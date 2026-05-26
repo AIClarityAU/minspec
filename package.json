@@ -8,7 +8,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint packages/*/src --ext .ts",
+    "lint": "eslint .",
     "build": "npm run build --workspaces --if-present",
     "package": "npm run package --workspaces --if-present",
     "validate": "npx tsx scripts/validate-frontmatter.ts"
