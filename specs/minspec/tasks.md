@@ -84,10 +84,10 @@ product: minspec
 - [x] Context menu: change tier, transition phase, archive
 
 ### 4.2 Active Spec Panel
-- [ ] Webview panel showing current spec phases as vertical stepper
-- [ ] Phase status indicators (done / active / skipped / pending)
-- [ ] Inline task checklist with toggle support
-- [ ] Classification breakdown (signals, confidence, tier)
+- [x] Webview panel showing current spec phases as vertical stepper
+- [x] Phase status indicators (done / active / skipped / pending)
+- [x] Inline task checklist with toggle support
+- [x] Classification breakdown (signals, confidence, tier)
 
 ### 4.3 Status Bar
 - [x] Status bar item showing: tier | active phase | progress
@@ -99,39 +99,39 @@ product: minspec
 ## Phase 5: Harness Generator (Week 5-6)
 
 ### 5.1 Template System
-- [ ] Bundle default Handlebars templates for CLAUDE.md, AGENTS.md, .cursorrules, DESIGN.md, constitution.md
-- [ ] Implement template rendering with project context variables
-- [ ] `minspec init` command — generate all harness files from templates
+- [x] Bundle default Handlebars templates for CLAUDE.md, AGENTS.md, .cursorrules, DESIGN.md, constitution.md
+- [x] Implement template rendering with project context variables
+- [x] `minspec init` command — generate all harness files from templates
 
 ### 5.2 Merge-on-Refresh
-- [ ] Section-level hashing for generated files
-- [ ] `minspec init --refresh` — merge template updates with user edits
-- [ ] **T0 tests:** Refresh preserves user edits, updates unmodified sections, appends new sections
+- [x] Section-level hashing for generated files
+- [x] `minspec init --refresh` — merge template updates with user edits
+- [x] **T0 tests:** Refresh preserves user edits, updates unmodified sections, appends new sections
 
 ### 5.3 Constitution
-- [ ] Constitution template with invariants, principles, constraints sections
-- [ ] Link constitution to classifier (constitution rules can influence tier thresholds)
+- [x] Constitution template with invariants, principles, constraints sections
+- [x] Link constitution to classifier (constitution rules can influence tier thresholds)
 
 ---
 
 ## Phase 6: Agent Integration (Week 6-7)
 
 ### 6.1 Context Injection
-- [ ] On spec create/update, inject active spec context into CLAUDE.md session block
-- [ ] On spec create/update, inject into .cursorrules active-spec section
-- [ ] On spec create/update, inject into AGENTS.md active-spec section
-- [ ] Detection of which AI tools are present (check for .cursorrules, .clinerules, etc.)
+- [x] On spec create/update, inject active spec context into CLAUDE.md session block
+- [x] On spec create/update, inject into .cursorrules active-spec section
+- [x] On spec create/update, inject into AGENTS.md active-spec section
+- [x] Detection of which AI tools are present (check for .cursorrules, .clinerules, etc.)
 
 ### 6.2 Session Discipline
-- [ ] Scope declaration prompt on first spec command per session
-- [ ] Session state persistence in `.minspec/session.json`
-- [ ] File save monitoring for scope drift detection
-- [ ] Drift warning UI (park / add to scope / dismiss)
+- [x] Scope declaration prompt on first spec command per session
+- [x] Session state persistence in `.minspec/session.json`
+- [x] File save monitoring for scope drift detection
+- [x] Drift warning UI (park / add to scope / dismiss)
 
 ### 6.3 Parking Lot
-- [ ] GitHub issue creation via `gh` CLI for parked topics
-- [ ] Fallback to `.minspec/parking-lot.md` when `gh` unavailable
-- [ ] Issue template with session context and auto-labels
+- [x] GitHub issue creation via `gh` CLI for parked topics
+- [x] Fallback to `.minspec/parking-lot.md` when `gh` unavailable
+- [x] Issue template with session context and auto-labels
 
 ---
 
