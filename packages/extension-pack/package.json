@@ -1,0 +1,22 @@
+{
+  "name": "@aiclarity/minspec-pro",
+  "displayName": "MinSpec Pro",
+  "description": "MinSpec + ScroogeLLM — spec conformance checking unlocked.",
+  "version": "0.0.1",
+  "private": true,
+  "publisher": "aiclarity",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": ["Extension Packs"],
+  "extensionPack": [
+    "aiclarity.minspec",
+    "aiclarity.scroogellm"
+  ],
+  "scripts": {
+    "package": "vsce package --no-dependencies"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.0.0"
+  }
+}

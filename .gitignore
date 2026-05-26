@@ -1,0 +1,13 @@
+node_modules/
+out/
+dist/
+*.vsix
+.vscode-test/
+coverage/
+*.log
+.DS_Store
+
+# Secrets — never commit
+.env
+.env.*
+!.env.example

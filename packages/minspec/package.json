@@ -1,0 +1,48 @@
+{
+  "name": "@aiclarity/minspec",
+  "displayName": "MinSpec",
+  "description": "Just enough spec. Never too much.",
+  "version": "0.0.1",
+  "private": true,
+  "publisher": "aiclarity",
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": ["Other"],
+  "keywords": ["sdd", "specification", "spec", "productivity", "ai"],
+  "activationEvents": [],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "minspec.init",
+        "title": "MinSpec: Initialize SDD Structure"
+      },
+      {
+        "command": "minspec.classify",
+        "title": "MinSpec: Classify Task Complexity"
+      },
+      {
+        "command": "minspec.status",
+        "title": "MinSpec: Show SDD Status"
+      }
+    ],
+    "views": {
+      "explorer": [
+        {
+          "id": "minspecStatus",
+          "name": "MinSpec"
+        }
+      ]
+    }
+  },
+  "scripts": {
+    "build": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node",
+    "watch": "npm run build -- --watch",
+    "package": "vsce package --no-dependencies",
+    "test": "vitest run"
+  },
+  "devDependencies": {
+    "@vscode/vsce": "^3.0.0"
+  }
+}
