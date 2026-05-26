@@ -161,16 +161,16 @@ describe('T0 Invariants — Lifecycle State Machine', () => {
     expect(getSpecStatus(allSkipped)).toBe('done');
   });
 
-  it('Invariant 7: A spec with any phase in-progress has status active', () => {
+  it('Invariant 7: A spec with any phase in-progress has specifying/implementing status', () => {
     const phases1 = makePhases({ specify: 'in-progress' });
-    expect(getSpecStatus(phases1)).toBe('active');
+    expect(getSpecStatus(phases1)).toBe('specifying');
 
     const phases2 = makePhases({
       specify: 'done',
       clarify: 'done',
       plan: 'in-progress',
     });
-    expect(getSpecStatus(phases2)).toBe('active');
+    expect(getSpecStatus(phases2)).toBe('implementing');
 
     const phases3 = makePhases({
       specify: 'done',
@@ -179,7 +179,7 @@ describe('T0 Invariants — Lifecycle State Machine', () => {
       tasks: 'done',
       implement: 'in-progress',
     });
-    expect(getSpecStatus(phases3)).toBe('active');
+    expect(getSpecStatus(phases3)).toBe('implementing');
   });
 
   it('Invariant 8: A freshly created spec has all phases pending and status new', () => {
@@ -228,7 +228,7 @@ describe('advancePhase()', () => {
     const result = advancePhase(phases, 'specify');
     expect(result.success).toBe(true);
     expect(result.newPhases.specify).toBe('in-progress');
-    expect(result.newStatus).toBe('active');
+    expect(result.newStatus).toBe('specifying');
   });
 
   it('completes a phase and starts the next', () => {
@@ -486,10 +486,15 @@ describe('getSpecStatus()', () => {
     expect(getSpecStatus(createInitialPhases())).toBe('new');
   });
 
-  it('returns active when any phase has progressed but not all complete', () => {
-    expect(getSpecStatus(makePhases({ specify: 'done' }))).toBe('active');
-    expect(getSpecStatus(makePhases({ specify: 'skipped' }))).toBe('active');
-    expect(getSpecStatus(makePhases({ specify: 'in-progress' }))).toBe('active');
+  it('returns specifying/implementing when phases are in progress', () => {
+    // specify done, next is clarify (pending) → specifying
+    expect(getSpecStatus(makePhases({ specify: 'done' }))).toBe('specifying');
+    // specify skipped, next is clarify (pending) → specifying
+    expect(getSpecStatus(makePhases({ specify: 'skipped' }))).toBe('specifying');
+    // specify in-progress → specifying
+    expect(getSpecStatus(makePhases({ specify: 'in-progress' }))).toBe('specifying');
+    // specify+clarify done, plan pending → implementing
+    expect(getSpecStatus(makePhases({ specify: 'done', clarify: 'done' }))).toBe('implementing');
   });
 
   it('returns done when all phases are done or skipped', () => {

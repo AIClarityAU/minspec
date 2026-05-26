@@ -5,19 +5,15 @@
  * No filesystem, no VS Code API — just state transitions and validation.
  *
  * Phase order: specify → clarify → plan → tasks → implement
- * Spec status: new | active | done | archived
+ * Spec status: new | specifying | implementing | done | archived
  */
 
 import type { Phase } from './config';
 import { PHASES } from './config';
+import type { PhaseStatus, SpecStatus } from './spec';
 
-// --- Types ---
-
-/** Status of an individual phase within the lifecycle */
-export type PhaseStatus = 'pending' | 'in-progress' | 'done' | 'skipped';
-
-/** Overall status of the spec (derived from phase states) */
-export type SpecStatus = 'new' | 'active' | 'done' | 'archived';
+// Re-export so consumers can import from either module
+export type { PhaseStatus, SpecStatus };
 
 /** Map of phase → status */
 export interface PhaseState {
@@ -71,8 +67,9 @@ export function getCurrentPhase(phases: PhaseState): Phase | null {
  *
  * Rules:
  * - All phases pending → 'new'
- * - Any phase in-progress → 'active'
- * - All phases done/skipped (none pending or in-progress) → 'done'
+ * - All phases done/skipped → 'done'
+ * - Current phase is specify or clarify → 'specifying'
+ * - Current phase is plan, tasks, or implement → 'implementing'
  * - (archived is set explicitly, not derived from phases)
  */
 export function getSpecStatus(phases: PhaseState): SpecStatus {
@@ -91,7 +88,11 @@ export function getSpecStatus(phases: PhaseState): SpecStatus {
 
   if (allPending) return 'new';
   if (allComplete) return 'done';
-  return 'active';
+
+  // Determine which sub-status based on current phase
+  const current = getCurrentPhase(phases);
+  if (current === 'specify' || current === 'clarify') return 'specifying';
+  return 'implementing';
 }
 
 /**
