@@ -16,11 +16,11 @@ product: minspec
 ## Phase 1: Foundation (Week 1-2)
 
 ### 1.1 Extension Scaffold
-- [ ] Initialize VS Code extension with TypeScript + esbuild
-- [ ] Configure Vitest with VS Code extension test harness
+- [x] Initialize VS Code extension with TypeScript + esbuild
+- [x] Configure Vitest with VS Code extension test harness
 - [ ] Set up CI (GitHub Actions: lint, test, package)
-- [ ] Create extension manifest (`package.json`) with activation events, commands, views
-- [ ] Implement `minspec.init` command — creates `.minspec/` directory structure
+- [x] Create extension manifest (`package.json`) with activation events, commands, views
+- [x] Implement `minspec.init` command — creates `.minspec/` directory structure
 
 ### 1.2 Config System
 - [x] Define `.minspec/config.json` schema (tier thresholds, phase mappings, spec directory)
@@ -138,48 +138,48 @@ product: minspec
 ## Phase 7: CodeLens & Traceability (Week 7-8)
 
 ### 7.1 CodeLens Provider
-- [ ] Register CodeLens provider for source files
-- [ ] Display spec requirement annotations above functions/classes
-- [ ] Click CodeLens → navigate to spec requirement line
-- [ ] Click spec requirement → navigate to code location
+- [x] Register CodeLens provider for source files
+- [x] Display spec requirement annotations above functions/classes
+- [x] Click CodeLens → navigate to spec requirement line
+- [x] Click spec requirement → navigate to code location
 
 ### 7.2 Traceability Mappings
-- [ ] Auto-suggest mappings from task file paths
-- [ ] Manual mapping via CodeLens "Link to spec" action
-- [ ] Store in `.minspec/traceability.json`
-- [ ] Bidirectional navigation commands
+- [x] Auto-suggest mappings from task file paths
+- [x] Manual mapping via CodeLens "Link to spec" action
+- [x] Store in `.minspec/traceability.json`
+- [x] Bidirectional navigation commands
 
 ---
 
 ## Phase 8: ADR & Backlog (Week 8-9)
 
 ### 8.1 Architecture Decision Records
-- [ ] `minspec adr` command — create new DR-NNN.md from template
-- [ ] Sequential numbering with collision detection
-- [ ] Auto-prompt ADR creation on T4 classification
-- [ ] ADR tree view in sidebar
+- [x] `minspec adr` command — create new DR-NNN.md from template
+- [x] Sequential numbering with collision detection
+- [x] Auto-prompt ADR creation on T4 classification
+- [x] ADR tree view in sidebar
 
 ### 8.2 Backlog Management
-- [ ] WSJF scoring UI (input: user business value, time criticality, risk reduction, job size)
-- [ ] Issue lifecycle labels (inbox → triaged → agent-ready → wip → done)
-- [ ] Sidebar view: prioritized backlog from GitHub Issues
-- [ ] Quick-triage command for inbox issues
+- [x] WSJF scoring UI (input: user business value, time criticality, risk reduction, job size)
+- [x] Issue lifecycle labels (inbox → triaged → agent-ready → wip → done)
+- [x] Sidebar view: prioritized backlog from GitHub Issues
+- [x] Quick-triage command for inbox issues
 
 ---
 
 ## Phase 9: Polish & Launch (Week 9-10)
 
 ### 9.1 Onboarding
-- [ ] VS Code Getting Started walkthrough (3-5 steps)
-- [ ] First-run experience: detect existing project, suggest init
-- [ ] Example spec generation for demo/learning
+- [x] VS Code Getting Started walkthrough (3-5 steps)
+- [x] First-run experience: detect existing project, suggest init
+- [x] Example spec generation for demo/learning
 
 ### 9.2 Marketplace Preparation
 - [ ] Extension icon and banner design
 - [ ] Screenshots (sidebar, CodeLens, classification, phase stepper)
-- [ ] README with GIFs showing key workflows
-- [ ] CHANGELOG.md
-- [ ] Marketplace description from Section 7 of competitive landscape report
+- [x] README with GIFs showing key workflows
+- [x] CHANGELOG.md
+- [x] Marketplace description from Section 7 of competitive landscape report
 
 ### 9.3 Quality
 - [ ] Extension size audit (<5MB target)
