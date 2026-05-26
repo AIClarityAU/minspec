@@ -1,15 +1,26 @@
 {
   "name": "@aiclarity/minspec",
   "displayName": "MinSpec",
-  "description": "Just enough spec. Never too much.",
-  "version": "0.0.1",
+  "description": "Complexity-adaptive specification-driven development. Classifies changes into tiers and applies proportional ceremony — a one-line fix needs one sentence of spec, an architecture rewrite gets the full treatment.",
+  "version": "0.1.0",
   "private": true,
   "publisher": "aiclarity",
+  "license": "MIT",
+  "icon": "media/icon.png",
+  "galleryBanner": {
+    "color": "#1e1e2e",
+    "theme": "dark"
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/harvest316/minspec"
+  },
   "engines": {
     "vscode": "^1.90.0"
   },
-  "categories": ["Other"],
-  "keywords": ["sdd", "specification", "spec", "productivity", "ai"],
+  "categories": ["Programming Languages", "Other"],
+  "keywords": ["sdd", "specification", "spec", "productivity", "ai", "spec-driven", "complexity", "classifier"],
+  "badges": [],
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
@@ -54,6 +65,39 @@
       {
         "command": "minspec.showSpecPanel",
         "title": "MinSpec: Show Active Spec Panel"
+      },
+      {
+        "command": "minspec.generateExample",
+        "title": "MinSpec: Generate Example Spec"
+      },
+      {
+        "command": "minspec.createAdr",
+        "title": "MinSpec: Create Architecture Decision Record"
+      },
+      {
+        "command": "minspec.scoreWsjf",
+        "title": "MinSpec: Score Issue (WSJF)"
+      },
+      {
+        "command": "minspec.triageIssue",
+        "title": "MinSpec: Quick Triage Inbox Issue"
+      },
+      {
+        "command": "minspec.refreshBacklog",
+        "title": "MinSpec: Refresh Backlog",
+        "icon": "$(refresh)"
+      },
+      {
+        "command": "minspec.goToSpec",
+        "title": "MinSpec: Go to Spec Requirement"
+      },
+      {
+        "command": "minspec.goToCode",
+        "title": "MinSpec: Go to Code Location"
+      },
+      {
+        "command": "minspec.linkToSpec",
+        "title": "MinSpec: Link Code to Spec Requirement"
       }
     ],
     "views": {
@@ -61,6 +105,14 @@
         {
           "id": "minspecStatus",
           "name": "MinSpec"
+        },
+        {
+          "id": "minspecAdrs",
+          "name": "MinSpec: Decisions"
+        },
+        {
+          "id": "minspecBacklog",
+          "name": "MinSpec: Backlog"
         }
       ]
     },
@@ -70,6 +122,21 @@
           "command": "minspec.refreshTree",
           "when": "view == minspecStatus",
           "group": "navigation"
+        },
+        {
+          "command": "minspec.refreshTree",
+          "when": "view == minspecAdrs",
+          "group": "navigation"
+        },
+        {
+          "command": "minspec.createAdr",
+          "when": "view == minspecAdrs",
+          "group": "navigation"
+        },
+        {
+          "command": "minspec.refreshBacklog",
+          "when": "view == minspecBacklog",
+          "group": "navigation"
         }
       ],
       "view/item/context": [
@@ -77,6 +144,16 @@
           "command": "minspec.classify",
           "when": "viewItem == specNode",
           "group": "1_tier"
+        },
+        {
+          "command": "minspec.scoreWsjf",
+          "when": "viewItem == backlogIssueNode",
+          "group": "1_scoring"
+        },
+        {
+          "command": "minspec.triageIssue",
+          "when": "viewItem == backlogIssueNode",
+          "group": "2_triage"
         }
       ]
     },
@@ -107,9 +184,72 @@
           "type": "number",
           "default": 14,
           "description": "Maximum complexity score for T3 (medium) classification"
+        },
+        "minspec.codelens.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Enable/disable CodeLens annotations showing spec requirement mappings"
         }
       }
-    }
+    },
+    "walkthroughs": [
+      {
+        "id": "minspec.gettingStarted",
+        "title": "Get Started with MinSpec",
+        "description": "Learn Specification-Driven Development in 5 steps.",
+        "steps": [
+          {
+            "id": "minspec.walkthrough.welcome",
+            "title": "Welcome to MinSpec",
+            "description": "MinSpec brings Specification-Driven Development (SDD) to VS Code. Classify tasks by complexity, write just enough spec, and ship with confidence.\n\n**Ceremony proportional to complexity** — a one-line fix needs one sentence of spec. A new subsystem gets the full treatment.",
+            "media": {
+              "markdown": "media/walkthrough/welcome.md"
+            }
+          },
+          {
+            "id": "minspec.walkthrough.init",
+            "title": "Initialize Your Project",
+            "description": "Set up the `.minspec/` directory, specs folder, and default configuration.\n\n[Initialize SDD Structure](command:minspec.init)",
+            "media": {
+              "markdown": "media/walkthrough/init-project.md"
+            },
+            "completionEvents": [
+              "onCommand:minspec.init"
+            ]
+          },
+          {
+            "id": "minspec.walkthrough.classify",
+            "title": "Classify Your First Task",
+            "description": "Every task gets a complexity tier (T1-T4) that determines how much spec to write. The classifier suggests — you decide.\n\n[Classify Task](command:minspec.classify)",
+            "media": {
+              "markdown": "media/walkthrough/classify-task.md"
+            },
+            "completionEvents": [
+              "onCommand:minspec.classify"
+            ]
+          },
+          {
+            "id": "minspec.walkthrough.sidebar",
+            "title": "Explore the Sidebar",
+            "description": "The MinSpec panel in the Explorer sidebar shows all your specs, their tiers, phases, and task progress. The status bar tracks your active spec at a glance.",
+            "media": {
+              "markdown": "media/walkthrough/explore-sidebar.md"
+            }
+          },
+          {
+            "id": "minspec.walkthrough.aiIntegration",
+            "title": "Integrate with AI Tools",
+            "description": "Inject your active spec context into CLAUDE.md, .cursorrules, or other AI tool configs. Keeps AI suggestions aligned with your specification.\n\n[Inject Context](command:minspec.injectContext)",
+            "media": {
+              "markdown": "media/walkthrough/ai-integration.md"
+            },
+            "completionEvents": [
+              "onCommand:minspec.injectContext"
+            ]
+          }
+        ]
+      }
+    ]
   },
   "scripts": {
     "build": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node",

@@ -6,7 +6,12 @@ import { classifyCommand } from './commands/classify';
 import { statusCommand } from './commands/status';
 import { declareScopeCommand } from './commands/session';
 import { parkCommand } from './commands/park';
+import { generateExampleCommand } from './commands/example';
+import { createAdrCommand } from './commands/adr';
+import { scoreWsjfCommand, triageIssueCommand } from './commands/backlog';
 import { SpecTreeProvider } from './views/spec-tree-provider';
+import { AdrTreeProvider } from './views/adr-tree-provider';
+import { BacklogTreeProvider } from './views/backlog-view';
 import { MinSpecStatusBar } from './views/status-bar';
 import { SpecPanel } from './views/spec-panel';
 import { loadConfig, applyVSCodeOverrides } from './lib/config';
@@ -14,6 +19,13 @@ import { loadSession, saveSession, addToScope, isFileInScope } from './lib/sessi
 import { detectTools, getToolFilePath, type DetectedTools } from './lib/tool-detector';
 import { injectContextToFile, removeContextFromFile, type ActiveSpecContext } from './lib/context-injector';
 import { parkTopic, createParkingLotEntry } from './lib/parking-lot';
+import {
+  MinSpecCodeLensProvider,
+  MinSpecSpecFileLensProvider,
+  goToSpecCommand,
+  goToCodeCommand,
+  linkToSpecCommand,
+} from './views/codelens-provider';
 
 export function activate(context: vscode.ExtensionContext): void {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
@@ -21,15 +33,49 @@ export function activate(context: vscode.ExtensionContext): void {
   // Active spec panel
   const specPanel = new SpecPanel(context.extensionUri);
 
-  // Sidebar tree view
+  // Sidebar tree views
   const specTreeProvider = new SpecTreeProvider(workspaceRoot);
+  const adrTreeProvider = new AdrTreeProvider(workspaceRoot);
+  const backlogTreeProvider = new BacklogTreeProvider(workspaceRoot);
   context.subscriptions.push(
     vscode.window.registerTreeDataProvider('minspecStatus', specTreeProvider),
+    vscode.window.registerTreeDataProvider('minspecAdrs', adrTreeProvider),
+    vscode.window.registerTreeDataProvider('minspecBacklog', backlogTreeProvider),
   );
 
   // Status bar
   const statusBar = new MinSpecStatusBar();
   statusBar.update(null);
+
+  // CodeLens providers (Phase 7)
+  const codeLensProvider = new MinSpecCodeLensProvider(workspaceRoot);
+  const specFileLensProvider = new MinSpecSpecFileLensProvider(workspaceRoot);
+
+  const sourceSelector: vscode.DocumentSelector = [
+    { scheme: 'file', language: 'typescript' },
+    { scheme: 'file', language: 'typescriptreact' },
+    { scheme: 'file', language: 'javascript' },
+    { scheme: 'file', language: 'javascriptreact' },
+    { scheme: 'file', language: 'python' },
+    { scheme: 'file', language: 'go' },
+    { scheme: 'file', language: 'rust' },
+    { scheme: 'file', language: 'java' },
+    { scheme: 'file', language: 'csharp' },
+    { scheme: 'file', language: 'c' },
+    { scheme: 'file', language: 'cpp' },
+    { scheme: 'file', language: 'ruby' },
+    { scheme: 'file', language: 'swift' },
+    { scheme: 'file', language: 'kotlin' },
+    { scheme: 'file', language: 'vue' },
+    { scheme: 'file', language: 'svelte' },
+  ];
+  context.subscriptions.push(
+    vscode.languages.registerCodeLensProvider(sourceSelector, codeLensProvider),
+    vscode.languages.registerCodeLensProvider(
+      { scheme: 'file', language: 'markdown' },
+      specFileLensProvider,
+    ),
+  );
 
   // Commands
   context.subscriptions.push(
@@ -37,11 +83,25 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('minspec.initRefresh', initRefreshCommand),
     vscode.commands.registerCommand('minspec.classify', classifyCommand),
     vscode.commands.registerCommand('minspec.status', statusCommand),
-    vscode.commands.registerCommand('minspec.refreshTree', () => specTreeProvider.refresh()),
+    vscode.commands.registerCommand('minspec.refreshTree', () => {
+      specTreeProvider.refresh();
+      adrTreeProvider.refresh();
+    }),
+    vscode.commands.registerCommand('minspec.createAdr', createAdrCommand),
+    vscode.commands.registerCommand('minspec.scoreWsjf', scoreWsjfCommand),
+    vscode.commands.registerCommand('minspec.triageIssue', triageIssueCommand),
+    vscode.commands.registerCommand('minspec.refreshBacklog', () => backlogTreeProvider.refresh()),
+    vscode.commands.registerCommand('minspec.goToSpec', (specId?: string, reqKey?: string) =>
+      goToSpecCommand(workspaceRoot, specId, reqKey)),
+    vscode.commands.registerCommand('minspec.goToCode', (specId?: string, reqKey?: string) =>
+      goToCodeCommand(workspaceRoot, specId, reqKey)),
+    vscode.commands.registerCommand('minspec.linkToSpec', () =>
+      linkToSpecCommand(workspaceRoot)),
     vscode.commands.registerCommand('minspec.declareScope', declareScopeCommand),
     vscode.commands.registerCommand('minspec.park', parkCommand),
     vscode.commands.registerCommand('minspec.injectContext', () => injectContextCommand(workspaceRoot)),
     vscode.commands.registerCommand('minspec.removeContext', () => removeContextCommand(workspaceRoot)),
+    vscode.commands.registerCommand('minspec.generateExample', generateExampleCommand),
     vscode.commands.registerCommand('minspec.showSpecPanel', async (specFilePath?: string) => {
       if (!workspaceRoot) {
         vscode.window.showErrorMessage('MinSpec: No workspace folder open.');
@@ -82,6 +142,44 @@ export function activate(context: vscode.ExtensionContext): void {
 
   context.subscriptions.push(watcher);
 
+  // Watch decisions directory — refresh ADR tree on changes
+  const decisionsDir = vscode.workspace.getConfiguration('minspec').get<string>('decisionsDir', 'docs/decisions');
+  const adrWatcher = vscode.workspace.createFileSystemWatcher(
+    new vscode.RelativePattern(
+      vscode.workspace.workspaceFolders?.[0] ?? '',
+      `${decisionsDir}/**/*.md`,
+    ),
+  );
+
+  const onAdrsChanged = () => {
+    adrTreeProvider.refresh();
+  };
+
+  adrWatcher.onDidChange(onAdrsChanged);
+  adrWatcher.onDidCreate(onAdrsChanged);
+  adrWatcher.onDidDelete(onAdrsChanged);
+
+  context.subscriptions.push(adrWatcher);
+
+  // Watch traceability.json — refresh CodeLens on changes
+  const traceabilityWatcher = vscode.workspace.createFileSystemWatcher(
+    new vscode.RelativePattern(
+      vscode.workspace.workspaceFolders?.[0] ?? '',
+      '.minspec/traceability.json',
+    ),
+  );
+
+  const onTraceabilityChanged = () => {
+    codeLensProvider.refresh();
+    specFileLensProvider.refresh();
+  };
+
+  traceabilityWatcher.onDidChange(onTraceabilityChanged);
+  traceabilityWatcher.onDidCreate(onTraceabilityChanged);
+  traceabilityWatcher.onDidDelete(onTraceabilityChanged);
+
+  context.subscriptions.push(traceabilityWatcher);
+
   // Drift detection: monitor file saves
   if (workspaceRoot) {
     context.subscriptions.push(
@@ -89,6 +187,28 @@ export function activate(context: vscode.ExtensionContext): void {
         handleFileSaveDriftCheck(doc, workspaceRoot);
       }),
     );
+  }
+
+  // First-run experience: prompt to initialize if .minspec/ doesn't exist
+  if (workspaceRoot) {
+    const minspecDir = path.join(workspaceRoot, '.minspec');
+    const hasMinspec = fs.existsSync(minspecDir);
+    const hasSeenFirstRun = context.globalState.get<boolean>('minspec.firstRun', false);
+
+    if (!hasMinspec && !hasSeenFirstRun) {
+      context.globalState.update('minspec.firstRun', true);
+      vscode.window
+        .showInformationMessage(
+          'Welcome to MinSpec! Would you like to initialize SDD for this project?',
+          'Initialize',
+          'Not Now',
+        )
+        .then(choice => {
+          if (choice === 'Initialize') {
+            vscode.commands.executeCommand('minspec.init');
+          }
+        });
+    }
   }
 }
 
