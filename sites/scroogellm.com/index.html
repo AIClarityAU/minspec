@@ -406,12 +406,15 @@
     }
 
     .features-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+      display: flex;
+      flex-wrap: wrap;
+      justify-content: center;
       gap: 1.5rem;
     }
 
     .feature-card {
+      flex: 0 1 calc(33.333% - 1rem);
+      min-width: 280px;
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: 12px;
@@ -535,23 +538,19 @@
 
     /* ── Architecture ────────────────────────────────── */
     .arch-diagram {
-      max-width: 700px;
+      max-width: 750px;
       margin: 3rem auto 0;
-      font-family: var(--font-mono);
-      font-size: 0.82rem;
-      color: var(--text-secondary);
       background: var(--bg-card);
       border: 1px solid var(--border);
       border-radius: 12px;
       padding: 2rem 2.5rem;
-      line-height: 1.9;
       overflow-x: auto;
-      white-space: pre;
     }
 
-    .arch-highlight { color: var(--accent); font-weight: 600; }
-    .arch-dim { color: var(--text-muted); }
-    .arch-label { color: var(--green-300); }
+    .arch-diagram .mermaid {
+      display: flex;
+      justify-content: center;
+    }
 
     /* ── Privacy section ─────────────────────────────── */
     .privacy-grid {
@@ -700,7 +699,6 @@
       }
 
       .arch-diagram {
-        font-size: 0.72rem;
         padding: 1.25rem;
       }
     }
@@ -950,23 +948,32 @@
       </div>
 
       <div class="arch-diagram" role="img" aria-label="Architecture diagram showing request flow from VS Code through the ScroogeLLM proxy to the LLM provider">
-<span class="arch-dim">  Your machine (localhost only)</span>
-  <span class="arch-dim">  ┌─────────────────────────────────────────────────┐</span>
-  <span class="arch-dim">  │</span>
-  <span class="arch-dim">  │</span>  <span class="arch-label">VS Code / AI Tool</span>
-  <span class="arch-dim">  │       │</span>
-  <span class="arch-dim">  │       ▼</span>
-  <span class="arch-dim">  │</span>  ┌──────────────────────────────────┐
-  <span class="arch-dim">  │</span>  │  <span class="arch-highlight">ScroogeLLM Proxy</span>                │
-  <span class="arch-dim">  │</span>  │                                  │
-  <span class="arch-dim">  │</span>  │  <span class="arch-label">compress</span> → <span class="arch-label">anonymize</span> → <span class="arch-label">cache</span>    │
-  <span class="arch-dim">  │</span>  │  <span class="arch-label">route</span> → <span class="arch-label">log</span> → <span class="arch-label">audit</span>             │
-  <span class="arch-dim">  │</span>  └──────────────┬───────────────────┘
-  <span class="arch-dim">  │</span>                 │
-  <span class="arch-dim">  └─────────────────┼───────────────────────────────┘</span>
-                    ▼
-           <span class="arch-label">LLM Provider API</span>
-        <span class="arch-dim">(OpenAI, Anthropic, etc.)</span></div>
+        <pre class="mermaid">
+graph TD
+    subgraph localhost["🖥 Your Machine (localhost only)"]
+        A["VS Code / AI Tool"] --> B
+        subgraph proxy["ScroogeLLM Proxy"]
+            B["compress"] --> C["anonymize"]
+            C --> D["cache"]
+            D --> E["route"]
+            E --> F["log"]
+            F --> G["audit"]
+        end
+    end
+    G --> H["☁️ LLM Provider API\n(OpenAI, Anthropic, etc.)"]
+
+    style localhost fill:#0d1117,stroke:#1a3a2a,color:#8b9a8b
+    style proxy fill:#0a1f0a,stroke:#22c55e,color:#4ade80
+    style A fill:#1a1a2e,stroke:#6c9cfc,color:#a0b4e0
+    style B fill:#132613,stroke:#22c55e,color:#4ade80
+    style C fill:#132613,stroke:#22c55e,color:#4ade80
+    style D fill:#132613,stroke:#22c55e,color:#4ade80
+    style E fill:#132613,stroke:#22c55e,color:#4ade80
+    style F fill:#132613,stroke:#22c55e,color:#4ade80
+    style G fill:#132613,stroke:#22c55e,color:#4ade80
+    style H fill:#1a1a2e,stroke:#6c9cfc,color:#a0b4e0
+        </pre>
+      </div>
 
     </div>
   </section>
@@ -1066,5 +1073,21 @@
     </div>
   </footer>
 
+  <script type="module">
+    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs';
+    mermaid.initialize({
+      startOnLoad: true,
+      theme: 'dark',
+      themeVariables: {
+        darkMode: true,
+        background: '#0a0f0a',
+        primaryColor: '#0a1f0a',
+        primaryBorderColor: '#22c55e',
+        lineColor: '#4ade80',
+        textColor: '#e0e0e0',
+        fontSize: '14px'
+      }
+    });
+  </script>
 </body>
 </html>
