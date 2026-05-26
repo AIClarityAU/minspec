@@ -1,0 +1,737 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MinSpec — Just enough spec. Never too much.</title>
+  <meta name="description" content="MinSpec is a VS Code extension that adapts SDD ceremony to change complexity. T1 tasks need one sentence. T4 needs full architecture docs. No AI dependency, no backend, no lock-in.">
+  <meta name="theme-color" content="#0f1117">
+  <link rel="canonical" href="https://minspec.dev">
+  <style>
+    :root {
+      --bg: #0f1117;
+      --bg-surface: #161922;
+      --bg-card: #1c1f2b;
+      --border: #2a2d3a;
+      --text: #e2e4eb;
+      --text-muted: #8b8fa3;
+      --text-dim: #5c6072;
+      --accent: #6c9cfc;
+      --accent-bright: #8db4ff;
+      --accent-dim: #4a7ad4;
+      --accent-glow: rgba(108, 156, 252, 0.12);
+      --green: #5ec48a;
+      --amber: #e5a84b;
+      --red: #e06060;
+      --radius: 10px;
+      --max-width: 960px;
+    }
+
+    *, *::before, *::after {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    html {
+      scroll-behavior: smooth;
+      -webkit-text-size-adjust: 100%;
+    }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    /* --- Nav --- */
+    nav {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      z-index: 100;
+      background: rgba(15, 17, 23, 0.85);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .nav-inner {
+      max-width: var(--max-width);
+      margin: 0 auto;
+      padding: 0 24px;
+      height: 56px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .nav-logo {
+      font-size: 1.1rem;
+      font-weight: 700;
+      color: var(--text);
+      text-decoration: none;
+      letter-spacing: -0.02em;
+    }
+
+    .nav-logo span {
+      color: var(--accent);
+    }
+
+    .nav-links {
+      display: flex;
+      gap: 28px;
+      list-style: none;
+    }
+
+    .nav-links a {
+      color: var(--text-muted);
+      text-decoration: none;
+      font-size: 0.875rem;
+      transition: color 0.2s;
+    }
+
+    .nav-links a:hover {
+      color: var(--text);
+    }
+
+    /* --- Hero --- */
+    .hero {
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      text-align: center;
+      padding: 80px 24px 60px;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .hero::before {
+      content: "";
+      position: absolute;
+      top: -120px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 600px;
+      height: 600px;
+      background: radial-gradient(circle, var(--accent-glow) 0%, transparent 70%);
+      animation: pulse 6s ease-in-out infinite;
+      pointer-events: none;
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 0.5; transform: translateX(-50%) scale(1); }
+      50% { opacity: 1; transform: translateX(-50%) scale(1.15); }
+    }
+
+    .hero-content {
+      position: relative;
+      z-index: 1;
+      max-width: 640px;
+    }
+
+    .hero-badge {
+      display: inline-block;
+      padding: 4px 14px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-bottom: 28px;
+      letter-spacing: 0.02em;
+    }
+
+    .hero h1 {
+      font-size: clamp(2.4rem, 6vw, 3.6rem);
+      font-weight: 800;
+      line-height: 1.1;
+      letter-spacing: -0.03em;
+      margin-bottom: 12px;
+    }
+
+    .hero h1 .accent {
+      color: var(--accent);
+    }
+
+    .hero-tagline {
+      font-size: clamp(1.1rem, 2.5vw, 1.35rem);
+      color: var(--text-muted);
+      font-weight: 400;
+      margin-bottom: 36px;
+      line-height: 1.4;
+    }
+
+    .hero-actions {
+      display: flex;
+      gap: 14px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      padding: 12px 28px;
+      border-radius: 8px;
+      font-size: 0.95rem;
+      font-weight: 600;
+      text-decoration: none;
+      transition: all 0.2s;
+      border: none;
+      cursor: pointer;
+    }
+
+    .btn-primary {
+      background: var(--accent);
+      color: #0f1117;
+    }
+
+    .btn-primary:hover {
+      background: var(--accent-bright);
+      box-shadow: 0 0 24px var(--accent-glow);
+    }
+
+    .btn-secondary {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover {
+      border-color: var(--text-dim);
+      color: var(--text);
+    }
+
+    .hero-sub {
+      margin-top: 24px;
+      font-size: 0.8rem;
+      color: var(--text-dim);
+    }
+
+    /* --- Section base --- */
+    section {
+      padding: 100px 24px;
+    }
+
+    .section-inner {
+      max-width: var(--max-width);
+      margin: 0 auto;
+    }
+
+    .section-label {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      color: var(--accent);
+      margin-bottom: 12px;
+    }
+
+    .section-title {
+      font-size: clamp(1.6rem, 4vw, 2.2rem);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin-bottom: 16px;
+    }
+
+    .section-desc {
+      color: var(--text-muted);
+      max-width: 560px;
+      margin-bottom: 48px;
+      font-size: 1.05rem;
+      line-height: 1.6;
+    }
+
+    /* --- Problem --- */
+    .problem {
+      background: var(--bg-surface);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .problem-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 40px;
+      align-items: center;
+    }
+
+    .problem-quote {
+      border-left: 3px solid var(--accent-dim);
+      padding-left: 20px;
+      font-size: 1.15rem;
+      color: var(--text);
+      line-height: 1.6;
+      font-style: italic;
+    }
+
+    .problem-quote cite {
+      display: block;
+      margin-top: 12px;
+      font-size: 0.85rem;
+      font-style: normal;
+      color: var(--text-dim);
+    }
+
+    .problem-text p {
+      color: var(--text-muted);
+      margin-bottom: 16px;
+      line-height: 1.7;
+    }
+
+    .problem-text strong {
+      color: var(--text);
+    }
+
+    /* --- Features --- */
+    .features-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+
+    .feature-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px 24px;
+      transition: border-color 0.2s, box-shadow 0.2s;
+    }
+
+    .feature-card:hover {
+      border-color: var(--accent-dim);
+      box-shadow: 0 0 20px var(--accent-glow);
+    }
+
+    .feature-icon {
+      font-size: 1.5rem;
+      margin-bottom: 14px;
+      display: block;
+    }
+
+    .feature-card h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 8px;
+      letter-spacing: -0.01em;
+    }
+
+    .feature-card p {
+      font-size: 0.875rem;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    /* --- Tiers --- */
+    .tiers {
+      background: var(--bg-surface);
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+
+    .tier-list {
+      display: grid;
+      gap: 16px;
+    }
+
+    .tier-row {
+      display: grid;
+      grid-template-columns: 80px 130px 1fr 1fr;
+      gap: 16px;
+      align-items: start;
+      padding: 24px;
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      transition: border-color 0.2s;
+    }
+
+    .tier-row:hover {
+      border-color: var(--accent-dim);
+    }
+
+    .tier-badge {
+      font-size: 0.8rem;
+      font-weight: 700;
+      padding: 4px 12px;
+      border-radius: 6px;
+      text-align: center;
+      letter-spacing: 0.02em;
+      white-space: nowrap;
+    }
+
+    .tier-t1 .tier-badge { background: rgba(94, 196, 138, 0.15); color: var(--green); }
+    .tier-t2 .tier-badge { background: rgba(108, 156, 252, 0.15); color: var(--accent); }
+    .tier-t3 .tier-badge { background: rgba(229, 168, 75, 0.15); color: var(--amber); }
+    .tier-t4 .tier-badge { background: rgba(224, 96, 96, 0.15); color: var(--red); }
+
+    .tier-label {
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+
+    .tier-desc {
+      color: var(--text-muted);
+      font-size: 0.875rem;
+      line-height: 1.5;
+    }
+
+    .tier-ceremony {
+      font-size: 0.8rem;
+      color: var(--text-dim);
+      line-height: 1.6;
+    }
+
+    .tier-ceremony code {
+      font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace;
+      background: rgba(108, 156, 252, 0.08);
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 0.75rem;
+      color: var(--accent);
+    }
+
+    /* --- Principles --- */
+    .principles-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+
+    .principle {
+      padding: 24px;
+      border-radius: var(--radius);
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+    }
+
+    .principle-header {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-bottom: 10px;
+    }
+
+    .principle-icon {
+      font-size: 1.2rem;
+    }
+
+    .principle h3 {
+      font-size: 0.95rem;
+      font-weight: 600;
+    }
+
+    .principle p {
+      font-size: 0.85rem;
+      color: var(--text-muted);
+      line-height: 1.6;
+    }
+
+    /* --- CTA --- */
+    .cta {
+      text-align: center;
+      padding: 100px 24px;
+    }
+
+    .cta .section-title {
+      margin-bottom: 12px;
+    }
+
+    .cta .section-desc {
+      margin-left: auto;
+      margin-right: auto;
+      margin-bottom: 32px;
+    }
+
+    /* --- Footer --- */
+    footer {
+      border-top: 1px solid var(--border);
+      padding: 40px 24px;
+    }
+
+    .footer-inner {
+      max-width: var(--max-width);
+      margin: 0 auto;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 16px;
+    }
+
+    .footer-brand {
+      font-size: 0.85rem;
+      color: var(--text-dim);
+    }
+
+    .footer-brand a {
+      color: var(--text-muted);
+      text-decoration: none;
+    }
+
+    .footer-brand a:hover {
+      color: var(--text);
+    }
+
+    .footer-links {
+      display: flex;
+      gap: 24px;
+      list-style: none;
+    }
+
+    .footer-links a {
+      font-size: 0.85rem;
+      color: var(--text-dim);
+      text-decoration: none;
+      transition: color 0.2s;
+    }
+
+    .footer-links a:hover {
+      color: var(--text-muted);
+    }
+
+    /* --- Responsive --- */
+    @media (max-width: 768px) {
+      .nav-links { display: none; }
+
+      .problem-grid {
+        grid-template-columns: 1fr;
+        gap: 28px;
+      }
+
+      .features-grid,
+      .principles-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .tier-row {
+        grid-template-columns: 1fr;
+        gap: 8px;
+        padding: 20px;
+      }
+
+      .tier-badge {
+        justify-self: start;
+      }
+
+      section {
+        padding: 64px 20px;
+      }
+    }
+
+    @media (max-width: 480px) {
+      .hero {
+        min-height: auto;
+        padding: 120px 20px 60px;
+      }
+
+      .hero-actions {
+        flex-direction: column;
+        align-items: stretch;
+      }
+
+      .btn {
+        justify-content: center;
+      }
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Nav -->
+  <nav>
+    <div class="nav-inner">
+      <a href="/" class="nav-logo"><span>Min</span>Spec</a>
+      <ul class="nav-links">
+        <li><a href="#features">Features</a></li>
+        <li><a href="#how-it-works">How It Works</a></li>
+        <li><a href="#principles">Principles</a></li>
+        <li><a href="#" title="Coming soon">Install</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <!-- Hero -->
+  <section class="hero">
+    <div class="hero-content">
+      <div class="hero-badge">VS Code Extension</div>
+      <h1>The <span class="accent">Right Amount</span> of Spec</h1>
+      <p class="hero-tagline">Just enough spec. Never too much.<br>Adaptive ceremony for specification-driven development.</p>
+      <div class="hero-actions">
+        <a href="#" class="btn btn-primary">Install from Marketplace</a>
+        <a href="https://github.com/harvest316/MinSpecPro" class="btn btn-secondary">Source on GitHub</a>
+      </div>
+      <p class="hero-sub">Free and open source. No AI dependency. No backend. No lock-in.</p>
+    </div>
+  </section>
+
+  <!-- Problem -->
+  <section class="problem">
+    <div class="section-inner">
+      <div class="problem-grid">
+        <blockquote class="problem-quote">
+          "Kiro generated 16 acceptance criteria for a simple bug fix."
+          <cite>-- Observed by Martin Fowler on current SDD tooling</cite>
+        </blockquote>
+        <div class="problem-text">
+          <p>Every SDD tool today applies <strong>uniform ceremony</strong> regardless of change size. Developers try specification-driven development, hit overhead on trivial changes, and abandon it.</p>
+          <p>MinSpec solves this by classifying change complexity and applying <strong>proportional ceremony</strong>. A typo fix gets one sentence. An architecture change gets the full treatment.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Features -->
+  <section id="features">
+    <div class="section-inner">
+      <div class="section-label">Features</div>
+      <h2 class="section-title">Built for developers who ship</h2>
+      <p class="section-desc">MinSpec integrates into your existing workflow. No new tools to learn, no context switching, no overhead on simple changes.</p>
+      <div class="features-grid">
+        <div class="feature-card">
+          <span class="feature-icon" aria-hidden="true">&#x2696;</span>
+          <h3>Complexity-Adaptive</h3>
+          <p>Classifies changes into four tiers using git diff analysis and AST inspection. T1 tasks need one sentence of spec. T4 gets full architecture docs.</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon" aria-hidden="true">&#x26A1;</span>
+          <h3>No AI Dependency</h3>
+          <p>Works with zero AI tools installed. Pure local analysis of your codebase using git history and syntax trees. No API keys, no cloud services.</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon" aria-hidden="true">&#x1F512;</span>
+          <h3>No Backend</h3>
+          <p>Zero network calls. No accounts. No telemetry. Everything runs locally in your VS Code instance. Your code never leaves your machine.</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon" aria-hidden="true">&#x1F4C4;</span>
+          <h3>No Lock-In</h3>
+          <p>Spec files are standard markdown with optional frontmatter. Spec Kit compatible. Switch tools anytime &mdash; your specs stay useful.</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon" aria-hidden="true">&#x1F333;</span>
+          <h3>VS Code Native</h3>
+          <p>Tree view for spec navigation, status bar indicators, command palette integration. Feels like a built-in feature, not a bolted-on tool.</p>
+        </div>
+        <div class="feature-card">
+          <span class="feature-icon" aria-hidden="true">&#x2699;</span>
+          <h3>Harness Generation</h3>
+          <p>Generates test harnesses, acceptance criteria, and implementation scaffolds from your specs. Regeneration merges &mdash; never overwrites your edits.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- How it works: Tiers -->
+  <section class="tiers" id="how-it-works">
+    <div class="section-inner">
+      <div class="section-label">How It Works</div>
+      <h2 class="section-title">Ceremony proportional to complexity</h2>
+      <p class="section-desc">MinSpec classifies every change and selects the right SDD phases. You always have override control.</p>
+      <div class="tier-list">
+        <div class="tier-row tier-t1">
+          <div><span class="tier-badge">T1</span></div>
+          <div class="tier-label">Trivial</div>
+          <div class="tier-desc">Fix a typo, update a constant, tweak CSS. Single file, under 50 lines.</div>
+          <div class="tier-ceremony">
+            <code>specify</code> one-liner<br>
+            Skip clarify, plan, constitution
+          </div>
+        </div>
+        <div class="tier-row tier-t2">
+          <div><span class="tier-badge">T2</span></div>
+          <div class="tier-label">Standard</div>
+          <div class="tier-desc">Add validation, refactor a function, fix a bug. 2&ndash;5 files, under 200 lines.</div>
+          <div class="tier-ceremony">
+            <code>specify</code> requirements list<br>
+            <code>plan</code> approach sentence
+          </div>
+        </div>
+        <div class="tier-row tier-t3">
+          <div><span class="tier-badge">T3</span></div>
+          <div class="tier-label">Complex</div>
+          <div class="tier-desc">New feature, DB migration, new package. 6+ files or new public APIs.</div>
+          <div class="tier-ceremony">
+            <code>specify</code> full requirements + acceptance criteria<br>
+            <code>clarify</code> required &middot; <code>plan</code> design doc
+          </div>
+        </div>
+        <div class="tier-row tier-t4">
+          <div><span class="tier-badge">T4</span></div>
+          <div class="tier-label">Architectural</div>
+          <div class="tier-desc">New service, auth rewrite, breaking API change. Cross-project impact.</div>
+          <div class="tier-ceremony">
+            <code>specify</code> full + cross-system impact<br>
+            <code>clarify</code> + stakeholder review<br>
+            <code>plan</code> design + ADR &middot; <code>tasks</code> DAG + milestones
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Principles -->
+  <section id="principles">
+    <div class="section-inner">
+      <div class="section-label">Principles</div>
+      <h2 class="section-title">Opinionated where it matters</h2>
+      <p class="section-desc">The design constraints that keep MinSpec useful instead of just another tool to configure.</p>
+      <div class="principles-grid">
+        <div class="principle">
+          <div class="principle-header">
+            <span class="principle-icon" aria-hidden="true">&#x1F9ED;</span>
+            <h3>User Override Wins</h3>
+          </div>
+          <p>The classifier suggests a tier. You decide. Escalate or skip phases freely. MinSpec warns but never blocks.</p>
+        </div>
+        <div class="principle">
+          <div class="principle-header">
+            <span class="principle-icon" aria-hidden="true">&#x1F504;</span>
+            <h3>Merge, Never Overwrite</h3>
+          </div>
+          <p>Regenerating harness files preserves your edits. Templates provide structure; your content is sacred.</p>
+        </div>
+        <div class="principle">
+          <div class="principle-header">
+            <span class="principle-icon" aria-hidden="true">&#x1F4E6;</span>
+            <h3>Standard Formats</h3>
+          </div>
+          <p>Specs are markdown. Tasks are markdown. No proprietary formats, no binary blobs. Works with any editor, any VCS.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- CTA -->
+  <section class="cta">
+    <div class="section-inner">
+      <div class="section-label">Get Started</div>
+      <h2 class="section-title">Stop over-specifying trivial changes</h2>
+      <p class="section-desc">Install MinSpec and let the right amount of ceremony happen automatically.</p>
+      <a href="#" class="btn btn-primary">Install from VS Code Marketplace</a>
+    </div>
+  </section>
+
+  <!-- Footer -->
+  <footer>
+    <div class="footer-inner">
+      <div class="footer-brand">
+        Built by <a href="https://aiclarity.com.au">AI Clarity</a>
+      </div>
+      <ul class="footer-links">
+        <li><a href="https://github.com/harvest316/MinSpecPro">GitHub</a></li>
+        <li><a href="#">Docs</a></li>
+        <li><a href="#">Changelog</a></li>
+        <li><a href="https://aiclarity.com.au">aiclarity.com.au</a></li>
+      </ul>
+    </div>
+  </footer>
+
+</body>
+</html>
