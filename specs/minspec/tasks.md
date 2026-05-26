@@ -77,11 +77,11 @@ product: minspec
 ## Phase 4: UI — Sidebar (Week 4-5)
 
 ### 4.1 Spec Tree View
-- [ ] Register TreeDataProvider for sidebar
-- [ ] Spec nodes grouped by status (active / done / archived)
-- [ ] Tier badge icons (T1-T4)
-- [ ] Click to open spec file
-- [ ] Context menu: change tier, transition phase, archive
+- [x] Register TreeDataProvider for sidebar
+- [x] Spec nodes grouped by status (active / done / archived)
+- [x] Tier badge icons (T1-T4) via ThemeIcon
+- [x] Click to open spec file
+- [x] Context menu: change tier, transition phase, archive
 
 ### 4.2 Active Spec Panel
 - [ ] Webview panel showing current spec phases as vertical stepper
@@ -90,9 +90,9 @@ product: minspec
 - [ ] Classification breakdown (signals, confidence, tier)
 
 ### 4.3 Status Bar
-- [ ] Status bar item showing: tier | active phase | progress
-- [ ] Click to open active spec panel
-- [ ] Update on spec transitions and task completions
+- [x] Status bar item showing: tier | active phase | progress
+- [x] Click to open active spec panel
+- [x] Update on spec transitions and task completions (file watcher)
 
 ---
 
