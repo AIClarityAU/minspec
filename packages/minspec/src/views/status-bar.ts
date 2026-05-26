@@ -130,6 +130,11 @@ export class MinSpecStatusBar {
   update(spec: StatusBarSpec | null): void {
     this.statusBarItem.text = formatStatusBarText(spec);
     this.statusBarItem.tooltip = formatTooltip(spec);
+    this.statusBarItem.accessibilityInformation = {
+      label: spec
+        ? `MinSpec: ${spec.id}, tier ${spec.tier}, phase ${spec.currentPhase ?? 'done'}, ${computeProgress(spec.phases)}`
+        : 'MinSpec: No active spec',
+    };
     this.statusBarItem.show();
   }
 

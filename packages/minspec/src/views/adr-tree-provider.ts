@@ -30,6 +30,10 @@ export class AdrGroupNode extends vscode.TreeItem {
     this.adrs = adrs;
     this.description = `(${adrs.length})`;
     this.contextValue = 'adrGroup';
+    this.accessibilityInformation = {
+      label: `${group.label} decisions group, ${adrs.length} items`,
+      role: 'treeitem',
+    };
   }
 }
 
@@ -62,6 +66,10 @@ export class AdrNode extends vscode.TreeItem {
 
     this.contextValue = 'adrNode';
     this.tooltip = `${adr.id}: ${adr.title}\nStatus: ${adr.status}\nDate: ${adr.date}`;
+    this.accessibilityInformation = {
+      label: `${adr.id}: ${adr.title}, status ${adr.status}, date ${adr.date}`,
+      role: 'treeitem',
+    };
   }
 }
 

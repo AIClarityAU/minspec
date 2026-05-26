@@ -106,6 +106,10 @@ export class SpecGroupNode extends vscode.TreeItem {
     this.specs = specs;
     this.description = `(${specs.length})`;
     this.contextValue = 'specGroup';
+    this.accessibilityInformation = {
+      label: `${group.label} specs group, ${specs.length} items`,
+      role: 'treeitem',
+    };
   }
 }
 
@@ -146,6 +150,11 @@ export class SpecNode extends vscode.TreeItem {
 
     // Tooltip with more detail
     this.tooltip = `${spec.id}: ${spec.title}\nTier: ${spec.tier}\nStatus: ${spec.status}\nPhase: ${phaseLabel}`;
+
+    this.accessibilityInformation = {
+      label: `${spec.id}: ${spec.title}, tier ${spec.tier}, status ${spec.status}, phase ${phaseLabel}`,
+      role: 'treeitem',
+    };
   }
 }
 

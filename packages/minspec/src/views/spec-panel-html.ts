@@ -91,17 +91,18 @@ export function getHtml(spec: ParsedSpec, classification?: ClassificationSummary
 
     let tasksHtml = '';
     if (content && content.tasks.length > 0) {
+      const doneCount = content.tasks.filter(t => t.done).length;
       const taskItems = content.tasks.map((task, idx) => {
         const checked = task.done ? 'checked' : '';
         return `<li class="task-item">
           <label>
-            <input type="checkbox" ${checked} data-phase="${phase}" data-index="${idx}" />
+            <input type="checkbox" ${checked} data-phase="${phase}" data-index="${idx}" aria-label="${escapeHtml(task.text)}" />
             <span class="${task.done ? 'task-done' : ''}">${escapeHtml(task.text)}</span>
           </label>
         </li>`;
       }).join('\n');
 
-      tasksHtml = `<ul class="task-list">${taskItems}</ul>`;
+      tasksHtml = `<ul class="task-list" role="list" aria-label="${label} phase tasks, ${doneCount} of ${content.tasks.length} complete">${taskItems}</ul>`;
     }
 
     // Show body preview for non-task content (only for active/done phases with content)
@@ -111,11 +112,11 @@ export function getHtml(spec: ParsedSpec, classification?: ClassificationSummary
       bodyPreviewHtml = `<div class="phase-body-preview">${escapeHtml(preview)}</div>`;
     }
 
-    return `<div class="phase-step ${isActive ? 'active' : ''} ${statusClass}">
+    return `<div class="phase-step ${isActive ? 'active' : ''} ${statusClass}" role="region" aria-label="${label} phase, ${statusLabel}">
       <div class="phase-header">
-        <span class="phase-icon">${icon}</span>
+        <span class="phase-icon" aria-hidden="true">${icon}</span>
         <span class="phase-label">${label}</span>
-        <span class="phase-status ${statusClass}">${statusLabel}</span>
+        <span class="phase-status ${statusClass}" aria-label="status: ${statusLabel}">${statusLabel}</span>
       </div>
       ${tasksHtml}
       ${bodyPreviewHtml}
@@ -135,17 +136,17 @@ export function getHtml(spec: ParsedSpec, classification?: ClassificationSummary
   <style>${getStyles()}</style>
 </head>
 <body>
-  <div class="container">
-    <header class="spec-header">
+  <div class="container" role="main">
+    <header class="spec-header" role="banner">
       <h1 class="spec-title">${escapeHtml(frontmatter.title || frontmatter.id)}</h1>
-      <div class="spec-meta">
-        <span class="tier-badge tier-${frontmatter.tier.toLowerCase()}">${frontmatter.tier}</span>
-        <span class="status-badge">${frontmatter.status}</span>
+      <div class="spec-meta" aria-label="Spec metadata">
+        <span class="tier-badge tier-${frontmatter.tier.toLowerCase()}" aria-label="Tier ${frontmatter.tier}">${frontmatter.tier}</span>
+        <span class="status-badge" aria-label="Status ${frontmatter.status}">${frontmatter.status}</span>
         <span class="spec-id">${escapeHtml(frontmatter.id)}</span>
       </div>
     </header>
 
-    <section class="phase-stepper">
+    <section class="phase-stepper" aria-label="Spec phases" aria-live="polite">
       <h2>Phases</h2>
       ${phaseStepsHtml}
     </section>
@@ -176,7 +177,7 @@ export function getErrorHtml(message: string): string {
   </style>
 </head>
 <body>
-  <p class="error">${escapeHtml(message)}</p>
+  <p class="error" role="alert">${escapeHtml(message)}</p>
 </body>
 </html>`;
 }
@@ -216,18 +217,18 @@ function getClassificationHtml(classification: ClassificationSummary): string {
     </tr>`;
   }).join('\n');
 
-  return `<section class="classification">
+  return `<section class="classification" aria-label="Classification results">
     <h2>Classification</h2>
     <div class="classification-summary">
-      <span class="tier-badge tier-${classification.tier.toLowerCase()}">${classification.tier}</span>
-      <span class="confidence">${confidencePercent}% confidence</span>
+      <span class="tier-badge tier-${classification.tier.toLowerCase()}" aria-label="Classified as tier ${classification.tier}">${classification.tier}</span>
+      <span class="confidence" aria-label="${confidencePercent} percent confidence">${confidencePercent}% confidence</span>
     </div>
-    <table class="signals-table">
+    <table class="signals-table" aria-label="Classification signals">
       <thead>
         <tr>
-          <th>Signal</th>
-          <th>Value</th>
-          <th>Tier</th>
+          <th scope="col">Signal</th>
+          <th scope="col">Value</th>
+          <th scope="col">Tier</th>
         </tr>
       </thead>
       <tbody>

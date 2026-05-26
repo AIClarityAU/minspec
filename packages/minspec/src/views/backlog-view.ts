@@ -36,6 +36,10 @@ export class BacklogGroupNode extends vscode.TreeItem {
     this.issues = issues;
     this.description = `(${issues.length})`;
     this.contextValue = 'backlogGroup';
+    this.accessibilityInformation = {
+      label: `${group.label} issues group, ${issues.length} items`,
+      role: 'treeitem',
+    };
   }
 }
 
@@ -73,6 +77,10 @@ export class BacklogIssueNode extends vscode.TreeItem {
     };
 
     this.contextValue = 'backlogIssueNode';
+    this.accessibilityInformation = {
+      label: `Issue ${issue.number}: ${issue.title}${issue.priorityLabel ? `, priority ${issue.priorityLabel}` : ''}${issue.lifecycleLabel ? `, ${issue.lifecycleLabel}` : ''}`,
+      role: 'treeitem',
+    };
 
     // Build tooltip
     const tooltipParts = [
@@ -93,6 +101,9 @@ class MessageNode extends vscode.TreeItem {
   constructor(message: string) {
     super(message, vscode.TreeItemCollapsibleState.None);
     this.contextValue = 'backlogMessage';
+    this.accessibilityInformation = {
+      label: message,
+    };
   }
 }
 
