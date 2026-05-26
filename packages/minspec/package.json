@@ -34,6 +34,36 @@
           "name": "MinSpec"
         }
       ]
+    },
+    "configuration": {
+      "title": "MinSpec",
+      "properties": {
+        "minspec.specsDir": {
+          "type": "string",
+          "default": "specs",
+          "description": "Directory for spec files (relative to workspace root)"
+        },
+        "minspec.decisionsDir": {
+          "type": "string",
+          "default": "docs/decisions",
+          "description": "Directory for architecture decision records (relative to workspace root)"
+        },
+        "minspec.thresholds.t1Max": {
+          "type": "number",
+          "default": 3,
+          "description": "Maximum complexity score for T1 (trivial) classification"
+        },
+        "minspec.thresholds.t2Max": {
+          "type": "number",
+          "default": 7,
+          "description": "Maximum complexity score for T2 (small) classification"
+        },
+        "minspec.thresholds.t3Max": {
+          "type": "number",
+          "default": 14,
+          "description": "Maximum complexity score for T3 (medium) classification"
+        }
+      }
     }
   },
   "scripts": {

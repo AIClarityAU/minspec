@@ -1,0 +1,260 @@
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { parseSpec, writeSpec, updateSpecFrontmatter, readSpecFile, writeSpecFile } from '../src/lib/spec';
+import type { ParsedSpec } from '../src/lib/spec';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+
+// Example spec from design.md — the canonical format
+const EXAMPLE_SPEC = `---
+id: SPEC-001
+title: Add rate limiting to /api/health
+tier: T1
+status: implementing
+created: 2026-05-26
+phases:
+  specify: done
+  clarify: skipped
+  plan: skipped
+  tasks: done
+  implement: in-progress
+---
+
+## Specify
+
+Health endpoint needs rate limiting at 100 req/min per IP.
+
+## Tasks
+
+- [x] Add express-rate-limit middleware to health route
+- [ ] Add 429 response test
+`;
+
+// Minimal Spec Kit format — just frontmatter + content, no MinSpec extensions
+const SPECKIT_MINIMAL = `---
+id: SPEC-042
+title: Fix login redirect
+---
+
+## Requirements
+
+User should be redirected after login.
+
+## Notes
+
+Some additional notes here.
+`;
+
+describe('parseSpec()', () => {
+  it('parses full frontmatter', () => {
+    const spec = parseSpec(EXAMPLE_SPEC);
+    expect(spec.frontmatter.id).toBe('SPEC-001');
+    expect(spec.frontmatter.title).toBe('Add rate limiting to /api/health');
+    expect(spec.frontmatter.tier).toBe('T1');
+    expect(spec.frontmatter.status).toBe('implementing');
+    expect(spec.frontmatter.created).toBe('2026-05-26');
+  });
+
+  it('parses phase statuses from frontmatter', () => {
+    const spec = parseSpec(EXAMPLE_SPEC);
+    expect(spec.frontmatter.phases.specify).toBe('done');
+    expect(spec.frontmatter.phases.clarify).toBe('skipped');
+    expect(spec.frontmatter.phases.plan).toBe('skipped');
+    expect(spec.frontmatter.phases.tasks).toBe('done');
+    expect(spec.frontmatter.phases.implement).toBe('in-progress');
+  });
+
+  it('parses phase body sections', () => {
+    const spec = parseSpec(EXAMPLE_SPEC);
+    expect(spec.phaseSections.specify).toBeDefined();
+    expect(spec.phaseSections.specify!.body).toContain('rate limiting');
+  });
+
+  it('parses task items', () => {
+    const spec = parseSpec(EXAMPLE_SPEC);
+    const tasks = spec.phaseSections.tasks!.tasks;
+    expect(tasks).toHaveLength(2);
+    expect(tasks[0].done).toBe(true);
+    expect(tasks[0].text).toBe('Add express-rate-limit middleware to health route');
+    expect(tasks[1].done).toBe(false);
+    expect(tasks[1].text).toBe('Add 429 response test');
+  });
+
+  it('handles minimal Spec Kit format (no MinSpec extensions)', () => {
+    const spec = parseSpec(SPECKIT_MINIMAL);
+    expect(spec.frontmatter.id).toBe('SPEC-042');
+    expect(spec.frontmatter.title).toBe('Fix login redirect');
+    // Defaults for missing fields
+    expect(spec.frontmatter.tier).toBe('T2');
+    expect(spec.frontmatter.status).toBe('new');
+    // All phases default to pending
+    expect(spec.frontmatter.phases.specify).toBe('pending');
+    expect(spec.frontmatter.phases.implement).toBe('pending');
+  });
+
+  it('preserves non-phase sections', () => {
+    const spec = parseSpec(SPECKIT_MINIMAL);
+    expect(spec.sections.get('Requirements')).toContain('redirected after login');
+    expect(spec.sections.get('Notes')).toContain('additional notes');
+  });
+
+  it('handles empty content', () => {
+    const spec = parseSpec('');
+    expect(spec.frontmatter.id).toBe('');
+    expect(spec.frontmatter.title).toBe('');
+  });
+
+  it('handles frontmatter-only (no body)', () => {
+    const input = `---
+id: SPEC-099
+title: Empty spec
+tier: T1
+status: new
+created: 2026-05-26
+phases:
+  specify: pending
+  clarify: pending
+  plan: pending
+  tasks: pending
+  implement: pending
+---
+`;
+    const spec = parseSpec(input);
+    expect(spec.frontmatter.id).toBe('SPEC-099');
+    expect(spec.sections.size).toBe(0);
+  });
+});
+
+describe('writeSpec()', () => {
+  it('round-trips full spec without data loss', () => {
+    const parsed = parseSpec(EXAMPLE_SPEC);
+    const written = writeSpec(parsed);
+    const reparsed = parseSpec(written);
+
+    expect(reparsed.frontmatter).toEqual(parsed.frontmatter);
+    expect(reparsed.phaseSections.specify!.body).toEqual(parsed.phaseSections.specify!.body);
+    expect(reparsed.phaseSections.tasks!.tasks).toEqual(parsed.phaseSections.tasks!.tasks);
+  });
+
+  it('round-trips Spec Kit format preserving user sections', () => {
+    const parsed = parseSpec(SPECKIT_MINIMAL);
+    const written = writeSpec(parsed);
+    const reparsed = parseSpec(written);
+
+    expect(reparsed.frontmatter.id).toBe('SPEC-042');
+    expect(reparsed.sections.get('Requirements')).toContain('redirected after login');
+    expect(reparsed.sections.get('Notes')).toContain('additional notes');
+  });
+
+  it('outputs valid frontmatter delimiters', () => {
+    const parsed = parseSpec(EXAMPLE_SPEC);
+    const written = writeSpec(parsed);
+    expect(written.startsWith('---\n')).toBe(true);
+    expect(written).toContain('\n---\n');
+  });
+
+  it('ends with newline', () => {
+    const parsed = parseSpec(EXAMPLE_SPEC);
+    const written = writeSpec(parsed);
+    expect(written.endsWith('\n')).toBe(true);
+  });
+});
+
+describe('updateSpecFrontmatter()', () => {
+  it('updates tier without changing body', () => {
+    const updated = updateSpecFrontmatter(EXAMPLE_SPEC, { tier: 'T3' });
+    const reparsed = parseSpec(updated);
+    expect(reparsed.frontmatter.tier).toBe('T3');
+    // Body preserved
+    expect(reparsed.phaseSections.specify!.body).toContain('rate limiting');
+    expect(reparsed.phaseSections.tasks!.tasks).toHaveLength(2);
+  });
+
+  it('updates individual phase status', () => {
+    const updated = updateSpecFrontmatter(EXAMPLE_SPEC, {
+      phases: { specify: 'done', clarify: 'skipped', plan: 'skipped', tasks: 'done', implement: 'done' },
+    });
+    const reparsed = parseSpec(updated);
+    expect(reparsed.frontmatter.phases.implement).toBe('done');
+  });
+
+  it('preserves non-updated frontmatter fields', () => {
+    const updated = updateSpecFrontmatter(EXAMPLE_SPEC, { status: 'done' });
+    const reparsed = parseSpec(updated);
+    expect(reparsed.frontmatter.id).toBe('SPEC-001');
+    expect(reparsed.frontmatter.title).toBe('Add rate limiting to /api/health');
+    expect(reparsed.frontmatter.tier).toBe('T1');
+    expect(reparsed.frontmatter.status).toBe('done');
+  });
+});
+
+describe('readSpecFile() / writeSpecFile()', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-spec-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('round-trips through filesystem', () => {
+    const filePath = path.join(tmpDir, 'SPEC-001.md');
+    fs.writeFileSync(filePath, EXAMPLE_SPEC);
+
+    const parsed = readSpecFile(filePath);
+    expect(parsed.frontmatter.id).toBe('SPEC-001');
+
+    // Modify and write back
+    const modified: ParsedSpec = {
+      ...parsed,
+      frontmatter: { ...parsed.frontmatter, status: 'done' },
+    };
+    writeSpecFile(filePath, modified);
+
+    const reread = readSpecFile(filePath);
+    expect(reread.frontmatter.status).toBe('done');
+    expect(reread.phaseSections.tasks!.tasks).toHaveLength(2);
+  });
+});
+
+describe('Spec Kit compatibility', () => {
+  it('Spec Kit file readable by MinSpec (graceful defaults)', () => {
+    // Spec Kit produces: id, title, maybe status. No tier, no phases, no created.
+    const specKitFile = `---
+id: SK-001
+title: A Spec Kit spec
+status: draft
+---
+
+## Requirements
+
+Something important.
+`;
+    const parsed = parseSpec(specKitFile);
+    expect(parsed.frontmatter.id).toBe('SK-001');
+    expect(parsed.frontmatter.tier).toBe('T2'); // default
+    expect(parsed.frontmatter.phases.specify).toBe('pending'); // default
+    expect(parsed.sections.get('Requirements')).toContain('Something important');
+  });
+
+  it('MinSpec file readable by Spec Kit (unknown frontmatter ignored)', () => {
+    // Spec Kit ignores unknown frontmatter keys (tier, phases, etc.)
+    // Verify our output has standard YAML frontmatter that any parser can read
+    const parsed = parseSpec(EXAMPLE_SPEC);
+    const written = writeSpec(parsed);
+
+    // Must have valid --- delimiters
+    const fmMatch = written.match(/^---\n([\s\S]*?)\n---/);
+    expect(fmMatch).not.toBeNull();
+
+    // Must have id and title (Spec Kit required fields)
+    expect(fmMatch![1]).toContain('id: SPEC-001');
+    expect(fmMatch![1]).toContain('title: Add rate limiting');
+
+    // Body sections use standard ## markdown headings
+    expect(written).toContain('## Specify');
+    expect(written).toContain('## Tasks');
+  });
+});

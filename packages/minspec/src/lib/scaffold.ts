@@ -1,11 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { DEFAULT_CONFIG } from './config';
 
-export const DEFAULT_CONFIG = {
-  version: '1',
-  specsDir: 'specs',
-  decisionsDir: 'docs/decisions',
-};
+export { DEFAULT_CONFIG };
 
 /**
  * Creates the .minspec/ directory structure in rootDir.
