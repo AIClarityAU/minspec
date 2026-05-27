@@ -66,7 +66,7 @@ function capitalize(phase: string): string {
  * Shows phases joined by arrows, with the current phase highlighted.
  * Example: "Specify -> Plan -> Tasks"
  */
-export function formatPhasePipeline(phases: Record<Phase, PhaseStatus>): string {
+export function formatPhasePipeline(_phases: Record<Phase, PhaseStatus>): string {
   return PHASES.map(p => capitalize(p)).join(' -> ');
 }
 

@@ -50,7 +50,7 @@ suite('Command Execution', () => {
     try {
       // Execute with a short timeout — the command will wait for user input
       // which won't come in an automated test, so we don't await completion
-      const classifyPromise = vscode.commands.executeCommand('minspec.classify');
+      void vscode.commands.executeCommand('minspec.classify');
 
       // Give it a moment, then cancel any open input boxes
       await new Promise(resolve => setTimeout(resolve, 500));
@@ -121,7 +121,7 @@ suite('Command Execution', () => {
 
   test('minspec.createAdr requires user input (does not throw)', async () => {
     try {
-      const createPromise = vscode.commands.executeCommand('minspec.createAdr');
+      void vscode.commands.executeCommand('minspec.createAdr');
 
       // Give the command time to show input box
       await new Promise(resolve => setTimeout(resolve, 500));

@@ -2,14 +2,14 @@
 
 > Just enough spec. Never too much.
 
-[![CI](https://github.com/harvest316/MinSpecPro/actions/workflows/ci.yml/badge.svg)](https://github.com/harvest316/MinSpecPro/actions/workflows/ci.yml)
-[![Tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/harvest316/MinSpecPro/badges/tests.json)](https://github.com/harvest316/MinSpecPro/actions/workflows/ci.yml)
-[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/harvest316/MinSpecPro/badges/coverage.json)](https://github.com/harvest316/MinSpecPro/actions/workflows/ci.yml)
+[![CI](https://github.com/harvest316/minspec/actions/workflows/ci.yml/badge.svg)](https://github.com/harvest316/minspec/actions/workflows/ci.yml)
+[![Tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/harvest316/minspec/badges/tests.json)](https://github.com/harvest316/minspec/actions/workflows/ci.yml)
+[![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/harvest316/minspec/badges/coverage.json)](https://github.com/harvest316/minspec/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.90+-blue.svg)](https://code.visualstudio.com/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6.svg)](https://www.typescriptlang.org/)
-[![No AI Required](https://img.shields.io/badge/AI-not%20required-lightgrey.svg)](https://github.com/harvest316/MinSpecPro)
-[![Zero Network](https://img.shields.io/badge/network-zero%20calls-lightgrey.svg)](https://github.com/harvest316/MinSpecPro)
+[![No AI Required](https://img.shields.io/badge/AI-not%20required-lightgrey.svg)](https://github.com/harvest316/minspec)
+[![Zero Network](https://img.shields.io/badge/network-zero%20calls-lightgrey.svg)](https://github.com/harvest316/minspec)
 
 ## Why This Exists
 
@@ -224,7 +224,7 @@ The classifier is a deterministic, multi-signal heuristic engine -- not ML. It a
 
 ## Contributing
 
-Contributions are welcome. See the [GitHub repository](https://github.com/harvest316/MinSpecPro) for issues and pull requests.
+Contributions are welcome. See the [GitHub repository](https://github.com/harvest316/minspec) for issues and pull requests.
 
 ## Privacy
 

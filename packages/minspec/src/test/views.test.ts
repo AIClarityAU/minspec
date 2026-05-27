@@ -19,7 +19,7 @@ suite('View Providers', () => {
   test('Spec tree view (minspecStatus) is accessible via reveal', async () => {
     // Verify the view exists by checking registered commands.
     // When a view is registered, VS Code creates focus commands for it.
-    const commands = await vscode.commands.getCommands(true);
+    await vscode.commands.getCommands(true);
 
     // The minspecStatus view should have an associated focus command
     // registered by VS Code when the view is contributed

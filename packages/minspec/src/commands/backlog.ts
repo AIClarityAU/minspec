@@ -7,11 +7,9 @@ import {
   transitionIssue,
   setPriority,
   LIFECYCLE_TRANSITIONS,
-  PRIORITY_LABELS,
 } from '../lib/backlog';
 import type {
   WsjfDimensions,
-  BacklogIssue,
   IssueLifecycleLabel,
   PriorityLabel,
 } from '../lib/backlog';

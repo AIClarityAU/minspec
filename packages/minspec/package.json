@@ -13,10 +13,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/harvest316/MinSpecPro"
+    "url": "https://github.com/harvest316/minspec"
   },
   "bugs": {
-    "url": "https://github.com/harvest316/MinSpecPro/issues"
+    "url": "https://github.com/harvest316/minspec/issues"
   },
   "preview": true,
   "homepage": "https://minspec.dev",
@@ -25,7 +25,8 @@
     "vscode": "^1.90.0"
   },
   "categories": [
-    "Other"
+    "Other",
+    "Testing"
   ],
   "keywords": [
     "sdd",
@@ -37,7 +38,18 @@
     "complexity",
     "classifier"
   ],
-  "badges": [],
+  "badges": [
+    {
+      "url": "https://github.com/harvest316/minspec/actions/workflows/ci.yml/badge.svg",
+      "href": "https://github.com/harvest316/minspec/actions/workflows/ci.yml",
+      "description": "CI Status"
+    },
+    {
+      "url": "https://img.shields.io/badge/License-MIT-yellow.svg",
+      "href": "https://opensource.org/licenses/MIT",
+      "description": "MIT License"
+    }
+  ],
   "activationEvents": [],
   "main": "./out/extension.js",
   "contributes": {
