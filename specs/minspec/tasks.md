@@ -185,7 +185,7 @@ product: minspec
 - [x] Extension size audit (<5MB target)
 - [x] Performance benchmarks (classification <500ms, tree view <200ms)
 - [x] Accessibility audit (keyboard navigation, screen reader support)
-- [ ] Test coverage report (T0 invariant tests: 100%, T1 contract tests: 100%, T2 feature tests: 1-2 per feature)
+- [x] Test coverage report (T0 invariant tests: 100%, T1 contract tests: 100%, T2 feature tests: 1-2 per feature)
 
 ---
 
