@@ -14,7 +14,7 @@ import { AdrTreeProvider } from './views/adr-tree-provider';
 import { BacklogTreeProvider } from './views/backlog-view';
 import { MinSpecStatusBar } from './views/status-bar';
 import { SpecPanel } from './views/spec-panel';
-import { loadConfig, applyVSCodeOverrides } from './lib/config';
+import { loadConfig, applyVSCodeOverrides, resolveAndValidate } from './lib/config';
 import { loadSession, saveSession, addToScope, isFileInScope } from './lib/session';
 import { detectTools, getToolFilePath, type DetectedTools } from './lib/tool-detector';
 import { injectContextToFile, removeContextFromFile, type ActiveSpecContext } from './lib/context-injector';
@@ -363,7 +363,7 @@ async function findActiveSpec(rootDir: string): Promise<string | null> {
     specsDir: vscodeConfig.get('specsDir'),
   });
 
-  const specsDir = path.join(rootDir, finalConfig.specsDir);
+  const specsDir = resolveAndValidate(rootDir, finalConfig.specsDir);
   if (!fs.existsSync(specsDir)) return null;
 
   const specFiles: string[] = [];

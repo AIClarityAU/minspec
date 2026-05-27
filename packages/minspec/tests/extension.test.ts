@@ -172,6 +172,7 @@ vi.mock('../src/views/codelens-provider', () => ({
 vi.mock('../src/lib/config', () => ({
   loadConfig: vi.fn(() => ({ specsDir: 'specs' })),
   applyVSCodeOverrides: vi.fn((c: any) => c),
+  resolveAndValidate: vi.fn((root: string, sub: string) => `${root}/${sub}`),
 }));
 vi.mock('../src/lib/session', () => ({
   loadSession: vi.fn(() => null),

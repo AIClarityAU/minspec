@@ -1,6 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { loadConfig, applyVSCodeOverrides } from './config';
+import { loadConfig, applyVSCodeOverrides, resolveAndValidate } from './config';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -65,7 +65,7 @@ export function resolveDecisionsDir(
   if (vscodeOverrides) {
     config = applyVSCodeOverrides(config, vscodeOverrides);
   }
-  return path.join(rootDir, config.decisionsDir);
+  return resolveAndValidate(rootDir, config.decisionsDir);
 }
 
 // ─── Sequential ID with Collision Detection ─────────────────────────────────

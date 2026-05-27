@@ -59,6 +59,7 @@ vi.mock('../src/lib/config', () => ({
   applyVSCodeOverrides: vi.fn(
     (config: Record<string, unknown>) => config,
   ),
+  resolveAndValidate: vi.fn((root: string, sub: string) => `${root}/${sub}`),
 }));
 
 vi.mock('../src/lib/session', () => ({

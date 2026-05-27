@@ -3,6 +3,7 @@
  * No vscode API dependency — safe for unit testing.
  */
 
+import * as crypto from 'crypto';
 import type { ParsedSpec, TaskItem } from '../lib/spec';
 import type { Phase, Tier } from '../lib/config';
 import { PHASES } from '../lib/config';
@@ -127,11 +128,14 @@ export function getHtml(spec: ParsedSpec, classification?: ClassificationSummary
     ? getClassificationHtml(classification)
     : '';
 
+  const nonce = crypto.randomBytes(16).toString('base64');
+
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}';" />
   <title>MinSpec: Active Spec</title>
   <style>${getStyles()}</style>
 </head>
@@ -153,7 +157,7 @@ export function getHtml(spec: ParsedSpec, classification?: ClassificationSummary
 
     ${classificationHtml}
   </div>
-  <script>${getScript()}</script>
+  <script nonce="${nonce}">${getScript()}</script>
 </body>
 </html>`;
 }

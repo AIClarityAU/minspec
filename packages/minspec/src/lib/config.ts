@@ -95,6 +95,22 @@ export function loadConfig(rootDir: string): MinspecConfig {
 }
 
 /**
+ * Resolve a subdirectory relative to rootDir and validate it does not escape
+ * the workspace root. Prevents path traversal attacks via malicious config
+ * values like "../../etc".
+ *
+ * @throws Error if the resolved path is outside rootDir.
+ */
+export function resolveAndValidate(rootDir: string, subDir: string): string {
+  const resolved = path.resolve(rootDir, subDir);
+  const root = path.resolve(rootDir);
+  if (!resolved.startsWith(root + path.sep) && resolved !== root) {
+    throw new Error(`Path "${subDir}" escapes workspace root`);
+  }
+  return resolved;
+}
+
+/**
  * Merge VS Code settings over a loaded config.
  * Called from extension code that has access to vscode module.
  */

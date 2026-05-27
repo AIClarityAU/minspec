@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { loadConfig, applyVSCodeOverrides } from '../lib/config';
+import { loadConfig, applyVSCodeOverrides, resolveAndValidate } from '../lib/config';
 
 /**
  * Generate an example spec file demonstrating all four tiers.
@@ -20,7 +20,7 @@ export async function generateExampleCommand(): Promise<void> {
     specsDir: vscodeConfig.get('specsDir'),
   });
 
-  const specsDir = path.join(folder, finalConfig.specsDir);
+  const specsDir = resolveAndValidate(folder, finalConfig.specsDir);
   const examplePath = path.join(specsDir, 'SPEC-EXAMPLE.md');
 
   if (fs.existsSync(examplePath)) {
