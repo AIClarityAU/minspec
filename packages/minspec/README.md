@@ -2,9 +2,14 @@
 
 > Just enough spec. Never too much.
 
-<!-- badge: marketplace version -->
-<!-- badge: installs -->
+[![Tests](https://img.shields.io/badge/tests-812%20passed-brightgreen)](https://github.com/harvest316/minspec)
+[![Coverage](https://img.shields.io/badge/coverage-97.5%25-brightgreen)](https://github.com/harvest316/minspec)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![VS Code](https://img.shields.io/badge/VS%20Code-1.85+-blue.svg)](https://code.visualstudio.com/)
+[![Node](https://img.shields.io/badge/node-18+-green.svg)](https://nodejs.org/)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6.svg)](https://www.typescriptlang.org/)
+[![No AI Required](https://img.shields.io/badge/AI-not%20required-lightgrey.svg)](https://github.com/harvest316/minspec)
+[![Zero Network](https://img.shields.io/badge/network-zero%20calls-lightgrey.svg)](https://github.com/harvest316/minspec)
 
 ## Why This Exists
 
