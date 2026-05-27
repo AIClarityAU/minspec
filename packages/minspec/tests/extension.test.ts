@@ -89,6 +89,9 @@ vi.mock('vscode', () => ({
       return { dispose: vi.fn() };
     }),
   },
+  extensions: {
+    getExtension: vi.fn(() => ({ id: 'mock' })),
+  },
   StatusBarAlignment: { Left: 1, Right: 2 },
   TreeItemCollapsibleState: { None: 0, Collapsed: 1, Expanded: 2 },
   EventEmitter: class {
