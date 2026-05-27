@@ -26,6 +26,7 @@ import {
   goToCodeCommand,
   linkToSpecCommand,
 } from './views/codelens-provider';
+import { maybeShowNudge, exportTraceability, setupConformanceWatcher } from './lib/bridge';
 
 export function activate(context: vscode.ExtensionContext): void {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
@@ -102,6 +103,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('minspec.injectContext', () => injectContextCommand(workspaceRoot)),
     vscode.commands.registerCommand('minspec.removeContext', () => removeContextCommand(workspaceRoot)),
     vscode.commands.registerCommand('minspec.generateExample', generateExampleCommand),
+    vscode.commands.registerCommand('minspec.exportTraceability', () => exportTraceabilityCommand(workspaceRoot)),
     vscode.commands.registerCommand('minspec.showSpecPanel', async (specFilePath?: string) => {
       if (!workspaceRoot) {
         vscode.window.showErrorMessage('MinSpec: No workspace folder open.');
@@ -209,6 +211,38 @@ export function activate(context: vscode.ExtensionContext): void {
           }
         });
     }
+  }
+
+  // ScroogeLLM bridge: conformance auto-export watcher (Phase 10)
+  if (workspaceRoot) {
+    const conformanceWatcher = setupConformanceWatcher(workspaceRoot);
+    if (conformanceWatcher) {
+      context.subscriptions.push(conformanceWatcher);
+    }
+  }
+
+  // ScroogeLLM bridge: nudge (Phase 10.1) — once per session, non-blocking
+  maybeShowNudge(context);
+}
+
+/**
+ * Command: Export traceability data for ScroogeLLM conformance checking.
+ */
+function exportTraceabilityCommand(workspaceRoot: string): void {
+  if (!workspaceRoot) {
+    vscode.window.showErrorMessage('MinSpec: No workspace folder open.');
+    return;
+  }
+
+  try {
+    const result = exportTraceability(workspaceRoot);
+    vscode.window.showInformationMessage(
+      `MinSpec: Exported traceability for ${result.specCount} spec(s) to ${path.basename(result.filePath)}.`,
+    );
+  } catch (err) {
+    vscode.window.showErrorMessage(
+      `MinSpec: Failed to export traceability — ${err instanceof Error ? err.message : String(err)}`,
+    );
   }
 }
 
