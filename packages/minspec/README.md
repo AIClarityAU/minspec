@@ -25,7 +25,7 @@ MinSpec fixes this. It classifies each change by complexity and applies proporti
 4. Run **MinSpec: Classify Task Complexity** to classify your current changes.
 5. Write your spec -- MinSpec tells you how much (or how little) you need.
 
-![MinSpec Sidebar](media/screenshots/sidebar.png)
+![MinSpec Sidebar](https://raw.githubusercontent.com/harvest316/minspec/main/packages/minspec/media/screenshots/sidebar.png)
 
 ## Features
 
@@ -33,25 +33,25 @@ MinSpec fixes this. It classifies each change by complexity and applies proporti
 
 MinSpec analyzes your git diff and classifies each change into one of four tiers. The classifier examines file count, line count, new exports, schema changes, dependency additions, and more -- then recommends the right level of specification ceremony.
 
-![Complexity Classification](media/screenshots/classification.png)
+![Complexity Classification](https://raw.githubusercontent.com/harvest316/minspec/main/packages/minspec/media/screenshots/classification.png)
 
 ### Adaptive Phase Lifecycle
 
 Each spec moves through a lifecycle of phases: **Specify, Clarify, Plan, Tasks, Implement**. MinSpec skips phases that do not add value for the current tier. A T1 trivial change jumps straight from a one-liner spec to implementation. A T3 complex change goes through the full pipeline.
 
-![Phase Stepper](media/screenshots/spec-panel.png)
+![Phase Stepper](https://raw.githubusercontent.com/harvest316/minspec/main/packages/minspec/media/screenshots/spec-panel.png)
 
 ### Sidebar Tree View
 
 All specs in your project appear in the Explorer sidebar, grouped by status (active, done, archived) with tier badges (T1-T4). Click any spec to open it. Right-click for actions like reclassification and phase transitions.
 
-![Sidebar Tree View](media/screenshots/sidebar.png)
+![Sidebar Tree View](https://raw.githubusercontent.com/harvest316/minspec/main/packages/minspec/media/screenshots/sidebar.png)
 
 ### Active Spec Panel
 
 A webview panel displays the current spec as a vertical stepper. Completed phases collapse. The active phase expands with its content. Tasks appear as an interactive checklist you can toggle directly.
 
-![Active Spec Panel](media/screenshots/spec-panel.png)
+![Active Spec Panel](https://raw.githubusercontent.com/harvest316/minspec/main/packages/minspec/media/screenshots/spec-panel.png)
 
 ### Harness Generator
 
@@ -86,13 +86,13 @@ No AI tool is required. MinSpec works perfectly without any of them -- your spec
 
 Inline CodeLens annotations appear above functions and classes, showing which spec requirement each piece of code implements. Click a CodeLens annotation to jump to the spec. Click a spec requirement to jump to the code. Create mappings manually or let MinSpec suggest them from task file paths.
 
-![CodeLens Annotations](media/screenshots/codelens.png)
+![CodeLens Annotations](https://raw.githubusercontent.com/harvest316/minspec/main/packages/minspec/media/screenshots/codelens.png)
 
 ### Architecture Decision Records
 
 MinSpec manages Architecture Decision Records (ADRs) in `docs/decisions/DR-NNN.md`. When you classify a change as T4 (Architectural), MinSpec prompts you to create an ADR. The sidebar shows all decisions in a dedicated tree view.
 
-![ADR Tree View](media/screenshots/adr-tree.png)
+![ADR Tree View](https://raw.githubusercontent.com/harvest316/minspec/main/packages/minspec/media/screenshots/adr-tree.png)
 
 ### Session Discipline
 
