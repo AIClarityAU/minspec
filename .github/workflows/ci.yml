@@ -132,6 +132,10 @@ jobs:
 
       - run: npm ci
 
+      - name: Build MinSpec
+        working-directory: packages/minspec
+        run: npm run build
+
       - name: Package MinSpec
         working-directory: packages/minspec
         run: npx vsce package --no-dependencies
