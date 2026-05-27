@@ -175,7 +175,7 @@ product: minspec
 - [x] Example spec generation for demo/learning
 
 ### 9.2 Marketplace Preparation
-- [ ] Extension icon and banner design
+- [x] Extension icon and banner design
 - [x] Screenshots (sidebar, CodeLens, classification, phase stepper)
 - [x] README with GIFs showing key workflows
 - [x] CHANGELOG.md
