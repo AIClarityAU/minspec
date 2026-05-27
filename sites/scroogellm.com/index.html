@@ -7,6 +7,32 @@
   <meta name="description" content="See what AI costs. Then cut it. ScroogeLLM is a VS Code extension that optimizes LLM costs with a local proxy, prompt compression, and full savings visibility.">
   <meta name="theme-color" content="#0a0f0a">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💰</text></svg>">
+  <link rel="canonical" href="https://scroogellm.com">
+  <meta name="robots" content="index, follow">
+  <meta property="og:title" content="ScroogeLLM — Cut LLM Costs in VS Code">
+  <meta property="og:description" content="Free VS Code extension that reduces LLM API costs with a local proxy. Prompt compression, response caching, and smart model routing.">
+  <meta property="og:url" content="https://scroogellm.com">
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="ScroogeLLM">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="ScroogeLLM — Cut LLM Costs in VS Code">
+  <meta name="twitter:description" content="Free VS Code extension that reduces LLM API costs with a local proxy. Prompt compression, response caching, and smart model routing.">
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "ScroogeLLM",
+    "applicationCategory": "DeveloperApplication",
+    "operatingSystem": "Windows, macOS, Linux",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "USD"
+    },
+    "description": "VS Code extension that optimizes LLM API costs with a local proxy, prompt compression, and smart model routing.",
+    "url": "https://scroogellm.com"
+  }
+  </script>
   <style>
     /* ── Reset & Base ─────────────────────────────────── */
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -231,7 +257,7 @@
     }
 
     .btn-primary {
-      background: var(--green-600);
+      background: var(--green-700);
       color: white;
     }
 
@@ -708,14 +734,58 @@
       .hero h1 { font-size: 2rem; }
       .hero .subtitle { font-size: 1.05rem; }
     }
+
+    /* ── Skip navigation ────────────────────────────── */
+    .skip-link {
+      position: absolute;
+      top: -40px;
+      left: 0;
+      background: var(--accent, #22c55e);
+      color: #0a0f0a;
+      padding: 8px 16px;
+      z-index: 200;
+      font-weight: 600;
+      text-decoration: none;
+    }
+    .skip-link:focus {
+      top: 0;
+    }
+
+    /* ── Focus indicators ───────────────────────────── */
+    a:focus-visible,
+    .btn:focus-visible,
+    button:focus-visible,
+    input:focus-visible {
+      outline: 2px solid var(--green-400, #4ade80);
+      outline-offset: 3px;
+    }
+
+    /* ── Logo link ──────────────────────────────────── */
+    a.nav-logo {
+      text-decoration: none;
+      color: inherit;
+    }
+
+    /* ── Reduced motion ─────────────────────────────── */
+    @media (prefers-reduced-motion: reduce) {
+      .hero::before,
+      .badge {
+        animation: none;
+      }
+      html {
+        scroll-behavior: auto;
+      }
+    }
   </style>
 </head>
 <body>
 
+  <a href="#main-content" class="skip-link">Skip to main content</a>
+
   <!-- ── Navigation ──────────────────────────────────── -->
   <nav class="nav" aria-label="Main navigation">
     <div class="nav-inner">
-      <div class="nav-logo">Scrooge<span>LLM</span></div>
+      <a href="/" class="nav-logo">Scrooge<span>LLM</span></a>
       <ul class="nav-links">
         <li><a href="#features">Features</a></li>
         <li><a href="#how-it-works">How It Works</a></li>
@@ -738,10 +808,13 @@
       <form class="signup-form" action="#" method="post" aria-label="Hero email signup">
         <input type="email" placeholder="dev@example.com" aria-label="Email address" required>
         <button type="submit" class="btn btn-primary">Notify Me</button>
+        <p class="signup-notice" style="font-size: 0.75rem; color: var(--text-dim); margin-top: 0.5rem;">Notifications launching soon</p>
       </form>
       <p class="signup-note">No spam. One email when we launch.</p>
     </div>
   </header>
+
+  <main id="main-content">
 
   <!-- ── Cost Comparison ─────────────────────────────── -->
   <section class="section cost-section" id="costs">
@@ -754,7 +827,7 @@
           ScroogeLLM makes every dollar visible &mdash; then recovers what you can.
         </p>
       </div>
-      <div class="cost-comparison" role="img" aria-label="Cost comparison: before ScroogeLLM showing $47.20 daily cost, after ScroogeLLM showing $18.40 daily cost with 61% savings">
+      <div class="cost-comparison" aria-label="Cost comparison: before ScroogeLLM showing $47.20 daily cost, after ScroogeLLM showing $18.40 daily cost with 61% savings">
         <div class="cost-panel cost-panel-before">
           <div class="cost-panel-label">Without ScroogeLLM</div>
           <div class="cost-line">
@@ -1073,10 +1146,13 @@ flowchart TB
       <form class="signup-form signup-form-cta" action="#" method="post" aria-label="Footer email signup">
         <input type="email" placeholder="dev@example.com" aria-label="Email address" required>
         <button type="submit" class="btn btn-primary">Notify Me</button>
+        <p class="signup-notice" style="font-size: 0.75rem; color: var(--text-dim); margin-top: 0.5rem;">Notifications launching soon</p>
       </form>
       <p class="signup-note">Free forever tier included. No credit card needed.</p>
     </div>
   </section>
+
+  </main>
 
   <!-- ── Footer ──────────────────────────────────────── -->
   <footer class="footer">
