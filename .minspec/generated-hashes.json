@@ -1,0 +1,25 @@
+{
+  ".cursorrules": {
+    "__preamble__": "b0cecc2c1af0888fc61a00fe09957b1a0e769f847d6eff5b2aae4edec70796ab",
+    "Project Context": "c56fd6ffbf458f31f9ac33046835ee6d110d9902fe55678e5b74939276cac59e",
+    "Invariants": "2e6ef0a7e5f75a0803d8bfac10d60241fe996ec4a8627b2bf342cde2e8186121",
+    "Principles": "8cb51c45a720ff86ada884494d98f76f056bb5e113296e3300bacc6805b4cc2c",
+    "Before Making Changes": "bc4b2ef1ae3e8b94b0e7c2f5496e3cc9df7b81aaf43a547ab0b6071d8477be2d",
+    "Coding Standards": "89ab084719acfcbe5296dfb31a2f302c2ef49f8f0e3cdbc528e125244af758fb"
+  },
+  "DESIGN.md": {
+    "__preamble__": "90caf2c606c2af233131835e4748e06b15c8fee1dfa59e4c471174c9626b443c",
+    "Architecture Overview": "dcd77c8f98ac09e3f8293c5385aade99512dae74b4a125c51d346904a90597e9",
+    "Key Components": "a52a499476c82580f39a2a65ae05d2ade685e3f00e9ddd6e1903a7cba4edc4c1",
+    "Data Flow": "9079c23ddfb7dcd43590c8542959c93a04dc9a302a2eaf547492d6a15a221518",
+    "Technology Stack": "1145594b09ad57d13b5afc0f4a3e5e72b095e21709b9d5633ce5693a1a5a8316",
+    "Constraints": "f689e8eb98e7360e80dcf59159332f6b41f1f894dd2bc29689315e92f99a6138",
+    "Open Questions": "38528da75811ee8a86958713c9913481ce2e3f5fb08869b0b6cd1375540d5905"
+  },
+  ".minspec/constitution.md": {
+    "__preamble__": "fb86119423ac547e0ea2a4f12e5dc30660310a96630d5261a5e849dbbe7c3767",
+    "Invariants": "b24cf758849cedce8269447ce05a923df3530b59a68bd379f4d6f80c7d4b3d74",
+    "Principles": "0ef8e5f87949afcc8dadd637a41225de6a238fa2872032dee0796e6ea48c398e",
+    "Constraints": "7a870ce7154b580cdb5c7ddc037b9c0dbd28739b77f40732378e73ec09d68ec7"
+  }
+}

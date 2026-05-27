@@ -1,0 +1,28 @@
+# minspec-monorepo — Cursor Rules
+
+## Project Context
+
+This project uses MinSpec SDD methodology. Specs in `specs/`, decisions in `docs/decisions/`.
+
+## Invariants
+
+<!-- Add project invariants here -->
+
+## Principles
+
+- Ceremony proportional to complexity
+- User override always wins
+- Specs are living documents
+
+## Before Making Changes
+
+1. Check if a spec exists for the area you're modifying
+2. Classify the change complexity (T1-T4)
+3. Follow the appropriate ceremony level
+4. Never violate the invariants listed above
+
+## Coding Standards
+
+- Follow existing patterns in the codebase
+- Keep changes focused and atomic
+- Document decisions that are hard to reverse
