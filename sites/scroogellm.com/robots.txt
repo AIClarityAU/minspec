@@ -1,0 +1,3 @@
+User-agent: *
+Allow: /
+Sitemap: https://scroogellm.com/sitemap.xml
