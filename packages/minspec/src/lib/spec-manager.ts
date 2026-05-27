@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { Tier, Phase } from './config';
-import { loadConfig, PHASES } from './config';
+import { loadConfig, PHASES, resolveAndValidate } from './config';
 import type { SpecFrontmatter, ParsedSpec } from './spec';
 import { parseSpec, writeSpec, readSpecFile, writeSpecFile } from './spec';
 import type { PhaseState, SpecStatus, TransitionResult } from './lifecycle';
@@ -83,7 +83,7 @@ export function nextSpecId(specsDir: string): string {
 
 function resolveSpecsDir(rootDir: string): string {
   const config = loadConfig(rootDir);
-  return path.join(rootDir, config.specsDir);
+  return resolveAndValidate(rootDir, config.specsDir);
 }
 
 function findSpecFile(specsDir: string, specId: string): string | null {

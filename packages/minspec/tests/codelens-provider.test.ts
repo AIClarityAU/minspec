@@ -97,6 +97,7 @@ vi.mock('../src/lib/traceability', () => ({
 
 vi.mock('../src/lib/config', () => ({
   loadConfig: vi.fn(() => ({ specsDir: 'specs' })),
+  resolveAndValidate: vi.fn((root: string, sub: string) => `${root}/${sub}`),
 }));
 
 vi.mock('fs', () => ({

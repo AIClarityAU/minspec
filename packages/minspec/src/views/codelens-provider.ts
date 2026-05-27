@@ -26,7 +26,7 @@ import {
   parseLocationString,
   formatLocationString,
 } from '../lib/traceability';
-import { loadConfig } from '../lib/config';
+import { loadConfig, resolveAndValidate } from '../lib/config';
 
 // --- CodeLens Provider ---
 
@@ -196,7 +196,7 @@ function findRequirementLine(document: vscode.TextDocument, requirementKey: stri
  */
 function findSpecFilePath(workspaceRoot: string, specId: string): string | null {
   const config = loadConfig(workspaceRoot);
-  const specsDir = path.join(workspaceRoot, config.specsDir);
+  const specsDir = resolveAndValidate(workspaceRoot, config.specsDir);
 
   try {
     const files = fs.readdirSync(specsDir);
@@ -376,7 +376,7 @@ export async function linkToSpecCommand(workspaceRoot: string): Promise<void> {
 
   // Find available specs
   const config = loadConfig(workspaceRoot);
-  const specsDir = path.join(workspaceRoot, config.specsDir);
+  const specsDir = resolveAndValidate(workspaceRoot, config.specsDir);
   let specFiles: string[] = [];
 
   try {

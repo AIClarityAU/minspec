@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import { loadConfig } from '../lib/config';
+import { loadConfig, resolveAndValidate } from '../lib/config';
 import { parseSpec } from '../lib/spec';
 import type { SpecFrontmatter, SpecStatus } from '../lib/spec';
 import type { Phase } from '../lib/config';
@@ -14,7 +14,7 @@ export type { SpecSummary };
  */
 export function listSpecs(rootDir: string): SpecSummary[] {
   const config = loadConfig(rootDir);
-  const specsDir = path.join(rootDir, config.specsDir);
+  const specsDir = resolveAndValidate(rootDir, config.specsDir);
 
   if (!fs.existsSync(specsDir)) {
     return [];
