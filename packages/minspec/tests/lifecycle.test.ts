@@ -507,3 +507,35 @@ describe('getSpecStatus()', () => {
     }))).toBe('done');
   });
 });
+
+// =============================================================================
+// UNKNOWN PHASE BRANCHES — cover the idx === -1 guard clauses
+// =============================================================================
+
+describe('skipPhase() — unknown phase', () => {
+  it('fails with warning for an unknown phase name', () => {
+    const phases = makePhases({ specify: 'in-progress' });
+    const result = skipPhase(phases, 'invalid' as any, 'some reason');
+    expect(result.success).toBe(false);
+    expect(result.warning).toContain('Unknown phase');
+    expect(result.warning).toContain('invalid');
+    // Phase state should be unchanged
+    expect(result.newPhases).toEqual(phases);
+  });
+});
+
+describe('goBackToPhase() — unknown phase', () => {
+  it('fails with warning for an unknown phase name', () => {
+    const phases = makePhases({
+      specify: 'done',
+      clarify: 'done',
+      plan: 'in-progress',
+    });
+    const result = goBackToPhase(phases, 'nonexistent' as any, 'reason');
+    expect(result.success).toBe(false);
+    expect(result.warning).toContain('Unknown phase');
+    expect(result.warning).toContain('nonexistent');
+    // Phase state should be unchanged
+    expect(result.newPhases).toEqual(phases);
+  });
+});

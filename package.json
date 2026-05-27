@@ -18,6 +18,7 @@
     "@types/vscode": "^1.90.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
+    "@vitest/coverage-v8": "^2.1.9",
     "esbuild": "^0.24.0",
     "eslint": "^9.0.0",
     "typescript": "^5.5.0",

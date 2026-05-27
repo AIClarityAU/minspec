@@ -34,6 +34,7 @@ describe('Invariant 1: No AI dependency', () => {
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
+        if (entry.name === 'test' || entry.name === '__benchmarks__') continue;
         results.push(...getAllTsFiles(fullPath));
       } else if (entry.name.endsWith('.ts')) {
         results.push(fullPath);
@@ -93,6 +94,8 @@ describe('Invariant 2: No backend — no network calls', () => {
     for (const entry of entries) {
       const fullPath = path.join(dir, entry.name);
       if (entry.isDirectory()) {
+        // Skip src/test/ — E2E tests are not production code
+        if (entry.name === 'test' || entry.name === '__benchmarks__') continue;
         results.push(...getAllTsFiles(fullPath));
       } else if (entry.name.endsWith('.ts')) {
         results.push(fullPath);
