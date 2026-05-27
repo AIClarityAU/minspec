@@ -176,7 +176,7 @@ product: minspec
 
 ### 9.2 Marketplace Preparation
 - [ ] Extension icon and banner design
-- [ ] Screenshots (sidebar, CodeLens, classification, phase stepper)
+- [x] Screenshots (sidebar, CodeLens, classification, phase stepper)
 - [x] README with GIFs showing key workflows
 - [x] CHANGELOG.md
 - [x] Marketplace description from Section 7 of competitive landscape report
