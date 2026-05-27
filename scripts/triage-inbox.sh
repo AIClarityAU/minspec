@@ -10,10 +10,15 @@ set -euo pipefail
 REPO="harvest316/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROLES_DIR="${SCRIPT_DIR}/roles"
-TRIAGE_PROMPT=$(cat "${ROLES_DIR}/triage.md")
 
 triage_issue() {
   local ISSUE="$1"
+
+  if ! [[ "$ISSUE" =~ ^[0-9]+$ ]]; then
+    echo "ERROR: Invalid issue number: $ISSUE" >&2
+    exit 1
+  fi
+
   local ISSUE_JSON
   ISSUE_JSON=$(gh issue view "$ISSUE" --repo "$REPO" --json body,title,labels)
   local ISSUE_BODY
@@ -23,25 +28,14 @@ triage_issue() {
 
   echo "Triaging: #$ISSUE — $ISSUE_TITLE"
 
-  local PROMPT
-  PROMPT=$(cat <<PROMPT
-# Triage Task: Issue #${ISSUE}
-
+  local USER_CONTENT
+  USER_CONTENT=$(cat <<CONTENT
+<untrusted_issue_body>
 ${ISSUE_BODY}
-
----
-
-## Role Instructions
-
-${TRIAGE_PROMPT}
-
----
-
-## Context
+</untrusted_issue_body>
 
 Repo: ${REPO}
-Read CLAUDE.md for project invariants and tier definitions.
-
+Issue number: ${ISSUE}
 Available roles: dev, architect, security, reviewer
 Available priority labels: P1, P2, P3
 
@@ -49,16 +43,12 @@ Use \`gh\` CLI to:
 - Add labels: \`gh issue edit ${ISSUE} --repo ${REPO} --add-label "role:dev,agent-ready,P2" --remove-label "inbox"\`
 - Comment: \`gh issue comment ${ISSUE} --repo ${REPO} --body "triage summary"\`
 - Request info: \`gh issue edit ${ISSUE} --repo ${REPO} --add-label "needs-info" --remove-label "inbox"\`
-
-ESCALATION RULE: If you cannot fully and correctly complete this task — due to complexity, missing context, token limits, or uncertainty — do NOT cut corners, leave stubs, skip edge cases, or simplify the implementation. Instead, output exactly:
-
-ESCALATE: <one-line reason>
-
-Then stop. Do not attempt a partial solution.
-PROMPT
+CONTENT
 )
 
-  claude -p "$PROMPT"
+  claude -p "$USER_CONTENT" \
+    --system-prompt-file "${ROLES_DIR}/triage.md" \
+    --allowedTools "gh issue edit,gh issue comment,Read"
   echo "Triage complete for #$ISSUE"
 }
 
