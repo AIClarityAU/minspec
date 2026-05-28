@@ -20,7 +20,18 @@ Project: minspec / scroogellm / shared / infra
 Type: bug / feat / explore / plan
 ```
 
-Topic drift → GitHub issue, do not act.
+### Triage Rules
+
+0. **Root cause before fix.** Never rush into fixing an issue. Always identify root cause first — even for off-topic issues that get parked. Park ≠ skip the diagnosis.
+1. **Topic drift → GitHub issue, do not act.** File on the relevant repo with `inbox` label, report URL, continue original scope.
+2. **Scope-expansion triggers.** When the in-scope request contains any of these verbs, confirm before implementing — they almost always hide new scope:
+   - "integrate with X" (≠ "detect X")
+   - "also support X" / "include X too"
+   - "expand to X" / "extend to X"
+   - "and X" tacked on as a follow-up to an already-defined scope
+   - "make it work with X" where X is a system not previously named
+   Default action: confirm with user OR park as separate issue. Do NOT silently expand.
+3. **Detection ≠ integration.** Reading a signal (filesystem existence, extension presence) is small. Acting on it (custom commands, exports, bidirectional sync) is a new feature surface. Treat them as separate work items.
 
 ## Invariants
 
@@ -90,10 +101,10 @@ npm run validate      # frontmatter validation
 
 All architectural decisions → `docs/decisions/DR-NNN.md`. See `docs/decisions/INDEX.md`.
 
-## Repo Mapping (DR-360 Parking Lot)
+## Repo Mapping (Parking Lot)
 
 | Topic | GitHub repo |
 |---|---|
-| MinSpec extension / SDD tool | `harvest316/MinSpecPro` |
-| ScroogeLLM extension / proxy | `harvest316/MinSpecPro` (same monorepo) |
+| MinSpec extension / SDD tool | `harvest316/minspec` |
+| ScroogeLLM extension / proxy | `harvest316/minspec` (same monorepo) |
 | Shared infra / cross-project | `harvest316/mmo-platform` |
