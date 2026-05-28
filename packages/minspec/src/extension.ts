@@ -26,7 +26,7 @@ import {
   goToCodeCommand,
   linkToSpecCommand,
 } from './views/codelens-provider';
-import { maybeShowNudge, exportTraceability, setupConformanceWatcher } from './lib/bridge';
+import { maybeShowNudge, recordInstallTimestamp, exportTraceability, setupConformanceWatcher } from './lib/bridge';
 
 export function activate(context: vscode.ExtensionContext): void {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
@@ -234,8 +234,10 @@ export function activate(context: vscode.ExtensionContext): void {
     }
   }
 
-  // ScroogeLLM bridge: nudge (Phase 10.1) — once per session, non-blocking
-  maybeShowNudge(context);
+  // ScroogeLLM bridge: record install timestamp on first activation, then
+  // attempt the nudge (gated on 24h install age + 7d cooldown).
+  recordInstallTimestamp(context);
+  void maybeShowNudge(context);
 }
 
 /**
