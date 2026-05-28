@@ -119,9 +119,54 @@ jobs:
         working-directory: packages/minspec
         run: xvfb-run -a npm run test:e2e
 
-  package:
+  security:
+    name: Supply-chain scan (bumblebee)
     runs-on: ubuntu-latest
     needs: build
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - run: npm ci
+
+      - name: Install bumblebee
+        run: go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest
+
+      - name: Fetch threat catalogs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/fetch-bumblebee-catalogs.sh ./.bumblebee-catalogs
+
+      - name: Run supply-chain scan
+        env:
+          BUMBLEBEE_BIN: ${{ runner.tool_cache }}/go/bin/bumblebee
+          BUMBLEBEE_CATALOGS: ${{ github.workspace }}/.bumblebee-catalogs
+        run: |
+          # Use Go's GOBIN default ($HOME/go/bin) since setup-go does not set tool_cache path.
+          export BUMBLEBEE_BIN="$HOME/go/bin/bumblebee"
+          ./scripts/check-supply-chain.sh
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: supply-chain-inventory
+          path: .cache/supply-chain/*.ndjson
+          if-no-files-found: warn
+          retention-days: 30
+
+  package:
+    runs-on: ubuntu-latest
+    needs: [build, security]
     steps:
       - uses: actions/checkout@v4
 

@@ -1,0 +1,99 @@
+name: Supply-chain daily scan
+
+# Daily scan of main against the latest threat_intel catalogs from upstream
+# perplexityai/bumblebee. If a previously-clean dependency becomes known-bad,
+# this is how we find out before someone tries to publish.
+#
+# DR-005 follow-up: complements the per-PR pre-merge gate in ci.yml.
+
+on:
+  schedule:
+    # 06:00 UTC daily — off-hours for AU/EU/US publish windows
+    - cron: '0 6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: 'stable'
+
+      - run: npm ci
+
+      - name: Install bumblebee
+        run: go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest
+
+      - name: Fetch threat catalogs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: ./scripts/fetch-bumblebee-catalogs.sh ./.bumblebee-catalogs
+
+      - name: Run supply-chain scan
+        id: scan
+        env:
+          BUMBLEBEE_CATALOGS: ${{ github.workspace }}/.bumblebee-catalogs
+        run: |
+          export BUMBLEBEE_BIN="$HOME/go/bin/bumblebee"
+          set +e
+          ./scripts/check-supply-chain.sh 2>&1 | tee scan-output.log
+          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          set -e
+
+      - name: File issue on findings
+        if: steps.scan.outputs.exit_code != '0'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SERVER_URL: ${{ github.server_url }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -e
+          # Build issue body in a temp file so untrusted-looking scan output
+          # never reaches a shell-evaluation context. gh accepts --body-file.
+          BODY_FILE="$(mktemp)"
+          {
+            printf '%s\n' "Daily supply-chain scan against \`main\` detected one or more bundled dependencies matching the upstream bumblebee threat catalog."
+            printf '\n## Scan output\n\n```\n'
+            tail -40 scan-output.log
+            printf '\n```\n\n'
+            printf '## What to do\n\n'
+            printf '1. Identify the affected package(s) from the finding records below.\n'
+            printf '2. Check the upstream advisory in [perplexityai/bumblebee/threat_intel](https://github.com/perplexityai/bumblebee/tree/main/threat_intel).\n'
+            printf '3. Pin or remove the dependency, regenerate `package-lock.json`, and re-run the scan locally.\n'
+            printf '4. Until resolved, do not run `npm run package` or publish — the pre-package hook will block, but a force-bypass would ship the compromised dep.\n\n'
+            printf '## Findings inventory\n\n'
+            printf 'Full NDJSON inventory is attached to the workflow run as `supply-chain-inventory` artifact.\n\n'
+            printf 'Workflow: %s/%s/actions/runs/%s\n' "$SERVER_URL" "$REPOSITORY" "$RUN_ID"
+          } > "$BODY_FILE"
+
+          gh issue create \
+            --title "security: supply-chain finding(s) detected in daily scan" \
+            --label "security,inbox,P1" \
+            --body-file "$BODY_FILE"
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: supply-chain-inventory
+          path: .cache/supply-chain/*.ndjson
+          if-no-files-found: warn
+          retention-days: 90
+
+      - name: Fail if findings
+        if: steps.scan.outputs.exit_code != '0'
+        run: exit 1
