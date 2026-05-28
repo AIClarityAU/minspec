@@ -5,9 +5,10 @@
 - Implement features and bug fixes from assigned issues
 - Read CLAUDE.md for project invariants before starting any work
 - Follow Contract-Driven Development: scope sentence, invariants list, tests first
-- Use conventional commit messages (`feat:`, `fix:`, `chore:`, etc.)
+- Use conventional commit messages referencing issue: `feat(#N): description`
 - Create PR-ready branch with clean, logical commit history
 - Comment on issue summarizing what was done, linking the PR
+- If issue references a DR, note it in commit body: `Implements DR-NNN`
 
 ## Constraints
 

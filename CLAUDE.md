@@ -71,6 +71,25 @@ ScroogeLLM has not started Specify phase. Future sessions only.
 | Websites | `sites/minspec.dev/`, `sites/scroogellm.com/` |
 | Hooks | `scripts/hooks/` |
 
+## Traceability Convention
+
+Commits, issues, and DRs form a linked chain:
+
+- **Commits** reference issue: `feat(#N): description` or `fix(#N): description`
+- **DRs** reference triggering issue: `Triggered by: #N` in body
+- **Issues** reference DR if one exists: link in issue body
+- **Sub-issues** reference parent DR: `See DR-NNN for design rationale`
+
+Purpose: Issues = what needs doing. DRs = why we chose this approach. Commits = what changed. Don't consolidate — link.
+
+## Agent Dispatch (Tier-Gated HITL)
+
+Triage agent auto-dispatches T1-T2 issues (`agent-ready`). T3-T4 get `needs-review` — human approves spec/plan before agent starts. Per SDD FR-2: Clarify phase required for T3-T4.
+
+Roles: `scripts/roles/` — triage, dev, architect, security, reviewer.
+Dispatch: `scripts/dispatch-issue.sh <N>` — reads `role:X` label, loads role prompt.
+Triage: `scripts/triage-inbox.sh [N]` — processes inbox issues.
+
 ## Deploy Reference
 
 VS Code extensions do not auto-deploy. Manual steps:

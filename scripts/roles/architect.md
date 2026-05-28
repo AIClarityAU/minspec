@@ -16,6 +16,8 @@
 - MUST NOT make changes without a one-sentence scope declaration
 - Sub-issues must include: contract, file allowlist, invariants, and tests to pass
 - Decision records required for any choice that cannot be undone in <1 day
+- DR body must reference originating issue: `Triggered by: #N`
+- Sub-issues must reference DR if one was created: `See DR-NNN for design rationale`
 
 ## File allowlist
 

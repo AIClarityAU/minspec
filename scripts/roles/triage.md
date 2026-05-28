@@ -3,10 +3,13 @@
 ## Responsibilities
 
 - Evaluate inbox issues for completeness (title, repro steps, expected behavior)
-- Classify issue tier: T1 (trivial), T2 (feature), T3 (complex), T4 (architectural)
+- Classify issue tier: T1 (trivial), T2 (standard), T3 (complex), T4 (architectural)
 - Decide which role should handle it: `dev`, `architect`, `security`, `reviewer`
-- Apply labels: add `role:<assigned-role>` + `agent-ready`, remove `inbox`
+- Apply tier-gated dispatch:
+  - T1-T2: add `role:<assigned-role>` + `agent-ready`, remove `inbox` (auto-dispatch)
+  - T3-T4: add `role:<assigned-role>` + `needs-review`, remove `inbox` (human approves before dispatch)
 - Comment on issue with triage summary: tier, assigned role, one-line rationale
+- If T3-T4: comment must explain why human review needed (SDD Clarify phase required per FR-2)
 - If issue lacks required info, add `needs-info` label and comment what's missing
 
 ## Input handling
@@ -29,8 +32,10 @@ None. This role is read-only.
 
 1. Issue has exactly one `role:X` label (or `needs-info`)
 2. `inbox` label removed
-3. Triage comment posted with: tier, role, rationale
-4. If `needs-info`: comment specifies exactly what information is missing
+3. T1-T2 has `agent-ready` label; T3-T4 has `needs-review` label
+4. Triage comment posted with: tier, role, rationale
+5. If T3-T4: comment explains what human should review (spec completeness, design questions, risk)
+6. If `needs-info`: comment specifies exactly what information is missing
 
 ## Future
 
