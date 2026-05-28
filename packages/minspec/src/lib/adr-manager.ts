@@ -154,6 +154,222 @@ export function createAdr(rootDir: string, title: string, vscodeOverrides?: { de
   return { id, title, status: 'proposed', date, filePath };
 }
 
+// ─── Detailed Index ─────────────────────────────────────────────────────────
+
+const INDEX_MARKER_START = '<!-- minspec:dr-index:start -->';
+const INDEX_MARKER_END = '<!-- minspec:dr-index:end -->';
+const DEFAULT_WORD_MIN = 40;
+const DEFAULT_WORD_MAX = 80;
+
+export interface DrIndexOptions {
+  readonly wordMin?: number;
+  readonly wordMax?: number;
+}
+
+export interface DrIndexResult {
+  readonly filePath: string;
+  readonly count: number;
+}
+
+/**
+ * Extract a named H2 section's body from a markdown document.
+ * Returns the lines between `## <header>` and the next `## ` header
+ * (or end of file), with surrounding blank lines trimmed.
+ */
+function extractH2Section(body: string, header: string): string {
+  const lines = body.split('\n');
+  const headerRe = new RegExp(`^##\\s+${header.replace(/[.*+?^${}()|[\\]\\\\]/g, '\\$&')}\\s*$`, 'i');
+  const anyH2Re = /^##\s+/;
+  let inSection = false;
+  const collected: string[] = [];
+  for (const line of lines) {
+    if (inSection) {
+      if (anyH2Re.test(line)) break;
+      collected.push(line);
+    } else if (headerRe.test(line)) {
+      inSection = true;
+    }
+  }
+  return collected.join('\n').trim();
+}
+
+/**
+ * Extract the Context section body from an ADR markdown body
+ * (the portion after frontmatter). Falls back to Decision section,
+ * then to the first non-empty paragraph after the H1.
+ */
+export function extractContextBody(adrBody: string): string {
+  const ctx = extractH2Section(adrBody, 'Context');
+  if (ctx) return ctx;
+
+  const dec = extractH2Section(adrBody, 'Decision');
+  if (dec) return dec;
+
+  return adrBody.replace(/^#\s+[^\n]+\n+/, '');
+}
+
+/**
+ * Condense ADR body content to a word-budgeted summary. Strips HTML comments,
+ * code fences, and markdown link syntax. Takes the first usable paragraph,
+ * pulling additional paragraphs until reaching wordMin, capped at wordMax.
+ * No AI dependency — pure offline text processing (Tier 0, invariant 1+2).
+ */
+export function summarizeContext(
+  body: string,
+  options: DrIndexOptions = {},
+): string {
+  const wordMin = options.wordMin ?? DEFAULT_WORD_MIN;
+  const wordMax = options.wordMax ?? DEFAULT_WORD_MAX;
+
+  const cleaned = body
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/```[\s\S]*?```/g, '')
+    .replace(/`([^`]+)`/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1');
+
+  const paragraphs = cleaned
+    .split(/\n\s*\n/)
+    .map(p => p.replace(/\s+/g, ' ').trim())
+    .filter(p => p.length > 0 && !/^[#>\-*]/.test(p));
+
+  if (paragraphs.length === 0) return '';
+
+  const collected: string[] = [];
+  let wordCount = 0;
+  for (const para of paragraphs) {
+    collected.push(para);
+    wordCount += para.split(/\s+/).length;
+    if (wordCount >= wordMin) break;
+  }
+
+  let combined = collected.join(' ');
+  const words = combined.split(/\s+/);
+  if (words.length > wordMax) {
+    combined = words.slice(0, wordMax).join(' ').replace(/[,;:]$/, '') + '…';
+  }
+  return combined;
+}
+
+/**
+ * Read an ADR file and produce a single index entry block.
+ * Format:
+ *   ## [DR-NNN — Title](DR-NNN-file.md)
+ *
+ *   *Status: accepted · Date: YYYY-MM-DD*
+ *
+ *   Summary paragraph (40–80 words).
+ */
+export function renderDrEntry(
+  summary: AdrSummary,
+  options: DrIndexOptions = {},
+): string {
+  let body = '';
+  try {
+    const content = fs.readFileSync(summary.filePath, 'utf-8');
+    const fmMatch = content.match(FRONTMATTER_RE);
+    body = fmMatch ? content.slice(fmMatch[0].length) : content;
+  } catch {
+    body = '';
+  }
+
+  const contextBody = extractContextBody(body);
+  const summaryText = summarizeContext(contextBody, options) || '_No summary available._';
+  const fileName = path.basename(summary.filePath);
+  const metaParts: string[] = [];
+  if (summary.status) metaParts.push(`Status: ${summary.status}`);
+  if (summary.date) metaParts.push(`Date: ${summary.date}`);
+  const meta = metaParts.length > 0 ? `*${metaParts.join(' · ')}*` : '';
+
+  return [
+    `## [${summary.id} — ${summary.title}](${fileName})`,
+    '',
+    meta,
+    meta ? '' : null,
+    summaryText,
+  ].filter(line => line !== null).join('\n');
+}
+
+/**
+ * Build the auto-generated portion of the DR INDEX (between markers).
+ */
+export function buildDrIndexContent(
+  rootDir: string,
+  vscodeOverrides?: { decisionsDir?: string },
+  options: DrIndexOptions = {},
+): { content: string; count: number } {
+  const adrs = listAdrs(rootDir, vscodeOverrides);
+  if (adrs.length === 0) {
+    return { content: '# Decision Register\n\n_No decisions recorded yet._\n', count: 0 };
+  }
+
+  const header = '# Decision Register\n\n_Architecture decisions for this project. One entry per accepted/proposed DR._\n';
+  const entries = adrs.map(a => renderDrEntry(a, options)).join('\n\n');
+  return {
+    content: `${header}\n${entries}\n`,
+    count: adrs.length,
+  };
+}
+
+/**
+ * Merge new auto content into existing INDEX.md, preserving user-authored
+ * content outside the auto-managed markers (invariant 6).
+ *
+ * Merge rules:
+ *  - If markers exist: replace content between them.
+ *  - If markers absent and file is empty/missing/legacy-table-only: full replace.
+ *  - Otherwise: prepend markered block; preserve existing user content below.
+ */
+export function mergeDrIndex(existing: string | null, autoContent: string): string {
+  const wrapped = `${INDEX_MARKER_START}\n${autoContent.trimEnd()}\n${INDEX_MARKER_END}\n`;
+
+  if (existing === null || existing.trim() === '') {
+    return wrapped;
+  }
+
+  const markerRe = new RegExp(
+    `${escapeRegex(INDEX_MARKER_START)}[\\s\\S]*?${escapeRegex(INDEX_MARKER_END)}\\n?`,
+  );
+  if (markerRe.test(existing)) {
+    return existing.replace(markerRe, wrapped);
+  }
+
+  // Legacy detection: an INDEX.md that is just `# Decision Register` + a single
+  // markdown table is fully managed — safe to replace entirely.
+  const isLegacyTable =
+    /^#\s+Decision Register\s*\n+\|/.test(existing) &&
+    existing.split('\n').filter(l => l.trim() !== '').length <= 30;
+
+  if (isLegacyTable) return wrapped;
+
+  return `${wrapped}\n${existing.trimStart()}`;
+}
+
+function escapeRegex(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Regenerate <decisionsDir>/INDEX.md with a detailed entry per DR.
+ * Preserves user content outside auto-managed markers.
+ */
+export function regenerateDrIndex(
+  rootDir: string,
+  vscodeOverrides?: { decisionsDir?: string },
+  options: DrIndexOptions = {},
+): DrIndexResult {
+  const decisionsDir = resolveDecisionsDir(rootDir, vscodeOverrides);
+  fs.mkdirSync(decisionsDir, { recursive: true });
+
+  const indexPath = path.join(decisionsDir, 'INDEX.md');
+  const { content, count } = buildDrIndexContent(rootDir, vscodeOverrides, options);
+
+  const existing = fs.existsSync(indexPath) ? fs.readFileSync(indexPath, 'utf-8') : null;
+  const merged = mergeDrIndex(existing, content);
+  fs.writeFileSync(indexPath, merged, 'utf-8');
+
+  return { filePath: indexPath, count };
+}
+
 /**
  * List all ADR files in the decisions directory.
  * Returns summaries sorted by ID.

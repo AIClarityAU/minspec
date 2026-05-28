@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { createAdr } from '../lib/adr-manager';
+import { createAdr, regenerateDrIndex } from '../lib/adr-manager';
 
 /**
  * Command: Create a new Architecture Decision Record.
@@ -52,6 +52,40 @@ export async function createAdrCommand(): Promise<void> {
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     vscode.window.showErrorMessage(`MinSpec: Failed to create ADR — ${message}`);
+  }
+}
+
+/**
+ * Command: Regenerate the Decision Register INDEX.md with a detailed entry
+ * (header + clickable title + 40–80 word summary) per DR file. Preserves
+ * any user-authored content outside the auto-managed markers.
+ */
+export async function regenerateDrIndexCommand(): Promise<void> {
+  const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  if (!folder) {
+    vscode.window.showErrorMessage('MinSpec: No workspace folder open.');
+    return;
+  }
+
+  const decisionsDir = vscode.workspace
+    .getConfiguration('minspec')
+    .get<string>('decisionsDir');
+
+  try {
+    const result = regenerateDrIndex(
+      folder,
+      decisionsDir ? { decisionsDir } : undefined,
+    );
+
+    const doc = await vscode.workspace.openTextDocument(result.filePath);
+    await vscode.window.showTextDocument(doc);
+
+    vscode.window.showInformationMessage(
+      `MinSpec: Regenerated DR INDEX (${result.count} decision${result.count === 1 ? '' : 's'}).`,
+    );
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    vscode.window.showErrorMessage(`MinSpec: Failed to regenerate DR INDEX — ${message}`);
   }
 }
 

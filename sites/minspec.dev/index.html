@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MinSpec — Just enough spec. Never too much.</title>
-  <meta name="description" content="MinSpec is a VS Code extension that adapts SDD ceremony to change complexity. T1 tasks need one sentence. T4 needs full architecture docs. No AI dependency, no backend, no lock-in.">
+  <meta name="description" content="MinSpec is a VS Code extension that adapts SDD ceremony to change complexity. T1 tasks need one sentence. T4 needs full architecture docs. No AI dependency, offline core, no lock-in.">
   <meta name="theme-color" content="#0f1117">
   <link rel="canonical" href="https://minspec.dev">
   <meta name="robots" content="index, follow">
@@ -670,8 +670,8 @@
         </div>
         <div class="feature-card">
           <span class="feature-icon" aria-hidden="true">&#x1F512;</span>
-          <h3>No Backend</h3>
-          <p>Zero network calls. No accounts. No telemetry. Everything runs locally in your VS Code instance. Your code never leaves your machine.</p>
+          <h3>Offline Core, Opt-in Integrations</h3>
+          <p>The extension binary makes no network calls &mdash; no telemetry, no analytics, no accounts, no backend. Three opt-in commands (Park Topic, Quick Triage, Refresh Backlog) shell out to your local <code>gh</code> CLI under your own GitHub auth, and only when you invoke them. If <code>gh</code> isn&rsquo;t installed they fall back to local files. Your code never leaves your machine.</p>
         </div>
         <div class="feature-card">
           <span class="feature-icon" aria-hidden="true">&#x1F4C4;</span>

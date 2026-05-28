@@ -200,3 +200,26 @@ product: minspec
 - [x] Export traceability mappings in format ScroogeLLM can consume
 - [x] Define conformance API contract between extensions
 - [x] `minspec.conformance.enabled` setting (activates when ScroogeLLM detected)
+
+---
+
+## Phase 11: Auto-Bootstrap (Detect + Offer)
+
+### 11.0 Companion Cleanups (shipped with 11.1)
+- [x] Wire `minspec.classify` command to the real classifier (was a Phase-2 stub message)
+- [x] Hide `minspec.init`, `minspec.initRefresh`, `minspec.classify` from Command Palette via `menus.commandPalette: when "false"` — auto-triggered only
+- [x] Add Aider (`CONVENTIONS.md`) to `tool-detector` + `TOOL_FILES` for parity with Claude/Cursor/Cline/Windsurf
+- [x] Recrop marketplace screenshots (remove distracting git toasts, tighter framing) + split spec-panel into `spec-panel-stepper.png` and `spec-panel-tasks.png`
+- [x] README rewrite: merge Harness Generator under Initialize, add 5-phase Mermaid diagram, clarify Session Discipline scope concept, replace manual-command Quick Start with toast-driven flow, remove the 3 auto-triggered commands from the command table
+- [x] DR-006 written for auto-bootstrap decision
+
+### 11.1 Detect + Offer System
+- [x] Detect missing `.minspec/` on activation and offer to run `minspec.init`
+- [x] Detect harness template drift (stored hashes vs current bundled template hashes) and offer `minspec.initRefresh`
+- [x] Detect uncommitted git changes with no cached classification and offer `minspec.classify`
+- [x] Surface one toast at a time in priority order (init > refresh > classify); never spam
+- [x] "Don't ask again" choice per prompt persists to `.minspec/preferences.json`
+- [x] Master `minspec.autoBootstrap.enabled` setting (default: true) toggles entire system
+- [x] Optional `minspec.autoClassifyOnCommit` setting (default: false) — file watcher on `.git/HEAD` + `.git/refs/heads/*` auto-runs classify after commit
+- [x] Preserves existing legacy `minspec.firstRun` workspaceState behavior
+- [x] **T0 tests:** missing-`.minspec/` detection, stale-hash drift detection, "Don't ask again" persistence, master toggle, prompt priority ordering, git watcher path filter

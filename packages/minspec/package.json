@@ -2,7 +2,7 @@
   "name": "minspec",
   "displayName": "MinSpec",
   "description": "Complexity-adaptive specification-driven development. Classifies changes into tiers and applies proportional ceremony — a one-line fix needs one sentence of spec, an architecture rewrite gets the full treatment.",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "private": true,
   "publisher": "aiclarity",
   "license": "MIT",
@@ -104,6 +104,11 @@
         "title": "MinSpec: Create Architecture Decision Record"
       },
       {
+        "command": "minspec.regenerateDrIndex",
+        "title": "MinSpec: Regenerate Decision Register INDEX",
+        "icon": "$(list-tree)"
+      },
+      {
         "command": "minspec.scoreWsjf",
         "title": "MinSpec: Score Issue (WSJF)"
       },
@@ -150,6 +155,20 @@
       ]
     },
     "menus": {
+      "commandPalette": [
+        {
+          "command": "minspec.init",
+          "when": "false"
+        },
+        {
+          "command": "minspec.initRefresh",
+          "when": "false"
+        },
+        {
+          "command": "minspec.classify",
+          "when": "false"
+        }
+      ],
       "view/title": [
         {
           "command": "minspec.refreshTree",
@@ -163,6 +182,11 @@
         },
         {
           "command": "minspec.createAdr",
+          "when": "view == minspecAdrs",
+          "group": "navigation"
+        },
+        {
+          "command": "minspec.regenerateDrIndex",
           "when": "view == minspecAdrs",
           "group": "navigation"
         },
@@ -232,6 +256,16 @@
           "type": "boolean",
           "default": true,
           "description": "Show ScroogeLLM installation suggestion when not installed"
+        },
+        "minspec.autoBootstrap.enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "Auto-detect missing initialization, harness drift, and unclassified changes — and offer to run setup/refresh/classify. Per-prompt 'Don't ask again' choices are persisted in .minspec/preferences.json."
+        },
+        "minspec.autoClassifyOnCommit": {
+          "type": "boolean",
+          "default": false,
+          "description": "Automatically run 'MinSpec: Classify Task Complexity' after each git commit (watches .git/HEAD and .git/refs/heads/*). Off by default."
         }
       }
     },

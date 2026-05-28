@@ -5,6 +5,22 @@ All notable changes to the MinSpec extension will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.8] - 2026-05-28
+
+### Added
+
+- **Auto-bootstrap (detect + offer):** On activation, MinSpec detects missing `.minspec/`, harness template drift, or unclassified git changes and surfaces one toast at a time offering the appropriate setup action. Replaces the previous manual Ctrl-Shift-P workflow for first-time setup. Master toggle: `minspec.autoBootstrap.enabled` (default true). Per-prompt "Don't ask again" persisted to `.minspec/preferences.json`. See [DR-006](https://github.com/harvest316/MinSpecPro/blob/main/docs/decisions/DR-006.md).
+- **Auto-classify on commit** (opt-in): `minspec.autoClassifyOnCommit` setting (default false) installs a watcher on `.git/HEAD` and `.git/refs/heads/*` that auto-runs classification after each commit.
+- **Real classify command:** `MinSpec: Classify Task Complexity` is no longer a Phase-2 stub — it analyses the current git diff via the existing classifier engine and reports tier, confidence, and suggested phases with an Override option.
+- **Aider integration:** Aider (`CONVENTIONS.md`) added to tool detection and active-spec context injection alongside Claude / Cursor / Cline / Windsurf.
+- **Detailed Decision Register INDEX:** New command `MinSpec: Regenerate Decision Register INDEX` (also a button in the **MinSpec: Decisions** sidebar) rewrites `docs/decisions/INDEX.md` with a heading per DR — clickable title linking to the DR file, status/date meta line, and a 40–80 word summary auto-extracted from each DR's Context section. Generation is fully offline (no AI dependency, Tier 0). Output is wrapped in `<!-- minspec:dr-index:start/end -->` markers so subsequent regenerations preserve any user-authored notes outside the auto block (invariant 6).
+
+### Changed
+
+- `MinSpec: Initialize SDD Structure`, `MinSpec: Refresh Harness Files`, and `MinSpec: Classify Task Complexity` are hidden from the Command Palette (`when: "false"`) — they remain programmatically callable but are now invoked via auto-bootstrap toasts.
+- Marketplace screenshots recropped to remove distracting git toasts and tighten framing; `spec-panel.png` split into `spec-panel-stepper.png` and `spec-panel-tasks.png`.
+- README rewritten: merged Harness Generator into Initialize section, added 5-phase Mermaid lifecycle diagram, clarified that MinSpec's session scope is distinct from chat-session scope, and replaced the manual-command Quick Start with the new toast-driven flow.
+
 ## [0.1.5] - 2026-05-27
 
 ### Changed

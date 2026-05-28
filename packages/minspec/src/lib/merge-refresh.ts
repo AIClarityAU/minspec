@@ -46,6 +46,7 @@ export interface MergeResult {
  */
 export function parseSections(content: string): Section[] {
   const sections: Section[] = [];
+  if (typeof content !== 'string') return sections;
   const lines = content.split('\n');
   let currentHeading = '__preamble__';
   let currentBody: string[] = [];

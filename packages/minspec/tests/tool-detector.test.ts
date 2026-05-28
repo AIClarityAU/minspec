@@ -28,6 +28,7 @@ describe('tool-detector', () => {
       expect(tools.cline).toBe(false);
       expect(tools.agents).toBe(false);
       expect(tools.windsurf).toBe(false);
+      expect(tools.aider).toBe(false);
     });
 
     it('detects CLAUDE.md', () => {
@@ -62,6 +63,17 @@ describe('tool-detector', () => {
       expect(tools.windsurf).toBe(true);
     });
 
+    it('detects CONVENTIONS.md (Aider)', () => {
+      fs.writeFileSync(path.join(tmpDir, 'CONVENTIONS.md'), '# Conventions');
+      const tools = detectTools(tmpDir);
+      expect(tools.aider).toBe(true);
+      expect(tools.claude).toBe(false);
+      expect(tools.cursor).toBe(false);
+      expect(tools.cline).toBe(false);
+      expect(tools.agents).toBe(false);
+      expect(tools.windsurf).toBe(false);
+    });
+
     it('detects multiple tools simultaneously', () => {
       fs.writeFileSync(path.join(tmpDir, 'CLAUDE.md'), '# Claude');
       fs.writeFileSync(path.join(tmpDir, '.cursorrules'), 'rules');
@@ -83,6 +95,7 @@ describe('tool-detector', () => {
       expect(getToolFilePath(tmpDir, 'cline')).toBe(path.join(tmpDir, '.clinerules'));
       expect(getToolFilePath(tmpDir, 'agents')).toBe(path.join(tmpDir, 'AGENTS.md'));
       expect(getToolFilePath(tmpDir, 'windsurf')).toBe(path.join(tmpDir, '.windsurfrules'));
+      expect(getToolFilePath(tmpDir, 'aider')).toBe(path.join(tmpDir, 'CONVENTIONS.md'));
     });
   });
 
@@ -109,6 +122,7 @@ describe('tool-detector', () => {
       expect(TOOL_FILES.cline).toBe('.clinerules');
       expect(TOOL_FILES.agents).toBe('AGENTS.md');
       expect(TOOL_FILES.windsurf).toBe('.windsurfrules');
+      expect(TOOL_FILES.aider).toBe('CONVENTIONS.md');
     });
   });
 });

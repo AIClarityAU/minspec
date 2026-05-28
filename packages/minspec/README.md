@@ -32,12 +32,39 @@ These run under your own GitHub authentication and only when you trigger them. I
 ## Quick Start
 
 1. Install MinSpec from the VS Code Marketplace.
-2. Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`).
-3. Run **MinSpec: Initialize SDD Structure** to scaffold your project.
-4. Run **MinSpec: Classify Task Complexity** to classify your current changes.
-5. Write your spec -- MinSpec tells you how much (or how little) you need.
+2. Open your project in VS Code.
+3. MinSpec auto-detects your project state and offers setup actions as toasts -- accept "Initialize", "Refresh", or "Classify" when prompted.
+4. Write your spec -- MinSpec tells you how much (or how little) you need.
 
 ![MinSpec Sidebar](https://raw.githubusercontent.com/harvest316/minspec/main/packages/minspec/media/screenshots/sidebar.png)
+
+### What Initialization Produces — Files & AI Tool Integration
+
+When you accept the "Initialize" toast, MinSpec scaffolds the SDD structure for your project. The same files double as integration points: any AI coding tool that already reads these conventions (Claude Code, Cursor, Cline, Aider, Windsurf, Copilot) automatically picks up your active spec context, because MinSpec injects it into the file the tool already loads.
+
+| Path | Purpose | Picked up by |
+|------|---------|--------------|
+| `CLAUDE.md` | Project instructions + active spec context block | Claude Code |
+| `AGENTS.md` | Cross-tool agent instructions + active spec context | GitHub Copilot, Codex, generic agent runners |
+| `.cursorrules` | Cursor-specific rules + active spec context | Cursor |
+| `.clinerules` | Cline-specific rules + active spec context | Cline |
+| `CONVENTIONS.md` | Project conventions + active spec context | Aider (auto-loads) |
+| `.windsurfrules` | Windsurf-specific rules + active spec context | Windsurf |
+| `DESIGN.md` | Design document template | Humans + LLMs reviewing architecture |
+| `.minspec/constitution.md` | Project invariants and principles | MinSpec classifier + humans |
+| `.minspec/config.json` | Tier thresholds, phase mappings, spec dir | MinSpec extension |
+| `.minspec/session.json` | Current session scope + file allowlist | MinSpec drift detection |
+| `.minspec/preferences.json` | Auto-bootstrap prompt preferences | MinSpec extension |
+| `.minspec/calibration.json` | Persisted user overrides for classifier learning | MinSpec classifier |
+| `.minspec/traceability.json` | Code-to-spec requirement mappings | MinSpec CodeLens |
+| `.minspec/parking-lot.md` | Out-of-scope items when `gh` CLI unavailable | MinSpec park command |
+| `specs/SPEC-NNN-*.md` | Individual spec files (markdown, Spec Kit-compatible) | MinSpec + Spec Kit + humans |
+| `docs/decisions/DR-NNN.md` | Architecture Decision Records | MinSpec ADR tree + humans |
+| `docs/decisions/INDEX.md` | Auto-regenerated index of all DRs | MinSpec ADR command |
+
+Templates are rendered with project context variables (project name, repo URL, detected tool list). Tool-specific files are only generated for tools that exist or are explicitly requested — no clutter from tools you don't use.
+
+Accepting the "Refresh" toast later merges template updates with your edits via section-level hashing. Sections you modified are preserved. Unmodified sections get the latest template content. New template sections are appended. No AI tool is required — your specs are plain markdown files that any tool (or no tool) can read.
 
 ## Features
 
@@ -51,7 +78,20 @@ MinSpec analyzes your git diff and classifies each change into one of four tiers
 
 Each spec moves through a lifecycle of phases: **Specify, Clarify, Plan, Tasks, Implement**. MinSpec skips phases that do not add value for the current tier. A T1 trivial change jumps straight from a one-liner spec to implementation. A T3 complex change goes through the full pipeline.
 
-![Phase Stepper](https://raw.githubusercontent.com/harvest316/minspec/main/packages/minspec/media/screenshots/spec-panel.png)
+```mermaid
+flowchart LR
+    Specify --> Clarify
+    Clarify --> Plan
+    Plan --> Tasks
+    Tasks --> Implement
+    Specify -. "T1: skip to Tasks" .-> Tasks
+    Clarify -. "T2: optional" .-> Plan
+    Plan -. "T2: one sentence" .-> Tasks
+```
+
+Solid arrows are the full T3/T4 path. Dashed arrows show how T1 collapses Specify directly to a single auto-generated Tasks step, and how T2 makes Clarify optional and reduces Plan to a single sentence.
+
+![Phase Stepper](https://raw.githubusercontent.com/harvest316/minspec/main/packages/minspec/media/screenshots/spec-panel-stepper.png)
 
 ### Sidebar Tree View
 
@@ -63,36 +103,9 @@ All specs in your project appear in the Explorer sidebar, grouped by status (act
 
 A webview panel displays the current spec as a vertical stepper. Completed phases collapse. The active phase expands with its content. Tasks appear as an interactive checklist you can toggle directly.
 
-![Active Spec Panel](https://raw.githubusercontent.com/harvest316/minspec/main/packages/minspec/media/screenshots/spec-panel.png)
+![Phase Stepper](https://raw.githubusercontent.com/harvest316/minspec/main/packages/minspec/media/screenshots/spec-panel-stepper.png)
 
-### Harness Generator
-
-`MinSpec: Initialize SDD Structure` generates opinionated project harness files from Handlebars templates:
-
-| File | Purpose |
-|------|---------|
-| `CLAUDE.md` | Claude Code project instructions |
-| `AGENTS.md` | Cross-tool agent instructions (Codex, Copilot) |
-| `.cursorrules` | Cursor-specific rules |
-| `DESIGN.md` | Design document template |
-| `.minspec/constitution.md` | Project invariants and principles |
-
-`MinSpec: Refresh Harness Files` merges template updates with your edits. Sections you modified are preserved. Unmodified sections get the latest template content. New template sections are appended.
-
-### AI Tool Integration
-
-MinSpec detects which AI coding tools you use and injects your active spec context into their configuration files. Supported tools:
-
-| Tool | Config file |
-|------|-------------|
-| Claude Code | `CLAUDE.md` |
-| Cursor | `.cursorrules` |
-| Cline | `.clinerules` |
-| Aider | `.aider.conf.yml` |
-| Windsurf | `.windsurfrules` |
-| GitHub Copilot | `AGENTS.md` |
-
-No AI tool is required. MinSpec works perfectly without any of them -- your specs are plain markdown files that any tool can read.
+![Task Checklist](https://raw.githubusercontent.com/harvest316/minspec/main/packages/minspec/media/screenshots/spec-panel-tasks.png)
 
 ### CodeLens Traceability
 
@@ -110,9 +123,15 @@ MinSpec manages Architecture Decision Records (ADRs) in `docs/decisions/DR-NNN.m
 
 Declare your session scope before starting work. MinSpec monitors file saves and warns you when you drift outside scope. Drifted work can be parked as a GitHub Issue (via `gh` CLI) or saved to a local parking lot file for later triage.
 
+A MinSpec "session" is distinct from your Claude / Cursor / Copilot chat session -- it's a unit of intent ("today I'm fixing the rate limiter"), not a chat window. Run **MinSpec: Declare Session Scope** from the Command Palette to set it; the scope persists to `.minspec/session.json` and survives chat restarts, editor reloads, and machine reboots.
+
+This is a MinSpec-specific discipline -- inspired by SDD and SAFe but not literally either -- and is opt-in. You can ignore it entirely and MinSpec still works.
+
 ### Status Bar
 
 The status bar shows the active spec's tier, current phase, and task progress at a glance. Click it to open the active spec panel.
+
+![Status Bar](https://raw.githubusercontent.com/harvest316/minspec/main/packages/minspec/media/screenshots/status-bar.png)
 
 ## Tier System
 
@@ -158,13 +177,12 @@ Tier thresholds are tunable per project. Scores above `t3Max` classify as T4 (ar
 
 ## Commands
 
-Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type "MinSpec" to see all commands:
+Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type "MinSpec" to see all commands.
+
+Manual commands are listed below. Setup commands (init, refresh, classify) are auto-triggered via toasts -- no need to invoke them manually.
 
 | Command | Description |
 |---------|-------------|
-| **MinSpec: Initialize SDD Structure** | Create `.minspec/` directory, config, constitution, and harness files (CLAUDE.md, AGENTS.md, etc.) |
-| **MinSpec: Refresh Harness Files** | Regenerate harness files from templates, preserving your edits via section-level merge |
-| **MinSpec: Classify Task Complexity** | Analyze the current git diff and classify the change into a complexity tier (T1-T4) |
 | **MinSpec: Show SDD Status** | Display a summary of all specs, their tiers, and current phases |
 | **MinSpec: Refresh Spec Tree** | Manually refresh the sidebar spec tree view |
 | **MinSpec: Declare Session Scope** | Set the scope for your current work session (enables drift detection) |

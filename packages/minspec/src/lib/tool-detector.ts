@@ -8,6 +8,7 @@ export interface DetectedTools {
   readonly cline: boolean;      // .clinerules exists
   readonly agents: boolean;     // AGENTS.md exists
   readonly windsurf: boolean;   // .windsurfrules exists
+  readonly aider: boolean;      // CONVENTIONS.md exists
 }
 
 /** Map from tool key to the filename it uses */
@@ -17,6 +18,7 @@ export const TOOL_FILES: Record<keyof DetectedTools, string> = {
   cline: '.clinerules',
   agents: 'AGENTS.md',
   windsurf: '.windsurfrules',
+  aider: 'CONVENTIONS.md',
 };
 
 /**
@@ -30,6 +32,7 @@ export function detectTools(rootDir: string): DetectedTools {
     cline: fs.existsSync(path.join(rootDir, TOOL_FILES.cline)),
     agents: fs.existsSync(path.join(rootDir, TOOL_FILES.agents)),
     windsurf: fs.existsSync(path.join(rootDir, TOOL_FILES.windsurf)),
+    aider: fs.existsSync(path.join(rootDir, TOOL_FILES.aider)),
   };
 }
 

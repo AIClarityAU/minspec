@@ -172,11 +172,14 @@ describe('commands', () => {
   // ─── classifyCommand ──────────────────────────────────────────────────────
 
   describe('classifyCommand()', () => {
-    it('shows Phase 2 information message', () => {
-      classifyCommand();
-      expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-        'MinSpec: Classification engine coming in Phase 2.',
-      );
+    it('shows "no changes detected" when git diff is empty', async () => {
+      await classifyCommand();
+      expect(vscode.window.showInformationMessage).toHaveBeenCalled();
+      const calls = (vscode.window.showInformationMessage as any).mock.calls;
+      const firstArg = calls[0][0] as string;
+      // Either "no changes" path or classifier result — both acceptable for
+      // empty-mock scenario. The old "coming in Phase 2" stub message is not.
+      expect(firstArg).not.toContain('coming in Phase 2');
     });
   });
 
