@@ -5,6 +5,13 @@ All notable changes to the MinSpec extension will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.10] - 2026-05-28
+
+### Changed
+
+- **Phase Lifecycle diagram** replaced inline Mermaid block with a pre-rendered PNG (`phase-lifecycle.png`). VS Code Marketplace doesn't render Mermaid; pre-render keeps the listing visually consistent. Source `.mmd` retained alongside the PNG so it can be regenerated.
+- Open VSX publish now live alongside VS Code Marketplace at the same version.
+
 ## [0.1.9] - 2026-05-28
 
 ### Added

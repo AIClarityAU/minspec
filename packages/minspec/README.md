@@ -78,16 +78,7 @@ MinSpec analyzes your git diff and classifies each change into one of four tiers
 
 Each spec moves through a lifecycle of phases: **Specify, Clarify, Plan, Tasks, Implement**. MinSpec skips phases that do not add value for the current tier. A T1 trivial change jumps straight from a one-liner spec to implementation. A T3 complex change goes through the full pipeline.
 
-```mermaid
-flowchart LR
-    Specify --> Clarify
-    Clarify --> Plan
-    Plan --> Tasks
-    Tasks --> Implement
-    Specify -. "T1: skip to Tasks" .-> Tasks
-    Clarify -. "T2: optional" .-> Plan
-    Plan -. "T2: one sentence" .-> Tasks
-```
+![Phase Lifecycle](https://raw.githubusercontent.com/harvest316/minspec/main/packages/minspec/media/screenshots/phase-lifecycle.png)
 
 Solid arrows are the full T3/T4 path. Dashed arrows show how T1 collapses Specify directly to a single auto-generated Tasks step, and how T2 makes Clarify optional and reduces Plan to a single sentence.
 

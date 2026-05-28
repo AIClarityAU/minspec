@@ -1,0 +1,11 @@
+flowchart LR
+    Specify --> Clarify
+    Clarify --> Plan
+    Plan --> Tasks
+    Tasks --> Implement
+    Specify -. "T1: skip to Tasks" .-> Tasks
+    Clarify -. "T2: optional" .-> Plan
+    Plan -. "T2: one sentence" .-> Tasks
+
+    classDef phase fill:#1e1e2e,stroke:#cba6f7,stroke-width:2px,color:#cdd6f4;
+    class Specify,Clarify,Plan,Tasks,Implement phase;
