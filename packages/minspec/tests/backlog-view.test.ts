@@ -284,6 +284,36 @@ describe('BacklogTreeProvider', () => {
     expect((provider as unknown as { _onDidChangeTreeData: { fire: ReturnType<typeof vi.fn> } })._onDidChangeTreeData.fire).toHaveBeenCalled();
   });
 
+  it('refreshIfStale() fires when no prior refresh has happened', () => {
+    const fire = (provider as unknown as { _onDidChangeTreeData: { fire: ReturnType<typeof vi.fn> } })._onDidChangeTreeData.fire;
+    provider.refreshIfStale();
+    expect(fire).toHaveBeenCalledTimes(1);
+  });
+
+  it('refreshIfStale() skips when recent refresh is fresher than maxAgeMs', () => {
+    const fire = (provider as unknown as { _onDidChangeTreeData: { fire: ReturnType<typeof vi.fn> } })._onDidChangeTreeData.fire;
+    provider.refresh();
+    fire.mockClear();
+    provider.refreshIfStale(30_000);
+    expect(fire).not.toHaveBeenCalled();
+  });
+
+  it('refreshIfStale() fires again once cache exceeds maxAgeMs', () => {
+    const fire = (provider as unknown as { _onDidChangeTreeData: { fire: ReturnType<typeof vi.fn> } })._onDidChangeTreeData.fire;
+    const originalNow = Date.now;
+    let now = 1_000_000;
+    Date.now = () => now;
+    try {
+      provider.refresh();
+      fire.mockClear();
+      now += 60_000;
+      provider.refreshIfStale(30_000);
+      expect(fire).toHaveBeenCalledTimes(1);
+    } finally {
+      Date.now = originalNow;
+    }
+  });
+
   it('getTreeItem returns the element itself', () => {
     const issue = makeIssue();
     const node = new BacklogIssueNode(issue);

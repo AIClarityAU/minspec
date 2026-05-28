@@ -13,7 +13,7 @@ let subscriptions: any[] = [];
 // Mock instances returned by view constructors
 const mockSpecTreeProvider = { refresh: vi.fn() };
 const mockAdrTreeProvider = { refresh: vi.fn() };
-const mockBacklogTreeProvider = { refresh: vi.fn() };
+const mockBacklogTreeProvider = { refresh: vi.fn(), refreshIfStale: vi.fn() };
 const mockStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockSpecPanel = { show: vi.fn(), refresh: vi.fn(), dispose: vi.fn() };
 const mockCodeLensProvider = { refresh: vi.fn() };
@@ -35,6 +35,17 @@ let watcherCallIndex = 0;
 // Track tree data providers registered
 const registeredTreeProviders = new Map<string, any>();
 
+// Track tree views created (id -> { provider, visibilityHandler })
+interface MockTreeView {
+  provider: any;
+  visibilityHandler?: (e: { visible: boolean }) => void;
+  dispose: () => void;
+}
+const createdTreeViews = new Map<string, MockTreeView>();
+
+// Track the onDidChangeWindowState handler
+let windowStateHandler: ((state: { focused: boolean }) => void) | undefined;
+
 // Track CodeLens registrations
 const codeLensRegistrations: { selector: any; provider: any }[] = [];
 
@@ -49,6 +60,23 @@ vi.mock('vscode', () => ({
   window: {
     registerTreeDataProvider: vi.fn((id: string, provider: any) => {
       registeredTreeProviders.set(id, provider);
+      return { dispose: vi.fn() };
+    }),
+    createTreeView: vi.fn((id: string, options: { treeDataProvider: any }) => {
+      registeredTreeProviders.set(id, options.treeDataProvider);
+      const view: MockTreeView = {
+        provider: options.treeDataProvider,
+        dispose: vi.fn(),
+        onDidChangeVisibility: vi.fn((handler: (e: { visible: boolean }) => void) => {
+          view.visibilityHandler = handler;
+          return { dispose: vi.fn() };
+        }),
+      } as any;
+      createdTreeViews.set(id, view);
+      return view;
+    }),
+    onDidChangeWindowState: vi.fn((handler: (state: { focused: boolean }) => void) => {
+      windowStateHandler = handler;
       return { dispose: vi.fn() };
     }),
     showErrorMessage: vi.fn(),
@@ -145,6 +173,7 @@ vi.mock('../src/commands/example', () => ({
 }));
 vi.mock('../src/commands/adr', () => ({
   createAdrCommand: vi.fn(),
+  regenerateDrIndexCommand: vi.fn(),
 }));
 vi.mock('../src/commands/backlog', () => ({
   scoreWsjfCommand: vi.fn(),
@@ -285,6 +314,8 @@ beforeEach(() => {
   registeredCommands.clear();
   subscriptions = [];
   registeredTreeProviders.clear();
+  createdTreeViews.clear();
+  windowStateHandler = undefined;
   codeLensRegistrations.length = 0;
   onSaveHandler = undefined;
 
@@ -438,6 +469,76 @@ describe('activate()', () => {
     expect(SpecTreeProvider).toHaveBeenCalledWith('/tmp/test-workspace');
     expect(AdrTreeProvider).toHaveBeenCalledWith('/tmp/test-workspace');
     expect(BacklogTreeProvider).toHaveBeenCalledWith('/tmp/test-workspace');
+  });
+
+  // -------------------------------------------------------------------------
+  // Async refresh triggers (visibility + window focus)
+  // -------------------------------------------------------------------------
+
+  it('creates a TreeView for each of the three sidebar panes', () => {
+    activate(makeMockContext());
+
+    expect(createdTreeViews.has('minspecStatus')).toBe(true);
+    expect(createdTreeViews.has('minspecAdrs')).toBe(true);
+    expect(createdTreeViews.has('minspecBacklog')).toBe(true);
+  });
+
+  it('refreshes spec tree when its pane becomes visible', () => {
+    activate(makeMockContext());
+
+    const view = createdTreeViews.get('minspecStatus')!;
+    view.visibilityHandler!({ visible: true });
+    expect(mockSpecTreeProvider.refresh).toHaveBeenCalled();
+  });
+
+  it('refreshes ADR tree when its pane becomes visible', () => {
+    activate(makeMockContext());
+
+    const view = createdTreeViews.get('minspecAdrs')!;
+    view.visibilityHandler!({ visible: true });
+    expect(mockAdrTreeProvider.refresh).toHaveBeenCalled();
+  });
+
+  it('refreshes backlog (stale-only) when its pane becomes visible', () => {
+    activate(makeMockContext());
+
+    const view = createdTreeViews.get('minspecBacklog')!;
+    view.visibilityHandler!({ visible: true });
+    expect(mockBacklogTreeProvider.refreshIfStale).toHaveBeenCalled();
+    expect(mockBacklogTreeProvider.refresh).not.toHaveBeenCalled();
+  });
+
+  it('does not refresh when a pane becomes hidden', () => {
+    activate(makeMockContext());
+
+    createdTreeViews.get('minspecStatus')!.visibilityHandler!({ visible: false });
+    createdTreeViews.get('minspecAdrs')!.visibilityHandler!({ visible: false });
+    createdTreeViews.get('minspecBacklog')!.visibilityHandler!({ visible: false });
+
+    expect(mockSpecTreeProvider.refresh).not.toHaveBeenCalled();
+    expect(mockAdrTreeProvider.refresh).not.toHaveBeenCalled();
+    expect(mockBacklogTreeProvider.refreshIfStale).not.toHaveBeenCalled();
+  });
+
+  it('refreshes all three trees when the window regains focus', () => {
+    activate(makeMockContext());
+
+    expect(windowStateHandler).toBeDefined();
+    windowStateHandler!({ focused: true });
+
+    expect(mockSpecTreeProvider.refresh).toHaveBeenCalled();
+    expect(mockAdrTreeProvider.refresh).toHaveBeenCalled();
+    expect(mockBacklogTreeProvider.refreshIfStale).toHaveBeenCalled();
+  });
+
+  it('does not refresh when the window loses focus', () => {
+    activate(makeMockContext());
+
+    windowStateHandler!({ focused: false });
+
+    expect(mockSpecTreeProvider.refresh).not.toHaveBeenCalled();
+    expect(mockAdrTreeProvider.refresh).not.toHaveBeenCalled();
+    expect(mockBacklogTreeProvider.refreshIfStale).not.toHaveBeenCalled();
   });
 
   // -------------------------------------------------------------------------
@@ -596,7 +697,7 @@ describe('activate()', () => {
     expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
   });
 
-  it('does not show first-run prompt when user has already seen it', () => {
+  it('does not show legacy welcome prompt when user has already seen it', () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
 
     const ctx = makeMockContext();
@@ -604,7 +705,11 @@ describe('activate()', () => {
 
     activate(ctx);
 
-    expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
+    expect(vscode.window.showInformationMessage).not.toHaveBeenCalledWith(
+      'Welcome to MinSpec! Would you like to initialize SDD for this project?',
+      'Initialize',
+      'Not Now',
+    );
   });
 
   it('sets workspaceState flag when showing first-run prompt', () => {

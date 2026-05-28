@@ -7,7 +7,7 @@ import { statusCommand } from './commands/status';
 import { declareScopeCommand } from './commands/session';
 import { parkCommand } from './commands/park';
 import { generateExampleCommand } from './commands/example';
-import { createAdrCommand } from './commands/adr';
+import { createAdrCommand, regenerateDrIndexCommand } from './commands/adr';
 import { scoreWsjfCommand, triageIssueCommand } from './commands/backlog';
 import { SpecTreeProvider } from './views/spec-tree-provider';
 import { AdrTreeProvider } from './views/adr-tree-provider';
@@ -27,6 +27,7 @@ import {
   linkToSpecCommand,
 } from './views/codelens-provider';
 import { maybeShowNudge, recordInstallTimestamp, exportTraceability, setupConformanceWatcher } from './lib/bridge';
+import { runBootstrap, isWatchedGitPath, type BootstrapVsCode } from './lib/auto-bootstrap';
 
 export function activate(context: vscode.ExtensionContext): void {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
@@ -38,10 +39,39 @@ export function activate(context: vscode.ExtensionContext): void {
   const specTreeProvider = new SpecTreeProvider(workspaceRoot);
   const adrTreeProvider = new AdrTreeProvider(workspaceRoot);
   const backlogTreeProvider = new BacklogTreeProvider(workspaceRoot);
+
+  const specTreeView = vscode.window.createTreeView('minspecStatus', {
+    treeDataProvider: specTreeProvider,
+  });
+  const adrTreeView = vscode.window.createTreeView('minspecAdrs', {
+    treeDataProvider: adrTreeProvider,
+  });
+  const backlogTreeView = vscode.window.createTreeView('minspecBacklog', {
+    treeDataProvider: backlogTreeProvider,
+  });
+  context.subscriptions.push(specTreeView, adrTreeView, backlogTreeView);
+
+  // Async refresh triggers: when a pane becomes visible, refetch its data.
+  // File watchers below catch in-VSCode edits; these hooks catch external
+  // changes (CLI edits, git checkout, GitHub issue updates).
   context.subscriptions.push(
-    vscode.window.registerTreeDataProvider('minspecStatus', specTreeProvider),
-    vscode.window.registerTreeDataProvider('minspecAdrs', adrTreeProvider),
-    vscode.window.registerTreeDataProvider('minspecBacklog', backlogTreeProvider),
+    specTreeView.onDidChangeVisibility(e => {
+      if (e.visible) specTreeProvider.refresh();
+    }),
+    adrTreeView.onDidChangeVisibility(e => {
+      if (e.visible) adrTreeProvider.refresh();
+    }),
+    backlogTreeView.onDidChangeVisibility(e => {
+      if (e.visible) backlogTreeProvider.refreshIfStale();
+    }),
+    // When VS Code window regains focus, refresh all three. Backlog uses the
+    // stale-only variant so we don't hammer `gh` on every alt-tab.
+    vscode.window.onDidChangeWindowState(state => {
+      if (!state.focused) return;
+      specTreeProvider.refresh();
+      adrTreeProvider.refresh();
+      backlogTreeProvider.refreshIfStale();
+    }),
   );
 
   // Status bar
@@ -89,6 +119,7 @@ export function activate(context: vscode.ExtensionContext): void {
       adrTreeProvider.refresh();
     }),
     vscode.commands.registerCommand('minspec.createAdr', createAdrCommand),
+    vscode.commands.registerCommand('minspec.regenerateDrIndex', regenerateDrIndexCommand),
     vscode.commands.registerCommand('minspec.scoreWsjf', scoreWsjfCommand),
     vscode.commands.registerCommand('minspec.triageIssue', triageIssueCommand),
     vscode.commands.registerCommand('minspec.refreshBacklog', () => backlogTreeProvider.refresh()),
@@ -204,7 +235,10 @@ export function activate(context: vscode.ExtensionContext): void {
     );
   }
 
-  // First-run experience: prompt to initialize if .minspec/ doesn't exist
+  // First-run experience: legacy welcome toast (kept for users who already
+  // had .minspec installed before auto-bootstrap shipped — its workspaceState
+  // flag prevents the new richer system from double-prompting them on the
+  // very first activation after upgrade).
   if (workspaceRoot) {
     const minspecDir = path.join(workspaceRoot, '.minspec');
     const hasMinspec = fs.existsSync(minspecDir);
@@ -223,6 +257,44 @@ export function activate(context: vscode.ExtensionContext): void {
             vscode.commands.executeCommand('minspec.init');
           }
         });
+    } else {
+      // Auto-bootstrap: detect+offer system for missing init, harness drift,
+      // and unclassified diffs. Fires on every activation past first-run.
+      const bootstrapVsCode: BootstrapVsCode = {
+        isEnabled: () =>
+          vscode.workspace
+            .getConfiguration('minspec')
+            .get<boolean>('autoBootstrap.enabled', true) !== false,
+        showPrompt: (message, actions) =>
+          Promise.resolve(
+            vscode.window.showInformationMessage(message, ...actions),
+          ).then(choice => (typeof choice === 'string' ? choice : undefined)),
+        executeCommand: (commandId) => {
+          const result = vscode.commands.executeCommand(commandId);
+          return result instanceof Promise ? result.then(() => undefined) : undefined;
+        },
+      };
+      void runBootstrap(workspaceRoot, bootstrapVsCode);
+    }
+
+    // Auto-classify on commit — watch .git/HEAD + refs/heads/* if opted in.
+    const autoClassifyEnabled = vscode.workspace
+      .getConfiguration('minspec')
+      .get<boolean>('autoClassifyOnCommit', false);
+    if (autoClassifyEnabled) {
+      const gitWatcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(
+          vscode.workspace.workspaceFolders?.[0] ?? '',
+          '.git/{HEAD,refs/heads/**}',
+        ),
+      );
+      const triggerClassify = (uri: vscode.Uri) => {
+        if (!isWatchedGitPath(uri.fsPath)) return;
+        vscode.commands.executeCommand('minspec.classify');
+      };
+      gitWatcher.onDidChange(triggerClassify);
+      gitWatcher.onDidCreate(triggerClassify);
+      context.subscriptions.push(gitWatcher);
     }
   }
 

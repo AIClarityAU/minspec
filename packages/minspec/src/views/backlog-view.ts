@@ -116,13 +116,24 @@ export class BacklogTreeProvider implements vscode.TreeDataProvider<BacklogGroup
   private cachedIssues: BacklogIssue[] = [];
   private lastError: string | null = null;
   private loading = false;
+  private lastRefreshAt = 0;
 
   constructor(private workspaceRoot: string) {}
 
   refresh(): void {
     this.cachedIssues = [];
     this.lastError = null;
+    this.lastRefreshAt = Date.now();
     this._onDidChangeTreeData.fire(undefined);
+  }
+
+  /**
+   * Refresh only if the cache is older than `maxAgeMs`. Used by visibility/focus
+   * triggers to avoid thrashing `gh` on rapid window-state changes.
+   */
+  refreshIfStale(maxAgeMs = 30_000): void {
+    if (Date.now() - this.lastRefreshAt < maxAgeMs) return;
+    this.refresh();
   }
 
   getTreeItem(element: BacklogGroupNode | BacklogIssueNode | MessageNode): vscode.TreeItem {
