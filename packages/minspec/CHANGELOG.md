@@ -7,9 +7,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [0.1.9] - 2026-05-28
 
-### Note
+### Added
 
-Re-publish of the 0.1.8 release content (0.1.8 was already on the marketplace under a prior package). No functional changes versus 0.1.8 below.
+- **Status Bar screenshot** in README — visible example of the active-spec tier/phase/progress strip.
+
+### Changed
+
+- Merged "Harness Generator" and "AI Tool Integration" sections in the README into a single "What Initialization Produces — Files & AI Tool Integration" table that lists every file MinSpec creates or maintains (CLAUDE.md, AGENTS.md, .cursorrules, .clinerules, CONVENTIONS.md, .windsurfrules, DESIGN.md, .minspec/constitution.md, config.json, session.json, preferences.json, calibration.json, traceability.json, parking-lot.md, specs/, docs/decisions/) and which AI tool (if any) auto-loads each.
+- **Listings aligned:** minspec.dev site language updated to match the accurate "extension binary makes zero network calls; three opt-in commands shell to local `gh` CLI" claim that already lives in the marketplace README. Meta description on the site updated from "no backend" to "offline core" for consistency with the README badge.
+- Re-publish that also covers the 0.1.8 release content (0.1.8 had been published under a prior package — see the 0.1.8 entry below for the underlying feature set).
 
 ## [0.1.8] - 2026-05-28
 
