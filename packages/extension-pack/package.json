@@ -29,7 +29,7 @@
     "aiclarity.scroogellm"
   ],
   "scripts": {
-    "package": "vsce package --no-dependencies"
+    "package": "node -e \"console.error('MinSpec Pro extension pack is blocked from packaging until ScroogeLLM ships. Pack would reference an unpublished extension. Remove this guard once aiclarity.scroogellm is live on both marketplaces.'); process.exit(1)\""
   },
   "devDependencies": {
     "@vscode/vsce": "^3.0.0"

@@ -31,7 +31,7 @@
   "scripts": {
     "build": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node",
     "watch": "npm run build -- --watch",
-    "package": "vsce package --no-dependencies",
+    "package": "node -e \"console.error('ScroogeLLM is in SDD Specify phase — not ready for marketplace. Blocked to prevent publishing an empty/incomplete extension (VSCode ToU §4.xiv, Open VSX §8b). Remove this guard once description, icon, README, LICENSE, and implementation are complete.'); process.exit(1)\"",
     "test": "vitest run"
   },
   "devDependencies": {

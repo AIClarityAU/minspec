@@ -5,6 +5,47 @@ All notable changes to the MinSpec extension will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.5] - 2026-05-27
+
+### Changed
+
+- Marketplace listing republished to refresh CDN cache for icon and gallery images.
+
+## [0.1.4] - 2026-05-27
+
+### Fixed
+
+- README images now use absolute URLs so they render correctly on the Marketplace listing page (relative paths only resolve inside the repo).
+
+## [0.1.3] - 2026-05-27
+
+### Fixed
+
+- Path traversal validation hardened across spec/decision/parking-lot file operations.
+- Webview Content Security Policy tightened to block inline scripts and remote sources.
+- `.gitignore` and HTTP-style response headers cleaned up for the marketplace publish.
+
+## [0.1.2] - 2026-05-27
+
+### Fixed
+
+- Marketplace metadata (publisher, repository, categories) corrected; lint errors that were blocking CI badges resolved.
+
+## [0.1.1] - 2026-05-26
+
+### Added
+
+- Branded MinSpec icon (256×256) and 1280×280 gallery banner for the marketplace listing.
+- Automated screenshot capture via VS Code extension-host e2e tests.
+- Dynamic test and coverage badges generated from GitHub Actions.
+- Privacy section in README with link to the AIClarity privacy policy.
+- `.vscodeignore` for clean marketplace packaging.
+
+### Fixed
+
+- Operator precedence bug, `globalState` misuse, duplicated logic, status bar refresh issue.
+- ScroogeLLM bridge: nudge surface, conformance contract, traceability export (Phase 10).
+
 ## [0.1.0] - 2026-05-26
 
 ### Added

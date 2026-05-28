@@ -9,13 +9,25 @@
 [![VS Code](https://img.shields.io/badge/VS%20Code-1.90+-blue.svg)](https://code.visualstudio.com/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6.svg)](https://www.typescriptlang.org/)
 [![No AI Required](https://img.shields.io/badge/AI-not%20required-lightgrey.svg)](https://github.com/harvest316/minspec)
-[![Zero Network](https://img.shields.io/badge/network-zero%20calls-lightgrey.svg)](https://github.com/harvest316/minspec)
+[![Offline Core](https://img.shields.io/badge/core-offline%20by%20default-lightgrey.svg)](https://github.com/harvest316/minspec)
 
 ## Why This Exists
 
 Every specification-driven development tool applies the same ceremony to every change. A one-line bug fix gets the same multi-page spec treatment as a full architecture rewrite. Developers try SDD, hit the overhead on small changes, and abandon it.
 
 MinSpec fixes this. It classifies each change by complexity and applies proportional ceremony -- a trivial fix needs one sentence of spec, while an architectural change gets a full design document. You get the discipline of specification-driven development without the bureaucracy.
+
+## What MinSpec Does on Your Network
+
+The MinSpec extension itself makes **zero network calls** — no telemetry, no analytics, no accounts, no backend. All spec data lives in your project directory.
+
+Three opt-in commands shell out to your local [GitHub CLI](https://cli.github.com/) (`gh`) when you invoke them:
+
+- **MinSpec: Park Topic** — creates a GitHub Issue via `gh issue create`
+- **MinSpec: Quick Triage Inbox Issue** — labels/comments via `gh issue edit`
+- **MinSpec: Refresh Backlog** — lists issues via `gh issue list`
+
+These run under your own GitHub authentication and only when you trigger them. If `gh` isn't installed, MinSpec falls back to local files (e.g. `.minspec/parking-lot.md`). Nothing else in the extension contacts a network.
 
 ## Quick Start
 
@@ -208,7 +220,7 @@ No. MinSpec has zero AI dependencies. It works with any AI coding tool (Claude C
 
 ### Does MinSpec make network calls or require an account?
 
-No. MinSpec operates entirely locally. There are no network calls, no accounts, no telemetry, and no backend. All data lives in your project directory.
+The extension binary makes no network calls — no telemetry, no analytics, no accounts, no backend. Three opt-in commands (Park Topic, Quick Triage, Refresh Backlog) shell out to your local `gh` CLI under your own GitHub auth, and only when you invoke them. If `gh` isn't installed, they fall back to local files. See [What MinSpec Does on Your Network](#what-minspec-does-on-your-network) above.
 
 ### Can I use MinSpec with Spec Kit?
 
@@ -228,7 +240,7 @@ Contributions are welcome. See the [GitHub repository](https://github.com/harves
 
 ## Privacy
 
-MinSpec collects **zero data**. No telemetry, no analytics, no network calls, no accounts. All data stays on your local filesystem. [Privacy Policy](https://aiclarity.com.au/privacy)
+MinSpec collects **zero data**. No telemetry, no analytics, no accounts, no backend. The extension binary makes no network calls. Three opt-in commands (Park Topic, Quick Triage Inbox Issue, Refresh Backlog) delegate to your local `gh` CLI under your own GitHub authentication, and only when you trigger them — see [What MinSpec Does on Your Network](#what-minspec-does-on-your-network). All spec data stays on your local filesystem. [Privacy Policy](https://aiclarity.com.au/privacy)
 
 ## License
 
