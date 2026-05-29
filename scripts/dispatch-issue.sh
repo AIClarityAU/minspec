@@ -32,7 +32,9 @@ ISSUE_LABELS=$(echo "$ISSUE_JSON" | jq -r '.labels[].name')
 if [[ -n "$FORCE_ROLE" ]]; then
   ROLE="$FORCE_ROLE"
 else
-  ROLE=$(echo "$ISSUE_LABELS" | grep -oP '^role:\K.*' | head -1)
+  # `|| true`: grep exits 1 when no role: label exists, which would abort the
+  # whole script under `set -euo pipefail` before the dev fallback could apply.
+  ROLE=$(echo "$ISSUE_LABELS" | grep -oP '^role:\K.*' | head -1 || true)
   ROLE="${ROLE:-dev}"
 fi
 
