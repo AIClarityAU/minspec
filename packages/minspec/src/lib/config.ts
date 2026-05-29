@@ -29,11 +29,19 @@ export interface TierThresholds {
   readonly t3Max: number;
 }
 
+/**
+ * Spec storage layout.
+ * - `flat`: one file per spec: `specs/SPEC-NNN-slug.md`
+ * - `spec-kit`: one directory per spec: `specs/NNN-slug/{spec,plan,tasks}.md`
+ */
+export type SpecsLayout = 'flat' | 'spec-kit';
+
 /** Full config shape persisted in .minspec/config.json */
 export interface MinspecConfig {
   readonly version: '1';
   readonly specsDir: string;
   readonly decisionsDir: string;
+  readonly specsLayout: SpecsLayout;
   readonly thresholds: TierThresholds;
   readonly phaseMappings: Record<Tier, TierPhaseMapping>;
 }
@@ -47,6 +55,7 @@ export const DEFAULT_CONFIG: MinspecConfig = {
   version: '1',
   specsDir: 'specs',
   decisionsDir: 'docs/decisions',
+  specsLayout: 'flat',
   thresholds: {
     t1Max: 3,
     t2Max: 7,
@@ -119,6 +128,7 @@ export function applyVSCodeOverrides(
   overrides: {
     specsDir?: string;
     decisionsDir?: string;
+    specsLayout?: SpecsLayout;
     t1Max?: number;
     t2Max?: number;
     t3Max?: number;
@@ -128,6 +138,7 @@ export function applyVSCodeOverrides(
     ...config,
     specsDir: overrides.specsDir ?? config.specsDir,
     decisionsDir: overrides.decisionsDir ?? config.decisionsDir,
+    specsLayout: overrides.specsLayout ?? config.specsLayout,
     thresholds: {
       t1Max: overrides.t1Max ?? config.thresholds.t1Max,
       t2Max: overrides.t2Max ?? config.thresholds.t2Max,

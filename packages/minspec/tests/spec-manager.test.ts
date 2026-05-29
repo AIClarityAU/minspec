@@ -11,18 +11,21 @@ import {
   deleteSpec,
   slugify,
   nextSpecId,
+  migrateLayout,
 } from '../src/lib/spec-manager';
 import { parseSpec } from '../src/lib/spec';
+import type { MinspecConfig, SpecsLayout } from '../src/lib/config';
 import { DEFAULT_CONFIG } from '../src/lib/config';
 
 /** Create a temporary project directory with .minspec/config.json */
-function makeTmpProject(): string {
+function makeTmpProject(layout: SpecsLayout = 'flat'): string {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-manager-test-'));
   const minspecDir = path.join(tmpDir, '.minspec');
   fs.mkdirSync(minspecDir, { recursive: true });
+  const config: MinspecConfig = { ...DEFAULT_CONFIG, specsLayout: layout };
   fs.writeFileSync(
     path.join(minspecDir, 'config.json'),
-    JSON.stringify(DEFAULT_CONFIG, null, 2),
+    JSON.stringify(config, null, 2),
   );
   return tmpDir;
 }
@@ -552,5 +555,254 @@ phases:
 
     const summary = createSpec(rootDir, 'After gap');
     expect(summary.id).toBe('SPEC-011');
+  });
+});
+
+// --- spec-kit layout ----------------------------------------------------
+
+describe('spec-kit layout — createSpec', () => {
+  let rootDir: string;
+
+  beforeEach(() => {
+    rootDir = makeTmpProject('spec-kit');
+  });
+
+  afterEach(() => {
+    fs.rmSync(rootDir, { recursive: true, force: true });
+  });
+
+  it('creates a NNN-slug/ directory instead of a flat file', () => {
+    const summary = createSpec(rootDir, 'Add OAuth login', 'T3');
+    expect(summary.id).toBe('SPEC-001');
+
+    const specsDir = path.join(rootDir, DEFAULT_CONFIG.specsDir);
+    const dirPath = path.join(specsDir, '001-add-oauth-login');
+    expect(fs.statSync(dirPath).isDirectory()).toBe(true);
+    expect(fs.existsSync(path.join(dirPath, 'spec.md'))).toBe(true);
+  });
+
+  it('SpecSummary.filePath points to spec.md inside the dir', () => {
+    const summary = createSpec(rootDir, 'Another feature');
+    expect(summary.filePath.endsWith(path.join('001-another-feature', 'spec.md'))).toBe(true);
+  });
+
+  it('listSpecs surfaces spec-kit specs', () => {
+    createSpec(rootDir, 'First');
+    createSpec(rootDir, 'Second');
+    const specs = listSpecs(rootDir);
+    expect(specs).toHaveLength(2);
+    expect(specs[0].id).toBe('SPEC-001');
+    expect(specs[1].id).toBe('SPEC-002');
+  });
+
+  it('listSpecs reads flat + spec-kit side by side (mixed project)', () => {
+    // Create a spec in spec-kit layout (current config)
+    createSpec(rootDir, 'New kit spec');
+
+    // Drop a flat file manually
+    const specsDir = path.join(rootDir, DEFAULT_CONFIG.specsDir);
+    fs.writeFileSync(
+      path.join(specsDir, 'SPEC-002-legacy.md'),
+      `---
+id: SPEC-002
+title: Legacy flat spec
+tier: T2
+status: new
+created: 2026-01-01
+phases:
+  specify: pending
+  clarify: pending
+  plan: pending
+  tasks: pending
+  implement: pending
+---
+`,
+    );
+
+    const specs = listSpecs(rootDir);
+    expect(specs).toHaveLength(2);
+    const ids = specs.map(s => s.id).sort();
+    expect(ids).toEqual(['SPEC-001', 'SPEC-002']);
+  });
+
+  it('nextSpecId considers both flat files and spec-kit dirs', () => {
+    const specsDir = path.join(rootDir, DEFAULT_CONFIG.specsDir);
+    fs.mkdirSync(specsDir, { recursive: true });
+    // Mixed: flat SPEC-001 + dir 002-foo
+    fs.writeFileSync(path.join(specsDir, 'SPEC-001-x.md'), '');
+    fs.mkdirSync(path.join(specsDir, '002-foo'), { recursive: true });
+
+    expect(nextSpecId(specsDir)).toBe('SPEC-003');
+  });
+
+  it('transitionPhase persists state inside spec-kit dir', () => {
+    createSpec(rootDir, 'Test spec');
+
+    transitionPhase(rootDir, 'SPEC-001', 'advance');
+    const detail = getSpec(rootDir, 'SPEC-001');
+    expect(detail?.phases.specify).toBe('in-progress');
+
+    // Verify on disk: spec.md frontmatter shows in-progress
+    const specMd = fs.readFileSync(detail!.summary.filePath, 'utf-8');
+    expect(specMd).toContain('specify: in-progress');
+  });
+
+  it('archiveSpecById works on spec-kit specs', () => {
+    createSpec(rootDir, 'Archivable');
+    const result = archiveSpecById(rootDir, 'SPEC-001');
+    expect(result.success).toBe(true);
+    const detail = getSpec(rootDir, 'SPEC-001');
+    expect(detail?.summary.status).toBe('archived');
+  });
+
+  it('deleteSpec removes the whole directory', () => {
+    const summary = createSpec(rootDir, 'Deletable');
+    const dirPath = path.dirname(summary.filePath);
+    expect(fs.existsSync(dirPath)).toBe(true);
+
+    const ok = deleteSpec(rootDir, 'SPEC-001', true);
+    expect(ok).toBe(true);
+    expect(fs.existsSync(dirPath)).toBe(false);
+  });
+});
+
+// --- migration: invariant: no data loss --------------------------------
+
+describe('migrateLayout()', () => {
+  let rootDir: string;
+
+  afterEach(() => {
+    if (rootDir) fs.rmSync(rootDir, { recursive: true, force: true });
+  });
+
+  it('migrates flat → spec-kit losslessly (T0 invariant)', () => {
+    rootDir = makeTmpProject('flat');
+    const s1 = createSpec(rootDir, 'Feature one', 'T3');
+    const s2 = createSpec(rootDir, 'Feature two', 'T1');
+
+    // Snapshot canonical content before
+    const before1 = fs.readFileSync(s1.filePath, 'utf-8');
+    const before2 = fs.readFileSync(s2.filePath, 'utf-8');
+    const beforeFm1 = parseSpec(before1).frontmatter;
+    const beforeFm2 = parseSpec(before2).frontmatter;
+
+    const result = migrateLayout(rootDir, 'spec-kit');
+    expect(result.success).toBe(true);
+    expect(result.migrated).toBe(2);
+
+    // Flat files are gone
+    expect(fs.existsSync(s1.filePath)).toBe(false);
+    expect(fs.existsSync(s2.filePath)).toBe(false);
+
+    // Spec-kit dirs exist
+    const specsDir = path.join(rootDir, DEFAULT_CONFIG.specsDir);
+    expect(fs.statSync(path.join(specsDir, '001-feature-one')).isDirectory()).toBe(true);
+    expect(fs.statSync(path.join(specsDir, '002-feature-two')).isDirectory()).toBe(true);
+
+    // Frontmatter preserved
+    const d1 = getSpec(rootDir, 'SPEC-001');
+    const d2 = getSpec(rootDir, 'SPEC-002');
+    expect(d1?.summary.title).toBe(beforeFm1.title);
+    expect(d2?.summary.title).toBe(beforeFm2.title);
+    expect(d1?.summary.tier).toBe(beforeFm1.tier);
+  });
+
+  it('migrates spec-kit → flat losslessly (T0 invariant)', () => {
+    rootDir = makeTmpProject('spec-kit');
+    const s1 = createSpec(rootDir, 'Kit feature', 'T3');
+
+    // Mutate the spec so it has rich content in every phase
+    transitionPhase(rootDir, 'SPEC-001', 'advance'); // specify in-progress
+    transitionPhase(rootDir, 'SPEC-001', 'advance'); // specify done
+    const dirPath = path.dirname(s1.filePath);
+    const planPath = path.join(dirPath, 'plan.md');
+    fs.writeFileSync(planPath, '## Plan\n\nDesign details here.\n', 'utf-8');
+
+    const detailBefore = getSpec(rootDir, 'SPEC-001');
+    expect(detailBefore?.content).toContain('Design details here.');
+
+    const result = migrateLayout(rootDir, 'flat');
+    expect(result.success).toBe(true);
+    expect(result.migrated).toBe(1);
+
+    // Dir gone, flat file present
+    expect(fs.existsSync(dirPath)).toBe(false);
+    const specsDir = path.join(rootDir, DEFAULT_CONFIG.specsDir);
+    const flatPath = path.join(specsDir, 'SPEC-001-kit-feature.md');
+    expect(fs.existsSync(flatPath)).toBe(true);
+
+    // Content preserved
+    const after = fs.readFileSync(flatPath, 'utf-8');
+    expect(after).toContain('Design details here.');
+    expect(after).toContain('id: SPEC-001');
+    expect(after).toContain('specify: done');
+  });
+
+  it('flat → spec-kit → flat is identity on frontmatter and bodies', () => {
+    rootDir = makeTmpProject('flat');
+    const summary = createSpec(rootDir, 'Round trip', 'T2');
+    const planPath = summary.filePath;
+    // Hand-author some content into the flat file
+    const seed = `---
+id: SPEC-001
+title: Round trip
+tier: T2
+status: implementing
+created: 2026-05-29
+phases:
+  specify: done
+  clarify: skipped
+  plan: in-progress
+  tasks: pending
+  implement: pending
+---
+
+Preamble here.
+
+## Specify
+
+Requirement A.
+
+## Plan
+
+Approach B.
+
+## Tasks
+
+- [ ] Task C
+`;
+    fs.writeFileSync(planPath, seed, 'utf-8');
+
+    const fmBefore = parseSpec(seed).frontmatter;
+    const sectionsBefore = parseSpec(seed).sections;
+
+    expect(migrateLayout(rootDir, 'spec-kit').success).toBe(true);
+    expect(migrateLayout(rootDir, 'flat').success).toBe(true);
+
+    const specsDir = path.join(rootDir, DEFAULT_CONFIG.specsDir);
+    const finalPath = path.join(specsDir, 'SPEC-001-round-trip.md');
+    const finalContent = fs.readFileSync(finalPath, 'utf-8');
+    const fmAfter = parseSpec(finalContent).frontmatter;
+    const sectionsAfter = parseSpec(finalContent).sections;
+
+    expect(fmAfter).toEqual(fmBefore);
+    for (const [heading, body] of sectionsBefore) {
+      expect(sectionsAfter.get(heading)).toBe(body);
+    }
+  });
+
+  it('reports success with zero migrations if already in target layout', () => {
+    rootDir = makeTmpProject('spec-kit');
+    createSpec(rootDir, 'Already kit');
+    const result = migrateLayout(rootDir, 'spec-kit');
+    expect(result.success).toBe(true);
+    expect(result.migrated).toBe(0);
+  });
+
+  it('handles empty specs directory', () => {
+    rootDir = makeTmpProject('flat');
+    const result = migrateLayout(rootDir, 'spec-kit');
+    expect(result.success).toBe(true);
+    expect(result.migrated).toBe(0);
   });
 });

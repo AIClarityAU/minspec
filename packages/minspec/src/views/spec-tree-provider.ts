@@ -6,11 +6,13 @@ import { parseSpec } from '../lib/spec';
 import type { SpecFrontmatter, SpecStatus } from '../lib/spec';
 import type { Phase } from '../lib/config';
 import type { SpecSummary } from '../lib/spec-manager';
+import { isSpecKitDirEntry, readSpecKitDir } from '../lib/spec-layout';
 export type { SpecSummary };
 
 /**
- * Scan the specs directory and return summaries for all spec files.
- * Reads .minspec/config.json to determine the specsDir.
+ * Scan the specs directory and return summaries for all specs.
+ * Reads both flat files and spec-kit directories so a project mid-migration
+ * stays visible in the sidebar.
  */
 export function listSpecs(rootDir: string): SpecSummary[] {
   const config = loadConfig(rootDir);
@@ -20,17 +22,35 @@ export function listSpecs(rootDir: string): SpecSummary[] {
     return [];
   }
 
-  const files = fs.readdirSync(specsDir).filter(f => f.endsWith('.md'));
+  const entries = fs.readdirSync(specsDir);
   const summaries: SpecSummary[] = [];
 
-  for (const file of files) {
-    const filePath = path.join(specsDir, file);
+  for (const entry of entries) {
+    const fullPath = path.join(specsDir, entry);
+    let stat: fs.Stats;
     try {
-      const content = fs.readFileSync(filePath, 'utf-8');
-      const parsed = parseSpec(content);
-      const fm = parsed.frontmatter;
+      stat = fs.statSync(fullPath);
+    } catch {
+      continue;
+    }
 
-      // Only include files that look like specs (have an id)
+    try {
+      let fm: SpecFrontmatter;
+      let displayPath: string;
+
+      if (stat.isFile() && entry.endsWith('.md')) {
+        const content = fs.readFileSync(fullPath, 'utf-8');
+        fm = parseSpec(content).frontmatter;
+        displayPath = fullPath;
+      } else if (stat.isDirectory() && isSpecKitDirEntry(entry)) {
+        const specMd = path.join(fullPath, 'spec.md');
+        if (!fs.existsSync(specMd)) continue;
+        fm = readSpecKitDir(fullPath).frontmatter;
+        displayPath = specMd;
+      } else {
+        continue;
+      }
+
       if (!fm.id) continue;
 
       summaries.push({
@@ -39,10 +59,10 @@ export function listSpecs(rootDir: string): SpecSummary[] {
         tier: fm.tier,
         status: fm.status,
         currentPhase: deriveCurrentPhase(fm),
-        filePath,
+        filePath: displayPath,
       });
     } catch {
-      // Skip unparseable files
+      // Skip unparseable entries
     }
   }
 

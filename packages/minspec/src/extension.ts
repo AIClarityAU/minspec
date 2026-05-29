@@ -7,6 +7,7 @@ import { statusCommand } from './commands/status';
 import { declareScopeCommand } from './commands/session';
 import { parkCommand } from './commands/park';
 import { generateExampleCommand } from './commands/example';
+import { migrateLayoutCommand } from './commands/migrate';
 import { createAdrCommand, regenerateDrIndexCommand, acceptAdrCommand, setAdrStatusCommand } from './commands/adr';
 import { scoreWsjfCommand, triageIssueCommand } from './commands/backlog';
 import { SpecTreeProvider } from './views/spec-tree-provider';
@@ -148,6 +149,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('minspec.injectContext', () => injectContextCommand(workspaceRoot)),
     vscode.commands.registerCommand('minspec.removeContext', () => removeContextCommand(workspaceRoot)),
     vscode.commands.registerCommand('minspec.generateExample', generateExampleCommand),
+    vscode.commands.registerCommand('minspec.migrateLayout', () => migrateLayoutCommand(workspaceRoot)),
     vscode.commands.registerCommand('minspec.exportTraceability', () => exportTraceabilityCommand(workspaceRoot)),
     vscode.commands.registerCommand('minspec.showSpecPanel', async (specFilePath?: string) => {
       if (!workspaceRoot) {
