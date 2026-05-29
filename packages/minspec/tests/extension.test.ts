@@ -116,6 +116,7 @@ vi.mock('vscode', () => ({
       codeLensRegistrations.push({ selector, provider });
       return { dispose: vi.fn() };
     }),
+    registerCompletionItemProvider: vi.fn(() => ({ dispose: vi.fn() })),
   },
   extensions: {
     getExtension: vi.fn(() => ({ id: 'mock' })),

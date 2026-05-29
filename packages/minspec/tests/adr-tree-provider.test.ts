@@ -106,8 +106,13 @@ describe('AdrNode', () => {
     expect(node.label).toBe('DR-005: Use monorepo');
     expect(node.collapsibleState).toBe(0); // None
     expect(node.description).toBe('2026-05-20');
-    expect(node.contextValue).toBe('adrNode');
+    expect(node.contextValue).toBe('adrNode.accepted');
     expect(node.adr).toBe(adr);
+  });
+
+  it('suffixes contextValue with status to gate menus', () => {
+    expect(new AdrNode(makeAdr({ status: 'proposed' })).contextValue).toBe('adrNode.proposed');
+    expect(new AdrNode(makeAdr({ status: 'superseded' })).contextValue).toBe('adrNode.superseded');
   });
 
   it('has command to open ADR file', () => {

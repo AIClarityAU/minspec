@@ -11,6 +11,7 @@ import { createAdrCommand, regenerateDrIndexCommand, acceptAdrCommand, setAdrSta
 import { scoreWsjfCommand, triageIssueCommand } from './commands/backlog';
 import { SpecTreeProvider } from './views/spec-tree-provider';
 import { AdrTreeProvider } from './views/adr-tree-provider';
+import { FrontmatterCompletionProvider } from './views/frontmatter-completion';
 import { BacklogTreeProvider } from './views/backlog-view';
 import { MinSpecStatusBar, fromFrontmatter } from './views/status-bar';
 import { SpecPanel } from './views/spec-panel';
@@ -105,6 +106,11 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.languages.registerCodeLensProvider(
       { scheme: 'file', language: 'markdown' },
       specFileLensProvider,
+    ),
+    vscode.languages.registerCompletionItemProvider(
+      { scheme: 'file', language: 'markdown' },
+      new FrontmatterCompletionProvider(),
+      ':', ' ', // trigger after "key:" and after the space
     ),
   );
 
