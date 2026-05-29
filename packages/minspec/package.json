@@ -2,7 +2,7 @@
   "name": "minspec",
   "displayName": "MinSpec",
   "description": "Complexity-adaptive specification-driven development. Classifies changes into tiers and applies proportional ceremony — a one-line fix needs one sentence of spec, an architecture rewrite gets the full treatment.",
-  "version": "0.1.10",
+  "version": "0.1.11",
   "private": true,
   "publisher": "aiclarity",
   "license": "MIT",
@@ -48,6 +48,16 @@
       "url": "https://img.shields.io/badge/License-MIT-yellow.svg",
       "href": "https://opensource.org/licenses/MIT",
       "description": "MIT License"
+    },
+    {
+      "url": "https://img.shields.io/badge/VS%20Code-1.90+-blue.svg",
+      "href": "https://code.visualstudio.com/",
+      "description": "VS Code 1.90+"
+    },
+    {
+      "url": "https://img.shields.io/badge/TypeScript-5.0+-3178C6.svg",
+      "href": "https://www.typescriptlang.org/",
+      "description": "TypeScript 5.0+"
     }
   ],
   "activationEvents": [],
@@ -101,7 +111,9 @@
       },
       {
         "command": "minspec.createAdr",
-        "title": "MinSpec: Create Architecture Decision Record"
+        "title": "MinSpec: Create Architecture Decision Record",
+        "shortTitle": "New ADR",
+        "icon": "$(add)"
       },
       {
         "command": "minspec.regenerateDrIndex",

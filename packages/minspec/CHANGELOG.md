@@ -5,6 +5,19 @@ All notable changes to the MinSpec extension will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.11] - 2026-05-28
+
+### Changed
+
+- **README badges restructured.** Tests, Coverage, "No AI Required", and "Internet not required" remain at the top (high-signal). License, VS Code version, TypeScript version, and CI status moved to the marketplace sidebar (`package.json` `badges` array) — same info, less visual noise above the fold.
+- Renamed badge "Offline Core" → "Internet: not required" for plain-English clarity.
+- First mention of "specification-driven development" in the README now links to [Spec Kit](https://github.com/spec-kit/spec-kit) — the upstream SDD methodology / file format MinSpec stays compatible with.
+- Phase Lifecycle diagram regenerated with thicker connectors (4px solid for the T3/T4 path, 3px dashed for T1/T2 skip arrows) and bold phase labels for readability at marketplace render scale.
+
+### Fixed
+
+- **"MinSpec: Decisions" section title flicker:** Hovering the explorer pane no longer expands the title bar to "MinSpec: Create Architecture D…". The `minspec.createAdr` command now declares `shortTitle: "New ADR"` plus a `$(add)` icon, so VS Code renders it as an icon-only action button instead of stretching the full title.
+
 ## [0.1.10] - 2026-05-28
 
 ### Changed

@@ -2,18 +2,14 @@
 
 > Just enough spec. Never too much.
 
-[![CI](https://github.com/harvest316/minspec/actions/workflows/ci.yml/badge.svg)](https://github.com/harvest316/minspec/actions/workflows/ci.yml)
 [![Tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/harvest316/minspec/badges/tests.json)](https://github.com/harvest316/minspec/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/harvest316/minspec/badges/coverage.json)](https://github.com/harvest316/minspec/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![VS Code](https://img.shields.io/badge/VS%20Code-1.90+-blue.svg)](https://code.visualstudio.com/)
-[![TypeScript](https://img.shields.io/badge/TypeScript-5.0+-3178C6.svg)](https://www.typescriptlang.org/)
 [![No AI Required](https://img.shields.io/badge/AI-not%20required-lightgrey.svg)](https://github.com/harvest316/minspec)
-[![Offline Core](https://img.shields.io/badge/core-offline%20by%20default-lightgrey.svg)](https://github.com/harvest316/minspec)
+[![Internet not required](https://img.shields.io/badge/Internet-not%20required-lightgrey.svg)](https://github.com/harvest316/minspec)
 
 ## Why This Exists
 
-Every specification-driven development tool applies the same ceremony to every change. A one-line bug fix gets the same multi-page spec treatment as a full architecture rewrite. Developers try SDD, hit the overhead on small changes, and abandon it.
+Every [specification-driven development](https://github.com/spec-kit/spec-kit) tool applies the same ceremony to every change. A one-line bug fix gets the same multi-page spec treatment as a full architecture rewrite. Developers try SDD, hit the overhead on small changes, and abandon it.
 
 MinSpec fixes this. It classifies each change by complexity and applies proportional ceremony -- a trivial fix needs one sentence of spec, while an architectural change gets a full design document. You get the discipline of specification-driven development without the bureaucracy.
 
