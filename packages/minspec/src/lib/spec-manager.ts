@@ -1,9 +1,9 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import type { Tier, Phase } from './config';
+import type { Tier, Phase, SpecsLayout } from './config';
 import { loadConfig, PHASES, resolveAndValidate } from './config';
 import type { SpecFrontmatter, ParsedSpec } from './spec';
-import { parseSpec, writeSpec, readSpecFile, writeSpecFile } from './spec';
+import { writeSpec, readSpecFile, writeSpecFile } from './spec';
 import type { PhaseState, SpecStatus, TransitionResult } from './lifecycle';
 import {
   createInitialPhases,
@@ -14,6 +14,12 @@ import {
   goBackToPhase,
   archiveSpec as archiveSpecLifecycle,
 } from './lifecycle';
+import {
+  isSpecKitDirEntry,
+  readSpecKitDir,
+  writeSpecKitDir,
+  specKitDirName,
+} from './spec-layout';
 
 /** Summary of a spec for listing/display */
 export interface SpecSummary {
@@ -22,6 +28,7 @@ export interface SpecSummary {
   readonly tier: Tier;
   readonly status: SpecStatus;
   readonly currentPhase: Phase | null;
+  /** Path users open: flat file path, or spec.md inside spec-kit directory. */
   readonly filePath: string;
 }
 
@@ -55,11 +62,13 @@ export function slugify(title: string): string {
 // --- ID generation ---
 
 const SPEC_ID_RE = /^SPEC-(\d+)/;
+const FLAT_DIR_NUM_RE = /^(\d{3,})-/;
 const SPEC_FILE_RE = /^SPEC-\d{3,}.*\.md$/;
 
 /**
  * Scan specs directory and return the next sequential SPEC ID.
- * E.g., if SPEC-003 exists, returns "SPEC-004".
+ * Scans both flat files (`SPEC-NNN-…`) and spec-kit dirs (`NNN-…`)
+ * so IDs stay unique across layouts.
  */
 export function nextSpecId(specsDir: string): string {
   let maxNum = 0;
@@ -67,10 +76,23 @@ export function nextSpecId(specsDir: string): string {
   if (fs.existsSync(specsDir)) {
     const entries = fs.readdirSync(specsDir);
     for (const entry of entries) {
-      const match = entry.match(SPEC_ID_RE);
-      if (match) {
-        const num = parseInt(match[1], 10);
+      const flatMatch = entry.match(SPEC_ID_RE);
+      if (flatMatch) {
+        const num = parseInt(flatMatch[1], 10);
         if (num > maxNum) maxNum = num;
+        continue;
+      }
+      const dirMatch = entry.match(FLAT_DIR_NUM_RE);
+      if (dirMatch) {
+        const full = path.join(specsDir, entry);
+        try {
+          if (fs.statSync(full).isDirectory()) {
+            const num = parseInt(dirMatch[1], 10);
+            if (num > maxNum) maxNum = num;
+          }
+        } catch {
+          /* ignore */
+        }
       }
     }
   }
@@ -86,16 +108,57 @@ function resolveSpecsDir(rootDir: string): string {
   return resolveAndValidate(rootDir, config.specsDir);
 }
 
-function findSpecFile(specsDir: string, specId: string): string | null {
+/** Discriminated handle to a spec on disk. */
+type SpecEntry =
+  | { kind: 'flat'; filePath: string }
+  | { kind: 'spec-kit'; dirPath: string; specMdPath: string };
+
+function findSpecEntry(specsDir: string, specId: string): SpecEntry | null {
   if (!fs.existsSync(specsDir)) return null;
+
+  const numMatch = specId.match(SPEC_ID_RE);
+  const numericPart = numMatch ? numMatch[1] : null;
 
   const entries = fs.readdirSync(specsDir);
   for (const entry of entries) {
+    const full = path.join(specsDir, entry);
+
     if (entry.startsWith(specId) && entry.endsWith('.md')) {
-      return path.join(specsDir, entry);
+      return { kind: 'flat', filePath: full };
+    }
+
+    if (numericPart && entry.startsWith(`${numericPart}-`) || entry === numericPart) {
+      try {
+        if (fs.statSync(full).isDirectory()) {
+          return {
+            kind: 'spec-kit',
+            dirPath: full,
+            specMdPath: path.join(full, 'spec.md'),
+          };
+        }
+      } catch {
+        /* ignore */
+      }
     }
   }
   return null;
+}
+
+function readEntry(entry: SpecEntry): ParsedSpec {
+  if (entry.kind === 'flat') return readSpecFile(entry.filePath);
+  return readSpecKitDir(entry.dirPath);
+}
+
+function writeEntry(entry: SpecEntry, spec: ParsedSpec): void {
+  if (entry.kind === 'flat') {
+    writeSpecFile(entry.filePath, spec);
+    return;
+  }
+  writeSpecKitDir(entry.dirPath, spec);
+}
+
+function entryDisplayPath(entry: SpecEntry): string {
+  return entry.kind === 'flat' ? entry.filePath : entry.specMdPath;
 }
 
 function buildSummary(parsed: ParsedSpec, filePath: string): SpecSummary {
@@ -112,18 +175,17 @@ function buildSummary(parsed: ParsedSpec, filePath: string): SpecSummary {
 // --- CRUD operations ---
 
 /**
- * Create a new spec file with auto-generated ID and optional tier.
+ * Create a new spec with auto-generated ID and optional tier.
+ * Storage layout (flat file vs. spec-kit directory) follows config.specsLayout.
  */
 export function createSpec(rootDir: string, title: string, tier: Tier = 'T2'): SpecSummary {
-  const specsDir = resolveSpecsDir(rootDir);
+  const config = loadConfig(rootDir);
+  const specsDir = resolveAndValidate(rootDir, config.specsDir);
   fs.mkdirSync(specsDir, { recursive: true });
 
   const id = nextSpecId(specsDir);
   const slug = slugify(title);
-  const fileName = `${id}-${slug}.md`;
-  const filePath = path.join(specsDir, fileName);
   const today = new Date().toISOString().slice(0, 10);
-
   const initialPhases = createInitialPhases();
 
   const frontmatter: SpecFrontmatter = {
@@ -135,8 +197,6 @@ export function createSpec(rootDir: string, title: string, tier: Tier = 'T2'): S
     phases: initialPhases as Record<Phase, import('./spec').PhaseStatus>,
   };
 
-  // Build skeleton spec with phase sections based on tier
-  const config = loadConfig(rootDir);
   const tierMapping = config.phaseMappings[tier];
   const relevantPhases = [...tierMapping.requiredPhases, ...tierMapping.optionalPhases];
 
@@ -156,8 +216,18 @@ export function createSpec(rootDir: string, title: string, tier: Tier = 'T2'): S
     raw: '',
   };
 
-  const content = writeSpec(spec);
-  fs.writeFileSync(filePath, content, 'utf-8');
+  let displayPath: string;
+  if (config.specsLayout === 'spec-kit') {
+    const dirName = specKitDirName(id, slug);
+    const dirPath = path.join(specsDir, dirName);
+    writeSpecKitDir(dirPath, spec);
+    displayPath = path.join(dirPath, 'spec.md');
+  } else {
+    const fileName = `${id}-${slug}.md`;
+    const filePath = path.join(specsDir, fileName);
+    fs.writeFileSync(filePath, writeSpec(spec), 'utf-8');
+    displayPath = filePath;
+  }
 
   return {
     id,
@@ -165,12 +235,14 @@ export function createSpec(rootDir: string, title: string, tier: Tier = 'T2'): S
     tier,
     status: 'new',
     currentPhase: getCurrentPhase(initialPhases),
-    filePath,
+    filePath: displayPath,
   };
 }
 
 /**
  * List all specs, optionally filtered by status and/or tier.
+ * Returns specs from both flat files and spec-kit directories
+ * (so a project mid-migration stays readable).
  */
 export function listSpecs(
   rootDir: string,
@@ -179,21 +251,40 @@ export function listSpecs(
   const specsDir = resolveSpecsDir(rootDir);
   if (!fs.existsSync(specsDir)) return [];
 
-  const entries = fs.readdirSync(specsDir).filter((e) => SPEC_FILE_RE.test(e)).sort();
+  const entries = fs.readdirSync(specsDir).sort();
   const results: SpecSummary[] = [];
 
   for (const entry of entries) {
-    const filePath = path.join(specsDir, entry);
-    const stat = fs.statSync(filePath);
-    if (!stat.isFile()) continue;
+    const fullPath = path.join(specsDir, entry);
+    let stat: fs.Stats;
+    try {
+      stat = fs.statSync(fullPath);
+    } catch {
+      continue;
+    }
 
     try {
-      const parsed = readSpecFile(filePath);
-      const summary = buildSummary(parsed, filePath);
+      let parsed: ParsedSpec;
+      let displayPath: string;
 
+      if (stat.isFile()) {
+        if (!SPEC_FILE_RE.test(entry)) continue;
+        parsed = readSpecFile(fullPath);
+        displayPath = fullPath;
+      } else if (stat.isDirectory() && isSpecKitDirEntry(entry)) {
+        const specMd = path.join(fullPath, 'spec.md');
+        if (!fs.existsSync(specMd)) continue;
+        parsed = readSpecKitDir(fullPath);
+        displayPath = specMd;
+      } else {
+        continue;
+      }
+
+      if (!parsed.frontmatter.id) continue;
+
+      const summary = buildSummary(parsed, displayPath);
       if (filter?.status && summary.status !== filter.status) continue;
       if (filter?.tier && summary.tier !== filter.tier) continue;
-
       results.push(summary);
     } catch {
       continue;
@@ -208,13 +299,16 @@ export function listSpecs(
  */
 export function getSpec(rootDir: string, specId: string): SpecDetail | null {
   const specsDir = resolveSpecsDir(rootDir);
-  const filePath = findSpecFile(specsDir, specId);
-  if (!filePath) return null;
+  const entry = findSpecEntry(specsDir, specId);
+  if (!entry) return null;
 
   try {
-    const content = fs.readFileSync(filePath, 'utf-8');
-    const parsed = parseSpec(content);
-    const summary = buildSummary(parsed, filePath);
+    const parsed = readEntry(entry);
+    const displayPath = entryDisplayPath(entry);
+    // `content` is the canonical single-file serialization — useful for callers
+    // that want a portable text view regardless of underlying layout.
+    const content = writeSpec(parsed);
+    const summary = buildSummary(parsed, displayPath);
 
     return {
       summary,
@@ -236,8 +330,8 @@ export function transitionPhase(
   reason?: string,
 ): TransitionResult {
   const specsDir = resolveSpecsDir(rootDir);
-  const filePath = findSpecFile(specsDir, specId);
-  if (!filePath) {
+  const entry = findSpecEntry(specsDir, specId);
+  if (!entry) {
     return {
       success: false,
       newPhases: createInitialPhases(),
@@ -246,7 +340,7 @@ export function transitionPhase(
     };
   }
 
-  const parsed = readSpecFile(filePath);
+  const parsed = readEntry(entry);
   const phases = parsed.frontmatter.phases;
   const current = getCurrentPhase(phases);
 
@@ -279,7 +373,7 @@ export function transitionPhase(
       status: result.newStatus,
       phases: result.newPhases as Record<Phase, import('./spec').PhaseStatus>,
     };
-    writeSpecFile(filePath, { ...parsed, frontmatter: newFm });
+    writeEntry(entry, { ...parsed, frontmatter: newFm });
   }
 
   return result;
@@ -290,8 +384,8 @@ export function transitionPhase(
  */
 export function archiveSpecById(rootDir: string, specId: string): TransitionResult {
   const specsDir = resolveSpecsDir(rootDir);
-  const filePath = findSpecFile(specsDir, specId);
-  if (!filePath) {
+  const entry = findSpecEntry(specsDir, specId);
+  if (!entry) {
     return {
       success: false,
       newPhases: createInitialPhases(),
@@ -300,7 +394,7 @@ export function archiveSpecById(rootDir: string, specId: string): TransitionResu
     };
   }
 
-  const parsed = readSpecFile(filePath);
+  const parsed = readEntry(entry);
   const result = archiveSpecLifecycle(parsed.frontmatter.phases);
 
   if (result.success) {
@@ -309,22 +403,105 @@ export function archiveSpecById(rootDir: string, specId: string): TransitionResu
       status: 'archived',
       phases: result.newPhases as Record<Phase, import('./spec').PhaseStatus>,
     };
-    writeSpecFile(filePath, { ...parsed, frontmatter: newFm });
+    writeEntry(entry, { ...parsed, frontmatter: newFm });
   }
 
   return result;
 }
 
 /**
- * Delete a spec file. Requires confirm=true as a safety measure.
+ * Delete a spec — removes the flat file or the entire spec-kit directory.
+ * Requires confirm=true as a safety measure.
  */
 export function deleteSpec(rootDir: string, specId: string, confirm: boolean): boolean {
   if (!confirm) return false;
 
   const specsDir = resolveSpecsDir(rootDir);
-  const filePath = findSpecFile(specsDir, specId);
-  if (!filePath) return false;
+  const entry = findSpecEntry(specsDir, specId);
+  if (!entry) return false;
 
-  fs.unlinkSync(filePath);
+  if (entry.kind === 'flat') {
+    fs.unlinkSync(entry.filePath);
+  } else {
+    fs.rmSync(entry.dirPath, { recursive: true, force: true });
+  }
   return true;
+}
+
+// --- Migration ---
+
+export interface MigrationResult {
+  readonly success: boolean;
+  readonly migrated: number;
+  readonly target: SpecsLayout;
+  readonly warning?: string;
+}
+
+/**
+ * Migrate every spec in `rootDir` to the target storage layout.
+ *
+ * Safety order: write all new representations first, then delete old.
+ * If a spec is already in the target layout it is skipped.
+ *
+ * Frontmatter and body content are preserved byte-for-byte (round-trip
+ * tested in spec-layout.test.ts — see "no data loss" invariant).
+ */
+export function migrateLayout(rootDir: string, target: SpecsLayout): MigrationResult {
+  const specsDir = resolveSpecsDir(rootDir);
+  if (!fs.existsSync(specsDir)) {
+    return { success: true, migrated: 0, target };
+  }
+
+  const summaries = listSpecs(rootDir);
+  let migrated = 0;
+  const toDelete: SpecEntry[] = [];
+
+  for (const summary of summaries) {
+    const entry = findSpecEntry(specsDir, summary.id);
+    if (!entry) continue;
+    if (entry.kind === target) continue;
+
+    const parsed = readEntry(entry);
+    const slug = slugify(parsed.frontmatter.title);
+
+    if (target === 'spec-kit') {
+      const dirName = specKitDirName(parsed.frontmatter.id, slug);
+      const dirPath = path.join(specsDir, dirName);
+      if (fs.existsSync(dirPath)) {
+        return {
+          success: false,
+          migrated,
+          target,
+          warning: `Target directory already exists: ${dirName}`,
+        };
+      }
+      writeSpecKitDir(dirPath, parsed);
+    } else {
+      const fileName = `${parsed.frontmatter.id}-${slug}.md`;
+      const filePath = path.join(specsDir, fileName);
+      if (fs.existsSync(filePath)) {
+        return {
+          success: false,
+          migrated,
+          target,
+          warning: `Target file already exists: ${fileName}`,
+        };
+      }
+      fs.writeFileSync(filePath, writeSpec(parsed), 'utf-8');
+    }
+
+    toDelete.push(entry);
+    migrated++;
+  }
+
+  // All writes succeeded — now remove old representations.
+  for (const entry of toDelete) {
+    if (entry.kind === 'flat') {
+      fs.unlinkSync(entry.filePath);
+    } else {
+      fs.rmSync(entry.dirPath, { recursive: true, force: true });
+    }
+  }
+
+  return { success: true, migrated, target };
 }
