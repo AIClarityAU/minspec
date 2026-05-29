@@ -8,6 +8,7 @@ import { declareScopeCommand } from './commands/session';
 import { parkCommand } from './commands/park';
 import { generateExampleCommand } from './commands/example';
 import { createAdrCommand, regenerateDrIndexCommand, acceptAdrCommand, setAdrStatusCommand } from './commands/adr';
+import { regenerateDrIndex } from './lib/adr-manager';
 import { scoreWsjfCommand, triageIssueCommand } from './commands/backlog';
 import { SpecTreeProvider } from './views/spec-tree-provider';
 import { AdrTreeProvider } from './views/adr-tree-provider';
@@ -211,8 +212,23 @@ export function activate(context: vscode.ExtensionContext): void {
     ),
   );
 
-  const onAdrsChanged = () => {
+  // Regenerate INDEX.md when a DR file changes (frontmatter edit, add, delete).
+  // Guard against self-trigger: regenerateDrIndex writes INDEX.md, which is a
+  // *.md under decisionsDir and would re-fire the watcher → infinite loop.
+  // Debounce coalesces bursts (e.g. multi-file save) into one regenerate.
+  let adrIndexTimer: ReturnType<typeof setTimeout> | undefined;
+  const onAdrsChanged = (uri?: vscode.Uri) => {
     adrTreeProvider.refresh();
+    if (uri && path.basename(uri.fsPath).toLowerCase() === 'index.md') return;
+    if (!workspaceRoot) return;
+    if (adrIndexTimer) clearTimeout(adrIndexTimer);
+    adrIndexTimer = setTimeout(() => {
+      try {
+        regenerateDrIndex(workspaceRoot, decisionsDir ? { decisionsDir } : undefined);
+      } catch {
+        // Non-fatal: tree already refreshed; index regen is best-effort.
+      }
+    }, 300);
   };
 
   adrWatcher.onDidChange(onAdrsChanged);

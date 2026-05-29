@@ -176,6 +176,9 @@ vi.mock('../src/commands/adr', () => ({
   createAdrCommand: vi.fn(),
   regenerateDrIndexCommand: vi.fn(),
 }));
+vi.mock('../src/lib/adr-manager', () => ({
+  regenerateDrIndex: vi.fn(),
+}));
 vi.mock('../src/commands/backlog', () => ({
   scoreWsjfCommand: vi.fn(),
   triageIssueCommand: vi.fn(),
@@ -252,6 +255,7 @@ import { declareScopeCommand } from '../src/commands/session';
 import { parkCommand } from '../src/commands/park';
 import { generateExampleCommand } from '../src/commands/example';
 import { createAdrCommand } from '../src/commands/adr';
+import { regenerateDrIndex } from '../src/lib/adr-manager';
 import { scoreWsjfCommand, triageIssueCommand } from '../src/commands/backlog';
 import {
   goToSpecCommand,
@@ -644,9 +648,63 @@ describe('activate()', () => {
     expect(adrWatcher.onDidDelete).toHaveBeenCalled();
 
     const onChangeHandler = adrWatcher.onDidChange.mock.calls[0][0];
-    onChangeHandler();
+    onChangeHandler({ fsPath: '/tmp/test-workspace/docs/decisions/DR-007.md' });
 
     expect(mockAdrTreeProvider.refresh).toHaveBeenCalled();
+  });
+
+  it('regenerates INDEX.md when a DR file changes (debounced trigger)', () => {
+    vi.useFakeTimers();
+    try {
+      activate(makeMockContext());
+      vi.mocked(regenerateDrIndex).mockClear();
+
+      const onChangeHandler = adrWatcher.onDidChange.mock.calls[0][0];
+      onChangeHandler({ fsPath: '/tmp/test-workspace/docs/decisions/DR-007.md' });
+
+      // Debounced — not called synchronously
+      expect(regenerateDrIndex).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(300);
+      expect(regenerateDrIndex).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does NOT regenerate INDEX.md when INDEX.md itself changes (no self-trigger loop)', () => {
+    vi.useFakeTimers();
+    try {
+      activate(makeMockContext());
+      vi.mocked(regenerateDrIndex).mockClear();
+
+      const onChangeHandler = adrWatcher.onDidChange.mock.calls[0][0];
+      onChangeHandler({ fsPath: '/tmp/test-workspace/docs/decisions/INDEX.md' });
+
+      vi.advanceTimersByTime(300);
+      expect(regenerateDrIndex).not.toHaveBeenCalled();
+      // Tree still refreshes regardless
+      expect(mockAdrTreeProvider.refresh).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('coalesces a burst of DR changes into a single regenerate', () => {
+    vi.useFakeTimers();
+    try {
+      activate(makeMockContext());
+      vi.mocked(regenerateDrIndex).mockClear();
+
+      const onChangeHandler = adrWatcher.onDidChange.mock.calls[0][0];
+      onChangeHandler({ fsPath: '/tmp/test-workspace/docs/decisions/DR-001.md' });
+      onChangeHandler({ fsPath: '/tmp/test-workspace/docs/decisions/DR-007.md' });
+      onChangeHandler({ fsPath: '/tmp/test-workspace/docs/decisions/DR-002.md' });
+
+      vi.advanceTimersByTime(300);
+      expect(regenerateDrIndex).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('wires traceability watcher callbacks to refresh CodeLens providers', () => {
