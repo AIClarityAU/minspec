@@ -915,47 +915,8 @@
         Nothing exotic. No new framework to learn.
       </p>
 
-      <div class="arch-diagram" role="img" aria-label="Methodology stack diagram: SDD core lifecycle, CDD applied as a cross-cutting layer, with Tier Classifier, ADR, WSJF, GTD-style sessions, and Bug Session Protocol as satellite practices">
-        <pre class="mermaid">
----
-config:
-  layout: fixed
-  theme: dark
----
-flowchart TB
- subgraph SDD["SDD — Spec-Driven Development (primary, ~70%)"]
-    direction LR
-        P1["Constitution"]
-        P2["Specify"]
-        P3["Clarify"]
-        P4["Plan"]
-        P5["Tasks"]
-        P6["Analyze"]
-        P7["Implement"]
-  end
-  TC["Tier Classifier T1–T4\n(MinSpec's own)"] --> SDD
-  CDD["CDD — Contract-Driven Dev (~15%)\nT0–T4 tests, contracts, file allowlists"] -.applied across.-> SDD
-  ADR["ADR / DR-NNN\n(Nygard pattern)"] -.-> SDD
-  WSJF["WSJF Backlog\n(SAFe scoring)"] -.-> SDD
-  GTD["Session Scope + Parking Lot\n(GTD-style)"] -.-> SDD
-  BUG["Bug Session Protocol\n(MinSpec's own)"] -.-> SDD
-  P1 --> P2 --> P3 --> P4 --> P5 --> P6 --> P7
-
-  style SDD fill:#0d1a2e,stroke:#6c9cfc,color:#a0b4e0
-  style P1 fill:#1a2540,stroke:#6c9cfc,color:#cbd5e8
-  style P2 fill:#1a2540,stroke:#6c9cfc,color:#cbd5e8
-  style P3 fill:#1a2540,stroke:#6c9cfc,color:#cbd5e8
-  style P4 fill:#1a2540,stroke:#6c9cfc,color:#cbd5e8
-  style P5 fill:#1a2540,stroke:#6c9cfc,color:#cbd5e8
-  style P6 fill:#1a2540,stroke:#6c9cfc,color:#cbd5e8
-  style P7 fill:#1a2540,stroke:#6c9cfc,color:#cbd5e8
-  style TC fill:#132613,stroke:#22c55e,color:#4ade80
-  style CDD fill:#2a1f3a,stroke:#a78bfa,color:#c4b5fd
-  style ADR fill:#1c1f2b,stroke:#8b8fa3,color:#b8bcc8
-  style WSJF fill:#1c1f2b,stroke:#8b8fa3,color:#b8bcc8
-  style GTD fill:#1c1f2b,stroke:#8b8fa3,color:#b8bcc8
-  style BUG fill:#132613,stroke:#22c55e,color:#4ade80
-        </pre>
+      <div class="arch-diagram">
+        <img src="/img/methodology-stack.svg" alt="Methodology stack: SDD core lifecycle (Constitution, Specify, Clarify, Plan, Tasks, Analyze, Implement) with CDD applied across as a cross-cutting layer, and Tier Classifier, ADR, WSJF, GTD-style sessions, and Bug Session Protocol as satellite practices" width="100%" loading="lazy">
       </div>
 
       <div class="methodology-pills">
@@ -1122,22 +1083,5 @@ flowchart TB
     </div>
   </footer>
 
-  <script type="module">
-    import mermaid from 'https://cdn.jsdelivr.net/npm/mermaid@11.4.1/dist/mermaid.esm.min.mjs';
-    mermaid.initialize({
-      startOnLoad: true,
-      theme: 'dark',
-      themeVariables: {
-        darkMode: true,
-        background: '#0f1117',
-        primaryColor: '#1a2540',
-        primaryBorderColor: '#6c9cfc',
-        lineColor: '#6c9cfc',
-        textColor: '#e2e4eb',
-        fontSize: '13px'
-      },
-      flowchart: { curve: 'basis' }
-    });
-  </script>
 </body>
 </html>

@@ -13,6 +13,16 @@ Every [specification-driven development](https://github.com/spec-kit/spec-kit) t
 
 MinSpec fixes this. It classifies each change by complexity and applies proportional ceremony -- a trivial fix needs one sentence of spec, while an architectural change gets a full design document. You get the discipline of specification-driven development without the bureaucracy.
 
+> **More info:** [**minspec.dev**](https://minspec.dev) — full methodology breakdown, 8-question FAQ, interactive stack diagram, and the case for adaptive ceremony.
+
+## Methodology Stack
+
+MinSpec is mostly **SDD** (Spec-Driven Development, ~70%) with a thin **CDD** layer (Contract-Driven Development, ~15%) and a few borrowed best practices: ADR, WSJF, GTD-style session discipline, plus a separate Bug Session Protocol because bug-fix work doesn't fit a feature-shaped lifecycle.
+
+![MinSpec methodology stack — SDD spine with CDD layer and satellite practices](https://raw.githubusercontent.com/harvest316/minspec/main/packages/minspec/media/methodology-stack.png)
+
+Full explanation, attribution to source methodologies, and FAQ at [**minspec.dev/#methodology**](https://minspec.dev/#methodology).
+
 ## What MinSpec Does on Your Network
 
 The MinSpec extension itself makes **zero network calls** — no telemetry, no analytics, no accounts, no backend. All spec data lives in your project directory.
