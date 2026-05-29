@@ -2,7 +2,7 @@
   "name": "minspec",
   "displayName": "MinSpec",
   "description": "Complexity-adaptive specification-driven development. Classifies changes into tiers and applies proportional ceremony — a one-line fix needs one sentence of spec, an architecture rewrite gets the full treatment.",
-  "version": "0.1.15",
+  "version": "0.1.16",
   "private": true,
   "publisher": "aiclarity",
   "license": "MIT",
@@ -380,16 +380,16 @@
     "test:e2e": "vscode-test"
   },
   "dependencies": {
-    "esbuild": "0.28.0",
     "handlebars": "^4.7.9",
-    "simple-git": "^3.27.0",
-    "vitest": "4.1.7"
+    "simple-git": "^3.27.0"
   },
   "devDependencies": {
     "@types/mocha": "^10.0.10",
     "@vscode/test-cli": "0.0.11",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.0.0",
-    "mocha": "^11.3.0"
+    "esbuild": "0.28.0",
+    "mocha": "^11.3.0",
+    "vitest": "4.1.7"
   }
 }
