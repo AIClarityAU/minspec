@@ -7,7 +7,7 @@ import { statusCommand } from './commands/status';
 import { declareScopeCommand } from './commands/session';
 import { parkCommand } from './commands/park';
 import { generateExampleCommand } from './commands/example';
-import { createAdrCommand, regenerateDrIndexCommand } from './commands/adr';
+import { createAdrCommand, regenerateDrIndexCommand, acceptAdrCommand, setAdrStatusCommand } from './commands/adr';
 import { scoreWsjfCommand, triageIssueCommand } from './commands/backlog';
 import { SpecTreeProvider } from './views/spec-tree-provider';
 import { AdrTreeProvider } from './views/adr-tree-provider';
@@ -120,6 +120,14 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('minspec.createAdr', createAdrCommand),
     vscode.commands.registerCommand('minspec.regenerateDrIndex', regenerateDrIndexCommand),
+    vscode.commands.registerCommand('minspec.acceptAdr', async (node) => {
+      await acceptAdrCommand(node);
+      adrTreeProvider.refresh();
+    }),
+    vscode.commands.registerCommand('minspec.setAdrStatus', async (node) => {
+      await setAdrStatusCommand(node);
+      adrTreeProvider.refresh();
+    }),
     vscode.commands.registerCommand('minspec.scoreWsjf', scoreWsjfCommand),
     vscode.commands.registerCommand('minspec.triageIssue', triageIssueCommand),
     vscode.commands.registerCommand('minspec.refreshBacklog', () => backlogTreeProvider.refresh()),

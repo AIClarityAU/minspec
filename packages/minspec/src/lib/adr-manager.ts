@@ -154,6 +154,43 @@ export function createAdr(rootDir: string, title: string, vscodeOverrides?: { de
   return { id, title, status: 'proposed', date, filePath };
 }
 
+/** All valid ADR statuses, in lifecycle order. For UI pickers. */
+export const ADR_STATUS_VALUES: readonly AdrStatus[] = [
+  'proposed',
+  'accepted',
+  'deprecated',
+  'superseded',
+];
+
+/**
+ * Rewrite the `status:` line in an ADR's frontmatter in place.
+ * Adds the line if frontmatter exists but has no status field.
+ * Returns the updated status. Throws if the file has no frontmatter block.
+ */
+export function setAdrStatus(filePath: string, status: AdrStatus): AdrStatus {
+  if (!ADR_STATUSES.has(status)) {
+    throw new Error(`Invalid ADR status: ${status}`);
+  }
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const fmMatch = content.match(FRONTMATTER_RE);
+  if (!fmMatch) {
+    throw new Error(`No frontmatter block in ${filePath}`);
+  }
+
+  const yaml = fmMatch[1];
+  const statusLineRe = /^([ \t]*)status[ \t]*:[ \t]*.*$/m;
+  let newYaml: string;
+  if (statusLineRe.test(yaml)) {
+    newYaml = yaml.replace(statusLineRe, `$1status: ${status}`);
+  } else {
+    newYaml = `${yaml}\nstatus: ${status}`;
+  }
+
+  const updated = content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---`);
+  fs.writeFileSync(filePath, updated, 'utf-8');
+  return status;
+}
+
 // ─── Detailed Index ─────────────────────────────────────────────────────────
 
 const INDEX_MARKER_START = '<!-- minspec:dr-index:start -->';

@@ -121,6 +121,17 @@
         "icon": "$(list-tree)"
       },
       {
+        "command": "minspec.acceptAdr",
+        "title": "MinSpec: Accept Decision",
+        "shortTitle": "Accept",
+        "icon": "$(check)"
+      },
+      {
+        "command": "minspec.setAdrStatus",
+        "title": "MinSpec: Set Decision Status…",
+        "icon": "$(circle-outline)"
+      },
+      {
         "command": "minspec.scoreWsjf",
         "title": "MinSpec: Score Issue (WSJF)"
       },
@@ -213,6 +224,21 @@
           "command": "minspec.classify",
           "when": "viewItem == specNode",
           "group": "1_tier"
+        },
+        {
+          "command": "minspec.acceptAdr",
+          "when": "view == minspecAdrs && viewItem == adrNode.proposed",
+          "group": "inline"
+        },
+        {
+          "command": "minspec.acceptAdr",
+          "when": "view == minspecAdrs && viewItem == adrNode.proposed",
+          "group": "1_status@1"
+        },
+        {
+          "command": "minspec.setAdrStatus",
+          "when": "view == minspecAdrs && viewItem =~ /^adrNode/",
+          "group": "1_status@2"
         },
         {
           "command": "minspec.scoreWsjf",

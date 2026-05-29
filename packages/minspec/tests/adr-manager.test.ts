@@ -21,6 +21,8 @@ import {
   slugify,
   generateAdrContent,
   resolveDecisionsDir,
+  setAdrStatus,
+  ADR_STATUS_VALUES,
 } from '../src/lib/adr-manager';
 import { DEFAULT_CONFIG } from '../src/lib/config';
 
@@ -305,6 +307,71 @@ describe('adr-manager', () => {
         'Use PostgreSQL',
         'Switch to Vitest',
         'Adopt TypeScript Strict Mode',
+      ]);
+    });
+  });
+
+  // ─── setAdrStatus() ──────────────────────────────────────────────────
+
+  describe('setAdrStatus()', () => {
+    it('rewrites the status line and is reflected by listAdrs', () => {
+      const dir = path.join(tmpDir, 'decisions');
+      const adr = createAdr(tmpDir, 'Use PostgreSQL');
+      expect(adr.status).toBe('proposed');
+
+      const result = setAdrStatus(adr.filePath, 'accepted');
+      expect(result).toBe('accepted');
+
+      const reloaded = listAdrs(tmpDir).find(a => a.id === adr.id);
+      expect(reloaded?.status).toBe('accepted');
+      expect(dir).toContain('decisions'); // dir resolution sanity
+    });
+
+    it('preserves other frontmatter fields and body', () => {
+      const adr = createAdr(tmpDir, 'Adopt Vitest');
+      setAdrStatus(adr.filePath, 'superseded');
+      const content = fs.readFileSync(adr.filePath, 'utf-8');
+
+      expect(content).toContain(`id: ${adr.id}`);
+      expect(content).toContain('title: Adopt Vitest');
+      expect(content).toContain('status: superseded');
+      expect(content).not.toContain('status: proposed');
+      expect(content).toContain('## Context');
+    });
+
+    it('adds a status field when frontmatter has none', () => {
+      const dir = path.join(tmpDir, 'decisions');
+      fs.mkdirSync(dir, { recursive: true });
+      const fp = path.join(dir, 'DR-009-no-status.md');
+      fs.writeFileSync(fp, '---\nid: DR-009\ntitle: No Status\n---\n\n## Context\n', 'utf-8');
+
+      setAdrStatus(fp, 'accepted');
+      const content = fs.readFileSync(fp, 'utf-8');
+      expect(content).toContain('status: accepted');
+      expect(content).toContain('title: No Status');
+    });
+
+    it('throws on a file with no frontmatter', () => {
+      const dir = path.join(tmpDir, 'decisions');
+      fs.mkdirSync(dir, { recursive: true });
+      const fp = path.join(dir, 'DR-010-bare.md');
+      fs.writeFileSync(fp, '# Just a heading\n', 'utf-8');
+
+      expect(() => setAdrStatus(fp, 'accepted')).toThrow(/frontmatter/);
+    });
+
+    it('throws on an invalid status value', () => {
+      const adr = createAdr(tmpDir, 'Bad Status');
+      // @ts-expect-error testing runtime guard against invalid status
+      expect(() => setAdrStatus(adr.filePath, 'bogus')).toThrow(/Invalid ADR status/);
+    });
+
+    it('ADR_STATUS_VALUES lists all four lifecycle states in order', () => {
+      expect(ADR_STATUS_VALUES).toEqual([
+        'proposed',
+        'accepted',
+        'deprecated',
+        'superseded',
       ]);
     });
   });

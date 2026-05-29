@@ -1,5 +1,12 @@
 import * as vscode from 'vscode';
-import { createAdr, regenerateDrIndex } from '../lib/adr-manager';
+import {
+  createAdr,
+  regenerateDrIndex,
+  setAdrStatus,
+  ADR_STATUS_VALUES,
+  type AdrStatus,
+} from '../lib/adr-manager';
+import type { AdrNode } from '../views/adr-tree-provider';
 
 /**
  * Command: Create a new Architecture Decision Record.
@@ -53,6 +60,92 @@ export async function createAdrCommand(): Promise<void> {
     const message = err instanceof Error ? err.message : String(err);
     vscode.window.showErrorMessage(`MinSpec: Failed to create ADR — ${message}`);
   }
+}
+
+const STATUS_LABELS: Record<AdrStatus, string> = {
+  proposed: '$(circle-outline) Proposed',
+  accepted: '$(check) Accepted',
+  deprecated: '$(circle-slash) Deprecated',
+  superseded: '$(arrow-swap) Superseded',
+};
+
+/** Resolve the ADR file path + current status from a tree node argument. */
+function resolveAdrFromNode(
+  node: AdrNode | undefined,
+): { filePath: string; status: AdrStatus; id: string } | undefined {
+  const adr = node?.adr;
+  if (!adr?.filePath) {
+    vscode.window.showErrorMessage('MinSpec: No decision selected.');
+    return undefined;
+  }
+  return { filePath: adr.filePath, status: adr.status, id: adr.id };
+}
+
+/** Write the new status, regenerate the index, surface result. */
+async function applyStatus(
+  filePath: string,
+  id: string,
+  status: AdrStatus,
+): Promise<void> {
+  try {
+    setAdrStatus(filePath, status);
+
+    // Keep the Decision Register index in sync with the new status.
+    const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (folder) {
+      const decisionsDir = vscode.workspace
+        .getConfiguration('minspec')
+        .get<string>('decisionsDir');
+      try {
+        regenerateDrIndex(folder, decisionsDir ? { decisionsDir } : undefined);
+      } catch {
+        // Index regen is best-effort; status write already succeeded.
+      }
+    }
+
+    vscode.window.showInformationMessage(`MinSpec: ${id} → ${status}`);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    vscode.window.showErrorMessage(`MinSpec: Failed to set status — ${message}`);
+  }
+}
+
+/**
+ * Command: Accept a proposed ADR (inline ✓ on hover). Flips status to
+ * `accepted` in one click. No-op confirmation if already accepted.
+ */
+export async function acceptAdrCommand(node?: AdrNode): Promise<void> {
+  const resolved = resolveAdrFromNode(node);
+  if (!resolved) return;
+  if (resolved.status === 'accepted') {
+    vscode.window.showInformationMessage(`MinSpec: ${resolved.id} already accepted.`);
+    return;
+  }
+  await applyStatus(resolved.filePath, resolved.id, 'accepted');
+}
+
+/**
+ * Command: Set an ADR's status via a quick pick of all lifecycle states.
+ * Right-click → Set Status. Current status marked.
+ */
+export async function setAdrStatusCommand(node?: AdrNode): Promise<void> {
+  const resolved = resolveAdrFromNode(node);
+  if (!resolved) return;
+
+  const items: (vscode.QuickPickItem & { value: AdrStatus })[] =
+    ADR_STATUS_VALUES.map(status => ({
+      label: STATUS_LABELS[status],
+      description: status === resolved.status ? 'current' : undefined,
+      value: status,
+    }));
+
+  const picked = await vscode.window.showQuickPick(items, {
+    placeHolder: `Set status for ${resolved.id} (currently ${resolved.status})`,
+    ignoreFocusOut: true,
+  });
+  if (!picked || picked.value === resolved.status) return;
+
+  await applyStatus(resolved.filePath, resolved.id, picked.value);
 }
 
 /**

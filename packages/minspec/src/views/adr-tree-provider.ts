@@ -64,7 +64,9 @@ export class AdrNode extends vscode.TreeItem {
       arguments: [vscode.Uri.file(adr.filePath)],
     };
 
-    this.contextValue = 'adrNode';
+    // Status-suffixed contextValue gates menus: inline ✓ Accept shows only on
+    // proposed ADRs (`adrNode.proposed`); Set Status shows on all (`adrNode.*`).
+    this.contextValue = `adrNode.${adr.status}`;
     this.tooltip = `${adr.id}: ${adr.title}\nStatus: ${adr.status}\nDate: ${adr.date}`;
     this.accessibilityInformation = {
       label: `${adr.id}: ${adr.title}, status ${adr.status}, date ${adr.date}`,
