@@ -11,6 +11,7 @@ import {
   saveHashes,
   type GeneratedHashes,
 } from './merge-refresh';
+import { generateSlashCommandShims } from './slash-commands';
 
 export { DEFAULT_CONFIG };
 
@@ -59,6 +60,11 @@ export function generateHarnessFiles(rootDir: string): void {
   }
 
   saveHashes(rootDir, allHashes);
+
+  // Generate Spec Kit slash-command shims for any detected AI tool.
+  // Tools are re-detected after template generation so freshly written
+  // CLAUDE.md / AGENTS.md / .cursorrules trigger shim creation.
+  generateSlashCommandShims(rootDir);
 }
 
 /**
@@ -101,4 +107,9 @@ export function refreshHarnessFiles(rootDir: string): void {
   }
 
   saveHashes(rootDir, allHashes);
+
+  // Refresh Spec Kit slash-command shims. Per-command Claude/Cursor files
+  // are only created if missing (user edits preserved); the AGENTS.md
+  // marker section is regenerated in place.
+  generateSlashCommandShims(rootDir);
 }
