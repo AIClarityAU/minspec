@@ -18,14 +18,18 @@
     "@types/vscode": "^1.90.0",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
-    "@vitest/coverage-v8": "^2.1.9",
-    "esbuild": "^0.24.0",
+    "@vitest/coverage-v8": "^4.1.7",
+    "esbuild": "^0.28.0",
     "eslint": "^9.0.0",
     "typescript": "^5.5.0",
-    "vitest": "^2.0.0"
+    "vitest": "^4.1.7"
   },
   "engines": {
     "node": ">=22.0.0",
     "npm": ">=10.0.0"
+  },
+  "dependencies": {
+    "@vscode/test-cli": "0.0.11",
+    "mocha": "11.3.0"
   }
 }

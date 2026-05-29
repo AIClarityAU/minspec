@@ -181,23 +181,23 @@ vi.mock('../src/commands/backlog', () => ({
   triageIssueCommand: vi.fn(),
 }));
 vi.mock('../src/views/spec-tree-provider', () => ({
-  SpecTreeProvider: vi.fn(() => mockSpecTreeProvider),
+  SpecTreeProvider: vi.fn(function () { return mockSpecTreeProvider; }),
 }));
 vi.mock('../src/views/adr-tree-provider', () => ({
-  AdrTreeProvider: vi.fn(() => mockAdrTreeProvider),
+  AdrTreeProvider: vi.fn(function () { return mockAdrTreeProvider; }),
 }));
 vi.mock('../src/views/backlog-view', () => ({
-  BacklogTreeProvider: vi.fn(() => mockBacklogTreeProvider),
+  BacklogTreeProvider: vi.fn(function () { return mockBacklogTreeProvider; }),
 }));
 vi.mock('../src/views/status-bar', () => ({
-  MinSpecStatusBar: vi.fn(() => mockStatusBar),
+  MinSpecStatusBar: vi.fn(function () { return mockStatusBar; }),
 }));
 vi.mock('../src/views/spec-panel', () => ({
-  SpecPanel: vi.fn(() => mockSpecPanel),
+  SpecPanel: vi.fn(function () { return mockSpecPanel; }),
 }));
 vi.mock('../src/views/codelens-provider', () => ({
-  MinSpecCodeLensProvider: vi.fn(() => mockCodeLensProvider),
-  MinSpecSpecFileLensProvider: vi.fn(() => mockSpecFileLensProvider),
+  MinSpecCodeLensProvider: vi.fn(function () { return mockCodeLensProvider; }),
+  MinSpecSpecFileLensProvider: vi.fn(function () { return mockSpecFileLensProvider; }),
   goToSpecCommand: vi.fn(),
   goToCodeCommand: vi.fn(),
   linkToSpecCommand: vi.fn(),
