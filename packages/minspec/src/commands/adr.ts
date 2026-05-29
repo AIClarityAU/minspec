@@ -1,12 +1,45 @@
 import * as vscode from 'vscode';
 import {
   createAdr,
+  findSimilarAdrs,
   regenerateDrIndex,
   setAdrStatus,
   ADR_STATUS_VALUES,
   type AdrStatus,
 } from '../lib/adr-manager';
 import type { AdrNode } from '../views/adr-tree-provider';
+
+/**
+ * Dedup gate shared by both create paths. If an existing in-force ADR has a
+ * near-duplicate title, prompt the user. On "Open existing" the existing file
+ * is opened and 'cancel' is returned (no new ADR). Returns 'proceed' only when
+ * there is no near-duplicate or the user explicitly chose "Create anyway".
+ */
+async function confirmNoDuplicate(
+  folder: string,
+  title: string,
+  overrides: { decisionsDir: string } | undefined,
+): Promise<'proceed' | 'cancel'> {
+  const similar = findSimilarAdrs(folder, title, overrides);
+  if (similar.length === 0) return 'proceed';
+
+  const top = similar[0].adr;
+  const more = similar.length > 1 ? ` (+${similar.length - 1} more)` : '';
+  const OPEN = 'Open existing';
+  const CREATE = 'Create anyway';
+  const choice = await vscode.window.showWarningMessage(
+    `MinSpec: A similar decision already exists — ${top.id}: ${top.title}${more}. Create a new ADR anyway, or open the existing one?`,
+    { modal: true },
+    OPEN,
+    CREATE,
+  );
+  if (choice === OPEN) {
+    const doc = await vscode.workspace.openTextDocument(top.filePath);
+    await vscode.window.showTextDocument(doc);
+    return 'cancel';
+  }
+  return choice === CREATE ? 'proceed' : 'cancel';
+}
 
 /**
  * Command: Create a new Architecture Decision Record.
@@ -41,13 +74,14 @@ export async function createAdrCommand(): Promise<void> {
   const decisionsDir = vscode.workspace
     .getConfiguration('minspec')
     .get<string>('decisionsDir');
+  const overrides = decisionsDir ? { decisionsDir } : undefined;
+
+  // Dedup gate: warn if an existing, in-force ADR covers the same decision.
+  const gate = await confirmNoDuplicate(folder, title.trim(), overrides);
+  if (gate === 'cancel') return;
 
   try {
-    const adr = createAdr(
-      folder,
-      title.trim(),
-      decisionsDir ? { decisionsDir } : undefined,
-    );
+    const adr = createAdr(folder, title.trim(), overrides);
 
     // Open the new file
     const doc = await vscode.workspace.openTextDocument(adr.filePath);
@@ -221,13 +255,14 @@ export async function promptAdrOnT4Classification(taskTitle?: string): Promise<b
   const decisionsDir = vscode.workspace
     .getConfiguration('minspec')
     .get<string>('decisionsDir');
+  const overrides = decisionsDir ? { decisionsDir } : undefined;
+
+  // Dedup gate: warn if an existing, in-force ADR covers the same decision.
+  const gate = await confirmNoDuplicate(folder, title.trim(), overrides);
+  if (gate === 'cancel') return false;
 
   try {
-    const adr = createAdr(
-      folder,
-      title.trim(),
-      decisionsDir ? { decisionsDir } : undefined,
-    );
+    const adr = createAdr(folder, title.trim(), overrides);
 
     const doc = await vscode.workspace.openTextDocument(adr.filePath);
     await vscode.window.showTextDocument(doc);

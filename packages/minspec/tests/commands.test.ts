@@ -52,6 +52,7 @@ vi.mock('../src/lib/scaffold', () => ({
 
 vi.mock('../src/lib/adr-manager', () => ({
   createAdr: vi.fn(),
+  findSimilarAdrs: vi.fn(() => []),
 }));
 
 vi.mock('../src/lib/config', () => ({
@@ -126,7 +127,7 @@ import { declareScopeCommand, ensureSession } from '../src/commands/session';
 import { parkCommand } from '../src/commands/park';
 import { scoreWsjfCommand, triageIssueCommand } from '../src/commands/backlog';
 import { scaffold, generateHarnessFiles, refreshHarnessFiles } from '../src/lib/scaffold';
-import { createAdr } from '../src/lib/adr-manager';
+import { createAdr, findSimilarAdrs } from '../src/lib/adr-manager';
 import { loadSession, saveSession, clearSession } from '../src/lib/session';
 import { parkTopic } from '../src/lib/parking-lot';
 import {
@@ -288,6 +289,102 @@ describe('commands', () => {
       expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
         'MinSpec: Created DR-001 — Use PostgreSQL for persistence',
       );
+    });
+
+    it('dedup gate: creates anyway when user confirms despite a near-duplicate', async () => {
+      vi.mocked(vscode.window.showInputBox).mockResolvedValueOnce(
+        'Use PostgreSQL for storage',
+      );
+      vi.mocked(findSimilarAdrs).mockReturnValueOnce([
+        {
+          adr: {
+            id: 'DR-001',
+            title: 'Use PostgreSQL for persistence',
+            status: 'proposed',
+            date: '2026-05-27',
+            filePath: '/tmp/test-workspace/docs/decisions/DR-001.md',
+          },
+          score: 0.5,
+        },
+      ]);
+      vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(
+        'Create anyway' as never,
+      );
+      vi.mocked(createAdr).mockReturnValueOnce({
+        id: 'DR-002',
+        title: 'Use PostgreSQL for storage',
+        status: 'proposed',
+        date: '2026-05-29',
+        filePath: '/tmp/test-workspace/docs/decisions/DR-002.md',
+      });
+      vi.mocked(vscode.workspace.openTextDocument).mockResolvedValueOnce(
+        {} as vscode.TextDocument,
+      );
+
+      await createAdrCommand();
+
+      expect(vscode.window.showWarningMessage).toHaveBeenCalled();
+      expect(createAdr).toHaveBeenCalledWith(
+        '/tmp/test-workspace',
+        'Use PostgreSQL for storage',
+        undefined,
+      );
+    });
+
+    it('dedup gate: opens the existing ADR and does not create when user chooses Open existing', async () => {
+      vi.mocked(vscode.window.showInputBox).mockResolvedValueOnce(
+        'Use PostgreSQL for storage',
+      );
+      vi.mocked(findSimilarAdrs).mockReturnValueOnce([
+        {
+          adr: {
+            id: 'DR-001',
+            title: 'Use PostgreSQL for persistence',
+            status: 'proposed',
+            date: '2026-05-27',
+            filePath: '/tmp/test-workspace/docs/decisions/DR-001.md',
+          },
+          score: 0.5,
+        },
+      ]);
+      vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(
+        'Open existing' as never,
+      );
+      vi.mocked(vscode.workspace.openTextDocument).mockResolvedValueOnce(
+        {} as vscode.TextDocument,
+      );
+
+      await createAdrCommand();
+
+      expect(vscode.workspace.openTextDocument).toHaveBeenCalledWith(
+        '/tmp/test-workspace/docs/decisions/DR-001.md',
+      );
+      expect(createAdr).not.toHaveBeenCalled();
+    });
+
+    it('dedup gate: cancels (no create) when the warning is dismissed', async () => {
+      vi.mocked(vscode.window.showInputBox).mockResolvedValueOnce(
+        'Use PostgreSQL for storage',
+      );
+      vi.mocked(findSimilarAdrs).mockReturnValueOnce([
+        {
+          adr: {
+            id: 'DR-001',
+            title: 'Use PostgreSQL for persistence',
+            status: 'proposed',
+            date: '2026-05-27',
+            filePath: '/tmp/test-workspace/docs/decisions/DR-001.md',
+          },
+          score: 0.5,
+        },
+      ]);
+      vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(
+        undefined as never,
+      );
+
+      await createAdrCommand();
+
+      expect(createAdr).not.toHaveBeenCalled();
     });
 
     it('passes decisionsDir when configured', async () => {

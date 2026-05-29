@@ -407,6 +407,67 @@ export function regenerateDrIndex(
   return { filePath: indexPath, count };
 }
 
+// ─── Dedup / Similarity ───────────────────────────────────────────────────
+
+/** A possible-duplicate ADR, scored by title similarity to a candidate. */
+export interface AdrSimilarity {
+  readonly adr: AdrSummary;
+  /** Jaccard overlap of slug tokens, 0..1. */
+  readonly score: number;
+}
+
+/**
+ * Default similarity threshold above which two titles are "near-duplicates".
+ * Tuned low (0.3): the gate only warns — a false positive costs one extra
+ * click ("Create anyway"), while a false negative silently mints a duplicate
+ * decision, which is the thing we are trying to prevent.
+ */
+export const ADR_SIMILARITY_THRESHOLD = 0.3;
+
+/** Tokenize a title into a set of slug words, dropping trivial stopwords. */
+function titleTokens(title: string): Set<string> {
+  const STOP = new Set(['the', 'a', 'an', 'for', 'to', 'of', 'and', 'or', 'use', 'with', 'in', 'on']);
+  return new Set(
+    slugify(title)
+      .split('-')
+      .filter(t => t.length > 0 && !STOP.has(t)),
+  );
+}
+
+/** Jaccard similarity (|A∩B| / |A∪B|) of two token sets. */
+function jaccard(a: Set<string>, b: Set<string>): number {
+  if (a.size === 0 || b.size === 0) return 0;
+  let inter = 0;
+  for (const t of a) if (b.has(t)) inter++;
+  const union = a.size + b.size - inter;
+  return union === 0 ? 0 : inter / union;
+}
+
+/**
+ * Find existing ADRs whose title is a near-duplicate of `title`.
+ * Used as a dedup gate before creating a new record so the same decision
+ * is not minted twice under different numbers. Superseded/deprecated records
+ * are excluded — they describe choices no longer in force, so re-deciding
+ * the same topic is expected and not a duplicate.
+ *
+ * Returns matches at or above `threshold`, sorted by score descending.
+ */
+export function findSimilarAdrs(
+  rootDir: string,
+  title: string,
+  vscodeOverrides?: { decisionsDir?: string },
+  threshold: number = ADR_SIMILARITY_THRESHOLD,
+): AdrSimilarity[] {
+  const candidate = titleTokens(title);
+  if (candidate.size === 0) return [];
+
+  return listAdrs(rootDir, vscodeOverrides)
+    .filter(adr => adr.status !== 'superseded' && adr.status !== 'deprecated')
+    .map(adr => ({ adr, score: jaccard(candidate, titleTokens(adr.title)) }))
+    .filter(m => m.score >= threshold)
+    .sort((x, y) => y.score - x.score);
+}
+
 /**
  * List all ADR files in the decisions directory.
  * Returns summaries sorted by ID.

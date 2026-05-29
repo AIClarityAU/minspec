@@ -1,0 +1,62 @@
+---
+config:
+  theme: base
+---
+flowchart TB
+ subgraph TOP[" "]
+    direction LR
+        TC["Tier Classifier<br>(MinSpec)"]
+        CDD["CDD: Contract-Driven Development"]
+        WSJF["WSJF Backlog<br>(SAFe)"]
+  end
+ subgraph SDD["SDD: Spec-Driven Development"]
+    direction LR
+        P1["Constitution"]
+        P2["Specify"]
+        P3["Clarify"]
+        P4["Plan"]
+        P5["Tasks"]
+        P6["Analyze"]
+        P7["Implement"]
+  end
+ subgraph BOTTOM[" "]
+    direction LR
+        ADR["Decision Register<br>(Nygard)"]
+        BUG["RCDD: Root-Cause Driven Debugging (MinSpec)"]
+        GTD["Session Scope + Parking Lot<br>(GTD)"]
+  end
+    TC --> SDD
+    CDD --> SDD
+    WSJF --> SDD
+    P1 --> P2
+    P2 --> P3
+    P3 --> P4
+    P4 --> P5
+    P5 --> P6
+    P6 --> P7
+    ADR --> SDD
+    BUG --> SDD
+    GTD --> SDD
+    %% Invisible anchors — force BOTTOM row to render below SDD without adding visible edges
+    SDD ~~~ ADR
+    SDD ~~~ BUG
+    SDD ~~~ GTD
+
+    TC@{ shape: rect}
+    BUG@{ shape: rect}
+    style P1 fill:#ffffff,stroke:#3b5fc4,stroke-width:1.5px,color:#1a2540
+    style P2 fill:#ffffff,stroke:#3b5fc4,stroke-width:1.5px,color:#1a2540
+    style P3 fill:#ffffff,stroke:#3b5fc4,stroke-width:1.5px,color:#1a2540
+    style P4 fill:#ffffff,stroke:#3b5fc4,stroke-width:1.5px,color:#1a2540
+    style P5 fill:#ffffff,stroke:#3b5fc4,stroke-width:1.5px,color:#1a2540
+    style P6 fill:#ffffff,stroke:#3b5fc4,stroke-width:1.5px,color:#1a2540
+    style P7 fill:#ffffff,stroke:#3b5fc4,stroke-width:1.5px,color:#1a2540
+    style TC fill:#e6f7ec,stroke:#16a34a,stroke-width:2px,color:#14532d
+    style SDD fill:#e8eeff,stroke:#3b5fc4,stroke-width:2px,color:#1a2540
+    style CDD fill:#f3ebff,stroke:#7c3aed,stroke-width:2px,color:#3b1d72
+    style BUG fill:#e6f7ec,stroke:#16a34a,stroke-width:2px,color:#14532d
+    style ADR fill:#f5f5f5,stroke:#525a6b,stroke-width:2px,color:#1f2530
+    style WSJF fill:#f5f5f5,stroke:#525a6b,stroke-width:2px,color:#1f2530
+    style GTD fill:#f5f5f5,stroke:#525a6b,stroke-width:2px,color:#1f2530
+    style TOP fill:transparent,stroke:none,color:transparent
+    style BOTTOM fill:transparent,stroke:none,color:transparent

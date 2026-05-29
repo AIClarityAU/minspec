@@ -22,6 +22,8 @@ import {
   generateAdrContent,
   resolveDecisionsDir,
   setAdrStatus,
+  findSimilarAdrs,
+  ADR_SIMILARITY_THRESHOLD,
   ADR_STATUS_VALUES,
 } from '../src/lib/adr-manager';
 import { DEFAULT_CONFIG } from '../src/lib/config';
@@ -373,6 +375,52 @@ describe('adr-manager', () => {
         'deprecated',
         'superseded',
       ]);
+    });
+  });
+
+  // ─── findSimilarAdrs() — dedup gate ──────────────────────────────────
+
+  describe('findSimilarAdrs()', () => {
+    it('flags a near-duplicate title above threshold', () => {
+      createAdr(tmpDir, 'Use PostgreSQL for persistence');
+      const hits = findSimilarAdrs(tmpDir, 'Use PostgreSQL for storage');
+      expect(hits.length).toBe(1);
+      expect(hits[0].adr.title).toBe('Use PostgreSQL for persistence');
+      expect(hits[0].score).toBeGreaterThanOrEqual(ADR_SIMILARITY_THRESHOLD);
+    });
+
+    it('returns nothing for an unrelated title', () => {
+      createAdr(tmpDir, 'Use PostgreSQL for persistence');
+      expect(findSimilarAdrs(tmpDir, 'Adopt Tailwind for styling')).toEqual([]);
+    });
+
+    it('ignores stopwords so only meaningful tokens count', () => {
+      createAdr(tmpDir, 'Rate limiting middleware');
+      // Shares only stopwords with the existing title → no match.
+      expect(findSimilarAdrs(tmpDir, 'Use the for a to of')).toEqual([]);
+    });
+
+    it('excludes superseded and deprecated records', () => {
+      const sup = createAdr(tmpDir, 'Use Webpack for bundling');
+      setAdrStatus(sup.filePath, 'superseded');
+      const dep = createAdr(tmpDir, 'Use Webpack for builds');
+      setAdrStatus(dep.filePath, 'deprecated');
+      // Re-deciding a topic whose prior records are out of force is not a dup.
+      expect(findSimilarAdrs(tmpDir, 'Use Webpack for bundling')).toEqual([]);
+    });
+
+    it('sorts multiple matches by score descending', () => {
+      createAdr(tmpDir, 'Use PostgreSQL for persistence');
+      createAdr(tmpDir, 'Use PostgreSQL for persistence and caching');
+      const hits = findSimilarAdrs(tmpDir, 'Use PostgreSQL for persistence', undefined, 0.3);
+      expect(hits.length).toBe(2);
+      expect(hits[0].score).toBeGreaterThanOrEqual(hits[1].score);
+      expect(hits[0].adr.title).toBe('Use PostgreSQL for persistence'); // exact = 1.0
+    });
+
+    it('returns empty for an all-stopword candidate title', () => {
+      createAdr(tmpDir, 'Use PostgreSQL for persistence');
+      expect(findSimilarAdrs(tmpDir, 'the a an for')).toEqual([]);
     });
   });
 });

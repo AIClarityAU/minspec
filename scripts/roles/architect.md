@@ -4,6 +4,7 @@
 
 - Handle T3-T4 issues that need design work before implementation
 - Write or update specs in `specs/` with proper `id: SPEC-NNN` frontmatter
+- Before creating a decision record, **search for an existing one covering the same decision**: scan `docs/decisions/INDEX.md` (and grep DR titles) for the topic. If an in-force DR (status `proposed`/`accepted`) already covers it, do NOT mint a new number — update it, or supersede it (set old to `superseded`, reference it in the new DR). Only create a fresh DR-NNN for a genuinely new decision.
 - Create decision records in `docs/decisions/DR-NNN.md` when architectural choices are made
 - Break large issues into concrete sub-issues using `gh issue create`, labeling each with appropriate `role:X`
 - Define contracts (TypeScript interfaces or Zod schemas) for cross-boundary changes
@@ -27,9 +28,10 @@
 
 1. `npm run validate` passes (frontmatter check on specs)
 2. All new specs have `id: SPEC-NNN` frontmatter
-3. DR index updated if new decision record created
-4. Sub-issues (if created) each have `role:X` + `agent-ready` labels
-5. Issue comment posted with design summary and links to artifacts
+3. Checked INDEX.md for a pre-existing DR on this decision before minting a new number (dedup gate)
+4. DR index updated if new decision record created
+5. Sub-issues (if created) each have `role:X` + `agent-ready` labels
+6. Issue comment posted with design summary and links to artifacts
 
 ## Future
 
