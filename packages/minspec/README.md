@@ -1,6 +1,7 @@
 # MinSpec
 
-> Just enough spec. Never too much.
+> Just enough Spec. Never too much.
+
 
 [![Tests](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/harvest316/minspec/badges/tests.json)](https://github.com/harvest316/minspec/actions/workflows/ci.yml)
 [![Coverage](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/harvest316/minspec/badges/coverage.json)](https://github.com/harvest316/minspec/actions/workflows/ci.yml)
@@ -13,11 +14,11 @@ Every [specification-driven development](https://github.com/spec-kit/spec-kit) t
 
 MinSpec fixes this. It classifies each change by complexity and applies proportional ceremony -- a trivial fix needs one sentence of spec, while an architectural change gets a full design document. You get the discipline of specification-driven development without the bureaucracy.
 
-> **More info:** [**minspec.dev**](https://minspec.dev) — full methodology breakdown, 8-question FAQ, interactive stack diagram, and the case for adaptive ceremony.
+> **More info:** [**minspec.dev**](https://minspec.dev) — full methodology, FAQ, stack diagram, and the case for adaptive ceremony.
 
 ## Methodology Stack
 
-MinSpec is mostly **SDD** (Spec-Driven Development, ~70%) with a thin **CDD** layer (Contract-Driven Development, ~15%) and a few borrowed best practices: ADR, WSJF, GTD-style session discipline, plus a separate Bug Session Protocol because bug-fix work doesn't fit a feature-shaped lifecycle.
+MinSpec is mostly **SDD** (Spec-Driven Development, ~70%) with a thin **CDD** layer (Contract-Driven Development, ~15%) and a few borrowed best practices: ADR, WSJF, GTD-style session discipline. Bug fixes follow **RCDD** (Root-Cause-Driven Debugging) — a separate lifecycle, because bug-fix work doesn't fit a feature-shaped process.
 
 ![MinSpec methodology stack — SDD spine with CDD layer and satellite practices](https://raw.githubusercontent.com/harvest316/minspec/main/packages/minspec/media/methodology-stack.png)
 

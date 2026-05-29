@@ -70,7 +70,7 @@ scripts/hooks/           Pre-commit + dispatch
 
 Spec-driven development. Three phases per product: **Specify → Plan → Implement**. MinSpec is at Implement. ScroogeLLM has not started Specify.
 
-Bug fixes follow the [Bug Session Protocol](docs/decisions/DR-003.md) — reproduce, diagnose, fix, harden. No code changes in phases 1–2.
+Bug fixes follow [**RCDD** — Root-Cause-Driven Debugging](docs/decisions/DR-003.md) — reproduce, diagnose, fix, harden. No code changes in phases 1–2.
 
 All architectural decisions land in [docs/decisions/](docs/decisions/INDEX.md) as `DR-NNN.md`.
 

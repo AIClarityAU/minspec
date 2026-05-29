@@ -916,7 +916,7 @@
       </p>
 
       <div class="arch-diagram">
-        <img src="/img/methodology-stack.svg" alt="Methodology stack: SDD core lifecycle (Constitution, Specify, Clarify, Plan, Tasks, Analyze, Implement) with CDD applied across as a cross-cutting layer, and Tier Classifier, ADR, WSJF, GTD-style sessions, and Bug Session Protocol as satellite practices" width="100%" loading="lazy">
+        <img src="/img/methodology-stack.svg" alt="Methodology stack: SDD core lifecycle (Constitution, Specify, Clarify, Plan, Tasks, Analyze, Implement) with CDD applied across as a cross-cutting layer, and Tier Classifier, ADR, WSJF, GTD-style sessions, and RCDD (Root-Cause-Driven Debugging) as satellite practices" width="100%" loading="lazy">
       </div>
 
       <div class="methodology-pills">
@@ -951,8 +951,8 @@
           <span class="source">Source: GTD / focused-work discipline</span>
         </div>
         <div class="methodology-pill">
-          <div class="methodology-pill-header"><h4>Bug Session Protocol</h4><span class="weight">MinSpec</span></div>
-          <p>Reproduce → Diagnose → Fix → Harden. Root cause before fix, regression test before merge.</p>
+          <div class="methodology-pill-header"><h4>RCDD</h4><span class="weight">MinSpec</span></div>
+          <p>Root-Cause-Driven Debugging. Reproduce → Diagnose → Fix → Harden. Root cause before fix, regression test before merge.</p>
           <span class="source">Source: MinSpec's own (DR-003)</span>
         </div>
         <div class="methodology-pill">
@@ -1005,9 +1005,9 @@
         </details>
 
         <details class="faq-item">
-          <summary>Why a Bug Session Protocol separate from the SDD lifecycle?</summary>
+          <summary>Why RCDD as a separate lifecycle from SDD?</summary>
           <p>SDD assumes you're building a feature — you know roughly what you want, you write a spec, you implement. Bug fixes invert this: you don't know what's wrong, you have to <em>find</em> the root cause first, and a written "spec" before diagnosis is just guessing.</p>
-          <p>MinSpec's Bug Session Protocol (<code>Reproduce → Diagnose → Fix → Harden</code>) is a separate, lighter lifecycle that respects this. Bug work is roughly half of developer time and shouldn't be forced through a feature-shaped process.</p>
+          <p><strong>RCDD — Root-Cause-Driven Debugging</strong> (<code>Reproduce → Diagnose → Fix → Harden</code>) is MinSpec's separate, lighter lifecycle that respects this. Bug work is roughly half of developer time and shouldn't be forced through a feature-shaped process. RCDD's differentiator is the final <em>Harden</em> phase — close the contract or test gap that let the bug in, not just patch the symptom.</p>
         </details>
 
         <details class="faq-item">
