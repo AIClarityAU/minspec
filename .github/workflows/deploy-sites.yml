@@ -1,0 +1,49 @@
+name: Deploy sites
+
+# Auto-deploy the static marketing sites to Cloudflare Pages on push to main.
+# Replaces the previous manual `wrangler pages deploy` step that went stale
+# (favicon/logo/robots were committed but never redeployed). See DR on site deploy.
+#
+# Each site maps 1:1 to a CF Pages project:
+#   sites/minspec.dev     -> minspec-dev    (minspec.dev)
+#   sites/scroogellm.com  -> scroogellm-com (scroogellm.com)
+#
+# CF Pages only uploads changed files, so deploying both on any sites/** change
+# is a no-op for the untouched site.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'sites/**'
+      - '.github/workflows/deploy-sites.yml'
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-sites-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - dir: sites/minspec.dev
+            project: minspec-dev
+          - dir: sites/scroogellm.com
+            project: scroogellm-com
+    steps:
+      - uses: actions/checkout@v4
+      - name: Deploy ${{ matrix.project }}
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+        run: |
+          npx --yes wrangler@4 pages deploy "${{ matrix.dir }}" \
+            --project-name="${{ matrix.project }}" \
+            --branch=main \
+            --commit-dirty=true
