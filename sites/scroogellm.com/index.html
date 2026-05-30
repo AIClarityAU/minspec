@@ -124,25 +124,25 @@
     }
 
     .nav-logo {
-      display: flex;
+      display: inline-flex;
       align-items: center;
-      gap: 0.55rem;
+      gap: 0.4rem;
       font-family: var(--font-mono);
       font-size: 1.15rem;
       font-weight: 700;
       color: var(--text-primary);
       letter-spacing: -0.02em;
+      white-space: nowrap;
     }
 
-    .nav-logo img {
-      width: 36px;
-      height: 36px;
-      border-radius: 50%;
-      display: block;
-      background: var(--cream);
+    .nav-logo-icon {
+      font-size: 1.4rem;
+      line-height: 1;
+      display: inline-block;
     }
 
-    .nav-logo span { color: var(--gold-bright); }
+    .nav-logo-text { letter-spacing: -0.02em; }
+    .nav-logo-text b { font-weight: 700; color: var(--gold-bright); }
 
     .nav-links {
       display: flex;
@@ -161,7 +161,7 @@
 
     /* ── Hero (burgundy) ──────────────────────────────── */
     .hero {
-      padding: 7.5rem 1.5rem 4.5rem;
+      padding: 6rem 0 4rem;
       text-align: center;
       position: relative;
       background: var(--burgundy);
@@ -173,29 +173,30 @@
       position: absolute;
       inset: 0;
       background:
-        radial-gradient(ellipse at 50% 30%, rgba(244, 200, 67, 0.12) 0%, transparent 60%),
+        radial-gradient(ellipse at 70% 30%, rgba(244, 200, 67, 0.10) 0%, transparent 65%),
         linear-gradient(180deg, var(--burgundy-dark) 0%, var(--burgundy) 40%, var(--burgundy) 100%);
       pointer-events: none;
     }
 
-    .hero-inner {
-      max-width: 1100px;
-      margin: 0 auto;
-      position: relative;
-    }
-
     .hero-banner-wrap {
-      max-width: 1100px;
-      margin: 0 auto 2rem;
+      width: 100%;
+      max-width: 1600px;
+      margin: 0 0 2.5rem;
       line-height: 0;
-      filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.35));
+      position: relative;
     }
 
     .hero-banner-wrap img {
       width: 100%;
       height: auto;
       display: block;
-      border-radius: 12px;
+    }
+
+    .hero-inner {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 0 1.5rem;
+      position: relative;
     }
 
     .hero .tagline {
@@ -474,11 +475,11 @@
 
     .cost-savings-img {
       width: 100%;
-      max-width: 280px;
+      max-width: 300px;
       aspect-ratio: 1 / 1;
-      border-radius: 50%;
+      border-radius: 10px;
       overflow: hidden;
-      box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5), 0 0 0 4px rgba(244, 200, 67, 0.2);
+      box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5), 0 0 0 3px rgba(244, 200, 67, 0.18);
       line-height: 0;
     }
 
@@ -744,44 +745,57 @@
       line-height: 1.6;
     }
 
-    /* ── CTA (cream) ─────────────────────────────────── */
+    /* ── CTA (burgundy) ──────────────────────────────── */
     .cta-section {
       text-align: center;
-      background: var(--cream);
-      color: var(--ink);
-      border-top: 8px solid var(--burgundy);
+      background: var(--burgundy);
+      color: var(--cream);
+      border-top: 8px solid var(--gold);
       position: relative;
       overflow: hidden;
     }
+
+    .cta-section::before {
+      content: '';
+      position: absolute;
+      inset: 0;
+      background:
+        radial-gradient(ellipse at 50% 0%, rgba(244, 200, 67, 0.12) 0%, transparent 60%),
+        linear-gradient(180deg, var(--burgundy-dark) 0%, var(--burgundy) 50%, var(--burgundy-dark) 100%);
+      pointer-events: none;
+    }
+
+    .cta-section .section-inner { position: relative; }
 
     .cta-banner-wrap {
       max-width: 1100px;
       margin: 0 auto 2rem;
       line-height: 0;
-      filter: drop-shadow(0 8px 24px rgba(118, 17, 49, 0.18));
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 12px 36px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(244, 200, 67, 0.2);
     }
 
     .cta-banner-wrap img {
       width: 100%;
       height: auto;
       display: block;
-      border-radius: 12px;
     }
 
     .cta-section .section-label {
-      color: var(--burgundy);
+      color: var(--gold-bright);
     }
 
     .cta-section .section-title {
-      color: var(--ink);
+      color: var(--cream-light);
     }
 
     .cta-section .section-title em {
-      color: var(--burgundy);
+      color: var(--gold-bright);
     }
 
     .cta-section .section-desc {
-      color: #4a3220;
+      color: var(--cream);
       margin-left: auto;
       margin-right: auto;
       margin-bottom: 2rem;
@@ -793,12 +807,12 @@
     }
 
     .signup-form-cta input[type="email"] {
-      background: rgba(255, 255, 255, 0.7);
-      color: var(--ink);
-      border-color: rgba(118, 17, 49, 0.25);
+      background: rgba(10, 5, 8, 0.4);
+      color: var(--cream-light);
+      border-color: rgba(244, 200, 67, 0.25);
     }
 
-    .signup-form-cta input[type="email"]::placeholder { color: rgba(42, 24, 16, 0.4); }
+    .signup-form-cta input[type="email"]::placeholder { color: rgba(230, 215, 184, 0.45); }
 
     /* ── Footer ──────────────────────────────────────── */
     .footer {
@@ -959,9 +973,8 @@
   <!-- ── Navigation ──────────────────────────────────── -->
   <nav class="nav" aria-label="Main navigation">
     <div class="nav-inner">
-      <a href="/" class="nav-logo">
-        <img src="img/scrooge-bust-fronton.webp" alt="" aria-hidden="true" width="36" height="36" loading="eager">
-        Scrooge<span>LLM</span>
+      <a href="/" class="nav-logo" aria-label="ScroogeLLM home">
+        <span class="nav-logo-icon" aria-hidden="true">💰</span><span class="nav-logo-text">Scrooge<b>LLM</b></span>
       </a>
       <ul class="nav-links">
         <li><a href="#features">Features</a></li>
@@ -975,15 +988,15 @@
 
   <!-- ── Hero ────────────────────────────────────────── -->
   <header class="hero">
+    <div class="hero-banner-wrap">
+      <picture>
+        <source srcset="img/scrooge-banner-red.webp" type="image/webp">
+        <img src="img/scrooge-banner-red.jpg"
+             alt="ScroogeLLM — a jovial Victorian gentleman laughing beside a vault stacked with bags labelled TOKENS SAVED, under a gilded sign reading 'Why pay full price?'"
+             width="1408" height="768" loading="eager" fetchpriority="high">
+      </picture>
+    </div>
     <div class="hero-inner">
-      <div class="hero-banner-wrap">
-        <picture>
-          <source srcset="img/scrooge-banner-red.webp" type="image/webp">
-          <img src="img/scrooge-banner-red.jpg"
-               alt="ScroogeLLM — a jovial Victorian gentleman laughing beside a vault stacked with bags labelled TOKENS SAVED, under a gilded sign reading 'Why pay full price?'"
-               width="1408" height="768" loading="eager" fetchpriority="high">
-        </picture>
-      </div>
       <p class="tagline">Every token counts. Especially the ones we pinch.</p>
       <p class="subtitle">
         A jovial little VS Code extension that sits between you and your AI provider,
@@ -1006,8 +1019,7 @@
         <h2 class="section-title">Where did all your <em>money</em> go?</h2>
         <p class="section-desc">
           Most developers haven't the foggiest what each AI call actually costs them.
-          ScroogeLLM names every dollar &mdash; <em>politely, in a ledger</em> &mdash;
-          then quietly recovers whatever it can.
+          Scrooge tracks every penny &mdash; <em>racking up the savings in no time.</em>
         </p>
       </div>
       <div class="cost-comparison" aria-label="Cost comparison: before ScroogeLLM showing $47.20 daily cost, after ScroogeLLM showing $18.40 daily cost with 61% savings">
@@ -1075,7 +1087,7 @@
         </div>
         <div class="cost-savings">
           <div class="cost-savings-amount">61% saved</div>
-          <div class="cost-savings-label">an honest day's haul for one frugal developer</div>
+          <div class="cost-savings-label">an honest day's haul for this frugal developer</div>
         </div>
       </div>
     </div>
@@ -1187,9 +1199,9 @@
         <p class="section-label gold">How It Works</p>
         <h2 class="section-title">A miserly little proxy that <em>earns its keep</em></h2>
         <p class="section-desc">
-          ScroogeLLM runs a quiet local proxy. Your AI tools talk to it.
-          It talks to the provider. In between, it pinches every penny it can
-          &mdash; and reports back, honest to the cent.
+          Scrooge runs as a quiet local proxy. Your AI tools talk to the Scrooge proxy,
+          which then ships the work out to the most appropriate LLM provider.
+          In between, he pinches every penny he can &mdash; and reports back, honest to the cent.
         </p>
       </div>
 
@@ -1228,33 +1240,24 @@ config:
   theme: dark
 ---
 flowchart TB
- subgraph row1[" "]
-    direction LR
-        D["cache"]
-        C["anonymize"]
-        B["compress"]
-  end
- subgraph row2[" "]
-    direction LR
-        G["audit"]
-        F["log"]
-        E["route"]
-  end
  subgraph proxy["ScroogeLLM Proxy"]
-    direction LR
-        row1
-        row2
+        B["compress"]
+        C["anonymize"]
+        D["cache"]
+        E["route"]
+        F["log"]
+        G["audit"]
   end
  subgraph localhost["🖥 Your Machine (localhost only)"]
         proxy
         A["VS Code / AI Tool"]
   end
+    A --> B
     B --> C
     C --> D
+    D --> E
     E --> F
     F --> G
-    D --> E
-    A --> B
     G --> H["☁️ LLM Provider API\n(OpenAI, Anthropic, etc.)"]
 
     style D fill:#132613,stroke:#22c55e,color:#4ade80
@@ -1263,8 +1266,6 @@ flowchart TB
     style G fill:#132613,stroke:#22c55e,color:#4ade80
     style F fill:#132613,stroke:#22c55e,color:#4ade80
     style E fill:#132613,stroke:#22c55e,color:#4ade80
-    style row1 fill:transparent,stroke:none
-    style row2 fill:transparent,stroke:none
     style proxy fill:#0a1f0a,stroke:#22c55e,color:#4ade80
     style A fill:#1a1a2e,stroke:#6c9cfc,color:#a0b4e0
     style H fill:#1a1a2e,stroke:#6c9cfc,color:#a0b4e0
@@ -1327,10 +1328,10 @@ flowchart TB
     <div class="section-inner">
       <div class="features-header">
         <p class="section-label gold">Privacy &amp; Security</p>
-        <h2 class="section-title">Your secrets stay home. <em>Always.</em></h2>
+        <h2 class="section-title">Your secrets stay <em>close to home</em></h2>
         <p class="section-desc">
           ScroogeLLM is built for people who take data seriously.
-          No cloud, no accounts, no telemetry. The miser keeps the books &mdash; nobody else.
+          The design goal is simple: the miser keeps the books on your machine, not ours.
         </p>
       </div>
 
@@ -1338,30 +1339,30 @@ flowchart TB
         <div class="privacy-item">
           <span class="privacy-icon" aria-hidden="true">&#x1F3E0;</span>
           <div>
-            <div class="privacy-item-title">Localhost only</div>
+            <div class="privacy-item-title">Local-first by default</div>
             <p class="privacy-item-desc">
-              The proxy binds to 127.0.0.1 by default. No remote exposure
-              without your explicit opt-in, signed in triplicate.
+              The proxy is designed to bind to localhost (127.0.0.1).
+              Any remote exposure would require an explicit opt-in &mdash; and a good reason.
             </p>
           </div>
         </div>
         <div class="privacy-item">
           <span class="privacy-icon" aria-hidden="true">&#x1F512;</span>
           <div>
-            <div class="privacy-item-title">Native keychain</div>
+            <div class="privacy-item-title">Native keychain storage</div>
             <p class="privacy-item-desc">
-              API keys live in macOS Keychain, Windows Credential Locker,
-              or Linux Secret Service. Never in plaintext, never on a sticky note.
+              API keys go into your OS's native keychain &mdash; macOS Keychain,
+              Windows Credential Locker, or Linux Secret Service &mdash; rather than plaintext on disk.
             </p>
           </div>
         </div>
         <div class="privacy-item">
           <span class="privacy-icon" aria-hidden="true">&#x1F6AB;</span>
           <div>
-            <div class="privacy-item-title">Zero telemetry</div>
+            <div class="privacy-item-title">Telemetry-light</div>
             <p class="privacy-item-desc">
-              No usage data, no analytics, no phone-home. We never see
-              your prompts, your code, or your API keys. Not interested.
+              No analytics, prompts, or API keys leave your machine by default.
+              If diagnostics ever get added later, they'll be off until you choose to turn them on.
             </p>
           </div>
         </div>
@@ -1370,8 +1371,8 @@ flowchart TB
           <div>
             <div class="privacy-item-title">Deterministic PII scrubbing</div>
             <p class="privacy-item-desc">
-              Real names, emails, and identifiers are replaced with stable fakes
-              before data leaves your machine. Same input, same fake, every time.
+              When enabled, real names, emails, and identifiers can be replaced with
+              stable fakes before requests reach your provider. Same input, same fake, every time.
             </p>
           </div>
         </div>
@@ -1401,7 +1402,7 @@ flowchart TB
         <input type="email" placeholder="dev@example.com" aria-label="Email address" required disabled>
         <button type="submit" class="btn btn-gold" disabled style="opacity: 0.6; cursor: not-allowed;">Notify Me</button>
       </form>
-      <div class="coming-soon-pill" style="background: rgba(118, 17, 49, 0.08); border-color: rgba(118, 17, 49, 0.3); color: var(--burgundy);">
+      <div class="coming-soon-pill">
         <span aria-hidden="true">🪙</span> Notifications launching soon
       </div>
     </div>
