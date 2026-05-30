@@ -81,11 +81,10 @@ the others reference, plus an epic grouping layer in each panel.
 - A merged single "work item" tree collapsing spec/ADR/issue distinctions.
 - Auto-assigning epics to existing artifacts (no inference).
 
-## Open questions
+## Resolved (were open questions)
 
-- **OQ-1 — done/total badge source.** Count = (artifacts in epic with terminal
-  status) / (total artifacts in epic). Confirm "terminal" per kind: spec
-  `status: done`, ADR `status: accepted|done`, issue closed. Proposed default;
-  not blocking.
-- **OQ-2 — toggle granularity.** One global "group by epic" setting vs.
-  per-panel toggle. Proposed: per-panel (FR-7); revisit if noisy.
+- **OQ-1 — done/total badge source. RESOLVED (default).** Badge = (artifacts in
+  epic with terminal status) / (total in epic). Terminal per kind: spec
+  `status: done`, ADR `status: accepted|done`, issue closed (GitHub state).
+- **OQ-2 — toggle granularity. RESOLVED (default).** Per-panel toggle (FR-7), not
+  one global setting.
