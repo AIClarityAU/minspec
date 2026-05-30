@@ -35,36 +35,52 @@ const DATASET = 'princeton-nlp/SWE-bench_Verified';
 const CONFIG = 'default';
 const SPLIT = 'test';
 const API = 'https://datasets-server.huggingface.co/rows';
-const PAGE = 100; // datasets-server max length per request
+const INFO = 'https://datasets-server.huggingface.co/info';
 
 const count = Math.max(1, parseInt(process.argv[2] ?? '50', 10) || 50);
 
-async function fetchRows(offset, length) {
-  const url = `${API}?dataset=${encodeURIComponent(DATASET)}&config=${CONFIG}&split=${SPLIT}&offset=${offset}&length=${length}`;
+async function getJson(url) {
   const res = await fetch(url);
   if (!res.ok) {
-    throw new Error(`HuggingFace API ${res.status} ${res.statusText} for offset=${offset}`);
+    throw new Error(`HuggingFace API ${res.status} ${res.statusText} for ${url}`);
   }
-  const json = await res.json();
-  return json.rows ?? [];
+  return res.json();
+}
+
+async function fetchRow(offset) {
+  const url = `${API}?dataset=${encodeURIComponent(DATASET)}&config=${CONFIG}&split=${SPLIT}&offset=${offset}&length=1`;
+  const json = await getJson(url);
+  return json.rows?.[0]?.row ?? null;
+}
+
+async function getTotal() {
+  // datasets-server /info exposes per-split num_examples
+  const info = await getJson(`${INFO}?dataset=${encodeURIComponent(DATASET)}&config=${CONFIG}`);
+  const splits = info?.dataset_info?.splits ?? {};
+  return splits[SPLIT]?.num_examples ?? 500;
 }
 
 async function main() {
-  console.log(`Fetching ${count} instances from ${DATASET} (${SPLIT})…`);
+  const total = await getTotal();
+  // Stride evenly across the whole dataset for repo/size diversity — NOT the first N
+  // (rows are grouped by repo, so a sequential head is single-repo and size-skewed).
+  const step = Math.max(1, Math.floor(total / count));
+  console.log(
+    `Fetching ${count} instances from ${DATASET} (${SPLIT}, total=${total}) ` +
+      `strided every ${step} rows…`,
+  );
+
   const instances = [];
-  for (let offset = 0; instances.length < count; offset += PAGE) {
-    const length = Math.min(PAGE, count - instances.length);
-    const rows = await fetchRows(offset, length);
-    if (rows.length === 0) break; // dataset exhausted
-    for (const { row } of rows) {
-      if (!row || !row.patch) continue;
-      instances.push({
-        instanceId: row.instance_id,
-        repo: row.repo,
-        problemStatement: row.problem_statement ?? '',
-        patch: row.patch,
-      });
-    }
+  for (let k = 0; k < count; k++) {
+    const offset = (k * step) % total;
+    const row = await fetchRow(offset);
+    if (!row || !row.patch) continue;
+    instances.push({
+      instanceId: row.instance_id,
+      repo: row.repo,
+      problemStatement: row.problem_statement ?? '',
+      patch: row.patch,
+    });
   }
 
   mkdirSync(DATA_DIR, { recursive: true });

@@ -7,5 +7,30 @@
     "T4": "Architectural / wide blast radius, 500+ lines or 16+ files.",
     "_note": "Label the task as a HUMAN would scope it, independent of raw diff size. Disagreements between human scope and the size-based classifier are the interesting data."
   },
-  "labels": {}
+  "labels": {
+    "astropy__astropy-12907": "T1",
+    "astropy__astropy-8707": "T2",
+    "django__django-11211": "T1",
+    "django__django-11790": "T1",
+    "django__django-12308": "T1",
+    "django__django-13128": "T2",
+    "django__django-13568": "T1",
+    "django__django-14034": "T1",
+    "django__django-14559": "T1",
+    "django__django-15128": "T2",
+    "django__django-15572": "T1",
+    "django__django-16145": "T1",
+    "django__django-16667": "T1",
+    "matplotlib__matplotlib-22719": "T1",
+    "matplotlib__matplotlib-25775": "T2",
+    "pydata__xarray-3151": "T1",
+    "pylint-dev__pylint-4551": "T3",
+    "pytest-dev__pytest-7205": "T1",
+    "scikit-learn__scikit-learn-13328": "T1",
+    "scikit-learn__scikit-learn-9288": "T1",
+    "sphinx-doc__sphinx-8120": "T1",
+    "sphinx-doc__sphinx-9602": "T1",
+    "sympy__sympy-13877": "T2",
+    "sympy__sympy-17318": "T1"
+  }
 }
