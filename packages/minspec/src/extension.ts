@@ -9,6 +9,7 @@ import { parkCommand } from './commands/park';
 import { generateExampleCommand } from './commands/example';
 import { migrateLayoutCommand } from './commands/migrate';
 import { createAdrCommand, regenerateDrIndexCommand, acceptAdrCommand, setAdrStatusCommand } from './commands/adr';
+import { createEpicCommand, regenerateEpicIndexCommand } from './commands/epic';
 import { regenerateDrIndex } from './lib/adr-manager';
 import { scoreWsjfCommand, triageIssueCommand } from './commands/backlog';
 import { approveSpecCommand, revokeApprovalCommand } from './commands/approve';
@@ -55,6 +56,26 @@ export function activate(context: vscode.ExtensionContext): void {
     treeDataProvider: backlogTreeProvider,
   });
   context.subscriptions.push(specTreeView, adrTreeView, backlogTreeView);
+
+  // ─── Epic grouping toggle (DR-013 / SPEC-007 FR-7) ──────────────────────────
+  // Each panel persists its "group by epic" state in workspaceState (default on)
+  // and exposes a context key so the titlebar icon reflects on/off.
+  const EPIC_TOGGLES = [
+    { key: 'minspec.specExplorer.groupByEpic', ctx: 'minspec.specExplorer.groupByEpic', provider: specTreeProvider },
+    { key: 'minspec.adrExplorer.groupByEpic', ctx: 'minspec.adrExplorer.groupByEpic', provider: adrTreeProvider },
+    { key: 'minspec.backlog.groupByEpic', ctx: 'minspec.backlog.groupByEpic', provider: backlogTreeProvider },
+  ];
+  for (const t of EPIC_TOGGLES) {
+    const enabled = context.workspaceState.get<boolean>(t.key, true);
+    t.provider.epicGrouping?.set(enabled);
+    void vscode.commands.executeCommand('setContext', t.ctx, enabled);
+  }
+  const toggleEpicGrouping = async (t: typeof EPIC_TOGGLES[number]): Promise<void> => {
+    const next = t.provider.epicGrouping?.toggle() ?? true;
+    await context.workspaceState.update(t.key, next);
+    await vscode.commands.executeCommand('setContext', t.ctx, next);
+    t.provider.refresh();
+  };
 
   // Async refresh triggers: when a pane becomes visible, refetch its data.
   // File watchers below catch in-VSCode edits; these hooks catch external
@@ -130,6 +151,16 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('minspec.createAdr', createAdrCommand),
     vscode.commands.registerCommand('minspec.regenerateDrIndex', regenerateDrIndexCommand),
+    vscode.commands.registerCommand('minspec.createEpic', async () => {
+      await createEpicCommand();
+      specTreeProvider.refresh();
+      adrTreeProvider.refresh();
+      backlogTreeProvider.refresh();
+    }),
+    vscode.commands.registerCommand('minspec.regenerateEpicIndex', regenerateEpicIndexCommand),
+    vscode.commands.registerCommand('minspec.specExplorer.toggleEpicGrouping', () => toggleEpicGrouping(EPIC_TOGGLES[0])),
+    vscode.commands.registerCommand('minspec.adrExplorer.toggleEpicGrouping', () => toggleEpicGrouping(EPIC_TOGGLES[1])),
+    vscode.commands.registerCommand('minspec.backlog.toggleEpicGrouping', () => toggleEpicGrouping(EPIC_TOGGLES[2])),
     vscode.commands.registerCommand('minspec.acceptAdr', async (node) => {
       await acceptAdrCommand(node);
       adrTreeProvider.refresh();

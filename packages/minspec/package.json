@@ -125,6 +125,32 @@
         "icon": "$(list-tree)"
       },
       {
+        "command": "minspec.createEpic",
+        "title": "MinSpec: Create Epic",
+        "shortTitle": "New Epic",
+        "icon": "$(milestone)"
+      },
+      {
+        "command": "minspec.regenerateEpicIndex",
+        "title": "MinSpec: Regenerate Epic INDEX",
+        "icon": "$(list-tree)"
+      },
+      {
+        "command": "minspec.specExplorer.toggleEpicGrouping",
+        "title": "MinSpec: Toggle Group by Epic (Specs)",
+        "icon": "$(milestone)"
+      },
+      {
+        "command": "minspec.adrExplorer.toggleEpicGrouping",
+        "title": "MinSpec: Toggle Group by Epic (Decisions)",
+        "icon": "$(milestone)"
+      },
+      {
+        "command": "minspec.backlog.toggleEpicGrouping",
+        "title": "MinSpec: Toggle Group by Epic (Backlog)",
+        "icon": "$(milestone)"
+      },
+      {
         "command": "minspec.acceptAdr",
         "title": "MinSpec: Accept Decision",
         "shortTitle": "Accept",
@@ -218,6 +244,11 @@
           "group": "navigation"
         },
         {
+          "command": "minspec.specExplorer.toggleEpicGrouping",
+          "when": "view == minspecStatus",
+          "group": "navigation"
+        },
+        {
           "command": "minspec.refreshTree",
           "when": "view == minspecAdrs",
           "group": "navigation"
@@ -233,7 +264,22 @@
           "group": "navigation"
         },
         {
+          "command": "minspec.adrExplorer.toggleEpicGrouping",
+          "when": "view == minspecAdrs",
+          "group": "navigation"
+        },
+        {
+          "command": "minspec.createEpic",
+          "when": "view == minspecAdrs",
+          "group": "navigation"
+        },
+        {
           "command": "minspec.refreshBacklog",
+          "when": "view == minspecBacklog",
+          "group": "navigation"
+        },
+        {
+          "command": "minspec.backlog.toggleEpicGrouping",
           "when": "view == minspecBacklog",
           "group": "navigation"
         }
