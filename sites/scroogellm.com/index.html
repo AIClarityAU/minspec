@@ -22,17 +22,81 @@
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
-    "@type": "SoftwareApplication",
-    "name": "ScroogeLLM",
-    "applicationCategory": "DeveloperApplication",
-    "operatingSystem": "Windows, macOS, Linux",
-    "offers": {
-      "@type": "Offer",
-      "price": "0",
-      "priceCurrency": "USD"
-    },
-    "description": "VS Code extension that optimizes LLM API costs with a local proxy, prompt compression, and smart model routing.",
-    "url": "https://scroogellm.com"
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": "https://aiclarity.com.au/#organization",
+        "name": "AI Clarity",
+        "url": "https://aiclarity.com.au",
+        "sameAs": [
+          "https://github.com/harvest316/minspec",
+          "https://marketplace.visualstudio.com/publishers/aiclarity"
+        ]
+      },
+      {
+        "@type": "WebSite",
+        "@id": "https://scroogellm.com/#website",
+        "url": "https://scroogellm.com",
+        "name": "ScroogeLLM",
+        "publisher": { "@id": "https://aiclarity.com.au/#organization" }
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://scroogellm.com/#software",
+        "name": "ScroogeLLM",
+        "applicationCategory": "DeveloperApplication",
+        "applicationSubCategory": "Visual Studio Code Extension",
+        "operatingSystem": "Windows, macOS, Linux",
+        "url": "https://scroogellm.com",
+        "description": "A local VS Code proxy that cuts LLM API costs — prompt compression, response caching, and smart model routing — and shows every penny saved in your status bar. Your code stays on your machine.",
+        "author": { "@id": "https://aiclarity.com.au/#organization" },
+        "publisher": { "@id": "https://aiclarity.com.au/#organization" },
+        "dateModified": "2026-05-30",
+        "isAccessibleForFree": true,
+        "featureList": [
+          "Local proxy — code and prompts stay on your machine",
+          "Prompt compression to trim wasted tokens",
+          "Response caching to avoid repeat charges",
+          "Smart model routing",
+          "Full savings visibility in the status bar"
+        ],
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        }
+      },
+      {
+        "@type": "FAQPage",
+        "@id": "https://scroogellm.com/#faq",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Does my code leave my machine?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. ScroogeLLM runs as a local proxy, so your code and prompts stay on your machine. It sits between your editor and the LLM provider to measure and trim cost without exfiltrating your source."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Is ScroogeLLM free?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. ScroogeLLM is a free VS Code extension. You install it from the VS Code Marketplace and run it against your own LLM API keys."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "How does ScroogeLLM cut LLM costs?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "A local proxy applies prompt compression to trim wasted tokens, response caching to avoid paying twice for the same request, and smart model routing. Every saving is shown in your status bar so you can see what AI costs and what you cut."
+            }
+          }
+        ]
+      }
+    ]
   }
   </script>
   <style>

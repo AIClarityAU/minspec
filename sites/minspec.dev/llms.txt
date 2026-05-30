@@ -1,0 +1,19 @@
+# MinSpec
+
+> Adaptive specification-driven development (SDD) for VS Code. Proportional ceremony that scales with change complexity — trivial T1 changes need one sentence, complex T4 architecture changes get full specs. No AI dependency, offline core, no lock-in. Free. Built by AI Clarity.
+
+MinSpec is a free VS Code extension that implements the SDD methodology popularized by GitHub Spec Kit, adding a T1–T4 complexity classifier so ceremony scales to the size of the change instead of applying the full lifecycle to everything. Spec files are Spec Kit-compatible.
+
+## Core concepts
+
+- Tier classifier (T1–T4): suggests how much SDD ceremony a change needs. User override always wins.
+- SDD phases: constitution, specify, clarify, plan, tasks, analyze, implement — each produces a markdown artifact forming a traceable chain from intent to code.
+- CDD layer: contracts (TypeScript types, Zod, OpenAPI) plus T0 invariant tests written before implementation, so AI agents don't drift.
+- RCDD — Root-Cause-Driven Debugging: a separate, lighter lifecycle for bug work (Reproduce, Diagnose, Fix, Harden). The Harden phase closes the gap that let the bug in.
+
+## Links
+
+- Home: https://minspec.dev
+- Source (GitHub): https://github.com/harvest316/minspec
+- Changelog: https://github.com/harvest316/minspec/blob/main/packages/minspec/CHANGELOG.md
+- Publisher: AI Clarity — https://aiclarity.com.au

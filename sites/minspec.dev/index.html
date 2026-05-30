@@ -20,17 +20,125 @@
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
-    "@type": "SoftwareApplication",
-    "name": "MinSpec",
-    "applicationCategory": "DeveloperApplication",
-    "operatingSystem": "Windows, macOS, Linux",
-    "offers": {
-      "@type": "Offer",
-      "price": "0",
-      "priceCurrency": "USD"
-    },
-    "description": "Adaptive specification-driven development for VS Code. Proportional ceremony that scales with change complexity.",
-    "url": "https://minspec.dev"
+    "@graph": [
+      {
+        "@type": "Organization",
+        "@id": "https://aiclarity.com.au/#organization",
+        "name": "AI Clarity",
+        "url": "https://aiclarity.com.au",
+        "sameAs": [
+          "https://github.com/harvest316/minspec",
+          "https://marketplace.visualstudio.com/publishers/aiclarity"
+        ]
+      },
+      {
+        "@type": "WebSite",
+        "@id": "https://minspec.dev/#website",
+        "url": "https://minspec.dev",
+        "name": "MinSpec",
+        "publisher": { "@id": "https://aiclarity.com.au/#organization" }
+      },
+      {
+        "@type": "SoftwareApplication",
+        "@id": "https://minspec.dev/#software",
+        "name": "MinSpec",
+        "applicationCategory": "DeveloperApplication",
+        "applicationSubCategory": "Visual Studio Code Extension",
+        "operatingSystem": "Windows, macOS, Linux",
+        "url": "https://minspec.dev",
+        "description": "Adaptive specification-driven development for VS Code. Proportional ceremony that scales with change complexity: T1 trivial changes need one sentence, T4 architecture changes get full specs. No AI dependency, offline core, no lock-in.",
+        "author": { "@id": "https://aiclarity.com.au/#organization" },
+        "publisher": { "@id": "https://aiclarity.com.au/#organization" },
+        "datePublished": "2026-05-26",
+        "dateModified": "2026-05-30",
+        "license": "https://minspec.dev",
+        "isAccessibleForFree": true,
+        "featureList": [
+          "T1–T4 complexity classifier that scales SDD ceremony to change size",
+          "Adaptive phase selection (constitution, specify, clarify, plan, tasks, analyze, implement)",
+          "RCDD — Root-Cause-Driven Debugging lifecycle for bug work",
+          "Contract-Driven Development layer with T0 invariant tests",
+          "Offline core with no AI dependency",
+          "Spec Kit-compatible spec files, no lock-in",
+          "User override always wins — recommendation engine, not a gate"
+        ],
+        "offers": {
+          "@type": "Offer",
+          "price": "0",
+          "priceCurrency": "USD"
+        }
+      },
+      {
+        "@type": "FAQPage",
+        "@id": "https://minspec.dev/#faq",
+        "mainEntity": [
+          {
+            "@type": "Question",
+            "name": "Is MinSpec a Spec Kit clone?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. MinSpec implements the same SDD methodology that GitHub Spec Kit popularized, but adds an adaptive ceremony layer driven by a T1–T4 complexity classifier. Spec Kit applies the full lifecycle to every change; MinSpec asks whether a trivial fix really needs a Plan document. Spec files are intentionally Spec Kit-compatible — unknown frontmatter fields are ignored by both tools, so you can move between them."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What is SDD, in one paragraph?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Spec-Driven Development is the practice of writing the specification before the implementation, then driving the implementation (often by AI agents) from that spec. Canonical SDD has seven phases: constitution, specify, clarify, plan, tasks, analyze, implement. Each phase produces a markdown artifact, and the artifacts form a traceable chain from intent to code."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "What is CDD and why layer it on top of SDD?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Contract-Driven Development pushes you to write contracts (TypeScript types, Zod schemas, OpenAPI specs) and invariant tests before implementation. SDD tells you what to build; CDD tells you what shape the output must satisfy. They compose well: SDD's plan phase is the natural place to write contracts, and CDD's T0 invariant tests give SDD's tasks something concrete to verify against. MinSpec adds CDD as a thin layer because AI agents need contracts to avoid drift."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Why mix in ADR, WSJF, and GTD instead of staying pure SDD?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Pure SDD doesn't answer some practical questions. ADR answers why a given approach was chosen. WSJF answers which spec to work on next — SDD is silent on backlog order. GTD-style session scope answers what counts as drift, which matters for AI agents that wander. None of these are full methodologies in MinSpec — they're small, well-known patterns plugged in where SDD has gaps, and any of them can be ignored."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Does MinSpec replace my agile / kanban / scrum process?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. MinSpec is a development methodology tool — how you take one change from intent to merged code. It doesn't tell you how to run standups, plan sprints, or estimate stories. The WSJF scoring is for ordering MinSpec's own backlog of specs, not your team's overall workflow."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Why RCDD as a separate lifecycle from SDD?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "SDD assumes you're building a feature you roughly understand. Bug fixes invert this: you have to find the root cause first, and writing a spec before diagnosis is just guessing. RCDD — Root-Cause-Driven Debugging (Reproduce, Diagnose, Fix, Harden) is MinSpec's separate, lighter lifecycle. Its differentiator is the final Harden phase — closing the contract or test gap that let the bug in, not just patching the symptom."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Do I need to know all these methodologies to use MinSpec?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "No. Open VS Code, install the extension, run MinSpec: Init. The classifier suggests tiers, the lifecycle UI shows which phase you're in, and the templates fill in the boilerplate. You absorb the underlying SDD/CDD ideas by using them. The FAQ is for the curious developer, not required reading."
+            }
+          },
+          {
+            "@type": "Question",
+            "name": "Can I disable phases or override the tier the classifier picks?",
+            "acceptedAnswer": {
+              "@type": "Answer",
+              "text": "Yes. User override always wins is a hard invariant. The classifier suggests a tier; you click to change it. Phases are never mandatory — MinSpec warns when you skip something the rules say you should keep, but it doesn't block. The methodology is a recommendation engine, not a gate."
+            }
+          }
+        ]
+      }
+    ]
   }
   </script>
   <style>
