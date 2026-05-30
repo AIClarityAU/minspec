@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { Tier, Phase, SpecsLayout } from './config';
-import { loadConfig, PHASES, resolveAndValidate } from './config';
+import { loadConfig, PHASES, resolveAndValidate, DEFAULT_CONFIG } from './config';
 import type { SpecFrontmatter, ParsedSpec } from './spec';
 import { writeSpec, readSpecFile, writeSpecFile } from './spec';
 import type { PhaseState, SpecStatus, TransitionResult } from './lifecycle';
@@ -30,6 +30,10 @@ export interface SpecSummary {
   readonly currentPhase: Phase | null;
   /** Path users open: flat file path, or spec.md inside spec-kit directory. */
   readonly filePath: string;
+  /** Required phases completed (done or skipped) for this spec's tier (DR-012). */
+  readonly phasesDone: number;
+  /** Total required phases for this spec's tier (DR-012). */
+  readonly phasesTotal: number;
 }
 
 /** Full spec detail including content and phase states */
@@ -161,7 +165,26 @@ function entryDisplayPath(entry: SpecEntry): string {
   return entry.kind === 'flat' ? entry.filePath : entry.specMdPath;
 }
 
+/**
+ * Count completed (done/skipped) required phases for a tier (DR-012).
+ * Uses the default phase mapping; the sidebar recomputes with project config
+ * for display, this keeps SpecSummary self-contained for non-UI callers.
+ */
+function phaseProgress(
+  phases: Record<Phase, import('./spec').PhaseStatus>,
+  tier: Tier,
+): { done: number; total: number } {
+  const required = DEFAULT_CONFIG.phaseMappings[tier]?.requiredPhases ?? ['specify'];
+  let done = 0;
+  for (const phase of required) {
+    const st = phases[phase];
+    if (st === 'done' || st === 'skipped') done++;
+  }
+  return { done, total: required.length };
+}
+
 function buildSummary(parsed: ParsedSpec, filePath: string): SpecSummary {
+  const { done, total } = phaseProgress(parsed.frontmatter.phases, parsed.frontmatter.tier);
   return {
     id: parsed.frontmatter.id,
     title: parsed.frontmatter.title,
@@ -169,6 +192,8 @@ function buildSummary(parsed: ParsedSpec, filePath: string): SpecSummary {
     status: parsed.frontmatter.status,
     currentPhase: getCurrentPhase(parsed.frontmatter.phases),
     filePath,
+    phasesDone: done,
+    phasesTotal: total,
   };
 }
 
@@ -229,6 +254,10 @@ export function createSpec(rootDir: string, title: string, tier: Tier = 'T2'): S
     displayPath = filePath;
   }
 
+  const progress = phaseProgress(
+    initialPhases as Record<Phase, import('./spec').PhaseStatus>,
+    tier,
+  );
   return {
     id,
     title,
@@ -236,6 +265,8 @@ export function createSpec(rootDir: string, title: string, tier: Tier = 'T2'): S
     status: 'new',
     currentPhase: getCurrentPhase(initialPhases),
     filePath: displayPath,
+    phasesDone: progress.done,
+    phasesTotal: progress.total,
   };
 }
 

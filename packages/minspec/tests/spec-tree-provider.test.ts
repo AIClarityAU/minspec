@@ -30,7 +30,7 @@ vi.mock('vscode', () => ({
 }));
 
 import type { SpecSummary } from '../src/views/spec-tree-provider';
-import { SpecTreeProvider, SpecGroupNode, SpecNode, listSpecs } from '../src/views/spec-tree-provider';
+import { SpecTreeProvider, SpecGroupNode, SpecNode, RollupNode, listSpecs } from '../src/views/spec-tree-provider';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -45,8 +45,17 @@ function makeSpec(overrides: Partial<SpecSummary> = {}): SpecSummary {
     status: 'new',
     currentPhase: 'specify',
     filePath: '/tmp/specs/SPEC-001.md',
+    phasesDone: 0,
+    phasesTotal: 2,
     ...overrides,
   };
+}
+
+// Root children = [RollupNode, ...groups]. Helper to get just the groups (DR-012).
+function groupsOf(provider: SpecTreeProvider): SpecGroupNode[] {
+  return provider
+    .getChildren(undefined)
+    .filter((n): n is SpecGroupNode => n instanceof SpecGroupNode);
 }
 
 const ACTIVE_SPECS: SpecSummary[] = [
@@ -254,33 +263,34 @@ describe('SpecTreeProvider', () => {
   });
 
   describe('getChildren(undefined) — root level', () => {
-    it('returns 3 group nodes', () => {
-      const groups = provider.getChildren(undefined);
-      expect(groups).toHaveLength(3);
+    it('returns a rollup node plus 3 group nodes', () => {
+      const root = provider.getChildren(undefined);
+      expect(root[0]).toBeInstanceOf(RollupNode);
+      expect(groupsOf(provider)).toHaveLength(3);
     });
 
     it('returns groups in order: Active, Done, Archived', () => {
-      const groups = provider.getChildren(undefined) as SpecGroupNode[];
+      const groups = groupsOf(provider);
       expect(groups[0].label).toBe('Active');
       expect(groups[1].label).toBe('Done');
       expect(groups[2].label).toBe('Archived');
     });
 
     it('Active group is expanded by default', () => {
-      const groups = provider.getChildren(undefined) as SpecGroupNode[];
+      const groups = groupsOf(provider);
       // Expanded = 2
       expect(groups[0].collapsibleState).toBe(2);
     });
 
     it('Done and Archived groups are collapsed by default', () => {
-      const groups = provider.getChildren(undefined) as SpecGroupNode[];
+      const groups = groupsOf(provider);
       // Collapsed = 1
       expect(groups[1].collapsibleState).toBe(1);
       expect(groups[2].collapsibleState).toBe(1);
     });
 
     it('shows spec count in group description', () => {
-      const groups = provider.getChildren(undefined) as SpecGroupNode[];
+      const groups = groupsOf(provider);
       expect(groups[0].description).toBe('(3)'); // 3 active specs
       expect(groups[1].description).toBe('(1)'); // 1 done spec
       expect(groups[2].description).toBe('(1)'); // 1 archived spec
@@ -290,7 +300,7 @@ describe('SpecTreeProvider', () => {
       mockListSpecs.mockReturnValue([]);
       provider = new SpecTreeProvider('/fake/workspace', mockListSpecs);
 
-      const groups = provider.getChildren(undefined) as SpecGroupNode[];
+      const groups = groupsOf(provider);
       expect(groups[0].description).toBe('(0)');
       expect(groups[1].description).toBe('(0)');
       expect(groups[2].description).toBe('(0)');
@@ -299,7 +309,7 @@ describe('SpecTreeProvider', () => {
 
   describe('getChildren(groupNode) — spec list', () => {
     it('returns specs belonging to the Active group', () => {
-      const groups = provider.getChildren(undefined) as SpecGroupNode[];
+      const groups = groupsOf(provider);
       const activeGroup = groups[0];
       const specs = provider.getChildren(activeGroup) as SpecNode[];
 
@@ -310,7 +320,7 @@ describe('SpecTreeProvider', () => {
     });
 
     it('returns specs belonging to the Done group', () => {
-      const groups = provider.getChildren(undefined) as SpecGroupNode[];
+      const groups = groupsOf(provider);
       const doneGroup = groups[1];
       const specs = provider.getChildren(doneGroup) as SpecNode[];
 
@@ -319,7 +329,7 @@ describe('SpecTreeProvider', () => {
     });
 
     it('returns specs belonging to the Archived group', () => {
-      const groups = provider.getChildren(undefined) as SpecGroupNode[];
+      const groups = groupsOf(provider);
       const archivedGroup = groups[2];
       const specs = provider.getChildren(archivedGroup) as SpecNode[];
 
@@ -331,7 +341,7 @@ describe('SpecTreeProvider', () => {
       mockListSpecs.mockReturnValue([]);
       provider = new SpecTreeProvider('/fake/workspace', mockListSpecs);
 
-      const groups = provider.getChildren(undefined) as SpecGroupNode[];
+      const groups = groupsOf(provider);
       const specs = provider.getChildren(groups[0]) as SpecNode[];
       expect(specs).toHaveLength(0);
     });
@@ -339,27 +349,27 @@ describe('SpecTreeProvider', () => {
 
   describe('SpecNode details', () => {
     it('has correct label format (ID: title)', () => {
-      const groups = provider.getChildren(undefined) as SpecGroupNode[];
+      const groups = groupsOf(provider);
       const specs = provider.getChildren(groups[0]) as SpecNode[];
       expect(specs[0].label).toBe('SPEC-001: Rate limiting');
     });
 
-    it('has correct description (tier + phase)', () => {
-      const groups = provider.getChildren(undefined) as SpecGroupNode[];
+    it('has description with tier, progress meter, percent and phase (DR-012)', () => {
+      const groups = groupsOf(provider);
       const specs = provider.getChildren(groups[0]) as SpecNode[];
-      expect(specs[0].description).toBe('T1 \u00b7 specify');
-      expect(specs[1].description).toBe('T3 \u00b7 clarify');
-      expect(specs[2].description).toBe('T4 \u00b7 implement');
+      expect(specs[0].description).toMatch(/^T1 \u00b7 [\u25b0\u25b1]+ \d+% \u00b7 specify$/);
+      expect(specs[1].description).toMatch(/^T3 \u00b7 [\u25b0\u25b1]+ \d+% \u00b7 clarify$/);
+      expect(specs[2].description).toMatch(/^T4 \u00b7 [\u25b0\u25b1]+ \d+% \u00b7 implement$/);
     });
 
     it('shows "complete" when no current phase', () => {
-      const groups = provider.getChildren(undefined) as SpecGroupNode[];
+      const groups = groupsOf(provider);
       const doneSpecs = provider.getChildren(groups[1]) as SpecNode[];
-      expect(doneSpecs[0].description).toBe('T2 \u00b7 complete');
+      expect(doneSpecs[0].description).toMatch(/^T2 \u00b7 [\u25b0\u25b1]+ \d+% \u00b7 complete$/);
     });
 
     it('has ThemeIcon based on status', () => {
-      const groups = provider.getChildren(undefined) as SpecGroupNode[];
+      const groups = groupsOf(provider);
       const specs = provider.getChildren(groups[0]) as SpecNode[];
 
       // new -> circle-outline
@@ -379,14 +389,14 @@ describe('SpecTreeProvider', () => {
     });
 
     it('has vscode.open command on click', () => {
-      const groups = provider.getChildren(undefined) as SpecGroupNode[];
+      const groups = groupsOf(provider);
       const specs = provider.getChildren(groups[0]) as SpecNode[];
       expect(specs[0].command).toBeDefined();
       expect(specs[0].command!.command).toBe('vscode.open');
     });
 
     it('has contextValue of specNode', () => {
-      const groups = provider.getChildren(undefined) as SpecGroupNode[];
+      const groups = groupsOf(provider);
       const specs = provider.getChildren(groups[0]) as SpecNode[];
       expect(specs[0].contextValue).toBe('specNode');
     });

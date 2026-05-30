@@ -11,13 +11,14 @@ import { migrateLayoutCommand } from './commands/migrate';
 import { createAdrCommand, regenerateDrIndexCommand, acceptAdrCommand, setAdrStatusCommand } from './commands/adr';
 import { regenerateDrIndex } from './lib/adr-manager';
 import { scoreWsjfCommand, triageIssueCommand } from './commands/backlog';
+import { approveSpecCommand, revokeApprovalCommand } from './commands/approve';
+import { validateSpecCommand } from './commands/validate';
 import { SpecTreeProvider } from './views/spec-tree-provider';
 import { AdrTreeProvider } from './views/adr-tree-provider';
 import { FrontmatterCompletionProvider } from './views/frontmatter-completion';
 import { BacklogTreeProvider } from './views/backlog-view';
 import { MinSpecStatusBar, fromFrontmatter } from './views/status-bar';
 import { SpecPanel } from './views/spec-panel';
-import { loadConfig, applyVSCodeOverrides, resolveAndValidate } from './lib/config';
 import { loadSession, saveSession, addToScope, isFileInScope } from './lib/session';
 import { detectTools, getToolFilePath, type DetectedTools } from './lib/tool-detector';
 import { injectContextToFile, removeContextFromFile, type ActiveSpecContext } from './lib/context-injector';
@@ -31,6 +32,7 @@ import {
 } from './views/codelens-provider';
 import { maybeShowNudge, recordInstallTimestamp, exportTraceability, setupConformanceWatcher } from './lib/bridge';
 import { runBootstrap, isWatchedGitPath, type BootstrapVsCode } from './lib/auto-bootstrap';
+import { findActiveSpec } from './lib/active-spec';
 
 export function activate(context: vscode.ExtensionContext): void {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
@@ -121,7 +123,7 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('minspec.init', initCommand),
     vscode.commands.registerCommand('minspec.initRefresh', initRefreshCommand),
     vscode.commands.registerCommand('minspec.classify', classifyCommand),
-    vscode.commands.registerCommand('minspec.status', statusCommand),
+    vscode.commands.registerCommand('minspec.status', statusCommand(workspaceRoot)),
     vscode.commands.registerCommand('minspec.refreshTree', () => {
       specTreeProvider.refresh();
       adrTreeProvider.refresh();
@@ -152,6 +154,15 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('minspec.generateExample', generateExampleCommand),
     vscode.commands.registerCommand('minspec.migrateLayout', () => migrateLayoutCommand(workspaceRoot)),
     vscode.commands.registerCommand('minspec.exportTraceability', () => exportTraceabilityCommand(workspaceRoot)),
+    vscode.commands.registerCommand('minspec.approveSpec', async (node) => {
+      await approveSpecCommand(node);
+      specTreeProvider.refresh();
+    }),
+    vscode.commands.registerCommand('minspec.revokeApproval', async (node) => {
+      await revokeApprovalCommand(node);
+      specTreeProvider.refresh();
+    }),
+    vscode.commands.registerCommand('minspec.validateSpec', (node) => validateSpecCommand(node)),
     vscode.commands.registerCommand('minspec.showSpecPanel', async (specFilePath?: string) => {
       if (!workspaceRoot) {
         vscode.window.showErrorMessage('MinSpec: No workspace folder open.');
@@ -257,6 +268,20 @@ export function activate(context: vscode.ExtensionContext): void {
   traceabilityWatcher.onDidDelete(onTraceabilityChanged);
 
   context.subscriptions.push(traceabilityWatcher);
+
+  // Watch approvals.json — refresh spec tree so approval badges stay current
+  // when the gate hook, CLI, or another window changes approval state.
+  const approvalsWatcher = vscode.workspace.createFileSystemWatcher(
+    new vscode.RelativePattern(
+      vscode.workspace.workspaceFolders?.[0] ?? '',
+      '.minspec/approvals.json',
+    ),
+  );
+  const onApprovalsChanged = () => specTreeProvider.refresh();
+  approvalsWatcher.onDidChange(onApprovalsChanged);
+  approvalsWatcher.onDidCreate(onApprovalsChanged);
+  approvalsWatcher.onDidDelete(onApprovalsChanged);
+  context.subscriptions.push(approvalsWatcher);
 
   // Drift detection: monitor file saves
   if (workspaceRoot) {
@@ -503,56 +528,6 @@ async function showDriftWarning(
     saveSession(workspaceRoot, updatedSession);
     vscode.window.showInformationMessage(`MinSpec: Added "${relativePath}" to session scope.`);
   }
-}
-
-/**
- * Find the most likely active spec file in the workspace.
- * Prefers specs with implementing/specifying status.
- */
-async function findActiveSpec(rootDir: string): Promise<string | null> {
-  const config = loadConfig(rootDir);
-  const vscodeConfig = vscode.workspace.getConfiguration('minspec');
-  const finalConfig = applyVSCodeOverrides(config, {
-    specsDir: vscodeConfig.get('specsDir'),
-  });
-
-  const specsDir = resolveAndValidate(rootDir, finalConfig.specsDir);
-  if (!fs.existsSync(specsDir)) return null;
-
-  const specFiles: string[] = [];
-  const walk = (dir: string) => {
-    try {
-      const entries = fs.readdirSync(dir, { withFileTypes: true });
-      for (const entry of entries) {
-        const fullPath = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          walk(fullPath);
-        } else if (entry.name.endsWith('.md')) {
-          specFiles.push(fullPath);
-        }
-      }
-    } catch {
-      // Ignore unreadable directories
-    }
-  };
-  walk(specsDir);
-
-  if (specFiles.length === 0) return null;
-
-  const { parseSpec } = await import('./lib/spec');
-  for (const filePath of specFiles) {
-    try {
-      const content = fs.readFileSync(filePath, 'utf-8');
-      const spec = parseSpec(content);
-      if (spec.frontmatter.status === 'implementing' || spec.frontmatter.status === 'specifying') {
-        return filePath;
-      }
-    } catch {
-      // Ignore unparseable files
-    }
-  }
-
-  return specFiles[0];
 }
 
 export function deactivate(): void {}

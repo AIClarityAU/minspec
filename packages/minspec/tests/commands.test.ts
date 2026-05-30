@@ -55,6 +55,11 @@ vi.mock('../src/lib/adr-manager', () => ({
   findSimilarAdrs: vi.fn(() => []),
 }));
 
+vi.mock('../src/lib/active-spec', () => ({
+  findActiveSpec: vi.fn(),
+  summarizeActiveSpec: vi.fn(),
+}));
+
 vi.mock('../src/lib/config', () => ({
   loadConfig: vi.fn(() => ({ specsDir: 'specs', decisionsDir: 'docs/decisions' })),
   applyVSCodeOverrides: vi.fn(
@@ -128,6 +133,7 @@ import { parkCommand } from '../src/commands/park';
 import { scoreWsjfCommand, triageIssueCommand } from '../src/commands/backlog';
 import { scaffold, generateHarnessFiles, refreshHarnessFiles } from '../src/lib/scaffold';
 import { createAdr, findSimilarAdrs } from '../src/lib/adr-manager';
+import { findActiveSpec, summarizeActiveSpec } from '../src/lib/active-spec';
 import { loadSession, saveSession, clearSession } from '../src/lib/session';
 import { parkTopic } from '../src/lib/parking-lot';
 import {
@@ -187,8 +193,58 @@ describe('commands', () => {
   // ─── statusCommand ────────────────────────────────────────────────────────
 
   describe('statusCommand()', () => {
-    it('shows no active spec message', () => {
-      statusCommand();
+    // T3 regression: the status-bar click used to call a hardcoded stub that
+    // always said "No active spec", disagreeing with the status bar (which used
+    // the real findActiveSpec). The command must now consult real state.
+    it('shows initialize prompt only when there is genuinely no active spec', async () => {
+      vi.mocked(findActiveSpec).mockResolvedValueOnce(null);
+
+      await statusCommand('/tmp/test-workspace')();
+
+      expect(findActiveSpec).toHaveBeenCalledWith('/tmp/test-workspace');
+      expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+        'MinSpec: No active spec. Run "MinSpec: Initialize SDD Structure" to get started.',
+      );
+      expect(vscode.workspace.openTextDocument).not.toHaveBeenCalled();
+    });
+
+    it('opens the active spec and shows its real tier|phase|progress', async () => {
+      vi.mocked(findActiveSpec).mockResolvedValueOnce(
+        '/tmp/test-workspace/specs/SPEC-004.md',
+      );
+      vi.mocked(summarizeActiveSpec).mockReturnValueOnce({
+        id: 'SPEC-004',
+        title: 'Classifier Validation Harness',
+        tier: 'T3',
+        phase: 'Implement',
+        progress: '3/5 done',
+      });
+      const mockDoc = {};
+      vi.mocked(vscode.workspace.openTextDocument).mockResolvedValueOnce(
+        mockDoc as vscode.TextDocument,
+      );
+
+      await statusCommand('/tmp/test-workspace')();
+
+      // It must open the SAME spec the status bar resolved — no "No active spec" lie.
+      expect(vscode.workspace.openTextDocument).toHaveBeenCalledWith(
+        '/tmp/test-workspace/specs/SPEC-004.md',
+      );
+      expect(vscode.window.showTextDocument).toHaveBeenCalledWith(mockDoc, {
+        preview: false,
+      });
+      expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+        'MinSpec: SPEC-004 — T3 | Implement | 3/5 done',
+      );
+      // It must NOT show the no-active-spec message when a spec exists.
+      expect(vscode.window.showInformationMessage).not.toHaveBeenCalledWith(
+        'MinSpec: No active spec. Run "MinSpec: Initialize SDD Structure" to get started.',
+      );
+    });
+
+    it('shows initialize prompt when no workspace is open (does not call findActiveSpec)', async () => {
+      await statusCommand('')();
+      expect(findActiveSpec).not.toHaveBeenCalled();
       expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
         'MinSpec: No active spec. Run "MinSpec: Initialize SDD Structure" to get started.',
       );

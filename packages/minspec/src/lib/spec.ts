@@ -45,6 +45,21 @@ export interface ParsedSpec {
 const FRONTMATTER_RE = /^---\n([\s\S]*?)\n---\n?/;
 const TASK_RE = /^- \[([ xX])\] (.+)$/;
 const HEADING_RE = /^## (.+)$/;
+const H1_RE = /^# (.+)$/;
+
+/**
+ * Extract the first level-1 (`# `) heading text from a markdown body.
+ * Used as the human title fallback when frontmatter has no `title:` field —
+ * spec files carry their title in the first `# ` heading, not the frontmatter.
+ * Returns '' when no level-1 heading exists.
+ */
+function firstH1Heading(body: string): string {
+  for (const line of body.split('\n')) {
+    const match = line.match(H1_RE);
+    if (match) return match[1].trim();
+  }
+  return '';
+}
 
 /** Parse YAML frontmatter — lightweight, no dependency */
 function parseFrontmatterYaml(yaml: string): Record<string, unknown> {
@@ -142,7 +157,9 @@ export function parseSpec(content: string): ParsedSpec {
   // Build frontmatter with defaults
   const frontmatter: SpecFrontmatter = {
     id: (fmParsed.id as string) ?? '',
-    title: (fmParsed.title as string) ?? '',
+    // Title comes from frontmatter when present; otherwise fall back to the
+    // first level-1 `# ` heading in the body (the human title for spec files).
+    title: (fmParsed.title as string) ?? firstH1Heading(bodyAfterFm),
     tier: (TIERS_SET.has(fmParsed.tier as string) ? fmParsed.tier : 'T2') as Tier,
     status: (STATUSES_SET.has(fmParsed.status as string) ? fmParsed.status : 'new') as SpecStatus,
     created: (fmParsed.created as string) ?? new Date().toISOString().slice(0, 10),

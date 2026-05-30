@@ -160,8 +160,11 @@ vi.mock('../src/commands/init', () => ({
 vi.mock('../src/commands/classify', () => ({
   classifyCommand: vi.fn(),
 }));
+// statusCommand is now a factory: statusCommand(workspaceRoot) => handler.
+// Return a stable spy handler so registerCommand gets a real function.
+const { statusHandlerSpy } = vi.hoisted(() => ({ statusHandlerSpy: vi.fn() }));
 vi.mock('../src/commands/status', () => ({
-  statusCommand: vi.fn(),
+  statusCommand: vi.fn(() => statusHandlerSpy),
 }));
 vi.mock('../src/commands/session', () => ({
   declareScopeCommand: vi.fn(),
@@ -618,10 +621,11 @@ describe('activate()', () => {
   // File system watchers
   // -------------------------------------------------------------------------
 
-  it('creates three file system watchers', () => {
+  it('creates four file system watchers (specs, adrs, traceability, approvals)', () => {
     activate(makeMockContext());
 
-    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(3);
+    // DR-012 added the .minspec/approvals.json watcher → 4 (was 3).
+    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(4);
   });
 
   it('wires spec watcher callbacks to refresh tree and panel', () => {

@@ -1,0 +1,130 @@
+import * as vscode from 'vscode';
+import { listSpecs, type SpecSummary } from '../views/spec-tree-provider';
+import { readSpecFile } from '../lib/spec';
+import { loadConfig } from '../lib/config';
+import { validateSpec } from '../lib/spec-validator';
+import {
+  approveSpec as recordApproval,
+  revokeApproval as removeApproval,
+  getApprovalStatus,
+} from '../lib/approval';
+
+/** A tree node carrying a SpecSummary (from the spec tree context menu). */
+interface SpecNodeLike {
+  readonly spec?: SpecSummary;
+}
+
+function getWorkspaceRoot(): string | undefined {
+  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+}
+
+/** Resolve which spec to act on: from a tree node, else a quick-pick. */
+async function pickSpec(
+  rootDir: string,
+  node: SpecNodeLike | undefined,
+  placeholder: string,
+): Promise<SpecSummary | undefined> {
+  if (node?.spec) return node.spec;
+
+  const specs = listSpecs(rootDir);
+  if (specs.length === 0) {
+    vscode.window.showInformationMessage('MinSpec: No specs found.');
+    return undefined;
+  }
+  const picked = await vscode.window.showQuickPick(
+    specs.map((s) => ({
+      label: `${s.id}: ${s.title}`,
+      description: `${s.tier} · ${getApprovalStatus(rootDir, s.id, s.filePath)}`,
+      spec: s,
+    })),
+    { placeHolder: placeholder, ignoreFocusOut: true },
+  );
+  return picked?.spec;
+}
+
+/**
+ * Command: Approve a spec for implementation.
+ * Runs the completeness validator first — refuses approval if it has errors.
+ */
+export async function approveSpecCommand(node?: SpecNodeLike): Promise<void> {
+  const rootDir = getWorkspaceRoot();
+  if (!rootDir) {
+    vscode.window.showErrorMessage('MinSpec: No workspace folder open.');
+    return;
+  }
+
+  const spec = await pickSpec(rootDir, node, 'Select a spec to approve for implementation');
+  if (!spec) return;
+
+  let parsed;
+  try {
+    parsed = readSpecFile(spec.filePath);
+  } catch (err) {
+    vscode.window.showErrorMessage(
+      `MinSpec: Cannot read ${spec.id} — ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return;
+  }
+
+  const config = loadConfig(rootDir);
+  const result = validateSpec(parsed, config);
+  const errors = result.violations.filter((v) => v.severity === 'error');
+  const warnings = result.violations.filter((v) => v.severity === 'warning');
+
+  if (!result.complete) {
+    // Refuse. Surface the blocking violations and offer to open the spec.
+    const summary = errors.map((e) => `• ${e.message}`).join('\n');
+    const choice = await vscode.window.showErrorMessage(
+      `MinSpec: ${spec.id} is not complete — approval refused.\n\n${summary}`,
+      { modal: true, detail: errors.map((e) => `${e.message}\n   ↳ ${e.fixHint}`).join('\n\n') },
+      'Open Spec',
+    );
+    if (choice === 'Open Spec') {
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(spec.filePath));
+      await vscode.window.showTextDocument(doc);
+    }
+    return;
+  }
+
+  // Complete (possibly with warnings) — confirm, noting any warnings.
+  let confirmDetail = `Approving binds ${spec.id} to its current content. Editing the spec afterward will revoke approval automatically.`;
+  if (warnings.length > 0) {
+    confirmDetail += `\n\nNon-blocking warnings:\n${warnings.map((w) => `• ${w.message}`).join('\n')}`;
+  }
+  const confirm = await vscode.window.showWarningMessage(
+    `Approve ${spec.id} (${spec.tier}) for implementation?`,
+    { modal: true, detail: confirmDetail },
+    'Approve',
+  );
+  if (confirm !== 'Approve') return;
+
+  try {
+    recordApproval(rootDir, spec.id, spec.filePath, spec.tier);
+    vscode.window.showInformationMessage(`MinSpec: ✓ Approved ${spec.id} for implementation.`);
+    await vscode.commands.executeCommand('minspec.refreshTree');
+  } catch (err) {
+    vscode.window.showErrorMessage(
+      `MinSpec: Failed to approve — ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+/** Command: Revoke a spec's approval. */
+export async function revokeApprovalCommand(node?: SpecNodeLike): Promise<void> {
+  const rootDir = getWorkspaceRoot();
+  if (!rootDir) {
+    vscode.window.showErrorMessage('MinSpec: No workspace folder open.');
+    return;
+  }
+
+  const spec = await pickSpec(rootDir, node, 'Select a spec to revoke approval');
+  if (!spec) return;
+
+  const removed = removeApproval(rootDir, spec.id);
+  vscode.window.showInformationMessage(
+    removed
+      ? `MinSpec: Revoked approval for ${spec.id}.`
+      : `MinSpec: ${spec.id} was not approved.`,
+  );
+  await vscode.commands.executeCommand('minspec.refreshTree');
+}

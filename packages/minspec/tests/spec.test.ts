@@ -104,6 +104,60 @@ describe('parseSpec()', () => {
     expect(spec.frontmatter.title).toBe('');
   });
 
+  // T3 regression: tooltip showed "SPEC-004: " with a blank title because
+  // spec files carry the human title in the first level-1 # heading, not a
+  // frontmatter `title:` field.
+  it('falls back to first level-1 # heading when frontmatter has no title', () => {
+    const input = `---
+id: SPEC-004
+tier: T2
+status: implementing
+created: 2026-05-26
+---
+
+# MinSpec — Classifier Validation Harness (Design)
+
+Some intro text.
+
+## Specify
+
+Details here.
+`;
+    const spec = parseSpec(input);
+    expect(spec.frontmatter.title).toBe(
+      'MinSpec — Classifier Validation Harness (Design)',
+    );
+  });
+
+  it('prefers frontmatter title over body heading when both present', () => {
+    const input = `---
+id: SPEC-005
+title: Frontmatter Title Wins
+---
+
+# Body Heading Should Be Ignored
+
+## Requirements
+
+Stuff.
+`;
+    const spec = parseSpec(input);
+    expect(spec.frontmatter.title).toBe('Frontmatter Title Wins');
+  });
+
+  it('keeps empty title when neither frontmatter nor body heading exists', () => {
+    const input = `---
+id: SPEC-006
+---
+
+## Requirements
+
+No level-1 heading anywhere.
+`;
+    const spec = parseSpec(input);
+    expect(spec.frontmatter.title).toBe('');
+  });
+
   it('handles frontmatter-only (no body)', () => {
     const input = `---
 id: SPEC-099
