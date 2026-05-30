@@ -36,13 +36,44 @@ product: minspec
 - [x] Confirm `npm test` green on fresh offline clone (AC-1) — 987 pass, harness skips
 - [x] Run end-to-end after fetch+label; record baseline (AC-2, AC-4)
 
-## Findings (baseline, n=24)
-- Exact accuracy 95.8%, adjacent 100%. One disagreement: `sphinx-doc__sphinx-8120`
-  predicted T2 vs labelled T1 — `cross_directory` signal counts a parent dir + its
-  child subdir (`sphinx/` + `sphinx/locale/`) as 2-dir spread, inflating a 9-line
-  fix. Candidate threshold-tuning target.
-- **Caveat:** labels follow the size-based rubric, which correlates with the
-  size-based classifier → high agreement is partly structural. To stress-test
-  semantic complexity, a future pass should label from `problem_statement`
-  difficulty independent of diff size, and include genuine T3/T4 (16+ file / 500+
-  line) instances — the current strided subset is small-fix-skewed (dataset reality).
+## Findings
+
+### Run A — size-based labels (n=24)
+Exact 95.8%, adjacent 100%. High — but labels followed the size rubric, which
+correlates with the size-based classifier by construction. Circular; not a real test.
+
+### Run B — semantic labels (n=50, 10 repos) — THE REAL TEST
+Labels assigned from `problem_statement` difficulty, independent of diff size.
+
+- **Exact 18%, adjacent 80%.** Classifier predicted **T1 for 42 of 50** instances.
+- Confusion (rows=expected, cols=predicted):
+  ```
+          T1   T2   T3   T4
+   T1      4    0    0    0
+   T2     28    4    0    0
+   T3     10    3    1    0
+  ```
+- **10 outliers, all T3→T1**: subtle bugs (nested CompoundModel separability,
+  GFK+UUID prefetch, tz reverse-conversion, ConditionSet subs, …) shipped as small
+  gold patches → classifier calls them T1.
+
+### Root cause (not a bug, a design limit)
+Every signal is size/blast-radius (file count, line count, cross-dir, file-types,
+new-files, deps). **Semantic difficulty is orthogonal to diff size.**
+`astropy-12907` (T3, +1/-1) and `django-11790` (T1, +3/-1) are size-identical →
+both T1. No threshold setting separates them. **Tuning thresholds cannot fix this**;
+it would only inflate the genuine T1s. The classifier measures *mechanical scope*,
+not *cognitive difficulty*, and systematically **under-tiers subtle small fixes** —
+recommending one-sentence-spec (T1) ceremony for changes that demand deep
+understanding (T3).
+
+### Implications (for user decision — NOT actioned)
+1. **Reframe (cheapest):** document tier = mechanical/blast-radius scope; rely on the
+   existing user-override + calibration path to bump subtle work up. Honest about scope.
+2. **Augment signals (real work):** add non-AI difficulty proxies (AST cyclomatic
+   complexity of changed hunks, symbol count, nesting depth) via the existing
+   ast-analyzer. Limited gain — subtle fixes often have low *local* complexity too.
+3. **NLP difficulty scoring:** highest signal, but reads issue text → near invariant
+   #1 (no AI). Out unless reframed as opt-in.
+
+Park (2) and (3) as issues; (1) is a doc change pending user call.
