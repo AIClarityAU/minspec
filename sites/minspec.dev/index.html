@@ -653,6 +653,88 @@
       line-height: 1.6;
     }
 
+    /* --- Dogfooding (cream interlude) --- */
+    .dogfooding {
+      background: #ece8dd;
+      color: #1c1f2b;
+      border-top: 1px solid rgba(108, 156, 252, 0.15);
+      border-bottom: 1px solid rgba(108, 156, 252, 0.15);
+      padding: 80px 24px;
+    }
+
+    .dogfooding .section-inner {
+      max-width: 1000px;
+    }
+
+    .dogfooding-grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: 48px;
+      align-items: center;
+    }
+
+    .dogfooding .section-label {
+      color: var(--accent-dim);
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+      font-size: 0.78rem;
+      margin-bottom: 8px;
+    }
+
+    .dogfooding .section-title {
+      color: #1c1f2b;
+      border-left: 3px solid var(--accent-dim);
+      padding-left: 12px;
+      margin-bottom: 16px;
+    }
+
+    .dogfooding .section-title em {
+      font-style: italic;
+      color: var(--accent-dim);
+    }
+
+    .dogfooding p {
+      font-size: 1rem;
+      color: #3a3f52;
+      line-height: 1.7;
+    }
+
+    .dogfooding p strong {
+      color: var(--accent-dim);
+      font-weight: 700;
+    }
+
+    .dogfooding-image {
+      line-height: 0;
+    }
+
+    .dogfooding-image img {
+      width: 100%;
+      height: auto;
+      display: block;
+      mix-blend-mode: multiply;
+    }
+
+    @media (max-width: 768px) {
+      .dogfooding {
+        padding: 56px 20px;
+      }
+      .dogfooding-grid {
+        grid-template-columns: 1fr;
+        gap: 24px;
+        text-align: center;
+      }
+      .dogfooding .section-title {
+        border-left: none;
+        padding-left: 0;
+      }
+      .dogfooding-image {
+        max-width: 280px;
+        margin: 0 auto;
+      }
+    }
+
     /* --- CTA --- */
     .cta {
       text-align: center;
@@ -1115,6 +1197,32 @@
             <h3>Standard Formats</h3>
           </div>
           <p>Specs are markdown. Tasks are markdown. No proprietary formats, no binary blobs. Works with any editor, any VCS.</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Dogfooding -->
+  <section class="dogfooding" id="dogfooding">
+    <div class="section-inner">
+      <div class="dogfooding-grid">
+        <div class="dogfooding-text">
+          <div class="section-label">Exhibit A</div>
+          <h2 class="section-title">We eat our own <em>dog food</em></h2>
+          <p>
+            <strong>With a smile, even.</strong> Every shipped feature gets tested on its harshest
+            critic first &mdash; the developer himself. This whole project was specified, classified,
+            and shipped using MinSpec itself. T1 changes got T1 ceremony. T4 changes got T4 ceremony.
+            Which is why the tiers feel right &mdash; they were stress-tested on the project that built them.
+          </p>
+        </div>
+        <div class="dogfooding-image">
+          <picture>
+            <source srcset="/img/dogfooding.webp" type="image/webp">
+            <img src="/img/dogfooding.jpg"
+                 alt="A cheerful developer happily eating from a bowl labelled DOG FOOD with a spoon"
+                 width="1024" height="1024" loading="lazy">
+          </picture>
         </div>
       </div>
     </div>
