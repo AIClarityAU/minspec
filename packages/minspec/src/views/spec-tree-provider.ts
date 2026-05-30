@@ -171,14 +171,6 @@ function progressMeter(done: number, total: number): string {
   return '\u25b0'.repeat(filled) + '\u25b1'.repeat(5 - filled);
 }
 
-function approvalGlyph(status: ApprovalStatus): string {
-  switch (status) {
-    case 'approved': return '$(verified)';
-    case 'stale': return '$(warning)';
-    default: return '';
-  }
-}
-
 export class SpecNode extends vscode.TreeItem {
   constructor(
     public readonly spec: SpecSummary,

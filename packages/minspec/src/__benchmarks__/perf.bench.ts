@@ -102,6 +102,8 @@ function build50Specs(): SpecSummary[] {
     status: s.status,
     currentPhase: s.phase,
     filePath: `/workspace/specs/SPEC-${String(i + 1).padStart(3, '0')}.md`,
+    phasesDone: s.phase === null ? 2 : 0,
+    phasesTotal: 2,
   }));
 }
 
