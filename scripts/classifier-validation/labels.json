@@ -1,0 +1,11 @@
+{
+  "_about": "SPEC-004 / DR-009 — hand-assigned expected tiers for SWE-bench-Verified instances. Patches live in gitignored .data/; only these labels are committed. Fill `labels` after running fetch-swebench.mjs.",
+  "_rubric": {
+    "T1": "One concept, one/two files, < ~20 lines. Typo, off-by-one, guard.",
+    "T2": "Small feature or multi-file fix, < ~100 lines, one subsystem.",
+    "T3": "Cross-subsystem change, new behaviour, ~100-500 lines.",
+    "T4": "Architectural / wide blast radius, 500+ lines or 16+ files.",
+    "_note": "Label the task as a HUMAN would scope it, independent of raw diff size. Disagreements between human scope and the size-based classifier are the interesting data."
+  },
+  "labels": {}
+}
