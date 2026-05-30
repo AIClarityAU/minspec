@@ -1,4 +1,58 @@
-# MinSpec Monorepo — Claude Instructions
+# minspec-monorepo — Project Instructions
+
+## Overview
+
+minspec-monorepo project managed with MinSpec SDD methodology.
+
+- **Specs directory:** `specs/`
+- **Decisions directory:** `docs/decisions/`
+
+## Invariants
+
+These rules must never be violated. All changes must preserve them.
+
+### INV-1 — `minspec-extension-deployed`: public ADR references gate on visibility
+
+Public-facing surfaces — `sites/**`, `packages/*/README.md`, `packages/*/CHANGELOG.md`, and any VS Code Marketplace / Open VSX listing copy — reference ADR entries (`DR-NNN`) only under these rules:
+
+1. **Repo or ADR private → no public DR references.** If `github.com/harvest316/minspec` is private, or `docs/decisions/` is not publicly readable, do NOT cite `DR-NNN` on any public web page or store listing. A private link 404s for visitors and leaks internal identifiers. Describe the decision in prose instead, no DR id.
+2. **Repo and ADR both public → DR references must be clickable.** Every `DR-NNN` mention links to its published ADR: `https://github.com/harvest316/minspec/blob/main/docs/decisions/DR-NNN.md`. No bare unlinked `DR-NNN` text on public surfaces.
+3. **Check before deploy/publish.** Before deploying a site or publishing an extension, confirm repo visibility (`gh repo view harvest316/minspec --json isPrivate`) and that every public `DR-NNN` either links (public) or is removed (private).
+
+Rationale: ADR ids are an internal traceability convention; exposing them publicly only helps readers if the target actually resolves. See the Traceability Convention section.
+
+## SDD Methodology
+
+This project uses Specification-Driven Development. Tasks are classified by complexity tier:
+
+| Tier | Ceremony | Phases Required |
+|------|----------|-----------------|
+| T1 | One-sentence spec | specify |
+| T2 | Spec + plan | specify, plan |
+| T3 | Full spec cycle | specify, plan, tasks, implement |
+| T4 | Complete ceremony | all phases |
+
+## File Locations
+
+| Artifact | Location |
+|---|---|
+| Specs | `specs/` |
+| Decisions | `docs/decisions/` |
+| Constitution | `.minspec/constitution.md` |
+| Config | `.minspec/config.json` |
+
+## Commands
+
+```bash
+# Initialize SDD structure
+minspec init
+
+# Refresh harness files (preserves user edits)
+minspec init --refresh
+
+# Classify task complexity
+minspec classify
+```
 
 ## Project Overview
 
@@ -33,43 +87,11 @@ Type: bug / feat / explore / plan
    Default action: confirm with user OR park as separate issue. Do NOT silently expand.
 3. **Detection ≠ integration.** Reading a signal (filesystem existence, extension presence) is small. Acting on it (custom commands, exports, bidirectional sync) is a new feature surface. Treat them as separate work items.
 
-## Invariants
-
-These rules must never be violated. All changes must preserve them.
-
-### MinSpec (from specs/minspec/requirements.md)
-
-1. **No AI dependency** — works with zero AI tools installed. No AI calls in core path.
-2. **Tiered network consent (DR-004)** — Tier 0 (core): zero network calls, fully offline. Tier 1 (opt-in): delegates to local CLI tools (`gh`, `claude`), no network code in extension. Tier 2 (MinSpec Pro): network services with explicit consent. No `http`/`https`/`fetch` imports in `packages/minspec` or `packages/shared`.
-3. **No lock-in** — spec files are Spec Kit-compatible markdown. No proprietary format.
-4. **Ceremony proportional to complexity** — T1 task never requires >1 sentence of spec.
-5. **User override always wins** — classifier suggests, human decides. No forced classification.
-6. **Harness file regeneration preserves user edits** — regenerate = merge, not overwrite.
-
-### ScroogeLLM (from market research + design intent)
-
-7. **All LLM calls through proxy** — no direct API access bypasses middleware chain.
-8. **Savings auditable** — raw vs actual cost logged per request, inspectable by user.
-9. **PII anonymization deterministic** — same input → same fake name, stable across session.
-10. **User API keys in OS keychain only** — never stored in plaintext, never transmitted.
-11. **Proxy binds localhost by default** — no remote exposure without explicit user opt-in.
-12. **Free tier optimizations always active** — downgrades don't disable free optimizations.
-
 ## SDD Phases (current state)
 
 MinSpec is at **Implement** phase. Work from `specs/minspec/tasks.md`.
 
 ScroogeLLM has not started Specify phase. Future sessions only.
-
-## File Locations
-
-| Artifact | Location |
-|---|---|
-| Specs | `specs/<product>/*.md` |
-| Decisions | `docs/decisions/DR-NNN.md` |
-| Research | `docs/research/` |
-| Websites | `sites/minspec.dev/`, `sites/scroogellm.com/` |
-| Hooks | `scripts/hooks/` |
 
 ## Traceability Convention
 
