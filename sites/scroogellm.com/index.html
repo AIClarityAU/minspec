@@ -3,20 +3,22 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>ScroogeLLM — Every token counts.</title>
-  <meta name="description" content="See what AI costs. Then cut it. ScroogeLLM is a VS Code extension that optimizes LLM costs with a local proxy, prompt compression, and full savings visibility.">
-  <meta name="theme-color" content="#0a0f0a">
+  <title>ScroogeLLM — Why pay full price?</title>
+  <meta name="description" content="A jovial little VS Code extension that sits between you and your AI provider, counts every token, and quietly pockets the savings on your behalf.">
+  <meta name="theme-color" content="#5a0d24">
   <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>💰</text></svg>">
   <link rel="canonical" href="https://scroogellm.com">
   <meta name="robots" content="index, follow">
-  <meta property="og:title" content="ScroogeLLM — Cut LLM Costs in VS Code">
-  <meta property="og:description" content="Free VS Code extension that reduces LLM API costs with a local proxy. Prompt compression, response caching, and smart model routing.">
+  <meta property="og:title" content="ScroogeLLM — Why pay full price?">
+  <meta property="og:description" content="A miserly little VS Code proxy that counts every AI token, trims every prompt, and quietly pockets the savings on your behalf.">
   <meta property="og:url" content="https://scroogellm.com">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="ScroogeLLM">
+  <meta property="og:image" content="https://scroogellm.com/img/scrooge-banner-red.jpg">
   <meta name="twitter:card" content="summary_large_image">
-  <meta name="twitter:title" content="ScroogeLLM — Cut LLM Costs in VS Code">
-  <meta name="twitter:description" content="Free VS Code extension that reduces LLM API costs with a local proxy. Prompt compression, response caching, and smart model routing.">
+  <meta name="twitter:title" content="ScroogeLLM — Why pay full price?">
+  <meta name="twitter:description" content="A miserly little VS Code proxy that counts every AI token, trims every prompt, and quietly pockets the savings on your behalf.">
+  <meta name="twitter:image" content="https://scroogellm.com/img/scrooge-banner-red.jpg">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -38,6 +40,7 @@
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
     :root {
+      /* Tech-green (sections about the proxy mechanism) */
       --green-50: #f0fdf4;
       --green-100: #dcfce7;
       --green-200: #bbf7d0;
@@ -64,8 +67,20 @@
       --accent-dim: var(--green-600);
       --accent-glow: rgba(74, 222, 128, 0.15);
 
+      /* Scrooge palette (mascot interlude sections) */
+      --cream: #e6d7b8;
+      --cream-light: #f5e9ce;
+      --cream-deep: #d4c498;
+      --burgundy: #761131;
+      --burgundy-dark: #5a0d24;
+      --burgundy-light: #8a1a3c;
+      --gold: #d4a418;
+      --gold-bright: #f4c843;
+      --ink: #2a1810;
+
       --font-sans: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
       --font-mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'JetBrains Mono', 'Consolas', monospace;
+      --font-display: 'Georgia', 'Cambria', 'Times New Roman', serif;
 
       --max-width: 1120px;
       --section-pad: 6rem 1.5rem;
@@ -93,7 +108,7 @@
       left: 0;
       right: 0;
       z-index: 100;
-      padding: 1rem 1.5rem;
+      padding: 0.85rem 1.5rem;
       background: rgba(10, 15, 10, 0.85);
       backdrop-filter: blur(12px);
       -webkit-backdrop-filter: blur(12px);
@@ -109,6 +124,9 @@
     }
 
     .nav-logo {
+      display: flex;
+      align-items: center;
+      gap: 0.55rem;
       font-family: var(--font-mono);
       font-size: 1.15rem;
       font-weight: 700;
@@ -116,7 +134,15 @@
       letter-spacing: -0.02em;
     }
 
-    .nav-logo span { color: var(--accent); }
+    .nav-logo img {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      display: block;
+      background: var(--cream);
+    }
+
+    .nav-logo span { color: var(--gold-bright); }
 
     .nav-links {
       display: flex;
@@ -131,89 +157,67 @@
       transition: color 0.2s;
     }
 
-    .nav-links a:hover { color: var(--accent); }
+    .nav-links a:hover { color: var(--gold-bright); }
 
-    /* ── Hero ─────────────────────────────────────────── */
+    /* ── Hero (burgundy) ──────────────────────────────── */
     .hero {
-      padding: 10rem 1.5rem 6rem;
+      padding: 7.5rem 1.5rem 4.5rem;
       text-align: center;
       position: relative;
-      background: url('img/hero-bg.webp') center right / cover no-repeat, url('img/hero-bg.jpg') center right / cover no-repeat;
+      background: var(--burgundy);
+      overflow: hidden;
     }
 
     .hero::before {
       content: '';
       position: absolute;
-      top: 0;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 800px;
-      height: 600px;
-      background: radial-gradient(ellipse, var(--accent-glow) 0%, transparent 70%);
+      inset: 0;
+      background:
+        radial-gradient(ellipse at 50% 30%, rgba(244, 200, 67, 0.12) 0%, transparent 60%),
+        linear-gradient(180deg, var(--burgundy-dark) 0%, var(--burgundy) 40%, var(--burgundy) 100%);
       pointer-events: none;
-      animation: hero-pulse 6s ease-in-out infinite;
-    }
-
-    @keyframes hero-pulse {
-      0%, 100% { opacity: 0.4; transform: translateX(-50%) scale(1); }
-      50% { opacity: 0.7; transform: translateX(-50%) scale(1.05); }
     }
 
     .hero-inner {
-      max-width: 720px;
+      max-width: 1100px;
       margin: 0 auto;
       position: relative;
     }
 
-    .badge {
-      display: inline-block;
-      padding: 0.35rem 1rem;
-      font-size: 0.75rem;
-      font-weight: 600;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      color: var(--accent);
-      background: rgba(74, 222, 128, 0.08);
-      border: 1px solid rgba(74, 222, 128, 0.2);
-      border-radius: 100px;
-      margin-bottom: 2rem;
-      animation: badge-glow 3s ease-in-out infinite;
+    .hero-banner-wrap {
+      max-width: 1100px;
+      margin: 0 auto 2rem;
+      line-height: 0;
+      filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.35));
     }
 
-    @keyframes badge-glow {
-      0%, 100% { border-color: rgba(74, 222, 128, 0.2); box-shadow: none; }
-      50% { border-color: rgba(74, 222, 128, 0.4); box-shadow: 0 0 20px rgba(74, 222, 128, 0.06); }
-    }
-
-    .hero h1 {
-      font-size: clamp(2.5rem, 6vw, 4rem);
-      font-weight: 800;
-      line-height: 1.1;
-      letter-spacing: -0.03em;
-      margin-bottom: 0.5rem;
-    }
-
-    .hero h1 .highlight {
-      background: linear-gradient(135deg, var(--green-300), var(--green-500));
-      -webkit-background-clip: text;
-      background-clip: text;
-      -webkit-text-fill-color: transparent;
+    .hero-banner-wrap img {
+      width: 100%;
+      height: auto;
+      display: block;
+      border-radius: 12px;
     }
 
     .hero .tagline {
-      font-family: var(--font-mono);
-      font-size: 1.1rem;
-      color: var(--accent);
-      margin-bottom: 1.5rem;
-      opacity: 0.9;
+      font-family: var(--font-display);
+      font-style: italic;
+      font-size: 1.35rem;
+      color: var(--cream-light);
+      margin-bottom: 1rem;
+      opacity: 0.95;
     }
 
     .hero .subtitle {
-      font-size: 1.2rem;
-      color: var(--text-secondary);
-      max-width: 540px;
-      margin: 0 auto 2.5rem;
+      font-size: 1.1rem;
+      color: var(--cream);
+      max-width: 620px;
+      margin: 0 auto 2.25rem;
       line-height: 1.7;
+    }
+
+    .hero .subtitle strong {
+      color: var(--gold-bright);
+      font-weight: 600;
     }
 
     /* ── Signup form ──────────────────────────────────── */
@@ -246,15 +250,16 @@
     }
 
     .btn {
-      padding: 0.8rem 1.5rem;
-      font-size: 0.9rem;
-      font-weight: 600;
+      padding: 0.85rem 1.7rem;
+      font-size: 0.95rem;
+      font-weight: 700;
       font-family: var(--font-sans);
       border: none;
       border-radius: 8px;
       cursor: pointer;
       transition: all 0.2s;
       white-space: nowrap;
+      letter-spacing: 0.01em;
     }
 
     .btn-primary {
@@ -267,10 +272,39 @@
       box-shadow: 0 4px 20px rgba(74, 222, 128, 0.2);
     }
 
+    .btn-gold {
+      background: var(--gold);
+      color: var(--ink);
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
+    }
+
+    .btn-gold:hover {
+      background: var(--gold-bright);
+      box-shadow: 0 6px 22px rgba(244, 200, 67, 0.35);
+      transform: translateY(-1px);
+    }
+
     .signup-note {
       font-size: 0.8rem;
-      color: var(--text-muted);
-      margin-top: 0.75rem;
+      color: var(--cream);
+      opacity: 0.7;
+      margin-top: 0.9rem;
+    }
+
+    .coming-soon-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.45rem 1rem;
+      background: rgba(244, 200, 67, 0.12);
+      border: 1px solid rgba(244, 200, 67, 0.35);
+      border-radius: 100px;
+      color: var(--gold-bright);
+      font-family: var(--font-mono);
+      font-size: 0.78rem;
+      font-weight: 600;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
     }
 
     /* ── Section shared ──────────────────────────────── */
@@ -293,6 +327,8 @@
       margin-bottom: 0.75rem;
     }
 
+    .section-label.gold { color: var(--gold-bright); }
+
     .section-title {
       font-size: clamp(1.75rem, 4vw, 2.5rem);
       font-weight: 700;
@@ -300,11 +336,40 @@
       margin-bottom: 1rem;
     }
 
+    .section-title em {
+      font-family: var(--font-display);
+      font-style: italic;
+      color: var(--gold-bright);
+      font-weight: 400;
+    }
+
     .section-desc {
       font-size: 1.1rem;
       color: var(--text-secondary);
-      max-width: 600px;
+      max-width: 640px;
       line-height: 1.7;
+    }
+
+    .section-desc em {
+      font-family: var(--font-display);
+      font-style: italic;
+      color: var(--cream-light);
+    }
+
+    /* Full-width hero image inside any section */
+    .section-figure {
+      max-width: 1100px;
+      margin: 0 auto 3rem;
+      line-height: 0;
+      border-radius: 12px;
+      overflow: hidden;
+      box-shadow: 0 12px 40px rgba(0, 0, 0, 0.4);
+    }
+
+    .section-figure img {
+      width: 100%;
+      height: auto;
+      display: block;
     }
 
     /* ── Cost comparison ─────────────────────────────── */
@@ -312,6 +377,7 @@
       background: var(--bg-secondary);
       border-top: 1px solid var(--border-subtle);
       border-bottom: 1px solid var(--border-subtle);
+      position: relative;
     }
 
     .cost-header {
@@ -354,7 +420,7 @@
     .cost-panel-label {
       font-family: var(--font-sans);
       font-size: 0.75rem;
-      font-weight: 600;
+      font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.1em;
       margin-bottom: 1.25rem;
@@ -393,44 +459,79 @@
       align-items: center;
       justify-content: center;
       font-size: 2rem;
-      color: var(--accent);
+      color: var(--gold-bright);
       padding: 0 0.5rem;
     }
 
+    .cost-savings-row {
+      display: grid;
+      grid-template-columns: 280px 1fr;
+      gap: 2.5rem;
+      align-items: center;
+      max-width: 900px;
+      margin: 3rem auto 0;
+    }
+
+    .cost-savings-img {
+      width: 100%;
+      max-width: 280px;
+      aspect-ratio: 1 / 1;
+      border-radius: 50%;
+      overflow: hidden;
+      box-shadow: 0 10px 32px rgba(0, 0, 0, 0.5), 0 0 0 4px rgba(244, 200, 67, 0.2);
+      line-height: 0;
+    }
+
+    .cost-savings-img img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+
     .cost-savings {
-      text-align: center;
-      margin-top: 2.5rem;
-      padding: 1.5rem;
-      background: rgba(74, 222, 128, 0.05);
-      border: 1px solid rgba(74, 222, 128, 0.15);
+      padding: 1.75rem 2rem;
+      background: rgba(212, 164, 24, 0.07);
+      border: 1px solid rgba(244, 200, 67, 0.25);
       border-radius: 12px;
-      max-width: 400px;
-      margin-left: auto;
-      margin-right: auto;
     }
 
     .cost-savings-amount {
-      font-size: 2.5rem;
+      font-size: 2.75rem;
       font-weight: 800;
-      color: var(--accent);
+      color: var(--gold-bright);
       font-family: var(--font-mono);
+      line-height: 1;
     }
 
     .cost-savings-label {
-      font-size: 0.9rem;
+      font-size: 0.95rem;
       color: var(--text-secondary);
-      margin-top: 0.25rem;
+      margin-top: 0.4rem;
+      font-family: var(--font-display);
+      font-style: italic;
     }
 
     /* ── Features grid ───────────────────────────────── */
     .features-header {
       text-align: center;
       margin-bottom: 3.5rem;
+      position: relative;
     }
 
     .features-header .section-desc {
       margin-left: auto;
       margin-right: auto;
+    }
+
+    .features-bust {
+      width: 96px;
+      height: 96px;
+      border-radius: 50%;
+      margin: 0 auto 1.5rem;
+      display: block;
+      box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 0 3px rgba(244, 200, 67, 0.25);
+      background: var(--cream);
     }
 
     .features-grid {
@@ -451,7 +552,7 @@
     }
 
     .feature-card:hover {
-      border-color: rgba(74, 222, 128, 0.3);
+      border-color: rgba(244, 200, 67, 0.35);
       background: var(--bg-card-hover);
       transform: translateY(-2px);
     }
@@ -463,7 +564,7 @@
     }
 
     .feature-title {
-      font-size: 1.1rem;
+      font-size: 1.08rem;
       font-weight: 650;
       margin-bottom: 0.5rem;
     }
@@ -478,7 +579,7 @@
       display: inline-block;
       margin-top: 0.75rem;
       font-size: 0.7rem;
-      font-weight: 600;
+      font-weight: 700;
       text-transform: uppercase;
       letter-spacing: 0.08em;
       padding: 0.2rem 0.6rem;
@@ -502,7 +603,7 @@
 
     .how-header {
       text-align: center;
-      margin-bottom: 3.5rem;
+      margin-bottom: 2.5rem;
     }
 
     .how-header .section-desc {
@@ -526,7 +627,7 @@
       left: calc(16.67% + 1rem);
       right: calc(16.67% + 1rem);
       height: 2px;
-      background: linear-gradient(90deg, var(--border), var(--accent-dim), var(--border));
+      background: linear-gradient(90deg, var(--border), rgba(244, 200, 67, 0.45), var(--border));
     }
 
     .how-step {
@@ -539,29 +640,60 @@
       height: 4rem;
       border-radius: 50%;
       background: var(--bg-primary);
-      border: 2px solid var(--accent-dim);
+      border: 2px solid var(--gold);
       display: flex;
       align-items: center;
       justify-content: center;
       font-family: var(--font-mono);
       font-size: 1.25rem;
       font-weight: 700;
-      color: var(--accent);
+      color: var(--gold-bright);
       margin: 0 auto 1.25rem;
       position: relative;
       z-index: 1;
     }
 
     .how-step-title {
-      font-size: 1rem;
+      font-size: 1.05rem;
       font-weight: 650;
       margin-bottom: 0.5rem;
     }
 
     .how-step-desc {
-      font-size: 0.88rem;
+      font-size: 0.9rem;
       color: var(--text-secondary);
       line-height: 1.6;
+    }
+
+    /* ── Routing (orchestra) ─────────────────────────── */
+    .routing-section {
+      background: var(--bg-primary);
+    }
+
+    .routing-section .section-desc {
+      margin: 0 auto;
+      text-align: center;
+    }
+
+    .routing-header {
+      text-align: center;
+      margin-bottom: 2.5rem;
+    }
+
+    /* ── Agents (building) ───────────────────────────── */
+    .agents-section {
+      background: var(--bg-secondary);
+      border-top: 1px solid var(--border-subtle);
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .agents-header {
+      text-align: center;
+      margin-bottom: 2.5rem;
+    }
+
+    .agents-header .section-desc {
+      margin: 0 auto;
     }
 
     /* ── Architecture ────────────────────────────────── */
@@ -612,18 +744,44 @@
       line-height: 1.6;
     }
 
-    /* ── CTA ─────────────────────────────────────────── */
+    /* ── CTA (cream) ─────────────────────────────────── */
     .cta-section {
       text-align: center;
-      background: var(--bg-secondary);
-      border-top: 1px solid var(--border-subtle);
+      background: var(--cream);
+      color: var(--ink);
+      border-top: 8px solid var(--burgundy);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .cta-banner-wrap {
+      max-width: 1100px;
+      margin: 0 auto 2rem;
+      line-height: 0;
+      filter: drop-shadow(0 8px 24px rgba(118, 17, 49, 0.18));
+    }
+
+    .cta-banner-wrap img {
+      width: 100%;
+      height: auto;
+      display: block;
+      border-radius: 12px;
+    }
+
+    .cta-section .section-label {
+      color: var(--burgundy);
     }
 
     .cta-section .section-title {
-      margin-bottom: 0.75rem;
+      color: var(--ink);
+    }
+
+    .cta-section .section-title em {
+      color: var(--burgundy);
     }
 
     .cta-section .section-desc {
+      color: #4a3220;
       margin-left: auto;
       margin-right: auto;
       margin-bottom: 2rem;
@@ -634,9 +792,18 @@
       margin-right: auto;
     }
 
+    .signup-form-cta input[type="email"] {
+      background: rgba(255, 255, 255, 0.7);
+      color: var(--ink);
+      border-color: rgba(118, 17, 49, 0.25);
+    }
+
+    .signup-form-cta input[type="email"]::placeholder { color: rgba(42, 24, 16, 0.4); }
+
     /* ── Footer ──────────────────────────────────────── */
     .footer {
       padding: 3rem 1.5rem;
+      background: var(--bg-primary);
       border-top: 1px solid var(--border-subtle);
     }
 
@@ -669,7 +836,7 @@
       transition: color 0.2s;
     }
 
-    .footer-links a:hover { color: var(--accent); }
+    .footer-links a:hover { color: var(--gold-bright); }
 
     .footer-legal {
       width: 100%;
@@ -682,6 +849,11 @@
       line-height: 1.6;
     }
 
+    .footer-legal em {
+      font-family: var(--font-display);
+      color: var(--cream);
+    }
+
     /* ── Responsive ──────────────────────────────────── */
     @media (max-width: 768px) {
       :root {
@@ -690,7 +862,8 @@
 
       .nav-links { display: none; }
 
-      .hero { padding: 8rem 1.25rem 4rem; }
+      .hero { padding: 6.5rem 1.25rem 3rem; }
+      .hero .tagline { font-size: 1.15rem; }
 
       .signup-form {
         flex-direction: column;
@@ -710,6 +883,14 @@
         transform: rotate(90deg);
         padding: 0.5rem 0;
       }
+
+      .cost-savings-row {
+        grid-template-columns: 1fr;
+        gap: 1.5rem;
+        justify-items: center;
+      }
+
+      .cost-savings { text-align: center; }
 
       .features-grid {
         grid-template-columns: 1fr;
@@ -732,8 +913,9 @@
     }
 
     @media (max-width: 480px) {
-      .hero h1 { font-size: 2rem; }
-      .hero .subtitle { font-size: 1.05rem; }
+      .hero .tagline { font-size: 1.05rem; }
+      .hero .subtitle { font-size: 1rem; }
+      .cost-savings-amount { font-size: 2.25rem; }
     }
 
     /* ── Skip navigation ────────────────────────────── */
@@ -741,27 +923,24 @@
       position: absolute;
       top: -40px;
       left: 0;
-      background: var(--accent, #22c55e);
-      color: #0a0f0a;
+      background: var(--gold);
+      color: var(--ink);
       padding: 8px 16px;
       z-index: 200;
-      font-weight: 600;
+      font-weight: 700;
       text-decoration: none;
     }
-    .skip-link:focus {
-      top: 0;
-    }
+    .skip-link:focus { top: 0; }
 
     /* ── Focus indicators ───────────────────────────── */
     a:focus-visible,
     .btn:focus-visible,
     button:focus-visible,
     input:focus-visible {
-      outline: 2px solid var(--green-400, #4ade80);
+      outline: 2px solid var(--gold-bright);
       outline-offset: 3px;
     }
 
-    /* ── Logo link ──────────────────────────────────── */
     a.nav-logo {
       text-decoration: none;
       color: inherit;
@@ -769,13 +948,7 @@
 
     /* ── Reduced motion ─────────────────────────────── */
     @media (prefers-reduced-motion: reduce) {
-      .hero::before,
-      .badge {
-        animation: none;
-      }
-      html {
-        scroll-behavior: auto;
-      }
+      html { scroll-behavior: auto; }
     }
   </style>
 </head>
@@ -786,10 +959,14 @@
   <!-- ── Navigation ──────────────────────────────────── -->
   <nav class="nav" aria-label="Main navigation">
     <div class="nav-inner">
-      <a href="/" class="nav-logo">Scrooge<span>LLM</span></a>
+      <a href="/" class="nav-logo">
+        <img src="img/scrooge-bust-fronton.webp" alt="" aria-hidden="true" width="36" height="36" loading="eager">
+        Scrooge<span>LLM</span>
+      </a>
       <ul class="nav-links">
         <li><a href="#features">Features</a></li>
         <li><a href="#how-it-works">How It Works</a></li>
+        <li><a href="#routing">Routing</a></li>
         <li><a href="#privacy">Privacy</a></li>
         <li><a href="#signup">Get Notified</a></li>
       </ul>
@@ -799,19 +976,23 @@
   <!-- ── Hero ────────────────────────────────────────── -->
   <header class="hero">
     <div class="hero-inner">
-      <div class="badge">Coming Soon</div>
-      <h1>See what AI costs.<br>Then <span class="highlight">cut it.</span></h1>
-      <p class="tagline">Every token counts.</p>
+      <div class="hero-banner-wrap">
+        <picture>
+          <source srcset="img/scrooge-banner-red.webp" type="image/webp">
+          <img src="img/scrooge-banner-red.jpg"
+               alt="ScroogeLLM — a jovial Victorian gentleman laughing beside a vault stacked with bags labelled TOKENS SAVED, under a gilded sign reading 'Why pay full price?'"
+               width="1408" height="768" loading="eager" fetchpriority="high">
+        </picture>
+      </div>
+      <p class="tagline">Every token counts. Especially the ones we pinch.</p>
       <p class="subtitle">
-        ScroogeLLM is a VS Code extension that sits between you and your LLM provider.
-        It shows you exactly what every call costs &mdash; then optimizes it automatically.
+        A jovial little VS Code extension that sits between you and your AI provider,
+        counts <strong>every token</strong>, trims <strong>every prompt</strong>,
+        and quietly pockets the savings on your behalf.
       </p>
-      <form class="signup-form" action="#" method="post" aria-label="Hero email signup" hidden>
-        <input type="email" placeholder="dev@example.com" aria-label="Email address" required disabled>
-        <button type="submit" class="btn btn-primary" disabled style="opacity: 0.6; cursor: not-allowed;">Notify Me</button>
-        <p class="signup-notice" style="font-size: 0.75rem; color: var(--text-dim); margin-top: 0.5rem;">Notifications launching soon</p>
-      </form>
-      <p class="signup-note" hidden>Email signup coming soon. No spam. One email when we launch.</p>
+      <div class="coming-soon-pill" aria-label="Coming soon">
+        <span aria-hidden="true">🪙</span> Coming Soon to the Marketplace
+      </div>
     </div>
   </header>
 
@@ -821,16 +1002,17 @@
   <section class="section cost-section" id="costs">
     <div class="section-inner">
       <div class="cost-header">
-        <p class="section-label">The Problem</p>
-        <h2 class="section-title">LLM costs add up fast</h2>
+        <p class="section-label">The Damage</p>
+        <h2 class="section-title">Where did all your <em>money</em> go?</h2>
         <p class="section-desc">
-          Most developers have no idea what each AI call actually costs.
-          ScroogeLLM makes every dollar visible &mdash; then recovers what you can.
+          Most developers haven't the foggiest what each AI call actually costs them.
+          ScroogeLLM names every dollar &mdash; <em>politely, in a ledger</em> &mdash;
+          then quietly recovers whatever it can.
         </p>
       </div>
       <div class="cost-comparison" aria-label="Cost comparison: before ScroogeLLM showing $47.20 daily cost, after ScroogeLLM showing $18.40 daily cost with 61% savings">
         <div class="cost-panel cost-panel-before">
-          <div class="cost-panel-label">Without ScroogeLLM</div>
+          <div class="cost-panel-label">Before the Penny Drops</div>
           <div class="cost-line">
             <span class="cost-line-label">Code completions</span>
             <span class="cost-line-value red">$12.80</span>
@@ -857,21 +1039,21 @@
         <div class="cost-arrow" aria-hidden="true">&rarr;</div>
 
         <div class="cost-panel cost-panel-after">
-          <div class="cost-panel-label">With ScroogeLLM</div>
+          <div class="cost-panel-label">After Old Scrooge Steps In</div>
           <div class="cost-line">
-            <span class="cost-line-label">Prompt compression</span>
+            <span class="cost-line-label">Prompt trimmed</span>
             <span class="cost-line-value green">-$8.20</span>
           </div>
           <div class="cost-line">
-            <span class="cost-line-label">Response caching</span>
+            <span class="cost-line-label">Cache caught it</span>
             <span class="cost-line-value green">-$11.40</span>
           </div>
           <div class="cost-line">
-            <span class="cost-line-label">Model downgrades</span>
+            <span class="cost-line-label">Cheaper model sufficed</span>
             <span class="cost-line-value green">-$6.80</span>
           </div>
           <div class="cost-line">
-            <span class="cost-line-label">Free optimizations</span>
+            <span class="cost-line-label">Free optimisations</span>
             <span class="cost-line-value green">-$2.40</span>
           </div>
           <hr class="cost-divider">
@@ -881,9 +1063,20 @@
           </div>
         </div>
       </div>
-      <div class="cost-savings">
-        <div class="cost-savings-amount">61% saved</div>
-        <div class="cost-savings-label">Average daily savings for a solo developer</div>
+
+      <div class="cost-savings-row">
+        <div class="cost-savings-img">
+          <picture>
+            <source srcset="img/scrooge-moneypile.webp" type="image/webp">
+            <img src="img/scrooge-moneypile.jpg"
+                 alt="Old Scrooge sitting on a pile of moneybags labelled TOKENS SAVED and UNSPENT API, inside a vault marked SCROOGE LLM SAVINGS BANK"
+                 width="1024" height="1024" loading="lazy">
+          </picture>
+        </div>
+        <div class="cost-savings">
+          <div class="cost-savings-amount">61% saved</div>
+          <div class="cost-savings-label">an honest day's haul for one frugal developer</div>
+        </div>
       </div>
     </div>
   </section>
@@ -892,90 +1085,95 @@
   <section class="section" id="features">
     <div class="section-inner">
       <div class="features-header">
-        <p class="section-label">Features</p>
-        <h2 class="section-title">Everything to make LLMs affordable</h2>
+        <picture>
+          <source srcset="img/scrooge-bust.webp" type="image/webp">
+          <img class="features-bust" src="img/scrooge-bust.png"
+               alt="" aria-hidden="true" width="96" height="96" loading="lazy">
+        </picture>
+        <p class="section-label gold">The Frugal Toolkit</p>
+        <h2 class="section-title">Every <em>penny-pinching</em> feature you'll need</h2>
         <p class="section-desc">
-          From real-time cost tracking to automatic optimization &mdash;
-          all running locally on your machine.
+          From bone-honest cost tracking to silent auto-optimisation &mdash;
+          all running on your own machine, where no provider can peek.
         </p>
       </div>
       <div class="features-grid">
 
         <div class="feature-card">
           <span class="feature-icon" aria-hidden="true">&#x1F4CA;</span>
-          <h3 class="feature-title">Real-time cost visibility</h3>
+          <h3 class="feature-title">Every penny, as it spends</h3>
           <p class="feature-desc">
-            See exactly what every LLM call costs as it happens.
-            Per-request, per-session, and cumulative totals right in your status bar.
+            Watch each LLM call ring up in real time. Per-request, per-session,
+            and a running tally in your status bar &mdash; nothing hidden.
           </p>
-          <span class="feature-tag free">Free</span>
+          <span class="feature-tag free">Free Forever</span>
         </div>
 
         <div class="feature-card">
-          <span class="feature-icon" aria-hidden="true">&#x1F5DC;</span>
-          <h3 class="feature-title">Prompt compression</h3>
+          <span class="feature-icon" aria-hidden="true">&#x2702;&#xFE0F;</span>
+          <h3 class="feature-title">Trim the fat from every prompt</h3>
           <p class="feature-desc">
-            Automatic context trimming removes redundant tokens before they hit the API.
-            Same quality responses, fewer tokens billed.
+            Redundant tokens snipped before the API ever sees them.
+            Same quality answer, leaner bill at the end of the day.
           </p>
         </div>
 
         <div class="feature-card">
           <span class="feature-icon" aria-hidden="true">&#x1F4BE;</span>
-          <h3 class="feature-title">Response caching</h3>
+          <h3 class="feature-title">Never pay twice for the same answer</h3>
           <p class="feature-desc">
-            Identical or near-identical prompts return cached results instantly.
-            Zero cost, zero latency on repeat queries.
+            Ask the same thing again? The cache serves it instantly.
+            No round trip, no token spent. Scrooge approves.
           </p>
         </div>
 
         <div class="feature-card">
           <span class="feature-icon" aria-hidden="true">&#x1F3AF;</span>
-          <h3 class="feature-title">Smart model routing</h3>
+          <h3 class="feature-title">Cheap model when cheap will do</h3>
           <p class="feature-desc">
-            Not every task needs the most expensive model. ScroogeLLM suggests
-            downgrades when a cheaper model can handle the request equally well.
+            Not every task needs the maestro. ScroogeLLM nudges you toward
+            the smaller model whenever it can carry the tune.
           </p>
         </div>
 
         <div class="feature-card">
           <span class="feature-icon" aria-hidden="true">&#x1F575;</span>
-          <h3 class="feature-title">PII anonymization</h3>
+          <h3 class="feature-title">Real names stay home</h3>
           <p class="feature-desc">
-            Deterministic fake names replace real PII before it reaches the provider.
-            Same fake name for the same input, stable across your session.
+            Deterministic fake names replace real PII before it leaves your machine.
+            Same input, same fake, every time &mdash; nothing leaks.
           </p>
-          <span class="feature-tag free">Free</span>
+          <span class="feature-tag free">Free Forever</span>
         </div>
 
         <div class="feature-card">
           <span class="feature-icon" aria-hidden="true">&#x1F4DC;</span>
-          <h3 class="feature-title">Savings audit trail</h3>
+          <h3 class="feature-title">A ledger your CFO will love</h3>
           <p class="feature-desc">
-            Every request logs raw cost vs. actual cost. Full audit trail you can
-            inspect, export, and use to justify tooling budgets.
+            Every request logs raw cost vs. actual cost. Inspect it, export it,
+            and use it to justify your tooling budget at the next review.
           </p>
-          <span class="feature-tag free">Free</span>
+          <span class="feature-tag free">Free Forever</span>
         </div>
 
         <div class="feature-card">
           <span class="feature-icon" aria-hidden="true">&#x1F510;</span>
-          <h3 class="feature-title">OS keychain integration</h3>
+          <h3 class="feature-title">API keys, in the vault</h3>
           <p class="feature-desc">
-            API keys stored in your operating system's native keychain.
-            Never plaintext, never transmitted. Your keys, your machine, period.
+            Stored in your operating system's native keychain.
+            Never plaintext, never transmitted. Your keys, your machine, full stop.
           </p>
-          <span class="feature-tag free">Free</span>
+          <span class="feature-tag free">Free Forever</span>
         </div>
 
         <div class="feature-card">
           <span class="feature-icon" aria-hidden="true">&#x26A1;</span>
-          <h3 class="feature-title">Free tier always on</h3>
+          <h3 class="feature-title">Free tier, always on</h3>
           <p class="feature-desc">
-            Core optimizations work without paying a cent. Visibility, PII protection,
-            and audit logging are free forever. Paid features add deeper savings.
+            Visibility, PII protection, and audit logging are free forever.
+            Paid features add deeper savings, but you'll never need to pay to see what you're spending.
           </p>
-          <span class="feature-tag free">Free</span>
+          <span class="feature-tag free">Free Forever</span>
         </div>
 
       </div>
@@ -986,38 +1184,38 @@
   <section class="section how-section" id="how-it-works">
     <div class="section-inner">
       <div class="how-header">
-        <p class="section-label">How It Works</p>
-        <h2 class="section-title">A local proxy that earns its keep</h2>
+        <p class="section-label gold">How It Works</p>
+        <h2 class="section-title">A miserly little proxy that <em>earns its keep</em></h2>
         <p class="section-desc">
-          ScroogeLLM runs a lightweight proxy on localhost.
-          Your AI tools talk to the proxy. The proxy talks to the provider.
-          In between, it does its work.
+          ScroogeLLM runs a quiet local proxy. Your AI tools talk to it.
+          It talks to the provider. In between, it pinches every penny it can
+          &mdash; and reports back, honest to the cent.
         </p>
       </div>
 
       <div class="how-steps">
         <div class="how-step">
           <div class="how-step-number">1</div>
-          <h3 class="how-step-title">Install &amp; configure</h3>
+          <h3 class="how-step-title">Move in</h3>
           <p class="how-step-desc">
             Install from the VS Code Marketplace. Point your LLM tools at
-            <code>localhost</code>. Done.
+            <code>localhost</code>. That's the whole setup.
           </p>
         </div>
         <div class="how-step">
           <div class="how-step-number">2</div>
-          <h3 class="how-step-title">Intercept &amp; optimize</h3>
+          <h3 class="how-step-title">Pinch the pennies</h3>
           <p class="how-step-desc">
-            Every request flows through the proxy. Prompts are compressed, PII is
-            scrubbed, and responses are cached automatically.
+            Every request flows through. Prompts get trimmed, PII gets scrubbed,
+            and the cache catches what it can. All locally.
           </p>
         </div>
         <div class="how-step">
           <div class="how-step-number">3</div>
-          <h3 class="how-step-title">Track &amp; save</h3>
+          <h3 class="how-step-title">Count the loot</h3>
           <p class="how-step-desc">
-            See real-time costs in VS Code. Review your audit trail. Watch the savings
-            accumulate, request by request.
+            See real-time costs in VS Code. Browse your audit trail.
+            Watch the savings pile up, one request at a time.
           </p>
         </div>
       </div>
@@ -1077,15 +1275,62 @@ flowchart TB
     </div>
   </section>
 
+  <!-- ── Routing (orchestra) ─────────────────────────── -->
+  <section class="section routing-section" id="routing">
+    <div class="section-inner">
+      <div class="routing-header">
+        <p class="section-label gold">The Routing Trick</p>
+        <h2 class="section-title">Why call the <em>maestro</em> when the cellist will do?</h2>
+        <p class="section-desc">
+          Not every prompt needs the most expensive model in the orchestra.
+          ScroogeLLM conducts the whole ensemble &mdash; Haiku here, Sonnet there,
+          Opus only when the music truly demands it. The tip jar fills up either way.
+        </p>
+      </div>
+      <figure class="section-figure">
+        <picture>
+          <source srcset="img/scrooge-orchestra.webp" type="image/webp">
+          <img src="img/scrooge-orchestra.jpg"
+               alt="Old Scrooge conducting an orchestra of vintage brass robots labelled HAIKU, SONNET, FLASH, MINI, OPUS PREMIUM TIER and LOCAL FREE, with a sheet of music titled TOKEN ECONOMY IN B♭ and a savings tip jar on the podium"
+               width="1408" height="768" loading="lazy">
+        </picture>
+      </figure>
+    </div>
+  </section>
+
+  <!-- ── Agents (building) ───────────────────────────── -->
+  <section class="section agents-section" id="agents">
+    <div class="section-inner">
+      <div class="agents-header">
+        <p class="section-label gold">For Agentic Coding</p>
+        <h2 class="section-title">Let the bots build your <em>empire</em></h2>
+        <p class="section-desc">
+          Agentic coders spend tokens like Edwardian construction crews spend bricks.
+          ScroogeLLM keeps a careful eye on the worksite, vetoes the wasteful jobs,
+          and reminds the foreman-bot when a smaller crew will do.
+          You sit on the balcony with the cigar.
+        </p>
+      </div>
+      <figure class="section-figure">
+        <picture>
+          <source srcset="img/scrooge-building.webp" type="image/webp">
+          <img src="img/scrooge-building.jpg"
+               alt="Old Scrooge on a brass balcony surveying robot construction crews building an Edwardian skyscraper labelled MEGACORP, FLOOR 12 REFACTORED, FEATURE #47, with a SCROOGELLM hot-air balloon overhead"
+               width="1408" height="768" loading="lazy">
+        </picture>
+      </figure>
+    </div>
+  </section>
+
   <!-- ── Privacy ─────────────────────────────────────── -->
   <section class="section" id="privacy">
     <div class="section-inner">
       <div class="features-header">
-        <p class="section-label">Privacy &amp; Security</p>
-        <h2 class="section-title">Your code stays on your machine</h2>
+        <p class="section-label gold">Privacy &amp; Security</p>
+        <h2 class="section-title">Your secrets stay home. <em>Always.</em></h2>
         <p class="section-desc">
-          ScroogeLLM is designed for developers who take data seriously.
-          No cloud, no accounts, no telemetry.
+          ScroogeLLM is built for people who take data seriously.
+          No cloud, no accounts, no telemetry. The miser keeps the books &mdash; nobody else.
         </p>
       </div>
 
@@ -1096,7 +1341,7 @@ flowchart TB
             <div class="privacy-item-title">Localhost only</div>
             <p class="privacy-item-desc">
               The proxy binds to 127.0.0.1 by default. No remote exposure
-              without your explicit opt-in.
+              without your explicit opt-in, signed in triplicate.
             </p>
           </div>
         </div>
@@ -1106,7 +1351,7 @@ flowchart TB
             <div class="privacy-item-title">Native keychain</div>
             <p class="privacy-item-desc">
               API keys live in macOS Keychain, Windows Credential Locker,
-              or Linux Secret Service. Never in plaintext files.
+              or Linux Secret Service. Never in plaintext, never on a sticky note.
             </p>
           </div>
         </div>
@@ -1116,7 +1361,7 @@ flowchart TB
             <div class="privacy-item-title">Zero telemetry</div>
             <p class="privacy-item-desc">
               No usage data, no analytics, no phone-home. We never see
-              your prompts, your code, or your API keys.
+              your prompts, your code, or your API keys. Not interested.
             </p>
           </div>
         </div>
@@ -1138,17 +1383,27 @@ flowchart TB
   <!-- ── Final CTA ───────────────────────────────────── -->
   <section class="section cta-section" id="signup">
     <div class="section-inner">
+      <div class="cta-banner-wrap">
+        <picture>
+          <source srcset="img/scrooge-banner-white.webp" type="image/webp">
+          <img src="img/scrooge-banner-white.jpg"
+               alt="ScroogeLLM mascot tipping his cigar beside a gilded vault marked TOKENS SAVED, under a sign reading 'Why pay full price?'"
+               width="1408" height="768" loading="lazy">
+        </picture>
+      </div>
       <p class="section-label">Get Early Access</p>
-      <h2 class="section-title">Stop paying full price for AI</h2>
+      <h2 class="section-title">Stop paying <em>full price.</em></h2>
       <p class="section-desc">
-        ScroogeLLM is coming to the VS Code Marketplace.
+        ScroogeLLM is on its way to the VS Code Marketplace.
+        Free tier forever &mdash; paid tier saves you more. Old Scrooge insists.
       </p>
       <form class="signup-form signup-form-cta" action="#" method="post" aria-label="Footer email signup" hidden>
         <input type="email" placeholder="dev@example.com" aria-label="Email address" required disabled>
-        <button type="submit" class="btn btn-primary" disabled style="opacity: 0.6; cursor: not-allowed;">Notify Me</button>
-        <p class="signup-notice" style="font-size: 0.75rem; color: var(--text-dim); margin-top: 0.5rem;">Notifications launching soon</p>
+        <button type="submit" class="btn btn-gold" disabled style="opacity: 0.6; cursor: not-allowed;">Notify Me</button>
       </form>
-      <p class="signup-note" hidden>Email signup coming soon. Free forever tier included. No credit card needed.</p>
+      <div class="coming-soon-pill" style="background: rgba(118, 17, 49, 0.08); border-color: rgba(118, 17, 49, 0.3); color: var(--burgundy);">
+        <span aria-hidden="true">🪙</span> Notifications launching soon
+      </div>
     </div>
   </section>
 
@@ -1168,6 +1423,8 @@ flowchart TB
       <p class="footer-legal">
         ScroogeLLM is named in the spirit of Ebenezer Scrooge from Charles Dickens'
         <em>A Christmas Carol</em> (1843, public domain) &mdash; a character who knew the value of every penny.
+        Our mascot is an original jovial Edwardian gentleman of our own invention,
+        unrelated to any board game or animated waterfowl.
         <br>
         &copy; 2026 AI Clarity Pty Ltd. All rights reserved.
       </p>
