@@ -18,6 +18,7 @@
 
 import * as vscode from 'vscode';
 import { ADR_STATUS_VALUES } from '../lib/adr-manager';
+import { listEpics } from '../lib/epic-manager';
 
 // ─── Value tables (single source for completions) ────────────────────────────
 
@@ -55,6 +56,12 @@ export interface FrontmatterCompletionContext {
   readonly lineIndex: number;
   /** Text of the cursor line up to (not including) the cursor column. */
   readonly linePrefix: string;
+  /**
+   * Registry epic completions for the `epic:` field (ids + slugs). Dynamic, so
+   * the adapter injects them; the pure core stays FS-free. Absent → no epic
+   * completions (e.g. no registry).
+   */
+  readonly epicCandidates?: readonly string[];
 }
 
 /** True when `lineIndex` falls inside the leading `---`…`---` frontmatter block. */
@@ -100,6 +107,8 @@ export function frontmatterValueCompletions(
     candidates = TIER_VALUES;
   } else if ((PHASE_KEYS as readonly string[]).includes(key)) {
     candidates = PHASE_STATUS_VALUES;
+  } else if (key === 'epic') {
+    candidates = ctx.epicCandidates ?? [];
   }
 
   if (!candidates) return [];
@@ -121,11 +130,29 @@ export class FrontmatterCompletionProvider implements vscode.CompletionItemProvi
     const lines = document.getText().split('\n');
     const linePrefix = document.lineAt(position.line).text.slice(0, position.character);
 
+    // Epic completions are dynamic — read the registry only when the cursor line
+    // is actually an `epic:` field, to avoid an FS hit on every keystroke.
+    let epicCandidates: string[] | undefined;
+    if (/^\s*epic\s*:/i.test(linePrefix)) {
+      const root = vscode.workspace.getWorkspaceFolder(document.uri)?.uri.fsPath
+        ?? vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+      if (root) {
+        try {
+          const epics = listEpics(root);
+          // Offer ids first, then slugs (both are valid refs).
+          epicCandidates = [...epics.map(e => e.id), ...epics.map(e => e.slug)];
+        } catch {
+          // best-effort — no completions on read failure
+        }
+      }
+    }
+
     const values = frontmatterValueCompletions({
       fileName,
       lines,
       lineIndex: position.line,
       linePrefix,
+      epicCandidates,
     });
 
     return values.map((value, i) => {

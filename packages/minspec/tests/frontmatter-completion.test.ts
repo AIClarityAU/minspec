@@ -64,6 +64,43 @@ describe('frontmatterValueCompletions()', () => {
     });
   });
 
+  describe('epic field — registry-driven', () => {
+    const EPIC_DOC = '---\nid: SPEC-001\nepic: \nstatus: new\n---\n# Spec\n';
+    const cands = ['EPIC-001', 'EPIC-002', 'telemetry', 'auth'];
+
+    it('offers injected epic candidates (ids + slugs)', () => {
+      const result = frontmatterValueCompletions({
+        fileName: 'requirements.md',
+        lines: EPIC_DOC.split('\n'),
+        lineIndex: 2,
+        linePrefix: 'epic: ',
+        epicCandidates: cands,
+      });
+      expect(result).toEqual(cands);
+    });
+
+    it('prefix-filters epic candidates', () => {
+      const result = frontmatterValueCompletions({
+        fileName: 'requirements.md',
+        lines: EPIC_DOC.split('\n'),
+        lineIndex: 2,
+        linePrefix: 'epic: EPIC',
+        epicCandidates: cands,
+      });
+      expect(result).toEqual(['EPIC-001', 'EPIC-002']);
+    });
+
+    it('returns [] for epic field when no candidates injected', () => {
+      const result = frontmatterValueCompletions({
+        fileName: 'requirements.md',
+        lines: EPIC_DOC.split('\n'),
+        lineIndex: 2,
+        linePrefix: 'epic: ',
+      });
+      expect(result).toEqual([]);
+    });
+  });
+
   describe('phase keys', () => {
     it('offers phase statuses after a phase key', () => {
       const doc = '---\nid: SPEC-001\nimplement: \n---\n';

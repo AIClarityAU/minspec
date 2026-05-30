@@ -12,6 +12,7 @@ import {
   type GeneratedHashes,
 } from './merge-refresh';
 import { generateSlashCommandShims } from './slash-commands';
+import { writeEpicIndex } from './epic-manager';
 
 export { DEFAULT_CONFIG };
 
@@ -32,6 +33,15 @@ export function scaffold(rootDir: string): void {
   const configPath = path.join(minspecDir, 'config.json');
   if (!fs.existsSync(configPath)) {
     fs.writeFileSync(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2) + '\n');
+  }
+
+  // Pre-create the epic registry directory + empty marker-bounded INDEX so the
+  // explorer epic-grouping has a home from day one (DR-013 / SPEC-007 FR-10).
+  // Idempotent — writeEpicIndex only rewrites content inside its own markers.
+  try {
+    writeEpicIndex(rootDir);
+  } catch {
+    // best-effort — epics are optional; a failure here must not break init.
   }
 }
 

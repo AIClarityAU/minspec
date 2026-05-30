@@ -168,11 +168,32 @@ function hasAcceptanceCriteria(spec: ParsedSpec): boolean {
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
-export function validateSpec(spec: ParsedSpec, config: MinspecConfig): ValidationResult {
+export function validateSpec(
+  spec: ParsedSpec,
+  config: MinspecConfig,
+  /**
+   * Lowercased set of valid epic refs (ids + slugs) from the registry. When
+   * supplied, an `epic:` frontmatter ref that is not in the set yields a
+   * WARNING (never an error — epics are optional, FR-9). Omit to skip the check
+   * (callers without registry access get no false warnings).
+   */
+  knownEpicRefs?: ReadonlySet<string>,
+): ValidationResult {
   const tier = spec.frontmatter.tier;
   const raw = spec.raw;
   const rawLower = raw.toLowerCase();
   const violations: ValidationViolation[] = [];
+
+  // 0. Epic reference resolves (soft — warning only, DR-013 FR-9).
+  const epicRef = spec.frontmatter.epic?.trim();
+  if (epicRef && knownEpicRefs && !knownEpicRefs.has(epicRef.toLowerCase())) {
+    violations.push({
+      rule: 'epic.unresolved',
+      severity: 'warning',
+      message: `Epic "${epicRef}" does not match any registered epic.`,
+      fixHint: 'Create the epic (MinSpec: Create Epic) or fix the ref to an existing EPIC-NNN id or slug. The spec stays grouped under "(no epic)" until then.',
+    });
+  }
 
   // 1. Required-phase sections must be present and non-empty.
   const required: Phase[] = config.phaseMappings[tier]?.requiredPhases ?? [];

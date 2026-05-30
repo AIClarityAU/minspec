@@ -3,6 +3,7 @@ import { listSpecs, type SpecSummary } from '../views/spec-tree-provider';
 import { readSpecFile } from '../lib/spec';
 import { loadConfig } from '../lib/config';
 import { validateSpec } from '../lib/spec-validator';
+import { epicRefSet } from '../lib/epic-manager';
 
 interface SpecNodeLike {
   readonly spec?: SpecSummary;
@@ -36,7 +37,7 @@ export async function validateSpecCommand(node?: SpecNodeLike): Promise<void> {
 
   let result;
   try {
-    result = validateSpec(readSpecFile(spec.filePath), loadConfig(rootDir));
+    result = validateSpec(readSpecFile(spec.filePath), loadConfig(rootDir), epicRefSet(rootDir));
   } catch (err) {
     vscode.window.showErrorMessage(
       `MinSpec: Cannot read ${spec.id} — ${err instanceof Error ? err.message : String(err)}`,

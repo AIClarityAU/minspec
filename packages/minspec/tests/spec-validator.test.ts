@@ -125,3 +125,55 @@ describe('validateSpec — aspect: architecture', () => {
     expect(r.violations.some((v) => v.rule === 'aspect.architecture.no-diagram' && v.severity === 'error')).toBe(true);
   });
 });
+
+describe('validateSpec — epic reference (DR-013 FR-9)', () => {
+  // Spec with an `epic:` frontmatter field (the spec() helper omits it, so build inline).
+  function specWithEpic(epicRef: string): string {
+    return [
+      '---',
+      'id: SPEC-001',
+      'title: Test',
+      'tier: T3',
+      'status: implementing',
+      'created: 2026-05-30',
+      `epic: ${epicRef}`,
+      'phases:',
+      '  specify: done',
+      '  clarify: pending',
+      '  plan: done',
+      '  tasks: done',
+      '  implement: in-progress',
+      '---',
+      '',
+      FULL_T3,
+    ].join('\n');
+  }
+
+  it('warns (never errors) when the epic ref does not resolve', () => {
+    const known = new Set(['epic-001', 'telemetry']);
+    const r = validateSpec(parseSpec(specWithEpic('nope')), DEFAULT_CONFIG, known);
+    const v = r.violations.find((x) => x.rule === 'epic.unresolved');
+    expect(v).toBeDefined();
+    expect(v!.severity).toBe('warning');
+    // warning must not break completeness
+    expect(r.complete).toBe(true);
+  });
+
+  it('does not warn when the ref resolves (by id or slug, case-insensitive)', () => {
+    const known = new Set(['epic-001', 'telemetry']);
+    expect(validateSpec(parseSpec(specWithEpic('EPIC-001')), DEFAULT_CONFIG, known)
+      .violations.some((x) => x.rule === 'epic.unresolved')).toBe(false);
+    expect(validateSpec(parseSpec(specWithEpic('Telemetry')), DEFAULT_CONFIG, known)
+      .violations.some((x) => x.rule === 'epic.unresolved')).toBe(false);
+  });
+
+  it('does not warn when no registry set is supplied (check skipped)', () => {
+    const r = validateSpec(parseSpec(specWithEpic('whatever')), DEFAULT_CONFIG);
+    expect(r.violations.some((x) => x.rule === 'epic.unresolved')).toBe(false);
+  });
+
+  it('does not warn when the spec has no epic field', () => {
+    const r = validateSpec(parseSpec(spec({ tier: 'T3' }, FULL_T3)), DEFAULT_CONFIG, new Set(['epic-001']));
+    expect(r.violations.some((x) => x.rule === 'epic.unresolved')).toBe(false);
+  });
+});

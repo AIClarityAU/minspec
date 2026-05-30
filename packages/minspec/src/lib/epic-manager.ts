@@ -125,6 +125,19 @@ export function listEpics(rootDir: string, vscodeOverrides?: { epicsDir?: string
   return results;
 }
 
+/**
+ * Lowercased set of every valid epic reference (ids + slugs) in the registry.
+ * For soft validation (`validateSpec` FR-9) — membership = "resolves".
+ */
+export function epicRefSet(rootDir: string, vscodeOverrides?: { epicsDir?: string }): Set<string> {
+  const set = new Set<string>();
+  for (const e of listEpics(rootDir, vscodeOverrides)) {
+    set.add(e.id.toLowerCase());
+    set.add(e.slug.toLowerCase());
+  }
+  return set;
+}
+
 // ─── Resolution ─────────────────────────────────────────────────────────────
 
 /**
