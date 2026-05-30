@@ -3,6 +3,7 @@ id: SPEC-009
 type: tasks
 status: done
 product: minspec
+epic: EPIC-001
 ---
 
 # MinSpec — Registered Epics & Grouping (Tasks)

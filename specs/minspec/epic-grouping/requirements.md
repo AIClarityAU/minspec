@@ -3,6 +3,7 @@ id: SPEC-007
 type: requirements
 status: done
 product: minspec
+epic: EPIC-001
 ---
 
 # MinSpec — Registered Epics & Cross-Artifact Grouping (Requirements)
