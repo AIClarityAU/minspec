@@ -3,7 +3,7 @@ id: SPEC-008
 type: design
 status: done
 product: minspec
-epic: EPIC-001
+epic: EPIC-001  # Explorer Epic Grouping
 ---
 
 # MinSpec — Registered Epics & Grouping (Design / Plan)

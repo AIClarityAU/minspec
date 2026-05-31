@@ -3,7 +3,7 @@ id: SPEC-011
 type: requirements
 status: specifying
 product: minspec
-epic: EPIC-001
+epic: EPIC-001  # Explorer Epic Grouping
 ---
 
 # MinSpec — AI-assisted Epic Backfill (Requirements)

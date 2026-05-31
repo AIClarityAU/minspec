@@ -1,5 +1,5 @@
 ---
-epic: EPIC-003
+epic: EPIC-003  # SDD Core Methodology
 id: SPEC-003
 type: tasks
 status: implementing

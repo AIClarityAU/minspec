@@ -3,7 +3,7 @@ id: SPEC-010
 type: requirements
 status: specifying
 product: minspec
-epic: EPIC-002
+epic: EPIC-002  # Signpost Integrity
 ---
 
 # MinSpec — Signpost Correctness (Requirements)

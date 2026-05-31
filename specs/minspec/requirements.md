@@ -1,5 +1,5 @@
 ---
-epic: EPIC-003
+epic: EPIC-003  # SDD Core Methodology
 id: SPEC-001
 type: requirements
 status: implementing

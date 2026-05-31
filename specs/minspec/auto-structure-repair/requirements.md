@@ -1,5 +1,5 @@
 ---
-epic: EPIC-005
+epic: EPIC-005  # Auto Structure Repair
 id: SPEC-005
 type: requirements
 status: specifying

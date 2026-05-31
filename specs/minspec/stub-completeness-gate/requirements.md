@@ -1,5 +1,5 @@
 ---
-epic: EPIC-002
+epic: EPIC-002  # Signpost Integrity
 id: SPEC-006
 type: requirements
 status: specifying
