@@ -106,6 +106,11 @@ Purpose: Issues = what needs doing. DRs = why we chose this approach. Commits = 
 
 ## Agent Dispatch (Tier-Gated HITL)
 
+The `scripts/` dispatch below is the **dev-time** path for building this monorepo.
+Productized, agent dispatch does NOT ship inside MinSpec (Tier 0 / air-gapped) — it
+ships as a separate third "Execute" extension (`aiclarity.agent-execute`, Tier 1).
+See DR-015 for packaging, DR-004 for the tier model, DR-008 for dispatch security.
+
 Triage agent auto-dispatches T1-T2 issues (`agent-ready`). T3-T4 get `needs-review` — human approves spec/plan before agent starts. Per SDD FR-2: Clarify phase required for T3-T4.
 
 Roles: `scripts/roles/` — triage, dev, architect, security, reviewer.
