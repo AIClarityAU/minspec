@@ -45,6 +45,8 @@ export class EpicGroupNode<T> extends vscode.TreeItem {
     public readonly members: T[],
     badge: string,
     isNoEpic: boolean,
+    /** The registered epic this group represents (absent for the NO_EPIC group). */
+    public readonly epic?: EpicSummary,
   ) {
     super(
       groupLabel,
@@ -53,10 +55,23 @@ export class EpicGroupNode<T> extends vscode.TreeItem {
         : vscode.TreeItemCollapsibleState.Expanded,
     );
     this.description = badge;
-    this.contextValue = isNoEpic ? 'epicGroup.none' : 'epicGroup';
+    // Status-suffixed contextValue gates the inline accept tick: it shows only
+    // on proposed epics (`epicGroup.proposed`). NO_EPIC has no epic to act on.
+    this.contextValue = isNoEpic ? 'epicGroup.none' : `epicGroup.${epic?.status ?? 'proposed'}`;
     this.iconPath = new vscode.ThemeIcon(isNoEpic ? 'circle-slash' : 'milestone');
+
+    // Selecting an epic header opens its EPIC-NNN.md.
+    if (epic) {
+      this.command = {
+        command: 'vscode.open',
+        title: 'Open Epic',
+        arguments: [vscode.Uri.file(epic.filePath)],
+      };
+      this.tooltip = `${epic.id}: ${epic.title}\nStatus: ${epic.status}\n${badge} done`;
+    }
+
     this.accessibilityInformation = {
-      label: `${groupLabel} epic group, ${badge}`,
+      label: `${groupLabel} epic group, ${badge}${epic ? `, status ${epic.status}` : ''}`,
       role: 'treeitem',
     };
   }
@@ -86,17 +101,16 @@ export function buildEpicGroups<T>(
   const epics = listEpicsFn(rootDir);
   if (epics.length === 0) return null;
   const buckets = groupByEpic(items, refOf, epics);
-  const titleById = new Map(epics.map(e => [e.id, e.title] as const));
+  const epicById = new Map(epics.map(e => [e.id, e] as const));
 
   const nodes: EpicGroupNode<T>[] = [];
   for (const [key, members] of buckets) {
     const isNoEpic = key === NO_EPIC;
     const done = members.filter(isTerminal).length;
     const badge = `${done}/${members.length}`;
-    const label = isNoEpic
-      ? NO_EPIC
-      : `${titleById.get(key) ?? key} (${key})`;
-    nodes.push(new EpicGroupNode(label, members, badge, isNoEpic));
+    const epic = isNoEpic ? undefined : epicById.get(key);
+    const label = isNoEpic ? NO_EPIC : `${epic?.title ?? key} (${key})`;
+    nodes.push(new EpicGroupNode(label, members, badge, isNoEpic, epic));
   }
   return nodes;
 }

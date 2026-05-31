@@ -141,6 +141,12 @@
         "icon": "$(sparkle)"
       },
       {
+        "command": "minspec.acceptEpic",
+        "title": "MinSpec: Accept Epic",
+        "shortTitle": "Accept",
+        "icon": "$(check)"
+      },
+      {
         "command": "minspec.specExplorer.toggleEpicGrouping",
         "title": "MinSpec: Toggle Group by Epic (Specs)",
         "icon": "$(milestone)"
@@ -215,7 +221,7 @@
       "explorer": [
         {
           "id": "minspecStatus",
-          "name": "MinSpec"
+          "name": "MinSpec: Specs"
         },
         {
           "id": "minspecAdrs",
@@ -229,6 +235,10 @@
     },
     "menus": {
       "commandPalette": [
+        {
+          "command": "minspec.acceptEpic",
+          "when": "false"
+        },
         {
           "command": "minspec.init",
           "when": "false"
@@ -295,6 +305,16 @@
         }
       ],
       "view/item/context": [
+        {
+          "command": "minspec.acceptEpic",
+          "when": "viewItem == epicGroup.proposed",
+          "group": "inline"
+        },
+        {
+          "command": "minspec.acceptEpic",
+          "when": "viewItem == epicGroup.proposed",
+          "group": "1_epic"
+        },
         {
           "command": "minspec.classify",
           "when": "viewItem == specNode",

@@ -254,6 +254,28 @@ export function readArtifactEpic(filePath: string): string | null {
   }
 }
 
+/**
+ * Rewrite the `status:` line in an epic file's frontmatter. Adds the line if
+ * absent. Returns the new status. Throws on invalid status or no frontmatter.
+ */
+export function setEpicStatus(filePath: string, status: EpicStatus): EpicStatus {
+  if (!EPIC_STATUSES.has(status)) {
+    throw new Error(`Invalid epic status: ${status}`);
+  }
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const fmMatch = content.match(FRONTMATTER_RE);
+  if (!fmMatch) {
+    throw new Error(`No frontmatter block in ${filePath}`);
+  }
+  const yaml = fmMatch[1];
+  const statusLineRe = /^([ \t]*)status[ \t]*:[ \t]*.*$/m;
+  const newYaml = statusLineRe.test(yaml)
+    ? yaml.replace(statusLineRe, `$1status: ${status}`)
+    : `${yaml}\nstatus: ${status}`;
+  fs.writeFileSync(filePath, content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---`), 'utf-8');
+  return status;
+}
+
 // ─── Numbering & Creation ─────────────────────────────────────────────────────
 
 /** Next sequential epic number: max(existing EPIC-NNN) + 1. */

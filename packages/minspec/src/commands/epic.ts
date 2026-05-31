@@ -1,5 +1,38 @@
 import * as vscode from 'vscode';
-import { createEpic, writeEpicIndex } from '../lib/epic-manager';
+import { createEpic, writeEpicIndex, setEpicStatus } from '../lib/epic-manager';
+import type { EpicSummary } from '../lib/epic-manager';
+
+/** Tree node carrying the epic this group represents (from EpicGroupNode). */
+interface EpicNodeLike {
+  readonly epic?: EpicSummary;
+}
+
+/**
+ * Command: Accept a proposed epic (inline ✓ on hover). Flips status
+ * proposed → active in one click, mirroring Accept Decision for ADRs.
+ */
+export async function acceptEpicCommand(node?: EpicNodeLike): Promise<void> {
+  const epic = node?.epic;
+  if (!epic?.filePath) {
+    vscode.window.showErrorMessage('MinSpec: No epic selected.');
+    return;
+  }
+  if (epic.status === 'active') {
+    vscode.window.showInformationMessage(`MinSpec: ${epic.id} already active.`);
+    return;
+  }
+  try {
+    setEpicStatus(epic.filePath, 'active');
+    const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    if (folder) {
+      try { writeEpicIndex(folder); } catch { /* index regen best-effort */ }
+    }
+    vscode.window.showInformationMessage(`MinSpec: ${epic.id} → active`);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    vscode.window.showErrorMessage(`MinSpec: Failed to accept epic — ${message}`);
+  }
+}
 
 /**
  * Command: Create a new Epic.

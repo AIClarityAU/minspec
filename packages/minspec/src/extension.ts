@@ -9,7 +9,7 @@ import { parkCommand } from './commands/park';
 import { generateExampleCommand } from './commands/example';
 import { migrateLayoutCommand } from './commands/migrate';
 import { createAdrCommand, regenerateDrIndexCommand, acceptAdrCommand, setAdrStatusCommand } from './commands/adr';
-import { createEpicCommand, regenerateEpicIndexCommand } from './commands/epic';
+import { createEpicCommand, regenerateEpicIndexCommand, acceptEpicCommand } from './commands/epic';
 import { backfillEpicsCommand } from './commands/backfill-epics';
 import { regenerateDrIndex } from './lib/adr-manager';
 import { scoreWsjfCommand, triageIssueCommand } from './commands/backlog';
@@ -159,6 +159,12 @@ export function activate(context: vscode.ExtensionContext): void {
       backlogTreeProvider.refresh();
     }),
     vscode.commands.registerCommand('minspec.regenerateEpicIndex', regenerateEpicIndexCommand),
+    vscode.commands.registerCommand('minspec.acceptEpic', async (node) => {
+      await acceptEpicCommand(node);
+      specTreeProvider.refresh();
+      adrTreeProvider.refresh();
+      backlogTreeProvider.refresh();
+    }),
     vscode.commands.registerCommand('minspec.backfillEpics', async () => {
       await backfillEpicsCommand();
       specTreeProvider.refresh();

@@ -36,6 +36,7 @@ import {
   epicRefValue,
   formatEpicRef,
   setArtifactEpic,
+  setEpicStatus,
   readArtifactEpic,
   type EpicSummary,
 } from '../src/lib/epic-manager';
@@ -169,6 +170,20 @@ describe('epic-manager', () => {
   });
 
   // ─── setArtifactEpic / readArtifactEpic ──────────────────────────────
+
+  describe('setEpicStatus()', () => {
+    it('rewrites the status line and listEpics reflects it', () => {
+      const s = createEpic(tmpDir, 'Telemetry');
+      expect(listEpics(tmpDir)[0].status).toBe('proposed');
+      setEpicStatus(s.filePath, 'active');
+      expect(listEpics(tmpDir)[0].status).toBe('active');
+    });
+    it('throws on invalid status', () => {
+      const s = createEpic(tmpDir, 'X');
+      // @ts-expect-error invalid status
+      expect(() => setEpicStatus(s.filePath, 'bogus')).toThrow();
+    });
+  });
 
   describe('setArtifactEpic() / readArtifactEpic()', () => {
     function artifact(body: string): string {
