@@ -189,6 +189,42 @@ export function groupByEpic<T>(
   return buckets;
 }
 
+// ─── Frontmatter mutation ─────────────────────────────────────────────────────
+
+/**
+ * Insert or replace the `epic:` line in an existing artifact's frontmatter
+ * block (spec or ADR). Top-level placement (prepended, before any nested block
+ * like `phases:`). Mirrors `setAdrStatus`. Returns the written ref.
+ * @throws if the file has no frontmatter block.
+ */
+export function setArtifactEpic(filePath: string, ref: string): string {
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const fmMatch = content.match(FRONTMATTER_RE);
+  if (!fmMatch) {
+    throw new Error(`No frontmatter block in ${filePath}`);
+  }
+  const yaml = fmMatch[1];
+  const epicLineRe = /^([ \t]*)epic[ \t]*:[ \t]*.*$/m;
+  const newYaml = epicLineRe.test(yaml)
+    ? yaml.replace(epicLineRe, `$1epic: ${ref}`)
+    : `epic: ${ref}\n${yaml}`;
+  const updated = content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---`);
+  fs.writeFileSync(filePath, updated, 'utf-8');
+  return ref;
+}
+
+/** Read the current `epic:` ref from an artifact's frontmatter, or null. */
+export function readArtifactEpic(filePath: string): string | null {
+  try {
+    const m = fs.readFileSync(filePath, 'utf-8').match(FRONTMATTER_RE);
+    if (!m) return null;
+    const line = m[1].match(/^[ \t]*epic[ \t]*:[ \t]*(.+)$/m);
+    return line ? line[1].trim() : null;
+  } catch {
+    return null;
+  }
+}
+
 // ─── Numbering & Creation ─────────────────────────────────────────────────────
 
 /** Next sequential epic number: max(existing EPIC-NNN) + 1. */
