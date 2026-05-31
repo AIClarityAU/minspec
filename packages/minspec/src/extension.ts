@@ -10,6 +10,7 @@ import { generateExampleCommand } from './commands/example';
 import { migrateLayoutCommand } from './commands/migrate';
 import { createAdrCommand, regenerateDrIndexCommand, acceptAdrCommand, setAdrStatusCommand } from './commands/adr';
 import { createEpicCommand, regenerateEpicIndexCommand } from './commands/epic';
+import { backfillEpicsCommand } from './commands/backfill-epics';
 import { regenerateDrIndex } from './lib/adr-manager';
 import { scoreWsjfCommand, triageIssueCommand } from './commands/backlog';
 import { approveSpecCommand, revokeApprovalCommand } from './commands/approve';
@@ -158,6 +159,12 @@ export function activate(context: vscode.ExtensionContext): void {
       backlogTreeProvider.refresh();
     }),
     vscode.commands.registerCommand('minspec.regenerateEpicIndex', regenerateEpicIndexCommand),
+    vscode.commands.registerCommand('minspec.backfillEpics', async () => {
+      await backfillEpicsCommand();
+      specTreeProvider.refresh();
+      adrTreeProvider.refresh();
+      backlogTreeProvider.refresh();
+    }),
     vscode.commands.registerCommand('minspec.specExplorer.toggleEpicGrouping', () => toggleEpicGrouping(EPIC_TOGGLES[0])),
     vscode.commands.registerCommand('minspec.adrExplorer.toggleEpicGrouping', () => toggleEpicGrouping(EPIC_TOGGLES[1])),
     vscode.commands.registerCommand('minspec.backlog.toggleEpicGrouping', () => toggleEpicGrouping(EPIC_TOGGLES[2])),

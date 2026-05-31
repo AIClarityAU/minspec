@@ -136,6 +136,11 @@
         "icon": "$(list-tree)"
       },
       {
+        "command": "minspec.backfillEpics",
+        "title": "MinSpec: Backfill Epics (AI-assisted)",
+        "icon": "$(sparkle)"
+      },
+      {
         "command": "minspec.specExplorer.toggleEpicGrouping",
         "title": "MinSpec: Toggle Group by Epic (Specs)",
         "icon": "$(milestone)"
@@ -270,6 +275,11 @@
         },
         {
           "command": "minspec.createEpic",
+          "when": "view == minspecAdrs",
+          "group": "navigation"
+        },
+        {
+          "command": "minspec.backfillEpics",
           "when": "view == minspecAdrs",
           "group": "navigation"
         },

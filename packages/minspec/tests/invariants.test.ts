@@ -104,12 +104,18 @@ describe('Invariant 2: No backend — no network calls', () => {
     return results;
   }
 
-  // Files allowed to use child_process (github, parking-lot, backlog use `gh` CLI)
+  // Files allowed to use child_process. All are Tier-1 local-tool delegation
+  // (DR-004): the extension shells a locally-installed binary that owns its own
+  // networking — the extension process makes zero outbound connections.
+  //   - github / parking-lot / backlog / git-analyzer → `gh` + `git` CLI
+  //   - epic-backfill → `claude -p` for AI epic proposal (DR-016, opt-in,
+  //     degrades to a pure heuristic when `claude` is absent)
   const CHILD_PROCESS_ALLOWLIST = new Set([
     'lib/github.ts',
     'lib/parking-lot.ts',
     'lib/backlog.ts',
     'lib/git-analyzer.ts',
+    'lib/epic-backfill.ts',
   ]);
 
   const NETWORK_PATTERNS = [

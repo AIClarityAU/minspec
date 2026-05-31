@@ -7,6 +7,7 @@ import {
   isMinspecInitialized,
   hasHarnessDrift,
   hasUnclassifiedChanges,
+  hasUnbackfilledEpics,
   loadPreferences,
   savePreferences,
   preferencesPath,
@@ -326,10 +327,48 @@ describe('auto-bootstrap', () => {
   // Step-table sanity
   // =========================================================================
 
+  describe('hasUnbackfilledEpics()', () => {
+    function specFile(root: string, dir: string, id: string, epic?: string): void {
+      const d = path.join(root, 'specs', dir);
+      fs.mkdirSync(d, { recursive: true });
+      fs.writeFileSync(path.join(d, `${id}.md`), [
+        '---', `id: ${id}`, `title: ${id}`, 'tier: T2', 'status: new', 'created: 2026-05-31',
+        ...(epic ? [`epic: ${epic}`] : []), 'phases:', '  specify: done', '---', '', `# ${id}`, '',
+      ].join('\n'));
+    }
+    function cfg(root: string): void {
+      fs.mkdirSync(path.join(root, '.minspec'), { recursive: true });
+      fs.writeFileSync(path.join(root, '.minspec', 'config.json'), JSON.stringify({ version: '1' }));
+    }
+
+    it('false when fewer than 3 untagged artifacts', () => {
+      cfg(tmpDir);
+      specFile(tmpDir, 'a', 'SPEC-001');
+      specFile(tmpDir, 'b', 'SPEC-002');
+      expect(hasUnbackfilledEpics(tmpDir)).toBe(false);
+    });
+
+    it('true when ≥3 specs/ADRs lack an epic ref', () => {
+      cfg(tmpDir);
+      specFile(tmpDir, 'a', 'SPEC-001');
+      specFile(tmpDir, 'b', 'SPEC-002');
+      specFile(tmpDir, 'c', 'SPEC-003');
+      expect(hasUnbackfilledEpics(tmpDir)).toBe(true);
+    });
+
+    it('false when all artifacts are already tagged', () => {
+      cfg(tmpDir);
+      specFile(tmpDir, 'a', 'SPEC-001', 'EPIC-001');
+      specFile(tmpDir, 'b', 'SPEC-002', 'EPIC-001');
+      specFile(tmpDir, 'c', 'SPEC-003', 'EPIC-001');
+      expect(hasUnbackfilledEpics(tmpDir)).toBe(false);
+    });
+  });
+
   describe('BOOTSTRAP_STEPS', () => {
-    it('contains init, refresh, classify in that order', () => {
+    it('contains init, refresh, classify, backfill in that order', () => {
       const kinds = BOOTSTRAP_STEPS.map((s: BootstrapStep) => s.kind);
-      expect(kinds).toEqual(['init', 'refresh', 'classify']);
+      expect(kinds).toEqual(['init', 'refresh', 'classify', 'backfill']);
     });
 
     it('each step wires to an existing minspec command', () => {
@@ -337,6 +376,7 @@ describe('auto-bootstrap', () => {
         init: 'minspec.init',
         refresh: 'minspec.initRefresh',
         classify: 'minspec.classify',
+        backfill: 'minspec.backfillEpics',
       };
       for (const step of BOOTSTRAP_STEPS) {
         expect(step.commandId).toBe(expected[step.kind]);

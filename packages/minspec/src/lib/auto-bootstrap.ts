@@ -30,6 +30,7 @@ import {
   type SectionHashes,
 } from './merge-refresh';
 import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS, TEMPLATES } from './template-registry';
+import { collectArtifacts } from './epic-backfill';
 
 // ---------------------------------------------------------------------------
 // Preferences (persisted in .minspec/preferences.json)
@@ -39,6 +40,7 @@ export interface BootstrapPreferences {
   readonly skipInitPrompt?: boolean;
   readonly skipRefreshPrompt?: boolean;
   readonly skipClassifyPrompt?: boolean;
+  readonly skipBackfillPrompt?: boolean;
 }
 
 const PREFS_FILENAME = 'preferences.json';
@@ -253,7 +255,25 @@ export interface BootstrapVsCode {
 }
 
 /** Identifiers used by the per-prompt skip flags */
-export type PromptKind = 'init' | 'refresh' | 'classify';
+export type PromptKind = 'init' | 'refresh' | 'classify' | 'backfill';
+
+/**
+ * Detector: project has registered epics live (DR-013) but a meaningful number
+ * of specs/ADRs carry no `epic:` ref — backfill (DR-016) would help. Pure
+ * file-system (the offer is Tier 0; the AI pass only runs on explicit action).
+ * Quiet on tiny/new projects (needs ≥3 untagged artifacts).
+ */
+export function hasUnbackfilledEpics(rootDir: string): boolean {
+  let artifacts;
+  try {
+    artifacts = collectArtifacts(rootDir);
+  } catch {
+    return false;
+  }
+  if (artifacts.length < 3) return false;
+  const untagged = artifacts.filter(a => !a.epic).length;
+  return untagged >= 3;
+}
 
 /** A single bootstrap step the orchestrator may surface */
 export interface BootstrapStep {
@@ -303,6 +323,18 @@ export const BOOTSTRAP_STEPS: readonly BootstrapStep[] = [
     primaryAction: 'Classify',
     commandId: 'minspec.classify',
     skipPrefKey: 'skipClassifyPrompt',
+  },
+  {
+    kind: 'backfill',
+    shouldRun: (rootDir, prefs) =>
+      !prefs.skipBackfillPrompt &&
+      isMinspecInitialized(rootDir) &&
+      hasUnbackfilledEpics(rootDir),
+    message:
+      'MinSpec: Several specs/decisions have no epic. Backfill epics now? (AI-enhanced if Claude Code is installed.)',
+    primaryAction: 'Backfill',
+    commandId: 'minspec.backfillEpics',
+    skipPrefKey: 'skipBackfillPrompt',
   },
 ] as const;
 
