@@ -1,4 +1,5 @@
 ---
+epic: EPIC-003
 id: SPEC-003
 type: tasks
 status: implementing

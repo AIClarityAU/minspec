@@ -1,4 +1,5 @@
 ---
+epic: EPIC-002
 id: SPEC-006
 type: requirements
 status: specifying
