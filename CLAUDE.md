@@ -62,7 +62,7 @@ Monorepo for two VS Code extensions + extension pack:
 |---|---|---|---|
 | `packages/minspec` | `aiclarity.minspec` | minspec.dev | SDD Implement phase |
 | `packages/scroogellm` | `aiclarity.scroogellm` | scroogellm.com | SDD Specify (future) |
-| `packages/shared` | `@aiclarity/shared` | — | Shared classifier |
+| `packages/shared` | `@aiclarity/shared` | — | Tier-0 shared: contract types + classifier engine (no vscode/network). See DR-014 |
 | `packages/extension-pack` | `aiclarity.minspec-pro` | — | References both |
 
 ## Session Scope Protocol
