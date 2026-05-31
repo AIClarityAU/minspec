@@ -431,6 +431,15 @@ describe('SpecTreeProvider', () => {
       const specs = provider.getChildren(groups[0]) as SpecNode[];
       expect(specs[0].contextValue).toBe('specNode');
     });
+
+    // Regression: a done/archived spec is past the DR-012 approve gate, so it
+    // must NOT expose the approve action (contextValue gates the menu).
+    it('done and archived specs get contextValue specNode.terminal', () => {
+      expect(new SpecNode(makeSpec({ status: 'done' }), 'unapproved').contextValue).toBe('specNode.terminal');
+      expect(new SpecNode(makeSpec({ status: 'archived' }), 'unapproved').contextValue).toBe('specNode.terminal');
+      // even an approved-then-done spec is terminal (no approve/revoke)
+      expect(new SpecNode(makeSpec({ status: 'done' }), 'approved').contextValue).toBe('specNode.terminal');
+    });
   });
 
   describe('getChildren(specNode) — leaf level', () => {

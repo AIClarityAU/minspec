@@ -216,9 +216,14 @@ export class SpecNode extends vscode.TreeItem {
       arguments: [vscode.Uri.file(spec.filePath)],
     };
 
-    // Context value drives menu visibility. Suffix encodes approval so the
-    // "Revoke" action only shows on approved specs (see package.json when-clauses).
-    this.contextValue = approval === 'approved' ? 'specNode.approved' : 'specNode';
+    // Context value drives menu visibility. Terminal specs (done/archived) are
+    // past the DR-012 approve-before-implement gate, so they expose no approval
+    // action at all. Otherwise the suffix encodes approval state so Revoke shows
+    // only on approved specs (see package.json when-clauses).
+    const terminal = spec.status === 'done' || spec.status === 'archived';
+    this.contextValue = terminal
+      ? 'specNode.terminal'
+      : approval === 'approved' ? 'specNode.approved' : 'specNode';
 
     const approvalLine =
       approval === 'approved' ? 'Approval: \u2714 approved (content-bound)'

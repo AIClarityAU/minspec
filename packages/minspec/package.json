@@ -205,7 +205,7 @@
         "command": "minspec.approveSpec",
         "title": "MinSpec: Approve Spec for Implementation",
         "shortTitle": "Approve",
-        "icon": "$(verified)"
+        "icon": "$(check)"
       },
       {
         "command": "minspec.revokeApproval",
@@ -297,11 +297,6 @@
           "command": "minspec.refreshBacklog",
           "when": "view == minspecBacklog",
           "group": "navigation"
-        },
-        {
-          "command": "minspec.backlog.toggleEpicGrouping",
-          "when": "view == minspecBacklog",
-          "group": "navigation"
         }
       ],
       "view/item/context": [
@@ -322,12 +317,12 @@
         },
         {
           "command": "minspec.approveSpec",
-          "when": "view == minspecStatus && viewItem =~ /^specNode/",
+          "when": "view == minspecStatus && viewItem =~ /^specNode(\\.approved)?$/",
           "group": "inline"
         },
         {
           "command": "minspec.approveSpec",
-          "when": "view == minspecStatus && viewItem =~ /^specNode/",
+          "when": "view == minspecStatus && viewItem =~ /^specNode(\\.approved)?$/",
           "group": "2_approval@1"
         },
         {

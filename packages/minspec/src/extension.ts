@@ -61,13 +61,16 @@ export function activate(context: vscode.ExtensionContext): void {
   // ─── Epic grouping toggle (DR-013 / SPEC-007 FR-7) ──────────────────────────
   // Each panel persists its "group by epic" state in workspaceState (default on)
   // and exposes a context key so the titlebar icon reflects on/off.
+  // Specs/Decisions default to epic grouping on; the Backlog defaults OFF until
+  // issues carry epic:<slug> labels (no label backfill yet — harvest316/minspec#68),
+  // so its titlebar toggle is also hidden in package.json.
   const EPIC_TOGGLES = [
-    { key: 'minspec.specExplorer.groupByEpic', ctx: 'minspec.specExplorer.groupByEpic', provider: specTreeProvider },
-    { key: 'minspec.adrExplorer.groupByEpic', ctx: 'minspec.adrExplorer.groupByEpic', provider: adrTreeProvider },
-    { key: 'minspec.backlog.groupByEpic', ctx: 'minspec.backlog.groupByEpic', provider: backlogTreeProvider },
+    { key: 'minspec.specExplorer.groupByEpic', ctx: 'minspec.specExplorer.groupByEpic', provider: specTreeProvider, def: true },
+    { key: 'minspec.adrExplorer.groupByEpic', ctx: 'minspec.adrExplorer.groupByEpic', provider: adrTreeProvider, def: true },
+    { key: 'minspec.backlog.groupByEpic', ctx: 'minspec.backlog.groupByEpic', provider: backlogTreeProvider, def: false },
   ];
   for (const t of EPIC_TOGGLES) {
-    const enabled = context.workspaceState.get<boolean>(t.key, true);
+    const enabled = context.workspaceState.get<boolean>(t.key, t.def);
     t.provider.epicGrouping?.set(enabled);
     void vscode.commands.executeCommand('setContext', t.ctx, enabled);
   }
