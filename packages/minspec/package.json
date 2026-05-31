@@ -2,7 +2,7 @@
   "name": "minspec",
   "displayName": "MinSpec",
   "description": "Complexity-adaptive specification-driven development. Classifies changes into tiers and applies proportional ceremony — a one-line fix needs one sentence of spec, an architecture rewrite gets the full treatment.",
-  "version": "0.1.16",
+  "version": "0.1.17",
   "private": true,
   "publisher": "aiclarity",
   "license": "MIT",
@@ -377,7 +377,10 @@
         },
         "minspec.specsLayout": {
           "type": "string",
-          "enum": ["flat", "spec-kit"],
+          "enum": [
+            "flat",
+            "spec-kit"
+          ],
           "default": "flat",
           "description": "How spec files are stored. 'flat': one file per spec (specs/SPEC-NNN-slug.md). 'spec-kit': one directory per spec with separate spec.md/plan.md/tasks.md — strict GitHub Spec Kit compatibility."
         },
