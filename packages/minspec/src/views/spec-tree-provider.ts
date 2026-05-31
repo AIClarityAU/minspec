@@ -21,8 +21,12 @@ export type { SpecSummary };
 
 /**
  * Scan the specs directory and return summaries for all specs.
- * Reads both flat files and spec-kit directories so a project mid-migration
- * stays visible in the sidebar.
+ *
+ * Recurses into product/feature subfolders (e.g. `specs/minspec/epic-grouping/`)
+ * — monorepos nest specs under a product dir, which the old top-level-only scan
+ * missed entirely. Still handles flat files and spec-kit directories. Multiple
+ * files sharing one `id` (a spec split across requirements/design/tasks) collapse
+ * to a single entry, preferring the canonical requirements.md/spec.md.
  */
 export function listSpecs(rootDir: string): SpecSummary[] {
   const config = loadConfig(rootDir);
@@ -32,54 +36,66 @@ export function listSpecs(rootDir: string): SpecSummary[] {
     return [];
   }
 
-  const entries = fs.readdirSync(specsDir);
-  const summaries: SpecSummary[] = [];
+  // id → {summary, rank}. Lower rank wins as the representative file.
+  const byId = new Map<string, { summary: SpecSummary; rank: number }>();
+  const rankOf = (name: string): number =>
+    name === 'requirements.md' ? 0
+      : name === 'spec.md' ? 1
+        : name === 'design.md' ? 2
+          : 3;
 
-  for (const entry of entries) {
-    const fullPath = path.join(specsDir, entry);
-    let stat: fs.Stats;
+  const consider = (fm: SpecFrontmatter, displayPath: string): void => {
+    if (!fm.id) return;
+    const { done, total } = phaseProgress(fm, config);
+    const summary: SpecSummary = {
+      id: fm.id,
+      title: fm.title,
+      tier: fm.tier,
+      status: fm.status,
+      currentPhase: deriveCurrentPhase(fm),
+      filePath: displayPath,
+      phasesDone: done,
+      phasesTotal: total,
+      epic: fm.epic,
+    };
+    const rank = rankOf(path.basename(displayPath));
+    const prev = byId.get(fm.id);
+    if (!prev || rank < prev.rank) byId.set(fm.id, { summary, rank });
+  };
+
+  const walk = (dir: string): void => {
+    let entries: string[];
     try {
-      stat = fs.statSync(fullPath);
+      entries = fs.readdirSync(dir);
     } catch {
-      continue;
+      return;
     }
-
-    try {
-      let fm: SpecFrontmatter;
-      let displayPath: string;
-
-      if (stat.isFile() && entry.endsWith('.md')) {
-        const content = fs.readFileSync(fullPath, 'utf-8');
-        fm = parseSpec(content).frontmatter;
-        displayPath = fullPath;
-      } else if (stat.isDirectory() && isSpecKitDirEntry(entry)) {
-        const specMd = path.join(fullPath, 'spec.md');
-        if (!fs.existsSync(specMd)) continue;
-        fm = readSpecKitDir(fullPath).frontmatter;
-        displayPath = specMd;
-      } else {
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry);
+      let stat: fs.Stats;
+      try {
+        stat = fs.statSync(fullPath);
+      } catch {
         continue;
       }
-
-      if (!fm.id) continue;
-
-      const { done, total } = phaseProgress(fm, config);
-      summaries.push({
-        id: fm.id,
-        title: fm.title,
-        tier: fm.tier,
-        status: fm.status,
-        currentPhase: deriveCurrentPhase(fm),
-        filePath: displayPath,
-        phasesDone: done,
-        phasesTotal: total,
-        epic: fm.epic,
-      });
-    } catch {
-      // Skip unparseable entries
+      try {
+        if (stat.isFile() && entry.endsWith('.md')) {
+          consider(parseSpec(fs.readFileSync(fullPath, 'utf-8')).frontmatter, fullPath);
+        } else if (stat.isDirectory() && isSpecKitDirEntry(entry)) {
+          // Spec-kit dir: merge shards, don't recurse into it.
+          const specMd = path.join(fullPath, 'spec.md');
+          if (fs.existsSync(specMd)) consider(readSpecKitDir(fullPath).frontmatter, specMd);
+        } else if (stat.isDirectory()) {
+          walk(fullPath); // product / feature subfolder
+        }
+      } catch {
+        // Skip unparseable entries
+      }
     }
-  }
+  };
+  walk(specsDir);
 
+  const summaries = [...byId.values()].map(v => v.summary);
   // Sort by ID for stable ordering
   summaries.sort((a, b) => a.id.localeCompare(b.id));
   return summaries;

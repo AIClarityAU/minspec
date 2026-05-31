@@ -136,6 +136,35 @@ Add rate limiting.
     expect(result[0].filePath).toBe(path.join(specsDir, 'SPEC-001.md'));
   });
 
+  // T3 regression: specs nested under product/feature subfolders were invisible
+  // (listSpecs scanned only specsDir top-level + spec-kit dirs) → empty Specs pane.
+  function fmSpec(id: string, title: string, status = 'new'): string {
+    return `---\nid: ${id}\ntitle: ${title}\ntier: T2\nstatus: ${status}\ncreated: 2026-05-31\nphases:\n  specify: done\n---\n\n# ${title}\n`;
+  }
+
+  it('recurses into product/feature subfolders (nested specs)', () => {
+    writeMinspecConfig(tmpDir);
+    const specsDir = path.join(tmpDir, 'specs');
+    writeSpecFile(path.join(specsDir, 'minspec'), 'requirements.md', fmSpec('SPEC-001', 'Core'));
+    writeSpecFile(path.join(specsDir, 'minspec', 'epic-grouping'), 'requirements.md', fmSpec('SPEC-007', 'Epics'));
+    writeSpecFile(path.join(specsDir, 'scroogellm'), 'design.md', fmSpec('SPEC-100', 'Proxy'));
+
+    const ids = listSpecs(tmpDir).map(s => s.id).sort();
+    expect(ids).toEqual(['SPEC-001', 'SPEC-007', 'SPEC-100']);
+  });
+
+  it('collapses multiple files sharing one id, preferring requirements.md', () => {
+    writeMinspecConfig(tmpDir);
+    const dir = path.join(tmpDir, 'specs', 'minspec', 'classifier-validation');
+    writeSpecFile(dir, 'requirements.md', fmSpec('SPEC-004', 'Validation'));
+    writeSpecFile(dir, 'design.md', fmSpec('SPEC-004', 'Validation'));
+    writeSpecFile(dir, 'tasks.md', fmSpec('SPEC-004', 'Validation'));
+
+    const matches = listSpecs(tmpDir).filter(s => s.id === 'SPEC-004');
+    expect(matches).toHaveLength(1);
+    expect(path.basename(matches[0].filePath)).toBe('requirements.md');
+  });
+
   it('skips files without an id', () => {
     writeMinspecConfig(tmpDir);
     const specsDir = path.join(tmpDir, 'specs');
@@ -475,6 +504,26 @@ describe('SpecTreeProvider — epic grouping', () => {
     const kids = p.getChildren(telemetry);
     expect(kids.every(k => k instanceof SpecNode)).toBe(true);
     expect(kids).toHaveLength(2);
+  });
+
+  it('epic header opens the epic file and carries a status-suffixed contextValue', () => {
+    const p = new SpecTreeProvider('/ws', () => SPECS, undefined, () => EPICS);
+    const telemetry = epicGroups(p).find(g => g.groupLabel.startsWith('Telemetry'))!;
+    // command opens EPIC-001's file
+    expect(telemetry.command?.command).toBe('vscode.open');
+    expect((telemetry.command?.arguments?.[0] as { fsPath: string }).fsPath).toBe('/e/EPIC-001.md');
+    // contextValue gates the inline accept tick (EPICS are 'active' here)
+    expect(telemetry.contextValue).toBe('epicGroup.active');
+  });
+
+  it('a proposed epic gets contextValue epicGroup.proposed (accept tick shows)', () => {
+    const proposed: EpicSummary[] = [
+      { id: 'EPIC-009', slug: 'new-thing', title: 'New Thing', status: 'proposed', order: 1, filePath: '/e/EPIC-009.md' },
+    ];
+    const specs: SpecSummary[] = [makeSpec({ id: 'SPEC-050', epic: 'new-thing' })];
+    const p = new SpecTreeProvider('/ws', () => specs, undefined, () => proposed);
+    const g = epicGroups(p)[0];
+    expect(g.contextValue).toBe('epicGroup.proposed');
   });
 
   it('falls back to status groups when no epics are registered (FR-10)', () => {
