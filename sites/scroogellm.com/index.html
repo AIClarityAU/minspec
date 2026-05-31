@@ -815,7 +815,7 @@
     }
 
     /* ── Privacy: deep-dive disclosure ────────────────── */
-    .privacy-deep {
+    .deep-dive {
       margin-top: 2.5rem;
       background: var(--bg-card);
       border: 1px solid var(--border);
@@ -823,7 +823,7 @@
       overflow: hidden;
     }
 
-    .privacy-deep > summary {
+    .deep-dive > summary {
       cursor: pointer;
       list-style: none;
       padding: 1rem 1.25rem;
@@ -836,45 +836,45 @@
       user-select: none;
     }
 
-    .privacy-deep > summary::-webkit-details-marker { display: none; }
+    .deep-dive > summary::-webkit-details-marker { display: none; }
 
-    .privacy-deep > summary::before {
+    .deep-dive > summary::before {
       content: "\25B8"; /* ▸ */
       color: var(--text-secondary);
       transition: transform 0.2s;
     }
 
-    .privacy-deep[open] > summary::before { transform: rotate(90deg); }
+    .deep-dive[open] > summary::before { transform: rotate(90deg); }
 
-    .privacy-deep > summary:hover { background: var(--bg-card-hover); }
+    .deep-dive > summary:hover { background: var(--bg-card-hover); }
 
-    .privacy-deep-body {
+    .deep-dive-body {
       padding: 0.25rem 1.25rem 1.5rem;
       border-top: 1px solid var(--border-subtle);
     }
 
-    .privacy-deep-body h4 {
+    .deep-dive-body h4 {
       font-size: 0.9rem;
       font-weight: 600;
       color: var(--text-primary);
       margin: 1.25rem 0 0.35rem;
     }
 
-    .privacy-deep-body p,
-    .privacy-deep-body li {
+    .deep-dive-body p,
+    .deep-dive-body li {
       font-size: 0.86rem;
       color: var(--text-secondary);
       line-height: 1.65;
     }
 
-    .privacy-deep-body ul {
+    .deep-dive-body ul {
       margin: 0.35rem 0 0;
       padding-left: 1.1rem;
     }
 
-    .privacy-deep-body li { margin-bottom: 0.3rem; }
+    .deep-dive-body li { margin-bottom: 0.3rem; }
 
-    .privacy-deep-body code {
+    .deep-dive-body code {
       font-family: ui-monospace, "SF Mono", Menlo, monospace;
       font-size: 0.82em;
       background: var(--bg-secondary);
@@ -884,7 +884,7 @@
       color: var(--accent);
     }
 
-    .privacy-deep-foot {
+    .deep-dive-foot {
       margin-top: 1.25rem;
       padding-top: 0.9rem;
       border-top: 1px solid var(--border-subtle);
@@ -1448,6 +1448,68 @@
         </div>
       </div>
 
+      <details class="deep-dive">
+        <summary>For the token-counters: how the trimming actually works&hellip;</summary>
+        <div class="deep-dive-body">
+          <p>
+            Scrooge doesn&rsquo;t hack bytes off your prompt and hope. Trimming is
+            <strong>tokenizer-aware</strong>: the proxy counts with the same byte-pair
+            tokenizer your provider bills against, so the &ldquo;tokens in vs tokens out&rdquo;
+            figure in your ledger matches the invoice to the token.
+          </p>
+
+          <h4>What gets snipped</h4>
+          <ul>
+            <li><strong>Re-sent boilerplate</strong> &mdash; the system preamble and instructions
+              many tools resend verbatim on every turn. Scrooge recognises the repeat and
+              forwards it once where the provider supports it.</li>
+            <li><strong>Dead whitespace and filler</strong> &mdash; collapsible indentation,
+              duplicated blank lines, and padding that costs tokens but carries no meaning.</li>
+            <li><strong>Stale context</strong> &mdash; chunks already established earlier in the
+              same conversation and re-pasted further down.</li>
+          </ul>
+
+          <h4>What never gets touched</h4>
+          <p>
+            Code fences, string literals, and anything inside them pass through
+            <strong>verbatim</strong> &mdash; a careless trim there would change behaviour, and a
+            frugal miser is not a reckless one. Trimming runs only on the framing around your
+            payload, never the payload itself. Every request logs the before/after token count,
+            so you can audit exactly what was cut and confirm the answer didn&rsquo;t change.
+          </p>
+        </div>
+      </details>
+
+      <details class="deep-dive">
+        <summary>For the cache nerds: how Scrooge avoids paying twice&hellip;</summary>
+        <div class="deep-dive-body">
+          <p>
+            The cache key is not just the prompt text. It is a hash of the
+            <strong>normalised prompt + the exact model id + every sampling parameter</strong>
+            (<code>temperature</code>, <code>top_p</code>, <code>max_tokens</code>, stop sequences).
+            Change any one of them and it is a different request &mdash; you never get a stale
+            answer that was generated under different settings.
+          </p>
+
+          <h4>Exact-match, served locally</h4>
+          <p>
+            On a hit, the response comes straight from a <strong>per-workspace local store</strong>
+            on your own disk &mdash; zero round trip, zero tokens, nothing sent to the provider.
+            Streamed responses are <strong>replayed chunk-by-chunk</strong>, so your editor behaves
+            exactly as if the model had just answered: same typing animation, same cancel
+            behaviour.
+          </p>
+
+          <h4>When Scrooge declines to cache</h4>
+          <p>
+            High-temperature calls and anything you mark no-store are passed through untouched
+            &mdash; caching a deliberately random sample would be a lie, not a saving. TTL is
+            yours to set, and the store is scoped per workspace so one project&rsquo;s answers
+            never bleed into another&rsquo;s.
+          </p>
+        </div>
+      </details>
+
       <div class="arch-diagram" role="img" aria-label="Architecture diagram showing request flow from VS Code through the ScroogeLLM proxy to the LLM provider">
         <pre class="mermaid">
 ---
@@ -1512,6 +1574,42 @@ flowchart TB
                width="1408" height="768" loading="lazy">
         </picture>
       </figure>
+
+      <details class="deep-dive">
+        <summary>For the routing wonks: how Scrooge picks the cheaper seat&hellip;</summary>
+        <div class="deep-dive-body">
+          <p>
+            Before a request is dispatched, a <strong>lightweight local scorer</strong> sizes it
+            up &mdash; no extra LLM call, no extra spend. It reads cheap, observable signals and
+            maps them to the smallest tier likely to carry the tune.
+          </p>
+
+          <h4>Signals it weighs</h4>
+          <ul>
+            <li><strong>Prompt size and shape</strong> &mdash; token count and whether the request
+              is a short edit or a sprawling multi-file context.</li>
+            <li><strong>Task hints</strong> &mdash; whether tools / function-calling are requested,
+              whether structured output is required, how long an answer is expected.</li>
+            <li><strong>Your own ceilings</strong> &mdash; a per-task or per-workspace budget you
+              set, above which Scrooge won&rsquo;t reach for the premium tier without asking.</li>
+          </ul>
+
+          <h4>You stay the conductor</h4>
+          <p>
+            Routing is <strong>suggest-and-override, never silent</strong>. A model you&rsquo;ve
+            explicitly pinned is honoured &mdash; Scrooge will show you what the cheaper seat
+            <em>would</em> have cost, but it never swaps your choice behind your back.
+          </p>
+
+          <h4>The saving is measured, not guessed</h4>
+          <p>
+            Every routed request logs which model actually served it <em>and</em> what the
+            premium tier would have billed for the same call. That delta &mdash; real model vs
+            counterfactual &mdash; is the figure that lands in your status bar. The savings are
+            an arithmetic fact in your ledger, not a marketing estimate.
+          </p>
+        </div>
+      </details>
     </div>
   </section>
 
@@ -1594,9 +1692,9 @@ flowchart TB
         </div>
       </div>
 
-      <details class="privacy-deep">
+      <details class="deep-dive">
         <summary>For the privacy geeks, here are the juicy details&hellip;</summary>
-        <div class="privacy-deep-body">
+        <div class="deep-dive-body">
           <p>
             Community Intelligence &mdash; the fleet-tuned routing and the
             &ldquo;users saved $X&rdquo; figure &mdash; needs aggregate data from many
@@ -1648,7 +1746,7 @@ flowchart TB
             about.
           </p>
 
-          <p class="privacy-deep-foot">
+          <p class="deep-dive-foot">
             Method grounded in free public guidance &mdash; the ICO&rsquo;s
             <em>Anonymisation</em> code of practice and the EDPB/WP29
             <em>Opinion&nbsp;05/2014 on Anonymisation Techniques</em>. We keep a dated,
