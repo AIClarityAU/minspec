@@ -172,8 +172,26 @@ describe('validateSpec — epic reference (DR-013 FR-9)', () => {
     expect(r.violations.some((x) => x.rule === 'epic.unresolved')).toBe(false);
   });
 
-  it('does not warn when the spec has no epic field', () => {
+  it('warns epic.missing (never errors) when the spec has no epic field but epics are registered', () => {
+    // Regression: SPEC-004 sat orphaned because a missing `epic:` was not flagged —
+    // only a *dangling* ref was. A missing ref strands the spec under "(no epic)"
+    // just the same, so it must surface too.
     const r = validateSpec(parseSpec(spec({ tier: 'T3' }, FULL_T3)), DEFAULT_CONFIG, new Set(['epic-001']));
+    const v = r.violations.find((x) => x.rule === 'epic.missing');
+    expect(v).toBeDefined();
+    expect(v!.severity).toBe('warning');
+    expect(r.complete).toBe(true); // warning must not break completeness
+    // and it is reported as missing, not as an unresolved ref
     expect(r.violations.some((x) => x.rule === 'epic.unresolved')).toBe(false);
+  });
+
+  it('does not warn epic.missing when no epics are registered (pre-epic repo, graceful)', () => {
+    const r = validateSpec(parseSpec(spec({ tier: 'T3' }, FULL_T3)), DEFAULT_CONFIG, new Set());
+    expect(r.violations.some((x) => x.rule === 'epic.missing')).toBe(false);
+  });
+
+  it('does not warn epic.missing when no registry set is supplied (check skipped)', () => {
+    const r = validateSpec(parseSpec(spec({ tier: 'T3' }, FULL_T3)), DEFAULT_CONFIG);
+    expect(r.violations.some((x) => x.rule === 'epic.missing')).toBe(false);
   });
 });

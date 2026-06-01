@@ -185,15 +185,32 @@ export function validateSpec(
   const rawLower = raw.toLowerCase();
   const violations: ValidationViolation[] = [];
 
-  // 0. Epic reference resolves (soft — warning only, DR-013 FR-9).
+  // 0. Epic reference (soft — warnings only, DR-013 FR-9). Two failure modes,
+  //    both leave the spec stranded under "(no epic)":
+  //      a. epic.unresolved — an `epic:` ref matching no registered epic.
+  //      b. epic.missing    — no `epic:` at all, in a repo that HAS registered
+  //         epics. Gated on a non-empty registry: a pre-epic repo is legitimately
+  //         epic-less (graceful degradation), and omitting `knownEpicRefs` skips
+  //         the check entirely (callers without registry access stay quiet).
+  //    The asymmetry that let SPEC-004 sit orphaned: only (a) was checked, so a
+  //    spec that simply never got an `epic:` line slipped past silently.
   //    Strip any inline title comment (`epic: EPIC-001  # Title`) before matching.
   const epicRef = epicRefValue(spec.frontmatter.epic);
-  if (epicRef && knownEpicRefs && !knownEpicRefs.has(epicRef.toLowerCase())) {
+  if (epicRef) {
+    if (knownEpicRefs && !knownEpicRefs.has(epicRef.toLowerCase())) {
+      violations.push({
+        rule: 'epic.unresolved',
+        severity: 'warning',
+        message: `Epic "${epicRef}" does not match any registered epic.`,
+        fixHint: 'Create the epic (MinSpec: Create Epic) or fix the ref to an existing EPIC-NNN id or slug. The spec stays grouped under "(no epic)" until then.',
+      });
+    }
+  } else if (knownEpicRefs && knownEpicRefs.size > 0) {
     violations.push({
-      rule: 'epic.unresolved',
+      rule: 'epic.missing',
       severity: 'warning',
-      message: `Epic "${epicRef}" does not match any registered epic.`,
-      fixHint: 'Create the epic (MinSpec: Create Epic) or fix the ref to an existing EPIC-NNN id or slug. The spec stays grouped under "(no epic)" until then.',
+      message: 'Spec has no epic reference but epics are registered.',
+      fixHint: 'Add an `epic: EPIC-NNN` frontmatter line (MinSpec: Create Epic, or run epic backfill). The spec stays grouped under "(no epic)" until then.',
     });
   }
 
