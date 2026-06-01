@@ -196,9 +196,12 @@ Explicit trace from the discussed mechanisms to FRs — nothing dropped.
 
 ## Open questions
 
-- Topological ordering when multiple specs are simultaneously incomplete — most
+- ~~Topological ordering when multiple specs are simultaneously incomplete — most
   recently edited, lowest SPEC-NNN, or explicit priority/WSJF? (Affects which
-  single "next step" surfaces globally.)
+  single "next step" surfaces globally.)~~ **Resolved by
+  [SPEC-012 Next-Task Resolver](../next-task-resolver/requirements.md) / DR-019:**
+  deterministic total order `(severity-class, epic.order, artifact-id)`; subjective
+  weight in explicit frontmatter, never inferred.
 - Where the coverage DAG lives: derived on demand from `.minspec/traceability.json`
   + frontmatter, or cached. (Leans on-demand per DR-004 pure-fs.)
 - Exact "ready/transition" trigger set for FR-11 (reuse SPEC-006 RD-2

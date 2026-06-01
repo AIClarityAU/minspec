@@ -36,11 +36,17 @@ in-editor, by the *same rule* as CI and agent dispatch.
   [SPEC-010 Signpost Correctness](../../specs/minspec/signpost-correctness/requirements.md)
   — DAG state model, six correctness mechanisms, save-time completeness check,
   five nag-avoidance guardrails, correctness + advisory invariants.
+  [SPEC-012 Next-Task Resolver](../../specs/minspec/next-task-resolver/requirements.md)
+  — cross-artifact priority DAG over approval/status gates + SPEC-010 phase
+  actions; single deterministic next human task + optional pipeline; resolves
+  SPEC-010 OQ#1.
 - **Composed specs (pre-existing):**
   [SPEC-006 Stub & Completeness Gate](../../specs/minspec/stub-completeness-gate/requirements.md)
   (strengthens the deterministic predicate);
   [SPEC-005 Auto-Structure Repair](../../specs/minspec/auto-structure-repair/requirements.md)
   (offer-driven recovery; triggered by SPEC-010 honest-degradation, never silent).
-- **Decision:** [DR-012](../decisions/DR-012.md) — HITL gate consumes the
+- **Decisions:** [DR-012](../decisions/DR-012.md) — HITL gate consumes the
   completeness contract for blocking enforcement (the signpost itself is advisory).
+  [DR-019](../decisions/DR-019.md) — next-task priority is a deterministic
+  cross-artifact DAG, never an LLM judgement (governs SPEC-012).
 - **Issues:** label `epic:signpost-integrity`.
