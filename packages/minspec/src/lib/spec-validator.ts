@@ -214,23 +214,38 @@ export function validateSpec(
     });
   }
 
-  // 1. Required-phase sections must be present and non-empty.
-  const required: Phase[] = config.phaseMappings[tier]?.requiredPhases ?? [];
-  for (const phase of required) {
-    const content = spec.phaseSections[phase];
-    const empty = !content || content.body.trim() === '';
-    if (empty) {
-      violations.push({
-        rule: `section.${phase}.empty`,
-        severity: TIER_RANK[tier] >= 3 ? 'error' : 'warning',
-        message: `Required "${phase}" section is missing or empty for ${tier}.`,
-        fixHint: `Add a "## ${cap(phase)}" section with content. ${tier} requires the ${required.map(cap).join(' → ')} phases.`,
-      });
+  // Split-layout (#93): a spec whose phases are split across sibling files
+  // (`type: requirements | design | tasks`, one phase per file) does NOT carry
+  // every `## Phase` section in one file — a `design` file legitimately has no
+  // `## Plan`. The in-file phase-section + acceptance-criteria checks below assume
+  // a single-file spec, so they are skipped for split-layout phase files (the
+  // sibling files carry those). Cross-file coverage (do all required phase files
+  // exist for the tier?) is a separate, deferred concern.
+  const SPLIT_LAYOUT_TYPES = new Set(['requirements', 'design', 'tasks']);
+  const specType = (spec.frontmatter.type ?? '').toLowerCase();
+  const isSplitLayout = SPLIT_LAYOUT_TYPES.has(specType);
+
+  // 1. Required-phase sections must be present and non-empty (single-file only).
+  if (!isSplitLayout) {
+    const required: Phase[] = config.phaseMappings[tier]?.requiredPhases ?? [];
+    for (const phase of required) {
+      const content = spec.phaseSections[phase];
+      const empty = !content || content.body.trim() === '';
+      if (empty) {
+        violations.push({
+          rule: `section.${phase}.empty`,
+          severity: TIER_RANK[tier] >= 3 ? 'error' : 'warning',
+          message: `Required "${phase}" section is missing or empty for ${tier}.`,
+          fixHint: `Add a "## ${cap(phase)}" section with content. ${tier} requires the ${required.map(cap).join(' → ')} phases.`,
+        });
+      }
     }
   }
 
-  // 2. Acceptance criteria (T3/T4).
-  if (requiresAcceptanceCriteria(tier) && !hasAcceptanceCriteria(spec)) {
+  // 2. Acceptance criteria (T3/T4). Belongs to the specify/requirements phase, so
+  //    in split-layout only the `requirements` file carries it.
+  const acceptancePhaseFile = !isSplitLayout || specType === 'requirements';
+  if (acceptancePhaseFile && requiresAcceptanceCriteria(tier) && !hasAcceptanceCriteria(spec)) {
     violations.push({
       rule: 'acceptance.missing',
       severity: 'error',

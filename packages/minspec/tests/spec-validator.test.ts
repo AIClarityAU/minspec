@@ -195,3 +195,46 @@ describe('validateSpec — epic reference (DR-013 FR-9)', () => {
     expect(r.violations.some((x) => x.rule === 'epic.missing')).toBe(false);
   });
 });
+
+describe('validateSpec — split-layout (#93 regression)', () => {
+  // A split-layout phase file (`type: design`) carries no in-file
+  // ## Plan/## Clarify/## Implement sections — those live in sibling
+  // requirements.md / tasks.md. It MUST NOT be flagged for missing phase
+  // sections, and (not being the requirements/specify file) MUST NOT be
+  // required to carry acceptance criteria. Regression: issue #93.
+  const splitDesign = `---
+id: SPEC-002
+type: design
+tier: T4
+status: implementing
+product: minspec
+---
+
+# Design Document
+
+## Architecture Overview
+The design content lives here; phase sections live in sibling files.
+`;
+
+  it('split-layout design file does not error on missing phase sections', () => {
+    const r = validateSpec(parseSpec(splitDesign), DEFAULT_CONFIG);
+    const phaseErrors = r.violations.filter((v) => /^section\.\w+\.empty$/.test(v.rule));
+    expect(phaseErrors).toHaveLength(0);
+  });
+
+  it('split-layout design file does not error on missing acceptance criteria', () => {
+    const r = validateSpec(parseSpec(splitDesign), DEFAULT_CONFIG);
+    expect(r.violations.some((v) => v.rule === 'acceptance.missing')).toBe(false);
+  });
+
+  it('split-layout design file is complete (approvable)', () => {
+    const r = validateSpec(parseSpec(splitDesign), DEFAULT_CONFIG);
+    expect(r.complete).toBe(true);
+  });
+
+  it('single-file spec still enforces phase sections (no regression)', () => {
+    const body = `## Specify\nthing\n- [ ] c1\n\n## Tasks\n- [ ] t\n\n## Implement\nx\n`;
+    const r = validateSpec(parseSpec(spec({ tier: 'T3' }, body)), DEFAULT_CONFIG);
+    expect(r.violations.some((v) => v.rule === 'section.plan.empty' && v.severity === 'error')).toBe(true);
+  });
+});

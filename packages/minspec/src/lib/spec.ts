@@ -31,6 +31,13 @@ export interface SpecFrontmatter {
   readonly phases: Record<Phase, PhaseStatus>;
   /** Optional epic reference (EPIC-NNN id or slug). Absent = ungrouped. */
   readonly epic?: string;
+  /**
+   * Split-layout phase-file kind: `requirements` | `design` | `tasks`. Present
+   * when a spec is split across sibling files (one phase per file) rather than a
+   * single file carrying all `## Phase` sections. Drives layout-aware validation
+   * (a `design` file legitimately has no in-file `## Plan`). Absent = single-file.
+   */
+  readonly type?: string;
 }
 
 /** Complete parsed spec */
@@ -166,6 +173,7 @@ export function parseSpec(content: string): ParsedSpec {
     status: (STATUSES_SET.has(fmParsed.status as string) ? fmParsed.status : 'new') as SpecStatus,
     created: (fmParsed.created as string) ?? new Date().toISOString().slice(0, 10),
     epic: (fmParsed.epic as string) || undefined,
+    type: (fmParsed.type as string) || undefined,
     phases: {
       specify: (fmPhases.specify as PhaseStatus) ?? 'pending',
       clarify: (fmPhases.clarify as PhaseStatus) ?? 'pending',
