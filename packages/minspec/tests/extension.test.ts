@@ -610,11 +610,11 @@ describe('activate()', () => {
   // SpecPanel
   // -------------------------------------------------------------------------
 
-  it('constructs SpecPanel with context extensionUri', () => {
+  it('constructs SpecPanel', () => {
     const ctx = makeMockContext();
     activate(ctx);
 
-    expect(SpecPanel).toHaveBeenCalledWith({ fsPath: '/tmp/ext' });
+    expect(SpecPanel).toHaveBeenCalledWith();
   });
 
   // -------------------------------------------------------------------------

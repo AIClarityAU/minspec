@@ -17,7 +17,7 @@ export class SpecPanel {
   private specFilePath: string | null = null;
   private disposables: vscode.Disposable[] = [];
 
-  constructor(private readonly extensionUri: vscode.Uri) {}
+  constructor() {}
 
   /**
    * Show or reveal the spec panel for a given spec file.

@@ -40,7 +40,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
 
   // Active spec panel
-  const specPanel = new SpecPanel(context.extensionUri);
+  const specPanel = new SpecPanel();
 
   // Sidebar tree views
   const specTreeProvider = new SpecTreeProvider(workspaceRoot);
@@ -216,7 +216,7 @@ export function activate(context: vscode.ExtensionContext): void {
         return;
       }
       if (!specFilePath) {
-        specFilePath = await findActiveSpec(workspaceRoot);
+        specFilePath = (await findActiveSpec(workspaceRoot)) ?? undefined;
         if (!specFilePath) {
           vscode.window.showInformationMessage(
             'MinSpec: No spec files found. Run "MinSpec: Initialize SDD Structure" first.',
@@ -246,7 +246,7 @@ export function activate(context: vscode.ExtensionContext): void {
     if (activeSpecPath) {
       try {
         const content = fs.readFileSync(activeSpecPath, 'utf-8');
-        const { parseSpec: parse } = await import('./lib/spec');
+        const { parseSpec: parse } = await import('./lib/spec.js');
         const parsed = parse(content);
         statusBar.update(fromFrontmatter(parsed.frontmatter));
       } catch {

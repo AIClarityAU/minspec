@@ -72,7 +72,7 @@ export const DEFAULT_CONFIG: MinspecConfig = {
 };
 
 /** Deep merge user config over defaults. User values win. */
-function deepMerge<T extends Record<string, unknown>>(defaults: T, overrides: Partial<T>): T {
+function deepMerge<T extends object>(defaults: T, overrides: Partial<T>): T {
   const result = { ...defaults };
   for (const key of Object.keys(overrides) as (keyof T)[]) {
     const val = overrides[key];

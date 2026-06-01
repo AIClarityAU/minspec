@@ -33,18 +33,19 @@ export async function classifyCommand(): Promise<void> {
     return;
   }
 
-  const result = classify(signals, config);
-  const calibrated = applyCalibration(result, loadCalibration(workspaceRoot));
+  const calibration = loadCalibration(workspaceRoot);
+  const calibratedSignals = applyCalibration(signals, calibration);
+  const result = classify(calibratedSignals, config);
 
-  const confidencePct = Math.round(calibrated.confidence * 100);
-  const phaseList = calibrated.suggestedPhases.join(' → ');
-  const signalSummary = calibrated.signals
+  const confidencePct = Math.round(result.confidence * 100);
+  const phaseList = result.suggestedPhases.join(' → ');
+  const signalSummary = result.signals
     .slice(0, 4)
-    .map(s => `${s.name}=${s.value}`)
+    .map((s) => `${s.name}=${s.value}`)
     .join(', ');
 
   const choice = await vscode.window.showInformationMessage(
-    `MinSpec: ${calibrated.tier} (${confidencePct}% confidence) · ${phaseList}`,
+    `MinSpec: ${result.tier} (${confidencePct}% confidence) · ${phaseList}`,
     { detail: `Signals: ${signalSummary || 'none'}`, modal: false },
     'Show Details',
     'Override Tier',
@@ -52,12 +53,12 @@ export async function classifyCommand(): Promise<void> {
 
   if (choice === 'Show Details') {
     const channel = vscode.window.createOutputChannel('MinSpec Classification');
-    channel.appendLine(`Tier: ${calibrated.tier}`);
+    channel.appendLine(`Tier: ${result.tier}`);
     channel.appendLine(`Confidence: ${confidencePct}%`);
     channel.appendLine(`Suggested phases: ${phaseList}`);
     channel.appendLine('');
     channel.appendLine('Signals:');
-    for (const s of calibrated.signals) {
+    for (const s of result.signals) {
       channel.appendLine(`  ${s.name} (${s.tierContribution}, weight ${s.weight}): ${s.value}`);
     }
     channel.show();
@@ -69,13 +70,16 @@ export async function classifyCommand(): Promise<void> {
       { label: 'T4 — Architectural', value: 'T4' },
     ];
     const picked = await vscode.window.showQuickPick(tiers, {
-      placeHolder: `Override ${calibrated.tier}?`,
+      placeHolder: `Override ${result.tier}?`,
     });
     if (picked) {
-      const { recordOverride, saveCalibration } = await import('../lib/classifier');
-      const cal = loadCalibration(workspaceRoot);
-      const updated = recordOverride(cal, calibrated.tier, picked.value, calibrated.signals);
-      saveCalibration(workspaceRoot, updated);
+      const { recordOverride } = await import('../lib/classifier.js');
+      recordOverride(
+        workspaceRoot,
+        result.tier,
+        picked.value,
+        result.signals.map((s) => s.name),
+      );
       vscode.window.showInformationMessage(
         `MinSpec: Overridden to ${picked.value}. Calibration saved.`,
       );

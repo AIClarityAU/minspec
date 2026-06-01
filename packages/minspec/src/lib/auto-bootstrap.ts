@@ -27,7 +27,6 @@ import {
   parseSections,
   hashSection,
   loadHashes,
-  type SectionHashes,
 } from './merge-refresh';
 import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS, TEMPLATES } from './template-registry';
 import { collectArtifacts } from './epic-backfill';
@@ -122,7 +121,7 @@ export function hasHarnessDrift(rootDir: string): boolean {
 
     const templateSrc = TEMPLATES[name];
     const templateSections = parseSections(templateSrc);
-    const templateHashes: SectionHashes = {};
+    const templateHashes: Record<string, string> = {};
     for (const s of templateSections) {
       templateHashes[s.heading] = hashSection(s.body);
     }
