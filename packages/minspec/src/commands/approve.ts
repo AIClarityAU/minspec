@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { listSpecs, type SpecSummary } from '../views/spec-tree-provider';
-import { readSpecFile } from '../lib/spec';
+import { parseSpec, readSpecFile } from '../lib/spec';
 import { loadConfig } from '../lib/config';
 import { validateSpec } from '../lib/spec-validator';
 import { epicRefSet } from '../lib/epic-manager';
@@ -19,6 +19,20 @@ function getWorkspaceRoot(): string | undefined {
   return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
 }
 
+/**
+ * The SPEC id of the spec open in the active editor, if any. A spec spans
+ * several files (requirements/design/tasks) that share one `id`, so we read the
+ * id from the open document's frontmatter rather than matching by file path —
+ * any file of the spec resolves to the same spec. Uses the in-memory text so an
+ * unsaved buffer still resolves.
+ */
+function activeSpecId(): string | undefined {
+  const doc = vscode.window.activeTextEditor?.document;
+  if (!doc) return undefined;
+  const id = parseSpec(doc.getText()).frontmatter.id;
+  return id || undefined;
+}
+
 /** Resolve which spec to act on: from a tree node, else a quick-pick. */
 async function pickSpec(
   rootDir: string,
@@ -32,14 +46,23 @@ async function pickSpec(
     vscode.window.showInformationMessage('MinSpec: No specs found.');
     return undefined;
   }
-  const picked = await vscode.window.showQuickPick(
-    specs.map((s) => ({
-      label: `${s.id}: ${s.title}`,
-      description: `${s.tier} · ${getApprovalStatus(rootDir, s.id, s.filePath)}`,
-      spec: s,
-    })),
-    { placeHolder: placeholder, ignoreFocusOut: true },
-  );
+  const openId = activeSpecId();
+  const items = specs.map((s) => ({
+    label: `${s.id}: ${s.title}`,
+    description: `${s.tier} · ${getApprovalStatus(rootDir, s.id, s.filePath)}${
+      s.id === openId ? ' · open' : ''
+    }`,
+    spec: s,
+  }));
+  // Float the currently-open spec to the top so it is the default selection
+  // (showQuickPick highlights the first item; Enter picks it).
+  const openIdx = items.findIndex((i) => i.spec.id === openId);
+  if (openIdx > 0) items.unshift(items.splice(openIdx, 1)[0]);
+
+  const picked = await vscode.window.showQuickPick(items, {
+    placeHolder: placeholder,
+    ignoreFocusOut: true,
+  });
   return picked?.spec;
 }
 
