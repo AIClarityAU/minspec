@@ -330,3 +330,20 @@ No MinSpec code changes needed for Phase 3 — just the ScroogeLLM extension rea
 3. `web-tree-sitter` — AST analysis (optional, lazy-loaded)
 
 Dev deps: `vitest`, `esbuild`, `@types/vscode`, `@vscode/test-electron`
+
+---
+
+## Risks & Mitigations
+
+Design-level (approach) risks. Several trace to live issues — that is the section
+working, not failing. Per DR-020 (interim; becomes screen-gated under DR-022).
+
+| # | Risk | Likelihood · Impact | Mitigation |
+|---|---|---|---|
+| R1 | **Classifier floor mis-set** — ceremony is routed off `tier`, but the size classifier (Classification Engine, FR-1) under-tiers subtle small fixes (κ=0.80, n=120). | Med · Med | DR-021 upward-only **ratchet** (predicted tier is a 100%-precise *lower bound*, never auto-down) + DR-022 **consequence axis** (reach) replacing size as the driver. *Evolving — gated on #91.* |
+| R2 | **Harness Generator clobbers user edits** — it writes into shared files (CLAUDE.md, AGENTS.md, .cursorrules, DESIGN.md, constitution). A bad merge overwrites hand-authored prose. | Med · High | Marker-bounded merge + `generated-hashes.json` (DR-011): only content *between* MinSpec markers is replaced; everything else preserved (invariant). T0 test on the merge boundary. |
+| R3 | **`traceability.json` staleness** — the semi-automated requirement→code map rots as code moves; CodeLens then points at the wrong lines, eroding trust. | High · Med | Re-derive/validate on demand rather than cache as truth; manual override always available via the CodeLens action; surface stale mappings as a diagnostic, never silently. |
+| R4 | **Session Enforcer nag fatigue** — false scope-drift warnings (FR-7) train devs to disable the feature, losing the parking-lot too. | Med · Med | Advisory + dismissible (INV #5 override); **propose-not-prompt** scope (FR-7 revision — derive from the next-task resolver, SPEC-012); tune drift sensitivity; warn at boundaries, not every save. |
+| R5 | **Tier-0 boundary creep** — design surfaces that need AI (conformance checking; the webview revision loop) pull network/model calls into the air-gapped core, breaking invariant #2 / DR-004. | Med · High | Revision/conformance is **delegation, not in-extension model calls** (SPEC-014 reframe; agent-execute / `claude -p`, DR-015/017). DR-004 tiered consent gates any network. Core stays Tier-0. |
+| R6 | **Split-layout fragility** — the design assumes single-file specs with in-file phase sections; the live `type:`-split layout (requirements/design/tasks) breaks that assumption. | High · Med | Tracked: #93 (approve gate refuses split specs), #58 (SPEC id collisions), #96 (frontmatter schema canonicalization). Reconcile the phase-section model with split-layout. |
+| R7 | **Conformance over-coupled to ScroogeLLM** — this doc (Migration Path; cf. SPEC-001:202) ties spec-conformance to ScroogeLLM. Conformance needs *an LLM*, which is the Tier-1 AI layer — ScroogeLLM is only an optional cost-optimizer, not a requirement. | Med · Med | Re-point conformance at the Tier-1 AI layer (agent-execute / `claude -p`, DR-015/017); treat ScroogeLLM as optional. Stale two-extension-era coupling — fix when the conformance phase is specced. |
