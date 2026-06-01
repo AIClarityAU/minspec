@@ -112,15 +112,25 @@ for content-bearing artifacts (specs, ADRs).
 
 ### Selection → comment pins
 
-- **FR-3 (text-select → comment pin).** Selecting rendered text MUST offer "Add comment".
-  A pin stores `{ anchor, selectedText, comment, createdAt }` in a sidecar
-  `.minspec/review/<artifactId>.json` (anchor = stable locator; exact scheme is a
-  plan-phase decision, FR-OQ). Pins render in a gutter/margin against their span.
+- **FR-3 (text-select → comment pin, Google-Docs conversation-pane model).** Selecting
+  rendered text MUST offer "Add comment". A pin stores
+  `{ anchor, selectedText, thread[], status, createdAt }` in a sidecar
+  `.minspec/review/<artifactId>.json`. Pins render in a **right-margin conversation pane**
+  (Google-Docs style): one card per anchored span, stacked in **document order**, the card
+  aligned to its anchored line; clicking a card highlights its span and vice-versa. (Anchor
+  scheme — how a pin re-binds across edits — is FR-OQ1.)
+- **FR-3a (threaded comments + resolve — GDocs semantics).** A pin is a **thread**: an
+  initial comment plus replies. The reviewer MAY reply, and MUST be able to **Resolve** a
+  thread; resolved threads collapse out of the active pane (retained, reachable via
+  "show resolved"). This is the conversation-pane behaviour, not a single flat note.
 - **FR-4 (pins are non-destructive to the artifact).** Pins live in the sidecar, NOT in
   the spec body. They MUST NOT change the spec's content hash (so adding a comment does
   not by itself invalidate an existing approval — only an actual edit does, per DR-012).
-- **FR-5 (pin lifecycle).** A pin is `open` → (revision applied) → `resolved` /
-  `dismissed`. Resolved pins are retained for audit but visually de-emphasised.
+- **FR-5 (pin lifecycle).** A thread is `open` → `resolved` (re-read confirmed / revision
+  applied) or `dismissed`. Resolved/dismissed threads are retained for audit and
+  de-emphasised. If the anchored span no longer matches after an edit (FR-OQ1), the thread
+  is **orphaned** — surfaced as orphaned (GDocs behaviour), never silently re-pointed at
+  the wrong span.
 
 ### LLM revision (delegated to host agent — Tier-0 preserved)
 
@@ -201,13 +211,14 @@ for content-bearing artifacts (specs, ADRs).
 │ SPEC-006  Stub-Completeness Gate            [T3] [stale ⚠]  [▸ pipeline]   │
 │ ⚠ approval stale — edited since last approve · validator: 0 errors        │
 ├───────────────────────────────────────────────────────────────────────────┤
-│                                                                   ┌───────┐ │
-│  ## Context                                                       │ 💬 pin │ │
-│  The gate enforces spec completeness but does not look at ────────┤ "tie  │ │
-│  implementation code, so a task can be marked done while ─────────┤  this │ │
-│  the code behind it is a stub.                                    │  to   │ │
-│                                                                   │  FR-3"│ │
-│  ## Decision                                                      └───────┘ │
+│                                                       ┌── conversation ──┐  │
+│  ## Context                                           │ 💬 Paul · 2:14pm  │  │
+│  The gate enforces spec completeness but does ────────┤ "tie this to FR-3"│  │
+│  not look at implementation code, so a task ──────────┤   ↳ reply…        │  │
+│  can be marked done while the code is a stub.         │   [ Resolve ]     │  │
+│                                                       ├──────────────────┤  │
+│  ## Decision                                          │ 💬 (resolved) ·…  │  │
+│                                                       └──────────────────┘  │
 │  Add a code-completeness gate that scans ▒only spec-traced files▒ for stub   │
 │  markers.                                                                    │
 │     ▒ shaded ▒ = changed by the last revision → re-read this.                │
@@ -273,7 +284,7 @@ decision-only node (epic-promote / issue-triage) collapses to a summary card:
 | R2 | **Gate bypass via the pretty door.** The webview becomes an easier path that skips the validator the command enforces. | Med · High | FR-10 reuses `approveSpecCommand`'s validate-then-refuse logic verbatim; INV — Gate parity + test. |
 | R3 | **Ordering drift.** Webview computes its own "next" and disagrees with the status-bar/CI signpost, destroying trust. | Low · High | FR-12 forbids local ordering; consumes SPEC-012's single engine (its FR-11). |
 | R4 | **Unwanted / clobbering revision.** The agent's edit is wrong, or overwrites concurrent manual edits. | Med · Med | Revision is a normal file edit → standard editor undo / git revert (no bespoke hunk UI to get wrong); FR-9 forces re-hash so a bad edit can't sneak past approval; dirty-editor-safe handoff (plan-phase, mirrors SPEC-012 FR-15 dirty-safe rung). Re-comment to re-revise. |
-| R5 | **Stale anchors.** A comment pin's anchor drifts after edits and points at the wrong span. | Med · Med | FR-3 stable-anchor scheme is an explicit plan-phase decision (FR-OQ); resolved pins de-emphasised (FR-5) limit blast radius. |
+| R5 | **Stale anchors.** A comment pin's anchor drifts after an edit and points at the wrong span. | Med · Med | Content-based re-anchor (FR-OQ1), not char-offset; on no acceptable match the thread is **orphaned** and surfaced as such (FR-5, GDocs behaviour) — never silently re-pointed at the wrong span. Matcher + confidence threshold pinned at plan. |
 | R6 | **Approve-chain fatigue → rubber-stamping.** A continuous walk encourages reflexive approval without reading (the DR-020 R1 risk, amplified by flow). | Med · Med | FR-2 surfaces violations + stale state up-front; FR-14 skip is frictionless so "not sure" need not become a click-through approve; validator still refuses incomplete specs (FR-10). |
 | R7 | **Phase-action category error.** Authoring work shown with an Approve button → two-queue leak. | Low · Med | FR-13 explicitly de-approves phase-action nodes; INV — Two queues + test. |
 
@@ -300,8 +311,15 @@ decision-only node (epic-promote / issue-triage) collapses to a summary card:
 
 ## Open questions
 
-- **FR-OQ1 — anchor scheme for comment pins.** Char-offset, heading-path + quote, or fuzzy
-  context match? Must survive minor edits (R5). *(Open — plan phase.)*
+- **FR-OQ1 — anchor scheme for comment pins.** *Presentation resolved: Google-Docs
+  conversation pane* (FR-3/3a — margin cards, document order, threads, resolve, orphan-on-
+  delete). **Still open: the re-anchor algorithm.** GDocs keeps anchors live because it
+  *owns the editor* and tracks every position through OT; MinSpec does **not** — the spec is
+  a plain `.md` file edited externally and rewritten by the agent, with no live session to
+  track. So anchors MUST re-bind by **content** on each (re)render, not by char-offset
+  (which any edit above the span breaks). Lean: heading-path + quoted-span, fuzzy-match
+  fallback, orphan when no acceptable match. Pin the exact matcher + match-confidence
+  threshold at plan. *(Open — plan phase.)*
 - **FR-OQ2 — revision handoff mechanism.** Which Tier-1 path: VS Code chat-participant API,
   a `minspec.dispatchRevision` command into `agent-execute`, a prompt file the running
   session watches, or `claude -p` via the DR-017 broker? Must be dirty-editor-safe (R4).
