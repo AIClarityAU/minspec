@@ -199,7 +199,7 @@ These rules MUST NOT be violated by any implementation:
 
 ## Out of Scope (Phase 1)
 
-- Spec conformance checking (Phase 3 — requires ScroogeLLM)
+- Spec conformance checking (Phase 3 — requires the Tier-1 AI layer: agent-execute / `claude -p`, DR-015/017; semantic, so out of MinSpec's Tier-0 core. ScroogeLLM optional — only to cost-optimize those calls, not required.)
 - Proxy integration or ANTHROPIC_BASE_URL injection
 - Cost tracking or savings estimation (ScroogeLLM extension's job)
 - Paid features or licensing
@@ -220,6 +220,14 @@ These rules MUST NOT be violated by any implementation:
 ---
 
 ## Competitive Positioning
+
+> **⏳ Angle evolving (held, [#86](https://github.com/harvest316/minspec/issues/86)).**
+> The current tagline below is operative. The angle is shifting toward **"Just Enough
+> _Review_; Always Enough _Consideration_"** (ceremony scales with *risk*, not size;
+> consideration is always-on) per [DR-022](../../docs/decisions/DR-022.md). That copy
+> change is **held until reach validation [#91](https://github.com/harvest316/minspec/issues/91)
+> clears** ([DR-024](../../docs/decisions/DR-024.md) §4) — do not adopt it as final
+> until then.
 
 See [vscode-sdd-competitive-landscape-2026-05-26.md](../research/vscode-sdd-competitive-landscape-2026-05-26.md) Section 7 for full two-extension strategy.
 
