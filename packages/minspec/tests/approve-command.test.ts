@@ -29,7 +29,7 @@ vi.mock('../src/views/spec-tree-provider', () => ({
 vi.mock('../src/lib/approval', () => ({
   approveSpec: vi.fn(),
   revokeApproval: vi.fn(() => true),
-  getApprovalStatus: vi.fn(() => 'none'),
+  getApprovalStatus: vi.fn(() => 'unapproved'),
 }));
 
 // ─── Imports ───────────────────────────────────────────────────────────────
@@ -40,7 +40,8 @@ import {
   revokeApprovalCommand,
 } from '../src/commands/approve';
 import { listSpecs } from '../src/views/spec-tree-provider';
-import { revokeApproval } from '../src/lib/approval';
+import { revokeApproval, getApprovalStatus } from '../src/lib/approval';
+import type { ApprovalStatus } from '../src/lib/approval';
 import type { SpecSummary } from '../src/views/spec-tree-provider';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -78,6 +79,13 @@ A non-canonical file of the spec (design.md), not its representative path.
 function quickPickItems(): { label: string; description: string; spec: SpecSummary }[] {
   const calls = (vscode.window.showQuickPick as ReturnType<typeof vi.fn>).mock.calls;
   return calls[calls.length - 1][0];
+}
+
+/** Drive getApprovalStatus per spec id (default 'unapproved' for unlisted). */
+function setStatuses(map: Record<string, ApprovalStatus>): void {
+  vi.mocked(getApprovalStatus).mockImplementation(
+    (_root: string, id: string) => map[id] ?? 'unapproved',
+  );
 }
 
 // =============================================================================
@@ -143,6 +151,7 @@ describe('approve command — default to open spec', () => {
 
   it('revoke shares the same default-to-open behavior', async () => {
     setActiveDoc(SPEC_002_DESIGN);
+    setStatuses({ 'SPEC-001': 'approved', 'SPEC-002': 'approved', 'SPEC-003': 'approved' });
     // User accepts the highlighted default (first item).
     vi.mocked(vscode.window.showQuickPick).mockImplementationOnce(
       async (items: unknown) =>
@@ -153,6 +162,73 @@ describe('approve command — default to open spec', () => {
 
     const items = quickPickItems();
     expect(items[0].spec.id).toBe('SPEC-002');
+    expect(revokeApproval).toHaveBeenCalledWith('/tmp/ws', 'SPEC-002');
+  });
+});
+
+describe('approve command — filter by approval status', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(getApprovalStatus).mockReturnValue('unapproved');
+    vi.mocked(listSpecs).mockReturnValue([
+      summary('SPEC-001', 'First'),
+      summary('SPEC-002', 'Review Webview'),
+      summary('SPEC-003', 'Third'),
+    ]);
+  });
+
+  afterEach(() => setActiveDoc(undefined));
+
+  it('Approve hides already-approved specs but keeps stale ones', async () => {
+    setStatuses({ 'SPEC-001': 'approved', 'SPEC-002': 'stale', 'SPEC-003': 'unapproved' });
+    vi.mocked(vscode.window.showQuickPick).mockResolvedValueOnce(undefined);
+
+    await approveSpecCommand(undefined);
+
+    const ids = quickPickItems().map((i) => i.spec.id);
+    expect(ids).toEqual(['SPEC-002', 'SPEC-003']); // approved SPEC-001 dropped; stale kept
+  });
+
+  it('Approve shows empty-state message when every spec is already approved', async () => {
+    setStatuses({ 'SPEC-001': 'approved', 'SPEC-002': 'approved', 'SPEC-003': 'approved' });
+
+    await approveSpecCommand(undefined);
+
+    expect(vscode.window.showQuickPick).not.toHaveBeenCalled();
+    expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+      'MinSpec: No specs awaiting approval — all are already approved.',
+    );
+  });
+
+  it('Revoke hides unapproved specs but keeps approved and stale ones', async () => {
+    setStatuses({ 'SPEC-001': 'approved', 'SPEC-002': 'unapproved', 'SPEC-003': 'stale' });
+    vi.mocked(vscode.window.showQuickPick).mockResolvedValueOnce(undefined);
+
+    await revokeApprovalCommand(undefined);
+
+    const ids = quickPickItems().map((i) => i.spec.id);
+    expect(ids).toEqual(['SPEC-001', 'SPEC-003']); // unapproved SPEC-002 dropped
+  });
+
+  it('Revoke shows empty-state message when nothing is approved', async () => {
+    setStatuses({}); // all default 'unapproved'
+
+    await revokeApprovalCommand(undefined);
+
+    expect(vscode.window.showQuickPick).not.toHaveBeenCalled();
+    expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+      'MinSpec: No approved specs to revoke.',
+    );
+  });
+
+  it('tree-node invocation bypasses the status filter (approves an approved spec)', async () => {
+    // Right-clicking an already-approved spec in the tree should still act on it.
+    setStatuses({ 'SPEC-002': 'approved' });
+    const node = { spec: summary('SPEC-002', 'Review Webview') };
+
+    await revokeApprovalCommand(node);
+
+    expect(vscode.window.showQuickPick).not.toHaveBeenCalled();
     expect(revokeApproval).toHaveBeenCalledWith('/tmp/ws', 'SPEC-002');
   });
 });

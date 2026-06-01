@@ -8,6 +8,7 @@ import {
   approveSpec as recordApproval,
   revokeApproval as removeApproval,
   getApprovalStatus,
+  type ApprovalStatus,
 } from '../lib/approval';
 
 /** A tree node carrying a SpecSummary (from the spec tree context menu). */
@@ -33,11 +34,26 @@ function activeSpecId(): string | undefined {
   return id || undefined;
 }
 
-/** Resolve which spec to act on: from a tree node, else a quick-pick. */
+interface PickOptions {
+  /** Keep a spec in the list only when its approval status passes this. */
+  include: (status: ApprovalStatus) => boolean;
+  /** Shown when specs exist but none survive the `include` filter. */
+  emptyMessage: string;
+}
+
+/**
+ * Resolve which spec to act on: from a tree node, else a quick-pick.
+ *
+ * The quick-pick is filtered by approval status so each command only offers
+ * specs the action makes sense for — Approve hides already-approved specs,
+ * Revoke hides unapproved ones. A tree-node invocation bypasses the filter: the
+ * user picked that exact spec from the tree, so honour it.
+ */
 async function pickSpec(
   rootDir: string,
   node: SpecNodeLike | undefined,
   placeholder: string,
+  opts: PickOptions,
 ): Promise<SpecSummary | undefined> {
   if (node?.spec) return node.spec;
 
@@ -47,13 +63,18 @@ async function pickSpec(
     return undefined;
   }
   const openId = activeSpecId();
-  const items = specs.map((s) => ({
-    label: `${s.id}: ${s.title}`,
-    description: `${s.tier} · ${getApprovalStatus(rootDir, s.id, s.filePath)}${
-      s.id === openId ? ' · open' : ''
-    }`,
-    spec: s,
-  }));
+  const items = specs
+    .map((s) => ({ spec: s, status: getApprovalStatus(rootDir, s.id, s.filePath) }))
+    .filter((x) => opts.include(x.status))
+    .map(({ spec, status }) => ({
+      label: `${spec.id}: ${spec.title}`,
+      description: `${spec.tier} · ${status}${spec.id === openId ? ' · open' : ''}`,
+      spec,
+    }));
+  if (items.length === 0) {
+    vscode.window.showInformationMessage(opts.emptyMessage);
+    return undefined;
+  }
   // Float the currently-open spec to the top so it is the default selection
   // (showQuickPick highlights the first item; Enter picks it).
   const openIdx = items.findIndex((i) => i.spec.id === openId);
@@ -77,7 +98,12 @@ export async function approveSpecCommand(node?: SpecNodeLike): Promise<void> {
     return;
   }
 
-  const spec = await pickSpec(rootDir, node, 'Select a spec to approve for implementation');
+  const spec = await pickSpec(rootDir, node, 'Select a spec to approve for implementation', {
+    // Already-approved specs have nothing to do here; stale ones (edited since
+    // approval) still need re-approval, so keep them.
+    include: (status) => status !== 'approved',
+    emptyMessage: 'MinSpec: No specs awaiting approval — all are already approved.',
+  });
   if (!spec) return;
 
   let parsed;
@@ -141,7 +167,11 @@ export async function revokeApprovalCommand(node?: SpecNodeLike): Promise<void> 
     return;
   }
 
-  const spec = await pickSpec(rootDir, node, 'Select a spec to revoke approval');
+  const spec = await pickSpec(rootDir, node, 'Select a spec to revoke approval', {
+    // Only specs with an approval record (approved or stale) can be revoked.
+    include: (status) => status !== 'unapproved',
+    emptyMessage: 'MinSpec: No approved specs to revoke.',
+  });
   if (!spec) return;
 
   const removed = removeApproval(rootDir, spec.id);
