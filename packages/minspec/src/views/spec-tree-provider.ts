@@ -201,8 +201,11 @@ export class SpecNode extends vscode.TreeItem {
     const phaseLabel = spec.currentPhase ?? 'complete';
     const pct = spec.phasesTotal > 0 ? Math.round((spec.phasesDone / spec.phasesTotal) * 100) : 100;
     const meter = progressMeter(spec.phasesDone, spec.phasesTotal);
+    // \ud83d\udd12 (lock), NOT \u2714 (check): approval seals the spec's content (editing
+    // voids it), it does NOT mean the feature is built/done. A checkmark here
+    // misreads as "done" on a spec that is only approved-to-build (signpost-lie).
     const approvalTag =
-      approval === 'approved' ? ' \u2714 approved'
+      approval === 'approved' ? ' \ud83d\udd12 approved'
         : approval === 'stale' ? ' \u26a0 stale'
           : '';
 
@@ -227,7 +230,7 @@ export class SpecNode extends vscode.TreeItem {
       : approval === 'approved' ? 'specNode.approved' : 'specNode';
 
     const approvalLine =
-      approval === 'approved' ? 'Approval: \u2714 approved (content-bound)'
+      approval === 'approved' ? 'Approval: \ud83d\udd12 approved (content-bound) \u2014 sealed to this content, not yet built'
         : approval === 'stale' ? 'Approval: \u26a0 STALE \u2014 spec edited since approval, re-approve required'
           : 'Approval: \u2014 not approved';
     this.tooltip = `${spec.id}: ${spec.title}\nTier: ${spec.tier}\nStatus: ${spec.status}\nPhase: ${phaseLabel}\nProgress: ${spec.phasesDone}/${spec.phasesTotal} required phases (${pct}%)\n${approvalLine}`;

@@ -515,6 +515,10 @@ describe('SpecTreeProvider — approval wiring (regression)', () => {
     expect(node.approval).toBe('approved');
     expect(node.contextValue).toBe('specNode.approved');
     expect(node.description).toContain('approved');
+    // Badge must NOT use a checkmark — ✔ on an unbuilt-but-approved spec misreads
+    // as "done" (signpost-lie). Use 🔒 (sealed/gated), not ✔ (complete).
+    expect(node.description).toContain('🔒');
+    expect(node.description).not.toContain('✔');
   });
 
   it('default-constructed provider marks approval stale after the spec is edited', () => {
