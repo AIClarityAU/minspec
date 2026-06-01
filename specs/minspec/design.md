@@ -2,7 +2,6 @@
 epic: EPIC-003  # SDD Core Methodology
 id: SPEC-002
 type: design
-tier: T4
 # Editing voids approval (hash in .minspec/approvals.json → stale); re-run "MinSpec: Approve Spec". DR-012
 status: implementing
 product: minspec
