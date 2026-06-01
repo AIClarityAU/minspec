@@ -232,3 +232,19 @@ These rules MUST NOT be violated by any implementation:
 See [vscode-sdd-competitive-landscape-2026-05-26.md](../research/vscode-sdd-competitive-landscape-2026-05-26.md) Section 7 for full two-extension strategy.
 
 **MinSpec's unique angle:** "Just enough spec. Never too much." No other SDD tool adapts ceremony to complexity. This directly addresses the #1 adoption barrier documented across HN discussions, Martin Fowler's analysis, and community feedback.
+
+---
+
+## Risks & Mitigations
+
+Requirements/product-level risks (the *bets* this spec makes). Design/implementation
+risks live in [SPEC-002](design.md). Per DR-020 (interim; screen-gated under DR-022).
+
+| # | Risk | Likelihood · Impact | Mitigation |
+|---|---|---|---|
+| R1 | **Core adoption thesis unvalidated** — the spec bets that "proportional ceremony solves the #1 barrier (overhead-driven abandonment)." That overhead *is* #1, and that adapting ceremony fixes *retention*, are hypotheses, not measured. | Med · High | Anti-slop/never-wrong positioning leads (#59); classifier measured (κ=0.80, DR-009). The retention claim itself stays unproven — instrument adoption/retention before leaning on it in copy. |
+| R2 | **Proportionality mechanism re-founded mid-flight** — this doc frames ceremony ∝ *size/complexity*, but DR-022/DR-024 move the unit to a *risk profile* (consequence axis). The spec's central mechanism is changing under it. | High · Med | Tier banner flags the provisional content; migration sequenced (#90) and gated on reach validation (#91). Update this doc's mechanism framing when #91 clears. |
+| R3 | **Classifier over-promises "complexity"** — "classifies change complexity" reads as difficulty detection; the classifier measures *mechanical scope*, under-tiering subtle small fixes (κ=0.80). | Med · Med | DR-021: reframe to *scope, not difficulty* + upward-only ratchet (100%-precise floor); difficulty deferred to opt-in semantic. Fix the copy that implies difficulty detection. |
+| R4 | **Spec Kit compatibility dependency** — adoption leans on Spec-Kit-compatible format; if Spec Kit's format diverges, compatibility (a stated selling point) breaks. | Low · Med | Plain Markdown + YAML frontmatter (format-stable); the existing metric (<5 compat issues / 90 days) is the early-warning; track Spec Kit releases. |
+| R5 | **Conformance value depends on a second extension + AI** — the conformance/Phase-3 value prop needs the Tier-1 AI layer (agent-execute / `claude -p`, DR-015/017); if that slips, conformance is delayed. (Also: this doc mis-coupled it to ScroogeLLM — corrected at "Out of Scope".) | Med · Med | Conformance is explicitly **Phase 3 / out of scope for Phase 1**, so it never blocks launch; decoupled from ScroogeLLM (optional cost-optimizer, not required). |
+| R6 | **First-mover marketplace bet** — "9-month-old, 32K-install, no-dominant-player market" assumes the window stays open; a dominant SDD extension could emerge first. | Med · Med | Ship the never-wrong signpost moat fast (the structural differentiator a CLI/separate-IDE can't copy); positioning (#59) defends the niche. |
