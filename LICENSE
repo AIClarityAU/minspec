@@ -1,0 +1,23 @@
+Licensing — minspec-monorepo
+=============================
+
+This repository is multi-licensed. Each package carries its own LICENSE file,
+which is authoritative for that package. See DR-018 for the rationale.
+
+| Path                        | License      | What                                            |
+|-----------------------------|--------------|-------------------------------------------------|
+| packages/shared             | MPL-2.0      | Core library: tier classifier + contract types  |
+| packages/minspec            | MIT          | MinSpec VS Code extension (end-user app)         |
+| packages/scroogellm         | MIT          | ScroogeLLM VS Code extension (end-user app)      |
+| packages/extension-pack     | MIT          | MinSpec Pro extension pack                        |
+| docs/, sites/ copy, whitepaper | CC-BY-4.0 | Prose/content — see LICENSE-CONTENT              |
+| scripts/, root tooling      | MIT          | Dev-time monorepo tooling                         |
+
+Why MPL-2.0 for `packages/shared` and MIT for everything else: the shared
+package is the one reusable *library* and the project's core IP (the T1–T4
+complexity classifier). MPL-2.0's file-level copyleft keeps modifications to
+those source files open while still permitting commercial tools to depend on
+it. The extensions are end-user applications with no library to protect, so
+MIT removes all adoption friction. See docs/decisions/DR-018.md.
+
+Copyright (c) 2026 AI Clarity.

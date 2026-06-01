@@ -3,6 +3,7 @@
   "version": "0.0.1",
   "private": true,
   "description": "Shared classification engine and contracts for MinSpec and ScroogeLLM",
+  "license": "MPL-2.0",
   "main": "out/index.js",
   "types": "out/index.d.ts",
   "scripts": {
