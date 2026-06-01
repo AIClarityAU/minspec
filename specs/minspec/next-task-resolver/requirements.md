@@ -63,7 +63,8 @@ Each **pending human decision** is a node:
 | `adr-accept` | ADR `status: proposed` | accept/reject |
 | `phase-action` | SPEC-010 within-feature hole (uncovered FR / unchecked task) | author the phase |
 
-Edges = **dependency gates** (a partial order; the DAG):
+Edges are of two kinds. **(a) Implicit SDD-tree edges** — derived from structure,
+always present:
 
 ```
 epic(active) ──gates──▶ spec-approve, adr-accept, phase-action of its members
@@ -71,36 +72,59 @@ spec(approved) ──gates──▶ implement phase-action of that spec   (DR-01
 phase predecessor ──gates──▶ phase successor                    (SPEC-010 chain)
 ```
 
+**(b) Explicit cross-cutting edges** — arbitrary dependencies between *any* two
+artifacts, *outside* the tree, that the SDD hierarchy cannot express: "this spec
+is blocked by that ADR being accepted", "this DR depends on those DRs", "this spec
+supersedes that one". Today these live only in prose (`Triggered by:`, `Resolves:`,
+`composes`) and are invisible to the engine. They MUST become machine-readable
+frontmatter edges (FR-13) so the resolver can rank a blocked node below its
+blocker. The union of (a) + (b) is the dependency DAG; **it MUST be acyclic — a
+cycle is corruption** (FR-15), and acyclicity is itself a free correctness check.
+
 A node whose gate is **unsatisfied while downstream work has already started** is
 a **gate violation** (e.g. spec `implementing` but unapproved; spec `implementing`
-under a `proposed` epic). Violations are detectable purely structurally and rank
-highest — they are live invariant breaches, not future work.
+under a `proposed` epic; a spec advancing while an ADR it `depends_on` is still
+`proposed`). Violations are detectable purely structurally and rank highest — they
+are live invariant breaches, not future work.
 
 ## Requirements
 
 ### Determinism & layering
 
-- **FR-1 (deterministic, no LLM — *derive, never guess*).** Priority and the
-  next task MUST be a pure function of filesystem + frontmatter + approval state.
-  Same inputs → same output. No LLM, no network, no randomness, no hidden state.
-  An LLM-derived next-task is non-reproducible and untestable; it is forbidden
-  here. (Tier 0, DR-004; DR-019.)
-- **FR-2 (severity classes — total order, deterministic).** Every pending node is
-  assigned exactly one severity class, ranked:
-  1. **gate-violation** — downstream work proceeding past an unsatisfied gate.
+- **FR-1 (deterministic ranking, no LLM — *derive, never guess*).** The priority
+  *ranking* MUST be a pure function of filesystem + frontmatter + approval +
+  dependency-edge state. Same inputs → same ranking. No LLM, no network, no hidden
+  state. The single permitted non-determinism is an arbitrary choice **among a true
+  priority tie** (FR-14) — never in the ranking itself. An LLM-derived next-task is
+  non-reproducible and untestable; it is forbidden here. (Tier 0, DR-004; DR-019.)
+- **FR-2 (severity classes — partial order).** Every pending node is assigned
+  exactly one severity class, ranked:
+  1. **gate-violation** — downstream work proceeding past an unsatisfied gate
+     (incl. an unsatisfied explicit `depends_on`, FR-13).
   2. **blocked-ready** — at a gate whose clearance unblocks the next phase, under
-     an `active` epic.
+     an `active` epic, with all `depends_on` already cleared.
   3. **promote-parent** — a `proposed` epic with members waiting on it.
   4. **pending** — remaining `proposed` ADRs / unapproved specs.
-  Tie-break **within** a class by `(epic.order, artifact-id)`. The resolver MUST
-  produce a single total order; the **next task** is its minimum.
+  Order **within** a class by `(epic.order, artifact-id)`. This yields a partial
+  order whose top band may contain ties (FR-14); the **next task** is any member
+  of that top band.
 - **FR-3 (subjective weight is explicit data, never inferred).** Any priority
-  input that is a human judgement — relative importance of independent branches,
-  "this epic is future/deferred" — MUST be read from explicit frontmatter
-  (`epic.order`, and new `deferred: true` / `priority:` fields), NOT inferred by
-  the engine and NOT inferred by an LLM. Prose in CLAUDE.md ("ScroogeLLM is
-  future") is invisible to the resolver until lifted into a field. The engine
-  computes structure; the human sets weight.
+  input that is a human judgement — relative importance of independent branches —
+  MUST be read from explicit frontmatter (`epic.order`), NOT inferred by the engine
+  and NOT inferred by an LLM. Prose in CLAUDE.md ("ScroogeLLM is future") is
+  invisible to the resolver until lifted into structured data. The engine computes
+  structure; the human sets weight.
+- **FR-3a (deferral is a link to a blocker, never a bare boolean).** "Not now"
+  MUST be expressed as a dependency on the thing that unblocks it — reusing
+  `depends_on` (FR-13) — not a standalone `deferred: true` flag. A boolean rots:
+  it is set once and never unset, so the item stays hidden after its real blocker
+  clears. A link instead (a) **auto-clears** when the blocker clears, (b) is
+  **explainable** ("hidden because blocked on EPIC-003"), and (c) reuses one
+  mechanism. Consequently a deferred node is simply a node with an un-cleared
+  `depends_on`, which FR-13 already ranks below its blocker — no separate
+  "deferred floor" rule is needed. Purely-temporal deferral with no artifact
+  blocker ("after public launch") MUST still link a *named* target — a milestone
+  artifact or a date — not a flag (see Open Questions).
 - **FR-4 (composes with SPEC-010, does not duplicate).** SPEC-010's per-feature
   resolver is consumed as the `phase-action` node source. This spec adds the
   cross-artifact gate nodes and the **global** ordering across all node kinds. It
@@ -134,7 +158,48 @@ highest — they are live invariant breaches, not future work.
   under proposed EPIC-004"), not silently ranked among normal work.
 - **FR-10 (honest degradation — reuse SPEC-010 FR-6).** If state is incoherent
   beyond the FR-9 rules (dangling epic refs, malformed frontmatter), the resolver
-  MUST say "state unclear — <file>" rather than fabricate a confident next task.
+  MUST say "state unclear — <file>" rather than fabricate a confident next task,
+  and route to the repair ladder (FR-15).
+
+### Cross-cutting dependencies, ties & corruption repair
+
+- **FR-13 (explicit cross-cutting dependency edges).** Artifacts MUST be able to
+  declare machine-readable dependencies on *any* other artifact, independent of
+  the SDD tree, via frontmatter — minimally `depends_on: [ID, …]` (this node is
+  blocked until each listed artifact's own gate is cleared), with room for
+  `supersedes:` / `relates_to:`. These edges join the implicit tree edges to form
+  the dependency DAG the resolver ranks over: a node with an *uncleared*
+  `depends_on` target MUST rank below that target, and a node advancing while a
+  `depends_on` target is still un-cleared is a **gate-violation** (FR-2.1). This
+  replaces the prose-only links (`Triggered by:`, `Resolves:`, `composes`) that
+  the engine cannot read today. The edge set is the single structured source of
+  cross-artifact dependency truth; an `id` that does not resolve is corruption
+  (FR-15), not a silent drop. (Edge vocabulary scope — see Open Questions.)
+- **FR-14 (ties are an equivalence class — arbitrary pick licensed).** When, after
+  all ranking (FR-2) and dependency (FR-13) computation, >1 node shares the top
+  priority band, those nodes are **equally-correct** next tasks. The resolver MAY
+  pick any of them; correctness does NOT depend on which. The default pick MUST be
+  **deterministic-arbitrary** (lowest `artifact-id`) so T0 tests stay reproducible
+  — random selection is permitted but discouraged for that reason. The product
+  MUST NOT present the tie-break order as carrying meaning, and SHOULD be able to
+  reveal "N equally-next tasks" rather than imply a single forced winner.
+- **FR-15 (corruption: detect → deterministic repair → offer LLM escalation).**
+  Correctness is **reliably assessable for structure, not for meaning.** The
+  resolver MUST deterministically detect structural corruption — malformed
+  frontmatter, dangling `epic:`/`depends_on` refs, status-incoherence (FR-9),
+  **dependency-graph cycles** (the DAG must be acyclic) — and MUST NOT claim a
+  confident next task while corruption stands. Semantic corruption (well-formed
+  but wrong content) is explicitly **not** programmatically detectable and out of
+  scope. On detected structural corruption the response is a ladder, never a
+  silent fix: (1) attempt a **deterministic programmatic repair** (e.g. regenerate
+  a stale generated INDEX, re-resolve an unambiguous ref) and **offer** it
+  (confirm-before-write); (2) only if no deterministic repair applies, **offer to
+  escalate to an LLM** repair — confirm-before-write, dirty-editor-safe, bounded
+  and escalating per DR-355. This composes
+  [SPEC-005 Auto-Structure Repair](../auto-structure-repair/requirements.md)
+  (offer-never-silent, non-destructive) — it MUST NOT reinvent it. The LLM never
+  *decides whether* corruption exists (deterministic, step 0); it only *proposes a
+  fix* a human confirms.
 
 ### Packaging
 
@@ -160,7 +225,7 @@ highest — they are live invariant breaches, not future work.
 - **INV — Two Queues (T0).** The human next-task queue and the agent/LLM dispatch
   queue MUST remain distinct. No agent work item is ever emitted as a human next
   task, and vice versa.
-- **INV — Determinism / Tier 0 (DR-004, DR-018).** Resolution is pure
+- **INV — Determinism / Tier 0 (DR-004, DR-019).** Resolution is pure
   filesystem + frontmatter; no AI, no network. The LLM's only sanctioned role is
   *suggesting* values for the explicit weight fields (FR-3) for the human to
   accept — never computing the live next task. (DR-019.)
@@ -177,7 +242,12 @@ highest — they are live invariant breaches, not future work.
 | Optional expand to see pipeline | FR-6 |
 | Next task = human's, not LLM's | FR-8, INV-two-queues |
 | Reliable / deterministic assessment | FR-1, FR-2, FR-9, FR-12 |
-| Subjective weight (ScroogeLLM=future) | FR-3 |
+| Subjective weight (ScroogeLLM=future) | FR-3, FR-3a |
+| Deferral as a link, not a boolean | FR-3a, FR-13 |
+| Cross-cutting deps outside SDD tree | FR-13 |
+| Ties → arbitrary pick OK | FR-14 |
+| Corruption: detect → fix → escalate | FR-15 |
+| Reliable correctness = structural only | FR-15 |
 | Gate violations (the 2 found by hand) | FR-9, FR-12 |
 | Resolve SPEC-010 OQ#1 (global order) | FR-2, FR-4 |
 | One engine, every surface | FR-11 |
@@ -191,22 +261,34 @@ highest — they are live invariant breaches, not future work.
   the session flagged is downstream of this engine.
 - **The agent/LLM dispatch queue** and its ordering — separate substrate
   (DR-015/017, agent-execute).
-- **LLM suggestion of `order`/`deferred` values** — a distinct optional feature;
-  this spec only mandates that such values, *however* set, are explicit data the
-  engine reads (FR-3), never engine/LLM inference at resolve time.
+- **LLM suggestion of `order` / `depends_on` values** — a distinct optional
+  feature; this spec only mandates that such values, *however* set, are explicit
+  data the engine reads (FR-3), never engine/LLM inference at resolve time.
 - **Blocking enforcement** — the resolver is advisory (mirrors SPEC-010 FR-5);
   the blocking gate is DR-012.
 
 ## Open questions
 
-- **New frontmatter fields for weight (FR-3).** Minimal set: is `epic.order`
-  enough, or are per-spec `priority:` and a boolean `deferred:` both needed? Lean
-  `deferred:` (boolean, cheap) for the ScroogeLLM=future case; defer `priority:`
-  until a real tie demands it.
-- **Where deferred items rank.** Does `deferred: true` drop a node below all
-  non-deferred (a 5th severity floor), or just weight its tie-break? Lean: hard
-  floor — deferred never surfaces as *the* next task unless nothing else pends.
+- **Weight fields beyond `epic.order` + `depends_on`.** With deferral folded into
+  `depends_on` (FR-3a) and ordering into `epic.order`, is any per-spec `priority:`
+  field still needed? Lean: no — add it only when a real tie between same-epic
+  same-class nodes demands a finer dial than `artifact-id`.
+- **Temporal / external deferral with no artifact blocker (FR-3a residual).** "Not
+  now, after public launch" has no in-repo artifact to `depends_on`. Options: (a)
+  a lightweight **milestone artifact** (`MILESTONE-NNN`) that items depend on and
+  that a human marks reached; (b) a `depends_on` target that is a **date**; (c)
+  out of scope for v1 (require every deferral to name a real artifact blocker).
+  Lean (a) — a milestone is itself a first-class blocker, keeps one mechanism.
+- **`depends_on` edge vocabulary scope (FR-13).** Ship only `depends_on` in v1, or
+  also `supersedes:` / `relates_to:`? `supersedes` has clear ranking meaning (the
+  superseded node drops out); `relates_to` is non-blocking and may be noise. Lean:
+  `depends_on` + `supersedes` in v1, defer `relates_to`.
 - **Cross-epic vs in-epic gate violations.** When two gate-violations exist in
   different epics, is `epic.order` the right tie-break, or should violation
   *recency* / blast-radius win? Lean `epic.order` for determinism; revisit if it
   mis-orders in practice.
+- **Auto-repairable vs LLM-only corruption (FR-15).** Which structural corruptions
+  have a *deterministic* fix (stale generated INDEX → regenerate; unambiguous
+  dangling ref → re-resolve) vs require an LLM offer (ambiguous ref, malformed
+  hand-edited frontmatter)? Enumerate the deterministic set at plan time; default
+  everything outside it to the LLM-escalation rung.
