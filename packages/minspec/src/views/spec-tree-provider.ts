@@ -13,6 +13,7 @@ import type { ApprovalStatus } from '../lib/approval';
  * mirrors the ListSpecsFn injection pattern). extension.ts wires the real one.
  */
 export type ApprovalLookupFn = (rootDir: string, specId: string, specFilePath: string) => ApprovalStatus;
+import { getApprovalStatus } from '../lib/approval';
 import type { SpecSummary } from '../lib/spec-manager';
 import { isSpecKitDirEntry, readSpecKitDir } from '../lib/spec-layout';
 import { EpicGroupingState, EpicGroupNode, buildEpicGroups } from './epic-grouping';
@@ -285,7 +286,11 @@ export class SpecTreeProvider implements vscode.TreeDataProvider<SpecTreeNode> {
     listEpicsFn?: ListEpicsFn,
   ) {
     this._listSpecs = listSpecsFn ?? listSpecs;
-    this._approvalOf = approvalFn ?? (() => 'unapproved');
+    // Default to the REAL lookup, mirroring listSpecs above (DR-012). A prior
+    // `() => 'unapproved'` stub default meant production (extension.ts) — which
+    // constructs with no approvalFn — never read approvals.json, so approval
+    // badges never appeared and no refresh could surface them.
+    this._approvalOf = approvalFn ?? getApprovalStatus;
     this._listEpics = listEpicsFn;
   }
 

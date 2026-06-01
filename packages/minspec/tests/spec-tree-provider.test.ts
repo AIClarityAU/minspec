@@ -33,6 +33,7 @@ import type { SpecSummary } from '../src/views/spec-tree-provider';
 import { SpecTreeProvider, SpecGroupNode, SpecNode, RollupNode, listSpecs } from '../src/views/spec-tree-provider';
 import { EpicGroupNode } from '../src/views/epic-grouping';
 import type { EpicSummary } from '../src/lib/epic-manager';
+import { approveSpec } from '../src/lib/approval';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -469,6 +470,70 @@ describe('SpecTreeProvider', () => {
       const groups = emptyProvider.getChildren(undefined);
       expect(groups).toHaveLength(0);
     });
+  });
+});
+
+// --- Approval wiring (DR-012) — T3 regression ---
+//
+// Bug: extension.ts constructed `new SpecTreeProvider(workspaceRoot)` with NO
+// ApprovalLookupFn, so the provider fell back to its `() => 'unapproved'` default
+// stub. approvals.json was therefore never read for the tree — no refresh (manual
+// button, visibility change, or approvals.json watcher) could ever surface an
+// approval badge. An approved spec showed forever as unapproved.
+//
+// Root cause: the default for `approvalFn` was a stub, NOT the real lookup —
+// inconsistent with `listSpecsFn`, which defaults to the real `listSpecs`. These
+// tests pin the contract that a default-constructed provider reads real approvals.
+describe('SpecTreeProvider — approval wiring (regression)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-approval-wiring-'));
+  });
+
+  function writeSpec(id: string): string {
+    const specsDir = path.join(tmpDir, 'specs');
+    fs.mkdirSync(specsDir, { recursive: true });
+    const p = path.join(specsDir, `${id}.md`);
+    fs.writeFileSync(p, `---\nid: ${id}\ntitle: Wired\ntier: T2\nstatus: implementing\n---\n\n# Wired\n`);
+    return p;
+  }
+
+  function activeNodes(provider: SpecTreeProvider): SpecNode[] {
+    return provider.getChildren(groupsOf(provider)[0]) as SpecNode[];
+  }
+
+  it('default-constructed provider reflects a real approval from approvals.json', () => {
+    const specPath = writeSpec('SPEC-001');
+    approveSpec(tmpDir, 'SPEC-001', specPath, 'T2'); // binds current file hash
+
+    // Production path: NO approvalFn injected.
+    const spec = makeSpec({ id: 'SPEC-001', status: 'implementing', filePath: specPath });
+    const provider = new SpecTreeProvider(tmpDir, () => [spec]);
+
+    const node = activeNodes(provider)[0];
+    expect(node.approval).toBe('approved');
+    expect(node.contextValue).toBe('specNode.approved');
+    expect(node.description).toContain('approved');
+  });
+
+  it('default-constructed provider marks approval stale after the spec is edited', () => {
+    const specPath = writeSpec('SPEC-001');
+    approveSpec(tmpDir, 'SPEC-001', specPath, 'T2');
+    fs.appendFileSync(specPath, '\nedited after approval\n'); // hash now differs
+
+    const spec = makeSpec({ id: 'SPEC-001', status: 'implementing', filePath: specPath });
+    const provider = new SpecTreeProvider(tmpDir, () => [spec]);
+
+    expect(activeNodes(provider)[0].approval).toBe('stale');
+  });
+
+  it('default-constructed provider shows unapproved when no record exists', () => {
+    const specPath = writeSpec('SPEC-002'); // never approved
+    const spec = makeSpec({ id: 'SPEC-002', status: 'implementing', filePath: specPath });
+    const provider = new SpecTreeProvider(tmpDir, () => [spec]);
+
+    expect(activeNodes(provider)[0].approval).toBe('unapproved');
   });
 });
 
