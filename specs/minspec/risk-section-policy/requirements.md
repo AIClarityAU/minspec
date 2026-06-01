@@ -10,17 +10,21 @@ depends_on: [DR-022]
 
 # MinSpec — Risk-Section Policy Enforcement (Requirements)
 
-> **RE-SCOPED by [DR-022](../../../docs/decisions/DR-022.md)** (which supersedes
-> DR-020). The risks section is now **screen-gated** — required *iff the risk
-> screen trips*, not by tier. This spec's tier-based logic (FR-2/FR-3) must change
-> to "required when the screen reports tripped signals," and it now `depends_on`
-> the consequence screen existing. Body below is the pre-DR-022 draft, kept for
-> review context; will be reworked before approval.
+> **Interim: implements [DR-020](../../../docs/decisions/DR-020.md) (tier-proportional).**
+> DR-022's screen-gated re-scope was **downgraded to proposed** ([DR-024](../../../docs/decisions/DR-024.md))
+> pending reach validation ([#91](https://github.com/harvest316/minspec/issues/91)),
+> so **DR-020 remains in force** and this spec implements it as written below. When
+> DR-022 is accepted, the risks section becomes **screen-gated** — required *iff the
+> risk screen trips*, not by tier — and FR-2/FR-3's tier logic changes to "required
+> when the screen reports tripped signals" (`depends_on` the consequence screen).
+> The `depends_on: [DR-022]` link tracks that eventual re-scope; the operative policy
+> today is DR-020.
 
 **Date:** 2026-06-01
 **Status:** Specifying (SDD Specify phase)
-**Decision:** [DR-022](../../../docs/decisions/DR-022.md) (screen-gated risks
-section; supersedes DR-020 which this spec originally implemented)
+**Decision:** [DR-020](../../../docs/decisions/DR-020.md) (in force — tier-proportional)
+today; re-scopes to [DR-022](../../../docs/decisions/DR-022.md) (screen-gated) on its
+acceptance, gated on #91 per [DR-024](../../../docs/decisions/DR-024.md)
 **Triggered by:** session request — "spec the risk-enforcing policy, then I'll
 review it so we can implement + backfill directly after approval."
 **Epic:** [EPIC-003 SDD Core Methodology](../../../docs/epics/EPIC-003-sdd-core.md)
