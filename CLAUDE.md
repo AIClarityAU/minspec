@@ -24,12 +24,6 @@ This project uses Specification-Driven Development. Tasks are classified by comp
 | T3 | Full spec cycle | specify, plan, tasks, implement |
 | T4 | Complete ceremony | all phases |
 
-> **⏳ Under revision (DR-024):** Fork B accepted — ceremony's unit becomes a **risk
-> profile**, `tier` a **derived label**, and this tier→phase table is replaced by
-> risk→phase. Deferred until reach validation [#91](https://github.com/harvest316/minspec/issues/91)
-> clears (then migration [#90](https://github.com/harvest316/minspec/issues/90)).
-> This table is operative until then.
-
 ## File Locations
 
 | Artifact | Location |
@@ -124,6 +118,14 @@ If unverified, write the honest state ("specified, not built" / "planned, #NN").
 lie. (Root-caused 2026-06-01: SPEC-002 falsely called SPEC-014's review webview
 "implemented" — it was `specifying`, zero code. Deterministic backstop tracked as an
 issue, sibling to #47.)
+
+**Sibling rule — root cause ≠ bad-state restatement (RCDD, DR-003 addendum).** Just
+as *artifact-existence ≠ feature-existence*, a *description of a bad state* ≠ its *root
+cause*. "Frontmatter field is missing" is a symptom; the cause is the mechanism that
+produced it **plus** the gate that should have rejected it. A pure data/config fix is a
+tell that the gate is missing — fix the gate too (see DR-003 Phase 4 asymmetry check).
+Root-caused 2026-06-01: SPEC-004's missing `epic:` was first "fixed" with a data edit
+alone; the real defect was `validateSpec` flagging dangling refs but not missing ones.
 
 ## Agent Dispatch (Tier-Gated HITL)
 
