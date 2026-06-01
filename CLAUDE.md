@@ -93,8 +93,14 @@ Commits, issues, and DRs form a linked chain:
 - **DRs** reference triggering issue: `Triggered by: #N` in body
 - **Issues** reference DR if one exists: link in issue body
 - **Sub-issues** reference parent DR: `See DR-NNN for design rationale`
+- **DRs materialize their follow-ups (DR-023):** every DR carries a `## Follow-ups
+  (tracked)` section; each actionable item it surfaces links a `SPEC-NNN` or a
+  GitHub issue `#`. Forward rule — when writing a DR, **file the issues for any
+  follow-up not covered by a spec** (especially cross-repo / non-code work like
+  site/marketplace copy, which never enters the SDD flow). Prose-only consequences
+  are a leak. `None` is a valid, explicit answer.
 
-Purpose: Issues = what needs doing. DRs = why we chose this approach. Commits = what changed. Don't consolidate — link.
+Purpose: Issues = what needs doing. DRs = why we chose this approach. Commits = what changed. Don't consolidate — link. Chain is bidirectional: issue→DR (rationale) and DR→issue/spec (materialization).
 
 ## Agent Dispatch (Tier-Gated HITL)
 
