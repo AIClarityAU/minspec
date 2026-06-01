@@ -118,3 +118,22 @@ New code must have:
 - Modify files outside the task's file allowlist
 - Skip tests for invariant-touching changes
 - Add task checklists (`- [ ]`) to `docs/domain/` files
+
+<!-- minspec:slash-commands:start -->
+
+## Spec Kit Slash Commands
+
+Generic agents can invoke the following commands. Each routes to a MinSpec SDD phase against the active spec.
+
+| Command | Phase | Purpose |
+|---|---|---|
+| `/specify` | Specify | Start or update the Specify phase for the active MinSpec spec |
+| `/clarify` | Clarify | Resolve open questions before planning |
+| `/plan` | Plan | Draft the technical approach for the active spec |
+| `/tasks` | Tasks | Break the plan into ordered, checkable tasks |
+| `/analyze` | Analyze | Cross-check spec, plan, and tasks for consistency |
+| `/implement` | Implement | Execute the task list against the active spec |
+
+Full per-command instructions live in `.claude/commands/*.md` (Claude Code) and `.cursor/rules/spec-kit-commands.mdc` (Cursor) when those tools are detected.
+
+<!-- minspec:slash-commands:end -->

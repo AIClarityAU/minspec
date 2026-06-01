@@ -25,7 +25,7 @@
   "CLAUDE.md": {
     "__preamble__": "ece35349e24a64371bf8ced25d09fe08bc65420ba70176df44f9831be96dc129",
     "Overview": "6002cdc29f45a95c3e4971694abe098af6a02f81220e619e4bded098479bdada",
-    "Invariants": "c31c03f976a013d96bd0a7ca790947731c338064e87034dfd18c6bf771128c39",
+    "Invariants": "5d5d5c2c84564cd4e2ed8499afe43ed2fa85141713eaeeccbe59c7ee4021b70c",
     "SDD Methodology": "659cf2fee5afc6db19cd4e80569ee28f026764d7b23f716e62808256f0a8f4a6",
     "File Locations": "7c8f5347eec33d9917104252890ef5c4912b6997cb7ea689f451095b1b712321",
     "Commands": "315b3b522b5b0097b0f28398b15590423e58e3ea115a2b81c31940439d8a6a7e",
@@ -33,7 +33,7 @@
     "Session Scope Protocol": "7f0e526fee740859b5007e899a8dd1be4e195be704c8e5b770f9000b56f3c4e8",
     "SDD Phases (current state)": "e3ec36cedca2ae1c3e5a05ae1160afdd81642d662a5f9ed2edef4b3b7ff538c3",
     "Traceability Convention": "f94fa97083b84ad6c1e24ed42f7ae2d4c44bac4836cceeab2db82dd3f4b3ca4e",
-    "Agent Dispatch (Tier-Gated HITL)": "6373ac64772252949da2fbc82c7d5336fd6e340eae7d3d4f6b887cd80cd78443",
+    "Agent Dispatch (Tier-Gated HITL)": "6c57a3dc586b435e831379412f5ab55d56b14bd27dc9658c2a381430e6c46e64",
     "Deploy Reference": "ebb1304ad529dbab0444ab5e9e627d40928feb1cfa4a835e5ede432c68b75fdc",
     "Test Commands": "7d181a22f368dc3b37c56866e26ad63345d58e92c5a04bd1e1cf52f85d8f2459",
     "Pre-Commit Checks": "5d8784c1fca733ece82ba9396d0ae57b823e02f45b2b260cc1677d7929d72d74",
@@ -59,6 +59,7 @@
     "File Structure Reference": "90ffb35f48eb8e40bf3745e6c1c91057d38f6272dc667e1360a5aa4a5f1927d5",
     "Current Work": "b7b44b83ea0b10aa1e4fd90abd38c5e4b7683784448562f61a370220f1fa78c4",
     "Testing": "e7969f422355a257bf1dc584cc0aa765d0cb79ec9c97a4439a4af4fee9f3436c",
-    "Do Not": "6aa53d710948e0f5680923908a5fdf5d60330f66bef10bd863aba8f057decfec"
+    "Do Not": "c7d2d2b29dc4d34678916e5d8e78a2312c7725b93197ca383786f6b1d5fa3179",
+    "Spec Kit Slash Commands": "336ffe2e65dda58fd2c66c03f4eb1067f0974edd18b7ec35afd7d2ab691162fc"
   }
 }

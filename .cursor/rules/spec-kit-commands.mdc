@@ -1,0 +1,77 @@
+---
+description: Spec Kit slash command surface routed to MinSpec phases
+alwaysApply: false
+---
+
+# Spec Kit Slash Commands (via MinSpec)
+
+When the user invokes one of the following commands, follow MinSpec's SDD phase methodology. The active spec is referenced in the `minspec:active-spec` block of `CLAUDE.md` or `.cursorrules`.
+
+## /specify
+
+*Start or update the Specify phase for the active MinSpec spec*
+
+Run the **Specify** phase of MinSpec SDD methodology.
+
+Read the active spec referenced in the `minspec:active-spec` block of `CLAUDE.md` / `AGENTS.md`. Open the corresponding file under the project `specs/` directory and fill in the Specify section: user-visible outcome, problem statement, constraints.
+
+Match ceremony to the spec's tier:
+- T1: one sentence
+- T2: short paragraph
+- T3/T4: thorough but bounded
+
+Never violate invariants in `CLAUDE.md` or `.minspec/constitution.md`. Arguments: $ARGUMENTS
+
+## /clarify
+
+*Resolve open questions before planning*
+
+Run the **Clarify** phase. Required for T4, optional for T2/T3, skipped for T1.
+
+List concrete answerable questions blocking the plan. For each question add an answer or a follow-up task. Vague concerns belong in discussion, not here.
+
+Update the active spec's Clarify section. Arguments: $ARGUMENTS
+
+## /plan
+
+*Draft the technical approach for the active spec*
+
+Run the **Plan** phase. Required for T2+.
+
+Describe the technical approach, key decisions, and what is explicitly out of scope. Reference existing decisions in `docs/decisions/` rather than re-deciding.
+
+Honour the dependency budget recorded in `CLAUDE.md` (0-1 for simple, 2-3 for complex). Update the Plan section of the active spec. Arguments: $ARGUMENTS
+
+## /tasks
+
+*Break the plan into ordered, checkable tasks*
+
+Run the **Tasks** phase. Required for T3+.
+
+Break the plan into small, dependency-ordered checkboxes. Each task must be completable in one session and verifiable from outside.
+
+MinSpec tracks progress from these checkboxes — they must remain in standard markdown checkbox format (`- [ ]` / `- [x]`). Arguments: $ARGUMENTS
+
+## /analyze
+
+*Cross-check spec, plan, and tasks for consistency*
+
+Run the **Analyze** phase — cross-artifact consistency review before implementation.
+
+MinSpec's native phase list ends at `implement`; treat Analyze as a review pass over the active spec:
+1. Does every Plan decision trace to a Specify requirement?
+2. Does every Task implement part of the Plan?
+3. Are any invariants from `CLAUDE.md` at risk?
+4. Is the dependency budget respected?
+
+Output gaps and contradictions. Do not modify code. Arguments: $ARGUMENTS
+
+## /implement
+
+*Execute the task list against the active spec*
+
+Run the **Implement** phase. Required for T3+.
+
+Pick the next unchecked task in the active spec's Tasks section. Implement it, update the checkbox, and add a brief implementation note to the Implement section (decisions, gotchas, PR link).
+
+Respect file allowlists, invariants, and the dependency budget. If you cannot complete a task fully, escalate per `CLAUDE.md` rather than stub. Arguments: $ARGUMENTS
