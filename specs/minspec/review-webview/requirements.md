@@ -85,8 +85,8 @@ into two interaction modes:
 
 | Resolver node kind (SPEC-012) | Mode | Affordances in webview |
 |---|---|---|
-| `spec-approve` | **content-review** | render + select + comment + revise + diff + **Approve** (re-hash, DR-012 gate) |
-| `adr-accept` (ADR is a doc) | **content-review** | render + select + comment + revise + diff + **Accept / Reject** |
+| `spec-approve` | **content-review** | render + select + comment + revise + highlight-changed + **Approve** (re-hash, DR-012 gate) |
+| `adr-accept` (ADR is a doc) | **content-review** | render + select + comment + revise + highlight-changed + **Accept / Reject** |
 | `epic-promote` | **decision-only** | summary card + **Promote** control (status flip); no revise loop needed |
 | `issue-triage` *(new — see §Dependencies)* | **decision-only** | issue summary + triage control (inbox → P1/P2/P3); Tier-1 `gh` |
 | `phase-action` (author a phase) | **not approvable** | NOT an approval — show "next is authoring work: <imperative>" + Open / Dispatch; never a fake Approve |
@@ -137,18 +137,22 @@ for content-bearing artifacts (specs, ADRs).
   This is what keeps "LLM revision" inside the Tier-1 delegation precedent, not a new
   network surface.
 
-### Highlight changes (local diff, per-hunk)
+### Highlight changes (local, re-read cue)
 
-- **FR-7 (change-highlighting after revision).** When a revision lands (the agent edits
-  the file on disk), the webview MUST show the change as a **diff against the pre-revision
-  snapshot** — added/removed spans highlighted inline or side-by-side. This is a local
-  computation (snapshot vs current bytes / git); no network.
-- **FR-8 (per-hunk accept / reject).** The reviewer MUST be able to **accept** (keep) or
-  **reject** (revert to snapshot) each revised hunk independently, before approving.
-  Reject restores the original span; the artifact file reflects only accepted hunks.
+- **FR-7 (highlight the new/changed spans only).** When a revision lands (the agent edits
+  the file on disk), the webview MUST highlight the **new/changed** passages in the
+  rendered artifact — the bits the reviewer needs to **re-read**. Computed locally against
+  the pre-revision snapshot; no network. Removed/old text is **NOT** shown and this is
+  **NOT** a two-sided diff review — it is a re-read cue. Highlight clears once the artifact
+  is approved (or the panel re-opens fresh).
+- **FR-8 (revision applied directly — no accept/reject gate).** A revision is written
+  straight to the artifact (a normal file edit). There is **no** per-hunk accept/reject
+  step and no removed-text panel. If a revision is wrong, the reviewer re-comments /
+  re-revises or edits by hand; the revert path is standard editor undo / git, not a bespoke
+  hunk UI. FR-7 (re-read cue) + FR-9 (forced re-hash) ensure nothing lands silently.
 - **FR-9 (revision invalidates prior approval — by design).** Because approval is
-  content-hash bound (DR-012), any accepted revision changes the hash and any prior
-  approval goes `stale`. The diff → accept → approve sequence is the re-review the gate
+  content-hash bound (DR-012), any revision changes the hash and any prior approval goes
+  `stale`. The revise → re-read (FR-7) → approve sequence is the re-review the gate
   intends; the webview MUST make the re-hash explicit at the Approve step.
 
 ### Approve + chain to next (the signpost walk)
@@ -183,8 +187,8 @@ for content-bearing artifacts (specs, ADRs).
 ### Packaging & boundary
 
 - **FR-16 (HTML generation is a pure, testable function).** Following the existing split
-  (`spec-panel.ts` = vscode glue, `spec-panel-html.ts` = pure HTML), all render/diff/markup
-  generation MUST be pure functions (no `vscode`, no network) so they are unit-testable;
+  (`spec-panel.ts` = vscode glue, `spec-panel-html.ts` = pure HTML), all render / highlight
+  / markup generation MUST be pure functions (no `vscode`, no network) so they are unit-testable;
   the `vscode`-aware shell only wires messages and file I/O.
 - **FR-17 (Tier-0 invariant — enforced).** No file in `packages/minspec` reachable from
   this feature may import `http`/`https`/`fetch`/`net`. A T0 test MUST assert this for the
@@ -203,12 +207,11 @@ for content-bearing artifacts (specs, ADRs).
 │  implementation code, so a task can be marked done while ─────────┤  this │ │
 │  the code behind it is a stub.                                    │  to   │ │
 │                                                                   │  FR-3"│ │
-│  ## Decision                          ┌── revised (diff) ──────┐  └───────┘ │
-│  Add a code-completeness gate that  → │ - scans the whole tree │  ✓ accept  │
-│  scans spec-traced files only for     │ + scans only files     │  ✗ reject  │
-│  stub markers.                        │ +  mapped via          │            │
-│                                       │ + traceability.json    │            │
-│                                       └────────────────────────┘            │
+│  ## Decision                                                      └───────┘ │
+│  Add a code-completeness gate that scans ▒only spec-traced files▒ for stub   │
+│  markers.                                                                    │
+│     ▒ shaded ▒ = changed by the last revision → re-read this.                │
+│     (old text not shown · not a diff · just a re-read cue)                   │
 │  ```ts                                                                       │
 │  interface StubFinding { file: string; marker: string; line: number }       │
 │  ```                                                                         │
@@ -244,7 +247,7 @@ decision-only node (epic-promote / issue-triage) collapses to a summary card:
   dispatch work is never presented as an approvable step; `phase-action` authoring work is
   shown but not "approved" (FR-13, SPEC-012 INV).
 - **INV — Non-destructive review (T0).** Comments (FR-4) and skips (FR-14) never mutate the
-  artifact or its hash; only an accepted revision (FR-8) and an explicit Approve (FR-10) do.
+  artifact or its hash; only an applied revision (FR-8) and an explicit Approve (FR-10) do.
 
 ## Coverage Map (session asks → FR)
 
@@ -254,7 +257,7 @@ decision-only node (epic-promote / issue-triage) collapses to a summary card:
 | Approximates ExitPlanMode (custom webview, native not invocable) | FR-1, DR-012 finding |
 | Text select → comment | FR-3, FR-4 |
 | → LLM revision | FR-6, FR-6a |
-| → highlight changes | FR-7, FR-8 |
+| → highlight new/changed bits to re-read (no diff, no removals) | FR-7, FR-8 |
 | Scroll-bottom Approve that does NOT close | FR-11 |
 | Approve shows the next spec/dr/issue/doc | FR-11, FR-12 |
 | "whatever the next-human-task signpost points to" | FR-12 (consume SPEC-012) |
@@ -269,7 +272,7 @@ decision-only node (epic-promote / issue-triage) collapses to a summary card:
 | R1 | **Tier-0 erosion.** "Just one fetch" creeps into the webview to call a model directly, breaking the air-gapped selling point (invariant #2). | Med · High | FR-6/FR-17 + a T0 import-ban test; revision is delegation only. Reviewed at the DR-004 code-review boundary. |
 | R2 | **Gate bypass via the pretty door.** The webview becomes an easier path that skips the validator the command enforces. | Med · High | FR-10 reuses `approveSpecCommand`'s validate-then-refuse logic verbatim; INV — Gate parity + test. |
 | R3 | **Ordering drift.** Webview computes its own "next" and disagrees with the status-bar/CI signpost, destroying trust. | Low · High | FR-12 forbids local ordering; consumes SPEC-012's single engine (its FR-11). |
-| R4 | **Lost edits / bad revert.** Per-hunk reject mis-reverts or the agent's edit clobbers concurrent manual edits. | Med · High | FR-7 snapshot before revision; FR-8 reject restores from snapshot; dirty-editor-safe handoff (mechanism resolved at plan, mirrors SPEC-012 FR-15 dirty-safe rung). |
+| R4 | **Unwanted / clobbering revision.** The agent's edit is wrong, or overwrites concurrent manual edits. | Med · Med | Revision is a normal file edit → standard editor undo / git revert (no bespoke hunk UI to get wrong); FR-9 forces re-hash so a bad edit can't sneak past approval; dirty-editor-safe handoff (plan-phase, mirrors SPEC-012 FR-15 dirty-safe rung). Re-comment to re-revise. |
 | R5 | **Stale anchors.** A comment pin's anchor drifts after edits and points at the wrong span. | Med · Med | FR-3 stable-anchor scheme is an explicit plan-phase decision (FR-OQ); resolved pins de-emphasised (FR-5) limit blast radius. |
 | R6 | **Approve-chain fatigue → rubber-stamping.** A continuous walk encourages reflexive approval without reading (the DR-020 R1 risk, amplified by flow). | Med · Med | FR-2 surfaces violations + stale state up-front; FR-14 skip is frictionless so "not sure" need not become a click-through approve; validator still refuses incomplete specs (FR-10). |
 | R7 | **Phase-action category error.** Authoring work shown with an Approve button → two-queue leak. | Low · Med | FR-13 explicitly de-approves phase-action nodes; INV — Two queues + test. |
@@ -302,9 +305,6 @@ decision-only node (epic-promote / issue-triage) collapses to a summary card:
 - **FR-OQ2 — revision handoff mechanism.** Which Tier-1 path: VS Code chat-participant API,
   a `minspec.dispatchRevision` command into `agent-execute`, a prompt file the running
   session watches, or `claude -p` via the DR-017 broker? Must be dirty-editor-safe (R4).
-  *(Open — plan phase.)*
-- **FR-OQ3 — diff application model.** Does the agent edit the file directly (webview diffs
-  snapshot vs disk) or propose a patch the human applies on accept? Affects FR-8 revert.
   *(Open — plan phase.)*
 
 ## Follow-ups (tracked)
