@@ -238,7 +238,24 @@ Mappings are semi-automated: classifier suggests based on file paths in task lis
 $(shield) MinSpec: T2 | Specify → Plan → Tasks | 2/5 done
 ```
 
-Click opens active spec panel.
+Click opens the active spec panel (the review webview, below).
+
+### Review Webview — implemented ([SPEC-014](review-webview/requirements.md))
+
+The active-spec panel (`views/spec-panel.ts` + pure-HTML `views/spec-panel-html.ts`)
+is a prettified webview for reading and **reviewing** a spec: phase-step progress
+and task toggles, plus (SPEC-014, materialising [#36](https://github.com/harvest316/minspec/issues/36))
+text-selection highlighting, Google-Docs-style **comment pins** anchored back into
+the spec, and per-revision highlight colours. This is the surface the per-doc review
+flow runs in.
+
+### Dependency Map — planned ([#48](https://github.com/harvest316/minspec/issues/48))
+
+A colour-coded, clickable artifact **minimap** visualising the cross-artifact edges
+(`depends_on` / `relates_to` / `supersedes`, the SPEC-012 vocabulary) across specs,
+DRs, and epics. **Not yet built** — tracked in #48; would render the same dependency
+DAG the next-task resolver (SPEC-012) already computes, so it is a *view* over
+existing data, not a new source of truth.
 
 ---
 
