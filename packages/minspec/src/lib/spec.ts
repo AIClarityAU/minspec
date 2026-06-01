@@ -40,6 +40,13 @@ export interface SpecFrontmatter {
   /** Optional epic reference (EPIC-NNN id or slug). Absent = ungrouped. */
   readonly epic?: string;
   /**
+   * Owning product slug (e.g. `minspec` / `scroogellm`) from the `product:`
+   * frontmatter field. Drives the SPECS-pane product-prefix strip under epic
+   * grouping (the H1 title carries a redundant `MinSpec — ` / `ScroogeLLM — `
+   * prefix). Absent for single-product repos that omit the field.
+   */
+  readonly product?: string;
+  /**
    * Split-layout phase-file kind: `requirements` | `design` | `tasks`. Present
    * when a spec is split across sibling files (one phase per file) rather than a
    * single file carrying all `## Phase` sections. Drives layout-aware validation
@@ -181,6 +188,7 @@ export function parseSpec(content: string): ParsedSpec {
     status: (STATUSES_SET.has(fmParsed.status as string) ? fmParsed.status : 'new') as SpecStatus,
     created: (fmParsed.created as string) ?? new Date().toISOString().slice(0, 10),
     epic: (fmParsed.epic as string) || undefined,
+    product: (fmParsed.product as string) || undefined,
     type: (fmParsed.type as string) || undefined,
     phases: {
       specify: (fmPhases.specify as PhaseStatus) ?? 'pending',

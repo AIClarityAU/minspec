@@ -58,6 +58,7 @@ export function listSpecs(rootDir: string): SpecSummary[] {
       phasesDone: done,
       phasesTotal: total,
       epic: fm.epic,
+      product: fm.product,
     };
     const rank = rankOf(path.basename(displayPath));
     const prev = byId.get(fm.id);
@@ -197,12 +198,48 @@ function progressMeter(done: number, total: number): string {
   return '\u25b0'.repeat(filled) + '\u25b1'.repeat(5 - filled);
 }
 
+/**
+ * SPECS-pane row label is a width-constrained, display-only rendering — the
+ * authoritative `SPEC-NNN` id and full title always survive in the tooltip and
+ * accessibility label (never-wrong: no information is destroyed, only abbreviated).
+ *
+ * `compressSpecId`: `SPEC-015` -> `015` (it IS the specs pane; the prefix is
+ * redundant). Any id not matching `SPEC-<digits>` passes through unchanged.
+ */
+export function compressSpecId(id: string): string {
+  const m = /^SPEC-(\d+)$/i.exec(id);
+  return m ? m[1] : id;
+}
+
+/**
+ * `stripProductPrefix`: drop a leading `MinSpec — ` / `ScroogeLLM -- ` product
+ * prefix from a spec's H1 title. Only strips when the leading token equals the
+ * spec's `product` slug (case-insensitive) — so unrelated titles like
+ * `Add rate limiting` are never touched. Tolerates any of the separators specs
+ * use in the wild (em/en dash, double or single hyphen). Used only under epic
+ * grouping, where the epic header already implies the product (DR-013 / SPEC-007).
+ */
+export function stripProductPrefix(title: string, product?: string): string {
+  if (!product) return title;
+  const m = /^(\S+)\s*(?:—|–|--|-)\s+(.*)$/.exec(title);
+  if (m && m[1].toLowerCase() === product.toLowerCase()) return m[2];
+  return title;
+}
+
 export class SpecNode extends vscode.TreeItem {
   constructor(
     public readonly spec: SpecSummary,
     public readonly approval: ApprovalStatus = 'unapproved',
+    /**
+     * True when this row renders under an epic group: the epic header implies
+     * the product, so the redundant `MinSpec — ` title prefix is stripped to
+     * reclaim width. Status-lane rows pass false (two products would otherwise
+     * collapse to identical text). The id is compressed regardless.
+     */
+    epicGrouped = false,
   ) {
-    super(`${spec.id}: ${spec.title}`, vscode.TreeItemCollapsibleState.None);
+    const displayTitle = epicGrouped ? stripProductPrefix(spec.title, spec.product) : spec.title;
+    super(`${compressSpecId(spec.id)}: ${displayTitle}`, vscode.TreeItemCollapsibleState.None);
 
     const phaseLabel = spec.currentPhase ?? 'complete';
     const pct = spec.phasesTotal > 0 ? Math.round((spec.phasesDone / spec.phasesTotal) * 100) : 100;
@@ -338,11 +375,12 @@ export class SpecTreeProvider implements vscode.TreeDataProvider<SpecTreeNode> {
     }
 
     if (element instanceof SpecGroupNode) {
-      return element.specs.map(spec => this.toSpecNode(spec));
+      return element.specs.map(spec => this.toSpecNode(spec, false));
     }
 
     if (element instanceof EpicGroupNode) {
-      return element.members.map(spec => this.toSpecNode(spec));
+      // Under an epic group the product is implied → strip the redundant title prefix.
+      return element.members.map(spec => this.toSpecNode(spec, true));
     }
 
     // RollupNode and SpecNode are leaves
@@ -350,14 +388,14 @@ export class SpecTreeProvider implements vscode.TreeDataProvider<SpecTreeNode> {
   }
 
   /** Build a SpecNode tagged with its current approval status. */
-  private toSpecNode(spec: SpecSummary): SpecNode {
+  private toSpecNode(spec: SpecSummary, epicGrouped = false): SpecNode {
     let approval: ApprovalStatus = 'unapproved';
     try {
       approval = this._approvalOf(this.workspaceRoot, spec.id, spec.filePath);
     } catch {
       // best-effort — default to unapproved
     }
-    return new SpecNode(spec, approval);
+    return new SpecNode(spec, approval, epicGrouped);
   }
 
   private getStatusGroups(allSpecs: SpecSummary[]): SpecGroupNode[] {

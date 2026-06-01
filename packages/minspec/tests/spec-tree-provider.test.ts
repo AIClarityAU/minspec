@@ -30,7 +30,7 @@ vi.mock('vscode', () => ({
 }));
 
 import type { SpecSummary } from '../src/views/spec-tree-provider';
-import { SpecTreeProvider, SpecGroupNode, SpecNode, RollupNode, listSpecs, STATUS_GROUPS } from '../src/views/spec-tree-provider';
+import { SpecTreeProvider, SpecGroupNode, SpecNode, RollupNode, listSpecs, STATUS_GROUPS, compressSpecId, stripProductPrefix } from '../src/views/spec-tree-provider';
 import { EpicGroupNode } from '../src/views/epic-grouping';
 import type { EpicSummary } from '../src/lib/epic-manager';
 import { SPEC_STATUSES } from '../src/lib/spec';
@@ -347,8 +347,9 @@ describe('SpecTreeProvider', () => {
       const specs = provider.getChildren(groups[0]) as SpecNode[];
 
       expect(specs).toHaveLength(2);
-      expect(specs[0].label).toBe('SPEC-001: Rate limiting'); // new
-      expect(specs[1].label).toBe('SPEC-002: Auth flow');     // specifying
+      // Status-lane rows: id compressed (SPEC-001 -> 001), product prefix NOT stripped.
+      expect(specs[0].label).toBe('001: Rate limiting'); // new
+      expect(specs[1].label).toBe('002: Auth flow');     // specifying
     });
 
     it('returns specs belonging to the Implementing group', () => {
@@ -356,7 +357,7 @@ describe('SpecTreeProvider', () => {
       const specs = provider.getChildren(groups[1]) as SpecNode[];
 
       expect(specs).toHaveLength(1);
-      expect(specs[0].label).toBe('SPEC-003: Dashboard');
+      expect(specs[0].label).toBe('003: Dashboard');
     });
 
     it('returns specs belonging to the Done group', () => {
@@ -364,7 +365,7 @@ describe('SpecTreeProvider', () => {
       const specs = provider.getChildren(groups[2]) as SpecNode[];
 
       expect(specs).toHaveLength(1);
-      expect(specs[0].label).toBe('SPEC-010: Login page');
+      expect(specs[0].label).toBe('010: Login page');
     });
 
     it('returns specs belonging to the Archived group', () => {
@@ -372,7 +373,7 @@ describe('SpecTreeProvider', () => {
       const specs = provider.getChildren(groups[3]) as SpecNode[];
 
       expect(specs).toHaveLength(1);
-      expect(specs[0].label).toBe('SPEC-020: Old feature');
+      expect(specs[0].label).toBe('020: Old feature');
     });
 
     it('returns empty array for group with no specs', () => {
@@ -386,10 +387,10 @@ describe('SpecTreeProvider', () => {
   });
 
   describe('SpecNode details', () => {
-    it('has correct label format (ID: title)', () => {
+    it('has correct label format (compressed ID: title)', () => {
       const groups = groupsOf(provider);
       const specs = provider.getChildren(groups[0]) as SpecNode[];
-      expect(specs[0].label).toBe('SPEC-001: Rate limiting');
+      expect(specs[0].label).toBe('001: Rate limiting');
     });
 
     it('has description with tier, progress meter, percent and phase (DR-012)', () => {
@@ -664,5 +665,73 @@ describe('SpecTreeProvider — epic grouping', () => {
     const nodes = p.getChildren(undefined);
     expect(nodes.some(n => n instanceof EpicGroupNode)).toBe(false);
     expect(nodes.some(n => n instanceof SpecGroupNode)).toBe(true);
+  });
+
+  // --- SPECS-pane label compaction (epic-grouping width tweak) ---
+  const PRODUCT_EPICS: EpicSummary[] = [
+    { id: 'EPIC-001', slug: 'telemetry', title: 'Telemetry', status: 'active', order: 1, filePath: '/e/EPIC-001.md' },
+  ];
+
+  it('epic-group rows strip the product prefix AND compress the id', () => {
+    const specs: SpecSummary[] = [
+      makeSpec({ id: 'SPEC-007', epic: 'EPIC-001', product: 'minspec', title: 'MinSpec — Registered Epics & Grouping' }),
+    ];
+    const p = new SpecTreeProvider('/ws', () => specs, undefined, () => PRODUCT_EPICS);
+    const group = epicGroups(p).find(g => g.groupLabel.startsWith('Telemetry'))!;
+    const [node] = p.getChildren(group) as SpecNode[];
+    expect(node.label).toBe('007: Registered Epics & Grouping');
+  });
+
+  it('epic-group rows keep the FULL id + FULL title in tooltip and a11y label (never-wrong)', () => {
+    const specs: SpecSummary[] = [
+      makeSpec({ id: 'SPEC-007', epic: 'EPIC-001', product: 'minspec', title: 'MinSpec — Registered Epics & Grouping' }),
+    ];
+    const p = new SpecTreeProvider('/ws', () => specs, undefined, () => PRODUCT_EPICS);
+    const group = epicGroups(p).find(g => g.groupLabel.startsWith('Telemetry'))!;
+    const [node] = p.getChildren(group) as SpecNode[];
+    const full = 'SPEC-007: MinSpec — Registered Epics & Grouping';
+    expect(node.tooltip).toContain(full);
+    expect((node as unknown as { accessibilityInformation: { label: string } }).accessibilityInformation.label)
+      .toContain(full);
+  });
+
+  it('status-lane rows compress the id but KEEP the product prefix (products stay distinct)', () => {
+    const specs: SpecSummary[] = [
+      makeSpec({ id: 'SPEC-100', status: 'specifying', product: 'scroogellm', title: 'ScroogeLLM — Requirements Specification' }),
+    ];
+    const p = new SpecTreeProvider('/ws', () => specs); // no epics → status lanes
+    const [node] = p.getChildren(groupsOf(p)[0]) as SpecNode[]; // Specifying lane
+    expect(node.label).toBe('100: ScroogeLLM — Requirements Specification');
+  });
+});
+
+describe('compressSpecId()', () => {
+  it('strips the SPEC- prefix, keeping the numeric part', () => {
+    expect(compressSpecId('SPEC-015')).toBe('015');
+    expect(compressSpecId('SPEC-100')).toBe('100');
+    expect(compressSpecId('SPEC-1')).toBe('1');
+  });
+  it('passes non-SPEC ids through unchanged', () => {
+    expect(compressSpecId('EPIC-001')).toBe('EPIC-001');
+    expect(compressSpecId('')).toBe('');
+    expect(compressSpecId('SPEC-')).toBe('SPEC-'); // no digits → no match
+  });
+});
+
+describe('stripProductPrefix()', () => {
+  it('strips a matching product prefix across the separators specs use in the wild', () => {
+    expect(stripProductPrefix('MinSpec — Classifier Validation', 'minspec')).toBe('Classifier Validation');
+    expect(stripProductPrefix('ScroogeLLM -- Requirements Specification', 'scroogellm')).toBe('Requirements Specification');
+    expect(stripProductPrefix('MinSpec - Task Breakdown', 'minspec')).toBe('Task Breakdown');
+  });
+  it('only consumes the FIRST separator (mid-title dashes survive)', () => {
+    expect(stripProductPrefix('MinSpec — A — B', 'minspec')).toBe('A — B');
+  });
+  it('never strips when the leading token is not the product (no false positives)', () => {
+    expect(stripProductPrefix('Frobnicate - the widget', 'minspec')).toBe('Frobnicate - the widget');
+    expect(stripProductPrefix('Add rate limiting to /api/health', 'minspec')).toBe('Add rate limiting to /api/health');
+  });
+  it('is a no-op without a product slug', () => {
+    expect(stripProductPrefix('MinSpec — Whatever', undefined)).toBe('MinSpec — Whatever');
   });
 });

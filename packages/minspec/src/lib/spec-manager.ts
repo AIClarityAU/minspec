@@ -36,6 +36,8 @@ export interface SpecSummary {
   readonly phasesTotal: number;
   /** Optional epic reference (EPIC-NNN id or slug). Absent = ungrouped. */
   readonly epic?: string;
+  /** Owning product slug (`minspec` / `scroogellm`); drives the SPECS-pane prefix strip. */
+  readonly product?: string;
 }
 
 /** Full spec detail including content and phase states */
