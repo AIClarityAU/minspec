@@ -240,14 +240,18 @@ $(shield) MinSpec: T2 | Specify → Plan → Tasks | 2/5
 
 Click opens the active spec panel (the review webview, below).
 
-### Review Webview — implemented ([SPEC-014](review-webview/requirements.md))
+### Active Spec Panel (implemented) · Review Webview (specified — [SPEC-014](review-webview/requirements.md))
 
-The active-spec panel (`views/spec-panel.ts` + pure-HTML `views/spec-panel-html.ts`)
-is a prettified webview for reading and **reviewing** a spec: phase-step progress
-and task toggles, plus (SPEC-014, materialising [#36](https://github.com/harvest316/minspec/issues/36))
-text-selection highlighting, Google-Docs-style **comment pins** anchored back into
-the spec, and per-revision highlight colours. This is the surface the per-doc review
-flow runs in.
+**Implemented today:** the active-spec panel (`views/spec-panel.ts` + pure-HTML
+`views/spec-panel-html.ts`) — renders the spec with phase-step progress; its only
+write action is toggling task checkboxes.
+
+**Specified, NOT yet built** (SPEC-014, status `specifying`; materialises
+[#36](https://github.com/harvest316/minspec/issues/36)): the upgrade to a *review*
+webview — rendered (not raw) markdown, selectable text, inline **comment pins**, an
+LLM **revision loop** (revision = agent *delegation*, kept Tier-0-safe), per-revision
+change-highlighting, and an in-panel **Approve** action (re-hash, DR-012 gate). This
+is the *intended* surface for the per-doc review flow — not the current one.
 
 ### Dependency Map — planned ([#48](https://github.com/harvest316/minspec/issues/48))
 
