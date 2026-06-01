@@ -29,6 +29,22 @@ SUBJECT="$(grep -v '^#' "$MSG_FILE" | grep -m1 . || true)"
 
 # Only gate Conventional-Commit fix subjects: fix:  fix(scope):  fix!:  fix(scope)!:
 if ! printf '%s' "$SUBJECT" | grep -Eq '^fix(\([^)]*\))?!?:'; then
+  # Not a fix commit -> the hard gate does not apply. But a bug fix mislabeled
+  # as chore/refactor/style/perf dodges RCDD. Emit a NON-blocking advisory when
+  # such a type carries bug-language and no documented root cause. Warning only
+  # (exit 0) — refactors are legitimate; this nudges, never blocks.
+  BODY="$(grep -v '^#' "$MSG_FILE" || true)"
+  if printf '%s' "$SUBJECT" | grep -Eq '^(chore|refactor|style|perf)(\([^)]*\))?!?:' \
+     && printf '%s' "$BODY" | grep -Eiq '\b(bug|bugfix|hotfix|regression|crash|segfault|broken|null deref|null pointer|off-by-one)\b' \
+     && ! printf '%s' "$BODY" | grep -Eiq '\broot[ -]cause:'; then
+    cat >&2 <<'EOF'
+⚠ RCDD advisory (DR-003): this looks like a bug fix mislabeled as a non-fix type.
+
+  Bug-language detected under a chore/refactor/style/perf subject with no
+  `Root cause:` line. If it fixes a bug, prefer `fix:` and document the cause.
+  Committing anyway (advisory only — not blocked).
+EOF
+  fi
   exit 0
 fi
 
