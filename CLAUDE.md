@@ -108,6 +108,23 @@ Commits, issues, and DRs form a linked chain:
 
 Purpose: Issues = what needs doing. DRs = why we chose this approach. Commits = what changed. Don't consolidate — link. Chain is bidirectional: issue→DR (rationale) and DR→issue/spec (materialization).
 
+## Evidence Discipline — status claims (RCDD / DR-003)
+
+Before writing **"implemented / done / built / works / shipped"** about a feature into
+any artifact (spec, DR, README, comment), verify the **authoritative** signals, not
+proxies:
+
+- ✅ the feature's **code** — grep/read the actual implementation; cite `file:line`.
+- ✅ the owning spec's **`status`** field — `done`/`implementing`, not `specifying`.
+- ❌ **NOT** evidence: a file or spec *exists*, a commit *subject* mentions it, an
+  issue is *closed*. **Artifact-existence ≠ feature-existence.**
+
+If unverified, write the honest state ("specified, not built" / "planned, #NN"). In a
+*never-wrong* product a false "implemented" is the worst defect — it makes the signpost
+lie. (Root-caused 2026-06-01: SPEC-002 falsely called SPEC-014's review webview
+"implemented" — it was `specifying`, zero code. Deterministic backstop tracked as an
+issue, sibling to #47.)
+
 ## Agent Dispatch (Tier-Gated HITL)
 
 The `scripts/` dispatch below is the **dev-time** path for building this monorepo.
