@@ -252,6 +252,18 @@ are live invariant breaches, not future work.
 | Resolve SPEC-010 OQ#1 (global order) | FR-2, FR-4 |
 | One engine, every surface | FR-11 |
 
+## Risks & Mitigations
+
+| # | Risk | Likelihood · Impact | Mitigation |
+|---|---|---|---|
+| R1 | **Frontmatter rot → confident-wrong next task.** The DAG is only as fresh as the frontmatter; a stale `status`/`order`/`depends_on` yields a wrong signpost stated with full confidence (the stale-INDEX bug, exactly). | High · High | FR-9 coherence + FR-15 structural-corruption checks run as a resolve-time **precondition**; on breach, degrade honestly (FR-10) — emit "unclear", never a wrong step. Acyclicity check catches dependency rot. |
+| R2 | **Edge-maintenance burden → cross-cutting deps never authored.** If devs don't write `depends_on`, real blockers stay invisible and the resolver under-orders (ranks a blocked item too high). | High · Med | Prose-link linter flags `Resolves:`/`Triggered by:`/`composes` prose with no matching machine edge; optional opt-in LLM **suggests** edges for human accept (never auto-writes, DR-019). |
+| R3 | **Surfaces disagree.** Status-bar, explorer rollup, and CI computing the next task differently destroys trust in the signpost. | Low · High | FR-11 single pure function in `packages/shared` — one engine, one verdict everywhere. T0 tests pin the mapping. |
+| R4 | **`epic.order` is a human guess → wrong global next task, confidently.** Determinism faithfully propagates a bad human-set weight. | Med · Med | FR-7 show-the-evidence makes any wrong order diagnosable to the field that caused it; `order` is cheap to edit; INV #5 override lets the human dismiss and proceed. |
+| R5 | **Corruption blackout (DoS).** One cycle or malformed file makes the resolver say "unclear" globally → no next task at all, signpost dead. | Med · High | FR-15 localizes the report to the offending edge/file set and offers repair; the rest of the DAG MUST still resolve. A single bad node must not blank the whole signpost. |
+| R6 | **Advisory drifts to de-facto blocking.** Human follows the signpost blindly, mis-ordering real-world priorities the model can't see. | Med · Med | FR-5 advisory + INV #5 override + FR-6 pipeline view (see what's behind the one task). The signpost suggests; the human still decides. |
+| R7 | **Two-queue leak.** Agent/LLM dispatch work surfaces as a human next task (or vice-versa), polluting the signpost. | Low · Med | INV — Two Queues (T0) + dedicated tests; the resolver's node sources exclude the dispatch queue by construction (FR-8). |
+
 ## Out of scope
 
 - **Within-feature coverage predicates** — owned by SPEC-010 (consumed, not
