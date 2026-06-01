@@ -94,6 +94,13 @@ const hasMarkdownTable = (s: string) => /^\s*\|.+\|\s*\n\s*\|[\s:|-]+\|\s*$/m.te
 /** crude ascii-box mockup: 3+ lines of box-drawing or +--+ framing */
 const hasAsciiBox = (s: string) =>
   (s.match(/^[ \t]*[+|│┌└├─].*$/gm)?.length ?? 0) >= 3;
+/**
+ * A fenced ``` code block containing box-drawing / flow characters — i.e. an
+ * ASCII diagram, including *flow* diagrams (arrows, ▼) whose lines start with
+ * text labels rather than box-framing chars (so `hasAsciiBox` misses them).
+ */
+const hasDiagramFence = (s: string) =>
+  /```[\s\S]*?[┌┐└┘├┤┬┴┼─│▼▲►◄▶◀→←↓↑][\s\S]*?```/.test(s);
 
 // ─── Aspect → required artifact rules ────────────────────────────────────────
 
@@ -137,7 +144,7 @@ const ASPECT_RULES: AspectRule[] = [
     aspect: 'architecture',
     rule: 'aspect.architecture.no-diagram',
     satisfied: (s) =>
-      hasMermaid(s) || /\.(puml|drawio|svg)\b/i.test(s) || hasSection(s, ['diagram', 'architecture']) && hasAsciiBox(s),
+      hasMermaid(s) || /\.(puml|drawio|svg)\b/i.test(s) || hasAsciiBox(s) || hasDiagramFence(s),
     message: 'Architectural spec has no diagram.',
     fixHint: 'Add a ```mermaid``` diagram, a linked .puml/.drawio, or an ASCII component diagram under "## Architecture".',
   },

@@ -260,6 +260,48 @@ aspects: [ux, api, data, architecture]
     expect(r.complete).toBe(true);
   });
 
+  it('architecture aspect satisfied by a flow diagram in a fence (any section name)', () => {
+    const body = `---
+id: SPEC-X
+type: design
+tier: T3
+status: implementing
+product: minspec
+aspects: [architecture]
+---
+
+# Design
+## Data flow
+\`\`\`
+fetch.mjs ──network──> subset ──> .data/instances.json
+                                        │
+labels.json ──────────────────────┐    │
+                                   ▼    ▼
+  harness reads both
+\`\`\`
+`;
+    const r = validateSpec(parseSpec(body), DEFAULT_CONFIG);
+    expect(r.violations.some((v) => v.rule === 'aspect.architecture.no-diagram')).toBe(false);
+  });
+
+  it('architecture aspect STILL flagged when there is no diagram at all', () => {
+    const body = `---
+id: SPEC-Y
+type: design
+tier: T3
+status: implementing
+product: minspec
+aspects: [architecture]
+---
+
+# Design
+## Overview
+Prose only, no diagram, no fence.
+`;
+    const r = validateSpec(parseSpec(body), DEFAULT_CONFIG);
+    expect(r.violations.some((v) => v.rule === 'aspect.architecture.no-diagram')).toBe(true);
+  });
+
   it('split-layout design file STILL enforces aspect artifacts', () => {
     const splitDesignUx = `---
 id: SPEC-002
