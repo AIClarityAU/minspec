@@ -85,6 +85,7 @@ vi.mock('vscode', () => ({
     showInputBox: vi.fn(),
     showTextDocument: vi.fn(),
     activeTextEditor: undefined,
+    onDidChangeActiveTextEditor: vi.fn(() => ({ dispose: vi.fn() })),
   },
   workspace: {
     workspaceFolders: [{ uri: { fsPath: '/tmp/test-workspace' } }],

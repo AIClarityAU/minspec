@@ -34,9 +34,10 @@ import {
 } from './views/codelens-provider';
 import { maybeShowNudge, recordInstallTimestamp, exportTraceability, setupConformanceWatcher } from './lib/bridge';
 import { runBootstrap, isWatchedGitPath, type BootstrapVsCode } from './lib/auto-bootstrap';
-import { findActiveSpec } from './lib/active-spec';
+import { findActiveSpec, trackActiveSpecEditor } from './lib/active-spec';
 
 export function activate(context: vscode.ExtensionContext): void {
+  trackActiveSpecEditor(context);
   const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
 
   // Active spec panel
