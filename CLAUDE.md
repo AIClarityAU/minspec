@@ -24,6 +24,12 @@ This project uses Specification-Driven Development. Tasks are classified by comp
 | T3 | Full spec cycle | specify, plan, tasks, implement |
 | T4 | Complete ceremony | all phases |
 
+> **⏳ Under revision (DR-024):** Fork B accepted — ceremony's unit becomes a **risk
+> profile**, `tier` a **derived label**, and this tier→phase table is replaced by
+> risk→phase. Deferred until reach validation [#91](https://github.com/harvest316/minspec/issues/91)
+> clears (then migration [#90](https://github.com/harvest316/minspec/issues/90)).
+> This table is operative until then.
+
 ## File Locations
 
 | Artifact | Location |

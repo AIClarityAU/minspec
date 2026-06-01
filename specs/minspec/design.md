@@ -9,6 +9,14 @@ product: minspec
 
 # MinSpec — Design Document
 
+> **⏳ Tier model under revision — review T1–T4 as provisional.** Fork B is accepted
+> ([DR-024](../../docs/decisions/DR-024.md)): the unit of ceremony becomes a **risk
+> profile** and `tier` (T1–T4) becomes a **derived/display label**; the tier→phase
+> ladder will be replaced by risk→phase. Migration is **deferred until reach
+> validation [#91](https://github.com/harvest316/minspec/issues/91) clears** (then
+> [#90](https://github.com/harvest316/minspec/issues/90)). The T1–T4 content below is
+> the live, operative model until then — not final.
+
 **Date:** 2026-05-26
 **Status:** Implementing
 **Requirements:** [requirements.md](requirements.md)

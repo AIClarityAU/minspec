@@ -22,6 +22,11 @@ Project invariants, principles, and constraints are in `.minspec/constitution.md
 
 ## Task Classification Guide
 
+> **⏳ Under revision (DR-024):** Fork B accepted — classification is moving from a
+> T1–T4 size tier to a **risk profile** (blast-radius), with `tier` a derived label.
+> Deferred until reach validation [#91](https://github.com/harvest316/minspec/issues/91)
+> clears. The T1–T4 guide below is operative until then.
+
 Before starting work, classify the task:
 
 - **T1 (Trivial):** One-line fix, typo, config change. One sentence of spec is enough.
