@@ -1,13 +1,22 @@
 # MinSpecPro
 
-Monorepo for two VS Code extensions plus an extension pack that bundles them.
+![status](https://img.shields.io/badge/status-under%20construction-orange)
+![release](https://img.shields.io/badge/release-none%20yet-lightgrey)
+![marketplace](https://img.shields.io/badge/marketplace-not%20published-red)
+
+> 🚧 **Under construction — pre-release.** APIs, specs, and layout change daily; nothing here is published to the VS Code Marketplace or Open VSX, and there are no stability guarantees. Star/watch to follow along — don't depend on it yet.
+>
+> **ScroogeLLM source is not in this repo.** It's built in a separate private repository ([DR-027](docs/decisions/DR-027.md)); only its public spec ([`specs/scroogellm/`](specs/scroogellm)) lives here. This monorepo hosts **MinSpec** (open), the shared classifier, and the extension-pack manifest.
+
+Monorepo for the open **MinSpec** VS Code extension, the shared classifier engine, and the MinSpec Pro extension-pack manifest.
 
 | Package | ID | Domain | Status |
 |---|---|---|---|
-| [`packages/minspec`](packages/minspec) | `aiclarity.minspec` | [minspec.dev](https://minspec.dev) | SDD Implement |
-| [`packages/scroogellm`](packages/scroogellm) | `aiclarity.scroogellm` | [scroogellm.com](https://scroogellm.com) | SDD Specify (future) |
+| [`packages/minspec`](packages/minspec) | `aiclarity.minspec` | [minspec.dev](https://minspec.dev) | SDD Implement (pre-release) |
 | [`packages/shared`](packages/shared) | `@aiclarity/shared` | — | Shared classifier |
-| [`packages/extension-pack`](packages/extension-pack) | `aiclarity.minspec-pro` | — | Bundles both |
+| [`packages/extension-pack`](packages/extension-pack) | `aiclarity.minspec-pro` | — | Manifest only — refs ScroogeLLM by marketplace ID |
+
+> **ScroogeLLM** (`aiclarity.scroogellm`, [scroogellm.com](https://scroogellm.com)) — proxy source is private (see banner above). Public spec: [`specs/scroogellm/`](specs/scroogellm).
 
 ## What is this?
 
@@ -81,7 +90,7 @@ Multi-licensed — see [`LICENSE`](LICENSE) and [DR-018](docs/decisions/DR-018.m
 | Path | License |
 |---|---|
 | `packages/shared` (classifier engine + contracts) | **MPL-2.0** |
-| `packages/minspec`, `packages/scroogellm`, `packages/extension-pack` | **MIT** |
+| `packages/minspec`, `packages/extension-pack` | **MIT** |
 | docs / site copy / whitepaper ([`LICENSE-CONTENT`](LICENSE-CONTENT)) | **CC-BY-4.0** |
 
 Publisher: `aiclarity`.
