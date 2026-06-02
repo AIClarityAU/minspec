@@ -71,7 +71,7 @@ MinSpec is a **VS Code extension**, not a CLI — run everything from the Comman
 
 | Command Palette | Purpose |
 |---|---|
-| *MinSpec: Initialize SDD Structure* | Scaffold \`.minspec/\` + harness files. Offered automatically via a prompt when you open an un-initialized project (it is not listed in the palette itself). |
+| *MinSpec: Initialize SDD Structure* | Scaffold \`.minspec/\` + harness files. Also offered automatically when you open an un-initialized project. |
 | *MinSpec: Refresh Harness Files* | Re-merge harness templates, preserving your edits. |
 | *MinSpec: Classify Task Complexity* | Classify the current change into a tier (T1–T4). |
 | *MinSpec: Show SDD Status* | Show the current phase and spec status. |

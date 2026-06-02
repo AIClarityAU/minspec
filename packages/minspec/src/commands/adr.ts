@@ -10,6 +10,7 @@ import {
   type AdrStatus,
 } from '../lib/adr-manager';
 import type { AdrNode } from '../views/adr-tree-provider';
+import { resolveTargetFolder } from '../lib/resolve-folder';
 
 /**
  * Dedup gate shared by both create paths. If an existing in-force ADR has a
@@ -49,11 +50,8 @@ async function confirmNoDuplicate(
  * and opens the file for editing.
  */
 export async function createAdrCommand(): Promise<void> {
-  const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!folder) {
-    vscode.window.showErrorMessage('MinSpec: No workspace folder open.');
-    return;
-  }
+  const folder = await resolveTargetFolder();
+  if (!folder) return;
 
   // Prompt for title
   const title = await vscode.window.showInputBox({
@@ -218,11 +216,8 @@ export async function setAdrStatusCommand(node?: AdrNode): Promise<void> {
  * any user-authored content outside the auto-managed markers.
  */
 export async function regenerateDrIndexCommand(): Promise<void> {
-  const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!folder) {
-    vscode.window.showErrorMessage('MinSpec: No workspace folder open.');
-    return;
-  }
+  const folder = await resolveTargetFolder();
+  if (!folder) return;
 
   const decisionsDir = vscode.workspace
     .getConfiguration('minspec')

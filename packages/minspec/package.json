@@ -238,18 +238,6 @@
         {
           "command": "minspec.acceptEpic",
           "when": "false"
-        },
-        {
-          "command": "minspec.init",
-          "when": "false"
-        },
-        {
-          "command": "minspec.initRefresh",
-          "when": "false"
-        },
-        {
-          "command": "minspec.classify",
-          "when": "false"
         }
       ],
       "view/title": [

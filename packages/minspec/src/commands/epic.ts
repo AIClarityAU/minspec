@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { createEpic, writeEpicIndex, setEpicStatus } from '../lib/epic-manager';
 import type { EpicSummary } from '../lib/epic-manager';
+import { resolveTargetFolder } from '../lib/resolve-folder';
 
 /** Tree node carrying the epic this group represents (from EpicGroupNode). */
 interface EpicNodeLike {
@@ -41,11 +42,8 @@ export async function acceptEpicCommand(node?: EpicNodeLike): Promise<void> {
  * Mirrors the Create ADR flow (DR-013 / SPEC-007 FR-2).
  */
 export async function createEpicCommand(): Promise<void> {
-  const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!folder) {
-    vscode.window.showErrorMessage('MinSpec: No workspace folder open.');
-    return;
-  }
+  const folder = await resolveTargetFolder();
+  if (!folder) return;
 
   const title = await vscode.window.showInputBox({
     prompt: 'Title for the Epic',

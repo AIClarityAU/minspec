@@ -2,13 +2,11 @@ import * as vscode from 'vscode';
 import { analyzeGitDiff } from '../lib/git-analyzer';
 import { classify, applyCalibration, loadCalibration } from '../lib/classifier';
 import { loadConfig, applyVSCodeOverrides } from '../lib/config';
+import { resolveTargetFolder } from '../lib/resolve-folder';
 
 export async function classifyCommand(): Promise<void> {
-  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!workspaceRoot) {
-    vscode.window.showErrorMessage('MinSpec: No workspace folder open.');
-    return;
-  }
+  const workspaceRoot = await resolveTargetFolder();
+  if (!workspaceRoot) return;
 
   const baseConfig = loadConfig(workspaceRoot);
   const vscodeConfig = vscode.workspace.getConfiguration('minspec');
