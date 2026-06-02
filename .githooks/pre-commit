@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+#
+# Pre-commit gate (DR-029 RCDD hardening).
+#
+# A NEWLY-ADDED Decision Register file must be born `status: proposed`.
+# Acceptance is a separate, human act ("MinSpec: Accept ADR" → a later status
+# flip, a *Modify* commit). A DR therefore cannot be *created* already claiming
+# `accepted` / `deprecated` / `superseded` — that is a self-conferred terminal
+# status with nothing behind it (the exact false-status defect DR-029 addresses,
+# and the asymmetry sibling of issue #112 for specs).
+#
+# Only fires on git-ADD of a DR file; promoting proposed→accepted later is a
+# Modify and is untouched.
+#
+# Bypass (rare retroactive record of an already-decided DR):
+#   ADR_BORN_GATE_OFF=1 git commit ...
+set -euo pipefail
+
+[ "${ADR_BORN_GATE_OFF:-}" = "1" ] && exit 0
+
+fail=0
+while IFS=$'\t' read -r _status path; do
+  case "$path" in
+    docs/decisions/DR-*.md) ;;
+    *) continue ;;
+  esac
+  born=$(git show ":$path" | grep -m1 -E '^status:' | sed -E 's/^status:[[:space:]]*//; s/[[:space:]]*#.*//; s/[[:space:]]*$//')
+  if [ "$born" != "proposed" ] && [ "$born" != "draft" ]; then
+    echo "✖ DR-029 gate: new DR '$path' is born 'status: ${born:-<none>}' — must be 'proposed'." >&2
+    echo "  Acceptance is a separate human act (MinSpec: Accept ADR). Create proposed; accept after review." >&2
+    echo "  Override (rare retroactive record): ADR_BORN_GATE_OFF=1 git commit ..." >&2
+    fail=1
+  fi
+done < <(git diff --cached --name-status --diff-filter=A)
+
+exit $fail
