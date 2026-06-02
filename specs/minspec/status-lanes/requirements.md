@@ -1,7 +1,7 @@
 ---
 id: SPEC-015
 type: requirements
-status: specifying
+status: implementing  # built: lifecycle status lanes shipped (feat #105) + 91 tests pass (lifecycle + spec-tree-provider)
 tier: T2
 product: minspec
 epic: EPIC-003  # SDD Core Methodology
@@ -9,8 +9,8 @@ depends_on: [DR-012]
 phases:
   specify: done
   plan: done
-  tasks: pending
-  implement: pending
+  tasks: done
+  implement: in-progress
 ---
 
 # Status Lanes — lifecycle-named SPECS groups

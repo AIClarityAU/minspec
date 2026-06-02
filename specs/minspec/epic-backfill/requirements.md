@@ -2,7 +2,7 @@
 id: SPEC-011
 type: requirements
 # Editing voids approval (hash in .minspec/approvals.json → stale); re-run "MinSpec: Approve Spec". DR-012
-status: specifying
+status: implementing  # built: epic-backfill.ts (476 lines, both engines) + 15 tests pass; command minspec.backfillEpics wired
 product: minspec
 epic: EPIC-001  # Explorer Epic Grouping
 ---
