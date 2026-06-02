@@ -6,7 +6,7 @@
 
 > 🚧 **Under construction — pre-release.** APIs, specs, and layout change daily; nothing here is published to the VS Code Marketplace or Open VSX, and there are no stability guarantees. Star/watch to follow along — don't depend on it yet.
 >
-> **ScroogeLLM source is not in this repo.** It's built in a separate private repository ([DR-027](docs/decisions/DR-027.md)); only its public spec ([`specs/scroogellm/`](specs/scroogellm)) lives here. This monorepo hosts **MinSpec** (open), the shared classifier, and the extension-pack manifest.
+> **ScroogeLLM is not in this repo.** Its source, spec, design, and research live in a separate private repository ([DR-027](docs/decisions/DR-027.md)). This monorepo hosts **MinSpec** (open), the shared classifier, and the extension-pack manifest.
 
 Monorepo for the open **MinSpec** VS Code extension, the shared classifier engine, and the MinSpec Pro extension-pack manifest.
 
@@ -16,7 +16,7 @@ Monorepo for the open **MinSpec** VS Code extension, the shared classifier engin
 | [`packages/shared`](packages/shared) | `@aiclarity/shared` | — | Shared classifier |
 | [`packages/extension-pack`](packages/extension-pack) | `aiclarity.minspec-pro` | — | Manifest only — refs ScroogeLLM by marketplace ID |
 
-> **ScroogeLLM** (`aiclarity.scroogellm`, [scroogellm.com](https://scroogellm.com)) — proxy source is private (see banner above). Public spec: [`specs/scroogellm/`](specs/scroogellm).
+> **ScroogeLLM** (`aiclarity.scroogellm`, [scroogellm.com](https://scroogellm.com)) — developed in a private repo (see banner above). The pack references it by marketplace ID once published.
 
 ## What is this?
 
