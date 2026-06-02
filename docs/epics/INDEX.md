@@ -31,7 +31,7 @@ _Bodies of work grouping specs, decisions, and issues. One entry per epic._
 
 *Status: active · slug: `agent-execute` · order: 7*
 
-## [EPIC-008 — ScroogeLLM Proxy](EPIC-008-scroogellm.md)
+## [EPIC-008 — ScroogeLLM Proxy — moved to private repo (DR-027)](EPIC-008-scroogellm.md)
 
 *Status: active · slug: `scroogellm` · order: 8*
 <!-- minspec:epic-index:end -->
