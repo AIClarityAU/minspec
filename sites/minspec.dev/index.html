@@ -576,6 +576,13 @@
 
     .methodology-intro strong { color: var(--text); font-weight: 600; }
     .methodology-intro .accent { color: var(--accent-bright); font-weight: 600; }
+    .methodology-intro a {
+      color: var(--accent-bright);
+      text-decoration: none;
+      border-bottom: 1px solid var(--accent-dim);
+      transition: border-color 0.2s;
+    }
+    .methodology-intro a:hover { border-bottom-color: var(--accent-bright); }
 
     .arch-diagram {
       background: var(--bg-card);
@@ -604,6 +611,19 @@
       border-radius: 8px;
       background: var(--bg-card);
       border: 1px solid var(--border);
+    }
+
+    a.methodology-pill {
+      display: block;
+      color: inherit;
+      text-decoration: none;
+      transition: border-color 0.2s, transform 0.2s, box-shadow 0.2s;
+    }
+
+    a.methodology-pill:hover {
+      border-color: var(--accent-dim);
+      transform: translateY(-2px);
+      box-shadow: 0 0 20px var(--accent-glow);
     }
 
     .methodology-pill-header {
@@ -1191,9 +1211,9 @@
         </div>
       </div>
       <p class="methodology-intro">
-        MinSpec is built on <span class="accent">Spec-Driven Development</span> as the spine, with a thin layer of
-        <span class="accent">Contract-Driven Development</span> for testing discipline. A handful of
-        accepted best practices — ADR, WSJF, GTD-style session scoping — get borrowed where they pay rent.
+        MinSpec is built on <a class="accent" href="https://github.com/github/spec-kit" target="_blank" rel="noopener">Spec-Driven Development</a> as the spine, with a thin layer of
+        <a class="accent" href="https://docs.specmatic.io/contract_driven_development" target="_blank" rel="noopener">Contract-Driven Development</a> for testing discipline. A handful of
+        accepted best practices — <a href="https://adr.github.io/" target="_blank" rel="noopener">ADR</a>, <a href="https://scaledagileframework.com/wsjf/" target="_blank" rel="noopener">WSJF</a>, <a href="https://gettingthingsdone.com/" target="_blank" rel="noopener">GTD-style session scoping</a> — get borrowed where they pay rent.
         Nothing exotic. No new framework to learn.
       </p>
 
@@ -1202,46 +1222,46 @@
       </div>
 
       <div class="methodology-pills">
-        <div class="methodology-pill">
+        <a class="methodology-pill" href="https://github.com/github/spec-kit" target="_blank" rel="noopener">
           <div class="methodology-pill-header"><h4>SDD</h4><span class="weight">~70%</span></div>
           <p>The spine. Constitution → Specify → Clarify → Plan → Tasks → Analyze → Implement.</p>
           <span class="source">Source: GitHub Spec Kit (canonical SDD)</span>
-        </div>
+        </a>
         <div class="methodology-pill">
           <div class="methodology-pill-header"><h4>Tier Classifier</h4><span class="weight">MinSpec</span></div>
           <p>T1–T4 complexity scoring decides which phases run. The differentiator no other SDD tool has.</p>
           <span class="source">Source: MinSpec's own invention</span>
         </div>
-        <div class="methodology-pill">
+        <a class="methodology-pill" href="https://docs.specmatic.io/contract_driven_development" target="_blank" rel="noopener">
           <div class="methodology-pill-header"><h4>CDD</h4><span class="weight">~15%</span></div>
           <p>Contract-Driven Development layer: T0–T4 test tiers, TypeScript/Zod contracts, file allowlists for agent tasks.</p>
           <span class="source">Source: industry CDD practice</span>
-        </div>
-        <div class="methodology-pill">
-          <div class="methodology-pill-header"><h4>ADR</h4><span class="weight">borrow</span></div>
+        </a>
+        <a class="methodology-pill" href="https://adr.github.io/" target="_blank" rel="noopener">
+          <div class="methodology-pill-header"><h4>ADR</h4></div>
           <p>Architecture Decision Records as <code>DR-NNN.md</code> files. Captures the "why" behind technical choices.</p>
           <span class="source">Source: Michael Nygard, 2011</span>
-        </div>
-        <div class="methodology-pill">
-          <div class="methodology-pill-header"><h4>WSJF</h4><span class="weight">borrow</span></div>
+        </a>
+        <a class="methodology-pill" href="https://scaledagileframework.com/wsjf/" target="_blank" rel="noopener">
+          <div class="methodology-pill-header"><h4>WSJF</h4></div>
           <p>Weighted Shortest Job First scoring for backlog prioritization. Cost of Delay ÷ Job Duration.</p>
           <span class="source">Source: SAFe / Don Reinertsen</span>
-        </div>
-        <div class="methodology-pill">
-          <div class="methodology-pill-header"><h4>GTD-style sessions</h4><span class="weight">borrow</span></div>
+        </a>
+        <a class="methodology-pill" href="https://gettingthingsdone.com/" target="_blank" rel="noopener">
+          <div class="methodology-pill-header"><h4>GTD-style sessions</h4></div>
           <p>Mandatory scope declaration + topic-drift parking lot → GitHub issues. Keeps work focused.</p>
           <span class="source">Source: GTD / focused-work discipline</span>
-        </div>
-        <div class="methodology-pill">
+        </a>
+        <a class="methodology-pill" href="https://github.com/harvest316/minspec/blob/main/docs/decisions/DR-003.md" target="_blank" rel="noopener">
           <div class="methodology-pill-header"><h4>RCDD</h4><span class="weight">MinSpec</span></div>
           <p>Root-Cause-Driven Debugging. Reproduce → Diagnose → Fix → Harden. Root cause before fix, regression test before merge.</p>
-          <span class="source">Source: MinSpec's own (<a href="https://github.com/harvest316/minspec/blob/main/docs/decisions/DR-003.md" target="_blank" rel="noopener">DR-003</a>)</span>
-        </div>
-        <div class="methodology-pill">
+          <span class="source">Source: MinSpec's own (DR-003)</span>
+        </a>
+        <a class="methodology-pill" href="https://github.com/harvest316/minspec/blob/main/docs/decisions/DR-004.md" target="_blank" rel="noopener">
           <div class="methodology-pill-header"><h4>Tiered Network Consent</h4><span class="weight">orthogonal</span></div>
           <p>Tier 0 fully offline, Tier 1 delegates to local CLIs, Tier 2 (Pro) opts into network with consent.</p>
-          <span class="source">Source: MinSpec privacy stance (<a href="https://github.com/harvest316/minspec/blob/main/docs/decisions/DR-004.md" target="_blank" rel="noopener">DR-004</a>)</span>
-        </div>
+          <span class="source">Source: MinSpec privacy stance (DR-004)</span>
+        </a>
       </div>
     </div>
   </section>
