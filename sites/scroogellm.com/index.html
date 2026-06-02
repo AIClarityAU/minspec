@@ -785,6 +785,12 @@
       height: auto;
     }
 
+    .arch-tall { display: none; }
+    @media (max-width: 640px) {
+      .arch-wide { display: none; }
+      .arch-tall { display: block; max-width: 360px; }
+    }
+
     /* ── Privacy section ─────────────────────────────── */
     .privacy-grid {
       display: grid;
@@ -1514,7 +1520,7 @@
       </details>
 
       <div class="arch-diagram">
-        <svg id="scrooge-arch" viewBox="0 0 1000 300" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ScroogeLLM architecture: your VS Code or AI tool sends requests to the local ScroogeLLM proxy, which runs a left-to-right pipeline — compress, anonymize, cache, route, log, audit — entirely on your machine (localhost only), then forwards them to remote LLM provider APIs (Anthropic, OpenAI compatible).">
+        <svg id="scrooge-arch" class="arch-wide" viewBox="0 0 1000 300" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ScroogeLLM architecture: your VS Code or AI tool sends requests to the local ScroogeLLM proxy, which runs a left-to-right pipeline — compress, anonymize, cache, route, log, audit — entirely on your machine (localhost only), then forwards them to remote LLM provider APIs (Anthropic, OpenAI compatible).">
 <title>ScroogeLLM request flow</title>
 <defs>
 <marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse">
@@ -1544,6 +1550,27 @@
 <g><circle cx="850" cy="176" r="19" fill="#243357"/><circle cx="872" cy="160" r="25" fill="#243357"/><circle cx="900" cy="166" r="21" fill="#243357"/><circle cx="920" cy="178" r="15" fill="#243357"/><rect x="834" y="172" width="100" height="22" rx="11" fill="#243357"/></g>
 <text x="888" y="230" fill="#a0b4e0" font-size="13" font-weight="600" text-anchor="middle">LLM Provider APIs</text>
 <text x="888" y="248" fill="#6b7280" font-size="10.5" text-anchor="middle">(Anthropic, OpenAI compat)</text>
+</svg>
+        <svg id="scrooge-arch-m" class="arch-tall" viewBox="0 0 360 720" width="100%" xmlns="http://www.w3.org/2000/svg" role="img" aria-label="ScroogeLLM architecture (mobile): your VS Code or AI tool sends requests down through the local ScroogeLLM proxy pipeline — compress, anonymize, cache, route, log, audit — entirely on your machine (localhost only), then out to remote LLM provider APIs (Anthropic, OpenAI compatible).">
+<title>ScroogeLLM request flow</title>
+<defs><marker id="ahd" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="7.5" markerHeight="7.5" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4ade80"/></marker></defs>
+<style>#scrooge-arch-m text{font-family:Inter, ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;}</style>
+<rect x="16" y="8" width="328" height="522" rx="16" fill="none" stroke="#1a3a2a" stroke-width="1.5" stroke-dasharray="6 5"/>
+<text x="180" y="34" fill="#8b9a8b" font-size="12.5" font-weight="600" text-anchor="middle">Your Machine &#8212; localhost only</text>
+<rect x="122" y="50" width="116" height="56" rx="11" fill="#1a1a2e" stroke="#6c9cfc" stroke-width="1.5"/>
+<text x="180" y="73" fill="#a0b4e0" font-size="13" font-weight="600" text-anchor="middle">VS Code</text>
+<text x="180" y="91" fill="#a0b4e0" font-size="11" text-anchor="middle" opacity="0.85">/ AI Tool</text>
+<line x1="180" y1="106" x2="180" y2="125" stroke="#4ade80" stroke-width="1.8" marker-end="url(#ahd)"/>
+<rect x="40" y="132" width="280" height="382" rx="14" fill="#0a1f0a" stroke="#22c55e" stroke-width="2"/>
+<text x="180" y="156" fill="#4ade80" font-size="14" font-weight="700" text-anchor="middle" letter-spacing="0.3">ScroogeLLM Proxy</text>
+<rect x="85" y="168" width="190" height="38" rx="9" fill="#132613" stroke="#22c55e" stroke-width="1.5"/><text x="180" y="187" fill="#4ade80" font-size="13" text-anchor="middle" dominant-baseline="central">compress</text><rect x="85" y="226" width="190" height="38" rx="9" fill="#132613" stroke="#22c55e" stroke-width="1.5"/><text x="180" y="245" fill="#4ade80" font-size="13" text-anchor="middle" dominant-baseline="central">anonymize</text><rect x="85" y="284" width="190" height="38" rx="9" fill="#132613" stroke="#22c55e" stroke-width="1.5"/><text x="180" y="303" fill="#4ade80" font-size="13" text-anchor="middle" dominant-baseline="central">cache</text><rect x="85" y="342" width="190" height="38" rx="9" fill="#132613" stroke="#22c55e" stroke-width="1.5"/><text x="180" y="361" fill="#4ade80" font-size="13" text-anchor="middle" dominant-baseline="central">route</text><rect x="85" y="400" width="190" height="38" rx="9" fill="#132613" stroke="#22c55e" stroke-width="1.5"/><text x="180" y="419" fill="#4ade80" font-size="13" text-anchor="middle" dominant-baseline="central">log</text><rect x="85" y="458" width="190" height="38" rx="9" fill="#132613" stroke="#22c55e" stroke-width="1.5"/><text x="180" y="477" fill="#4ade80" font-size="13" text-anchor="middle" dominant-baseline="central">audit</text>
+<line x1="180" y1="206" x2="180" y2="219" stroke="#4ade80" stroke-width="1.8" marker-end="url(#ahd)"/><line x1="180" y1="264" x2="180" y2="277" stroke="#4ade80" stroke-width="1.8" marker-end="url(#ahd)"/><line x1="180" y1="322" x2="180" y2="335" stroke="#4ade80" stroke-width="1.8" marker-end="url(#ahd)"/><line x1="180" y1="380" x2="180" y2="393" stroke="#4ade80" stroke-width="1.8" marker-end="url(#ahd)"/><line x1="180" y1="438" x2="180" y2="451" stroke="#4ade80" stroke-width="1.8" marker-end="url(#ahd)"/>
+<line x1="180" y1="514" x2="180" y2="560" stroke="#4ade80" stroke-width="1.8" marker-end="url(#ahd)"/>
+<g><circle cx="164" cy="592" r="19" fill="#141a2b"/><circle cx="186" cy="576" r="25" fill="#141a2b"/><circle cx="214" cy="582" r="21" fill="#141a2b"/><circle cx="234" cy="594" r="15" fill="#141a2b"/><rect x="148" y="588" width="100" height="22" rx="11" fill="#141a2b"/></g>
+<g><circle cx="154" cy="600" r="19" fill="#1b2440"/><circle cx="176" cy="584" r="25" fill="#1b2440"/><circle cx="204" cy="590" r="21" fill="#1b2440"/><circle cx="224" cy="602" r="15" fill="#1b2440"/><rect x="138" y="596" width="100" height="22" rx="11" fill="#1b2440"/></g>
+<g><circle cx="146" cy="608" r="19" fill="#243357"/><circle cx="168" cy="592" r="25" fill="#243357"/><circle cx="196" cy="598" r="21" fill="#243357"/><circle cx="216" cy="610" r="15" fill="#243357"/><rect x="130" y="604" width="100" height="22" rx="11" fill="#243357"/></g>
+<text x="180" y="658" fill="#a0b4e0" font-size="13.5" font-weight="600" text-anchor="middle">LLM Provider APIs</text>
+<text x="180" y="677" fill="#6b7280" font-size="11" text-anchor="middle">(Anthropic, OpenAI compat)</text>
 </svg>
       </div>
 
