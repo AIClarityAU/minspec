@@ -2,7 +2,7 @@
 id: SPEC-013
 type: requirements
 status: specifying
-tier: T2
+tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology
 depends_on: [DR-020, DR-022, DR-026, DR-028]  # DR-020(+addendum) policy; DR-022 future re-scope; DR-026 offer-not-silent; DR-028 cross-cutting freshness
