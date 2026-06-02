@@ -2,7 +2,7 @@
 id: EPIC-007
 slug: agent-execute
 title: Agent Execute Extension
-status: proposed
+status: active
 order: 7
 ---
 

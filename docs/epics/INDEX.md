@@ -13,15 +13,15 @@ _Bodies of work grouping specs, decisions, and issues. One entry per epic._
 
 ## [EPIC-003 — SDD Core Methodology](EPIC-003-sdd-core.md)
 
-*Status: proposed · slug: `sdd-core` · order: 3*
+*Status: active · slug: `sdd-core` · order: 3*
 
 ## [EPIC-004 — Classifier Validation](EPIC-004-classifier-validation.md)
 
-*Status: proposed · slug: `classifier-validation` · order: 4*
+*Status: active · slug: `classifier-validation` · order: 4*
 
 ## [EPIC-005 — Auto Structure Repair](EPIC-005-structure-repair.md)
 
-*Status: proposed · slug: `structure-repair` · order: 5*
+*Status: active · slug: `structure-repair` · order: 5*
 
 ## [EPIC-006 — Trust, Consent & Supply Chain](EPIC-006-trust-and-supply-chain.md)
 
@@ -29,9 +29,9 @@ _Bodies of work grouping specs, decisions, and issues. One entry per epic._
 
 ## [EPIC-007 — Agent Execute Extension](EPIC-007-agent-execute.md)
 
-*Status: proposed · slug: `agent-execute` · order: 7*
+*Status: active · slug: `agent-execute` · order: 7*
 
 ## [EPIC-008 — ScroogeLLM Proxy](EPIC-008-scroogellm.md)
 
-*Status: proposed · slug: `scroogellm` · order: 8*
+*Status: active · slug: `scroogellm` · order: 8*
 <!-- minspec:epic-index:end -->

@@ -2,7 +2,7 @@
 id: EPIC-004
 slug: classifier-validation
 title: Classifier Validation
-status: proposed
+status: active
 order: 4
 ---
 
