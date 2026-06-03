@@ -51,6 +51,7 @@ const COMMAND_GUIDANCE: Record<SpecKitCommand, CommandGuidance> = {
       '- T1: one sentence\n' +
       '- T2: short paragraph\n' +
       '- T3/T4: thorough but bounded\n\n' +
+      'After the **Requirements** section, add a **`## Costly to Refactor`** section (read-first, placed after Requirements): a ranked list of the expensive-to-reverse commitments — contracts, cross-package boundaries, data-model/API changes — each with a one-line *why-costly* + *what to check*. `"Low — <reason>"` is valid when nothing is hard to undo. Author it last (once the requirements are stable); place it after Requirements.\n\n' +
       'Never violate invariants in `CLAUDE.md` or `.minspec/constitution.md`. Arguments: $ARGUMENTS',
   },
   clarify: {
