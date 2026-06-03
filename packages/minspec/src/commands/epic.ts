@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import { createEpic, writeEpicIndex, setEpicStatus } from '../lib/epic-manager';
 import type { EpicSummary } from '../lib/epic-manager';
-import { resolveTargetFolder } from '../lib/resolve-folder';
+import { resolveTargetFolder, folderForFile } from '../lib/resolve-folder';
 
 /** Tree node carrying the epic this group represents (from EpicGroupNode). */
 interface EpicNodeLike {
@@ -24,7 +24,7 @@ export async function acceptEpicCommand(node?: EpicNodeLike): Promise<void> {
   }
   try {
     setEpicStatus(epic.filePath, 'active');
-    const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    const folder = folderForFile(epic.filePath);
     if (folder) {
       try { writeEpicIndex(folder); } catch { /* index regen best-effort */ }
     }
@@ -93,11 +93,8 @@ export async function createEpicCommand(): Promise<void> {
  * minspec:epic-index markers).
  */
 export async function regenerateEpicIndexCommand(): Promise<void> {
-  const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!folder) {
-    vscode.window.showErrorMessage('MinSpec: No workspace folder open.');
-    return;
-  }
+  const folder = await resolveTargetFolder();
+  if (!folder) return;
   try {
     const result = writeEpicIndex(folder);
     const doc = await vscode.workspace.openTextDocument(result.filePath);

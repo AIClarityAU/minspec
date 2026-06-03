@@ -4,8 +4,8 @@ import { classify, applyCalibration, loadCalibration } from '../lib/classifier';
 import { loadConfig, applyVSCodeOverrides } from '../lib/config';
 import { resolveTargetFolder } from '../lib/resolve-folder';
 
-export async function classifyCommand(): Promise<void> {
-  const workspaceRoot = await resolveTargetFolder();
+export async function classifyCommand(folderArg?: string): Promise<void> {
+  const workspaceRoot = folderArg ?? (await resolveTargetFolder());
   if (!workspaceRoot) return;
 
   const baseConfig = loadConfig(workspaceRoot);

@@ -10,7 +10,7 @@ import {
   type AdrStatus,
 } from '../lib/adr-manager';
 import type { AdrNode } from '../views/adr-tree-provider';
-import { resolveTargetFolder } from '../lib/resolve-folder';
+import { resolveTargetFolder, folderForFile } from '../lib/resolve-folder';
 
 /**
  * Dedup gate shared by both create paths. If an existing in-force ADR has a
@@ -122,7 +122,7 @@ function resolveAdr(
 
   // 2. Command palette — fall back to the ADR open in the active editor.
   const activePath = vscode.window.activeTextEditor?.document.uri.fsPath;
-  const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+  const folder = activePath ? folderForFile(activePath) : undefined;
   if (activePath && folder) {
     const decisionsDir = vscode.workspace
       .getConfiguration('minspec')
@@ -152,8 +152,9 @@ async function applyStatus(
   try {
     setAdrStatus(filePath, status);
 
-    // Keep the Decision Register index in sync with the new status.
-    const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+    // Keep the Decision Register index in sync with the new status (the
+    // register of the folder that contains the changed ADR).
+    const folder = folderForFile(filePath);
     if (folder) {
       const decisionsDir = vscode.workspace
         .getConfiguration('minspec')
@@ -255,11 +256,8 @@ export async function promptAdrOnT4Classification(taskTitle?: string): Promise<b
 
   if (choice !== 'Create ADR') return false;
 
-  const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!folder) {
-    vscode.window.showErrorMessage('MinSpec: No workspace folder open.');
-    return false;
-  }
+  const folder = await resolveTargetFolder();
+  if (!folder) return false;
 
   // Pre-fill title from task if available
   const title = await vscode.window.showInputBox({

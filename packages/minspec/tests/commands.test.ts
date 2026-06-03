@@ -17,6 +17,7 @@ vi.mock('vscode', () => ({
     workspaceFolders: [{ uri: { fsPath: '/tmp/test-workspace' } }],
     getConfiguration: vi.fn(() => ({ get: vi.fn() })),
     openTextDocument: vi.fn(() => Promise.resolve({})),
+    getWorkspaceFolder: vi.fn(),
   },
   commands: {
     executeCommand: vi.fn(),
@@ -188,6 +189,20 @@ describe('commands', () => {
     vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
       get: vi.fn(),
     } as unknown as vscode.WorkspaceConfiguration);
+    // folderForFile() resolves via getWorkspaceFolder — map a file to the
+    // folder that contains it (falls back to the first folder).
+    vi.mocked(vscode.workspace.getWorkspaceFolder).mockImplementation(
+      ((uri: { fsPath?: string }) => {
+        const folders = vscode.workspace.workspaceFolders;
+        if (!folders || folders.length === 0) return undefined;
+        const p = uri?.fsPath ?? '';
+        return (
+          folders.find(
+            (f) => p === f.uri.fsPath || p.startsWith(f.uri.fsPath + '/'),
+          ) ?? folders[0]
+        );
+      }) as unknown as typeof vscode.workspace.getWorkspaceFolder,
+    );
   });
 
   // ─── classifyCommand ──────────────────────────────────────────────────────

@@ -7,6 +7,7 @@ import {
   renderProposalMarkdown,
   type BackfillProposal,
 } from '../lib/epic-backfill';
+import { resolveTargetFolder } from '../lib/resolve-folder';
 
 /**
  * Command: Backfill epics (DR-016 / SPEC-011).
@@ -16,12 +17,9 @@ import {
  * proposal for review (HITL), and only on explicit approval writes epics +
  * frontmatter. Never writes without confirmation.
  */
-export async function backfillEpicsCommand(): Promise<void> {
-  const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!folder) {
-    vscode.window.showErrorMessage('MinSpec: No workspace folder open.');
-    return;
-  }
+export async function backfillEpicsCommand(folderArg?: string): Promise<void> {
+  const folder = folderArg ?? (await resolveTargetFolder());
+  if (!folder) return;
 
   let proposal: BackfillProposal = proposeHeuristic(folder);
 

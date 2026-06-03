@@ -169,8 +169,8 @@ export function activate(context: vscode.ExtensionContext): void {
       adrTreeProvider.refresh();
       backlogTreeProvider.refresh();
     }),
-    vscode.commands.registerCommand('minspec.backfillEpics', async () => {
-      await backfillEpicsCommand();
+    vscode.commands.registerCommand('minspec.backfillEpics', async (folderArg?: string) => {
+      await backfillEpicsCommand(folderArg);
       specTreeProvider.refresh();
       adrTreeProvider.refresh();
       backlogTreeProvider.refresh();
@@ -344,44 +344,29 @@ export function activate(context: vscode.ExtensionContext): void {
   // had .minspec installed before auto-bootstrap shipped — its workspaceState
   // flag prevents the new richer system from double-prompting them on the
   // very first activation after upgrade).
+  // Auto-bootstrap: detect+offer (init / harness drift / unclassified diff /
+  // epic backfill) for EVERY workspace folder, so non-first folders in a
+  // multi-root workspace get their own offers (harvest316/minspec#123). Each
+  // offered command is invoked WITH its folder, so it targets the right one.
+  const bootstrapVsCode: BootstrapVsCode = {
+    isEnabled: () =>
+      vscode.workspace
+        .getConfiguration('minspec')
+        .get<boolean>('autoBootstrap.enabled', true) !== false,
+    showPrompt: (message, actions) =>
+      Promise.resolve(
+        vscode.window.showInformationMessage(message, ...actions),
+      ).then(choice => (typeof choice === 'string' ? choice : undefined)),
+    executeCommand: (commandId, folder) => {
+      const result = vscode.commands.executeCommand(commandId, folder);
+      return result instanceof Promise ? result.then(() => undefined) : undefined;
+    },
+  };
+  for (const folder of vscode.workspace.workspaceFolders ?? []) {
+    void runBootstrap(folder.uri.fsPath, bootstrapVsCode);
+  }
+
   if (workspaceRoot) {
-    const minspecDir = path.join(workspaceRoot, '.minspec');
-    const hasMinspec = fs.existsSync(minspecDir);
-    const hasSeenFirstRun = context.workspaceState.get<boolean>('minspec.firstRun', false);
-
-    if (!hasMinspec && !hasSeenFirstRun) {
-      context.workspaceState.update('minspec.firstRun', true);
-      vscode.window
-        .showInformationMessage(
-          'Welcome to MinSpec! Would you like to initialize SDD for this project?',
-          'Initialize',
-          'Not Now',
-        )
-        .then(choice => {
-          if (choice === 'Initialize') {
-            vscode.commands.executeCommand('minspec.init');
-          }
-        });
-    } else {
-      // Auto-bootstrap: detect+offer system for missing init, harness drift,
-      // and unclassified diffs. Fires on every activation past first-run.
-      const bootstrapVsCode: BootstrapVsCode = {
-        isEnabled: () =>
-          vscode.workspace
-            .getConfiguration('minspec')
-            .get<boolean>('autoBootstrap.enabled', true) !== false,
-        showPrompt: (message, actions) =>
-          Promise.resolve(
-            vscode.window.showInformationMessage(message, ...actions),
-          ).then(choice => (typeof choice === 'string' ? choice : undefined)),
-        executeCommand: (commandId) => {
-          const result = vscode.commands.executeCommand(commandId);
-          return result instanceof Promise ? result.then(() => undefined) : undefined;
-        },
-      };
-      void runBootstrap(workspaceRoot, bootstrapVsCode);
-    }
-
     // Auto-classify on commit — watch .git/HEAD + refs/heads/* if opted in.
     const autoClassifyEnabled = vscode.workspace
       .getConfiguration('minspec')

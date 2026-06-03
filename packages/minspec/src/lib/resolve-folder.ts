@@ -29,3 +29,16 @@ export async function resolveTargetFolder(): Promise<string | undefined> {
   });
   return picked?.uri.fsPath;
 }
+
+/**
+ * Resolve the workspace folder that CONTAINS a specific file. For contextual
+ * operations acting on a known file (status changes, index regens) the target
+ * is the file's own folder — never an interactive pick. Falls back to the first
+ * workspace folder when the file is outside every folder.
+ */
+export function folderForFile(filePath: string): string | undefined {
+  return (
+    vscode.workspace.getWorkspaceFolder(vscode.Uri.file(filePath))?.uri.fsPath ??
+    vscode.workspace.workspaceFolders?.[0]?.uri.fsPath
+  );
+}

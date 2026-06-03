@@ -741,16 +741,21 @@ describe('activate()', () => {
   // First-run experience
   // -------------------------------------------------------------------------
 
-  it('shows first-run prompt when .minspec/ does not exist', () => {
+  it('offers bootstrap setup when a folder is uninitialized', async () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
 
     activate(makeMockContext());
 
-    expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-      'Welcome to MinSpec! Would you like to initialize SDD for this project?',
-      'Initialize',
-      'Not Now',
-    );
+    // The legacy welcome toast was removed; init is now offered by the
+    // per-folder auto-bootstrap loop (harvest316/minspec#123).
+    await vi.waitFor(() => {
+      expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+        expect.stringContaining("isn't initialized"),
+        'Initialize',
+        'Not Now',
+        "Don't ask again",
+      );
+    });
   });
 
   it('does not show first-run prompt when .minspec/ exists', () => {
@@ -776,30 +781,48 @@ describe('activate()', () => {
     );
   });
 
-  it('sets workspaceState flag when showing first-run prompt', () => {
+  it('runs bootstrap for each workspace folder (multi-root)', async () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
-
-    const ctx = makeMockContext();
-    activate(ctx);
-
-    expect(ctx.workspaceState.update).toHaveBeenCalledWith(
-      'minspec.firstRun',
-      true,
-    );
+    const ws = vscode.workspace as { workspaceFolders: unknown };
+    const original = ws.workspaceFolders;
+    ws.workspaceFolders = [
+      { uri: { fsPath: '/tmp/wsA' } },
+      { uri: { fsPath: '/tmp/wsB' } },
+    ];
+    try {
+      activate(makeMockContext());
+      await vi.waitFor(() => {
+        const initOffers = (
+          vscode.window.showInformationMessage as ReturnType<typeof vi.fn>
+        ).mock.calls.filter(
+          (c) =>
+            typeof c[0] === 'string' && c[0].includes("isn't initialized"),
+        );
+        expect(initOffers.length).toBeGreaterThanOrEqual(2);
+      });
+    } finally {
+      ws.workspaceFolders = original;
+    }
   });
 
-  it('executes minspec.init when user clicks Initialize', async () => {
+  it('runs minspec.init for the folder when the user picks Initialize', async () => {
     vi.mocked(fs.existsSync).mockReturnValue(false);
-    vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce(
-      'Initialize' as any,
+    vi.mocked(vscode.window.showInformationMessage).mockImplementation(
+      ((msg: unknown) =>
+        Promise.resolve(
+          typeof msg === 'string' && msg.includes("isn't initialized")
+            ? 'Initialize'
+            : undefined,
+        )) as unknown as typeof vscode.window.showInformationMessage,
     );
 
     activate(makeMockContext());
 
-    // Allow the .then() microtask to resolve
+    // #123: init is invoked WITH the bootstrapped folder.
     await vi.waitFor(() => {
       expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
         'minspec.init',
+        '/tmp/test-workspace',
       );
     });
   });

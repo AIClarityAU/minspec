@@ -245,7 +245,8 @@ describe('auto-bootstrap', () => {
       const { stub, executeCommand } = makeVsCodeStub({ response: 'Initialize' });
       const result = await runBootstrap(tmpDir, stub);
       expect(result.choice).toBe('Initialize');
-      expect(executeCommand).toHaveBeenCalledWith('minspec.init');
+      // #123: the bootstrapped folder is passed so the command targets it.
+      expect(executeCommand).toHaveBeenCalledWith('minspec.init', tmpDir);
     });
 
     it("T0: Not Now does NOT persist any skip preference", async () => {
@@ -319,7 +320,7 @@ describe('auto-bootstrap', () => {
       expect(result.offered).toBe('refresh');
       expect(showPrompt).toHaveBeenCalledTimes(1);
       expect(showPrompt.mock.calls[0]![0]).toMatch(/Harness templates updated/);
-      expect(executeCommand).toHaveBeenCalledWith('minspec.initRefresh');
+      expect(executeCommand).toHaveBeenCalledWith('minspec.initRefresh', tmpDir);
     });
   });
 

@@ -2,8 +2,8 @@ import * as vscode from 'vscode';
 import { scaffold, generateHarnessFiles, refreshHarnessFiles } from '../lib/scaffold';
 import { resolveTargetFolder } from '../lib/resolve-folder';
 
-export async function initCommand(): Promise<void> {
-  const folder = await resolveTargetFolder();
+export async function initCommand(folderArg?: string): Promise<void> {
+  const folder = folderArg ?? (await resolveTargetFolder());
   if (!folder) return;
   scaffold(folder);
   generateHarnessFiles(folder);
@@ -12,8 +12,8 @@ export async function initCommand(): Promise<void> {
   );
 }
 
-export async function initRefreshCommand(): Promise<void> {
-  const folder = await resolveTargetFolder();
+export async function initRefreshCommand(folderArg?: string): Promise<void> {
+  const folder = folderArg ?? (await resolveTargetFolder());
   if (!folder) return;
   refreshHarnessFiles(folder);
   vscode.window.showInformationMessage(

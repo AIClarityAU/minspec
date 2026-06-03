@@ -251,7 +251,7 @@ export interface BootstrapVsCode {
     actions: readonly string[],
   ): Promise<string | undefined>;
   /** Execute a VS Code command id */
-  executeCommand(commandId: string): Promise<void> | void;
+  executeCommand(commandId: string, folder?: string): Promise<void> | void;
 }
 
 /** Identifiers used by the per-prompt skip flags */
@@ -385,7 +385,9 @@ export async function runBootstrap(
     ]);
 
     if (choice === step.primaryAction) {
-      await vscode.executeCommand(step.commandId);
+      // Pass the bootstrapped folder so the command targets THIS folder, not a
+      // re-resolved one (matters in a multi-root workspace).
+      await vscode.executeCommand(step.commandId, rootDir);
     } else if (choice === DONT_ASK) {
       savePreferences(rootDir, { [step.skipPrefKey]: true });
     }
