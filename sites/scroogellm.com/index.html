@@ -151,7 +151,7 @@
       --section-pad: 6rem 1.5rem;
     }
 
-    html { scroll-behavior: smooth; }
+    html { scroll-behavior: smooth; overflow-x: hidden; }
 
     body {
       font-family: var(--font-sans);
@@ -1059,6 +1059,7 @@
 
     .footer-links {
       display: flex;
+      flex-wrap: wrap;
       gap: 1.5rem;
       list-style: none;
     }
