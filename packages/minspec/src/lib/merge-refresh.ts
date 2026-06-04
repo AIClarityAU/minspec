@@ -126,30 +126,37 @@ export function mergeFile(
   const existingSections = parseSections(existing);
   const generatedSections = parseSections(generated);
 
-  // Build lookup maps
-  const existingMap = new Map<string, string>();
+  // Index existing sections by heading as an occurrence-ordered queue.
+  // A plain Map<string,string> would collapse duplicate-named headings and
+  // silently drop one section's body (#153). We retain every occurrence and
+  // consume them positionally instead.
+  const existingByHeading = new Map<string, Section[]>();
   for (const s of existingSections) {
-    existingMap.set(s.heading, s.body);
+    const queue = existingByHeading.get(s.heading);
+    if (queue) {
+      queue.push(s);
+    } else {
+      existingByHeading.set(s.heading, [s]);
+    }
   }
+  // Track which existing sections have been consumed (by reference identity)
+  // so the preserve pass can append everything left over — including extra
+  // duplicate occurrences — verbatim.
+  const consumed = new Set<Section>();
 
-  const generatedMap = new Map<string, string>();
-  for (const s of generatedSections) {
-    generatedMap.set(s.heading, s.body);
-  }
-
-  // Track which existing headings have been processed
-  const processed = new Set<string>();
   const mergedSections: Section[] = [];
   const newHashes: Record<string, string> = {};
 
   // Process sections in the order they appear in the new template
   for (const genSection of generatedSections) {
     const heading = genSection.heading;
-    processed.add(heading);
+    const queue = existingByHeading.get(heading);
+    const existSection = queue && queue.length > 0 ? queue.shift()! : undefined;
 
-    if (existingMap.has(heading)) {
-      // Section exists in both files
-      const existingBody = existingMap.get(heading)!;
+    if (existSection) {
+      // Section exists in both files — consume the first unmatched occurrence.
+      consumed.add(existSection);
+      const existingBody = existSection.body;
       const existingHash = hashSection(existingBody);
       const oldHash = oldHashes[heading];
 
@@ -169,10 +176,17 @@ export function mergeFile(
     }
   }
 
-  // Preserve sections in user file that are not in the template
+  // Preserve every existing section the template did not consume — in original
+  // document order. This covers both user-added sections (heading absent from
+  // template) and surplus occurrences of duplicate-named headings, so no user
+  // content is ever dropped (#153).
   for (const existSection of existingSections) {
-    if (!processed.has(existSection.heading)) {
-      mergedSections.push(existSection);
+    if (consumed.has(existSection)) continue;
+    mergedSections.push(existSection);
+    // Only record a tracking hash if this heading has no hash yet, so the
+    // first occurrence's hash (used for modified-detection) is not clobbered
+    // by a later duplicate.
+    if (!(existSection.heading in newHashes)) {
       newHashes[existSection.heading] = hashSection(existSection.body);
     }
   }

@@ -300,6 +300,89 @@ Content here
       // Since user edited, their version is kept — hash should match user's content
       expect(newHashes['Sec']).toBe(hashSection('User edited content'));
     });
+
+    it('T3 (#153): refresh preserves both bodies of duplicate-named ## sections', () => {
+      // The original generated file had a single "Notes" + "Other" section.
+      const original = `# Project
+
+## Notes
+
+Template notes body.
+
+## Other
+
+Template other content.
+`;
+      // Hashes are stored from that generation, so the merge can tell the user
+      // edited the first "Notes" (it differs from this stored hash).
+      const oldHashes = buildSectionHashes(parseSections(original));
+
+      // User edits the first "Notes" AND adds a SECOND "Notes" section with a
+      // distinct body — two sections now share the heading "Notes".
+      const userFile = `# Project
+
+## Notes
+
+First notes body that the user wrote.
+
+## Other
+
+Template other content.
+
+## Notes
+
+Second notes body — completely different, must not be lost.
+`;
+
+      // Template still only knows about a single "Notes" + "Other".
+      const newTemplate = original;
+
+      // Without the fix, the Map keyed on heading text collapses the two
+      // "Notes" sections and one body is dropped.
+      const { merged } = mergeFile(userFile, newTemplate, oldHashes);
+
+      // BOTH user bodies must survive the refresh.
+      expect(merged).toContain('First notes body that the user wrote.');
+      expect(merged).toContain(
+        'Second notes body — completely different, must not be lost.',
+      );
+
+      // There must still be two "## Notes" headings, not one collapsed section.
+      const notesHeadings = merged.match(/^## Notes$/gm) ?? [];
+      expect(notesHeadings).toHaveLength(2);
+
+      // The unrelated "Other" section is intact.
+      expect(merged).toContain('## Other');
+    });
+
+    it('T3 (#153): user-added duplicate section with no template match is preserved verbatim', () => {
+      // The template knows a single "Log"; the user has appended a SECOND "Log"
+      // section whose body the template can never supply. On refresh, the
+      // surplus occurrence must be preserved verbatim even with no prior hashes.
+      const userFile = `# Project
+
+## Log
+
+Entry one.
+
+## Log
+
+Entry two — user-added duplicate, must survive.
+`;
+      const newTemplate = `# Project
+
+## Log
+
+Fresh template log.
+`;
+
+      const { merged } = mergeFile(userFile, newTemplate, {});
+
+      // The surplus (unmatched) duplicate occurrence must never be dropped.
+      expect(merged).toContain('Entry two — user-added duplicate, must survive.');
+      const logHeadings = merged.match(/^## Log$/gm) ?? [];
+      expect(logHeadings).toHaveLength(2);
+    });
   });
 
   describe('loadHashes() / saveHashes()', () => {
