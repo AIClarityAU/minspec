@@ -218,9 +218,12 @@ export function setupConformanceWatcher(workspaceRoot: string): vscode.Disposabl
   }
 
   const specsDir = config.get<string>('specsDir', 'specs');
+  // Watch the folder we were asked to watch (passed by the caller), not a
+  // re-resolved workspaceFolders[0] — they diverge in a multi-root workspace
+  // and the watcher must match its exportTraceability(workspaceRoot) target (#123).
   const watcher = vscode.workspace.createFileSystemWatcher(
     new vscode.RelativePattern(
-      vscode.workspace.workspaceFolders?.[0] ?? '',
+      workspaceRoot,
       `${specsDir}/**/*.md`,
     ),
   );

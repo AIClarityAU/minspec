@@ -35,10 +35,15 @@ import {
 import { maybeShowNudge, recordInstallTimestamp, exportTraceability, setupConformanceWatcher } from './lib/bridge';
 import { runBootstrap, isWatchedGitPath, type BootstrapVsCode } from './lib/auto-bootstrap';
 import { findActiveSpec, trackActiveSpecEditor } from './lib/active-spec';
+import { resolveTargetFolderNonInteractive } from './lib/resolve-folder';
 
 export function activate(context: vscode.ExtensionContext): void {
   trackActiveSpecEditor(context);
-  const workspaceRoot = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
+  // Activation-time root: the folder containing the active editor (multi-root
+  // safe), else the first folder, else ''. Non-interactive — never prompts at
+  // startup. All file watchers below derive their base from this single value
+  // so the watcher and its consumers always point at the same folder (#123).
+  const workspaceRoot = resolveTargetFolderNonInteractive();
 
   // Active spec panel
   const specPanel = new SpecPanel();
@@ -235,7 +240,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const specsDir = vscode.workspace.getConfiguration('minspec').get<string>('specsDir', 'specs');
   const watcher = vscode.workspace.createFileSystemWatcher(
     new vscode.RelativePattern(
-      vscode.workspace.workspaceFolders?.[0] ?? '',
+      workspaceRoot,
       `${specsDir}/**/*.md`,
     ),
   );
@@ -268,7 +273,7 @@ export function activate(context: vscode.ExtensionContext): void {
   const decisionsDir = vscode.workspace.getConfiguration('minspec').get<string>('decisionsDir', 'docs/decisions');
   const adrWatcher = vscode.workspace.createFileSystemWatcher(
     new vscode.RelativePattern(
-      vscode.workspace.workspaceFolders?.[0] ?? '',
+      workspaceRoot,
       `${decisionsDir}/**/*.md`,
     ),
   );
@@ -301,7 +306,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // Watch traceability.json — refresh CodeLens on changes
   const traceabilityWatcher = vscode.workspace.createFileSystemWatcher(
     new vscode.RelativePattern(
-      vscode.workspace.workspaceFolders?.[0] ?? '',
+      workspaceRoot,
       '.minspec/traceability.json',
     ),
   );
@@ -321,7 +326,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // when the gate hook, CLI, or another window changes approval state.
   const approvalsWatcher = vscode.workspace.createFileSystemWatcher(
     new vscode.RelativePattern(
-      vscode.workspace.workspaceFolders?.[0] ?? '',
+      workspaceRoot,
       '.minspec/approvals.json',
     ),
   );
@@ -374,7 +379,7 @@ export function activate(context: vscode.ExtensionContext): void {
     if (autoClassifyEnabled) {
       const gitWatcher = vscode.workspace.createFileSystemWatcher(
         new vscode.RelativePattern(
-          vscode.workspace.workspaceFolders?.[0] ?? '',
+          workspaceRoot,
           '.git/{HEAD,refs/heads/**}',
         ),
       );

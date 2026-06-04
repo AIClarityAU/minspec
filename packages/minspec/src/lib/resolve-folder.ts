@@ -31,6 +31,34 @@ export async function resolveTargetFolder(): Promise<string | undefined> {
 }
 
 /**
+ * Non-interactive target-folder resolution for ACTIVATION-time code (the file
+ * watchers and the module-level `workspaceRoot` in `extension.ts`, the
+ * conformance watcher in `bridge.ts`). These run when no user is present, so
+ * they MUST NOT pop a quick-pick — `resolveTargetFolder()` is the wrong tool
+ * here. Resolution order:
+ *   1. the workspace folder containing the active editor's file (multi-root
+ *      safe via longest-prefix match), else
+ *   2. the first workspace folder, else
+ *   3. '' (no folder open — callers already treat '' as "skip"/inert).
+ *
+ * Replaces the bare `workspaceFolders?.[0]` activation sites that silently
+ * targeted the first folder regardless of the active editor
+ * (harvest316/minspec#123).
+ */
+export function resolveTargetFolderNonInteractive(): string {
+  const folders = vscode.workspace.workspaceFolders ?? [];
+  const activeFsPath = vscode.window.activeTextEditor?.document.uri.fsPath;
+  return (
+    pickFolderPath(
+      folders.map(f => f.uri.fsPath),
+      activeFsPath,
+    ) ??
+    folders[0]?.uri.fsPath ??
+    ''
+  );
+}
+
+/**
  * Resolve the workspace folder that CONTAINS a specific file. For contextual
  * operations acting on a known file (status changes, index regens) the target
  * is the file's own folder — never an interactive pick. Falls back to the first
