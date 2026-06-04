@@ -27,6 +27,7 @@ import {
   formatLocationString,
 } from '../lib/traceability';
 import { loadConfig, resolveAndValidate } from '../lib/config';
+import { parseSpec } from '../lib/spec';
 
 // --- CodeLens Provider ---
 
@@ -192,22 +193,103 @@ function findRequirementLine(document: vscode.TextDocument, requirementKey: stri
 // --- Commands ---
 
 /**
+ * Rank a spec phase-file basename so a split-layout spec (requirements/design/
+ * tasks.md sharing one `id`) resolves to its canonical file. Mirrors the ranking
+ * used by spec-tree-provider's listSpecs: requirements.md wins, then spec.md,
+ * then design.md, then anything else. Lower rank = preferred.
+ */
+function specFileRank(name: string): number {
+  return name === 'requirements.md' ? 0
+    : name === 'spec.md' ? 1
+      : name === 'design.md' ? 2
+        : 3;
+}
+
+/**
  * Find spec file path by spec ID within the workspace.
+ *
+ * Real specs live nested as `specs/<product>/<feature>/requirements.md` — the
+ * `id: SPEC-NNN` is in frontmatter, NOT the filename (#150). A flat
+ * `readdirSync` + filename `startsWith(specId)` scan therefore never matched
+ * the nested layout and goToSpec always failed. We now recurse the specs tree
+ * (mirroring spec-tree-provider's `walk`), parse each `.md`'s frontmatter, and
+ * return the file whose `id` equals specId — tie-breaking toward the canonical
+ * requirements.md/spec.md. The old filename `startsWith` match is kept only as a
+ * fallback for genuinely flat layouts (e.g. `SPEC-001.md` at the top level).
  */
 function findSpecFilePath(workspaceRoot: string, specId: string): string | null {
   const config = loadConfig(workspaceRoot);
   const specsDir = resolveAndValidate(workspaceRoot, config.specsDir);
 
-  try {
-    const files = fs.readdirSync(specsDir);
-    for (const file of files) {
-      if (file.startsWith(specId) && file.endsWith('.md')) {
-        return path.join(specsDir, file);
+  // Best frontmatter-id match (authoritative) and best filename match (fallback),
+  // each tracked with its basename rank so split-layout specs collapse to their
+  // canonical file rather than whichever was read first.
+  let bestById: { filePath: string; rank: number } | null = null;
+  let bestByName: { filePath: string; rank: number } | null = null;
+
+  const consider = (
+    slot: 'id' | 'name',
+    filePath: string,
+  ): void => {
+    const rank = specFileRank(path.basename(filePath));
+    if (slot === 'id') {
+      if (!bestById || rank < bestById.rank) bestById = { filePath, rank };
+    } else {
+      if (!bestByName || rank < bestByName.rank) bestByName = { filePath, rank };
+    }
+  };
+
+  const walk = (dir: string): void => {
+    let entries: string[];
+    try {
+      entries = fs.readdirSync(dir);
+    } catch {
+      return; // unreadable / missing directory
+    }
+    for (const entry of entries) {
+      // `entry` may be a string (flat mock) — guard every fs call so a minimal
+      // fs (e.g. a test mock providing only readdirSync) degrades to the
+      // filename fallback below instead of throwing.
+      const name = typeof entry === 'string' ? entry : String(entry);
+      const fullPath = path.join(dir, name);
+
+      let stat: fs.Stats | null = null;
+      try {
+        stat = typeof fs.statSync === 'function' ? fs.statSync(fullPath) : null;
+      } catch {
+        stat = null;
+      }
+
+      // Filename fallback: a top-level `SPEC-NNN*.md` (flat layout).
+      if (name.startsWith(specId) && name.endsWith('.md')) {
+        consider('name', fullPath);
+      }
+
+      if (stat && stat.isDirectory()) {
+        walk(fullPath);
+        continue;
+      }
+
+      // Treat as a file when stat says so, or when stat is unavailable but the
+      // entry looks like a markdown file (flat mock without statSync).
+      const looksLikeFile = (stat && stat.isFile()) || (!stat && name.endsWith('.md'));
+      if (looksLikeFile && name.endsWith('.md')) {
+        try {
+          const content = fs.readFileSync(fullPath, 'utf-8');
+          const fm = parseSpec(content).frontmatter;
+          if (fm.id === specId) consider('id', fullPath);
+        } catch {
+          // unreadable / unparseable — skip, fallback may still apply
+        }
       }
     }
-  } catch {
-    // Directory doesn't exist
-  }
+  };
+
+  walk(specsDir);
+
+  // Frontmatter id is authoritative; filename match is the fallback.
+  if (bestById) return (bestById as { filePath: string }).filePath;
+  if (bestByName) return (bestByName as { filePath: string }).filePath;
   return null;
 }
 
