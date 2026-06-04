@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { parseSpec, writeSpec, updateSpecFrontmatter, readSpecFile, writeSpecFile } from '../src/lib/spec';
+import { parseSpec, writeSpec, updateSpecFrontmatter, readSpecFile, writeSpecFile, setSpecStatus } from '../src/lib/spec';
 import type { ParsedSpec } from '../src/lib/spec';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -378,5 +378,66 @@ Something important.
     // Body sections use standard ## markdown headings
     expect(written).toContain('## Specify');
     expect(written).toContain('## Tasks');
+  });
+});
+
+describe('setSpecStatus() — surgical status-line rewrite', () => {
+  let tmpDir: string;
+  let filePath: string;
+
+  // Mirrors a real SPEC-016-shaped file: a full-line `#` comment sits directly
+  // above status, plus rich frontmatter that a full re-serialize would mangle.
+  const RICH = `---
+id: SPEC-016
+type: requirements
+# 🔒 Once approved, hash-locked: ANY edit voids approval. DR-012.
+status: specifying
+tier: T3
+depends_on: [DR-029, DR-030]
+---
+
+# Title
+
+## Context
+Body stays put.
+`;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-setstatus-'));
+    filePath = path.join(tmpDir, 'SPEC-016.md');
+    fs.writeFileSync(filePath, RICH);
+  });
+  afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+
+  it('flips only the status line, preserving the lock comment, field order, and body', () => {
+    expect(setSpecStatus(filePath, 'implementing')).toBe('implementing');
+    const after = fs.readFileSync(filePath, 'utf-8');
+    expect(after).toContain('status: implementing');
+    expect(after).not.toContain('status: specifying');
+    // Everything around the status line is byte-preserved.
+    expect(after).toContain('# 🔒 Once approved, hash-locked: ANY edit voids approval. DR-012.');
+    expect(after).toContain('depends_on: [DR-029, DR-030]');
+    expect(after).toContain('## Context\nBody stays put.');
+    // Parser agrees.
+    expect(parseSpec(after).frontmatter.status).toBe('implementing');
+  });
+
+  it('rejects an invalid status (enum gate)', () => {
+    expect(() => setSpecStatus(filePath, 'bogus' as never)).toThrow(/invalid spec status/i);
+    // File untouched on rejection.
+    expect(fs.readFileSync(filePath, 'utf-8')).toBe(RICH);
+  });
+
+  it('adds a status line when none exists', () => {
+    const noStatus = path.join(tmpDir, 'no-status.md');
+    fs.writeFileSync(noStatus, '---\nid: SPEC-099\ntier: T2\n---\n# X\n');
+    setSpecStatus(noStatus, 'implementing');
+    expect(parseSpec(fs.readFileSync(noStatus, 'utf-8')).frontmatter.status).toBe('implementing');
+  });
+
+  it('throws when there is no frontmatter block', () => {
+    const noFm = path.join(tmpDir, 'no-fm.md');
+    fs.writeFileSync(noFm, '# Just a heading\n');
+    expect(() => setSpecStatus(noFm, 'done')).toThrow(/no frontmatter/i);
   });
 });

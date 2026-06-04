@@ -12,6 +12,7 @@ import {
   getApprovalStatus,
   loadApprovals,
 } from '../src/lib/approval';
+import { setSpecStatus, parseSpec } from '../src/lib/spec';
 
 let tmp: string;
 let specPath: string;
@@ -89,5 +90,31 @@ describe('approve / revoke lifecycle', () => {
     fs.mkdirSync(path.join(tmp, '.minspec'), { recursive: true });
     fs.writeFileSync(path.join(tmp, '.minspec', 'approvals.json'), '{ not json');
     expect(loadApprovals(tmp)).toEqual({});
+  });
+});
+
+// Regression (T3) — DR-003 RCDD. Approval must flip the spec's `status:` line to
+// `implementing` AND remain non-stale. The trap: flipping status mutates the file
+// bytes, so the hash MUST be recorded AFTER the flip (flip-then-hash). If the order
+// is reversed, the just-approved spec is instantly stale. This test pins the order.
+describe('approval flips status and stays approved (flip-then-hash ordering)', () => {
+  const SPECIFYING = '---\nid: SPEC-007\nstatus: specifying\ntier: T3\n---\n# Thing\n';
+
+  beforeEach(() => fs.writeFileSync(specPath, SPECIFYING));
+
+  it('flip-then-hash → status implementing AND approval is approved (not stale)', () => {
+    // Replicates approveSpecCommand's order: write status first, then hash.
+    setSpecStatus(specPath, 'implementing');
+    approveSpec(tmp, 'SPEC-007', specPath, 'T3');
+
+    expect(parseSpec(fs.readFileSync(specPath, 'utf-8')).frontmatter.status).toBe('implementing');
+    expect(getApprovalStatus(tmp, 'SPEC-007', specPath)).toBe('approved');
+  });
+
+  it('hash-then-flip is the bug: recording before the flip leaves it stale', () => {
+    // The wrong order — guards against a future refactor reintroducing it.
+    approveSpec(tmp, 'SPEC-007', specPath, 'T3');
+    setSpecStatus(specPath, 'implementing');
+    expect(getApprovalStatus(tmp, 'SPEC-007', specPath)).toBe('stale');
   });
 });

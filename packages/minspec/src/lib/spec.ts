@@ -390,3 +390,32 @@ export function readSpecFile(filePath: string): ParsedSpec {
 export function writeSpecFile(filePath: string, spec: ParsedSpec): void {
   fs.writeFileSync(filePath, writeSpec(spec), 'utf-8');
 }
+
+/**
+ * Surgically rewrite the `status:` line in a spec's frontmatter in place,
+ * adding it if absent. Returns the new status. Throws on invalid status or no
+ * frontmatter block.
+ *
+ * Deliberately a line-level rewrite (mirrors `setEpicStatus`/`setAdrStatus`),
+ * NOT a `writeSpec()` re-serialize: the latter would drop full-line `#` comments
+ * (e.g. the DR-012 hash-lock reminder) and reorder fields. The symmetric
+ * present-value writer specs previously lacked — its absence is why approval
+ * could not keep the lifecycle signpost in sync (DR-003 RCDD; #137).
+ */
+export function setSpecStatus(filePath: string, status: SpecStatus): SpecStatus {
+  if (!(SPEC_STATUSES as readonly string[]).includes(status)) {
+    throw new Error(`Invalid spec status: ${status}`);
+  }
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const fmMatch = content.match(FRONTMATTER_RE);
+  if (!fmMatch) {
+    throw new Error(`No frontmatter block in ${filePath}`);
+  }
+  const yaml = fmMatch[1];
+  const statusLineRe = /^([ \t]*)status[ \t]*:[ \t]*.*$/m;
+  const newYaml = statusLineRe.test(yaml)
+    ? yaml.replace(statusLineRe, `$1status: ${status}`)
+    : `${yaml}\nstatus: ${status}`;
+  fs.writeFileSync(filePath, content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---\n`), 'utf-8');
+  return status;
+}

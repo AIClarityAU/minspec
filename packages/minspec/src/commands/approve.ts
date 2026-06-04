@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { listSpecs, type SpecSummary } from '../views/spec-tree-provider';
-import { readSpecFile } from '../lib/spec';
+import { readSpecFile, setSpecStatus } from '../lib/spec';
 import { loadConfig } from '../lib/config';
 import { validateSpec } from '../lib/spec-validator';
 import { epicRefSet } from '../lib/epic-manager';
@@ -137,8 +137,23 @@ export async function approveSpecCommand(node?: SpecNodeLike): Promise<void> {
   if (confirm !== 'Approve') return;
 
   try {
+    // Flip the lifecycle status to `implementing` BEFORE recording the hash.
+    // Approval binds the spec's bytes; the status write changes them, so it must
+    // happen first — otherwise the hash is recorded over pre-flip bytes and the
+    // just-approved spec is instantly stale (flip-then-hash; DR-003 RCDD). Guard:
+    // only advance from a pre-implementation status — never downgrade done/archived
+    // or re-flip an already-implementing spec being re-approved after an edit.
+    const wasPreImpl =
+      parsed.frontmatter.status === 'new' || parsed.frontmatter.status === 'specifying';
+    if (wasPreImpl) {
+      setSpecStatus(spec.filePath, 'implementing');
+    }
     recordApproval(rootDir, spec.id, spec.filePath, spec.tier);
-    vscode.window.showInformationMessage(`MinSpec: ✓ Approved ${spec.id} for implementation.`);
+    vscode.window.showInformationMessage(
+      wasPreImpl
+        ? `MinSpec: ✓ Approved ${spec.id} for implementation (status → implementing).`
+        : `MinSpec: ✓ Approved ${spec.id} for implementation.`,
+    );
     await vscode.commands.executeCommand('minspec.refreshTree');
   } catch (err) {
     vscode.window.showErrorMessage(

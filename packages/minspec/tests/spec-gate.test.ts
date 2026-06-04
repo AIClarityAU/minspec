@@ -14,14 +14,32 @@ const HOOK = path.resolve(__dirname, '../../../scripts/hooks/spec-gate.sh');
 
 let ws: string;
 
+// Pin the child's environment to a minimal, deterministic set. We deliberately
+// do NOT spread the whole ambient `process.env`: the gate reads env-driven
+// signals (MINSPEC_GATE_OFF, PATH to bash/python3), so inheriting the parent's
+// full env would let any stray/sibling-set variable leak into the gate and make
+// this subprocess-shelling suite order-sensitive (#146). Only PATH/HOME are
+// forwarded so bash + python3 resolve; per-test `env` overrides win on top.
+function gateEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return {
+    PATH: process.env.PATH,
+    HOME: process.env.HOME,
+    LANG: process.env.LANG,
+    ...env,
+  };
+}
+
 function runGate(
   envelope: Record<string, unknown>,
   env: NodeJS.ProcessEnv = {},
 ): { decision: string | null; raw: string } {
+  // cwd is pinned to the per-test temp workspace both on the child process and
+  // in the envelope, so the gate's `os.getcwd()` fallback can never reach the
+  // real repo root (which holds live T3/T4 specs + a shared .minspec/).
   const out = execFileSync('bash', [HOOK], {
     input: JSON.stringify(envelope),
     cwd: ws,
-    env: { ...process.env, ...env },
+    env: gateEnv(env),
     encoding: 'utf-8',
   });
   const raw = out.trim();
