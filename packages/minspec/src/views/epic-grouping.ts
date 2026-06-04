@@ -130,9 +130,13 @@ export function buildEpicGroups<T>(
     // status (e.g. "proposed") is the signal the user needs to act on. Epics WITH
     // members keep the done/total badge unchanged.
     const done = members.filter(isTerminal).length;
-    const badge = !isNoEpic && members.length === 0
+    const baseBadge = !isNoEpic && members.length === 0
       ? (epic?.status ?? 'proposed')
       : `${done}/${members.length}`;
+    // Stub decoration (#85): an epic whose Goal/Artifacts is still empty or only
+    // the template placeholder gets a `(stub)` suffix — advisory, never blocking,
+    // mirroring the `(no epic)` placement. NO_EPIC has no epic doc to be a stub.
+    const badge = !isNoEpic && epic?.isStub ? `${baseBadge} (stub)` : baseBadge;
     const label = isNoEpic ? NO_EPIC : `${epic?.title ?? key} (${key})`;
     nodes.push(new EpicGroupNode(label, members, badge, isNoEpic, epic));
   }
