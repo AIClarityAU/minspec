@@ -11,6 +11,7 @@ import {
 } from '../lib/adr-manager';
 import type { AdrNode } from '../views/adr-tree-provider';
 import { resolveTargetFolder, folderForFile } from '../lib/resolve-folder';
+import { resolveActiveAdrPath } from '../lib/active-adr';
 
 /**
  * Dedup gate shared by both create paths. If an existing in-force ADR has a
@@ -109,6 +110,9 @@ const STATUS_LABELS: Record<AdrStatus, string> = {
  * Tree-view invocations (inline ✓ / right-click) pass an `AdrNode` carrying the
  * decision. Command-palette invocations pass nothing — so fall back to the ADR
  * file open in the active editor, matched against the known decisions by path.
+ * The open-ADR resolution survives markdown preview (Ctrl-Shift-V): a webview
+ * preview is never a TextEditor, so `resolveActiveAdrPath()` falls back to the
+ * last-active ADR editor (see lib/active-adr.ts, harvest316/minspec#110).
  * Returns undefined (after surfacing an error) when neither yields a decision.
  */
 function resolveAdr(
@@ -120,8 +124,9 @@ function resolveAdr(
     return { filePath: fromNode.filePath, status: fromNode.status, id: fromNode.id };
   }
 
-  // 2. Command palette — fall back to the ADR open in the active editor.
-  const activePath = vscode.window.activeTextEditor?.document.uri.fsPath;
+  // 2. Command palette — fall back to the ADR open in the active editor,
+  //    including when it is shown in a markdown preview (Ctrl-Shift-V).
+  const activePath = resolveActiveAdrPath();
   const folder = activePath ? folderForFile(activePath) : undefined;
   if (activePath && folder) {
     const decisionsDir = vscode.workspace
