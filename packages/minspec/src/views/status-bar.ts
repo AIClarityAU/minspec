@@ -5,15 +5,15 @@
  * Click opens the active spec panel (via minspec.status command).
  *
  * Format (from design.md):
- *   $(shield) MinSpec: T2 | Specify -> Plan -> Tasks | 2/5 done
+ *   $(shield) MinSpec: T2 | Specify -> Plan -> Tasks | · 50%
  *
  * Updates on spec transitions, task completions, and spec file changes.
  */
 
 import * as vscode from 'vscode';
 import type { SpecFrontmatter, PhaseStatus } from '../lib/spec';
-import type { Phase } from '../lib/config';
-import { PHASES } from '../lib/config';
+import type { Phase, Tier } from '../lib/config';
+import { PHASES, DEFAULT_CONFIG } from '../lib/config';
 
 /** Lightweight summary passed to the status bar for display */
 export interface StatusBarSpec {
@@ -71,19 +71,33 @@ export function formatPhasePipeline(_phases: Record<Phase, PhaseStatus>): string
 }
 
 /**
- * Compute progress string from phases map.
- * Counts done + skipped phases out of total.
- * Returns format like "2/5 done".
+ * Compute a tier-aware completion percentage from a phases map (#38).
+ *
+ * When `tier` is given, the denominator is the phases that tier *requires*
+ * (DR-362 `phaseProgress` logic, replicated locally) — so a T1 spec reads 100%
+ * once `specify` is done, while a T4 needs all five phases. This is what the
+ * status bar passes. When `tier` is omitted, the denominator is the full
+ * five-phase pipeline (the legacy whole-pipeline semantics, preserved for
+ * non-tier callers). Done + skipped count as completed. Returns the progress
+ * token "· N%" — no redundant " done" suffix (#97).
  */
-export function computeProgress(phases: Record<Phase, PhaseStatus>): string {
+export function computeProgress(
+  phases: Record<Phase, PhaseStatus>,
+  tier?: string,
+): string {
+  const required: readonly Phase[] =
+    tier === undefined
+      ? PHASES
+      : DEFAULT_CONFIG.phaseMappings[tier as Tier]?.requiredPhases ?? ['specify'];
   let completed = 0;
-  for (const phase of PHASES) {
+  for (const phase of required) {
     const status = phases[phase];
     if (status === 'done' || status === 'skipped') {
       completed++;
     }
   }
-  return `${completed}/${PHASES.length} done`;
+  const pct = required.length === 0 ? 0 : Math.round((completed / required.length) * 100);
+  return `· ${pct}%`;
 }
 
 /**
@@ -97,7 +111,7 @@ export function formatStatusBarText(spec: StatusBarSpec | null): string {
   }
 
   const phaseName = spec.currentPhase ? capitalize(spec.currentPhase) : 'Done';
-  const progress = computeProgress(spec.phases);
+  const progress = computeProgress(spec.phases, spec.tier);
   return `$(shield) MinSpec: ${spec.tier} | ${phaseName} | ${progress}`;
 }
 
@@ -132,7 +146,7 @@ export class MinSpecStatusBar {
     this.statusBarItem.tooltip = formatTooltip(spec);
     this.statusBarItem.accessibilityInformation = {
       label: spec
-        ? `MinSpec: ${spec.id}, tier ${spec.tier}, phase ${spec.currentPhase ?? 'done'}, ${computeProgress(spec.phases)}`
+        ? `MinSpec: ${spec.id}, tier ${spec.tier}, phase ${spec.currentPhase ?? 'done'}, ${computeProgress(spec.phases, spec.tier)}`
         : 'MinSpec: No active spec',
     };
     this.statusBarItem.show();
