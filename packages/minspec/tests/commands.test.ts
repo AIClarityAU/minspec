@@ -22,6 +22,9 @@ vi.mock('vscode', () => ({
   commands: {
     executeCommand: vi.fn(),
   },
+  env: {
+    openExternal: vi.fn(),
+  },
   Uri: {
     file: (p: string) => ({ fsPath: p, scheme: 'file' }),
     parse: (s: string) => ({ toString: () => s }),
@@ -100,6 +103,8 @@ vi.mock('../src/lib/parking-lot', () => ({
     }),
   ),
   parkTopic: vi.fn(),
+  commentOnIssue: vi.fn(),
+  getRepoFromRemote: vi.fn(() => Promise.resolve('owner/repo')),
 }));
 
 vi.mock('../src/lib/backlog', () => ({
@@ -140,6 +145,7 @@ import {
 import { generateExampleCommand } from '../src/commands/example';
 import { declareScopeCommand, ensureSession } from '../src/commands/session';
 import { parkCommand } from '../src/commands/park';
+import { commentOnIssue, getRepoFromRemote } from '../src/lib/parking-lot';
 import { scoreWsjfCommand, triageIssueCommand } from '../src/commands/backlog';
 import { scaffold, generateHarnessFiles, refreshHarnessFiles } from '../src/lib/scaffold';
 import {
@@ -1076,6 +1082,7 @@ describe('commands', () => {
           body: 'Perf concern',
           labels: ['idea', 'inbox'],
         }),
+        { force: false },
       );
       expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
         'MinSpec: Created GitHub issue — https://github.com/harvest316/minspec/issues/42',
@@ -1154,6 +1161,150 @@ describe('commands', () => {
         'No active session',
         ['idea', 'inbox'],
       );
+    });
+
+    // ─── #136: force command bypasses the dedup gate ────────────────────────
+
+    it('force command parks with { force: true } and never offers a choice', async () => {
+      vi.mocked(vscode.window.showInputBox)
+        .mockResolvedValueOnce('Dup topic')  // title
+        .mockResolvedValueOnce('')            // body
+        .mockResolvedValueOnce('idea,inbox'); // labels
+      vi.mocked(loadSession).mockReturnValueOnce(null);
+      vi.mocked(parkTopic).mockResolvedValueOnce({
+        method: 'github',
+        url: 'https://github.com/owner/repo/issues/99',
+      });
+
+      await parkCommand({ force: true });
+
+      // force:true threaded through to parkTopic.
+      expect(parkTopic).toHaveBeenCalledWith(
+        '/tmp/test-workspace',
+        expect.objectContaining({ title: 'Dup topic' }),
+        { force: true },
+      );
+      // No dedup hit possible when forcing → no quick-pick.
+      expect(vscode.window.showQuickPick).not.toHaveBeenCalled();
+      expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+        'MinSpec: Created GitHub issue — https://github.com/owner/repo/issues/99',
+      );
+    });
+
+    // ─── #136: dedup-hit choice UX (open / comment / force) ─────────────────
+
+    it('dedup hit, choice = open existing → opens the issue in the browser', async () => {
+      vi.mocked(vscode.window.showInputBox)
+        .mockResolvedValueOnce('Existing topic')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('idea,inbox');
+      vi.mocked(loadSession).mockReturnValueOnce(null);
+      vi.mocked(parkTopic).mockResolvedValueOnce({
+        method: 'github',
+        url: 'https://github.com/owner/repo/issues/7',
+        deduped: true,
+      });
+      // User picks "open existing".
+      vi.mocked(vscode.window.showQuickPick).mockResolvedValueOnce({
+        action: 'open',
+      } as never);
+
+      await parkCommand();
+
+      expect(vscode.window.showQuickPick).toHaveBeenCalled();
+      expect(vscode.env.openExternal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          toString: expect.any(Function),
+        }),
+      );
+      // open path must NOT force-create a second issue.
+      expect(parkTopic).toHaveBeenCalledTimes(1);
+      expect(commentOnIssue).not.toHaveBeenCalled();
+    });
+
+    it('dedup hit, choice = comment → comments on the existing issue', async () => {
+      vi.mocked(vscode.window.showInputBox)
+        .mockResolvedValueOnce('Existing topic')
+        .mockResolvedValueOnce('extra note')
+        .mockResolvedValueOnce('idea,inbox');
+      vi.mocked(loadSession).mockReturnValueOnce(null);
+      vi.mocked(parkTopic).mockResolvedValueOnce({
+        method: 'github',
+        url: 'https://github.com/owner/repo/issues/7',
+        deduped: true,
+      });
+      vi.mocked(vscode.window.showQuickPick).mockResolvedValueOnce({
+        action: 'comment',
+      } as never);
+      vi.mocked(commentOnIssue).mockResolvedValueOnce(true);
+
+      await parkCommand();
+
+      expect(commentOnIssue).toHaveBeenCalledWith(
+        'https://github.com/owner/repo/issues/7',
+        expect.any(String),
+        'owner/repo',
+      );
+      // comment path does not force a new issue.
+      expect(parkTopic).toHaveBeenCalledTimes(1);
+    });
+
+    it('dedup hit, choice = force → re-parks with { force: true } and creates new', async () => {
+      vi.mocked(vscode.window.showInputBox)
+        .mockResolvedValueOnce('Existing topic')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('idea,inbox');
+      vi.mocked(loadSession).mockReturnValue(null);
+      vi.mocked(parkTopic)
+        // First park: dedup hit.
+        .mockResolvedValueOnce({
+          method: 'github',
+          url: 'https://github.com/owner/repo/issues/7',
+          deduped: true,
+        })
+        // Second park (forced): brand-new issue.
+        .mockResolvedValueOnce({
+          method: 'github',
+          url: 'https://github.com/owner/repo/issues/8',
+        });
+      vi.mocked(vscode.window.showQuickPick).mockResolvedValueOnce({
+        action: 'force',
+      } as never);
+
+      await parkCommand();
+
+      // Two parkTopic calls: the initial one, then the forced re-park.
+      expect(parkTopic).toHaveBeenCalledTimes(2);
+      expect(parkTopic).toHaveBeenLastCalledWith(
+        '/tmp/test-workspace',
+        expect.objectContaining({ title: 'Existing topic' }),
+        { force: true },
+      );
+      expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+        'MinSpec: Created GitHub issue — https://github.com/owner/repo/issues/8',
+      );
+    });
+
+    it('dedup hit, choice cancelled → no open, no comment, no force', async () => {
+      vi.mocked(vscode.window.showInputBox)
+        .mockResolvedValueOnce('Existing topic')
+        .mockResolvedValueOnce('')
+        .mockResolvedValueOnce('idea,inbox');
+      vi.mocked(loadSession).mockReturnValueOnce(null);
+      vi.mocked(parkTopic).mockResolvedValueOnce({
+        method: 'github',
+        url: 'https://github.com/owner/repo/issues/7',
+        deduped: true,
+      });
+      vi.mocked(vscode.window.showQuickPick).mockResolvedValueOnce(
+        undefined as never,
+      );
+
+      await parkCommand();
+
+      expect(vscode.env.openExternal).not.toHaveBeenCalled();
+      expect(commentOnIssue).not.toHaveBeenCalled();
+      expect(parkTopic).toHaveBeenCalledTimes(1);
     });
   });
 

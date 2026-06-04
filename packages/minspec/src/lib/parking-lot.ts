@@ -151,6 +151,39 @@ export async function createGitHubIssue(entry: ParkingLotEntry, repo: string): P
 }
 
 /**
+ * Add a comment to an existing GitHub issue via the `gh` CLI.
+ *
+ * Used by the dedup-hit "comment on existing" choice (issue #136): rather than
+ * silently reusing or creating a duplicate, the user can append the new context
+ * to the issue that already covers the topic.
+ *
+ * `issueUrl` is the full issue URL (gh accepts a URL as the issue selector).
+ * Returns true on success, false on ANY failure — a best-effort comment must
+ * never throw and block the command.
+ */
+export async function commentOnIssue(
+  issueUrl: string,
+  body: string,
+  repo: string,
+): Promise<boolean> {
+  if (!issueUrl || !body) return false;
+  try {
+    await execFileAsync(
+      'gh',
+      [
+        'issue', 'comment', issueUrl,
+        '--repo', repo,
+        '--body', body,
+      ],
+      { timeout: 15000, env: { ...process.env } },
+    );
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Append an entry to .minspec/parking-lot.md as a fallback
  * when `gh` is unavailable.
  */
@@ -183,10 +216,31 @@ export function appendToParkingLotFile(rootDir: string, entry: ParkingLotEntry):
   return filePath;
 }
 
+/** Options for {@link parkTopic}. */
+export interface ParkOptions {
+  /**
+   * Bypass the dedup gate (issue #136). When true, parkTopic skips the
+   * existing-issue / existing-heading lookup entirely and always creates a new
+   * issue (or appends a new file block) — the "force-create" path behind the
+   * `MinSpec: Park Topic (force)` command and the dedup-hit "create new anyway"
+   * choice.
+   */
+  readonly force?: boolean;
+}
+
 /**
  * Park a topic — tries GitHub issue first, falls back to local file.
+ *
+ * By default a dedup gate (issue #24) reuses an existing open issue / heading
+ * whose normalized title matches. Pass `{ force: true }` to bypass that gate and
+ * always create (issue #136).
  */
-export async function parkTopic(rootDir: string, entry: ParkingLotEntry): Promise<ParkResult> {
+export async function parkTopic(
+  rootDir: string,
+  entry: ParkingLotEntry,
+  opts: ParkOptions = {},
+): Promise<ParkResult> {
+  const force = opts.force === true;
   const ghAvail = await isGhAvailable();
 
   if (ghAvail) {
@@ -194,9 +248,12 @@ export async function parkTopic(rootDir: string, entry: ParkingLotEntry): Promis
     if (repo) {
       // Dedup gate: reuse an existing open issue with a matching normalized
       // title instead of creating a near-identical duplicate (issue #24).
-      const existing = await findExistingIssue(entry, repo);
-      if (existing) {
-        return { method: 'github', url: existing, deduped: true };
+      // Skipped entirely when forcing (issue #136).
+      if (!force) {
+        const existing = await findExistingIssue(entry, repo);
+        if (existing) {
+          return { method: 'github', url: existing, deduped: true };
+        }
       }
 
       const url = await createGitHubIssue(entry, repo);
@@ -207,9 +264,9 @@ export async function parkTopic(rootDir: string, entry: ParkingLotEntry): Promis
   }
 
   // Fallback to local file. Dedup gate: skip re-appending a topic whose heading
-  // already exists in parking-lot.md (issue #24).
+  // already exists in parking-lot.md (issue #24). Skipped when forcing (#136).
   const filePath = path.join(rootDir, '.minspec', 'parking-lot.md');
-  if (fileEntryExists(rootDir, entry)) {
+  if (!force && fileEntryExists(rootDir, entry)) {
     return { method: 'file', filePath, deduped: true };
   }
   return { method: 'file', filePath: appendToParkingLotFile(rootDir, entry) };

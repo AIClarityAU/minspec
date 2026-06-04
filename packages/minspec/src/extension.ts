@@ -201,7 +201,8 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('minspec.linkToSpec', () =>
       linkToSpecCommand(workspaceRoot)),
     vscode.commands.registerCommand('minspec.declareScope', declareScopeCommand),
-    vscode.commands.registerCommand('minspec.park', parkCommand),
+    vscode.commands.registerCommand('minspec.park', () => parkCommand()),
+    vscode.commands.registerCommand('minspec.parkForce', () => parkCommand({ force: true })),
     vscode.commands.registerCommand('minspec.injectContext', () => injectContextCommand(workspaceRoot)),
     vscode.commands.registerCommand('minspec.removeContext', () => removeContextCommand(workspaceRoot)),
     vscode.commands.registerCommand('minspec.generateExample', generateExampleCommand),

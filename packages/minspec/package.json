@@ -94,6 +94,10 @@
         "title": "MinSpec: Park Topic"
       },
       {
+        "command": "minspec.parkForce",
+        "title": "MinSpec: Park Topic (force)"
+      },
+      {
         "command": "minspec.injectContext",
         "title": "MinSpec: Inject Active Spec Context"
       },
