@@ -38,6 +38,7 @@ import {
   setArtifactEpic,
   setEpicStatus,
   readArtifactEpic,
+  detectEpicStub,
   type EpicSummary,
 } from '../src/lib/epic-manager';
 
@@ -296,6 +297,71 @@ describe('epic-manager', () => {
       expect(body).toContain('slug: my-epic');
       expect(body).toContain('status: proposed');
       expect(body).toContain('order: 3');
+    });
+  });
+
+  // ─── stub detection (#85) ───────────────────────────────────────────
+  // Tier-0 soft warning (advisory, never blocking): an epic whose ## Goal or
+  // ## Artifacts section is empty or still only the template placeholder.
+
+  describe('detectEpicStub() / listEpics().isStub', () => {
+    it('flags a freshly-generated epic (placeholder Goal AND Artifacts) as a stub', () => {
+      const body = generateEpicContent('EPIC-001', 'My Epic', 'my-epic', 1);
+      const res = detectEpicStub(body);
+      expect(res.stub).toBe(true);
+      expect(res.reasons).toContain('goal');
+      expect(res.reasons).toContain('artifacts');
+    });
+
+    it('does NOT flag an epic whose Goal AND Artifacts have real prose', () => {
+      const body = [
+        '---', 'id: EPIC-001', 'slug: s', 'title: T', 'status: active', 'order: 1', '---',
+        '', '# EPIC-001: T', '',
+        '## Goal', '', 'Ship the whole billing pipeline end to end.', '',
+        '## Artifacts', '', '- SPEC-001 — billing core', '',
+      ].join('\n');
+      expect(detectEpicStub(body).stub).toBe(false);
+    });
+
+    it('flags when ONLY the Goal is filled but Artifacts is still the placeholder', () => {
+      const body = generateEpicContent('EPIC-002', 'E', 'e', 2, 'A concrete, filled-in goal.');
+      const res = detectEpicStub(body);
+      expect(res.stub).toBe(true);
+      expect(res.reasons).toEqual(['artifacts']); // Goal is filled, Artifacts is not
+    });
+
+    it('treats a whitespace-only section body as a stub', () => {
+      const body = [
+        '---', 'id: EPIC-003', 'slug: s', 'title: T', 'status: proposed', 'order: 3', '---',
+        '', '## Goal', '', '   ', '', '## Artifacts', '', 'real artifact text', '',
+      ].join('\n');
+      const res = detectEpicStub(body);
+      expect(res.stub).toBe(true);
+      expect(res.reasons).toEqual(['goal']);
+    });
+
+    it('treats a missing section entirely as a stub reason', () => {
+      const body = [
+        '---', 'id: EPIC-004', 'slug: s', 'title: T', 'status: proposed', 'order: 4', '---',
+        '', '## Goal', '', 'A real goal lives here.', '',
+        // no ## Artifacts section at all
+      ].join('\n');
+      const res = detectEpicStub(body);
+      expect(res.stub).toBe(true);
+      expect(res.reasons).toContain('artifacts');
+    });
+
+    it('listEpics surfaces isStub per epic (filled vs placeholder)', () => {
+      // EPIC-001: filled both sections → not a stub.
+      epicFile(tmpDir, 'EPIC-001', [
+        '---', 'id: EPIC-001', 'slug: a', 'title: A', 'status: active', 'order: 1', '---',
+        '', '## Goal', '', 'Real goal.', '', '## Artifacts', '', '- SPEC-001', '',
+      ].join('\n'));
+      // EPIC-002: freshly generated → stub.
+      epicFile(tmpDir, 'EPIC-002', generateEpicContent('EPIC-002', 'B', 'b', 2));
+      const byId = new Map(listEpics(tmpDir).map(e => [e.id, e]));
+      expect(byId.get('EPIC-001')!.isStub).toBe(false);
+      expect(byId.get('EPIC-002')!.isStub).toBe(true);
     });
   });
 

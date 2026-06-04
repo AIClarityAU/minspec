@@ -20,6 +20,14 @@ export interface EpicFrontmatter {
 /** Summary for listing/display */
 export interface EpicSummary extends EpicFrontmatter {
   readonly filePath: string;
+  /**
+   * True when the epic doc is still a stub — its `## Goal` or `## Artifacts`
+   * section is empty or holds only the template placeholder (#85). Advisory:
+   * drives a `(stub)` explorer decoration / soft warning, never a hard block.
+   * Optional so hand-built summaries (tests, lightweight callers) need not set
+   * it; `listEpics`/`createEpic` always populate it. Absent/false ⇒ not a stub.
+   */
+  readonly isStub?: boolean;
 }
 
 /** Sentinel group label for artifacts with no/unresolved epic reference. */
@@ -91,6 +99,8 @@ export function listEpics(rootDir: string, vscodeOverrides?: { epicsDir?: string
       const content = fs.readFileSync(filePath, 'utf-8');
       const fmMatch = content.match(FRONTMATTER_RE);
       const idFromFile = entry.match(EPIC_ID_RE)?.[0] ?? entry;
+      // Tier-0 stub check from the epic body (#85): empty/placeholder sections.
+      const isStub = detectEpicStub(content).stub;
 
       if (!fmMatch) {
         // No frontmatter — derive minimal summary from the filename.
@@ -101,6 +111,7 @@ export function listEpics(rootDir: string, vscodeOverrides?: { epicsDir?: string
           status: 'proposed',
           order: 999,
           filePath,
+          isStub,
         });
         continue;
       }
@@ -115,6 +126,7 @@ export function listEpics(rootDir: string, vscodeOverrides?: { epicsDir?: string
         status: EPIC_STATUSES.has(fm.status) ? (fm.status as EpicStatus) : 'proposed',
         order: Number.isFinite(parsedOrder) ? parsedOrder : 999,
         filePath,
+        isStub,
       });
     } catch {
       // Skip unreadable files
@@ -308,8 +320,37 @@ export function nextEpicId(rootDir: string, vscodeOverrides?: { epicsDir?: strin
   return formatEpicId(nextEpicNumber(resolveEpicsDir(rootDir, vscodeOverrides)));
 }
 
-/** Generate a new epic markdown file from template. */
-export function generateEpicContent(id: string, title: string, slug: string, order: number): string {
+/**
+ * The template placeholder comment for an unfilled `## Goal` section. Exported so
+ * stub detection (#85) can recognize an epic body left at its birth state — the
+ * Goal is "filled" exactly when its body is neither empty nor this comment.
+ */
+export const GOAL_PLACEHOLDER =
+  '<!-- What body of work does this epic group? What does "done" look like? -->';
+
+/** Build the `## Artifacts` placeholder comment for a given id/slug. */
+function artifactsPlaceholder(id: string, slug: string): string {
+  return [
+    `<!-- Specs/ADRs reference this epic via \`epic: ${id}\` (or \`epic: ${slug}\`) frontmatter.`,
+    `     Issues via the GitHub label \`epic:${slug}\`. -->`,
+  ].join('\n');
+}
+
+/**
+ * Generate a new epic markdown file from template.
+ *
+ * When `goal` is a non-empty string it becomes the `## Goal` body verbatim
+ * (so a backfill proposal's rationale survives — #79). Otherwise the section is
+ * seeded with the template placeholder comment for the author to fill in.
+ */
+export function generateEpicContent(
+  id: string,
+  title: string,
+  slug: string,
+  order: number,
+  goal?: string,
+): string {
+  const goalBody = goal && goal.trim() !== '' ? goal.trim() : GOAL_PLACEHOLDER;
   return [
     '---',
     `id: ${id}`,
@@ -323,19 +364,20 @@ export function generateEpicContent(id: string, title: string, slug: string, ord
     '',
     '## Goal',
     '',
-    '<!-- What body of work does this epic group? What does "done" look like? -->',
+    goalBody,
     '',
     '## Artifacts',
     '',
-    `<!-- Specs/ADRs reference this epic via \`epic: ${id}\` (or \`epic: ${slug}\`) frontmatter.`,
-    `     Issues via the GitHub label \`epic:${slug}\`. -->`,
+    artifactsPlaceholder(id, slug),
     '',
   ].join('\n');
 }
 
 /**
  * Create a new epic file with an auto-generated sequential id. The `order`
- * defaults to the new epic's number so freshly-created epics sort last.
+ * defaults to the new epic's number so freshly-created epics sort last. When
+ * `goal` is given it is written into the `## Goal` section (backfill threads the
+ * proposal rationale here — #79); otherwise the placeholder comment is used.
  * Returns the created summary.
  */
 export function createEpic(
@@ -343,6 +385,7 @@ export function createEpic(
   title: string,
   slug?: string,
   vscodeOverrides?: { epicsDir?: string },
+  goal?: string,
 ): EpicSummary {
   const epicsDir = resolveEpicsDir(rootDir, vscodeOverrides);
   fs.mkdirSync(epicsDir, { recursive: true });
@@ -353,8 +396,64 @@ export function createEpic(
   const fileName = `${id}-${resolvedSlug}.md`;
   const filePath = path.join(epicsDir, fileName);
 
-  fs.writeFileSync(filePath, generateEpicContent(id, title, resolvedSlug, num), 'utf-8');
-  return { id, slug: resolvedSlug, title, status: 'proposed', order: num, filePath };
+  const content = generateEpicContent(id, title, resolvedSlug, num, goal);
+  fs.writeFileSync(filePath, content, 'utf-8');
+  return {
+    id, slug: resolvedSlug, title, status: 'proposed', order: num, filePath,
+    isStub: detectEpicStub(content).stub,
+  };
+}
+
+// ─── Stub detection (#85) ─────────────────────────────────────────────────────
+
+/** A section of an epic body the stub check inspects. */
+export type EpicStubReason = 'goal' | 'artifacts';
+
+/** Result of the Tier-0 stub check on an epic body. */
+export interface EpicStubResult {
+  /** True when at least one inspected section is empty/placeholder-only. */
+  readonly stub: boolean;
+  /** Which sections are unfilled (`goal` and/or `artifacts`), in section order. */
+  readonly reasons: EpicStubReason[];
+}
+
+/**
+ * Extract the raw body of a `## <heading>` section: everything between that
+ * heading and the next `## ` (or EOF). Returns null when the heading is absent.
+ * Heading match is case-insensitive and tolerant of trailing whitespace.
+ */
+function extractSection(body: string, heading: string): string | null {
+  const startRe = new RegExp(`^##[ \\t]+${escapeRegex(heading)}[ \\t]*$`, 'mi');
+  const m = startRe.exec(body);
+  if (!m) return null;
+  const after = body.slice(m.index + m[0].length);
+  const nextHeading = after.search(/^##[ \t]/m);
+  return nextHeading === -1 ? after : after.slice(0, nextHeading);
+}
+
+/**
+ * Whether a section body counts as "unfilled" — empty/whitespace-only, or it
+ * consists solely of HTML comment(s) (the template placeholder). Any real prose
+ * outside a comment makes it filled. Tier 0, purely structural — no AI.
+ */
+function isSectionUnfilled(sectionBody: string | null): boolean {
+  if (sectionBody === null) return true;              // section missing entirely
+  const stripped = sectionBody.replace(/<!--[\s\S]*?-->/g, '').trim();
+  return stripped === '';                              // only comments/whitespace left
+}
+
+/**
+ * Tier-0 soft check (#85): is this epic body still a stub — i.e. its `## Goal`
+ * or `## Artifacts` section empty or holding only the template placeholder?
+ *
+ * Advisory only (the caller surfaces a WARNING / `(stub)` decoration; it never
+ * blocks — only DR-012 approval blocks). Accepts the full epic file content.
+ */
+export function detectEpicStub(body: string): EpicStubResult {
+  const reasons: EpicStubReason[] = [];
+  if (isSectionUnfilled(extractSection(body, 'Goal'))) reasons.push('goal');
+  if (isSectionUnfilled(extractSection(body, 'Artifacts'))) reasons.push('artifacts');
+  return { stub: reasons.length > 0, reasons };
 }
 
 // ─── Index ────────────────────────────────────────────────────────────────
