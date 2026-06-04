@@ -63,13 +63,19 @@ describe('T0 Invariants — Status Bar', () => {
     const text = formatStatusBarText(spec);
     expect(text).toContain('T2');
     expect(text).toContain('Plan');
-    expect(text).toMatch(/\d+\/\d+ done/);
+    expect(text).toMatch(/· \d+%/);
   });
 
-  it('Invariant: progress denominator always equals total phase count (5)', () => {
+  it('Invariant: progress never contains the redundant " done" suffix (#97)', () => {
     const spec = makeSpec();
-    const progress = computeProgress(spec.phases);
-    expect(progress).toMatch(/^\d+\/5 done$/);
+    expect(computeProgress(spec.phases, spec.tier)).not.toContain('done');
+    expect(formatStatusBarText(spec)).not.toContain('done');
+  });
+
+  it('Invariant: progress is a tier-aware percentage token "· N%" (#38)', () => {
+    const spec = makeSpec();
+    const progress = computeProgress(spec.phases, spec.tier);
+    expect(progress).toMatch(/^· \d+%$/);
   });
 
   it('Invariant: dispose cleans up the status bar item', () => {
@@ -94,7 +100,9 @@ describe('formatStatusBarText()', () => {
     expect(formatStatusBarText(null)).toBe('$(shield) MinSpec: No active spec');
   });
 
-  it('formats with tier, current phase, and progress', () => {
+  it('formats with tier, current phase, and tier-aware percentage', () => {
+    // T3 requires specify+plan+tasks+implement (4 phases); specify+plan done
+    // (clarify is NOT required at T3, so it does not count) → 2/4 = 50%
     const spec = makeSpec({
       tier: 'T3',
       currentPhase: 'tasks',
@@ -106,10 +114,10 @@ describe('formatStatusBarText()', () => {
         implement: 'pending',
       },
     });
-    expect(formatStatusBarText(spec)).toBe('$(shield) MinSpec: T3 | Tasks | 3/5 done');
+    expect(formatStatusBarText(spec)).toBe('$(shield) MinSpec: T3 | Tasks | · 50%');
   });
 
-  it('shows "Done" when no current phase (all complete)', () => {
+  it('shows "Done" and 100% when no current phase (all complete)', () => {
     const spec = makeSpec({
       currentPhase: null,
       phases: {
@@ -120,10 +128,10 @@ describe('formatStatusBarText()', () => {
         implement: 'done',
       },
     });
-    expect(formatStatusBarText(spec)).toBe('$(shield) MinSpec: T2 | Done | 5/5 done');
+    expect(formatStatusBarText(spec)).toBe('$(shield) MinSpec: T2 | Done | · 100%');
   });
 
-  it('shows T1 with Specify phase', () => {
+  it('shows T1 with Specify phase at 0%', () => {
     const spec = makeSpec({
       tier: 'T1',
       currentPhase: 'specify',
@@ -135,10 +143,11 @@ describe('formatStatusBarText()', () => {
         implement: 'pending',
       },
     });
-    expect(formatStatusBarText(spec)).toBe('$(shield) MinSpec: T1 | Specify | 0/5 done');
+    expect(formatStatusBarText(spec)).toBe('$(shield) MinSpec: T1 | Specify | · 0%');
   });
 
-  it('counts skipped phases as completed in progress', () => {
+  it('counts skipped phases as completed in the percentage', () => {
+    // T2 requires specify+plan (2 phases); specify done, plan in-progress → 50%
     const spec = makeSpec({
       tier: 'T2',
       currentPhase: 'plan',
@@ -150,7 +159,7 @@ describe('formatStatusBarText()', () => {
         implement: 'pending',
       },
     });
-    expect(formatStatusBarText(spec)).toBe('$(shield) MinSpec: T2 | Plan | 2/5 done');
+    expect(formatStatusBarText(spec)).toBe('$(shield) MinSpec: T2 | Plan | · 50%');
   });
 });
 
@@ -166,7 +175,7 @@ describe('formatTooltip()', () => {
 });
 
 describe('computeProgress()', () => {
-  it('returns 0/5 when all pending', () => {
+  it('returns "· 0%" when all required phases pending', () => {
     const phases = {
       specify: 'pending' as const,
       clarify: 'pending' as const,
@@ -174,10 +183,10 @@ describe('computeProgress()', () => {
       tasks: 'pending' as const,
       implement: 'pending' as const,
     };
-    expect(computeProgress(phases)).toBe('0/5 done');
+    expect(computeProgress(phases, 'T4')).toBe('· 0%');
   });
 
-  it('returns 5/5 when all done', () => {
+  it('returns "· 100%" when all phases done (T4 requires all five)', () => {
     const phases = {
       specify: 'done' as const,
       clarify: 'done' as const,
@@ -185,21 +194,46 @@ describe('computeProgress()', () => {
       tasks: 'done' as const,
       implement: 'done' as const,
     };
-    expect(computeProgress(phases)).toBe('5/5 done');
+    expect(computeProgress(phases, 'T4')).toBe('· 100%');
   });
 
-  it('counts mix of done and skipped', () => {
+  it('T1 is 100% as soon as specify is done (tier-aware denominator, #38)', () => {
+    const phases = {
+      specify: 'done' as const,
+      clarify: 'pending' as const,
+      plan: 'pending' as const,
+      tasks: 'pending' as const,
+      implement: 'pending' as const,
+    };
+    // T1 requires only specify, so 1/1 = 100% even though other phases pending
+    expect(computeProgress(phases, 'T1')).toBe('· 100%');
+  });
+
+  it('T2 denominator is specify+plan (not all 5): specify done → 50%', () => {
     const phases = {
       specify: 'done' as const,
       clarify: 'skipped' as const,
-      plan: 'done' as const,
-      tasks: 'in-progress' as const,
+      plan: 'pending' as const,
+      tasks: 'pending' as const,
       implement: 'pending' as const,
     };
-    expect(computeProgress(phases)).toBe('3/5 done');
+    // clarify skipped is ignored (not required at T2); 1 of 2 required → 50%
+    expect(computeProgress(phases, 'T2')).toBe('· 50%');
   });
 
-  it('in-progress does not count as completed', () => {
+  it('counts skipped required phases as completed', () => {
+    const phases = {
+      specify: 'done' as const,
+      clarify: 'skipped' as const,
+      plan: 'skipped' as const,
+      tasks: 'done' as const,
+      implement: 'in-progress' as const,
+    };
+    // T4 requires all 5: specify+clarify+plan+tasks complete, implement not → 4/5 = 80%
+    expect(computeProgress(phases, 'T4')).toBe('· 80%');
+  });
+
+  it('in-progress required phase does not count as completed', () => {
     const phases = {
       specify: 'in-progress' as const,
       clarify: 'pending' as const,
@@ -207,7 +241,29 @@ describe('computeProgress()', () => {
       tasks: 'pending' as const,
       implement: 'pending' as const,
     };
-    expect(computeProgress(phases)).toBe('0/5 done');
+    expect(computeProgress(phases, 'T2')).toBe('· 0%');
+  });
+
+  it('never emits the redundant " done" suffix (#97)', () => {
+    const phases = {
+      specify: 'done' as const,
+      clarify: 'done' as const,
+      plan: 'done' as const,
+      tasks: 'done' as const,
+      implement: 'done' as const,
+    };
+    expect(computeProgress(phases, 'T3')).not.toContain('done');
+  });
+
+  it('unknown tier falls back to a specify-only denominator', () => {
+    const phases = {
+      specify: 'done' as const,
+      clarify: 'pending' as const,
+      plan: 'pending' as const,
+      tasks: 'pending' as const,
+      implement: 'pending' as const,
+    };
+    expect(computeProgress(phases, 'T9')).toBe('· 100%');
   });
 });
 
@@ -318,7 +374,9 @@ describe('MinSpecStatusBar class', () => {
     });
     bar.update(spec);
 
-    expect(mockStatusBarItem.text).toBe('$(shield) MinSpec: T3 | Implement | 4/5 done');
+    // T3 requires specify+plan+tasks+implement; first 3 done, implement
+    // in-progress → 3/4 = 75% (clarify done but not required at T3)
+    expect(mockStatusBarItem.text).toBe('$(shield) MinSpec: T3 | Implement | · 75%');
     expect(mockStatusBarItem.tooltip).toBe('SPEC-007: Add caching layer');
     expect(mockStatusBarItem.show).toHaveBeenCalled();
   });
