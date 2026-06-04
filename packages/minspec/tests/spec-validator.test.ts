@@ -237,10 +237,89 @@ describe('validateSpec — api aspect false-positives (#108)', () => {
   });
 
   it('TWO corroborating ambiguous keywords do detect the api aspect', () => {
-    // request + response together is a genuine API signal even without a strong word.
+    // request + response + route together is a genuine API signal even without a strong word.
     const body = FULL_T3.replace('Build the thing.', 'Define the request and response shapes for the route.');
     const r = validateSpec(parseSpec(spec({ tier: 'T3' }, body)), DEFAULT_CONFIG);
     expect(r.detectedAspects).toContain('api');
+  });
+});
+
+// T3 regression (#153.4): siblings of the shipped #108 fix.
+//  (api) `request` + `response` are the SOFTEST ambiguous keywords — both are everyday
+//        UX/interaction prose ("the user's request", "in response to a click"). The
+//        #108 rule (≥2 ambiguous ⇒ api) let that pair trip `aspect.api.no-schema` on UX
+//        prose with no API at all. The corroboration is tightened so the soft pair needs
+//        a STRUCTURAL ambiguous keyword (route/http) or a strong keyword to corroborate —
+//        request+response alone no longer fires; request+route / response+http still do.
+//  (data) the data aspect had a FLAT keyword list (no strong/ambiguous split, unlike api).
+//        `table`/`query`/`index` are polysemous (markdown table, "query the user",
+//        "index.md"), so a lone one tripped `aspect.data.no-schema`. The same #108
+//        strong/ambiguous split is now applied to data: one ambiguous word alone never
+//        fires; it needs a strong data keyword OR ≥2 ambiguous corroborating.
+describe('validateSpec — api/data over-match on polysemous prose (#153.4)', () => {
+  // ── api: the soft request+response pair ──
+  it('request + response in UX prose (no route/http, no strong) does NOT detect api', () => {
+    const body = FULL_T3.replace(
+      'Build the thing.',
+      "On the user's request, in response to a click, the panel expands.",
+    );
+    const r = validateSpec(parseSpec(spec({ tier: 'T3' }, body)), DEFAULT_CONFIG);
+    expect(r.detectedAspects).not.toContain('api');
+    expect(r.violations.some((v) => v.rule === 'aspect.api.no-schema')).toBe(false);
+  });
+
+  it('request + route (a structural ambiguous keyword) still detects api', () => {
+    const body = FULL_T3.replace('Build the thing.', 'The route handles the incoming request.');
+    const r = validateSpec(parseSpec(spec({ tier: 'T3' }, body)), DEFAULT_CONFIG);
+    expect(r.detectedAspects).toContain('api');
+  });
+
+  it('response + http still detects api', () => {
+    const body = FULL_T3.replace('Build the thing.', 'Return an http response.');
+    const r = validateSpec(parseSpec(spec({ tier: 'T3' }, body)), DEFAULT_CONFIG);
+    expect(r.detectedAspects).toContain('api');
+  });
+
+  it('request + response WITH a strong api keyword still detects api', () => {
+    const body = FULL_T3.replace('Build the thing.', 'The endpoint takes a request and returns a response.');
+    const r = validateSpec(parseSpec(spec({ tier: 'T3' }, body)), DEFAULT_CONFIG);
+    expect(r.detectedAspects).toContain('api');
+  });
+
+  // ── data: polysemous table/query/index ──
+  it('a lone "table" in prose (markdown table) does NOT detect data', () => {
+    const body = FULL_T3.replace('Build the thing.', 'Render the results in a table on the page.');
+    const r = validateSpec(parseSpec(spec({ tier: 'T3' }, body)), DEFAULT_CONFIG);
+    expect(r.detectedAspects, '"table" alone tripped data').not.toContain('data');
+    expect(r.violations.some((v) => v.rule === 'aspect.data.no-schema')).toBe(false);
+  });
+
+  it('a lone "query"/"index" in prose does NOT detect data', () => {
+    for (const word of ['query', 'index']) {
+      const body = FULL_T3.replace('Build the thing.', `We ${word} the user before proceeding.`);
+      const r = validateSpec(parseSpec(spec({ tier: 'T3' }, body)), DEFAULT_CONFIG);
+      expect(r.detectedAspects, `"${word}" alone tripped data`).not.toContain('data');
+    }
+  });
+
+  it('a single STRONG data keyword still detects the data aspect', () => {
+    for (const word of ['schema', 'migration', 'database', 'column', 'entity', 'sql']) {
+      const body = FULL_T3.replace('Build the thing.', `Add a ${word} to the store.`);
+      const r = validateSpec(parseSpec(spec({ tier: 'T3' }, body)), DEFAULT_CONFIG);
+      expect(r.detectedAspects, `"${word}" failed to detect data`).toContain('data');
+    }
+  });
+
+  it('TWO corroborating ambiguous data keywords (table + query) detect the data aspect', () => {
+    const body = FULL_T3.replace('Build the thing.', 'Add an index and a query against the table.');
+    const r = validateSpec(parseSpec(spec({ tier: 'T3' }, body)), DEFAULT_CONFIG);
+    expect(r.detectedAspects).toContain('data');
+  });
+
+  it('a strong data keyword without a schema artifact still ERRORS at T4 (no over-soften)', () => {
+    const body = FULL_T3.replace('Build the thing.', 'Add a database migration for the new column.');
+    const r = validateSpec(parseSpec(spec({ tier: 'T4', aspects: 'data' }, body)), DEFAULT_CONFIG);
+    expect(r.violations.some((v) => v.rule === 'aspect.data.no-schema' && v.severity === 'error')).toBe(true);
   });
 });
 

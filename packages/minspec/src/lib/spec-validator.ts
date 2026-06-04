@@ -47,15 +47,21 @@ export interface ValidationResult {
 
 // ─── Aspect detection ────────────────────────────────────────────────────────
 
-/** Keyword signals per aspect. Word-boundary matched, case-insensitive. */
+/**
+ * Strong keyword signals per aspect — each unambiguous enough that ONE is enough to
+ * detect the aspect. Word-boundary matched, case-insensitive. The `api` and `data`
+ * aspects ALSO carry an ambiguous keyword set (below) handled by a stricter rule;
+ * their entries here are the strong sets only.
+ */
 const ASPECT_KEYWORDS: Record<Aspect, string[]> = {
   ux: ['ui', 'ux', 'screen', 'page', 'component', 'button', 'modal', 'dialog',
     'layout', 'wireframe', 'frontend', 'css', 'view', 'form', 'menu', 'icon'],
   // See `API_AMBIGUOUS_KEYWORDS` below — the api aspect has a stricter rule and
   // its keyword set is split into strong/weak; this entry is the strong set.
   api: ['endpoint', 'api', 'payload', 'graphql', 'webhook', 'rpc', 'restful', 'openapi'],
-  data: ['schema', 'table', 'migration', 'database', 'column', 'entity',
-    'index', 'query', 'sql'],
+  // See `DATA_AMBIGUOUS_KEYWORDS` below — `table`/`query`/`index` are polysemous and
+  // moved to the ambiguous set (#153.4); this entry is the strong, unambiguous set.
+  data: ['schema', 'migration', 'database', 'column', 'entity', 'sql'],
   architecture: ['architecture', 'subsystem', 'service', 'integration',
     'cross-cutting', 'topology', 'pipeline', 'queue', 'broker'],
 };
@@ -64,12 +70,27 @@ const ASPECT_KEYWORDS: Record<Aspect, string[]> = {
  * Ambiguous api keywords (#108). `request`, `response`, `route`, `http` are common
  * English words; bare `rest` (now dropped — `restful` / `rest api` carry the real
  * signal) collided with "the rest". A single ambiguous keyword is NOT enough to flag
- * the api aspect: it needs a strong signal (`ASPECT_KEYWORDS.api`) OR ≥2 ambiguous
- * keywords corroborating each other. This fixes SPEC-015 tripping `aspect.api.no-schema`
- * on the prose "…the rest" while keeping genuine API specs (request+response, a route +
- * payload, "REST API") detected.
+ * the api aspect.
+ *
+ * `request` and `response` are the SOFTEST of these — both are everyday UX/interaction
+ * prose ("the user's request", "in response to a click") — so even *together* they are
+ * not a reliable API signal (#153.4: that pair tripped `aspect.api.no-schema` on UX
+ * prose with no API). The corroboration rule therefore requires the soft pair to be
+ * backed by a STRUCTURAL ambiguous keyword (`route`/`http`) or a strong keyword:
+ * request+response alone no longer fires; request+route / response+http still do, as
+ * does request+response+a-strong-word.
  */
 const API_AMBIGUOUS_KEYWORDS = ['request', 'response', 'route', 'http'] as const;
+/** The STRUCTURAL ambiguous api keywords — concrete enough to corroborate the soft pair. */
+const API_STRUCTURAL_AMBIGUOUS = ['route', 'http'] as const;
+
+/**
+ * Ambiguous data keywords (#153.4, the data sibling of #108). `table` (markdown
+ * table / HTML table), `query` ("query the user"), and `index` ("index.md",
+ * "index into the list") are individually polysemous, so one alone must not flag the
+ * data aspect: it needs a strong data keyword OR ≥2 ambiguous corroborating.
+ */
+const DATA_AMBIGUOUS_KEYWORDS = ['table', 'query', 'index'] as const;
 
 /** Compile a case-insensitive word-boundary regex for a keyword. */
 function wordBoundaryRe(kw: string): RegExp {
@@ -78,23 +99,38 @@ function wordBoundaryRe(kw: string): RegExp {
 
 /**
  * The api aspect's detection rule, separated from the generic any-keyword rule
- * because its keywords are individually ambiguous (#108). Fires when there is at
- * least one strong keyword, OR the phrase "rest api", OR ≥2 distinct ambiguous
- * keywords. One ambiguous keyword alone never fires.
+ * because its keywords are individually ambiguous (#108, #153.4). Fires when there is
+ * at least one strong keyword, OR the phrase "rest api", OR ≥2 distinct ambiguous
+ * keywords WHERE at least one is structural (`route`/`http`) — the soft `request` +
+ * `response` pair alone is not enough. One ambiguous keyword alone never fires.
  */
 function detectsApi(rawLower: string): boolean {
   if (ASPECT_KEYWORDS.api.some((kw) => wordBoundaryRe(kw).test(rawLower))) return true;
   if (/\brest\s+api\b/i.test(rawLower)) return true; // "REST API" as a phrase
   const ambiguousHits = API_AMBIGUOUS_KEYWORDS.filter((kw) => wordBoundaryRe(kw).test(rawLower)).length;
+  if (ambiguousHits < 2) return false;
+  // ≥2 ambiguous, but the soft request+response pair needs a structural anchor.
+  return API_STRUCTURAL_AMBIGUOUS.some((kw) => wordBoundaryRe(kw).test(rawLower));
+}
+
+/**
+ * The data aspect's detection rule (#153.4). Fires when there is at least one strong
+ * data keyword, OR ≥2 distinct ambiguous (`table`/`query`/`index`) keywords. One
+ * ambiguous keyword alone never fires.
+ */
+function detectsData(rawLower: string): boolean {
+  if (ASPECT_KEYWORDS.data.some((kw) => wordBoundaryRe(kw).test(rawLower))) return true;
+  const ambiguousHits = DATA_AMBIGUOUS_KEYWORDS.filter((kw) => wordBoundaryRe(kw).test(rawLower)).length;
   return ambiguousHits >= 2;
 }
 
 function detectAspects(rawLower: string): Aspect[] {
   const found: Aspect[] = [];
   for (const aspect of ASPECTS) {
-    const hit = aspect === 'api'
-      ? detectsApi(rawLower)
-      : ASPECT_KEYWORDS[aspect].some((kw) => wordBoundaryRe(kw).test(rawLower));
+    let hit: boolean;
+    if (aspect === 'api') hit = detectsApi(rawLower);
+    else if (aspect === 'data') hit = detectsData(rawLower);
+    else hit = ASPECT_KEYWORDS[aspect].some((kw) => wordBoundaryRe(kw).test(rawLower));
     if (hit) found.push(aspect);
   }
   return found;
