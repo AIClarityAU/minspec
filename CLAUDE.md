@@ -35,16 +35,13 @@ This project uses Specification-Driven Development. Tasks are classified by comp
 
 ## Commands
 
-```bash
-# Initialize SDD structure
-minspec init
+MinSpec is a **VS Code extension**, not a CLI — run everything from the Command Palette (`Ctrl/Cmd+Shift+P`), typing "MinSpec:". There is no `minspec` shell binary (every package is `bin: null`).
 
-# Refresh harness files (preserves user edits)
-minspec init --refresh
-
-# Classify task complexity
-minspec classify
-```
+| Command Palette | Purpose |
+|---|---|
+| *MinSpec: Initialize SDD Structure* | Scaffold `.minspec/` + harness files. Also offered automatically when you open an un-initialized project (auto-bootstrap). |
+| *MinSpec: Refresh Harness Files* | Re-merge harness templates, preserving your edits (auto-refresh on open). |
+| *MinSpec: Classify Task Complexity* | Classify the current change into a tier (T1–T4). |
 
 ## Project Overview
 
