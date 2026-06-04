@@ -400,7 +400,7 @@ export function validateSpec(
       rule: 'acceptance.missing',
       severity: 'error',
       message: `${tier} spec has no acceptance criteria.`,
-      fixHint: 'Add an "## Acceptance Criteria" section, or a checkbox list in the Specify section, defining done.',
+      fixHint: 'Add an "## Acceptance Criteria" section defining done: a checkbox list where each item is a plain-language outcome tracing to its FR/INV (e.g. "- [ ] **Honest degradation** — incoherent state surfaces \'state unclear\'. (FR-6)"). See the "MinSpec: Generate Example Spec" output for the canonical format. A checkbox list in the Specify section also satisfies this.',
     });
   }
 

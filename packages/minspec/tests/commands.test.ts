@@ -769,6 +769,24 @@ describe('commands', () => {
       );
     });
 
+    it('writes an example with a demonstrated Acceptance Criteria section', async () => {
+      vi.mocked(fs.existsSync).mockReturnValueOnce(false);
+      vi.mocked(vscode.workspace.openTextDocument).mockResolvedValueOnce(
+        {} as vscode.TextDocument,
+      );
+
+      await generateExampleCommand();
+
+      const written = vi.mocked(fs.writeFileSync).mock.calls.at(-1)?.[1] as string;
+      expect(written).toBeTypeOf('string');
+      expect(written).toContain('## Acceptance Criteria');
+      // at least one checkbox demonstrating the format
+      expect(written).toMatch(/- \[[ xX]\]/);
+      // canonical format markers: bold short name + (FR/INV trace)
+      expect(written).toMatch(/- \[ \] \*\*[^*]+\*\* —/);
+      expect(written).toMatch(/\((FR|INV)[^)]*\)/);
+    });
+
     it('prompts to overwrite when example already exists', async () => {
       vi.mocked(fs.existsSync).mockReturnValueOnce(true);
       vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(

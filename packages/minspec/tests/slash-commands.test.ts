@@ -58,6 +58,17 @@ describe('slash-commands', () => {
       const content = buildClaudeShim('plan');
       expect(content.toLowerCase()).toMatch(/invariant|dependency budget/);
     });
+
+    it('instructs Specify to add an Acceptance Criteria section defining done', () => {
+      const content = buildClaudeShim('specify');
+      expect(content).toContain('## Acceptance Criteria');
+      // checkbox + bold-name + plain-outcome + (FR/INV trace) format is described
+      expect(content.toLowerCase()).toMatch(/checkbox list/);
+      expect(content).toMatch(/FR.*INV|FR`\/`INV|`FR`\/`INV`/);
+      expect(content.toLowerCase()).toMatch(/defines? \*?done|defining done|defines done/);
+      // tier-scaled guidance so T1/T2 specs are not bloated
+      expect(content.toLowerCase()).toMatch(/tier-scaled/);
+    });
   });
 
   describe('buildCursorShim()', () => {
