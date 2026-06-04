@@ -11,7 +11,7 @@
  */
 
 import type { ParsedSpec } from './spec';
-import { SPEC_STATUSES, stripInlineComment } from './spec';
+import { SPEC_STATUSES, SPEC_TYPES, stripInlineComment } from './spec';
 import type { Tier, MinspecConfig, Phase } from './config';
 import { TIERS } from './config';
 import { epicRefValue } from './epic-manager';
@@ -208,34 +208,100 @@ function rawFrontmatterField(raw: string, key: string): string | undefined {
 
 const SPEC_STATUS_SET = new Set<string>(SPEC_STATUSES);
 const TIER_SET = new Set<string>(TIERS);
+const SPEC_TYPE_SET = new Set<string>(SPEC_TYPES);
+
+/** Split-layout phase-file kinds (one phase per sibling file) — see SPEC_TYPES. */
+const SPLIT_LAYOUT_TYPES = SPEC_TYPE_SET;
+
+// ─── Symmetric frontmatter primitive (#137) ──────────────────────────────────
+//
+// The recurring DR-003 Phase-4 asymmetry, fixed structurally rather than per
+// field. Each frontmatter field belongs to a *class* with two directions that
+// MUST both be asserted:
+//
+//   closed-set: present ⇒ valid (warn on an unrecognized member, #115)
+//               required ⇒ present (warn when a genuinely-required field is absent)
+//   reference:  present ⇒ resolvable (warn on a dangling ref)
+//               required ⇒ present (warn when a required ref is missing — SPEC-004)
+//
+// Severity is ALWAYS `warning` — never an error. Foreign-but-valid vocabularies
+// (Spec Kit's `draft`) and incremental authoring (a half-written spec) must not be
+// blocked; we only surface that MinSpec does not recognize / cannot resolve a
+// value, or that a value the schema expects is absent.
+//
+// The derived field schema (CLOSED_SET_FIELDS below) is evidence-based, NOT a
+// hardcoded guess. Across the real specs/ corpus (21 files, 2026-06-04):
+//   - id      21/21 present  → required (identity; parser silently defaults to '')
+//   - status  21/21 present  → required (parser silently coerces absent → 'new')
+//   - tier    10/21 present  → NOT required (split-layout files omit it)
+//   - type    single-file specs legitimately omit it (absence IS the single-file
+//             signal) → closed-set but NOT required
+// product has no canonical value-list anywhere in code, so it is intentionally
+// not closed-set-validated (inventing a list would risk false warnings on new
+// products). depends_on has no resolver passed to validateSpec → not validated
+// here. epic keeps its bespoke registry plumbing below (the reference instance).
+
+interface ClosedSetField {
+  /** Frontmatter key. */
+  readonly key: string;
+  /**
+   * Recognized members (post inline-comment-strip). Omit for a presence-only
+   * field whose values are not enumerable (e.g. `id`): any present value passes
+   * the present ⇒ valid direction; only required ⇒ present is meaningful.
+   */
+  readonly valid?: ReadonlySet<string>;
+  /** Members, ordered, for the fix hint. Omit for presence-only fields. */
+  readonly validList?: readonly string[];
+  /** The parser's silent fallback when the value is unrecognized/absent, if any. */
+  readonly coercesTo?: string;
+  /** When true, a missing field warns (required ⇒ present). */
+  readonly required: boolean;
+}
+
+const CLOSED_SET_FIELDS: readonly ClosedSetField[] = [
+  // `id` — identity, presence-only (values not enumerable). Required: 21/21 real
+  // specs carry it; the parser silently defaults a missing one to '' (a spec with
+  // no id is an integrity hole the SPECS pane can't key on). The CI gate in
+  // scripts/validate-frontmatter.ts also blocks it; this is the in-extension warning.
+  { key: 'id', required: true },
+  { key: 'status', valid: SPEC_STATUS_SET, validList: SPEC_STATUSES, coercesTo: 'new', required: true },
+  { key: 'tier', valid: TIER_SET, validList: TIERS, coercesTo: 'T2', required: false },
+  { key: 'type', valid: SPEC_TYPE_SET, validList: SPEC_TYPES, required: false },
+];
 
 /**
- * Assert a PRESENT closed-enum frontmatter value (`status`/`tier`) is a recognized
- * member. The parser coerces any unrecognized value to a hardcoded default
- * ('new'/'T2'), so by the time we hold a `ParsedSpec` the bad value is gone — the
- * SPECS pane would show a FALSE status with no signal (signpost-lie, #115). This
- * gate re-reads the RAW line and WARNS (never errors — a foreign-but-valid
- * vocabulary like Spec Kit's `draft` is legitimate; we only surface that MinSpec
- * does not recognize it) so the silent coercion becomes visible.
+ * Symmetric gate for one closed-set frontmatter field. Asserts BOTH directions
+ * (present ⇒ valid, required ⇒ present) by re-reading the RAW frontmatter line —
+ * the parsed value is lossy after coercion, so the validator must inspect source.
  *
- * Closes the asymmetry flagged in #115 / DR-003 Phase 4: the validator checked
- * dangling/missing epic refs but never asserted a present enum value was valid.
+ * - present-but-unrecognized → `frontmatter.<key>.unknown` (was #115's coercion).
+ *   Surfaces the silent coercion as a warning so the SPECS pane can't show a lie.
+ *   Skipped for presence-only fields (no `valid` set).
+ * - required-but-absent → `frontmatter.<key>.missing`. Closes the half of the
+ *   #115/DR-003 asymmetry that was never built: nothing asserted a present value
+ *   should *exist*. Only fires for `required` fields, so non-required closed-set
+ *   fields (tier/type) stay silent when omitted.
  */
-function checkClosedEnumField(
-  raw: string,
-  key: 'status' | 'tier',
-  valid: ReadonlySet<string>,
-  validList: readonly string[],
-  out: ValidationViolation[],
-): void {
-  const value = rawFrontmatterField(raw, key);
-  if (value === undefined) return; // absent/empty → legitimate default, no lie
-  if (valid.has(value)) return;
+function checkClosedSetField(raw: string, field: ClosedSetField, out: ValidationViolation[]): void {
+  const value = rawFrontmatterField(raw, field.key);
+  if (value === undefined) {
+    if (field.required) {
+      const oneOf = field.validList ? `, one of: ${field.validList.join(', ')}` : '';
+      out.push({
+        rule: `frontmatter.${field.key}.missing`,
+        severity: 'warning',
+        message: `Spec has no ${field.key} — a required field${field.coercesTo ? ` (shown as the default "${field.coercesTo}")` : ''}.`,
+        fixHint: `Add a "${field.key}:" line${oneOf}.${field.coercesTo ? ` (An absent value is silently displayed as the default "${field.coercesTo}", so the SPECS pane would otherwise show a false ${field.key}.)` : ''}`,
+      });
+    }
+    return; // not required, or already reported missing → nothing more to assert
+  }
+  if (!field.valid || field.valid.has(value)) return; // presence-only, or recognized
   out.push({
-    rule: `frontmatter.${key}.unknown`,
+    rule: `frontmatter.${field.key}.unknown`,
     severity: 'warning',
-    message: `Spec ${key} "${value}" is not a recognized ${key} — it is shown as the default "${key === 'status' ? 'new' : 'T2'}".`,
-    fixHint: `Set "${key}:" to one of: ${validList.join(', ')}. (An unrecognized value is silently displayed as the default, so the SPECS pane would otherwise show a false ${key}.)`,
+    message: `Spec ${field.key} "${value}" is not a recognized ${field.key}${field.coercesTo ? ` — it is shown as the default "${field.coercesTo}"` : ''}.`,
+    fixHint: `Set "${field.key}:" to one of: ${(field.validList ?? []).join(', ')}.${field.coercesTo ? ` (An unrecognized value is silently displayed as the default, so the SPECS pane would otherwise show a false ${field.key}.)` : ''}`,
   });
 }
 
@@ -286,13 +352,18 @@ export function validateSpec(
     });
   }
 
-  // 0b. Closed-enum frontmatter (#115). A present-but-unrecognized `status`/`tier`
-  //     is coerced by the parser to a default ('new'/'T2') and shown as if real —
-  //     a signpost-lie with no signal. WARN (never block) so the coercion is
-  //     visible. Symmetric with the epic checks: assert a PRESENT value is valid,
-  //     not merely that a declared value resolves. Absent value = no warning.
-  checkClosedEnumField(raw, 'status', SPEC_STATUS_SET, SPEC_STATUSES, violations);
-  checkClosedEnumField(raw, 'tier', TIER_SET, TIERS, violations);
+  // 0b. Closed-set frontmatter — the symmetric primitive (#137). For each
+  //     closed-set field assert BOTH directions: present ⇒ valid (a
+  //     present-but-unrecognized value is silently coerced by the parser to a
+  //     default and shown as if real — a signpost-lie, #115) AND required ⇒
+  //     present (a missing required field, the half of the asymmetry that
+  //     stranded SPEC-004's epic — see DR-003 Phase 4). WARN, never block:
+  //     foreign-but-valid vocabularies (`draft`) and incremental authoring are
+  //     legitimate. Field set is derived from the schema (CLOSED_SET_FIELDS),
+  //     not scattered literals.
+  for (const field of CLOSED_SET_FIELDS) {
+    checkClosedSetField(raw, field, violations);
+  }
 
   // Split-layout (#93): a spec whose phases are split across sibling files
   // (`type: requirements | design | tasks`, one phase per file) does NOT carry
@@ -301,7 +372,6 @@ export function validateSpec(
   // a single-file spec, so they are skipped for split-layout phase files (the
   // sibling files carry those). Cross-file coverage (do all required phase files
   // exist for the tier?) is a separate, deferred concern.
-  const SPLIT_LAYOUT_TYPES = new Set(['requirements', 'design', 'tasks']);
   const specType = (spec.frontmatter.type ?? '').toLowerCase();
   const isSplitLayout = SPLIT_LAYOUT_TYPES.has(specType);
 
