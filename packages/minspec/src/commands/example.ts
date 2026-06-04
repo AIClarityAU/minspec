@@ -97,6 +97,25 @@ For larger tasks, be thorough but not exhaustive:
 > operational transformation. The feature must work with our existing WebSocket
 > infrastructure and degrade gracefully when offline.
 
+## Acceptance Criteria
+
+Still in Zone A — right after Requirements — list what *done* looks like. This is
+the part reviewers read first, so make every line independently verifiable.
+
+The feature is **done** when all of these hold. Each item is one line: a **bold
+short outcome name**, an em-dash, a plain-language outcome a reader can observe,
+and a parenthetical trace to the requirement (\`FR\`/\`INV\`) it satisfies.
+
+- [ ] **Live cursors** — two users editing the same document each see the other's
+  caret move within 200ms, in a distinct colour. (FR-1)
+- [ ] **Conflict-free merge** — simultaneous edits to the same line converge to the
+  same final text on every client, no lost keystrokes. (FR-2)
+- [ ] **Graceful offline** — a user who loses connection keeps editing locally and
+  their queued edits replay on reconnect, never silently dropped. (FR-3, INV-no-data-loss)
+
+Keep this tier-scaled: a T1/T2 spec might have just one or two boxes; don't pad it
+out. The checkbox list is also what MinSpec reads to know the spec defines *done*.
+
 ## Clarify
 
 The **Clarify** phase is required for T4, optional for T2/T3, and skipped for T1.

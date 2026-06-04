@@ -70,6 +70,18 @@ describe('validateSpec — acceptance criteria', () => {
     const r = validateSpec(parseSpec(spec({ tier: 'T3' }, body)), DEFAULT_CONFIG);
     expect(r.violations.some((v) => v.rule === 'acceptance.missing')).toBe(false);
   });
+
+  it('missing-criteria fixHint points at the canonical FR/INV checkbox format', () => {
+    const body = `## Specify\nprose only no checkboxes\n\n## Plan\np\n\n## Tasks\n- [ ] t\n\n## Implement\ni\n`;
+    const r = validateSpec(parseSpec(spec({ tier: 'T3' }, body)), DEFAULT_CONFIG);
+    const v = r.violations.find((x) => x.rule === 'acceptance.missing');
+    expect(v).toBeDefined();
+    expect(v?.fixHint).toContain('## Acceptance Criteria');
+    // describes a plain-language outcome tracing to its FR/INV
+    expect(v?.fixHint).toMatch(/FR\/INV/);
+    // points the author at the canonical example output (real palette title)
+    expect(v?.fixHint).toContain('MinSpec: Generate Example Spec');
+  });
 });
 
 describe('validateSpec — aspect: ux', () => {

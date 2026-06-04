@@ -52,6 +52,7 @@ const COMMAND_GUIDANCE: Record<SpecKitCommand, CommandGuidance> = {
       '- T2: short paragraph\n' +
       '- T3/T4: thorough but bounded\n\n' +
       'After the **Requirements** section, add a **`## Costly to Refactor`** section (read-first, placed after Requirements): a ranked list of the expensive-to-reverse commitments — contracts, cross-package boundaries, data-model/API changes — each with a one-line *why-costly* + *what to check*. `"Low — <reason>"` is valid when nothing is hard to undo. Author it last (once the requirements are stable); place it after Requirements.\n\n' +
+      'Also in Zone A, after Requirements, add a **`## Acceptance Criteria`** section that defines *done*: a checkbox list where each item is one line — a **bold short outcome name**, an em-dash, a plain-language observable outcome a reader can verify, and a parenthetical trace to the `FR`/`INV` it satisfies (e.g. `- [ ] **Honest degradation** — incoherent state surfaces "state unclear", never a fabricated next step. (FR-6)`). Tier-scaled: a couple of criteria is plenty for T1/T2 — don\'t bloat. See the **MinSpec: Generate Example Spec** output for the canonical format.\n\n' +
       'Never violate invariants in `CLAUDE.md` or `.minspec/constitution.md`. Arguments: $ARGUMENTS',
   },
   clarify: {
