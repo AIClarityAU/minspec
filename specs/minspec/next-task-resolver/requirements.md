@@ -2,7 +2,7 @@
 id: SPEC-012
 type: requirements
 status: specifying
-tier: T3
+tier: T4
 product: minspec
 epic: EPIC-002  # Signpost Integrity
 ---
@@ -242,6 +242,16 @@ are live invariant breaches, not future work.
   (stale epic INDEX; SPEC-004 implementing-under-proposed) become T3 regression
   fixtures.
 
+## Costly to Refactor (Zone A)
+
+Seams where a v1 mistake is expensive to undo later — ranked. Each is FR-anchored.
+
+1. **The frontmatter edge vocabulary (`depends_on` / `supersedes` / `relates_to`, FR-13).** Once authors write these keys across real specs/DRs/epics, the *names, cardinality (lists), and gating semantics* become a corpus-wide contract. Renaming a key or flipping `depends_on` from blocking→advisory means migrating every artifact that adopted it. Get the v1 vocabulary right (OQ3 resolved to ship all three) — adding a *new* edge kind later is cheap; changing an existing one is a corpus migration.
+2. **`MILESTONE-NNN` as a first-class artifact kind (FR-3b).** Introducing a brand-new registered artifact type (id namespace, `status: open|reached`, INDEX participation) is a schema commitment. If temporal deferral were later modelled differently (a date edge, a flag), every `depends_on: [MILESTONE-NNN]` link and every milestone file would have to be rewritten. The "deferral is always a link" decision (FR-3a) is the load-bearing constraint that makes milestones necessary — reversing *that* unwinds FR-3a, FR-3b together.
+3. **The severity-class partial order and its boundaries (FR-2's 4 classes).** Callers (status-bar, explorer, CI — FR-11) and every T0 test (FR-12) encode "gate-violation > blocked-ready > promote-parent > pending". Re-splitting or re-ordering classes invalidates the whole T0 fixture set and any UI that colour-codes by class. The class *count and order* is the stable contract; the `(epic.order, priority, artifact-id)` within-class tie-break (FR-3) is comparatively cheap to retune.
+4. **`packages/shared` pure-function signature (FR-11).** The resolver's `(filesystem+frontmatter state) → next-task` signature is imported by 4 surfaces. Changing its input shape or return type is a cross-package break (DR-014 tier map). The Tier-0 purity constraint (no `vscode`, no network) is the hard wall — admitting either later contaminates every consumer and breaks CI usage.
+5. **"Human queue only" node-source boundary (FR-8, INV — Two Queues).** The set of node kinds the resolver draws from (epic-promote, spec-approve, adr-accept, phase-action) is defined by *exclusion* of the agent/dispatch queue. If an agent-work node kind were ever admitted, the Two-Queues invariant and its tests fall, and the signpost's meaning ("what the human must do") silently changes. The exclusion is structural and should stay structural.
+
 ## Invariants (must hold)
 
 - **INV — Next-task correctness (T0).** The resolver MUST NOT present a next task
@@ -259,6 +269,25 @@ are live invariant breaches, not future work.
 - **INV #5 (user override wins).** Reuses SPEC-010 FR-7 override memory: the human
   may dismiss the current next task ("not this — I'm on X"); the dismissal sticks
   until state changes.
+
+## Acceptance Criteria (Zone A)
+
+Definition-of-done — each item traces FR(s) and is the concrete check that the
+requirement is met. The resolver ships only when every box is tickable.
+
+- [ ] **(FR-1, INV-determinism)** Given a fixed fixture tree, the resolver returns the *same* next-task on repeated runs; no LLM/network call is reachable from the resolve path. A test asserts byte-identical output across N runs.
+- [ ] **(FR-2)** A fixture with one node of each severity class yields the next-task drawn from **gate-violation** first; T0 tests cover all four class boundaries and the `(epic.order, priority, artifact-id)` within-class tie-break.
+- [ ] **(FR-5)** The primary output is exactly **one** task object (kind, target id, imperative string, clearing action) — not a list — verified by output shape.
+- [ ] **(FR-6)** The full ranked queue is retrievable on demand and is collapsed/secondary by default.
+- [ ] **(FR-7)** Every emitted next-task carries its derivation (severity class + the gate/rule that produced it, e.g. "implementing-but-unapproved → DR-012"); a deliberately-wrong fixture is diagnosable to the artifact+rule.
+- [ ] **(FR-8, INV — Two Queues)** No agent/dispatch node ever appears in resolver output; a fixture seeded with a dispatch item proves exclusion.
+- [ ] **(FR-8a)** Simulated dev "deviation" (state unchanged) does NOT alter the canonical next-task; only an artifact-state change moves it.
+- [ ] **(FR-9, FR-10)** A child-ahead-of-parent fixture surfaces as the top gate-violation; beyond-FR-9 incoherence (dangling ref / malformed frontmatter) yields "state unclear — <file>", never a fabricated task.
+- [ ] **(FR-13)** `depends_on` / `supersedes` / `relates_to` are parsed from frontmatter; a `depends_on` blocker ranks its dependent below it; an un-cleared blocker that is advanced-past is reported as gate-violation; a dangling edge id is corruption (FR-15), not a silent drop.
+- [ ] **(FR-14)** A top-band tie returns a deterministic-arbitrary pick (lowest `artifact-id`) and can report "N equally-next tasks".
+- [ ] **(FR-15)** Structural corruption (malformed frontmatter, dangling refs, DAG cycle) is detected deterministically; the ladder offers programmatic repair first, LLM escalation only when no deterministic repair applies; both confirm-before-write.
+- [ ] **(FR-11)** A single pure function in `packages/shared` (no `vscode`, no network) is the *only* resolver, imported by status-bar, explorer rollup, and CI/`npm run validate`.
+- [ ] **(FR-12)** Each (state → next-task) mapping has a T0 invariant test; the two triggering-session inconsistencies (stale epic INDEX; SPEC-004 implementing-under-proposed) exist as T3 regression fixtures.
 
 ## Coverage Map (all bases)
 
@@ -294,6 +323,97 @@ are live invariant breaches, not future work.
 | R5 | **Corruption blackout (DoS).** One cycle or malformed file makes the resolver say "unclear" globally → no next task at all, signpost dead. | Med · High | FR-15 localizes the report to the offending edge/file set and offers repair; the rest of the DAG MUST still resolve. A single bad node must not blank the whole signpost. |
 | R6 | **Advisory drifts to de-facto blocking.** Human follows the signpost blindly, mis-ordering real-world priorities the model can't see. | Med · Med | FR-5 advisory + INV #5 override + FR-6 pipeline view (see what's behind the one task). The signpost suggests; the human still decides. |
 | R7 | **Two-queue leak.** Agent/LLM dispatch work surfaces as a human next task (or vice-versa), polluting the signpost. | Low · Med | INV — Two Queues (T0) + dedicated tests; the resolver's node sources exclude the dispatch queue by construction (FR-8). |
+
+## Assumptions
+
+- SPEC-010's per-feature resolver already exposes a consumable `phase-action` node source (FR-4 composes it, does not re-implement); this spec assumes that interface exists or lands alongside it.
+- Artifacts carry parseable YAML frontmatter with `status`, and (where set) `epic`, `epic.order`, `priority`, and the FR-13 edge keys — i.e. the validation gate from `npm run validate` keeps frontmatter well-formed enough to parse.
+- The implicit SDD-tree edges (epic→members, spec-approval→implement per DR-012, phase-predecessor→successor per SPEC-010) are derivable from existing structure without new authoring; only the **explicit** cross-cutting edges (FR-13) require new frontmatter authoring.
+- A `MILESTONE-NNN` artifact registry / INDEX participation (FR-3b) can reuse the same id+status+index pattern already used for SPECs/DRs/epics rather than needing a new storage substrate.
+
+## Test-thought
+
+Verified by a T0 invariant-fixture suite in `packages/shared/tests`: each (state → next-task) mapping (every FR-2 severity class, every gate edge, every FR-9 coherence rule, the FR-14 tie pick, FR-15 corruption detection) is a deterministic fixture-in → expected-next-task-out assertion (FR-12), with the two triggering-session bugs (stale epic INDEX; SPEC-004 implementing-under-proposed) pinned as T3 regression fixtures. Determinism is itself the test enabler — same input, same output, no mocking of LLM/network because none is reachable (FR-1).
+
+## Consequences
+
+**Positive:**
+- Collapses SPEC-010's within-feature signpost and the three cross-artifact approval gates into **one** total order, resolving SPEC-010 OQ#1 (global ordering) with a single engine rather than per-surface logic (FR-2, FR-4).
+- Makes prose-only relationships (`Triggered by:`, `Resolves:`, `composes`) machine-readable (FR-13), so blockers the engine was blind to now actually re-rank — and a dangling ref becomes detectable corruption instead of an invisible drop (FR-15).
+- One `packages/shared` pure function means status-bar, explorer, and CI can never disagree on "next task" (FR-11) — the signpost has a single source of truth.
+
+**Negative:**
+- Adds authoring burden: cross-cutting blockers only count once a human writes `depends_on`/`supersedes` (FR-13) and registers `MILESTONE-NNN` artifacts (FR-3b). Un-authored edges leave the resolver under-ordering (R2).
+- Introduces a new corpus-wide frontmatter contract (the edge vocabulary) that, once adopted, is costly to change (see Costly to Refactor #1) — and a new artifact kind (milestones) to maintain.
+- The resolver is now a single point of failure for the signpost: a structural-corruption blackout (R5) must be carefully localized (FR-15) or one bad file blanks the global next-task.
+
+## Failure-Modes / Edge-Cases
+
+1. **Dependency-graph cycle** (`A depends_on B`, `B depends_on A`, possibly transitively). The DAG-must-be-acyclic invariant (FR-15) is breached; resolver MUST report the cycle as structural corruption and degrade (FR-10), not loop or pick arbitrarily.
+2. **Dangling edge id** — `depends_on: [SPEC-999]` where SPEC-999 doesn't resolve. Corruption (FR-13/FR-15), surfaced for repair; never silently dropped.
+3. **Empty queue** — no pending human decisions at all (every gate cleared, no `phase-action` hole). The resolver MUST emit a clean "nothing pending" state — a well-formed empty result, distinct from the FR-10 "state unclear" degradation — and MUST NOT fabricate a task (the inverse of the FR-5 single-task output: zero, not one) nor error.
+4. **All-tied top band** — every top-priority node is in one FR-14 equivalence class; resolver returns the deterministic-arbitrary lowest-`artifact-id` pick and can report "N equally-next".
+5. **Coherence breach vs deeper incoherence** — child-ahead-of-parent (FR-9) routes to a gate-violation next-task; malformed/dangling state beyond FR-9 routes to "state unclear — <file>" + repair ladder (FR-10/FR-15). The boundary between these two must not be miscategorized.
+6. **`supersedes` to an already-`done`/`archived` target** — superseding a node whose target is already out of the queue must be a no-op, not a re-introduction or error (FR-13).
+7. **Milestone never reached** — a `depends_on: [MILESTONE-NNN]` whose milestone stays `open` keeps the dependent legitimately hidden indefinitely; this is correct (auto-clears on reach), not a stuck state (FR-3a/FR-3b).
+
+## Test / Verification Strategy
+
+Per-FR tier + one-line assertion sketch:
+
+| FR | Tier | Assertion sketch |
+|---|---|---|
+| FR-1 | T0 | Repeated resolve on a fixed fixture → byte-identical output; no LLM/network call reachable from the resolve path. |
+| FR-2 | T0 | One-node-per-class fixture → next-task is the gate-violation; within-class order follows `(epic.order, priority, artifact-id)`. |
+| FR-3 / FR-3a / FR-3b | T0 | `epic.order`/`priority` change re-orders deterministically; a `depends_on` (incl. on a `MILESTONE-NNN`) hides the dependent until the blocker/milestone clears. |
+| FR-4 | T1 | Resolver consumes SPEC-010's `phase-action` source; does not re-derive coverage predicates (no duplicate predicate code path). |
+| FR-5 / FR-6 | T2 | Primary output = single task object; full queue retrievable on demand, secondary by default. |
+| FR-7 | T2 | Emitted task includes severity class + producing rule; a wrong-on-purpose fixture is diagnosable to artifact+rule. |
+| FR-8 / FR-8a | T0 | Dispatch-seeded fixture proves no agent node emitted (INV — Two Queues); state-unchanged "deviation" leaves next-task fixed. |
+| FR-9 / FR-10 | T0 | Child-ahead-of-parent → top gate-violation; beyond-FR-9 incoherence → "state unclear — <file>", never a fabricated task. |
+| FR-13 | T0/T1 | Each edge kind parsed; `depends_on` ranks dependent below blocker; advancing past un-cleared blocker = gate-violation; dangling id = corruption. |
+| FR-14 | T0 | Top-band tie → lowest-`artifact-id` pick; "N equally-next" reportable. |
+| FR-15 | T0/T2 | Cycle/dangling/malformed detected deterministically; repair ladder offered (deterministic first, LLM second), confirm-before-write. |
+| FR-11 | T1 | Single `packages/shared` pure function (no `vscode`/network) imported by status-bar, explorer, CI. |
+| FR-12 | T0 | Coverage check: every severity class + gate edge + coherence rule has a mapped T0 test; 2 session bugs exist as T3 fixtures. |
+
+## Alternatives Considered
+
+- **LLM-ranked next task.** Let an LLM read the corpus and pick the next task. **Rejected:** non-reproducible, untestable, and violates Tier-0/determinism (FR-1, INV — Determinism, DR-004/DR-019); the whole point of EPIC-002 is a signpost that can't lie, which requires a derived (not guessed) verdict.
+- **Emit a ranked list/backlog instead of one task.** **Rejected:** a backlog is precisely what MinSpec exists to collapse into a single pointer (Context); the list survives only as the optional FR-6 expansion, not the primary output (FR-5).
+- **`deferred: true` boolean for "not now".** **Rejected (FR-3a):** a boolean rots — set once, never unset, so the item stays hidden after its blocker clears. Replaced by a `depends_on` link (auto-clears, explainable, one mechanism), with `MILESTONE-NNN` for purely-temporal deferral (FR-3b).
+- **Per-surface resolver logic** (status-bar, explorer, CI each compute their own). **Rejected:** surfaces would disagree and destroy signpost trust (R3); replaced by the single `packages/shared` pure function (FR-11).
+- **Date-typed deferral edge** for temporal "later". **Rejected (OQ2):** adds a second deferral mechanism and a non-artifact edge type; milestones keep deferral as one uniform link end-to-end (FR-3b).
+
+## Dependencies & Blast-Radius
+
+**Declared dependencies (what this spec consumes / reaches into):**
+- [SPEC-010 signpost-correctness](../signpost-correctness/requirements.md) — `phase-action` node source and FR-6 honest-degradation (FR-4, FR-10); resolves its OQ#1.
+- [SPEC-005 auto-structure-repair](../auto-structure-repair/requirements.md) — composed for the FR-15 repair ladder (offer-never-silent, non-destructive).
+- [DR-012](../../../docs/decisions/DR-012.md) content-hash approval gate — defines the `spec-approve` node and the implementing-but-unapproved gate-violation.
+- [DR-014](../../../docs/decisions/DR-014.md) tier map — mandates the resolver live in `packages/shared` (FR-11).
+- [DR-019](../../../docs/decisions/DR-019.md) — the decision this spec is the contract for (determinism, no-LLM ranking).
+- The frontmatter schema across all SPEC/DR/epic artifacts (parsed for `status`, `epic.order`, `priority`, FR-13 edges) and the `MILESTONE-NNN` registry (FR-3b).
+
+**Blast-radius — what breaks if changed:**
+- Changing the `packages/shared` resolver signature breaks **all four consumers** (status-bar signpost, explorer rollup, CI/`npm run validate`, future surfaces) simultaneously (FR-11, DR-014).
+- Changing the FR-13 edge vocabulary names/semantics requires migrating every artifact that authored them (Costly to Refactor #1).
+- Changing the FR-2 severity-class set/order invalidates the entire T0 fixture suite (FR-12) and any class-coded UI.
+- A regression that lets an agent/dispatch node leak in breaks INV — Two Queues across every surface at once (FR-8).
+
+## Rollback / Reversibility
+
+- **Undo mechanism — the engine.** The resolver is a pure additive read-only view (FR-1, FR-11): deleting/disabling the `packages/shared` function and its call-sites removes the signpost with no data loss. Nothing it computes is persisted state, so reverting the code fully reverts the feature.
+- **Undo mechanism — the data.** The new frontmatter edges (`depends_on`/`supersedes`/`relates_to`, FR-13) and `MILESTONE-NNN` files are additive metadata; left unread they are inert YAML/markdown. Removing the resolver does not require removing them, and removing them does not corrupt artifacts (they're optional keys).
+- **Hard-to-reverse seam (the caveat).** Once authors have written FR-13 edges across the corpus, the *vocabulary* is corpus-wide (Costly to Refactor #1) — the code is reversible in <1 day, but un-adopting the edge keys from many artifacts is not. This asymmetry (reversible engine, sticky data contract) is the reason this is T4 and carries a DR (DR-019).
+- **ADR-filter answer.** Can this be undone in <1 day? **The engine: yes** (delete code + call-sites). **The data contract + `MILESTONE-NNN` artifact kind: no** — it's a corpus-wide schema commitment, which is exactly why it is governed by a DR (DR-019) rather than done ad-hoc.
+
+## Follow-ups (tracked)
+
+- **Prose-link linter (R2 mitigation):** flag `Resolves:` / `Triggered by:` / `composes` prose that lacks a matching machine-readable FR-13 edge. Cross-cutting tooling — file as a GitHub issue on `harvest316/minspec` if not already covered by a spec; not yet a SPEC.
+- **OQ4 (cross-epic gate-violation tie-break)** and **OQ5 (deterministic-repairable vs LLM-only corruption set)** — both deferred to the plan phase (see Open questions); resolve before implement.
+- **MILESTONE-NNN registry/INDEX mechanics (FR-3b)** — exact storage + index-participation to be specified at plan time (assumed to reuse the SPEC/DR id+status+INDEX pattern).
+- **UX/data-contract handoff** — the status-bar signpost + explorer rollup visual design is a separate downstream UX spec (see Out of scope); this spec hands it the ordering + task-object contract.
 
 ## Out of scope
 

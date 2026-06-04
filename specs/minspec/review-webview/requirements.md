@@ -2,7 +2,7 @@
 id: SPEC-014
 type: requirements
 status: specifying
-tier: T3
+tier: T4
 product: minspec
 epic: EPIC-002  # Signpost Integrity
 aspects: [ux]
@@ -220,6 +220,38 @@ for content-bearing artifacts (specs, ADRs).
   this feature may import `http`/`https`/`fetch`/`net`. A T0 test MUST assert this for the
   new module(s), matching the DR-004 code-review boundary.
 
+## Costly to Refactor (Zone A — read first)
+
+Ranked seams whose shape is expensive to change once code lands. Each names the FR(s)
+that pin it.
+
+1. **The revision-handoff contract (FR-6, FR-6a, FR-OQ2).** The `{ selectedText, comment,
+   surrounding context, target file }` instruction shape handed to the host agent is the
+   Tier-0/Tier-1 boundary line. Pick the wrong handoff (FR-OQ2: chat-participant vs
+   `minspec.dispatchRevision` into `agent-execute` vs prompt-file vs DR-017 broker) and you
+   either smuggle a network module into `packages/minspec` (breaks INV — Tier-0 core / FR-17)
+   or you cannot stay dirty-editor-safe (R4). Changing the channel later re-touches every
+   FR-6/FR-7 round-trip. **Hardest to reverse — pin in plan, gate with the FR-17 T0 test.**
+2. **The comment-pin anchor scheme (FR-3, FR-5, FR-OQ1).** The sidecar
+   `.minspec/review/<artifactId>.json` `{ anchor, selectedText, thread[], status, createdAt }`
+   record is *persisted data*. If the re-anchor algorithm (heading-path + quoted-span vs
+   char-offset) changes after pins exist on disk, every stored anchor must migrate or
+   orphan. Char-offset would have to be ripped out the moment any external edit lands.
+   Choose content-based re-anchor up front (FR-OQ1) so the on-disk shape survives edits.
+3. **The pure-function render/highlight split (FR-16, FR-1, FR-7a).** Mirroring
+   `spec-panel.ts` (vscode glue) / `spec-panel-html.ts` (pure HTML): if render/highlight
+   logic leaks `vscode` or file-I/O into the pure layer, the FR-16 unit-testability and the
+   FR-17 import-ban both collapse and must be re-split. Establish the boundary in the first
+   module, not after.
+4. **Gate-call reuse of `approveSpecCommand` (FR-10, INV — Gate parity).** FR-10 requires the
+   webview reuse `approve.ts:70-100` *verbatim*, not a fork. A copied-then-drifted validator
+   path is the exact bypass R2 warns of; refactoring two divergent approval paths back into
+   one later is far costlier than wiring the single shared call now.
+5. **SPEC-012 resolver as sole "next" source (FR-12, INV — Single ordering authority).** The
+   moment this webview caches or re-derives ordering, it can disagree with the status-bar /
+   CI signpost (R3) and the single-engine invariant (SPEC-012 FR-11) is broken across
+   surfaces. Always call the resolver live; do not snapshot its order into the panel.
+
 ## Mockup (ux aspect — DR-012 §2)
 
 ```
@@ -277,6 +309,45 @@ decision-only node (epic-promote / issue-triage) collapses to a summary card:
 - **INV — Non-destructive review (T0).** Comments (FR-4) and skips (FR-14) never mutate the
   artifact or its hash; only an applied revision (FR-8) and an explicit Approve (FR-10) do.
 
+## Acceptance Criteria (Zone A — definition of done)
+
+Checkbox DoD tracing the FRs. The feature is "done" only when all hold.
+
+- [ ] **Renders, not raw** — the active artifact shows formatted HTML (headings, tables,
+  code blocks) under the reused CSP-nonce pattern (`spec-panel-html.ts:131-138`),
+  `default-src 'none'`, untrusted content sanitised before injection (FR-1).
+- [ ] **Gate-state header** — id / title / tier / status / approval state
+  (`approved`/`stale`/`unapproved` from `approval.ts`) + blocking validator violations show
+  at the top before the body (FR-2).
+- [ ] **Comment pins persist non-destructively** — selecting text adds a thread to
+  `.minspec/review/<artifactId>.json`; adding/replying/resolving a comment does NOT change
+  the artifact's content hash and does NOT invalidate an existing approval (FR-3, FR-3a,
+  FR-4); orphaned-on-no-match is surfaced, never silently re-pointed (FR-5).
+- [ ] **Revision is delegation, zero network** — "Revise with AI" assembles the instruction
+  and hands it to the host agent; no `http`/`https`/`fetch`/`net` import exists in the
+  feature's `packages/minspec` modules, asserted by a passing T0 test (FR-6, FR-17). With no
+  agent reachable the action degrades to a saved note, not an error (FR-6).
+- [ ] **Re-read highlight, per-round colour, a11y-paired** — landed revisions highlight only
+  new/changed spans locally; each round gets a distinct, cycling, theme-token colour paired
+  with a non-colour "changed · rev N" label/tooltip (WCAG 1.4.1); cleared on approve (FR-7,
+  FR-7a, FR-8).
+- [ ] **Approve is never softer than the command** — the scroll-bottom action runs
+  `validateSpec` and refuses on errors using the exact `approveSpecCommand` logic
+  (`approve.ts:70-100`); a revision forces a visible re-hash so prior approval goes `stale`
+  (FR-9, FR-10, INV — Gate parity).
+- [ ] **Approve advances, does not close** — on success the panel loads the next human task
+  from the SPEC-012 resolver into the same panel; closes only on empty queue → terminal
+  "All clear" state (FR-11). Ordering is never re-derived locally (FR-12, INV — Single
+  ordering authority).
+- [ ] **Phase-action is shown, not approvable** — a `phase-action` node renders its
+  imperative + Open/Dispatch and presents no Approve button (FR-13, INV — Two queues).
+- [ ] **Skip/stop are non-mutating** — skipping advances without deciding and mutates no
+  artifact or hash; the walk can be stopped (FR-14, INV — Non-destructive review).
+- [ ] **Progress affordance** — position ("3 of 7 pending") shows; full pipeline expands on
+  demand, collapsed by default (FR-15).
+- [ ] **Pure render layer** — all render/highlight/markup generation is `vscode`-free,
+  network-free, and unit-tested; the shell only wires messages + file I/O (FR-16).
+
 ## Coverage Map (session asks → FR)
 
 | Concern (from session) | FR |
@@ -316,6 +387,190 @@ decision-only node (epic-promote / issue-triage) collapses to a summary card:
   **`issue-triage` node kind** (Tier-1, `gh`). That is a SPEC-012 extension, tracked as a
   follow-up below — this spec consumes whatever node kinds the resolver emits and does not
   add ordering of its own.
+
+## Blast-Radius (what breaks if these change)
+
+Beyond the `depends_on: SPEC-012` link above, the declared touch-surface and the failure
+each change would trigger:
+
+- **`approve.ts:70-100` (`approveSpecCommand` validate-then-refuse path)** — FR-10 reuses it
+  verbatim. If its signature or refusal behaviour changes, the webview's Approve silently
+  diverges from `minspec.approveSpec` → INV — Gate parity breaks (R2). Any edit there must
+  re-run the gate-parity test for both surfaces.
+- **`spec-validator.ts` (DR-012 gate)** — the validator the gate calls. A new violation class
+  added there must surface in FR-2's header and be refused by FR-10; a missing-vs-dangling
+  asymmetry (the SPEC-004 class of bug) would let an incomplete spec through both doors.
+- **`approval.ts` (content-hash + `approved`/`stale`/`unapproved`)** — FR-2 reads its state,
+  FR-9 depends on its hash-binding. Change the hash algorithm and every persisted approval +
+  every stored pin's "did the artifact change" assumption (FR-4) must be re-evaluated.
+- **`spec-panel-html.ts:131-138` (CSP-nonce pattern)** — FR-1 reuses it. Loosen the CSP there
+  (e.g. allow remote `img-src`) and the no-network-fetch guarantee of FR-1 silently weakens.
+- **SPEC-012 resolver node-kind set** — FR-12 renders whatever it emits. Adding/removing a
+  node kind (e.g. the planned `issue-triage`) changes which artifacts the walk loads; an
+  unhandled kind must degrade to "shown, not approvable" rather than crash the walk (FR-13).
+- **`.minspec/review/<artifactId>.json` sidecar schema** — FR-3's persisted record. New
+  consumers (or a schema change) ripple to FR-3a threads, FR-5 lifecycle, and FR-OQ1
+  re-anchor. This file is data-on-disk: treat its shape as a contract, not an implementation
+  detail.
+
+## Assumptions
+
+- A **host agent is usually but not always present** — Claude Code / `agent-execute` broker
+  is reachable for the FR-6 revision handoff in the common case, but FR-6 explicitly handles
+  its absence (degrade to saved note). We do not assume an always-on agent.
+- **SPEC-012's resolver is the queue** — we assume it already emits, or will emit, the node
+  kinds the walk needs (`spec-approve`, `adr-accept`, `epic-promote`, `phase-action`, and the
+  follow-up `issue-triage`); this spec adds no ordering and assumes none is needed here.
+- **Specs are plain external `.md` files** with no live editor session to track positions —
+  the assumption that forces content-based re-anchoring over char-offset (FR-OQ1).
+- **VS Code theme tokens** (`--vscode-editor-*Highlight` / `charts.*`) provide enough
+  distinct, light/dark-readable colours for the FR-7a cycling palette before it must wrap.
+
+## Test-thought
+
+Verified by: a **T0 import-ban test** asserting no `http`/`https`/`fetch`/`net` in the
+feature's `packages/minspec` modules (FR-17), a **gate-parity test** proving webview-Approve
+refuses exactly when `minspec.approveSpec` does (FR-10), and **pure-function unit tests** over
+the render/highlight markup (FR-16) — comment-pin persistence and re-anchor exercised against
+fixture `.minspec/review/*.json`.
+
+## Consequences
+
+**Positive:**
+
+- The review surface and the enforcement command share one gate (FR-10) — there is exactly
+  one place approval can happen and one validator (DR-012), so "the pretty door" can never be
+  a softer path (closes the R2 class permanently, not per-feature).
+- The continuous walk (FR-11/FR-12) over the SPEC-012 single engine means the reviewer clears
+  the whole pending queue in one surface, and every surface (status bar, CI, this panel)
+  agrees on "what's next" by construction (INV — Single ordering authority).
+- LLM revision lands without breaching Tier-0 (FR-6/FR-17): the air-gapped-core selling point
+  survives even as the product gains an AI-revision affordance — delegation, not a socket.
+
+**Negative:**
+
+- A new persisted artifact class (`.minspec/review/<artifactId>.json`) now needs lifecycle
+  care: orphaned anchors (FR-5), schema migration (Blast-Radius), and audit retention — state
+  the product did not previously carry.
+- The flow itself introduces a *human* risk the old per-artifact panel did not: approve-chain
+  fatigue → rubber-stamping (R6); we accept it and lean on FR-2 up-front evidence + frictionless
+  FR-14 skip rather than removing the chain.
+- Two Tier boundaries now run through one feature (Tier-0 webview + Tier-1 revision handoff),
+  so every change near FR-6 must be re-checked against FR-17 — ongoing review cost.
+
+## Failure-Modes / Edge-Cases
+
+- **No agent reachable at "Revise with AI"** (FR-6) → degrade to a saved standing note with
+  "no agent available — comment saved"; never an error, never a dropped comment.
+- **Anchored span no longer matches after an external/agent edit** (FR-5, FR-OQ1) → thread is
+  marked **orphaned** and surfaced as such; MUST NOT silently re-point at a wrong span.
+- **Agent edit clobbers a dirty (unsaved) editor buffer** (R4) → handoff must be dirty-editor-safe
+  (FR-OQ2); the recovery path is standard editor undo / git, with FR-9 re-hash ensuring the bad
+  edit cannot pass approval unseen.
+- **Resolver emits an unmodelled node kind** (e.g. `issue-triage` before this surface handles
+  it) → fall back to "shown, not approvable" (FR-13 spirit), never crash or fabricate an Approve.
+- **Resolver reports the queue empty mid-walk** (FR-11) → panel shows the terminal "All clear —
+  no pending approvals" state rather than loading nothing or closing abruptly.
+- **Validator errors on Approve** (FR-10) → refuse and surface the blocking violations; the walk
+  stays on the current artifact, does not advance, does not record a partial approval.
+- **Long revision session → palette exhausted** (FR-7a) → palette cycles/wraps and oldest rounds
+  fade; the non-colour "changed · rev N" label remains the durable signal (WCAG 1.4.1).
+
+## Test / Verification Strategy
+
+Per-FR test tier + a one-line assertion sketch.
+
+| FR | Tier | Assertion sketch |
+|---|---|---|
+| FR-17 (no-network) | T0 | static-import scan of feature modules under `packages/minspec` asserts zero `http`/`https`/`fetch`/`net`. |
+| FR-10 (gate parity) | T0 | given an invalid spec, webview-Approve refuses iff `approveSpecCommand` refuses (same validator, same message). |
+| FR-12 (single ordering) | T0 | "next" loaded by the panel `===` the SPEC-012 resolver's emitted next node; panel computes no order of its own. |
+| FR-4 (non-destructive pins) | T0 | adding/resolving a thread leaves the artifact content hash unchanged → prior approval stays valid. |
+| FR-13 (phase-action) | T1 | a `phase-action` node renders Open/Dispatch and exposes NO Approve control. |
+| FR-1 (render + CSP) | T1 | rendered HTML carries the nonce CSP, `default-src 'none'`, and raw HTML in spec body is sanitised out. |
+| FR-2 (gate-state header) | T1 | header reflects `approved`/`stale`/`unapproved` from `approval.ts` + blocking violations. |
+| FR-5 / FR-OQ1 (re-anchor / orphan) | T2 | after an edit above a pinned span, the thread re-binds by content or is marked orphaned — never wrong-pointed. |
+| FR-7 / FR-7a (highlight + a11y) | T2 | a landed revision highlights only changed spans, in the round's colour, with a paired "changed · rev N" label. |
+| FR-6 (revise degrades) | T2 | with no agent reachable, "Revise with AI" saves the note and shows the degrade message (no throw). |
+| FR-11 (advance not close) | T2 | a successful Approve loads the resolver's next node into the same panel; empty queue → "All clear". |
+| FR-14 (skip non-mutating) | T2 | Skip advances and leaves the skipped artifact + its hash untouched. |
+| FR-16 (pure functions) | T2 | render/highlight helpers run with no `vscode` and no file I/O in scope. |
+| FR-9 (re-hash visible) | T3 | a revision flips a prior `approved` to `stale` and the Approve step shows the re-hash. |
+
+## Alternatives Considered
+
+Named design alternatives weighed for this spec's two pinned seams (Costly#1 revision
+handoff; the review-surface medium) plus the viewer-vs-editor framing. Each is "rejected
+because Y", consolidating the options scattered across Costly#1 and FR-OQ2 into one
+comparison. The handoff alternatives are mutually exclusive *channels* for FR-6's
+delegation; FR-OQ2 keeps the final pick open to plan but records why none is the obvious
+default and what each costs against the invariants.
+
+**The review surface medium:**
+
+- **Alternative A — invoke ExitPlanMode's native approval panel** instead of a custom
+  `WebviewPanel`. *Rejected because* the DR-012 finding (Context §) stands: ExitPlanMode's
+  native panel is **model-only** — an extension cannot invoke it — so FR-1's rendered,
+  selectable, comment-bearing surface is unreachable that way. The custom webview is forced,
+  not chosen.
+- **Alternative B — render the artifact in a native VS Code text editor** (a virtual/
+  read-only document) rather than a webview. *Rejected because* FR-1 requires *rendered*
+  HTML (headings, tables, code blocks — pretty, not raw MD) with the FR-3 Google-Docs
+  right-margin conversation pane and FR-7/FR-7a per-round colour highlighting; a text editor
+  shows raw markdown and has no margin-card or multi-colour span affordance. It would also
+  drop the FR-1 CSP-nonce sandbox (`spec-panel-html.ts:131-138`) the no-network guarantee
+  reuses. A native editor is the right surface for *editing* the `.md`, which is exactly the
+  viewer-vs-editor split deferred below.
+
+**The revision-handoff channel (FR-6 delegation; Costly#1, FR-OQ2 — Tier-0/Tier-1 line):**
+
+- **Alternative C — call a model directly from the webview** (one `fetch` to an LLM API).
+  *Rejected because* it breaks INV — Tier-0 core / FR-17 (no `http`/`https`/`fetch`/`net`
+  in `packages/minspec`), erasing the air-gapped-core selling point (R1). This is the exact
+  creep FR-6/FR-6a/FR-17 exist to forbid; non-negotiable, not merely deferred.
+- **Alternative D — VS Code chat-participant API** as the Tier-1 handoff. *Rejected as the
+  default because* it couples the revision loop to a specific chat surface and does not by
+  itself guarantee the dirty-editor-safe write FR-6/R4 demand (the agent edits the file on
+  disk while an unsaved buffer may be open). Kept as a live candidate in FR-OQ2, not chosen
+  here.
+- **Alternative E — prompt-file the running session watches.** *Rejected as the default
+  because* it is the loosest contract: no acknowledgement that the agent picked the
+  instruction up, making FR-6's "no agent available → degrade to saved note" hard to detect
+  reliably, and it offers no dirty-editor coordination (R4). Viable fallback, weak primary.
+- **Alternative F — `claude -p` via the DR-017 host-side broker** (cred-free sandbox →
+  host broker). *Rejected as a hard dependency because* it presumes the `agent-execute`
+  /DR-017 broker is installed, whereas FR-6 must degrade gracefully when *no* agent is
+  reachable (Assumptions: agent usually-but-not-always present). It remains the preferred
+  channel *when present*, but cannot be the sole path. The chosen direction is a
+  `minspec.dispatchRevision` command (Costly#1) that targets whatever Tier-1 agent exists
+  (broker / chat / session) behind one instruction shape — but the concrete channel stays
+  FR-OQ2-open to plan, gated by the FR-17 T0 import-ban test.
+
+**Viewer vs editor (relates to SPEC-018):**
+
+- **Alternative G — make this webview a full spec *editor*** (in-panel direct text editing
+  of the `.md`), not a review viewer. *Rejected because* it conflates two surfaces: this
+  spec is a *review* surface whose only writes are FR-8 delegated revisions and the FR-10
+  Approve gate — comments are FR-4 non-destructive and skips are FR-14 non-mutating (INV —
+  Non-destructive review). Direct artifact editing is the viewer-vs-editor concern owned by
+  **SPEC-018**; folding it in here would breach the non-destructive invariant and blur the
+  Costly#1 handoff boundary. Kept out: editing stays SPEC-018's; this panel reviews.
+
+## Rollback / Reversibility
+
+- **Undo mechanism.** The feature is **additive** (FR — Surfaces §: a second panel, the
+  existing stepper untouched) so it can be disabled/removed without touching the spec-panel
+  surface or the approval command. A bad revision is reversible by standard editor undo / git
+  (FR-8, R4) — no bespoke hunk state to unwind. The one piece of new *persisted* state is the
+  `.minspec/review/<artifactId>.json` sidecar; deleting it loses comment threads but harms no
+  artifact or approval (FR-4 keeps pins non-destructive), so rollback is clean.
+- **ADR-filter answer.** Can this be undone in < 1 day? The *webview* yes (additive, removable).
+  But the two seams it pins are **not** cheaply reversible once code + on-disk pins exist: the
+  Tier-0/Tier-1 revision-handoff channel (FR-OQ2) and the pin anchor scheme + sidecar schema
+  (FR-OQ1). Those cross the Tier-0 invariant and persist data → they warrant the ADR-level
+  rigor this spec already carries (composes DR-012; reasons on the DR-004 Tier-1 precedent).
+  No *new* DR is created (Context §: boundary recorded inline), but the decision is DR-bound,
+  not a < 1-day reversible call.
 
 ## Out of scope
 

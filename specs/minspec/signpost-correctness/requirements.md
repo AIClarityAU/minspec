@@ -167,8 +167,9 @@ change. Ranked most→least costly.*
 
 1. **DAG coverage model — edges-not-presence (FR-1).** The entire correctness story keys
    off "first incomplete node in topo order." Retreating to file-exists checks = re-deriving
-   every signpost and re-writing every T0 mapping test. *Check: coverage-not-presence
-   accepted before implement.*
+   every signpost and re-writing every T0 mapping test. *Check: Acceptance Criterion 1
+   ("coverage, not presence" — spec FR-1..5 + plan covering FR-1..3 names holes FR-4/FR-5)
+   passes against fixtures, and the DAG model is the one recorded in DR-019, before implement.*
 2. **Shared L1 checker — one pure fn, four callers (FR-16).** A near-public contract
    consumed by extension, pre-commit, CI, and agent dispatch. A second implementation =
    permanent drift; the four surfaces disagree about "complete." *Check: one function in
@@ -249,7 +250,7 @@ Explicit trace from the discussed mechanisms to FRs — nothing dropped.
 | R3 | **Partial-coverage hole missed.** A presence check passes a plan covering FR-1..3 of FR-1..5. | Med · High | FR-1 DAG models coverage not presence; FR-3 greps every `FR-N` for a downstream ref; FR-8 T0 case for partway-through. |
 | R4 | **Nag fatigue.** Every-keystroke squiggles on a half-written draft → users disable the signpost. | High · Med | FR-11 holes are errors only at the ready/transition (`status: done`); FR-15 debounce, save-not-keystroke; FR-7 dismissible + sticky, never re-nag. |
 | R5 | **Incoherent state → confident-but-wrong next step.** Dangling/colliding IDs produce a fabricated "next". | Med · High | FR-6 honest degradation ("state unclear — open tasks.md") routes to SPEC-005 repair offer, never a guess. |
-| R6 | **Auto-fix clobbers unsaved work / loops forever.** | Low · High | FR-14 dirty-editor safety (confirmable `WorkspaceEdit`); FR-13 loop cap (default 3) → DR-355 escalation. |
+| R6 | **Auto-fix clobbers unsaved work / loops forever (the FR-10 agent-bounce path).** A `WorkspaceEdit` overwrites a dirty buffer, or the write→check→rewrite cycle never converges. | Low · High | FR-14 dirty-editor safety (confirmable `WorkspaceEdit`); FR-13 loop cap (default 3) → DR-355 escalation. |
 | R7 | **FR-17 leaks private spec content to GitHub.** Pre-filled issue body carries paths / spec text. | Med · Med | Sanitised snapshot; extension never auto-submits — opens pre-filled URL, dev reviews + submits (INV-Tier-0; INV #5 visible + opt-in). |
 | R8 | **Floor depends on unbuilt specs.** Predicate strength (SPEC-006) is `specifying`. | Med · Med | FR-3 ships with the L1 grammar today; SPEC-006 strengthens the predicate behind the same interface; SPEC-012/DR-019 already resolved global order (OQ1). Sequence SPEC-006 before the L4 layer is trusted. |
 
@@ -290,6 +291,109 @@ Explicit trace from the discussed mechanisms to FRs — nothing dropped.
   under [#121](https://github.com/harvest316/minspec/issues/121)).
 - **DR-012** — the HITL approval gate *consumes* this completeness contract (blocking lives
   there, not here). **DR-004** — Tier-0 pure-fs. **DR-355** — escalation for the FR-13 loop cap.
+
+### Blast-Radius (what breaks if changed)
+
+The shared L1 checker (FR-16) is the highest-blast-radius surface in this spec: a single
+pure function in `packages/shared` imported by four callers, so a change ripples outward.
+
+- **Change the L1 checker's verdict shape / predicate semantics (FR-3, FR-16)** → breaks all
+  four consumers at once: the extension save hook (FR-9), the pre-commit hook
+  (`.githooks`), CI (`npm run validate`), and agent dispatch (`scripts/dispatch-issue.sh`,
+  FR-10). The four-caller leverage cuts both ways — one edit, four surfaces. Mitigated by the
+  T1 contract test (Acceptance Criterion 2) asserting identical verdict across all callers.
+- **Change the traceability `FR-N`→plan-ref→task grammar (FR-3)** → breaks SPEC-013's
+  co-owned parse contract (Dependencies) and forces a re-parse/migrate of every spec under
+  `specs/**`; also breaks SPEC-013 FR-11 which *consumes* this DAG coverage edge (#121).
+- **Retreat the DAG coverage model to file-exists (FR-1)** → every signpost re-derives and
+  every T0 mapping test (FR-8) is rewritten (Costly #1).
+- **Make the signpost block (reverse FR-5 / INV-Advisory)** → breaks the advisory contract
+  DR-012's opt-in gate relies on; users feel a behaviour reversal (Costly #4).
+- **Change `preferences.json` override schema (FR-7)** → breaks dismissal stickiness and the
+  cached-repair determinism that reuses the INV #5 override model.
+
+Low-blast-radius (isolated to this spec): FR-17 bug-report channel, the debounce timing
+(FR-15), and the loop-cap default (FR-13) — all tunable without touching consumers.
+
+## Assumptions
+
+- The traceability `FR-N`→plan-ref→task grammar (FR-3) is actually followed by spec authors;
+  specs that don't follow it deliberately degrade to "unclear" (FR-6) rather than to a wrong
+  signpost (accepted authoring constraint, see Consequences negative #3).
+- `status: done` (reused from SPEC-006 RD-2 per resolved OQ) is the single ready/transition
+  trigger for FR-11 — no separate signpost-ready signal exists or is needed.
+- Topological global order is already resolved by SPEC-012 / DR-019 `(severity-class,
+  epic.order, artifact-id)`; this spec consumes that order and does not re-derive it (OQ1).
+- The DAG is derived on-demand from `.minspec/traceability.json` + frontmatter with no
+  persisted cache (resolved OQ2) — repo sizes are assumed small enough that per-query
+  derivation cost is acceptable until proven otherwise.
+- Agent-authored saves are reliably distinguishable from human saves (FR-10) via the
+  `claude -p` dispatch path, so the auto-bounce vs offered-fix branch is decidable.
+
+## Test-thought
+
+Verified by the FR-8 T0 mapping suite: each state→signpost edge predicate and each
+degradation case (FR-6) has a passing T0 invariant test, plus a T1 contract test proving the
+shared checker (FR-16) returns an identical verdict across all four callers, and a T2 feature
+test for the FR-17 pre-filled-issue channel. Because the signpost is a pure function of
+filesystem state (FR-2), correctness is *tested against fixtures*, not predicted.
+
+## Failure-Modes / Edge-Cases
+
+- **Partial coverage straddling a stage (FR-1, FR-3).** Plan covers FR-1..3 of FR-1..5 →
+  signpost MUST name the specific holes (FR-4, FR-5), not collapse to "planned" or "no plan".
+- **Incoherent state — dangling/colliding IDs (FR-6).** A `task` with no parent plan item, a
+  dangling `FR-N` reference, or two hand-edited specs colliding on the same `FR-N` → resolver
+  emits "state unclear — open <file>" and routes to SPEC-005, never a fabricated "next".
+- **Dirty editor during auto-fix (FR-14).** Target file open with unsaved changes → fix MUST
+  apply as a confirmable `WorkspaceEdit` or defer until saved; MUST NOT clobber.
+- **Agent auto-bounce non-convergence (FR-13).** Holes persist after the loop cap (default 3)
+  → escalate per DR-355 (higher model, then human); never an infinite write→check→rewrite.
+- **Save storm / double-fire (FR-15).** Rapid saves or the ~500ms index-lag debounce window
+  → at most one check per write; the same write is never re-checked twice.
+- **Draft-stage noise (FR-11).** Holes in an artifact still below `status: done` → surfaced
+  as a forward checklist, NOT red-squiggle errors (no every-keystroke nagging).
+- **Private content in a bug report (FR-17).** Pre-filled issue body would carry spec paths /
+  prose → sanitised snapshot; extension opens the URL, dev reviews + submits (never silent).
+
+## Test / Verification Strategy
+
+Per-FR test tier (T0 = invariant, T1 = contract, T2 = feature) with a one-line assertion
+sketch. T0 is mandated by FR-8 for every state→signpost mapping.
+
+| FR | Tier | Assertion sketch |
+|---|---|---|
+| FR-1 | T0 | Spec FR-1..5 + plan covering FR-1..3 → signpost == "cover FR-4, FR-5" (not "planned"). |
+| FR-2 | T1 | Same fixture run twice → byte-identical signpost; no randomness/hidden state. |
+| FR-3 | T0 | Each `FR-N` without a downstream plan ref is flagged; every covered FR passes. |
+| FR-4 | T2 | Hover/derivation request returns the exact state string + IDs that produced the signpost. |
+| FR-5 | T0 | Edits/commits proceed with the signpost present; no block raised. |
+| FR-6 | T0 | Dangling/colliding ID fixture → "state unclear — open <file>", never a confident next. |
+| FR-7 | T0 | Dismiss step X → X stays suppressed until state changes; re-nag never fires for identical X. |
+| FR-8 | T0 | Meta: assert each edge predicate + degradation case owns a passing T0 test (no orphan mapping). |
+| FR-9 | T2 | Save of `specs/**` (debounced) → signpost refreshes; holes surface without commit/CI. |
+| FR-10 | T2 | Agent-authored save → auto-bounce; human-authored save → diagnostics + offered fix, no auto-LLM. |
+| FR-11 | T0 | Holes below `status: done` → checklist (no errors); at `done` transition → errors. |
+| FR-12 | T0 | Detection path invokes no LLM; LLM entered only on an explicit fix request. |
+| FR-13 | T2 | Auto-bounce hits cap (3) on persistent hole → escalates per DR-355, loop terminates. |
+| FR-14 | T0 | Fix against a dirty file → applied as confirmable `WorkspaceEdit`/deferred; original untouched. |
+| FR-15 | T0 | N rapid saves of one write → exactly one check; same write never re-checked. |
+| FR-16 | T1 | Same state → identical verdict from extension hook, pre-commit, CI, agent (one fn, no fork). |
+| FR-17 | T2 | Derivation state → correctly pre-filled `harvest316/minspec` issue URL; no silent submit. |
+
+## Rollback / Reversibility
+
+- **Undo mechanism.** The signpost is a pure derived view (FR-2) with no persisted DAG cache
+  (resolved OQ2) — disabling it writes nothing back, so removal is a clean revert plus the
+  INV #5 master toggle (FR-7) lets a user switch it off without a code change. Per-caller
+  wiring (extension hook FR-9, pre-commit, CI, agent FR-10) can each be unhooked independently
+  because they share one `packages/shared` function (FR-16).
+- **ADR-filter answer.** Reversible in <1 day for the *advisory surface and its callers*, but
+  **NOT** for the load-bearing commitments — the DAG coverage model (FR-1, Costly #1), the
+  shared checker contract (FR-16, Costly #2), and the traceability grammar (FR-3, Costly #3)
+  are co-owned with SPEC-013 and depended on by SPEC-006/SPEC-012; these crossed the ADR
+  threshold and are recorded in DR-012 (gate consumer) and DR-019 (global order). So: the
+  feature wiring is cheap to pull; the model and contract are not, and already carry DRs.
 
 ## Out of scope
 

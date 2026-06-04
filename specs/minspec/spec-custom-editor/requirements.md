@@ -135,6 +135,37 @@ never load-bearing for the trust metrics — reflected in INV — Metrics-indepe
   function is reused (FR-6). Tier-0 sanitisation preserved.
 - **INV — Tier-0 core (T0).** No networking import added (FR-8).
 
+## Acceptance Criteria
+
+*Definition-of-done; each traces an FR / INV. Zone A — read before approving.*
+
+- [ ] **AC-1 (FR-2 / INV-No-global-hijack).** The `customEditors` contribution's
+  `selector` glob is path-scoped to specs (e.g. `**/specs/**/*.md`) and is **never**
+  `**/*.md`; the T0 glob-scope test asserts this and fails on a global pattern.
+- [ ] **AC-2 (FR-1).** Clicking a spec in
+  [`spec-tree-provider.ts`](../../../packages/minspec/src/views/spec-tree-provider.ts)
+  opens it in the MinSpec webview editor, and a one-click "Open as plain text"
+  affordance is visible from that editor.
+- [ ] **AC-3 (FR-3).** The contribution ships `priority: "option"`; with
+  `minspec.specEditor.useByDefault` at its default (**off**), opening a spec by any
+  path still uses the native text editor, and the webview is reachable only via
+  "Reopen Editor With…".
+- [ ] **AC-4 (FR-4).** Inside the webview editor, save, undo/redo, find, git gutter,
+  the frontmatter validator, and the RCDD/commit hooks all act on the underlying
+  `TextDocument` (T1 tests for save/undo/validator pass); the provider is a
+  `CustomTextEditorProvider`, not a replacement editor.
+- [ ] **AC-5 (FR-5 / INV-Reversible).** From the webview editor the raw text is
+  reachable in one action regardless of FR-3 state; `workbench.action.reopenWithEditor`
+  still works. No setting removes this escape.
+- [ ] **AC-6 (FR-6 / INV-One-renderer).** The editor mounts SPEC-014's pure render
+  function (FR-1/FR-16); no second markdown renderer or sanitiser is introduced;
+  same CSP-nonce and Tier-0 sanitisation.
+- [ ] **AC-7 (FR-7 / INV-Metrics-independent).** With SPEC-017 FR-8 telemetry OFF the
+  editor captures nothing and remains fully usable for reading/reviewing; the metric
+  layer has no hard import of the custom-editor module (T0 dependency-direction test).
+- [ ] **AC-8 (FR-8 / INV-Tier-0).** No `http`/`https`/`fetch`/`net` import is added to
+  `packages/minspec`; the import-ban T0 test passes.
+
 ## Coverage Map (session ask → FR)
 
 | Concern (from session) | FR |
@@ -154,7 +185,7 @@ never load-bearing for the trust metrics — reflected in INV — Metrics-indepe
 | R2 | **Editing regressions.** find/replace, LSP, git gutter, validator break inside a custom editor. | Med · High | FR-4 `CustomTextEditorProvider` over the real `TextDocument`; T1 tests for save/undo/validator; viewer-fallback never the default. |
 | R3 | **Hijack/surprise perception.** Users feel MinSpec seized their editor → marketplace backlash. | Med · High | INV-No-global-hijack + FR-3 opt-in default-off + FR-5 escape + scoped glob. Never `**/*.md`, never silent default. |
 | R4 | **Telemetry-coupling confusion.** "Webview editor = I'm being watched." | Med · Med | INV-Metrics-independent + FR-7: editor works fully with telemetry OFF; capture is SPEC-017 FR-8's separate, visible opt-in. |
-| R5 | **Webview perf vs text editor** on large specs. | Low · Med | Lazy/virtualised render; fall back to text for very large files (threshold at plan). |
+| R5 | **FR-1 mount of SPEC-014's renderer (FR-6) is slower than the native editor on a large spec** — the reused render function builds full DOM where the text editor virtualises lines for free. | Low · Med | No FR mandates virtualised render today; the committed mitigation is FR-5's text path used as a size-triggered fallback (Failure-Modes "Large spec performance"), with the byte/line threshold set at plan. Whether FR-6's renderer itself must virtualise is an FR-OQ1-adjacent plan call, not assumed here. |
 
 ## Dependencies
 
@@ -163,6 +194,87 @@ never load-bearing for the trust metrics — reflected in INV — Metrics-indepe
   render function exists, so sequencing: SPEC-014 render → SPEC-018 editor wrapper.
 - **`relates_to: SPEC-017`** — provides FR-7a's richest engagement source; the relationship
   is *enrich-only* (INV-Metrics-independent), never a hard dependency in either direction.
+
+## Assumptions
+
+- VS Code's `CustomTextEditorProvider` API can back a webview with the real `TextDocument`
+  so save/undo/find/git-gutter keep working (FR-4); FR-OQ1 exists precisely because this
+  edit-parity assumption is *not yet proven* and may force the viewer-fallback.
+- SPEC-014's render function will be extracted as a reusable pure function (FR-6) before
+  this editor needs to mount it — the sequencing assumption recorded in Dependencies and
+  Follow-ups (SPEC-014 is `specifying`, not built).
+- Specs live under a `**/specs/**/*.md`-shaped path so a path-scoped glob (FR-2) can
+  select them without touching other markdown (INV-No-global-hijack).
+- The richer full-DOM scroll/focus/dwell signal (FR-7) is only ever consumed by SPEC-017's
+  M3 (opt-in correlate), never by M1/M2 — so disabling this editor cannot break trust metrics.
+
+## Test-thought
+
+Verified by: (1) a T0 test asserting the contributed `customEditors` selector is
+path-scoped and not `**/*.md` (INV-No-global-hijack, FR-2); (2) a T0 test asserting the
+SPEC-017 metric layer has no import of the custom-editor module (INV-Metrics-independent);
+(3) T1 tests that save/undo/validator still operate on the `TextDocument` through the
+`CustomTextEditorProvider` (FR-4); and (4) the inherited import-ban T0 test for FR-8.
+
+## Consequences
+
+**Positive:**
+- Delivers the session's "default to webview for all operations" intent via the only real
+  mechanism (`customEditors`, FR-2) without the rejected Ctrl-P/global-markdown hijack.
+- Reuses SPEC-014's single renderer (FR-6) — no duplicate markdown/sanitise path to drift.
+- Gives SPEC-017 FR-7a its richest engagement source (FR-7) while staying enrich-only.
+
+**Negative:**
+- Adds a public-ish `viewType` + selector-glob contract (FR-2, Costly #1) that is expensive
+  to rename or rescope once users' `Reopen With` associations remember it.
+- Introduces editing-regression surface (FR-4, R2): find/replace, LSP, git gutter, and the
+  validator must be re-proven to work inside a custom editor rather than the native one.
+- Couples this spec's render layer to SPEC-014's still-unbuilt render function (Dependencies),
+  so it cannot ship ahead of SPEC-014.
+
+## Failure-Modes / Edge-Cases
+
+- **Edit-parity infeasible at plan (FR-OQ1 resolves "no").** If `CustomTextEditorProvider`
+  cannot give acceptable in-webview editing, FR-4's fallback (viewer + always-adjacent text
+  editor) engages — must never strand the spec as un-editable.
+- **Large spec performance (R5).** A very large spec makes FR-1's mount of SPEC-014's
+  full-DOM renderer (FR-6) degrade vs the line-virtualising native editor; the FR-5 text
+  path is reused as a size-triggered fallback, with the threshold set at plan.
+- **Competing markdown extension on a spec path (R1).** Markdown All-in-One / linters lose
+  their grip on spec files; mitigated because `priority:"option"` (FR-3) leaves default
+  behaviour unchanged until the user opts in.
+- **User opts FR-3 default-on then wants out.** The FR-5 escape (`reopenWithEditor`) MUST
+  still reach raw text even when `useByDefault` is on (INV-Reversible).
+- **Telemetry OFF.** Editor emits nothing (FR-7) and remains fully usable for reading —
+  reviewing must not silently depend on capture being on (INV-Metrics-independent).
+- **ADR paths (FR-OQ3).** Until the glob is widened to `docs/decisions/**`, opening an ADR
+  uses the native editor by design — not a bug.
+
+## Test / Verification Strategy
+
+| FR | Tier | Assertion sketch |
+|---|---|---|
+| FR-1 | T2 | Clicking a node in `spec-tree-provider.ts` opens the webview editor and a visible "Open as plain text" affordance; the revert setting restores plain-text open. |
+| FR-2 | T0 | The contributed `customEditors` selector glob is path-scoped (matches a `specs/**` path, rejects a top-level `README.md`); never equals `**/*.md`. |
+| FR-3 | T2 | With `minspec.specEditor.useByDefault` off, a spec opens in the native editor; the webview appears in "Reopen Editor With…"; flipping the setting makes it default while FR-5 still holds. |
+| FR-4 | T1 | Through the `CustomTextEditorProvider`, save / undo-redo / find / frontmatter-validator each operate on the backing `TextDocument` and produce identical results to the native editor. |
+| FR-5 | T1 | `workbench.action.reopenWithEditor` from the webview yields the raw text editor regardless of FR-3 state; no config disables it. |
+| FR-6 | T0 | Only SPEC-014's pure render function is imported; a test asserts no second markdown renderer/sanitiser symbol exists in this module; CSP-nonce present. |
+| FR-7 | T1 | With SPEC-017 FR-8 ON the editor emits scroll/focus/dwell events; with it OFF zero capture calls fire and the editor still renders. |
+| FR-8 | T0 | Import-ban test: no `http`/`https`/`fetch`/`net` import reachable from `packages/minspec` via this editor (SPEC-014 FR-17 / invariant #2 / DR-004). |
+
+## Alternatives Considered
+
+- **Hook Ctrl-P / Quick Open to reroute `.md` opens** — rejected: VS Code Quick Open exposes
+  no interception API (§What this is NOT); the intent is unachievable this way.
+- **Global markdown custom editor (`**/*.md`)** — rejected: owning every README/note is the
+  intrusive over-reach the "just enough human" thesis sells against (INV-No-global-hijack).
+- **Read-only webview viewer** — rejected as the *default* path: it strips save/undo/find and
+  makes specs un-editable in place (FR-4); only acceptable as the FR-OQ1 fallback with an
+  always-adjacent text editor.
+- **Ship `priority:"default"` immediately** — rejected: seizing specs as the unavoidable
+  default re-trains users and may strand `Reopen With` (Costly #3); FR-3 ships `option` + an
+  opt-in setting instead.
 
 ## Out of scope
 

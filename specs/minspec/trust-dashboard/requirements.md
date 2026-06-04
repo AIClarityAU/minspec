@@ -2,7 +2,7 @@
 id: SPEC-017
 type: requirements
 status: specifying
-tier: T3
+tier: T4
 product: minspec
 epic: EPIC-002  # Signpost Integrity
 aspects: [ux, data]
@@ -231,6 +231,38 @@ live. Ranked most→least costly.*
   disk + the approval store; same inputs ⇒ same numbers, no hidden event log required (FR-2,
   FR-3, FR-12).
 
+## Acceptance Criteria
+
+*Definition-of-done; each item traces an FR/INV. Zone A — read before approving.*
+
+- [ ] **AC-1 (FR-1).** On approval, `ApprovalRecord` persists a gzipped latest-approved body
+  snapshot + a `reviewStart` timestamp into git-ignored `.minspec/snapshots/`; an old
+  `approvals.json` record lacking these fields still reads (back-compat path, per Follow-ups).
+- [ ] **AC-2 (FR-2, FR-4).** Rework % for a spec = changed chars ÷ `max(approvedChars,
+  currentChars)` over the **body** (frontmatter stripped via `parseSpec`); recomputing it
+  twice from the same files yields the identical number (INV — Deterministic).
+- [ ] **AC-3 (FR-3).** A manual editor edit, an agent on-disk edit, and a (future) SPEC-014
+  in-webview edit each move M1 identically for the same char delta — no surface is
+  instrumented; the file is the source of truth.
+- [ ] **AC-4 (FR-5).** `superseded` is a member of [`SPEC_STATUSES`](../../../packages/minspec/src/lib/spec.ts#L14)
+  with a `superseded-by: SPEC-NNN` field, and SPEC-015's total-coverage T0 lane test passes
+  (the status→lane map is updated, not left partial).
+- [ ] **AC-5 (FR-6).** A superseded spec's previously-approved chars render as a **separate
+  "wasted review" bar**, never summed into the M1 denominator.
+- [ ] **AC-6 (FR-7, FR-7a, INV — Outcome over proxy).** M3 duration is engaged reading time
+  (first-engagement start, idle gaps > threshold stripped), not `approvedAt − reviewStart`;
+  no code path writes a time- or scroll-threshold "skimmed" flag to a spec or fires such a
+  warning (T0 test green).
+- [ ] **AC-7 (FR-8, INV — Consensual human telemetry).** With the opt-in toggle **off**, M3
+  and all engagement sampling are absent and M1/M2 still compute; when on, the state is
+  UI-visible and only timestamps + scroll/focus positions (no content) are stored.
+- [ ] **AC-8 (FR-9).** The dashboard shows M3 only as an engaged-time × later-rework scatter;
+  there is no time-only badge, note, or warning anywhere in the surface.
+- [ ] **AC-9 (FR-10, FR-11, FR-12, INV — Tier-0 core / Non-destructive).** The chart renders
+  in the existing spec-panel webview via inline SVG / vendored no-fetch renderer reusing the
+  CSP-nonce pattern; `packages/minspec` gains no `http`/`https`/`fetch`/`net` import (T0
+  import-ban green); opening the dashboard mutates no spec body and invalidates no approval.
+
 ## Coverage Map (session asks → FR)
 
 | Concern (from session) | FR |
@@ -269,6 +301,147 @@ live. Ranked most→least costly.*
   the existing spec-panel now (FR-OQ1 resolved), not in the review pane. When SPEC-014 lands
   it becomes a richer engagement source (full-DOM scroll/focus, FR-7a) and a second mount
   point — FR-12's host-agnostic render allows it. This spec assumes none of SPEC-014's code.
+
+## Assumptions
+
+- **A1.** [`approval.ts`](../../../packages/minspec/src/lib/approval.ts) (DR-012) remains the
+  single approval-write path, so FR-1's snapshot + FR-7's `reviewStart` can be persisted at
+  exactly one site; if approvals are ever written elsewhere, the snapshot would be missed.
+- **A2.** `parseSpec` reliably splits frontmatter from body (FR-4 leans on it for the diff
+  boundary); no separate `coreHash` / two-zone delimiter exists or is needed.
+- **A3.** A char-level diff over a single spec body is cheap enough to recompute on demand
+  (FR-2 / INV — Deterministic) — no persisted event log; numbers derive from files + the
+  approval store each render.
+- **A4.** `.minspec/snapshots/` can be git-ignored without losing the trust trend, because the
+  numeric history (`{approvedAt, reworkPct, engagedMs}`, FR-OQ4) carries the trend, not the
+  bodies (gates R3).
+
+## Test-thought
+
+M1/M2 are pure functions of files-on-disk + the approval store (INV — Deterministic, FR-12),
+so verification is fixture-snapshot unit tests: feed an approved-body snapshot + a later body,
+assert the exact rework % (FR-2) and the separate wasted-review figure (FR-6); the proxy-trap
+ban (INV — Outcome over proxy) is verified by a T0 test asserting no code path emits a
+time/scroll-threshold verdict (FR-9), and the Tier-0 guarantee by the import-ban T0 test
+(INV — Tier-0 core, mirroring SPEC-014 FR-17).
+
+## Consequences
+
+**Positive:**
+- Makes the standing-but-unmeasured **rubber-stamping** risk (SPEC-014 R6) an *observable
+  outcome* (M1/M2 ground truth) rather than an accusation — "measurement is the moat" (Context)
+  becomes a shippable differentiator.
+- Brings specs to status parity with ADRs by adding `superseded` (FR-5), and the SPEC-015 INV-1
+  total-coverage T0 turns that addition into a *forced* lane-mapping decision — a gate, not a gap.
+- Lands MinSpec's **first chart** (FR-10) as a reusable, host-agnostic pure render (FR-12) that a
+  later SPEC-014 review pane can mount with a re-wire, not a rewrite.
+
+**Negative:**
+- Grows the `ApprovalRecord` data model and the on-disk `.minspec/` footprint (snapshots +
+  numeric history), forcing an `approvals.json` back-compat migration (Follow-ups; Costly #1, #4).
+- Adds human-timing telemetry (M3) — even opt-in and content-free (FR-8), it carries a
+  surveillance-smell cost (R4) the copy and consent UI must continuously manage.
+- The `superseded` enum addition ripples beyond this dashboard into the spec parser, validator,
+  and SPEC-015 lane map (Costly #2, Follow-ups) — blast radius wider than the chart itself.
+
+## Failure-Modes / Edge-Cases
+
+- **First-ever approval (no prior snapshot).** FR-2's baseline doesn't exist yet → rework % must
+  be defined as 0% / "no prior review" for the first approval, not a divide-by-zero or 100%.
+- **`max(approvedChars, currentChars) = 0` (empty body).** A spec whose body is empty must not
+  throw in the FR-2 denominator; treat as 0% rework.
+- **Legacy `approvals.json` record lacking snapshot/reviewStart (FR-1/FR-7).** The back-compat
+  read path (Follow-ups) must yield "no M1/M3 datapoint for this record," never crash the render.
+- **Opt-in toggle flipped off mid-review (FR-8).** Engagement sampling stops immediately and any
+  partial M3 timing for that artifact is discarded — M1/M2 still compute (INV — Consensual).
+- **Spec superseded *before* it was ever approved (FR-6).** Zero previously-approved chars → it
+  contributes nothing to the wasted-review bar (no negative / phantom waste).
+- **Re-approval with identical body.** Char delta = 0 ⇒ M1 = 0% for that round; not counted as
+  "reworked" (FR-2 diffs content, not the approve event).
+- **No distinct concurrency edge** — the dashboard is single-repo, read-only over local files
+  (FR-11, Out-of-scope cross-repo); accepted because there is no multi-writer surface.
+
+## Test / Verification Strategy
+
+*Per-FR test tier (T0 invariant · T1 contract · T2 feature · T3 regression) + assertion sketch.*
+
+- **FR-1 — T1/T3.** Approve a fixture spec → assert `ApprovalRecord` now carries a gzipped body
+  snapshot + `reviewStart`; T3 regression: a pre-migration `approvals.json` record still reads.
+- **FR-2, FR-4 — T1.** Snapshot "abcde" vs later "abXde" → assert rework % = 1/5 over body only;
+  flip only frontmatter `status:` → assert 0% (frontmatter excluded).
+- **FR-3 — T2.** Apply the same char delta via (a) editor edit and (b) on-disk agent edit →
+  assert identical M1 (no surface instrumented).
+- **FR-5 — T0 (binds SPEC-015 INV-1).** `superseded ∈ SPEC_STATUSES` and the status→lane map is
+  total/disjoint — the SPEC-015 coverage test fails if the lane is unmapped.
+- **FR-6 — T1.** Supersede an approved fixture → assert its approved chars appear in the separate
+  wasted-review figure and are NOT in the M1 denominator.
+- **FR-7, FR-7a — T2.** Simulate engagement events with a > idle-threshold gap → assert engaged
+  time excludes the gap (≠ wall-clock); start fires on first engagement, not file-open.
+- **FR-7b, FR-9 — T0 (INV — Outcome over proxy).** Assert no code path writes a time/scroll
+  "skimmed" flag or warning, and M3 surfaces only as the engaged-time × rework scatter.
+- **FR-8 — T0 (INV — Consensual).** Toggle off ⇒ no engagement sampling, no stored timestamps,
+  M1/M2 intact; stored payload contains positions/timestamps only, never text.
+- **FR-10 — T0 (INV — Tier-0 core).** Import-ban test: no `http`/`https`/`fetch`/`net` import in
+  `packages/minspec` (mirrors SPEC-014 FR-17).
+- **FR-11 — T0 (INV — Non-destructive).** Render the dashboard over a fixture → assert spec bytes
+  and content hash are byte-identical before/after (no approval invalidated).
+- **FR-12 — T1.** Call metric + chart-markup functions with no `vscode` stub present → assert they
+  return numbers/SVG (pure, network-free).
+
+## Alternatives Considered
+
+- **Line-count rework proxy (instead of char-level diff, FR-2).** Rejected at FR-OQ2: line counts
+  aren't a true char % and would mis-measure dense prose edits — the same "rigorous-looking, wrong
+  thing" failure as SPEC-004's diff-size classifier (§The proxy trap).
+- **Standalone time-only "skimmed" verdict (the user's first instinct, "<5min ⇒ skimmed").**
+  Rejected by §The proxy trap, INV — Outcome over proxy, and FR-9: a bare time threshold fires
+  false accusations on co-authored / good-fast approvals and destroys trust in the trust tool.
+- **Store full approved body per spec per approval round (for richer history).** Rejected at
+  FR-OQ4 (R3): duplicates the repo many times over; latest-approved gzipped body + numeric trend
+  history keeps the signal at a fraction of the storage.
+- **Persist snapshot/timestamps into the spec frontmatter (simplest to find).** Rejected by INV —
+  Non-destructive + FR-11/R6: writing into the file changes its hash → marks the approval stale;
+  all state lives in the `.minspec/` sidecar instead.
+- **Mount the chart in the SPEC-014 review webview.** Rejected at FR-OQ1: SPEC-014 is `specifying`
+  (unbuilt), so the dashboard ships now in the existing spec-panel; FR-12's host-agnostic render
+  keeps the review-pane mount open as a later re-wire.
+
+## Dependencies & Blast-Radius
+
+*Augments the Dependencies section above with what breaks if each changes (T4).*
+
+- **[`approval.ts`](../../../packages/minspec/src/lib/approval.ts) / `ApprovalRecord` (FR-1, FR-7;
+  DR-012).** The data model M1/M3 extend. *Breaks if changed:* every approve-write and read, plus
+  an `approvals.json` migration (Costly #1, Follow-ups) — the back-compat read path must hold.
+- **[`SPEC_STATUSES`](../../../packages/minspec/src/lib/spec.ts#L14) + SPEC-015 lane map (FR-5).**
+  *Breaks if changed:* SPEC-015's INV-1 total-coverage T0 test goes red until the new lane is
+  mapped, and the spec validator + every superseded spec's frontmatter must agree (Costly #2).
+- **[`spec-panel-html.ts`](../../../packages/minspec/src/views/spec-panel-html.ts) CSP-nonce
+  render (FR-10).** *Breaks if changed:* the inline-SVG chart's nonce wiring; a regression here can
+  silently fail the chart or, worse, admit a network import (violating INV — Tier-0 core).
+- **`parseSpec` frontmatter split (FR-4).** *Breaks if changed:* the M1 body boundary — a change to
+  what counts as "body" silently shifts *every historical rework number* (Costly #3).
+- **`.minspec/snapshots/` location + numeric-history schema (FR-OQ4).** *Breaks if changed:*
+  re-snapshot or lose the trust trend; the gitignore entry must land with the first write (Costly
+  #4).
+- **SPEC-018 Spec Custom Editor (engagement source for FR-7a).** *Soft* dependency only — M3 must
+  work via the plain-editor fallback; SPEC-018 being absent must NOT break the dashboard (FR-7a).
+
+## Rollback / Reversibility
+
+- **Undo mechanism.** M3 is the riskiest surface and is independently reversible: the FR-8 opt-in
+  toggle off ⇒ M3 + all engagement sampling vanish, M1/M2 stand alone (R7 fallback: "M3 ships
+  disabled, M1/M2 stand"). The whole dashboard is a read-only spec-panel section (FR-11) — removing
+  the section reverts the UI with no spec-file or hash changes (INV — Non-destructive).
+- **Hard-to-reverse residue.** Two changes outlive a UI rollback and are the reason this is **not**
+  freely reversible: (1) the `ApprovalRecord` schema + persisted `.minspec/snapshots/` (Costly #1,
+  #4) — rolling back means a reverse migration of `approvals.json`; (2) the `superseded` enum +
+  any spec frontmatter that adopted `superseded-by:` (Costly #2) — reverting the grammar means
+  re-editing every superseded spec and the SPEC-015 lane map.
+- **ADR-filter answer.** *Not* undoable in <1 day — the cross-spec `superseded` contract and the
+  approval-store schema/migration carry it past the DR threshold. Rationale already lives in
+  `depends_on: DR-012`; the `superseded` contract and migration are materialized as the first two
+  items under **Follow-ups (tracked)**.
 
 ## Out of scope
 

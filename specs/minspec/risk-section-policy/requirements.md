@@ -3,7 +3,7 @@ id: SPEC-013
 type: requirements
 # 🔒 Once approved, hash-locked: approved bytes recorded in .minspec/approvals.json[SPEC-013].specHash. ANY edit voids approval (hash → stale) — re-run "MinSpec: Approve Spec". DR-012.
 status: specifying
-tier: T3
+tier: T4
 product: minspec
 epic: EPIC-003  # SDD Core Methodology
 depends_on: [DR-029, DR-020, DR-026, DR-028, DR-030, DR-022]  # DR-029 keystone; DR-020(+addendum) policy; DR-026 offer-not-silent; DR-028 cross-cutting; DR-030 untrusted-input; DR-022 future re-scope
@@ -216,18 +216,208 @@ contracts, cross-package boundaries, new deps, data-model / public-API changes.)
   "complete" on presence alone — FR-9 (disposition) + FR-10 (freshness) + FR-11
   (coverage) gate it (DR-028/DR-029).
 
+## Acceptance Criteria
+
+*Definition-of-done — each item traces a concrete FR/invariant. Checked = built +
+its T0/T1 test green (see Test / Verification Strategy below).*
+
+- [ ] **One registry drives enforcement** — sections emit from the single FR-1 table
+  (`{ heading, appliesTo, minTier, shape, crossCutting }`); adding/removing a section
+  is a table edit with no new code path. *(FR-1)*
+- [ ] **Exactly one `hasSection` predicate** — validator (FR-6) and template self-check
+  call the same function, parameterised by heading; no second implementation exists.
+  *(FR-2, INV-single-predicate)*
+- [ ] **Per-FR disposition coverage (L0)** — every `FR-N` in the spec is paired with a
+  risk row, a "covered by FR-M" escape, or a "happy-path only, accepted" escape; a
+  naked FR is named by the validator. *(FR-3, FR-9 L0)*
+- [ ] **Consequences ± shape enforced** — a Consequences section satisfies only with ≥1
+  positive AND ≥1 negative (or an explicit one-sided "Negative: none"), detected via the
+  polarity-cue set. *(FR-4)*
+- [ ] **Scaffolds emit tier-scoped stubs** — `specify`/`plan`/Create-ADR templates emit
+  one stub per `appliesTo` registry entry, cross-cutting ones as `⏳ not yet counted`
+  deferred placeholders; a filled Consequences stub passes FR-4 with no edit. *(FR-5)*
+- [ ] **Detect → offer, never silent / never block** — the validator names file+section
+  on under-satisfaction, surfaces a one-click stub-insert offer, exits zero, and never
+  rewrites the author's content. *(FR-6, FR-7, INV-advisory)*
+- [ ] **Two-zone split renders** — a spec splits at `<!-- minspec:core-end -->` into
+  Zone A and the Zone-B self-audit appendix, with B1 (skim) / B2 (please read) ordered by
+  verification status; Assumptions/Alternatives/Rollback are structurally B2. *(FR-8)*
+- [ ] **Deterministic floor L0-L3 runs with no AI/network** — disposition (L0),
+  specificity→B2 (L1), id-based consistency (L2), freshness (L3) all execute in
+  `packages/minspec`/`packages/shared` with no `claude`/`http`/`fetch`. *(FR-9, INV-Tier-0)*
+- [ ] **Freshness binds FR-body bytes** — editing an FR's body after a cross-cutting
+  section is written marks that section stale and surfaces a named offer. *(FR-10)*
+- [ ] **Parse contract implemented** — `spec-validator.ts` parses `FR-N` ids, the
+  disposition block, the polarity cues, and the `<!-- minspec:core-end -->` delimiter
+  (none parsed today). *(FR-12)*
+- [ ] **Cross-checks lifecycle gated to T3/T4** — `specify → core-signoff → cross-checks
+  → final-approve → done` exists for T3/T4 only; T1/T2 keep one Risks line, no second
+  approval; the new phase propagates to SPEC-015 lanes + classifier + signpost. *(FR-13)*
+- [ ] **No policy/LLM leak** — the spec encodes registry+predicate only (taxonomy stays
+  DR-020 / addendum); no reality-check, round-table, LLM-drafted content, or skim claim
+  ships in Slice 1. *(FR-14, INV-Tier-0)*
+
 ## Risks & Mitigations
 
 | # | Risk | Likelihood · Impact | Mitigation |
 |---|---|---|---|
 | R1 | **Stub/validator drift** — template emits a heading the predicate rejects. | Med · High | FR-2 single predicate + INV-single-predicate; T0 test scaffolds each tier and asserts the raw stub passes. |
-| R2 | **Backfill warning-flood** — enabling FR-6 over existing DRs/specs floods warnings. | High · Med | RD-1 backfill-before-enable (incl. restructuring 25 DRs' Consequences to ±); advisory-only meanwhile. |
+| R2 | **Backfill warning-flood** — enabling FR-6 over existing DRs/specs floods warnings. | High · Med | RD-1 backfill-before-enable (the ~22 of 28 DRs whose Consequences are prose, not ±, need restructuring; DR-007/DR-010 lack Consequences entirely); advisory-only meanwhile. |
 | R3 | **Predicate too loose** — empty heading passes. | Med · Med | FR-2 requires ≥1 non-empty line; FR-3 disposition per FR. |
 | R4 | **Vacuity passes Tier-0** — specific-but-vacuous line clears the floor. | High · High | Floor catches omission, not vacuity (stated, DR-029 R1). Caught only by the Slice-2 reality-check; no skim claim until the study (FR-13/#127), so vacuity never earns a skim licence. Residual. |
 | R5 | **Ceremony creep at T2** — the cheap floor grows into a T2 wall. | Med · Med | T2 entries are one-line, skim-not-read (consideration, not ceremony); Invariant #4 + ceremony tests in CI. |
 | R6 | **Freshness false-positives** — cosmetic FR reword voids a section. | Med · Med | FR-10 binds FR-body bytes deliberately (closes substance-rot); FR-ref present clears the cell. Accepted safe direction. |
 | R7 | **Floor depends on unbuilt specs** — SPEC-010 DAG (#121) + SPEC-006 stub scanner are `specifying`. | High · High | FR-9 L4 + FR-11 are explicitly *consumed* dependencies; sequence SPEC-006 + SPEC-010 before those layers are trusted; FR-9 L0-L3 + FR-10 ship independently. |
 | R8 | **"Consequences" name collision** with the DR-022 reach axis. | Med · Low | Out-of-scope separates them; this enforces a doc-section heading, never a risk-screen signal. |
+
+## Assumptions
+
+- The registry (FR-1) is small enough that section policy lives in data, not code — adding
+  a section is a table row, never a new mechanism (the whole premise of FR-1).
+- DR-020 + its addendum remain the **sole** owners of Risks/Consequences taxonomy; this
+  spec assumes it never has to encode depth policy (FR-14).
+- SPEC-006 (hollow-test scanner, FR-9 L4) and SPEC-010 (coverage DAG, #121, FR-11) are
+  available *before* their consuming layers are trusted; FR-9 L0-L3 + FR-10 are assumed
+  independent of both and ship first (per Open questions).
+- An FR-id reference inside a cross-cutting section is a reliable proxy for "this section
+  considered that FR" — the basis of both the freshness clear (FR-10) and coverage (FR-11).
+
+## Test-thought
+
+Verified by scaffolding a spec at each tier (T1-T4) and asserting (a) the raw emitted
+stubs pass the `hasSection` predicate (FR-2/FR-5, no stub/checker drift), (b) a spec with
+a naked `FR-N` is flagged by L0 (FR-3/FR-9), (c) a Consequences section missing a polarity
+side fails FR-4, and (d) the validator exits **zero** on every under-satisfaction (FR-6,
+INV-advisory). No-AI/network is verified by a grep-gate over `packages/minspec` /
+`packages/shared` (INV-Tier-0). Full per-FR matrix in Test / Verification Strategy below.
+
+## Coverage Map
+
+*Each mechanism/concern this spec introduces, mapped to the FR(s) that own it — the
+inverse of the per-FR disposition, used to confirm no concern is orphaned.*
+
+| Mechanism / concern | Owning FR(s) |
+|---|---|
+| Section registry (data-driven policy) | FR-1 |
+| Single `hasSection` predicate | FR-2 |
+| Per-FR disposition (anti-gaming) | FR-3 |
+| Per-entry satisfaction shape (Risks forms, Consequences ±) | FR-4 |
+| Scaffold/template stub emission | FR-5 |
+| Detect → offer (never silent / never block) | FR-6, FR-7 |
+| Two-zone document + B1/B2 sub-zones | FR-8 |
+| Deterministic floor L0-L4 | FR-9 (+ FR-10 = L3) |
+| Freshness (FR-body-byte binding) | FR-10 |
+| FR→section coverage (consumes SPEC-010) | FR-11 |
+| Parse contract / grammar | FR-12 |
+| Cross-checks lifecycle (T3/T4) | FR-13 |
+| Policy + LLM scope boundary | FR-14 |
+| Costly-to-Refactor Zone-A seam aid | FR-1 placement exception (#132) |
+
+## Consequences
+
+**Positive:**
+
+- One registry + one predicate (FR-1/FR-2) means section policy evolves by editing a
+  table, not shipping code — the cost of the next cross-check section approaches zero.
+- The per-FR disposition (FR-3) makes Risks coverage *un-gameable by count* — a wall of
+  identical escapes is visible at a glance, which a floating risk-count never was.
+- Slice 1 ships a real mechanism with **no AI and no trust claim** (FR-14, FR-13), so the
+  air-gap invariant (#1) and the never-wrong positioning are preserved while evidence is
+  gathered (#127).
+
+**Negative:**
+
+- Backfill is mandatory before FR-6 enables (RD-1): Risks onto every DR/spec lacking it
+  *and* restructuring the ~22 of 28 DRs whose Consequences are prose (only ~6 already use
+  ± polarity cues) into ± shape — real one-time toil (R2).
+- Freshness binding FR-body bytes (FR-10) means a cosmetic FR reword voids the section —
+  an accepted false-positive we deliberately chose over substance-rot (R6).
+- The floor's strongest layers (L4 hollow-test, FR-11 coverage) are **debt** until SPEC-006
+  and SPEC-010 (#121) land — Slice 1 ships with L0-L3 + FR-10 only (R7).
+
+## Failure-Modes / Edge-Cases
+
+1. **Heading present, body empty** — a `## Risks & Mitigations` with no content line: FR-2
+   requires ≥1 non-empty line, so it reads *unsatisfied*, not *satisfied* (R3).
+2. **Specific-but-vacuous line** — a line citing a real FR but saying nothing true clears
+   the Tier-0 floor (L1 only checks anchor presence). Accepted residual: caught only by
+   the Slice-2 reality-check, and no skim licence is granted until #127 (R4).
+3. **Deferred placeholder counted as missing OR satisfied** — a `⏳ not yet counted` stub
+   (FR-5) must be *neither*; mis-bucketing it either floods FR-6 warnings or lets an empty
+   section pass. It is explicitly a third state (FR-9).
+4. **One-sided Consequences** — only `Positive:` filled: fails FR-4 unless the author
+   writes the explicit `Negative: none` judgement (the written judgement is the value).
+5. **FR renumbered/removed after sign-off** — the FR-set hash changes (FR-10); every
+   bound cross-cutting section goes stale and re-offers, never silently passes.
+6. **Out-of-scope item that is actually an FR** — L2 id-based consistency flags any
+   out-of-scope entry that appears in the FR-set, and any FR listed both in and out (FR-9 L2).
+
+## Test / Verification Strategy
+
+*Per-FR test tier (T0 invariant / T1 contract / T2 feature / T3 regression / T4 coverage)
++ one-line assertion sketch. T0 = highest priority (invariants).*
+
+| FR | Tier | Assertion sketch |
+|---|---|---|
+| FR-1 | T1 | Registry parses to N entries with required keys; unknown key rejected. |
+| FR-2 | T0 | `hasSection` accepts `##`/`###` heading + ≥1 content line; empty body → false; one impl only. |
+| FR-3 | T0 | Spec with a naked `FR-N` (no row/escape) → L0 names it; every FR paired → passes. |
+| FR-4 | T0 | Consequences with only `Positive:` → fail; `Negative: none` added → pass; polarity cues table-driven. |
+| FR-5 | T2 | Scaffold each tier; raw emitted stubs all pass `hasSection`; Consequences stub carries ± skeleton. |
+| FR-6 | T0 | Under-satisfied artifact → validator names file+section AND `exit 0` (never non-zero, never rewrite). |
+| FR-7 | T2 | Each finding yields id/path + section + one-line remedy (+ action where surface supports). |
+| FR-8 | T2 | Spec splits at `<!-- minspec:core-end -->`; Assumptions/Alternatives/Rollback land in B2. |
+| FR-9 | T0 | L0-L2 each fire on a crafted fixture; L1 flags an anchor-free line to B2 (never drops it). |
+| FR-10 | T0 | Edit an FR body after section written → section marked stale; FR-ref present clears the cell. |
+| FR-11 | T4 | Consumes SPEC-010 predicate; uncovered FR named — gated on #121, ships after. |
+| FR-12 | T1 | Parser extracts `FR-N`, disposition block, polarity cues, delimiter from a fixture spec. |
+| FR-13 | T2 | T3/T4 spec walks `specify→core-signoff→cross-checks→final-approve→done`; T1/T2 skip the phase. |
+| FR-14 | T0 | Grep-gate: no `claude`/`http`/`fetch` and no DR-020-depth policy in `packages/minspec`/`packages/shared`. |
+
+## Alternatives Considered
+
+- **One checker per section (no registry).** Rejected — N hand-written checkers drift from
+  N template stubs (exactly R1); the single-registry + single-`hasSection` design (FR-1/FR-2)
+  exists to make that drift impossible.
+- **Count-based Risks coverage** (≥N risks per spec). Rejected by FR-3 — a count is trivially
+  gamed by padding; per-FR disposition forces a *reason per FR*, far harder to fake.
+- **Hard-block on missing sections** (non-zero exit / refuse commit). Rejected — violates
+  INV-advisory + DR-026 (offer-never-silent); only DR-012 approval blocks (FR-6).
+- **Freshness on FR-ids only** (DR-028's original rule). Rejected by FR-10 — ids-only misses
+  substance-rot (FR body changes, id stays); DR-029 amends it to bind FR-body bytes, accepting
+  the cosmetic-reword false-positive (R6) as the safe direction.
+- **Ship the skim/trust claim in Slice 1.** Rejected — DR-029 §6 withholds it until the
+  validation study (#127); Slice 1's appendix is labelled "read what you want" (FR-13), no claim.
+
+## Dependencies & Blast-Radius
+
+*Declared dependencies + what breaks downstream if each is changed.*
+
+- **`scripts/validate-frontmatter.ts` / `spec-validator.ts`** (FR-6, FR-12) — gains the new
+  parser + detect/offer path. Today it parses **none** of the grammar (FR-12); a regression
+  here silences the whole floor. Highest blast-radius file.
+- **`hasSection` predicate** (FR-2) — consumed by validator *and* every template self-check;
+  a signature/semantics change ripples to all callers + every emitted stub (INV-single-predicate).
+- **`specify`/`plan` scaffolds + Create-ADR template** (FR-5) — every new spec/DR inherits
+  their stubs; a stub that fails `hasSection` reintroduces R1 drift across all future docs.
+- **SPEC-010 coverage DAG (#121)** (FR-11) — amended, not silently edited; FR-11 is dead until
+  it lands. **SPEC-006 hollow-test scanner** (FR-9 L4) — same: L4 stays unbuilt until SPEC-006.
+- **SPEC-015 lanes + classifier + signpost** (FR-13) — the new `cross-checks` phase must
+  propagate to all three (DR-029 §Methodology #5); a miss strands T3/T4 specs mid-lifecycle.
+- **`<!-- minspec:core-end -->` delimiter + `coreHash`** (FR-8, FR-13) — a structural contract
+  every doc adopts; moving it forces re-delimit + rehash of every existing spec.
+
+## Rollback / Reversibility
+
+- **Undo mechanism.** Slice 1 is advisory-only and exits zero (FR-6, INV-advisory): disabling
+  it is a config/flag flip on the validator's detect-offer path — no doc rewrite to revert,
+  nothing blocks in the meantime. The scaffold stubs (FR-5) are inert text; removing them is a
+  template edit. The genuinely hard-to-reverse pieces are catalogued in **Costly to Refactor**
+  (the `hasSection` predicate, the Tier-0 boundary, the parse grammar, the `core-end` delimiter).
+- **ADR-filter (undo in <1 day?).** **No** — the registry + predicate + parse contract + two-zone
+  delimiter are foundational seams adopted across every spec/DR (Costly items 1, 3, 4); they are
+  *not* reversible in <1 day, which is why this work is governed by DR-029 (keystone) rather than
+  done ad-hoc. The advisory *surfacing* is reversible in minutes; the *contracts* are not.
 
 ## Out of scope
 
@@ -255,3 +445,47 @@ contracts, cross-package boundaries, new deps, data-model / public-API changes.)
 - **None blocking.** Sequenced dependencies (not blockers): SPEC-006 hollow-test
   extension (FR-9 L4) and SPEC-010 coverage edge (#121, FR-11) ship before those two
   layers are trusted; the rest of the floor (FR-2/3/4/9 L0-L2/10) is independent.
+
+## Follow-ups (tracked)
+
+*Every forward-looking / deferred item this spec surfaces, with its tracking ref
+(DR-023). Cross-repo / non-code consequences get an issue ref or an explicit
+"→ file issue". Items below this spec's own scope (Slice 1, Tier-0) are EPIC-007 /
+Slice 2-3 work and tracked on their own spec.*
+
+- **Activate the skim/trust ("skim-safe") claim** once the validation study returns —
+  Slice 1 ships the mechanism with *no* claim (FR-13/FR-14, R4, RD-7). Tracked:
+  [#127](https://github.com/harvest316/minspec/issues/127).
+- **Skim-claim telemetry** to gather the evidence #127 depends on (Out of scope) —
+  tracked: [#128](https://github.com/harvest316/minspec/issues/128).
+- **Problems-panel surface for the offer** — FR-7/RD-2 ship CLI stdout in v1; the
+  one-click action in the editor Problems panel is later. Tracked:
+  [#118](https://github.com/harvest316/minspec/issues/118).
+- **Amend SPEC-010's coverage DAG** to own the FR→section coverage edge that FR-11
+  consumes (approved spec — amended + re-reviewed, not silently edited; R7,
+  Dependencies). Tracked: [#121](https://github.com/harvest316/minspec/issues/121).
+  FR-9 L0-L3 + FR-10 ship independently of it.
+- **DR-022 reach-axis re-scope gate** — this spec re-scopes to DR-022 on its
+  acceptance (frontmatter, Out of scope, R8); the reach/consequence risk-screen axis
+  is gated on [#91](https://github.com/harvest316/minspec/issues/91) per DR-024. Not a
+  doc-section concern of this spec.
+- **Costly-to-Refactor Zone-A placement exception** — the one family member that
+  renders in Zone A (FR-1 placement exception, Coverage Map). Tracked:
+  [#132](https://github.com/harvest316/minspec/issues/132).
+- **Reality-check agent + round-table + LLM-drafted offer content + Zod verdict
+  contract + untrusted-input handling** — Tier-1, explicitly out of this Tier-0 core
+  (FR-14, Out of scope, isolation per DR-030). Tracked on the **EPIC-007 spec
+  (Slices 2-3)**; → file issue if no EPIC-007 spec id exists yet to carry Slice 2-3.
+- **RD-1 backfill before FR-6 enables** — Risks onto every DR/spec lacking it *and*
+  restructure the ~22 of 28 DRs whose Consequences are prose (DR-007/DR-010 lack
+  Consequences entirely) into ± shape (RD-1, R2, Consequences→Negative). One-time
+  migration prerequisite to enabling the FR-6 floor. → file issue (cross-cutting
+  backfill chore, no owning SPEC) if not already tracked alongside #121.
+- **Sequence SPEC-006 (hollow-test scanner, FR-9 L4) + SPEC-010 (coverage DAG, #121,
+  FR-11) before their consuming layers are trusted** — both `specifying`; L4 + FR-11
+  are debt until they land (Open questions, R7, Assumptions, Dependencies). Tracked
+  via SPEC-006, SPEC-010, and [#121](https://github.com/harvest316/minspec/issues/121).
+- **Propagate the new `cross-checks` phase to SPEC-015 lanes + the classifier + the
+  signpost** (FR-13, DR-029 §Methodology #5, Dependencies) — a miss strands T3/T4
+  specs mid-lifecycle. Tracked via **SPEC-015** (lanes) + the classifier/signpost work
+  it governs.
