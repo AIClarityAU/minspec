@@ -177,8 +177,9 @@ NOT share the global `~/code/mmo-platform/docs/decisions.md` register (currently
 **not** apply here — it is overridden by this project-local register.
 
 - Next number = `max(existing DR-NNN in docs/decisions/) + 1`. Use the MinSpec
-  ext (**MinSpec: Create ADR**), which computes this correctly and writes the
-  standard template. Do not hand-pick a number from the global register.
+  ext (**MinSpec: Create Architecture Decision Record**), which computes this
+  correctly and writes the standard template. Do not hand-pick a number from the
+  global register.
 - A DR created with an out-of-sequence number (e.g. a global-register number
   like `DR-012` in this repo) is a convention error — renumber to the next local
   number and update all references.

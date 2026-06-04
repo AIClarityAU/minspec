@@ -149,4 +149,27 @@ describe("repo CLAUDE.md — no phantom 'minspec' shell CLI", () => {
     const commands = section(content, 'Commands');
     expect(commands).toMatch(/Command Palette/);
   });
+
+  // Widened guard (#126): the phantom-CLI block was not the only stale command
+  // reference — the Decision Register section once named "MinSpec: Create ADR",
+  // a title that does not exist (real: "MinSpec: Create Architecture Decision
+  // Record"). Scope the structural ⊆ check to the WHOLE file so any palette-title
+  // shorthand that drifts from contributes.commands fails, not just the one section.
+  it('every "MinSpec: <Title>" reference in the whole file is a real command', () => {
+    const titles = realCommandTitles();
+    const refs = extractPaletteTitleRefs(content);
+    const phantom = refs.filter((t) => !titles.has(t));
+    expect(
+      phantom,
+      `phantom palette titles in repo CLAUDE.md: ${phantom.join(', ')}`,
+    ).toEqual([]);
+  });
+
+  it('the whole file advertises no "minspec <subcommand>" shell CLI', () => {
+    const invocations = extractShellCliInvocations(content);
+    expect(
+      invocations,
+      `phantom shell-CLI invocations in repo CLAUDE.md: ${invocations.join(', ')}`,
+    ).toEqual([]);
+  });
 });
