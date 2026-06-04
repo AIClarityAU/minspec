@@ -27,6 +27,7 @@ import {
   recordInstallTimestamp,
   buildNudgeMessage,
   isScroogeLlmInstalled,
+  setupConformanceWatcher,
 } from '../src/lib/bridge';
 import { detectAITools } from '../src/lib/ai-usage-detector';
 
@@ -162,6 +163,46 @@ describe('bridge — maybeShowNudge gating', () => {
     const ctx = makeContext({ 'minspec.installedAt': now - (ONE_DAY + 1) });
     await maybeShowNudge(ctx, now);
     expect(vscode.env.openExternal).toHaveBeenCalled();
+  });
+});
+
+describe('bridge — setupConformanceWatcher (#123 multi-root base)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    // conformance.enabled = true so the watcher is actually created.
+    (vscode.workspace.getConfiguration as ReturnType<typeof vi.fn>).mockReturnValue({
+      get: (key: string, def?: unknown) =>
+        key === 'conformance.enabled'
+          ? true
+          : key === 'specsDir'
+            ? 'specs'
+            : def,
+    });
+    // ScroogeLLM appears installed (second precondition for the watcher).
+    (vscode.extensions.getExtension as ReturnType<typeof vi.fn>).mockReturnValue({
+      id: 'aiclarity.scroogellm',
+    });
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('uses the passed workspaceRoot as the watcher base, not workspaceFolders[0]', () => {
+    const created: any[] = [];
+    (vscode.workspace.createFileSystemWatcher as ReturnType<typeof vi.fn>).mockImplementation(
+      (pattern: { a?: unknown }) => {
+        created.push(pattern?.a);
+        return { onDidChange: vi.fn(), onDidCreate: vi.fn(), onDidDelete: vi.fn(), dispose: vi.fn() };
+      },
+    );
+
+    const watcher = setupConformanceWatcher('/tmp/wsB');
+
+    expect(watcher).toBeDefined();
+    expect(created).toHaveLength(1);
+    // RelativePattern base must be the folder we were asked to watch.
+    expect(created[0]).toBe('/tmp/wsB');
   });
 });
 

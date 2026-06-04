@@ -32,6 +32,10 @@ let adrWatcher = makeWatcher();
 let traceWatcher = makeWatcher();
 let watcherCallIndex = 0;
 
+// #123: capture the RelativePattern base passed to each createFileSystemWatcher
+// call so tests can assert watchers target the resolved folder, not always [0].
+let watcherPatternBases: any[] = [];
+
 // Track tree data providers registered
 const registeredTreeProviders = new Map<string, any>();
 
@@ -92,7 +96,8 @@ vi.mock('vscode', () => ({
     getConfiguration: vi.fn(() => ({
       get: vi.fn((_key: string, def: any) => def),
     })),
-    createFileSystemWatcher: vi.fn(() => {
+    createFileSystemWatcher: vi.fn((pattern?: { base?: unknown }) => {
+      watcherPatternBases.push(pattern?.base);
       // Return different watchers in order of creation
       const watchers = [specWatcher, adrWatcher, traceWatcher];
       const w = watchers[watcherCallIndex] ?? makeWatcher();
@@ -340,6 +345,7 @@ beforeEach(() => {
   adrWatcher = makeWatcher();
   traceWatcher = makeWatcher();
   watcherCallIndex = 0;
+  watcherPatternBases = [];
 
   // Default: .minspec/ exists (suppress first-run prompt)
   vi.mocked(fs.existsSync).mockReturnValue(true);
@@ -809,6 +815,42 @@ describe('activate()', () => {
       });
     } finally {
       ws.workspaceFolders = original;
+    }
+  });
+
+  it('targets the active editor folder (not [0]) for all file watchers in a multi-root workspace (#123)', () => {
+    const ws = vscode.workspace as {
+      workspaceFolders: unknown;
+    };
+    const win = vscode.window as { activeTextEditor: unknown };
+    const originalFolders = ws.workspaceFolders;
+    const originalEditor = win.activeTextEditor;
+    ws.workspaceFolders = [
+      { uri: { fsPath: '/tmp/wsA' } },
+      { uri: { fsPath: '/tmp/wsB' } },
+    ];
+    // Active editor lives in folder [1] (wsB) — every watcher base must follow.
+    win.activeTextEditor = {
+      document: { uri: { fsPath: '/tmp/wsB/specs/SPEC-001.md' } },
+    };
+    // Opt into the auto-classify git watcher so we cover that site too.
+    vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+      get: vi.fn((key: string, def: any) =>
+        key === 'autoClassifyOnCommit' ? true : def,
+      ),
+    } as any);
+    try {
+      activate(makeMockContext());
+
+      // The spec, ADR, traceability, approvals and git watchers are all
+      // created; none may silently fall back to folder [0] (/tmp/wsA).
+      expect(watcherPatternBases.length).toBeGreaterThanOrEqual(4);
+      for (const base of watcherPatternBases) {
+        expect(base).toBe('/tmp/wsB');
+      }
+    } finally {
+      ws.workspaceFolders = originalFolders;
+      win.activeTextEditor = originalEditor;
     }
   });
 
