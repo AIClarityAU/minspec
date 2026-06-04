@@ -810,9 +810,15 @@
     .dogfooding-grid {
       display: grid;
       grid-template-columns: minmax(0, 1fr) 320px;
-      gap: 48px;
+      grid-template-areas:
+        "head image"
+        "body image";
+      gap: 0 48px;
       align-items: center;
     }
+    .dogfooding-head { grid-area: head; }
+    .dogfooding-body { grid-area: body; }
+    .dogfooding-image { grid-area: image; align-self: center; }
 
     .dogfooding .section-label {
       color: var(--accent-dim);
@@ -901,7 +907,8 @@
       }
       .dogfooding-grid {
         grid-template-columns: 1fr;
-        gap: 24px;
+        grid-template-areas: "head" "image" "body";
+        gap: 20px;
         text-align: center;
       }
       .dogfooding .section-title {
@@ -1401,9 +1408,11 @@
   <section class="dogfooding" id="dogfooding">
     <div class="section-inner">
       <div class="dogfooding-grid">
-        <div class="dogfooding-text">
+        <div class="dogfooding-head">
           <div class="section-label">Exhibit A</div>
           <h2 class="section-title">We eat our own <em>dog food</em></h2>
+        </div>
+        <div class="dogfooding-body">
           <p>
             <strong>With a smile, even.</strong> Every shipped feature gets tested on its harshest
             critic first &mdash; the developer himself. This whole project was specified, classified,
