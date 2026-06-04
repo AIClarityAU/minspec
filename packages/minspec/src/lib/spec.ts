@@ -16,6 +16,22 @@ export const SPEC_STATUSES = ['new', 'specifying', 'implementing', 'done', 'arch
 /** Lifecycle status of the entire spec */
 export type SpecStatus = typeof SPEC_STATUSES[number];
 
+/**
+ * Split-layout phase-file kinds. A spec split across sibling files carries one
+ * of these in its `type:` frontmatter (one phase per file); a single-file spec
+ * carries no `type` at all. Single source of truth: the split-layout branch in
+ * `validateSpec` and the closed-set `type` gate both import this, so the closed
+ * set of legitimate `type` values lives in exactly one place.
+ *
+ * NOTE: `type` is a closed-set field but NOT a required one — single-file specs
+ * legitimately omit it (their absence IS the single-file signal). Requiring it
+ * would mis-flag every single-file spec.
+ */
+export const SPEC_TYPES = ['requirements', 'design', 'tasks'] as const;
+
+/** A split-layout phase-file kind. */
+export type SpecType = typeof SPEC_TYPES[number];
+
 /** A single task item within a phase section */
 export interface TaskItem {
   readonly text: string;

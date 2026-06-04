@@ -403,3 +403,132 @@ describe('validateSpec — unrecognized closed-enum frontmatter (#115)', () => {
     expect(r.violations.some((x) => x.rule === 'frontmatter.tier.unknown')).toBe(false);
   });
 });
+
+// ── #137: symmetric closed-set / reference frontmatter primitive ───────────────
+// The recurring DR-003 Phase-4 asymmetry: validateSpec checked values that
+// *resolve* but never asserted (b) a *required* closed-set field is *present*, nor
+// — symmetrically — that a *required* reference is present. SPEC-004 sat orphaned
+// because a *missing* epic was as invisible as a *dangling* one; #115 patched
+// present⇒valid for status/tier but not required⇒present. This block locks in BOTH
+// directions for EVERY field class through one primitive: (a) present-but-unknown
+// closed-set value, (b) missing required closed-set field, (c) dangling reference,
+// (d) missing required reference. Severity = warning always (foreign-but-valid
+// vocabularies + incremental authoring must never be blocked, per #115).
+describe('validateSpec — symmetric frontmatter primitive (#137)', () => {
+  // Raw spec WITHOUT the spec() helper's defaults, so individual fields can be
+  // omitted to exercise the required⇒present direction. No `phases:` block needed
+  // for these frontmatter-only gates; a minimal body keeps the parser happy.
+  function rawSpec(fmLines: string[], body = '## Specify\nx\n'): string {
+    return `---\n${fmLines.join('\n')}\n---\n\n${body}`;
+  }
+
+  // (a) closed-set present ⇒ valid — preserved from #115 (status/tier), extended to type.
+  describe('(a) closed-set present ⇒ valid', () => {
+    it('warns on an unrecognized status (preserves #115)', () => {
+      const r = validateSpec(parseSpec(rawSpec(['id: SPEC-001', 'tier: T3', 'status: bogus'])), DEFAULT_CONFIG);
+      expect(r.violations.some((x) => x.rule === 'frontmatter.status.unknown' && x.severity === 'warning')).toBe(true);
+    });
+
+    it('warns on an unrecognized tier (preserves #115)', () => {
+      const r = validateSpec(parseSpec(rawSpec(['id: SPEC-001', 'tier: T9', 'status: done'])), DEFAULT_CONFIG);
+      expect(r.violations.some((x) => x.rule === 'frontmatter.tier.unknown' && x.severity === 'warning')).toBe(true);
+    });
+
+    it('warns on an unrecognized type (NEW closed-set field)', () => {
+      const r = validateSpec(parseSpec(rawSpec(['id: SPEC-001', 'status: done', 'type: blueprint'])), DEFAULT_CONFIG);
+      const v = r.violations.find((x) => x.rule === 'frontmatter.type.unknown');
+      expect(v).toBeDefined();
+      expect(v!.severity).toBe('warning');
+      expect(v!.message).toContain('blueprint');
+    });
+
+    it('does NOT warn for a recognized type (requirements/design/tasks)', () => {
+      for (const t of ['requirements', 'design', 'tasks']) {
+        const r = validateSpec(parseSpec(rawSpec(['id: SPEC-001', 'status: done', `type: ${t}`])), DEFAULT_CONFIG);
+        expect(r.violations.some((x) => x.rule === 'frontmatter.type.unknown')).toBe(false);
+      }
+    });
+
+    it('does NOT warn when type is absent (single-file spec — legitimate)', () => {
+      const r = validateSpec(parseSpec(rawSpec(['id: SPEC-001', 'status: done'])), DEFAULT_CONFIG);
+      expect(r.violations.some((x) => x.rule === 'frontmatter.type.unknown')).toBe(false);
+    });
+  });
+
+  // (b) closed-set required ⇒ present — THE gap. status is genuinely required
+  //     (parser silently defaults a missing one to 'new' → signpost-lie). tier/type
+  //     are closed-set but NOT required, so their absence must stay silent.
+  describe('(b) closed-set required ⇒ present', () => {
+    it('warns when a required closed-set field (status) is absent', () => {
+      // T1 + a Specify section → the only completeness requirement is satisfied, so
+      // `complete` reflects ONLY the frontmatter gate: a missing status must warn,
+      // never error (it must not flip an otherwise-complete spec to incomplete).
+      const r = validateSpec(parseSpec(rawSpec(['id: SPEC-001', 'tier: T1'], '## Specify\none-liner\n')), DEFAULT_CONFIG);
+      const v = r.violations.find((x) => x.rule === 'frontmatter.status.missing');
+      expect(v).toBeDefined();
+      expect(v!.severity).toBe('warning');
+      // never an error — must not block approval
+      expect(r.violations.some((x) => x.rule === 'frontmatter.status.missing' && x.severity === 'error')).toBe(false);
+      expect(r.complete).toBe(true);
+    });
+
+    it('does NOT warn missing for a non-required closed-set field (tier absent is fine)', () => {
+      // 10/21 real specs legitimately omit tier — requiring it would flood.
+      const r = validateSpec(parseSpec(rawSpec(['id: SPEC-001', 'status: done'])), DEFAULT_CONFIG);
+      expect(r.violations.some((x) => x.rule === 'frontmatter.tier.missing')).toBe(false);
+    });
+
+    it('does NOT warn missing for type (single-file specs omit it)', () => {
+      const r = validateSpec(parseSpec(rawSpec(['id: SPEC-001', 'status: done'])), DEFAULT_CONFIG);
+      expect(r.violations.some((x) => x.rule === 'frontmatter.type.missing')).toBe(false);
+    });
+
+    it('warns when the required identity field (id) is absent', () => {
+      const r = validateSpec(parseSpec(rawSpec(['title: No Id', 'tier: T1', 'status: done'], '## Specify\nx\n')), DEFAULT_CONFIG);
+      const v = r.violations.find((x) => x.rule === 'frontmatter.id.missing');
+      expect(v).toBeDefined();
+      expect(v!.severity).toBe('warning');
+      expect(r.complete).toBe(true);
+    });
+
+    it('does NOT warn id.missing when id is present', () => {
+      const r = validateSpec(parseSpec(rawSpec(['id: SPEC-001', 'status: done'])), DEFAULT_CONFIG);
+      expect(r.violations.some((x) => x.rule === 'frontmatter.id.missing')).toBe(false);
+    });
+  });
+
+  // (c) reference present ⇒ resolvable — the epic.unresolved direction (preserved).
+  it('(c) reference present ⇒ resolvable: warns on a dangling epic ref', () => {
+    const r = validateSpec(
+      parseSpec(rawSpec(['id: SPEC-001', 'status: done', 'epic: EPIC-999'])),
+      DEFAULT_CONFIG,
+      new Set(['epic-001']),
+    );
+    expect(r.violations.some((x) => x.rule === 'epic.unresolved' && x.severity === 'warning')).toBe(true);
+  });
+
+  // (d) reference required ⇒ present — the epic.missing direction (preserved). The
+  //     SPEC-004 incident: a missing epic ref was as invisible as a dangling one.
+  it('(d) reference required ⇒ present: warns on a missing epic when epics are registered', () => {
+    const r = validateSpec(
+      parseSpec(rawSpec(['id: SPEC-001', 'status: done'])),
+      DEFAULT_CONFIG,
+      new Set(['epic-001']),
+    );
+    expect(r.violations.some((x) => x.rule === 'epic.missing' && x.severity === 'warning')).toBe(true);
+  });
+
+  // Invariant: NOTHING the primitive emits is ever an error (warning-only contract).
+  it('never emits an error-severity frontmatter/reference violation', () => {
+    const r = validateSpec(
+      parseSpec(rawSpec(['title: broken', 'tier: T9', 'status: bogus', 'type: nope', 'epic: EPIC-999'])),
+      DEFAULT_CONFIG,
+      new Set(['epic-001']),
+    );
+    const frontmatterRules = r.violations.filter(
+      (v) => v.rule.startsWith('frontmatter.') || v.rule.startsWith('epic.'),
+    );
+    expect(frontmatterRules.length).toBeGreaterThan(0); // we did trip several
+    expect(frontmatterRules.every((v) => v.severity === 'warning')).toBe(true);
+  });
+});
