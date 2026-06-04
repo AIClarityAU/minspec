@@ -215,6 +215,35 @@ describe('epic-manager', () => {
       expect(out).not.toContain('EPIC-009');
       expect(out).not.toContain('Old');
     });
+
+    // ─── #152: a $-special epic title comment must be written verbatim ──
+    it('writes an epic title containing $-special sequences verbatim', () => {
+      const p = artifact('---\nid: SPEC-001\ntitle: X\n---\n# X\n');
+      // `$5`/`$1` look like back-references; `$&`/$` exercise the named specials.
+      const epicTitle = 'cost is $5 ($1 each) for A$AP — $& $`';
+      setArtifactEpic(p, 'EPIC-001', epicTitle);
+      const out = fs.readFileSync(p, 'utf-8');
+      expect(out).toContain(`epic: EPIC-001  # ${epicTitle}`);
+      // The resolvable ref reads back cleanly (comment stripped at the first #).
+      expect(readArtifactEpic(p)).toBe('EPIC-001');
+    });
+
+    it('preserves a $-special title field when only the status block is rewritten', () => {
+      // setEpicStatus rewrites the WHOLE frontmatter block; a $ in any sibling
+      // field (title) must survive the replacement (#152).
+      const title = 'A$AP costs $5 ($1 each) $& $`';
+      const before = `---\nid: EPIC-001\nslug: a\ntitle: ${title}\nstatus: proposed\norder: 1\n---\n\n## Goal\n\ng\n\n## Artifacts\n\na\n`;
+      epicFile(tmpDir, 'EPIC-001', before);
+      const fp = path.join(tmpDir, EPICS_DIR, 'EPIC-001-x.md');
+      setEpicStatus(fp, 'active');
+      const out = fs.readFileSync(fp, 'utf-8');
+      // Exact-equality: a $-driven corruption duplicates/reorders the block, which
+      // a loose `toContain` misses because the expanded $1/$& re-inject the title.
+      expect(out).toBe(before.replace('status: proposed', 'status: active'));
+      expect(out.match(/^---$/gm)).toHaveLength(2);
+      expect(out.match(/^title:/gm)).toHaveLength(1);
+      expect(out.match(/^status:/gm)).toHaveLength(1);
+    });
   });
 
   // ─── groupByEpic ────────────────────────────────────────────────────
@@ -397,6 +426,18 @@ describe('epic-manager', () => {
       expect(m2).toContain('## User');
       expect(m2).toContain('EPIC-001');
       expect(m2.match(/minspec:epic-index:start/g)!.length).toBe(1);
+    });
+
+    // ─── #152: a $-special epic title must not corrupt the INDEX on remerge ──
+    it('keeps an epic title with $-special sequences intact when replacing markers', () => {
+      const title = 'cost is $5 ($1 each) for A$AP — $& $`';
+      const auto = buildEpicIndexContent([
+        { id: 'EPIC-001', slug: 'a', title, status: 'active', order: 1, filePath: '/docs/epics/EPIC-001-a.md' },
+      ]);
+      // Existing markered content forces the `existing.replace(markerRe, …)` path.
+      const existing = mergeEpicIndex(null, buildEpicIndexContent([]));
+      const merged = mergeEpicIndex(existing, auto);
+      expect(merged).toContain(`## [EPIC-001 — ${title}]`);
     });
   });
 
