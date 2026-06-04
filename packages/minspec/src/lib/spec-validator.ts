@@ -256,12 +256,22 @@ function requiresAcceptanceCriteria(tier: Tier): boolean {
   return TIER_RANK[tier] >= 3;
 }
 
+/** A markdown checkbox list item: `- [ ]` / `- [x]`. */
+const CHECKBOX_RE = /- \[[ xX]\]/;
+
 function hasAcceptanceCriteria(spec: ParsedSpec): boolean {
   const raw = spec.raw;
   if (hasSection(raw, ['acceptance criteria', 'acceptance', 'success criteria'])) return true;
-  // checkbox list inside the specify section counts as acceptance criteria
+  // A checkbox list inside the requirements/specify content counts as acceptance
+  // criteria. The parser maps a heading to `phaseSections` only when its text is a
+  // literal Phase name (`specify`), so a `type: requirements` spec — whose checklist
+  // lives under `## Requirements`, mapping to NO phase — never populated
+  // `phaseSections.specify`; the fallback could not fire and a real checklist was
+  // FALSELY flagged (#153.2). Scan both the Specify phase section AND the
+  // `## Requirements` section (the requirements artifact's primary heading).
   const specify = spec.phaseSections.specify?.body ?? '';
-  return /- \[[ xX]\]/.test(specify);
+  const requirements = spec.sections.get('Requirements') ?? '';
+  return CHECKBOX_RE.test(specify) || CHECKBOX_RE.test(requirements);
 }
 
 // ─── Closed-enum frontmatter gate (#115) ─────────────────────────────────────
@@ -562,7 +572,7 @@ export function validateSpec(
       rule: 'acceptance.missing',
       severity: 'error',
       message: `${tier} spec has no acceptance criteria.`,
-      fixHint: 'Add an "## Acceptance Criteria" section defining done: a checkbox list where each item is a plain-language outcome tracing to its FR/INV (e.g. "- [ ] **Honest degradation** — incoherent state surfaces \'state unclear\'. (FR-6)"). See the "MinSpec: Generate Example Spec" output for the canonical format. A checkbox list in the Specify section also satisfies this.',
+      fixHint: 'Add an "## Acceptance Criteria" section defining done: a checkbox list where each item is a plain-language outcome tracing to its FR/INV (e.g. "- [ ] **Honest degradation** — incoherent state surfaces \'state unclear\'. (FR-6)"). See the "MinSpec: Generate Example Spec" output for the canonical format. A checkbox list under the Specify section (single-file specs) or the Requirements section (requirements specs) also satisfies this.',
     });
   }
 

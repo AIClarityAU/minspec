@@ -85,6 +85,65 @@ describe('validateSpec — acceptance criteria', () => {
   });
 });
 
+// T3 regression (#153.2): the checkbox-acceptance FALLBACK read only
+// `phaseSections.specify`, but the parser maps a heading to phaseSections only when
+// its text is a literal Phase name (`specify`). A `type: requirements` spec carries a
+// `## Requirements` heading (which maps to NO phase), so the fallback's source string
+// was always '' and could never fire — a requirements spec whose acceptance checklist
+// lives under `## Requirements` was FALSELY flagged `acceptance.missing`, and the
+// fixHint promised an impossible remedy ("a checkbox list in the Specify section") for
+// a file that has no Specify section. The fallback now also scans the Requirements
+// section, and the fixHint is honest for requirements specs.
+describe('validateSpec — acceptance checkbox fallback for requirements specs (#153.2)', () => {
+  // A `type: requirements` spec uses `## Requirements`, not `## Specify`. Build inline
+  // (the spec() helper assumes a single-file `## Specify` layout).
+  function reqSpec(tier: string, body: string): string {
+    return [
+      '---',
+      'id: SPEC-019',
+      'type: requirements',
+      `tier: ${tier}`,
+      'status: specifying',
+      'product: minspec',
+      '---',
+      '',
+      body,
+    ].join('\n');
+  }
+
+  it('a checkbox list under ## Requirements satisfies acceptance (was impossible before)', () => {
+    const body = '# Reqs\n\n## Requirements\n- [ ] **Honest degradation** — incoherent state surfaces \'state unclear\'. (FR-6)\n- [ ] **Never blocks** — warning only. (FR-9)\n';
+    const r = validateSpec(parseSpec(reqSpec('T4', body)), DEFAULT_CONFIG);
+    expect(r.violations.some((v) => v.rule === 'acceptance.missing')).toBe(false);
+  });
+
+  it('a requirements spec with NO checklist and no acceptance section still errors (true positive)', () => {
+    const body = '# Reqs\n\n## Requirements\n- **FR-1** prose requirement, no checkbox.\n- **FR-2** another.\n';
+    const r = validateSpec(parseSpec(reqSpec('T4', body)), DEFAULT_CONFIG);
+    expect(r.violations.some((v) => v.rule === 'acceptance.missing' && v.severity === 'error')).toBe(true);
+  });
+
+  it('the acceptance fixHint names the Requirements section, not only Specify (honest remedy)', () => {
+    const body = '# Reqs\n\n## Requirements\n- **FR-1** prose only.\n';
+    const r = validateSpec(parseSpec(reqSpec('T4', body)), DEFAULT_CONFIG);
+    const v = r.violations.find((x) => x.rule === 'acceptance.missing');
+    expect(v).toBeDefined();
+    // mentions the Requirements section as a valid place for the checklist
+    expect(v!.fixHint).toMatch(/Requirements/);
+  });
+
+  it('an explicit ## Acceptance Criteria section still satisfies a requirements spec (no regression)', () => {
+    const body = '# Reqs\n\n## Requirements\nprose\n\n## Acceptance Criteria\n- must work\n';
+    const r = validateSpec(parseSpec(reqSpec('T3', body)), DEFAULT_CONFIG);
+    expect(r.violations.some((v) => v.rule === 'acceptance.missing')).toBe(false);
+  });
+
+  it('a single-file spec still satisfies via a checkbox in ## Specify (no regression)', () => {
+    const r = validateSpec(parseSpec(spec({ tier: 'T3' }, FULL_T3)), DEFAULT_CONFIG);
+    expect(r.violations.some((v) => v.rule === 'acceptance.missing')).toBe(false);
+  });
+});
+
 describe('validateSpec — aspect: ux', () => {
   const uxBody = FULL_T3.replace('Build the thing.', 'Build the new settings screen with a toggle button.');
 
