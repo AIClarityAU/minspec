@@ -229,6 +229,18 @@ describe('dr-index regenerator', () => {
       expect(merged).toContain('AUTO');
       expect(merged).toContain('<!-- minspec:dr-index:start -->');
     });
+
+    // ─── #152: a $-special sequence in a DR title must not corrupt the INDEX ──
+    it('writes auto content with $-special sequences verbatim when replacing markers', () => {
+      const existing =
+        '# Heading\n\n' +
+        '<!-- minspec:dr-index:start -->\nOLD\n<!-- minspec:dr-index:end -->\n';
+      // `$1`, `$&`, `$\`` and `$$` are all RegExp-replacement specials.
+      const auto = '# Decision Register\n\n## [DR-001 — cost is $5 ($1 each), A$AP, $& $`]\n';
+      const merged = mergeDrIndex(existing, auto);
+      expect(merged).toContain('cost is $5 ($1 each), A$AP, $& $`');
+      expect(merged).not.toContain('OLD');
+    });
   });
 
   // ─── regenerateDrIndex (end-to-end) ──────────────────────────────────
@@ -269,6 +281,29 @@ describe('dr-index regenerator', () => {
       const after = fs.readFileSync(indexPath, 'utf-8');
       expect(after).toContain('## Reviewer Notes');
       expect(after).toContain('DR-001 needs a follow-up.');
+    });
+
+    // ─── #152: a $-special title survives the full marker-replace regeneration ──
+    it('keeps a DR title with $-special sequences intact across a re-run', () => {
+      const title = 'cost is $5 ($1 each) for A$AP — $& $`';
+      fs.writeFileSync(
+        path.join(decisionsDir, 'DR-001-dollar.md'),
+        `---\nid: DR-001\ntitle: ${title}\nstatus: accepted\ndate: 2026-01-01\n---\n\n## Context\n\nWhy this matters.\n`,
+        'utf-8',
+      );
+
+      // First run seeds the markers; the second run hits the marker-replace path.
+      regenerateDrIndex(tmpDir);
+      regenerateDrIndex(tmpDir);
+
+      const content = fs.readFileSync(path.join(decisionsDir, 'INDEX.md'), 'utf-8');
+      expect(content).toContain(`## [DR-001 — ${title}]`);
+      // Corruption ($& / $` expansion) duplicates the marker block, so the title
+      // and each marker must appear exactly ONCE — a plain `toContain` is fooled
+      // by the re-injected copy the buggy replacement leaves behind.
+      expect(content.match(/## \[DR-001 —/g)).toHaveLength(1);
+      expect(content.match(/minspec:dr-index:start/g)).toHaveLength(1);
+      expect(content.match(/minspec:dr-index:end/g)).toHaveLength(1);
     });
   });
 });

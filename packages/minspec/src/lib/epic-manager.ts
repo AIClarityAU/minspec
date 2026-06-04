@@ -250,10 +250,14 @@ export function setArtifactEpic(filePath: string, ref: string, title?: string): 
   const yaml = fmMatch[1];
   const value = formatEpicRef(ref, title);
   const epicLineRe = /^([ \t]*)epic[ \t]*:[ \t]*.*$/m;
+  // `$1` keeps the captured indent; `value` (which may carry an untrusted epic
+  // title comment) is escaped so a literal `$` in it is inserted verbatim (#152).
   const newYaml = epicLineRe.test(yaml)
-    ? yaml.replace(epicLineRe, `$1epic: ${value}`)
+    ? yaml.replace(epicLineRe, `$1epic: ${escapeReplacement(value)}`)
     : `epic: ${value}\n${yaml}`;
-  const updated = content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---`);
+  // Replacer FUNCTION so a `$` anywhere in the rewritten block is literal (#152).
+  const block = `---\n${newYaml}\n---`;
+  const updated = content.replace(FRONTMATTER_RE, () => block);
   fs.writeFileSync(filePath, updated, 'utf-8');
   return ref;
 }
@@ -286,10 +290,13 @@ export function setEpicStatus(filePath: string, status: EpicStatus): EpicStatus 
   }
   const yaml = fmMatch[1];
   const statusLineRe = /^([ \t]*)status[ \t]*:[ \t]*.*$/m;
+  // `$1` keeps the captured indent; status is escaped for consistency (#152).
   const newYaml = statusLineRe.test(yaml)
-    ? yaml.replace(statusLineRe, `$1status: ${status}`)
+    ? yaml.replace(statusLineRe, `$1status: ${escapeReplacement(status)}`)
     : `${yaml}\nstatus: ${status}`;
-  fs.writeFileSync(filePath, content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---`), 'utf-8');
+  // Replacer FUNCTION so a `$` anywhere in the rewritten block is literal (#152).
+  const block = `---\n${newYaml}\n---`;
+  fs.writeFileSync(filePath, content.replace(FRONTMATTER_RE, () => block), 'utf-8');
   return status;
 }
 
@@ -462,6 +469,16 @@ function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/**
+ * Escape a string for safe use as the *replacement* argument of
+ * `String.prototype.replace`. Doubles every `$` so a literal `$1`/`$&`/`` $` ``/
+ * `$'`/`$$` in untrusted text (a field value or epic title) is inserted verbatim
+ * instead of being interpreted as a replacement pattern (#152).
+ */
+function escapeReplacement(s: string): string {
+  return s.replace(/\$/g, '$$$$');
+}
+
 /** Build the auto-generated portion of the epic INDEX (between markers). */
 export function buildEpicIndexContent(epics: EpicSummary[]): string {
   const header = '# Epic Register\n\n_Bodies of work grouping specs, decisions, and issues. One entry per epic._\n';
@@ -491,7 +508,9 @@ export function mergeEpicIndex(existing: string | null, autoContent: string): st
     `${escapeRegex(INDEX_MARKER_START)}[\\s\\S]*?${escapeRegex(INDEX_MARKER_END)}\\n?`,
   );
   if (markerRe.test(existing)) {
-    return existing.replace(markerRe, wrapped);
+    // Replacer FUNCTION so a `$` in any epic title inside `wrapped` is inserted
+    // literally, never read as a replacement pattern (#152).
+    return existing.replace(markerRe, () => wrapped);
   }
   return `${wrapped}\n${existing.trimStart()}`;
 }

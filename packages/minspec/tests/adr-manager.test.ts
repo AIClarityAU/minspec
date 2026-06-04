@@ -385,6 +385,39 @@ describe('adr-manager', () => {
         'superseded',
       ]);
     });
+
+    // ─── #152: $-special sequences in a field value must not corrupt the file ──
+    it('preserves a title containing $-special sequences ($1, $&, $`) verbatim', () => {
+      // `cost is $5 ($1 each)` carries `$5` and `$1` — both look like RegExp
+      // replacement back-references; `A$AP` plus `$&`/$` exercise the others.
+      const dir = resolveDecisionsDir(tmpDir); // resolved dir so listAdrs sees it
+      fs.mkdirSync(dir, { recursive: true });
+      const fp = path.join(dir, 'DR-050-dollar.md');
+      const title = 'cost is $5 ($1 each) for A$AP — $& and $` too';
+      fs.writeFileSync(
+        fp,
+        `---\nid: DR-050\ntitle: ${title}\nstatus: proposed\ndate: 2026-06-04\n---\n\n## Context\n`,
+        'utf-8',
+      );
+
+      setAdrStatus(fp, 'accepted');
+
+      const content = fs.readFileSync(fp, 'utf-8');
+      // The whole file must be exactly the input with status flipped — a $-driven
+      // corruption duplicates/reorders the block, so an equality check catches it
+      // where a loose `toContain` would not (the expanded `$1`/`$&` re-inject the
+      // literal title into the garbled output, masking the bug).
+      expect(content).toBe(
+        `---\nid: DR-050\ntitle: ${title}\nstatus: accepted\ndate: 2026-06-04\n---\n\n## Context\n`,
+      );
+      // Exactly one frontmatter delimiter pair and one title/status line.
+      expect(content.match(/^---$/gm)).toHaveLength(2);
+      expect(content.match(/^title:/gm)).toHaveLength(1);
+      expect(content.match(/^status:/gm)).toHaveLength(1);
+      // listAdrs must read the literal title back, proving frontmatter is intact.
+      const reloaded = listAdrs(tmpDir).find(a => a.id === 'DR-050');
+      expect(reloaded?.title).toBe(title);
+    });
   });
 
   // ─── findSimilarAdrs() — dedup gate ──────────────────────────────────

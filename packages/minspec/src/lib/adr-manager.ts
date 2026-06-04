@@ -318,12 +318,17 @@ export function setAdrStatus(filePath: string, status: AdrStatus): AdrStatus {
   const statusLineRe = /^([ \t]*)status[ \t]*:[ \t]*.*$/m;
   let newYaml: string;
   if (statusLineRe.test(yaml)) {
-    newYaml = yaml.replace(statusLineRe, `$1status: ${status}`);
+    // `$1` keeps the captured indent; the value is escaped so a literal `$`
+    // in it is never read as a replacement pattern (#152).
+    newYaml = yaml.replace(statusLineRe, `$1status: ${escapeReplacement(status)}`);
   } else {
     newYaml = `${yaml}\nstatus: ${status}`;
   }
 
-  const updated = content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---`);
+  // Replacer FUNCTION — its return value is inserted literally, so a `$` in any
+  // frontmatter field can never be interpreted as a replacement pattern (#152).
+  const block = `---\n${newYaml}\n---`;
+  const updated = content.replace(FRONTMATTER_RE, () => block);
   fs.writeFileSync(filePath, updated, 'utf-8');
   return status;
 }
@@ -504,7 +509,9 @@ export function mergeDrIndex(existing: string | null, autoContent: string): stri
     `${escapeRegex(INDEX_MARKER_START)}[\\s\\S]*?${escapeRegex(INDEX_MARKER_END)}\\n?`,
   );
   if (markerRe.test(existing)) {
-    return existing.replace(markerRe, wrapped);
+    // Replacer FUNCTION so a `$` in any DR title inside `wrapped` is inserted
+    // literally, never read as a replacement pattern (#152).
+    return existing.replace(markerRe, () => wrapped);
   }
 
   // Legacy detection: an INDEX.md that is just `# Decision Register` + a single
@@ -520,6 +527,16 @@ export function mergeDrIndex(existing: string | null, autoContent: string): stri
 
 function escapeRegex(s: string): string {
   return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * Escape a string for safe use as the *replacement* argument of
+ * `String.prototype.replace`. Doubles every `$` so a literal `$1`/`$&`/`` $` ``/
+ * `$'`/`$$` in untrusted text (a field value or DR/epic title) is inserted
+ * verbatim instead of being interpreted as a replacement pattern (#152).
+ */
+function escapeReplacement(s: string): string {
+  return s.replace(/\$/g, '$$$$');
 }
 
 /**
