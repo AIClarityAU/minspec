@@ -201,7 +201,11 @@ vi.mock('../src/views/adr-tree-provider', () => ({
 vi.mock('../src/views/backlog-view', () => ({
   BacklogTreeProvider: vi.fn(function () { return mockBacklogTreeProvider; }),
 }));
-vi.mock('../src/views/status-bar', () => ({
+// Partial mock: stub the status-bar class but forward the real pure helpers
+// (fromFrontmatter, computeProgress, …) so injectContextCommand can derive the
+// current phase from frontmatter the same way the bar does (#149).
+vi.mock('../src/views/status-bar', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/views/status-bar')>()),
   MinSpecStatusBar: vi.fn(function () { return mockStatusBar; }),
 }));
 vi.mock('../src/views/spec-panel', () => ({
@@ -279,6 +283,7 @@ import {
   linkToSpecCommand,
 } from '../src/views/codelens-provider';
 import { detectTools, getToolFilePath } from '../src/lib/tool-detector';
+import { parseSpec } from '../src/lib/spec';
 import {
   injectContextToFile,
   removeContextFromFile,
@@ -972,18 +977,71 @@ describe('showSpecPanel command', () => {
 // =============================================================================
 
 describe('injectContext command', () => {
-  it('prompts for spec ID and title, then injects into detected tools', async () => {
-    vi.mocked(vscode.window.showInputBox)
-      .mockResolvedValueOnce('SPEC-005')
-      .mockResolvedValueOnce('Auth Feature');
+  // A full T4/implementing spec on disk. The walk reads its file content via
+  // fs.readFileSync; parseSpec (mocked) turns it into frontmatter. The id must
+  // match what the user typed so the finder selects this file.
+  const T4_SPEC_FILE = '/tmp/test-workspace/specs/SPEC-007-thing.md';
+  const T4_FRONTMATTER = {
+    id: 'SPEC-007',
+    title: 'Real Feature Title',
+    tier: 'T4',
+    status: 'implementing',
+    created: '2026-06-04',
+    phases: {
+      specify: 'done',
+      clarify: 'done',
+      plan: 'done',
+      tasks: 'done',
+      implement: 'in-progress',
+    },
+  };
 
-    vi.mocked(detectTools as any).mockReturnValue({
-      claude: true,
-      cursor: false,
-      cline: false,
-      agents: true,
-      windsurf: false,
+  /**
+   * Wire fs so the recursive spec walk finds exactly one spec file under
+   * specs/, and parseSpec returns the given frontmatter for it.
+   */
+  function stubSpecOnDisk(frontmatter: Record<string, unknown>): void {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readdirSync as any).mockImplementation((dir: string) => {
+      if (String(dir).endsWith('/specs')) {
+        return [{ name: 'SPEC-007-thing.md', isDirectory: () => false }];
+      }
+      return [];
     });
+    vi.mocked(fs.readFileSync as any).mockReturnValue('---\nraw spec\n---\n');
+    vi.mocked(parseSpec as any).mockReturnValue({ frontmatter });
+  }
+
+  it('injects the spec REAL tier/status/phase from frontmatter, not fabricated T2/new (#149)', async () => {
+    // Regression: the command used to hardcode tier:'T2', status:'new',
+    // currentPhase:null and never read the spec — a never-wrong violation.
+    vi.mocked(vscode.window.showInputBox).mockResolvedValueOnce('SPEC-007');
+    stubSpecOnDisk(T4_FRONTMATTER);
+
+    vi.mocked(detectTools as any).mockReturnValue({ claude: true });
+    vi.mocked(getToolFilePath as any).mockReturnValue('/tmp/test-workspace/CLAUDE.md');
+
+    activate(makeMockContext());
+    await invokeCommand('minspec.injectContext');
+
+    expect(injectContextToFile).toHaveBeenCalledTimes(1);
+    const injected = vi.mocked(injectContextToFile).mock.calls[0][1];
+    expect(injected.specId).toBe('SPEC-007');
+    expect(injected.tier).toBe('T4');
+    expect(injected.status).toBe('implementing');
+    // first non-done phase from the phases map
+    expect(injected.currentPhase).toBe('implement');
+    expect(injected.title).toBe('Real Feature Title');
+    // The fabricated defaults must NOT appear.
+    expect(injected.tier).not.toBe('T2');
+    expect(injected.status).not.toBe('new');
+  });
+
+  it('prompts only for spec ID (title comes from frontmatter), then injects into detected tools', async () => {
+    vi.mocked(vscode.window.showInputBox).mockResolvedValueOnce('SPEC-007');
+    stubSpecOnDisk(T4_FRONTMATTER);
+
+    vi.mocked(detectTools as any).mockReturnValue({ claude: true, agents: true });
     vi.mocked(getToolFilePath as any)
       .mockReturnValueOnce('/tmp/test-workspace/CLAUDE.md')
       .mockReturnValueOnce('/tmp/test-workspace/AGENTS.md');
@@ -991,11 +1049,28 @@ describe('injectContext command', () => {
     activate(makeMockContext());
     await invokeCommand('minspec.injectContext');
 
-    expect(vscode.window.showInputBox).toHaveBeenCalledTimes(2);
+    // Single prompt now — title is no longer asked for.
+    expect(vscode.window.showInputBox).toHaveBeenCalledTimes(1);
     expect(injectContextToFile).toHaveBeenCalledTimes(2);
     expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
       'MinSpec: Injected active spec context into 2 file(s).',
     );
+  });
+
+  it('errors and injects nothing when the spec cannot be found', async () => {
+    vi.mocked(vscode.window.showInputBox).mockResolvedValueOnce('SPEC-404');
+    // No spec files on disk.
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.readdirSync as any).mockReturnValue([]);
+
+    vi.mocked(detectTools as any).mockReturnValue({ claude: true });
+    vi.mocked(getToolFilePath as any).mockReturnValue('/tmp/test-workspace/CLAUDE.md');
+
+    activate(makeMockContext());
+    await invokeCommand('minspec.injectContext');
+
+    expect(injectContextToFile).not.toHaveBeenCalled();
+    expect(vscode.window.showErrorMessage).toHaveBeenCalled();
   });
 
   it('aborts when user cancels spec ID input', async () => {
@@ -1007,21 +1082,9 @@ describe('injectContext command', () => {
     expect(injectContextToFile).not.toHaveBeenCalled();
   });
 
-  it('aborts when user cancels title input', async () => {
-    vi.mocked(vscode.window.showInputBox)
-      .mockResolvedValueOnce('SPEC-005')
-      .mockResolvedValueOnce(undefined);
-
-    activate(makeMockContext());
-    await invokeCommand('minspec.injectContext');
-
-    expect(injectContextToFile).not.toHaveBeenCalled();
-  });
-
   it('shows info when no AI tool config files detected', async () => {
-    vi.mocked(vscode.window.showInputBox)
-      .mockResolvedValueOnce('SPEC-005')
-      .mockResolvedValueOnce('Auth Feature');
+    vi.mocked(vscode.window.showInputBox).mockResolvedValueOnce('SPEC-007');
+    stubSpecOnDisk(T4_FRONTMATTER);
 
     vi.mocked(detectTools as any).mockReturnValue({
       claude: false,

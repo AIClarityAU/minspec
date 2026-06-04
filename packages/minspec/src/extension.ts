@@ -35,6 +35,8 @@ import {
 import { maybeShowNudge, recordInstallTimestamp, exportTraceability, setupConformanceWatcher } from './lib/bridge';
 import { runBootstrap, isWatchedGitPath, type BootstrapVsCode } from './lib/auto-bootstrap';
 import { findActiveSpec, trackActiveSpecEditor } from './lib/active-spec';
+import { parseSpec } from './lib/spec';
+import { loadConfig, resolveAndValidate } from './lib/config';
 import { trackActiveAdrEditor } from './lib/active-adr';
 import { resolveTargetFolderNonInteractive } from './lib/resolve-folder';
 
@@ -432,6 +434,53 @@ function exportTraceabilityCommand(workspaceRoot: string): void {
 }
 
 /**
+ * Resolve a spec id to its parsed frontmatter by reading the actual file.
+ *
+ * Walks the configured specs dir (recursively, so both flat and spec-kit
+ * layouts work) and returns the first spec whose frontmatter `id` matches.
+ * Returns null when no readable/parseable spec carries that id — the caller
+ * MUST treat null as "not found" and refuse to fabricate context (#149).
+ *
+ * Matches on parsed frontmatter `id`, not the filename prefix, so the injected
+ * tier/status/phase always come from the real spec the id denotes.
+ */
+function resolveSpecFrontmatter(workspaceRoot: string, specId: string) {
+  let specsDir: string;
+  try {
+    const config = loadConfig(workspaceRoot);
+    specsDir = resolveAndValidate(workspaceRoot, config.specsDir);
+  } catch {
+    return null;
+  }
+  if (!fs.existsSync(specsDir)) return null;
+
+  const stack = [specsDir];
+  while (stack.length > 0) {
+    const dir = stack.pop() as string;
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      continue;
+    }
+    for (const entry of entries) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        stack.push(full);
+      } else if (entry.name.endsWith('.md')) {
+        try {
+          const parsed = parseSpec(fs.readFileSync(full, 'utf-8'));
+          if (parsed.frontmatter.id === specId) return parsed.frontmatter;
+        } catch {
+          // Unparseable file — skip; a real match elsewhere still wins.
+        }
+      }
+    }
+  }
+  return null;
+}
+
+/**
  * Command: Inject active spec context into detected AI tool config files.
  */
 async function injectContextCommand(workspaceRoot: string): Promise<void> {
@@ -447,19 +496,28 @@ async function injectContextCommand(workspaceRoot: string): Promise<void> {
   });
   if (!specId) return;
 
-  const title = await vscode.window.showInputBox({
-    prompt: 'Spec title',
-    placeHolder: 'Feature title',
-    ignoreFocusOut: true,
-  });
-  if (!title) return;
+  // Read the spec's REAL frontmatter — never fabricate. A never-wrong product
+  // must not write a false tier/status into AI tool config (#149). If the spec
+  // can't be found/parsed, error out rather than inject a fabricated default.
+  const frontmatter = resolveSpecFrontmatter(workspaceRoot, specId);
+  if (!frontmatter) {
+    vscode.window.showErrorMessage(
+      `MinSpec: Spec ${specId} not found (or unparseable) — nothing injected.`,
+    );
+    return;
+  }
+
+  // Derive the current phase the same way the status bar does (first
+  // in-progress phase, else first pending) so the injected block agrees with
+  // every other surface that reports the active phase.
+  const { currentPhase } = fromFrontmatter(frontmatter);
 
   const activeContext: ActiveSpecContext = {
-    specId,
-    title,
-    tier: 'T2',
-    currentPhase: null,
-    status: 'new',
+    specId: frontmatter.id,
+    title: frontmatter.title,
+    tier: frontmatter.tier,
+    currentPhase,
+    status: frontmatter.status,
   };
 
   const tools = detectTools(workspaceRoot);
