@@ -197,6 +197,21 @@ change. Ranked most→least costly.*
 - **INV — Tier 0 (DR-004).** L1 detection is pure file-system; no AI, no network.
 - **INV #5 (user override wins).** Master toggle + per-signpost dismissal (FR-7).
 
+## Acceptance Criteria
+
+The signpost is **done** when all hold (each traces to its FR/INV; each is a T0/T1/T2 test per FR-8):
+
+- [ ] **Coverage, not presence** — given a spec with FR-1..5 and a plan covering only FR-1..3, the signpost names the specific holes (FR-4, FR-5), not "planned" or "no plan". (FR-1, FR-3)
+- [ ] **Deterministic, one verdict everywhere** — identical filesystem + frontmatter state yields an identical signpost across repeated runs *and* across all four callers (extension save hook, pre-commit, CI, agent dispatch), proven by a T1 contract test. (FR-2, FR-16)
+- [ ] **Show why** — every signpost renders its derivation on demand (hover/click): the exact state + IDs that produced it ("plan.md exists; FR-4, FR-5 have no plan ref → next: cover FR-4, FR-5"). (FR-4)
+- [ ] **One-click bug report** — a wrong signpost files a pre-filled `harvest316/minspec` issue from that derivation in a single action, and the extension never submits silently. (FR-17)
+- [ ] **Advisory** — the signpost and the save-time checker never block edits or commits, and never write to the developer's artifacts without explicit confirmation. (FR-5, FR-14, INV-Advisory)
+- [ ] **Honest degradation** — incoherent state (dangling/colliding IDs) surfaces "state unclear — open <file>" and never fabricates a confident next step. (FR-6)
+- [ ] **Dismissible + sticky** — a dismissed signpost stays suppressed for the identical step until state changes; it never re-nags the same step. (FR-7)
+- [ ] **Every mapping tested (T0)** — each state→signpost edge predicate and each degradation case has a passing T0 invariant test; no mapping ships without one. (FR-8, INV-correctness)
+- [ ] **Tier-0** — the L1 detection path contains no AI and no network in `packages/minspec` / `packages/shared`. (INV-Tier-0, DR-004)
+- [ ] **Ready-gated, debounced** — holes are a forward checklist (not errors) until `status: done`; the check is debounced, fires on save not keystroke, and runs at most once per save. (FR-11, FR-15)
+
 ## Coverage Map (all bases)
 
 Explicit trace from the discussed mechanisms to FRs — nothing dropped.
