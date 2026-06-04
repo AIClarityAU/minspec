@@ -1,0 +1,245 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Privacy Policy — MinSpec</title>
+  <meta name="description" content="MinSpec Privacy Policy — the website and the open-source, offline VS Code extension collect nothing.">
+  <meta name="theme-color" content="#0f1117">
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg">
+  <style>
+    :root {
+      --bg: #0f1117;
+      --bg-surface: #161922;
+      --bg-card: #1c1f2b;
+      --border: #2a2d3a;
+      --text: #e2e4eb;
+      --text-muted: #8b8fa3;
+      --text-dim: #8b8fa3;
+      --accent: #6c9cfc;
+      --accent-bright: #8db4ff;
+      --accent-dim: #4a7ad4;
+      --accent-glow: rgba(108, 156, 252, 0.12);
+      --green: #5ec48a;
+      --amber: #e5a84b;
+      --red: #e06060;
+      --radius: 10px;
+      --max-width: 960px;
+      --doc-width: 720px;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    html { scroll-behavior: smooth; -webkit-text-size-adjust: 100%; overflow-x: hidden; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+      background: var(--bg); color: var(--text); line-height: 1.6; -webkit-font-smoothing: antialiased;
+    }
+
+    a { color: var(--accent-bright); text-decoration: none; }
+
+    /* --- Nav --- */
+    nav {
+      position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+      background: rgba(15, 17, 23, 0.85); backdrop-filter: blur(12px); -webkit-backdrop-filter: blur(12px);
+      border-bottom: 1px solid var(--border);
+    }
+    .nav-inner {
+      max-width: var(--max-width); margin: 0 auto; padding: 0 24px; height: 56px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .nav-logo {
+      display: inline-flex; align-items: center; gap: 9px; font-size: 1.1rem; font-weight: 700;
+      color: var(--text); text-decoration: none; letter-spacing: -0.02em;
+    }
+    .nav-logo-icon { height: 33px; width: auto; display: block; }
+    .nav-logo-text span { color: var(--accent); }
+    .nav-links { display: flex; gap: 28px; list-style: none; }
+    .nav-links a { color: var(--text-muted); text-decoration: none; font-size: 0.875rem; transition: color 0.2s; }
+    .nav-links a:hover { color: var(--text); }
+
+    /* --- Legal document --- */
+    .legal-wrap { padding: 116px 24px 100px; }
+    .legal-doc { max-width: var(--doc-width); margin: 0 auto; }
+    .legal-eyebrow {
+      font-size: 0.75rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.1em;
+      color: var(--accent); margin-bottom: 12px;
+    }
+    .legal-doc h1 {
+      font-size: clamp(1.9rem, 5vw, 2.6rem); font-weight: 800; letter-spacing: -0.03em;
+      line-height: 1.12; margin-bottom: 8px;
+    }
+    .legal-meta {
+      font-size: 0.85rem; color: var(--text-dim); margin-bottom: 40px;
+      padding-bottom: 24px; border-bottom: 1px solid var(--border); line-height: 1.7;
+    }
+    .legal-doc h2 { font-size: 1.25rem; font-weight: 700; letter-spacing: -0.01em; margin: 40px 0 12px; }
+    .legal-doc p, .legal-doc li { color: var(--text-muted); font-size: 0.96rem; line-height: 1.75; }
+    .legal-doc p { margin-bottom: 14px; }
+    .legal-doc ul { margin: 0 0 14px; padding-left: 22px; }
+    .legal-doc li { margin-bottom: 6px; }
+    .legal-doc strong { color: var(--text); }
+    .legal-doc a { border-bottom: 1px dotted var(--accent-dim); }
+    .legal-doc code {
+      background: rgba(108, 156, 252, 0.08); padding: 1px 6px; border-radius: 4px;
+      font-family: "SF Mono", "Fira Code", "Cascadia Code", monospace; font-size: 0.85em; color: var(--accent);
+    }
+    .callout {
+      background: var(--bg-card); border: 1px solid var(--border); border-left: 3px solid var(--green);
+      border-radius: var(--radius); padding: 18px 20px; margin: 20px 0;
+    }
+    .callout p:last-child { margin-bottom: 0; }
+
+    /* --- Footer --- */
+    footer { border-top: 1px solid var(--border); padding: 40px 24px; }
+    .footer-inner {
+      max-width: var(--max-width); margin: 0 auto; display: flex; justify-content: space-between;
+      align-items: center; flex-wrap: wrap; gap: 16px;
+    }
+    .footer-brand { font-size: 0.85rem; color: var(--text-dim); }
+    .footer-brand a { color: var(--text-muted); text-decoration: none; }
+    .footer-brand a:hover { color: var(--text); }
+    .footer-links { display: flex; flex-wrap: wrap; gap: 24px; list-style: none; }
+    .footer-links a { font-size: 0.85rem; color: var(--text-dim); text-decoration: none; transition: color 0.2s; }
+    .footer-links a:hover { color: var(--text-muted); }
+
+    a:focus-visible { outline: 2px solid var(--accent-bright); outline-offset: 3px; }
+
+    @media (max-width: 768px) {
+      .nav-links { display: none; }
+      .legal-wrap { padding: 96px 20px 70px; }
+    }
+  </style>
+</head>
+<body>
+
+  <nav aria-label="Main navigation">
+    <div class="nav-inner">
+      <a href="/" class="nav-logo"><img src="/img/logo.svg" alt="" class="nav-logo-icon" width="27" height="33"><span class="nav-logo-text"><span>Min</span>Spec</span></a>
+      <ul class="nav-links">
+        <li><a href="/#features">Features</a></li>
+        <li><a href="/#how-it-works">How It Works</a></li>
+        <li><a href="/#methodology">Methodology</a></li>
+        <li><a href="/#faq">FAQ</a></li>
+        <li><a href="/privacy.html">Privacy</a></li>
+      </ul>
+    </div>
+  </nav>
+
+  <main id="main-content" class="legal-wrap">
+    <article class="legal-doc">
+      <p class="legal-eyebrow">MinSpec</p>
+      <h1>Privacy Policy</h1>
+      <p class="legal-meta">
+        <strong>Effective date:</strong> 4 June 2026<br>
+        <strong>Published by:</strong> Audit&Fix, publisher of MinSpec.
+      </p>
+
+      <div class="callout">
+        <p><strong>The short version: we collect nothing.</strong> The MinSpec website has no
+        forms, no analytics, and no cookies. The MinSpec VS Code extension is free, open-source
+        (MIT), runs fully offline, has no telemetry, no analytics, no accounts, and no backend.</p>
+      </div>
+
+      <h2>1. Who we are</h2>
+      <p>
+        MinSpec is published by <strong>Audit&Fix, a registered business name of a sole trader
+        (ABN 19 429 399 114) based in New South Wales, Australia ("we", "us")</strong> (not
+        registered for GST). This policy covers the MinSpec website (<code>minspec.dev</code>) and
+        the MinSpec Visual Studio Code extension. We handle personal information in line with the
+        <strong>Australian Privacy Act 1988</strong> and the <strong>Australian Privacy Principles</strong>,
+        and — for visitors in those regions — the EU and UK GDPR. You must be <strong>at least 18
+        years old</strong> to use the website or extension or to submit any personal information to us.
+      </p>
+
+      <h2>2. The website collects nothing</h2>
+      <p>
+        <code>minspec.dev</code> is a static marketing site hosted on
+        <strong>Cloudflare Pages</strong>. It has no signup forms, no analytics scripts, and sets
+        no cookies that we are aware of. We do not build profiles of visitors and we have no
+        database of website visitors.
+      </p>
+      <p>
+        As with any website, our host (Cloudflare) may log standard request metadata such as your
+        <strong>IP address</strong> at its infrastructure layer to deliver and protect the site,
+        under its own retention periods. This happens at the CDN/hosting level and is governed by
+        Cloudflare's own terms — see Cloudflare's
+        <a href="https://www.cloudflare.com/privacypolicy/">privacy policy</a> and
+        <a href="https://www.cloudflare.com/cloudflare-customer-dpa/">data processing addendum</a>.
+        The live site uses <strong>zero analytics and zero non-essential cookies</strong>. If this
+        ever changes, we will update this page and add a cookie notice and consent mechanism
+        (including for EU/UK visitors) before any such cookies or analytics are introduced.
+      </p>
+
+      <h2>3. The extension collects nothing</h2>
+      <p>The MinSpec VS Code extension is designed to be fully local and silent:</p>
+      <ul>
+        <li><strong>No telemetry or analytics</strong> — it does not phone home.</li>
+        <li><strong>No accounts and no backend</strong> — there is nothing to sign in to.</li>
+        <li><strong>Offline core</strong> — it works without a network connection, and the
+          spec/decision files it creates stay in your own project on your own machine.</li>
+        <li><strong>No AI dependency</strong> — it does not send your code or prompts to any model.</li>
+      </ul>
+
+      <h2>4. Optional local <code>gh</code> CLI integration</h2>
+      <p>
+        MinSpec can optionally shell out to the <strong>GitHub CLI (<code>gh</code>)</strong> that
+        is already installed on your machine — for example to file an issue — and <strong>only when
+        you explicitly invoke that action</strong>. When this happens:
+      </p>
+      <ul>
+        <li>The command runs <strong>locally</strong>, under <strong>your own GitHub
+          authentication</strong> already configured for <code>gh</code>.</li>
+        <li>Any resulting network request goes <strong>directly from your machine to GitHub</strong>
+          under your account — not to Audit&Fix.</li>
+        <li>Audit&Fix does not receive, intercept, or store anything from this interaction, and
+          GitHub's own <a href="https://docs.github.com/site-policy/privacy-policies/github-general-privacy-statement">privacy statement</a>
+          governs what GitHub does with it.</li>
+      </ul>
+      <p>If you never invoke that action, no such request is made.</p>
+
+      <h2>5. Open source</h2>
+      <p>
+        MinSpec is open-source software released under the <strong>MIT licence</strong>. You can
+        read the full source — and verify these claims for yourself — at
+        <a href="https://github.com/harvest316/minspec">github.com/harvest316/minspec</a>.
+      </p>
+
+      <h2>6. Your rights</h2>
+      <p>
+        Because we hold no personal information about website visitors or extension users, there is
+        normally nothing for us to access, correct, or delete. If you nonetheless have a privacy
+        question or believe we hold information about you,
+        <a href="https://auditandfix.com/contact">contact us through our contact form</a> and we
+        will respond within <strong>30 days</strong>, in line with the Australian Privacy Principles
+        and, where applicable, the GDPR / UK GDPR.
+      </p>
+
+      <h2>7. Changes to this policy</h2>
+      <p>We may update this policy from time to time. The current version, with its effective date, will always be posted here.</p>
+
+      <h2>8. Contact</h2>
+      <p>
+        Audit&Fix, a registered business name of a sole trader (ABN 19 429 399 114) based in New South Wales, Australia. Not registered for GST.<br>
+        Privacy enquiries: <a href="https://auditandfix.com/contact">use our contact form</a>
+        (we do not publish a contact email address).
+      </p>
+    </article>
+  </main>
+
+  <footer>
+    <div class="footer-inner">
+      <div class="footer-brand">
+        Built by <a href="https://auditandfix.com">Audit&Fix</a>
+      </div>
+      <ul class="footer-links">
+        <li><a href="https://github.com/harvest316/minspec">GitHub</a></li>
+        <li><a href="/privacy.html">Privacy</a></li>
+        <li><a href="https://github.com/harvest316/minspec/blob/main/packages/minspec/LICENSE">License (MIT)</a></li>
+      </ul>
+    </div>
+  </footer>
+
+</body>
+</html>
