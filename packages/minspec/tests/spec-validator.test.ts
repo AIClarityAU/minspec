@@ -193,6 +193,50 @@ describe('validateSpec — aspect: architecture', () => {
   });
 });
 
+// T3 regression (#153.1): a plain markdown table tripped `hasAsciiBox`, because the
+// box-line regex counted any line beginning with `|` — and a markdown table row starts
+// with `|`. 3+ table rows therefore read as an "ascii box", FALSELY satisfying the
+// ux/architecture diagram gates (a false negative: the gate passes on prose-plus-table
+// with no real diagram/mockup). A markdown table is NOT a wireframe nor a component
+// diagram. The fix tightens box detection to require a genuine box-drawing glyph or a
+// +--- frame, excluding markdown table rows — while a REAL ascii diagram (which uses
+// box-drawing chars / +---) still satisfies the gate.
+describe('validateSpec — markdown table is not an ascii box (#153.1)', () => {
+  const TABLE = '\n| Mode | Trigger | Sandbox |\n|---|---|---|\n| Manual | human | no |\n| Auto | cron | yes |\n';
+  const ASCII_BOX = '\n```\n┌──────────┐\n│  Widget  │\n└──────────┘\n```\n';
+  const PLUS_BOX = '\n+----------+\n|  Widget  |\n+----------+\n';
+
+  it('a declared ux aspect with ONLY a markdown table still errors (table ≠ mockup)', () => {
+    const body = FULL_T3.replace('Build the thing.', 'Build the settings screen.') + TABLE;
+    const r = validateSpec(parseSpec(spec({ tier: 'T3', aspects: 'ux' }, body)), DEFAULT_CONFIG);
+    expect(r.violations.some((v) => v.rule === 'aspect.ux.no-mockup' && v.severity === 'error')).toBe(true);
+  });
+
+  it('a declared architecture aspect with ONLY a markdown table still errors (table ≠ diagram)', () => {
+    const body = FULL_T3.replace('Build the thing.', 'Introduce a new broker subsystem.') + TABLE;
+    const r = validateSpec(parseSpec(spec({ tier: 'T4', aspects: 'architecture' }, body)), DEFAULT_CONFIG);
+    expect(r.violations.some((v) => v.rule === 'aspect.architecture.no-diagram' && v.severity === 'error')).toBe(true);
+  });
+
+  it('a REAL unicode ascii box still satisfies the architecture diagram gate (no regression)', () => {
+    const body = FULL_T3.replace('Build the thing.', 'Introduce a new broker subsystem.') + ASCII_BOX;
+    const r = validateSpec(parseSpec(spec({ tier: 'T4', aspects: 'architecture' }, body)), DEFAULT_CONFIG);
+    expect(r.violations.some((v) => v.rule === 'aspect.architecture.no-diagram')).toBe(false);
+  });
+
+  it('a REAL +--- frame box still satisfies the architecture diagram gate (no regression)', () => {
+    const body = FULL_T3.replace('Build the thing.', 'Introduce a new broker subsystem.') + PLUS_BOX;
+    const r = validateSpec(parseSpec(spec({ tier: 'T4', aspects: 'architecture' }, body)), DEFAULT_CONFIG);
+    expect(r.violations.some((v) => v.rule === 'aspect.architecture.no-diagram')).toBe(false);
+  });
+
+  it('a markdown table AND a real ascii box together still satisfies (box counted, table ignored)', () => {
+    const body = FULL_T3.replace('Build the thing.', 'Introduce a new broker subsystem.') + TABLE + ASCII_BOX;
+    const r = validateSpec(parseSpec(spec({ tier: 'T4', aspects: 'architecture' }, body)), DEFAULT_CONFIG);
+    expect(r.violations.some((v) => v.rule === 'aspect.architecture.no-diagram')).toBe(false);
+  });
+});
+
 describe('validateSpec — epic reference (DR-013 FR-9)', () => {
   // Spec with an `epic:` frontmatter field (the spec() helper omits it, so build inline).
   function specWithEpic(epicRef: string): string {

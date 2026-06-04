@@ -121,10 +121,69 @@ const hasMermaid = (s: string, kind?: string) =>
   new RegExp('```mermaid' + (kind ? `[\\s\\S]*?\\b${kind}\\b` : ''), 'i').test(s);
 const hasSection = (s: string, names: string[]) =>
   new RegExp('^##+\\s*(' + names.join('|') + ')\\b', 'im').test(s);
-const hasMarkdownTable = (s: string) => /^\s*\|.+\|\s*\n\s*\|[\s:|-]+\|\s*$/m.test(s);
-/** crude ascii-box mockup: 3+ lines of box-drawing or +--+ framing */
-const hasAsciiBox = (s: string) =>
-  (s.match(/^[ \t]*[+|│┌└├─].*$/gm)?.length ?? 0) >= 3;
+const MARKDOWN_TABLE_RE = /^\s*\|.+\|\s*\n\s*\|[\s:|-]+\|\s*$/m;
+const hasMarkdownTable = (s: string) => MARKDOWN_TABLE_RE.test(s);
+/**
+ * A genuine box-drawing / flow glyph: unicode box-drawing + arrows. The bare `|`
+ * is deliberately NOT here — a markdown table row starts with `|`, and counting it
+ * as box-drawing made a plain table read as an ascii box (#153.1).
+ */
+const BOX_GLYPH_RE = /[┌┐└┘├┤┬┴┼─│▼▲►◄▶◀→←↓↑]/;
+/** An ASCII `+---` / `---+` frame corner — the other legitimate box style. */
+const PLUS_FRAME_RE = /\+[-=]{2,}|[-=]{2,}\+/;
+/** A markdown table separator row, e.g. `|---|:--:|`. The unambiguous table marker. */
+const TABLE_SEPARATOR_RE = /^\s*\|?[\s:|-]*-[\s:|-]*\|[\s:|-]*$/;
+/** A pipe-delimited row (table data OR an ascii-box interior `| label |` line). */
+const isPipeRow = (line: string): boolean => {
+  const t = line.trim();
+  return t.startsWith('|') && (t.match(/\|/g)?.length ?? 0) >= 2;
+};
+
+/**
+ * Line indices belonging to a MARKDOWN TABLE: a contiguous run of pipe-rows that
+ * contains a separator row (`|---|---|`). The separator is what distinguishes a
+ * data table from the `| label |` interior of a `+---` ascii box, which has no
+ * separator row. Used to exclude true table rows from the box-line count (#153.1).
+ */
+function markdownTableLineSet(lines: string[]): Set<number> {
+  const out = new Set<number>();
+  let run: number[] = [];
+  let hasSeparator = false;
+  const flush = () => {
+    if (hasSeparator) for (const i of run) out.add(i);
+    run = [];
+    hasSeparator = false;
+  };
+  for (let i = 0; i < lines.length; i++) {
+    if (isPipeRow(lines[i])) {
+      run.push(i);
+      if (TABLE_SEPARATOR_RE.test(lines[i])) hasSeparator = true;
+    } else {
+      flush();
+    }
+  }
+  flush();
+  return out;
+}
+
+/**
+ * Crude ascii-box mockup / diagram: 3+ lines carrying a real box-drawing glyph, a
+ * `+---` frame, or a pipe-delimited box-interior line — EXCLUDING rows that belong to
+ * a markdown table (a `|`-table with a `|---|` separator row is data, not a wireframe
+ * or component diagram, #153.1). A genuine ascii box (unicode box chars, `+--+`
+ * framing, or a flow diagram with arrows) still counts: its interior `| label |` lines
+ * are kept because the block has no table separator.
+ */
+const hasAsciiBox = (s: string) => {
+  const lines = s.split('\n');
+  const tableLines = markdownTableLineSet(lines);
+  let count = 0;
+  for (let i = 0; i < lines.length; i++) {
+    if (tableLines.has(i)) continue;
+    if (BOX_GLYPH_RE.test(lines[i]) || PLUS_FRAME_RE.test(lines[i]) || isPipeRow(lines[i])) count++;
+  }
+  return count >= 3;
+};
 /**
  * A fenced ``` code block containing box-drawing / flow characters — i.e. an
  * ASCII diagram, including *flow* diagrams (arrows, ▼) whose lines start with
