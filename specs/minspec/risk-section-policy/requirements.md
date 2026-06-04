@@ -432,7 +432,7 @@ inverse of the per-FR disposition, used to confirm no concern is orphaned.*
 
 ## Resolved design decisions
 
-- **RD-1 — backfill before enabling.** Two-part: (a) Risks onto any DR/spec lacking it; (b) restructure the 25 existing DRs' Consequences prose → ± shape. Lands before/with FR-6 (avoids R2).
+- **RD-1 — backfill before enabling.** Two-part: (a) Risks onto any DR/spec lacking it; (b) restructure the ~22 of 28 existing DRs' prose Consequences → ± shape (DR-007/DR-010 had none → added fresh). Lands before/with FR-6 (avoids R2). **Executed 2026-06-04** — all 30 DRs + 13 specs now carry the cross-check family (commits 128eeff specs, f08b06a DRs); FR-6 enablement is the remaining gate.
 - **RD-2 — CLI stdout v1.** Problems-panel parked #118.
 - **RD-3 — Consequences policy home = DR-020 addendum.**
 - **RD-4 — Consequences shape = minimal ±.**
