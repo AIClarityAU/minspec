@@ -35,10 +35,12 @@ import {
 import { maybeShowNudge, recordInstallTimestamp, exportTraceability, setupConformanceWatcher } from './lib/bridge';
 import { runBootstrap, isWatchedGitPath, type BootstrapVsCode } from './lib/auto-bootstrap';
 import { findActiveSpec, trackActiveSpecEditor } from './lib/active-spec';
+import { trackActiveAdrEditor } from './lib/active-adr';
 import { resolveTargetFolderNonInteractive } from './lib/resolve-folder';
 
 export function activate(context: vscode.ExtensionContext): void {
   trackActiveSpecEditor(context);
+  trackActiveAdrEditor(context);
   // Activation-time root: the folder containing the active editor (multi-root
   // safe), else the first folder, else ''. Non-interactive — never prompts at
   // startup. All file watchers below derive their base from this single value
