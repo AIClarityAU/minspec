@@ -224,3 +224,44 @@ export function saveHashes(rootDir: string, hashes: GeneratedHashes): void {
   fs.mkdirSync(path.dirname(hashesPath), { recursive: true });
   fs.writeFileSync(hashesPath, JSON.stringify(hashes, null, 2) + '\n');
 }
+
+const TEMPLATE_BASELINE_FILENAME = 'template-baseline.json';
+
+/**
+ * Load the raw-template section-hash baseline from
+ * `.minspec/template-baseline.json`.
+ *
+ * This records the hash of each *unrendered* bundled template section (with
+ * `{{placeholders}}` intact) as of the last generate/refresh — the like-for-like
+ * reference `hasHarnessDrift` compares the current bundled template against. It
+ * is deliberately SEPARATE from `generated-hashes.json`, which stores
+ * rendered + user-merged content hashes for edit preservation. Comparing the raw
+ * template against those rendered/merged hashes is what produced the perpetual
+ * false-positive drift toast (#117): a raw `{{projectName}}` never hash-matches
+ * the rendered project name.
+ *
+ * Returns `{}` if the file is missing or invalid.
+ */
+export function loadTemplateBaseline(rootDir: string): GeneratedHashes {
+  const baselinePath = path.join(rootDir, '.minspec', TEMPLATE_BASELINE_FILENAME);
+  if (!fs.existsSync(baselinePath)) {
+    return {};
+  }
+  try {
+    const raw = fs.readFileSync(baselinePath, 'utf-8');
+    return JSON.parse(raw) as GeneratedHashes;
+  } catch {
+    return {};
+  }
+}
+
+/**
+ * Persist the raw-template baseline to `.minspec/template-baseline.json`.
+ * Written at every generate/refresh so drift detection always has a current
+ * like-for-like reference. See {@link loadTemplateBaseline}.
+ */
+export function saveTemplateBaseline(rootDir: string, baseline: GeneratedHashes): void {
+  const baselinePath = path.join(rootDir, '.minspec', TEMPLATE_BASELINE_FILENAME);
+  fs.mkdirSync(path.dirname(baselinePath), { recursive: true });
+  fs.writeFileSync(baselinePath, JSON.stringify(baseline, null, 2) + '\n');
+}

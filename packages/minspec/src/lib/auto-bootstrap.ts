@@ -23,12 +23,12 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { loadTemplateBaseline } from './merge-refresh';
 import {
-  parseSections,
-  hashSection,
-  loadHashes,
-} from './merge-refresh';
-import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS, TEMPLATES } from './template-registry';
+  TEMPLATE_NAMES,
+  TEMPLATE_OUTPUT_PATHS,
+  computeTemplateBaseline,
+} from './template-registry';
 import { collectArtifacts } from './epic-backfill';
 import { listEpics } from './epic-manager';
 
@@ -97,60 +97,51 @@ export function isMinspecInitialized(rootDir: string): boolean {
 }
 
 /**
- * Detect whether the bundled harness templates have drifted from the last
- * generation. Returns true when any of:
- *   - A harness output file exists but no hashes are stored (e.g. user edited
- *     before tooling tracked them) AND the file content does not match the
- *     current template
- *   - Stored hashes for a section differ from the hash of that section in the
- *     current bundled template (meaning the template has been updated since
- *     the last init/refresh)
+ * Detect whether the bundled harness templates have genuinely moved upstream
+ * since the project's harness files were last generated/refreshed.
  *
- * Only considers files that already exist on disk — a missing harness file is
- * not "drift", it's "uninitialized" and handled by isMinspecInitialized().
+ * Compares the hash of each *raw, unrendered* template section now against the
+ * raw-template baseline recorded at the last generate/refresh
+ * (`.minspec/template-baseline.json`). Both sides are raw template — a true
+ * like-for-like comparison — so the result is independent of:
+ *   - rendering context (project name, specs dir, invariant list); and
+ *   - the user's own edits to the generated files.
+ *
+ * This replaces the previous comparison of the raw template against
+ * `generated-hashes.json` (rendered + user-merged hashes), which could never
+ * match for any section containing a `{{placeholder}}` and therefore reported
+ * drift on essentially every activation forever (#117).
+ *
+ * Returns false (no drift) when:
+ *   - `.minspec/` is missing (uninitialized);
+ *   - no baseline has been recorded yet — a project generated before baseline
+ *     tracking. We have no like-for-like reference, so we stay silent rather
+ *     than re-introduce a false positive; the baseline is written on the next
+ *     init/refresh, restoring detection; or
+ *   - a harness file is absent on disk (that is "uninitialized", not drift).
  */
 export function hasHarnessDrift(rootDir: string): boolean {
   if (!isMinspecInitialized(rootDir)) return false;
 
-  const storedHashes = loadHashes(rootDir);
+  const baseline = loadTemplateBaseline(rootDir);
+  if (Object.keys(baseline).length === 0) return false;
+
+  const current = computeTemplateBaseline();
 
   for (const name of TEMPLATE_NAMES) {
     const relPath = TEMPLATE_OUTPUT_PATHS[name];
-    const fullPath = path.join(rootDir, relPath);
-    if (!fs.existsSync(fullPath)) continue;
+    if (!fs.existsSync(path.join(rootDir, relPath))) continue;
 
-    const templateSrc = TEMPLATES[name];
-    const templateSections = parseSections(templateSrc);
-    const templateHashes: Record<string, string> = {};
-    for (const s of templateSections) {
-      templateHashes[s.heading] = hashSection(s.body);
-    }
+    const recordedHashes = baseline[relPath];
+    const currentHashes = current[relPath];
+    if (!recordedHashes || !currentHashes) continue;
 
-    const fileStored = storedHashes[relPath];
-
-    if (!fileStored || Object.keys(fileStored).length === 0) {
-      // No stored hashes — only treat as drift when content differs from
-      // the bundled template (otherwise file was just generated and
-      // hashes haven't been written yet).
-      const existing = safeReadFile(fullPath);
-      if (existing == null) continue;
-      const existingSections = parseSections(existing);
-      for (const s of existingSections) {
-        const tplHash = templateHashes[s.heading];
-        if (tplHash && tplHash !== hashSection(s.body)) {
-          return true;
-        }
-      }
-      continue;
-    }
-
-    // Compare stored hashes (last-known template state) to current template.
-    // If any section's template hash differs from what we stored, the
-    // bundled template has been updated → drift.
-    for (const heading of Object.keys(templateHashes)) {
-      const stored = fileStored[heading];
-      const current = templateHashes[heading];
-      if (stored && current && stored !== current) {
+    for (const heading of Object.keys(currentHashes)) {
+      const recorded = recordedHashes[heading];
+      const now = currentHashes[heading];
+      // Drift = the raw template body for this section changed since the
+      // baseline was recorded (the bundled template genuinely moved upstream).
+      if (recorded && now && recorded !== now) {
         return true;
       }
     }
@@ -416,17 +407,4 @@ export function isWatchedGitPath(p: string): boolean {
     normalized.endsWith('/.git/HEAD') ||
     /\/.git\/refs\/heads\//.test(normalized)
   );
-}
-
-// ---------------------------------------------------------------------------
-// Helpers
-// ---------------------------------------------------------------------------
-
-function safeReadFile(p: string): string | null {
-  try {
-    const result = fs.readFileSync(p, 'utf-8');
-    return typeof result === 'string' ? result : null;
-  } catch {
-    return null;
-  }
 }

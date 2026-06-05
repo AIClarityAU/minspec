@@ -17,8 +17,13 @@ import {
   type BootstrapVsCode,
   type BootstrapStep,
 } from '../src/lib/auto-bootstrap';
-import { saveHashes } from '../src/lib/merge-refresh';
-import { TEMPLATES, TEMPLATE_OUTPUT_PATHS } from '../src/lib/template-registry';
+import {
+  saveHashes,
+  loadTemplateBaseline,
+  saveTemplateBaseline,
+} from '../src/lib/merge-refresh';
+import { TEMPLATE_OUTPUT_PATHS } from '../src/lib/template-registry';
+import { generateHarnessFiles } from '../src/lib/scaffold';
 
 /** Build a BootstrapVsCode stub with spies for assertions */
 function makeVsCodeStub(
@@ -79,47 +84,82 @@ describe('auto-bootstrap', () => {
       expect(hasHarnessDrift(tmpDir)).toBe(false);
     });
 
-    it('T0: returns false when harness file matches the bundled template', () => {
+    it('T0: returns false when no baseline recorded yet (legacy project — no structural false positive)', () => {
+      // A project generated before #117 baseline tracking: harness file + the
+      // old generated-hashes.json exist, but no template-baseline.json. Without a
+      // like-for-like reference we must NOT fire — that was the perpetual toast.
       fs.mkdirSync(path.join(tmpDir, '.minspec'), { recursive: true });
-      // Write the CLAUDE.md template content verbatim
       const relPath = TEMPLATE_OUTPUT_PATHS['CLAUDE.md'];
-      fs.writeFileSync(path.join(tmpDir, relPath), TEMPLATES['CLAUDE.md']);
-      // Pretend hashes already match (no stored map; content == template)
+      fs.writeFileSync(
+        path.join(tmpDir, relPath),
+        'rendered content for a real Project Name\n',
+      );
+      saveHashes(tmpDir, { [relPath]: { __preamble__: 'whatever' } });
+      expect(loadTemplateBaseline(tmpDir)).toEqual({});
       expect(hasHarnessDrift(tmpDir)).toBe(false);
     });
 
-    it('T0: returns true when stored hashes differ from current template hashes', () => {
-      fs.mkdirSync(path.join(tmpDir, '.minspec'), { recursive: true });
+    it('T0: returns true when the recorded baseline differs from the current raw template (upstream moved)', () => {
+      // Generate so a real baseline is written, then move one section's recorded
+      // hash to simulate "the bundled template changed since generation".
+      generateHarnessFiles(tmpDir);
       const relPath = TEMPLATE_OUTPUT_PATHS['CLAUDE.md'];
-      // Write a stale version of CLAUDE.md
-      fs.writeFileSync(
-        path.join(tmpDir, relPath),
-        '# Old\n\n## Overview\n\nstale content\n',
-      );
-      // Mock stored hashes pointing at sections that no longer hash-match
-      // the bundled template — simulating "template updated upstream".
-      saveHashes(tmpDir, {
-        [relPath]: {
-          // Heading that exists in the real CLAUDE template
-          Overview: 'deadbeef-stale-hash-from-old-template-version',
-          __preamble__: 'also-stale',
-        },
+      const baseline = loadTemplateBaseline(tmpDir);
+      saveTemplateBaseline(tmpDir, {
+        ...baseline,
+        [relPath]: { ...baseline[relPath], Overview: 'stale-hash-from-an-older-template' },
       });
       expect(hasHarnessDrift(tmpDir)).toBe(true);
     });
 
-    it('T0: detects drift when no hashes stored but file differs from template', () => {
-      fs.mkdirSync(path.join(tmpDir, '.minspec'), { recursive: true });
+    it('T0: gate is not vacuous — restoring the correct baseline clears the drift', () => {
+      // Negative proof: drift fires only because the baseline was tampered, and
+      // clears the instant the correct baseline is restored.
+      generateHarnessFiles(tmpDir);
+      expect(hasHarnessDrift(tmpDir)).toBe(false);
       const relPath = TEMPLATE_OUTPUT_PATHS['CLAUDE.md'];
-      // Write a file with same headings as template but body content differs
-      const templateSrc = TEMPLATES['CLAUDE.md'];
-      const modified = templateSrc.replace(
+      const good = loadTemplateBaseline(tmpDir);
+      saveTemplateBaseline(tmpDir, {
+        ...good,
+        [relPath]: { ...good[relPath], Overview: 'tampered' },
+      });
+      expect(hasHarnessDrift(tmpDir)).toBe(true);
+      saveTemplateBaseline(tmpDir, good);
+      expect(hasHarnessDrift(tmpDir)).toBe(false);
+    });
+
+    it('T0: user edits to a harness file are NOT drift (the #117 secondary defect)', () => {
+      // Generate, then the user heavily edits CLAUDE.md. Drift compares the raw
+      // template to its baseline, never the user's content, so this is false.
+      generateHarnessFiles(tmpDir);
+      const relPath = TEMPLATE_OUTPUT_PATHS['CLAUDE.md'];
+      const p = path.join(tmpDir, relPath);
+      const edited = fs.readFileSync(p, 'utf-8').replace(
         /## Overview\n\n[\s\S]*?\n\n##/,
         '## Overview\n\nUSER MANUALLY EDITED THIS\n\n##',
       );
-      fs.writeFileSync(path.join(tmpDir, relPath), modified);
-      // No stored hashes — code path: compare body hashes to template hashes
-      expect(hasHarnessDrift(tmpDir)).toBe(true);
+      fs.writeFileSync(p, edited);
+      expect(hasHarnessDrift(tmpDir)).toBe(false);
+    });
+  });
+
+  // =========================================================================
+  // #117 regression: drift must be raw-template-vs-raw-template (like-for-like),
+  // never raw-template-vs-rendered/user-merged content.
+  // =========================================================================
+
+  describe('hasHarnessDrift() — #117 raw-vs-raw baseline', () => {
+    it('T3 regression: NO drift immediately after a real generate (bug: fired every activation)', () => {
+      // Repro of the P1 false positive. generateHarnessFiles renders templates
+      // ({{projectName}} → folder name) and records a baseline. The old detector
+      // hashed the UNRENDERED template and compared it to rendered/merged hashes,
+      // so a freshly-generated project reported drift on every activation forever.
+      generateHarnessFiles(tmpDir);
+      // Prove rendering actually happened (placeholders are gone on disk):
+      const claude = fs.readFileSync(path.join(tmpDir, 'CLAUDE.md'), 'utf-8');
+      expect(claude).not.toContain('{{projectName}}');
+      // Drift must be false: the raw bundled template has not moved since generate.
+      expect(hasHarnessDrift(tmpDir)).toBe(false);
     });
   });
 
@@ -280,14 +320,16 @@ describe('auto-bootstrap', () => {
     });
 
     it('T0: respects skipRefreshPrompt and skips refresh step', async () => {
-      // Setup: .minspec exists + stale hashes (would normally trigger refresh)
-      fs.mkdirSync(path.join(tmpDir, '.minspec'), { recursive: true });
+      // Establish REAL drift (tampered baseline) so the skip pref is what
+      // suppresses the prompt — not an absent signal.
+      generateHarnessFiles(tmpDir);
       const relPath = TEMPLATE_OUTPUT_PATHS['CLAUDE.md'];
-      fs.writeFileSync(
-        path.join(tmpDir, relPath),
-        '# Old\n\n## Overview\n\nstale\n',
-      );
-      saveHashes(tmpDir, { [relPath]: { Overview: 'stale-hash', __preamble__: 'stale' } });
+      const baseline = loadTemplateBaseline(tmpDir);
+      saveTemplateBaseline(tmpDir, {
+        ...baseline,
+        [relPath]: { ...baseline[relPath], Overview: 'stale-baseline-hash' },
+      });
+      expect(hasHarnessDrift(tmpDir)).toBe(true); // precondition: drift really fires
       savePreferences(tmpDir, { skipRefreshPrompt: true });
 
       const { stub, showPrompt } = makeVsCodeStub();
@@ -307,13 +349,14 @@ describe('auto-bootstrap', () => {
     });
 
     it('T0: surfaces refresh prompt when init satisfied + drift detected', async () => {
-      fs.mkdirSync(path.join(tmpDir, '.minspec'), { recursive: true });
+      // Real drift via a moved baseline (generate, then tamper one section hash).
+      generateHarnessFiles(tmpDir);
       const relPath = TEMPLATE_OUTPUT_PATHS['CLAUDE.md'];
-      fs.writeFileSync(
-        path.join(tmpDir, relPath),
-        '# Old\n\n## Overview\n\nstale\n',
-      );
-      saveHashes(tmpDir, { [relPath]: { Overview: 'stale', __preamble__: 'stale' } });
+      const baseline = loadTemplateBaseline(tmpDir);
+      saveTemplateBaseline(tmpDir, {
+        ...baseline,
+        [relPath]: { ...baseline[relPath], Overview: 'stale-baseline-hash' },
+      });
 
       const { stub, showPrompt, executeCommand } = makeVsCodeStub({ response: 'Refresh' });
       const result = await runBootstrap(tmpDir, stub);
