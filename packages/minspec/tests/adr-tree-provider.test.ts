@@ -187,9 +187,34 @@ describe('AdrTreeProvider', () => {
     expect(provider).toBeDefined();
   });
 
-  it('refresh() fires the event emitter', () => {
-    provider.refresh();
-    expect((provider as unknown as { _onDidChangeTreeData: { fire: ReturnType<typeof vi.fn> } })._onDidChangeTreeData.fire).toHaveBeenCalled();
+  it('refresh() fires the event emitter (after the debounce window)', () => {
+    vi.useFakeTimers();
+    try {
+      const fire = (provider as unknown as { _onDidChangeTreeData: { fire: ReturnType<typeof vi.fn> } })._onDidChangeTreeData.fire;
+      provider.refresh();
+      vi.advanceTimersByTime(500);
+      expect(fire).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // T3 regression — issue #154. Like the spec tree, each refresh re-parses every
+  // DR synchronously on the UI thread; a burst must coalesce to one rebuild.
+  it('coalesces a burst of refresh() calls into one fire', () => {
+    vi.useFakeTimers();
+    try {
+      const fire = (provider as unknown as { _onDidChangeTreeData: { fire: ReturnType<typeof vi.fn> } })._onDidChangeTreeData.fire;
+      provider.refresh();
+      provider.refresh();
+      provider.refresh();
+      provider.refresh();
+      expect(fire).not.toHaveBeenCalled();
+      vi.advanceTimersByTime(500);
+      expect(fire).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('getTreeItem returns the element itself', () => {

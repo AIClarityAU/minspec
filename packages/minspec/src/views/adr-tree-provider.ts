@@ -87,6 +87,9 @@ export type AdrTreeNode = AdrGroupNode | EpicGroupNode<AdrSummary> | AdrNode;
 export class AdrTreeProvider implements vscode.TreeDataProvider<AdrTreeNode> {
   private _onDidChangeTreeData = new vscode.EventEmitter<AdrTreeNode | undefined | null | void>();
   readonly onDidChangeTreeData = this._onDidChangeTreeData.event;
+  /** Coalesce refresh bursts (issue #154). See refresh(). */
+  private _refreshTimer: ReturnType<typeof setTimeout> | undefined;
+  private static readonly REFRESH_DEBOUNCE_MS = 120;
   private readonly _listAdrs: ListAdrsFn;
   private readonly _listEpics?: ListEpicsFn;
   /** Per-panel "group by epic" toggle (FR-7), default on. */
@@ -101,8 +104,19 @@ export class AdrTreeProvider implements vscode.TreeDataProvider<AdrTreeNode> {
     this._listEpics = listEpicsFn;
   }
 
+  /**
+   * Rebuild the tree, coalescing bursts into a single rebuild (issue #154).
+   * Epic/ADR commands fire this alongside the spec-tree refresh; like the spec
+   * tree, each fire synchronously re-reads+parses every DR (`listAdrs`) on the
+   * extension-host thread, so an uncoalesced burst stalls the UI under memory
+   * pressure. getChildren reads fresh, so one trailing fire reflects latest state.
+   */
   refresh(): void {
-    this._onDidChangeTreeData.fire(undefined);
+    if (this._refreshTimer !== undefined) return;
+    this._refreshTimer = setTimeout(() => {
+      this._refreshTimer = undefined;
+      this._onDidChangeTreeData.fire(undefined);
+    }, AdrTreeProvider.REFRESH_DEBOUNCE_MS);
   }
 
   getTreeItem(element: AdrTreeNode): vscode.TreeItem {

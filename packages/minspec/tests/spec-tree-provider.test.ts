@@ -470,7 +470,13 @@ describe('SpecTreeProvider', () => {
 
   describe('refresh()', () => {
     it('does not throw', () => {
-      expect(() => provider.refresh()).not.toThrow();
+      vi.useFakeTimers();
+      try {
+        expect(() => provider.refresh()).not.toThrow();
+        vi.advanceTimersByTime(500); // flush the debounce timer; leak no real timer
+      } finally {
+        vi.useRealTimers();
+      }
     });
 
     // T3 regression — issue #154. Approving a spec fires refresh() ~4-5× in a
