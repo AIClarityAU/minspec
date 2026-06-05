@@ -125,7 +125,7 @@ Specs and DRs were being written without an explicit **Risks & Mitigations** sec
 
 ## [DR-021 — Tier classifier ships as an upward-only ceremony ratchet; difficulty deferred to opt-in](DR-021.md)
 
-*Status: proposed · Date: 2026-06-01*
+*Status: accepted · Date: 2026-06-01*
 
 DR-009 validated the tier classifier against SWE-bench-Verified via out-of-tree fixtures (SPEC-004) and **deliberately left the direction open** — it measures, it does not decide. The measurement is now in (tasks.md Findings) and forces a product decision. Strongest evidence (Run C, n=120, 11 repos; ground truth = majority of 3 blind LLM labellers given only the problem statement + 1 human; **Fleiss κ = 0.80**):
 
