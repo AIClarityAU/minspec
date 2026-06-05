@@ -2,7 +2,7 @@
 id: SPEC-013
 type: requirements
 # 🔒 Once approved, hash-locked: approved bytes recorded in .minspec/approvals.json[SPEC-013].specHash. ANY edit voids approval (hash → stale) — re-run "MinSpec: Approve Spec". DR-012.
-status: specifying
+status: implementing
 tier: T4
 product: minspec
 epic: EPIC-003  # SDD Core Methodology
