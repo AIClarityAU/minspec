@@ -231,12 +231,19 @@ function resolvePhaseStatus(phase: Phase, fmPhases: Record<string, string> | und
  * Handles Spec Kit format (YAML frontmatter + ## sections).
  */
 export function parseSpec(content: string): ParsedSpec {
-  const raw = content;
+  // Normalize line endings up front (#153.3). FRONTMATTER_RE (and the validator's
+  // own frontmatter-block regex, which reads `spec.raw`) anchor on `\n`, so a CRLF
+  // (`\r\n`) or old-Mac (`\r`) spec failed to match — id came out '' and the spec
+  // was silently dropped from listSpecs. Single-point normalization here covers
+  // every read seam that flows through the parser (readSpecFile, readSpecKitDir,
+  // the custom editor, …); writeSpec always emits `\n`, so this loses nothing.
+  const normalized = content.replace(/\r\n?/g, '\n');
+  const raw = normalized;
 
   // Extract frontmatter
-  const fmMatch = content.match(FRONTMATTER_RE);
+  const fmMatch = normalized.match(FRONTMATTER_RE);
   const fmRaw = fmMatch ? fmMatch[1] : '';
-  const bodyAfterFm = fmMatch ? content.slice(fmMatch[0].length) : content;
+  const bodyAfterFm = fmMatch ? normalized.slice(fmMatch[0].length) : normalized;
 
   const fmParsed = parseFrontmatterYaml(fmRaw);
   const fmPhases = (fmParsed.phases as Record<string, string>) ?? {};

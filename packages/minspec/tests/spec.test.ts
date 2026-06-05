@@ -172,6 +172,30 @@ status: done
     expect(spec.frontmatter.title).toBe('Issue#42 hotfix');
   });
 
+  // T3 regression (#153.3): FRONTMATTER_RE anchored on `^---\n`, so a CRLF spec
+  // (`---\r\n…`) never matched — the frontmatter block was unparsed, id came out
+  // '', and listSpecs silently dropped the spec with no error. parseSpec must
+  // normalize CRLF→LF so a Windows-authored spec parses identically to a LF one.
+  it('parses a CRLF spec identically to LF (frontmatter not dropped)', () => {
+    const crlf = EXAMPLE_SPEC.replace(/\n/g, '\r\n');
+    const spec = parseSpec(crlf);
+    expect(spec.frontmatter.id).toBe('SPEC-001'); // was '' → dropped from listSpecs
+    expect(spec.frontmatter.title).toBe('Add rate limiting to /api/health');
+    expect(spec.frontmatter.status).toBe('implementing');
+    expect(spec.frontmatter.phases.specify).toBe('done');
+    // Body sections parse too; no stray \r leaks into section text.
+    expect(spec.phaseSections.specify!.body).toContain('rate limiting');
+    expect(spec.phaseSections.specify!.body).not.toContain('\r');
+    expect(spec.phaseSections.tasks!.tasks).toHaveLength(2);
+  });
+
+  it('parses a lone-CR (old Mac) spec frontmatter', () => {
+    // Defensive: normalize bare \r too, so an old-Mac line ending also parses.
+    const cr = EXAMPLE_SPEC.replace(/\n/g, '\r');
+    const spec = parseSpec(cr);
+    expect(spec.frontmatter.id).toBe('SPEC-001');
+  });
+
   it('handles minimal Spec Kit format (no MinSpec extensions)', () => {
     const spec = parseSpec(SPECKIT_MINIMAL);
     expect(spec.frontmatter.id).toBe('SPEC-042');
