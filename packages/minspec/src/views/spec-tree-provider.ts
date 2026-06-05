@@ -23,7 +23,7 @@ export type { SpecSummary };
 /**
  * Scan the specs directory and return summaries for all specs.
  *
- * Recurses into product/feature subfolders (e.g. `specs/minspec/epic-grouping/`)
+ * Recurses into product/feature subfolders (e.g. `specs/minspec/SPEC-007-epic-grouping/`)
  * — monorepos nest specs under a product dir, which the old top-level-only scan
  * missed entirely. Still handles flat files and spec-kit directories. Multiple
  * files sharing one `id` (a spec split across requirements/design/tasks) collapse
