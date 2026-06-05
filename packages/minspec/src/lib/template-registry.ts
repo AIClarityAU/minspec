@@ -3,6 +3,13 @@
  * This avoids esbuild file-loader complexity for .hbs files.
  */
 
+import {
+  parseSections,
+  buildSectionHashes,
+  type GeneratedHashes,
+  type SectionHashes,
+} from './merge-refresh';
+
 /** Template names that can be rendered */
 export type TemplateName = 'CLAUDE.md' | 'AGENTS.md' | '.cursorrules' | 'DESIGN.md' | 'constitution.md';
 
@@ -256,3 +263,24 @@ export const TEMPLATES: Record<TemplateName, string> = {
   'DESIGN.md': DESIGN_MD_TEMPLATE,
   'constitution.md': CONSTITUTION_MD_TEMPLATE,
 };
+
+/**
+ * Compute the raw-template baseline: the SHA-256 of each *unrendered* template
+ * section (`{{placeholders}}` intact), keyed by output path → heading.
+ *
+ * This is the canonical "which template version are we at" signal. Because it
+ * hashes the raw template — never the rendered output — it is independent of any
+ * project context: re-rendering with a different project name, specs dir, or
+ * invariant list never perturbs it. `hasHarnessDrift` compares this (the current
+ * bundled template) against the stored baseline (the template at last generate)
+ * to decide whether the bundled template has genuinely moved upstream (#117).
+ */
+export function computeTemplateBaseline(): GeneratedHashes {
+  const baseline: Record<string, SectionHashes> = {};
+  for (const name of TEMPLATE_NAMES) {
+    baseline[TEMPLATE_OUTPUT_PATHS[name]] = buildSectionHashes(
+      parseSections(TEMPLATES[name]),
+    );
+  }
+  return baseline;
+}

@@ -2,13 +2,18 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { DEFAULT_CONFIG, loadConfig } from './config';
 import { buildContext, renderTemplate, renderAll } from './template-engine';
-import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS } from './template-registry';
+import {
+  TEMPLATE_NAMES,
+  TEMPLATE_OUTPUT_PATHS,
+  computeTemplateBaseline,
+} from './template-registry';
 import {
   parseSections,
   buildSectionHashes,
   mergeFile,
   loadHashes,
   saveHashes,
+  saveTemplateBaseline,
   type GeneratedHashes,
 } from './merge-refresh';
 import { generateSlashCommandShims } from './slash-commands';
@@ -109,6 +114,12 @@ export function generateHarnessFiles(rootDir: string): void {
 
   saveHashes(rootDir, allHashes);
 
+  // Record the raw-template baseline so drift detection compares like-for-like
+  // (raw template now vs raw template at generation), never raw vs the rendered/
+  // user-merged content in generated-hashes.json — the cause of #117's perpetual
+  // false-positive drift toast.
+  saveTemplateBaseline(rootDir, computeTemplateBaseline());
+
   // Generate Spec Kit slash-command shims for any detected AI tool.
   // Tools are re-detected after template generation so freshly written
   // CLAUDE.md / AGENTS.md / .cursorrules trigger shim creation.
@@ -155,6 +166,11 @@ export function refreshHarnessFiles(rootDir: string): void {
   }
 
   saveHashes(rootDir, allHashes);
+
+  // Re-record the raw-template baseline: after a refresh the user's files are in
+  // sync with the current bundled template, so drift must read false until the
+  // template next moves upstream (#117).
+  saveTemplateBaseline(rootDir, computeTemplateBaseline());
 
   // Refresh Spec Kit slash-command shims. Per-command Claude/Cursor files
   // are only created if missing (user edits preserved); the AGENTS.md
