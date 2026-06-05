@@ -382,8 +382,10 @@ inverse of the per-FR disposition, used to confirm no concern is orphaned.*
   ± polarity cues) into ± shape — real one-time toil (R2).
 - The canonical zone order + structural divider (FR-8) must be back-filled across the 13
   existing specs + 30 DRs (several still carry Out-of-Scope / Open-Questions *after* Zone B,
-  the inconsistency that surfaced this amendment) — tracked as a re-layout chore on SPEC-005
-  auto-structure-repair + RD-1, not hand-edited.
+  the inconsistency that surfaced this amendment) — tracked at
+  [#167](https://github.com/harvest316/minspec/issues/167) (SPEC-005 does *not* reorder doc
+  bodies — its FR-4 writes only absent files; implement as a SPEC-005 FR or a standalone
+  migration), not hand-edited.
 - Freshness binding FR-body bytes (FR-10) means a cosmetic FR reword voids the section —
   an accepted false-positive we deliberately chose over substance-rot (R6).
 - The floor's strongest layers (L4 hollow-test, FR-11 coverage) are **debt** until SPEC-006
@@ -542,8 +544,9 @@ Slice 2-3 work and tracked on their own spec.*
 - **Re-layout the 13 existing specs + 30 DRs to the canonical zone order + structural
   divider (FR-8)** — they predate the split (several carry Out-of-Scope / Open-Questions
   *after* Zone B, the symptom that surfaced this amendment). Mechanical re-ordering tracked
-  on **SPEC-005 auto-structure-repair** + RD-1 backfill, not hand-edited here. → file issue
-  if SPEC-005's scope doesn't already cover doc re-layout.
+  at [#167](https://github.com/harvest316/minspec/issues/167) — **not** covered by SPEC-005
+  (its FR-4 writes only absent files, never reorders bodies); implement as a SPEC-005 FR or
+  a standalone migration. Pairs with RD-1 backfill. Not hand-edited here.
 - **Web/README copy for the stub-free, pre-approve → LLM-writes → skim flow** — a
   positioning change (cross-repo, non-code; a prose-only leak otherwise). Tracked:
   [#165](https://github.com/harvest316/minspec/issues/165); Paul reviews copy before
