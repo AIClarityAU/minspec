@@ -403,3 +403,61 @@ in <1 day.)*
   Still deferred per [DR-015](../../../docs/decisions/DR-015.md) pending marketing/SEO +
   competitive scan (tracked in #66); working name "AgentSystem", working technical id
   `aiclarity.agent-execute`. Do not treat either as the product name on any public surface.
+
+## Clarify
+
+Clarify session **2026-06-05**. Inputs: the 5 governing DRs + the mining of the old
+AgentSystem ([docs/research/agent-execute-mining-old-agentsystem.md](../../../docs/research/agent-execute-mining-old-agentsystem.md),
+which surfaced 17 spec gaps + 10 questions). Four product forks resolved by the user; the
+rest by engineering default from the DRs + mining evidence. No question remains blocking
+Plan. The single empirical unknown (#74) is a tracked spike that does **not** block the v1
+manual path.
+
+| ID | Decision | By | Lands in |
+|---|---|---|---|
+| **CL-1 — v1 scope** | **Manual Layer-1 ships first.** Human-initiated dispatch; `claude -p` runs as a spawned **subprocess** (never embedded in the ext host — FR-1 still holds) with the host's own creds, no container (DR-008 Layer-1 permits this). Autonomous **Layer-2** (container + attestation + broker) is a **follow-on milestone**. See the v1/Layer-2 FR split below. | user | FR-9/10 + scope split |
+| **CL-2 — confidence = 2nd HITL axis** | Low agent **self-reported** confidence **escalates** an auto-dispatched (T1–T2) run to human review — an axis orthogonal to tier. **Never** used to auto-*approve* (self-reported → hallucination-prone, per mining; it only ever pushes toward a human, the safe direction). | user | FR-12 |
+| **CL-3 — concurrency granularity** | **Global cap** for v1. Roadmap: **per-class caps v2**; **full-auto, load-scaled worker pool** (scale up/down by system load per task — the old-333 model) **v3**, behind the FR-14 cap abstraction. | user | FR-14 |
+| **CL-4 — outcome/trust store** | An **`OutcomeStore` port** (mirrors the `SandboxRunner` port). v1 backend = **one file per attempt** (`.minspec/agent-execute/outcomes/<ulid>.json`, **gitignored**), each a **Zod-validated** record. Per-attempt files → **zero write contention by construction** (multi-window/multi-process safe); aggregates = read-dir (cheap at v1–v2 volume). **SQLite** backend swapped behind the port at **v3** when throughput/query demand it. MinSpec core **never reads** this dir (FR-16). | user | FR-13/FR-16 (new) |
+| **CL-5 — agent-output contract** | Zod result: seed `{fix_description, confidence, tests_passed, files_changed}`; **must also accept the nested/batched shape** (META-MONITOR-style `results[]`) so no run silently null-fails. Rejectable bundle = empty diff / missing-or-empty summary / malformed-or-missing confidence / tests-failed. Exact severity/evidence fields → Plan. | eng default | FR-13 |
+| **CL-6 — infra-vs-quality split + one type-set** | Substrate/infra failures (`{no-runtime, spawn-failed, attest-failed, timeout, oom, …}`) **never** count against tier eligibility or the quality signal. The **dispatchable-type set ≡ executable-type set** (single source of truth) — closes the `crai_*`-class false-failure the mining found. | eng default | FR-11/FR-12 |
+| **CL-7 — retry + terminal-state + crash recovery** | **3 total attempts → `blocked`** (terminal). Terminal set = `completed \| blocked \| cancelled`. Orphan reclamation: a run abandoned mid-flight (control plane died) is reclaimed by a lifecycle sweep (soft timeout → re-queue, hard timeout → blocked), adapted from the seed's `recoverStaleTasks`. | eng default | FR-2/FR-11 |
+| **CL-8 — deterministic-gate anti-deadlock** | The tier gate's input is the **classifier over the spec**, not outcome history → **no self-poisoning input** → the seed's "never-record-own-rejection" escape is **N/A and dropped**. Retained: self-repair-type exemption + an explicit recovery path so a perpetually-`needs-review` class is never permanently stuck. | eng default | FR-12 |
+| **CL-9 — model/effort/thinking locus + cred precedence** | The **broker** is the single resolution seam for model + effort + thinking (collapses the seed's 3 drifting call-sites). Credential precedence: **subscription → API → Scrooge**. effort/thinking tunable per-task; defaults per-tier. (Broker = Layer-2.) | eng default | FR-3/4/5 |
+| **CL-10 — staleness re-check** | A cheap **"still-actionable?"** re-check runs between human-approval and dispatch (re-read issue/PR state; re-run the failing test). **Asymmetric fail-soft**: on error → do the work; skip **only** on positive proof of resolution. | eng default | FR-12/FR-13 |
+| **CL-11 — empty-diff / no-op close** | "Already resolved / not a bug / operational" outcomes (no diff) are closed by the control plane **without a push**. | eng default | FR-13 |
+| **CL-12 — full forbidden-set is enforce-by-construction** | The **entire** forbidden set — push, `.env`/secrets, `package.json`, migrations, new deps, `systemctl`, foreign-DB writes — is denied by **sandbox capability + no-cred** (Layer-2) / by the **control-plane-only action boundary** (Layer-1), **never** by prompt prose (the old system's failure mode). | eng default | FR-13/INV |
+| **CL-13 — post-success side-effects** | A **declared, orchestrator-routed** post-merge action set (close issue, update linked records) runs in the control plane after merge; the result handler **never** reaches into foreign state. | eng default | FR-13 |
+| **CL-14 — input-size cap** | Per-field truncation + a total prompt-size cap, as a DoS/cost guard (distinct from FR-14's spend/concurrency caps). | eng default | FR-14 |
+| **CL-15 — usage/telemetry locus** | Exec plane is credential-free → **structurally cannot observe billing**; the **broker is the only meter** (stage/provider/model/tokens/cost). FR-14's spend cap reads the broker's meter. (Layer-2.) | eng default | FR-14/FR-3 |
+
+### v1 vs Layer-2 milestone split (from CL-1)
+
+- **v1 — manual Layer-1 (no container, ships first):** FR-1 (subprocess, never ext-host-embedded),
+  FR-9/FR-10/FR-11 (mode detect + degrade-to-manual + never-throw), FR-12 (tier-gate + the CL-2
+  confidence escalation), FR-13 (diff handoff + verdict/retry/`OutcomeStore` logic), FR-15
+  (untrusted-as-data inner framing), FR-16 (Tier-0). Plus the ported pure logic
+  (`parseClaudeOutput`/`extractFixSummary`/verdict-ladder, staleness re-check).
+- **Layer-2 milestone — autonomous (gated, later):** FR-2 (`SandboxRunner` container adapter),
+  FR-3/4/5 (host-side broker + billing modes), FR-6/7/8 (attestation), FR-14 **spend** cap (the
+  concurrency cap itself is v1). Gated by #74 + a dedicated security review (DR-017).
+
+### OQ disposition
+
+- **OQ-1 (subscription-oauth)** → tracked spike **#74**; Layer-2 only, **non-blocking for v1**.
+- **OQ-2 (microVM)** → confirmed **out of scope**, **#73** (required only before *untrusted* dispatch).
+- **OQ-3 (packaging)** → already **resolved**: `packages/agent-execute` (DR-015).
+- **OQ-4 (public name)** → deferred, **#66**.
+
+## Follow-ups (tracked)
+
+- **#74 — subscription-oauth broker-injection spike.** Empirical: can the claude CLI subscription
+  oauth be broker-injected (sandbox sans-credential, broker adds token)? Fallback = spawn-token
+  injection / API-key mode. **Layer-2** concern → resolve before default-mode plumbing; does **not**
+  block v1 manual.
+- **Exact verdict Zod fields + severity/evidence (CL-5)** → Plan phase (contracts-first, CDD).
+- **#73 — microVM/gVisor hardening** → required only before *untrusted* (non-self-authored) issue
+  dispatch; out of v1 and the v1 Layer-2 milestone.
+- **`OutcomeStore` SQLite backend (CL-4)** → v3, behind the port; no caller changes.
+- **Per-class caps (v2) + load-scaled worker pool (v3)** → roadmap, behind the FR-14 cap abstraction.
+- **Public brand name + domain** → non-code marketing follow-up, **#66** (DR-023 forward rule).
