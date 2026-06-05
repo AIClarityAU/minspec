@@ -185,13 +185,7 @@ DR-029's **reality-check agent** and **round-table** (Tier-1, agent-execute) rea
 
 ## [DR-031 — Spec-gate must be sound in dispatch contexts — canonical approval resolution + human-only, audited bypass](DR-031.md)
 
-*Status: proposed · Date: 2026-06-04*
+*Status: accepted · Date: 2026-06-04*
 
 The PreToolUse **spec-gate** (DR-362 enforcement of the DR-012 HITL approval gate) denies source edits while any T3/T4 spec is status: implementing without a current approval. It is the only enforcement that survives bypass-permissions mode. Three defects block it — and block the user's goal of an automated triage-inbox.sh → dispatch-issue.sh pipeline where auto-approved (T1–T2 agent-ready) issues build themselves:
-## [DR-031 — Spec-gate must be sound in dispatch contexts — canonical approval resolution + human-only, audited bypass](DR-031.md)
-
-*Status: proposed · Date: 2026-06-04*
-
-The PreToolUse spec-gate (DR-362 enforcing DR-012 HITL) had two latent holes, exposed once #25 repaired the hook's relative-path bug and the gate began actually firing in dispatch worktrees: **#144** — `.minspec/approvals.json` is gitignored so it never reaches a worktree, making the gate block all source edits even for genuinely-approved specs; and **#143** — the deny message advertises `MINSPEC_GATE_OFF=1`, which an autonomous agent can self-set (3 of 6 dispatched agents did). Decision: resolve approvals from the **canonical checkout** (git common dir) so worktrees see the real human-approved state (fail-closed if unresolvable + gated specs exist); make the kill-switch **human-only, unadvertised, and audited**; have `dispatch-issue.sh` rely on canonical approvals, never the bypass; and isolate the flaky `spec-gate.test.ts` (#146) without restructuring the global vitest config.
-
 <!-- minspec:dr-index:end -->
