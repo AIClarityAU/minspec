@@ -60,10 +60,10 @@ describe('goToSpec — nested spec layout (#150)', () => {
     fs.rmSync(tmpRoot, { recursive: true, force: true });
   });
 
-  it('resolves a nested SPEC-007 at specs/minspec/epic-grouping/requirements.md', async () => {
+  it('resolves a nested SPEC-007 at specs/minspec/SPEC-007-epic-grouping/requirements.md', async () => {
     // Real layout: id lives in frontmatter; filename is requirements.md.
     writeSpec(
-      'specs/minspec/epic-grouping',
+      'specs/minspec/SPEC-007-epic-grouping',
       'requirements.md',
       'id: SPEC-007\ntype: requirements\ntier: T4\nstatus: done\nproduct: minspec',
       '# Epic Grouping (Requirements)',
@@ -73,17 +73,17 @@ describe('goToSpec — nested spec layout (#150)', () => {
 
     expect(errors).toEqual([]); // must NOT report "Spec file for SPEC-007 not found."
     expect(opened.path).not.toBeNull();
-    expect(opened.path).toBe(path.join(tmpRoot, 'specs/minspec/epic-grouping/requirements.md'));
+    expect(opened.path).toBe(path.join(tmpRoot, 'specs/minspec/SPEC-007-epic-grouping/requirements.md'));
   });
 
   it('tie-breaks toward requirements.md when a spec is split across phase files', async () => {
-    writeSpec('specs/minspec/epic-grouping', 'design.md', 'id: SPEC-007\ntype: design\ntier: T4\nstatus: done');
-    writeSpec('specs/minspec/epic-grouping', 'tasks.md', 'id: SPEC-007\ntype: tasks\ntier: T4\nstatus: done');
-    writeSpec('specs/minspec/epic-grouping', 'requirements.md', 'id: SPEC-007\ntype: requirements\ntier: T4\nstatus: done');
+    writeSpec('specs/minspec/SPEC-007-epic-grouping', 'design.md', 'id: SPEC-007\ntype: design\ntier: T4\nstatus: done');
+    writeSpec('specs/minspec/SPEC-007-epic-grouping', 'tasks.md', 'id: SPEC-007\ntype: tasks\ntier: T4\nstatus: done');
+    writeSpec('specs/minspec/SPEC-007-epic-grouping', 'requirements.md', 'id: SPEC-007\ntype: requirements\ntier: T4\nstatus: done');
 
     await goToSpecCommand(tmpRoot, 'SPEC-007');
 
-    expect(opened.path).toBe(path.join(tmpRoot, 'specs/minspec/epic-grouping/requirements.md'));
+    expect(opened.path).toBe(path.join(tmpRoot, 'specs/minspec/SPEC-007-epic-grouping/requirements.md'));
   });
 
   it('still resolves a flat top-level SPEC-001.md by filename (fallback path)', async () => {
@@ -96,7 +96,7 @@ describe('goToSpec — nested spec layout (#150)', () => {
   });
 
   it('reports not-found when no spec with the id exists anywhere in the tree', async () => {
-    writeSpec('specs/minspec/epic-grouping', 'requirements.md', 'id: SPEC-007\ntier: T4\nstatus: done');
+    writeSpec('specs/minspec/SPEC-007-epic-grouping', 'requirements.md', 'id: SPEC-007\ntier: T4\nstatus: done');
 
     await goToSpecCommand(tmpRoot, 'SPEC-999');
 
