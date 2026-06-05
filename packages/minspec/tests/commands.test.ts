@@ -573,18 +573,24 @@ describe('commands', () => {
       );
     });
 
-    it('errors when no node and no ADR file is open', async () => {
+    // No node, nothing open, empty register → backstop reports the empty
+    // register instead of dead-ending with "No decision selected" (#110 fix
+    // made open-detection load-bearing; this restores the spec-style backstop).
+    it('reports an empty register (no dead-end) when no node and no ADR file is open', async () => {
       setActiveEditor(undefined);
       await acceptAdrCommand(undefined);
       expect(setAdrStatus).not.toHaveBeenCalled();
-      expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-        expect.stringContaining('No decision selected'),
+      expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+      expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+        'MinSpec: No decisions found.',
       );
     });
 
-    it('errors when the active file is not a known ADR', async () => {
+    // Active file is not a known decision → fall back to a quick-pick of all
+    // decisions rather than erroring, so the user is never stranded.
+    it('falls back to a pick when the active file is not a known decision', async () => {
       setActiveEditor('/tmp/test-workspace/README.md');
-      vi.mocked(listAdrs).mockReturnValueOnce([
+      vi.mocked(listAdrs).mockReturnValue([
         {
           id: 'DR-008',
           title: 'Dispatch security',
@@ -593,9 +599,18 @@ describe('commands', () => {
           filePath: DR8,
         },
       ]);
+      vi.mocked(vscode.window.showQuickPick).mockResolvedValueOnce({
+        label: 'DR-008: Dispatch security',
+        description: 'proposed',
+        adr: { filePath: DR8, status: 'proposed', id: 'DR-008' },
+      } as never);
+
       await acceptAdrCommand(undefined);
-      expect(setAdrStatus).not.toHaveBeenCalled();
-      expect(vscode.window.showErrorMessage).toHaveBeenCalled();
+
+      expect(vscode.window.showQuickPick).toHaveBeenCalled();
+      expect(setAdrStatus).toHaveBeenCalledWith(DR8, 'accepted');
+      expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+      vi.mocked(listAdrs).mockReturnValue([]); // restore default for later tests
     });
 
     it('still works from a tree node argument', async () => {

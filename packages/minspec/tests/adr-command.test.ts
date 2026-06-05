@@ -558,11 +558,62 @@ describe('setAdrStatusCommand() — same-status no-op', () => {
 });
 
 // =============================================================================
-// resolveAdr — active path present but folderForFile returns undefined
+// T3 REGRESSION (harvest316/minspec#169): palette accept must not dead-end when
+// open-decision detection misses (e.g. Ctrl-Shift-V preview, stale editor).
+// Before the fix, resolveAdr hard-failed "No decision selected"; now a
+// quick-pick of all decisions backstops it.
 // =============================================================================
 
-describe('resolveAdr() — activePath with no folder', () => {
-  it('shows "No decision selected" error when activePath is outside any workspace', async () => {
+describe('acceptAdrCommand() — backstop quick-pick when no decision resolves from the editor', () => {
+  it('offers a pick of unaccepted decisions and accepts the chosen one', async () => {
+    // Simulate the failure condition: no live ADR editor and no preview cache
+    // hit, so resolveActiveAdrPath() yields nothing (open-decision miss).
+    setActiveEditor(undefined);
+    const DR21 = `${WS}/docs/decisions/DR-021.md`;
+    vi.mocked(listAdrs).mockReturnValueOnce([
+      { id: 'DR-021', title: 'Lifecycle floor', status: 'proposed', date: '2026-06-05', filePath: DR21 },
+      { id: 'DR-001', title: 'Already accepted', status: 'accepted', date: '2026-05-27', filePath: DR1 },
+    ]);
+    // User selects the proposed decision from the backstop pick.
+    vi.mocked(vscode.window.showQuickPick).mockResolvedValueOnce({
+      label: 'DR-021: Lifecycle floor',
+      description: 'proposed',
+      adr: { filePath: DR21, status: 'proposed', id: 'DR-021' },
+    } as never);
+
+    await acceptAdrCommand(undefined);
+
+    // The pick was offered (no dead-end) and only the unaccepted decision was a
+    // candidate — accept hides already-accepted ones.
+    const items = vi.mocked(vscode.window.showQuickPick).mock.calls[0][0] as {
+      adr: { id: string };
+    }[];
+    expect(items.map((i) => i.adr.id)).toEqual(['DR-021']);
+    // The chosen decision was accepted; no "No decision selected" error.
+    expect(setAdrStatus).toHaveBeenCalledWith(DR21, 'accepted');
+    expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+  });
+
+  it('backstop pick can be cancelled without error', async () => {
+    setActiveEditor(undefined);
+    vi.mocked(listAdrs).mockReturnValueOnce([
+      { id: 'DR-021', title: 'Lifecycle floor', status: 'proposed', date: '2026-06-05', filePath: `${WS}/docs/decisions/DR-021.md` },
+    ]);
+    vi.mocked(vscode.window.showQuickPick).mockResolvedValueOnce(undefined as never);
+
+    await acceptAdrCommand(undefined);
+
+    expect(setAdrStatus).not.toHaveBeenCalled();
+    expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// pickAdr — active path present but folderForFile returns undefined
+// =============================================================================
+
+describe('pickAdr() — activePath with no folder', () => {
+  it('falls back to resolveTargetFolder (no-workspace) when activePath is outside any workspace', async () => {
     // Set an active editor with a path that is outside the workspace
     setActiveEditor('/outside/workspace/DR-001.md');
     // getWorkspaceFolder returns undefined — no workspace contains this path
@@ -572,9 +623,11 @@ describe('resolveAdr() — activePath with no folder', () => {
 
     await acceptAdrCommand(undefined);
 
+    // Open-decision detection can't resolve a folder, so the backstop runs and
+    // hits resolveTargetFolder's no-workspace guard — never silently dead-ends.
     expect(setAdrStatus).not.toHaveBeenCalled();
     expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-      expect.stringContaining('No decision selected'),
+      'MinSpec: No workspace folder open.',
     );
   });
 
@@ -608,16 +661,19 @@ describe('resolveAdr() — activePath with no folder', () => {
 // setAdrStatusCommand — !resolved early return (line 201)
 // =============================================================================
 
-describe('setAdrStatusCommand() — no resolved ADR', () => {
-  it('returns early when no node and no ADR file is open (resolved is undefined)', async () => {
+describe('setAdrStatusCommand() — no open ADR, empty register', () => {
+  it('shows "No decisions found" (not a dead-end error) when nothing is open and the register is empty', async () => {
     setActiveEditor(undefined);
+    // listAdrs default mock returns [] — empty register.
 
     await setAdrStatusCommand(undefined);
 
+    // Backstop ran (resolveTargetFolder → workspace → listAdrs []), reported the
+    // empty register, and never showed a status pick.
     expect(vscode.window.showQuickPick).not.toHaveBeenCalled();
     expect(setAdrStatus).not.toHaveBeenCalled();
-    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-      expect.stringContaining('No decision selected'),
+    expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+      'MinSpec: No decisions found.',
     );
   });
 });

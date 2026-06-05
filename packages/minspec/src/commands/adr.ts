@@ -13,6 +13,13 @@ import type { AdrNode } from '../views/adr-tree-provider';
 import { resolveTargetFolder, folderForFile } from '../lib/resolve-folder';
 import { resolveActiveAdrPath } from '../lib/active-adr';
 
+function decisionsDirOverride(): { decisionsDir: string } | undefined {
+  const decisionsDir = vscode.workspace
+    .getConfiguration('minspec')
+    .get<string>('decisionsDir');
+  return decisionsDir ? { decisionsDir } : undefined;
+}
+
 /**
  * Dedup gate shared by both create paths. If an existing in-force ADR has a
  * near-duplicate title, prompt the user. On "Open existing" the existing file
@@ -104,37 +111,52 @@ const STATUS_LABELS: Record<AdrStatus, string> = {
   superseded: '$(arrow-swap) Superseded',
 };
 
+type ResolvedAdr = { filePath: string; status: AdrStatus; id: string };
+
+interface AdrPickOptions {
+  /** Keep a decision in the quick-pick only when its status passes this. */
+  include: (status: AdrStatus) => boolean;
+  /** Shown when decisions exist but none survive the `include` filter. */
+  emptyMessage: string;
+}
+
 /**
- * Resolve the target ADR for a status command.
+ * Resolve which decision to act on: tree node → open decision → quick-pick.
  *
- * Tree-view invocations (inline ✓ / right-click) pass an `AdrNode` carrying the
- * decision. Command-palette invocations pass nothing — so fall back to the ADR
- * file open in the active editor, matched against the known decisions by path.
- * The open-ADR resolution survives markdown preview (Ctrl-Shift-V): a webview
- * preview is never a TextEditor, so `resolveActiveAdrPath()` falls back to the
- * last-active ADR editor (see lib/active-adr.ts, harvest316/minspec#110).
- * Returns undefined (after surfacing an error) when neither yields a decision.
+ * The bug this fixes: the command identified its target ONLY from the open
+ * editor, and hard-failed ("No decision selected") whenever that detection
+ * missed — e.g. a Ctrl-Shift-V preview opened to the side leaves
+ * `activeTextEditor` pointed at another file, so the open ADR couldn't be
+ * recovered and the user was stranded with no way forward. The fix gives the
+ * command the same backstop spec approval has (commands/approve.ts `pickSpec`):
+ * a quick-pick of all decisions. So:
+ *
+ *   1. Tree node (inline ✓ / right-click) — the user picked that exact decision.
+ *   2. Open decision (preview-aware via resolveActiveAdrPath / #110) — the fast
+ *      path: when a known decision is open, act on it directly, no pick.
+ *   3. Backstop — open-decision detection missed → quick-pick of all decisions
+ *      so the command can NEVER dead-end (the old failure mode).
  */
-function resolveAdr(
+async function pickAdr(
   node: AdrNode | undefined,
-): { filePath: string; status: AdrStatus; id: string } | undefined {
+  placeholder: string,
+  opts: AdrPickOptions,
+): Promise<ResolvedAdr | undefined> {
   // 1. Tree node — carries its own state, no filesystem read needed.
   const fromNode = node?.adr;
   if (fromNode?.filePath) {
     return { filePath: fromNode.filePath, status: fromNode.status, id: fromNode.id };
   }
 
-  // 2. Command palette — fall back to the ADR open in the active editor,
-  //    including when it is shown in a markdown preview (Ctrl-Shift-V).
+  const overrides = decisionsDirOverride();
+
+  // 2. Open decision — the fast path. resolveActiveAdrPath() survives markdown
+  //    preview (#110); when it points at a known decision, act on it directly.
   const activePath = resolveActiveAdrPath();
-  const folder = activePath ? folderForFile(activePath) : undefined;
-  if (activePath && folder) {
-    const decisionsDir = vscode.workspace
-      .getConfiguration('minspec')
-      .get<string>('decisionsDir');
-    const overrides = decisionsDir ? { decisionsDir } : undefined;
+  const openFolder = activePath ? folderForFile(activePath) : undefined;
+  if (activePath && openFolder) {
     const target = path.resolve(activePath);
-    const match = listAdrs(folder, overrides).find(
+    const match = listAdrs(openFolder, overrides).find(
       a => path.resolve(a.filePath) === target,
     );
     if (match) {
@@ -142,10 +164,34 @@ function resolveAdr(
     }
   }
 
-  vscode.window.showErrorMessage(
-    'MinSpec: No decision selected. Open a decision file or pick one in the Decisions view.',
-  );
-  return undefined;
+  // 3. Backstop — nothing resolved from the editor. Offer a quick-pick of all
+  //    decisions instead of dead-ending, mirroring spec approval's pickSpec.
+  const folder = openFolder ?? (await resolveTargetFolder());
+  if (!folder) return undefined;
+
+  const adrs = listAdrs(folder, overrides);
+  if (adrs.length === 0) {
+    vscode.window.showInformationMessage('MinSpec: No decisions found.');
+    return undefined;
+  }
+
+  const items = adrs
+    .filter(a => opts.include(a.status))
+    .map(a => ({
+      label: `${a.id}: ${a.title}`,
+      description: a.status,
+      adr: { filePath: a.filePath, status: a.status, id: a.id } as ResolvedAdr,
+    }));
+  if (items.length === 0) {
+    vscode.window.showInformationMessage(opts.emptyMessage);
+    return undefined;
+  }
+
+  const picked = await vscode.window.showQuickPick(items, {
+    placeHolder: placeholder,
+    ignoreFocusOut: true,
+  });
+  return picked?.adr;
 }
 
 /** Write the new status, regenerate the index, surface result. */
@@ -183,7 +229,12 @@ async function applyStatus(
  * `accepted` in one click. No-op confirmation if already accepted.
  */
 export async function acceptAdrCommand(node?: AdrNode): Promise<void> {
-  const resolved = resolveAdr(node);
+  const resolved = await pickAdr(node, 'Select a decision to accept', {
+    // Already-accepted decisions have nothing to do here; hide them from the
+    // pick. A tree-node invocation can still arrive accepted — guarded below.
+    include: (status) => status !== 'accepted',
+    emptyMessage: 'MinSpec: No decisions awaiting acceptance — all are already accepted.',
+  });
   if (!resolved) return;
   if (resolved.status === 'accepted') {
     vscode.window.showInformationMessage(`MinSpec: ${resolved.id} already accepted.`);
@@ -197,7 +248,10 @@ export async function acceptAdrCommand(node?: AdrNode): Promise<void> {
  * Right-click → Set Status. Current status marked.
  */
 export async function setAdrStatusCommand(node?: AdrNode): Promise<void> {
-  const resolved = resolveAdr(node);
+  const resolved = await pickAdr(node, 'Select a decision to set status', {
+    include: () => true, // every decision is a valid target for a status change
+    emptyMessage: 'MinSpec: No decisions found.',
+  });
   if (!resolved) return;
 
   const items: (vscode.QuickPickItem & { value: AdrStatus })[] =
