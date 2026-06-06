@@ -1,14 +1,14 @@
 ---
 id: SPEC-022
 type: requirements
-status: specifying
+status: implementing
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity
 depends_on: [DR-034, DR-012, DR-031, DR-003]  # DR-034 the accepted design; DR-012 approval-as-human-act being amended; DR-031 canonical resolution demoted to fallback; DR-003 RCDD gate model
 relates_to: [SPEC-010, SPEC-015]  # SPEC-010 signpost-correctness — this integrity work backs the never-wrong signpost; SPEC-015 status lanes render the derived status (FR-4). Issue refs (#95/#116/#112/#148/#166) are in Context + Traceability.
 phases:
-  specify: in-progress
+  specify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -221,6 +221,41 @@ gates that make each bad state un-representable.
   repo — no two specs share an approval record.
 - **INV-6 (terminal honesty).** `archived` / `superseded` are set **only** by an
   explicit human act, never inferred from phases.
+
+## Acceptance Criteria
+
+Verifiable definition-of-done. Each maps to the FR/INV it proves; all must pass
+before the gate promotes from WARN to ERROR (FR-5).
+
+- [ ] **AC-1 (FR-1).** `.minspec/approvals/` is committed (its `.gitignore:39` entry is
+  removed); approving a spec writes a per-spec sidecar at
+  `.minspec/approvals/<spec-repo-relative-path>.json`, present after a fresh `git clone`.
+- [ ] **AC-2 (FR-1/INV-5).** Two devs approving *different* specs produce no merge
+  conflict; two approving the *same* spec do. Sidecar keys (spec paths) are unique — no
+  two specs share a record.
+- [ ] **AC-3 (FR-2).** Each sidecar carries `specPath`, `specHash`, `approvedAt`,
+  `approvedBy` (= `git config user.email` captured at approval time), `tier`, `migrated`;
+  approval performs no network call (Tier-0 / offline).
+- [ ] **AC-4 (FR-3/INV-3).** Editing **only** `status` and/or `phases` leaves `specHash`
+  unchanged; editing the body or any other frontmatter field changes it. CRLF and LF
+  copies of the same spec hash identically.
+- [ ] **AC-5 (FR-3/INV-2).** `canonicalizeSpec`/`specHash` produce **byte-identical**
+  output in the Node module and the `spec-gate.py` Python twin for every spec in
+  `specs/` (corpus parity test green in CI; the bash `sha256sum` path is gone).
+- [ ] **AC-6 (FR-4/INV-1).** A spec deriving to `implementing`/`done` without a
+  hash-matching record fails validation; `deriveStatus` returns `specifying` for an
+  unapproved spec regardless of its literal `status:` line.
+- [ ] **AC-7 (FR-4/INV-4).** The literal `status:` line is tool-written; a hand-edit
+  disagreeing with `deriveStatus` raises a validator **warning**; the gate and CI read
+  the **derived** status, never the literal line.
+- [ ] **AC-8 (FR-4/INV-6).** `archived`/`superseded` are set only by an explicit human
+  act, never inferred from phases.
+- [ ] **AC-9 (FR-5).** Migration converts the 15 local records to committed sidecars with
+  **recomputed** canonical hashes; the 7 unbacked `implementing`/`done` specs get
+  `migrated:true` sidecars (valid-but-flagged); the gate ships **WARN** and promotes to
+  **ERROR** only when zero `migrated` records and zero literal/derived drift remain.
+- [ ] **AC-10 (T0 discipline).** INV-1..INV-6 each have a test that **fails against the
+  pre-change code** and **passes after** — written before implementation.
 
 ## Contracts (define before implementation)
 
