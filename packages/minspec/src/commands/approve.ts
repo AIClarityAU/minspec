@@ -1,6 +1,6 @@
 import * as vscode from 'vscode';
 import { listSpecs, type SpecSummary } from '../views/spec-tree-provider';
-import { readSpecFile, setSpecStatus } from '../lib/spec';
+import { readSpecFile, advanceSpecToImplementing } from '../lib/spec';
 import { loadConfig } from '../lib/config';
 import { validateSpec } from '../lib/spec-validator';
 import { epicRefSet } from '../lib/epic-manager';
@@ -138,11 +138,13 @@ export async function approveSpecCommand(
     // a tool-written mirror of the derived status; write it on approval. Guard:
     // only advance from a pre-implementation status — never downgrade done/archived
     // or re-flip an already-implementing spec being re-approved after an edit.
+    // advanceSpecToImplementing also advances the `phases:` map (when present) so
+    // the status line and the phases-derived status cannot diverge (#148).
     const wasPreImpl =
       parsed.frontmatter.status === 'new' || parsed.frontmatter.status === 'specifying';
     const email = gitConfigEmail(rootDir);
     if (wasPreImpl) {
-      setSpecStatus(spec.filePath, 'implementing'); // mirror; no longer affects the hash
+      advanceSpecToImplementing(spec.filePath); // mirror; phases-aware, no longer affects the hash
     }
     recordApproval(rootDir, spec.filePath, spec.tier, email);
 
