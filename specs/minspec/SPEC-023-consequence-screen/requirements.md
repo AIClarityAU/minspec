@@ -196,7 +196,7 @@ hard-asserted — #91 owns acceptance).
 ## Follow-ups (tracked)
 
 - Real cross-file **reference/call-graph index** for impact-reach (FR-1's full form),
-  **gated by [#91](https://github.com/harvest316/minspec/issues/91)** → **issue to be filed**.
+  **gated by [#91](https://github.com/harvest316/minspec/issues/91)** → [#195](https://github.com/harvest316/minspec/issues/195).
 - **#91** — validation acceptance thresholds for the reach model (owns FR-8's pass/fail).
 - **#90** — `tier → risk-profile` data-model migration (consumes this spec's signals).
 - Positioning flip (consequence as primary unit) — DR-022, post-validation.
