@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
-import { analyzeGitDiff } from '../lib/git-analyzer';
+import { analyzeGitDiff, buildConsequenceInput } from '../lib/git-analyzer';
 import { classify, applyFloor } from '../lib/classifier';
+import type { ClassificationSignal } from '../lib/classifier';
+import { runConsequenceAnalyzers } from '../lib/consequence-analyzers';
 import { loadConfig, applyVSCodeOverrides, TIERS } from '../lib/config';
 import type { Tier } from '../lib/config';
 import { resolveTargetFolder } from '../lib/resolve-folder';
@@ -21,10 +23,15 @@ export async function classifyCommand(folderArg?: string): Promise<void> {
     specsDir: vscodeConfig.get('specsDir'),
   });
 
-  let signals: Awaited<ReturnType<typeof analyzeGitDiff>> = [];
+  // Diff-size signals (DR-022: demoted to ordinary inputs, not the dominant
+  // driver). Try staged first, then working tree. `usedStaged` records which
+  // view produced them so the consequence input reads the SAME view (FR-7).
+  let signals: ClassificationSignal[] = [];
+  let usedStaged = true;
   try {
     signals = await analyzeGitDiff(workspaceRoot, { staged: true });
     if (signals.length === 0) {
+      usedStaged = false;
       signals = await analyzeGitDiff(workspaceRoot, { staged: false });
     }
   } catch {
@@ -36,6 +43,21 @@ export async function classifyCommand(folderArg?: string): Promise<void> {
       'MinSpec: No changes detected. Stage or modify files to classify.',
     );
     return;
+  }
+
+  // SPEC-023 FR-7: the consequence axis. Build the pure input from the same git
+  // view, run the (pure, offline) analyzers, and APPEND their signals alongside
+  // the size signals. `classify()`'s max-over-`tierContribution` is unchanged, so
+  // a consequence signal can only ratchet the tier UP (INV-3). IO stays here in
+  // the command layer; the analyzers stay pure (INV-1).
+  try {
+    const consequenceInput = await buildConsequenceInput(workspaceRoot, {
+      staged: usedStaged,
+    });
+    const consequenceSignals = runConsequenceAnalyzers(consequenceInput);
+    signals = [...signals, ...consequenceSignals];
+  } catch {
+    // Consequence axis is best-effort; size signals still classify on their own.
   }
 
   const result = classify(signals, config);

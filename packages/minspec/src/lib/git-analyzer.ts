@@ -4,6 +4,11 @@ import * as path from 'path';
 
 import type { Tier } from './config';
 import type { ClassificationSignal } from './classifier';
+import type {
+  ChangedFile,
+  ChangeStatus,
+  ConsequenceInput,
+} from './consequence-analyzers';
 export type { ClassificationSignal };
 
 /** Options for the git analyzer */
@@ -258,4 +263,137 @@ export async function analyzeGitDiff(
   }
 
   return signals;
+}
+
+// ─── Consequence input (SPEC-023 FR-7 — the IO seam) ─────────────────────────
+
+/**
+ * Map a git status (`status.files[].index`/`working_dir` letters, or a category
+ * array) to the normalized {@link ChangeStatus}. Defaults to `'modified'`.
+ */
+function statusFromGit(
+  filePath: string,
+  created: Set<string>,
+  deleted: Set<string>,
+  renamed: Set<string>,
+): ChangeStatus {
+  if (deleted.has(filePath)) return 'deleted';
+  if (renamed.has(filePath)) return 'renamed';
+  if (created.has(filePath)) return 'added';
+  return 'modified';
+}
+
+/**
+ * Build the pure {@link ConsequenceInput} for the consequence analyzers from the
+ * current git diff. **This is the IO seam** (INV-1): all git/disk reads live here
+ * in the analyzer-adjacent IO layer; the analyzers themselves stay pure and
+ * receive only data.
+ *
+ * It reads, per changed file:
+ *  - path, insertions, deletions, status (added/modified/deleted/renamed);
+ *  - new content (`git show :<path>` staged, or working-tree `git show :<path>`
+ *    fallback) and old content (`git show HEAD:<path>`), best-effort.
+ *
+ * `refIndex` is **always null in v1** — there is no cross-file reference index
+ * yet (SPEC-023 Clarification 2); analyzers degrade accordingly.
+ *
+ * Failures are swallowed per-file (content stays `undefined`) so a partial read
+ * degrades gracefully rather than throwing — the analyzers handle missing content.
+ */
+export async function buildConsequenceInput(
+  repoPath: string,
+  options: GitAnalyzerOptions = {},
+): Promise<ConsequenceInput> {
+  const { staged = true, git: injectedGit } = options;
+  const git = injectedGit ?? simpleGit(repoPath);
+
+  const empty: ConsequenceInput = { changedFiles: [], refIndex: null };
+
+  if (!(await isGitRepo(git))) return empty;
+
+  let diffSummary;
+  try {
+    diffSummary = await git.diffSummary(staged ? ['--cached'] : []);
+  } catch {
+    return empty;
+  }
+  const files = diffSummary.files as DiffFile[];
+  if (files.length === 0) return empty;
+
+  // Classify status from `git status`.
+  const created = new Set<string>();
+  const deleted = new Set<string>();
+  const renamed = new Set<string>();
+  try {
+    const st = await git.status();
+    for (const f of st.created ?? []) created.add(f);
+    for (const f of st.deleted ?? []) deleted.add(f);
+    if (!staged) for (const f of st.not_added ?? []) created.add(f);
+    for (const r of st.renamed ?? []) {
+      // simple-git renamed entries: { from, to }
+      const to = (r as unknown as { to?: string }).to;
+      if (to) renamed.add(to);
+    }
+  } catch {
+    // No status → everything defaults to 'modified'.
+  }
+
+  const changedFiles: ChangedFile[] = [];
+
+  for (const file of files) {
+    const status = statusFromGit(file.file, created, deleted, renamed);
+
+    let content: string | undefined;
+    let oldContent: string | undefined;
+
+    if (status !== 'deleted') {
+      // New/current content: the staged blob (`:path`) or, for working-tree
+      // mode, the file on disk via the same `:path` falls back to HEAD; read the
+      // working tree directly when not staged.
+      try {
+        if (staged) {
+          content = await git.show([`:${file.file}`]);
+        } else {
+          // Working-tree content: read from disk relative to repo root.
+          const abs = path.isAbsolute(file.file)
+            ? file.file
+            : path.join(repoPath, file.file);
+          content = await fsReadFile(abs);
+        }
+      } catch {
+        content = undefined;
+      }
+    }
+
+    if (status !== 'added') {
+      try {
+        oldContent = await git.show([`HEAD:${file.file}`]);
+      } catch {
+        oldContent = undefined;
+      }
+    }
+
+    changedFiles.push({
+      path: file.file,
+      insertions: file.insertions,
+      deletions: file.deletions,
+      status,
+      content,
+      oldContent,
+    });
+  }
+
+  return { changedFiles, refIndex: null };
+}
+
+/** Best-effort UTF-8 file read; returns undefined on any failure. */
+async function fsReadFile(absPath: string): Promise<string | undefined> {
+  try {
+    // Lazy import keeps fs out of the module's top-level surface; this is the IO
+    // layer, so fs is permitted here (analyzers stay pure — INV-1).
+    const fs = await import('fs');
+    return fs.promises.readFile(absPath, 'utf-8');
+  } catch {
+    return undefined;
+  }
 }
