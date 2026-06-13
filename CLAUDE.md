@@ -54,6 +54,27 @@ Monorepo for two VS Code extensions + extension pack:
 | `packages/shared` | `@aiclarity/shared` | — | Tier-0 shared: contract types + classifier engine (no vscode/network). See DR-014 |
 | `packages/extension-pack` | `aiclarity.minspec-pro` | — | References both |
 
+## Scrooge Model-Fit Advisory
+
+Watch whether the session's active **model / effort / thinking** matches what the
+current task actually needs. When they diverge — in **either** direction, over- or
+under-powered — append a **single-line advisory** at the end of the response. This is
+an ongoing nag, not a gate: never pause the thread, never ask, just surface it and
+continue.
+
+- **Format:** `💲 Scrooge: this <task> suits <model> · <effort> effort · <thinking> — you're on <current>. Switch: /model`
+  e.g. `💲 Scrooge: this task suits Sonnet · medium effort · no thinking — you're on Opus · high. Switch: /model`
+- **Surface only on a genuine mismatch.** Already well-matched → say nothing. One line,
+  never a paragraph; if unsure, stay silent rather than cry wolf.
+- **Direction-neutral.** Recommend *down* (cheaper — the common case) or *up* (a hard
+  task on a weak model) with equal willingness. Frugality is the default lean, not a floor.
+- **Advisory only — never silent auto-switch.** The model cannot change its own
+  session, and a silently-swapped model makes the UI's model label lie (never-wrong
+  invariant). Name the keyboard path (`/model`); the human decides and acts.
+- **Heuristic, not authority.** This is a cheap task-shape read, not a guarantee — a
+  soft advisory layer. The deterministic, always-visible version is a Scrooge statusline
+  (tracked in `harvest316/scroogellm`); this CLAUDE.md nag does not replace it.
+
 ## Session Scope Protocol
 
 Declare at session start:
