@@ -37,5 +37,8 @@ packages/minspec/test-fixtures/workspace/.minspec/generated-hashes.json
 # Supply-chain scan output (bumblebee, DR-005)
 .cache/supply-chain/
 
-# MinSpec local approval state (content-hash bound, machine-local)
+# SPEC-022 (DR-034): approval ground truth is now COMMITTED, path-keyed sidecars
+# under .minspec/approvals/ (FR-1) — intentionally TRACKED so every clone/worktree/CI
+# checkout has it. The legacy single-file .minspec/approvals.json stays ignored (it
+# is migrated into the sidecar tree by scripts/migrate-approvals.ts and retired).
 .minspec/approvals.json
