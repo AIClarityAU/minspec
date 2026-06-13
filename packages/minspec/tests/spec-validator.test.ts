@@ -1099,3 +1099,53 @@ describe('validateSpec — dangling park reference lint (#40)', () => {
     expect(v?.fixHint).toMatch(/#NNN|issue/i);
   });
 });
+
+// ─── SPEC-022 / INV-4 — literal status mirror drift (warn-only) ──────────────
+//
+// AC-10 discipline: pre-change, validateSpec had NO approvalState/explicitTerminal
+// params and NO mirror check — a hand-edited literal status that disagreed with
+// the derived status passed silently. These assert the new warn-on-drift gate.
+describe('validateSpec — INV-4 literal/derived status mirror drift', () => {
+  // phases that derive to 'implementing' when approved (plan in progress).
+  const IMPL_PHASES = 'specify: done\n  clarify: skipped\n  plan: in-progress\n  tasks: pending\n  implement: pending';
+
+  it('no mirror check (no warning) when approvalState is omitted', () => {
+    const src = spec({ status: 'implementing', phases: IMPL_PHASES }, FULL_T3);
+    const result = validateSpec(parseSpec(src), DEFAULT_CONFIG);
+    expect(result.violations.some((v) => v.rule === 'status.mirror-drift')).toBe(false);
+  });
+
+  it('warns (never errors) when the literal disagrees with the derived status', () => {
+    // Literal says 'implementing' but the spec is UNAPPROVED → derives 'specifying'.
+    const src = spec({ status: 'implementing', phases: IMPL_PHASES }, FULL_T3);
+    const result = validateSpec(parseSpec(src), DEFAULT_CONFIG, undefined, 'unapproved', undefined);
+    const drift = result.violations.find((v) => v.rule === 'status.mirror-drift');
+    expect(drift).toBeDefined();
+    expect(drift!.severity).toBe('warning');
+    expect(drift!.message).toContain('implementing');
+    expect(drift!.message).toContain('specifying');
+    // WARN never blocks — the spec is still "complete" (no error-severity drift).
+    expect(result.violations.some((v) => v.rule === 'status.mirror-drift' && v.severity === 'error')).toBe(false);
+  });
+
+  it('no drift warning when the literal matches the derived status', () => {
+    // Approved + plan in progress → derives 'implementing', literal agrees.
+    const src = spec({ status: 'implementing', phases: IMPL_PHASES }, FULL_T3);
+    const result = validateSpec(parseSpec(src), DEFAULT_CONFIG, undefined, 'approved', undefined);
+    expect(result.violations.some((v) => v.rule === 'status.mirror-drift')).toBe(false);
+  });
+
+  it('the gate reads DERIVED status: an unapproved spec deriving to specifying does not drift when its literal is specifying', () => {
+    const src = spec({ status: 'specifying', phases: IMPL_PHASES }, FULL_T3);
+    const result = validateSpec(parseSpec(src), DEFAULT_CONFIG, undefined, 'unapproved', undefined);
+    expect(result.violations.some((v) => v.rule === 'status.mirror-drift')).toBe(false);
+  });
+
+  it('explicitTerminal (archived) drives the derive: literal implementing drifts against archived', () => {
+    const src = spec({ status: 'implementing', phases: IMPL_PHASES }, FULL_T3);
+    const result = validateSpec(parseSpec(src), DEFAULT_CONFIG, undefined, 'approved', 'archived');
+    const drift = result.violations.find((v) => v.rule === 'status.mirror-drift');
+    expect(drift).toBeDefined();
+    expect(drift!.message).toContain('archived');
+  });
+});

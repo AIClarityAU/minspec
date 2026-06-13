@@ -35,6 +35,12 @@ vi.mock('../src/lib/epic-manager', () => ({
   epicRefSet: vi.fn(),
 }));
 
+// SPEC-022: validate.ts now reads the approval verdict to feed the INV-4 mirror
+// check. Mock it (default 'unapproved').
+vi.mock('../src/lib/approval', () => ({
+  getApprovalStatus: vi.fn(() => 'unapproved'),
+}));
+
 // ─── Imports ──────────────────────────────────────────────────────────────────
 
 import * as vscode from 'vscode';
@@ -44,6 +50,7 @@ import { readSpecFile } from '../src/lib/spec';
 import { loadConfig } from '../src/lib/config';
 import { validateSpec } from '../src/lib/spec-validator';
 import { epicRefSet } from '../src/lib/epic-manager';
+import { getApprovalStatus } from '../src/lib/approval';
 import type { SpecSummary } from '../src/views/spec-tree-provider';
 import type { ValidationResult, ValidationViolation } from '../src/lib/spec-validator';
 
@@ -96,7 +103,12 @@ describe('validateSpecCommand', () => {
     // Sensible defaults — override per-test as needed.
     vi.mocked(loadConfig).mockReturnValue({} as ReturnType<typeof loadConfig>);
     vi.mocked(epicRefSet).mockReturnValue(new Set<string>());
-    vi.mocked(readSpecFile).mockReturnValue({} as ReturnType<typeof readSpecFile>);
+    // SPEC-022: validate.ts reads parsed.frontmatter.status — give the default a
+    // minimal frontmatter so the command doesn't throw before validateSpec.
+    vi.mocked(readSpecFile).mockReturnValue(
+      { frontmatter: { status: 'specifying' } } as ReturnType<typeof readSpecFile>,
+    );
+    vi.mocked(getApprovalStatus).mockReturnValue('unapproved');
     vi.mocked(validateSpec).mockReturnValue(makeResult());
   });
 
@@ -373,15 +385,18 @@ describe('validateSpecCommand', () => {
 
   // ── Verify lib calls receive correct args ───────────────────────────────────
 
-  it('passes rootDir, config, and epicRefSet to validateSpec', async () => {
+  it('passes rootDir, config, epicRefSet, approval verdict, and explicit terminal to validateSpec', async () => {
     const spec = makeSpec('SPEC-012');
     const fakeConfig = { version: '1' } as ReturnType<typeof loadConfig>;
     const fakeEpics = new Set(['epic-001']);
-    const fakeParsed = { frontmatter: { id: 'SPEC-012' } } as ReturnType<typeof readSpecFile>;
+    const fakeParsed = {
+      frontmatter: { id: 'SPEC-012', status: 'implementing' },
+    } as ReturnType<typeof readSpecFile>;
 
     vi.mocked(loadConfig).mockReturnValue(fakeConfig);
     vi.mocked(epicRefSet).mockReturnValue(fakeEpics);
     vi.mocked(readSpecFile).mockReturnValue(fakeParsed);
+    vi.mocked(getApprovalStatus).mockReturnValue('approved');
     vi.mocked(validateSpec).mockReturnValue(makeResult({ complete: true, violations: [] }));
 
     await validateSpecCommand({ spec });
@@ -389,6 +404,28 @@ describe('validateSpecCommand', () => {
     expect(loadConfig).toHaveBeenCalledWith('/tmp/ws');
     expect(epicRefSet).toHaveBeenCalledWith('/tmp/ws');
     expect(readSpecFile).toHaveBeenCalledWith(spec.filePath);
-    expect(validateSpec).toHaveBeenCalledWith(fakeParsed, fakeConfig, fakeEpics);
+    expect(getApprovalStatus).toHaveBeenCalledWith('/tmp/ws', spec.filePath);
+    // SPEC-022 (INV-4): the verdict + explicit terminal (undefined here, status is
+    // not 'archived') are forwarded so the validator can assert the mirror.
+    expect(validateSpec).toHaveBeenCalledWith(fakeParsed, fakeConfig, fakeEpics, 'approved', undefined);
+  });
+
+  it('passes explicitTerminal "archived" when the literal status is archived', async () => {
+    const spec = makeSpec('SPEC-013');
+    vi.mocked(readSpecFile).mockReturnValue(
+      { frontmatter: { id: 'SPEC-013', status: 'archived' } } as ReturnType<typeof readSpecFile>,
+    );
+    vi.mocked(getApprovalStatus).mockReturnValue('approved');
+    vi.mocked(validateSpec).mockReturnValue(makeResult({ complete: true, violations: [] }));
+
+    await validateSpecCommand({ spec });
+
+    expect(validateSpec).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      'approved',
+      'archived',
+    );
   });
 });

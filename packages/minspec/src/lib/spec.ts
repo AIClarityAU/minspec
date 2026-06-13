@@ -336,10 +336,10 @@ function serializeFrontmatter(fm: SpecFrontmatter): string {
   // round-trip, erasing the split-vs-single signal (#153.4).
   if (fm.type) lines.push(`type: ${fm.type}`);
   lines.push(`tier: ${fm.tier}`);
-  // Reminder: approval (DR-012) binds a sha256 of this whole file. Any edit
-  // voids it (→ stale); re-run "MinSpec: Approve Spec" to re-bind. The parser
-  // skips full-line `#` comments (see parseFrontmatterYaml), so this is inert.
-  lines.push('# Editing voids approval (hash in .minspec/approvals.json → stale); re-run "MinSpec: Approve Spec". DR-012');
+  // SPEC-022 (FR-3): the approval hash is now CANONICAL and excludes the lifecycle
+  // fields (status/phases), so editing status no longer voids approval — the old
+  // DR-012 "Editing voids approval" reminder line was removed here (it lied after
+  // SPEC-022). Editing the BODY or any other frontmatter field still voids it.
   lines.push(`status: ${fm.status}`);
   lines.push(`created: ${fm.created}`);
   if (fm.epic) lines.push(`epic: ${fm.epic}`);

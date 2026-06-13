@@ -393,11 +393,13 @@ Body.
     expect(written).not.toMatch(/^type:/m);
   });
 
-  it('emits the approval-reminder comment above status, inertly', () => {
+  it('no longer emits the DR-012 "Editing voids approval" reminder (SPEC-022 FR-3)', () => {
     const written = writeSpec(parseSpec(EXAMPLE_SPEC));
-    // Comment is present, accurate, and sits directly above the status line.
-    expect(written).toMatch(/# Editing voids approval[^\n]*DR-012\nstatus: /);
-    // It is inert: status still parses correctly (parser skips full-line `#`).
+    // SPEC-022: the canonical hash excludes lifecycle fields, so editing status
+    // does NOT void approval — the old reminder line lied and was removed.
+    expect(written).not.toMatch(/# Editing voids approval/);
+    // status still serializes + parses correctly.
+    expect(written).toMatch(/^status: /m);
     expect(parseSpec(written).frontmatter.status).toBe('implementing');
   });
 

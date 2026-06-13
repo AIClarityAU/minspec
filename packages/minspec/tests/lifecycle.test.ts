@@ -3,6 +3,7 @@ import {
   createInitialPhases,
   getCurrentPhase,
   getSpecStatus,
+  deriveStatus,
   advancePhase,
   skipPhase,
   goBackToPhase,
@@ -537,5 +538,110 @@ describe('goBackToPhase() — unknown phase', () => {
     expect(result.warning).toContain('nonexistent');
     // Phase state should be unchanged
     expect(result.newPhases).toEqual(phases);
+  });
+});
+
+// =============================================================================
+// SPEC-022 / DR-034 — deriveStatus (FR-4). T0 invariants INV-1, INV-6.
+//
+// AC-10 discipline: the pre-change code had only `getSpecStatus(phases)` — a
+// phases-ONLY derivation with NO approval input. It returned 'implementing'/'done'
+// purely from phases, regardless of approval. `deriveStatus` did not exist, so
+// every assertion below (that an unapproved spec derives to 'specifying', that
+// implementing/done REQUIRE an approved verdict) fails against the old code by
+// construction.
+// =============================================================================
+
+describe('SPEC-022 deriveStatus — INV-1 (approval gates implementing/done)', () => {
+  // A phase shape that, when approved, would derive to 'implementing'
+  // (specify done, plan in-progress).
+  const inImpl = makePhases({ specify: 'done', clarify: 'skipped', plan: 'in-progress' });
+  // All phases complete → would derive to 'done' when approved.
+  const allDone = makePhases({
+    specify: 'done', clarify: 'done', plan: 'done', tasks: 'done', implement: 'done',
+  });
+
+  it('returns specifying for an UNAPPROVED spec regardless of phases (INV-1)', () => {
+    expect(deriveStatus(inImpl, 'unapproved', undefined)).toBe('specifying');
+    expect(deriveStatus(allDone, 'unapproved', undefined)).toBe('specifying');
+  });
+
+  it('returns specifying for a STALE approval (INV-1)', () => {
+    expect(deriveStatus(inImpl, 'stale', undefined)).toBe('specifying');
+    expect(deriveStatus(allDone, 'stale', undefined)).toBe('specifying');
+  });
+
+  it('returns implementing only when approved AND mid-implementation', () => {
+    expect(deriveStatus(inImpl, 'approved', undefined)).toBe('implementing');
+  });
+
+  it('returns done only when approved AND all required phases complete', () => {
+    expect(deriveStatus(allDone, 'approved', undefined)).toBe('done');
+  });
+
+  it('returns new when all phases pending, regardless of approval verdict', () => {
+    const fresh = createInitialPhases();
+    expect(deriveStatus(fresh, 'unapproved', undefined)).toBe('new');
+    expect(deriveStatus(fresh, 'approved', undefined)).toBe('new');
+  });
+});
+
+describe('SPEC-022 deriveStatus — INV-6 (terminal is a human act, never inferred)', () => {
+  it('returns archived ONLY when explicitTerminal is set, never from phases', () => {
+    const allDone = makePhases({
+      specify: 'done', clarify: 'done', plan: 'done', tasks: 'done', implement: 'done',
+    });
+    // explicitTerminal set → archived even though phases would derive 'done'.
+    expect(deriveStatus(allDone, 'approved', 'archived')).toBe('archived');
+    // No phases configuration ever yields 'archived' without the explicit act.
+    for (const verdict of ['approved', 'stale', 'unapproved'] as const) {
+      expect(deriveStatus(allDone, verdict, undefined)).not.toBe('archived');
+      expect(deriveStatus(createInitialPhases(), verdict, undefined)).not.toBe('archived');
+    }
+  });
+
+  it('explicitTerminal overrides every other rule (even all-pending)', () => {
+    expect(deriveStatus(createInitialPhases(), 'unapproved', 'archived')).toBe('archived');
+  });
+});
+
+describe('SPEC-022 getSpecStatus — preview-only shim (regression)', () => {
+  // The transition helpers keep a phases-only preview. getSpecStatus must still
+  // behave as before (modeling "approved") so advancePhase's newStatus previews
+  // don't silently change.
+  it('still derives implementing/done from phases alone (preview semantics)', () => {
+    const inImpl = makePhases({ specify: 'done', clarify: 'skipped', plan: 'in-progress' });
+    expect(getSpecStatus(inImpl)).toBe('implementing');
+    const allDone = makePhases({
+      specify: 'done', clarify: 'done', plan: 'done', tasks: 'done', implement: 'done',
+    });
+    expect(getSpecStatus(allDone)).toBe('done');
+    expect(getSpecStatus(createInitialPhases())).toBe('new');
+  });
+
+  // getSpecStatus and the approval-aware deriveStatus agree on new / done /
+  // mid-implementation (plan+ in-progress). They DELIBERATELY diverge while the
+  // current phase is specify/clarify: the legacy preview shows 'specifying' from
+  // the current-phase signal, whereas deriveStatus(...,'approved',...) shows
+  // 'implementing' (it discriminates specifying↔implementing by APPROVAL, not by
+  // phase — INV-1). That divergence is exactly why deriveStatus, not getSpecStatus,
+  // is the authoritative status; getSpecStatus stays a phases-only TRANSITION
+  // preview. This test pins both the agreement AND the intended divergence.
+  it('agrees with deriveStatus on new/done/mid-impl; diverges (by design) in the specify/clarify range', () => {
+    // Agreement cases.
+    expect(getSpecStatus(createInitialPhases())).toBe(
+      deriveStatus(createInitialPhases(), 'approved', undefined),
+    ); // both 'new'
+    const midImpl = makePhases({ specify: 'done', clarify: 'skipped', plan: 'in-progress' });
+    expect(getSpecStatus(midImpl)).toBe(deriveStatus(midImpl, 'approved', undefined)); // both 'implementing'
+    const allDone = makePhases({
+      specify: 'done', clarify: 'done', plan: 'done', tasks: 'done', implement: 'done',
+    });
+    expect(getSpecStatus(allDone)).toBe(deriveStatus(allDone, 'approved', undefined)); // both 'done'
+
+    // Intended divergence: specify in-progress.
+    const earlyPhase = makePhases({ specify: 'in-progress' });
+    expect(getSpecStatus(earlyPhase)).toBe('specifying'); // legacy preview (current-phase signal)
+    expect(deriveStatus(earlyPhase, 'approved', undefined)).toBe('implementing'); // approval-driven
   });
 });

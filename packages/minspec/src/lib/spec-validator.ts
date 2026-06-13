@@ -15,6 +15,8 @@ import { SPEC_STATUSES, SPEC_TYPES, stripInlineComment } from './spec';
 import type { Tier, MinspecConfig, Phase } from './config';
 import { TIERS } from './config';
 import { epicRefValue } from './epic-manager';
+import { deriveStatus, type ExplicitTerminal, type PhaseState } from './lifecycle';
+import type { ApprovalStatus } from './approval';
 
 /** A cross-cutting concern a spec may touch, each requiring a specific artifact. */
 export type Aspect = 'ux' | 'api' | 'data' | 'architecture';
@@ -592,6 +594,17 @@ export function validateSpec(
    * (callers without registry access get no false warnings).
    */
   knownEpicRefs?: ReadonlySet<string>,
+  /**
+   * The spec's current approval verdict (SPEC-022 / INV-4). When supplied
+   * (with `explicitTerminal`), the validator asserts the literal `status:` line
+   * EQUALS `deriveStatus(phases, approvalState, explicitTerminal)` and warns on
+   * drift — catching hand-edits and the #148 phases/status desync. Omit to skip
+   * the mirror check entirely (callers without a verdict get no false warning —
+   * the same no-false-positive pattern as `knownEpicRefs`).
+   */
+  approvalState?: ApprovalStatus,
+  /** The spec's explicit terminal (archived), if any — fed to `deriveStatus`. */
+  explicitTerminal?: ExplicitTerminal,
 ): ValidationResult {
   const tier = spec.frontmatter.tier;
   const raw = spec.raw;
@@ -644,6 +657,33 @@ export function validateSpec(
   const specType = (spec.frontmatter.type ?? '').toLowerCase();
   for (const field of CLOSED_SET_FIELDS) {
     checkClosedSetField(raw, field, specType, violations);
+  }
+
+  // 0c. Literal-status mirror drift (SPEC-022 / INV-4). The literal `status:` line
+  //     is a tool-written MIRROR of the derived status; a hand-edit (or the #148
+  //     phases/status desync) makes it lie. When the caller supplies an approval
+  //     verdict, assert literal == deriveStatus and WARN on drift — never an
+  //     error (incremental authoring + foreign vocabularies must not block), same
+  //     symmetric discipline as the #137 closed-set gate. Skipped when no verdict
+  //     is supplied (no false positive). The gate/CI read DERIVED status, never
+  //     the literal line, so a stale literal can never gate — this only surfaces it.
+  if (approvalState !== undefined) {
+    const literal = rawFrontmatterField(raw, 'status');
+    const derived = deriveStatus(
+      spec.frontmatter.phases as PhaseState,
+      approvalState,
+      explicitTerminal,
+    );
+    // Only flag a PRESENT literal that disagrees — an absent literal is the
+    // #115 missing-status gate's concern (handled above), not a mirror drift.
+    if (literal !== undefined && literal !== derived) {
+      violations.push({
+        rule: 'status.mirror-drift',
+        severity: 'warning',
+        message: `Literal status "${literal}" disagrees with the derived status "${derived}".`,
+        fixHint: `The "status:" line is a tool-written mirror of the derived status (computed from {phases, approval}). It reads "${literal}" but should be "${derived}". Re-run a lifecycle action (Approve / Advance Phase) to rewrite the mirror, or fix the phases/approval state — the gate and CI use the DERIVED status, so the literal is only a cache that has drifted.`,
+      });
+    }
   }
 
   // Split-layout (#93): a spec whose phases are split across sibling files
