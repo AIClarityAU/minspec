@@ -36,6 +36,7 @@ vi.mock('../src/lib/approval', () => ({
   approveSpec: vi.fn(),
   revokeApproval: vi.fn(() => true),
   getApprovalStatus: vi.fn(() => 'unapproved'),
+  gitConfigEmail: vi.fn(() => 'tester@example.com'),
 }));
 
 // Mock the libs called inside the action body
@@ -133,11 +134,12 @@ function pickFirst() {
   );
 }
 
-/** Drive getApprovalStatus per spec id. */
+/** Drive getApprovalStatus per spec id (path-keyed now: recover id from filePath). */
 function setStatuses(map: Record<string, ApprovalStatus>): void {
-  vi.mocked(getApprovalStatus).mockImplementation(
-    (_root: string, id: string) => map[id] ?? 'unapproved',
-  );
+  vi.mocked(getApprovalStatus).mockImplementation((_root: string, filePath: string) => {
+    const m = filePath.match(/\/(SPEC-\d+)\//);
+    return map[m ? m[1] : ''] ?? 'unapproved';
+  });
 }
 
 // ─── approveSpecCommand action paths ──────────────────────────────────────
@@ -297,7 +299,7 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
 
   // ── successful approval ──────────────────────────────────────────────────
 
-  it('calls approveSpec with correct (root, id, filePath, tier) args on confirm', async () => {
+  it('calls approveSpec with correct (root, filePath, tier, email) args on confirm', async () => {
     pickFirst();
     vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec() as never);
     vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
@@ -305,11 +307,13 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
 
     await approveSpecCommand(undefined);
 
+    // SPEC-022: path-keyed + attributed. The id is gone from the signature; the
+    // captured git email is the new last arg.
     expect(approveSpec).toHaveBeenCalledWith(
       '/tmp/ws',
-      'SPEC-001',
       '/tmp/ws/specs/minspec/SPEC-001/spec.md',
       'T2',
+      'tester@example.com',
     );
   });
 
@@ -439,9 +443,9 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
     expect(vscode.window.showQuickPick).not.toHaveBeenCalled();
     expect(approveSpec).toHaveBeenCalledWith(
       '/tmp/ws',
-      'SPEC-003',
       '/tmp/ws/specs/minspec/SPEC-003/spec.md',
       'T2',
+      'tester@example.com',
     );
   });
 
@@ -477,9 +481,9 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
 
     expect(approveSpec).toHaveBeenCalledWith(
       '/tmp/ws',
-      'SPEC-002',
       '/tmp/ws/specs/minspec/SPEC-002/spec.md',
       'T2',
+      'tester@example.com',
     );
     // Already implementing — no status flip
     expect(setSpecStatus).not.toHaveBeenCalled();
@@ -501,7 +505,7 @@ describe('revokeApprovalCommand — action paths (post-selection)', () => {
 
     await revokeApprovalCommand(undefined);
 
-    expect(revokeApproval).toHaveBeenCalledWith('/tmp/ws', 'SPEC-001');
+    expect(revokeApproval).toHaveBeenCalledWith('/tmp/ws', '/tmp/ws/specs/minspec/SPEC-001/spec.md');
     expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
       expect.stringContaining('Revoked approval for SPEC-001'),
     );
@@ -550,7 +554,7 @@ describe('revokeApprovalCommand — action paths (post-selection)', () => {
     await revokeApprovalCommand(node);
 
     expect(vscode.window.showQuickPick).not.toHaveBeenCalled();
-    expect(revokeApproval).toHaveBeenCalledWith('/tmp/ws', 'SPEC-004');
+    expect(revokeApproval).toHaveBeenCalledWith('/tmp/ws', '/tmp/ws/specs/minspec/SPEC-004/spec.md');
   });
 
   it('shows "was not approved" path even via tree node when revokeApproval returns false', async () => {
@@ -572,7 +576,7 @@ describe('revokeApprovalCommand — action paths (post-selection)', () => {
 
     await revokeApprovalCommand(undefined);
 
-    expect(revokeApproval).toHaveBeenCalledWith('/tmp/ws', 'SPEC-005');
+    expect(revokeApproval).toHaveBeenCalledWith('/tmp/ws', '/tmp/ws/specs/minspec/SPEC-005/spec.md');
     expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
       expect.stringContaining('Revoked approval for SPEC-005'),
     );

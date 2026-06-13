@@ -116,6 +116,11 @@ describe('Invariant 2: No backend — no network calls', () => {
     'lib/backlog.ts',
     'lib/git-analyzer.ts',
     'lib/epic-backfill.ts',
+    // SPEC-022 / DR-034: approval capture of `git config user.email` for the FR-2
+    // attributed record. Local, headless, no network — Tier-0 (the "no network
+    // calls" invariant above still passes; this is git, not a backend). See
+    // approval.ts gitConfigEmail.
+    'lib/approval.ts',
   ]);
 
   const NETWORK_PATTERNS = [
