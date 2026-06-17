@@ -17,6 +17,7 @@ vi.mock('vscode', () => ({
     showErrorMessage: vi.fn(),
     showQuickPick: vi.fn(),
     createOutputChannel: vi.fn(() => mockChannel),
+    setStatusBarMessage: vi.fn(),
     activeTextEditor: undefined,
   },
   workspace: {
@@ -414,6 +415,43 @@ describe('classifyCommand()', () => {
     expect(vscode.window.createOutputChannel).not.toHaveBeenCalled();
     expect(mockConfigUpdate).not.toHaveBeenCalled();
     expect(recordOverride).not.toHaveBeenCalled();
+  });
+
+  // ── Auto mode (#216): fired by the commit watcher, must not nag ───────────
+
+  it('auto mode surfaces a passive status-bar line and NO interactive toast', async () => {
+    const signals = [makeSignal('fileCount', 4, 'T2')];
+    vi.mocked(analyzeGitDiff).mockResolvedValueOnce(signals);
+    vi.mocked(classify).mockReturnValue(makeResult('T2', signals, 0.75, ['specify', 'plan']));
+
+    await classifyCommand(WS, { auto: true });
+
+    expect(vscode.window.setStatusBarMessage).toHaveBeenCalledWith(
+      'MinSpec: current changes → T2 (75% confidence) · specify → plan',
+      8000,
+    );
+    // No interrupting toast, no action buttons.
+    expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
+  it('auto mode stays completely silent on a clean tree (no nag after a commit)', async () => {
+    vi.mocked(analyzeGitDiff).mockResolvedValue([]); // both staged + unstaged empty
+
+    await classifyCommand(WS, { auto: true });
+
+    expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
+    expect(vscode.window.setStatusBarMessage).not.toHaveBeenCalled();
+  });
+
+  it('explicit (non-auto) mode still shows the full interactive toast, not the status bar', async () => {
+    const signals = [makeSignal('fileCount', 4, 'T2')];
+    vi.mocked(analyzeGitDiff).mockResolvedValueOnce(signals);
+    vi.mocked(classify).mockReturnValue(makeResult('T2', signals, 0.75, ['specify', 'plan']));
+
+    await classifyCommand(WS); // no opts → interactive
+
+    expect(vscode.window.showInformationMessage).toHaveBeenCalled();
+    expect(vscode.window.setStatusBarMessage).not.toHaveBeenCalled();
   });
 
   // ── applyVSCodeOverrides receives the specsDir from workspace config ───────

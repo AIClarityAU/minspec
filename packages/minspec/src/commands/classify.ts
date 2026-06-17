@@ -11,7 +11,15 @@ function nextTierUp(tier: Tier): Tier {
   return idx >= 0 && idx < TIERS.length - 1 ? TIERS[idx + 1] : tier;
 }
 
-export async function classifyCommand(folderArg?: string): Promise<void> {
+export async function classifyCommand(
+  folderArg?: string,
+  opts?: { auto?: boolean },
+): Promise<void> {
+  // `auto` = fired by the git-HEAD watcher on every commit, not by the user.
+  // Auto runs surface passively and never interrupt; the explicit command keeps
+  // the full interactive toast. (#216, DR-021 Risk 2 — avoid nag fatigue.)
+  const auto = opts?.auto === true;
+
   const workspaceRoot = folderArg ?? (await resolveTargetFolder());
   if (!workspaceRoot) return;
 
@@ -32,9 +40,14 @@ export async function classifyCommand(folderArg?: string): Promise<void> {
   }
 
   if (signals.length === 0) {
-    vscode.window.showInformationMessage(
-      'MinSpec: No changes detected. Stage or modify files to classify.',
-    );
+    // Auto fires right after a commit, where a clean tree is the common case —
+    // a "no changes" toast there is pure noise. Stay silent on auto; only the
+    // user-invoked command reports it (they asked). (#216)
+    if (!auto) {
+      vscode.window.showInformationMessage(
+        'MinSpec: No changes detected. Stage or modify files to classify.',
+      );
+    }
     return;
   }
 
@@ -51,6 +64,18 @@ export async function classifyCommand(folderArg?: string): Promise<void> {
     .slice(0, 4)
     .map((s) => `${s.name}=${s.value}`)
     .join(', ');
+
+  // Auto-on-commit is ambient awareness, not a decision. Surface a passive,
+  // self-dismissing status-bar line — no action buttons that imply a pending
+  // approval there is none of. The interactive toast (below) is reserved for
+  // explicit invocation. (#216, DR-021 Risk 2.)
+  if (auto) {
+    vscode.window.setStatusBarMessage(
+      `MinSpec: current changes → ${predictedTier} (${confidencePct}% confidence) · ${phaseList}`,
+      8000,
+    );
+    return;
+  }
 
   // DR-021 Decision 2: bump-up affordance. Advisory, never blocking. Tier is a
   // mechanical-scope floor, not a difficulty read, and the classifier

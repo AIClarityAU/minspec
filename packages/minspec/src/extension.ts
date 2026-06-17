@@ -400,7 +400,10 @@ export function activate(context: vscode.ExtensionContext): void {
       );
       const triggerClassify = (uri: vscode.Uri) => {
         if (!isWatchedGitPath(uri.fsPath)) return;
-        vscode.commands.executeCommand('minspec.classify');
+        // Passive (no interactive toast) — this fires on every commit. (#216)
+        vscode.commands.executeCommand('minspec.classify', undefined, {
+          auto: true,
+        });
       };
       gitWatcher.onDidChange(triggerClassify);
       gitWatcher.onDidCreate(triggerClassify);
