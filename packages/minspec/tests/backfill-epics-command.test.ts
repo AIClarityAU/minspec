@@ -21,7 +21,7 @@ vi.mock('vscode', () => ({
   },
   ProgressLocation: { Notification: 15 },
   QuickPickItemKind: { Separator: -1, Default: 0 },
-  ConfigurationTarget: { Workspace: 2 },
+  ConfigurationTarget: { Global: 1, Workspace: 2 },
 }));
 
 // ─── Mock lib deps ─────────────────────────────────────────────────────────
@@ -412,7 +412,12 @@ describe('backfillEpicsCommand()', () => {
 
     await backfillEpicsCommand(FOLDER);
 
-    expect(update).toHaveBeenCalledWith('autoBackfillUseAi', true, expect.anything());
+    // Written globally — a personal preference, not project policy (#213).
+    expect(update).toHaveBeenCalledWith(
+      'autoBackfillUseAi',
+      true,
+      vscode.ConfigurationTarget.Global,
+    );
     expect(proposeAI).toHaveBeenCalledWith(FOLDER);
   });
 

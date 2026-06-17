@@ -399,7 +399,7 @@
         "minspec.autoBackfillUseAi": {
           "type": "boolean",
           "default": false,
-          "description": "Always use the AI pass when backfilling epics (skips the per-run 'AI-enhanced?' prompt). Set by choosing 'Always' on that prompt. Runs 'claude -p' locally; the extension makes no network calls. Off by default."
+          "description": "Always use the AI pass when backfilling epics (skips the per-run 'AI-enhanced?' prompt). Set globally by choosing 'Always' on that prompt — a personal preference that follows you across projects. Runs 'claude -p' locally; the extension makes no network calls. Off by default."
         }
       }
     },

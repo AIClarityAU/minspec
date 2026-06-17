@@ -19,7 +19,11 @@ export interface BackfillOptions {
   readonly aiConsent?: boolean;
 }
 
-/** Persisted "always use the AI pass for backfill" opt-in (mirrors autoClassifyOnCommit). */
+/**
+ * Persisted "always use the AI pass for backfill" opt-in. Written GLOBALLY: it's
+ * a personal cost/privacy/quota preference, not project policy, so it follows the
+ * user across every project (#213). Reads merge global+workspace as usual.
+ */
 function alwaysUseAi(): boolean {
   return vscode.workspace
     .getConfiguration('minspec')
@@ -28,7 +32,7 @@ function alwaysUseAi(): boolean {
 async function enableAlwaysUseAi(): Promise<void> {
   await vscode.workspace
     .getConfiguration('minspec')
-    .update('autoBackfillUseAi', true, vscode.ConfigurationTarget.Workspace);
+    .update('autoBackfillUseAi', true, vscode.ConfigurationTarget.Global);
 }
 
 /**
