@@ -197,7 +197,7 @@ MinSpec **dogfoods** its own SDD methodology — its developers write internal D
 
 ## [DR-033 — Auto-triage + auto-build most raised issues — local anchor for the parking-lot policy; amends inbox-no-auto-start](DR-033.md)
 
-*Status: proposed · Date: 2026-06-05*
+*Status: accepted · Date: 2026-06-05*
 
 The **global parking-lot rule** — *mmo-platform DR-360* (the **parent** register, ~DR-360; **not** a decision in this repo's local register) — routes topic drift to GitHub issues and states *"do NOT auto-start inbox issues; the user triages to a priority before any agent works them."* This repo inherits that rule via the global CLAUDE.md.
 
@@ -205,5 +205,5 @@ The **global parking-lot rule** — *mmo-platform DR-360* (the **parent** regist
 
 *Status: accepted · Date: 2026-06-06*
 
-A higher-touch fix for #112 (status=done with no approval record) dead-ended on architecture: approval ground truth (`.minspec/approvals.json`) is gitignored — local + per-checkout — so the invariant `status ∈ {implementing,done} ⇒ approval exists` is structurally unenforceable in CI / fresh clones / for teammates. This DR promotes approvals to a **committed, attributed** artifact as per-spec, path-keyed sidecars (#95; path-key sidesteps #58 id-collision), scopes the approval hash to **canonicalized content excluding the lifecycle fields `status`/`phases`** (#116; kills the self-voiding hash and the flip-then-hash dance), and makes spec status **derived** from {phases, approval} with the literal line a validated mirror (#116/#148) — so implementing/done is structurally impossible without a current record. Migration is warn-first with a `migrated:true` provenance flag for the 7 shipped-but-unbacked specs (honest, non-blocking). Amends DR-012; demotes DR-031's canonical resolution to a fallback.
+DR-012 made spec approval an explicit human act: a content hash recorded in .minspec/approvals.json, with a PreToolUse gate (DR-031 / spec-gate.py) that denies source edits while any T3/T4 spec is status: implementing without a current approval. It is the only enforcement that survives bypass-permissions mode.
 <!-- minspec:dr-index:end -->
