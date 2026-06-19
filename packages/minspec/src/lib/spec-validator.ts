@@ -348,6 +348,18 @@ const ASPECT_RULES: AspectRule[] = [
   },
 ];
 
+/**
+ * Shift-left guidance (harvest316/minspec#104): the per-aspect artifact
+ * requirements the approve gate enforces, exported so generation-time skill
+ * prompts (`slash-commands.ts`) can surface the SAME requirements up front. It is
+ * derived from `ASPECT_RULES` here — the gate's own source of truth — so the
+ * generation guidance can never drift from what approval actually checks. Approve
+ * stays a pure backstop: if the spec is authored with these in place, it finds
+ * nothing to flag.
+ */
+export const ASPECT_GUIDANCE: readonly { aspect: Aspect; fixHint: string }[] =
+  ASPECT_RULES.map((r) => ({ aspect: r.aspect, fixHint: r.fixHint }));
+
 // ─── Tier severity policy ────────────────────────────────────────────────────
 
 const TIER_RANK: Record<Tier, number> = { T1: 1, T2: 2, T3: 3, T4: 4 };
