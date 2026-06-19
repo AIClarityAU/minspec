@@ -25,6 +25,13 @@ export const MINSPEC_GITIGNORE_MARKER = '# MinSpec ephemeral data';
 export const MINSPEC_GITIGNORE_ENTRIES = [
   '.minspec/session.json',
   '.minspec/calibration.json',
+  // Machine-local merge-refresh drift-detection state, rebuilt on every
+  // generate/refresh — must be gitignored, never committed. These mirror
+  // merge-refresh's HASHES_FILENAME / TEMPLATE_BASELINE_FILENAME (kept as plain
+  // literals here to avoid an import cycle; gitignore.test.ts ties the literals
+  // back to those source constants so a rename of either can't silently drift).
+  '.minspec/generated-hashes.json',
+  '.minspec/template-baseline.json',
 ];
 
 /**
@@ -51,8 +58,9 @@ export function scaffold(rootDir: string): void {
 }
 
 /**
- * Ensure MinSpec ephemeral files (session.json, calibration.json) are
- * present in the project's .gitignore.
+ * Ensure MinSpec's machine-local files (session.json, calibration.json,
+ * generated-hashes.json, template-baseline.json) are present in the project's
+ * .gitignore — see MINSPEC_GITIGNORE_ENTRIES.
  *
  * Idempotent: skips any entry already listed (exact match, ignoring leading
  * whitespace). Creates .gitignore if missing. Preserves existing content.
@@ -139,6 +147,10 @@ export function generateHarnessFiles(rootDir: string): void {
 export function refreshHarnessFiles(rootDir: string): void {
   // Ensure .minspec/ exists
   scaffold(rootDir);
+  // Backfill any missing ignore entries on auto-refresh-on-open so existing
+  // projects (scaffolded before a new state file was added) stop committing
+  // machine-local merge-refresh state. Idempotent — adds only what's missing.
+  ensureGitignoreEntries(rootDir);
 
   const config = loadConfig(rootDir);
   const context = buildContext(rootDir, config);

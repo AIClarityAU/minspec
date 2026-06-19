@@ -197,7 +197,7 @@ export function mergeFile(
   };
 }
 
-const HASHES_FILENAME = 'generated-hashes.json';
+export const HASHES_FILENAME = 'generated-hashes.json';
 
 /**
  * Load persisted section hashes from .minspec/generated-hashes.json.
@@ -225,7 +225,7 @@ export function saveHashes(rootDir: string, hashes: GeneratedHashes): void {
   fs.writeFileSync(hashesPath, JSON.stringify(hashes, null, 2) + '\n');
 }
 
-const TEMPLATE_BASELINE_FILENAME = 'template-baseline.json';
+export const TEMPLATE_BASELINE_FILENAME = 'template-baseline.json';
 
 /**
  * Load the raw-template section-hash baseline from
