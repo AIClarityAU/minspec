@@ -215,7 +215,7 @@ export function activate(context: vscode.ExtensionContext): void {
     // approve/revoke already fire `minspec.refreshTree` internally — no extra
     // refresh here (it only added to the redundant burst; issue #154).
     vscode.commands.registerCommand('minspec.approveSpec', async (node) => {
-      await approveSpecCommand(node);
+      await approveSpecCommand(node, context.globalState);
     }),
     vscode.commands.registerCommand('minspec.revokeApproval', async (node) => {
       await revokeApprovalCommand(node);

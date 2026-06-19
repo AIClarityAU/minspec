@@ -747,7 +747,8 @@ describe('refresh-wrapping command callbacks', () => {
     activate(makeMockContext());
     const node = { spec: { id: 'SPEC-001' } };
     await invokeCommand('minspec.approveSpec', node);
-    expect(approveSpecCommand).toHaveBeenCalledWith(node);
+    // Second arg is the globalState Memento, wired for the first-approve tip (#104).
+    expect(approveSpecCommand).toHaveBeenCalledWith(node, expect.anything());
     expect(mockSpecTreeProvider.refresh).not.toHaveBeenCalled();
   });
 
