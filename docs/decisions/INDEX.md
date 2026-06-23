@@ -221,7 +221,7 @@ MinSpec's HITL model requires human approval at every spec, plan, task-list, and
 
 ## [DR-037 — Scaffold editor-independent git hooks into user projects](DR-037.md)
 
-*Status: proposed · Date: 2026-06-22*
+*Status: accepted · Date: 2026-06-22*
 
 MinSpec's SDD gates (spec id: frontmatter, RCDD root-cause line, ref-egress leak DR-032) only fire when the user goes through the VS Code Command Palette. A terminal git commit, a different editor, or an AI agent committing via Bash bypasses all of them. The RCDD Phase-4 rule says bad states should be **un-committable** — the current setup violates that for any workflow outside VS Code.
 <!-- minspec:dr-index:end -->
