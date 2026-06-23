@@ -40,6 +40,15 @@ jobs:
 
       - run: npm ci
 
+      # @aiclarity/shared is consumed by extension source (e.g. bridge.ts). The v8
+      # coverage provider resolves that cross-package import to the package's built
+      # `out/` entry when instrumenting — the test-only vitest `resolve.alias`
+      # (which redirects to source) does not cover the coverage provider's own
+      # resolution, so without a build the run fails with "Cannot find module
+      # @aiclarity/shared/out/index.js". Build the Tier-0 lib first (pure tsc).
+      - name: Build shared lib (coverage resolution)
+        run: npm run build --workspace=@aiclarity/shared
+
       # @vitest/coverage-v8 is a devDependency pinned to the vitest version in
       # package.json (^4.1.7); `npm ci` installs the matching provider. A prior
       # step force-installed coverage-v8@2.1.9 with --legacy-peer-deps on top of

@@ -8,6 +8,7 @@ import {
   approveSpec as recordApproval,
   revokeApproval as removeApproval,
   getApprovalStatus,
+  gitConfigEmail,
   type ApprovalStatus,
 } from '../lib/approval';
 import { resolveActiveSpecId } from '../lib/active-spec';
@@ -52,7 +53,7 @@ async function pickSpec(
   }
   const openId = resolveActiveSpecId();
   const items = specs
-    .map((s) => ({ spec: s, status: getApprovalStatus(rootDir, s.id, s.filePath) }))
+    .map((s) => ({ spec: s, status: getApprovalStatus(rootDir, s.filePath) }))
     .filter((x) => opts.include(x.status))
     .map(({ spec, status }) => ({
       label: `${spec.id}: ${spec.title}`,
@@ -133,18 +134,19 @@ export async function approveSpecCommand(
   // gate approval — they are surfaced non-modally below, never as a focus-stealing
   // approve-anyway dialog (HITL: advisory over the visible artifact).
   try {
-    // Flip the lifecycle status to `implementing`. Under the v2 normalized hash
-    // (#252) the `status:` line is excluded from the contract hash, so flip order
-    // no longer matters — a status write can never instantly stale a just-approved
-    // spec (this retired the old flip-then-hash dance; DR-003 RCDD). Guard: only
-    // advance from a pre-implementation status — never downgrade done/archived or
-    // re-flip an already-implementing spec being re-approved after an edit.
+    // SPEC-022 (FR-3): the approval hash is canonical and EXCLUDES the lifecycle
+    // fields, so the status flip no longer affects it — the old flip-then-hash
+    // ordering dance is gone (ordering is now free). The literal `status:` line is
+    // a tool-written mirror of the derived status; write it on approval. Guard:
+    // only advance from a pre-implementation status — never downgrade done/archived
+    // or re-flip an already-implementing spec being re-approved after an edit.
     const wasPreImpl =
       parsed.frontmatter.status === 'new' || parsed.frontmatter.status === 'specifying';
+    const email = gitConfigEmail(rootDir);
     if (wasPreImpl) {
-      setSpecStatus(spec.filePath, 'implementing');
+      setSpecStatus(spec.filePath, 'implementing'); // mirror; no longer affects the hash
     }
-    recordApproval(rootDir, spec.id, spec.filePath, spec.tier);
+    recordApproval(rootDir, spec.filePath, spec.tier, email);
 
     const base = wasPreImpl
       ? `MinSpec: ✓ Approved ${spec.id} for implementation (status → implementing).`
@@ -197,7 +199,7 @@ export async function revokeApprovalCommand(node?: SpecNodeLike): Promise<void> 
   });
   if (!spec) return;
 
-  const removed = removeApproval(rootDir, spec.id);
+  const removed = removeApproval(rootDir, spec.filePath);
   vscode.window.showInformationMessage(
     removed
       ? `MinSpec: Revoked approval for ${spec.id}.`

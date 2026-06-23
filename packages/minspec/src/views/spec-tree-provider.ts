@@ -12,7 +12,9 @@ import type { ApprovalStatus } from '../lib/approval';
  * the approval module (keeps unit tests that mock only `vscode` clean, and
  * mirrors the ListSpecsFn injection pattern). extension.ts wires the real one.
  */
-export type ApprovalLookupFn = (rootDir: string, specId: string, specFilePath: string) => ApprovalStatus;
+// Path-keyed since SPEC-022 (FR-1): approval ground truth is keyed by the spec's
+// repo-relative path, not its id, so the lookup no longer takes a specId.
+export type ApprovalLookupFn = (rootDir: string, specFilePath: string) => ApprovalStatus;
 import { getApprovalStatus } from '../lib/approval';
 import type { SpecSummary } from '../lib/spec-manager';
 import { isSpecKitDirEntry, readSpecKitDir } from '../lib/spec-layout';
@@ -410,7 +412,7 @@ export class SpecTreeProvider implements vscode.TreeDataProvider<SpecTreeNode> {
   private toSpecNode(spec: SpecSummary, epicGrouped = false): SpecNode {
     let approval: ApprovalStatus = 'unapproved';
     try {
-      approval = this._approvalOf(this.workspaceRoot, spec.id, spec.filePath);
+      approval = this._approvalOf(this.workspaceRoot, spec.filePath);
     } catch {
       // best-effort — default to unapproved
     }

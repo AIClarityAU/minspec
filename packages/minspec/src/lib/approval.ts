@@ -1,151 +1,88 @@
 /**
- * Spec Approval State — DR-012
+ * Spec Approval State — DR-012, amended by SPEC-022 / DR-034.
  *
- * Approval is an explicit human act, recorded as a content hash of the spec
- * file. Editing the spec changes the hash → the approval auto-invalidates
- * ("stale"), forcing re-review.
+ * Approval is an explicit human act, recorded as a CANONICAL content hash of the
+ * spec (FR-3, `@aiclarity/shared` specHash) — NOT raw file bytes. The canonical
+ * hash excludes the lifecycle fields (`status`/`phases`), so the tool's own
+ * status flips and deterministic lifecycle transitions no longer void approval;
+ * editing the body or any other frontmatter field still does (re-review).
  *
- * The hash binds the spec's *contract* (#252). v1 records hashed the raw file
- * bytes (sha256sum parity); that cried wolf — a directory rename's internal-ref
- * renumbering (#83) or a `status:` lifecycle flip mutated the bytes and falsely
- * invalidated a human approval. v2 records hash a NORMALIZED form
- * ({@link normalizeSpecContent}) that excludes those volatile/mechanical bytes.
- * The normalization MUST stay byte-identical to `scripts/hooks/spec-gate.py`
- * (`normalize()`), so the bash/python edit-gate and this module agree exactly.
- *
- * State lives in `.minspec/approvals.json`:
- *   { "SPEC-007": { "specHash": "ab12…", "approvedAt": "2026-05-30T…", "tier": "T3", "hashVersion": 2 } }
+ * Ground truth is COMMITTED and path-keyed (FR-1): one sidecar per spec under
+ * `.minspec/approvals/<repo-relative-spec-path>.json`, owned by `approval-store.ts`.
+ * Records are ATTRIBUTED (FR-2): they carry who approved (`approvedBy` =
+ * `git config user.email`, captured offline at approval time — Tier-0, no network).
  */
 
 import * as fs from 'fs';
 import * as path from 'path';
-import * as crypto from 'crypto';
+import { execFileSync } from 'child_process';
+import { specHash } from '@aiclarity/shared';
 import type { Tier } from './config';
+import {
+  readRecord,
+  writeRecord,
+  removeRecord,
+  toPosixRel,
+} from './approval-store';
 
 export type ApprovalStatus = 'approved' | 'stale' | 'unapproved';
 
 /**
- * Approval-hash format version (#252).
- *  - v1 (absent): `specHash` is sha256 of the raw file bytes (sha256sum parity).
- *  - v2: `specHash` is sha256 of the *normalized contract* (see
- *    {@link normalizeSpecContent}) — volatile/mechanical bytes excluded.
- * Old v1 records keep raw comparison (no mass re-staling on upgrade); new
- * approvals are written at the current version.
+ * The FR-2 attributed approval record — the on-disk sidecar shape.
+ *
+ * `migrated` is `true` only for FR-5 backfilled records (an approval the human
+ * never performed, flagged so the gate treats it valid-but-flagged — "re-approve
+ * to clear"). A `migrated:true` record still resolves to `approved` for the
+ * derive (non-blocking, warn-first), but carries its honest provenance.
  */
-export type HashVersion = 1 | 2;
-export const CURRENT_HASH_VERSION: HashVersion = 2;
-
 export interface ApprovalRecord {
-  readonly specHash: string;
-  readonly approvedAt: string;
+  readonly specPath: string;   // repo-relative, POSIX, e.g. specs/minspec/SPEC-007-foo/requirements.md
+  readonly specHash: string;   // canonical hash (FR-3), hex
+  readonly approvedAt: string; // ISO-8601 UTC
+  readonly approvedBy: string; // git config user.email at approval time
   readonly tier: Tier;
-  /** Absent ⇒ 1 (raw bytes). See {@link HashVersion}. */
-  readonly hashVersion?: HashVersion;
+  readonly migrated: boolean;
 }
 
-export interface ApprovalStore {
-  [specId: string]: ApprovalRecord;
-}
-
-const APPROVALS_FILE = 'approvals.json';
-
-function approvalsPath(rootDir: string): string {
-  return path.join(rootDir, '.minspec', APPROVALS_FILE);
-}
-
-/** sha256 hex of raw bytes. Accepts a Buffer or string. Matches `sha256sum`. */
-export function hashContent(content: Buffer | string): string {
-  return crypto.createHash('sha256').update(content).digest('hex');
-}
-
-/** Hash a spec file by its raw bytes (v1). Returns null if unreadable. */
-export function hashSpecFile(filePath: string): string | null {
-  try {
-    return hashContent(fs.readFileSync(filePath));
-  } catch {
-    return null;
-  }
+/** Repo-relative POSIX path for a spec file, the approval store's key. */
+export function specRelPath(rootDir: string, specFilePath: string): string {
+  return toPosixRel(path.relative(rootDir, specFilePath));
 }
 
 /**
- * Normalize spec content before hashing (#252). Approval binds the *contract*,
- * not volatile/mechanical bytes. Two exclusions:
- *  1. The lifecycle `status:` frontmatter line — written by the approve flow /
- *     `setSpecStatus` and independently validated by the spec-validator; it is
- *     not part of the contract a human reviews. (Excluding it also retires the
- *     fragile flip-then-hash ordering dance — a status flip no longer perturbs
- *     the hash.)
- *  2. Relative-link URLs — automated directory renumbering (#83/#175) rewrites
- *     sibling-spec link *paths* without changing what is referenced. ALL
- *     relative URLs are collapsed: `./…`, `../…`, and bare-relative (`child/x.md`,
- *     `file.md` — e.g. a top-level `design.md` linking into a child dir). External
- *     links (`scheme://…`, `mailto:`), anchors (`#…`) and absolute paths (`/…`)
- *     are KEPT. Link *text* is preserved, so changing the referenced spec is
- *     still caught.
- *
- * Anything excluded here is gated elsewhere (status by the validator; link text
- * stays hashed), so this does not open a hole where a substantive edit hides.
- *
- * MUST stay byte-identical to `scripts/hooks/spec-gate.py::normalize` — the two
- * regexes below are intentionally simple so both languages reproduce them
- * exactly. A parity test pins this (`approval.test.ts`).
+ * Canonical hash of a spec file's current content (FR-3). Returns null if the
+ * file is unreadable. Replaces the old raw-byte `hashSpecFile`.
  */
-export function normalizeSpecContent(text: string): string {
-  return text
-    .replace(/^status:.*\r?\n/gm, '')
-    .replace(/\]\((?![a-z][a-z0-9+.-]*:)(?!#)(?!\/)[^)]*\)/gi, '](RELLINK)');
-}
-
-/** Hash a spec file's normalized contract (v2). Returns null if unreadable. */
-export function hashSpecFileNormalized(filePath: string): string | null {
+export function canonicalSpecHash(specFilePath: string): string | null {
   try {
-    return hashContent(normalizeSpecContent(fs.readFileSync(filePath, 'utf-8')));
+    return specHash(fs.readFileSync(specFilePath, 'utf-8'));
   } catch {
     return null;
   }
 }
 
-/** Hash a spec file at the given format version (v1 raw, v2 normalized). */
-export function hashSpecFileAt(filePath: string, version: HashVersion): string | null {
-  return version >= 2 ? hashSpecFileNormalized(filePath) : hashSpecFile(filePath);
-}
-
-export function loadApprovals(rootDir: string): ApprovalStore {
-  const p = approvalsPath(rootDir);
-  if (!fs.existsSync(p)) return {};
+/**
+ * Capture the approver's identity offline (Tier-0, no network) — `git config
+ * user.email` at approval time. An empty/missing value degrades to `'unknown'`;
+ * never throws, so an approval is never blocked on git config (AC-3).
+ */
+export function gitConfigEmail(rootDir: string): string {
   try {
-    const parsed = JSON.parse(fs.readFileSync(p, 'utf-8')) as unknown;
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    // Shallow shape validation — drop malformed records rather than throw.
-    const store: ApprovalStore = {};
-    for (const [id, rec] of Object.entries(parsed as Record<string, unknown>)) {
-      if (
-        rec && typeof rec === 'object' &&
-        typeof (rec as ApprovalRecord).specHash === 'string' &&
-        typeof (rec as ApprovalRecord).approvedAt === 'string'
-      ) {
-        // Preserve hashVersion only when it is a recognized value; an absent or
-        // junk version reads as v1 (raw) via the `?? 1` fallbacks downstream.
-        const v = (rec as ApprovalRecord).hashVersion;
-        store[id] =
-          v === 2 || v === 1 ? (rec as ApprovalRecord) : ({ ...(rec as ApprovalRecord), hashVersion: undefined } as ApprovalRecord);
-      }
-    }
-    return store;
+    return (
+      execFileSync('git', ['config', 'user.email'], { cwd: rootDir, stdio: ['ignore', 'pipe', 'ignore'] })
+        .toString()
+        .trim() || 'unknown'
+    );
   } catch {
-    return {};
+    return 'unknown';
   }
 }
 
-export function saveApprovals(rootDir: string, store: ApprovalStore): void {
-  const dir = path.join(rootDir, '.minspec');
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(approvalsPath(rootDir), JSON.stringify(store, null, 2) + '\n', 'utf-8');
-}
-
 /**
- * Resolve approval status for a spec given its current on-disk content.
- * Pure given (record, currentHash) — exported for direct unit testing.
+ * Resolve approval status given a record and the spec's current CANONICAL hash.
+ * Pure — exported for direct unit testing. A `migrated` record is `approved`
+ * (valid-but-flagged) when its hash matches; the `migrated` provenance is carried
+ * on the record itself for the gate/validator to surface.
  */
 export function resolveStatus(
   record: ApprovalRecord | undefined,
@@ -156,54 +93,49 @@ export function resolveStatus(
   return record.specHash === currentHash ? 'approved' : 'stale';
 }
 
-/** Read approval status for a spec from disk. */
-export function getApprovalStatus(
-  rootDir: string,
-  specId: string,
-  specFilePath: string,
-): ApprovalStatus {
-  const store = loadApprovals(rootDir);
-  const record = store[specId];
-  if (!record) return 'unapproved';
-  // Hash the current file at the record's own format version, so v1 records keep
-  // raw comparison (no false stale after upgrade) and v2 records compare the
-  // normalized contract (#252).
-  const currentHash = hashSpecFileAt(specFilePath, record.hashVersion ?? 1);
-  return resolveStatus(record, currentHash);
+/** Read approval status for a spec from its committed sidecar. */
+export function getApprovalStatus(rootDir: string, specFilePath: string): ApprovalStatus {
+  const rel = specRelPath(rootDir, specFilePath);
+  return resolveStatus(readRecord(rootDir, rel), canonicalSpecHash(specFilePath));
+}
+
+/** Read the raw approval record for a spec (or undefined), for callers needing `migrated`. */
+export function getApprovalRecord(rootDir: string, specFilePath: string): ApprovalRecord | undefined {
+  return readRecord(rootDir, specRelPath(rootDir, specFilePath));
 }
 
 /**
- * Record an approval binding the current file hash. Returns the new record.
- * `now` is injectable for deterministic tests.
+ * Record an approval binding the spec's current CANONICAL content hash. Writes a
+ * committed, attributed, path-keyed sidecar. Returns the new record.
+ *
+ * `email` is the captured `git config user.email` (the caller passes
+ * `gitConfigEmail(rootDir)`). `now` is injectable for deterministic tests.
+ * Path-keyed — the spec `id` is no longer part of the signature.
  */
 export function approveSpec(
   rootDir: string,
-  specId: string,
   specFilePath: string,
   tier: Tier,
+  email: string,
   now: () => Date = () => new Date(),
 ): ApprovalRecord {
-  const specHash = hashSpecFileNormalized(specFilePath);
-  if (specHash === null) {
+  const hash = canonicalSpecHash(specFilePath);
+  if (hash === null) {
     throw new Error(`Cannot read spec file to approve: ${specFilePath}`);
   }
   const record: ApprovalRecord = {
-    specHash,
+    specPath: specRelPath(rootDir, specFilePath),
+    specHash: hash,
     approvedAt: now().toISOString(),
+    approvedBy: email,
     tier,
-    hashVersion: CURRENT_HASH_VERSION,
+    migrated: false,
   };
-  const store = loadApprovals(rootDir);
-  store[specId] = record;
-  saveApprovals(rootDir, store);
+  writeRecord(rootDir, record);
   return record;
 }
 
-/** Remove an approval. Returns true if one existed. */
-export function revokeApproval(rootDir: string, specId: string): boolean {
-  const store = loadApprovals(rootDir);
-  if (!(specId in store)) return false;
-  delete store[specId];
-  saveApprovals(rootDir, store);
-  return true;
+/** Remove a spec's approval sidecar. Returns true if one existed. */
+export function revokeApproval(rootDir: string, specFilePath: string): boolean {
+  return removeRecord(rootDir, specRelPath(rootDir, specFilePath));
 }

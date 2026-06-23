@@ -7,4 +7,5 @@
  * to `packages/`, triggering TS6 "common source directory is '..'".
  */
 export * from './contracts/conformance';
+export * from './canonical';
 export * from './review-signals';

@@ -30,6 +30,7 @@ vi.mock('../src/lib/approval', () => ({
   approveSpec: vi.fn(),
   revokeApproval: vi.fn(() => true),
   getApprovalStatus: vi.fn(() => 'unapproved'),
+  gitConfigEmail: vi.fn(() => 'tester@example.com'),
 }));
 
 // ─── Imports ───────────────────────────────────────────────────────────────
@@ -81,11 +82,17 @@ function quickPickItems(): { label: string; description: string; spec: SpecSumma
   return calls[calls.length - 1][0];
 }
 
-/** Drive getApprovalStatus per spec id (default 'unapproved' for unlisted). */
+/**
+ * Drive getApprovalStatus per spec id (default 'unapproved' for unlisted).
+ * getApprovalStatus is now path-keyed (rootDir, specFilePath); summary() builds
+ * filePath as `…/specs/minspec/<id>/spec.md`, so recover the id from the path.
+ */
 function setStatuses(map: Record<string, ApprovalStatus>): void {
-  vi.mocked(getApprovalStatus).mockImplementation(
-    (_root: string, id: string) => map[id] ?? 'unapproved',
-  );
+  vi.mocked(getApprovalStatus).mockImplementation((_root: string, filePath: string) => {
+    const m = filePath.match(/\/(SPEC-\d+)\//);
+    const id = m ? m[1] : '';
+    return map[id] ?? 'unapproved';
+  });
 }
 
 // =============================================================================
@@ -162,7 +169,8 @@ describe('approve command — default to open spec', () => {
 
     const items = quickPickItems();
     expect(items[0].spec.id).toBe('SPEC-002');
-    expect(revokeApproval).toHaveBeenCalledWith('/tmp/ws', 'SPEC-002');
+    // revokeApproval is now path-keyed: called with the spec's file path, not its id.
+    expect(revokeApproval).toHaveBeenCalledWith('/tmp/ws', '/tmp/ws/specs/minspec/SPEC-002/spec.md');
   });
 });
 
@@ -229,6 +237,6 @@ describe('approve command — filter by approval status', () => {
     await revokeApprovalCommand(node);
 
     expect(vscode.window.showQuickPick).not.toHaveBeenCalled();
-    expect(revokeApproval).toHaveBeenCalledWith('/tmp/ws', 'SPEC-002');
+    expect(revokeApproval).toHaveBeenCalledWith('/tmp/ws', '/tmp/ws/specs/minspec/SPEC-002/spec.md');
   });
 });

@@ -600,7 +600,7 @@ describe('SpecTreeProvider — approval wiring (regression)', () => {
 
   it('default-constructed provider reflects a real approval from approvals.json', () => {
     const specPath = writeSpec('SPEC-001');
-    approveSpec(tmpDir, 'SPEC-001', specPath, 'T2'); // binds current file hash
+    approveSpec(tmpDir, specPath, 'T2', 'tester@example.com'); // binds canonical hash, path-keyed
 
     // Production path: NO approvalFn injected.
     const spec = makeSpec({ id: 'SPEC-001', status: 'implementing', filePath: specPath });
@@ -619,8 +619,8 @@ describe('SpecTreeProvider — approval wiring (regression)', () => {
 
   it('default-constructed provider marks approval stale (⚠ icon) after the spec is edited', () => {
     const specPath = writeSpec('SPEC-001');
-    approveSpec(tmpDir, 'SPEC-001', specPath, 'T2');
-    fs.appendFileSync(specPath, '\nedited after approval\n'); // hash now differs
+    approveSpec(tmpDir, specPath, 'T2', 'tester@example.com');
+    fs.appendFileSync(specPath, '\nedited after approval\n'); // BODY edit → canonical hash differs
 
     const spec = makeSpec({ id: 'SPEC-001', status: 'implementing', filePath: specPath });
     const provider = new SpecTreeProvider(tmpDir, () => [spec]);

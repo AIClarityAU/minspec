@@ -11,6 +11,7 @@
 import type { Phase } from './config';
 import { PHASES } from './config';
 import type { PhaseStatus, SpecStatus } from './spec';
+import type { ApprovalStatus } from './approval';
 
 // Re-export so consumers can import from either module
 export type { PhaseStatus, SpecStatus };
@@ -62,10 +63,66 @@ export function getCurrentPhase(phases: PhaseState): Phase | null {
   return null;
 }
 
+/** True when every phase is `pending` (the spec has not been started). */
+function allPending(phases: PhaseState): boolean {
+  for (const phase of PHASES) {
+    if (phases[phase] !== 'pending') return false;
+  }
+  return true;
+}
+
+/** True when every phase is complete (`done` or `skipped`). */
+function allRequiredDone(phases: PhaseState): boolean {
+  for (const phase of PHASES) {
+    const status = phases[phase];
+    if (status === 'pending' || status === 'in-progress') return false;
+  }
+  return true;
+}
+
 /**
- * Derive the overall spec status from phase states.
+ * The explicit-terminal class (SPEC-022 / DR-034 FR-4, INV-6): a terminal status
+ * that is a HUMAN ACT, never inferred from phases. `archived` is the v1 terminal;
+ * `superseded` joins when #162 lands and adds it to SpecStatus. `undefined` means
+ * "no explicit terminal — derive from {phases, approval}".
+ */
+export type ExplicitTerminal = 'archived' | undefined;
+
+/**
+ * Derive the overall spec status — the SINGLE source of truth (SPEC-022 FR-4).
+ * Encodes the FR-4 rules table exactly:
  *
- * Rules:
+ *   | explicitTerminal set (archived) | that terminal (human act, INV-6)        |
+ *   | all phases pending              | new                                     |
+ *   | not approved                    | specifying (unapproved cannot pass, INV-1) |
+ *   | approved + all required done    | done (v1: implement-phase signal, #116) |
+ *   | approved + implement in progress| implementing                           |
+ *
+ * The gate and validator read THIS, never the literal `status:` line — so
+ * `implementing`/`done` is structurally impossible without a current approval
+ * record (the enforced #112 fix). `getSpecStatus` below is a preview-only shim.
+ */
+export function deriveStatus(
+  phases: PhaseState,
+  approvalState: ApprovalStatus,
+  explicitTerminal: ExplicitTerminal,
+): SpecStatus {
+  if (explicitTerminal) return explicitTerminal; // INV-6 — human act, never inferred
+  if (allPending(phases)) return 'new';
+  if (approvalState !== 'approved') return 'specifying'; // INV-1 — unapproved cannot pass
+  if (allRequiredDone(phases)) return 'done'; // v1: see #116 deferral (implement-phase signal)
+  return 'implementing';
+}
+
+/**
+ * Phases-only status derivation — PREVIEW-ONLY (SPEC-022). Used by the pure
+ * transition helpers (`advancePhase`/`skipPhase`/`goBackToPhase`) for their
+ * `newStatus` preview field: they model a *transition*, not the authoritative
+ * spec status, and have no approval verdict to hand. The gate and validator use
+ * the approval-aware `deriveStatus` instead.
+ *
+ * Rules (unchanged from the legacy behaviour, modeled as "approved" so the
+ * implementing/done previews still render):
  * - All phases pending → 'new'
  * - All phases done/skipped → 'done'
  * - Current phase is specify or clarify → 'specifying'
@@ -73,23 +130,8 @@ export function getCurrentPhase(phases: PhaseState): Phase | null {
  * - (archived is set explicitly, not derived from phases)
  */
 export function getSpecStatus(phases: PhaseState): SpecStatus {
-  let allPending = true;
-  let allComplete = true; // done or skipped
-
-  for (const phase of PHASES) {
-    const status = phases[phase];
-    if (status !== 'pending') {
-      allPending = false;
-    }
-    if (status === 'pending' || status === 'in-progress') {
-      allComplete = false;
-    }
-  }
-
-  if (allPending) return 'new';
-  if (allComplete) return 'done';
-
-  // Determine which sub-status based on current phase
+  if (allPending(phases)) return 'new';
+  if (allRequiredDone(phases)) return 'done';
   const current = getCurrentPhase(phases);
   if (current === 'specify' || current === 'clarify') return 'specifying';
   return 'implementing';
