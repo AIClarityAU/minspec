@@ -39,9 +39,6 @@ export async function classifyCommand(folderArg?: string): Promise<void> {
   }
 
   if (signals.length === 0) {
-    vscode.window.showInformationMessage(
-      'MinSpec: No changes detected. Stage or modify files to classify.',
-    );
     return;
   }
 
@@ -127,14 +124,15 @@ export async function classifyCommand(folderArg?: string): Promise<void> {
     );
     vscode.window.showInformationMessage(`MinSpec: Raised to ${raised}.`);
   } else if (choice === AUTO_CLASSIFY) {
-    // Enable the existing git-HEAD watcher (extension.ts) for this workspace so
-    // classification re-runs on every commit. The watcher is wired at activation,
-    // so the toggle takes effect on the next window reload.
+    // Enable the git-HEAD watcher (extension.ts) for this workspace so
+    // classification re-runs on every commit. extension.ts watches this setting
+    // via onDidChangeConfiguration and starts the watcher immediately — the
+    // toggle takes effect now, no window reload (#203).
     await vscode.workspace
       .getConfiguration('minspec')
       .update('autoClassifyOnCommit', true, vscode.ConfigurationTarget.Workspace);
     vscode.window.showInformationMessage(
-      'MinSpec: Auto-classify on commit enabled for this workspace (takes effect after reload).',
+      'MinSpec: Auto-classify on commit enabled for this workspace.',
     );
   }
 }

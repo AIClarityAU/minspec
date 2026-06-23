@@ -52,6 +52,10 @@ let configValues: Record<string, any> = {};
 // Conformance watcher disposable returned by the (mocked) bridge helper.
 let conformanceWatcherDisposable: { dispose: () => void } | undefined;
 
+// The onDidChangeConfiguration listener activate() registers, captured so the
+// live-toggle regression test (#203) can fire it without a window reload.
+let configChangeHandler: ((e: any) => void) | undefined;
+
 // ---------------------------------------------------------------------------
 // vscode mock
 // ---------------------------------------------------------------------------
@@ -87,6 +91,10 @@ vi.mock('vscode', () => ({
     }),
     openTextDocument: vi.fn(() => Promise.resolve({})),
     onDidSaveTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
+    onDidChangeConfiguration: vi.fn((handler: (e: any) => void) => {
+      configChangeHandler = handler;
+      return { dispose: vi.fn() };
+    }),
   },
   commands: {
     registerCommand: vi.fn((id: string, handler: (...args: any[]) => any) => {
@@ -289,6 +297,7 @@ beforeEach(() => {
   subscriptions = [];
   createdWatchers = [];
   configValues = {};
+  configChangeHandler = undefined;
   conformanceWatcherDisposable = undefined;
 
   vi.mocked(fs.existsSync).mockReturnValue(true);
@@ -333,6 +342,53 @@ describe('auto-classify git watcher', () => {
     vi.mocked(vscode.commands.executeCommand).mockClear();
     triggerCreate({ fsPath: '/tmp/test-workspace/.git/refs/heads/main' });
     expect(vscode.commands.executeCommand).toHaveBeenCalledWith('minspec.classify');
+  });
+
+  // #203 regression: enabling the setting AFTER activation must start the
+  // watcher live, with no window reload. Previously the watcher was wired only
+  // at activation, so the classify toast's "from now on" silently did nothing.
+  it('starts the git watcher live when autoClassifyOnCommit flips on after activation', () => {
+    configValues = {}; // start disabled
+    activate(makeMockContext());
+    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(4);
+    expect(configChangeHandler).toBeDefined();
+
+    // Simulate the toast writing the setting, then VS Code firing the change.
+    configValues = { autoClassifyOnCommit: true };
+    configChangeHandler!({
+      affectsConfiguration: (k: string) => k === 'minspec.autoClassifyOnCommit',
+    });
+
+    // The 5th watcher (the git watcher) now exists without any reload.
+    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(5);
+    const gitWatcher = createdWatchers[4];
+    expect(gitWatcher.onDidChange).toHaveBeenCalled();
+    expect(gitWatcher.onDidCreate).toHaveBeenCalled();
+  });
+
+  it('disposes the git watcher live when autoClassifyOnCommit flips off', () => {
+    configValues = { autoClassifyOnCommit: true };
+    activate(makeMockContext());
+    const gitWatcher = createdWatchers[4];
+
+    configValues = { autoClassifyOnCommit: false };
+    configChangeHandler!({
+      affectsConfiguration: (k: string) => k === 'minspec.autoClassifyOnCommit',
+    });
+
+    expect(gitWatcher.dispose).toHaveBeenCalled();
+  });
+
+  it('ignores config changes for unrelated settings', () => {
+    configValues = {}; // disabled
+    activate(makeMockContext());
+    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(4);
+
+    // A change to some other key must not create the git watcher.
+    configValues = { autoClassifyOnCommit: true };
+    configChangeHandler!({ affectsConfiguration: () => false });
+
+    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(4);
   });
 });
 
@@ -748,7 +804,8 @@ describe('refresh-wrapping command callbacks', () => {
     activate(makeMockContext());
     const node = { spec: { id: 'SPEC-001' } };
     await invokeCommand('minspec.approveSpec', node);
-    expect(approveSpecCommand).toHaveBeenCalledWith(node);
+    // Second arg is the globalState Memento, wired for the first-approve tip (#104).
+    expect(approveSpecCommand).toHaveBeenCalledWith(node, expect.anything());
     expect(mockSpecTreeProvider.refresh).not.toHaveBeenCalled();
   });
 
