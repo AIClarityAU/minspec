@@ -7,12 +7,12 @@ product: minspec
 epic: EPIC-003  # SDD Core Methodology
 ---
 
-# MinSpec — Constitution Proposer (deterministic, Tier-0) — Requirements
+# MinSpec — Constitution Proposer (LLM-drafted, MinSpec-orchestrated) — Requirements
 
 **Date:** 2026-06-23
 **Status:** Specifying (SDD Specify phase)
 **Triggered by:** [#269](https://github.com/harvest316/minspec/issues/269) — "shouldn't MinSpec propose Invariants/Principles/Constraints alongside Goals at init, instead of empty placeholders?"
-**Related:** [#270](https://github.com/harvest316/minspec/issues/270) (enforce invariants as gates — the sequel), [#242](https://github.com/harvest316/minspec/issues/242) (init tech-debt scan), DR-039 (Goals), DR-004/DR-015 (Tier-0 boundary)
+**Related:** [#270](https://github.com/harvest316/minspec/issues/270) (enforce invariants as gates — the sequel), [#242](https://github.com/harvest316/minspec/issues/242) (init tech-debt scan), DR-039 (Goals), DR-004/DR-015 (Tier-0 boundary), DR-017 (agent-execute model access)
 
 ## Problem
 
@@ -24,96 +24,114 @@ but never asserts it should be filled). An empty constitution is a bad state.
 
 ## Scope (one sentence)
 
-At Initialize/Refresh, deterministically **propose a DRAFT constitution**
-(Invariants/Principles/Constraints/Goals) from codebase signals — never empty
-placeholders — and softly surface an empty constitution as a next human task.
+At Initialize/Refresh, **MinSpec orchestrates (Tier-0) and an LLM assistant generates
+(Tier-1)** a DRAFT constitution (Invariants/Principles/Constraints/Goals) from codebase
+context — never empty placeholders — with a deterministic rule-based seed as the offline
+fallback, and a soft nudge when the constitution is empty.
+
+## Architecture — who does what
+
+The rich draft is **LLM-generated**, but **not by MinSpec-the-extension** (Tier-0,
+air-gapped). MinSpec orchestrates deterministically; the LLM lives in the user's assistant
+or the Tier-1 `agent-execute` extension.
+
+| Step | Who | Tier |
+|---|---|---|
+| Detect empty constitution → nudge | MinSpec | Tier-0 |
+| Scaffold structure incl. `## Goals` | MinSpec | Tier-0 |
+| Assemble codebase **context manifest** + a **prepared prompt** | MinSpec | Tier-0 |
+| **Generate the rich draft** | assistant / `agent-execute` | **Tier-1 (LLM)** |
+| Integrate result, mark DRAFT, offer compact, gate | MinSpec | Tier-0 |
+| Rule-based **seed** when no LLM available | MinSpec | Tier-0 fallback |
+
+This mirrors the product thesis: **the LLM thinks, MinSpec harnesses/gates** ("just enough
+human"). It also matches how this very session's Goals were drafted (assistant LLM), not
+by the extension.
 
 ## Invariants (this change must preserve)
 
-- **INV-1 — Tier-0.** No LLM, no network. The proposer is a pure function over the
-  filesystem (DR-004/DR-015/DR-019 §6). LLM enrichment is explicitly **out of scope**
-  (Tier-1 `agent-execute` follow-up).
-- **INV-2 — Never assert, never overwrite human content.** Proposals are marked DRAFT.
-  A section that already holds human-authored (non-DRAFT) content is left untouched.
-  Idempotent across repeated Refresh runs.
-- **INV-3 — Populate, do not enforce.** This spec only *writes* candidate invariants. It
+- **INV-1 — MinSpec extension stays Tier-0.** MinSpec itself makes no LLM call and no
+  network call (DR-004/DR-015/DR-019 §6). The LLM generation is **external** — the
+  assistant or `agent-execute` (Tier-1, DR-017). MinSpec only *assembles the prompt/context*
+  and *integrates the returned draft*, both pure-FS operations.
+- **INV-2 — Never assert, never overwrite human content.** Proposals are marked DRAFT. A
+  section already holding human-authored (non-DRAFT) content is left untouched. Idempotent
+  across repeated Initialize/Refresh runs (additive only).
+- **INV-3 — Populate, do not enforce.** This spec only *writes* candidate invariants; it
   does **not** wire invariants as resolver gates — that is #270. (populate ≠ enforce.)
-- **INV-4 — Determinism is auditable.** Every candidate carries machine-readable
-  provenance ("proposed because <signal>"), so the proposal is reproducible and
-  reviewable.
+- **INV-4 — Degrade, never block.** No assistant present → fall back to the deterministic
+  seed (FR-5); never leave the constitution empty and never hard-block init on an LLM.
 
 ## Functional Requirements
 
-- **FR-1 — Deterministic signal scan.** Read, without executing or networking:
-  `package.json` (`engines` → runtime constraint; dependencies → "runs offline / no
-  network without consent" candidate when no network deps), monorepo layout (Tier-0
-  packages → "shared stays `vscode`/network-free" invariant candidate), bundle config
-  (`.vscodeignore`/size), and existing `CLAUDE.md` / `docs/decisions/*` prose (extract
-  already-stated invariants/principles). Output: a list of typed `Signal` records.
-- **FR-2 — Two-tier candidate generation (silence > noise, but no signal lost).**
-  - *Tier A — written.* A fixed catalog maps `Signal → Candidate` (kind ∈ {invariant,
-    principle, constraint, goal}, text, stable ID). Only high-confidence catalog matches
-    are written as DRAFT entries. No inference beyond the catalog.
-  - *Tier B — surfaced, not written.* Notable signals with no catalog match are **not**
-    written into the doc; instead they are surfaced to the human as "other signals found,
-    not written up — might trigger thoughts." Keeps the doc clean while never silently
-    dropping a notable signal (OQ-1 resolved).
-- **FR-3 — Whole-doc proposal (offer if any section empty; additive on re-run).** If
-  **any** section is empty/template, offer to propose draft entries across the **whole**
-  constitution — including a `## Goals` section (currently absent from the scaffold).
-  Re-running `Initialize` does the **full** signal scan and proposes anything **not
-  already present** (additive, idempotent, whole-doc; never per-section piecemeal).
-  Existing human content is never touched (INV-2). (OQ-2 resolved.)
-- **FR-4 — DRAFT marking + human boundary.** Each proposed item is visibly DRAFT and
-  removable; the moment a section has human content the proposer never rewrites it.
-- **FR-5 — Empty-constitution nudge.** When the constitution is empty/all-template, a
-  **soft** advisory (signpost/validator, never a block) surfaces "author your
-  constitution" as a next human task (RCDD phase-4: surface the bad state).
-- **FR-6 — Provenance is review-time only.** Each candidate's "proposed because <signal>"
-  is shown in the **proposal preview** so the human can judge it. It does **not** need to
-  persist in the doc; any DRAFT/provenance markers that do land are removed by compaction
-  (FR-7). So provenance cannot rot — it is gone after review (OQ-3 resolved).
-- **FR-7 — Offer to compact after review.** The constitution is read in (almost) every
-  session, so its token weight matters. After the human has reviewed, offer to **compact**
-  it: strip `DRAFT` markers and any provenance, tighten prose — never silently, always a
-  confirmed human action. Compaction is meaning-preserving; the human confirms the result.
+- **FR-1 — Deterministic context assembly (Tier-0).** Read, without executing or
+  networking: `package.json` (`engines`, dependencies), monorepo layout / Tier boundaries,
+  bundle config, and existing `CLAUDE.md` / `docs/decisions/*` / `docs/epics/*` prose.
+  Output: a structured **context manifest** + typed `Signal` records. Pure function.
+- **FR-2 — Prepared generation prompt (Tier-0).** From the manifest + the constitution's
+  section schema (Invariants/Principles/Constraints/Goals), MinSpec builds a deterministic
+  **prompt** instructing the LLM to propose DRAFT entries with per-item provenance, biased
+  to **silence > noise** (few high-confidence items; list other notable signals separately,
+  not as entries).
+- **FR-3 — LLM generation via assistant / agent-execute (Tier-1).** The prepared prompt is
+  fulfilled by the LLM: automatically when `agent-execute` is present (subscription
+  `claude -p` default per DR-017), otherwise MinSpec surfaces the prompt for the user to run
+  in their own assistant and paste back / apply. MinSpec never calls the model itself.
+- **FR-4 — Integrate the returned draft (Tier-0).** Parse the LLM's proposal into the
+  section schema, write entries marked **DRAFT** with stable IDs, **whole-doc & additive**:
+  offer if any section is empty; on re-run, add only what is **not already present**; never
+  touch human content (INV-2). Notable-but-unwritten signals are surfaced to the human
+  ("found these, didn't write them up — might trigger thoughts").
+- **FR-5 — Deterministic seed fallback (Tier-0).** With no assistant available, a fixed
+  catalog maps `Signal → Candidate` (e.g. no network deps → DRAFT "runs offline / no
+  network without consent"; Tier-0 package → "shared stays `vscode`/network-free"). Shallow
+  but never empty. Same DRAFT/additive/non-overwrite rules.
+- **FR-6 — Empty-constitution nudge.** When the constitution is empty/all-template, a
+  **soft** advisory (signpost/validator, never a block) surfaces "author your constitution"
+  as a next human task (RCDD phase-4: surface the bad state).
+- **FR-7 — Provenance is review-time only.** Each candidate's "proposed because <signal>"
+  is shown in the proposal preview so the human can judge it; it need not persist, and any
+  DRAFT/provenance markers that land are removed by compaction (FR-8) — so provenance
+  cannot rot (OQ-3 resolved).
+- **FR-8 — Offer to compact after review.** The constitution is read in (almost) every
+  session, so its token weight matters. After human review, offer to **compact**: strip
+  `DRAFT` markers and provenance, tighten prose — never silently, always human-confirmed,
+  meaning-preserving.
 
 ## Out of scope
 
-- **LLM enrichment** of the draft → Tier-1 `agent-execute` follow-up (separate spec).
-- **Invariant enforcement** (wiring invariants as `gate-violation` in the resolver) →
-  [#270](https://github.com/harvest316/minspec/issues/270).
-- **Constitution hash/approval integrity.** Not needed here: while invariants are not
-  enforced, the constitution is a freely human-edited doc (INV-2 non-overwrite is the only
-  guard). Once #270 makes invariants **load-bearing gates**, a silent edit could silently
-  change what's enforced project-wide — so a deliberate-edit checkpoint (DR-012-style
-  approval/hash, which also confirms a compaction rewrite) belongs to **#270**, not here.
+- **Building `agent-execute`** or its model-access broker (DR-017) — this spec *consumes*
+  the Tier-1 LLM path; it does not build it.
+- **MinSpec calling an LLM in-process** — forbidden by INV-1; the model is always external.
+- **Invariant enforcement** (wiring invariants as `gate-violation`) → [#270](https://github.com/harvest316/minspec/issues/270).
+- **Constitution hash/approval integrity** — not needed while invariants are unenforced;
+  once #270 makes them load-bearing gates, a deliberate-edit checkpoint (DR-012-style
+  approval/hash, also confirming a compaction rewrite) lands with **#270**.
 - Re-proposing / churning a human-authored constitution.
 
 ## Open questions — resolved (Clarify)
 
-- **OQ-1 (catalog) → resolved.** Silence > noise: only high-confidence catalog matches are
-  written (FR-2 Tier A); other notable signals are surfaced to the human, not written
-  (FR-2 Tier B).
-- **OQ-2 (ergonomics) → resolved.** Whole-doc: offer if any section empty; re-run scans
-  fully and adds anything missing (FR-3).
-- **OQ-3 (provenance rot) → resolved.** Provenance is review-time only and removed by
-  compaction (FR-6/FR-7) — it never persists to rot.
+- **OQ-1 (noise) → resolved.** Silence > noise in the prompt (FR-2) and the seed (FR-5);
+  other notable signals surfaced, not written (FR-4).
+- **OQ-2 (ergonomics) → resolved.** Whole-doc: offer if any section empty; re-run adds
+  anything missing (FR-4).
+- **OQ-3 (provenance rot) → resolved.** Review-time only; removed by compaction (FR-7/FR-8).
+- **OQ-4 (who runs the LLM) → resolved.** The assistant / `agent-execute` (Tier-1), never
+  MinSpec core (FR-3, INV-1).
 
 ## Acceptance (T2 feature tests, happy + primary failure)
 
-- A fresh `Initialize` on a repo with no network deps yields a constitution whose
-  `## Invariants` contains a DRAFT "runs offline / no network without consent" candidate
-  with provenance — not an empty placeholder.
-- `Refresh Harness` on a constitution with human-authored Invariants but empty
-  Constraints fills **only** Constraints (INV-2 idempotence/non-overwrite).
-- An all-template constitution triggers the soft "author your constitution" advisory
-  (FR-5); a populated one does not.
-- A notable signal with no catalog match is surfaced as a "found, not written up"
-  suggestion, not injected into the doc (FR-2 Tier B).
-- After review, the offered compaction strips all `DRAFT`/provenance markers and leaves
-  meaning-equivalent prose; it never runs silently (FR-7).
+- With `agent-execute` present, a fresh `Initialize` produces a DRAFT constitution whose
+  sections contain LLM-proposed entries with review-time provenance — not empty placeholders.
+- With **no** assistant, `Initialize` falls back to the deterministic seed (e.g. a DRAFT
+  "runs offline" invariant) — still never empty (INV-4/FR-5).
+- `Refresh` on a constitution with human-authored Invariants but empty Constraints adds
+  **only** to Constraints (INV-2 additive/non-overwrite).
+- An all-template constitution triggers the soft "author your constitution" advisory (FR-6);
+  a populated one does not.
+- The offered compaction strips all `DRAFT`/provenance and leaves meaning-equivalent prose;
+  never runs silently (FR-8).
 
 ## Traceability
 
-Materializes #269. Enforcement sequel: #270. Tier-1 LLM enrichment: future spec.
+Materializes #269. Enforcement sequel: #270. Consumes the Tier-1 LLM path (DR-017 / agent-execute).
