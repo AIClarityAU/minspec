@@ -197,7 +197,7 @@ MinSpec **dogfoods** its own SDD methodology — its developers write internal D
 
 ## [DR-033 — Auto-triage + auto-build most raised issues — local anchor for the parking-lot policy; amends inbox-no-auto-start](DR-033.md)
 
-*Status: proposed · Date: 2026-06-05*
+*Status: accepted · Date: 2026-06-05*
 
 The **global parking-lot rule** — *mmo-platform DR-360* (the **parent** register, ~DR-360; **not** a decision in this repo's local register) — routes topic drift to GitHub issues and states *"do NOT auto-start inbox issues; the user triages to a priority before any agent works them."* This repo inherits that rule via the global CLAUDE.md.
 
@@ -205,5 +205,41 @@ The **global parking-lot rule** — *mmo-platform DR-360* (the **parent** regist
 
 *Status: accepted · Date: 2026-06-06*
 
-A higher-touch fix for #112 (status=done with no approval record) dead-ended on architecture: approval ground truth (`.minspec/approvals.json`) is gitignored — local + per-checkout — so the invariant `status ∈ {implementing,done} ⇒ approval exists` is structurally unenforceable in CI / fresh clones / for teammates. This DR promotes approvals to a **committed, attributed** artifact as per-spec, path-keyed sidecars (#95; path-key sidesteps #58 id-collision), scopes the approval hash to **canonicalized content excluding the lifecycle fields `status`/`phases`** (#116; kills the self-voiding hash and the flip-then-hash dance), and makes spec status **derived** from {phases, approval} with the literal line a validated mirror (#116/#148) — so implementing/done is structurally impossible without a current record. Migration is warn-first with a `migrated:true` provenance flag for the 7 shipped-but-unbacked specs (honest, non-blocking). Amends DR-012; demotes DR-031's canonical resolution to a fallback.
+DR-012 made spec approval an explicit human act: a content hash recorded in .minspec/approvals.json, with a PreToolUse gate (DR-031 / spec-gate.py) that denies source edits while any T3/T4 spec is status: implementing without a current approval. It is the only enforcement that survives bypass-permissions mode.
+
+## [DR-035 — Normalize checkbox state before hashing approved spec files](DR-035.md)
+
+*Status: accepted · Date: 2026-06-19*
+
+Approval system (DR-012) binds a spec to its sha256 hash at approval time. Any byte change → stale. Intended: editing spec content forces re-review. During investigation of checkbox-ticking during implement phase, a structural mismatch surfaced: Two semantic types of checkbox exist in the spec kit:
+
+## [DR-036 — Autopilot Mode — approve once, agents fly the build (greenlighted for SourceBridge trial)](DR-036.md)
+
+*Status: accepted · Date: 2026-06-19*
+
+MinSpec's HITL model requires human approval at every spec, plan, task-list, and PR. For throwaway "playground" repos (MeetLoop, HireLoop, SourceBridge) where a wrong build costs nothing real, the cost/friction of per-artifact approval is higher than the risk. A compressed alternative — one human gate, then fully autonomous — is worth trialling.
+
+## [DR-037 — Scaffold editor-independent git hooks into user projects](DR-037.md)
+
+*Status: accepted · Date: 2026-06-22*
+
+MinSpec's SDD gates (spec id: frontmatter, RCDD root-cause line, ref-egress leak DR-032) only fire when the user goes through the VS Code Command Palette. A terminal git commit, a different editor, or an AI agent committing via Bash bypasses all of them. The RCDD Phase-4 rule says bad states should be **un-committable** — the current setup violates that for any workflow outside VS Code.
+
+## [DR-038 — Unified next-task graph surface — one clickable DAG of specs/DRs/epics/issues/PRs, subsuming the dependency-map and PR-queue surfaces](DR-038.md)
+
+*Status: proposed · Date: 2026-06-23*
+
+The next-task signpost emits one task from a deterministic DAG, but the answer and its reasoning are split across three unbuilt surfaces (#48 dependency-map, #182 PR-nodes, #211 PR-queue) with three node vocabularies. One unified graph renders the SPEC-012 DAG with the signpost node at its centre — signpost + 2 layers + "+N" rollups, primary node dominant and sole call-to-action — subsuming all three. A view over the resolver, never a source of truth; spec-after-SPEC-012.
+
+## [DR-039 — Goals drive priority — constitution Goals + goal-rank/epic.order as the deterministic human dial; auto-derived WSJF as a future upgrade](DR-039.md)
+
+*Status: proposed · Date: 2026-06-23*
+
+The human priority dial is epic.order (coarse) + ranked project Goals (thematic, mapped via `goal:` frontmatter), read by the resolver as deterministic tie-breaks within a severity class — never an LLM judgement, never overriding a gate. Manual WSJF is demoted (kept for discoverability, not wired to the signpost). The exciting future upgrade: auto-derive WSJF deterministically — size from the classifier, value from goal-rank, risk from consequence analyzers, time from milestones — at zero human ceremony.
+
+## [DR-040 — DR-023 follow-ups auto-materialize — friction-free auto-create of missing issues, not a blocking gate](DR-040.md)
+
+*Status: proposed · Date: 2026-06-23*
+
+Hardening DR-023 (no orphan follow-ups) without surfacing commit friction: on DR save, un-materialized `## Follow-ups (tracked)` bullets are auto-filed as issues with the `#ref` written back, while genuinely dangling refs stay a surfaced error. Scoped to the curated section only (threads DR-023's "don't auto-create every consequence" rejection). Closes the DR-019 input leak honestly instead of teaching the resolver to infer priority from prose.
 <!-- minspec:dr-index:end -->

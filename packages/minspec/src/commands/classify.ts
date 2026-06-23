@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
-import { analyzeGitDiff } from '../lib/git-analyzer';
+import { analyzeGitDiff, buildConsequenceInput } from '../lib/git-analyzer';
 import { classify, applyFloor } from '../lib/classifier';
+import type { ClassificationSignal } from '../lib/classifier';
+import { runConsequenceAnalyzers } from '../lib/consequence-analyzers';
 import { loadConfig, applyVSCodeOverrides, TIERS } from '../lib/config';
 import type { Tier } from '../lib/config';
 import { resolveTargetFolder } from '../lib/resolve-folder';
@@ -21,10 +23,15 @@ export async function classifyCommand(folderArg?: string): Promise<void> {
     specsDir: vscodeConfig.get('specsDir'),
   });
 
-  let signals: Awaited<ReturnType<typeof analyzeGitDiff>> = [];
+  // Diff-size signals (DR-022: demoted to ordinary inputs, not the dominant
+  // driver). Try staged first, then working tree. `usedStaged` records which
+  // view produced them so the consequence input reads the SAME view (FR-7).
+  let signals: ClassificationSignal[] = [];
+  let usedStaged = true;
   try {
     signals = await analyzeGitDiff(workspaceRoot, { staged: true });
     if (signals.length === 0) {
+      usedStaged = false;
       signals = await analyzeGitDiff(workspaceRoot, { staged: false });
     }
   } catch {
@@ -32,10 +39,22 @@ export async function classifyCommand(folderArg?: string): Promise<void> {
   }
 
   if (signals.length === 0) {
-    vscode.window.showInformationMessage(
-      'MinSpec: No changes detected. Stage or modify files to classify.',
-    );
     return;
+  }
+
+  // SPEC-023 FR-7: the consequence axis. Build the pure input from the same git
+  // view, run the (pure, offline) analyzers, and APPEND their signals alongside
+  // the size signals. `classify()`'s max-over-`tierContribution` is unchanged, so
+  // a consequence signal can only ratchet the tier UP (INV-3). IO stays here in
+  // the command layer; the analyzers stay pure (INV-1).
+  try {
+    const consequenceInput = await buildConsequenceInput(workspaceRoot, {
+      staged: usedStaged,
+    });
+    const consequenceSignals = runConsequenceAnalyzers(consequenceInput);
+    signals = [...signals, ...consequenceSignals];
+  } catch {
+    // Consequence axis is best-effort; size signals still classify on their own.
   }
 
   const result = classify(signals, config);
@@ -60,12 +79,21 @@ export async function classifyCommand(folderArg?: string): Promise<void> {
   // Dismissible like any MinSpec toast.
   const showBumpUp = predictedTier === 'T1';
   const bumpUpLabel = 'Harder than it looks — raise tier';
-  const actions = ['Show Details', 'Override Tier'];
+  // The old "Override Tier" wrote to a calibration log nothing reads back
+  // (DR-021 gutted the feedback loop). Replace it with a live affordance: opt
+  // into auto-classify-on-commit so the advice runs itself going forward (#203).
+  const AUTO_CLASSIFY = 'Auto-classify from now on';
+  const actions = ['Show Details', AUTO_CLASSIFY];
   if (showBumpUp) actions.push(bumpUpLabel);
 
+  // Advisory toast: names the unit (your current diff) and states that nothing
+  // is persisted — the result is informational, not a pending action (#203).
   const choice = await vscode.window.showInformationMessage(
-    `MinSpec: ${predictedTier} (${confidencePct}% confidence) · ${phaseList}`,
-    { detail: `Signals: ${signalSummary || 'none'}`, modal: false },
+    `MinSpec: Current changes → ${predictedTier} (${confidencePct}% confidence) · ${phaseList}`,
+    {
+      detail: `Advisory — reflects your current diff; nothing is saved. Signals: ${signalSummary || 'none'}`,
+      modal: false,
+    },
     ...actions,
   );
 
@@ -95,27 +123,16 @@ export async function classifyCommand(folderArg?: string): Promise<void> {
       result.signals.map((s) => s.name),
     );
     vscode.window.showInformationMessage(`MinSpec: Raised to ${raised}.`);
-  } else if (choice === 'Override Tier') {
-    const tiers: Array<{ label: string; value: Tier }> = [
-      { label: 'T1 — Trivial', value: 'T1' },
-      { label: 'T2 — Standard', value: 'T2' },
-      { label: 'T3 — Complex', value: 'T3' },
-      { label: 'T4 — Architectural', value: 'T4' },
-    ];
-    const picked = await vscode.window.showQuickPick(tiers, {
-      placeHolder: `Override ${predictedTier}?`,
-    });
-    if (picked) {
-      const { recordOverride } = await import('../lib/classifier.js');
-      recordOverride(
-        workspaceRoot,
-        predictedTier,
-        picked.value,
-        result.signals.map((s) => s.name),
-      );
-      vscode.window.showInformationMessage(
-        `MinSpec: Overridden to ${picked.value}.`,
-      );
-    }
+  } else if (choice === AUTO_CLASSIFY) {
+    // Enable the git-HEAD watcher (extension.ts) for this workspace so
+    // classification re-runs on every commit. extension.ts watches this setting
+    // via onDidChangeConfiguration and starts the watcher immediately — the
+    // toggle takes effect now, no window reload (#203).
+    await vscode.workspace
+      .getConfiguration('minspec')
+      .update('autoClassifyOnCommit', true, vscode.ConfigurationTarget.Workspace);
+    vscode.window.showInformationMessage(
+      'MinSpec: Auto-classify on commit enabled for this workspace.',
+    );
   }
 }

@@ -36,12 +36,14 @@ function makeVsCodeStub(
   const response = overrides.response;
   const showPrompt = vi.fn(async () => response);
   const executeCommand = vi.fn(async () => undefined);
+  const enableAutoClassify = vi.fn(async () => undefined);
   const stub: BootstrapVsCode = {
     isEnabled: () => enabled,
     showPrompt,
     executeCommand,
+    enableAutoClassify,
   };
-  return { stub, showPrompt, executeCommand };
+  return { stub, showPrompt, executeCommand, enableAutoClassify };
 }
 
 describe('auto-bootstrap', () => {
@@ -278,7 +280,9 @@ describe('auto-bootstrap', () => {
       expect(showPrompt).toHaveBeenCalledTimes(1);
       const [msg, actions] = showPrompt.mock.calls[0]!;
       expect(msg).toMatch(/isn't initialized/);
-      expect(actions).toEqual(['Initialize', 'Not Now', "Don't ask again"]);
+      // #203: no "Not Now" — the toast's X already dismisses. The init step has
+      // no "Always" affordance, so just primary + opt-out.
+      expect(actions).toEqual(['Initialize', "Don't ask again"]);
     });
 
     it("T0: runs minspec.init when user picks Initialize", async () => {
@@ -286,7 +290,8 @@ describe('auto-bootstrap', () => {
       const result = await runBootstrap(tmpDir, stub);
       expect(result.choice).toBe('Initialize');
       // #123: the bootstrapped folder is passed so the command targets it.
-      expect(executeCommand).toHaveBeenCalledWith('minspec.init', tmpDir);
+      // #213: a 3rd arg (step.commandArg) now always flows; undefined for init.
+      expect(executeCommand).toHaveBeenCalledWith('minspec.init', tmpDir, undefined);
     });
 
     it("T0: Not Now does NOT persist any skip preference", async () => {
@@ -302,6 +307,87 @@ describe('auto-bootstrap', () => {
       await runBootstrap(tmpDir, stub);
       const prefs = loadPreferences(tmpDir);
       expect(prefs.skipInitPrompt).toBe(true);
+    });
+  });
+
+  // =========================================================================
+  // #203: the "Always" affordance (classify step) — auto-run opt-in
+  // =========================================================================
+
+  describe('runBootstrap() — "Always" affordance', () => {
+    // Synthetic step exercises the action-assembly + Always handling directly,
+    // without the git/.minspec setup the real classify step needs to fire.
+    const alwaysStep: BootstrapStep = {
+      kind: 'classify',
+      shouldRun: () => true,
+      message: 'MinSpec: You have uncommitted changes. Classify complexity now?',
+      primaryAction: 'Classify',
+      commandId: 'minspec.classify',
+      skipPrefKey: 'skipClassifyPrompt',
+      alwaysAction: 'Always',
+    };
+
+    it('offers Always first, then primary, then opt-out — and no "Not Now"', async () => {
+      const { stub, showPrompt } = makeVsCodeStub({ response: undefined });
+      await runBootstrap(tmpDir, stub, [alwaysStep]);
+      const [, actions] = showPrompt.mock.calls[0]!;
+      expect(actions).toEqual(['Always', 'Classify', "Don't ask again"]);
+      expect(actions).not.toContain('Not Now');
+    });
+
+    it('Always → enables auto-classify, then runs the command once', async () => {
+      const { stub, executeCommand, enableAutoClassify } = makeVsCodeStub({
+        response: 'Always',
+      });
+      await runBootstrap(tmpDir, stub, [alwaysStep]);
+      expect(enableAutoClassify).toHaveBeenCalledWith(tmpDir);
+      expect(executeCommand).toHaveBeenCalledWith('minspec.classify', tmpDir, undefined);
+    });
+
+    it('primary (Classify) → runs once WITHOUT enabling auto-classify', async () => {
+      const { stub, executeCommand, enableAutoClassify } = makeVsCodeStub({
+        response: 'Classify',
+      });
+      await runBootstrap(tmpDir, stub, [alwaysStep]);
+      expect(enableAutoClassify).not.toHaveBeenCalled();
+      expect(executeCommand).toHaveBeenCalledWith('minspec.classify', tmpDir, undefined);
+    });
+
+    it('Always falls back to a one-shot run when host lacks enableAutoClassify', async () => {
+      const { stub, executeCommand } = makeVsCodeStub({ response: 'Always' });
+      delete (stub as { enableAutoClassify?: unknown }).enableAutoClassify;
+      await runBootstrap(tmpDir, stub, [alwaysStep]);
+      expect(executeCommand).toHaveBeenCalledWith('minspec.classify', tmpDir, undefined);
+    });
+  });
+
+  // =========================================================================
+  // #213: backfill step forwards AI consent so the command doesn't re-ask
+  // =========================================================================
+
+  describe('runBootstrap() — backfill AI-consent forwarding (#213)', () => {
+    it('the real backfill step carries commandArg { aiConsent: true }', () => {
+      const backfill = BOOTSTRAP_STEPS.find((s) => s.kind === 'backfill');
+      expect(backfill?.commandArg).toEqual({ aiConsent: true });
+    });
+
+    it('forwards commandArg as the 3rd executeCommand arg on the primary action', async () => {
+      const backfillStep: BootstrapStep = {
+        kind: 'backfill',
+        shouldRun: () => true,
+        message: 'MinSpec: backfill?',
+        primaryAction: 'Backfill',
+        commandId: 'minspec.backfillEpics',
+        skipPrefKey: 'skipBackfillPrompt',
+        commandArg: { aiConsent: true },
+      };
+      const { stub, executeCommand } = makeVsCodeStub({ response: 'Backfill' });
+      await runBootstrap(tmpDir, stub, [backfillStep]);
+      expect(executeCommand).toHaveBeenCalledWith(
+        'minspec.backfillEpics',
+        tmpDir,
+        { aiConsent: true },
+      );
     });
   });
 
@@ -363,7 +449,7 @@ describe('auto-bootstrap', () => {
       expect(result.offered).toBe('refresh');
       expect(showPrompt).toHaveBeenCalledTimes(1);
       expect(showPrompt.mock.calls[0]![0]).toMatch(/Harness templates updated/);
-      expect(executeCommand).toHaveBeenCalledWith('minspec.initRefresh', tmpDir);
+      expect(executeCommand).toHaveBeenCalledWith('minspec.initRefresh', tmpDir, undefined);
     });
   });
 

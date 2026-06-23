@@ -15,9 +15,11 @@
  *      `phases` (the latter including its indented child lines). Everything else
  *      — id, tier, type, epic, title, … — is content and is retained verbatim.
  *   4. Rejoin frontmatter-minus-lifecycle + body.
- *   5. Normalize: strip trailing whitespace per line; collapse the trailing
+ *   5. Collapse ALL relative-link URLs to `](RELLINK)` (#252) — external,
+ *      anchor and absolute links are kept; link text is kept.
+ *   6. Normalize: strip trailing whitespace per line; collapse the trailing
  *      newline run to exactly one.
- *   6. sha256 the UTF-8 bytes; return the hex digest.
+ *   7. sha256 the UTF-8 bytes; return the hex digest.
  *
  * Consequence (the fix): editing `status`/`phases` — the tool's own lifecycle
  * transitions — no longer voids a content approval. Editing the body or any
@@ -103,11 +105,20 @@ export function canonicalizeSpec(raw: string): string {
     joined = '---\n' + fmClean + '\n---\n' + body;
   }
 
-  // 5. Normalize per-line trailing whitespace (the design's `trimEnd()` — strips
+  // 5. Collapse relative-link URLs (#252). Automated directory renumbering
+  //    (#83/#175) rewrites sibling-spec link *paths* without changing what is
+  //    referenced; collapsing them stops that cry-wolf. ALL relative URLs are
+  //    collapsed (`./…`, `../…`, bare-relative `child/x.md`, `file.md`); external
+  //    (`scheme://…`, `mailto:`), anchors (`#…`) and absolute (`/…`) are KEPT.
+  //    Link *text* is preserved, so changing the referenced spec is still caught.
+  //    MUST stay byte-identical to the Python twin's regex.
+  const linked = joined.replace(/\]\((?![a-z][a-z0-9+.-]*:)(?!#)(?!\/)[^)]*\)/gi, '](RELLINK)');
+
+  // 6. Normalize per-line trailing whitespace (the design's `trimEnd()` — strips
   //    all trailing whitespace; lines are already newline-free after the split, so
   //    this matches Python's `str.rstrip()` byte-for-byte), then collapse the
   //    trailing newline run to exactly one.
-  const lines = joined.split('\n').map((ln) => ln.replace(/\s+$/, ''));
+  const lines = linked.split('\n').map((ln) => ln.replace(/\s+$/, ''));
   return lines.join('\n').replace(/\n*$/, '') + '\n';
 }
 

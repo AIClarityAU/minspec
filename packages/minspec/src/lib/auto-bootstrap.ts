@@ -236,13 +236,19 @@ export function hasUnclassifiedChanges(rootDir: string): boolean {
 export interface BootstrapVsCode {
   /** True if the master `minspec.autoBootstrap.enabled` setting is on */
   isEnabled(): boolean;
-  /** Show an info toast with three actions. Returns the chosen label. */
+  /** Show an info toast with the given actions. Returns the chosen label. */
   showPrompt(
     message: string,
     actions: readonly string[],
   ): Promise<string | undefined>;
-  /** Execute a VS Code command id */
-  executeCommand(commandId: string, folder?: string): Promise<void> | void;
+  /** Execute a VS Code command id. `arg` carries step-specific extra args (e.g. AI consent). */
+  executeCommand(commandId: string, folder?: string, arg?: unknown): Promise<void> | void;
+  /**
+   * Enable auto-classify-on-commit for the folder (the "Always" affordance).
+   * Optional so existing test stubs need not implement it; absent → the
+   * "Always" action falls back to a one-shot run.
+   */
+  enableAutoClassify?(folder: string): Promise<void> | void;
 }
 
 /** Identifiers used by the per-prompt skip flags */
@@ -278,9 +284,20 @@ export interface BootstrapStep {
   readonly primaryAction: string;
   readonly commandId: string;
   readonly skipPrefKey: keyof BootstrapPreferences;
+  /**
+   * Optional "Always" affordance — when set, this label is offered first and,
+   * if chosen, calls `enableAutoClassify` so the step runs itself in future,
+   * then runs the command once now. Only the classify step uses it.
+   */
+  readonly alwaysAction?: string;
+  /**
+   * Optional extra argument forwarded to the command after the folder. The
+   * backfill step uses it to pass AI consent ({ aiConsent: true }) — the offer's
+   * toast already promised the AI pass, so the command must not re-ask (#213).
+   */
+  readonly commandArg?: unknown;
 }
 
-const NOT_NOW = 'Not Now';
 const DONT_ASK = "Don't ask again";
 
 /** All steps, in the order they are surfaced. Exported for testability. */
@@ -318,6 +335,7 @@ export const BOOTSTRAP_STEPS: readonly BootstrapStep[] = [
     primaryAction: 'Classify',
     commandId: 'minspec.classify',
     skipPrefKey: 'skipClassifyPrompt',
+    alwaysAction: 'Always',
   },
   {
     kind: 'backfill',
@@ -330,6 +348,7 @@ export const BOOTSTRAP_STEPS: readonly BootstrapStep[] = [
     primaryAction: 'Backfill',
     commandId: 'minspec.backfillEpics',
     skipPrefKey: 'skipBackfillPrompt',
+    commandArg: { aiConsent: true },
   },
 ] as const;
 
@@ -339,9 +358,12 @@ export const BOOTSTRAP_STEPS: readonly BootstrapStep[] = [
  * Behavior:
  *   - If master setting disabled → no-op
  *   - Steps are evaluated in order; the first eligible one is offered
- *   - "Primary" → runs the associated command
- *   - "Not Now" → no-op (eligible again next activation)
+ *   - "Always" (when offered) → enables auto-run for the step, then runs once
+ *   - "Primary" → runs the associated command once
  *   - "Don't ask again" → writes the corresponding skip flag to preferences
+ *   - Dismissing the toast (the X) → no-op (eligible again next activation).
+ *     There is no explicit "Not Now": the toast's close button already does
+ *     exactly that, so a dedicated button was redundant.
  *
  * Returns a result object describing what (if anything) was offered, so tests
  * can assert behavior without inspecting vscode mocks.
@@ -369,16 +391,27 @@ export async function runBootstrap(
   for (const step of steps) {
     if (!step.shouldRun(rootDir, prefs)) continue;
 
-    const choice = await vscode.showPrompt(step.message, [
+    // "Always" first (most prominent / default), then the one-shot primary,
+    // then the opt-out. No "Not Now" — the toast's X already dismisses.
+    const actions = [
+      ...(step.alwaysAction ? [step.alwaysAction] : []),
       step.primaryAction,
-      NOT_NOW,
       DONT_ASK,
-    ]);
+    ];
+    const choice = await vscode.showPrompt(step.message, actions);
 
-    if (choice === step.primaryAction) {
+    if (step.alwaysAction && choice === step.alwaysAction) {
+      // Opt into auto-run going forward, then run once now. If the host can't
+      // persist the setting, fall back to a plain one-shot run.
+      if (vscode.enableAutoClassify) {
+        await vscode.enableAutoClassify(rootDir);
+      }
+      await vscode.executeCommand(step.commandId, rootDir, step.commandArg);
+    } else if (choice === step.primaryAction) {
       // Pass the bootstrapped folder so the command targets THIS folder, not a
-      // re-resolved one (matters in a multi-root workspace).
-      await vscode.executeCommand(step.commandId, rootDir);
+      // re-resolved one (matters in a multi-root workspace), plus any step-
+      // specific arg (backfill → AI consent).
+      await vscode.executeCommand(step.commandId, rootDir, step.commandArg);
     } else if (choice === DONT_ASK) {
       savePreferences(rootDir, { [step.skipPrefKey]: true });
     }

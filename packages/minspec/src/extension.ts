@@ -10,7 +10,7 @@ import { generateExampleCommand } from './commands/example';
 import { migrateLayoutCommand } from './commands/migrate';
 import { createAdrCommand, regenerateDrIndexCommand, acceptAdrCommand, setAdrStatusCommand } from './commands/adr';
 import { createEpicCommand, regenerateEpicIndexCommand, acceptEpicCommand } from './commands/epic';
-import { backfillEpicsCommand } from './commands/backfill-epics';
+import { backfillEpicsCommand, type BackfillOptions } from './commands/backfill-epics';
 import { regenerateDrIndex } from './lib/adr-manager';
 import { scoreWsjfCommand, triageIssueCommand } from './commands/backlog';
 import { approveSpecCommand, revokeApprovalCommand } from './commands/approve';
@@ -178,8 +178,8 @@ export function activate(context: vscode.ExtensionContext): void {
       adrTreeProvider.refresh();
       backlogTreeProvider.refresh();
     }),
-    vscode.commands.registerCommand('minspec.backfillEpics', async (folderArg?: string) => {
-      await backfillEpicsCommand(folderArg);
+    vscode.commands.registerCommand('minspec.backfillEpics', async (folderArg?: string, opts?: BackfillOptions) => {
+      await backfillEpicsCommand(folderArg, opts);
       specTreeProvider.refresh();
       adrTreeProvider.refresh();
       backlogTreeProvider.refresh();
@@ -215,7 +215,7 @@ export function activate(context: vscode.ExtensionContext): void {
     // approve/revoke already fire `minspec.refreshTree` internally — no extra
     // refresh here (it only added to the redundant burst; issue #154).
     vscode.commands.registerCommand('minspec.approveSpec', async (node) => {
-      await approveSpecCommand(node);
+      await approveSpecCommand(node, context.globalState);
     }),
     vscode.commands.registerCommand('minspec.revokeApproval', async (node) => {
       await revokeApprovalCommand(node);
@@ -367,10 +367,20 @@ export function activate(context: vscode.ExtensionContext): void {
       Promise.resolve(
         vscode.window.showInformationMessage(message, ...actions),
       ).then(choice => (typeof choice === 'string' ? choice : undefined)),
-    executeCommand: (commandId, folder) => {
-      const result = vscode.commands.executeCommand(commandId, folder);
+    executeCommand: (commandId, folder, arg) => {
+      const result = vscode.commands.executeCommand(commandId, folder, arg);
       return result instanceof Promise ? result.then(() => undefined) : undefined;
     },
+    enableAutoClassify: () =>
+      Promise.resolve(
+        vscode.workspace
+          .getConfiguration('minspec')
+          .update(
+            'autoClassifyOnCommit',
+            true,
+            vscode.ConfigurationTarget.Workspace,
+          ),
+      ).then(() => undefined),
   };
   for (const folder of vscode.workspace.workspaceFolders ?? []) {
     void runBootstrap(folder.uri.fsPath, bootstrapVsCode);
@@ -378,15 +388,19 @@ export function activate(context: vscode.ExtensionContext): void {
 
   if (workspaceRoot) {
     // Auto-classify on commit — watch .git/HEAD + refs/heads/* if opted in.
-    const autoClassifyEnabled = vscode.workspace
-      .getConfiguration('minspec')
-      .get<boolean>('autoClassifyOnCommit', false);
-    if (autoClassifyEnabled) {
-      const gitWatcher = vscode.workspace.createFileSystemWatcher(
-        new vscode.RelativePattern(
-          workspaceRoot,
-          '.git/{HEAD,refs/heads/**}',
-        ),
+    // Created/torn down LIVE when minspec.autoClassifyOnCommit flips, so the
+    // classify toast's "from now on" takes effect immediately — no window
+    // reload (#203). Previously the watcher was wired only at activation, so
+    // the toggle silently did nothing until the next reload.
+    let gitWatcher: vscode.FileSystemWatcher | undefined;
+    const isAutoClassifyEnabled = () =>
+      vscode.workspace
+        .getConfiguration('minspec')
+        .get<boolean>('autoClassifyOnCommit', false);
+    const startGitWatcher = () => {
+      if (gitWatcher) return;
+      gitWatcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(workspaceRoot, '.git/{HEAD,refs/heads/**}'),
       );
       const triggerClassify = (uri: vscode.Uri) => {
         if (!isWatchedGitPath(uri.fsPath)) return;
@@ -395,7 +409,19 @@ export function activate(context: vscode.ExtensionContext): void {
       gitWatcher.onDidChange(triggerClassify);
       gitWatcher.onDidCreate(triggerClassify);
       context.subscriptions.push(gitWatcher);
-    }
+    };
+    const stopGitWatcher = () => {
+      gitWatcher?.dispose();
+      gitWatcher = undefined;
+    };
+    if (isAutoClassifyEnabled()) startGitWatcher();
+    context.subscriptions.push(
+      vscode.workspace.onDidChangeConfiguration((e) => {
+        if (!e.affectsConfiguration('minspec.autoClassifyOnCommit')) return;
+        if (isAutoClassifyEnabled()) startGitWatcher();
+        else stopGitWatcher();
+      }),
+    );
   }
 
   // ScroogeLLM bridge: conformance auto-export watcher (Phase 10)

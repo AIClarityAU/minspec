@@ -247,54 +247,38 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
     expect(approveSpec).not.toHaveBeenCalled();
   });
 
-  // ── confirmation dialog ──────────────────────────────────────────────────
+  // ── no confirmation modal (#104: selecting + picking IS the explicit act) ──
 
-  it('aborts when the user dismisses the confirmation warning', async () => {
+  it('approves a complete spec directly, with no confirmation modal', async () => {
     pickFirst();
     vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec() as never);
     vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
-    vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(undefined as never);
 
     await approveSpecCommand(undefined);
 
-    expect(approveSpec).not.toHaveBeenCalled();
-    expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
+    // No modal at all — approval proceeds on the explicit pick.
+    expect(approveSpec).toHaveBeenCalled();
+    const modalCalls = vi
+      .mocked(vscode.window.showWarningMessage)
+      .mock.calls.filter((c) => (c[1] as { modal?: boolean } | undefined)?.modal);
+    expect(modalCalls).toHaveLength(0);
   });
 
-  it('shows warning message with spec id and tier in confirmation', async () => {
-    pickFirst();
-    vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec() as never);
-    vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
-    vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(undefined as never);
-
-    await approveSpecCommand(undefined);
-
-    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
-      expect.stringContaining('SPEC-001'),
-      expect.objectContaining({ modal: true }),
-      'Approve',
-    );
-    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
-      expect.stringContaining('T2'),
-      expect.anything(),
-      'Approve',
-    );
-  });
-
-  it('includes non-blocking warnings in the confirmation detail', async () => {
+  it('surfaces warnings as a non-modal advisory after approving (never an approve-anyway gate)', async () => {
     pickFirst();
     vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec() as never);
     vi.mocked(validateSpec).mockReturnValueOnce(
       completeWithWarnings(['Optional section missing']) as never,
     );
-    vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(undefined as never);
 
     await approveSpecCommand(undefined);
 
+    // Approval still happened — warnings do not block.
+    expect(approveSpec).toHaveBeenCalled();
+    // The advisory is a non-modal warning toast carrying the warning text.
     const call = vi.mocked(vscode.window.showWarningMessage).mock.calls[0];
-    const detail = (call[1] as { detail?: string }).detail ?? '';
-    expect(detail).toContain('Non-blocking warnings');
-    expect(detail).toContain('Optional section missing');
+    expect(call[0]).toContain('Optional section missing');
+    expect((call[1] as { modal?: boolean } | undefined)?.modal).toBeFalsy();
   });
 
   // ── successful approval ──────────────────────────────────────────────────
@@ -487,6 +471,44 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
     );
     // Already implementing — no status flip
     expect(setSpecStatus).not.toHaveBeenCalled();
+  });
+
+  // ── first-approve revoke tip (#104: show once, not every approve) ──────────
+
+  it('shows the editing-revokes tip once, then records it so it does not repeat', async () => {
+    const store: Record<string, unknown> = {};
+    const memento = {
+      get: (k: string, d?: unknown) => (k in store ? store[k] : d),
+      update: (k: string, v: unknown) => {
+        store[k] = v;
+        return Promise.resolve();
+      },
+    } as unknown as import('vscode').Memento;
+
+    const tip = /editing an approved spec automatically revokes/i;
+
+    // First approval — tip shown.
+    pickFirst();
+    vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec('new') as never);
+    vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
+    await approveSpecCommand(undefined, memento);
+    expect(
+      vi.mocked(vscode.window.showInformationMessage).mock.calls.some((c) =>
+        tip.test(String(c[0])),
+      ),
+    ).toBe(true);
+
+    // Second approval — flag set, tip suppressed.
+    vi.mocked(vscode.window.showInformationMessage).mockClear();
+    pickFirst();
+    vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec('new') as never);
+    vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
+    await approveSpecCommand(undefined, memento);
+    expect(
+      vi.mocked(vscode.window.showInformationMessage).mock.calls.some((c) =>
+        tip.test(String(c[0])),
+      ),
+    ).toBe(false);
   });
 });
 

@@ -14,6 +14,8 @@ import {
   AGENTS_SLASH_SECTION_END,
 } from '../src/lib/slash-commands';
 import { generateHarnessFiles, refreshHarnessFiles } from '../src/lib/scaffold';
+import { ASPECT_GUIDANCE } from '../src/lib/spec-validator';
+import { SPEC_STATUSES } from '../src/lib/spec';
 
 describe('slash-commands', () => {
   let tmpDir: string;
@@ -68,6 +70,37 @@ describe('slash-commands', () => {
       expect(content.toLowerCase()).toMatch(/defines? \*?done|defining done|defines done/);
       // tier-scaled guidance so T1/T2 specs are not bloated
       expect(content.toLowerCase()).toMatch(/tier-scaled/);
+    });
+  });
+
+  // Shift-left completeness (harvest316/minspec#104): generation guidance must
+  // surface the SAME requirements the approve gate enforces, derived from the
+  // gate's own constants so the two can never drift. Approve = pure backstop.
+  describe('shift-left completeness guidance (#104)', () => {
+    it('Plan carries every aspect-artifact requirement the approve gate checks (drift guard)', () => {
+      const content = buildClaudeShim('plan');
+      // Each fixHint is the gate's own string — asserting it is present here proves
+      // the generation guidance cannot silently fall out of sync with the gate.
+      for (const g of ASPECT_GUIDANCE) {
+        expect(content).toContain(g.fixHint);
+        expect(content).toContain(`**${g.aspect}**`);
+      }
+    });
+
+    it('Plan frames the artifacts as a shift-left of the approve gate', () => {
+      const content = buildClaudeShim('plan').toLowerCase();
+      expect(content).toMatch(/shift-left/);
+      expect(content).toMatch(/approve gate|approval/);
+    });
+
+    it('Specify lists exactly the recognized statuses so guidance never names a rejected one', () => {
+      const content = buildClaudeShim('specify');
+      for (const status of SPEC_STATUSES) {
+        expect(content).toContain(`\`${status}\``);
+      }
+      // explicit tier is requested, and the backstop framing is present
+      expect(content.toLowerCase()).toMatch(/explicit `tier:`|explicit tier/);
+      expect(content.toLowerCase()).toMatch(/backstop/);
     });
   });
 

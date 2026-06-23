@@ -13,8 +13,10 @@ INV-2 fails. The algorithm (see the Node module for the full prose):
   2. Split the frontmatter block from the body.
   3. Remove exactly the lifecycle keys `status` and `phases` (+ indented children).
   4. Rejoin frontmatter-minus-lifecycle + body.
-  5. Strip per-line trailing whitespace; collapse the trailing newline run to one.
-  6. sha256 the UTF-8 bytes; return the hex digest.
+  5. Collapse ALL relative-link URLs to `](RELLINK)` (#252); keep external/anchor/
+     absolute links and link text.
+  6. Strip per-line trailing whitespace; collapse the trailing newline run to one.
+  7. sha256 the UTF-8 bytes; return the hex digest.
 
 Pure stdlib (`re`, `hashlib`). Also runnable as a CLI: `canonical.py --hash <file>`
 prints the hex digest of the file's canonical form (used by the parity test).
@@ -67,7 +69,12 @@ def canonicalize_spec(raw: str) -> str:
         fm_clean = _strip_lifecycle(fm)
         joined = '---\n' + fm_clean + '\n---\n' + body
 
-    # 5. Strip per-line trailing whitespace (str.rstrip() == JS trimEnd over a
+    # 5. Collapse ALL relative-link URLs to `](RELLINK)` (#252). External
+    #    (scheme://, mailto:), anchor (#…) and absolute (/…) links are KEPT; link
+    #    text is KEPT. MUST stay byte-identical to the Node twin's regex.
+    joined = re.sub(r'\]\((?![a-z][a-z0-9+.-]*:)(?!#)(?!/)[^)]*\)', '](RELLINK)', joined, flags=re.I)
+
+    # 6. Strip per-line trailing whitespace (str.rstrip() == JS trimEnd over a
     #    newline-free line), then collapse the trailing newline run to exactly one.
     lines = [ln.rstrip() for ln in joined.split('\n')]
     return re.sub(r'\n*$', '', '\n'.join(lines)) + '\n'

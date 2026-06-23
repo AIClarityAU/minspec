@@ -1,0 +1,10 @@
+---
+id: SPEC-099
+status: specifying
+title: See [ref](../other/spec.md)
+---
+# Links
+
+Relative: [a](./sibling.md), [b](../up/x.md), [c](child/y.md), [d](file.md).
+External: [e](https://example.com), [f](mailto:x@y.com).
+Anchor: [g](#section). Absolute: [h](/root/abs.md).

@@ -18,6 +18,12 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { analyzeGitDiff } from '../src/lib/git-analyzer';
 import { classify } from '../src/lib/classifier';
+import { runConsequenceAnalyzers } from '../src/lib/consequence-analyzers';
+import type {
+  ChangedFile,
+  ChangeStatus,
+  ConsequenceInput,
+} from '../src/lib/consequence-analyzers';
 import { DEFAULT_CONFIG } from '../src/lib/config';
 import type { Tier } from '../src/lib/config';
 
@@ -234,6 +240,158 @@ describe.skipIf(!hasData)('Classifier validation — SWE-bench-Verified', () => 
 
     // The harness asserts it RAN, not a quality bar — accuracy is for human review.
     expect(applied).toBeGreaterThan(0);
+  });
+});
+
+// ─── FR-8: consequence-axis ON vs OFF (SPEC-023) ─────────────────────────────
+
+/**
+ * Per-file content surfaces reconstructed from a unified diff: the `+` lines as
+ * a (post-change) content proxy and the `-` lines as an (old-content) proxy.
+ * This is exactly the inclusion-biased surface the analyzers scan (whole-content
+ * regex), so an ON/OFF tier-shift measured this way is faithful to how the
+ * command-layer path feeds them (FR-7). It cannot UNDER-detect a consequence the
+ * real path would catch in the diff hunk; it only lacks unchanged context (which
+ * the analyzers do not need for their regexes).
+ */
+interface PatchFile {
+  file: string;
+  status: ChangeStatus;
+  added: string; // joined `+` content lines
+  removed: string; // joined `-` content lines
+}
+
+function parsePatchForConsequence(patch: string): PatchFile[] {
+  const files: PatchFile[] = [];
+  let cur: PatchFile | null = null;
+  for (const line of patch.split('\n')) {
+    if (line.startsWith('diff --git ')) {
+      if (cur) files.push(cur);
+      const m = line.match(/^diff --git a\/(.+?) b\/(.+)$/);
+      const file = m ? m[2].trim() : line.slice('diff --git '.length).trim();
+      cur = { file, status: 'modified', added: '', removed: '' };
+      continue;
+    }
+    if (!cur) continue;
+    if (line.startsWith('new file mode')) cur.status = 'added';
+    else if (line.startsWith('deleted file mode')) cur.status = 'deleted';
+    else if (line.startsWith('rename from') || line.startsWith('rename to')) cur.status = 'renamed';
+    else if (line.startsWith('+++ ') || line.startsWith('--- ')) {
+      /* header */
+    } else if (line.startsWith('+')) cur.added += line.slice(1) + '\n';
+    else if (line.startsWith('-')) cur.removed += line.slice(1) + '\n';
+  }
+  if (cur) files.push(cur);
+  return files;
+}
+
+function buildConsequenceInputFromPatch(patch: string): ConsequenceInput {
+  const pfs = parsePatchForConsequence(patch);
+  const changedFiles: ChangedFile[] = pfs.map((pf) => ({
+    path: pf.file,
+    insertions: pf.added ? pf.added.split('\n').length - 1 : 0,
+    deletions: pf.removed ? pf.removed.split('\n').length - 1 : 0,
+    status: pf.status,
+    // Post-change content proxy = added lines; deleted files have none.
+    content: pf.status === 'deleted' ? undefined : pf.added || undefined,
+    // Old content proxy = removed lines; added files have none.
+    oldContent: pf.status === 'added' ? undefined : pf.removed || undefined,
+  }));
+  return { changedFiles, refIndex: null }; // refIndex always null in v1
+}
+
+describe.skipIf(!hasData)('SPEC-023 FR-8 — consequence axis ON vs OFF', () => {
+  it('reports the tier-shift delta and asserts every shift is UPWARD (INV-3)', async () => {
+    const instances: Instance[] = JSON.parse(
+      fs.readFileSync(INSTANCES_FILE, 'utf-8'),
+    );
+
+    interface Shift {
+      instanceId: string;
+      off: Tier;
+      on: Tier;
+      tripped: string[];
+    }
+    const shifts: Shift[] = [];
+    let evaluated = 0;
+    let downward = 0;
+
+    for (const inst of instances) {
+      const stats = parsePatch(inst.patch);
+      if (stats.length === 0) continue;
+      const git = fakeGit(stats, inst.patch);
+
+      // OFF: size signals only (the pre-SPEC-023 path).
+      const sizeSignals = await analyzeGitDiff('<fake>', { staged: true, git });
+      const off = classify(sizeSignals, DEFAULT_CONFIG).tier;
+
+      // ON: size + consequence signals (the SPEC-023 path).
+      const consequence = runConsequenceAnalyzers(
+        buildConsequenceInputFromPatch(inst.patch),
+      );
+      const on = classify([...sizeSignals, ...consequence], DEFAULT_CONFIG).tier;
+
+      evaluated++;
+      if (on !== off) {
+        if (TIER_INDEX[on] < TIER_INDEX[off]) downward++;
+        shifts.push({
+          instanceId: inst.instanceId,
+          off,
+          on,
+          tripped: consequence
+            .filter((s) => s.tierContribution !== 'T1')
+            .map((s) => s.name),
+        });
+      }
+    }
+
+    // Tally direction.
+    const byDirection: Record<string, number> = {};
+    for (const s of shifts) {
+      const key = `${s.off}→${s.on}`;
+      byDirection[key] = (byDirection[key] ?? 0) + 1;
+    }
+
+    /* eslint-disable no-console */
+    console.log(
+      `\nSPEC-023 FR-8 — consequence axis ON vs OFF (n=${evaluated} evaluated)`,
+    );
+    console.log(`Tier shifts: ${shifts.length} of ${evaluated}`);
+    console.log(`Downward shifts (MUST be 0 — INV-3): ${downward}`);
+    if (Object.keys(byDirection).length) {
+      console.log('Shift directions:');
+      for (const [k, v] of Object.entries(byDirection).sort()) {
+        console.log(`   ${k}: ${v}`);
+      }
+    }
+    if (shifts.length) {
+      console.log('\nShifted instances:');
+      for (const s of shifts) {
+        console.log(
+          `   ${s.instanceId}  ${s.off}→${s.on}  [${s.tripped.join(', ')}]`,
+        );
+      }
+    }
+    /* eslint-enable no-console */
+
+    // Write a machine-readable delta report alongside the validation report.
+    const deltaReport = {
+      n: evaluated,
+      shifts: shifts.length,
+      downward,
+      byDirection,
+      shiftedInstances: shifts,
+    };
+    fs.writeFileSync(
+      path.join(VALIDATION_DIR, '.data', 'fr8-delta.json'),
+      JSON.stringify(deltaReport, null, 2) + '\n',
+      'utf-8',
+    );
+
+    // INV-3 is a HARD invariant: no shift may ever lower a tier.
+    expect(downward).toBe(0);
+    // Sanity: the harness actually evaluated instances.
+    expect(evaluated).toBeGreaterThan(0);
   });
 });
 

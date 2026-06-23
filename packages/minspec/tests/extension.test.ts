@@ -109,6 +109,7 @@ vi.mock('vscode', () => ({
       onSaveHandler = handler;
       return { dispose: vi.fn() };
     }),
+    onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
   },
   commands: {
     registerCommand: vi.fn((id: string, handler: (...args: any[]) => any) => {
@@ -767,10 +768,10 @@ describe('activate()', () => {
     // The legacy welcome toast was removed; init is now offered by the
     // per-folder auto-bootstrap loop (harvest316/minspec#123).
     await vi.waitFor(() => {
+      // #203: "Not Now" removed — the toast's X dismisses; init has no "Always".
       expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
         expect.stringContaining("isn't initialized"),
         'Initialize',
-        'Not Now',
         "Don't ask again",
       );
     });
@@ -873,10 +874,12 @@ describe('activate()', () => {
     activate(makeMockContext());
 
     // #123: init is invoked WITH the bootstrapped folder.
+    // #213: a 3rd commandArg now flows (undefined for the init step).
     await vi.waitFor(() => {
       expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
         'minspec.init',
         '/tmp/test-workspace',
+        undefined,
       );
     });
   });
