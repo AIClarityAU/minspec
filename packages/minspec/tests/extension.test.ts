@@ -109,6 +109,7 @@ vi.mock('vscode', () => ({
       onSaveHandler = handler;
       return { dispose: vi.fn() };
     }),
+    onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
   },
   commands: {
     registerCommand: vi.fn((id: string, handler: (...args: any[]) => any) => {

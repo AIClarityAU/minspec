@@ -178,27 +178,23 @@ describe('classifyCommand()', () => {
 
   // ── Lines 23-25: analyzeGitDiff throws → treat as empty signals ───────────
 
-  it('treats signals as empty and shows "no changes" when analyzeGitDiff throws', async () => {
+  it('returns early without toast when analyzeGitDiff throws', async () => {
     vi.mocked(analyzeGitDiff).mockRejectedValue(new Error('git not found'));
 
     await classifyCommand(WS);
 
-    expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-      'MinSpec: No changes detected. Stage or modify files to classify.',
-    );
+    expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
     expect(classify).not.toHaveBeenCalled();
   });
 
   // ── Lines 27-32: no signals (both staged and unstaged empty) ─────────────
 
-  it('shows "no changes detected" message and returns early when both staged and unstaged are empty', async () => {
+  it('returns early without toast when both staged and unstaged are empty', async () => {
     vi.mocked(analyzeGitDiff).mockResolvedValue([]);
 
     await classifyCommand(WS);
 
-    expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-      'MinSpec: No changes detected. Stage or modify files to classify.',
-    );
+    expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
     expect(classify).not.toHaveBeenCalled();
   });
 
@@ -394,7 +390,7 @@ describe('classifyCommand()', () => {
       vscode.ConfigurationTarget.Workspace,
     );
     expect(vscode.window.showInformationMessage).toHaveBeenLastCalledWith(
-      'MinSpec: Auto-classify on commit enabled for this workspace (takes effect after reload).',
+      'MinSpec: Auto-classify on commit enabled for this workspace.',
     );
     // The dead override log is never written by this path.
     expect(recordOverride).not.toHaveBeenCalled();

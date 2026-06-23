@@ -388,15 +388,19 @@ export function activate(context: vscode.ExtensionContext): void {
 
   if (workspaceRoot) {
     // Auto-classify on commit — watch .git/HEAD + refs/heads/* if opted in.
-    const autoClassifyEnabled = vscode.workspace
-      .getConfiguration('minspec')
-      .get<boolean>('autoClassifyOnCommit', false);
-    if (autoClassifyEnabled) {
-      const gitWatcher = vscode.workspace.createFileSystemWatcher(
-        new vscode.RelativePattern(
-          workspaceRoot,
-          '.git/{HEAD,refs/heads/**}',
-        ),
+    // Created/torn down LIVE when minspec.autoClassifyOnCommit flips, so the
+    // classify toast's "from now on" takes effect immediately — no window
+    // reload (#203). Previously the watcher was wired only at activation, so
+    // the toggle silently did nothing until the next reload.
+    let gitWatcher: vscode.FileSystemWatcher | undefined;
+    const isAutoClassifyEnabled = () =>
+      vscode.workspace
+        .getConfiguration('minspec')
+        .get<boolean>('autoClassifyOnCommit', false);
+    const startGitWatcher = () => {
+      if (gitWatcher) return;
+      gitWatcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(workspaceRoot, '.git/{HEAD,refs/heads/**}'),
       );
       const triggerClassify = (uri: vscode.Uri) => {
         if (!isWatchedGitPath(uri.fsPath)) return;
@@ -405,7 +409,19 @@ export function activate(context: vscode.ExtensionContext): void {
       gitWatcher.onDidChange(triggerClassify);
       gitWatcher.onDidCreate(triggerClassify);
       context.subscriptions.push(gitWatcher);
-    }
+    };
+    const stopGitWatcher = () => {
+      gitWatcher?.dispose();
+      gitWatcher = undefined;
+    };
+    if (isAutoClassifyEnabled()) startGitWatcher();
+    context.subscriptions.push(
+      vscode.workspace.onDidChangeConfiguration((e) => {
+        if (!e.affectsConfiguration('minspec.autoClassifyOnCommit')) return;
+        if (isAutoClassifyEnabled()) startGitWatcher();
+        else stopGitWatcher();
+      }),
+    );
   }
 
   // ScroogeLLM bridge: conformance auto-export watcher (Phase 10)
