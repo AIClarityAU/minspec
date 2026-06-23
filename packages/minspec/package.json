@@ -463,7 +463,10 @@
     ]
   },
   "scripts": {
+    "build:shared": "tsc -p ../shared/tsconfig.json",
+    "prebuild": "npm run build:shared",
     "build": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --minify",
+    "prebuild:prod": "npm run build:shared",
     "build:prod": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --minify --sourcemap=external",
     "watch": "npm run build -- --watch --sourcemap",
     "supply-chain:check": "../../scripts/check-supply-chain.sh",
