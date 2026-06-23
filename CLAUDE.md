@@ -62,8 +62,12 @@ under-powered — append a **single-line advisory** at the end of the response. 
 an ongoing nag, not a gate: never pause the thread, never ask, just surface it and
 continue.
 
-- **Format:** `💲 Scrooge: this <task> suits <model> · <effort> effort · <thinking> — you're on <current>. Switch: /model`
-  e.g. `💲 Scrooge: this task suits Sonnet · medium effort · no thinking — you're on Opus · high. Switch: /model`
+- **Format — emit in *italic*** so it sets apart and reads low-weight. Wrap the whole
+  line in `*…*`:
+  `*💲 Scrooge: this <task> suits <model> · <effort> effort · <thinking> — you're on <current>. Switch: /model*`
+  e.g. *💲 Scrooge: this task suits Sonnet · medium effort · no thinking — you're on Opus · high. Switch: /model*
+  (Font size is fixed by the terminal — italic is the only emphasis available here.
+  A genuinely smaller font belongs to the statusline/webview surface, not this nag.)
 - **Surface only on a genuine mismatch.** Already well-matched → say nothing. One line,
   never a paragraph; if unsure, stay silent rather than cry wolf.
 - **Direction-neutral.** Recommend *down* (cheaper — the common case) or *up* (a hard
