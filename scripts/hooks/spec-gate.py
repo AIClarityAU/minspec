@@ -57,13 +57,15 @@ def normalize(text):
     """Normalize spec content before hashing (#252) — the approval hash binds the
     *contract*, not volatile/mechanical bytes. MUST stay byte-identical to
     packages/minspec/src/lib/approval.ts::normalizeSpecContent (the two regexes
-    are intentionally trivial so both languages reproduce them exactly):
+    are intentionally simple so both languages reproduce them exactly):
       1. drop the lifecycle `status:` frontmatter line,
-      2. collapse relative-link URLs (./… or ../…) so #83 dir-renumbering of
-         sibling-spec link paths does not invalidate a human approval.
+      2. collapse ALL relative-link URLs (./… ../… and bare-relative child/x.md)
+         so #83/#175 dir-renumbering of sibling-spec link paths does not
+         invalidate a human approval; external (scheme://, mailto:), anchors (#)
+         and absolute (/…) links are kept.
     """
     text = re.sub(r'^status:.*\r?\n', '', text, flags=re.M)
-    text = re.sub(r'\]\(\.{1,2}/[^)]*\)', '](RELLINK)', text)
+    text = re.sub(r'\]\((?![a-z][a-z0-9+.-]*:)(?!#)(?!/)[^)]*\)', '](RELLINK)', text, flags=re.I)
     return text
 
 

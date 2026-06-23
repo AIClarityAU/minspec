@@ -75,22 +75,25 @@ export function hashSpecFile(filePath: string): string | null {
  *     not part of the contract a human reviews. (Excluding it also retires the
  *     fragile flip-then-hash ordering dance — a status flip no longer perturbs
  *     the hash.)
- *  2. Relative-link URLs (`./…` / `../…`) — automated directory renumbering
- *     (#83) rewrites sibling-spec link *paths* without changing what is
- *     referenced. Link *text* is preserved, so changing the referenced spec is
+ *  2. Relative-link URLs — automated directory renumbering (#83/#175) rewrites
+ *     sibling-spec link *paths* without changing what is referenced. ALL
+ *     relative URLs are collapsed: `./…`, `../…`, and bare-relative (`child/x.md`,
+ *     `file.md` — e.g. a top-level `design.md` linking into a child dir). External
+ *     links (`scheme://…`, `mailto:`), anchors (`#…`) and absolute paths (`/…`)
+ *     are KEPT. Link *text* is preserved, so changing the referenced spec is
  *     still caught.
  *
  * Anything excluded here is gated elsewhere (status by the validator; link text
  * stays hashed), so this does not open a hole where a substantive edit hides.
  *
  * MUST stay byte-identical to `scripts/hooks/spec-gate.py::normalize` — the two
- * regexes below are intentionally trivial so both languages reproduce them
+ * regexes below are intentionally simple so both languages reproduce them
  * exactly. A parity test pins this (`approval.test.ts`).
  */
 export function normalizeSpecContent(text: string): string {
   return text
     .replace(/^status:.*\r?\n/gm, '')
-    .replace(/\]\(\.{1,2}\/[^)]*\)/g, '](RELLINK)');
+    .replace(/\]\((?![a-z][a-z0-9+.-]*:)(?!#)(?!\/)[^)]*\)/gi, '](RELLINK)');
 }
 
 /** Hash a spec file's normalized contract (v2). Returns null if unreadable. */

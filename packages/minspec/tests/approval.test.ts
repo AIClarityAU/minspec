@@ -137,10 +137,23 @@ describe('normalizeSpecContent — excludes volatile bytes only (#252)', () => {
     expect(normalizeSpecContent(withStatus)).not.toContain('status:');
   });
 
-  it('collapses relative-link URLs (sibling dir renumbering is invisible)', () => {
+  it('collapses ../ relative-link URLs (sibling dir renumbering is invisible)', () => {
     const before = 'See [SPEC-6](../stub-completeness-gate/requirements.md) here.';
     const after = 'See [SPEC-6](../SPEC-006-stub-completeness-gate/requirements.md) here.';
     expect(normalizeSpecContent(before)).toBe(normalizeSpecContent(after));
+  });
+
+  it('collapses BARE-relative link URLs too (top-level design.md → child dir; #254)', () => {
+    // SPEC-002 class: a top-level doc links into a child dir with no ./ or ../
+    const before = 'See [SPEC-14](review-webview/requirements.md).';
+    const after = 'See [SPEC-14](SPEC-014-review-webview/requirements.md).';
+    expect(normalizeSpecContent(before)).toBe(normalizeSpecContent(after));
+    expect(normalizeSpecContent(before)).toContain('](RELLINK)');
+  });
+
+  it('collapses ./ and same-dir file links', () => {
+    expect(normalizeSpecContent('[a](./x.md)')).toBe('[a](RELLINK)');
+    expect(normalizeSpecContent('[a](file.md)')).toBe('[a](RELLINK)');
   });
 
   it('ANTI-HOLE: link TEXT changes are still visible (only the URL is collapsed)', () => {
@@ -161,8 +174,8 @@ describe('normalizeSpecContent — excludes volatile bytes only (#252)', () => {
     expect(normalizeSpecContent(a)).not.toBe(normalizeSpecContent(b));
   });
 
-  it('leaves absolute/external links and anchors untouched', () => {
-    const s = 'a [x](https://e.com/p) b [y](#anchor) c';
+  it('leaves external (scheme://, mailto:), anchor, and absolute links untouched', () => {
+    const s = 'a [x](https://e.com/p) b [y](#anchor) c [m](mailto:a@b.com) d [abs](/root/p)';
     expect(normalizeSpecContent(s)).toBe(s);
   });
 });
@@ -204,7 +217,9 @@ describe('normalization parity: TS === spec-gate.py --normalize (#252)', () => {
     const fixture =
       '---\nid: SPEC-1\nstatus: implementing\ntier: T3\nepic: EPIC-1\n---\n' +
       '## FR-1\nLinks: [a](../old-dir/requirements.md), [b](./x.md), ' +
-      '[ext](https://e.com), [anc](#h).\nstatus: not-a-frontmatter-line-but-matches\n';
+      '[bare](child-dir/r.md), [f](file.md), [ext](https://e.com), ' +
+      '[mail](mailto:x@y.com), [abs](/root/p), [anc](#h).\n' +
+      'status: not-a-frontmatter-line-but-matches\n';
     const f = path.join(tmp, 'fixture.md');
     fs.writeFileSync(f, fixture);
     let pyOut: string;
