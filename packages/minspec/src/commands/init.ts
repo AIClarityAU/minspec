@@ -1,6 +1,23 @@
 import * as vscode from 'vscode';
 import { scaffold, generateHarnessFiles, refreshHarnessFiles } from '../lib/scaffold';
 import { resolveTargetFolder } from '../lib/resolve-folder';
+import { evaluateConstitution } from '../lib/constitution-nudge';
+
+/**
+ * SPEC-025 FR-6: soft, NON-MODAL advisory when the constitution has no
+ * human-authored rules yet. Advisory only — never modal, never blocks, and a
+ * failure here must not affect the init result (best-effort).
+ */
+function surfaceConstitutionNudge(folder: string): void {
+  try {
+    const nudge = evaluateConstitution(folder);
+    if (nudge.empty) {
+      vscode.window.showInformationMessage(nudge.message);
+    }
+  } catch {
+    // best-effort — the nudge is advisory; never let it break init.
+  }
+}
 
 export async function initCommand(folderArg?: string): Promise<void> {
   const folder = folderArg ?? (await resolveTargetFolder());
@@ -22,6 +39,7 @@ export async function initCommand(folderArg?: string): Promise<void> {
   vscode.window.showInformationMessage(
     'MinSpec: Initialized .minspec/ and generated harness files.',
   );
+  surfaceConstitutionNudge(folder);
 }
 
 export async function initRefreshCommand(folderArg?: string): Promise<void> {
@@ -41,6 +59,7 @@ export async function initRefreshCommand(folderArg?: string): Promise<void> {
   vscode.window.showInformationMessage(
     'MinSpec: Refreshed harness files (user edits preserved).',
   );
+  surfaceConstitutionNudge(folder);
 }
 
 /** Extract a human-readable message from an unknown thrown value. */

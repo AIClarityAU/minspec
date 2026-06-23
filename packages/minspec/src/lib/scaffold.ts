@@ -18,6 +18,41 @@ import {
 } from './merge-refresh';
 import { generateSlashCommandShims } from './slash-commands';
 import { writeEpicIndex } from './epic-manager';
+import { assembleContext } from './constitution-context';
+import { seedProvider, integrateProposal, CONSTITUTION_SECTION_SCHEMA } from './constitution-proposer';
+
+/** Output path of the constitution, relative to project root. */
+const CONSTITUTION_REL_PATH = TEMPLATE_OUTPUT_PATHS['constitution.md'];
+
+/**
+ * SPEC-025 FR-4/FR-5: seed the constitution with deterministic DRAFT entries so
+ * it is never empty (INV-4). Reads the current constitution, runs the offline
+ * seed provider over the assembled context manifest, integrates additively
+ * (never overwriting human content, idempotent), writes the result back, and
+ * re-hashes the file so later refresh-merge treats the seeded DRAFT sections as
+ * template-origin (preserving INV-2 on subsequent human edits).
+ *
+ * Mutates `allHashes` in place for the constitution's relative path and returns
+ * it. Best-effort: callers wrap in try/catch so a proposer failure never breaks
+ * init (mirrors writeEpicIndex).
+ */
+function seedConstitution(rootDir: string, allHashes: GeneratedHashes): GeneratedHashes {
+  const fullPath = path.join(rootDir, CONSTITUTION_REL_PATH);
+  if (!fs.existsSync(fullPath)) return allHashes;
+
+  const existing = fs.readFileSync(fullPath, 'utf-8');
+  const manifest = assembleContext(rootDir);
+  const proposal = seedProvider.propose(manifest, CONSTITUTION_SECTION_SCHEMA);
+  // seedProvider is synchronous (FR-5); integrate expects a resolved Proposal.
+  if (proposal instanceof Promise) return allHashes;
+
+  const { merged } = integrateProposal(existing, proposal);
+  if (merged === existing) return allHashes;
+
+  fs.writeFileSync(fullPath, merged);
+  const sections = parseSections(merged);
+  return { ...allHashes, [CONSTITUTION_REL_PATH]: buildSectionHashes(sections) };
+}
 
 export { DEFAULT_CONFIG };
 
@@ -112,6 +147,14 @@ export function generateHarnessFiles(rootDir: string): void {
     }
   }
 
+  // SPEC-025 FR-4/FR-5: seed the freshly written constitution so first-init is
+  // never empty. Best-effort — a proposer failure must never break init.
+  try {
+    allHashes = seedConstitution(rootDir, allHashes);
+  } catch {
+    // best-effort — the constitution stays as the template scaffold on failure.
+  }
+
   saveHashes(rootDir, allHashes);
 
   // Record the raw-template baseline so drift detection compares like-for-like
@@ -163,6 +206,14 @@ export function refreshHarnessFiles(rootDir: string): void {
       fs.writeFileSync(fullPath, merged);
       allHashes = { ...allHashes, [relativePath]: newHashes };
     }
+  }
+
+  // SPEC-025 FR-4/FR-5: re-seed after merge so a still-empty section gains DRAFT
+  // entries on refresh too; additive + idempotent, never overwrites human edits.
+  try {
+    allHashes = seedConstitution(rootDir, allHashes);
+  } catch {
+    // best-effort — never break a refresh on a proposer failure.
   }
 
   saveHashes(rootDir, allHashes);
