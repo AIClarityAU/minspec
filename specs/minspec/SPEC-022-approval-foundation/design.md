@@ -3,6 +3,7 @@ id: SPEC-022
 type: design
 status: implementing
 product: minspec
+epic: EPIC-002  # Signpost Integrity
 ---
 
 # Approval Ground Truth + Derived Status — Design
