@@ -63,6 +63,16 @@ if [[ -d "$WORKTREE" ]]; then
   git branch -D "$BRANCH" 2>/dev/null || true
 fi
 
+# Branch off ORIGIN/main, not local `main`. The shared checkout's local `main`
+# is frequently stale (rule #8 — we never switch/pull it from a session), so
+# basing agent work on it makes agents build on an outdated tree: they re-derive
+# already-merged work and emit factually-wrong output (smoke test: an agent
+# documented a merged script as "does not exist" because its base predated the
+# merge). Fetch the remote ref and branch from there so every agent starts from
+# the true tip. Fetch is a parent-side credentialed op; the agent still gets no
+# network tools.
+git fetch origin main -q
+
 # Spec-gate (HITL) reliance — DR-031 D3:
 # We deliberately do NOT set MINSPEC_GATE_OFF and do NOT seed approvals into the
 # worktree. As a linked worktree, its spec-gate resolves the CANONICAL approval
@@ -70,7 +80,7 @@ fi
 # genuinely human-approved spec passes the gate inside the worktree, while an
 # unapproved/stale spec correctly BLOCKS the dispatched edit (surfaced, never
 # bypassed). The bypass kill-switch is human-only; the pipeline must never use it.
-git worktree add -b "$BRANCH" "$WORKTREE" main
+git worktree add -b "$BRANCH" "$WORKTREE" origin/main
 
 echo "Launching $ROLE agent for: $ISSUE_TITLE"
 
@@ -110,6 +120,21 @@ After completing work:
 3. Commit with a conventional commit message (commit locally only)
 4. Write a short markdown summary of what you changed to \`.agent-summary.md\`
    in the worktree root. The dispatcher reads this and posts it to the issue.
+5. Write \`.review-signals.json\` in the worktree root for the PR-side review
+   block (#180). It MUST match the \`ReviewSignalsInput\` shape from
+   \`@aiclarity/shared\` and report TRUTHFULLY — never claim a proof you did not
+   produce (an unproven regression renders as UNVERIFIED, not a checkmark):
+   {
+     "rootCause": "<your RCDD root cause sentence; '' if a pure feat>",
+     "changedFiles": ["<every file in your diff>"],
+     "rootCauseFiles": ["<the file(s) the cause points at — subset of changedFiles>"],
+     "regressionTest": "<fully-qualified name of the test that distinguishes the fix, or omit>",
+     "regressionProvenBaseRed": <true ONLY if you ran it against the pre-fix/base code and saw it FAIL>,
+     "regressionProvenHeadGreen": <true ONLY if you ran it against head and saw it PASS>,
+     "gate": { "test": "pass|fail|unknown", "lint": "...", "build": "...", "validate": "..." }
+   }
+   The dispatcher renders this into the published PR/issue body; it is NOT a
+   substitute for \`.agent-summary.md\`.
 
 Do NOT run \`git push\`, \`git remote\`, \`gh\`, or any network/deploy command —
 you are not permitted to and the dispatcher handles publishing after you exit.
@@ -156,6 +181,20 @@ if (cd "$WORKTREE" && claude -p "$PROMPT" \
         BODY=$(printf '%s\n\n— branch `%s` @ %s (auto-dispatched)' "$(cat "$SUMMARY_FILE")" "$BRANCH" "$SHA")
       else
         BODY=$(printf 'Agent completed (no summary written).\n\n— branch `%s` @ %s (auto-dispatched)' "$BRANCH" "$SHA")
+      fi
+
+      # Append the honest 3-signal review block (#180) so the reviewer skims a
+      # VERIFIED summary instead of reconstructing it. The renderer is pure +
+      # tested in @aiclarity/shared; this runs in the PARENT (no agent creds).
+      # Rendering is best-effort — a missing/unparseable .review-signals.json
+      # must never block publishing the summary, and never fabricates a block.
+      SIGNALS_FILE="${WORKTREE}/.review-signals.json"
+      if [[ -f "$SIGNALS_FILE" ]]; then
+        if SIGNALS_BLOCK=$(node "${SCRIPT_DIR}/render-review-signals.mjs" "$SIGNALS_FILE" 2>/dev/null); then
+          BODY=$(printf '%s\n\n---\n\n%s' "$BODY" "$SIGNALS_BLOCK")
+        else
+          echo "WARNING: could not render review signals from $SIGNALS_FILE — posting summary without the block"
+        fi
       fi
       gh issue comment "$ISSUE" --repo "$REPO" --body "$BODY" 2>/dev/null || true
     else

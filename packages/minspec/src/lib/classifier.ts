@@ -4,12 +4,31 @@ import type { Tier, Phase, MinspecConfig } from './config';
 
 // ─── Shared Types ────────────────────────────────────────────────────────────
 
-/** A single signal produced by an analyzer (git-diff, AST, etc.) */
+/**
+ * A single signal produced by an analyzer (git-diff, consequence, etc.).
+ *
+ * The optional `axis`/`degraded`/`explain` fields (SPEC-023 FR-6) are **additive**:
+ * legacy diff-size producers omit them and stay valid. `classify()` reads only
+ * `tierContribution` (max-over-signals), so these fields are descriptive metadata
+ * surfaced to the user, never inputs to the ranking.
+ */
 export interface ClassificationSignal {
   readonly name: string;
   readonly value: number | boolean;
   readonly weight: number;
   readonly tierContribution: Tier;
+  /**
+   * Which axis produced this signal. Diff-size ('scope') vs blast-radius
+   * ('consequence'). Absent on legacy size signals (treated as 'scope').
+   */
+  readonly axis?: 'scope' | 'consequence';
+  /**
+   * True when the analyzer could not get its ideal data source and fell back to
+   * a coarser read. INV-4: degrade is visible, never a silently-wrong tier.
+   */
+  readonly degraded?: boolean;
+  /** Human-readable rationale, e.g. "call graph unavailable; using size signals". */
+  readonly explain?: string;
 }
 
 /** Result of classifying a set of signals into a tier */
