@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { initCommand, initRefreshCommand } from './commands/init';
+import { constitutionShowPromptCommand, constitutionCompactCommand } from './commands/constitution';
 import { classifyCommand } from './commands/classify';
 import { statusCommand } from './commands/status';
 import { declareScopeCommand } from './commands/session';
@@ -157,6 +158,8 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('minspec.init', initCommand),
     vscode.commands.registerCommand('minspec.initRefresh', initRefreshCommand),
+    vscode.commands.registerCommand('minspec.constitutionShowPrompt', constitutionShowPromptCommand),
+    vscode.commands.registerCommand('minspec.constitutionCompact', constitutionCompactCommand),
     vscode.commands.registerCommand('minspec.classify', classifyCommand),
     vscode.commands.registerCommand('minspec.status', statusCommand(workspaceRoot)),
     vscode.commands.registerCommand('minspec.refreshTree', () => {

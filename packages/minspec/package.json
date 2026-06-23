@@ -73,6 +73,14 @@
         "title": "MinSpec: Refresh Harness Files"
       },
       {
+        "command": "minspec.constitutionShowPrompt",
+        "title": "MinSpec: Show Constitution Generation Prompt"
+      },
+      {
+        "command": "minspec.constitutionCompact",
+        "title": "MinSpec: Compact Constitution"
+      },
+      {
         "command": "minspec.classify",
         "title": "MinSpec: Classify Task Complexity"
       },

@@ -253,6 +253,14 @@ Technical or business constraints that bound the solution space.
 <!-- 2. VS Code extension size < 5MB -->
 <!-- 3. Node.js 18+ runtime only -->
 {{/if}}
+
+## Goals
+
+What this project is trying to achieve. The outcomes work should ladder up to.
+
+<!-- Add goals here. Example: -->
+<!-- 1. Ship a frictionless SDD experience for solo developers -->
+<!-- 2. Keep ceremony proportional to scope -->
 `;
 
 /** Registry of all templates keyed by name */

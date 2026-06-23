@@ -123,6 +123,16 @@ describe('Invariant 2: No backend — no network calls', () => {
     'lib/approval.ts',
   ]);
 
+  // Files allowed to *name* HTTP clients as detection data (not call them). They
+  // make zero network calls; the bare-token patterns below (e.g. /\baxios\b/)
+  // would false-positive on a data list. Real no-network coverage for these
+  // files lives in constitution-invariants.test.ts (forbids fetch(/https/net/exec).
+  //   - lib/constitution-context.ts → NETWORK_DEP_NAMES, used to detect a
+  //     project's runtime HTTP clients for the constitution proposer (SPEC-025).
+  const NETWORK_NAME_DATA_ALLOWLIST = new Set([
+    'lib/constitution-context.ts',
+  ]);
+
   const NETWORK_PATTERNS = [
     { pattern: /\bfetch\s*\(/, name: 'fetch()' },
     { pattern: /\baxios\b/, name: 'axios' },
@@ -147,6 +157,8 @@ describe('Invariant 2: No backend — no network calls', () => {
 
     for (const filePath of files) {
       const relPath = path.relative(srcRoot, filePath);
+      // Skip files that only *name* HTTP clients as data (see allowlist above).
+      if (NETWORK_NAME_DATA_ALLOWLIST.has(relPath)) continue;
       const content = fs.readFileSync(filePath, 'utf-8');
       const lines = content.split('\n');
 
