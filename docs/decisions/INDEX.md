@@ -242,4 +242,10 @@ The human priority dial is epic.order (coarse) + ranked project Goals (thematic,
 *Status: proposed · Date: 2026-06-23*
 
 Hardening DR-023 (no orphan follow-ups) without surfacing commit friction: on DR save, un-materialized `## Follow-ups (tracked)` bullets are auto-filed as issues with the `#ref` written back, while genuinely dangling refs stay a surfaced error. Scoped to the curated section only (threads DR-023's "don't auto-create every consequence" rejection). Closes the DR-019 input leak honestly instead of teaching the resolver to infer priority from prose.
+
+## [DR-042 — Outcome metrics before engagement — sequence the trust-measurement build (outcome is the moat, engagement is the garnish)](DR-042.md)
+
+*Status: proposed · Date: 2026-06-26*
+
+A review-telemetry audit found the entire trust-measurement layer (snapshot, reviewer identity, engagement, outcome-join) specified in detail but 0% built, and approvals.json gitignored so there is no committed ground truth to join against. Sets build order: SPEC-017 M1/M2 outcome metrics (char-rework %, needs no surface ownership) + reviewer identity + committed content-free ledger FIRST; engagement (M3) and the scoped opt-in custom editor (SPEC-018) AFTER, because engagement is meaningless until there is rework to cross it against (FR-9). Rejects the global markdown/PR-intercept tactic as impossible and anti-thesis. Reframes the DR-029 tuning study from one-armed (LLM-only) to two-armed (+ human review-depth → error-rate).
 <!-- minspec:dr-index:end -->
