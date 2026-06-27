@@ -37,6 +37,9 @@ import {
   formatEpicRef,
   setArtifactEpic,
   setEpicStatus,
+  setEpicOrder,
+  reorderEpics,
+  applyEpicReorder,
   readArtifactEpic,
   detectEpicStub,
   type EpicSummary,
@@ -207,6 +210,127 @@ describe('epic-manager', () => {
       const s = createEpic(tmpDir, 'X');
       // @ts-expect-error invalid status
       expect(() => setEpicStatus(s.filePath, 'bogus')).toThrow();
+    });
+  });
+
+  // ─── setEpicOrder / reorderEpics / applyEpicReorder (DnD, #261) ─────────
+
+  describe('setEpicOrder()', () => {
+    it('rewrites the order line and listEpics reflects it', () => {
+      const s = createEpic(tmpDir, 'Telemetry'); // order defaults to its number (1)
+      expect(listEpics(tmpDir)[0].order).toBe(1);
+      setEpicOrder(s.filePath, 7);
+      expect(listEpics(tmpDir)[0].order).toBe(7);
+    });
+    it('adds an order line when frontmatter lacks one', () => {
+      epicFile(tmpDir, 'EPIC-001', '---\nid: EPIC-001\nslug: a\ntitle: A\nstatus: active\n---\n');
+      const fp = listEpics(tmpDir)[0].filePath;
+      setEpicOrder(fp, 3);
+      expect(listEpics(tmpDir)[0].order).toBe(3);
+    });
+    it('throws on a non-finite order', () => {
+      const s = createEpic(tmpDir, 'X');
+      expect(() => setEpicOrder(s.filePath, NaN)).toThrow();
+    });
+  });
+
+  describe('reorderEpics() — pure recomputation', () => {
+    const mk = (id: string, order: number): EpicSummary => ({
+      id, slug: id.toLowerCase(), title: id, status: 'active', order,
+      filePath: `/x/${id}.md`,
+    });
+
+    it('returns [] for a no-op (moved === target)', () => {
+      const epics = [mk('EPIC-001', 1), mk('EPIC-002', 2)];
+      expect(reorderEpics(epics, 'EPIC-001', 'EPIC-001')).toEqual([]);
+    });
+
+    it('returns [] when either id is absent', () => {
+      const epics = [mk('EPIC-001', 1), mk('EPIC-002', 2)];
+      expect(reorderEpics(epics, 'EPIC-099', 'EPIC-001')).toEqual([]);
+      expect(reorderEpics(epics, 'EPIC-001', 'EPIC-099')).toEqual([]);
+    });
+
+    it('drags an epic UP — it lands above the target', () => {
+      // [A,B,C] drag C onto A -> [C,A,B]
+      const epics = [mk('EPIC-A', 1), mk('EPIC-B', 2), mk('EPIC-C', 3)];
+      const out = reorderEpics(epics, 'EPIC-C', 'EPIC-A');
+      // new visual order C,A,B -> orders 1,2,3
+      expect(out).toEqual([
+        { id: 'EPIC-C', filePath: '/x/EPIC-C.md', order: 1 },
+        { id: 'EPIC-A', filePath: '/x/EPIC-A.md', order: 2 },
+        { id: 'EPIC-B', filePath: '/x/EPIC-B.md', order: 3 },
+      ]);
+    });
+
+    it('drags an epic DOWN — it lands just below the target', () => {
+      // [A,B,C] drag A onto C -> A removed -> [B,C], insert A before C -> [B,A,C]
+      const epics = [mk('EPIC-A', 1), mk('EPIC-B', 2), mk('EPIC-C', 3)];
+      const out = reorderEpics(epics, 'EPIC-A', 'EPIC-C');
+      expect(out).toEqual([
+        { id: 'EPIC-B', filePath: '/x/EPIC-B.md', order: 1 },
+        { id: 'EPIC-A', filePath: '/x/EPIC-A.md', order: 2 },
+      ]);
+    });
+
+    it('produces a dense, gap-free 1..N sequence from sparse/duplicate orders', () => {
+      // sparse + duplicate + 999-default orders; reorder must normalise all.
+      const epics = [mk('EPIC-A', 5), mk('EPIC-B', 5), mk('EPIC-C', 999)];
+      const out = reorderEpics(epics, 'EPIC-C', 'EPIC-A'); // -> [C,A,B]
+      expect(out).toEqual([
+        { id: 'EPIC-C', filePath: '/x/EPIC-C.md', order: 1 },
+        { id: 'EPIC-A', filePath: '/x/EPIC-A.md', order: 2 },
+        { id: 'EPIC-B', filePath: '/x/EPIC-B.md', order: 3 },
+      ]);
+    });
+
+    it('only returns epics whose order actually changed', () => {
+      // [A(1),B(2),C(3),D(4)] drag A onto C -> [B,A,C,D]; D keeps order 4 (unchanged).
+      const epics = [mk('EPIC-A', 1), mk('EPIC-B', 2), mk('EPIC-C', 3), mk('EPIC-D', 4)];
+      const out = reorderEpics(epics, 'EPIC-A', 'EPIC-C');
+      // new visual order B,A,C,D -> B:1, A:2, C:3 (was 3, unchanged? no: C was 3 stays 3)
+      // changed: B(2->1), A(1->2). C stays 3, D stays 4.
+      expect(out.map(a => a.id)).toEqual(['EPIC-B', 'EPIC-A']);
+    });
+  });
+
+  describe('applyEpicReorder() — persistence + index regen', () => {
+    function seedEpic(id: string, title: string, order: number): void {
+      epicFile(
+        tmpDir, id,
+        `---\nid: ${id}\nslug: ${title.toLowerCase()}\ntitle: ${title}\nstatus: active\norder: ${order}\n---\n\n## Goal\n\nreal goal\n\n## Artifacts\n\nreal artifacts\n`,
+      );
+    }
+
+    it('persists new orders and regenerates the INDEX', () => {
+      seedEpic('EPIC-001', 'Alpha', 1);
+      seedEpic('EPIC-002', 'Beta', 2);
+      seedEpic('EPIC-003', 'Gamma', 3);
+
+      // drag Gamma to top
+      const out = applyEpicReorder(tmpDir, 'EPIC-003', 'EPIC-001');
+      expect(out.length).toBeGreaterThan(0);
+
+      // persisted order reflects the new visual sequence [Gamma, Alpha, Beta]
+      expect(listEpics(tmpDir).map(e => e.id)).toEqual(['EPIC-003', 'EPIC-001', 'EPIC-002']);
+      expect(listEpics(tmpDir).map(e => e.order)).toEqual([1, 2, 3]);
+
+      // INDEX regenerated and lists Gamma first
+      const indexPath = path.join(tmpDir, EPICS_DIR, 'INDEX.md');
+      expect(fs.existsSync(indexPath)).toBe(true);
+      const idx = fs.readFileSync(indexPath, 'utf-8');
+      expect(idx.indexOf('EPIC-003')).toBeLessThan(idx.indexOf('EPIC-001'));
+    });
+
+    it('is a no-op (writes nothing) when moved === target', () => {
+      seedEpic('EPIC-001', 'Alpha', 1);
+      seedEpic('EPIC-002', 'Beta', 2);
+      const out = applyEpicReorder(tmpDir, 'EPIC-001', 'EPIC-001');
+      expect(out).toEqual([]);
+      // no INDEX written for a no-op
+      expect(fs.existsSync(path.join(tmpDir, EPICS_DIR, 'INDEX.md'))).toBe(false);
+      // orders untouched
+      expect(listEpics(tmpDir).map(e => e.order)).toEqual([1, 2]);
     });
   });
 

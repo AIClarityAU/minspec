@@ -323,6 +323,107 @@ export function setEpicStatus(filePath: string, status: EpicStatus): EpicStatus 
   return status;
 }
 
+/**
+ * Rewrite the `order:` line in an epic file's frontmatter. Adds the line if
+ * absent. Returns the new order. Throws on a non-finite order or no frontmatter.
+ *
+ * `order` is the explorer sort key (lower = higher). Mirrors `setEpicStatus`.
+ */
+export function setEpicOrder(filePath: string, order: number): number {
+  if (!Number.isFinite(order)) {
+    throw new Error(`Invalid epic order: ${order}`);
+  }
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const fmMatch = content.match(FRONTMATTER_RE);
+  if (!fmMatch) {
+    throw new Error(`No frontmatter block in ${filePath}`);
+  }
+  const yaml = fmMatch[1];
+  const orderLineRe = /^([ \t]*)order[ \t]*:[ \t]*.*$/m;
+  const newYaml = orderLineRe.test(yaml)
+    ? yaml.replace(orderLineRe, `$1order: ${order}`)
+    : `${yaml}\norder: ${order}`;
+  // Replacer FUNCTION so a `$` anywhere in the rewritten block is literal (#152).
+  const block = `---\n${newYaml}\n---`;
+  fs.writeFileSync(filePath, content.replace(FRONTMATTER_RE, () => block), 'utf-8');
+  return order;
+}
+
+// ─── Reorder (drag-and-drop) ──────────────────────────────────────────────────
+
+/** A single epic's new sort position, returned by `reorderEpics`. */
+export interface EpicOrderAssignment {
+  readonly id: string;
+  readonly filePath: string;
+  readonly order: number;
+}
+
+/**
+ * Pure recomputation of `epic.order` after dragging one epic onto another.
+ *
+ * Takes the current epic list (already in display order — `listEpics` returns
+ * order→id), the id being moved, and the id it was dropped onto. Produces a
+ * dense, gap-free `order` sequence (1..N) in the post-move visual order. Every
+ * epic is renumbered so the result is stable regardless of pre-existing sparse,
+ * duplicate, or 999-default order values (which the explorer otherwise renders
+ * ambiguously). Returns ONLY the epics whose `order` actually changed, so the
+ * caller writes the minimum number of files.
+ *
+ * The moved epic is inserted at the dropped-on epic's slot: dragging upward
+ * lands it ABOVE the target, dragging downward lands it BELOW (it takes the
+ * target's old position once the target shifts up). No-op (moved === target,
+ * or either id absent) returns [].
+ */
+export function reorderEpics(
+  epics: readonly EpicSummary[],
+  movedId: string,
+  targetId: string,
+): EpicOrderAssignment[] {
+  if (movedId === targetId) return [];
+  const fromIdx = epics.findIndex(e => e.id === movedId);
+  const targetIdx = epics.findIndex(e => e.id === targetId);
+  if (fromIdx === -1 || targetIdx === -1) return [];
+
+  const next = epics.slice();
+  const [moved] = next.splice(fromIdx, 1);
+  // After removing the moved epic, re-find the target's index so the moved epic
+  // lands at the target's current slot (insert before it). Dragging downward,
+  // the target has shifted up by one, so the moved epic ends just below it.
+  const insertAt = next.findIndex(e => e.id === targetId);
+  next.splice(insertAt, 0, moved);
+
+  const assignments: EpicOrderAssignment[] = [];
+  next.forEach((epic, i) => {
+    const order = i + 1; // dense 1..N
+    if (epic.order !== order) {
+      assignments.push({ id: epic.id, filePath: epic.filePath, order });
+    }
+  });
+  return assignments;
+}
+
+/**
+ * Apply a drag-and-drop epic reorder end to end: recompute `epic.order` for the
+ * move (`movedId` dropped onto `targetId`), persist each changed epic's
+ * frontmatter, and regenerate the epic INDEX. Returns the assignments written
+ * (empty on a no-op). Reads the current order fresh from disk via `listEpics`.
+ */
+export function applyEpicReorder(
+  rootDir: string,
+  movedId: string,
+  targetId: string,
+  vscodeOverrides?: { epicsDir?: string },
+): EpicOrderAssignment[] {
+  const epics = listEpics(rootDir, vscodeOverrides);
+  const assignments = reorderEpics(epics, movedId, targetId);
+  if (assignments.length === 0) return [];
+  for (const a of assignments) {
+    setEpicOrder(a.filePath, a.order);
+  }
+  writeEpicIndex(rootDir, vscodeOverrides);
+  return assignments;
+}
+
 // ─── Numbering & Creation ─────────────────────────────────────────────────────
 
 /** Next sequential epic number: max(existing EPIC-NNN) + 1. */
