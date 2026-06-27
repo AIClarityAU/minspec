@@ -5,21 +5,21 @@ import { buildContext, renderTemplate, renderAll } from './template-engine';
 import {
   TEMPLATE_NAMES,
   TEMPLATE_OUTPUT_PATHS,
-  WHOLE_FILE_TEMPLATES,
-  WHOLE_FILE_BASELINE_HEADING,
+  MANAGED_REGION_TEMPLATES,
+  managedRegionStartMarker,
+  managedRegionEndMarker,
+  renderManagedBlock,
   computeTemplateBaseline,
-  computeWholeFileBaseline,
 } from './template-registry';
 import {
   parseSections,
   buildSectionHashes,
-  hashSection,
   mergeFile,
   loadHashes,
   saveHashes,
   saveTemplateBaseline,
-  loadWholeFileBaseline,
-  saveWholeFileBaseline,
+  splitManagedRegion,
+  spliceManagedRegion,
   type GeneratedHashes,
 } from './merge-refresh';
 import { generateSlashCommandShims } from './slash-commands';
@@ -123,66 +123,104 @@ export function ensureGitignoreEntries(rootDir: string): void {
 }
 
 /**
- * Scaffold whole-file templates (#249, DR-037) at first init.
- *
- * Whole-file templates (YAML workflows, scripts) cannot go through the Markdown
- * section-merge engine, so they are written verbatim and only if absent — exactly
- * like the Markdown first-time path. The content baseline recorded by the caller
- * (`computeWholeFileBaseline`) is what later lets Refresh tell a user-edited file
- * from an untouched one. Idempotent: an existing file is never overwritten here.
+ * Warning emitted when a managed-region refresh cannot safely update a file
+ * because its MinSpec markers are missing or corrupted. Surfaced (not thrown) so a
+ * single un-restorable file never aborts the whole refresh, and never triggers a
+ * silent whole-file overwrite (never-wrong).
  */
-function generateWholeFileTemplates(rootDir: string): void {
-  for (const tpl of WHOLE_FILE_TEMPLATES) {
+export interface ManagedRegionWarning {
+  /** The output path (relative to project root) that was left untouched. */
+  readonly outputPath: string;
+  /** Human-readable, actionable message. */
+  readonly message: string;
+}
+
+/**
+ * The skip+warn message for a file whose managed markers are gone. Single source
+ * so the message is identical wherever it is produced (tests match on it).
+ */
+function missingMarkersMessage(outputPath: string): string {
+  return (
+    `MinSpec-managed markers missing in ${outputPath}; left untouched — ` +
+    'restore the markers or delete the file to re-scaffold.'
+  );
+}
+
+/**
+ * Scaffold managed-region templates (#249, DR-037) at first init.
+ *
+ * Managed-region templates (YAML workflows, scripts) cannot go through the
+ * Markdown section-merge engine, so MinSpec wraps its owned content in
+ * comment-delimited markers (`renderManagedBlock`) and writes the block verbatim —
+ * but only if the output path is absent (idempotent: an existing file, MinSpec- or
+ * user-authored, is never overwritten here). The markers written now ARE the
+ * boundary Refresh later uses to update only MinSpec's region. The user is expected
+ * to add any custom content OUTSIDE the markers.
+ */
+function generateManagedRegionTemplates(rootDir: string): void {
+  for (const tpl of MANAGED_REGION_TEMPLATES) {
     const fullPath = path.join(rootDir, tpl.outputPath);
     if (!fs.existsSync(fullPath)) {
       fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-      fs.writeFileSync(fullPath, tpl.content);
+      fs.writeFileSync(fullPath, renderManagedBlock(tpl));
     }
   }
 }
 
 /**
- * Reconcile whole-file templates on Refresh (#249, DR-037).
+ * Reconcile managed-region templates on Refresh (#249, DR-037).
  *
- * For each whole-file template, with no Markdown section merge:
- *   - file missing      → write it (re-scaffold a deleted managed file)
- *   - file == baseline  → CLEAN (user never touched it) → overwrite with the
- *                         current bundled content, carrying upstream updates forward
- *   - file != baseline  → DRIFT (user edited it) → SKIP, preserving their copy
+ * For each managed-region template, by parsing its markers — never a whole-file
+ * compare:
+ *   - file missing             → re-scaffold it with markers (a deleted managed file)
+ *   - markers present          → OVERWRITE only the content between the markers with
+ *                                the current template; PRESERVE everything outside
+ *                                verbatim (user edits outside the region survive,
+ *                                and MinSpec's region is always brought current)
+ *   - file exists, NO markers  → SKIP + warn; never a silent whole-file overwrite
  *
- * The baseline is the content hash recorded at the last generate/refresh
- * (`.minspec/whole-file-baseline.json`). When no baseline exists yet for a path
- * (project predating this mechanism) we treat any existing file as user content
- * and preserve it — never clobbering an unverified file (mirrors the
- * conservative #117 no-baseline stance).
+ * No content baseline is consulted — the markers ARE the boundary between
+ * MinSpec-owned and user-owned content, which is the key improvement over the old
+ * preserve-on-any-edit whole-file rule: a stray edit outside the region no longer
+ * freezes MinSpec out of its own region.
+ *
+ * Returns the warnings for any files left untouched (missing markers) so the
+ * vscode-aware caller can surface them. The file is NEVER modified on a warning.
  */
-function refreshWholeFileTemplates(rootDir: string): void {
-  const baseline = loadWholeFileBaseline(rootDir);
-  for (const tpl of WHOLE_FILE_TEMPLATES) {
+function refreshManagedRegionTemplates(rootDir: string): ManagedRegionWarning[] {
+  const warnings: ManagedRegionWarning[] = [];
+
+  for (const tpl of MANAGED_REGION_TEMPLATES) {
     const fullPath = path.join(rootDir, tpl.outputPath);
 
     if (!fs.existsSync(fullPath)) {
+      // Re-scaffold a deleted managed file, markers and all.
       fs.mkdirSync(path.dirname(fullPath), { recursive: true });
-      fs.writeFileSync(fullPath, tpl.content);
-      continue;
-    }
-
-    const recorded = baseline[tpl.outputPath]?.[WHOLE_FILE_BASELINE_HEADING];
-    if (!recorded) {
-      // No like-for-like reference — cannot prove the file is untouched, so
-      // preserve it rather than risk clobbering user edits.
+      fs.writeFileSync(fullPath, renderManagedBlock(tpl));
       continue;
     }
 
     const onDisk = fs.readFileSync(fullPath, 'utf-8');
-    if (hashSection(onDisk) === recorded) {
-      // CLEAN: unmodified since scaffold → carry the current template forward.
-      if (onDisk !== tpl.content) {
-        fs.writeFileSync(fullPath, tpl.content);
-      }
+    const startMarker = managedRegionStartMarker(tpl.name, tpl.commentStyle);
+    const endMarker = managedRegionEndMarker(tpl.name, tpl.commentStyle);
+    const split = splitManagedRegion(onDisk, startMarker, endMarker);
+
+    if (!split) {
+      // Markers missing/corrupted — cannot identify MinSpec's region. NEVER
+      // clobber the whole file; skip and warn so the user can restore the markers.
+      warnings.push({ outputPath: tpl.outputPath, message: missingMarkersMessage(tpl.outputPath) });
+      continue;
     }
-    // DRIFT: hashes differ → user edited it → leave untouched.
+
+    // Overwrite ONLY the managed region with the current template; preserve the
+    // user's surrounding content verbatim.
+    const updated = spliceManagedRegion(split, renderManagedBlock(tpl));
+    if (updated !== onDisk) {
+      fs.writeFileSync(fullPath, updated);
+    }
   }
+
+  return warnings;
 }
 
 /**
@@ -232,11 +270,11 @@ export function generateHarnessFiles(rootDir: string): void {
   // false-positive drift toast.
   saveTemplateBaseline(rootDir, computeTemplateBaseline());
 
-  // Scaffold whole-file templates (#249) — non-Markdown harness artifacts (the
-  // CI workflow) the section-merge engine cannot carry — and record their content
-  // baseline so refresh can preserve-on-edit / update-on-clean.
-  generateWholeFileTemplates(rootDir);
-  saveWholeFileBaseline(rootDir, computeWholeFileBaseline());
+  // Scaffold managed-region templates (#249) — non-Markdown harness artifacts (the
+  // CI workflow) the section-merge engine cannot carry — wrapping MinSpec's content
+  // in comment-delimited markers. No content baseline is recorded: the markers
+  // themselves are the boundary Refresh uses to update only MinSpec's region.
+  generateManagedRegionTemplates(rootDir);
 
   // Generate Spec Kit slash-command shims for any detected AI tool.
   // Tools are re-detected after template generation so freshly written
@@ -253,8 +291,12 @@ export function generateHarnessFiles(rootDir: string): void {
  *   - Unmodified sections → updated from latest template
  *   - New template sections → appended
  *   - User-added sections (not in template) → preserved
+ *
+ * Returns any managed-region warnings (files left untouched because their MinSpec
+ * markers were deleted) so the vscode-aware caller can surface them; an empty array
+ * means a fully clean refresh.
  */
-export function refreshHarnessFiles(rootDir: string): void {
+export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
   // Ensure .minspec/ exists
   scaffold(rootDir);
 
@@ -298,14 +340,15 @@ export function refreshHarnessFiles(rootDir: string): void {
   // template next moves upstream (#117).
   saveTemplateBaseline(rootDir, computeTemplateBaseline());
 
-  // Reconcile whole-file templates (#249): re-scaffold if deleted, update if the
-  // user never touched it, preserve if they edited it. Then re-record the content
-  // baseline so a later refresh measures drift from the now-current template.
-  refreshWholeFileTemplates(rootDir);
-  saveWholeFileBaseline(rootDir, computeWholeFileBaseline());
+  // Reconcile managed-region templates (#249): re-scaffold if deleted, overwrite
+  // only the marker-bounded MinSpec region (preserving the user's surrounding
+  // content), or skip+warn if the markers were deleted. Collect warnings to return.
+  const managedRegionWarnings = refreshManagedRegionTemplates(rootDir);
 
   // Refresh Spec Kit slash-command shims. Per-command Claude/Cursor files
   // are only created if missing (user edits preserved); the AGENTS.md
   // marker section is regenerated in place.
   generateSlashCommandShims(rootDir);
+
+  return managedRegionWarnings;
 }

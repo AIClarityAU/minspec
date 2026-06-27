@@ -6,7 +6,6 @@
 import {
   parseSections,
   buildSectionHashes,
-  hashSection,
   type GeneratedHashes,
   type SectionHashes,
 } from './merge-refresh';
@@ -269,34 +268,118 @@ export function computeTemplateBaseline(): GeneratedHashes {
 }
 
 // ---------------------------------------------------------------------------
-// Whole-file templates (#249, DR-037)
+// Managed-region templates (#249, DR-037)
 //
 // A second class of scaffolded file that the Markdown section-merge engine
 // (`mergeFile` / `parseSections` in merge-refresh.ts) cannot manage: its merge
 // unit is the `## ` heading, so it can only carry Markdown. Non-Markdown harness
-// artifacts — YAML workflows, shell scripts — have no `## ` sections to merge and
-// would be corrupted by section reassembly.
+// artifacts — YAML workflows, shell scripts, JS/TS configs — have no `## `
+// sections to merge and would be corrupted by section reassembly.
 //
-// Contract: a whole-file template is scaffolded ONCE (only if the output path is
-// absent). On Refresh it is reconciled as a single opaque unit against a recorded
-// content baseline (`.minspec/whole-file-baseline.json`, the drift concept reused
-// from template-baseline.json):
-//   - file missing      → write it (re-scaffold a deleted file, like the Markdown path)
-//   - file == baseline  → CLEAN: the user has not touched it → overwrite with the
-//                         current bundled template (carry upstream updates forward)
-//   - file != baseline  → DRIFT: the user edited it → SKIP, preserving their copy
-// No section merge is ever attempted. This mechanism is the reusable foundation
+// Instead of treating these as opaque whole files, MinSpec wraps its owned
+// content in comment-delimited MARKERS whose comment syntax matches the target
+// file type — the same `minspec:` marker convention already used for the DR-index
+// (`<!-- minspec:dr-index:start -->`), generalized to any file type:
+//
+//   # >>> minspec:managed:<name> >>>     (YAML / shell — `#` comments)
+//   # <<< minspec:managed:<name> <<<
+//   <!-- >>> minspec:managed:<name> >>> -->   (Markdown / HTML / XML)
+//   <!-- <<< minspec:managed:<name> <<< -->
+//   // >>> minspec:managed:<name> >>>    (JS / TS / C-family)
+//   // <<< minspec:managed:<name> <<<
+//
+// Contract:
+//   - Scaffold (init): write the file with the MinSpec-owned content wrapped in
+//     the managed block. A fully-MinSpec-owned file (the CI workflow) = one
+//     managed block spanning the file; the user adds custom content OUTSIDE the
+//     markers.
+//   - Refresh: parse the markers; OVERWRITE only the content BETWEEN them with the
+//     current template; PRESERVE everything outside verbatim. User edits outside
+//     the region survive; MinSpec's region stays current — the key improvement over
+//     the old preserve-on-any-edit whole-file rule, which let one stray edit freeze
+//     MinSpec out of its own region forever.
+//   - Missing/corrupted markers (user deleted them): NEVER a silent clobber. If
+//     the file exists but has no recognizable markers → SKIP + warn; if the file
+//     is absent → re-scaffold it with markers.
+//
+// No content baseline file is needed — the markers ARE the boundary between
+// MinSpec-owned and user-owned content. This mechanism is the reusable foundation
 // for the hook-script scaffolds (#246/#247) and the python validator (#244).
 // ---------------------------------------------------------------------------
 
-/** A scaffolded file managed as one opaque unit (no Markdown section merge). */
-export interface WholeFileTemplate {
-  /** Stable identifier (used in messages/tests). */
+/**
+ * Comment syntax used to delimit a managed region, chosen to match the target
+ * file type so the markers are valid comments in that language.
+ *  - `hash`  → `#` line comments (YAML, shell, Python, TOML, .gitignore)
+ *  - `html`  → `<!-- -->` block comments (Markdown, HTML, XML)
+ *  - `slash` → `//` line comments (JS, TS, JSON-with-comments, C-family)
+ */
+export type CommentStyle = 'hash' | 'html' | 'slash';
+
+/** Shared marker token — reuses the `minspec:` convention (cf. dr-index markers). */
+const MANAGED_MARKER_PREFIX = 'minspec:managed:';
+
+/**
+ * Build the start marker line for a managed region of the given name + comment
+ * style. Exported so the parser and tests derive markers from one source of truth
+ * (never hand-typed, so the scaffold and refresh halves can never drift).
+ */
+export function managedRegionStartMarker(name: string, style: CommentStyle): string {
+  const token = `>>> ${MANAGED_MARKER_PREFIX}${name} >>>`;
+  switch (style) {
+    case 'hash':
+      return `# ${token}`;
+    case 'slash':
+      return `// ${token}`;
+    case 'html':
+      return `<!-- ${token} -->`;
+  }
+}
+
+/** Build the end marker line for a managed region. See {@link managedRegionStartMarker}. */
+export function managedRegionEndMarker(name: string, style: CommentStyle): string {
+  const token = `<<< ${MANAGED_MARKER_PREFIX}${name} <<<`;
+  switch (style) {
+    case 'hash':
+      return `# ${token}`;
+    case 'slash':
+      return `// ${token}`;
+    case 'html':
+      return `<!-- ${token} -->`;
+  }
+}
+
+/** A scaffolded file with a comment-delimited MinSpec-managed region. */
+export interface ManagedRegionTemplate {
+  /** Stable identifier (used in markers, messages, tests). */
   readonly name: string;
   /** Output path relative to project root. */
   readonly outputPath: string;
-  /** Verbatim file content. Whole-file templates are NOT Handlebars-rendered. */
+  /** Comment syntax for the markers (must be valid in the target file type). */
+  readonly commentStyle: CommentStyle;
+  /**
+   * The MinSpec-owned region body (between the markers). Managed-region templates
+   * are NOT Handlebars-rendered — the content is project-independent and pinned so
+   * the region stays byte-stable across projects.
+   */
   readonly content: string;
+}
+
+/**
+ * Wrap a managed-region template's content in its start/end markers, producing the
+ * full block written to disk at scaffold time and used to overwrite the region on
+ * refresh. The block is a self-contained unit: start marker, content, end marker,
+ * each on its own line, newline-terminated. This is the SINGLE place the on-disk
+ * managed-block shape is defined — scaffold and refresh both call it, so they can
+ * never disagree about the bytes.
+ */
+export function renderManagedBlock(tpl: ManagedRegionTemplate): string {
+  const start = managedRegionStartMarker(tpl.name, tpl.commentStyle);
+  const end = managedRegionEndMarker(tpl.name, tpl.commentStyle);
+  // Normalize: exactly one trailing newline on the content body so the end marker
+  // always sits on its own line regardless of how the template literal was written.
+  const body = tpl.content.replace(/\n+$/, '') + '\n';
+  return `${start}\n${body}${end}\n`;
 }
 
 /**
@@ -306,7 +389,7 @@ export interface WholeFileTemplate {
  * caught before merge. Local hook = fast fail; CI = never-merge guarantee.
  *
  * Pinned to a literal YAML string (no Handlebars): it is project-independent and
- * must remain byte-stable so drift detection is exact.
+ * must remain byte-stable so the refreshed region matches exactly.
  */
 const MINSPEC_VALIDATE_WORKFLOW = `name: MinSpec Validate
 
@@ -328,33 +411,14 @@ jobs:
           node-version: '20'
 
       - name: Run MinSpec validation
-        run: npx --yes @aiclarity/minspec-validator
-`;
+        run: npx --yes @aiclarity/minspec-validator`;
 
-/** All whole-file templates in scaffold order. */
-export const WHOLE_FILE_TEMPLATES: readonly WholeFileTemplate[] = [
+/** All managed-region templates in scaffold order. */
+export const MANAGED_REGION_TEMPLATES: readonly ManagedRegionTemplate[] = [
   {
-    name: 'minspec-validate.yml',
+    name: 'validate-workflow',
     outputPath: '.github/workflows/minspec-validate.yml',
+    commentStyle: 'hash',
     content: MINSPEC_VALIDATE_WORKFLOW,
   },
 ] as const;
-
-/**
- * Content-hash baseline for whole-file templates, keyed by output path. Uses the
- * same {@link GeneratedHashes} shape as the Markdown baseline (path → heading →
- * hash) for storage symmetry, with a single synthetic `__wholefile__` heading per
- * file. Hashing the bundled (unrendered) content lets Refresh tell a CLEAN file
- * (== baseline → safe to update) from a user-edited one (!= baseline → preserve).
- */
-export const WHOLE_FILE_BASELINE_HEADING = '__wholefile__';
-
-export function computeWholeFileBaseline(): GeneratedHashes {
-  const baseline: Record<string, SectionHashes> = {};
-  for (const tpl of WHOLE_FILE_TEMPLATES) {
-    baseline[tpl.outputPath] = {
-      [WHOLE_FILE_BASELINE_HEADING]: hashSection(tpl.content),
-    };
-  }
-  return baseline;
-}
