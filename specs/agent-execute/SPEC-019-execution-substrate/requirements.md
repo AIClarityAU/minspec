@@ -7,7 +7,7 @@ tier: T4
 product: agent-execute
 epic: EPIC-007  # Agent Execute Extension
 depends_on: [DR-008, DR-015, DR-017, DR-030, DR-004, DR-016]  # DR-008 no-cred isolation (Layer-2 precondition); DR-015 third-extension packaging; DR-017 the substrate spec (two-plane / SandboxRunner / broker / attestation); DR-030 untrusted-input-as-data; DR-004 tiering + Tier-0 air-gap; DR-016 detect-or-degrade claude -p pattern
-relates_to: [SPEC-016]  # the reality-check reviewer ships in this same extension and consumes the broker seam this spec defines
+relates_to: [SPEC-016, DR-031]  # SPEC-016 reality-check reviewer ships in this same extension + consumes the broker seam; DR-031 = the dev-time spec-gate, build-time analogue of FR-12 HITL — does NOT transfer to the product (R9)
 ---
 
 # Agent Execute — Layer-2 Execution Substrate (control plane + credential-free exec plane)
@@ -65,11 +65,17 @@ This spec is the requirements record for that substrate: the two-plane split, th
 model broker as the sole model-access seam, the attestation gate that *verifies* the
 boundary rather than assuming it, the manual-vs-autonomous mode split with graceful degrade,
 and the tier-gated HITL that is the product's differentiator ("agents you can trust because
-they stop"). It synthesises decided architecture; it invents nothing. There is a live seed
-implementation (`~/code/AgentSystem`, a mmo/333Method DB-queue ops-dispatcher) whose
-`claude -p` dispatch + retry/confidence/result-handling logic is a **reusable seed for the
-Layer-1 manual-dispatch path only** — its DB-queue/systemd architecture is explicitly **not**
-the product architecture; [DR-017](../../../docs/decisions/DR-017.md) is.
+they stop"). It synthesises decided architecture; it invents nothing. Two seeds inform the Layer-1
+manual-dispatch path, both **learn-functionality-only** references, never adopted product
+code. The **closer, battle-tested** one is this repo's own dev-time dispatch harness
+(`scripts/dispatch-issue.sh` + `scripts/triage-decide.sh`) — a *running* in-repo proof of the
+Layer-1 shape (origin/main base-ref, no-cred agent + parent-side push, deterministic
+fail-closed tier-gate, untrusted-body-as-data framing). It is **dev-tooling that ships in no
+.vsix** (see Out of scope) — a reference to harvest logic from, **not** the product. The older
+seed (`~/code/AgentSystem`, a mmo/333Method DB-queue ops-dispatcher) supplies the
+`claude -p` dispatch + retry/confidence/result-handling logic for the **Layer-1
+manual-dispatch path only** — its DB-queue/systemd architecture is explicitly **not** the
+product architecture; [DR-017](../../../docs/decisions/DR-017.md) is.
 
 **Evidence discipline (CLAUDE.md / DR-003).** Nothing here is implemented, done, or shipped.
 Where a requirement traces to a decision it cites the DR by path. Artifact-existence ≠
@@ -262,6 +268,17 @@ evidence any capability exists.
   instructions. Traces to [DR-017](../../../docs/decisions/DR-017.md) (§Diff-handoff) and
   [DR-008](../../../docs/decisions/DR-008.md) (Layer 1 parent-side push/comment).
 
+  - **Base-ref freshness (control-plane creation-time precondition).** *Complementing FR-13's
+    exit-time handoff:* when the control plane **creates** the agent's exec context it branches
+    off **`origin/main` (fetched parent-side), never the stale local `main`.** On a shared
+    checkout the local `main` is frequently stale (global rule #8 — it is never switched/pulled
+    from a session), so basing agent work on it makes the agent build on an outdated tree and
+    emit factually-wrong output (observed: an agent documented an already-merged script as
+    "does not exist" because its base predated the merge). The fetch is a parent-side
+    credentialed op; the agent still gets no network tools. (The in-repo
+    `scripts/dispatch-issue.sh` dev-seed demonstrates this discipline — dev-tooling, not the
+    product substrate; see Out of scope.)
+
 ### Caps (concurrency always; spend in API mode)
 
 - **FR-14 (concurrency cap always; spend cap in API mode; shared-account quota respected).**
@@ -381,6 +398,7 @@ in <1 day.)*
 | R6 | **Degradation gap** — substrate path throws/blocks (or fails *silently* — bare null, no reason) instead of falling back to Layer-1. | Low · High | FR-11 `catch → log reason → typed {ok:false,reason}` over thin never-throw shells; FR-10 Layer-1 manual is the unconditional fallback (not "off"); never-throw-contract T0 test covers every failure path (no-runtime/spawn/attest/timeout). |
 | R7 | **Isolation regression via a "convenience" grant** — a future edit gives the sandbox creds/network/write to "just push" or "auto-fix". | Low · High | The no-cred/no-egress invariants are standing (T0); any grant needs a superseding DR; the attestation gate (FR-6) would *detect* the regression and fail closed; code-review grep for creds/network in the exec path. |
 | R8 | **Prompt injection via untrusted body** steers the agent to a false result. | Med · Med | DATA-framing + injection-aware prompt + credential-free + no-write (FR-15); blast-radius bounded to a degraded advisory (quality/DoS, not integrity); untrusted bodies gated on #73 (R2). Residual: degraded output, not a breach. |
+| R9 | **HITL-gate confusion — dev-time spec-gate ≠ product gate.** The dev-time dispatch harness enforces spec-approval inside a linked worktree by resolving the canonical `.minspec/approvals.json` via `git rev-parse --git-common-dir` ([DR-031](../../../docs/decisions/DR-031.md), dev-tooling). A future build might try to reuse that mechanism for FR-12's product HITL. | Low · Med | **It does not transfer — record, do not adopt.** FR-12's HITL is the tier-gate + shared classifier + human spec/plan approval, **not** the dev PreToolUse hook. At Layer-2 the `git-common-dir` trick is moot anyway: FR-6 requires the host `$HOME`/checkout **unmounted**, so no canonical main tree exists inside the box to resolve against. DR-031 is the build-time analogue only (`relates_to`, not `depends_on`). |
 
 ## Out of scope
 
@@ -441,7 +459,7 @@ manual path.
 
 | ID | Decision | By | Lands in |
 |---|---|---|---|
-| **CL-1 — v1 scope** | **Manual Layer-1 ships first.** Human-initiated dispatch; `claude -p` runs as a spawned **subprocess** (never embedded in the ext host — FR-1 still holds) with the host's own creds, no container (DR-008 Layer-1 permits this). Autonomous **Layer-2** (container + attestation + broker) is a **follow-on milestone**. See the v1/Layer-2 FR split below. | user | FR-9/10 + scope split |
+| **CL-1 — v1 scope** | **Manual Layer-1 ships first.** Human-initiated dispatch; `claude -p` runs as a spawned **subprocess** (never embedded in the ext host — FR-1 still holds), no container (DR-008 Layer-1 permits this). **Credential-free for the push surface even without a container:** FR-13 already removes push/`gh` from the agent (parent pushes after the agent exits — listed as a v1 item below), so the L1 subprocess holds **no `gh`/push token**. It is **not egress-isolated** — it still shares the host's ambient `$HOME`/env; stripping that is the **Layer-2** container's job. Autonomous **Layer-2** (container + attestation + broker) is a **follow-on milestone**. See the v1/Layer-2 FR split below. | user | FR-9/10 + scope split |
 | **CL-2 — confidence = 2nd HITL axis** | Low agent **self-reported** confidence **escalates** an auto-dispatched (T1–T2) run to human review — an axis orthogonal to tier. **Never** used to auto-*approve* (self-reported → hallucination-prone, per mining; it only ever pushes toward a human, the safe direction). | user | FR-12 |
 | **CL-3 — concurrency granularity** | **Global cap** for v1. Roadmap: **per-class caps v2**; **full-auto, load-scaled worker pool** (scale up/down by system load per task — the old-333 model) **v3**, behind the FR-14 cap abstraction. | user | FR-14 |
 | **CL-4 — outcome/trust store** | An **`OutcomeStore` port** (mirrors the `SandboxRunner` port). v1 backend = **one file per attempt** (`.minspec/agent-execute/outcomes/<ulid>.json`, **gitignored**), each a **Zod-validated** record. Per-attempt files → **zero write contention by construction** (multi-window/multi-process safe); aggregates = read-dir (cheap at v1–v2 volume). **SQLite** backend swapped behind the port at **v3** when throughput/query demand it. MinSpec core **never reads** this dir (FR-16). | user | FR-13/FR-16 (new) |
@@ -482,6 +500,15 @@ manual path.
   injection / API-key mode. **Layer-2** concern → resolve before default-mode plumbing; does **not**
   block v1 manual.
 - **Exact verdict Zod fields + severity/evidence (CL-5)** → Plan phase (contracts-first, CDD).
+  **Non-binding reference for Plan:** the dev-time `/loop` review-signals renderer
+  (`scripts/render-review-signals.mjs`, [#180](https://github.com/harvest316/minspec/issues/180)
+  / [DR-033](../../../docs/decisions/DR-033.md) — monorepo dev-tooling, ships in no `.vsix`,
+  **not** the agent-execute product surface) shows one shape for *proven, not self-reported*
+  evidence fields: a named `regressionTest` gated behind separate `regressionProvenBaseRed` /
+  `regressionProvenHeadGreen` proof flags, with **NO FALSE GREEN** (an unproven regression
+  renders ⚠️ UNVERIFIED, **never** ✅). Whether Plan adopts any of it is undecided — and note
+  its inputs are caller-**measured** facts, distinct from CL-5's **self-reported** `confidence`
+  (CL-2).
 - **#73 — microVM/gVisor hardening** → required only before *untrusted* (non-self-authored) issue
   dispatch; out of v1 and the v1 Layer-2 milestone.
 - **`OutcomeStore` SQLite backend (CL-4)** → v3, behind the port; no caller changes.
