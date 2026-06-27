@@ -351,15 +351,18 @@ describe('auto-classify git watcher', () => {
     trigger({ fsPath: '/tmp/test-workspace/.git/config' });
     expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith(
       'minspec.classify',
-      undefined,
+      '/tmp/test-workspace',
       AUTO,
     );
 
     // A watched path (.git/HEAD) triggers the classify command in auto mode.
     trigger({ fsPath: '/tmp/test-workspace/.git/HEAD' });
+    // #302: classify is invoked WITH the resolved folder (never folder-less /
+    // `undefined`, which would let classifyCommand fall through to the
+    // interactive project picker) AND in auto mode (passive, no toast).
     expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
       'minspec.classify',
-      undefined,
+      '/tmp/test-workspace',
       AUTO,
     );
 
@@ -367,9 +370,10 @@ describe('auto-classify git watcher', () => {
     const triggerCreate = gitWatcher.onDidCreate.mock.calls[0][0] as (u: any) => void;
     vi.mocked(vscode.commands.executeCommand).mockClear();
     triggerCreate({ fsPath: '/tmp/test-workspace/.git/refs/heads/main' });
+    // #302: same on the refs/heads/* (onDidCreate) path — folder + auto.
     expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
       'minspec.classify',
-      undefined,
+      '/tmp/test-workspace',
       AUTO,
     );
   });
