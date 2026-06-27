@@ -96,4 +96,4 @@ Canonical terms. Use these in UI labels, prose, and code.
 
 | Term | Definition |
 |---|---|
-| **Approvable** | Any artifact that carries a human approval gate before work may proceed: Spec, DR, PR, Epic, or Issue. The set surfaces in the signpost as "Pending Approvables." Type alias: `type Approvable` in `packages/shared/src/contracts/`. Distinct from `approvals.json`, which is the *store* of approval hashes. (DR-044) |
+| **Approvable** | Any artifact that carries a human approval gate before work may proceed: Spec, DR, PR, Epic, or Issue. The set surfaces in the signpost as "Pending Approvables." Type alias: `type Approvable` in `packages/shared/src/contracts/`. Distinct from `approvals.json`, which is the *store* of approval hashes. (DR-041) |

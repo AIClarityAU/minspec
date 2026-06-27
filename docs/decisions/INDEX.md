@@ -243,6 +243,12 @@ DR-019 makes next-task priority a deterministic DAG; the one thing the DAG canno
 
 DR-023 requires every DR to materialize its surfaced work as tracked issues/specs in a ## Follow-ups (tracked) section, with only a **soft validator warning** when items lack a ref. The session asked whether to *harden* this into a blocking gate — because un-materialized follow-ups are the mechanism by which "newer specs/DRs not yet turned into issues/PRs" stay invisible to the next-task DAG (DR-019): the resolver ranks structural edges, so prose-only follow-ups are simply not there.
 
+## [DR-041 — Canonical term for review-gate artifacts is "Approvable"](DR-041.md)
+
+*Status: proposed · Date: 2026-06-27*
+
+Specs, DRs, PRs, Epics, and Issues all share one property: a human must approve them before work proceeds. The canonical collective term is **Approvable** — used in UI labels, the `type Approvable` union in `packages/shared/src/contracts/`, and user-facing prose. Teaches shared vocabulary so users can say "which Approvables are pending?" and be understood by both the tool and Claude Code.
+
 ## [DR-042 — Outcome metrics before engagement — sequence the trust-measurement build (outcome is the moat, engagement is the garnish)](DR-042.md)
 
 *Status: proposed · Date: 2026-06-26*
@@ -255,9 +261,4 @@ A review-telemetry audit (2026-06-26, 6-agent workflow, claims verified to file:
 
 SPEC-017 (Trust Dashboard) needs an **approval baseline** — the exact approved spec body at approval time — so it can later char-diff current-vs-approved and report rework % (M1). SPEC-017 FR-OQ4 originally resolved this *by engineering default* to: gzip the latest-approved body into a **git-ignored** .minspec/snapshots/ sidecar.
 
-## [DR-044 — Canonical term for review-gate artifacts is "Approvable"](DR-044.md)
-
-*Status: accepted · Date: 2026-06-27*
-
-MinSpec tracks five artifact kinds that all share one property: a human must read and approve them before work proceeds. The signpost (DR-019) surfaces the single next human task from this set. The approval gate (DR-012 / DR-034) hashes and locks them. Nothing in the codebase named the set as a whole.
 <!-- minspec:dr-index:end -->
