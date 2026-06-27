@@ -265,3 +265,88 @@ export function saveTemplateBaseline(rootDir: string, baseline: GeneratedHashes)
   fs.mkdirSync(path.dirname(baselinePath), { recursive: true });
   fs.writeFileSync(baselinePath, JSON.stringify(baseline, null, 2) + '\n');
 }
+
+// ---------------------------------------------------------------------------
+// Managed-region merge (#249, DR-037)
+//
+// Generalizes the existing `<!-- minspec:dr-index:start -->` marker convention to
+// ANY file type via a per-call comment style. A managed region is the content
+// between a start and end marker; on refresh MinSpec overwrites ONLY that region
+// and preserves everything outside it verbatim. No content baseline is needed —
+// the markers ARE the boundary, so user edits outside the region always survive and
+// MinSpec's region is always brought current (unlike a whole-file preserve-on-edit
+// rule, which one stray edit could freeze forever).
+// ---------------------------------------------------------------------------
+
+/** Parsed split of a file around a single managed region. */
+export interface ManagedRegionSplit {
+  /** Everything before the start marker (start marker excluded). */
+  readonly before: string;
+  /** Everything after the end marker (end marker excluded). */
+  readonly after: string;
+}
+
+/**
+ * Locate a managed region delimited by `startMarker` … `endMarker` (exact,
+ * trimmed line matches) and return the content surrounding it. Returns `null` when
+ * the markers are missing, out of order, or incomplete — the caller MUST treat a
+ * `null` as "no recognizable region" and never clobber the file (never-wrong: a
+ * deleted/corrupted marker is a skip-and-warn, not a silent whole-file overwrite).
+ *
+ * Matching is whole-line and whitespace-tolerant (the marker line may be indented
+ * or trailing-padded) so reasonable hand-formatting of the surrounding file does
+ * not break detection, while still requiring the exact marker text.
+ */
+export function splitManagedRegion(
+  content: string,
+  startMarker: string,
+  endMarker: string,
+): ManagedRegionSplit | null {
+  if (typeof content !== 'string') return null;
+  const lines = content.split('\n');
+
+  let startIdx = -1;
+  let endIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    const trimmed = lines[i].trim();
+    if (startIdx === -1) {
+      if (trimmed === startMarker) startIdx = i;
+    } else if (trimmed === endMarker) {
+      endIdx = i;
+      break;
+    }
+  }
+
+  // Both markers must be present, in order, and the end must follow the start.
+  if (startIdx === -1 || endIdx === -1 || endIdx <= startIdx) return null;
+
+  const before = lines.slice(0, startIdx).join('\n');
+  const after = lines.slice(endIdx + 1).join('\n');
+  return { before, after };
+}
+
+/**
+ * Rebuild a file from its preserved surroundings and a freshly rendered managed
+ * block. Joins `before` + block + `after`, collapsing the seams so the block is
+ * separated from non-empty surrounding content by exactly one blank line and no
+ * stray leading/trailing whitespace accumulates across refreshes (idempotent: a
+ * refresh that re-inserts the same block produces byte-identical output).
+ *
+ * Surrounding content is whitespace-trimmed at the seams (the user's own
+ * non-whitespace bytes are preserved verbatim); the result ends in exactly one
+ * trailing newline.
+ */
+export function spliceManagedRegion(
+  split: ManagedRegionSplit,
+  block: string,
+): string {
+  const beforeTrim = split.before.replace(/\s+$/, '');
+  const afterTrim = split.after.replace(/^\s+/, '').replace(/\s+$/, '');
+  const blockTrim = block.replace(/^\n+/, '').replace(/\n+$/, '');
+
+  let out = '';
+  if (beforeTrim.length > 0) out += beforeTrim + '\n\n';
+  out += blockTrim + '\n';
+  if (afterTrim.length > 0) out += '\n' + afterTrim + '\n';
+  return out;
+}

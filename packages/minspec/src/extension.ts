@@ -15,6 +15,7 @@ import { backfillEpicsCommand, type BackfillOptions } from './commands/backfill-
 import { regenerateDrIndex } from './lib/adr-manager';
 import { scoreWsjfCommand, triageIssueCommand } from './commands/backlog';
 import { approveSpecCommand, revokeApprovalCommand } from './commands/approve';
+import { approveActiveCommand } from './commands/approve-active';
 import { validateSpecCommand } from './commands/validate';
 import { SpecTreeProvider } from './views/spec-tree-provider';
 import { AdrTreeProvider } from './views/adr-tree-provider';
@@ -40,6 +41,7 @@ import { parseSpec } from './lib/spec';
 import { loadConfig, resolveAndValidate } from './lib/config';
 import { trackActiveAdrEditor } from './lib/active-adr';
 import { resolveTargetFolderNonInteractive } from './lib/resolve-folder';
+import { registerReferenceDiagnostics } from './lib/diagnostics';
 
 export function activate(context: vscode.ExtensionContext): void {
   trackActiveSpecEditor(context);
@@ -223,6 +225,12 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('minspec.revokeApproval', async (node) => {
       await revokeApprovalCommand(node);
     }),
+    // Unified context-aware Approve/Accept (Alt+A, #303): routes to approveSpec /
+    // acceptAdr / acceptEpic by the active approvable (tree node or editor), with
+    // approveSpec's pending picker as the no-focus fallback.
+    vscode.commands.registerCommand('minspec.approveActive', async (node) => {
+      await approveActiveCommand(node);
+    }),
     vscode.commands.registerCommand('minspec.validateSpec', (node) => validateSpecCommand(node)),
     vscode.commands.registerCommand('minspec.showSpecPanel', async (specFilePath?: string) => {
       if (!workspaceRoot) {
@@ -352,6 +360,10 @@ export function activate(context: vscode.ExtensionContext): void {
       }),
     );
   }
+
+  // Live dangling-reference diagnostics (#316): surface the #161 ref-checker as
+  // editor squiggles on save/change, reusing the Tier-0 checker unmodified.
+  registerReferenceDiagnostics(context, workspaceRoot);
 
   // First-run experience: legacy welcome toast (kept for users who already
   // had .minspec installed before auto-bootstrap shipped — its workspaceState
