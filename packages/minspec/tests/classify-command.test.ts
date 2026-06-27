@@ -63,7 +63,8 @@ vi.mock('../src/lib/classifier', () => ({
   recordOverride: vi.fn(),
 }));
 
-vi.mock('../src/lib/config', () => ({
+vi.mock('../src/lib/config', async (importOriginal) => ({
+  ...(await importOriginal()),
   loadConfig: vi.fn(),
   applyVSCodeOverrides: vi.fn((config: unknown) => config),
   TIERS: ['T1', 'T2', 'T3', 'T4'],
