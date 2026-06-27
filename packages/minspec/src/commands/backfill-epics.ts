@@ -6,8 +6,11 @@ import {
   applyBackfill,
   renderProposalMarkdown,
   type BackfillProposal,
+  type ProposedEpic,
 } from '../lib/epic-backfill';
 import { resolveTargetFolder } from '../lib/resolve-folder';
+import { slugify } from '../lib/spec-manager';
+import { listEpics } from '../lib/epic-manager';
 
 /** Options threaded in from an upstream caller (e.g. the auto-bootstrap offer). */
 export interface BackfillOptions {
@@ -36,13 +39,110 @@ async function enableAlwaysUseAi(): Promise<void> {
 }
 
 /**
+ * Rename-in-flow (harvest316/minspec#218). A keyboard single-select loop layered
+ * on top of the drop step: pick a NEW proposed epic, edit its title in an
+ * InputBox (pre-filled, two-key edit), and the slug is re-derived via the shared
+ * `slugify`. Every mapping that pointed at the old slug is repointed at the new
+ * one so nothing is orphaned (an orphaned mapping is silently dropped at apply).
+ *
+ * Only NEW epics (no `id`) are renamable: `applyBackfill` prefers the registry's
+ * canonical title for already-registered epics and never renames on disk, so an
+ * in-flow "rename" of an existing epic would silently no-op — we omit them rather
+ * than offer a no-op. Nothing is written here; the rename mutates the in-flight
+ * proposal and is persisted by `applyBackfill` → `createEpic` on Apply.
+ *
+ * Mutates `epics`/`mappings` in place and returns them (a thin convenience).
+ */
+async function renameEpicsInFlow(
+  folder: string,
+  epics: ProposedEpic[],
+  mappings: BackfillProposal['mappings'],
+): Promise<void> {
+  // Slugs that already exist on disk — a new epic must not collide into one
+  // (that would silently merge it into an unrelated registered epic at apply).
+  const registeredSlugs = new Set(listEpics(folder).map((e) => e.slug));
+
+  type RenameItem = vscode.QuickPickItem & {
+    epic?: ProposedEpic;
+    rename?: 'done';
+  };
+
+  for (;;) {
+    // Renamable = new epics only. Recompute each pass so labels reflect renames.
+    const renamable = epics.filter((e) => !e.id);
+    if (renamable.length === 0) return;
+
+    const items: RenameItem[] = [
+      { label: '$(check) Done — apply changes', rename: 'done' },
+      { label: 'Epics', kind: vscode.QuickPickItemKind.Separator },
+      ...renamable.map((e) => ({
+        label: `$(pencil) ${e.title}`,
+        description: e.slug,
+        epic: e,
+      })),
+    ];
+
+    const pick = (await vscode.window.showQuickPick(items, {
+      title: 'Backfill — rename an epic, or Done to apply',
+      placeHolder: 'Pick an epic to rename · Enter · Esc/Done finishes',
+    })) as RenameItem | undefined;
+
+    if (!pick || pick.rename === 'done' || !pick.epic) return;
+
+    const target = pick.epic;
+    const newTitle = await vscode.window.showInputBox({
+      title: `Rename epic — ${target.title}`,
+      prompt: 'New epic title (the slug is derived automatically)',
+      value: target.title,
+      validateInput: (raw: string): string | undefined => {
+        const title = raw.trim();
+        if (title === '') return 'Title cannot be empty.';
+        const slug = slugify(title);
+        if (slug === '') return 'Title must contain at least one letter or number.';
+        // Renaming an epic to a slug it already has is a no-op — allow it.
+        if (slug === target.slug) return undefined;
+        if (registeredSlugs.has(slug)) {
+          return `An existing epic already uses the slug "${slug}". Choose a different title.`;
+        }
+        if (epics.some((e) => e !== target && e.slug === slug)) {
+          return `Another proposed epic already uses the slug "${slug}". Choose a different title.`;
+        }
+        return undefined;
+      },
+    });
+
+    if (newTitle === undefined) continue; // Esc → leave this epic untouched
+
+    const title = newTitle.trim();
+    const slug = slugify(title);
+    if (title === '' || slug === '') continue; // defensive; validateInput blocks this
+    if (slug === target.slug && title === target.title) continue; // nothing changed
+
+    const oldSlug = target.slug;
+    target.title = title;
+    target.slug = slug;
+    // Repoint every mapping that referenced the old slug — no orphans.
+    if (oldSlug !== slug) {
+      for (let i = 0; i < mappings.length; i++) {
+        if (mappings[i].epicSlug === oldSlug) {
+          mappings[i] = { ...mappings[i], epicSlug: slug };
+        }
+      }
+    }
+  }
+}
+
+/**
  * Per-item review: a keyboard QuickPick of every proposed epic + mapping, all
  * pre-checked. Uncheck to drop; Enter applies the rest (harvest316/minspec#213).
- * Returns the filtered proposal, or `undefined` if the picker was dismissed (the
- * caller then keeps the un-tweaked proposal). No markdown round-trip parsing —
- * the proposal object is the source of truth.
+ * After the drop step, a rename-in-flow loop lets you edit a kept epic's
+ * title/slug (harvest316/minspec#218). Returns the filtered proposal, or
+ * `undefined` if the drop picker was dismissed (the caller then keeps the
+ * un-tweaked proposal). No markdown round-trip parsing — the proposal object is
+ * the source of truth.
  */
 async function tweakProposal(
+  folder: string,
   proposal: BackfillProposal,
 ): Promise<BackfillProposal | undefined> {
   type Item = vscode.QuickPickItem & { ref?: { kind: 'epic' | 'mapping'; i: number } };
@@ -92,7 +192,13 @@ async function tweakProposal(
     (m, i) => keptMapIdx.has(i) && keptSlugs.has(m.epicSlug),
   );
 
-  return { epics: keptEpics, mappings: keptMappings, source: proposal.source };
+  // Mutable copies so rename-in-flow can edit titles/slugs and repoint mappings
+  // without touching the caller's original proposal (kept on QuickPick dismiss).
+  const epics = keptEpics.map((e) => ({ ...e }));
+  const mappings = keptMappings.map((m) => ({ ...m }));
+  await renameEpicsInFlow(folder, epics, mappings);
+
+  return { epics, mappings, source: proposal.source };
 }
 
 /**
@@ -179,7 +285,7 @@ export async function backfillEpicsCommand(
     );
     if (choice === APPLY) break;
     if (choice === TWEAK) {
-      const tweaked = await tweakProposal(proposal);
+      const tweaked = await tweakProposal(folder, proposal);
       if (tweaked) {
         proposal = tweaked;
         await showProposal(proposal);
