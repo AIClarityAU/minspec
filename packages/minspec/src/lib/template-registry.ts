@@ -10,15 +10,24 @@ import {
   type SectionHashes,
 } from './merge-refresh';
 
-/** Template names that can be rendered */
-export type TemplateName = 'CLAUDE.md' | 'AGENTS.md' | '.cursorrules' | 'DESIGN.md' | 'constitution.md';
+/**
+ * Template names that can be rendered.
+ *
+ * NOTE — `DESIGN.md` is intentionally absent (#206). It is NOT a harness
+ * template: a split-layout `design.md` is a T3+ **Plan-phase** artifact, created
+ * when planning starts, not at init. Scaffolding an empty `DESIGN.md` stub at
+ * init produced a doc the project's own gap-audit (#205) would flag, and — being
+ * a managed template — refresh resurrected it after deletion. Never re-add it
+ * here; both `generateHarnessFiles` and `refreshHarnessFiles` loop over
+ * `TEMPLATE_NAMES`, so membership is exactly "scaffolded + refresh-managed".
+ */
+export type TemplateName = 'CLAUDE.md' | 'AGENTS.md' | '.cursorrules' | 'constitution.md';
 
 /** All template names in generation order */
 export const TEMPLATE_NAMES: readonly TemplateName[] = [
   'CLAUDE.md',
   'AGENTS.md',
   '.cursorrules',
-  'DESIGN.md',
   'constitution.md',
 ] as const;
 
@@ -27,7 +36,6 @@ export const TEMPLATE_OUTPUT_PATHS: Record<TemplateName, string> = {
   'CLAUDE.md': 'CLAUDE.md',
   'AGENTS.md': 'AGENTS.md',
   '.cursorrules': '.cursorrules',
-  'DESIGN.md': 'DESIGN.md',
   'constitution.md': '.minspec/constitution.md',
 };
 
@@ -175,39 +183,6 @@ This project uses MinSpec SDD methodology. Specs in \`{{specsDir}}/\`, decisions
 - Document decisions that are hard to reverse
 `;
 
-const DESIGN_MD_TEMPLATE = `# {{projectName}} — Design Document
-
-## Architecture Overview
-
-<!-- Describe the high-level architecture here -->
-
-## Key Components
-
-<!-- List and describe the main modules/components -->
-
-## Data Flow
-
-<!-- Describe how data flows through the system -->
-
-## Technology Stack
-
-<!-- List key technologies and why they were chosen -->
-
-## Constraints
-
-{{#if constraints}}
-{{#each constraints}}
-- {{this}}
-{{/each}}
-{{else}}
-<!-- Add technical/business constraints here -->
-{{/if}}
-
-## Open Questions
-
-<!-- Track unresolved design questions here -->
-`;
-
 const CONSTITUTION_MD_TEMPLATE = `# {{projectName}} — Constitution
 
 ## Invariants
@@ -268,7 +243,6 @@ export const TEMPLATES: Record<TemplateName, string> = {
   'CLAUDE.md': CLAUDE_MD_TEMPLATE,
   'AGENTS.md': AGENTS_MD_TEMPLATE,
   '.cursorrules': CURSORRULES_TEMPLATE,
-  'DESIGN.md': DESIGN_MD_TEMPLATE,
   'constitution.md': CONSTITUTION_MD_TEMPLATE,
 };
 
@@ -292,3 +266,159 @@ export function computeTemplateBaseline(): GeneratedHashes {
   }
   return baseline;
 }
+
+// ---------------------------------------------------------------------------
+// Managed-region templates (#249, DR-037)
+//
+// A second class of scaffolded file that the Markdown section-merge engine
+// (`mergeFile` / `parseSections` in merge-refresh.ts) cannot manage: its merge
+// unit is the `## ` heading, so it can only carry Markdown. Non-Markdown harness
+// artifacts — YAML workflows, shell scripts, JS/TS configs — have no `## `
+// sections to merge and would be corrupted by section reassembly.
+//
+// Instead of treating these as opaque whole files, MinSpec wraps its owned
+// content in comment-delimited MARKERS whose comment syntax matches the target
+// file type — the same `minspec:` marker convention already used for the DR-index
+// (`<!-- minspec:dr-index:start -->`), generalized to any file type:
+//
+//   # >>> minspec:managed:<name> >>>     (YAML / shell — `#` comments)
+//   # <<< minspec:managed:<name> <<<
+//   <!-- >>> minspec:managed:<name> >>> -->   (Markdown / HTML / XML)
+//   <!-- <<< minspec:managed:<name> <<< -->
+//   // >>> minspec:managed:<name> >>>    (JS / TS / C-family)
+//   // <<< minspec:managed:<name> <<<
+//
+// Contract:
+//   - Scaffold (init): write the file with the MinSpec-owned content wrapped in
+//     the managed block. A fully-MinSpec-owned file (the CI workflow) = one
+//     managed block spanning the file; the user adds custom content OUTSIDE the
+//     markers.
+//   - Refresh: parse the markers; OVERWRITE only the content BETWEEN them with the
+//     current template; PRESERVE everything outside verbatim. User edits outside
+//     the region survive; MinSpec's region stays current — the key improvement over
+//     the old preserve-on-any-edit whole-file rule, which let one stray edit freeze
+//     MinSpec out of its own region forever.
+//   - Missing/corrupted markers (user deleted them): NEVER a silent clobber. If
+//     the file exists but has no recognizable markers → SKIP + warn; if the file
+//     is absent → re-scaffold it with markers.
+//
+// No content baseline file is needed — the markers ARE the boundary between
+// MinSpec-owned and user-owned content. This mechanism is the reusable foundation
+// for the hook-script scaffolds (#246/#247) and the python validator (#244).
+// ---------------------------------------------------------------------------
+
+/**
+ * Comment syntax used to delimit a managed region, chosen to match the target
+ * file type so the markers are valid comments in that language.
+ *  - `hash`  → `#` line comments (YAML, shell, Python, TOML, .gitignore)
+ *  - `html`  → `<!-- -->` block comments (Markdown, HTML, XML)
+ *  - `slash` → `//` line comments (JS, TS, JSON-with-comments, C-family)
+ */
+export type CommentStyle = 'hash' | 'html' | 'slash';
+
+/** Shared marker token — reuses the `minspec:` convention (cf. dr-index markers). */
+const MANAGED_MARKER_PREFIX = 'minspec:managed:';
+
+/**
+ * Build the start marker line for a managed region of the given name + comment
+ * style. Exported so the parser and tests derive markers from one source of truth
+ * (never hand-typed, so the scaffold and refresh halves can never drift).
+ */
+export function managedRegionStartMarker(name: string, style: CommentStyle): string {
+  const token = `>>> ${MANAGED_MARKER_PREFIX}${name} >>>`;
+  switch (style) {
+    case 'hash':
+      return `# ${token}`;
+    case 'slash':
+      return `// ${token}`;
+    case 'html':
+      return `<!-- ${token} -->`;
+  }
+}
+
+/** Build the end marker line for a managed region. See {@link managedRegionStartMarker}. */
+export function managedRegionEndMarker(name: string, style: CommentStyle): string {
+  const token = `<<< ${MANAGED_MARKER_PREFIX}${name} <<<`;
+  switch (style) {
+    case 'hash':
+      return `# ${token}`;
+    case 'slash':
+      return `// ${token}`;
+    case 'html':
+      return `<!-- ${token} -->`;
+  }
+}
+
+/** A scaffolded file with a comment-delimited MinSpec-managed region. */
+export interface ManagedRegionTemplate {
+  /** Stable identifier (used in markers, messages, tests). */
+  readonly name: string;
+  /** Output path relative to project root. */
+  readonly outputPath: string;
+  /** Comment syntax for the markers (must be valid in the target file type). */
+  readonly commentStyle: CommentStyle;
+  /**
+   * The MinSpec-owned region body (between the markers). Managed-region templates
+   * are NOT Handlebars-rendered — the content is project-independent and pinned so
+   * the region stays byte-stable across projects.
+   */
+  readonly content: string;
+}
+
+/**
+ * Wrap a managed-region template's content in its start/end markers, producing the
+ * full block written to disk at scaffold time and used to overwrite the region on
+ * refresh. The block is a self-contained unit: start marker, content, end marker,
+ * each on its own line, newline-terminated. This is the SINGLE place the on-disk
+ * managed-block shape is defined — scaffold and refresh both call it, so they can
+ * never disagree about the bytes.
+ */
+export function renderManagedBlock(tpl: ManagedRegionTemplate): string {
+  const start = managedRegionStartMarker(tpl.name, tpl.commentStyle);
+  const end = managedRegionEndMarker(tpl.name, tpl.commentStyle);
+  // Normalize: exactly one trailing newline on the content body so the end marker
+  // always sits on its own line regardless of how the template literal was written.
+  const body = tpl.content.replace(/\n+$/, '') + '\n';
+  return `${start}\n${body}${end}\n`;
+}
+
+/**
+ * GitHub Actions workflow: the authoritative post-push MinSpec validation gate
+ * (DR-037, #249). Runs the Node-tier validator on every push / PR so that
+ * contributors without the local git hooks — or any local bypass — are still
+ * caught before merge. Local hook = fast fail; CI = never-merge guarantee.
+ *
+ * Pinned to a literal YAML string (no Handlebars): it is project-independent and
+ * must remain byte-stable so the refreshed region matches exactly.
+ */
+const MINSPEC_VALIDATE_WORKFLOW = `name: MinSpec Validate
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    name: MinSpec SDD validation
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Run MinSpec validation
+        run: npx --yes @aiclarity/minspec-validator`;
+
+/** All managed-region templates in scaffold order. */
+export const MANAGED_REGION_TEMPLATES: readonly ManagedRegionTemplate[] = [
+  {
+    name: 'validate-workflow',
+    outputPath: '.github/workflows/minspec-validate.yml',
+    commentStyle: 'hash',
+    content: MINSPEC_VALIDATE_WORKFLOW,
+  },
+] as const;
