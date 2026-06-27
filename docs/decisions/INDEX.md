@@ -19,7 +19,7 @@ Two extensions share a classification engine. Specs, docs, and decisions live at
 
 *Status: proposed · Date: 2026-05-27*
 
-Contract-Driven Development (DR-359) established session discipline and T3 regression tests, but has no enforced diagnostic phase before bug fixes. Current rule ("commit WIP, fix separately, resume") prevents scope bleed but doesn't prevent symptom-fixing. AI agents are especially prone to jumping straight to code changes — they optimize for completion, not understanding. Without a structural gate that prohibits code changes during diagnosis, root causes get papered over.
+Contract-Driven Development (DR-359 (parent register, mmo-platform)) established session discipline and T3 regression tests, but has no enforced diagnostic phase before bug fixes. Current rule ("commit WIP, fix separately, resume") prevents scope bleed but doesn't prevent symptom-fixing. AI agents are especially prone to jumping straight to code changes — they optimize for completion, not understanding. Without a structural gate that prohibits code changes during diagnosis, root causes get papered over.
 
 ## [DR-004 — Tiered Network Consent Model](DR-004.md)
 
@@ -187,7 +187,7 @@ DR-029's **reality-check agent** and **round-table** (Tier-1, agent-execute) rea
 
 *Status: accepted · Date: 2026-06-04*
 
-The PreToolUse **spec-gate** (DR-362 enforcement of the DR-012 HITL approval gate) denies source edits while any T3/T4 spec is status: implementing without a current approval. It is the only enforcement that survives bypass-permissions mode. Three defects block it — and block the user's goal of an automated triage-inbox.sh → dispatch-issue.sh pipeline where auto-approved (T1–T2 agent-ready) issues build themselves:
+The PreToolUse **spec-gate** (DR-362 (parent register, mmo-platform) enforcement of the DR-012 HITL approval gate) denies source edits while any T3/T4 spec is status: implementing without a current approval. It is the only enforcement that survives bypass-permissions mode. Three defects block it — and block the user's goal of an automated triage-inbox.sh → dispatch-issue.sh pipeline where auto-approved (T1–T2 agent-ready) issues build themselves:
 
 ## [DR-032 — MinSpec never emits its own internal DR/SPEC/EPIC numbers into user-facing output — symmetric output-provenance gate](DR-032.md)
 
@@ -229,17 +229,17 @@ MinSpec's SDD gates (spec id: frontmatter, RCDD root-cause line, ref-egress leak
 
 *Status: proposed · Date: 2026-06-23*
 
-The next-task signpost emits one task from a deterministic DAG, but the answer and its reasoning are split across three unbuilt surfaces (#48 dependency-map, #182 PR-nodes, #211 PR-queue) with three node vocabularies. One unified graph renders the SPEC-012 DAG with the signpost node at its centre — signpost + 2 layers + "+N" rollups, primary node dominant and sole call-to-action — subsuming all three. A view over the resolver, never a source of truth; spec-after-SPEC-012.
+The next-task signpost (DR-019, SPEC-012) emits **one** next human task from a deterministic cross-artifact DAG. Today the *answer* (one task) and the *reasoning* (the DAG behind it) are separate ideas with separate, unbuilt surfaces: Three surfaces, three node vocabularies, one underlying graph. SPEC-010 FR-4 already requires the signpost to **show its evidence**; a local graph centred on the signpost node *is* that evidence rendered spatially — it turns an opaque verdict ("do X next") into an auditable one ("…because Y…
 
 ## [DR-039 — Goals drive priority — constitution Goals + goal-rank/epic.order as the deterministic human dial; auto-derived WSJF as a future upgrade](DR-039.md)
 
 *Status: proposed · Date: 2026-06-23*
 
-The human priority dial is epic.order (coarse) + ranked project Goals (thematic, mapped via `goal:` frontmatter), read by the resolver as deterministic tie-breaks within a severity class — never an LLM judgement, never overriding a gate. Manual WSJF is demoted (kept for discoverability, not wired to the signpost). The exciting future upgrade: auto-derive WSJF deterministically — size from the classifier, value from goal-rank, risk from consequence analyzers, time from milestones — at zero human ceremony.
+DR-019 makes next-task priority a deterministic DAG; the one thing the DAG cannot derive — relative importance between independent branches — it lifts into the human-set epic.order field. Three gaps surfaced this session: 1. **Is business value computed, and correctly?** Yes, but in the wrong place: a **WSJF** scorer exists (minspec.scoreWsjf, backlog.ts) — human-entered, 4 dimensions × 1–10 — but it scores **GitHub issues only**, is **not wired to the resolver**, and asks for four numbers per issue. That is…
 
 ## [DR-040 — DR-023 follow-ups auto-materialize — friction-free auto-create of missing issues, not a blocking gate](DR-040.md)
 
 *Status: proposed · Date: 2026-06-23*
 
-Hardening DR-023 (no orphan follow-ups) without surfacing commit friction: on DR save, un-materialized `## Follow-ups (tracked)` bullets are auto-filed as issues with the `#ref` written back, while genuinely dangling refs stay a surfaced error. Scoped to the curated section only (threads DR-023's "don't auto-create every consequence" rejection). Closes the DR-019 input leak honestly instead of teaching the resolver to infer priority from prose.
+DR-023 requires every DR to materialize its surfaced work as tracked issues/specs in a ## Follow-ups (tracked) section, with only a **soft validator warning** when items lack a ref. The session asked whether to *harden* this into a blocking gate — because un-materialized follow-ups are the mechanism by which "newer specs/DRs not yet turned into issues/PRs" stay invisible to the next-task DAG (DR-019): the resolver ranks structural edges, so prose-only follow-ups are simply not there.
 <!-- minspec:dr-index:end -->
