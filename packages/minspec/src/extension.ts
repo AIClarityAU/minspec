@@ -18,6 +18,7 @@ import { approveSpecCommand, revokeApprovalCommand } from './commands/approve';
 import { approveActiveCommand } from './commands/approve-active';
 import { validateSpecCommand } from './commands/validate';
 import { SpecTreeProvider } from './views/spec-tree-provider';
+import { EpicReorderDragAndDropController } from './views/epic-dnd-controller';
 import { AdrTreeProvider } from './views/adr-tree-provider';
 import { FrontmatterCompletionProvider } from './views/frontmatter-completion';
 import { BacklogTreeProvider } from './views/backlog-view';
@@ -63,6 +64,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const specTreeView = vscode.window.createTreeView('minspecStatus', {
     treeDataProvider: specTreeProvider,
+    // Programmatic DnD reorder of epic.order (#261 / DR-039) — NOT in package.json.
+    dragAndDropController: new EpicReorderDragAndDropController(workspaceRoot, () => specTreeProvider.refresh()),
   });
   const adrTreeView = vscode.window.createTreeView('minspecAdrs', {
     treeDataProvider: adrTreeProvider,
