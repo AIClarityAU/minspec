@@ -37,10 +37,14 @@ jobs:
     steps:
       - uses: actions/checkout@v5
       - name: Deploy ${{ matrix.project }}
+        # Run from inside the site dir: `wrangler pages deploy` resolves functions/
+        # relative to CWD, not the deploy-path arg. Deploying from the repo root
+        # silently drops Pages Functions (e.g. the /api/waitlist capture).
+        working-directory: ${{ matrix.dir }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          npx --yes wrangler@4 pages deploy "${{ matrix.dir }}" \
+          npx --yes wrangler@4 pages deploy . \
             --project-name="${{ matrix.project }}" \
             --branch=main \
             --commit-dirty=true

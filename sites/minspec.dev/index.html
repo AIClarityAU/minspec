@@ -1073,6 +1073,14 @@
         justify-content: center;
       }
     }
+    /* --- Waitlist form --- */
+    .waitlist { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; max-width: 460px; margin: 0 auto; }
+    .waitlist input[type=email] { flex: 1 1 240px; min-width: 0; padding: 12px 16px; font-size: 0.95rem; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text); }
+    .waitlist input[type=email]:focus { outline: none; border-color: var(--accent-dim); box-shadow: 0 0 0 3px var(--accent-glow); }
+    .hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+    .form-msg { margin-top: 16px; font-size: 0.9rem; min-height: 1.2em; text-align: center; }
+    .form-msg.ok { color: var(--accent-bright); }
+    .form-msg.err { color: var(--amber); }
   </style>
 </head>
 <body>
@@ -1447,8 +1455,14 @@
     <div class="section-inner">
       <div class="section-label">Get Started</div>
       <h2 class="section-title">Stop over-specifying trivial changes</h2>
-      <p class="section-desc">Install MinSpec and let the right amount of ceremony happen automatically.</p>
-      <a href="#" class="btn btn-primary" title="Coming soon to the VS Code Marketplace">Install from VS Code Marketplace (Coming Soon)</a>
+      <p class="section-desc">MinSpec is coming to the VS Code Marketplace. Join the waitlist and we'll email you the moment it's live.</p>
+      <form class="waitlist" id="waitlist-form" method="POST" action="/api/waitlist" novalidate>
+        <label class="hp" for="website">Leave this empty</label>
+        <input class="hp" type="text" id="website" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+        <input type="email" id="email" name="email" placeholder="you@company.com" required autocomplete="email" aria-label="Email address">
+        <button class="btn btn-primary" type="submit" id="waitlist-submit">Join the waitlist</button>
+      </form>
+      <p class="form-msg" id="waitlist-msg" role="status" aria-live="polite"></p>
     </div>
   </section>
 
@@ -1470,5 +1484,6 @@
     </div>
   </footer>
 
+  <script src="/js/waitlist.js" defer></script>
 </body>
 </html>
