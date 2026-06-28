@@ -260,4 +260,10 @@ A review-telemetry audit (2026-06-26, 6-agent workflow, claims verified to file:
 *Status: proposed · Date: 2026-06-27*
 
 SPEC-017 (Trust Dashboard) needs an **approval baseline** — the exact approved spec body at approval time — so it can later char-diff current-vs-approved and report rework % (M1). SPEC-017 FR-OQ4 originally resolved this *by engineering default* to: gzip the latest-approved body into a **git-ignored** .minspec/snapshots/ sidecar.
+
+## [DR-044 — The "Execute" extension is named SealBox and lives in its own private repo (split from the monorepo)](DR-044.md)
+
+*Status: proposed · Date: 2026-06-28*
+
+The third "Execute" extension (DR-015, working id agent-execute) is named **SealBox** (sealbox.dev registered; resolves DR-015 OQ-4 / #66) and **split into its own private repo `harvest316/sealbox`**, mirroring the ScroogeLLM split (DR-027) and superseding DR-015 OQ-3 (which placed it at `packages/agent-execute` in the monorepo). The sealbox.dev marketing + waitlist site ships now; the specs/EPIC/research migration (SPEC-016, SPEC-019, EPIC-007) is a tracked follow-up.
 <!-- minspec:dr-index:end -->
