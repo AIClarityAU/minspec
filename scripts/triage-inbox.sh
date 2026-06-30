@@ -56,12 +56,18 @@ TRIAGE_VERDICT_END
 CONTENT
 )
 
-  # Agent runs READ-ONLY: it may read repo files to judge tier, but holds no
-  # gh/Bash/network — it can only return text. We capture that text.
+  # Agent runs with NO tools: it classifies tier from the issue TEXT alone and
+  # can only return text. The issue body is UNTRUSTED (prompt-injection surface),
+  # so per the global `claude -p` Subprocess Rule #1 (DR-345 / FiverrGigmeister
+  # DR-002) it gets NO filesystem/network tool — granting Read over untrusted
+  # input is an arbitrary-file-read / cred-exfil hole (`claude -p` resolves
+  # absolute paths OUTSIDE cwd; cwd is not a sandbox boundary), so the tool is
+  # ELIMINATED, not justified by triage.md's anti-injection prose (#344). `--tools
+  # ""` disables the entire built-in tool set. We capture the returned text.
   local AGENT_OUT
   AGENT_OUT=$(claude -p "$USER_CONTENT" \
     --system-prompt-file "${ROLES_DIR}/triage.md" \
-    --allowedTools "Read" \
+    --tools "" \
     --output-format text 2>&1) || {
       echo "WARNING: triage agent failed for #$ISSUE — leaving in inbox" >&2
       return 0
