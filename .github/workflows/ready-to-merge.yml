@@ -1,0 +1,78 @@
+# ready-to-merge — AI-review merge gate
+#
+# Posts a commit status named `ready-to-merge` on the PR head SHA that is GREEN
+# iff the PR is AI-greenlit, so branch protection can require it and a downstream
+# merge-gate / signpost can read it.
+#
+#   SUCCESS  when the PR has label `ai-review:pass`  AND NOT `ai-review:changes`
+#   FAILURE  otherwise (description: "needs ai-review:pass")
+#
+# An independent AI reviewer posts verdicts and applies the `ai-review:pass` /
+# `ai-review:changes` labels to PRs; this check just reflects those labels as a
+# required-able commit status.
+#
+# ── MANUAL STEP (cannot be done from a file) ─────────────────────────────────
+# A workflow file CANNOT make itself gating. To enforce this gate, a human must
+# add `ready-to-merge` as a *required status check* in repo Settings → Branches
+# → branch protection rule for `main`. Until then this status is advisory only.
+#
+# ── LABEL-INTEGRITY CAVEAT ───────────────────────────────────────────────────
+# A GitHub label is hand-addable by anyone with write access, so this check
+# TRUSTS that `ai-review:pass` is applied only by the reviewer automation — it
+# verifies the label's PRESENCE, not its PROVENANCE. A human could add the label
+# manually and turn this check green without a real AI review. Hardening
+# follow-up (for teams): restrict who may add the `ai-review:*` labels — e.g. via
+# a label-guard workflow that strips/reverts `ai-review:pass` unless applied by
+# the reviewer bot/app, or org label-permission controls. Not done here.
+
+name: ready-to-merge
+
+on:
+  pull_request:
+    # opened/synchronize/reopened: (re)post the status when the PR or its head
+    # commit changes. labeled/unlabeled: re-evaluate the moment the reviewer
+    # automation (or a human) adds/removes an ai-review:* label.
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  statuses: write       # post the `ready-to-merge` commit status on the PR head SHA
+  pull-requests: read   # read the PR's labels
+
+jobs:
+  ready-to-merge:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reflect ai-review labels as the `ready-to-merge` commit status
+        uses: actions/github-script@v7
+        env:
+          # Built-in token; scoped by the permissions block above.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          script: |
+            const pr = context.payload.pull_request;
+            const labels = (pr.labels || []).map(l => l.name);
+
+            const hasPass    = labels.includes('ai-review:pass');
+            const hasChanges = labels.includes('ai-review:changes');
+            const isGreen    = hasPass && !hasChanges;
+
+            const state = isGreen ? 'success' : 'failure';
+            const description = isGreen
+              ? 'AI review passed'
+              : 'needs ai-review:pass';
+
+            // Post the status on the PR HEAD sha (not the merge sha), so branch
+            // protection on the PR's head commit can require it.
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: pr.head.sha,
+              state,
+              context: 'ready-to-merge',
+              description,
+            });
+
+            core.info(
+              `ready-to-merge=${state} (ai-review:pass=${hasPass}, ` +
+              `ai-review:changes=${hasChanges}) on ${pr.head.sha}`
+            );

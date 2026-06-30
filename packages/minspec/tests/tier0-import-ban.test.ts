@@ -44,9 +44,12 @@ function collectTsFiles(dir: string): string[] {
  *   import { request } from 'node:http';
  *   import('https');
  *   import { Agent } from 'net';
- *   import fetch from 'node-fetch';
+ *   import('node:net');
  *
- * Does NOT match:
+ * Does NOT match (by design):
+ *   import fetch from 'node-fetch';   ← a 3rd-party network *package*, not a core
+ *                                       module / global; barred by the no-new-dependency
+ *                                       rule + dep audit, not this core-import regex.
  *   // comment mentioning http for documentation purposes
  *   'Content-Type: application/json'  (no import keyword)
  */

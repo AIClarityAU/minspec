@@ -80,6 +80,13 @@ export function renderTrustChart(model: TrustChartModel): string {
     return renderEmptyChart();
   }
 
+  // Public-contract hardening: renderTrustChart is exported, so a non-finite/negative
+  // metric (unreachable from the real producer: computeSpecRework → [0,1]|null,
+  // approvedChars ≥ 0) must never reach the SVG — it would emit width="NaN". Coerce.
+  const finitePct = (p: number | null): number | null =>
+    p !== null && Number.isFinite(p) && p >= 0 ? p : null;
+  const finiteChars = (c: number): number => (Number.isFinite(c) && c >= 0 ? c : 0);
+
   // Compute heights for each section
   const reworkSectionH = hasRework
     ? HEADER_H + rework.length * (BAR_HEIGHT + BAR_GAP)
@@ -116,19 +123,23 @@ export function renderTrustChart(model: TrustChartModel): string {
     y += HEADER_H;
 
     // Compute max pct for relative scale (null entries are skipped)
-    const maxPct = rework.reduce((m, r) => (r.pct !== null ? Math.max(m, r.pct) : m), 0);
+    const maxPct = rework.reduce((m, r) => {
+      const p = finitePct(r.pct);
+      return p !== null ? Math.max(m, p) : m;
+    }, 0);
 
     for (const row of rework) {
+      const pct = finitePct(row.pct); // non-finite ⇒ treated as no-data
       const barWidth =
-        row.pct === null
+        pct === null
           ? 0
           : maxPct > 0
-            ? Math.round((row.pct / Math.max(maxPct, 0.01)) * BAR_MAX_WIDTH)
+            ? Math.round((pct / Math.max(maxPct, 0.01)) * BAR_MAX_WIDTH)
             : 0;
 
-      const fill = row.pct === null
+      const fill = pct === null
         ? 'var(--vscode-disabledForeground, #555)'
-        : reworkFill(row.pct);
+        : reworkFill(pct);
 
       parts.push(barRow({
         x: PADDING,
@@ -136,10 +147,10 @@ export function renderTrustChart(model: TrustChartModel): string {
         label: svgText(row.specId),
         barWidth,
         barFill: fill,
-        annotationText: row.pct === null
+        annotationText: pct === null
           ? 'no data'
-          : `${Math.round(row.pct * 100)}%`,
-        isNoData: row.pct === null,
+          : `${Math.round(pct * 100)}%`,
+        isNoData: pct === null,
       }));
 
       y += BAR_HEIGHT + BAR_GAP;
@@ -156,12 +167,13 @@ export function renderTrustChart(model: TrustChartModel): string {
     parts.push(sectionLabel('Wasted Review (M2)', PADDING, y + HEADER_H - 4));
     y += HEADER_H;
 
-    const maxChars = wasted.reduce((m, w) => Math.max(m, w.approvedChars), 0);
+    const maxChars = wasted.reduce((m, w) => Math.max(m, finiteChars(w.approvedChars)), 0);
 
     for (const row of wasted) {
+      const chars = finiteChars(row.approvedChars); // non-finite/negative ⇒ 0
       const barWidth =
         maxChars > 0
-          ? Math.round((row.approvedChars / maxChars) * BAR_MAX_WIDTH)
+          ? Math.round((chars / maxChars) * BAR_MAX_WIDTH)
           : 0;
 
       parts.push(barRow({
@@ -170,7 +182,7 @@ export function renderTrustChart(model: TrustChartModel): string {
         label: svgText(row.specId),
         barWidth,
         barFill: 'var(--vscode-charts-orange, #cca700)',
-        annotationText: `${row.approvedChars} ch`,
+        annotationText: `${chars} ch`,
         isNoData: false,
       }));
 
