@@ -126,6 +126,13 @@ describe('Invariant 2: No backend — no network calls', () => {
     // editor-independent SDD hooks run on every commit. Local git config write —
     // no network, Tier-0. See scaffold.ts ensureHooksPath.
     'lib/scaffold.ts',
+    // #356: ruleset advisor's single sanctioned spawn point shells the USER's
+    // authenticated `gh` to detect/create a branch ruleset — and ONLY behind
+    // explicit, opt-in post-init consent (the always-on path is the zero-network
+    // docs link). MinSpec opens no socket itself; same posture as it already
+    // shells `git`. Tier-0 boundary interpretation to be ratified by a DR.
+    // See ruleset-advisor.ts defaultCommandRunner.
+    'lib/ruleset-advisor.ts',
   ]);
 
   // Files allowed to *name* HTTP clients as detection data (not call them). They

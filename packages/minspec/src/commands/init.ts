@@ -5,6 +5,16 @@ import { scaffold, generateHarnessFiles, refreshHarnessFiles } from '../lib/scaf
 import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS } from '../lib/template-registry';
 import { resolveTargetFolder } from '../lib/resolve-folder';
 import { evaluateConstitution } from '../lib/constitution-nudge';
+import { getRepoFromRemote } from '../lib/github';
+import {
+  type CommandRunner,
+  RULESET_DOCS_URL,
+  REQUIRED_CHECK_CONTEXTS,
+  createRequiredChecksRuleset,
+  defaultCommandRunner,
+  hasRequiredChecksRuleset,
+  isGhReady,
+} from '../lib/ruleset-advisor';
 
 /**
  * SPEC-025 FR-6: soft, NON-MODAL advisory when the constitution has no
@@ -164,9 +174,144 @@ export async function offerScaffoldCommit(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Post-init branch-ruleset advisory (#356)
+// ---------------------------------------------------------------------------
+
+/** Toast action: open the GitHub rulesets docs page. */
+const RULESET_DOCS_ACTION = 'View GitHub docs';
+/** Toast action: create the required-status-checks ruleset via the user's gh. */
+const RULESET_CREATE_ACTION = 'Create ruleset';
+
+/** Dependencies for {@link offerRulesetAdvisory}, injectable for tests. */
+export interface RulesetAdvisoryDeps {
+  /** Command runner used for all `gh` invocations. */
+  run?: CommandRunner;
+  /** Resolve `owner/repo` from the folder's git remote. */
+  resolveRepo?: (folder: string) => Promise<string | null>;
+  /** Open an external URL (defaults to VS Code's opener). */
+  openExternal?: (url: string) => void;
+  /**
+   * Whether `folder` is a git working tree. Defaults to a cheap `.git`
+   * existence check — same guard {@link offerScaffoldCommit} uses to stay
+   * toast-free (and gh-free) on non-repo init flows.
+   */
+  isRepo?: (folder: string) => boolean;
+}
+
+/** Show an info toast linking the rulesets docs, with a one-click open action. */
+async function linkRulesetDocs(
+  message: string,
+  openExternal: (url: string) => void,
+): Promise<void> {
+  const choice = await vscode.window.showInformationMessage(message, RULESET_DOCS_ACTION);
+  if (choice === RULESET_DOCS_ACTION) openExternal(RULESET_DOCS_URL);
+}
+
+/**
+ * NON-BLOCKING post-init advisory (#356): nudge the user toward a branch
+ * ruleset that requires CI status checks on the default branch.
+ *
+ * Network discipline (Tier-0 boundary): the ONLY always-on path is the
+ * zero-network docs link. EVERY network action — reading existing rulesets and
+ * creating one — is gated behind BOTH `gh` availability AND an explicit user
+ * action:
+ *   - `gh` missing/unauthed → info toast linking the docs. Zero network. Done.
+ *   - `gh` ready + a qualifying ruleset already exists → brief "already
+ *     configured" toast. No offer.
+ *   - `gh` ready + none exists → offer to create (explicit consent). On
+ *     "Create ruleset" → POST via gh; success → toast; 403/error → fall back to
+ *     the docs link. On dismiss / "View GitHub docs" → link the docs.
+ *
+ * Best-effort: any failure is swallowed (at worst the docs link), and never
+ * affects the init result.
+ */
+export async function offerRulesetAdvisory(
+  folder: string,
+  deps: RulesetAdvisoryDeps = {},
+): Promise<void> {
+  const run = deps.run ?? defaultCommandRunner;
+  const resolveRepo = deps.resolveRepo ?? getRepoFromRemote;
+  const openExternal = deps.openExternal ?? ((url: string) => vscode.env.openExternal(vscode.Uri.parse(url)));
+  const isRepo = deps.isRepo ?? ((f: string) => fs.existsSync(path.join(f, '.git')));
+
+  // Cheap guard: not a git repo → no remote, no ruleset to advise about. Return
+  // before probing gh at all (mirrors offerScaffoldCommit) so non-repo init
+  // flows stay both toast-free AND zero-process.
+  if (!isRepo(folder)) return;
+
+  try {
+    // gh unavailable/unauthed → zero-network docs link. Done.
+    if (!(await isGhReady(run))) {
+      await linkRulesetDocs(
+        'MinSpec: protect your default branch with a ruleset that requires CI ' +
+          `(${REQUIRED_CHECK_CONTEXTS.join(', ')}) status checks. ` +
+          'Install/authenticate the `gh` CLI to let MinSpec offer to create one, or see the GitHub docs.',
+        openExternal,
+      );
+      return;
+    }
+
+    const repo = await resolveRepo(folder);
+    if (!repo) {
+      // gh is ready but we cannot identify the GitHub repo (no github.com
+      // remote). Nothing to read or create against → docs link only.
+      await linkRulesetDocs(
+        'MinSpec: to require CI status checks on your default branch, add a ' +
+          'GitHub remote, then create a branch ruleset — see the GitHub docs.',
+        openExternal,
+      );
+      return;
+    }
+    const [owner, name] = repo.split('/');
+
+    // READ (network, gated by gh-availability above). A qualifying ruleset
+    // already protects the default branch → brief confirmation, no offer.
+    if (await hasRequiredChecksRuleset(owner, name, run)) {
+      vscode.window.showInformationMessage(
+        `MinSpec: your default branch already has a ruleset requiring status checks (${repo}).`,
+      );
+      return;
+    }
+
+    // None found → OFFER (explicit consent gate for the create-network action).
+    const choice = await vscode.window.showInformationMessage(
+      `MinSpec: ${repo} has no ruleset requiring CI status checks on its default branch. ` +
+        `Create one requiring ${REQUIRED_CHECK_CONTEXTS.join(' + ')}?`,
+      RULESET_CREATE_ACTION,
+      RULESET_DOCS_ACTION,
+    );
+
+    if (choice === RULESET_CREATE_ACTION) {
+      // CREATE (network) — only reached on explicit "Create ruleset".
+      const outcome = await createRequiredChecksRuleset(owner, name, run);
+      if (outcome.created) {
+        vscode.window.showInformationMessage(
+          `MinSpec: created a ruleset requiring ${REQUIRED_CHECK_CONTEXTS.join(' + ')} on ${repo}'s default branch.`,
+        );
+        return;
+      }
+      // 403 (no admin scope) or any other error → fall back to the docs link.
+      const why = outcome.forbidden
+        ? 'your gh token lacks repo-admin scope'
+        : 'the request failed';
+      await linkRulesetDocs(
+        `MinSpec: could not create the ruleset (${why}). Create it manually — see the GitHub docs.`,
+        openExternal,
+      );
+      return;
+    }
+
+    // Dismissed or chose "View GitHub docs" → link the docs (zero further network).
+    if (choice === RULESET_DOCS_ACTION) openExternal(RULESET_DOCS_URL);
+  } catch {
+    // Advisory only — never let a ruleset-advisory failure break init.
+  }
+}
+
 export async function initCommand(
   folderArg?: string,
-  deps?: OfferScaffoldCommitDeps,
+  deps?: OfferScaffoldCommitDeps & { ruleset?: RulesetAdvisoryDeps },
 ): Promise<void> {
   const folder = folderArg ?? (await resolveTargetFolder());
   if (!folder) return;
@@ -191,6 +336,10 @@ export async function initCommand(
   // Post-init "what to commit" hint + offer (#222). Best-effort, non-modal,
   // never blocks the init result.
   await offerScaffoldCommit(folder, deps);
+  // Post-init branch-ruleset advisory (#356). NON-BLOCKING; the only always-on
+  // path is a zero-network docs link — all network is gh-availability- AND
+  // consent-gated. Failures never affect the init result.
+  await offerRulesetAdvisory(folder, deps?.ruleset);
 }
 
 export async function initRefreshCommand(folderArg?: string): Promise<void> {
