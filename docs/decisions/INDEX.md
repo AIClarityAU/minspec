@@ -371,6 +371,12 @@ The host IDE (the Claude Code VS Code extension) now surfaces **pending backgrou
 SPEC-019's **FR-13** hands the agent's branch out as a diff and has the credentialed control plane push it **after the agent exits**. Its one concurrency guard is a *creation-time* sub-bullet: branch off origin/main (fetched parent-side), never the stale local main. The session question: SealBox does not run in a vacuum — concurrently the human **merges PRs** (origin/main advances), **edits main directly**, and **other Claude Code sessions work in sibling worktrees** on the same .git. Does FR-13 keep SealBox from getting…
 <!-- /dr-summary:DR-046 -->
 
+## [DR-047 — Independent AI review across every Approvable surface](DR-047.md)
+
+*Status: proposed · Date: 2026-06-30*
+
+The independent reviewer-agent from DR-033 §6 covers PRs only. AI-authored Specs, Plans, DRs, constitution invariants, and Epics have no independent read before the human approval gate — a structural gap demonstrated by the 2026-06-29 rubber-stamp session (#344–349, 7 live defects waved through). This DR makes AI review the universal floor — it runs on **every** doc type MinSpec produces or consumes (spec, plan, design.md, tasks.md, DR, constitution, epic, issue, PR), including non-human-approvable types — and **decouples** the AI-reviewed set (all docs) from the human-gated set (the critical subset). It amends DR-041's Approvable union (+ plan, design.md, tasks.md, constitution); adds dev-opt-in auto-approve for low-criticality docs (design.md/tasks.md/issue) and a per-dev coverage slider (dogfood default = max); generalises the signpost predicate (greenlit ∧ prior-gates ∧ human-gate-open) to all human-gated types; and softens the §3 ordering gate to block only *implementing* code, not unrelated code in a mixed PR.
+
 ## [DR-048 — Memory-poisoning defence + reality-checking split by tier; promptfoo is a dev-time harness, never a shipped dependency](DR-048.md)
 
 *Status: accepted · Date: 2026-06-30*
