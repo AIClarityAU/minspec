@@ -278,4 +278,10 @@ The host IDE's background-task runner (e.g. Claude Code tacking pending tasks on
 *Status: accepted · Date: 2026-06-29*
 
 Under concurrent git mutation (PRs merging, main edited, sibling-worktree sessions), SPEC-019 FR-13 must keep SealBox dispatch from corrupting the user's checkout. A 7-lens adversarial review confirmed 7 integrity-class races; the fix mandates dedicated-worktree isolation and symmetric base-freshness — verify the true remote tip at BOTH worktree creation AND push — as T0 invariants.
+
+## [DR-047 — SealBox is public / open-source — the moat stays in private Scrooge, not in the sandbox](DR-047.md)
+
+*Status: proposed · Date: 2026-06-29*
+
+DR-044 §2 put SealBox in a private repo to guard the credential-boundary design. A 3-lens pressure-test (steelman-private, steelman-public, scrooge-funnel) returned 2:1 for public — the private lens conceded its own core. SealBox's load-bearing trust claim (FR-6 attestation) is only auditable if buyers can read the code; the real moat (measurement/routing) stays private inside ScroogeLLM (DR-027). Flipping the repo public maximises install volume and Scrooge funnel pull-through; closed-source throttles the exact spend SealBox exists to create.
 <!-- minspec:dr-index:end -->
