@@ -166,4 +166,26 @@ describe('renderTrustChart — model edge cases', () => {
     expect(result).not.toContain('<evil>');
     expect(result).toContain('&lt;evil&gt;');
   });
+
+  it('coerces non-finite / negative metric values — never emits NaN/Infinity/negative width (public-contract hardening)', () => {
+    const result = renderTrustChart(
+      makeModel(
+        [
+          { specId: 'A', pct: NaN },
+          { specId: 'B', pct: Infinity },
+          { specId: 'C', pct: -0.5 },
+          { specId: 'D', pct: 0.4 },
+        ],
+        [
+          { specId: 'W', approvedChars: NaN },
+          { specId: 'X', approvedChars: -10 },
+          { specId: 'Y', approvedChars: 12 },
+        ],
+      ),
+    );
+    expect(result).not.toMatch(/NaN/);
+    expect(result).not.toMatch(/Infinity/);
+    expect(result).not.toMatch(/width="-/); // no negative bar width
+    expect((result.match(/<svg/g) || []).length).toBe(1); // still one well-formed SVG
+  });
 });
