@@ -26,10 +26,14 @@
  *   - 'phase-action' nodes come from SPEC-010's per-feature resolver (FR-4,
  *     deferred); declared in the NodeKind union as a typed seam, never generated
  *     here.
+ *   - 'answer-OQ' (#227) IS implemented in this slice — see `hasUnresolvedOpenQuestions`
+ *     below. Parsing the Clarify/Open-Questions prose into that boolean (incl. the
+ *     tracked-via-issue exemption, mirroring the dangling-park-ref linter in
+ *     spec-validator.ts) is the fs-adapter's job; this core only consumes the flag.
  *   - FR-3b milestones, FR-15 LLM repair-escalation, PR-review nodes (#182),
- *     pre-phase gates (#227) are out of this slice. This core DETECTS corruption
- *     only; the repair ladder (deterministic→LLM offer) is a follow-up consumer
- *     of `resolveCorruption()`.
+ *     analyze-gate / review-gate (#227, the other two pre-phase gate kinds) are
+ *     out of this slice. This core DETECTS corruption only; the repair ladder
+ *     (deterministic→LLM offer) is a follow-up consumer of `resolveCorruption()`.
  *   - The fs adapter (build ArtifactGraph from real epics/specs/DRs) and all UI
  *     surfaces (status-bar/explorer) are a separate follow-up PR.
  */
@@ -76,6 +80,13 @@ export interface SpecNode {
   approvalState: ApprovalState;
   goalRank?: number;
   priority?: number;
+  /**
+   * #227 answer-OQ. True iff the spec carries an Open Question that is neither
+   * answered nor parked-with-a-tracking-link (the fs-adapter computes this from
+   * Clarify `- [ ]` boxes / `OQ-N` prose, applying the same tracked-via-issue
+   * exemption as the dangling-park-ref linter). Absent/false ⇒ no gate.
+   */
+  hasUnresolvedOpenQuestions?: boolean;
 }
 export interface AdrNode {
   id: string; // DR-NNN
@@ -83,6 +94,8 @@ export interface AdrNode {
   epic?: string;
   goalRank?: number;
   priority?: number;
+  /** #227 answer-OQ — see `SpecNode.hasUnresolvedOpenQuestions`. */
+  hasUnresolvedOpenQuestions?: boolean;
 }
 
 export interface ArtifactGraph {
@@ -98,7 +111,7 @@ export type SeverityClass = 'gate-violation' | 'blocked-ready' | 'promote-parent
 //  NOTE: 'phase-action' is in the kind UNION (DR-019/FR-8 vocabulary) but NOT
 //  emitted by the core slice — its source is SPEC-010 (FR-4, deferred). Declared
 //  for the typed seam, never produced.
-export type NodeKind = 'epic-promote' | 'spec-approve' | 'adr-accept' | 'phase-action';
+export type NodeKind = 'epic-promote' | 'spec-approve' | 'adr-accept' | 'phase-action' | 'answer-OQ';
 
 export interface Evidence {
   severityClass: SeverityClass;
@@ -420,6 +433,20 @@ function detectIncoherence(
         });
       }
     }
+    // #227 answer-OQ, terminal half: a spec that reached done/archived (no
+    // longer a pending human task, per isSpecTerminal) but STILL carries an
+    // unresolved Open Question shipped silently — the exact defect this gate
+    // exists to make structurally impossible. Surfaced as top-severity
+    // corruption, not a normal pending node, because the artifact already
+    // claims to be finished.
+    if (s.hasUnresolvedOpenQuestions && isSpecTerminal(s)) {
+      out.push({
+        kind: 'incoherence',
+        rule: 'coherence.terminal-with-open-oq',
+        message: `state unclear — ${s.id} is ${s.status} but still has an unresolved open question`,
+        refs: [s.id],
+      });
+    }
   }
 
   for (const a of graph.adrs) {
@@ -434,6 +461,19 @@ function detectIncoherence(
           refs: [epic.id, a.id].sort(compareIds),
         });
       }
+    }
+    // #227 answer-OQ, terminal half (DR side): a DR has no separate
+    // "implementing" phase between authoring (proposed) and shipped —
+    // accepted/deprecated/superseded ARE its terminal states. An unresolved OQ
+    // at that point is the same shipped-with-a-dangling-question defect as the
+    // spec case above.
+    if (a.hasUnresolvedOpenQuestions && a.status !== 'proposed') {
+      out.push({
+        kind: 'incoherence',
+        rule: 'coherence.terminal-with-open-oq',
+        message: `state unclear — ${a.id} is ${a.status} but still has an unresolved open question`,
+        refs: [a.id],
+      });
     }
   }
 
@@ -649,6 +689,43 @@ function generateNodes(
         },
         cls,
         dials,
+      ),
+    );
+  }
+
+  // #227 answer-OQ, in-flight half: a spec past `specifying` but not yet
+  // terminal (i.e. `implementing`) that still carries an unresolved Open
+  // Question — a normal pending human decision (not corruption; the artifact
+  // hasn't claimed to be finished yet). The terminal case is a coherence
+  // violation instead (see `detectIncoherence`), so this never double-covers
+  // done/archived specs.
+  for (const s of graph.specs) {
+    if (superseded.has(s.id)) continue;
+    if (s.status !== 'implementing') continue;
+    if (!s.hasUnresolvedOpenQuestions) continue;
+    const epic = s.epic ? index.epicById.get(s.epic) : undefined;
+    const cls: SeverityClass = epic && epic.status === 'active' ? 'blocked-ready' : 'pending';
+    ranked.push(
+      mkRanked(
+        {
+          kind: 'answer-OQ',
+          targetId: s.id,
+          imperative: `Answer open question on ${s.id}`,
+          severityClass: cls,
+          evidence: {
+            severityClass: cls,
+            rule: cls === 'blocked-ready' ? 'gate.answer-oq' : 'pending.answer-oq',
+            explanation: `${s.id} is implementing with an unresolved open question`,
+            refs: epic ? [epic.id, s.id] : [s.id],
+          },
+        },
+        cls,
+        {
+          epicOrder: resolveEpicOrder(s.epic, index),
+          goalRank: s.goalRank,
+          priority: s.priority,
+          artifactId: s.id,
+        },
       ),
     );
   }
