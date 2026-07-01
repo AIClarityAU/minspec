@@ -65,8 +65,8 @@ merge-vs-hold decision. This spec is that decision.
 - **FR-1** the pure eligibility decision function.
 - **FR-2** the red→green regression prover.
 - **FR-3** hollow-test gate input (wires #130 — closes #197's activation).
-- **FR-4** conservative reach-degrade rule.
-- **FR-5** blast-radius classification of a PR (low vs high) from the consequence signals.
+- **FR-4** conservative reach-degrade rule + **FR-4a** the *derived* `touchesExportedSurface` (single source of truth).
+- **FR-5** blast-radius classification of a PR (low vs high), deny-by-default over the analyzer's signal names.
 - **FR-6** loop integration: replace #172's unconditional hold with eligible→merge / else→hold.
 - **FR-7** an audit trail: every merge/hold decision records which conditions passed/failed.
 - **FR-8** high-blast skim surface: hand the held PR + signal block to SPEC-014's in-IDE review-webview as a keyboard-first next-human-task (GitHub comment is the degraded fallback).
@@ -103,24 +103,49 @@ merge-vs-hold decision. This spec is that decision.
 ## Functional Requirements
 
 - **FR-1 Eligibility decision.** `decideAutoMerge(input: AutoMergeInput): AutoMergeDecision`.
-  `eligible` iff: all three review signals green (incl. proven red→green) **and** no hollow/stub
-  finding **and** blast-radius = low **and** (reach known low **or** no exported-surface touch).
-  Otherwise `{ eligible: false, reason, failed: string[] }`.
+  `eligible` iff: all three review signals green (incl. prover-produced red→green, INV-3)
+  **and** no hollow/stub finding **and** blast-radius = low (FR-5) **and** (reach known low
+  **or** `touchesExportedSurface` is false — the FR-4a *derived* predicate, not a caller
+  boolean). Otherwise `{ eligible: false, reason, failed: string[] }`.
 - **FR-2 Red→green prover.** Given the PR's base SHA, head SHA, and the named regression
   test(s): in an isolated checkout/worktree, run the test against **base** and assert it
   FAILS; run against **head** and assert it PASSES. Emits `regressionProvenBaseRed` +
   `regressionGreenOnHead`. Honest failure modes: test not found, test green on base (not a
   real regression), test red on head → all ⇒ NOT proven ⇒ ineligible. This is IO/exec
   (not Tier-0-pure) → lives in the dispatch/script layer, feeds the pure FR-1 as data.
+  **The prover is the sole authority for `regressionProvenBaseRed`:** the dispatch MUST
+  overwrite any agent-supplied value on `ReviewSignalsInput` with the prover's result, so a
+  self-reported `true` can never survive into FR-1 (INV-3). Absent/failed prover run ⇒ `false`.
 - **FR-3 Hollow-test input.** Run `scanTestSource` (#130) over changed/added test files;
   any finding ⇒ INV-4 ineligible. (This is the activation #197 asked for.)
 - **FR-4 Conservative reach-degrade.** When a consequence signal set contains the
-  `reach_unavailable` degraded marker (SPEC-023 FR-1) AND the public-API analyzer reports any
-  exported-surface change, classify the PR **high-blast** (hold). Reach-unknown is treated as
-  worst-case, never best-case.
-- **FR-5 Blast classification.** Map the consequence signal set to `low | high`: **high** if
-  any of {irreversibility, sensitive-sink, public-API delta, concurrency} trips, OR the FR-4
-  degrade condition holds; else **low**. (This is the routing DR-033 §3 keys auto-merge on.)
+  `reach_unavailable` degraded marker (SPEC-023 FR-1) AND `touchesExportedSurface` (FR-4a) is
+  true, classify the PR **high-blast** (hold). Reach-unknown is treated as worst-case, never
+  best-case. (In v1 `reach_unavailable` is *always* present — impact-reach has no index — so
+  every v1 merge's safety reduces to `touchesExportedSurface`; its derivation is therefore
+  load-bearing and pinned in FR-4a.)
+- **FR-4a `touchesExportedSurface` is DERIVED, not a caller input.** Compute it inside the
+  gate from `consequenceSignals`: true iff any `public_api_added` / `public_api_changed` /
+  `public_api_removed` signal is present. **Fail-safe:** if the public-API analyzer emitted a
+  degraded/`export *` sentinel or a "content-unavailable" `public_api_changed` (it could not
+  read the old/new surface — a documented `publicApiAnalyzer` blind spot), force
+  `touchesExportedSurface = true`. It is never supplied by the dispatch as an independent
+  boolean (that would be a second, un-reconciled source of truth for the one conjunct the v1
+  gate leans on). Unknown/unreadable surface ⇒ assume exported-touch ⇒ hold.
+- **FR-5 Blast classification (deny-by-default over signal *names*).** Map the consequence
+  signal set to `low | high`. The classifier keys on the analyzer's **actual emitted signal
+  names**, not abstract families, and **defaults unknown names to `high`** (a novel/unmapped
+  signal is treated as dangerous until a human classifies it — the inverse of an allowlist).
+  Concretely, from the live `consequence-analyzers.ts` (SPEC-023): **high** if any of —
+  `irreversible_deletion`, `irreversible_migration`, `destructive_schema_op` (irreversibility);
+  `sensitive_sink`; `public_api_added` / `public_api_changed` / `public_api_removed`;
+  `concurrency`, `timer`, `transaction` — trips, OR the FR-4 degrade condition holds, **OR any
+  consequence signal name not in the low-blast recognition set is present**. A signal counts
+  toward `low` only if it is explicitly recognized as low-blast (currently: the `reach_unavailable`
+  degrade marker is handled by FR-4, not counted low here; there is no other low-blast signal in
+  v1). Any future analyzer signal is therefore `high` until this list is deliberately updated.
+  (This is the routing DR-033 §3 keys auto-merge on; erring `high` costs a 30s skim, erring
+  `low` costs a bad `main`.)
 - **FR-6 Loop integration.** In the #172 dispatch, after a PR's checks are green, call the
   prover (FR-2) + gate (FR-1). `eligible` ⇒ `gh pr merge --squash` (low-blast, no human).
   Else ⇒ **do not merge; emit a high-blast review task (FR-8)** carrying the #180 signal
@@ -147,11 +172,12 @@ merge-vs-hold decision. This spec is that decision.
 
 ```ts
 interface AutoMergeInput {
-  readonly reviewSignals: ReviewSignalsInput;      // from #180, incl. prover output
+  readonly reviewSignals: ReviewSignalsInput;      // from #180; regressionProvenBaseRed OVERWRITTEN by the FR-2 prover
   readonly hollowFindings: TestFinding[];          // from #130 scanTestSource
-  readonly consequenceSignals: ClassificationSignal[]; // from #88 runConsequenceAnalyzers
-  readonly touchesExportedSurface: boolean;        // public-API analyzer
+  readonly consequenceSignals: ClassificationSignal[]; // from #88 runConsequenceAnalyzers — sole source for blast + exported-surface
   readonly mode: 'consequence-hybrid' | 'pr-gate'; // #183 per-dev (default hybrid)
+  // NOTE: touchesExportedSurface is NOT an input — it is DERIVED from consequenceSignals (FR-4a),
+  // so the gate has a single source of truth. blast is DERIVED via FR-5 (deny-by-default on names).
 }
 interface AutoMergeDecision {
   readonly eligible: boolean;
@@ -174,11 +200,18 @@ interface ProverResult {
 **T0 (invariants):** INV-1 deny-by-default property (drop any input → never eligible);
 INV-2 degraded-reach + exported touch → ineligible; INV-3 self-reported (un-proven)
 regression → ineligible; INV-4 any hollow/stub finding → ineligible; INV-6 purity + every
-decision has a non-empty reason.
+decision has a non-empty reason. **FR-5 deny-by-default:** a novel/unmapped consequence
+signal name (e.g. a fabricated `"future_signal"`) → **high-blast** (guards the allowlist
+inversion, finding 1); each of `destructive_schema_op` / `timer` / `transaction` alone →
+high. **FR-4a derivation:** `reach_unavailable` + an `export *` sentinel (or content-unavailable
+`public_api_changed`) → `touchesExportedSurface=true` → ineligible (guards the second-source-of-truth
+hole, finding 2); no `public_api_*` signal → `touchesExportedSurface=false`.
 
 **T1 (contract):** a fully-green low-blast change → eligible; each single failing condition
-flips it to ineligible with the right `failed[]` key; a migration/auth/public-API/concurrency
-change → high-blast hold even with all signals green; `pr-gate` mode → always hold.
+flips it to ineligible with the right `failed[]` key; a change tripping any high signal
+(`irreversible_*` / `destructive_schema_op` / `sensitive_sink` / `public_api_*` /
+`concurrency` / `timer` / `transaction`) → high-blast hold even with all review signals green;
+`pr-gate` mode → always hold.
 
 **FR-2 prover tests:** a real regression (red→green) proves; a test green-on-base → not
 proven; a test red-on-head → not proven; missing test → not proven.
@@ -197,5 +230,9 @@ proven; a test red-on-head → not proven; missing test → not proven.
 ## Follow-ups (tracked)
 
 - Widen low-blast coverage once reach is real + validated: #195 (index), #91 (validation).
+- **FR-8's in-IDE path is gated on [SPEC-014](../SPEC-014-review-webview/requirements.md)**
+  (`status: specifying` — no built webview yet). Buildable now: the GitHub-comment degraded
+  fallback; the keyboard-first review-webview surface + the INV-7 T-test land only when
+  SPEC-014 ships. Not read as buildable-now.
 - `plan-gate` HITL mode (#183 option 2) — deferred.
 - Productize as the `aiclarity.agent-execute` gate surface (EPIC-007) — this dev-time gate is the prototype.
