@@ -139,7 +139,8 @@ merge-vs-hold decision. This spec is that decision.
   Concretely, from the live `consequence-analyzers.ts` (SPEC-023): **high** if any of —
   `irreversible_deletion`, `irreversible_migration`, `destructive_schema_op` (irreversibility);
   `sensitive_sink`; `public_api_added` / `public_api_changed` / `public_api_removed`;
-  `concurrency`, `timer`, `transaction` — trips, OR the FR-4 degrade condition holds, **OR any
+  `concurrency` (its `explain` covers the timer/transaction sub-patterns — `concurrency` is the
+  only emitted name) — trips, OR the FR-4 degrade condition holds, **OR any
   consequence signal name not in the low-blast recognition set is present**. A signal counts
   toward `low` only if it is explicitly recognized as low-blast (currently: the `reach_unavailable`
   degrade marker is handled by FR-4, not counted low here; there is no other low-blast signal in
@@ -202,15 +203,14 @@ INV-2 degraded-reach + exported touch → ineligible; INV-3 self-reported (un-pr
 regression → ineligible; INV-4 any hollow/stub finding → ineligible; INV-6 purity + every
 decision has a non-empty reason. **FR-5 deny-by-default:** a novel/unmapped consequence
 signal name (e.g. a fabricated `"future_signal"`) → **high-blast** (guards the allowlist
-inversion, finding 1); each of `destructive_schema_op` / `timer` / `transaction` alone →
-high. **FR-4a derivation:** `reach_unavailable` + an `export *` sentinel (or content-unavailable
+inversion, finding 1); `destructive_schema_op` alone → high; a `concurrency` signal → high. **FR-4a derivation:** `reach_unavailable` + an `export *` sentinel (or content-unavailable
 `public_api_changed`) → `touchesExportedSurface=true` → ineligible (guards the second-source-of-truth
 hole, finding 2); no `public_api_*` signal → `touchesExportedSurface=false`.
 
 **T1 (contract):** a fully-green low-blast change → eligible; each single failing condition
 flips it to ineligible with the right `failed[]` key; a change tripping any high signal
 (`irreversible_*` / `destructive_schema_op` / `sensitive_sink` / `public_api_*` /
-`concurrency` / `timer` / `transaction`) → high-blast hold even with all review signals green;
+`concurrency`) → high-blast hold even with all review signals green;
 `pr-gate` mode → always hold.
 
 **FR-2 prover tests:** a real regression (red→green) proves; a test green-on-base → not
