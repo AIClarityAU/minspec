@@ -7,6 +7,8 @@ Rules that must never be violated. All changes must preserve them.
 <!-- Add invariants here. Example: -->
 <!-- 1. No breaking changes to public API without deprecation cycle -->
 <!-- 2. All user data stays local — no network calls without consent -->
+- DRAFT: Runs offline — no network calls without explicit user consent.
+  > _proposed because no runtime network-client dependency was detected_
 
 ## Principles
 
@@ -16,6 +18,10 @@ Guidelines that should be followed. Can be bent in exceptional circumstances wit
 <!-- 1. Ceremony proportional to complexity -->
 <!-- 2. User override always wins -->
 <!-- 3. Specs are living documents, not bureaucracy -->
+- DRAFT: Honor CLAUDE.md project instructions — they override default behavior.
+  > _proposed because a CLAUDE.md instructions file is present_
+- DRAFT: Record hard-to-reverse decisions as decision records before implementing.
+  > _proposed because a docs/decisions/ register is in use_
 
 ## Constraints
 
@@ -25,6 +31,14 @@ Technical or business constraints that bound the solution space.
 <!-- 1. Must run offline — zero network dependency -->
 <!-- 2. VS Code extension size < 5MB -->
 <!-- 3. Node.js 18+ runtime only -->
+- DRAFT: @aiclarity/shared stays vscode/network-free (Tier-0) — no editor or network imports.
+  > _proposed because @aiclarity/shared is a vscode-free workspace package_
+- DRAFT: Cross-package changes must respect workspace boundaries; no deep reach into another package’s internals.
+  > _proposed because a monorepo / workspaces layout was detected_
+- DRAFT: Target the pinned Node engine range; do not rely on newer runtime features.
+  > _proposed because package.json pins an engines.node range_
+- DRAFT: Keep extension activation cheap and side-effect-free; do not block the editor on init.
+  > _proposed because this package is a VS Code extension_
 
 ## Goals
 
