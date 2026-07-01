@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-026-session-presence/requirements.md",
+  "specHash": "676d25caa3e7790ec22478bcbda9ef7c725cd2c0864f6fc528e8ef90fda5f153",
+  "approvedAt": "2026-07-01T07:51:25.189Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T4",
+  "migrated": false,
+  "baselineBlob": "ffa5c26d9f1f349e2302fbdfbbaeaa7af48759ba"
+}
