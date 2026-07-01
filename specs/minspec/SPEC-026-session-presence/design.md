@@ -78,11 +78,14 @@ minspec_cedit_gate() {
       case "$P" in specs/*|docs/decisions/*|docs/domain/*|docs/epics/*) ;; *) continue ;; esac
       for A in $r_allow; do
         if [ "$P" = "$A" ] || [ "${P#$A/}" != "$P" ] || { [ "${A%/\*}" != "$A" ] && d=${A%/\*} && [ "${P#$d/}" != "$P" ]; }; then
-          # arbitration (FR-13): earlier startedAt holds; block only the later self
+          # arbitration (FR-13, TOTAL): peer holds iff strictly-earlier startedAt, OR
+          # equal startedAt AND its sessionId sorts lower — exactly one holder, never both.
           r_start=$(grep -m1 '"startedAt"' "$rec" 2>/dev/null | sed -E 's/.*:[[:space:]]*"([^"]*)".*/\1/')
-          if [ -z "$my_start" ] || [ -z "$r_start" ] || [ "$r_start" \< "$my_start" ]; then
-            echo "✗ MinSpec Concurrent-Edit Guard: '$P' is being edited by LIVE session $r_id (pid $r_pid, seen ${r_seen}) in this working tree." >&2
-            echo "  It started earlier and holds this file. Open a worktree (scripts/new-worktree.sh) or wait — it drops off within 120s when done." >&2
+          if [ -z "$my_start" ] || [ -z "$r_start" ] \
+             || [ "$r_start" \< "$my_start" ] \
+             || { [ "$r_start" = "$my_start" ] && [ "$r_id" \< "$me" ]; }; then
+            echo "✗ MinSpec Concurrent-Edit Guard: approvable '$P' is being edited by LIVE session $r_id (pid $r_pid, seen ${r_seen}) on this checkout." >&2
+            echo "  It holds this doc. Approvables edit on main (DR-051) — do NOT open a worktree; wait for the peer to drop off (<=120s), pick a different doc, or coordinate via the FR-16 prompt." >&2
             echo "  Bypass: MINSPEC_CEDIT_OFF=1 git commit ..." >&2
             gate_fail=1
           fi
@@ -149,7 +152,7 @@ for rec in "$sess_dir"/*.session.json; do
 done
 if [ "$live_peer" = "1" ]; then
   echo "✗ MinSpec: HEAD moved under a LIVE session with uncommitted work — reverting the switch." >&2
-  echo "  Use a worktree for a different branch: scripts/new-worktree.sh <name> (rule #8)." >&2
+  echo "  Use a worktree for a different branch: git worktree add ~/code/.worktrees/<repo>/<name> -b <name> (rule #8)." >&2
   echo "  Bypass: MINSPEC_HEADGUARD_OFF=1" >&2
   git switch - >/dev/null 2>&1 || git checkout - >/dev/null 2>&1 || true
 fi
@@ -171,11 +174,14 @@ with your file/shell tools (you cannot see the status bar).
 A peer is LIVE iff `(now - lastSeen) < 120s` AND `kill -0 <pid>` succeeds. Ignore
 dead/stale peers.
 
-1. Before EDITING a corpus file F (specs/**, docs/decisions/**, docs/domain/**,
+1. Before EDITING an **approvable** F (specs/**, docs/decisions/**, docs/domain/**,
    docs/epics/**): if a LIVE peer whose `worktreeRoot` equals yours
    (`git rev-parse --show-toplevel`) lists F (or a covering dir/glob) in its
-   `fileAllowlist`, do NOT edit F — pick different work, or open your own worktree
-   (`scripts/new-worktree.sh <name>` then `cd` in).
+   `fileAllowlist`, do NOT edit F — pick different work or wait for it to drop off.
+   Approvables edit on `main` (DR-051), so do NOT open a worktree for them.
+1b. Before EDITING **code** (packages/**, scripts/**, config) while a LIVE peer shares your
+   `worktreeRoot`: open your own worktree first —
+   `git worktree add ~/code/.worktrees/<repo>/<name> -b <name>` then `cd` in.
 2. Before any HEAD-MOVING git op (`switch`/`checkout <branch>`/`reset --hard`/`merge`)
    on the PRIMARY checkout: if ANY other LIVE session shares your `worktreeRoot`, do
    NOT move HEAD — use a worktree (rule #8). Verify the current branch first; if it

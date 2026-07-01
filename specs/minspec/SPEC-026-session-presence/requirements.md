@@ -115,7 +115,7 @@ interface SessionPresenceRecord {
   fileAllowlist: string[]; // from session.json (repo-relative paths) — the live CLAIM the guard keys on (FR-12)
   pid: number;             // process.pid of the VS Code extension host
   lastSeen: string;        // ISO-8601 UTC, updated every heartbeat
-  startedAt: string;       // ISO-8601 UTC, set on first write, never changed — the arbitration key (FR-13)
+  startedAt: string;       // canonical fixed-width ISO-8601 UTC, ms precision (e.g. 2026-07-01T05:56:10.123Z) so lexical order == chronological — the FR-13 arbitration key; sessionId is the secondary tie-break on equal startedAt
 }
 ```
 
@@ -327,8 +327,11 @@ staged path P, ALL hold:
   (`specs/**`, `docs/decisions/**`, `docs/domain/**`, `docs/epics/**`).
 
 ALLOW otherwise. On block: print the peer's **scope**/branch/pid/lastSeen and the
-resolution ("open a worktree: scripts/new-worktree.sh, or wait — the peer drops off
-within 120s"). **Fail-open:** any parse/read/`kill`/`git` error ⇒ that P does not block.
+resolution. Because FR-12 fires on the **approvable corpus** — edited directly on `main`
+per [DR-051](../../../docs/decisions/DR-051.md), **never** worktree-isolated — the
+resolution is **"wait for the peer to drop off (≤120s), pick a different doc, or coordinate
+via the FR-16 prompt"**, NOT "open a worktree" (worktree advice belongs only to the
+FR-9/FR-15 *code* paths). **Fail-open:** any parse/read/`kill`/`git` error ⇒ that P does not block.
 **Kill-switch:** `MINSPEC_CEDIT_OFF=1`. **CI/absent no-op:** missing/empty
 `.minspec/sessions/` ⇒ exit 0 immediately (FR-8 carve-out). Shell-only, jq-free
 (grep/sed/awk), and the shell predicate MUST agree with `presence.ts` on a golden
@@ -346,15 +349,21 @@ scope).
    each see the other as a live contender and BOTH are rejected — a deadlock. Rule: when
    FR-12 would reject P, compare `startedAt` of self (from `.minspec/session.json`) with
    the contending peer's. The **earlier-started session is the holder and is ALLOWED**;
-   only the **later-started session is rejected** and told to worktree-or-wait. Single
-   deterministic winner + single clear loser instruction, not a symmetric stall. (If self
-   has no resolvable `startedAt`, treat self as later → the conservative side blocks,
-   never both.)
+   only the **later-started session is rejected** and told to wait / pick another doc
+   (FR-16) — not "open a worktree" (approvables edit on `main`, DR-051). **Total tie-break
+   (closes INV-9):** `startedAt` is canonical fixed-width ISO-8601 UTC (ms precision, FR-2)
+   so lexical order == chronological; on **equal** `startedAt` (same millisecond), the
+   **lexicographically-lower `sessionId` holds** — a deterministic total order both engines
+   compute identically, so exactly one session is ever the holder and two same-second
+   sessions can never both commit. (If self has no resolvable `startedAt`, treat self as
+   later → the conservative side blocks, never both.)
 2. **Self-fallback.** If `MY_SESSION` is unresolved (trailer absent — bare-terminal human,
    or trailer hook bypassed), the backstop MUST NOT let a session's own presence record
    block its own commit. It additionally excludes any record whose `pid` is the committing
-   process's own tree root when derivable; if still ambiguous, fail open toward ALLOW for
-   that P. A null `MY_SESSION` degrades to warn/allow, never self-deadlock.
+   process's own tree root when derivable — **best-effort only: under the shared ext-host
+   PID (FR-11) this cannot distinguish self from a peer, so the real self-protection is the
+   fail-open-to-ALLOW below, not this PID check**. If still ambiguous, fail open toward
+   ALLOW for that P. A null `MY_SESSION` degrades to warn/allow, never self-deadlock.
 
 ### FR-14 — Bash⇔TypeScript predicate parity (anti-drift)
 
@@ -365,7 +374,10 @@ fixture set of records (live / stale-heartbeat / dead-PID / empty-allowlist /
 same-vs-different worktreeRoot / covering-vs-non-covering path) is evaluated by BOTH the
 TS `contendingLiveSessions` and the bash stanza (invoked in a harness), and CI fails on
 any divergence. This is the guard's **only** cross-surface determinism obligation:
-given identical inputs, identical verdicts. It does NOT (and per FR-8 need not) make the
+given identical inputs, identical verdicts. **Parity is over the liveness+coverage
+predicate only** — TS `contendingLiveSessions` (no arbitration) is compared against the
+bash **sub-function that stops before FR-13 arbitration**; the arbitration tie-break is
+tested separately (INV-9), never folded into this parity contract. It does NOT (and per FR-8 need not) make the
 verdict reproducible across environments — the *inputs* (who is live now) are intrinsically
 local-runtime. `STALE_SECS=120` / `HEARTBEAT_SECS=30` are duplicated as shell constants
 with a comment tying them to the `presence.ts` named constants.
@@ -434,9 +446,11 @@ need a way to find it… not guessing based on the name"*).
 - **INV-8 (sequential handoff never blocks).** A staged path whose only same-worktree
   claimant is DEAD/STALE/absent is ALLOWED — liveness is the sole discriminator, no
   lock-release step.
-- **INV-9 (concurrent pair blocks exactly the later committer).** Two live records, equal
-  worktreeRoot, overlapping non-empty allowlist, both staging P ⇒ the earlier `startedAt`
-  commits (exit 0), the later is rejected (exit 1) — never both, never the earlier.
+- **INV-9 (concurrent pair blocks exactly one committer — total order).** Two live records,
+  equal worktreeRoot, overlapping non-empty allowlist, both staging P ⇒ the holder commits
+  (exit 0), the other is rejected (exit 1) — **never both, never neither**. Holder = earlier
+  `startedAt`; on **equal** `startedAt`, the lexicographically-lower `sessionId` holds (total
+  tie-break, FR-13). A T0 fixture MUST cover the equal-`startedAt` case.
 - **INV-10 (separate-worktree / empty-allowlist never block).** A live peer with a
   different `worktreeRoot`, or an empty `fileAllowlist`, is never a contender.
 - **INV-11 (no-op when presence absent).** Missing/empty `.minspec/sessions/` ⇒ the
@@ -528,7 +542,7 @@ Ranked most-to-least expensive to change after shipping.
   and the original message-1 idea). A file-based session mailbox each agent is instructed
   to poll is the likely shape, but it is a distinct feature surface with its own protocol
   (who listens, what if a peer isn't polling, message schema) — not folded into this spec.
-  Issue filed; SPEC-027 to follow.
+  Issue [#388](https://github.com/harvest316/minspec/issues/388); SPEC-027 stub committed.
 - **Sub-file / per-line / per-checkbox locking.** Contention is whole-file granularity;
   two sessions editing different lines of the same `tasks.md` still serialize at commit.
 - **Preventing wasted in-flight editing when both agents ignore the steer AND the
@@ -540,6 +554,12 @@ Ranked most-to-least expensive to change after shipping.
   `fileAllowlist`, FR-12 has no claim to key on and the clobber falls through to git
   last-write-wins. Mitigated only by allowlist hygiene (the CLAUDE.md protocol requests it,
   #380 fan-out may make it mandatory) — not guaranteed here.
+- **Code-clobber when both sessions ignore the FR-9 steer.** After [DR-051](../../../docs/decisions/DR-051.md),
+  the FR-12 hard backstop guards **only the approvable corpus** (which has no PR gate); FR-9
+  worktree-steer for **code** is soft/advisory. So two sessions that both ignore the steer and
+  both edit the same `packages/**` file get a silent last-write-wins — **intentionally left to
+  the PR + CI flow** (code goes through PRs, which surface the conflict at merge). The hard
+  backstop deliberately covers only approvables-on-main, which have no such gate.
 - **Committed branch-RESERVATION artifact.** A committed "I own branch X, don't switch"
   file would make (c) deterministic + CI-visible, but is heavier committed coordination
   than this iteration warrants (was an OQ-1 option; user chose the lighter auto-revert).
