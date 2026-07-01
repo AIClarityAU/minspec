@@ -1,0 +1,95 @@
+#!/usr/bin/env sh
+
+# >>> minspec:managed:pre-commit-hook >>>
+# MinSpec pre-commit gate (DR-037) — editor-independent SDD + secret gates.
+# Runs on EVERY commit (terminal, other editor, AI agent), not just the VS Code path.
+# Bypass: MINSPEC_GATE_OFF=1 git commit ...
+set -u
+
+[ "${MINSPEC_GATE_OFF:-0}" = "1" ] && exit 0
+
+hook_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+
+# ── Stage 1: secret scan (#244, gitleaks) ────────────────────────────────────
+# gitleaks is the recommended static, offline, read-only scanner. It is OPTIONAL:
+# if it is not installed we warn and continue (graceful degradation) rather than
+# block — a missing optional tool must never wedge a commit.
+if command -v gitleaks >/dev/null 2>&1; then
+  if ! gitleaks protect --staged --redact --no-banner >/dev/null 2>&1; then
+    echo "✗ MinSpec gate: gitleaks found a potential secret in the staged changes." >&2
+    echo "  Review the finding above; remove the secret or add a gitleaks allowlist entry." >&2
+    echo "  Bypass (rare): MINSPEC_GATE_OFF=1 git commit ..." >&2
+    exit 1
+  fi
+else
+  echo "⚠ MinSpec gate: gitleaks not installed — secret scan SKIPPED." >&2
+  echo "  Install gitleaks (https://github.com/gitleaks/gitleaks) to gate committed secrets." >&2
+fi
+
+# ── Stage 2: SDD validation (DR-037 detection chain) ─────────────────────────
+# Highest-fidelity validator AVAILABLE wins, but every tier is OPPORTUNISTIC: a
+# tier is used only when it can actually run, otherwise the chain falls through to
+# the next. This is the never-wrong rule — a tier that cannot be reached (the npm
+# validator not yet published/installed, python3 absent) must NEVER brick a commit;
+# it degrades to the always-present shell gate below. Tiers:
+#   Node   — only if @aiclarity/minspec-validator is ALREADY resolvable
+#            (`npx --no-install`, never a network fetch that could E404-block).
+#   python — only if python3 is on PATH and validate.py exists.
+#   shell  — always present; the two pattern-matchable gates, inline below.
+
+# minspec_shell_gate: the always-correct baseline. (1) every staged specs/**/ md
+# file must carry an `id: SPEC-NNN` frontmatter line; (2) flag any staged non-hook
+# file leaking a MinSpec-internal marker (DR-032 egress). Returns non-zero on a
+# fatal (1) violation; the (2) leak is a warning only.
+minspec_shell_gate() {
+  gate_fail=0
+  staged=$(git diff --cached --name-only --diff-filter=ACM)
+  for f in $staged; do
+    case "$f" in
+      specs/*.md)
+        # Frontmatter is the block between the first two `---` fences.
+        if ! git show ":$f" 2>/dev/null | awk '
+          /^---[[:space:]]*$/ { fence++; next }
+          fence==1 && /^id:[[:space:]]*SPEC-[0-9]+/ { found=1 }
+          END { exit(found?0:1) }'; then
+          echo "✗ MinSpec gate: $f missing \`id: SPEC-NNN\` frontmatter." >&2
+          gate_fail=1
+        fi
+        ;;
+    esac
+  done
+  for f in $staged; do
+    case "$f" in
+      .minspec/hooks/*) continue ;;
+    esac
+    if git show ":$f" 2>/dev/null | grep -q 'minspec:managed:'; then
+      echo "⚠ MinSpec gate: $f contains a \`minspec:managed:\` marker outside the hooks dir (possible internal-ref leak, DR-032)." >&2
+    fi
+  done
+  if [ "$gate_fail" -ne 0 ]; then
+    echo "" >&2
+    echo "  Fix the errors above before committing." >&2
+    echo "  Bypass (rare): MINSPEC_GATE_OFF=1 git commit ..." >&2
+    return 1
+  fi
+  return 0
+}
+
+# Node tier — ONLY when the validator is already resolvable (no network fetch).
+if command -v npx >/dev/null 2>&1 \
+   && npx --no-install @aiclarity/minspec-validator --version >/dev/null 2>&1; then
+  npx --no-install @aiclarity/minspec-validator --pre-commit
+  exit $?
+fi
+
+# Python tier — ONLY when python3 + validate.py are present.
+if command -v python3 >/dev/null 2>&1 && [ -f "$hook_dir/validate.py" ]; then
+  python3 "$hook_dir/validate.py" --pre-commit
+  exit $?
+fi
+
+# Shell tier — always present.
+minspec_shell_gate
+exit $?
+# <<< minspec:managed:pre-commit-hook <<<

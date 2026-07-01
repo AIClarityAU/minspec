@@ -20,6 +20,13 @@ __pycache__/
 # MinSpec ephemeral session data
 .minspec/session.json
 .minspec/calibration.json
+# Machine-local merge-refresh drift-detection state, rebuilt on every
+# generate/refresh — must be gitignored, never committed. Mirrors
+# MINSPEC_GITIGNORE_ENTRIES in packages/minspec/src/lib/scaffold.ts (kept in
+# sync by gitignore.test.ts). Backfilled here after a stale installed build
+# wrote template-baseline.json without adding these entries (#380 follow-up).
+.minspec/generated-hashes.json
+.minspec/template-baseline.json
 
 # Classifier validation: fetched SWE-bench data (DR-009 — patches not committed)
 scripts/classifier-validation/.data/
