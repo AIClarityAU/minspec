@@ -6,7 +6,7 @@ tier: T4
 product: minspec
 epic: EPIC-009  # Team Readiness — concurrent multi-session coordination
 depends_on: [SPEC-022]  # SPEC-022 FR-1 resolved the approvals race (per-spec sidecars); this spec adds presence + the concurrent-edit guard on top
-relates_to: [SPEC-015]  # SPEC-015 status lanes own the status-bar surface this spec extends
+relates_to: [SPEC-015, DR-051]  # SPEC-015 status lanes own the status-bar surface this spec extends; DR-051 scopes worktree-steer to code (approvables edit on main)
 phases:
   specify: done
   clarify: done   # 4 gating decisions resolved by Paul Harvey 2026-07-01 (see Resolved Decisions)
@@ -244,23 +244,35 @@ it never blocks where it cannot observe live presence, so it never emits a verdi
 cannot reproduce. This carve-out MUST be stated in-repo next to the gate so the guard is
 never mistaken for a deterministic gate.
 
-### FR-9 — SOFT: worktree-steer (structural prevention; the agent-binding path)
+### FR-9 — SOFT: worktree-steer (structural prevention for CODE; the agent-binding path)
+
+> **Scoped to code by [DR-051](../../../docs/decisions/DR-051.md).** Worktree-steer
+> targets **code** changes (`packages/**`, `scripts/**`, config, hooks) — the class that
+> needs branch isolation + CI + PR. **Approvables** (`specs/**`, `docs/decisions/**`,
+> `docs/epics/**`, `docs/domain/**`) are edited **directly on `main`** (like issues,
+> visible in the IDE, no branch) — they get **no** worktree-steer, but the FR-12 guard
+> still serializes two live sessions clobbering the *same* approvable on `main`. So a
+> peer whose declared work is approvables-only is **not** steered.
 
 - Add `worktreeRoot` to `SessionPresenceRecord` (FR-2), populated from
   `git rev-parse --show-toplevel` at each heartbeat.
-- New command **"MinSpec: New Session Worktree"** wraps `scripts/new-worktree.sh <name>`
-  (`git worktree add ~/code/.worktrees/<repo>/<name> -b <name>`). On activation, if
-  `getActiveSessions()` returns ≥1 other live session whose `worktreeRoot` equals this
-  session's, surface a **non-modal toast** over the visible editor: *"N other live
-  session(s) share this working tree — open an isolated worktree? [Create Worktree]"*.
-  One keystroke; **never auto-runs** (creating a worktree is a low-frequency one-off; a
-  hotkey/command path satisfies the keyboard-over-mouse rule without forcing automation).
+- New command **"MinSpec: New Session Worktree"** — the extension calls
+  `git worktree add ~/code/.worktrees/<repo>/<name> -b <name>` **directly** (portable: it
+  must NOT depend on a repo-local `scripts/new-worktree.sh`, which won't exist in a target
+  project). On activation, if `getActiveSessions()` returns ≥1 other live session that
+  shares this `worktreeRoot` **and whose declared work includes a code path** (its
+  `fileAllowlist` covers a non-approvable path, or is empty/unknown), surface a
+  **non-modal toast** over the visible editor: *"N other live session(s) share this
+  working tree — open an isolated worktree? [Create Worktree]"*. One keystroke;
+  **never auto-runs** (creating a worktree is a low-frequency one-off; a hotkey/command
+  path satisfies the keyboard-over-mouse rule without forcing automation).
 - **CLAUDE.md "Concurrent-Session Etiquette" block (the ONLY layer that binds an
   autonomous agent** — it reads CLAUDE.md at session start but never the status bar):
-  at session start, if `.minspec/sessions/` shows a live peer (lastSeen<120s AND pid
-  alive) sharing this `worktreeRoot`, run `scripts/new-worktree.sh <name>` and `cd` into
-  it **before editing**. Advisory and bypassable; the FR-12 backstop catches the
-  non-compliant case, so skipping the steer **wastes work, it does not unblock**.
+  at session start, if a **code** edit is intended and `.minspec/sessions/` shows a live
+  peer (lastSeen<120s AND pid alive) sharing this `worktreeRoot`, create a worktree and
+  `cd` into it **before editing**. Approvable-only work stays on `main` (DR-051). Advisory
+  and bypassable; the FR-12 backstop catches the non-compliant case, so skipping the steer
+  **wastes work, it does not unblock**.
 
 ### FR-10 — SOFT: presence-derived pre-edit contention advisory
 
@@ -542,6 +554,11 @@ Ranked most-to-least expensive to change after shipping.
 - **Relates to:** SPEC-015 (status lanes own the status-bar surface FR-5/FR-16 extend);
   global rule #8 (worktree-per-session — FR-9/FR-15 are its in-tool enforcement);
   #383 (the gitignore-drift gate that must also cover `.minspec/sessions/`).
+- **Amended by:** [DR-051](../../../docs/decisions/DR-051.md) — artifact-class branch
+  policy: FR-9 worktree-steer scopes to **code**; approvables edit on `main` (FR-12 guards
+  them there); FR-9 portability (extension calls `git worktree add` directly). DR-051 also
+  spins off a **duplicate-id `validate` gate** (numbering) and the SPEC-022 "approve =
+  commit doc + sidecar" UX — both tracked there, not in this spec.
 - **Design provenance:** the guard (FR-8..16) is the synthesis of a 9-agent judge-panel
   workflow (4 design lenses → adversarial verify → synthesize), 2026-07-01. Worktree-steer
   won as the only structural fix; the liveness-gated backstop + trailer self-id + carve-out
