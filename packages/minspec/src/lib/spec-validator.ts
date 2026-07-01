@@ -529,11 +529,11 @@ const CLOSED_SET_FIELDS: readonly ClosedSetField[] = [
   { key: 'type', valid: SPEC_TYPE_SET, validList: SPEC_TYPES, required: false },
   // superseded-by (#162): the conditional-presence application of the #137
   // primitive to SPEC-017's terminal. Required ONLY when status is `superseded`,
-  // and (when a resolver is supplied) the ref must resolve. NOTE: `superseded` is
-  // not yet in the SpecStatus union (lifecycle.ts: it "joins when #162 lands"), so
-  // for specs this never fires today; the gate is scoped to where `superseded` IS a
-  // valid status (DRs / AdrStatus, and a future SpecStatus) by keying on the raw
-  // `status:` line. A reference field, presence + resolution only (no value enum).
+  // and (when a resolver is supplied) the ref must resolve. As of SPEC-017 Slice 5,
+  // `superseded` IS a member of the SpecStatus union (spec.ts `SPEC_STATUSES` /
+  // lifecycle.ts `ExplicitTerminal`), so this gate now fires for specs too — not only
+  // DRs / AdrStatus. It keys on the raw `status:` line, so it covers every artifact
+  // type uniformly. A reference field, presence + resolution only (no value enum).
   {
     key: 'superseded-by',
     required: false,
