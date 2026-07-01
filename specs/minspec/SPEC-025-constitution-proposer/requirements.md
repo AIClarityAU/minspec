@@ -1,7 +1,7 @@
 ---
 id: SPEC-025
 type: requirements
-status: specifying
+status: implementing
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology
