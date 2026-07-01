@@ -37,7 +37,7 @@ Thinnest end-to-end path first, then expand:
 - `contendingLiveSessions(paths: string[]): { path: string; peer: SessionPresenceRecord }[]`
   — the single liveness+coverage predicate (TS), mirrored byte-for-verdict in bash.
 - Trailer key constant `MinSpec-Session:` — frozen contract, in git history.
-- Kill-switches: `MINSPEC_CEDIT_OFF`, `MINSPEC_HEADGUARD_OFF`, `MINSPEC_TRAILER_OFF`.
+- Kill-switches: `MINSPEC_CEDIT_OFF`, `MINSPEC_HEADGUARD_OFF`, `MINSPEC_TRAILER_OFF`, `MINSPEC_APPROVABLE_MAIN_OFF`.
 - Constants: `HEARTBEAT_SECS=30`, `STALE_SECS=120` (paired, 4×); duplicated in bash with tie-back comment.
 
 ## Hook bodies (managed-block idiom: `set -u`, fail-open, actor-agnostic, kill-switch)
@@ -96,11 +96,40 @@ minspec_cedit_gate() {
   return $gate_fail
 }
 minspec_cedit_gate || exit 1
-```
 
-> **FR-15 branch-assertion** deliberately omitted from this draft pending the Plan
-> decision on the heartbeat-self-heal subtlety (requirements.md FR-15.2). Structural
-> (FR-9) + post-checkout (below) are the load-bearing (c) protections.
+# ── Approvable-on-main assertion (SPEC-026 FR-15.2, DR-051 §4b): deterministic,
+# actor-agnostic, CI-visible. If any staged path is an approvable, HEAD must be the
+# default branch. Fail-open. Bypass: MINSPEC_APPROVABLE_MAIN_OFF=1
+minspec_approvable_main_gate() {
+  [ "${MINSPEC_APPROVABLE_MAIN_OFF:-0}" = "1" ] && return 0
+  root=$(git rev-parse --show-toplevel 2>/dev/null) || return 0
+  # Only the PRIMARY checkout is pinned to main. A LINKED WORKTREE (its top-level `.git`
+  # is a FILE, not a dir) is the sanctioned place for a review-needing approvable on a
+  # branch → PR, so exempt it — else this gate would reject the very PR that reviews a
+  # spec/DR change. (Trivial approvables go direct to main on the primary; substantial
+  # ones go worktree→PR. DR-051 §1/§4b.)
+  [ -d "$root/.git" ] || return 0                            # linked worktree → exempt
+  # NO --diff-filter here (unlike the FR-12 gate above): a rename (R) or delete (D) of
+  # an approvable must also gate — `git mv`/`git rm` off-main is exactly the coverage
+  # gap an ACM-only filter would leave open. Matches FR-15.2's plain `--name-only`.
+  staged=$(git diff --cached --name-only 2>/dev/null) || return 0
+  has_approvable=0
+  for P in $staged; do
+    case "$P" in specs/*|docs/decisions/*|docs/domain/*|docs/epics/*) has_approvable=1; break ;; esac
+  done
+  [ "$has_approvable" = "1" ] || return 0                     # code-only commit → untouched
+  def=$(git symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##'); [ -n "$def" ] || def=main
+  cur=$(git branch --show-current 2>/dev/null) || return 0   # detached/err → fail-open
+  [ -n "$cur" ] || return 0
+  if [ "$cur" != "$def" ]; then
+    echo "✗ MinSpec: on the primary checkout, approvables commit on '$def' (DR-051) — you are on '$cur'." >&2
+    echo "  Commit trivial approvables from '$def'; do review-needing approvables (and all code) from a worktree. Bypass: MINSPEC_APPROVABLE_MAIN_OFF=1" >&2
+    return 1
+  fi
+  return 0
+}
+minspec_approvable_main_gate || exit 1
+```
 
 ### 2. NEW `.minspec/hooks/prepare-commit-msg` (FR-11)
 
@@ -122,19 +151,30 @@ exit 0
 # <<< minspec:managed:prepare-commit-msg-hook <<<
 ```
 
-### 3. NEW `.minspec/hooks/post-checkout` (FR-15.1 — auto-revert, D2)
+### 3. NEW `.minspec/hooks/post-checkout` (FR-15.1 — agent-strict auto-revert, D2)
 
 ```sh
 #!/usr/bin/env sh
 # >>> minspec:managed:post-checkout-hook >>>
-# Detect a branch switch under a live same-worktree peer with uncommitted work and
-# revert it (only actor-agnostic hook that fires on switch; fires AFTER → remediate,
-# not veto). Fail-open. Bypass: MINSPEC_HEADGUARD_OFF=1
+# Revert a branch switch on the primary checkout (only actor-agnostic hook that fires on
+# switch; fires AFTER → remediate, not veto). AGENT-STRICT: an agent context
+# (MINSPEC_SESSION_ID set, DR-051 §4a) is reverted unconditionally — agents never move the
+# primary HEAD; a human context reverts only when it strands a live dirty peer.
+# Fail-open. Bypass: MINSPEC_HEADGUARD_OFF=1
 set -u
 [ "${MINSPEC_HEADGUARD_OFF:-0}" = "1" ] && exit 0
 prev="${1:-}"; new="${2:-}"; branch_flag="${3:-0}"
 [ "$branch_flag" = "1" ] || exit 0                          # only branch changes
 repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+# Agent context: revert unconditionally (agent must use a worktree, never move primary HEAD).
+if [ -n "${MINSPEC_SESSION_ID:-}" ]; then
+  echo "✗ MinSpec: an agent must not switch the primary checkout's HEAD — reverting." >&2
+  echo "  Do branch work in a worktree: git worktree add ~/code/.worktrees/<repo>/<name> -b <name> (rule #8)." >&2
+  echo "  Bypass: MINSPEC_HEADGUARD_OFF=1" >&2
+  git switch - >/dev/null 2>&1 || git checkout - >/dev/null 2>&1 || true
+  exit 0
+fi
+# Human context: revert only if it strands a live dirty peer.
 sess_dir="$repo_root/.minspec/sessions"; [ -d "$sess_dir" ] || exit 0
 [ -n "$(git status --porcelain 2>/dev/null)" ] || exit 0   # only if uncommitted work present
 wt=$(git rev-parse --show-toplevel 2>/dev/null) || exit 0
@@ -182,10 +222,14 @@ dead/stale peers.
 1b. Before EDITING **code** (packages/**, scripts/**, config) while a LIVE peer shares your
    `worktreeRoot`: open your own worktree first —
    `git worktree add ~/code/.worktrees/<repo>/<name> -b <name>` then `cd` in.
-2. Before any HEAD-MOVING git op (`switch`/`checkout <branch>`/`reset --hard`/`merge`)
-   on the PRIMARY checkout: if ANY other LIVE session shares your `worktreeRoot`, do
-   NOT move HEAD — use a worktree (rule #8). Verify the current branch first; if it
-   changed unexpectedly, STOP and surface it.
+2. **NEVER move the PRIMARY checkout's HEAD** (`switch`/`checkout <branch>`/`reset --hard`/
+   `rebase`/`merge`) — this is absolute for agents (DR-051 §4a), not conditional on a peer.
+   Do ALL branch work in a worktree: `git worktree add ~/code/.worktrees/<repo>/<name> -b
+   <name>` then `cd` in. The primary checkout stays on `main` so approvables always commit
+   there. (`post-checkout` auto-reverts an agent switch, and the pre-commit gate rejects an
+   approvable commit off `main` — but don't rely on the backstop; just don't switch.) Verify
+   the current branch is what you expect before committing; if it changed unexpectedly,
+   STOP and surface it (another session moved it).
 3. Keep your `fileAllowlist` honest and current — the backstop can only serialize
    files a peer actually declared.
 4. Advisory; the pre-commit hook is the backstop if you skip them — so skipping WASTES
@@ -201,6 +245,8 @@ dead/stale peers.
   Confirm the ext reliably exports `MINSPEC_COMMIT_MSG_FILE` to the agent's
   integrated-terminal shell; else self-id degrades to the `session.json` read (fine for
   single-checkout).
-- **FR-15.2 branch-assertion:** decide snapshot-intent vs drop (heartbeat self-heal).
+- ~~**FR-15.2 branch-assertion:** decide snapshot-intent vs drop~~ — **RESOLVED** (DR-051 §4b):
+  replaced by the deterministic **approvable⇒`HEAD==main`** assertion (scoping to approvables
+  removes the heartbeat-self-heal false-positive). Implemented above in the pre-commit stanza.
 - **fileAllowlist hygiene:** whether to make an accurate allowlist mandatory at session
   start (closes the both-non-compliant blind spot) — #380 fan-out.

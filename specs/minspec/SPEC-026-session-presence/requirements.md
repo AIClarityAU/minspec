@@ -83,7 +83,7 @@ heartbeat, IS its live claim. No separate `.minspec/locks/` store is introduced.
 | # | Question | Resolution |
 |---|---|---|
 | D1 | Worktree enforcement strength | **Steer + commit backstop.** Advisory steer (toast + CLAUDE.md) into a worktree; the hard pre-commit gate blocks ONLY a genuine live-clobber (two live sessions staging the same file in the same tree). Solo/sequential never blocked. |
-| D2 | HEAD-switch remediation | **Auto-revert.** `post-checkout` switches back automatically when a live same-tree peer has uncommitted work (no git hook can veto the switch itself — confirmed on git 2.43). |
+| D2 | HEAD-switch remediation | **Auto-revert (agent-strict).** `post-checkout` reverts an agent-context switch on the primary checkout unconditionally, a human-context switch only when it strands a live dirty peer (no git hook can veto the switch itself — confirmed on git 2.43). Plus a deterministic **approvable⇒`HEAD==main`** commit assertion — the load-bearing docs-on-main guard (DR-051 §4b, FR-15). |
 | D3 | Self-identification in a public repo | **Stamp `MinSpec-Session: <uuid>` trailer** into commit messages. Random per-session UUID, no personal data; enables a CI-visible self-id the runtime gate never depends on. |
 | D4 | Findability → **conflict resolution** | Reframed by the user: the need is to *resolve* conflicts, ranked **prevent > sessions auto-resolve > HITL**. HITL must name the peer by its human-readable **scope/title** (never a worktree path to guess) + give a copy/paste prompt. Tier-2 auto-resolve (inter-session comms) is a genuinely separate feature → fast-follow SPEC-027. |
 
@@ -382,7 +382,7 @@ verdict reproducible across environments — the *inputs* (who is live now) are 
 local-runtime. `STALE_SECS=120` / `HEARTBEAT_SECS=30` are duplicated as shell constants
 with a comment tying them to the `presence.ts` named constants.
 
-### FR-15 — HARD: git-HEAD-switch guard (residual (c)): auto-revert + branch-assertion
+### FR-15 — HARD: git-HEAD-switch guard (residual (c)): agent-strict auto-revert + approvable-on-main assertion
 
 Empirically (git 2.43.0), `git switch`/`checkout <branch>` emit ZERO
 `reference-transaction` events (only `post-checkout`, which fires AFTER the move and
@@ -390,21 +390,43 @@ cannot veto). **Therefore no git hook can PREVENT the switch**; hard prevention 
 is provided **structurally** by FR-9 (a peer in its own worktree has a private HEAD no
 `git switch` in the shared checkout can move). On top of that:
 
-1. **`post-checkout` detect-and-auto-remediate** (managed hook; `set -u`; fail-open;
-   kill-switch `MINSPEC_HEADGUARD_OFF=1`). Receives `<prev> <new> <branch-flag>`; when
-   `branch-flag==1` AND ≥1 other LIVE session shares this `worktreeRoot` AND
-   `git status --porcelain` is non-empty (uncommitted work present), it immediately
-   `git switch -` back and prints the rule-#8 worktree alert. (D2 = auto-revert.) Honest
-   limits: it fires AFTER the move, so a switch onto a genuinely conflicting tree may
-   perturb it momentarily; and it cannot fire under the kill-switch or `--no-verify`.
-   Structural worktree separation remains the real guarantee.
-2. **Deterministic pre-commit branch-assertion (best-effort; refine in Plan).** Assert
-   `git branch --show-current` matches the branch this session expects. **Subtlety flagged
-   for Plan:** because `branch` updates every heartbeat (FR-2), a naive assertion self-heals
-   within one heartbeat and false-positives on a legitimate in-place branch creation. Plan
-   must decide whether to snapshot an *intent* branch or drop this part in favour of the
-   structural + post-checkout protection (which D2 already provides). This FR is scoped as
-   **detect + auto-remediate + (optionally) assert, NOT prevent**.
+1. **`post-checkout` detect-and-auto-remediate (agent-strict)** (managed hook; `set -u`;
+   fail-open; kill-switch `MINSPEC_HEADGUARD_OFF=1`). Receives `<prev> <new> <branch-flag>`.
+   Two modes, keyed on `MINSPEC_SESSION_ID` (set in an agent's integrated terminal, FR-11;
+   absent in a human's bare terminal — the actor proxy, DR-051 §4a):
+   - **Agent context (`MINSPEC_SESSION_ID` set):** an agent must NEVER move the primary
+     checkout's HEAD. On `branch-flag==1`, immediately `git switch -` back and alert —
+     **unconditionally** (no live-peer/dirty-tree precondition): the agent's own work belongs
+     in a worktree, so any primary-checkout switch from an agent is reverted.
+   - **Human context (`MINSPEC_SESSION_ID` unset):** revert only when it would strand a peer
+     — `branch-flag==1` AND ≥1 other LIVE session shares this `worktreeRoot` AND
+     `git status --porcelain` is non-empty. Otherwise leave the human's switch alone.
+   (D2 = auto-revert.) Honest limits: it fires AFTER the move (no git hook can veto a switch,
+   2.43), and cannot fire under the kill-switch or `--no-verify`. Structural worktree
+   separation + the FR-15.2 commit-time assertion remain the real guarantees.
+2. **Deterministic approvable-on-`main` assertion (the load-bearing docs-on-main guard;
+   DR-051 §4b).** In the pre-commit stanza, **on the PRIMARY checkout only**, if the staged
+   set (`git diff --cached --name-only`) includes ANY approvable-corpus path (`specs/**`,
+   `docs/decisions/**`, `docs/domain/**`, `docs/epics/**`), assert `HEAD == ` the repo's
+   default branch (`main`); else **reject**. **A linked worktree is EXEMPT** — detected by
+   its top-level `.git` being a **file** (gitdir link), not a directory. This exemption is
+   load-bearing: a **review-needing** approvable (a new spec/DR that must pass the AI-review
+   gate + human approval) is authored in a **worktree on a review branch → PR** (exactly this
+   spec's own workflow), so blocking approvables-off-`main` everywhere would reject the very
+   PR that reviews a spec change. The split is: **trivial approvables → direct on `main`
+   (primary checkout); review-needing approvables → worktree branch → PR.** This **replaces**
+   the earlier heartbeat-fragile "branch matches session-intent" idea (which self-healed within
+   one heartbeat and false-positived on legit in-place code branches): scoping to **approvables
+   on the primary checkout only** removes the false-positive entirely — a code commit on a
+   feature branch, and any commit from a worktree, are untouched. It is **deterministic and
+   actor-agnostic on the primary checkout** — it holds even if the agent-strict auto-revert
+   (part 1) was bypassed or the actor rule forgotten. (It is a pre-commit hook, not a CI check:
+   it fires when the commit is *made*, not when CI later checks it out at a detached HEAD —
+   "CI-visible" belongs to the FR-11 trailer, not this gate.) It is the structural guarantee
+   that DR-051's docs-on-main invariant cannot be silently
+   broken. **Fail-open** on any error (missing default-branch resolution ⇒ allow);
+   **kill-switch** `MINSPEC_APPROVABLE_MAIN_OFF=1`. The default branch is resolved via
+   `git symbolic-ref --short refs/remotes/origin/HEAD` (fallback `main`).
 
 ### FR-16 — HITL conflict resolution + session findability (Tier 3)
 
@@ -463,6 +485,17 @@ need a way to find it… not guessing based on the name"*).
 - **INV-14 (no new git noise, no lock store).** No new tracked state beyond the
   `MinSpec-Session:` trailer on commit objects; `.minspec/sessions/` + `.minspec/session.json`
   stay gitignored; no `.minspec/locks/` directory exists. Zero network from any guard path.
+- **INV-15 (approvables commit on `main` on the primary checkout — DR-051 §4b).** On the
+  **primary checkout** (top-level `.git` is a directory), a commit whose staged set touches
+  the approvable corpus (`specs/**`, `docs/decisions/**`, `docs/domain/**`, `docs/epics/**`)
+  is ALLOWED only when `HEAD == ` the default branch; rejected otherwise. A **linked worktree**
+  (top-level `.git` is a file) is EXEMPT — it is the sanctioned review-branch→PR path for a
+  review-needing approvable. Deterministic + actor-agnostic **at commit time on the primary
+  checkout** (a pre-commit hook, so it does not itself run during a later CI checkout — that
+  is not a gap, since a rejected commit never exists to check out). A code-only commit is
+  unaffected anywhere. T0: on the primary, stage an approvable on a non-`main` branch ⇒ exit 1;
+  same staged set on `main` ⇒ exit 0; a code-only commit on a feature branch ⇒ exit 0; **the
+  same approvable staged in a linked worktree on a branch ⇒ exit 0** (exempt).
 
 ## Acceptance Criteria
 
@@ -489,9 +522,13 @@ need a way to find it… not guessing based on the name"*).
   the identical diff in CI (no `.minspec/sessions/`) also exits 0. (FR-8, INV-7, INV-11)
 - [ ] **Self-id survives shared ext-host PID** — with 2+ sessions on one ext-host PID, a
   session committing its OWN locked file is not blocked (self from the trailer, not PID). (FR-11, FR-13)
-- [ ] **HEAD-switch auto-reverted** — while X has uncommitted work, Y `git switch`es on the
-  shared checkout; post-checkout detects branch-flag=1 + live same-tree peer + dirty tree
-  and switches back with the rule-#8 alert. (FR-15)
+- [ ] **HEAD-switch auto-reverted (agent-strict)** — an agent-context (`MINSPEC_SESSION_ID`
+  set) `git switch` on the primary checkout is reverted unconditionally; a human-context
+  switch is reverted only when it strands a live dirty peer. (FR-15.1)
+- [ ] **Approvables commit on `main` (primary), worktree exempt** — on the primary checkout,
+  staging an approvable while `HEAD != main` is rejected; same set on `main` passes; a
+  code-only commit on a feature branch passes; the same approvable staged in a **worktree** on
+  a review branch passes (the PR path). Holds in CI. (FR-15.2, INV-15, DR-051 §4b)
 - [ ] **Fails open + honors kill-switches** — malformed record / unset `MINSPEC_SESSION_ID`
   never blocks; each `MINSPEC_*_OFF=1` disables its gate. (FR-12, FR-15, INV-12)
 - [ ] **Predicate parity in CI** — golden-fixture test: TS and bash predicates agree on
