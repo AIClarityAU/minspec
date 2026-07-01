@@ -37,7 +37,7 @@ describe.skipIf(!hasRealData)('INV-REALDATA: graph over the real repo', () => {
     expect(() => { task = resolveNextTask(g); }).not.toThrow();
     if (task !== null) {
       const t: NextTask = task;
-      expect(['epic-promote', 'spec-approve', 'adr-accept', 'phase-action']).toContain(t.kind);
+      expect(['epic-promote', 'spec-approve', 'adr-accept', 'phase-action', 'answer-OQ']).toContain(t.kind);
       expect(t.imperative.length).toBeGreaterThan(0);
       expect(SEVERITY_CLASSES).toContain(t.severityClass);
       expect(t.targetId).toMatch(ID_RE);

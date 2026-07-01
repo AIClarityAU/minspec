@@ -522,3 +522,116 @@ describe('edge-cases & output contract', () => {
     expect(resolveNextTask(build())).toStrictEqual(resolveNextTask(build()));
   });
 });
+
+// =====================================================================
+// #227 answer-OQ — pre-phase open-questions gate
+// =====================================================================
+describe('#227 answer-OQ — open-questions gate', () => {
+  it('in-flight: an implementing spec with an unresolved OQ surfaces as a pending answer-OQ node, not corruption', () => {
+    const g = graph({
+      specs: [
+        mkSpec('SPEC-001', 'implementing', 'approved', { hasUnresolvedOpenQuestions: true }),
+      ],
+    });
+    expect(resolveCorruption(g)).toHaveLength(0);
+    const next = resolveNextTask(g)!;
+    expect(next.kind).toBe('answer-OQ');
+    expect(next.targetId).toBe('SPEC-001');
+    expect(next.severityClass).toBe('pending');
+  });
+
+  it('in-flight: blocked-ready when the parent epic is active', () => {
+    const g = graph({
+      epics: [mkEpic('EPIC-001', 'active', { order: 1 })],
+      specs: [
+        mkSpec('SPEC-001', 'implementing', 'approved', {
+          epic: 'EPIC-001',
+          hasUnresolvedOpenQuestions: true,
+        }),
+      ],
+    });
+    const next = resolveNextTask(g)!;
+    expect(next.kind).toBe('answer-OQ');
+    expect(next.severityClass).toBe('blocked-ready');
+  });
+
+  it('a resolved (or absent) flag never generates an answer-OQ node', () => {
+    const g = graph({
+      specs: [
+        mkSpec('SPEC-001', 'implementing', 'approved', { hasUnresolvedOpenQuestions: false }),
+        mkSpec('SPEC-002', 'implementing', 'approved'),
+      ],
+    });
+    expect(resolvePipeline(g).some((t) => t.kind === 'answer-OQ')).toBe(false);
+  });
+
+  it('terminal (spec): done with an unresolved OQ is a gate-violation, not a normal pending node — closes "shipped with a dangling OQ"', () => {
+    const g = graph({
+      specs: [mkSpec('SPEC-001', 'done', 'approved', { hasUnresolvedOpenQuestions: true })],
+    });
+    const corruptions = resolveCorruption(g);
+    expect(corruptions).toHaveLength(1);
+    expect(corruptions[0].rule).toBe('coherence.terminal-with-open-oq');
+    expect(corruptions[0].refs).toEqual(['SPEC-001']);
+    const next = resolveNextTask(g)!;
+    expect(next.severityClass).toBe('gate-violation');
+  });
+
+  it('terminal (spec): archived with an unresolved OQ is also a gate-violation', () => {
+    const g = graph({
+      specs: [mkSpec('SPEC-001', 'archived', 'approved', { hasUnresolvedOpenQuestions: true })],
+    });
+    expect(resolveCorruption(g)[0]?.rule).toBe('coherence.terminal-with-open-oq');
+  });
+
+  it('terminal (DR): accepted with an unresolved OQ is a gate-violation — a DR has no "implementing" phase, so accepted IS its shipped state', () => {
+    const g = graph({
+      adrs: [mkAdr('DR-001', 'accepted', { hasUnresolvedOpenQuestions: true })],
+    });
+    const corruptions = resolveCorruption(g);
+    expect(corruptions).toHaveLength(1);
+    expect(corruptions[0].rule).toBe('coherence.terminal-with-open-oq');
+    expect(corruptions[0].refs).toEqual(['DR-001']);
+  });
+
+  it('a proposed DR with an unresolved OQ is NOT flagged — still authoring, mirrors specifying', () => {
+    const g = graph({
+      adrs: [mkAdr('DR-001', 'proposed', { hasUnresolvedOpenQuestions: true })],
+    });
+    expect(resolveCorruption(g)).toHaveLength(0);
+  });
+
+  it('a superseded spec/DR with an unresolved OQ is exempt (it is being retired, not shipped)', () => {
+    const g = graph({
+      specs: [mkSpec('SPEC-001', 'done', 'approved', { hasUnresolvedOpenQuestions: true })],
+      adrs: [mkAdr('DR-001', 'accepted', { hasUnresolvedOpenQuestions: true })],
+      edges: [
+        { kind: 'supersedes', from: 'SPEC-002', to: 'SPEC-001' },
+        { kind: 'supersedes', from: 'DR-002', to: 'DR-001' },
+      ],
+    });
+    // SPEC-002/DR-002 don't resolve (dangling supersedes source) but that's a
+    // separate corruption class; assert specifically that terminal-with-open-oq
+    // does not fire for the superseded targets.
+    expect(
+      resolveCorruption(g).filter((c) => c.rule === 'coherence.terminal-with-open-oq'),
+    ).toHaveLength(0);
+  });
+
+  it('deprecated/superseded-status DR with an unresolved OQ is also a gate-violation', () => {
+    const g = graph({
+      adrs: [mkAdr('DR-001', 'deprecated', { hasUnresolvedOpenQuestions: true })],
+    });
+    expect(resolveCorruption(g)[0]?.rule).toBe('coherence.terminal-with-open-oq');
+  });
+
+  it('determinism: identical graph yields identical answer-OQ node across runs', () => {
+    const g = graph({
+      specs: [mkSpec('SPEC-001', 'implementing', 'approved', { hasUnresolvedOpenQuestions: true })],
+    });
+    const first = resolveNextTask(g);
+    for (let i = 0; i < 5; i++) {
+      expect(resolveNextTask(g)).toStrictEqual(first);
+    }
+  });
+});
