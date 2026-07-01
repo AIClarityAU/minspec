@@ -18,9 +18,12 @@
   },
   ".minspec/constitution.md": {
     "__preamble__": "fb86119423ac547e0ea2a4f12e5dc30660310a96630d5261a5e849dbbe7c3767",
-    "Invariants": "b24cf758849cedce8269447ce05a923df3530b59a68bd379f4d6f80c7d4b3d74",
-    "Principles": "0ef8e5f87949afcc8dadd637a41225de6a238fa2872032dee0796e6ea48c398e",
-    "Constraints": "7a870ce7154b580cdb5c7ddc037b9c0dbd28739b77f40732378e73ec09d68ec7"
+    "Invariants": "19ab623393ed1f32a2808ebca63d5fb962ba7356af698b1fec033a93fadfa681",
+    "Principles": "b09db586fd586988d666f3df9626c7715ca59a1ac1c55a43c9df4eae5e85c951",
+    "Constraints": "cafabc1fa95f6aa66f5e2cd334bff8021b07c257f9609cffa10a5f4dbef75313",
+    "Goals": "53d9eafc49553c566cbf6eef8934ee94324a58895a5bfc4a7329d1ba5a7488f0",
+    "Phases": "56ecaf73e96fe04b65545f5141760bbfdabe5e06644a4f2ab36deb448483a8a9",
+    "Glossary": "fe0bb1a241cb9abe70848e15074b86e7e92575ae5df07840107b63ad253f0679"
   },
   "CLAUDE.md": {
     "__preamble__": "ece35349e24a64371bf8ced25d09fe08bc65420ba70176df44f9831be96dc129",
