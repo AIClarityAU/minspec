@@ -102,6 +102,13 @@ minspec_cedit_gate || exit 1
 # default branch. Fail-open. Bypass: MINSPEC_APPROVABLE_MAIN_OFF=1
 minspec_approvable_main_gate() {
   [ "${MINSPEC_APPROVABLE_MAIN_OFF:-0}" = "1" ] && return 0
+  root=$(git rev-parse --show-toplevel 2>/dev/null) || return 0
+  # Only the PRIMARY checkout is pinned to main. A LINKED WORKTREE (its top-level `.git`
+  # is a FILE, not a dir) is the sanctioned place for a review-needing approvable on a
+  # branch → PR, so exempt it — else this gate would reject the very PR that reviews a
+  # spec/DR change. (Trivial approvables go direct to main on the primary; substantial
+  # ones go worktree→PR. DR-051 §1/§4b.)
+  [ -d "$root/.git" ] || return 0                            # linked worktree → exempt
   staged=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null) || return 0
   has_approvable=0
   for P in $staged; do
@@ -112,8 +119,8 @@ minspec_approvable_main_gate() {
   cur=$(git branch --show-current 2>/dev/null) || return 0   # detached/err → fail-open
   [ -n "$cur" ] || return 0
   if [ "$cur" != "$def" ]; then
-    echo "✗ MinSpec: approvables commit on '$def' (DR-051) — you are on '$cur'." >&2
-    echo "  Commit approvables from '$def'; do code from a worktree. Bypass: MINSPEC_APPROVABLE_MAIN_OFF=1" >&2
+    echo "✗ MinSpec: on the primary checkout, approvables commit on '$def' (DR-051) — you are on '$cur'." >&2
+    echo "  Commit trivial approvables from '$def'; do review-needing approvables (and all code) from a worktree. Bypass: MINSPEC_APPROVABLE_MAIN_OFF=1" >&2
     return 1
   fi
   return 0

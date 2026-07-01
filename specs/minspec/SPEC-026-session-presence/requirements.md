@@ -405,15 +405,20 @@ is provided **structurally** by FR-9 (a peer in its own worktree has a private H
    2.43), and cannot fire under the kill-switch or `--no-verify`. Structural worktree
    separation + the FR-15.2 commit-time assertion remain the real guarantees.
 2. **Deterministic approvable-on-`main` assertion (the load-bearing docs-on-main guard;
-   DR-051 §4b).** In the pre-commit stanza, if the staged set (`git diff --cached
-   --name-only`) includes ANY approvable-corpus path (`specs/**`, `docs/decisions/**`,
-   `docs/domain/**`, `docs/epics/**`), assert `HEAD == ` the repo's default branch (`main`);
-   else **reject** ("approvables commit on `main` (DR-051); you are on `<branch>` — commit
-   approvables from `main`, do code from a worktree"). This **replaces** the earlier
-   heartbeat-fragile "branch matches session-intent" idea (which self-healed within one
-   heartbeat and false-positived on legit in-place code branches): scoping the assertion to
-   **approvables only** removes the false-positive entirely — a code commit on a feature
-   branch is untouched. It is **deterministic, actor-agnostic, and CI-visible** — it holds
+   DR-051 §4b).** In the pre-commit stanza, **on the PRIMARY checkout only**, if the staged
+   set (`git diff --cached --name-only`) includes ANY approvable-corpus path (`specs/**`,
+   `docs/decisions/**`, `docs/domain/**`, `docs/epics/**`), assert `HEAD == ` the repo's
+   default branch (`main`); else **reject**. **A linked worktree is EXEMPT** — detected by
+   its top-level `.git` being a **file** (gitdir link), not a directory. This exemption is
+   load-bearing: a **review-needing** approvable (a new spec/DR that must pass the AI-review
+   gate + human approval) is authored in a **worktree on a review branch → PR** (exactly this
+   spec's own workflow), so blocking approvables-off-`main` everywhere would reject the very
+   PR that reviews a spec change. The split is: **trivial approvables → direct on `main`
+   (primary checkout); review-needing approvables → worktree branch → PR.** This **replaces**
+   the earlier heartbeat-fragile "branch matches session-intent" idea (which self-healed within
+   one heartbeat and false-positived on legit in-place code branches): scoping to **approvables
+   on the primary checkout only** removes the false-positive entirely — a code commit on a
+   feature branch, and any commit from a worktree, are untouched. It is **deterministic, actor-agnostic, and CI-visible** — it holds
    even if the agent-strict auto-revert (part 1) was bypassed or the actor rule forgotten, so
    it is the structural guarantee that DR-051's docs-on-main invariant cannot be silently
    broken. **Fail-open** on any error (missing default-branch resolution ⇒ allow);
@@ -477,13 +482,15 @@ need a way to find it… not guessing based on the name"*).
 - **INV-14 (no new git noise, no lock store).** No new tracked state beyond the
   `MinSpec-Session:` trailer on commit objects; `.minspec/sessions/` + `.minspec/session.json`
   stay gitignored; no `.minspec/locks/` directory exists. Zero network from any guard path.
-- **INV-15 (approvables commit only on `main` — DR-051 §4b).** A commit whose staged set
-  touches the approvable corpus (`specs/**`, `docs/decisions/**`, `docs/domain/**`,
-  `docs/epics/**`) is ALLOWED only when `HEAD == ` the default branch; rejected otherwise.
-  Deterministic + actor-agnostic + CI-visible (unlike the presence-keyed guard, this holds in
-  CI too). A code-only commit on a feature branch is unaffected. T0: stage an approvable on a
-  non-`main` branch ⇒ exit 1; the same staged set on `main` ⇒ exit 0; a code-only commit on a
-  feature branch ⇒ exit 0.
+- **INV-15 (approvables commit on `main` on the primary checkout — DR-051 §4b).** On the
+  **primary checkout** (top-level `.git` is a directory), a commit whose staged set touches
+  the approvable corpus (`specs/**`, `docs/decisions/**`, `docs/domain/**`, `docs/epics/**`)
+  is ALLOWED only when `HEAD == ` the default branch; rejected otherwise. A **linked worktree**
+  (top-level `.git` is a file) is EXEMPT — it is the sanctioned review-branch→PR path for a
+  review-needing approvable. Deterministic + actor-agnostic + CI-visible. A code-only commit is
+  unaffected anywhere. T0: on the primary, stage an approvable on a non-`main` branch ⇒ exit 1;
+  same staged set on `main` ⇒ exit 0; a code-only commit on a feature branch ⇒ exit 0; **the
+  same approvable staged in a linked worktree on a branch ⇒ exit 0** (exempt).
 
 ## Acceptance Criteria
 
@@ -513,9 +520,10 @@ need a way to find it… not guessing based on the name"*).
 - [ ] **HEAD-switch auto-reverted (agent-strict)** — an agent-context (`MINSPEC_SESSION_ID`
   set) `git switch` on the primary checkout is reverted unconditionally; a human-context
   switch is reverted only when it strands a live dirty peer. (FR-15.1)
-- [ ] **Approvables commit only on `main`** — staging an approvable (`docs/decisions/**`,
-  `specs/**`, …) while `HEAD != main` is rejected; the same staged set on `main` passes; a
-  code-only commit on a feature branch passes. Holds in CI. (FR-15.2, INV-15, DR-051 §4b)
+- [ ] **Approvables commit on `main` (primary), worktree exempt** — on the primary checkout,
+  staging an approvable while `HEAD != main` is rejected; same set on `main` passes; a
+  code-only commit on a feature branch passes; the same approvable staged in a **worktree** on
+  a review branch passes (the PR path). Holds in CI. (FR-15.2, INV-15, DR-051 §4b)
 - [ ] **Fails open + honors kill-switches** — malformed record / unset `MINSPEC_SESSION_ID`
   never blocks; each `MINSPEC_*_OFF=1` disables its gate. (FR-12, FR-15, INV-12)
 - [ ] **Predicate parity in CI** — golden-fixture test: TS and bash predicates agree on
