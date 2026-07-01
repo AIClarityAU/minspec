@@ -524,6 +524,16 @@ function resolveEpicOrder(epicId: string | undefined, index: Index): number {
   return epic?.order ?? INF;
 }
 
+/**
+ * Shared severity-class rule for the three "gate node" loops (spec-approve,
+ * adr-accept, answer-OQ): a pending human decision is `blocked-ready` only
+ * when its parent epic is already `active` (worth doing right now), else
+ * merely `pending` (queued, not yet actionable).
+ */
+function blockedOrPending(epic: EpicNode | undefined): SeverityClass {
+  return epic && epic.status === 'active' ? 'blocked-ready' : 'pending';
+}
+
 function mkRanked(
   task: NextTask,
   cls: SeverityClass,
@@ -668,8 +678,7 @@ function generateNodes(
       priority: s.priority,
       artifactId: s.id,
     };
-    const cls: SeverityClass =
-      epic && epic.status === 'active' ? 'blocked-ready' : 'pending';
+    const cls = blockedOrPending(epic);
     ranked.push(
       mkRanked(
         {
@@ -704,7 +713,7 @@ function generateNodes(
     if (s.status !== 'implementing') continue;
     if (!s.hasUnresolvedOpenQuestions) continue;
     const epic = s.epic ? index.epicById.get(s.epic) : undefined;
-    const cls: SeverityClass = epic && epic.status === 'active' ? 'blocked-ready' : 'pending';
+    const cls = blockedOrPending(epic);
     ranked.push(
       mkRanked(
         {
@@ -743,8 +752,7 @@ function generateNodes(
       priority: a.priority,
       artifactId: a.id,
     };
-    const cls: SeverityClass =
-      epic && epic.status === 'active' ? 'blocked-ready' : 'pending';
+    const cls = blockedOrPending(epic);
     ranked.push(
       mkRanked(
         {
