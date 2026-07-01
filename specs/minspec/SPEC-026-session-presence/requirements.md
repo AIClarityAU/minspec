@@ -418,9 +418,12 @@ is provided **structurally** by FR-9 (a peer in its own worktree has a private H
    the earlier heartbeat-fragile "branch matches session-intent" idea (which self-healed within
    one heartbeat and false-positived on legit in-place code branches): scoping to **approvables
    on the primary checkout only** removes the false-positive entirely — a code commit on a
-   feature branch, and any commit from a worktree, are untouched. It is **deterministic, actor-agnostic, and CI-visible** — it holds
-   even if the agent-strict auto-revert (part 1) was bypassed or the actor rule forgotten, so
-   it is the structural guarantee that DR-051's docs-on-main invariant cannot be silently
+   feature branch, and any commit from a worktree, are untouched. It is **deterministic and
+   actor-agnostic on the primary checkout** — it holds even if the agent-strict auto-revert
+   (part 1) was bypassed or the actor rule forgotten. (It is a pre-commit hook, not a CI check:
+   it fires when the commit is *made*, not when CI later checks it out at a detached HEAD —
+   "CI-visible" belongs to the FR-11 trailer, not this gate.) It is the structural guarantee
+   that DR-051's docs-on-main invariant cannot be silently
    broken. **Fail-open** on any error (missing default-branch resolution ⇒ allow);
    **kill-switch** `MINSPEC_APPROVABLE_MAIN_OFF=1`. The default branch is resolved via
    `git symbolic-ref --short refs/remotes/origin/HEAD` (fallback `main`).
@@ -487,7 +490,9 @@ need a way to find it… not guessing based on the name"*).
   the approvable corpus (`specs/**`, `docs/decisions/**`, `docs/domain/**`, `docs/epics/**`)
   is ALLOWED only when `HEAD == ` the default branch; rejected otherwise. A **linked worktree**
   (top-level `.git` is a file) is EXEMPT — it is the sanctioned review-branch→PR path for a
-  review-needing approvable. Deterministic + actor-agnostic + CI-visible. A code-only commit is
+  review-needing approvable. Deterministic + actor-agnostic **at commit time on the primary
+  checkout** (a pre-commit hook, so it does not itself run during a later CI checkout — that
+  is not a gap, since a rejected commit never exists to check out). A code-only commit is
   unaffected anywhere. T0: on the primary, stage an approvable on a non-`main` branch ⇒ exit 1;
   same staged set on `main` ⇒ exit 0; a code-only commit on a feature branch ⇒ exit 0; **the
   same approvable staged in a linked worktree on a branch ⇒ exit 0** (exempt).

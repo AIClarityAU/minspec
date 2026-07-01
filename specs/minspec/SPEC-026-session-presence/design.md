@@ -109,7 +109,10 @@ minspec_approvable_main_gate() {
   # spec/DR change. (Trivial approvables go direct to main on the primary; substantial
   # ones go worktree→PR. DR-051 §1/§4b.)
   [ -d "$root/.git" ] || return 0                            # linked worktree → exempt
-  staged=$(git diff --cached --name-only --diff-filter=ACM 2>/dev/null) || return 0
+  # NO --diff-filter here (unlike the FR-12 gate above): a rename (R) or delete (D) of
+  # an approvable must also gate — `git mv`/`git rm` off-main is exactly the coverage
+  # gap an ACM-only filter would leave open. Matches FR-15.2's plain `--name-only`.
+  staged=$(git diff --cached --name-only 2>/dev/null) || return 0
   has_approvable=0
   for P in $staged; do
     case "$P" in specs/*|docs/decisions/*|docs/domain/*|docs/epics/*) has_approvable=1; break ;; esac
