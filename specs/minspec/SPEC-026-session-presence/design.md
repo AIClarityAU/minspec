@@ -189,9 +189,10 @@ dead/stale peers.
 3. Keep your `fileAllowlist` honest and current — the backstop can only serialize
    files a peer actually declared.
 4. Advisory; the pre-commit hook is the backstop if you skip them — so skipping WASTES
-   work, it does not unblock you. If the hook rejects your commit naming a live peer,
-   that peer started earlier and holds the file: open a worktree or wait (it drops off
-   within 120s).
+   work, it does not unblock you. If the hook rejects your commit naming a live peer, that
+   peer holds the file: wait for it to drop off (<120s), pick a different doc, or coordinate
+   via the FR-16 prompt. (The FR-12 hook only ever fires on approvables, which edit on
+   `main` — do NOT open a worktree for them, DR-051.)
 ```
 
 ## Open plan questions (carried from the design workflow)
