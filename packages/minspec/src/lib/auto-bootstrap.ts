@@ -24,13 +24,10 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { loadTemplateBaseline } from './merge-refresh';
-import {
-  TEMPLATE_NAMES,
-  TEMPLATE_OUTPUT_PATHS,
-  computeTemplateBaseline,
-} from './template-registry';
+import { computeTemplateBaseline } from './template-registry';
 import { collectArtifacts } from './epic-backfill';
 import { listEpics } from './epic-manager';
+import { findSpecDirsMissingTasksMd, scaffoldTasksMd } from './scaffold';
 
 // ---------------------------------------------------------------------------
 // Preferences (persisted in .minspec/preferences.json)
@@ -41,6 +38,18 @@ export interface BootstrapPreferences {
   readonly skipRefreshPrompt?: boolean;
   readonly skipClassifyPrompt?: boolean;
   readonly skipBackfillPrompt?: boolean;
+  /**
+   * Per-prompt opt-out for the DESIGN.md-stub-removal offer (#315). Distinct
+   * from `skipBackfillPrompt` (epic backfill) even though both are `kind:
+   * 'backfill'` — declining one must never suppress the other.
+   */
+  readonly skipDesignStubPrompt?: boolean;
+  /**
+   * Per-prompt opt-out for the missing-tasks.md offer (#225). A third
+   * `kind: 'backfill'` step with its own skip flag so declining it never
+   * cross-suppresses the epic-backfill or DESIGN.md-stub offers (and vice-versa).
+   */
+  readonly skipTasksMdPrompt?: boolean;
 }
 
 const PREFS_FILENAME = 'preferences.json';
@@ -128,8 +137,14 @@ export function hasHarnessDrift(rootDir: string): boolean {
 
   const current = computeTemplateBaseline();
 
-  for (const name of TEMPLATE_NAMES) {
-    const relPath = TEMPLATE_OUTPUT_PATHS[name];
+  // Iterate every output path the CURRENT baseline knows about — both the Markdown
+  // harness templates AND the managed-region templates (CI workflow, git hooks, and
+  // the #241 slash-command shims), which `computeTemplateBaseline` now records. This
+  // is what lets a slash-shim guidance edit fire the "templates updated, refresh?"
+  // prompt: drift is no longer scoped to `TEMPLATE_NAMES`. Each side is still raw
+  // template hash, so the comparison stays like-for-like (#117) and independent of
+  // both rendering context and the user's own edits to the generated files.
+  for (const relPath of Object.keys(current)) {
     if (!fs.existsSync(path.join(rootDir, relPath))) continue;
 
     const recordedHashes = baseline[relPath];
@@ -236,13 +251,19 @@ export function hasUnclassifiedChanges(rootDir: string): boolean {
 export interface BootstrapVsCode {
   /** True if the master `minspec.autoBootstrap.enabled` setting is on */
   isEnabled(): boolean;
-  /** Show an info toast with three actions. Returns the chosen label. */
+  /** Show an info toast with the given actions. Returns the chosen label. */
   showPrompt(
     message: string,
     actions: readonly string[],
   ): Promise<string | undefined>;
-  /** Execute a VS Code command id */
-  executeCommand(commandId: string, folder?: string): Promise<void> | void;
+  /** Execute a VS Code command id. `arg` carries step-specific extra args (e.g. AI consent). */
+  executeCommand(commandId: string, folder?: string, arg?: unknown): Promise<void> | void;
+  /**
+   * Enable auto-classify-on-commit for the folder (the "Always" affordance).
+   * Optional so existing test stubs need not implement it; absent → the
+   * "Always" action falls back to a one-shot run.
+   */
+  enableAutoClassify?(folder: string): Promise<void> | void;
 }
 
 /** Identifiers used by the per-prompt skip flags */
@@ -270,6 +291,131 @@ export function hasUnbackfilledEpics(rootDir: string): boolean {
   return artifacts.filter(a => !a.epic).length >= 3; // registry exists, gaps remain
 }
 
+// ---------------------------------------------------------------------------
+// Missing tasks.md detection (#225)
+// ---------------------------------------------------------------------------
+
+/**
+ * Detector: a project with split-layout T3/T4 specs (whose Tasks phase is
+ * required, DR-035) that are missing their `tasks.md`. The spec-validator
+ * already WARNS on this (`split-coverage.tasks.missing`); this powers the
+ * actionable offer-to-create. Pure file-system (Tier 0 / DR-004); delegates the
+ * walk to `findSpecDirsMissingTasksMd` so detect and create share one source of
+ * truth and can never disagree about which dirs qualify.
+ */
+export function hasSpecsMissingTasksMd(rootDir: string): boolean {
+  try {
+    return findSpecDirsMissingTasksMd(rootDir).length > 0;
+  } catch {
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Pristine DESIGN.md stub detection (#315 — backfill for #206)
+// ---------------------------------------------------------------------------
+
+/**
+ * Detect a *pristine, placeholder-only* `DESIGN.md` at the project root.
+ *
+ * Background: #206 (PR #311) stopped *scaffolding* the empty DESIGN.md harness
+ * stub, but projects initialized before #206 still carry the committed stub on
+ * disk. This detector recognizes that stub so the bootstrap can offer to remove
+ * it — converging existing projects to the #206 state.
+ *
+ * The match is **structural**, not text-equality against the removed
+ * `DESIGN_MD_TEMPLATE` const (which #206 deleted). A file is "pristine" iff,
+ * after removing a frontmatter block (if any), every non-blank body line is one
+ * of:
+ *   - a markdown ATX heading (`#`, `##`, `###`, …); or
+ *   - an HTML comment placeholder (a line wholly inside a `<!-- … -->` block).
+ *
+ * ANY other non-blank line — a sentence, a list item, a code fence, a table —
+ * is real prose/content and makes the file NOT pristine (left untouched). A
+ * frontmatter block with any non-blank key is likewise treated as real content
+ * (the scaffold stub had none), so a DESIGN.md someone gave real frontmatter is
+ * preserved. The body must also contain at least one heading AND at least one
+ * comment placeholder, so an empty or near-empty file is not mistaken for the
+ * scaffold stub.
+ *
+ * Returns false when DESIGN.md is absent, unreadable, or has any real content.
+ * Deterministic, offline, no AI (Tier 0 / DR-004).
+ */
+export function isPristineDesignStub(rootDir: string): boolean {
+  const filePath = path.join(rootDir, 'DESIGN.md');
+  let raw: string;
+  try {
+    if (!fs.statSync(filePath).isFile()) return false;
+    raw = fs.readFileSync(filePath, 'utf-8');
+  } catch {
+    return false;
+  }
+
+  let body = raw;
+
+  // Strip a leading YAML frontmatter block. Any non-blank line inside it counts
+  // as real content (the scaffold stub had no frontmatter).
+  const fmMatch = /^﻿?---\r?\n([\s\S]*?)\r?\n---\r?\n?/.exec(raw);
+  if (fmMatch) {
+    const fmInner = fmMatch[1] ?? '';
+    if (fmInner.split(/\r?\n/).some((l) => l.trim() !== '')) {
+      return false; // meaningful frontmatter → real content
+    }
+    body = raw.slice(fmMatch[0].length);
+  }
+
+  const lines = body.split(/\r?\n/);
+  let inComment = false;
+  let sawHeading = false;
+  let sawComment = false;
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+
+    if (inComment) {
+      sawComment = true;
+      if (line.includes('-->')) {
+        // Reject trailing prose after the comment close on the same line.
+        const after = line.slice(line.indexOf('-->') + 3).trim();
+        if (after !== '') return false;
+        inComment = false;
+      }
+      continue;
+    }
+
+    if (line === '') continue;
+
+    // Single-line comment: <!-- … -->
+    if (line.startsWith('<!--') && line.includes('-->')) {
+      const after = line.slice(line.indexOf('-->') + 3).trim();
+      if (after !== '') return false;
+      sawComment = true;
+      continue;
+    }
+
+    // Opening of a multi-line comment with no close on this line.
+    if (line.startsWith('<!--')) {
+      sawComment = true;
+      inComment = true;
+      continue;
+    }
+
+    // ATX heading: one or more '#', a space, then text.
+    if (/^#{1,6}\s+\S/.test(line)) {
+      sawHeading = true;
+      continue;
+    }
+
+    // Anything else is real content.
+    return false;
+  }
+
+  // An unterminated comment block, or a file lacking either a heading or a
+  // placeholder, is not the recognizable scaffold stub.
+  if (inComment) return false;
+  return sawHeading && sawComment;
+}
+
 /** A single bootstrap step the orchestrator may surface */
 export interface BootstrapStep {
   readonly kind: PromptKind;
@@ -278,9 +424,27 @@ export interface BootstrapStep {
   readonly primaryAction: string;
   readonly commandId: string;
   readonly skipPrefKey: keyof BootstrapPreferences;
+  /**
+   * Optional in-process action run on the primary choice INSTEAD of dispatching
+   * a VS Code command. Used by the DESIGN.md-stub step (#315) whose effect — a
+   * local file removal — has no command of its own and must stay entirely in
+   * this module. When set, `commandId` is ignored for the primary action.
+   */
+  readonly action?: (rootDir: string) => void | Promise<void>;
+  /**
+   * Optional "Always" affordance — when set, this label is offered first and,
+   * if chosen, calls `enableAutoClassify` so the step runs itself in future,
+   * then runs the command once now. Only the classify step uses it.
+   */
+  readonly alwaysAction?: string;
+  /**
+   * Optional extra argument forwarded to the command after the folder. The
+   * backfill step uses it to pass AI consent ({ aiConsent: true }) — the offer's
+   * toast already promised the AI pass, so the command must not re-ask (#213).
+   */
+  readonly commandArg?: unknown;
 }
 
-const NOT_NOW = 'Not Now';
 const DONT_ASK = "Don't ask again";
 
 /** All steps, in the order they are surfaced. Exported for testability. */
@@ -318,6 +482,7 @@ export const BOOTSTRAP_STEPS: readonly BootstrapStep[] = [
     primaryAction: 'Classify',
     commandId: 'minspec.classify',
     skipPrefKey: 'skipClassifyPrompt',
+    alwaysAction: 'Always',
   },
   {
     kind: 'backfill',
@@ -330,6 +495,60 @@ export const BOOTSTRAP_STEPS: readonly BootstrapStep[] = [
     primaryAction: 'Backfill',
     commandId: 'minspec.backfillEpics',
     skipPrefKey: 'skipBackfillPrompt',
+    commandArg: { aiConsent: true },
+  },
+  {
+    // #315 backfill: existing projects keep the empty DESIGN.md stub that #206
+    // stopped scaffolding. Offer to remove a *pristine* (placeholder-only) stub.
+    // Shares `kind: 'backfill'` with epic backfill but uses its own skip flag so
+    // the two offers never cross-suppress. NEVER deletes silently — only on the
+    // user's explicit primary choice, and only when the file is recognizably the
+    // scaffold stub (real content is left untouched).
+    kind: 'backfill',
+    shouldRun: (rootDir, prefs) =>
+      !prefs.skipDesignStubPrompt &&
+      isMinspecInitialized(rootDir) &&
+      isPristineDesignStub(rootDir),
+    message:
+      'MinSpec: This DESIGN.md is an empty placeholder stub (no longer scaffolded). Remove it?',
+    primaryAction: 'Remove',
+    commandId: '',
+    skipPrefKey: 'skipDesignStubPrompt',
+    action: (rootDir) => {
+      // Re-check immediately before deleting: the file may have gained content
+      // between detection and the user's click. Never delete real content.
+      if (!isPristineDesignStub(rootDir)) return;
+      fs.rmSync(path.join(rootDir, 'DESIGN.md'), { force: true });
+    },
+  },
+  {
+    // #225: split-layout T3/T4 specs (whose Tasks phase is required, DR-035)
+    // that lack a tasks.md have no spec-kit-native place to track implement-phase
+    // progress. The validator already WARNS (`split-coverage.tasks.missing`);
+    // this makes it actionable. Shares `kind: 'backfill'` with the epic + design
+    // offers but uses its own skip flag so none cross-suppress. NEVER creates
+    // silently — only on the user's explicit primary choice, and re-checks at
+    // click time so a dir that gained a tasks.md is skipped. Scaffolds via the
+    // shared `scaffoldTasksMd` (frontmatter mirrors the requirements sibling, so
+    // each created file passes the frontmatter gate). Deriving `done` from the
+    // checkboxes is OUT of scope — that is #208.
+    kind: 'backfill',
+    shouldRun: (rootDir, prefs) =>
+      !prefs.skipTasksMdPrompt &&
+      isMinspecInitialized(rootDir) &&
+      hasSpecsMissingTasksMd(rootDir),
+    message:
+      'MinSpec: Some specs need a tasks.md to track implement-phase progress. Create the missing ones?',
+    primaryAction: 'Create tasks.md',
+    commandId: '',
+    skipPrefKey: 'skipTasksMdPrompt',
+    action: (rootDir) => {
+      // Re-resolve at click time — a dir may have gained a tasks.md since
+      // detection. scaffoldTasksMd is itself idempotent (skips an existing file).
+      for (const spec of findSpecDirsMissingTasksMd(rootDir)) {
+        scaffoldTasksMd(spec.dirPath);
+      }
+    },
   },
 ] as const;
 
@@ -339,9 +558,12 @@ export const BOOTSTRAP_STEPS: readonly BootstrapStep[] = [
  * Behavior:
  *   - If master setting disabled → no-op
  *   - Steps are evaluated in order; the first eligible one is offered
- *   - "Primary" → runs the associated command
- *   - "Not Now" → no-op (eligible again next activation)
+ *   - "Always" (when offered) → enables auto-run for the step, then runs once
+ *   - "Primary" → runs the associated command once
  *   - "Don't ask again" → writes the corresponding skip flag to preferences
+ *   - Dismissing the toast (the X) → no-op (eligible again next activation).
+ *     There is no explicit "Not Now": the toast's close button already does
+ *     exactly that, so a dedicated button was redundant.
  *
  * Returns a result object describing what (if anything) was offered, so tests
  * can assert behavior without inspecting vscode mocks.
@@ -369,16 +591,32 @@ export async function runBootstrap(
   for (const step of steps) {
     if (!step.shouldRun(rootDir, prefs)) continue;
 
-    const choice = await vscode.showPrompt(step.message, [
+    // "Always" first (most prominent / default), then the one-shot primary,
+    // then the opt-out. No "Not Now" — the toast's X already dismisses.
+    const actions = [
+      ...(step.alwaysAction ? [step.alwaysAction] : []),
       step.primaryAction,
-      NOT_NOW,
       DONT_ASK,
-    ]);
+    ];
+    const choice = await vscode.showPrompt(step.message, actions);
 
-    if (choice === step.primaryAction) {
-      // Pass the bootstrapped folder so the command targets THIS folder, not a
-      // re-resolved one (matters in a multi-root workspace).
-      await vscode.executeCommand(step.commandId, rootDir);
+    if (step.alwaysAction && choice === step.alwaysAction) {
+      // Opt into auto-run going forward, then run once now. If the host can't
+      // persist the setting, fall back to a plain one-shot run.
+      if (vscode.enableAutoClassify) {
+        await vscode.enableAutoClassify(rootDir);
+      }
+      await vscode.executeCommand(step.commandId, rootDir, step.commandArg);
+    } else if (choice === step.primaryAction) {
+      if (step.action) {
+        // In-process effect (e.g. DESIGN.md stub removal, #315) — no command.
+        await step.action(rootDir);
+      } else {
+        // Pass the bootstrapped folder so the command targets THIS folder, not a
+        // re-resolved one (matters in a multi-root workspace), plus any step-
+        // specific arg (backfill → AI consent).
+        await vscode.executeCommand(step.commandId, rootDir, step.commandArg);
+      }
     } else if (choice === DONT_ASK) {
       savePreferences(rootDir, { [step.skipPrefKey]: true });
     }

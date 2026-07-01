@@ -36,6 +36,7 @@ vi.mock('../src/lib/approval', () => ({
   approveSpec: vi.fn(),
   revokeApproval: vi.fn(() => true),
   getApprovalStatus: vi.fn(() => 'unapproved'),
+  gitConfigEmail: vi.fn(() => 'tester@example.com'),
 }));
 
 // Mock the libs called inside the action body
@@ -44,7 +45,8 @@ vi.mock('../src/lib/spec', () => ({
   setSpecStatus: vi.fn(),
 }));
 
-vi.mock('../src/lib/config', () => ({
+vi.mock('../src/lib/config', async (importOriginal) => ({
+  ...(await importOriginal()),
   loadConfig: vi.fn(() => ({})),
 }));
 
@@ -133,11 +135,12 @@ function pickFirst() {
   );
 }
 
-/** Drive getApprovalStatus per spec id. */
+/** Drive getApprovalStatus per spec id (path-keyed now: recover id from filePath). */
 function setStatuses(map: Record<string, ApprovalStatus>): void {
-  vi.mocked(getApprovalStatus).mockImplementation(
-    (_root: string, id: string) => map[id] ?? 'unapproved',
-  );
+  vi.mocked(getApprovalStatus).mockImplementation((_root: string, filePath: string) => {
+    const m = filePath.match(/\/(SPEC-\d+)\//);
+    return map[m ? m[1] : ''] ?? 'unapproved';
+  });
 }
 
 // ─── approveSpecCommand action paths ──────────────────────────────────────
@@ -245,59 +248,43 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
     expect(approveSpec).not.toHaveBeenCalled();
   });
 
-  // ── confirmation dialog ──────────────────────────────────────────────────
+  // ── no confirmation modal (#104: selecting + picking IS the explicit act) ──
 
-  it('aborts when the user dismisses the confirmation warning', async () => {
+  it('approves a complete spec directly, with no confirmation modal', async () => {
     pickFirst();
     vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec() as never);
     vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
-    vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(undefined as never);
 
     await approveSpecCommand(undefined);
 
-    expect(approveSpec).not.toHaveBeenCalled();
-    expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
+    // No modal at all — approval proceeds on the explicit pick.
+    expect(approveSpec).toHaveBeenCalled();
+    const modalCalls = vi
+      .mocked(vscode.window.showWarningMessage)
+      .mock.calls.filter((c) => (c[1] as { modal?: boolean } | undefined)?.modal);
+    expect(modalCalls).toHaveLength(0);
   });
 
-  it('shows warning message with spec id and tier in confirmation', async () => {
-    pickFirst();
-    vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec() as never);
-    vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
-    vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(undefined as never);
-
-    await approveSpecCommand(undefined);
-
-    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
-      expect.stringContaining('SPEC-001'),
-      expect.objectContaining({ modal: true }),
-      'Approve',
-    );
-    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
-      expect.stringContaining('T2'),
-      expect.anything(),
-      'Approve',
-    );
-  });
-
-  it('includes non-blocking warnings in the confirmation detail', async () => {
+  it('surfaces warnings as a non-modal advisory after approving (never an approve-anyway gate)', async () => {
     pickFirst();
     vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec() as never);
     vi.mocked(validateSpec).mockReturnValueOnce(
       completeWithWarnings(['Optional section missing']) as never,
     );
-    vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(undefined as never);
 
     await approveSpecCommand(undefined);
 
+    // Approval still happened — warnings do not block.
+    expect(approveSpec).toHaveBeenCalled();
+    // The advisory is a non-modal warning toast carrying the warning text.
     const call = vi.mocked(vscode.window.showWarningMessage).mock.calls[0];
-    const detail = (call[1] as { detail?: string }).detail ?? '';
-    expect(detail).toContain('Non-blocking warnings');
-    expect(detail).toContain('Optional section missing');
+    expect(call[0]).toContain('Optional section missing');
+    expect((call[1] as { modal?: boolean } | undefined)?.modal).toBeFalsy();
   });
 
   // ── successful approval ──────────────────────────────────────────────────
 
-  it('calls approveSpec with correct (root, id, filePath, tier) args on confirm', async () => {
+  it('calls approveSpec with correct (root, filePath, tier, email) args on confirm', async () => {
     pickFirst();
     vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec() as never);
     vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
@@ -305,11 +292,13 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
 
     await approveSpecCommand(undefined);
 
+    // SPEC-022: path-keyed + attributed. The id is gone from the signature; the
+    // captured git email is the new last arg.
     expect(approveSpec).toHaveBeenCalledWith(
       '/tmp/ws',
-      'SPEC-001',
       '/tmp/ws/specs/minspec/SPEC-001/spec.md',
       'T2',
+      'tester@example.com',
     );
   });
 
@@ -439,9 +428,9 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
     expect(vscode.window.showQuickPick).not.toHaveBeenCalled();
     expect(approveSpec).toHaveBeenCalledWith(
       '/tmp/ws',
-      'SPEC-003',
       '/tmp/ws/specs/minspec/SPEC-003/spec.md',
       'T2',
+      'tester@example.com',
     );
   });
 
@@ -477,12 +466,50 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
 
     expect(approveSpec).toHaveBeenCalledWith(
       '/tmp/ws',
-      'SPEC-002',
       '/tmp/ws/specs/minspec/SPEC-002/spec.md',
       'T2',
+      'tester@example.com',
     );
     // Already implementing — no status flip
     expect(setSpecStatus).not.toHaveBeenCalled();
+  });
+
+  // ── first-approve revoke tip (#104: show once, not every approve) ──────────
+
+  it('shows the editing-revokes tip once, then records it so it does not repeat', async () => {
+    const store: Record<string, unknown> = {};
+    const memento = {
+      get: (k: string, d?: unknown) => (k in store ? store[k] : d),
+      update: (k: string, v: unknown) => {
+        store[k] = v;
+        return Promise.resolve();
+      },
+    } as unknown as import('vscode').Memento;
+
+    const tip = /editing an approved spec automatically revokes/i;
+
+    // First approval — tip shown.
+    pickFirst();
+    vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec('new') as never);
+    vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
+    await approveSpecCommand(undefined, memento);
+    expect(
+      vi.mocked(vscode.window.showInformationMessage).mock.calls.some((c) =>
+        tip.test(String(c[0])),
+      ),
+    ).toBe(true);
+
+    // Second approval — flag set, tip suppressed.
+    vi.mocked(vscode.window.showInformationMessage).mockClear();
+    pickFirst();
+    vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec('new') as never);
+    vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
+    await approveSpecCommand(undefined, memento);
+    expect(
+      vi.mocked(vscode.window.showInformationMessage).mock.calls.some((c) =>
+        tip.test(String(c[0])),
+      ),
+    ).toBe(false);
   });
 });
 
@@ -501,7 +528,7 @@ describe('revokeApprovalCommand — action paths (post-selection)', () => {
 
     await revokeApprovalCommand(undefined);
 
-    expect(revokeApproval).toHaveBeenCalledWith('/tmp/ws', 'SPEC-001');
+    expect(revokeApproval).toHaveBeenCalledWith('/tmp/ws', '/tmp/ws/specs/minspec/SPEC-001/spec.md');
     expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
       expect.stringContaining('Revoked approval for SPEC-001'),
     );
@@ -550,7 +577,7 @@ describe('revokeApprovalCommand — action paths (post-selection)', () => {
     await revokeApprovalCommand(node);
 
     expect(vscode.window.showQuickPick).not.toHaveBeenCalled();
-    expect(revokeApproval).toHaveBeenCalledWith('/tmp/ws', 'SPEC-004');
+    expect(revokeApproval).toHaveBeenCalledWith('/tmp/ws', '/tmp/ws/specs/minspec/SPEC-004/spec.md');
   });
 
   it('shows "was not approved" path even via tree node when revokeApproval returns false', async () => {
@@ -572,7 +599,7 @@ describe('revokeApprovalCommand — action paths (post-selection)', () => {
 
     await revokeApprovalCommand(undefined);
 
-    expect(revokeApproval).toHaveBeenCalledWith('/tmp/ws', 'SPEC-005');
+    expect(revokeApproval).toHaveBeenCalledWith('/tmp/ws', '/tmp/ws/specs/minspec/SPEC-005/spec.md');
     expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
       expect.stringContaining('Revoked approval for SPEC-005'),
     );

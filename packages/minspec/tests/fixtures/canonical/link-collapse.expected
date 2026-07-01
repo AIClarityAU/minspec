@@ -1,0 +1,9 @@
+---
+id: SPEC-099
+title: See [ref](RELLINK)
+---
+# Links
+
+Relative: [a](RELLINK), [b](RELLINK), [c](RELLINK), [d](RELLINK).
+External: [e](https://example.com), [f](mailto:x@y.com).
+Anchor: [g](#section). Absolute: [h](/root/abs.md).

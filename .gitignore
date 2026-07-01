@@ -10,6 +10,7 @@ coverage/
 # Tool / cache directories
 .wrangler/
 .claude/
+__pycache__/
 
 # Secrets — never commit
 .env
@@ -19,6 +20,13 @@ coverage/
 # MinSpec ephemeral session data
 .minspec/session.json
 .minspec/calibration.json
+# Machine-local merge-refresh drift-detection state, rebuilt on every
+# generate/refresh — must be gitignored, never committed. Mirrors
+# MINSPEC_GITIGNORE_ENTRIES in packages/minspec/src/lib/scaffold.ts (kept in
+# sync by gitignore.test.ts). Backfilled here after a stale installed build
+# wrote template-baseline.json without adding these entries (#380 follow-up).
+.minspec/generated-hashes.json
+.minspec/template-baseline.json
 
 # Classifier validation: fetched SWE-bench data (DR-009 — patches not committed)
 scripts/classifier-validation/.data/
@@ -36,5 +44,16 @@ packages/minspec/test-fixtures/workspace/.minspec/generated-hashes.json
 # Supply-chain scan output (bumblebee, DR-005)
 .cache/supply-chain/
 
-# MinSpec local approval state (content-hash bound, machine-local)
+# SPEC-022 (DR-034): approval ground truth is now COMMITTED, path-keyed sidecars
+# under .minspec/approvals/ (FR-1) — intentionally TRACKED so every clone/worktree/CI
+# checkout has it. The legacy single-file .minspec/approvals.json stays ignored (it
+# is migrated into the sidecar tree by scripts/migrate-approvals.ts and retired).
 .minspec/approvals.json
+.minspec/approvals.json.bak-*
+
+# Auto-drain opt-in (#239) — personal/machine-local, never inherited by teammates
+.minspec/auto-drain
+
+# ScroogeLLM content lives in the private scroogellm repo, never in public MinSpec (DR-027).
+# Gate: keep scrooge assets/site out of public history even if dropped into this tree.
+sites/scroogellm.com/

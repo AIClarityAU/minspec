@@ -1,0 +1,10 @@
+# SPEC-022 / DR-034 (FR-3) — VCS-layer EOL normalization for specs.
+#
+# Reinforces the canonicalization's EOL step at the version-control layer so a
+# spec checked out on Windows (CRLF) and on POSIX (LF) hashes identically (closing
+# the CRLF<->LF hash-flip). Belt-and-suspenders with canonicalizeSpec/canonical.py.
+specs/** text eol=lf
+
+# The committed approval sidecars are JSON the gate twins parse byte-for-byte;
+# keep them LF-normalized too.
+.minspec/approvals/** text eol=lf

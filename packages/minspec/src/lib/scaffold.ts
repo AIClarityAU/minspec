@@ -1,12 +1,20 @@
 import * as fs from 'fs';
 import * as path from 'path';
-import { DEFAULT_CONFIG, loadConfig } from './config';
+import { DEFAULT_CONFIG, loadConfig, resolveAndValidate, TIERS, type Tier } from './config';
 import { buildContext, renderTemplate, renderAll } from './template-engine';
 import {
   TEMPLATE_NAMES,
   TEMPLATE_OUTPUT_PATHS,
+  MANAGED_REGION_TEMPLATES,
+  MINSPEC_HOOKS_DIR,
+  managedRegionStartMarker,
+  managedRegionEndMarker,
+  renderManagedBlock,
+  renderManagedFile,
   computeTemplateBaseline,
+  type ManagedRegionTemplate,
 } from './template-registry';
+import { execFileSync } from 'child_process';
 import {
   parseSections,
   buildSectionHashes,
@@ -14,17 +22,240 @@ import {
   loadHashes,
   saveHashes,
   saveTemplateBaseline,
+  splitManagedRegion,
+  spliceManagedRegion,
   type GeneratedHashes,
 } from './merge-refresh';
 import { generateSlashCommandShims } from './slash-commands';
+import { detectTools, type DetectedTools } from './tool-detector';
 import { writeEpicIndex } from './epic-manager';
+import { assembleContext } from './constitution-context';
+import { seedProvider, integrateProposal, CONSTITUTION_SECTION_SCHEMA } from './constitution-proposer';
+
+/** Output path of the constitution, relative to project root. */
+const CONSTITUTION_REL_PATH = TEMPLATE_OUTPUT_PATHS['constitution.md'];
+
+/**
+ * SPEC-025 FR-4/FR-5: seed the constitution with deterministic DRAFT entries so
+ * it is never empty (INV-4). Reads the current constitution, runs the offline
+ * seed provider over the assembled context manifest, integrates additively
+ * (never overwriting human content, idempotent), writes the result back, and
+ * re-hashes the file so later refresh-merge treats the seeded DRAFT sections as
+ * template-origin (preserving INV-2 on subsequent human edits).
+ *
+ * Mutates `allHashes` in place for the constitution's relative path and returns
+ * it. Best-effort: callers wrap in try/catch so a proposer failure never breaks
+ * init (mirrors writeEpicIndex).
+ */
+function seedConstitution(rootDir: string, allHashes: GeneratedHashes): GeneratedHashes {
+  const fullPath = path.join(rootDir, CONSTITUTION_REL_PATH);
+  if (!fs.existsSync(fullPath)) return allHashes;
+
+  const existing = fs.readFileSync(fullPath, 'utf-8');
+  const manifest = assembleContext(rootDir);
+  const proposal = seedProvider.propose(manifest, CONSTITUTION_SECTION_SCHEMA);
+  // seedProvider is synchronous (FR-5); integrate expects a resolved Proposal.
+  if (proposal instanceof Promise) return allHashes;
+
+  const { merged } = integrateProposal(existing, proposal);
+  if (merged === existing) return allHashes;
+
+  fs.writeFileSync(fullPath, merged);
+  const sections = parseSections(merged);
+  return { ...allHashes, [CONSTITUTION_REL_PATH]: buildSectionHashes(sections) };
+}
 
 export { DEFAULT_CONFIG };
+
+// ─── Ensure-tasks.md (#225) ──────────────────────────────────────────────────
+//
+// A split-layout spec (`type: requirements|design|tasks`, one phase per sibling
+// file) whose TIER requires the Tasks phase (T3/T4) must carry a `tasks.md`, or
+// the implement phase has no spec-kit-native place to track step-by-step
+// progress (DR-035). The spec-validator already WARNS on this
+// (`split-coverage.tasks.missing`); #225 makes the warning ACTIONABLE by
+// scaffolding the missing file. Deriving `done` from the checkboxes is OUT of
+// scope — that is #208 (the #116/DR-034 task-tracking caveat).
+//
+// Tier-0: deterministic, offline, pure filesystem. The created file is body-only
+// content under a frontmatter block that MIRRORS the requirements sibling — the
+// corpus convention is exactly `id`, `type: tasks`, `status`, `product`, `epic`
+// (no `tier`/`created`/`phases`; those live on the requirements artifact). The
+// `id` line is what the CI frontmatter gate (scripts/validate-frontmatter.ts)
+// requires on every `specs/**/*.md`, so the scaffolded file passes validation.
+
+/** A frontmatter key whose RAW line is copied verbatim from requirements.md. */
+const TASKS_MD_INHERITED_FIELDS = ['id', 'status', 'product', 'epic'] as const;
+
+/**
+ * Read the RAW value-bearing frontmatter line for `key` from a markdown source,
+ * preserving any inline `# Title` comment verbatim (the corpus carries the epic's
+ * human title that way). Returns the full `key: value` line, or undefined when
+ * the field is absent. Only the top-level frontmatter block is scanned.
+ */
+function rawFrontmatterLine(raw: string, key: string): string | undefined {
+  const block = raw.match(/^---\n([\s\S]*?)\n---/);
+  if (!block) return undefined;
+  const lineRe = new RegExp(`^(${key}\\s*:\\s*.*)$`, 'm');
+  const m = block[1].match(lineRe);
+  return m ? m[1].trimEnd() : undefined;
+}
+
+/**
+ * Build the body of a scaffolded `tasks.md` from the requirements sibling's raw
+ * source. Frontmatter mirrors the requirements file's `id`/`status`/`product`/
+ * `epic` lines verbatim, with `type: tasks` (placed right after `id:`, matching
+ * the corpus). The body is a single placeholder heading prompting the author to
+ * fill in the task breakdown — intentionally minimal (no invented tasks).
+ */
+export function buildTasksMdContent(requirementsRaw: string): string {
+  const idLine = rawFrontmatterLine(requirementsRaw, 'id') ?? 'id: SPEC-000';
+  const fm: string[] = ['---', idLine, 'type: tasks'];
+  for (const key of TASKS_MD_INHERITED_FIELDS) {
+    if (key === 'id') continue; // already emitted first
+    const line = rawFrontmatterLine(requirementsRaw, key);
+    if (line) fm.push(line);
+  }
+  fm.push('---');
+
+  const idValue = (idLine.match(/SPEC-\d+/) ?? ['the spec'])[0];
+  const body = [
+    '',
+    `# ${idValue} — Task Breakdown`,
+    '',
+    '<!-- MinSpec scaffolded this tasks.md (#225). Break the plan into ordered,',
+    '     checkable tasks. Ticking a checkbox here is body-only — it never voids',
+    '     spec approval (DR-035). -->',
+    '',
+    '## Tasks',
+    '',
+    '- [ ] _Add the first task._',
+    '',
+  ];
+
+  return fm.join('\n') + '\n' + body.join('\n');
+}
+
+/**
+ * Scaffold a `tasks.md` into a split-layout spec directory that lacks one.
+ *
+ * No-op (returns false) when the dir has no `requirements.md` (nothing to mirror
+ * frontmatter from) or already has a `tasks.md` (NEVER overwritten — a deliberate
+ * author absence beyond the offer is respected). Returns true iff a file was
+ * written. Pure filesystem, deterministic, offline (Tier-0 / DR-004).
+ */
+export function scaffoldTasksMd(dirPath: string): boolean {
+  const requirementsPath = path.join(dirPath, 'requirements.md');
+  const tasksPath = path.join(dirPath, 'tasks.md');
+  if (fs.existsSync(tasksPath)) return false;
+  if (!fs.existsSync(requirementsPath)) return false;
+
+  let requirementsRaw: string;
+  try {
+    requirementsRaw = fs.readFileSync(requirementsPath, 'utf-8');
+  } catch {
+    return false;
+  }
+
+  fs.writeFileSync(tasksPath, buildTasksMdContent(requirementsRaw), 'utf-8');
+  return true;
+}
+
+/** A split-layout spec directory that is missing its required `tasks.md`. */
+export interface MissingTasksMdSpec {
+  /** The spec's `id` (SPEC-NNN), read from requirements.md frontmatter. */
+  readonly id: string;
+  /** The spec's tier (the requirements artifact carries it). */
+  readonly tier: Tier;
+  /** Absolute path to the spec directory holding requirements.md. */
+  readonly dirPath: string;
+}
+
+/** Strip an inline `# comment` from a raw frontmatter scalar value. */
+function scalarValue(line: string | undefined): string {
+  if (line === undefined) return '';
+  const v = line.split(/:(.*)/s)[1]?.trim() ?? '';
+  const m = v.match(/\s#/);
+  return (m && m.index !== undefined ? v.slice(0, m.index) : v).trim();
+}
+
+/**
+ * Walk the specs tree for split-layout spec directories whose tier REQUIRES the
+ * Tasks phase (T3/T4 by default config) but which have no `tasks.md`.
+ *
+ * A directory qualifies when it contains a `requirements.md` carrying a `type:`
+ * frontmatter (the split-layout signal) — single-file specs (one file, no
+ * sibling files, no `type`) embed their Tasks phase in-file and are NEVER
+ * offered. The tier is read from requirements.md; only tiers whose
+ * `requiredPhases` include `tasks` are returned (T1/T2 don't, so they are
+ * skipped). Deterministic + offline; tolerant of an absent specs/ dir.
+ */
+export function findSpecDirsMissingTasksMd(rootDir: string): MissingTasksMdSpec[] {
+  const config = loadConfig(rootDir);
+  let specsDir: string;
+  try {
+    specsDir = resolveAndValidate(rootDir, config.specsDir);
+  } catch {
+    return [];
+  }
+  if (!fs.existsSync(specsDir)) return [];
+
+  const found: MissingTasksMdSpec[] = [];
+
+  const visit = (dir: string): void => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    const requirementsPath = path.join(dir, 'requirements.md');
+    if (fs.existsSync(requirementsPath)) {
+      try {
+        const raw = fs.readFileSync(requirementsPath, 'utf-8');
+        const type = scalarValue(rawFrontmatterLine(raw, 'type'));
+        const id = scalarValue(rawFrontmatterLine(raw, 'id'));
+        const tierRaw = scalarValue(rawFrontmatterLine(raw, 'tier'));
+        const tier = (TIERS as readonly string[]).includes(tierRaw)
+          ? (tierRaw as Tier)
+          : 'T2';
+        const requiresTasks =
+          config.phaseMappings[tier]?.requiredPhases.includes('tasks') ?? false;
+        const isSplit = type === 'requirements';
+        if (
+          isSplit &&
+          requiresTasks &&
+          id &&
+          !fs.existsSync(path.join(dir, 'tasks.md'))
+        ) {
+          found.push({ id, tier, dirPath: dir });
+        }
+      } catch {
+        /* unreadable requirements.md — skip this dir */
+      }
+    }
+
+    for (const entry of entries) {
+      if (entry.isDirectory()) visit(path.join(dir, entry.name));
+    }
+  };
+
+  visit(specsDir);
+  return found;
+}
 
 export const MINSPEC_GITIGNORE_MARKER = '# MinSpec ephemeral data';
 export const MINSPEC_GITIGNORE_ENTRIES = [
   '.minspec/session.json',
   '.minspec/calibration.json',
+  // Machine-local merge-refresh drift-detection state, rebuilt on every
+  // generate/refresh — must be gitignored, never committed. These mirror
+  // merge-refresh's HASHES_FILENAME / TEMPLATE_BASELINE_FILENAME (kept as plain
+  // literals here to avoid an import cycle; gitignore.test.ts ties the literals
+  // back to those source constants so a rename of either can't silently drift).
+  '.minspec/generated-hashes.json',
+  '.minspec/template-baseline.json',
 ];
 
 /**
@@ -51,8 +282,9 @@ export function scaffold(rootDir: string): void {
 }
 
 /**
- * Ensure MinSpec ephemeral files (session.json, calibration.json) are
- * present in the project's .gitignore.
+ * Ensure MinSpec's machine-local files (session.json, calibration.json,
+ * generated-hashes.json, template-baseline.json) are present in the project's
+ * .gitignore — see MINSPEC_GITIGNORE_ENTRIES.
  *
  * Idempotent: skips any entry already listed (exact match, ignoring leading
  * whitespace). Creates .gitignore if missing. Preserves existing content.
@@ -79,6 +311,167 @@ export function ensureGitignoreEntries(rootDir: string): void {
   const separator = existing.length > 0 && !existing.endsWith('\n\n') ? '\n' : '';
 
   fs.writeFileSync(gitignorePath, existing + prefix + separator + block);
+}
+
+/**
+ * Warning emitted when a managed-region refresh cannot safely update a file
+ * because its MinSpec markers are missing or corrupted. Surfaced (not thrown) so a
+ * single un-restorable file never aborts the whole refresh, and never triggers a
+ * silent whole-file overwrite (never-wrong).
+ */
+export interface ManagedRegionWarning {
+  /** The output path (relative to project root) that was left untouched. */
+  readonly outputPath: string;
+  /** Human-readable, actionable message. */
+  readonly message: string;
+}
+
+/**
+ * The skip+warn message for a file whose managed markers are gone. Single source
+ * so the message is identical wherever it is produced (tests match on it).
+ */
+function missingMarkersMessage(outputPath: string): string {
+  return (
+    `MinSpec-managed markers missing in ${outputPath}; left untouched — ` +
+    'restore the markers or delete the file to re-scaffold.'
+  );
+}
+
+/**
+ * Scaffold managed-region templates (#249, DR-037) at first init.
+ *
+ * Managed-region templates (YAML workflows, scripts) cannot go through the
+ * Markdown section-merge engine, so MinSpec wraps its owned content in
+ * comment-delimited markers (`renderManagedBlock`) and writes the block verbatim —
+ * but only if the output path is absent (idempotent: an existing file, MinSpec- or
+ * user-authored, is never overwritten here). The markers written now ARE the
+ * boundary Refresh later uses to update only MinSpec's region. The user is expected
+ * to add any custom content OUTSIDE the markers.
+ */
+function generateManagedRegionTemplates(rootDir: string, tools: DetectedTools): void {
+  for (const tpl of MANAGED_REGION_TEMPLATES) {
+    // Tool-gated templates (the slash-command shims, #241) are only scaffolded for a
+    // tool the project actually uses; tool-independent templates (CI workflow, git
+    // hooks) have no condition and are always scaffolded.
+    if (tpl.condition && !tpl.condition(tools)) continue;
+    const fullPath = path.join(rootDir, tpl.outputPath);
+    if (!fs.existsSync(fullPath)) {
+      writeManagedFile(fullPath, tpl);
+    }
+  }
+}
+
+/**
+ * Write the full on-disk file for a managed-region template (shebang preamble +
+ * marked block) and, for executable templates (the git hooks), set the execute bit
+ * so git will actually run the hook. Single place both scaffold and the deleted-file
+ * re-scaffold path go through, so the bytes and the mode never diverge.
+ */
+function writeManagedFile(fullPath: string, tpl: ManagedRegionTemplate): void {
+  fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+  fs.writeFileSync(fullPath, renderManagedFile(tpl));
+  if (tpl.executable) {
+    try {
+      fs.chmodSync(fullPath, 0o755);
+    } catch {
+      // chmod can fail on filesystems without POSIX modes (e.g. some Windows
+      // mounts). Git on those platforms ignores the bit anyway — best-effort.
+    }
+  }
+}
+
+/**
+ * Point the project's git `core.hooksPath` at `.minspec/hooks` so the scaffolded
+ * editor-independent hooks (DR-037, #247) run on EVERY commit — terminal, another
+ * editor, or an AI agent — not just the VS Code command path.
+ *
+ * Idempotent: reads the current value first and only writes when it differs (a no-op
+ * when already configured). Best-effort and fail-quiet — a repo without git, or a git
+ * error, must never break init/refresh; the GitHub Actions backstop (DR-037) still
+ * gates such repos on push.
+ */
+function ensureHooksPath(rootDir: string): void {
+  try {
+    let current = '';
+    try {
+      current = execFileSync('git', ['config', '--local', 'core.hooksPath'], {
+        cwd: rootDir,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+    } catch {
+      // Unset → git exits non-zero; treat as empty and set it below.
+      current = '';
+    }
+    if (current !== MINSPEC_HOOKS_DIR) {
+      execFileSync('git', ['config', '--local', 'core.hooksPath', MINSPEC_HOOKS_DIR], {
+        cwd: rootDir,
+        stdio: 'ignore',
+      });
+    }
+  } catch {
+    // No git repo / git not on PATH / config write failed — non-fatal.
+  }
+}
+
+/**
+ * Reconcile managed-region templates on Refresh (#249, DR-037).
+ *
+ * For each managed-region template, by parsing its markers — never a whole-file
+ * compare:
+ *   - file missing             → re-scaffold it with markers (a deleted managed file)
+ *   - markers present          → OVERWRITE only the content between the markers with
+ *                                the current template; PRESERVE everything outside
+ *                                verbatim (user edits outside the region survive,
+ *                                and MinSpec's region is always brought current)
+ *   - file exists, NO markers  → SKIP + warn; never a silent whole-file overwrite
+ *
+ * No content baseline is consulted — the markers ARE the boundary between
+ * MinSpec-owned and user-owned content, which is the key improvement over the old
+ * preserve-on-any-edit whole-file rule: a stray edit outside the region no longer
+ * freezes MinSpec out of its own region.
+ *
+ * Returns the warnings for any files left untouched (missing markers) so the
+ * vscode-aware caller can surface them. The file is NEVER modified on a warning.
+ */
+function refreshManagedRegionTemplates(rootDir: string, tools: DetectedTools): ManagedRegionWarning[] {
+  const warnings: ManagedRegionWarning[] = [];
+
+  for (const tpl of MANAGED_REGION_TEMPLATES) {
+    // Skip a tool-gated template whose tool the project does not use (#241): never
+    // scaffold a Claude shim into a Cursor-only project, and never re-scaffold one a
+    // user removed by uninstalling the tool. Tool-independent templates are unconditional.
+    if (tpl.condition && !tpl.condition(tools)) continue;
+
+    const fullPath = path.join(rootDir, tpl.outputPath);
+
+    if (!fs.existsSync(fullPath)) {
+      // Re-scaffold a deleted managed file, shebang + markers and all.
+      writeManagedFile(fullPath, tpl);
+      continue;
+    }
+
+    const onDisk = fs.readFileSync(fullPath, 'utf-8');
+    const startMarker = managedRegionStartMarker(tpl.name, tpl.commentStyle);
+    const endMarker = managedRegionEndMarker(tpl.name, tpl.commentStyle);
+    const split = splitManagedRegion(onDisk, startMarker, endMarker);
+
+    if (!split) {
+      // Markers missing/corrupted — cannot identify MinSpec's region. NEVER
+      // clobber the whole file; skip and warn so the user can restore the markers.
+      warnings.push({ outputPath: tpl.outputPath, message: missingMarkersMessage(tpl.outputPath) });
+      continue;
+    }
+
+    // Overwrite ONLY the managed region with the current template; preserve the
+    // user's surrounding content verbatim.
+    const updated = spliceManagedRegion(split, renderManagedBlock(tpl));
+    if (updated !== onDisk) {
+      fs.writeFileSync(fullPath, updated);
+    }
+  }
+
+  return warnings;
 }
 
 /**
@@ -112,6 +505,14 @@ export function generateHarnessFiles(rootDir: string): void {
     }
   }
 
+  // SPEC-025 FR-4/FR-5: seed the freshly written constitution so first-init is
+  // never empty. Best-effort — a proposer failure must never break init.
+  try {
+    allHashes = seedConstitution(rootDir, allHashes);
+  } catch {
+    // best-effort — the constitution stays as the template scaffold on failure.
+  }
+
   saveHashes(rootDir, allHashes);
 
   // Record the raw-template baseline so drift detection compares like-for-like
@@ -120,10 +521,24 @@ export function generateHarnessFiles(rootDir: string): void {
   // false-positive drift toast.
   saveTemplateBaseline(rootDir, computeTemplateBaseline());
 
-  // Generate Spec Kit slash-command shims for any detected AI tool.
-  // Tools are re-detected after template generation so freshly written
-  // CLAUDE.md / AGENTS.md / .cursorrules trigger shim creation.
-  generateSlashCommandShims(rootDir);
+  // Scaffold managed-region templates (#249, #241) — harness artifacts the Markdown
+  // section-merge engine cannot carry (CI workflow, git hooks) PLUS the tool-gated
+  // slash-command shims — wrapping MinSpec's content in comment-delimited markers. No
+  // content baseline is recorded: the markers themselves are the boundary Refresh uses
+  // to update only MinSpec's region. Tools are detected here, AFTER the Markdown
+  // templates are written, so freshly-written CLAUDE.md / .cursorrules gate the shims.
+  const tools = detectTools(rootDir);
+  generateManagedRegionTemplates(rootDir, tools);
+
+  // Point git at the scaffolded editor-independent hooks so terminal / other-editor
+  // / AI-agent commits run the SDD gates too (DR-037, #247). Idempotent + fail-quiet.
+  ensureHooksPath(rootDir);
+
+  // Inject the AGENTS.md slash-command marker section (already merge-safe). The Claude
+  // per-command files and the Cursor file are now owned by the managed-region path
+  // above, so this is a no-op for those (they already exist with markers); it remains
+  // the writer for the AGENTS.md table.
+  generateSlashCommandShims(rootDir, { tools });
 }
 
 /**
@@ -135,10 +550,18 @@ export function generateHarnessFiles(rootDir: string): void {
  *   - Unmodified sections → updated from latest template
  *   - New template sections → appended
  *   - User-added sections (not in template) → preserved
+ *
+ * Returns any managed-region warnings (files left untouched because their MinSpec
+ * markers were deleted) so the vscode-aware caller can surface them; an empty array
+ * means a fully clean refresh.
  */
-export function refreshHarnessFiles(rootDir: string): void {
+export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
   // Ensure .minspec/ exists
   scaffold(rootDir);
+  // Backfill any missing ignore entries on auto-refresh-on-open so existing
+  // projects (scaffolded before a new state file was added) stop committing
+  // machine-local merge-refresh state. Idempotent — adds only what's missing.
+  ensureGitignoreEntries(rootDir);
 
   const config = loadConfig(rootDir);
   const context = buildContext(rootDir, config);
@@ -165,6 +588,14 @@ export function refreshHarnessFiles(rootDir: string): void {
     }
   }
 
+  // SPEC-025 FR-4/FR-5: re-seed after merge so a still-empty section gains DRAFT
+  // entries on refresh too; additive + idempotent, never overwrites human edits.
+  try {
+    allHashes = seedConstitution(rootDir, allHashes);
+  } catch {
+    // best-effort — never break a refresh on a proposer failure.
+  }
+
   saveHashes(rootDir, allHashes);
 
   // Re-record the raw-template baseline: after a refresh the user's files are in
@@ -172,8 +603,22 @@ export function refreshHarnessFiles(rootDir: string): void {
   // template next moves upstream (#117).
   saveTemplateBaseline(rootDir, computeTemplateBaseline());
 
-  // Refresh Spec Kit slash-command shims. Per-command Claude/Cursor files
-  // are only created if missing (user edits preserved); the AGENTS.md
-  // marker section is regenerated in place.
-  generateSlashCommandShims(rootDir);
+  // Reconcile managed-region templates (#249, #241): re-scaffold if deleted, overwrite
+  // only the marker-bounded MinSpec region (preserving the user's surrounding content),
+  // or skip+warn if the markers were deleted. The slash-command shims ride this path
+  // now, so a guidance update reaches existing projects and a drifted shim is brought
+  // current — the create-only behaviour is gone. Collect warnings to return.
+  const tools = detectTools(rootDir);
+  const managedRegionWarnings = refreshManagedRegionTemplates(rootDir, tools);
+
+  // Re-assert git's hooksPath on refresh too (a repo cloned without it, or whose
+  // config was reset, regains the gate). Idempotent + fail-quiet (DR-037, #247).
+  ensureHooksPath(rootDir);
+
+  // Re-inject the AGENTS.md slash-command marker section (regenerated in place). The
+  // Claude per-command files and the Cursor file are refreshed by the managed-region
+  // path above, so this no longer owns them.
+  generateSlashCommandShims(rootDir, { tools });
+
+  return managedRegionWarnings;
 }

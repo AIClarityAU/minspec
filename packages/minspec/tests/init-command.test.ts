@@ -37,6 +37,15 @@ vi.mock('../src/lib/resolve-folder', () => ({
   resolveTargetFolder: vi.fn(),
 }));
 
+// ─── Mock the SPEC-025 FR-6 constitution nudge ───────────────────────────────
+// Default: not-empty → no advisory toast, so the happy-path success-message
+// count stays deterministic. A dedicated test below flips it to empty=true to
+// assert the advisory fires as a SECOND, non-modal info message.
+
+vi.mock('../src/lib/constitution-nudge', () => ({
+  evaluateConstitution: vi.fn(() => ({ empty: false, message: 'm', fixHint: 'f' })),
+}));
+
 // ─── Imports ─────────────────────────────────────────────────────────────────
 
 import * as vscode from 'vscode';
@@ -46,6 +55,7 @@ import {
   generateHarnessFiles,
   refreshHarnessFiles,
 } from '../src/lib/scaffold';
+import { evaluateConstitution } from '../src/lib/constitution-nudge';
 
 // =============================================================================
 // Tests
@@ -104,6 +114,56 @@ describe('initRefreshCommand() — write-failure surfacing (#153)', () => {
     await initRefreshCommand('/tmp/ws');
 
     expect(refreshHarnessFiles).toHaveBeenCalledWith('/tmp/ws');
+    expect(vscode.window.showInformationMessage).toHaveBeenCalledTimes(1);
+    expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+  });
+});
+
+describe('SPEC-025 FR-6 — empty-constitution nudge (non-modal advisory)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(evaluateConstitution).mockReturnValue({
+      empty: false,
+      message: 'm',
+      fixHint: 'f',
+    });
+  });
+
+  it('initCommand surfaces a SECOND non-modal info message when constitution is empty', async () => {
+    vi.mocked(evaluateConstitution).mockReturnValue({
+      empty: true,
+      message: 'MinSpec: author your constitution',
+      fixHint: 'edit it',
+    });
+    await initCommand('/tmp/ws');
+    // Success message + the advisory = two non-modal info toasts, no error.
+    expect(vscode.window.showInformationMessage).toHaveBeenCalledTimes(2);
+    const calls = vi.mocked(vscode.window.showInformationMessage).mock.calls.map((c) => c[0]);
+    expect(calls).toContain('MinSpec: author your constitution');
+    // Advisory must be NON-MODAL: no options object with { modal: true }.
+    for (const call of vi.mocked(vscode.window.showInformationMessage).mock.calls) {
+      const opts = call[1] as { modal?: boolean } | undefined;
+      expect(opts?.modal).not.toBe(true);
+    }
+    expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+  });
+
+  it('does NOT surface the advisory when the constitution is already populated', async () => {
+    vi.mocked(evaluateConstitution).mockReturnValue({
+      empty: false,
+      message: 'unused',
+      fixHint: 'unused',
+    });
+    await initCommand('/tmp/ws');
+    expect(vscode.window.showInformationMessage).toHaveBeenCalledTimes(1);
+  });
+
+  it('a nudge failure never affects the init result (best-effort)', async () => {
+    vi.mocked(evaluateConstitution).mockImplementationOnce(() => {
+      throw new Error('boom');
+    });
+    await expect(initCommand('/tmp/ws')).resolves.toBeUndefined();
+    // Success message still fired; the thrown nudge was swallowed.
     expect(vscode.window.showInformationMessage).toHaveBeenCalledTimes(1);
     expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
   });

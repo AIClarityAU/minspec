@@ -15,6 +15,7 @@ const mockSpecTreeProvider = { refresh: vi.fn() };
 const mockAdrTreeProvider = { refresh: vi.fn() };
 const mockBacklogTreeProvider = { refresh: vi.fn(), refreshIfStale: vi.fn() };
 const mockStatusBar = { update: vi.fn(), dispose: vi.fn() };
+const mockNextTaskStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockSpecPanel = { show: vi.fn(), refresh: vi.fn(), dispose: vi.fn() };
 const mockCodeLensProvider = { refresh: vi.fn() };
 const mockSpecFileLensProvider = { refresh: vi.fn() };
@@ -106,9 +107,16 @@ vi.mock('vscode', () => ({
     }),
     openTextDocument: vi.fn(() => Promise.resolve({})),
     onDidSaveTextDocument: vi.fn((handler: (doc: any) => void) => {
-      onSaveHandler = handler;
+      // Capture only the FIRST save listener — the drift-detection handler these
+      // tests exercise. The reference-diagnostics module (#316) registers a
+      // second save listener; without this guard it would clobber onSaveHandler.
+      if (!onSaveHandler) onSaveHandler = handler;
       return { dispose: vi.fn() };
     }),
+    onDidChangeTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
+    onDidCloseTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
+    textDocuments: [],
+    onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
   },
   commands: {
     registerCommand: vi.fn((id: string, handler: (...args: any[]) => any) => {
@@ -123,6 +131,11 @@ vi.mock('vscode', () => ({
       return { dispose: vi.fn() };
     }),
     registerCompletionItemProvider: vi.fn(() => ({ dispose: vi.fn() })),
+    createDiagnosticCollection: vi.fn(() => ({
+      set: vi.fn(),
+      delete: vi.fn(),
+      dispose: vi.fn(),
+    })),
   },
   extensions: {
     getExtension: vi.fn(() => ({ id: 'mock' })),
@@ -207,6 +220,13 @@ vi.mock('../src/views/backlog-view', () => ({
 vi.mock('../src/views/status-bar', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/views/status-bar')>()),
   MinSpecStatusBar: vi.fn(function () { return mockStatusBar; }),
+  MinSpecNextTaskStatusBar: vi.fn(function () { return mockNextTaskStatusBar; }),
+}));
+// Stub the next-task command factory + cheap computeNextTask so activate's
+// status-bar wiring runs without building a real graph (no fs in this mock).
+vi.mock('../src/commands/next-task', () => ({
+  nextTaskCommand: vi.fn(() => vi.fn()),
+  computeNextTask: vi.fn(() => null),
 }));
 vi.mock('../src/views/spec-panel', () => ({
   SpecPanel: vi.fn(function () { return mockSpecPanel; }),
@@ -640,11 +660,12 @@ describe('activate()', () => {
   // File system watchers
   // -------------------------------------------------------------------------
 
-  it('creates four file system watchers (specs, adrs, traceability, approvals)', () => {
+  it('creates five file system watchers (specs, adrs, traceability, approvals, epics)', () => {
     activate(makeMockContext());
 
-    // DR-012 added the .minspec/approvals.json watcher → 4 (was 3).
-    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(4);
+    // DR-012 added the approvals watcher → 4 (was 3); SPEC-012 signpost wiring
+    // added the docs/epics/** watcher (epic status feeds the next-task resolver) → 5.
+    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(5);
   });
 
   it('wires spec watcher callbacks to refresh tree and panel', () => {
@@ -767,21 +788,59 @@ describe('activate()', () => {
     // The legacy welcome toast was removed; init is now offered by the
     // per-folder auto-bootstrap loop (harvest316/minspec#123).
     await vi.waitFor(() => {
+      // #203: "Not Now" removed — the toast's X dismisses; init has no "Always".
       expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
         expect.stringContaining("isn't initialized"),
         'Initialize',
-        'Not Now',
         "Don't ask again",
       );
     });
   });
 
-  it('does not show first-run prompt when .minspec/ exists', () => {
+  it('does not show first-run (bootstrap init) prompt when .minspec/ exists', () => {
     vi.mocked(fs.existsSync).mockReturnValue(true);
 
     activate(makeMockContext());
 
-    expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
+    // The bootstrap "isn't initialized" offer must not fire for an initialized
+    // project. (An empty constitution may still surface its own #320 advisory —
+    // asserted separately below — so we scope this to the init prompt, not "no
+    // toast at all".)
+    const calls = vi.mocked(vscode.window.showInformationMessage).mock.calls;
+    expect(
+      calls.some((c) => String(c[0]).includes("isn't initialized")),
+    ).toBe(false);
+  });
+
+  it('surfaces the #320 propose-draft nudge when an initialized constitution is empty', async () => {
+    // .minspec/ exists; the (auto-mocked) constitution reads as empty/template →
+    // the empty-constitution nudge offers "Propose draft" with a skip option.
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+
+    activate(makeMockContext());
+
+    await vi.waitFor(() => {
+      expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+        expect.stringContaining('no human-authored rules yet'),
+        'Propose draft',
+        "Don't ask again",
+      );
+    });
+  });
+
+  it('suppresses the #320 propose nudge once dismissed (workspaceState skip flag)', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+
+    const ctx = makeMockContext();
+    // Skip flag set → the nudge must not fire.
+    (ctx.workspaceState.get as ReturnType<typeof vi.fn>).mockReturnValue(true);
+
+    activate(ctx);
+
+    const calls = vi.mocked(vscode.window.showInformationMessage).mock.calls;
+    expect(
+      calls.some((c) => String(c[0]).includes('no human-authored rules yet')),
+    ).toBe(false);
   });
 
   it('does not show legacy welcome prompt when user has already seen it', () => {
@@ -873,10 +932,12 @@ describe('activate()', () => {
     activate(makeMockContext());
 
     // #123: init is invoked WITH the bootstrapped folder.
+    // #213: a 3rd commandArg now flows (undefined for the init step).
     await vi.waitFor(() => {
       expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
         'minspec.init',
         '/tmp/test-workspace',
+        undefined,
       );
     });
   });

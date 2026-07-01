@@ -4,6 +4,8 @@ import { readSpecFile } from '../lib/spec';
 import { loadConfig } from '../lib/config';
 import { validateSpec } from '../lib/spec-validator';
 import { epicRefSet } from '../lib/epic-manager';
+import { getApprovalStatus } from '../lib/approval';
+import type { ExplicitTerminal } from '../lib/lifecycle';
 
 interface SpecNodeLike {
   readonly spec?: SpecSummary;
@@ -37,7 +39,21 @@ export async function validateSpecCommand(node?: SpecNodeLike): Promise<void> {
 
   let result;
   try {
-    result = validateSpec(readSpecFile(spec.filePath), loadConfig(rootDir), epicRefSet(rootDir));
+    const parsed = readSpecFile(spec.filePath);
+    // SPEC-022 (INV-4): feed the validator the approval verdict + explicit
+    // terminal so it can assert the literal `status:` mirror == derived status and
+    // warn on drift. `archived` is the explicit-terminal human act read from the
+    // literal status; everything else is derived from {phases, approval}.
+    const approvalState = getApprovalStatus(rootDir, spec.filePath);
+    const explicitTerminal: ExplicitTerminal =
+      parsed.frontmatter.status === 'archived' ? 'archived' : undefined;
+    result = validateSpec(
+      parsed,
+      loadConfig(rootDir),
+      epicRefSet(rootDir),
+      approvalState,
+      explicitTerminal,
+    );
   } catch (err) {
     vscode.window.showErrorMessage(
       `MinSpec: Cannot read ${spec.id} — ${err instanceof Error ? err.message : String(err)}`,

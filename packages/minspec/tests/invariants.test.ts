@@ -116,6 +116,33 @@ describe('Invariant 2: No backend — no network calls', () => {
     'lib/backlog.ts',
     'lib/git-analyzer.ts',
     'lib/epic-backfill.ts',
+    // SPEC-022 / DR-034: approval capture of `git config user.email` for the FR-2
+    // attributed record. Local, headless, no network — Tier-0 (the "no network
+    // calls" invariant above still passes; this is git, not a backend). See
+    // approval.ts gitConfigEmail.
+    'lib/approval.ts',
+    // DR-037 / #247: scaffold points the project's git `core.hooksPath` at
+    // .minspec/hooks (via `git config --local core.hooksPath`) so the
+    // editor-independent SDD hooks run on every commit. Local git config write —
+    // no network, Tier-0. See scaffold.ts ensureHooksPath.
+    'lib/scaffold.ts',
+    // #356: ruleset advisor's single sanctioned spawn point shells the USER's
+    // authenticated `gh` to detect/create a branch ruleset — and ONLY behind
+    // explicit, opt-in post-init consent (the always-on path is the zero-network
+    // docs link). MinSpec opens no socket itself; same posture as it already
+    // shells `git`. Tier-0 boundary interpretation to be ratified by a DR.
+    // See ruleset-advisor.ts defaultCommandRunner.
+    'lib/ruleset-advisor.ts',
+  ]);
+
+  // Files allowed to *name* HTTP clients as detection data (not call them). They
+  // make zero network calls; the bare-token patterns below (e.g. /\baxios\b/)
+  // would false-positive on a data list. Real no-network coverage for these
+  // files lives in constitution-invariants.test.ts (forbids fetch(/https/net/exec).
+  //   - lib/constitution-context.ts → NETWORK_DEP_NAMES, used to detect a
+  //     project's runtime HTTP clients for the constitution proposer (SPEC-025).
+  const NETWORK_NAME_DATA_ALLOWLIST = new Set([
+    'lib/constitution-context.ts',
   ]);
 
   const NETWORK_PATTERNS = [
@@ -142,6 +169,8 @@ describe('Invariant 2: No backend — no network calls', () => {
 
     for (const filePath of files) {
       const relPath = path.relative(srcRoot, filePath);
+      // Skip files that only *name* HTTP clients as data (see allowlist above).
+      if (NETWORK_NAME_DATA_ALLOWLIST.has(relPath)) continue;
       const content = fs.readFileSync(filePath, 'utf-8');
       const lines = content.split('\n');
 
@@ -538,5 +567,61 @@ Updated setup.
     expect(hash1).toBe(hash2);
     // Different content produces different hash
     expect(hashSection('Different content')).not.toBe(hash1);
+  });
+});
+
+// ─── INV-CONSUME: signpost wiring consumes the resolver, never reimplements it ──
+
+describe('INV-CONSUME: next-task resolver is consumed from @aiclarity/shared', () => {
+  const srcRoot = path.resolve(__dirname, '..', 'src');
+
+  function allSrcTsFiles(dir: string): string[] {
+    const out: string[] = [];
+    if (!fs.existsSync(dir)) return out;
+    for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        if (entry.name === 'test' || entry.name === '__benchmarks__') continue;
+        out.push(...allSrcTsFiles(full));
+      } else if (entry.name.endsWith('.ts')) {
+        out.push(full);
+      }
+    }
+    return out;
+  }
+
+  const srcFiles = allSrcTsFiles(srcRoot);
+
+  it('the adapter + command import the resolver from @aiclarity/shared', () => {
+    const adapter = fs.readFileSync(path.join(srcRoot, 'lib', 'artifact-graph.ts'), 'utf-8');
+    const command = fs.readFileSync(path.join(srcRoot, 'commands', 'next-task.ts'), 'utf-8');
+    expect(adapter).toMatch(/from\s+['"]@aiclarity\/shared['"]/);
+    expect(adapter).toMatch(/ArtifactGraph/);
+    expect(command).toMatch(/resolveNextTask/);
+    expect(command).toMatch(/from\s+['"]@aiclarity\/shared['"]/);
+  });
+
+  it('resolver-internal logic is NOT duplicated anywhere under src', () => {
+    // Identifiers that live ONLY in packages/shared/src/next-task.ts. Their
+    // appearance in minspec source would mean the severity/coherence/cycle engine
+    // was re-implemented instead of consumed — the INV-CONSUME breach.
+    const forbidden = [
+      'detectIncoherence',
+      'detectCycles',
+      'compareRanked',
+      'gateCleared',
+      'coherence.spec-ahead-of-epic',
+      'promote.proposed-with-children',
+    ];
+    const offenders: string[] = [];
+    for (const file of srcFiles) {
+      const content = fs.readFileSync(file, 'utf-8');
+      for (const needle of forbidden) {
+        if (content.includes(needle)) {
+          offenders.push(`${path.relative(srcRoot, file)} contains "${needle}"`);
+        }
+      }
+    }
+    expect(offenders).toEqual([]);
   });
 });

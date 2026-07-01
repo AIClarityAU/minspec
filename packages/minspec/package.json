@@ -73,12 +73,28 @@
         "title": "MinSpec: Refresh Harness Files"
       },
       {
+        "command": "minspec.constitutionShowPrompt",
+        "title": "MinSpec: Show Constitution Generation Prompt"
+      },
+      {
+        "command": "minspec.constitutionPropose",
+        "title": "MinSpec: Propose Constitution (draft)"
+      },
+      {
+        "command": "minspec.constitutionCompact",
+        "title": "MinSpec: Compact Constitution"
+      },
+      {
         "command": "minspec.classify",
         "title": "MinSpec: Classify Task Complexity"
       },
       {
         "command": "minspec.status",
         "title": "MinSpec: Show SDD Status"
+      },
+      {
+        "command": "minspec.nextTask",
+        "title": "MinSpec: Go to Next Review Task"
       },
       {
         "command": "minspec.refreshTree",
@@ -219,6 +235,25 @@
       {
         "command": "minspec.validateSpec",
         "title": "MinSpec: Check Spec Completeness"
+      },
+      {
+        "command": "minspec.approveActive",
+        "title": "MinSpec: Approve/Accept Active",
+        "shortTitle": "Approve/Accept",
+        "icon": "$(check-all)"
+      }
+    ],
+    "keybindings": [
+      {
+        "command": "minspec.approveActive",
+        "key": "alt+a",
+        "when": "editorTextFocus || minspec.markdownPreviewActive || focusedView == minspecStatus || focusedView == minspecAdrs || focusedView == minspecBacklog"
+      },
+      {
+        "command": "minspec.nextTask",
+        "key": "ctrl+k ctrl+n",
+        "mac": "cmd+k cmd+n",
+        "when": "workspaceFolderCount != 0"
       }
     ],
     "views": {
@@ -395,6 +430,22 @@
           "type": "boolean",
           "default": false,
           "description": "Automatically run 'MinSpec: Classify Task Complexity' after each git commit (watches .git/HEAD and .git/refs/heads/*). Off by default."
+        },
+        "minspec.autoBackfillUseAi": {
+          "type": "boolean",
+          "default": false,
+          "description": "Always use the AI pass when backfilling epics (skips the per-run 'AI-enhanced?' prompt). Set globally by choosing 'Always' on that prompt — a personal preference that follows you across projects. Runs 'claude -p' locally; the extension makes no network calls. Off by default."
+        },
+        "minspec.ruleset.requiredChecks": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "lint",
+            "test"
+          ],
+          "description": "Status-check contexts the post-init branch-ruleset advisory requires when it creates a ruleset on your default branch. Defaults to 'lint' + 'test' (the checks the standard CI reports). Add e.g. 'build' or 'ready-to-merge' to require them too. 'ready-to-merge' is intentionally NOT in the default because it would block every merge until MinSpec's reviewer is wired and labelling — enable it here once your reviewer pipeline is live. Read at create time; the create only runs on your explicit 'Create ruleset' click."
         }
       }
     },
@@ -458,7 +509,10 @@
     ]
   },
   "scripts": {
+    "build:shared": "tsc -p ../shared/tsconfig.json",
+    "prebuild": "npm run build:shared",
     "build": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --minify",
+    "prebuild:prod": "npm run build:shared",
     "build:prod": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --minify --sourcemap=external",
     "watch": "npm run build -- --watch --sourcemap",
     "supply-chain:check": "../../scripts/check-supply-chain.sh",

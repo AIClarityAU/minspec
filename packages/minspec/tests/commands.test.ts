@@ -59,6 +59,7 @@ vi.mock('../src/lib/adr-manager', () => ({
   findSimilarAdrs: vi.fn(() => []),
   listAdrs: vi.fn(() => []),
   setAdrStatus: vi.fn(),
+  adrHasFrontmatter: vi.fn(() => true),
   regenerateDrIndex: vi.fn(),
   ADR_STATUS_VALUES: ['proposed', 'accepted', 'deprecated', 'superseded'],
 }));
@@ -68,7 +69,8 @@ vi.mock('../src/lib/active-spec', () => ({
   summarizeActiveSpec: vi.fn(),
 }));
 
-vi.mock('../src/lib/config', () => ({
+vi.mock('../src/lib/config', async (importOriginal) => ({
+  ...(await importOriginal()),
   loadConfig: vi.fn(() => ({ specsDir: 'specs', decisionsDir: 'docs/decisions' })),
   applyVSCodeOverrides: vi.fn(
     (config: Record<string, unknown>) => config,
@@ -214,14 +216,9 @@ describe('commands', () => {
   // ─── classifyCommand ──────────────────────────────────────────────────────
 
   describe('classifyCommand()', () => {
-    it('shows "no changes detected" when git diff is empty', async () => {
+    it('returns early without toast when git diff is empty', async () => {
       await classifyCommand();
-      expect(vscode.window.showInformationMessage).toHaveBeenCalled();
-      const calls = (vscode.window.showInformationMessage as any).mock.calls;
-      const firstArg = calls[0][0] as string;
-      // Either "no changes" path or classifier result — both acceptable for
-      // empty-mock scenario. The old "coming in Phase 2" stub message is not.
-      expect(firstArg).not.toContain('coming in Phase 2');
+      expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
     });
   });
 

@@ -8,6 +8,7 @@ import {
   hasHarnessDrift,
   hasUnclassifiedChanges,
   hasUnbackfilledEpics,
+  isPristineDesignStub,
   loadPreferences,
   savePreferences,
   preferencesPath,
@@ -36,12 +37,14 @@ function makeVsCodeStub(
   const response = overrides.response;
   const showPrompt = vi.fn(async () => response);
   const executeCommand = vi.fn(async () => undefined);
+  const enableAutoClassify = vi.fn(async () => undefined);
   const stub: BootstrapVsCode = {
     isEnabled: () => enabled,
     showPrompt,
     executeCommand,
+    enableAutoClassify,
   };
-  return { stub, showPrompt, executeCommand };
+  return { stub, showPrompt, executeCommand, enableAutoClassify };
 }
 
 describe('auto-bootstrap', () => {
@@ -278,7 +281,9 @@ describe('auto-bootstrap', () => {
       expect(showPrompt).toHaveBeenCalledTimes(1);
       const [msg, actions] = showPrompt.mock.calls[0]!;
       expect(msg).toMatch(/isn't initialized/);
-      expect(actions).toEqual(['Initialize', 'Not Now', "Don't ask again"]);
+      // #203: no "Not Now" — the toast's X already dismisses. The init step has
+      // no "Always" affordance, so just primary + opt-out.
+      expect(actions).toEqual(['Initialize', "Don't ask again"]);
     });
 
     it("T0: runs minspec.init when user picks Initialize", async () => {
@@ -286,7 +291,8 @@ describe('auto-bootstrap', () => {
       const result = await runBootstrap(tmpDir, stub);
       expect(result.choice).toBe('Initialize');
       // #123: the bootstrapped folder is passed so the command targets it.
-      expect(executeCommand).toHaveBeenCalledWith('minspec.init', tmpDir);
+      // #213: a 3rd arg (step.commandArg) now always flows; undefined for init.
+      expect(executeCommand).toHaveBeenCalledWith('minspec.init', tmpDir, undefined);
     });
 
     it("T0: Not Now does NOT persist any skip preference", async () => {
@@ -302,6 +308,87 @@ describe('auto-bootstrap', () => {
       await runBootstrap(tmpDir, stub);
       const prefs = loadPreferences(tmpDir);
       expect(prefs.skipInitPrompt).toBe(true);
+    });
+  });
+
+  // =========================================================================
+  // #203: the "Always" affordance (classify step) — auto-run opt-in
+  // =========================================================================
+
+  describe('runBootstrap() — "Always" affordance', () => {
+    // Synthetic step exercises the action-assembly + Always handling directly,
+    // without the git/.minspec setup the real classify step needs to fire.
+    const alwaysStep: BootstrapStep = {
+      kind: 'classify',
+      shouldRun: () => true,
+      message: 'MinSpec: You have uncommitted changes. Classify complexity now?',
+      primaryAction: 'Classify',
+      commandId: 'minspec.classify',
+      skipPrefKey: 'skipClassifyPrompt',
+      alwaysAction: 'Always',
+    };
+
+    it('offers Always first, then primary, then opt-out — and no "Not Now"', async () => {
+      const { stub, showPrompt } = makeVsCodeStub({ response: undefined });
+      await runBootstrap(tmpDir, stub, [alwaysStep]);
+      const [, actions] = showPrompt.mock.calls[0]!;
+      expect(actions).toEqual(['Always', 'Classify', "Don't ask again"]);
+      expect(actions).not.toContain('Not Now');
+    });
+
+    it('Always → enables auto-classify, then runs the command once', async () => {
+      const { stub, executeCommand, enableAutoClassify } = makeVsCodeStub({
+        response: 'Always',
+      });
+      await runBootstrap(tmpDir, stub, [alwaysStep]);
+      expect(enableAutoClassify).toHaveBeenCalledWith(tmpDir);
+      expect(executeCommand).toHaveBeenCalledWith('minspec.classify', tmpDir, undefined);
+    });
+
+    it('primary (Classify) → runs once WITHOUT enabling auto-classify', async () => {
+      const { stub, executeCommand, enableAutoClassify } = makeVsCodeStub({
+        response: 'Classify',
+      });
+      await runBootstrap(tmpDir, stub, [alwaysStep]);
+      expect(enableAutoClassify).not.toHaveBeenCalled();
+      expect(executeCommand).toHaveBeenCalledWith('minspec.classify', tmpDir, undefined);
+    });
+
+    it('Always falls back to a one-shot run when host lacks enableAutoClassify', async () => {
+      const { stub, executeCommand } = makeVsCodeStub({ response: 'Always' });
+      delete (stub as { enableAutoClassify?: unknown }).enableAutoClassify;
+      await runBootstrap(tmpDir, stub, [alwaysStep]);
+      expect(executeCommand).toHaveBeenCalledWith('minspec.classify', tmpDir, undefined);
+    });
+  });
+
+  // =========================================================================
+  // #213: backfill step forwards AI consent so the command doesn't re-ask
+  // =========================================================================
+
+  describe('runBootstrap() — backfill AI-consent forwarding (#213)', () => {
+    it('the real backfill step carries commandArg { aiConsent: true }', () => {
+      const backfill = BOOTSTRAP_STEPS.find((s) => s.kind === 'backfill');
+      expect(backfill?.commandArg).toEqual({ aiConsent: true });
+    });
+
+    it('forwards commandArg as the 3rd executeCommand arg on the primary action', async () => {
+      const backfillStep: BootstrapStep = {
+        kind: 'backfill',
+        shouldRun: () => true,
+        message: 'MinSpec: backfill?',
+        primaryAction: 'Backfill',
+        commandId: 'minspec.backfillEpics',
+        skipPrefKey: 'skipBackfillPrompt',
+        commandArg: { aiConsent: true },
+      };
+      const { stub, executeCommand } = makeVsCodeStub({ response: 'Backfill' });
+      await runBootstrap(tmpDir, stub, [backfillStep]);
+      expect(executeCommand).toHaveBeenCalledWith(
+        'minspec.backfillEpics',
+        tmpDir,
+        { aiConsent: true },
+      );
     });
   });
 
@@ -363,7 +450,7 @@ describe('auto-bootstrap', () => {
       expect(result.offered).toBe('refresh');
       expect(showPrompt).toHaveBeenCalledTimes(1);
       expect(showPrompt.mock.calls[0]![0]).toMatch(/Harness templates updated/);
-      expect(executeCommand).toHaveBeenCalledWith('minspec.initRefresh', tmpDir);
+      expect(executeCommand).toHaveBeenCalledWith('minspec.initRefresh', tmpDir, undefined);
     });
   });
 
@@ -429,12 +516,14 @@ describe('auto-bootstrap', () => {
   });
 
   describe('BOOTSTRAP_STEPS', () => {
-    it('contains init, refresh, classify, backfill in that order', () => {
+    it('contains init, refresh, classify, then three backfill steps (epics, design-stub, tasks.md) in order', () => {
       const kinds = BOOTSTRAP_STEPS.map((s: BootstrapStep) => s.kind);
-      expect(kinds).toEqual(['init', 'refresh', 'classify', 'backfill']);
+      // #315 adds a second `backfill`-kind step (DESIGN.md stub removal); #225
+      // adds a third (missing-tasks.md creation), after the epic backfill step.
+      expect(kinds).toEqual(['init', 'refresh', 'classify', 'backfill', 'backfill', 'backfill']);
     });
 
-    it('each step wires to an existing minspec command', () => {
+    it('command-dispatching steps wire to an existing minspec command', () => {
       const expected: Record<string, string> = {
         init: 'minspec.init',
         refresh: 'minspec.initRefresh',
@@ -442,8 +531,284 @@ describe('auto-bootstrap', () => {
         backfill: 'minspec.backfillEpics',
       };
       for (const step of BOOTSTRAP_STEPS) {
+        // Steps with an in-process `action` (#315 design-stub removal) carry no
+        // commandId — they don't dispatch a command. Only assert on dispatchers.
+        if (step.action) {
+          expect(step.commandId).toBe('');
+          continue;
+        }
         expect(step.commandId).toBe(expected[step.kind]);
       }
+    });
+
+    it('the backfill steps use DISTINCT skip flags (no cross-suppression)', () => {
+      const backfills = BOOTSTRAP_STEPS.filter((s) => s.kind === 'backfill');
+      expect(backfills).toHaveLength(3);
+      const keys = backfills.map((s) => s.skipPrefKey);
+      expect(new Set(keys).size).toBe(3);
+      expect(keys).toContain('skipBackfillPrompt');
+      expect(keys).toContain('skipDesignStubPrompt');
+      expect(keys).toContain('skipTasksMdPrompt');
+    });
+  });
+
+  // =========================================================================
+  // #315: pristine DESIGN.md stub detection + backfill removal
+  // =========================================================================
+
+  // The exact shape #206 used to scaffold (constraints rendered to the
+  // placeholder branch) — this is byte-for-byte the stub this repo dogfoods.
+  const PRISTINE_DESIGN_STUB = [
+    '# my-project — Design Document',
+    '',
+    '## Architecture Overview',
+    '',
+    '<!-- Describe the high-level architecture here -->',
+    '',
+    '## Key Components',
+    '',
+    '<!-- List and describe the main modules/components -->',
+    '',
+    '## Data Flow',
+    '',
+    '<!-- Describe how data flows through the system -->',
+    '',
+    '## Technology Stack',
+    '',
+    '<!-- List key technologies and why they were chosen -->',
+    '',
+    '## Constraints',
+    '',
+    '<!-- Add technical/business constraints here -->',
+    '',
+    '## Open Questions',
+    '',
+    '<!-- Track unresolved design questions here -->',
+    '',
+  ].join('\n');
+
+  function writeDesign(root: string, content: string): string {
+    const p = path.join(root, 'DESIGN.md');
+    fs.writeFileSync(p, content);
+    return p;
+  }
+
+  describe('isPristineDesignStub()', () => {
+    it('T0: false when DESIGN.md is absent', () => {
+      expect(isPristineDesignStub(tmpDir)).toBe(false);
+    });
+
+    it('T0: true for the scaffold stub (headings + comment placeholders only)', () => {
+      writeDesign(tmpDir, PRISTINE_DESIGN_STUB);
+      expect(isPristineDesignStub(tmpDir)).toBe(true);
+    });
+
+    it('T0: true even without a trailing newline', () => {
+      writeDesign(tmpDir, PRISTINE_DESIGN_STUB.trimEnd());
+      expect(isPristineDesignStub(tmpDir)).toBe(true);
+    });
+
+    it('T0: true with CRLF line endings', () => {
+      writeDesign(tmpDir, PRISTINE_DESIGN_STUB.replace(/\n/g, '\r\n'));
+      expect(isPristineDesignStub(tmpDir)).toBe(true);
+    });
+
+    it('INVARIANT: false when ANY heading has real prose under it', () => {
+      const edited = PRISTINE_DESIGN_STUB.replace(
+        '<!-- Describe the high-level architecture here -->',
+        'We use a layered hexagonal architecture with a Tier-0 core.',
+      );
+      writeDesign(tmpDir, edited);
+      expect(isPristineDesignStub(tmpDir)).toBe(false);
+    });
+
+    it('INVARIANT: false when a list item was added (real content)', () => {
+      writeDesign(tmpDir, PRISTINE_DESIGN_STUB + '\n- a real bullet\n');
+      expect(isPristineDesignStub(tmpDir)).toBe(false);
+    });
+
+    it('INVARIANT: false when a code fence was added', () => {
+      writeDesign(tmpDir, PRISTINE_DESIGN_STUB + '\n```ts\nconst x = 1;\n```\n');
+      expect(isPristineDesignStub(tmpDir)).toBe(false);
+    });
+
+    it('INVARIANT: false when prose trails a comment close on the same line', () => {
+      writeDesign(
+        tmpDir,
+        '# T — Design Document\n\n## A\n\n<!-- note --> real text here\n',
+      );
+      expect(isPristineDesignStub(tmpDir)).toBe(false);
+    });
+
+    it('INVARIANT: false with meaningful frontmatter (real content)', () => {
+      writeDesign(
+        tmpDir,
+        '---\nid: DESIGN-1\nstatus: draft\n---\n\n' + PRISTINE_DESIGN_STUB,
+      );
+      expect(isPristineDesignStub(tmpDir)).toBe(false);
+    });
+
+    it('T0: true with an EMPTY frontmatter block (no meaningful keys) + stub body', () => {
+      writeDesign(tmpDir, '---\n\n---\n\n' + PRISTINE_DESIGN_STUB);
+      expect(isPristineDesignStub(tmpDir)).toBe(true);
+    });
+
+    it('T0: false for an empty file (no heading, no placeholder)', () => {
+      writeDesign(tmpDir, '');
+      expect(isPristineDesignStub(tmpDir)).toBe(false);
+    });
+
+    it('T0: false for headings only with no comment placeholders', () => {
+      writeDesign(tmpDir, '# T — Design Document\n\n## Architecture\n\n## Data Flow\n');
+      expect(isPristineDesignStub(tmpDir)).toBe(false);
+    });
+
+    it('T0: false for an unterminated comment block', () => {
+      writeDesign(tmpDir, '# T\n\n## A\n\n<!-- never closed\nmore lines\n');
+      expect(isPristineDesignStub(tmpDir)).toBe(false);
+    });
+
+    it('T0: true for a multi-line comment block (all lines inside the comment)', () => {
+      writeDesign(
+        tmpDir,
+        '# T — Design Document\n\n## A\n\n<!--\nline one\nline two\n-->\n',
+      );
+      expect(isPristineDesignStub(tmpDir)).toBe(true);
+    });
+
+    it('T0: false when DESIGN.md is a directory, not a file', () => {
+      fs.mkdirSync(path.join(tmpDir, 'DESIGN.md'));
+      expect(isPristineDesignStub(tmpDir)).toBe(false);
+    });
+
+    it('T3 dogfood: the repo-tracked DESIGN.md shape is recognized as pristine', () => {
+      // The shape committed in this monorepo (#315 note: dogfood instance).
+      writeDesign(
+        tmpDir,
+        [
+          '# minspec-monorepo — Design Document',
+          '',
+          '## Architecture Overview',
+          '',
+          '<!-- Describe the high-level architecture here -->',
+          '',
+          '## Open Questions',
+          '',
+          '<!-- Track unresolved design questions here -->',
+          '',
+        ].join('\n'),
+      );
+      expect(isPristineDesignStub(tmpDir)).toBe(true);
+    });
+  });
+
+  describe('runBootstrap() — DESIGN.md stub backfill (#315)', () => {
+    function initMinspec(root: string): void {
+      fs.mkdirSync(path.join(root, '.minspec'), { recursive: true });
+    }
+
+    it('offers removal of a pristine stub and DELETES it on accept', async () => {
+      initMinspec(tmpDir);
+      const p = writeDesign(tmpDir, PRISTINE_DESIGN_STUB);
+      const { stub, showPrompt } = makeVsCodeStub({ response: 'Remove' });
+      const result = await runBootstrap(tmpDir, stub);
+      expect(result.offered).toBe('backfill');
+      expect(result.choice).toBe('Remove');
+      const [msg, actions] = showPrompt.mock.calls[0]!;
+      expect(msg).toMatch(/placeholder stub/i);
+      expect(actions).toEqual(['Remove', "Don't ask again"]);
+      expect(fs.existsSync(p)).toBe(false);
+    });
+
+    it('INVARIANT: a DESIGN.md with real content is NEVER offered', async () => {
+      initMinspec(tmpDir);
+      writeDesign(
+        tmpDir,
+        PRISTINE_DESIGN_STUB.replace(
+          '<!-- Describe the high-level architecture here -->',
+          'Real architecture prose lives here.',
+        ),
+      );
+      const { stub, showPrompt } = makeVsCodeStub({ response: 'Remove' });
+      const result = await runBootstrap(tmpDir, stub);
+      expect(showPrompt).not.toHaveBeenCalled();
+      expect(result.offered).toBeNull();
+    });
+
+    it('INVARIANT: decline (dismiss) keeps the file and persists NO skip flag', async () => {
+      initMinspec(tmpDir);
+      const p = writeDesign(tmpDir, PRISTINE_DESIGN_STUB);
+      const { stub } = makeVsCodeStub({ response: undefined }); // toast dismissed
+      const result = await runBootstrap(tmpDir, stub);
+      expect(result.offered).toBe('backfill');
+      expect(fs.existsSync(p)).toBe(true);
+      expect(loadPreferences(tmpDir).skipDesignStubPrompt).toBeFalsy();
+    });
+
+    it("INVARIANT: \"Don't ask again\" keeps the file and persists skipDesignStubPrompt", async () => {
+      initMinspec(tmpDir);
+      const p = writeDesign(tmpDir, PRISTINE_DESIGN_STUB);
+      const { stub } = makeVsCodeStub({ response: "Don't ask again" });
+      await runBootstrap(tmpDir, stub);
+      expect(fs.existsSync(p)).toBe(true);
+      expect(loadPreferences(tmpDir).skipDesignStubPrompt).toBe(true);
+    });
+
+    it('respects skipDesignStubPrompt and surfaces no toast', async () => {
+      initMinspec(tmpDir);
+      writeDesign(tmpDir, PRISTINE_DESIGN_STUB);
+      savePreferences(tmpDir, { skipDesignStubPrompt: true });
+      const { stub, showPrompt } = makeVsCodeStub({ response: 'Remove' });
+      const result = await runBootstrap(tmpDir, stub);
+      expect(showPrompt).not.toHaveBeenCalled();
+      expect(result.offered).toBeNull();
+    });
+
+    it('skipBackfillPrompt (epic) does NOT suppress the design-stub offer', async () => {
+      initMinspec(tmpDir);
+      const p = writeDesign(tmpDir, PRISTINE_DESIGN_STUB);
+      savePreferences(tmpDir, { skipBackfillPrompt: true });
+      const { stub, showPrompt } = makeVsCodeStub({ response: 'Remove' });
+      const result = await runBootstrap(tmpDir, stub);
+      expect(result.offered).toBe('backfill');
+      expect(showPrompt).toHaveBeenCalledTimes(1);
+      expect(fs.existsSync(p)).toBe(false);
+    });
+
+    it('master toggle off → no offer, file untouched', async () => {
+      initMinspec(tmpDir);
+      const p = writeDesign(tmpDir, PRISTINE_DESIGN_STUB);
+      const { stub, showPrompt } = makeVsCodeStub({ enabled: false });
+      const result = await runBootstrap(tmpDir, stub);
+      expect(result.enabled).toBe(false);
+      expect(showPrompt).not.toHaveBeenCalled();
+      expect(fs.existsSync(p)).toBe(true);
+    });
+
+    it('not offered when .minspec/ is missing (uninitialized project)', async () => {
+      // No .minspec → the init step would win first anyway; assert design-stub
+      // shouldRun is gated on initialization.
+      const designStep = BOOTSTRAP_STEPS.find((s) => s.action);
+      expect(designStep).toBeDefined();
+      writeDesign(tmpDir, PRISTINE_DESIGN_STUB);
+      expect(designStep!.shouldRun(tmpDir, {})).toBe(false);
+    });
+
+    it('re-check before delete: stub gains content between offer and click → not deleted', async () => {
+      initMinspec(tmpDir);
+      const p = writeDesign(tmpDir, PRISTINE_DESIGN_STUB);
+      const stub: BootstrapVsCode = {
+        isEnabled: () => true,
+        showPrompt: async () => {
+          // Simulate the user editing the file while the toast is open.
+          fs.writeFileSync(p, PRISTINE_DESIGN_STUB + '\nNow real prose.\n');
+          return 'Remove';
+        },
+        executeCommand: async () => undefined,
+      };
+      const result = await runBootstrap(tmpDir, stub);
+      expect(result.offered).toBe('backfill');
+      expect(fs.existsSync(p)).toBe(true); // not deleted — content appeared
     });
   });
 

@@ -63,6 +63,16 @@ if [[ -d "$WORKTREE" ]]; then
   git branch -D "$BRANCH" 2>/dev/null || true
 fi
 
+# Branch off ORIGIN/main, not local `main`. The shared checkout's local `main`
+# is frequently stale (rule #8 — we never switch/pull it from a session), so
+# basing agent work on it makes agents build on an outdated tree: they re-derive
+# already-merged work and emit factually-wrong output (smoke test: an agent
+# documented a merged script as "does not exist" because its base predated the
+# merge). Fetch the remote ref and branch from there so every agent starts from
+# the true tip. Fetch is a parent-side credentialed op; the agent still gets no
+# network tools.
+git fetch origin main -q
+
 # Spec-gate (HITL) reliance — DR-031 D3:
 # We deliberately do NOT set MINSPEC_GATE_OFF and do NOT seed approvals into the
 # worktree. As a linked worktree, its spec-gate resolves the CANONICAL approval
@@ -70,7 +80,7 @@ fi
 # genuinely human-approved spec passes the gate inside the worktree, while an
 # unapproved/stale spec correctly BLOCKS the dispatched edit (surfaced, never
 # bypassed). The bypass kill-switch is human-only; the pipeline must never use it.
-git worktree add -b "$BRANCH" "$WORKTREE" main
+git worktree add -b "$BRANCH" "$WORKTREE" origin/main
 
 echo "Launching $ROLE agent for: $ISSUE_TITLE"
 
@@ -110,6 +120,22 @@ After completing work:
 3. Commit with a conventional commit message (commit locally only)
 4. Write a short markdown summary of what you changed to \`.agent-summary.md\`
    in the worktree root. The dispatcher reads this and posts it to the issue.
+5. Write \`.review-signals.json\` in the worktree root with the JUDGEMENT-only
+   fields for the PR-side review block (#180). Report TRUTHFULLY — never claim a
+   proof you did not produce (an unproven regression renders as UNVERIFIED, not
+   a checkmark). You supply ONLY these fields; the dispatcher DERIVES the
+   machine-checkable signals (\`changedFiles\` from the diff, \`gate\` by re-running
+   the checks itself) and merges them, so do NOT bother filling those in — they
+   are ignored:
+   {
+     "rootCause": "<your RCDD root cause sentence; '' if a pure feat>",
+     "rootCauseFiles": ["<the file(s) the cause points at — must be in your diff>"],
+     "regressionTest": "<fully-qualified name of the test that distinguishes the fix, or omit>",
+     "regressionProvenBaseRed": <true ONLY if you ran it against the pre-fix/base code and saw it FAIL>,
+     "regressionProvenHeadGreen": <true ONLY if you ran it against head and saw it PASS>
+   }
+   If you skip this file the block still renders — but every judgement signal
+   shows UNVERIFIED, so write it. It is NOT a substitute for \`.agent-summary.md\`.
 
 Do NOT run \`git push\`, \`git remote\`, \`gh\`, or any network/deploy command —
 you are not permitted to and the dispatcher handles publishing after you exit.
@@ -156,6 +182,76 @@ if (cd "$WORKTREE" && claude -p "$PROMPT" \
         BODY=$(printf '%s\n\n— branch `%s` @ %s (auto-dispatched)' "$(cat "$SUMMARY_FILE")" "$BRANCH" "$SHA")
       else
         BODY=$(printf 'Agent completed (no summary written).\n\n— branch `%s` @ %s (auto-dispatched)' "$BRANCH" "$SHA")
+      fi
+
+      # Append the honest 3-signal review block (#180) so the reviewer skims a
+      # VERIFIED summary instead of reconstructing it. The renderer is pure +
+      # tested in @aiclarity/shared; this runs in the PARENT (no agent creds).
+      #
+      # #256 root cause: the block used to require the AGENT to self-report the
+      # whole `.review-signals.json`. The dev role never durably instructed it to
+      # (only a buried step in the ephemeral prompt did), so the file was usually
+      # absent, the renderer no-op'd, and the block was SILENTLY dropped from
+      # every auto-dispatched PR — with no gate asserting it was present.
+      #
+      # Fix: the dispatcher now DERIVES the machine-checkable signals itself
+      # (`changedFiles` from the diff; `gate` by re-running the checks in the
+      # parent — the authoritative pre-publish gate), and MERGES only the
+      # LLM-judgement prose (`rootCause`, `rootCauseFiles`, `regressionTest`,
+      # the red/green proof flags) from the agent's file when it wrote one. The
+      # block therefore ALWAYS renders; the checkable parts are machine-truth,
+      # not self-report (no-bare-LLM-signal principle), and unproven prose still
+      # renders honestly as ⚠️ UNVERIFIED — we never fabricate a checkmark.
+      SIGNALS_FILE="${WORKTREE}/.review-signals.json"
+
+      # 1. changedFiles — deterministic, from the diff the agent actually made.
+      CHANGED_JSON=$(git -C "$WORKTREE" diff --name-only origin/main...HEAD \
+        | jq -R -s 'split("\n") | map(select(length > 0))')
+
+      # 2. gate — re-run each check in the parent and map exit code → status.
+      #    This is the real pre-publish gate; its result is authoritative, not
+      #    the agent's claim. Each check is independent: a fail in one does not
+      #    skip the others, so every status is reported truthfully.
+      gate_status() { ( cd "$WORKTREE" && "$@" >/dev/null 2>&1 ) && echo pass || echo fail; }
+      GATE_TEST=$(gate_status npm test)
+      GATE_LINT=$(gate_status npm run lint)
+      GATE_BUILD=$(gate_status npm run build)
+      GATE_VALIDATE=$(gate_status npm run validate)
+      GATE_JSON=$(jq -n \
+        --arg test "$GATE_TEST" --arg lint "$GATE_LINT" \
+        --arg build "$GATE_BUILD" --arg validate "$GATE_VALIDATE" \
+        '{test: $test, lint: $lint, build: $build, validate: $validate}')
+
+      # 3. prose — LLM-only judgement. Take it from the agent file if present and
+      #    parseable; otherwise default to honest "unstated" values (the renderer
+      #    then shows ⚠️/❌, never ✅). Proof flags are NEVER defaulted true.
+      if [[ -f "$SIGNALS_FILE" ]] && PROSE_JSON=$(jq -e '{
+            rootCause: (.rootCause // ""),
+            rootCauseFiles: (.rootCauseFiles // []),
+            regressionTest: .regressionTest,
+            regressionProvenBaseRed: (.regressionProvenBaseRed == true),
+            regressionProvenHeadGreen: (.regressionProvenHeadGreen == true)
+          }' "$SIGNALS_FILE" 2>/dev/null); then
+        :
+      else
+        echo "Note: no parseable .review-signals.json from agent — prose signals will render UNVERIFIED"
+        PROSE_JSON='{"rootCause":"","rootCauseFiles":[],"regressionProvenBaseRed":false,"regressionProvenHeadGreen":false}'
+      fi
+
+      # Merge: derived machine signals win over anything the agent claimed.
+      SIGNALS_INPUT=$(jq -n \
+        --argjson prose "$PROSE_JSON" \
+        --argjson changed "$CHANGED_JSON" \
+        --argjson gate "$GATE_JSON" \
+        '$prose + {changedFiles: $changed, gate: $gate}')
+
+      # Render. Pure + tested in @aiclarity/shared; reads the merged input on
+      # stdin. Best-effort: a render failure must never block publishing the
+      # summary, and the renderer never fabricates a block.
+      if SIGNALS_BLOCK=$(printf '%s' "$SIGNALS_INPUT" | node "${SCRIPT_DIR}/render-review-signals.mjs" - 2>/dev/null); then
+        BODY=$(printf '%s\n\n---\n\n%s' "$BODY" "$SIGNALS_BLOCK")
+      else
+        echo "WARNING: could not render review signals — posting summary without the block"
       fi
       gh issue comment "$ISSUE" --repo "$REPO" --body "$BODY" 2>/dev/null || true
     else

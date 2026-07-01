@@ -7,3 +7,8 @@
  * to `packages/`, triggering TS6 "common source directory is '..'".
  */
 export * from './contracts/conformance';
+export * from './canonical'; // includes getSpecBodyOnly (SPEC-017 FR-4)
+export * from './rework'; // SPEC-017 M1 — reworkPct
+export * from './trust-model'; // SPEC-017 Slice 6 — TrustChartModel + renderTrustChart
+export * from './review-signals';
+export * from './next-task';

@@ -4,12 +4,31 @@ import type { Tier, Phase, MinspecConfig } from './config';
 
 // ─── Shared Types ────────────────────────────────────────────────────────────
 
-/** A single signal produced by an analyzer (git-diff, AST, etc.) */
+/**
+ * A single signal produced by an analyzer (git-diff, consequence, etc.).
+ *
+ * The optional `axis`/`degraded`/`explain` fields (SPEC-023 FR-6) are **additive**:
+ * legacy diff-size producers omit them and stay valid. `classify()` reads only
+ * `tierContribution` (max-over-signals), so these fields are descriptive metadata
+ * surfaced to the user, never inputs to the ranking.
+ */
 export interface ClassificationSignal {
   readonly name: string;
   readonly value: number | boolean;
   readonly weight: number;
   readonly tierContribution: Tier;
+  /**
+   * Which axis produced this signal. Diff-size ('scope') vs blast-radius
+   * ('consequence'). Absent on legacy size signals (treated as 'scope').
+   */
+  readonly axis?: 'scope' | 'consequence';
+  /**
+   * True when the analyzer could not get its ideal data source and fell back to
+   * a coarser read. INV-4: degrade is visible, never a silently-wrong tier.
+   */
+  readonly degraded?: boolean;
+  /** Human-readable rationale, e.g. "call graph unavailable; using size signals". */
+  readonly explain?: string;
 }
 
 /** Result of classifying a set of signals into a tier */
@@ -129,6 +148,37 @@ export function classify(
     signals: [...signals],
     suggestedPhases,
   };
+}
+
+/**
+ * The single signal that DROVE the classified tier — the most informative "why".
+ *
+ * `classify()` ranks by max `tierContribution` ("highest wins"), so the tier is
+ * set by whichever signal(s) sit at the winning tier. Among those, prefer the
+ * blast-radius ('consequence') axis as the more meaningful explanation, then the
+ * highest weight. Falls back to the whole signal set if none sit exactly at the
+ * winning tier (defensive — shouldn't happen for a tier derived from them).
+ *
+ * Pure. Used to render a grounded headline ("set by importersReached=23") in
+ * place of the agreement-fraction `confidence%`, which read as a broken
+ * probability — a high tier with a low % looks like "we're 14% sure" when it
+ * actually means "one signal forced it up" (#216). Returns undefined only when
+ * there are no signals at all.
+ */
+export function pickDrivingSignal(
+  result: ClassificationResult,
+): ClassificationSignal | undefined {
+  const atTier = result.signals.filter(
+    (s) => s.tierContribution === result.tier,
+  );
+  const pool = atTier.length > 0 ? atTier : result.signals;
+  if (pool.length === 0) return undefined;
+  return pool.reduce((best, s) => {
+    const bestConseq = best.axis === 'consequence' ? 1 : 0;
+    const sConseq = s.axis === 'consequence' ? 1 : 0;
+    if (sConseq !== bestConseq) return sConseq > bestConseq ? s : best;
+    return s.weight > best.weight ? s : best; // ties keep `best` (stable)
+  });
 }
 
 // ─── User Override ───────────────────────────────────────────────────────────

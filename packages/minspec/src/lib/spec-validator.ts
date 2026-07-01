@@ -10,11 +10,13 @@
  * T3/T4 produce errors that block approval.
  */
 
-import type { ParsedSpec } from './spec';
+import type { ParsedSpec, SpecStatus } from './spec';
 import { SPEC_STATUSES, SPEC_TYPES, stripInlineComment } from './spec';
 import type { Tier, MinspecConfig, Phase } from './config';
 import { TIERS } from './config';
 import { epicRefValue } from './epic-manager';
+import { deriveStatus, type ExplicitTerminal, type PhaseState } from './lifecycle';
+import type { ApprovalStatus } from './approval';
 
 /** A cross-cutting concern a spec may touch, each requiring a specific artifact. */
 export type Aspect = 'ux' | 'api' | 'data' | 'architecture';
@@ -348,6 +350,18 @@ const ASPECT_RULES: AspectRule[] = [
   },
 ];
 
+/**
+ * Shift-left guidance (harvest316/minspec#104): the per-aspect artifact
+ * requirements the approve gate enforces, exported so generation-time skill
+ * prompts (`slash-commands.ts`) can surface the SAME requirements up front. It is
+ * derived from `ASPECT_RULES` here — the gate's own source of truth — so the
+ * generation guidance can never drift from what approval actually checks. Approve
+ * stays a pure backstop: if the spec is authored with these in place, it finds
+ * nothing to flag.
+ */
+export const ASPECT_GUIDANCE: readonly { aspect: Aspect; fixHint: string }[] =
+  ASPECT_RULES.map((r) => ({ aspect: r.aspect, fixHint: r.fixHint }));
+
 // ─── Tier severity policy ────────────────────────────────────────────────────
 
 const TIER_RANK: Record<Tier, number> = { T1: 1, T2: 2, T3: 3, T4: 4 };
@@ -474,6 +488,21 @@ interface ClosedSetField {
    * while staying optional for split-layout `design`/`tasks` files that omit it.
    */
   readonly requiredWhen?: (specType: string) => boolean;
+  /**
+   * Status-conditional required-ness (#162). When present, the field is required
+   * only when this predicate, given the artifact's RAW `status:` value, returns
+   * true — e.g. `superseded-by` is required only when `status: superseded`. This
+   * is the status-keyed sibling of `requiredWhen` (which keys on `type`).
+   */
+  readonly requiredWhenStatus?: (status: string) => boolean;
+  /**
+   * When true the field is a REFERENCE (#137 reference class): a present value is
+   * additionally asserted to RESOLVE against a caller-supplied known-refs set. A
+   * present-but-unresolvable value warns `frontmatter.<key>.unresolved`. The check
+   * is skipped when the caller supplies no resolver (no false positive, mirroring
+   * `knownEpicRefs`). Mutually used with the closed/presence classes above.
+   */
+  readonly reference?: boolean;
 }
 
 /**
@@ -498,6 +527,19 @@ const CLOSED_SET_FIELDS: readonly ClosedSetField[] = [
   // files legitimately omit it, so `requiredWhen` gates on the spec's `type`.
   { key: 'tier', valid: TIER_SET, validList: TIERS, coercesTo: 'T2', required: false, requiredWhen: isPrimarySpec },
   { key: 'type', valid: SPEC_TYPE_SET, validList: SPEC_TYPES, required: false },
+  // superseded-by (#162): the conditional-presence application of the #137
+  // primitive to SPEC-017's terminal. Required ONLY when status is `superseded`,
+  // and (when a resolver is supplied) the ref must resolve. As of SPEC-017 Slice 5,
+  // `superseded` IS a member of the SpecStatus union (spec.ts `SPEC_STATUSES` /
+  // lifecycle.ts `ExplicitTerminal`), so this gate now fires for specs too — not only
+  // DRs / AdrStatus. It keys on the raw `status:` line, so it covers every artifact
+  // type uniformly. A reference field, presence + resolution only (no value enum).
+  {
+    key: 'superseded-by',
+    required: false,
+    requiredWhenStatus: (status) => status === 'superseded',
+    reference: true,
+  },
 ];
 
 /**
@@ -518,21 +560,44 @@ function checkClosedSetField(
   field: ClosedSetField,
   specType: string,
   out: ValidationViolation[],
+  knownRefs?: ReadonlySet<string>,
 ): void {
   const value = rawFrontmatterField(raw, field.key);
-  // requiredWhen (type-conditional, #103) overrides the static `required` flag.
-  const required = field.requiredWhen ? field.requiredWhen(specType) : field.required;
+  // requiredWhen (type-conditional, #103) and requiredWhenStatus (status-conditional,
+  // #162) override the static `required` flag. A field with either predicate uses
+  // ONLY that predicate; otherwise the static flag.
+  let required = field.required;
+  if (field.requiredWhen) required = field.requiredWhen(specType);
+  else if (field.requiredWhenStatus) {
+    required = field.requiredWhenStatus(rawFrontmatterField(raw, 'status') ?? '');
+  }
   if (value === undefined) {
     if (required) {
       const oneOf = field.validList ? `, one of: ${field.validList.join(', ')}` : '';
       out.push({
         rule: `frontmatter.${field.key}.missing`,
         severity: 'warning',
-        message: `Spec has no ${field.key} — a required field${field.coercesTo ? ` (shown as the default "${field.coercesTo}")` : ''}.`,
-        fixHint: `Add a "${field.key}:" line${oneOf}.${field.coercesTo ? ` (An absent value is silently displayed as the default "${field.coercesTo}", so the SPECS pane would otherwise show a false ${field.key}.)` : ''}`,
+        message: `${field.key === 'superseded-by'
+          ? `Artifact is "superseded" but has no ${field.key} reference.`
+          : `Spec has no ${field.key} — a required field${field.coercesTo ? ` (shown as the default "${field.coercesTo}")` : ''}.`}`,
+        fixHint: `${field.key === 'superseded-by'
+          ? `A superseded artifact MUST name what replaced it. Add a "superseded-by:" line pointing at the successor (e.g. "superseded-by: SPEC-NNN" / "DR-NNN") — without it the supersession dangles and the trail to the live decision is lost.`
+          : `Add a "${field.key}:" line${oneOf}.${field.coercesTo ? ` (An absent value is silently displayed as the default "${field.coercesTo}", so the SPECS pane would otherwise show a false ${field.key}.)` : ''}`}`,
       });
     }
     return; // not required, or already reported missing → nothing more to assert
+  }
+  // Reference class (#137): a present value must RESOLVE when a resolver is supplied.
+  if (field.reference) {
+    if (knownRefs && !knownRefs.has(value.toLowerCase())) {
+      out.push({
+        rule: `frontmatter.${field.key}.unresolved`,
+        severity: 'warning',
+        message: `${field.key} "${value}" does not match any known artifact.`,
+        fixHint: `Fix the "${field.key}:" reference to an existing SPEC-NNN / DR-NNN id, or create the successor. A dangling supersession points nowhere.`,
+      });
+    }
+    return; // reference fields carry no value enum to check
   }
   if (!field.valid || field.valid.has(value)) return; // presence-only, or recognized
   out.push({
@@ -592,6 +657,25 @@ export function validateSpec(
    * (callers without registry access get no false warnings).
    */
   knownEpicRefs?: ReadonlySet<string>,
+  /**
+   * The spec's current approval verdict (SPEC-022 / INV-4). When supplied
+   * (with `explicitTerminal`), the validator asserts the literal `status:` line
+   * EQUALS `deriveStatus(phases, approvalState, explicitTerminal)` and warns on
+   * drift — catching hand-edits and the #148 phases/status desync. Omit to skip
+   * the mirror check entirely (callers without a verdict get no false warning —
+   * the same no-false-positive pattern as `knownEpicRefs`).
+   */
+  approvalState?: ApprovalStatus,
+  /** The spec's explicit terminal (archived), if any — fed to `deriveStatus`. */
+  explicitTerminal?: ExplicitTerminal,
+  /**
+   * Lowercased set of known artifact refs (SPEC-NNN / DR-NNN ids) used to resolve
+   * REFERENCE-class frontmatter fields — currently `superseded-by` (#162). When
+   * supplied, a present-but-unresolvable `superseded-by` yields a WARNING; omit it
+   * to skip the dangling-ref check (no false positive, mirroring `knownEpicRefs`).
+   * The required-when-superseded PRESENCE check runs regardless of this resolver.
+   */
+  knownArtifactRefs?: ReadonlySet<string>,
 ): ValidationResult {
   const tier = spec.frontmatter.tier;
   const raw = spec.raw;
@@ -643,7 +727,34 @@ export function validateSpec(
   //     split-layout phase/acceptance checks below, so it is computed once here.
   const specType = (spec.frontmatter.type ?? '').toLowerCase();
   for (const field of CLOSED_SET_FIELDS) {
-    checkClosedSetField(raw, field, specType, violations);
+    checkClosedSetField(raw, field, specType, violations, knownArtifactRefs);
+  }
+
+  // 0c. Literal-status mirror drift (SPEC-022 / INV-4). The literal `status:` line
+  //     is a tool-written MIRROR of the derived status; a hand-edit (or the #148
+  //     phases/status desync) makes it lie. When the caller supplies an approval
+  //     verdict, assert literal == deriveStatus and WARN on drift — never an
+  //     error (incremental authoring + foreign vocabularies must not block), same
+  //     symmetric discipline as the #137 closed-set gate. Skipped when no verdict
+  //     is supplied (no false positive). The gate/CI read DERIVED status, never
+  //     the literal line, so a stale literal can never gate — this only surfaces it.
+  if (approvalState !== undefined) {
+    const literal = rawFrontmatterField(raw, 'status');
+    const derived = deriveStatus(
+      spec.frontmatter.phases as PhaseState,
+      approvalState,
+      explicitTerminal,
+    );
+    // Only flag a PRESENT literal that disagrees — an absent literal is the
+    // #115 missing-status gate's concern (handled above), not a mirror drift.
+    if (literal !== undefined && literal !== derived) {
+      violations.push({
+        rule: 'status.mirror-drift',
+        severity: 'warning',
+        message: `Literal status "${literal}" disagrees with the derived status "${derived}".`,
+        fixHint: `The "status:" line is a tool-written mirror of the derived status (computed from {phases, approval}). It reads "${literal}" but should be "${derived}". Re-run a lifecycle action (Approve / Advance Phase) to rewrite the mirror, or fix the phases/approval state — the gate and CI use the DERIVED status, so the literal is only a cache that has drifted.`,
+      });
+    }
   }
 
   // Split-layout (#93): a spec whose phases are split across sibling files
@@ -851,4 +962,225 @@ export function validateSplitLayoutCoverage(
 
 function cap(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1);
+}
+
+// ─── Cross-artifact status monotonicity (#277) ────────────────────────────────
+//
+// A split-layout spec's parent requirements artifact must not lag behind its
+// children. The #112 sibling instance: SPEC-004's requirements.md derived
+// `specifying` while tasks.md derived `implementing` and the harness was built +
+// run — the parent said not-started, the child said in-progress, and nothing
+// asserted the parent's derived status is ≥ its children's. This closes that gap.
+//
+// Severity is WARNING, never error — same discipline as the #137/#103/#111 gates:
+// incremental authoring is legitimate (a parent transiently behind a child is a
+// normal mid-authoring state), so we SURFACE the desync without blocking. The gate
+// reads DERIVED status (deriveStatus), never the literal `status:` line, so a stale
+// mirror can never produce a false monotonicity warning.
+//
+// Lifecycle order (the comparison): new < specifying < implementing < done. The
+// explicit terminals (archived / a future superseded) are NOT ranked here — they
+// are human acts orthogonal to the in-progress lane (INV-6), so an artifact in an
+// explicit terminal is excluded from the comparison rather than forced into the
+// order.
+
+/** Lifecycle rank for the monotonicity comparison; explicit terminals are unranked. */
+const LIFECYCLE_RANK: Partial<Record<SpecStatus, number>> = {
+  new: 0,
+  specifying: 1,
+  implementing: 2,
+  done: 3,
+};
+
+/**
+ * One sibling file in a split-layout spec directory, with everything needed to
+ * DERIVE its status (#277). Callers (the validate command, the CI script) read
+ * each sibling's frontmatter and approval verdict and assemble the set. Mirrors
+ * `SplitLayoutFile`, adding the derive inputs.
+ */
+export interface StatusMonotonicityFile {
+  /** The file's `type:` frontmatter, lowercased (`requirements` | `design` | `tasks`). */
+  readonly type: string;
+  /** The file's `phases:` map (phase → PhaseStatus), fed to `deriveStatus`. */
+  readonly phases: PhaseState;
+  /** The file's approval verdict, fed to `deriveStatus`. Defaults to `unapproved`. */
+  readonly approvalState?: ApprovalStatus;
+  /** The file's explicit terminal (archived), if any — fed to `deriveStatus`. */
+  readonly explicitTerminal?: ExplicitTerminal;
+}
+
+export interface StatusMonotonicityResult {
+  /** true when the set is NOT a split layout with a requirements parent to compare. */
+  readonly notSplitLayout: boolean;
+  /** Monotonicity violations (always warning severity). Empty when monotone. */
+  readonly violations: ValidationViolation[];
+}
+
+/** Derive a file's status, defaulting an absent approval verdict to `unapproved`. */
+function deriveFileStatus(f: StatusMonotonicityFile): SpecStatus {
+  return deriveStatus(f.phases, f.approvalState ?? 'unapproved', f.explicitTerminal);
+}
+
+/**
+ * Validate that a split-layout spec DIRECTORY's parent requirements status is ≥
+ * the max of its child design/tasks statuses, in lifecycle order (#277). Pure:
+ * takes the already-parsed sibling files (type + phases + approval), no filesystem.
+ *
+ * - Returns `notSplitLayout: true` (no violations) when the set has no `requirements`
+ *   file to act as parent (a single-file or design/tasks-only set is not this
+ *   check's concern — there is no cross-artifact parent to compare).
+ * - Otherwise compares the parent's DERIVED status against the max DERIVED child
+ *   status; a parent strictly behind its highest child emits a WARNING
+ *   `status.cross-artifact.regression`. Warning (never error) so a transient
+ *   mid-authoring lag is surfaced but not blocked.
+ *
+ * Children/parent in an explicit terminal (archived) are excluded from the
+ * comparison (their status is unranked, INV-6): a terminal artifact does not sit
+ * on the in-progress lane the monotonicity assertion is about.
+ */
+export function validateStatusMonotonicity(
+  files: readonly StatusMonotonicityFile[],
+): StatusMonotonicityResult {
+  const splitFiles = files.filter((f) => SPLIT_LAYOUT_TYPES.has(f.type));
+  const parent = splitFiles.find((f) => f.type === 'requirements');
+  if (!parent) {
+    return { notSplitLayout: true, violations: [] };
+  }
+
+  const parentStatus = deriveFileStatus(parent);
+  const parentRank = LIFECYCLE_RANK[parentStatus];
+  // A parent in an explicit terminal is off the lane — nothing to assert.
+  if (parentRank === undefined) {
+    return { notSplitLayout: false, violations: [] };
+  }
+
+  // Highest-ranked child on the in-progress lane (terminals excluded).
+  let maxChildStatus: SpecStatus | undefined;
+  let maxChildRank = -1;
+  for (const child of splitFiles) {
+    if (child.type === 'requirements') continue;
+    const status = deriveFileStatus(child);
+    const rank = LIFECYCLE_RANK[status];
+    if (rank === undefined) continue; // terminal child — unranked
+    if (rank > maxChildRank) {
+      maxChildRank = rank;
+      maxChildStatus = status;
+    }
+  }
+
+  const violations: ValidationViolation[] = [];
+  if (maxChildStatus !== undefined && parentRank < maxChildRank) {
+    violations.push({
+      rule: 'status.cross-artifact.regression',
+      severity: 'warning',
+      message: `Parent requirements status "${parentStatus}" is behind a child artifact at "${maxChildStatus}".`,
+      fixHint: `A split-layout spec's requirements.md must not lag its design/tasks siblings (lifecycle order new < specifying < implementing < done). The parent derives "${parentStatus}" but a child derives "${maxChildStatus}" — advance/approve the requirements artifact so the parent is at or ahead of its children, or roll the child back. The cross-artifact desync makes the SPECS pane show the parent as less progressed than work that is already underway.`,
+    });
+  }
+
+  return { notSplitLayout: false, violations };
+}
+
+// ─── Doc status-claims vs referenced status (#98) ─────────────────────────────
+//
+// An artifact's prose can claim a feature is `implemented`/`done`/`built` while the
+// owning spec is still `specifying` with zero code — a false signpost (the SPEC-002
+// design.md "Review Webview implemented (SPEC-014)" overclaim while SPEC-014 was
+// `specifying`, RCDD 2026-06-01). This is the structural Evidence-Discipline gate:
+// scan prose for an explicit implementation-status CLAIM tied to a SPEC-NNN/DR-NNN
+// reference and WARN when the referenced artifact's ACTUAL status contradicts it.
+//
+// Deterministic Slice-1 (DR-004 / Tier-0): clear claim patterns only — no NLP. It
+// catches STRUCTURAL lies (claim vs status field), not semantic ones (status says
+// `done` but code is a stub — the global grep-check's job). The status map is
+// caller-supplied (id → actual status), the same no-false-positive pattern as
+// `knownEpicRefs`/`approvalState`: omit it and the check is skipped entirely.
+
+/** The claim verbs asserting a SPEC is finished, and the statuses that satisfy them. */
+const SPEC_DONE_VERBS = ['implemented', 'done', 'built', 'shipped'] as const;
+const SPEC_DONE_OK = new Set<string>(['implementing', 'done']);
+/** The claim verb asserting a DR is settled, and the status that satisfies it. */
+const DR_DONE_VERBS = ['accepted'] as const;
+const DR_DONE_OK = new Set<string>(['accepted']);
+
+/** A SPEC/DR reference id, e.g. `SPEC-014` or `DR-031`. */
+const ARTIFACT_REF = '(SPEC|DR)-(\\d+)';
+/** Max chars between a claim verb and its id (either order) to count as "attached". */
+const CLAIM_WINDOW = 40;
+
+/**
+ * Build a regex matching an implementation-status CLAIM bound to an artifact ref,
+ * in EITHER order (verb before id, or id before verb) within a small window. The
+ * verb set differs by artifact kind, so this is built per (kind, verbs).
+ */
+function claimRegex(verbs: readonly string[]): RegExp {
+  const v = verbs.join('|');
+  // Either: "<verb> … SPEC-NNN"  or  "SPEC-NNN … <verb>". Window-bounded, no newlines.
+  return new RegExp(
+    `\\b(?:${v})\\b[^\\n]{0,${CLAIM_WINDOW}}?\\b${ARTIFACT_REF}\\b` +
+      `|\\b${ARTIFACT_REF}\\b[^\\n]{0,${CLAIM_WINDOW}}?\\b(?:${v})\\b`,
+    'gi',
+  );
+}
+
+const SPEC_CLAIM_RE = claimRegex(SPEC_DONE_VERBS);
+const DR_CLAIM_RE = claimRegex(DR_DONE_VERBS);
+
+/** Normalize a captured ref to canonical `SPEC-NNN` / `DR-NNN`. */
+function canonRef(kind: string, num: string): string {
+  return `${kind.toUpperCase()}-${num}`;
+}
+
+/**
+ * Scan an artifact's prose for implementation-status claims and warn when a claim
+ * contradicts the referenced artifact's ACTUAL status (#98). Pure, deterministic.
+ *
+ * @param body         The artifact's text (prose to scan).
+ * @param actualStatus Map of canonical id (`SPEC-014` / `DR-031`) → actual status.
+ *                     A referenced id NOT in the map is skipped (unknown → no false
+ *                     positive). An empty map yields no violations.
+ *
+ * SPEC claims (`implemented|done|built|shipped`) are satisfied by an actual status
+ * of `implementing` or `done`; anything else (`new`/`specifying`/`archived`/…)
+ * contradicts. DR claims (`accepted`) are satisfied only by `accepted`. Each
+ * contradicted (kind, id) pair is reported once, regardless of how many times the
+ * claim recurs in the text.
+ */
+export function validateStatusClaims(
+  body: string,
+  actualStatus: ReadonlyMap<string, string>,
+): ValidationViolation[] {
+  if (actualStatus.size === 0) return [];
+  const violations: ValidationViolation[] = [];
+  const seen = new Set<string>();
+
+  const scan = (re: RegExp, verbs: readonly string[], okStatuses: ReadonlySet<string>) => {
+    re.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = re.exec(body)) !== null) {
+      // The ref is captured by whichever alternative matched: groups 1-2 (verb→id)
+      // or groups 3-4 (id→verb). Exactly one pair is populated.
+      const kind = m[1] ?? m[3];
+      const num = m[2] ?? m[4];
+      if (!kind || !num) continue;
+      const id = canonRef(kind, num);
+      if (seen.has(id)) continue;
+      const actual = actualStatus.get(id);
+      if (actual === undefined) continue; // unknown ref → skip (no false positive)
+      if (okStatuses.has(actual)) continue; // claim is consistent
+      seen.add(id);
+      const verbList = verbs.join('/');
+      violations.push({
+        rule: 'status-claim.contradicted',
+        severity: 'warning',
+        message: `Doc claims ${id} is ${verbList} but its actual status is "${actual}".`,
+        fixHint: `An "${verbList}" claim for ${id} contradicts its recorded status "${actual}" — a false signpost (artifact-existence ≠ feature-existence, Evidence Discipline / DR-003). Either correct the prose to the honest state, or, if the work really is done, advance ${id}'s status so the signpost stops lying.`,
+      });
+    }
+  };
+
+  scan(SPEC_CLAIM_RE, SPEC_DONE_VERBS, SPEC_DONE_OK);
+  scan(DR_CLAIM_RE, DR_DONE_VERBS, DR_DONE_OK);
+
+  return violations;
 }

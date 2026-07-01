@@ -14,9 +14,14 @@
   <meta property="og:url" content="https://minspec.dev">
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="MinSpec">
+  <meta property="og:image" content="https://minspec.dev/img/og-minspec.jpg">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="MinSpec — adaptive specification-driven development for VS Code">
   <meta name="twitter:card" content="summary_large_image">
   <meta name="twitter:title" content="MinSpec — Adaptive SDD for VS Code">
   <meta name="twitter:description" content="Free VS Code extension for specification-driven development. Adaptive ceremony: trivial changes need one sentence, complex changes get full specs.">
+  <meta name="twitter:image" content="https://minspec.dev/img/og-minspec.jpg">
   <script type="application/ld+json">
   {
     "@context": "https://schema.org",
@@ -1068,7 +1073,17 @@
         justify-content: center;
       }
     }
+    /* --- Waitlist form --- */
+    .waitlist { display: flex; gap: 10px; justify-content: center; flex-wrap: wrap; max-width: 460px; margin: 0 auto; }
+    .waitlist input[type=email] { flex: 1 1 240px; min-width: 0; padding: 12px 16px; font-size: 0.95rem; background: var(--bg-surface); border: 1px solid var(--border); border-radius: 8px; color: var(--text); }
+    .waitlist input[type=email]:focus { outline: none; border-color: var(--accent-dim); box-shadow: 0 0 0 3px var(--accent-glow); }
+    .hp { position: absolute; left: -9999px; width: 1px; height: 1px; overflow: hidden; }
+    .form-msg { margin-top: 16px; font-size: 0.9rem; min-height: 1.2em; text-align: center; }
+    .form-msg.ok { color: var(--accent-bright); }
+    .form-msg.err { color: var(--amber); }
   </style>
+  <!-- Cloudflare Web Analytics -->
+  <script defer src="https://static.cloudflareinsights.com/beacon.min.js" data-cf-beacon='{"token":"9debd814880e4387bbd1dca16c96b4a6"}'></script>
 </head>
 <body>
 
@@ -1442,8 +1457,14 @@
     <div class="section-inner">
       <div class="section-label">Get Started</div>
       <h2 class="section-title">Stop over-specifying trivial changes</h2>
-      <p class="section-desc">Install MinSpec and let the right amount of ceremony happen automatically.</p>
-      <a href="#" class="btn btn-primary" title="Coming soon to the VS Code Marketplace">Install from VS Code Marketplace (Coming Soon)</a>
+      <p class="section-desc">MinSpec is coming to the VS Code Marketplace. Join the waitlist and we'll email you the moment it's live.</p>
+      <form class="waitlist" id="waitlist-form" method="POST" action="/api/waitlist" novalidate>
+        <label class="hp" for="website">Leave this empty</label>
+        <input class="hp" type="text" id="website" name="website" tabindex="-1" autocomplete="off" aria-hidden="true">
+        <input type="email" id="email" name="email" placeholder="you@company.com" required autocomplete="email" aria-label="Email address">
+        <button class="btn btn-primary" type="submit" id="waitlist-submit">Join the waitlist</button>
+      </form>
+      <p class="form-msg" id="waitlist-msg" role="status" aria-live="polite"></p>
     </div>
   </section>
 
@@ -1465,5 +1486,6 @@
     </div>
   </footer>
 
+  <script src="/js/waitlist.js" defer></script>
 </body>
 </html>

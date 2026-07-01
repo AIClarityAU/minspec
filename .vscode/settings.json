@@ -1,9 +1,12 @@
 {
     "cSpell.words": [
+        "Approvable",
+        "Approvables",
         "clinerules",
         "cursorrules",
         "Frontmatter",
         "minspec",
         "WSJF"
-    ]
+    ],
+    "minspec.autoClassifyOnCommit": true
 }

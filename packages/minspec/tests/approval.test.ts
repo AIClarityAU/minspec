@@ -4,48 +4,62 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import {
-  hashContent,
-  hashSpecFile,
   resolveStatus,
   approveSpec,
   revokeApproval,
   getApprovalStatus,
-  loadApprovals,
+  getApprovalRecord,
+  canonicalSpecHash,
+  gitConfigEmail,
+  specRelPath,
+  type ApprovalRecord,
 } from '../src/lib/approval';
+import { readRecord } from '../src/lib/approval-store';
 import { setSpecStatus, parseSpec } from '../src/lib/spec';
+import { specHash } from '@aiclarity/shared';
 
 let tmp: string;
 let specPath: string;
+const SPEC_REL = 'specs/SPEC-007-thing.md';
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-approval-'));
   fs.mkdirSync(path.join(tmp, 'specs'));
   specPath = path.join(tmp, 'specs', 'SPEC-007-thing.md');
-  fs.writeFileSync(specPath, '---\nid: SPEC-007\ntier: T3\n---\n# Thing\n');
+  fs.writeFileSync(specPath, '---\nid: SPEC-007\ntier: T3\nstatus: specifying\n---\n# Thing\n');
+  // Give the tmp repo a git identity so gitConfigEmail returns a real value.
+  try {
+    execFileSync('git', ['init', '-q'], { cwd: tmp });
+    execFileSync('git', ['config', 'user.email', 'tester@example.com'], { cwd: tmp });
+  } catch {
+    // git absent — gitConfigEmail degrades to 'unknown', asserted separately.
+  }
 });
 
 afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-describe('hashContent — matches sha256sum', () => {
-  it('Node crypto agrees with the shell sha256sum the gate hook uses', () => {
-    const nodeHash = hashSpecFile(specPath);
-    let shellHash: string;
-    try {
-      shellHash = execFileSync('sha256sum', [specPath]).toString().split(/\s+/)[0];
-    } catch {
-      return; // sha256sum unavailable on this platform — skip cross-check
-    }
-    expect(nodeHash).toBe(shellHash);
+function record(overrides: Partial<ApprovalRecord> = {}): ApprovalRecord {
+  return {
+    specPath: SPEC_REL,
+    specHash: 'abc',
+    approvedAt: 't',
+    approvedBy: 'paul@harvest316.com',
+    tier: 'T3',
+    migrated: false,
+    ...overrides,
+  };
+}
+
+describe('canonicalSpecHash — matches @aiclarity/shared specHash', () => {
+  it('equals specHash over the file content (canonical, not raw bytes)', () => {
+    const nodeHash = canonicalSpecHash(specPath);
+    expect(nodeHash).toBe(specHash(fs.readFileSync(specPath, 'utf-8')));
   });
 
-  it('is stable for identical bytes and differs on change', () => {
-    const a = hashContent('hello');
-    const b = hashContent('hello');
-    const c = hashContent('hello!');
-    expect(a).toBe(b);
-    expect(a).not.toBe(c);
+  it('returns null for an unreadable file', () => {
+    expect(canonicalSpecHash(path.join(tmp, 'nope.md'))).toBeNull();
   });
 });
 
@@ -54,67 +68,92 @@ describe('resolveStatus — pure', () => {
     expect(resolveStatus(undefined, 'abc')).toBe('unapproved');
   });
   it('approved when hash matches', () => {
-    expect(resolveStatus({ specHash: 'abc', approvedAt: 't', tier: 'T3' }, 'abc')).toBe('approved');
+    expect(resolveStatus(record(), 'abc')).toBe('approved');
   });
   it('stale when hash differs', () => {
-    expect(resolveStatus({ specHash: 'abc', approvedAt: 't', tier: 'T3' }, 'xyz')).toBe('stale');
+    expect(resolveStatus(record(), 'xyz')).toBe('stale');
   });
   it('unapproved when file unreadable (null hash)', () => {
-    expect(resolveStatus({ specHash: 'abc', approvedAt: 't', tier: 'T3' }, null)).toBe('unapproved');
+    expect(resolveStatus(record(), null)).toBe('unapproved');
+  });
+  it('a migrated record still resolves approved when its hash matches', () => {
+    expect(resolveStatus(record({ migrated: true }), 'abc')).toBe('approved');
   });
 });
 
-describe('approve / revoke lifecycle', () => {
+describe('approve / revoke lifecycle (path-keyed, committed sidecar)', () => {
   it('approveSpec then getApprovalStatus = approved', () => {
-    approveSpec(tmp, 'SPEC-007', specPath, 'T3', () => new Date('2026-05-30T00:00:00Z'));
-    expect(getApprovalStatus(tmp, 'SPEC-007', specPath)).toBe('approved');
-    const store = loadApprovals(tmp);
-    expect(store['SPEC-007'].tier).toBe('T3');
-    expect(store['SPEC-007'].approvedAt).toBe('2026-05-30T00:00:00.000Z');
+    approveSpec(tmp, specPath, 'T3', 'paul@harvest316.com', () => new Date('2026-05-30T00:00:00Z'));
+    expect(getApprovalStatus(tmp, specPath)).toBe('approved');
+    const rec = readRecord(tmp, SPEC_REL)!;
+    expect(rec.tier).toBe('T3');
+    expect(rec.approvedAt).toBe('2026-05-30T00:00:00.000Z');
+    expect(rec.specPath).toBe(SPEC_REL);
   });
 
-  it('editing the spec after approval makes it stale', () => {
-    approveSpec(tmp, 'SPEC-007', specPath, 'T3');
+  it('AC-3 — the sidecar carries all six FR-2 fields', () => {
+    approveSpec(tmp, specPath, 'T3', 'paul@harvest316.com', () => new Date('2026-05-30T00:00:00Z'));
+    const rec = getApprovalRecord(tmp, specPath)!;
+    expect(rec).toMatchObject({
+      specPath: SPEC_REL,
+      approvedBy: 'paul@harvest316.com',
+      tier: 'T3',
+      migrated: false,
+    });
+    expect(rec.specHash).toMatch(/^[0-9a-f]{64}$/);
+    expect(rec.approvedAt).toBe('2026-05-30T00:00:00.000Z');
+  });
+
+  it('AC-4 — editing ONLY the status line keeps approval (lifecycle non-void)', () => {
+    approveSpec(tmp, specPath, 'T3', 'paul@harvest316.com');
+    setSpecStatus(specPath, 'implementing'); // a lifecycle-field edit
+    expect(getApprovalStatus(tmp, specPath)).toBe('approved');
+    expect(parseSpec(fs.readFileSync(specPath, 'utf-8')).frontmatter.status).toBe('implementing');
+  });
+
+  it('editing the BODY after approval makes it stale', () => {
+    approveSpec(tmp, specPath, 'T3', 'paul@harvest316.com');
     fs.appendFileSync(specPath, '\nmore content\n');
-    expect(getApprovalStatus(tmp, 'SPEC-007', specPath)).toBe('stale');
+    expect(getApprovalStatus(tmp, specPath)).toBe('stale');
   });
 
-  it('revokeApproval removes the record', () => {
-    approveSpec(tmp, 'SPEC-007', specPath, 'T3');
-    expect(revokeApproval(tmp, 'SPEC-007')).toBe(true);
-    expect(getApprovalStatus(tmp, 'SPEC-007', specPath)).toBe('unapproved');
-    expect(revokeApproval(tmp, 'SPEC-007')).toBe(false);
+  it('revokeApproval removes the sidecar', () => {
+    approveSpec(tmp, specPath, 'T3', 'paul@harvest316.com');
+    expect(revokeApproval(tmp, specPath)).toBe(true);
+    expect(getApprovalStatus(tmp, specPath)).toBe('unapproved');
+    expect(revokeApproval(tmp, specPath)).toBe(false);
   });
 
-  it('approvals.json survives a malformed file (returns empty)', () => {
-    fs.mkdirSync(path.join(tmp, '.minspec'), { recursive: true });
-    fs.writeFileSync(path.join(tmp, '.minspec', 'approvals.json'), '{ not json');
-    expect(loadApprovals(tmp)).toEqual({});
+  it('AC-1 — a committed sidecar survives a fresh "clone" (copy without the source repo state)', () => {
+    approveSpec(tmp, specPath, 'T3', 'paul@harvest316.com');
+    // Simulate a fresh clone: copy specs/ + .minspec/approvals/ into a new dir.
+    const clone = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-clone-'));
+    fs.cpSync(path.join(tmp, 'specs'), path.join(clone, 'specs'), { recursive: true });
+    fs.cpSync(path.join(tmp, '.minspec'), path.join(clone, '.minspec'), { recursive: true });
+    const clonedSpec = path.join(clone, 'specs', 'SPEC-007-thing.md');
+    expect(getApprovalStatus(clone, clonedSpec)).toBe('approved');
+    fs.rmSync(clone, { recursive: true, force: true });
   });
 });
 
-// Regression (T3) — DR-003 RCDD. Approval must flip the spec's `status:` line to
-// `implementing` AND remain non-stale. The trap: flipping status mutates the file
-// bytes, so the hash MUST be recorded AFTER the flip (flip-then-hash). If the order
-// is reversed, the just-approved spec is instantly stale. This test pins the order.
-describe('approval flips status and stays approved (flip-then-hash ordering)', () => {
-  const SPECIFYING = '---\nid: SPEC-007\nstatus: specifying\ntier: T3\n---\n# Thing\n';
-
-  beforeEach(() => fs.writeFileSync(specPath, SPECIFYING));
-
-  it('flip-then-hash → status implementing AND approval is approved (not stale)', () => {
-    // Replicates approveSpecCommand's order: write status first, then hash.
-    setSpecStatus(specPath, 'implementing');
-    approveSpec(tmp, 'SPEC-007', specPath, 'T3');
-
-    expect(parseSpec(fs.readFileSync(specPath, 'utf-8')).frontmatter.status).toBe('implementing');
-    expect(getApprovalStatus(tmp, 'SPEC-007', specPath)).toBe('approved');
+describe('AC-3 — gitConfigEmail is offline (Tier-0)', () => {
+  it('captures git config user.email with no network call', () => {
+    const email = gitConfigEmail(tmp);
+    // Either the configured email (git present) or the honest fallback.
+    expect(['tester@example.com', 'unknown']).toContain(email);
   });
 
-  it('hash-then-flip is the bug: recording before the flip leaves it stale', () => {
-    // The wrong order — guards against a future refactor reintroducing it.
-    approveSpec(tmp, 'SPEC-007', specPath, 'T3');
-    setSpecStatus(specPath, 'implementing');
-    expect(getApprovalStatus(tmp, 'SPEC-007', specPath)).toBe('stale');
+  it('degrades to "unknown" rather than throwing on a non-repo dir', () => {
+    const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-bare-'));
+    // A dir with no git identity; on a machine with a global user.email this may
+    // still resolve — the contract is only that it never throws and returns a string.
+    expect(typeof gitConfigEmail(bare)).toBe('string');
+    fs.rmSync(bare, { recursive: true, force: true });
+  });
+});
+
+describe('specRelPath', () => {
+  it('produces a repo-relative POSIX path', () => {
+    expect(specRelPath(tmp, specPath)).toBe(SPEC_REL);
   });
 });

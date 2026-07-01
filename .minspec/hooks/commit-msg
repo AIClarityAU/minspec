@@ -1,0 +1,33 @@
+#!/usr/bin/env sh
+
+# >>> minspec:managed:commit-msg-hook >>>
+# MinSpec commit-msg gate (DR-037 / DR-003) — RCDD root-cause requirement.
+# A \`fix:\` commit must document its diagnosis. Bypass: MINSPEC_GATE_OFF=1 git commit ...
+set -u
+
+[ "${MINSPEC_GATE_OFF:-0}" = "1" ] && exit 0
+
+msg_file="${1:-}"
+[ -n "$msg_file" ] && [ -r "$msg_file" ] || exit 0   # fail open
+
+# Subject = first non-comment, non-empty line.
+subject=$(grep -v '^#' "$msg_file" | grep -m1 . 2>/dev/null || true)
+
+# Only Conventional-Commit fix subjects are gated: fix:  fix(scope):  fix!:
+echo "$subject" | grep -Eq '^fix(\([^)]*\))?!?:' || exit 0
+
+# Require a `Root cause:` marker (case-insensitive, space or hyphen) in the body.
+if grep -v '^#' "$msg_file" | grep -Eiq 'root[ -]cause:'; then
+  exit 0
+fi
+
+echo "✗ MinSpec RCDD gate (DR-003): fix commit missing root cause." >&2
+echo "" >&2
+echo "  A \`fix\` commit must document the diagnosis. Add a body line:" >&2
+echo "" >&2
+echo "      Root cause: <one sentence>" >&2
+echo "" >&2
+echo "  RCDD Phase 2 (diagnose) precedes Phase 3 (fix)." >&2
+echo "  Bypass (rare): MINSPEC_GATE_OFF=1 git commit ..." >&2
+exit 1
+# <<< minspec:managed:commit-msg-hook <<<

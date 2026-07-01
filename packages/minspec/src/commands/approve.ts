@@ -8,6 +8,7 @@ import {
   approveSpec as recordApproval,
   revokeApproval as removeApproval,
   getApprovalStatus,
+  gitConfigEmail,
   type ApprovalStatus,
 } from '../lib/approval';
 import { resolveActiveSpecId } from '../lib/active-spec';
@@ -52,7 +53,7 @@ async function pickSpec(
   }
   const openId = resolveActiveSpecId();
   const items = specs
-    .map((s) => ({ spec: s, status: getApprovalStatus(rootDir, s.id, s.filePath) }))
+    .map((s) => ({ spec: s, status: getApprovalStatus(rootDir, s.filePath) }))
     .filter((x) => opts.include(x.status))
     .map(({ spec, status }) => ({
       label: `${spec.id}: ${spec.title}`,
@@ -79,7 +80,10 @@ async function pickSpec(
  * Command: Approve a spec for implementation.
  * Runs the completeness validator first — refuses approval if it has errors.
  */
-export async function approveSpecCommand(node?: SpecNodeLike): Promise<void> {
+export async function approveSpecCommand(
+  node?: SpecNodeLike,
+  state?: vscode.Memento,
+): Promise<void> {
   const rootDir = getWorkspaceRoot();
   if (!rootDir) {
     vscode.window.showErrorMessage('MinSpec: No workspace folder open.');
@@ -124,36 +128,54 @@ export async function approveSpecCommand(node?: SpecNodeLike): Promise<void> {
     return;
   }
 
-  // Complete (possibly with warnings) — confirm, noting any warnings.
-  let confirmDetail = `Approving binds ${spec.id} to its current content. Editing the spec afterward will revoke approval automatically.`;
-  if (warnings.length > 0) {
-    confirmDetail += `\n\nNon-blocking warnings:\n${warnings.map((w) => `• ${w.message}`).join('\n')}`;
-  }
-  const confirm = await vscode.window.showWarningMessage(
-    `Approve ${spec.id} (${spec.tier}) for implementation?`,
-    { modal: true, detail: confirmDetail },
-    'Approve',
-  );
-  if (confirm !== 'Approve') return;
-
+  // Complete — approve directly. Selecting "Approve Spec" and picking this spec
+  // IS the explicit act (DR-012); a second confirmation modal is redundant
+  // friction (#104). Hard-blocking errors already stopped above; warnings never
+  // gate approval — they are surfaced non-modally below, never as a focus-stealing
+  // approve-anyway dialog (HITL: advisory over the visible artifact).
   try {
-    // Flip the lifecycle status to `implementing` BEFORE recording the hash.
-    // Approval binds the spec's bytes; the status write changes them, so it must
-    // happen first — otherwise the hash is recorded over pre-flip bytes and the
-    // just-approved spec is instantly stale (flip-then-hash; DR-003 RCDD). Guard:
+    // SPEC-022 (FR-3): the approval hash is canonical and EXCLUDES the lifecycle
+    // fields, so the status flip no longer affects it — the old flip-then-hash
+    // ordering dance is gone (ordering is now free). The literal `status:` line is
+    // a tool-written mirror of the derived status; write it on approval. Guard:
     // only advance from a pre-implementation status — never downgrade done/archived
     // or re-flip an already-implementing spec being re-approved after an edit.
     const wasPreImpl =
       parsed.frontmatter.status === 'new' || parsed.frontmatter.status === 'specifying';
+    const email = gitConfigEmail(rootDir);
     if (wasPreImpl) {
-      setSpecStatus(spec.filePath, 'implementing');
+      setSpecStatus(spec.filePath, 'implementing'); // mirror; no longer affects the hash
     }
-    recordApproval(rootDir, spec.id, spec.filePath, spec.tier);
-    vscode.window.showInformationMessage(
-      wasPreImpl
-        ? `MinSpec: ✓ Approved ${spec.id} for implementation (status → implementing).`
-        : `MinSpec: ✓ Approved ${spec.id} for implementation.`,
-    );
+    recordApproval(rootDir, spec.filePath, spec.tier, email);
+
+    const base = wasPreImpl
+      ? `MinSpec: ✓ Approved ${spec.id} for implementation (status → implementing).`
+      : `MinSpec: ✓ Approved ${spec.id} for implementation.`;
+    if (warnings.length > 0) {
+      // Non-modal advisory: approved, but the gaps are surfaced so they are not
+      // silently swallowed (never-wrong). Not a modal, not a blocking gate.
+      const n = warnings.length;
+      vscode.window.showWarningMessage(
+        `${base} ${n} advisory ${n === 1 ? 'warning' : 'warnings'} — ${warnings
+          .map((w) => w.message)
+          .join(' ')}`,
+      );
+    } else {
+      vscode.window.showInformationMessage(base);
+    }
+
+    // First-approve-only tip that editing revokes approval (#104 — show once, not
+    // on every approve). Skipped entirely when no Memento is wired (e.g. tests).
+    if (state) {
+      const HINT_KEY = 'minspec.approveRevokeHintShown';
+      if (!state.get<boolean>(HINT_KEY)) {
+        void state.update(HINT_KEY, true);
+        vscode.window.showInformationMessage(
+          'MinSpec: Tip — editing an approved spec automatically revokes its approval; re-approve after edits.',
+        );
+      }
+    }
+
     await vscode.commands.executeCommand('minspec.refreshTree');
   } catch (err) {
     vscode.window.showErrorMessage(
@@ -177,7 +199,7 @@ export async function revokeApprovalCommand(node?: SpecNodeLike): Promise<void> 
   });
   if (!spec) return;
 
-  const removed = removeApproval(rootDir, spec.id);
+  const removed = removeApproval(rootDir, spec.filePath);
   vscode.window.showInformationMessage(
     removed
       ? `MinSpec: Revoked approval for ${spec.id}.`

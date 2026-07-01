@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
 import { initCommand, initRefreshCommand } from './commands/init';
+import { constitutionShowPromptCommand, constitutionCompactCommand, constitutionProposeCommand } from './commands/constitution';
 import { classifyCommand } from './commands/classify';
 import { statusCommand } from './commands/status';
 import { declareScopeCommand } from './commands/session';
@@ -10,16 +11,19 @@ import { generateExampleCommand } from './commands/example';
 import { migrateLayoutCommand } from './commands/migrate';
 import { createAdrCommand, regenerateDrIndexCommand, acceptAdrCommand, setAdrStatusCommand } from './commands/adr';
 import { createEpicCommand, regenerateEpicIndexCommand, acceptEpicCommand } from './commands/epic';
-import { backfillEpicsCommand } from './commands/backfill-epics';
+import { backfillEpicsCommand, type BackfillOptions } from './commands/backfill-epics';
 import { regenerateDrIndex } from './lib/adr-manager';
 import { scoreWsjfCommand, triageIssueCommand } from './commands/backlog';
 import { approveSpecCommand, revokeApprovalCommand } from './commands/approve';
+import { approveActiveCommand } from './commands/approve-active';
 import { validateSpecCommand } from './commands/validate';
 import { SpecTreeProvider } from './views/spec-tree-provider';
+import { EpicReorderDragAndDropController } from './views/epic-dnd-controller';
 import { AdrTreeProvider } from './views/adr-tree-provider';
 import { FrontmatterCompletionProvider } from './views/frontmatter-completion';
 import { BacklogTreeProvider } from './views/backlog-view';
-import { MinSpecStatusBar, fromFrontmatter } from './views/status-bar';
+import { MinSpecStatusBar, MinSpecNextTaskStatusBar, fromFrontmatter } from './views/status-bar';
+import { nextTaskCommand, computeNextTask } from './commands/next-task';
 import { SpecPanel } from './views/spec-panel';
 import { loadSession, saveSession, addToScope, isFileInScope } from './lib/session';
 import { detectTools, getToolFilePath, type DetectedTools } from './lib/tool-detector';
@@ -38,11 +42,54 @@ import { findActiveSpec, trackActiveSpecEditor } from './lib/active-spec';
 import { parseSpec } from './lib/spec';
 import { loadConfig, resolveAndValidate } from './lib/config';
 import { trackActiveAdrEditor } from './lib/active-adr';
+import { recordApprovableView } from './lib/recent-approvables';
 import { resolveTargetFolderNonInteractive } from './lib/resolve-folder';
+import { registerReferenceDiagnostics } from './lib/diagnostics';
+import { evaluateConstitution } from './lib/constitution-nudge';
 
 export function activate(context: vscode.ExtensionContext): void {
   trackActiveSpecEditor(context);
   trackActiveAdrEditor(context);
+
+  // Most-recently-viewed approvables: record each approvable the user focuses so
+  // Alt+A's preview picker (commands/approve-active.ts) can offer them
+  // reverse-chronologically. Records the instant-before-preview editor too,
+  // since Ctrl-Shift-V previews the active editor.
+  recordApprovableView(vscode.window.activeTextEditor?.document?.uri?.fsPath);
+  context.subscriptions.push(
+    vscode.window.onDidChangeActiveTextEditor((e) =>
+      recordApprovableView(e?.document?.uri?.fsPath),
+    ),
+  );
+
+  // `minspec.markdownPreviewActive` context key — true when the focused tab is a
+  // markdown preview webview. Lets the Alt+A keybinding fire over a preview,
+  // where `editorTextFocus` is false (a webview is never a text editor). The
+  // command then routes to the most-recently-viewed picker.
+  const isMarkdownPreviewTab = (): boolean => {
+    const tab = vscode.window.tabGroups?.activeTabGroup?.activeTab as
+      | { input?: { viewType?: string } }
+      | undefined;
+    const viewType = tab?.input?.viewType;
+    return typeof viewType === 'string' && /markdown.*preview/i.test(viewType);
+  };
+  const syncPreviewContext = (): void => {
+    void vscode.commands.executeCommand(
+      'setContext',
+      'minspec.markdownPreviewActive',
+      isMarkdownPreviewTab(),
+    );
+  };
+  syncPreviewContext();
+  // tabGroups is guarded: it can be absent in tests' vscode mock and on engines
+  // older than the API (mirrors the optional access in lib/active-spec.ts).
+  const tabGroups = vscode.window.tabGroups;
+  if (tabGroups?.onDidChangeTabs) {
+    context.subscriptions.push(tabGroups.onDidChangeTabs(syncPreviewContext));
+  }
+  if (tabGroups?.onDidChangeTabGroups) {
+    context.subscriptions.push(tabGroups.onDidChangeTabGroups(syncPreviewContext));
+  }
   // Activation-time root: the folder containing the active editor (multi-root
   // safe), else the first folder, else ''. Non-interactive — never prompts at
   // startup. All file watchers below derive their base from this single value
@@ -59,6 +106,8 @@ export function activate(context: vscode.ExtensionContext): void {
 
   const specTreeView = vscode.window.createTreeView('minspecStatus', {
     treeDataProvider: specTreeProvider,
+    // Programmatic DnD reorder of epic.order (#261 / DR-039) — NOT in package.json.
+    dragAndDropController: new EpicReorderDragAndDropController(workspaceRoot, () => specTreeProvider.refresh()),
   });
   const adrTreeView = vscode.window.createTreeView('minspecAdrs', {
     treeDataProvider: adrTreeProvider,
@@ -118,6 +167,32 @@ export function activate(context: vscode.ExtensionContext): void {
   const statusBar = new MinSpecStatusBar();
   statusBar.update(null);
 
+  // Next-task signpost status bar (SPEC-012 / DR-019). Workspace-wide; click /
+  // chord → minspec.nextTask. Cached value, recomputed only on debounced file
+  // events below — never rebuilt on render.
+  const nextTaskStatusBar = new MinSpecNextTaskStatusBar();
+  let nextTaskTimer: ReturnType<typeof setTimeout> | undefined;
+  const refreshNextTask = () => {
+    if (!workspaceRoot) {
+      nextTaskStatusBar.update(null);
+      return;
+    }
+    if (nextTaskTimer) clearTimeout(nextTaskTimer);
+    nextTaskTimer = setTimeout(() => {
+      try {
+        nextTaskStatusBar.update(computeNextTask(workspaceRoot));
+      } catch {
+        nextTaskStatusBar.update(null);
+      }
+    }, 300);
+  };
+  // Initial paint (synchronous; computeNextTask is itself fail-safe).
+  try {
+    nextTaskStatusBar.update(workspaceRoot ? computeNextTask(workspaceRoot) : null);
+  } catch {
+    nextTaskStatusBar.update(null);
+  }
+
   // CodeLens providers (Phase 7)
   const codeLensProvider = new MinSpecCodeLensProvider(workspaceRoot);
   const specFileLensProvider = new MinSpecSpecFileLensProvider(workspaceRoot);
@@ -157,8 +232,12 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(
     vscode.commands.registerCommand('minspec.init', initCommand),
     vscode.commands.registerCommand('minspec.initRefresh', initRefreshCommand),
+    vscode.commands.registerCommand('minspec.constitutionShowPrompt', constitutionShowPromptCommand),
+    vscode.commands.registerCommand('minspec.constitutionCompact', constitutionCompactCommand),
+    vscode.commands.registerCommand('minspec.constitutionPropose', constitutionProposeCommand),
     vscode.commands.registerCommand('minspec.classify', classifyCommand),
     vscode.commands.registerCommand('minspec.status', statusCommand(workspaceRoot)),
+    vscode.commands.registerCommand('minspec.nextTask', nextTaskCommand(workspaceRoot)),
     vscode.commands.registerCommand('minspec.refreshTree', () => {
       specTreeProvider.refresh();
       adrTreeProvider.refresh();
@@ -178,8 +257,8 @@ export function activate(context: vscode.ExtensionContext): void {
       adrTreeProvider.refresh();
       backlogTreeProvider.refresh();
     }),
-    vscode.commands.registerCommand('minspec.backfillEpics', async (folderArg?: string) => {
-      await backfillEpicsCommand(folderArg);
+    vscode.commands.registerCommand('minspec.backfillEpics', async (folderArg?: string, opts?: BackfillOptions) => {
+      await backfillEpicsCommand(folderArg, opts);
       specTreeProvider.refresh();
       adrTreeProvider.refresh();
       backlogTreeProvider.refresh();
@@ -215,10 +294,16 @@ export function activate(context: vscode.ExtensionContext): void {
     // approve/revoke already fire `minspec.refreshTree` internally — no extra
     // refresh here (it only added to the redundant burst; issue #154).
     vscode.commands.registerCommand('minspec.approveSpec', async (node) => {
-      await approveSpecCommand(node);
+      await approveSpecCommand(node, context.globalState);
     }),
     vscode.commands.registerCommand('minspec.revokeApproval', async (node) => {
       await revokeApprovalCommand(node);
+    }),
+    // Unified context-aware Approve/Accept (Alt+A, #303): routes to approveSpec /
+    // acceptAdr / acceptEpic by the active approvable (tree node or editor), with
+    // approveSpec's pending picker as the no-focus fallback.
+    vscode.commands.registerCommand('minspec.approveActive', async (node) => {
+      await approveActiveCommand(node);
     }),
     vscode.commands.registerCommand('minspec.validateSpec', (node) => validateSpecCommand(node)),
     vscode.commands.registerCommand('minspec.showSpecPanel', async (specFilePath?: string) => {
@@ -239,6 +324,7 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     { dispose: () => specPanel.dispose() },
     statusBar,
+    nextTaskStatusBar,
   );
 
   // Watch spec files — refresh tree + status bar on changes
@@ -266,6 +352,8 @@ export function activate(context: vscode.ExtensionContext): void {
     } else {
       statusBar.update(null);
     }
+    // Spec/approval/phase changes can change the next human task — recompute.
+    refreshNextTask();
   };
 
   watcher.onDidChange(onSpecsChanged);
@@ -290,6 +378,8 @@ export function activate(context: vscode.ExtensionContext): void {
   let adrIndexTimer: ReturnType<typeof setTimeout> | undefined;
   const onAdrsChanged = (uri?: vscode.Uri) => {
     adrTreeProvider.refresh();
+    // ADR status (proposed→accepted) is a resolver input — recompute the signpost.
+    refreshNextTask();
     if (uri && path.basename(uri.fsPath).toLowerCase() === 'index.md') return;
     if (!workspaceRoot) return;
     if (adrIndexTimer) clearTimeout(adrIndexTimer);
@@ -329,17 +419,41 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Watch approvals.json — refresh spec tree so approval badges stay current
   // when the gate hook, CLI, or another window changes approval state.
+  // Covers both the legacy `.minspec/approvals.json` map and the DR-034 path-keyed
+  // sidecars under `.minspec/approvals/**` (the real approval ground truth that
+  // feeds the next-task resolver's per-spec `approvalState`).
   const approvalsWatcher = vscode.workspace.createFileSystemWatcher(
     new vscode.RelativePattern(
       workspaceRoot,
-      '.minspec/approvals.json',
+      '.minspec/approvals{.json,/**}',
     ),
   );
-  const onApprovalsChanged = () => specTreeProvider.refresh();
+  const onApprovalsChanged = () => {
+    specTreeProvider.refresh();
+    // Approval state (approved/stale/unapproved) is a resolver input — recompute.
+    refreshNextTask();
+  };
   approvalsWatcher.onDidChange(onApprovalsChanged);
   approvalsWatcher.onDidCreate(onApprovalsChanged);
   approvalsWatcher.onDidDelete(onApprovalsChanged);
   context.subscriptions.push(approvalsWatcher);
+
+  // Watch epics — epic status (proposed/active) and order are resolver inputs, so
+  // an epic edit (e.g. promote) can change the next task. The decisions watcher
+  // covers docs/decisions only; epics live under docs/epics/**.
+  const epicsDir = vscode.workspace.getConfiguration('minspec').get<string>('epicsDir', 'docs/epics');
+  const epicsWatcher = vscode.workspace.createFileSystemWatcher(
+    new vscode.RelativePattern(workspaceRoot, `${epicsDir}/**/*.md`),
+  );
+  const onEpicsChanged = () => {
+    specTreeProvider.refresh();
+    adrTreeProvider.refresh();
+    refreshNextTask();
+  };
+  epicsWatcher.onDidChange(onEpicsChanged);
+  epicsWatcher.onDidCreate(onEpicsChanged);
+  epicsWatcher.onDidDelete(onEpicsChanged);
+  context.subscriptions.push(epicsWatcher);
 
   // Drift detection: monitor file saves
   if (workspaceRoot) {
@@ -349,6 +463,10 @@ export function activate(context: vscode.ExtensionContext): void {
       }),
     );
   }
+
+  // Live dangling-reference diagnostics (#316): surface the #161 ref-checker as
+  // editor squiggles on save/change, reusing the Tier-0 checker unmodified.
+  registerReferenceDiagnostics(context, workspaceRoot);
 
   // First-run experience: legacy welcome toast (kept for users who already
   // had .minspec installed before auto-bootstrap shipped — its workspaceState
@@ -367,10 +485,20 @@ export function activate(context: vscode.ExtensionContext): void {
       Promise.resolve(
         vscode.window.showInformationMessage(message, ...actions),
       ).then(choice => (typeof choice === 'string' ? choice : undefined)),
-    executeCommand: (commandId, folder) => {
-      const result = vscode.commands.executeCommand(commandId, folder);
+    executeCommand: (commandId, folder, arg) => {
+      const result = vscode.commands.executeCommand(commandId, folder, arg);
       return result instanceof Promise ? result.then(() => undefined) : undefined;
     },
+    enableAutoClassify: () =>
+      Promise.resolve(
+        vscode.workspace
+          .getConfiguration('minspec')
+          .update(
+            'autoClassifyOnCommit',
+            true,
+            vscode.ConfigurationTarget.Workspace,
+          ),
+      ).then(() => undefined),
   };
   for (const folder of vscode.workspace.workspaceFolders ?? []) {
     void runBootstrap(folder.uri.fsPath, bootstrapVsCode);
@@ -378,24 +506,44 @@ export function activate(context: vscode.ExtensionContext): void {
 
   if (workspaceRoot) {
     // Auto-classify on commit — watch .git/HEAD + refs/heads/* if opted in.
-    const autoClassifyEnabled = vscode.workspace
-      .getConfiguration('minspec')
-      .get<boolean>('autoClassifyOnCommit', false);
-    if (autoClassifyEnabled) {
-      const gitWatcher = vscode.workspace.createFileSystemWatcher(
-        new vscode.RelativePattern(
-          workspaceRoot,
-          '.git/{HEAD,refs/heads/**}',
-        ),
+    // Created/torn down LIVE when minspec.autoClassifyOnCommit flips, so the
+    // classify toast's "from now on" takes effect immediately — no window
+    // reload (#203). Previously the watcher was wired only at activation, so
+    // the toggle silently did nothing until the next reload.
+    let gitWatcher: vscode.FileSystemWatcher | undefined;
+    const isAutoClassifyEnabled = () =>
+      vscode.workspace
+        .getConfiguration('minspec')
+        .get<boolean>('autoClassifyOnCommit', false);
+    const startGitWatcher = () => {
+      if (gitWatcher) return;
+      gitWatcher = vscode.workspace.createFileSystemWatcher(
+        new vscode.RelativePattern(workspaceRoot, '.git/{HEAD,refs/heads/**}'),
       );
       const triggerClassify = (uri: vscode.Uri) => {
         if (!isWatchedGitPath(uri.fsPath)) return;
-        vscode.commands.executeCommand('minspec.classify');
+        // Auto mode — passive status-bar line, never the interactive toast.
+        // This fires on every commit; a buttoned verdict here is pure nag (#216).
+        vscode.commands.executeCommand('minspec.classify', undefined, {
+          auto: true,
+        });
       };
       gitWatcher.onDidChange(triggerClassify);
       gitWatcher.onDidCreate(triggerClassify);
       context.subscriptions.push(gitWatcher);
-    }
+    };
+    const stopGitWatcher = () => {
+      gitWatcher?.dispose();
+      gitWatcher = undefined;
+    };
+    if (isAutoClassifyEnabled()) startGitWatcher();
+    context.subscriptions.push(
+      vscode.workspace.onDidChangeConfiguration((e) => {
+        if (!e.affectsConfiguration('minspec.autoClassifyOnCommit')) return;
+        if (isAutoClassifyEnabled()) startGitWatcher();
+        else stopGitWatcher();
+      }),
+    );
   }
 
   // ScroogeLLM bridge: conformance auto-export watcher (Phase 10)
@@ -410,6 +558,57 @@ export function activate(context: vscode.ExtensionContext): void {
   // attempt the nudge (gated on 24h install age + 7d cooldown).
   recordInstallTimestamp(context);
   void maybeShowNudge(context);
+
+  // #320: empty-constitution nudge with an offer-to-fix action. If the
+  // constitution has no human-authored rules yet, surface a SOFT, NON-MODAL
+  // toast whose primary action runs the deterministic Propose command. Advisory
+  // only (never blocks), honors a per-workspace "Don't ask again" skip flag.
+  for (const folder of vscode.workspace.workspaceFolders ?? []) {
+    void surfaceConstitutionProposeNudge(context, folder.uri.fsPath);
+  }
+}
+
+/** workspaceState key: the constitution-propose nudge was dismissed for good. */
+const CONSTITUTION_PROPOSE_NUDGE_SKIP = 'minspec.constitutionProposeNudge.skip';
+
+/**
+ * #320: surface the empty-constitution nudge with a "Propose draft" action.
+ *
+ * Best-effort + advisory: a failure here never affects activation, the toast is
+ * non-modal, and once the user picks "Don't ask again" the per-workspace skip
+ * flag suppresses it. The deterministic propose command does the actual write —
+ * this is only the offer surface (the pure descriptor lives in
+ * constitution-nudge.ts; the file write reuses the Tier-0 proposer unchanged).
+ */
+async function surfaceConstitutionProposeNudge(
+  context: vscode.ExtensionContext,
+  folder: string,
+): Promise<void> {
+  try {
+    if (context.workspaceState.get<boolean>(CONSTITUTION_PROPOSE_NUDGE_SKIP, false)) {
+      return;
+    }
+    // Only offer for an initialized project that actually has a constitution to
+    // fill — a missing .minspec/ is the init bootstrap's job, not this nudge.
+    if (!fs.existsSync(path.join(folder, '.minspec', 'constitution.md'))) return;
+
+    const nudge = evaluateConstitution(folder);
+    if (!nudge.empty) return;
+
+    const DONT_ASK = "Don't ask again";
+    const choice = await vscode.window.showInformationMessage(
+      nudge.message,
+      nudge.fixActionLabel,
+      DONT_ASK,
+    );
+    if (choice === nudge.fixActionLabel) {
+      await vscode.commands.executeCommand(nudge.fixCommandId, folder);
+    } else if (choice === DONT_ASK) {
+      await context.workspaceState.update(CONSTITUTION_PROPOSE_NUDGE_SKIP, true);
+    }
+  } catch {
+    // best-effort — the nudge is advisory; never let it break activation.
+  }
 }
 
 /**

@@ -14,8 +14,13 @@ import {
   ensureGitignoreEntries,
   MINSPEC_GITIGNORE_MARKER,
   MINSPEC_GITIGNORE_ENTRIES,
+  generateHarnessFiles,
+  refreshHarnessFiles,
 } from '../src/lib/scaffold';
-import { generateHarnessFiles } from '../src/lib/scaffold';
+import {
+  HASHES_FILENAME,
+  TEMPLATE_BASELINE_FILENAME,
+} from '../src/lib/merge-refresh';
 
 describe('ensureGitignoreEntries()', () => {
   let tmpDir: string;
@@ -157,5 +162,76 @@ describe('generateHarnessFiles() — gitignore integration', () => {
     expect(content).toContain('node_modules');
     expect(content).toContain('dist');
     expect(content).toContain('.minspec/session.json');
+  });
+});
+
+describe('MINSPEC_GITIGNORE_ENTRIES — coverage of machine-local state files', () => {
+  it('includes all four machine-local files (session, calibration, hashes, baseline)', () => {
+    expect(MINSPEC_GITIGNORE_ENTRIES).toContain('.minspec/session.json');
+    expect(MINSPEC_GITIGNORE_ENTRIES).toContain('.minspec/calibration.json');
+    expect(MINSPEC_GITIGNORE_ENTRIES).toContain('.minspec/generated-hashes.json');
+    expect(MINSPEC_GITIGNORE_ENTRIES).toContain('.minspec/template-baseline.json');
+  });
+
+  // ASYMMETRY GATE (durable fix): the merge-refresh state files are the source of
+  // truth for their own filenames. This ties the gitignore literals back to those
+  // constants, so renaming a state file without updating the ignore list — the
+  // exact asymmetry this work closed — fails the suite instead of silently
+  // re-stranding the file as committed.
+  it('covers the merge-refresh state files by their source-of-truth constants', () => {
+    expect(MINSPEC_GITIGNORE_ENTRIES).toContain(`.minspec/${HASHES_FILENAME}`);
+    expect(MINSPEC_GITIGNORE_ENTRIES).toContain(`.minspec/${TEMPLATE_BASELINE_FILENAME}`);
+  });
+
+  // Guard against over-ignoring: config.json and constitution.md are shared,
+  // committed project files. They must NEVER appear in the ignore list.
+  it('never ignores shared/committed project files', () => {
+    expect(MINSPEC_GITIGNORE_ENTRIES).not.toContain('.minspec/config.json');
+    expect(MINSPEC_GITIGNORE_ENTRIES).not.toContain('.minspec/constitution.md');
+  });
+});
+
+describe('refreshHarnessFiles() — gitignore backfill for existing projects', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-refresh-gitignore-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('backfills the new state-file entries on refresh of an old project', () => {
+    // Initialise a project, then simulate one scaffolded BEFORE the state-file
+    // entries existed: rewrite .gitignore to hold only the two original entries.
+    generateHarnessFiles(tmpDir);
+
+    const gitignorePath = path.join(tmpDir, '.gitignore');
+    const oldStyle =
+      `node_modules\n\n${MINSPEC_GITIGNORE_MARKER}\n` +
+      '.minspec/session.json\n.minspec/calibration.json\n';
+    fs.writeFileSync(gitignorePath, oldStyle);
+
+    refreshHarnessFiles(tmpDir);
+
+    const content = fs.readFileSync(gitignorePath, 'utf-8');
+
+    // New state-file entries are now present.
+    expect(content).toContain(`.minspec/${HASHES_FILENAME}`);
+    expect(content).toContain(`.minspec/${TEMPLATE_BASELINE_FILENAME}`);
+
+    // Pre-existing content preserved.
+    expect(content).toContain('node_modules');
+
+    // No duplicate marker.
+    const markerCount = content.split(MINSPEC_GITIGNORE_MARKER).length - 1;
+    expect(markerCount).toBe(1);
+
+    // Every entry appears exactly once (no duplication of the originals).
+    for (const entry of MINSPEC_GITIGNORE_ENTRIES) {
+      const occurrences = content.split('\n').filter((line) => line.trim() === entry).length;
+      expect(occurrences, `entry ${entry} should appear exactly once`).toBe(1);
+    }
   });
 });

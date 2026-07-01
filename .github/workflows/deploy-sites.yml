@@ -6,10 +6,9 @@ name: Deploy sites
 #
 # Each site maps 1:1 to a CF Pages project:
 #   sites/minspec.dev     -> minspec-dev    (minspec.dev)
-#   sites/scroogellm.com  -> scroogellm-com (scroogellm.com)
 #
-# CF Pages only uploads changed files, so deploying both on any sites/** change
-# is a no-op for the untouched site.
+# scroogellm.com moved to the private harvest316/scroogellm repo, which deploys
+# it from its own deploy-site.yml. CF Pages only uploads changed files.
 
 on:
   push:
@@ -35,15 +34,17 @@ jobs:
         include:
           - dir: sites/minspec.dev
             project: minspec-dev
-          - dir: sites/scroogellm.com
-            project: scroogellm-com
     steps:
       - uses: actions/checkout@v5
       - name: Deploy ${{ matrix.project }}
+        # Run from inside the site dir: `wrangler pages deploy` resolves functions/
+        # relative to CWD, not the deploy-path arg. Deploying from the repo root
+        # silently drops Pages Functions (e.g. the /api/waitlist capture).
+        working-directory: ${{ matrix.dir }}
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
         run: |
-          npx --yes wrangler@4 pages deploy "${{ matrix.dir }}" \
+          npx --yes wrangler@4 pages deploy . \
             --project-name="${{ matrix.project }}" \
             --branch=main \
             --commit-dirty=true

@@ -1,6 +1,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { detectTools, type DetectedTools } from './tool-detector';
+import { ASPECT_GUIDANCE } from './spec-validator';
+import { SPEC_STATUSES } from './spec';
 
 /**
  * Spec Kit-compatible slash command surface.
@@ -41,12 +43,39 @@ interface CommandGuidance {
   readonly body: string;
 }
 
+/**
+ * Shift-left frontmatter guidance (harvest316/minspec#104). The valid `status`
+ * set is imported from the parser's own constant, so this prose can never name a
+ * status the validator would then reject as "not recognized".
+ */
+const FRONTMATTER_GUIDANCE =
+  'Set valid frontmatter so the SPECS pane and the approve gate read it correctly: ' +
+  `\`status:\` must be one of ${SPEC_STATUSES.map((s) => `\`${s}\``).join(', ')} ` +
+  '(an absent or unrecognized value is silently coerced to "new" and flagged at approve), ' +
+  'and set an explicit `tier:` (one of `T1`, `T2`, `T3`, `T4`) — a missing tier is flagged too. ' +
+  'Getting these right here is the point: the approve gate is only a backstop, not the place to discover gaps.';
+
+/**
+ * Shift-left aspect-artifact guidance (harvest316/minspec#104). Built from
+ * `ASPECT_GUIDANCE` — the approve gate's own rule definitions — so the design
+ * phase is told to produce exactly what approval will check, and the two can
+ * never drift. Lives on `/plan` because mockups/schemas/diagrams are DESIGN-phase
+ * deliverables.
+ */
+const ASPECT_ARTIFACT_GUIDANCE =
+  '**Design-aspect artifacts (shift-left — the approve gate checks these at T3/T4).** ' +
+  'If the spec has any of these surfaces, include the matching artifact now so approval finds nothing missing:\n' +
+  ASPECT_GUIDANCE.map((g) => `- **${g.aspect}** — ${g.fixHint}`).join('\n') +
+  '\n\nThese are DESIGN-phase deliverables; in split-layout specs they live in `design.md`. ' +
+  'T1 specs are exempt, T2 warns, T3/T4 block — so authoring them up front is what keeps approval clean.';
+
 const COMMAND_GUIDANCE: Record<SpecKitCommand, CommandGuidance> = {
   specify: {
     description: 'Start or update the Specify phase for the active MinSpec spec',
     body:
       'Run the **Specify** phase of MinSpec SDD methodology.\n\n' +
       'Read the active spec referenced in the `minspec:active-spec` block of `CLAUDE.md` / `AGENTS.md`. Open the corresponding file under the project `specs/` directory and fill in the Specify section: user-visible outcome, problem statement, constraints.\n\n' +
+      `${FRONTMATTER_GUIDANCE}\n\n` +
       'Match ceremony to the spec\'s tier:\n' +
       '- T1: one sentence\n' +
       '- T2: short paragraph\n' +
@@ -67,6 +96,7 @@ const COMMAND_GUIDANCE: Record<SpecKitCommand, CommandGuidance> = {
     body:
       'Run the **Plan** phase. Required for T2+.\n\n' +
       'Describe the technical approach, key decisions, and what is explicitly out of scope. Reference existing decisions in `docs/decisions/` rather than re-deciding.\n\n' +
+      `${ASPECT_ARTIFACT_GUIDANCE}\n\n` +
       'Honour the dependency budget recorded in `CLAUDE.md` (0-1 for simple, 2-3 for complex). Update the Plan section of the active spec. Arguments: $ARGUMENTS',
   },
   tasks: {

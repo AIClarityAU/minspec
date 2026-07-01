@@ -29,6 +29,7 @@ const mockSpecTreeProvider = { refresh: vi.fn(), epicGrouping: { set: vi.fn(), t
 const mockAdrTreeProvider = { refresh: vi.fn(), epicGrouping: { set: vi.fn(), toggle: vi.fn(() => true) } };
 const mockBacklogTreeProvider = { refresh: vi.fn(), refreshIfStale: vi.fn(), epicGrouping: { set: vi.fn(), toggle: vi.fn(() => true) } };
 const mockStatusBar = { update: vi.fn(), dispose: vi.fn() };
+const mockNextTaskStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockSpecPanel = { show: vi.fn(), refresh: vi.fn(), dispose: vi.fn() };
 const mockCodeLensProvider = { refresh: vi.fn() };
 const mockSpecFileLensProvider = { refresh: vi.fn() };
@@ -51,6 +52,10 @@ let configValues: Record<string, any> = {};
 
 // Conformance watcher disposable returned by the (mocked) bridge helper.
 let conformanceWatcherDisposable: { dispose: () => void } | undefined;
+
+// The onDidChangeConfiguration listener activate() registers, captured so the
+// live-toggle regression test (#203) can fire it without a window reload.
+let configChangeHandler: ((e: any) => void) | undefined;
 
 // ---------------------------------------------------------------------------
 // vscode mock
@@ -87,6 +92,13 @@ vi.mock('vscode', () => ({
     }),
     openTextDocument: vi.fn(() => Promise.resolve({})),
     onDidSaveTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
+    onDidChangeTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
+    onDidCloseTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
+    textDocuments: [],
+    onDidChangeConfiguration: vi.fn((handler: (e: any) => void) => {
+      configChangeHandler = handler;
+      return { dispose: vi.fn() };
+    }),
   },
   commands: {
     registerCommand: vi.fn((id: string, handler: (...args: any[]) => any) => {
@@ -98,6 +110,11 @@ vi.mock('vscode', () => ({
   languages: {
     registerCodeLensProvider: vi.fn(() => ({ dispose: vi.fn() })),
     registerCompletionItemProvider: vi.fn(() => ({ dispose: vi.fn() })),
+    createDiagnosticCollection: vi.fn(() => ({
+      set: vi.fn(),
+      delete: vi.fn(),
+      dispose: vi.fn(),
+    })),
   },
   extensions: {
     getExtension: vi.fn(() => undefined),
@@ -168,6 +185,11 @@ vi.mock('../src/views/frontmatter-completion', () => ({
 vi.mock('../src/views/status-bar', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/views/status-bar')>()),
   MinSpecStatusBar: vi.fn(function () { return mockStatusBar; }),
+  MinSpecNextTaskStatusBar: vi.fn(function () { return mockNextTaskStatusBar; }),
+}));
+vi.mock('../src/commands/next-task', () => ({
+  nextTaskCommand: vi.fn(() => vi.fn()),
+  computeNextTask: vi.fn(() => null),
 }));
 vi.mock('../src/views/spec-panel', () => ({
   SpecPanel: vi.fn(function () { return mockSpecPanel; }),
@@ -289,6 +311,7 @@ beforeEach(() => {
   subscriptions = [];
   createdWatchers = [];
   configValues = {};
+  configChangeHandler = undefined;
   conformanceWatcherDisposable = undefined;
 
   vi.mocked(fs.existsSync).mockReturnValue(true);
@@ -304,35 +327,97 @@ describe('auto-classify git watcher', () => {
     configValues = {}; // autoClassifyOnCommit defaults to false
     activate(makeMockContext());
 
-    // 4 standard watchers (specs, adrs, traceability, approvals), no git watcher.
-    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(4);
+    // 5 standard watchers (specs, adrs, traceability, approvals, epics), no git watcher.
+    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(5);
   });
 
   it('creates a git watcher and fires classify only for watched git paths when enabled', () => {
     configValues = { autoClassifyOnCommit: true };
     activate(makeMockContext());
 
-    // The git watcher is the 5th (index 4) created.
-    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(5);
-    const gitWatcher = createdWatchers[4];
+    // The git watcher is the 6th (index 5) created (5 standard + git).
+    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(6);
+    const gitWatcher = createdWatchers[5];
     expect(gitWatcher.onDidChange).toHaveBeenCalled();
     expect(gitWatcher.onDidCreate).toHaveBeenCalled();
 
     const trigger = gitWatcher.onDidChange.mock.calls[0][0] as (u: any) => void;
 
+    // The commit watcher fires classify in AUTO mode — passive, no toast (#216).
+    const AUTO = { auto: true };
+
     // A non-watched path (e.g. .git/config) must be ignored.
     trigger({ fsPath: '/tmp/test-workspace/.git/config' });
-    expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith('minspec.classify');
+    expect(vscode.commands.executeCommand).not.toHaveBeenCalledWith(
+      'minspec.classify',
+      undefined,
+      AUTO,
+    );
 
-    // A watched path (.git/HEAD) triggers the classify command.
+    // A watched path (.git/HEAD) triggers the classify command in auto mode.
     trigger({ fsPath: '/tmp/test-workspace/.git/HEAD' });
-    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('minspec.classify');
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+      'minspec.classify',
+      undefined,
+      AUTO,
+    );
 
     // A refs/heads/* path also triggers (covers the onDidCreate handler too).
     const triggerCreate = gitWatcher.onDidCreate.mock.calls[0][0] as (u: any) => void;
     vi.mocked(vscode.commands.executeCommand).mockClear();
     triggerCreate({ fsPath: '/tmp/test-workspace/.git/refs/heads/main' });
-    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('minspec.classify');
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith(
+      'minspec.classify',
+      undefined,
+      AUTO,
+    );
+  });
+
+  // #203 regression: enabling the setting AFTER activation must start the
+  // watcher live, with no window reload. Previously the watcher was wired only
+  // at activation, so the classify toast's "from now on" silently did nothing.
+  it('starts the git watcher live when autoClassifyOnCommit flips on after activation', () => {
+    configValues = {}; // start disabled
+    activate(makeMockContext());
+    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(5);
+    expect(configChangeHandler).toBeDefined();
+
+    // Simulate the toast writing the setting, then VS Code firing the change.
+    configValues = { autoClassifyOnCommit: true };
+    configChangeHandler!({
+      affectsConfiguration: (k: string) => k === 'minspec.autoClassifyOnCommit',
+    });
+
+    // The 6th watcher (the git watcher) now exists without any reload.
+    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(6);
+    const gitWatcher = createdWatchers[5];
+    expect(gitWatcher.onDidChange).toHaveBeenCalled();
+    expect(gitWatcher.onDidCreate).toHaveBeenCalled();
+  });
+
+  it('disposes the git watcher live when autoClassifyOnCommit flips off', () => {
+    configValues = { autoClassifyOnCommit: true };
+    activate(makeMockContext());
+    const gitWatcher = createdWatchers[5];
+
+    configValues = { autoClassifyOnCommit: false };
+    configChangeHandler!({
+      affectsConfiguration: (k: string) => k === 'minspec.autoClassifyOnCommit',
+    });
+
+    expect(gitWatcher.dispose).toHaveBeenCalled();
+  });
+
+  it('ignores config changes for unrelated settings', () => {
+    configValues = {}; // disabled
+    activate(makeMockContext());
+    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(5);
+
+    // A change to some other key must not create the git watcher.
+    configValues = { autoClassifyOnCommit: true };
+    configChangeHandler!({ affectsConfiguration: () => false });
+
+    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(5);
   });
 });
 
@@ -710,7 +795,8 @@ describe('refresh-wrapping command callbacks', () => {
   it('backfillEpics forwards the folder arg then refreshes all three trees', async () => {
     activate(makeMockContext());
     await invokeCommand('minspec.backfillEpics', '/tmp/test-workspace');
-    expect(backfillEpicsCommand).toHaveBeenCalledWith('/tmp/test-workspace');
+    // #213: the handler now forwards a 2nd opts arg (BackfillOptions); undefined here.
+    expect(backfillEpicsCommand).toHaveBeenCalledWith('/tmp/test-workspace', undefined);
     expect(mockSpecTreeProvider.refresh).toHaveBeenCalled();
     expect(mockAdrTreeProvider.refresh).toHaveBeenCalled();
     expect(mockBacklogTreeProvider.refresh).toHaveBeenCalled();
@@ -747,7 +833,8 @@ describe('refresh-wrapping command callbacks', () => {
     activate(makeMockContext());
     const node = { spec: { id: 'SPEC-001' } };
     await invokeCommand('minspec.approveSpec', node);
-    expect(approveSpecCommand).toHaveBeenCalledWith(node);
+    // Second arg is the globalState Memento, wired for the first-approve tip (#104).
+    expect(approveSpecCommand).toHaveBeenCalledWith(node, expect.anything());
     expect(mockSpecTreeProvider.refresh).not.toHaveBeenCalled();
   });
 
