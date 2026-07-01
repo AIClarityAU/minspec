@@ -402,4 +402,12 @@ DR-044 §2 put SealBox in a **private** repo, mirroring DR-027's ScroogeLLM spli
 <!-- dr-summary:DR-050 auto=0000000000000000 -->
 Invariant #1 ("MinSpec makes zero network calls in its core path") and DR-004's Tier-0 rule do not prohibit shelling the user's own installed and authenticated CLI (gh, like git) when all three conditions hold: MinSpec opens no socket itself, every network-triggering action requires explicit per-action user consent, and a zero-network default fallback remains intact. Ratifies the Tier-0 boundary pre-committed by #365 (ruleset-advisor invariants.test.ts allowlist entry). Triggered by #356 + #365 review.
 <!-- /dr-summary:DR-050 -->
+
+## [DR-051 — Artifact-class branch policy — approvables live on main; only code isolates in worktrees; approval state is the committed hash-matched sidecar, never git staging](DR-051.md)
+
+*Status: proposed · Date: 2026-07-01*
+
+<!-- dr-summary:DR-051 auto=9b6f4ee6159c -->
+SPEC-026 treats the whole **corpus** — specs/**, docs/decisions/**, docs/epics/**, docs/domain/** — uniformly: worktree-steer (FR-9) would push a second live session editing *any* corpus file into its own worktree, and the pre-commit backstop (FR-12) guards all of it. The founder, reviewing SPEC-026, observed that **approvables are not code**:
+<!-- /dr-summary:DR-051 -->
 <!-- minspec:dr-index:end -->
