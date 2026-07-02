@@ -162,6 +162,104 @@ echo "Running headless agent (log: $LOG)..."
 #   - git: local history ops only — NO push/remote/config/clone/fetch/pull
 ALLOWED_TOOLS="Read,Edit,Write,Glob,Grep,Bash(npm test),Bash(npm run validate),Bash(npm run lint),Bash(npm run build),Bash(npm ci),Bash(git add:*),Bash(git commit:*),Bash(git status),Bash(git diff:*),Bash(git log:*)"
 
+# ── Independent reviewer stage (DR-033 §6 · #342) ─────────────────────────────
+# A SECOND agent — never the dev agent that wrote the code — reviews the pushed
+# diff and posts an ADVISORY approve / request-changes verdict on the PR. This is
+# the independent counterpart to #180's self-attestation (self-report ≠ proof).
+# Invariants held here:
+#   • credential-free agent: review-branch.sh grants the reviewer ONLY read-only
+#     tools; THIS parent applies every credentialed op (PR create / review /
+#     label) AFTER the agent exits — same discipline as the push + comment above.
+#   • fail-closed: review-decide.sh downgrades a missing/garbled/injected
+#     "approve" to request-changes; a security request-changes overrides a
+#     reviewer approve (combine = fail toward the safe outcome).
+#   • never-throw: any failure degrades to ai-review:changes + a stderr WARNING
+#     and NEVER blocks the agent-done labelling / issue-comment behaviour below.
+# Reuses the shared, trigger-agnostic unit (review-branch.sh + review-decide.sh)
+# so a future PR-open Action (Track B, #74) can post the same verdict via its own
+# token — only this poster differs. Called ONLY on the successful-push path.
+run_reviewer_stage() {
+  local base="origin/main"   # the pre-push fetch point this branch forked from
+  local decide="${SCRIPT_DIR}/review-decide.sh"
+  local reviewer="${SCRIPT_DIR}/review-branch.sh"
+
+  # 1. General reviewer (always). Pipe raw agent output → deterministic gate.
+  local rev_out rev_line reviewer_decision
+  rev_out=$( cd "$WORKTREE" && "$reviewer" "$base" HEAD --role reviewer 2>>"$LOG" ) || true
+  rev_line=$( printf '%s\n' "$rev_out" | "$decide" ) || true
+  reviewer_decision=$(printf '%s' "$rev_line" | awk '{print $1}')
+  [[ -z "$reviewer_decision" ]] && reviewer_decision="request-changes"
+
+  # 2. Security reviewer — ONLY when the diff touches packages/ source.
+  local touches_pkg sec_out="" sec_decision=""
+  if git -C "$WORKTREE" diff --name-only "${base}...HEAD" | grep -q '^packages/'; then
+    touches_pkg="yes"
+    local sec_line
+    sec_out=$( cd "$WORKTREE" && "$reviewer" "$base" HEAD --role security 2>>"$LOG" ) || true
+    sec_line=$( printf '%s\n' "$sec_out" | "$decide" ) || true
+    sec_decision=$(printf '%s' "$sec_line" | awk '{print $1}')
+    [[ -z "$sec_decision" ]] && sec_decision="request-changes"
+  else
+    touches_pkg="no"
+  fi
+
+  # 3. Combine: approve IFF reviewer approved AND (no security run OR security
+  #    approved). Any request-changes → request-changes (fail toward safe).
+  local combined="request-changes"
+  if [[ "$reviewer_decision" == "approve" ]]; then
+    if [[ "$touches_pkg" != "yes" || "$sec_decision" == "approve" ]]; then
+      combined="approve"
+    fi
+  fi
+
+  # 4. Render the advisory PR-review body from the raw verdict block(s).
+  local review_body
+  review_body=$(printf '## Independent AI review — advisory (DR-033 §6)\n\n**Reviewer** verdict:\n```\n%s\n```' \
+    "$(printf '%s\n' "$rev_out" | sed -n '/REVIEW_VERDICT_BEGIN/,/REVIEW_VERDICT_END/p')")
+  if [[ "$touches_pkg" == "yes" ]]; then
+    review_body=$(printf '%s\n\n**Security** verdict:\n```\n%s\n```' "$review_body" \
+      "$(printf '%s\n' "$sec_out" | sed -n '/REVIEW_VERDICT_BEGIN/,/REVIEW_VERDICT_END/p')")
+  fi
+  review_body=$(printf '%s\n\n_Reviewer agent is read-only and credential-free; verdict enforced by the deterministic fail-closed gate (`review-decide.sh`). Advisory only — the human holds the merge keystroke (never-wrong / HITL)._' "$review_body")
+
+  # 5. Ensure the ai-review:* labels exist (best-effort; exact vocab reused from
+  #    .github/workflows/ready-to-merge.yml — do NOT invent new label names).
+  gh label create "ai-review:pass"    --repo "$REPO" --color 0e8a16 --description "Independent AI review passed (advisory)" 2>/dev/null || true
+  gh label create "ai-review:changes" --repo "$REPO" --color d93f0b --description "Independent AI review requested changes"  2>/dev/null || true
+
+  # 6. Confirm a PR exists for this branch, creating one if not. Direct pushes to
+  #    main are blocked by a branch-protection ruleset, so a PR is MANDATORY for
+  #    this branch to ever land. Reuse the already-built $BODY (do not rebuild the
+  #    summary) and the issue title for the PR.
+  local pr_num
+  pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)
+  if [[ -z "$pr_num" ]]; then
+    gh pr create --repo "$REPO" --base main --head "$BRANCH" \
+      --title "$ISSUE_TITLE" --body "$BODY" 2>/dev/null || true
+    pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)
+  fi
+  if [[ -z "$pr_num" ]]; then
+    echo "WARNING: no PR for $BRANCH (create failed?) — AI review verdict: $combined (not posted)" >&2
+    return 0
+  fi
+
+  # 7. Apply the label + post the advisory review. Credentialed ops — parent-side,
+  #    after the agent exited. `gh pr review --approve/--request-changes` fails on
+  #    a self-authored PR, so fall back to a plain comment; the LABEL is the
+  #    load-bearing signal that ready-to-merge.yml reflects into the merge gate.
+  if [[ "$combined" == "approve" ]]; then
+    gh pr edit "$pr_num" --repo "$REPO" --add-label "ai-review:pass" --remove-label "ai-review:changes" 2>/dev/null || true
+    gh pr review "$pr_num" --repo "$REPO" --approve --body "$review_body" 2>/dev/null \
+      || gh pr comment "$pr_num" --repo "$REPO" --body "$review_body" 2>/dev/null || true
+    echo "  → AI review: ai-review:pass on PR #$pr_num"
+  else
+    gh pr edit "$pr_num" --repo "$REPO" --add-label "ai-review:changes" --remove-label "ai-review:pass" 2>/dev/null || true
+    gh pr review "$pr_num" --repo "$REPO" --request-changes --body "$review_body" 2>/dev/null \
+      || gh pr comment "$pr_num" --repo "$REPO" --body "$review_body" 2>/dev/null || true
+    echo "  → AI review: ai-review:changes on PR #$pr_num"
+  fi
+}
+
 # Headless run inside the worktree. `claude -p` is the only automatable launch
 # primitive (cron/loop-able). It exits 0 even when the agent self-escalates, so
 # detect ESCALATE: in the output rather than relying on exit code.
@@ -254,6 +352,13 @@ if (cd "$WORKTREE" && claude -p "$PROMPT" \
         echo "WARNING: could not render review signals — posting summary without the block"
       fi
       gh issue comment "$ISSUE" --repo "$REPO" --body "$BODY" 2>/dev/null || true
+
+      # Independent reviewer stage (#342) — runs AFTER the push/summary and adds
+      # the PR review ALONGSIDE the existing issue comment (which is unchanged).
+      # never-throw: a failure degrades to ai-review:changes + a WARNING and must
+      # not block the agent-done labelling below. The `|| echo` keeps set -e from
+      # aborting the script if the stage errors.
+      run_reviewer_stage || echo "WARNING: reviewer stage errored (see $LOG) — treat as ai-review:changes" >&2
     else
       echo "WARNING: push failed for $BRANCH — review worktree manually"
     fi
