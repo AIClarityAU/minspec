@@ -16,14 +16,20 @@
 # add `ready-to-merge` as a *required status check* in repo Settings → Branches
 # → branch protection rule for `main`. Until then this status is advisory only.
 #
-# ── LABEL-INTEGRITY CAVEAT ───────────────────────────────────────────────────
-# A GitHub label is hand-addable by anyone with write access, so this check
-# TRUSTS that `ai-review:pass` is applied only by the reviewer automation — it
-# verifies the label's PRESENCE, not its PROVENANCE. A human could add the label
-# manually and turn this check green without a real AI review. Hardening
-# follow-up (for teams): restrict who may add the `ai-review:*` labels — e.g. via
-# a label-guard workflow that strips/reverts `ai-review:pass` unless applied by
-# the reviewer bot/app, or org label-permission controls. Not done here.
+# ── LABEL-INTEGRITY (PROVENANCE + STALENESS) ─────────────────────────────────
+# A GitHub label is hand-addable by anyone with triage/write access, so on its
+# own this check only verifies the label's PRESENCE, not its PROVENANCE — it
+# would trust a hand-set `ai-review:pass` (the PR #200 incident). Two integrity
+# holes are closed by the companion `.github/workflows/ai-review-guard.yml`:
+#   • PROVENANCE (#397): reverts `ai-review:pass` if applied by anyone other than
+#     an authorized reviewer identity, and re-posts this status failing.
+#   • STALENESS  (#359): strips `ai-review:pass` on `synchronize` (new commits)
+#     and re-posts this status failing, so an old-head greenlight can't gate new
+#     code. (The guard re-posts directly because a label removed via GITHUB_TOKEN
+#     does not retrigger this workflow.)
+# Set the trusted reviewer identity via the `AI_REVIEW_BOT_LOGINS` repo variable
+# — see ai-review-guard.yml. This status is still only binding once it is made a
+# required check (the manual step above).
 
 name: ready-to-merge
 

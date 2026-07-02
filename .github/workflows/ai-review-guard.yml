@@ -1,0 +1,87 @@
+# ai-review label-integrity guard — PROVENANCE (#397) + STALENESS (#359)
+#
+# THREAT ──────────────────────────────────────────────────────────────────────
+# `.github/workflows/ready-to-merge.yml` turns the `ready-to-merge` commit status
+# GREEN purely on the PRESENCE of the `ai-review:pass` label. A GitHub label is
+# hand-addable by anyone with triage/write access, so that gate is only as
+# trustworthy as the label is un-forgeable. On PR #200 a human hand-set
+# `ai-review:pass` with no review — the gate went green over a spec that a real
+# review then found had two paths to a wrong auto-merge. Presence of the label
+# must imply a real review ran; today it does not.
+#
+# This guard closes two label-integrity holes:
+#   • PROVENANCE (#397): on `labeled`, if `ai-review:pass` was applied by an actor
+#     that is NOT an authorized reviewer identity, it reverts the label, sets
+#     `ready-to-merge` failing, and leaves an audit comment.
+#   • STALENESS  (#359): on `synchronize` (new commits), it strips any existing
+#     `ai-review:pass` and sets `ready-to-merge` failing, so a greenlight earned
+#     on an older head cannot gate unreviewed new code. A fresh review must pass
+#     again on the new head.
+#
+# CONFIGURE THE REVIEWER IDENTITY (required manual step) ───────────────────────
+# The authorized reviewer identity is NOT hard-coded to any human account. By
+# default only the built-in Actions identity `github-actions[bot]` is trusted —
+# that is who the reviewer automation posts as when it applies the label from a
+# workflow using GITHUB_TOKEN. If your reviewer instead runs as a dedicated
+# GitHub App, add its login (`<app-slug>[bot]`) to the allowlist:
+#
+#   Settings → Secrets and variables → Actions → Variables → New repository
+#   variable:   AI_REVIEW_BOT_LOGINS = my-reviewer-app[bot]
+#
+# (comma / whitespace separated to trust several; `github-actions[bot]` is always
+# included). To make the gate actually binding, also add `ready-to-merge` as a
+# required status check for `main` — see the manual-step note in ready-to-merge.yml.
+#
+# SECURITY ─────────────────────────────────────────────────────────────────────
+# All webhook-supplied values (label name, sender login, PR title / branch) are
+# handled ONLY as JS data via actions/github-script and the tested helper, then
+# passed to the REST API as parameters — none is ever interpolated into a `run:`
+# shell, so there is no command-injection surface. On fork PRs GitHub downgrades
+# GITHUB_TOKEN to read-only, so the write paths below only ever take effect on
+# trusted, same-repo events (which is also the only context in which a label can
+# be applied at all — labeling needs triage/write access).
+
+name: ai-review-guard
+
+on:
+  pull_request:
+    # labeled     -> provenance check (#397): who applied ai-review:pass?
+    # synchronize -> staleness check (#359): strip a pass label left on an old head.
+    types: [labeled, synchronize]
+
+# Least privilege: read to check out the tested helper, write to labels (revert)
+# and statuses (fail ready-to-merge). No contents:write, no other scopes.
+permissions:
+  contents: read
+  pull-requests: write
+  statuses: write
+
+concurrency:
+  group: ai-review-guard-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
+
+jobs:
+  guard:
+    runs-on: ubuntu-latest
+    steps:
+      # Check out so github-script can require the unit-tested guard helper
+      # (.github/scripts/ai-review-guard.js). persist-credentials:false keeps the
+      # checkout token out of local git — the guard writes only via the
+      # github-script REST client, not git.
+      - name: Check out repository
+        uses: actions/checkout@v5
+        with:
+          persist-credentials: false
+
+      - name: Enforce ai-review label integrity
+        uses: actions/github-script@v7
+        env:
+          # Built-in token; scoped by the permissions block above.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Admin-set repo variable (may be empty). Read as JS data only; the
+          # built-in github-actions[bot] identity is always trusted in addition.
+          AI_REVIEW_BOT_LOGINS: ${{ vars.AI_REVIEW_BOT_LOGINS }}
+        with:
+          script: |
+            const guard = require(`${process.env.GITHUB_WORKSPACE}/.github/scripts/ai-review-guard.js`);
+            await guard.run({ github, context, core });

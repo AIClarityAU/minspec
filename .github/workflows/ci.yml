@@ -28,6 +28,11 @@ jobs:
       - name: Validate frontmatter
         run: npm run validate
 
+      # The ai-review label-guard helper lives in .github/scripts (outside the
+      # vitest `include` glob) and has no deps, so run its node:test suite here.
+      - name: Test ai-review label-guard helper
+        run: node --test .github/scripts/ai-review-guard.test.js
+
   test:
     runs-on: ubuntu-latest
     steps:
