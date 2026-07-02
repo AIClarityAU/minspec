@@ -58,7 +58,22 @@ interface Args {
   signalsFile?: string;
 }
 
-function parseArgs(argv: string[]): Args {
+/**
+ * MAJOR 3 + MAJOR 4 — deny-by-default mode resolution (the kill-switch).
+ *
+ * Auto-merge is OPT-IN and HARD to turn on: the mode is `consequence-hybrid`
+ * ONLY when the caller passes EXACTLY that token (whitespace-trimmed). ANY other
+ * value — absent (the DEFAULT), empty, misspelled, differently-cased, or garbage
+ * — resolves to `pr-gate` (HOLD). There is NO fail-open path: an unrecognized
+ * mode string can never enable auto-merge. This mirrors the POSITIVE, exact shell
+ * guard in dispatch-issue.sh (`[[ "$MODE" == "consequence-hybrid" ]]`), so the
+ * two gates agree byte-for-byte on what "on" means.
+ */
+export function resolveMode(raw: string | undefined): AutoMergeMode {
+  return String(raw ?? '').trim() === 'consequence-hybrid' ? 'consequence-hybrid' : 'pr-gate';
+}
+
+export function parseArgs(argv: string[]): Args {
   const out: Record<string, string> = {};
   for (let i = 0; i < argv.length; i += 2) {
     const key = argv[i];
@@ -66,12 +81,11 @@ function parseArgs(argv: string[]): Args {
     if (!key?.startsWith('--')) continue;
     out[key.slice(2)] = val ?? '';
   }
-  const modeRaw = out.mode || 'consequence-hybrid';
-  const mode: AutoMergeMode = modeRaw === 'pr-gate' ? 'pr-gate' : 'consequence-hybrid';
   return {
     worktree: path.resolve(out.worktree || process.cwd()),
     base: out.base || 'origin/main',
-    mode,
+    // Deny-by-default: unknown/absent ⇒ pr-gate (HOLD). Opt-in only.
+    mode: resolveMode(out.mode),
     pr: out.pr || '',
     signalsFile: out['signals-file'],
   };
@@ -101,12 +115,32 @@ function gitTry(cwd: string, args: string[]): string | undefined {
 
 // ─── FR-2 red→green prover ───────────────────────────────────────────────────
 
-interface VitestRun {
+export interface VitestRun {
   numTotal: number;
   numPassed: number;
   numFailed: number;
   exitCode: number;
   files: string[]; // absolute paths of test files that ran
+}
+
+/** HEAD green = the named test EXECUTED and every assertion passed. */
+export function headGreenVerdict(r: VitestRun): boolean {
+  return r.numTotal >= 1 && r.numFailed === 0 && r.numPassed >= 1;
+}
+
+/**
+ * BLOCKER 2 — BASE 'red' means the named test EXECUTED and FAILED an assertion:
+ * `numPassed === 0 && numFailed >= 1`.
+ *
+ * The OLD predicate ALSO counted `numTotal === 0 && exitCode !== 0` as red. But
+ * that state is a test that FAILED TO LOAD (e.g. it imports a symbol that exists
+ * only on head, so the file cannot resolve on base) or ANY broken base env — i.e.
+ * INCONCLUSIVE, not a genuine assertion-red. Counting it red produced a FALSE
+ * proof of red→green (the prover is the SOLE authority for INV-3). Inconclusive
+ * on base ⇒ NOT red ⇒ NOT proven ⇒ hold.
+ */
+export function baseRedVerdict(r: VitestRun): boolean {
+  return r.numPassed === 0 && r.numFailed >= 1;
 }
 
 /**
@@ -164,11 +198,76 @@ function runNamedTest(dir: string, testFile: string, testName: string): VitestRu
 }
 
 /**
- * Prove the named regression is a genuine red→green: it must FAIL on BASE (the
- * new/modified test run against the PRE-FIX source) and PASS on HEAD. Runs each
- * side TWICE and requires a consistent verdict (flaky ⇒ NOT proven, fail safe).
+ * Injectable seams so the prover's DECISION LOGIC is testable deterministically
+ * (the four BLOCKER-2 scenarios) without spawning real vitest / git worktrees —
+ * a flaky safety test on the highest-consequence code is itself a liability.
+ * Defaults do the real IO.
  */
-function proveRegression(worktree: string, base: string, regressionTest?: string): ProverResult {
+export interface ProverDeps {
+  runNamedTest?: (dir: string, testFile: string, testName: string) => VitestRun;
+  /**
+   * Prepare the isolated base worktree: add it, share deps, overlay the head
+   * test file(s). MUST THROW on ANY failure — a half-prepared base is NOT a
+   * trustworthy red (BLOCKER 2). Never swallow-and-continue.
+   */
+  prepareBase?: (worktree: string, base: string, baseDir: string, overlayFiles: string[]) => void;
+  removeBase?: (worktree: string, baseDir: string) => void;
+}
+
+/**
+ * Default base-prep. THROWS on any failure (BLOCKER 2): worktree add, the
+ * node_modules symlink (without deps a "red" would be a load error, not an
+ * assertion failure), and each test-file overlay (without it the base runs the
+ * OLD test or none) — every step must succeed or the base is not trustworthy.
+ */
+function defaultPrepareBase(worktree: string, base: string, baseDir: string, overlayFiles: string[]): void {
+  git(worktree, ['worktree', 'add', '--detach', baseDir, base]);
+
+  const headNodeModules = path.join(worktree, 'node_modules');
+  if (fs.existsSync(headNodeModules)) {
+    fs.symlinkSync(headNodeModules, path.join(baseDir, 'node_modules'), 'dir');
+  }
+
+  for (const abs of overlayFiles) {
+    const rel = path.relative(worktree, abs);
+    const dest = path.join(baseDir, rel);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.copyFileSync(abs, dest);
+  }
+}
+
+function defaultRemoveBase(worktree: string, baseDir: string): void {
+  try {
+    git(worktree, ['worktree', 'remove', '--force', baseDir]);
+  } catch {
+    try {
+      fs.rmSync(baseDir, { recursive: true, force: true });
+    } catch {
+      /* ignore */
+    }
+  }
+}
+
+/**
+ * Prove the named regression is a genuine red→green: it must EXECUTE-AND-FAIL on
+ * BASE (the new/modified test run against the PRE-FIX source) and PASS on HEAD.
+ * Runs each side TWICE and requires a consistent verdict (flaky ⇒ NOT proven).
+ *
+ * Fail-safe (BLOCKER 2):
+ *  - base 'red' requires a real assertion failure (`baseRedVerdict`), NOT a
+ *    load/collection error (import of a head-only symbol on base is INCONCLUSIVE);
+ *  - ANY base-prep failure ABORTS to NOT-proven — never run a half-prepared base.
+ */
+export function proveRegression(
+  worktree: string,
+  base: string,
+  regressionTest?: string,
+  deps: ProverDeps = {},
+): ProverResult {
+  const run = deps.runNamedTest ?? runNamedTest;
+  const prepareBase = deps.prepareBase ?? defaultPrepareBase;
+  const removeBase = deps.removeBase ?? defaultRemoveBase;
+
   const notProven = (note: string): ProverResult => ({
     regressionProvenBaseRed: false,
     regressionGreenOnHead: false,
@@ -185,14 +284,13 @@ function proveRegression(worktree: string, base: string, regressionTest?: string
   const testName = sepIdx >= 0 ? regressionTest.slice(sepIdx + 3).trim() : regressionTest.trim();
 
   // ── HEAD: run twice; establishes the test EXISTS and is green on head. ──
-  const head1 = runNamedTest(worktree, testFile, testName);
+  const head1 = run(worktree, testFile, testName);
   if (head1.numTotal === 0) {
     return notProven(`test not found on head: ${regressionTest}`);
   }
-  const head2 = runNamedTest(worktree, testFile, testName);
-  const headGreen = (r: VitestRun): boolean => r.numTotal >= 1 && r.numFailed === 0 && r.numPassed >= 1;
-  const head1Green = headGreen(head1);
-  const head2Green = headGreen(head2);
+  const head2 = run(worktree, testFile, testName);
+  const head1Green = headGreenVerdict(head1);
+  const head2Green = headGreenVerdict(head2);
   if (head1Green !== head2Green) {
     return notProven('non-deterministic on head (flaky) — treated as NOT proven');
   }
@@ -206,48 +304,27 @@ function proveRegression(worktree: string, base: string, regressionTest?: string
 
   // ── BASE: isolated worktree, overlay the head test file(s), run twice. ──
   const baseDir = path.join(os.tmpdir(), `minspec-prover-base-${process.pid}-${Date.now()}`);
-  let baseWorktreeAdded = false;
   try {
-    git(worktree, ['worktree', 'add', '--detach', baseDir, base]);
-    baseWorktreeAdded = true;
-
-    // Share the head worktree's installed deps (same lockfile for a bugfix PR).
+    // FAIL-SAFE (BLOCKER 2): any base-prep failure ⇒ NOT proven. A half-prepared
+    // base (missing deps / un-overlaid test) yields a load-error "red" that is a
+    // FALSE proof — abort rather than run it.
     try {
-      const headNodeModules = path.join(worktree, 'node_modules');
-      if (fs.existsSync(headNodeModules)) {
-        fs.symlinkSync(headNodeModules, path.join(baseDir, 'node_modules'), 'dir');
-      }
+      prepareBase(worktree, base, baseDir, overlayFiles);
     } catch (e) {
-      log(`could not symlink node_modules into base worktree: ${(e as Error).message}`);
+      return notProven(`base preparation failed: ${(e as Error).message} — base not trustworthy, NOT proven`);
     }
 
-    // Overlay each head test file at the same relative path in the base worktree.
-    for (const abs of overlayFiles) {
-      const rel = path.relative(worktree, abs);
-      const dest = path.join(baseDir, rel);
-      try {
-        fs.mkdirSync(path.dirname(dest), { recursive: true });
-        fs.copyFileSync(abs, dest);
-      } catch (e) {
-        log(`could not overlay test file ${rel} onto base: ${(e as Error).message}`);
-      }
-    }
-
-    const base1 = runNamedTest(baseDir, testFile, testName);
-    const base2 = runNamedTest(baseDir, testFile, testName);
-    // Red on base = the named test does NOT pass and DID fail/error (0 passed,
-    // and either a reported failure or a non-zero exit with no collected tests —
-    // e.g. the fix's new symbol is absent so the test file cannot even load).
-    const baseRed = (r: VitestRun): boolean =>
-      r.numPassed === 0 && (r.numFailed >= 1 || (r.numTotal === 0 && r.exitCode !== 0));
-    const base1Red = baseRed(base1);
-    const base2Red = baseRed(base2);
+    const base1 = run(baseDir, testFile, testName);
+    const base2 = run(baseDir, testFile, testName);
+    const base1Red = baseRedVerdict(base1);
+    const base2Red = baseRedVerdict(base2);
     if (base1Red !== base2Red) {
       return notProven('non-deterministic on base (flaky) — treated as NOT proven');
     }
     if (!base1Red) {
-      // Test passes on base too ⇒ it does NOT distinguish the fix ⇒ not a regression.
-      return notProven('named regression PASSES on base — it does not distinguish the fix');
+      // The test either PASSES on base (not a regression) or was INCONCLUSIVE
+      // (failed to load / collected 0 tests). Neither proves red ⇒ NOT proven.
+      return notProven('named regression did not EXECUTE-AND-FAIL on base (passed or inconclusive) — not proven');
     }
 
     return {
@@ -258,16 +335,12 @@ function proveRegression(worktree: string, base: string, regressionTest?: string
   } catch (e) {
     return notProven(`prover error: ${(e as Error).message}`);
   } finally {
-    if (baseWorktreeAdded) {
-      try {
-        git(worktree, ['worktree', 'remove', '--force', baseDir]);
-      } catch {
-        try {
-          fs.rmSync(baseDir, { recursive: true, force: true });
-        } catch {
-          /* ignore */
-        }
-      }
+    // Always attempt cleanup — prepareBase may have added the worktree before a
+    // later step threw. removeBase is idempotent / best-effort.
+    try {
+      removeBase(worktree, baseDir);
+    } catch {
+      /* ignore */
     }
   }
 }
@@ -282,9 +355,25 @@ function mapStatus(code: string): ChangeStatus {
   return 'modified';
 }
 
-function buildChangedFiles(worktree: string, base: string): ChangedFile[] {
-  const nameStatus = gitTry(worktree, ['diff', '--name-status', `${base}...HEAD`]) ?? '';
-  const numstatRaw = gitTry(worktree, ['diff', '--numstat', `${base}...HEAD`]) ?? '';
+export function buildChangedFiles(worktree: string, base: string): ChangedFile[] {
+  // MAJOR 5 — the diff enumeration is load-bearing: a SWALLOWED git failure
+  // (the old `?? ''`) yields ZERO changed files → empty consequence signals →
+  // blast=low → auto-merge on an INFRA failure. So a failing diff command
+  // THROWS, and main()'s catch turns the throw into a fail-safe HOLD. NOTE: an
+  // empty string from a SUCCESSFUL git call is a legitimately empty diff and is
+  // fine — only `undefined` (the command itself failing) forces the hold.
+  const nameStatus = gitTry(worktree, ['diff', '--name-status', `${base}...HEAD`]);
+  if (nameStatus === undefined) {
+    throw new Error(
+      `git diff --name-status against '${base}' failed — cannot enumerate changed files (fail-safe HOLD)`,
+    );
+  }
+  const numstatRaw = gitTry(worktree, ['diff', '--numstat', `${base}...HEAD`]);
+  if (numstatRaw === undefined) {
+    throw new Error(
+      `git diff --numstat against '${base}' failed — cannot measure the diff (fail-safe HOLD)`,
+    );
+  }
 
   // path → { insertions, deletions }
   const numstat = new Map<string, { insertions: number; deletions: number }>();
@@ -336,6 +425,54 @@ function buildChangedFiles(worktree: string, base: string): ChangedFile[] {
     });
   }
   return files;
+}
+
+// ─── BLOCKER 1: manifest / public-surface boundary detection (defense-in-depth) ─
+
+/**
+ * Manifest / non-code boundary files whose change the public-API analyzer does
+ * NOT signal — it skips non-code files (analyzer root cause is #414). A change to
+ * any of these is a supply-chain / public-API-surface event (dep add/bump,
+ * `exports`/`main`/`bin` edit, lockfile churn, workspace layout) and MUST be
+ * treated as high-blast. Matched by BASENAME so it catches every workspace
+ * package's manifest, not just the repo root.
+ */
+const MANIFEST_BASENAMES: ReadonlySet<string> = new Set([
+  'package.json',
+  'package-lock.json',
+  'npm-shrinkwrap.json',
+  'yarn.lock',
+  'pnpm-lock.yaml',
+  'pnpm-workspace.yaml',
+  'lerna.json',
+]);
+
+/**
+ * If ANY changed file is a manifest/boundary file, return the high-blast
+ * `manifest_changed` consequence signal to INJECT into the analyzer output
+ * (recognized-high in `classifyBlast` ⇒ blast=high ⇒ hold). Returns `undefined`
+ * when no manifest changed. Defense-in-depth for the #414 analyzer blind spot;
+ * the gate does not rely on the analyzer to cover this class.
+ */
+export function detectManifestChange(
+  changedFiles: ReadonlyArray<ChangedFile>,
+): ClassificationSignal | undefined {
+  const matched = changedFiles
+    .map((f) => f.path)
+    .filter((p) => MANIFEST_BASENAMES.has(path.basename(p)));
+  if (matched.length === 0) return undefined;
+  return {
+    name: 'manifest_changed',
+    value: true,
+    weight: 0,
+    tierContribution: 'T4',
+    axis: 'consequence',
+    degraded: false,
+    explain:
+      `manifest/boundary file(s) changed (${matched.join(', ')}) — supply-chain / public-API ` +
+      `surface the public-API analyzer does not signal (#414); gate-injected high-blast ` +
+      `(defense-in-depth, BLOCKER 1)`,
+  };
 }
 
 // ─── Hollow/stub findings over changed test files (INV-4 input) ──────────────
@@ -425,6 +562,12 @@ function main(): void {
       changedFiles,
       refIndex: null, // v1 — no reference index (SPEC-023 Clarification 2)
     });
+    // BLOCKER 1 (#414 defense-in-depth): the public-API analyzer skips non-code
+    // files, so a manifest change (package.json / lockfile / workspace manifest)
+    // emits NO signal and would classify low-blast → merge unseen. Inject a
+    // high-blast `manifest_changed` signal so any such change holds for a human.
+    const manifestSignal = detectManifestChange(changedFiles);
+    if (manifestSignal) consequenceSignals.push(manifestSignal);
     const hollowFindings = buildHollowFindings(changedFiles);
 
     // 3. Pure decision. The prover result is passed separately and OVERRIDES any
@@ -481,4 +624,10 @@ function main(): void {
   }
 }
 
-main();
+// Run main() ONLY when invoked directly as a script (dispatch shells out via
+// `npx tsx …/auto-merge-gate.ts`). Guarded so importing this module for tests
+// does NOT execute the CLI. Belt-and-suspenders: never run under vitest.
+const invokedDirectly = /auto-merge-gate\.[cm]?[jt]s$/.test(process.argv[1] ?? '');
+if (invokedDirectly && !process.env.VITEST) {
+  main();
+}

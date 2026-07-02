@@ -113,6 +113,14 @@ const HIGH_SIGNAL_NAMES: ReadonlySet<string> = new Set([
   'public_api_removed',
   // FR-5 concurrency (its `explain` covers timer/transaction sub-patterns)
   'concurrency',
+  // Defense-in-depth (BLOCKER 1 / #414): the public-API analyzer skips non-code
+  // files, so a manifest change (package.json dep add/bump, `exports`/`main`/`bin`
+  // edit, lockfile, workspace manifest) emits NO consequence signal and would
+  // otherwise classify low-blast → auto-merge unseen. The IO/exec layer
+  // (auto-merge-gate.ts) INJECTS this signal for any changed manifest/boundary
+  // file so blast=high → hold. Recognized here (not merely caught by the
+  // unknown-name default) so `blastExplain` names it in the FR-8 hold reason.
+  'manifest_changed',
 ]);
 
 /** The `public_api_*` names — presence ⇒ the diff touches an exported surface (FR-4a). */

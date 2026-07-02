@@ -246,6 +246,7 @@ describe('SPEC-024 FR-5 — blast classification defaults UNKNOWN names to high'
     'public_api_changed',
     'public_api_removed',
     'concurrency',
+    'manifest_changed',
   ])('recognized high name %s → high', (name) => {
     expect(classifyBlast([signal(name)], false)).toBe('high');
   });
@@ -263,6 +264,35 @@ describe('SPEC-024 FR-5 — blast classification defaults UNKNOWN names to high'
     expect(d.blast).toBe('high');
     expect(d.eligible).toBe(false);
     expect(d.failed).toContain('high-blast');
+  });
+});
+
+// ─── BLOCKER 1 — manifest change forces high-blast (defense-in-depth #414) ────
+
+describe('SPEC-024 BLOCKER 1 — a manifest change classifies high-blast → hold', () => {
+  // The gate (auto-merge-gate.ts) INJECTS a `manifest_changed` signal for any
+  // package.json / lockfile / workspace-manifest diff, because the public-API
+  // analyzer skips non-code files (#414). Here we prove the PURE gate treats that
+  // injected signal as high-blast → ineligible. The injection itself is covered
+  // by detectManifestChange in auto-merge-gate.test.ts (a package.json-only diff).
+  const manifestChanged = signal('manifest_changed', {
+    tierContribution: 'T4',
+    explain: 'manifest/boundary file(s) changed (package.json)',
+  });
+
+  it('manifest_changed alone → high-blast', () => {
+    expect(classifyBlast([manifestChanged], false)).toBe('high');
+  });
+
+  it('an otherwise-eligible change carrying manifest_changed → high-blast, ineligible', () => {
+    const d = decideAutoMerge(
+      eligibleInput({ consequenceSignals: [reachUnavailable(), manifestChanged] }),
+    );
+    expect(d.blast).toBe('high');
+    expect(d.eligible).toBe(false);
+    expect(d.failed).toContain('high-blast');
+    // FR-8: the hold reason names the driving signal.
+    expect(d.reason).toMatch(/manifest_changed/);
   });
 });
 
