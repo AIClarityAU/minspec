@@ -14,9 +14,22 @@ const {
   isAuthorizedReviewer,
   decideProvenanceRevert,
   decideStalenessStrip,
+  verifyPassProvenance,
   decideStatus,
+  isBenignRemovalError,
   sanitizeLogin,
 } = require('./ai-review-guard.js');
+
+// Shared timestamps for the recency tests: a pass applied AFTER the head commit
+// is fresh; a pass applied BEFORE it reviewed an older head and is stale.
+const HEAD_AT = '2026-07-02T12:00:00Z';
+const AFTER_HEAD = '2026-07-02T12:05:00Z';
+const BEFORE_HEAD = '2026-07-02T11:55:00Z';
+const BOT_ALLOWLIST = parseAllowlist('minspec-review-bot, my-review-app[bot]');
+
+// A verified provenance object, as the workflow would compute for a fresh,
+// allowlisted pass — used where a status test needs the gate to be able to green.
+const VERIFIED = { verified: true };
 
 // ── parseAllowlist ───────────────────────────────────────────────────────────
 test('parseAllowlist: comma/space/newline separated, lowercased, empties dropped', () => {
@@ -117,11 +130,140 @@ test('staleness: non-synchronize events never strip', () => {
   }
 });
 
+// ── verifyPassProvenance (#359 + #397 durable — never trust bare presence) ────
+test('provenance-recency: pass applied by an allowlisted bot AFTER the head commit is verified (green)', () => {
+  const v = verifyPassProvenance({
+    labelActor: 'minspec-review-bot',
+    labelAppliedAt: AFTER_HEAD,
+    headCommittedAt: HEAD_AT,
+    allowlist: BOT_ALLOWLIST,
+  });
+  assert.equal(v.verified, true);
+});
+
+test('provenance-recency: a pass applied at the exact head-commit time is verified (boundary, still fresh)', () => {
+  const v = verifyPassProvenance({
+    labelActor: 'my-review-app[bot]',
+    labelAppliedAt: HEAD_AT,
+    headCommittedAt: HEAD_AT,
+    allowlist: BOT_ALLOWLIST,
+  });
+  assert.equal(v.verified, true);
+});
+
+test('provenance-recency: pass last applied by a non-allowlisted actor is NOT verified', () => {
+  const v = verifyPassProvenance({
+    labelActor: 'harvest316', // a human maintainer, not the reviewer identity
+    labelAppliedAt: AFTER_HEAD,
+    headCommittedAt: HEAD_AT,
+    allowlist: BOT_ALLOWLIST,
+  });
+  assert.equal(v.verified, false);
+  assert.match(v.reason, /not an allowlisted reviewer/);
+});
+
+test('provenance-recency: pass applied BEFORE the current head commit (stale) is NOT verified', () => {
+  const v = verifyPassProvenance({
+    labelActor: 'minspec-review-bot',
+    labelAppliedAt: BEFORE_HEAD,
+    headCommittedAt: HEAD_AT,
+    allowlist: BOT_ALLOWLIST,
+  });
+  assert.equal(v.verified, false);
+  assert.match(v.reason, /stale|predates/);
+});
+
+test('provenance-recency: an empty allowlist verifies nothing — even a real bot (fail closed)', () => {
+  const v = verifyPassProvenance({
+    labelActor: 'minspec-review-bot',
+    labelAppliedAt: AFTER_HEAD,
+    headCommittedAt: HEAD_AT,
+    allowlist: [],
+  });
+  assert.equal(v.verified, false);
+  assert.match(v.reason, /AI_REVIEW_BOT_LOGINS/);
+});
+
+test('provenance-recency: no record of who applied the pass is NOT verified (deny by default)', () => {
+  const v = verifyPassProvenance({
+    labelActor: null, // e.g. pass already present before the guard was deployed
+    labelAppliedAt: AFTER_HEAD,
+    headCommittedAt: HEAD_AT,
+    allowlist: BOT_ALLOWLIST,
+  });
+  assert.equal(v.verified, false);
+  assert.match(v.reason, /no record/);
+});
+
+test('provenance-recency: missing/unparseable timestamps are NOT verified (cannot confirm freshness)', () => {
+  const v = verifyPassProvenance({
+    labelActor: 'minspec-review-bot',
+    labelAppliedAt: undefined,
+    headCommittedAt: HEAD_AT,
+    allowlist: BOT_ALLOWLIST,
+  });
+  assert.equal(v.verified, false);
+  assert.match(v.reason, /timestamp/);
+});
+
+// ── decideStatus + verifyPassProvenance end-to-end (the fail-open regressions) ─
+test('regression: a forged pass that survived a failed revert does NOT re-green on a later unrelated event', () => {
+  // Later `labeled: feat` event; ai-review:pass still present because an earlier
+  // revert failed. Timeline shows it was last applied by a human → not verified.
+  const provenance = verifyPassProvenance({
+    labelActor: 'harvest316',
+    labelAppliedAt: AFTER_HEAD,
+    headCommittedAt: HEAD_AT,
+    allowlist: BOT_ALLOWLIST,
+  });
+  const s = decideStatus({ labels: [PASS, 'feat'], passProvenance: provenance });
+  assert.equal(s.state, 'failure');
+  assert.match(s.description, /not trusted/);
+});
+
+test('regression: a stale pass that survived a failed strip does NOT re-green on a later event', () => {
+  // New head commit exists; pass was applied by the bot but BEFORE it → stale.
+  const provenance = verifyPassProvenance({
+    labelActor: 'minspec-review-bot',
+    labelAppliedAt: BEFORE_HEAD,
+    headCommittedAt: HEAD_AT,
+    allowlist: BOT_ALLOWLIST,
+  });
+  const s = decideStatus({ labels: [PASS], passProvenance: provenance });
+  assert.equal(s.state, 'failure');
+  assert.match(s.description, /not trusted/);
+});
+
+// ── isBenignRemovalError (fail-safe label removal — no silent fail-open) ───────
+test('removal: only a 404 (already gone) is a benign, ignorable failure', () => {
+  assert.equal(isBenignRemovalError(404), true);
+});
+
+test('removal: any non-404 failure is NOT benign — the caller must throw (run goes red)', () => {
+  for (const status of [500, 502, 503, 403, 422, 0, undefined, null]) {
+    assert.equal(isBenignRemovalError(status), false);
+  }
+});
+
 // ── decideStatus (single writer of the ready-to-merge status) ─────────────────
-test('status: pass and no changes is green', () => {
-  const s = decideStatus({ labels: [PASS, 'feat'] });
+test('status: pass and no changes, with verified provenance, is green', () => {
+  const s = decideStatus({ labels: [PASS, 'feat'], passProvenance: VERIFIED });
   assert.equal(s.state, 'success');
   assert.equal(s.description, 'AI review passed');
+});
+
+test('status: pass present but provenance unverified/absent is red (bare presence is never trusted)', () => {
+  // No passProvenance supplied ⇒ the label is present but not trusted ⇒ red.
+  const s = decideStatus({ labels: [PASS, 'feat'] });
+  assert.equal(s.state, 'failure');
+  assert.match(s.description, /not trusted/);
+  // Even an explicit unverified verdict keeps it red, and surfaces the reason.
+  const s2 = decideStatus({
+    labels: [PASS],
+    passProvenance: { verified: false, reason: 'stale' },
+  });
+  assert.equal(s2.state, 'failure');
+  assert.match(s2.description, /stale/);
 });
 
 test('status: pass plus changes is red', () => {

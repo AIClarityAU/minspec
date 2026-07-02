@@ -2,23 +2,40 @@
 //
 // This module is deliberately I/O-free: no network, no `github`/octokit, no
 // `fs`, no process access. Every function is a pure input→output mapping so the
-// security-critical decisions (revert-or-not, strip-or-not, green-or-not) can be
-// unit-tested exhaustively (see ai-review-guard.test.js) and the workflow that
-// requires it stays a thin, auditable I/O shell.
+// security-critical decisions (revert-or-not, strip-or-not, verified-or-not,
+// green-or-not) can be unit-tested exhaustively (see ai-review-guard.test.js)
+// and the workflow that requires it stays a thin, auditable I/O shell.
 //
 // Threats this closes (see the header of ready-to-merge.yml for the full note):
 //   #359 staleness  — a greenlight from an old head must not survive new commits.
 //   #397 provenance — an `ai-review:pass` applied by anyone other than the
 //                     configured reviewer identity must not count as a review.
 //
-// SECURITY: callers pass label names / actor logins in here as plain JS data.
-// Nothing in this module (or the workflow) may forward that untrusted data to a
-// shell — it is only ever compared as data or handed to the REST API as JSON.
+// NEVER TRUST BARE PRESENCE. The active guards below (revert at add-time, strip
+// at push-time) are best-effort *cleanup*; they can transiently fail (rate
+// limit / 5xx), leaving a forged or stale `ai-review:pass` on the PR. So the
+// authoritative gate (`decideStatus`) does NOT green on label presence alone:
+// a surviving pass counts only if `verifyPassProvenance` confirmed — from the
+// PR's own event timeline — that it was LAST APPLIED BY an allowlisted reviewer
+// identity AND AFTER the current head commit. Anything unverifiable ⇒ not green.
+//
+// SECURITY: callers pass label names / actor logins / timestamps in here as
+// plain JS data. Nothing in this module (or the workflow) may forward that
+// untrusted data to a shell — it is only ever compared as data or handed to the
+// REST API as JSON.
 
 'use strict';
 
 const PASS = 'ai-review:pass';
 const CHANGES = 'ai-review:changes';
+
+// GitHub truncates commit-status descriptions at 140 chars; keep ours within it
+// even when a description carries a (potentially long) provenance reason.
+const MAX_DESCRIPTION = 140;
+function truncate(s, n = MAX_DESCRIPTION) {
+  const str = String(s == null ? '' : s);
+  return str.length <= n ? str : `${str.slice(0, n - 1)}…`;
+}
 
 // Parse the reviewer-bot allowlist from a raw env string.
 // Accepts comma / whitespace / newline separated logins; case-insensitive.
@@ -69,21 +86,98 @@ function decideStalenessStrip({ action, labels } = {}) {
   };
 }
 
+// #359 + #397 (durable) — provenance-recency verification of a *surviving* pass.
+//
+// The revert/strip guards above are add-time / push-time *cleanup* and can fail
+// transiently, leaving a forged or stale `ai-review:pass` present. So on every
+// event the gate must independently re-verify any present pass rather than trust
+// its bare presence:
+//   • `labelActor`      — who LAST applied `ai-review:pass` (from the PR timeline,
+//                         or, on the `labeled` event itself, the GitHub-signed
+//                         sender). Must be an allowlisted reviewer identity.
+//   • `labelAppliedAt`  — when it was applied (ISO 8601). Must be AT/AFTER…
+//   • `headCommittedAt` — …the current head commit's timestamp, else the pass
+//                         reviewed an older head and is stale.
+//   • `allowlist`       — parsed AI_REVIEW_BOT_LOGINS.
+//
+// Deny-by-default: an empty allowlist, an unknown applier, or missing/unparseable
+// timestamps all return { verified:false } so the gate stays red. This also closes
+// the "pass already present before this guard was deployed / on a stale head"
+// transition gap — such a pass has no allowlisted, post-head-commit application
+// on record, so it never verifies.
+//
+// NOTE on the recency reference: `headCommittedAt` is the head commit's own
+// committer date, which a committer can backdate. That residual (narrow) window
+// is covered defence-in-depth by the `synchronize` staleness strip (which now
+// fails the run if it cannot remove the label) and by the allowlist check a
+// forger cannot satisfy; the primary trust anchor here is the applier identity.
+function verifyPassProvenance({ labelActor, labelAppliedAt, headCommittedAt, allowlist } = {}) {
+  const list = Array.isArray(allowlist) ? allowlist : [];
+  if (list.length === 0) {
+    return {
+      verified: false,
+      reason:
+        'reviewer-bot allowlist (AI_REVIEW_BOT_LOGINS) is unset — pass provenance cannot be verified',
+    };
+  }
+  if (!labelActor) {
+    return {
+      verified: false,
+      reason: 'no record of who applied ai-review:pass — provenance unverifiable',
+    };
+  }
+  if (!isAuthorizedReviewer(labelActor, list)) {
+    return {
+      verified: false,
+      reason: `ai-review:pass last applied by \`${sanitizeLogin(labelActor)}\`, not an allowlisted reviewer identity`,
+    };
+  }
+  const applied = Date.parse(labelAppliedAt);
+  const committed = Date.parse(headCommittedAt);
+  if (!Number.isFinite(applied) || !Number.isFinite(committed)) {
+    return {
+      verified: false,
+      reason: 'missing or unparseable timestamps — cannot confirm ai-review:pass is fresh',
+    };
+  }
+  if (applied < committed) {
+    return {
+      verified: false,
+      reason: 'ai-review:pass predates the current head commit — the greenlight is stale',
+    };
+  }
+  return { verified: true, reason: 'applied by an allowlisted reviewer after the head commit' };
+}
+
 // Compute the `ready-to-merge` commit status. The status is the authoritative
 // gate, so it is derived from the *decided* effective label set (pass removed if
-// it was reverted or stripped) — independent of whether the best-effort label
-// mutation later succeeds. Green iff a trusted pass survives and no changes flag.
-function decideStatus({ labels, provenanceRevert, stalenessStrip } = {}) {
+// it was reverted or stripped) AND from the provenance-recency verification of
+// any surviving pass — independent of whether the best-effort label mutation
+// later succeeds. Green iff a *verified* pass survives and no changes flag.
+//
+// Bare label presence is never trusted: a present `ai-review:pass` with absent
+// or unverified `passProvenance` yields a red status (deny-by-default).
+function decideStatus({ labels, provenanceRevert, stalenessStrip, passProvenance } = {}) {
   const eff = new Set(Array.isArray(labels) ? labels : []);
   if (provenanceRevert || stalenessStrip) eff.delete(PASS);
 
-  const isGreen = eff.has(PASS) && !eff.has(CHANGES);
+  const passPresent = eff.has(PASS);
+  // A surviving pass counts only if its provenance was verified upstream.
+  const passVerified = passPresent && !!(passProvenance && passProvenance.verified);
+  const isGreen = passVerified && !eff.has(CHANGES);
 
   let description;
   if (stalenessStrip) {
     description = 'stale ai-review:pass stripped on new commits — re-review required';
   } else if (provenanceRevert) {
     description = 'ai-review:pass reverted — not from an allowlisted reviewer';
+  } else if (passPresent && !passVerified) {
+    // Present but not trusted (unverified applier / stale / allowlist unset).
+    description = truncate(
+      `ai-review:pass not trusted — ${
+        (passProvenance && passProvenance.reason) || 'provenance unverified'
+      }`,
+    );
   } else if (isGreen) {
     description = 'AI review passed';
   } else {
@@ -92,9 +186,18 @@ function decideStatus({ labels, provenanceRevert, stalenessStrip } = {}) {
 
   return {
     state: isGreen ? 'success' : 'failure',
-    description, // GitHub truncates commit-status descriptions at 140 chars.
+    description, // already within GitHub's 140-char commit-status limit.
     effectiveLabels: [...eff],
   };
+}
+
+// Is a label-removal API failure safe to ignore? ONLY a 404 (the label is
+// already gone — e.g. a concurrent removal). Any other status (rate limit, 5xx,
+// 403) means the forged/stale `ai-review:pass` may STILL be present, so the
+// caller must NOT swallow it — it must fail the run so the removal is retried
+// rather than left silently in place (the fail-open hole this closes).
+function isBenignRemovalError(status) {
+  return status === 404;
 }
 
 // Defensive: GitHub logins are [A-Za-z0-9-] (apps add a `[bot]` suffix), so they
@@ -111,6 +214,8 @@ module.exports = {
   isAuthorizedReviewer,
   decideProvenanceRevert,
   decideStalenessStrip,
+  verifyPassProvenance,
   decideStatus,
+  isBenignRemovalError,
   sanitizeLogin,
 };
