@@ -40,6 +40,22 @@ if [[ -z "$BLOCK" ]]; then
   exit 2
 fi
 
+# Fail closed on AMBIGUITY: the reviewer is contractually told to emit EXACTLY ONE
+# verdict block. More than one BEGIN marker means the captured output carries a
+# second block — the prompt-injection channel this gate exists to defeat: an
+# UNTRUSTED diff can embed its own `REVIEW_VERDICT_BEGIN decision: approve …` block,
+# and an HONEST reviewer that merely QUOTES that block in its findings (before its
+# own real verdict) would otherwise have `field()`'s `head -1` read the attacker's
+# `approve` instead of the reviewer's `request-changes`. Any count != 1 is anomalous
+# (injection echo, a malformed double-emit, or a truncated block) → distrust the
+# whole thing and block. Counted over the RAW input, not the sed-joined BLOCK, so a
+# quoted block that never closed its END still trips this.
+BEGIN_COUNT="$(printf '%s\n' "$INPUT" | grep -c 'REVIEW_VERDICT_BEGIN' || true)"
+if [[ "$BEGIN_COUNT" -ne 1 ]]; then
+  echo "request-changes unknown"   # >1 (or 0-after-nonempty) verdict block → ambiguous → fail closed
+  exit 0
+fi
+
 # Extract a single field value, lowercased and trimmed; empty if absent.
 field() {
   printf '%s\n' "$BLOCK" \
