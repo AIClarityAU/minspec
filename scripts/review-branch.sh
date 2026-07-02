@@ -113,11 +113,14 @@ CONTENT
 
 # Fresh-context reviewer. Read-only tools ONLY; NO gh/git/network/Bash — the
 # agent cannot push, comment, label, or merge. opus per DR-033 §6.
+# `</dev/null`: the prompt is passed as an ARG (not stdin), so close stdin — else
+# `claude -p` waits ~3s for piped input before proceeding. The read-only tools do
+# not use stdin, so this is safe and removes the stall.
 AGENT_OUT=$(claude -p "$USER_CONTENT" \
   --system-prompt-file "$ROLE_FILE" \
   --allowedTools "Read,Glob,Grep" \
   --model opus \
-  --output-format text 2>&1) || {
+  --output-format text </dev/null 2>&1) || {
     # Agent crashed / non-zero exit. Emit NO verdict to stdout so review-decide.sh
     # fails closed to request-changes; surface the captured output on stderr.
     echo "review-branch.sh: reviewer agent (role=$ROLE) failed — gate fails closed" >&2
