@@ -20,6 +20,9 @@ __pycache__/
 # MinSpec ephemeral session data
 .minspec/session.json
 .minspec/calibration.json
+# SPEC-024 auto-merge decision audit trail (FR-7). Machine-local, append-only,
+# rebuilt/extended on every gate invocation — never committed.
+.minspec/auto-merge-audit.log
 # Machine-local merge-refresh drift-detection state, rebuilt on every
 # generate/refresh — must be gitignored, never committed. Mirrors
 # MINSPEC_GITIGNORE_ENTRIES in packages/minspec/src/lib/scaffold.ts (kept in

@@ -359,6 +359,64 @@ if (cd "$WORKTREE" && claude -p "$PROMPT" \
       # not block the agent-done labelling below. The `|| echo` keeps set -e from
       # aborting the script if the stage errors.
       run_reviewer_stage || echo "WARNING: reviewer stage errored (see $LOG) — treat as ai-review:changes" >&2
+
+      # ── SPEC-024: auto-merge eligibility gate (FR-6/FR-7/FR-8) ──────────────
+      # After the branch is pushed and the gate checks are green (GATE_* above),
+      # decide merge-vs-hold. The IMPURE work (FR-2 red→green prover, analyzers,
+      # scanner) lives in scripts/auto-merge-gate.ts; the PURE decision is
+      # decideAutoMerge (packages/minspec/src/lib/auto-merge.ts). Deny-by-default:
+      # ANY gate error emits a fail-safe HOLD, never an accidental merge.
+      #
+      # Mode (DR-033 C4): per-dev override via MINSPEC_AUTOMERGE_MODE; default is
+      # consequence-hybrid. `pr-gate` forces every PR to hold (status quo).
+      AUTOMERGE_MODE="${MINSPEC_AUTOMERGE_MODE:-consequence-hybrid}"
+      # Base = the branch's fork point (three-dot semantics), so the diff + prover
+      # measure exactly what this branch introduced.
+      AUTOMERGE_BASE=$(git -C "$WORKTREE" merge-base origin/main HEAD 2>/dev/null || echo "origin/main")
+      # The prover is the SOLE authority for the regression proof: feed it the
+      # merged signals (its regressionTest field) — NOT the agent's proof flags.
+      SIGNALS_TMP="${WORKTREE}/.auto-merge-signals.json"
+      printf '%s' "$SIGNALS_INPUT" > "$SIGNALS_TMP"
+      # Find the PR for this branch (the gate holds/merges a PR, not the issue).
+      PR_NUM=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
+        --json number --jq '.[0].number' 2>/dev/null || true)
+
+      echo "Running auto-merge gate (mode: $AUTOMERGE_MODE, base: $AUTOMERGE_BASE, PR: ${PR_NUM:-none})..."
+      DECISION=$(cd "$WORKTREE" && npx tsx "${SCRIPT_DIR}/auto-merge-gate.ts" \
+        --worktree "$WORKTREE" --base "$AUTOMERGE_BASE" --mode "$AUTOMERGE_MODE" \
+        --pr "${PR_NUM:-0}" --signals-file "$SIGNALS_TMP" 2>>"$LOG" \
+        || echo '{"eligible":false,"blast":"high","reason":"gate invocation failed — fail-safe hold","failed":["gate-error"],"block":""}')
+      rm -f "$SIGNALS_TMP" 2>/dev/null || true
+
+      ELIGIBLE=$(printf '%s' "$DECISION" | jq -r '.eligible // false')
+      BLAST=$(printf '%s' "$DECISION" | jq -r '.blast // "high"')
+      GATE_REASON=$(printf '%s' "$DECISION" | jq -r '.reason // "no reason"')
+      GATE_BLOCK=$(printf '%s' "$DECISION" | jq -r '.block // ""')
+
+      if [[ "$ELIGIBLE" == "true" && -n "$PR_NUM" && "$AUTOMERGE_MODE" != "pr-gate" ]]; then
+        # FR-6: low-blast, all signals green → merge with no human eyes.
+        echo "Auto-merge ELIGIBLE for PR #$PR_NUM ($BLAST-blast): $GATE_REASON"
+        if gh pr merge "$PR_NUM" --repo "$REPO" --squash 2>>"$LOG"; then
+          echo "Merged PR #$PR_NUM (squash, auto)."
+        else
+          echo "WARNING: gh pr merge failed for PR #$PR_NUM — left for human"
+          gh pr edit "$PR_NUM" --repo "$REPO" --add-label "needs-human-skim" 2>/dev/null || true
+        fi
+      else
+        # FR-8 degraded fallback (headless / no IDE surface attached): post the
+        # prover-authoritative #180 block + the blast reason as a PR comment and
+        # label needs-human-skim. (The in-IDE keyboard-first review surface is
+        # deferred to SPEC-014 — see SPEC-024 Follow-ups; not built here.)
+        echo "Auto-merge HELD ($BLAST-blast): $GATE_REASON"
+        if [[ -n "$PR_NUM" ]]; then
+          HOLD_BODY=$(printf '## Auto-merge held — human skim needed\n\n**Blast:** `%s` · %s\n\n%s' \
+            "$BLAST" "$GATE_REASON" "$GATE_BLOCK")
+          gh pr comment "$PR_NUM" --repo "$REPO" --body "$HOLD_BODY" 2>/dev/null || true
+          gh pr edit "$PR_NUM" --repo "$REPO" --add-label "needs-human-skim" 2>/dev/null || true
+        else
+          echo "No PR found for $BRANCH — nothing to hold/merge (branch pushed only)."
+        fi
+      fi
     else
       echo "WARNING: push failed for $BRANCH — review worktree manually"
     fi
