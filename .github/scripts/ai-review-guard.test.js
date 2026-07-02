@@ -1,0 +1,168 @@
+// Unit tests for the ai-review label-integrity decision logic.
+// Runs on plain Node (no deps): `node --test .github/scripts/ai-review-guard.test.js`.
+// Wired into CI's lint job so the security-critical decisions stay enforced.
+
+'use strict';
+
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+
+const {
+  PASS,
+  CHANGES,
+  parseAllowlist,
+  isAuthorizedReviewer,
+  decideProvenanceRevert,
+  decideStalenessStrip,
+  decideStatus,
+  sanitizeLogin,
+} = require('./ai-review-guard.js');
+
+// ── parseAllowlist ───────────────────────────────────────────────────────────
+test('parseAllowlist: comma/space/newline separated, lowercased, empties dropped', () => {
+  assert.deepEqual(parseAllowlist('Review-Bot, my-app[bot]\n  Other '), [
+    'review-bot',
+    'my-app[bot]',
+    'other',
+  ]);
+});
+
+test('parseAllowlist: unset/empty yields an empty list (authorizes nobody)', () => {
+  assert.deepEqual(parseAllowlist(undefined), []);
+  assert.deepEqual(parseAllowlist(''), []);
+  assert.deepEqual(parseAllowlist('   , \n '), []);
+});
+
+// ── isAuthorizedReviewer ─────────────────────────────────────────────────────
+test('isAuthorizedReviewer: case-insensitive membership', () => {
+  const list = parseAllowlist('review-bot, my-app[bot]');
+  assert.equal(isAuthorizedReviewer('Review-Bot', list), true);
+  assert.equal(isAuthorizedReviewer('my-app[bot]', list), true);
+  assert.equal(isAuthorizedReviewer('some-human', list), false);
+});
+
+test('isAuthorizedReviewer: empty allowlist and empty login authorize nobody', () => {
+  assert.equal(isAuthorizedReviewer('review-bot', []), false);
+  assert.equal(isAuthorizedReviewer('', ['review-bot']), false);
+  assert.equal(isAuthorizedReviewer(undefined, ['review-bot']), false);
+});
+
+// ── decideProvenanceRevert (#397) ────────────────────────────────────────────
+test('provenance: pass added by a human (not allowlisted) is reverted — the #200 incident', () => {
+  const d = decideProvenanceRevert({
+    action: 'labeled',
+    labelName: PASS,
+    senderLogin: 'harvest316',
+    allowlist: parseAllowlist('review-bot'),
+  });
+  assert.equal(d.revert, true);
+  assert.match(d.reason, /not an allowlisted reviewer/);
+});
+
+test('provenance: pass added by the allowlisted reviewer bot is kept', () => {
+  const d = decideProvenanceRevert({
+    action: 'labeled',
+    labelName: PASS,
+    senderLogin: 'Review-Bot',
+    allowlist: parseAllowlist('review-bot, my-app[bot]'),
+  });
+  assert.equal(d.revert, false);
+});
+
+test('provenance: unset allowlist means an unverifiable pass is reverted (fail closed)', () => {
+  const d = decideProvenanceRevert({
+    action: 'labeled',
+    labelName: PASS,
+    senderLogin: 'review-bot',
+    allowlist: [],
+  });
+  assert.equal(d.revert, true);
+  assert.match(d.reason, /AI_REVIEW_BOT_LOGINS/);
+});
+
+test('provenance: only ai-review:pass is guarded (a forged :changes is fail-safe)', () => {
+  assert.equal(
+    decideProvenanceRevert({
+      action: 'labeled',
+      labelName: CHANGES,
+      senderLogin: 'harvest316',
+      allowlist: [],
+    }).revert,
+    false,
+  );
+});
+
+test('provenance: non-labeled events never revert', () => {
+  for (const action of ['synchronize', 'opened', 'reopened', 'unlabeled']) {
+    assert.equal(
+      decideProvenanceRevert({ action, labelName: PASS, senderLogin: 'x', allowlist: [] }).revert,
+      false,
+    );
+  }
+});
+
+// ── decideStalenessStrip (#359) ──────────────────────────────────────────────
+test('staleness: synchronize strips an existing pass', () => {
+  const d = decideStalenessStrip({ action: 'synchronize', labels: [PASS, 'feat'] });
+  assert.equal(d.strip, true);
+});
+
+test('staleness: synchronize with no pass is a no-op', () => {
+  assert.equal(decideStalenessStrip({ action: 'synchronize', labels: ['feat'] }).strip, false);
+});
+
+test('staleness: non-synchronize events never strip', () => {
+  for (const action of ['labeled', 'opened', 'reopened', 'unlabeled']) {
+    assert.equal(decideStalenessStrip({ action, labels: [PASS] }).strip, false);
+  }
+});
+
+// ── decideStatus (single writer of the ready-to-merge status) ─────────────────
+test('status: pass and no changes is green', () => {
+  const s = decideStatus({ labels: [PASS, 'feat'] });
+  assert.equal(s.state, 'success');
+  assert.equal(s.description, 'AI review passed');
+});
+
+test('status: pass plus changes is red', () => {
+  assert.equal(decideStatus({ labels: [PASS, CHANGES] }).state, 'failure');
+});
+
+test('status: no pass is red', () => {
+  const s = decideStatus({ labels: ['feat'] });
+  assert.equal(s.state, 'failure');
+  assert.equal(s.description, 'needs ai-review:pass');
+});
+
+test('status: a reverted pass is dropped from the effective set (red), even though the label is still present in the payload', () => {
+  const s = decideStatus({ labels: [PASS], provenanceRevert: true });
+  assert.equal(s.state, 'failure');
+  assert.deepEqual(s.effectiveLabels, []);
+  assert.match(s.description, /reverted/);
+});
+
+test('status: a stripped (stale) pass is dropped from the effective set (red)', () => {
+  const s = decideStatus({ labels: [PASS, 'feat'], stalenessStrip: true });
+  assert.equal(s.state, 'failure');
+  assert.deepEqual(s.effectiveLabels, ['feat']);
+  assert.match(s.description, /stale/);
+});
+
+test('status: description never exceeds the 140-char commit-status limit', () => {
+  const cases = [
+    { labels: [PASS] },
+    { labels: [PASS, CHANGES] },
+    { labels: [] },
+    { labels: [PASS], provenanceRevert: true },
+    { labels: [PASS], stalenessStrip: true },
+  ];
+  for (const c of cases) {
+    assert.ok(decideStatus(c).description.length <= 140);
+  }
+});
+
+// ── sanitizeLogin ────────────────────────────────────────────────────────────
+test('sanitizeLogin: strips backticks so a value cannot escape a markdown code span', () => {
+  assert.equal(sanitizeLogin('ev`il'), 'evil');
+  assert.equal(sanitizeLogin(undefined), '');
+});
