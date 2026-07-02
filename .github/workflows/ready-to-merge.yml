@@ -8,64 +8,160 @@
 #   FAILURE  otherwise (description: "needs ai-review:pass")
 #
 # An independent AI reviewer posts verdicts and applies the `ai-review:pass` /
-# `ai-review:changes` labels to PRs; this check just reflects those labels as a
-# required-able commit status.
+# `ai-review:changes` labels to PRs; this check reflects those labels as a
+# required-able commit status — and now also actively guards their integrity
+# (staleness #359, provenance #397) so a stale or forged label cannot slip a PR
+# through.
 #
 # ── MANUAL STEP (cannot be done from a file) ─────────────────────────────────
 # A workflow file CANNOT make itself gating. To enforce this gate, a human must
 # add `ready-to-merge` as a *required status check* in repo Settings → Branches
-# → branch protection rule for `main`. Until then this status is advisory only.
+# → branch protection rule (or a branch ruleset) for `main`. Until then this
+# status is advisory only. (MinSpec's post-init ruleset advisor now suggests
+# this check by DEFAULT on repos that have THIS workflow wired — see
+# ruleset-advisor.ts / init.ts / #390 — but a workflow still cannot require
+# itself; the advisor only proposes it.)
 #
-# ── LABEL-INTEGRITY CAVEAT ───────────────────────────────────────────────────
-# A GitHub label is hand-addable by anyone with write access, so this check
-# TRUSTS that `ai-review:pass` is applied only by the reviewer automation — it
-# verifies the label's PRESENCE, not its PROVENANCE. A human could add the label
-# manually and turn this check green without a real AI review. Hardening
-# follow-up (for teams): restrict who may add the `ai-review:*` labels — e.g. via
-# a label-guard workflow that strips/reverts `ai-review:pass` unless applied by
-# the reviewer bot/app, or org label-permission controls. Not done here.
+# ── LABEL-INTEGRITY (staleness #359 + provenance #397) ───────────────────────
+# A GitHub label is hand-addable by anyone with write access, so a naive reflect
+# of label PRESENCE trusts the label's FRESHNESS and its PROVENANCE. Two active
+# guards close those holes here:
+#
+#   • STALENESS (#359): on `synchronize` (a new commit pushed to the PR) any
+#     existing `ai-review:pass` / `ai-review:changes` is REMOVED before the
+#     status is recomputed — a verdict from a previous commit is not valid for
+#     unreviewed new code, so the gate goes red until a fresh review re-labels.
+#     The removal and the failure status happen in the SAME run (no second event
+#     needed to catch up).
+#
+#   • PROVENANCE (#397): on `labeled`, if an `ai-review:*` label was applied by
+#     an actor NOT on the authorized allowlist, it is reverted and not counted —
+#     so a hand-applied `pass` cannot turn this check green.
+#
+#     RESIDUAL GAP (documented honestly — no full fix available yet): the
+#     reviewer automation (#342) currently runs `dispatch-issue.sh` locally under
+#     a HUMAN maintainer's own `gh` auth — there is NO dedicated reviewer bot /
+#     GitHub App identity. So provenance can only be enforced at ACCOUNT
+#     granularity: "applied by an allowlisted account" (default: the repo owner;
+#     override via the `AI_REVIEW_LABEL_ACTORS` repo variable, a comma-separated
+#     login allowlist). This CANNOT distinguish an allowlisted account that ran a
+#     real review from that same account hand-applying the label (the #200
+#     incident shape). Fully closing that gap needs a dedicated bot/App token
+#     that applies the label ONLY from the reviewer run, with NO human — not even
+#     the maintainer — in the allowlist. Until that exists, this narrows the
+#     attack surface from "anyone with write access" to "the allowlisted reviewer
+#     identity" — a real but partial mitigation. A guard keyed on
+#     `sender.type == 'Bot'` is deliberately NOT used: #342 applies labels as a
+#     human, so a bot-only rule would wrongly strip its legitimate labels.
 
 name: ready-to-merge
 
 on:
   pull_request:
     # opened/synchronize/reopened: (re)post the status when the PR or its head
-    # commit changes. labeled/unlabeled: re-evaluate the moment the reviewer
-    # automation (or a human) adds/removes an ai-review:* label.
+    # commit changes. synchronize ALSO strips stale ai-review:* labels (#359).
+    # labeled/unlabeled: re-evaluate the moment an ai-review:* label is
+    # added/removed — and, on `labeled`, guard the added label's provenance
+    # (#397) before it can count toward the status.
     types: [opened, synchronize, reopened, labeled, unlabeled]
 
 permissions:
   statuses: write       # post the `ready-to-merge` commit status on the PR head SHA
-  pull-requests: read   # read the PR's labels
+  # pull-requests: write is the LEAST privilege that still lets this job REMOVE a
+  # PR label — needed to strip a stale verdict on `synchronize` (#359) and to
+  # revert an unauthorized `ai-review:*` addition on `labeled` (#397). No
+  # `contents`, no scope broader than the label read/remove + status post require.
+  pull-requests: write  # read the PR's labels AND remove stale/forged ai-review:* labels
 
 jobs:
   ready-to-merge:
     runs-on: ubuntu-latest
     steps:
-      - name: Reflect ai-review labels as the `ready-to-merge` commit status
+      - name: Guard label integrity, then reflect ai-review labels as the `ready-to-merge` status
         uses: actions/github-script@v7
         env:
           # Built-in token; scoped by the permissions block above.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional comma-separated allowlist of GitHub logins permitted to
+          # apply `ai-review:*` labels (the reviewer automation's account(s)).
+          # Unset → falls back to the repo owner (the account #342 runs under).
+          AI_REVIEW_LABEL_ACTORS: ${{ vars.AI_REVIEW_LABEL_ACTORS }}
         with:
           script: |
             const pr = context.payload.pull_request;
-            const labels = (pr.labels || []).map(l => l.name);
+            const action = context.payload.action; // opened|synchronize|reopened|labeled|unlabeled
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
 
-            const hasPass    = labels.includes('ai-review:pass');
-            const hasChanges = labels.includes('ai-review:changes');
-            const isGreen    = hasPass && !hasChanges;
+            const PASS = 'ai-review:pass';
+            const CHANGES = 'ai-review:changes';
 
+            // Remove a label from the PR, tolerating "not present" (404).
+            async function removeLabel(name) {
+              try {
+                await github.rest.issues.removeLabel({
+                  owner, repo, issue_number: pr.number, name,
+                });
+                core.info(`removed label ${name}`);
+              } catch (e) {
+                if (e.status !== 404) throw e;
+              }
+            }
+
+            // ── #397 provenance: who may apply ai-review:* labels ──
+            // No dedicated reviewer bot exists yet (see header RESIDUAL GAP), so
+            // enforce at ACCOUNT granularity: an allowlist of logins. Default to
+            // the repo owner (the account the reviewer automation, #342, runs
+            // under); override via the AI_REVIEW_LABEL_ACTORS repo variable.
+            const configured = (process.env.AI_REVIEW_LABEL_ACTORS || '')
+              .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+            const authorized = configured.length ? configured : [owner.toLowerCase()];
+            const sender = ((context.payload.sender && context.payload.sender.login) || '').toLowerCase();
+            const senderAuthorized = authorized.includes(sender);
+
+            const labels = (pr.labels || []).map((l) => l.name);
+            let hasPass = labels.includes(PASS);
+            let hasChanges = labels.includes(CHANGES);
+
+            // ── #359 staleness: a verdict from a previous commit is not valid
+            // for the new code a `synchronize` just pushed. Strip both verdict
+            // labels and recompute as ungreenlit — in THIS run, so the failure
+            // status lands on the new head SHA without waiting for a second event.
+            if (action === 'synchronize') {
+              if (hasPass) await removeLabel(PASS);
+              if (hasChanges) await removeLabel(CHANGES);
+              hasPass = false;
+              hasChanges = false;
+              core.info('synchronize: stripped stale ai-review:* labels; a fresh review is required.');
+            }
+
+            // ── #397 provenance: on `labeled`, if the just-added ai-review:*
+            // label came from an actor NOT on the allowlist, revert it and do
+            // not count it — a hand-applied `pass` must not turn this green.
+            if (action === 'labeled') {
+              const added = context.payload.label && context.payload.label.name;
+              if ((added === PASS || added === CHANGES) && !senderAuthorized) {
+                await removeLabel(added);
+                if (added === PASS) hasPass = false;
+                if (added === CHANGES) hasChanges = false;
+                core.warning(
+                  `${added} was applied by @${sender || 'unknown'}, not an authorized ` +
+                  `ai-review labeler (${authorized.join(', ')}); reverted. Set the ` +
+                  `AI_REVIEW_LABEL_ACTORS repo variable to authorize the reviewer ` +
+                  `automation's account.`,
+                );
+              }
+            }
+
+            const isGreen = hasPass && !hasChanges;
             const state = isGreen ? 'success' : 'failure';
-            const description = isGreen
-              ? 'AI review passed'
-              : 'needs ai-review:pass';
+            const description = isGreen ? 'AI review passed' : 'needs ai-review:pass';
 
             // Post the status on the PR HEAD sha (not the merge sha), so branch
             // protection on the PR's head commit can require it.
             await github.rest.repos.createCommitStatus({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
+              owner,
+              repo,
               sha: pr.head.sha,
               state,
               context: 'ready-to-merge',
@@ -74,5 +170,5 @@ jobs:
 
             core.info(
               `ready-to-merge=${state} (ai-review:pass=${hasPass}, ` +
-              `ai-review:changes=${hasChanges}) on ${pr.head.sha}`
+              `ai-review:changes=${hasChanges}, action=${action}) on ${pr.head.sha}`,
             );
