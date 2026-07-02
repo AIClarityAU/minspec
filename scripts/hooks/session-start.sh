@@ -52,9 +52,15 @@ fi
 # `scripts/drain-inbox.sh --enable-auto`, this auto-triages + dispatches on every
 # session start. Until then it only reports the pending count.
 DRAIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/drain-inbox.sh"
-PREF="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/.minspec/auto-drain"
+# Ask drain-inbox.sh where the pref lives — do NOT recompute it here. This hook
+# sits in scripts/hooks/, one level deeper than drain-inbox.sh, so an independent
+# relative-path walk silently drifted (read scripts/.minspec/auto-drain while
+# --enable-auto wrote the repo-root .minspec/auto-drain), leaving auto-drain
+# permanently OFF and the banner lying "OFF" while the pref said "on". Delegating
+# to `--pref-path` keeps a single source of truth (regression: #415).
+PREF="$("$DRAIN" --pref-path 2>/dev/null || true)"
 if [[ -x "$DRAIN" ]]; then
-  if [[ "$(cat "$PREF" 2>/dev/null || echo off)" == "on" ]]; then
+  if [[ -n "$PREF" && "$(cat "$PREF" 2>/dev/null || echo off)" == "on" ]]; then
     "$DRAIN" --auto 2>/dev/null || true
   else
     pending="$("$DRAIN" --dry-run 2>/dev/null || true)"
