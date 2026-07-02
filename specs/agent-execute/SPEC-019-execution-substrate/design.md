@@ -353,17 +353,28 @@ behavioral 5h→7d multiplier (rejected). `[rev]` the gauge reads each window tr
 ```
 
 **(b) Tier-gated HITL — needs-review (FR-12)** — T3/T4 (or a CL-2 low-confidence T1/T2)
-stop for human spec/plan approval before the agent starts:
+stop for human spec/plan approval before the agent starts. `[rev]` **The default action is
+the safe/reversible one (review); dispatch is a deliberate chord, NEVER the bare-Enter
+default** — a T3/T4 stop you can Enter through isn't a stop, it's theatre, and it defeats
+"agents you can trust because they stop." Approve is `Alt+A` over the focused spec (the
+shipped chord, #378), consistent with the markdown-preview direct-approve:
 
 ```
-┌─ Agent Execute · awaiting your approval ────────────────────────┐
+┌─ Agent Execute · review before dispatch ────────────────────────┐
 │ #142  "Add rate-limit to webhook"            tier T3 · needs-review│
-│ reason: T3 — Clarify+Plan approval required before dispatch       │
 │ base pinned @ a1b2c3d  ·  self-authored ✓  ·  still-actionable ✓   │
-│   [Approve & dispatch ⏎]   [Open spec ^O]   [Skip ^S]            │
-│ (agents you can trust because they stop)                          │
+│ Read the spec, then decide:                                       │
+│   ⏎  Open / focus spec   (default — the stop makes you look)      │
+│   ⌥A  Approve & dispatch  (deliberate chord #378 — never Enter)   │
+│   Esc  Skip                                                       │
 └─────────────────────────────────────────────────────────────────┘
 ```
+
+**Principle (design-level realisation of FR-12).** The gate's lowest-friction key is always
+the reversible action; the consequential/irreversible one (dispatching an autonomous agent)
+demands a distinct, deliberate keystroke. This satisfies the RSI/keyboard rule (approve keeps
+a fast keyboard path — the `Alt+A` chord) without making rubber-stamping the path of least
+resistance.
 
 ## Build order (vertical slices, CDD)
 
