@@ -410,4 +410,12 @@ Invariant #1 ("MinSpec makes zero network calls in its core path") and DR-004's 
 <!-- dr-summary:DR-051 auto=9b6f4ee6159c -->
 SPEC-026 treats the whole **corpus** — specs/**, docs/decisions/**, docs/epics/**, docs/domain/** — uniformly: worktree-steer (FR-9) would push a second live session editing *any* corpus file into its own worktree, and the pre-commit backstop (FR-12) guards all of it. The founder, reviewing SPEC-026, observed that **approvables are not code**:
 <!-- /dr-summary:DR-051 -->
+
+## [DR-052 — Subscription-CLI-default billing, amended for Anthropic's consumer-OAuth ToS — genuine CLI direct; broker/Scrooge = API-key mode only; no multi-tenant](DR-052.md)
+
+*Status: proposed · Date: 2026-07-03*
+
+<!-- dr-summary:DR-052 auto=0000000000000000 -->
+Issue #74 confirmed against Anthropic's official Legal-and-compliance docs that consumer OAuth is for individual native-app use only — routing subscription traffic through a broker/Scrooge or "on behalf of users" is prohibited, and the June-15 separate Agent-SDK credit is paused (still draws the interactive quota). Amends DR-016/DR-017: subscription mode = genuine `claude` CLI direct (no broker reroute), default subscription-CLI, ship both modes, broker/Scrooge = API-key mode only, no multi-tenant.
+<!-- /dr-summary:DR-052 -->
 <!-- minspec:dr-index:end -->
