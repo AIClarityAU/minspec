@@ -359,6 +359,113 @@ if (cd "$WORKTREE" && claude -p "$PROMPT" \
       # not block the agent-done labelling below. The `|| echo` keeps set -e from
       # aborting the script if the stage errors.
       run_reviewer_stage || echo "WARNING: reviewer stage errored (see $LOG) — treat as ai-review:changes" >&2
+
+      # ── SPEC-024: auto-merge eligibility gate (FR-6/FR-7/FR-8) ──────────────
+      # After the branch is pushed and the gate checks are green (GATE_* above),
+      # decide merge-vs-hold. The IMPURE work (FR-2 red→green prover, analyzers,
+      # scanner) lives in scripts/auto-merge-gate.ts; the PURE decision is
+      # decideAutoMerge (packages/minspec/src/lib/auto-merge.ts). Deny-by-default:
+      # ANY gate error emits a fail-safe HOLD, never an accidental merge.
+      #
+      # Mode (DR-033 C4 / DR-033 §6). AUTO-MERGE IS OFF BY DEFAULT (`pr-gate`):
+      # every PR HOLDS for a human skim. Turning it ON is deliberate and requires
+      # ALL of:
+      #   1. MINSPEC_AUTOMERGE_MODE=consequence-hybrid  (EXACT string; opt-in),
+      #   2. the independent AI reviewer (#342) wired and applying `ai-review:pass`
+      #      — surfaced as the `ready-to-merge` commit status this block requires
+      #      SUCCESS below (the #410 label-guard verifies its provenance), and
+      #   3. the consequence analyzers (#88) validated on a real index (#91/#195).
+      # Until all three hold, leave this unset — PRs hold for a human. This
+      # deny-by-default is the mandated §6 posture: the on-switch never
+      # self-activates. Deny-by-default resolution: anything other than the EXACT
+      # token `consequence-hybrid` (empty, misspelled, different case, garbage)
+      # resolves to `pr-gate`/HOLD — there is no fail-open path.
+      AUTOMERGE_MODE_RAW="${MINSPEC_AUTOMERGE_MODE:-pr-gate}"
+      if [[ "$AUTOMERGE_MODE_RAW" == "consequence-hybrid" ]]; then
+        AUTOMERGE_MODE="consequence-hybrid"
+      else
+        AUTOMERGE_MODE="pr-gate"
+      fi
+      # Base = the branch's fork point (three-dot semantics), so the diff + prover
+      # measure exactly what this branch introduced.
+      AUTOMERGE_BASE=$(git -C "$WORKTREE" merge-base origin/main HEAD 2>/dev/null || echo "origin/main")
+      # The prover is the SOLE authority for the regression proof: feed it the
+      # merged signals (its regressionTest field) — NOT the agent's proof flags.
+      SIGNALS_TMP="${WORKTREE}/.auto-merge-signals.json"
+      printf '%s' "$SIGNALS_INPUT" > "$SIGNALS_TMP"
+      # Find the PR for this branch (the gate holds/merges a PR, not the issue).
+      PR_NUM=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
+        --json number --jq '.[0].number' 2>/dev/null || true)
+
+      echo "Running auto-merge gate (mode: $AUTOMERGE_MODE, base: $AUTOMERGE_BASE, PR: ${PR_NUM:-none})..."
+      DECISION=$(cd "$WORKTREE" && npx tsx "${SCRIPT_DIR}/auto-merge-gate.ts" \
+        --worktree "$WORKTREE" --base "$AUTOMERGE_BASE" --mode "$AUTOMERGE_MODE" \
+        --pr "${PR_NUM:-0}" --signals-file "$SIGNALS_TMP" 2>>"$LOG" \
+        || echo '{"eligible":false,"blast":"high","reason":"gate invocation failed — fail-safe hold","failed":["gate-error"],"block":""}')
+      rm -f "$SIGNALS_TMP" 2>/dev/null || true
+
+      ELIGIBLE=$(printf '%s' "$DECISION" | jq -r '.eligible // false')
+      BLAST=$(printf '%s' "$DECISION" | jq -r '.blast // "high"')
+      GATE_REASON=$(printf '%s' "$DECISION" | jq -r '.reason // "no reason"')
+      GATE_BLOCK=$(printf '%s' "$DECISION" | jq -r '.block // ""')
+
+      # MAJOR 3 / DR-033 §6 — INDEPENDENT-REVIEWER CONJUNCT. Even when the gate is
+      # eligible AND the operator opted into consequence-hybrid, auto-merge ALSO
+      # requires the `ready-to-merge` commit status on the PR head SHA to be
+      # SUCCESS. That status encodes the provenance-verified `ai-review:pass`
+      # verdict (independent reviewer #342, forgery-guarded by #410). Absent /
+      # pending / failing ⇒ HOLD. This is what stops the on-switch from merging on
+      # gate-eligibility ALONE.
+      READY_STATE="missing"
+      if [[ -n "$PR_NUM" ]]; then
+        PR_HEAD_SHA=$(gh pr view "$PR_NUM" --repo "$REPO" --json headRefOid --jq '.headRefOid' 2>/dev/null || echo "")
+        if [[ -n "$PR_HEAD_SHA" ]]; then
+          READY_STATE=$(gh api "repos/${REPO}/commits/${PR_HEAD_SHA}/status" \
+            --jq '[.statuses[] | select(.context=="ready-to-merge")] | (.[0].state // "missing")' \
+            2>/dev/null || echo "error")
+        else
+          READY_STATE="error"
+        fi
+      fi
+
+      if [[ "$ELIGIBLE" == "true" && -n "$PR_NUM" \
+            && "$AUTOMERGE_MODE" == "consequence-hybrid" \
+            && "$READY_STATE" == "success" ]]; then
+        # FR-6: low-blast, all signals green, opted-in, AND the independent
+        # reviewer greenlit (ready-to-merge=success) → merge with no human eyes.
+        echo "Auto-merge ELIGIBLE for PR #$PR_NUM ($BLAST-blast, ready-to-merge=success): $GATE_REASON"
+        if gh pr merge "$PR_NUM" --repo "$REPO" --squash 2>>"$LOG"; then
+          echo "Merged PR #$PR_NUM (squash, auto)."
+        else
+          echo "WARNING: gh pr merge failed for PR #$PR_NUM — left for human"
+          gh pr edit "$PR_NUM" --repo "$REPO" --add-label "needs-human-skim" 2>/dev/null || true
+        fi
+      else
+        # FR-8 degraded fallback (headless / no IDE surface attached): post the
+        # prover-authoritative #180 block + the blast reason as a PR comment and
+        # label needs-human-skim. (The in-IDE keyboard-first review surface is
+        # deferred to SPEC-014 — see SPEC-024 Follow-ups; not built here.)
+        #
+        # Name the HOLD reason precisely: mode-not-opted-in, gate-ineligible, or
+        # the reviewer conjunct (ready-to-merge != success) — so a human knows
+        # which gate held it.
+        if [[ "$AUTOMERGE_MODE" != "consequence-hybrid" ]]; then
+          HOLD_WHY="auto-merge off (mode=$AUTOMERGE_MODE; opt in with MINSPEC_AUTOMERGE_MODE=consequence-hybrid)"
+        elif [[ "$ELIGIBLE" != "true" ]]; then
+          HOLD_WHY="gate ineligible — $GATE_REASON"
+        else
+          HOLD_WHY="independent review not green (ready-to-merge=$READY_STATE; needs ai-review:pass from #342)"
+        fi
+        echo "Auto-merge HELD ($BLAST-blast): $HOLD_WHY"
+        if [[ -n "$PR_NUM" ]]; then
+          HOLD_BODY=$(printf '## Auto-merge held — human skim needed\n\n**Blast:** `%s` · **Why:** %s\n\n_Gate:_ %s\n\n%s' \
+            "$BLAST" "$HOLD_WHY" "$GATE_REASON" "$GATE_BLOCK")
+          gh pr comment "$PR_NUM" --repo "$REPO" --body "$HOLD_BODY" 2>/dev/null || true
+          gh pr edit "$PR_NUM" --repo "$REPO" --add-label "needs-human-skim" 2>/dev/null || true
+        else
+          echo "No PR found for $BRANCH — nothing to hold/merge (branch pushed only)."
+        fi
+      fi
     else
       echo "WARNING: push failed for $BRANCH — review worktree manually"
     fi
