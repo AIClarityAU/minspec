@@ -24,6 +24,7 @@ import {
   readRecord,
   writeRecord,
   removeRecord,
+  listRecords,
   toPosixRel,
 } from './approval-store';
 
@@ -116,8 +117,14 @@ function writeGzipFallback(rootDir: string, specPath: string, bodyBuf: Buffer): 
  *   4. If `hash-object` throws (non-git dir, git absent) → gzip fallback.
  *   5. If gzip also fails → return '' (no M1 datapoint, approval still written).
  *
- * A returned 40-hex SHA therefore means "blob written AND pinned by a ref."
- * NEVER returns a SHA whose blob is unpinned.  Tier-0, offline.
+ * A returned 40-hex SHA means "blob written AND pinned by a ref ON THIS MACHINE."
+ * The scope is PER-MACHINE, NOT cross-machine (DR-043 Risks/Follow-ups): the pin is
+ * a LOCAL `refs/minspec/snapshots/*` ref, and a plain `git push origin <branch>` does
+ * NOT transfer it — DR-043's default is "do not push snapshot refs." So the blob is
+ * only gc-safe on the machine that minted it; on another clone the recorded SHA can be
+ * unresolvable and `recoverBaseline` returns undefined. That drift is NOT silent:
+ * `classifyBaseline` / `checkBaselineIntegrity` surface it as 'unrecoverable' (#404).
+ * Tier-0, offline: mint NEVER pushes to a remote — no network op on the approval path.
  */
 export function mintBaseline(rootDir: string, specPath: string, bodyOnly: string): string {
   const buf = Buffer.from(bodyOnly, 'utf-8');
@@ -137,7 +144,7 @@ export function mintBaseline(rootDir: string, specPath: string, bodyOnly: string
         ['update-ref', `refs/minspec/snapshots/${refKey(specPath)}`, sha],
         { cwd: rootDir, stdio: 'ignore' },
       );
-      return sha; // blob written AND pinned — durable.
+      return sha; // blob written AND pinned locally (per-machine; never pushed at approval).
     } catch {
       // Pin failed → the blob is unpinned and gc could prune it later.
       // Fall through to a pinned-somewhere fallback rather than return a fragile SHA.
@@ -188,6 +195,77 @@ export function recoverBaseline(rootDir: string, record: ApprovalRecord): string
   }
 
   return undefined; // unrecognized form → degrade
+}
+
+/**
+ * Classify a record's baseline recoverability ON THIS MACHINE (#404).
+ *
+ * `recoverBaseline` collapses two very different situations into one bare
+ * `undefined`: (a) NO baseline was ever recorded (legacy / all-mint-paths-failed →
+ * baselineBlob is '' or absent), and (b) a baseline WAS recorded (a 40-hex SHA or
+ * GZIP_MARKER) but cannot be resolved here — typically because the per-machine pin
+ * ref never travelled with a plain `git push` and the blob has since been gc-pruned
+ * on this clone (the DR-043 per-machine scope; see `mintBaseline`).
+ *
+ * Collapsing (a) and (b) is exactly the silent-drift bug: a recorded-but-gone
+ * baseline reads identically to never-recorded. This function separates them:
+ *   'none'          — baselineBlob is '' / absent → no datapoint was ever claimed.
+ *   'recovered'     — a recorded pointer that resolves to a body here.
+ *   'unrecoverable' — a recorded pointer (non-empty) that does NOT resolve here.
+ *
+ * Tier-0, offline. Never throws (delegates to `recoverBaseline`, which never throws).
+ */
+export function classifyBaseline(
+  rootDir: string,
+  record: ApprovalRecord,
+): 'none' | 'recovered' | 'unrecoverable' {
+  const blob = record.baselineBlob;
+  if (!blob || blob === '') return 'none';
+  return recoverBaseline(rootDir, record) === undefined ? 'unrecoverable' : 'recovered';
+}
+
+/**
+ * Aggregate baseline integrity across every committed approval record (#404).
+ *
+ * Surfaces per-machine baseline drift as a report future M1/CI tooling can act on,
+ * instead of letting `recoverBaseline`'s bare `undefined` hide it. `unrecoverableSpecs`
+ * lists the repo-relative spec paths whose recorded baseline cannot be resolved on
+ * THIS machine — the exact set an operator would re-mint or a CI check would flag.
+ *
+ * Invariant: `total === recovered + unrecoverable + noBaseline`. Tier-0, offline.
+ */
+export interface BaselineIntegrityReport {
+  readonly total: number;              // number of committed approval records
+  readonly recovered: number;          // baseline resolves to a body here
+  readonly unrecoverable: number;      // baseline recorded but unresolvable here (drift)
+  readonly noBaseline: number;         // no baseline ever recorded ('' / legacy)
+  readonly unrecoverableSpecs: string[]; // specPaths of the unrecoverable records
+}
+
+/**
+ * Walk every committed approval sidecar and classify each record's baseline.
+ * Reads only the local ledger + git object store — no network (Tier-0).
+ */
+export function checkBaselineIntegrity(rootDir: string): BaselineIntegrityReport {
+  const records = listRecords(rootDir);
+  let recovered = 0;
+  let unrecoverable = 0;
+  let noBaseline = 0;
+  const unrecoverableSpecs: string[] = [];
+  for (const rec of records) {
+    switch (classifyBaseline(rootDir, rec)) {
+      case 'recovered':
+        recovered++;
+        break;
+      case 'unrecoverable':
+        unrecoverable++;
+        unrecoverableSpecs.push(rec.specPath);
+        break;
+      default:
+        noBaseline++;
+    }
+  }
+  return { total: records.length, recovered, unrecoverable, noBaseline, unrecoverableSpecs };
 }
 
 /**

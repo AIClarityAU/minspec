@@ -12,6 +12,10 @@ import {
   canonicalSpecHash,
   gitConfigEmail,
   specRelPath,
+  recoverBaseline,
+  classifyBaseline,
+  checkBaselineIntegrity,
+  refKey,
   type ApprovalRecord,
 } from '../src/lib/approval';
 import { readRecord } from '../src/lib/approval-store';
@@ -155,5 +159,80 @@ describe('AC-3 — gitConfigEmail is offline (Tier-0)', () => {
 describe('specRelPath', () => {
   it('produces a repo-relative POSIX path', () => {
     expect(specRelPath(tmp, specPath)).toBe(SPEC_REL);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #404 regression — per-machine baseline drift is SURFACED, not silent.
+//
+// The FR-1 baseline blob is pinned by a LOCAL `refs/minspec/snapshots/*` ref that a
+// plain `git push origin <branch>` never transfers (DR-043 per-machine scope). On
+// another clone the recorded 40-hex SHA still reads as durable, yet the blob can be
+// gc-pruned there — so `recoverBaseline` degrades to `undefined` with NO signal,
+// indistinguishable from "never recorded." `classifyBaseline` / `checkBaselineIntegrity`
+// close that gap by making the drift observable.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('#404 — dropped-ref + gc drift is distinguishable from never-recorded', () => {
+  it('recorded blob whose ref is dropped then gc-pruned → recoverBaseline undefined, classifyBaseline unrecoverable, report flags it', () => {
+    // SUBTLETY (proven): git is content-addressed. The survivor and the gone spec MUST
+    // have DISTINCT bodies. Identical bodies dedup to ONE blob, so the survivor's
+    // surviving ref would keep it alive and `git gc` would never reclaim it — the gone
+    // record would still "recover" and the regression would falsely pass.
+    const survivorRel = 'specs/SPEC-100-survivor.md';
+    const goneRel = 'specs/SPEC-101-gone.md';
+    const survivorPath = path.join(tmp, survivorRel);
+    const gonePath = path.join(tmp, goneRel);
+    fs.writeFileSync(
+      survivorPath,
+      '---\nid: SPEC-100\ntier: T3\nstatus: specifying\n---\n# Survivor\n\nUNIQUE survivor body — kept alive by its pin.\n',
+    );
+    fs.writeFileSync(
+      gonePath,
+      '---\nid: SPEC-101\ntier: T3\nstatus: specifying\n---\n# Gone\n\nDIFFERENT gone body — distinct blob so gc can reclaim it.\n',
+    );
+
+    const survivor = approveSpec(tmp, survivorPath, 'T3', 'tester@example.com');
+    const gone = approveSpec(tmp, gonePath, 'T3', 'tester@example.com');
+
+    // Both minted a real pinned blob ON THIS MACHINE, and they are DISTINCT blobs.
+    expect(survivor.baselineBlob).toMatch(/^[0-9a-f]{40}$/);
+    expect(gone.baselineBlob).toMatch(/^[0-9a-f]{40}$/);
+    expect(gone.baselineBlob).not.toBe(survivor.baselineBlob);
+
+    // Reproduce the other-machine reality: the gone spec's pin ref never arrived
+    // (a plain push doesn't carry refs/minspec/snapshots/*). Drop it, then gc-prune.
+    execFileSync('git', ['update-ref', '-d', `refs/minspec/snapshots/${refKey(goneRel)}`], {
+      cwd: tmp,
+      stdio: 'ignore',
+    });
+    execFileSync('git', ['gc', '--prune=now', '--quiet'], { cwd: tmp, stdio: 'ignore' });
+
+    const goneRecord = readRecord(tmp, goneRel)!;
+    const survivorRecord = readRecord(tmp, survivorRel)!;
+
+    // The #404 silent failure: recoverBaseline collapses to undefined with no signal…
+    expect(recoverBaseline(tmp, goneRecord)).toBeUndefined();
+    // …and the fix makes it DISTINGUISHABLE from a never-recorded baseline.
+    expect(classifyBaseline(tmp, goneRecord)).toBe('unrecoverable');
+
+    // The survivor's pinned blob is untouched → still recovers.
+    expect(recoverBaseline(tmp, survivorRecord)).toContain('UNIQUE survivor body');
+    expect(classifyBaseline(tmp, survivorRecord)).toBe('recovered');
+
+    // checkBaselineIntegrity aggregates the drift for M1/CI tooling.
+    const report = checkBaselineIntegrity(tmp);
+    expect(report.total).toBe(2);
+    expect(report.recovered).toBe(1);
+    expect(report.unrecoverable).toBe(1);
+    expect(report.noBaseline).toBe(0);
+    expect(report.unrecoverableSpecs).toContain(goneRel);
+    expect(report.unrecoverableSpecs).not.toContain(survivorRel);
+    // Invariant: the buckets partition the total.
+    expect(report.recovered + report.unrecoverable + report.noBaseline).toBe(report.total);
+  });
+
+  it('classifyBaseline returns "none" for a record that never recorded a baseline', () => {
+    // Legacy / all-mint-paths-failed shape: baselineBlob === '' (never a datapoint).
+    expect(classifyBaseline(tmp, record({ baselineBlob: '' }))).toBe('none');
   });
 });
