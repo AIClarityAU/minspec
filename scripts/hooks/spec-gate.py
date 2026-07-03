@@ -1,12 +1,31 @@
 #!/usr/bin/env python3
-"""MinSpec PreToolUse spec gate (DR-362, amended by SPEC-022 / DR-034).
+"""MinSpec PreToolUse spec gate (DR-362, amended by SPEC-022 / DR-034, scoped #426).
 
 Reads a Claude Code PreToolUse hook envelope on stdin and prints a JSON
-permission decision on stdout. Blocks Edit/Write/MultiEdit to *source* files
-while any T3/T4 spec that DERIVES to `implementing`/`done` is unapproved (or
-approved then edited -> stale). This is the only enforcement that survives
-bypass-permissions mode, because a PreToolUse deny blocks the tool call before
-permission rules.
+permission decision on stdout. Blocks Edit/Write/MultiEdit to a file ONLY when
+that file belongs to the OWNED FILE SET of a T3/T4 spec that DERIVES to
+`implementing`/`done` and is unapproved (or approved then edited -> stale). This
+is the only enforcement that survives bypass-permissions mode, because a
+PreToolUse deny blocks the tool call before permission rules.
+
+#426 scoping (DR-047 §3 — "doc-before-code for THAT doc, not a global freeze").
+  Earlier this gate blocked EVERY non-allowlisted source file while ANY unapproved
+  spec was in implementation — freezing unrelated work (e.g. a sibling P1 fix)
+  behind a spec it had nothing to do with. That contradicted DR-047 §3, which
+  scopes the doc-before-code sequence PAIRWISE to a doc and the code that realises
+  THAT doc, never repo-wide. The block is now scoped to each unapproved spec's own
+  file set:
+    (3a) its own artifacts — the per-spec `SPEC-NNN-*/` directory (or, for the flat
+         umbrella spec, its same-id sibling docs). ALWAYS owned; the fail-safe
+         minimum even when nothing else is derivable.
+    (3b) source files it EXPLICITLY names as implementation targets — a frontmatter
+         `implements:`/`affects:` list (forward-compatible; not in the corpus yet)
+         or backtick code-span paths in its own `tasks.md`, filtered to existing
+         source files so prose/placeholder tokens never match.
+    (3c) a spec that declares NO implementation files freezes only (3a); unrelated
+         source edits pass (fail-OPEN for unrelated files is correct per DR-047 §3).
+  A structured spec->impl-file convention (a first-class frontmatter glob list) is
+  a follow-up (see #426); until it lands, (3a)+(3b) are the derivation.
 
 SPEC-022 changes:
   - Approval ground truth is COMMITTED, path-keyed sidecars under
@@ -193,6 +212,141 @@ def resolve_record(cwd, canon_dir, rel_spec_path):
     return read_record(canon_dir, rel_spec_path)
 
 
+# --- #426 scoping: derive each spec's OWNED file set ------------------------
+
+_SPEC_DIR_RE = re.compile(r'^SPEC-\d+', re.I)
+# Source extensions a declared impl-file token must end in (3b precision filter).
+_SRC_EXT_RE = re.compile(
+    r'\.(?:ts|tsx|js|jsx|mjs|cjs|py|sh|bash|json|jsonc|css|scss|less|html|htm'
+    r'|vue|svelte|sql|ya?ml|toml)$', re.I)
+_INFRA_PREFIXES = ("node_modules/", "out/", "dist/", "coverage/", ".git/")
+_CODE_SPAN_RE = re.compile(r'`([^`]+)`')
+
+
+def _blocker_reason(sid, verdict):
+    if verdict == "stale":
+        return "%s (approval stale - spec edited since approval)" % sid
+    return "%s (not approved)" % sid
+
+
+def _same_id_md_siblings(cwd, spec_dir_abs, sid):
+    """Immediate *.md files in a FLAT spec dir that carry the same `id` (POSIX rels).
+
+    Used only for a flat/umbrella spec whose directory ALSO holds other specs'
+    subdirs (e.g. `specs/minspec/`): the owned set is the same-id sibling docs,
+    NEVER the whole parent tree. Fail-safe: read errors are skipped.
+    """
+    out = set()
+    try:
+        entries = glob.glob(os.path.join(spec_dir_abs, "*.md"))
+    except Exception:
+        return out
+    for f in entries:
+        try:
+            with open(f, "r", encoding="utf-8") as fh:
+                head = fh.read(8000)
+        except Exception:
+            continue
+        m = re.match(r'^---\n(.*?)\n---', head, re.S)
+        if not m or (fm_value(m.group(1), "id") or "") != sid:
+            continue
+        try:
+            out.add(os.path.relpath(f, cwd).replace(os.sep, "/"))
+        except Exception:
+            out.add(f.replace(os.sep, "/"))
+    return out
+
+
+def declared_impl_files(cwd, fm, spec_dir_abs):
+    """Source files a spec EXPLICITLY names as its implementation targets (3b).
+
+    Signals, in priority order:
+      - a frontmatter `implements:`/`affects:` list (structured; none in the
+        corpus yet — forward-compatible, tracked as a follow-up on #426), then
+      - backtick code-span paths in the spec's own `tasks.md`.
+    Precision filter (defeats prose/example/placeholder false positives): a token
+    counts only if it contains '/', ends in a known source extension, is not an
+    infra/escape path, and RESOLVES TO AN EXISTING FILE under cwd. Fully
+    fail-safe: any read error yields an empty set — the caller still applies the
+    own-dir (3a) protection, so a parse failure never silently unfreezes a spec.
+    """
+    files = set()
+
+    def consider(token):
+        token = token.strip().strip('"').strip("'").strip()
+        if not token or "/" not in token:
+            return
+        p = token.replace("\\", "/")
+        if p.startswith("./"):
+            p = p[2:]
+        # No absolute / parent-escape / infra paths.
+        if p.startswith("/") or p.startswith("../") or ".." in p.split("/"):
+            return
+        if p.startswith(_INFRA_PREFIXES):
+            return
+        if not _SRC_EXT_RE.search(p):
+            return
+        if os.path.isfile(os.path.join(cwd, p)):
+            files.add(p)
+
+    for key in ("implements", "affects"):
+        raw = fm_value(fm, key)
+        if raw:
+            for tok in re.split(r'[,\s\[\]]+', raw):
+                consider(tok)
+
+    try:
+        with open(os.path.join(spec_dir_abs, "tasks.md"), "r", encoding="utf-8") as fh:
+            tasks_text = fh.read()
+    except Exception:
+        tasks_text = ""
+    for m in _CODE_SPAN_RE.finditer(tasks_text):
+        consider(m.group(1))
+    return files
+
+
+def owned_file_set(cwd, sp, sid, fm):
+    """(prefixes, files) a spec OWNS — the ONLY files its unapproved state blocks.
+
+    - prefixes: directory prefixes owned wholesale (its per-spec `SPEC-NNN-*/`
+      dir, if it lives in one).
+    - files:    exact POSIX rel paths owned (flat same-id docs + declared impl).
+    Own artifacts (3a) are ALWAYS included — the fail-safe minimum even when the
+    declared-file derivation yields nothing.
+    """
+    spec_dir_abs = os.path.dirname(sp)
+    base = os.path.basename(spec_dir_abs)
+    prefixes = []
+    files = set()
+    if _SPEC_DIR_RE.match(base):
+        # Per-spec dir: own everything under it (prefix match, no glob needed).
+        try:
+            dir_rel = os.path.relpath(spec_dir_abs, cwd).replace(os.sep, "/")
+        except Exception:
+            dir_rel = spec_dir_abs.replace(os.sep, "/")
+        prefixes.append(dir_rel.rstrip("/") + "/")
+    else:
+        # Flat/umbrella spec: own only its same-id sibling docs, never the whole
+        # parent dir (which holds other specs' subdirs).
+        files |= _same_id_md_siblings(cwd, spec_dir_abs, sid)
+        try:
+            files.add(os.path.relpath(sp, cwd).replace(os.sep, "/"))
+        except Exception:
+            files.add(sp.replace(os.sep, "/"))
+    files |= declared_impl_files(cwd, fm, spec_dir_abs)
+    return prefixes, files
+
+
+def owned_match(rel, prefixes, files):
+    """True if `rel` (POSIX, cwd-relative) falls inside a spec's owned set."""
+    if rel in files:
+        return True
+    for pre in prefixes:
+        if rel == pre.rstrip("/") or rel.startswith(pre):
+            return True
+    return False
+
+
 def main():
     try:
         env = json.load(sys.stdin)
@@ -217,14 +371,8 @@ def main():
         rel = fpath
     rel = rel.replace(os.sep, "/")
 
-    # Allowlist: spec/review/config/doc/markdown/scripts are always editable,
-    # so the user can always write or fix the specs that unblock the gate.
-    allow_prefixes = ("specs/", "docs/", ".minspec/", "scripts/", ".claude/", ".github/")
-    if rel.startswith(allow_prefixes) or rel.endswith(".md") or rel.startswith("../"):
-        allow()
-    if rel.startswith(("node_modules/", "out/", "dist/", "coverage/", ".git/")):
-        allow()
-    if rel in ("package.json", "package-lock.json", "tsconfig.json"):
+    # A path outside the repo (../…) can never be part of a spec's file set.
+    if rel.startswith("../"):
         allow()
 
     # Approval resolution: committed sidecar under cwd FIRST (FR-1 — present in
@@ -235,9 +383,16 @@ def main():
     canon_dir = canonical_minspec_dir(cwd)
     canon_resolved = canon_dir is not None
 
-    blockers = []
-    migrated_notes = []
+    # Build the blocking set: every T3/T4 spec whose PHASES put it in the
+    # implementation range (plan/tasks/implement/done) AND whose approval is
+    # missing/stale, paired with the file set it OWNS. A target file is blocked
+    # ONLY if it falls inside one of these owned sets (#426 / DR-047 §3 — the
+    # doc-before-code gate applies to the code implementing THAT doc, never a
+    # repo-wide freeze).
     gated = 0
+    blocking = []      # (sid, verdict, prefixes, files)
+    migrated = []      # (sid, prefixes, files)
+    seen_ids = set()
     for sp in glob.glob(os.path.join(cwd, "specs", "**", "*.md"), recursive=True):
         try:
             with open(sp, "r", encoding="utf-8") as fh:
@@ -290,51 +445,65 @@ def main():
         intended = phase_intent_status(phases, explicit_terminal)
         if intended not in ("implementing", "done"):
             continue  # phases don't put it in implementation — nothing to gate
+
+        # One entry per spec identity. In practice only requirements.md carries
+        # the tier, but dedup defensively so a spec is never double-listed.
+        if sid in seen_ids:
+            continue
+        seen_ids.add(sid)
         gated += 1
 
-        if approval == "unapproved":
-            blockers.append("%s (not approved)" % sid)
-        elif approval == "stale":
-            blockers.append("%s (approval stale - spec edited since approval)" % sid)
+        prefixes, files = owned_file_set(cwd, sp, sid, fm)
+
+        if approval in ("unapproved", "stale"):
+            blocking.append((sid, approval, prefixes, files))
         elif rec and rec.get("migrated") is True:
             # WARN phase: migrated counts as approved -> non-blocking, but noted.
-            migrated_notes.append(sid)
+            migrated.append((sid, prefixes, files))
 
-    # Fail closed: if the canonical store is unresolvable (cwd not a repo) AND
-    # gated specs exist with NO committed sidecar found, we cannot prove a human
-    # approved -> deny. With a committed sidecar (FR-1) this no longer trips for
-    # a normal clone/worktree. (python3-missing is handled fail-open in the .sh.)
-    if not canon_resolved and gated > 0 and blockers:
+    # Does the target file fall inside any BLOCKING spec's owned set?
+    matched = [(sid, verdict) for (sid, verdict, pre, fil) in blocking
+               if owned_match(rel, pre, fil)]
+
+    if matched:
+        # Fail closed: if the canonical store is unresolvable (cwd is not a git
+        # checkout) we cannot positively prove a human approved — and this file IS
+        # in an unapproved spec's owned set, so deny rather than risk unfreezing
+        # it. Unrelated files never reach here (matched would be empty), so the
+        # fail-closed guard no longer freezes unrelated work. (python3-missing is
+        # handled fail-open in the .sh.)
+        if not canon_resolved:
+            deny(
+                "MinSpec gate: source edit to '%s' blocked. "
+                "Cannot resolve the approval store (no readable git checkout) and "
+                "the file is in the owned set of %d unapproved T3/T4 spec(s) in "
+                "implementation. Failing closed: a human approval cannot be "
+                "verified." % (rel, len(matched))
+            )
+        names = ", ".join(_blocker_reason(sid, v) for sid, v in matched)
         deny(
             "MinSpec gate: source edit to '%s' blocked. "
-            "Cannot resolve the approval store (no readable git checkout) and %d "
-            "T3/T4 spec(s) derive to implementation. Failing closed: a human "
-            "approval cannot be verified." % (rel, gated)
+            "Unapproved T3/T4 spec(s) in implementation: %s. "
+            "A human must review and approve the spec first "
+            "(VS Code: 'MinSpec: Approve Spec for Implementation', or the checkmark "
+            "in the MinSpec sidebar)."
+            % (rel, names)
         )
 
-    if not blockers:
-        # WARN phase: migrated records are allowed but surfaced (still allow()).
-        if migrated_notes:
-            print(json.dumps({"hookSpecificOutput": {
-                "hookEventName": "PreToolUse",
-                "permissionDecision": "allow",
-                "permissionDecisionReason": (
-                    "MinSpec gate (WARN): approval migrated for %s — re-approve to "
-                    "clear (MinSpec: Approve Spec for Implementation). Allowed for "
-                    "now; promotion to a hard block is pending a clean corpus."
-                    % ", ".join(migrated_notes))}}))
-            sys.exit(0)
-        allow()
-
-    names = ", ".join(blockers)
-    deny(
-        "MinSpec gate: source edit to '%s' blocked. "
-        "Unapproved T3/T4 spec(s) in implementation: %s. "
-        "A human must review and approve the spec first "
-        "(VS Code: 'MinSpec: Approve Spec for Implementation', or the checkmark "
-        "in the MinSpec sidebar)."
-        % (rel, names)
-    )
+    # No blocker owns this file. Surface a migrated-approval WARN only when the
+    # file is inside a migrated spec's own set (FR-5, scoped), else plain allow.
+    warn_ids = [sid for (sid, pre, fil) in migrated if owned_match(rel, pre, fil)]
+    if warn_ids:
+        print(json.dumps({"hookSpecificOutput": {
+            "hookEventName": "PreToolUse",
+            "permissionDecision": "allow",
+            "permissionDecisionReason": (
+                "MinSpec gate (WARN): approval migrated for %s — re-approve to "
+                "clear (MinSpec: Approve Spec for Implementation). Allowed for "
+                "now; promotion to a hard block is pending a clean corpus."
+                % ", ".join(warn_ids))}}))
+        sys.exit(0)
+    allow()
 
 
 if __name__ == "__main__":
