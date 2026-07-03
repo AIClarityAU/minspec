@@ -164,15 +164,16 @@ ALLOWED_TOOLS="Read,Edit,Write,Glob,Grep,Bash(npm test),Bash(npm run validate),B
 
 # ── Independent reviewer stage (DR-033 §6 · #342) ─────────────────────────────
 # A SECOND agent — never the dev agent that wrote the code — reviews the pushed
-# diff and posts an ADVISORY approve / request-changes verdict on the PR. This is
-# the independent counterpart to #180's self-attestation (self-report ≠ proof).
+# diff and posts an ADVISORY ai-review:pass / ai-review:changes verdict on the PR.
+# This is the independent counterpart to #180's self-attestation (self-report ≠
+# proof).
 # Invariants held here:
 #   • credential-free agent: review-branch.sh grants the reviewer ONLY read-only
 #     tools; THIS parent applies every credentialed op (PR create / review /
 #     label) AFTER the agent exits — same discipline as the push + comment above.
 #   • fail-closed: review-decide.sh downgrades a missing/garbled/injected
-#     "approve" to request-changes; a security request-changes overrides a
-#     reviewer approve (combine = fail toward the safe outcome).
+#     "verdict: pass" to ai-review:changes; a security ai-review:changes overrides
+#     a reviewer ai-review:pass (combine = fail toward the safe outcome).
 #   • never-throw: any failure degrades to ai-review:changes + a stderr WARNING
 #     and NEVER blocks the agent-done labelling / issue-comment behaviour below.
 # Reuses the shared, trigger-agnostic unit (review-branch.sh + review-decide.sh)
@@ -184,31 +185,29 @@ run_reviewer_stage() {
   local reviewer="${SCRIPT_DIR}/review-branch.sh"
 
   # 1. General reviewer (always). Pipe raw agent output → deterministic gate.
-  local rev_out rev_line reviewer_decision
+  #    The gate emits the FINAL label directly (ai-review:pass|ai-review:changes).
+  local rev_out reviewer_verdict
   rev_out=$( cd "$WORKTREE" && "$reviewer" "$base" HEAD --role reviewer 2>>"$LOG" ) || true
-  rev_line=$( printf '%s\n' "$rev_out" | "$decide" ) || true
-  reviewer_decision=$(printf '%s' "$rev_line" | awk '{print $1}')
-  [[ -z "$reviewer_decision" ]] && reviewer_decision="request-changes"
+  reviewer_verdict=$( printf '%s\n' "$rev_out" | "$decide" | tr -d '[:space:]' ) || true
+  [[ -z "$reviewer_verdict" ]] && reviewer_verdict="ai-review:changes"
 
   # 2. Security reviewer — ONLY when the diff touches packages/ source.
-  local touches_pkg sec_out="" sec_decision=""
+  local touches_pkg sec_out="" sec_verdict=""
   if git -C "$WORKTREE" diff --name-only "${base}...HEAD" | grep -q '^packages/'; then
     touches_pkg="yes"
-    local sec_line
     sec_out=$( cd "$WORKTREE" && "$reviewer" "$base" HEAD --role security 2>>"$LOG" ) || true
-    sec_line=$( printf '%s\n' "$sec_out" | "$decide" ) || true
-    sec_decision=$(printf '%s' "$sec_line" | awk '{print $1}')
-    [[ -z "$sec_decision" ]] && sec_decision="request-changes"
+    sec_verdict=$( printf '%s\n' "$sec_out" | "$decide" | tr -d '[:space:]' ) || true
+    [[ -z "$sec_verdict" ]] && sec_verdict="ai-review:changes"
   else
     touches_pkg="no"
   fi
 
-  # 3. Combine: approve IFF reviewer approved AND (no security run OR security
-  #    approved). Any request-changes → request-changes (fail toward safe).
-  local combined="request-changes"
-  if [[ "$reviewer_decision" == "approve" ]]; then
-    if [[ "$touches_pkg" != "yes" || "$sec_decision" == "approve" ]]; then
-      combined="approve"
+  # 3. Combine: ai-review:pass IFF reviewer passed AND (no security run OR security
+  #    passed). Any ai-review:changes → ai-review:changes (fail toward safe).
+  local combined="ai-review:changes"
+  if [[ "$reviewer_verdict" == "ai-review:pass" ]]; then
+    if [[ "$touches_pkg" != "yes" || "$sec_verdict" == "ai-review:pass" ]]; then
+      combined="ai-review:pass"
     fi
   fi
 
@@ -247,7 +246,7 @@ run_reviewer_stage() {
   #    after the agent exited. `gh pr review --approve/--request-changes` fails on
   #    a self-authored PR, so fall back to a plain comment; the LABEL is the
   #    load-bearing signal that ready-to-merge.yml reflects into the merge gate.
-  if [[ "$combined" == "approve" ]]; then
+  if [[ "$combined" == "ai-review:pass" ]]; then
     gh pr edit "$pr_num" --repo "$REPO" --add-label "ai-review:pass" --remove-label "ai-review:changes" 2>/dev/null || true
     gh pr review "$pr_num" --repo "$REPO" --approve --body "$review_body" 2>/dev/null \
       || gh pr comment "$pr_num" --repo "$REPO" --body "$review_body" 2>/dev/null || true

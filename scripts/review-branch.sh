@@ -24,8 +24,8 @@
 #   • Read-only filesystem tools ONLY (Read, Glob, Grep) so it can open the
 #     files the diff touches and their callers ("read the enclosing function") —
 #     the whole point of an independent review over a blind diff read.
-# Defense in depth: review-decide.sh fails an injected "decision: approve" closed
-# to request-changes, and the human still holds the merge keystroke (never-wrong
+# Defense in depth: review-decide.sh fails an injected "verdict: pass" closed
+# to ai-review:changes, and the human still holds the merge keystroke (never-wrong
 # / HITL). Residual risk: a prompt-injected diff could coax the reviewer into
 # echoing a file's contents into its verdict TEXT (which a parent may post to a
 # PR); that channel is text-only, gated by review-decide.sh, and accepted per
@@ -95,19 +95,21 @@ callers of the touched code where it sharpens the review. Then emit EXACTLY ONE
 verdict block, and NOTHING after it:
 
 REVIEW_VERDICT_BEGIN
-decision: approve | request-changes
-severity: none | low | medium | high | critical
-findings: <file:line — one-line finding>
-rationale: <one line>
+verdict: pass | changes
+blocking: <integer>
+summary: <one line>
+findings:
+- <sev> <file:line> — <what and why> (omit this list entirely if none)
 REVIEW_VERDICT_END
 
 Rules for the block:
-- decision: "approve" ONLY if the change is correct, complete, and safe to merge;
-  otherwise "request-changes".
-- severity: the worst finding's severity ("none" iff you approve with no findings).
-- findings: repeat the "findings:" line once per finding (zero or more); each is
-  "<file:line — one-line problem>". Omit the line entirely if there are none.
-- rationale: one line summarising the verdict.
+- verdict: "pass" ONLY if the change is correct, complete, and safe to merge;
+  otherwise "changes".
+- blocking: the count of correctness/blocking findings (an integer; 0 to pass).
+  A single blocking finding means verdict must be "changes".
+- summary: one line summarising the verdict.
+- findings: one bullet per finding "<sev> <file:line> — problem" (zero or more);
+  omit the whole list if there are none.
 CONTENT
 )
 
