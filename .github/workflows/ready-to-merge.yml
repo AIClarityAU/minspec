@@ -1,174 +1,324 @@
-# ready-to-merge — AI-review merge gate
+# ready-to-merge — AI-review label-integrity + merge gate
 #
 # Posts a commit status named `ready-to-merge` on the PR head SHA that is GREEN
-# iff the PR is AI-greenlit, so branch protection can require it and a downstream
-# merge-gate / signpost can read it.
+# iff the PR carries a *trustworthy* AI greenlight, so branch protection can
+# require it and a downstream merge-gate / signpost can read it.
 #
-#   SUCCESS  when the PR has label `ai-review:pass`  AND NOT `ai-review:changes`
-#   FAILURE  otherwise (description: "needs ai-review:pass")
+#   SUCCESS  when the PR has a *verified* `ai-review:pass` AND NOT `ai-review:changes`
+#   FAILURE  otherwise (description names the reason)
 #
 # An independent AI reviewer posts verdicts and applies the `ai-review:pass` /
-# `ai-review:changes` labels to PRs; this check reflects those labels as a
-# required-able commit status — and now also actively guards their integrity
-# (staleness #359, provenance #397) so a stale or forged label cannot slip a PR
-# through.
+# `ai-review:changes` labels; this workflow reflects those labels as a
+# required-able commit status AND enforces the label-integrity guards below so the
+# label cannot be forged or go stale. It is the SINGLE writer of the
+# `ready-to-merge` status (one job, all events) — do not add a second workflow
+# that also posts this status, or the two will race on the same (sha, context).
 #
-# ── MANUAL STEP (cannot be done from a file) ─────────────────────────────────
-# A workflow file CANNOT make itself gating. To enforce this gate, a human must
-# add `ready-to-merge` as a *required status check* in repo Settings → Branches
-# → branch protection rule (or a branch ruleset) for `main`. Until then this
-# status is advisory only. (MinSpec's post-init ruleset advisor now suggests
-# this check by DEFAULT on repos that have THIS workflow wired — see
-# ruleset-advisor.ts / init.ts / #390 — but a workflow still cannot require
-# itself; the advisor only proposes it.)
+# ── THREATS CLOSED ───────────────────────────────────────────────────────────
+# #359 (staleness): on `synchronize` (new commits pushed to a PR that already
+#   has `ai-review:pass`), the old greenlight reviewed an older head. This strips
+#   `ai-review:pass` and re-posts `ready-to-merge` as failing, so a stale pass
+#   cannot gate the new, unreviewed head.
 #
-# ── LABEL-INTEGRITY (staleness #359 + provenance #397) ───────────────────────
-# A GitHub label is hand-addable by anyone with write access, so a naive reflect
-# of label PRESENCE trusts the label's FRESHNESS and its PROVENANCE. Two active
-# guards close those holes here:
+# #397 (provenance): a GitHub label is hand-addable by anyone with write access.
+#   On PR #200 a human hand-set `ai-review:pass` with no review run, turning this
+#   check green over a spec that a real review then found had two auto-merge
+#   holes. On a `labeled` event that adds `ai-review:pass`, this verifies the
+#   label came from an *allowlisted reviewer identity*; if not, it reverts the
+#   label, fails the status, and leaves an audit comment.
 #
-#   • STALENESS (#359): on `synchronize` (a new commit pushed to the PR) any
-#     existing `ai-review:pass` / `ai-review:changes` is REMOVED before the
-#     status is recomputed — a verdict from a previous commit is not valid for
-#     unreviewed new code, so the gate goes red until a fresh review re-labels.
-#     The removal and the failure status happen in the SAME run (no second event
-#     needed to catch up).
+# The revert (add-time) and strip (push-time) guards are best-effort *cleanup* —
+# a transient API failure can leave a forged/stale label present. So the gate
+# NEVER trusts bare label presence: on every event any surviving `ai-review:pass`
+# is independently re-verified against the PR's own event timeline — it counts
+# only if it was LAST APPLIED BY an allowlisted reviewer identity AND AFTER the
+# current head commit (guard.verifyPassProvenance). Unverifiable presence ⇒ red.
+# This also closes the gap where a pass was already present before this guard was
+# deployed, or lingers on a stale head after a failed strip.
+# NOTE: `ai-review:changes` is not provenance-guarded — a forged `changes` can
+# only make the gate stricter (fail), never falsely green, so it is fail-safe.
 #
-#   • PROVENANCE (#397): on `labeled`, if an `ai-review:*` label was applied by
-#     an actor NOT on the authorized allowlist, it is reverted and not counted —
-#     so a hand-applied `pass` cannot turn this check green.
+# ── REQUIRED MANUAL STEP 1 — reviewer identity (provenance) ──────────────────
+# Set the repo/org Actions *variable* `AI_REVIEW_BOT_LOGINS` to the login(s) that
+# are allowed to apply `ai-review:*` labels — Settings → Secrets and variables →
+# Actions → Variables → New repository variable. Value is comma/space separated:
+#   - a bot USER account login, e.g. `minspec-review-bot`
+#   - and/or a GitHub App login, which looks like `my-review-app[bot]`
+# This MUST be a dedicated reviewer identity, NOT a maintainer's day-to-day
+# account — if a human's own login is allowlisted, a hand-applied pass from that
+# human is indistinguishable from a real review and the guarantee collapses.
+# Until this variable is set, the allowlist is empty and EVERY `ai-review:pass`
+# is treated as unverifiable → never green (fail closed).
 #
-#     RESIDUAL GAP (documented honestly — no full fix available yet): the
-#     reviewer automation (#342) currently runs `dispatch-issue.sh` locally under
-#     a HUMAN maintainer's own `gh` auth — there is NO dedicated reviewer bot /
-#     GitHub App identity. So provenance can only be enforced at ACCOUNT
-#     granularity: "applied by an allowlisted account" (default: the repo owner;
-#     override via the `AI_REVIEW_LABEL_ACTORS` repo variable, a comma-separated
-#     login allowlist). This CANNOT distinguish an allowlisted account that ran a
-#     real review from that same account hand-applying the label (the #200
-#     incident shape). Fully closing that gap needs a dedicated bot/App token
-#     that applies the label ONLY from the reviewer run, with NO human — not even
-#     the maintainer — in the allowlist. Until that exists, this narrows the
-#     attack surface from "anyone with write access" to "the allowlisted reviewer
-#     identity" — a real but partial mitigation. A guard keyed on
-#     `sender.type == 'Bot'` is deliberately NOT used: #342 applies labels as a
-#     human, so a bot-only rule would wrongly strip its legitimate labels.
+# ── REQUIRED MANUAL STEP 2 — make the gate enforcing ─────────────────────────
+# A workflow file cannot make itself gating. Add `ready-to-merge` as a *required
+# status check* in Settings → Branches → branch protection for `main`. Until
+# then this status is advisory only. It is the independent-review check that must
+# be green before merge.
+#
+# ── SECURITY ─────────────────────────────────────────────────────────────────
+# SELF-FORGE DEFENCE (load-bearing): the checkout is pinned to the TRUSTED BASE
+# commit (`pull_request.base.sha`), NOT the PR head/merge ref. The step below
+# `require`s `.github/scripts/ai-review-guard.js` from the checked-out tree and
+# that module IS the security decision — so if it were taken from the PR's own
+# tree, a same-repo PR (which gets a read-write GITHUB_TOKEN) could edit the guard
+# to always return success and self-post a green `ready-to-merge`, a strictly
+# easier forge than the label trick this guard exists to block. Pinning to the
+# base runs the base branch's guard, immune to any edit the PR makes. The job
+# fails closed if `pull_request.base.sha` is absent, or if the base guard cannot
+# be loaded (e.g. before the branch that introduces the module is merged).
+#
+# No untrusted input (label names, actor logins, timestamps, PR title/body/branch)
+# ever reaches a shell: it is compared as JS data and handed to the REST API as
+# JSON. There is no `run:` interpolation of `${{ github.event.* }}` — the only
+# such interpolations are the trusted commit SHA / token / configured variable,
+# read via `env:`. On fork PRs the built-in GITHUB_TOKEN is read-only, so the
+# mutating calls below fail and the status is never set green — fail closed.
 
 name: ready-to-merge
 
 on:
   pull_request:
-    # opened/synchronize/reopened: (re)post the status when the PR or its head
-    # commit changes. synchronize ALSO strips stale ai-review:* labels (#359).
-    # labeled/unlabeled: re-evaluate the moment an ai-review:* label is
-    # added/removed — and, on `labeled`, guard the added label's provenance
-    # (#397) before it can count toward the status.
+    # opened/reopened: (re)post the status for the PR's current head.
+    # synchronize: new head commit → strip any stale `ai-review:pass` (#359).
+    # labeled/unlabeled: re-evaluate the moment an ai-review:* label changes;
+    #   `labeled` is also where the provenance guard runs (#397).
+    # Every `pull_request` event carries `pull_request.base.sha`, which the
+    # self-forge defence pins the checkout to (see SECURITY above).
     types: [opened, synchronize, reopened, labeled, unlabeled]
 
 permissions:
-  statuses: write       # post the `ready-to-merge` commit status on the PR head SHA
-  # pull-requests: write is the LEAST privilege that still lets this job REMOVE a
-  # PR label — needed to strip a stale verdict on `synchronize` (#359) and to
-  # revert an unauthorized `ai-review:*` addition on `labeled` (#397). No
-  # `contents`, no scope broader than the label read/remove + status post require.
-  pull-requests: write  # read the PR's labels AND remove stale/forged ai-review:* labels
+  statuses: write        # post the `ready-to-merge` commit status on the PR head SHA
+  pull-requests: write   # remove a stale/forged `ai-review:pass` + post an audit comment
+  issues: read           # read the PR's label timeline (issue events API) for pass provenance
+  contents: read         # checkout the trusted base commit + read the head commit's timestamp
 
 jobs:
   ready-to-merge:
     runs-on: ubuntu-latest
     steps:
-      - name: Guard label integrity, then reflect ai-review labels as the `ready-to-merge` status
+      # ── Fail closed if we cannot pin the checkout to a trusted base commit ──
+      # The guard script is `require`d from the checked-out tree and IS the
+      # security decision, so it must come from the trusted base — never the PR's
+      # own tree. Every `pull_request` event carries `pull_request.base.sha`; if a
+      # future trigger were added without it, refuse to run rather than execute
+      # the guard from an unpinned (PR-influenced) tree. The SHA is read via env
+      # (not interpolated into the script body) — injection-safe, and it is a
+      # GitHub-assigned commit id, not attacker free-text.
+      - name: Require a trusted base commit
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          if [ -z "$BASE_SHA" ]; then
+            echo "::error::No pull_request.base.sha to pin the checkout — refusing to run the guard against an unpinned tree (fail closed)."
+            exit 1
+          fi
+
+      # Check out the TRUSTED BASE commit (NOT the PR head/merge ref) so this job
+      # always executes the base branch's ai-review-guard.js — a PR editing that
+      # file cannot influence its own gate (self-forge defence, see SECURITY).
+      # persist-credentials:false keeps the token out of git config (never pushes).
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event.pull_request.base.sha }}
+          persist-credentials: false
+
+      - name: Enforce ai-review label integrity and reflect the merge gate
         uses: actions/github-script@v7
         env:
           # Built-in token; scoped by the permissions block above.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Optional comma-separated allowlist of GitHub logins permitted to
-          # apply `ai-review:*` labels (the reviewer automation's account(s)).
-          # Unset → falls back to the repo owner (the account #342 runs under).
-          AI_REVIEW_LABEL_ACTORS: ${{ vars.AI_REVIEW_LABEL_ACTORS }}
+          # Allowlist of logins permitted to apply ai-review:* labels. Configured
+          # by the owner (see REQUIRED MANUAL STEP 1). Empty ⇒ fail closed.
+          AI_REVIEW_BOT_LOGINS: ${{ vars.AI_REVIEW_BOT_LOGINS }}
         with:
           script: |
+            const path = require('path');
             const pr = context.payload.pull_request;
-            const action = context.payload.action; // opened|synchronize|reopened|labeled|unlabeled
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
+            const { owner, repo } = context.repo;
 
-            const PASS = 'ai-review:pass';
-            const CHANGES = 'ai-review:changes';
-
-            // Remove a label from the PR, tolerating "not present" (404).
-            async function removeLabel(name) {
-              try {
-                await github.rest.issues.removeLabel({
-                  owner, repo, issue_number: pr.number, name,
-                });
-                core.info(`removed label ${name}`);
-              } catch (e) {
-                if (e.status !== 404) throw e;
+            // ── Load the guard from the TRUSTED BASE tree (self-forge defence) ─
+            // If it is missing/unreadable — e.g. before the branch that adds the
+            // module is merged into the base — we cannot make a trusted decision,
+            // so fail closed: post red and stop.
+            let guard;
+            try {
+              guard = require(
+                path.join(process.env.GITHUB_WORKSPACE, '.github/scripts/ai-review-guard.js'),
+              );
+              if (typeof guard.verifyPassProvenance !== 'function') {
+                throw new Error('base guard module lacks verifyPassProvenance');
               }
+            } catch (e) {
+              core.warning(`ai-review-guard unavailable on the base commit: ${e.message}`);
+              await github.rest.repos.createCommitStatus({
+                owner,
+                repo,
+                sha: pr.head.sha,
+                state: 'failure',
+                context: 'ready-to-merge',
+                description: 'guard module unavailable on base commit — fail closed',
+              });
+              return;
             }
 
-            // ── #397 provenance: who may apply ai-review:* labels ──
-            // No dedicated reviewer bot exists yet (see header RESIDUAL GAP), so
-            // enforce at ACCOUNT granularity: an allowlist of logins. Default to
-            // the repo owner (the account the reviewer automation, #342, runs
-            // under); override via the AI_REVIEW_LABEL_ACTORS repo variable.
-            const configured = (process.env.AI_REVIEW_LABEL_ACTORS || '')
-              .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
-            const authorized = configured.length ? configured : [owner.toLowerCase()];
-            const sender = ((context.payload.sender && context.payload.sender.login) || '').toLowerCase();
-            const senderAuthorized = authorized.includes(sender);
-
+            const action = context.payload.action;
             const labels = (pr.labels || []).map((l) => l.name);
-            let hasPass = labels.includes(PASS);
-            let hasChanges = labels.includes(CHANGES);
+            // The just-added label (labeled events) and the actor who added it.
+            const addedLabel = context.payload.label && context.payload.label.name;
+            const senderLogin = context.payload.sender && context.payload.sender.login;
+            const allowlist = guard.parseAllowlist(process.env.AI_REVIEW_BOT_LOGINS);
 
-            // ── #359 staleness: a verdict from a previous commit is not valid
-            // for the new code a `synchronize` just pushed. Strip both verdict
-            // labels and recompute as ungreenlit — in THIS run, so the failure
-            // status lands on the new head SHA without waiting for a second event.
-            if (action === 'synchronize') {
-              if (hasPass) await removeLabel(PASS);
-              if (hasChanges) await removeLabel(CHANGES);
-              hasPass = false;
-              hasChanges = false;
-              core.info('synchronize: stripped stale ai-review:* labels; a fresh review is required.');
-            }
+            // ── Active-cleanup decisions (pure) ────────────────────────────
+            const provenance = guard.decideProvenanceRevert({
+              action,
+              labelName: addedLabel,
+              senderLogin,
+              allowlist,
+            });
+            const staleness = guard.decideStalenessStrip({ action, labels });
 
-            // ── #397 provenance: on `labeled`, if the just-added ai-review:*
-            // label came from an actor NOT on the allowlist, revert it and do
-            // not count it — a hand-applied `pass` must not turn this green.
-            if (action === 'labeled') {
-              const added = context.payload.label && context.payload.label.name;
-              if ((added === PASS || added === CHANGES) && !senderAuthorized) {
-                await removeLabel(added);
-                if (added === PASS) hasPass = false;
-                if (added === CHANGES) hasChanges = false;
-                core.warning(
-                  `${added} was applied by @${sender || 'unknown'}, not an authorized ` +
-                  `ai-review labeler (${authorized.join(', ')}); reverted. Set the ` +
-                  `AI_REVIEW_LABEL_ACTORS repo variable to authorize the reviewer ` +
-                  `automation's account.`,
-                );
+            // ── Provenance-recency verification of any *surviving* pass ────
+            // Never trust bare presence: a present ai-review:pass greens the gate
+            // only if the PR timeline shows it was LAST APPLIED BY an allowlisted
+            // reviewer identity AND AFTER the current head commit. (Skipped when a
+            // revert/strip is already dropping the pass this event.)
+            let passProvenance = { verified: false, reason: 'ai-review:pass not present' };
+            if (labels.includes(guard.PASS) && !provenance.revert && !staleness.strip) {
+              // (1) Head commit timestamp — the recency reference.
+              let headCommittedAt = null;
+              try {
+                const { data: head } = await github.rest.repos.getCommit({
+                  owner,
+                  repo,
+                  ref: pr.head.sha,
+                });
+                headCommittedAt =
+                  head.commit && head.commit.committer && head.commit.committer.date;
+              } catch (e) {
+                core.warning(`could not read head commit ${pr.head.sha}: ${e.message}`);
               }
+
+              // (2) Who LAST applied ai-review:pass, and when.
+              let labelActor = null;
+              let labelAppliedAt = null;
+              if (action === 'labeled' && addedLabel === guard.PASS) {
+                // This very event applied the pass: use the GitHub-signed sender
+                // and now() — authoritative, and avoids eventual-consistency lag
+                // in the events list; the head commit already exists, so now() is
+                // strictly after it.
+                labelActor = senderLogin;
+                labelAppliedAt = new Date().toISOString();
+              } else {
+                try {
+                  const events = await github.paginate(github.rest.issues.listEvents, {
+                    owner,
+                    repo,
+                    issue_number: pr.number,
+                    per_page: 100,
+                  });
+                  const lastPass = events
+                    .filter(
+                      (ev) => ev.event === 'labeled' && ev.label && ev.label.name === guard.PASS,
+                    )
+                    .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at))
+                    .pop();
+                  if (lastPass) {
+                    labelActor = lastPass.actor && lastPass.actor.login;
+                    labelAppliedAt = lastPass.created_at;
+                  }
+                } catch (e) {
+                  core.warning(`could not read PR label timeline: ${e.message}`);
+                }
+              }
+
+              passProvenance = guard.verifyPassProvenance({
+                labelActor,
+                labelAppliedAt,
+                headCommittedAt,
+                allowlist,
+              });
             }
 
-            const isGreen = hasPass && !hasChanges;
-            const state = isGreen ? 'success' : 'failure';
-            const description = isGreen ? 'AI review passed' : 'needs ai-review:pass';
+            // ── Decide the authoritative status (pure) ─────────────────────
+            const status = guard.decideStatus({
+              labels,
+              provenanceRevert: provenance.revert,
+              stalenessStrip: staleness.strip,
+              passProvenance,
+            });
 
-            // Post the status on the PR HEAD sha (not the merge sha), so branch
-            // protection on the PR's head commit can require it.
+            // ── Post the authoritative gate status FIRST (fail closed) ─────
+            // Derived from the decided effective label set + provenance check, so
+            // even if the label removal below fails, the gate is already correct.
             await github.rest.repos.createCommitStatus({
               owner,
               repo,
               sha: pr.head.sha,
-              state,
+              state: status.state,
               context: 'ready-to-merge',
-              description,
+              description: status.description,
             });
-
             core.info(
-              `ready-to-merge=${state} (ai-review:pass=${hasPass}, ` +
-              `ai-review:changes=${hasChanges}, action=${action}) on ${pr.head.sha}`,
+              `ready-to-merge=${status.state} on ${pr.head.sha} — ${status.description} ` +
+                `(action=${action}, labels=[${labels.join(', ')}], ` +
+                `passVerified=${passProvenance.verified})`,
             );
+
+            // ── Cleanup + audit trail for the revert/strip guards ──────────
+            // The security-critical removal is NOT best-effort: on a revert/strip,
+            // if removeLabel fails with anything other than 404 (already gone) we
+            // THROW so the run goes RED — a forged/stale label must never be left
+            // silently in place (its later re-green is only otherwise blocked by
+            // the provenance re-verification above; belt and suspenders).
+            const removePass = async () => {
+              try {
+                await github.rest.issues.removeLabel({
+                  owner,
+                  repo,
+                  issue_number: pr.number,
+                  name: guard.PASS,
+                });
+              } catch (e) {
+                // 404 = already gone (concurrent removal) — safe to ignore.
+                if (guard.isBenignRemovalError(e.status)) return;
+                // Anything else (rate limit / 5xx / 403): the forged/stale label
+                // may still be present — fail the run rather than swallow it.
+                throw new Error(
+                  `failed to remove forged/stale ${guard.PASS} (status ${e.status}): ${e.message}`,
+                );
+              }
+            };
+            const comment = async (body) =>
+              github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: pr.number,
+                body,
+              });
+
+            if (provenance.revert) {
+              core.warning(
+                `PROVENANCE: reverting ${guard.PASS} — ${provenance.reason} ` +
+                  `(sender=${senderLogin})`,
+              );
+              // Audit comment first so it lands even if the removal below throws.
+              await comment(
+                `<!-- ai-review-guard:provenance -->\n` +
+                  `**\`ai-review:pass\` reverted — provenance check (#397).**\n\n` +
+                  `${provenance.reason}. The \`ready-to-merge\` gate is red until an ` +
+                  `allowlisted reviewer identity re-applies it after a real review.\n\n` +
+                  `Owner: set the \`AI_REVIEW_BOT_LOGINS\` Actions variable to your ` +
+                  `reviewer identity (see \`.github/workflows/ready-to-merge.yml\`).`,
+              );
+              await removePass();
+            } else if (staleness.strip) {
+              core.warning(`STALENESS: stripping stale ${guard.PASS} — ${staleness.reason}`);
+              await comment(
+                `<!-- ai-review-guard:staleness -->\n` +
+                  `**\`ai-review:pass\` stripped — new commits (#359).**\n\n` +
+                  `${staleness.reason}. A fresh independent review must re-apply ` +
+                  `\`ai-review:pass\` before \`ready-to-merge\` goes green again.`,
+              );
+              await removePass();
+            }

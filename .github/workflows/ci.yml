@@ -28,6 +28,13 @@ jobs:
       - name: Validate frontmatter
         run: npm run validate
 
+      # Pure decision logic behind the ai-review label-integrity gate
+      # (.github/workflows/ready-to-merge.yml). Lives under .github/scripts so it
+      # is outside vitest's packages/* include; run it directly on Node so the
+      # security-critical revert/strip/green decisions stay enforced in CI.
+      - name: Unit-test ai-review label guard
+        run: node --test .github/scripts/ai-review-guard.test.js
+
   test:
     runs-on: ubuntu-latest
     steps:
