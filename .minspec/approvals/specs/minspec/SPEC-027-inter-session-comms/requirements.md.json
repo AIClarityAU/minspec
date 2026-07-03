@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-027-inter-session-comms/requirements.md",
+  "specHash": "deb6dc765ceecf039943c494bba6e620f54f55e56b13d88b10b59a309ef1ed10",
+  "approvedAt": "2026-07-03T04:12:13.161Z",
+  "approvedBy": "claude@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "235cc04a89a6cb30e93c6fc00cf6d5bff7fccca7"
+}
