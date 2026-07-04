@@ -50,7 +50,7 @@ Monorepo for two VS Code extensions + extension pack:
 | Package | ID | Domain | Status |
 |---|---|---|---|
 | `packages/minspec` | `aiclarity.minspec` | minspec.dev | SDD Implement phase |
-| ↪ split out → **`harvest316/scroogellm`** (private) | `aiclarity.scroogellm` | scroogellm.com | Moved to its own repo per DR-027; SDD Specify there. Code lands there (harvest316/minspec#119), not in `packages/`. |
+| ↪ split out → **`harvest316/scroogellm`** (private) | `aiclarity.scroogellm` | scroogellm.com | Moved to its own repo per DR-027; SDD Specify there. Code lands there (AIClarityAU/minspec#119), not in `packages/`. |
 | `packages/shared` | `@aiclarity/shared` | — | Tier-0 shared: contract types + classifier engine (no vscode/network). See DR-014 |
 | `packages/extension-pack` | `aiclarity.minspec-pro` | — | References both |
 
@@ -105,7 +105,7 @@ Type: bug / feat / explore / plan
 
 MinSpec is at **Implement** phase. Work from `specs/minspec/tasks.md`.
 
-ScroogeLLM was split into its own **private** repo (`harvest316/scroogellm`, `~/code/scroogellm`) per DR-027 and is in **Specify** there (SPEC-100/101/102). Do ScroogeLLM work in that repo, not here. Public proxy implementation tracked at harvest316/minspec#119. Note: scroogellm keeps its OWN local DR register (independent of this repo's); DR-007/010 were imported there with their original numbers.
+ScroogeLLM was split into its own **private** repo (`harvest316/scroogellm`, `~/code/scroogellm`) per DR-027 and is in **Specify** there (SPEC-100/101/102). Do ScroogeLLM work in that repo, not here. Public proxy implementation tracked at AIClarityAU/minspec#119. Note: scroogellm keeps its OWN local DR register (independent of this repo's); DR-007/010 were imported there with their original numbers.
 
 ## Traceability Convention
 
@@ -213,6 +213,6 @@ NOT share the global `~/code/mmo-platform/docs/decisions.md` register (currently
 
 | Topic | GitHub repo |
 |---|---|
-| MinSpec extension / SDD tool | `harvest316/minspec` |
+| MinSpec extension / SDD tool | `AIClarityAU/minspec` |
 | ScroogeLLM extension / proxy | `harvest316/scroogellm` (private; split from monorepo per DR-027) |
 | Shared infra / cross-project | `harvest316/mmo-platform` |
