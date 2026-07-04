@@ -166,7 +166,7 @@ export function classify(
  * there are no signals at all.
  */
 export function pickDrivingSignal(
-  result: ClassificationResult,
+  result: Pick<ClassificationResult, 'tier' | 'signals'>,
 ): ClassificationSignal | undefined {
   const atTier = result.signals.filter(
     (s) => s.tierContribution === result.tier,

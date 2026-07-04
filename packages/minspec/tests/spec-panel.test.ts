@@ -156,10 +156,38 @@ describe('getHtml()', () => {
 
     expect(html).toContain('Classification');
     expect(html).toContain('75%');
-    expect(html).toContain('confidence');
+    expect(html).toContain('signal agreement');
     expect(html).toContain('files_changed');
     expect(html).toContain('lines_changed');
     expect(html).toContain('new_files');
+  });
+
+  // #334 (sibling of #216 / follow-up to #333): the webview must not label the
+  // raw agreement fraction as "confidence" — classify() ranks by MAX
+  // tierContribution, so a low % beside a high tier reads as a broken
+  // probability. Match the toast: name the driving signal + honest label.
+  it('does not label the agreement fraction "confidence" (#334)', () => {
+    const spec = parseSpec(FULL_SPEC);
+    const classification: ClassificationSummary = {
+      tier: 'T3',
+      confidence: 0.14, // 1 of 7 signals at the winning tier — the misleading case
+      signals: [
+        { name: 'importersReached', value: 23, weight: 0.4, tierContribution: 'T3', axis: 'consequence' },
+        { name: 'files_changed', value: 2, weight: 0.3, tierContribution: 'T1' },
+        { name: 'lines_changed', value: 30, weight: 0.25, tierContribution: 'T1' },
+        { name: 'new_files', value: 0, weight: 0.1, tierContribution: 'T1' },
+        { name: 'test_files', value: 1, weight: 0.1, tierContribution: 'T1' },
+        { name: 'docs_only', value: false, weight: 0.05, tierContribution: 'T1' },
+        { name: 'config_only', value: false, weight: 0.05, tierContribution: 'T1' },
+      ],
+    };
+
+    const html = getHtml(spec, classification);
+
+    expect(html).not.toContain('% confidence');
+    expect(html).not.toContain('confidence"');
+    expect(html).toContain('14% signal agreement');
+    expect(html).toContain('set by importersReached=23');
   });
 
   it('does not render classification section when not provided', () => {
