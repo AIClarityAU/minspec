@@ -233,6 +233,11 @@
         "icon": "$(unverified)"
       },
       {
+        "command": "minspec.showChangesSinceApproval",
+        "title": "MinSpec: Show Changes Since Approval",
+        "icon": "$(diff)"
+      },
+      {
         "command": "minspec.validateSpec",
         "title": "MinSpec: Check Spec Completeness"
       },
@@ -277,6 +282,10 @@
         {
           "command": "minspec.acceptEpic",
           "when": "false"
+        },
+        {
+          "command": "minspec.showChangesSinceApproval",
+          "when": "editorLangId == markdown"
         }
       ],
       "view/title": [
@@ -339,22 +348,27 @@
         },
         {
           "command": "minspec.classify",
-          "when": "viewItem == specNode",
+          "when": "viewItem =~ /^specNode(\\.stale)?$/",
           "group": "1_tier"
         },
         {
           "command": "minspec.approveSpec",
-          "when": "view == minspecStatus && viewItem == specNode",
+          "when": "view == minspecStatus && viewItem =~ /^specNode(\\.stale)?$/",
           "group": "inline"
         },
         {
           "command": "minspec.approveSpec",
-          "when": "view == minspecStatus && viewItem == specNode",
+          "when": "view == minspecStatus && viewItem =~ /^specNode(\\.stale)?$/",
           "group": "2_approval@1"
         },
         {
           "command": "minspec.revokeApproval",
           "when": "view == minspecStatus && viewItem == specNode.approved",
+          "group": "2_approval@2"
+        },
+        {
+          "command": "minspec.showChangesSinceApproval",
+          "when": "view == minspecStatus && viewItem == specNode.stale",
           "group": "2_approval@2"
         },
         {

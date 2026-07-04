@@ -29,7 +29,7 @@ vi.mock('vscode', () => ({
   Uri: { file: (p: string) => ({ fsPath: p, scheme: 'file' }) },
 }));
 
-import type { SpecSummary } from '../src/views/spec-tree-provider';
+import type { SpecSummary, ApprovalLookupFn } from '../src/views/spec-tree-provider';
 import { SpecTreeProvider, SpecGroupNode, SpecNode, RollupNode, listSpecs, STATUS_GROUPS, compressSpecId, stripProductPrefix } from '../src/views/spec-tree-provider';
 import { EpicGroupNode } from '../src/views/epic-grouping';
 import type { EpicSummary } from '../src/lib/epic-manager';
@@ -646,6 +646,157 @@ describe('SpecTreeProvider — approval wiring (regression)', () => {
     const provider = new SpecTreeProvider(tmpDir, () => [spec]);
 
     expect(activeNodes(provider)[0].approval).toBe('unapproved');
+  });
+});
+
+// --- Needs Re-Approval group (SPEC-029 FR-1..FR-4, FR-7) ---
+//
+// Cross-cutting, additive to STATUS_GROUPS (INV — Orthogonal axes): a stale
+// spec dual-lists (Clarify FR-OQ1) — it stays in its lifecycle lane AND also
+// appears here. The existing STATUS_GROUPS/SPEC_STATUSES INV-1 test above is
+// this feature's own "nothing was added to the status enum" regression lock.
+describe('SpecTreeProvider — Needs Re-Approval group (SPEC-029)', () => {
+  function approvalFnFor(staleIds: string[]): ApprovalLookupFn {
+    return (_root, filePath) => {
+      const stale = staleIds.some((id) => filePath.includes(id));
+      return stale ? 'stale' : 'unapproved';
+    };
+  }
+
+  const SPECS_WITH_ONE_STALE: SpecSummary[] = [
+    makeSpec({ id: 'SPEC-001', status: 'implementing', filePath: '/tmp/SPEC-001.md' }),
+    makeSpec({ id: 'SPEC-002', status: 'implementing', filePath: '/tmp/SPEC-002.md' }),
+  ];
+
+  it('FR-1: renders "Needs Re-Approval" first (right after Rollup), containing only the stale spec', () => {
+    const provider = new SpecTreeProvider(
+      '/fake/workspace',
+      () => SPECS_WITH_ONE_STALE,
+      approvalFnFor(['SPEC-001']),
+    );
+    const root = provider.getChildren(undefined);
+    expect(root[0]).toBeInstanceOf(RollupNode);
+    const needsReapproval = root[1] as SpecGroupNode;
+    expect(needsReapproval).toBeInstanceOf(SpecGroupNode);
+    expect(needsReapproval.label).toBe('Needs Re-Approval');
+    expect(needsReapproval.specs).toHaveLength(1);
+    expect(needsReapproval.specs[0].id).toBe('SPEC-001');
+  });
+
+  it('FR-1: renders first regardless of epicGrouping.enabled (on or off)', () => {
+    const provider = new SpecTreeProvider(
+      '/fake/workspace',
+      () => SPECS_WITH_ONE_STALE,
+      approvalFnFor(['SPEC-001']),
+    );
+    provider.epicGrouping.set(true);
+    expect((provider.getChildren(undefined)[1] as SpecGroupNode).label).toBe('Needs Re-Approval');
+    provider.epicGrouping.set(false);
+    expect((provider.getChildren(undefined)[1] as SpecGroupNode).label).toBe('Needs Re-Approval');
+  });
+
+  it('FR-4: zero stale specs → no Needs Re-Approval group renders at all (not an empty group)', () => {
+    const provider = new SpecTreeProvider('/fake/workspace', () => SPECS_WITH_ONE_STALE, approvalFnFor([]));
+    const root = provider.getChildren(undefined);
+    expect(root.find((n) => n instanceof SpecGroupNode && n.label === 'Needs Re-Approval')).toBeUndefined();
+  });
+
+  it('FR-2: a spec leaves the group once its approval flips from stale to approved (next call re-derives, no persisted state)', () => {
+    let staleIds = ['SPEC-001'];
+    const provider = new SpecTreeProvider(
+      '/fake/workspace',
+      () => SPECS_WITH_ONE_STALE,
+      (_root, filePath) => (staleIds.some((id) => filePath.includes(id)) ? 'stale' : 'approved'),
+    );
+    expect((provider.getChildren(undefined)[1] as SpecGroupNode).label).toBe('Needs Re-Approval');
+    staleIds = []; // simulate re-approval
+    const root2 = provider.getChildren(undefined);
+    expect(root2.find((n) => n instanceof SpecGroupNode && n.label === 'Needs Re-Approval')).toBeUndefined();
+  });
+
+  it('FR-1 terminal guard: a done/archived spec whose sidecar hash drifted (resolves stale) does NOT enter the group', () => {
+    const specs: SpecSummary[] = [
+      makeSpec({ id: 'SPEC-010', status: 'done', filePath: '/tmp/SPEC-010.md' }),
+      makeSpec({ id: 'SPEC-020', status: 'archived', filePath: '/tmp/SPEC-020.md' }),
+      makeSpec({ id: 'SPEC-003', status: 'implementing', filePath: '/tmp/SPEC-003.md' }),
+    ];
+    const provider = new SpecTreeProvider('/fake/workspace', () => specs, approvalFnFor(['SPEC-010', 'SPEC-020', 'SPEC-003']));
+    const needsReapproval = provider
+      .getChildren(undefined)
+      .find((n): n is SpecGroupNode => n instanceof SpecGroupNode && n.label === 'Needs Re-Approval');
+    expect(needsReapproval).toBeDefined();
+    expect(needsReapproval!.specs.map((s) => s.id)).toEqual(['SPEC-003']); // only the non-terminal one
+  });
+
+  it('FR-4: dual-listing needs no RollupNode change — same active.length/progress as without the group', () => {
+    const withStale = new SpecTreeProvider('/fake/workspace', () => SPECS_WITH_ONE_STALE, approvalFnFor(['SPEC-001']));
+    const withoutStale = new SpecTreeProvider('/fake/workspace', () => SPECS_WITH_ONE_STALE, approvalFnFor([]));
+    const rollupA = withStale.getChildren(undefined)[0] as RollupNode;
+    const rollupB = withoutStale.getChildren(undefined)[0] as RollupNode;
+    expect(rollupA.description).toBe(rollupB.description); // identical counts/percent either way
+  });
+
+  it('FR-3: a SpecNode rendered under Needs Re-Approval has IDENTICAL icon/description/tooltip to its lifecycle-lane counterpart', () => {
+    const provider = new SpecTreeProvider(
+      '/fake/workspace',
+      () => SPECS_WITH_ONE_STALE,
+      approvalFnFor(['SPEC-001']),
+    );
+    const root = provider.getChildren(undefined);
+    const fromGroup = (provider.getChildren(root[1]) as SpecNode[])[0]; // Needs Re-Approval row
+    const statusGroups = root.filter((n): n is SpecGroupNode => n instanceof SpecGroupNode && n.label !== 'Needs Re-Approval');
+    const implementingGroup = statusGroups.find((g) => g.label === 'Implementing')!;
+    const fromLane = (provider.getChildren(implementingGroup) as SpecNode[]).find((n) => n.spec.id === 'SPEC-001')!;
+
+    expect(fromGroup.iconPath).toEqual(fromLane.iconPath);
+    expect(fromGroup.description).toBe(fromLane.description);
+    expect(fromGroup.tooltip).toBe(fromLane.tooltip);
+    // Only the command differs (FR-7):
+    expect(fromLane.command!.command).toBe('vscode.open');
+    expect(fromGroup.command!.command).toBe('minspec.showChangesSinceApproval');
+    expect(fromGroup.command!.arguments).toEqual([fromGroup.spec.filePath]);
+  });
+
+  // Opus review SEV-1 (confirmed): retagging stale specs to `specNode.stale`
+  // would silently strip Approve Spec + Classify from those rows unless the
+  // package.json `when`-clauses widen from exact `== specNode` to also match
+  // `specNode.stale`. VS Code's `when`-clause engine isn't in this unit
+  // harness, so this locks the REGEX ITSELF against every real viewItem value
+  // — a change to package.json that breaks this pattern breaks the menu.
+  it('SEV-1 menu-preservation: the widened when-clause regex matches specNode + specNode.stale, and ONLY those', () => {
+    const pattern = /^specNode(\.stale)?$/;
+    expect(pattern.test('specNode')).toBe(true);
+    expect(pattern.test('specNode.stale')).toBe(true);
+    expect(pattern.test('specNode.approved')).toBe(false);
+    expect(pattern.test('specNode.terminal')).toBe(false);
+    expect(pattern.test('epicGroup.proposed')).toBe(false);
+  });
+
+  it('SEV-1 menu-preservation (real file): package.json\'s classify + approveSpec view/item/context clauses actually use the widened pattern, not exact ==', () => {
+    const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
+    const contextMenus: Array<{ command: string; when: string }> = pkg.contributes.menus['view/item/context'];
+    const widened = /viewItem\s*=~\s*\/\^specNode\(\\\.stale\)\?\$\//;
+
+    const classify = contextMenus.filter((m) => m.command === 'minspec.classify');
+    expect(classify.length).toBeGreaterThan(0);
+    for (const m of classify) expect(m.when).toMatch(widened);
+
+    const approve = contextMenus.filter((m) => m.command === 'minspec.approveSpec');
+    expect(approve.length).toBeGreaterThan(0);
+    for (const m of approve) expect(m.when).toMatch(widened);
+
+    // revokeApproval must NOT be widened — it stays scoped to specNode.approved only.
+    const revoke = contextMenus.find((m) => m.command === 'minspec.revokeApproval');
+    expect(revoke?.when).toContain('specNode.approved');
+    expect(revoke?.when).not.toMatch(widened);
+  });
+
+  it('Slice 5: a non-terminal stale spec gets contextValue specNode.stale; approved/unapproved unchanged', () => {
+    expect(new SpecNode(makeSpec({ status: 'implementing' }), 'stale').contextValue).toBe('specNode.stale');
+    expect(new SpecNode(makeSpec({ status: 'implementing' }), 'approved').contextValue).toBe('specNode.approved');
+    expect(new SpecNode(makeSpec({ status: 'implementing' }), 'unapproved').contextValue).toBe('specNode');
+    // terminal still wins regardless of approval (unchanged prior behavior)
+    expect(new SpecNode(makeSpec({ status: 'done' }), 'stale').contextValue).toBe('specNode.terminal');
   });
 });
 

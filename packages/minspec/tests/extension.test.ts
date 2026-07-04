@@ -117,6 +117,7 @@ vi.mock('vscode', () => ({
     onDidCloseTextDocument: vi.fn(() => ({ dispose: vi.fn() })),
     textDocuments: [],
     onDidChangeConfiguration: vi.fn(() => ({ dispose: vi.fn() })),
+    registerTextDocumentContentProvider: vi.fn(() => ({ dispose: vi.fn() })),
   },
   commands: {
     registerCommand: vi.fn((id: string, handler: (...args: any[]) => any) => {

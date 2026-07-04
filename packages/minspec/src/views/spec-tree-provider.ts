@@ -166,14 +166,23 @@ export const STATUS_GROUPS: StatusGroup[] = [
 
 export class SpecGroupNode extends vscode.TreeItem {
   public readonly specs: SpecSummary[];
+  /**
+   * 'needsReapproval' identifies the SPEC-029 pinned, cross-cutting group so
+   * getChildren can route its rows to the diff command (FR-7) without a new
+   * contextValue on the GROUP itself (menus keyed off contextValue today are
+   * unaffected — see spec-tree-provider's SpecNode.contextValue for the
+   * per-ROW `specNode.stale` value this feature adds instead).
+   */
+  public readonly kind: 'status' | 'needsReapproval';
 
-  constructor(group: StatusGroup, specs: SpecSummary[]) {
+  constructor(group: StatusGroup, specs: SpecSummary[], kind: 'status' | 'needsReapproval' = 'status') {
     const collapsibleState = group.defaultExpanded
       ? vscode.TreeItemCollapsibleState.Expanded
       : vscode.TreeItemCollapsibleState.Collapsed;
     super(group.label, collapsibleState);
 
     this.specs = specs;
+    this.kind = kind;
     this.description = `(${specs.length})`;
     this.contextValue = 'specGroup';
     this.accessibilityInformation = {
@@ -244,6 +253,15 @@ export class SpecNode extends vscode.TreeItem {
      * collapse to identical text). The id is compressed regardless.
      */
     epicGrouped = false,
+    /**
+     * True only for the row rendered under the SPEC-029 "Needs Re-Approval"
+     * group (dual-listed alongside the same spec's normal lifecycle-lane row,
+     * which always keeps diffOnClick=false). Routes the click to the diff
+     * command instead of the plain file (FR-7) — every other property below
+     * (icon/description/tooltip/contextValue) is computed identically either
+     * way, so FR-3 holds by construction, not a parallel code path.
+     */
+    diffOnClick = false,
   ) {
     const displayTitle = epicGrouped ? stripProductPrefix(spec.title, spec.product) : spec.title;
     super(`${compressSpecId(spec.id)}: ${displayTitle}`, vscode.TreeItemCollapsibleState.None);
@@ -276,19 +294,34 @@ export class SpecNode extends vscode.TreeItem {
           : approval === 'stale' ? ' \u00b7 stale' : '';
     this.description = `${spec.tier} \u00b7 ${meter} ${pct}% \u00b7 ${phaseLabel}${approvalTag}`;
 
-    this.command = {
-      command: 'vscode.open',
-      title: 'Open Spec',
-      arguments: [vscode.Uri.file(spec.filePath)],
-    };
+    // diffOnClick (SPEC-029 FR-7): the Needs-Re-Approval row opens the diff
+    // command instead of the plain file. The command handler accepts a plain
+    // string path (this shape) OR a SpecNode (the context-menu invocation
+    // shape) — see approval-diff.ts.
+    this.command = diffOnClick
+      ? {
+          command: 'minspec.showChangesSinceApproval',
+          title: 'Show Changes Since Approval',
+          arguments: [spec.filePath],
+        }
+      : {
+          command: 'vscode.open',
+          title: 'Open Spec',
+          arguments: [vscode.Uri.file(spec.filePath)],
+        };
 
     // Context value drives menu visibility. Terminal specs (done/archived) are
     // past the DR-012 approve-before-implement gate, so they expose no approval
     // action at all. Otherwise the suffix encodes approval state so Revoke shows
-    // only on approved specs (see package.json when-clauses).
+    // only on approved specs, and (SPEC-029) 'specNode.stale' scopes the
+    // "Show Changes Since Approval" menu entry to stale specs only — see the
+    // package.json when-clauses, which widen the classify/approveSpec clauses
+    // to also match specNode.stale so those actions are NOT lost on this row.
     this.contextValue = terminal
       ? 'specNode.terminal'
-      : approval === 'approved' ? 'specNode.approved' : 'specNode';
+      : approval === 'approved' ? 'specNode.approved'
+      : approval === 'stale' ? 'specNode.stale'
+      : 'specNode';
 
     const approvalLine =
       approval === 'approved' ? 'Approval: \ud83d\udd12 approved (content-bound) \u2014 sealed to this content, not yet built'
@@ -391,17 +424,21 @@ export class SpecTreeProvider implements vscode.TreeDataProvider<SpecTreeNode> {
     }
 
     if (!element) {
-      // Root level: roll-up summary, then either epic groups or status groups.
+      // Root level: roll-up summary, the SPEC-029 pinned Needs-Re-Approval
+      // group (cross-cutting — rendered regardless of epic-grouping mode),
+      // then either epic groups or status groups.
       const allSpecs = this._listSpecs(this.workspaceRoot);
       const root: SpecTreeNode[] = [];
       if (allSpecs.length > 0) root.push(new RollupNode(allSpecs));
+      const needsReapproval = this.getNeedsReapprovalGroup(allSpecs);
+      if (needsReapproval) root.push(needsReapproval);
       const epicGroups = this.epicGrouping.enabled ? this.getEpicGroups(allSpecs) : null;
       root.push(...(epicGroups ?? this.getStatusGroups(allSpecs)));
       return root;
     }
 
     if (element instanceof SpecGroupNode) {
-      return element.specs.map(spec => this.toSpecNode(spec, false));
+      return element.specs.map(spec => this.toSpecNode(spec, false, element.kind === 'needsReapproval'));
     }
 
     if (element instanceof EpicGroupNode) {
@@ -413,15 +450,19 @@ export class SpecTreeProvider implements vscode.TreeDataProvider<SpecTreeNode> {
     return [];
   }
 
-  /** Build a SpecNode tagged with its current approval status. */
-  private toSpecNode(spec: SpecSummary, epicGrouped = false): SpecNode {
-    let approval: ApprovalStatus = 'unapproved';
+  /** Approval lookup with the established best-effort degrade (shared by
+   *  toSpecNode and getNeedsReapprovalGroup — one try/catch, not two to drift). */
+  private safeApproval(spec: SpecSummary): ApprovalStatus {
     try {
-      approval = this._approvalOf(this.workspaceRoot, spec.filePath);
+      return this._approvalOf(this.workspaceRoot, spec.filePath);
     } catch {
-      // best-effort — default to unapproved
+      return 'unapproved'; // best-effort — default to unapproved
     }
-    return new SpecNode(spec, approval, epicGrouped);
+  }
+
+  /** Build a SpecNode tagged with its current approval status. */
+  private toSpecNode(spec: SpecSummary, epicGrouped = false, diffOnClick = false): SpecNode {
+    return new SpecNode(spec, this.safeApproval(spec), epicGrouped, diffOnClick);
   }
 
   private getStatusGroups(allSpecs: SpecSummary[]): SpecGroupNode[] {
@@ -429,6 +470,29 @@ export class SpecTreeProvider implements vscode.TreeDataProvider<SpecTreeNode> {
       const groupSpecs = allSpecs.filter(s => group.statuses.includes(s.status));
       return new SpecGroupNode(group, groupSpecs);
     });
+  }
+
+  /**
+   * SPEC-029 FR-1/FR-2/FR-4: cross-cutting group of every stale spec, additive
+   * to STATUS_GROUPS (INV — Orthogonal axes — no SpecStatus value is added,
+   * STATUS_GROUPS is untouched). Live-derived on every call (FR-2 — no
+   * persisted state). The terminal guard is load-bearing: getApprovalStatus is
+   * purely hash-based and would otherwise resolve 'stale' for a done/archived
+   * spec whose sidecar hash drifted post-terminal — mirrors SpecNode's own
+   * `terminal` predicate so such a spec never enters this group (matching
+   * requirements.md's Failure-Modes: "a terminal spec never enters the
+   * Needs-Re-Approval group either").
+   */
+  private getNeedsReapprovalGroup(allSpecs: SpecSummary[]): SpecGroupNode | null {
+    const stale = allSpecs.filter(
+      s => s.status !== 'done' && s.status !== 'archived' && this.safeApproval(s) === 'stale',
+    );
+    if (stale.length === 0) return null; // FR-4: non-empty-only
+    return new SpecGroupNode(
+      { label: 'Needs Re-Approval', statuses: [], defaultExpanded: true },
+      stale,
+      'needsReapproval',
+    );
   }
 
   private getEpicGroups(allSpecs: SpecSummary[]): EpicGroupNode<SpecSummary>[] | null {
