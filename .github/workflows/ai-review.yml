@@ -22,6 +22,14 @@
 #       green).
 #
 # ── SECURITY MODEL (T0 invariants) ───────────────────────────────────────────
+#   • TRUSTED CONTROL PLANE FROM BASE (the load-bearing one). We check out the
+#     PR's BASE ref, so every executed script — scripts/review-branch.sh,
+#     scripts/review-decide.sh, scripts/roles/* — is the BASE (trusted) version.
+#     A same-repo PR author (write access → secrets present) therefore CANNOT
+#     rewrite review-decide.sh to `echo ai-review:pass` and forge the bot-applied
+#     pass that #428/auto-merge trusts. The untrusted head is fetched for the
+#     `git diff base...head` ONLY — its file CONTENTS are seen solely as diff DATA,
+#     never checked out into the workspace and never executed.
 #   • `pull_request` (NOT `pull_request_target`): the latter would run untrusted
 #     PR code WITH secrets — a well-known exfil hole. Our PRs are same-repo
 #     branches, so secrets are available under plain `pull_request`. A FORK PR
@@ -30,11 +38,26 @@
 #     review-branch.sh) authenticates for INFERENCE via CLAUDE_CODE_OAUTH_TOKEN,
 #     but runs with `--allowedTools "Read,Glob,Grep"` so it has NO tool that can
 #     use a credential (no gh, git, network, or Bash). The GitHub App token lives
-#     ONLY in the post / fail-closed steps (the credentialed parent) and is NEVER
-#     present in the review step — so the agent cannot post, label, or merge. The
-#     untrusted diff stays DATA (review-branch.sh does the framing); this workflow
-#     never interpolates PR title/body/diff into a shell (only base/head SHAs and
-#     the PR number, passed via env).
+#     ONLY in the stale-clear / post / fail-closed steps (the credentialed parent)
+#     and is NEVER present in the review step — so the agent cannot post, label, or
+#     merge. The untrusted diff stays DATA (review-branch.sh does the framing);
+#     this workflow never interpolates PR title/body/diff into a shell (only
+#     base/head SHAs and the PR number, passed via env).
+#   • Output redaction (token exfil). The review step carries
+#     CLAUDE_CODE_OAUTH_TOKEN for inference; a prompt-injected diff could coax the
+#     no-tools reviewer to echo `/proc/self/environ`. Before the verdict text ever
+#     reaches the PR comment we scrub the token value AND any `sk-ant-*` secret to
+#     `***`, so a leaked token can never land in the bot-posted comment. (The App
+#     token is not in this step at all.)
+#   • Supply chain. The Claude CLI is pinned to an exact published version and
+#     every marketplace action to a full commit SHA — a backdoored `latest`/`@vN`
+#     cannot run with the token in env.
+#   • TOCTOU. `cancel-in-progress` can leave a superseded `ai-review:pass` (from an
+#     earlier commit) on the PR while this run re-reviews the new head. At run
+#     start we clear any stale pass and mark the PR `ai-review:pending`, so it
+#     cannot feed auto-merge mid-run. The COMPLETE fix — ready-to-merge verifying
+#     the pass was applied to the CURRENT head SHA — is a follow-up in
+#     ready-to-merge.yml (deliberately NOT edited from here).
 #   • Fail closed everywhere: any error, missing verdict, or a `packages/`
 #     security-role that requests changes → `ai-review:changes`. A spurious `pass`
 #     is the worst outcome (it feeds auto-merge), so `pass` is emitted ONLY on an
@@ -96,31 +119,57 @@ jobs:
       - name: Mint GitHub App token (post as minspec-sdd[bot])
         id: app-token
         if: steps.guard.outputs.configured == 'true'
-        uses: actions/create-github-app-token@v1
+        uses: actions/create-github-app-token@f2acddfb5195534d487896a656232b016a682f3c # v1.9.0
         with:
           app-id: ${{ secrets.MINSPEC_APP_ID }}
           private-key: ${{ secrets.MINSPEC_APP_PRIVATE_KEY }}
 
-      # fetch-depth: 0 + ref = head SHA so BOTH base and head are present for the
-      # `git diff base...head` inside review-branch.sh.
-      - name: Checkout PR head (full history for base...head diff)
+      # TOCTOU guard (partial). `cancel-in-progress` means a superseded
+      # `ai-review:pass` from an earlier commit can linger while this run re-reviews
+      # the NEW head — long enough for auto-merge to fire on unreviewed code. Clear
+      # any stale pass and mark the PR `ai-review:pending` for the duration of this
+      # run, AS THE BOT (App token). Best-effort (`|| true`): removing the stale
+      # pass is load-bearing, but a transient label-API hiccup here must not red the
+      # run — the final post step below writes the authoritative label anyway. The
+      # COMPLETE fix (ready-to-merge verifying the pass label's commit SHA == head)
+      # is a follow-up in ready-to-merge.yml, NOT edited here.
+      - name: Clear stale pass at run start (mark pending) as minspec-sdd[bot]
         if: steps.guard.outputs.configured == 'true'
-        uses: actions/checkout@v5
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -uo pipefail
+          gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "ai-review:pass" 2>/dev/null || true
+          gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label "ai-review:pending" 2>/dev/null || true
+
+      # Check out the TRUSTED BASE ref (NOT the PR head). This makes the executed
+      # control plane — scripts/review-branch.sh, scripts/review-decide.sh,
+      # scripts/roles/* — the BASE versions, so a same-repo PR cannot rewrite the
+      # gate to forge a pass. fetch-depth: 0 gives full history (so the merge-base
+      # for `base...head` is present); the untrusted head is fetched in the review
+      # step for the DIFF ONLY (data), never checked out or executed.
+      - name: Checkout TRUSTED base (control scripts come from base, never head)
+        if: steps.guard.outputs.configured == 'true'
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.head.sha }}
+          ref: ${{ github.event.pull_request.base.sha }}
 
       - name: Set up Node 22
         if: steps.guard.outputs.configured == 'true'
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '22'
 
       # Genuine Claude Code CLI so `claude -p` (inside review-branch.sh) is on PATH.
       # DR-052: the real CLI direct to Anthropic — NOT the Agent SDK, NOT a broker.
+      # Pinned to an exact published version (supply-chain): a backdoored `latest`
+      # must not run in the step that holds the inference token.
       - name: Install Claude Code CLI
         if: steps.guard.outputs.configured == 'true'
-        run: npm install -g @anthropic-ai/claude-code
+        run: npm install -g @anthropic-ai/claude-code@2.1.201
 
       # Reviewer (always) + security (only if packages/ touched). Each role's
       # output is decided by the fail-closed gate; the combined verdict passes ONLY
@@ -140,16 +189,34 @@ jobs:
           BASE="$PR_BASE_SHA"
           HEAD="$PR_HEAD_SHA"
 
-          # Belt-and-suspenders on top of fetch-depth: 0 — ensure both endpoints
-          # are local. Fetching a reachable SHA is allowed by GitHub; ignore errors.
-          git fetch --no-tags --quiet origin "$BASE" "$HEAD" 2>/dev/null || true
+          # The workspace is the TRUSTED base checkout (fetch-depth: 0). Fetch the
+          # UNTRUSTED head SHA so `git diff base...head` has both endpoints — the
+          # head is brought in as DIFF DATA ONLY; it is never checked out and no
+          # script from it is executed. The SHA is passed via env (never raw
+          # interpolation). If the fetch fails, the diff is empty → fail closed.
+          git fetch --no-tags --quiet origin "$HEAD" 2>/dev/null || true
 
           extract_block() { sed -n '/REVIEW_VERDICT_BEGIN/,/REVIEW_VERDICT_END/p'; }
+
+          # Scrub any inference-token value or `sk-ant-*` secret to `***` before the
+          # reviewer text can reach the PR comment. Defeats a prompt-injected diff
+          # that coaxes the no-tools reviewer into echoing /proc/self/environ.
+          # awk index() does a LITERAL (regex-free) match of the exact token value,
+          # so it is robust regardless of characters in the token.
+          redact() {
+            sed -E 's/sk-ant-[A-Za-z0-9_-]+/***/g' \
+              | if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
+                  awk -v tok="$CLAUDE_CODE_OAUTH_TOKEN" \
+                    '{ while ((p=index($0,tok))>0) $0=substr($0,1,p-1) "***" substr($0,p+length(tok)); print }'
+                else
+                  cat
+                fi
+          }
 
           # ── reviewer role (always) ──
           REVIEWER_OUT="$(bash scripts/review-branch.sh "$BASE" "$HEAD" --role reviewer || true)"
           REVIEWER_LABEL="$(printf '%s\n' "$REVIEWER_OUT" | bash scripts/review-decide.sh || true)"
-          REVIEWER_BLOCK="$(printf '%s\n' "$REVIEWER_OUT" | extract_block)"
+          REVIEWER_BLOCK="$(printf '%s\n' "$REVIEWER_OUT" | extract_block | redact)"
           [ -z "$REVIEWER_BLOCK" ] && REVIEWER_BLOCK="(reviewer emitted no verdict block — fail-closed to changes)"
 
           # ── security role (only if packages/ changed) ──
@@ -161,7 +228,7 @@ jobs:
             SECURITY_REQUIRED=yes
             SECURITY_OUT="$(bash scripts/review-branch.sh "$BASE" "$HEAD" --role security || true)"
             SECURITY_LABEL="$(printf '%s\n' "$SECURITY_OUT" | bash scripts/review-decide.sh || true)"
-            SECURITY_BLOCK="$(printf '%s\n' "$SECURITY_OUT" | extract_block)"
+            SECURITY_BLOCK="$(printf '%s\n' "$SECURITY_OUT" | extract_block | redact)"
             [ -z "$SECURITY_BLOCK" ] && SECURITY_BLOCK="(security reviewer emitted no verdict block — fail-closed to changes)"
           fi
 
