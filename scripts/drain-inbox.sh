@@ -28,6 +28,16 @@ LOCK="/tmp/minspec-drain-inbox.lock"
 LOG="/tmp/minspec-drain-inbox.log"
 
 case "${1:-}" in
+  --pref-path)
+    # Single source of truth for the opt-in pref location. The session-start
+    # hook lives one directory deeper (scripts/hooks/) than this script, so it
+    # MUST NOT recompute PREF_FILE with its own relative `..` walk — that drift
+    # is exactly what silently disabled auto-drain (the hook read
+    # scripts/.minspec/auto-drain, one level too shallow, while --enable-auto
+    # wrote the correct repo-root .minspec/auto-drain). The hook asks us instead.
+    echo "$PREF_FILE"
+    exit 0
+    ;;
   --dry-run) DRY_RUN=true ;;
   --enable-auto)
     mkdir -p "$(dirname "$PREF_FILE")"
