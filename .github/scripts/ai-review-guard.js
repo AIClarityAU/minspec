@@ -191,42 +191,74 @@ function decideStatus({ labels, provenanceRevert, stalenessStrip, passProvenance
   };
 }
 
-// Map the reviewer's FINAL verdict label to the `ai-review` check-run's
-// conclusion + human-readable title/summary.
+// Map the reviewer's FINAL verdict label — plus whether the PR touches the
+// review machinery — to the `ai-review` check-run's conclusion + human-
+// readable title/summary.
 //
-// This is the fix for the "ai-review is green even when changes were requested"
-// defect: the check named `ai-review` must reflect the *verdict*, not merely
-// that the reviewer workflow ran. A check-run supports a `neutral` conclusion
-// (a plain commit-status does not), which is exactly right here — the review DID
-// complete, it just did not PASS, so the honest signal is "reviewed; changes
-// requested / human review required", not a green pass and not a red broken-CI
-// failure.
+// #480 (this fix, built on #469's verdict-mirroring fix): a 3-way conclusion
+// so `ai-review` can be an ALWAYS-ON REQUIRED ruleset check that still
+// self-exempts machinery PRs. GitHub required check-runs treat `neutral`/
+// `skipped` as PASSING; only `failure`/`pending` BLOCK. That semantics gives
+// us, from one check, both a real gate AND a self-exemption with no bypass
+// actor and no path-based ruleset exemption (which GitHub doesn't support):
 //
-//   ai-review:pass  → success   (the PR genuinely passed independent review)
-//   anything else   → neutral   (changes requested, the machinery-self-cert
-//                                override, an errored/empty verdict, …) — NEVER
-//                                success, and NEVER failure. Fail-closed: only an
-//                                exact `ai-review:pass` is ever green.
+//   isMachineryPr === true       → neutral   (EXEMPT. Wins regardless of
+//                                   `label` — precedence, checked first. A
+//                                   gate cannot certify a change to itself
+//                                   (`.github/`/`scripts/`, #476/#477/…), so
+//                                   these are neutral and a human reviews.)
+//   label === 'ai-review:pass'   → success   (genuinely passed independent
+//                                   review)
+//   anything else (changes,
+//   empty/errored, unrecognised) → failure   (BLOCKS the required check —
+//                                   this is the actual gate. Changed from
+//                                   #469's `neutral`, which a required check
+//                                   reads as passing and therefore never
+//                                   gated a normal `changes` verdict.)
+//
+// `isMachineryPr` MUST be computed from the SAME predicate the workflow's
+// anti-self-cert override already uses — changed-file paths matching
+// `^(\.github/|scripts/)` (ai-review.yml's `SELF_EDIT_KIND === "machinery"`),
+// never a second, divergent definition. It deliberately EXCLUDES the
+// "indeterminate" case (the changed-file diff itself could not be computed):
+// that case must stay fail-closed to `failure`, not `neutral` — otherwise a
+// PR could win the exemption simply by making the diff computation error.
 const CHECK_NAME = 'ai-review';
-function decideReviewCheck(label) {
-  const pass = label === PASS;
-  return {
-    name: CHECK_NAME,
-    // completed check-run conclusion: only `success` reads as "passed".
-    conclusion: pass ? 'success' : 'neutral',
-    title: pass
-      ? 'AI review: passed'
-      : 'AI review: changes requested — human review required',
-    summary: pass
-      ? 'The independent AI reviewer approved this PR (`ai-review:pass`). ' +
-        'See the AI review comment for the findings behind the verdict.'
-      : 'The independent AI reviewer did **not** pass this PR ' +
-        '(`ai-review:changes`) — changes were requested, the review could not ' +
-        'complete, or the PR edits the review machinery (auto-pass disabled). ' +
-        'This check is deliberately **neutral**, not green: `ai-review` is green ' +
-        'only when the PR actually passed. A human must review — see the AI ' +
-        'review comment for details.',
-  };
+function decideReviewCheck(label, isMachineryPr) {
+  const machinery = isMachineryPr === true;
+  const pass = !machinery && label === PASS;
+
+  let conclusion;
+  let title;
+  let summary;
+  if (machinery) {
+    conclusion = 'neutral';
+    title = 'AI review: machinery PR — exempt, human review required';
+    summary =
+      'This PR touches the AI-review machinery (`.github/` or `scripts/`). ' +
+      'A gate cannot certify a change to itself, so the reviewer force-labels ' +
+      'these `ai-review:changes` regardless of the agent\'s verdict. This check ' +
+      'is deliberately **neutral** — GitHub treats `neutral` as passing a ' +
+      'required check, so a machinery PR is not permanently blocked by its own ' +
+      'gate — but a human must still review and approve it before merging.';
+  } else if (pass) {
+    conclusion = 'success';
+    title = 'AI review: passed';
+    summary =
+      'The independent AI reviewer approved this PR (`ai-review:pass`). ' +
+      'See the AI review comment for the findings behind the verdict.';
+  } else {
+    conclusion = 'failure';
+    title = 'AI review: changes requested — this check blocks merge';
+    summary =
+      'The independent AI reviewer did **not** pass this PR ' +
+      '(`ai-review:changes`), the review could not complete, or the verdict ' +
+      'was empty/unrecognised. This check is deliberately **failure**: when ' +
+      '`ai-review` is required in the branch ruleset, this blocks merge until ' +
+      'a human resolves it. See the AI review comment for details.';
+  }
+
+  return { name: CHECK_NAME, conclusion, title, summary };
 }
 
 // Is a label-removal API failure safe to ignore? ONLY a 404 (the label is

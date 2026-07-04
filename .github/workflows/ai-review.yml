@@ -96,10 +96,13 @@
 #      `checks: write` is absent the review still works — the verdict check is
 #      simply not posted (best-effort), never a false green.
 #   3. AFTER a verified run: set repo variable `AI_REVIEW_LABEL_ACTORS =
-#      minspec-sdd[bot]` (so ready-to-merge.yml trusts ONLY the bot) and make the
-#      `ai-review` verdict check required in branch protection (green only when the
-#      PR actually passed — the runner's own `ai-review-runner` job is not the
-#      signal). Both are deliberately NOT done here.
+#      minspec-sdd[bot]` (so ready-to-merge.yml trusts ONLY the bot) and add the
+#      `ai-review` verdict check as a REQUIRED check in the branch ruleset
+#      (#480 — 3-way conclusion makes this safe to leave always-on: machinery
+#      PRs self-exempt via `neutral`, a genuine pass is `success`, and anything
+#      else is `failure` and actually blocks — the runner's own
+#      `ai-review-runner` job is not the signal). Deliberately NOT done here
+#      (ruleset config is a human/HITL action, not this workflow's).
 
 # NOTE — why this workflow is `ai-review-runner`, not `ai-review`:
 # GitHub Actions posts one implicit check-run per JOB, named after the job, whose
@@ -109,8 +112,11 @@
 # wrongly think the PR passed. So the runner job is named `ai-review-runner` (its
 # implicit check honestly means "the review ran"), and the name `ai-review` is
 # reserved for the EXPLICIT verdict check-run posted at the end of the job, whose
-# conclusion MIRRORS THE VERDICT (pass → success, anything else → neutral). Green
-# on `ai-review` therefore means the PR actually passed, never just "it ran".
+# conclusion MIRRORS THE VERDICT — 3-way as of #480: a machinery PR (touches
+# `.github/`/`scripts/`) → `neutral` (self-exempt, a gate can't certify itself),
+# `ai-review:pass` → `success`, anything else → `failure`. Green on `ai-review`
+# therefore means the PR actually passed, never just "it ran"; `failure` is what
+# lets this be a real, always-on REQUIRED merge gate.
 name: ai-review-runner
 
 on:
@@ -319,7 +325,18 @@ jobs:
           fi
 
           echo "label=$FINAL" >> "$GITHUB_OUTPUT"
-          echo "Reviewer=${REVIEWER_LABEL:-<none>} | Security(${SECURITY_REQUIRED})=${SECURITY_LABEL:-<n/a>} | SelfEdit=${SELF_EDIT}(${SELF_EDIT_KIND:-none}) | FINAL=$FINAL"
+
+          # ── is_machinery output (#480) — reused by the check-run step below to
+          #    self-exempt (neutral) an always-on REQUIRED `ai-review` check.
+          #    ONLY the unambiguous "changed paths match .github/|scripts/" case
+          #    counts, NOT the "indeterminate" (diff-computation-failed) case:
+          #    that one must stay fail-closed (failure), or a PR could win the
+          #    neutral exemption simply by making the changed-file diff error.
+          IS_MACHINERY=false
+          [ "$SELF_EDIT_KIND" = "machinery" ] && IS_MACHINERY=true
+          echo "is_machinery=$IS_MACHINERY" >> "$GITHUB_OUTPUT"
+
+          echo "Reviewer=${REVIEWER_LABEL:-<none>} | Security(${SECURITY_REQUIRED})=${SECURITY_LABEL:-<n/a>} | SelfEdit=${SELF_EDIT}(${SELF_EDIT_KIND:-none}) | FINAL=$FINAL | IsMachinery=$IS_MACHINERY"
 
           # ── build the PR comment body (findings/rationale behind the label) ──
           BODY="$RUNNER_TEMP/ai-review-comment.md"
@@ -441,27 +458,37 @@ jobs:
           # Re-fail so the job status honestly reflects the error (label recovered).
           exit 1
 
-      # ── Honest `ai-review` verdict CHECK-RUN (the fix) ───────────────────────
+      # ── Honest, 3-way `ai-review` verdict CHECK-RUN (#480, built on #469) ────
       # The runner job's own success only means "the reviewer RAN" — NOT "the PR
       # PASSED". So post the authoritative `ai-review` check-run whose CONCLUSION
-      # MIRRORS THE VERDICT, computed by the tested pure helper decideReviewCheck:
-      #   ai-review:pass → success ; anything else → neutral (changes requested,
-      #   the machinery-self-cert override, or an errored/empty verdict). A
-      #   check-run supports `neutral`, which is exactly right: the review DID
-      #   complete, it just did not pass, so it must not read as green NOR as a
-      #   broken-CI red `failure`. Fail-closed: an empty `steps.review.outputs.label`
-      #   (review step errored) maps to neutral, never success.
+      # MIRRORS THE VERDICT, computed by the tested pure helper decideReviewCheck,
+      # now 3-way so `ai-review` is safe to make an ALWAYS-ON REQUIRED ruleset
+      # check (#480 — GitHub required checks: `neutral` PASSES, only `failure`
+      # blocks):
+      #   isMachineryPr → neutral   (self-exempt; wins over the label — a gate
+      #                   can't certify a change to itself, so `.github/`/
+      #                   `scripts/` PRs stay merge-able and a human reviews)
+      #   ai-review:pass → success  (genuinely passed independent review)
+      #   anything else  → failure  (BLOCKS the required check — changed from
+      #                   #469's `neutral`, which a required check reads as
+      #                   passing and so never gated a normal `changes` verdict)
+      # `isMachineryPr` reuses the review step's `is_machinery` output, which is
+      # the SAME predicate as the self-edit override above (SELF_EDIT_KIND ==
+      # "machinery"), not a second definition. Fail-closed: an empty
+      # `steps.review.outputs.label` (review step errored) is NOT machinery
+      # (defaults false) → failure, never a false neutral/green.
       #
       # Runs `if: always()` so the check is posted on both the pass and the
       # fail-closed paths, but only when the reviewer is configured. Posted AS THE
-      # BOT (App token) to match the comment/label provenance. INFORMATIONAL only —
-      # it is NOT the merge gate (`ready-to-merge`, which reads the
-      # provenance-verified label, is), so a forged green here grants no merge and
-      # this row never weakens the gate. Best-effort: a missing `checks: write` App
-      # permission degrades to a warning (the honest check is then simply absent —
-      # never a false green), and this step never changes the job's honest status.
-      # Only trusted values reach the shell (App token, repo slug, the
-      # GitHub-assigned head SHA, and our own gate's label) — no PR-controlled text.
+      # BOT (App token) to match the comment/label provenance. This check-run is
+      # now the intended REQUIRED merge gate for normal PRs (once added to the
+      # branch ruleset) — machinery PRs are gated by human review instead, since
+      # a gate cannot certify itself. Best-effort: a missing `checks: write` App
+      # permission degrades to a warning (the honest check is then simply absent
+      # — never a false green), and this step never changes the job's honest
+      # status. Only trusted values reach the shell (App token, repo slug, the
+      # GitHub-assigned head SHA, and our own gate's label/machinery flag) — no
+      # PR-controlled text.
       - name: Post honest `ai-review` verdict check-run as minspec-sdd[bot]
         if: always() && steps.guard.outputs.configured == 'true'
         env:
@@ -469,8 +496,13 @@ jobs:
           REPO: ${{ github.repository }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           # Our own gate's output (`ai-review:pass` / `ai-review:changes`), NOT any
-          # PR-controlled text. Empty if the review step never completed → neutral.
+          # PR-controlled text. Empty if the review step never completed → failure.
           VERDICT_LABEL: ${{ steps.review.outputs.label }}
+          # Same machinery predicate as the self-edit override (SELF_EDIT_KIND ==
+          # "machinery"), reused via the review step's own output — not a second,
+          # divergent definition. Empty/missing (review step never completed)
+          # defaults to "false" below, never a false machinery exemption.
+          IS_MACHINERY: ${{ steps.review.outputs.is_machinery }}
         run: |
           set -uo pipefail
           if [ -z "${GH_TOKEN:-}" ]; then
@@ -478,14 +510,15 @@ jobs:
             exit 0
           fi
           # Build the check-run body from the TESTED pure helper (single source of
-          # truth for pass→success / changes→neutral). node reads inputs from env,
-          # never from an interpolated GitHub Actions expression — injection-safe.
+          # truth for machinery→neutral / pass→success / changes→failure). node
+          # reads inputs from env, never from an interpolated GitHub Actions
+          # expression — injection-safe.
           # (NB: an Actions expression written literally here would be evaluated even
           # inside this shell comment — an empty one fails workflow load; #486.)
           BODY="$RUNNER_TEMP/ai-review-check.json"
           if ! node -e '
             const g = require(process.env.GITHUB_WORKSPACE + "/.github/scripts/ai-review-guard.js");
-            const c = g.decideReviewCheck(process.env.VERDICT_LABEL || "");
+            const c = g.decideReviewCheck(process.env.VERDICT_LABEL || "", process.env.IS_MACHINERY === "true");
             const fs = require("fs");
             fs.writeFileSync(process.env.BODY, JSON.stringify({
               name: c.name,
@@ -494,7 +527,7 @@ jobs:
               conclusion: c.conclusion,
               output: { title: c.title, summary: c.summary },
             }));
-            process.stderr.write("ai-review verdict=" + (process.env.VERDICT_LABEL || "<none>") + " → conclusion=" + c.conclusion + "\n");
+            process.stderr.write("ai-review verdict=" + (process.env.VERDICT_LABEL || "<none>") + " machinery=" + (process.env.IS_MACHINERY || "false") + " → conclusion=" + c.conclusion + "\n");
           ' BODY="$BODY"; then
             echo "::warning title=ai-review check not posted::Could not compute the verdict check-run body. The label/comment remain authoritative."
             exit 0

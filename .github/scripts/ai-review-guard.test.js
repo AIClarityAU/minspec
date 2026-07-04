@@ -304,37 +304,68 @@ test('status: description never exceeds the 140-char commit-status limit', () =>
   }
 });
 
-// ── decideReviewCheck (honest `ai-review` check-run conclusion) ───────────────
-// The fix: the `ai-review` check conclusion must MIRROR THE VERDICT (green only
-// when the PR actually passed), not merely reflect that the workflow ran.
-test('review-check: an ai-review:pass verdict maps to a green (success) check', () => {
-  const c = decideReviewCheck(PASS);
+// ── decideReviewCheck (honest, 3-way `ai-review` check-run conclusion) ────────
+// #480: `ai-review` must be safe as an ALWAYS-ON REQUIRED ruleset check —
+// machinery PRs self-exempt (neutral, GitHub treats neutral as passing a
+// required check), a genuine pass is success, and everything else (changes /
+// empty / errored) is now FAILURE so the required check actually blocks
+// (the #469 behaviour of neutral-for-changes never gated anything).
+
+// -- machinery precedence: ALWAYS neutral, regardless of label --
+test('review-check: machinery PR + pass verdict is still NEUTRAL (machinery wins over label)', () => {
+  const c = decideReviewCheck(PASS, true);
+  assert.equal(c.name, 'ai-review');
+  assert.equal(c.conclusion, 'neutral');
+  assert.match(c.title, /machinery/i);
+});
+
+test('review-check: machinery PR + changes verdict is NEUTRAL (self-exempt)', () => {
+  const c = decideReviewCheck(CHANGES, true);
+  assert.equal(c.conclusion, 'neutral');
+  assert.match(c.title, /machinery/i);
+});
+
+test('review-check: machinery PR + empty/errored verdict is NEUTRAL (machinery always neutral)', () => {
+  for (const label of ['', undefined, null, 'garbage']) {
+    const c = decideReviewCheck(label, true);
+    assert.equal(c.conclusion, 'neutral', `expected neutral for ${JSON.stringify(label)}`);
+  }
+});
+
+// -- normal (non-machinery) PRs: the actual gate --
+test('review-check: normal PR + ai-review:pass verdict maps to a green (success) check', () => {
+  const c = decideReviewCheck(PASS, false);
   assert.equal(c.name, 'ai-review');
   assert.equal(c.conclusion, 'success');
   assert.match(c.title, /passed/i);
 });
 
-test('review-check: an ai-review:changes verdict maps to NEUTRAL, never success/failure', () => {
-  const c = decideReviewCheck(CHANGES);
+test('review-check: normal PR + ai-review:changes verdict maps to FAILURE — blocks a required check', () => {
+  const c = decideReviewCheck(CHANGES, false);
   assert.equal(c.name, 'ai-review');
-  assert.equal(c.conclusion, 'neutral');
-  assert.notEqual(c.conclusion, 'success');
-  assert.match(c.title, /changes requested|human review/i);
+  assert.equal(c.conclusion, 'failure');
+  assert.notEqual(c.conclusion, 'neutral');
+  assert.match(c.title, /changes requested|blocks merge/i);
 });
 
-test('review-check: fail-closed — an empty/absent verdict (review errored) is NEUTRAL, not green', () => {
+test('review-check: normal PR fail-closed — an empty/absent verdict (review errored) is FAILURE, not neutral or green', () => {
   for (const label of ['', undefined, null, 'ai-review:pending', 'garbage']) {
-    const c = decideReviewCheck(label);
-    assert.equal(c.conclusion, 'neutral', `expected neutral for ${JSON.stringify(label)}`);
+    const c = decideReviewCheck(label, false);
+    assert.equal(c.conclusion, 'failure', `expected failure for ${JSON.stringify(label)}`);
     assert.notEqual(c.conclusion, 'success');
   }
 });
 
-test('review-check: ONLY an exact ai-review:pass is ever green (no near-miss passes)', () => {
-  assert.equal(decideReviewCheck('ai-review:pass ').conclusion, 'neutral'); // trailing space
-  assert.equal(decideReviewCheck('AI-REVIEW:PASS').conclusion, 'neutral'); // wrong case
-  assert.equal(decideReviewCheck('pass').conclusion, 'neutral'); // unqualified
-  assert.equal(decideReviewCheck(PASS).conclusion, 'success'); // the only green
+test('review-check: isMachineryPr omitted defaults to the normal (non-machinery) path', () => {
+  assert.equal(decideReviewCheck(PASS).conclusion, 'success');
+  assert.equal(decideReviewCheck(CHANGES).conclusion, 'failure');
+});
+
+test('review-check: ONLY an exact ai-review:pass on a normal PR is ever green (no near-miss passes)', () => {
+  assert.equal(decideReviewCheck('ai-review:pass ', false).conclusion, 'failure'); // trailing space
+  assert.equal(decideReviewCheck('AI-REVIEW:PASS', false).conclusion, 'failure'); // wrong case
+  assert.equal(decideReviewCheck('pass', false).conclusion, 'failure'); // unqualified
+  assert.equal(decideReviewCheck(PASS, false).conclusion, 'success'); // the only green
 });
 
 // ── sanitizeLogin ────────────────────────────────────────────────────────────
