@@ -13,6 +13,7 @@ import type {
   IssueLifecycleLabel,
   PriorityLabel,
 } from '../lib/backlog';
+import { resolveTargetFolder } from '../lib/resolve-folder';
 
 // ─── WSJF Scoring Command ──────────────────────────────────────────────────
 
@@ -21,11 +22,11 @@ import type {
  * Uses VS Code QuickPick/InputBox for each dimension (1-10 scale).
  */
 export async function scoreWsjfCommand(): Promise<void> {
-  const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!folder) {
-    vscode.window.showErrorMessage('MinSpec: No workspace folder open.');
-    return;
-  }
+  // Multi-root safe: `fetchIssues` etc. read the folder's git remote to pick
+  // WHICH repo's issues to touch — folder [0] would silently target the wrong
+  // project (harvest316/minspec#373).
+  const folder = await resolveTargetFolder();
+  if (!folder) return;
 
   // Check gh is available
   const ghAvail = await isGhAvailable();
@@ -144,11 +145,9 @@ export async function scoreWsjfCommand(): Promise<void> {
  * Quick-triage an inbox issue: set priority and transition lifecycle label.
  */
 export async function triageIssueCommand(): Promise<void> {
-  const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!folder) {
-    vscode.window.showErrorMessage('MinSpec: No workspace folder open.');
-    return;
-  }
+  // Multi-root safe: same rationale as scoreWsjfCommand (#373).
+  const folder = await resolveTargetFolder();
+  if (!folder) return;
 
   const ghAvail = await isGhAvailable();
   if (!ghAvail) {

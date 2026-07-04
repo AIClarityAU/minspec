@@ -6,6 +6,7 @@ import { validateSpec } from '../lib/spec-validator';
 import { epicRefSet } from '../lib/epic-manager';
 import { getApprovalStatus } from '../lib/approval';
 import type { ExplicitTerminal } from '../lib/lifecycle';
+import { folderForFile, resolveTargetFolder } from '../lib/resolve-folder';
 
 interface SpecNodeLike {
   readonly spec?: SpecSummary;
@@ -16,11 +17,15 @@ interface SpecNodeLike {
  * Read-only — does not change approval state.
  */
 export async function validateSpecCommand(node?: SpecNodeLike): Promise<void> {
-  const rootDir = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!rootDir) {
-    vscode.window.showErrorMessage('MinSpec: No workspace folder open.');
-    return;
-  }
+  // Multi-root safe: a tree-node click carries the spec's file path, so pin the
+  // root to the folder actually containing it; otherwise prompt the user
+  // (harvest316/minspec#373). Previously used `workspaceFolders?.[0]`,
+  // silently validating folder [0]'s specs regardless of which project was
+  // right-clicked.
+  const rootDir = node?.spec?.filePath
+    ? folderForFile(node.spec.filePath) ?? (await resolveTargetFolder())
+    : await resolveTargetFolder();
+  if (!rootDir) return;
 
   let spec = node?.spec;
   if (!spec) {

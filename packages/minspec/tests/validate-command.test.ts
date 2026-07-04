@@ -5,12 +5,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 vi.mock('vscode', () => ({
   workspace: {
     workspaceFolders: [{ uri: { fsPath: '/tmp/ws' } }],
+    // Multi-root resolver (#373): `folderForFile` calls `getWorkspaceFolder`.
+    getWorkspaceFolder: vi.fn(() => ({ uri: { fsPath: '/tmp/ws' } })),
   },
   window: {
     showErrorMessage: vi.fn(),
     showInformationMessage: vi.fn(),
     showQuickPick: vi.fn(),
+    showWorkspaceFolderPick: vi.fn(),
+    activeTextEditor: undefined,
   },
+  Uri: { file: (p: string) => ({ fsPath: p, scheme: 'file' }) },
 }));
 
 // ─── Mock lib deps ────────────────────────────────────────────────────────────

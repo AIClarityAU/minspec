@@ -14,6 +14,12 @@ vi.mock('vscode', () => ({
   workspace: {
     workspaceFolders: [{ uri: { fsPath: '/tmp/ws' } }],
     openTextDocument: vi.fn(),
+    // Multi-root resolver (#123, #373) — the mock resolves any file path to the
+    // sole workspace folder, matching the real VS Code behavior for single-root
+    // suites. `undefined` triggers the `?? [0]` fallback in `folderForFile`, so
+    // either shape works; being explicit avoids TypeError when
+    // `getWorkspaceFolder(...)` is called with `undefined` fields.
+    getWorkspaceFolder: vi.fn(() => ({ uri: { fsPath: '/tmp/ws' } })),
   },
   commands: { executeCommand: vi.fn() },
   Uri: { file: (p: string) => ({ fsPath: p, scheme: 'file' }) },
@@ -62,8 +68,13 @@ function summary(id: string, title: string): SpecSummary {
 
 /** Point the active editor at an in-memory document with the given text. */
 function setActiveDoc(text: string | undefined): void {
+  // `uri.fsPath` must exist for the multi-root resolver (#373) — resolveTargetFolder
+  // reads the active editor's file path. The path itself is irrelevant for the
+  // id-from-editor cases; only `getText` drives their assertions.
   (vscode.window as { activeTextEditor: unknown }).activeTextEditor =
-    text === undefined ? undefined : { document: { getText: () => text } };
+    text === undefined
+      ? undefined
+      : { document: { getText: () => text, uri: { fsPath: '/tmp/ws/active-editor.md' } } };
 }
 
 const SPEC_002_DESIGN = `---
