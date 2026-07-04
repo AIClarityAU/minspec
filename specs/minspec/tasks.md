@@ -1,6 +1,6 @@
 ---
 epic: EPIC-003  # SDD Core Methodology
-id: SPEC-003
+id: SPEC-001
 type: tasks
 # Editing voids approval (hash in .minspec/approvals.json → stale); re-run "MinSpec: Approve Spec". DR-012
 status: implementing

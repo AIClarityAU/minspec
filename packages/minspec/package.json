@@ -294,6 +294,14 @@
           "when": "false"
         },
         {
+          "command": "minspec.viewDesign",
+          "when": "false"
+        },
+        {
+          "command": "minspec.viewTasks",
+          "when": "false"
+        },
+        {
           "command": "minspec.showChangesSinceApproval",
           "when": "editorLangId == markdown"
         }

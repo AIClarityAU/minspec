@@ -269,7 +269,7 @@ See [vscode-sdd-competitive-landscape-2026-05-26.md](../research/vscode-sdd-comp
 ## Risks & Mitigations
 
 Requirements/product-level risks (the *bets* this spec makes). Design/implementation
-risks live in [SPEC-002](design.md). Per DR-020 (interim; screen-gated under DR-022).
+risks live in [the design doc](design.md). Per DR-020 (interim; screen-gated under DR-022).
 
 | # | Risk | Likelihood · Impact | Mitigation |
 |---|---|---|---|
@@ -311,7 +311,7 @@ Verified by the Acceptance Criteria checklist above plus the import-scan invaria
 - **`minspec init --refresh` over a hand-edited harness file** (FR-4, Invariant 6) — naive overwrite would destroy user edits; merge must preserve them or the invariant fails.
 - **Spec Kit writes a frontmatter field MinSpec doesn't recognize** (FR-3) — must round-trip the unknown field untouched, not drop it, or no-lock-in (Invariant 3) breaks.
 - **ADR number collision under concurrent T4 changes** (FR-8) — two specs racing for the next DR-NNN; collision detection must reject the duplicate, not silently co-number.
-- **Repo exceeds the NFR-1 envelope (>100K files / >500 specs)** — classification/tree render may breach the <500ms/<200ms budgets. No over-envelope degradation strategy is specified here (out of NFR-1's stated bound); accepted because the classify path runs on the git diff (FR-1 inputs), not full-repo scan, so file count past 100K does not linearly inflate it — the residual is the >500-spec tree render, deferred to design (SPEC-002) rather than promised in this requirements doc.
+- **Repo exceeds the NFR-1 envelope (>100K files / >500 specs)** — classification/tree render may breach the <500ms/<200ms budgets. No over-envelope degradation strategy is specified here (out of NFR-1's stated bound); accepted because the classify path runs on the git diff (FR-1 inputs), not full-repo scan, so file count past 100K does not linearly inflate it — the residual is the >500-spec tree render, deferred to the design doc rather than promised in this requirements doc.
 
 ## Coverage Map
 

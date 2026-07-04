@@ -21,6 +21,6 @@ toggle, plus a Create Epic command, completion, scaffold, and soft validation.
 
 - **Decision:** [DR-013](../decisions/DR-013.md) — registered epics design.
 - **Specs:** [SPEC-007 requirements](../../specs/minspec/SPEC-007-epic-grouping/requirements.md),
-  [SPEC-008 design](../../specs/minspec/SPEC-007-epic-grouping/design.md),
-  [SPEC-009 tasks](../../specs/minspec/SPEC-007-epic-grouping/tasks.md).
+  [SPEC-007 design](../../specs/minspec/SPEC-007-epic-grouping/design.md),
+  [SPEC-007 tasks](../../specs/minspec/SPEC-007-epic-grouping/tasks.md).
 - **Issues:** label `epic:epic-grouping` (none open — shipped in one session).

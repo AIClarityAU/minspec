@@ -170,14 +170,14 @@ Add rate limiting.
     expect(matches[0].hasTasksFile).toBe(true);
   });
 
-  // Regression (PR #472 review finding #1): a flat directory can hold several
-  // INDEPENDENTLY-numbered specs, not just one spec's split-layout shards —
-  // exactly this repo's own specs/minspec/{requirements,design,tasks}.md are
-  // SPEC-001/002/003, three separate specs, not phase-files of SPEC-001. Before
-  // the fix, hasDesignFile/hasTasksFile were derived from directory
-  // co-location alone, so SPEC-001 would falsely claim SPEC-002's design.md and
-  // SPEC-003's tasks.md as its own — showing "View Design"/"View Tasks" menu
-  // items that opened an unrelated spec's content.
+  // Invariant guard (PR #472 review finding #1): ownership is keyed by the
+  // phase-file's OWN frontmatter id, never by directory co-location — so a
+  // design.md/tasks.md carrying a DIFFERENT id than the sibling requirements.md
+  // is never claimed. (The live repo's mis-numbered clusters —
+  // specs/minspec/{design,tasks}.md and SPEC-007-epic-grouping/{design,tasks}.md
+  // — were renumbered to share their parent id in this same PR, so the intended
+  // split-layout specs now resolve correctly; this test locks the algorithm's
+  // no-cross-id-contamination guarantee so a future stray file can't leak in.)
   it('does NOT claim a sibling design.md/tasks.md that belongs to a DIFFERENT spec id', () => {
     writeMinspecConfig(tmpDir);
     const dir = path.join(tmpDir, 'specs', 'minspec');
