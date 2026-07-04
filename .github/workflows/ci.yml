@@ -35,6 +35,27 @@ jobs:
       - name: Unit-test ai-review label guard
         run: node --test .github/scripts/ai-review-guard.test.js
 
+  # Workflow-syntax + expression lint (#486 harden). CI validated YAML syntax but
+  # NOT the GitHub Actions schema/expression grammar, so an invalid `${{ }}` reached
+  # main and put ai-review into startup_failure REPO-WIDE (a literal empty `${{ }}`
+  # in a run: comment — YAML sees a string, Actions sees an invalid expression). This
+  # is the gate that was missing. shellcheck/pyflakes are OFF: they lint the shell/
+  # python INSIDE run: blocks (noisy style, out of scope) — we gate ONLY the
+  # workflow-syntax/expression/schema class that broke the pipeline. Verified clean
+  # across all current workflows with these flags; still catches the #486 class.
+  actionlint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      # Pinned script + pinned binary version (the exact release used to verify the
+      # #486 fix) — deterministic, no floating `latest`/`main`.
+      - name: Install actionlint (pinned)
+        run: bash <(curl -sSL https://raw.githubusercontent.com/rhysd/actionlint/v1.7.12/scripts/download-actionlint.bash) 1.7.12
+
+      - name: Lint GitHub Actions workflows
+        run: ./actionlint -shellcheck= -pyflakes= -color
+
   test:
     runs-on: ubuntu-latest
     steps:
