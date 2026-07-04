@@ -169,6 +169,215 @@ merge-vs-hold decision. This spec is that decision.
   merges via `gh pr merge`. The block content is identical across surfaces (one renderer,
   #180) — only the host differs.
 
+## Acceptance Criteria
+
+Each criterion is a checkable pass/fail condition on the built gate, traceable to the
+FR/INV it discharges and to the test (or code) that proves it. **This section was written
+*after* the gate merged (PR #412); the status column is an audit of the merged code, not a
+forward plan.** A criterion is met only on the **authoritative** signal (the test asserts
+the behaviour / the code path exists), never on artifact-existence (RCDD evidence
+discipline).
+
+**Status legend:** ✅ met (code + passing test) · 🟡 met, test-gap (code present, no
+dedicated test found — add a T-test) · ⛔ unmet (required, not implemented) · ⏳ deferred
+(explicitly out of v1 scope or gated on another spec).
+
+### A. Core eligibility & purity
+
+- **AC-1 — Deny-by-default.** Given an `AutoMergeInput` with **any** required conjunct
+  absent / `undefined` / unknown, When `decideAutoMerge` runs, Then `eligible === false`
+  and `failed[]` names the missing conjunct; an entirely empty object never throws and is
+  ineligible. *(FR-1, INV-1 — ✅ `auto-merge.test.ts:124` drop-each-input property + `:150`;
+  🟡 sub-clause "`failed[]` names the missing conjunct" is code-only (`auto-merge.ts:338–364`) —
+  the property test asserts only `failed.length > 0`, not the specific key. Add a key-assertion test.)*
+- **AC-2 — Eligible baseline.** Given all three review signals green (prover-verified
+  red→green), no hollow/stub findings, `blast === 'low'`, and (reach known-low **or**
+  `touchesExportedSurface === false`), When `decideAutoMerge` runs, Then `eligible === true`,
+  `blast === 'low'`, `failed === []`. *(FR-1 — ✅ `auto-merge.test.ts:112`.)*
+- **AC-3 — Pure Tier-0 + always-reasoned.** `decideAutoMerge` performs no IO (imports no
+  `vscode` / `fs` / `path` / `child_process` / network; value-level imports are type-only,
+  erased at runtime) and **every** decision — eligible or not — carries a non-empty `reason`
+  and a `failed[]` that is `[]` iff eligible. *(INV-6 — ✅ purity `auto-merge.test.ts:431`;
+  non-empty reason + `failed === []` on the eligible path `auto-merge.test.ts:113–118`.)*
+
+### B. Regression prover — sole authority (INV-3 / FR-2)
+
+- **AC-4 — Prover overrides self-report.** Given `reviewSignals.regressionProvenBaseRed ===
+  true` but **no** `proverResult`, Then ineligible; and given a genuine prover red→green
+  with a self-report of `false`, Then the prover wins ⇒ eligible. The agent's self-report is
+  never trusted. *(INV-3 — ✅ `auto-merge.test.ts:159`.)*
+- **AC-5 — Honest prover failure modes.** green-on-base / red-on-head / test-not-found /
+  flaky-across-runs / no-test-named / broken-base-env / load-collection-error on base ⇒ **NOT
+  proven** ⇒ ineligible. A "red" verdict requires an *executed assertion failure*, never a
+  load error. *(FR-2 — ✅ `auto-merge-gate.test.ts:118` + `:152`.)*
+
+### C. Hollow / stub tests (INV-4 / FR-3)
+
+- **AC-6 — Any hollow or stub finding blocks.** Given `scanTestSource` returns ≥1 finding of
+  kind `hollow` **or** `stub` on a changed/added test, Then ineligible (`failed` ∋
+  `hollow-tests`); a missing `hollowFindings` array ⇒ ineligible
+  (`hollow-findings-missing`). Closes #197's activation requirement. *(INV-4, FR-3 — ✅
+  present-finding path `auto-merge.test.ts:207`; 🟡 the `hollow-findings-missing` (absent-array)
+  key is code-only (`auto-merge.ts:353–355`) — no test names it. Add one.)*
+
+### D. Blast classification — deny-by-default over signal NAMES (FR-5)
+
+- **AC-7 — Unknown name ⇒ high (allowlist inversion).** Given a novel/unmapped consequence
+  signal name (e.g. a fabricated `future_signal`), Then `blast === 'high'` and the change is
+  ineligible. A signal counts toward `low` only if explicitly recognized as low-blast (v1: none).
+  *(FR-5 — ✅ `auto-merge.test.ts:223` + end-to-end `:262`.)*
+- **AC-8 — Recognized high signals hold.** Any of `irreversible_deletion` /
+  `irreversible_migration` / `destructive_schema_op` / `sensitive_sink` / `public_api_*` /
+  `concurrency` ⇒ high-blast hold **even with all three review signals green**. *(FR-5 — ✅
+  `auto-merge.test.ts:236` + `:401`.)*
+- **AC-9 — The only low outcome.** A signal set containing at most the `reach_unavailable`
+  marker and **no** exported touch ⇒ `low`; an empty signal set ⇒ `low`. *(FR-5 — ✅
+  `auto-merge.test.ts:254`.)*
+- **AC-10 — Manifest change ⇒ high (defence-in-depth, #414 / BLOCKER-1).** A changed
+  dependency/boundary manifest (`package.json`, `exports`/`main`/`bin`, lockfile, workspace
+  manifest) — which the public-API analyzer skips — is injected as `manifest_changed` by the
+  IO layer and classifies **high**; a `package.json`-only diff holds end-to-end. *(Extends
+  FR-5 beyond the doc's original signal list — ✅ `auto-merge.test.ts:272`,
+  `auto-merge-gate.test.ts:235`.)*
+- **AC-11 — CI/build boundary change ⇒ high (#422).** A diff touching a CI/build boundary
+  (`.github/workflows/*`, `tsconfig.json`, `.npmrc`, `Jenkinsfile`, `.githooks/*`, …) holds;
+  an ordinary `src/*.ts` change is **not** force-escalated by this matcher. *(Extends FR-5 —
+  ✅ `auto-merge-gate.test.ts:286`.)*
+
+### E. Reach & exported surface (INV-2 / FR-4 / FR-4a)
+
+- **AC-12 — `touchesExportedSurface` is derived, never an input.** Computed inside the gate
+  as `some(signal ∈ public_api_*)`; there is no caller boolean. *(FR-4a — ✅
+  `auto-merge.test.ts:301`.)*
+- **AC-13 — Degraded surface fails safe to "touched".** A degraded / `export *` sentinel or a
+  content-unavailable `public_api_changed` (analyzer couldn't read old/new surface) forces
+  `touchesExportedSurface === true`. *(FR-4a — ✅ `auto-merge.test.ts:302` + `:312`.)*
+- **AC-14 — Unmeasured blast = high (v1 load-bearing conjunct).** `reach_unavailable` +
+  exported touch ⇒ high, ineligible (`failed` ∋ `unmeasured-blast`); `reachKnownLow` is
+  **always** `false` in v1 (no index), so eligibility's reach conjunct reduces to
+  `!touchesExportedSurface`. *(INV-2, FR-4 — ✅ `auto-merge.test.ts:344`.)*
+- **AC-15 — No exported signal ⇒ not touched.** No `public_api_*` signal present ⇒
+  `touchesExportedSurface === false`. *(FR-4a — ✅ `auto-merge.test.ts:321`.)*
+
+### F. Mode, kill-switch & loop integration (C4 / FR-6)
+
+- **AC-16 — `pr-gate` mode always holds.** A change that would be eligible under
+  `consequence-hybrid` holds under `pr-gate`, and the hold still reports the derived blast
+  class. *(C4 — ✅ `auto-merge.test.ts:412`.)*
+- **AC-17 — Mode resolves deny-by-default at the IO seam.** `parseArgs` with no `--mode` ⇒
+  `pr-gate` (**auto-merge OFF by default**); garbage `--mode` ⇒ `pr-gate`; only the exact
+  opt-in token ⇒ `consequence-hybrid`. No fail-open. *(C4 / MAJOR-4 — ✅
+  `auto-merge-gate.test.ts:85`.)*
+- **AC-18 — Loop wires eligible→merge / else→hold (merge predicate is a conjunction, not
+  `eligible` alone).** In the #172 dispatch, a PR merges (`gh pr merge --squash`, no human)
+  **only** when `ELIGIBLE === true` **AND** a PR number is resolved **AND**
+  `AUTOMERGE_MODE === consequence-hybrid` **AND** the independent-reviewer `ready-to-merge`
+  status is `success` (`dispatch-issue.sh:431–433`). `eligible` is necessary, not sufficient —
+  the reviewer greenlight is an additional gate. Any miss ⇒ **no merge**, PR labelled
+  `needs-human-skim`, hold body (the #180 signal block + blast reason) posted. *(FR-6 — ✅
+  code `dispatch-issue.sh:431–440` merge / `:440,:463` label / `:462` hold comment. 🟡 no
+  end-to-end shell test for the branch selection or the four-way conjunction — add one.)*
+- **AC-19 — Diff failure fails safe to HOLD.** An unresolvable base ref / git failure ⇒
+  `buildChangedFiles` throws ⇒ `main()`'s catch converts it to a HOLD; never a silent 0-file
+  diff read as "nothing changed". *(FR-6 / MAJOR-5 — ✅ the *throw* is tested
+  `auto-merge-gate.test.ts:464`; 🟡 the throw→HOLD conversion in `main()` (`auto-merge-gate.ts:714–731`)
+  is code-only — no test drives `main()`'s catch to assert a HOLD is emitted. Add one.)*
+
+### G. Audit trail (FR-7)
+
+- **AC-20 — Every decision is recorded.** Each gate invocation appends a record (PR#,
+  eligible, `failed[]`, blast, signal snapshot) to `.minspec/auto-merge-audit.log` (resolved
+  to the shared main-repo root across worktrees), so a wrong auto-merge is traceable to the
+  condition that lied. *(FR-7 — 🟡 code `auto-merge-gate.ts:591–615`, called `:691`; **no
+  dedicated test** for the appended record's shape/content — add a T1.)*
+
+### H. High-blast skim surface (FR-8 / INV-7)
+
+- **AC-21 — Degraded GitHub-comment fallback (buildable now).** With no IDE surface attached
+  (headless / cron / CI), the held PR receives the identical #180 signal block + one-line
+  blast reason as a `gh pr comment`; the human merges via `gh pr merge`. One renderer across
+  surfaces. *(FR-8 fallback — ✅ code `auto-merge-gate.ts:707` render + `dispatch-issue.sh:462`
+  post. 🟡 no test asserting the posted body equals the renderer output — add one.)*
+- **AC-22 — In-IDE review surface (gated on SPEC-014).** A held PR surfaces as a
+  [SPEC-012](../SPEC-012-next-task-resolver/requirements.md) next-human-task and renders in the
+  [SPEC-014](../SPEC-014-review-webview/requirements.md) review-webview (non-modal), offering
+  exactly two actions — approve+merge, open diff. *(FR-8 in-IDE — ⛔ **not wired**:
+  `dispatch-issue.sh:445` itself notes the in-IDE surface is deferred; only the AC-21 fallback
+  exists. SPEC-014 is now `status: implementing` — the Follow-ups note below is stale.)*
+- **AC-23 — Keyboard-first approve+merge (INV-7).** The approve+merge action is bound to a
+  two-key chord / hotkey — never mouse-only — with a T-test asserting a bound key exists.
+  *(INV-7 — ⛔ **unmet**: depends on the AC-22 surface, which is not built; no bound key, no
+  T-test. This is the one hard invariant with zero coverage and must gate the FR-8 in-IDE
+  build.)*
+
+### I. Upstream scope guard (INV-5)
+
+- **AC-24 — Gate assumes the held-for-human filter, never re-litigates it.** The gate is
+  invoked only for issues already past the DR-033 held-for-human filter
+  (marketing/legal/decide/irreversible-architecture/billing/published-sites never reach it);
+  it does not re-check the filter. *(INV-5 — this is a **documentation assertion, not a
+  self-checkable criterion**: the pure gate cannot verify an upstream property, so there is
+  nothing for it to assert. Documented at `auto-merge.ts:27`. **Checkable form to add:** a
+  dispatch-level test that the gate is never invoked for a held-for-human category — that
+  test, not the gate, is the enforceable acceptance condition.)*
+
+### J. Known wrong-merge directions with NO acceptance coverage (⛔ — the audit's real teeth)
+
+A wrong `eligible` reaches `main` unseen; these are the paths by which the *current* gate
+could emit one, none of which any AC above closes. Surfaced by the adversarial audit of PR
+#412; each is a required acceptance condition the gate does **not** yet meet. Materialized as
+tracked issues (Follow-ups) — an unmet ⛔ here is a live hole, not a note.
+
+- **AC-25 — Signal-1 (root cause) must be cross-checked against the REAL diff, not the
+  agent's self-report.** Unlike Signal-2 (independently established by the FR-2 prover),
+  `rootCauseGreen` (`auto-merge.ts:249–256`) checks `rootCauseFiles ⊆ changedFiles` where
+  **both** come from the agent-authored signals file (`dispatch-issue.sh:393–394`), not from
+  `buildChangedFiles`' real git diff. An agent passes Signal-1 trivially by making its claimed
+  `rootCauseFiles` a subset of its own claimed `changedFiles`. *(⛔ no prover/cross-check for
+  Signal-1; the one review conjunct without an independent witness. Acceptance: `changedFiles`
+  used for Signal-1 must be the real git diff, or Signal-1 must not count toward auto-merge.
+  Tracked: [#489](https://github.com/AIClarityAU/minspec/issues/489).)*
+- **AC-26 — Empty / low consequence-signal set on a subtle CODE change must not float to
+  `low`-blast.** `classifyBlast([], false) === 'low'` (`auto-merge.ts:197`): a high-consequence
+  *code* edit (auth, money-path, logic) that trips no analyzer and is not a manifest/boundary
+  file emits an empty signal set ⇒ low ⇒ eligible. The #414/#422 injections cover only
+  *non-code* blind spots; nothing covers an analyzer **false-negative on code**. This is the
+  deepest hole and aligns with the standing "classifier measures diff size, not difficulty"
+  finding (SPEC-004). *(⛔ no floor on unanalyzed code; deny-by-default stops at *known* signal
+  names, not at *absence of signal*. Acceptance: an analyzed-code change with zero recognized
+  signals but non-trivial reach/size must not auto-classify low.
+  Tracked: [#490](https://github.com/AIClarityAU/minspec/issues/490).)*
+- **AC-27 — Audit-write failure must not be silently swallowed.** `appendAudit`
+  (`auto-merge-gate.ts:610–616`) catches its own error and only logs to stderr; the merge
+  proceeds regardless. FR-7 is best-effort, so a wrong auto-merge whose audit append failed
+  leaves nothing to trace — defeating the trail's purpose exactly when it matters. *(⛔
+  contradicts FR-7's "every decision is recorded". Acceptance: an audit-append failure on an
+  `eligible` decision must block the merge (fail-safe to HOLD), not proceed untraced.
+  Tracked: [#491](https://github.com/AIClarityAU/minspec/issues/491).)*
+- **AC-28 — The merge must be pinned to the evaluated SHA (TOCTOU).** The prover/diff run on
+  the local worktree HEAD, but `gh pr merge "$PR_NUM"` (`dispatch-issue.sh:436`) merges the
+  PR's *current* head with no `--match-head-commit`. If the PR head advances between evaluation
+  and merge, **unevaluated code merges to `main`**. *(⛔ no SHA pin. Acceptance: the merge asserts
+  the PR head equals the SHA the gate evaluated, else re-evaluate or HOLD. Same TOCTOU family as
+  open [#466](https://github.com/AIClarityAU/minspec/issues/466) (SHA-bind the ai-review label);
+  this is the gate-evaluation-SHA→merge-SHA variant — fold into #466 or file a sibling.)*
+
+### Acceptance summary (audit of merged PR #412)
+
+- **Met with tests (✅):** AC-2, AC-4..AC-17 (core minus the sub-clause gaps below) — the pure
+  decision core, prover, blast/reach classification, mode kill-switch.
+- **Met, test-gap (🟡):** AC-1 (missing-conjunct key), AC-3 (reasoned-path now cited), AC-6
+  (absent-array key), AC-18 (loop conjunction), AC-19 (throw→HOLD conversion), AC-20
+  (audit-record shape), AC-21 (fallback body parity). Code exists; add the named tests.
+- **Not self-checkable (AC-24):** documentation assertion; the enforceable form is a
+  dispatch-level test that the gate is never called for a held-for-human category.
+- **Unmet, deferred (⛔ ⏳):** AC-22 + AC-23 — the FR-8 **in-IDE keyboard-first** surface;
+  fallback (AC-21) covers the loop today, but **INV-7 has zero implementation** and must gate
+  any SPEC-014-backed FR-8 build.
+- **Unmet, live holes (⛔):** AC-25..AC-28 — self-reported root cause, analyzer false-negative
+  on code, swallowed audit failure, TOCTOU merge SHA. These are the paths to a wrong auto-merge
+  the gate does **not** yet close; each is tracked (Follow-ups).
+
 ## Contract (TypeScript sketch)
 
 ```ts
@@ -231,8 +440,15 @@ proven; a test red-on-head → not proven; missing test → not proven.
 
 - Widen low-blast coverage once reach is real + validated: #195 (index), #91 (validation).
 - **FR-8's in-IDE path is gated on [SPEC-014](../SPEC-014-review-webview/requirements.md)**
-  (`status: specifying` — no built webview yet). Buildable now: the GitHub-comment degraded
-  fallback; the keyboard-first review-webview surface + the INV-7 T-test land only when
-  SPEC-014 ships. Not read as buildable-now.
+  (now `status: implementing` — verify the review-webview actually renders a *held-PR* skim
+  surface before marking AC-22/AC-23 met; SPEC-014's existing webview is the spec/ADR approval
+  surface, not the PR skim surface). Buildable now: the GitHub-comment degraded fallback
+  (AC-21). The keyboard-first review-webview surface (AC-22) + the INV-7 bound-key T-test
+  (AC-23) land only when SPEC-014 ships the held-PR surface. Not read as buildable-now.
+- **Wrong-merge holes surfaced by the PR-#412 acceptance audit (Acceptance Criteria §J),
+  filed per DR-023:** AC-25 self-reported root cause → [#489](https://github.com/AIClarityAU/minspec/issues/489);
+  AC-26 analyzer false-negative on code → [#490](https://github.com/AIClarityAU/minspec/issues/490);
+  AC-27 swallowed audit failure → [#491](https://github.com/AIClarityAU/minspec/issues/491);
+  AC-28 TOCTOU merge SHA → fold into [#466](https://github.com/AIClarityAU/minspec/issues/466).
 - `plan-gate` HITL mode (#183 option 2) — deferred.
 - Productize as the `aiclarity.agent-execute` gate surface (EPIC-007) — this dev-time gate is the prototype.
