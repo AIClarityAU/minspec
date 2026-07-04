@@ -191,6 +191,44 @@ function decideStatus({ labels, provenanceRevert, stalenessStrip, passProvenance
   };
 }
 
+// Map the reviewer's FINAL verdict label to the `ai-review` check-run's
+// conclusion + human-readable title/summary.
+//
+// This is the fix for the "ai-review is green even when changes were requested"
+// defect: the check named `ai-review` must reflect the *verdict*, not merely
+// that the reviewer workflow ran. A check-run supports a `neutral` conclusion
+// (a plain commit-status does not), which is exactly right here — the review DID
+// complete, it just did not PASS, so the honest signal is "reviewed; changes
+// requested / human review required", not a green pass and not a red broken-CI
+// failure.
+//
+//   ai-review:pass  → success   (the PR genuinely passed independent review)
+//   anything else   → neutral   (changes requested, the machinery-self-cert
+//                                override, an errored/empty verdict, …) — NEVER
+//                                success, and NEVER failure. Fail-closed: only an
+//                                exact `ai-review:pass` is ever green.
+const CHECK_NAME = 'ai-review';
+function decideReviewCheck(label) {
+  const pass = label === PASS;
+  return {
+    name: CHECK_NAME,
+    // completed check-run conclusion: only `success` reads as "passed".
+    conclusion: pass ? 'success' : 'neutral',
+    title: pass
+      ? 'AI review: passed'
+      : 'AI review: changes requested — human review required',
+    summary: pass
+      ? 'The independent AI reviewer approved this PR (`ai-review:pass`). ' +
+        'See the AI review comment for the findings behind the verdict.'
+      : 'The independent AI reviewer did **not** pass this PR ' +
+        '(`ai-review:changes`) — changes were requested, the review could not ' +
+        'complete, or the PR edits the review machinery (auto-pass disabled). ' +
+        'This check is deliberately **neutral**, not green: `ai-review` is green ' +
+        'only when the PR actually passed. A human must review — see the AI ' +
+        'review comment for details.',
+  };
+}
+
 // Is a label-removal API failure safe to ignore? ONLY a 404 (the label is
 // already gone — e.g. a concurrent removal). Any other status (rate limit, 5xx,
 // 403) means the forged/stale `ai-review:pass` may STILL be present, so the
@@ -216,6 +254,7 @@ module.exports = {
   decideStalenessStrip,
   verifyPassProvenance,
   decideStatus,
+  decideReviewCheck,
   isBenignRemovalError,
   sanitizeLogin,
 };

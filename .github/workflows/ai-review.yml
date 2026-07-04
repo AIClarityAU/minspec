@@ -91,12 +91,27 @@
 #      broker). Until it exists, this workflow SKIPS with a notice (never reds).
 #   2. Confirm `MINSPEC_APP_PRIVATE_KEY` is the RAW PEM (create-github-app-token
 #      needs raw, not base64), and the App is installed on the repo with
-#      `pull-requests: write` + `issues: write` (labels/comments use the issues API).
+#      `pull-requests: write` + `issues: write` (labels/comments use the issues
+#      API) + `checks: write` (the honest `ai-review` verdict check-run). If
+#      `checks: write` is absent the review still works — the verdict check is
+#      simply not posted (best-effort), never a false green.
 #   3. AFTER a verified run: set repo variable `AI_REVIEW_LABEL_ACTORS =
-#      minspec-sdd[bot]` (so ready-to-merge.yml trusts ONLY the bot) and make a
-#      check required in branch protection. Both are deliberately NOT done here.
+#      minspec-sdd[bot]` (so ready-to-merge.yml trusts ONLY the bot) and make the
+#      `ai-review` verdict check required in branch protection (green only when the
+#      PR actually passed — the runner's own `ai-review-runner` job is not the
+#      signal). Both are deliberately NOT done here.
 
-name: ai-review
+# NOTE — why this workflow is `ai-review-runner`, not `ai-review`:
+# GitHub Actions posts one implicit check-run per JOB, named after the job, whose
+# conclusion is just "did the job exit 0". If the job were named `ai-review`, that
+# implicit check would go GREEN whenever the reviewer merely RAN — even when the
+# verdict is `ai-review:changes` — so a human reading `ai-review: success` would
+# wrongly think the PR passed. So the runner job is named `ai-review-runner` (its
+# implicit check honestly means "the review ran"), and the name `ai-review` is
+# reserved for the EXPLICIT verdict check-run posted at the end of the job, whose
+# conclusion MIRRORS THE VERDICT (pass → success, anything else → neutral). Green
+# on `ai-review` therefore means the PR actually passed, never just "it ran".
+name: ai-review-runner
 
 on:
   pull_request:
@@ -114,7 +129,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  ai-review:
+  # Renamed from `ai-review` → `runner` so its implicit "did the job exit 0"
+  # check-run is NOT called `ai-review` (see the NOTE at the top of this file).
+  # The authoritative `ai-review` check is posted explicitly by the final step,
+  # with a conclusion that mirrors the verdict.
+  runner:
     runs-on: ubuntu-latest
     steps:
       # Secrets can't be read inside `if:`, so copy them into a step env and set an
@@ -421,3 +440,68 @@ jobs:
           gh pr edit "$PR_NUMBER" --repo "$REPO" --add-reviewer "$REVIEWERS" 2>/dev/null || true
           # Re-fail so the job status honestly reflects the error (label recovered).
           exit 1
+
+      # ── Honest `ai-review` verdict CHECK-RUN (the fix) ───────────────────────
+      # The runner job's own success only means "the reviewer RAN" — NOT "the PR
+      # PASSED". So post the authoritative `ai-review` check-run whose CONCLUSION
+      # MIRRORS THE VERDICT, computed by the tested pure helper decideReviewCheck:
+      #   ai-review:pass → success ; anything else → neutral (changes requested,
+      #   the machinery-self-cert override, or an errored/empty verdict). A
+      #   check-run supports `neutral`, which is exactly right: the review DID
+      #   complete, it just did not pass, so it must not read as green NOR as a
+      #   broken-CI red `failure`. Fail-closed: an empty `steps.review.outputs.label`
+      #   (review step errored) maps to neutral, never success.
+      #
+      # Runs `if: always()` so the check is posted on both the pass and the
+      # fail-closed paths, but only when the reviewer is configured. Posted AS THE
+      # BOT (App token) to match the comment/label provenance. INFORMATIONAL only —
+      # it is NOT the merge gate (`ready-to-merge`, which reads the
+      # provenance-verified label, is), so a forged green here grants no merge and
+      # this row never weakens the gate. Best-effort: a missing `checks: write` App
+      # permission degrades to a warning (the honest check is then simply absent —
+      # never a false green), and this step never changes the job's honest status.
+      # Only trusted values reach the shell (App token, repo slug, the
+      # GitHub-assigned head SHA, and our own gate's label) — no PR-controlled text.
+      - name: Post honest `ai-review` verdict check-run as minspec-sdd[bot]
+        if: always() && steps.guard.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # Our own gate's output (`ai-review:pass` / `ai-review:changes`), NOT any
+          # PR-controlled text. Empty if the review step never completed → neutral.
+          VERDICT_LABEL: ${{ steps.review.outputs.label }}
+        run: |
+          set -uo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning title=ai-review check not posted::No App token (mint skipped/failed) — cannot post the ai-review verdict check-run. The label/comment remain authoritative."
+            exit 0
+          fi
+          # Build the check-run body from the TESTED pure helper (single source of
+          # truth for pass→success / changes→neutral). node reads inputs from env,
+          # never from an interpolated GitHub Actions expression — injection-safe.
+          # (NB: an Actions expression written literally here would be evaluated even
+          # inside this shell comment — an empty one fails workflow load; #486.)
+          BODY="$RUNNER_TEMP/ai-review-check.json"
+          if ! node -e '
+            const g = require(process.env.GITHUB_WORKSPACE + "/.github/scripts/ai-review-guard.js");
+            const c = g.decideReviewCheck(process.env.VERDICT_LABEL || "");
+            const fs = require("fs");
+            fs.writeFileSync(process.env.BODY, JSON.stringify({
+              name: c.name,
+              head_sha: process.env.HEAD_SHA,
+              status: "completed",
+              conclusion: c.conclusion,
+              output: { title: c.title, summary: c.summary },
+            }));
+            process.stderr.write("ai-review verdict=" + (process.env.VERDICT_LABEL || "<none>") + " → conclusion=" + c.conclusion + "\n");
+          ' BODY="$BODY"; then
+            echo "::warning title=ai-review check not posted::Could not compute the verdict check-run body. The label/comment remain authoritative."
+            exit 0
+          fi
+          # POST the check-run on the PR head SHA as the bot. Best-effort: a failure
+          # (e.g. the App lacks `checks: write`) must NOT red the run.
+          if ! gh api -X POST "repos/$REPO/check-runs" --input "$BODY" >/dev/null; then
+            echo "::warning title=ai-review check not posted::Posting the ai-review verdict check-run failed (grant the minspec-sdd App \`checks: write\`). The label/comment remain authoritative."
+          fi
+          exit 0

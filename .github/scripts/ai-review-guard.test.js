@@ -16,6 +16,7 @@ const {
   decideStalenessStrip,
   verifyPassProvenance,
   decideStatus,
+  decideReviewCheck,
   isBenignRemovalError,
   sanitizeLogin,
 } = require('./ai-review-guard.js');
@@ -301,6 +302,39 @@ test('status: description never exceeds the 140-char commit-status limit', () =>
   for (const c of cases) {
     assert.ok(decideStatus(c).description.length <= 140);
   }
+});
+
+// ── decideReviewCheck (honest `ai-review` check-run conclusion) ───────────────
+// The fix: the `ai-review` check conclusion must MIRROR THE VERDICT (green only
+// when the PR actually passed), not merely reflect that the workflow ran.
+test('review-check: an ai-review:pass verdict maps to a green (success) check', () => {
+  const c = decideReviewCheck(PASS);
+  assert.equal(c.name, 'ai-review');
+  assert.equal(c.conclusion, 'success');
+  assert.match(c.title, /passed/i);
+});
+
+test('review-check: an ai-review:changes verdict maps to NEUTRAL, never success/failure', () => {
+  const c = decideReviewCheck(CHANGES);
+  assert.equal(c.name, 'ai-review');
+  assert.equal(c.conclusion, 'neutral');
+  assert.notEqual(c.conclusion, 'success');
+  assert.match(c.title, /changes requested|human review/i);
+});
+
+test('review-check: fail-closed — an empty/absent verdict (review errored) is NEUTRAL, not green', () => {
+  for (const label of ['', undefined, null, 'ai-review:pending', 'garbage']) {
+    const c = decideReviewCheck(label);
+    assert.equal(c.conclusion, 'neutral', `expected neutral for ${JSON.stringify(label)}`);
+    assert.notEqual(c.conclusion, 'success');
+  }
+});
+
+test('review-check: ONLY an exact ai-review:pass is ever green (no near-miss passes)', () => {
+  assert.equal(decideReviewCheck('ai-review:pass ').conclusion, 'neutral'); // trailing space
+  assert.equal(decideReviewCheck('AI-REVIEW:PASS').conclusion, 'neutral'); // wrong case
+  assert.equal(decideReviewCheck('pass').conclusion, 'neutral'); // unqualified
+  assert.equal(decideReviewCheck(PASS).conclusion, 'success'); // the only green
 });
 
 // ── sanitizeLogin ────────────────────────────────────────────────────────────
