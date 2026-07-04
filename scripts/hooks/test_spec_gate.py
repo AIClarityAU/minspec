@@ -47,13 +47,14 @@ SPECIFYING_PHASES = (
 
 
 def _spec_text(sid, phases, body="The requirements body.\n", tier="T4",
-               status="implementing"):
+               status="implementing", extra_fm=""):
     return (
         "---\n"
         f"id: {sid}\n"
         "type: requirements\n"
         f"status: {status}\n"
         f"tier: {tier}\n"
+        f"{extra_fm}"
         f"{phases}"
         "---\n\n"
         f"# {sid}\n\n{body}"
@@ -79,8 +80,9 @@ class GateFixture:
         return path
 
     def write_spec(self, rel, sid, phases, body="The requirements body.\n",
-                   tier="T4", status="implementing"):
-        content = _spec_text(sid, phases, body=body, tier=tier, status=status)
+                   tier="T4", status="implementing", extra_fm=""):
+        content = _spec_text(sid, phases, body=body, tier=tier, status=status,
+                             extra_fm=extra_fm)
         self.write(rel, content)
         return content
 
@@ -195,6 +197,84 @@ class ScopedGateTests(unittest.TestCase):
         # The non-existent declared path resolves to nothing -> unrelated real
         # files still pass.
         self.assertEqual(self.fx.decision("packages/real/src/keep.ts"), "allow")
+
+    # --- 3b STRUCTURED signal: creation-blocking (the #426 review core fix) --
+
+    def test_structured_declared_missing_file_blocks_creation(self):
+        """A frontmatter `implements:` path is owned REGARDLESS of whether the
+        file exists yet, so a Write that would CREATE it is DENIED. Without this
+        (the old existence-only filter) the gate only bit edits to code that had
+        already landed, re-opening DR-362's hole for greenfield impl code."""
+        self.fx.write_spec(
+            "specs/minspec/SPEC-909-green/requirements.md",
+            "SPEC-909", IMPLEMENTING_PHASES,
+            extra_fm="implements: packages/core/src/brand_new.ts\n",
+        )  # unapproved; the declared impl file does NOT exist on disk yet
+        target = os.path.join(self.fx.root, "packages/core/src/brand_new.ts")
+        self.assertFalse(
+            os.path.exists(target), "precondition: declared file is not yet created"
+        )
+        self.assertEqual(
+            self.fx.decision("packages/core/src/brand_new.ts", tool="Write"),
+            "deny",
+            "creating a structurally-declared impl file of an unapproved spec "
+            "must be blocked (creation-blocking)",
+        )
+        # Contrast: an UNDECLARED, also-not-yet-existing sibling stays creatable —
+        # the block is scoped to the declaration, not a blanket freeze.
+        self.assertEqual(
+            self.fx.decision("packages/core/src/undeclared_new.ts", tool="Write"),
+            "allow",
+            "an undeclared new sibling must NOT be blocked",
+        )
+
+    def test_structured_declared_blocks_case_mismatched_target(self):
+        """Case-insensitive owned_match (#426 review fix 3): a structured
+        `implements:` (block-list form) declaring lowercase `thing.ts` must still
+        DENY a Write to the real-cased `Thing.ts`. On a case-insensitive FS the
+        existence check resolves either case, so the owned-set membership test must
+        match case-insensitively too, or the real-cased target slips the gate."""
+        self.fx.write_spec(
+            "specs/minspec/SPEC-910-case/requirements.md",
+            "SPEC-910", IMPLEMENTING_PHASES,
+            extra_fm=(
+                "implements:\n"
+                "  - packages/core/src/thing.ts\n"
+            ),
+        )  # unapproved; block-list form also exercises fm_list block parsing
+        self.assertEqual(
+            self.fx.decision("packages/core/src/Thing.ts", tool="Write"),
+            "deny",
+            "a case-mismatched declared impl file must still be blocked",
+        )
+
+    def test_undeclared_greenfield_impl_file_is_the_disclosed_gap(self):
+        """DISCLOSED GAP (intended behaviour, not a silent hole): a spec that names
+        its impl work only in prose `tasks.md` — the FUZZY, existence-filtered
+        signal — and carries NO structured `implements:` list does NOT block
+        creation of a not-yet-existing impl file it references. This is the
+        deliberate tradeoff of DR-047 §3 (unblock unrelated work rather than
+        repo-wide freeze); the durable fix is the structured convention + validator
+        tracked as #460. Encoded as a test so the gap can never silently change to
+        a block without someone updating this contract."""
+        self.fx.write_spec(
+            "specs/minspec/SPEC-911-prose/requirements.md",
+            "SPEC-911", IMPLEMENTING_PHASES,  # no `implements:` frontmatter
+        )
+        self.fx.write(
+            "specs/minspec/SPEC-911-prose/tasks.md",
+            "- [ ] Create `packages/core/src/to_be_written.ts` (does not exist yet)\n",
+        )
+        target = os.path.join(self.fx.root, "packages/core/src/to_be_written.ts")
+        self.assertFalse(
+            os.path.exists(target), "precondition: the impl file is not yet created"
+        )
+        self.assertEqual(
+            self.fx.decision("packages/core/src/to_be_written.ts", tool="Write"),
+            "allow",
+            "prose-only (fuzzy tasks.md) greenfield code is NOT gated — the "
+            "disclosed #460 gap; only a structured `implements:` list would block it",
+        )
 
     # --- approval + phase gating -------------------------------------------
 

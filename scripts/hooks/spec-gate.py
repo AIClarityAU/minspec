@@ -18,14 +18,33 @@ PreToolUse deny blocks the tool call before permission rules.
     (3a) its own artifacts — the per-spec `SPEC-NNN-*/` directory (or, for the flat
          umbrella spec, its same-id sibling docs). ALWAYS owned; the fail-safe
          minimum even when nothing else is derivable.
-    (3b) source files it EXPLICITLY names as implementation targets — a frontmatter
-         `implements:`/`affects:` list (forward-compatible; not in the corpus yet)
-         or backtick code-span paths in its own `tasks.md`, filtered to existing
-         source files so prose/placeholder tokens never match.
+    (3b) source files it EXPLICITLY names as implementation targets, from two
+         signals with DELIBERATELY DIFFERENT precision:
+           - STRUCTURED: a frontmatter `implements:`/`affects:` list. Matched
+             WITHOUT an existence filter, so a `Write` to a declared-but-not-yet-
+             existing file is DENIED — i.e. this signal blocks CREATION of an
+             unapproved spec's impl code, not merely edits to code that already
+             landed. (No spec in the corpus declares this yet — see below.)
+           - FUZZY: backtick code-span paths in the spec's own `tasks.md`. Matched
+             ONLY IF the file already exists, because a bare backtick token can be
+             prose/placeholder/example; the existence filter is what keeps those
+             from widening the block set. A necessary consequence is that the fuzzy
+             signal CANNOT block creation of a not-yet-existing file.
     (3c) a spec that declares NO implementation files freezes only (3a); unrelated
          source edits pass (fail-OPEN for unrelated files is correct per DR-047 §3).
-  A structured spec->impl-file convention (a first-class frontmatter glob list) is
-  a follow-up (see #426); until it lands, (3a)+(3b) are the derivation.
+
+  HONEST SCOPE (not "DR-362's hole is fully closed"). This gate blocks edits AND
+  creation of a spec's STRUCTURALLY-declared (`implements:`/`affects:`) impl files
+  and its own dir. Code an unapproved spec does NOT declare structurally — one that
+  describes its work only in prose `tasks.md`, or greenfield code it never names —
+  is NOT gated, because the fuzzy `tasks.md` signal is existence-filtered and no
+  spec in the corpus carries a structured `implements:` list yet. That is a
+  DELIBERATE, DISCLOSED tradeoff to unblock unrelated work per DR-047 §3, NOT a
+  claim that DR-362's enforcement hole is fully closed for greenfield/undeclared
+  code. The durable fix — a first-class `implements:`/`affects:` convention plus a
+  validator that requires/derives it across the corpus — is tracked as #460
+  (follows up #426); until specs declare their impl files structurally, the gate
+  cannot block creation of undeclared impl code.
 
 SPEC-022 changes:
   - Approval ground truth is COMMITTED, path-keyed sidecars under
@@ -78,6 +97,38 @@ def deny(reason):
 def fm_value(text, key):
     m = re.search(r'^' + re.escape(key) + r':\s*(.+?)\s*$', text, re.M)
     return m.group(1).strip() if m else None
+
+
+def fm_list(fm, key):
+    """Raw tokens of a frontmatter list `key:`, inline or YAML block form.
+
+    Accepts `key: a, b`, `key: [a, b]`, and the block form:
+        key:
+          - a
+          - b
+    Returns a list of raw string tokens (quotes/whitespace stripped). Empty when
+    the key is absent. Purely a tokenizer — path validation happens downstream.
+    """
+    toks = []
+    inline = fm_value(fm, key)
+    if inline is not None:
+        for t in re.split(r'[,\s\[\]]+', inline):
+            if t:
+                toks.append(t.strip().strip('"').strip("'"))
+        return toks
+    # Block-list form: `key:` alone on its line, then `  - item` lines.
+    lines = fm.split("\n")
+    for i, line in enumerate(lines):
+        if re.match(r'^' + re.escape(key) + r'[ \t]*:[ \t]*(?:#.*)?$', line):
+            for cont in lines[i + 1:]:
+                if re.match(r'^[ \t]*$', cont):
+                    continue
+                m = re.match(r'^[ \t]+-[ \t]*(.+?)[ \t]*(?:#.*)?$', cont)
+                if not m:
+                    break  # de-indented / next key -> list ended
+                toks.append(m.group(1).strip().strip('"').strip("'"))
+            break
+    return toks
 
 
 def spec_hash(path):
@@ -260,48 +311,61 @@ def _same_id_md_siblings(cwd, spec_dir_abs, sid):
 def declared_impl_files(cwd, fm, spec_dir_abs):
     """Source files a spec EXPLICITLY names as its implementation targets (3b).
 
-    Signals, in priority order:
-      - a frontmatter `implements:`/`affects:` list (structured; none in the
-        corpus yet — forward-compatible, tracked as a follow-up on #426), then
-      - backtick code-span paths in the spec's own `tasks.md`.
-    Precision filter (defeats prose/example/placeholder false positives): a token
-    counts only if it contains '/', ends in a known source extension, is not an
-    infra/escape path, and RESOLVES TO AN EXISTING FILE under cwd. Fully
-    fail-safe: any read error yields an empty set — the caller still applies the
-    own-dir (3a) protection, so a parse failure never silently unfreezes a spec.
+    Two signals with DELIBERATELY DIFFERENT existence handling:
+      - STRUCTURED frontmatter `implements:`/`affects:` list (`require_exists=
+        False`): a token is owned REGARDLESS of whether the file exists yet, so a
+        `Write` to a declared-but-not-yet-created file is blocked. This is what
+        makes the gate block CREATION of an unapproved spec's impl code, not only
+        edits to code that already landed (#426 review fix; durable convention +
+        validator tracked as #460). No spec in the corpus declares this yet.
+      - FUZZY backtick code-span paths in the spec's own `tasks.md`
+        (`require_exists=True`): a bare backtick token can be prose / example /
+        placeholder, so it only counts when it RESOLVES TO AN EXISTING FILE. That
+        existence filter is what stops prose tokens widening the block set — and
+        by construction means the fuzzy signal cannot block creation of a
+        not-yet-existing file (the disclosed greenfield gap, #460).
+
+    Shared precision/safety filters apply to BOTH signals: a token counts only if
+    it contains '/', ends in a known source extension, and is not an absolute /
+    parent-escape / infra path. Fully fail-safe: any read error yields an empty
+    set — the caller still applies the own-dir (3a) protection, so a parse failure
+    never silently unfreezes a spec.
     """
     files = set()
 
-    def consider(token):
+    def consider(token, require_exists):
         token = token.strip().strip('"').strip("'").strip()
         if not token or "/" not in token:
             return
         p = token.replace("\\", "/")
         if p.startswith("./"):
             p = p[2:]
-        # No absolute / parent-escape / infra paths.
+        # No absolute / parent-escape / infra paths (kept for BOTH signals).
         if p.startswith("/") or p.startswith("../") or ".." in p.split("/"):
             return
         if p.startswith(_INFRA_PREFIXES):
             return
         if not _SRC_EXT_RE.search(p):
             return
-        if os.path.isfile(os.path.join(cwd, p)):
-            files.add(p)
+        # Existence filter applies ONLY to the fuzzy tasks.md signal. Structured
+        # declarations are owned regardless of existence, so creation is blocked.
+        if require_exists and not os.path.isfile(os.path.join(cwd, p)):
+            return
+        files.add(p)
 
+    # STRUCTURED signal: block regardless of existence (creation-blocking).
     for key in ("implements", "affects"):
-        raw = fm_value(fm, key)
-        if raw:
-            for tok in re.split(r'[,\s\[\]]+', raw):
-                consider(tok)
+        for tok in fm_list(fm, key):
+            consider(tok, require_exists=False)
 
+    # FUZZY signal: backtick paths in tasks.md, existence-filtered.
     try:
         with open(os.path.join(spec_dir_abs, "tasks.md"), "r", encoding="utf-8") as fh:
             tasks_text = fh.read()
     except Exception:
         tasks_text = ""
     for m in _CODE_SPAN_RE.finditer(tasks_text):
-        consider(m.group(1))
+        consider(m.group(1), require_exists=True)
     return files
 
 
@@ -338,11 +402,21 @@ def owned_file_set(cwd, sp, sid, fm):
 
 
 def owned_match(rel, prefixes, files):
-    """True if `rel` (POSIX, cwd-relative) falls inside a spec's owned set."""
-    if rel in files:
+    """True if `rel` (POSIX, cwd-relative) falls inside a spec's owned set.
+
+    Membership and prefix comparison are CASE-INSENSITIVE, consistent with the
+    `os.path.isfile` existence check (which resolves case-insensitively on a
+    case-insensitive filesystem). Otherwise a declared `thing.ts` could be added
+    to the owned set while a `Write` to the real-cased `Thing.ts` slipped a
+    case-SENSITIVE membership test (#426 review fix). Case-folding only ever
+    WIDENS the block set (fail-closed) — it never unfreezes a file.
+    """
+    rl = rel.lower()
+    if rl in {f.lower() for f in files}:
         return True
     for pre in prefixes:
-        if rel == pre.rstrip("/") or rel.startswith(pre):
+        prl = pre.lower()
+        if rl == prl.rstrip("/") or rl.startswith(prl):
             return True
     return False
 
