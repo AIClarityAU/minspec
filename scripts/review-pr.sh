@@ -20,6 +20,25 @@
 
 set -euo pipefail
 
+# Deterministic truncation backstop (#427): a diff too large to show the model
+# in full can never be greenlit by the model's verdict alone. review-decide.sh
+# has no truncation signal — it only ever sees the model's verdict block, so a
+# model that ignores the in-prompt truncation note and emits `verdict: pass` /
+# `blocking: 0` would sail through the gate untouched: the one spot where a
+# false-green depended solely on LLM obedience. The PARENT (this script,
+# credentialed, not the LLM) knows when it truncated and overrides the outcome
+# here, unconditionally, regardless of what review-decide.sh returned — no
+# reliance on the model reading or obeying the note. Pure (no I/O, no globals)
+# so it is unit-testable in isolation from the gh/claude plumbing around it.
+truncation_backstop_label() {
+  local diff_note="$1" gate_label="$2"
+  if [[ -n "$diff_note" ]]; then
+    echo "ai-review:changes"
+  else
+    echo "$gate_label"
+  fi
+}
+
 PR="${1:?Usage: review-pr.sh <pr-number> [--repo owner/name]}"
 REPO="harvest316/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -122,10 +141,25 @@ AGENT_OUT=$(claude -p "$USER_CONTENT" \
     exit 0
   }
 
-LABEL=$(printf '%s\n' "$AGENT_OUT" | "$DECIDE" || true)
-if [[ "$LABEL" != "ai-review:pass" && "$LABEL" != "ai-review:changes" ]]; then
+GATE_LABEL=$(printf '%s\n' "$AGENT_OUT" | "$DECIDE" || true)
+if [[ "$GATE_LABEL" != "ai-review:pass" && "$GATE_LABEL" != "ai-review:changes" ]]; then
   echo "WARNING: no clean verdict parsed for #$PR — fail closed to ai-review:changes" >&2
-  LABEL="ai-review:changes"
+  GATE_LABEL="ai-review:changes"
+fi
+
+# Deterministic truncation backstop (#427) — see truncation_backstop_label()
+# above for the rationale. This is the one call site: whatever the gate
+# decided, a truncated diff can never come out the other side as a pass.
+LABEL="$(truncation_backstop_label "$DIFF_NOTE" "$GATE_LABEL")"
+
+TRUNC_NOTICE=""
+if [[ -n "$DIFF_NOTE" ]]; then
+  if [[ "$GATE_LABEL" != "ai-review:changes" ]]; then
+    echo "  → #$PR: diff truncated (${DIFF_BYTES} > ${DIFF_CAP} bytes) — forcing ai-review:changes, overriding verdict-derived '$GATE_LABEL'" >&2
+  fi
+  TRUNC_NOTICE="
+⚠️ **Diff truncated at ${DIFF_CAP} bytes of ${DIFF_BYTES}.** The reviewer never saw the full diff, so the outcome is forced to \`ai-review:changes\` regardless of the model's verdict — deterministic backstop, not LLM compliance (#427).
+"
 fi
 
 # The verdict block, verbatim, becomes the audit trail behind the label.
@@ -138,7 +172,7 @@ echo "  → #$PR: $LABEL"
 # Post the findings comment FIRST (provenance), then move the label.
 gh pr comment "$PR" --repo "$REPO" --body "$(cat <<COMMENT
 ## 🤖 AI review — \`${LABEL}\`
-
+${TRUNC_NOTICE}
 \`\`\`
 ${VERDICT_BLOCK}
 \`\`\`
