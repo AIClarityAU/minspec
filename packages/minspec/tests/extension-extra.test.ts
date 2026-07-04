@@ -99,6 +99,7 @@ vi.mock('vscode', () => ({
       configChangeHandler = handler;
       return { dispose: vi.fn() };
     }),
+    registerTextDocumentContentProvider: vi.fn(() => ({ dispose: vi.fn() })),
   },
   commands: {
     registerCommand: vi.fn((id: string, handler: (...args: any[]) => any) => {

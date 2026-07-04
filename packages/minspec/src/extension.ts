@@ -15,6 +15,7 @@ import { backfillEpicsCommand, type BackfillOptions } from './commands/backfill-
 import { regenerateDrIndex } from './lib/adr-manager';
 import { scoreWsjfCommand, triageIssueCommand } from './commands/backlog';
 import { approveSpecCommand, revokeApprovalCommand } from './commands/approve';
+import { ApprovalDiffContentProvider, showChangesSinceApproval } from './lib/approval-diff';
 import { approveActiveCommand } from './commands/approve-active';
 import { validateSpecCommand } from './commands/validate';
 import { SpecTreeProvider } from './views/spec-tree-provider';
@@ -299,6 +300,12 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('minspec.revokeApproval', async (node) => {
       await revokeApprovalCommand(node);
     }),
+    // SPEC-029 FR-5/FR-6/FR-7: "what changed since approval" for a stale spec.
+    // rootDir is injected here (never a passed command arg) — mirrors goToSpecCommand.
+    vscode.commands.registerCommand('minspec.showChangesSinceApproval', (arg) =>
+      showChangesSinceApproval(workspaceRoot, arg)),
+    vscode.workspace.registerTextDocumentContentProvider(
+      'minspec-approval-diff', new ApprovalDiffContentProvider(workspaceRoot)),
     // Unified context-aware Approve/Accept (Alt+A, #303): routes to approveSpec /
     // acceptAdr / acceptEpic by the active approvable (tree node or editor), with
     // approveSpec's pending picker as the no-focus fallback.
