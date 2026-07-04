@@ -165,6 +165,46 @@ Add rate limiting.
     const matches = listSpecs(tmpDir).filter(s => s.id === 'SPEC-004');
     expect(matches).toHaveLength(1);
     expect(path.basename(matches[0].filePath)).toBe('requirements.md');
+    // design.md/tasks.md share SPEC-004's OWN id — genuinely its phase-files.
+    expect(matches[0].hasDesignFile).toBe(true);
+    expect(matches[0].hasTasksFile).toBe(true);
+  });
+
+  // Invariant guard (PR #472 review finding #1): ownership is keyed by the
+  // phase-file's OWN frontmatter id, never by directory co-location — so a
+  // design.md/tasks.md carrying a DIFFERENT id than the sibling requirements.md
+  // is never claimed. (The live repo's mis-numbered clusters —
+  // specs/minspec/{design,tasks}.md and SPEC-007-epic-grouping/{design,tasks}.md
+  // — were renumbered to share their parent id in this same PR, so the intended
+  // split-layout specs now resolve correctly; this test locks the algorithm's
+  // no-cross-id-contamination guarantee so a future stray file can't leak in.)
+  it('does NOT claim a sibling design.md/tasks.md that belongs to a DIFFERENT spec id', () => {
+    writeMinspecConfig(tmpDir);
+    const dir = path.join(tmpDir, 'specs', 'minspec');
+    writeSpecFile(dir, 'requirements.md', fmSpec('SPEC-001', 'Core requirements'));
+    writeSpecFile(dir, 'design.md', fmSpec('SPEC-002', 'Core design'));
+    writeSpecFile(dir, 'tasks.md', fmSpec('SPEC-003', 'Core tasks'));
+
+    const result = listSpecs(tmpDir);
+    const spec001 = result.find(s => s.id === 'SPEC-001');
+    expect(spec001?.hasDesignFile).toBe(false);
+    expect(spec001?.hasTasksFile).toBe(false);
+
+    // SPEC-002/SPEC-003 are real, independent specs — they still appear.
+    expect(result.map(s => s.id).sort()).toEqual(['SPEC-001', 'SPEC-002', 'SPEC-003']);
+  });
+
+  it('spec-kit layout: hasDesignFile/hasTasksFile reflect real plan.md/tasks.md shard files', () => {
+    writeMinspecConfig(tmpDir, 'specs');
+    const dir = path.join(tmpDir, 'specs', '005-spec-kit-example');
+    writeSpecFile(dir, 'spec.md', fmSpec('SPEC-005', 'Spec kit example'));
+    writeSpecFile(dir, 'plan.md', '# Plan\n');
+    // tasks.md deliberately absent — Tasks phase not started yet.
+
+    const matches = listSpecs(tmpDir).filter(s => s.id === 'SPEC-005');
+    expect(matches).toHaveLength(1);
+    expect(matches[0].hasDesignFile).toBe(true);
+    expect(matches[0].hasTasksFile).toBe(false);
   });
 
   it('skips files without an id', () => {
@@ -453,6 +493,35 @@ describe('SpecTreeProvider', () => {
       expect(new SpecNode(makeSpec({ status: 'archived' }), 'unapproved').contextValue).toBe('specNode.terminal');
       // even an approved-then-done spec is terminal (no approve/revoke)
       expect(new SpecNode(makeSpec({ status: 'done' }), 'approved').contextValue).toBe('specNode.terminal');
+    });
+
+    // Regression: "View Design"/"View Tasks" must only appear when the sibling
+    // file actually exists on disk (package.json gates them on the hasDesign/
+    // hasTasks flags below) — otherwise the command opens a dangling path.
+    // SpecNode reads spec.hasDesignFile/hasTasksFile — it does no fs I/O of its
+    // own (that would risk re-deriving "sibling file exists" instead of "sibling
+    // file belongs to ME", the exact bug listSpecs()'s own rolesById map exists
+    // to avoid; see the listSpecs() describe block below for that coverage).
+    describe('hasDesign/hasTasks flags (gate View Design / View Tasks menu items)', () => {
+      it('no flags when the summary carries neither', () => {
+        const spec = makeSpec({});
+        expect(new SpecNode(spec).contextValue).toBe('specNode');
+      });
+
+      it('hasDesign only', () => {
+        const spec = makeSpec({ hasDesignFile: true });
+        expect(new SpecNode(spec).contextValue).toBe('specNode hasDesign');
+      });
+
+      it('hasTasks only', () => {
+        const spec = makeSpec({ hasTasksFile: true });
+        expect(new SpecNode(spec).contextValue).toBe('specNode hasTasks');
+      });
+
+      it('both flags, combined with the approval suffix', () => {
+        const spec = makeSpec({ hasDesignFile: true, hasTasksFile: true });
+        expect(new SpecNode(spec, 'approved').contextValue).toBe('specNode.approved hasDesign hasTasks');
+      });
     });
   });
 
@@ -763,11 +832,19 @@ describe('SpecTreeProvider — Needs Re-Approval group (SPEC-029)', () => {
   // `specNode.stale`. VS Code's `when`-clause engine isn't in this unit
   // harness, so this locks the REGEX ITSELF against every real viewItem value
   // — a change to package.json that breaks this pattern breaks the menu.
-  it('SEV-1 menu-preservation: the widened when-clause regex matches specNode + specNode.stale, and ONLY those', () => {
-    const pattern = /^specNode(\.stale)?$/;
+  //
+  // Widened a second time (View Design/View Tasks): contextValue can now carry
+  // trailing " hasDesign"/" hasTasks" flags, so the anchor moved from a bare
+  // `$` to `( |$)` — classify/approveSpec must keep matching specNode(.stale)
+  // rows regardless of whether those flags are present.
+  it('SEV-1 menu-preservation: the widened when-clause regex matches specNode + specNode.stale (flags or not), and ONLY those', () => {
+    const pattern = /^specNode(\.stale)?( |$)/;
     expect(pattern.test('specNode')).toBe(true);
     expect(pattern.test('specNode.stale')).toBe(true);
+    expect(pattern.test('specNode hasDesign')).toBe(true);
+    expect(pattern.test('specNode.stale hasDesign hasTasks')).toBe(true);
     expect(pattern.test('specNode.approved')).toBe(false);
+    expect(pattern.test('specNode.approved hasDesign')).toBe(false);
     expect(pattern.test('specNode.terminal')).toBe(false);
     expect(pattern.test('epicGroup.proposed')).toBe(false);
   });
@@ -775,20 +852,21 @@ describe('SpecTreeProvider — Needs Re-Approval group (SPEC-029)', () => {
   it('SEV-1 menu-preservation (real file): package.json\'s classify + approveSpec view/item/context clauses actually use the widened pattern, not exact ==', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
     const contextMenus: Array<{ command: string; when: string }> = pkg.contributes.menus['view/item/context'];
-    const widened = /viewItem\s*=~\s*\/\^specNode\(\\\.stale\)\?\$\//;
+    const widenedFragment = 'viewItem =~ /^specNode(\\.stale)?( |$)/';
 
     const classify = contextMenus.filter((m) => m.command === 'minspec.classify');
     expect(classify.length).toBeGreaterThan(0);
-    for (const m of classify) expect(m.when).toMatch(widened);
+    for (const m of classify) expect(m.when).toContain(widenedFragment);
 
     const approve = contextMenus.filter((m) => m.command === 'minspec.approveSpec');
     expect(approve.length).toBeGreaterThan(0);
-    for (const m of approve) expect(m.when).toMatch(widened);
+    for (const m of approve) expect(m.when).toContain(widenedFragment);
 
-    // revokeApproval must NOT be widened — it stays scoped to specNode.approved only.
+    // revokeApproval must NOT be widened — it stays scoped to specNode.approved only
+    // (now via regex too, since it must still tolerate a trailing hasDesign/hasTasks flag).
     const revoke = contextMenus.find((m) => m.command === 'minspec.revokeApproval');
-    expect(revoke?.when).toContain('specNode.approved');
-    expect(revoke?.when).not.toMatch(widened);
+    expect(revoke?.when).toContain('specNode\\.approved');
+    expect(revoke?.when).not.toContain(widenedFragment);
   });
 
   it('Slice 5: a non-terminal stale spec gets contextValue specNode.stale; approved/unapproved unchanged', () => {

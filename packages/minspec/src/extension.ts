@@ -18,6 +18,7 @@ import { approveSpecCommand, revokeApprovalCommand } from './commands/approve';
 import { ApprovalDiffContentProvider, showChangesSinceApproval } from './lib/approval-diff';
 import { approveActiveCommand } from './commands/approve-active';
 import { validateSpecCommand } from './commands/validate';
+import { viewDesignCommand, viewTasksCommand } from './commands/view-phase-file';
 import { SpecTreeProvider } from './views/spec-tree-provider';
 import { EpicReorderDragAndDropController } from './views/epic-dnd-controller';
 import { AdrTreeProvider } from './views/adr-tree-provider';
@@ -313,6 +314,8 @@ export function activate(context: vscode.ExtensionContext): void {
       await approveActiveCommand(node);
     }),
     vscode.commands.registerCommand('minspec.validateSpec', (node) => validateSpecCommand(node)),
+    vscode.commands.registerCommand('minspec.viewDesign', (node) => viewDesignCommand(node)),
+    vscode.commands.registerCommand('minspec.viewTasks', (node) => viewTasksCommand(node)),
     vscode.commands.registerCommand('minspec.showSpecPanel', async (specFilePath?: string) => {
       if (!workspaceRoot) {
         vscode.window.showErrorMessage('MinSpec: No workspace folder open.');

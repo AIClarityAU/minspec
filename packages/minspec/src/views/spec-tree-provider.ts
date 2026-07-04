@@ -47,6 +47,20 @@ export function listSpecs(rootDir: string): SpecSummary[] {
         : name === 'design.md' ? 2
           : 3;
 
+  // id → which phase-file roles it OWNS, keyed by the role file's OWN
+  // frontmatter id — never by directory co-location. A flat directory can
+  // hold several independently-numbered specs (this repo's own
+  // specs/minspec/{requirements,design,tasks}.md are SPEC-001/002/003, not
+  // three shards of one spec), so "design.md exists next to me" is not the
+  // same claim as "design.md is MY design phase". Populated inline as the
+  // walk below parses each candidate file anyway — no extra fs pass.
+  const rolesById = new Map<string, { design: boolean; tasks: boolean }>();
+  const addRole = (id: string, role: 'design' | 'tasks'): void => {
+    const roles = rolesById.get(id) ?? { design: false, tasks: false };
+    roles[role] = true;
+    rolesById.set(id, roles);
+  };
+
   const consider = (fm: SpecFrontmatter, displayPath: string): void => {
     if (!fm.id) return;
     const { done, total } = phaseProgress(fm, config);
@@ -65,6 +79,10 @@ export function listSpecs(rootDir: string): SpecSummary[] {
     const rank = rankOf(path.basename(displayPath));
     const prev = byId.get(fm.id);
     if (!prev || rank < prev.rank) byId.set(fm.id, { summary, rank });
+
+    const base = path.basename(displayPath).toLowerCase();
+    if (base === 'design.md' || base === 'plan.md') addRole(fm.id, 'design');
+    if (base === 'tasks.md') addRole(fm.id, 'tasks');
   };
 
   const walk = (dir: string): void => {
@@ -86,9 +104,20 @@ export function listSpecs(rootDir: string): SpecSummary[] {
         if (stat.isFile() && entry.endsWith('.md')) {
           consider(parseSpec(fs.readFileSync(fullPath, 'utf-8')).frontmatter, fullPath);
         } else if (stat.isDirectory() && isSpecKitDirEntry(entry)) {
-          // Spec-kit dir: merge shards, don't recurse into it.
+          // Spec-kit dir: merge shards, don't recurse into it. Unlike the flat
+          // walk above, plan.md/tasks.md here have no frontmatter id of their
+          // own to key by (mergeSpecKitShards folds them into one spec) — the
+          // directory itself is scoped to a single spec by construction, so a
+          // plain existence check is safe (no cross-spec collision is possible).
           const specMd = path.join(fullPath, 'spec.md');
-          if (fs.existsSync(specMd)) consider(readSpecKitDir(fullPath).frontmatter, specMd);
+          if (fs.existsSync(specMd)) {
+            const fm = readSpecKitDir(fullPath).frontmatter;
+            consider(fm, specMd);
+            if (fm.id) {
+              if (fs.existsSync(path.join(fullPath, 'plan.md'))) addRole(fm.id, 'design');
+              if (fs.existsSync(path.join(fullPath, 'tasks.md'))) addRole(fm.id, 'tasks');
+            }
+          }
         } else if (stat.isDirectory()) {
           walk(fullPath); // product / feature subfolder
         }
@@ -99,7 +128,10 @@ export function listSpecs(rootDir: string): SpecSummary[] {
   };
   walk(specsDir);
 
-  const summaries = [...byId.values()].map(v => v.summary);
+  const summaries = [...byId.values()].map(({ summary }) => {
+    const roles = rolesById.get(summary.id);
+    return { ...summary, hasDesignFile: roles?.design ?? false, hasTasksFile: roles?.tasks ?? false };
+  });
   // Sort by ID for stable ordering
   summaries.sort((a, b) => a.id.localeCompare(b.id));
   return summaries;
@@ -317,11 +349,22 @@ export class SpecNode extends vscode.TreeItem {
     // "Show Changes Since Approval" menu entry to stale specs only — see the
     // package.json when-clauses, which widen the classify/approveSpec clauses
     // to also match specNode.stale so those actions are NOT lost on this row.
-    this.contextValue = terminal
+    const base = terminal
       ? 'specNode.terminal'
       : approval === 'approved' ? 'specNode.approved'
       : approval === 'stale' ? 'specNode.stale'
       : 'specNode';
+
+    // Space-separated flags (not dot-suffixed, so they stay distinguishable from
+    // the approval suffix above) gate "View Design"/"View Tasks": only offered
+    // when this spec OWNS a design/tasks phase-file (spec.hasDesignFile/
+    // hasTasksFile — computed once in listSpecs()'s directory walk, keyed by
+    // each candidate file's own frontmatter id, not by directory co-location;
+    // see SpecSummary's doc comment). Reading it here (rather than re-deriving
+    // via fs.existsSync per node per render) avoids both a redundant fs pass
+    // and the cross-spec collision a bare "sibling file exists" check risked.
+    const flags = [spec.hasDesignFile && 'hasDesign', spec.hasTasksFile && 'hasTasks'].filter(Boolean).join(' ');
+    this.contextValue = flags ? `${base} ${flags}` : base;
 
     const approvalLine =
       approval === 'approved' ? 'Approval: \ud83d\udd12 approved (content-bound) \u2014 sealed to this content, not yet built'

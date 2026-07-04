@@ -206,6 +206,16 @@
         "icon": "$(refresh)"
       },
       {
+        "command": "minspec.viewDesign",
+        "title": "MinSpec: View Design",
+        "shortTitle": "Design"
+      },
+      {
+        "command": "minspec.viewTasks",
+        "title": "MinSpec: View Tasks",
+        "shortTitle": "Tasks"
+      },
+      {
         "command": "minspec.goToSpec",
         "title": "MinSpec: Go to Spec Requirement"
       },
@@ -284,6 +294,14 @@
           "when": "false"
         },
         {
+          "command": "minspec.viewDesign",
+          "when": "false"
+        },
+        {
+          "command": "minspec.viewTasks",
+          "when": "false"
+        },
+        {
           "command": "minspec.showChangesSinceApproval",
           "when": "editorLangId == markdown"
         }
@@ -348,27 +366,37 @@
         },
         {
           "command": "minspec.classify",
-          "when": "viewItem =~ /^specNode(\\.stale)?$/",
+          "when": "viewItem =~ /^specNode(\\.stale)?( |$)/",
           "group": "1_tier"
         },
         {
+          "command": "minspec.viewDesign",
+          "when": "viewItem =~ /(^| )hasDesign( |$)/",
+          "group": "1_phaseFiles@1"
+        },
+        {
+          "command": "minspec.viewTasks",
+          "when": "viewItem =~ /(^| )hasTasks( |$)/",
+          "group": "1_phaseFiles@2"
+        },
+        {
           "command": "minspec.approveSpec",
-          "when": "view == minspecStatus && viewItem =~ /^specNode(\\.stale)?$/",
+          "when": "view == minspecStatus && viewItem =~ /^specNode(\\.stale)?( |$)/",
           "group": "inline"
         },
         {
           "command": "minspec.approveSpec",
-          "when": "view == minspecStatus && viewItem =~ /^specNode(\\.stale)?$/",
+          "when": "view == minspecStatus && viewItem =~ /^specNode(\\.stale)?( |$)/",
           "group": "2_approval@1"
         },
         {
           "command": "minspec.revokeApproval",
-          "when": "view == minspecStatus && viewItem == specNode.approved",
+          "when": "view == minspecStatus && viewItem =~ /^specNode\\.approved( |$)/",
           "group": "2_approval@2"
         },
         {
           "command": "minspec.showChangesSinceApproval",
-          "when": "view == minspecStatus && viewItem == specNode.stale",
+          "when": "view == minspecStatus && viewItem =~ /^specNode\\.stale( |$)/",
           "group": "2_approval@2"
         },
         {
