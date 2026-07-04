@@ -8,43 +8,50 @@ that file belongs to the OWNED FILE SET of a T3/T4 spec that DERIVES to
 is the only enforcement that survives bypass-permissions mode, because a
 PreToolUse deny blocks the tool call before permission rules.
 
-#426 scoping (DR-047 §3 — "doc-before-code for THAT doc, not a global freeze").
+#426 scoping (DR-047 §3 — doc-before-*CODE*, scoped PAIRWISE to a doc and the code
+  that realises THAT doc, never a repo-wide freeze).
   Earlier this gate blocked EVERY non-allowlisted source file while ANY unapproved
   spec was in implementation — freezing unrelated work (e.g. a sibling P1 fix)
   behind a spec it had nothing to do with. That contradicted DR-047 §3, which
   scopes the doc-before-code sequence PAIRWISE to a doc and the code that realises
-  THAT doc, never repo-wide. The block is now scoped to each unapproved spec's own
-  file set:
-    (3a) its own artifacts — the per-spec `SPEC-NNN-*/` directory (or, for the flat
-         umbrella spec, its same-id sibling docs). ALWAYS owned; the fail-safe
-         minimum even when nothing else is derivable.
-    (3b) source files it EXPLICITLY names as implementation targets, from two
-         signals with DELIBERATELY DIFFERENT precision:
-           - STRUCTURED: a frontmatter `implements:`/`affects:` list. Matched
-             WITHOUT an existence filter, so a `Write` to a declared-but-not-yet-
-             existing file is DENIED — i.e. this signal blocks CREATION of an
-             unapproved spec's impl code, not merely edits to code that already
-             landed. (No spec in the corpus declares this yet — see below.)
-           - FUZZY: backtick code-span paths in the spec's own `tasks.md`. Matched
-             ONLY IF the file already exists, because a bare backtick token can be
-             prose/placeholder/example; the existence filter is what keeps those
-             from widening the block set. A necessary consequence is that the fuzzy
-             signal CANNOT block creation of a not-yet-existing file.
-    (3c) a spec that declares NO implementation files freezes only (3a); unrelated
-         source edits pass (fail-OPEN for unrelated files is correct per DR-047 §3).
+  THAT doc, never repo-wide. The block is now scoped to the implementation CODE
+  each unapproved spec EXPLICITLY declares, from two signals with DELIBERATELY
+  DIFFERENT precision:
+    - STRUCTURED: a frontmatter `implements:`/`affects:` list. Matched WITHOUT an
+      existence filter, so a `Write` to a declared-but-not-yet-existing file is
+      DENIED — i.e. this signal blocks CREATION of an unapproved spec's impl code,
+      not merely edits to code that already landed. (No spec in the corpus declares
+      this yet — see below.)
+    - FUZZY: backtick code-span paths in the spec's own `tasks.md`. Matched ONLY IF
+      the file already exists, because a bare backtick token can be prose /
+      placeholder / example; the existence filter is what keeps those from widening
+      the block set. A necessary consequence is that the fuzzy signal CANNOT block
+      creation of a not-yet-existing file.
+  A spec that declares NO implementation files owns NOTHING and therefore blocks
+  nothing; unrelated source edits pass (fail-OPEN for unrelated files is correct
+  per DR-047 §3).
+
+  DOC-BEFORE-*CODE*, NOT DOC-BEFORE-DOC. The gate blocks a spec's implementation
+  CODE, never the spec's OWN docs. An unapproved-and-implementing spec's own
+  requirements/plan/tasks/design docs stay EDITABLE — you must be able to fix a spec
+  to get it approved (the edit-unapproved-specs-directly workflow). Freezing a spec's
+  own dir would DEADLOCK approval: you could not edit the very doc whose approval
+  unfreezes its code. Approval writes to `.minspec/` are likewise always allowed.
+  (An earlier #426 revision wrongly froze each spec's own dir as a "fail-safe
+  minimum"; that broke edit-unapproved-specs-directly and is removed — the owned set
+  is now EXACTLY the declared impl code, nothing more.)
 
   HONEST SCOPE (not "DR-362's hole is fully closed"). This gate blocks edits AND
-  creation of a spec's STRUCTURALLY-declared (`implements:`/`affects:`) impl files
-  and its own dir. Code an unapproved spec does NOT declare structurally — one that
-  describes its work only in prose `tasks.md`, or greenfield code it never names —
-  is NOT gated, because the fuzzy `tasks.md` signal is existence-filtered and no
-  spec in the corpus carries a structured `implements:` list yet. That is a
-  DELIBERATE, DISCLOSED tradeoff to unblock unrelated work per DR-047 §3, NOT a
-  claim that DR-362's enforcement hole is fully closed for greenfield/undeclared
-  code. The durable fix — a first-class `implements:`/`affects:` convention plus a
-  validator that requires/derives it across the corpus — is tracked as #460
-  (follows up #426); until specs declare their impl files structurally, the gate
-  cannot block creation of undeclared impl code.
+  creation of a spec's STRUCTURALLY-declared (`implements:`/`affects:`) impl files.
+  Code an unapproved spec does NOT declare structurally — one that describes its work
+  only in prose `tasks.md`, or greenfield code it never names — is NOT gated, because
+  the fuzzy `tasks.md` signal is existence-filtered and no spec in the corpus carries
+  a structured `implements:` list yet. That is a DELIBERATE, DISCLOSED tradeoff to
+  unblock unrelated work per DR-047 §3, NOT a claim that DR-362's enforcement hole is
+  fully closed for greenfield/undeclared code. The durable fix — a first-class
+  `implements:`/`affects:` convention plus a validator that requires/derives it
+  across the corpus — is tracked as #460 (follows up #426); until specs declare their
+  impl files structurally, the gate cannot block creation of undeclared impl code.
 
 SPEC-022 changes:
   - Approval ground truth is COMMITTED, path-keyed sidecars under
@@ -263,10 +270,9 @@ def resolve_record(cwd, canon_dir, rel_spec_path):
     return read_record(canon_dir, rel_spec_path)
 
 
-# --- #426 scoping: derive each spec's OWNED file set ------------------------
+# --- #426 scoping: derive each spec's OWNED file set (declared impl code only) --
 
-_SPEC_DIR_RE = re.compile(r'^SPEC-\d+', re.I)
-# Source extensions a declared impl-file token must end in (3b precision filter).
+# Source extensions a declared impl-file token must end in (precision filter).
 _SRC_EXT_RE = re.compile(
     r'\.(?:ts|tsx|js|jsx|mjs|cjs|py|sh|bash|json|jsonc|css|scss|less|html|htm'
     r'|vue|svelte|sql|ya?ml|toml)$', re.I)
@@ -280,36 +286,12 @@ def _blocker_reason(sid, verdict):
     return "%s (not approved)" % sid
 
 
-def _same_id_md_siblings(cwd, spec_dir_abs, sid):
-    """Immediate *.md files in a FLAT spec dir that carry the same `id` (POSIX rels).
-
-    Used only for a flat/umbrella spec whose directory ALSO holds other specs'
-    subdirs (e.g. `specs/minspec/`): the owned set is the same-id sibling docs,
-    NEVER the whole parent tree. Fail-safe: read errors are skipped.
-    """
-    out = set()
-    try:
-        entries = glob.glob(os.path.join(spec_dir_abs, "*.md"))
-    except Exception:
-        return out
-    for f in entries:
-        try:
-            with open(f, "r", encoding="utf-8") as fh:
-                head = fh.read(8000)
-        except Exception:
-            continue
-        m = re.match(r'^---\n(.*?)\n---', head, re.S)
-        if not m or (fm_value(m.group(1), "id") or "") != sid:
-            continue
-        try:
-            out.add(os.path.relpath(f, cwd).replace(os.sep, "/"))
-        except Exception:
-            out.add(f.replace(os.sep, "/"))
-    return out
-
-
 def declared_impl_files(cwd, fm, spec_dir_abs):
-    """Source files a spec EXPLICITLY names as its implementation targets (3b).
+    """Source files a spec EXPLICITLY names as its implementation targets.
+
+    This IS the spec's entire owned set (doc-before-CODE): the ONLY files an
+    unapproved spec's state blocks. The spec's own doc dir is deliberately NOT
+    included — see owned_file_set.
 
     Two signals with DELIBERATELY DIFFERENT existence handling:
       - STRUCTURED frontmatter `implements:`/`affects:` list (`require_exists=
@@ -327,9 +309,11 @@ def declared_impl_files(cwd, fm, spec_dir_abs):
 
     Shared precision/safety filters apply to BOTH signals: a token counts only if
     it contains '/', ends in a known source extension, and is not an absolute /
-    parent-escape / infra path. Fully fail-safe: any read error yields an empty
-    set — the caller still applies the own-dir (3a) protection, so a parse failure
-    never silently unfreezes a spec.
+    parent-escape / infra path. Fail-safe by construction: the STRUCTURED signal
+    reads only the already-loaded frontmatter (no I/O), so a structurally-declared
+    impl file is always owned regardless; only the FUZZY tasks.md read can raise,
+    and it degrades to an empty contribution — consistent with that signal's own
+    existence filter (an unreadable/absent tasks.md simply declares no fuzzy paths).
     """
     files = set()
 
@@ -369,56 +353,31 @@ def declared_impl_files(cwd, fm, spec_dir_abs):
     return files
 
 
-def owned_file_set(cwd, sp, sid, fm):
-    """(prefixes, files) a spec OWNS — the ONLY files its unapproved state blocks.
+def owned_file_set(cwd, sp, fm):
+    """The set of files a spec OWNS — the ONLY files its unapproved state blocks.
 
-    - prefixes: directory prefixes owned wholesale (its per-spec `SPEC-NNN-*/`
-      dir, if it lives in one).
-    - files:    exact POSIX rel paths owned (flat same-id docs + declared impl).
-    Own artifacts (3a) are ALWAYS included — the fail-safe minimum even when the
-    declared-file derivation yields nothing.
+    DOC-BEFORE-*CODE*, NOT doc-before-doc (DR-047 §3). The owned set is EXACTLY the
+    implementation CODE the spec declares (structured `implements:`/`affects:` +
+    fuzzy existing tasks.md paths) — NEVER the spec's own doc dir. An unapproved-
+    and-implementing spec's own requirements/plan/tasks/design docs stay EDITABLE so
+    the spec can be fixed and approved (edit-unapproved-specs-directly); freezing
+    them would deadlock approval. A spec that declares NO impl files owns NOTHING
+    and therefore blocks nothing. Returns a set of exact POSIX rel paths.
     """
-    spec_dir_abs = os.path.dirname(sp)
-    base = os.path.basename(spec_dir_abs)
-    prefixes = []
-    files = set()
-    if _SPEC_DIR_RE.match(base):
-        # Per-spec dir: own everything under it (prefix match, no glob needed).
-        try:
-            dir_rel = os.path.relpath(spec_dir_abs, cwd).replace(os.sep, "/")
-        except Exception:
-            dir_rel = spec_dir_abs.replace(os.sep, "/")
-        prefixes.append(dir_rel.rstrip("/") + "/")
-    else:
-        # Flat/umbrella spec: own only its same-id sibling docs, never the whole
-        # parent dir (which holds other specs' subdirs).
-        files |= _same_id_md_siblings(cwd, spec_dir_abs, sid)
-        try:
-            files.add(os.path.relpath(sp, cwd).replace(os.sep, "/"))
-        except Exception:
-            files.add(sp.replace(os.sep, "/"))
-    files |= declared_impl_files(cwd, fm, spec_dir_abs)
-    return prefixes, files
+    return declared_impl_files(cwd, fm, os.path.dirname(sp))
 
 
-def owned_match(rel, prefixes, files):
-    """True if `rel` (POSIX, cwd-relative) falls inside a spec's owned set.
+def owned_match(rel, files):
+    """True if `rel` (POSIX, cwd-relative) is in a spec's owned (declared-impl) set.
 
-    Membership and prefix comparison are CASE-INSENSITIVE, consistent with the
-    `os.path.isfile` existence check (which resolves case-insensitively on a
-    case-insensitive filesystem). Otherwise a declared `thing.ts` could be added
-    to the owned set while a `Write` to the real-cased `Thing.ts` slipped a
-    case-SENSITIVE membership test (#426 review fix). Case-folding only ever
-    WIDENS the block set (fail-closed) — it never unfreezes a file.
+    Membership is CASE-INSENSITIVE, consistent with the `os.path.isfile` existence
+    check (which resolves case-insensitively on a case-insensitive filesystem).
+    Otherwise a declared `thing.ts` could be added to the owned set while a `Write`
+    to the real-cased `Thing.ts` slipped a case-SENSITIVE membership test (#426
+    review fix). Case-folding only ever WIDENS the block set (fail-closed) — it
+    never unfreezes a file.
     """
-    rl = rel.lower()
-    if rl in {f.lower() for f in files}:
-        return True
-    for pre in prefixes:
-        prl = pre.lower()
-        if rl == prl.rstrip("/") or rl.startswith(prl):
-            return True
-    return False
+    return rel.lower() in {f.lower() for f in files}
 
 
 def main():
@@ -464,8 +423,8 @@ def main():
     # doc-before-code gate applies to the code implementing THAT doc, never a
     # repo-wide freeze).
     gated = 0
-    blocking = []      # (sid, verdict, prefixes, files)
-    migrated = []      # (sid, prefixes, files)
+    blocking = []      # (sid, verdict, files)
+    migrated = []      # (sid, files)
     seen_ids = set()
     for sp in glob.glob(os.path.join(cwd, "specs", "**", "*.md"), recursive=True):
         try:
@@ -527,17 +486,17 @@ def main():
         seen_ids.add(sid)
         gated += 1
 
-        prefixes, files = owned_file_set(cwd, sp, sid, fm)
+        files = owned_file_set(cwd, sp, fm)
 
         if approval in ("unapproved", "stale"):
-            blocking.append((sid, approval, prefixes, files))
+            blocking.append((sid, approval, files))
         elif rec and rec.get("migrated") is True:
             # WARN phase: migrated counts as approved -> non-blocking, but noted.
-            migrated.append((sid, prefixes, files))
+            migrated.append((sid, files))
 
     # Does the target file fall inside any BLOCKING spec's owned set?
-    matched = [(sid, verdict) for (sid, verdict, pre, fil) in blocking
-               if owned_match(rel, pre, fil)]
+    matched = [(sid, verdict) for (sid, verdict, fil) in blocking
+               if owned_match(rel, fil)]
 
     if matched:
         # Fail closed: if the canonical store is unresolvable (cwd is not a git
@@ -566,7 +525,7 @@ def main():
 
     # No blocker owns this file. Surface a migrated-approval WARN only when the
     # file is inside a migrated spec's own set (FR-5, scoped), else plain allow.
-    warn_ids = [sid for (sid, pre, fil) in migrated if owned_match(rel, pre, fil)]
+    warn_ids = [sid for (sid, fil) in migrated if owned_match(rel, fil)]
     if warn_ids:
         print(json.dumps({"hookSpecificOutput": {
             "hookEventName": "PreToolUse",

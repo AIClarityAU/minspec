@@ -1,11 +1,14 @@
 #!/usr/bin/env python3
 """Behavioural tests for the #426-scoped PreToolUse spec gate.
 
-Contract (DR-362 scoped by #426 / DR-047 §3): an unapproved T3/T4 spec in
-implementation blocks edits ONLY to files in its OWN file set — its per-spec
-directory (3a) plus the source files it explicitly declares (3b) — and NOT
-unrelated source files (3c). Approved specs block nothing; the MINSPEC_GATE_OFF
-human kill-switch still bypasses and logs.
+Contract (DR-362 scoped by #426 / DR-047 §3 — doc-before-CODE): an unapproved
+T3/T4 spec in implementation blocks edits/creation ONLY of the implementation
+CODE it EXPLICITLY declares — structured `implements:`/`affects:` frontmatter
+(regardless of existence) plus fuzzy existing paths in its own tasks.md — and NOT
+its own doc dir, and NOT unrelated source files. A spec's own requirements/plan/
+tasks/design docs stay EDITABLE so it can be fixed and approved (the
+edit-unapproved-specs-directly workflow). Approved specs block nothing; the
+MINSPEC_GATE_OFF human kill-switch still bypasses and logs.
 
 Runs the real gate as a subprocess against throwaway fixture repos, exactly as
 Claude Code invokes it (PreToolUse envelope on stdin -> JSON decision on stdout).
@@ -142,19 +145,22 @@ class ScopedGateTests(unittest.TestCase):
             self.fx.decision("packages/other/src/unrelated.ts"), "allow"
         )
 
-    def test_spec_own_dir_blocked_when_unapproved(self):
-        """3a: the unapproved spec's own directory is always in its owned set."""
+    def test_spec_own_dir_editable_when_unapproved(self):
+        """Doc-before-CODE (DR-047 §3): an unapproved-and-implementing spec's OWN
+        docs stay EDITABLE so it can be fixed and approved (edit-unapproved-specs-
+        directly). Freezing them would deadlock approval. The gate freezes the
+        spec's declared impl CODE, never its own dir."""
         self.fx.write_spec(
             "specs/minspec/SPEC-901-widget/requirements.md",
             "SPEC-901", IMPLEMENTING_PHASES,
-        )
+        )  # unapproved; declares no impl code
         self.assertEqual(
             self.fx.decision("specs/minspec/SPEC-901-widget/requirements.md"),
-            "deny",
+            "allow",
         )
         self.fx.write("specs/minspec/SPEC-901-widget/design.md", "# design\n")
         self.assertEqual(
-            self.fx.decision("specs/minspec/SPEC-901-widget/design.md"), "deny"
+            self.fx.decision("specs/minspec/SPEC-901-widget/design.md"), "allow"
         )
 
     # --- 3b: explicitly-declared impl files ARE blocked, siblings are not ---
@@ -291,16 +297,25 @@ class ScopedGateTests(unittest.TestCase):
             "an approved spec does not even freeze its own dir",
         )
 
-    def test_stale_approval_blocks_owned_file(self):
+    def test_stale_approval_blocks_declared_impl_not_own_doc(self):
+        """A stale approval re-blocks the spec's DECLARED impl CODE — but NOT the
+        spec's own doc, which must stay editable to drive re-approval."""
         spec = self.fx.write_spec(
             "specs/minspec/SPEC-905-stale/requirements.md",
             "SPEC-905", IMPLEMENTING_PHASES,
+            extra_fm="implements: packages/core/src/stale_impl.ts\n",
         )
         self.fx.approve(
             "specs/minspec/SPEC-905-stale/requirements.md", spec, good=False
         )  # hash mismatch -> stale
         self.assertEqual(
-            self.fx.decision("specs/minspec/SPEC-905-stale/requirements.md"), "deny"
+            self.fx.decision("packages/core/src/stale_impl.ts"), "deny",
+            "a stale spec's declared impl code is re-blocked",
+        )
+        self.assertEqual(
+            self.fx.decision("specs/minspec/SPEC-905-stale/requirements.md"),
+            "allow",
+            "the spec's own doc stays editable even while stale (re-approval path)",
         )
 
     def test_specifying_phase_spec_not_gated(self):
@@ -318,11 +333,14 @@ class ScopedGateTests(unittest.TestCase):
 
     # --- flat/umbrella edge: must not freeze the whole specs/ tree ----------
 
-    def test_flat_umbrella_spec_does_not_freeze_subspecs_or_packages(self):
-        """The flat umbrella spec's dir (specs/minspec/) holds OTHER specs' subdirs;
-        its owned set must be its same-id sibling docs only, never the tree."""
+    def test_flat_umbrella_spec_blocks_only_declared_impl_not_the_tree(self):
+        """The flat umbrella spec (specs/minspec/requirements.md) sits in a dir that
+        holds OTHER specs' subdirs. Its unapproved state blocks ONLY the impl CODE
+        it declares — never a sub-spec's dir, never packages/**, and never its OWN
+        doc (doc-before-CODE, DR-047 §3)."""
         self.fx.write_spec(
             "specs/minspec/requirements.md", "SPEC-800", IMPLEMENTING_PHASES,
+            extra_fm="implements: packages/umbrella/src/impl.ts\n",
         )  # unapproved flat umbrella
         # A sub-spec (approved) whose files must stay editable.
         sub = self.fx.write_spec(
@@ -333,9 +351,17 @@ class ScopedGateTests(unittest.TestCase):
             "specs/minspec/SPEC-901-widget/requirements.md", sub, good=True
         )
         self.fx.write("packages/z/src/c.ts", "export const c = 1;\n")
-        # Umbrella owns its OWN flat doc -> blocked.
-        self.assertEqual(self.fx.decision("specs/minspec/requirements.md"), "deny")
-        # But NOT the sub-spec's dir, and NOT packages/**.
+        # ONLY the umbrella's declared impl file is blocked...
+        self.assertEqual(
+            self.fx.decision("packages/umbrella/src/impl.ts", tool="Write"), "deny",
+            "the umbrella's declared impl code IS blocked",
+        )
+        # ...not its OWN flat doc (must stay editable to re-approve)...
+        self.assertEqual(
+            self.fx.decision("specs/minspec/requirements.md"), "allow",
+            "flat umbrella must not freeze its own doc",
+        )
+        # ...not a sub-spec's dir, and not unrelated packages/**.
         self.assertEqual(
             self.fx.decision("specs/minspec/SPEC-901-widget/requirements.md"),
             "allow",
@@ -367,9 +393,10 @@ class GateOffBypassTests(unittest.TestCase):
         self.fx.write_spec(
             "specs/minspec/SPEC-908-b/requirements.md",
             "SPEC-908", IMPLEMENTING_PHASES,
-        )  # unapproved -> would otherwise DENY its own dir
+            extra_fm="implements: packages/core/src/gated_impl.ts\n",
+        )  # unapproved -> its declared impl file would otherwise DENY
         target = os.path.join(
-            self.fx.root, "specs/minspec/SPEC-908-b/requirements.md"
+            self.fx.root, "packages/core/src/gated_impl.ts"
         )
         env = {
             "tool_name": "Edit",
@@ -393,7 +420,7 @@ class GateOffBypassTests(unittest.TestCase):
         self.assertTrue(os.path.exists(log), "bypass must be audit-logged")
         with open(log, encoding="utf-8") as fh:
             line = fh.read()
-        self.assertIn("SPEC-908-b/requirements.md", line)
+        self.assertIn("packages/core/src/gated_impl.ts", line)
         self.assertIn("tool=Edit", line)
 
 
