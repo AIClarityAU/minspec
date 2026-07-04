@@ -281,6 +281,69 @@ run_reviewer_stage() {
   fi
 }
 
+# ── EGRESS GUARD (#358) ───────────────────────────────────────────────────────
+# The dev agent ran `claude -p` over an UNTRUSTED issue body (prompt-injection
+# surface). It holds NO credentials (no gh/push/remote/network), but this PARENT
+# then PUBLISHES its output: it pushes the committed diff, opens a PR, and posts
+# `.agent-summary.md` / derives `.review-signals.json` onto the issue. So a
+# prompt-injected agent's exfil channel is: read a secret from a file it can Read,
+# then smuggle it into the committed diff or the summary — which the parent would
+# faithfully publish. This guard scans EXACTLY that about-to-be-published material,
+# AFTER the agent exits but BEFORE the first credentialed/network op, and FAILS
+# CLOSED: any hit / unreadable input / scan error → do NOT publish.
+#
+# HONEST SCOPE — do NOT overclaim: this closes the WRITE-TO-PUBLISHED channel only.
+# It does NOT close arbitrary NETWORK egress DURING the agent's `npm test` run — the
+# agent can edit test files and the runner executes them (same reason ALLOWED_TOOLS
+# is defense-in-depth, not a sandbox). That residual is inherent to running the
+# project's own build and is out of this guard's scope.
+run_egress_guard() {
+  local scan="${SCRIPT_DIR}/egress-scan.sh"
+  local diff_dump="${WORKTREE}/.egress-diff.txt"
+  local -a targets=()
+
+  # The committed diff we're about to push/PR (three-dot: what this branch adds).
+  # If it can't even be computed we cannot prove it clean → fail closed.
+  if ! git -C "$WORKTREE" diff origin/main...HEAD > "$diff_dump" 2>/dev/null; then
+    echo "BLOCK: could not compute the publish diff (git diff failed) — failing closed"
+    return 1
+  fi
+  targets+=("$diff_dump")
+
+  # The two artefacts the parent publishes to the issue, WHEN the agent wrote them
+  # (both are optional — only scan what exists, so a legit run that skips them is
+  # not falsely blocked; a present-but-unreadable one still fails closed inside the
+  # scanner).
+  [[ -f "${WORKTREE}/.agent-summary.md" ]]    && targets+=("${WORKTREE}/.agent-summary.md")
+  [[ -f "${WORKTREE}/.review-signals.json" ]] && targets+=("${WORKTREE}/.review-signals.json")
+
+  # Pure scanner: exits non-zero (and prints redacted reasons on stdout) on any
+  # hit / unreadable / scanner error. Its exit code becomes ours; its stdout flows
+  # to the caller so the block reason can be logged.
+  "$scan" "${targets[@]}"
+}
+
+# Quarantine path (#358): the guard tripped, so we publish NOTHING. Label the issue
+# for a human, comment briefly, and leave the worktree intact for inspection.
+quarantine_publish() {
+  local matches="$1"
+  echo "🛑 egress guard BLOCKED publish for #$ISSUE (role: $ROLE):" >&2
+  printf '%s\n' "$matches" >&2
+  # Create the labels if absent (best-effort), then apply the quarantine set. The
+  # `agent-quarantined` label also makes dispatch-ready-check.sh refuse to re-drain
+  # this issue (#406), so it can't be silently re-dispatched.
+  gh label create "agent-quarantined" --repo "$REPO" --color b60205 \
+    --description "Agent output blocked by the pre-publish egress guard — human review required" 2>/dev/null || true
+  gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
+    --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
+  gh issue edit "$ISSUE" --repo "$REPO" \
+    --remove-label "agent-running" \
+    --add-label "agent-quarantined,needs-human-review" 2>/dev/null || true
+  gh issue comment "$ISSUE" --repo "$REPO" \
+    --body "$(printf 'egress guard blocked publish — see worktree `%s`\n\nThe pre-publish egress guard (`scripts/egress-scan.sh`) matched a secret/exfil marker in the agent output about to be published (committed diff / `.agent-summary.md` / `.review-signals.json`). Nothing was pushed and no PR was opened; the worktree is left intact for a human to inspect before any publish. (#358)' "$WORKTREE")" 2>/dev/null || true
+  echo "Agent output QUARANTINED for #$ISSUE (role: $ROLE). Worktree left at: $WORKTREE"
+}
+
 # Headless run inside the worktree. `claude -p` is the only automatable launch
 # primitive (cron/loop-able). It exits 0 even when the agent self-escalates, so
 # detect ESCALATE: in the output rather than relying on exit code.
@@ -292,6 +355,13 @@ if (cd "$WORKTREE" && claude -p "$PROMPT" \
       --remove-label "agent-running" --add-label "agent-escalated" 2>/dev/null || true
     echo "Agent ESCALATED issue #$ISSUE (role: $ROLE). Review: $LOG"
   else
+    # EGRESS GUARD (#358) — scan the about-to-be-published material AFTER the agent
+    # exits but BEFORE the first credentialed/network op. Fail-closed: on any
+    # secret/exfil hit (or an unreadable/uncomputable input) publish NOTHING and
+    # quarantine the issue for a human. On a clean result, fall through to publish.
+    if ! EGRESS_MATCHES=$(run_egress_guard); then
+      quarantine_publish "$EGRESS_MATCHES"
+    else
     # Credentialed/network ops happen HERE in the parent, never in the agent.
     # Push the branch the agent committed locally, then post its summary.
     if git -C "$WORKTREE" push -u origin "$BRANCH" 2>&1; then
@@ -493,6 +563,7 @@ if (cd "$WORKTREE" && claude -p "$PROMPT" \
     gh issue edit "$ISSUE" --repo "$REPO" \
       --remove-label "agent-running" --add-label "agent-done" 2>/dev/null || true
     echo "Agent completed issue #$ISSUE (role: $ROLE). Worktree: $WORKTREE"
+    fi  # end egress guard: clean-publish branch (quarantine handled above)
   fi
 else
   gh issue edit "$ISSUE" --repo "$REPO" \
