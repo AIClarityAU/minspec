@@ -23,13 +23,25 @@
 #
 # ── SECURITY MODEL (T0 invariants) ───────────────────────────────────────────
 #   • TRUSTED CONTROL PLANE FROM BASE (the load-bearing one). We check out the
-#     PR's BASE ref, so every executed script — scripts/review-branch.sh,
+#     PR's BASE ref, so every executed reviewer SCRIPT — scripts/review-branch.sh,
 #     scripts/review-decide.sh, scripts/roles/* — is the BASE (trusted) version.
-#     A same-repo PR author (write access → secrets present) therefore CANNOT
-#     rewrite review-decide.sh to `echo ai-review:pass` and forge the bot-applied
-#     pass that #428/auto-merge trusts. The untrusted head is fetched for the
-#     `git diff base...head` ONLY — its file CONTENTS are seen solely as diff DATA,
-#     never checked out into the workspace and never executed.
+#     A same-repo PR author (write access → secrets present) therefore cannot
+#     rewrite review-decide.sh to `echo ai-review:pass` and forge a pass THAT WAY.
+#     SCOPE (no overclaim): this base-trust covers the reviewer SCRIPTS/ROLES, NOT
+#     this workflow file — `on: pull_request` still runs ai-review.yml from the PR
+#     HEAD, and a PR could edit the gate itself (this .yml, or a scripts/* file it
+#     will run in a later base run) to forge a pass. That residual is closed by the
+#     SELF-EDIT GUARD below, NOT by the base checkout. The untrusted head is fetched
+#     for the `git diff base...head` ONLY — its file CONTENTS are seen solely as
+#     diff DATA, never checked out into the workspace and never executed.
+#   • SELF-EDIT GUARD (fail closed). Because ai-review.yml runs from head, the
+#     reviewer cannot self-certify a PR that rewrites the reviewer. So if the PR's
+#     changed-file set touches `.github/` OR `scripts/` — or cannot be computed at
+#     all — the verdict is FORCED to `ai-review:changes` regardless of the agent's
+#     output, and the run posts a "machinery touched → human review required"
+#     notice. Auto-pass is therefore impossible on a self-editing PR. Fail closed:
+#     an errored/empty changed-file computation is treated AS a self-edit
+#     (→ changes), never as clean.
 #   • `pull_request` (NOT `pull_request_target`): the latter would run untrusted
 #     PR code WITH secrets — a well-known exfil hole. Our PRs are same-repo
 #     branches, so secrets are available under plain `pull_request`. A FORK PR
@@ -58,10 +70,20 @@
 #     cannot feed auto-merge mid-run. The COMPLETE fix — ready-to-merge verifying
 #     the pass was applied to the CURRENT head SHA — is a follow-up in
 #     ready-to-merge.yml (deliberately NOT edited from here).
-#   • Fail closed everywhere: any error, missing verdict, or a `packages/`
-#     security-role that requests changes → `ai-review:changes`. A spurious `pass`
-#     is the worst outcome (it feeds auto-merge), so `pass` is emitted ONLY on an
-#     unambiguous clean verdict from every required role.
+#   • Fail closed everywhere: any error, missing verdict, a `packages/`
+#     security-role that requests changes, or a PR that edits the review machinery
+#     (`.github/`/`scripts/`) → `ai-review:changes`. A spurious `pass` is the worst
+#     outcome (it feeds auto-merge), so `pass` is emitted ONLY on an unambiguous
+#     clean verdict from every required role AND only when the PR does not touch
+#     the machinery.
+#   • RESIDUALS (known, LOW; tracked with #458). (a) redact() scrubs the literal
+#     token value and `sk-ant-*`; an agent that re-encodes the token before echoing
+#     it (base64/hex/split) could slip past the literal scrub — but the no-tools
+#     agent cannot read the token in the first place, so this is defence-in-depth,
+#     not the primary control. (b) The stale-pass clear at run start is best-effort
+#     (`|| true`); the post step writes the authoritative label, and the COMPLETE
+#     TOCTOU fix (ready-to-merge verifying the pass SHA == head) is a follow-up in
+#     ready-to-merge.yml.
 #
 # ── ACTIVATION (deps flagged in the PR body) ─────────────────────────────────
 #   1. Add the `CLAUDE_CODE_OAUTH_TOKEN` repo secret (`claude setup-token`) — a
@@ -213,18 +235,44 @@ jobs:
                 fi
           }
 
+          # ── self-edit fail-closed: does this PR touch the review machinery? ──
+          # `on: pull_request` runs THIS workflow (and would run any scripts/* it
+          # calls in a later BASE run) from a head the PR author controls. The base
+          # checkout makes the reviewer SCRIPTS trusted, but NOT edits to them, so a
+          # PR that rewrites `.github/` or `scripts/` could forge a pass. We compute
+          # the changed-file set ONCE here (reused by the security role below) with
+          # EXPLICIT error detection: if `git diff` fails OR the set is empty we
+          # cannot prove the PR is clean, so we FAIL CLOSED and treat it as a
+          # self-edit — never as clean. Any match of `^\.github/` or `^scripts/`
+          # forces the final verdict to changes (an OVERRIDE applied at combine
+          # time, not a skip — the reviewer still runs below, for information).
+          CHANGED=""
+          CHANGED_OK=no
+          if CHANGED="$(git diff --name-only "$BASE...$HEAD" 2>/dev/null)" && [ -n "$CHANGED" ]; then
+            CHANGED_OK=yes
+          fi
+
+          SELF_EDIT=no
+          SELF_EDIT_KIND=""
+          if [ "$CHANGED_OK" != "yes" ]; then
+            SELF_EDIT=yes
+            SELF_EDIT_KIND=indeterminate
+          elif printf '%s\n' "$CHANGED" | grep -qE '^(\.github/|scripts/)'; then
+            SELF_EDIT=yes
+            SELF_EDIT_KIND=machinery
+          fi
+
           # ── reviewer role (always) ──
           REVIEWER_OUT="$(bash scripts/review-branch.sh "$BASE" "$HEAD" --role reviewer || true)"
           REVIEWER_LABEL="$(printf '%s\n' "$REVIEWER_OUT" | bash scripts/review-decide.sh || true)"
           REVIEWER_BLOCK="$(printf '%s\n' "$REVIEWER_OUT" | extract_block | redact)"
           [ -z "$REVIEWER_BLOCK" ] && REVIEWER_BLOCK="(reviewer emitted no verdict block — fail-closed to changes)"
 
-          # ── security role (only if packages/ changed) ──
-          CHANGED="$(git diff --name-only "$BASE...$HEAD" 2>/dev/null || true)"
+          # ── security role (only if packages/ changed; reuse CHANGED from above) ──
           SECURITY_REQUIRED=no
           SECURITY_LABEL=""
           SECURITY_BLOCK=""
-          if printf '%s\n' "$CHANGED" | grep -qE '^packages/'; then
+          if [ "$CHANGED_OK" = "yes" ] && printf '%s\n' "$CHANGED" | grep -qE '^packages/'; then
             SECURITY_REQUIRED=yes
             SECURITY_OUT="$(bash scripts/review-branch.sh "$BASE" "$HEAD" --role security || true)"
             SECURITY_LABEL="$(printf '%s\n' "$SECURITY_OUT" | bash scripts/review-decide.sh || true)"
@@ -242,14 +290,33 @@ jobs:
             fi
           fi
 
+          # ── self-edit OVERRIDE (fail closed): a PR touching the review machinery
+          #    (`.github/`/`scripts/`), or one whose changed set could not be
+          #    determined, can NEVER auto-pass — no matter what the roles decided.
+          #    Applied AFTER the combine so the reviewer still ran for information
+          #    but cannot yield a green on a PR that edits its own gate. ──
+          if [ "$SELF_EDIT" = "yes" ]; then
+            FINAL="ai-review:changes"
+          fi
+
           echo "label=$FINAL" >> "$GITHUB_OUTPUT"
-          echo "Reviewer=${REVIEWER_LABEL:-<none>} | Security(${SECURITY_REQUIRED})=${SECURITY_LABEL:-<n/a>} | FINAL=$FINAL"
+          echo "Reviewer=${REVIEWER_LABEL:-<none>} | Security(${SECURITY_REQUIRED})=${SECURITY_LABEL:-<n/a>} | SelfEdit=${SELF_EDIT}(${SELF_EDIT_KIND:-none}) | FINAL=$FINAL"
 
           # ── build the PR comment body (findings/rationale behind the label) ──
           BODY="$RUNNER_TEMP/ai-review-comment.md"
           {
             echo "## 🤖 AI review — \`$FINAL\`"
             echo
+            if [ "$SELF_EDIT" = "yes" ]; then
+              if [ "$SELF_EDIT_KIND" = "machinery" ]; then
+                echo "> ⚠️ **This PR modifies the AI-review machinery (\`.github/\`/\`scripts/\`) — auto-pass is disabled; a human must review.**"
+              else
+                echo "> ⚠️ **The set of changed files could not be verified — auto-pass is disabled (fail closed); a human must review.**"
+              fi
+              echo ">"
+              echo "> \`on: pull_request\` runs this workflow from the PR head, so a change to the gate itself cannot self-certify. The verdict is forced to \`ai-review:changes\` regardless of the reviewer's output below (which still runs, for information)."
+              echo
+            fi
             echo "### Reviewer"
             echo '```'
             printf '%s\n' "$REVIEWER_BLOCK"
