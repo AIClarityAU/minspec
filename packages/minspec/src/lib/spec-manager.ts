@@ -38,6 +38,19 @@ export interface SpecSummary {
   readonly epic?: string;
   /** Owning product slug (`minspec` / `scroogellm`); drives the SPECS-pane prefix strip. */
   readonly product?: string;
+  /**
+   * Whether this spec has its OWN design.md/plan.md (resp. tasks.md) sibling —
+   * i.e. a file with that basename whose frontmatter `id` matches THIS spec's
+   * id, not merely a file with that name sitting in the same directory (a flat
+   * directory can hold several independently-numbered specs, e.g. this repo's
+   * own specs/minspec/{requirements,design,tasks}.md are SPEC-001/002/003, not
+   * three phase-files of one spec). Computed once in listSpecs()'s directory
+   * walk, which already parses every candidate file's frontmatter — gates the
+   * SPECS-pane's "View Design"/"View Tasks" menu items without re-deriving the
+   * same fact via a second fs pass per node, per render.
+   */
+  readonly hasDesignFile?: boolean;
+  readonly hasTasksFile?: boolean;
 }
 
 /** Full spec detail including content and phase states */

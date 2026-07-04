@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Mock vscode module before any imports that use it
 vi.mock('vscode', () => ({
@@ -165,6 +165,46 @@ Add rate limiting.
     const matches = listSpecs(tmpDir).filter(s => s.id === 'SPEC-004');
     expect(matches).toHaveLength(1);
     expect(path.basename(matches[0].filePath)).toBe('requirements.md');
+    // design.md/tasks.md share SPEC-004's OWN id — genuinely its phase-files.
+    expect(matches[0].hasDesignFile).toBe(true);
+    expect(matches[0].hasTasksFile).toBe(true);
+  });
+
+  // Regression (PR #472 review finding #1): a flat directory can hold several
+  // INDEPENDENTLY-numbered specs, not just one spec's split-layout shards —
+  // exactly this repo's own specs/minspec/{requirements,design,tasks}.md are
+  // SPEC-001/002/003, three separate specs, not phase-files of SPEC-001. Before
+  // the fix, hasDesignFile/hasTasksFile were derived from directory
+  // co-location alone, so SPEC-001 would falsely claim SPEC-002's design.md and
+  // SPEC-003's tasks.md as its own — showing "View Design"/"View Tasks" menu
+  // items that opened an unrelated spec's content.
+  it('does NOT claim a sibling design.md/tasks.md that belongs to a DIFFERENT spec id', () => {
+    writeMinspecConfig(tmpDir);
+    const dir = path.join(tmpDir, 'specs', 'minspec');
+    writeSpecFile(dir, 'requirements.md', fmSpec('SPEC-001', 'Core requirements'));
+    writeSpecFile(dir, 'design.md', fmSpec('SPEC-002', 'Core design'));
+    writeSpecFile(dir, 'tasks.md', fmSpec('SPEC-003', 'Core tasks'));
+
+    const result = listSpecs(tmpDir);
+    const spec001 = result.find(s => s.id === 'SPEC-001');
+    expect(spec001?.hasDesignFile).toBe(false);
+    expect(spec001?.hasTasksFile).toBe(false);
+
+    // SPEC-002/SPEC-003 are real, independent specs — they still appear.
+    expect(result.map(s => s.id).sort()).toEqual(['SPEC-001', 'SPEC-002', 'SPEC-003']);
+  });
+
+  it('spec-kit layout: hasDesignFile/hasTasksFile reflect real plan.md/tasks.md shard files', () => {
+    writeMinspecConfig(tmpDir, 'specs');
+    const dir = path.join(tmpDir, 'specs', '005-spec-kit-example');
+    writeSpecFile(dir, 'spec.md', fmSpec('SPEC-005', 'Spec kit example'));
+    writeSpecFile(dir, 'plan.md', '# Plan\n');
+    // tasks.md deliberately absent — Tasks phase not started yet.
+
+    const matches = listSpecs(tmpDir).filter(s => s.id === 'SPEC-005');
+    expect(matches).toHaveLength(1);
+    expect(matches[0].hasDesignFile).toBe(true);
+    expect(matches[0].hasTasksFile).toBe(false);
   });
 
   it('skips files without an id', () => {
@@ -458,38 +498,28 @@ describe('SpecTreeProvider', () => {
     // Regression: "View Design"/"View Tasks" must only appear when the sibling
     // file actually exists on disk (package.json gates them on the hasDesign/
     // hasTasks flags below) — otherwise the command opens a dangling path.
+    // SpecNode reads spec.hasDesignFile/hasTasksFile — it does no fs I/O of its
+    // own (that would risk re-deriving "sibling file exists" instead of "sibling
+    // file belongs to ME", the exact bug listSpecs()'s own rolesById map exists
+    // to avoid; see the listSpecs() describe block below for that coverage).
     describe('hasDesign/hasTasks flags (gate View Design / View Tasks menu items)', () => {
-      let dir: string;
-
-      beforeEach(() => {
-        dir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-phase-flags-'));
-      });
-
-      afterEach(() => {
-        fs.rmSync(dir, { recursive: true, force: true });
-      });
-
-      it('no flags when neither sibling exists (single-file spec)', () => {
-        const spec = makeSpec({ filePath: path.join(dir, 'requirements.md') });
+      it('no flags when the summary carries neither', () => {
+        const spec = makeSpec({});
         expect(new SpecNode(spec).contextValue).toBe('specNode');
       });
 
-      it('hasDesign only, once design.md exists', () => {
-        fs.writeFileSync(path.join(dir, 'design.md'), '');
-        const spec = makeSpec({ filePath: path.join(dir, 'requirements.md') });
+      it('hasDesign only', () => {
+        const spec = makeSpec({ hasDesignFile: true });
         expect(new SpecNode(spec).contextValue).toBe('specNode hasDesign');
       });
 
-      it('hasDesign via plan.md (spec-kit layout)', () => {
-        fs.writeFileSync(path.join(dir, 'plan.md'), '');
-        const spec = makeSpec({ filePath: path.join(dir, 'spec.md') });
-        expect(new SpecNode(spec).contextValue).toBe('specNode hasDesign');
+      it('hasTasks only', () => {
+        const spec = makeSpec({ hasTasksFile: true });
+        expect(new SpecNode(spec).contextValue).toBe('specNode hasTasks');
       });
 
       it('both flags, combined with the approval suffix', () => {
-        fs.writeFileSync(path.join(dir, 'design.md'), '');
-        fs.writeFileSync(path.join(dir, 'tasks.md'), '');
-        const spec = makeSpec({ filePath: path.join(dir, 'requirements.md') });
+        const spec = makeSpec({ hasDesignFile: true, hasTasksFile: true });
         expect(new SpecNode(spec, 'approved').contextValue).toBe('specNode.approved hasDesign hasTasks');
       });
     });
