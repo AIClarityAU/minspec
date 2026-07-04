@@ -23,10 +23,32 @@ while [[ $# -gt 0 ]]; do
 done
 
 echo "Fetching issue #$ISSUE..."
-ISSUE_JSON=$(gh issue view "$ISSUE" --repo "$REPO" --json body,title,labels)
+# Fetch `state` alongside labels: this view IS the point-in-time re-validation for
+# the #406 staleness re-check below (see it, right after the field extraction).
+ISSUE_JSON=$(gh issue view "$ISSUE" --repo "$REPO" --json body,title,labels,state)
 ISSUE_BODY=$(echo "$ISSUE_JSON" | jq -r '"# " + .title + "\n\n" + .body')
 ISSUE_TITLE=$(echo "$ISSUE_JSON" | jq -r '.title')
 ISSUE_LABELS=$(echo "$ISSUE_JSON" | jq -r '.labels[].name')
+ISSUE_STATE=$(echo "$ISSUE_JSON" | jq -r '.state')
+ISSUE_LABELS_CSV=$(echo "$ISSUE_JSON" | jq -r '[.labels[].name] | join(",")')
+
+# ── #406: re-validate readiness at dispatch time (not just at triage) ─────────
+# ROOT CAUSE: `agent-ready` is written ONCE at triage and never re-checked. Between
+# the drain enumerating the agent-ready set and THIS dispatcher launching (the drain
+# runs issues sequentially, so a slow earlier build defers later ones), the issue
+# may have been closed, re-triaged to needs-review, or quarantined — yet the stale
+# stamp would still make us build it. The gh view above re-fetched the issue's
+# CURRENT state; feed it to the pure, tested gate and ABORT CLEANLY (exit 0 — not an
+# error) unless it is still OPEN and still carries agent-ready. The gate aborts ONLY
+# on clear staleness signals (not-open, agent-ready gone, or a human-gate label), so
+# it never false-aborts valid work. SCOPE: this closes the label/open-state cases
+# only; full dependency-graph freshness (a linked SPEC's phase / a linked DR still
+# `accepted`) is the architect-flagged follow-up and is OUT OF SCOPE here.
+if ! READY_REASON=$("${SCRIPT_DIR}/dispatch-ready-check.sh" "$ISSUE_STATE" "$ISSUE_LABELS_CSV"); then
+  echo "Skipping #$ISSUE — no longer dispatchable at dispatch time: ${READY_REASON}"
+  echo "  (was agent-ready when the drain enumerated it; re-validated stale here — #406)"
+  exit 0
+fi
 
 # Resolve role: --role flag > role:X label > default to dev
 if [[ -n "$FORCE_ROLE" ]]; then
