@@ -343,6 +343,11 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           LABEL: ${{ steps.review.outputs.label }}
           BODY_FILE: ${{ steps.review.outputs.body-file }}
+          # Human-reviewer fallback for the fail-closed (`ai-review:changes`) path
+          # below. Comma-separated logins from the repo variable if set, else the
+          # repo owner. Passed via env (never `github.event.pull_request.*`).
+          REVIEWERS: ${{ vars.AI_REVIEW_HUMAN_REVIEWERS }}
+          OWNER: ${{ github.repository_owner }}
         run: |
           set -euo pipefail
 
@@ -363,6 +368,23 @@ jobs:
           gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "$OPPOSITE" 2>/dev/null || true
           gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "ai-review:pending" 2>/dev/null || true
 
+          # Fail-closed → pull a human in. When the verdict is `ai-review:changes`
+          # (normal request-changes OR the self-edit override, both of which land
+          # here as $LABEL), the bot-only label allowlist means no human is looped
+          # in automatically — so mark the PR `needs-human-review` and best-effort
+          # request a human reviewer. ALL of this is best-effort (`|| true`): the
+          # `ai-review:changes` label above is the authoritative signal, and none of
+          # these calls may change the job's honest status. (`gh pr edit
+          # --add-reviewer` legitimately fails when $REVIEWERS is the PR's own
+          # author — that's fine, the label is the reliable signal.)
+          if [ "$LABEL" = "ai-review:changes" ]; then
+            REVIEWERS="${REVIEWERS:-$OWNER}"
+            gh label create "needs-human-review" --repo "$REPO" \
+              --color FBCA04 --description "AI review failed closed — a human must resolve" 2>/dev/null || true
+            gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+            gh pr edit "$PR_NUMBER" --repo "$REPO" --add-reviewer "$REVIEWERS" 2>/dev/null || true
+          fi
+
       # Backstop: if ANY step above errored (install, mint, review, post…), request
       # changes as the bot so an error never yields a green. If the token mint
       # itself failed there is no bot identity to post as — fail red (still no
@@ -374,6 +396,9 @@ jobs:
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          # Human-reviewer fallback (see Post step). Repo variable if set, else owner.
+          REVIEWERS: ${{ vars.AI_REVIEW_HUMAN_REVIEWERS }}
+          OWNER: ${{ github.repository_owner }}
         run: |
           set -uo pipefail
           if [ -z "${GH_TOKEN:-}" ]; then
@@ -384,5 +409,15 @@ jobs:
           gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label "ai-review:changes"
           gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "ai-review:pass" 2>/dev/null || true
           gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "ai-review:pending" 2>/dev/null || true
+
+          # Fail-closed → pull a human in (same as the Post step). The bot-only label
+          # allowlist means a fail-closed PR needs a human to resolve it. All calls
+          # are best-effort (`|| true`) and MUST NOT change the honest red status —
+          # the `exit 1` below still stands regardless of their outcome.
+          REVIEWERS="${REVIEWERS:-$OWNER}"
+          gh label create "needs-human-review" --repo "$REPO" \
+            --color FBCA04 --description "AI review failed closed — a human must resolve" 2>/dev/null || true
+          gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+          gh pr edit "$PR_NUMBER" --repo "$REPO" --add-reviewer "$REVIEWERS" 2>/dev/null || true
           # Re-fail so the job status honestly reflects the error (label recovered).
           exit 1
