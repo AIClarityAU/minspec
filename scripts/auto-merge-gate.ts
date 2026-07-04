@@ -479,17 +479,23 @@ export function detectManifestChange(
 
 /**
  * Directory prefixes whose contents run arbitrary code at CI/build time (or
- * define the pipeline that does). Matched by path-prefix on the POSIX-normalized
- * path so both repo-root (`.github/workflows/…`) and any nested occurrence are
- * caught (deny-by-default). A workflow change is the exact exploit that motivated
- * #422: a `run: curl … | sh` step trips NO sensitive term, so absent this signal
- * a workflow-only PR classifies low-blast and could reach `main` under auto-merge.
+ * define the pipeline that does) — or, for `.githooks/`/`.husky/`, at commit/push
+ * time via the local git-hooks mechanism. Matched by path-prefix on the
+ * POSIX-normalized path so both repo-root (`.github/workflows/…`) and any nested
+ * occurrence are caught (deny-by-default). A workflow change is the exact exploit
+ * that motivated #422: a `run: curl … | sh` step trips NO sensitive term, so
+ * absent this signal a workflow-only PR classifies low-blast and could reach
+ * `main` under auto-merge. Git-hook dirs are the same class of blind spot: this
+ * repo runs `core.hooksPath=.githooks` (`.githooks/commit-msg` is the RCDD gate),
+ * so a poisoned hook script is arbitrary shell that also trips no sensitive term.
  */
 const BOUNDARY_DIR_PREFIXES: readonly string[] = [
   '.github/workflows/', // GitHub Actions workflows
   '.github/actions/', // local/composite actions (arbitrary code in CI)
   '.circleci/', // CircleCI pipeline config
   '.buildkite/', // Buildkite pipeline config
+  '.githooks/', // git hooks run arbitrary shell on commit/push (this repo: core.hooksPath=.githooks)
+  '.husky/', // husky-managed git hooks — same arbitrary-shell-on-commit/push surface
 ];
 
 /**
@@ -514,7 +520,8 @@ const BOUNDARY_CONFIG_BASENAMES: ReadonlySet<string> = new Set(['.npmrc', '.yarn
  * Is `rawPath` a CI/build-config BOUNDARY file (#422)? Non-code, high-consequence
  * config the public-API analyzer does not signal:
  *
- *   - anything under a {@link BOUNDARY_DIR_PREFIXES} directory (CI pipelines);
+ *   - anything under a {@link BOUNDARY_DIR_PREFIXES} directory (CI pipelines,
+ *     plus `.githooks/`/`.husky/` — git hooks run arbitrary shell on commit/push);
  *   - a root CI-provider config by basename ({@link BOUNDARY_ROOT_BASENAMES});
  *   - package-manager config: `.npmrc`, `.yarnrc`, `.yarnrc.yml` (registry / auth
  *     / scripts → supply-chain surface);
@@ -523,7 +530,7 @@ const BOUNDARY_CONFIG_BASENAMES: ReadonlySet<string> = new Set(['.npmrc', '.yarn
  * Deny-by-default (#422): match HIGH on any doubt for CI/build config — erring
  * high costs a 30s human skim; erring low costs arbitrary CI code (or a silent
  * build/registry pivot) on `main`. Does NOT rely on SENSITIVE_TERMS (`curl` trips
- * nothing).
+ * nothing) — same reasoning applies to a poisoned git-hook script.
  */
 export function isBoundaryPath(rawPath: string): boolean {
   const p = rawPath.replace(/\\/g, '/').replace(/^\.\//, '');

@@ -17,10 +17,12 @@
  *                (→ main() emits a fail-safe HOLD) instead of yielding 0 files.
  *   - #422       CI/build boundary blind spot (same class as BLOCKER 1):
  *                `detectBoundaryChange` injects a high-blast signal for
- *                `.github/workflows/*`, `.npmrc`/`.yarnrc*`, `tsconfig*.json`, and
- *                other CI/build config the public-API analyzer never sees, so a
- *                workflow whose only sink is `run: curl … | sh` (no SENSITIVE_TERM)
- *                cannot classify low-blast.
+ *                `.github/workflows/*`, `.npmrc`/`.yarnrc*`, `tsconfig*.json`,
+ *                `.githooks/*`/`.husky/*` (git hooks run arbitrary shell on
+ *                commit/push — this repo's `.githooks/commit-msg` is the RCDD
+ *                gate), and other CI/build config the public-API analyzer never
+ *                sees, so a workflow or hook whose only sink is `run: curl … | sh`
+ *                (no SENSITIVE_TERM) cannot classify low-blast.
  *
  * The prover's decision logic is exercised DETERMINISTICALLY via injected deps
  * (`ProverDeps`) — a flaky nested-vitest test on the highest-consequence code
@@ -297,6 +299,9 @@ describe('#422 — detectBoundaryChange flags CI/build boundary diffs', () => {
     'tsconfig.json',
     'tsconfig.build.json',
     'packages/minspec/tsconfig.json', // matched by basename in any workspace pkg
+    '.githooks/pre-commit', // git hooks run arbitrary shell on commit/push (this repo's core.hooksPath)
+    '.githooks/commit-msg', // the RCDD gate itself — a poisoned hook could disable its own gate
+    '.husky/pre-commit', // husky-managed hook — same arbitrary-shell-on-commit surface
   ])('%s → manifest_changed high-blast signal (isBoundaryPath + detectBoundaryChange)', (p) => {
     expect(isBoundaryPath(p)).toBe(true);
     const sig = detectBoundaryChange([cf({ path: p })]);
@@ -399,6 +404,35 @@ describe('#422 — detectBoundaryChange flags CI/build boundary diffs', () => {
     });
     expect(d.blast).toBe('high');
     expect(d.eligible).toBe(false);
+  });
+
+  it('.githooks/pre-commit-only diff → blast:high, ineligible (end-to-end through the pure gate)', () => {
+    // The review finding this fixes: git-hook directories run arbitrary shell on
+    // commit/push (this repo: core.hooksPath=.githooks, .githooks/commit-msg is
+    // the RCDD gate) but were not classified as a boundary path, so a poisoned
+    // hook could slip through as low-blast and reach auto-merge.
+    const changed: ChangedFile[] = [cf({ path: '.githooks/pre-commit' })];
+    const boundarySignal = detectBoundaryChange(changed);
+    expect(boundarySignal).toBeDefined();
+    const consequenceSignals: ClassificationSignal[] = boundarySignal ? [boundarySignal] : [];
+
+    const reviewSignals: ReviewSignalsInput = {
+      rootCause: 'add a pre-commit hook step',
+      changedFiles: ['.githooks/pre-commit'],
+      rootCauseFiles: ['.githooks/pre-commit'],
+      regressionTest: 'x.test.ts > y',
+      gate: { test: 'pass', lint: 'pass', build: 'pass', validate: 'pass' },
+    };
+    const d = decideAutoMerge({
+      reviewSignals,
+      hollowFindings: [],
+      consequenceSignals,
+      mode: 'consequence-hybrid',
+      proverResult: { regressionProvenBaseRed: true, regressionGreenOnHead: true, note: 'proven' },
+    });
+    expect(d.blast).toBe('high');
+    expect(d.eligible).toBe(false);
+    expect(d.failed).toContain('high-blast');
   });
 
   it('control: an ordinary src/foo.ts change with no other high signal is NOT forced high by this matcher', () => {
