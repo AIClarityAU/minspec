@@ -479,7 +479,9 @@ jobs:
           fi
           # Build the check-run body from the TESTED pure helper (single source of
           # truth for pass→success / changes→neutral). node reads inputs from env,
-          # never from interpolated ${{ }} — injection-safe.
+          # never from an interpolated GitHub Actions expression — injection-safe.
+          # (NB: an Actions expression written literally here would be evaluated even
+          # inside this shell comment — an empty one fails workflow load; #486.)
           BODY="$RUNNER_TEMP/ai-review-check.json"
           if ! node -e '
             const g = require(process.env.GITHUB_WORKSPACE + "/.github/scripts/ai-review-guard.js");
