@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock vscode module before any imports that use it
 vi.mock('vscode', () => ({
@@ -454,6 +454,45 @@ describe('SpecTreeProvider', () => {
       // even an approved-then-done spec is terminal (no approve/revoke)
       expect(new SpecNode(makeSpec({ status: 'done' }), 'approved').contextValue).toBe('specNode.terminal');
     });
+
+    // Regression: "View Design"/"View Tasks" must only appear when the sibling
+    // file actually exists on disk (package.json gates them on the hasDesign/
+    // hasTasks flags below) — otherwise the command opens a dangling path.
+    describe('hasDesign/hasTasks flags (gate View Design / View Tasks menu items)', () => {
+      let dir: string;
+
+      beforeEach(() => {
+        dir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-phase-flags-'));
+      });
+
+      afterEach(() => {
+        fs.rmSync(dir, { recursive: true, force: true });
+      });
+
+      it('no flags when neither sibling exists (single-file spec)', () => {
+        const spec = makeSpec({ filePath: path.join(dir, 'requirements.md') });
+        expect(new SpecNode(spec).contextValue).toBe('specNode');
+      });
+
+      it('hasDesign only, once design.md exists', () => {
+        fs.writeFileSync(path.join(dir, 'design.md'), '');
+        const spec = makeSpec({ filePath: path.join(dir, 'requirements.md') });
+        expect(new SpecNode(spec).contextValue).toBe('specNode hasDesign');
+      });
+
+      it('hasDesign via plan.md (spec-kit layout)', () => {
+        fs.writeFileSync(path.join(dir, 'plan.md'), '');
+        const spec = makeSpec({ filePath: path.join(dir, 'spec.md') });
+        expect(new SpecNode(spec).contextValue).toBe('specNode hasDesign');
+      });
+
+      it('both flags, combined with the approval suffix', () => {
+        fs.writeFileSync(path.join(dir, 'design.md'), '');
+        fs.writeFileSync(path.join(dir, 'tasks.md'), '');
+        const spec = makeSpec({ filePath: path.join(dir, 'requirements.md') });
+        expect(new SpecNode(spec, 'approved').contextValue).toBe('specNode.approved hasDesign hasTasks');
+      });
+    });
   });
 
   describe('getChildren(specNode) — leaf level', () => {
@@ -763,11 +802,19 @@ describe('SpecTreeProvider — Needs Re-Approval group (SPEC-029)', () => {
   // `specNode.stale`. VS Code's `when`-clause engine isn't in this unit
   // harness, so this locks the REGEX ITSELF against every real viewItem value
   // — a change to package.json that breaks this pattern breaks the menu.
-  it('SEV-1 menu-preservation: the widened when-clause regex matches specNode + specNode.stale, and ONLY those', () => {
-    const pattern = /^specNode(\.stale)?$/;
+  //
+  // Widened a second time (View Design/View Tasks): contextValue can now carry
+  // trailing " hasDesign"/" hasTasks" flags, so the anchor moved from a bare
+  // `$` to `( |$)` — classify/approveSpec must keep matching specNode(.stale)
+  // rows regardless of whether those flags are present.
+  it('SEV-1 menu-preservation: the widened when-clause regex matches specNode + specNode.stale (flags or not), and ONLY those', () => {
+    const pattern = /^specNode(\.stale)?( |$)/;
     expect(pattern.test('specNode')).toBe(true);
     expect(pattern.test('specNode.stale')).toBe(true);
+    expect(pattern.test('specNode hasDesign')).toBe(true);
+    expect(pattern.test('specNode.stale hasDesign hasTasks')).toBe(true);
     expect(pattern.test('specNode.approved')).toBe(false);
+    expect(pattern.test('specNode.approved hasDesign')).toBe(false);
     expect(pattern.test('specNode.terminal')).toBe(false);
     expect(pattern.test('epicGroup.proposed')).toBe(false);
   });
@@ -775,20 +822,21 @@ describe('SpecTreeProvider — Needs Re-Approval group (SPEC-029)', () => {
   it('SEV-1 menu-preservation (real file): package.json\'s classify + approveSpec view/item/context clauses actually use the widened pattern, not exact ==', () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'));
     const contextMenus: Array<{ command: string; when: string }> = pkg.contributes.menus['view/item/context'];
-    const widened = /viewItem\s*=~\s*\/\^specNode\(\\\.stale\)\?\$\//;
+    const widenedFragment = 'viewItem =~ /^specNode(\\.stale)?( |$)/';
 
     const classify = contextMenus.filter((m) => m.command === 'minspec.classify');
     expect(classify.length).toBeGreaterThan(0);
-    for (const m of classify) expect(m.when).toMatch(widened);
+    for (const m of classify) expect(m.when).toContain(widenedFragment);
 
     const approve = contextMenus.filter((m) => m.command === 'minspec.approveSpec');
     expect(approve.length).toBeGreaterThan(0);
-    for (const m of approve) expect(m.when).toMatch(widened);
+    for (const m of approve) expect(m.when).toContain(widenedFragment);
 
-    // revokeApproval must NOT be widened — it stays scoped to specNode.approved only.
+    // revokeApproval must NOT be widened — it stays scoped to specNode.approved only
+    // (now via regex too, since it must still tolerate a trailing hasDesign/hasTasks flag).
     const revoke = contextMenus.find((m) => m.command === 'minspec.revokeApproval');
-    expect(revoke?.when).toContain('specNode.approved');
-    expect(revoke?.when).not.toMatch(widened);
+    expect(revoke?.when).toContain('specNode\\.approved');
+    expect(revoke?.when).not.toContain(widenedFragment);
   });
 
   it('Slice 5: a non-terminal stale spec gets contextValue specNode.stale; approved/unapproved unchanged', () => {

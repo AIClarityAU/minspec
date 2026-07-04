@@ -317,11 +317,22 @@ export class SpecNode extends vscode.TreeItem {
     // "Show Changes Since Approval" menu entry to stale specs only — see the
     // package.json when-clauses, which widen the classify/approveSpec clauses
     // to also match specNode.stale so those actions are NOT lost on this row.
-    this.contextValue = terminal
+    const base = terminal
       ? 'specNode.terminal'
       : approval === 'approved' ? 'specNode.approved'
       : approval === 'stale' ? 'specNode.stale'
       : 'specNode';
+
+    // Space-separated flags (not dot-suffixed, so they stay distinguishable from
+    // the approval suffix above) gate "View Design"/"View Tasks": only offered
+    // when the sibling file actually exists, so the command never opens a
+    // dangling path. Checked against the representative file's directory —
+    // split-layout only; single-file specs have no siblings, so both stay absent.
+    const dir = path.dirname(spec.filePath);
+    const hasDesign = ['design.md', 'plan.md'].some((f) => fs.existsSync(path.join(dir, f)));
+    const hasTasks = fs.existsSync(path.join(dir, 'tasks.md'));
+    const flags = [hasDesign && 'hasDesign', hasTasks && 'hasTasks'].filter(Boolean).join(' ');
+    this.contextValue = flags ? `${base} ${flags}` : base;
 
     const approvalLine =
       approval === 'approved' ? 'Approval: \ud83d\udd12 approved (content-bound) \u2014 sealed to this content, not yet built'
