@@ -15,6 +15,14 @@
  *                — only the EXACT token `consequence-hybrid` enables auto-merge.
  *   - MAJOR 5    git-diff swallow: `buildChangedFiles` THROWS on a git failure
  *                (→ main() emits a fail-safe HOLD) instead of yielding 0 files.
+ *   - #422       CI/build boundary blind spot (same class as BLOCKER 1):
+ *                `detectBoundaryChange` injects a high-blast signal for
+ *                `.github/workflows/*`, `.npmrc`/`.yarnrc*`, `tsconfig*.json`,
+ *                `.githooks/*`/`.husky/*` (git hooks run arbitrary shell on
+ *                commit/push — this repo's `.githooks/commit-msg` is the RCDD
+ *                gate), and other CI/build config the public-API analyzer never
+ *                sees, so a workflow or hook whose only sink is `run: curl … | sh`
+ *                (no SENSITIVE_TERM) cannot classify low-blast.
  *
  * The prover's decision logic is exercised DETERMINISTICALLY via injected deps
  * (`ProverDeps`) — a flaky nested-vitest test on the highest-consequence code
@@ -33,6 +41,8 @@ import {
   baseRedVerdict,
   proveRegression,
   detectManifestChange,
+  isBoundaryPath,
+  detectBoundaryChange,
   buildChangedFiles,
   type VitestRun,
   type ProverDeps,
@@ -268,6 +278,184 @@ describe('SPEC-024 BLOCKER 1 — detectManifestChange flags manifest/boundary di
     expect(d.blast).toBe('high');
     expect(d.eligible).toBe(false);
     expect(d.failed).toContain('high-blast');
+  });
+});
+
+// ─── #422 — CI/build boundary files force high-blast (same class as BLOCKER 1) ─
+
+describe('#422 — detectBoundaryChange flags CI/build boundary diffs', () => {
+  it.each([
+    '.github/workflows/ci.yml',
+    '.github/actions/setup/action.yml',
+    '.circleci/config.yml',
+    '.buildkite/pipeline.yml',
+    '.gitlab-ci.yml',
+    '.travis.yml',
+    'azure-pipelines.yml',
+    'Jenkinsfile',
+    '.npmrc',
+    '.yarnrc',
+    '.yarnrc.yml',
+    'tsconfig.json',
+    'tsconfig.build.json',
+    'packages/minspec/tsconfig.json', // matched by basename in any workspace pkg
+    '.githooks/pre-commit', // git hooks run arbitrary shell on commit/push (this repo's core.hooksPath)
+    '.githooks/commit-msg', // the RCDD gate itself — a poisoned hook could disable its own gate
+    '.husky/pre-commit', // husky-managed hook — same arbitrary-shell-on-commit surface
+  ])('%s → manifest_changed high-blast signal (isBoundaryPath + detectBoundaryChange)', (p) => {
+    expect(isBoundaryPath(p)).toBe(true);
+    const sig = detectBoundaryChange([cf({ path: p })]);
+    expect(sig?.name).toBe('manifest_changed');
+    expect(sig?.axis).toBe('consequence');
+  });
+
+  it('an ordinary source-code diff → NOT flagged as a boundary change', () => {
+    expect(isBoundaryPath('packages/minspec/src/lib/foo.ts')).toBe(false);
+    expect(detectBoundaryChange([cf({ path: 'packages/minspec/src/lib/foo.ts' })])).toBeUndefined();
+    expect(detectBoundaryChange([])).toBeUndefined();
+  });
+
+  it('.github/workflows/ci.yml-only diff → blast:high, ineligible (end-to-end through the pure gate)', () => {
+    // The #412 adversarial-review exploit: `run: curl … | sh` trips no
+    // SENSITIVE_TERM, and a workflow-only diff emits no analyzer signal. Without
+    // the boundary matcher this would classify low-blast and could auto-merge.
+    const changed: ChangedFile[] = [cf({ path: '.github/workflows/ci.yml' })];
+    const boundarySignal = detectBoundaryChange(changed);
+    expect(boundarySignal).toBeDefined();
+    const consequenceSignals: ClassificationSignal[] = boundarySignal ? [boundarySignal] : [];
+
+    const reviewSignals: ReviewSignalsInput = {
+      rootCause: 'add a CI step',
+      changedFiles: ['.github/workflows/ci.yml'],
+      rootCauseFiles: ['.github/workflows/ci.yml'],
+      regressionTest: 'x.test.ts > y',
+      gate: { test: 'pass', lint: 'pass', build: 'pass', validate: 'pass' },
+    };
+    const d = decideAutoMerge({
+      reviewSignals,
+      hollowFindings: [],
+      consequenceSignals,
+      mode: 'consequence-hybrid',
+      proverResult: { regressionProvenBaseRed: true, regressionGreenOnHead: true, note: 'proven' },
+    });
+    expect(d.blast).toBe('high');
+    expect(d.eligible).toBe(false);
+    expect(d.failed).toContain('high-blast');
+  });
+
+  it('.npmrc-only diff → blast:high, ineligible', () => {
+    const changed: ChangedFile[] = [cf({ path: '.npmrc' })];
+    const boundarySignal = detectBoundaryChange(changed);
+    const consequenceSignals: ClassificationSignal[] = boundarySignal ? [boundarySignal] : [];
+    const d = decideAutoMerge({
+      reviewSignals: {
+        rootCause: 'registry config change',
+        changedFiles: ['.npmrc'],
+        rootCauseFiles: ['.npmrc'],
+        regressionTest: 'x.test.ts > y',
+        gate: { test: 'pass', lint: 'pass', build: 'pass', validate: 'pass' },
+      },
+      hollowFindings: [],
+      consequenceSignals,
+      mode: 'consequence-hybrid',
+      proverResult: { regressionProvenBaseRed: true, regressionGreenOnHead: true, note: 'proven' },
+    });
+    expect(d.blast).toBe('high');
+    expect(d.eligible).toBe(false);
+  });
+
+  it('tsconfig.json-only diff → blast:high, ineligible', () => {
+    const changed: ChangedFile[] = [cf({ path: 'tsconfig.json' })];
+    const boundarySignal = detectBoundaryChange(changed);
+    const consequenceSignals: ClassificationSignal[] = boundarySignal ? [boundarySignal] : [];
+    const d = decideAutoMerge({
+      reviewSignals: {
+        rootCause: 'compiler option change',
+        changedFiles: ['tsconfig.json'],
+        rootCauseFiles: ['tsconfig.json'],
+        regressionTest: 'x.test.ts > y',
+        gate: { test: 'pass', lint: 'pass', build: 'pass', validate: 'pass' },
+      },
+      hollowFindings: [],
+      consequenceSignals,
+      mode: 'consequence-hybrid',
+      proverResult: { regressionProvenBaseRed: true, regressionGreenOnHead: true, note: 'proven' },
+    });
+    expect(d.blast).toBe('high');
+    expect(d.eligible).toBe(false);
+  });
+
+  it('Jenkinsfile-only diff → blast:high, ineligible', () => {
+    const changed: ChangedFile[] = [cf({ path: 'Jenkinsfile' })];
+    const boundarySignal = detectBoundaryChange(changed);
+    const consequenceSignals: ClassificationSignal[] = boundarySignal ? [boundarySignal] : [];
+    const d = decideAutoMerge({
+      reviewSignals: {
+        rootCause: 'pipeline step change',
+        changedFiles: ['Jenkinsfile'],
+        rootCauseFiles: ['Jenkinsfile'],
+        regressionTest: 'x.test.ts > y',
+        gate: { test: 'pass', lint: 'pass', build: 'pass', validate: 'pass' },
+      },
+      hollowFindings: [],
+      consequenceSignals,
+      mode: 'consequence-hybrid',
+      proverResult: { regressionProvenBaseRed: true, regressionGreenOnHead: true, note: 'proven' },
+    });
+    expect(d.blast).toBe('high');
+    expect(d.eligible).toBe(false);
+  });
+
+  it('.githooks/pre-commit-only diff → blast:high, ineligible (end-to-end through the pure gate)', () => {
+    // The review finding this fixes: git-hook directories run arbitrary shell on
+    // commit/push (this repo: core.hooksPath=.githooks, .githooks/commit-msg is
+    // the RCDD gate) but were not classified as a boundary path, so a poisoned
+    // hook could slip through as low-blast and reach auto-merge.
+    const changed: ChangedFile[] = [cf({ path: '.githooks/pre-commit' })];
+    const boundarySignal = detectBoundaryChange(changed);
+    expect(boundarySignal).toBeDefined();
+    const consequenceSignals: ClassificationSignal[] = boundarySignal ? [boundarySignal] : [];
+
+    const reviewSignals: ReviewSignalsInput = {
+      rootCause: 'add a pre-commit hook step',
+      changedFiles: ['.githooks/pre-commit'],
+      rootCauseFiles: ['.githooks/pre-commit'],
+      regressionTest: 'x.test.ts > y',
+      gate: { test: 'pass', lint: 'pass', build: 'pass', validate: 'pass' },
+    };
+    const d = decideAutoMerge({
+      reviewSignals,
+      hollowFindings: [],
+      consequenceSignals,
+      mode: 'consequence-hybrid',
+      proverResult: { regressionProvenBaseRed: true, regressionGreenOnHead: true, note: 'proven' },
+    });
+    expect(d.blast).toBe('high');
+    expect(d.eligible).toBe(false);
+    expect(d.failed).toContain('high-blast');
+  });
+
+  it('control: an ordinary src/foo.ts change with no other high signal is NOT forced high by this matcher', () => {
+    const changed: ChangedFile[] = [cf({ path: 'src/foo.ts' })];
+    expect(detectBoundaryChange(changed)).toBeUndefined();
+
+    const d = decideAutoMerge({
+      reviewSignals: {
+        rootCause: 'fix off-by-one',
+        changedFiles: ['src/foo.ts'],
+        rootCauseFiles: ['src/foo.ts'],
+        regressionTest: 'x.test.ts > y',
+        gate: { test: 'pass', lint: 'pass', build: 'pass', validate: 'pass' },
+      },
+      hollowFindings: [],
+      consequenceSignals: [], // no analyzer signal, no boundary signal
+      mode: 'consequence-hybrid',
+      proverResult: { regressionProvenBaseRed: true, regressionGreenOnHead: true, note: 'proven' },
+    });
+    // Not asserting eligible:true here — other gate conjuncts may still hold it.
+    // The point of this control is narrow: the boundary matcher itself must not
+    // be the thing forcing high-blast for an ordinary source file.
+    expect(d.blast).not.toBe('high');
   });
 });
 

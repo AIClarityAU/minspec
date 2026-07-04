@@ -475,6 +475,104 @@ export function detectManifestChange(
   };
 }
 
+// ─── #422: CI / build-config boundary detection (same class as BLOCKER 1) ──────
+
+/**
+ * Directory prefixes whose contents run arbitrary code at CI/build time (or
+ * define the pipeline that does) — or, for `.githooks/`/`.husky/`, at commit/push
+ * time via the local git-hooks mechanism. Matched by path-prefix on the
+ * POSIX-normalized path so both repo-root (`.github/workflows/…`) and any nested
+ * occurrence are caught (deny-by-default). A workflow change is the exact exploit
+ * that motivated #422: a `run: curl … | sh` step trips NO sensitive term, so
+ * absent this signal a workflow-only PR classifies low-blast and could reach
+ * `main` under auto-merge. Git-hook dirs are the same class of blind spot: this
+ * repo runs `core.hooksPath=.githooks` (`.githooks/commit-msg` is the RCDD gate),
+ * so a poisoned hook script is arbitrary shell that also trips no sensitive term.
+ */
+const BOUNDARY_DIR_PREFIXES: readonly string[] = [
+  '.github/workflows/', // GitHub Actions workflows
+  '.github/actions/', // local/composite actions (arbitrary code in CI)
+  '.circleci/', // CircleCI pipeline config
+  '.buildkite/', // Buildkite pipeline config
+  '.githooks/', // git hooks run arbitrary shell on commit/push (this repo: core.hooksPath=.githooks)
+  '.husky/', // husky-managed git hooks — same arbitrary-shell-on-commit/push surface
+];
+
+/**
+ * Root CI-provider configs matched by basename (not tied to a directory prefix).
+ */
+const BOUNDARY_ROOT_BASENAMES: ReadonlySet<string> = new Set([
+  '.gitlab-ci.yml',
+  '.travis.yml',
+  'azure-pipelines.yml',
+  'Jenkinsfile',
+]);
+
+/**
+ * Package-manager / build-tool config matched by basename. `tsconfig*.json`
+ * (paths / emit / strictness) is matched via prefix+suffix rather than an exact
+ * set, since project references add arbitrarily-named variants
+ * (`tsconfig.build.json`, `tsconfig.base.json`, …).
+ */
+const BOUNDARY_CONFIG_BASENAMES: ReadonlySet<string> = new Set(['.npmrc', '.yarnrc', '.yarnrc.yml']);
+
+/**
+ * Is `rawPath` a CI/build-config BOUNDARY file (#422)? Non-code, high-consequence
+ * config the public-API analyzer does not signal:
+ *
+ *   - anything under a {@link BOUNDARY_DIR_PREFIXES} directory (CI pipelines,
+ *     plus `.githooks/`/`.husky/` — git hooks run arbitrary shell on commit/push);
+ *   - a root CI-provider config by basename ({@link BOUNDARY_ROOT_BASENAMES});
+ *   - package-manager config: `.npmrc`, `.yarnrc`, `.yarnrc.yml` (registry / auth
+ *     / scripts → supply-chain surface);
+ *   - TypeScript compiler config: `tsconfig*.json` (build & type-safety boundary).
+ *
+ * Deny-by-default (#422): match HIGH on any doubt for CI/build config — erring
+ * high costs a 30s human skim; erring low costs arbitrary CI code (or a silent
+ * build/registry pivot) on `main`. Does NOT rely on SENSITIVE_TERMS (`curl` trips
+ * nothing) — same reasoning applies to a poisoned git-hook script.
+ */
+export function isBoundaryPath(rawPath: string): boolean {
+  const p = rawPath.replace(/\\/g, '/').replace(/^\.\//, '');
+  for (const prefix of BOUNDARY_DIR_PREFIXES) {
+    if (p === prefix.slice(0, -1) || p.startsWith(prefix) || p.includes('/' + prefix)) return true;
+  }
+  const base = path.basename(p);
+  if (BOUNDARY_ROOT_BASENAMES.has(base)) return true;
+  if (BOUNDARY_CONFIG_BASENAMES.has(base)) return true;
+  if (/^tsconfig.*\.json$/.test(base)) return true;
+  return false;
+}
+
+/**
+ * If ANY changed file is a CI/build-config boundary file (#422), return the
+ * high-blast `manifest_changed` consequence signal to INJECT into the analyzer
+ * output (recognized-high in `classifyBlast` ⇒ blast=high ⇒ hold). Returns
+ * `undefined` when none matched. Sibling to `detectManifestChange`: same
+ * defense-in-depth for a class the public-API analyzer does not cover — here
+ * CI/build config rather than supply-chain manifests. Reuses the `manifest_changed`
+ * signal name so no new name has to be classified in `auto-merge.ts`.
+ */
+export function detectBoundaryChange(
+  changedFiles: ReadonlyArray<ChangedFile>,
+): ClassificationSignal | undefined {
+  const matched = changedFiles.map((f) => f.path).filter((p) => isBoundaryPath(p));
+  if (matched.length === 0) return undefined;
+  return {
+    name: 'manifest_changed',
+    value: true,
+    weight: 0,
+    tierContribution: 'T4',
+    axis: 'consequence',
+    degraded: false,
+    explain:
+      `CI/build-config boundary file(s) changed (${matched.join(', ')}) — arbitrary-CI / ` +
+      `package-manager / compiler config the public-API analyzer does not signal; ` +
+      `gate-injected high-blast (deny-by-default, #422). A workflow can run code (e.g. ` +
+      `\`curl … | sh\`) that trips no sensitive term.`,
+  };
+}
+
 // ─── Hollow/stub findings over changed test files (INV-4 input) ──────────────
 
 const TEST_FILE_RE = /\.(test|spec)\.[cm]?[jt]sx?$/;
@@ -568,6 +666,15 @@ function main(): void {
     // high-blast `manifest_changed` signal so any such change holds for a human.
     const manifestSignal = detectManifestChange(changedFiles);
     if (manifestSignal) consequenceSignals.push(manifestSignal);
+    // #422 (same class as BLOCKER 1): CI/build-config boundary files
+    // (.github/workflows/*, .npmrc, .yarnrc*, tsconfig*.json, common CI-provider
+    // configs) are also non-code, high-consequence, and NOT signalled by the
+    // public-API analyzer. Inject a high-blast manifest_changed signal so any such
+    // change holds for a human. Without this a workflow whose only sink is
+    // `run: curl … | sh` (curl trips NO sensitive term) could reach main under
+    // auto-merge.
+    const boundarySignal = detectBoundaryChange(changedFiles);
+    if (boundarySignal) consequenceSignals.push(boundarySignal);
     const hollowFindings = buildHollowFindings(changedFiles);
 
     // 3. Pure decision. The prover result is passed separately and OVERRIDES any
