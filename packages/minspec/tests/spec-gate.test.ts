@@ -117,18 +117,34 @@ function phasesFor(status: string): string {
   return 'specify: done\n  clarify: skipped\n  plan: in-progress\n  tasks: pending\n  implement: pending';
 }
 
-function writeSpecIn(root: string, id: string, tier: string, status: string): string {
+/**
+ * Write a flat spec doc. `implementsList` (optional) becomes a structured
+ * `implements:` frontmatter list — the source files the spec declares as its impl
+ * targets. Under #426 / DR-047 §3 (doc-before-CODE) the gate's owned set is EXACTLY
+ * that declared impl code: it blocks those files while the spec is unapproved, and
+ * NOTHING else — not the spec's own doc, not unrelated source. So a test that means
+ * to exercise the gate blocking a source edit must DECLARE that source file here;
+ * an undeclared file is (correctly) never gated.
+ */
+function writeSpecIn(
+  root: string,
+  id: string,
+  tier: string,
+  status: string,
+  implementsList: string[] = [],
+): string {
   const p = path.join(root, 'specs', `${id}-x.md`);
   fs.mkdirSync(path.dirname(p), { recursive: true });
+  const impl = implementsList.length ? `implements: [${implementsList.join(', ')}]\n` : '';
   fs.writeFileSync(
     p,
-    `---\nid: ${id}\ntitle: X\ntier: ${tier}\nstatus: ${status}\ncreated: 2026-05-30\nphases:\n  ${phasesFor(status)}\n---\n# ${id}\nbody\n`,
+    `---\nid: ${id}\ntitle: X\ntier: ${tier}\nstatus: ${status}\ncreated: 2026-05-30\n${impl}phases:\n  ${phasesFor(status)}\n---\n# ${id}\nbody\n`,
   );
   return p;
 }
 
-function writeSpec(id: string, tier: string, status: string): string {
-  return writeSpecIn(ws, id, tier, status);
+function writeSpec(id: string, tier: string, status: string, implementsList: string[] = []): string {
+  return writeSpecIn(ws, id, tier, status, implementsList);
 }
 
 /**
@@ -184,21 +200,26 @@ describe('spec-gate.sh', () => {
     expect(runGate(editEnvelope('src/app.ts')).decision).toBe('allow');
   });
 
-  it('DENIES source edits when a T3/T4 implementing spec is unapproved', () => {
-    writeSpec('SPEC-007', 'T3', 'implementing');
+  it('DENIES edits to a spec-DECLARED impl file when the spec is unapproved', () => {
+    // #426 / DR-047 §3: the gate blocks the impl CODE the spec declares, not
+    // unrelated source. SPEC-007 declares src/app.ts as its impl target.
+    writeSpec('SPEC-007', 'T3', 'implementing', ['src/app.ts']);
     const r = runGate(editEnvelope('src/app.ts'));
     expect(r.decision).toBe('deny');
     expect(r.raw).toContain('SPEC-007');
+    // #422 unblock: a source file the spec does NOT declare stays editable — the
+    // gate is scoped to declared impl code, never a repo-wide freeze.
+    expect(runGate(editEnvelope('src/unrelated.ts')).decision).toBe('allow');
   });
 
-  it('allows source edits once the spec is approved (canonical hash matches)', () => {
-    const sp = writeSpec('SPEC-007', 'T3', 'implementing');
+  it('allows edits to a spec-DECLARED impl file once the spec is approved (canonical hash matches)', () => {
+    const sp = writeSpec('SPEC-007', 'T3', 'implementing', ['src/app.ts']);
     approve(sp, 'T3');
     expect(runGate(editEnvelope('src/app.ts')).decision).toBe('allow');
   });
 
   it('a lifecycle-only edit (status flip) keeps approval — canonical hash unchanged', () => {
-    const sp = writeSpec('SPEC-007', 'T3', 'implementing');
+    const sp = writeSpec('SPEC-007', 'T3', 'implementing', ['src/app.ts']);
     approve(sp, 'T3');
     // Edit ONLY the literal status line — canonical hash excludes it, so approval
     // survives and the gate still allows.
@@ -207,8 +228,8 @@ describe('spec-gate.sh', () => {
     expect(runGate(editEnvelope('src/app.ts')).decision).toBe('allow');
   });
 
-  it('DENIES again (stale) when the spec BODY is edited after approval', () => {
-    const sp = writeSpec('SPEC-007', 'T3', 'implementing');
+  it('DENIES again (stale) a declared impl file when the spec BODY is edited after approval', () => {
+    const sp = writeSpec('SPEC-007', 'T3', 'implementing', ['src/app.ts']);
     approve(sp, 'T3');
     fs.appendFileSync(sp, '\nedited after approval\n');
     const r = runGate(editEnvelope('src/app.ts'));
@@ -217,7 +238,9 @@ describe('spec-gate.sh', () => {
   });
 
   it('a migrated:true sidecar ALLOWS in the WARN phase but surfaces a re-approve note', () => {
-    const sp = writeSpec('SPEC-007', 'T3', 'implementing');
+    // The WARN note is scoped like the block: it surfaces when the edited file is
+    // in the migrated spec's owned (declared-impl) set. SPEC-007 declares src/app.ts.
+    const sp = writeSpec('SPEC-007', 'T3', 'implementing', ['src/app.ts']);
     approve(sp, 'T3', /* migrated */ true);
     const r = runGate(editEnvelope('src/app.ts'));
     expect(r.decision).toBe('allow');
@@ -225,7 +248,8 @@ describe('spec-gate.sh', () => {
   });
 
   it('kill-switch MINSPEC_GATE_OFF=1 disables the gate', () => {
-    writeSpec('SPEC-007', 'T3', 'implementing');
+    // Declares src/app.ts so the gate WOULD deny without the kill-switch.
+    writeSpec('SPEC-007', 'T3', 'implementing', ['src/app.ts']);
     const r = runGate(editEnvelope('src/app.ts'), { MINSPEC_GATE_OFF: '1' });
     expect(r.decision).toBeNull(); // empty output = allow
     expect(r.raw).toBe('');
@@ -255,7 +279,7 @@ describe('spec-gate.sh', () => {
   });
 
   it('kill-switch bypass is audited to canonical .minspec/gate-bypass.log', () => {
-    writeSpec('SPEC-007', 'T3', 'implementing');
+    writeSpec('SPEC-007', 'T3', 'implementing', ['src/app.ts']);
     runGate(editEnvelope('src/app.ts'), { MINSPEC_GATE_OFF: '1' });
     const log = path.join(ws, '.minspec', 'gate-bypass.log');
     expect(fs.existsSync(log)).toBe(true);
@@ -275,7 +299,7 @@ describe('spec-gate.sh', () => {
     // SPEC-022 FR-1: the approvals/ tree is COMMITTED, so `git worktree add`
     // MATERIALISES the sidecar in the worktree. The gate reads it from the
     // worktree's own cwd — the load-bearing common-dir hop is gone.
-    const sp = writeSpec('SPEC-007', 'T3', 'implementing');
+    const sp = writeSpec('SPEC-007', 'T3', 'implementing', ['src/app.ts']);
     approve(sp, 'T3');
     // Commit the spec AND its committed sidecar so the worktree gets both.
     const gitOpts = { cwd: ws, env: gateEnv({}), stdio: 'ignore' as const };
