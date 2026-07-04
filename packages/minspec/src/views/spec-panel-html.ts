@@ -8,6 +8,7 @@ import type { ParsedSpec, TaskItem } from '../lib/spec';
 import type { Phase, Tier } from '../lib/config';
 import { PHASES } from '../lib/config';
 import type { ClassificationSignal } from '../lib/classifier';
+import { pickDrivingSignal } from '../lib/classifier';
 import type { TrustChartModel } from '@aiclarity/shared';
 import { renderTrustChart } from '@aiclarity/shared';
 
@@ -222,7 +223,7 @@ function getStatusLabel(status: string): string {
 }
 
 function getClassificationHtml(classification: ClassificationSummary): string {
-  const confidencePercent = Math.round(classification.confidence * 100);
+  const agreementPercent = Math.round(classification.confidence * 100);
   const signalsHtml = classification.signals.map(signal => {
     const value = typeof signal.value === 'boolean'
       ? (signal.value ? 'true' : 'false')
@@ -234,11 +235,25 @@ function getClassificationHtml(classification: ClassificationSummary): string {
     </tr>`;
   }).join('\n');
 
+  // Match the classify toast (#333, sibling #216 fix): name the driving signal
+  // and label the raw agreement fraction honestly. `classification.confidence`
+  // is atWinningTier/signals.length — share of signals at the winning tier, not
+  // a probability the tier is right. A high tier with a low % (e.g. "14%") read
+  // as a broken probability under the old "confidence" wording (#334).
+  const driver = pickDrivingSignal(classification);
+  const driverValue = driver
+    ? (typeof driver.value === 'boolean' ? (driver.value ? 'true' : 'false') : String(driver.value))
+    : null;
+  const driverHtml = driver
+    ? `<span class="driver" aria-label="set by ${escapeHtml(driver.name)} equals ${escapeHtml(driverValue!)}">set by ${escapeHtml(driver.name)}=${escapeHtml(driverValue!)}</span>`
+    : '';
+
   return `<section class="classification" aria-label="Classification results">
     <h2>Classification</h2>
     <div class="classification-summary">
       <span class="tier-badge tier-${classification.tier.toLowerCase()}" aria-label="Classified as tier ${classification.tier}">${classification.tier}</span>
-      <span class="confidence" aria-label="${confidencePercent} percent confidence">${confidencePercent}% confidence</span>
+      ${driverHtml}
+      <span class="signal-agreement" title="Share of signals at the winning tier — not a probability the tier is right." aria-label="${agreementPercent} percent signal agreement, share of signals at the winning tier">${agreementPercent}% signal agreement</span>
     </div>
     <table class="signals-table" aria-label="Classification signals">
       <thead>
@@ -475,9 +490,15 @@ function getStyles(): string {
       margin-bottom: 10px;
     }
 
-    .confidence {
+    .signal-agreement {
       font-size: 0.9em;
       color: var(--vscode-descriptionForeground, #999);
+    }
+
+    .driver {
+      font-size: 0.9em;
+      color: var(--vscode-descriptionForeground, #999);
+      font-family: var(--vscode-editor-font-family, monospace);
     }
 
     .signals-table {
