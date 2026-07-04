@@ -400,7 +400,7 @@ DR-044 §2 put SealBox in a **private** repo, mirroring DR-027's ScroogeLLM spli
 *Status: accepted · Date: 2026-07-01*
 
 <!-- dr-summary:DR-050 auto=0000000000000000 -->
-Invariant #1 ("MinSpec makes zero network calls in its core path") and DR-004's Tier-0 rule do not prohibit shelling the user's own installed and authenticated CLI (gh, like git) when all three conditions hold: MinSpec opens no socket itself, every network-triggering action requires explicit per-action user consent, and a zero-network default fallback remains intact. Ratifies the Tier-0 boundary pre-committed by #365 (ruleset-advisor invariants.test.ts allowlist entry). Triggered by #356 + #365 review.
+Invariant #1 (zero network in core) and DR-004's Tier-0 rule do not prohibit shelling the user's own authenticated CLI (gh, like git) when three conditions hold: MinSpec opens no socket itself, a zero-network fallback remains intact, and mutating/egressing actions sit behind explicit per-action user consent. Amended 2026-07-01: an autonomous read-only config probe (a gh api GET of the repo's own rulesets) may run without a prior consent toast; only the mutating create is consent-gated. Ratifies the Tier-0 boundary pre-committed by #365 (ruleset-advisor invariants.test.ts allowlist entry).
 <!-- /dr-summary:DR-050 -->
 
 ## [DR-051 — Artifact-class branch policy — approvables live on main; only code isolates in worktrees; approval state is the committed hash-matched sidecar, never git staging](DR-051.md)
