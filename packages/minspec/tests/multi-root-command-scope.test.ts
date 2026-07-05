@@ -60,7 +60,9 @@ vi.mock('../src/views/spec-tree-provider', () => ({
 }));
 vi.mock('../src/lib/spec', () => ({
   readSpecFile: vi.fn(),
-  setSpecStatus: vi.fn(),
+  // approveSpecCommand's status/phases seam is advanceSpecToImplementing (#148),
+  // not raw setSpecStatus — mock the seam the command actually calls.
+  advanceSpecToImplementing: vi.fn(),
 }));
 vi.mock('../src/lib/config', async (importOriginal) => ({
   ...(await importOriginal()),

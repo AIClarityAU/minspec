@@ -214,4 +214,40 @@ phases:
     expect(parsed.frontmatter.status).toBe('implementing');
     expect(getSpecStatus(parsed.frontmatter.phases)).toBe('implementing');
   });
+
+  // ─── #148 MAJOR (degenerate block). A phases block carrying only an early-band
+  //     line (e.g. `specify: in-progress`, no plan/tasks/implement) is the one
+  //     shape the earlier fix reintroduced the desync on: `parseSpec` materializes
+  //     the absent implementing-band phases to `pending` in memory, so the target
+  //     derives `implementing`; but `setSpecPhases` only rewrites lines that
+  //     physically exist, so it CANNOT persist an implementing-band marker, and a
+  //     re-read derives `specifying`. Pre-fix, advanceSpecToImplementing wrote
+  //     `status: implementing` over bytes that re-derive `specifying` — the exact
+  //     #148 divergence — with no gate. This T3 pins the gate.
+  it('rejects a degenerate phases block instead of writing a self-contradicting file (#148 MAJOR)', () => {
+    const p = write(
+      'SPEC-205.md',
+      `---
+id: SPEC-205
+status: specifying
+tier: T3
+phases:
+  specify: in-progress
+---
+
+# Title
+`,
+    );
+    // The advance is un-realizable without desync, so it is REJECTED (the gate) —
+    // NOT silently written as a status the bytes won't reproduce. Pre-fix this did
+    // not throw (it returned 'implementing'), so this expectation was red.
+    expect(() => advanceSpecToImplementing(p)).toThrow(/implementing-band|desync|disagree/i);
+
+    // THE INVARIANT, whatever the outcome: the persisted `status:` line equals the
+    // status its persisted `phases:` map derives — the file is never left desynced.
+    // Pre-fix the bytes read `status: implementing` while the phases derived
+    // `specifying`, so this too was red.
+    const after = parseSpec(fs.readFileSync(p, 'utf-8')).frontmatter;
+    expect(after.status).toBe(getSpecStatus(after.phases));
+  });
 });
