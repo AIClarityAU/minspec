@@ -33,9 +33,16 @@
 5. Sub-issues (if created) each have `role:X` + `agent-ready` labels
 6. Issue comment posted with design summary and links to artifacts
 
-## Future
+## Provenance
 
-Will inherit from `agency-agents` shared role definitions when that project is ready.
+Vendored reference base (not a live merge — see `scripts/roles/vendor/README.md`):
+[`engineering-software-architect.md`](vendor/agency-agents/engineering/engineering-software-architect.md)
+and [`engineering-backend-architect.md`](vendor/agency-agents/engineering/engineering-backend-architect.md)
+from [msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents) (MIT),
+pinned per `scripts/roles/vendor/agency-agents.lock.json` (#230/#232 — two candidates,
+neither yet picked as canonical). This file's MinSpec-specific invariants (CLAUDE.md
+Invariants, the DR/spec dedup-search rule, sub-issue contract requirements) are
+hand-authored and are not overwritten by a sync — see `scripts/sync-agency-agents.sh`.
 
 ## Escalation
 

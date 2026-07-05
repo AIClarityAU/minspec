@@ -29,9 +29,15 @@ None. This role is read-only.
 4. Commit messages follow conventional format
 5. PR review submitted via `gh pr review` with approve/request-changes
 
-## Future
+## Provenance
 
-Will inherit from `agency-agents` shared role definitions when that project is ready.
+Vendored reference base (not a live merge — see `scripts/roles/vendor/README.md`):
+[`engineering-code-reviewer.md`](vendor/agency-agents/engineering/engineering-code-reviewer.md)
+from [msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents) (MIT),
+pinned per `scripts/roles/vendor/agency-agents.lock.json` (#230/#232, high confidence
+match). This file's MinSpec-specific invariants (`gh pr review` submission, secrets/
+commit-message checks) are hand-authored and are not overwritten by a sync — see
+`scripts/sync-agency-agents.sh`.
 
 ## Escalation
 

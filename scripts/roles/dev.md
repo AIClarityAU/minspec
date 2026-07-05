@@ -57,9 +57,16 @@ pre-fix/base code and saw it FAIL; `regressionProvenHeadGreen` true ONLY if you
 ran it against head and saw it PASS. This file is not a substitute for the
 `.agent-summary.md` prose summary.
 
-## Future
+## Provenance
 
-Will inherit from `agency-agents` shared role definitions when that project is ready.
+Vendored reference base (not a live merge — see `scripts/roles/vendor/README.md`):
+[`engineering-senior-developer.md`](vendor/agency-agents/engineering/engineering-senior-developer.md)
+and [`engineering-minimal-change-engineer.md`](vendor/agency-agents/engineering/engineering-minimal-change-engineer.md)
+from [msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents) (MIT),
+pinned per `scripts/roles/vendor/agency-agents.lock.json` (#230/#232 — two candidates,
+neither yet picked as canonical). This file's MinSpec-specific invariants (RCDD, the
+regression-proof fields, file allowlist discipline) are hand-authored and are not
+overwritten by a sync — see `scripts/sync-agency-agents.sh`.
 
 ## Escalation
 

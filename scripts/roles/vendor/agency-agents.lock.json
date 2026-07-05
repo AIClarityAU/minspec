@@ -1,0 +1,29 @@
+{
+  "repo": "msitarzewski/agency-agents",
+  "license": "MIT",
+  "pinnedCommit": "217a63b8b6b6ea5752fd436a05996c796ba0ec66",
+  "pinnedAt": "2026-07-05",
+  "reviewedBy": "unreviewed — re-run reviewed a fresh pin; update this field once a human has diffed scripts/roles/vendor/",
+  "mapping": {
+    "reviewer": [
+      "engineering/engineering-code-reviewer.md"
+    ],
+    "security": [
+      "security/security-appsec-engineer.md"
+    ],
+    "architect": [
+      "engineering/engineering-software-architect.md",
+      "engineering/engineering-backend-architect.md"
+    ],
+    "dev": [
+      "engineering/engineering-senior-developer.md",
+      "engineering/engineering-minimal-change-engineer.md"
+    ],
+    "triage": []
+  },
+  "notes": [
+    "architect and dev each vendor TWO upstream candidates per #232 ('med confidence' — which is canonical was left undecided by that decision). Both are pinned here; picking one (or blending) is a separate follow-up when a human/agent actually authors the overlay merge for that role.",
+    "triage has no clean upstream match per #232 — stays fully bespoke, no vendor file, nothing to sync.",
+    "This is a VENDORED REFERENCE COPY, not a live dependency. scripts/roles/{architect,dev,reviewer,security,triage}.md are hand-authored MinSpec overlays and are NOT auto-merged against these files — see scripts/roles/vendor/README.md."
+  ]
+}
