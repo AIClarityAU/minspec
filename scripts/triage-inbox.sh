@@ -13,7 +13,7 @@
 
 set -euo pipefail
 
-REPO="harvest316/minspec"
+REPO="AIClarityAU/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROLES_DIR="${SCRIPT_DIR}/roles"
 DECIDE="${SCRIPT_DIR}/triage-decide.sh"

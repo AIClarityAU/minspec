@@ -100,7 +100,7 @@ function resolveNode(kind: ApprovableKind, fsPath: string): ArtifactNode | undef
   // Multi-root safe: the artifact's own folder is the root. `folderForFile`
   // maps the path to whichever workspace folder actually contains it, so an
   // approvable in folder [1] resolves against folder [1]'s tree, not [0]'s
-  // (harvest316/minspec#373, deferred out of #363 / PR #370).
+  // (AIClarityAU/minspec#373, deferred out of #363 / PR #370).
   const root = folderForFile(fsPath);
   if (!root) return undefined;
   const target = path.resolve(fsPath);
@@ -202,7 +202,7 @@ async function pickRecentApprovable(): Promise<{ outcome: 'none' | 'picked' | 'd
   // never a workspace-wide [0]. Both `resolveNode` (artifact match) and the
   // pending-filter's approval lookup are folder-scoped, so recents in folder
   // [1] survive when the previous active editor was in folder [0]
-  // (harvest316/minspec#373; previously used [0]).
+  // (AIClarityAU/minspec#373; previously used [0]).
   // `target` is a nested property (not spread) so it never collides with
   // QuickPickItem's own `kind` (QuickPickItemKind).
   type Item = vscode.QuickPickItem & { target: RecentTarget; fsPath: string };

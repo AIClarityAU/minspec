@@ -38,7 +38,7 @@ export async function parkCommand(opts: ParkCommandOptions = {}): Promise<void> 
 
   // Multi-root safe: parking creates an issue on THIS folder's git remote
   // (or writes THIS folder's parking-lot.md). Folder [0] would silently file
-  // against the wrong project (harvest316/minspec#373).
+  // against the wrong project (AIClarityAU/minspec#373).
   const folder = await resolveTargetFolder();
   if (!folder) return;
 

@@ -13,10 +13,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "https://github.com/harvest316/minspec"
+    "url": "https://github.com/AIClarityAU/minspec"
   },
   "bugs": {
-    "url": "https://github.com/harvest316/minspec/issues"
+    "url": "https://github.com/AIClarityAU/minspec/issues"
   },
   "preview": false,
   "homepage": "https://minspec.dev",
@@ -40,8 +40,8 @@
   ],
   "badges": [
     {
-      "url": "https://github.com/harvest316/minspec/actions/workflows/ci.yml/badge.svg",
-      "href": "https://github.com/harvest316/minspec/actions/workflows/ci.yml",
+      "url": "https://github.com/AIClarityAU/minspec/actions/workflows/ci.yml/badge.svg",
+      "href": "https://github.com/AIClarityAU/minspec/actions/workflows/ci.yml",
       "description": "CI Status"
     },
     {

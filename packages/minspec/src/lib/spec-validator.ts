@@ -351,7 +351,7 @@ const ASPECT_RULES: AspectRule[] = [
 ];
 
 /**
- * Shift-left guidance (harvest316/minspec#104): the per-aspect artifact
+ * Shift-left guidance (AIClarityAU/minspec#104): the per-aspect artifact
  * requirements the approve gate enforces, exported so generation-time skill
  * prompts (`slash-commands.ts`) can surface the SAME requirements up front. It is
  * derived from `ASPECT_RULES` here — the gate's own source of truth — so the

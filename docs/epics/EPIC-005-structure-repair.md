@@ -48,7 +48,7 @@ change that would alter content *outside* a marker still asks first.
 - **Code:** `packages/minspec/src/lib/auto-bootstrap.ts` (`isMinspecInitialized`,
   `scaffold`, `generateHarnessFiles`).
 - **Issues:** label `epic:structure-repair`.
-  [#39](https://github.com/harvest316/minspec/issues/39) — corrupt-artifact
+  [#39](https://github.com/AIClarityAU/minspec/issues/39) — corrupt-artifact
   repair (out of scope; additive/missing-only here).
-  [#40](https://github.com/harvest316/minspec/issues/40) — lint for dangling
+  [#40](https://github.com/AIClarityAU/minspec/issues/40) — lint for dangling
   "parked as a separate issue" references with no link.

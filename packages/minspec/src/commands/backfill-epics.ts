@@ -17,7 +17,7 @@ export interface BackfillOptions {
   /**
    * AI consent already obtained upstream. The bootstrap offer's toast promises
    * "AI-enhanced if Claude Code is installed", so clicking it IS consent — the
-   * command must not re-ask (harvest316/minspec#213).
+   * command must not re-ask (AIClarityAU/minspec#213).
    */
   readonly aiConsent?: boolean;
 }
@@ -39,7 +39,7 @@ async function enableAlwaysUseAi(): Promise<void> {
 }
 
 /**
- * Rename-in-flow (harvest316/minspec#218). A keyboard single-select loop layered
+ * Rename-in-flow (AIClarityAU/minspec#218). A keyboard single-select loop layered
  * on top of the drop step: pick a NEW proposed epic, edit its title in an
  * InputBox (pre-filled, two-key edit), and the slug is re-derived via the shared
  * `slugify`. Every mapping that pointed at the old slug is repointed at the new
@@ -134,9 +134,9 @@ async function renameEpicsInFlow(
 
 /**
  * Per-item review: a keyboard QuickPick of every proposed epic + mapping, all
- * pre-checked. Uncheck to drop; Enter applies the rest (harvest316/minspec#213).
+ * pre-checked. Uncheck to drop; Enter applies the rest (AIClarityAU/minspec#213).
  * After the drop step, a rename-in-flow loop lets you edit a kept epic's
- * title/slug (harvest316/minspec#218). Returns the filtered proposal, or
+ * title/slug (AIClarityAU/minspec#218). Returns the filtered proposal, or
  * `undefined` if the drop picker was dismissed (the caller then keeps the
  * un-tweaked proposal). No markdown round-trip parsing — the proposal object is
  * the source of truth.
@@ -209,7 +209,7 @@ async function tweakProposal(
  * "Always", or asked once — falls back to heuristic on any failure). Opens the
  * proposal so it stays visible, then a NON-modal toast (Apply / Tweak / Cancel)
  * — the proposal is readable while you decide, and Tweak filters it per-item.
- * Never writes without confirmation (harvest316/minspec#213).
+ * Never writes without confirmation (AIClarityAU/minspec#213).
  */
 export async function backfillEpicsCommand(
   folderArg?: string,

@@ -7,7 +7,7 @@ name: Deploy sites
 # Each site maps 1:1 to a CF Pages project:
 #   sites/minspec.dev     -> minspec-dev    (minspec.dev)
 #
-# scroogellm.com moved to the private harvest316/scroogellm repo, which deploys
+# scroogellm.com moved to the private AIClarityAU/scroogellm repo, which deploys
 # it from its own deploy-site.yml. CF Pages only uploads changed files.
 
 on:

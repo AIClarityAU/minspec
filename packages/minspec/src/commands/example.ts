@@ -11,7 +11,7 @@ import { resolveTargetFolder } from '../lib/resolve-folder';
 export async function generateExampleCommand(): Promise<void> {
   // User-invoked write command → interactive resolver. Multi-root safe: targets
   // the active editor's folder (or prompts), not a blind `workspaceFolders?.[0]`
-  // (harvest316/minspec#123, #153). It surfaces the "no folder open" error and
+  // (AIClarityAU/minspec#123, #153). It surfaces the "no folder open" error and
   // returns undefined on no-folder / cancelled pick.
   const folder = await resolveTargetFolder();
   if (!folder) return;
@@ -37,7 +37,7 @@ export async function generateExampleCommand(): Promise<void> {
   fs.mkdirSync(specsDir, { recursive: true });
   // Stamp `created` at CALL time. Building the content here (not as a
   // module-level const) keeps the date current for every invocation instead of
-  // freezing it to extension-activation time (harvest316/minspec#153).
+  // freezing it to extension-activation time (AIClarityAU/minspec#153).
   fs.writeFileSync(examplePath, buildExampleSpecContent());
 
   const doc = await vscode.workspace.openTextDocument(examplePath);
@@ -52,7 +52,7 @@ export async function generateExampleCommand(): Promise<void> {
  * Build the example spec body. A function (not a module-level const) so the
  * `created:` date is evaluated when the command runs — each generated example
  * stamps the current date rather than the extension-activation date
- * (harvest316/minspec#153).
+ * (AIClarityAU/minspec#153).
  */
 function buildExampleSpecContent(): string {
   return `---

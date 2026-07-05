@@ -8,7 +8,7 @@ import { pickFolderPath } from './workspace';
  * Surfaces the "no folder open" error itself. Returns undefined on no-folder OR
  * on a cancelled pick — callers should `if (!folder) return;` with no extra
  * message. Replaces `workspaceFolders?.[0]`, which silently targeted the first
- * folder in a multi-root workspace (harvest316/minspec#123).
+ * folder in a multi-root workspace (AIClarityAU/minspec#123).
  */
 export async function resolveTargetFolder(): Promise<string | undefined> {
   const folders = vscode.workspace.workspaceFolders ?? [];
@@ -43,7 +43,7 @@ export async function resolveTargetFolder(): Promise<string | undefined> {
  *
  * Replaces the bare `workspaceFolders?.[0]` activation sites that silently
  * targeted the first folder regardless of the active editor
- * (harvest316/minspec#123).
+ * (AIClarityAU/minspec#123).
  */
 export function resolveTargetFolderNonInteractive(): string {
   const folders = vscode.workspace.workspaceFolders ?? [];

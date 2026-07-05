@@ -37,9 +37,9 @@ Before starting work, classify the task:
 
 ## Project Identity
 
-- Repo: `harvest316/MinSpecPro`
+- Repo: `AIClarityAU/minspec`
 - Publisher: `aiclarity`
-- Two VS Code extensions in `packages/minspec` and `packages/scroogellm`
+- `packages/minspec` extension in this repo; ScroogeLLM split out to `AIClarityAU/scroogellm` (DR-027)
 - Shared code in `packages/shared`
 
 ## Invariants (Non-Negotiable)

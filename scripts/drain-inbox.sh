@@ -18,7 +18,7 @@
 
 set -euo pipefail
 
-REPO="harvest316/minspec"
+REPO="AIClarityAU/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DISPATCH="${SCRIPT_DIR}/dispatch-issue.sh"
 TRIAGE="${SCRIPT_DIR}/triage-inbox.sh"

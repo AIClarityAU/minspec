@@ -8,7 +8,7 @@
 set -euo pipefail
 
 ISSUE="${1:?Usage: dispatch-issue.sh <issue-number> [--role <role>]}"
-REPO="harvest316/minspec"
+REPO="AIClarityAU/minspec"
 WORKTREE_BASE="/tmp/minspec-agent"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROLES_DIR="${SCRIPT_DIR}/roles"

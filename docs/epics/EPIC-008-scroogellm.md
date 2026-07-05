@@ -9,7 +9,7 @@ order: 8
 # EPIC-008: ScroogeLLM Proxy — relocated
 
 > **Tombstone.** ScroogeLLM (the cost-optimisation proxy + VS Code extension) is
-> developed in the private `harvest316/scroogellm` repository per
+> developed in the private `AIClarityAU/scroogellm` repository per
 > [DR-027](../decisions/DR-027.md) — its design specs and research are not public.
 > This stub preserves the epic slot so the `epic:scroogellm` grouping reference and
 > `EPIC-008` links resolve.

@@ -8,7 +8,7 @@
  *    must prompt with a folder picker.
  *
  * Replaces the legacy `workspaceFolders?.[0]` that silently targeted the first
- * folder in a multi-root workspace (harvest316/minspec#123).
+ * folder in a multi-root workspace (AIClarityAU/minspec#123).
  */
 export function pickFolderPath(
   folderPaths: readonly string[],

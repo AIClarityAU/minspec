@@ -24,7 +24,7 @@ notice informs you that:
   <https://mozilla.org/MPL/2.0/>.
 - **Where to get the source (MPL-2.0 §3.2):** the Source Code Form of
   `@aiclarity/shared` is published at
-  <https://github.com/harvest316/minspec>, under `packages/shared/`.
+  <https://github.com/AIClarityAU/minspec>, under `packages/shared/`.
 
 MPL-2.0 is a file-level (weak) copyleft license: modifications to the MPL-2.0
 source files of `@aiclarity/shared` must be made available under the MPL-2.0,
