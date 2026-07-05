@@ -154,6 +154,34 @@ describe('slash-commands', () => {
       expect(second).toBe(first);
     });
 
+    it('collapses N duplicate blocks to exactly one (self-healing invariant)', () => {
+      const block = buildAgentsSlashCommandSection();
+      // Simulate scroogellm's committed 6× accumulation
+      const seeded = '# Agents\n\n' + [block, block, block].join('\n\n') + '\n';
+      const result = injectAgentsSlashSection(seeded);
+      const startCount = result.split(AGENTS_SLASH_SECTION_START).length - 1;
+      const endCount = result.split(AGENTS_SLASH_SECTION_END).length - 1;
+      expect(startCount).toBe(1);
+      expect(endCount).toBe(1);
+    });
+
+    it('collapses duplicates to exactly one even across repeated injections', () => {
+      const original = '# Agents\n';
+      const first = injectAgentsSlashSection(original);
+      const doubled = first + '\n' + first;
+      const healed = injectAgentsSlashSection(doubled);
+      expect(healed.split(AGENTS_SLASH_SECTION_START).length - 1).toBe(1);
+      expect(healed.split(AGENTS_SLASH_SECTION_END).length - 1).toBe(1);
+    });
+
+    it('removes orphaned start marker without matching end', () => {
+      const withOrphanedStart = '# Agents\n\n' + AGENTS_SLASH_SECTION_START + '\norphan\n';
+      const result = injectAgentsSlashSection(withOrphanedStart);
+      // Exactly one complete managed block in output (the newly appended one)
+      expect(result.split(AGENTS_SLASH_SECTION_START).length - 1).toBe(1);
+      expect(result.split(AGENTS_SLASH_SECTION_END).length - 1).toBe(1);
+    });
+
     it('handles empty input', () => {
       const updated = injectAgentsSlashSection('');
       expect(updated).toContain(AGENTS_SLASH_SECTION_START);

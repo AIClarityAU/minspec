@@ -192,19 +192,26 @@ export function buildAgentsSlashCommandSection(): string {
 /**
  * Inject or replace the slash-command section in AGENTS.md content.
  * Content outside the markers is preserved verbatim.
+ *
+ * Idempotent and self-healing: removes ALL existing start..end blocks (handles
+ * duplicates accumulated by previous non-idempotent versions), strips any
+ * orphaned markers, then appends exactly one canonical block.
  */
 export function injectAgentsSlashSection(fileContent: string): string {
   const block = buildAgentsSlashCommandSection();
-  const startIdx = fileContent.indexOf(AGENTS_SLASH_SECTION_START);
-  const endIdx = fileContent.indexOf(AGENTS_SLASH_SECTION_END);
 
-  if (startIdx !== -1 && endIdx !== -1) {
-    const before = fileContent.slice(0, startIdx);
-    const after = fileContent.slice(endIdx + AGENTS_SLASH_SECTION_END.length);
-    return before + block + after;
-  }
+  const escapeRe = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const startRe = escapeRe(AGENTS_SLASH_SECTION_START);
+  const endRe = escapeRe(AGENTS_SLASH_SECTION_END);
 
-  const trimmed = fileContent.trimEnd();
+  // Remove all complete start..end blocks (non-greedy — handles N duplicates).
+  let stripped = fileContent.replace(new RegExp(`${startRe}[\\s\\S]*?${endRe}`, 'g'), '');
+  // Remove any orphaned markers not consumed by the block pattern above.
+  stripped = stripped
+    .replace(new RegExp(startRe, 'g'), '')
+    .replace(new RegExp(endRe, 'g'), '');
+
+  const trimmed = stripped.trimEnd();
   if (trimmed.length === 0) {
     return block + '\n';
   }
