@@ -5,6 +5,9 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   validate:
     name: MinSpec SDD validation
@@ -20,14 +23,15 @@ jobs:
 
       - name: Run MinSpec validation
         run: |
-          # @aiclarity/minspec-validator degrades gracefully when not yet published.
-          # Once the package is live on npm this step runs the real validator; until
-          # then it exits 0 so CI stays green (frontmatter is still gated by the
-          # pre-commit hook and the lint job).
-          if npx --yes @aiclarity/minspec-validator 2>&1; then
-            echo "minspec-validator ran successfully."
+          # @aiclarity/minspec-validator is not yet published. --no-install is
+          # deliberate: it NEVER fetches from the registry, so an unclaimed scope
+          # can't be dependency-confusion-hijacked into running in CI. Once the
+          # package is a real devDependency (installed by an npm-install step
+          # added alongside this), this branch runs it for real and its exit
+          # code gates the job — no silent pass-through of a genuine failure.
+          if npx --no-install @aiclarity/minspec-validator --version >/dev/null 2>&1; then
+            npx --no-install @aiclarity/minspec-validator
           else
-            echo "minspec-validator not published yet — skipping (frontmatter is validated by the lint job / local hooks)"
-            exit 0
+            echo "minspec-validator not installed — skipping (frontmatter is validated by the lint job / local hooks)"
           fi
 # <<< minspec:managed:validate-workflow <<<
