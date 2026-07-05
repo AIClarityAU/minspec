@@ -30,11 +30,14 @@
 #
 # HONEST SCOPE — do NOT overclaim (see dispatch-issue.sh ALLOWED_TOOLS note):
 # this closes the WRITE-TO-PUBLISHED channel only — a secret cannot be smuggled into
-# the diff/summary/signals the parent is about to publish. It does NOT close
-# arbitrary NETWORK egress DURING the agent run: the agent may edit test files and
-# `npm test` executes them, so a determined injection could exfiltrate over the
-# network at test time. That residual is inherent to running the project's own build
-# and is out of this guard's scope.
+# the material the parent publishes: the committed diff, the commit MESSAGES (`git
+# push` carries them and the PR shows them — added after the #479 review flagged
+# them as an unscanned exfil path), `.agent-summary.md`, and `.review-signals.json`.
+# The scanner itself is content-agnostic (scans whatever paths it is given); the
+# caller (run_egress_guard) decides that set. It does NOT close arbitrary NETWORK
+# egress DURING the agent run: the agent may edit test files and `npm test` executes
+# them, so a determined injection could exfiltrate over the network at test time.
+# That residual is inherent to running the project's own build and is out of scope.
 #
 # PURE + no side effects: reads only the given files, writes only stdout, makes no
 # network/gh/git call — so it is unit-testable in isolation (tests/egress-scan.test.ts)

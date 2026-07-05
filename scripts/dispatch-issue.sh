@@ -299,16 +299,39 @@ run_reviewer_stage() {
 # project's own build and is out of this guard's scope.
 run_egress_guard() {
   local scan="${SCRIPT_DIR}/egress-scan.sh"
-  local diff_dump="${WORKTREE}/.egress-diff.txt"
   local -a targets=()
+
+  # Scratch dir OUTSIDE the worktree for the dumps we materialise — so we never
+  # leave a stray `.egress-diff.txt` in the worktree a human later inspects
+  # (#479 review, LOW). Removed before we return, on every path.
+  local scan_tmp
+  if ! scan_tmp=$(mktemp -d 2>/dev/null); then
+    echo "BLOCK: mktemp failed — failing closed"
+    return 1
+  fi
 
   # The committed diff we're about to push/PR (three-dot: what this branch adds).
   # If it can't even be computed we cannot prove it clean → fail closed.
+  local diff_dump="${scan_tmp}/diff.txt"
   if ! git -C "$WORKTREE" diff origin/main...HEAD > "$diff_dump" 2>/dev/null; then
+    rm -rf "$scan_tmp"
     echo "BLOCK: could not compute the publish diff (git diff failed) — failing closed"
     return 1
   fi
   targets+=("$diff_dump")
+
+  # Commit MESSAGES are published too — `git push` carries them and the PR displays
+  # them — so a prompt-injected agent could exfiltrate a secret via
+  # `git commit -m "<secret>"`, which scanning only the diff would miss (#479 review,
+  # MAJOR: the write-to-published channel includes commit messages, not just file
+  # content). Scan every commit body this branch adds. Uncomputable → fail closed.
+  local msg_dump="${scan_tmp}/commit-messages.txt"
+  if ! git -C "$WORKTREE" log origin/main..HEAD --format=%B > "$msg_dump" 2>/dev/null; then
+    rm -rf "$scan_tmp"
+    echo "BLOCK: could not read commit messages (git log failed) — failing closed"
+    return 1
+  fi
+  targets+=("$msg_dump")
 
   # The two artefacts the parent publishes to the issue, WHEN the agent wrote them
   # (both are optional — only scan what exists, so a legit run that skips them is
@@ -321,6 +344,9 @@ run_egress_guard() {
   # hit / unreadable / scanner error. Its exit code becomes ours; its stdout flows
   # to the caller so the block reason can be logged.
   "$scan" "${targets[@]}"
+  local rc=$?
+  rm -rf "$scan_tmp"
+  return "$rc"
 }
 
 # Quarantine path (#358): the guard tripped, so we publish NOTHING. Label the issue

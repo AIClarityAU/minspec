@@ -145,3 +145,41 @@ describe('egress-scan.sh — PASSES clean material, no false positives (#358)', 
     expect(r.blocked).toBe(false);
   });
 });
+
+describe('egress-scan.sh — commit messages are in scope (#479 review, MAJOR)', () => {
+  // run_egress_guard now dumps `git log origin/main..HEAD --format=%B` and scans it,
+  // because commit messages are published by `git push` and shown on the PR — a
+  // prompt-injected agent could exfiltrate via `git commit -m "<secret>"`. The
+  // scanner is content-agnostic, so a secret in a commit-message dump blocks exactly
+  // like one in the diff.
+  it('BLOCKS a secret smuggled into a commit-message body', () => {
+    const r = scan(fixture('commit-messages.txt',
+      'fix: legitimate subject line\n\nexfil sk-ant-api03-QwErTy0123456789abcdefZZ via the message\n'));
+    expect(r.blocked).toBe(true);
+    expect(r.out).not.toContain('QwErTy0123456789abcdefZZ');
+  });
+
+  it('a clean commit message → CLEAN', () => {
+    const r = scan(fixture('commit-messages.txt',
+      'fix(#302): reject nullish folder arg in the classify gate\n\nRoot cause: ...\n'));
+    expect(r.blocked).toBe(false);
+  });
+});
+
+describe('egress-scan.sh — documented false-positive is safe-direction (#479 review, LOW)', () => {
+  // The mixed-class high-entropy rule (upper+lower+digit, >=32 chars) can flag a long
+  // camelCase identifier that happens to contain a digit. This is a KNOWN false
+  // positive: it fails in the SAFE direction (quarantine → human review, never a
+  // silent publish) and matches the documented posture. Covered here so the behavior
+  // is intentional and regression-guarded rather than surprising.
+  it('a >=32-char camelCase identifier with a digit is flagged (safe direction)', () => {
+    const r = scan(fixture('g.diff',
+      '+  const someVeryLongDescriptiveVariableName2Value = compute();\n'));
+    expect(r.blocked).toBe(true);
+  });
+
+  it('a short/ordinary identifier with a digit is NOT flagged', () => {
+    const r = scan(fixture('h.diff', '+  const user2 = getUser();\n'));
+    expect(r.blocked).toBe(false);
+  });
+});
