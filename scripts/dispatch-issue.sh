@@ -249,8 +249,15 @@ run_reviewer_stage() {
   # channel). Run the rendered body through the same egress guard as the diff; on
   # ANY hit, withhold the body and post a neutral notice instead — never publish
   # unscanned agent output. Fail-closed: a scan error also withholds.
-  local rb_scan; rb_scan=$(mktemp 2>/dev/null) || rb_scan=""
-  if [[ -n "$rb_scan" ]]; then
+  local rb_scan
+  if ! rb_scan=$(mktemp 2>/dev/null); then
+    # FAIL CLOSED on mktemp failure — matching run_egress_guard. This scan is the
+    # ONLY guard on the reviewer-output publish channel; skipping it would publish
+    # `review_body` UNSCANNED, and a prompt-injected diff can steer the read-only
+    # reviewer into echoing a secret it Read. So a scratch-file failure withholds,
+    # never publishes (#479 review, MAJOR: the old `rb_scan=""` path failed open).
+    review_body=$'## Independent AI review — advisory (DR-033 §6)\n\n⚠️ The reviewer output was withheld: the pre-publish egress guard could not run (mktemp failed to create a scratch file). Failing closed — unscanned reviewer output is never published. A human should inspect the dispatch log before relying on this review. (#358/#479)'
+  else
     printf '%s' "$review_body" > "$rb_scan"
     if ! "${SCRIPT_DIR}/egress-scan.sh" "$rb_scan" >/dev/null 2>&1; then
       review_body=$'## Independent AI review — advisory (DR-033 §6)\n\n⚠️ The reviewer output was withheld: the pre-publish egress guard matched a secret/exfil marker in it (a prompt-injected diff may have steered the reviewer into echoing a secret). See the dispatch log; a human should inspect before relying on this review. (#479)'
