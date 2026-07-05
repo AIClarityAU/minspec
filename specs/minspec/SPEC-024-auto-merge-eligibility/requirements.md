@@ -11,7 +11,7 @@ relates_to: [SPEC-014, SPEC-012, SPEC-006]  # review-webview skim surface · nex
 # MinSpec — Auto-Merge Eligibility Gate (Requirements)
 
 **Date:** 2026-06-07
-**Status:** Implementing (SDD Implement phase — gate built & merged #412; retroactively approved 2026-07-05, see approvals sidecar. `done` gated on open acceptance holes #489/#490/#491/#466 + INV-7 keyboard.)
+**Status:** Implementing (SDD Implement phase — gate built & merged #412, AC backfilled #492. **Not yet Approved** — this T4 spec was implemented without ever going through the Approve step; a human must run the real Approve command before this coherence gap closes. `done` additionally gated on open acceptance holes #489/#490/#491/#466 + INV-7 keyboard.)
 **Decision:** [DR-033](../../../docs/decisions/DR-033.md) §3 (this spec is the *consumer* that decision describes but never had)
 **Triggered by:** [#199](https://github.com/harvest316/minspec/issues/199) — "nothing consumes the signals to skip the PR gate; this is the actual auto-approve on-switch."
 **Epic:** [EPIC-007 Agent Execute](../../../docs/epics/EPIC-007-agent-execute.md)
