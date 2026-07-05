@@ -625,3 +625,63 @@ describe('INV-CONSUME: next-task resolver is consumed from @aiclarity/shared', (
     expect(offenders).toEqual([]);
   });
 });
+
+// ─── INV-SHARD-ID: per-phase shard files in one spec dir share one id ────────
+
+describe('INV-SHARD-ID: spec shards in a directory carry a single id', () => {
+  const repoRoot = path.resolve(__dirname, '..', '..', '..');
+  const specsRoot = path.join(repoRoot, 'specs');
+  const runnable = fs.existsSync(specsRoot);
+
+  // Canonical per-phase shard filenames. When >1 of these live in one directory
+  // they are shards of the SAME spec, so listSpecs collapses them BY SHARED id
+  // (spec-tree-provider.ts). Divergent ids defeat the collapse and each shard
+  // surfaces as its own phantom spec — exactly how SPEC-007's design.md/tasks.md
+  // became phantom SPEC-008/SPEC-009 (#438). Body-only shards (plan.md/tasks.md
+  // in strict spec-kit layout) carry no frontmatter id and are ignored here; the
+  // guard only fires when two shards assert *different* ids.
+  const SHARD_NAMES = new Set(['requirements.md', 'spec.md', 'design.md', 'plan.md', 'tasks.md']);
+
+  // Pre-existing debt grandfathered until its own (reference-heavy) renumber lands.
+  // `specs/minspec` holds the core SDD spec split into requirements/design/tasks.md
+  // at the product root with divergent ids SPEC-001/002/003 — same class as #438
+  // but foundational ids referenced across approvals/graph/epics. Tracked in #441;
+  // remove this entry when #441 lands. New offenders still fail.
+  const KNOWN_MISNUMBERED = new Set(['specs/minspec']);
+
+  // Skipped in a published package where specs/ is absent — this is a repo
+  // integrity guard, run in CI against the real tree.
+  (runnable ? it : it.skip)('no spec directory mixes divergent ids across its shards', () => {
+    const offenders: { dir: string; ids: string[] }[] = [];
+
+    const walk = (dir: string): void => {
+      let entries: fs.Dirent[];
+      try {
+        entries = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return;
+      }
+      const shardIds = new Set<string>();
+      for (const e of entries) {
+        if (e.isFile() && SHARD_NAMES.has(e.name)) {
+          try {
+            const id = parseSpec(fs.readFileSync(path.join(dir, e.name), 'utf-8')).frontmatter.id;
+            if (id) shardIds.add(id);
+          } catch {
+            // unparseable shard — not this guard's concern
+          }
+        }
+      }
+      if (shardIds.size > 1) {
+        offenders.push({ dir: path.relative(repoRoot, dir), ids: [...shardIds].sort() });
+      }
+      for (const e of entries) {
+        if (e.isDirectory()) walk(path.join(dir, e.name));
+      }
+    };
+    walk(specsRoot);
+
+    const unexpected = offenders.filter((o) => !KNOWN_MISNUMBERED.has(o.dir));
+    expect(unexpected).toEqual([]);
+  });
+});
