@@ -243,6 +243,21 @@ run_reviewer_stage() {
   fi
   review_body=$(printf '%s\n\n_Reviewer agent is read-only and credential-free; verdict enforced by the deterministic fail-closed gate (`review-decide.sh`). Advisory only — the human holds the merge keystroke (never-wrong / HITL)._' "$review_body")
 
+  # The reviewer read the UNTRUSTED diff; a prompt-injected diff could steer the
+  # (read-only) reviewer into echoing a secret it read, which the parent would then
+  # publish in this review body (#479 review, MEDIUM — the reviewer-output publish
+  # channel). Run the rendered body through the same egress guard as the diff; on
+  # ANY hit, withhold the body and post a neutral notice instead — never publish
+  # unscanned agent output. Fail-closed: a scan error also withholds.
+  local rb_scan; rb_scan=$(mktemp 2>/dev/null) || rb_scan=""
+  if [[ -n "$rb_scan" ]]; then
+    printf '%s' "$review_body" > "$rb_scan"
+    if ! "${SCRIPT_DIR}/egress-scan.sh" "$rb_scan" >/dev/null 2>&1; then
+      review_body=$'## Independent AI review — advisory (DR-033 §6)\n\n⚠️ The reviewer output was withheld: the pre-publish egress guard matched a secret/exfil marker in it (a prompt-injected diff may have steered the reviewer into echoing a secret). See the dispatch log; a human should inspect before relying on this review. (#479)'
+    fi
+    rm -f "$rb_scan"
+  fi
+
   # 5. Ensure the ai-review:* labels exist (best-effort; exact vocab reused from
   #    .github/workflows/ready-to-merge.yml — do NOT invent new label names).
   gh label create "ai-review:pass"    --repo "$REPO" --color 0e8a16 --description "Independent AI review passed (advisory)" 2>/dev/null || true
@@ -310,15 +325,24 @@ run_egress_guard() {
     return 1
   fi
 
-  # The committed diff we're about to push/PR (three-dot: what this branch adds).
-  # If it can't even be computed we cannot prove it clean → fail closed.
-  local diff_dump="${scan_tmp}/diff.txt"
-  if ! git -C "$WORKTREE" diff origin/main...HEAD > "$diff_dump" 2>/dev/null; then
+  # Scan the ADDED lines of EVERY published commit, not the net three-dot diff:
+  # `git push` publishes the full branch history, so a secret added in one commit
+  # and removed in a later one is gone from the net diff yet still in the pushed
+  # history and the PR "Commits" view (#479 review, MAJOR — intermediate-commit
+  # bypass). `git log -p` walks every commit's patch; we keep only added-content
+  # lines (`^+`, minus the `+++` file headers) so we neither miss an intermediate
+  # `+secret` nor re-scan removed/context lines that merely echo main's content.
+  local patches="${scan_tmp}/patches.txt"
+  if ! git -C "$WORKTREE" log -p --no-color origin/main..HEAD > "$patches" 2>/dev/null; then
     rm -rf "$scan_tmp"
-    echo "BLOCK: could not compute the publish diff (git diff failed) — failing closed"
+    echo "BLOCK: could not read branch history (git log -p failed) — failing closed"
     return 1
   fi
-  targets+=("$diff_dump")
+  local added_dump="${scan_tmp}/added-lines.txt"
+  # grep exits 1 on zero added lines (an empty branch) — a valid clean result, not
+  # an error — so tolerate it; the file is then empty and scans clean.
+  grep -E '^\+' "$patches" | grep -Ev '^\+\+\+ ' > "$added_dump" || true
+  targets+=("$added_dump")
 
   # Commit MESSAGES are published too — `git push` carries them and the PR displays
   # them — so a prompt-injected agent could exfiltrate a secret via

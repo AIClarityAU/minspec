@@ -166,6 +166,35 @@ describe('egress-scan.sh — commit messages are in scope (#479 review, MAJOR)',
   });
 });
 
+describe('egress-scan.sh — slash-paths are not secrets (#479 review, MAJOR false-positive)', () => {
+  // The base64 heuristic used to flag any >=32-char token containing `/`. The
+  // tokenizer runs a file path into one long token, so a realistic diff (headers
+  // + deep-path imports) false-quarantined nearly every PR. Fixed by triggering on
+  // base64 `+`/`=` (which paths never carry), not on `/`.
+  it('a realistic `diff --git` dump with deep paths + imports → CLEAN', () => {
+    const r = scan(fixture('real.diff',
+      'diff --git a/packages/minspec/tests/dispatch-ready-check.test.ts b/packages/minspec/tests/dispatch-ready-check.test.ts\n' +
+      'index 0000000..1111111 100644\n' +
+      '--- a/packages/minspec/tests/dispatch-ready-check.test.ts\n' +
+      '+++ b/packages/minspec/tests/dispatch-ready-check.test.ts\n' +
+      '@@ -1,3 +1,4 @@\n' +
+      "+import { scanTestSource } from '../packages/minspec/src/lib/test-scanner';\n" +
+      '+  const p = path.resolve(__dirname, "../../../scripts/egress-scan.sh");\n'));
+    expect(r.blocked).toBe(false);
+    expect(r.out).toBe('');
+  });
+
+  it('a long slash-path token alone → CLEAN', () => {
+    const r = scan(fixture('p.txt', 'b/packages/minspec/src/lib/consequence-analyzers\n'));
+    expect(r.blocked).toBe(false);
+  });
+
+  it('still BLOCKS a base64 blob that carries a slash AND padding', () => {
+    const r = scan(fixture('b64.diff', '+  const key = "AbCd/EfGh+IjKlMnOpQrStUvWxYz0123456789==";\n'));
+    expect(r.blocked).toBe(true);
+  });
+});
+
 describe('egress-scan.sh — documented false-positive is safe-direction (#479 review, LOW)', () => {
   // The mixed-class high-entropy rule (upper+lower+digit, >=32 chars) can flag a long
   // camelCase identifier that happens to contain a digit. This is a KNOWN false

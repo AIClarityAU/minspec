@@ -85,7 +85,14 @@ function secretish(t,   hasU, hasL, hasD) {
   if (length(t) < 32) return 0
   if (t ~ /^sha(1|224|256|384|512)-/) return 0   # SRI / npm-lock integrity hash — not a secret
   if (t ~ /^[0-9a-fA-F]+$/) return 0             # pure hex = a hash (sha*/git SHA) committed legitimately
-  if (t ~ /[+\/=]/) return 1                     # base64-flavoured blob
+  # `+` and `=` are strong base64 signals that file PATHS never carry. We do NOT
+  # trigger on `/` alone: the tokenizer runs a slash-path (a diff header like
+  # `b/packages/minspec/tests/dispatch-ready-check.test.ts`, or an in-file import)
+  # into one ≥32-char token, and flagging that false-quarantined nearly every real
+  # PR (#479 review, MAJOR). A base64 secret WITHOUT `+`/`=` is still caught by the
+  # mixed-class rule below (real keys are upper+lower+digit); a lowercase-plus-slash
+  # path is not mixed-class, so it correctly passes.
+  if (t ~ /[+=]/) return 1                        # base64-flavoured blob (padding/plus)
   hasU = (t ~ /[A-Z]/); hasL = (t ~ /[a-z]/); hasD = (t ~ /[0-9]/)
   return (hasU && hasL && hasD) ? 1 : 0          # mixed-class high-entropy token
 }
