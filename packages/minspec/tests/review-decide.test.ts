@@ -66,3 +66,23 @@ describe('review-decide.sh — fail-closed AI-review gate', () => {
     expect(decide('')).toBe(CHANGES);
   });
 });
+
+describe('review-decide.sh — blocked (reviewer could not run: quota/transient)', () => {
+  const BLOCKED = 'ai-review:blocked';
+  const unavailable =
+    'REVIEW_UNAVAILABLE_BEGIN\nreason: quota\ndetail: |\n  usage limit reached\nREVIEW_UNAVAILABLE_END';
+
+  it('a REVIEW_UNAVAILABLE marker → ai-review:blocked (not changes, not pass)', () => {
+    expect(decide(unavailable)).toBe(BLOCKED);
+  });
+
+  it('blocked is checked FIRST — a stray verdict block alongside it still yields blocked', () => {
+    expect(decide(unavailable + '\n' + block('pass', '0'))).toBe(BLOCKED);
+  });
+
+  it('an injected REVIEW_UNAVAILABLE cannot force a PASS to blocked-then-green', () => {
+    // Even if a diff injects the marker, blocked (retry) is the safe outcome —
+    // never a green. (Retry re-reviews; it never merges unreviewed.)
+    expect(decide('REVIEW_UNAVAILABLE embedded by a diff\n' + block('pass', '0'))).toBe(BLOCKED);
+  });
+});

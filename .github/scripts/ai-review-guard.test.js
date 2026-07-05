@@ -10,6 +10,8 @@ const assert = require('node:assert/strict');
 const {
   PASS,
   CHANGES,
+  BLOCKED,
+  isQuotaExhaustion,
   parseAllowlist,
   isAuthorizedReviewer,
   decideProvenanceRevert,
@@ -359,6 +361,53 @@ test('review-check: normal PR fail-closed — an empty/absent verdict (review er
 test('review-check: isMachineryPr omitted defaults to the normal (non-machinery) path', () => {
   assert.equal(decideReviewCheck(PASS).conclusion, 'success');
   assert.equal(decideReviewCheck(CHANGES).conclusion, 'failure');
+});
+
+// ── ai-review:blocked (reviewer could not run — quota/transient) ──────────────
+test('review-check: blocked maps to action_required — blocks merge but is NOT failure/changes/green', () => {
+  const c = decideReviewCheck(BLOCKED, false);
+  assert.equal(c.name, 'ai-review');
+  assert.equal(c.conclusion, 'action_required');
+  assert.notEqual(c.conclusion, 'success');   // never a green
+  assert.notEqual(c.conclusion, 'failure');   // not a "changes requested" red
+  assert.match(c.title, /could not run|quota|retr/i);
+  assert.match(c.summary, /not a review of your code/i);
+});
+
+test('review-check: a machinery PR that is also blocked still resolves as machinery (neutral) — self-edit wins', () => {
+  // A machinery verdict needs no working reviewer, so blocked yields to it.
+  assert.equal(decideReviewCheck(BLOCKED, true).conclusion, 'neutral');
+});
+
+// ── isQuotaExhaustion (single source of truth shared with review-branch.sh) ───
+test('isQuotaExhaustion: TRUE for real subscription/limit/transient signatures', () => {
+  for (const s of [
+    'Claude AI usage limit reached',
+    "You've reached your usage limit",
+    '5-hour limit reached, resets at 3:00 PM',
+    'weekly limit reached',
+    'Error: rate limit exceeded',
+    'HTTP 429 Too Many Requests',
+    'overloaded_error: the service is overloaded',
+    'insufficient quota',
+    'try again later',
+  ]) {
+    assert.equal(isQuotaExhaustion(s), true, `expected quota=true for: ${s}`);
+  }
+});
+
+test('isQuotaExhaustion: FALSE for a normal review / crash / empty (fail closed to changes, not blocked)', () => {
+  for (const s of [
+    '',
+    null,
+    undefined,
+    'REVIEW_VERDICT_BEGIN\nverdict: changes\nblocking: 1\nREVIEW_VERDICT_END',
+    'TypeError: Cannot read properties of undefined',
+    '+ const someLongVariableName = compute();',
+    'the reviewer found a limitation in error handling', // "limit" substring must NOT trip it
+  ]) {
+    assert.equal(isQuotaExhaustion(s), false, `expected quota=false for: ${JSON.stringify(s)}`);
+  }
 });
 
 test('review-check: ONLY an exact ai-review:pass on a normal PR is ever green (no near-miss passes)', () => {

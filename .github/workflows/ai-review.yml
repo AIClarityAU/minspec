@@ -315,6 +315,19 @@ jobs:
             fi
           fi
 
+          # ── BLOCKED: a required role could not RUN (quota / rate-limit / transient),
+          #    which review-decide.sh reports as `ai-review:blocked`. This is NOT a
+          #    verdict on the code and must never read as `changes` (that would tell
+          #    the dev "the reviewer wants changes" and hide the real, fixable cause).
+          #    If either required role is blocked, the review is incomplete →
+          #    ai-review:blocked — retry-able; the `ai-review-retry` workflow re-runs
+          #    it when the quota window resets. (Machinery PRs are decided by the
+          #    self-edit override below regardless of the reviewer, so this yields to
+          #    it — a machinery verdict needs no working reviewer.) ──
+          if [ "$REVIEWER_LABEL" = "ai-review:blocked" ] || { [ "$SECURITY_REQUIRED" = "yes" ] && [ "$SECURITY_LABEL" = "ai-review:blocked" ]; }; then
+            FINAL="ai-review:blocked"
+          fi
+
           # ── self-edit OVERRIDE (fail closed): a PR touching the review machinery
           #    (`.github/`/`scripts/`), or one whose changed set could not be
           #    determined, can NEVER auto-pass — no matter what the roles decided.
@@ -343,29 +356,55 @@ jobs:
           {
             echo "## 🤖 AI review — \`$FINAL\`"
             echo
-            if [ "$SELF_EDIT" = "yes" ]; then
-              if [ "$SELF_EDIT_KIND" = "machinery" ]; then
-                echo "> ⚠️ **This PR modifies the AI-review machinery (\`.github/\`/\`scripts/\`) — auto-pass is disabled; a human must review.**"
-              else
-                echo "> ⚠️ **The set of changed files could not be verified — auto-pass is disabled (fail closed); a human must review.**"
-              fi
+            if [ "$FINAL" = "ai-review:blocked" ]; then
+              # The reviewer could not RUN — a transient/quota outage, NOT a verdict
+              # on the code. Give the dev the plain-language cause + concrete options
+              # so a mid-week quota exhaustion never reads as a mysterious "changes".
+              echo "> ⏳ **The AI reviewer could not run — this is NOT a review of your code.**"
               echo ">"
-              echo "> \`on: pull_request\` runs this workflow from the PR head, so a change to the gate itself cannot self-certify. The verdict is forced to \`ai-review:changes\` regardless of the reviewer's output below (which still runs, for information)."
+              echo "> Almost always the **Claude subscription session quota** is exhausted (also possible: rate-limit / overload). The required \`ai-review\` check is \`action_required\` — it blocks merge only because un-reviewed code must not land — and it **re-runs automatically** when the quota window resets (the \`ai-review-retry\` workflow)."
+              echo ">"
+              echo "> **Options:**"
+              echo "> 1. **Wait** for the quota window to reset — the retry workflow re-reviews automatically."
+              echo "> 2. **Fail over to PAYG API** — set repo variable \`AI_REVIEW_FAILOVER=payg\` + secret \`ANTHROPIC_API_KEY\`; re-runs then use pay-as-you-go instead of the subscription quota."
+              echo "> 3. Re-run the \`ai-review\` workflow manually once quota is back."
+              det=$(printf '%s\n' "$REVIEWER_OUT" | sed -n '/REVIEW_UNAVAILABLE_BEGIN/,/REVIEW_UNAVAILABLE_END/p' | redact)
+              if [ -n "$det" ]; then
+                echo
+                echo "<details><summary>reviewer output (redacted — may include the reset time)</summary>"
+                echo
+                echo '```'
+                printf '%s\n' "$det"
+                echo '```'
+                echo "</details>"
+              fi
               echo
-            fi
-            echo "### Reviewer"
-            echo '```'
-            printf '%s\n' "$REVIEWER_BLOCK"
-            echo '```'
-            if [ "$SECURITY_REQUIRED" = "yes" ]; then
+              echo "_Posted by \`minspec-sdd[bot]\`. Transient/quota failures are surfaced as \`ai-review:blocked\` (distinct from \`ai-review:changes\`) so a token outage never masquerades as a code-review verdict._"
+            else
+              if [ "$SELF_EDIT" = "yes" ]; then
+                if [ "$SELF_EDIT_KIND" = "machinery" ]; then
+                  echo "> ⚠️ **This PR modifies the AI-review machinery (\`.github/\`/\`scripts/\`) — auto-pass is disabled; a human must review.**"
+                else
+                  echo "> ⚠️ **The set of changed files could not be verified — auto-pass is disabled (fail closed); a human must review.**"
+                fi
+                echo ">"
+                echo "> \`on: pull_request\` runs this workflow from the PR head, so a change to the gate itself cannot self-certify. The verdict is forced to \`ai-review:changes\` regardless of the reviewer's output below (which still runs, for information)."
+                echo
+              fi
+              echo "### Reviewer"
+              echo '```'
+              printf '%s\n' "$REVIEWER_BLOCK"
+              echo '```'
+              if [ "$SECURITY_REQUIRED" = "yes" ]; then
+                echo
+                echo "### Security (\`packages/\` changed)"
+                echo '```'
+                printf '%s\n' "$SECURITY_BLOCK"
+                echo '```'
+              fi
               echo
-              echo "### Security (\`packages/\` changed)"
-              echo '```'
-              printf '%s\n' "$SECURITY_BLOCK"
-              echo '```'
+              echo "_Independent fresh-context reviewer (\`scripts/review-branch.sh\`, no-tools agent reading the diff as untrusted data); label decided by the deterministic fail-closed gate (\`scripts/review-decide.sh\`). Posted by \`minspec-sdd[bot]\` from CI — provenance is the App identity, verified here, not the label alone (#428, #342). A combined verdict fails toward \`changes\` if any role requests changes._"
             fi
-            echo
-            echo "_Independent fresh-context reviewer (\`scripts/review-branch.sh\`, no-tools agent reading the diff as untrusted data); label decided by the deterministic fail-closed gate (\`scripts/review-decide.sh\`). Posted by \`minspec-sdd[bot]\` from CI — provenance is the App identity, verified here, not the label alone (#428, #342). A combined verdict fails toward \`changes\` if any role requests changes._"
           } > "$BODY"
           echo "body-file=$BODY" >> "$GITHUB_OUTPUT"
 
@@ -387,32 +426,36 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Normalise fail-closed: anything other than an exact `ai-review:pass`
-          # becomes `ai-review:changes`.
-          if [ "$LABEL" = "ai-review:pass" ]; then
-            OPPOSITE="ai-review:changes"
-          else
-            LABEL="ai-review:changes"
-            OPPOSITE="ai-review:pass"
-          fi
+          # Normalise: `ai-review:pass` and `ai-review:blocked` (reviewer could not
+          # run — quota/transient) are the only non-changes states; anything else
+          # fails closed to `ai-review:changes` (never a spurious pass).
+          case "$LABEL" in
+            ai-review:pass|ai-review:blocked) ;;
+            *) LABEL="ai-review:changes" ;;
+          esac
 
           gh pr comment "$PR_NUMBER" --repo "$REPO" --body-file "$BODY_FILE"
 
-          # Apply the decided label FIRST (load-bearing), then clear the opposite +
-          # the in-progress marker (tolerate their absence).
+          if [ "$LABEL" = "ai-review:blocked" ]; then
+            gh label create "ai-review:blocked" --repo "$REPO" --color d4c5f9 \
+              --description "AI review could not run (quota/transient) — retry-able, not a code verdict" 2>/dev/null || true
+          fi
+
+          # Apply the decided label FIRST (load-bearing), then clear the other two
+          # verdict labels + the in-progress marker (tolerate their absence).
           gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label "$LABEL"
-          gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "$OPPOSITE" 2>/dev/null || true
+          for other in ai-review:pass ai-review:changes ai-review:blocked; do
+            [ "$other" = "$LABEL" ] && continue
+            gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "$other" 2>/dev/null || true
+          done
           gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "ai-review:pending" 2>/dev/null || true
 
-          # Fail-closed → pull a human in. When the verdict is `ai-review:changes`
-          # (normal request-changes OR the self-edit override, both of which land
-          # here as $LABEL), the bot-only label allowlist means no human is looped
-          # in automatically — so mark the PR `needs-human-review` and best-effort
-          # request a human reviewer. ALL of this is best-effort (`|| true`): the
-          # `ai-review:changes` label above is the authoritative signal, and none of
-          # these calls may change the job's honest status. (`gh pr edit
-          # --add-reviewer` legitimately fails when $REVIEWERS is the PR's own
-          # author — that's fine, the label is the reliable signal.)
+          # Fail-closed → pull a human in — ONLY for a real `ai-review:changes`
+          # (normal request-changes OR the self-edit override). A `blocked` verdict
+          # is retry-able (the reviewer never ran), NOT a human-review situation, so
+          # it must NOT summon a reviewer or the needs-human-review label — the
+          # ai-review-retry workflow re-runs it when quota returns. All best-effort
+          # (`|| true`): the label above is the authoritative signal.
           if [ "$LABEL" = "ai-review:changes" ]; then
             REVIEWERS="${REVIEWERS:-$OWNER}"
             gh label create "needs-human-review" --repo "$REPO" \
@@ -516,7 +559,11 @@ jobs:
           # (NB: an Actions expression written literally here would be evaluated even
           # inside this shell comment — an empty one fails workflow load; #486.)
           BODY="$RUNNER_TEMP/ai-review-check.json"
-          if ! node -e '
+          # BODY MUST be an ENV var (prefix), not a trailing arg: `node -e '…' BODY=x`
+          # makes BODY a positional argv, so `process.env.BODY` is undefined and
+          # `writeFileSync(undefined,…)` throws → "Could not compute the verdict
+          # check-run body" → the check-run never posted (silently, exit 0). #486-sibling.
+          if ! BODY="$BODY" node -e '
             const g = require(process.env.GITHUB_WORKSPACE + "/.github/scripts/ai-review-guard.js");
             const c = g.decideReviewCheck(process.env.VERDICT_LABEL || "", process.env.IS_MACHINERY === "true");
             const fs = require("fs");
@@ -528,7 +575,7 @@ jobs:
               output: { title: c.title, summary: c.summary },
             }));
             process.stderr.write("ai-review verdict=" + (process.env.VERDICT_LABEL || "<none>") + " machinery=" + (process.env.IS_MACHINERY || "false") + " → conclusion=" + c.conclusion + "\n");
-          ' BODY="$BODY"; then
+          '; then
             echo "::warning title=ai-review check not posted::Could not compute the verdict check-run body. The label/comment remain authoritative."
             exit 0
           fi

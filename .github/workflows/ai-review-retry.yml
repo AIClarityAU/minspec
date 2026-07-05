@@ -1,0 +1,74 @@
+# ai-review-retry — auto-pick-up quota-blocked reviews (companion to ai-review.yml)
+#
+# When the Claude subscription session quota is exhausted mid-week, ai-review.yml
+# cannot produce a verdict and labels the PR `ai-review:blocked` (retry-able, NOT a
+# code verdict — see ai-review-guard.js isQuotaExhaustion / decideReviewCheck). This
+# scheduled workflow finds those PRs and RE-RUNS their latest ai-review run, so once
+# the quota window resets the review completes on its own and the block clears — the
+# dev never has to notice or hand-retrigger.
+#
+# Also surfaced to humans: `ai-review:blocked` is a normal label, so a VS Code
+# fan-out / next-task resolver can list these as pending re-review tasks (#503-adjacent).
+#
+# `gh run rerun` re-executes the run in its original PR context (same head SHA),
+# minting a FRESH App/subscription token — the whole point: a new token past the
+# reset window succeeds. If quota is still out, the rerun re-blocks and we try again
+# next tick (cheap: gh calls; the paid review only runs when a rerun actually fires).
+
+name: ai-review-retry
+
+on:
+  schedule:
+    # Hourly, offset off the top of the hour to dodge scheduler congestion.
+    - cron: '17 * * * *'
+  workflow_dispatch: {}
+
+# Least privilege: read code, and `actions: write` ONLY to re-run the ai-review runs.
+permissions:
+  contents: read
+  actions: write
+  pull-requests: read
+
+concurrency:
+  group: ai-review-retry
+  cancel-in-progress: false
+
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Re-run ai-review for quota-blocked PRs
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -uo pipefail
+
+          # Open PRs the reviewer could not run on (quota/transient). Cap at 25 per
+          # tick so a large backlog can't fan out into a token stampede — the rest
+          # roll to the next hourly tick.
+          mapfile -t rows < <(
+            gh pr list --repo "$REPO" --state open --label "ai-review:blocked" \
+              --json number,headRefName --jq '.[] | "\(.number)\t\(.headRefName)"' | head -25
+          )
+          if [ "${#rows[@]}" -eq 0 ]; then
+            echo "No ai-review:blocked PRs — nothing to retry."
+            exit 0
+          fi
+          echo "Found ${#rows[@]} blocked PR(s) to retry."
+
+          for row in "${rows[@]}"; do
+            num="${row%%$'\t'*}"
+            branch="${row#*$'\t'}"
+            [ -z "$num" ] && continue
+            # Latest ai-review run for this PR's branch → re-run it (fresh token).
+            rid=$(gh run list --repo "$REPO" --workflow ai-review.yml \
+              --branch "$branch" --limit 1 --json databaseId --jq '.[0].databaseId // empty' 2>/dev/null || true)
+            if [ -n "$rid" ]; then
+              echo "PR #$num ($branch): re-running ai-review run $rid"
+              gh run rerun "$rid" --repo "$REPO" 2>/dev/null \
+                || echo "  rerun failed for #$num (run may be too old to re-run; a new push/reopen will re-review)"
+            else
+              echo "PR #$num ($branch): no prior ai-review run found — skipping"
+            fi
+          done
