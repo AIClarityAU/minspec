@@ -6,6 +6,7 @@ import {
   createSession,
   type SessionType,
 } from '../lib/session';
+import { resolveTargetFolder } from '../lib/resolve-folder';
 
 const SESSION_TYPES: SessionType[] = ['bug', 'feat', 'explore', 'plan'];
 
@@ -14,11 +15,11 @@ const SESSION_TYPES: SessionType[] = ['bug', 'feat', 'explore', 'plan'];
  * Called on first spec command if no active session, or via explicit command.
  */
 export async function declareScopeCommand(): Promise<void> {
-  const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!folder) {
-    vscode.window.showErrorMessage('MinSpec: No workspace folder open.');
-    return;
-  }
+  // Multi-root safe: session state is per-project (`.minspec/session.json` in
+  // that folder). Folder [0] would silently clobber the wrong project's
+  // session (harvest316/minspec#373).
+  const folder = await resolveTargetFolder();
+  if (!folder) return;
 
   // Check for existing session
   const existing = loadSession(folder);

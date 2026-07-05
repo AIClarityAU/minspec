@@ -6,6 +6,7 @@ import { listSpecs, type SpecSummary } from '../views/spec-tree-provider';
 import { classifyApprovablePath, type ApprovableKind } from '../lib/approvable';
 import { recentApprovables } from '../lib/recent-approvables';
 import { getApprovalStatus } from '../lib/approval';
+import { folderForFile } from '../lib/resolve-folder';
 
 /**
  * Unified, context-aware Approve/Accept (Alt+A) — issues #303, #377.
@@ -68,10 +69,6 @@ function activeEditorPath(): string | undefined {
   return vscode.window.activeTextEditor?.document?.uri?.fsPath;
 }
 
-function getWorkspaceRoot(): string | undefined {
-  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-}
-
 function decisionsDirOverride(): { decisionsDir: string } | undefined {
   const decisionsDir = vscode.workspace.getConfiguration('minspec').get<string>('decisionsDir');
   return decisionsDir ? { decisionsDir } : undefined;
@@ -100,7 +97,11 @@ type ArtifactNode =
  * focused requirements.md / single spec.md matches, which is the common case.
  */
 function resolveNode(kind: ApprovableKind, fsPath: string): ArtifactNode | undefined {
-  const root = getWorkspaceRoot();
+  // Multi-root safe: the artifact's own folder is the root. `folderForFile`
+  // maps the path to whichever workspace folder actually contains it, so an
+  // approvable in folder [1] resolves against folder [1]'s tree, not [0]'s
+  // (harvest316/minspec#373, deferred out of #363 / PR #370).
+  const root = folderForFile(fsPath);
   if (!root) return undefined;
   const target = path.resolve(fsPath);
 
@@ -197,17 +198,21 @@ type RecentTarget = { kind: ApprovableKind; node: ArtifactNode };
  * we never silently approve something other than what's on screen (never-wrong).
  */
 async function pickRecentApprovable(): Promise<{ outcome: 'none' | 'picked' | 'dismissed'; target?: RecentTarget }> {
-  const root = getWorkspaceRoot();
-  if (!root) return { outcome: 'none' };
-
+  // Multi-root safe: each recent entry is resolved against ITS OWN folder,
+  // never a workspace-wide [0]. Both `resolveNode` (artifact match) and the
+  // pending-filter's approval lookup are folder-scoped, so recents in folder
+  // [1] survive when the previous active editor was in folder [0]
+  // (harvest316/minspec#373; previously used [0]).
   // `target` is a nested property (not spread) so it never collides with
   // QuickPickItem's own `kind` (QuickPickItemKind).
   type Item = vscode.QuickPickItem & { target: RecentTarget; fsPath: string };
   const items: Item[] = recentApprovables()
     .map((r): Item | undefined => {
+      const perEntryRoot = folderForFile(r.fsPath);
+      if (!perEntryRoot) return undefined;
       const node = resolveNode(r.kind, r.fsPath);
-      if (!node || !isPending(r.kind, node, root)) return undefined;
-      return { ...describeNode(r.kind, node, root), target: { kind: r.kind, node }, fsPath: r.fsPath };
+      if (!node || !isPending(r.kind, node, perEntryRoot)) return undefined;
+      return { ...describeNode(r.kind, node, perEntryRoot), target: { kind: r.kind, node }, fsPath: r.fsPath };
     })
     .filter((x): x is Item => x !== undefined);
 

@@ -12,16 +12,12 @@ import {
   type ApprovalStatus,
 } from '../lib/approval';
 import { resolveActiveSpecId } from '../lib/active-spec';
+import { folderForFile, resolveTargetFolder } from '../lib/resolve-folder';
 
 /** A tree node carrying a SpecSummary (from the spec tree context menu). */
 interface SpecNodeLike {
   readonly spec?: SpecSummary;
 }
-
-function getWorkspaceRoot(): string | undefined {
-  return vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-}
-
 
 interface PickOptions {
   /** Keep a spec in the list only when its approval status passes this. */
@@ -84,11 +80,13 @@ export async function approveSpecCommand(
   node?: SpecNodeLike,
   state?: vscode.Memento,
 ): Promise<void> {
-  const rootDir = getWorkspaceRoot();
-  if (!rootDir) {
-    vscode.window.showErrorMessage('MinSpec: No workspace folder open.');
-    return;
-  }
+  // Multi-root safe: prefer the active editor's folder, else prompt (#123, #373).
+  // A tree-node invocation carries the spec's file path, so we can pin the root
+  // to the folder actually containing it — no prompt when the artifact is known.
+  const rootDir = node?.spec?.filePath
+    ? folderForFile(node.spec.filePath) ?? (await resolveTargetFolder())
+    : await resolveTargetFolder();
+  if (!rootDir) return;
 
   const spec = await pickSpec(rootDir, node, 'Select a spec to approve for implementation', {
     // Already-approved specs have nothing to do here; stale ones (edited since
@@ -186,11 +184,11 @@ export async function approveSpecCommand(
 
 /** Command: Revoke a spec's approval. */
 export async function revokeApprovalCommand(node?: SpecNodeLike): Promise<void> {
-  const rootDir = getWorkspaceRoot();
-  if (!rootDir) {
-    vscode.window.showErrorMessage('MinSpec: No workspace folder open.');
-    return;
-  }
+  // Multi-root safe (see approveSpecCommand for the pattern).
+  const rootDir = node?.spec?.filePath
+    ? folderForFile(node.spec.filePath) ?? (await resolveTargetFolder())
+    : await resolveTargetFolder();
+  if (!rootDir) return;
 
   const spec = await pickSpec(rootDir, node, 'Select a spec to revoke approval', {
     // Only specs with an approval record (approved or stale) can be revoked.

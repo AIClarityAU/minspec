@@ -7,6 +7,7 @@ import type { ClassificationSummary } from './spec-panel-html';
 import { listSpecs } from '../lib/spec-manager';
 import { computeSpecRework, computeWastedReview } from '../lib/trust-metrics';
 import type { TrustChartModel } from '@aiclarity/shared';
+import { folderForFile } from '../lib/resolve-folder';
 
 export type { ClassificationSummary } from './spec-panel-html';
 export { getHtml, getErrorHtml, toggleTask } from './spec-panel-html';
@@ -99,7 +100,11 @@ export class SpecPanel {
    * Writes: NOTHING. (INV — Non-destructive, FR-11)
    */
   private buildTrustModel(): TrustChartModel | undefined {
-    const rootDir = vscode.workspace?.workspaceFolders?.[0]?.uri.fsPath;
+    // Multi-root safe: the panel shows ONE spec whose path is known, so the
+    // trust chart's context (specs list + approval sidecars) must come from
+    // THAT spec's folder — not `workspaceFolders?.[0]` (harvest316/minspec#373).
+    if (!this.specFilePath) return undefined;
+    const rootDir = folderForFile(this.specFilePath);
     if (!rootDir) return undefined;
 
     let specs: ReturnType<typeof listSpecs>;

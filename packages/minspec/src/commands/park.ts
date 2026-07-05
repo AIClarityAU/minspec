@@ -8,6 +8,7 @@ import {
   type ParkingLotEntry,
   type ParkResult,
 } from '../lib/parking-lot';
+import { resolveTargetFolder } from '../lib/resolve-folder';
 
 /** Options for {@link parkCommand}. */
 export interface ParkCommandOptions {
@@ -35,11 +36,11 @@ type DedupAction = 'open' | 'comment' | 'force';
 export async function parkCommand(opts: ParkCommandOptions = {}): Promise<void> {
   const force = opts.force === true;
 
-  const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-  if (!folder) {
-    vscode.window.showErrorMessage('MinSpec: No workspace folder open.');
-    return;
-  }
+  // Multi-root safe: parking creates an issue on THIS folder's git remote
+  // (or writes THIS folder's parking-lot.md). Folder [0] would silently file
+  // against the wrong project (harvest316/minspec#373).
+  const folder = await resolveTargetFolder();
+  if (!folder) return;
 
   // Step 1: Title
   const title = await vscode.window.showInputBox({

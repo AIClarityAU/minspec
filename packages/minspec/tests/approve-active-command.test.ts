@@ -13,8 +13,11 @@ vi.mock('vscode', () => ({
   workspace: {
     workspaceFolders: [{ uri: { fsPath: '/tmp/ws' } }],
     getConfiguration: () => ({ get: () => undefined }),
+    // Multi-root resolver (#373): `folderForFile` calls `getWorkspaceFolder`.
+    getWorkspaceFolder: vi.fn(() => ({ uri: { fsPath: '/tmp/ws' } })),
   },
   commands: { executeCommand: vi.fn() },
+  Uri: { file: (p: string) => ({ fsPath: p, scheme: 'file' }) },
 }));
 
 // The list functions are the source of truth for "does this path map to a known

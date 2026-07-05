@@ -23,6 +23,8 @@ vi.mock('vscode', () => ({
   workspace: {
     workspaceFolders: [{ uri: { fsPath: '/tmp/ws' } }],
     openTextDocument: vi.fn(),
+    // Multi-root resolver (#373): `folderForFile` calls `getWorkspaceFolder`.
+    getWorkspaceFolder: vi.fn(() => ({ uri: { fsPath: '/tmp/ws' } })),
   },
   commands: { executeCommand: vi.fn() },
   Uri: { file: (p: string) => ({ fsPath: p, scheme: 'file' }) },
