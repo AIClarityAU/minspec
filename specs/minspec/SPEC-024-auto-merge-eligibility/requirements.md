@@ -11,7 +11,7 @@ relates_to: [SPEC-014, SPEC-012, SPEC-006]  # review-webview skim surface · nex
 # MinSpec — Auto-Merge Eligibility Gate (Requirements)
 
 **Date:** 2026-06-07
-**Status:** Specifying (SDD Specify phase)
+**Status:** Specifying (derived — INV-1: unapproved ⇒ `specifying`, regardless of code state; see `deriveStatus`, `packages/minspec/src/lib/lifecycle.ts:114`). This is **not actually accurate to the codebase**: the gate is built, merged (#412), and running (`packages/shared/src/review-signals.ts`), with acceptance criteria backfilled (#492). But this T4 spec was never run through the real Approve step, so the derived status floors at `specifying` and cannot legitimately read `implementing` or `done` until a human approves it. Once approved, status will next derive from phase completion — `done` is additionally gated on open acceptance holes #489/#490/#491/#466 + INV-7 keyboard.
 **Decision:** [DR-033](../../../docs/decisions/DR-033.md) §3 (this spec is the *consumer* that decision describes but never had)
 **Triggered by:** [#199](https://github.com/harvest316/minspec/issues/199) — "nothing consumes the signals to skip the PR gate; this is the actual auto-approve on-switch."
 **Epic:** [EPIC-007 Agent Execute](../../../docs/epics/EPIC-007-agent-execute.md)
