@@ -1,5 +1,5 @@
 ---
-id: SPEC-029
+id: SPEC-030
 type: requirements
 status: specifying
 tier: T3
@@ -67,7 +67,8 @@ deny-by-default; this spec is how a project deliberately, visibly turns it on.
 - **INV-1 Deny-by-default default.** The shipped default is `pr-gate` (auto-merge OFF).
   An absent / malformed / unknown `autoMerge.mode` resolves to `pr-gate`. Only the exact
   string `consequence-hybrid` enables auto-merge. **No fail-open path** — mirrors the
-  SPEC-024 gate kill-switch (`auto-merge-gate.ts` `normalizeMode`).
+  SPEC-024 gate kill-switch (`auto-merge-gate.ts` `resolveMode`, and the dispatch guard
+  `dispatch-issue.sh:383-386`).
 - **INV-2 Dismissal is safe.** If the init question is dismissed / escaped / times out,
   the project is left at `pr-gate`. The question **never** pre-selects or defaults to
   `consequence-hybrid`; there is no dark-pattern nudge toward auto-merge. Turning auto-merge
