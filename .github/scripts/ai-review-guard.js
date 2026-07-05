@@ -28,6 +28,32 @@
 
 const PASS = 'ai-review:pass';
 const CHANGES = 'ai-review:changes';
+// The reviewer could NOT run to a verdict for a TRANSIENT, non-code reason —
+// almost always the Claude subscription's session quota being exhausted, but also
+// a rate-limit / overload / auth blip. This is NOT a review of the PR: it must be
+// visibly distinct from `ai-review:changes` (which means "the reviewer read your
+// code and wants changes"), and it is safe to RETRY once the window resets. See
+// isQuotaExhaustion() and the ai-review-retry workflow.
+const BLOCKED = 'ai-review:blocked';
+
+// Detect, from a failed `claude -p` reviewer invocation's combined output, whether
+// the cause is an exhausted subscription quota / rate-limit / overload (a transient,
+// retry-able, NOT-your-code condition) versus a genuine crash. review-branch.sh
+// pipes the captured failure text here (via `node -e`) so the SAME tested pattern
+// governs bash and JS — no drift. Pure: text in → boolean out. Conservative by
+// design: it only claims "quota/transient" on a clear signal; anything else stays a
+// hard failure (which fails closed to ai-review:changes, never a spurious pass).
+function isQuotaExhaustion(text) {
+  const s = String(text == null ? '' : text);
+  // Kept deliberately TIGHT: over-matching would loop a genuine (non-transient)
+  // crash forever as `ai-review:blocked` instead of failing closed to `changes`
+  // for a human. Only clear quota / rate-limit / overload / retry signals count.
+  return /\b(usage limit|rate.?limit(ed)?|quota|too many requests|overloaded|resets? (at|in)|try again (later|in)|429|insufficient (quota|credit))\b/i
+    .test(s)
+    // Claude CLI's subscription-limit phrasing: "Claude AI usage limit reached",
+    // "5-hour limit reached", "You've reached your usage limit", "weekly limit".
+    || /usage limit reached|limit reached|reached your (usage )?limit|weekly limit|session limit|5-?hour limit/i.test(s);
+}
 
 // GitHub truncates commit-status descriptions at 140 chars; keep ours within it
 // even when a description carries a (potentially long) provenance reason.
@@ -247,6 +273,22 @@ function decideReviewCheck(label, isMachineryPr) {
     summary =
       'The independent AI reviewer approved this PR (`ai-review:pass`). ' +
       'See the AI review comment for the findings behind the verdict.';
+  } else if (label === BLOCKED) {
+    // The reviewer could not run (quota/rate-limit/transient) — NOT a verdict on
+    // the code. `action_required` blocks merge (un-reviewed code must not land)
+    // while reading as "needs action: re-run", never "changes requested" or a
+    // broken-CI failure. The ai-review-retry workflow re-runs it automatically
+    // when the quota window resets.
+    conclusion = 'action_required';
+    title = 'AI review could not run — quota/transient (auto-retries)';
+    summary =
+      'The independent AI reviewer could **not** complete — almost always the ' +
+      'Claude subscription session-quota being exhausted (also rate-limit / ' +
+      'overload). **This is not a review of your code.** It blocks merge only ' +
+      'because un-reviewed code must not land. It re-runs automatically when the ' +
+      'quota window resets (see the ai-review-retry workflow); to unblock sooner, ' +
+      'wait for the reset or enable PAYG-API failover (`ANTHROPIC_API_KEY`). See ' +
+      'the AI review comment for the reset time and options.';
   } else {
     conclusion = 'failure';
     title = 'AI review: changes requested — this check blocks merge';
@@ -280,6 +322,8 @@ function sanitizeLogin(login) {
 module.exports = {
   PASS,
   CHANGES,
+  BLOCKED,
+  isQuotaExhaustion,
   parseAllowlist,
   isAuthorizedReviewer,
   decideProvenanceRevert,

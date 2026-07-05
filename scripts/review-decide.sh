@@ -31,6 +31,17 @@ set -eu
 
 INPUT="$(cat)"
 
+# A review that could NOT RUN (quota / rate-limit / transient) is distinct from a
+# review that ran and requested changes. review-branch.sh emits a
+# REVIEW_UNAVAILABLE marker for that case; surface it as `ai-review:blocked` —
+# retry-able, NOT a code verdict. Checked FIRST so a transient failure can never
+# masquerade as `ai-review:changes` (which would read as "the reviewer wants
+# changes" and hide the real, fixable cause from the dev). No verdict block is
+# required alongside it.
+if printf '%s\n' "$INPUT" | grep -q 'REVIEW_UNAVAILABLE'; then
+  echo "ai-review:blocked"; exit 0
+fi
+
 # An explicit escalation is never a pass.
 if printf '%s\n' "$INPUT" | grep -qE '^[[:space:]]*ESCALATE:'; then
   echo "ai-review:changes"; exit 2

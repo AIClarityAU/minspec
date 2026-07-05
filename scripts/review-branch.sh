@@ -113,21 +113,76 @@ Rules for the block:
 CONTENT
 )
 
-# Fresh-context reviewer. Read-only tools ONLY; NO gh/git/network/Bash — the
-# agent cannot push, comment, label, or merge. opus per DR-033 §6.
-# `</dev/null`: the prompt is passed as an ARG (not stdin), so close stdin — else
-# `claude -p` waits ~3s for piped input before proceeding. The read-only tools do
-# not use stdin, so this is safe and removes the stall.
-AGENT_OUT=$(claude -p "$USER_CONTENT" \
-  --system-prompt-file "$ROLE_FILE" \
-  --allowedTools "Read,Glob,Grep" \
-  --model opus \
-  --output-format text </dev/null 2>&1) || {
-    # Agent crashed / non-zero exit. Emit NO verdict to stdout so review-decide.sh
-    # fails closed to request-changes; surface the captured output on stderr.
-    echo "review-branch.sh: reviewer agent (role=$ROLE) failed — gate fails closed" >&2
-    printf '%s\n' "$AGENT_OUT" >&2
-    exit 0
-  }
+# Single source of truth for the quota/transient classifier (tested JS, shared with
+# decideReviewCheck) — scripts/ is a sibling of .github/scripts/.
+GUARD="${SCRIPT_DIR}/../.github/scripts/ai-review-guard.js"
 
-printf '%s\n' "$AGENT_OUT"
+# Fresh-context reviewer. Read-only tools ONLY; NO gh/git/network/Bash — the agent
+# cannot push, comment, label, or merge. opus per DR-033 §6. `</dev/null`: the prompt
+# is an ARG (not stdin), so close stdin — else `claude -p` waits ~3s for input.
+# $1: "payg" → force a PAYG Anthropic API key (ANTHROPIC_API_KEY) instead of the
+# subscription OAuth token (the quota-failover path). Captures combined stdout+stderr
+# into AGENT_OUT; returns claude's exit code. Guarded so `set -e` never aborts here.
+run_reviewer() {
+  local rc=0
+  if [[ "${1:-subscription}" == "payg" ]]; then
+    AGENT_OUT=$( CLAUDE_CODE_OAUTH_TOKEN='' ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
+      claude -p "$USER_CONTENT" --system-prompt-file "$ROLE_FILE" \
+      --allowedTools "Read,Glob,Grep" --model opus --output-format text </dev/null 2>&1 ) || rc=$?
+  else
+    AGENT_OUT=$( claude -p "$USER_CONTENT" --system-prompt-file "$ROLE_FILE" \
+      --allowedTools "Read,Glob,Grep" --model opus --output-format text </dev/null 2>&1 ) || rc=$?
+  fi
+  return "$rc"
+}
+
+has_verdict() { printf '%s\n' "${1:-}" | grep -q 'REVIEW_VERDICT_BEGIN'; }
+
+# Quota / rate-limit / transient? Delegate to the tested pure classifier so bash and
+# JS never drift. node is always present where this runs (CI setup-node; local
+# dispatch). If node/guard is somehow absent, treat as NOT quota (conservative → the
+# hard fail-closed path below, never a spurious retry).
+is_quota() {
+  [[ -f "$GUARD" ]] || return 1
+  GUARD="$GUARD" node -e 'const g=require(process.env.GUARD);let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.exit(g.isQuotaExhaustion(s)?0:1));' <<<"${1:-}" 2>/dev/null
+}
+
+# Emit the distinct, machine-parseable "could not run" marker → review-decide.sh maps
+# it to ai-review:blocked (retry-able), never ai-review:changes. `detail` carries the
+# trimmed claude limit/reset lines for the PR comment.
+emit_unavailable() {
+  local detail
+  detail=$(printf '%s\n' "${1:-}" | tr -d '\r' | grep -iE 'limit|quota|reset|try again|429|overload' | head -3 | sed 's/^/  /' || true)
+  printf 'REVIEW_UNAVAILABLE_BEGIN\nreason: quota\ndetail: |\n%s\nREVIEW_UNAVAILABLE_END\n' "${detail:-  (no detail captured; likely subscription session quota)}"
+}
+
+# 1) Try the reviewer on the subscription token. A clean run WITH a verdict → done.
+if run_reviewer subscription && has_verdict "$AGENT_OUT"; then
+  printf '%s\n' "$AGENT_OUT"
+  exit 0
+fi
+
+# 2) No verdict. Distinguish a quota/transient block (retry-able, NOT the dev's code)
+#    from a genuine crash (fail closed to changes, as before).
+if is_quota "$AGENT_OUT"; then
+  # 2a) Optional PAYG-API failover before giving up — config-gated (AI_REVIEW_FAILOVER
+  #     = "payg") AND a key present. Lets a dev who has run out of subscription quota
+  #     keep reviewing on PAYG instead of stalling for the whole reset window.
+  if [[ "${AI_REVIEW_FAILOVER:-wait}" == "payg" && -n "${ANTHROPIC_API_KEY:-}" ]]; then
+    echo "review-branch.sh: subscription quota hit — failing over to PAYG API (role=$ROLE)" >&2
+    if run_reviewer payg && has_verdict "$AGENT_OUT"; then
+      printf '%s\n' "$AGENT_OUT"
+      exit 0
+    fi
+    echo "review-branch.sh: PAYG failover also produced no verdict (role=$ROLE)" >&2
+  fi
+  echo "review-branch.sh: reviewer UNAVAILABLE (quota/transient, role=$ROLE) — → ai-review:blocked (retry-able)" >&2
+  emit_unavailable "$AGENT_OUT"
+  exit 0
+fi
+
+# 3) Genuine crash / non-quota failure → emit NO verdict → review-decide.sh fails
+#    closed to request-changes (never a false pass). Surface output on stderr.
+echo "review-branch.sh: reviewer agent (role=$ROLE) failed (non-quota) — gate fails closed" >&2
+printf '%s\n' "$AGENT_OUT" >&2
+exit 0
