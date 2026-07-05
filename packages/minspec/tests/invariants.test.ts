@@ -769,21 +769,34 @@ describe('Invariant 7: non-user contexts never reach the interactive folder pick
     expect(violations).toEqual([]);
   });
 
-  it('B: non-command code invokes minspec commands WITH a folder (default-deny)', () => {
-    // Default-deny: ANY executeCommand('minspec.<id>') with no 2nd argument in
-    // non-command source is a violation UNLESS <id> is a known no-folder command.
-    // The safe-list starts EMPTY — today the only such call is the (now-fixed)
-    // git watcher, which passes workspaceRoot. A NEW no-folder command invoked
-    // from non-command code must be added here deliberately; that review is the
-    // gate. Broader than a folder-taking allowlist: createEpic/createAdr/etc. are
+  it('B: non-command code invokes minspec commands WITH a real folder — never a missing OR nullish 2nd arg (default-deny, #302)', () => {
+    // Default-deny: in non-command source, ANY executeCommand('minspec.<id>') that
+    // passes NO folder is a violation UNLESS <id> is a known no-folder command.
+    // "No folder" covers BOTH shapes:
+    //   • MISSING  — close-paren right after the id:  executeCommand('minspec.x')
+    //   • NULLISH  — an explicit undefined/null 2nd arg:
+    //                executeCommand('minspec.x', undefined, { auto: true })
+    // The NULLISH shape is the asymmetric-gate hole the #302 reviewer flagged:
+    // `folderArg = undefined` reaches classifyCommand's interactive resolver
+    // (the modal project picker) exactly like a missing arg does, so the gate
+    // MUST reject it too — checking only for a missing 2nd arg let it slip past.
+    // The safe-list starts EMPTY — today the only such call is the (now-fixed) git
+    // watcher, which passes workspaceRoot. A NEW no-folder command invoked from
+    // non-command code must be added here deliberately; that review is the gate.
+    // Broader than a folder-taking allowlist: createEpic/createAdr/etc. are
     // caught automatically because they are not safe-listed.
     const NO_FOLDER_COMMAND_IDS = new Set<string>([
       // e.g. 'minspec.refreshTree' — add ONLY after confirming the command takes
       // no folder. (refreshTree is invoked from command bodies, not scanned here.)
     ]);
-    // executeCommand('minspec.foo') / "..." / `...` with NO second argument
-    // (close-paren immediately after the id literal).
+    // executeCommand('minspec.foo') with NO second argument (close-paren right
+    // after the id literal)…
     const NO_ARG = /executeCommand\(\s*['"`](minspec\.[\w.-]+)['"`]\s*\)/;
+    // …OR a NULLISH literal second argument (undefined/null), followed by either
+    // a comma (more args, e.g. an { auto } opts object) or the close-paren. This
+    // reaches the interactive resolver just like a missing arg (#302 hole).
+    const NULLISH_ARG =
+      /executeCommand\(\s*['"`](minspec\.[\w.-]+)['"`]\s*,\s*(?:undefined|null)\s*[,)]/;
 
     const files = getAllTsFiles(srcRoot);
     const violations: { file: string; id: string; line: string }[] = [];
@@ -793,7 +806,8 @@ describe('Invariant 7: non-user contexts never reach the interactive folder pick
       if (isCommandFile(rel)) continue;
       const lines = fs.readFileSync(filePath, 'utf-8').split('\n');
       lines.forEach((raw, i) => {
-        const m = NO_ARG.exec(codeOf(raw));
+        const code = codeOf(raw);
+        const m = NO_ARG.exec(code) ?? NULLISH_ARG.exec(code);
         if (m && !NO_FOLDER_COMMAND_IDS.has(m[1])) {
           violations.push({ file: `${rel}:${i + 1}`, id: m[1], line: raw.trim() });
         }
