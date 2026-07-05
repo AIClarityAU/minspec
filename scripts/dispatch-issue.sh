@@ -42,6 +42,11 @@ done
 #                                  fetches/checks once, not once per issue.
 if [[ "${MINSPEC_FRESHNESS_CHECKED:-}" != "1" ]]; then
   git fetch origin main -q 2>/dev/null || true
+  # Known blind spot: if the fetch fails (network/auth) or origin/main isn't
+  # a resolvable ref, rev-list falls through to `echo 0`, so BEHIND reads as
+  # "0 commits behind" and the guard fails OPEN (proceeds as if fresh) rather
+  # than blocking on an unrelated infra problem. Accepted tradeoff — see the
+  # `|| true` / `|| echo 0` robustness design above.
   BEHIND=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0)
   if [[ "${BEHIND:-0}" -gt 0 ]]; then
     if [[ "${MINSPEC_ALLOW_STALE:-}" == "1" ]]; then
