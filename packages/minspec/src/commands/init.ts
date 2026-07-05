@@ -445,8 +445,9 @@ export async function initRefreshCommand(folderArg?: string): Promise<void> {
   if (!folder) return;
   // Same all-or-nothing concern as initCommand: a mid-sequence write failure
   // must surface, not silently leave a partial/inconsistent harness (#153).
+  let warnings: ReturnType<typeof refreshHarnessFiles>;
   try {
-    refreshHarnessFiles(folder);
+    warnings = refreshHarnessFiles(folder);
   } catch (err) {
     vscode.window.showErrorMessage(
       `MinSpec: Harness refresh failed — ${describeError(err)}. ` +
@@ -457,6 +458,9 @@ export async function initRefreshCommand(folderArg?: string): Promise<void> {
   vscode.window.showInformationMessage(
     'MinSpec: Refreshed harness files (user edits preserved).',
   );
+  for (const w of warnings) {
+    vscode.window.showWarningMessage(w.message);
+  }
   surfaceConstitutionNudge(folder);
 }
 
