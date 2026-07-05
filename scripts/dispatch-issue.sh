@@ -22,6 +22,43 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# ── Fail-loud stale-checkout guard (#481) ───────────────────────────────────
+# The dispatch PIPELINE (PR creation, reviewer stage, auto-merge gate below)
+# lives IN this script, not in a versioned dependency. A checkout behind
+# origin/main therefore runs an OUT-OF-DATE pipeline — e.g. an older copy
+# with no `gh pr create` / `run_reviewer_stage` / auto-merge-gate.ts call —
+# and nothing previously checked the script itself was current. The agent's
+# BUILD always looks fresh (`git worktree add ... origin/main` below forces
+# it), which masks that the ORCHESTRATION around the build is stale (found
+# 2026-07-04: a checkout 23 commits behind ran this script on #393, built +
+# pushed a branch, and silently skipped PR/reviewer/gate entirely — exit 0).
+# Refuse to run rather than degrade silently.
+#
+# Escape hatches:
+#   MINSPEC_ALLOW_STALE=1        — human override: proceed anyway (loud warning).
+#   MINSPEC_FRESHNESS_CHECKED=1  — set automatically once this check passes,
+#                                  and inherited by any script we call, so a
+#                                  drain-inbox.sh → dispatch-issue.sh chain
+#                                  fetches/checks once, not once per issue.
+if [[ "${MINSPEC_FRESHNESS_CHECKED:-}" != "1" ]]; then
+  git fetch origin main -q 2>/dev/null || true
+  # Known blind spot: if the fetch fails (network/auth) or origin/main isn't
+  # a resolvable ref, rev-list falls through to `echo 0`, so BEHIND reads as
+  # "0 commits behind" and the guard fails OPEN (proceeds as if fresh) rather
+  # than blocking on an unrelated infra problem. Accepted tradeoff — see the
+  # `|| true` / `|| echo 0` robustness design above.
+  BEHIND=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0)
+  if [[ "${BEHIND:-0}" -gt 0 ]]; then
+    if [[ "${MINSPEC_ALLOW_STALE:-}" == "1" ]]; then
+      echo "WARNING: checkout is $BEHIND commit(s) behind origin/main — proceeding anyway (MINSPEC_ALLOW_STALE=1)." >&2
+    else
+      echo "ERROR: checkout is $BEHIND commit(s) behind origin/main — the pipeline orchestration (PR/reviewer/gate) in this script may be stale. Pull main (or run from a fresh checkout) before dispatching. Override (not recommended): MINSPEC_ALLOW_STALE=1" >&2
+      exit 1
+    fi
+  fi
+  export MINSPEC_FRESHNESS_CHECKED=1
+fi
+
 echo "Fetching issue #$ISSUE..."
 ISSUE_JSON=$(gh issue view "$ISSUE" --repo "$REPO" --json body,title,labels)
 ISSUE_BODY=$(echo "$ISSUE_JSON" | jq -r '"# " + .title + "\n\n" + .body')

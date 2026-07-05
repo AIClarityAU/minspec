@@ -86,6 +86,46 @@ if $DRY_RUN; then
   exit 0
 fi
 
+# ── Fail-loud stale-checkout guard (#481) ───────────────────────────────────
+# This script drives dispatch-issue.sh, whose PIPELINE (PR creation, reviewer
+# stage, auto-merge gate) lives IN that script. A checkout behind origin/main
+# runs an OUT-OF-DATE pipeline silently — the build always looks fresh (each
+# dispatch worktree is forced onto origin/main), which masks that the
+# ORCHESTRATION is stale. Checked here — after the zero-work and dry-run
+# early exits above — so it only fires when real dispatch work is about to
+# happen. A stale local checkout is the documented normal state for this
+# project's worktree workflow (many parallel worktrees off one shared
+# `.git`, nobody force-pulls main in each — see global rule #8), so an
+# opted-in `--auto` session with an empty inbox, or any `--dry-run` report,
+# must not be blocked by it. Config-only commands earlier in the arg-parsing
+# case (--pref-path, --enable-auto, --disable-auto) already returned before
+# this point since they never touch the pipeline either.
+#
+# Escape hatches:
+#   MINSPEC_ALLOW_STALE=1        — human override: proceed anyway (loud warning).
+#   MINSPEC_FRESHNESS_CHECKED=1  — set automatically once this check passes,
+#                                  and exported to every dispatch-issue.sh call
+#                                  below, so we fetch/check ONCE per drain run,
+#                                  not once per dispatched issue.
+if [[ "${MINSPEC_FRESHNESS_CHECKED:-}" != "1" ]]; then
+  git fetch origin main -q 2>/dev/null || true
+  # Known blind spot: if the fetch fails (network/auth) or origin/main isn't
+  # a resolvable ref, rev-list falls through to `echo 0`, so BEHIND reads as
+  # "0 commits behind" and the guard fails OPEN (proceeds as if fresh) rather
+  # than blocking on an unrelated infra problem. Accepted tradeoff — see the
+  # `|| true` / `|| echo 0` robustness design above.
+  BEHIND=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0)
+  if [[ "${BEHIND:-0}" -gt 0 ]]; then
+    if [[ "${MINSPEC_ALLOW_STALE:-}" == "1" ]]; then
+      echo "WARNING: checkout is $BEHIND commit(s) behind origin/main — proceeding anyway (MINSPEC_ALLOW_STALE=1)." >&2
+    else
+      echo "ERROR: checkout is $BEHIND commit(s) behind origin/main — the pipeline orchestration (PR/reviewer/gate) dispatch-issue.sh runs may be stale. Pull main (or run from a fresh checkout) before draining. Override (not recommended): MINSPEC_ALLOW_STALE=1" >&2
+      exit 1
+    fi
+  fi
+  export MINSPEC_FRESHNESS_CHECKED=1
+fi
+
 # Only one drain process at a time
 if [[ -f "$LOCK" ]]; then
   LOCK_PID=$(cat "$LOCK" 2>/dev/null || echo "?")
