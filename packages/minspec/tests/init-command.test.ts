@@ -20,6 +20,7 @@ vi.mock('vscode', () => ({
   window: {
     showErrorMessage: vi.fn(),
     showInformationMessage: vi.fn(),
+    showWarningMessage: vi.fn(),
   },
 }));
 
@@ -28,7 +29,8 @@ vi.mock('vscode', () => ({
 vi.mock('../src/lib/scaffold', () => ({
   scaffold: vi.fn(),
   generateHarnessFiles: vi.fn(),
-  refreshHarnessFiles: vi.fn(),
+  // Default: no managed-region warnings (clean refresh).
+  refreshHarnessFiles: vi.fn(() => []),
 }));
 
 // ─── Mock folder resolver (avoid touching the real workspace) ────────────────
@@ -116,6 +118,54 @@ describe('initRefreshCommand() — write-failure surfacing (#153)', () => {
     expect(refreshHarnessFiles).toHaveBeenCalledWith('/tmp/ws');
     expect(vscode.window.showInformationMessage).toHaveBeenCalledTimes(1);
     expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+    expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
+  });
+
+  // T3 — Regression: #348 — ManagedRegionWarning[] was silently discarded;
+  // success toast fired unconditionally even when managed files were left stale.
+  it('surfaces each ManagedRegionWarning via showWarningMessage (#348)', async () => {
+    vi.mocked(refreshHarnessFiles).mockReturnValueOnce([
+      {
+        outputPath: '.github/workflows/minspec-ci.yml',
+        message:
+          'MinSpec-managed markers missing in .github/workflows/minspec-ci.yml; left untouched — restore the markers or delete the file to re-scaffold.',
+      },
+    ]);
+
+    await initRefreshCommand('/tmp/ws');
+
+    // Success toast still fires (the refresh itself completed).
+    expect(vscode.window.showInformationMessage).toHaveBeenCalledTimes(1);
+    expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+    // The warning must be surfaced — this is what PR #311 built and #348 fixed.
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1);
+    const warnMsg = vi.mocked(vscode.window.showWarningMessage).mock.calls[0][0] as string;
+    expect(warnMsg).toContain('markers missing');
+    expect(warnMsg).toContain('.github/workflows/minspec-ci.yml');
+  });
+
+  it('surfaces multiple warnings when several managed files have missing markers (#348)', async () => {
+    vi.mocked(refreshHarnessFiles).mockReturnValueOnce([
+      {
+        outputPath: '.github/workflows/minspec-ci.yml',
+        message: 'MinSpec-managed markers missing in .github/workflows/minspec-ci.yml; left untouched — restore the markers or delete the file to re-scaffold.',
+      },
+      {
+        outputPath: '.githooks/commit-msg',
+        message: 'MinSpec-managed markers missing in .githooks/commit-msg; left untouched — restore the markers or delete the file to re-scaffold.',
+      },
+    ]);
+
+    await initRefreshCommand('/tmp/ws');
+
+    expect(vscode.window.showInformationMessage).toHaveBeenCalledTimes(1);
+    expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(2);
+    const warnMsgs = vi.mocked(vscode.window.showWarningMessage).mock.calls.map(
+      (c) => c[0] as string,
+    );
+    expect(warnMsgs.some((m) => m.includes('minspec-ci.yml'))).toBe(true);
+    expect(warnMsgs.some((m) => m.includes('.githooks/commit-msg'))).toBe(true);
   });
 });
 
