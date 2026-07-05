@@ -504,6 +504,52 @@ describe('classifyCommand()', () => {
     expect(vscode.window.setStatusBarMessage).not.toHaveBeenCalled();
   });
 
+  // ── #302 (T3 regression): auto mode + a NULLISH folderArg must never reach the
+  // interactive folder picker. The git-HEAD watcher fires on every commit and
+  // passes its own resolved folder; an `undefined`/`null` folderArg on the auto
+  // path is NOT a cue to prompt the user — that popped a project picker on every
+  // commit (the #302 nag). It is a silent no-op instead. Guards the asymmetric
+  // gate the reviewer flagged: `folderArg = undefined` reached resolveTargetFolder
+  // exactly like a missing arg did. ───────────────────────────────────────────
+
+  it('auto mode never opens the interactive picker on an undefined folderArg (#302)', async () => {
+    // analyzeGitDiff/classify are mocked to WOULD-succeed; the point is the run
+    // never gets that far because it early-returns before touching the resolver.
+    const signals = [makeSignal('fileCount', 4, 'T2')];
+    vi.mocked(analyzeGitDiff).mockResolvedValueOnce(signals);
+    vi.mocked(classify).mockReturnValue(makeResult('T2', signals, 0.75, ['specify', 'plan']));
+
+    await classifyCommand(undefined, { auto: true });
+
+    // The interactive resolver (a modal project picker) is never reached…
+    expect(resolveTargetFolder).not.toHaveBeenCalled();
+    // …and with no explicit folder, the auto run is a silent no-op: no classify,
+    // no status-bar line, no toast.
+    expect(analyzeGitDiff).not.toHaveBeenCalled();
+    expect(vscode.window.setStatusBarMessage).not.toHaveBeenCalled();
+    expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
+  });
+
+  it('auto mode never opens the interactive picker on a null folderArg (#302)', async () => {
+    await classifyCommand(null as unknown as string, { auto: true });
+
+    expect(resolveTargetFolder).not.toHaveBeenCalled();
+    expect(analyzeGitDiff).not.toHaveBeenCalled();
+    expect(vscode.window.setStatusBarMessage).not.toHaveBeenCalled();
+  });
+
+  it('explicit (non-auto) mode with no folderArg still resolves via the picker', async () => {
+    // The asymmetry is intentional: only the machine-triggered auto path is
+    // silenced. An explicit user invocation with no folder must still prompt.
+    const signals = [makeSignal('fileCount', 4, 'T2')];
+    vi.mocked(analyzeGitDiff).mockResolvedValueOnce(signals);
+    vi.mocked(classify).mockReturnValue(makeResult('T2', signals, 0.75, ['specify', 'plan']));
+
+    await classifyCommand(undefined); // no opts → interactive
+
+    expect(resolveTargetFolder).toHaveBeenCalled();
+  });
+
   it('explicit (non-auto) mode shows the interactive toast, not the status bar', async () => {
     const signals = [makeSignal('fileCount', 4, 'T2')];
     vi.mocked(analyzeGitDiff).mockResolvedValueOnce(signals);

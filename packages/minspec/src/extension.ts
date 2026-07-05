@@ -534,7 +534,15 @@ export function activate(context: vscode.ExtensionContext): void {
         if (!isWatchedGitPath(uri.fsPath)) return;
         // Auto mode — passive status-bar line, never the interactive toast.
         // This fires on every commit; a buttoned verdict here is pure nag (#216).
-        vscode.commands.executeCommand('minspec.classify', undefined, {
+        //
+        // #302: pass the folder EXPLICITLY (`workspaceRoot`), not `undefined`.
+        // This is a watcher (machine-triggered by a git commit/branch event), so
+        // it MUST NOT reach the interactive folder resolver — that would pop a
+        // project picker at the user with no command invoked. `workspaceRoot` is
+        // the non-interactive activation root (also this watcher's RelativePattern
+        // base above), so classifyCommand takes its `folderArg` path and never
+        // prompts. Enforced structurally by invariants.test.ts Inv 7.
+        vscode.commands.executeCommand('minspec.classify', workspaceRoot, {
           auto: true,
         });
       };

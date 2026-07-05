@@ -25,6 +25,16 @@ export async function classifyCommand(
   // (#216 facet 3, DR-021 Risk 2).
   const auto = opts?.auto === true;
 
+  // #302: the auto path is machine-triggered by the git-HEAD watcher on every
+  // commit — it MUST NOT fall through to the interactive resolveTargetFolder()
+  // (a modal project picker) when no folder is passed. The watcher always passes
+  // its own resolved folder, so a NULLISH folderArg (undefined/null) here means
+  // "no explicit folder", NOT "ask the user which project". Treating it like a
+  // missing arg — resolving it interactively — is the asymmetric-gate hole that
+  // popped a picker at the user on every commit. Silent no-op instead; only an
+  // explicit (user-invoked) run may prompt.
+  if (auto && folderArg == null) return;
+
   const workspaceRoot = folderArg ?? (await resolveTargetFolder());
   if (!workspaceRoot) return;
 
