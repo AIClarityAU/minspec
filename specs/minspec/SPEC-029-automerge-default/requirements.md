@@ -86,6 +86,13 @@ deny-by-default; this spec is how a project deliberately, visibly turns it on.
 - **INV-6 Enabling is auditable.** The resolved mode is already recorded per-decision by
   SPEC-024 (FR-7 audit + `dispatch-issue.sh` log line). Enabling auto-merge for a project
   is a committed change to `config.json` — visible in git, not a hidden runtime flag.
+- **INV-7 The init question withholds the on-switch while the gate has open wrong-merge
+  holes (C2(a)).** While any of #489 / #490 / #491 is open, the init question (FR-2) MUST NOT
+  present `consequence-hybrid` as a writable choice — deny-by-default extended to the UI: do
+  not offer a one-click enable for a gate with a known un-closed wrong-merge path. (The gate
+  and the `MINSPEC_AUTOMERGE_MODE` env override still accept the value for testing; this
+  invariant binds the *init UX* only.) T-test: with the holes-open flag set, the offer
+  exposes no action that writes `consequence-hybrid`.
 
 ## Functional Requirements
 
@@ -95,23 +102,33 @@ deny-by-default; this spec is how a project deliberately, visibly turns it on.
   `config.json` without an `autoMerge` block by default (absence ⇒ off), or writes an
   explicit `pr-gate` — **whichever keeps INV-1/INV-5** (an explicit `pr-gate` is clearer;
   an absent key is simpler — pin in Plan).
-- **FR-2 Init-time question.** After the scaffold/harness writes in `initCommand`
-  (`init.ts:428`+), and only when `autoMerge.mode` is **absent**, present a non-modal offer
-  (following `offerScaffoldCommit`): *"When review + security come back clean, auto-merge
-  low-blast PRs automatically, or hold every PR for a ~30-second human read?"* Two explicit
-  actions — **"Hold every PR (recommended)"** → `pr-gate`; **"Auto-merge low-blast"** →
-  `consequence-hybrid`. Dismiss ⇒ `pr-gate` (INV-2). Writes the chosen mode to
-  `config.json`. Never blocks the init result (best-effort, like the ruleset advisory).
+- **FR-2 Init-time question (v1 = hold-only, per C2(a)).** After the scaffold/harness
+  writes in `initCommand` (`init.ts:428`+), and only when `autoMerge.mode` is **absent**,
+  present a non-modal offer (following `offerScaffoldCommit`). **While SPEC-024's wrong-merge
+  holes #489 / #490 / #491 remain open, the question offers only `pr-gate`** — the
+  `consequence-hybrid` on-switch is shown as **not-yet-available** ("Auto-merge low-blast —
+  available once #489/#490/#491 close"), never as a writable choice (INV-7). Copy: *"MinSpec
+  holds every PR for a ~30-second human read before merge. Auto-merge of low-blast PRs is not
+  enabled yet (pending gate hardening #489/#490/#491)."* with a single **"Keep holding every
+  PR"** action → writes `pr-gate`. Dismiss ⇒ `pr-gate` (INV-2). Never blocks the init result
+  (best-effort, like the ruleset advisory). *(When the three holes close, a follow-up flips
+  this to the two-action offer — see Follow-ups. The gate + env override already accept
+  `consequence-hybrid` for testing; only the init UX withholds it in v1.)*
 - **FR-3 Dispatch reads the policy.** In `dispatch-issue.sh`, resolve the mode with
   precedence: explicit `MINSPEC_AUTOMERGE_MODE` env (override for CI/one-off) →
   `.minspec/config.json` `autoMerge.mode` → `pr-gate`. Preserve the exact-string,
   no-fail-open guard: any value other than `consequence-hybrid` ⇒ `pr-gate` (INV-1). Add
   the `config.json` read (currently `:382` reads env only).
-- **FR-4 VS Code setting (write-through mirror).** Add `minspec.autoMerge.mode` (enum
-  `pr-gate` | `consequence-hybrid`, default `pr-gate`, `scope: "resource"`/window i.e.
-  Workspace, `markdownDescription` naming the consequence) to `package.json`
-  `contributes.configuration`. Changing it writes through to `.minspec/config.json` (INV-4);
-  the Settings UI is a discoverable change-later surface, not a second source of truth.
+- **FR-4 VS Code setting (write-through mirror; v1 enum = `pr-gate` only, per INV-7).** Add
+  `minspec.autoMerge.mode` to `package.json` `contributes.configuration`, `scope: "resource"`
+  (Workspace), `markdownDescription` naming the consequence and linking #489/#490/#491.
+  **In v1 the enum offers only `pr-gate`** — so no UI surface (init question *or* Settings)
+  presents a one-click `consequence-hybrid` enable while the holes are open (INV-7,
+  consistent with FR-2). The enum expands to include `consequence-hybrid` in the same
+  follow-up that flips the init offer. Changing the setting writes through to
+  `.minspec/config.json` (INV-4); the Settings UI is a discoverable change-later surface,
+  not a second source of truth. *(Advanced path unchanged: `MINSPEC_AUTOMERGE_MODE=consequence-hybrid`
+  still works for gate testing/CI — the withholding binds the graphical UI, not the env override.)*
 
 ## Contract (TypeScript sketch)
 
@@ -130,27 +147,17 @@ const resolveMode = (env: string | undefined, cfg?: AutoMergeMode): AutoMergeMod
   : 'pr-gate';                                      // absent/unknown ⇒ off (deny-by-default)
 ```
 
-## Decisions needed (Clarify — human-only, #229 `decide/policy`)
+## Resolved Clarifications (Paul Harvey, 2026-07-05)
 
-- **C1 — Shipped default.** Confirm the shipped/default answer is **`pr-gate`** (hold every
-  PR; auto-merge off). *(Recommended: yes — deny-by-default, and it matches the existing
-  gate kill-switch. This spec assumes it.)*
-- **C2 — Offer the on-switch now, given SPEC-024's open holes?** Enabling
-  `consequence-hybrid` routes low-blast PRs to a **no-human merge** through the SPEC-024
-  gate, which still has **open wrong-merge holes**: #489 (self-reported root cause), #490
-  (analyzer false-negative on subtle code), #491 (swallowed audit failure). Choose:
-  - **(a)** the init question offers **only `pr-gate`** (auto-merge visibly "coming soon,
-    gated on #489/#490/#491") until those close — *safest, honours never-wrong*;
-  - **(b)** offer both, but the `consequence-hybrid` action shows a **loud warning** naming
-    the open holes before it writes;
-  - **(c)** offer both freely (the gate is deny-by-default and the holes are pre-existing).
-  *(Recommendation: **(a)** or **(b)**. The whole product promise is a never-wrong signpost;
-  shipping a one-click on-switch for a gate with three known un-closed wrong-merge paths
-  undercuts it. This is your call.)*
-- **C3 — Setting is authoritative or config.json?** Confirm `config.json` is the source of
-  truth and the VS Code setting writes through (FR-4 / INV-4), vs. making the setting
-  primary. *(Recommended: config.json primary — the dev-time script consumer cannot read VS
-  Code settings.)*
+- **C1 — Shipped default = `pr-gate`** (hold every PR; auto-merge off). Deny-by-default;
+  matches the gate kill-switch. *(Assumed/confirmed.)*
+- **C2 — On-switch: option (a), hold-only until the holes close.** While #489 / #490 / #491
+  are open, the init question offers **only `pr-gate`**; `consequence-hybrid` is shown as
+  not-yet-available and is not a writable choice (FR-2, **INV-7**). A follow-up flips the
+  offer on when the three holes close. *(Chosen over (b) warn-and-allow and (c) offer-freely —
+  the never-wrong promise wins.)*
+- **C3 — `config.json` is authoritative; the VS Code setting writes through** (FR-4 / INV-4).
+  The dev-time script consumer cannot read VS Code settings. *(Confirmed.)*
 
 ## Test Plan
 
@@ -159,6 +166,9 @@ const resolveMode = (env: string | undefined, cfg?: AutoMergeMode): AutoMergeMod
   `pr-gate` and no write of `consequence-hybrid`. INV-3 the setting's declared scope is
   Workspace (assert `package.json` `scope`). INV-4 writing the setting updates
   `config.json`. INV-5 init with an existing `autoMerge.mode` → question NOT shown.
+  **INV-7 (C2(a)):** with the holes-open flag set, the init offer exposes no action that
+  writes `consequence-hybrid`, and the `package.json` enum for `minspec.autoMerge.mode`
+  contains only `pr-gate`.
 - **T1 (contract):** `resolveMode` precedence table (env override > config > default);
   `loadConfig` merges an absent `autoMerge` to the default.
 - **FR-3 dispatch:** a `config.json` with `consequence-hybrid` and no env → dispatch runs
@@ -175,7 +185,9 @@ const resolveMode = (env: string | undefined, cfg?: AutoMergeMode): AutoMergeMod
 
 ## Follow-ups (tracked)
 
-- SPEC-024 open wrong-merge holes that condition C2: #489, #490, #491 (+ #466 TOCTOU).
-- If C2 chooses (a)/(b), the "auto-merge available once #489/#490/#491 close" state may want
-  a small follow-up to flip the offer on when they land.
+- SPEC-024 open wrong-merge holes that gate the on-switch (C2(a) / INV-7): #489, #490, #491
+  (+ #466 TOCTOU).
+- **Flip the offer on when the holes close** (C2(a)): once #489/#490/#491 are closed, extend
+  FR-2 to the two-action offer and FR-4's enum to include `consequence-hybrid`. Tracked
+  (blocked-by): [#499](https://github.com/AIClarityAU/minspec/issues/499).
 - `plan-gate` HITL mode (#183 option 2) — deferred with SPEC-024.
