@@ -51,7 +51,7 @@ vi.mock('vscode', () => ({
 vi.mock('../src/lib/scaffold', () => ({
   scaffold: vi.fn(),
   generateHarnessFiles: vi.fn(),
-  refreshHarnessFiles: vi.fn(),
+  refreshHarnessFiles: vi.fn(() => []),
 }));
 
 vi.mock('../src/lib/adr-manager', () => ({
