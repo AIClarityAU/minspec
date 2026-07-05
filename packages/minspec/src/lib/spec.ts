@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import type { Tier, Phase } from './config';
 import { PHASES } from './config';
+import { getSpecStatus, phasesForApproval } from './lifecycle';
 
 /** Status of an individual phase */
 export type PhaseStatus = 'pending' | 'in-progress' | 'done' | 'skipped';
@@ -468,5 +469,117 @@ export function setSpecStatus(filePath: string, status: SpecStatus): SpecStatus 
     ? yaml.replace(statusLineRe, `$1status: ${status}`)
     : `${yaml}\nstatus: ${status}`;
   fs.writeFileSync(filePath, content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---\n`), 'utf-8');
+  return status;
+}
+
+/**
+ * Surgically rewrite phase-status lines inside a spec's `phases:` frontmatter
+ * block, in place. Only lines that ALREADY exist under `phases:` are rewritten —
+ * absent phases are NOT added, preserving the file's chosen shape (a spec that
+ * tracks no `clarify:` line keeps none). No-op when there is no `phases:` block.
+ *
+ * Mirrors `setSpecStatus`: line-level, never a `writeSpec()` re-serialize, so
+ * full-line `#` comments (the DR-012 lock reminder) and field order survive.
+ * Throws when there is no frontmatter block at all.
+ */
+export function setSpecPhases(filePath: string, phases: Partial<Record<Phase, PhaseStatus>>): void {
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const fmMatch = content.match(FRONTMATTER_RE);
+  if (!fmMatch) {
+    throw new Error(`No frontmatter block in ${filePath}`);
+  }
+  const lines = fmMatch[1].split('\n');
+  const phasesIdx = lines.findIndex((l) => /^phases[ \t]*:/.test(l));
+  if (phasesIdx === -1) return; // no phases block → nothing to rewrite
+  for (let i = phasesIdx + 1; i < lines.length; i++) {
+    // The phases block ends at the first line that is not an indented child.
+    if (!/^[ \t]/.test(lines[i])) break;
+    const m = lines[i].match(/^([ \t]+)([A-Za-z][\w-]*)[ \t]*:/);
+    if (!m) continue;
+    const val = phases[m[2] as Phase];
+    if (val !== undefined) lines[i] = `${m[1]}${m[2]}: ${val}`;
+  }
+  const newYaml = lines.join('\n');
+  fs.writeFileSync(filePath, content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---\n`), 'utf-8');
+}
+
+/**
+ * Advance a spec into the `implementing` band on approval, keeping the literal
+ * `status:` line and any `phases:` map in agreement (#148). When the spec carries
+ * a `phases:` block, the block is advanced (specifying band → done, implementing
+ * band started) and the status line is written as the status the *persisted bytes*
+ * derive, so the two representations cannot diverge. When there is no `phases:`
+ * block, only the `status:` line is set to `implementing` — the established
+ * single-writer path.
+ *
+ * Degenerate-case gate (#148 MAJOR). `phasesForApproval` computes the target from
+ * the in-memory map, where `parseSpec` MATERIALIZED every absent phase to
+ * `pending`. But `setSpecPhases` only rewrites phase lines that PHYSICALLY exist —
+ * it never invents one (its contract, preserving the file's shape). So a phases
+ * block missing every implementing-band line (e.g. just `specify: in-progress`,
+ * no plan/tasks/implement) cannot persist an implementing-band `in-progress`
+ * marker: a re-read of the bytes derives a different status than the in-memory
+ * target. Writing the status from the in-memory map — the shape of the earlier
+ * fix — would emit a `status:` line the file provably won't reproduce, i.e. the
+ * exact #148 desync this function exists to prevent. Instead:
+ *   1. the written status is derived from the PERSISTED bytes, never the in-memory
+ *      map, so `status` == `getSpecStatus(persisted phases)` by construction; and
+ *   2. if the bytes cannot realize the approval target (the degenerate block), the
+ *      advance is REJECTED with a throw rather than silently under-advanced — an
+ *      un-committable-bad-state gate (RCDD Phase 4). Real specs all carry an
+ *      implementing-band line, so this fires only on a degenerate block, and the
+ *      file is left internally consistent (status == derived) either way.
+ *
+ * Preserves approval's flip-then-hash discipline (DR-003): callers invoke this
+ * BEFORE recording the approval hash, so the hash binds post-flip bytes. Returns
+ * the new spec status. Throws when there is no frontmatter block, and when a
+ * degenerate phases block cannot realize the approval target without desyncing.
+ */
+export function advanceSpecToImplementing(filePath: string): SpecStatus {
+  const content = fs.readFileSync(filePath, 'utf-8');
+  const fmMatch = content.match(FRONTMATTER_RE);
+  if (!fmMatch) {
+    throw new Error(`No frontmatter block in ${filePath}`);
+  }
+  // No `phases:` block → the `status:` line is the sole lifecycle representation;
+  // a status-only flip has nothing to contradict.
+  if (!/^phases[ \t]*:/m.test(fmMatch[1])) {
+    return setSpecStatus(filePath, 'implementing');
+  }
+
+  const newPhases = phasesForApproval(parseSpec(content).frontmatter.phases);
+  const target = getSpecStatus(newPhases);
+  setSpecPhases(filePath, newPhases);
+
+  // Derive the status from the PERSISTED bytes (never the in-memory map) so the
+  // `status:` line and the phases-derived status are identical by construction.
+  const persistedStatus = getSpecStatus(
+    parseSpec(fs.readFileSync(filePath, 'utf-8')).frontmatter.phases,
+  );
+  const status = setSpecStatus(filePath, persistedStatus);
+
+  // Enforced invariant (defense-in-depth): the persisted `status:` line MUST equal
+  // the status its persisted `phases:` map derives. True by construction above;
+  // asserting it turns any future regression into a loud throw, never a silent
+  // self-contradicting file (#148).
+  const after = parseSpec(fs.readFileSync(filePath, 'utf-8')).frontmatter;
+  if (after.status !== getSpecStatus(after.phases)) {
+    throw new Error(
+      `advanceSpecToImplementing left ${filePath} desynced: status=${after.status} ` +
+        `but its phases derive ${getSpecStatus(after.phases)} (should be impossible).`,
+    );
+  }
+
+  // Degenerate-block gate: the bytes could not realize the approval target, so
+  // reject rather than record an approval that half-advanced the spec.
+  if (persistedStatus !== target) {
+    throw new Error(
+      `Cannot advance ${filePath} to ${target}: its phases block has no ` +
+        `implementing-band line (plan/tasks/implement) to mark in-progress, so the ` +
+        `status line and the phases-derived status would disagree (the persisted ` +
+        `phases derive ${persistedStatus}). Add a plan/tasks/implement phase line, ` +
+        `or remove the phases block.`,
+    );
+  }
   return status;
 }
