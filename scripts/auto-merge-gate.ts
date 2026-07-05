@@ -144,6 +144,48 @@ export function baseRedVerdict(r: VitestRun): boolean {
 }
 
 /**
+ * #513 — a run where NOTHING executed (`numFailed === 0 && numPassed === 0`)
+ * means the named test was NOT SELECTED, not that it failed. Two shapes fold in:
+ *
+ *   - `numTotal === 0` — no test file / no test collected at all; and
+ *   - vitest's SKIPPED-reporting for a `-t` pattern that matched a FILE but no
+ *     test inside it: `numTotal: 1, numPassed: 0, numFailed: 0, numPending: 1`.
+ *
+ * The OLD not-found guard checked only `numTotal === 0`, so the skipped shape
+ * slipped past it, then `headGreenVerdict` (needs a pass) read the 0-passed run as
+ * a FALSE "RED on head" — the exact #513 defect that made the prover inert on the
+ * common nested-`describe` case (a mis-joined `-t` pattern selects nothing). A
+ * selection miss is INCONCLUSIVE / not-found, never a genuine red (which is
+ * `numFailed >= 1`).
+ */
+export function testNotSelected(r: VitestRun): boolean {
+  return r.numFailed === 0 && r.numPassed === 0;
+}
+
+/**
+ * #513 — build the vitest `-t` pattern from the test-name portion of a doc-format
+ * regression id (`file > describe > … > it`, split on the FIRST ` > `).
+ *
+ * vitest matches `-t` as a REGEX (`new RegExp(pattern)`, no flags) against each
+ * test's full name — which vitest builds by joining the ancestor `describe` titles
+ * and the `it` title with a single SPACE (`getTaskFullName`), NOT ` > `. So we:
+ *   1. normalize any internal ` > ` separators in the name portion to a single
+ *      space, so the pattern matches that space-join; and
+ *   2. regex-escape the result so title metacharacters (`.`, `(`, `)`, `+`, `[`,
+ *      …) match LITERALLY instead of acting as regex operators (e.g. an unescaped
+ *      `(v1.2)` becomes a capture group and matches nothing against the literal
+ *      `(v1.2)` in the name).
+ * Without this the pattern matches NOTHING → vitest reports the test skipped →
+ * false "RED on head" → `regression-unproven`, which made auto-merge inert on
+ * every nested-`describe` regression (the common case). `#` is intentionally NOT
+ * escaped — it is a literal in JS regex, and vitest compiles without the `u` flag.
+ */
+export function toVitestNamePattern(testNamePortion: string): string {
+  const spaceJoined = testNamePortion.split(' > ').join(' ');
+  return spaceJoined.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
  * Run vitest filtered to a single named regression test in `dir`, via the JSON
  * reporter (robust, structured — never scrape human output). Captures the run
  * even on non-zero exit (a failing test is the expected "red" state).
@@ -154,8 +196,11 @@ function runNamedTest(dir: string, testFile: string, testName: string): VitestRu
     'vitest',
     'run',
     testFile,
+    // #513: `-t` is a REGEX matched against vitest's SPACE-joined full name —
+    // normalize ` > ` → space and regex-escape, else nested-`describe` tests
+    // match nothing and read as a false red.
     '-t',
-    testName,
+    toVitestNamePattern(testName),
     '--reporter=json',
     `--outputFile=${outFile}`,
     '--no-color',
@@ -285,8 +330,16 @@ export function proveRegression(
 
   // ── HEAD: run twice; establishes the test EXISTS and is green on head. ──
   const head1 = run(worktree, testFile, testName);
-  if (head1.numTotal === 0) {
-    return notProven(`test not found on head: ${regressionTest}`);
+  // #513 FAIL-SAFE: a SELECTION MISS (nothing ran — `numFailed === 0 &&
+  // numPassed === 0`, whether 0-collected OR vitest's skipped-reporting for a
+  // `-t` that matched the file but no test) is NOT a red. Surface it distinctly
+  // as not-found / inconclusive so a mis-named regression test is fixed, never
+  // silently read by `headGreenVerdict` as a false "RED on head" (the defect that
+  // made the prover inert on nested-`describe` tests).
+  if (testNotSelected(head1)) {
+    return notProven(
+      `regression test not selectable on head — matched no test (check the name; not found or mis-named): ${regressionTest}`,
+    );
   }
   const head2 = run(worktree, testFile, testName);
   const head1Green = headGreenVerdict(head1);
