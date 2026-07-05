@@ -39,6 +39,8 @@ import {
   parseArgs,
   headGreenVerdict,
   baseRedVerdict,
+  testNotSelected,
+  toVitestNamePattern,
   proveRegression,
   detectManifestChange,
   isBoundaryPath,
@@ -207,10 +209,23 @@ describe('SPEC-024 BLOCKER 2 — proveRegression cannot be fooled into a false p
     expect(r.note).toMatch(/non-deterministic on base/);
   });
 
-  it('named test not found on head → NOT proven', () => {
+  it('named test not selected on head (0 collected) → NOT proven', () => {
     const r = proveRegression(WT, 'BASE', REG, deps(vr({ numTotal: 0, numPassed: 0 }), RED_ASSERTION));
     expect(r.regressionProvenBaseRed).toBe(false);
-    expect(r.note).toMatch(/not found on head/);
+    expect(r.note).toMatch(/not selectable on head/);
+  });
+
+  it('#513 — a SKIPPED head run (file matched, -t hit no test) → not-found/inconclusive, NOT red', () => {
+    // vitest reports an unmatched `-t` as SKIPPED, not absent: numTotal 1 with
+    // 0 passed / 0 failed / 1 pending. The old `numTotal === 0` guard missed this
+    // shape, so `headGreenVerdict` read it as a false "RED on head". It must now be
+    // surfaced as a selection miss — never classified red.
+    const SKIPPED = vr({ numTotal: 1, numPassed: 0, numFailed: 0, exitCode: 0 });
+    const r = proveRegression(WT, 'BASE', REG, deps(SKIPPED, RED_ASSERTION));
+    expect(r.regressionProvenBaseRed).toBe(false);
+    expect(r.regressionGreenOnHead).toBe(false);
+    expect(r.note).toMatch(/not selectable on head/);
+    expect(r.note).not.toMatch(/RED on head/);
   });
 
   it('red on head (the fix does not actually pass) → NOT proven', () => {
@@ -224,6 +239,170 @@ describe('SPEC-024 BLOCKER 2 — proveRegression cannot be fooled into a false p
     expect(r.regressionProvenBaseRed).toBe(false);
     expect(r.note).toMatch(/nothing to prove/);
   });
+});
+
+// ─── #513 — `-t` selection format + skipped≠red predicates ───────────────────
+
+describe('#513 — toVitestNamePattern matches vitest space-joined full name', () => {
+  it('normalizes ` > ` separators in the name portion to single spaces', () => {
+    expect(toVitestNamePattern('outer group > inner > rejects the bad state')).toBe(
+      'outer group inner rejects the bad state',
+    );
+  });
+
+  it('regex-escapes metacharacters so titles match literally (parens/dots)', () => {
+    // `(v1.2)` unescaped is a capture group + wildcard `.` → matches nothing
+    // against the literal `(v1.2)` in the name. Escaped, it matches literally.
+    expect(toVitestNamePattern('outer group > inner (v1.2) > rejects the #bad state')).toBe(
+      'outer group inner \\(v1\\.2\\) rejects the #bad state',
+    );
+  });
+
+  it('a name with no ` > ` is passed through (escaped) unchanged in structure', () => {
+    expect(toVitestNamePattern('plain name + suffix')).toBe('plain name \\+ suffix');
+  });
+
+  it('the escaped pattern actually matches its source string as a RegExp (vitest semantics)', () => {
+    // vitest compiles `-t` via `new RegExp(pattern)` (no flags) and matches it
+    // against the SPACE-joined full name with `.match`. Prove the round-trip.
+    const fullName = 'outer group inner (v1.2) rejects the #bad state';
+    const docId = 'outer group > inner (v1.2) > rejects the #bad state';
+    expect(fullName.match(new RegExp(toVitestNamePattern(docId)))).not.toBeNull();
+    // The OLD (unescaped, ` > `-joined) pattern matches NOTHING — the #513 bug.
+    expect(fullName.match(new RegExp(docId))).toBeNull();
+  });
+});
+
+describe('#513 — testNotSelected folds 0-collected AND skipped into one selection-miss', () => {
+  it('0 collected (numTotal 0) → not selected', () => {
+    expect(testNotSelected(vr({ numTotal: 0, numPassed: 0, numFailed: 0 }))).toBe(true);
+  });
+  it('vitest skipped-reporting (numTotal 1, 0 passed, 0 failed) → not selected', () => {
+    expect(testNotSelected(vr({ numTotal: 1, numPassed: 0, numFailed: 0 }))).toBe(true);
+  });
+  it('a real failure (numFailed ≥ 1) is NOT a selection miss (it is a genuine red)', () => {
+    expect(testNotSelected(RED_ASSERTION)).toBe(false);
+  });
+  it('a pass is NOT a selection miss', () => {
+    expect(testNotSelected(GREEN)).toBe(false);
+  });
+});
+
+// ─── #513 — REAL prover path (NO runNamedTest mock) over a nested-describe fixture
+//
+// Every other prover test injects `runNamedTest`, so the actual vitest `-t`
+// selection was never exercised — which is why #513 shipped. These two spawn the
+// REAL `runNamedTest` (real `npx vitest` subprocesses) against a hermetic tmp
+// fixture with a genuine NESTED `describe` and metacharacters in the titles (the
+// exact shape the ` > `-joined pattern broke). Only base-PREP is injected (a tmp
+// dir with the OLD source + the head test overlaid — the real RCDD red→green
+// setup, minus the `git worktree add` that is not the code under test).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** Locate the hoisted `node_modules/vitest` by walking up from cwd. */
+function findRootNodeModules(start: string): string {
+  let dir = start;
+  for (let i = 0; i < 64; i++) {
+    const nm = path.join(dir, 'node_modules');
+    if (fs.existsSync(path.join(nm, 'vitest'))) return nm;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error(`could not locate node_modules/vitest from ${start}`);
+}
+
+const NESTED_TEST_SRC =
+  `import { describe, it, expect } from 'vitest';\n` +
+  `import { answer } from './subject';\n` +
+  `describe('outer group', () => {\n` +
+  `  describe('inner (v1.2)', () => {\n` +
+  `    it('rejects the #bad state', () => { expect(answer()).toBe(42); });\n` +
+  `  });\n` +
+  `});\n`;
+
+const VITEST_CFG = `import { defineConfig } from 'vitest/config';\nexport default defineConfig({ test: { include: ['**/*.test.ts'] } });\n`;
+
+/** Build a hermetic HEAD fixture dir with the CORRECT source (answer → 42). */
+function makeHeadFixture(nodeModules: string): string {
+  const headDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-513-head-'));
+  fs.symlinkSync(nodeModules, path.join(headDir, 'node_modules'), 'dir');
+  fs.writeFileSync(path.join(headDir, 'vitest.config.ts'), VITEST_CFG);
+  fs.writeFileSync(path.join(headDir, 'subject.ts'), `export function answer(): number { return 42; }\n`);
+  fs.writeFileSync(path.join(headDir, 'regression.test.ts'), NESTED_TEST_SRC);
+  return headDir;
+}
+
+/** Base-prep dep: tmp dir with the OLD source (answer → 41) + head test overlaid. */
+function makeBasePrep(headDir: string, nodeModules: string, cleanup: string[]): ProverDeps {
+  return {
+    prepareBase: (worktree, _base, baseDir, overlayFiles) => {
+      fs.mkdirSync(baseDir, { recursive: true });
+      cleanup.push(baseDir);
+      fs.symlinkSync(nodeModules, path.join(baseDir, 'node_modules'), 'dir');
+      fs.copyFileSync(path.join(headDir, 'vitest.config.ts'), path.join(baseDir, 'vitest.config.ts'));
+      // OLD source: returns 41, so the overlaid (head) test FAILS on base → red.
+      fs.writeFileSync(path.join(baseDir, 'subject.ts'), `export function answer(): number { return 41; }\n`);
+      for (const abs of overlayFiles) {
+        const rel = path.relative(worktree, abs);
+        const dest = path.join(baseDir, rel);
+        fs.mkdirSync(path.dirname(dest), { recursive: true });
+        fs.copyFileSync(abs, dest);
+      }
+    },
+    removeBase: (_wt, baseDir) => {
+      fs.rmSync(baseDir, { recursive: true, force: true });
+    },
+  };
+}
+
+describe('#513 — REAL prover path over a genuine nested-describe fixture (no runNamedTest mock)', () => {
+  const NODE_MODULES = findRootNodeModules(process.cwd());
+  // doc-format id the dispatch passes: `file > describe > describe > it`, ` > `-joined.
+  const REG_NESTED = 'regression.test.ts > outer group > inner (v1.2) > rejects the #bad state';
+
+  it(
+    '(a) nested-describe test red-on-base / green-on-head → PROVEN (regression-unproven cleared)',
+    () => {
+      const cleanup: string[] = [];
+      const headDir = makeHeadFixture(NODE_MODULES);
+      cleanup.push(headDir);
+      try {
+        const r = proveRegression(headDir, 'BASE', REG_NESTED, makeBasePrep(headDir, NODE_MODULES, cleanup));
+        // Before the fix the ` > `-joined `-t` selected NOTHING → head read as a
+        // false RED → NOT proven. With the fix the nested test is selected, green
+        // on head, red on base → genuinely PROVEN.
+        expect(r.regressionGreenOnHead).toBe(true);
+        expect(r.regressionProvenBaseRed).toBe(true);
+        expect(r.note).toMatch(/proven red→green/);
+      } finally {
+        for (const d of cleanup) fs.rmSync(d, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
+
+  it(
+    '(b) a mis-named / unmatched nested test → not-found/inconclusive, NEVER classified red',
+    () => {
+      const cleanup: string[] = [];
+      const headDir = makeHeadFixture(NODE_MODULES);
+      cleanup.push(headDir);
+      try {
+        const MISNAMED = 'regression.test.ts > outer group > inner (v1.2) > NO SUCH title';
+        const r = proveRegression(headDir, 'BASE', MISNAMED, makeBasePrep(headDir, NODE_MODULES, cleanup));
+        // Real vitest reports the unmatched `-t` as SKIPPED; the prover must read
+        // that as a selection miss (not-found), never as a red on head.
+        expect(r.regressionProvenBaseRed).toBe(false);
+        expect(r.regressionGreenOnHead).toBe(false);
+        expect(r.note).toMatch(/not selectable on head/);
+        expect(r.note).not.toMatch(/RED on head/);
+      } finally {
+        for (const d of cleanup) fs.rmSync(d, { recursive: true, force: true });
+      }
+    },
+    120_000,
+  );
 });
 
 // ─── BLOCKER 1 — manifest change injection ───────────────────────────────────
