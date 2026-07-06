@@ -9,17 +9,17 @@ aspects: [reviewer, hitl, never-wrong, signpost]
 depends_on: [SPEC-012]
 relates_to: [SPEC-010, SPEC-024, DR-047, DR-033, DR-041, DR-023]
 phases:
-  specify: in-progress   # requirements drafted 2026-07-05, awaiting human review; OQ-1..4 open
-  clarify: not-started   # T3 requires Clarify before Plan (OQs must resolve)
-  plan: not-started
+  specify: done          # requirements drafted 2026-07-05
+  clarify: done          # OQ-1..4 resolved 2026-07-06 (Paul Harvey) — see Clarify section
+  plan: not-started      # awaiting human Approve Spec before Plan
   tasks: not-started
   implement: not-started
 ---
 
 # MinSpec — Independent AI Review Across Every Approvable Type — Requirements
 
-**Date:** 2026-07-05
-**Status:** Specifying (SDD Specify phase)
+**Date:** 2026-07-05 (Clarify 2026-07-06)
+**Status:** Clarify complete — awaiting human *Approve Spec* before Plan
 **Triggered by:** [DR-047](../../../docs/decisions/DR-047.md) — generalises the PR-only
 independent reviewer (DR-033 §6) to every Approvable, after the 2026-06-29 rubber-stamp
 session ([#344](https://github.com/AIClarityAU/minspec/issues/344)–349: 7 live defects,
@@ -127,7 +127,9 @@ enough human") — and matches how the PR reviewer already runs (#342), extended
     correctly tier-scoped.
   - **Epic** — members consistent with the goal, goal measurable.
   - **Issue** — reproducible, single concern, named root cause (RCDD) not a bad-state
-    restatement. **AI-reviewed, never human-gated.**
+    restatement. **AI-reviewed, never human-gated.** Fires on **promotion from inbox**
+    (a `triage` / `role:*` label applied), not on raw open — reviews the issues that
+    matter, not inbox noise (OQ-4).
 - **FR-2 — Bounded auto-loop + human-authored fallback.** On `request-changes` the runner
   re-dispatches the **author agent** (default 2 cycles; then `agent-escalated` to the
   human). An `approve` verdict ends the cycle. For a **human-authored** artifact with no
@@ -135,10 +137,13 @@ enough human") — and matches how the PR reviewer already runs (#342), extended
   escalates straight to the human with findings attached (DR-047 §1 fallback).
 - **FR-3 — Per-type recording.** Extend the `ai-review:*` family (#342 poster) per type:
   `ai-review/<type>` status check + `ai-review:<type>:{pass,changes,pending,escalated}`
-  labels, for all doc types incl. Issue
+  labels, for all PR-attached doc types
   ([#530](https://github.com/AIClarityAU/minspec/issues/530)). Labels prefixed
   `ai-review:<type>:*` to bound proliferation. Named `ai-review:*`, never `ai-approved:*`
-  (INV-2).
+  (INV-2). **Issue is the exception (OQ-4):** an Issue has no PR head SHA to carry a
+  commit status, so the Issue verdict records as an `ai-review:issue:*` **label + a
+  findings comment only — no status check.** Acceptable because Issue is non-gated (no
+  `ready-to-merge`-style check consumes it).
 - **FR-4 — Signpost predicate generalisation (contract; owned by SPEC-012).** The
   next-human-task predicate generalises from PR-only to **all human-gated** types:
   present iff greenlit-for-type ∧ prior-stage-gates-clear ∧ human-gate-open (INV-4). This
@@ -148,18 +153,32 @@ enough human") — and matches how the PR reviewer already runs (#342), extended
   Approvable **and its implementing code**, the doc must be greenlit before the
   *implementing* code's review stage runs. Precedence per doc↔code pair: doc AI review →
   implementing-code AI review → human gate. **Unrelated code in the same PR is NOT blocked**
-  (INV-5 — [#529](https://github.com/AIClarityAU/minspec/issues/529)).
+  (INV-5 — [#529](https://github.com/AIClarityAU/minspec/issues/529)). **Executes as a CI
+  job in `.github/workflows/ai-review.yml`** (OQ-3): a merge-blocker must hold for **any**
+  PR, including external contributors with no local harness. `review-pr.sh` runs the same
+  check locally as fast-feedback preview; CI is the enforcing copy.
 - **FR-6 — Auto-approve config (low-criticality, dev opt-in).** A per-dev, off-by-default
   setting that lets an `ai-review:<type>:pass` on **design.md / tasks.md / issue** advance
   the artifact with **no** human keystroke. High-criticality types (Spec / Plan / DR /
   constitution / PR-to-main / Epic) ALWAYS keep the human gate; Issue is never gated
   regardless (INV-6 — [#330](https://github.com/AIClarityAU/minspec/issues/330)).
-- **FR-7 — Per-dev coverage slider.** A per-dev sliding scale over *which* doc types are
-  reviewed and *at what depth* — from minimal (highest-criticality types only) to **max**
-  (every type incl. Issue + downstream design/tasks, full depth). Composes with FR-6:
-  coverage decides *what* is reviewed; auto-approve decides whether a reviewed
-  low-criticality doc still needs a human. **Dogfood default (MinSpecPro projects) = max**,
-  accepting the token-window latency ([#453](https://github.com/AIClarityAU/minspec/issues/453)).
+  **Dogfood default (MinSpecPro projects): opt IN — auto-approve ON for design.md /
+  tasks.md** (OQ-1). At max breadth these derivative docs are reviewed then auto-accepted
+  (hands-off); the human keystroke is retained only on the high-criticality types. This is
+  the dogfood *exercising* the opt-in (DR-047 keeps it off by default everywhere else) — a
+  reviewed-then-auto-accepted derivative doc, not an un-reviewed one.
+- **FR-7 — Two orthogonal review-config axes (breadth × depth).** Per-dev config is **two
+  independent settings** (OQ-2), not one slider:
+  - **Breadth — which doc types are reviewed:** `critical-only` (Spec/Plan/DR/constitution/
+    Epic/PR) → `+downstream` (add design.md/tasks.md) → `all` (add Issue). Composes with
+    FR-6: breadth decides *what* is reviewed; auto-approve decides whether a reviewed
+    low-criticality doc still needs a human.
+  - **Depth — how many reviewers per artifact:** `single` (one fresh-context reviewer, the
+    floor) → `panel` (an adversarial multi-voter panel; #453's `none/single/panel` is this
+    axis). Depth is orthogonal to breadth — any breadth can run at either depth.
+  - **Dogfood default (MinSpecPro projects) = breadth `all` × depth `single`**, accepting
+    the token-window latency ([#453](https://github.com/AIClarityAU/minspec/issues/453));
+    `panel` is available but not the v1 default (see Out of scope).
 - **FR-8 — Canonical human-gated classification.** A single source of truth for which
   Approvable types are human-gated (Spec, Plan, DR, constitution invariant, PR-to-main,
   Epic), AI-reviewed-only (Issue), or config-dependent (design.md, tasks.md — FR-6). The
@@ -180,24 +199,30 @@ enough human") — and matches how the PR reviewer already runs (#342), extended
 - **Building `agent-execute`** or its model-access broker (DR-017) — the reviewer runs in
   the existing dispatch / CI path, not a new extension.
 
-## Open questions — OPEN (must resolve in Clarify; T3 requires it)
+## Clarify — open questions resolved (2026-07-06, Paul Harvey)
 
-- **OQ-1 — Does the dogfood default also auto-approve, or review-only?** DR-047 sets
-  auto-approve **off by default** (Decision 5) but **max coverage** for the dogfood
-  projects (Decision 6). Max coverage means design.md/tasks.md ARE reviewed — but does the
-  dogfood also flip FR-6 on for them (fully hands-off derivative docs), or review-only with
-  a human keystroke retained? The two Decisions touch here and DR-047 does not settle it.
-- **OQ-2 — Coverage-slider axes.** #453 proposes `none / single / panel` — that is a
-  **depth** axis (how many voters). FR-7's scale is a **breadth** axis (which types).
-  Reconcile: one 2-D setting (breadth × depth) or two orthogonal settings?
-- **OQ-3 — Where does the ordering gate (FR-5) execute?** CI job (`ai-review.yml`, enforced
-  on external contributors) vs local dispatch (`review-pr.sh`, dev-time only). Determines
-  whether the gate holds for a PR from someone without the local harness.
-- **OQ-4 — Issue-reviewer trigger + recording surface.** An Issue has no PR head SHA to
-  attach a commit status to. What event fires the Issue reviewer (on open? on
-  `role:*`/triage label?) and where does its verdict record — a label only (no status
-  check), or a synthetic check? FR-3's status-check model assumes a PR; Issue breaks that
-  assumption.
+All four blocking OQs resolved; each decision is threaded into the FR/invariant noted.
+No follow-up tasks deferred — the spec is Plan-ready once a human approves it.
+
+- **OQ-1 — Dogfood: auto-approve OR review-only for design.md/tasks.md?** → **Auto-approve
+  ON for the dogfood** (design.md / tasks.md). At max breadth these derivative docs are
+  reviewed then auto-accepted (hands-off); the human keystroke is retained only on the
+  high-criticality types. DR-047 keeps auto-approve off *by default* everywhere else — the
+  dogfood explicitly *opts in*. Threaded into **FR-6**. (Note: this is a
+  reviewed-then-auto-accepted doc, never an un-reviewed one — INV-3/INV-6 hold.)
+- **OQ-2 — Coverage axes: one 2-D slider or two orthogonal settings?** → **Two orthogonal
+  settings — breadth (which types) × depth (single / panel).** #453's `none/single/panel`
+  is the *depth* axis; the type-selection is the *breadth* axis; they compose freely.
+  Threaded into **FR-7**. Dogfood = breadth `all` × depth `single`.
+- **OQ-3 — Ordering-gate execution locus?** → **CI job in `.github/workflows/ai-review.yml`.**
+  A merge-blocker must hold for any PR incl. external contributors with no local harness;
+  `review-pr.sh` stays a local fast-feedback preview, CI is the enforcing copy. Threaded
+  into **FR-5**.
+- **OQ-4 — Issue-reviewer trigger + recording (no PR head SHA)?** → **Trigger on promotion
+  from inbox** (a `triage` / `role:*` label), not on raw open; **record as an
+  `ai-review:issue:*` label + findings comment only — no commit status.** An Issue has no
+  head SHA and is non-gated, so no check-run is needed. Threaded into **FR-1** (Issue
+  bullet) + **FR-3** (recording exception).
 
 ## Acceptance (T2 feature tests — happy + primary failure)
 
