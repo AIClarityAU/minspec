@@ -19,7 +19,7 @@ interface SpecNodeLike {
 export async function validateSpecCommand(node?: SpecNodeLike): Promise<void> {
   // Multi-root safe: a tree-node click carries the spec's file path, so pin the
   // root to the folder actually containing it; otherwise prompt the user
-  // (harvest316/minspec#373). Previously used `workspaceFolders?.[0]`,
+  // (AIClarityAU/minspec#373). Previously used `workspaceFolders?.[0]`,
   // silently validating folder [0]'s specs regardless of which project was
   // right-clicked.
   const rootDir = node?.spec?.filePath

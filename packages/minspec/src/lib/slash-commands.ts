@@ -44,7 +44,7 @@ interface CommandGuidance {
 }
 
 /**
- * Shift-left frontmatter guidance (harvest316/minspec#104). The valid `status`
+ * Shift-left frontmatter guidance (AIClarityAU/minspec#104). The valid `status`
  * set is imported from the parser's own constant, so this prose can never name a
  * status the validator would then reject as "not recognized".
  */
@@ -56,7 +56,7 @@ const FRONTMATTER_GUIDANCE =
   'Getting these right here is the point: the approve gate is only a backstop, not the place to discover gaps.';
 
 /**
- * Shift-left aspect-artifact guidance (harvest316/minspec#104). Built from
+ * Shift-left aspect-artifact guidance (AIClarityAU/minspec#104). Built from
  * `ASPECT_GUIDANCE` — the approve gate's own rule definitions — so the design
  * phase is told to produce exactly what approval will check, and the two can
  * never drift. Lives on `/plan` because mockups/schemas/diagrams are DESIGN-phase

@@ -102,7 +102,7 @@ export class SpecPanel {
   private buildTrustModel(): TrustChartModel | undefined {
     // Multi-root safe: the panel shows ONE spec whose path is known, so the
     // trust chart's context (specs list + approval sidecars) must come from
-    // THAT spec's folder — not `workspaceFolders?.[0]` (harvest316/minspec#373).
+    // THAT spec's folder — not `workspaceFolders?.[0]` (AIClarityAU/minspec#373).
     if (!this.specFilePath) return undefined;
     const rootDir = folderForFile(this.specFilePath);
     if (!rootDir) return undefined;

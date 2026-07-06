@@ -14,7 +14,7 @@ Declare scope before writing code:
 MinSpec status: SDD Implement phase → specs/minspec/tasks.md
 ScroogeLLM status: awaiting Specify phase (future session)
 
-Topic drift → GitHub issue (harvest316/minspec), not inline work.
+Topic drift → GitHub issue (AIClarityAU/minspec), not inline work.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SCOPE
 

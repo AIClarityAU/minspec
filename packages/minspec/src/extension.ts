@@ -123,7 +123,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // Each panel persists its "group by epic" state in workspaceState (default on)
   // and exposes a context key so the titlebar icon reflects on/off.
   // Specs/Decisions default to epic grouping on; the Backlog defaults OFF until
-  // issues carry epic:<slug> labels (no label backfill yet — harvest316/minspec#68),
+  // issues carry epic:<slug> labels (no label backfill yet — AIClarityAU/minspec#68),
   // so its titlebar toggle is also hidden in package.json.
   const EPIC_TOGGLES = [
     { key: 'minspec.specExplorer.groupByEpic', ctx: 'minspec.specExplorer.groupByEpic', provider: specTreeProvider, def: true },
@@ -484,7 +484,7 @@ export function activate(context: vscode.ExtensionContext): void {
   // very first activation after upgrade).
   // Auto-bootstrap: detect+offer (init / harness drift / unclassified diff /
   // epic backfill) for EVERY workspace folder, so non-first folders in a
-  // multi-root workspace get their own offers (harvest316/minspec#123). Each
+  // multi-root workspace get their own offers (AIClarityAU/minspec#123). Each
   // offered command is invoked WITH its folder, so it targets the right one.
   const bootstrapVsCode: BootstrapVsCode = {
     isEnabled: () =>

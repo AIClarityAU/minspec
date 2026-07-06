@@ -14,6 +14,6 @@ MinSpec is a free VS Code extension that implements the SDD methodology populari
 ## Links
 
 - Home: https://minspec.dev
-- Source (GitHub): https://github.com/harvest316/minspec
-- Changelog: https://github.com/harvest316/minspec/blob/main/packages/minspec/CHANGELOG.md
+- Source (GitHub): https://github.com/AIClarityAU/minspec
+- Changelog: https://github.com/AIClarityAU/minspec/blob/main/packages/minspec/CHANGELOG.md
 - Publisher: AI Clarity — https://aiclarity.com.au

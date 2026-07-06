@@ -4,7 +4,7 @@
 SCOPE_FILE=".claude/.session-scope"
 
 echo "━━━ Context reinject after compaction ━━━"
-echo "Repo: harvest316/minspec"
+echo "Repo: AIClarityAU/minspec"
 if [ -f "$SCOPE_FILE" ]; then
   echo "Scope: $(cat $SCOPE_FILE)"
 else

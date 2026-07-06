@@ -216,7 +216,7 @@ SPEC-013 enforces *required sections* (Risks & Mitigations; Consequences). The s
 *Status: accepted · Date: 2026-06-02*
 
 <!-- dr-summary:DR-027 auto=738e7a1f5d77 -->
-The harvest316/minspec monorepo is **public**. It was framed as a two-extension monorepo (MinSpec + ScroogeLLM) plus an extension pack. MinSpec is the open, free, Tier-0 SDD tool — public by design (DR-004). ScroogeLLM is the freemium proxy whose **defensible IP — the proxy-layer logic and the measurement methodology behind it — cannot be public.** That extends beyond code: the design specs and competitive research describe the approach in enough detail to be copied.
+The AIClarityAU/minspec monorepo is **public**. It was framed as a two-extension monorepo (MinSpec + ScroogeLLM) plus an extension pack. MinSpec is the open, free, Tier-0 SDD tool — public by design (DR-004). ScroogeLLM is the freemium proxy whose **defensible IP — the proxy-layer logic and the measurement methodology behind it — cannot be public.** That extends beyond code: the design specs and competitive research describe the approach in enough detail to be copied.
 <!-- /dr-summary:DR-027 -->
 
 ## [DR-028 — Cross-cutting sections are completed-last and freshness-bound — presence never latches "complete"](DR-028.md)
@@ -352,7 +352,7 @@ SPEC-017 (Trust Dashboard) needs an **approval baseline** — the exact approved
 *Status: proposed · Date: 2026-06-28*
 
 <!-- dr-summary:DR-044 auto=ac8869d3b81c -->
-DR-015 accepted a **third Tier-1 "Execute" extension** (autonomous agent dispatch) and — via its OQ-3 — placed it **inside** the public harvest316/minspec monorepo as packages/agent-execute, shipped in the Pro pack, sharing @aiclarity/shared. Its name was deferred (OQ-4, #66), with aiclarity.agent-execute / "AgentSystem" as working placeholders. Its load-bearing security substrate is specified in SPEC-019 (credential-free sandbox, host-side broker, attestation) and the reality-check reviewer in SPEC-016.
+DR-015 accepted a **third Tier-1 "Execute" extension** (autonomous agent dispatch) and — via its OQ-3 — placed it **inside** the public AIClarityAU/minspec monorepo as packages/agent-execute, shipped in the Pro pack, sharing @aiclarity/shared. Its name was deferred (OQ-4, #66), with aiclarity.agent-execute / "AgentSystem" as working placeholders. Its load-bearing security substrate is specified in SPEC-019 (credential-free sandbox, host-side broker, attestation) and the reality-check reviewer in SPEC-016.
 <!-- /dr-summary:DR-044 -->
 
 ## [DR-045 — A host IDE's background-task runner is Layer-1 visibility, never a Layer-2 degrade substrate (SPEC-019 FR-9/FR-10 interaction)](DR-045.md)

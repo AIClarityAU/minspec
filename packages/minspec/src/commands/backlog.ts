@@ -24,7 +24,7 @@ import { resolveTargetFolder } from '../lib/resolve-folder';
 export async function scoreWsjfCommand(): Promise<void> {
   // Multi-root safe: `fetchIssues` etc. read the folder's git remote to pick
   // WHICH repo's issues to touch — folder [0] would silently target the wrong
-  // project (harvest316/minspec#373).
+  // project (AIClarityAU/minspec#373).
   const folder = await resolveTargetFolder();
   if (!folder) return;
 

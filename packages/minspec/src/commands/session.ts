@@ -17,7 +17,7 @@ const SESSION_TYPES: SessionType[] = ['bug', 'feat', 'explore', 'plan'];
 export async function declareScopeCommand(): Promise<void> {
   // Multi-root safe: session state is per-project (`.minspec/session.json` in
   // that folder). Folder [0] would silently clobber the wrong project's
-  // session (harvest316/minspec#373).
+  // session (AIClarityAU/minspec#373).
   const folder = await resolveTargetFolder();
   if (!folder) return;
 

@@ -40,7 +40,7 @@ truncation_backstop_label() {
 }
 
 PR="${1:?Usage: review-pr.sh <pr-number> [--repo owner/name]}"
-REPO="harvest316/minspec"
+REPO="AIClarityAU/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROLES_DIR="${SCRIPT_DIR}/roles"
 DECIDE="${SCRIPT_DIR}/review-decide.sh"
