@@ -86,6 +86,11 @@ beforeEach(() => {
   recentApprovablesMock.mockReturnValue([]);
   getApprovalStatusMock.mockReturnValue('unapproved');
   setPreviewTab(undefined);
+  // Reset workspace-folder mocks — one test (#546) mutates these directly.
+  (vscode.workspace as { workspaceFolders: unknown }).workspaceFolders = [{ uri: { fsPath: '/tmp/ws' } }];
+  (vscode.workspace.getWorkspaceFolder as ReturnType<typeof vi.fn>).mockReturnValue({
+    uri: { fsPath: '/tmp/ws' },
+  });
 });
 
 // ─── classifyApprovablePath (pure, re-exported from lib/approvable) ────────────
@@ -164,12 +169,28 @@ describe('approveActiveCommand — editor routing (direct, resolved node)', () =
     });
   });
 
-  it('errors (no dispatch) when an open approvable file matches no known artifact', async () => {
+  it('errors (no dispatch) when an open approvable file matches no known artifact, naming the resolved root', async () => {
     listEpicsMock.mockReturnValue([]); // no match
     setActiveFile('/tmp/ws/docs/epics/EPIC-999.md');
     await approveActiveCommand();
     expect(executeCommand).not.toHaveBeenCalled();
-    expect(vscode.window.showErrorMessage).toHaveBeenCalledOnce();
+    expect(vscode.window.showErrorMessage).toHaveBeenCalledExactlyOnceWith(
+      'MinSpec: The active editor looks like a epic, but it could not be matched to a known epic under "/tmp/ws".',
+    );
+  });
+
+  it('errors with a distinct message when the file is outside every open workspace folder (#546)', async () => {
+    (vscode.workspace as { getWorkspaceFolder: ReturnType<typeof vi.fn> }).getWorkspaceFolder.mockReturnValue(
+      undefined,
+    );
+    (vscode.workspace as { workspaceFolders: unknown }).workspaceFolders = [];
+    listEpicsMock.mockReturnValue([]);
+    setActiveFile('/elsewhere/docs/epics/EPIC-999.md');
+    await approveActiveCommand();
+    expect(executeCommand).not.toHaveBeenCalled();
+    expect(vscode.window.showErrorMessage).toHaveBeenCalledExactlyOnceWith(
+      'MinSpec: The active editor looks like a epic, but no open workspace folder contains it.',
+    );
   });
 });
 

@@ -440,6 +440,8 @@ sketch. T0 is mandated by FR-8 for every state→signpost mapping.
 - **[#121](https://github.com/harvest316/minspec/issues/121)** (approved-spec amend:
   SPEC-013 FR-11 consumes this DAG coverage edge) — already tracked; this spec's edge
   ships independently of #121.
-- **Site / marketplace copy** — "the signpost is never wrong, and the one time it is, you
-  report it in one click" is a positioning beat (FR-17); non-code → `harvest316/minspec`
-  issue per DR-023 forward rule if the team wants it surfaced.
+- **Site / marketplace copy** — "the signpost is computed deterministically — no LLM in
+  that decision path, so it can't hallucinate — and the rare gap is one click to
+  report" is a positioning beat (FR-17); lead with the mechanism, not a "never wrong"
+  infallibility claim (baseline correctness isn't a differentiator). Non-code →
+  `harvest316/minspec` issue per DR-023 forward rule if the team wants it surfaced.

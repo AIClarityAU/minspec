@@ -36,7 +36,7 @@ The anti-slop lead is **strategically sound but must be LAYERED**, not a solo be
 |---|---|---|
 | **Just-enough-human** — the guardrail that catches slop *before it commits* (LLM does the thorough thinking; MinSpec surfaces only the signal a human must verify) | **LEAD** | Literal anti-slop mechanism + exact JTBD resolution: trust *without* line-by-line review. Names the acute pain SDD-as-methodology never spoke to. |
 | **Adaptive/tiered ceremony** (T1–T4, upward-only floor) — friction proportional to blast radius, not bureaucracy | **CO-SUPPORT** | Pre-empts the fatal objection *"isn't a guardrail just more process slop?"* The market is independently converging on "risk-tiered review" (JetBrains, InfoQ, AWS AI-DLC). Must co-lead or anti-slop reads as red tape. |
-| **Never-wrong deterministic signpost** — a guardrail that itself can't hallucinate / never bluffs done-vs-implemented | **CO-SUPPORT** | Meta-anti-slop + trust backbone; category-of-one (every rival routes decisions through an LLM). **Currently ABSENT from site + README** despite being the named internal differentiator — the single biggest strategy↔copy gap. |
+| **Deterministic signpost — no LLM in the decision path** — the next-step pointer is computed, not guessed, so it can't hallucinate or bluff done-vs-implemented | **CO-SUPPORT** | Meta-anti-slop + trust backbone; category-of-one (every rival routes decisions through an LLM). **Currently ABSENT from site + README** — the single biggest strategy↔copy gap. Frame as a *mechanism* claim, not an infallibility claim: "never wrong" is baseline correctness any product implicitly promises, not a differentiator, and reads as an incredible superlative to a skeptical buyer. |
 | **Tier-0 air-gapped / no backend / no lock-in** | **DEMOTE (bottom-up) / ELEVATE (top-down)** | Reframe from privacy → **trust-and-sovereignty**: "the anti-slop gate can't leak, phone home, or become a supply-chain risk." Lead this for the budget-owner/security/procurement pitch where every rival is cloud SaaS ingesting your code. |
 | **Free / open source** | **DEMOTE → CTA** | Adoption lubricant, not a value pillar. "Start free, runs local, nothing to trust remotely." Frugal is the wedge, never the headline. |
 | **Spec-Kit-compatible markdown** | **CUT from top-of-funnel** | Inside-baseball; means nothing to a buyer drowning in slop, and echoing Spec Kit makes MinSpec sound derivative. Keep as a docs footnote / objection-handler. |
@@ -66,8 +66,12 @@ free+in-editor real-time tool: **Codacy Guardrails** — differentiate on *layer
 
 ## Messaging changes (beyond the tagline already shipped in #498)
 
-1. **Never-wrong signpost card** — ADD to site + README (absent today). Frame: *"a
-   guardrail that itself can't hallucinate."* **← biggest gap.**
+1. **Deterministic-signpost card** — ADD to site + README (absent today). Frame: *"a
+   guardrail that itself can't hallucinate — no LLM in the decision path."* **Do NOT
+   lead with "never wrong"** — that's a baseline-correctness claim every product
+   implicitly makes, not a differentiator; it reads as an incredible superlative
+   rather than evidence. The sellable claim is the *mechanism* (deterministic,
+   no LLM, auditable), not a promise of infallibility. **← biggest gap.**
 2. **Problem section** — add the review-fatigue emotional hook (*"AI writes faster
    than you can review; 66% of devs spend more time fixing almost-right AI code"* —
    SO 2025) *above* the existing ceremony-overhead (Fowler/Kiro "16 acceptance
@@ -105,11 +109,27 @@ free+in-editor real-time tool: **Codacy Guardrails** — differentiate on *layer
 - Keyword volumes are Planner ranges — directionally validated, not precise; the
   exact-volume unlock is the $1/day campaign (#61).
 
+## Addendum (2026-07-05) — drop "never-wrong" as headline framing
+
+"Never-wrong" was reconsidered as a customer-facing benefit name: any product is
+*expected* to be correctly built as a baseline — claiming "never wrong" as a headline
+differentiator reads as an unbelievable superlative, not evidence, to a skeptical
+buyer. It does not survive the JTBD test ("why should I believe this, and why does no
+one else have it?").
+
+The underlying claim that *is* differentiated and credible is the **mechanism**: the
+next-step signpost is computed deterministically with no LLM in that decision path,
+so it structurally cannot hallucinate or bluff "done." Lead with that mechanism (and
+the one-click report backstop for the rare gap), not with an infallibility promise.
+All "never-wrong [card/signpost]" mentions above renamed to "deterministic signpost";
+the internal engineering invariant name (used in DR/spec/code, e.g. EPIC-002) is
+unaffected — this correction applies to outward marketing framing only.
+
 ## Status
 
 - Tagline anti-slop hero: **shipped** (#498, merged).
-- Everything above (never-wrong card, offline→trust reframe, problem hook, dogfooding
-  stat, README lead, SEO pages): **not shipped** — tracked for human copywriting.
+- Everything above (deterministic-signpost card, offline→trust reframe, problem hook,
+  dogfooding stat, README lead, SEO pages): **not shipped** — tracked for human copywriting.
 - Sources: Stack Overflow Developer Survey 2025; Merriam-Webster 2025; keyword issues
   #59–63; competitive scan (Spec Kit, AWS Kiro, Cursor, CodeRabbit, Codacy, CodeScene,
   AWS AI-DLC), 2026-07.
