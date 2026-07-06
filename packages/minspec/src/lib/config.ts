@@ -34,6 +34,11 @@ export interface TierPhaseMapping {
  */
 export type SpecsLayout = 'flat' | 'spec-kit';
 
+/** Coverage-gate config — see `setCoverageMinimum` for the write path. */
+export interface CoverageConfig {
+  readonly minimumPercentage: number;
+}
+
 /** Full config shape persisted in .minspec/config.json */
 export interface MinspecConfig {
   readonly version: '1';
@@ -42,7 +47,11 @@ export interface MinspecConfig {
   readonly epicsDir: string;
   readonly specsLayout: SpecsLayout;
   readonly phaseMappings: Record<Tier, TierPhaseMapping>;
+  readonly coverage: CoverageConfig;
 }
+
+/** 80% statement/branch/function/line coverage — the commonly-cited industry bar. */
+export const DEFAULT_COVERAGE_MINIMUM = 80;
 
 /**
  * Default config — matches FR-2 mapping table from requirements.md:
@@ -61,6 +70,7 @@ export const DEFAULT_CONFIG: MinspecConfig = {
     T3: { requiredPhases: ['specify', 'plan', 'tasks', 'implement'], optionalPhases: ['clarify'] },
     T4: { requiredPhases: ['specify', 'clarify', 'plan', 'tasks', 'implement'], optionalPhases: [] },
   },
+  coverage: { minimumPercentage: DEFAULT_COVERAGE_MINIMUM },
 };
 
 /** Deep merge user config over defaults. User values win. */
@@ -133,4 +143,23 @@ export function applyVSCodeOverrides(
     epicsDir: overrides.epicsDir ?? config.epicsDir,
     specsLayout: overrides.specsLayout ?? config.specsLayout,
   };
+}
+
+/**
+ * Persist a new coverage-gate minimum to .minspec/config.json, preserving
+ * every other field in the file. This is the file CI and vitest.config.ts
+ * read (a VS Code setting can't reach a headless CI run) — the onboarding
+ * prompt in initCommand is the only caller today.
+ */
+export function setCoverageMinimum(rootDir: string, minimumPercentage: number): void {
+  const configPath = path.join(rootDir, '.minspec', 'config.json');
+  const raw = fs.existsSync(configPath) ? fs.readFileSync(configPath, 'utf-8') : '{}';
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = JSON.parse(raw) as Record<string, unknown>;
+  } catch {
+    parsed = {};
+  }
+  parsed.coverage = { minimumPercentage };
+  fs.writeFileSync(configPath, JSON.stringify(parsed, null, 2) + '\n');
 }

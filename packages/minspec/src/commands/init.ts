@@ -4,6 +4,7 @@ import * as vscode from 'vscode';
 import { scaffold, generateHarnessFiles, refreshHarnessFiles } from '../lib/scaffold';
 import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS } from '../lib/template-registry';
 import { resolveTargetFolder } from '../lib/resolve-folder';
+import { setCoverageMinimum, DEFAULT_COVERAGE_MINIMUM } from '../lib/config';
 import { evaluateConstitution } from '../lib/constitution-nudge';
 import { getRepoFromRemote } from '../lib/github';
 import {
@@ -405,12 +406,97 @@ export async function offerRulesetAdvisory(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Post-init coverage-minimum onboarding prompt
+// ---------------------------------------------------------------------------
+
+/** VS Code setting id read for the QuickPick's pre-selected "recommended" value. */
+const COVERAGE_MINIMUM_SETTING = 'minspec.coverage.minimumPercentage';
+
+/** QuickPick action: type a percentage not in the preset list. */
+const COVERAGE_CUSTOM_ACTION = 'Custom…';
+
+/**
+ * Resolve the "recommended" percentage the onboarding prompt pre-selects: the
+ * `minspec.coverage.minimumPercentage` VS Code setting if set (e.g. a
+ * committed `.vscode/settings.json` encoding a team's policy), else
+ * {@link DEFAULT_COVERAGE_MINIMUM}. Read failures degrade to the default —
+ * mirrors {@link resolveRequiredChecks}.
+ */
+function resolveRecommendedCoverageMinimum(): number {
+  try {
+    const configured = vscode.workspace.getConfiguration().get<unknown>(COVERAGE_MINIMUM_SETTING);
+    if (typeof configured === 'number' && Number.isFinite(configured) && configured >= 0 && configured <= 100) {
+      return configured;
+    }
+  } catch {
+    // fall through to default
+  }
+  return DEFAULT_COVERAGE_MINIMUM;
+}
+
+/**
+ * SPEC coverage-gate onboarding: `scaffold()` already wrote
+ * `coverage.minimumPercentage: 80` into the fresh `.minspec/config.json` —
+ * this asks the dev whether 80 (or their team's `minspec.coverage.minimumPercentage`
+ * setting) is actually what they want enforced, and persists the answer via
+ * {@link setCoverageMinimum}. `.minspec/config.json` is the file `vitest.config.ts`
+ * and CI read — a VS Code setting alone can't reach a headless CI run.
+ *
+ * Non-modal-equivalent (QuickPick, dismissable), best-effort: any failure or
+ * dismissal leaves the 80% default scaffold() already wrote in place and must
+ * never break init.
+ */
+export async function offerCoverageThresholdPrompt(folder: string): Promise<void> {
+  try {
+    const recommended = resolveRecommendedCoverageMinimum();
+    const presets = [60, 70, 80, 90].filter((p) => p !== recommended);
+    const items: Array<{ label: string; value: number | typeof COVERAGE_CUSTOM_ACTION }> = [
+      { label: `${recommended}% (recommended)`, value: recommended },
+      ...presets.map((p) => ({ label: `${p}%`, value: p })),
+      { label: COVERAGE_CUSTOM_ACTION, value: COVERAGE_CUSTOM_ACTION },
+    ];
+
+    const picked = await vscode.window.showQuickPick(items, {
+      placeHolder: 'Minimum code coverage to enforce for this project (CI fails below it)',
+    });
+    if (!picked) return; // dismissed — keep the 80% scaffold() already wrote
+
+    let pct: number;
+    if (picked.value === COVERAGE_CUSTOM_ACTION) {
+      const input = await vscode.window.showInputBox({
+        prompt: 'Minimum coverage percentage (whole number, 0-100)',
+        value: String(recommended),
+        validateInput: (v) => {
+          const n = Number(v);
+          return Number.isInteger(n) && n >= 0 && n <= 100 ? undefined : 'Enter a whole number 0-100';
+        },
+      });
+      if (input === undefined) return; // dismissed
+      pct = Number(input);
+    } else {
+      pct = picked.value;
+    }
+
+    setCoverageMinimum(folder, pct);
+    vscode.window.showInformationMessage(
+      `MinSpec: coverage gate set to ${pct}% (enforced by vitest thresholds in CI).`,
+    );
+  } catch {
+    // Advisory only — never let this prompt failing break init.
+  }
+}
+
 export async function initCommand(
   folderArg?: string,
   deps?: OfferScaffoldCommitDeps & { ruleset?: RulesetAdvisoryDeps },
 ): Promise<void> {
   const folder = folderArg ?? (await resolveTargetFolder());
   if (!folder) return;
+  // Onboarding only makes sense the FIRST time a project gets a config.json —
+  // check before scaffold() writes the default, since scaffold() is
+  // idempotent and no-ops on an existing file (never re-prompt on refresh).
+  const isFirstInit = !fs.existsSync(path.join(folder, '.minspec', 'config.json'));
   // The scaffold + harness writes are a multi-file synchronous sequence. If one
   // write fails partway, the project is left with a partial .minspec/ (and the
   // drift detector then reports false drift). Catch any failure, surface exactly
@@ -429,6 +515,7 @@ export async function initCommand(
     'MinSpec: Initialized .minspec/ and generated harness files.',
   );
   surfaceConstitutionNudge(folder);
+  if (isFirstInit) await offerCoverageThresholdPrompt(folder);
   // Post-init "what to commit" hint + offer (#222). Best-effort, non-modal,
   // never blocks the init result.
   await offerScaffoldCommit(folder, deps);

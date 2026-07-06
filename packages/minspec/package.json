@@ -488,6 +488,13 @@
             "test"
           ],
           "description": "Status-check contexts the post-init branch-ruleset advisory requires when it creates a ruleset on your default branch. Defaults to 'lint' + 'test' (the checks the standard CI reports). Add e.g. 'build' or 'ready-to-merge' to require them too. 'ready-to-merge' is intentionally NOT in the default because it would block every merge until MinSpec's reviewer is wired and labelling — enable it here once your reviewer pipeline is live. Read at create time; the create only runs on your explicit 'Create ruleset' click."
+        },
+        "minspec.coverage.minimumPercentage": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 100,
+          "default": 80,
+          "description": "Recommended minimum code coverage percentage. This setting only sets the pre-selected value in the 'MinSpec: Initialize SDD Structure' onboarding prompt (e.g. set it in a committed .vscode/settings.json to encode a team policy) — it does NOT itself change an already-initialized project's enforced threshold. The value CI and vitest actually enforce lives in .minspec/config.json's coverage.minimumPercentage; change an existing project by editing that file directly, or by re-running the onboarding prompt."
         }
       }
     },
