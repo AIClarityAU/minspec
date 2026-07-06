@@ -7,6 +7,9 @@
     "t2Max": 7,
     "t3Max": 14
   },
+  "coverage": {
+    "minimumPercentage": 80
+  },
   "phaseMappings": {
     "T1": {
       "requiredPhases": [

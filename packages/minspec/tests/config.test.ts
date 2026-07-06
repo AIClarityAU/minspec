@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { loadConfig, DEFAULT_CONFIG, type MinspecConfig } from '../src/lib/config';
+import {
+  loadConfig,
+  DEFAULT_CONFIG,
+  DEFAULT_COVERAGE_MINIMUM,
+  setCoverageMinimum,
+  type MinspecConfig,
+} from '../src/lib/config';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -73,5 +79,62 @@ describe('loadConfig()', () => {
     // T4: all phases required
     expect(DEFAULT_CONFIG.phaseMappings.T4.requiredPhases).toHaveLength(5);
     expect(DEFAULT_CONFIG.phaseMappings.T4.optionalPhases).toHaveLength(0);
+  });
+
+  it('defaults coverage.minimumPercentage to 80', () => {
+    expect(DEFAULT_CONFIG.coverage.minimumPercentage).toBe(80);
+    expect(DEFAULT_COVERAGE_MINIMUM).toBe(80);
+  });
+
+  it('merges a partial coverage override onto the default', () => {
+    const dir = path.join(tmpDir, '.minspec');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'config.json'),
+      JSON.stringify({ coverage: { minimumPercentage: 90 } }),
+    );
+    const config = loadConfig(tmpDir);
+    expect(config.coverage.minimumPercentage).toBe(90);
+    // Everything else still default
+    expect(config.specsDir).toBe(DEFAULT_CONFIG.specsDir);
+  });
+});
+
+describe('setCoverageMinimum()', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-config-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('writes coverage.minimumPercentage into a fresh config.json', () => {
+    fs.mkdirSync(path.join(tmpDir, '.minspec'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, '.minspec', 'config.json'),
+      JSON.stringify(DEFAULT_CONFIG, null, 2) + '\n',
+    );
+
+    setCoverageMinimum(tmpDir, 90);
+
+    expect(loadConfig(tmpDir).coverage.minimumPercentage).toBe(90);
+  });
+
+  it('preserves every other field already in config.json', () => {
+    const dir = path.join(tmpDir, '.minspec');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'config.json'),
+      JSON.stringify({ ...DEFAULT_CONFIG, specsDir: 'my-specs' }, null, 2) + '\n',
+    );
+
+    setCoverageMinimum(tmpDir, 70);
+
+    const config = loadConfig(tmpDir);
+    expect(config.coverage.minimumPercentage).toBe(70);
+    expect(config.specsDir).toBe('my-specs');
   });
 });
