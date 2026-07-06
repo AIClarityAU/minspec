@@ -29,9 +29,15 @@ None. This role is read-only.
 4. Findings comment posted on issue/PR with severity ratings
 5. If zero findings: explicit "no issues found" comment with scope of review
 
-## Future
+## Provenance
 
-Will inherit from `agency-agents` shared role definitions when that project is ready.
+Vendored reference base (not a live merge — see `scripts/roles/vendor/README.md`):
+[`security-appsec-engineer.md`](vendor/agency-agents/security/security-appsec-engineer.md)
+from [msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents) (MIT),
+pinned per `scripts/roles/vendor/agency-agents.lock.json` (#230/#232, high confidence
+match). This file's MinSpec-specific invariants (inv-10 keychain, inv-11 localhost proxy
+bind, TODO/stub gate) are hand-authored and are not overwritten by a sync — see
+`scripts/sync-agency-agents.sh`.
 
 ## Escalation
 

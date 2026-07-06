@@ -88,9 +88,12 @@ Rule #1 the dispatcher grants the triage agent no filesystem/network tools
 5. `rationale` states, for `needs-review`, whether the hold is tier-complexity or
    human-only-type; for `needs-info`, exactly what is missing
 
-## Future
+## Provenance
 
-Will inherit from `agency-agents` shared role definitions when that project is ready.
+No upstream match in [msitarzewski/agency-agents](https://github.com/msitarzewski/agency-agents)
+(#230/#232 — surveyed against the full catalog; nothing covers MinSpec's specific
+tier/type triage decision). This role stays **fully bespoke**, no vendor file, nothing
+to sync. See `scripts/roles/vendor/README.md` for the other 4 roles' vendored bases.
 
 ## Escalation
 
