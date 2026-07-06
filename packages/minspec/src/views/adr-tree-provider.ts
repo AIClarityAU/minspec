@@ -1,6 +1,8 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { listAdrs } from '../lib/adr-manager';
 import type { AdrSummary, AdrStatus } from '../lib/adr-manager';
+import { allWorkspaceRoots } from '../lib/resolve-folder';
 import { EpicGroupingState, EpicGroupNode, buildEpicGroups } from './epic-grouping';
 import type { ListEpicsFn } from './epic-grouping';
 
@@ -79,10 +81,30 @@ export class AdrNode extends vscode.TreeItem {
 
 // ─── TreeDataProvider ───────────────────────────────────────────────────────
 
+/**
+ * Top-level per-folder group, shown ONLY in a multi-root workspace (#549).
+ * Mirrors SpecFolderNode: its children are that folder's ordinary status/epic
+ * groups, computed against the folder's OWN root. Single-root workspaces render
+ * no folder tier — the tree is byte-identical to before.
+ */
+export class AdrFolderNode extends vscode.TreeItem {
+  constructor(public readonly root: string) {
+    const name = path.basename(root) || root;
+    super(name, vscode.TreeItemCollapsibleState.Expanded);
+    this.iconPath = new vscode.ThemeIcon('folder');
+    this.contextValue = 'adrFolder';
+    this.tooltip = root;
+    this.accessibilityInformation = {
+      label: `${name} workspace folder`,
+      role: 'treeitem',
+    };
+  }
+}
+
 /** Function signature for listing ADRs — allows dependency injection in tests */
 export type ListAdrsFn = (rootDir: string, vscodeOverrides?: { decisionsDir?: string }) => AdrSummary[];
 
-export type AdrTreeNode = AdrGroupNode | EpicGroupNode<AdrSummary> | AdrNode;
+export type AdrTreeNode = AdrFolderNode | AdrGroupNode | EpicGroupNode<AdrSummary> | AdrNode;
 
 export class AdrTreeProvider implements vscode.TreeDataProvider<AdrTreeNode> {
   private _onDidChangeTreeData = new vscode.EventEmitter<AdrTreeNode | undefined | null | void>();
@@ -124,14 +146,19 @@ export class AdrTreeProvider implements vscode.TreeDataProvider<AdrTreeNode> {
   }
 
   getChildren(element?: AdrTreeNode): AdrTreeNode[] {
-    if (!this.workspaceRoot) {
-      return [];
+    if (!element) {
+      const roots = this.roots();
+      if (roots.length === 0) return [];
+      // Single-root (the common case): render the folder's groups directly —
+      // byte-identical to the pre-#549 behavior.
+      if (roots.length === 1) return this.rootChildren(roots[0]);
+      // Multi-root: one expandable group per folder (#549), each listing its own
+      // decisions and its own epics.
+      return roots.map(root => new AdrFolderNode(root));
     }
 
-    if (!element) {
-      const allAdrs = this.listAll();
-      const epicGroups = this.epicGrouping.enabled ? this.getEpicGroups(allAdrs) : null;
-      return epicGroups ?? this.getStatusGroups(allAdrs);
+    if (element instanceof AdrFolderNode) {
+      return this.rootChildren(element.root);
     }
 
     if (element instanceof AdrGroupNode) {
@@ -145,12 +172,32 @@ export class AdrTreeProvider implements vscode.TreeDataProvider<AdrTreeNode> {
     return [];
   }
 
-  private listAll(): AdrSummary[] {
+  /**
+   * The workspace roots to scan. Live `workspaceFolders` win (multi-root, #549);
+   * the ctor `workspaceRoot` is the single-root fallback for activation-time
+   * construction and unit tests whose vscode mock exposes no workspaceFolders.
+   * Read fresh every call so refresh() after onDidChangeWorkspaceFolders re-scans.
+   */
+  private roots(): string[] {
+    const live = allWorkspaceRoots();
+    if (live.length > 0) return live;
+    return this.workspaceRoot ? [this.workspaceRoot] : [];
+  }
+
+  /** The status/epic groups for ONE folder — what getChildren(undefined)
+   *  returned before #549; multi-root calls it once per folder. */
+  private rootChildren(root: string): AdrTreeNode[] {
+    const allAdrs = this.listAll(root);
+    const epicGroups = this.epicGrouping.enabled ? this.getEpicGroups(root, allAdrs) : null;
+    return epicGroups ?? this.getStatusGroups(allAdrs);
+  }
+
+  private listAll(root: string): AdrSummary[] {
     const decisionsDir = vscode.workspace
       .getConfiguration('minspec')
       .get<string>('decisionsDir');
     return this._listAdrs(
-      this.workspaceRoot,
+      root,
       decisionsDir ? { decisionsDir } : undefined,
     );
   }
@@ -162,9 +209,9 @@ export class AdrTreeProvider implements vscode.TreeDataProvider<AdrTreeNode> {
     });
   }
 
-  private getEpicGroups(allAdrs: AdrSummary[]): EpicGroupNode<AdrSummary>[] | null {
+  private getEpicGroups(root: string, allAdrs: AdrSummary[]): EpicGroupNode<AdrSummary>[] | null {
     return buildEpicGroups(
-      this.workspaceRoot,
+      root,
       allAdrs,
       a => a.epic,
       a => a.status === 'accepted',
