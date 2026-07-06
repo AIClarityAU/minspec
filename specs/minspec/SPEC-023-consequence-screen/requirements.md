@@ -1,7 +1,7 @@
 ---
 id: SPEC-023
 type: requirements
-status: specifying
+status: implementing
 tier: T4
 product: minspec
 epic: EPIC-004  # Classifier Validation
@@ -126,6 +126,94 @@ from *dominant driver* to *ordinary inputs*).
   instances shift tier and in which direction. All shifts MUST be upward (INV-3); the
   over-tiering bound must be re-checked. Numbers are **reported**, not hard-asserted (#91
   owns thresholds).
+
+## Acceptance Criteria
+
+Each criterion is a checkable pass/fail condition on the analyzers once built, traceable
+to the FR/INV it discharges. Written at Specify close (pre-code) — not yet an audit of
+built code, a target for Plan/Tasks to build against and for tests to prove.
+
+### A. Impact-reach — degraded flagship (FR-1)
+
+- **AC-1 — No fabricated reach.** Given `refIndex === null` (always true in v1), When
+  impact-reach runs on any changed exported symbol, Then it emits exactly one
+  `degraded: true` signal (`name: "reach_unavailable"`, `tierContribution: 'T1'`) and never
+  a fabricated numeric reach/caller count. *(FR-1, INV-4)*
+
+### B. Public-API surface delta (FR-2)
+
+- **AC-2 — Removed/changed export floors higher than an addition.** Given a barrel/entry
+  file diff with `oldContent` present, When an export is removed or its signature changed,
+  Then the emitted signal's `tierContribution` is strictly higher than for an
+  additions-only diff. *(FR-2)*
+- **AC-3 — Missing old content degrades honestly.** Given `oldContent` is absent, When the
+  analyzer runs, Then it treats the diff as additions-only and marks the signal
+  `degraded: true` — it never guesses a removal. *(FR-2, INV-4)*
+
+### C. Irreversibility (FR-3)
+
+- **AC-4 — Deletion / migration / destructive-schema each trip independently.** Given a
+  changed-file set containing (a) a file deletion, (b) a path under `migrations/`, `*.sql`,
+  or `*.prisma`, or (c) content containing `DROP TABLE`, `ALTER … DROP`, or a removed Prisma
+  `model`/column, When the analyzer runs, Then each case independently emits an
+  irreversibility signal. *(FR-3)*
+- **AC-5 — Content-absent fallback.** Given file content is unavailable, When the analyzer
+  runs, Then it falls back to path/status alone and marks the signal `degraded: true`.
+  *(FR-3, INV-4)*
+
+### D. Sensitive-sink reach (FR-4)
+
+- **AC-6 — Direct hit trips on the capped C4 catalog.** Given a changed path, identifier, or
+  raw-SQL/credential pattern matching the C4 list (`auth`, `login`, `token`, `secret`,
+  `password`, `payment`, `charge`, `stripe`, `pii`, credential/SQL regex), When the analyzer
+  runs, Then it emits a sensitive-sink signal. *(FR-4)*
+- **AC-7 — No fabricated transitive reach in v1.** Given `refIndex === null`, When a
+  sensitive symbol is touched only indirectly (no direct match), Then the analyzer does not
+  invent a transitive hit — v1 checks direct matches only, and the signal is marked
+  `degraded: true`. *(FR-4, INV-4)*
+
+### E. Concurrency (FR-5)
+
+- **AC-8 — Concurrency primitive trips.** Given changed JS/TS content introducing or
+  modifying `Promise.all`, `Worker`, a lock/mutex, a timer, `Atomics`, or a transaction block
+  around shared state, When the analyzer runs, Then it emits a concurrency signal. *(FR-5)*
+- **AC-9 — Absent content emits nothing, not a false degrade.** Given content is
+  unavailable, When the analyzer runs, Then it emits no signal at all (not even
+  `degraded`) — concurrency has no size-based proxy to fall back to, so "absent" stays
+  absent rather than becoming a manufactured degrade marker. *(FR-5)*
+
+### F. Contract + wiring (FR-6, FR-7)
+
+- **AC-10 — Additive-only contract.** Given the existing `ClassificationSignal` producers
+  (size signals), When the new optional fields (`axis`, `degraded`, `explain`) are added,
+  Then every existing producer/consumer compiles and behaves unchanged — no required field
+  added, no existing signature broken. *(FR-6)*
+- **AC-11 — `classify()` purity preserved.** Given the consequence analyzers are wired in
+  above `classify()`, When `classify()` runs, Then it performs no file/graph IO itself and
+  its existing T0 test suite passes **verbatim**. *(INV-1, INV-2)*
+- **AC-12 — Demotion is additive, not threshold-lowering.** Given the diff-size signals'
+  existing thresholds, When consequence signals are introduced, Then no size-signal
+  threshold changes — "demotion" means solely that higher-authority consequence signals now
+  sit in the same max-over-`tierContribution` set, not that size thresholds were lowered.
+  *(FR-7)*
+
+### G. Upward-only ratchet + re-validation (INV-3, FR-8)
+
+- **AC-13 — Monotonicity property holds.** Given any signal set `S` and any consequence
+  signal `C`, When `C` is added to `S`, Then `classify(S ∪ {C})` never yields a tier lower
+  than `classify(S)`. *(INV-3 — property test)*
+- **AC-14 — ON/OFF delta reported, not asserted.** Given the SPEC-004 120-instance
+  validation harness, When re-run with consequence analyzers ON vs OFF, Then every instance
+  whose tier shifts shifts **upward only**, and the shift count/direction is recorded per
+  FR-8 — pass/fail acceptance thresholds are explicitly **not** enforced here (owned by
+  [#91](https://github.com/harvest316/minspec/issues/91)). *(FR-8, INV-5)*
+
+### H. Tier-0 boundary
+
+- **AC-15 — No forbidden imports.** Given the analyzer module source, When statically
+  inspected, Then it imports no `vscode` and performs no network/AI call — git/disk IO
+  enters only via the injected `ConsequenceInput`, never from inside the analyzer module.
+  *(INV-1)*
 
 ## Contract (TypeScript sketch — finalized in Plan)
 
