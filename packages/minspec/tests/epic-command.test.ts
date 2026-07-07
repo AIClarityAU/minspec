@@ -14,6 +14,12 @@ vi.mock('vscode', () => ({
     workspaceFolders: [{ uri: { fsPath: '/tmp/ws' } }],
     openTextDocument: vi.fn(),
     getWorkspaceFolder: vi.fn(),
+    // commit-on-approve reads `minspec.commitOnApprove`; keep it OFF here so the
+    // accept-epic unit tests never shell out to git (commit path is covered by
+    // approve-commit.test.ts).
+    getConfiguration: vi.fn(() => ({
+      get: vi.fn((key: string, def?: unknown) => (key === 'commitOnApprove' ? false : def)),
+    })),
   },
   Uri: {
     file: (p: string) => ({ fsPath: p, scheme: 'file' }),

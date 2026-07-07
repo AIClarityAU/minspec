@@ -13,6 +13,7 @@ import {
 import type { AdrNode } from '../views/adr-tree-provider';
 import { resolveTargetFolder, folderForFile } from '../lib/resolve-folder';
 import { resolveActiveAdrPath } from '../lib/active-adr';
+import { commitApprovalIfEnabled } from './commit-on-approve';
 
 function decisionsDirOverride(): { decisionsDir: string } | undefined {
   const decisionsDir = vscode.workspace
@@ -200,6 +201,7 @@ async function applyStatus(
   filePath: string,
   id: string,
   status: AdrStatus,
+  opts: { commit?: boolean } = {},
 ): Promise<void> {
   try {
     // Pre-MinSpec DRs have no frontmatter. `setAdrStatus` will synthesize one,
@@ -232,7 +234,23 @@ async function applyStatus(
       }
     }
 
-    vscode.window.showInformationMessage(`MinSpec: ${id} → ${status}`);
+    // Commit-on-approve: accepting a decision commits the flipped doc + the
+    // regenerated register INDEX in one pathspec-safe commit (SPEC-022 FR-1).
+    // Only the Accept path opts in — a manual Set Status is not an approval, so
+    // it leaves the change staged for the user to commit.
+    let suffix = '';
+    if (opts.commit && folder) {
+      const indexPath = path.join(path.dirname(filePath), 'INDEX.md');
+      suffix = (
+        await commitApprovalIfEnabled(
+          folder,
+          [filePath, indexPath],
+          `chore(accept): ${id} → ${status}`,
+        )
+      ).suffix;
+    }
+
+    vscode.window.showInformationMessage(`MinSpec: ${id} → ${status}${suffix}`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     vscode.window.showErrorMessage(`MinSpec: Failed to set status — ${message}`);
@@ -255,7 +273,7 @@ export async function acceptAdrCommand(node?: AdrNode): Promise<void> {
     vscode.window.showInformationMessage(`MinSpec: ${resolved.id} already accepted.`);
     return;
   }
-  await applyStatus(resolved.filePath, resolved.id, 'accepted');
+  await applyStatus(resolved.filePath, resolved.id, 'accepted', { commit: true });
 }
 
 /**
