@@ -181,6 +181,30 @@ export async function commitApproval(
   }
 }
 
+/**
+ * True when `absPath` has no committed version at HEAD — i.e. staging it next
+ * would add it as a brand-new file (`git diff --cached --diff-filter=A`), not
+ * modify an existing one. A path outside `rootDir`, or a repo with no HEAD
+ * commit yet, both count as untracked (nothing to compare against).
+ *
+ * Used by ADR acceptance (issue #577) to detect a DR that was created but
+ * never committed, before its status is flipped to a terminal value.
+ */
+export async function isUntrackedAtHead(
+  rootDir: string,
+  absPath: string,
+  run: GitRun = defaultGitRun(rootDir),
+): Promise<boolean> {
+  const rel = path.relative(rootDir, absPath);
+  if (rel.length === 0 || rel.startsWith('..' + path.sep) || rel === '..') return true;
+  try {
+    await run(['cat-file', '-e', `HEAD:${rel}`]);
+    return false;
+  } catch {
+    return true;
+  }
+}
+
 /** Best-effort unstage of exactly `rel` (never throws — index-clean is advisory). */
 async function unstage(run: GitRun, rel: readonly string[]): Promise<void> {
   try {

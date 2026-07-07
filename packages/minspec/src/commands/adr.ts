@@ -13,7 +13,7 @@ import {
 import type { AdrNode } from '../views/adr-tree-provider';
 import { resolveTargetFolder, folderForFile } from '../lib/resolve-folder';
 import { resolveActiveAdrPath } from '../lib/active-adr';
-import { commitApprovalIfEnabled } from './commit-on-approve';
+import { commitApprovalIfEnabled, commitBornIfUntracked } from './commit-on-approve';
 
 function decisionsDirOverride(): { decisionsDir: string } | undefined {
   const decisionsDir = vscode.workspace
@@ -218,11 +218,25 @@ async function applyStatus(
       if (choice !== ADD) return;
     }
 
+    const folder = folderForFile(filePath);
+
+    // Issue #577: a DR that was never committed is about to be flipped to a
+    // terminal status by `setAdrStatus` below, BEFORE it's ever staged. The
+    // commit-on-approve call further down would then stage it as a brand-new
+    // ADDED file already claiming e.g. `accepted`, which the DR-029
+    // born-proposed pre-commit gate correctly rejects. Give the file its own
+    // born commit NOW, capturing its pre-flip content, so the later flip
+    // lands as a legitimate Modify — see commitBornIfUntracked for the full
+    // rationale. No-op when the file is already tracked or commit-on-approve
+    // is off.
+    if (opts.commit && folder) {
+      await commitBornIfUntracked(folder, filePath, `chore(adr): add ${id}`);
+    }
+
     setAdrStatus(filePath, status);
 
     // Keep the Decision Register index in sync with the new status (the
     // register of the folder that contains the changed ADR).
-    const folder = folderForFile(filePath);
     if (folder) {
       const decisionsDir = vscode.workspace
         .getConfiguration('minspec')
