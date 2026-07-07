@@ -1,7 +1,9 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { createEpic, writeEpicIndex, setEpicStatus } from '../lib/epic-manager';
 import type { EpicSummary } from '../lib/epic-manager';
 import { resolveTargetFolder, folderForFile } from '../lib/resolve-folder';
+import { commitApprovalIfEnabled } from './commit-on-approve';
 
 /** Tree node carrying the epic this group represents (from EpicGroupNode). */
 interface EpicNodeLike {
@@ -28,7 +30,21 @@ export async function acceptEpicCommand(node?: EpicNodeLike): Promise<void> {
     if (folder) {
       try { writeEpicIndex(folder); } catch { /* index regen best-effort */ }
     }
-    vscode.window.showInformationMessage(`MinSpec: ${epic.id} → active`);
+    // Commit-on-approve: accepting an epic commits the flipped doc + the
+    // regenerated epic INDEX in one pathspec-safe commit (SPEC-022 FR-1), gated
+    // by `minspec.commitOnApprove`. Suffix folds the outcome into the toast.
+    let suffix = '';
+    if (folder) {
+      const indexPath = path.join(path.dirname(epic.filePath), 'INDEX.md');
+      suffix = (
+        await commitApprovalIfEnabled(
+          folder,
+          [epic.filePath, indexPath],
+          `chore(accept): ${epic.id} activated`,
+        )
+      ).suffix;
+    }
+    vscode.window.showInformationMessage(`MinSpec: ${epic.id} → active${suffix}`);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     vscode.window.showErrorMessage(`MinSpec: Failed to accept epic — ${message}`);

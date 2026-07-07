@@ -25,6 +25,12 @@ vi.mock('vscode', () => ({
     openTextDocument: vi.fn(),
     // Multi-root resolver (#373): `folderForFile` calls `getWorkspaceFolder`.
     getWorkspaceFolder: vi.fn(() => ({ uri: { fsPath: '/tmp/ws' } })),
+    // commit-on-approve reads `minspec.commitOnApprove`; keep it OFF here so these
+    // approval-action unit tests never shell out to git (the commit path has its
+    // own real-git coverage in approve-commit.test.ts).
+    getConfiguration: vi.fn(() => ({
+      get: vi.fn((key: string, def?: unknown) => (key === 'commitOnApprove' ? false : def)),
+    })),
   },
   commands: { executeCommand: vi.fn() },
   Uri: { file: (p: string) => ({ fsPath: p, scheme: 'file' }) },
@@ -39,6 +45,9 @@ vi.mock('../src/lib/approval', () => ({
   revokeApproval: vi.fn(() => true),
   getApprovalStatus: vi.fn(() => 'unapproved'),
   gitConfigEmail: vi.fn(() => 'tester@example.com'),
+  // Used by approve.ts to build the sidecar path for commit-on-approve. Value is
+  // irrelevant here (commit is disabled in this suite) — it just must exist.
+  specRelPath: vi.fn((_root: string, p: string) => p),
 }));
 
 // Mock the libs called inside the action body

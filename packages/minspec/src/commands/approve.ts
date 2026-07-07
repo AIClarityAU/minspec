@@ -9,10 +9,13 @@ import {
   revokeApproval as removeApproval,
   getApprovalStatus,
   gitConfigEmail,
+  specRelPath,
   type ApprovalStatus,
 } from '../lib/approval';
+import { sidecarPath } from '../lib/approval-store';
 import { resolveActiveSpecId } from '../lib/active-spec';
 import { folderForFile, resolveTargetFolder } from '../lib/resolve-folder';
+import { commitApprovalIfEnabled } from './commit-on-approve';
 
 /** A tree node carrying a SpecSummary (from the spec tree context menu). */
 interface SpecNodeLike {
@@ -148,9 +151,23 @@ export async function approveSpecCommand(
     }
     recordApproval(rootDir, spec.filePath, spec.tier, email);
 
-    const base = wasPreImpl
-      ? `MinSpec: ✓ Approved ${spec.id} for implementation (status → implementing).`
-      : `MinSpec: ✓ Approved ${spec.id} for implementation.`;
+    // Commit-on-approve (SPEC-022 FR-1): the flipped doc + attributed record
+    // become ONE real commit so an approval is never left uncommitted in the
+    // working tree (the Alt+A nuisance — project memory project_alt_a_no_autocommit).
+    // Gated by `minspec.commitOnApprove` (default on); pathspec-safe (never bundles
+    // another session's staged files). The suffix folds the commit outcome into the
+    // single approval toast below.
+    const sidecar = sidecarPath(rootDir, specRelPath(rootDir, spec.filePath));
+    const { suffix: commitSuffix } = await commitApprovalIfEnabled(
+      rootDir,
+      [spec.filePath, sidecar],
+      `chore(approve): ${spec.id} approved for implementation`,
+    );
+
+    const base =
+      (wasPreImpl
+        ? `MinSpec: ✓ Approved ${spec.id} for implementation (status → implementing).`
+        : `MinSpec: ✓ Approved ${spec.id} for implementation.`) + commitSuffix;
     if (warnings.length > 0) {
       // Non-modal advisory: approved, but the gaps are surfaced so they are not
       // silently swallowed (never-wrong). Not a modal, not a blocking gate.

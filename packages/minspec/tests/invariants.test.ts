@@ -121,6 +121,12 @@ describe('Invariant 2: No backend — no network calls', () => {
     // calls" invariant above still passes; this is git, not a backend). See
     // approval.ts gitConfigEmail.
     'lib/approval.ts',
+    // SPEC-022 FR-1 commit-on-approve: the durable half of "committed ground
+    // truth". On approve/accept, `git add -- <paths>` + `git commit -- <paths>`
+    // the flipped doc + record in one pathspec-safe commit. Local git plumbing,
+    // no network, never pushes — same Tier-0 posture as approval.ts. See
+    // approve-commit.ts commitApproval.
+    'lib/approve-commit.ts',
     // DR-037 / #247: scaffold points the project's git `core.hooksPath` at
     // .minspec/hooks (via `git config --local core.hooksPath`) so the
     // editor-independent SDD hooks run on every commit. Local git config write —
