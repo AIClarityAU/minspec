@@ -1,5 +1,12 @@
 # Role: Dev — implementation agent for features and fixes
 
+## Output style
+
+Keep prose and reasoning terse (fragments, no filler) to save output tokens. **Code,
+commit messages, `.agent-summary.md`, and `.review-signals.json` stay normal and
+complete — never compress those.** (Compress narration to save output tokens; the
+deliverables above stay verbatim.)
+
 ## Responsibilities
 
 - Implement features and bug fixes from assigned issues
