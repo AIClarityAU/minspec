@@ -2,8 +2,9 @@
  * Ruleset advisor (#356, reworked per DR-050 Amendment 2026-07-01).
  *
  * After `MinSpec: Initialize`, advise the user about a GitHub branch *ruleset*
- * that requires CI status checks (default `lint`, `test`) on the repo's default
- * branch.
+ * that requires CI status checks (default `MinSpec SDD validation` — the job
+ * name MinSpec's own scaffolded `.github/workflows/minspec-validate.yml`
+ * reports) on the repo's default branch.
  *
  * ──────────────────────────────────────────────────────────────────────────
  * TIER-0 NETWORK BOUNDARY (load-bearing)
@@ -54,15 +55,21 @@ export const RULESET_DOCS_URL =
  * DEFAULT status-check contexts the created ruleset requires on the default
  * branch when the user has not overridden them.
  *
- * Deliberately `lint` + `test` only — the two checks the standard MinSpec CI
- * already reports on every repo. `ready-to-merge` is intentionally EXCLUDED: it
- * is asserted by MinSpec's reviewer only after it auto-labels a PR, so making it
- * a *required* status check at init time would block EVERY merge on a fresh repo
- * (no reviewer wired yet, no reviewer on a solo repo). Users who want it opt in
- * via the `minspec.ruleset.requiredChecks` setting (read at create time in
- * init.ts) — see {@link resolveRequiredChecks} there.
+ * Deliberately just `MinSpec SDD validation` — the single check context the
+ * `validate` job in MinSpec's OWN scaffolded
+ * `.github/workflows/minspec-validate.yml` reports (its `name:`, see
+ * `MINSPEC_VALIDATE_WORKFLOW` in `template-registry.ts`). Earlier this default
+ * was `['lint', 'test']`, which no MinSpec-scaffolded CI ever reports — a
+ * required-but-never-satisfied context permanently blocks every PR/push to the
+ * default branch (#559). `ready-to-merge` is intentionally EXCLUDED: it is
+ * asserted by MinSpec's reviewer only after it auto-labels a PR, so making it a
+ * *required* status check at init time would block EVERY merge on a fresh repo
+ * (no reviewer wired yet, no reviewer on a solo repo). Users who add their own
+ * `lint`/`test`/`build` CI opt in via the `minspec.ruleset.requiredChecks`
+ * setting (read at create time in init.ts) — see {@link resolveRequiredChecks}
+ * there.
  */
-export const DEFAULT_REQUIRED_CHECK_CONTEXTS: readonly string[] = ['lint', 'test'];
+export const DEFAULT_REQUIRED_CHECK_CONTEXTS: readonly string[] = ['MinSpec SDD validation'];
 
 /** Default ruleset name MinSpec proposes. */
 export const RULESET_NAME = 'MinSpec required status checks';
@@ -298,8 +305,9 @@ export function resolveCheckContexts(checks?: readonly string[]): string[] {
 
 /**
  * Build the POST body for a ruleset that requires the given status `checks`
- * (default {@link DEFAULT_REQUIRED_CHECK_CONTEXTS} — `lint` + `test`) on the
- * repo's default branch.
+ * (default {@link DEFAULT_REQUIRED_CHECK_CONTEXTS} — `MinSpec SDD validation`,
+ * the context MinSpec's own scaffolded CI reports) on the repo's default
+ * branch.
  *
  * The check set is configurable so a user can add e.g. `build` or the opt-in
  * `ready-to-merge` via the `minspec.ruleset.requiredChecks` setting without a
