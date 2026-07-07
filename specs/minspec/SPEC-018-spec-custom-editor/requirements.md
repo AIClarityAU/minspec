@@ -13,7 +13,7 @@ relates_to: [SPEC-017, SPEC-022, SPEC-021, SPEC-013, DR-012]
 # MinSpec — Approvable Custom Editor (in-IDE review surface) (Requirements)
 
 **Date:** 2026-06-04 · **Amended:** 2026-07-05 (re-approval feedback)
-**Status:** Specifying (SDD Specify phase)
+**Status:** Implementing (SDD Implement phase)
 **Triggered by:** session request (SPEC-017 clarify) — "the webview gives better
 [engagement] tracking, so default to webview for all operations: click targets from any
 MinSpec explorer pane, and hook Ctrl-P to open .md files in our webview." — **plus** the
