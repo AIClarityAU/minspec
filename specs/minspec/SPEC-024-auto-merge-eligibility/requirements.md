@@ -1,7 +1,7 @@
 ---
 id: SPEC-024
 type: requirements
-status: specifying
+status: implementing
 tier: T4
 product: minspec
 epic: EPIC-007  # Agent Execute

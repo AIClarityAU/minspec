@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-024-auto-merge-eligibility/requirements.md",
+  "specHash": "2ba87a90f5b4ae704d402c0ba9475812e3fd76fc40ad7dd9346c1b5d4627afd3",
+  "approvedAt": "2026-07-06T05:19:15.920Z",
+  "approvedBy": "claude@harvest316.com",
+  "tier": "T4",
+  "migrated": false,
+  "baselineBlob": "13f22df3d755a53b0f1e4e39fadc2894a8bbb1c9"
+}
