@@ -1,8 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-010-signpost-correctness/requirements.md",
-  "specHash": "48d04885c13d268aa903183e229819cd894dfcdb3e036e32c4e68bef0911fc50",
-  "approvedAt": "2026-06-04T10:25:20.629Z",
-  "approvedBy": "github@harvest316.com",
+  "specHash": "31b0e39d6ace72f100c926573f0a3d8e0c8d1e57a078cffe3ae5288993e9d869",
+  "approvedAt": "2026-07-06T00:51:27.206Z",
+  "approvedBy": "claude@harvest316.com",
   "tier": "T4",
-  "migrated": false
+  "migrated": false,
+  "baselineBlob": "de22f152b58ac565fe6048eafd38c84bf4e656f9"
 }

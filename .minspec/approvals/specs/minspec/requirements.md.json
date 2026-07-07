@@ -1,8 +1,9 @@
 {
   "specPath": "specs/minspec/requirements.md",
-  "specHash": "271810ec3d8ba284f5838ad1810e60a08363af83691af7f1d9edc279adfeec87",
-  "approvedAt": "2026-06-04T10:25:20.622Z",
-  "approvedBy": "github@harvest316.com",
+  "specHash": "74e6eb88dba075511fa8cc77f8e9ca203ad4e75317eb17a192e66eff7d351702",
+  "approvedAt": "2026-07-05T22:17:31.880Z",
+  "approvedBy": "claude@harvest316.com",
   "tier": "T4",
-  "migrated": false
+  "migrated": false,
+  "baselineBlob": "8a0f40e421578705740039e7ce87de05592752a9"
 }

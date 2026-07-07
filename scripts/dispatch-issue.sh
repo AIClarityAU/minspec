@@ -438,8 +438,8 @@ quarantine_publish() {
   echo "Agent output QUARANTINED for #$ISSUE (role: $ROLE). Worktree left at: $WORKTREE"
 }
 
-# Model per role (DR-017 position 3 — native model routing, the measured ~3-4%
-# dev-loop saving). Route mechanical/standard work off the expensive default and
+# Model per role (native model routing — the measured ~3-4% dev-loop saving from
+# the ScroogeLLM dogfooding work). Route mechanical/standard work off the expensive default and
 # keep opus where an error is costly. The ESCALATION clause in $PROMPT is the
 # backstop: an under-powered agent emits `ESCALATE:` and the caller retries on a
 # higher tier, so routing down is safe, not lossy.
