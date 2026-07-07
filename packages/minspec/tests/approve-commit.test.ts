@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
-import { commitApproval } from '../src/lib/approve-commit';
+import { commitApproval, isUntrackedAtHead } from '../src/lib/approve-commit';
 
 let tmp: string;
 
@@ -202,5 +202,44 @@ describe('commitApproval — pathspec-safe commit-on-approve', () => {
     expect(res.error).toContain('hook rejected');
     // Invariant 3: the change must NOT be left staged for another session to sweep.
     expect(git(['diff', '--cached', '--name-only']).trim()).toBe('');
+  });
+});
+
+describe('isUntrackedAtHead — detects a create that was never committed (#577)', () => {
+  it('is true for a brand-new file with no HEAD version', async () => {
+    initRepo(tmp);
+    write('seed.md', 'x\n');
+    git(['add', '-A']);
+    git(['commit', '-m', 'init']);
+    const drPath = write('docs/decisions/DR-001.md', '---\nstatus: proposed\n---\n');
+
+    expect(await isUntrackedAtHead(tmp, drPath)).toBe(true);
+  });
+
+  it('is false once the file has been committed', async () => {
+    initRepo(tmp);
+    const drPath = write('docs/decisions/DR-001.md', '---\nstatus: proposed\n---\n');
+    git(['add', '-A']);
+    git(['commit', '-m', 'init']);
+
+    expect(await isUntrackedAtHead(tmp, drPath)).toBe(false);
+  });
+
+  it('stays false across an in-place edit that has not been re-committed', async () => {
+    initRepo(tmp);
+    const drPath = write('docs/decisions/DR-001.md', '---\nstatus: proposed\n---\n');
+    git(['add', '-A']);
+    git(['commit', '-m', 'init']);
+    fs.writeFileSync(drPath, '---\nstatus: accepted\n---\n');
+
+    // The file HAS a HEAD version — this is a Modify, not the #577 scenario.
+    expect(await isUntrackedAtHead(tmp, drPath)).toBe(false);
+  });
+
+  it('is true when there is no HEAD commit at all (unborn branch)', async () => {
+    initRepo(tmp); // no commits made
+    const drPath = write('docs/decisions/DR-001.md', '---\nstatus: proposed\n---\n');
+
+    expect(await isUntrackedAtHead(tmp, drPath)).toBe(true);
   });
 });

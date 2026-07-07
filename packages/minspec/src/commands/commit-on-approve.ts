@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import { commitApproval, type CommitApprovalResult } from '../lib/approve-commit';
+import { commitApproval, isUntrackedAtHead, type CommitApprovalResult } from '../lib/approve-commit';
 
 /**
  * Bridge between the approve/accept commands and the Tier-0 {@link commitApproval}
@@ -48,4 +48,40 @@ export async function commitApprovalIfEnabled(
       // 'not-a-repo' | 'nothing-to-commit' — no net change worth reporting.
       return { suffix: '', result };
   }
+}
+
+/**
+ * Give `filePath` its OWN commit right now, if (and only if) it has no
+ * committed version at HEAD — used before an ADR acceptance (issue #577).
+ *
+ * `applyStatus` (commands/adr.ts) flips a DR's frontmatter to a terminal
+ * status (e.g. `accepted`) BEFORE the accept commit runs. If the DR was
+ * created but never committed, that accept commit would stage it as a
+ * brand-new ADDED file already claiming the terminal status — exactly what
+ * the DR-029 born-proposed pre-commit gate (`.githooks/pre-commit`) exists to
+ * reject (a DR must be born `proposed`/`draft`; acceptance is a separate,
+ * later act). Committing the file's CURRENT (pre-flip) content here first
+ * turns the later accept commit into a legitimate Modify instead of the
+ * file's first-ever commit.
+ *
+ * The git hook is the actual arbiter, not this function: if the pre-flip
+ * content isn't a validly-born DR, the hook rejects this commit too and the
+ * caller's own commit attempt fails exactly as it would without this helper —
+ * no gate logic is duplicated here.
+ *
+ * No-op (returns undefined, no git call) when the setting is off or the file
+ * already has a HEAD version.
+ */
+export async function commitBornIfUntracked(
+  rootDir: string,
+  filePath: string,
+  message: string,
+): Promise<CommitApprovalResult | undefined> {
+  if (!commitOnApproveEnabled()) return undefined;
+  if (!(await isUntrackedAtHead(rootDir, filePath))) return undefined;
+  const result = await commitApproval(rootDir, [filePath], message);
+  if (result.outcome === 'failed') {
+    console.warn(`MinSpec: born commit failed — ${result.error ?? 'git error'}`);
+  }
+  return result;
 }
