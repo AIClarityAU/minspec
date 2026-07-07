@@ -13,7 +13,7 @@ Building VS Code extensions for two related but distinct problems: 1. SDD (Spec-
 
 ## [DR-002 — Monorepo with npm workspaces](DR-002.md)
 
-*Status: proposed · Date: 2026-05-26*
+*Status: accepted · Date: 2026-05-26*
 
 <!-- dr-summary:DR-002 auto=b7a3328b1e5f -->
 Two extensions share a classification engine. Specs, docs, and decisions live at project level. Need a structure that supports both extensions without duplication.
@@ -21,7 +21,7 @@ Two extensions share a classification engine. Specs, docs, and decisions live at
 
 ## [DR-003 — RCDD — Root-Cause-Driven Debugging](DR-003.md)
 
-*Status: proposed · Date: 2026-05-27*
+*Status: accepted · Date: 2026-05-27*
 
 <!-- dr-summary:DR-003 auto=0175b4c84f1a -->
 Contract-Driven Development (DR-359 (parent register, mmo-platform)) established session discipline and T3 regression tests, but has no enforced diagnostic phase before bug fixes. Current rule ("commit WIP, fix separately, resume") prevents scope bleed but doesn't prevent symptom-fixing. AI agents are especially prone to jumping straight to code changes — they optimize for completion, not understanding. Without a structural gate that prohibits code changes during diagnosis, root causes get papered over.
@@ -37,7 +37,7 @@ MinSpec extension has invariant #2: "No backend — zero network calls, no accou
 
 ## [DR-005 — Pre-Publish Supply-Chain Inventory Gate (bumblebee)](DR-005.md)
 
-*Status: proposed · Date: 2026-05-28*
+*Status: accepted · Date: 2026-05-28*
 
 <!-- dr-summary:DR-005 auto=5f1f0bbe7269 -->
 MinSpec and ScroogeLLM ship as VS Code extensions to a public marketplace. A supply-chain compromise in any bundled dependency — a malicious post-install in a transitive npm package, a hijacked publisher account, or a typosquat slipping into package-lock.json — would propagate directly to every install. Recent npm worms (shai-hulud, polyfill.io takeover, etc.) demonstrate this is an active threat for any VS Code extension publisher.
@@ -45,7 +45,7 @@ MinSpec and ScroogeLLM ship as VS Code extensions to a public marketplace. A sup
 
 ## [DR-006 — Auto-detect and offer MinSpec setup actions (replace manual Ctrl-Shift-P workflow)](DR-006.md)
 
-*Status: proposed · Date: 2026-05-28*
+*Status: accepted · Date: 2026-05-28*
 
 <!-- dr-summary:DR-006 auto=ed746f19462c -->
 Users were reporting confusion because MinSpec required them to manually run three palette commands ("Initialize SDD Structure", "Refresh Harness Files", "Classify Task Complexity") to bootstrap a project. Users would forget to run them, or wouldn't know they existed. The marketplace README was also cluttered describing each command, and there was no onboarding flow.
@@ -69,7 +69,7 @@ scripts/dispatch-issue.sh runs a headless claude -p agent against a GitHub issue
 
 ## [DR-009 — Classifier validated against SWE-bench-Verified via out-of-tree fixtures](DR-009.md)
 
-*Status: proposed · Date: 2026-05-29*
+*Status: accepted · Date: 2026-05-29*
 
 <!-- dr-summary:DR-009 auto=9746475d0129 -->
 The tier classifier (classifier.ts) and its analyzers (git-analyzer.ts, ast-analyzer.ts) are validated only by synthetic unit tests. We have no evidence the tier thresholds (file count, line count, file-type diversity) produce sensible tiers on real-world code changes. We want to validate against a real corpus of issue→PR pairs. **SWE-bench-Verified** (500 human-vetted GitHub issue→gold-patch instances) is the best fit: each instance has a unified-diff patch and a problem statement.
@@ -85,7 +85,7 @@ The tier classifier (classifier.ts) and its analyzers (git-analyzer.ts, ast-anal
 
 ## [DR-011 — Marker-bounded auto-update of MinSpec-managed harness sections (no permission prompt)](DR-011.md)
 
-*Status: proposed · Date: 2026-05-30*
+*Status: accepted · Date: 2026-05-30*
 
 <!-- dr-summary:DR-011 auto=ee4fc794cbe4 -->
 MinSpec writes content into shared harness files (CLAUDE.md, AGENTS.md, .cursorrules, DESIGN.md, .minspec/constitution.md, docs/decisions/INDEX.md) inside explicit markers: ` … (e.g. dr-index, slash-commands, active-spec). refreshHarnessFiles() and adr-manager already merge by replacing only the content between those markers, preserving everything outside (invariant #6).
