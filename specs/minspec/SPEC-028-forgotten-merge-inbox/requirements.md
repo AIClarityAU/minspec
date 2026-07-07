@@ -11,7 +11,7 @@ relates_to: [SPEC-024, SPEC-026, SPEC-027, SPEC-032, DR-051]  # done-ness/mergea
 # MinSpec — Forgotten-Merge Actions: Single & Bulk Merge (Requirements)
 
 **Date:** 2026-07-02 (narrowed to action-only 2026-07-06 at Clarify, OQ-5)
-**Status:** Specifying (SDD Specify phase)
+**Status:** Implementing (approved 2026-07-06; Specify + Clarify done, awaiting Plan)
 **Triggered by:** [#276](https://github.com/harvest316/minspec/issues/276) — "some devs (such as myself) tend to forget that they have other pending branches to merge."
 **Epic:** [EPIC-009 Team Readiness](../../../docs/epics/EPIC-009-team-readiness.md)
 
