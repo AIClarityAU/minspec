@@ -68,12 +68,25 @@ export function resolveTargetFolderNonInteractive(): string {
  *
  * Enumeration, never `workspaceFolders?.[0]`, so it satisfies the index-0 guard
  * (workspace-folders-zero-guard.test.ts) by construction. `vscode.workspace` is
- * optional-chained so a bare `{ }` vscode mock (unit tests) yields [] rather than
- * throwing. Returns [] when no folder is open — callers treat [] as "nothing to
- * show", mirroring how the single-root resolvers treat '' as inert.
+ * optional-chained so a bare `{ }` vscode mock (unit tests) yields undefined
+ * rather than throwing.
+ *
+ * Returns `undefined` — not `[]` — when the live API has no folder list to
+ * offer at all (`workspaceFolders` itself is `undefined`: no workspace ever
+ * opened, or a unit-test mock that doesn't expose it). Returns `[]` when the
+ * API IS live and reports zero folders (e.g. every folder removed at runtime
+ * from an open multi-root workspace). Callers that need a single-root
+ * activation-time fallback (spec-tree-provider.ts / adr-tree-provider.ts
+ * `roots()`) rely on this distinction: falling back to a stale ctor-seeded root
+ * is correct only in the former case, never the latter (AIClarityAU/minspec#574
+ * — a prior `?? []` collapse made the two indistinguishable, so removing the
+ * last live folder at runtime re-rendered the stale ctor root instead of an
+ * empty tree).
  */
-export function allWorkspaceRoots(): string[] {
-  return (vscode.workspace?.workspaceFolders ?? []).map(f => f.uri.fsPath);
+export function allWorkspaceRoots(): string[] | undefined {
+  const folders = vscode.workspace?.workspaceFolders;
+  if (folders === undefined) return undefined;
+  return folders.map(f => f.uri.fsPath);
 }
 
 /**
