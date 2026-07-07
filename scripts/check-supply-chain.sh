@@ -21,6 +21,7 @@ if [ "${SKIP_SUPPLY_CHAIN_CHECK}" = "1" ]; then
 fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+BUMBLEBEE_VERSION="${BUMBLEBEE_VERSION:-v0.1.2}"
 BUMBLEBEE_BIN="${BUMBLEBEE_BIN:-$HOME/go/bin/bumblebee}"
 GO_BIN="${GO_BIN:-$HOME/.local/opt/go1.26.3/bin/go}"
 CATALOG_DIR="${BUMBLEBEE_CATALOGS:-$HOME/.cache/bumblebee/catalogs}"
@@ -34,8 +35,8 @@ if [ ! -x "$BUMBLEBEE_BIN" ]; then
     echo "  required for bumblebee install. Set GO_BIN or install Go 1.25+." >&2
     exit 1
   fi
-  echo "check-supply-chain: installing bumblebee..." >&2
-  GOBIN="$HOME/go/bin" "$GO_BIN" install github.com/perplexityai/bumblebee/cmd/bumblebee@latest
+  echo "check-supply-chain: installing bumblebee $BUMBLEBEE_VERSION..." >&2
+  GOBIN="$HOME/go/bin" "$GO_BIN" install "github.com/perplexityai/bumblebee/cmd/bumblebee@$BUMBLEBEE_VERSION"
 fi
 
 mkdir -p "$OUT_DIR" "$CATALOG_DIR"

@@ -37,7 +37,7 @@ MinSpec extension has invariant #2: "No backend — zero network calls, no accou
 
 ## [DR-005 — Pre-Publish Supply-Chain Inventory Gate (bumblebee)](DR-005.md)
 
-*Status: proposed · Date: 2026-05-28*
+*Status: accepted · Date: 2026-05-28*
 
 <!-- dr-summary:DR-005 auto=5f1f0bbe7269 -->
 MinSpec and ScroogeLLM ship as VS Code extensions to a public marketplace. A supply-chain compromise in any bundled dependency — a malicious post-install in a transitive npm package, a hijacked publisher account, or a typosquat slipping into package-lock.json — would propagate directly to every install. Recent npm worms (shai-hulud, polyfill.io takeover, etc.) demonstrate this is an active threat for any VS Code extension publisher.
