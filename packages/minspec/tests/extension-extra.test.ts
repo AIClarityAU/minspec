@@ -99,6 +99,8 @@ vi.mock('vscode', () => ({
       configChangeHandler = handler;
       return { dispose: vi.fn() };
     }),
+    // #549: activate() subscribes to re-scan the trees on folder-set changes.
+    onDidChangeWorkspaceFolders: vi.fn(() => ({ dispose: vi.fn() })),
     registerTextDocumentContentProvider: vi.fn(() => ({ dispose: vi.fn() })),
   },
   commands: {
