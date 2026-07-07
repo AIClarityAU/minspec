@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-028-forgotten-merge-inbox/requirements.md",
+  "specHash": "f0cd68422c49a39a51dcf14fbfdbcc6a95c8c328cee44af94f2b18d7e2ae8ba7",
+  "approvedAt": "2026-07-06T08:12:54.041Z",
+  "approvedBy": "claude@harvest316.com",
+  "tier": "T4",
+  "migrated": false,
+  "baselineBlob": "215d9b586396a19cc94c3464867798efe07f6cf2"
+}

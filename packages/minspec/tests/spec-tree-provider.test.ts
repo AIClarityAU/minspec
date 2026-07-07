@@ -27,6 +27,12 @@ vi.mock('vscode', () => ({
     }
   },
   Uri: { file: (p: string) => ({ fsPath: p, scheme: 'file' }) },
+  // #549: the provider now reads vscode.workspace.workspaceFolders to aggregate
+  // across a multi-root workspace. With no workspaceFolders here, roots() falls
+  // back to the ctor workspaceRoot — so these tests exercise the single-root
+  // path unchanged. (vitest's mock throws on any undefined export, so the key
+  // must exist even though it's empty; mirrors adr-tree-provider.test.ts.)
+  workspace: { workspaceFolders: undefined },
 }));
 
 import type { SpecSummary, ApprovalLookupFn } from '../src/views/spec-tree-provider';

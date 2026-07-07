@@ -163,6 +163,18 @@ export function activate(context: vscode.ExtensionContext): void {
       adrTreeProvider.refresh();
       backlogTreeProvider.refreshIfStale();
     }),
+    // Re-scan when the set of workspace folders changes (#549). The Specs/DRs
+    // providers read the LIVE folder list on every getChildren, so a plain
+    // refresh rebuilds each tree against the new set — a folder added to the
+    // combined workspace surfaces its specs/DRs immediately, a removed one drops
+    // out. Backlog stays single-root (out of #549 scope) but still refreshes its
+    // own root; the stale-only variant avoids a `gh` storm when several folders
+    // are added at once.
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      specTreeProvider.refresh();
+      adrTreeProvider.refresh();
+      backlogTreeProvider.refreshIfStale();
+    }),
   );
 
   // Status bar

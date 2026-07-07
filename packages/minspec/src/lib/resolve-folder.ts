@@ -59,6 +59,24 @@ export function resolveTargetFolderNonInteractive(): string {
 }
 
 /**
+ * Every open workspace folder path, in workspace order. The multi-root READ
+ * counterpart to resolveTargetFolderNonInteractive() (which deliberately picks
+ * exactly ONE folder for single-root activation concerns): data surfaces that
+ * must show EVERY folder's artifacts at once — the Specs and Decisions tree
+ * views — enumerate here instead of freezing a single root, which left specs/DRs
+ * in every non-primary folder invisible (AIClarityAU/minspec#549).
+ *
+ * Enumeration, never `workspaceFolders?.[0]`, so it satisfies the index-0 guard
+ * (workspace-folders-zero-guard.test.ts) by construction. `vscode.workspace` is
+ * optional-chained so a bare `{ }` vscode mock (unit tests) yields [] rather than
+ * throwing. Returns [] when no folder is open — callers treat [] as "nothing to
+ * show", mirroring how the single-root resolvers treat '' as inert.
+ */
+export function allWorkspaceRoots(): string[] {
+  return (vscode.workspace?.workspaceFolders ?? []).map(f => f.uri.fsPath);
+}
+
+/**
  * Resolve the workspace folder that CONTAINS a specific file. For contextual
  * operations acting on a known file (status changes, index regens) the target
  * is the file's own folder — never an interactive pick. Falls back to the first

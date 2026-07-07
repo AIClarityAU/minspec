@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import { loadConfig, resolveAndValidate } from '../lib/config';
+import { allWorkspaceRoots } from '../lib/resolve-folder';
 import { parseSpec } from '../lib/spec';
 import type { SpecFrontmatter, SpecStatus } from '../lib/spec';
 import type { Phase, MinspecConfig } from '../lib/config';
@@ -206,8 +207,15 @@ export class SpecGroupNode extends vscode.TreeItem {
    * per-ROW `specNode.stale` value this feature adds instead).
    */
   public readonly kind: 'status' | 'needsReapproval';
+  /**
+   * The workspace folder this group's specs came from. Carried so the lazy
+   * getChildren(group) → toSpecNode path resolves each spec's approval against
+   * its OWN folder in a multi-root workspace (#549). Single-root construction
+   * leaves it as the sole workspace root; direct construction defaults to ''.
+   */
+  public readonly root: string;
 
-  constructor(group: StatusGroup, specs: SpecSummary[], kind: 'status' | 'needsReapproval' = 'status') {
+  constructor(group: StatusGroup, specs: SpecSummary[], kind: 'status' | 'needsReapproval' = 'status', root = '') {
     const collapsibleState = group.defaultExpanded
       ? vscode.TreeItemCollapsibleState.Expanded
       : vscode.TreeItemCollapsibleState.Collapsed;
@@ -215,6 +223,7 @@ export class SpecGroupNode extends vscode.TreeItem {
 
     this.specs = specs;
     this.kind = kind;
+    this.root = root;
     this.description = `(${specs.length})`;
     this.contextValue = 'specGroup';
     this.accessibilityInformation = {
@@ -403,12 +412,33 @@ export class RollupNode extends vscode.TreeItem {
   }
 }
 
+/**
+ * Top-level per-folder group, shown ONLY in a multi-root workspace (#549). Its
+ * children are that folder's ordinary tree (rollup + Needs-Re-Approval + status
+ * or epic groups), computed against the folder's OWN root — so epic ids from
+ * different products in the combined workspace never collide. A single-root
+ * workspace renders no folder tier at all; the tree is byte-identical to before.
+ */
+export class SpecFolderNode extends vscode.TreeItem {
+  constructor(public readonly root: string) {
+    const name = path.basename(root) || root;
+    super(name, vscode.TreeItemCollapsibleState.Expanded);
+    this.iconPath = new vscode.ThemeIcon('folder');
+    this.contextValue = 'specFolder';
+    this.tooltip = root;
+    this.accessibilityInformation = {
+      label: `${name} workspace folder`,
+      role: 'treeitem',
+    };
+  }
+}
+
 // --- TreeDataProvider ---
 
 /** Function signature for listing specs — allows dependency injection in tests */
 export type ListSpecsFn = (rootDir: string) => SpecSummary[];
 
-export type SpecTreeNode = RollupNode | SpecGroupNode | EpicGroupNode<SpecSummary> | SpecNode;
+export type SpecTreeNode = SpecFolderNode | RollupNode | SpecGroupNode | EpicGroupNode<SpecSummary> | SpecNode;
 
 export class SpecTreeProvider implements vscode.TreeDataProvider<SpecTreeNode> {
   private _onDidChangeTreeData = new vscode.EventEmitter<SpecTreeNode | undefined | null | void>();
@@ -462,56 +492,84 @@ export class SpecTreeProvider implements vscode.TreeDataProvider<SpecTreeNode> {
   }
 
   getChildren(element?: SpecTreeNode): SpecTreeNode[] {
-    if (!this.workspaceRoot) {
-      return [];
+    if (!element) {
+      const roots = this.roots();
+      if (roots.length === 0) return [];
+      // Single-root (the common case): render the folder's tree directly, with
+      // no folder tier — byte-identical to the pre-#549 behavior.
+      if (roots.length === 1) return this.rootChildren(roots[0]);
+      // Multi-root: one expandable group per folder (#549). Each folder's own
+      // subtree lists that folder's specs (and its own epics), so nothing from a
+      // non-primary folder is dropped and epic ids never collide across products.
+      return roots.map(root => new SpecFolderNode(root));
     }
 
-    if (!element) {
-      // Root level: roll-up summary, the SPEC-029 pinned Needs-Re-Approval
-      // group (cross-cutting — rendered regardless of epic-grouping mode),
-      // then either epic groups or status groups.
-      const allSpecs = this._listSpecs(this.workspaceRoot);
-      const root: SpecTreeNode[] = [];
-      if (allSpecs.length > 0) root.push(new RollupNode(allSpecs));
-      const needsReapproval = this.getNeedsReapprovalGroup(allSpecs);
-      if (needsReapproval) root.push(needsReapproval);
-      const epicGroups = this.epicGrouping.enabled ? this.getEpicGroups(allSpecs) : null;
-      root.push(...(epicGroups ?? this.getStatusGroups(allSpecs)));
-      return root;
+    if (element instanceof SpecFolderNode) {
+      return this.rootChildren(element.root);
     }
 
     if (element instanceof SpecGroupNode) {
-      return element.specs.map(spec => this.toSpecNode(spec, false, element.kind === 'needsReapproval'));
+      return element.specs.map(spec => this.toSpecNode(element.root, spec, false, element.kind === 'needsReapproval'));
     }
 
     if (element instanceof EpicGroupNode) {
       // Under an epic group the product is implied → strip the redundant title prefix.
-      return element.members.map(spec => this.toSpecNode(spec, true));
+      return element.members.map(spec => this.toSpecNode(element.root, spec, true));
     }
 
-    // RollupNode and SpecNode are leaves
+    // SpecFolderNode is handled above; RollupNode and SpecNode are leaves.
     return [];
+  }
+
+  /**
+   * The workspace roots to scan. Live `workspaceFolders` win (multi-root, #549);
+   * the ctor `workspaceRoot` is the single-root fallback for activation-time
+   * construction and for unit tests whose vscode mock exposes no workspaceFolders.
+   * Read fresh every call so a refresh() after onDidChangeWorkspaceFolders picks
+   * up an added/removed folder with no cached root to go stale.
+   */
+  private roots(): string[] {
+    const live = allWorkspaceRoots();
+    if (live.length > 0) return live;
+    return this.workspaceRoot ? [this.workspaceRoot] : [];
+  }
+
+  /**
+   * The ordinary tree for ONE root: rollup, the SPEC-029 pinned Needs-Re-Approval
+   * group (cross-cutting — rendered regardless of epic-grouping mode), then either
+   * epic groups or status groups. This is exactly what getChildren(undefined)
+   * returned before #549; multi-root just calls it once per folder.
+   */
+  private rootChildren(root: string): SpecTreeNode[] {
+    const allSpecs = this._listSpecs(root);
+    const out: SpecTreeNode[] = [];
+    if (allSpecs.length > 0) out.push(new RollupNode(allSpecs));
+    const needsReapproval = this.getNeedsReapprovalGroup(root, allSpecs);
+    if (needsReapproval) out.push(needsReapproval);
+    const epicGroups = this.epicGrouping.enabled ? this.getEpicGroups(root, allSpecs) : null;
+    out.push(...(epicGroups ?? this.getStatusGroups(root, allSpecs)));
+    return out;
   }
 
   /** Approval lookup with the established best-effort degrade (shared by
    *  toSpecNode and getNeedsReapprovalGroup — one try/catch, not two to drift). */
-  private safeApproval(spec: SpecSummary): ApprovalStatus {
+  private safeApproval(root: string, spec: SpecSummary): ApprovalStatus {
     try {
-      return this._approvalOf(this.workspaceRoot, spec.filePath);
+      return this._approvalOf(root, spec.filePath);
     } catch {
       return 'unapproved'; // best-effort — default to unapproved
     }
   }
 
   /** Build a SpecNode tagged with its current approval status. */
-  private toSpecNode(spec: SpecSummary, epicGrouped = false, diffOnClick = false): SpecNode {
-    return new SpecNode(spec, this.safeApproval(spec), epicGrouped, diffOnClick);
+  private toSpecNode(root: string, spec: SpecSummary, epicGrouped = false, diffOnClick = false): SpecNode {
+    return new SpecNode(spec, this.safeApproval(root, spec), epicGrouped, diffOnClick);
   }
 
-  private getStatusGroups(allSpecs: SpecSummary[]): SpecGroupNode[] {
+  private getStatusGroups(root: string, allSpecs: SpecSummary[]): SpecGroupNode[] {
     return STATUS_GROUPS.map(group => {
       const groupSpecs = allSpecs.filter(s => group.statuses.includes(s.status));
-      return new SpecGroupNode(group, groupSpecs);
+      return new SpecGroupNode(group, groupSpecs, 'status', root);
     });
   }
 
@@ -526,21 +584,22 @@ export class SpecTreeProvider implements vscode.TreeDataProvider<SpecTreeNode> {
    * requirements.md's Failure-Modes: "a terminal spec never enters the
    * Needs-Re-Approval group either").
    */
-  private getNeedsReapprovalGroup(allSpecs: SpecSummary[]): SpecGroupNode | null {
+  private getNeedsReapprovalGroup(root: string, allSpecs: SpecSummary[]): SpecGroupNode | null {
     const stale = allSpecs.filter(
-      s => s.status !== 'done' && s.status !== 'archived' && this.safeApproval(s) === 'stale',
+      s => s.status !== 'done' && s.status !== 'archived' && this.safeApproval(root, s) === 'stale',
     );
     if (stale.length === 0) return null; // FR-4: non-empty-only
     return new SpecGroupNode(
       { label: 'Needs Re-Approval', statuses: [], defaultExpanded: true },
       stale,
       'needsReapproval',
+      root,
     );
   }
 
-  private getEpicGroups(allSpecs: SpecSummary[]): EpicGroupNode<SpecSummary>[] | null {
+  private getEpicGroups(root: string, allSpecs: SpecSummary[]): EpicGroupNode<SpecSummary>[] | null {
     return buildEpicGroups(
-      this.workspaceRoot,
+      root,
       allSpecs,
       s => s.epic,
       s => s.status === 'done',

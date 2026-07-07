@@ -63,6 +63,13 @@ export class EpicGroupNode<T> extends vscode.TreeItem {
     isNoEpic: boolean,
     /** The registered epic this group represents (absent for the NO_EPIC group). */
     public readonly epic?: EpicSummary,
+    /**
+     * The workspace folder this group was built from. Carried so a multi-root
+     * consumer (the Specs pane, #549) can resolve each member against its OWN
+     * folder when expanding the group. Defaults to '' for single-root/legacy
+     * construction; the ADR pane sets but does not read it.
+     */
+    public readonly root: string = '',
   ) {
     super(
       groupLabel,
@@ -138,7 +145,7 @@ export function buildEpicGroups<T>(
     // mirroring the `(no epic)` placement. NO_EPIC has no epic doc to be a stub.
     const badge = !isNoEpic && epic?.isStub ? `${baseBadge} (stub)` : baseBadge;
     const label = isNoEpic ? NO_EPIC : `${epic?.title ?? key} (${key})`;
-    nodes.push(new EpicGroupNode(label, members, badge, isNoEpic, epic));
+    nodes.push(new EpicGroupNode(label, members, badge, isNoEpic, epic, rootDir));
   }
   return nodes;
 }
