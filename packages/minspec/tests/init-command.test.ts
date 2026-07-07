@@ -21,6 +21,13 @@ vi.mock('vscode', () => ({
     showErrorMessage: vi.fn(),
     showInformationMessage: vi.fn(),
     showWarningMessage: vi.fn(),
+    // Default: dismissed (undefined) — the coverage-threshold onboarding
+    // prompt (offerCoverageThresholdPrompt) then no-ops without writing.
+    showQuickPick: vi.fn(),
+    showInputBox: vi.fn(),
+  },
+  workspace: {
+    getConfiguration: vi.fn(() => ({ get: vi.fn() })),
   },
 }));
 

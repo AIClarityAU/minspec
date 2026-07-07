@@ -131,6 +131,40 @@ deny-by-default; this spec is how a project deliberately, visibly turns it on.
   not a second source of truth. *(Advanced path unchanged: `MINSPEC_AUTOMERGE_MODE=consequence-hybrid`
   still works for gate testing/CI — the withholding binds the graphical UI, not the env override.)*
 
+## Acceptance Criteria
+
+The feature is **done** when all of these hold. Each item traces to the `FR`/`INV` it
+satisfies.
+
+- [ ] **Off by default** — a project with no `autoMerge` key in `.minspec/config.json`
+  resolves to `pr-gate`; only the exact string `consequence-hybrid` ever turns it on. (FR-1, INV-1)
+- [ ] **Hold-only init offer** — after init, when `autoMerge.mode` is absent, a non-modal
+  toast offers only "Keep holding every PR" (writes `pr-gate`); no action in the offer can
+  write `consequence-hybrid` while #489/#490/#491 are open. (FR-2, INV-7)
+- [ ] **Dismissal is safe** — dismissing/escaping the init offer leaves the project at
+  `pr-gate`; nothing pre-selects or defaults toward auto-merge. (INV-2)
+- [ ] **Asked at most once** — a project that already has `autoMerge.mode` set is never
+  re-prompted by init or init-refresh. (INV-5)
+- [ ] **Dispatch honors the policy** — with no env var set, `dispatch-issue.sh` reads
+  `autoMerge.mode` from `config.json` and runs the gate in that mode; an explicit
+  `MINSPEC_AUTOMERGE_MODE` env value always overrides it (including overriding a
+  `consequence-hybrid` config back down to `pr-gate` when the env value isn't exactly that
+  string). (FR-3, INV-1)
+- [ ] **Setting write-through** — changing `minspec.autoMerge.mode` in VS Code Settings
+  updates `.minspec/config.json`; the dispatch script never reads the VS Code setting
+  directly. (FR-4, INV-4)
+- [ ] **Write-through can't be tricked into enabling auto-merge** — a raw, hand-edited, or
+  `git`-pulled `.vscode/settings.json` value of `consequence-hybrid` (out-of-enum for v1)
+  does **not** cause the write-through listener to write `consequence-hybrid` into
+  `config.json` — it is clamped to `pr-gate` the same as the graphical dropdown is
+  constrained, so the enum restriction can't be bypassed by editing settings.json directly.
+  (FR-4, INV-7 — closes the gap where an enum only constrains the UI, not `.get()`)
+- [ ] **Never a global default** — the setting is project/workspace-scoped; opening a
+  different project never inherits an auto-merge-on default from another project or from
+  User settings. (INV-3)
+- [ ] **Enabling is a visible commit** — turning auto-merge on for a project is a change to
+  a committed file (`config.json`), never a hidden runtime-only flag. (INV-6)
+
 ## Contract (TypeScript sketch)
 
 ```ts

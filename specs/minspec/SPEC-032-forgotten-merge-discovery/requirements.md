@@ -11,14 +11,14 @@ relates_to: [SPEC-024, SPEC-026, SPEC-027, SPEC-028, SPEC-012, DR-051]  # done-n
 # MinSpec — Forgotten-Merge Discovery & Done-ness (Requirements)
 
 **Date:** 2026-07-06
-**Status:** Specifying (SDD Specify phase)
+**Status:** Implementing (approved 2026-07-06; Specify + Clarify done, awaiting Plan)
 **Split from:** [SPEC-028](../SPEC-028-forgotten-merge-inbox/requirements.md) at Clarify
 (OQ-5, 2026-07-06) — see [SPEC-028 Traceability](../SPEC-028-forgotten-merge-inbox/requirements.md#traceability)
 and [#551](https://github.com/AIClarityAU/minspec/issues/551).
 **Triggered by:** [#276](https://github.com/harvest316/minspec/issues/276) — "some devs (such as myself) tend to forget that they have other pending branches to merge."
 **Epic:** [EPIC-009 Team Readiness](../../../docs/epics/EPIC-009-team-readiness.md)
 
-> **Why split from SPEC-028.** This half is read-only (`git fetch` only, INV-5) and
+> **Why split from SPEC-028.** This half is read-only (`git fetch` only, INV-3) and
 > outward-neutral — no `main`-push, no external side effect. It does not need Clarify
 > ceremony on its own merits; it was carved out of a T4 spec whose *other* half (bulk
 > and single-merge actions, still SPEC-028) does push `main` and stays T4. This document
@@ -54,7 +54,7 @@ merge execution is entirely [SPEC-028](../SPEC-028-forgotten-merge-inbox/require
 
 - **Branch cleanup / pruning** — owned by #177 / #272. This spec surfaces *unmerged* work; deleting *merged* leftovers is a separate concern.
 - **Re-implementing mergeability / CI-green computation** — reused from SPEC-024. This spec is the *discoverer*, not a second merge engine.
-- **Merging, deleting, or rebasing anything** — that's [SPEC-028](../SPEC-028-forgotten-merge-inbox/requirements.md). This spec is read-only by construction (INV-5).
+- **Merging, deleting, or rebasing anything** — that's [SPEC-028](../SPEC-028-forgotten-merge-inbox/requirements.md). This spec is read-only by construction (INV-3).
 - **Cross-remote discovery** beyond the repo's own `origin` in v1 (forks, secondary remotes) — tracked as [#550](https://github.com/AIClarityAU/minspec/issues/550).
 
 ## The three actors this must model
@@ -104,7 +104,7 @@ configured) **and** not behind base by unmerged base commits that would silently
 
 **FR-7 — Dependabot fast-path.** A `dependabot/*` branch that is a single dep bump, ahead-only,
 mergeable, CI-green → the canonical `ready` example. This spec only computes the verdict;
-[SPEC-028](../SPEC-028-forgotten-merge-inbox/requirements.md) INV-3 governs how that verdict
+[SPEC-028](../SPEC-028-forgotten-merge-inbox/requirements.md) INV-1 governs how that verdict
 is allowed to act.
 
 ### Surface (FR-8)
@@ -155,6 +155,6 @@ action-layer or meta and are recorded in [SPEC-028](../SPEC-028-forgotten-merge-
 - **Split from:** [SPEC-028](../SPEC-028-forgotten-merge-inbox/requirements.md), per [#551](https://github.com/AIClarityAU/minspec/issues/551).
 - **Reuses:** [SPEC-024](../SPEC-024-auto-merge-eligibility/requirements.md) (eligibility/done-ness signal set).
 - **Coordinates with:** [SPEC-026](../SPEC-026-session-presence/requirements.md) (presence — "in flight" annotation), [SPEC-027](../SPEC-027-inter-session-comms/requirements.md), [SPEC-012](../SPEC-012-next-task-resolver/requirements.md) (surface home), [DR-051](../../../docs/decisions/DR-051.md).
-- **Consumed by:** [SPEC-028](../SPEC-028-forgotten-merge-inbox/requirements.md) (bulk/single-merge actions read this spec's verdict; no independent mergeability judgement — INV-4 there).
+- **Consumed by:** [SPEC-028](../SPEC-028-forgotten-merge-inbox/requirements.md) (bulk/single-merge actions read this spec's verdict; no independent mergeability judgement — INV-2 there).
 - **Distinct from (not cleanup):** #168, #272, #177.
 - **Follow-ups (tracked):** OQ-2 (fork discovery) → [#550](https://github.com/AIClarityAU/minspec/issues/550).
