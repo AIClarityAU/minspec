@@ -4,7 +4,7 @@
 
 This is mechanical triage — be terse. State the tier, chosen role, and decision in
 fragments; drop preamble, filler, and hedging. Labels, `decision:` values, and any
-structured output stay exact. (Saves output tokens — DR-017 position 2, mechanical role.)
+structured output stay exact. (Terse output on a high-volume mechanical role saves output tokens.)
 
 ## Responsibilities
 
