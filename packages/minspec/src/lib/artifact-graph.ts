@@ -67,6 +67,7 @@ const SPEC_STATUS_MAP = {
   implementing: 'implementing',
   done: 'done',
   archived: 'archived',
+  superseded: 'superseded',
 } satisfies Record<SpecStatus, ResolverSpecStatus>;
 
 const ADR_STATUS_MAP = {
