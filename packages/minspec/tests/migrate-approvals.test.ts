@@ -112,22 +112,31 @@ describe('AC-9 — migrate-approvals converts legacy records with recomputed can
     expect(fs.existsSync(sidecarPath(specifyingRel))).toBe(false);
   });
 
-  it('is idempotent — a second run writes no new sidecars and never flips migrated:false to true', () => {
-    const sp = writeSpec('SPEC-007', 'T3', IMPL_PHASES);
-    const specRel = path.relative(ws, sp).split(path.sep).join('/');
-    fs.writeFileSync(
-      path.join(ws, '.minspec', 'approvals.json'),
-      JSON.stringify({ 'SPEC-007': { specHash: rawByteHash(sp), approvedAt: '2026-06-01T00:00:00.000Z', tier: 'T3' } }),
-    );
+  it(
+    'is idempotent — a second run writes no new sidecars and never flips migrated:false to true',
+    () => {
+      const sp = writeSpec('SPEC-007', 'T3', IMPL_PHASES);
+      const specRel = path.relative(ws, sp).split(path.sep).join('/');
+      fs.writeFileSync(
+        path.join(ws, '.minspec', 'approvals.json'),
+        JSON.stringify({ 'SPEC-007': { specHash: rawByteHash(sp), approvedAt: '2026-06-01T00:00:00.000Z', tier: 'T3' } }),
+      );
 
-    runMigration();
-    const firstContent = fs.readFileSync(sidecarPath(specRel), 'utf-8');
-    runMigration();
-    const secondContent = fs.readFileSync(sidecarPath(specRel), 'utf-8');
+      runMigration();
+      const firstContent = fs.readFileSync(sidecarPath(specRel), 'utf-8');
+      runMigration();
+      const secondContent = fs.readFileSync(sidecarPath(specRel), 'utf-8');
 
-    expect(secondContent).toBe(firstContent); // unchanged
-    expect(readSidecar(specRel).migrated).toBe(false); // step 2 never overwrites a converted record
-  });
+      expect(secondContent).toBe(firstContent); // unchanged
+      expect(readSidecar(specRel).migrated).toBe(false); // step 2 never overwrites a converted record
+    },
+    // Two `npx tsx` child-process spawns in one test (each real fs+git work,
+    // not mocked). Under the full-suite parallel worker pool, CPU/fs
+    // contention pushes this past the default 5000ms testTimeout even though
+    // the idempotency behavior itself is correct (isolated runs are clean —
+    // #554). Bump only this test, not the global default.
+    20_000,
+  );
 
   it('a migrated:true record leaves the corpus non-clean (promotion stays blocked)', () => {
     writeSpec('SPEC-010', 'T4', IMPL_PHASES); // no legacy record → migrated:true
