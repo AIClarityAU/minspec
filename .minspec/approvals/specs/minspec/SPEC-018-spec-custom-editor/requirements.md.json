@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-018-spec-custom-editor/requirements.md",
+  "specHash": "82cfa61fdcbdeff128cdf909a58b4808a69b46a32a70e1fb948a012d2a4da675",
+  "approvedAt": "2026-07-06T04:25:41.473Z",
+  "approvedBy": "claude@harvest316.com",
+  "tier": "T4",
+  "migrated": false,
+  "baselineBlob": "49dfcb8055f4d182082f41dddc7ebec786cef13e"
+}
