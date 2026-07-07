@@ -6,10 +6,10 @@ product: minspec
 epic: EPIC-002  # Signpost Integrity
 ---
 
-# MinSpec — Approvable Custom Editor (in-IDE review surface) (Plan)
+# MinSpec — Approvable Custom Editor (in-IDE review surface) — Design
 
 **Date:** 2026-07-05
-**Status:** Plan (SDD Plan phase)
+**Status:** Implementing (SDD Implement phase)
 **Reads:** [requirements.md](requirements.md) — the FRs, invariants, and the Clarify
 decisions (OQ2 offer-useByDefault, OQ3 all-approvables, OQ1 kept as a research spike) are
 settled there and not re-litigated here. This document is HOW, not WHAT/WHY.
