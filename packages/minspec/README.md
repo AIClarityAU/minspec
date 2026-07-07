@@ -74,6 +74,8 @@ Accepting the "Refresh" toast later merges template updates with your edits via 
 
 ## Features
 
+*Your AI just got a whole lot smarter.*
+
 ### Scope Classifier
 
 MinSpec analyzes your git diff and classifies each change into one of four tiers by its **mechanical scope** -- the blast radius of the change. The classifier examines file count, line count, new exports, schema changes, dependency additions, cross-directory spread, and more, then recommends the right level of specification ceremony.
