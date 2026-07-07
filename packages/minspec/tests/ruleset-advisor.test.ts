@@ -57,6 +57,7 @@ import {
   resolveCheckContexts,
 } from '../src/lib/ruleset-advisor';
 import { offerRulesetAdvisory, resolveRequiredChecks } from '../src/commands/init';
+import { MANAGED_REGION_TEMPLATES } from '../src/lib/template-registry';
 
 // ─── Test runner factory ─────────────────────────────────────────────────────
 
@@ -222,7 +223,7 @@ function payloadContexts(payload: Record<string, unknown>): string[] {
 }
 
 describe('createRulesetPayload()', () => {
-  it('requires lint + test on the default branch and OMITS ready-to-merge by default', () => {
+  it('requires MinSpec SDD validation on the default branch and OMITS ready-to-merge by default', () => {
     const payload = createRulesetPayload() as {
       name: string;
       target: string;
@@ -237,8 +238,10 @@ describe('createRulesetPayload()', () => {
 
     const contexts = payloadContexts(payload);
     expect(contexts).toEqual([...DEFAULT_REQUIRED_CHECK_CONTEXTS]);
-    expect(contexts).toContain('lint');
-    expect(contexts).toContain('test');
+    // The default MUST match the check context MinSpec's own scaffolded CI
+    // reports (`validate` job's `name:` in minspec-validate.yml) — anything
+    // else deadlocks every PR on a repo that only has the scaffolded CI (#559).
+    expect(contexts).toEqual(['MinSpec SDD validation']);
     // ready-to-merge would block every merge until the reviewer auto-labels —
     // it must NOT be a default required check.
     expect(contexts).not.toContain('ready-to-merge');
@@ -255,6 +258,27 @@ describe('createRulesetPayload()', () => {
   it('falls back to the default when given an empty check set', () => {
     const contexts = payloadContexts(createRulesetPayload([]));
     expect(contexts).toEqual([...DEFAULT_REQUIRED_CHECK_CONTEXTS]);
+  });
+});
+
+describe('DEFAULT_REQUIRED_CHECK_CONTEXTS matches the scaffolded CI (#559 regression)', () => {
+  it('equals the job `name:` MinSpec\'s own minspec-validate.yml template reports', () => {
+    // Root cause of #559: the default was a hardcoded ['lint', 'test'] guess
+    // that was never reconciled with the check context the extension's own
+    // scaffolded CI actually reports, so the advisor could write a
+    // self-deadlocking ruleset. This test ties the default directly to the
+    // scaffolded workflow's job name so the two can never drift apart again
+    // undetected.
+    const workflowTemplate = MANAGED_REGION_TEMPLATES.find(
+      (t) => t.outputPath === '.github/workflows/minspec-validate.yml',
+    );
+    expect(workflowTemplate).toBeDefined();
+
+    const match = workflowTemplate!.content.match(/\n\s*validate:\s*\n\s*name:\s*(.+)/);
+    expect(match).not.toBeNull();
+    const scaffoldedJobName = match![1].trim();
+
+    expect([...DEFAULT_REQUIRED_CHECK_CONTEXTS]).toEqual([scaffoldedJobName]);
   });
 });
 
