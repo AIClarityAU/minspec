@@ -14,6 +14,7 @@ import {
   SPEC_KIT_COMMANDS,
   buildClaudeShim,
   buildCursorShim,
+  slashCommandName,
 } from './slash-commands';
 import type { DetectedTools } from './tool-detector';
 
@@ -892,14 +893,34 @@ function splitShimFrontmatter(doc: string): { preamble: string; body: string } {
   return { preamble, body };
 }
 
+/**
+ * Stable managed-region marker name for a command's Claude Code shim. Shared by
+ * the current (`minspec-<command>.md`) template AND the pre-#534 legacy-path
+ * migration cleanup in `scaffold.ts`, so both recognize the exact same
+ * MinSpec-owned region regardless of which filename it lives at.
+ */
+export function claudeShimTemplateName(command: (typeof SPEC_KIT_COMMANDS)[number]): string {
+  return `slash-claude-${command}`;
+}
+
+/**
+ * Pre-#534 bare-name output path for a command's Claude Code shim
+ * (`.claude/commands/specify.md`). Superseded by the `minspec-`-prefixed path
+ * below; kept only so `scaffold.ts` can detect and clean up the orphaned file
+ * left behind when an already-initialized project upgrades.
+ */
+export function legacyClaudeShimOutputPath(command: (typeof SPEC_KIT_COMMANDS)[number]): string {
+  return `${CLAUDE_COMMANDS_DIR}/${command}.md`;
+}
+
 /** Build the managed-region template for one Claude Code slash-command shim. */
 function buildClaudeShimTemplate(
   command: (typeof SPEC_KIT_COMMANDS)[number],
 ): ManagedRegionTemplate {
   const { preamble, body } = splitShimFrontmatter(buildClaudeShim(command));
   return {
-    name: `slash-claude-${command}`,
-    outputPath: `${CLAUDE_COMMANDS_DIR}/${command}.md`,
+    name: claudeShimTemplateName(command),
+    outputPath: `${CLAUDE_COMMANDS_DIR}/${slashCommandName(command)}.md`,
     commentStyle: 'html',
     content: body,
     preamble,

@@ -9,8 +9,11 @@ import { SPEC_STATUSES } from './spec';
  *
  * Spec Kit (github.com/github/spec-kit) exposes `/specify`, `/clarify`, `/plan`,
  * `/tasks`, `/analyze`, `/implement` as slash commands in agentic coding tools.
- * MinSpec generates shim files routing these commands to the matching MinSpec
- * phase guidance so users migrating from Spec Kit don't hit dead commands.
+ * MinSpec generates shim files routing these phases to the matching MinSpec
+ * guidance so users migrating from Spec Kit don't hit dead commands. The
+ * generated commands carry a `minspec-` prefix (`/minspec-specify`, …, #534) so
+ * they never collide with another tool's bare-named commands; `SPEC_KIT_COMMANDS`
+ * stays unprefixed as the internal phase identifier.
  *
  * All generation is offline (Tier 0) — pure file I/O.
  */
@@ -33,6 +36,20 @@ export const SPEC_KIT_COMMANDS: readonly SpecKitCommand[] = [
   'analyze',
   'implement',
 ] as const;
+
+/**
+ * Prefix applied to every slash command MinSpec generates into a harness (#534).
+ * The bare Spec Kit names (`/specify`, `/plan`, …) collide with other tools'
+ * commands and read ambiguously. `SPEC_KIT_COMMANDS` stays unprefixed — it is the
+ * internal phase identifier used to key `COMMAND_GUIDANCE` and match Spec Kit's own
+ * naming — only the generated, user-facing command name is prefixed.
+ */
+export const SLASH_COMMAND_PREFIX = 'minspec-';
+
+/** The generated, user-facing slash command name for a Spec Kit phase (#534). */
+export function slashCommandName(command: SpecKitCommand): string {
+  return `${SLASH_COMMAND_PREFIX}${command}`;
+}
 
 /** Markers bounding the auto-generated section inside AGENTS.md */
 export const AGENTS_SLASH_SECTION_START = '<!-- minspec:slash-commands:start -->';
@@ -126,14 +143,14 @@ const COMMAND_GUIDANCE: Record<SpecKitCommand, CommandGuidance> = {
   },
 };
 
-/** Build a Claude Code slash command file (`.claude/commands/<name>.md`). */
+/** Build a Claude Code slash command file (`.claude/commands/minspec-<name>.md`). */
 export function buildClaudeShim(command: SpecKitCommand): string {
   const g = COMMAND_GUIDANCE[command];
   return (
     '---\n' +
     `description: ${g.description}\n` +
     '---\n\n' +
-    `# /${command} — MinSpec ${capitalize(command)} Phase\n\n` +
+    `# /${slashCommandName(command)} — MinSpec ${capitalize(command)} Phase\n\n` +
     `${g.body}\n`
   );
 }
@@ -154,7 +171,7 @@ export function buildCursorShim(): string {
   lines.push('');
   for (const cmd of SPEC_KIT_COMMANDS) {
     const g = COMMAND_GUIDANCE[cmd];
-    lines.push(`## /${cmd}`);
+    lines.push(`## /${slashCommandName(cmd)}`);
     lines.push('');
     lines.push(`*${g.description}*`);
     lines.push('');
@@ -178,7 +195,9 @@ export function buildAgentsSlashCommandSection(): string {
   lines.push('| Command | Phase | Purpose |');
   lines.push('|---|---|---|');
   for (const cmd of SPEC_KIT_COMMANDS) {
-    lines.push(`| \`/${cmd}\` | ${capitalize(cmd)} | ${COMMAND_GUIDANCE[cmd].description} |`);
+    lines.push(
+      `| \`/${slashCommandName(cmd)}\` | ${capitalize(cmd)} | ${COMMAND_GUIDANCE[cmd].description} |`,
+    );
   }
   lines.push('');
   lines.push(
@@ -256,7 +275,7 @@ export function generateSlashCommandShims(
     const dir = path.join(rootDir, '.claude', 'commands');
     fs.mkdirSync(dir, { recursive: true });
     for (const cmd of SPEC_KIT_COMMANDS) {
-      const filePath = path.join(dir, `${cmd}.md`);
+      const filePath = path.join(dir, `${slashCommandName(cmd)}.md`);
       if (!fs.existsSync(filePath)) {
         fs.writeFileSync(filePath, buildClaudeShim(cmd), 'utf-8');
         claude.push(filePath);
