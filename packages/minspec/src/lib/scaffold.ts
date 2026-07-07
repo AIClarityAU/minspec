@@ -12,6 +12,8 @@ import {
   renderManagedBlock,
   renderManagedFile,
   computeTemplateBaseline,
+  claudeShimTemplateName,
+  legacyClaudeShimOutputPath,
   type ManagedRegionTemplate,
 } from './template-registry';
 import { execFileSync } from 'child_process';
@@ -26,7 +28,7 @@ import {
   spliceManagedRegion,
   type GeneratedHashes,
 } from './merge-refresh';
-import { generateSlashCommandShims } from './slash-commands';
+import { generateSlashCommandShims, SPEC_KIT_COMMANDS } from './slash-commands';
 import { detectTools, type DetectedTools } from './tool-detector';
 import { writeEpicIndex } from './epic-manager';
 import { assembleContext } from './constitution-context';
@@ -381,6 +383,41 @@ function writeManagedFile(fullPath: string, tpl: ManagedRegionTemplate): void {
 }
 
 /**
+ * Clean up pre-#534 bare-name Claude Code slash-command shims
+ * (`.claude/commands/specify.md`, …) once a project has moved to the
+ * `minspec-`-prefixed names (`.claude/commands/minspec-specify.md`). Because the
+ * output path changed, `refreshManagedRegionTemplates` never revisits the old
+ * path — left alone it would sit forever as a stale, un-refreshed duplicate of
+ * the new shim, both routable, which is exactly the "harness upgrades cleanly"
+ * gap #534 calls out.
+ *
+ * A legacy file is deleted ONLY when it is still a pure, unmodified MinSpec
+ * scaffold: its managed markers are intact (same marker name as the new shim —
+ * only the path moved) AND nothing besides the frontmatter preamble was added
+ * outside them. Markers missing, or real user content outside the region, means
+ * leave it untouched — never a silent clobber, mirroring the missing-markers
+ * refresh rule.
+ */
+function migrateLegacyClaudeSlashCommandShims(rootDir: string): void {
+  for (const command of SPEC_KIT_COMMANDS) {
+    const legacyRel = legacyClaudeShimOutputPath(command);
+    const legacyFull = path.join(rootDir, legacyRel);
+    if (!fs.existsSync(legacyFull)) continue;
+
+    const start = managedRegionStartMarker(claudeShimTemplateName(command), 'html');
+    const end = managedRegionEndMarker(claudeShimTemplateName(command), 'html');
+    const onDisk = fs.readFileSync(legacyFull, 'utf-8');
+    const split = splitManagedRegion(onDisk, start, end);
+    if (!split) continue; // no recognizable MinSpec region — leave it alone
+
+    const leftover = (split.before + split.after).replace(/^---[\s\S]*?---/, '').trim();
+    if (leftover.length > 0) continue; // user added content outside the region — keep the file
+
+    fs.unlinkSync(legacyFull);
+  }
+}
+
+/**
  * Point the project's git `core.hooksPath` at `.minspec/hooks` so the scaffolded
  * editor-independent hooks (DR-037, #247) run on EVERY commit — terminal, another
  * editor, or an AI agent — not just the VS Code command path.
@@ -530,6 +567,10 @@ export function generateHarnessFiles(rootDir: string): void {
   const tools = detectTools(rootDir);
   generateManagedRegionTemplates(rootDir, tools);
 
+  // Clean up any pre-#534 bare-name Claude shims left behind by a prior init of
+  // this same directory (defensive — a fresh init normally has none).
+  migrateLegacyClaudeSlashCommandShims(rootDir);
+
   // Point git at the scaffolded editor-independent hooks so terminal / other-editor
   // / AI-agent commits run the SDD gates too (DR-037, #247). Idempotent + fail-quiet.
   ensureHooksPath(rootDir);
@@ -610,6 +651,11 @@ export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
   // current — the create-only behaviour is gone. Collect warnings to return.
   const tools = detectTools(rootDir);
   const managedRegionWarnings = refreshManagedRegionTemplates(rootDir, tools);
+
+  // Migrate a pre-#534 project off the bare-name Claude shims (#534): the new
+  // `minspec-<cmd>.md` files were just (re-)scaffolded above, so the stale
+  // `<cmd>.md` duplicates — if still pure MinSpec scaffolds — are safe to remove.
+  migrateLegacyClaudeSlashCommandShims(rootDir);
 
   // Re-assert git's hooksPath on refresh too (a repo cloned without it, or whose
   // config was reset, regains the gate). Idempotent + fail-quiet (DR-037, #247).

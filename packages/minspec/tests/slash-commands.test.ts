@@ -10,6 +10,7 @@ import {
   buildAgentsSlashCommandSection,
   injectAgentsSlashSection,
   generateSlashCommandShims,
+  slashCommandName,
   AGENTS_SLASH_SECTION_START,
   AGENTS_SLASH_SECTION_END,
 } from '../src/lib/slash-commands';
@@ -41,13 +42,23 @@ describe('slash-commands', () => {
     });
   });
 
+  describe('slashCommandName()', () => {
+    it('prefixes every command with minspec- (#534)', () => {
+      for (const cmd of SPEC_KIT_COMMANDS) {
+        expect(slashCommandName(cmd)).toBe(`minspec-${cmd}`);
+      }
+    });
+  });
+
   describe('buildClaudeShim()', () => {
     it('emits valid front-matter and command heading for each command', () => {
       for (const cmd of SPEC_KIT_COMMANDS) {
         const content = buildClaudeShim(cmd);
         expect(content.startsWith('---\n')).toBe(true);
         expect(content).toMatch(/^---\ndescription: .+\n---/m);
-        expect(content).toContain(`# /${cmd}`);
+        expect(content).toContain(`# /${slashCommandName(cmd)}`);
+        // bare (unprefixed) heading must never appear — that's the collision #534 fixes
+        expect(content).not.toContain(`# /${cmd} —`);
       }
     });
 
@@ -109,7 +120,7 @@ describe('slash-commands', () => {
       const content = buildCursorShim();
       expect(content.startsWith('---\n')).toBe(true);
       for (const cmd of SPEC_KIT_COMMANDS) {
-        expect(content).toContain(`## /${cmd}`);
+        expect(content).toContain(`## /${slashCommandName(cmd)}`);
       }
     });
   });
@@ -120,7 +131,7 @@ describe('slash-commands', () => {
       expect(section.startsWith(AGENTS_SLASH_SECTION_START)).toBe(true);
       expect(section.endsWith(AGENTS_SLASH_SECTION_END)).toBe(true);
       for (const cmd of SPEC_KIT_COMMANDS) {
-        expect(section).toContain(`\`/${cmd}\``);
+        expect(section).toContain(`\`/${slashCommandName(cmd)}\``);
       }
     });
   });
@@ -144,7 +155,7 @@ describe('slash-commands', () => {
       expect(updated).toContain('User Trailing Section');
       expect(updated).toContain('User content.');
       expect(updated).not.toContain('old content');
-      expect(updated).toContain('/specify');
+      expect(updated).toContain('/minspec-specify');
     });
 
     it('is idempotent under repeated application', () => {
@@ -199,15 +210,15 @@ describe('slash-commands', () => {
       expect(fs.existsSync(path.join(tmpDir, '.cursor'))).toBe(false);
     });
 
-    it('creates .claude/commands/<name>.md for each command when CLAUDE.md exists', () => {
+    it('creates .claude/commands/minspec-<name>.md for each command when CLAUDE.md exists', () => {
       fs.writeFileSync(path.join(tmpDir, 'CLAUDE.md'), '# Claude\n');
       const result = generateSlashCommandShims(tmpDir);
       expect(result.claude).toHaveLength(SPEC_KIT_COMMANDS.length);
       for (const cmd of SPEC_KIT_COMMANDS) {
-        const filePath = path.join(tmpDir, '.claude', 'commands', `${cmd}.md`);
+        const filePath = path.join(tmpDir, '.claude', 'commands', `${slashCommandName(cmd)}.md`);
         expect(fs.existsSync(filePath)).toBe(true);
         const content = fs.readFileSync(filePath, 'utf-8');
-        expect(content).toContain(`/${cmd}`);
+        expect(content).toContain(`/${slashCommandName(cmd)}`);
       }
       expect(result.cursor).toEqual([]);
     });
@@ -220,7 +231,7 @@ describe('slash-commands', () => {
       expect(fs.existsSync(filePath)).toBe(true);
       const content = fs.readFileSync(filePath, 'utf-8');
       for (const cmd of SPEC_KIT_COMMANDS) {
-        expect(content).toContain(`## /${cmd}`);
+        expect(content).toContain(`## /${slashCommandName(cmd)}`);
       }
       expect(result.claude).toEqual([]);
     });
@@ -233,14 +244,14 @@ describe('slash-commands', () => {
       const content = fs.readFileSync(agentsPath, 'utf-8');
       expect(content).toContain('Existing rules.');
       expect(content).toContain(AGENTS_SLASH_SECTION_START);
-      expect(content).toContain('/specify');
+      expect(content).toContain('/minspec-specify');
     });
 
     it('does not overwrite existing Claude shim files — user edits preserved', () => {
       fs.writeFileSync(path.join(tmpDir, 'CLAUDE.md'), '# Claude\n');
       const dir = path.join(tmpDir, '.claude', 'commands');
       fs.mkdirSync(dir, { recursive: true });
-      const specifyPath = path.join(dir, 'specify.md');
+      const specifyPath = path.join(dir, 'minspec-specify.md');
       fs.writeFileSync(specifyPath, '# my custom specify\n');
 
       const result = generateSlashCommandShims(tmpDir);
@@ -248,7 +259,7 @@ describe('slash-commands', () => {
       expect(fs.readFileSync(specifyPath, 'utf-8')).toBe('# my custom specify\n');
       expect(result.claude).not.toContain(specifyPath);
       // Other commands still written
-      expect(fs.existsSync(path.join(dir, 'plan.md'))).toBe(true);
+      expect(fs.existsSync(path.join(dir, 'minspec-plan.md'))).toBe(true);
     });
 
     it('does not overwrite an existing Cursor shim file', () => {
@@ -282,7 +293,7 @@ describe('slash-commands', () => {
       expect(content).toContain('User Custom Section');
       expect(content).toContain('Do not touch.');
       expect(content).not.toContain('stale');
-      expect(content).toContain('/implement');
+      expect(content).toContain('/minspec-implement');
     });
 
     it('honours an injected tools override (skips when detection is opted out)', () => {
@@ -313,7 +324,7 @@ describe('slash-commands', () => {
       const claudeDir = path.join(tmpDir, '.claude', 'commands');
       expect(fs.existsSync(claudeDir)).toBe(true);
       for (const cmd of SPEC_KIT_COMMANDS) {
-        expect(fs.existsSync(path.join(claudeDir, `${cmd}.md`))).toBe(true);
+        expect(fs.existsSync(path.join(claudeDir, `${slashCommandName(cmd)}.md`))).toBe(true);
       }
 
       const cursorFile = path.join(tmpDir, '.cursor', 'rules', 'spec-kit-commands.mdc');
@@ -327,7 +338,7 @@ describe('slash-commands', () => {
       generateHarnessFiles(tmpDir);
 
       // User edits their specify shim
-      const specifyPath = path.join(tmpDir, '.claude', 'commands', 'specify.md');
+      const specifyPath = path.join(tmpDir, '.claude', 'commands', 'minspec-specify.md');
       fs.writeFileSync(specifyPath, '# customized\n');
 
       // User stomps the AGENTS.md slash section
@@ -342,7 +353,7 @@ describe('slash-commands', () => {
       expect(fs.readFileSync(specifyPath, 'utf-8')).toBe('# customized\n');
       const agentsContent = fs.readFileSync(agentsPath, 'utf-8');
       expect(agentsContent).not.toContain('stale');
-      expect(agentsContent).toContain('/specify');
+      expect(agentsContent).toContain('/minspec-specify');
     });
   });
 });

@@ -34,20 +34,21 @@ import {
   managedRegionEndMarker,
   renderManagedBlock,
   computeTemplateBaseline,
+  legacyClaudeShimOutputPath,
 } from '../src/lib/template-registry';
 import { splitManagedRegion, loadTemplateBaseline, saveTemplateBaseline } from '../src/lib/merge-refresh';
-import { SPEC_KIT_COMMANDS } from '../src/lib/slash-commands';
+import { SPEC_KIT_COMMANDS, slashCommandName } from '../src/lib/slash-commands';
 import { hasHarnessDrift } from '../src/lib/auto-bootstrap';
 
-const SPECIFY_REL = `${CLAUDE_COMMANDS_DIR}/specify.md`;
-const PLAN_REL = `${CLAUDE_COMMANDS_DIR}/plan.md`;
+const SPECIFY_REL = `${CLAUDE_COMMANDS_DIR}/${slashCommandName('specify')}.md`;
+const PLAN_REL = `${CLAUDE_COMMANDS_DIR}/${slashCommandName('plan')}.md`;
 
 const tplByPath = (p: string) =>
   MANAGED_REGION_TEMPLATES.find((t) => t.outputPath === p)!;
 
 describe('slash-command shim templates are registered as managed-region templates (#241)', () => {
   it('registers one Claude shim per command + one Cursor file', () => {
-    const claudePaths = SPEC_KIT_COMMANDS.map((c) => `${CLAUDE_COMMANDS_DIR}/${c}.md`);
+    const claudePaths = SPEC_KIT_COMMANDS.map((c) => `${CLAUDE_COMMANDS_DIR}/${slashCommandName(c)}.md`);
     for (const p of [...claudePaths, CURSOR_SLASH_COMMANDS_PATH]) {
       const tpl = tplByPath(p);
       expect(tpl, `expected a managed-region template for ${p}`).toBeDefined();
@@ -111,7 +112,7 @@ describe('slash-command shim scaffolding + refresh (#241)', () => {
   it('init scaffolds each Claude shim wrapped in managed markers, frontmatter on line 1', () => {
     generateHarnessFiles(tmpDir);
     for (const cmd of SPEC_KIT_COMMANDS) {
-      const rel = `${CLAUDE_COMMANDS_DIR}/${cmd}.md`;
+      const rel = `${CLAUDE_COMMANDS_DIR}/${slashCommandName(cmd)}.md`;
       const full = path.join(tmpDir, rel);
       expect(fs.existsSync(full), `expected ${rel}`).toBe(true);
       const onDisk = fs.readFileSync(full, 'utf-8');
@@ -124,8 +125,8 @@ describe('slash-command shim scaffolding + refresh (#241)', () => {
       expect(onDisk).toContain(start);
       expect(onDisk).toContain(end);
       expect(splitManagedRegion(onDisk, start, end)).not.toBeNull();
-      // The command heading the AI tool routes on is still present.
-      expect(onDisk).toContain(`# /${cmd}`);
+      // The command heading the AI tool routes on is still present, prefixed (#534).
+      expect(onDisk).toContain(`# /${slashCommandName(cmd)}`);
     }
   });
 
@@ -140,7 +141,7 @@ describe('slash-command shim scaffolding + refresh (#241)', () => {
     const end = managedRegionEndMarker(tpl.name, tpl.commentStyle);
     expect(splitManagedRegion(onDisk, start, end)).not.toBeNull();
     for (const cmd of SPEC_KIT_COMMANDS) {
-      expect(onDisk).toContain(`## /${cmd}`);
+      expect(onDisk).toContain(`## /${slashCommandName(cmd)}`);
     }
   });
 
@@ -264,6 +265,92 @@ describe('slash-command shim scaffolding + refresh (#241)', () => {
   });
 });
 
+describe('legacy bare-name Claude shims are migrated on refresh (#534)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-shim534-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('removes a legacy bare-name shim that is still a pure, unmodified scaffold', () => {
+    generateHarnessFiles(tmpDir);
+    const newFull = path.join(tmpDir, SPECIFY_REL);
+    const legacyRel = legacyClaudeShimOutputPath('specify');
+    const legacyFull = path.join(tmpDir, legacyRel);
+
+    // Simulate a pre-#534 project: the shim lives at the old bare path instead.
+    fs.renameSync(newFull, legacyFull);
+    expect(fs.existsSync(legacyFull)).toBe(true);
+    expect(fs.existsSync(newFull)).toBe(false);
+
+    const warnings = refreshHarnessFiles(tmpDir);
+    expect(warnings).toEqual([]);
+
+    // The new prefixed path is re-scaffolded (missing-file path)...
+    expect(fs.existsSync(newFull)).toBe(true);
+    expect(fs.readFileSync(newFull, 'utf-8')).toContain('/minspec-specify');
+    // ...and the orphaned legacy duplicate is cleaned up — never left as a second,
+    // un-refreshed `/specify` command shadowing the new one.
+    expect(fs.existsSync(legacyFull)).toBe(false);
+  });
+
+  it('leaves a legacy shim alone when the user appended content outside the markers', () => {
+    generateHarnessFiles(tmpDir);
+    const newFull = path.join(tmpDir, SPECIFY_REL);
+    const legacyRel = legacyClaudeShimOutputPath('specify');
+    const legacyFull = path.join(tmpDir, legacyRel);
+
+    const scaffolded = fs.readFileSync(newFull, 'utf-8');
+    fs.unlinkSync(newFull);
+    const withUserTail = scaffolded + '\n## My Project Notes\n\nDo not delete this.\n';
+    fs.writeFileSync(legacyFull, withUserTail);
+
+    refreshHarnessFiles(tmpDir);
+
+    // User content survives — never a silent clobber of real user edits.
+    expect(fs.readFileSync(legacyFull, 'utf-8')).toContain('Do not delete this.');
+    // The current-named shim is still (re-)scaffolded independently.
+    expect(fs.existsSync(newFull)).toBe(true);
+  });
+
+  it('leaves a fully user-owned legacy file alone (markers deleted)', () => {
+    generateHarnessFiles(tmpDir);
+    const legacyRel = legacyClaudeShimOutputPath('specify');
+    const legacyFull = path.join(tmpDir, legacyRel);
+    fs.writeFileSync(legacyFull, '# my own specify, not MinSpec-managed\n');
+
+    refreshHarnessFiles(tmpDir);
+
+    expect(fs.readFileSync(legacyFull, 'utf-8')).toBe('# my own specify, not MinSpec-managed\n');
+  });
+
+  it('is a no-op when no legacy shim exists', () => {
+    generateHarnessFiles(tmpDir);
+    expect(() => refreshHarnessFiles(tmpDir)).not.toThrow();
+    for (const rel of [SPECIFY_REL, PLAN_REL]) {
+      expect(fs.existsSync(path.join(tmpDir, rel))).toBe(true);
+    }
+  });
+
+  it('is idempotent under repeated refresh — never re-creates a removed legacy file', () => {
+    generateHarnessFiles(tmpDir);
+    const newFull = path.join(tmpDir, SPECIFY_REL);
+    const legacyFull = path.join(tmpDir, legacyClaudeShimOutputPath('specify'));
+    fs.renameSync(newFull, legacyFull);
+
+    refreshHarnessFiles(tmpDir);
+    expect(fs.existsSync(legacyFull)).toBe(false);
+
+    refreshHarnessFiles(tmpDir);
+    expect(fs.existsSync(legacyFull)).toBe(false);
+    expect(fs.existsSync(newFull)).toBe(true);
+  });
+});
+
 describe('slash-shim guidance change is drift-detected (#241)', () => {
   let tmpDir: string;
 
@@ -278,7 +365,7 @@ describe('slash-shim guidance change is drift-detected (#241)', () => {
   it('computeTemplateBaseline records every slash-shim output path', () => {
     const baseline = computeTemplateBaseline();
     for (const cmd of SPEC_KIT_COMMANDS) {
-      expect(baseline[`${CLAUDE_COMMANDS_DIR}/${cmd}.md`]).toBeDefined();
+      expect(baseline[`${CLAUDE_COMMANDS_DIR}/${slashCommandName(cmd)}.md`]).toBeDefined();
     }
     expect(baseline[CURSOR_SLASH_COMMANDS_PATH]).toBeDefined();
   });
