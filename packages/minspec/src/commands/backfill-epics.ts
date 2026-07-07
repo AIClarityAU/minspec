@@ -119,8 +119,8 @@ async function renameEpicsInFlow(
     if (slug === target.slug && title === target.title) continue; // nothing changed
 
     const oldSlug = target.slug;
-    target.title = title;
-    target.slug = slug;
+    const targetIndex = epics.indexOf(target);
+    if (targetIndex !== -1) epics[targetIndex] = { ...target, title, slug };
     // Repoint every mapping that referenced the old slug — no orphans.
     if (oldSlug !== slug) {
       for (let i = 0; i < mappings.length; i++) {

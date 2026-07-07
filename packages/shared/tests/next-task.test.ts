@@ -463,6 +463,16 @@ describe('edge-cases & output contract', () => {
     expect(resolveCorruption(g)).toStrictEqual([]);
   });
 
+  it('SUPERSEDED (#579): a superseded spec is terminal-out, same as done/archived, not a pending task', () => {
+    const g = graph({
+      epics: [mkEpic('EPIC-001', 'active')],
+      specs: [mkSpec('SPEC-001', 'superseded', 'unapproved', { epic: 'EPIC-001' })],
+    });
+    expect(resolveNextTask(g)).toBeNull();
+    expect(resolvePipeline(g)).toStrictEqual([]);
+    expect(resolveCorruption(g)).toStrictEqual([]);
+  });
+
   it('EMPTY: a totally empty graph → null / []', () => {
     const g = graph({});
     expect(resolveNextTask(g)).toBeNull();

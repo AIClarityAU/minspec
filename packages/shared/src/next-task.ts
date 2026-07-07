@@ -40,7 +40,7 @@
 
 // ---- Status enums (mirror packages/minspec source-of-truth, redeclared Tier-0-locally) ----
 export type EpicStatus = 'proposed' | 'active' | 'done' | 'abandoned';
-export type SpecStatus = 'new' | 'specifying' | 'implementing' | 'done' | 'archived';
+export type SpecStatus = 'new' | 'specifying' | 'implementing' | 'done' | 'archived' | 'superseded';
 export type AdrStatus = 'proposed' | 'accepted' | 'deprecated' | 'superseded';
 export type ApprovalState = 'approved' | 'stale' | 'unapproved';
 export type Phase = 'specify' | 'clarify' | 'plan' | 'tasks' | 'implement';
@@ -205,7 +205,7 @@ function compareIds(a: string, b: string): number {
 
 /** A spec terminal-out state: no longer a pending human task. */
 function isSpecTerminal(s: SpecNode): boolean {
-  return s.status === 'done' || s.status === 'archived';
+  return s.status === 'done' || s.status === 'archived' || s.status === 'superseded';
 }
 
 /**
