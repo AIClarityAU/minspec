@@ -177,10 +177,17 @@ export class AdrTreeProvider implements vscode.TreeDataProvider<AdrTreeNode> {
    * the ctor `workspaceRoot` is the single-root fallback for activation-time
    * construction and unit tests whose vscode mock exposes no workspaceFolders.
    * Read fresh every call so refresh() after onDidChangeWorkspaceFolders re-scans.
+   *
+   * `allWorkspaceRoots()` returns `undefined` (fall back to the ctor seed) only
+   * when the live API has no folder list at all; it returns `[]` — rendered as
+   * an empty tree, no fallback — when the API is live and genuinely reports
+   * zero folders (every folder removed at runtime). Collapsing those two cases
+   * via `live.length > 0 ? live : fallback` briefly re-rendered the removed
+   * folder's stale DRs after the last live folder vanished (#574).
    */
   private roots(): string[] {
     const live = allWorkspaceRoots();
-    if (live.length > 0) return live;
+    if (live !== undefined) return live;
     return this.workspaceRoot ? [this.workspaceRoot] : [];
   }
 

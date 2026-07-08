@@ -527,10 +527,17 @@ export class SpecTreeProvider implements vscode.TreeDataProvider<SpecTreeNode> {
    * construction and for unit tests whose vscode mock exposes no workspaceFolders.
    * Read fresh every call so a refresh() after onDidChangeWorkspaceFolders picks
    * up an added/removed folder with no cached root to go stale.
+   *
+   * `allWorkspaceRoots()` returns `undefined` (fall back to the ctor seed) only
+   * when the live API has no folder list at all; it returns `[]` — rendered as
+   * an empty tree, no fallback — when the API is live and genuinely reports
+   * zero folders (every folder removed at runtime). Collapsing those two cases
+   * via `live.length > 0 ? live : fallback` briefly re-rendered the removed
+   * folder's stale specs after the last live folder vanished (#574).
    */
   private roots(): string[] {
     const live = allWorkspaceRoots();
-    if (live.length > 0) return live;
+    if (live !== undefined) return live;
     return this.workspaceRoot ? [this.workspaceRoot] : [];
   }
 
