@@ -1,9 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-018-spec-custom-editor/requirements.md",
-  "specHash": "82cfa61fdcbdeff128cdf909a58b4808a69b46a32a70e1fb948a012d2a4da675",
-  "approvedAt": "2026-07-06T04:25:41.473Z",
+  "specHash": "52abcf1e7e1a2335d02416b72d8e4ec66ca682cbb7bf195fa6b26e52e0b8e154",
+  "approvedAt": "2026-07-07T05:27:18.335Z",
   "approvedBy": "claude@harvest316.com",
   "tier": "T4",
   "migrated": false,
-  "baselineBlob": "49dfcb8055f4d182082f41dddc7ebec786cef13e"
+  "baselineBlob": "5035bc9ea9b499e4e65004bc3569adfedeab9ebd"
 }
