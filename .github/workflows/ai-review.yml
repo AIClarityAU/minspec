@@ -188,6 +188,25 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           set -uo pipefail
+
+          # Self-heal ALL label objects this workflow can apply, on a fresh repo
+          # that has never run it before (`gh pr edit --add-label` 404s if the
+          # label object doesn't exist yet — a repo's labels aren't git content,
+          # so copying this workflow into a new repo does NOT bring them along).
+          # `ai-review:blocked` was already created defensively further down (only
+          # on the blocked path); `pending`/`pass`/`changes` were NOT, so a fresh
+          # repo's "Post verdict" step 404s on its load-bearing add-label call —
+          # found porting this workflow into scroogellm (2026-07-09). Create all
+          # four here, earliest point in the job, so nothing downstream can hit it.
+          gh label create "ai-review:pending" --repo "$REPO" --color fbca04 \
+            --description "AI review in progress" 2>/dev/null || true
+          gh label create "ai-review:pass" --repo "$REPO" --color 0e8a16 \
+            --description "Independent AI reviewer greenlit (advisory; human still approves)" 2>/dev/null || true
+          gh label create "ai-review:changes" --repo "$REPO" --color d93f0b \
+            --description "AI reviewer requested changes — loops back to dev" 2>/dev/null || true
+          gh label create "ai-review:blocked" --repo "$REPO" --color d4c5f9 \
+            --description "AI review could not run (quota/transient) — retry-able, not a code verdict" 2>/dev/null || true
+
           gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "ai-review:pass" 2>/dev/null || true
           gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label "ai-review:pending" 2>/dev/null || true
 
