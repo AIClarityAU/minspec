@@ -103,6 +103,15 @@ finding: the gate checks the thing it happens to know about and is silent on the
   each file, no marker duplication; refresh keeps the MinSpec-owned region current and
   preserves user content outside the markers; deleted markers ⇒ skip + warn, never clobber
   (the existing managed-region contract, inherited for free).
+- **FR-6 — Agnostic security-review scope (init scans → dev confirms).** The security role
+  must NOT be gated on a hardcoded monorepo path (`packages/**`); reviewer and security share
+  scope over **code**, and "what is code" is project-specific (language/framework-driven).
+  MinSpec init **scans the project's tracked file list** and **recommends** the code/deploy
+  surface (e.g. `sites/**/*.js`, `scripts/**`, `src/**`, `.github/**`) which the **dev
+  confirms** (never silent), persisted to project config; the scaffolded workflow runs the
+  security role over that surface. Interim default until confirmed: security runs on any
+  non-Markdown change (shipped for minspec in #595). No language assumption baked into the
+  template. (Resolution of D-4; see also #453 adversarial panel.)
 
 ### Out of scope (explicitly)
 
@@ -136,28 +145,29 @@ finding: the gate checks the thing it happens to know about and is silent on the
 - **INV-7 — Keyboard-reachable.** The governance check + fix action have a keyboard path and
   show their keybinding (global input-modality preference).
 
-## Decisions needed (Clarify — human-only)
+## Clarify decisions (resolved 2026-07-08 — founder)
 
-- **D-1 — Tier: T3 or T4?** Half (A) is T3-shaped (files + one command). Half (B) adds a
-  GitHub-API **write** with a repo-admin credential — a new external-integration boundary
-  that arguably makes the feature T4 and warrants a security review of the protection-write
-  path. *Recommendation:* keep (A) T3; treat (B) as its own security-reviewed slice.
-- **D-2 — Branch protection: ever write, or advise-only?** Does the extension actually call
-  `gh api` to set protection (needs admin), or does it **only** ever surface the steps? This
-  is an authority question, not just UX. *Recommendation:* advise-only by default; opt-in
-  write behind explicit confirm + present-token check.
-- **D-3 — Secret-name convention.** Keep `CLAUDE_CODE_OAUTH_TOKEN` /`MINSPEC_APP_ID` /
-  `MINSPEC_APP_PRIVATE_KEY` as a **fixed cross-repo convention** (one `minspec-sdd[bot]` App
-  serves all AIClarityAU repos) or parameterize per repo? *Recommendation:* fixed
-  convention — matches reality, keeps the template byte-stable.
-- **D-4 — The `packages/`-gated security role.** The security role fires only when
-  `packages/**` changes (a monorepo-ism). Ship as-is (harmless no-op elsewhere) or
-  generalize to a configurable path glob? *Recommendation:* ship as-is now; generalize later
-  if a consuming repo needs it.
-- **D-5 — Tier-0 positioning.** ai-review runs `claude -p` **in CI**, not in the extension
-  runtime. Confirm this is consistent with MinSpec's Tier-0/air-gapped stance
-  ([DR-004](../../../docs/decisions/DR-004.md)) — inference lives in the repo's CI, which the
-  user owns, not inside the shipped extension.
+- **D-1 — Tier: T3 or T4?** **Resolved: (A) stays T3; (B) branch-protection-write is its own
+  security-reviewed slice.** The GitHub-API write with a repo-admin credential is a distinct
+  external-integration boundary and gets its own review.
+- **D-2 — Branch protection: write or advise-only?** **Resolved: advise-only by default;**
+  opt-in write behind explicit confirm + present-token check. (Authority stays with the human.)
+- **D-3 — Secret-name convention.** **Resolved: fixed cross-repo convention** —
+  `CLAUDE_CODE_OAUTH_TOKEN` / `MINSPEC_APP_ID` / `MINSPEC_APP_PRIVATE_KEY`, one
+  `minspec-sdd[bot]` App across all AIClarityAU repos. Keeps the template byte-stable.
+- **D-4 — Security-role scope.** **Resolved — neither "ship as-is" nor a better hardcoded
+  glob.** The founder rejected differential scope: reviewer and security see the **same code
+  scope**, and "what is code" is project-specific (a monorepo `packages/**`, a site's
+  `sites/**/*.js`, `scripts/**`, …). So **init scans the file list → recommends → dev
+  confirms** the code surface (→ **FR-6**). Interim agnostic default (security on any
+  non-Markdown change) shipped for minspec in **#595**; the scan-and-confirm is FR-6 here and
+  overlaps the **#453** adversarial panel.
+- **D-5 — Tier-0 positioning.** **Resolved: consistent.** ai-review runs `claude -p` **in the
+  repo's CI** (which the user owns), not in the shipped extension runtime — Tier-0/air-gapped
+  ([DR-004](../../../docs/decisions/DR-004.md)) holds.
+
+> **Clarify complete** — all five resolved. T3 (Half A) proceeds to Plan; Half B
+> (branch-protection write) carries its own security review. FR-6 added.
 
 ## Acceptance (feature-level, verified end-to-end)
 
