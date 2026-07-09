@@ -407,6 +407,92 @@ export async function offerRulesetAdvisory(
 }
 
 // ---------------------------------------------------------------------------
+// Post-init GitHub Pull Requests extension advisory
+// ---------------------------------------------------------------------------
+
+/** Marketplace id of the official GitHub PR review/merge extension. */
+export const GITHUB_PR_EXTENSION_ID = 'GitHub.vscode-pull-request-github';
+
+/** Zero-network fallback: the extension's Marketplace listing. */
+export const GITHUB_PR_EXTENSION_MARKETPLACE_URL =
+  'https://marketplace.visualstudio.com/items?itemName=GitHub.vscode-pull-request-github';
+
+const GITHUB_PR_EXT_INSTALL_ACTION = 'Install';
+const GITHUB_PR_EXT_DECLINE_ACTION = 'Not now';
+const GITHUB_PR_EXT_LEARN_MORE_ACTION = 'Learn more';
+
+/** Dependencies for {@link offerGitHubPrExtensionAdvisory}, injectable for tests. */
+export interface GitHubPrExtAdvisoryDeps {
+  /** Whether `folder` is a git working tree. Defaults to the same `.git`-existence check the other advisories use. */
+  isRepo?: (folder: string) => boolean;
+  /** Whether the extension is already installed. Defaults to `vscode.extensions.getExtension`. */
+  isInstalled?: (id: string) => boolean;
+  /** Trigger the install. Defaults to the `workbench.extensions.installExtension` command. */
+  install?: (id: string) => Promise<void>;
+  /** Open an external URL (defaults to VS Code's opener). */
+  openExternal?: (url: string) => void;
+}
+
+/**
+ * NON-BLOCKING, first-init-only advisory: recommend the GitHub Pull Requests
+ * and Issues extension. Reviewing/merging locally through it avoids the messy
+ * history GitHub's browser-side "Rebase and merge" button can leave behind —
+ * merging locally keeps a clean merge commit and resolves conflicts in the
+ * editor instead of the browser's limited UI.
+ *
+ * Silent when: not a git repo (nothing to review/merge), or the extension is
+ * already installed (nothing for the user to do) — mirrors the "silent when
+ * already satisfied" shape of {@link offerRulesetAdvisory}.
+ *
+ * Installing an extension is a mutating, network-touching action, so — same
+ * consent rule as {@link offerRulesetAdvisory}'s ruleset create — it fires
+ * ONLY on the user's explicit "Install" click; the toast's other choices
+ * ("Not now", "Learn more") make no network call. Best-effort: any failure is
+ * swallowed and never affects the init result.
+ */
+export async function offerGitHubPrExtensionAdvisory(
+  folder: string,
+  deps: GitHubPrExtAdvisoryDeps = {},
+): Promise<void> {
+  const isRepo = deps.isRepo ?? ((f: string) => fs.existsSync(path.join(f, '.git')));
+  if (!isRepo(folder)) return;
+
+  try {
+    const isInstalled =
+      deps.isInstalled ?? ((id: string) => vscode.extensions.getExtension(id) !== undefined);
+    if (isInstalled(GITHUB_PR_EXTENSION_ID)) return; // already have it — nothing to do
+
+    const install =
+      deps.install ??
+      (async (id: string) => {
+        await vscode.commands.executeCommand('workbench.extensions.installExtension', id);
+      });
+    const openExternal =
+      deps.openExternal ?? ((url: string) => vscode.env.openExternal(vscode.Uri.parse(url)));
+
+    const choice = await vscode.window.showInformationMessage(
+      'MinSpec tip: the GitHub Pull Requests and Issues extension lets you review and merge ' +
+        "PRs from VS Code. It avoids the messy history GitHub's browser \"Rebase and merge\" " +
+        'button can leave behind, and resolves conflicts locally instead of in the browser.',
+      GITHUB_PR_EXT_INSTALL_ACTION,
+      GITHUB_PR_EXT_DECLINE_ACTION,
+      GITHUB_PR_EXT_LEARN_MORE_ACTION,
+    );
+
+    if (choice === GITHUB_PR_EXT_INSTALL_ACTION) {
+      await install(GITHUB_PR_EXTENSION_ID);
+      return;
+    }
+    if (choice === GITHUB_PR_EXT_LEARN_MORE_ACTION) {
+      openExternal(GITHUB_PR_EXTENSION_MARKETPLACE_URL);
+    }
+    // "Not now" / dismiss → nothing further.
+  } catch {
+    // Advisory only — never let this failing break init.
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Post-init coverage-minimum onboarding prompt
 // ---------------------------------------------------------------------------
 
@@ -489,7 +575,10 @@ export async function offerCoverageThresholdPrompt(folder: string): Promise<void
 
 export async function initCommand(
   folderArg?: string,
-  deps?: OfferScaffoldCommitDeps & { ruleset?: RulesetAdvisoryDeps },
+  deps?: OfferScaffoldCommitDeps & {
+    ruleset?: RulesetAdvisoryDeps;
+    githubPrExt?: GitHubPrExtAdvisoryDeps;
+  },
 ): Promise<void> {
   const folder = folderArg ?? (await resolveTargetFolder());
   if (!folder) return;
@@ -515,7 +604,13 @@ export async function initCommand(
     'MinSpec: Initialized .minspec/ and generated harness files.',
   );
   surfaceConstitutionNudge(folder);
-  if (isFirstInit) await offerCoverageThresholdPrompt(folder);
+  if (isFirstInit) {
+    await offerCoverageThresholdPrompt(folder);
+    // Onboarding-only nudge toward the GitHub PR extension (see doc comment on
+    // offerGitHubPrExtensionAdvisory) — gated to first init like the coverage
+    // prompt so it doesn't repeat on every harness refresh.
+    await offerGitHubPrExtensionAdvisory(folder, deps?.githubPrExt);
+  }
   // Post-init "what to commit" hint + offer (#222). Best-effort, non-modal,
   // never blocks the init result.
   await offerScaffoldCommit(folder, deps);
