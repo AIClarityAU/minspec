@@ -13,7 +13,9 @@
  *   2. already installed      → SILENT (no toast at all).
  *   3. not installed           → exactly ONE toast offering Install/Not now/Learn more.
  *   4. "Install" clicked       → triggers the install, no further toast.
- *   5. "Learn more" clicked    → opens the Marketplace URL, no install.
+ *   5. "Learn more" clicked    → opens the Marketplace URL on Microsoft builds,
+ *                                 the Open VSX listing on everything else
+ *                                 (VSCodium, code-server forks, …), no install.
  *   6. "Not now" / dismissed   → no install, no external open.
  *   7. a thrown failure is swallowed (best-effort, never breaks init).
  */
@@ -30,15 +32,17 @@ vi.mock('vscode', () => ({
   commands: {
     executeCommand: vi.fn(),
   },
-  env: { openExternal: vi.fn() },
+  env: { openExternal: vi.fn(), appName: 'Visual Studio Code' },
   Uri: { parse: (s: string) => ({ toString: () => s }) },
 }));
 
 import * as vscode from 'vscode';
 import {
   offerGitHubPrExtensionAdvisory,
+  resolveGitHubPrExtensionLearnMoreUrl,
   GITHUB_PR_EXTENSION_ID,
   GITHUB_PR_EXTENSION_MARKETPLACE_URL,
+  GITHUB_PR_EXTENSION_OPEN_VSX_URL,
 } from '../src/commands/init';
 
 describe('offerGitHubPrExtensionAdvisory()', () => {
@@ -104,7 +108,7 @@ describe('offerGitHubPrExtensionAdvisory()', () => {
     );
   });
 
-  it('"Learn more" clicked → opens the Marketplace URL, no install', async () => {
+  it('"Learn more" clicked on a Microsoft build → opens the Marketplace URL, no install', async () => {
     const install = vi.fn();
     vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce('Learn more');
 
@@ -112,12 +116,50 @@ describe('offerGitHubPrExtensionAdvisory()', () => {
       isRepo: () => true,
       isInstalled: () => false,
       install,
+      appName: 'Visual Studio Code',
     });
 
     expect(install).not.toHaveBeenCalled();
     expect(vscode.env.openExternal).toHaveBeenCalledTimes(1);
     const url = (vi.mocked(vscode.env.openExternal).mock.calls[0][0] as { toString(): string }).toString();
     expect(url).toBe(GITHUB_PR_EXTENSION_MARKETPLACE_URL);
+  });
+
+  it('"Learn more" clicked on VSCodium → opens the Open VSX listing instead', async () => {
+    vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce('Learn more');
+
+    await offerGitHubPrExtensionAdvisory('/tmp/ws', {
+      isRepo: () => true,
+      isInstalled: () => false,
+      appName: 'VSCodium',
+    });
+
+    const url = (vi.mocked(vscode.env.openExternal).mock.calls[0][0] as { toString(): string }).toString();
+    expect(url).toBe(GITHUB_PR_EXTENSION_OPEN_VSX_URL);
+  });
+
+  it('defaults appName to vscode.env.appName when not injected', async () => {
+    vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce('Learn more');
+    (vscode.env as { appName: string }).appName = 'Visual Studio Code - Insiders';
+
+    await offerGitHubPrExtensionAdvisory('/tmp/ws', { isRepo: () => true, isInstalled: () => false });
+
+    const url = (vi.mocked(vscode.env.openExternal).mock.calls[0][0] as { toString(): string }).toString();
+    expect(url).toBe(GITHUB_PR_EXTENSION_MARKETPLACE_URL);
+    (vscode.env as { appName: string }).appName = 'Visual Studio Code'; // restore
+  });
+
+  describe('resolveGitHubPrExtensionLearnMoreUrl()', () => {
+    it.each([
+      ['Visual Studio Code', GITHUB_PR_EXTENSION_MARKETPLACE_URL],
+      ['Visual Studio Code - Insiders', GITHUB_PR_EXTENSION_MARKETPLACE_URL],
+      ['VSCodium', GITHUB_PR_EXTENSION_OPEN_VSX_URL],
+      ['Cursor', GITHUB_PR_EXTENSION_OPEN_VSX_URL],
+      ['Windsurf', GITHUB_PR_EXTENSION_OPEN_VSX_URL],
+      ['code-server', GITHUB_PR_EXTENSION_OPEN_VSX_URL],
+    ])('%s → %s', (appName, expected) => {
+      expect(resolveGitHubPrExtensionLearnMoreUrl(appName)).toBe(expected);
+    });
   });
 
   it('"Not now" / dismiss → no install, no external open', async () => {
