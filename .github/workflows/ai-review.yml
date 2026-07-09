@@ -70,8 +70,8 @@
 #     cannot feed auto-merge mid-run. The COMPLETE fix — ready-to-merge verifying
 #     the pass was applied to the CURRENT head SHA — is a follow-up in
 #     ready-to-merge.yml (deliberately NOT edited from here).
-#   • Fail closed everywhere: any error, missing verdict, a `packages/`
-#     security-role that requests changes, or a PR that edits the review machinery
+#   • Fail closed everywhere: any error, missing verdict, a security-role (any
+#     code change) that requests changes, or a PR that edits the review machinery
 #     (`.github/`/`scripts/`) → `ai-review:changes`. A spurious `pass` is the worst
 #     outcome (it feeds auto-merge), so `pass` is emitted ONLY on an unambiguous
 #     clean verdict from every required role AND only when the PR does not touch
@@ -218,7 +218,7 @@ jobs:
         if: steps.guard.outputs.configured == 'true'
         run: npm install -g @anthropic-ai/claude-code@2.1.201
 
-      # Reviewer (always) + security (only if packages/ touched). Each role's
+      # Reviewer (always) + security (any non-docs code change). Each role's
       # output is decided by the fail-closed gate; the combined verdict passes ONLY
       # if every required role passed. CLAUDE_CODE_OAUTH_TOKEN is the INFERENCE
       # credential for `claude -p` here — the agent still has no actionable tool.
@@ -293,11 +293,17 @@ jobs:
           REVIEWER_BLOCK="$(printf '%s\n' "$REVIEWER_OUT" | extract_block | redact)"
           [ -z "$REVIEWER_BLOCK" ] && REVIEWER_BLOCK="(reviewer emitted no verdict block — fail-closed to changes)"
 
-          # ── security role (only if packages/ changed; reuse CHANGED from above) ──
+          # ── security role (runs on ANY code change; skipped only for docs-only PRs) ──
+          # Agnostic — NO hardcoded monorepo path. Security flaws live in any executable
+          # surface (sites/*.js, scripts/, .github/, config, packages/, …), not just
+          # `packages/`, and the security lens has the SAME scope as the reviewer over
+          # code. A PR is security-exempt ONLY when every changed file is Markdown (pure
+          # docs/approvables). Durable per-project code-surface detection (init scans the
+          # file list, dev confirms) is #453 / SPEC-033 D-4; this is the agnostic interim.
           SECURITY_REQUIRED=no
           SECURITY_LABEL=""
           SECURITY_BLOCK=""
-          if [ "$CHANGED_OK" = "yes" ] && printf '%s\n' "$CHANGED" | grep -qE '^packages/'; then
+          if [ "$CHANGED_OK" = "yes" ] && printf '%s\n' "$CHANGED" | grep -qvE '\.md$'; then
             SECURITY_REQUIRED=yes
             SECURITY_OUT="$(bash scripts/review-branch.sh "$BASE" "$HEAD" --role security || true)"
             SECURITY_LABEL="$(printf '%s\n' "$SECURITY_OUT" | bash scripts/review-decide.sh || true)"
@@ -397,7 +403,7 @@ jobs:
               echo '```'
               if [ "$SECURITY_REQUIRED" = "yes" ]; then
                 echo
-                echo "### Security (\`packages/\` changed)"
+                echo "### Security (code changed)"
                 echo '```'
                 printf '%s\n' "$SECURITY_BLOCK"
                 echo '```'
