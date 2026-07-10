@@ -28,7 +28,11 @@ import {
   spliceManagedRegion,
   type GeneratedHashes,
 } from './merge-refresh';
-import { generateSlashCommandShims, SPEC_KIT_COMMANDS } from './slash-commands';
+import {
+  generateSlashCommandShims,
+  SPEC_KIT_COMMANDS,
+  buildLegacyBareClaudeShim,
+} from './slash-commands';
 import { detectTools, type DetectedTools } from './tool-detector';
 import { writeEpicIndex } from './epic-manager';
 import { assembleContext } from './constitution-context';
@@ -391,12 +395,22 @@ function writeManagedFile(fullPath: string, tpl: ManagedRegionTemplate): void {
  * the new shim, both routable, which is exactly the "harness upgrades cleanly"
  * gap #534 calls out.
  *
- * A legacy file is deleted ONLY when it is still a pure, unmodified MinSpec
- * scaffold: its managed markers are intact (same marker name as the new shim —
- * only the path moved) AND nothing besides the frontmatter preamble was added
- * outside them. Markers missing, or real user content outside the region, means
- * leave it untouched — never a silent clobber, mirroring the missing-markers
- * refresh rule.
+ * Two legacy shapes exist on disk depending on when the project was scaffolded,
+ * and each is deleted only when it is still pure and unmodified:
+ *
+ *  - **Post-#241, pre-#534** — a managed-region file (markers intact, same
+ *    marker name as the new shim — only the path moved) with nothing besides
+ *    the frontmatter preamble added outside the region.
+ *  - **Pre-#241** — a raw, markerless file written directly by the old
+ *    `generateSlashCommandShims` (no region to parse at all — this is what every
+ *    real pre-#534 project actually has on disk, #599). Recognized instead by a
+ *    full-content byte match (modulo trailing newline) against
+ *    `buildLegacyBareClaudeShim(command)`, the exact bytes MinSpec itself wrote
+ *    pre-#534.
+ *
+ * Either way: markers missing AND content not a pristine bare-heading match, or
+ * real user content outside a present region, means leave the file untouched —
+ * never a silent clobber, mirroring the missing-markers refresh rule.
  */
 function migrateLegacyClaudeSlashCommandShims(rootDir: string): void {
   for (const command of SPEC_KIT_COMMANDS) {
@@ -404,16 +418,25 @@ function migrateLegacyClaudeSlashCommandShims(rootDir: string): void {
     const legacyFull = path.join(rootDir, legacyRel);
     if (!fs.existsSync(legacyFull)) continue;
 
+    const onDisk = fs.readFileSync(legacyFull, 'utf-8');
+
     const start = managedRegionStartMarker(claudeShimTemplateName(command), 'html');
     const end = managedRegionEndMarker(claudeShimTemplateName(command), 'html');
-    const onDisk = fs.readFileSync(legacyFull, 'utf-8');
     const split = splitManagedRegion(onDisk, start, end);
-    if (!split) continue; // no recognizable MinSpec region — leave it alone
+    if (split) {
+      const leftover = (split.before + split.after).replace(/^---[\s\S]*?---/, '').trim();
+      if (leftover.length > 0) continue; // user added content outside the region — keep the file
+      fs.unlinkSync(legacyFull);
+      continue;
+    }
 
-    const leftover = (split.before + split.after).replace(/^---[\s\S]*?---/, '').trim();
-    if (leftover.length > 0) continue; // user added content outside the region — keep the file
-
-    fs.unlinkSync(legacyFull);
+    // No managed region: the pre-#241 raw shape. Only remove when byte-identical
+    // (modulo trailing newline) to what MinSpec itself wrote pre-#534 — any
+    // drift (user edit, foreign extension, hand-written file) is left alone.
+    const pristine = buildLegacyBareClaudeShim(command);
+    if (onDisk.replace(/\n+$/, '') === pristine.replace(/\n+$/, '')) {
+      fs.unlinkSync(legacyFull);
+    }
   }
 }
 
