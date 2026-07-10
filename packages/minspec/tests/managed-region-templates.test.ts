@@ -289,3 +289,85 @@ describe('managed-region template scaffolding (#249)', () => {
     expect(fs.readFileSync(full, 'utf-8')).toBe(before);
   });
 });
+
+// #604 — lossless auto-heal. The overwhelmingly common way a managed region
+// "breaks" is the marker comment lines getting deleted while MinSpec's body stays
+// intact. Because MinSpec knows the exact body it owns, refresh re-inserts the
+// markers around it WITHOUT overwriting anything — no warning, no possible loss of
+// user content (never-wrong). Heal fires only when the body is present as a single
+// unambiguous run; otherwise it falls back to the skip+warn path.
+describe('managed-region auto-heal (#604)', () => {
+  let tmpDir: string;
+  const BODY = TPL.content.replace(/\n+$/, '') + '\n'; // exactly what sits between markers
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-heal-test-'));
+  });
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('re-wraps a marker-stripped-but-body-intact file losslessly, no warning', () => {
+    generateHarnessFiles(tmpDir);
+    const full = path.join(tmpDir, WORKFLOW_PATH);
+
+    // Delete ONLY the two marker lines; keep the body verbatim.
+    const stripped = fs
+      .readFileSync(full, 'utf-8')
+      .split('\n')
+      .filter((l) => l.trim() !== START && l.trim() !== END)
+      .join('\n');
+    fs.writeFileSync(full, stripped);
+    expect(splitManagedRegion(stripped, START, END)).toBeNull(); // markers really gone
+
+    const warnings = refreshHarnessFiles(tmpDir);
+
+    // Healed back to the canonical scaffold, and NOT warned.
+    expect(warnings).toEqual([]);
+    expect(fs.readFileSync(full, 'utf-8')).toBe(renderManagedBlock(TPL));
+    expect(splitManagedRegion(fs.readFileSync(full, 'utf-8'), START, END)).not.toBeNull();
+  });
+
+  it('preserves user content surrounding the intact body when healing', () => {
+    generateHarnessFiles(tmpDir);
+    const full = path.join(tmpDir, WORKFLOW_PATH);
+    fs.writeFileSync(full, `# user head\n${BODY}# user tail\n`);
+
+    const warnings = refreshHarnessFiles(tmpDir);
+
+    expect(warnings).toEqual([]);
+    const healed = fs.readFileSync(full, 'utf-8');
+    const split = splitManagedRegion(healed, START, END);
+    expect(split).not.toBeNull();
+    // Surrounding user lines survive; markers now bound the region.
+    expect(split!.before).toContain('# user head');
+    expect(split!.after).toContain('# user tail');
+  });
+
+  it('does NOT heal (skips+warns) when the body appears more than once (ambiguous)', () => {
+    generateHarnessFiles(tmpDir);
+    const full = path.join(tmpDir, WORKFLOW_PATH);
+    const twice = BODY + BODY;
+    fs.writeFileSync(full, twice);
+
+    const warnings = refreshHarnessFiles(tmpDir);
+
+    // Ambiguous → refuse to guess: file untouched, single actionable warning.
+    expect(fs.readFileSync(full, 'utf-8')).toBe(twice);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].outputPath).toBe(WORKFLOW_PATH);
+  });
+
+  it('does NOT heal (skips+warns) when the body was genuinely edited', () => {
+    generateHarnessFiles(tmpDir);
+    const full = path.join(tmpDir, WORKFLOW_PATH);
+    const edited = 'name: hand-rolled, different body\non: push\njobs: {}\n';
+    fs.writeFileSync(full, edited);
+
+    const warnings = refreshHarnessFiles(tmpDir);
+
+    expect(fs.readFileSync(full, 'utf-8')).toBe(edited);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].outputPath).toBe(WORKFLOW_PATH);
+  });
+});

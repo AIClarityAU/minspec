@@ -383,6 +383,86 @@ function writeManagedFile(fullPath: string, tpl: ManagedRegionTemplate): void {
 }
 
 /**
+ * Attempt a LOSSLESS repair (#604) of a managed file whose delimiting markers were
+ * removed but whose body is otherwise intact — by far the most common way a managed
+ * region "breaks" (someone deletes the `<!-- minspec:managed:* -->` comment lines, or
+ * a formatter strips them). MinSpec knows the exact body it owns, so it can re-insert
+ * the markers around that body without touching anything else — no overwrite, no
+ * possible loss of user content (never-wrong).
+ *
+ * Heals ONLY when the template's body appears as a single, contiguous, verbatim run
+ * of lines in the file. Zero matches (body genuinely edited) or more than one
+ * (ambiguous which run is MinSpec's) → returns null so the caller warns and leaves the
+ * file untouched. The reconstructed content is validated to round-trip through
+ * `splitManagedRegion` before it is offered, so a heal can never write a file the next
+ * refresh cannot parse.
+ *
+ * Returns the healed file content (markers re-inserted), or null when no unambiguous,
+ * lossless repair is possible.
+ */
+function tryHealManagedRegion(onDisk: string, tpl: ManagedRegionTemplate): string | null {
+  const startMarker = managedRegionStartMarker(tpl.name, tpl.commentStyle);
+  const endMarker = managedRegionEndMarker(tpl.name, tpl.commentStyle);
+
+  // The exact body MinSpec owns, as lines. renderManagedBlock normalizes the body to a
+  // single trailing newline (i.e. drops trailing blanks); mirror that here so a match
+  // is byte-faithful to what scaffold/refresh actually write between the markers.
+  const bodyLines = tpl.content.replace(/\n+$/, '').split('\n');
+  if (bodyLines.length === 0) return null;
+
+  const lines = onDisk.split('\n');
+
+  // Find every contiguous run of lines equal to bodyLines.
+  let matchStart = -1;
+  let matches = 0;
+  for (let i = 0; i + bodyLines.length <= lines.length; i++) {
+    let ok = true;
+    for (let j = 0; j < bodyLines.length; j++) {
+      if (lines[i + j] !== bodyLines[j]) {
+        ok = false;
+        break;
+      }
+    }
+    if (ok) {
+      matches++;
+      matchStart = i;
+      if (matches > 1) return null; // ambiguous — refuse to guess
+    }
+  }
+  if (matches !== 1) return null;
+
+  // Re-insert the markers around the located body, preserving every other line verbatim.
+  const healed = [
+    ...lines.slice(0, matchStart),
+    startMarker,
+    ...bodyLines,
+    endMarker,
+    ...lines.slice(matchStart + bodyLines.length),
+  ].join('\n');
+
+  // Guard: the repair must round-trip (markers now findable). If not, don't write.
+  if (!splitManagedRegion(healed, startMarker, endMarker)) return null;
+  return healed;
+}
+
+/**
+ * Overwrite a single managed-region file from its template — the consent-gated
+ * "Re-scaffold (overwrite)" action (#604) offered when a file's markers are missing
+ * and `tryHealManagedRegion` could not losslessly repair it. Unlike refresh's in-place
+ * splice this replaces the WHOLE file (the markers that would bound an in-place update
+ * are, by definition, gone), so it is destructive to any content the user kept outside
+ * the region — which is exactly why it is only ever reached behind an explicit user
+ * click, never automatically. Returns true if a matching managed template exists and
+ * was written, false if `outputPath` names no managed template.
+ */
+export function rescaffoldManagedFile(rootDir: string, outputPath: string): boolean {
+  const tpl = MANAGED_REGION_TEMPLATES.find((t) => t.outputPath === outputPath);
+  if (!tpl) return false;
+  writeManagedFile(path.join(rootDir, outputPath), tpl);
+  return true;
+}
+
+/**
  * Clean up pre-#534 bare-name Claude Code slash-command shims
  * (`.claude/commands/specify.md`, …) once a project has moved to the
  * `minspec-`-prefixed names (`.claude/commands/minspec-specify.md`). Because the
@@ -494,8 +574,16 @@ function refreshManagedRegionTemplates(rootDir: string, tools: DetectedTools): M
     const split = splitManagedRegion(onDisk, startMarker, endMarker);
 
     if (!split) {
-      // Markers missing/corrupted — cannot identify MinSpec's region. NEVER
-      // clobber the whole file; skip and warn so the user can restore the markers.
+      // Markers missing/corrupted — cannot identify MinSpec's region. First try a
+      // LOSSLESS auto-repair (#604): if MinSpec's exact body is still present verbatim,
+      // re-insert the markers around it (no overwrite, no possible loss of user
+      // content). Only if that is impossible or ambiguous do we skip and warn — NEVER
+      // clobber the whole file automatically.
+      const healed = tryHealManagedRegion(onDisk, tpl);
+      if (healed !== null) {
+        if (healed !== onDisk) fs.writeFileSync(fullPath, healed);
+        continue;
+      }
       warnings.push({ outputPath: tpl.outputPath, message: missingMarkersMessage(tpl.outputPath) });
       continue;
     }

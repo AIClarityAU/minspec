@@ -1,7 +1,13 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { scaffold, generateHarnessFiles, refreshHarnessFiles } from '../lib/scaffold';
+import {
+  scaffold,
+  generateHarnessFiles,
+  refreshHarnessFiles,
+  rescaffoldManagedFile,
+  type ManagedRegionWarning,
+} from '../lib/scaffold';
 import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS } from '../lib/template-registry';
 import { resolveTargetFolder } from '../lib/resolve-folder';
 import { setCoverageMinimum, DEFAULT_COVERAGE_MINIMUM } from '../lib/config';
@@ -673,10 +679,56 @@ export async function initRefreshCommand(folderArg?: string): Promise<void> {
   vscode.window.showInformationMessage(
     'MinSpec: Refreshed harness files (user edits preserved).',
   );
+  const folderName = path.basename(folder);
   for (const w of warnings) {
-    vscode.window.showWarningMessage(w.message);
+    await surfaceManagedRegionWarning(folder, folderName, w);
   }
   surfaceConstitutionNudge(folder);
+}
+
+/** Toast action: overwrite the stale managed file from its template. */
+const RESCAFFOLD_ACTION = 'Re-scaffold (overwrite)';
+/** Toast action: open the file so the user can restore the markers by hand. */
+const OPEN_FILE_ACTION = 'Open file';
+
+/**
+ * Surface one managed-region warning as an actionable, project-attributed toast
+ * (#604). Three prior defects this fixes:
+ *   1. The relative path alone is ambiguous in a multi-root workspace — two folders
+ *      held the identically-broken file — so we prefix the owning folder name.
+ *   2. The old toast had no affordances; here `Re-scaffold (overwrite)` rewrites the
+ *      file from template and `Open file` opens it to restore markers by hand.
+ *   3. Re-scaffold is DESTRUCTIVE to any content the user kept outside the lost region
+ *      (the markers that would bound an in-place update are gone), so it is offered as
+ *      an explicit click, never an auto-action — the lossless auto-heal already ran in
+ *      the refresh pass and could not recover this file (never-wrong).
+ */
+async function surfaceManagedRegionWarning(
+  folder: string,
+  folderName: string,
+  w: ManagedRegionWarning,
+): Promise<void> {
+  const choice = await vscode.window.showWarningMessage(
+    `MinSpec [${folderName}]: ${w.message}`,
+    RESCAFFOLD_ACTION,
+    OPEN_FILE_ACTION,
+  );
+  if (choice === RESCAFFOLD_ACTION) {
+    if (rescaffoldManagedFile(folder, w.outputPath)) {
+      vscode.window.showInformationMessage(
+        `MinSpec: Re-scaffolded ${w.outputPath} from template.`,
+      );
+    } else {
+      vscode.window.showErrorMessage(
+        `MinSpec: No managed template found for ${w.outputPath}.`,
+      );
+    }
+  } else if (choice === OPEN_FILE_ACTION) {
+    const doc = await vscode.workspace.openTextDocument(
+      path.join(folder, w.outputPath),
+    );
+    await vscode.window.showTextDocument(doc);
+  }
 }
 
 /** Extract a human-readable message from an unknown thrown value. */

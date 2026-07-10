@@ -25,9 +25,13 @@ vi.mock('vscode', () => ({
     // prompt (offerCoverageThresholdPrompt) then no-ops without writing.
     showQuickPick: vi.fn(),
     showInputBox: vi.fn(),
+    // #604 — the managed-region warning's "Open file" affordance.
+    showTextDocument: vi.fn(),
   },
   workspace: {
     getConfiguration: vi.fn(() => ({ get: vi.fn() })),
+    // #604 — "Open file" opens the stale managed file.
+    openTextDocument: vi.fn(),
   },
 }));
 
@@ -38,6 +42,8 @@ vi.mock('../src/lib/scaffold', () => ({
   generateHarnessFiles: vi.fn(),
   // Default: no managed-region warnings (clean refresh).
   refreshHarnessFiles: vi.fn(() => []),
+  // #604 — the "Re-scaffold (overwrite)" affordance. Default: template found.
+  rescaffoldManagedFile: vi.fn(() => true),
 }));
 
 // ─── Mock folder resolver (avoid touching the real workspace) ────────────────
@@ -63,6 +69,7 @@ import {
   scaffold,
   generateHarnessFiles,
   refreshHarnessFiles,
+  rescaffoldManagedFile,
 } from '../src/lib/scaffold';
 import { evaluateConstitution } from '../src/lib/constitution-nudge';
 
@@ -223,5 +230,85 @@ describe('SPEC-025 FR-6 — empty-constitution nudge (non-modal advisory)', () =
     // Success message still fired; the thrown nudge was swallowed.
     expect(vscode.window.showInformationMessage).toHaveBeenCalledTimes(1);
     expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+  });
+});
+
+// T3 — Regression: #604 — the managed-region "markers missing" warning was
+// surfaced with no project attribution (ambiguous in a multi-root workspace) and
+// no action buttons. It now names the owning folder and offers Re-scaffold / Open.
+describe('initRefreshCommand() — managed-region warning UX (#604)', () => {
+  const WARNING = {
+    outputPath: '.claude/commands/minspec-clarify.md',
+    message:
+      'MinSpec-managed markers missing in .claude/commands/minspec-clarify.md; ' +
+      'left untouched — restore the markers or delete the file to re-scaffold.',
+  };
+  const RESCAFFOLD = 'Re-scaffold (overwrite)';
+  const OPEN = 'Open file';
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    vi.mocked(refreshHarnessFiles).mockReturnValue([]);
+    vi.mocked(rescaffoldManagedFile).mockReturnValue(true);
+  });
+
+  it('attributes the warning to the workspace folder and offers two actions', async () => {
+    vi.mocked(refreshHarnessFiles).mockReturnValueOnce([WARNING]);
+
+    await initRefreshCommand('/tmp/MinSpecPro');
+
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledTimes(1);
+    const [msg, ...actions] = vi.mocked(vscode.window.showWarningMessage).mock.calls[0];
+    // Folder name prefixed so two identically-broken files in a multi-root
+    // workspace are distinguishable — the core #604 defect.
+    expect(msg).toContain('[MinSpecPro]');
+    expect(msg).toContain(WARNING.message);
+    expect(actions).toEqual([RESCAFFOLD, OPEN]);
+  });
+
+  it('"Re-scaffold (overwrite)" rewrites the file from template + confirms', async () => {
+    vi.mocked(refreshHarnessFiles).mockReturnValueOnce([WARNING]);
+    vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(RESCAFFOLD);
+
+    await initRefreshCommand('/tmp/MinSpecPro');
+
+    expect(rescaffoldManagedFile).toHaveBeenCalledWith('/tmp/MinSpecPro', WARNING.outputPath);
+    const infos = vi
+      .mocked(vscode.window.showInformationMessage)
+      .mock.calls.map((c) => c[0] as string);
+    expect(infos.some((m) => m.includes('Re-scaffolded'))).toBe(true);
+  });
+
+  it('"Open file" opens the stale file and does NOT re-scaffold', async () => {
+    vi.mocked(refreshHarnessFiles).mockReturnValueOnce([WARNING]);
+    vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(OPEN);
+
+    await initRefreshCommand('/tmp/MinSpecPro');
+
+    expect(vscode.workspace.openTextDocument).toHaveBeenCalledTimes(1);
+    expect(vscode.window.showTextDocument).toHaveBeenCalledTimes(1);
+    expect(rescaffoldManagedFile).not.toHaveBeenCalled();
+  });
+
+  it('dismissing the warning takes no action (never-wrong: no silent overwrite)', async () => {
+    vi.mocked(refreshHarnessFiles).mockReturnValueOnce([WARNING]);
+    // showWarningMessage default returns undefined (dismissed).
+
+    await initRefreshCommand('/tmp/MinSpecPro');
+
+    expect(rescaffoldManagedFile).not.toHaveBeenCalled();
+    expect(vscode.workspace.openTextDocument).not.toHaveBeenCalled();
+  });
+
+  it('surfaces an error if Re-scaffold names no managed template', async () => {
+    vi.mocked(refreshHarnessFiles).mockReturnValueOnce([WARNING]);
+    vi.mocked(rescaffoldManagedFile).mockReturnValueOnce(false);
+    vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(RESCAFFOLD);
+
+    await initRefreshCommand('/tmp/MinSpecPro');
+
+    expect(vscode.window.showErrorMessage).toHaveBeenCalledTimes(1);
+    const err = vi.mocked(vscode.window.showErrorMessage).mock.calls[0][0] as string;
+    expect(err).toContain('No managed template');
   });
 });
