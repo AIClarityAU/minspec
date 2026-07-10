@@ -1,9 +1,15 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { scaffold, generateHarnessFiles, refreshHarnessFiles } from '../lib/scaffold';
+import {
+  scaffold,
+  generateHarnessFiles,
+  refreshHarnessFiles,
+  rescaffoldManagedRegionFile,
+  type ManagedRegionWarning,
+} from '../lib/scaffold';
 import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS } from '../lib/template-registry';
-import { resolveTargetFolder } from '../lib/resolve-folder';
+import { resolveTargetFolder, workspaceFolderLabel } from '../lib/resolve-folder';
 import { setCoverageMinimum, DEFAULT_COVERAGE_MINIMUM } from '../lib/config';
 import { evaluateConstitution } from '../lib/constitution-nudge';
 import { getRepoFromRemote } from '../lib/github';
@@ -678,6 +684,51 @@ export async function initCommand(
   await offerRulesetAdvisory(folder, deps?.ruleset);
 }
 
+// ---------------------------------------------------------------------------
+// Managed-region missing-markers warning: attribution + actions (#604)
+// ---------------------------------------------------------------------------
+
+/** Warning action: consent-gated whole-file rewrite from the current template. */
+const RESCAFFOLD_ACTION = 'Re-scaffold (overwrite)';
+/** Warning action: open the affected file so the user can inspect/fix it by hand. */
+const OPEN_FILE_ACTION = 'Open file';
+
+/**
+ * Surface a single {@link ManagedRegionWarning} left behind by
+ * `refreshHarnessFiles` after its auto-heal (scaffold.ts) couldn't prove the file
+ * safe to recover automatically. Three defects this closes (#604):
+ *   - the bare message carried no project attribution, so two folders with the
+ *     identical broken file (e.g. two workspace roots) were indistinguishable —
+ *     now prefixed with the workspace folder's label;
+ *   - `showWarningMessage(w.message)` passed no action items, forcing a manual
+ *     fix — now offers `Re-scaffold (overwrite)` (consent-gated whole-file
+ *     rewrite) and `Open file`;
+ * Best-effort: a re-scaffold failure is surfaced as an error but never throws out
+ * of the refresh flow.
+ */
+async function surfaceManagedRegionWarning(folder: string, w: ManagedRegionWarning): Promise<void> {
+  const label = workspaceFolderLabel(folder);
+  const choice = await vscode.window.showWarningMessage(
+    `[${label}] ${w.message}`,
+    RESCAFFOLD_ACTION,
+    OPEN_FILE_ACTION,
+  );
+
+  if (choice === RESCAFFOLD_ACTION) {
+    try {
+      rescaffoldManagedRegionFile(folder, w.outputPath);
+      vscode.window.showInformationMessage(`MinSpec: re-scaffolded ${w.outputPath}.`);
+    } catch (err) {
+      vscode.window.showErrorMessage(
+        `MinSpec: could not re-scaffold ${w.outputPath} — ${describeError(err)}.`,
+      );
+    }
+  } else if (choice === OPEN_FILE_ACTION) {
+    const doc = await vscode.workspace.openTextDocument(path.join(folder, w.outputPath));
+    await vscode.window.showTextDocument(doc, { preview: false });
+  }
+}
+
 export async function initRefreshCommand(
   folderArg?: string,
   deps?: OfferScaffoldCommitDeps,
@@ -700,7 +751,7 @@ export async function initRefreshCommand(
     'MinSpec: Refreshed harness files (user edits preserved).',
   );
   for (const w of warnings) {
-    vscode.window.showWarningMessage(w.message);
+    await surfaceManagedRegionWarning(folder, w);
   }
   surfaceConstitutionNudge(folder);
   // Post-refresh "what to commit" offer — the SAME affordance init gives (#222).

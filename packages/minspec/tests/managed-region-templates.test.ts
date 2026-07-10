@@ -28,6 +28,7 @@ import * as os from 'os';
 import {
   generateHarnessFiles,
   refreshHarnessFiles,
+  rescaffoldManagedRegionFile,
 } from '../src/lib/scaffold';
 import {
   MANAGED_REGION_TEMPLATES,
@@ -461,5 +462,132 @@ describe('#564 CI-review stack — scaffolding is dependency-complete', () => {
     expect(onDisk).toContain('# user note below');
     expect(onDisk).toContain(tpl.content);
     expect(onDisk).not.toContain('name: OLD');
+  });
+});
+
+/**
+ * #604 — auto-heal: the reported real-world trigger is the two `minspec:managed:`
+ * marker COMMENT LINES stripped (e.g. by a linter/hand-edit) while the MinSpec body
+ * is otherwise byte-intact. That case is losslessly recoverable — MinSpec knows its
+ * exact body — so refresh should re-wrap it silently instead of skip+warn.
+ */
+describe('managed-region auto-heal on marker-stripped-but-body-intact files (#604)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-managed-region-heal-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('re-wraps a file whose two marker lines were stripped, body otherwise byte-intact', () => {
+    generateHarnessFiles(tmpDir);
+    const full = path.join(tmpDir, WORKFLOW_PATH);
+    const scaffolded = fs.readFileSync(full, 'utf-8');
+
+    const stripped = scaffolded
+      .split('\n')
+      .filter((line) => line.trim() !== START && line.trim() !== END)
+      .join('\n');
+    fs.writeFileSync(full, stripped);
+    // Confirm the setup actually reproduces the "markers gone" precondition.
+    expect(splitManagedRegion(stripped, START, END)).toBeNull();
+
+    const warnings = refreshHarnessFiles(tmpDir);
+
+    // Healed silently — no warning surfaced.
+    expect(warnings).toEqual([]);
+    const onDisk = fs.readFileSync(full, 'utf-8');
+    expect(onDisk).toContain(START);
+    expect(onDisk).toContain(END);
+    expect(splitManagedRegion(onDisk, START, END)).not.toBeNull();
+    // The heal only re-inserted the 2 marker lines — byte-identical to a fresh scaffold.
+    expect(onDisk).toBe(renderManagedBlock(TPL));
+  });
+
+  it('preserves surrounding content (shebang preamble) outside the healed region', () => {
+    const hookTpl = MANAGED_REGION_TEMPLATES.find((t) => t.name === 'pre-commit-hook')!;
+    generateHarnessFiles(tmpDir);
+    const full = path.join(tmpDir, hookTpl.outputPath);
+    const hookStart = managedRegionStartMarker(hookTpl.name, hookTpl.commentStyle);
+    const hookEnd = managedRegionEndMarker(hookTpl.name, hookTpl.commentStyle);
+    const scaffolded = fs.readFileSync(full, 'utf-8');
+
+    const stripped = scaffolded
+      .split('\n')
+      .filter((line) => line.trim() !== hookStart && line.trim() !== hookEnd)
+      .join('\n');
+    fs.writeFileSync(full, stripped);
+
+    const warnings = refreshHarnessFiles(tmpDir);
+
+    expect(warnings).toEqual([]);
+    const onDisk = fs.readFileSync(full, 'utf-8');
+    expect(onDisk.startsWith('#!/usr/bin/env sh')).toBe(true);
+    expect(splitManagedRegion(onDisk, hookStart, hookEnd)).not.toBeNull();
+  });
+
+  it('leaves a genuinely-edited file (body does not match the template) warned, not healed', () => {
+    generateHarnessFiles(tmpDir);
+    const full = path.join(tmpDir, WORKFLOW_PATH);
+
+    const edited = 'name: hand-rolled, markers removed\non: push\njobs: {}\n';
+    fs.writeFileSync(full, edited);
+
+    const warnings = refreshHarnessFiles(tmpDir);
+
+    expect(fs.readFileSync(full, 'utf-8')).toBe(edited);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].outputPath).toBe(WORKFLOW_PATH);
+  });
+
+  it('does not heal when the body appears more than once (ambiguous match)', () => {
+    generateHarnessFiles(tmpDir);
+    const full = path.join(tmpDir, WORKFLOW_PATH);
+    const scaffolded = fs.readFileSync(full, 'utf-8');
+    const strippedBody = scaffolded
+      .split('\n')
+      .filter((line) => line.trim() !== START && line.trim() !== END)
+      .join('\n');
+    // Duplicate the bare body so an exact contiguous match is no longer unique.
+    const duplicated = strippedBody + '\n' + strippedBody;
+    fs.writeFileSync(full, duplicated);
+
+    const warnings = refreshHarnessFiles(tmpDir);
+
+    // Never a guess — file untouched, skip + warn.
+    expect(fs.readFileSync(full, 'utf-8')).toBe(duplicated);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0].outputPath).toBe(WORKFLOW_PATH);
+  });
+});
+
+describe('rescaffoldManagedRegionFile (#604 — consent-gated whole-file rewrite)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-rescaffold-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('overwrites a genuinely-edited managed file with a fresh scaffold', () => {
+    generateHarnessFiles(tmpDir);
+    const full = path.join(tmpDir, WORKFLOW_PATH);
+    fs.writeFileSync(full, 'name: hand-rolled, markers removed\non: push\njobs: {}\n');
+
+    const ok = rescaffoldManagedRegionFile(tmpDir, WORKFLOW_PATH);
+
+    expect(ok).toBe(true);
+    expect(fs.readFileSync(full, 'utf-8')).toBe(renderManagedBlock(TPL));
+  });
+
+  it('returns false for an outputPath that matches no managed-region template', () => {
+    generateHarnessFiles(tmpDir);
+    expect(rescaffoldManagedRegionFile(tmpDir, 'no/such/path.yml')).toBe(false);
   });
 });
