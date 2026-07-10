@@ -88,7 +88,6 @@ describe('post-init commit offer (#222)', () => {
     it('returns only the scaffolded paths that exist on disk', () => {
       seedScaffold();
       const paths = collectScaffoldPaths(tmpDir);
-      expect(paths).toContain('.minspec');
       expect(paths).toContain('CLAUDE.md');
       expect(paths).toContain('.gitignore');
       // Absent harness files must NOT be listed.
@@ -98,6 +97,45 @@ describe('post-init commit offer (#222)', () => {
 
     it('returns an empty list when nothing has been scaffolded', () => {
       expect(collectScaffoldPaths(tmpDir)).toEqual([]);
+    });
+
+    // #607 — regression: a bare directory pathspec used to stage EVERYTHING
+    // under `.minspec/`, including files MinSpec never wrote (a hand-edited
+    // config.json, a WIP spec draft, …). Every entry is now a precise file, so
+    // an unrelated file living alongside a real managed one is never listed.
+    it('never lists .minspec itself, or unrelated files under it, only the precise managed files', () => {
+      seedScaffold();
+      fs.writeFileSync(path.join(tmpDir, '.minspec', 'constitution.md'), '# Constitution');
+      fs.mkdirSync(path.join(tmpDir, '.minspec', 'specs', 'SPEC-999'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, '.minspec', 'specs', 'SPEC-999', 'requirements.md'),
+        '# WIP draft',
+      );
+
+      const paths = collectScaffoldPaths(tmpDir);
+
+      // The managed harness file IS listed …
+      expect(paths).toContain('.minspec/constitution.md');
+      // … but the directory itself, the unrelated hand-edited config, and any
+      // WIP spec draft living under the same directory are NOT.
+      expect(paths).not.toContain('.minspec');
+      expect(paths).not.toContain('.minspec/config.json');
+      expect(paths.some((p) => p.startsWith('.minspec/specs'))).toBe(false);
+    });
+
+    it('never lists .claude/commands or .cursor/rules as bare directories', () => {
+      seedScaffold();
+      fs.mkdirSync(path.join(tmpDir, '.claude', 'commands'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, '.claude', 'commands', 'my-own-command.md'),
+        '# not a MinSpec shim',
+      );
+
+      const paths = collectScaffoldPaths(tmpDir);
+
+      expect(paths).not.toContain('.claude/commands');
+      expect(paths).not.toContain('.cursor/rules');
+      expect(paths).not.toContain('.claude/commands/my-own-command.md');
     });
   });
 
@@ -144,9 +182,12 @@ describe('post-init commit offer (#222)', () => {
       expect(added).toHaveLength(1);
       const staged = added[0];
       expect(staged).toEqual(collectScaffoldPaths(tmpDir));
-      expect(staged).toContain('.minspec');
       expect(staged).toContain('CLAUDE.md');
       expect(staged).toContain('.gitignore');
+      // #607 — never a bare directory pathspec, even though seedScaffold()
+      // leaves an unrelated .minspec/config.json on disk.
+      expect(staged).not.toContain('.minspec');
+      expect(staged).not.toContain('.minspec/config.json');
     });
   });
 

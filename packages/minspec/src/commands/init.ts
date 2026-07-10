@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { scaffold, generateHarnessFiles, refreshHarnessFiles } from '../lib/scaffold';
-import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS } from '../lib/template-registry';
+import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS, MANAGED_REGION_TEMPLATES } from '../lib/template-registry';
 import { resolveTargetFolder } from '../lib/resolve-folder';
 import { setCoverageMinimum, DEFAULT_COVERAGE_MINIMUM } from '../lib/config';
 import { evaluateConstitution } from '../lib/constitution-nudge';
@@ -45,24 +45,33 @@ export const SCAFFOLD_COMMIT_MESSAGE = 'chore: scaffold MinSpec SDD structure';
 const COMMIT_ACTION = 'Commit them';
 
 /**
- * Top-level paths MinSpec init is responsible for scaffolding. These are
- * pathspecs (relative to the project root) that `git add` can stage directly.
- * Directories are staged whole; git honors .gitignore for directory adds, so
- * the ephemeral `.minspec/session.json` / `calibration.json` are never staged.
+ * Paths MinSpec init/refresh is responsible for writing. These are pathspecs
+ * (relative to the project root) that `git add` can stage directly.
  *
- * The harness output paths come from the template registry (CLAUDE.md,
- * AGENTS.md, .cursorrules, DESIGN.md, .minspec/constitution.md), plus the
- * `.minspec/` dir itself, `.gitignore` (init appends the ephemeral entries),
- * and the Spec Kit slash-command shim dirs (created only when a matching AI
- * tool is detected).
+ * Every entry is a single FILE, never a directory (#607). A directory
+ * pathspec like `.minspec` or `.claude/commands` stages EVERYTHING under it —
+ * including files MinSpec never wrote, such as a hand-edited
+ * `.minspec/config.json` or a spec draft under `.minspec/specs/`. On the
+ * refresh path (which runs repeatedly against active, long-lived projects,
+ * not just a fresh scaffold) that sweeps unrelated dirty content into the
+ * `chore: refresh MinSpec harness files` commit. Listing each managed output
+ * file individually preserves the "commit only what MinSpec touched"
+ * property regardless of what else happens to be dirty alongside it.
+ *
+ * The harness output paths come from the template registry: the
+ * section-merge templates (CLAUDE.md, AGENTS.md, .cursorrules,
+ * .minspec/constitution.md) plus the managed-region templates (CI workflow,
+ * git hooks, and the tool-gated Spec Kit slash-command shims), and
+ * `.gitignore` (init/refresh append the ephemeral-state entries).
  */
 const SCAFFOLD_PATHSPECS: readonly string[] = [
-  '.minspec',
   '.gitignore',
-  '.claude/commands',
-  '.cursor/rules',
-  // Harness files rendered at the project root.
+  // Section-merge harness files rendered at the project root / .minspec.
   ...TEMPLATE_NAMES.map((name) => TEMPLATE_OUTPUT_PATHS[name]),
+  // Managed-region templates — each its own file, never the containing
+  // directory, so an unrelated file a user placed alongside them (e.g. a
+  // hand-written .claude/commands/my-own-command.md) is never swept in.
+  ...MANAGED_REGION_TEMPLATES.map((tpl) => tpl.outputPath),
 ];
 
 /**
