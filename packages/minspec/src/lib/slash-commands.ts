@@ -8,12 +8,13 @@ import { SPEC_STATUSES } from './spec';
  * Spec Kit-compatible slash command surface.
  *
  * Spec Kit (github.com/github/spec-kit) exposes `/specify`, `/clarify`, `/plan`,
- * `/tasks`, `/analyze`, `/implement` as slash commands in agentic coding tools.
+ * `/tasks`, `/analyze`, `/implement` as phases; current Spec Kit (v0.12.x)
+ * namespaces its own commands as `/speckit.specify` etc., not bare names.
  * MinSpec generates shim files routing these phases to the matching MinSpec
- * guidance so users migrating from Spec Kit don't hit dead commands. The
- * generated commands carry a `minspec-` prefix (`/minspec-specify`, …, #534) so
- * they never collide with another tool's bare-named commands; `SPEC_KIT_COMMANDS`
- * stays unprefixed as the internal phase identifier.
+ * guidance under its own `minspec-` prefix (`/minspec-specify`, …, #534) so the
+ * generated commands never collide with another tool's namespaced or bare
+ * commands. `SPEC_KIT_COMMANDS` stays unprefixed as the internal phase
+ * identifier — it is not a claim that Spec Kit's live command names are bare.
  *
  * All generation is offline (Tier 0) — pure file I/O.
  */
@@ -151,6 +152,27 @@ export function buildClaudeShim(command: SpecKitCommand): string {
     `description: ${g.description}\n` +
     '---\n\n' +
     `# /${slashCommandName(command)} — MinSpec ${capitalize(command)} Phase\n\n` +
+    `${g.body}\n`
+  );
+}
+
+/**
+ * Reconstruct the exact pre-#534 bare-heading Claude Code shim content
+ * (`# /specify — …` instead of `# /minspec-specify — …`). This is what
+ * `generateSlashCommandShims` wrote directly to `.claude/commands/<command>.md`
+ * before markers or the `minspec-` prefix existed — used only by
+ * `migrateLegacyClaudeSlashCommandShims` (scaffold.ts) to recognize a pristine,
+ * unmodified legacy scaffold on disk so it can be safely deleted. Body/description
+ * text is shared with `buildClaudeShim` so the two can never drift apart; only the
+ * heading differs.
+ */
+export function buildLegacyBareClaudeShim(command: SpecKitCommand): string {
+  const g = COMMAND_GUIDANCE[command];
+  return (
+    '---\n' +
+    `description: ${g.description}\n` +
+    '---\n\n' +
+    `# /${command} — MinSpec ${capitalize(command)} Phase\n\n` +
     `${g.body}\n`
   );
 }

@@ -37,7 +37,11 @@ import {
   legacyClaudeShimOutputPath,
 } from '../src/lib/template-registry';
 import { splitManagedRegion, loadTemplateBaseline, saveTemplateBaseline } from '../src/lib/merge-refresh';
-import { SPEC_KIT_COMMANDS, slashCommandName } from '../src/lib/slash-commands';
+import {
+  SPEC_KIT_COMMANDS,
+  slashCommandName,
+  buildLegacyBareClaudeShim,
+} from '../src/lib/slash-commands';
 import { hasHarnessDrift } from '../src/lib/auto-bootstrap';
 
 const SPECIFY_REL = `${CLAUDE_COMMANDS_DIR}/${slashCommandName('specify')}.md`;
@@ -276,13 +280,16 @@ describe('legacy bare-name Claude shims are migrated on refresh (#534)', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('removes a legacy bare-name shim that is still a pure, unmodified scaffold', () => {
+  it('removes a legacy bare-name shim that is a post-#241 managed-region scaffold', () => {
     generateHarnessFiles(tmpDir);
     const newFull = path.join(tmpDir, SPECIFY_REL);
     const legacyRel = legacyClaudeShimOutputPath('specify');
     const legacyFull = path.join(tmpDir, legacyRel);
 
-    // Simulate a pre-#534 project: the shim lives at the old bare path instead.
+    // Simulate a post-#241/pre-#534 project: the marker-bearing shim lives at the
+    // old bare path instead (markers were introduced by #241, before the #534
+    // rename — this is NOT what a real pre-#241 legacy shim looks like; see the
+    // markerless case below, #599).
     fs.renameSync(newFull, legacyFull);
     expect(fs.existsSync(legacyFull)).toBe(true);
     expect(fs.existsSync(newFull)).toBe(false);
@@ -296,6 +303,42 @@ describe('legacy bare-name Claude shims are migrated on refresh (#534)', () => {
     // ...and the orphaned legacy duplicate is cleaned up — never left as a second,
     // un-refreshed `/specify` command shadowing the new one.
     expect(fs.existsSync(legacyFull)).toBe(false);
+  });
+
+  it('removes a legacy bare-name shim that is a real markerless pre-#241 scaffold (#599)', () => {
+    generateHarnessFiles(tmpDir);
+    const newFull = path.join(tmpDir, SPECIFY_REL);
+    const legacyRel = legacyClaudeShimOutputPath('specify');
+    const legacyFull = path.join(tmpDir, legacyRel);
+
+    // Every real pre-#534 project has this shape: raw bytes written directly by
+    // the old generateSlashCommandShims, with NO managed-region markers at all
+    // (markers were only introduced by #241 for the current-named shim). This is
+    // the shape #599 found the prior fix inert against.
+    fs.unlinkSync(newFull);
+    fs.writeFileSync(legacyFull, buildLegacyBareClaudeShim('specify'));
+
+    const warnings = refreshHarnessFiles(tmpDir);
+    expect(warnings).toEqual([]);
+
+    expect(fs.existsSync(newFull)).toBe(true);
+    expect(fs.readFileSync(newFull, 'utf-8')).toContain('/minspec-specify');
+    expect(fs.existsSync(legacyFull)).toBe(false);
+  });
+
+  it('leaves a markerless legacy shim alone when it does not byte-match the pristine pre-#241 scaffold', () => {
+    generateHarnessFiles(tmpDir);
+    const newFull = path.join(tmpDir, SPECIFY_REL);
+    const legacyFull = path.join(tmpDir, legacyClaudeShimOutputPath('specify'));
+
+    fs.unlinkSync(newFull);
+    fs.writeFileSync(legacyFull, buildLegacyBareClaudeShim('specify') + '\nCustom project note.\n');
+
+    refreshHarnessFiles(tmpDir);
+
+    // Not a pristine scaffold (user appended content) — never a silent clobber.
+    expect(fs.existsSync(legacyFull)).toBe(true);
+    expect(fs.readFileSync(legacyFull, 'utf-8')).toContain('Custom project note.');
   });
 
   it('leaves a legacy shim alone when the user appended content outside the markers', () => {
