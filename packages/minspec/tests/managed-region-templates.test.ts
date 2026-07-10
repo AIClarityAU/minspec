@@ -326,6 +326,8 @@ const CI_STACK: ReadonlyArray<{
   { name: 'review-decide-script', outputPath: 'scripts/review-decide.sh', style: 'hash', executable: true, shebang: true },
   { name: 'review-role-reviewer', outputPath: 'scripts/roles/reviewer.md', style: 'html', executable: false, shebang: false },
   { name: 'review-role-security', outputPath: 'scripts/roles/security.md', style: 'html', executable: false, shebang: false },
+  { name: 'review-role-architect', outputPath: 'scripts/roles/architect.md', style: 'html', executable: false, shebang: false },
+  { name: 'review-role-skeptic', outputPath: 'scripts/roles/skeptic.md', style: 'html', executable: false, shebang: false },
   { name: 'ai-review-guard', outputPath: '.github/scripts/ai-review-guard.js', style: 'slash', executable: false, shebang: false },
 ];
 
@@ -434,6 +436,8 @@ describe('#564 CI-review stack — scaffolding is dependency-complete', () => {
       'scripts/review-decide.sh',
       'scripts/roles/reviewer.md',
       'scripts/roles/security.md',
+      'scripts/roles/architect.md',
+      'scripts/roles/skeptic.md',
       '.github/scripts/ai-review-guard.js',
     ]) {
       expect(fs.existsSync(path.join(tmpDir, dep)), `${dep} scaffolded`).toBe(true);

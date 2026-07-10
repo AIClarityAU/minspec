@@ -25,6 +25,8 @@ import {
   REVIEW_DECIDE_SH,
   ROLE_REVIEWER_MD,
   ROLE_SECURITY_MD,
+  ROLE_ARCHITECT_MD,
+  ROLE_SKEPTIC_MD,
   AI_REVIEW_GUARD_JS,
   REVIEW_SCRIPT_SHEBANG,
 } from './ci-review-templates';
@@ -1038,6 +1040,18 @@ const CI_REVIEW_STACK_TEMPLATES: readonly ManagedRegionTemplate[] = [
     outputPath: 'scripts/roles/security.md',
     commentStyle: 'html',
     content: ROLE_SECURITY_MD,
+  },
+  {
+    name: 'review-role-architect',
+    outputPath: 'scripts/roles/architect.md',
+    commentStyle: 'html',
+    content: ROLE_ARCHITECT_MD,
+  },
+  {
+    name: 'review-role-skeptic',
+    outputPath: 'scripts/roles/skeptic.md',
+    commentStyle: 'html',
+    content: ROLE_SKEPTIC_MD,
   },
   {
     name: 'ai-review-guard',
