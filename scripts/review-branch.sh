@@ -8,7 +8,7 @@
 # gate) and then apply the verdict with its own credentials.
 #
 # Usage:
-#   review-branch.sh <base> <head> [--role reviewer|security]
+#   review-branch.sh <base> <head> [--role reviewer|security|architect|skeptic]
 #
 # Trigger-agnostic BY CONTRACT: it references NO dispatch-issue.sh variable and
 # takes only positional <base> <head> plus an optional --role, so a future
@@ -33,8 +33,8 @@
 
 set -euo pipefail
 
-BASE="${1:?Usage: review-branch.sh <base> <head> [--role reviewer|security]}"
-HEAD_REF="${2:?Usage: review-branch.sh <base> <head> [--role reviewer|security]}"
+BASE="${1:?Usage: review-branch.sh <base> <head> [--role reviewer|security|architect|skeptic]}"
+HEAD_REF="${2:?Usage: review-branch.sh <base> <head> [--role reviewer|security|architect|skeptic]}"
 shift 2 || true
 
 ROLE="reviewer"
@@ -46,8 +46,8 @@ while [[ $# -gt 0 ]]; do
 done
 
 case "$ROLE" in
-  reviewer|security) ;;
-  *) echo "review-branch.sh: --role must be 'reviewer' or 'security' (got: '$ROLE')" >&2; exit 1 ;;
+  reviewer|security|architect|skeptic) ;;
+  *) echo "review-branch.sh: --role must be one of reviewer|security|architect|skeptic (got: '$ROLE')" >&2; exit 1 ;;
 esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
