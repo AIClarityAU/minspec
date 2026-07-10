@@ -289,3 +289,173 @@ describe('managed-region template scaffolding (#249)', () => {
     expect(fs.readFileSync(full, 'utf-8')).toBe(before);
   });
 });
+
+// =============================================================================
+// #564 — the never-wrong required-check CI stack as managed-region templates.
+//
+// ai-review.yml + ready-to-merge.yml + ai-review-retry.yml and the scripts they
+// depend on (review-branch.sh, review-decide.sh, roles/reviewer.md,
+// roles/security.md, .github/scripts/ai-review-guard.js) are scaffolded exactly
+// like validate-workflow so any MinSpec-inited repo gets the full AI-review gate.
+// =============================================================================
+
+/** Locate the repo root (the worktree) by walking up to the dir holding the real workflow. */
+function findRepoRoot(): string {
+  let dir = process.cwd();
+  for (let i = 0; i < 10; i++) {
+    if (fs.existsSync(path.join(dir, '.github/workflows/ai-review.yml'))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error('could not locate repo root (…/.github/workflows/ai-review.yml)');
+}
+
+/** The eight CI-review-stack managed templates and their expected shape. */
+const CI_STACK: ReadonlyArray<{
+  name: string;
+  outputPath: string;
+  style: 'hash' | 'html' | 'slash';
+  executable: boolean;
+  shebang: boolean;
+}> = [
+  { name: 'ai-review-workflow', outputPath: '.github/workflows/ai-review.yml', style: 'hash', executable: false, shebang: false },
+  { name: 'ready-to-merge-workflow', outputPath: '.github/workflows/ready-to-merge.yml', style: 'hash', executable: false, shebang: false },
+  { name: 'ai-review-retry-workflow', outputPath: '.github/workflows/ai-review-retry.yml', style: 'hash', executable: false, shebang: false },
+  { name: 'review-branch-script', outputPath: 'scripts/review-branch.sh', style: 'hash', executable: true, shebang: true },
+  { name: 'review-decide-script', outputPath: 'scripts/review-decide.sh', style: 'hash', executable: true, shebang: true },
+  { name: 'review-role-reviewer', outputPath: 'scripts/roles/reviewer.md', style: 'html', executable: false, shebang: false },
+  { name: 'review-role-security', outputPath: 'scripts/roles/security.md', style: 'html', executable: false, shebang: false },
+  { name: 'ai-review-guard', outputPath: '.github/scripts/ai-review-guard.js', style: 'slash', executable: false, shebang: false },
+];
+
+const tplByName = (name: string) => MANAGED_REGION_TEMPLATES.find((t) => t.name === name);
+
+describe('#564 CI-review stack — registry membership + [0] stability', () => {
+  it('keeps validate-workflow as MANAGED_REGION_TEMPLATES[0] (stability contract)', () => {
+    // Other tests pin index 0; the #564 stack must be appended, never prepended.
+    expect(MANAGED_REGION_TEMPLATES[0].name).toBe('validate-workflow');
+    expect(MANAGED_REGION_TEMPLATES[0].outputPath).toBe(WORKFLOW_PATH);
+  });
+
+  it('registers all eight stack templates with the right output path / comment style / mode', () => {
+    for (const t of CI_STACK) {
+      const tpl = tplByName(t.name);
+      expect(tpl, `template ${t.name} is registered`).toBeDefined();
+      expect(tpl!.outputPath).toBe(t.outputPath);
+      expect(tpl!.commentStyle).toBe(t.style);
+      expect(tpl!.content.length).toBeGreaterThan(0);
+      // Scripts are executable + carry a bash shebang preamble; data files are not.
+      if (t.executable) {
+        expect(tpl!.executable).toBe(true);
+        expect(tpl!.preamble).toBe('#!/usr/bin/env bash');
+      } else {
+        expect(tpl!.executable).toBeFalsy();
+        expect(tpl!.preamble).toBeUndefined();
+      }
+      // Tool-independent (always scaffolded), like validate-workflow — no condition.
+      expect(tpl!.condition).toBeUndefined();
+    }
+  });
+});
+
+describe('#564 CI-review stack — portability (embedded copy == the repo’s own working file)', () => {
+  // T0 invariant: a scaffolded repo other than minspec must get WORKING files, so
+  // the embedded template MUST be byte-identical to the file the minspec repo
+  // itself runs in CI. Decodes each template and compares to the on-disk source —
+  // catches any drift and proves zero transcription/escaping corruption.
+  const repoRoot = findRepoRoot();
+
+  for (const t of CI_STACK) {
+    it(`${t.outputPath} is byte-identical to the on-disk source`, () => {
+      const tpl = tplByName(t.name)!;
+      const real = fs.readFileSync(path.join(repoRoot, t.outputPath), 'utf-8');
+      if (t.shebang) {
+        const nl = real.indexOf('\n');
+        // Shebang lives in the preamble (line 1); the body is the managed content.
+        expect(real.slice(0, nl)).toBe(tpl.preamble);
+        expect(tpl.content).toBe(real.slice(nl + 1));
+      } else {
+        expect(tpl.content).toBe(real);
+      }
+    });
+  }
+
+  it('carries ZERO hardcoded owner/repo — identities come from github.* + repo secrets/vars', () => {
+    for (const name of ['ai-review-workflow', 'ready-to-merge-workflow', 'ai-review-retry-workflow']) {
+      const yaml = tplByName(name)!.content;
+      // No literal `AIClarityAU/minspec` (or the pre-move `harvest316/minspec`) slug.
+      expect(yaml).not.toMatch(/AIClarityAU\/minspec\b/);
+      expect(yaml).not.toMatch(/harvest316\/minspec\b/);
+    }
+  });
+});
+
+describe('#564 CI-review stack — scaffolding is dependency-complete', () => {
+  let tmpDir: string;
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-564-stack-'));
+  });
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('init writes every stack file wrapped in markers, with scripts executable', () => {
+    generateHarnessFiles(tmpDir);
+    for (const t of CI_STACK) {
+      const full = path.join(tmpDir, t.outputPath);
+      expect(fs.existsSync(full), `${t.outputPath} scaffolded`).toBe(true);
+      const onDisk = fs.readFileSync(full, 'utf-8');
+      const start = managedRegionStartMarker(t.name, t.style);
+      const end = managedRegionEndMarker(t.name, t.style);
+      expect(onDisk).toContain(start);
+      expect(onDisk).toContain(end);
+      expect(splitManagedRegion(onDisk, start, end)).not.toBeNull();
+      if (t.executable) {
+        expect(onDisk.startsWith('#!/usr/bin/env bash\n')).toBe(true);
+        // Execute bit set so CI/git actually runs the script (POSIX fs).
+        expect(fs.statSync(full).mode & 0o111).not.toBe(0);
+      }
+    }
+  });
+
+  it('ai-review.yml’s runtime dependencies are all scaffolded alongside it (portability)', () => {
+    generateHarnessFiles(tmpDir);
+    const aiReview = fs.readFileSync(
+      path.join(tmpDir, '.github/workflows/ai-review.yml'),
+      'utf-8',
+    );
+    // It shells these + requires the guard — all must exist in the scaffolded repo.
+    expect(aiReview).toContain('scripts/review-branch.sh');
+    expect(aiReview).toContain('scripts/review-decide.sh');
+    expect(aiReview).toContain('.github/scripts/ai-review-guard.js');
+    for (const dep of [
+      'scripts/review-branch.sh',
+      'scripts/review-decide.sh',
+      'scripts/roles/reviewer.md',
+      'scripts/roles/security.md',
+      '.github/scripts/ai-review-guard.js',
+    ]) {
+      expect(fs.existsSync(path.join(tmpDir, dep)), `${dep} scaffolded`).toBe(true);
+    }
+  });
+
+  it('refresh restores a stale ai-review.yml region while preserving user content outside it', () => {
+    generateHarnessFiles(tmpDir);
+    const full = path.join(tmpDir, '.github/workflows/ai-review.yml');
+    const tpl = tplByName('ai-review-workflow')!;
+    const start = managedRegionStartMarker('ai-review-workflow', 'hash');
+    const end = managedRegionEndMarker('ai-review-workflow', 'hash');
+    const stale = `# user note above\n${start}\nname: OLD\non: {}\n${end}\n# user note below\n`;
+    fs.writeFileSync(full, stale);
+
+    const warnings = refreshHarnessFiles(tmpDir);
+    expect(warnings).toEqual([]);
+
+    const onDisk = fs.readFileSync(full, 'utf-8');
+    expect(onDisk).toContain('# user note above');
+    expect(onDisk).toContain('# user note below');
+    expect(onDisk).toContain(tpl.content);
+    expect(onDisk).not.toContain('name: OLD');
+  });
+});

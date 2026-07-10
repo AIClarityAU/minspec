@@ -55,6 +55,10 @@ import {
   hasRequiredChecksRuleset,
   isGhReady,
   resolveCheckContexts,
+  detectCodeChecks,
+  resolveTieredRequiredChecks,
+  AI_REVIEW_CHECK,
+  READY_TO_MERGE_CHECK,
 } from '../src/lib/ruleset-advisor';
 import { offerRulesetAdvisory, resolveRequiredChecks } from '../src/commands/init';
 import { MANAGED_REGION_TEMPLATES } from '../src/lib/template-registry';
@@ -317,6 +321,112 @@ describe('resolveRequiredChecks() (reads minspec.ruleset.requiredChecks)', () =>
   it('falls back to the default when the setting is malformed', () => {
     mockConfigValue = 'not-an-array';
     expect(resolveRequiredChecks()).toEqual([...DEFAULT_REQUIRED_CHECK_CONTEXTS]);
+  });
+});
+
+// =============================================================================
+// Pure library: tiered required-check resolution (#564)
+// =============================================================================
+
+describe('detectCodeChecks() (#564 Tier-B producibility)', () => {
+  it('none producible when the scripts map is missing / empty', () => {
+    expect(detectCodeChecks(undefined)).toEqual({ lint: false, test: false, build: false });
+    expect(detectCodeChecks(null)).toEqual({ lint: false, test: false, build: false });
+    expect(detectCodeChecks({})).toEqual({ lint: false, test: false, build: false });
+  });
+
+  it('counts only non-blank string scripts (a blank/non-string script is not producible)', () => {
+    expect(
+      detectCodeChecks({
+        test: 'vitest run',
+        lint: '   ',
+        build: 42 as unknown as string,
+      }),
+    ).toEqual({ lint: false, test: true, build: false });
+  });
+});
+
+describe('resolveTieredRequiredChecks() (#564 no-deadlock tiering)', () => {
+  it('always requires MinSpec SDD validation, and nothing the repo cannot produce', () => {
+    expect(
+      resolveTieredRequiredChecks({
+        aiReviewWorkflowScaffolded: false,
+        readyToMergeWorkflowScaffolded: false,
+      }),
+    ).toEqual(['MinSpec SDD validation']);
+  });
+
+  it('Tier A: ai-review + ready-to-merge ENTER the set when scaffolded AND reviewer configured', () => {
+    const checks = resolveTieredRequiredChecks({
+      aiReviewWorkflowScaffolded: true,
+      readyToMergeWorkflowScaffolded: true,
+      reviewerConfigured: true,
+    });
+    expect(checks).toContain('MinSpec SDD validation');
+    expect(checks).toContain(AI_REVIEW_CHECK);
+    expect(checks).toContain(READY_TO_MERGE_CHECK);
+  });
+
+  it('Tier A NO-DEADLOCK: scaffolded but reviewer NOT configured → NOT required (invariant #3)', () => {
+    // The workflows exist but post no pass until the reviewer secrets/App are set
+    // (#564 slice 3). Requiring them now would block every merge on a fresh/solo
+    // repo — exactly the DR-050 / #559 deadlock. So they stay OUT.
+    const checks = resolveTieredRequiredChecks({
+      aiReviewWorkflowScaffolded: true,
+      readyToMergeWorkflowScaffolded: true,
+      // reviewerConfigured omitted ⇒ defaults false (fail-safe)
+    });
+    expect(checks).toEqual(['MinSpec SDD validation']);
+    expect(checks).not.toContain(AI_REVIEW_CHECK);
+    expect(checks).not.toContain(READY_TO_MERGE_CHECK);
+  });
+
+  it('Tier A NO-DEADLOCK: reviewer configured but a workflow MISSING → that check stays out', () => {
+    // e.g. the user deleted ai-review.yml. Requiring `ai-review` with no workflow
+    // to report it = permanent pending. ready-to-merge (present) still enters.
+    const checks = resolveTieredRequiredChecks({
+      aiReviewWorkflowScaffolded: false,
+      readyToMergeWorkflowScaffolded: true,
+      reviewerConfigured: true,
+    });
+    expect(checks).not.toContain(AI_REVIEW_CHECK);
+    expect(checks).toContain(READY_TO_MERGE_CHECK);
+  });
+
+  it('Tier B: lint/test/build do NOT enter on a repo with no runnable scripts (#559)', () => {
+    const checks = resolveTieredRequiredChecks({
+      aiReviewWorkflowScaffolded: true,
+      readyToMergeWorkflowScaffolded: true,
+      reviewerConfigured: true,
+      codeChecks: detectCodeChecks(undefined), // no package.json scripts
+    });
+    expect(checks).not.toContain('lint');
+    expect(checks).not.toContain('test');
+    expect(checks).not.toContain('build');
+  });
+
+  it('Tier B: requires ONLY the code checks the repo can actually run', () => {
+    const checks = resolveTieredRequiredChecks({
+      aiReviewWorkflowScaffolded: false,
+      readyToMergeWorkflowScaffolded: false,
+      codeChecks: detectCodeChecks({ test: 'vitest run', build: 'tsc -p .' }), // no lint script
+    });
+    expect(checks).toContain('test');
+    expect(checks).toContain('build');
+    expect(checks).not.toContain('lint');
+  });
+
+  it('layers user-configured extras, de-duplicates, and keeps MinSpec SDD validation first', () => {
+    const checks = resolveTieredRequiredChecks({
+      aiReviewWorkflowScaffolded: true,
+      readyToMergeWorkflowScaffolded: true,
+      reviewerConfigured: true,
+      userChecks: ['ready-to-merge', ' custom-gate ', 'MinSpec SDD validation'],
+    });
+    expect(checks[0]).toBe('MinSpec SDD validation');
+    expect(checks.filter((c) => c === READY_TO_MERGE_CHECK)).toHaveLength(1);
+    expect(checks.filter((c) => c === 'MinSpec SDD validation')).toHaveLength(1);
+    expect(checks).toContain('custom-gate'); // trimmed
   });
 });
 

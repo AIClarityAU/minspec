@@ -17,6 +17,17 @@ import {
   slashCommandName,
 } from './slash-commands';
 import type { DetectedTools } from './tool-detector';
+import {
+  AI_REVIEW_WORKFLOW,
+  READY_TO_MERGE_WORKFLOW,
+  AI_REVIEW_RETRY_WORKFLOW,
+  REVIEW_BRANCH_SH,
+  REVIEW_DECIDE_SH,
+  ROLE_REVIEWER_MD,
+  ROLE_SECURITY_MD,
+  AI_REVIEW_GUARD_JS,
+  REVIEW_SCRIPT_SHEBANG,
+} from './ci-review-templates';
 
 /**
  * Template names that can be rendered.
@@ -947,12 +958,102 @@ export const SLASH_COMMAND_SHIM_TEMPLATES: readonly ManagedRegionTemplate[] = [
   buildCursorShimTemplate(),
 ];
 
+// ---------------------------------------------------------------------------
+// The never-wrong required-check CI stack (#564)
+//
+// `minspec-validate.yml` alone only ever gave a scaffolded repo a ONE-check gate
+// (`MinSpec SDD validation`). The never-wrong merge-gate story also needs the
+// independent AI reviewer + the label-integrity/merge gate, which until #564
+// lived hand-built in the minspec repo only and were never scaffolded — so a
+// freshly-inited repo (sealbox, scrooge) could never actually get the `ai-review`
+// gate the ruleset-advisor is meant to enforce (scrooge PR #46: nothing ran).
+//
+// These are added as managed-region templates exactly like `validate-workflow`
+// (markers → refresh keeps MinSpec's region current while preserving user edits
+// outside it). All are PORTABLE — verified to carry ZERO minspec-repo-hardcoded
+// values (owner/repo come from `github.repository*`, identities from repo secrets
+// and the `AI_REVIEW_*` repo variables). The full, byte-exact file bodies are
+// embedded in `ci-review-templates.ts` (base64 to dodge the template-literal
+// escaping hazard of ~90 KB of `${{ … }}` / backtick / regex content); the
+// `ci-stack-portability` test decodes each and asserts it equals the repo's own
+// working file, so a scaffolded repo gets exactly what minspec itself runs.
+//
+// Dependency graph (all covered here so a scaffolded repo gets a WORKING stack):
+//   ai-review.yml        → review-branch.sh, review-decide.sh, roles/reviewer.md,
+//                          roles/security.md, .github/scripts/ai-review-guard.js
+//   ready-to-merge.yml   → .github/scripts/ai-review-guard.js
+//   ai-review-retry.yml  → re-runs ai-review.yml (by filename)
+//   review-branch.sh     → roles/<role>.md, ../.github/scripts/ai-review-guard.js
+//
+// NOT included (out of #564 slice 1 scope): the human-only secrets + App install
+// (slice 3), `render-review-signals.mjs` + the dev-time dispatch harness (no
+// consumer in the CI gate; dispatch does not ship in the vsix), and the
+// dev/triage/architect roles (dispatch-only, not used by ai-review.yml).
+// ---------------------------------------------------------------------------
+
+/** The three GitHub Actions workflows of the AI-review required-check stack (#564). */
+const CI_REVIEW_STACK_TEMPLATES: readonly ManagedRegionTemplate[] = [
+  {
+    name: 'ai-review-workflow',
+    outputPath: '.github/workflows/ai-review.yml',
+    commentStyle: 'hash',
+    content: AI_REVIEW_WORKFLOW,
+  },
+  {
+    name: 'ready-to-merge-workflow',
+    outputPath: '.github/workflows/ready-to-merge.yml',
+    commentStyle: 'hash',
+    content: READY_TO_MERGE_WORKFLOW,
+  },
+  {
+    name: 'ai-review-retry-workflow',
+    outputPath: '.github/workflows/ai-review-retry.yml',
+    commentStyle: 'hash',
+    content: AI_REVIEW_RETRY_WORKFLOW,
+  },
+  {
+    name: 'review-branch-script',
+    outputPath: 'scripts/review-branch.sh',
+    commentStyle: 'hash',
+    content: REVIEW_BRANCH_SH,
+    executable: true,
+    preamble: REVIEW_SCRIPT_SHEBANG,
+  },
+  {
+    name: 'review-decide-script',
+    outputPath: 'scripts/review-decide.sh',
+    commentStyle: 'hash',
+    content: REVIEW_DECIDE_SH,
+    executable: true,
+    preamble: REVIEW_SCRIPT_SHEBANG,
+  },
+  {
+    name: 'review-role-reviewer',
+    outputPath: 'scripts/roles/reviewer.md',
+    commentStyle: 'html',
+    content: ROLE_REVIEWER_MD,
+  },
+  {
+    name: 'review-role-security',
+    outputPath: 'scripts/roles/security.md',
+    commentStyle: 'html',
+    content: ROLE_SECURITY_MD,
+  },
+  {
+    name: 'ai-review-guard',
+    outputPath: '.github/scripts/ai-review-guard.js',
+    commentStyle: 'slash',
+    content: AI_REVIEW_GUARD_JS,
+  },
+] as const;
+
 /**
  * All managed-region templates in scaffold order.
  *
  * The tool-independent gate harness (CI workflow + git hooks, DR-037) stays FIRST so
  * the existing `MANAGED_REGION_TEMPLATES[0]` references in tests remain stable; the
- * tool-gated slash-command shims (#241) are appended.
+ * AI-review required-check stack (#564) is appended after the DR-037 harness, and the
+ * tool-gated slash-command shims (#241) last.
  */
 export const MANAGED_REGION_TEMPLATES: readonly ManagedRegionTemplate[] = [
   {
@@ -985,5 +1086,6 @@ export const MANAGED_REGION_TEMPLATES: readonly ManagedRegionTemplate[] = [
     executable: true,
     preamble: '#!/usr/bin/env python3',
   },
+  ...CI_REVIEW_STACK_TEMPLATES,
   ...SLASH_COMMAND_SHIM_TEMPLATES,
 ] as const;
