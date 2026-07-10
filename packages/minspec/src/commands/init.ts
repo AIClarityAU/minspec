@@ -413,13 +413,43 @@ export async function offerRulesetAdvisory(
 /** Marketplace id of the official GitHub PR review/merge extension. */
 export const GITHUB_PR_EXTENSION_ID = 'GitHub.vscode-pull-request-github';
 
-/** Zero-network fallback: the extension's Marketplace listing. */
+/**
+ * Zero-network fallback: the extension's Microsoft Marketplace listing. Used
+ * only for official Microsoft builds — see {@link resolveGitHubPrExtensionLearnMoreUrl}.
+ */
 export const GITHUB_PR_EXTENSION_MARKETPLACE_URL =
   'https://marketplace.visualstudio.com/items?itemName=GitHub.vscode-pull-request-github';
+
+/**
+ * Zero-network fallback for non-Microsoft builds (VSCodium, code-server forks,
+ * etc.), which default to the Open VSX Registry rather than the Microsoft
+ * Marketplace. The extension is dual-published under the SAME id
+ * ({@link GITHUB_PR_EXTENSION_ID}) by GitHub's own `open-vsx` namespace, so
+ * `workbench.extensions.installExtension` already resolves correctly on those
+ * builds without any code change — this URL only affects which page "Learn
+ * more" opens.
+ */
+export const GITHUB_PR_EXTENSION_OPEN_VSX_URL =
+  'https://open-vsx.org/extension/GitHub/vscode-pull-request-github';
 
 const GITHUB_PR_EXT_INSTALL_ACTION = 'Install';
 const GITHUB_PR_EXT_DECLINE_ACTION = 'Not now';
 const GITHUB_PR_EXT_LEARN_MORE_ACTION = 'Learn more';
+
+/**
+ * The Microsoft Marketplace's own ToS restricts its gallery to Microsoft's
+ * official builds, so every non-Microsoft build (VSCodium, code-server forks,
+ * Cursor, Windsurf, …) points `vscode.env.appName` at something other than
+ * "Visual Studio Code" and defaults its extension gallery to Open VSX instead.
+ * Only Microsoft's own builds ("Visual Studio Code", "Visual Studio Code -
+ * Insiders") get the Marketplace link; everything else gets Open VSX, which
+ * is where those builds actually install from.
+ */
+export function resolveGitHubPrExtensionLearnMoreUrl(appName: string): string {
+  return /^Visual Studio Code\b/.test(appName)
+    ? GITHUB_PR_EXTENSION_MARKETPLACE_URL
+    : GITHUB_PR_EXTENSION_OPEN_VSX_URL;
+}
 
 /** Dependencies for {@link offerGitHubPrExtensionAdvisory}, injectable for tests. */
 export interface GitHubPrExtAdvisoryDeps {
@@ -431,6 +461,8 @@ export interface GitHubPrExtAdvisoryDeps {
   install?: (id: string) => Promise<void>;
   /** Open an external URL (defaults to VS Code's opener). */
   openExternal?: (url: string) => void;
+  /** The running editor's name. Defaults to `vscode.env.appName`. */
+  appName?: string;
 }
 
 /**
@@ -484,7 +516,8 @@ export async function offerGitHubPrExtensionAdvisory(
       return;
     }
     if (choice === GITHUB_PR_EXT_LEARN_MORE_ACTION) {
-      openExternal(GITHUB_PR_EXTENSION_MARKETPLACE_URL);
+      const appName = deps.appName ?? vscode.env.appName;
+      openExternal(resolveGitHubPrExtensionLearnMoreUrl(appName));
     }
     // "Not now" / dismiss → nothing further.
   } catch {
