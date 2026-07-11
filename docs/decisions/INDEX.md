@@ -429,7 +429,7 @@ Per-repo-local SDD ids stay unprefixed (DR-027 separate registers); a reference 
 
 ## [DR-054 — Reframe the network posture — data-sovereignty + bring-your-own-LLM (incl. local) + deterministic core supersede "air-gapped" as the product identity; adopt one shared GitHub App (minspec-sdd[bot]) + an OIDC token-broker as the reviewer-identity seam, with customer-own-app as the enterprise override](DR-054.md)
 
-*Status: proposed · Date: 2026-07-11*
+*Status: accepted · Date: 2026-07-11*
 
 <!-- dr-summary:DR-054 auto=b7aa8aa57c0a -->
 Three properties have been conflated under one word — **"offline"** — since DR-004, and treating them as one produces a positioning that is both weak and false the moment a customer uses the product: 1. **Determinism / no-LLM-in-the-decision-path** — the never-wrong signpost, the tier classifier, status resolution: pure functions, reproducible across editor/commit/CI/agent (Goal **G-6**, "determinism as moat"; DR-039/DR-019). This is a **correctness** property. It has nothing to do with network. 2. **Data sovereignty / no MinSpec-initiated egress** — the extension…
