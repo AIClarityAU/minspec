@@ -602,13 +602,17 @@ export function activate(context: vscode.ExtensionContext): void {
 const CONSTITUTION_PROPOSE_NUDGE_SKIP = 'minspec.constitutionProposeNudge.skip';
 
 /**
- * #320: surface the empty-constitution nudge with a "Propose draft" action.
+ * #320: surface the empty-constitution nudge with two offer-to-fix actions — a
+ * deterministic "Propose draft" seed and an LLM-powered "Generate with AI…"
+ * hand-off — plus "Don't ask again".
  *
  * Best-effort + advisory: a failure here never affects activation, the toast is
  * non-modal, and once the user picks "Don't ask again" the per-workspace skip
- * flag suppresses it. The deterministic propose command does the actual write —
- * this is only the offer surface (the pure descriptor lives in
- * constitution-nudge.ts; the file write reuses the Tier-0 proposer unchanged).
+ * flag suppresses it. Neither command's actual work happens here — this is only
+ * the offer surface (the pure descriptor lives in constitution-nudge.ts; the
+ * deterministic write reuses the Tier-0 proposer unchanged, and the LLM leg
+ * reuses the existing prompt-handoff command unchanged — MinSpec itself still
+ * never calls a model, INV-1).
  */
 async function surfaceConstitutionProposeNudge(
   context: vscode.ExtensionContext,
@@ -629,10 +633,13 @@ async function surfaceConstitutionProposeNudge(
     const choice = await vscode.window.showInformationMessage(
       nudge.message,
       nudge.fixActionLabel,
+      nudge.llmActionLabel,
       DONT_ASK,
     );
     if (choice === nudge.fixActionLabel) {
       await vscode.commands.executeCommand(nudge.fixCommandId, folder);
+    } else if (choice === nudge.llmActionLabel) {
+      await vscode.commands.executeCommand(nudge.llmCommandId, folder);
     } else if (choice === DONT_ASK) {
       await context.workspaceState.update(CONSTITUTION_PROPOSE_NUDGE_SKIP, true);
     }

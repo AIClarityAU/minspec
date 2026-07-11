@@ -7,6 +7,8 @@ import {
   isAllTemplate,
   PROPOSE_ACTION_LABEL,
   PROPOSE_COMMAND_ID,
+  PROPOSE_LLM_ACTION_LABEL,
+  PROPOSE_LLM_COMMAND_ID,
 } from '../src/lib/constitution-nudge';
 
 let tmp: string;
@@ -98,5 +100,15 @@ describe('evaluateConstitution (FR-6)', () => {
     expect(nudge.fixActionLabel).toBe(PROPOSE_ACTION_LABEL);
     expect(nudge.fixCommandId).toBe(PROPOSE_COMMAND_ID);
     expect(nudge.fixCommandId).toBe('minspec.constitutionPropose');
+  });
+
+  it('also carries the LLM-powered offer-to-fix action metadata', () => {
+    writeConstitution(ALL_TEMPLATE);
+    const nudge = evaluateConstitution(tmp);
+    expect(nudge.llmActionLabel).toBe(PROPOSE_LLM_ACTION_LABEL);
+    expect(nudge.llmCommandId).toBe(PROPOSE_LLM_COMMAND_ID);
+    expect(nudge.llmCommandId).toBe('minspec.constitutionShowPrompt');
+    // Two distinct offers, not the same command under two labels.
+    expect(nudge.llmCommandId).not.toBe(nudge.fixCommandId);
   });
 });
