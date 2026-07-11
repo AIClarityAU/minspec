@@ -50,13 +50,22 @@ const COMMIT_ACTION = 'Commit them';
  *
  * Every entry is a single FILE, never a directory (#607). A directory
  * pathspec like `.minspec` or `.claude/commands` stages EVERYTHING under it —
- * including files MinSpec never wrote, such as a hand-edited
- * `.minspec/config.json` or a spec draft under `.minspec/specs/`. On the
- * refresh path (which runs repeatedly against active, long-lived projects,
- * not just a fresh scaffold) that sweeps unrelated dirty content into the
- * `chore: refresh MinSpec harness files` commit. Listing each managed output
- * file individually preserves the "commit only what MinSpec touched"
- * property regardless of what else happens to be dirty alongside it.
+ * including genuinely user-authored content MinSpec never wrote, e.g. a WIP
+ * spec draft under `.minspec/specs/`. On the refresh path (which runs
+ * repeatedly against active, long-lived projects, not just a fresh scaffold)
+ * that sweeps unrelated dirty content into the `chore: refresh MinSpec harness
+ * files` commit. Listing each managed output file individually preserves the
+ * "commit only what MinSpec touched" property regardless of what else happens
+ * to be dirty alongside it.
+ *
+ * The managed files MinSpec DOES author but that do not come from the template
+ * registry — `.minspec/config.json` (scaffold() writes it and setCoverageMinimum
+ * persists the coverage choice into it; CI/vitest read it) and the epic registry's
+ * marker-bounded `docs/epics/INDEX.md` (writeEpicIndex, at the DEFAULT `epicsDir`
+ * a fresh init uses; a custom `epicsDir` is rarer and the existsSync filter simply
+ * skips the miss) — are listed here EXPLICITLY (as files), so they ride the
+ * scaffold commit without sweeping a directory. Omitting them left MinSpec-written,
+ * non-gitignored files untracked after "Commit them" (#610).
  *
  * The harness output paths come from the template registry: the
  * section-merge templates (CLAUDE.md, AGENTS.md, .cursorrules,
@@ -66,6 +75,9 @@ const COMMIT_ACTION = 'Commit them';
  */
 const SCAFFOLD_PATHSPECS: readonly string[] = [
   '.gitignore',
+  // scaffold()-authored, non-template, non-gitignored managed files (#610).
+  '.minspec/config.json',
+  'docs/epics/INDEX.md',
   // Section-merge harness files rendered at the project root / .minspec.
   ...TEMPLATE_NAMES.map((name) => TEMPLATE_OUTPUT_PATHS[name]),
   // Managed-region templates — each its own file, never the containing
