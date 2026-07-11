@@ -212,3 +212,40 @@ describe('egress-scan.sh — documented false-positive is safe-direction (#479 r
     expect(r.blocked).toBe(false);
   });
 });
+
+describe("egress-scan.sh — MinSpec's own artifact paths (SPEC-/DR-/EPIC-NNN) are not secrets (#616)", () => {
+  // The mixed-class rule (upper+lower+digit, >=32 chars) flagged MinSpec's OWN
+  // artifact paths: `specs/minspec/SPEC-028-forgotten-merge-inbox/requirements`
+  // has SPEC (upper) + words (lower) + 028 (digit), so the whole >=32 token read
+  // as "mixed-class" and false-quarantined nearly every MinSpec PR (the 41-PR
+  // backlog). A path's longest CONTIGUOUS alnum run is a short word; a secret's is
+  // one unbroken >=32 run. The heuristic now gates on that contiguous run.
+  it('a diff touching a SPEC-NNN spec path → CLEAN', () => {
+    const r = scan(fixture('spec.diff',
+      'diff --git a/specs/minspec/SPEC-028-forgotten-merge-inbox/requirements.md b/specs/minspec/SPEC-028-forgotten-merge-inbox/requirements.md\n' +
+      "+  const SPEC_REL = 'specs/minspec/SPEC-028-forgotten-merge-inbox/requirements.md';\n"));
+    expect(r.blocked).toBe(false);
+    expect(r.out).toBe('');
+  });
+
+  it('DR-/EPIC- paths and a cross-project ref (MS-SPEC-019) → CLEAN', () => {
+    const r = scan(fixture('dr.diff',
+      '+  docs/decisions/DR-053-cross-project-reference-prefixes.md\n' +
+      '+  docs/epics/EPIC-010-reviewer-all-approvables/EPIC-010.md\n' +
+      '+  // see MS-SPEC-019 and SC-DR-007 for the cross-project convention\n'));
+    expect(r.blocked).toBe(false);
+    expect(r.out).toBe('');
+  });
+
+  it('still BLOCKS a contiguous secret even when adjacent to a path', () => {
+    const r = scan(fixture('mix.diff',
+      '+  fetch("/api/specs/SPEC-028", { headers: { auth: "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789" }});\n'));
+    expect(r.blocked).toBe(true);
+  });
+
+  it('still BLOCKS a secret WRAPPED in path separators (>=32 run survives — no bypass)', () => {
+    const r = scan(fixture('wrap.diff',
+      '+  path = "foo/AbCdEfGhIjKlMnOpQrStUvWxYz0123456789/bar";\n'));
+    expect(r.blocked).toBe(true);
+  });
+});

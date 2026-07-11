@@ -81,20 +81,37 @@ CI_PATTERNS=(
 #    char slips this heuristic; the distinctive-prefix shapes above catch the common
 #    real tokens, and this is defence-in-depth, not the sole control. ──
 read -r -d '' ENTROPY_AWK <<'AWK' || true
+# Longest run of CONTIGUOUS alphanumerics in t. Separators (/, -, _) break a run.
+# A prefix-less secret is one unbroken high-entropy run; a file path or structured
+# id is short dictionary segments split by separators, so its longest run is a
+# short word. Gates the mixed-class rule so it fires on secrets, not paths (#616).
+function longest_alnum_run(t,   i, c, n, best) {
+  n = 0; best = 0
+  for (i = 1; i <= length(t); i++) {
+    c = substr(t, i, 1)
+    if (c ~ /[A-Za-z0-9]/) { n++; if (n > best) best = n } else n = 0
+  }
+  return best
+}
 function secretish(t,   hasU, hasL, hasD) {
   if (length(t) < 32) return 0
   if (t ~ /^sha(1|224|256|384|512)-/) return 0   # SRI / npm-lock integrity hash — not a secret
   if (t ~ /^[0-9a-fA-F]+$/) return 0             # pure hex = a hash (sha*/git SHA) committed legitimately
-  # `+` and `=` are strong base64 signals that file PATHS never carry. We do NOT
-  # trigger on `/` alone: the tokenizer runs a slash-path (a diff header like
-  # `b/packages/minspec/tests/dispatch-ready-check.test.ts`, or an in-file import)
-  # into one ≥32-char token, and flagging that false-quarantined nearly every real
-  # PR (#479 review, MAJOR). A base64 secret WITHOUT `+`/`=` is still caught by the
-  # mixed-class rule below (real keys are upper+lower+digit); a lowercase-plus-slash
-  # path is not mixed-class, so it correctly passes.
+  # `+` and `=` are strong base64 signals that file PATHS never carry. A base64
+  # secret is caught here regardless of separators.
   if (t ~ /[+=]/) return 1                        # base64-flavoured blob (padding/plus)
+  # Mixed-class (upper+lower+digit) is the entropy tell for a prefix-less secret,
+  # but ONLY on a CONTIGUOUS >=32 run. Applied to the whole separator-laden token
+  # it flagged MinSpec's OWN artifact paths — SPEC-/DR-/EPIC-NNN ids are
+  # upper+lower+digit yet split by `/` and `-` into short words, so nearly every
+  # MinSpec PR was quarantined (#616). A secret WRAPPED in separators still has its
+  # >=32 contiguous run (foo/<32-char-blob>/bar → run=32), so this is NOT a bypass;
+  # only a secret deliberately chopped into <32 chunks slips — the same
+  # defence-in-depth residual the distinctive-prefix shapes above backstop. A
+  # lowercase-plus-slash path was never mixed-class and already passed (#479).
+  if (longest_alnum_run(t) < 32) return 0
   hasU = (t ~ /[A-Z]/); hasL = (t ~ /[a-z]/); hasD = (t ~ /[0-9]/)
-  return (hasU && hasL && hasD) ? 1 : 0          # mixed-class high-entropy token
+  return (hasU && hasL && hasD) ? 1 : 0          # contiguous mixed-class high-entropy token
 }
 {
   s = $0
