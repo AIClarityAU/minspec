@@ -13,7 +13,7 @@ relates_to: [SPEC-010, SPEC-006]
 # MinSpec — Prettified Spec-Review Webview (Requirements)
 
 **Date:** 2026-06-01
-**Status:** Specifying (SDD Specify phase)
+**Status:** Implementing (SDD Implement phase)
 **Triggered by:** session request — "expand the planned webview that approximates
 ExitPlanMode (pretty not MD, with a text-select → comment → LLM revision → highlight
 changes process); a scroll-bottom Approve button that, instead of closing, shows the

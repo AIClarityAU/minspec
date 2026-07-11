@@ -82,7 +82,11 @@ describe('post-init commit offer (#222)', () => {
   function seedScaffold(): void {
     fs.mkdirSync(path.join(tmpDir, '.git'), { recursive: true });
     fs.mkdirSync(path.join(tmpDir, '.minspec'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, 'docs', 'epics'), { recursive: true });
+    // Both are scaffold()-authored, non-gitignored managed files (#610): config.json
+    // under .minspec, the epic index under the default epicsDir (docs/epics).
     fs.writeFileSync(path.join(tmpDir, '.minspec', 'config.json'), '{}');
+    fs.writeFileSync(path.join(tmpDir, 'docs', 'epics', 'INDEX.md'), '# Epics\n');
     fs.writeFileSync(path.join(tmpDir, 'CLAUDE.md'), '# CLAUDE');
     fs.writeFileSync(path.join(tmpDir, '.gitignore'), 'node_modules\n');
   }
@@ -91,7 +95,6 @@ describe('post-init commit offer (#222)', () => {
     it('returns only the scaffolded paths that exist on disk', () => {
       seedScaffold();
       const paths = collectScaffoldPaths(tmpDir);
-      expect(paths).toContain('.minspec');
       expect(paths).toContain('CLAUDE.md');
       expect(paths).toContain('.gitignore');
       // Absent harness files must NOT be listed.
@@ -101,6 +104,48 @@ describe('post-init commit offer (#222)', () => {
 
     it('returns an empty list when nothing has been scaffolded', () => {
       expect(collectScaffoldPaths(tmpDir)).toEqual([]);
+    });
+
+    // #607/#610 — regression: a bare directory pathspec used to stage EVERYTHING
+    // under `.minspec/`, including genuinely user-authored content MinSpec never
+    // wrote (a WIP spec draft, …). Every entry is now a precise file, so an
+    // unrelated file living alongside a real managed one is never listed — while
+    // the managed files MinSpec DOES author (config.json, epics/INDEX.md) still are.
+    it('lists the precise managed files (incl. config.json + epics/INDEX.md), never .minspec itself or user drafts', () => {
+      seedScaffold();
+      fs.writeFileSync(path.join(tmpDir, '.minspec', 'constitution.md'), '# Constitution');
+      fs.mkdirSync(path.join(tmpDir, '.minspec', 'specs', 'SPEC-999'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, '.minspec', 'specs', 'SPEC-999', 'requirements.md'),
+        '# WIP draft',
+      );
+
+      const paths = collectScaffoldPaths(tmpDir);
+
+      // The managed harness files ARE listed — including config.json + epics/INDEX.md,
+      // which scaffold() writes but that are NOT gitignored and MUST be committed (#610).
+      expect(paths).toContain('.minspec/constitution.md');
+      expect(paths).toContain('.minspec/config.json');
+      expect(paths).toContain('docs/epics/INDEX.md');
+      // … but the directory itself and any WIP spec draft (genuinely user content)
+      // under the same directory are NOT.
+      expect(paths).not.toContain('.minspec');
+      expect(paths.some((p) => p.startsWith('.minspec/specs'))).toBe(false);
+    });
+
+    it('never lists .claude/commands or .cursor/rules as bare directories', () => {
+      seedScaffold();
+      fs.mkdirSync(path.join(tmpDir, '.claude', 'commands'), { recursive: true });
+      fs.writeFileSync(
+        path.join(tmpDir, '.claude', 'commands', 'my-own-command.md'),
+        '# not a MinSpec shim',
+      );
+
+      const paths = collectScaffoldPaths(tmpDir);
+
+      expect(paths).not.toContain('.claude/commands');
+      expect(paths).not.toContain('.cursor/rules');
+      expect(paths).not.toContain('.claude/commands/my-own-command.md');
     });
   });
 
@@ -147,9 +192,13 @@ describe('post-init commit offer (#222)', () => {
       expect(added).toHaveLength(1);
       const staged = added[0];
       expect(staged).toEqual(collectScaffoldPaths(tmpDir));
-      expect(staged).toContain('.minspec');
       expect(staged).toContain('CLAUDE.md');
       expect(staged).toContain('.gitignore');
+      // #610 — the MinSpec-written, non-gitignored managed files ARE staged …
+      expect(staged).toContain('.minspec/config.json');
+      expect(staged).toContain('docs/epics/INDEX.md');
+      // … but never the bare `.minspec` directory pathspec (#607).
+      expect(staged).not.toContain('.minspec');
     });
   });
 

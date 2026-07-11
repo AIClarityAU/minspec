@@ -11,7 +11,7 @@ product: minspec
 # MinSpec — Auto-Structure-Repair (Requirements)
 
 **Date:** 2026-05-30
-**Status:** Specifying (SDD Specify phase)
+**Status:** Implementing (SDD Implement phase)
 **Decision:** [DR-006 addendum](../../../docs/decisions/DR-006.md)
 **Triggered by:** session request — "auto-fix the SDD structure whenever needed"
 

@@ -10,7 +10,7 @@ epic: EPIC-003  # SDD Core Methodology
 # MinSpec — Constitution Proposer (LLM-drafted, MinSpec-orchestrated) — Requirements
 
 **Date:** 2026-06-23
-**Status:** Specifying (SDD Specify phase)
+**Status:** Implementing (SDD Implement phase)
 **Triggered by:** [#269](https://github.com/harvest316/minspec/issues/269) — "shouldn't MinSpec propose Invariants/Principles/Constraints alongside Goals at init, instead of empty placeholders?"
 **Related:** [#270](https://github.com/harvest316/minspec/issues/270) (enforce invariants as gates — the sequel), [#242](https://github.com/harvest316/minspec/issues/242) (init tech-debt scan), DR-039 (Goals), DR-004/DR-015 (Tier-0 boundary), DR-017 (agent-execute model access)
 

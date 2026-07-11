@@ -1,9 +1,15 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { scaffold, generateHarnessFiles, refreshHarnessFiles } from '../lib/scaffold';
-import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS } from '../lib/template-registry';
-import { resolveTargetFolder } from '../lib/resolve-folder';
+import {
+  scaffold,
+  generateHarnessFiles,
+  refreshHarnessFiles,
+  rescaffoldManagedRegionFile,
+  type ManagedRegionWarning,
+} from '../lib/scaffold';
+import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS, MANAGED_REGION_TEMPLATES } from '../lib/template-registry';
+import { resolveTargetFolder, workspaceFolderLabel } from '../lib/resolve-folder';
 import { setCoverageMinimum, DEFAULT_COVERAGE_MINIMUM } from '../lib/config';
 import { evaluateConstitution } from '../lib/constitution-nudge';
 import { getRepoFromRemote } from '../lib/github';
@@ -54,24 +60,45 @@ export const REFRESH_COMMIT_MESSAGE = 'chore: refresh MinSpec harness files';
 const COMMIT_ACTION = 'Commit them';
 
 /**
- * Top-level paths MinSpec init is responsible for scaffolding. These are
- * pathspecs (relative to the project root) that `git add` can stage directly.
- * Directories are staged whole; git honors .gitignore for directory adds, so
- * the ephemeral `.minspec/session.json` / `calibration.json` are never staged.
+ * Paths MinSpec init/refresh is responsible for writing. These are pathspecs
+ * (relative to the project root) that `git add` can stage directly.
  *
- * The harness output paths come from the template registry (CLAUDE.md,
- * AGENTS.md, .cursorrules, DESIGN.md, .minspec/constitution.md), plus the
- * `.minspec/` dir itself, `.gitignore` (init appends the ephemeral entries),
- * and the Spec Kit slash-command shim dirs (created only when a matching AI
- * tool is detected).
+ * Every entry is a single FILE, never a directory (#607). A directory
+ * pathspec like `.minspec` or `.claude/commands` stages EVERYTHING under it —
+ * including genuinely user-authored content MinSpec never wrote, e.g. a WIP
+ * spec draft under `.minspec/specs/`. On the refresh path (which runs
+ * repeatedly against active, long-lived projects, not just a fresh scaffold)
+ * that sweeps unrelated dirty content into the `chore: refresh MinSpec harness
+ * files` commit. Listing each managed output file individually preserves the
+ * "commit only what MinSpec touched" property regardless of what else happens
+ * to be dirty alongside it.
+ *
+ * The managed files MinSpec DOES author but that do not come from the template
+ * registry — `.minspec/config.json` (scaffold() writes it and setCoverageMinimum
+ * persists the coverage choice into it; CI/vitest read it) and the epic registry's
+ * marker-bounded `docs/epics/INDEX.md` (writeEpicIndex, at the DEFAULT `epicsDir`
+ * a fresh init uses; a custom `epicsDir` is rarer and the existsSync filter simply
+ * skips the miss) — are listed here EXPLICITLY (as files), so they ride the
+ * scaffold commit without sweeping a directory. Omitting them left MinSpec-written,
+ * non-gitignored files untracked after "Commit them" (#610).
+ *
+ * The harness output paths come from the template registry: the
+ * section-merge templates (CLAUDE.md, AGENTS.md, .cursorrules,
+ * .minspec/constitution.md) plus the managed-region templates (CI workflow,
+ * git hooks, and the tool-gated Spec Kit slash-command shims), and
+ * `.gitignore` (init/refresh append the ephemeral-state entries).
  */
 const SCAFFOLD_PATHSPECS: readonly string[] = [
-  '.minspec',
   '.gitignore',
-  '.claude/commands',
-  '.cursor/rules',
-  // Harness files rendered at the project root.
+  // scaffold()-authored, non-template, non-gitignored managed files (#610).
+  '.minspec/config.json',
+  'docs/epics/INDEX.md',
+  // Section-merge harness files rendered at the project root / .minspec.
   ...TEMPLATE_NAMES.map((name) => TEMPLATE_OUTPUT_PATHS[name]),
+  // Managed-region templates — each its own file, never the containing
+  // directory, so an unrelated file a user placed alongside them (e.g. a
+  // hand-written .claude/commands/my-own-command.md) is never swept in.
+  ...MANAGED_REGION_TEMPLATES.map((tpl) => tpl.outputPath),
 ];
 
 /**
@@ -678,6 +705,51 @@ export async function initCommand(
   await offerRulesetAdvisory(folder, deps?.ruleset);
 }
 
+// ---------------------------------------------------------------------------
+// Managed-region missing-markers warning: attribution + actions (#604)
+// ---------------------------------------------------------------------------
+
+/** Warning action: consent-gated whole-file rewrite from the current template. */
+const RESCAFFOLD_ACTION = 'Re-scaffold (overwrite)';
+/** Warning action: open the affected file so the user can inspect/fix it by hand. */
+const OPEN_FILE_ACTION = 'Open file';
+
+/**
+ * Surface a single {@link ManagedRegionWarning} left behind by
+ * `refreshHarnessFiles` after its auto-heal (scaffold.ts) couldn't prove the file
+ * safe to recover automatically. Three defects this closes (#604):
+ *   - the bare message carried no project attribution, so two folders with the
+ *     identical broken file (e.g. two workspace roots) were indistinguishable —
+ *     now prefixed with the workspace folder's label;
+ *   - `showWarningMessage(w.message)` passed no action items, forcing a manual
+ *     fix — now offers `Re-scaffold (overwrite)` (consent-gated whole-file
+ *     rewrite) and `Open file`;
+ * Best-effort: a re-scaffold failure is surfaced as an error but never throws out
+ * of the refresh flow.
+ */
+async function surfaceManagedRegionWarning(folder: string, w: ManagedRegionWarning): Promise<void> {
+  const label = workspaceFolderLabel(folder);
+  const choice = await vscode.window.showWarningMessage(
+    `[${label}] ${w.message}`,
+    RESCAFFOLD_ACTION,
+    OPEN_FILE_ACTION,
+  );
+
+  if (choice === RESCAFFOLD_ACTION) {
+    try {
+      rescaffoldManagedRegionFile(folder, w.outputPath);
+      vscode.window.showInformationMessage(`MinSpec: re-scaffolded ${w.outputPath}.`);
+    } catch (err) {
+      vscode.window.showErrorMessage(
+        `MinSpec: could not re-scaffold ${w.outputPath} — ${describeError(err)}.`,
+      );
+    }
+  } else if (choice === OPEN_FILE_ACTION) {
+    const doc = await vscode.workspace.openTextDocument(path.join(folder, w.outputPath));
+    await vscode.window.showTextDocument(doc, { preview: false });
+  }
+}
+
 export async function initRefreshCommand(
   folderArg?: string,
   deps?: OfferScaffoldCommitDeps,
@@ -700,7 +772,7 @@ export async function initRefreshCommand(
     'MinSpec: Refreshed harness files (user edits preserved).',
   );
   for (const w of warnings) {
-    vscode.window.showWarningMessage(w.message);
+    await surfaceManagedRegionWarning(folder, w);
   }
   surfaceConstitutionNudge(folder);
   // Post-refresh "what to commit" offer — the SAME affordance init gives (#222).
