@@ -18,9 +18,14 @@ import { compactConstitution } from '../lib/constitution-compaction';
  * to run in their own assistant. MinSpec never calls the model itself (INV-1);
  * the prompt is handed off. The future Tier-1 agent-execute provider implements
  * the same ConstitutionProvider seam — no rework here.
+ *
+ * This is the "Generate with AI" leg of the empty-constitution nudge (#320): the
+ * LLM-powered alternative to the deterministic {@link constitutionProposeCommand}
+ * seed. `folderArg` lets the nudge target the exact folder it evaluated instead
+ * of re-resolving (multi-root safe, mirrors the propose command's own arg).
  */
-export async function constitutionShowPromptCommand(): Promise<void> {
-  const folder = await resolveTargetFolder();
+export async function constitutionShowPromptCommand(folderArg?: string): Promise<void> {
+  const folder = folderArg ?? (await resolveTargetFolder());
   if (!folder) return;
 
   const manifest = assembleContext(folder);
