@@ -230,13 +230,54 @@ export function buildAgentsSlashCommandSection(): string {
   return lines.join('\n');
 }
 
+/** The exact heading line `buildAgentsSlashCommandSection()` emits. */
+const AGENTS_SLASH_SECTION_HEADING_LINE = '## Spec Kit Slash Commands';
+
+/**
+ * Remove any `## Spec Kit Slash Commands` heading section (heading through the
+ * next `## ` heading or EOF) that sits OUTSIDE a marker pair.
+ *
+ * This heading is exclusively MinSpec-owned — never hand-authored — so any
+ * content under it is safe to remove wholesale, same as the marker-block
+ * removal above. Needed for two cases (#625, sibling to #604's
+ * marker-recognition gap family):
+ *
+ *  - A truly legacy AGENTS.md whose slash-commands section predates the
+ *    marker format entirely (bare heading, no markers ever present).
+ *  - A marker pair mangled by the heading-based section-merge engine
+ *    (`mergeFile` in merge-refresh.ts, used for AGENTS.md's other sections):
+ *    that engine parses purely by `## ` headings and doesn't know this
+ *    heading's start marker belongs to it, so on a refresh it can drop the
+ *    start marker (swallowed into the tail of whichever real template
+ *    section precedes it) while re-appending the heading + body + end marker
+ *    as an ordinary "user section the template didn't consume" — leaving a
+ *    heading with no start marker for the block-removal regex above to match.
+ */
+function stripUnmarkedLegacySlashSections(content: string): string {
+  const lines = content.split('\n');
+  const out: string[] = [];
+  let skipping = false;
+  for (const line of lines) {
+    if (line.trim() === AGENTS_SLASH_SECTION_HEADING_LINE) {
+      skipping = true;
+      continue;
+    }
+    if (skipping && /^## /.test(line)) {
+      skipping = false;
+    }
+    if (!skipping) out.push(line);
+  }
+  return out.join('\n');
+}
+
 /**
  * Inject or replace the slash-command section in AGENTS.md content.
  * Content outside the markers is preserved verbatim.
  *
  * Idempotent and self-healing: removes ALL existing start..end blocks (handles
  * duplicates accumulated by previous non-idempotent versions), strips any
- * orphaned markers, then appends exactly one canonical block.
+ * orphaned markers and any unmarked legacy/duplicate heading sections, then
+ * appends exactly one canonical block.
  */
 export function injectAgentsSlashSection(fileContent: string): string {
   const block = buildAgentsSlashCommandSection();
@@ -251,6 +292,8 @@ export function injectAgentsSlashSection(fileContent: string): string {
   stripped = stripped
     .replace(new RegExp(startRe, 'g'), '')
     .replace(new RegExp(endRe, 'g'), '');
+  // Remove any remaining unmarked copy of the heading section itself (#625).
+  stripped = stripUnmarkedLegacySlashSections(stripped);
 
   const trimmed = stripped.trimEnd();
   if (trimmed.length === 0) {
