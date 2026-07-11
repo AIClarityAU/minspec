@@ -133,13 +133,24 @@ CONTENT
 )
 
 echo "Reviewing #$PR (no-tools reviewer over the diff)..."
-AGENT_OUT=$(claude -p "$USER_CONTENT" \
+# Prompt (embeds the untrusted, possibly DIFF_CAP-truncated diff) reaches claude
+# via a temp file on STDIN, never as an argv argument: a single argv element over
+# the kernel MAX_ARG_STRLEN (~131072 bytes) fails execve with E2BIG ("Argument
+# list too long"). DIFF_CAP is 180000 > that limit, so the truncated path used to
+# crash before claude ran (#477) — the truncation backstop below only becomes
+# reachable once the review actually executes. stdin has no such bound; a
+# regular-file redirect keeps the exit status purely claude's.
+REVIEW_PROMPT_FILE=$(mktemp)
+printf '%s' "$USER_CONTENT" >"$REVIEW_PROMPT_FILE"
+AGENT_OUT=$(claude -p \
   --system-prompt-file "${ROLES_DIR}/reviewer.md" \
   --tools "" \
-  --output-format text 2>&1) || {
+  --output-format text <"$REVIEW_PROMPT_FILE" 2>&1) || {
+    rm -f "$REVIEW_PROMPT_FILE"
     echo "WARNING: reviewer agent failed for #$PR — leaving unlabeled" >&2
     exit 0
   }
+rm -f "$REVIEW_PROMPT_FILE"
 
 GATE_LABEL=$(printf '%s\n' "$AGENT_OUT" | "$DECIDE" || true)
 if [[ "$GATE_LABEL" != "ai-review:pass" && "$GATE_LABEL" != "ai-review:changes" ]]; then

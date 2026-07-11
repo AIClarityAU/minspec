@@ -16,19 +16,18 @@
  * shipped file is what this test actually catches, not a drifted copy.
  *
  * Why a pure-function test and not a full gh/claude-stubbed end-to-end run:
- * DIFF_CAP is 180000 bytes, and the truncated diff is embedded as a SINGLE
- * argv element in `claude -p "$USER_CONTENT"`. Linux caps any single
+ * DIFF_CAP is 180000 bytes. Historically the truncated diff was embedded as a
+ * SINGLE argv element in `claude -p "$USER_CONTENT"`, and Linux caps any single
  * execve() argument at MAX_ARG_STRLEN (32 pages = 131072 bytes) — confirmed
- * empirically in this environment (subprocess with a 131072-byte arg fails
- * with E2BIG; 131000 succeeds). 180000 > 131072, so the `claude` call in the
- * truncated-diff branch already fails with "Argument list too long" today,
- * independent of this fix (tracked separately, see #427 PR description). A
- * true end-to-end test of the truncated path would therefore either be
- * unable to reach the code under test, or would rely on being run on a
- * kernel with a nonstandard MAX_ARG_STRLEN. Testing the pure decision
- * function directly is both more reliable and exercises exactly the new
- * logic. A lightweight end-to-end run covers the untruncated path, which
- * does not hit this wall, to prove the call site is wired correctly.
+ * empirically here (a 131072-byte arg fails with E2BIG; 131000 succeeds). Since
+ * 180000 > 131072, the `claude` call in the truncated-diff branch would fail with
+ * "Argument list too long" before the reviewer ever ran (#477 / #624). That is
+ * now fixed: the prompt reaches claude via a temp file on STDIN (no ARG_MAX
+ * bound), so the truncated path executes and this backstop is what forces
+ * `ai-review:changes`. This remains a pure-function test of that backstop rather
+ * than a claude-stubbed end-to-end run — testing the decision function directly
+ * is more reliable and exercises exactly the new logic. A lightweight end-to-end
+ * run covers the untruncated path to prove the call site is wired correctly.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';

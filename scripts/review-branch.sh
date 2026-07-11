@@ -118,21 +118,37 @@ CONTENT
 GUARD="${SCRIPT_DIR}/../.github/scripts/ai-review-guard.js"
 
 # Fresh-context reviewer. Read-only tools ONLY; NO gh/git/network/Bash — the agent
-# cannot push, comment, label, or merge. opus per DR-033 §6. `</dev/null`: the prompt
-# is an ARG (not stdin), so close stdin — else `claude -p` waits ~3s for input.
+# cannot push, comment, label, or merge. opus per DR-033 §6.
+#
+# The prompt (which embeds the full untrusted diff) reaches claude via STDIN
+# redirected from a temp file, never as an argv argument: a large diff as argv
+# exceeds the kernel ARG_MAX and execve fails with E2BIG ("Argument list too
+# long"), crashing the reviewer and fail-closing the gate on EVERY large PR
+# (#624). A regular-file redirect (not a pipe) means the exit status is purely
+# claude's — no pipeline / SIGPIPE / pipefail interaction that could mask a
+# successful review — and imposes no size bound. `claude -p` reads its prompt from
+# stdin when no positional prompt is given (that is why the ARG form had to close
+# stdin). The diff stays untrusted prompt content; the trust boundary is unchanged.
+# The temp file is mktemp-private (0600) and removed on return.
+#
 # $1: "payg" → force a PAYG Anthropic API key (ANTHROPIC_API_KEY) instead of the
-# subscription OAuth token (the quota-failover path). Captures combined stdout+stderr
-# into AGENT_OUT; returns claude's exit code. Guarded so `set -e` never aborts here.
+# subscription OAuth token (the quota-failover path). Captures combined
+# stdout+stderr into AGENT_OUT; returns claude's exit code. Guarded so `set -e`
+# never aborts here.
 run_reviewer() {
   local rc=0
+  local promptfile
+  promptfile="$(mktemp)"
+  printf '%s' "$USER_CONTENT" >"$promptfile"
   if [[ "${1:-subscription}" == "payg" ]]; then
     AGENT_OUT=$( CLAUDE_CODE_OAUTH_TOKEN='' ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
-      claude -p "$USER_CONTENT" --system-prompt-file "$ROLE_FILE" \
-      --allowedTools "Read,Glob,Grep" --model opus --output-format text </dev/null 2>&1 ) || rc=$?
+      claude -p --system-prompt-file "$ROLE_FILE" \
+      --allowedTools "Read,Glob,Grep" --model opus --output-format text <"$promptfile" 2>&1 ) || rc=$?
   else
-    AGENT_OUT=$( claude -p "$USER_CONTENT" --system-prompt-file "$ROLE_FILE" \
-      --allowedTools "Read,Glob,Grep" --model opus --output-format text </dev/null 2>&1 ) || rc=$?
+    AGENT_OUT=$( claude -p --system-prompt-file "$ROLE_FILE" \
+      --allowedTools "Read,Glob,Grep" --model opus --output-format text <"$promptfile" 2>&1 ) || rc=$?
   fi
+  rm -f "$promptfile"
   return "$rc"
 }
 
