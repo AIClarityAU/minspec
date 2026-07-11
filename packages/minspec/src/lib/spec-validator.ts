@@ -676,6 +676,15 @@ export function validateSpec(
    * The required-when-superseded PRESENCE check runs regardless of this resolver.
    */
   knownArtifactRefs?: ReadonlySet<string>,
+  /**
+   * The spec directory's shard files (filename + id), for shard-id
+   * consistency (#439). When supplied, a shard whose id diverges from the
+   * directory's canonical (requirements.md/spec.md) id yields an ERROR
+   * violation. Omit to skip the check entirely — the same no-false-positive
+   * pattern as `knownEpicRefs`/`knownArtifactRefs` (a caller without directory
+   * access gets no false violation).
+   */
+  siblingShardFiles?: readonly ShardIdFile[],
 ): ValidationResult {
   const tier = spec.frontmatter.tier;
   const raw = spec.raw;
@@ -833,6 +842,12 @@ export function validateSpec(
       message: 'A "parked/tracked as a separate issue" claim has no linked issue.',
       fixHint: 'Add the issue link inline (e.g. `(#NNN)` or a `.../issues/NNN` URL). A park claim with no link silently loses the parked work — file the issue (e.g. `gh issue create`) and link it.',
     });
+  }
+
+  // 5. Shard-id consistency (#439). ERROR — see the section above for why this
+  //    does not follow the warning-only discipline of the other dir-level checks.
+  if (siblingShardFiles) {
+    violations.push(...validateShardIdConsistency(siblingShardFiles).violations);
   }
 
   const complete = !violations.some((v) => v.severity === 'error');
@@ -1079,6 +1094,96 @@ export function validateStatusMonotonicity(
   }
 
   return { notSplitLayout: false, violations };
+}
+
+// ─── Shard id consistency (#439) ──────────────────────────────────────────────
+//
+// A spec-kit directory (`SPEC-NNN-slug/`) splits one spec across sibling shard
+// files: requirements.md/spec.md is the canonical/primary file, design.md /
+// plan.md / tasks.md are secondaries. `listSpecs` (spec-tree-provider.ts)
+// collapses shards that share one id into a single tree entry — but nothing
+// asserted a shard's id actually EQUALS its directory's canonical id. SPEC-007's
+// design.md/tasks.md carried freshly-minted ids (SPEC-008/SPEC-009) instead of
+// inheriting SPEC-007, so the divergent ids defeated the collapse and each
+// shard surfaced as its own phantom `done` spec (#438). A CI invariant test
+// (INV-SHARD-ID) now guards THIS repo's own specs/ tree; this is the
+// authoring-time counterpart so any MinSpec project gets the same protection
+// through `validateSpec` (the Validate/Approve commands), not only this repo's
+// CI — the validator-asymmetry class: nothing asserted a shard id must *equal*
+// its directory's canonical id, only that ids which exist resolve.
+//
+// Severity is ERROR — unlike the #111/#277 dir-level checks above (which warn,
+// because incremental authoring is legitimate), a divergent shard id is never a
+// mid-authoring state: the moment it exists it corrupts the Specs pane with a
+// phantom entry, so it is a correctness bug, not a gap to fill in later.
+//
+// This function stays agnostic of WHICH files are genuine shards — that
+// filtering happens upstream, in spec-layout.ts's `readShardIdFiles`
+// (`isGenuineShardFile`), before `siblingShardFiles` ever reaches here. A
+// naive "any canonical-named file in the same directory" grouping would
+// contradict `listSpecs`'s documented per-file-id invariant (a flat directory
+// can legitimately hold several independently-numbered specs whose canonical
+// basenames merely collide) and false-positive an ERROR that refuses
+// Validate/Approve (review finding on #648).
+
+/**
+ * Canonical shard filenames whose ids must agree within one spec directory.
+ * Mirrored (not imported) in spec-layout.ts's `readShardIdFiles` as
+ * `SHARD_ID_FILE_NAMES` — see the comment there for why that reader duplicates
+ * this list rather than importing it as a value. Exported (rather than kept
+ * private) solely so a parity test (spec-validator.test.ts) can assert the two
+ * lists never silently drift apart.
+ */
+export const SHARD_FILE_NAME_SET = new Set([
+  'requirements.md', 'spec.md', 'design.md', 'plan.md', 'tasks.md',
+]);
+
+/** One shard file in a spec directory, reduced to what id-consistency needs. */
+export interface ShardIdFile {
+  /** The file's basename, e.g. "design.md". Non-canonical names are ignored. */
+  readonly fileName: string;
+  /** The file's `id:` frontmatter, or '' when absent/unparseable. */
+  readonly id: string;
+}
+
+export interface ShardIdConsistencyResult {
+  /** ERROR violations — one per shard whose id diverges from the canonical id. */
+  readonly violations: ValidationViolation[];
+}
+
+/**
+ * Validate that every shard file in a spec directory carries the SAME id as
+ * the directory's canonical file (#439). Pure: takes pre-parsed sibling
+ * filenames + ids, no filesystem.
+ *
+ * The canonical id is requirements.md's if present, else spec.md's — the
+ * primary/requirements artifact (mirrors the rank order `listSpecs` already
+ * uses to pick its representative file). When NEITHER exists there is no
+ * reference id to compare against, so nothing is asserted. A shard with no id
+ * (absent frontmatter — e.g. a strict spec-kit plan.md/tasks.md, which is
+ * body-only by construction) is silently skipped: only a PRESENT, DIVERGENT id
+ * is a violation.
+ */
+export function validateShardIdConsistency(
+  files: readonly ShardIdFile[],
+): ShardIdConsistencyResult {
+  const relevant = files.filter((f) => SHARD_FILE_NAME_SET.has(f.fileName) && f.id);
+  const canonical =
+    relevant.find((f) => f.fileName === 'requirements.md') ??
+    relevant.find((f) => f.fileName === 'spec.md');
+  if (!canonical) return { violations: [] };
+
+  const violations: ValidationViolation[] = [];
+  for (const f of relevant) {
+    if (f.fileName === canonical.fileName || f.id === canonical.id) continue;
+    violations.push({
+      rule: 'shard-id.mismatch',
+      severity: 'error',
+      message: `${f.fileName} carries id "${f.id}" but this directory's canonical id (${canonical.fileName}) is "${canonical.id}".`,
+      fixHint: `Set ${f.fileName}'s "id:" to "${canonical.id}" — a shard whose id diverges from its directory's primary file is not collapsed with its siblings; it surfaces as its own phantom spec (#438). Renumber the shard to match the canonical file, never the other way round.`,
+    });
+  }
+  return { violations };
 }
 
 // ─── Doc status-claims vs referenced status (#98) ─────────────────────────────

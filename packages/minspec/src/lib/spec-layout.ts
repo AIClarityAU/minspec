@@ -3,6 +3,7 @@ import * as path from 'path';
 import type { ParsedSpec, SpecFrontmatter } from './spec';
 import { parseSpec, writeSpec } from './spec';
 import { PHASES } from './config';
+import type { ShardIdFile } from './spec-validator';
 
 /**
  * Storage layout for a single spec on disk.
@@ -149,6 +150,92 @@ function writeShard(fileName: SpecKitFile, shard: ParsedSpec): string {
   }
   if (parts.length === 0) return '';
   return parts.join('\n').trimEnd() + '\n';
+}
+
+/**
+ * Canonical shard filenames whose ids `validateShardIdConsistency` compares
+ * (#439). Mirrors spec-validator.ts's own `SHARD_FILE_NAME_SET` as a literal
+ * rather than a value import: spec-validator.ts is wholesale `vi.mock()`'d in
+ * several command-level tests, and a live value import here would break under
+ * that mock (the type-only `ShardIdFile` import above is erased at compile
+ * time, so it is unaffected). `SHARD_FILE_NAME_SET` is exported solely so a
+ * parity test (spec-validator.test.ts) can assert these two lists never
+ * silently drift apart.
+ */
+export const SHARD_ID_FILE_NAMES = ['requirements.md', 'spec.md', 'design.md', 'plan.md', 'tasks.md'] as const;
+
+/**
+ * Split-layout phase-file `type:` values (#439 review fix). Mirrors spec.ts's
+ * `SPEC_TYPES` as a literal rather than a value import: spec.ts is wholesale
+ * `vi.mock()`'d (without `SPEC_TYPES`) in several UI-command test files
+ * (spec-panel-class.test.ts, multi-root-command-scope.test.ts), and a live
+ * value import here breaks under those mocks — the same constraint that made
+ * `SHARD_ID_FILE_NAMES` above a literal instead of an import. Exported solely
+ * so a parity test (spec-layout.test.ts) can assert this never silently
+ * drifts from `SPEC_TYPES`.
+ */
+export const SPLIT_LAYOUT_TYPE_NAMES = ['requirements', 'design', 'tasks'] as const;
+const SPEC_TYPE_SET = new Set<string>(SPLIT_LAYOUT_TYPE_NAMES);
+
+/**
+ * Is `fileName` (one of the canonical shard names) a GENUINE shard of ONE
+ * spec, given its own frontmatter `type` and whether its directory is a
+ * strict spec-kit dir (#439 review fix)?
+ *
+ * Two independent split-layout conventions exist, so genuineness is decided
+ * per-file, not per-directory:
+ *
+ * - This repo's own convention (`requirements.md`/`design.md`/`tasks.md`,
+ *   any directory): a file is a shard only when it SELF-DECLARES via its own
+ *   `type: requirements | design | tasks` frontmatter (SPEC_TYPES) — the same
+ *   signal `validateSplitLayoutCoverage` (#111) and `validateStatusMonotonicity`
+ *   (#277) already filter on. A file merely NAMED e.g. "design.md", with no
+ *   `type:` set, is an ordinary independent single-file spec that happens to
+ *   share a canonical basename with an unrelated spec in the same directory
+ *   (spec-tree-provider.ts's documented per-file-id invariant, lines 51-58) —
+ *   not a shard, and must not be compared.
+ * - The strict GitHub Spec Kit convention (`spec.md`/`plan.md`/`tasks.md`,
+ *   body-only except spec.md, no `type:` field at all): genuineness instead
+ *   comes from the directory itself being namespaced to one spec
+ *   (`isSpecKitDirEntry`'s bare-digit `NNN-slug/` naming).
+ *
+ * Before this, `readShardIdFiles` treated ANY canonical-named file sitting in
+ * ANY directory as a shard of the same spec purely by co-location, which
+ * false-positived on a flat directory whose canonical-named files are
+ * legitimately independent, differently-numbered specs (review finding on
+ * #648 for #439).
+ */
+function isGenuineShardFile(fileName: string, type: string, dirIsSpecKit: boolean): boolean {
+  if (SPEC_TYPE_SET.has(type)) return true; // self-declared split-layout phase file
+  return dirIsSpecKit && (fileName === 'spec.md' || fileName === 'plan.md' || fileName === 'tasks.md');
+}
+
+/**
+ * Read each present canonical shard file's `id` in a spec directory (#439),
+ * keeping only files that are GENUINE shards of one spec (`isGenuineShardFile`)
+ * — never merely co-located canonical-named files that happen to belong to
+ * independently-numbered specs.
+ *
+ * Feeds `validateSpec`'s shard-id-consistency check (`validateShardIdConsistency`
+ * in spec-validator.ts) — that function is pure and takes no filesystem, so
+ * this is the impure glue that assembles its input from disk. Missing or
+ * unparseable files are simply omitted, not this reader's concern.
+ */
+export function readShardIdFiles(dirPath: string): ShardIdFile[] {
+  const dirIsSpecKit = isSpecKitDirEntry(path.basename(dirPath));
+  const out: ShardIdFile[] = [];
+  for (const fileName of SHARD_ID_FILE_NAMES) {
+    const filePath = path.join(dirPath, fileName);
+    if (!fs.existsSync(filePath)) continue;
+    try {
+      const fm = parseSpec(fs.readFileSync(filePath, 'utf-8')).frontmatter;
+      if (!isGenuineShardFile(fileName, (fm.type ?? '').toLowerCase(), dirIsSpecKit)) continue;
+      out.push({ fileName, id: fm.id });
+    } catch {
+      // unparseable shard — not this check's concern
+    }
+  }
+  return out;
 }
 
 /**

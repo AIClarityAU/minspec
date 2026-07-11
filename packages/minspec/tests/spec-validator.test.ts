@@ -4,10 +4,13 @@ import {
   validateSplitLayoutCoverage,
   validateStatusMonotonicity,
   validateStatusClaims,
+  validateShardIdConsistency,
+  SHARD_FILE_NAME_SET,
 } from '../src/lib/spec-validator';
-import type { SplitLayoutFile, StatusMonotonicityFile } from '../src/lib/spec-validator';
+import type { SplitLayoutFile, StatusMonotonicityFile, ShardIdFile } from '../src/lib/spec-validator';
 import { parseSpec } from '../src/lib/spec';
 import { DEFAULT_CONFIG } from '../src/lib/config';
+import { SHARD_ID_FILE_NAMES } from '../src/lib/spec-layout';
 
 function spec(fm: Record<string, string>, body: string): string {
   const phases = fm.phases ?? 'specify: done\n  clarify: pending\n  plan: done\n  tasks: done\n  implement: in-progress';
@@ -1258,6 +1261,159 @@ describe('validateStatusMonotonicity — cross-artifact status (#277)', () => {
     const v = r.violations.find((x) => x.rule === 'status.cross-artifact.regression');
     expect(v).toBeDefined();
     expect(v!.message).toContain('new');
+  });
+});
+
+// ─── #439: shard-id consistency ───────────────────────────────────────────────
+//
+// The #438 root cause: a spec directory's shard files (design.md/tasks.md, …)
+// are collapsed by `listSpecs` when they share one id, but nothing asserted
+// they actually DO share it. SPEC-007's design.md/tasks.md carried freshly
+// sequential ids (SPEC-008/SPEC-009) instead of inheriting SPEC-007, so the
+// divergent ids defeated the collapse and each shard surfaced as its own
+// phantom `done` spec. ERROR severity — unlike #111/#277 above, a divergent
+// shard id is never a legitimate mid-authoring state.
+// spec-layout.ts's `SHARD_ID_FILE_NAMES` hand-duplicates this file's
+// `SHARD_FILE_NAME_SET` (a live value import would break under the
+// `vi.mock('../src/lib/spec-validator')` several command-level tests use —
+// see the comment on both constants). This pins the two lists so a future
+// edit to one that forgets the other fails CI instead of silently drifting
+// (non-blocking review finding on #648).
+describe('SHARD_FILE_NAME_SET / SHARD_ID_FILE_NAMES parity (#439)', () => {
+  it('spec-layout.ts\'s hand-duplicated list matches spec-validator.ts\'s set exactly', () => {
+    expect(new Set(SHARD_ID_FILE_NAMES)).toEqual(SHARD_FILE_NAME_SET);
+  });
+});
+
+describe('validateShardIdConsistency — shard id must equal directory canonical id (#439)', () => {
+  const f = (fileName: string, id: string): ShardIdFile => ({ fileName, id });
+
+  it('flags a design.md whose id diverges from requirements.md', () => {
+    const r = validateShardIdConsistency([
+      f('requirements.md', 'SPEC-007'),
+      f('design.md', 'SPEC-008'),
+    ]);
+    expect(r.violations).toHaveLength(1);
+    const v = r.violations[0];
+    expect(v.rule).toBe('shard-id.mismatch');
+    expect(v.severity).toBe('error');
+    expect(v.message).toContain('design.md');
+    expect(v.message).toContain('SPEC-008');
+    expect(v.message).toContain('SPEC-007');
+  });
+
+  it('flags EACH diverging shard independently (the real #438 case: two phantom ids)', () => {
+    const r = validateShardIdConsistency([
+      f('requirements.md', 'SPEC-007'),
+      f('design.md', 'SPEC-008'),
+      f('tasks.md', 'SPEC-009'),
+    ]);
+    expect(r.violations).toHaveLength(2);
+    expect(r.violations.map((v) => v.message).join(' ')).toContain('SPEC-008');
+    expect(r.violations.map((v) => v.message).join(' ')).toContain('SPEC-009');
+  });
+
+  it('passes when every shard shares the canonical id', () => {
+    const r = validateShardIdConsistency([
+      f('requirements.md', 'SPEC-007'),
+      f('design.md', 'SPEC-007'),
+      f('tasks.md', 'SPEC-007'),
+    ]);
+    expect(r.violations).toHaveLength(0);
+  });
+
+  it('prefers requirements.md as canonical over spec.md when both are present', () => {
+    const r = validateShardIdConsistency([
+      f('requirements.md', 'SPEC-007'),
+      f('spec.md', 'SPEC-999'), // would-be canonical under the OTHER convention
+      f('design.md', 'SPEC-999'),
+    ]);
+    // spec.md itself is flagged (diverges from requirements.md, the preferred
+    // canonical); design.md agrees with spec.md but NOT with the true canonical.
+    expect(r.violations).toHaveLength(2);
+    expect(r.violations.map((v) => v.message).join(' ')).toContain('spec.md');
+    expect(r.violations.map((v) => v.message).join(' ')).toContain('design.md');
+  });
+
+  it('falls back to spec.md as canonical when there is no requirements.md', () => {
+    const r = validateShardIdConsistency([
+      f('spec.md', 'SPEC-100'),
+      f('plan.md', 'SPEC-101'),
+    ]);
+    expect(r.violations).toHaveLength(1);
+    expect(r.violations[0].message).toContain('plan.md');
+  });
+
+  it('asserts nothing when neither requirements.md nor spec.md is present', () => {
+    // No canonical file to compare against — a dir mid-authoring with only
+    // design.md/tasks.md (requirements.md not yet written) is not this check's
+    // concern; it cannot know what the "right" id is.
+    const r = validateShardIdConsistency([
+      f('design.md', 'SPEC-008'),
+      f('tasks.md', 'SPEC-009'),
+    ]);
+    expect(r.violations).toHaveLength(0);
+  });
+
+  it('ignores a shard with no id (absent/unparseable frontmatter)', () => {
+    // Strict spec-kit plan.md/tasks.md are body-only by construction — no id
+    // at all. A present-but-EMPTY id must never be treated as "divergent".
+    const r = validateShardIdConsistency([
+      f('requirements.md', 'SPEC-007'),
+      f('tasks.md', ''),
+    ]);
+    expect(r.violations).toHaveLength(0);
+  });
+
+  it('ignores a non-canonical filename entirely', () => {
+    const r = validateShardIdConsistency([
+      f('requirements.md', 'SPEC-007'),
+      f('notes.md', 'SPEC-999'),
+    ]);
+    expect(r.violations).toHaveLength(0);
+  });
+
+  it('is a no-op on a single-file (non-split) directory', () => {
+    const r = validateShardIdConsistency([f('requirements.md', 'SPEC-007')]);
+    expect(r.violations).toHaveLength(0);
+  });
+});
+
+describe('validateSpec — shard-id consistency wiring (#439)', () => {
+  const f = (fileName: string, id: string): ShardIdFile => ({ fileName, id });
+
+  it('is skipped (no violation) when siblingShardFiles is omitted — no false positive', () => {
+    const r = validateSpec(parseSpec(spec({ tier: 'T3' }, FULL_T3)), DEFAULT_CONFIG);
+    expect(r.violations.some((v) => v.rule === 'shard-id.mismatch')).toBe(false);
+  });
+
+  it('surfaces a shard-id-mismatch ERROR and marks the spec incomplete', () => {
+    const r = validateSpec(
+      parseSpec(spec({ id: 'SPEC-007', tier: 'T3' }, FULL_T3)),
+      DEFAULT_CONFIG,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      [f('requirements.md', 'SPEC-007'), f('design.md', 'SPEC-008')],
+    );
+    const v = r.violations.find((x) => x.rule === 'shard-id.mismatch');
+    expect(v).toBeDefined();
+    expect(v!.severity).toBe('error');
+    expect(r.complete).toBe(false);
+  });
+
+  it('does not affect completeness when siblingShardFiles all agree', () => {
+    const r = validateSpec(
+      parseSpec(spec({ id: 'SPEC-007', tier: 'T3' }, FULL_T3)),
+      DEFAULT_CONFIG,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      [f('requirements.md', 'SPEC-007'), f('design.md', 'SPEC-007')],
+    );
+    expect(r.violations.some((v) => v.rule === 'shard-id.mismatch')).toBe(false);
   });
 });
 
