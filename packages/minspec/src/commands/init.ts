@@ -1,9 +1,15 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { scaffold, generateHarnessFiles, refreshHarnessFiles } from '../lib/scaffold';
+import {
+  scaffold,
+  generateHarnessFiles,
+  refreshHarnessFiles,
+  rescaffoldManagedRegionFile,
+  type ManagedRegionWarning,
+} from '../lib/scaffold';
 import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS, MANAGED_REGION_TEMPLATES } from '../lib/template-registry';
-import { resolveTargetFolder } from '../lib/resolve-folder';
+import { resolveTargetFolder, workspaceFolderLabel } from '../lib/resolve-folder';
 import { setCoverageMinimum, DEFAULT_COVERAGE_MINIMUM } from '../lib/config';
 import { evaluateConstitution } from '../lib/constitution-nudge';
 import { getRepoFromRemote } from '../lib/github';
@@ -41,7 +47,16 @@ function surfaceConstitutionNudge(folder: string): void {
 /** Dedicated commit message for the scaffolded SDD structure. */
 export const SCAFFOLD_COMMIT_MESSAGE = 'chore: scaffold MinSpec SDD structure';
 
-/** Toast action label that triggers the dedicated scaffold commit. */
+/**
+ * Dedicated commit message for a harness *refresh*. Distinct from
+ * {@link SCAFFOLD_COMMIT_MESSAGE} so a refresh commit reads as what it is and
+ * matches the existing `chore: refresh MinSpec harness …` history convention.
+ * Used when the commit offer is reached from `initRefreshCommand` rather than
+ * `initCommand` — closing the init-offers-but-refresh-strands asymmetry.
+ */
+export const REFRESH_COMMIT_MESSAGE = 'chore: refresh MinSpec harness files';
+
+/** Toast action label that triggers the dedicated scaffold/refresh commit. */
 const COMMIT_ACTION = 'Commit them';
 
 /**
@@ -142,6 +157,15 @@ async function defaultCommitter(folder: string): Promise<ScaffoldCommitter> {
 export interface OfferScaffoldCommitDeps {
   /** Build the git committer for the folder. */
   makeCommitter?: (folder: string) => Promise<ScaffoldCommitter>;
+  /**
+   * Which write-path is offering the commit. `'scaffold'` (default, from
+   * `initCommand`) vs `'refresh'` (from `initRefreshCommand`) — selects the
+   * toast wording and the dedicated commit message ({@link SCAFFOLD_COMMIT_MESSAGE}
+   * vs {@link REFRESH_COMMIT_MESSAGE}). Everything else (pathspecs, staging,
+   * best-effort handling) is identical, so init and refresh can never again
+   * diverge on WHETHER they offer to commit — only on the label.
+   */
+  variant?: 'scaffold' | 'refresh';
 }
 
 /**
@@ -176,18 +200,23 @@ export async function offerScaffoldCommit(
     return;
   }
 
+  const refresh = deps.variant === 'refresh';
+  const verb = refresh ? 'refreshed' : 'scaffolded';
+  const commitMessage = refresh ? REFRESH_COMMIT_MESSAGE : SCAFFOLD_COMMIT_MESSAGE;
+  const committedNoun = refresh ? 'the refreshed harness files' : 'the scaffolded SDD structure';
+
   const summary = paths.join(', ');
   const choice = await vscode.window.showInformationMessage(
-    `MinSpec scaffolded: ${summary}. Commit them now in a dedicated commit?`,
+    `MinSpec ${verb}: ${summary}. Commit them now in a dedicated commit?`,
     COMMIT_ACTION,
   );
   if (choice !== COMMIT_ACTION) return; // decline / dismiss → no-op
 
   try {
     await committer.add(paths);
-    await committer.commit(SCAFFOLD_COMMIT_MESSAGE);
+    await committer.commit(commitMessage);
     vscode.window.showInformationMessage(
-      `MinSpec: committed the scaffolded SDD structure ("${SCAFFOLD_COMMIT_MESSAGE}").`,
+      `MinSpec: committed ${committedNoun} ("${commitMessage}").`,
     );
   } catch (err) {
     vscode.window.showWarningMessage(
@@ -676,7 +705,55 @@ export async function initCommand(
   await offerRulesetAdvisory(folder, deps?.ruleset);
 }
 
-export async function initRefreshCommand(folderArg?: string): Promise<void> {
+// ---------------------------------------------------------------------------
+// Managed-region missing-markers warning: attribution + actions (#604)
+// ---------------------------------------------------------------------------
+
+/** Warning action: consent-gated whole-file rewrite from the current template. */
+const RESCAFFOLD_ACTION = 'Re-scaffold (overwrite)';
+/** Warning action: open the affected file so the user can inspect/fix it by hand. */
+const OPEN_FILE_ACTION = 'Open file';
+
+/**
+ * Surface a single {@link ManagedRegionWarning} left behind by
+ * `refreshHarnessFiles` after its auto-heal (scaffold.ts) couldn't prove the file
+ * safe to recover automatically. Three defects this closes (#604):
+ *   - the bare message carried no project attribution, so two folders with the
+ *     identical broken file (e.g. two workspace roots) were indistinguishable —
+ *     now prefixed with the workspace folder's label;
+ *   - `showWarningMessage(w.message)` passed no action items, forcing a manual
+ *     fix — now offers `Re-scaffold (overwrite)` (consent-gated whole-file
+ *     rewrite) and `Open file`;
+ * Best-effort: a re-scaffold failure is surfaced as an error but never throws out
+ * of the refresh flow.
+ */
+async function surfaceManagedRegionWarning(folder: string, w: ManagedRegionWarning): Promise<void> {
+  const label = workspaceFolderLabel(folder);
+  const choice = await vscode.window.showWarningMessage(
+    `[${label}] ${w.message}`,
+    RESCAFFOLD_ACTION,
+    OPEN_FILE_ACTION,
+  );
+
+  if (choice === RESCAFFOLD_ACTION) {
+    try {
+      rescaffoldManagedRegionFile(folder, w.outputPath);
+      vscode.window.showInformationMessage(`MinSpec: re-scaffolded ${w.outputPath}.`);
+    } catch (err) {
+      vscode.window.showErrorMessage(
+        `MinSpec: could not re-scaffold ${w.outputPath} — ${describeError(err)}.`,
+      );
+    }
+  } else if (choice === OPEN_FILE_ACTION) {
+    const doc = await vscode.workspace.openTextDocument(path.join(folder, w.outputPath));
+    await vscode.window.showTextDocument(doc, { preview: false });
+  }
+}
+
+export async function initRefreshCommand(
+  folderArg?: string,
+  deps?: OfferScaffoldCommitDeps,
+): Promise<void> {
   const folder = folderArg ?? (await resolveTargetFolder());
   if (!folder) return;
   // Same all-or-nothing concern as initCommand: a mid-sequence write failure
@@ -695,9 +772,14 @@ export async function initRefreshCommand(folderArg?: string): Promise<void> {
     'MinSpec: Refreshed harness files (user edits preserved).',
   );
   for (const w of warnings) {
-    vscode.window.showWarningMessage(w.message);
+    await surfaceManagedRegionWarning(folder, w);
   }
   surfaceConstitutionNudge(folder);
+  // Post-refresh "what to commit" offer — the SAME affordance init gives (#222).
+  // Without this, a drift-triggered refresh (e.g. on window reload via
+  // auto-bootstrap) rewrites the harness files but leaves them stranded
+  // uncommitted, unlike init. Best-effort, non-modal; never blocks the refresh.
+  await offerScaffoldCommit(folder, { ...deps, variant: 'refresh' });
 }
 
 /** Extract a human-readable message from an unknown thrown value. */

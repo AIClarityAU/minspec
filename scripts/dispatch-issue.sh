@@ -223,18 +223,23 @@ ALLOWED_TOOLS="Read,Edit,Write,Glob,Grep,Bash(npm test),Bash(npm run validate),B
 
 # ── Independent reviewer stage (DR-033 §6 · #342) ─────────────────────────────
 # A SECOND agent — never the dev agent that wrote the code — reviews the pushed
-# diff and posts an ADVISORY ai-review:pass / ai-review:changes verdict on the PR.
-# This is the independent counterpart to #180's self-attestation (self-report ≠
-# proof).
+# diff and posts an ADVISORY ai-review:pass / ai-review:changes verdict as a PR
+# review/comment. This is the independent counterpart to #180's self-attestation
+# (self-report ≠ proof).
 # Invariants held here:
 #   • credential-free agent: review-branch.sh grants the reviewer ONLY read-only
 #     tools; THIS parent applies every credentialed op (PR create / review /
-#     label) AFTER the agent exits — same discipline as the push + comment above.
+#     comment) AFTER the agent exits — same discipline as the push + comment above.
 #   • fail-closed: review-decide.sh downgrades a missing/garbled/injected
 #     "verdict: pass" to ai-review:changes; a security ai-review:changes overrides
 #     a reviewer ai-review:pass (combine = fail toward the safe outcome).
 #   • never-throw: any failure degrades to ai-review:changes + a stderr WARNING
 #     and NEVER blocks the agent-done labelling / issue-comment behaviour below.
+#   • no local `ai-review:*` label mutation (#600): this stage runs under the
+#     operator's human `gh` credential, which can never satisfy the provenance
+#     guard's bot allowlist — see the long comment in step 7 below. The
+#     `ai-review:*` label is applied ONLY by CI (ai-review.yml), authenticated
+#     as the reviewer bot.
 # Reuses the shared, trigger-agnostic unit (review-branch.sh + review-decide.sh)
 # so a future PR-open Action (Track B, #74) can post the same verdict via its own
 # token — only this poster differs. Called ONLY on the successful-push path.
@@ -323,20 +328,32 @@ run_reviewer_stage() {
     return 0
   fi
 
-  # 7. Apply the label + post the advisory review. Credentialed ops — parent-side,
-  #    after the agent exited. `gh pr review --approve/--request-changes` fails on
-  #    a self-authored PR, so fall back to a plain comment; the LABEL is the
-  #    load-bearing signal that ready-to-merge.yml reflects into the merge gate.
+  # 7. Post the advisory review ONLY — never mutate the `ai-review:*` label here.
+  #    Credentialed ops — parent-side, after the agent exited. `gh pr
+  #    review --approve/--request-changes` fails on a self-authored PR, so fall
+  #    back to a plain comment.
+  #
+  #    #600 root cause: this dispatcher runs under the OPERATOR's ambient `gh`
+  #    credential (a human PAT) — it mints no GitHub App token, unlike
+  #    ai-review.yml ([:166-172]), which is the ONLY caller that authenticates as
+  #    the allowlisted reviewer bot (AI_REVIEW_BOT_LOGINS). A human-applied
+  #    `ai-review:pass` is therefore unauthorized self-approval and is
+  #    guaranteed-reverted by the provenance guard (#397,
+  #    .github/scripts/ai-review-guard.js::decideProvenanceRevert) — dead work
+  #    that raced the CI bot's real label and produced a confusing
+  #    pass→revert→re-pass churn on every dispatched PR (confirmed on #583/#587/
+  #    #589/#590). The missing gate: nothing previously stopped local dispatch
+  #    from writing to a merge-gating label under an identity that can never
+  #    satisfy its own provenance check. Fix: leave ALL `ai-review:*` labelling
+  #    to CI-as-bot; this stage posts the advisory comment/review only.
   if [[ "$combined" == "ai-review:pass" ]]; then
-    gh pr edit "$pr_num" --repo "$REPO" --add-label "ai-review:pass" --remove-label "ai-review:changes" 2>/dev/null || true
     gh pr review "$pr_num" --repo "$REPO" --approve --body "$review_body" 2>/dev/null \
       || gh pr comment "$pr_num" --repo "$REPO" --body "$review_body" 2>/dev/null || true
-    echo "  → AI review: ai-review:pass on PR #$pr_num"
+    echo "  → AI review: ai-review:pass (advisory only — CI applies the label as the reviewer bot) on PR #$pr_num"
   else
-    gh pr edit "$pr_num" --repo "$REPO" --add-label "ai-review:changes" --remove-label "ai-review:pass" 2>/dev/null || true
     gh pr review "$pr_num" --repo "$REPO" --request-changes --body "$review_body" 2>/dev/null \
       || gh pr comment "$pr_num" --repo "$REPO" --body "$review_body" 2>/dev/null || true
-    echo "  → AI review: ai-review:changes on PR #$pr_num"
+    echo "  → AI review: ai-review:changes (advisory only — CI applies the label as the reviewer bot) on PR #$pr_num"
   fi
 }
 

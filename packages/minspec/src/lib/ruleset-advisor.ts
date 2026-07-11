@@ -303,6 +303,139 @@ export function resolveCheckContexts(checks?: readonly string[]): string[] {
   return cleaned.length > 0 ? cleaned : [...DEFAULT_REQUIRED_CHECK_CONTEXTS];
 }
 
+// ---------------------------------------------------------------------------
+// Tiered required-check resolution (#564)
+//
+// A required status check is safe to enforce only if the target repo can actually
+// PRODUCE it — otherwise the ruleset permanently blocks every merge (the #559
+// permanent-pending / #560 unsatisfiable-gate bug class; invariant "no deadlock
+// gating"). #564 scaffolds the full AI-review stack (ai-review.yml +
+// ready-to-merge.yml, see template-registry.ts CI_REVIEW_STACK_TEMPLATES), which
+// makes MORE checks producible — but only under conditions this resolver models
+// explicitly so it never writes a self-deadlocking ruleset:
+//
+//   TIER A — diff/spec checks (ai-review, ready-to-merge). Reviewable from commit
+//     #1 (a docs-only diff is reviewable; no code maturity needed). BUT both only
+//     ever go GREEN once the reviewer pipeline is operational — the workflows post
+//     `ai-review` / a verified `ready-to-merge` ONLY when the reviewer secrets +
+//     App are configured (issue #564 slice 3). Requiring them before that would
+//     block every merge on a fresh/solo repo, exactly the case DR-050 called out
+//     ("ready-to-merge must NOT be required until the reviewer is wired"). So each
+//     enters the required set only when its workflow is scaffolded AND the reviewer
+//     is configured — never on scaffolding alone.
+//
+//   TIER B — code checks (lint, test, build). Requirable ONLY when the repo has a
+//     runnable `package.json` script for them (detected by {@link detectCodeChecks}).
+//     Requiring `test` on a repo with a `test` script but zero tests, or `lint`
+//     with no lint script, is the deadlock #559 fixed — so absence ⇒ not required.
+//
+// `MinSpec SDD validation` is always required (always produced by the scaffolded
+// minspec-validate.yml). User-configured extras (minspec.ruleset.requiredChecks)
+// are layered on top verbatim — the user owns that trade-off.
+//
+// PURE + offline (Tier-0): callers do the fs/secret PROBING and pass the booleans
+// in; this module only decides. Wiring the probe (which workflow files exist +
+// whether the reviewer secrets are set) into the init-time advisory is the
+// integration step for #564 slices 2/3.
+// ---------------------------------------------------------------------------
+
+/** Tier-A check context the scaffolded `ai-review.yml` reports (its verdict check-run). */
+export const AI_REVIEW_CHECK = 'ai-review';
+/** Tier-A check context the scaffolded `ready-to-merge.yml` reports (commit status). */
+export const READY_TO_MERGE_CHECK = 'ready-to-merge';
+/** Tier-B code-maturity check contexts — requirable only when the repo produces them. */
+export const TIER_B_CODE_CHECKS = ['lint', 'test', 'build'] as const;
+/** One of the Tier-B code checks. */
+export type CodeCheck = (typeof TIER_B_CODE_CHECKS)[number];
+
+/** Which Tier-B code checks the repo can actually run (has a non-empty npm script for). */
+export interface DetectedCodeChecks {
+  lint: boolean;
+  test: boolean;
+  build: boolean;
+}
+
+/**
+ * Detect which Tier-B code checks the repo can PRODUCE, from a parsed
+ * `package.json` `scripts` map. A check is producible only when its script exists
+ * and is non-blank — the first-order guard against the #559 permanent-pending
+ * deadlock (requiring a check no CI job reports). Pure; tolerant of a missing/
+ * malformed scripts object (⇒ none producible).
+ *
+ * NOTE (deeper guard, tracked as a follow-up): a script's mere presence does not
+ * prove it does real work — e.g. a `test` script with zero test files still
+ * "runs" but certifies nothing. Intersecting with what CI actually reports (the
+ * #559 note) needs a CI-report probe beyond this pure detector.
+ */
+export function detectCodeChecks(scripts?: Record<string, unknown> | null): DetectedCodeChecks {
+  const has = (name: CodeCheck): boolean => {
+    const v = scripts?.[name];
+    return typeof v === 'string' && v.trim().length > 0;
+  };
+  return { lint: has('lint'), test: has('test'), build: has('build') };
+}
+
+/** Inputs to {@link resolveTieredRequiredChecks}. */
+export interface TieredRequiredCheckInputs {
+  /** `.github/workflows/ai-review.yml` is scaffolded in the target repo. */
+  readonly aiReviewWorkflowScaffolded: boolean;
+  /** `.github/workflows/ready-to-merge.yml` is scaffolded in the target repo. */
+  readonly readyToMergeWorkflowScaffolded: boolean;
+  /**
+   * The reviewer pipeline is OPERATIONAL — the required secrets (CLAUDE_CODE_OAUTH_TOKEN
+   * + the App) are configured, so ai-review.yml/ready-to-merge.yml actually post their
+   * checks/verdict. Defaults to FALSE (fail-safe): a Tier-A check is never made required
+   * until the caller affirms the repo can produce a pass, so a naive caller can never
+   * mint a deadlocking ruleset. Detecting this is issue #564 slice 3 (a consent-gated
+   * `gh secret list` probe), out of the scaffolding scope.
+   */
+  readonly reviewerConfigured?: boolean;
+  /** Tier-B checks the repo can produce (from {@link detectCodeChecks}); absent ⇒ none. */
+  readonly codeChecks?: Partial<DetectedCodeChecks>;
+  /** Extra user-configured contexts (minspec.ruleset.requiredChecks), layered on top. */
+  readonly userChecks?: readonly string[];
+}
+
+/**
+ * Resolve the full required-check context set for a repo's branch ruleset, adding
+ * only checks the repo can actually PRODUCE (see the tier notes above). Always
+ * includes {@link DEFAULT_REQUIRED_CHECK_CONTEXTS} (`MinSpec SDD validation`); adds
+ * Tier-A (`ai-review`, `ready-to-merge`) only when their workflow is scaffolded AND
+ * the reviewer is configured; adds Tier-B (`lint`/`test`/`build`) only when the repo
+ * has a runnable script for each; appends de-duplicated user extras. Pure — the
+ * single decision point, so the no-deadlock rule holds no matter the call site.
+ */
+export function resolveTieredRequiredChecks(inputs: TieredRequiredCheckInputs): string[] {
+  const {
+    aiReviewWorkflowScaffolded,
+    readyToMergeWorkflowScaffolded,
+    reviewerConfigured = false,
+    codeChecks,
+    userChecks,
+  } = inputs;
+
+  const contexts: string[] = [...DEFAULT_REQUIRED_CHECK_CONTEXTS];
+
+  // Tier A — never required until BOTH scaffolded AND the reviewer can produce a pass.
+  if (readyToMergeWorkflowScaffolded && reviewerConfigured) contexts.push(READY_TO_MERGE_CHECK);
+  if (aiReviewWorkflowScaffolded && reviewerConfigured) contexts.push(AI_REVIEW_CHECK);
+
+  // Tier B — require a code check only when the repo actually runs it (#559 guard).
+  for (const check of TIER_B_CODE_CHECKS) {
+    if (codeChecks?.[check]) contexts.push(check);
+  }
+
+  // User-configured extras (trimmed, non-blank).
+  if (Array.isArray(userChecks)) {
+    for (const c of userChecks) {
+      if (typeof c === 'string' && c.trim().length > 0) contexts.push(c.trim());
+    }
+  }
+
+  // De-duplicate, preserving first-seen order (MinSpec SDD validation stays first).
+  return Array.from(new Set(contexts));
+}
+
 /**
  * Build the POST body for a ruleset that requires the given status `checks`
  * (default {@link DEFAULT_REQUIRED_CHECK_CONTEXTS} — `MinSpec SDD validation`,

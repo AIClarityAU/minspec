@@ -247,6 +247,7 @@ jobs:
         if: steps.guard.outputs.configured == 'true'
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          AI_REVIEW_COVERAGE: ${{ vars.AI_REVIEW_COVERAGE }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
@@ -254,6 +255,14 @@ jobs:
 
           BASE="$PR_BASE_SHA"
           HEAD="$PR_HEAD_SHA"
+
+          # ── review coverage (repo-level; CI has no per-dev machine — the per-dev
+          #    slider in #453 is the LOCAL review-pr.sh path). 'single' = reviewer
+          #    only (legacy); 'panel' = + architect + skeptic voters (security stays
+          #    code-only). Default 'panel'; set repo variable AI_REVIEW_COVERAGE=single
+          #    to dial back to one voter. Unknown value → panel (fail toward coverage).
+          COVERAGE="${AI_REVIEW_COVERAGE:-panel}"
+          case "$COVERAGE" in single|panel) ;; *) COVERAGE=panel ;; esac
 
           # The workspace is the TRUSTED base checkout (fetch-depth: 0). Fetch the
           # UNTRUSTED head SHA so `git diff base...head` has both endpoints — the
@@ -330,26 +339,63 @@ jobs:
             [ -z "$SECURITY_BLOCK" ] && SECURITY_BLOCK="(security reviewer emitted no verdict block — fail-closed to changes)"
           fi
 
-          # ── combine: pass ONLY if every required role passed (any non-pass → changes) ──
-          FINAL="ai-review:changes"
-          if [ "$REVIEWER_LABEL" = "ai-review:pass" ]; then
-            if [ "$SECURITY_REQUIRED" = "yes" ]; then
-              [ "$SECURITY_LABEL" = "ai-review:pass" ] && FINAL="ai-review:pass"
-            else
-              FINAL="ai-review:pass"
-            fi
+          # ── architect role (panel coverage only) — design-fit / scope / contracts /
+          #    missing-DR lens. Always-on in panel: design review applies to specs AND
+          #    code, so it is NOT gated on the code-vs-docs split the security role uses.
+          ARCHITECT_REQUIRED=no
+          ARCHITECT_LABEL=""
+          ARCHITECT_BLOCK=""
+          if [ "$COVERAGE" = "panel" ]; then
+            ARCHITECT_REQUIRED=yes
+            ARCHITECT_OUT="$(bash scripts/review-branch.sh "$BASE" "$HEAD" --role architect || true)"
+            ARCHITECT_LABEL="$(printf '%s\n' "$ARCHITECT_OUT" | bash scripts/review-decide.sh || true)"
+            ARCHITECT_BLOCK="$(printf '%s\n' "$ARCHITECT_OUT" | extract_block | redact)"
+            [ -z "$ARCHITECT_BLOCK" ] && ARCHITECT_BLOCK="(architect emitted no verdict block — fail-closed to changes)"
           fi
 
-          # ── BLOCKED: a required role could not RUN (quota / rate-limit / transient),
-          #    which review-decide.sh reports as `ai-review:blocked`. This is NOT a
-          #    verdict on the code and must never read as `changes` (that would tell
-          #    the dev "the reviewer wants changes" and hide the real, fixable cause).
-          #    If either required role is blocked, the review is incomplete →
-          #    ai-review:blocked — retry-able; the `ai-review-retry` workflow re-runs
-          #    it when the quota window resets. (Machinery PRs are decided by the
-          #    self-edit override below regardless of the reviewer, so this yields to
-          #    it — a machinery verdict needs no working reviewer.) ──
-          if [ "$REVIEWER_LABEL" = "ai-review:blocked" ] || { [ "$SECURITY_REQUIRED" = "yes" ] && [ "$SECURITY_LABEL" = "ai-review:blocked" ]; }; then
+          # ── skeptic role (panel coverage only) — evidence discipline: unproven
+          #    done/fixed/implemented claims, false status fields, hollow tests. ──
+          SKEPTIC_REQUIRED=no
+          SKEPTIC_LABEL=""
+          SKEPTIC_BLOCK=""
+          if [ "$COVERAGE" = "panel" ]; then
+            SKEPTIC_REQUIRED=yes
+            SKEPTIC_OUT="$(bash scripts/review-branch.sh "$BASE" "$HEAD" --role skeptic || true)"
+            SKEPTIC_LABEL="$(printf '%s\n' "$SKEPTIC_OUT" | bash scripts/review-decide.sh || true)"
+            SKEPTIC_BLOCK="$(printf '%s\n' "$SKEPTIC_OUT" | extract_block | redact)"
+            [ -z "$SKEPTIC_BLOCK" ] && SKEPTIC_BLOCK="(skeptic emitted no verdict block — fail-closed to changes)"
+          fi
+
+          # ── combine (N-voter panel): pass ONLY if EVERY required voter passed.
+          #    Precedence is changes > blocked > pass: a real `changes` from ANY voter
+          #    that RAN wins (never masked by a sibling that was quota-`blocked`); a
+          #    `blocked` (review could not RUN — quota/rate-limit/transient) surfaces
+          #    only when nothing requested changes, i.e. the sole reason we cannot pass
+          #    is an INCOMPLETE review → retry-able via `ai-review-retry`. `blocked` must
+          #    never read as `changes` (that would tell the dev "the reviewer wants
+          #    changes" and hide the real, fixable cause). reviewer is always required;
+          #    security when code changed; architect + skeptic under `panel` coverage.
+          #    Each REQUIRED voter contributes a "req:label" pair; unrequired voters
+          #    (req=no) are skipped. Empty/garbled label → the `*)` arm → changes
+          #    (fail closed). (Machinery PRs are forced to changes by the self-edit
+          #    override below regardless, so a blocked voter there yields to it.) ──
+          FINAL="ai-review:pass"
+          ANY_BLOCKED=no
+          for pair in \
+              "yes:${REVIEWER_LABEL}" \
+              "${SECURITY_REQUIRED}:${SECURITY_LABEL}" \
+              "${ARCHITECT_REQUIRED}:${ARCHITECT_LABEL}" \
+              "${SKEPTIC_REQUIRED}:${SKEPTIC_LABEL}"; do
+            req="${pair%%:*}"
+            lbl="${pair#*:}"
+            [ "$req" = "yes" ] || continue
+            case "$lbl" in
+              ai-review:pass) ;;
+              ai-review:blocked) ANY_BLOCKED=yes ;;
+              *) FINAL="ai-review:changes" ;;
+            esac
+          done
+          if [ "$FINAL" = "ai-review:pass" ] && [ "$ANY_BLOCKED" = "yes" ]; then
             FINAL="ai-review:blocked"
           fi
 
@@ -374,7 +420,7 @@ jobs:
           [ "$SELF_EDIT_KIND" = "machinery" ] && IS_MACHINERY=true
           echo "is_machinery=$IS_MACHINERY" >> "$GITHUB_OUTPUT"
 
-          echo "Reviewer=${REVIEWER_LABEL:-<none>} | Security(${SECURITY_REQUIRED})=${SECURITY_LABEL:-<n/a>} | SelfEdit=${SELF_EDIT}(${SELF_EDIT_KIND:-none}) | FINAL=$FINAL | IsMachinery=$IS_MACHINERY"
+          echo "Coverage=$COVERAGE | Reviewer=${REVIEWER_LABEL:-<none>} | Security(${SECURITY_REQUIRED})=${SECURITY_LABEL:-<n/a>} | Architect(${ARCHITECT_REQUIRED})=${ARCHITECT_LABEL:-<n/a>} | Skeptic(${SKEPTIC_REQUIRED})=${SKEPTIC_LABEL:-<n/a>} | SelfEdit=${SELF_EDIT}(${SELF_EDIT_KIND:-none}) | FINAL=$FINAL | IsMachinery=$IS_MACHINERY"
 
           # ── build the PR comment body (findings/rationale behind the label) ──
           BODY="$RUNNER_TEMP/ai-review-comment.md"
@@ -427,8 +473,22 @@ jobs:
                 printf '%s\n' "$SECURITY_BLOCK"
                 echo '```'
               fi
+              if [ "$ARCHITECT_REQUIRED" = "yes" ]; then
+                echo
+                echo "### Architect (design / scope)"
+                echo '```'
+                printf '%s\n' "$ARCHITECT_BLOCK"
+                echo '```'
+              fi
+              if [ "$SKEPTIC_REQUIRED" = "yes" ]; then
+                echo
+                echo "### Skeptic (evidence discipline)"
+                echo '```'
+                printf '%s\n' "$SKEPTIC_BLOCK"
+                echo '```'
+              fi
               echo
-              echo "_Independent fresh-context reviewer (\`scripts/review-branch.sh\`, no-tools agent reading the diff as untrusted data); label decided by the deterministic fail-closed gate (\`scripts/review-decide.sh\`). Posted by \`minspec-sdd[bot]\` from CI — provenance is the App identity, verified here, not the label alone (#428, #342). A combined verdict fails toward \`changes\` if any role requests changes._"
+              echo "_Independent fresh-context reviewers (\`scripts/review-branch.sh\`, no-tools agents reading the diff as untrusted data); each label decided by the deterministic fail-closed gate (\`scripts/review-decide.sh\`). Posted by \`minspec-sdd[bot]\` from CI — provenance is the App identity, verified here, not the label alone (#428, #342). Panel coverage (\`AI_REVIEW_COVERAGE\`): the combined verdict fails toward \`changes\` if ANY voter requests changes._"
             fi
           } > "$BODY"
           echo "body-file=$BODY" >> "$GITHUB_OUTPUT"

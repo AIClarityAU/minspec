@@ -33,16 +33,30 @@ export interface ConstitutionNudge {
    */
   readonly fixActionLabel: string;
   readonly fixCommandId: string;
+  /**
+   * A second offer on the same nudge: hand off to an LLM instead of the fixed
+   * seed catalog. Still Tier-0 at the command layer — MinSpec never calls a
+   * model itself; the command opens a generation prompt for the user's own
+   * assistant to run (`constitutionShowPromptCommand`, FR-2/FR-3). Surfacing
+   * both choices on one toast lets the user pick shallow-but-instant
+   * (programmatic seed) vs richer-but-manual (LLM) per project.
+   */
+  readonly llmActionLabel: string;
+  readonly llmCommandId: string;
 }
 
 const ADVISORY_MESSAGE =
   'MinSpec: your constitution has no human-authored rules yet — consider authoring its Invariants, Principles, Constraints, and Goals.';
 const FIX_HINT =
   'Edit .minspec/constitution.md (review/accept any DRAFT entries MinSpec seeded).';
-/** Label for the offer-to-fix action on the nudge (#320). */
+/** Label for the deterministic offer-to-fix action on the nudge (#320). */
 export const PROPOSE_ACTION_LABEL = 'Propose draft';
-/** The command the offer-to-fix action runs (#320). */
+/** The command the deterministic offer-to-fix action runs (#320). */
 export const PROPOSE_COMMAND_ID = 'minspec.constitutionPropose';
+/** Label for the LLM-powered offer-to-fix action on the nudge. */
+export const PROPOSE_LLM_ACTION_LABEL = 'Generate with AI…';
+/** The command the LLM-powered offer-to-fix action runs. */
+export const PROPOSE_LLM_COMMAND_ID = 'minspec.constitutionShowPrompt';
 
 /**
  * Is the constitution all-template — only comments and MinSpec DRAFT entries,
@@ -127,5 +141,7 @@ export function evaluateConstitution(rootDir: string): ConstitutionNudge {
     fixHint: FIX_HINT,
     fixActionLabel: PROPOSE_ACTION_LABEL,
     fixCommandId: PROPOSE_COMMAND_ID,
+    llmActionLabel: PROPOSE_LLM_ACTION_LABEL,
+    llmCommandId: PROPOSE_LLM_COMMAND_ID,
   };
 }

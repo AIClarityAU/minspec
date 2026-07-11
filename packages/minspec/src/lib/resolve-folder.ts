@@ -1,3 +1,4 @@
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { pickFolderPath } from './workspace';
 
@@ -56,6 +57,26 @@ export function resolveTargetFolderNonInteractive(): string {
     folders[0]?.uri.fsPath ??
     ''
   );
+}
+
+/**
+ * Human-readable label for the workspace folder at `folder`, for attributing a
+ * per-folder diagnostic in a multi-root workspace (#604): a harness-refresh warning
+ * carried only a relative path, so two folders with the identical broken file (e.g.
+ * MinSpecPro and scroogellm open side by side) were indistinguishable. Prefers the
+ * folder's declared `WorkspaceFolder.name` (a multi-root `.code-workspace` may alias
+ * it, e.g. "❄️ Platform"); falls back to the directory's basename when the folder
+ * isn't resolvable (not part of the open workspace, or a test double missing the
+ * `vscode.workspace` APIs) — never throws.
+ */
+export function workspaceFolderLabel(folder: string): string {
+  try {
+    const found = vscode.workspace.getWorkspaceFolder?.(vscode.Uri.file(folder));
+    if (found?.name) return found.name;
+  } catch {
+    // fall through to basename
+  }
+  return path.basename(folder);
 }
 
 /**

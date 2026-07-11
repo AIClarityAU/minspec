@@ -41,11 +41,14 @@ vi.mock('../src/lib/constitution-nudge', () => ({
 import * as vscode from 'vscode';
 import {
   initCommand,
+  initRefreshCommand,
   offerScaffoldCommit,
   collectScaffoldPaths,
   SCAFFOLD_COMMIT_MESSAGE,
+  REFRESH_COMMIT_MESSAGE,
   type ScaffoldCommitter,
 } from '../src/commands/init';
+import { scaffold, generateHarnessFiles } from '../src/lib/scaffold';
 
 /** A spying committer stub that records add()/commit() calls. */
 function makeCommitterStub(isRepo = true) {
@@ -276,6 +279,75 @@ describe('post-init commit offer (#222)', () => {
       expect(fs.existsSync(path.join(tmpDir, 'CLAUDE.md'))).toBe(true);
       // …and the offer was accepted → exactly one dedicated commit.
       expect(commits).toEqual([SCAFFOLD_COMMIT_MESSAGE]);
+    });
+  });
+});
+
+/**
+ * T3 — Regression: a harness REFRESH must offer to commit, exactly as init does.
+ *
+ * Bug (RCDD 2026-07-10): `initRefreshCommand` rewrote the harness files (e.g. on
+ * window reload via auto-bootstrap's drift offer) but NEVER called
+ * `offerScaffoldCommit`, so a refresh stranded its own output uncommitted —
+ * unlike init, which got the #222 offer. Root cause: the refresh write-path was
+ * built without the commit affordance the init write-path has, and no test
+ * asserted the two paths were symmetric. These tests are that gate.
+ */
+describe('post-refresh commit offer — init/refresh symmetry (RCDD 2026-07-10)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-refresh-offer-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  describe("offerScaffoldCommit({ variant: 'refresh' })", () => {
+    it('uses refresh wording + the dedicated refresh commit message on accept', async () => {
+      fs.mkdirSync(path.join(tmpDir, '.git'), { recursive: true });
+      fs.mkdirSync(path.join(tmpDir, '.minspec'), { recursive: true });
+      fs.writeFileSync(path.join(tmpDir, 'CLAUDE.md'), '# CLAUDE');
+      const { committer, commits } = makeCommitterStub(true);
+      vi.mocked(vscode.window.showInformationMessage).mockImplementation(
+        async (_msg: string, ...actions: string[]) => (actions.length ? actions[0] : undefined),
+      );
+
+      await offerScaffoldCommit(tmpDir, {
+        makeCommitter: async () => committer,
+        variant: 'refresh',
+      });
+
+      // Offer toast is worded for a refresh, not a scaffold.
+      const offer = vi.mocked(vscode.window.showInformationMessage).mock.calls[0][0] as string;
+      expect(offer).toMatch(/refreshed/i);
+      expect(offer).not.toMatch(/scaffolded/i);
+      // …and the commit carries the dedicated refresh message.
+      expect(commits).toEqual([REFRESH_COMMIT_MESSAGE]);
+    });
+  });
+
+  describe('initRefreshCommand() integration — the offer is reachable via refresh', () => {
+    it('fires the commit offer after a real refresh in a git repo (regression)', async () => {
+      // A real, already-initialized project: scaffold + harness on disk, in a repo.
+      fs.mkdirSync(path.join(tmpDir, '.git'), { recursive: true });
+      scaffold(tmpDir);
+      generateHarnessFiles(tmpDir);
+      expect(fs.existsSync(path.join(tmpDir, 'CLAUDE.md'))).toBe(true);
+
+      const { committer, commits } = makeCommitterStub(true);
+      vi.mocked(vscode.window.showInformationMessage).mockImplementation(
+        async (_msg: string, ...actions: string[]) => (actions.length ? actions[0] : undefined),
+      );
+
+      await initRefreshCommand(tmpDir, { makeCommitter: async () => committer });
+
+      // Pre-fix this array is empty: refresh rewrote files but never offered to
+      // commit. Post-fix: exactly one dedicated refresh commit, mirroring init.
+      expect(commits).toEqual([REFRESH_COMMIT_MESSAGE]);
+      expect(committer.commit).toHaveBeenCalledTimes(1);
     });
   });
 });

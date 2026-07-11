@@ -28,7 +28,11 @@ import {
   spliceManagedRegion,
   type GeneratedHashes,
 } from './merge-refresh';
-import { generateSlashCommandShims, SPEC_KIT_COMMANDS } from './slash-commands';
+import {
+  generateSlashCommandShims,
+  SPEC_KIT_COMMANDS,
+  buildLegacyBareClaudeShim,
+} from './slash-commands';
 import { detectTools, type DetectedTools } from './tool-detector';
 import { writeEpicIndex } from './epic-manager';
 import { assembleContext } from './constitution-context';
@@ -391,12 +395,22 @@ function writeManagedFile(fullPath: string, tpl: ManagedRegionTemplate): void {
  * the new shim, both routable, which is exactly the "harness upgrades cleanly"
  * gap #534 calls out.
  *
- * A legacy file is deleted ONLY when it is still a pure, unmodified MinSpec
- * scaffold: its managed markers are intact (same marker name as the new shim —
- * only the path moved) AND nothing besides the frontmatter preamble was added
- * outside them. Markers missing, or real user content outside the region, means
- * leave it untouched — never a silent clobber, mirroring the missing-markers
- * refresh rule.
+ * Two legacy shapes exist on disk depending on when the project was scaffolded,
+ * and each is deleted only when it is still pure and unmodified:
+ *
+ *  - **Post-#241, pre-#534** — a managed-region file (markers intact, same
+ *    marker name as the new shim — only the path moved) with nothing besides
+ *    the frontmatter preamble added outside the region.
+ *  - **Pre-#241** — a raw, markerless file written directly by the old
+ *    `generateSlashCommandShims` (no region to parse at all — this is what every
+ *    real pre-#534 project actually has on disk, #599). Recognized instead by a
+ *    full-content byte match (modulo trailing newline) against
+ *    `buildLegacyBareClaudeShim(command)`, the exact bytes MinSpec itself wrote
+ *    pre-#534.
+ *
+ * Either way: markers missing AND content not a pristine bare-heading match, or
+ * real user content outside a present region, means leave the file untouched —
+ * never a silent clobber, mirroring the missing-markers refresh rule.
  */
 function migrateLegacyClaudeSlashCommandShims(rootDir: string): void {
   for (const command of SPEC_KIT_COMMANDS) {
@@ -404,16 +418,25 @@ function migrateLegacyClaudeSlashCommandShims(rootDir: string): void {
     const legacyFull = path.join(rootDir, legacyRel);
     if (!fs.existsSync(legacyFull)) continue;
 
+    const onDisk = fs.readFileSync(legacyFull, 'utf-8');
+
     const start = managedRegionStartMarker(claudeShimTemplateName(command), 'html');
     const end = managedRegionEndMarker(claudeShimTemplateName(command), 'html');
-    const onDisk = fs.readFileSync(legacyFull, 'utf-8');
     const split = splitManagedRegion(onDisk, start, end);
-    if (!split) continue; // no recognizable MinSpec region — leave it alone
+    if (split) {
+      const leftover = (split.before + split.after).replace(/^---[\s\S]*?---/, '').trim();
+      if (leftover.length > 0) continue; // user added content outside the region — keep the file
+      fs.unlinkSync(legacyFull);
+      continue;
+    }
 
-    const leftover = (split.before + split.after).replace(/^---[\s\S]*?---/, '').trim();
-    if (leftover.length > 0) continue; // user added content outside the region — keep the file
-
-    fs.unlinkSync(legacyFull);
+    // No managed region: the pre-#241 raw shape. Only remove when byte-identical
+    // (modulo trailing newline) to what MinSpec itself wrote pre-#534 — any
+    // drift (user edit, foreign extension, hand-written file) is left alone.
+    const pristine = buildLegacyBareClaudeShim(command);
+    if (onDisk.replace(/\n+$/, '') === pristine.replace(/\n+$/, '')) {
+      fs.unlinkSync(legacyFull);
+    }
   }
 }
 
@@ -452,6 +475,68 @@ function ensureHooksPath(rootDir: string): void {
 }
 
 /**
+ * The managed body's lines exactly as `renderManagedBlock` sandwiches them between
+ * the start/end markers — i.e. `tpl.content` normalized to a single trailing
+ * newline, split into lines. Single source so the auto-heal search below can never
+ * disagree with what a fresh scaffold actually wrote between the markers.
+ */
+function managedBlockBodyLines(tpl: ManagedRegionTemplate): string[] {
+  const block = renderManagedBlock(tpl);
+  // block === `${start}\n${body}${end}\n` where body already ends in '\n', so
+  // splitting on '\n' gives [start, ...bodyLines, end, '']; drop the marker lines
+  // and the trailing empty element from the final newline.
+  return block.split('\n').slice(1, -2);
+}
+
+/**
+ * Auto-heal (#604): the common way markers go missing is a stray strip of the two
+ * marker comment lines with the MinSpec body otherwise untouched (a markdown/YAML
+ * linter, a hand-edit trimming "clutter") — losslessly recoverable because MinSpec
+ * knows the exact body it owns. Locates the current template's body as a contiguous
+ * line-run in the on-disk file; if it occurs EXACTLY ONCE, re-inserts the start/end
+ * marker lines around it and returns the healed content. Returns `null` when the
+ * body cannot be pinned down unambiguously (not found, or found more than once) —
+ * the caller must then fall back to skip+warn, never a guess (never-wrong: a heal
+ * only ever inserts the 2 marker lines, never rewrites a single body byte, so it is
+ * safe exactly when the match is unambiguous and unsafe otherwise).
+ */
+function tryAutoHealManagedRegion(
+  onDisk: string,
+  tpl: ManagedRegionTemplate,
+  startMarker: string,
+  endMarker: string,
+): string | null {
+  const bodyLines = managedBlockBodyLines(tpl);
+  if (bodyLines.length === 0) return null;
+
+  const fileLines = onDisk.split('\n');
+  const matchStarts: number[] = [];
+  for (let i = 0; i + bodyLines.length <= fileLines.length; i++) {
+    let matches = true;
+    for (let j = 0; j < bodyLines.length; j++) {
+      if (fileLines[i + j] !== bodyLines[j]) {
+        matches = false;
+        break;
+      }
+    }
+    if (matches) matchStarts.push(i);
+  }
+
+  if (matchStarts.length !== 1) return null;
+
+  const start = matchStarts[0];
+  const end = start + bodyLines.length;
+  const healedLines = [
+    ...fileLines.slice(0, start),
+    startMarker,
+    ...fileLines.slice(start, end),
+    endMarker,
+    ...fileLines.slice(end),
+  ];
+  return healedLines.join('\n');
+}
+
+/**
  * Reconcile managed-region templates on Refresh (#249, DR-037).
  *
  * For each managed-region template, by parsing its markers — never a whole-file
@@ -461,15 +546,19 @@ function ensureHooksPath(rootDir: string): void {
  *                                the current template; PRESERVE everything outside
  *                                verbatim (user edits outside the region survive,
  *                                and MinSpec's region is always brought current)
- *   - file exists, NO markers  → SKIP + warn; never a silent whole-file overwrite
+ *   - file exists, NO markers  → try {@link tryAutoHealManagedRegion} (markers merely
+ *                                stripped, body intact); if that can't prove it
+ *                                safely, SKIP + warn — never a silent whole-file
+ *                                overwrite
  *
  * No content baseline is consulted — the markers ARE the boundary between
  * MinSpec-owned and user-owned content, which is the key improvement over the old
  * preserve-on-any-edit whole-file rule: a stray edit outside the region no longer
  * freezes MinSpec out of its own region.
  *
- * Returns the warnings for any files left untouched (missing markers) so the
- * vscode-aware caller can surface them. The file is NEVER modified on a warning.
+ * Returns the warnings for any files left untouched (missing markers, un-healable)
+ * so the vscode-aware caller can surface them. The file is NEVER modified on a
+ * warning.
  */
 function refreshManagedRegionTemplates(rootDir: string, tools: DetectedTools): ManagedRegionWarning[] {
   const warnings: ManagedRegionWarning[] = [];
@@ -494,8 +583,16 @@ function refreshManagedRegionTemplates(rootDir: string, tools: DetectedTools): M
     const split = splitManagedRegion(onDisk, startMarker, endMarker);
 
     if (!split) {
-      // Markers missing/corrupted — cannot identify MinSpec's region. NEVER
-      // clobber the whole file; skip and warn so the user can restore the markers.
+      // Markers missing/corrupted — cannot identify MinSpec's region by markers
+      // alone. Try the lossless auto-heal (body byte-intact, only the marker
+      // lines gone) before giving up.
+      const healed = tryAutoHealManagedRegion(onDisk, tpl, startMarker, endMarker);
+      if (healed !== null) {
+        fs.writeFileSync(fullPath, healed);
+        continue;
+      }
+      // Can't prove it's safe — NEVER clobber the whole file; skip and warn so
+      // the user can restore the markers.
       warnings.push({ outputPath: tpl.outputPath, message: missingMarkersMessage(tpl.outputPath) });
       continue;
     }
@@ -509,6 +606,23 @@ function refreshManagedRegionTemplates(rootDir: string, tools: DetectedTools): M
   }
 
   return warnings;
+}
+
+/**
+ * Consent-gated whole-file re-scaffold for a SINGLE managed-region template, keyed
+ * by its output path (#604's "Re-scaffold (overwrite)" warning action). Unlike the
+ * automatic paths above (which never clobber on an ambiguous match), this
+ * deliberately overwrites the whole file with a fresh {@link renderManagedFile} —
+ * the user has explicitly asked for it because the file could not be proven safe to
+ * heal automatically. Returns `false` when `outputPath` doesn't match any
+ * managed-region template (defensive; should not happen for a warning this module
+ * itself produced).
+ */
+export function rescaffoldManagedRegionFile(rootDir: string, outputPath: string): boolean {
+  const tpl = MANAGED_REGION_TEMPLATES.find((t) => t.outputPath === outputPath);
+  if (!tpl) return false;
+  writeManagedFile(path.join(rootDir, tpl.outputPath), tpl);
+  return true;
 }
 
 /**

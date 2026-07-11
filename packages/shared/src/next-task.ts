@@ -21,21 +21,28 @@
  *     deterministically and surfaced; this core NEVER repairs. (FR-15.)
  *
  * DEFERRED — typed seams, not stubs:
- *   - FR-13 edge PARSING (frontmatter→Edge[]) is the fs-adapter's job (deferred);
- *     this core only consumes a built Edge[]. Absent edges ⇒ pure tree order.
+ *   - FR-13 edge PARSING (frontmatter→Edge[]) is BUILT: the fs-adapter
+ *     (`packages/minspec/src/lib/artifact-graph.ts` — `edgesFrom` / `buildArtifactGraph`)
+ *     parses the `depends_on` / `supersedes` / `relates_to` frontmatter arrays into
+ *     a real `Edge[]`; this core only consumes it. Absent edges ⇒ pure tree order.
  *   - 'phase-action' nodes come from SPEC-010's per-feature resolver (FR-4,
  *     deferred); declared in the NodeKind union as a typed seam, never generated
  *     here.
  *   - 'answer-OQ' (#227) IS implemented in this slice — see `hasUnresolvedOpenQuestions`
  *     below. Parsing the Clarify/Open-Questions prose into that boolean (incl. the
  *     tracked-via-issue exemption, mirroring the dangling-park-ref linter in
- *     spec-validator.ts) is the fs-adapter's job; this core only consumes the flag.
+ *     spec-validator.ts) remains the fs-adapter's job and is NOT yet built there;
+ *     this core only consumes the flag.
  *   - FR-3b milestones, FR-15 LLM repair-escalation, PR-review nodes (#182),
  *     analyze-gate / review-gate (#227, the other two pre-phase gate kinds) are
  *     out of this slice. This core DETECTS corruption only; the repair ladder
  *     (deterministic→LLM offer) is a follow-up consumer of `resolveCorruption()`.
- *   - The fs adapter (build ArtifactGraph from real epics/specs/DRs) and all UI
- *     surfaces (status-bar/explorer) are a separate follow-up PR.
+ *   - The fs adapter (`artifact-graph.ts`'s `buildArtifactGraph`, building
+ *     `ArtifactGraph` from real epics/specs/DRs) and the `minspec.nextTask`
+ *     command + debounced status-bar signpost (`commands/next-task.ts`,
+ *     wired in `extension.ts`) are BUILT and shipped. The explorer/tree views
+ *     are NOT yet next-task-aware (no decoration of the resolved target) —
+ *     that surface remains a follow-up.
  */
 
 // ---- Status enums (mirror packages/minspec source-of-truth, redeclared Tier-0-locally) ----
@@ -46,7 +53,7 @@ export type ApprovalState = 'approved' | 'stale' | 'unapproved';
 export type Phase = 'specify' | 'clarify' | 'plan' | 'tasks' | 'implement';
 export type PhaseStatus = 'pending' | 'in-progress' | 'done' | 'skipped';
 
-// ---- Explicit cross-cutting edges (FR-13). The resolver ACCEPTS these; file-parsing is deferred. ----
+// ---- Explicit cross-cutting edges (FR-13). The resolver ACCEPTS these; parsed by the fs-adapter (artifact-graph.ts). ----
 export type EdgeKind = 'depends_on' | 'supersedes' | 'relates_to';
 export interface Edge {
   kind: EdgeKind;
