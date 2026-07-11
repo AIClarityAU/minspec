@@ -9,9 +9,11 @@ import {
   readSpecKitDir,
   specKitDirName,
   isSpecKitDirEntry,
+  readShardIdFiles,
   SPEC_KIT_FILES,
+  SPLIT_LAYOUT_TYPE_NAMES,
 } from '../src/lib/spec-layout';
-import { parseSpec, writeSpec } from '../src/lib/spec';
+import { parseSpec, writeSpec, SPEC_TYPES } from '../src/lib/spec';
 
 const FULL_SPEC = `---
 id: SPEC-007
@@ -227,5 +229,106 @@ Just the spec.
 
   it('exports the canonical SPEC_KIT_FILES list', () => {
     expect(SPEC_KIT_FILES).toEqual(['spec.md', 'plan.md', 'tasks.md']);
+  });
+});
+
+// ─── readShardIdFiles — genuine-shard gating (#439 review fix) ────────────────
+//
+// Review finding on #648: the original implementation swept up ANY
+// canonical-named file sitting in the same directory as a "shard", purely by
+// co-location — contradicting listSpecs' documented per-file-id invariant (a
+// flat directory can legitimately hold several independently-numbered specs
+// whose canonical basenames merely collide, e.g. an unrelated single-file spec
+// that happens to be named "design.md"). These tests pin the fix: a file is
+// only a genuine shard when it self-declares via `type: requirements|design|
+// tasks` (this repo's split-layout convention) OR sits in a strict spec-kit
+// dir (`isSpecKitDirEntry`, bare-digit `NNN-slug/` naming).
+describe('readShardIdFiles() — genuine-shard gating (#439 review fix)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-shard-test-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  const write = (dirPath: string, fileName: string, id: string, type?: string): void => {
+    fs.mkdirSync(dirPath, { recursive: true });
+    const fm = ['---', `id: ${id}`, ...(type ? [`type: ${type}`] : []), '---', ''].join('\n');
+    fs.writeFileSync(path.join(dirPath, fileName), fm, 'utf-8');
+  };
+
+  it('reads genuine split-layout shards that self-declare matching type (this repo\'s real layout)', () => {
+    const dirPath = path.join(tmpDir, 'SPEC-007-epic-grouping');
+    write(dirPath, 'requirements.md', 'SPEC-007', 'requirements');
+    write(dirPath, 'design.md', 'SPEC-008', 'design'); // diverging id — should still surface
+    write(dirPath, 'tasks.md', 'SPEC-007', 'tasks');
+
+    const files = readShardIdFiles(dirPath);
+    expect(files).toHaveLength(3);
+    expect(files.find((f) => f.fileName === 'design.md')?.id).toBe('SPEC-008');
+  });
+
+  it('does NOT flag a flat directory whose canonical-named files are independent specs with no type: (the false-positive #648 caught)', () => {
+    // Neither file self-declares a split-layout `type:` — each is an ordinary,
+    // independent, single-file spec that merely happens to be named "design.md"
+    // / "requirements.md". Must be excluded entirely, not compared.
+    const dirPath = path.join(tmpDir, 'flat-product');
+    write(dirPath, 'requirements.md', 'SPEC-001');
+    write(dirPath, 'design.md', 'SPEC-050');
+
+    const files = readShardIdFiles(dirPath);
+    expect(files).toHaveLength(0);
+  });
+
+  it('excludes a non-genuine file even when a genuine sibling is present (per-file, not per-directory)', () => {
+    const dirPath = path.join(tmpDir, 'mixed');
+    write(dirPath, 'requirements.md', 'SPEC-001', 'requirements'); // genuine
+    write(dirPath, 'tasks.md', 'SPEC-999'); // no type: — independent, not a shard
+
+    const files = readShardIdFiles(dirPath);
+    expect(files).toHaveLength(1);
+    expect(files[0].fileName).toBe('requirements.md');
+  });
+
+  it('reads spec.md/plan.md/tasks.md (no type: field) inside a strict spec-kit dir', () => {
+    const dirPath = path.join(tmpDir, '007-oauth-login');
+    write(dirPath, 'spec.md', 'SPEC-007');
+    write(dirPath, 'plan.md', 'SPEC-008'); // diverging id — should still surface
+
+    const files = readShardIdFiles(dirPath);
+    expect(files).toHaveLength(2);
+    expect(files.find((f) => f.fileName === 'plan.md')?.id).toBe('SPEC-008');
+  });
+
+  it('excludes spec.md/plan.md (no type:) OUTSIDE a strict spec-kit dir', () => {
+    // Same filenames as the strict spec-kit convention, but the directory name
+    // does not carry the bare-digit spec-kit prefix, so nothing declares these
+    // as shards of one spec.
+    const dirPath = path.join(tmpDir, 'not-spec-kit-named');
+    write(dirPath, 'spec.md', 'SPEC-007');
+    write(dirPath, 'plan.md', 'SPEC-008');
+
+    const files = readShardIdFiles(dirPath);
+    expect(files).toHaveLength(0);
+  });
+
+  it('returns empty for a directory with no canonical-named files', () => {
+    const dirPath = path.join(tmpDir, 'empty');
+    fs.mkdirSync(dirPath, { recursive: true });
+    expect(readShardIdFiles(dirPath)).toEqual([]);
+  });
+});
+
+// spec-layout.ts's `SPLIT_LAYOUT_TYPE_NAMES` hand-duplicates spec.ts's
+// `SPEC_TYPES` (a live value import would break under the wholesale
+// `vi.mock('../src/lib/spec')` some UI-command test files use — see the
+// comment on the constant). This pins the two lists so a future edit to one
+// that forgets the other fails CI instead of silently drifting.
+describe('SPLIT_LAYOUT_TYPE_NAMES / SPEC_TYPES parity (#439)', () => {
+  it('spec-layout.ts\'s hand-duplicated list matches spec.ts\'s SPEC_TYPES exactly', () => {
+    expect([...SPLIT_LAYOUT_TYPE_NAMES]).toEqual([...SPEC_TYPES]);
   });
 });

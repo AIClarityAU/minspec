@@ -5,10 +5,12 @@ import {
   validateStatusMonotonicity,
   validateStatusClaims,
   validateShardIdConsistency,
+  SHARD_FILE_NAME_SET,
 } from '../src/lib/spec-validator';
 import type { SplitLayoutFile, StatusMonotonicityFile, ShardIdFile } from '../src/lib/spec-validator';
 import { parseSpec } from '../src/lib/spec';
 import { DEFAULT_CONFIG } from '../src/lib/config';
+import { SHARD_ID_FILE_NAMES } from '../src/lib/spec-layout';
 
 function spec(fm: Record<string, string>, body: string): string {
   const phases = fm.phases ?? 'specify: done\n  clarify: pending\n  plan: done\n  tasks: done\n  implement: in-progress';
@@ -1271,6 +1273,18 @@ describe('validateStatusMonotonicity — cross-artifact status (#277)', () => {
 // divergent ids defeated the collapse and each shard surfaced as its own
 // phantom `done` spec. ERROR severity — unlike #111/#277 above, a divergent
 // shard id is never a legitimate mid-authoring state.
+// spec-layout.ts's `SHARD_ID_FILE_NAMES` hand-duplicates this file's
+// `SHARD_FILE_NAME_SET` (a live value import would break under the
+// `vi.mock('../src/lib/spec-validator')` several command-level tests use —
+// see the comment on both constants). This pins the two lists so a future
+// edit to one that forgets the other fails CI instead of silently drifting
+// (non-blocking review finding on #648).
+describe('SHARD_FILE_NAME_SET / SHARD_ID_FILE_NAMES parity (#439)', () => {
+  it('spec-layout.ts\'s hand-duplicated list matches spec-validator.ts\'s set exactly', () => {
+    expect(new Set(SHARD_ID_FILE_NAMES)).toEqual(SHARD_FILE_NAME_SET);
+  });
+});
+
 describe('validateShardIdConsistency — shard id must equal directory canonical id (#439)', () => {
   const f = (fileName: string, id: string): ShardIdFile => ({ fileName, id });
 

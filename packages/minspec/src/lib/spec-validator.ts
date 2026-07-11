@@ -1116,14 +1116,25 @@ export function validateStatusMonotonicity(
 // because incremental authoring is legitimate), a divergent shard id is never a
 // mid-authoring state: the moment it exists it corrupts the Specs pane with a
 // phantom entry, so it is a correctness bug, not a gap to fill in later.
+//
+// This function stays agnostic of WHICH files are genuine shards — that
+// filtering happens upstream, in spec-layout.ts's `readShardIdFiles`
+// (`isGenuineShardFile`), before `siblingShardFiles` ever reaches here. A
+// naive "any canonical-named file in the same directory" grouping would
+// contradict `listSpecs`'s documented per-file-id invariant (a flat directory
+// can legitimately hold several independently-numbered specs whose canonical
+// basenames merely collide) and false-positive an ERROR that refuses
+// Validate/Approve (review finding on #648).
 
 /**
  * Canonical shard filenames whose ids must agree within one spec directory.
- * Mirrored (not imported) in spec-layout.ts's `readShardIdFiles` — see the
- * comment there for why that reader duplicates this list rather than importing
- * it as a value.
+ * Mirrored (not imported) in spec-layout.ts's `readShardIdFiles` as
+ * `SHARD_ID_FILE_NAMES` — see the comment there for why that reader duplicates
+ * this list rather than importing it as a value. Exported (rather than kept
+ * private) solely so a parity test (spec-validator.test.ts) can assert the two
+ * lists never silently drift apart.
  */
-const SHARD_FILE_NAME_SET = new Set([
+export const SHARD_FILE_NAME_SET = new Set([
   'requirements.md', 'spec.md', 'design.md', 'plan.md', 'tasks.md',
 ]);
 
