@@ -12,7 +12,7 @@ relates_to: [SPEC-005, SPEC-006, SPEC-012, SPEC-013]  # repair trigger; predicat
 # MinSpec — Signpost Correctness (Requirements)
 
 **Date:** 2026-05-31
-**Status:** Specifying (SDD Specify phase)
+**Status:** Implementing (SDD Implement phase)
 **Decision:** [DR-012](../../../docs/decisions/DR-012.md) (HITL gate consumes this contract)
 **Triggered by:** session request — "the signpost must always be correct; cover all the bases"
 **Epic:** [EPIC-002 Signpost Integrity](../../../docs/epics/EPIC-002-signpost-integrity.md)

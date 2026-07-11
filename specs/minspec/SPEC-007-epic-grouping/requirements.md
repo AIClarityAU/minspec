@@ -11,7 +11,7 @@ epic: EPIC-001  # Explorer Epic Grouping
 # MinSpec — Registered Epics & Cross-Artifact Grouping (Requirements)
 
 **Date:** 2026-05-30
-**Status:** Specifying (SDD Specify phase)
+**Status:** Done
 **Decision:** [DR-013](../../../docs/decisions/DR-013.md)
 **Triggered by:** session request — "add an epic field to frontmatter and group DRs, specs and issues by it in the explorer panels."
 

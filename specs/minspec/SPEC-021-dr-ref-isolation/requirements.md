@@ -10,7 +10,7 @@ epic: EPIC-002  # Signpost Integrity
 # MinSpec — Internal DR-Reference Isolation (Requirements)
 
 **Date:** 2026-06-05
-**Status:** Specifying (SDD Specify phase)
+**Status:** Implementing (SDD Implement phase)
 **Decision:** [DR-032](../../../docs/decisions/DR-032.md) (this spec is the contract that decision governs)
 **Triggered by:** session request 2026-06-05 (Paul Harvey) — *"if a MinSpec user has a decision register in their project that also numbers DR-XXX then we should prevent any DR-XXX references from being published in templates or displayed on screen by our vsix to prevent confusion."*
 **Epic:** [EPIC-002 Signpost Integrity](../../../docs/epics/EPIC-002-signpost-integrity.md)

@@ -19,7 +19,7 @@ phases:
 # MinSpec — Approval-Staleness Prominence + Diff View (Requirements)
 
 **Date:** 2026-07-03
-**Status:** Specifying (SDD Specify phase)
+**Status:** Implementing (SDD Implement phase)
 **Triggered by:** session — SPEC-026 showed a bare warning icon for "needs
 re-approval" with no way to see *what* changed; ask was to make staleness more
 prominent (a lifecycle-style grouping) and to show the changed sections on click.

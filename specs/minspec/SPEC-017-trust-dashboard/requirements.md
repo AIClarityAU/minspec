@@ -13,7 +13,7 @@ relates_to: [SPEC-014, SPEC-015, SPEC-004, SPEC-018]
 # MinSpec — Trust Dashboard (Requirements)
 
 **Date:** 2026-06-03
-**Status:** Specifying (SDD Specify phase)
+**Status:** Implementing (SDD Implement phase)
 **Triggered by:** session request — "add a graph showing % documentation chars
 reworked after review (even if changed by the dev outside the reviewing webview),
 including chars revoked/superseded by a later doc — i.e. how often does the LLM get

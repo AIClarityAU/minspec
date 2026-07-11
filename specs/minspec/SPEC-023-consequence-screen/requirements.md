@@ -10,7 +10,7 @@ epic: EPIC-004  # Classifier Validation
 # MinSpec — Consequence Screen: Tier-0 Blast-Radius Analyzers (Requirements)
 
 **Date:** 2026-06-06
-**Status:** Specifying (SDD Specify phase)
+**Status:** Implementing (SDD Implement phase)
 **Decision:** [DR-022](../../../docs/decisions/DR-022.md) §1 (this spec is the contract that decision's "always-on consequence axis" governs)
 **Triggered by:** [#88](https://github.com/harvest316/minspec/issues/88) — Tier-0 consequence-screen analyzers; itself a prerequisite backstop for the consequence-hybrid HITL gate ([DR-033](../../../docs/decisions/DR-033.md) §3).
 **Epic:** [EPIC-004 Classifier Validation](../../../docs/epics/EPIC-004-classifier-validation.md)
