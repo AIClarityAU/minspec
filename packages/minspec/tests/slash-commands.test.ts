@@ -185,6 +185,25 @@ describe('slash-commands', () => {
       expect(healed.split(AGENTS_SLASH_SECTION_END).length - 1).toBe(1);
     });
 
+    it('removes a legacy unmarked Spec Kit Slash Commands section (#625)', () => {
+      // Simulate an AGENTS.md whose slash-commands section predates the
+      // current marker format entirely — bare heading, no markers ever.
+      const legacyHeadingOnly =
+        '# Agents\n\nUser preamble.\n\n' +
+        '## Spec Kit Slash Commands\n\n' +
+        'Some stale pre-marker body text.\n\n' +
+        '## User Trailing Section\n\nUser content.\n';
+      const result = injectAgentsSlashSection(legacyHeadingOnly);
+      const headingCount = (result.match(/^## Spec Kit Slash Commands$/gm) || []).length;
+      expect(headingCount).toBe(1);
+      expect(result).not.toContain('Some stale pre-marker body text.');
+      expect(result).toContain('User preamble.');
+      expect(result).toContain('User Trailing Section');
+      expect(result).toContain('User content.');
+      expect(result).toContain(AGENTS_SLASH_SECTION_START);
+      expect(result).toContain(AGENTS_SLASH_SECTION_END);
+    });
+
     it('removes orphaned start marker without matching end', () => {
       const withOrphanedStart = '# Agents\n\n' + AGENTS_SLASH_SECTION_START + '\norphan\n';
       const result = injectAgentsSlashSection(withOrphanedStart);
@@ -332,6 +351,28 @@ describe('slash-commands', () => {
 
       const agentsContent = fs.readFileSync(path.join(tmpDir, 'AGENTS.md'), 'utf-8');
       expect(agentsContent).toContain(AGENTS_SLASH_SECTION_START);
+    });
+
+    it('refreshHarnessFiles heals a pre-marker-format AGENTS.md to exactly one section (#625)', () => {
+      generateHarnessFiles(tmpDir);
+      const agentsPath = path.join(tmpDir, 'AGENTS.md');
+
+      // Simulate a pre-current-marker-format AGENTS.md: strip the markers but
+      // leave the heading + body, as described in the issue's repro steps.
+      let content = fs.readFileSync(agentsPath, 'utf-8');
+      content = content
+        .replace(`${AGENTS_SLASH_SECTION_START}\n\n`, '')
+        .replace(`\n\n${AGENTS_SLASH_SECTION_END}`, '');
+      expect(content).not.toContain(AGENTS_SLASH_SECTION_START);
+      fs.writeFileSync(agentsPath, content);
+
+      refreshHarnessFiles(tmpDir);
+
+      const after = fs.readFileSync(agentsPath, 'utf-8');
+      const headingCount = (after.match(/^## Spec Kit Slash Commands$/gm) || []).length;
+      expect(headingCount).toBe(1);
+      expect(after.split(AGENTS_SLASH_SECTION_START).length - 1).toBe(1);
+      expect(after.split(AGENTS_SLASH_SECTION_END).length - 1).toBe(1);
     });
 
     it('refreshHarnessFiles re-injects the AGENTS.md section without touching custom shims', () => {
