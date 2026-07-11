@@ -11,7 +11,7 @@ depends_on: [DR-054, DR-033, DR-017, DR-004]
 relates_to: [SPEC-031, SPEC-033, DR-047, DR-050]
 phases:
   specify: done          # requirements drafted 2026-07-11
-  clarify: in-progress   # OQ-1/2/3 pre-resolved 2026-07-11 (Paul Harvey); OQ-4/5/6 open before Plan (T4 → Clarify mandatory)
+  clarify: done          # all OQ-1..6 resolved 2026-07-11 (Paul Harvey); acceptance criteria added
   plan: not-started
   tasks: not-started
   implement: not-started
@@ -159,6 +159,47 @@ statuses:write). No `contents:write`, no admin, no org scope.
 - **NFR-5 — Key rotation.** The App private key MUST be rotatable without customer action
   (customers hold nothing); document the rotation runbook.
 
+## Acceptance Criteria
+
+Testable checks the implementation must pass; each cites the FR/OQ it discharges. The
+security-critical ones (AC-2/5/6/8/9/10) are T0 invariants — write them before the broker.
+
+- **AC-1 (FR-1)** — an OIDC token with a bad signature / expired / wrong `aud` yields **401**
+  and no installation token is minted.
+- **AC-2 (FR-2, confused-deputy — T0)** — a request whose body `repository` disagrees with the
+  OIDC `repository` claim yields **403**; the token is always minted from the verified claim,
+  never the body.
+- **AC-3 (FR-3)** — a minted token is scoped to exactly one repository, carries only the
+  `review` permission set (issues / pull_requests / checks / statuses: write), and expires
+  within the target TTL (≤10 min); the response's scope + `expires_at` are asserted.
+- **AC-4 (FR-4)** — when the `minspec-sdd` App is not installed on the target repo, the broker
+  returns **403** with an install-the-App reason, not a generic error.
+- **AC-5 (FR-5 — T0)** — the App private key appears **only** in the broker secret store; a
+  scan of the vsix, harness output, and CI config finds no private key — only the public app
+  slug + broker URL.
+- **AC-6 (FR-6 — T0)** — the broker accepts only the OIDC JWT + repo id; a contract test
+  asserts no request field carries, and no code path stores or forwards, user code / diff /
+  spec / prompt content.
+- **AC-7 (FR-7, e2e)** — the ai-review workflow (with `id-token: write`) obtains a token from
+  the broker and applies `ai-review:*` on a fixture PR with `sender = minspec-sdd[bot]`.
+- **AC-8 (FR-8 — T0)** — a label applied via a broker-minted token satisfies the
+  `AI_REVIEW_BOT_LOGINS` allowlist and turns `ready-to-merge` green; the same label hand-applied
+  by a human is reverted (the existing `ai-review-guard.js` is unchanged and still passes its
+  tests).
+- **AC-9 (FR-9, fail-closed — T0)** — with the broker unreachable / returning deny, the
+  workflow obtains no token, cannot post `ai-review:pass`, and `ready-to-merge` stays red; no
+  code path posts a pass without a broker-minted or override token.
+- **AC-10 (FR-10, enterprise override — T0)** — with a customer app-id secret +
+  `AI_REVIEW_BOT_LOGINS` set to the customer bot, the workflow mints via GitHub's native
+  `create-github-app-token` (no vendor-broker call) and posts as the customer bot; a contract
+  test asserts the reviewer identity is read from config, never a hardcoded `minspec-sdd[bot]`.
+- **AC-11 (FR-11, zero-config default)** — a fresh repo whose only setup is the App-install
+  grant (no per-repo variable) posts a verdict as the default `minspec-sdd[bot]`.
+- **AC-12 (OQ-1)** — on a passing PR whose author ≠ the bot, the bot posts a GitHub-native
+  **Approved** review in addition to the label + status.
+- **AC-13 (NFR-1 / OQ-5)** — audit records contain only `{repo, timestamp, granted scope,
+  workflow ref, ttl}` and no artifact content; records purge at the stated retention (≤30 days).
+
 ## Out of Scope
 
 - **Model access / which LLM the reviewer calls** — Tier-1, user-chosen (DR-054 §2); that is
@@ -172,7 +213,9 @@ statuses:write). No `contents:write`, no admin, no org scope.
 
 ## Open Questions
 
-**OQ-1/2/3 pre-resolved 2026-07-11 (Paul Harvey); OQ-4/5/6 remain and gate the Plan.**
+**Clarify complete 2026-07-11 (Paul Harvey) — all six resolved below. The only items left for
+Plan are confirmations, not decisions: the CF free-tier vs SLO check (NFR-3) and the audit
+log-sink wiring.**
 
 - **OQ-1 — Label+status vs GH-native approval. → RESOLVED: GH-native "Approved" is the
   primary target.** The bot posts a GitHub-native *Approved* review (needs pull_requests:write
@@ -192,16 +235,23 @@ statuses:write). No `contents:write`, no admin, no org scope.
   installation token — all stateless. Storage (KV/D1/Durable Objects) is needed **only** if
   the parked abuse-tracking (#639) is later built; the base broker needs none. Confirm the CF
   free tier meets the SLO (NFR-3) in Plan.
-- **OQ-4 — Enterprise override mechanics.** Does the override use GitHub's native
-  `create-github-app-token` action with the customer's own app-id/key (no vendor code at
-  all), or a customer-hosted copy of this broker? Pick the one that needs the least MinSpec
-  code to support (FR-10).
-- **OQ-5 — Audit retention & privacy.** What exactly is logged, for how long, under what
-  privacy policy (Tier-2 requires one — DR-004)? (NFR-1.)
-- **OQ-6 — Reviewer-in-CI credential for the model.** Track B (#342) runs the reviewer in CI;
-  its *model* credential (CLAUDE_CODE_OAUTH_TOKEN / API key / local endpoint) is separate from
-  this broker but must be specified somewhere — confirm it is #74/SPEC-031's job, not this
-  spec's, and that the two seams never cross.
+- **OQ-4 — Enterprise override mechanics. → RESOLVED: GitHub's native `create-github-app-token`
+  action with the customer's own app-id + private key (their repo/org secret) — no vendor code,
+  no customer-hosted broker.** The workflow selects the native path when a customer app-id
+  secret + `AI_REVIEW_BOT_LOGINS` are configured, else falls back to the shared-App broker.
+  Least MinSpec code (FR-10); the customer holds their own key, so the override path runs with
+  **no** MinSpec-hosted infrastructure. (AC-10.)
+- **OQ-5 — Audit retention & privacy. → RESOLVED: content-free structured audit, ≤30-day
+  retention.** Log only `{repo, timestamp, granted scope, workflow ref, ttl}` to a log sink
+  (CF Logpush / Workers Analytics Engine) — never any user artifact content (NFR-1); purge at
+  ≤30 days. A Tier-2 privacy policy (DR-004) documents it before the path ships. Retention is a
+  cheap config knob — revisit only if the parked abuse-tracking (#639) needs longer. (AC-13.)
+- **OQ-6 — Reviewer-in-CI model credential. → RESOLVED: out of scope; owned by #74 / SPEC-031
+  (reviewer) + [DR-017](../../../docs/decisions/DR-017.md)'s model-access broker.** This spec
+  brokers the **GitHub identity token only**. Non-crossing invariant: a GitHub token minted
+  here can never reach the model endpoint, and a model credential can never mint a GitHub
+  token — the two seams are disjoint and share no store. This spec's scope ends at "post the
+  verdict as the bot."
 
 ## Risks & Mitigations
 
