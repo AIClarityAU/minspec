@@ -1,3 +1,4 @@
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { listSpecs, type SpecSummary } from '../views/spec-tree-provider';
 import { readSpecFile } from '../lib/spec';
@@ -7,6 +8,7 @@ import { epicRefSet } from '../lib/epic-manager';
 import { getApprovalStatus } from '../lib/approval';
 import type { ExplicitTerminal } from '../lib/lifecycle';
 import { folderForFile, resolveTargetFolder } from '../lib/resolve-folder';
+import { readShardIdFiles } from '../lib/spec-layout';
 
 interface SpecNodeLike {
   readonly spec?: SpecSummary;
@@ -58,6 +60,10 @@ export async function validateSpecCommand(node?: SpecNodeLike): Promise<void> {
       epicRefSet(rootDir),
       approvalState,
       explicitTerminal,
+      undefined,
+      // #439: sibling shard files (design.md/tasks.md/…) in this spec's directory,
+      // so a diverging shard id is flagged as an error.
+      readShardIdFiles(path.dirname(spec.filePath)),
     );
   } catch (err) {
     vscode.window.showErrorMessage(

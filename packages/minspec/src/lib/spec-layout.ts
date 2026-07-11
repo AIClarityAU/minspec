@@ -3,6 +3,7 @@ import * as path from 'path';
 import type { ParsedSpec, SpecFrontmatter } from './spec';
 import { parseSpec, writeSpec } from './spec';
 import { PHASES } from './config';
+import type { ShardIdFile } from './spec-validator';
 
 /**
  * Storage layout for a single spec on disk.
@@ -149,6 +150,38 @@ function writeShard(fileName: SpecKitFile, shard: ParsedSpec): string {
   }
   if (parts.length === 0) return '';
   return parts.join('\n').trimEnd() + '\n';
+}
+
+/**
+ * Canonical shard filenames whose ids `validateShardIdConsistency` compares
+ * (#439). Mirrors spec-validator.ts's own (private) `SHARD_FILE_NAME_SET` as a
+ * literal rather than a value import: spec-validator.ts is wholesale
+ * `vi.mock()`'d in several command-level tests, and a live value import here
+ * would break under that mock (the type-only `ShardIdFile` import above is
+ * erased at compile time, so it is unaffected).
+ */
+const SHARD_ID_FILE_NAMES = ['requirements.md', 'spec.md', 'design.md', 'plan.md', 'tasks.md'] as const;
+
+/**
+ * Read each present canonical shard file's `id` in a spec directory (#439).
+ * Feeds `validateSpec`'s shard-id-consistency check (`validateShardIdConsistency`
+ * in spec-validator.ts) — that function is pure and takes no filesystem, so
+ * this is the impure glue that assembles its input from disk. Missing or
+ * unparseable files are simply omitted, not this reader's concern.
+ */
+export function readShardIdFiles(dirPath: string): ShardIdFile[] {
+  const out: ShardIdFile[] = [];
+  for (const fileName of SHARD_ID_FILE_NAMES) {
+    const filePath = path.join(dirPath, fileName);
+    if (!fs.existsSync(filePath)) continue;
+    try {
+      const id = parseSpec(fs.readFileSync(filePath, 'utf-8')).frontmatter.id;
+      out.push({ fileName, id });
+    } catch {
+      // unparseable shard — not this check's concern
+    }
+  }
+  return out;
 }
 
 /**

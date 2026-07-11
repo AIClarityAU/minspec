@@ -1,9 +1,11 @@
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { listSpecs, type SpecSummary } from '../views/spec-tree-provider';
 import { readSpecFile, advanceSpecToImplementing } from '../lib/spec';
 import { loadConfig } from '../lib/config';
 import { validateSpec } from '../lib/spec-validator';
 import { epicRefSet } from '../lib/epic-manager';
+import { readShardIdFiles } from '../lib/spec-layout';
 import {
   approveSpec as recordApproval,
   revokeApproval as removeApproval,
@@ -110,7 +112,17 @@ export async function approveSpecCommand(
   }
 
   const config = loadConfig(rootDir);
-  const result = validateSpec(parsed, config, epicRefSet(rootDir));
+  const result = validateSpec(
+    parsed,
+    config,
+    epicRefSet(rootDir),
+    undefined,
+    undefined,
+    undefined,
+    // #439: sibling shard files (design.md/tasks.md/…) in this spec's directory,
+    // so a diverging shard id refuses approval as an error.
+    readShardIdFiles(path.dirname(spec.filePath)),
+  );
   const errors = result.violations.filter((v) => v.severity === 'error');
   const warnings = result.violations.filter((v) => v.severity === 'warning');
 

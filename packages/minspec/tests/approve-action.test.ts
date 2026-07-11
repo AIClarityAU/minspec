@@ -69,6 +69,12 @@ vi.mock('../src/lib/epic-manager', () => ({
   epicRefSet: vi.fn(() => new Set<string>()),
 }));
 
+// #439: readShardIdFiles does real fs reads keyed off the spec's directory —
+// mock it so shard-id-consistency wiring is asserted deterministically.
+vi.mock('../src/lib/spec-layout', () => ({
+  readShardIdFiles: vi.fn(() => []),
+}));
+
 // ─── Imports ───────────────────────────────────────────────────────────────
 
 import * as vscode from 'vscode';
@@ -83,6 +89,7 @@ import type { ApprovalStatus } from '../src/lib/approval';
 import type { SpecSummary } from '../src/views/spec-tree-provider';
 import { readSpecFile, advanceSpecToImplementing } from '../src/lib/spec';
 import { validateSpec } from '../src/lib/spec-validator';
+import { readShardIdFiles } from '../src/lib/spec-layout';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -161,6 +168,7 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
     vi.clearAllMocks();
     vi.mocked(listSpecs).mockReturnValue([summary('SPEC-001', 'First')]);
     vi.mocked(getApprovalStatus).mockReturnValue('unapproved');
+    vi.mocked(readShardIdFiles).mockReturnValue([]);
   });
 
   // ── no specs in workspace ────────────────────────────────────────────────
@@ -256,6 +264,55 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
 
     expect(vscode.workspace.openTextDocument).toHaveBeenCalled();
     expect(vscode.window.showTextDocument).toHaveBeenCalledWith(fakeDoc);
+    expect(approveSpec).not.toHaveBeenCalled();
+  });
+
+  // ── #439: shard-id consistency wiring ────────────────────────────────────
+
+  it('reads sibling shard ids from the spec directory and forwards them to validateSpec', async () => {
+    pickFirst();
+    vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec() as never);
+    const shardFiles = [
+      { fileName: 'requirements.md', id: 'SPEC-001' },
+      { fileName: 'tasks.md', id: 'SPEC-009' },
+    ];
+    vi.mocked(readShardIdFiles).mockReturnValueOnce(shardFiles);
+    vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
+
+    await approveSpecCommand(undefined);
+
+    // summary()'s filePath is ".../SPEC-001/spec.md" — the reader is passed the
+    // spec's containing DIRECTORY, not the file itself.
+    expect(readShardIdFiles).toHaveBeenCalledWith('/tmp/ws/specs/minspec/SPEC-001');
+    expect(validateSpec).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      undefined,
+      undefined,
+      undefined,
+      shardFiles,
+    );
+  });
+
+  it('refuses approval when a sibling shard carries a diverging id', async () => {
+    pickFirst();
+    vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec() as never);
+    // A REAL (unmocked) validateSpec would emit this error for a diverging
+    // shard id; asserting the refusal here pins the consuming behavior —
+    // validateSpec's own error-emission is covered in spec-validator.test.ts.
+    vi.mocked(validateSpec).mockReturnValueOnce(
+      incompleteResult(['tasks.md carries id "SPEC-009" but this directory\'s canonical id (requirements.md) is "SPEC-001".']) as never,
+    );
+    vi.mocked(vscode.window.showErrorMessage).mockResolvedValueOnce(undefined as never);
+
+    await approveSpecCommand(undefined);
+
+    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+      expect.stringContaining('SPEC-001 is not complete'),
+      expect.objectContaining({ modal: true }),
+      'Open Spec',
+    );
     expect(approveSpec).not.toHaveBeenCalled();
   });
 

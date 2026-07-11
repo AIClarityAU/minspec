@@ -47,6 +47,13 @@ vi.mock('../src/lib/approval', () => ({
   getApprovalStatus: vi.fn(() => 'unapproved'),
 }));
 
+// #439: readShardIdFiles does real fs reads keyed off the spec's directory —
+// mock it so shard-id-consistency wiring is asserted deterministically instead
+// of depending on whether the fake `/tmp/ws/...` test paths happen to exist.
+vi.mock('../src/lib/spec-layout', () => ({
+  readShardIdFiles: vi.fn(() => []),
+}));
+
 // ─── Imports ──────────────────────────────────────────────────────────────────
 
 import * as vscode from 'vscode';
@@ -57,6 +64,7 @@ import { loadConfig } from '../src/lib/config';
 import { validateSpec } from '../src/lib/spec-validator';
 import { epicRefSet } from '../src/lib/epic-manager';
 import { getApprovalStatus } from '../src/lib/approval';
+import { readShardIdFiles } from '../src/lib/spec-layout';
 import type { SpecSummary } from '../src/views/spec-tree-provider';
 import type { ValidationResult, ValidationViolation } from '../src/lib/spec-validator';
 
@@ -115,6 +123,7 @@ describe('validateSpecCommand', () => {
       { frontmatter: { status: 'specifying' } } as ReturnType<typeof readSpecFile>,
     );
     vi.mocked(getApprovalStatus).mockReturnValue('unapproved');
+    vi.mocked(readShardIdFiles).mockReturnValue([]);
     vi.mocked(validateSpec).mockReturnValue(makeResult());
   });
 
@@ -413,7 +422,11 @@ describe('validateSpecCommand', () => {
     expect(getApprovalStatus).toHaveBeenCalledWith('/tmp/ws', spec.filePath);
     // SPEC-022 (INV-4): the verdict + explicit terminal (undefined here, status is
     // not 'archived') are forwarded so the validator can assert the mirror.
-    expect(validateSpec).toHaveBeenCalledWith(fakeParsed, fakeConfig, fakeEpics, 'approved', undefined);
+    // #439: the trailing args are knownArtifactRefs (unused here) and the spec
+    // directory's shard files, so the validator can assert shard-id consistency.
+    expect(validateSpec).toHaveBeenCalledWith(
+      fakeParsed, fakeConfig, fakeEpics, 'approved', undefined, undefined, [],
+    );
   });
 
   it('passes explicitTerminal "archived" when the literal status is archived', async () => {
@@ -432,6 +445,38 @@ describe('validateSpecCommand', () => {
       expect.anything(),
       'approved',
       'archived',
+      undefined,
+      [],
+    );
+  });
+
+  // ── #439: shard-id consistency wiring ──────────────────────────────────────
+
+  it('reads sibling shard ids from the spec directory and forwards them to validateSpec', async () => {
+    const spec = makeSpec('SPEC-014');
+    const shardFiles = [
+      { fileName: 'requirements.md', id: 'SPEC-014' },
+      { fileName: 'design.md', id: 'SPEC-015' },
+    ];
+    vi.mocked(readShardIdFiles).mockReturnValue(shardFiles);
+    vi.mocked(validateSpec).mockReturnValue(makeResult({ complete: true, violations: [] }));
+
+    await validateSpecCommand({ spec });
+
+    // spec.filePath is ".../SPEC-014/spec.md" — the shard reader is passed the
+    // spec's containing DIRECTORY, not the file itself.
+    expect(readShardIdFiles).toHaveBeenCalledWith('/tmp/ws/specs/minspec/SPEC-014');
+    // Note: `expect.anything()` does NOT match undefined/null, so the
+    // explicitTerminal (undefined here — status is 'specifying') and
+    // knownArtifactRefs (never wired) positions use a literal `undefined`.
+    expect(validateSpec).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.anything(),
+      'unapproved',
+      undefined,
+      undefined,
+      shardFiles,
     );
   });
 });
