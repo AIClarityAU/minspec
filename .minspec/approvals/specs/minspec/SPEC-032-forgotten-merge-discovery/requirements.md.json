@@ -1,9 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-032-forgotten-merge-discovery/requirements.md",
-  "specHash": "1490e9781d9ba7d08ab8fa8c67ff6ab54dcb65d148c4c2ec744c198201a0146a",
-  "approvedAt": "2026-07-06T08:12:58.638Z",
+  "specHash": "6936c2994d72e4e64ebb99850285df5105258fb117ae73a414672975d342f776",
+  "approvedAt": "2026-07-10T01:24:24.562Z",
   "approvedBy": "claude@harvest316.com",
   "tier": "T3",
   "migrated": false,
-  "baselineBlob": "0c5d73aeb13c133126de8041540b5de23f4c6800"
+  "baselineBlob": "de8f999d7a580f6a0b16c4b7e7fd10c375e2b6a1"
 }
