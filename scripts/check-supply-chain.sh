@@ -21,7 +21,7 @@ if [ "${SKIP_SUPPLY_CHAIN_CHECK}" = "1" ]; then
 fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-BUMBLEBEE_VERSION="${BUMBLEBEE_VERSION:-v0.1.2}"
+BUMBLEBEE_VERSION="${BUMBLEBEE_VERSION:-latest}"
 BUMBLEBEE_BIN="${BUMBLEBEE_BIN:-$HOME/go/bin/bumblebee}"
 GO_BIN="${GO_BIN:-$HOME/.local/opt/go1.26.3/bin/go}"
 CATALOG_DIR="${BUMBLEBEE_CATALOGS:-$HOME/.cache/bumblebee/catalogs}"
