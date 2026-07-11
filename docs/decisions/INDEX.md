@@ -426,4 +426,12 @@ Issue #74 confirmed against Anthropic's official Legal-and-compliance docs that 
 <!-- dr-summary:DR-053 auto=0000000000000000 -->
 Per-repo-local SDD ids stay unprefixed (DR-027 separate registers); a reference that SPANS projects carries the target project's short prefix from the committed table `.minspec/project-prefixes.md` — SDD refs `<PREFIX>-<ID>` (MS-SPEC-019, SC-DR-007), issue/PR refs `<PREFIX>#<N>` (MS#500, SC#26). Unknown prefix is advisory, never fatal. Ships the Tier-0 core (`@aiclarity/shared` project-prefix module: parsePrefixTable/resolveRef/formatCrossRef/suggestPrefixDeterministic) + seed table + CLAUDE.md convention; Tier-1 validate-advisory + toast deferred to #614.
 <!-- /dr-summary:DR-053 -->
+
+## [DR-054 — Reframe the network posture — data-sovereignty + bring-your-own-LLM (incl. local) + deterministic core supersede "air-gapped" as the product identity; adopt one shared GitHub App (minspec-sdd[bot]) + an OIDC token-broker as the reviewer-identity seam, with customer-own-app as the enterprise override](DR-054.md)
+
+*Status: proposed · Date: 2026-07-11*
+
+<!-- dr-summary:DR-054 auto=b7aa8aa57c0a -->
+Three properties have been conflated under one word — **"offline"** — since DR-004, and treating them as one produces a positioning that is both weak and false the moment a customer uses the product: 1. **Determinism / no-LLM-in-the-decision-path** — the never-wrong signpost, the tier classifier, status resolution: pure functions, reproducible across editor/commit/CI/agent (Goal **G-6**, "determinism as moat"; DR-039/DR-019). This is a **correctness** property. It has nothing to do with network. 2. **Data sovereignty / no MinSpec-initiated egress** — the extension…
+<!-- /dr-summary:DR-054 -->
 <!-- minspec:dr-index:end -->
