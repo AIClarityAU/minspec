@@ -21,6 +21,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { ApprovalRecord } from './approval';
 import type { Tier } from './config';
+import { classifyApprovablePath } from './approvable';
 
 const APPROVALS_DIR = '.minspec/approvals';
 
@@ -160,6 +161,54 @@ export function listRecords(rootDir: string): ApprovalRecord[] {
         try {
           const parsed = JSON.parse(fs.readFileSync(full, 'utf-8')) as unknown;
           if (isValidRecord(parsed)) out.push(normalizeRecord(parsed));
+        } catch {
+          // skip malformed
+        }
+      }
+    }
+  };
+  walk(base);
+  return out;
+}
+
+/** A committed sidecar whose keyed path no longer resolves to an approvable spec. */
+export interface OrphanedRecord {
+  readonly specPath: string;    // the record's stored (stale) key, repo-relative POSIX
+  readonly sidecarFile: string; // absolute on-disk path of the orphaned .json
+}
+
+/**
+ * Walk every committed sidecar and flag the ones whose keyed `specPath` no
+ * longer classifies as an approvable spec (#630) — e.g. `design.md.json` /
+ * `tasks.md.json` sidecars minted back when the classifier's `SPEC_FILE_NAMES`
+ * was wider than `{requirements.md, spec.md}`. `listRecords` only validates
+ * record SHAPE; this is the missing symmetric check that the keyed path is
+ * still a live approvable, so a narrowed classifier can't strand sidecars that
+ * silently rot (nothing re-hashes or GCs them). Read-only — reuses the same
+ * shape validation as `listRecords`/`readRecord` so a malformed sidecar is
+ * skipped here too (it is already surfaced, or ignored, by those readers).
+ */
+export function listOrphanedRecords(rootDir: string): OrphanedRecord[] {
+  const base = path.join(rootDir, ...APPROVALS_DIR.split('/'));
+  const out: OrphanedRecord[] = [];
+  const walk = (dir: string): void => {
+    let entries: fs.Dirent[];
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) walk(full);
+      else if (e.name.endsWith('.json')) {
+        try {
+          const parsed = JSON.parse(fs.readFileSync(full, 'utf-8')) as unknown;
+          if (!isValidRecord(parsed)) continue;
+          const rec = normalizeRecord(parsed);
+          if (!classifyApprovablePath(rec.specPath)) {
+            out.push({ specPath: rec.specPath, sidecarFile: full });
+          }
         } catch {
           // skip malformed
         }

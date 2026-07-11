@@ -22,6 +22,7 @@ import {
   checkReferences,
   type ReferenceRegistry,
 } from '../packages/minspec/src/lib/reference-checker';
+import { listOrphanedRecords } from '../packages/minspec/src/lib/approval-store';
 
 const ROOT = process.cwd();
 let errors = 0;
@@ -304,6 +305,22 @@ try {
   }
 } catch {
   // Corpus unreadable / absent — nothing to check, stay silent.
+}
+
+// Rule 10 (non-fatal, #630): orphaned approval sidecars. Flags a committed
+// `.minspec/approvals/**.json` record whose keyed path no longer classifies as
+// an approvable spec (e.g. a `design.md.json` / `tasks.md.json` sidecar minted
+// before the classifier narrowed to requirements.md/spec.md). These sidecars
+// are never re-hashed or GC'd by the current approve path, so a naive reader
+// could mistake a stale record for live ground truth. WARNS only — a durable
+// gate makes the drift visible without failing the build on already-committed
+// history.
+try {
+  for (const orphan of listOrphanedRecords(ROOT)) {
+    warn(`orphaned approval sidecar for "${orphan.specPath}" (no longer an approvable spec): ${relative(ROOT, orphan.sidecarFile)}`);
+  }
+} catch {
+  // .minspec/approvals/ unreadable / absent — nothing to check, stay silent.
 }
 
 if (warnings > 0) {

@@ -9,6 +9,7 @@ import {
   writeRecord,
   removeRecord,
   listRecords,
+  listOrphanedRecords,
 } from '../src/lib/approval-store';
 import type { ApprovalRecord } from '../src/lib/approval';
 
@@ -135,5 +136,48 @@ describe('approval-store — read / write / remove / list round-trip', () => {
 
   it('listRecords on an empty repo returns []', () => {
     expect(listRecords(tmp)).toEqual([]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #630 — orphaned sidecars for non-approvable paths (design.md/tasks.md) rot
+// silently: the classifier narrowed to requirements.md/spec.md, but nothing
+// flags a committed sidecar keyed to a path that is no longer approvable.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe('listOrphanedRecords — #630 orphan detection', () => {
+  it('a design.md sidecar (no longer approvable) is flagged as orphaned', () => {
+    const orphanRel = 'specs/minspec/design.md';
+    writeRecord(tmp, rec(orphanRel));
+    const orphans = listOrphanedRecords(tmp);
+    expect(orphans).toHaveLength(1);
+    expect(orphans[0].specPath).toBe(orphanRel);
+    expect(orphans[0].sidecarFile).toBe(sidecarPath(tmp, orphanRel));
+  });
+
+  it('a tasks.md sidecar (no longer approvable) is flagged as orphaned', () => {
+    writeRecord(tmp, rec('specs/minspec/tasks.md'));
+    expect(listOrphanedRecords(tmp)).toHaveLength(1);
+  });
+
+  it('a live requirements.md / spec.md sidecar is NOT flagged as orphaned', () => {
+    writeRecord(tmp, rec('specs/minspec/SPEC-007-foo/requirements.md'));
+    writeRecord(tmp, rec('specs/minspec/SPEC-008-bar/spec.md'));
+    expect(listOrphanedRecords(tmp)).toEqual([]);
+  });
+
+  it('a mix of live and orphaned sidecars flags only the orphaned ones', () => {
+    writeRecord(tmp, rec('specs/minspec/SPEC-007-foo/requirements.md'));
+    writeRecord(tmp, rec('specs/minspec/design.md'));
+    writeRecord(tmp, rec('specs/agent-execute/SPEC-019-execution-substrate/design.md'));
+    const orphans = listOrphanedRecords(tmp).map((o) => o.specPath).sort();
+    expect(orphans).toEqual([
+      'specs/agent-execute/SPEC-019-execution-substrate/design.md',
+      'specs/minspec/design.md',
+    ]);
+  });
+
+  it('an empty repo has no orphans', () => {
+    expect(listOrphanedRecords(tmp)).toEqual([]);
   });
 });
