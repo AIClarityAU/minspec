@@ -124,6 +124,24 @@ Commits, issues, and DRs form a linked chain:
 
 Purpose: Issues = what needs doing. DRs = why we chose this approach. Commits = what changed. Don't consolidate — link. Chain is bidirectional: issue→DR (rationale) and DR→issue/spec (materialization).
 
+### Cross-project references — carry the project prefix (DR-053)
+
+Per-repo-local ids stay **unprefixed** (DR-027 separate registers): inside a
+repo, a bare `SPEC-001` / `DR-053` / `EPIC-010` / `#500` always means *this*
+repo's. But a reference that **spans projects** — a minspec DR citing a scrooge
+spec, a commit or issue body pointing at another repo's issue — MUST carry the
+target project's short prefix from `.minspec/project-prefixes.md`, so the ref is
+unambiguous out of context:
+
+- **SDD refs:** `<PREFIX>-<ID>` — `MS-SPEC-019` (minspec), `SC-DR-007` (scrooge), `SB-EPIC-002` (sealbox).
+- **Issue / PR refs:** `<PREFIX>#<N>` — `MS#500`, `SC#26`. The prefix abuts the `#` (no dash), because `#` is its own separator.
+
+Prefixes live in the committed table `.minspec/project-prefixes.md` (`| Prefix | Project | Repo |`).
+An **unknown** prefix is advisory — the assistant suggests one (`suggestPrefixDeterministic`
+is the offline Tier-0 default) and offers to add a row; it is **never** a hard
+failure. The deterministic reader/resolver is `@aiclarity/shared`'s
+`project-prefix` module (`parsePrefixTable` / `resolveRef` / `formatCrossRef`).
+
 ## Evidence Discipline — status claims (RCDD / DR-003)
 
 Before writing **"implemented / done / built / works / shipped"** about a feature into

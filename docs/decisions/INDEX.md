@@ -418,4 +418,12 @@ SPEC-026 treats the whole **corpus** — specs/**, docs/decisions/**, docs/epics
 <!-- dr-summary:DR-052 auto=0000000000000000 -->
 Issue #74 confirmed against Anthropic's official Legal-and-compliance docs that consumer OAuth is for individual native-app use only — routing subscription traffic through a broker/Scrooge or "on behalf of users" is prohibited, and the June-15 separate Agent-SDK credit is paused (still draws the interactive quota). Amends DR-016/DR-017: subscription mode = genuine `claude` CLI direct (no broker reroute), default subscription-CLI, ship both modes, broker/Scrooge = API-key mode only, no multi-tenant.
 <!-- /dr-summary:DR-052 -->
+
+## [DR-053 — Cross-project reference prefixes — per-repo-local ids stay unprefixed; a ref that spans projects carries a short project prefix (MS-SPEC-019, MS#500)](DR-053.md)
+
+*Status: proposed · Date: 2026-07-10*
+
+<!-- dr-summary:DR-053 auto=0000000000000000 -->
+Per-repo-local SDD ids stay unprefixed (DR-027 separate registers); a reference that SPANS projects carries the target project's short prefix from the committed table `.minspec/project-prefixes.md` — SDD refs `<PREFIX>-<ID>` (MS-SPEC-019, SC-DR-007), issue/PR refs `<PREFIX>#<N>` (MS#500, SC#26). Unknown prefix is advisory, never fatal. Ships the Tier-0 core (`@aiclarity/shared` project-prefix module: parsePrefixTable/resolveRef/formatCrossRef/suggestPrefixDeterministic) + seed table + CLAUDE.md convention; Tier-1 validate-advisory + toast deferred to #614.
+<!-- /dr-summary:DR-053 -->
 <!-- minspec:dr-index:end -->
