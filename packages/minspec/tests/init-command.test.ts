@@ -20,14 +20,18 @@ vi.mock('vscode', () => ({
   window: {
     showErrorMessage: vi.fn(),
     showInformationMessage: vi.fn(),
+    // Default: dismissed (undefined) — a missing-markers warning's
+    // Re-scaffold/Open-file actions then no-op, matching pre-#604 behaviour.
     showWarningMessage: vi.fn(),
     // Default: dismissed (undefined) — the coverage-threshold onboarding
     // prompt (offerCoverageThresholdPrompt) then no-ops without writing.
     showQuickPick: vi.fn(),
     showInputBox: vi.fn(),
+    showTextDocument: vi.fn(),
   },
   workspace: {
     getConfiguration: vi.fn(() => ({ get: vi.fn() })),
+    openTextDocument: vi.fn(),
   },
 }));
 
@@ -38,12 +42,16 @@ vi.mock('../src/lib/scaffold', () => ({
   generateHarnessFiles: vi.fn(),
   // Default: no managed-region warnings (clean refresh).
   refreshHarnessFiles: vi.fn(() => []),
+  rescaffoldManagedRegionFile: vi.fn(),
 }));
 
 // ─── Mock folder resolver (avoid touching the real workspace) ────────────────
 
 vi.mock('../src/lib/resolve-folder', () => ({
   resolveTargetFolder: vi.fn(),
+  // Stubbed folder label — the real resolver reads live vscode workspace state
+  // this suite doesn't model; a fixed label is enough to assert attribution.
+  workspaceFolderLabel: vi.fn(() => 'ws'),
 }));
 
 // ─── Mock the SPEC-025 FR-6 constitution nudge ───────────────────────────────
@@ -63,8 +71,10 @@ import {
   scaffold,
   generateHarnessFiles,
   refreshHarnessFiles,
+  rescaffoldManagedRegionFile,
 } from '../src/lib/scaffold';
 import { evaluateConstitution } from '../src/lib/constitution-nudge';
+import { workspaceFolderLabel } from '../src/lib/resolve-folder';
 
 // =============================================================================
 // Tests
@@ -173,6 +183,92 @@ describe('initRefreshCommand() — write-failure surfacing (#153)', () => {
     );
     expect(warnMsgs.some((m) => m.includes('minspec-ci.yml'))).toBe(true);
     expect(warnMsgs.some((m) => m.includes('.githooks/commit-msg'))).toBe(true);
+  });
+
+  // T3 — #604: missing-markers warning carried no project attribution, no action
+  // items, and no auto-heal attempt. Auto-heal itself lives in scaffold.ts
+  // (refreshHarnessFiles) — these assert the SURFACING half: folder-attributed
+  // message with the two buttons, and that each button does what it says.
+  it('prefixes the warning with the workspace folder label (#604)', async () => {
+    vi.mocked(refreshHarnessFiles).mockReturnValueOnce([
+      {
+        outputPath: '.claude/commands/clarify.md',
+        message:
+          'MinSpec-managed markers missing in .claude/commands/clarify.md; left untouched — restore the markers or delete the file to re-scaffold.',
+      },
+    ]);
+
+    await initRefreshCommand('/tmp/ws');
+
+    expect(workspaceFolderLabel).toHaveBeenCalledWith('/tmp/ws');
+    const warnMsg = vi.mocked(vscode.window.showWarningMessage).mock.calls[0][0] as string;
+    expect(warnMsg).toBe(
+      '[ws] MinSpec-managed markers missing in .claude/commands/clarify.md; left untouched — restore the markers or delete the file to re-scaffold.',
+    );
+  });
+
+  it('offers Re-scaffold (overwrite) and Open file actions on the warning (#604)', async () => {
+    vi.mocked(refreshHarnessFiles).mockReturnValueOnce([
+      {
+        outputPath: '.claude/commands/clarify.md',
+        message: 'MinSpec-managed markers missing in .claude/commands/clarify.md; left untouched — restore the markers or delete the file to re-scaffold.',
+      },
+    ]);
+
+    await initRefreshCommand('/tmp/ws');
+
+    const call = vi.mocked(vscode.window.showWarningMessage).mock.calls[0];
+    expect(call.slice(1)).toEqual(['Re-scaffold (overwrite)', 'Open file']);
+  });
+
+  it('"Re-scaffold" rewrites the file via rescaffoldManagedRegionFile (#604)', async () => {
+    vi.mocked(refreshHarnessFiles).mockReturnValueOnce([
+      {
+        outputPath: '.claude/commands/clarify.md',
+        message: 'MinSpec-managed markers missing in .claude/commands/clarify.md; left untouched — restore the markers or delete the file to re-scaffold.',
+      },
+    ]);
+    vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce('Re-scaffold (overwrite)' as never);
+
+    await initRefreshCommand('/tmp/ws');
+
+    expect(rescaffoldManagedRegionFile).toHaveBeenCalledWith('/tmp/ws', '.claude/commands/clarify.md');
+    expect(vscode.window.showTextDocument).not.toHaveBeenCalled();
+  });
+
+  it('"Open file" opens the affected file instead of rewriting it (#604)', async () => {
+    vi.mocked(refreshHarnessFiles).mockReturnValueOnce([
+      {
+        outputPath: '.claude/commands/clarify.md',
+        message: 'MinSpec-managed markers missing in .claude/commands/clarify.md; left untouched — restore the markers or delete the file to re-scaffold.',
+      },
+    ]);
+    vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce('Open file' as never);
+    const fakeDoc = { uri: 'fake' };
+    vi.mocked(vscode.workspace.openTextDocument).mockResolvedValueOnce(fakeDoc as never);
+
+    await initRefreshCommand('/tmp/ws');
+
+    expect(vscode.workspace.openTextDocument).toHaveBeenCalledWith(
+      expect.stringContaining('.claude/commands/clarify.md'),
+    );
+    expect(vscode.window.showTextDocument).toHaveBeenCalledWith(fakeDoc, { preview: false });
+    expect(rescaffoldManagedRegionFile).not.toHaveBeenCalled();
+  });
+
+  it('dismissing the warning takes neither action (#604)', async () => {
+    vi.mocked(refreshHarnessFiles).mockReturnValueOnce([
+      {
+        outputPath: '.claude/commands/clarify.md',
+        message: 'MinSpec-managed markers missing in .claude/commands/clarify.md; left untouched — restore the markers or delete the file to re-scaffold.',
+      },
+    ]);
+    // Default showWarningMessage mock resolves undefined (dismissed).
+
+    await initRefreshCommand('/tmp/ws');
+
+    expect(rescaffoldManagedRegionFile).not.toHaveBeenCalled();
+    expect(vscode.workspace.openTextDocument).not.toHaveBeenCalled();
   });
 });
 
