@@ -11,7 +11,7 @@ product: minspec
 # MinSpec — Code-Completeness (Stub) Gate (Requirements)
 
 **Date:** 2026-05-30
-**Status:** Specifying (SDD Specify phase)
+**Status:** Implementing (SDD Implement phase)
 **Decision:** [DR-012 addendum](../../../docs/decisions/DR-012.md)
 **Triggered by:** session request — "avoid considering code complete while it still has stubs"
 

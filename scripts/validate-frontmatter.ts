@@ -22,6 +22,7 @@ import {
   checkReferences,
   type ReferenceRegistry,
 } from '../packages/minspec/src/lib/reference-checker';
+import { checkStatusParity } from '../packages/minspec/src/lib/status-parity';
 
 const ROOT = process.cwd();
 let errors = 0;
@@ -304,6 +305,36 @@ try {
   }
 } catch {
   // Corpus unreadable / absent — nothing to check, stay silent.
+}
+
+// Rule 10 (FATAL, #626): the body status line must match frontmatter `status:`.
+// The #362 backfill found ~20-29 approvables whose frontmatter `status:` disagreed with
+// the body `**Status:**` (specs) / `## Status` (DRs) line — status-correction / re-approval
+// commits flip the frontmatter field to match the record and leave the prose header stale,
+// and nothing checked the two agree (the recurring validator-asymmetry class: present-and-
+// valid is checked, cross-representation PARITY of the same fact is not). Two disagreeing
+// status readouts in one file is the worst never-wrong defect. Conservative: only a body
+// line whose leading token is a RECOGNISED status word AND differs is flagged, so free-form
+// status prose ("Clarify complete — awaiting Approve", "Specifying (derived — …)") can never
+// false-positive (a false error would block a legitimate commit).
+try {
+  const parityFiles: { file: string; kind: 'spec' | 'dr' }[] = [
+    ...safeGlob(specsDir, '.md').map((file) => ({ file, kind: 'spec' as const })),
+    ...safeGlob(resolveDecisionsDir(), '.md').map((file) => ({ file, kind: 'dr' as const })),
+  ];
+  for (const { file, kind } of parityFiles) {
+    const content = readFileSync(file, 'utf-8');
+    const fm = parseFrontmatter(content);
+    const finding = checkStatusParity(content, fm.status, kind);
+    if (finding) {
+      fail(
+        relative(ROOT, file),
+        `status parity (#626) — frontmatter \`status: ${finding.frontmatter}\` disagrees with the body status line "${finding.body}" (line ${finding.line}). Reconcile the two: advance/correct whichever is stale. A file showing two different statuses is a false signpost.`,
+      );
+    }
+  }
+} catch {
+  // Corpus unreadable / absent — nothing to check.
 }
 
 if (warnings > 0) {

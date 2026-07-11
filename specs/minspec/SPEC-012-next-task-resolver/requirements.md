@@ -10,7 +10,7 @@ epic: EPIC-002  # Signpost Integrity
 # MinSpec — Next-Task Resolver (Requirements)
 
 **Date:** 2026-06-01
-**Status:** Specifying (SDD Specify phase)
+**Status:** Implementing (SDD Implement phase)
 **Decision:** [DR-019](../../../docs/decisions/DR-019.md) (this spec is the contract that decision governs)
 **Triggered by:** session request — "a prioritised list of docs/specs/epics/DRs I need to approve … but actually I don't need a list, just the next task; priority via DAG not LLM."
 **Epic:** [EPIC-002 Signpost Integrity](../../../docs/epics/EPIC-002-signpost-integrity.md)
