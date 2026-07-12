@@ -1,9 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-025-constitution-proposer/requirements.md",
-  "specHash": "fb47cab3659252f99c78494fd073c9e8ac210aa3efc96f8d5be018d180fa3b56",
-  "approvedAt": "2026-07-01T07:27:52.886Z",
-  "approvedBy": "github@harvest316.com",
+  "specHash": "a834e32b4330c782d6bf470ff95384eedebbe0ec901e13cbf3c5ce0eb37a0d4a",
+  "approvedAt": "2026-07-12T06:04:58.974Z",
+  "approvedBy": "claude@harvest316.com",
   "tier": "T3",
   "migrated": false,
-  "baselineBlob": "b0b9e8473a62030e45f04e9b13b3e22830a6fd03"
+  "baselineBlob": "a7631d2a9a69ea99119aedc48a1972e2b0575d4e"
 }
