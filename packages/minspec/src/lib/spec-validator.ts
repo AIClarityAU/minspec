@@ -647,16 +647,15 @@ function hasDanglingParkRef(raw: string): boolean {
 
 // ─── Main ────────────────────────────────────────────────────────────────────
 
-export function validateSpec(
-  spec: ParsedSpec,
-  config: MinspecConfig,
+/** Optional resolvers/context for {@link validateSpec}. All fields omit-to-skip — a caller without a given resolver gets no false positive/negative from that check. */
+export interface ValidateSpecOptions {
   /**
    * Lowercased set of valid epic refs (ids + slugs) from the registry. When
    * supplied, an `epic:` frontmatter ref that is not in the set yields a
    * WARNING (never an error — epics are optional, FR-9). Omit to skip the check
    * (callers without registry access get no false warnings).
    */
-  knownEpicRefs?: ReadonlySet<string>,
+  readonly knownEpicRefs?: ReadonlySet<string>;
   /**
    * The spec's current approval verdict (SPEC-022 / INV-4). When supplied
    * (with `explicitTerminal`), the validator asserts the literal `status:` line
@@ -665,9 +664,9 @@ export function validateSpec(
    * the mirror check entirely (callers without a verdict get no false warning —
    * the same no-false-positive pattern as `knownEpicRefs`).
    */
-  approvalState?: ApprovalStatus,
+  readonly approvalState?: ApprovalStatus;
   /** The spec's explicit terminal (archived), if any — fed to `deriveStatus`. */
-  explicitTerminal?: ExplicitTerminal,
+  readonly explicitTerminal?: ExplicitTerminal;
   /**
    * Lowercased set of known artifact refs (SPEC-NNN / DR-NNN ids) used to resolve
    * REFERENCE-class frontmatter fields — currently `superseded-by` (#162). When
@@ -675,7 +674,7 @@ export function validateSpec(
    * to skip the dangling-ref check (no false positive, mirroring `knownEpicRefs`).
    * The required-when-superseded PRESENCE check runs regardless of this resolver.
    */
-  knownArtifactRefs?: ReadonlySet<string>,
+  readonly knownArtifactRefs?: ReadonlySet<string>;
   /**
    * The spec directory's shard files (filename + id), for shard-id
    * consistency (#439). When supplied, a shard whose id diverges from the
@@ -684,8 +683,21 @@ export function validateSpec(
    * pattern as `knownEpicRefs`/`knownArtifactRefs` (a caller without directory
    * access gets no false violation).
    */
-  siblingShardFiles?: readonly ShardIdFile[],
+  readonly siblingShardFiles?: readonly ShardIdFile[];
+}
+
+export function validateSpec(
+  spec: ParsedSpec,
+  config: MinspecConfig,
+  options: ValidateSpecOptions = {},
 ): ValidationResult {
+  const {
+    knownEpicRefs,
+    approvalState,
+    explicitTerminal,
+    knownArtifactRefs,
+    siblingShardFiles,
+  } = options;
   const tier = spec.frontmatter.tier;
   const raw = spec.raw;
   const rawLower = raw.toLowerCase();

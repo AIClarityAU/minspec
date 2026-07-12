@@ -54,17 +54,14 @@ export async function validateSpecCommand(node?: SpecNodeLike): Promise<void> {
     const approvalState = getApprovalStatus(rootDir, spec.filePath);
     const explicitTerminal: ExplicitTerminal =
       parsed.frontmatter.status === 'archived' ? 'archived' : undefined;
-    result = validateSpec(
-      parsed,
-      loadConfig(rootDir),
-      epicRefSet(rootDir),
+    result = validateSpec(parsed, loadConfig(rootDir), {
+      knownEpicRefs: epicRefSet(rootDir),
       approvalState,
       explicitTerminal,
-      undefined,
       // #439: sibling shard files (design.md/tasks.md/…) in this spec's directory,
       // so a diverging shard id is flagged as an error.
-      readShardIdFiles(path.dirname(spec.filePath)),
-    );
+      siblingShardFiles: readShardIdFiles(path.dirname(spec.filePath)),
+    });
   } catch (err) {
     vscode.window.showErrorMessage(
       `MinSpec: Cannot read ${spec.id} — ${err instanceof Error ? err.message : String(err)}`,

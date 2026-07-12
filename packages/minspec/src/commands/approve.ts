@@ -112,17 +112,12 @@ export async function approveSpecCommand(
   }
 
   const config = loadConfig(rootDir);
-  const result = validateSpec(
-    parsed,
-    config,
-    epicRefSet(rootDir),
-    undefined,
-    undefined,
-    undefined,
+  const result = validateSpec(parsed, config, {
+    knownEpicRefs: epicRefSet(rootDir),
     // #439: sibling shard files (design.md/tasks.md/…) in this spec's directory,
     // so a diverging shard id refuses approval as an error.
-    readShardIdFiles(path.dirname(spec.filePath)),
-  );
+    siblingShardFiles: readShardIdFiles(path.dirname(spec.filePath)),
+  });
   const errors = result.violations.filter((v) => v.severity === 'error');
   const warnings = result.violations.filter((v) => v.severity === 'warning');
 
