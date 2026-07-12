@@ -1,9 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-029-approval-staleness-ux/requirements.md",
-  "specHash": "1f13732d15826d279c43dff1d03994ced75959dfc93d17d0757b81fb4bc1976b",
-  "approvedAt": "2026-07-03T22:42:20.377Z",
+  "specHash": "f7bf2e10857f61eda26824e8aadedff4c3b0d5d488552ffa7101c015f198ff1a",
+  "approvedAt": "2026-07-12T06:04:28.769Z",
   "approvedBy": "claude@harvest316.com",
   "tier": "T3",
   "migrated": false,
-  "baselineBlob": "c0ab51fce13d23dcb8dd58c9b1866ac57a822d18"
+  "baselineBlob": "b1edf09b8db72da0dc9d559eec1168edf5e11232"
 }
