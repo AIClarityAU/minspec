@@ -51,6 +51,15 @@ fi
 # session starts immediately. Opt-in gated (#239): once you run
 # `scripts/drain-inbox.sh --enable-auto`, this auto-triages + dispatches on every
 # session start. Until then it only reports the pending count.
+#
+# On the opted-in `--auto` path the drain runs CONTINUOUSLY (#239): it keeps
+# draining agent-ready work on an interval for as long as THIS Claude session is
+# alive, then dies with the session (no daemon — drain-inbox.sh ties the loop to
+# the session process; see its "Session-lifetime tie" header). It is also quota-
+# aware (#609): a Claude usage-limit signal pauses the loop and it resumes once the
+# window resets. Opt back to a single pass any time with MINSPEC_DRAIN_CONTINUOUS=0.
+# Do NOT resolve the session PID or recompute drain state here — drain-inbox.sh
+# owns that (single source of truth; the pref-path drift bug, #415, is why).
 DRAIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/drain-inbox.sh"
 # Ask drain-inbox.sh where the pref lives — do NOT recompute it here. This hook
 # sits in scripts/hooks/, one level deeper than drain-inbox.sh, so an independent
