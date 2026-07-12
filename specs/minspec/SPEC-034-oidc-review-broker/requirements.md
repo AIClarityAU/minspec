@@ -2,7 +2,7 @@
 id: SPEC-034
 type: requirements
 # 🔒 Once approved, hash-locked: approved bytes recorded in .minspec/approvals.json[SPEC-034].specHash. ANY edit voids approval (hash → stale) — re-run "MinSpec: Approve Spec". DR-012.
-status: specifying
+status: implementing
 tier: T4
 product: minspec
 epic: EPIC-009  # Team Readiness
@@ -10,11 +10,11 @@ aspects: [reviewer, provenance, github-app, oidc, broker, tier-2, team]
 depends_on: [DR-054, DR-033, DR-017, DR-004]
 relates_to: [SPEC-031, SPEC-033, DR-047, DR-050]
 phases:
-  specify: done          # requirements drafted 2026-07-11
-  clarify: done          # all OQ-1..6 resolved 2026-07-11 (Paul Harvey); acceptance criteria added
-  plan: not-started
-  tasks: not-started
-  implement: not-started
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # MinSpec — OIDC Review Token-Broker (shared reviewer App identity for GitHub-native review)
