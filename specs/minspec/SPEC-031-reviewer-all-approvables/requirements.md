@@ -178,7 +178,8 @@ enough human") — and matches how the PR reviewer already runs (#342), extended
     axis). Depth is orthogonal to breadth — any breadth can run at either depth.
   - **Dogfood default (MinSpecPro projects) = breadth `all` × depth `single`**, accepting
     the token-window latency ([#453](https://github.com/AIClarityAU/minspec/issues/453));
-    `panel` is available but not the v1 default (see Out of scope).
+    `panel` has since shipped (PR #612/#453) as the repo-level CI default; SPEC-031's
+    still-unbuilt per-dev depth slider keeps single as its floor (see Out of scope).
 - **FR-8 — Canonical human-gated classification.** A single source of truth for which
   Approvable types are human-gated (Spec, Plan, DR, constitution invariant, PR-to-main,
   Epic), AI-reviewed-only (Issue), or config-dependent (design.md, tasks.md — FR-6). The
@@ -194,8 +195,10 @@ enough human") — and matches how the PR reviewer already runs (#342), extended
   not close).
 - **Backfill / re-review of EXISTING approvables** — [#362](https://github.com/AIClarityAU/minspec/issues/362)
   / #455 (this spec ships the forward-going reviewer; backfill is its own run).
-- **Adversarial multi-voter panel** (a 3rd/4th skeptic voter) — the depth axis of #453; not
-  required for v1 (single fresh-context reviewer is the floor).
+- **Adversarial multi-voter panel** (a 3rd/4th skeptic voter) — the depth axis of #453, now
+  built at the repo-level CI layer as the default (PR #612); SPEC-031's own per-dev depth
+  slider remains unbuilt and not required for v1 (single fresh-context reviewer is the
+  floor).
 - **Building `agent-execute`** or its model-access broker (DR-017) — the reviewer runs in
   the existing dispatch / CI path, not a new extension.
 

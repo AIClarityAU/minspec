@@ -126,9 +126,11 @@ Triggered by: [#112](https://github.com/harvest316/minspec/issues/112)
      `tier`, `type`, `epic`, `aspects`, `title`, `superseded-by`, … — is **content**
      and is retained.
   3. Rejoin frontmatter-minus-lifecycle + body.
-  4. Normalize: EOL → `\n`; strip trailing whitespace per line; ensure **exactly one**
+  4. Collapse every relative-link URL `](path)` → `](RELLINK)`, keeping external
+     (`scheme:`), anchor (`#`) and absolute (`/`) links and all link text (#252).
+  5. Normalize: EOL → `\n`; strip trailing whitespace per line; ensure **exactly one**
      trailing newline.
-  5. `sha256` the result; `specHash(rawSpec)` returns its hex digest.
+  6. `sha256` the result; `specHash(rawSpec)` returns its hex digest.
 
   - **Belt-and-suspenders:** ship `.gitattributes` with `specs/** text eol=lf` so EOL
     is normalized at the VCS layer too, reinforcing step 4 across machines (closes the

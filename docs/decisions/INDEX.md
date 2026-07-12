@@ -277,7 +277,7 @@ DR-012 made spec approval an explicit human act: a content hash recorded in .min
 
 ## [DR-035 — Normalize checkbox state before hashing approved spec files](DR-035.md)
 
-*Status: accepted · Date: 2026-06-19*
+*Status: superseded · Date: 2026-06-19*
 
 <!-- dr-summary:DR-035 auto=b51c2e77ae7b -->
 Approval system (DR-012) binds a spec to its sha256 hash at approval time. Any byte change → stale. Intended: editing spec content forces re-review. During investigation of checkbox-ticking during implement phase, a structural mismatch surfaced: Two semantic types of checkbox exist in the spec kit:

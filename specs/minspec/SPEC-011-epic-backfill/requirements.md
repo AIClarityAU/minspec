@@ -43,8 +43,9 @@ delegation as Tier 1 — no invariant change.
   non-zero exit → fall back to the heuristic proposal. NEVER throw to the user;
   NEVER block.
 - **FR-5 (HITL review).** Apply nothing without explicit user approval. Surface
-  the proposal (epics + mappings + rationale) for review; a modal confirm gates
-  `applyBackfill`.
+  the proposal (epics + mappings + rationale) for review; a non-modal
+  confirmation toast (Apply / Tweak / Cancel over the visible read-only
+  proposal preview) gates `applyBackfill`.
 - **FR-6 (apply).** On approval: create new EPIC-NNN files (via `createEpic`),
   insert `epic:` frontmatter into each mapped artifact, regenerate the epic
   INDEX. Idempotent. Artifacts already carrying an `epic:` are skipped unless the
@@ -107,8 +108,9 @@ Definition of done — each traces an FR / invariant.
   FR-4, INV graceful degradation).
 - [ ] `claude` non-JSON / timeout / non-zero exit falls back to the heuristic
   proposal and never throws to the user or blocks (FR-4).
-- [ ] No `epic:` frontmatter is written until an explicit modal confirm fires (FR-5,
-  INV HITL).
+- [ ] No `epic:` frontmatter is written until an explicit non-modal confirmation
+  toast (Apply / Tweak / Cancel over the visible read-only proposal preview)
+  fires (FR-5, INV HITL).
 - [ ] `applyBackfill` is idempotent: re-running over already-mapped artifacts is a
   no-op unless the user opts to override; artifacts with an existing `epic:` are
   skipped by default (FR-6).
@@ -174,7 +176,9 @@ line without disturbing sibling frontmatter.
    inventing a block — the one permitted throw.
 5. **AI proposes a slug matching an existing registered epic (FR-1).** Reuse the
    existing `id`; do not allocate a duplicate EPIC-NNN.
-6. **User declines at the modal confirm (FR-5).** Zero writes; proposal discarded.
+6. **User declines at the non-modal confirmation toast (Apply / Tweak / Cancel
+   over the visible read-only proposal preview) (FR-5).** Zero writes; proposal
+   discarded.
 
 ## Test / Verification Strategy
 
@@ -184,7 +188,7 @@ line without disturbing sibling frontmatter.
 | FR-2 | T0 (invariant) | Heuristic run with no `claude` + network stubbed unreachable makes zero outbound calls; clusters match Jaccard groupings |
 | FR-3 | T2 (feature) | Mock `claude -p` returns valid JSON → parses into a proposal; availability checked first |
 | FR-4 | T0 (invariant) | absent/non-JSON/timeout/non-zero `claude` each return the heuristic proposal and never throw |
-| FR-5 | T0 (invariant) | No file write occurs unless the modal confirm resolves true |
+| FR-5 | T0 (invariant) | No file write occurs unless the non-modal confirmation toast (Apply / Tweak / Cancel over the visible read-only proposal preview) resolves true |
 | FR-6 | T2 (feature) | Re-running apply over a mapped artifact is a no-op; new EPIC-NNN created once; INDEX regenerated |
 | FR-7 | T1 (contract) | `setArtifactEpic` replaces/adds only the `epic:` line; throws on a block-less file |
 | FR-8 | T2 (feature) | `hasUnbackfilledEpics()` true ⇒ offer shown; AI call fires only on explicit action |
@@ -195,7 +199,9 @@ line without disturbing sibling frontmatter.
 - **Multi-model / provider abstraction (rejected).** Supporting OpenAI/etc. behind a
   provider interface — rejected for v1: `claude -p` only keeps the Tier-1 surface
   minimal and matches DR-004's local-binary delegation (see Out of scope).
-- **Auto-apply without review (rejected).** Skipping the modal confirm would violate
+- **Auto-apply without review (rejected).** Skipping the non-modal confirmation
+  toast (Apply / Tweak / Cancel over the visible read-only proposal preview)
+  would violate
   INV HITL (DR-012 ethos); a silent mass-rewrite is exactly the failure HITL exists
   to prevent.
 - **Editable markdown proposal vs read-only preview + modal (deferred).** Inline
@@ -219,7 +225,8 @@ line without disturbing sibling frontmatter.
 ## Follow-ups (tracked)
 
 - Inline-editable proposal surface — tracked as OQ-1 (review surface); v1 ships the
-  read-only preview + modal confirm chosen there (FR-5), inline edit deferred. Tracked
+  read-only preview + non-modal confirmation toast (Apply / Tweak / Cancel over
+  the visible read-only proposal preview) chosen there (FR-5), inline edit deferred. Tracked
   in-spec as an open question, not yet a GitHub issue (no cross-repo work surfaced).
 - Backfilling issue epic labels / GitHub writes — explicitly out of scope for v1
   (see Out of scope); revisit only if demand surfaces.
@@ -239,6 +246,8 @@ line without disturbing sibling frontmatter.
 
 - **OQ-1 — review surface.** Modal summary + confirm (simplest) vs. an editable
   generated markdown proposal the user tweaks before apply. Proposed: generated
-  markdown preview opened read-only + modal confirm for v1; inline editing later.
+  markdown preview opened read-only + non-modal confirmation toast (Apply /
+  Tweak / Cancel over the visible read-only proposal preview) for v1; inline
+  editing later.
 - **OQ-2 — AI prompt size.** Full prose vs. title+first-paragraph digest. Proposed:
   digest (id, kind, title, first non-empty paragraph) to bound token cost.

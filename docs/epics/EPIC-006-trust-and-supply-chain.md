@@ -16,8 +16,8 @@ under what license. These are the cross-cutting invariants every other epic
 builds on top of.
 
 "Done" = a tiered network-consent model enforced by invariant tests (not
-convention); a pre-publish supply-chain inventory gate that blocks release on
-undeclared dependencies; marker-bounded updates that never surprise-write; a
+convention); a pre-publish supply-chain inventory gate that blocks release when a
+bundled dependency matches a known-malicious-package catalog; marker-bounded updates that never surprise-write; a
 settled license split across core/extensions/content; and a documented
 shared-code boundary with single-writer disk artifacts — **each encoded as a DR
 with a mechanism that enforces it.**
