@@ -497,7 +497,7 @@ describe('validateSpec — epic reference (DR-013 FR-9)', () => {
 
   it('warns (never errors) when the epic ref does not resolve', () => {
     const known = new Set(['epic-001', 'telemetry']);
-    const r = validateSpec(parseSpec(specWithEpic('nope')), DEFAULT_CONFIG, known);
+    const r = validateSpec(parseSpec(specWithEpic('nope')), DEFAULT_CONFIG, { knownEpicRefs: known });
     const v = r.violations.find((x) => x.rule === 'epic.unresolved');
     expect(v).toBeDefined();
     expect(v!.severity).toBe('warning');
@@ -507,9 +507,9 @@ describe('validateSpec — epic reference (DR-013 FR-9)', () => {
 
   it('does not warn when the ref resolves (by id or slug, case-insensitive)', () => {
     const known = new Set(['epic-001', 'telemetry']);
-    expect(validateSpec(parseSpec(specWithEpic('EPIC-001')), DEFAULT_CONFIG, known)
+    expect(validateSpec(parseSpec(specWithEpic('EPIC-001')), DEFAULT_CONFIG, { knownEpicRefs: known })
       .violations.some((x) => x.rule === 'epic.unresolved')).toBe(false);
-    expect(validateSpec(parseSpec(specWithEpic('Telemetry')), DEFAULT_CONFIG, known)
+    expect(validateSpec(parseSpec(specWithEpic('Telemetry')), DEFAULT_CONFIG, { knownEpicRefs: known })
       .violations.some((x) => x.rule === 'epic.unresolved')).toBe(false);
   });
 
@@ -522,7 +522,7 @@ describe('validateSpec — epic reference (DR-013 FR-9)', () => {
     // Regression: SPEC-004 sat orphaned because a missing `epic:` was not flagged —
     // only a *dangling* ref was. A missing ref strands the spec under "(no epic)"
     // just the same, so it must surface too.
-    const r = validateSpec(parseSpec(spec({ tier: 'T3' }, FULL_T3)), DEFAULT_CONFIG, new Set(['epic-001']));
+    const r = validateSpec(parseSpec(spec({ tier: 'T3' }, FULL_T3)), DEFAULT_CONFIG, { knownEpicRefs: new Set(['epic-001']) });
     const v = r.violations.find((x) => x.rule === 'epic.missing');
     expect(v).toBeDefined();
     expect(v!.severity).toBe('warning');
@@ -532,7 +532,7 @@ describe('validateSpec — epic reference (DR-013 FR-9)', () => {
   });
 
   it('does not warn epic.missing when no epics are registered (pre-epic repo, graceful)', () => {
-    const r = validateSpec(parseSpec(spec({ tier: 'T3' }, FULL_T3)), DEFAULT_CONFIG, new Set());
+    const r = validateSpec(parseSpec(spec({ tier: 'T3' }, FULL_T3)), DEFAULT_CONFIG, { knownEpicRefs: new Set() });
     expect(r.violations.some((x) => x.rule === 'epic.missing')).toBe(false);
   });
 
@@ -950,7 +950,7 @@ describe('validateSpec — symmetric frontmatter primitive (#137)', () => {
     const r = validateSpec(
       parseSpec(rawSpec(['id: SPEC-001', 'status: done', 'epic: EPIC-999'])),
       DEFAULT_CONFIG,
-      new Set(['epic-001']),
+      { knownEpicRefs: new Set(['epic-001']) },
     );
     expect(r.violations.some((x) => x.rule === 'epic.unresolved' && x.severity === 'warning')).toBe(true);
   });
@@ -961,7 +961,7 @@ describe('validateSpec — symmetric frontmatter primitive (#137)', () => {
     const r = validateSpec(
       parseSpec(rawSpec(['id: SPEC-001', 'status: done'])),
       DEFAULT_CONFIG,
-      new Set(['epic-001']),
+      { knownEpicRefs: new Set(['epic-001']) },
     );
     expect(r.violations.some((x) => x.rule === 'epic.missing' && x.severity === 'warning')).toBe(true);
   });
@@ -971,7 +971,7 @@ describe('validateSpec — symmetric frontmatter primitive (#137)', () => {
     const r = validateSpec(
       parseSpec(rawSpec(['title: broken', 'tier: T9', 'status: bogus', 'type: nope', 'epic: EPIC-999'])),
       DEFAULT_CONFIG,
-      new Set(['epic-001']),
+      { knownEpicRefs: new Set(['epic-001']) },
     );
     const frontmatterRules = r.violations.filter(
       (v) => v.rule.startsWith('frontmatter.') || v.rule.startsWith('epic.'),
@@ -1126,7 +1126,7 @@ describe('validateSpec — INV-4 literal/derived status mirror drift', () => {
   it('warns (never errors) when the literal disagrees with the derived status', () => {
     // Literal says 'implementing' but the spec is UNAPPROVED → derives 'specifying'.
     const src = spec({ status: 'implementing', phases: IMPL_PHASES }, FULL_T3);
-    const result = validateSpec(parseSpec(src), DEFAULT_CONFIG, undefined, 'unapproved', undefined);
+    const result = validateSpec(parseSpec(src), DEFAULT_CONFIG, { approvalState: 'unapproved' });
     const drift = result.violations.find((v) => v.rule === 'status.mirror-drift');
     expect(drift).toBeDefined();
     expect(drift!.severity).toBe('warning');
@@ -1139,19 +1139,19 @@ describe('validateSpec — INV-4 literal/derived status mirror drift', () => {
   it('no drift warning when the literal matches the derived status', () => {
     // Approved + plan in progress → derives 'implementing', literal agrees.
     const src = spec({ status: 'implementing', phases: IMPL_PHASES }, FULL_T3);
-    const result = validateSpec(parseSpec(src), DEFAULT_CONFIG, undefined, 'approved', undefined);
+    const result = validateSpec(parseSpec(src), DEFAULT_CONFIG, { approvalState: 'approved' });
     expect(result.violations.some((v) => v.rule === 'status.mirror-drift')).toBe(false);
   });
 
   it('the gate reads DERIVED status: an unapproved spec deriving to specifying does not drift when its literal is specifying', () => {
     const src = spec({ status: 'specifying', phases: IMPL_PHASES }, FULL_T3);
-    const result = validateSpec(parseSpec(src), DEFAULT_CONFIG, undefined, 'unapproved', undefined);
+    const result = validateSpec(parseSpec(src), DEFAULT_CONFIG, { approvalState: 'unapproved' });
     expect(result.violations.some((v) => v.rule === 'status.mirror-drift')).toBe(false);
   });
 
   it('explicitTerminal (archived) drives the derive: literal implementing drifts against archived', () => {
     const src = spec({ status: 'implementing', phases: IMPL_PHASES }, FULL_T3);
-    const result = validateSpec(parseSpec(src), DEFAULT_CONFIG, undefined, 'approved', 'archived');
+    const result = validateSpec(parseSpec(src), DEFAULT_CONFIG, { approvalState: 'approved', explicitTerminal: 'archived' });
     const drift = result.violations.find((v) => v.rule === 'status.mirror-drift');
     expect(drift).toBeDefined();
     expect(drift!.message).toContain('archived');
@@ -1391,11 +1391,7 @@ describe('validateSpec — shard-id consistency wiring (#439)', () => {
     const r = validateSpec(
       parseSpec(spec({ id: 'SPEC-007', tier: 'T3' }, FULL_T3)),
       DEFAULT_CONFIG,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      [f('requirements.md', 'SPEC-007'), f('design.md', 'SPEC-008')],
+      { siblingShardFiles: [f('requirements.md', 'SPEC-007'), f('design.md', 'SPEC-008')] },
     );
     const v = r.violations.find((x) => x.rule === 'shard-id.mismatch');
     expect(v).toBeDefined();
@@ -1407,11 +1403,7 @@ describe('validateSpec — shard-id consistency wiring (#439)', () => {
     const r = validateSpec(
       parseSpec(spec({ id: 'SPEC-007', tier: 'T3' }, FULL_T3)),
       DEFAULT_CONFIG,
-      undefined,
-      undefined,
-      undefined,
-      undefined,
-      [f('requirements.md', 'SPEC-007'), f('design.md', 'SPEC-007')],
+      { siblingShardFiles: [f('requirements.md', 'SPEC-007'), f('design.md', 'SPEC-007')] },
     );
     expect(r.violations.some((v) => v.rule === 'shard-id.mismatch')).toBe(false);
   });
@@ -1447,10 +1439,7 @@ describe('validateSpec — superseded-by required-when-superseded (#162)', () =>
     const r = validateSpec(
       parseSpec(artifact('\nsuperseded-by: SPEC-999')),
       DEFAULT_CONFIG,
-      undefined,
-      undefined,
-      undefined,
-      known,
+      { knownArtifactRefs: known },
     );
     const v = r.violations.find((x) => x.rule === 'frontmatter.superseded-by.unresolved');
     expect(v).toBeDefined();
@@ -1463,10 +1452,7 @@ describe('validateSpec — superseded-by required-when-superseded (#162)', () =>
     const r = validateSpec(
       parseSpec(artifact('\nsuperseded-by: SPEC-200')),
       DEFAULT_CONFIG,
-      undefined,
-      undefined,
-      undefined,
-      known,
+      { knownArtifactRefs: known },
     );
     expect(r.violations.some((x) => x.rule.startsWith('frontmatter.superseded-by'))).toBe(false);
   });

@@ -422,11 +422,14 @@ describe('validateSpecCommand', () => {
     expect(getApprovalStatus).toHaveBeenCalledWith('/tmp/ws', spec.filePath);
     // SPEC-022 (INV-4): the verdict + explicit terminal (undefined here, status is
     // not 'archived') are forwarded so the validator can assert the mirror.
-    // #439: the trailing args are knownArtifactRefs (unused here) and the spec
-    // directory's shard files, so the validator can assert shard-id consistency.
-    expect(validateSpec).toHaveBeenCalledWith(
-      fakeParsed, fakeConfig, fakeEpics, 'approved', undefined, undefined, [],
-    );
+    // #439: siblingShardFiles is also forwarded, so the validator can assert
+    // shard-id consistency.
+    expect(validateSpec).toHaveBeenCalledWith(fakeParsed, fakeConfig, {
+      knownEpicRefs: fakeEpics,
+      approvalState: 'approved',
+      explicitTerminal: undefined,
+      siblingShardFiles: [],
+    });
   });
 
   it('passes explicitTerminal "archived" when the literal status is archived', async () => {
@@ -442,11 +445,7 @@ describe('validateSpecCommand', () => {
     expect(validateSpec).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
-      expect.anything(),
-      'approved',
-      'archived',
-      undefined,
-      [],
+      expect.objectContaining({ approvalState: 'approved', explicitTerminal: 'archived' }),
     );
   });
 
@@ -466,17 +465,12 @@ describe('validateSpecCommand', () => {
     // spec.filePath is ".../SPEC-014/spec.md" — the shard reader is passed the
     // spec's containing DIRECTORY, not the file itself.
     expect(readShardIdFiles).toHaveBeenCalledWith('/tmp/ws/specs/minspec/SPEC-014');
-    // Note: `expect.anything()` does NOT match undefined/null, so the
-    // explicitTerminal (undefined here — status is 'specifying') and
-    // knownArtifactRefs (never wired) positions use a literal `undefined`.
+    // explicitTerminal is undefined here (status is 'specifying'); knownArtifactRefs
+    // is never wired by this command.
     expect(validateSpec).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
-      expect.anything(),
-      'unapproved',
-      undefined,
-      undefined,
-      shardFiles,
+      expect.objectContaining({ approvalState: 'unapproved', siblingShardFiles: shardFiles }),
     );
   });
 });

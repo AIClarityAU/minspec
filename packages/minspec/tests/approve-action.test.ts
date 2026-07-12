@@ -287,11 +287,7 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
     expect(validateSpec).toHaveBeenCalledWith(
       expect.anything(),
       expect.anything(),
-      expect.anything(),
-      undefined,
-      undefined,
-      undefined,
-      shardFiles,
+      expect.objectContaining({ siblingShardFiles: shardFiles }),
     );
   });
 
