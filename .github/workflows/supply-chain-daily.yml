@@ -36,7 +36,7 @@ jobs:
       - run: npm ci
 
       - name: Install bumblebee
-        run: go install github.com/perplexityai/bumblebee/cmd/bumblebee@latest
+        run: go install github.com/perplexityai/bumblebee/cmd/bumblebee@v0.1.2
 
       - name: Fetch threat catalogs
         env:
