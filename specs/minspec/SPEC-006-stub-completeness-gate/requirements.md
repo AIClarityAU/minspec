@@ -4,14 +4,14 @@ id: SPEC-006
 type: requirements
 tier: T3
 # Editing voids approval (hash in .minspec/approvals.json → stale); re-run "MinSpec: Approve Spec". DR-012
-status: implementing
+status: specifying
 product: minspec
 ---
 
 # MinSpec — Code-Completeness (Stub) Gate (Requirements)
 
 **Date:** 2026-05-30
-**Status:** Implementing (SDD Implement phase)
+**Status:** Specifying (SDD Specify phase)
 **Decision:** [DR-012 addendum](../../../docs/decisions/DR-012.md)
 **Triggered by:** session request — "avoid considering code complete while it still has stubs"
 

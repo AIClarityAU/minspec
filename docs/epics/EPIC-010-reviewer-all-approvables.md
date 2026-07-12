@@ -84,7 +84,7 @@ alternatives.
   Decision 6).
 - [ ] **Auto-approve config (low-criticality)** — dev opt-in (off by default) to
   auto-accept `design.md` / `tasks.md` / issue on AI greenlight with no human
-  gate; high-criticality types (spec / DR / constitution / PR-to-main / epic)
+  gate; high-criticality types (spec / plan / DR / constitution / PR-to-main / epic)
   always keep the human gate (DR-047 Decision 5).
 
 > Issues for each checklist item are tracked individually (see DR-047 Follow-ups).

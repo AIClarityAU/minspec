@@ -106,15 +106,16 @@ are live invariant breaches, not future work.
      an `active` epic, with all `depends_on` already cleared.
   3. **promote-parent** — a `proposed` epic with members waiting on it.
   4. **pending** — remaining `proposed` ADRs / unapproved specs.
-  Order **within** a class by `(epic.order, priority, artifact-id)` (FR-3 dials;
+  Order **within** a class by `(epic.order, goal-rank, priority, artifact-id)` (FR-3 dials;
   `artifact-id` is the final deterministic tie-break). This yields a partial order
   whose top band may contain ties (FR-14); the **next task** is any member of that
   top band.
 - **FR-3 (subjective weight is explicit data, never inferred).** Any priority
   input that is a human judgement — relative importance of independent branches —
   MUST be read from explicit frontmatter, NOT inferred by the engine and NOT
-  inferred by an LLM. Two dials: `epic.order` (coarse, cross-epic) and a per-spec
-  `priority:` field (fine, within a tie — applied at the `(epic.order, …)`
+  inferred by an LLM. Three dials: `epic.order` (coarsest, cross-epic), `goal-rank`
+  (mid, DR-039 §3) and a per-spec
+  `priority:` field (finest, within a tie — applied at the `(epic.order, goal-rank, …)`
   tie-break, ahead of `artifact-id`). Prose in CLAUDE.md ("ScroogeLLM is future")
   is invisible to the resolver until lifted into structured data. The engine
   computes structure; the human sets weight.
@@ -248,7 +249,7 @@ Seams where a v1 mistake is expensive to undo later — ranked. Each is FR-ancho
 
 1. **The frontmatter edge vocabulary (`depends_on` / `supersedes` / `relates_to`, FR-13).** Once authors write these keys across real specs/DRs/epics, the *names, cardinality (lists), and gating semantics* become a corpus-wide contract. Renaming a key or flipping `depends_on` from blocking→advisory means migrating every artifact that adopted it. Get the v1 vocabulary right (OQ3 resolved to ship all three) — adding a *new* edge kind later is cheap; changing an existing one is a corpus migration.
 2. **`MILESTONE-NNN` as a first-class artifact kind (FR-3b).** Introducing a brand-new registered artifact type (id namespace, `status: open|reached`, INDEX participation) is a schema commitment. If temporal deferral were later modelled differently (a date edge, a flag), every `depends_on: [MILESTONE-NNN]` link and every milestone file would have to be rewritten. The "deferral is always a link" decision (FR-3a) is the load-bearing constraint that makes milestones necessary — reversing *that* unwinds FR-3a, FR-3b together.
-3. **The severity-class partial order and its boundaries (FR-2's 4 classes).** Callers (status-bar, explorer, CI — FR-11) and every T0 test (FR-12) encode "gate-violation > blocked-ready > promote-parent > pending". Re-splitting or re-ordering classes invalidates the whole T0 fixture set and any UI that colour-codes by class. The class *count and order* is the stable contract; the `(epic.order, priority, artifact-id)` within-class tie-break (FR-3) is comparatively cheap to retune.
+3. **The severity-class partial order and its boundaries (FR-2's 4 classes).** Callers (status-bar, explorer, CI — FR-11) and every T0 test (FR-12) encode "gate-violation > blocked-ready > promote-parent > pending". Re-splitting or re-ordering classes invalidates the whole T0 fixture set and any UI that colour-codes by class. The class *count and order* is the stable contract; the `(epic.order, goal-rank, priority, artifact-id)` within-class tie-break (FR-3) is comparatively cheap to retune.
 4. **`packages/shared` pure-function signature (FR-11).** The resolver's `(filesystem+frontmatter state) → next-task` signature is imported by 4 surfaces. Changing its input shape or return type is a cross-package break (DR-014 tier map). The Tier-0 purity constraint (no `vscode`, no network) is the hard wall — admitting either later contaminates every consumer and breaks CI usage.
 5. **"Human queue only" node-source boundary (FR-8, INV — Two Queues).** The set of node kinds the resolver draws from (epic-promote, spec-approve, adr-accept, phase-action) is defined by *exclusion* of the agent/dispatch queue. If an agent-work node kind were ever admitted, the Two-Queues invariant and its tests fall, and the signpost's meaning ("what the human must do") silently changes. The exclusion is structural and should stay structural.
 
@@ -276,7 +277,7 @@ Definition-of-done — each item traces FR(s) and is the concrete check that the
 requirement is met. The resolver ships only when every box is tickable.
 
 - [ ] **(FR-1, INV-determinism)** Given a fixed fixture tree, the resolver returns the *same* next-task on repeated runs; no LLM/network call is reachable from the resolve path. A test asserts byte-identical output across N runs.
-- [ ] **(FR-2)** A fixture with one node of each severity class yields the next-task drawn from **gate-violation** first; T0 tests cover all four class boundaries and the `(epic.order, priority, artifact-id)` within-class tie-break.
+- [ ] **(FR-2)** A fixture with one node of each severity class yields the next-task drawn from **gate-violation** first; T0 tests cover all four class boundaries and the `(epic.order, goal-rank, priority, artifact-id)` within-class tie-break.
 - [ ] **(FR-5)** The primary output is exactly **one** task object (kind, target id, imperative string, clearing action) — not a list — verified by output shape.
 - [ ] **(FR-6)** The full ranked queue is retrievable on demand and is collapsed/secondary by default.
 - [ ] **(FR-7)** Every emitted next-task carries its derivation (severity class + the gate/rule that produced it, e.g. "implementing-but-unapproved → DR-012"); a deliberately-wrong fixture is diagnosable to the artifact+rule.
@@ -299,7 +300,7 @@ requirement is met. The resolver ships only when every box is tickable.
 | Next task = human's, not LLM's | FR-8, INV-two-queues |
 | Reliable / deterministic assessment | FR-1, FR-2, FR-9, FR-12 |
 | Subjective weight (ScroogeLLM=future) | FR-3, FR-3a |
-| Two weight dials (order + priority) | FR-3, FR-2 |
+| Three weight dials (order + goal-rank + priority) | FR-3, FR-2 |
 | Deferral as a link, not a boolean | FR-3a, FR-13 |
 | Temporal deferral via milestones | FR-3b |
 | Cross-cutting deps outside SDD tree | FR-13 |
@@ -364,7 +365,7 @@ Per-FR tier + one-line assertion sketch:
 | FR | Tier | Assertion sketch |
 |---|---|---|
 | FR-1 | T0 | Repeated resolve on a fixed fixture → byte-identical output; no LLM/network call reachable from the resolve path. |
-| FR-2 | T0 | One-node-per-class fixture → next-task is the gate-violation; within-class order follows `(epic.order, priority, artifact-id)`. |
+| FR-2 | T0 | One-node-per-class fixture → next-task is the gate-violation; within-class order follows `(epic.order, goal-rank, priority, artifact-id)`. |
 | FR-3 / FR-3a / FR-3b | T0 | `epic.order`/`priority` change re-orders deterministically; a `depends_on` (incl. on a `MILESTONE-NNN`) hides the dependent until the blocker/milestone clears. |
 | FR-4 | T1 | Resolver consumes SPEC-010's `phase-action` source; does not re-derive coverage predicates (no duplicate predicate code path). |
 | FR-5 / FR-6 | T2 | Primary output = single task object; full queue retrievable on demand, secondary by default. |
@@ -432,8 +433,8 @@ Per-FR tier + one-line assertion sketch:
 
 ## Resolved questions
 
-- **OQ1 — per-spec `priority:` field.** **Resolved: keep it.** Both dials ship —
-  `epic.order` (coarse) and `priority:` (fine, within tie). (FR-3, FR-2.)
+- **OQ1 — per-spec `priority:` field.** **Resolved: keep it.** All three dials ship —
+  `epic.order` (coarsest), `goal-rank` (mid, DR-039 §3), and `priority:` (finest, within tie). (FR-3, FR-2.)
 - **OQ2 — temporal deferral with no artifact blocker.** **Resolved: milestones.**
   Add `MILESTONE-NNN` artifacts as `depends_on` targets; deferral stays one
   mechanism (a link), no date-typed edge, no flag. (FR-3a, FR-3b.)

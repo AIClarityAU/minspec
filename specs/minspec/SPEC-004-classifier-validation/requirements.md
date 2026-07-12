@@ -204,8 +204,9 @@ same test must `skipIf` `.data/` is absent and leave `npm test` green (AC-1, FR-
 
 - **Reframe tier = mechanical/blast-radius scope + upward-only ratchet** — design
   resolved in [DR-021](../../../docs/decisions/DR-021.md).
-- **Reach axis / tier → derived label** — resolved in
-  [DR-022](../../../docs/decisions/DR-022.md) / [DR-024](../../../docs/decisions/DR-024.md).
+- **Tier → derived label (Fork B)** — accepted in [DR-024](../../../docs/decisions/DR-024.md).
+  **Reach axis** — proposed, gated on reach validation (#91) per
+  [DR-022](../../../docs/decisions/DR-022.md) banner / DR-024 Decision point 2; NOT resolved.
 - **Expand corpus to include true-T4 (architectural) instances** to exercise the
   unexercised T4 row (NFR-2 gap) — needs a non-SWE-bench corpus; not in this spec.
 - **Finish labelling toward ~50+ with T4 examples** — tasks.md Phase 2 is `[~]` (24→120

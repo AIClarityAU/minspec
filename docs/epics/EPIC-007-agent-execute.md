@@ -47,6 +47,7 @@ quota, never silent PAYG.
   `scripts/dispatch-issue.sh`, `scripts/triage-inbox.sh`. This is the in-repo
   build harness; the **productized** form is this extension and does **not** ship
   inside MinSpec.
-- **Status / open questions:** Specify phase not yet started (future session).
-  Resolve subscription OAuth-injection into the cred-free sandbox during Specify.
+- **Status / open questions:** Specify+ underway: SPEC-016 (reality-check, T3) and
+  SPEC-019 (execution-substrate, T4, full requirements/design/tasks) both status:
+  implementing; OAuth-injection resolved via DR-052.
 - **Issues:** label `epic:agent-execute`.

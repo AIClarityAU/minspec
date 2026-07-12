@@ -1,7 +1,7 @@
 ---
 id: SPEC-029
 type: requirements
-status: implementing
+status: done
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity
@@ -11,15 +11,15 @@ relates_to: [SPEC-015, SPEC-018, SPEC-026, DR-012, DR-034]
 phases:
   specify: done
   clarify: done   # FR-OQ1 resolved by Paul Harvey 2026-07-03 (see Clarify); FR-OQ2/FR-OQ3 resolved by eng default
-  plan: in-progress   # design.md drafted 2026-07-03, Opus-adversarially-reviewed + fixed, awaiting human review
-  tasks: in-progress   # tasks.md drafted 2026-07-03, awaiting human review
-  implement: in-progress   # code + 24 new tests written 2026-07-04, all green (2328/2330 repo-wide); PR not yet opened/reviewed
+  plan: done   # design.md drafted 2026-07-03, Opus-adversarially-reviewed + fixed, merged via PR #451, 2026-07-04
+  tasks: done   # tasks.md drafted 2026-07-03, merged via PR #451, 2026-07-04
+  implement: done   # code + 24 new tests written 2026-07-04, all green (2328/2330 repo-wide); merged via PR #451, 2026-07-04
 ---
 
 # MinSpec — Approval-Staleness Prominence + Diff View (Requirements)
 
 **Date:** 2026-07-03
-**Status:** Implementing (SDD Implement phase)
+**Status:** Done
 **Triggered by:** session — SPEC-026 showed a bare warning icon for "needs
 re-approval" with no way to see *what* changed; ask was to make staleness more
 prominent (a lifecycle-style grouping) and to show the changed sections on click.

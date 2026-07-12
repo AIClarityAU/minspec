@@ -38,9 +38,10 @@ The **ai-review** workflow set — the independent fresh-context reviewer that p
 `ai-review:pass` / `ai-review:changes` label — is **not** in that list. It exists only on
 `AIClarityAU/minspec`. Consequence, observed 2026-07-06 (#557) and reconfirmed 2026-07-07:
 
-- **scrooge** `main`: only `deploy-site.yml` + `minspec-validate.yml`. PR #46 received two
-  `MinSpec Validate` checks and **zero** ai-review.
-- **sealbox** `main`: identical — only `deploy-site.yml` + `minspec-validate.yml`.
+- **scrooge** `main`: now carries the full ai-review set (landed via harness-refresh
+  PR #57) — no longer a live example of the gap.
+- **sealbox** `main`: still only `deploy-site.yml` + `minspec-validate.yml` — the sole
+  accurate pre-fix example.
 
 A hand-port exists (scrooge branch `feat/port-ai-review-ci`, commit `cd4b14c`) that copied
 the full reviewer harness into scrooge and **proves it runs in a non-monorepo repo** — but
@@ -97,7 +98,7 @@ finding: the gate checks the thing it happens to know about and is silent on the
   `CLAUDE_CODE_OAUTH_TOKEN` secret (`claude setup-token`); `MINSPEC_APP_ID` +
   `MINSPEC_APP_PRIVATE_KEY` (raw PEM); the `minspec-sdd[bot]` App installed with
   `pull-requests: write` + `issues: write` + `checks: write`; repo variable
-  `AI_REVIEW_LABEL_ACTORS = minspec-sdd[bot]`; and marking the `ai-review` check required
+  `AI_REVIEW_BOT_LOGINS = minspec-sdd[bot]`; and marking the `ai-review` check required
   (#480). Deep-link `claude setup-token` and the App install page where possible.
 - **FR-5 — Idempotent + drift-managed.** Init/refresh any number of times ⇒ one copy of
   each file, no marker duplication; refresh keeps the MinSpec-owned region current and
@@ -164,7 +165,7 @@ finding: the gate checks the thing it happens to know about and is silent on the
 1. A **fresh repo** with only `.minspec/` scaffolded, after init/refresh, has the full
    ai-review file set committed and ai-review **triggers** on the next PR (skipping cleanly
    with the notice while secrets are absent). [INV-1, FR-1]
-2. `MinSpec: Check Repo Governance` on scrooge/sealbox (pre-fix) reports *both* gaps
+2. `MinSpec: Check Repo Governance` on sealbox (pre-fix) reports *both* gaps
    (missing ai-review, unprotected/under-required `main`) and offers the fix. [FR-2]
 3. Accepting the fix scaffolds the files (half A) and either writes protection (D-2 opt-in)
    or prints the exact steps (default), plus the FR-4 prerequisite checklist. [FR-3, FR-4]
