@@ -455,6 +455,23 @@ quarantine_publish() {
   echo "Agent output QUARANTINED for #$ISSUE (role: $ROLE). Worktree left at: $WORKTREE"
 }
 
+# ── Escalate-retry decision (DR-355) — PURE, unit-tested ──────────────────────
+# Given the model that just emitted `ESCALATE:`, whether the one allowed opus
+# retry has already been consumed ("1"/"0"), and the opt-out env value, decide
+# the next action. Echoes exactly ONE token and nothing else (no side effects),
+# so it is safe to source and unit-test in isolation:
+#   retry-opus     — re-dispatch the SAME task once on opus (one tier bump)
+#   surface-human  — stop; label agent-escalated + needs-human-review
+# Order matters: opt-out AND already-retried each force surface-human, so the
+# bump is bounded to exactly one tier and can never loop.
+escalate_next_action() {
+  local model="$1" retried="$2" retry_off="$3"
+  if [[ "$retry_off" == "1" ]]; then echo "surface-human"; return 0; fi
+  if [[ "$retried" == "1" ]]; then echo "surface-human"; return 0; fi
+  if [[ "$model" == "opus" ]]; then echo "surface-human"; return 0; fi
+  echo "retry-opus"
+}
+
 # Model per role (native model routing — the measured ~3-4% dev-loop saving from
 # the ScroogeLLM dogfooding work). Route mechanical/standard work off the expensive default and
 # keep opus where an error is costly. The ESCALATION clause in $PROMPT is the
@@ -466,19 +483,48 @@ case "$ROLE" in
   reviewer|security|architect)  MODEL="opus"   ;;  # review / security / design — stakes high
   *)                            MODEL="sonnet" ;;
 esac
-echo "Model: $MODEL (role: $ROLE)"
+# ── Escalate-retry loop (DR-355) ──────────────────────────────────────────────
+# A lower-tier give-up (dev = sonnet emits `ESCALATE:`) earns ONE automated retry
+# on opus — the SAME task, with the sonnet failure reason carried in as context —
+# before a human is ever asked. Only if the OPUS run ALSO escalates (or the run
+# was already on opus, or the retry is opted out) do we label agent-escalated +
+# needs-human-review and stop. Bounded to exactly one tier bump by the local
+# ESCALATE_RETRIED flag (never re-read from labels), so it can never loop. Opt
+# out (straight to human, the pre-#662 behaviour): MINSPEC_ESCALATE_RETRY_OFF=1.
+RUN_MODEL="$MODEL"
+RUN_PROMPT="$PROMPT"
+ESCALATE_RETRIED=0
+
+while true; do
+echo "Model: $RUN_MODEL (role: $ROLE)"
 
 # Headless run inside the worktree. `claude -p` is the only automatable launch
 # primitive (cron/loop-able). It exits 0 even when the agent self-escalates, so
 # detect ESCALATE: in the output rather than relying on exit code.
-if (cd "$WORKTREE" && claude -p "$PROMPT" \
-      --model "$MODEL" \
+if (cd "$WORKTREE" && claude -p "$RUN_PROMPT" \
+      --model "$RUN_MODEL" \
       --allowedTools "$ALLOWED_TOOLS" \
       --output-format text 2>&1 | tee "$LOG"); then
   if grep -q '^ESCALATE:' "$LOG"; then
+    # First `ESCALATE:` line is the agent's one-line reason (DR-355 format).
+    ESCALATE_REASON=$(grep -m1 '^ESCALATE:' "$LOG" | sed 's/^ESCALATE:[[:space:]]*//')
+    if [[ "$(escalate_next_action "$RUN_MODEL" "$ESCALATE_RETRIED" "${MINSPEC_ESCALATE_RETRY_OFF:-}")" == "retry-opus" ]]; then
+      # DR-355: re-invoke the SAME task once on opus, carrying the lower-tier
+      # failure reason so opus has the sonnet-run context. One bump only — the
+      # ESCALATE_RETRIED flag makes the next escalation resolve to surface-human.
+      echo "Agent ESCALATED #$ISSUE on '$RUN_MODEL' (reason: ${ESCALATE_REASON}) — retrying once on opus (DR-355)."
+      ESCALATE_RETRIED=1
+      RUN_MODEL="opus"
+      RUN_PROMPT=$(printf '%s\n\n---\n\n## DR-355 escalation retry — prior lower-tier failure\n\nA previous run of THIS SAME task on a lower model tier (`%s`) could not complete it and emitted the escalation below. You are the opus retry and have more capability — complete the task fully and correctly. Only escalate again if it is genuinely beyond an opus agent (a human takes over after that).\n\n> ESCALATE: %s\n' "$PROMPT" "$MODEL" "$ESCALATE_REASON")
+      continue
+    fi
+    # Already on opus, the one retry is spent, or retry opted out → surface to a
+    # human. needs-human-review makes the dead-end visible (best-effort create).
+    gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
+      --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
     gh issue edit "$ISSUE" --repo "$REPO" \
-      --remove-label "agent-running" --add-label "agent-escalated" 2>/dev/null || true
-    echo "Agent ESCALATED issue #$ISSUE (role: $ROLE). Review: $LOG"
+      --remove-label "agent-running" --add-label "agent-escalated,needs-human-review" 2>/dev/null || true
+    echo "Agent ESCALATED issue #$ISSUE (role: $ROLE, model: $RUN_MODEL) — surfaced to human (agent-escalated + needs-human-review). Review: $LOG"
   else
     # EGRESS GUARD (#358) — scan the about-to-be-published material AFTER the agent
     # exits but BEFORE the first credentialed/network op. Fail-closed: on any
@@ -695,3 +741,9 @@ else
     --remove-label "agent-running" --add-label "agent-escalated" 2>/dev/null || true
   echo "Agent CRASHED on issue #$ISSUE (role: $ROLE). Review: $LOG"
 fi
+
+# Every non-retry path (clean publish, final escalation, crash) falls through to
+# here and exits the loop. Only the DR-355 opus retry `continue`s above, and it
+# can fire at most once (ESCALATE_RETRIED), so this loop runs 1–2 iterations.
+break
+done
