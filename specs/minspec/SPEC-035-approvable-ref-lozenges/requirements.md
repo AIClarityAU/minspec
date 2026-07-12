@@ -68,13 +68,21 @@ hover cards for project vocabulary/jargon — is a sibling feature tracked separ
 
 ## Functional Requirements
 
-- **FR1 — detect references (Tier-0).** Over a rendered approvable's text, detect every
-  DR-053-grammar reference — approvable (`MIN/SP19`, `DR53`, `#500`), paragraph
-  (`SP19/FR3`, `FR3`), and project-wide item (a constitution goal `G3`, an `INV`) —
-  using a regex anchored on the **closed code vocabulary** (project codes from the
-  table; `SP|DR|EP|PR|IS`; the paragraph type codes), so it does not fire on file paths
-  or URLs (DR-053 R1/OQ1). Detection + resolution reuse `@aiclarity/shared`
-  `project-prefix` — pure, no `fs`/`vscode`/network/LLM.
+- **FR1 — detect references (Tier-0), per the DR-053 §4 detection contract.** Over a
+  rendered approvable's text, detect DR-053-grammar references using a regex anchored on
+  the **closed code vocabulary** (project codes from the table; `SP|DR|EP`; the paragraph
+  type codes). Contract (DR-053 §4 — the review's central fix):
+  - **Auto-lozenge only a ref carrying at least an APPROVABLE segment** — `MIN/SP19`,
+    `SP19/FR3`, `DR53`, `#500`, `SCR#204`. A **bare** paragraph code (`FR3`, `R1`, `M1`,
+    `G7`) is authoring shorthand and is **NOT** auto-detected (it would flood false
+    positives — corpus `M1`×82, `R1`×51, "Apple M1", "Lexus IS500"). An **opt-in sigil**
+    `[[FR3]]` force-lozenges a bare ref.
+  - **Longest-match ordering** (`RD` before `R`, `NFR` before `FR`/`R`).
+  - **Invariants/goals are named**: admit `INV-<slug>` and `G-<n>`, not `INV\d+`.
+  - Issues/PRs are GitHub-native `#N` (intra-project) / `SCR#204` (cross-project) — not
+    `IS`/`PR` codes.
+  Detection + resolution reuse `@aiclarity/shared` `project-prefix` — pure, no
+  `fs`/`vscode`/network/LLM.
 - **FR2 — render as lozenge.** Each detected, resolved reference renders as an inline
   **lozenge/chip** in the webview, visually distinct from prose, carrying the canonical
   short form as its label.
@@ -82,9 +90,15 @@ hover cards for project vocabulary/jargon — is a sibling feature tracked separ
   with the target's **title, current status, and summary**. Card open/close and
   lozenge next/prev/activate all have **keyboard paths** (RSI standing constraint — not
   mouse-only).
-- **FR4 — `summary:` source.** The card's summary comes from a per-approvable one-line
-  summary. Provide it via a `summary:` **frontmatter field** on approvables and/or by
-  reusing the existing auto `dr-summary` block (OQ1 decides source + who authors it).
+- **FR4 — `summary:` source + hash boundary.** The card's summary comes from a
+  per-approvable one-line summary — a `summary:` **frontmatter field** and/or the existing
+  auto `dr-summary` block (OQ1 decides source + author). **⚑ Hash interaction (review,
+  confirmed):** `canonical.ts` `computeSpecHash` strips only `status`/`phases` from
+  frontmatter — *any other field voids the DR-012 approval when it changes*. So a
+  **regenerated** `summary:` would void approval on every regen. OQ1 MUST resolve this:
+  either add `summary` to `stripLifecycle` (exclude from `specHash` — mirrored in the
+  Python twin per INV-2) if it auto-regenerates, OR mandate `summary:` is human-frozen.
+  Do not ship FR4 without deciding which.
 - **FR5 — live status, deterministically.** The card's **status** is read **live** from
   the authoritative source (approvals.json + frontmatter `status`/phase), never guessed,
   never a cached restatement. A cross-project target resolves via the table; if its repo
@@ -94,16 +108,21 @@ hover cards for project vocabulary/jargon — is a sibling feature tracked separ
   approvable-authoring guidance instructs the LLM that it **need not** (should not)
   write another approvable's *current status* into prose. Where this instruction lives
   (constitution / authoring prompt) is OQ4.
-- **FR7 — navigate on activate.** Click/Enter on a lozenge navigates to the target
-  approvable; for a paragraph ref, scrolls to that item's anchor **if** the target
-  carries its id (depends on DR-053 migration — until then, resolves to the doc; OQ3).
+- **FR7 — navigate on activate; degrade to doc-level.** Click/Enter on a lozenge
+  navigates to the target approvable; for a paragraph ref, scrolls to that item's anchor
+  **only if** the target carries a stable id anchor (DR-053 §3.1 allocate-once handles).
+  Until anchors are migrated + proven stable, FR7 **degrades to doc-level navigation** —
+  it MUST NOT confidently scroll to a positionally-guessed item (never-wrong: a wrong
+  scroll is a silent lie). (Depends on DR-053 migration; OQ3.)
 - **FR8 — unknown/unresolvable → plain text, advisory.** An unknown project/approvable/
   paragraph code, or a ref whose target cannot be found, renders as **plain text**
   (never an error, never a dead lozenge); the Tier-1 layer may *advise* adding a table
   row (DR-053 §5). Graceful degrade is mandatory (INV-graceful-degrade).
-- **FR9 — project-wide items + invariants.** The same lozenge/card treatment applies to
-  references into project-wide docs (constitution goals `G`n, invariants `INV`n). Their
-  addressing form is DR-053 OQ5; this spec consumes whatever DR-053 settles.
+- **FR9 — project-wide items + invariants (named forms).** The same treatment applies to
+  references into project-wide docs — constitution goals (`G-<n>`) and invariants
+  (**named slugs** like `INV-live-status-deterministic`, not `INV3`; DR-053 §4). The
+  detector MUST match the named forms; a numeric-only grammar false-negatives every real
+  invariant. Their addressing scope is DR-053 OQ5; this spec consumes whatever it settles.
 
 ## Costly to Refactor
 
@@ -118,9 +137,12 @@ hover cards for project vocabulary/jargon — is a sibling feature tracked separ
 
 ## Acceptance Criteria
 
-- **AC1** A rendered approvable containing `SPEC-014` / `DR-053` / `#500` / a paragraph
-  ref shows each as a lozenge; a string like `src/foo/bar` or a URL does **not** become
-  a lozenge.
+- **AC1** A rendered approvable containing `MIN/SP19` / `DR53` / `#500` / `SP19/FR3`
+  shows each as a lozenge; `src/foo/bar`, a URL, **and bare prose tokens `M1` / `R1` /
+  `G7` / `IS500` / a lone `SEA`** do **NOT** become lozenges (the higher-frequency
+  collision — validate this axis, not just paths). Measured max false-positive rate on a
+  real prose+code corpus is pinned at plan.
+- **AC1b** A bare ref wrapped in the opt-in sigil `[[FR3]]` **does** lozenge.
 - **AC2** Hovering **or** keyboard-focusing a lozenge opens a card with title, status,
   summary; every action is reachable without a mouse.
 - **AC3** The card's status matches the target's authoritative status at render time
@@ -142,10 +164,12 @@ hover cards for project vocabulary/jargon — is a sibling feature tracked separ
 
 ## Open Questions
 
-- **OQ1 — summary source + author.** New `summary:` frontmatter field, reuse the auto
-  `dr-summary` HTML-comment block, or both? And is the summary human-written,
-  LLM-generated-then-skimmed (just-enough-human), or auto-derived from the doc's first
-  paragraph / one-sentence-scope? Affects FR4 + every approvable's frontmatter.
+- **OQ1 — summary source + author + hash boundary.** New `summary:` frontmatter field,
+  reuse the auto `dr-summary` HTML-comment block, or both? Human-written,
+  LLM-generated-then-skimmed (just-enough-human), or auto-derived from the one-sentence
+  scope? **And (FR4, must-resolve):** if it regenerates, add `summary` to `canonical.ts`
+  `stripLifecycle` (+ Python twin, INV-2) so it doesn't void DR-012 approval; if
+  human-frozen, no strip needed. Affects FR4 + every approvable's frontmatter.
 - **OQ2 — cross-project card data offline.** When a `MIN/…`-from-scrooge (or vice-versa)
   target repo is not checked out, where do title/status/summary come from? Degrade to
   code+title only? Optional sibling-repo read? No network (Tier-0).

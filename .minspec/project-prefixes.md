@@ -24,13 +24,16 @@ MIN/SP19       the approvable itself
 - **PARAGRAPH** — a type code + number: `FR OQ R AC INV AL CR CQ FU M G RD DV`
   (full table in DR-053 §3). Numbers restart per document, per type.
 
-> **v2 is `proposed`, not yet applied.** The prior form (`MS-SPEC-019`, dash-joined,
-> 2-letter codes) shipped in v1. The **codes** below are updated to the proposed
-> 3-letter form now (nothing in the corpus used the 2-letter codes yet), so new refs
-> can adopt them — but the `@aiclarity/shared` `project-prefix` module still emits the
-> **v1 dash grammar** (`MIN-SPEC-019`) until its tracked DR-053 follow-up lands the
-> `/`-joined, `SP`/paragraph-level grammar. An unknown code is **advisory**, never a
-> hard failure. MinSpec's Tier-0 core reads this table deterministically.
+> **v2 is `proposed`, not yet applied — do not wire this table to the resolver yet.**
+> The codes below are updated to the proposed 3-letter form (nothing in the corpus used
+> the 2-letter codes). But the shipped `@aiclarity/shared` `project-prefix` module still
+> *joins with a dash* and reads only 2-letter codes, so against this 3-letter table it
+> would emit `MIN-SPEC-019` — a chimera in **neither** the v1 register (`MS-SPEC-019`)
+> **nor** v2 (`MIN/SP19`). This is **latent only** (no runtime loader wires this file
+> today). The module update ([#679](https://github.com/AIClarityAU/minspec/issues/679))
+> is a **hard predecessor** to any runtime use of this table and must add a version-aware
+> gate (dash ⇒ 2-letter, slash ⇒ 3-letter) so the chimera is rejected. An unknown code
+> is **advisory**, never a hard failure.
 
 To add a project, add a row. Codes are **UPPERCASE, 3 letters, unique**.
 
