@@ -1,9 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-023-consequence-screen/requirements.md",
-  "specHash": "b8c139f3b672c46e2af49cac9c5d6b5f45d02a57e6fe1ce5df1e4564ec461b5c",
-  "approvedAt": "2026-07-06T02:52:44.730Z",
+  "specHash": "ef91cb24dc753f06af7d5bfba41a1d099b823359ce023f0e70f1816bb22e15cc",
+  "approvedAt": "2026-07-12T06:04:21.526Z",
   "approvedBy": "claude@harvest316.com",
   "tier": "T4",
   "migrated": false,
-  "baselineBlob": "c08f9f525daef6ab1a89ea6c1f8d117f3a222345"
+  "baselineBlob": "e653f1c01a95bd76c0a084a3b6eba376fae22451"
 }
