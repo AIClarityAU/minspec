@@ -124,23 +124,35 @@ Commits, issues, and DRs form a linked chain:
 
 Purpose: Issues = what needs doing. DRs = why we chose this approach. Commits = what changed. Don't consolidate — link. Chain is bidirectional: issue→DR (rationale) and DR→issue/spec (materialization).
 
-### Cross-project references — carry the project prefix (DR-053)
+### Cross-project & paragraph references — carry the code (DR-053)
 
 Per-repo-local ids stay **unprefixed** (DR-027 separate registers): inside a
-repo, a bare `SPEC-001` / `DR-053` / `EPIC-010` / `#500` always means *this*
-repo's. But a reference that **spans projects** — a minspec DR citing a scrooge
-spec, a commit or issue body pointing at another repo's issue — MUST carry the
-target project's short prefix from `.minspec/project-prefixes.md`, so the ref is
-unambiguous out of context:
+repo, a bare `SP1` / `DR53` / `EP10` / `#500` always means *this* repo's. A
+reference that **spans projects** — a minspec DR citing a scrooge spec, a commit
+or issue body pointing at another repo's item — carries the target project's code
+from `.minspec/project-prefixes.md`, so the ref is unambiguous out of context.
 
-- **SDD refs:** `<PREFIX>-<ID>` — `MS-SPEC-019` (minspec), `SC-DR-007` (scrooge), `SB-EPIC-002` (sealbox).
-- **Issue / PR refs:** `<PREFIX>#<N>` — `MS#500`, `SC#26`. The prefix abuts the `#` (no dash), because `#` is its own separator.
+**DR-053 v2 (proposed) — paragraph-addressable, slash-joined, no-pad.** Every
+referenceable item (approvable *and* the typed paragraphs/rows inside it) has an id
+of up to three segments that **elide** left-to-right when context implies them:
 
-Prefixes live in the committed table `.minspec/project-prefixes.md` (`| Prefix | Project | Repo |`).
-An **unknown** prefix is advisory — the assistant suggests one (`suggestPrefixDeterministic`
-is the offline Tier-0 default) and offers to add a row; it is **never** a hard
-failure. The deterministic reader/resolver is `@aiclarity/shared`'s
-`project-prefix` module (`parsePrefixTable` / `resolveRef` / `formatCrossRef`).
+- `PROJECT / APPROVABLE / PARAGRAPH` — `MIN/SP19/FR3` (cross-project),
+  `SP19/FR3` (intra-project), `FR3` (intra-document), `MIN/SP19` (the approvable itself).
+- **PROJECT** = 3 uppercase letters (`MIN`/`SCR`/`SEA`/`MMO`). **APPROVABLE** =
+  `SP`/`DR`/`EP`/`PR`/`IS` + number, no leading zeros. **PARAGRAPH** = a type code
+  (`FR OQ R AC INV AL CR CQ FU M G RD DV`) + number (see DR-053 §3 for the table).
+- Store the **fullest unambiguous form for the scope**; elision is display-only.
+
+> **Transition.** v2 is `proposed`, not accepted; the corpus is **not migrated yet**
+> (record now, reformat later). The `project-prefix` module still emits the **v1**
+> dash grammar (`MS-SPEC-019` → now `MIN-SPEC-019` with the 3-letter code) until its
+> tracked follow-up lands the `/`-joined paragraph grammar. Until then, write refs in
+> whichever form is clearest and don't mass-rewrite.
+
+An **unknown** code is advisory — the assistant suggests one (`suggestPrefixDeterministic`
+is the offline Tier-0 default) and offers to add a row; **never** a hard failure. The
+deterministic reader/resolver is `@aiclarity/shared`'s `project-prefix` module
+(`parsePrefixTable` / `resolveRef` / `formatCrossRef`).
 
 ## Evidence Discipline — status claims (RCDD / DR-003)
 
