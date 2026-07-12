@@ -249,3 +249,32 @@ describe("egress-scan.sh — MinSpec's own artifact paths (SPEC-/DR-/EPIC-NNN) a
     expect(r.blocked).toBe(true);
   });
 });
+
+describe('egress-scan.sh — punctuation-only runs (comment dividers) are not secrets (#652)', () => {
+  // The base64 rule fired on any >=32 token containing `+` or `=`. A comment
+  // divider — a long run of `=` (or `+`) — has the padding char but NO base64
+  // payload, so it false-quarantined the PR. This re-quarantined #526/#561 after
+  // the #616 fix. A real base64 blob always carries alnum payload; a divider does not.
+  it('a long `// ====…` comment divider → CLEAN', () => {
+    const r = scan(fixture('div.diff',
+      '+// =============================================================================\n' +
+      '+// Section header\n' +
+      '+// =============================================================================\n'));
+    expect(r.blocked).toBe(false);
+    expect(r.out).toBe('');
+  });
+
+  it('a long `+++++`/`-----` rule → CLEAN', () => {
+    const r = scan(fixture('rule.diff',
+      '+// +++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++\n' +
+      '+// -------------------------------------------------------------\n'));
+    expect(r.blocked).toBe(false);
+  });
+
+  it('still BLOCKS a real padded base64 blob (payload + `==`) — no weakening', () => {
+    const r = scan(fixture('b64.diff',
+      '+  const k = "aGVsbG8gd29ybGQtc2VjcmV0LXZhbHVlLTEyMzQ1Njc4OTA=";\n'));
+    expect(r.blocked).toBe(true);
+    expect(r.out).toContain('<redacted-high-entropy>');
+  });
+});

@@ -98,8 +98,13 @@ function secretish(t,   hasU, hasL, hasD) {
   if (t ~ /^sha(1|224|256|384|512)-/) return 0   # SRI / npm-lock integrity hash — not a secret
   if (t ~ /^[0-9a-fA-F]+$/) return 0             # pure hex = a hash (sha*/git SHA) committed legitimately
   # `+` and `=` are strong base64 signals that file PATHS never carry. A base64
-  # secret is caught here regardless of separators.
-  if (t ~ /[+=]/) return 1                        # base64-flavoured blob (padding/plus)
+  # secret is caught here regardless of separators — BUT it must also carry base64
+  # PAYLOAD (alphanumerics), else a pure run of `=` or `+` (an ASCII comment
+  # divider like `// ====…`) trips this rule and false-quarantines the PR (#652;
+  # this re-quarantined #526/#561 after the #616 fix). A real base64 blob always
+  # has alnum content; a `====`/`++++` divider has none → falls through to the
+  # contiguous-run gate below (longest_alnum_run = 0 < 32 → clean).
+  if (t ~ /[+=]/ && t ~ /[A-Za-z0-9]/) return 1   # base64-flavoured blob (padding/plus + payload)
   # Mixed-class (upper+lower+digit) is the entropy tell for a prefix-less secret,
   # but ONLY on a CONTIGUOUS >=32 run. Applied to the whole separator-laden token
   # it flagged MinSpec's OWN artifact paths — SPEC-/DR-/EPIC-NNN ids are
