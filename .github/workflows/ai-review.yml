@@ -95,7 +95,7 @@
 #      API) + `checks: write` (the honest `ai-review` verdict check-run). If
 #      `checks: write` is absent the review still works — the verdict check is
 #      simply not posted (best-effort), never a false green.
-#   3. AFTER a verified run: set repo variable `AI_REVIEW_LABEL_ACTORS =
+#   3. AFTER a verified run: set repo variable `AI_REVIEW_BOT_LOGINS =
 #      minspec-sdd[bot]` (so ready-to-merge.yml trusts ONLY the bot) and add the
 #      `ai-review` verdict check as a REQUIRED check in the branch ruleset
 #      (#480 — 3-way conclusion makes this safe to leave always-on: machinery

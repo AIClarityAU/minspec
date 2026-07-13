@@ -39,9 +39,9 @@ Triggered by: #105
 
 ### Lanes
 
-- **FR-1 (four lifecycle lanes).** The status-fallback grouping renders exactly
-  four lanes in this fixed order: **Specifying**, **Implementing**, **Done**,
-  **Archived**.
+- **FR-1 (five lifecycle lanes).** The status-fallback grouping renders exactly
+  five lanes in this fixed order: **Specifying**, **Implementing**, **Done**,
+  **Archived**, **Superseded**.
 
 - **FR-2 (total, disjoint status→lane mapping).** Every `SpecStatus` value maps
   to exactly one lane — no spec can vanish from the pane and none can appear
@@ -53,6 +53,7 @@ Triggered by: #105
   | Implementing | `implementing` |
   | Done | `done` |
   | Archived | `archived` |
+  | Superseded | `superseded` |
 
   `new` folds into **Specifying** (a freshly-created spec is pre-authoring, not
   yet building).
@@ -102,7 +103,7 @@ get wrong, each tied to a concrete FR. Highest-cost first.
   status appears in exactly one lane. *(T0 test — must hold even if a new status
   is added to the enum: the test fails loudly, forcing a lane decision.)*
 - **INV-2 (deterministic order).** Lane order is always
-  `[Specifying, Implementing, Done, Archived]`.
+  `[Specifying, Implementing, Done, Archived, Superseded]`.
 
 ## Acceptance Criteria (Zone A)
 
@@ -150,9 +151,9 @@ Definition-of-done checkboxes, each tracing the FR / invariant it discharges.
 
 ## Assumptions
 
-- The `SpecStatus` enum has exactly these five values — `new`, `specifying`,
-  `implementing`, `done`, `archived` — so FR-2's four lanes cover the whole space
-  (INV-1 makes this self-checking if the assumption later breaks).
+- The `SpecStatus` enum has exactly these six values — `new`, `specifying`,
+  `implementing`, `done`, `archived`, `superseded` — so FR-2's five lanes cover the
+  whole space (INV-1 makes this self-checking if the assumption later breaks).
 - The pane already renders arbitrary status groups from the `STATUS_GROUPS`
   constant via `getStatusGroups()` (`spec-tree-provider.ts:152,401`), so changing
   the constant's contents is sufficient — no new node type is needed (per
