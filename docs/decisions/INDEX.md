@@ -434,4 +434,12 @@ Per-repo-local SDD ids stay unprefixed (DR-027 separate registers); a reference 
 <!-- dr-summary:DR-054 auto=b7aa8aa57c0a -->
 Three properties have been conflated under one word — **"offline"** — since DR-004, and treating them as one produces a positioning that is both weak and false the moment a customer uses the product: 1. **Determinism / no-LLM-in-the-decision-path** — the never-wrong signpost, the tier classifier, status resolution: pure functions, reproducible across editor/commit/CI/agent (Goal **G-6**, "determinism as moat"; DR-039/DR-019). This is a **correctness** property. It has nothing to do with network. 2. **Data sovereignty / no MinSpec-initiated egress** — the extension…
 <!-- /dr-summary:DR-054 -->
+
+## [DR-055 — Adopt Spec Kit conventional conformity — mirror Spec Kit's artifact + command surface by default to lower switching cost; keep editor-time deterministic enforcement as the moat](DR-055.md)
+
+*Status: proposed · Date: 2026-07-13*
+
+<!-- dr-summary:DR-055 auto=18c5d1f7066e -->
+GitHub **Spec Kit** (github/spec-kit) is the incumbent spec-driven-development toolkit. A large share of MinSpec's likely users will have driven a Spec Kit project first — its /specify → /plan → /tasks loop is where the audience learns SDD. Every place MinSpec's *surface* differs from Spec Kit's for no load-bearing reason is pure **switching cost**: a file that isn't where they expect, a command that doesn't autocomplete, a folder named differently.
+<!-- /dr-summary:DR-055 -->
 <!-- minspec:dr-index:end -->

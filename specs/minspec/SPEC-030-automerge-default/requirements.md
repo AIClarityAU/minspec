@@ -1,7 +1,7 @@
 ---
 id: SPEC-030
 type: requirements
-status: specifying
+status: implementing
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute
@@ -11,7 +11,7 @@ relates_to: [SPEC-024, SPEC-023]  # the auto-merge gate this configures · the c
 # MinSpec — Auto-Merge Default (init-time question) — Requirements
 
 **Date:** 2026-07-04
-**Status:** Specifying (SDD Specify phase)
+**Status:** Implementing
 **Decision:** [DR-033](../../../docs/decisions/DR-033.md) §3 (consequence-hybrid HITL gate-placement) · [#183](https://github.com/AIClarityAU/minspec/issues/183) (the three gate-placement modes)
 **Triggered by:** [#229](https://github.com/AIClarityAU/minspec/issues/229) — "init-time question to set auto-merge-on-clean default (gate-placement #183)."
 **Consumes:** [SPEC-024](../SPEC-024-auto-merge-eligibility/requirements.md) — the eligibility gate. This spec supplies the `mode` input that SPEC-024 FR-6 / C4 reads; it does not change the gate.
