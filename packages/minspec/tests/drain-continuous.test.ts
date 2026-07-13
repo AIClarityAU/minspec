@@ -9,10 +9,12 @@
  *   • a Claude usage-limit signal is classified as quota (backoff, not death).
  */
 import { describe, it, expect } from 'vitest';
+import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 
 const DRAIN = path.resolve(__dirname, '../../../scripts/drain-inbox.sh');
+const DRAIN_SRC = fs.readFileSync(DRAIN, 'utf-8');
 
 function run(args: string[], input?: string): { code: number; out: string } {
   try {
@@ -62,5 +64,21 @@ describe('drain-inbox.sh — quota classifier seam (#609: pause, do not die)', (
     // uses, so bash and JS never drift on what a session-limit signal is.
     expect(run(['--is-quota'], "You've hit your session limit · resets 10:30am (UTC)").code).toBe(0);
     expect(run(['--is-quota'], 'Fixed the off-by-one in the tier classifier; added a regression test.').code).toBe(1);
+  });
+});
+
+describe('drain-inbox.sh — single-instance lock records the LOOP pid, not the dead parent (#676)', () => {
+  it('writes $BASHPID (the loop subshell) to the lock, never the parent $$', () => {
+    // In `( … ) &`, $$ stays the PARENT pid — which exits right after `disown`, so a
+    // $$-lock is dead-on-arrival and the stale-lock reclaim spawns duplicate loops
+    // (double-dispatch / quota abuse). ai-review #676 BLOCKING/HIGH.
+    expect(DRAIN_SRC, 'lock must be written from $BASHPID').toMatch(/echo\s+"\$BASHPID"\s*>\s*"\$LOCK"/);
+    expect(DRAIN_SRC, 'lock must NOT be written from $$').not.toMatch(/echo\s+"\$\$"\s*>\s*"\$LOCK"/);
+  });
+
+  it('bash semantics: $BASHPID differs from $$ inside a backgrounded subshell (why the fix is needed)', () => {
+    const out = execFileSync('bash', ['-c', '( echo "$$ $BASHPID" ) & wait'], { encoding: 'utf-8' }).trim();
+    const [dollarDollar, bashpid] = out.split(/\s+/);
+    expect(bashpid).not.toBe(dollarDollar); // $$ = inherited parent pid; $BASHPID = the subshell's own
   });
 });

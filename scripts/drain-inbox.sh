@@ -403,7 +403,14 @@ if [[ -f "$LOCK" ]]; then
 fi
 
 (
-  echo "$$" > "$LOCK"
+  # $BASHPID, NOT $$: inside a subshell `$$` is still the PARENT script's PID
+  # (POSIX keeps it constant across subshells), and the parent exits right after
+  # `disown` below — so writing $$ would record a PID that is dead within
+  # milliseconds, and the stale-lock reclaim above would then fire on EVERY later
+  # session and spawn a second concurrent loop (double-dispatch / quota abuse).
+  # $BASHPID is this subshell's own PID (== $DRAIN_PID), i.e. the long-lived loop
+  # the reclaim's `kill -0` must actually probe. (ai-review #676: BLOCKING/HIGH.)
+  echo "$BASHPID" > "$LOCK"
   trap 'rm -f "$LOCK"' EXIT
 
   if $CONTINUOUS; then
