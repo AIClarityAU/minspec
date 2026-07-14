@@ -595,4 +595,63 @@ Body stays put.
     fs.writeFileSync(noFm, '# Just a heading\n');
     expect(() => setSpecStatus(noFm, 'done')).toThrow(/no frontmatter/i);
   });
+
+  // #667: setSpecStatus was the sole writer of the FRONTMATTER status, leaving the
+  // body's `**Status:**` prose line — a second source of truth for the same fact —
+  // stale on every approve / phase-advance, which the #626 parity gate then caught
+  // as a false-looking desync (SPEC-030).
+  it('also rewrites the body **Status:** leading word, preserving trailing prose (#667)', () => {
+    const withBodyStatus = path.join(tmpDir, 'SPEC-100.md');
+    fs.writeFileSync(
+      withBodyStatus,
+      `---
+id: SPEC-100
+status: specifying
+tier: T3
+---
+
+# Title
+
+**Status:** Specifying (SDD Specify phase)
+`,
+    );
+    setSpecStatus(withBodyStatus, 'implementing');
+    const after = fs.readFileSync(withBodyStatus, 'utf-8');
+    expect(after).toContain('status: implementing'); // frontmatter
+    expect(after).toContain('**Status:** Implementing (SDD Specify phase)'); // body word flipped, trailing prose preserved
+    expect(after).not.toContain('**Status:** Specifying');
+  });
+
+  it('does not invent a body **Status:** line when none exists', () => {
+    // RICH has no body status line — the fixture's body must stay byte-identical.
+    setSpecStatus(filePath, 'implementing');
+    const after = fs.readFileSync(filePath, 'utf-8');
+    expect(after).toContain('## Context\nBody stays put.\n');
+    expect(after).not.toContain('**Status:**');
+  });
+
+  it('leaves a free-form (unrecognised) body status line untouched', () => {
+    const freeform = path.join(tmpDir, 'SPEC-101.md');
+    fs.writeFileSync(
+      freeform,
+      `---
+id: SPEC-101
+status: specifying
+tier: T3
+---
+
+# Title
+
+**Status:** Clarify complete — awaiting human *Approve Spec* before Plan
+`,
+    );
+    setSpecStatus(freeform, 'implementing');
+    const after = fs.readFileSync(freeform, 'utf-8');
+    // Frontmatter still flips...
+    expect(after).toContain('status: implementing');
+    // ...but the free-form prose line (leading word "Clarify" is not a recognised
+    // status token) is left exactly as authored — bodyStatusToken's conservative,
+    // never-false-positive contract.
+    expect(after).toContain('**Status:** Clarify complete — awaiting human *Approve Spec* before Plan');
+  });
 });

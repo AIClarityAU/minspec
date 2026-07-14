@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import type { Tier, Phase } from './config';
 import { PHASES } from './config';
 import { getSpecStatus, phasesForApproval } from './lifecycle';
+import { bodyStatusToken } from './status-parity';
 
 /** Status of an individual phase */
 export type PhaseStatus = 'pending' | 'in-progress' | 'done' | 'skipped';
@@ -444,8 +445,35 @@ export function writeSpecFile(filePath: string, spec: ParsedSpec): void {
 }
 
 /**
+ * Surgically rewrite the leading status word of a spec's body `**Status:**` line
+ * in place, preserving whatever free-form prose follows it (e.g. `(SDD Implement
+ * phase)` or a hand-written note). No-op — never invents a line — when the body
+ * has no `**Status:**` line, or its leading token is not a recognised status word
+ * (`bodyStatusToken`'s conservative contract; mirrors `setSpecPhases` never adding
+ * a phase line that was absent).
+ *
+ * This is the write-path half of the #626 parity gate (`checkStatusParity`):
+ * without it, `setSpecStatus` was the only writer of the *frontmatter* status,
+ * leaving the body's prose line — a second source of truth for the same fact —
+ * stale on every approve / phase-advance (#667).
+ */
+function setBodyStatusToken(filePath: string, content: string, status: SpecStatus): void {
+  const existing = bodyStatusToken(content, 'spec');
+  if (!existing) return;
+  const lines = content.split('\n');
+  const capitalized = status.charAt(0).toUpperCase() + status.slice(1);
+  lines[existing.line - 1] = lines[existing.line - 1].replace(
+    /^(\*\*Status:\*\*[ \t]*)[A-Za-z]+/,
+    `$1${capitalized}`,
+  );
+  fs.writeFileSync(filePath, lines.join('\n'), 'utf-8');
+}
+
+/**
  * Surgically rewrite the `status:` line in a spec's frontmatter in place,
- * adding it if absent. Returns the new status. Throws on invalid status or no
+ * adding it if absent, and the body's `**Status:**` line's leading word to match
+ * (#667 — the two are separate sources of truth for the same fact; see
+ * `setBodyStatusToken`). Returns the new status. Throws on invalid status or no
  * frontmatter block.
  *
  * Deliberately a line-level rewrite (mirrors `setEpicStatus`/`setAdrStatus`),
@@ -468,7 +496,9 @@ export function setSpecStatus(filePath: string, status: SpecStatus): SpecStatus 
   const newYaml = statusLineRe.test(yaml)
     ? yaml.replace(statusLineRe, `$1status: ${status}`)
     : `${yaml}\nstatus: ${status}`;
-  fs.writeFileSync(filePath, content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---\n`), 'utf-8');
+  const newContent = content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---\n`);
+  fs.writeFileSync(filePath, newContent, 'utf-8');
+  setBodyStatusToken(filePath, newContent, status);
   return status;
 }
 
