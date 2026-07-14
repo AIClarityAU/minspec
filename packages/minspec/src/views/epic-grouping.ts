@@ -70,6 +70,13 @@ export class EpicGroupNode<T> extends vscode.TreeItem {
      * construction; the ADR pane sets but does not read it.
      */
     public readonly root: string = '',
+    /**
+     * Stable, root-namespaced key for expand/collapse persistence
+     * ([[tree-expansion-memory]]). The epic id (or NO_EPIC sentinel) is the
+     * stable part — the label carries a count badge that must NOT enter the id.
+     * Defaults to the label for direct/test construction with no explicit key.
+     */
+    nodeId: string = groupLabel,
   ) {
     super(
       groupLabel,
@@ -77,6 +84,9 @@ export class EpicGroupNode<T> extends vscode.TreeItem {
         ? vscode.TreeItemCollapsibleState.Collapsed
         : vscode.TreeItemCollapsibleState.Expanded,
     );
+    // Root-namespace so the same epic under two folders (multi-root, #549) gets
+    // distinct expansion memory; stable across rebuilds (no volatile badge).
+    this.id = `${root}::epic:${nodeId}`;
     this.description = badge;
     // Status-suffixed contextValue gates the inline accept tick: it shows only
     // on proposed epics (`epicGroup.proposed`). NO_EPIC has no epic to act on.
@@ -145,7 +155,7 @@ export function buildEpicGroups<T>(
     // mirroring the `(no epic)` placement. NO_EPIC has no epic doc to be a stub.
     const badge = !isNoEpic && epic?.isStub ? `${baseBadge} (stub)` : baseBadge;
     const label = isNoEpic ? NO_EPIC : `${epic?.title ?? key} (${key})`;
-    nodes.push(new EpicGroupNode(label, members, badge, isNoEpic, epic, rootDir));
+    nodes.push(new EpicGroupNode(label, members, badge, isNoEpic, epic, rootDir, key));
   }
   return nodes;
 }

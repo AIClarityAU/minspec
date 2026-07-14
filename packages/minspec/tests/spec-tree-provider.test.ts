@@ -38,6 +38,7 @@ vi.mock('vscode', () => ({
 import type { SpecSummary, ApprovalLookupFn } from '../src/views/spec-tree-provider';
 import { SpecTreeProvider, SpecGroupNode, SpecNode, RollupNode, listSpecs, STATUS_GROUPS, compressSpecId, stripProductPrefix } from '../src/views/spec-tree-provider';
 import { EpicGroupNode } from '../src/views/epic-grouping';
+import { TreeExpansionMemory } from '../src/views/tree-expansion-memory';
 import type { EpicSummary } from '../src/lib/epic-manager';
 import { SPEC_STATUSES } from '../src/lib/spec';
 import { approveSpec } from '../src/lib/approval';
@@ -1091,4 +1092,55 @@ describe('stripProductPrefix()', () => {
   it('is a no-op without a product slug', () => {
     expect(stripProductPrefix('MinSpec — Whatever', undefined)).toBe('MinSpec — Whatever');
   });
+});
+
+// --- Expand/collapse memory wiring (tree-expansion-memory) ---
+
+describe('SpecTreeProvider expansion memory', () => {
+  const ROOT = '/fake/workspace';
+
+  const provider = () =>
+    new SpecTreeProvider(ROOT, vi.fn().mockReturnValue(ALL_SPECS));
+
+  it('status group ids are stable, root-namespaced, and carry no volatile count', () => {
+    const groups = groupsOf(provider());
+    const done = groups.find(g => g.label === 'Done')!;
+    expect(done.id).toBe(`${ROOT}::status:Done`);
+    // The count badge lives in description, never the id — so a group keeps its
+    // identity (and its remembered state) as specs come and go.
+    expect(done.id).not.toContain(done.description ?? '');
+  });
+
+  it('getTreeItem restores a remembered collapse over the expanded default', async () => {
+    const p = p_with_memory();
+    // Specifying defaults expanded (2); remember it collapsed.
+    await p.memory.record(`${ROOT}::status:Specifying`, false);
+    const specifying = groupsOf(p.provider).find(g => g.label === 'Specifying')!;
+    const rendered = p.provider.getTreeItem(specifying);
+    expect(rendered.collapsibleState).toBe(1); // Collapsed
+  });
+
+  it('leaves untouched groups at their provider default', () => {
+    const p = p_with_memory();
+    const done = groupsOf(p.provider).find(g => g.label === 'Done')!;
+    const rendered = p.provider.getTreeItem(done);
+    expect(rendered.collapsibleState).toBe(1); // Collapsed default, no memory entry
+  });
+
+  // Minimal Memento + wired provider for the two cases above.
+  function p_with_memory() {
+    const store: Record<string, unknown> = {};
+    const memento = {
+      get: (k: string, d: unknown) => (k in store ? store[k] : d),
+      update: (k: string, v: unknown) => {
+        store[k] = v;
+        return Promise.resolve();
+      },
+      keys: () => Object.keys(store),
+    } as never;
+    const memory = new TreeExpansionMemory(memento, 'k');
+    const prov = provider();
+    prov.setExpansionMemory(memory);
+    return { provider: prov, memory };
+  }
 });

@@ -11,9 +11,9 @@ const registeredCommands = new Map<string, (...args: any[]) => any>();
 let subscriptions: any[] = [];
 
 // Mock instances returned by view constructors
-const mockSpecTreeProvider = { refresh: vi.fn() };
-const mockAdrTreeProvider = { refresh: vi.fn() };
-const mockBacklogTreeProvider = { refresh: vi.fn(), refreshIfStale: vi.fn() };
+const mockSpecTreeProvider = { refresh: vi.fn(), setExpansionMemory: vi.fn() };
+const mockAdrTreeProvider = { refresh: vi.fn(), setExpansionMemory: vi.fn() };
+const mockBacklogTreeProvider = { refresh: vi.fn(), refreshIfStale: vi.fn(), setExpansionMemory: vi.fn() };
 const mockStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockNextTaskStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockSpecPanel = { show: vi.fn(), refresh: vi.fn(), dispose: vi.fn() };
@@ -76,6 +76,9 @@ vi.mock('vscode', () => ({
           view.visibilityHandler = handler;
           return { dispose: vi.fn() };
         }),
+        // Tree expand/collapse memory wiring (tree-expansion-memory).
+        onDidExpandElement: vi.fn(() => ({ dispose: vi.fn() })),
+        onDidCollapseElement: vi.fn(() => ({ dispose: vi.fn() })),
       } as any;
       createdTreeViews.set(id, view);
       return view;
