@@ -450,11 +450,12 @@ GitHub **Spec Kit** (github/spec-kit) is the incumbent spec-driven-development t
 <!-- dr-summary:DR-056 auto=4153245bf8a9 -->
 MinSpec captures the approver of a spec/DR as approvedBy = git config user.email, read offline at approval time (approval.ts:12-13, :57, :284-296 — execFileSync('git', ['config','user.email']), Tier-0, degrades to 'unknown'). DR-012 defines approval as **an explicit human act**; DR-033 §6 made the *reviewer* identity trustworthy via the AI_REVIEW_BOT_LOGINS allowlist (only the bot may apply ai-review:*). The *approver* identity has no equivalent guard.
 <!-- /dr-summary:DR-056 -->
+
 ## [DR-057 — Generated approvables take the review lane — LLM-generated next-phase docs (tasks.md; design.md opt-in) route worktree→PR for independent AI review; human-authored approvables stay main-direct; the drain actions phase-advance by enqueue, never by running an LLM in the Tier-0 extension](DR-057.md)
 
 *Status: proposed · Date: 2026-07-14*
 
-<!-- dr-summary:DR-057 auto=3f3b4d54013a -->
-The background piggyback drain (drain-inbox.sh) has one input — GitHub issues — and never actions approved-doc phase-advance; SDD phase-advance is a human-only extension action, so an approved plan with no tasks.md just stalls. Route by provenance: LLM-generated next-phase derivatives (tasks.md; design.md opt-in) take the worktree→PR review lane so ai-review.yml gives them an independent read, while human-authored approvables stay main-direct.
+<!-- dr-summary:DR-057 auto=a02554d56427 -->
+The background piggyback loop (scripts/drain-inbox.sh, fired from the session-start hook) has ONE input source: **GitHub issues** (inbox → triage → agent-ready → dispatch-issue.sh → worktree → PR). It never reads .minspec/approvals/ sidecars or spec status: frontmatter. Meanwhile SDD phase-advance (specify→plan→tasks→implement) lives entirely in the VS Code extension as a human Command-Palette action. So an **approved plan stalled with no tasks.md** just sits there — nothing in the background loop notices or generates the next phase. The founder asked to close…
 <!-- /dr-summary:DR-057 -->
 <!-- minspec:dr-index:end -->
