@@ -14,6 +14,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROLES_DIR="${SCRIPT_DIR}/roles"
 FORCE_ROLE=""
 
+# Shared pre-publish egress guard (#358) — single source of truth for the
+# fail-closed scan, reused by remediate-pr.sh so the two publish channels never
+# drift. Sourced (not executed); defines agent_egress_scan.
+# shellcheck source=scripts/lib/agent-egress.sh
+source "${SCRIPT_DIR}/lib/agent-egress.sh"
+
 shift || true
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -374,64 +380,13 @@ run_reviewer_stage() {
 # is defense-in-depth, not a sandbox). That residual is inherent to running the
 # project's own build and is out of this guard's scope.
 run_egress_guard() {
-  local scan="${SCRIPT_DIR}/egress-scan.sh"
-  local -a targets=()
-
-  # Scratch dir OUTSIDE the worktree for the dumps we materialise — so we never
-  # leave a stray `.egress-diff.txt` in the worktree a human later inspects
-  # (#479 review, LOW). Removed before we return, on every path.
-  local scan_tmp
-  if ! scan_tmp=$(mktemp -d 2>/dev/null); then
-    echo "BLOCK: mktemp failed — failing closed"
-    return 1
-  fi
-
-  # Scan the ADDED lines of EVERY published commit, not the net three-dot diff:
-  # `git push` publishes the full branch history, so a secret added in one commit
-  # and removed in a later one is gone from the net diff yet still in the pushed
-  # history and the PR "Commits" view (#479 review, MAJOR — intermediate-commit
-  # bypass). `git log -p` walks every commit's patch; we keep only added-content
-  # lines (`^+`, minus the `+++` file headers) so we neither miss an intermediate
-  # `+secret` nor re-scan removed/context lines that merely echo main's content.
-  local patches="${scan_tmp}/patches.txt"
-  if ! git -C "$WORKTREE" log -p --no-color origin/main..HEAD > "$patches" 2>/dev/null; then
-    rm -rf "$scan_tmp"
-    echo "BLOCK: could not read branch history (git log -p failed) — failing closed"
-    return 1
-  fi
-  local added_dump="${scan_tmp}/added-lines.txt"
-  # grep exits 1 on zero added lines (an empty branch) — a valid clean result, not
-  # an error — so tolerate it; the file is then empty and scans clean.
-  grep -E '^\+' "$patches" | grep -Ev '^\+\+\+ ' > "$added_dump" || true
-  targets+=("$added_dump")
-
-  # Commit MESSAGES are published too — `git push` carries them and the PR displays
-  # them — so a prompt-injected agent could exfiltrate a secret via
-  # `git commit -m "<secret>"`, which scanning only the diff would miss (#479 review,
-  # MAJOR: the write-to-published channel includes commit messages, not just file
-  # content). Scan every commit body this branch adds. Uncomputable → fail closed.
-  local msg_dump="${scan_tmp}/commit-messages.txt"
-  if ! git -C "$WORKTREE" log origin/main..HEAD --format=%B > "$msg_dump" 2>/dev/null; then
-    rm -rf "$scan_tmp"
-    echo "BLOCK: could not read commit messages (git log failed) — failing closed"
-    return 1
-  fi
-  targets+=("$msg_dump")
-
-  # The two artefacts the parent publishes to the issue, WHEN the agent wrote them
-  # (both are optional — only scan what exists, so a legit run that skips them is
-  # not falsely blocked; a present-but-unreadable one still fails closed inside the
-  # scanner).
-  [[ -f "${WORKTREE}/.agent-summary.md" ]]    && targets+=("${WORKTREE}/.agent-summary.md")
-  [[ -f "${WORKTREE}/.review-signals.json" ]] && targets+=("${WORKTREE}/.review-signals.json")
-
-  # Pure scanner: exits non-zero (and prints redacted reasons on stdout) on any
-  # hit / unreadable / scanner error. Its exit code becomes ours; its stdout flows
-  # to the caller so the block reason can be logged.
-  "$scan" "${targets[@]}"
-  local rc=$?
-  rm -rf "$scan_tmp"
-  return "$rc"
+  # Orchestration EXTRACTED to scripts/lib/agent-egress.sh so this and
+  # remediate-pr.sh run the IDENTICAL fail-closed scan (no drift between the two
+  # publish channels — a security control must never fork; #358). This wrapper only
+  # pins the dispatch-specific inputs: base = origin/main (a fresh branch), and the
+  # two artefacts the dispatcher publishes.
+  agent_egress_scan "$WORKTREE" "origin/main" \
+    "${WORKTREE}/.agent-summary.md" "${WORKTREE}/.review-signals.json"
 }
 
 # Quarantine path (#358): the guard tripped, so we publish NOTHING. Label the issue
