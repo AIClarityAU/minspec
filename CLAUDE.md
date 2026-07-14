@@ -51,7 +51,7 @@ Monorepo for two VS Code extensions + extension pack:
 |---|---|---|---|
 | `packages/minspec` | `aiclarity.minspec` | minspec.dev | SDD Implement phase |
 | ↪ split out → **`AIClarityAU/scroogellm`** (private) | `aiclarity.scroogellm` | scroogellm.com | Moved to its own repo per DR-027; SDD Specify there. Code lands there (AIClarityAU/minspec#119), not in `packages/`. |
-| `packages/shared` | `@aiclarity/shared` | — | Tier-0 shared: contract types + classifier engine (no vscode/network). See DR-014 |
+| `packages/shared` | `@aiclarity/shared` | — | Tier-0 shared: contract types (no vscode/network). Classifier engine still lives in `packages/minspec/src/lib/classifier.ts` — DR-014's move to here is `status: proposed`, not executed (tracked: #54) |
 | `packages/extension-pack` | `aiclarity.minspec-pro` | — | References both |
 
 ## Scrooge Model-Fit Advisory
