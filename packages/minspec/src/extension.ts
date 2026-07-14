@@ -24,6 +24,7 @@ import { EpicReorderDragAndDropController } from './views/epic-dnd-controller';
 import { AdrTreeProvider } from './views/adr-tree-provider';
 import { FrontmatterCompletionProvider } from './views/frontmatter-completion';
 import { BacklogTreeProvider } from './views/backlog-view';
+import { TreeExpansionMemory } from './views/tree-expansion-memory';
 import { MinSpecStatusBar, MinSpecNextTaskStatusBar, fromFrontmatter } from './views/status-bar';
 import { nextTaskCommand, computeNextTask } from './commands/next-task';
 import { SpecPanel } from './views/spec-panel';
@@ -118,6 +119,25 @@ export function activate(context: vscode.ExtensionContext): void {
     treeDataProvider: backlogTreeProvider,
   });
   context.subscriptions.push(specTreeView, adrTreeView, backlogTreeView);
+
+  // ─── Tree expand/collapse memory ────────────────────────────────────────────
+  // Persist each panel's group expansion across window reloads. VS Code only
+  // keeps it within a session; the providers otherwise re-supply their default
+  // collapsibleState on first render after a reload, so user toggles are lost.
+  // Each view records its own toggles into workspaceState under a distinct key.
+  const EXPANSION_PANELS = [
+    { view: specTreeView, provider: specTreeProvider, key: 'minspec.specExplorer.expansion' },
+    { view: adrTreeView, provider: adrTreeProvider, key: 'minspec.adrExplorer.expansion' },
+    { view: backlogTreeView, provider: backlogTreeProvider, key: 'minspec.backlog.expansion' },
+  ];
+  for (const p of EXPANSION_PANELS) {
+    const memory = new TreeExpansionMemory(context.workspaceState, p.key);
+    p.provider.setExpansionMemory(memory);
+    context.subscriptions.push(
+      p.view.onDidExpandElement(e => void memory.record(e.element?.id, true)),
+      p.view.onDidCollapseElement(e => void memory.record(e.element?.id, false)),
+    );
+  }
 
   // ─── Epic grouping toggle (DR-013 / SPEC-007 FR-7) ──────────────────────────
   // Each panel persists its "group by epic" state in workspaceState (default on)

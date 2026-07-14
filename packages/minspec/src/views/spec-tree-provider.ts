@@ -21,6 +21,7 @@ import type { SpecSummary } from '../lib/spec-manager';
 import { isSpecKitDirEntry, readSpecKitDir } from '../lib/spec-layout';
 import { EpicGroupingState, EpicGroupNode, buildEpicGroups } from './epic-grouping';
 import type { ListEpicsFn } from './epic-grouping';
+import { TreeExpansionMemory } from './tree-expansion-memory';
 export type { SpecSummary };
 
 /**
@@ -224,6 +225,10 @@ export class SpecGroupNode extends vscode.TreeItem {
     this.specs = specs;
     this.kind = kind;
     this.root = root;
+    // Root-namespaced expansion key ([[tree-expansion-memory]]); the label (not
+    // the count) is the stable discriminator, and the needsReapproval group gets
+    // its own key since it and a status lane can share a label edge-case-free.
+    this.id = `${root}::${kind === 'needsReapproval' ? 'needsReapproval' : `status:${group.label}`}`;
     this.description = `(${specs.length})`;
     this.contextValue = 'specGroup';
     this.accessibilityInformation = {
@@ -348,7 +353,8 @@ export class SpecNode extends vscode.TreeItem {
       : {
           command: 'vscode.open',
           title: 'Open Spec',
-          arguments: [vscode.Uri.file(spec.filePath)],
+          // preview + move focus to the editor (see adr-tree-provider for rationale).
+          arguments: [vscode.Uri.file(spec.filePath), { preview: true, preserveFocus: false }],
         };
 
     // Context value drives menu visibility. Terminal specs (done/archived) are
@@ -423,6 +429,7 @@ export class SpecFolderNode extends vscode.TreeItem {
   constructor(public readonly root: string) {
     const name = path.basename(root) || root;
     super(name, vscode.TreeItemCollapsibleState.Expanded);
+    this.id = `folder::${root}`; // stable expansion key ([[tree-expansion-memory]])
     this.iconPath = new vscode.ThemeIcon('folder');
     this.contextValue = 'specFolder';
     this.tooltip = root;
@@ -451,6 +458,11 @@ export class SpecTreeProvider implements vscode.TreeDataProvider<SpecTreeNode> {
   private readonly _listEpics?: ListEpicsFn;
   /** Per-panel "group by epic" toggle (FR-7), default on. */
   public readonly epicGrouping = new EpicGroupingState(true);
+  /** Remembers group expand/collapse across reloads; wired in extension.ts. */
+  private _expansion?: TreeExpansionMemory;
+  setExpansionMemory(memory: TreeExpansionMemory): void {
+    this._expansion = memory;
+  }
 
   constructor(
     private workspaceRoot: string,
@@ -488,6 +500,7 @@ export class SpecTreeProvider implements vscode.TreeDataProvider<SpecTreeNode> {
   }
 
   getTreeItem(element: SpecTreeNode): vscode.TreeItem {
+    this._expansion?.apply(element);
     return element;
   }
 

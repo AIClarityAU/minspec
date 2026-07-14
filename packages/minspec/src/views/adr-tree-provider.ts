@@ -5,6 +5,7 @@ import type { AdrSummary, AdrStatus } from '../lib/adr-manager';
 import { allWorkspaceRoots } from '../lib/resolve-folder';
 import { EpicGroupingState, EpicGroupNode, buildEpicGroups } from './epic-grouping';
 import type { ListEpicsFn } from './epic-grouping';
+import { TreeExpansionMemory } from './tree-expansion-memory';
 
 // ─── Status grouping ────────────────────────────────────────────────────────
 
@@ -25,13 +26,16 @@ const STATUS_GROUPS: StatusGroup[] = [
 export class AdrGroupNode extends vscode.TreeItem {
   public readonly adrs: AdrSummary[];
 
-  constructor(group: StatusGroup, adrs: AdrSummary[]) {
+  constructor(group: StatusGroup, adrs: AdrSummary[], root = '') {
     const collapsibleState = group.defaultExpanded
       ? vscode.TreeItemCollapsibleState.Expanded
       : vscode.TreeItemCollapsibleState.Collapsed;
     super(group.label, collapsibleState);
 
     this.adrs = adrs;
+    // Root-namespaced expansion key ([[tree-expansion-memory]]) — stable label,
+    // not the count badge, so multi-root (#549) lanes never collide.
+    this.id = `${root}::status:${group.label}`;
     this.description = `(${adrs.length})`;
     this.contextValue = 'adrGroup';
     this.accessibilityInformation = {
@@ -65,7 +69,9 @@ export class AdrNode extends vscode.TreeItem {
     this.command = {
       command: 'vscode.open',
       title: 'Open ADR',
-      arguments: [vscode.Uri.file(adr.filePath)],
+      // preview: reuse one tab (italic) until the custom webview lands.
+      // preserveFocus:false moves focus to the editor (tree default keeps it on the tree).
+      arguments: [vscode.Uri.file(adr.filePath), { preview: true, preserveFocus: false }],
     };
 
     // Status-suffixed contextValue gates menus: inline ✓ Accept shows only on
@@ -91,6 +97,7 @@ export class AdrFolderNode extends vscode.TreeItem {
   constructor(public readonly root: string) {
     const name = path.basename(root) || root;
     super(name, vscode.TreeItemCollapsibleState.Expanded);
+    this.id = `folder::${root}`; // stable expansion key ([[tree-expansion-memory]])
     this.iconPath = new vscode.ThemeIcon('folder');
     this.contextValue = 'adrFolder';
     this.tooltip = root;
@@ -116,6 +123,11 @@ export class AdrTreeProvider implements vscode.TreeDataProvider<AdrTreeNode> {
   private readonly _listEpics?: ListEpicsFn;
   /** Per-panel "group by epic" toggle (FR-7), default on. */
   public readonly epicGrouping = new EpicGroupingState(true);
+  /** Remembers group expand/collapse across reloads; wired in extension.ts. */
+  private _expansion?: TreeExpansionMemory;
+  setExpansionMemory(memory: TreeExpansionMemory): void {
+    this._expansion = memory;
+  }
 
   constructor(
     private workspaceRoot: string,
@@ -142,6 +154,7 @@ export class AdrTreeProvider implements vscode.TreeDataProvider<AdrTreeNode> {
   }
 
   getTreeItem(element: AdrTreeNode): vscode.TreeItem {
+    this._expansion?.apply(element);
     return element;
   }
 
@@ -196,7 +209,7 @@ export class AdrTreeProvider implements vscode.TreeDataProvider<AdrTreeNode> {
   private rootChildren(root: string): AdrTreeNode[] {
     const allAdrs = this.listAll(root);
     const epicGroups = this.epicGrouping.enabled ? this.getEpicGroups(root, allAdrs) : null;
-    return epicGroups ?? this.getStatusGroups(allAdrs);
+    return epicGroups ?? this.getStatusGroups(allAdrs, root);
   }
 
   private listAll(root: string): AdrSummary[] {
@@ -209,10 +222,10 @@ export class AdrTreeProvider implements vscode.TreeDataProvider<AdrTreeNode> {
     );
   }
 
-  private getStatusGroups(allAdrs: AdrSummary[]): AdrGroupNode[] {
+  private getStatusGroups(allAdrs: AdrSummary[], root = ''): AdrGroupNode[] {
     return STATUS_GROUPS.map(group => {
       const groupAdrs = allAdrs.filter(a => group.statuses.includes(a.status));
-      return new AdrGroupNode(group, groupAdrs);
+      return new AdrGroupNode(group, groupAdrs, root);
     });
   }
 

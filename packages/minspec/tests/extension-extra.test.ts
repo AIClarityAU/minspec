@@ -25,9 +25,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 const registeredCommands = new Map<string, (...args: any[]) => any>();
 let subscriptions: any[] = [];
 
-const mockSpecTreeProvider = { refresh: vi.fn(), epicGrouping: { set: vi.fn(), toggle: vi.fn(() => true) } };
-const mockAdrTreeProvider = { refresh: vi.fn(), epicGrouping: { set: vi.fn(), toggle: vi.fn(() => true) } };
-const mockBacklogTreeProvider = { refresh: vi.fn(), refreshIfStale: vi.fn(), epicGrouping: { set: vi.fn(), toggle: vi.fn(() => true) } };
+const mockSpecTreeProvider = { refresh: vi.fn(), setExpansionMemory: vi.fn(), epicGrouping: { set: vi.fn(), toggle: vi.fn(() => true) } };
+const mockAdrTreeProvider = { refresh: vi.fn(), setExpansionMemory: vi.fn(), epicGrouping: { set: vi.fn(), toggle: vi.fn(() => true) } };
+const mockBacklogTreeProvider = { refresh: vi.fn(), refreshIfStale: vi.fn(), setExpansionMemory: vi.fn(), epicGrouping: { set: vi.fn(), toggle: vi.fn(() => true) } };
 const mockStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockNextTaskStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockSpecPanel = { show: vi.fn(), refresh: vi.fn(), dispose: vi.fn() };
@@ -66,6 +66,8 @@ vi.mock('vscode', () => ({
     createTreeView: vi.fn(() => ({
       dispose: vi.fn(),
       onDidChangeVisibility: vi.fn(() => ({ dispose: vi.fn() })),
+      onDidExpandElement: vi.fn(() => ({ dispose: vi.fn() })),
+      onDidCollapseElement: vi.fn(() => ({ dispose: vi.fn() })),
     })),
     onDidChangeWindowState: vi.fn(() => ({ dispose: vi.fn() })),
     showErrorMessage: vi.fn(),

@@ -46,9 +46,12 @@ import {
   isBoundaryPath,
   detectBoundaryChange,
   buildChangedFiles,
+  appendAudit,
+  applyAuditFailsafe,
   type VitestRun,
   type ProverDeps,
 } from '../../../scripts/auto-merge-gate';
+import type { AutoMergeDecision } from '../src/lib/auto-merge';
 import { decideAutoMerge } from '../src/lib/auto-merge';
 import type { ChangedFile } from '../src/lib/consequence-analyzers';
 import type { ClassificationSignal } from '../src/lib/classifier';
@@ -661,6 +664,61 @@ describe('SPEC-024 MAJOR 5 — buildChangedFiles throws on a git failure (no sil
       );
     } finally {
       fs.rmSync(repo, { recursive: true, force: true });
+    }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #491 — FR-7 fail-safe: an ELIGIBLE decision whose audit line did NOT persist
+// must HOLD, not proceed untraced. The pure `applyAuditFailsafe` carries the
+// downgrade (unit-tested here, no flaky main()/e2e), and `appendAudit` now
+// REPORTS success so main() can act on it.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('#491 — audit-write failure fail-safes an eligible decision to HOLD', () => {
+  const ELIGIBLE: AutoMergeDecision = { eligible: true, blast: 'low', reason: 'all conditions met', failed: [] };
+  const HOLD: AutoMergeDecision = { eligible: false, blast: 'high', reason: 'prover not green', failed: ['head-not-green'] };
+
+  it('downgrades an ELIGIBLE decision to HOLD when the audit did not persist', () => {
+    const d = applyAuditFailsafe(ELIGIBLE, false);
+    expect(d.eligible).toBe(false);
+    expect(d.failed).toContain('audit-write-failed');
+    expect(d.reason).toMatch(/audit-write-failed/);
+    expect(d.blast).toBe('low'); // preserved for the FR-8 fallback comment
+  });
+
+  it('leaves an ELIGIBLE decision untouched when the audit DID persist', () => {
+    const d = applyAuditFailsafe(ELIGIBLE, true);
+    expect(d).toEqual(ELIGIBLE);
+    expect(d.eligible).toBe(true);
+  });
+
+  it('does NOT alter an already-HOLD decision on audit failure (audit is best-effort on holds)', () => {
+    const d = applyAuditFailsafe(HOLD, false);
+    expect(d).toEqual(HOLD);
+    expect(d.failed).not.toContain('audit-write-failed');
+  });
+
+  it('appendAudit returns true and writes the record on success', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'am-audit-ok-'));
+    try {
+      const ok = appendAudit(dir, { eligible: true, note: 'test491' });
+      expect(ok).toBe(true);
+      const written = fs.readFileSync(path.join(dir, '.minspec', 'auto-merge-audit.log'), 'utf8');
+      expect(written).toMatch(/"note":"test491"/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('appendAudit returns false (never throws) when the record cannot be written', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'am-audit-fail-'));
+    try {
+      // `.minspec` as a FILE blocks mkdirSync(dir/.minspec) → append throws →
+      // appendAudit catches and reports false (the signal main() fail-safes on).
+      fs.writeFileSync(path.join(dir, '.minspec'), 'not a directory');
+      expect(appendAudit(dir, { eligible: true })).toBe(false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
     }
   });
 });

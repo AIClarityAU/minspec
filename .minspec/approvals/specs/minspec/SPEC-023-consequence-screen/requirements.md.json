@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-023-consequence-screen/requirements.md",
+  "specHash": "ef91cb24dc753f06af7d5bfba41a1d099b823359ce023f0e70f1816bb22e15cc",
+  "approvedAt": "2026-07-14T08:46:56.831Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T4",
+  "migrated": false,
+  "baselineBlob": "e653f1c01a95bd76c0a084a3b6eba376fae22451"
+}

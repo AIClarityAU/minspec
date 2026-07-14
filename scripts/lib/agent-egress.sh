@@ -1,8 +1,11 @@
 #!/usr/bin/env bash
 # scripts/lib/agent-egress.sh — the pre-publish egress guard ORCHESTRATION,
-# extracted so every parent that publishes a credential-free agent's output runs
-# EXACTLY the same fail-closed scan (no drift between dispatch-issue.sh and
-# remediate-pr.sh). Sourced, not executed.
+# extracted into a single-responsibility, testable lib so every parent that
+# publishes a credential-free agent's output can run EXACTLY the same fail-closed
+# scan. Today the SOLE caller is dispatch-issue.sh; a second consumer — the
+# PR-remediation publish path — is PLANNED (#750). Once it calls this lib, the
+# "no drift between publish channels" guarantee is realized (until then the
+# extraction is reuse-ready, not yet reused). Sourced, not executed.
 #
 # Rationale (#358, and the no-drift rule for security controls): a credential-free
 # agent holds no creds, but the PARENT then PUBLISHES its output — it pushes the
