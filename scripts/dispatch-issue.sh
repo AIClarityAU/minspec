@@ -15,8 +15,9 @@ ROLES_DIR="${SCRIPT_DIR}/roles"
 FORCE_ROLE=""
 
 # Shared pre-publish egress guard (#358) — single source of truth for the
-# fail-closed scan, reused by remediate-pr.sh so the two publish channels never
-# drift. Sourced (not executed); defines agent_egress_scan.
+# fail-closed scan. Sole caller today is this script; the PR-remediation publish
+# path is the planned second consumer (#750), at which point both channels share
+# one scan and cannot drift. Sourced (not executed); defines agent_egress_scan.
 # shellcheck source=scripts/lib/agent-egress.sh
 source "${SCRIPT_DIR}/lib/agent-egress.sh"
 
@@ -380,11 +381,11 @@ run_reviewer_stage() {
 # is defense-in-depth, not a sandbox). That residual is inherent to running the
 # project's own build and is out of this guard's scope.
 run_egress_guard() {
-  # Orchestration EXTRACTED to scripts/lib/agent-egress.sh so this and
-  # remediate-pr.sh run the IDENTICAL fail-closed scan (no drift between the two
-  # publish channels — a security control must never fork; #358). This wrapper only
-  # pins the dispatch-specific inputs: base = origin/main (a fresh branch), and the
-  # two artefacts the dispatcher publishes.
+  # Orchestration EXTRACTED to scripts/lib/agent-egress.sh so every publish
+  # channel can share ONE fail-closed scan (a security control must never fork;
+  # #358). This script is the SOLE caller today; the PR-remediation path is the
+  # planned second consumer (#750). This wrapper only pins the dispatch-specific
+  # inputs: base = origin/main (a fresh branch), and the two artefacts published.
   agent_egress_scan "$WORKTREE" "origin/main" \
     "${WORKTREE}/.agent-summary.md" "${WORKTREE}/.review-signals.json"
 }
