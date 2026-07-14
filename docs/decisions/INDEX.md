@@ -458,4 +458,12 @@ MinSpec captures the approver of a spec/DR as approvedBy = git config user.email
 <!-- dr-summary:DR-057 auto=a02554d56427 -->
 The background piggyback loop (scripts/drain-inbox.sh, fired from the session-start hook) has ONE input source: **GitHub issues** (inbox → triage → agent-ready → dispatch-issue.sh → worktree → PR). It never reads .minspec/approvals/ sidecars or spec status: frontmatter. Meanwhile SDD phase-advance (specify→plan→tasks→implement) lives entirely in the VS Code extension as a human Command-Palette action. So an **approved plan stalled with no tasks.md** just sits there — nothing in the background loop notices or generates the next phase. The founder asked to close…
 <!-- /dr-summary:DR-057 -->
+
+## [DR-058 — Auto-merge low-blast requires AFFIRMATIVE evidence, not the absence of a high signal — an empty consequence-signal set on a code change is unmeasured (deny-by-default → hold), and eligibility needs a positive low-blast certification that grades consequence, never diff size](DR-058.md)
+
+*Status: proposed · Date: 2026-07-14*
+
+<!-- dr-summary:DR-058 auto=e19da9b036b0 -->
+classifyBlast(signals, touchesExportedSurface) (auto-merge.ts:188) returns 'low' when signals is **empty** — the recognition loop simply never runs, and the function falls through to return 'low'. Two more facts make that empty set fully *eligible*, not merely low-blast: 1. deriveTouchesExportedSurface([]) → false, so the unmeasured-blast gate (auto-merge.ts:385 — if (!reachKnownLow(signals) && touchesExportedSurface) failed.push('unmeasured-blast')) **never fires** (its touchesExportedSurface conjunct is false). 2. reachKnownLow **always returns false in v1** (auto-merge.ts:240 — "No affirmative low-reach signal type exists in v1") — so it can never…
+<!-- /dr-summary:DR-058 -->
 <!-- minspec:dr-index:end -->
