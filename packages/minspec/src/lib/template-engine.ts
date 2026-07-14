@@ -8,7 +8,7 @@ import * as path from 'path';
 import Handlebars from 'handlebars';
 import { loadConfig, type MinspecConfig } from './config';
 import { TEMPLATES, TEMPLATE_NAMES, type TemplateName } from './template-registry';
-import { parseConstitution, type Constitution } from './constitution';
+import { parseConstitution, firstSentence, type Constitution } from './constitution';
 
 /** Variables available to all templates */
 export interface TemplateContext {
@@ -27,6 +27,8 @@ export interface TemplateContext {
 function registerHelpers(): void {
   // {{incremented @index}} → 1-based index for numbered lists
   Handlebars.registerHelper('incremented', (index: number) => index + 1);
+  // {{firstSentence this}} → lead sentence only, for constitution mirrors (#705)
+  Handlebars.registerHelper('firstSentence', (text: unknown) => firstSentence(String(text)));
 }
 
 // Register helpers on module load
