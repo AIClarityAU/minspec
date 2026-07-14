@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-017-trust-dashboard/requirements.md",
+  "specHash": "344ed50bcdc3f533095e99ad7b0ff71e82f47fdb35b939883d25ca7ba4a756b9",
+  "approvedAt": "2026-07-14T08:46:25.500Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T4",
+  "migrated": false,
+  "baselineBlob": "4d464650b48dfd2b688c4aa5e8a2bffb74e90a6b"
+}
