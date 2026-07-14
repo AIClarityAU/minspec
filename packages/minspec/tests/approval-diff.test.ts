@@ -108,6 +108,59 @@ describe('resolveDiffSide', () => {
     expect(resolveDiffSide(tmp, path.join(tmp, 'does-not-exist.md'), 'current')).toBeUndefined();
   });
 
+  // #701 — git-history baseline fallback when the minted blob is unrecoverable
+  function commitAll(msg: string): void {
+    execFileSync('git', ['add', '-A'], { cwd: tmp, stdio: 'ignore' });
+    execFileSync('git', ['commit', '-m', msg, '--no-verify'], { cwd: tmp, stdio: 'ignore' });
+  }
+
+  it('#701: a legacy record (baselineBlob "") whose specHash matches a COMMITTED version reconstructs "approved" from git history', () => {
+    const specPath = writeSpec(SPEC_REL);
+    commitAll('add spec'); // the approved content now lives in git history
+    // Approve to capture the correct canonical specHash, then downgrade the
+    // sidecar to a legacy (no-baseline) shape so only the history path can serve.
+    approveSpec(tmp, specPath, 'T3', 'tester@example.com');
+    const p = sidecarPath(tmp, SPEC_REL);
+    const rec = JSON.parse(fs.readFileSync(p, 'utf-8'));
+    fs.writeFileSync(p, JSON.stringify({ ...rec, baselineBlob: '' }, null, 2));
+    // Edit the working file so the two sides genuinely differ.
+    fs.appendFileSync(specPath, '\nEdited after approval.\n');
+
+    const approved = resolveDiffSide(tmp, specPath, 'approved');
+    expect(approved).toContain('Original body.');
+    expect(approved).not.toContain('Edited after approval.');
+  });
+
+  it('#701: fallback returns undefined (degrade, never throw) when the approved hash matches NO commit', () => {
+    const specPath = writeSpec(SPEC_REL);
+    commitAll('add spec'); // committed, but the record below points at a bogus hash
+    const p = sidecarPath(tmp, SPEC_REL);
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, JSON.stringify({
+      specPath: SPEC_REL, specHash: 'a'.repeat(64), approvedAt: '2026-01-01T00:00:00.000Z',
+      approvedBy: 'x@y.com', tier: 'T3', migrated: false, baselineBlob: '',
+    }, null, 2));
+
+    expect(() => resolveDiffSide(tmp, specPath, 'approved')).not.toThrow();
+    expect(resolveDiffSide(tmp, specPath, 'approved')).toBeUndefined();
+  });
+
+  it('#701: showChangesSinceApproval opens the diff for a legacy record once its approved content is recoverable from history', async () => {
+    const specPath = writeSpec(SPEC_REL);
+    commitAll('add spec');
+    approveSpec(tmp, specPath, 'T3', 'tester@example.com');
+    const p = sidecarPath(tmp, SPEC_REL);
+    const rec = JSON.parse(fs.readFileSync(p, 'utf-8'));
+    fs.writeFileSync(p, JSON.stringify({ ...rec, baselineBlob: '' }, null, 2));
+    fs.appendFileSync(specPath, '\nEdited after approval.\n');
+
+    await showChangesSinceApproval(tmp, specPath);
+
+    expect(vscode.window.showInformationMessage).not.toHaveBeenCalled();
+    expect(vscode.commands.executeCommand).toHaveBeenCalledTimes(1);
+    expect((vscode.commands.executeCommand as ReturnType<typeof vi.fn>).mock.calls[0][0]).toBe('vscode.diff');
+  });
+
   it('R2: a spec path containing a space round-trips through the diff URI encoding losslessly', () => {
     const specPath = writeSpec('specs/minspec/SPEC WITH SPACE/requirements.md');
     approveSpec(tmp, specPath, 'T3', 'tester@example.com');

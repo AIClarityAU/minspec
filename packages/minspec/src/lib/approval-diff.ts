@@ -16,7 +16,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { getApprovalRecord, recoverBaseline } from './approval';
+import { getApprovalRecord, recoverBaseline, recoverBaselineFromHistory } from './approval';
 import { getSpecBodyOnly } from '@aiclarity/shared';
 import type { SpecNode } from '../views/spec-tree-provider';
 
@@ -26,8 +26,10 @@ export type DiffSide = 'approved' | 'current';
  * Re-derive one side's text on demand — nothing is cached. `'current'` reads +
  * body-extracts the live file (`undefined` on any read failure — deleted,
  * permissions, etc.). `'approved'` resolves the committed sidecar and recovers
- * its pinned baseline (`undefined` when no record or the baseline is
- * unrecoverable — legacy `baselineBlob === ''`, or a pruned/missing git blob).
+ * its pinned baseline, falling back to a git-history reconstruction (#701) when
+ * that blob is unrecoverable (legacy `baselineBlob === ''`, or a pruned/missing/
+ * cross-machine blob). `undefined` only when there is no record, or neither the
+ * blob nor any committed version reproduces the approved hash.
  *
  * `getApprovalRecord` takes the ABSOLUTE spec path and relativizes internally
  * (SPEC-029 Opus review SEV-1) — do NOT pre-relativize with `specRelPath`, or
@@ -44,7 +46,12 @@ export function resolveDiffSide(rootDir: string, specFilePath: string, side: Dif
   }
   const record = getApprovalRecord(rootDir, specFilePath);
   if (!record) return undefined;
-  return recoverBaseline(rootDir, record); // undefined on any failure — never throws
+  // Prefer the SPEC-017 minted blob; fall back to reconstructing the approved
+  // body from git history (#701) when the blob is unrecoverable — a legacy
+  // pre-baseline record (baselineBlob '') or a per-machine blob that never
+  // reached this clone (DR-043). Both branches return the SAME body-only
+  // boundary, so the diff's two sides stay comparable. Both never throw.
+  return recoverBaseline(rootDir, record) ?? recoverBaselineFromHistory(rootDir, record);
 }
 
 const SCHEME = 'minspec-approval-diff';
