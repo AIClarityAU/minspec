@@ -354,13 +354,46 @@ try {
   // Corpus unreadable / absent — nothing to check.
 }
 
-if (warnings > 0) {
-  console.warn(`\n${warnings} non-fatal warning(s).`);
+// Rule 12 (FATAL, #678): packages/minspec/src/lib/ci-review-templates.ts must be
+// byte-identical to what scripts/gen-ci-templates.mjs regenerates from the repo's
+// own working CI-review stack (.github/workflows/ai-review.yml + ready-to-merge.yml
+// + ai-review-retry.yml, scripts/review-branch.sh, scripts/review-decide.sh,
+// scripts/roles/*, .github/scripts/ai-review-guard.js). Editing any of those source
+// files without regenerating the embedded copy used to drift silently — the
+// `ci-stack-portability` vitest suite was the only gate, and it only runs on
+// push/PR, so the drift landed on main before anyone caught it (3 recurrences:
+// #453→#619, #619→#635, an ai-review.yml comment edit→#675). This rule runs in
+// CI's `lint` job (`npm run validate`) on every PR regardless of which files
+// changed, turning a silent main-breakage into a commit/PR-time error with the
+// exact fix command. Dynamic `import()` (not a top-level await) keeps this file
+// runnable under either CJS or ESM compilation of this script.
+async function checkCiReviewTemplatesFresh(): Promise<void> {
+  try {
+    const gen = await import('./gen-ci-templates.mjs');
+    const expected = gen.generateCiReviewTemplates(ROOT);
+    const outFile = join(ROOT, gen.OUTPUT_PATH);
+    const onDisk = readFileSync(outFile, 'utf-8');
+    if (onDisk !== expected) {
+      fail(
+        outFile,
+        'stale — drifted from .github/workflows/* + scripts/* sources (#678). Run: node scripts/gen-ci-templates.mjs',
+      );
+    }
+  } catch {
+    // Generator or one of its source files unreadable/absent — nothing to check,
+    // stay silent (mirrors the other corpus-optional rules above).
+  }
 }
 
-if (errors > 0) {
-  console.error(`\n${errors} validation error(s). Fix before committing.`);
-  process.exit(1);
-} else {
-  console.log('Frontmatter validation passed.');
-}
+checkCiReviewTemplatesFresh().then(() => {
+  if (warnings > 0) {
+    console.warn(`\n${warnings} non-fatal warning(s).`);
+  }
+
+  if (errors > 0) {
+    console.error(`\n${errors} validation error(s). Fix before committing.`);
+    process.exit(1);
+  } else {
+    console.log('Frontmatter validation passed.');
+  }
+});

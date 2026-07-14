@@ -16,7 +16,9 @@
  * Decoding is offline + deterministic (Buffer, no network) — Tier-0 safe (DR-004).
  *
  * GENERATED from the repo's real `.github/workflows/*` + `scripts/*` by
- * scratchpad/gen-templates.mjs. Do not hand-edit the base64 blobs — regenerate.
+ * scripts/gen-ci-templates.mjs (#678). Do not hand-edit the base64 blobs — run
+ * `node scripts/gen-ci-templates.mjs` to regenerate. `npm run validate` fails
+ * with a stale-file error (and the fix command) if this file drifts from that.
  */
 
 /** Decode a base64-embedded template back to its exact UTF-8 source bytes. */
