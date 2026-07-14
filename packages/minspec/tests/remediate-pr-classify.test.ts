@@ -107,4 +107,18 @@ describe('remediate-pr.sh: shared egress guard is reused (no security-control dr
     expect(fs.existsSync(LIB)).toBe(true);
     expect(fs.readFileSync(LIB, 'utf-8')).toContain('agent_egress_scan()');
   });
+
+  it('dispatch-issue.sh ALSO sources the shared lib — the no-drift invariant is real, both publish channels share one scan', () => {
+    // The claim is "no drift between dispatch-issue.sh and remediate-pr.sh": it
+    // only holds if BOTH source the lib. Extraction landed on main via #747;
+    // this asserts the second consumer (#750) shares it, so a future patch to the
+    // scan touches one file, not two.
+    const dispatch = fs.readFileSync(path.resolve(__dirname, '../../../scripts/dispatch-issue.sh'), 'utf-8');
+    expect(dispatch).toContain('source "${SCRIPT_DIR}/lib/agent-egress.sh"');
+    expect(dispatch).toContain('agent_egress_scan');
+    // And neither re-implements the scan body (no inline git-log-p orchestration).
+    const remediate = fs.readFileSync(SCRIPT, 'utf-8');
+    expect(remediate).not.toMatch(/git .*log -p .*origin\/main/);
+    expect(dispatch).not.toMatch(/local -a targets=\(\)/); // the old inline guard's array
+  });
 });
