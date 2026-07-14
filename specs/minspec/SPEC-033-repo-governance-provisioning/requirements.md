@@ -1,7 +1,7 @@
 ---
 id: SPEC-033
 type: requirements
-status: implementing
+status: specifying
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness — guardrails a shared repo must carry
@@ -10,8 +10,8 @@ relates_to: [SPEC-024, SPEC-030, SPEC-034]  # SPEC-024 auto-merge gate consumes 
 
 # MinSpec — Repo Governance Provisioning (ai-review + branch protection on init/refresh) — Requirements
 
-**Date:** 2026-07-07
-**Status:** Implementing
+**Date:** 2026-07-07 (clarify refinements applied 2026-07-14 — [#703](https://github.com/AIClarityAU/minspec/issues/703))
+**Status:** Specifying (reopened for the #703 clarify refinements; re-approval pending — the prior approval was against pre-refinement bytes)
 **Triggered by:** [#557](https://github.com/AIClarityAU/minspec/issues/557) — "provision repo governance (branch protection + ai-review) on init/refresh — detect & offer to fix."
 **Builds on:** [DR-037](../../../docs/decisions/DR-037.md) — the managed-region template mechanism this rides · the ai-review workflow set ([#342](https://github.com/AIClarityAU/minspec/issues/342) / [#428](https://github.com/AIClarityAU/minspec/issues/428) / [#480](https://github.com/AIClarityAU/minspec/issues/480)), propagated **unchanged**, not rewritten.
 **Relates:** [SPEC-024](../SPEC-024-auto-merge-eligibility/requirements.md) — the auto-merge gate that only becomes meaningful once the `ai-review:pass` label it consumes is actually produced on every repo, which today it is not.
@@ -102,6 +102,15 @@ finding: the gate checks the thing it happens to know about and is silent on the
   Applied via `gh api` **only** when an authenticated `gh`/token with repo-admin is
   available and the user confirms; otherwise **downgrade to advisory** — surface the exact
   `gh`/GitHub-UI steps and change nothing. Re-running is a no-op when already satisfied.
+  > **Clarify note (#703): `gh api` IS the GitHub REST API.** The extension already uses it
+  > (`ruleset-advisor.ts` does `gh api .../rulesets` GET to detect + POST to write). The
+  > relaxed network invariant ([DR-054](../../../docs/decisions/DR-054.md) — data-sovereignty,
+  > not air-gap) removes the "no network" objection but does **not** argue for a direct
+  > `octokit`/`fetch`+token client: that would make the extension **hold a credential**,
+  > reintroducing the token-custody surface DR-054/DR-050 deliberately keep out ("MinSpec
+  > holds no token, initiates no egress"). Keep `gh api` — it is credential-free (gh owns
+  > auth, the hop is user-initiated). Its one gap, "`gh` not installed / not authed",
+  > downgrades to the FR-3 advisory path, **never** a stored PAT.
 - **FR-4 — Surface the prerequisites the vsix cannot do headlessly.** Present the ai-review
   `ACTIVATION` checklist as explicit, **unchecked** items (never reported as done). **This is
   today's (pre-SPEC-034) checklist and is expected to shrink** — see the superseded-by note
@@ -145,27 +154,54 @@ finding: the gate checks the thing it happens to know about and is silent on the
   the three scripts to the managed-region set alongside the dispatch-only roles they load
   (`dev`/`triage` — reconcile against `roles/architect.md`, which the ai-review stack already
   ships for its own panel use, #453). *Decision: same spec, not a new one (D-6).*
-- **FR-7 — `auto-merge-gate.ts` propagation, default `consequence-hybrid` (added
-  2026-07-12).** Add `scripts/auto-merge-gate.ts` as a managed-region template — confirmed
-  portable as-is (zero hardcoded repo refs, unlike FR-6's scripts). Scaffolded repos default
-  `MINSPEC_AUTOMERGE_MODE` / `.minspec/config.json`'s `autoMerge.mode` to
-  `consequence-hybrid`, matching minspec's own SPEC-030 default — **an explicit, informed
-  decision (D-7) taken with SPEC-030/SPEC-024's four safety holes
-  ([#489](https://github.com/AIClarityAU/minspec/issues/489),
-  [#490](https://github.com/AIClarityAU/minspec/issues/490),
-  [#491](https://github.com/AIClarityAU/minspec/issues/491),
-  [#466](https://github.com/AIClarityAU/minspec/issues/466)) and two open prerequisite
-  backstops ([#91](https://github.com/AIClarityAU/minspec/issues/91),
-  [#195](https://github.com/AIClarityAU/minspec/issues/195)) still open** — those gaps now
-  apply to every repo this scaffolds into, not just minspec. A per-dev/per-repo override
-  (DR-033 #183) always wins over this default (INV-9).
-- **FR-8 — Workspace-wide init offer (added 2026-07-12).** When `Initialize SDD Structure`
-  runs with a multi-root `*.code-workspace` open, offer (non-modal) to run init on every
-  **top-level workspace folder** — the literal `folders` array entries, reusing the existing
-  `allWorkspaceFolderPaths`-style enumeration (`resolve-folder.ts`, built for #604) — **never**
-  a filesystem recursion for nested `.git` dirs (D-9). Already-scaffolded folders are listed
-  in the same offer as "already current," not silently skipped and not re-prompted
-  individually.
+- **FR-7 — `auto-merge-gate.ts` propagation, default `pr-gate` until the merge-holes close
+  (added 2026-07-12; default reversed 2026-07-14 per #703 / D-7-rev).** Add
+  `scripts/auto-merge-gate.ts` as a managed-region template — confirmed portable as-is (zero
+  hardcoded repo refs, unlike FR-6's scripts). **Scaffolded repos default
+  `MINSPEC_AUTOMERGE_MODE` / `.minspec/config.json`'s `autoMerge.mode` to `pr-gate`**
+  (deny-by-default), matching the gate's own no-fail-open design — **not** `consequence-hybrid`.
+  Rationale (reverses the earlier D-7): SPEC-030/SPEC-024's four merge-holes
+  ([#489](https://github.com/AIClarityAU/minspec/issues/489) signal-1 self-reported, not
+  cross-checked vs the real diff · [#490](https://github.com/AIClarityAU/minspec/issues/490)
+  subtle code change false-negatives to low-blast · [#491](https://github.com/AIClarityAU/minspec/issues/491)
+  swallowed audit-write · [#466](https://github.com/AIClarityAU/minspec/issues/466) `ai-review:pass`
+  not SHA-bound) plus two open backstops ([#91](https://github.com/AIClarityAU/minspec/issues/91),
+  [#195](https://github.com/AIClarityAU/minspec/issues/195)) are still open, so propagating a
+  live `consequence-hybrid` default would spread those holes to **every** scaffolded repo, not
+  just minspec. **Propagate the gate now, but deny-by-default; flip the scaffold default to
+  `consequence-hybrid` only once #489/#490/#491/#466 close.** A per-dev/per-repo override
+  (DR-033 #183) still always wins over the default in either direction (INV-9).
+- **FR-8 — Workspace-wide init offer (added 2026-07-12; refined 2026-07-14 per #703).** When
+  `Initialize SDD Structure` runs with a multi-root `*.code-workspace` open, offer (non-modal)
+  to run init on every **top-level workspace folder** — the literal `folders` array entries,
+  reusing the existing `allWorkspaceFolderPaths`-style enumeration (`resolve-folder.ts`, built
+  for #604) — **never** a filesystem recursion for nested `.git` dirs (D-9). **The offer lists
+  each folder by name** (a checklist showing per-folder state — *needs-init* vs *already
+  current*), so the user sees exactly what will be touched before confirming (INV-10 /
+  [HITL approval UX](../../../docs/decisions/) — act on a visible, enumerated artifact, never a
+  vague "initialize all N folders?"). Already-scaffolded folders appear in that list as
+  "already current," not silently skipped and not re-prompted individually. **No second toast
+  for nested git repos** (#703 / D-9): the founder does not use nested repos; if a nested
+  `.git` is nonetheless detected, at most emit a single passive one-line advisory ("N nested
+  repos found — not included; run init inside each if wanted"), never a second interactive
+  offer.
+- **FR-9 — Collapse init + refresh into one state-detecting command (added 2026-07-14 per
+  #703 / D-10).** Today two near-identically-named palette entries — *MinSpec: Initialize SDD
+  Structure* (`initCommand`, `packages/minspec/src/commands/init.ts:659` — first-run scaffold +
+  onboarding gated to first init: coverage prompt, ruleset advisory, PR-ext nudge) and
+  *MinSpec: Refresh Harness Files* (`initRefreshCommand`, same file `:753` — merge-preserving
+  re-render, no onboarding) — are a
+  misfire trap: a user cannot tell which to run, and init on an already-scaffolded repo could
+  clobber where refresh would merge-preserve. Collapse them to **one** command
+  (*MinSpec: Initialize / Refresh SDD Structure*) that branches on state: no
+  `.minspec/config.json` ⇒ full init (with onboarding); present ⇒ merge-preserving refresh
+  (+ managed-region warnings). One palette verb, impossible to pick wrong; the refresh path
+  becomes an internal branch, not a separate user-facing command. Auto-bootstrap already does
+  init-on-open / refresh-on-open, so the manual command is the redundant surface this
+  simplifies. *(Riding in this spec per D-10 because it is the init entry point FR-8's
+  workspace-wide offer and FR-1/FR-6/FR-7's scaffolding all hang off; if the Plan phase finds
+  it inflates scope, it is cleanly separable to its own T2 issue — the governance-content FRs
+  do not depend on it.)*
 
 ### Out of scope (explicitly)
 
@@ -202,14 +238,21 @@ finding: the gate checks the thing it happens to know about and is silent on the
   set that shells out to `gh`/`git` must resolve its target repo dynamically; a template
   containing a literal `AIClarityAU/minspec` (or any other single repo) string never ships.
   Enforced by extending the `ci-stack-portability` test before FR-6's templates are added.
-- **INV-9 — Auto-merge default never overrides an explicit config (FR-7).** `consequence-hybrid`
-  is the scaffolded default, but a per-dev/per-repo `autoMerge.mode` already set to `pr-gate`
-  always wins — FR-7 introduces no fail-open path that silently upgrades an explicit
-  `pr-gate` choice.
+- **INV-9 — Auto-merge default is `pr-gate` and never silently upgrades (FR-7).** The
+  scaffolded default is `pr-gate` (deny-by-default) while #489/#490/#491/#466 are open; a
+  per-dev/per-repo `autoMerge.mode` always wins in **either** direction, and nothing in FR-7
+  ever writes `consequence-hybrid` over an absent or explicit config without the human setting
+  it. (The flip of the *default* to `consequence-hybrid` is a separate, later change gated on
+  those holes closing — not shipped by this spec.)
 - **INV-10 — Workspace-wide offer is declared, not discovered (FR-8).** The offer never
-  touches a folder outside the workspace's declared `folders` array; it lists exactly what it
-  will touch before running, and running it twice is a no-op for already-current folders
-  (inherits FR-5/INV-2).
+  touches a folder outside the workspace's declared `folders` array; it lists each folder **by
+  name** with its state before running, and running it twice is a no-op for already-current
+  folders (inherits FR-5/INV-2).
+- **INV-11 — One command, no wrong choice, no clobber (FR-9).** The merged init/refresh
+  command selects init vs refresh purely from `.minspec/config.json` presence; the refresh
+  branch preserves user content outside managed markers exactly as `initRefreshCommand` does
+  today (inherits INV-3), and the onboarding prompts fire only on the first-init branch —
+  never re-prompted on the refresh branch.
 
 ## Decisions needed (Clarify — human-only)
 
@@ -244,18 +287,21 @@ finding: the gate checks the thing it happens to know about and is silent on the
   this spec**, not a separate spec — same epic (EPIC-009), same "propagate minspec's own
   automation" concern as FR-1. Accepted that this is a bigger lift than FR-1 (a portability
   refactor, not a template copy) — see INV-8.
-- **D-7 — Auto-merge default for freshly-provisioned repos. → RESOLVED (2026-07-12, Paul
-  Harvey): `consequence-hybrid` by default (FR-7)**, explicitly overriding this session's own
-  `pr-gate`-by-default recommendation. **Recorded risk, accepted knowingly:** sealbox and
-  scrooge will run live auto-merge under today's known gaps — #489 (signal-1 is
-  agent-self-reported, never cross-checked against the real diff), #490 (a subtle code
-  change can false-negative to low-blast and auto-merge), #491 (an audit-write failure is
-  swallowed, so a wrong auto-merge can be untraceable), #466 (`ai-review:pass` isn't yet
-  SHA-bound — TOCTOU), plus #91/#195 (consequence-classifier rescope and the real
-  impact-reach index are both still open). Mitigation carried into FR-7/INV-9: a per-repo
-  override to `pr-gate` always wins, so this is a default, not a floor. Follow-up: closing
-  #489/#490/#491/#466/#91/#195 remains tracked independently (SPEC-024/030); this decision
-  does not wait on them.
+- **D-7 — Auto-merge default for freshly-provisioned repos. → SUPERSEDED (2026-07-14, Paul
+  Harvey, #703): `pr-gate` by default until the merge-holes close, then flip.** The earlier
+  2026-07-12 resolution (`consequence-hybrid` by default, accepting the holes on every repo)
+  is **reversed**. Scaffolded repos default to `pr-gate` (deny-by-default); the gate is still
+  propagated (FR-7) so it is *present and configured*, but no repo auto-merges live until
+  #489/#490/#491/#466 close (backstops #91/#195). Founder's steer ("obv we should close those
+  gaps") + the opening "are we safe to turn on" both point to not spreading a known-holed
+  live default. The flip of the scaffold default to `consequence-hybrid` becomes a one-line
+  follow-up once those close. A per-repo override still wins in either direction (INV-9).
+- **D-10 — Collapse the two init/refresh palette commands into one? → RESOLVED (2026-07-14,
+  Paul Harvey, #703): yes — one state-detecting command (FR-9).** `initCommand` (first-run +
+  onboarding) and `initRefreshCommand` (merge-preserving) do genuinely different things, but
+  two near-identical palette names are a misfire trap; collapse to one command that branches
+  on `.minspec/config.json` presence. Folded into this spec (it is the init entry point the
+  other FRs hang off); separable to its own T2 issue if Plan finds it inflates scope.
 - **D-8 — Workspace-init target set. → RESOLVED (2026-07-12, Paul Harvey): top-level
   workspace folders only (FR-8)** — the `.code-workspace` file's declared `folders` array,
   not a recursive filesystem scan for nested `.git` dirs. Matches the existing
@@ -281,12 +327,18 @@ finding: the gate checks the thing it happens to know about and is silent on the
    scaffolded into scrooge/sealbox resolve their own repo at runtime — a portability test
    (extending `ci-stack-portability`) asserts no template contains a literal
    `AIClarityAU/minspec` string. [INV-8, FR-6]
-6. A freshly-scaffolded repo's `.minspec/config.json` has `autoMerge.mode: consequence-hybrid`
-   by default; setting it to `pr-gate` before/after scaffold is never overwritten by a
-   re-init/refresh. [INV-9, FR-7]
-7. Running `Initialize SDD Structure` with a `*.code-workspace` open (e.g.
-   `mmo.code-workspace`) offers every top-level workspace folder, marks already-scaffolded
-   ones as current, and touches no folder outside the declared `folders` array. [INV-10, FR-8]
+6. A freshly-scaffolded repo's `.minspec/config.json` has `autoMerge.mode: pr-gate` by default
+   (while #489/#490/#491/#466 are open); the gate files are present and configured, but the
+   repo does not auto-merge. Setting the mode explicitly is never overwritten by a
+   re-init/refresh, and nothing writes `consequence-hybrid` without the human. [INV-9, FR-7]
+7. Running the init command with a `*.code-workspace` open (e.g. `mmo.code-workspace`) offers
+   every top-level workspace folder **by name** with per-folder state, marks already-scaffolded
+   ones as current, and touches no folder outside the declared `folders` array; a nested `.git`
+   yields at most a passive advisory, never a second toast. [INV-10, FR-8]
+8. The single *MinSpec: Initialize / Refresh SDD Structure* command runs full init (with
+   onboarding) on a repo with no `.minspec/config.json` and a merge-preserving refresh (no
+   onboarding, user content outside markers intact) on one that has it — with no separate
+   *Refresh Harness Files* entry in the palette. [INV-11, FR-9]
 
 ## Follow-ups (tracked — DR-023)
 
@@ -299,6 +351,11 @@ finding: the gate checks the thing it happens to know about and is silent on the
 - **FR-4's checklist must be re-derived once SPEC-034 ships** (D-3) — do not let this spec's
   copy of the ACTIVATION checklist drift from `ai-review.yml`'s own a second time (#666 was
   the first instance, a plain comment typo; the next one would be a spec-vs-code desync).
-- **Track #489/#490/#491/#466/#91/#195 independently** (D-7) — FR-7 ships `consequence-hybrid`
-  as the default now, as an accepted risk, not contingent on those closing; they remain
-  SPEC-024/SPEC-030's problem to close, not blockers re-litigated here.
+- **Flip the FR-7 scaffold default `pr-gate` → `consequence-hybrid` once
+  #489/#490/#491/#466 close** (D-7-rev) — a one-line default change + a test update, tracked
+  against those issues (SPEC-024/SPEC-030). Until then, `pr-gate` is the shipped default and
+  #91/#195 (classifier rescope + real impact-reach index) remain the backstops that make the
+  eventual flip trustworthy.
+- **FR-9 command-merge is separable** (D-10) — if Plan finds collapsing the two init/refresh
+  commands inflates SPEC-033, split it to its own T2 issue; the governance-content FRs
+  (FR-1/2/3/4/6/7) do not depend on it.
