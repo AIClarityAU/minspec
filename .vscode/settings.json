@@ -8,5 +8,12 @@
         "minspec",
         "WSJF"
     ],
-    "minspec.autoClassifyOnCommit": true
+    "minspec.autoClassifyOnCommit": true,
+
+    // Surface the stdlib-unittest hook tests (scripts/hooks/test_*.py) in the
+    // Testing panel. These run canonical.py / the spec-gate as subprocesses and
+    // are invisible to the Vitest and Extension Test Runner controllers.
+    "python.testing.unittestEnabled": true,
+    "python.testing.pytestEnabled": false,
+    "python.testing.unittestArgs": ["-v", "-s", "scripts/hooks", "-p", "test_*.py"]
 }

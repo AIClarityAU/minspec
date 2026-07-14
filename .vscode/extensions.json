@@ -1,0 +1,13 @@
+{
+  // Extensions that make the Testing panel show ALL three of this repo's
+  // automated-test systems, not just the Vitest unit suite:
+  //   - vitest.explorer               → packages/*/tests/**  (Vitest, ~2897 cases)
+  //   - ms-vscode.extension-test-runner → packages/minspec/src/test/** via
+  //       .vscode-test.mjs  (mocha VS Code integration tests, spawned host)
+  //   - ms-python.python              → scripts/hooks/test_*.py  (stdlib unittest)
+  "recommendations": [
+    "vitest.explorer",
+    "ms-vscode.extension-test-runner",
+    "ms-python.python"
+  ]
+}
