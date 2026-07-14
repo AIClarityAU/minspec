@@ -100,7 +100,8 @@ export class EpicGroupNode<T> extends vscode.TreeItem {
       this.command = {
         command: 'vscode.open',
         title: 'Open Epic',
-        arguments: [vscode.Uri.file(epic.filePath)],
+        // preview + move focus to the editor (see adr-tree-provider for rationale).
+        arguments: [vscode.Uri.file(epic.filePath), { preview: true, preserveFocus: false }],
       };
       this.tooltip = `${epic.id}: ${epic.title}\nStatus: ${epic.status}\n${badge}`;
     }

@@ -353,7 +353,8 @@ export class SpecNode extends vscode.TreeItem {
       : {
           command: 'vscode.open',
           title: 'Open Spec',
-          arguments: [vscode.Uri.file(spec.filePath)],
+          // preview + move focus to the editor (see adr-tree-provider for rationale).
+          arguments: [vscode.Uri.file(spec.filePath), { preview: true, preserveFocus: false }],
         };
 
     // Context value drives menu visibility. Terminal specs (done/archived) are

@@ -69,7 +69,9 @@ export class AdrNode extends vscode.TreeItem {
     this.command = {
       command: 'vscode.open',
       title: 'Open ADR',
-      arguments: [vscode.Uri.file(adr.filePath)],
+      // preview: reuse one tab (italic) until the custom webview lands.
+      // preserveFocus:false moves focus to the editor (tree default keeps it on the tree).
+      arguments: [vscode.Uri.file(adr.filePath), { preview: true, preserveFocus: false }],
     };
 
     // Status-suffixed contextValue gates menus: inline ✓ Accept shows only on
