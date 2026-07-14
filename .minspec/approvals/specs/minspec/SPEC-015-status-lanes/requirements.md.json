@@ -1,8 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-015-status-lanes/requirements.md",
-  "specHash": "2cb66c3088bdf351875a7d97114c17f64aba0b649ac33ebd0840219592ad118b",
-  "approvedAt": "2026-06-04T10:25:20.633Z",
-  "approvedBy": "github@harvest316.com",
+  "specHash": "12289eefbe50ebbec3e75b0d293932a9d17715a20b38f0cb56fc04069cc76f3d",
+  "approvedAt": "2026-07-14T03:34:25.768Z",
+  "approvedBy": "claude@harvest316.com",
   "tier": "T3",
-  "migrated": false
+  "migrated": false,
+  "baselineBlob": "6e278715de461a40e426143176674b064c7606b1"
 }
