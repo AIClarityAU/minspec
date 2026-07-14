@@ -198,6 +198,62 @@ export function recoverBaseline(rootDir: string, record: ApprovalRecord): string
 }
 
 /**
+ * Deterministic FALLBACK for the approved-side baseline when the SPEC-017 minted
+ * blob is unrecoverable (#701). Two records reach here with `recoverBaseline`
+ * returning undefined despite a real prior approval: a LEGACY record predating
+ * SPEC-017 baseline minting (`baselineBlob` '' / absent), and a per-machine blob
+ * that never travelled to this clone (DR-043 — `refs/minspec/snapshots/*` is not
+ * pushed by a plain `git push`). In BOTH cases the approved content is still
+ * recoverable from git with zero persisted state: the record's canonical
+ * `specHash` matches whichever committed version the human approved.
+ *
+ * Walks the spec file's own history newest→oldest, canonical-hashing each
+ * committed version, and returns the BODY-ONLY text (same boundary as
+ * `recoverBaseline` / the diff's 'current' side) of the FIRST commit whose
+ * canonical hash equals `record.specHash`. Returns undefined when no commit
+ * matches — a shallow/squashed clone, or content approved but never committed —
+ * so the caller degrades to the existing "baseline unavailable" path.
+ *
+ * Bounded (MAX_HISTORY) so a pathological history degrades to the toast rather
+ * than stalling the extension-host thread; runs only on a user diff click, and
+ * short-circuits at the first match (typically within a handful of commits).
+ * Tier-0, offline (local object store only). NEVER throws (INV — Deterministic).
+ */
+const MAX_HISTORY = 500;
+export function recoverBaselineFromHistory(rootDir: string, record: ApprovalRecord): string | undefined {
+  let shas: string[];
+  try {
+    shas = execFileSync('git', ['log', '--format=%H', '--', record.specPath], {
+      cwd: rootDir,
+      stdio: ['ignore', 'pipe', 'ignore'],
+      maxBuffer: 1 << 24,
+    })
+      .toString()
+      .trim()
+      .split('\n')
+      .filter(Boolean);
+  } catch {
+    return undefined; // not a git repo, git absent, or path never tracked
+  }
+  for (const sha of shas.slice(0, MAX_HISTORY)) {
+    let content: string;
+    try {
+      content = execFileSync('git', ['show', `${sha}:${record.specPath}`], {
+        cwd: rootDir,
+        stdio: ['ignore', 'pipe', 'ignore'],
+        maxBuffer: 1 << 24,
+      }).toString('utf-8');
+    } catch {
+      continue; // path absent at this commit (pre-creation / a rename boundary) — skip
+    }
+    if (specHash(content) === record.specHash) {
+      return getSpecBodyOnly(content); // the exact content the human approved
+    }
+  }
+  return undefined; // no committed version matches the approved hash → degrade
+}
+
+/**
  * Classify a record's baseline recoverability ON THIS MACHINE (#404).
  *
  * `recoverBaseline` collapses two very different situations into one bare
