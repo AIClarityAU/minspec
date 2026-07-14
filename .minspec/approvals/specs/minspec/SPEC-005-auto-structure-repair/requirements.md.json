@@ -1,9 +1,0 @@
-{
-  "specPath": "specs/minspec/SPEC-005-auto-structure-repair/requirements.md",
-  "specHash": "a233960dbd8c8a5e7c9ecf9cdf04d76257e7b99e8df2ddc3e76c3d1ae4a6dc53",
-  "approvedAt": "2026-07-12T06:04:42.020Z",
-  "approvedBy": "claude@harvest316.com",
-  "tier": "T3",
-  "migrated": false,
-  "baselineBlob": "8ba51cb9a07705713190e45a86ce7315a1afcc29"
-}

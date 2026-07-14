@@ -1,9 +1,0 @@
-{
-  "specPath": "specs/minspec/SPEC-006-stub-completeness-gate/requirements.md",
-  "specHash": "2c95bad60b34db1ecb10ecff5a61b85df9a0f768f1657f55a8659e68ad9295c0",
-  "approvedAt": "2026-07-14T04:38:24.511Z",
-  "approvedBy": "claude@harvest316.com",
-  "tier": "T3",
-  "migrated": false,
-  "baselineBlob": "58f68d47d73e81cc655d386cca89355ea58c55b0"
-}

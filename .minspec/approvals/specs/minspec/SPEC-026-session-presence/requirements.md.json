@@ -1,9 +1,0 @@
-{
-  "specPath": "specs/minspec/SPEC-026-session-presence/requirements.md",
-  "specHash": "47f4f72a4852cfa9a2ae81a9cde8f4a070cdf7a2b1dbf4d0978d9744bffa35c7",
-  "approvedAt": "2026-07-03T04:11:38.000Z",
-  "approvedBy": "claude@harvest316.com",
-  "tier": "T4",
-  "migrated": false,
-  "baselineBlob": "26491990a6961628fde74bc866d3ba491bd15061"
-}

@@ -1,9 +1,0 @@
-{
-  "specPath": "specs/minspec/SPEC-030-automerge-default/requirements.md",
-  "specHash": "621b8bbd0c1b0dd847414af3548872c15dd4d59a0db84ce1acbe7ad0456f599d",
-  "approvedAt": "2026-07-12T07:11:35.085Z",
-  "approvedBy": "claude@harvest316.com",
-  "tier": "T3",
-  "migrated": false,
-  "baselineBlob": "bea4a2d52fb89ae7163375dbf49b8b82191b45a3"
-}
