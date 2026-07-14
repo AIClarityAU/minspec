@@ -1,8 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-011-epic-backfill/requirements.md",
-  "specHash": "91aaecd2052ca8495b7892addd73893c43d1f1b8f57e5e5ab7ca08db32a09e72",
-  "approvedAt": "2026-06-04T10:25:20.630Z",
-  "approvedBy": "github@harvest316.com",
+  "specHash": "513b9ec71bc91a35574e37aabf837843785060af6ed844478525d303ace8be18",
+  "approvedAt": "2026-07-14T03:34:29.604Z",
+  "approvedBy": "claude@harvest316.com",
   "tier": "T3",
-  "migrated": false
+  "migrated": false,
+  "baselineBlob": "688081cbdf10ce6c817f700ea48f52d451e61870"
 }
