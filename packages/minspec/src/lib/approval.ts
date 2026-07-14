@@ -11,6 +11,8 @@
  * `.minspec/approvals/<repo-relative-spec-path>.json`, owned by `approval-store.ts`.
  * Records are ATTRIBUTED (FR-2): they carry who approved (`approvedBy` =
  * `git config user.email`, captured offline at approval time — Tier-0, no network).
+ * The captured identity is GATED (DR-056): an agent/bot or absent identity is
+ * refused (`assertHumanApprover`), so a recorded `approvedBy` is a provable human.
  */
 
 import * as crypto from 'crypto';
@@ -353,6 +355,120 @@ export function gitConfigEmail(rootDir: string): string {
   }
 }
 
+// ─── DR-056 — Agent-proof approver identity (Decision 2, deny-by-default) ─────
+
+/**
+ * Thrown by `approveSpec` when the captured approver identity is NOT a provable
+ * human — an agent/bot identity or an absent one (DR-056 Decision 2). Typed so the
+ * command layer can distinguish "refused because the approver isn't human" from a
+ * genuine I/O failure and surface the DR-012 "explicit human act" message.
+ */
+export class ApproverDeniedError extends Error {
+  constructor(
+    message: string,
+    /** The offending captured identity (git email or configured value), for the message. */
+    readonly identity: string,
+  ) {
+    super(message);
+    this.name = 'ApproverDeniedError';
+  }
+}
+
+/**
+ * Built-in agent/container identities that may NEVER be recorded as a human
+ * approver (DR-056). An approval attributed to one of these is agent
+ * self-approval, which DR-012's "explicit human act" forbids — the exact hole the
+ * independent reviewer flagged on #677 (a repo-local `user.email=claude@…`
+ * override made `approvedBy` indistinguishable between a human approving and an
+ * agent running *Approve Spec*).
+ *
+ * This is the inverse of DR-033 §6's `AI_REVIEW_BOT_LOGINS` *allowlist* (only the
+ * bot may apply `ai-review:*`): here a *denylist* (only a non-agent may approve).
+ * Extend at runtime with `MINSPEC_AGENT_IDENTITIES` (same grammar as
+ * `AI_REVIEW_BOT_LOGINS`). Compared case-insensitively. Deny-by-default: any new
+ * agent/CI identity MUST be added here or via the env var.
+ */
+export const BUILTIN_AGENT_IDENTITIES: readonly string[] = [
+  // The Claude-account email — the single root of the #677 ambiguity (DR-056 Context).
+  'claude@harvest316.com',
+  // minspec-sdd[bot] — the App automation identity (id 299695933). Agent/container
+  // commits author as this (DR-056 Decision 1); it can therefore never be an approver.
+  'minspec-sdd[bot]@users.noreply.github.com',
+  '299695933+minspec-sdd[bot]@users.noreply.github.com',
+] as const;
+
+/**
+ * The sentinel `gitConfigEmail` returns when no git identity is configured. An
+ * absent identity is NOT a valid approver (you cannot prove a human act without an
+ * identity), so the gate denies it exactly like a bot identity.
+ */
+export const UNKNOWN_IDENTITY = 'unknown';
+
+/**
+ * Parse `MINSPEC_AGENT_IDENTITIES` into a lowercased, deduped denylist. Mirrors
+ * DR-033's `parseAllowlist` grammar exactly (comma/whitespace separated) so the
+ * denylist and the reviewer allowlist share one mental model. Undefined/empty → [].
+ */
+export function parseAgentIdentities(raw: string | undefined): string[] {
+  return String(raw == null ? '' : raw)
+    .split(/[\s,]+/)
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+}
+
+/** Result of the agent-proof approver check (DR-056). */
+export type ApproverCheck =
+  | { readonly ok: true; readonly email: string }
+  | { readonly ok: false; readonly email: string; readonly reason: string };
+
+/**
+ * DR-056 Decision 2 — the agent-proof approver gate. Pure, deny-by-default,
+ * offline (no git/network — the caller captures the identity). Refuses when the
+ * identity is:
+ *   • empty / whitespace / the `UNKNOWN_IDENTITY` sentinel — no identity is not a
+ *     provable human act; or
+ *   • a known agent/bot identity — the built-ins plus any `extraDenied` (parsed
+ *     from `MINSPEC_AGENT_IDENTITIES`).
+ * A human email passes. Comparison is case-insensitive and trims surrounding
+ * whitespace (git can echo a trailing newline). Exported for exhaustive unit
+ * testing — the security-critical decision is a pure input→output mapping.
+ */
+export function checkApprover(email: string, extraDenied: string[] = []): ApproverCheck {
+  const trimmed = (email ?? '').trim();
+  const lower = trimmed.toLowerCase();
+  if (!lower || lower === UNKNOWN_IDENTITY) {
+    return {
+      ok: false,
+      email: trimmed,
+      reason:
+        'no git identity is configured (git config user.email is empty) — set your human identity before approving',
+    };
+  }
+  const denied = new Set<string>([
+    ...BUILTIN_AGENT_IDENTITIES.map((s) => s.toLowerCase()),
+    ...extraDenied.map((s) => s.toLowerCase()),
+  ]);
+  if (denied.has(lower)) {
+    return {
+      ok: false,
+      email: trimmed,
+      reason: `"${trimmed}" is an agent/bot identity — an agent can't self-approve; approve under your human identity`,
+    };
+  }
+  return { ok: true, email: trimmed };
+}
+
+/**
+ * Assert a captured identity may record an approval, else throw `ApproverDeniedError`.
+ * Reads the runtime denylist extension from `MINSPEC_AGENT_IDENTITIES` so ANY caller
+ * of `approveSpec` (UI command, dispatch script, test harness) is gated identically —
+ * the lib boundary is the authoritative guard, not just the UI (defense-in-depth).
+ */
+export function assertHumanApprover(email: string): void {
+  const check = checkApprover(email, parseAgentIdentities(process.env.MINSPEC_AGENT_IDENTITIES));
+  if (!check.ok) throw new ApproverDeniedError(check.reason, check.email);
+}
+
 /**
  * Resolve approval status given a record and the spec's current CANONICAL hash.
  * Pure — exported for direct unit testing. A `migrated` record is `approved`
@@ -400,6 +516,12 @@ export function approveSpec(
   email: string,
   now: () => Date = () => new Date(),
 ): ApprovalRecord {
+  // DR-056 Decision 2: agent-proof approver gate at the lib boundary — deny BEFORE
+  // any side effect (status flip, baseline mint, sidecar write) so a denied identity
+  // never mints, mutates, or half-writes a record. Every caller is gated here, not
+  // just the UI; the command layer pre-checks too for a friendlier message.
+  assertHumanApprover(email);
+
   // 0. Single read — hash and baseline both derive from THESE bytes (no double-read,
   //    no TOCTOU skew between specHash and baselineBlob).
   let raw: string;

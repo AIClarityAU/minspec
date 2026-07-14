@@ -11,6 +11,8 @@ import {
   revokeApproval as removeApproval,
   getApprovalStatus,
   gitConfigEmail,
+  checkApprover,
+  parseAgentIdentities,
   specRelPath,
   type ApprovalStatus,
 } from '../lib/approval';
@@ -78,6 +80,22 @@ async function pickSpec(
 }
 
 /**
+ * Resolve the approver's identity for the DR-056 gate. Prefers the user-scoped
+ * `minspec.approverEmail` setting (the human's EXPLICIT identity, which follows
+ * them across repos) over the ambient `git config user.email` — because this
+ * repo's container commits author as the bot (DR-056), so the ambient identity is
+ * the bot and would be denied. Falls back to `gitConfigEmail` when the setting is
+ * unset/blank, preserving the pre-DR-056 behaviour for repos whose git identity is
+ * already the human's. Tier-0/offline: `gitConfigEmail` reads local git config only.
+ */
+function resolveApproverEmail(rootDir: string): string {
+  const configured = (
+    vscode.workspace.getConfiguration('minspec').get<string>('approverEmail') ?? ''
+  ).trim();
+  return configured || gitConfigEmail(rootDir);
+}
+
+/**
  * Command: Approve a spec for implementation.
  * Runs the completeness validator first — refuses approval if it has errors.
  */
@@ -136,6 +154,34 @@ export async function approveSpecCommand(
     return;
   }
 
+  // DR-056 Decision 2: agent-proof approver gate — resolve the approver's identity
+  // and refuse BEFORE any status flip if it isn't a provable human. `approverEmail`
+  // (a user-scoped setting) is the human's EXPLICIT identity, used in preference to
+  // the ambient `git config user.email` — because this repo's container commits
+  // author as the bot (DR-056 Decisions 1/3), so the ambient identity is the bot
+  // and would (correctly) be denied. A human sets `minspec.approverEmail` once and
+  // approves under it; the commit that persists the approval is still bot-authored
+  // tooling. The lib (`recordApproval`) re-checks — this pre-check only buys the
+  // friendlier message and stops the flip from running for a denied identity.
+  const email = resolveApproverEmail(rootDir);
+  const approverCheck = checkApprover(
+    email,
+    parseAgentIdentities(process.env.MINSPEC_AGENT_IDENTITIES),
+  );
+  if (!approverCheck.ok) {
+    await vscode.window.showErrorMessage(
+      `MinSpec: Approval refused for ${spec.id} — ${approverCheck.reason}.`,
+      {
+        modal: true,
+        detail:
+          'DR-056: an approval must be an explicit human act, so MinSpec will not record it under an ' +
+          'agent/bot or absent identity. Set "minspec.approverEmail" to your human email (Settings), ' +
+          'or approve from a checkout whose git identity is yours — then re-run Approve.',
+      },
+    );
+    return;
+  }
+
   // Complete — approve directly. Selecting "Approve Spec" and picking this spec
   // IS the explicit act (DR-012); a second confirmation modal is redundant
   // friction (#104). Hard-blocking errors already stopped above; warnings never
@@ -152,7 +198,6 @@ export async function approveSpecCommand(
     // the status line and the phases-derived status cannot diverge (#148).
     const wasPreImpl =
       parsed.frontmatter.status === 'new' || parsed.frontmatter.status === 'specifying';
-    const email = gitConfigEmail(rootDir);
     if (wasPreImpl) {
       advanceSpecToImplementing(spec.filePath); // mirror; phases-aware, no longer affects the hash
     }

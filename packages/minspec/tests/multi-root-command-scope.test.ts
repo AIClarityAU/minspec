@@ -84,12 +84,18 @@ vi.mock('../src/lib/epic-manager', () => ({
   listEpics: vi.fn(() => []),
 }));
 vi.mock('../src/lib/adr-manager', () => ({ listAdrs: vi.fn(() => []) }));
-vi.mock('../src/lib/approval', () => ({
-  approveSpec: vi.fn(),
-  revokeApproval: vi.fn(() => true),
-  getApprovalStatus: vi.fn(() => 'unapproved'),
-  gitConfigEmail: vi.fn(() => 't@example.com'),
-}));
+vi.mock('../src/lib/approval', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/lib/approval')>();
+  return {
+    approveSpec: vi.fn(),
+    revokeApproval: vi.fn(() => true),
+    getApprovalStatus: vi.fn(() => 'unapproved'),
+    gitConfigEmail: vi.fn(() => 't@example.com'),
+    // DR-056: real pure gate functions ('t@example.com' is a human → passes).
+    checkApprover: actual.checkApprover,
+    parseAgentIdentities: actual.parseAgentIdentities,
+  };
+});
 vi.mock('../src/lib/active-spec', () => ({
   resolveActiveSpecId: vi.fn(() => undefined),
 }));
