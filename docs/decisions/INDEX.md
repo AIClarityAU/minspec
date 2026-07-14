@@ -466,4 +466,11 @@ The background piggyback loop (scripts/drain-inbox.sh, fired from the session-st
 <!-- dr-summary:DR-058 auto=e19da9b036b0 -->
 classifyBlast(signals, touchesExportedSurface) (auto-merge.ts:188) returns 'low' when signals is **empty** — the recognition loop simply never runs, and the function falls through to return 'low'. Two more facts make that empty set fully *eligible*, not merely low-blast: 1. deriveTouchesExportedSurface([]) → false, so the unmeasured-blast gate (auto-merge.ts:385 — if (!reachKnownLow(signals) && touchesExportedSurface) failed.push('unmeasured-blast')) **never fires** (its touchesExportedSurface conjunct is false). 2. reachKnownLow **always returns false in v1** (auto-merge.ts:240 — "No affirmative low-reach signal type exists in v1") — so it can never…
 <!-- /dr-summary:DR-058 -->
+## [DR-059 — Commit-message prose deferrals must cite a follow-up — a blocking commit-msg gate, distinct from DR-040's DR-document auto-materialization](DR-059.md)
+
+*Status: proposed · Date: 2026-07-14*
+
+<!-- dr-summary:DR-059 auto=e78d2df187eb -->
+Two mechanisms leak un-tracked work, on **two different surfaces**: 1. **DR-document follow-ups.** A DR's ## Follow-ups (tracked) bullets that carry no issue/spec ref. DR-040 governs this: on DR save, un-materialized bullets **auto-create** their issues (friction-free), and only genuinely broken refs surface. DR-040 deliberately **rejected a blocking gate** here — "only DR-012 approval blocks in MinSpec; a second blocking gate for bookkeeping" — because the author's curated list can be materialized *for* them, so friction is unwarranted.
+<!-- /dr-summary:DR-059 -->
 <!-- minspec:dr-index:end -->

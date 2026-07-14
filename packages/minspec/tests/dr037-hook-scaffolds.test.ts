@@ -103,7 +103,7 @@ describe('the scaffolded hook scripts actually enforce the SDD gates', () => {
     // Detects deferral language, and accepts either an issue ref or an explicit escape.
     expect(c).toMatch(/held back\|separate/i);
     expect(c).toMatch(/#\[0-9\]\+/); // issue-ref escape
-    expect(c).toMatch(/follow-ups\?/i); // "Follow-ups: none" escape
+    expect(c).toMatch(/follow-\?ups\?/i); // "Follow-ups: none" escape (hyphen optional)
     expect(c).toContain('follow-up gate');
   });
 
@@ -193,6 +193,37 @@ describe('commit-msg follow-up gate (DR-023) — executed behavior', () => {
 
   it('MINSPEC_GATE_OFF=1 bypasses the gate', () => {
     expect(runHook('feat: add X\n\nheld back a bunch, no ref.\n', { MINSPEC_GATE_OFF: '1' }).code).toBe(0);
+  });
+
+  // DR-059 §3 — false-positive mitigations the #725 review asked for.
+  it('does NOT false-trigger on the git commit -v verbose diff below the scissors line', () => {
+    // A legit deferral-free commit whose appended verbose diff happens to contain
+    // "follow-up" / "out of scope". The gate must scan only the human body.
+    const msg =
+      'feat: add X\n\nA clean self-contained change.\n' +
+      '# ------------------------ >8 ------------------------\n' +
+      '# Do not modify or remove the line above.\n' +
+      'diff --git a/notes.md b/notes.md\n' +
+      '+This is a follow-up idea, out of scope, deferred for later.\n';
+    expect(runHook(msg).code).toBe(0);
+  });
+
+  it('ALLOWS "out of scope for X but handled here" (handled-here escape, no fake ref)', () => {
+    expect(runHook('feat: add X\n\nLogging is out of scope for X but handled here.\n').code).toBe(0);
+  });
+
+  it('ALLOWS an explicit "nothing deferred" negation with no issue ref', () => {
+    expect(runHook('feat: add X\n\nRefactor only; nothing deferred.\n').code).toBe(0);
+  });
+
+  it('still BLOCKS a genuine untracked prose deferral inside a -v verbose message', () => {
+    // The deferral is in the HUMAN body (above the scissors), so it must still block
+    // even when a verbose diff is appended.
+    const msg =
+      'feat: add X\n\nCI files held back for a separate PR.\n' +
+      '# ------------------------ >8 ------------------------\n' +
+      'diff --git a/x b/x\n+noise\n';
+    expect(runHook(msg).code).toBe(1);
   });
 
   it('still enforces the RCDD root-cause gate on fix: commits (no regression)', () => {
