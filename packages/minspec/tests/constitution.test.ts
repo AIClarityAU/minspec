@@ -130,4 +130,33 @@ Some trailing text that is not a list.
     const result = parseConstitution(content);
     expect(result.invariants).toEqual(['The actual rule']);
   });
+
+  it('joins wrapped continuation lines of a numbered item into the full text (#705)', () => {
+    const content = `## Invariants
+
+1. **Agent never executes in the extension host.** The agent process (\`claude -p\`
+   or \`codex exec\`) runs in a separate process from the extension host.
+2. No backend calls.
+`;
+    const result = parseConstitution(content);
+    expect(result.invariants).toEqual([
+      '**Agent never executes in the extension host.** The agent process (`claude -p` or `codex exec`) runs in a separate process from the extension host.',
+      'No backend calls.',
+    ]);
+  });
+
+  it('joins wrapped continuation lines of a bullet item, stopping at a blank-line boundary', () => {
+    const content = `## Invariants
+
+- Rule A spans
+  two physical lines.
+
+- Rule B is on one line.
+`;
+    const result = parseConstitution(content);
+    expect(result.invariants).toEqual([
+      'Rule A spans two physical lines.',
+      'Rule B is on one line.',
+    ]);
+  });
 });

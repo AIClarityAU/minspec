@@ -79,6 +79,20 @@ describe('template-engine', () => {
       expect(ctx.principles).toEqual([]);
       expect(ctx.constraints).toEqual([]);
     });
+
+    it('does not truncate a multi-line invariant to its first physical line (#705)', () => {
+      fs.writeFileSync(
+        path.join(tmpDir, '.minspec', 'constitution.md'),
+        '## Invariants\n\n' +
+          '1. **Agent never executes in the extension host.** The agent process\n' +
+          '   (`claude -p` or `codex exec`) runs in a separate process from the\n' +
+          '   extension host.\n',
+      );
+      const ctx = buildContext(tmpDir);
+      expect(ctx.invariants).toEqual([
+        '**Agent never executes in the extension host.** The agent process (`claude -p` or `codex exec`) runs in a separate process from the extension host.',
+      ]);
+    });
   });
 
   describe('renderTemplate()', () => {
@@ -118,6 +132,14 @@ describe('template-engine', () => {
       const result = renderTemplate('.cursorrules', baseContext);
       expect(result).toContain('- Rule one');
       expect(result).toContain('- Rule two');
+    });
+
+    it('mirrors a full multi-line invariant into CLAUDE.md without truncation (#705)', () => {
+      const wrapped =
+        '**Agent never executes in the extension host.** The agent process ' +
+        '(`claude -p` or `codex exec`) runs in a separate process from the extension host.';
+      const result = renderTemplate('CLAUDE.md', { ...baseContext, invariants: [wrapped] });
+      expect(result).toContain(`1. ${wrapped}`);
     });
 
     it('renders constitution sections', () => {

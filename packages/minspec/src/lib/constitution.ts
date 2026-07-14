@@ -22,28 +22,48 @@ export const EMPTY_CONSTITUTION: Constitution = {
  * Extract list items from a markdown section body.
  * Supports both numbered lists (1. item) and bullet lists (- item / * item).
  * Skips HTML comments (<!-- ... -->).
+ *
+ * Item-based (not line-based): a marker line starts an item, and subsequent
+ * non-marker, non-blank, non-comment, non-heading lines are wrapped
+ * continuation text that gets appended to that item. A blank line, comment,
+ * or heading closes the item — later stray lines are not attached to it.
  */
 function extractListItems(body: string): string[] {
   const items: string[] = [];
+  let currentIndex: number | null = null;
+
   for (const line of body.split('\n')) {
     const trimmed = line.trim();
-    // Skip empty lines, comments, and headings
+
+    // Blank lines, comments, and headings close the current item without
+    // starting a new one.
     if (!trimmed || trimmed.startsWith('<!--') || trimmed.startsWith('#')) {
+      currentIndex = null;
       continue;
     }
+
     // Numbered list: "1. item text"
     const numberedMatch = trimmed.match(/^\d+\.\s+(.+)$/);
     if (numberedMatch) {
       items.push(numberedMatch[1].trim());
+      currentIndex = items.length - 1;
       continue;
     }
+
     // Bullet list: "- item" or "* item"
     const bulletMatch = trimmed.match(/^[-*]\s+(.+)$/);
     if (bulletMatch) {
       items.push(bulletMatch[1].trim());
+      currentIndex = items.length - 1;
       continue;
     }
+
+    // Continuation/wrap line of the current item.
+    if (currentIndex !== null) {
+      items[currentIndex] = `${items[currentIndex]} ${trimmed}`;
+    }
   }
+
   return items;
 }
 
