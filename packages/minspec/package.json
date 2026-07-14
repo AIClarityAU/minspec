@@ -483,6 +483,12 @@
           "default": false,
           "description": "Always use the AI pass when backfilling epics (skips the per-run 'AI-enhanced?' prompt). Set globally by choosing 'Always' on that prompt — a personal preference that follows you across projects. Runs 'claude -p' locally; the extension makes no network calls. Off by default."
         },
+        "minspec.approverEmail": {
+          "type": "string",
+          "default": "",
+          "scope": "application",
+          "markdownDescription": "Your **explicit human identity** for recording approvals (DR-056). When set, approving a spec records this email as `approvedBy` instead of the ambient `git config user.email`. Use it when a checkout's git identity is an agent/bot (so approvals aren't refused as agent self-approval) while still attributing the human act to you. Leave blank to fall back to `git config user.email`. An agent/bot or blank identity is always refused — an approval must be an explicit human act. Personal preference; follows you across projects."
+        },
         "minspec.ruleset.requiredChecks": {
           "type": "array",
           "items": {

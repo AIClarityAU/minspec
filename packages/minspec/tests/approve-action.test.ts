@@ -40,15 +40,22 @@ vi.mock('../src/views/spec-tree-provider', () => ({
   listSpecs: vi.fn(),
 }));
 
-vi.mock('../src/lib/approval', () => ({
-  approveSpec: vi.fn(),
-  revokeApproval: vi.fn(() => true),
-  getApprovalStatus: vi.fn(() => 'unapproved'),
-  gitConfigEmail: vi.fn(() => 'tester@example.com'),
-  // Used by approve.ts to build the sidecar path for commit-on-approve. Value is
-  // irrelevant here (commit is disabled in this suite) — it just must exist.
-  specRelPath: vi.fn((_root: string, p: string) => p),
-}));
+vi.mock('../src/lib/approval', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../src/lib/approval')>();
+  return {
+    approveSpec: vi.fn(),
+    revokeApproval: vi.fn(() => true),
+    getApprovalStatus: vi.fn(() => 'unapproved'),
+    gitConfigEmail: vi.fn(() => 'tester@example.com'),
+    // Used by approve.ts to build the sidecar path for commit-on-approve. Value is
+    // irrelevant here (commit is disabled in this suite) — it just must exist.
+    specRelPath: vi.fn((_root: string, p: string) => p),
+    // DR-056: use the REAL pure gate functions so these command tests also confirm
+    // a human identity (the mocked gitConfigEmail above) passes the approver gate.
+    checkApprover: actual.checkApprover,
+    parseAgentIdentities: actual.parseAgentIdentities,
+  };
+});
 
 // Mock the libs called inside the action body
 vi.mock('../src/lib/spec', () => ({
