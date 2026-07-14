@@ -445,7 +445,7 @@ GitHub **Spec Kit** (github/spec-kit) is the incumbent spec-driven-development t
 
 ## [DR-056 — Approver identity must be captured agent-proof, not from a settable git-config value shared with agent commits — separate the agent/container commit identity (minspec-sdd[bot]) from the human approver identity, and deny bot/agent identities as approvers](DR-056.md)
 
-*Status: proposed · Date: 2026-07-14*
+*Status: accepted · Date: 2026-07-14*
 
 <!-- dr-summary:DR-056 auto=4153245bf8a9 -->
 MinSpec captures the approver of a spec/DR as approvedBy = git config user.email, read offline at approval time (approval.ts:12-13, :57, :284-296 — execFileSync('git', ['config','user.email']), Tier-0, degrades to 'unknown'). DR-012 defines approval as **an explicit human act**; DR-033 §6 made the *reviewer* identity trustworthy via the AI_REVIEW_BOT_LOGINS allowlist (only the bot may apply ai-review:*). The *approver* identity has no equivalent guard.
