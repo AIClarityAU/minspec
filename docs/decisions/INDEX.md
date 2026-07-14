@@ -419,9 +419,9 @@ SPEC-026 treats the whole **corpus** — specs/**, docs/decisions/**, docs/epics
 Issue #74 confirmed against Anthropic's official Legal-and-compliance docs that consumer OAuth is for individual native-app use only — routing subscription traffic through a broker/Scrooge or "on behalf of users" is prohibited, and the June-15 separate Agent-SDK credit is paused (still draws the interactive quota). Amends DR-016/DR-017: subscription mode = genuine `claude` CLI direct (no broker reroute), default subscription-CLI, ship both modes, broker/Scrooge = API-key mode only, no multi-tenant.
 <!-- /dr-summary:DR-052 -->
 
-## [DR-053 — Cross-project reference prefixes — per-repo-local ids stay unprefixed; a ref that spans projects carries a short project prefix (MS-SPEC-019, MS#500)](DR-053.md)
+## [DR-053 — Paragraph-addressable reference scheme — every approvable item gets a short, typeable id PROJ/APPR/PARA (MIN/SP19/FR3); project & document elide when implied](DR-053.md)
 
-*Status: proposed · Date: 2026-07-10*
+*Status: proposed · Date: 2026-07-12*
 
 <!-- dr-summary:DR-053 auto=0000000000000000 -->
 Per-repo-local SDD ids stay unprefixed (DR-027 separate registers); a reference that SPANS projects carries the target project's short prefix from the committed table `.minspec/project-prefixes.md` — SDD refs `<PREFIX>-<ID>` (MS-SPEC-019, SC-DR-007), issue/PR refs `<PREFIX>#<N>` (MS#500, SC#26). Unknown prefix is advisory, never fatal. Ships the Tier-0 core (`@aiclarity/shared` project-prefix module: parsePrefixTable/resolveRef/formatCrossRef/suggestPrefixDeterministic) + seed table + CLAUDE.md convention; Tier-1 validate-advisory + toast deferred to #614.
@@ -442,4 +442,12 @@ Three properties have been conflated under one word — **"offline"** — since 
 <!-- dr-summary:DR-055 auto=18c5d1f7066e -->
 GitHub **Spec Kit** (github/spec-kit) is the incumbent spec-driven-development toolkit. A large share of MinSpec's likely users will have driven a Spec Kit project first — its /specify → /plan → /tasks loop is where the audience learns SDD. Every place MinSpec's *surface* differs from Spec Kit's for no load-bearing reason is pure **switching cost**: a file that isn't where they expect, a command that doesn't autocomplete, a folder named differently.
 <!-- /dr-summary:DR-055 -->
+
+## [DR-056 — Approver identity must be captured agent-proof, not from a settable git-config value shared with agent commits — separate the agent/container commit identity (minspec-sdd[bot]) from the human approver identity, and deny bot/agent identities as approvers](DR-056.md)
+
+*Status: proposed · Date: 2026-07-14*
+
+<!-- dr-summary:DR-056 auto=4153245bf8a9 -->
+MinSpec captures the approver of a spec/DR as approvedBy = git config user.email, read offline at approval time (approval.ts:12-13, :57, :284-296 — execFileSync('git', ['config','user.email']), Tier-0, degrades to 'unknown'). DR-012 defines approval as **an explicit human act**; DR-033 §6 made the *reviewer* identity trustworthy via the AI_REVIEW_BOT_LOGINS allowlist (only the bot may apply ai-review:*). The *approver* identity has no equivalent guard.
+<!-- /dr-summary:DR-056 -->
 <!-- minspec:dr-index:end -->
