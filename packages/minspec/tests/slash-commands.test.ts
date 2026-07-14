@@ -32,12 +32,14 @@ describe('slash-commands', () => {
   describe('SPEC_KIT_COMMANDS constant', () => {
     it('exposes the full Spec Kit surface in canonical order', () => {
       expect(SPEC_KIT_COMMANDS).toEqual([
+        'constitution',
         'specify',
         'clarify',
         'plan',
         'tasks',
         'analyze',
         'implement',
+        'checklist',
       ]);
     });
   });
@@ -80,6 +82,25 @@ describe('slash-commands', () => {
       expect(content).toMatch(/FR.*INV|FR`\/`INV|`FR`\/`INV`/);
       expect(content.toLowerCase()).toMatch(/defines? \*?done|defining done|defines done/);
       // tier-scaled guidance so T1/T2 specs are not bloated
+      expect(content.toLowerCase()).toMatch(/tier-scaled/);
+    });
+
+    // DR-055 §B: additive Spec Kit command parity (#685)
+    it('instructs Constitution to author the four constitution sections without overwriting human content', () => {
+      const content = buildClaudeShim('constitution');
+      expect(content).toContain('.minspec/constitution.md');
+      for (const section of ['Invariants', 'Principles', 'Constraints', 'Goals']) {
+        expect(content).toContain(`**${section}**`);
+      }
+      expect(content.toLowerCase()).toMatch(/never overwrite|never .*delete/);
+      expect(content).toContain('DRAFT:');
+    });
+
+    it('instructs Checklist to review requirement quality, not implementation, via a checkbox section', () => {
+      const content = buildClaudeShim('checklist');
+      expect(content).toContain('## Checklist');
+      expect(content.toLowerCase()).toMatch(/checkbox list/);
+      expect(content.toLowerCase()).toMatch(/not.*(been )?built|not whether anything is built/);
       expect(content.toLowerCase()).toMatch(/tier-scaled/);
     });
   });

@@ -19,23 +19,33 @@ import { SPEC_STATUSES } from './spec';
  * All generation is offline (Tier 0) — pure file I/O.
  */
 
-/** Spec Kit slash command identifiers (matches Spec Kit's published surface) */
+/**
+ * Spec Kit slash command identifiers (matches Spec Kit's published surface).
+ *
+ * `taskstoissues` and `converge` are deliberately NOT included (DR-055 §B):
+ * `taskstoissues` overlaps MinSpec's own dispatch/triage scripts, and
+ * `converge`'s semantics need further study before adoption.
+ */
 export type SpecKitCommand =
+  | 'constitution'
   | 'specify'
   | 'clarify'
   | 'plan'
   | 'tasks'
   | 'analyze'
-  | 'implement';
+  | 'implement'
+  | 'checklist';
 
 /** All Spec Kit commands in canonical order */
 export const SPEC_KIT_COMMANDS: readonly SpecKitCommand[] = [
+  'constitution',
   'specify',
   'clarify',
   'plan',
   'tasks',
   'analyze',
   'implement',
+  'checklist',
 ] as const;
 
 /**
@@ -88,6 +98,16 @@ const ASPECT_ARTIFACT_GUIDANCE =
   'T1 specs are exempt, T2 warns, T3/T4 block — so authoring them up front is what keeps approval clean.';
 
 const COMMAND_GUIDANCE: Record<SpecKitCommand, CommandGuidance> = {
+  constitution: {
+    description: 'Author or update .minspec/constitution.md — invariants, principles, constraints, goals',
+    body:
+      'Run the **Constitution** phase — author or refine `.minspec/constitution.md`, the project\'s durable rule set (Spec Kit\'s `constitution` command).\n\n' +
+      'The constitution has four sections, in this order: **Invariants** (hard rules that must never be violated), **Principles** (guidelines that should hold, bendable with justification), **Constraints** (technical/business bounds on the solution space), **Goals** (outcomes the project is trying to achieve).\n\n' +
+      'Read the existing file first. Never overwrite or delete a human-authored (non-DRAFT) entry — only add missing ones or refine wording in place.\n\n' +
+      'Silence beats noise: propose only entries you are confident the project actually implies from its code, docs, and `docs/decisions/` — a thin, accurate constitution beats a padded one. When in doubt, leave it out rather than guess.\n\n' +
+      'Mark any entry you are not fully certain of with a leading `DRAFT:` for human review, instead of asserting it outright — the same convention the deterministic "MinSpec: Propose Constitution Draft" seed uses, so mixed human/DRAFT content stays legible either way. Once reviewed, "MinSpec: Compact Constitution" strips the DRAFT markers.\n\n' +
+      '`CLAUDE.md` / `AGENTS.md` / `.cursorrules` summarize this file\'s lead sentences into their own Invariants sections — write each entry so its first sentence stands alone. Arguments: $ARGUMENTS',
+  },
   specify: {
     description: 'Start or update the Specify phase for the active MinSpec spec',
     body:
@@ -141,6 +161,14 @@ const COMMAND_GUIDANCE: Record<SpecKitCommand, CommandGuidance> = {
       'Run the **Implement** phase. Required for T3+.\n\n' +
       'Pick the next unchecked task in the active spec\'s Tasks section. Implement it, update the checkbox, and add a brief implementation note to the Implement section (decisions, gotchas, PR link).\n\n' +
       'Respect file allowlists, invariants, and the dependency budget. If you cannot complete a task fully, escalate per `CLAUDE.md` rather than stub. Arguments: $ARGUMENTS',
+  },
+  checklist: {
+    description: 'Generate a requirements-quality checklist for the active spec',
+    body:
+      'Run the **Checklist** phase (Spec Kit\'s `checklist` command) — a requirements-quality pass over the active spec\'s WRITING, distinct from Implement\'s task checklist and from Analyze\'s cross-artifact review.\n\n' +
+      'Check whether each requirement is clear, unambiguous, testable, and free of implementation detail — not whether anything is built yet. Typical checks: does every FR state an observable outcome? Is any FR actually two requirements bundled together? Does any requirement assume an undocumented default?\n\n' +
+      'Add or update a `## Checklist` section in the active spec: a checkbox list (`- [ ]` / `- [x]`), one line per check, each phrased as a yes/no question about the requirement text itself. Check off ones the spec already satisfies; leave the rest unchecked as follow-ups for Specify/Clarify.\n\n' +
+      'Tier-scaled: a handful of checks is plenty for T1/T2; a T3/T4 spec with several FRs warrants more. Do not modify code. Arguments: $ARGUMENTS',
   },
 };
 
