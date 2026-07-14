@@ -146,7 +146,7 @@ finding: the gate checks the thing it happens to know about and is silent on the
 - **FR-6 — Triage/drain/dispatch propagation (added 2026-07-12 — dogfood-gap follow-up).**
   `dispatch-issue.sh`, `triage-inbox.sh`, `drain-inbox.sh` are **not portable today**: each
   hardcodes `REPO="AIClarityAU/minspec"` (confirmed: `dispatch-issue.sh:11`,
-  `triage-inbox.sh:16`, `drain-inbox.sh:21`), unlike the ai-review workflows, which derive
+  `triage-inbox.sh:16`, `drain-inbox.sh:73`), unlike the ai-review workflows, which derive
   `github.repository` at runtime. Before these join the managed-region template set:
   parameterize `REPO` (resolve from `gh repo view --json nameWithOwner` / the runtime
   workflow context, never a literal string) and extend the `ci-stack-portability` test
