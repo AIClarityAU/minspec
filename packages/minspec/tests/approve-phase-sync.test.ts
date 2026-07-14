@@ -250,4 +250,46 @@ phases:
     const after = parseSpec(fs.readFileSync(p, 'utf-8')).frontmatter;
     expect(after.status).toBe(getSpecStatus(after.phases));
   });
+
+  // #667: advanceSpecToImplementing (the Approve Spec write path) flipped the
+  // frontmatter `status:` line but left the body's `**Status:**` prose line stale —
+  // two disagreeing sources of truth for the same fact, caught live by the #626
+  // parity gate on SPEC-030. The fix is in setSpecStatus (the single writer both
+  // paths below funnel through), so both the phases-aware and status-only advance
+  // shapes must sync the body line.
+  it('syncs the body **Status:** line when advancing a spec with a phases block (#667)', () => {
+    const p = write(
+      'SPEC-206.md',
+      `---
+id: SPEC-206
+status: specifying
+tier: T3
+phases:
+  specify: in-progress
+  plan: pending
+  tasks: pending
+  implement: pending
+---
+
+# Title
+
+**Status:** Specifying (SDD Specify phase)
+`,
+    );
+    advanceSpecToImplementing(p);
+    const after = fs.readFileSync(p, 'utf-8');
+    expect(after).toContain('status: implementing');
+    expect(after).toContain('**Status:** Implementing (SDD Specify phase)');
+  });
+
+  it('syncs the body **Status:** line for the no-phases-block fallback (#667)', () => {
+    const p = write(
+      'SPEC-207.md',
+      '---\nid: SPEC-207\nstatus: specifying\ntier: T2\n---\n\n# X\n\n**Status:** Specifying\n',
+    );
+    advanceSpecToImplementing(p);
+    const after = fs.readFileSync(p, 'utf-8');
+    expect(after).toContain('status: implementing');
+    expect(after).toContain('**Status:** Implementing');
+  });
 });
