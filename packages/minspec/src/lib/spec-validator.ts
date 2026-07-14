@@ -645,6 +645,35 @@ function hasDanglingParkRef(raw: string): boolean {
   return false;
 }
 
+/**
+ * The T3/T4 acceptance-criteria gate (#654), extracted to a standalone,
+ * exported function so the commit/CI validator (`scripts/validate-frontmatter.ts`)
+ * can enforce the EXACT SAME rule `validateSpec` enforces at approval time,
+ * instead of the two drifting apart again (Goal G-6: one rule, every surface).
+ * Previously this logic lived inline in `validateSpec` only — reachable from the
+ * in-extension approve gate but invisible to the commit/CI path, so an AC-less
+ * T3/T4 spec (SPEC-034 / #644) passed commit → CI → PR → merge unchecked.
+ *
+ * Returns the violation, or `undefined` when the spec is exempt (T1/T2), a
+ * split-layout design/tasks file (acceptance criteria belongs to the sibling
+ * requirements file), or already carries criteria.
+ */
+export function checkAcceptanceCriteria(spec: ParsedSpec): ValidationViolation | undefined {
+  const tier = spec.frontmatter.tier;
+  const specType = (spec.frontmatter.type ?? '').toLowerCase();
+  const isSplitLayout = SPLIT_LAYOUT_TYPES.has(specType);
+  const acceptancePhaseFile = !isSplitLayout || specType === 'requirements';
+  if (!acceptancePhaseFile || !requiresAcceptanceCriteria(tier) || hasAcceptanceCriteria(spec)) {
+    return undefined;
+  }
+  return {
+    rule: 'acceptance.missing',
+    severity: 'error',
+    message: `${tier} spec has no acceptance criteria.`,
+    fixHint: 'Add an "## Acceptance Criteria" section defining done: a checkbox list where each item is a plain-language outcome tracing to its FR/INV (e.g. "- [ ] **Honest degradation** — incoherent state surfaces \'state unclear\'. (FR-6)"). See the "MinSpec: Generate Example Spec" output for the canonical format. A checkbox list under the Specify section (single-file specs) or the Requirements section (requirements specs) also satisfies this.',
+  };
+}
+
 // ─── Main ────────────────────────────────────────────────────────────────────
 
 /** Optional resolvers/context for {@link validateSpec}. All fields omit-to-skip — a caller without a given resolver gets no false positive/negative from that check. */
@@ -805,16 +834,11 @@ export function validateSpec(
   }
 
   // 2. Acceptance criteria (T3/T4). Belongs to the specify/requirements phase, so
-  //    in split-layout only the `requirements` file carries it.
-  const acceptancePhaseFile = !isSplitLayout || specType === 'requirements';
-  if (acceptancePhaseFile && requiresAcceptanceCriteria(tier) && !hasAcceptanceCriteria(spec)) {
-    violations.push({
-      rule: 'acceptance.missing',
-      severity: 'error',
-      message: `${tier} spec has no acceptance criteria.`,
-      fixHint: 'Add an "## Acceptance Criteria" section defining done: a checkbox list where each item is a plain-language outcome tracing to its FR/INV (e.g. "- [ ] **Honest degradation** — incoherent state surfaces \'state unclear\'. (FR-6)"). See the "MinSpec: Generate Example Spec" output for the canonical format. A checkbox list under the Specify section (single-file specs) or the Requirements section (requirements specs) also satisfies this.',
-    });
-  }
+  //    in split-layout only the `requirements` file carries it. Delegated to
+  //    `checkAcceptanceCriteria` (#654) — the same function the commit/CI gate
+  //    calls, so the rule cannot drift between the two surfaces.
+  const acViolation = checkAcceptanceCriteria(spec);
+  if (acViolation) violations.push(acViolation);
 
   // 3. Aspect-conditional artifacts. Mockups / schemas / diagrams are
   //    DESIGN-phase deliverables, so in split-layout they live in the `design`
