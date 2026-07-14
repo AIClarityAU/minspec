@@ -482,3 +482,51 @@ describe('SPEC-024 — review-signal green predicates match the #180 renderer (n
     },
   );
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #489 — Signal-1 (root cause) is checked against the REAL git diff
+// (`changedFilePaths`), not the agent's self-reported `reviewSignals.changedFiles`.
+// The agent could otherwise pass Signal-1 trivially by claiming a self-consistent
+// {rootCauseFiles ⊆ changedFiles} set. Same real-diff authority the prover already
+// gives Signal-2 (INV-3).
+// ─────────────────────────────────────────────────────────────────────────────
+describe('#489 — Signal-1 uses the real diff, not the agent self-report', () => {
+  it('HOLDS when the claimed root-cause files are NOT in the real diff', () => {
+    // greenReviewSignals claims rootCauseFiles ⊆ changedFiles = [spec-validator.ts],
+    // but the REAL diff touched a different file → root cause is unverified.
+    const d = decideAutoMerge(
+      eligibleInput({ changedFilePaths: ['packages/minspec/src/lib/some-other-file.ts'] }),
+    );
+    expect(d.eligible).toBe(false);
+    expect(d.failed).toContain('root-cause');
+  });
+
+  it('stays eligible when the real diff DOES contain the claimed root-cause files', () => {
+    const d = decideAutoMerge(
+      eligibleInput({ changedFilePaths: ['packages/minspec/src/lib/spec-validator.ts'] }),
+    );
+    expect(d.eligible).toBe(true);
+    expect(d.failed).toEqual([]);
+  });
+
+  it('inflating the self-reported changedFiles cannot fabricate the file universe (real diff wins)', () => {
+    const d = decideAutoMerge(
+      eligibleInput({
+        reviewSignals: greenReviewSignals({
+          rootCauseFiles: ['packages/minspec/src/lib/spec-validator.ts'],
+          // Agent CLAIMS the root-cause file is among the changed files…
+          changedFiles: ['packages/minspec/src/lib/spec-validator.ts', 'padding.ts'],
+        }),
+        // …but the real diff never touched it.
+        changedFilePaths: ['unrelated.ts'],
+      }),
+    );
+    expect(d.eligible).toBe(false);
+    expect(d.failed).toContain('root-cause');
+  });
+
+  it('absent changedFilePaths falls back to the review-signal diff (pure-unit-test path preserved)', () => {
+    const d = decideAutoMerge(eligibleInput()); // no real-diff override supplied
+    expect(d.eligible).toBe(true);
+  });
+});

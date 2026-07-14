@@ -738,6 +738,9 @@ function main(): void {
       consequenceSignals,
       mode: args.mode,
       proverResult: prover,
+      // #489 — the REAL git diff is the authority for Signal-1's changedFiles,
+      // never the agent's self-reported `reviewSignals.changedFiles`.
+      changedFilePaths: changedFiles.map((f) => f.path),
     };
     const decision = decideAutoMerge(input);
 
