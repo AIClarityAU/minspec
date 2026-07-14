@@ -212,6 +212,18 @@ describe('commit-msg follow-up gate (DR-023) — executed behavior', () => {
     expect(runHook('feat: add X\n\nLogging is out of scope for X but handled here.\n').code).toBe(0);
   });
 
+  it('BLOCKS "not in this PR" — the handled-here escape must NOT self-escape a real deferral (DR-059)', () => {
+    // Regression: the escape `in this (pr|commit|change)` was a superstring of the
+    // trigger `not in this (pr|commit)`, so a genuine "not in this PR" deferral
+    // self-escaped and passed. The escape now requires an affirmative verb.
+    expect(runHook('feat: add X\n\nThe retry path is not in this PR.\n').code).toBe(1);
+    expect(runHook('feat: add X\n\nThat cleanup is not in this commit.\n').code).toBe(1);
+  });
+
+  it('ALLOWS an affirmative "done in this PR" / "fixed in this commit" (real handled signal)', () => {
+    expect(runHook('feat: add X\n\nThe follow-up cleanup is done in this PR.\n').code).toBe(0);
+  });
+
   it('ALLOWS an explicit "nothing deferred" negation with no issue ref', () => {
     expect(runHook('feat: add X\n\nRefactor only; nothing deferred.\n').code).toBe(0);
   });

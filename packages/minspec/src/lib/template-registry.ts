@@ -689,7 +689,7 @@ subject=$(printf '%s\\n' "$body" | grep -m1 . 2>/dev/null || true)
 # would have caught the CI-scope deferral). DR-059 records why this blocks where
 # DR-040 kept DR-document materialization non-blocking (different surface).
 if printf '%s\\n' "$body" | grep -Eiq 'held back|separate (pr|commit|review)|follow-?up|out of scope|deferred|not in this (pr|commit)'; then
-  if ! printf '%s\\n' "$body" | grep -Eiq '#[0-9]+|follow-?ups?:? *none|tracked in|no(thing|ne)? *(deferred|follow-?ups?)|nothing (held|deferred)|handled (here|in this)|in this (pr|commit|change)'; then
+  if ! printf '%s\\n' "$body" | grep -Eiq '#[0-9]+|follow-?ups?:? *none|tracked in|no(thing|ne)? *(deferred|follow-?ups?)|nothing (held|deferred)|(handled|done|fixed|addressed) (here|in this (pr|commit|change))'; then
     echo "✗ MinSpec follow-up gate (DR-023/DR-059): this commit defers work but files no follow-up." >&2
     echo "" >&2
     echo "  A commit that says 'held back / separate PR / follow-up / out of scope' must" >&2
