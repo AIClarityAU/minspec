@@ -8,6 +8,7 @@ import {
 import type { BacklogIssue, IssueLifecycleLabel } from '../lib/backlog';
 import { EpicGroupingState, EpicGroupNode, buildEpicGroups } from './epic-grouping';
 import type { ListEpicsFn } from './epic-grouping';
+import { TreeExpansionMemory } from './tree-expansion-memory';
 
 // ─── Lifecycle grouping ─────────────────────────────────────────────────────
 
@@ -37,6 +38,9 @@ export class BacklogGroupNode extends vscode.TreeItem {
     super(group.label, collapsibleState);
 
     this.issues = issues;
+    // Stable expansion key ([[tree-expansion-memory]]); single-root pane, so the
+    // lifecycle label alone is unambiguous (the count badge stays out of the id).
+    this.id = `lifecycle:${group.label}`;
     this.description = `(${issues.length})`;
     this.contextValue = 'backlogGroup';
     this.accessibilityInformation = {
@@ -125,6 +129,11 @@ export class BacklogTreeProvider implements vscode.TreeDataProvider<BacklogNode>
   private readonly _listEpics?: ListEpicsFn;
   /** Per-panel "group by epic" toggle (FR-7), default on. */
   public readonly epicGrouping = new EpicGroupingState(true);
+  /** Remembers group expand/collapse across reloads; wired in extension.ts. */
+  private _expansion?: TreeExpansionMemory;
+  setExpansionMemory(memory: TreeExpansionMemory): void {
+    this._expansion = memory;
+  }
 
   constructor(private workspaceRoot: string, listEpicsFn?: ListEpicsFn) {
     this._listEpics = listEpicsFn;
@@ -147,6 +156,7 @@ export class BacklogTreeProvider implements vscode.TreeDataProvider<BacklogNode>
   }
 
   getTreeItem(element: BacklogNode): vscode.TreeItem {
+    this._expansion?.apply(element);
     return element;
   }
 
