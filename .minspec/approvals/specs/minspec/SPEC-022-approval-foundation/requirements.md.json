@@ -1,8 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-022-approval-foundation/requirements.md",
-  "specHash": "af2f44a74a6a3f5bc9c3452383498aa381546daa9b0f15fa17e9e34d90c6f627",
-  "approvedAt": "2026-06-06T03:05:13.791Z",
-  "approvedBy": "github@harvest316.com",
+  "specHash": "cd77e7f9e5decde6978739299574fe78ad446c371bd45185bf4088c133cdba5b",
+  "approvedAt": "2026-07-14T03:34:21.608Z",
+  "approvedBy": "claude@harvest316.com",
   "tier": "T3",
-  "migrated": false
+  "migrated": false,
+  "baselineBlob": "752e7d89128aab7c63596351499a1b1912697186"
 }
