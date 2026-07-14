@@ -11,8 +11,12 @@
  *      --git-common-dir, the same path the gate used). For each id-keyed record,
  *      resolve the spec FILE (id -> the representative requirements artifact),
  *      RECOMPUTE specHash under FR-3 canonicalization (raw-byte hashes are invalid
- *      now), set approvedBy = repo owner's git config user.email, migrated:false,
- *      carry tier/approvedAt, and write the path-keyed sidecar.
+ *      now), set approvedBy = repo owner's git config user.email, carry
+ *      tier/approvedAt, and write the path-keyed sidecar. `migrated` is `false`
+ *      only when the captured email passes the DR-056 `checkApprover` denylist
+ *      (a provable human identity); an agent/bot/absent identity is written as
+ *      `migrated:true` (unverified) — a one-time script must never stamp an
+ *      agent as a genuine human approver (#719, sibling of DR-056).
  *   2. For each shipped spec that DERIVES (phase-position) to implementing/done
  *      with no sidecar from step 1, write a sidecar marked migrated:true
  *      (attributed to the owner + migration date) — honest provenance, valid but
@@ -34,6 +38,7 @@ import {
 } from 'fs';
 import { dirname, join, relative, sep } from 'path';
 import { parseSpec } from '../packages/minspec/src/lib/spec';
+import { checkApprover, parseAgentIdentities } from '../packages/minspec/src/lib/approval';
 import { specHash } from '@aiclarity/shared';
 
 const ROOT = process.cwd();
@@ -221,9 +226,14 @@ function main(): void {
   const now = new Date().toISOString();
   const files = loadSpecFiles();
   const byId = representativeById(files);
+  const approverCheck = checkApprover(email, parseAgentIdentities(process.env.MINSPEC_AGENT_IDENTITIES));
+  const step1Migrated = !approverCheck.ok;
 
   log(`migrate-approvals (FR-5)${DRY_RUN ? ' [dry-run]' : ''}`);
   log(`  owner email: ${email}`);
+  if (!approverCheck.ok) {
+    log(`  ! captured identity is agent/absent (${approverCheck.reason}) — step 1 records will be written migrated:true`);
+  }
   log(`  spec files: ${files.length}, distinct ids: ${byId.size}`);
 
   // ── Step 1: convert legacy id-keyed records → committed path-keyed sidecars.
@@ -256,7 +266,7 @@ function main(): void {
         approvedAt: rec.approvedAt,
         approvedBy: email,
         tier: rec.tier ?? f.tier,
-        migrated: false,
+        migrated: step1Migrated,
       });
       converted++;
       convertedIds.add(id);

@@ -144,4 +144,23 @@ describe('AC-9 — migrate-approvals converts legacy records with recomputed can
     expect(out).toContain('migrated:true');
     expect(out).toMatch(/wrote [1-9]\d* migrated:true sidecar/);
   });
+
+  it('#719 — a legacy record converted under an agent git identity is written migrated:true, never a genuine approval', () => {
+    run('git', ['config', 'user.email', 'claude@harvest316.com'], { cwd: ws, stdio: 'ignore' });
+    const sp = writeSpec('SPEC-007', 'T3', IMPL_PHASES);
+    const specRel = path.relative(ws, sp).split(path.sep).join('/');
+    fs.writeFileSync(
+      path.join(ws, '.minspec', 'approvals.json'),
+      JSON.stringify({
+        'SPEC-007': { specHash: rawByteHash(sp), approvedAt: '2026-06-01T00:00:00.000Z', tier: 'T3' },
+      }),
+    );
+
+    const out = runMigration();
+
+    expect(out).toContain('step 1 records will be written migrated:true');
+    const rec = readSidecar(specRel);
+    expect(rec.migrated).toBe(true); // NOT false — an agent identity can't stand as a genuine human approver
+    expect(rec.approvedBy).toBe('claude@harvest316.com');
+  });
 });
