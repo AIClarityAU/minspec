@@ -35,6 +35,7 @@ import { execFileSync } from 'node:child_process';
 import {
   decideAutoMerge,
   type AutoMergeInput,
+  type AutoMergeDecision,
   type AutoMergeMode,
   type ProverResult,
 } from '../packages/minspec/src/lib/auto-merge';
@@ -656,17 +657,48 @@ function auditPath(worktree: string): string {
   return path.join(mainRoot, '.minspec', 'auto-merge-audit.log');
 }
 
-function appendAudit(
+/**
+ * Append one audit record. Returns `true` iff the line actually persisted, so an
+ * ELIGIBLE decision can fail-safe to HOLD when its record could not be written
+ * (#491 — see {@link applyAuditFailsafe}). A failure still logs (best-effort
+ * visibility) but is no longer silently swallowed into a proceeding merge.
+ */
+export function appendAudit(
   worktree: string,
   record: Record<string, unknown>,
-): void {
+): boolean {
   try {
     const file = auditPath(worktree);
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.appendFileSync(file, JSON.stringify(record) + '\n', 'utf8');
+    return true;
   } catch (e) {
     log(`could not write audit log: ${(e as Error).message}`);
+    return false;
   }
+}
+
+/**
+ * #491 — FR-7 fail-safe. An ELIGIBLE decision whose audit record did NOT persist
+ * must not stay eligible: a wrong auto-merge that left no audit trail is the worst
+ * case — untraceable exactly when it matters most — so a failed audit downgrades
+ * the decision to a HOLD. A non-eligible decision is already a hold; its audit is
+ * best-effort and needs no downgrade. Pure, so the fail-safe is unit-tested
+ * without driving `main()`/fs (the file's deliberate no-flaky-e2e discipline).
+ */
+export function applyAuditFailsafe(
+  decision: AutoMergeDecision,
+  audited: boolean,
+): AutoMergeDecision {
+  if (decision.eligible && !audited) {
+    return {
+      eligible: false,
+      blast: decision.blast,
+      reason: `audit-write-failed — fail-safe hold (FR-7 #491): an eligible decision could not be recorded; ${decision.reason}`,
+      failed: [...decision.failed, 'audit-write-failed'],
+    };
+  }
+  return decision;
 }
 
 // ─── Load the #180 merged review-signal prose ────────────────────────────────
@@ -739,22 +771,28 @@ function main(): void {
       mode: args.mode,
       proverResult: prover,
     };
-    const decision = decideAutoMerge(input);
+    const rawDecision = decideAutoMerge(input);
 
-    // 4. FR-7 audit.
-    appendAudit(args.worktree, {
+    // 4. FR-7 audit — and the #491 fail-safe: an ELIGIBLE decision whose audit
+    //    line did not persist downgrades to HOLD (a merge that cannot be recorded
+    //    must not proceed untraced). `appendAudit` now REPORTS whether it wrote.
+    const audited = appendAudit(args.worktree, {
       ts: new Date().toISOString(),
       pr: args.pr || null,
       base: args.base,
       mode: args.mode,
-      eligible: decision.eligible,
-      blast: decision.blast,
-      failed: decision.failed,
-      reason: decision.reason,
+      eligible: rawDecision.eligible,
+      blast: rawDecision.blast,
+      failed: rawDecision.failed,
+      reason: rawDecision.reason,
       prover: { baseRed: prover.regressionProvenBaseRed, greenOnHead: prover.regressionGreenOnHead, note: prover.note },
       consequenceSignals: consequenceSignals.map((s) => s.name),
       hollowFindings: hollowFindings.length,
     });
+    const decision = applyAuditFailsafe(rawDecision, audited);
+    if (decision !== rawDecision) {
+      log(`FR-7 audit append FAILED on an eligible decision — emitting fail-safe HOLD (#491): ${decision.reason}`);
+    }
 
     // 5. Render the prover-authoritative #180 block for the FR-8 fallback comment.
     const block = renderReviewSignals({
