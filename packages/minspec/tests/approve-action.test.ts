@@ -11,6 +11,25 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ─── Mock vscode ───────────────────────────────────────────────────────────
 
+// A shared, stateful `getConfiguration` backing store (via vi.hoisted so it's
+// visible inside the hoisted vi.mock factory below). Every call to
+// `getConfiguration('minspec')` reads/writes the SAME object, so a test that
+// flips `configState.advancePhaseOnApprove` sees it honoured regardless of
+// which of the several sequential getConfiguration() calls inside
+// approveSpecCommand (approverEmail / commitOnApprove / advancePhaseOnApprove)
+// picks it up — unlike per-call `mockReturnValueOnce` chaining, which is
+// brittle to call-order changes in approve.ts.
+const { configState, configUpdate } = vi.hoisted(() => ({
+  configState: {
+    commitOnApprove: false as unknown,
+    advancePhaseOnApprove: false as unknown,
+  },
+  configUpdate: vi.fn((key: string, value: unknown) => {
+    (configState as Record<string, unknown>)[key] = value;
+    return Promise.resolve();
+  }),
+}));
+
 vi.mock('vscode', () => ({
   window: {
     showErrorMessage: vi.fn(),
@@ -29,11 +48,22 @@ vi.mock('vscode', () => ({
     // approval-action unit tests never shell out to git (the commit path has its
     // own real-git coverage in approve-commit.test.ts).
     getConfiguration: vi.fn(() => ({
-      get: vi.fn((key: string, def?: unknown) => (key === 'commitOnApprove' ? false : def)),
+      get: vi.fn((key: string, def?: unknown) =>
+        key in configState ? (configState as Record<string, unknown>)[key] : def,
+      ),
+      update: configUpdate,
     })),
   },
   commands: { executeCommand: vi.fn() },
   Uri: { file: (p: string) => ({ fsPath: p, scheme: 'file' }) },
+  ConfigurationTarget: { Global: 1 },
+}));
+
+// The DR-057 §3 follow-up toast enqueues via this lib — mocked so these
+// command-level tests never touch real disk (the lib gets its own unit
+// coverage in phase-advance-queue.test.ts).
+vi.mock('../src/lib/phase-advance-queue', () => ({
+  enqueuePhaseAdvance: vi.fn(),
 }));
 
 vi.mock('../src/views/spec-tree-provider', () => ({
@@ -97,6 +127,7 @@ import type { SpecSummary } from '../src/views/spec-tree-provider';
 import { readSpecFile, advanceSpecToImplementing } from '../src/lib/spec';
 import { validateSpec } from '../src/lib/spec-validator';
 import { readShardIdFiles } from '../src/lib/spec-layout';
+import { enqueuePhaseAdvance } from '../src/lib/phase-advance-queue';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -168,6 +199,16 @@ function setStatuses(map: Record<string, ApprovalStatus>): void {
   });
 }
 
+/**
+ * First-arg text of every `showInformationMessage` call. The success toast now
+ * carries the DR-057 §3 follow-up buttons as extra args, so assertions on its
+ * TEXT check only this (via `.mock.calls`) rather than a strict
+ * `toHaveBeenCalledWith(message)`, which would also pin the exact button set.
+ */
+function infoMessages(): string[] {
+  return vi.mocked(vscode.window.showInformationMessage).mock.calls.map((c) => String(c[0]));
+}
+
 // ─── approveSpecCommand action paths ──────────────────────────────────────
 
 describe('approveSpecCommand — action paths (post-selection)', () => {
@@ -176,6 +217,10 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
     vi.mocked(listSpecs).mockReturnValue([summary('SPEC-001', 'First')]);
     vi.mocked(getApprovalStatus).mockReturnValue('unapproved');
     vi.mocked(readShardIdFiles).mockReturnValue([]);
+    // Reset the shared config-state backing store (vi.clearAllMocks doesn't
+    // touch it — it's a plain object, not mock call/implementation state).
+    configState.commitOnApprove = false;
+    configState.advancePhaseOnApprove = false;
   });
 
   // ── no specs in workspace ────────────────────────────────────────────────
@@ -386,9 +431,7 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
     expect(advanceSpecToImplementing).toHaveBeenCalledWith(
       '/tmp/ws/specs/minspec/SPEC-001/spec.md',
     );
-    expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-      expect.stringContaining('status → implementing'),
-    );
+    expect(infoMessages().some((m) => m.includes('status → implementing'))).toBe(true);
   });
 
   it('advances status to implementing when spec was pre-impl (status=new)', async () => {
@@ -402,9 +445,7 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
     expect(advanceSpecToImplementing).toHaveBeenCalledWith(
       '/tmp/ws/specs/minspec/SPEC-001/spec.md',
     );
-    expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-      expect.stringContaining('status → implementing'),
-    );
+    expect(infoMessages().some((m) => m.includes('status → implementing'))).toBe(true);
   });
 
   it('does NOT flip status when spec is already implementing', async () => {
@@ -416,12 +457,9 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
     await approveSpecCommand(undefined);
 
     expect(advanceSpecToImplementing).not.toHaveBeenCalled();
-    expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-      expect.not.stringContaining('status → implementing'),
-    );
-    expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-      expect.stringContaining('Approved SPEC-001 for implementation.'),
-    );
+    const messages = infoMessages();
+    expect(messages.some((m) => m.includes('status → implementing'))).toBe(false);
+    expect(messages.some((m) => m.includes('Approved SPEC-001 for implementation.'))).toBe(true);
   });
 
   it('does NOT flip status when spec is done', async () => {
@@ -443,10 +481,148 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
 
     await approveSpecCommand(undefined);
 
-    expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-      expect.stringContaining('✓ Approved SPEC-001'),
-    );
+    expect(infoMessages().some((m) => m.includes('✓ Approved SPEC-001'))).toBe(true);
     expect(vscode.commands.executeCommand).toHaveBeenCalledWith('minspec.refreshTree');
+  });
+
+  // ── DR-057 §3 — Alt-A follow-up toast (advance-to-next-phase enqueue, #733) ──
+
+  describe('follow-up toast: enqueue a phase-advance request', () => {
+    beforeEach(() => {
+      // `vi.clearAllMocks()` (outer beforeEach) clears call history but NOT a
+      // still-queued `mockResolvedValueOnce` from an earlier test that set one
+      // defensively and never actually triggered the mock (several tests above
+      // queue 'Approve' on showWarningMessage even when validateSpec returns no
+      // warnings, so it's never consumed) — `mockReset()` drains that queue so
+      // this describe's own `mockResolvedValueOnce` setups aren't shadowed by a
+      // stale leftover value from a prior test.
+      vi.mocked(vscode.window.showInformationMessage).mockReset();
+      vi.mocked(vscode.window.showWarningMessage).mockReset();
+    });
+
+    it('offers "Advance to next phase" / "Always" on the success toast by default', async () => {
+      pickFirst();
+      vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec() as never);
+      vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
+
+      await approveSpecCommand(undefined);
+
+      const successCall = vi
+        .mocked(vscode.window.showInformationMessage)
+        .mock.calls.find((c) => String(c[0]).includes('✓ Approved SPEC-001'));
+      expect(successCall).toEqual([
+        expect.stringContaining('✓ Approved SPEC-001'),
+        'Advance to next phase',
+        'Always',
+      ]);
+    });
+
+    it('enqueues a phase-advance request when "Advance to next phase" is picked', async () => {
+      pickFirst();
+      vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec() as never);
+      vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
+      vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce(
+        'Advance to next phase' as never,
+      );
+
+      await approveSpecCommand(undefined);
+
+      expect(enqueuePhaseAdvance).toHaveBeenCalledWith(
+        '/tmp/ws',
+        '/tmp/ws/specs/minspec/SPEC-001/spec.md',
+        'alt-a-toast',
+      );
+      expect(configUpdate).not.toHaveBeenCalled(); // one-shot pick — pref untouched
+    });
+
+    it('does not enqueue when the toast is dismissed with no choice', async () => {
+      pickFirst();
+      vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec() as never);
+      vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
+      // Default mock resolves undefined — the user dismissed the toast.
+
+      await approveSpecCommand(undefined);
+
+      expect(enqueuePhaseAdvance).not.toHaveBeenCalled();
+    });
+
+    it('"Always" persists the global pref AND enqueues immediately', async () => {
+      pickFirst();
+      vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec() as never);
+      vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
+      vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce('Always' as never);
+
+      await approveSpecCommand(undefined);
+
+      // Written globally — a personal preference, not project policy (mirrors
+      // minspec.autoBackfillUseAi / backfill-epics.ts).
+      expect(configUpdate).toHaveBeenCalledWith(
+        'advancePhaseOnApprove',
+        true,
+        vscode.ConfigurationTarget.Global,
+      );
+      expect(enqueuePhaseAdvance).toHaveBeenCalledWith(
+        '/tmp/ws',
+        '/tmp/ws/specs/minspec/SPEC-001/spec.md',
+        'alt-a-toast',
+      );
+    });
+
+    it('once the pref is enabled, shows the plain toast (no buttons) and enqueues silently', async () => {
+      configState.advancePhaseOnApprove = true;
+      pickFirst();
+      vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec() as never);
+      vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
+
+      await approveSpecCommand(undefined);
+
+      const successCall = vi
+        .mocked(vscode.window.showInformationMessage)
+        .mock.calls.find((c) => String(c[0]).includes('✓ Approved SPEC-001'));
+      expect(successCall).toEqual([expect.stringContaining('✓ Approved SPEC-001')]); // no buttons
+      expect(enqueuePhaseAdvance).toHaveBeenCalledWith(
+        '/tmp/ws',
+        '/tmp/ws/specs/minspec/SPEC-001/spec.md',
+        'alt-a-toast',
+      );
+      expect(configUpdate).not.toHaveBeenCalled(); // already enabled — no redundant re-write
+    });
+
+    it('offers the buttons on the warning-advisory toast too, and enqueues on pick', async () => {
+      pickFirst();
+      vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec() as never);
+      vi.mocked(validateSpec).mockReturnValueOnce(
+        completeWithWarnings(['Optional section missing']) as never,
+      );
+      vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce(
+        'Advance to next phase' as never,
+      );
+
+      await approveSpecCommand(undefined);
+
+      const call = vi.mocked(vscode.window.showWarningMessage).mock.calls[0];
+      expect(call.slice(1)).toEqual(['Advance to next phase', 'Always']);
+      expect(enqueuePhaseAdvance).toHaveBeenCalledWith(
+        '/tmp/ws',
+        '/tmp/ws/specs/minspec/SPEC-001/spec.md',
+        'alt-a-toast',
+      );
+    });
+
+    it('a queue-write failure is swallowed — never surfaces as an approval failure', async () => {
+      pickFirst();
+      vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec() as never);
+      vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
+      vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce(
+        'Advance to next phase' as never,
+      );
+      vi.mocked(enqueuePhaseAdvance).mockImplementationOnce(() => {
+        throw new Error('disk full');
+      });
+
+      await expect(approveSpecCommand(undefined)).resolves.toBeUndefined();
+      expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+    });
   });
 
   it('shows error when approveSpec throws (catch path)', async () => {
