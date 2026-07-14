@@ -74,8 +74,10 @@ const CLAUDE_MD_TEMPLATE = `# {{projectName}} — Project Instructions
 These rules must never be violated. All changes must preserve them.
 
 {{#if invariants}}
+> Summarized from \`.minspec/constitution.md\` — each line is the invariant's lead sentence. See the constitution for the full text, rationale, and SPEC/DR references; edit invariants there, not here.
+
 {{#each invariants}}
-{{incremented @index}}. {{this}}
+{{incremented @index}}. {{firstSentence this}}
 {{/each}}
 {{else}}
 <!-- Add project invariants here -->
@@ -139,8 +141,10 @@ Project invariants, principles, and constraints are in \`.minspec/constitution.m
 {{#if invariants}}
 ### Key Invariants
 
+> Summarized from \`.minspec/constitution.md\` — lead sentences only; the full text and rationale live there.
+
 {{#each invariants}}
-- {{this}}
+- {{firstSentence this}}
 {{/each}}
 {{/if}}
 
@@ -171,8 +175,10 @@ This project uses MinSpec SDD methodology. Specs in \`{{specsDir}}/\`, decisions
 ## Invariants
 
 {{#if invariants}}
+> Summarized from \`.minspec/constitution.md\` — lead sentences only; the full text and rationale live there.
+
 {{#each invariants}}
-- {{this}}
+- {{firstSentence this}}
 {{/each}}
 {{else}}
 <!-- Add project invariants here -->
