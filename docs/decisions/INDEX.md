@@ -421,7 +421,7 @@ Issue #74 confirmed against Anthropic's official Legal-and-compliance docs that 
 
 ## [DR-053 — Paragraph-addressable reference scheme — every approvable item gets a short, typeable id PROJ/APPR/PARA (MIN/SP19/FR3); project & document elide when implied](DR-053.md)
 
-*Status: proposed · Date: 2026-07-12*
+*Status: accepted · Date: 2026-07-12*
 
 <!-- dr-summary:DR-053 auto=0000000000000000 -->
 Per-repo-local SDD ids stay unprefixed (DR-027 separate registers); a reference that SPANS projects carries the target project's short prefix from the committed table `.minspec/project-prefixes.md` — SDD refs `<PREFIX>-<ID>` (MS-SPEC-019, SC-DR-007), issue/PR refs `<PREFIX>#<N>` (MS#500, SC#26). Unknown prefix is advisory, never fatal. Ships the Tier-0 core (`@aiclarity/shared` project-prefix module: parsePrefixTable/resolveRef/formatCrossRef/suggestPrefixDeterministic) + seed table + CLAUDE.md convention; Tier-1 validate-advisory + toast deferred to #614.
