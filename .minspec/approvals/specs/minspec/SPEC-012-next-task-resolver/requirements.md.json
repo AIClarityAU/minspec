@@ -1,9 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-012-next-task-resolver/requirements.md",
-  "specHash": "1753a4c36518baaab078e843c9a0ad31559b486ce98411f8a264fb7a74a70fd3",
-  "approvedAt": "2026-07-12T06:04:44.639Z",
+  "specHash": "526dbe9fc0784a3efbae5108c8271052e72cb0303cf4e3dc01b959db85e1d2b2",
+  "approvedAt": "2026-07-14T03:34:10.866Z",
   "approvedBy": "claude@harvest316.com",
   "tier": "T4",
   "migrated": false,
-  "baselineBlob": "471ad8bcac30667fa7001ccc7e113613e73bce52"
+  "baselineBlob": "bbbd6563d2d4a6cc55ae04dbc8d4bc9cdf898796"
 }
