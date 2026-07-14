@@ -169,3 +169,45 @@ describe('approveSpec — lib boundary is the authoritative gate (no side effect
     expect(readRecord(tmp, SPEC_REL)).toBeUndefined();
   });
 });
+
+describe('denylist drift guard — reconcile script matches the lib denylist', () => {
+  // scripts/reconcile-approver-identity.mjs (Decision 4) is a standalone .mjs that
+  // cannot import this TS lib, so it hand-copies BUILTIN_AGENT_IDENTITIES. If the lib
+  // gains an agent identity but the script doesn't, the reconcile pass would MISS
+  // that identity's committed approvals — silent drift. This test fails CI on drift.
+  it('every lib BUILTIN_AGENT_IDENTITIES entry is present in the reconcile script', () => {
+    const scriptPath = path.resolve(__dirname, '../../../scripts/reconcile-approver-identity.mjs');
+    const src = fs.readFileSync(scriptPath, 'utf-8');
+    for (const id of BUILTIN_AGENT_IDENTITIES) {
+      expect(src, `reconcile script is missing agent identity "${id}"`).toContain(id);
+    }
+  });
+
+  it('the reconcile script classifies exactly like the lib on the built-ins (behavioural parity)', () => {
+    // Drive the actual script over a hermetic corpus and assert its flag decision
+    // equals checkApprover's for each built-in identity + a human + unknown.
+    const scriptPath = path.resolve(__dirname, '../../../scripts/reconcile-approver-identity.mjs');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-reconcile-parity-'));
+    const appr = path.join(dir, '.minspec', 'approvals');
+    fs.mkdirSync(appr, { recursive: true });
+    const cases = [
+      ...BUILTIN_AGENT_IDENTITIES.map((e, i) => ({ name: `agent${i}.json`, email: e, deny: true })),
+      { name: 'human.json', email: 'human@example.com', deny: false },
+      { name: 'unknown.json', email: 'unknown', deny: true },
+    ];
+    for (const c of cases) {
+      fs.writeFileSync(
+        path.join(appr, c.name),
+        JSON.stringify({ approvedBy: c.email, migrated: false, tier: 'T3' }, null, 2) + '\n',
+      );
+    }
+    execFileSync('node', [scriptPath, '--root', dir], { stdio: 'ignore' });
+    for (const c of cases) {
+      const rec = JSON.parse(fs.readFileSync(path.join(appr, c.name), 'utf-8'));
+      // The lib and the script must agree on who is an agent/absent identity.
+      expect(checkApprover(c.email).ok).toBe(!c.deny);
+      expect(rec.migrated, `${c.email} should${c.deny ? '' : ' NOT'} be flagged`).toBe(c.deny);
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+});

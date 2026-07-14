@@ -48,6 +48,24 @@ function isAgentOrAbsent(email, denied) {
   return denied.has(lower);
 }
 
+/**
+ * A parsed JSON value is an approval record we may classify/mutate ONLY if it is a
+ * plain object with a string `approvedBy` (mirrors approval-store's `isValidRecord`).
+ * Anything else — `null` (a valid JSON literal that parses fine), an array, or an
+ * object lacking `approvedBy` — is NOT a record: we leave it untouched, never inject
+ * a `migrated` flag into it, and never crash on `rec.approvedBy`. Without this guard
+ * a stray `null`/array sidecar would either throw mid-walk (half-reconciling the
+ * corpus) or be silently reformatted and re-flagged every run (non-idempotent).
+ */
+function isApprovalRecord(rec) {
+  return (
+    rec !== null &&
+    typeof rec === 'object' &&
+    !Array.isArray(rec) &&
+    typeof rec.approvedBy === 'string'
+  );
+}
+
 function walkJson(dir, out = []) {
   let entries;
   try {
@@ -86,8 +104,9 @@ function main() {
     try {
       rec = JSON.parse(fs.readFileSync(file, 'utf-8'));
     } catch {
-      continue; // not a record we understand — leave untouched
+      continue; // unparseable — leave untouched
     }
+    if (!isApprovalRecord(rec)) continue; // parseable but not a record (null/array/no approvedBy) — leave untouched
     const rel = path.relative(root, file);
     if (!isAgentOrAbsent(rec.approvedBy, denied)) {
       humanKept.push(`${rel}  (${rec.approvedBy})`);
@@ -106,7 +125,7 @@ function main() {
 
   const verb = dryRun ? 'WOULD flag' : 'Flagged';
   console.log(`DR-056 reconcile — ${approvalsDir}`);
-  console.log(`  records scanned:        ${files.length}`);
+  console.log(`  json files scanned:     ${files.length}`);
   console.log(`  human-attributed kept:  ${humanKept.length}`);
   console.log(`  already flagged:        ${alreadyFlagged.length}`);
   console.log(`  ${verb} (agent/absent → migrated:true): ${flagged.length}`);
