@@ -110,6 +110,20 @@ export function buildSectionHashes(sections: Section[]): SectionHashes {
 }
 
 /**
+ * Whether a section body contains at least one authored markdown list item
+ * (numbered or bulleted), ignoring HTML comments. The constitution's content
+ * sections (Invariants/Principles/Constraints/Goals) express their content as
+ * lists; the bundled template ships them as a descriptive sentence plus
+ * commented-out example placeholders — i.e. prose but NO real list items. This
+ * is the signal the merge uses to refuse replacing populated human content with
+ * an unfilled template scaffold (#706, INV-2).
+ */
+export function hasAuthoredListItems(body: string): boolean {
+  const withoutComments = body.replace(/<!--[\s\S]*?-->/g, '');
+  return withoutComments.split('\n').some((line) => /^\s*(?:\d+\.|[-*])\s+\S/.test(line));
+}
+
+/**
  * Merge an existing file with a newly generated version, using stored hashes
  * to determine which sections the user has modified.
  *
@@ -160,7 +174,20 @@ export function mergeFile(
       const existingHash = hashSection(existingBody);
       const oldHash = oldHashes[heading];
 
-      if (oldHash && existingHash !== oldHash) {
+      if (hasAuthoredListItems(existingBody) && !hasAuthoredListItems(genSection.body)) {
+        // INV-2 guard (#706): never replace populated human content with an
+        // unfilled template scaffold. The constitution's content sections
+        // (Invariants/Principles/Constraints/Goals) ship as descriptive prose +
+        // commented example placeholders — prose but no real list items — so the
+        // "unmodified → use template" path below would silently destroy
+        // hand-authored list content, whether because no baseline hash was
+        // recorded for the section or because seedConstitution laundered the
+        // human content into the baseline (existingHash === oldHash). If the
+        // user's section has authored list items and the template's has none,
+        // preserve the user's content regardless of the hashes.
+        mergedSections.push({ heading, body: existingBody });
+        newHashes[heading] = existingHash;
+      } else if (oldHash && existingHash !== oldHash) {
         // User modified this section → keep user version
         mergedSections.push({ heading, body: existingBody });
         newHashes[heading] = existingHash;
