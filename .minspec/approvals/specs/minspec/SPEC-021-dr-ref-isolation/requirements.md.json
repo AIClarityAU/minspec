@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-021-dr-ref-isolation/requirements.md",
+  "specHash": "e993de06e9bf6827d2497297373555c0ab84c9da1e95de68aa9b1b49b1dd7aa4",
+  "approvedAt": "2026-07-14T08:46:31.036Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "dd15c31354b00ee5017a70bbcd4c6e635efbf0a8"
+}
