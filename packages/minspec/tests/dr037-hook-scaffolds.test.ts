@@ -98,6 +98,15 @@ describe('the scaffolded hook scripts actually enforce the SDD gates', () => {
     expect(c).toContain('exit 1');
   });
 
+  it('commit-msg gates prose-only deferrals — follow-up materialization (DR-023)', () => {
+    const c = byPath(COMMIT_MSG).content;
+    // Detects deferral language, and accepts either an issue ref or an explicit escape.
+    expect(c).toMatch(/held back\|separate/i);
+    expect(c).toMatch(/#\[0-9\]\+/); // issue-ref escape
+    expect(c).toMatch(/follow-ups\?/i); // "Follow-ups: none" escape
+    expect(c).toContain('follow-up gate');
+  });
+
   it('pre-commit runs gitleaks but degrades to a WARNING when absent (#244)', () => {
     const c = byPath(PRE_COMMIT).content;
     expect(c).toContain('command -v gitleaks');
@@ -136,6 +145,59 @@ describe('the scaffolded hook scripts actually enforce the SDD gates', () => {
     expect(c).toContain('[ -f "$hook_dir/validate.py" ]');
     // The always-present shell gate is the terminal fallback.
     expect(c).toContain('minspec_shell_gate');
+  });
+});
+
+describe('commit-msg follow-up gate (DR-023) — executed behavior', () => {
+  function runHook(message: string, env: Record<string, string> = {}): { code: number; stderr: string } {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-followup-'));
+    try {
+      const hookPath = path.join(dir, 'commit-msg');
+      fs.writeFileSync(hookPath, renderManagedFile(byPath(COMMIT_MSG)));
+      fs.chmodSync(hookPath, 0o755);
+      const msgPath = path.join(dir, 'MSG');
+      fs.writeFileSync(msgPath, message);
+      // Start from a clean env: the ambient shell may export MINSPEC_GATE_OFF=1
+      // (which would bypass the gate); tests opt into the bypass explicitly.
+      const base = { ...process.env };
+      delete base.MINSPEC_GATE_OFF;
+      try {
+        execFileSync('sh', [hookPath, msgPath], { stdio: 'pipe', env: { ...base, ...env } });
+        return { code: 0, stderr: '' };
+      } catch (e: unknown) {
+        const err = e as { status?: number; stderr?: Buffer };
+        return { code: err.status ?? 1, stderr: String(err.stderr ?? '') };
+      }
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('BLOCKS a commit that defers work with no issue ref', () => {
+    const r = runHook('feat: add X\n\nCI files held back for a separate PR.\n');
+    expect(r.code).toBe(1);
+    expect(r.stderr).toContain('follow-up gate');
+  });
+
+  it('ALLOWS a deferral that cites a tracked issue (#NNN)', () => {
+    expect(runHook('feat: add X\n\nCI files held back — tracked in #12.\n').code).toBe(0);
+  });
+
+  it('ALLOWS a deferral with an explicit "Follow-ups: none"', () => {
+    expect(runHook('feat: add X\n\nHeld back nothing.\n\nFollow-ups: none\n').code).toBe(0);
+  });
+
+  it('ALLOWS a normal commit with no deferral language', () => {
+    expect(runHook('feat: add X\n\nA clean, self-contained change. Closes #5.\n').code).toBe(0);
+  });
+
+  it('MINSPEC_GATE_OFF=1 bypasses the gate', () => {
+    expect(runHook('feat: add X\n\nheld back a bunch, no ref.\n', { MINSPEC_GATE_OFF: '1' }).code).toBe(0);
+  });
+
+  it('still enforces the RCDD root-cause gate on fix: commits (no regression)', () => {
+    expect(runHook('fix: thing\n\nno diagnosis here.\n').code).toBe(1);
+    expect(runHook('fix: thing\n\nRoot cause: the widget was null.\n').code).toBe(0);
   });
 });
 

@@ -662,8 +662,9 @@ exit $?`;
  *
  * Bypass: MINSPEC_GATE_OFF=1 git commit ...   Fail-open on a missing message file.
  */
-const COMMIT_MSG_HOOK = `# MinSpec commit-msg gate (DR-037 / DR-003) — RCDD root-cause requirement.
-# A \\\`fix:\\\` commit must document its diagnosis. Bypass: MINSPEC_GATE_OFF=1 git commit ...
+const COMMIT_MSG_HOOK = `# MinSpec commit-msg gate (DR-037) — RCDD root-cause (DR-003) + follow-up
+# materialization (DR-023). A \\\`fix:\\\` commit must document its diagnosis, and any
+# commit that DEFERS work must file the follow-up. Bypass: MINSPEC_GATE_OFF=1 git commit ...
 set -u
 
 [ "\${MINSPEC_GATE_OFF:-0}" = "1" ] && exit 0
@@ -673,6 +674,21 @@ msg_file="\${1:-}"
 
 # Subject = first non-comment, non-empty line.
 subject=$(grep -v '^#' "$msg_file" | grep -m1 . 2>/dev/null || true)
+
+# --- Follow-up materialization gate (DR-023) — runs on EVERY commit ---
+# A commit that DEFERS work in prose must cite a tracked issue (#NNN) or state
+# "Follow-ups: none". Prose-only "held back / separate PR / follow-up / out of
+# scope" is a leak (the discipline that would have caught the CI-scope deferral).
+if grep -v '^#' "$msg_file" | grep -Eiq 'held back|separate (pr|commit|review)|follow-?up|out of scope|deferred|not in this (pr|commit)'; then
+  if ! grep -v '^#' "$msg_file" | grep -Eiq '#[0-9]+|follow-ups?:? *none|tracked in'; then
+    echo "✗ MinSpec follow-up gate (DR-023): this commit defers work but files no follow-up." >&2
+    echo "" >&2
+    echo "  A commit that says 'held back / separate PR / follow-up / out of scope' must" >&2
+    echo "  cite a tracked issue (#NNN) or state 'Follow-ups: none'." >&2
+    echo "  Bypass (rare): MINSPEC_GATE_OFF=1 git commit ..." >&2
+    exit 1
+  fi
+fi
 
 # Only Conventional-Commit fix subjects are gated: fix:  fix(scope):  fix!:
 echo "$subject" | grep -Eq '^fix(\\([^)]*\\))?!?:' || exit 0
