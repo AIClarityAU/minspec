@@ -80,6 +80,14 @@ export interface AutoMergeInput {
   /** FR-2 prover result. The AUTHORITY for the red→green proof (INV-3).
    *  Absent ⇒ not proven ⇒ deny-by-default. */
   readonly proverResult?: ProverResult;
+  /** #489 — the REAL git-diff file paths (gate-supplied, from `buildChangedFiles`).
+   *  The AUTHORITY for Signal-1's `rootCauseFiles ⊆ changedFiles` check, replacing
+   *  the agent's self-reported `reviewSignals.changedFiles` (which the agent could
+   *  make self-consistent to pass trivially). Absent ⇒ the agent's own set is used
+   *  (the pure-decision unit tests inject their diff there); the production gate
+   *  ALWAYS supplies it, so the self-report never counts. Same real-diff source the
+   *  consequence/hollow signals already use. */
+  readonly changedFilePaths?: readonly string[];
 }
 
 /** The decision. `failed` is `[]` iff `eligible`. `reason` is always non-empty (INV-6). */
@@ -284,19 +292,32 @@ export function allReviewSignalsGreen(rs: ReviewSignalsInput): boolean {
 }
 
 /**
- * INV-3 — overlay the FR-2 prover's result onto the review signals as the SOLE
- * authority for the red→green proof. Any self-reported `regressionProvenBaseRed`/
- * `regressionProvenHeadGreen` on `rs` is DISCARDED. Absent prover ⇒ both false
- * (not proven, deny-by-default).
+ * INV-3 + #489 — overlay the gate's VERIFIED authority onto the agent's review
+ * signals, discarding the corresponding self-reports so neither Signal-1 nor
+ * Signal-2 can be passed by an agent grading its own homework:
+ *
+ *  - **Proof (Signal-2):** the FR-2 `prover` result is the SOLE authority for the
+ *    red→green proof. Any self-reported `regressionProvenBaseRed`/`…HeadGreen` on
+ *    `rs` is DISCARDED. Absent prover ⇒ both false (deny-by-default).
+ *  - **Diff (Signal-1, #489):** the REAL git-diff paths (`realChangedFiles`) are
+ *    the SOLE authority for `changedFiles`. Signal-1 checks `rootCauseFiles ⊆
+ *    changedFiles`; when BOTH came from the agent, it passed trivially by claiming
+ *    a self-consistent set. The real diff (same source the consequence/hollow
+ *    signals already use) replaces it. Absent a supplied diff, `rs.changedFiles`
+ *    is used unchanged — the pure-decision unit tests inject their diff there; the
+ *    production gate ALWAYS supplies `realChangedFiles`, so the self-report never
+ *    counts toward eligibility.
  */
-function withProverAuthority(
+function withVerifiedAuthority(
   rs: ReviewSignalsInput,
   prover: ProverResult | undefined,
+  realChangedFiles: readonly string[] | undefined,
 ): ReviewSignalsInput {
   return {
     ...rs,
     regressionProvenBaseRed: prover?.regressionProvenBaseRed === true,
     regressionProvenHeadGreen: prover?.regressionGreenOnHead === true,
+    changedFiles: realChangedFiles !== undefined ? [...realChangedFiles] : rs.changedFiles,
   };
 }
 
@@ -343,7 +364,7 @@ export function decideAutoMerge(input: AutoMergeInput): AutoMergeDecision {
   if (!reviewSignals || typeof reviewSignals !== 'object') {
     failed.push('review-signals-missing');
   } else {
-    const effective = withProverAuthority(reviewSignals, input?.proverResult);
+    const effective = withVerifiedAuthority(reviewSignals, input?.proverResult, input?.changedFilePaths);
     if (!rootCauseGreen(effective)) failed.push('root-cause');
     if (!regressionGreen(effective)) failed.push('regression-unproven');
     if (!gateGreen(effective)) failed.push('gate-not-green');
