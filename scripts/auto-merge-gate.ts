@@ -561,6 +561,12 @@ const BOUNDARY_ROOT_BASENAMES: ReadonlySet<string> = new Set([
   '.travis.yml',
   'azure-pipelines.yml',
   'Jenkinsfile',
+  // #490 review: CODEOWNERS is a GOVERNANCE / access-control surface (it routes
+  // required reviewers), not documentation — the same class as the CI/workflow
+  // boundary files above. A CODEOWNERS-only diff must classify HIGH so a change
+  // weakening review requirements can never auto-merge unseen. (basename match ⇒
+  // caught at repo root, `.github/`, or `docs/`.)
+  'CODEOWNERS',
 ]);
 
 /**
@@ -651,9 +657,11 @@ function buildHollowFindings(changedFiles: ChangedFile[]): TestFinding[] {
 // v1 catalog: a diff whose every changed path is documentation and/or a test file
 // ships no product source, so it cannot change runtime behaviour. It grades the
 // CHANGE CLASS, never diff size (a 500-line docs PR is low-blast; a 3-line auth
-// edit is not — SPEC-004). Mutually exclusive with the manifest/boundary high
-// injectors by construction (a manifest/config/code file is neither docs nor test),
-// and `classifyBlast` checks high before low regardless.
+// edit is not — SPEC-004). The docs/test basename+extension sets are kept DISJOINT
+// from the manifest/boundary high sets — notably CODEOWNERS is governance, NOT docs
+// (BOUNDARY_ROOT_BASENAMES), after the #490 review caught it certifying low here.
+// And even if a future overlap slipped in, `classifyBlast` checks high before low,
+// so a high signal always wins over an affirmative-low one.
 
 /** Documentation / prose files (extension or well-known basename). */
 const DOCS_EXT_RE = /\.(md|mdx|markdown|txt|rst|adoc)$/i;
@@ -664,7 +672,10 @@ const DOCS_BASENAMES: ReadonlySet<string> = new Set([
   'CHANGELOG',
   'AUTHORS',
   'CONTRIBUTING',
-  'CODEOWNERS',
+  // NB: CODEOWNERS is deliberately NOT here — it is governance/access-control, not
+  // documentation, so it lives in BOUNDARY_ROOT_BASENAMES (high-blast). See the
+  // #490 review finding: certifying it "docs" let a required-reviewer change
+  // auto-merge unseen.
 ]);
 
 function isDocsPath(p: string): boolean {

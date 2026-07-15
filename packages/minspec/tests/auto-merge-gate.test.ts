@@ -766,4 +766,22 @@ describe('#490 / DR-058 — detectLowBlastDocsTest certifies a docs/test-only di
   it('empty diff → no signal', () => {
     expect(detectLowBlastDocsTest([])).toBeUndefined();
   });
+
+  // #490 review finding: CODEOWNERS is GOVERNANCE (required-reviewer routing), NOT
+  // docs — certifying it low let a review-gate change auto-merge unseen. It must be
+  // excluded from the docs certification AND affirmatively flagged high (boundary).
+  it('CODEOWNERS is NOT certified docs — at repo root, .github/, or docs/', () => {
+    expect(detectLowBlastDocsTest([cf({ path: 'CODEOWNERS' })])).toBeUndefined();
+    expect(detectLowBlastDocsTest([cf({ path: '.github/CODEOWNERS' })])).toBeUndefined();
+    expect(detectLowBlastDocsTest([cf({ path: 'docs/CODEOWNERS' })])).toBeUndefined();
+    // even mixed with a genuine doc, the CODEOWNERS presence blocks certification
+    expect(detectLowBlastDocsTest([cf({ path: 'README.md' }), cf({ path: 'CODEOWNERS' })])).toBeUndefined();
+  });
+
+  it('CODEOWNERS is affirmatively HIGH-blast (boundary), at any path', () => {
+    expect(isBoundaryPath('CODEOWNERS')).toBe(true);
+    expect(isBoundaryPath('.github/CODEOWNERS')).toBe(true);
+    expect(isBoundaryPath('docs/CODEOWNERS')).toBe(true);
+    expect(detectBoundaryChange([cf({ path: '.github/CODEOWNERS' })])?.name).toBe('manifest_changed');
+  });
 });
