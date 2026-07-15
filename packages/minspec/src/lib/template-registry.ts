@@ -662,8 +662,10 @@ exit $?`;
  *
  * Bypass: MINSPEC_GATE_OFF=1 git commit ...   Fail-open on a missing message file.
  */
-const COMMIT_MSG_HOOK = `# MinSpec commit-msg gate (DR-037 / DR-003) — RCDD root-cause requirement.
-# A \\\`fix:\\\` commit must document its diagnosis. Bypass: MINSPEC_GATE_OFF=1 git commit ...
+const COMMIT_MSG_HOOK = `# MinSpec commit-msg gate (DR-037) — RCDD root-cause (DR-003) + follow-up
+# materialization (DR-023, blocking-for-commit-prose per DR-059). A \\\`fix:\\\` commit
+# must document its diagnosis, and any commit that DEFERS work in prose must cite the
+# follow-up. Bypass: MINSPEC_GATE_OFF=1 git commit ...
 set -u
 
 [ "\${MINSPEC_GATE_OFF:-0}" = "1" ] && exit 0
@@ -671,14 +673,37 @@ set -u
 msg_file="\${1:-}"
 [ -n "$msg_file" ] && [ -r "$msg_file" ] || exit 0   # fail open
 
-# Subject = first non-comment, non-empty line.
-subject=$(grep -v '^#' "$msg_file" | grep -m1 . 2>/dev/null || true)
+# Scan the HUMAN-AUTHORED body only. First drop the \\\`git commit -v\\\` verbose diff
+# (everything from the \\\`>8\\\` scissors line down) so diff text that merely contains
+# "follow-up"/"out of scope"/"root cause" can never false-trigger a gate (DR-059 §3);
+# then drop git comment lines. A message with no scissors line is unaffected.
+body=$(sed '/^#.*>8/,$ d' "$msg_file" | grep -v '^#' || true)
+
+# Subject = first non-empty body line.
+subject=$(printf '%s\\n' "$body" | grep -m1 . 2>/dev/null || true)
+
+# --- Follow-up materialization gate (DR-023 / DR-059) — runs on EVERY commit ---
+# A commit that DEFERS work in prose must cite a tracked issue (#NNN), say
+# "Follow-ups: none", or assert nothing was deferred. Prose-only "held back /
+# separate PR / follow-up / out of scope" with no ref is a leak (the discipline that
+# would have caught the CI-scope deferral). DR-059 records why this blocks where
+# DR-040 kept DR-document materialization non-blocking (different surface).
+if printf '%s\\n' "$body" | grep -Eiq 'held back|separate (pr|commit|review)|follow-?up|out of scope|deferred|not in this (pr|commit)'; then
+  if ! printf '%s\\n' "$body" | grep -Eiq '#[0-9]+|follow-?ups?:? *none|tracked in|no(thing|ne)? *(deferred|follow-?ups?)|nothing (held|deferred)|(handled|done|fixed|addressed) (here|in this (pr|commit|change))'; then
+    echo "✗ MinSpec follow-up gate (DR-023/DR-059): this commit defers work but files no follow-up." >&2
+    echo "" >&2
+    echo "  A commit that says 'held back / separate PR / follow-up / out of scope' must" >&2
+    echo "  cite a tracked issue (#NNN), state 'Follow-ups: none', or note 'nothing deferred'." >&2
+    echo "  Bypass (rare): MINSPEC_GATE_OFF=1 git commit ..." >&2
+    exit 1
+  fi
+fi
 
 # Only Conventional-Commit fix subjects are gated: fix:  fix(scope):  fix!:
 echo "$subject" | grep -Eq '^fix(\\([^)]*\\))?!?:' || exit 0
 
 # Require a \`Root cause:\` marker (case-insensitive, space or hyphen) in the body.
-if grep -v '^#' "$msg_file" | grep -Eiq 'root[ -]cause:'; then
+if printf '%s\\n' "$body" | grep -Eiq 'root[ -]cause:'; then
   exit 0
 fi
 
