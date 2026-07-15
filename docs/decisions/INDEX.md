@@ -437,7 +437,7 @@ Three properties have been conflated under one word — **"offline"** — since 
 
 ## [DR-055 — Adopt Spec Kit conventional conformity — mirror Spec Kit's artifact + command surface by default to lower switching cost; keep editor-time deterministic enforcement as the moat](DR-055.md)
 
-*Status: proposed · Date: 2026-07-13*
+*Status: accepted · Date: 2026-07-13*
 
 <!-- dr-summary:DR-055 auto=18c5d1f7066e -->
 GitHub **Spec Kit** (github/spec-kit) is the incumbent spec-driven-development toolkit. A large share of MinSpec's likely users will have driven a Spec Kit project first — its /specify → /plan → /tasks loop is where the audience learns SDD. Every place MinSpec's *surface* differs from Spec Kit's for no load-bearing reason is pure **switching cost**: a file that isn't where they expect, a command that doesn't autocomplete, a folder named differently.
@@ -466,6 +466,7 @@ The background piggyback loop (scripts/drain-inbox.sh, fired from the session-st
 <!-- dr-summary:DR-058 auto=e19da9b036b0 -->
 classifyBlast(signals, touchesExportedSurface) (auto-merge.ts:188) returns 'low' when signals is **empty** — the recognition loop simply never runs, and the function falls through to return 'low'. Two more facts make that empty set fully *eligible*, not merely low-blast: 1. deriveTouchesExportedSurface([]) → false, so the unmeasured-blast gate (auto-merge.ts:385 — if (!reachKnownLow(signals) && touchesExportedSurface) failed.push('unmeasured-blast')) **never fires** (its touchesExportedSurface conjunct is false). 2. reachKnownLow **always returns false in v1** (auto-merge.ts:240 — "No affirmative low-reach signal type exists in v1") — so it can never…
 <!-- /dr-summary:DR-058 -->
+
 ## [DR-059 — Commit-message prose deferrals must cite a follow-up — a blocking commit-msg gate, distinct from DR-040's DR-document auto-materialization](DR-059.md)
 
 *Status: proposed · Date: 2026-07-14*
