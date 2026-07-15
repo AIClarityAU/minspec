@@ -34,6 +34,7 @@ import { execFileSync } from 'node:child_process';
 
 import {
   decideAutoMerge,
+  LOW_BLAST_DOCS_TEST,
   type AutoMergeInput,
   type AutoMergeDecision,
   type AutoMergeMode,
@@ -642,6 +643,64 @@ function buildHollowFindings(changedFiles: ChangedFile[]): TestFinding[] {
   return findings;
 }
 
+// ─── #490 / DR-058 affirmative low-blast: docs/test-only ─────────────────────
+//
+// The blast classifier is deny-by-default over signal NAMES: an EMPTY consequence
+// set is `high` (unmeasured), never `low`. To make a change ELIGIBLE, an analyzer
+// must POSITIVELY certify its class is low-consequence. This one does so for the
+// v1 catalog: a diff whose every changed path is documentation and/or a test file
+// ships no product source, so it cannot change runtime behaviour. It grades the
+// CHANGE CLASS, never diff size (a 500-line docs PR is low-blast; a 3-line auth
+// edit is not — SPEC-004). Mutually exclusive with the manifest/boundary high
+// injectors by construction (a manifest/config/code file is neither docs nor test),
+// and `classifyBlast` checks high before low regardless.
+
+/** Documentation / prose files (extension or well-known basename). */
+const DOCS_EXT_RE = /\.(md|mdx|markdown|txt|rst|adoc)$/i;
+const DOCS_BASENAMES: ReadonlySet<string> = new Set([
+  'LICENSE',
+  'LICENCE',
+  'NOTICE',
+  'CHANGELOG',
+  'AUTHORS',
+  'CONTRIBUTING',
+  'CODEOWNERS',
+]);
+
+function isDocsPath(p: string): boolean {
+  if (DOCS_EXT_RE.test(p)) return true;
+  const base = path.basename(p).replace(/\.(md|txt)$/i, '');
+  return DOCS_BASENAMES.has(base);
+}
+
+function isTestPath(p: string): boolean {
+  return TEST_FILE_RE.test(p);
+}
+
+/**
+ * Emit the affirmative low-blast signal iff the diff is non-empty and EVERY changed
+ * path is documentation or a test file (no product source). `undefined` otherwise —
+ * absence of this signal is what makes an unrecognized/opaque change hold (#490).
+ */
+export function detectLowBlastDocsTest(
+  changedFiles: ReadonlyArray<ChangedFile>,
+): ClassificationSignal | undefined {
+  if (changedFiles.length === 0) return undefined;
+  const allDocsOrTest = changedFiles.every((f) => isDocsPath(f.path) || isTestPath(f.path));
+  if (!allDocsOrTest) return undefined;
+  return {
+    name: LOW_BLAST_DOCS_TEST,
+    value: true,
+    weight: 0,
+    tierContribution: 'T1',
+    axis: 'consequence',
+    degraded: false,
+    explain:
+      'every changed file is documentation or a test — no product source ships, so the ' +
+      'change cannot alter runtime behaviour: affirmatively low-blast (DR-058 #490)',
+  };
+}
+
 // ─── FR-7 audit ──────────────────────────────────────────────────────────────
 
 function auditPath(worktree: string): string {
@@ -760,6 +819,11 @@ function main(): void {
     // auto-merge.
     const boundarySignal = detectBoundaryChange(changedFiles);
     if (boundarySignal) consequenceSignals.push(boundarySignal);
+    // #490 / DR-058: affirmative low-blast certification for a docs/test-only diff.
+    // Without a positive low signal, an empty/opaque consequence set now classifies
+    // HIGH (unmeasured → hold); this is the only way a change becomes low-blast.
+    const lowBlastSignal = detectLowBlastDocsTest(changedFiles);
+    if (lowBlastSignal) consequenceSignals.push(lowBlastSignal);
     const hollowFindings = buildHollowFindings(changedFiles);
 
     // 3. Pure decision. The prover result is passed separately and OVERRIDES any
