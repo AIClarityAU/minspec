@@ -9,7 +9,13 @@ coverage/
 
 # Tool / cache directories
 .wrangler/
-.claude/
+# .claude/ is machine-local EXCEPT MinSpec's slash-command shims, which are part
+# of the shared SDD harness (like AGENTS.md/.cursorrules) and must be tracked so
+# the team/CI receive them (minspec#763). Carve those out of the ignore.
+.claude/*
+!.claude/commands/
+.claude/commands/*
+!.claude/commands/minspec-*.md
 __pycache__/
 
 # Secrets — never commit
