@@ -161,3 +161,44 @@ describe('review-approvable.sh — untrusted-content handling', () => {
     expect(decide(r.stdout)).toBe('ai-review:changes');
   });
 });
+
+describe('review-approvable.sh — type inference for docs without a frontmatter `type:`', () => {
+  // Regression for the `detect_type` crash: under `set -euo pipefail`, a doc with
+  // no `type:` line made the inner `grep` exit 1, pipefail aborted the assignment,
+  // and the whole script died BEFORE the path-inference case or the reviewer ran —
+  // so every advertised no-`type:` approvable (DR / Epic / Constitution) silently
+  // produced no verdict. The `|| true` guard makes path inference reachable.
+  it('DR with frontmatter but no `type:` → path-inferred type, reviewer still runs', () => {
+    const DR = `---\nid: DR-999\nstatus: proposed\n---\n\n# A decision\n\nUNIQUE_DR_SENTINEL_99\n`;
+    const doc = writeDoc('DR-999.md', DR);
+    const received = path.join(tmp, 'dr-received.txt');
+    const r = review(doc, {
+      reviewerCmd: `cat > ${received}; ${stubEmits(verdictBlock('pass', 0))}`,
+    });
+    expect(r.status).toBe(0); // did NOT abort in detect_type
+    expect(r.stdout).toContain('REVIEW_VERDICT_BEGIN');
+    expect(decide(r.stdout)).toBe('ai-review:pass');
+    const prompt = fs.readFileSync(received, 'utf-8');
+    expect(prompt).toContain('DR (Decision Record)'); // inferred from path, not frontmatter
+    expect(prompt).toContain('UNIQUE_DR_SENTINEL_99');
+  });
+
+  it('constitution.md with NO frontmatter at all → path-inferred type, reviewer still runs', () => {
+    const doc = writeDoc('constitution.md', `# Constitution\n\nUNIQUE_CONST_SENTINEL_7\n`);
+    const received = path.join(tmp, 'const-received.txt');
+    const r = review(doc, {
+      reviewerCmd: `cat > ${received}; ${stubEmits(verdictBlock('pass', 0))}`,
+    });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('REVIEW_VERDICT_BEGIN');
+    const prompt = fs.readFileSync(received, 'utf-8');
+    expect(prompt).toContain('Constitution invariant'); // inferred from path
+  });
+
+  it('--role security is accepted (usage/case parity)', () => {
+    const doc = writeDoc('sec.md', SPEC);
+    const r = review(doc, { role: 'security', reviewerCmd: stubEmits(verdictBlock('pass', 0)) });
+    expect(r.status).toBe(0);
+    expect(r.stdout).toContain('REVIEW_VERDICT_BEGIN');
+  });
+});

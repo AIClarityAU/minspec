@@ -17,7 +17,7 @@
 # deterministic fail-closed gate) exactly like review-branch.sh.
 #
 # Usage:
-#   review-approvable.sh <path-to-approvable.md> [--role approvable-reviewer|reviewer|architect|skeptic]
+#   review-approvable.sh <path-to-approvable.md> [--role approvable-reviewer|reviewer|security|architect|skeptic]
 #   review-approvable.sh <path> | scripts/review-decide.sh    # → ai-review:{pass,changes,blocked}
 #
 # Security model (mirrors review-branch.sh): the document is UNTRUSTED DATA — it is
@@ -34,7 +34,7 @@
 
 set -euo pipefail
 
-DOC="${1:?Usage: review-approvable.sh <path-to-approvable.md> [--role approvable-reviewer|reviewer|architect|skeptic]}"
+DOC="${1:?Usage: review-approvable.sh <path-to-approvable.md> [--role approvable-reviewer|reviewer|security|architect|skeptic]}"
 shift 1 || true
 
 ROLE="approvable-reviewer"
@@ -76,10 +76,13 @@ fi
 # per-type substance checks in the role; unknown → generic "approvable".
 detect_type() {
   local t
+  # `|| true`: under `set -euo pipefail` a missing `type:` line makes grep exit 1
+  # and pipefail aborts the assignment, killing the whole script before the
+  # path-inference case below ever runs (mirrors review-branch.sh's guarded grep).
   t=$(printf '%s\n' "$CONTENT" | sed -n '/^---[[:space:]]*$/,/^---[[:space:]]*$/p' \
         | grep -iE '^type:[[:space:]]*' | head -1 \
         | sed -E 's/^[Tt][Yy][Pp][Ee]:[[:space:]]*//' | tr -d '\r' \
-        | tr '[:upper:]' '[:lower:]' | sed -E 's/[[:space:]]+$//')
+        | tr '[:upper:]' '[:lower:]' | sed -E 's/[[:space:]]+$//' || true)
   case "$t" in
     requirements) echo "Spec (requirements)"; return ;;
     plan)         echo "Plan"; return ;;
