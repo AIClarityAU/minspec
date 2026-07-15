@@ -109,10 +109,12 @@ Steps 1–3 are one PR (the rule, shipping as `warn` — inert-by-default, break
 | P3 | **Backfill mis-declares ownership** — a spec claims files it doesn't own → gate over-blocks. | Backfill is per-spec, reviewed; AC-5-style spot check that a declared path arms/relaxes the gate as intended. |
 | P4 | **`implements: none` becomes a lazy escape hatch** — specs opt out to dodge the work. | `implements_reason:` required + non-empty; reasons are greppable for audit. |
 
-## Open plan questions
+## Plan questions (resolved 2026-07-14)
 
-- **PQ-1** — Exact home of `isValidOwnedPath` / the mirrored constants: a new `lib/ownership-path-rules.ts`, or fold into an existing lib module? (Leaning new small module for the parity test's single import surface.)
-- **PQ-2** — Does `validateOwnership` read `phases` from the same parsed frontmatter `validateSpec` already has, or does it need the split-layout phase source? Confirm the phase block is available at that call site.
+Both resolved at Tasks, so the plan carries no open design decision into implement:
+
+- **PQ-1 → new module.** `isValidOwnedPath` and the mirrored constants live in a new Tier-0 `lib/ownership-path-rules.ts` — a single import surface for the parity test. *(Recorded in tasks.md Slice 1.)*
+- **PQ-2 → `phases` is available; confirm-only.** `validateSpec` already reads `spec.frontmatter` (e.g. `spec.frontmatter.tier`, spec-validator.ts:662), so `validateOwnership` reads `spec.frontmatter.phases` the same way — no new phase source needed. The one residual is a **confirmation**, not a design choice: that the nested `phases:` block is parsed into a structured object at that call site (if the frontmatter reader is top-level-scalar-only, parse the block locally). Carried as a Slice-1 implement verify task, not an open plan question.
 
 ## Deferred & Follow-ups
 
