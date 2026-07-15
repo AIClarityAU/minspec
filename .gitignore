@@ -18,6 +18,11 @@ coverage/
 !.claude/commands/minspec-*.md
 __pycache__/
 
+# Agent-dispatch sidecars (DR-008 / scripts/dispatch-issue.sh) — worktree-local
+# memos the parent reads and posts to the issue; must never leak into git history.
+.agent-summary.md
+.review-signals.json
+
 # Secrets — never commit
 .env
 .env.*

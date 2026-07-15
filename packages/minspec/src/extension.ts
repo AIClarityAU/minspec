@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { initCommand, initRefreshCommand } from './commands/init';
+import { initCommand, initRefreshCommand, commitHarnessRefreshCommand, collectDirtyScaffoldPaths } from './commands/init';
 import { constitutionShowPromptCommand, constitutionCompactCommand, constitutionProposeCommand } from './commands/constitution';
 import { classifyCommand } from './commands/classify';
 import { statusCommand } from './commands/status';
@@ -25,7 +25,7 @@ import { AdrTreeProvider } from './views/adr-tree-provider';
 import { FrontmatterCompletionProvider } from './views/frontmatter-completion';
 import { BacklogTreeProvider } from './views/backlog-view';
 import { TreeExpansionMemory } from './views/tree-expansion-memory';
-import { MinSpecStatusBar, MinSpecNextTaskStatusBar, fromFrontmatter } from './views/status-bar';
+import { MinSpecStatusBar, MinSpecNextTaskStatusBar, MinSpecScaffoldCommitStatusBar, fromFrontmatter } from './views/status-bar';
 import { nextTaskCommand, computeNextTask } from './commands/next-task';
 import { SpecPanel } from './views/spec-panel';
 import { loadSession, saveSession, addToScope, isFileInScope } from './lib/session';
@@ -227,6 +227,27 @@ export function activate(context: vscode.ExtensionContext): void {
     nextTaskStatusBar.update(null);
   }
 
+  // Harness-refresh commit recovery status bar (#758). Debounced like the
+  // next-task signpost above — never rebuilt synchronously on render — and
+  // best-effort: collectDirtyScaffoldPaths already swallows its own errors,
+  // so a rejected promise here just means "nothing to report".
+  const scaffoldCommitStatusBar = new MinSpecScaffoldCommitStatusBar();
+  let scaffoldCommitTimer: ReturnType<typeof setTimeout> | undefined;
+  const refreshScaffoldCommitStatusBar = () => {
+    if (!workspaceRoot) {
+      scaffoldCommitStatusBar.update([]);
+      return;
+    }
+    if (scaffoldCommitTimer) clearTimeout(scaffoldCommitTimer);
+    scaffoldCommitTimer = setTimeout(() => {
+      void collectDirtyScaffoldPaths(workspaceRoot).then(
+        (dirty) => scaffoldCommitStatusBar.update(dirty),
+        () => scaffoldCommitStatusBar.update([]),
+      );
+    }, 300);
+  };
+  refreshScaffoldCommitStatusBar();
+
   // CodeLens providers (Phase 7)
   const codeLensProvider = new MinSpecCodeLensProvider(workspaceRoot);
   const specFileLensProvider = new MinSpecSpecFileLensProvider(workspaceRoot);
@@ -264,8 +285,24 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Commands
   context.subscriptions.push(
-    vscode.commands.registerCommand('minspec.init', initCommand),
-    vscode.commands.registerCommand('minspec.initRefresh', initRefreshCommand),
+    vscode.commands.registerCommand(
+      'minspec.init',
+      async (folderArg?: string, deps?: Parameters<typeof initCommand>[1]) => {
+        await initCommand(folderArg, deps);
+        refreshScaffoldCommitStatusBar();
+      },
+    ),
+    vscode.commands.registerCommand(
+      'minspec.initRefresh',
+      async (folderArg?: string, deps?: Parameters<typeof initRefreshCommand>[1]) => {
+        await initRefreshCommand(folderArg, deps);
+        refreshScaffoldCommitStatusBar();
+      },
+    ),
+    vscode.commands.registerCommand('minspec.commitHarnessRefresh', async (folderArg?: string) => {
+      await commitHarnessRefreshCommand(folderArg);
+      refreshScaffoldCommitStatusBar();
+    }),
     vscode.commands.registerCommand('minspec.constitutionShowPrompt', constitutionShowPromptCommand),
     vscode.commands.registerCommand('minspec.constitutionCompact', constitutionCompactCommand),
     vscode.commands.registerCommand('minspec.constitutionPropose', constitutionProposeCommand),
@@ -367,6 +404,7 @@ export function activate(context: vscode.ExtensionContext): void {
     { dispose: () => specPanel.dispose() },
     statusBar,
     nextTaskStatusBar,
+    scaffoldCommitStatusBar,
   );
 
   // Watch spec files — refresh tree + status bar on changes
