@@ -1,0 +1,1 @@
+guard negative test — should block auto-merge
