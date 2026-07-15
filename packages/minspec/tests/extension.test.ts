@@ -16,6 +16,7 @@ const mockAdrTreeProvider = { refresh: vi.fn(), setExpansionMemory: vi.fn() };
 const mockBacklogTreeProvider = { refresh: vi.fn(), refreshIfStale: vi.fn(), setExpansionMemory: vi.fn() };
 const mockStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockNextTaskStatusBar = { update: vi.fn(), dispose: vi.fn() };
+const mockScaffoldCommitStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockSpecPanel = { show: vi.fn(), refresh: vi.fn(), dispose: vi.fn() };
 const mockCodeLensProvider = { refresh: vi.fn() };
 const mockSpecFileLensProvider = { refresh: vi.fn() };
@@ -181,6 +182,8 @@ vi.mock('vscode', () => ({
 vi.mock('../src/commands/init', () => ({
   initCommand: vi.fn(),
   initRefreshCommand: vi.fn(),
+  commitHarnessRefreshCommand: vi.fn(),
+  collectDirtyScaffoldPaths: vi.fn(() => Promise.resolve([])),
 }));
 vi.mock('../src/commands/classify', () => ({
   classifyCommand: vi.fn(),
@@ -227,6 +230,7 @@ vi.mock('../src/views/status-bar', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/views/status-bar')>()),
   MinSpecStatusBar: vi.fn(function () { return mockStatusBar; }),
   MinSpecNextTaskStatusBar: vi.fn(function () { return mockNextTaskStatusBar; }),
+  MinSpecScaffoldCommitStatusBar: vi.fn(function () { return mockScaffoldCommitStatusBar; }),
 }));
 // Stub the next-task command factory + cheap computeNextTask so activate's
 // status-bar wiring runs without building a real graph (no fs in this mock).
@@ -294,7 +298,7 @@ vi.mock('path', async () => {
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import { activate, deactivate } from '../src/extension';
-import { initCommand, initRefreshCommand } from '../src/commands/init';
+import { initCommand, initRefreshCommand, commitHarnessRefreshCommand } from '../src/commands/init';
 import { classifyCommand } from '../src/commands/classify';
 import { statusCommand } from '../src/commands/status';
 import { declareScopeCommand } from '../src/commands/session';
@@ -316,7 +320,7 @@ import {
 } from '../src/lib/context-injector';
 import { loadSession, saveSession, addToScope, isFileInScope } from '../src/lib/session';
 import { createParkingLotEntry, parkTopic } from '../src/lib/parking-lot';
-import { MinSpecStatusBar } from '../src/views/status-bar';
+import { MinSpecStatusBar, MinSpecScaffoldCommitStatusBar } from '../src/views/status-bar';
 import { SpecPanel } from '../src/views/spec-panel';
 import { SpecTreeProvider } from '../src/views/spec-tree-provider';
 import { AdrTreeProvider } from '../src/views/adr-tree-provider';
@@ -397,6 +401,7 @@ describe('activate()', () => {
     const expectedCommands = [
       'minspec.init',
       'minspec.initRefresh',
+      'minspec.commitHarnessRefresh',
       'minspec.classify',
       'minspec.status',
       'minspec.refreshTree',
@@ -429,6 +434,9 @@ describe('activate()', () => {
 
     invokeCommand('minspec.initRefresh');
     expect(initRefreshCommand).toHaveBeenCalled();
+
+    invokeCommand('minspec.commitHarnessRefresh');
+    expect(commitHarnessRefreshCommand).toHaveBeenCalled();
 
     invokeCommand('minspec.classify');
     expect(classifyCommand).toHaveBeenCalled();
@@ -660,6 +668,26 @@ describe('activate()', () => {
     activate(ctx);
 
     expect(SpecPanel).toHaveBeenCalledWith();
+  });
+
+  // -------------------------------------------------------------------------
+  // Scaffold-commit recovery status bar (#758)
+  // -------------------------------------------------------------------------
+
+  it('constructs the scaffold-commit recovery status bar and pushes it for disposal', () => {
+    const ctx = makeMockContext();
+    activate(ctx);
+
+    expect(MinSpecScaffoldCommitStatusBar).toHaveBeenCalledWith();
+    expect(subscriptions).toContain(mockScaffoldCommitStatusBar);
+  });
+
+  it('re-invokes minspec.commitHarnessRefresh via the wired command handler', () => {
+    activate(makeMockContext());
+
+    invokeCommand('minspec.commitHarnessRefresh', '/tmp/some-folder');
+
+    expect(commitHarnessRefreshCommand).toHaveBeenCalledWith('/tmp/some-folder');
   });
 
   // -------------------------------------------------------------------------
