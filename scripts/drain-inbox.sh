@@ -6,7 +6,8 @@
 # (not in parallel) to respect subscription quota.
 #
 # Two scheduling modes share ONE dispatch cycle (triage inbox → dispatch every
-# resulting agent-ready issue):
+# resulting agent-ready issue → sweep open PRs and auto-remediate fixable problems
+# such as ai-review:changes, failing CI checks, or a branch behind main):
 #   • one-shot   — run the cycle once and exit (the original behaviour; still the
 #                  default for a MANUAL `scripts/drain-inbox.sh` invocation).
 #   • continuous — repeat the cycle on an interval for as long as the launching
@@ -74,6 +75,7 @@ REPO="AIClarityAU/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DISPATCH="${SCRIPT_DIR}/dispatch-issue.sh"
 TRIAGE="${SCRIPT_DIR}/triage-inbox.sh"
+REMEDIATE="${SCRIPT_DIR}/remediate-pr.sh"
 PREF_FILE="$(cd "${SCRIPT_DIR}/.." && pwd)/.minspec/auto-drain"
 # Single source of truth for the quota/transient classifier (tested JS, shared
 # with review-branch.sh via decideReviewCheck's isQuotaExhaustion). scripts/ is a
@@ -154,8 +156,9 @@ assert_fresh() {
   return 0
 }
 
-# run_cycle: ONE drain pass = the preserved single-shot behaviour (triage inbox →
-# dispatch every resulting agent-ready issue, sequentially). Return code drives the
+# run_cycle: ONE drain pass = triage inbox → dispatch every resulting agent-ready
+# issue → sweep open PRs and remediate fixable problems, all sequentially. Return
+# code drives the
 # continuous loop's scheduling (it is ignored by the one-shot path):
 #   0  — cycle completed (work done or nothing ready).
 #   42 — a Claude quota/limit signal was seen mid-dispatch → loop should back off.
@@ -208,6 +211,34 @@ run_cycle() {
     fi
     [[ "$drc" -ne 0 ]] && echo "[drain] WARNING: dispatch failed for #$n (rc=$drc)"
   done
+
+  # Step 3: sweep open PRs for FIXABLE problems and auto-remediate them (conflicts
+  # are surfaced, not touched). remediate-pr.sh owns ALL the decision-making —
+  # branch-prefix scope, classification, attempt caps — so the drain stays thin and
+  # there is ONE source of truth for what "fixable" means. We only enumerate open,
+  # non-draft PRs and hand each to it; a clean/out-of-scope PR self-skips cheaply
+  # (one gh fetch, no agent). Disable with MINSPEC_DRAIN_REMEDIATE_PRS=0.
+  if [[ "${MINSPEC_DRAIN_REMEDIATE_PRS:-1}" != "0" ]]; then
+    local open_prs pr rcap rout
+    open_prs=$(gh pr list --repo "$REPO" --state open --json number,isDraft \
+      --jq '.[] | select(.isDraft==false) | .number' 2>/dev/null || true)
+    if [[ -n "$open_prs" ]]; then
+      echo "[drain] sweeping $(echo "$open_prs" | wc -l | tr -d ' ') open PR(s) for fixable problems..."
+      for pr in $open_prs; do
+        # Same quota discipline as dispatch: remediation may launch claude, which
+        # exits 0 even under a usage limit — the signal is in the OUTPUT. Capture
+        # + classify; a quota hit pauses the whole cycle (loop backs off).
+        rcap=$(mktemp)
+        "$REMEDIATE" "$pr" 2>&1 | tee "$rcap" || true
+        rout=$(cat "$rcap" 2>/dev/null || true); rm -f "$rcap"
+        if is_quota <<<"$rout"; then
+          echo "[drain] Claude usage-limit signal while remediating PR #$pr — pausing this cycle (will back off, not fail)."
+          return 42
+        fi
+      done
+    fi
+  fi
+
   echo "[drain] cycle done."
   return 0
 }

@@ -474,4 +474,12 @@ classifyBlast(signals, touchesExportedSurface) (auto-merge.ts:188) returns 'low'
 <!-- dr-summary:DR-059 auto=e78d2df187eb -->
 Two mechanisms leak un-tracked work, on **two different surfaces**: 1. **DR-document follow-ups.** A DR's ## Follow-ups (tracked) bullets that carry no issue/spec ref. DR-040 governs this: on DR save, un-materialized bullets **auto-create** their issues (friction-free), and only genuinely broken refs surface. DR-040 deliberately **rejected a blocking gate** here — "only DR-012 approval blocks in MinSpec; a second blocking gate for bookkeeping" — because the author's curated list can be materialized *for* them, so friction is unwarranted.
 <!-- /dr-summary:DR-059 -->
+
+## [DR-060 — The drain auto-remediates fixable open-PR problems (ai-review:changes, failing checks, behind-base) — but never merges and never touches human PRs or conflicts](DR-060.md)
+
+*Status: proposed · Date: 2026-07-14*
+
+<!-- dr-summary:DR-060 auto=5d53524977b5 -->
+The continuous drain (#239) triages the inbox and dispatches agent-ready issues, each producing a PR via dispatch-issue.sh. Nothing then acted on PRs that came back with a **problem**: an ai-review:changes verdict, a red CI check, or a branch gone stale behind main. Those PRs sat until a human hand-fixed each — the exact backlog the drain exists to prevent, one layer up.
+<!-- /dr-summary:DR-060 -->
 <!-- minspec:dr-index:end -->
