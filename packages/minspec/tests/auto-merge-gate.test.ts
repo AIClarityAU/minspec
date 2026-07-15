@@ -45,6 +45,7 @@ import {
   detectManifestChange,
   isBoundaryPath,
   detectBoundaryChange,
+  detectLowBlastDocsTest,
   buildChangedFiles,
   appendAudit,
   applyAuditFailsafe,
@@ -617,8 +618,10 @@ describe('#422 — detectBoundaryChange flags CI/build boundary diffs', () => {
     expect(d.failed).toContain('high-blast');
   });
 
-  it('control: an ordinary src/foo.ts change with no other high signal is NOT forced high by this matcher', () => {
+  it('control: the boundary matcher does not fire on an ordinary src/foo.ts change (the #490 unmeasured default is what holds it)', () => {
     const changed: ChangedFile[] = [cf({ path: 'src/foo.ts' })];
+    // The narrow point of this control: the boundary matcher itself must NOT flag
+    // ordinary source (that would be a false positive of THIS matcher).
     expect(detectBoundaryChange(changed)).toBeUndefined();
 
     const d = decideAutoMerge({
@@ -630,14 +633,16 @@ describe('#422 — detectBoundaryChange flags CI/build boundary diffs', () => {
         gate: { test: 'pass', lint: 'pass', build: 'pass', validate: 'pass' },
       },
       hollowFindings: [],
-      consequenceSignals: [], // no analyzer signal, no boundary signal
+      consequenceSignals: [], // no analyzer signal → opaque code change
       mode: 'consequence-hybrid',
       proverResult: { regressionProvenBaseRed: true, regressionGreenOnHead: true, note: 'proven' },
     });
-    // Not asserting eligible:true here — other gate conjuncts may still hold it.
-    // The point of this control is narrow: the boundary matcher itself must not
-    // be the thing forcing high-blast for an ordinary source file.
-    expect(d.blast).not.toBe('high');
+    // Post-DR-058 (#490): an opaque code change with zero recognized signals is
+    // UNMEASURED → high (deny-by-default). The control still holds — the boundary
+    // matcher (undefined above) is NOT the cause; the #490 default is. An ordinary
+    // src change now correctly holds for a human until an analyzer can vouch for it.
+    expect(d.blast).toBe('high');
+    expect(d.failed).toContain('high-blast');
   });
 });
 
@@ -720,5 +725,96 @@ describe('#491 — audit-write failure fail-safes an eligible decision to HOLD',
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #490 / DR-058 — detectLowBlastDocsTest is the affirmative low-blast analyzer:
+// it emits a low-blast signal ONLY when every changed path is docs and/or a test
+// (no product source). Absence of this signal is what makes an opaque change hold.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('#490 / DR-058 — detectLowBlastDocsTest certifies a docs/test-only diff', () => {
+  it('docs-only diff → affirmative low-blast signal', () => {
+    const sig = detectLowBlastDocsTest([cf({ path: 'README.md' }), cf({ path: 'docs/guide.md' })]);
+    expect(sig?.name).toBe('low_blast_docs_test_only');
+  });
+
+  it('test-only diff → affirmative low-blast signal', () => {
+    const sig = detectLowBlastDocsTest([cf({ path: 'packages/minspec/tests/foo.test.ts' })]);
+    expect(sig?.name).toBe('low_blast_docs_test_only');
+  });
+
+  it('docs + test mix (no product code) → still certified', () => {
+    const sig = detectLowBlastDocsTest([cf({ path: 'CHANGELOG.md' }), cf({ path: 'a.spec.ts' })]);
+    expect(sig?.name).toBe('low_blast_docs_test_only');
+  });
+
+  it('LICENSE (no extension) → certified docs', () => {
+    expect(detectLowBlastDocsTest([cf({ path: 'LICENSE' })])?.name).toBe('low_blast_docs_test_only');
+  });
+
+  it('any product source file present → NO signal (opaque → the change will hold)', () => {
+    expect(
+      detectLowBlastDocsTest([cf({ path: 'README.md' }), cf({ path: 'packages/minspec/src/lib/auth.ts' })]),
+    ).toBeUndefined();
+  });
+
+  it('a manifest/config file → NO signal (handled high by detectManifestChange)', () => {
+    expect(detectLowBlastDocsTest([cf({ path: 'package.json' })])).toBeUndefined();
+  });
+
+  it('empty diff → no signal', () => {
+    expect(detectLowBlastDocsTest([])).toBeUndefined();
+  });
+
+  // #490 review finding: CODEOWNERS is GOVERNANCE (required-reviewer routing), NOT
+  // docs — certifying it low let a review-gate change auto-merge unseen. It must be
+  // excluded from the docs certification AND affirmatively flagged high (boundary).
+  it('CODEOWNERS is NOT certified docs — at repo root, .github/, or docs/', () => {
+    expect(detectLowBlastDocsTest([cf({ path: 'CODEOWNERS' })])).toBeUndefined();
+    expect(detectLowBlastDocsTest([cf({ path: '.github/CODEOWNERS' })])).toBeUndefined();
+    expect(detectLowBlastDocsTest([cf({ path: 'docs/CODEOWNERS' })])).toBeUndefined();
+    // even mixed with a genuine doc, the CODEOWNERS presence blocks certification
+    expect(detectLowBlastDocsTest([cf({ path: 'README.md' }), cf({ path: 'CODEOWNERS' })])).toBeUndefined();
+  });
+
+  it('CODEOWNERS is affirmatively HIGH-blast (boundary), at any path', () => {
+    expect(isBoundaryPath('CODEOWNERS')).toBe(true);
+    expect(isBoundaryPath('.github/CODEOWNERS')).toBe(true);
+    expect(isBoundaryPath('docs/CODEOWNERS')).toBe(true);
+    expect(detectBoundaryChange([cf({ path: '.github/CODEOWNERS' })])?.name).toBe('manifest_changed');
+  });
+
+  // #490 review (2nd finding): dispatch role prompts (scripts/roles/*.md) and the
+  // harness governance files (constitution.md, CLAUDE.md, AGENTS.md, .cursorrules)
+  // are `.md`/policy — they must NOT certify low, and must classify HIGH. The
+  // general invariant: a boundary path can never be certified low, even if it
+  // matches a docs extension/basename.
+  it('dispatch role prompts (scripts/roles/*.md) are NOT certified docs — they are agent governance', () => {
+    expect(detectLowBlastDocsTest([cf({ path: 'scripts/roles/security.md' })])).toBeUndefined();
+    expect(detectLowBlastDocsTest([cf({ path: 'scripts/roles/reviewer.md' })])).toBeUndefined();
+    // even mixed with a genuine doc, a role-prompt presence blocks certification
+    expect(
+      detectLowBlastDocsTest([cf({ path: 'README.md' }), cf({ path: 'scripts/roles/dev.md' })]),
+    ).toBeUndefined();
+  });
+
+  it('scripts/roles/*.md is affirmatively HIGH-blast (boundary)', () => {
+    expect(isBoundaryPath('scripts/roles/security.md')).toBe(true);
+    expect(detectBoundaryChange([cf({ path: 'scripts/roles/security.md' })])?.name).toBe('manifest_changed');
+  });
+
+  it('harness governance files (constitution/CLAUDE/AGENTS/.cursorrules) are NOT docs and ARE high-blast', () => {
+    for (const p of ['.minspec/constitution.md', 'CLAUDE.md', 'AGENTS.md', '.cursorrules']) {
+      expect(detectLowBlastDocsTest([cf({ path: p })]), `${p} must not certify low`).toBeUndefined();
+      expect(isBoundaryPath(p), `${p} must be boundary`).toBe(true);
+    }
+  });
+
+  it('regression guard: GENUINE docs still certify low (governance exclusion did not over-block)', () => {
+    expect(detectLowBlastDocsTest([cf({ path: 'README.md' }), cf({ path: 'docs/guide.md' })])?.name).toBe(
+      'low_blast_docs_test_only',
+    );
+    expect(detectLowBlastDocsTest([cf({ path: 'CHANGELOG.md' })])?.name).toBe('low_blast_docs_test_only');
   });
 });

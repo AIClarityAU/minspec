@@ -145,6 +145,19 @@ const PUBLIC_API_NAMES: ReadonlySet<string> = new Set([
  */
 const REACH_UNAVAILABLE = 'reach_unavailable';
 
+/**
+ * Affirmative low-blast signal names (DR-058 / #490). A change classifies `low`
+ * ONLY when one of these is present — an analyzer POSITIVELY certified the change
+ * class is low-CONSEQUENCE. Absence (an empty set, or only `reach_unavailable`) is
+ * UNMEASURED, which is `high` (deny-by-default): silence is no longer read as
+ * safety — that was the #490 hole. Grows by deliberate edit; every entry MUST grade
+ * consequence, never diff size (the SPEC-004 classifier anti-pattern). v1 catalog:
+ * `low_blast_docs_test_only` — the diff touches only documentation and/or test
+ * files, so no product source ships (gate-injected by `detectLowBlastDocsTest`).
+ */
+export const LOW_BLAST_DOCS_TEST = 'low_blast_docs_test_only';
+const LOW_BLAST_SIGNAL_NAMES: ReadonlySet<string> = new Set([LOW_BLAST_DOCS_TEST]);
+
 // ─── FR-4a `touchesExportedSurface` (DERIVED, single source of truth) ─────────
 
 /**
@@ -180,10 +193,13 @@ export function deriveTouchesExportedSurface(
  *  - ANY signal name that is neither a recognized high name nor the recognized
  *    `reach_unavailable` degrade marker is present (unknown ⇒ high).
  *
- * A signal counts toward `low` ONLY if it is explicitly recognized as low-blast.
- * In v1 there is NO low-blast signal: `reach_unavailable` is handled by FR-4, not
- * counted low. So the ONLY `low` outcome is a signal set containing at most the
- * `reach_unavailable` marker (and no exported touch).
+ * A signal counts toward `low` ONLY if it is explicitly recognized as low-blast
+ * (`LOW_BLAST_SIGNAL_NAMES`). #490 / DR-058: `low` requires AFFIRMATIVE evidence —
+ * an empty set, or a set carrying only `reach_unavailable`, is UNMEASURED and
+ * therefore `high` (deny-by-default). Silence is not safety: the old fall-through
+ * to `low` on an empty set let a subtle CODE change that tripped no analyzer
+ * auto-merge unseen. `reach_unavailable` is still handled by FR-4 and is NOT itself
+ * low.
  */
 export function classifyBlast(
   signals: ReadonlyArray<ClassificationSignal>,
@@ -195,14 +211,17 @@ export function classifyBlast(
   // surface is worst-case (INV-2).
   if (hasReachUnavailable && touchesExportedSurface) return 'high';
 
+  // Recognized high, or ANY unrecognized name (deny-by-default), ⇒ high.
   for (const s of signals) {
     if (HIGH_SIGNAL_NAMES.has(s.name)) return 'high'; // recognized high
     if (s.name === REACH_UNAVAILABLE) continue; // recognized, handled by FR-4
-    // Any other name is NOT in the (v1-empty) low-blast recognition set ⇒ high.
-    return 'high';
+    if (LOW_BLAST_SIGNAL_NAMES.has(s.name)) continue; // recognized affirmative-low
+    return 'high'; // unrecognized name ⇒ high
   }
 
-  return 'low';
+  // #490 / DR-058: `low` ONLY with affirmative low-blast evidence. Empty set or
+  // reach-only set ⇒ unmeasured ⇒ high (this `return` was `'low'` — the hole).
+  return signals.some((s) => LOW_BLAST_SIGNAL_NAMES.has(s.name)) ? 'low' : 'high';
 }
 
 /** One-line reason naming which consequence signal drove a high-blast verdict (FR-8). */
@@ -220,9 +239,18 @@ function blastExplain(
     }
   }
   for (const s of signals) {
-    if (s.name !== REACH_UNAVAILABLE && !HIGH_SIGNAL_NAMES.has(s.name)) {
+    if (
+      s.name !== REACH_UNAVAILABLE &&
+      !HIGH_SIGNAL_NAMES.has(s.name) &&
+      !LOW_BLAST_SIGNAL_NAMES.has(s.name)
+    ) {
       return `unrecognized consequence signal '${s.name}' — treated high (deny-by-default, FR-5)`;
     }
+  }
+  // #490 / DR-058: no high, no unrecognized — but also no affirmative low-blast
+  // signal ⇒ the change class was never positively certified low-consequence.
+  if (!signals.some((s) => LOW_BLAST_SIGNAL_NAMES.has(s.name))) {
+    return 'no affirmative low-blast signal — the change was not certified low-consequence (empty/opaque signal set); unmeasured ⇒ hold (DR-058 #490)';
   }
   return undefined;
 }

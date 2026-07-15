@@ -34,6 +34,7 @@ import { execFileSync } from 'node:child_process';
 
 import {
   decideAutoMerge,
+  LOW_BLAST_DOCS_TEST,
   type AutoMergeInput,
   type AutoMergeDecision,
   type AutoMergeMode,
@@ -550,6 +551,13 @@ const BOUNDARY_DIR_PREFIXES: readonly string[] = [
   '.buildkite/', // Buildkite pipeline config
   '.githooks/', // git hooks run arbitrary shell on commit/push (this repo: core.hooksPath=.githooks)
   '.husky/', // husky-managed git hooks — same arbitrary-shell-on-commit/push surface
+  // #490 review (2nd): dispatch AGENT-GOVERNANCE prompts (DR-008). scripts/roles/*.md
+  // define agent permissions + "MUST NOT" constraints and are loaded by
+  // dispatch-issue.sh to drive the security/merge/reviewer agents. They are `.md`
+  // but they are POLICY, not documentation — a role-prompt-only PR weakening the
+  // security or merge role must classify HIGH so it can never auto-merge unseen
+  // (the identical governance hole this PR closed for CODEOWNERS).
+  'scripts/roles/',
 ];
 
 /**
@@ -560,6 +568,21 @@ const BOUNDARY_ROOT_BASENAMES: ReadonlySet<string> = new Set([
   '.travis.yml',
   'azure-pipelines.yml',
   'Jenkinsfile',
+  // #490 review: CODEOWNERS is a GOVERNANCE / access-control surface (it routes
+  // required reviewers), not documentation — the same class as the CI/workflow
+  // boundary files above. A CODEOWNERS-only diff must classify HIGH so a change
+  // weakening review requirements can never auto-merge unseen. (basename match ⇒
+  // caught at repo root, `.github/`, or `docs/`.)
+  'CODEOWNERS',
+  // #490 review (2nd): the harness AGENT-GOVERNANCE / policy files. These are
+  // `.md` (so the docs-extension check would certify them low) but they define
+  // agent behaviour + invariants + "MUST NOT" rules — a change weakening them is
+  // governance, not documentation, and must classify HIGH (same class as
+  // scripts/roles/ above). basename match ⇒ caught wherever they live.
+  'constitution.md', // .minspec/constitution.md — the SDD invariants
+  'CLAUDE.md', // agent instructions / standing rules
+  'AGENTS.md', // agent instructions (Spec Kit / harness mirror)
+  '.cursorrules', // agent instructions (Cursor mirror)
 ]);
 
 /**
@@ -640,6 +663,76 @@ function buildHollowFindings(changedFiles: ChangedFile[]): TestFinding[] {
     findings.push(...scanTestSource(f.path, f.content));
   }
   return findings;
+}
+
+// ─── #490 / DR-058 affirmative low-blast: docs/test-only ─────────────────────
+//
+// The blast classifier is deny-by-default over signal NAMES: an EMPTY consequence
+// set is `high` (unmeasured), never `low`. To make a change ELIGIBLE, an analyzer
+// must POSITIVELY certify its class is low-consequence. This one does so for the
+// v1 catalog: a diff whose every changed path is documentation and/or a test file
+// ships no product source, so it cannot change runtime behaviour. It grades the
+// CHANGE CLASS, never diff size (a 500-line docs PR is low-blast; a 3-line auth
+// edit is not — SPEC-004). The docs/test basename+extension sets are kept DISJOINT
+// from the manifest/boundary high sets — notably CODEOWNERS is governance, NOT docs
+// (BOUNDARY_ROOT_BASENAMES), after the #490 review caught it certifying low here.
+// And even if a future overlap slipped in, `classifyBlast` checks high before low,
+// so a high signal always wins over an affirmative-low one.
+
+/** Documentation / prose files (extension or well-known basename). */
+const DOCS_EXT_RE = /\.(md|mdx|markdown|txt|rst|adoc)$/i;
+const DOCS_BASENAMES: ReadonlySet<string> = new Set([
+  'LICENSE',
+  'LICENCE',
+  'NOTICE',
+  'CHANGELOG',
+  'AUTHORS',
+  'CONTRIBUTING',
+  // NB: CODEOWNERS is deliberately NOT here — it is governance/access-control, not
+  // documentation, so it lives in BOUNDARY_ROOT_BASENAMES (high-blast). See the
+  // #490 review finding: certifying it "docs" let a required-reviewer change
+  // auto-merge unseen.
+]);
+
+function isDocsPath(p: string): boolean {
+  if (DOCS_EXT_RE.test(p)) return true;
+  const base = path.basename(p).replace(/\.(md|txt)$/i, '');
+  return DOCS_BASENAMES.has(base);
+}
+
+function isTestPath(p: string): boolean {
+  return TEST_FILE_RE.test(p);
+}
+
+/**
+ * Emit the affirmative low-blast signal iff the diff is non-empty and EVERY changed
+ * path is documentation or a test file (no product source). `undefined` otherwise —
+ * absence of this signal is what makes an unrecognized/opaque change hold (#490).
+ */
+export function detectLowBlastDocsTest(
+  changedFiles: ReadonlyArray<ChangedFile>,
+): ClassificationSignal | undefined {
+  if (changedFiles.length === 0) return undefined;
+  // A file that is ALSO a boundary/high-blast path (CI config, git hooks, CODEOWNERS,
+  // dispatch role prompts, harness governance) can NEVER be certified low — even if
+  // it matches a docs extension/basename. Governance is not documentation (#490
+  // review): this makes the affirmative-low catalog and the boundary (high) set
+  // provably disjoint, so a `.md` policy file can never slip through as "docs."
+  const allDocsOrTest = changedFiles.every(
+    (f) => (isDocsPath(f.path) || isTestPath(f.path)) && !isBoundaryPath(f.path),
+  );
+  if (!allDocsOrTest) return undefined;
+  return {
+    name: LOW_BLAST_DOCS_TEST,
+    value: true,
+    weight: 0,
+    tierContribution: 'T1',
+    axis: 'consequence',
+    degraded: false,
+    explain:
+      'every changed file is documentation or a test — no product source ships, so the ' +
+      'change cannot alter runtime behaviour: affirmatively low-blast (DR-058 #490)',
+  };
 }
 
 // ─── FR-7 audit ──────────────────────────────────────────────────────────────
@@ -760,6 +853,11 @@ function main(): void {
     // auto-merge.
     const boundarySignal = detectBoundaryChange(changedFiles);
     if (boundarySignal) consequenceSignals.push(boundarySignal);
+    // #490 / DR-058: affirmative low-blast certification for a docs/test-only diff.
+    // Without a positive low signal, an empty/opaque consequence set now classifies
+    // HIGH (unmeasured → hold); this is the only way a change becomes low-blast.
+    const lowBlastSignal = detectLowBlastDocsTest(changedFiles);
+    if (lowBlastSignal) consequenceSignals.push(lowBlastSignal);
     const hollowFindings = buildHollowFindings(changedFiles);
 
     // 3. Pure decision. The prover result is passed separately and OVERRIDES any
