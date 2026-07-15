@@ -1,0 +1,60 @@
+name: docs-lane
+
+# Option 2 of DR-051's docs-push reconciliation (#575): a docs-only PR that opts
+# into the lane with the `docs-lane` label gets GitHub auto-merge enabled, so it
+# lands on main WITHOUT a manual merge click — while the SAME required checks
+# (lint · test · MinSpec SDD validation · ai-review · ready-to-merge) still gate
+# it. Nothing is bypassed; it merely merges automatically once green.
+#
+# Hard path-enforcement (what actor-trust bypass could not give): a `docs-lane`
+# PR that touches ANY non-docs path fails this job (misuse alarm) and is NOT
+# auto-merged. Code physically cannot ride the lane. Substantive new DRs/specs
+# simply don't carry the label → normal human review (the DR-055 pattern).
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, ready_for_review]
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: docs-lane-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  docs-lane:
+    # Only when the author opted in via the label.
+    if: contains(github.event.pull_request.labels.*.name, 'docs-lane')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Verify docs-only, then enable auto-merge
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          # Allowed corpus: specs, docs, approval records, top-level markdown.
+          allowed='^(specs/|docs/|\.minspec/approvals/|[^/]+\.md$)'
+          mapfile -t files < <(gh api --paginate "repos/$REPO/pulls/$PR/files" -q '.[].filename')
+          if [ "${#files[@]}" -eq 0 ]; then
+            echo "::error::docs-lane: PR #$PR has no files"
+            exit 1
+          fi
+          bad=()
+          for f in "${files[@]}"; do
+            [[ "$f" =~ $allowed ]] || bad+=("$f")
+          done
+          if [ "${#bad[@]}" -gt 0 ]; then
+            printf '::error::docs-lane label but non-docs path(s): %s\n' "${bad[*]}"
+            gh pr comment "$PR" --repo "$REPO" --body \
+              "🚫 **docs-lane misuse** — this PR carries \`docs-lane\` but touches non-docs path(s): \`${bad[*]}\`. Auto-merge NOT enabled. Remove the label and get a human review, or split the change." || true
+            exit 1
+          fi
+          echo "docs-only ✓ (${#files[@]} file(s)) — enabling auto-merge"
+          gh pr merge --auto --squash --repo "$REPO" "$PR"
+          gh pr comment "$PR" --repo "$REPO" --body \
+            "✅ **docs-lane** — docs-only (${#files[@]} file(s)); auto-merge enabled. Merges once the required checks pass (ai-review still runs). Nothing bypassed." || true

@@ -92,9 +92,15 @@
 #   2. Confirm `MINSPEC_APP_PRIVATE_KEY` is the RAW PEM (create-github-app-token
 #      needs raw, not base64), and the App is installed on the repo with
 #      `pull-requests: write` + `issues: write` (labels/comments use the issues
-#      API) + `checks: write` (the honest `ai-review` verdict check-run). If
-#      `checks: write` is absent the review still works — the verdict check is
-#      simply not posted (best-effort), never a false green.
+#      API) + `checks: write` (the honest `ai-review` verdict check-run) +
+#      `statuses: write` (#466 — the SHA-bound `ai-review/pass` commit status the
+#      bot posts on the reviewed head SHA; ready-to-merge REQUIRES it on the current
+#      head, so the pass is bound to the exact commit reviewed). If `checks: write`
+#      is absent the review still works — the verdict check is simply not posted
+#      (best-effort), never a false green. If `statuses: write` is absent the bot
+#      cannot post `ai-review/pass`, so ready-to-merge stays RED (fail-closed) until
+#      the App is granted it — deny-by-default, never a false green (same posture as
+#      an unset `AI_REVIEW_BOT_LOGINS`).
 #   3. AFTER a verified run: set repo variable `AI_REVIEW_BOT_LOGINS =
 #      minspec-sdd[bot]` (so ready-to-merge.yml trusts ONLY the bot) and add the
 #      `ai-review` verdict check as a REQUIRED check in the branch ruleset
@@ -501,6 +507,8 @@ jobs:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
           REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
+          # #466 — the EXACT SHA this review evaluated, for the SHA-bound pass status.
+          PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           LABEL: ${{ steps.review.outputs.label }}
           BODY_FILE: ${{ steps.review.outputs.body-file }}
           # Human-reviewer fallback for the fail-closed (`ai-review:changes`) path
@@ -525,6 +533,22 @@ jobs:
             gh label create "ai-review:blocked" --repo "$REPO" --color d4c5f9 \
               --description "AI review could not run (quota/transient) — retry-able, not a code verdict" 2>/dev/null || true
           fi
+
+          # ── #466 SHA-bound pass witness ──────────────────────────────────────
+          # Post `ai-review/pass` on the EXACT head SHA this review evaluated,
+          # BEFORE applying the label. ready-to-merge fires on the `labeled` event
+          # and requires this status on the CURRENT head, so posting it first means
+          # the SHA-bound witness is present when the gate reads it — closing the
+          # TOCTOU where a stale label from an older head could green a newer,
+          # unreviewed head. `success` ONLY on a genuine pass; every other verdict
+          # (changes / blocked) posts `failure`, so the head SHA always carries a
+          # definitive verdict. Best-effort: a failed post leaves NO status ⇒
+          # ready-to-merge stays red (fail-closed), never a false green.
+          if [ "$LABEL" = "ai-review:pass" ]; then PASS_STATE=success; else PASS_STATE=failure; fi
+          gh api "repos/$REPO/statuses/$PR_HEAD_SHA" \
+            -f state="$PASS_STATE" \
+            -f context="ai-review/pass" \
+            -f description="ai-review verdict: $LABEL (bound to this commit)" >/dev/null || true
 
           # Apply the decided label FIRST (load-bearing), then clear the other two
           # verdict labels + the in-progress marker (tolerate their absence).

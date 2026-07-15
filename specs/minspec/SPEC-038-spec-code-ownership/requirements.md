@@ -11,8 +11,8 @@ relates_to: [DR-012, DR-031, DR-056, SPEC-004, DR-003]
 phases:
   specify: done   # draft merged via PR #769, 2026-07-14
   clarify: done   # OQ-1..5 confirmed by Paul Harvey 2026-07-14 (see Clarify)
-  plan: in-progress   # design.md drafted 2026-07-14 (PQ-1/PQ-2 open)
-  tasks: pending
+  plan: done   # design.md merged #772; PQ-1/PQ-2 both resolved at Tasks 2026-07-14 (see design.md)
+  tasks: in-progress   # tasks.md drafted 2026-07-14
   implement: pending
 ---
 
