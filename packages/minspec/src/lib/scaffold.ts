@@ -262,6 +262,11 @@ export const MINSPEC_GITIGNORE_ENTRIES = [
   // back to those source constants so a rename of either can't silently drift).
   '.minspec/generated-hashes.json',
   '.minspec/template-baseline.json',
+  // DR-057 §2 / #733: local, LLM-free phase-advance request queue. Written by
+  // the Alt-A follow-up toast (and, later, the drain-sweep #734); a downstream
+  // consumer dequeues it. Never committed — it is machine-local intent, not
+  // ground truth (the approval sidecar under .minspec/approvals/ is that).
+  '.minspec/queue/',
 ];
 
 /**
