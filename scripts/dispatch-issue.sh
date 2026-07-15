@@ -436,6 +436,7 @@ escalate_next_action() {
 case "$ROLE" in
   triage)                       MODEL="haiku"  ;;  # mechanical: classify / label
   dev)                          MODEL="sonnet" ;;  # standard impl (escalates if stuck)
+  tasks)                        MODEL="sonnet" ;;  # doc-phase generation from an approved design (DR-057/#732; escalates if stuck)
   reviewer|security|architect)  MODEL="opus"   ;;  # review / security / design — stakes high
   *)                            MODEL="sonnet" ;;
 esac
