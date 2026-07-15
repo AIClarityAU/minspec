@@ -47,5 +47,8 @@
       ],
       "optionalPhases": []
     }
+  },
+  "autoMerge": {
+    "native": true
   }
 }
