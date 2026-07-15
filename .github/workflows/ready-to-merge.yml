@@ -240,12 +240,43 @@ jobs:
               });
             }
 
+            // ── #466 SHA-bound witness — the CURRENT head SHA must carry
+            //    `ai-review/pass`=success from an allowlisted reviewer. This is the
+            //    EXACT recency proof the timestamp check only approximates. OPTIONAL
+            //    during rollout: enforced only when the trusted BASE guard exposes
+            //    verifyHeadPassStatus; left undefined otherwise, which decideStatus
+            //    treats as "not required" (prior behaviour preserved).
+            let headStatus; // undefined ⇒ decideStatus does not require it
+            if (
+              typeof guard.verifyHeadPassStatus === 'function' &&
+              labels.includes(guard.PASS) &&
+              !provenance.revert &&
+              !staleness.strip
+            ) {
+              try {
+                const statuses = await github.paginate(
+                  github.rest.repos.listCommitStatusesForRef,
+                  { owner, repo, ref: pr.head.sha, per_page: 100 },
+                );
+                headStatus = guard.verifyHeadPassStatus({ statuses, allowlist });
+              } catch (e) {
+                core.warning(
+                  `could not read head commit statuses ${pr.head.sha}: ${e.message}`,
+                );
+                headStatus = {
+                  verified: false,
+                  reason: 'could not read the head commit statuses to bind the pass (#466)',
+                };
+              }
+            }
+
             // ── Decide the authoritative status (pure) ─────────────────────
             const status = guard.decideStatus({
               labels,
               provenanceRevert: provenance.revert,
               stalenessStrip: staleness.strip,
               passProvenance,
+              headStatus,
             });
 
             // ── Post the authoritative gate status FIRST (fail closed) ─────

@@ -17,6 +17,8 @@ const {
   decideProvenanceRevert,
   decideStalenessStrip,
   verifyPassProvenance,
+  verifyHeadPassStatus,
+  PASS_STATUS_CONTEXT,
   decideStatus,
   decideReviewCheck,
   isBenignRemovalError,
@@ -421,4 +423,72 @@ test('review-check: ONLY an exact ai-review:pass on a normal PR is ever green (n
 test('sanitizeLogin: strips backticks so a value cannot escape a markdown code span', () => {
   assert.equal(sanitizeLogin('ev`il'), 'evil');
   assert.equal(sanitizeLogin(undefined), '');
+});
+
+// ── #466 verifyHeadPassStatus — SHA-bound pass witness ───────────────────────
+const BOTS = ['minspec-sdd[bot]'];
+const okStatus = (over = {}) => ({
+  context: PASS_STATUS_CONTEXT,
+  state: 'success',
+  created_at: '2026-07-14T10:00:00Z',
+  creator: { login: 'minspec-sdd[bot]' },
+  ...over,
+});
+
+test('verifyHeadPassStatus: ai-review/pass=success from an allowlisted bot on the head → verified', () => {
+  assert.equal(verifyHeadPassStatus({ statuses: [okStatus()], allowlist: BOTS }).verified, true);
+});
+
+test('verifyHeadPassStatus: NO ai-review/pass status on the head → not verified (#466 — stale label on a new head)', () => {
+  const r = verifyHeadPassStatus({
+    statuses: [{ context: 'other', state: 'success', created_at: '2026-07-14T10:00:00Z' }],
+    allowlist: BOTS,
+  });
+  assert.equal(r.verified, false);
+  assert.match(r.reason, /does not correspond to this SHA|no .*status/i);
+});
+
+test('verifyHeadPassStatus: status present but state=failure → not verified', () => {
+  assert.equal(verifyHeadPassStatus({ statuses: [okStatus({ state: 'failure' })], allowlist: BOTS }).verified, false);
+});
+
+test('verifyHeadPassStatus: success but from a non-allowlisted creator → not verified (forged status)', () => {
+  assert.equal(
+    verifyHeadPassStatus({ statuses: [okStatus({ creator: { login: 'some-human' } })], allowlist: BOTS }).verified,
+    false,
+  );
+});
+
+test('verifyHeadPassStatus: allowlist unset → not verified (cannot bind provenance)', () => {
+  assert.equal(verifyHeadPassStatus({ statuses: [okStatus()], allowlist: [] }).verified, false);
+});
+
+test('verifyHeadPassStatus: uses the MOST RECENT ai-review/pass (a later failure supersedes an earlier success, either array order)', () => {
+  const older = okStatus({ state: 'success', created_at: '2026-07-14T10:00:00Z' });
+  const newer = okStatus({ state: 'failure', created_at: '2026-07-14T11:00:00Z' });
+  assert.equal(verifyHeadPassStatus({ statuses: [older, newer], allowlist: BOTS }).verified, false);
+  assert.equal(verifyHeadPassStatus({ statuses: [newer, older], allowlist: BOTS }).verified, false);
+});
+
+// ── #466 decideStatus gates on the SHA-bound head status when supplied ────────
+const VERIFIED_PROV = { verified: true, reason: 'ok' };
+
+test('decideStatus: verified label + VERIFIED head status → green', () => {
+  const s = decideStatus({ labels: [PASS, 'feat'], passProvenance: VERIFIED_PROV, headStatus: { verified: true } });
+  assert.equal(s.state, 'success');
+});
+
+test('decideStatus: verified label but UNVERIFIED head status → red (the #466 stale-pass-on-new-head case)', () => {
+  const s = decideStatus({
+    labels: [PASS, 'feat'],
+    passProvenance: VERIFIED_PROV,
+    headStatus: { verified: false, reason: 'no ai-review/pass on this SHA' },
+  });
+  assert.equal(s.state, 'failure');
+  assert.match(s.description, /not bound to this commit/i);
+});
+
+test('decideStatus: headStatus OMITTED → not required (rollout / base-guard-predates-#466 compat)', () => {
+  const s = decideStatus({ labels: [PASS, 'feat'], passProvenance: VERIFIED_PROV });
+  assert.equal(s.state, 'success');
 });
