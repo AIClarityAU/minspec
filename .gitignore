@@ -31,6 +31,10 @@ __pycache__/
 # MinSpec ephemeral session data
 .minspec/session.json
 .minspec/calibration.json
+# DR-057 §2 phase-advance request queue (#733) — path-keyed, machine-local
+# request files the drain dequeues; must never leak into git history. Mirrors
+# MINSPEC_GITIGNORE_ENTRIES in scaffold.ts (scaffolded projects already get it).
+.minspec/queue/
 # SPEC-024 auto-merge decision audit trail (FR-7). Machine-local, append-only,
 # rebuilt/extended on every gate invocation — never committed.
 .minspec/auto-merge-audit.log
