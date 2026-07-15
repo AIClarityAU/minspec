@@ -6,19 +6,25 @@ This project uses MinSpec SDD methodology. Specs in `specs/`, decisions in `docs
 
 ## Invariants
 
-<!-- Add project invariants here -->
+> Summarized from `.minspec/constitution.md` — lead sentences only; the full text and rationale live there.
+
+- Core functionality works offline — no network calls without explicit user consent
 
 ## Principles
 
-- Ceremony proportional to complexity
-- User override always wins
-- Specs are living documents
+- Just enough human
+- Avoid UX patterns that train user into rubber-stamping
+- User is always open to a better way - Push-back is welcome
+- Avoid nagging
+- Specs are living documents, not bureaucracy
+- Record hard-to-reverse decisions as decision records before implementing.
+- **Conform to Spec Kit conventions by default.** Mirror Spec Kit's artifact names, folders, and command surface so a Spec-Kit user transitions with near-zero relearning. Diverge only where a recorded decision says our model requires it — deterministic write-time enforcement (G-7), `SPEC-NNN` ids (DR-027), the `.minspec` store, the never-wrong signpost (DR-055 §3). Familiar surface, stronger engine.
 
 ## Before Making Changes
 
 1. Check if a spec exists for the area you're modifying
-2. Classify the change complexity (T1-T4)
-3. Follow the appropriate ceremony level
+2. Classify the change by mechanical scope (T1-T4) — how far it reaches, not how hard it feels
+3. Follow the appropriate ceremony level (the predicted tier is a floor — raise it, never lower it)
 4. Never violate the invariants listed above
 
 ## Coding Standards
