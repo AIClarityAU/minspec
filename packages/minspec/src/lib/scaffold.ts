@@ -631,6 +631,96 @@ export function rescaffoldManagedRegionFile(rootDir: string, outputPath: string)
 }
 
 /**
+ * A managed-region output path present on disk without valid markers (#760).
+ *
+ * `refreshManagedRegionTemplates` only ever *discovers* this state, and only when
+ * a human happens to run Refresh — until then the file is fully committable, so a
+ * managed file introduced marker-less (a hand-port, a copy, a linter strip) can sit
+ * unnoticed indefinitely. This is a read-only ASSERTION of the same on-disk state
+ * Refresh checks, meant to run at commit/CI time instead of reactively:
+ *
+ *   - `'warning'` — markers are gone but the body is still byte-identical to the
+ *     template, so {@link tryAutoHealManagedRegion} (the same logic Refresh uses)
+ *     can restore the markers losslessly. Not urgent, but worth surfacing: markers
+ *     do not vanish on their own, so something stripped them.
+ *   - `'error'`   — markers are gone AND the body has diverged from the template.
+ *     Refresh cannot prove a heal is safe, so it will silently skip + warn this
+ *     file FOREVER (never self-resolving) until a human restores the markers by
+ *     hand. This is the actual bug: a diverged, marker-less managed file merges
+ *     and stays merged with no gate ever catching it.
+ */
+export interface ManagedRegionMarkerViolation {
+  /** The output path (relative to project root) missing valid markers. */
+  readonly outputPath: string;
+  /** `'error'` when the body diverged (unhealable); `'warning'` when it did not. */
+  readonly severity: 'error' | 'warning';
+  /** Human-readable, actionable message. */
+  readonly message: string;
+}
+
+/** Message for a marker-less file whose body still matches the template exactly. */
+function healableMarkersMessage(outputPath: string): string {
+  return (
+    `MinSpec-managed markers missing in ${outputPath}, but its content is unmodified — ` +
+    'run "MinSpec: Refresh Harness Files" (auto-heal will restore the markers losslessly).'
+  );
+}
+
+/** Message for a marker-less file whose body has diverged from the template. */
+function divergedMarkersMessage(outputPath: string): string {
+  return (
+    `MinSpec-managed markers missing in ${outputPath}, AND its content has diverged from ` +
+    'the template — Refresh cannot safely restore the markers and will skip this file ' +
+    'silently. Upstream the local edit into the MinSpec template, then re-scaffold ' +
+    '("Re-scaffold (overwrite)") to restore markers.'
+  );
+}
+
+/**
+ * Assert every {@link MANAGED_REGION_TEMPLATES} output path present on disk carries
+ * valid start/end markers (#760 harden). Absent files are skipped — Refresh
+ * re-scaffolds those, so a file that was never created is not this gate's concern.
+ * A tool-gated template whose tool is not detected is skipped, mirroring
+ * `refreshManagedRegionTemplates`.
+ *
+ * `exclude` names templates whose canonical source is the CALLING project's own
+ * working file rather than a scaffolded output (minspec's own repo authors the
+ * #564 CI-review-stack files directly and gates their freshness a different way —
+ * see `SELF_HOSTED_TEMPLATE_NAMES` in template-registry.ts); every other project
+ * that scaffolds FROM these templates has no such exclusion.
+ */
+export function checkManagedRegionMarkers(
+  rootDir: string,
+  tools: DetectedTools,
+  opts?: { readonly exclude?: readonly string[] },
+): ManagedRegionMarkerViolation[] {
+  const exclude = new Set(opts?.exclude ?? []);
+  const violations: ManagedRegionMarkerViolation[] = [];
+
+  for (const tpl of MANAGED_REGION_TEMPLATES) {
+    if (exclude.has(tpl.name)) continue;
+    if (tpl.condition && !tpl.condition(tools)) continue;
+
+    const fullPath = path.join(rootDir, tpl.outputPath);
+    if (!fs.existsSync(fullPath)) continue;
+
+    const onDisk = fs.readFileSync(fullPath, 'utf-8');
+    const startMarker = managedRegionStartMarker(tpl.name, tpl.commentStyle);
+    const endMarker = managedRegionEndMarker(tpl.name, tpl.commentStyle);
+    if (splitManagedRegion(onDisk, startMarker, endMarker)) continue;
+
+    const healed = tryAutoHealManagedRegion(onDisk, tpl, startMarker, endMarker);
+    violations.push(
+      healed !== null
+        ? { outputPath: tpl.outputPath, severity: 'warning', message: healableMarkersMessage(tpl.outputPath) }
+        : { outputPath: tpl.outputPath, severity: 'error', message: divergedMarkersMessage(tpl.outputPath) },
+    );
+  }
+
+  return violations;
+}
+
+/**
  * Generate all harness files from templates.
  * Only writes files that do not already exist (first-time init).
  * Stores initial section hashes for future merge-on-refresh.

@@ -26,6 +26,9 @@ import {
 } from '../packages/minspec/src/lib/reference-checker';
 import { listOrphanedRecords } from '../packages/minspec/src/lib/approval-store';
 import { checkStatusParity } from '../packages/minspec/src/lib/status-parity';
+import { checkManagedRegionMarkers } from '../packages/minspec/src/lib/scaffold';
+import { SELF_HOSTED_TEMPLATE_NAMES } from '../packages/minspec/src/lib/template-registry';
+import { detectTools } from '../packages/minspec/src/lib/tool-detector';
 
 const ROOT = process.cwd();
 let errors = 0;
@@ -406,6 +409,33 @@ try {
   }
 } catch {
   // specs/ unreadable / absent — nothing to validate, stay silent.
+}
+
+// Rule 14 (harden, #760): every MANAGED_REGION_TEMPLATES output path present on
+// disk must carry valid MinSpec markers. `refreshManagedRegionTemplates`
+// (scaffold.ts) already DETECTS a marker-less managed file — but only when a
+// human happens to run "MinSpec: Refresh Harness Files"; until then the file is
+// fully committable. Root-caused via a scrooge port (#48/#760): two CI-review
+// files were hand-ported without markers, one then diverged locally, and both
+// stayed merged, unnoticed, across several commits. FATAL when the body has
+// diverged (auto-heal cannot recover it, so Refresh will skip + warn this file
+// silently forever); a WARN when the body is still byte-identical to the
+// template (auto-heal can restore the markers losslessly — worth surfacing, not
+// blocking). `SELF_HOSTED_TEMPLATE_NAMES` excludes the #564 CI-review-stack
+// templates in THIS repo only: minspec authors those files directly (never
+// marker-wrapped here) and gates their freshness via Rule 12 above instead.
+try {
+  for (const v of checkManagedRegionMarkers(ROOT, detectTools(ROOT), {
+    exclude: SELF_HOSTED_TEMPLATE_NAMES,
+  })) {
+    if (v.severity === 'error') {
+      fail(join(ROOT, v.outputPath), v.message);
+    } else {
+      warn(`${v.outputPath}: ${v.message}`);
+    }
+  }
+} catch {
+  // scaffold/tool-detector unavailable — nothing to check, stay silent.
 }
 
 checkCiReviewTemplatesFresh().then(() => {

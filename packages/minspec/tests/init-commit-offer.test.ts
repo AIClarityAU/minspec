@@ -44,14 +44,16 @@ import {
   initRefreshCommand,
   offerScaffoldCommit,
   collectScaffoldPaths,
+  collectDirtyScaffoldPaths,
+  commitHarnessRefreshCommand,
   SCAFFOLD_COMMIT_MESSAGE,
   REFRESH_COMMIT_MESSAGE,
   type ScaffoldCommitter,
 } from '../src/commands/init';
 import { scaffold, generateHarnessFiles } from '../src/lib/scaffold';
 
-/** A spying committer stub that records add()/commit() calls. */
-function makeCommitterStub(isRepo = true) {
+/** A spying committer stub that records add()/commit()/dirty() calls. */
+function makeCommitterStub(isRepo = true, dirtyPaths?: readonly string[]) {
   const added: string[][] = [];
   const commits: string[] = [];
   const committer: ScaffoldCommitter = {
@@ -62,6 +64,10 @@ function makeCommitterStub(isRepo = true) {
     commit: vi.fn(async (message: string) => {
       commits.push(message);
     }),
+    // Default: everything asked about is reported dirty (mirrors a fresh
+    // scaffold where nothing is committed yet). Tests that care about the
+    // clean case pass `dirtyPaths` explicitly.
+    dirty: vi.fn(async (paths: readonly string[]) => [...(dirtyPaths ?? paths)]),
   };
   return { committer, added, commits };
 }
@@ -250,6 +256,7 @@ describe('post-init commit offer (#222)', () => {
         commit: vi.fn(async () => {
           throw new Error('nothing to commit');
         }),
+        dirty: vi.fn(async (paths: readonly string[]) => [...paths]),
       };
       vi.mocked(vscode.window.showInformationMessage).mockImplementation(
         async (_msg: string, ...actions: string[]) => actions[0],
@@ -349,5 +356,143 @@ describe('post-refresh commit offer — init/refresh symmetry (RCDD 2026-07-10)'
       expect(commits).toEqual([REFRESH_COMMIT_MESSAGE]);
       expect(committer.commit).toHaveBeenCalledTimes(1);
     });
+  });
+});
+
+/**
+ * T2 — Feature tests: recoverable "harness uncommitted" affordance (#758).
+ *
+ * The post-init/-refresh commit offer is a one-shot, non-modal toast — easy to
+ * dismiss or lose to the notification center, with no trace once gone. These
+ * pieces make the offer RECOVERABLE:
+ *   - `collectDirtyScaffoldPaths` — of the scaffolded/refreshed paths, which are
+ *     CURRENTLY uncommitted (distinct from `collectScaffoldPaths`, which only
+ *     asks "does this managed file exist on disk").
+ *   - `commitHarnessRefreshCommand` — re-invokable recovery: re-offers the
+ *     commit when something is dirty, and says so plainly (never a silent
+ *     no-op) when nothing is.
+ */
+describe('collectDirtyScaffoldPaths() (#758)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-dirty-scaffold-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function seedScaffold(): void {
+    fs.mkdirSync(path.join(tmpDir, '.git'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.minspec'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, '.minspec', 'config.json'), '{}');
+    fs.writeFileSync(path.join(tmpDir, 'CLAUDE.md'), '# CLAUDE');
+  }
+
+  it('returns [] when the folder is not a git repo', async () => {
+    fs.writeFileSync(path.join(tmpDir, 'CLAUDE.md'), '# CLAUDE');
+    const makeCommitter = vi.fn();
+
+    const dirty = await collectDirtyScaffoldPaths(tmpDir, { makeCommitter });
+
+    expect(dirty).toEqual([]);
+    expect(makeCommitter).not.toHaveBeenCalled();
+  });
+
+  it('returns [] when nothing has been scaffolded yet', async () => {
+    fs.mkdirSync(path.join(tmpDir, '.git'), { recursive: true });
+    const makeCommitter = vi.fn();
+
+    const dirty = await collectDirtyScaffoldPaths(tmpDir, { makeCommitter });
+
+    expect(dirty).toEqual([]);
+    expect(makeCommitter).not.toHaveBeenCalled();
+  });
+
+  it('delegates to the committer.dirty() and returns exactly what it reports', async () => {
+    seedScaffold();
+    const { committer } = makeCommitterStub(true, ['CLAUDE.md']);
+
+    const dirty = await collectDirtyScaffoldPaths(tmpDir, { makeCommitter: async () => committer });
+
+    expect(dirty).toEqual(['CLAUDE.md']);
+    expect(committer.dirty).toHaveBeenCalledWith(collectScaffoldPaths(tmpDir));
+  });
+
+  it('returns [] when the committer reports everything already committed', async () => {
+    seedScaffold();
+    const { committer } = makeCommitterStub(true, []);
+
+    const dirty = await collectDirtyScaffoldPaths(tmpDir, { makeCommitter: async () => committer });
+
+    expect(dirty).toEqual([]);
+  });
+
+  it('returns [] (best-effort) when the committer reports it is not a repo', async () => {
+    seedScaffold();
+    const { committer } = makeCommitterStub(false);
+
+    const dirty = await collectDirtyScaffoldPaths(tmpDir, { makeCommitter: async () => committer });
+
+    expect(dirty).toEqual([]);
+  });
+
+  it('returns [] (best-effort) when building the committer throws', async () => {
+    seedScaffold();
+
+    const dirty = await collectDirtyScaffoldPaths(tmpDir, {
+      makeCommitter: async () => {
+        throw new Error('git not found');
+      },
+    });
+
+    expect(dirty).toEqual([]);
+  });
+});
+
+describe('commitHarnessRefreshCommand() (#758)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-commit-refresh-cmd-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  function seedScaffold(): void {
+    fs.mkdirSync(path.join(tmpDir, '.git'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, '.minspec'), { recursive: true });
+    fs.writeFileSync(path.join(tmpDir, '.minspec', 'config.json'), '{}');
+    fs.writeFileSync(path.join(tmpDir, 'CLAUDE.md'), '# CLAUDE');
+  }
+
+  it('re-offers the commit (refresh wording) when something is dirty, and accept commits it', async () => {
+    seedScaffold();
+    const { committer, commits } = makeCommitterStub(true, ['CLAUDE.md']);
+    vi.mocked(vscode.window.showInformationMessage).mockImplementation(
+      async (_msg: string, ...actions: string[]) => (actions.length ? actions[0] : undefined),
+    );
+
+    await commitHarnessRefreshCommand(tmpDir, { makeCommitter: async () => committer });
+
+    expect(commits).toEqual([REFRESH_COMMIT_MESSAGE]);
+  });
+
+  it('says plainly there is nothing to commit — never a silent no-op — when clean', async () => {
+    seedScaffold();
+    const { committer } = makeCommitterStub(true, []);
+
+    await commitHarnessRefreshCommand(tmpDir, { makeCommitter: async () => committer });
+
+    expect(vscode.window.showInformationMessage).toHaveBeenCalledTimes(1);
+    const message = vi.mocked(vscode.window.showInformationMessage).mock.calls[0][0] as string;
+    expect(message).toMatch(/no uncommitted/i);
+    expect(committer.add).not.toHaveBeenCalled();
+    expect(committer.commit).not.toHaveBeenCalled();
   });
 });

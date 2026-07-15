@@ -120,6 +120,35 @@ export function collectScaffoldPaths(folder: string): string[] {
 }
 
 /**
+ * Of the paths MinSpec scaffolds/refreshes, the subset that is CURRENTLY
+ * uncommitted (#758). Distinct from {@link collectScaffoldPaths}, which only
+ * asks "does this managed file exist on disk" — a file can exist and already
+ * be committed (nothing to offer). This is what a recoverable "harness
+ * uncommitted" affordance (status bar, re-invokable command) polls, since the
+ * one-shot toast from {@link offerScaffoldCommit} is easy to miss and leaves
+ * no trace once dismissed.
+ *
+ * Best-effort and silent on any failure (not a repo, no committer, git
+ * error) — returns `[]`, mirroring {@link offerScaffoldCommit}'s own guards.
+ */
+export async function collectDirtyScaffoldPaths(
+  folder: string,
+  deps: OfferScaffoldCommitDeps = {},
+): Promise<string[]> {
+  if (!fs.existsSync(path.join(folder, '.git'))) return [];
+  const paths = collectScaffoldPaths(folder);
+  if (paths.length === 0) return [];
+  try {
+    const make = deps.makeCommitter ?? defaultCommitter;
+    const committer = await make(folder);
+    if (!(await committer.isRepo())) return [];
+    return await committer.dirty(paths);
+  } catch {
+    return [];
+  }
+}
+
+/**
  * The minimal git surface the commit-offer needs. Defined as an interface so
  * tests can inject a stub instead of shelling out to a real repository.
  */
@@ -130,6 +159,13 @@ export interface ScaffoldCommitter {
   add(paths: readonly string[]): Promise<void>;
   /** Create a single commit with `message` (staged content only). */
   commit(message: string): Promise<void>;
+  /**
+   * Of `paths`, which currently show uncommitted changes (staged, unstaged, or
+   * untracked) per `git status`. Used to decide whether the recoverable commit
+   * offer (#758) has anything to do — a scaffolded path that's already
+   * committed (or was never dirty) is not reported.
+   */
+  dirty(paths: readonly string[]): Promise<string[]>;
 }
 
 /** Default committer — wraps simple-git, lazily imported to keep init lean. */
@@ -149,6 +185,17 @@ async function defaultCommitter(folder: string): Promise<ScaffoldCommitter> {
     },
     async commit(message) {
       await git.commit(message);
+    },
+    async dirty(paths) {
+      if (paths.length === 0) return [];
+      try {
+        const status = await git.status(['--', ...paths]);
+        return status.files.map((f) => f.path);
+      } catch {
+        // Best-effort: an unreadable status means we can't prove anything is
+        // dirty, so report nothing rather than throw.
+        return [];
+      }
     },
   };
 }
@@ -224,6 +271,36 @@ export async function offerScaffoldCommit(
         'They remain staged/unstaged for you to commit manually.',
     );
   }
+}
+
+/**
+ * Re-invokable recovery for a MISSED {@link offerScaffoldCommit} toast (#758).
+ * The toast fires once, on the init/refresh write-path, and is trivially
+ * dismissed or auto-collapsed into the notification center — after that there
+ * was previously no way back to it, so the scaffolded/refreshed managed
+ * output (which is derived + coupled across several files) could sit dirty
+ * indefinitely with no further prompt. This command re-runs the SAME offer
+ * (`variant: 'refresh'`, since it's reachable independent of which write-path
+ * produced the dirty state) whenever there is something to commit, and says so
+ * plainly when there is nothing outstanding — never a silent no-op that reads
+ * as "did this do anything?".
+ */
+export async function commitHarnessRefreshCommand(
+  folderArg?: string,
+  deps?: OfferScaffoldCommitDeps,
+): Promise<void> {
+  const folder = folderArg ?? (await resolveTargetFolder());
+  if (!folder) return;
+
+  const dirty = await collectDirtyScaffoldPaths(folder, deps);
+  if (dirty.length === 0) {
+    vscode.window.showInformationMessage(
+      'MinSpec: no uncommitted harness/scaffold output to commit.',
+    );
+    return;
+  }
+
+  await offerScaffoldCommit(folder, { ...deps, variant: 'refresh' });
 }
 
 // ---------------------------------------------------------------------------

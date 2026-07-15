@@ -73,6 +73,10 @@
         "title": "MinSpec: Refresh Harness Files"
       },
       {
+        "command": "minspec.commitHarnessRefresh",
+        "title": "MinSpec: Commit Harness Refresh"
+      },
+      {
         "command": "minspec.constitutionShowPrompt",
         "title": "MinSpec: Show Constitution Generation Prompt"
       },

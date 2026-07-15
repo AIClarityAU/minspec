@@ -30,6 +30,7 @@ const mockAdrTreeProvider = { refresh: vi.fn(), setExpansionMemory: vi.fn(), epi
 const mockBacklogTreeProvider = { refresh: vi.fn(), refreshIfStale: vi.fn(), setExpansionMemory: vi.fn(), epicGrouping: { set: vi.fn(), toggle: vi.fn(() => true) } };
 const mockStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockNextTaskStatusBar = { update: vi.fn(), dispose: vi.fn() };
+const mockScaffoldCommitStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockSpecPanel = { show: vi.fn(), refresh: vi.fn(), dispose: vi.fn() };
 const mockCodeLensProvider = { refresh: vi.fn() };
 const mockSpecFileLensProvider = { refresh: vi.fn() };
@@ -150,7 +151,12 @@ vi.mock('vscode', () => ({
 // Lib / view mocks
 // ---------------------------------------------------------------------------
 
-vi.mock('../src/commands/init', () => ({ initCommand: vi.fn(), initRefreshCommand: vi.fn() }));
+vi.mock('../src/commands/init', () => ({
+  initCommand: vi.fn(),
+  initRefreshCommand: vi.fn(),
+  commitHarnessRefreshCommand: vi.fn(),
+  collectDirtyScaffoldPaths: vi.fn(() => Promise.resolve([])),
+}));
 vi.mock('../src/commands/classify', () => ({ classifyCommand: vi.fn() }));
 vi.mock('../src/commands/status', () => ({ statusCommand: vi.fn(() => vi.fn()) }));
 vi.mock('../src/commands/session', () => ({ declareScopeCommand: vi.fn() }));
@@ -191,6 +197,7 @@ vi.mock('../src/views/status-bar', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/views/status-bar')>()),
   MinSpecStatusBar: vi.fn(function () { return mockStatusBar; }),
   MinSpecNextTaskStatusBar: vi.fn(function () { return mockNextTaskStatusBar; }),
+  MinSpecScaffoldCommitStatusBar: vi.fn(function () { return mockScaffoldCommitStatusBar; }),
 }));
 vi.mock('../src/commands/next-task', () => ({
   nextTaskCommand: vi.fn(() => vi.fn()),
