@@ -110,10 +110,21 @@ function advancePhaseOnApproveEnabled(): boolean {
     .getConfiguration('minspec')
     .get<boolean>('advancePhaseOnApprove', false);
 }
+/**
+ * Persist the "Always" choice. Never lets a pref-write failure surface as an
+ * approval failure — same non-blocking contract as `enqueuePhaseAdvanceSafely`
+ * below, and for the same reason: the approval itself already succeeded by the
+ * time this runs, so a config-write error here must not throw into
+ * `approveSpecCommand`'s catch and paint a false "Failed to approve" toast.
+ */
 async function enableAdvancePhaseOnApprove(): Promise<void> {
-  await vscode.workspace
-    .getConfiguration('minspec')
-    .update('advancePhaseOnApprove', true, vscode.ConfigurationTarget.Global);
+  try {
+    await vscode.workspace
+      .getConfiguration('minspec')
+      .update('advancePhaseOnApprove', true, vscode.ConfigurationTarget.Global);
+  } catch (err) {
+    console.warn(`MinSpec: failed to persist advancePhaseOnApprove pref — ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 /**
@@ -273,6 +284,14 @@ export async function approveSpecCommand(
         ? `MinSpec: ✓ Approved ${spec.id} for implementation (status → implementing).`
         : `MinSpec: ✓ Approved ${spec.id} for implementation.`) + commitSuffix;
 
+    // Refresh the tree BEFORE the follow-up toast: the toast carries action
+    // buttons, so it persists on screen until the user dismisses it (an
+    // `await` on it blocks well past the approval itself). A re-approval with
+    // no `status:` change (sidecar under unwatched `.minspec/approvals/`) has
+    // no other trigger for the tree's approval decoration to update, so it must
+    // not wait on the toast's resolution.
+    await vscode.commands.executeCommand('minspec.refreshTree');
+
     // DR-057 §3 follow-up toast: offer to enqueue a phase-advance request (or,
     // once the global pref is set, do it silently — no re-asking). Enqueue-only,
     // LLM-free: this never runs `claude -p` itself (Tier-0 air-gap); a downstream
@@ -311,8 +330,6 @@ export async function approveSpecCommand(
         );
       }
     }
-
-    await vscode.commands.executeCommand('minspec.refreshTree');
   } catch (err) {
     vscode.window.showErrorMessage(
       `MinSpec: Failed to approve — ${err instanceof Error ? err.message : String(err)}`,

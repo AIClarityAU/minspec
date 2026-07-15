@@ -485,6 +485,33 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
     expect(vscode.commands.executeCommand).toHaveBeenCalledWith('minspec.refreshTree');
   });
 
+  it('refreshes the tree BEFORE the follow-up toast resolves, not after', async () => {
+    // The follow-up toast carries action buttons, so it stays on screen until
+    // dismissed — awaiting it before refreshing would leave the tree's
+    // approval decoration stale until the user acts. Use a deferred promise
+    // that only resolves once we've already asserted the refresh happened.
+    pickFirst();
+    vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec('specifying') as never);
+    vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
+
+    let resolveToast: (value: string | undefined) => void = () => {};
+    const toastPromise = new Promise<string | undefined>((resolve) => {
+      resolveToast = resolve;
+    });
+    vi.mocked(vscode.window.showInformationMessage).mockReturnValueOnce(toastPromise as never);
+
+    const runPromise = approveSpecCommand(undefined);
+
+    // Let everything up to the (unresolved) toast await flush — a macrotask
+    // tick drains the whole pending microtask queue, unlike a fixed number of
+    // `Promise.resolve()` hops which is brittle to the exact await chain depth.
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(vscode.commands.executeCommand).toHaveBeenCalledWith('minspec.refreshTree');
+
+    resolveToast(undefined);
+    await runPromise;
+  });
+
   // ── DR-057 §3 — Alt-A follow-up toast (advance-to-next-phase enqueue, #733) ──
 
   describe('follow-up toast: enqueue a phase-advance request', () => {
@@ -622,6 +649,29 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
 
       await expect(approveSpecCommand(undefined)).resolves.toBeUndefined();
       expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+    });
+
+    it('a rejected "Always" pref write is swallowed — approval still reports success', async () => {
+      pickFirst();
+      vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec() as never);
+      vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
+      vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce('Always' as never);
+      // Simulates a real runtime rejection (e.g. an unregistered setting) —
+      // not just the always-resolving default mock.
+      configUpdate.mockImplementationOnce(() => Promise.reject(new Error('unregistered setting')));
+
+      await expect(approveSpecCommand(undefined)).resolves.toBeUndefined();
+      expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+      const successCall = vi
+        .mocked(vscode.window.showInformationMessage)
+        .mock.calls.find((c) => String(c[0]).includes('✓ Approved SPEC-001'));
+      expect(successCall).toBeTruthy();
+      // The rejected write must not block the enqueue that follows it.
+      expect(enqueuePhaseAdvance).toHaveBeenCalledWith(
+        '/tmp/ws',
+        '/tmp/ws/specs/minspec/SPEC-001/spec.md',
+        'alt-a-toast',
+      );
     });
   });
 
