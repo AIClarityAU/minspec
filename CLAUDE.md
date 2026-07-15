@@ -11,11 +11,13 @@ minspec-monorepo project managed with MinSpec SDD methodology.
 
 These rules must never be violated. All changes must preserve them.
 
-<!-- Add project invariants here -->
+> Summarized from `.minspec/constitution.md` — each line is the invariant's lead sentence. See the constitution for the full text, rationale, and SPEC/DR references; edit invariants there, not here.
+
+1. Core functionality works offline — no network calls without explicit user consent
 
 ## SDD Methodology
 
-This project uses Specification-Driven Development. Tasks are classified by complexity tier:
+This project uses Specification-Driven Development. Tasks are classified by **mechanical scope** (blast radius — files, lines, boundaries touched), not by how hard they are to reason about. The predicted tier is an upward-only floor: it never lowers ceremony on its own, and you can always raise it.
 
 | Tier | Ceremony | Phases Required |
 |------|----------|-----------------|
@@ -35,13 +37,15 @@ This project uses Specification-Driven Development. Tasks are classified by comp
 
 ## Commands
 
-MinSpec is a **VS Code extension**, not a CLI — run everything from the Command Palette (`Ctrl/Cmd+Shift+P`), typing "MinSpec:". There is no `minspec` shell binary (every package is `bin: null`).
+MinSpec is a **VS Code extension**, not a CLI — run everything from the Command Palette (`Ctrl/Cmd+Shift+P`), typing "MinSpec:".
 
 | Command Palette | Purpose |
 |---|---|
-| *MinSpec: Initialize SDD Structure* | Scaffold `.minspec/` + harness files. Also offered automatically when you open an un-initialized project (auto-bootstrap). |
-| *MinSpec: Refresh Harness Files* | Re-merge harness templates, preserving your edits (auto-refresh on open). |
+| *MinSpec: Initialize SDD Structure* | Scaffold `.minspec/` + harness files. Also offered automatically when you open an un-initialized project. |
+| *MinSpec: Refresh Harness Files* | Re-merge harness templates, preserving your edits. |
 | *MinSpec: Classify Task Complexity* | Classify the current change into a tier (T1–T4). |
+| *MinSpec: Show SDD Status* | Show the current phase and spec status. |
+| *MinSpec: Create Architecture Decision Record* | Create a new `DR-NNN` in `docs/decisions/`. |
 
 ## Project Overview
 
