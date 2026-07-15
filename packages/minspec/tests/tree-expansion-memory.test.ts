@@ -118,3 +118,44 @@ describe('TreeExpansionMemory.record', () => {
     expect(seed).toEqual({ 'status:Done': true });
   });
 });
+
+describe('TreeExpansionMemory LRU eviction (#746)', () => {
+  it('evicts the least-recently-touched id once MAX_ENTRIES is exceeded', async () => {
+    const memento = fakeMemento();
+    const mem = new TreeExpansionMemory(memento as never, KEY);
+    const max = TreeExpansionMemory.MAX_ENTRIES;
+
+    for (let i = 0; i < max; i++) {
+      await mem.record(`epic:${i}`, true);
+    }
+    // At capacity: nothing evicted yet.
+    expect(Object.keys(memento._store[KEY] as Record<string, boolean>)).toHaveLength(max);
+    expect((memento._store[KEY] as Record<string, boolean>)['epic:0']).toBe(true);
+
+    // One more distinct id pushes past the cap → oldest ('epic:0') is evicted.
+    await mem.record('epic:overflow', true);
+    const stored = memento._store[KEY] as Record<string, boolean>;
+    expect(Object.keys(stored)).toHaveLength(max);
+    expect(stored['epic:0']).toBeUndefined();
+    expect(stored['epic:1']).toBe(true);
+    expect(stored['epic:overflow']).toBe(true);
+  });
+
+  it('re-touching an id refreshes it to the MRU end, sparing it from eviction', async () => {
+    const memento = fakeMemento();
+    const mem = new TreeExpansionMemory(memento as never, KEY);
+    const max = TreeExpansionMemory.MAX_ENTRIES;
+
+    for (let i = 0; i < max; i++) {
+      await mem.record(`epic:${i}`, true);
+    }
+    // Touch epic:0 again (flip its value) — this should move it to MRU end.
+    await mem.record('epic:0', false);
+    // Now overflow with a new id — the next-oldest ('epic:1') should be evicted instead.
+    await mem.record('epic:overflow', true);
+
+    const stored = memento._store[KEY] as Record<string, boolean>;
+    expect(stored['epic:0']).toBe(false); // survived, refreshed
+    expect(stored['epic:1']).toBeUndefined(); // now the oldest, evicted
+  });
+});
