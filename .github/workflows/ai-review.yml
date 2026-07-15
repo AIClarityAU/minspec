@@ -1,3 +1,4 @@
+# >>> minspec:managed:ai-review-workflow >>>
 # ai-review — independent AI reviewer in CI, posting AS THE APP (#342 Track B, #428)
 #
 # Runs the credential-free independent reviewer over a PR's diff and posts the
@@ -670,3 +671,4 @@ jobs:
             echo "::warning title=ai-review check not posted::Posting the ai-review verdict check-run failed (grant the minspec-sdd App \`checks: write\`). The label/comment remain authoritative."
           fi
           exit 0
+# <<< minspec:managed:ai-review-workflow <<<

@@ -1,3 +1,4 @@
+// >>> minspec:managed:ai-review-guard >>>
 // ai-review-guard — pure decision logic for the ai-review label-integrity gate.
 //
 // This module is deliberately I/O-free: no network, no `github`/octokit, no
@@ -334,3 +335,4 @@ module.exports = {
   isBenignRemovalError,
   sanitizeLogin,
 };
+// <<< minspec:managed:ai-review-guard <<<

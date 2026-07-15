@@ -1,3 +1,4 @@
+# >>> minspec:managed:ai-review-retry-workflow >>>
 # ai-review-retry — auto-pick-up quota-blocked reviews (companion to ai-review.yml)
 #
 # When the Claude subscription session quota is exhausted mid-week, ai-review.yml
@@ -72,3 +73,4 @@ jobs:
               echo "PR #$num ($branch): no prior ai-review run found — skipping"
             fi
           done
+# <<< minspec:managed:ai-review-retry-workflow <<<

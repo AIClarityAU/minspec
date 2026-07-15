@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# >>> minspec:managed:review-branch-script >>>
 # review-branch.sh — shared, trigger-agnostic independent-reviewer unit.
 # (DR-033 §6 · issue #342)
 #
@@ -202,3 +203,4 @@ fi
 echo "review-branch.sh: reviewer agent (role=$ROLE) failed (non-quota) — gate fails closed" >&2
 printf '%s\n' "$AGENT_OUT" >&2
 exit 0
+# <<< minspec:managed:review-branch-script <<<

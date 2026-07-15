@@ -1,3 +1,4 @@
+# >>> minspec:managed:ready-to-merge-workflow >>>
 # ready-to-merge — AI-review label-integrity + merge gate
 #
 # Posts a commit status named `ready-to-merge` on the PR head SHA that is GREEN
@@ -322,3 +323,4 @@ jobs:
               );
               await removePass();
             }
+# <<< minspec:managed:ready-to-merge-workflow <<<

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+# >>> minspec:managed:review-decide-script >>>
 # review-decide.sh — pure deterministic AI-review gate (no network, no gh, no side effects).
 #
 # Reads a reviewer agent's output on stdin, extracts its verdict block, and writes
@@ -94,3 +95,4 @@ if [[ "$VERDICT" == "pass" && "$BLOCKING" -eq 0 ]]; then
 fi
 
 echo "ai-review:changes"; exit 0
+# <<< minspec:managed:review-decide-script <<<
