@@ -28,6 +28,12 @@
 
 const PASS = 'ai-review:pass';
 const CHANGES = 'ai-review:changes';
+// #466 — the SHA-bound pass witness. The ai-review workflow posts this commit
+// status (success/failure) on the EXACT head SHA it evaluated, BEFORE it applies
+// the `ai-review:pass` label. Because a commit status is bound to its SHA, its
+// presence on the CURRENT head is an exact proof that THIS commit was reviewed —
+// unlike the timestamp proxy in `verifyPassProvenance`.
+const PASS_STATUS_CONTEXT = 'ai-review/pass';
 // The reviewer could NOT run to a verdict for a TRANSIENT, non-code reason —
 // almost always the Claude subscription's session quota being exhausted, but also
 // a rate-limit / overload / auth blip. This is NOT a review of the PR: it must be
@@ -175,6 +181,55 @@ function verifyPassProvenance({ labelActor, labelAppliedAt, headCommittedAt, all
   return { verified: true, reason: 'applied by an allowlisted reviewer after the head commit' };
 }
 
+// #466 — SHA-bound recency (closes the TOCTOU the timestamp proxy leaves open).
+// `verifyPassProvenance` compares the label-application TIME to the head-commit
+// TIME; a same-second push, clock skew, or a cancelled `synchronize` strip can slip
+// a stale pass through. A commit STATUS is bound to the exact SHA it was posted on,
+// so requiring `ai-review/pass`=success on the CURRENT head SHA is an EXACT witness
+// that this very commit was reviewed. `statuses` is the commit-status list for the
+// current head SHA; `verified` iff it carries `ai-review/pass`=success from an
+// allowlisted creator. Absence ⇒ the pass is for a different/older commit ⇒ red.
+function verifyHeadPassStatus({ statuses, allowlist } = {}) {
+  const list = Array.isArray(allowlist) ? allowlist : [];
+  if (list.length === 0) {
+    return {
+      verified: false,
+      reason:
+        'reviewer-bot allowlist (AI_REVIEW_BOT_LOGINS) is unset — head-status provenance cannot be verified',
+    };
+  }
+  const ours = (Array.isArray(statuses) ? statuses : []).filter(
+    (s) => s && s.context === PASS_STATUS_CONTEXT,
+  );
+  if (ours.length === 0) {
+    return {
+      verified: false,
+      reason: `no \`${PASS_STATUS_CONTEXT}\` status on the current head commit — the greenlight does not correspond to this SHA (#466)`,
+    };
+  }
+  // Most-recent by created_at (the API returns newest-first, but be explicit).
+  const latest = ours.reduce((a, b) =>
+    Date.parse(b.created_at) >= Date.parse(a.created_at) ? b : a,
+  );
+  if (latest.state !== 'success') {
+    return {
+      verified: false,
+      reason: `\`${PASS_STATUS_CONTEXT}\` on the current head is '${sanitizeLogin(latest.state)}', not success`,
+    };
+  }
+  const creator = latest.creator && latest.creator.login;
+  if (!creator || !isAuthorizedReviewer(creator, list)) {
+    return {
+      verified: false,
+      reason: `\`${PASS_STATUS_CONTEXT}\` on the current head was posted by \`${sanitizeLogin(creator)}\`, not an allowlisted reviewer`,
+    };
+  }
+  return {
+    verified: true,
+    reason: `\`${PASS_STATUS_CONTEXT}\`=success on the current head SHA, from an allowlisted reviewer`,
+  };
+}
+
 // Compute the `ready-to-merge` commit status. The status is the authoritative
 // gate, so it is derived from the *decided* effective label set (pass removed if
 // it was reverted or stripped) AND from the provenance-recency verification of
@@ -183,14 +238,20 @@ function verifyPassProvenance({ labelActor, labelAppliedAt, headCommittedAt, all
 //
 // Bare label presence is never trusted: a present `ai-review:pass` with absent
 // or unverified `passProvenance` yields a red status (deny-by-default).
-function decideStatus({ labels, provenanceRevert, stalenessStrip, passProvenance } = {}) {
+function decideStatus({ labels, provenanceRevert, stalenessStrip, passProvenance, headStatus } = {}) {
   const eff = new Set(Array.isArray(labels) ? labels : []);
   if (provenanceRevert || stalenessStrip) eff.delete(PASS);
 
   const passPresent = eff.has(PASS);
   // A surviving pass counts only if its provenance was verified upstream.
   const passVerified = passPresent && !!(passProvenance && passProvenance.verified);
-  const isGreen = passVerified && !eff.has(CHANGES);
+  // #466 — the SHA-bound witness must ALSO confirm THIS head was the reviewed one.
+  // `headStatus` is OPTIONAL: when omitted (a caller/base guard that predates #466,
+  // during rollout) it is NOT required — behaviour is unchanged. When supplied it
+  // gates: an unverified head status blocks green even with a provenance-verified
+  // label (that is exactly the stale-pass-on-a-new-head case #466 closes).
+  const headVerified = headStatus === undefined ? true : !!(headStatus && headStatus.verified);
+  const isGreen = passVerified && headVerified && !eff.has(CHANGES);
 
   let description;
   if (stalenessStrip) {
@@ -202,6 +263,13 @@ function decideStatus({ labels, provenanceRevert, stalenessStrip, passProvenance
     description = truncate(
       `ai-review:pass not trusted — ${
         (passProvenance && passProvenance.reason) || 'provenance unverified'
+      }`,
+    );
+  } else if (passPresent && passVerified && !headVerified) {
+    // #466 — the label is trustworthy but is not bound to THIS commit's review.
+    description = truncate(
+      `ai-review:pass not bound to this commit — ${
+        (headStatus && headStatus.reason) || 'no ai-review/pass status on the current head SHA'
       }`,
     );
   } else if (isGreen) {
@@ -329,6 +397,8 @@ module.exports = {
   decideProvenanceRevert,
   decideStalenessStrip,
   verifyPassProvenance,
+  verifyHeadPassStatus,
+  PASS_STATUS_CONTEXT,
   decideStatus,
   decideReviewCheck,
   isBenignRemovalError,
