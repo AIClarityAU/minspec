@@ -208,3 +208,62 @@ export class MinSpecNextTaskStatusBar {
     this.statusBarItem.dispose();
   }
 }
+
+// ─── Harness-refresh commit recovery status bar (#758) ──────────────────────
+
+/**
+ * Format the harness-commit status bar text. Only meaningful when the caller
+ * has already established `dirtyCount > 0` — {@link MinSpecScaffoldCommitStatusBar.update}
+ * hides the item entirely at zero, so this never needs to render an "all
+ * clear" state.
+ */
+export function formatScaffoldCommitText(dirtyCount: number): string {
+  return `$(git-commit) MinSpec: harness uncommitted (${dirtyCount})`;
+}
+
+/**
+ * Persistent recovery affordance for a missed `offerScaffoldCommit` toast
+ * (#758). The toast is a one-shot, non-modal notification — trivially
+ * dismissed or auto-collapsed — and harness-refresh output is derived +
+ * coupled across several files, so stranding it uncommitted is exactly the
+ * failure mode #705/#706 warn about. This item is hidden whenever nothing
+ * MinSpec-managed is dirty, and appears the moment `update()` is told
+ * otherwise; clicking it (or invoking `minspec.commitHarnessRefresh` from the
+ * palette) re-offers the same commit.
+ */
+export class MinSpecScaffoldCommitStatusBar {
+  private statusBarItem: vscode.StatusBarItem;
+
+  constructor() {
+    this.statusBarItem = vscode.window.createStatusBarItem(
+      vscode.StatusBarAlignment.Left,
+      98, // just left of the next-task signpost (priority 99)
+    );
+    this.statusBarItem.command = 'minspec.commitHarnessRefresh';
+  }
+
+  /**
+   * Update from the current set of dirty MinSpec-managed paths. Empty →
+   * hidden (nothing to recover). Non-empty → visible, listing the paths in
+   * the tooltip so the offer is self-explanatory without a click.
+   */
+  update(dirtyPaths: readonly string[]): void {
+    if (dirtyPaths.length === 0) {
+      this.statusBarItem.hide();
+      return;
+    }
+    this.statusBarItem.text = formatScaffoldCommitText(dirtyPaths.length);
+    this.statusBarItem.tooltip =
+      `Uncommitted MinSpec harness/scaffold output: ${dirtyPaths.join(', ')}. ` +
+      'Click to commit.';
+    this.statusBarItem.accessibilityInformation = {
+      label: `MinSpec: ${dirtyPaths.length} harness file${dirtyPaths.length === 1 ? '' : 's'} uncommitted`,
+    };
+    this.statusBarItem.show();
+  }
+
+  /** Clean up resources */
+  dispose(): void {
+    this.statusBarItem.dispose();
+  }
+}
