@@ -14,8 +14,10 @@ import { join, relative, dirname } from 'path';
 import { validateDrSequence, validateDrIndexStatus } from '../packages/minspec/src/lib/adr-manager';
 import {
   validateSplitLayoutCoverage,
+  checkAcceptanceCriteria,
   type SplitLayoutFile,
 } from '../packages/minspec/src/lib/spec-validator';
+import { parseSpec } from '../packages/minspec/src/lib/spec';
 import { DEFAULT_CONFIG } from '../packages/minspec/src/lib/config';
 import type { Tier } from '../packages/minspec/src/lib/config';
 import {
@@ -383,6 +385,27 @@ async function checkCiReviewTemplatesFresh(): Promise<void> {
     // Generator or one of its source files unreadable/absent — nothing to check,
     // stay silent (mirrors the other corpus-optional rules above).
   }
+}
+
+// Rule 13 (FATAL, #654): T3/T4 specs must carry acceptance criteria. This rule
+// was previously enforced ONLY by the in-extension approve gate (`validateSpec`
+// in spec-validator.ts) — nothing on the commit/CI path called it, so a
+// hand-authored or agent-authored T3/T4 requirements.md with no AC section
+// passed commit → CI → PR → merge unchecked (SPEC-034 / #644, caught only by a
+// human opening the approve flow by hand). `checkAcceptanceCriteria` is the
+// SAME function `validateSpec` calls — not a reimplementation that could drift
+// from it again (Goal G-6: one rule, enforced identically on every surface).
+try {
+  const specFiles = glob(specsDir, '.md');
+  for (const file of specFiles) {
+    const content = readFileSync(file, 'utf-8');
+    const violation = checkAcceptanceCriteria(parseSpec(content));
+    if (violation) {
+      fail(file, `${violation.message} ${violation.fixHint}`);
+    }
+  }
+} catch {
+  // specs/ unreadable / absent — nothing to validate, stay silent.
 }
 
 checkCiReviewTemplatesFresh().then(() => {

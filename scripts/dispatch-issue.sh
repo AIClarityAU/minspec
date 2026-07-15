@@ -21,6 +21,34 @@ FORCE_ROLE=""
 # shellcheck source=scripts/lib/agent-egress.sh
 source "${SCRIPT_DIR}/lib/agent-egress.sh"
 
+# native_automerge_enabled: is GitHub-native auto-merge (merge on ai-review:pass, no
+# blast gate) turned on for this project? Policy source, in order: MINSPEC_AUTOMERGE_NATIVE
+# env (1/0 override for CI/one-off), else `.minspec/config.json` autoMerge.native.
+# Default OFF (deny-by-default). This is distinct from the SPEC-024 consequence-hybrid
+# gate below — native marks the PR `--auto` and lets GitHub merge when the required
+# `ready-to-merge` check (= provenance-verified ai-review:pass) goes green (see DR-061).
+native_automerge_enabled() {
+  # Mutually exclusive with the stricter SPEC-024 consequence-hybrid gate: if that
+  # mode is on, IT owns the merge decision (with blast measurement), and native must
+  # stay OFF — otherwise a pre-armed `--auto` latch would merge on ai-review:pass
+  # alone, bypassing a HOLD the blast gate issued (#773 review, MAJOR/latent). The
+  # stricter gate wins.
+  [[ "${MINSPEC_AUTOMERGE_MODE:-}" == "consequence-hybrid" ]] && return 1
+  case "${MINSPEC_AUTOMERGE_NATIVE:-}" in
+    1|true) return 0 ;;
+    0|false) return 1 ;;
+  esac
+  local cfg="${SCRIPT_DIR}/../.minspec/config.json"
+  [[ -f "$cfg" ]] && [[ "$(jq -r '.autoMerge.native // false' "$cfg" 2>/dev/null)" == "true" ]]
+}
+
+# Pure seam (#773 review): behaviorally probe the native-auto-merge policy without
+# dispatching. Prints on/off + exits 0/1, so tests can prove deny-by-default (config
+# absent → off, env=0 overrides config-on) rather than grepping the source.
+if [[ "${ISSUE:-}" == "--check-native-automerge" ]]; then
+  if native_automerge_enabled; then echo "on"; exit 0; else echo "off"; exit 1; fi
+fi
+
 shift || true
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -335,6 +363,20 @@ run_reviewer_stage() {
     return 0
   fi
 
+  # 6b. Native auto-merge (DR-061): if the project opted in, mark the PR --auto so
+  #     GitHub merges it the moment the required `ready-to-merge` check (= provenance-
+  #     verified ai-review:pass) goes green — no human keystroke, no per-PR babysit.
+  #     HITL stays intact: the ai-review panel IS the gate; a machinery PR (self-edit
+  #     guard) can never get ai-review:pass, so it never auto-merges. Best-effort:
+  #     `--auto` errors on an already-clean/blocked PR are non-fatal.
+  if native_automerge_enabled; then
+    if gh pr merge "$pr_num" --repo "$REPO" --squash --auto 2>/dev/null; then
+      echo "  → native auto-merge armed on PR #$pr_num (merges on ai-review:pass)"
+    else
+      echo "  → native auto-merge could not be armed on PR #$pr_num (may already be mergeable/blocked) — left for the gate/human"
+    fi
+  fi
+
   # 7. Post the advisory review ONLY — never mutate the `ai-review:*` label here.
   #    Credentialed ops — parent-side, after the agent exited. `gh pr
   #    review --approve/--request-changes` fails on a self-authored PR, so fall
@@ -436,6 +478,7 @@ escalate_next_action() {
 case "$ROLE" in
   triage)                       MODEL="haiku"  ;;  # mechanical: classify / label
   dev)                          MODEL="sonnet" ;;  # standard impl (escalates if stuck)
+  tasks)                        MODEL="sonnet" ;;  # doc-phase generation from an approved design (DR-057/#732; escalates if stuck)
   reviewer|security|architect)  MODEL="opus"   ;;  # review / security / design — stakes high
   *)                            MODEL="sonnet" ;;
 esac
@@ -674,14 +717,21 @@ if (cd "$WORKTREE" && claude -p "$RUN_PROMPT" \
         else
           HOLD_WHY="independent review not green (ready-to-merge=$READY_STATE; needs ai-review:pass from #342)"
         fi
-        echo "Auto-merge HELD ($BLAST-blast): $HOLD_WHY"
-        if [[ -n "$PR_NUM" ]]; then
+        # If native auto-merge (DR-061) is armed on this PR, the consequence-hybrid
+        # gate is OFF and the PR WILL merge on ai-review:pass — so a "held — human
+        # skim needed" comment + needs-human-skim label would be a FALSE signpost
+        # (and would pollute the exact queue native auto-merge exists to unblock).
+        # Suppress the HOLD signals in that case (#773 review, MAJOR).
+        if [[ -z "$PR_NUM" ]]; then
+          echo "No PR found for $BRANCH — nothing to hold/merge (branch pushed only)."
+        elif native_automerge_enabled; then
+          echo "Native auto-merge armed (DR-061) — not posting a HOLD; PR #$PR_NUM merges on ai-review:pass."
+        else
+          echo "Auto-merge HELD ($BLAST-blast): $HOLD_WHY"
           HOLD_BODY=$(printf '## Auto-merge held — human skim needed\n\n**Blast:** `%s` · **Why:** %s\n\n_Gate:_ %s\n\n%s' \
             "$BLAST" "$HOLD_WHY" "$GATE_REASON" "$GATE_BLOCK")
           gh pr comment "$PR_NUM" --repo "$REPO" --body "$HOLD_BODY" 2>/dev/null || true
           gh pr edit "$PR_NUM" --repo "$REPO" --add-label "needs-human-skim" 2>/dev/null || true
-        else
-          echo "No PR found for $BRANCH — nothing to hold/merge (branch pushed only)."
         fi
       fi
     else

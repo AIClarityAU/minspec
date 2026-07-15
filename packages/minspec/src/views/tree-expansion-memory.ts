@@ -17,16 +17,28 @@ import * as vscode from 'vscode';
  * Only groups the user has actually toggled are stored — a node with no recorded
  * state keeps whatever default the provider built it with, so changing a lane's
  * default expansion later still applies to anyone who never touched it.
+ *
+ * A deleted epic or a renamed status lane leaves its id behind with nothing to
+ * ever remove it (the id is only read again if a live node with the same id
+ * reappears) — an unbounded, ever-growing `workspaceState` blob (#746). Rather
+ * than thread each provider's live-node-id set through three call sites (which
+ * differ by epic/status grouping mode and multi-root folder), this bounds
+ * growth with a simple LRU cap: the least-recently-toggled id is evicted once
+ * the map exceeds `MAX_ENTRIES`, which is far above any realistic group count.
  */
 export class TreeExpansionMemory {
-  /** id → true (user-expanded) / false (user-collapsed). Absent → use default. */
-  private state: Record<string, boolean>;
+  /** Hard cap on stored entries; oldest-touched id is evicted past this. */
+  static readonly MAX_ENTRIES = 500;
+
+  /** id → true (user-expanded) / false (user-collapsed), insertion-ordered so
+   * the first key is the least-recently-touched (LRU eviction candidate). */
+  private state: Map<string, boolean>;
 
   constructor(
     private readonly memento: vscode.Memento,
     private readonly key: string,
   ) {
-    this.state = { ...memento.get<Record<string, boolean>>(key, {}) };
+    this.state = new Map(Object.entries(memento.get<Record<string, boolean>>(key, {})));
   }
 
   /**
@@ -39,7 +51,7 @@ export class TreeExpansionMemory {
     if (!item.id) return;
     const current = item.collapsibleState;
     if (current === undefined || current === vscode.TreeItemCollapsibleState.None) return;
-    const remembered = this.state[item.id];
+    const remembered = this.state.get(item.id);
     if (remembered === undefined) return;
     item.collapsibleState = remembered
       ? vscode.TreeItemCollapsibleState.Expanded
@@ -49,12 +61,21 @@ export class TreeExpansionMemory {
   /**
    * Record a user toggle and persist it. Called from the view's
    * `onDidExpandElement` / `onDidCollapseElement`. A no-op write is skipped so we
-   * don't churn workspaceState on redundant events.
+   * don't churn workspaceState on redundant events. Re-touching an id moves it to
+   * the most-recently-used end; once the map exceeds `MAX_ENTRIES` the
+   * least-recently-touched id is evicted (#746) so a lifetime of deleted epics
+   * and renamed lanes can't grow the store without bound.
    */
   async record(id: string | undefined, expanded: boolean): Promise<void> {
     if (!id) return;
-    if (this.state[id] === expanded) return;
-    this.state[id] = expanded;
-    await this.memento.update(this.key, this.state);
+    if (this.state.get(id) === expanded) return;
+    this.state.delete(id); // drop then re-set so it moves to the MRU end
+    this.state.set(id, expanded);
+    while (this.state.size > TreeExpansionMemory.MAX_ENTRIES) {
+      const oldest = this.state.keys().next().value;
+      if (oldest === undefined) break;
+      this.state.delete(oldest);
+    }
+    await this.memento.update(this.key, Object.fromEntries(this.state));
   }
 }

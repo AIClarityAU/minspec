@@ -92,12 +92,23 @@ function isZeroSha(sha: string): boolean {
   return /^0+$/.test(sha);
 }
 
+/**
+ * KNOWN GAP (advisory backstop, non-blocking — flagged in #728/#715 review):
+ * `--no-merges` excludes true merge commits (2+ parents) from the walk. A
+ * merge commit's OWN tree includes any manual conflict-resolution edits made
+ * at merge time, which exist in no constituent commit — those edits are never
+ * fetched or audited. Each constituent (non-merge) commit that was merged is
+ * still walked and audited normally; only the merge commit's own diff is
+ * blind. Left as-is here (fixing it needs combined-diff (`--cc`) semantics
+ * with no existing git-shell-out test harness in this repo to prove it against
+ * — see `direct-push-audit-cli.test.ts` header) — tracked for a follow-up.
+ */
 async function listPushedShas(before: string, after: string): Promise<string[]> {
   if (isZeroSha(before)) {
     // New branch push: audit only the tip commit, not the whole branch history.
     return [after];
   }
-  const raw = await run('git', ['rev-list', '--no-merges', `${before}..${after}`]);
+  const raw = await run('git', ['rev-list', '--no-merges', '--end-of-options', `${before}..${after}`]);
   return raw
     .split('\n')
     .map((s) => s.trim())
@@ -105,7 +116,7 @@ async function listPushedShas(before: string, after: string): Promise<string[]> 
 }
 
 async function fetchChangedFiles(sha: string): Promise<string[]> {
-  const raw = await run('git', ['diff-tree', '--no-commit-id', '--name-only', '-r', sha]);
+  const raw = await run('git', ['diff-tree', '--no-commit-id', '--name-only', '-r', '--end-of-options', sha]);
   return raw
     .split('\n')
     .map((s) => s.trim())
@@ -114,7 +125,7 @@ async function fetchChangedFiles(sha: string): Promise<string[]> {
 
 async function fetchAuthor(sha: string): Promise<string | undefined> {
   try {
-    const raw = await run('git', ['show', '-s', '--format=%ae', sha]);
+    const raw = await run('git', ['show', '-s', '--format=%ae', '--end-of-options', sha]);
     return raw.trim() || undefined;
   } catch {
     return undefined;

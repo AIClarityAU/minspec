@@ -437,7 +437,7 @@ Three properties have been conflated under one word — **"offline"** — since 
 
 ## [DR-055 — Adopt Spec Kit conventional conformity — mirror Spec Kit's artifact + command surface by default to lower switching cost; keep editor-time deterministic enforcement as the moat](DR-055.md)
 
-*Status: proposed · Date: 2026-07-13*
+*Status: accepted · Date: 2026-07-13*
 
 <!-- dr-summary:DR-055 auto=18c5d1f7066e -->
 GitHub **Spec Kit** (github/spec-kit) is the incumbent spec-driven-development toolkit. A large share of MinSpec's likely users will have driven a Spec Kit project first — its /specify → /plan → /tasks loop is where the audience learns SDD. Every place MinSpec's *surface* differs from Spec Kit's for no load-bearing reason is pure **switching cost**: a file that isn't where they expect, a command that doesn't autocomplete, a folder named differently.
@@ -450,11 +450,44 @@ GitHub **Spec Kit** (github/spec-kit) is the incumbent spec-driven-development t
 <!-- dr-summary:DR-056 auto=4153245bf8a9 -->
 MinSpec captures the approver of a spec/DR as approvedBy = git config user.email, read offline at approval time (approval.ts:12-13, :57, :284-296 — execFileSync('git', ['config','user.email']), Tier-0, degrades to 'unknown'). DR-012 defines approval as **an explicit human act**; DR-033 §6 made the *reviewer* identity trustworthy via the AI_REVIEW_BOT_LOGINS allowlist (only the bot may apply ai-review:*). The *approver* identity has no equivalent guard.
 <!-- /dr-summary:DR-056 -->
+
 ## [DR-057 — Generated approvables take the review lane — LLM-generated next-phase docs (tasks.md; design.md opt-in) route worktree→PR for independent AI review; human-authored approvables stay main-direct; the drain actions phase-advance by enqueue, never by running an LLM in the Tier-0 extension](DR-057.md)
 
 *Status: proposed · Date: 2026-07-14*
 
-<!-- dr-summary:DR-057 auto=3f3b4d54013a -->
-The background piggyback drain (drain-inbox.sh) has one input — GitHub issues — and never actions approved-doc phase-advance; SDD phase-advance is a human-only extension action, so an approved plan with no tasks.md just stalls. Route by provenance: LLM-generated next-phase derivatives (tasks.md; design.md opt-in) take the worktree→PR review lane so ai-review.yml gives them an independent read, while human-authored approvables stay main-direct.
+<!-- dr-summary:DR-057 auto=a02554d56427 -->
+The background piggyback loop (scripts/drain-inbox.sh, fired from the session-start hook) has ONE input source: **GitHub issues** (inbox → triage → agent-ready → dispatch-issue.sh → worktree → PR). It never reads .minspec/approvals/ sidecars or spec status: frontmatter. Meanwhile SDD phase-advance (specify→plan→tasks→implement) lives entirely in the VS Code extension as a human Command-Palette action. So an **approved plan stalled with no tasks.md** just sits there — nothing in the background loop notices or generates the next phase. The founder asked to close…
 <!-- /dr-summary:DR-057 -->
+
+## [DR-058 — Auto-merge low-blast requires AFFIRMATIVE evidence, not the absence of a high signal — an empty consequence-signal set on a code change is unmeasured (deny-by-default → hold), and eligibility needs a positive low-blast certification that grades consequence, never diff size](DR-058.md)
+
+*Status: accepted · Date: 2026-07-14*
+
+<!-- dr-summary:DR-058 auto=e19da9b036b0 -->
+classifyBlast(signals, touchesExportedSurface) (auto-merge.ts:188) returns 'low' when signals is **empty** — the recognition loop simply never runs, and the function falls through to return 'low'. Two more facts make that empty set fully *eligible*, not merely low-blast: 1. deriveTouchesExportedSurface([]) → false, so the unmeasured-blast gate (auto-merge.ts:385 — if (!reachKnownLow(signals) && touchesExportedSurface) failed.push('unmeasured-blast')) **never fires** (its touchesExportedSurface conjunct is false). 2. reachKnownLow **always returns false in v1** (auto-merge.ts:240 — "No affirmative low-reach signal type exists in v1") — so it can never…
+<!-- /dr-summary:DR-058 -->
+
+## [DR-059 — Commit-message prose deferrals must cite a follow-up — a blocking commit-msg gate, distinct from DR-040's DR-document auto-materialization](DR-059.md)
+
+*Status: proposed · Date: 2026-07-14*
+
+<!-- dr-summary:DR-059 auto=e78d2df187eb -->
+Two mechanisms leak un-tracked work, on **two different surfaces**: 1. **DR-document follow-ups.** A DR's ## Follow-ups (tracked) bullets that carry no issue/spec ref. DR-040 governs this: on DR save, un-materialized bullets **auto-create** their issues (friction-free), and only genuinely broken refs surface. DR-040 deliberately **rejected a blocking gate** here — "only DR-012 approval blocks in MinSpec; a second blocking gate for bookkeeping" — because the author's curated list can be materialized *for* them, so friction is unwarranted.
+<!-- /dr-summary:DR-059 -->
+
+## [DR-060 — The drain auto-remediates fixable open-PR problems (ai-review:changes, failing checks, behind-base) — but never merges and never touches human PRs or conflicts](DR-060.md)
+
+*Status: proposed · Date: 2026-07-14*
+
+<!-- dr-summary:DR-060 auto=5d53524977b5 -->
+The continuous drain (#239) triages the inbox and dispatches agent-ready issues, each producing a PR via dispatch-issue.sh. Nothing then acted on PRs that came back with a **problem**: an ai-review:changes verdict, a red CI check, or a branch gone stale behind main. Those PRs sat until a human hand-fixed each — the exact backlog the drain exists to prevent, one layer up.
+<!-- /dr-summary:DR-060 -->
+
+## [DR-061 — Native GitHub auto-merge on ai-review:pass — interim policy that supersedes DR-033 §6 deny-by-default until the consequence-hybrid blast gate's analyzers land](DR-061.md)
+
+*Status: proposed · Date: 2026-07-15*
+
+<!-- dr-summary:DR-061 auto=3588d3052bff -->
+Auto-merge has been **deny-by-default** since DR-033 §6: a PR holds for a human unless the SPEC-024 **consequence-hybrid** gate certifies it low-blast. But that gate measures blast via the #88 consequence analyzers on a real cross-file index (#195) — **all still open**. With no analyzers, the gate scores every change high (INV-2: unmeasured blast = high) → HOLD. So the *designed* auto-merge cannot function today, and won't for weeks. DR-058 hardened that gate further (affirmative evidence required), widening — not closing…
+<!-- /dr-summary:DR-061 -->
 <!-- minspec:dr-index:end -->
