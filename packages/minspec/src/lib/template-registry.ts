@@ -1025,7 +1025,7 @@ export const SLASH_COMMAND_SHIM_TEMPLATES: readonly ManagedRegionTemplate[] = [
 // ---------------------------------------------------------------------------
 
 /** The three GitHub Actions workflows of the AI-review required-check stack (#564). */
-export const CI_REVIEW_STACK_TEMPLATES: readonly ManagedRegionTemplate[] = [
+const CI_REVIEW_STACK_TEMPLATES: readonly ManagedRegionTemplate[] = [
   {
     name: 'ai-review-workflow',
     outputPath: '.github/workflows/ai-review.yml',
