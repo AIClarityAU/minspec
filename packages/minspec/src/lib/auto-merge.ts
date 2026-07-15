@@ -266,7 +266,7 @@ export function rootCauseGreen(rs: ReviewSignalsInput): boolean {
 /**
  * Signal 2 — a named regression PROVABLY fails on base and passes on head. NOTE:
  * `rs` here MUST already carry the prover-authoritative flags (see
- * `withProverAuthority`); the raw agent self-report is never trusted (INV-3).
+ * `withVerifiedAuthority`); the raw agent self-report is never trusted (INV-3).
  */
 export function regressionGreen(rs: ReviewSignalsInput): boolean {
   const test = (rs.regressionTest ?? '').trim();
@@ -307,6 +307,16 @@ export function allReviewSignalsGreen(rs: ReviewSignalsInput): boolean {
  *    is used unchanged — the pure-decision unit tests inject their diff there; the
  *    production gate ALWAYS supplies `realChangedFiles`, so the self-report never
  *    counts toward eligibility.
+ *
+ * KNOWN ASYMMETRY (advisory, non-blocking — flagged in #728 review): Signal-2's
+ * "absent ⇒ deny" and Signal-1's "absent ⇒ fall back to the caller's own set" are
+ * not symmetric. Today this is inert (the production gate always supplies
+ * `realChangedFiles`), but it re-opens the Signal-1 bypass for any FUTURE caller
+ * of `decideAutoMerge` that skips `changedFilePaths`. Closing it — e.g. an
+ * explicit "real-diff-known" deny flag on `AutoMergeInput` — changes this INV-1
+ * gate's contract and the pinned "pure-unit-test path preserved" test above, so
+ * it needs a deliberate design pass (architect), not a drive-by edit; tracked for
+ * a follow-up rather than changed here.
  */
 function withVerifiedAuthority(
   rs: ReviewSignalsInput,
