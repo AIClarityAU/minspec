@@ -9,8 +9,8 @@ epic: EPIC-003  # SDD Core Methodology — the spec→code ownership contract
 aspects: [traceability, validation, governance, tier-0, spec-gate]
 relates_to: [DR-012, DR-031, DR-056, SPEC-004, DR-003]
 phases:
-  specify: in-progress
-  clarify: pending
+  specify: done   # draft merged via PR #769, 2026-07-14
+  clarify: done   # OQ-1..5 confirmed by Paul Harvey 2026-07-14 (see Clarify)
   plan: pending
   tasks: pending
   implement: pending
@@ -39,19 +39,19 @@ This is the project's recurring **validator-asymmetry class** ([#137](https://gi
 
 ## Functional Requirements
 
-- **FR-1 — `implements:` frontmatter.** A spec MAY declare `implements:` as a list of repo-relative code paths its implementation creates and owns. Paths are matched by the spec-gate exactly as #426/PR#436 already defined (no gate change here).
-- **FR-2 — `affects:` frontmatter.** A spec MAY declare `affects:` as a list of repo-relative paths it modifies but does **not** own (shared/edited surfaces). Distinct from `implements:` so ownership stays unambiguous.
+- **FR-1 — `implements:` frontmatter.** A spec MAY declare `implements:` as a list of repo-relative code paths its implementation creates and owns. Entries are **explicit file paths, not glob patterns** (resolved OQ-1/OQ-5): the gate matches exact case-insensitive path membership and drops any token not ending in a source extension, so a `foo/**` glob would silently never match. A spec owning many files enumerates them; directory/glob ownership would be a separate gate-matcher change, out of scope.
+- **FR-2 — `affects:` frontmatter.** A spec MAY declare `affects:` as a list of repo-relative paths it modifies but does **not** own (shared/edited surfaces), distinct from `implements:` so ownership stays unambiguous. `affects:` is **optional** — only `implements:` gates FR-3 (resolved OQ-3). *Design note:* the gate today blocks `affects:` paths **identically** to `implements:` (both creation-blocking), so `affects:` is not a lighter enforcement signal; its distinct value is as an `affects`-vs-`implements` **edge type** in DR-056's graph. Requiring both would double over-block risk for no enforcement gain — hence optional, and DR-056 should eventually make the gate distinguish *owns* from *touches*.
 - **FR-3 — Required for T3/T4 past Clarify.** The corpus validator MUST **fail** (error, not warn) when a spec is tier T3 or T4 **and** its Clarify phase is done (plan `in-progress` or later) **and** it declares neither a non-empty `implements:` nor the explicit escape (FR-5). The check asserts the declaration **exists** — it is the missing-direction half of the asymmetry, not a check that listed paths resolve.
 - **FR-4 — Validity of what is present (the other half of symmetry).** When `implements:`/`affects:` are present, each entry MUST be a repo-relative path that does not escape the repo root (no absolute paths, no `../` climbing above root). A declared path that does **not yet exist** is allowed (greenfield ownership is the point). A malformed/escaping path fails.
 - **FR-5 — `implements: none` escape.** A spec that genuinely owns no code (policy/docs-only specs) satisfies FR-3 with an explicit `implements: none` plus a one-line reason, mirroring DR-023's "None is a valid explicit answer". This keeps the requirement satisfiable for non-code specs and makes "owns nothing" an on-purpose, reviewable statement rather than an omission.
 - **FR-6 — Scoped to T3/T4.** T1/T2 specs are exempt (their mechanical blast radius does not warrant declared ownership). The rule reads `tier:` and the Clarify phase state only.
-- **FR-7 — Staged introduction (no corpus-wide breakage).** The rule ships as a **warning first**; the existing T3/T4-past-Clarify specs are backfilled with real declarations (or `implements: none`); only then does it flip to **error**. The flip is a single config/threshold change, recorded when backfill is complete — a grandfather ratchet, never a flag day.
+- **FR-7 — Staged introduction (no corpus-wide breakage).** The rule ships as a **warning first**; the existing T3/T4-past-Clarify specs are backfilled with real declarations (or `implements: none`); only then does it flip to **error**. The flip is a single config/threshold change, recorded when backfill is complete — a grandfather ratchet, never a flag day (rollout path confirmed, OQ-2).
 - **FR-8 — No spec-gate change.** This spec produces and validates the signal; the spec-gate (`spec-gate.py`) already consumes it. The boundary is explicit: enforcement is built, production is not.
 
 ## Costly to Refactor
 
 - The **frontmatter key names** `implements:` / `affects:` and the `none` escape grammar. Once specs declare them and both the gate and DR-056's edges consume them, a rename is a corpus-wide migration. The names are already fixed by #426/PR#436's gate — this spec keeps them; do not re-bikeshed at Clarify.
-- **Cheap to reverse:** the warn→error timing (FR-7), whether `affects:` is also required (OQ-3), glob vs explicit lists (OQ-1).
+- **Cheap to reverse (and now resolved at Clarify):** the warn→error timing (FR-7 ratchet), `implements:`-only gating (`affects:` optional), and explicit-lists-not-globs.
 
 ## Acceptance Criteria
 
@@ -71,13 +71,15 @@ This is the project's recurring **validator-asymmetry class** ([#137](https://gi
 - **Any change to spec-gate.py** — its consumption of the signal is built (#426/PR#436).
 - **Auto-deriving `implements:` from tasks.md or git history** — declarations are human-authored/reviewed; auto-derivation is a possible later convenience, not this spec.
 
-## Open Questions
+## Clarify
 
-- **OQ-1** — Globs vs explicit file lists in `implements:` (e.g. `packages/minspec/src/lib/foo/**`)? Globs cut maintenance but blur ownership; explicit lists are precise but rot faster. What does the gate's matcher (#436) already support?
-- **OQ-2** — Introduction path: the FR-7 warn→backfill→error ratchet, or scope the error to specs created after this ships (grandfather by date)? Ratchet preferred; confirm.
-- **OQ-3** — Is `affects:` also required for T3/T4, or does only `implements:` gate FR-3 (with `affects:` optional)? Leaning: `implements:` required, `affects:` optional.
-- **OQ-4** — Once `implements:` is required, is the fuzzy tasks.md path signal retired, or kept as belt-and-suspenders? (Retiring it removes a source of over-blocking; keeping it adds redundancy.)
-- **OQ-5** — Directory-level ownership for specs that own many files — a single `packages/minspec/src/foo/**` entry vs enumerating each file?
+Specify-phase Open Questions, resolved — **confirmed by Paul Harvey 2026-07-14**. Resolutions are grounded in the gate matcher's actual behaviour (`scripts/hooks/spec-gate.py`: exact case-insensitive path membership, no globs, source-extension filter, `implements:`/`affects:` blocked identically).
+
+- **OQ-1 → explicit file lists, not globs.** The gate matches exact paths and drops any token not ending in a source extension, so a `foo/**` glob silently never matches. Globs would need a separate gate-matcher change. *(Folded into FR-1.)*
+- **OQ-2 → warn → backfill → error ratchet.** Flipping to error before backfill breaks every existing T3/T4 spec's `validate` (R1); grandfather the corpus, block regression. *(FR-7.)*
+- **OQ-3 → `implements:` required, `affects:` optional.** The gate blocks both identically, so forcing both only doubles over-block risk; `affects:` earns its keep as a DR-056 edge type, not a second gate requirement. *(FR-2.)* **Design flag for DR-056:** the gate should eventually distinguish *owns* (`implements`) from *touches* (`affects`).
+- **OQ-4 → keep the fuzzy tasks.md signal, for now.** It is existence-filtered (low false-positive) and catches files a spec builds but forgot to declare — a real net during backfill while `implements:` coverage is partial. Revisit retiring it only after AC-8 proves coverage.
+- **OQ-5 → enumerate files, no directory globs.** Same gate constraint as OQ-1; large-spec maintenance cost is accepted. Directory/glob ownership is a possible later gate feature, not this spec.
 
 ## Invariants
 
