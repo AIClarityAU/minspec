@@ -461,7 +461,7 @@ The background piggyback loop (scripts/drain-inbox.sh, fired from the session-st
 
 ## [DR-058 — Auto-merge low-blast requires AFFIRMATIVE evidence, not the absence of a high signal — an empty consequence-signal set on a code change is unmeasured (deny-by-default → hold), and eligibility needs a positive low-blast certification that grades consequence, never diff size](DR-058.md)
 
-*Status: proposed · Date: 2026-07-14*
+*Status: accepted · Date: 2026-07-14*
 
 <!-- dr-summary:DR-058 auto=e19da9b036b0 -->
 classifyBlast(signals, touchesExportedSurface) (auto-merge.ts:188) returns 'low' when signals is **empty** — the recognition loop simply never runs, and the function falls through to return 'low'. Two more facts make that empty set fully *eligible*, not merely low-blast: 1. deriveTouchesExportedSurface([]) → false, so the unmeasured-blast gate (auto-merge.ts:385 — if (!reachKnownLow(signals) && touchesExportedSurface) failed.push('unmeasured-blast')) **never fires** (its touchesExportedSurface conjunct is false). 2. reachKnownLow **always returns false in v1** (auto-merge.ts:240 — "No affirmative low-reach signal type exists in v1") — so it can never…
