@@ -1025,7 +1025,7 @@ export const SLASH_COMMAND_SHIM_TEMPLATES: readonly ManagedRegionTemplate[] = [
 // ---------------------------------------------------------------------------
 
 /** The three GitHub Actions workflows of the AI-review required-check stack (#564). */
-const CI_REVIEW_STACK_TEMPLATES: readonly ManagedRegionTemplate[] = [
+export const CI_REVIEW_STACK_TEMPLATES: readonly ManagedRegionTemplate[] = [
   {
     name: 'ai-review-workflow',
     outputPath: '.github/workflows/ai-review.yml',
@@ -1091,6 +1091,25 @@ const CI_REVIEW_STACK_TEMPLATES: readonly ManagedRegionTemplate[] = [
     content: AI_REVIEW_GUARD_JS,
   },
 ] as const;
+
+/**
+ * Names of the managed-region templates whose canonical source is minspec's OWN
+ * on-disk working file (the #564 CI-review stack), not a scaffolded output.
+ *
+ * `checkManagedRegionMarkers` (scaffold.ts, #760) asserts every on-disk managed
+ * template carries its markers — but minspec's own repo never marker-wraps these
+ * particular files (see the `ci-stack-portability` suite in
+ * managed-region-templates.test.ts, which asserts `tpl.content` equals these
+ * files' raw bytes) and gates their freshness a different way instead
+ * (`checkCiReviewTemplatesFresh` in scripts/validate-frontmatter.ts, #678). Used
+ * to exclude them from the marker-presence gate IN THIS REPO ONLY — derived from
+ * `CI_REVIEW_STACK_TEMPLATES` so the exclusion list can never drift from the
+ * templates it names. A project that scaffolds FROM these templates (every
+ * project other than minspec itself) has no such exclusion.
+ */
+export const SELF_HOSTED_TEMPLATE_NAMES: readonly string[] = CI_REVIEW_STACK_TEMPLATES.map(
+  (t) => t.name,
+);
 
 /**
  * All managed-region templates in scaffold order.
