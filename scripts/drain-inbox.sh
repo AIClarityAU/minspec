@@ -43,7 +43,10 @@
 #   MINSPEC_DRAIN_MAX_LIFETIME=28800 — hard wall-clock cap on a loop (8 h backstop).
 #   MINSPEC_DRAIN_MAX_FAILURES=3   — stop after N consecutive non-quota cycle errors.
 #   MINSPEC_SESSION_PID=<pid>      — explicit session anchor (else auto-resolved).
-#   MINSPEC_ALLOW_STALE=1          — proceed even if the checkout is behind main.
+#   MINSPEC_DRAIN_SELF_REFRESH=0   — run the pipeline in place from SCRIPT_DIR
+#                                    instead of a self-synced run dir (#773 opt-out).
+#   MINSPEC_DRAIN_RUN_DIR=<path>   — where the self-synced run-dir worktree lives
+#                                    (default /tmp/minspec-drain-run).
 #
 # Opt-in is the once-off permission gate (#239): set it once with --enable-auto,
 # then the session-start hook drains automatically thereafter. The pref lives in
@@ -88,6 +91,17 @@ CONTINUOUS=false
 # temp dir instead of the shared /tmp file (behaviour is identical otherwise).
 LOCK="${MINSPEC_DRAIN_LOCK:-/tmp/minspec-drain-inbox.lock}"
 LOG="${MINSPEC_DRAIN_LOG:-/tmp/minspec-drain-inbox.log}"
+
+# ── Self-refreshing run directory (#773) ─────────────────────────────────────
+# The drain is launched from the SHARED primary checkout, which goes stale as main
+# advances (rule #8 forbids pulling it) — and auto-merge makes main advance faster.
+# The old behaviour self-TERMINATED on staleness (rc 43 → loop exit), so the drain
+# died and auto-fix/dispatch never ran. Instead, each cycle runs the pipeline
+# scripts from a DEDICATED worktree hard-synced to origin/main: fresh by
+# construction, self-healing, and NEVER touching the primary's HEAD/working tree
+# (rule #8). Overridable for tests; opt out with MINSPEC_DRAIN_SELF_REFRESH=0.
+DRAIN_RUN_DIR="${MINSPEC_DRAIN_RUN_DIR:-/tmp/minspec-drain-run}"
+PRIMARY_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "${SCRIPT_DIR}/.." && pwd))"
 
 # ── Continuous-loop tunables (env-overridable) ───────────────────────────────
 INTERVAL="${MINSPEC_DRAIN_INTERVAL:-1200}"           # 20 min between cycles
@@ -136,22 +150,100 @@ resolve_session_pid() {
   return 0
 }
 
-# assert_fresh: the #481 stale-checkout guard, re-usable per cycle. Returns 0 when
-# the checkout is at/ahead of origin/main (safe to run the pipeline), 1 when it is
-# behind (the PR/reviewer/gate orchestration dispatch-issue.sh runs may be stale).
-# MINSPEC_ALLOW_STALE=1 downgrades the stop to a warning. Fails OPEN on fetch/ref
-# errors (network/auth) — an unrelated infra blip must not masquerade as staleness.
-assert_fresh() {
-  git fetch origin main -q 2>/dev/null || true
-  local behind
-  behind=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0)
-  if [[ "${behind:-0}" -gt 0 ]]; then
-    if [[ "${MINSPEC_ALLOW_STALE:-}" == "1" ]]; then
-      echo "WARNING: checkout is $behind commit(s) behind origin/main — proceeding anyway (MINSPEC_ALLOW_STALE=1)." >&2
+# ensure_fresh_run_dir (#773): guarantee the pipeline scripts we run this cycle are
+# CURRENT, by maintaining a dedicated worktree hard-synced to origin/main and
+# repointing TRIAGE/DISPATCH/REMEDIATE at ITS copies. This replaces the old
+# terminal "die on staleness" (rc 43) with self-healing: staleness is impossible by
+# construction because we resync every cycle.
+#
+# RULE #8 SAFETY (load-bearing): every git op targets an EXPLICIT dir via `-C`.
+# `git -C "$PRIMARY_ROOT" fetch` is read-only (never moves HEAD). `git worktree add`
+# creates a SEPARATE worktree — it does not switch the primary's branch. `git -C
+# "$DRAIN_RUN_DIR" reset --hard` acts on the RUN DIR only. NONE of these touch the
+# shared primary checkout's HEAD or working tree, so concurrent sessions are safe.
+#
+# Fails OPEN, never fatal: if the worktree can't be created/synced (git/network),
+# it logs and falls back to the in-place SCRIPT_DIR scripts (whose own #481 guard
+# then applies) — the loop keeps going and retries next cycle. Opt out entirely
+# with MINSPEC_DRAIN_SELF_REFRESH=0 (runs in place, pre-#773 behaviour).
+ensure_fresh_run_dir() {
+  [[ "${MINSPEC_DRAIN_SELF_REFRESH:-1}" == "0" ]] && return 0
+  [[ -z "$DRAIN_RUN_DIR" ]] && { echo "[drain] WARNING: MINSPEC_DRAIN_RUN_DIR is empty — self-refresh disabled, running in place." >&2; return 0; }
+
+  # SAFETY (rule #8): the run dir must resolve OUTSIDE the primary checkout — we
+  # hard-reset and may remove it. CANONICALIZE both paths first (readlink -m resolves
+  # symlinks + `..`/`.`/`//` without requiring existence), so a run dir symlinked or
+  # relatively-pointed INTO the primary cannot slip past a purely-lexical compare
+  # (#773 review, BLOCKING). Require absolute too.
+  local run_canon primary_canon
+  run_canon="$(readlink -m -- "$DRAIN_RUN_DIR" 2>/dev/null || echo "$DRAIN_RUN_DIR")"
+  primary_canon="$(readlink -m -- "$PRIMARY_ROOT" 2>/dev/null || echo "$PRIMARY_ROOT")"
+  case "$run_canon" in
+    "$primary_canon"|"$primary_canon"/*)
+      echo "[drain] WARNING: MINSPEC_DRAIN_RUN_DIR ('$DRAIN_RUN_DIR' → '$run_canon') is inside the primary checkout — self-refresh disabled, running in place." >&2
+      return 0 ;;
+    /*) : ;;  # absolute, outside primary — ok
+    *)  echo "[drain] WARNING: MINSPEC_DRAIN_RUN_DIR ('$DRAIN_RUN_DIR') must be an absolute path — self-refresh disabled." >&2
+        return 0 ;;
+  esac
+
+  git -C "$PRIMARY_ROOT" fetch origin main -q 2>/dev/null || true
+
+  # (Re)create the worktree if it is missing or not a usable checkout. Use git's own
+  # worktree removal (not a blind rm) to unregister a stale/broken one; only rm a
+  # leftover path when it is NOT a populated checkout, so we never nuke real content.
+  if [[ ! -e "${DRAIN_RUN_DIR}/scripts/drain-inbox.sh" ]]; then
+    git -C "$PRIMARY_ROOT" worktree remove --force "$DRAIN_RUN_DIR" 2>/dev/null || true
+    git -C "$PRIMARY_ROOT" worktree prune 2>/dev/null || true
+    [[ -e "$DRAIN_RUN_DIR" && ! -d "${DRAIN_RUN_DIR}/scripts" ]] && rm -rf "$DRAIN_RUN_DIR" 2>/dev/null || true
+    if ! git -C "$PRIMARY_ROOT" worktree add --detach "$DRAIN_RUN_DIR" origin/main 2>/dev/null; then
+      echo "[drain] WARNING: could not create run-dir worktree at $DRAIN_RUN_DIR — running in place (SCRIPT_DIR)." >&2
       return 0
     fi
-    echo "ERROR: checkout is $behind commit(s) behind origin/main — the pipeline orchestration (PR/reviewer/gate) dispatch-issue.sh runs may be stale. Pull main (or run from a fresh checkout) before draining. Override (not recommended): MINSPEC_ALLOW_STALE=1" >&2
-    return 1
+  fi
+
+  # DEFENSE IN DEPTH (rule #8): even past the lexical guard, refuse to reset/repoint if
+  # git reports the run dir IS the primary working tree (a symlink/bind that fooled the
+  # path compare). The reset below must never touch the primary.
+  local run_toplevel
+  run_toplevel="$(git -C "$DRAIN_RUN_DIR" rev-parse --show-toplevel 2>/dev/null || echo '')"
+  if [[ -z "$run_toplevel" || "$(readlink -m -- "$run_toplevel" 2>/dev/null || echo "$run_toplevel")" == "$primary_canon" ]]; then
+    echo "[drain] WARNING: run dir resolves to the primary checkout — self-refresh disabled (rule #8), running in place." >&2
+    return 0
+  fi
+
+  # Hard-sync to origin/main — the self-heal. On any git error we do NOT trust the run
+  # dir (see the verify-before-repoint below); we never die.
+  git -C "$DRAIN_RUN_DIR" reset --hard origin/main -q 2>/dev/null \
+    || echo "[drain] WARNING: could not resync run-dir to origin/main." >&2
+
+  # node/tsx helpers (render-review-signals.mjs, auto-merge-gate.ts) need the
+  # workspace's hoisted modules; symlink the primary's so children resolve without a
+  # per-cycle install. HONEST CAVEAT (#773 review, minor): this uses the primary's
+  # COMPILED deps — including @aiclarity/shared's gitignored `out/` — which can lag
+  # origin/main's source. Those helpers are best-effort and degrade if it mismatches
+  # (the render block is skipped, not corrupted), so the staleness is accepted, not fatal.
+  [[ -d "${PRIMARY_ROOT}/node_modules" ]] \
+    && ln -sfn "${PRIMARY_ROOT}/node_modules" "${DRAIN_RUN_DIR}/node_modules" 2>/dev/null || true
+  [[ -d "${PRIMARY_ROOT}/packages/minspec/node_modules" ]] \
+    && ln -sfn "${PRIMARY_ROOT}/packages/minspec/node_modules" "${DRAIN_RUN_DIR}/packages/minspec/node_modules" 2>/dev/null || true
+
+  # VERIFY the run dir is ACTUALLY at origin/main before trusting it (#773 review,
+  # MAJOR). Only then repoint children + tell them freshness is validated. If the reset
+  # failed (e.g. a leftover index.lock from a killed prior cycle left the run dir
+  # behind), do NOT export MINSPEC_FRESHNESS_CHECKED — fall back to in-place so each
+  # child's own #481 guard fires instead of silently running STALE orchestration.
+  local run_head origin_head
+  run_head="$(git -C "$DRAIN_RUN_DIR" rev-parse HEAD 2>/dev/null || echo 'norun')"
+  origin_head="$(git -C "$PRIMARY_ROOT" rev-parse origin/main 2>/dev/null || echo 'noorigin')"
+  if [[ "$run_head" == "$origin_head" && -x "${DRAIN_RUN_DIR}/scripts/dispatch-issue.sh" ]]; then
+    TRIAGE="${DRAIN_RUN_DIR}/scripts/triage-inbox.sh"
+    DISPATCH="${DRAIN_RUN_DIR}/scripts/dispatch-issue.sh"
+    REMEDIATE="${DRAIN_RUN_DIR}/scripts/remediate-pr.sh"
+    export MINSPEC_FRESHNESS_CHECKED=1
+    echo "[drain] run dir verified at origin/main (${run_head:0:7}) — pipeline scripts are current."
+  else
+    echo "[drain] WARNING: run dir NOT verified at origin/main (run=${run_head:0:7} origin=${origin_head:0:7}) — running in place; children re-check freshness (#481)." >&2
   fi
   return 0
 }
@@ -162,10 +254,16 @@ assert_fresh() {
 # continuous loop's scheduling (it is ignored by the one-shot path):
 #   0  — cycle completed (work done or nothing ready).
 #   42 — a Claude quota/limit signal was seen mid-dispatch → loop should back off.
-#   43 — persistent freshness failure (behind main) → loop should stop cleanly.
 #   1  — a transient error → loop counts it toward MAX_CONSEC_FAIL, keeps going.
+# (There is no longer a terminal "stale" code: #773 self-heals the run dir each
+#  cycle instead of stopping the loop when the checkout falls behind main.)
 run_cycle() {
   local inbox_issues all_ready n out drc cap
+
+  # #773: refresh the run dir FIRST, so triage/dispatch/remediate all execute the
+  # CURRENT orchestration (self-heal, not die-on-stale). Never fatal — on failure it
+  # falls back to in-place scripts and the cycle proceeds.
+  ensure_fresh_run_dir
 
   # Step 1: triage inbox issues → labels T1/T2 as agent-ready
   inbox_issues=$(gh issue list --repo "$REPO" --label "inbox" \
@@ -186,15 +284,10 @@ run_cycle() {
     return 0
   fi
 
-  # Freshness gate (#481) — checked HERE, only once real dispatch is imminent, so
-  # an empty-inbox continuous cycle never blocks on it. Stale ⇒ stop the loop.
-  if ! assert_fresh; then
-    return 43
-  fi
-  # Tell each dispatch-issue.sh child we already validated freshness this cycle,
-  # so it does not re-fetch per issue (drain owns the check; children trust it).
-  export MINSPEC_FRESHNESS_CHECKED=1
-
+  # Freshness is guaranteed by ensure_fresh_run_dir at the top of this cycle (#773):
+  # the pipeline scripts run from a worktree hard-synced to origin/main, and
+  # MINSPEC_FRESHNESS_CHECKED is exported so the children trust it. No terminal
+  # "die on stale" (the old rc-43 path) — staleness is impossible by construction.
   echo "[drain] dispatching $(echo "$all_ready" | wc -l | tr -d ' ') agent-ready issue(s)..."
   for n in $all_ready; do
     echo "[drain] dispatching #$n..."
@@ -284,10 +377,6 @@ run_loop() {
         echo "[drain] backing off ${QUOTA_BACKOFF}s for the quota window to reset."
         wait_interval "$QUOTA_BACKOFF"
         ;;
-      43)
-        echo "[drain] persistent freshness failure (behind origin/main) — stopping loop cleanly. Pull main to resume next session."
-        break
-        ;;
       *)
         consec=$((consec + 1))
         echo "[drain] cycle error (rc=$rc) — ${consec}/${MAX_CONSEC_FAIL} consecutive."
@@ -333,6 +422,18 @@ case "${1:-}" in
     ;;
   --resolve-session-pid)
     resolve_session_pid; echo
+    exit 0
+    ;;
+  --refresh-run-dir)
+    # Seam (#773): refresh the dedicated run dir and print the ref it synced to
+    # (or "in-place" when self-refresh is off / fell back). Lets a test assert the
+    # run dir tracks origin/main without driving the whole loop.
+    ensure_fresh_run_dir
+    if [[ "${MINSPEC_DRAIN_SELF_REFRESH:-1}" != "0" && -e "${DRAIN_RUN_DIR}/.git" ]]; then
+      git -C "$DRAIN_RUN_DIR" rev-parse HEAD 2>/dev/null || echo "in-place"
+    else
+      echo "in-place"
+    fi
     exit 0
     ;;
   --dry-run) DRY_RUN=true ;;
@@ -397,20 +498,12 @@ if $DRY_RUN; then
   exit 0
 fi
 
-# One-shot manual runs keep the fail-loud FOREGROUND stale-checkout guard (#481)
-# so a dev running `scripts/drain-inbox.sh` sees the error and a non-zero exit,
-# rather than having it buried in the background log. (The continuous loop instead
-# re-checks freshness inside every cycle via assert_fresh, since main can advance
-# mid-session — it cannot hard-exit the foreground for a condition that may not
-# exist yet.) See the drain→dispatch stale-pipeline rationale in dispatch-issue.sh.
-if ! $CONTINUOUS; then
-  if [[ "${MINSPEC_FRESHNESS_CHECKED:-}" != "1" ]]; then
-    if ! assert_fresh; then
-      exit 1
-    fi
-    export MINSPEC_FRESHNESS_CHECKED=1
-  fi
-fi
+# Freshness is no longer a fail-loud FOREGROUND gate (#773 supersedes the #481
+# foreground guard): both the one-shot and continuous paths call run_cycle, which
+# runs ensure_fresh_run_dir first and executes the pipeline from a run dir
+# hard-synced to origin/main. A stale primary checkout no longer blocks a manual
+# run — the drain self-heals instead of refusing. (dispatch-issue.sh keeps its own
+# #481 guard for direct invocation.)
 
 # Resolve the session anchor NOW, in the foreground, while $PPID still chains up to
 # the Claude session (after the fork+disown below the loop is reparented and this
