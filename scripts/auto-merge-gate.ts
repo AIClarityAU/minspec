@@ -551,6 +551,13 @@ const BOUNDARY_DIR_PREFIXES: readonly string[] = [
   '.buildkite/', // Buildkite pipeline config
   '.githooks/', // git hooks run arbitrary shell on commit/push (this repo: core.hooksPath=.githooks)
   '.husky/', // husky-managed git hooks — same arbitrary-shell-on-commit/push surface
+  // #490 review (2nd): dispatch AGENT-GOVERNANCE prompts (DR-008). scripts/roles/*.md
+  // define agent permissions + "MUST NOT" constraints and are loaded by
+  // dispatch-issue.sh to drive the security/merge/reviewer agents. They are `.md`
+  // but they are POLICY, not documentation — a role-prompt-only PR weakening the
+  // security or merge role must classify HIGH so it can never auto-merge unseen
+  // (the identical governance hole this PR closed for CODEOWNERS).
+  'scripts/roles/',
 ];
 
 /**
@@ -567,6 +574,15 @@ const BOUNDARY_ROOT_BASENAMES: ReadonlySet<string> = new Set([
   // weakening review requirements can never auto-merge unseen. (basename match ⇒
   // caught at repo root, `.github/`, or `docs/`.)
   'CODEOWNERS',
+  // #490 review (2nd): the harness AGENT-GOVERNANCE / policy files. These are
+  // `.md` (so the docs-extension check would certify them low) but they define
+  // agent behaviour + invariants + "MUST NOT" rules — a change weakening them is
+  // governance, not documentation, and must classify HIGH (same class as
+  // scripts/roles/ above). basename match ⇒ caught wherever they live.
+  'constitution.md', // .minspec/constitution.md — the SDD invariants
+  'CLAUDE.md', // agent instructions / standing rules
+  'AGENTS.md', // agent instructions (Spec Kit / harness mirror)
+  '.cursorrules', // agent instructions (Cursor mirror)
 ]);
 
 /**
@@ -697,7 +713,14 @@ export function detectLowBlastDocsTest(
   changedFiles: ReadonlyArray<ChangedFile>,
 ): ClassificationSignal | undefined {
   if (changedFiles.length === 0) return undefined;
-  const allDocsOrTest = changedFiles.every((f) => isDocsPath(f.path) || isTestPath(f.path));
+  // A file that is ALSO a boundary/high-blast path (CI config, git hooks, CODEOWNERS,
+  // dispatch role prompts, harness governance) can NEVER be certified low — even if
+  // it matches a docs extension/basename. Governance is not documentation (#490
+  // review): this makes the affirmative-low catalog and the boundary (high) set
+  // provably disjoint, so a `.md` policy file can never slip through as "docs."
+  const allDocsOrTest = changedFiles.every(
+    (f) => (isDocsPath(f.path) || isTestPath(f.path)) && !isBoundaryPath(f.path),
+  );
   if (!allDocsOrTest) return undefined;
   return {
     name: LOW_BLAST_DOCS_TEST,

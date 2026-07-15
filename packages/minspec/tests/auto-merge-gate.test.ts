@@ -784,4 +784,37 @@ describe('#490 / DR-058 — detectLowBlastDocsTest certifies a docs/test-only di
     expect(isBoundaryPath('docs/CODEOWNERS')).toBe(true);
     expect(detectBoundaryChange([cf({ path: '.github/CODEOWNERS' })])?.name).toBe('manifest_changed');
   });
+
+  // #490 review (2nd finding): dispatch role prompts (scripts/roles/*.md) and the
+  // harness governance files (constitution.md, CLAUDE.md, AGENTS.md, .cursorrules)
+  // are `.md`/policy — they must NOT certify low, and must classify HIGH. The
+  // general invariant: a boundary path can never be certified low, even if it
+  // matches a docs extension/basename.
+  it('dispatch role prompts (scripts/roles/*.md) are NOT certified docs — they are agent governance', () => {
+    expect(detectLowBlastDocsTest([cf({ path: 'scripts/roles/security.md' })])).toBeUndefined();
+    expect(detectLowBlastDocsTest([cf({ path: 'scripts/roles/reviewer.md' })])).toBeUndefined();
+    // even mixed with a genuine doc, a role-prompt presence blocks certification
+    expect(
+      detectLowBlastDocsTest([cf({ path: 'README.md' }), cf({ path: 'scripts/roles/dev.md' })]),
+    ).toBeUndefined();
+  });
+
+  it('scripts/roles/*.md is affirmatively HIGH-blast (boundary)', () => {
+    expect(isBoundaryPath('scripts/roles/security.md')).toBe(true);
+    expect(detectBoundaryChange([cf({ path: 'scripts/roles/security.md' })])?.name).toBe('manifest_changed');
+  });
+
+  it('harness governance files (constitution/CLAUDE/AGENTS/.cursorrules) are NOT docs and ARE high-blast', () => {
+    for (const p of ['.minspec/constitution.md', 'CLAUDE.md', 'AGENTS.md', '.cursorrules']) {
+      expect(detectLowBlastDocsTest([cf({ path: p })]), `${p} must not certify low`).toBeUndefined();
+      expect(isBoundaryPath(p), `${p} must be boundary`).toBe(true);
+    }
+  });
+
+  it('regression guard: GENUINE docs still certify low (governance exclusion did not over-block)', () => {
+    expect(detectLowBlastDocsTest([cf({ path: 'README.md' }), cf({ path: 'docs/guide.md' })])?.name).toBe(
+      'low_blast_docs_test_only',
+    );
+    expect(detectLowBlastDocsTest([cf({ path: 'CHANGELOG.md' })])?.name).toBe('low_blast_docs_test_only');
+  });
 });
