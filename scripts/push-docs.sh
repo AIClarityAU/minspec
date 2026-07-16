@@ -64,9 +64,12 @@ fi
 # so .githooks/pre-commit's `npm run validate` step crashes on module load (a require
 # error, not a validation failure). Safe to skip because the SAME `npm run validate`
 # is re-run and REQUIRED on the docs-lane PR by ci.yml's `lint` job — NOT the no-op
-# minspec-validate.yml stub. commit-msg RCDD fires only on `fix:` (lane commits are
-# `docs(...)`, N/A). Residual gap, stated honestly: the DR-029 born-`proposed` gate has
-# no CI equivalent — fine, since a new DR goes via a review PR (DR-051 §4), not the lane.
+# minspec-validate.yml stub. commit-msg RCDD fires only on `fix:` subjects; the default
+# `-m` is `docs(...)`, but `$msg` is a raw caller-supplied flag with no prefix check, so
+# a caller-typed `fix:` message would skip RCDD with no CI backstop. Accepted: RCDD is a
+# process gate, not a product-safety invariant, and ai-review still reads every lane PR.
+# Residual gap, stated honestly: the DR-029 born-`proposed` gate has no CI equivalent —
+# fine, since a new DR goes via a review PR (DR-051 §4), not the lane.
 git -C "$wt" commit -q --no-verify -m "$msg"
 git -C "$wt" push -q -u origin "$branch"
 

@@ -335,9 +335,12 @@ export async function pushDocsLaneCommand(
         // skip because the SAME `npm run validate` is re-run and REQUIRED on the
         // docs-lane PR by `ci.yml`'s `lint` job — NOT the no-op `minspec-validate.yml`
         // stub (its validator is unpublished). The other skipped gate, `commit-msg`
-        // RCDD, fires only on `fix:` subjects; lane commits are `docs(...)`, so it is
-        // N/A. Honest residual gap: the DR-029 "new DR born `proposed`" gate has no CI
-        // equivalent — acceptable because a new DR goes via a review PR (DR-051 §4),
+        // RCDD, fires only on `fix:` subjects; the default message is `docs(...)`, but
+        // `message` is free text from the input box (promptMessage), so a user-typed
+        // `fix:` subject would skip RCDD with no CI backstop. Accepted: RCDD is a
+        // process gate, not a product-safety invariant, and ai-review still reads every
+        // lane PR. Honest residual gap: the DR-029 "new DR born `proposed`" gate has no
+        // CI equivalent — acceptable because a new DR goes via a review PR (DR-051 §4),
         // not this mechanical lane, and ai-review still reads every docs-lane PR.
         await run('git', ['commit', '--no-verify', '-m', message], { cwd: wt });
       } catch (err) {
