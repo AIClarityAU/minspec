@@ -498,4 +498,12 @@ Auto-merge has been **deny-by-default** since DR-033 §6: a PR holds for a human
 <!-- dr-summary:DR-062 auto=ff15b49d4cfd -->
 A read-only audit of the approvables system established three facts, each with file:line evidence: 1. **Approval validity is per-artifact-content only.** A spec's approval binds a canonical hash of *its own* content (approval.ts:306-313). depends_on / relates_to / supersedes edges are parsed and walked, but **only** for corruption detection and priority ordering (next-task.ts:262-395) — never as an input to approval validity. So when an upstream approvable a spec depends on changes, the dependent stays approved, signed off against content that no longer…
 <!-- /dr-summary:DR-062 -->
+
+## [DR-063 — The `awaiting-approval` queue signal — one positive "your turn" label, single-owner, decoupled from the AI-failure path](DR-063.md)
+
+*Status: proposed · Date: 2026-07-16*
+
+<!-- dr-summary:DR-063 auto=78ca4574c42b -->
+The independent AI reviewer (DR-033 §6) records a PR verdict as ai-review:{pass,changes,blocked,pending}. On any non-pass, .github/workflows/ai-review.yml **also** applies needs-human-review **unconditionally at t=0** (ai-review.yml L568-574 and L606-608). Two problems compound: 1. **ai-review:changes is overloaded.** It means both *"the reviewer read the code and wants specific fixes"* (substantive, AI-remediable) and *"the review could not produce a trustworthy green"* (procedural fail-closed — garbled/injected/truncated verdict, ESCALATE, workflow error). Different meanings, one label.
+<!-- /dr-summary:DR-063 -->
 <!-- minspec:dr-index:end -->

@@ -495,7 +495,7 @@ test('decideStatus: headStatus OMITTED → not required (rollout / base-guard-pr
   assert.equal(s.state, 'success');
 });
 
-// ── SPEC-031 FR-9a — awaiting-approval "your turn" queue signal ───────────────
+// ── DR-063 / SPEC-031 FR-9a — awaiting-approval "your turn" queue signal ──────
 test('shouldAwaitApproval: green gate + no auto-merge → your turn (label present)', () => {
   assert.equal(shouldAwaitApproval({ statusState: 'success', autoMergeArmed: false }), true);
 });

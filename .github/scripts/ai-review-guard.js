@@ -42,7 +42,8 @@ const PASS_STATUS_CONTEXT = 'ai-review/pass';
 // isQuotaExhaustion() and the ai-review-retry workflow.
 const BLOCKED = 'ai-review:blocked';
 
-// SPEC-031 INV-8 / FR-9a — the single positive "your turn" queue signal. Present
+// DR-063 (materialised as SPEC-031 INV-8 / FR-9a) — the single positive "your turn"
+// queue signal. Present
 // on a PR whose independent AI review has PASSED (the `ready-to-merge` gate is
 // green) and whose ONLY remaining gate is a human keystroke. It is the canonical
 // "my turn" filter, replacing the ambiguous read of `ai-review:pass` plus a
@@ -293,8 +294,8 @@ function decideStatus({ labels, provenanceRevert, stalenessStrip, passProvenance
   };
 }
 
-// SPEC-031 FR-9a — should the `awaiting-approval` "your turn" signal be PRESENT on
-// this PR? Pure and side-effect-free so it is unit-testable; ready-to-merge.yml
+// DR-063 / SPEC-031 FR-9a — should the `awaiting-approval` "your turn" signal be
+// PRESENT on this PR? Pure and side-effect-free so it is unit-testable; ready-to-merge.yml
 // applies/removes the label from this boolean on every PR event. Both conditions
 // required:
 //   - statusState === 'success' — the ready-to-merge gate (decideStatus, the sole

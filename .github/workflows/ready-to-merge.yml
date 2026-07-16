@@ -296,7 +296,7 @@ jobs:
                 `passVerified=${passProvenance.verified})`,
             );
 
-            // ── SPEC-031 FR-9a — sync the `awaiting-approval` "your turn" signal ──
+            // ── DR-063 / SPEC-031 FR-9a — sync the `awaiting-approval` "your turn" signal ──
             // ONE authoritative owner: the label tracks THIS gate's decision on every
             // PR event, so a flip to red (stale-strip / forged-revert / changes) that
             // drives status.state to 'failure' also clears the label here — no extra
