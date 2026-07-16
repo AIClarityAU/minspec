@@ -73,6 +73,10 @@
         "title": "MinSpec: Refresh Harness Files"
       },
       {
+        "command": "minspec.commitHarnessRefresh",
+        "title": "MinSpec: Commit Harness Refresh"
+      },
+      {
         "command": "minspec.constitutionShowPrompt",
         "title": "MinSpec: Show Constitution Generation Prompt"
       },
@@ -256,6 +260,10 @@
         "title": "MinSpec: Approve/Accept Active",
         "shortTitle": "Approve/Accept",
         "icon": "$(check-all)"
+      },
+      {
+        "command": "minspec.pushDocsLane",
+        "title": "MinSpec: Push docs via lane"
       }
     ],
     "keybindings": [
@@ -268,6 +276,12 @@
         "command": "minspec.nextTask",
         "key": "ctrl+k ctrl+n",
         "mac": "cmd+k cmd+n",
+        "when": "workspaceFolderCount != 0"
+      },
+      {
+        "command": "minspec.pushDocsLane",
+        "key": "ctrl+k ctrl+p",
+        "mac": "cmd+k cmd+p",
         "when": "workspaceFolderCount != 0"
       }
     ],
@@ -482,6 +496,11 @@
           "type": "boolean",
           "default": false,
           "description": "Always use the AI pass when backfilling epics (skips the per-run 'AI-enhanced?' prompt). Set globally by choosing 'Always' on that prompt — a personal preference that follows you across projects. Runs 'claude -p' locally; the extension makes no network calls. Off by default."
+        },
+        "minspec.advancePhaseOnApprove": {
+          "type": "boolean",
+          "default": false,
+          "description": "Always enqueue a phase-advance request when you approve a spec (skips the per-approval follow-up prompt). Set globally by choosing 'Always' on that prompt — a personal preference that follows you across projects. Enqueue-only: writes a request to .minspec/queue/ for a downstream consumer to dequeue; never runs 'claude -p' itself. Off by default."
         },
         "minspec.approverEmail": {
           "type": "string",

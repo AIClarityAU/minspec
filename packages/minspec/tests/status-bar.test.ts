@@ -21,8 +21,10 @@ vi.mock('vscode', () => ({
 import * as vscode from 'vscode';
 import {
   MinSpecStatusBar,
+  MinSpecScaffoldCommitStatusBar,
   formatStatusBarText,
   formatTooltip,
+  formatScaffoldCommitText,
   computeProgress,
   fromFrontmatter,
 } from '../src/views/status-bar';
@@ -383,6 +385,59 @@ describe('MinSpecStatusBar class', () => {
 
   it('dispose calls dispose on the underlying item', () => {
     const bar = new MinSpecStatusBar();
+    bar.dispose();
+    expect(mockStatusBarItem.dispose).toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// Harness-refresh commit recovery status bar (#758)
+// =============================================================================
+
+describe('formatScaffoldCommitText()', () => {
+  it('includes the dirty-file count', () => {
+    expect(formatScaffoldCommitText(3)).toBe('$(git-commit) MinSpec: harness uncommitted (3)');
+  });
+
+  it('renders singular count the same way as plural (count is data, not grammar)', () => {
+    expect(formatScaffoldCommitText(1)).toBe('$(git-commit) MinSpec: harness uncommitted (1)');
+  });
+});
+
+describe('MinSpecScaffoldCommitStatusBar class', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockStatusBarItem.text = '';
+    mockStatusBarItem.tooltip = '';
+    mockStatusBarItem.command = '';
+  });
+
+  it('creates a status bar item on construction, bound to the recovery command', () => {
+    new MinSpecScaffoldCommitStatusBar();
+    expect(vscode.window.createStatusBarItem).toHaveBeenCalledWith(1, 98); // Left=1, priority=98
+    expect(mockStatusBarItem.command).toBe('minspec.commitHarnessRefresh');
+  });
+
+  it('update([]) hides the item — nothing to recover', () => {
+    const bar = new MinSpecScaffoldCommitStatusBar();
+    bar.update([]);
+    expect(mockStatusBarItem.hide).toHaveBeenCalled();
+    expect(mockStatusBarItem.show).not.toHaveBeenCalled();
+  });
+
+  it('update([...dirty]) shows the item with a count and a listing tooltip', () => {
+    const bar = new MinSpecScaffoldCommitStatusBar();
+    bar.update(['CLAUDE.md', '.minspec/config.json']);
+
+    expect(mockStatusBarItem.text).toBe('$(git-commit) MinSpec: harness uncommitted (2)');
+    expect(mockStatusBarItem.tooltip).toContain('CLAUDE.md');
+    expect(mockStatusBarItem.tooltip).toContain('.minspec/config.json');
+    expect(mockStatusBarItem.show).toHaveBeenCalled();
+    expect(mockStatusBarItem.hide).not.toHaveBeenCalled();
+  });
+
+  it('dispose calls dispose on the underlying item', () => {
+    const bar = new MinSpecScaffoldCommitStatusBar();
     bar.dispose();
     expect(mockStatusBarItem.dispose).toHaveBeenCalled();
   });

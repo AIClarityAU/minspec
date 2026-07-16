@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as path from 'path';
 import * as fs from 'fs';
-import { initCommand, initRefreshCommand } from './commands/init';
+import { initCommand, initRefreshCommand, commitHarnessRefreshCommand, collectDirtyScaffoldPaths } from './commands/init';
 import { constitutionShowPromptCommand, constitutionCompactCommand, constitutionProposeCommand } from './commands/constitution';
 import { classifyCommand } from './commands/classify';
 import { statusCommand } from './commands/status';
@@ -19,13 +19,14 @@ import { ApprovalDiffContentProvider, showChangesSinceApproval } from './lib/app
 import { approveActiveCommand } from './commands/approve-active';
 import { validateSpecCommand } from './commands/validate';
 import { viewDesignCommand, viewTasksCommand } from './commands/view-phase-file';
+import { pushDocsLaneCommand } from './commands/push-docs-lane';
 import { SpecTreeProvider } from './views/spec-tree-provider';
 import { EpicReorderDragAndDropController } from './views/epic-dnd-controller';
 import { AdrTreeProvider } from './views/adr-tree-provider';
 import { FrontmatterCompletionProvider } from './views/frontmatter-completion';
 import { BacklogTreeProvider } from './views/backlog-view';
 import { TreeExpansionMemory } from './views/tree-expansion-memory';
-import { MinSpecStatusBar, MinSpecNextTaskStatusBar, fromFrontmatter } from './views/status-bar';
+import { MinSpecStatusBar, MinSpecNextTaskStatusBar, MinSpecScaffoldCommitStatusBar, fromFrontmatter } from './views/status-bar';
 import { nextTaskCommand, computeNextTask } from './commands/next-task';
 import { SpecPanel } from './views/spec-panel';
 import { loadSession, saveSession, addToScope, isFileInScope } from './lib/session';
@@ -227,6 +228,27 @@ export function activate(context: vscode.ExtensionContext): void {
     nextTaskStatusBar.update(null);
   }
 
+  // Harness-refresh commit recovery status bar (#758). Debounced like the
+  // next-task signpost above — never rebuilt synchronously on render — and
+  // best-effort: collectDirtyScaffoldPaths already swallows its own errors,
+  // so a rejected promise here just means "nothing to report".
+  const scaffoldCommitStatusBar = new MinSpecScaffoldCommitStatusBar();
+  let scaffoldCommitTimer: ReturnType<typeof setTimeout> | undefined;
+  const refreshScaffoldCommitStatusBar = () => {
+    if (!workspaceRoot) {
+      scaffoldCommitStatusBar.update([]);
+      return;
+    }
+    if (scaffoldCommitTimer) clearTimeout(scaffoldCommitTimer);
+    scaffoldCommitTimer = setTimeout(() => {
+      void collectDirtyScaffoldPaths(workspaceRoot).then(
+        (dirty) => scaffoldCommitStatusBar.update(dirty),
+        () => scaffoldCommitStatusBar.update([]),
+      );
+    }, 300);
+  };
+  refreshScaffoldCommitStatusBar();
+
   // CodeLens providers (Phase 7)
   const codeLensProvider = new MinSpecCodeLensProvider(workspaceRoot);
   const specFileLensProvider = new MinSpecSpecFileLensProvider(workspaceRoot);
@@ -264,8 +286,24 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // Commands
   context.subscriptions.push(
-    vscode.commands.registerCommand('minspec.init', initCommand),
-    vscode.commands.registerCommand('minspec.initRefresh', initRefreshCommand),
+    vscode.commands.registerCommand(
+      'minspec.init',
+      async (folderArg?: string, deps?: Parameters<typeof initCommand>[1]) => {
+        await initCommand(folderArg, deps);
+        refreshScaffoldCommitStatusBar();
+      },
+    ),
+    vscode.commands.registerCommand(
+      'minspec.initRefresh',
+      async (folderArg?: string, deps?: Parameters<typeof initRefreshCommand>[1]) => {
+        await initRefreshCommand(folderArg, deps);
+        refreshScaffoldCommitStatusBar();
+      },
+    ),
+    vscode.commands.registerCommand('minspec.commitHarnessRefresh', async (folderArg?: string) => {
+      await commitHarnessRefreshCommand(folderArg);
+      refreshScaffoldCommitStatusBar();
+    }),
     vscode.commands.registerCommand('minspec.constitutionShowPrompt', constitutionShowPromptCommand),
     vscode.commands.registerCommand('minspec.constitutionCompact', constitutionCompactCommand),
     vscode.commands.registerCommand('minspec.constitutionPropose', constitutionProposeCommand),
@@ -346,6 +384,11 @@ export function activate(context: vscode.ExtensionContext): void {
       await approveActiveCommand(node);
     }),
     vscode.commands.registerCommand('minspec.validateSpec', (node) => validateSpecCommand(node)),
+    // SPEC-039: open a docs-only PR on the docs-lane from inside the editor.
+    // folderArg is optional (tests/programmatic); the command resolves the target
+    // folder interactively when omitted. Best-effort — never rejects (INV-4).
+    vscode.commands.registerCommand('minspec.pushDocsLane', (folderArg?: string) =>
+      pushDocsLaneCommand(folderArg)),
     vscode.commands.registerCommand('minspec.viewDesign', (node) => viewDesignCommand(node)),
     vscode.commands.registerCommand('minspec.viewTasks', (node) => viewTasksCommand(node)),
     vscode.commands.registerCommand('minspec.showSpecPanel', async (specFilePath?: string) => {
@@ -367,6 +410,7 @@ export function activate(context: vscode.ExtensionContext): void {
     { dispose: () => specPanel.dispose() },
     statusBar,
     nextTaskStatusBar,
+    scaffoldCommitStatusBar,
   );
 
   // Watch spec files — refresh tree + status bar on changes

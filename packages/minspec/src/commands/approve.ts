@@ -20,6 +20,7 @@ import { sidecarPath } from '../lib/approval-store';
 import { resolveActiveSpecId } from '../lib/active-spec';
 import { folderForFile, resolveTargetFolder } from '../lib/resolve-folder';
 import { commitApprovalIfEnabled } from './commit-on-approve';
+import { enqueuePhaseAdvance } from '../lib/phase-advance-queue';
 
 /** A tree node carrying a SpecSummary (from the spec tree context menu). */
 interface SpecNodeLike {
@@ -93,6 +94,67 @@ function resolveApproverEmail(rootDir: string): string {
     vscode.workspace.getConfiguration('minspec').get<string>('approverEmail') ?? ''
   ).trim();
   return configured || gitConfigEmail(rootDir);
+}
+
+const ADVANCE_PHASE = 'Advance to next phase';
+const ALWAYS = 'Always';
+
+/**
+ * Persisted "always enqueue a phase-advance request on approve" opt-in
+ * (DR-057 §3). Written GLOBALLY: it's a personal workflow preference, not
+ * project policy, so it follows the user across every project — same pattern
+ * as `minspec.autoBackfillUseAi` (backfill-epics.ts).
+ */
+function advancePhaseOnApproveEnabled(): boolean {
+  return vscode.workspace
+    .getConfiguration('minspec')
+    .get<boolean>('advancePhaseOnApprove', false);
+}
+/**
+ * Persist the "Always" choice. Never lets a pref-write failure surface as an
+ * approval failure — same non-blocking contract as `enqueuePhaseAdvanceSafely`
+ * below, and for the same reason: the approval itself already succeeded by the
+ * time this runs, so a config-write error here must not throw into
+ * `approveSpecCommand`'s catch and paint a false "Failed to approve" toast.
+ */
+async function enableAdvancePhaseOnApprove(): Promise<void> {
+  try {
+    await vscode.workspace
+      .getConfiguration('minspec')
+      .update('advancePhaseOnApprove', true, vscode.ConfigurationTarget.Global);
+  } catch (err) {
+    console.warn(`MinSpec: failed to persist advancePhaseOnApprove pref — ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * Enqueue the LLM-free phase-advance request (DR-057 §3 / #733) — writes only
+ * a request file to `.minspec/queue/`; MUST NOT run `claude -p` (Tier-0
+ * air-gap) and must not block on generation. A downstream consumer
+ * (#732/#734/#735, not built here) dequeues it. Never lets a queue-write
+ * failure surface as an approval failure — the approval itself already
+ * succeeded by the time this runs.
+ */
+function enqueuePhaseAdvanceSafely(rootDir: string, specRel: string): void {
+  try {
+    enqueuePhaseAdvance(rootDir, specRel, 'alt-a-toast');
+  } catch (err) {
+    console.warn(`MinSpec: phase-advance enqueue failed — ${err instanceof Error ? err.message : String(err)}`);
+  }
+}
+
+/**
+ * Act on the follow-up toast's choice. "Always" additionally persists the
+ * global pref so future approvals skip asking.
+ */
+async function handleAdvancePhaseChoice(
+  rootDir: string,
+  specRel: string,
+  choice: string | undefined,
+): Promise<void> {
+  if (choice !== ADVANCE_PHASE && choice !== ALWAYS) return;
+  if (choice === ALWAYS) await enableAdvancePhaseOnApprove();
+  enqueuePhaseAdvanceSafely(rootDir, specRel);
 }
 
 /**
@@ -209,7 +271,8 @@ export async function approveSpecCommand(
     // Gated by `minspec.commitOnApprove` (default on); pathspec-safe (never bundles
     // another session's staged files). The suffix folds the commit outcome into the
     // single approval toast below.
-    const sidecar = sidecarPath(rootDir, specRelPath(rootDir, spec.filePath));
+    const specRel = specRelPath(rootDir, spec.filePath);
+    const sidecar = sidecarPath(rootDir, specRel);
     const { suffix: commitSuffix } = await commitApprovalIfEnabled(
       rootDir,
       [spec.filePath, sidecar],
@@ -220,17 +283,40 @@ export async function approveSpecCommand(
       (wasPreImpl
         ? `MinSpec: ✓ Approved ${spec.id} for implementation (status → implementing).`
         : `MinSpec: ✓ Approved ${spec.id} for implementation.`) + commitSuffix;
+
+    // Refresh the tree BEFORE the follow-up toast: the toast carries action
+    // buttons, so it persists on screen until the user dismisses it (an
+    // `await` on it blocks well past the approval itself). A re-approval with
+    // no `status:` change (sidecar under unwatched `.minspec/approvals/`) has
+    // no other trigger for the tree's approval decoration to update, so it must
+    // not wait on the toast's resolution.
+    await vscode.commands.executeCommand('minspec.refreshTree');
+
+    // DR-057 §3 follow-up toast: offer to enqueue a phase-advance request (or,
+    // once the global pref is set, do it silently — no re-asking). Enqueue-only,
+    // LLM-free: this never runs `claude -p` itself (Tier-0 air-gap); a downstream
+    // consumer (#732/#734/#735) dequeues and generates.
+    const alwaysAdvance = advancePhaseOnApproveEnabled();
     if (warnings.length > 0) {
       // Non-modal advisory: approved, but the gaps are surfaced so they are not
       // silently swallowed (never-wrong). Not a modal, not a blocking gate.
       const n = warnings.length;
-      vscode.window.showWarningMessage(
-        `${base} ${n} advisory ${n === 1 ? 'warning' : 'warnings'} — ${warnings
-          .map((w) => w.message)
-          .join(' ')}`,
-      );
-    } else {
+      const warnText = `${base} ${n} advisory ${n === 1 ? 'warning' : 'warnings'} — ${warnings
+        .map((w) => w.message)
+        .join(' ')}`;
+      if (alwaysAdvance) {
+        vscode.window.showWarningMessage(warnText);
+        enqueuePhaseAdvanceSafely(rootDir, specRel);
+      } else {
+        const choice = await vscode.window.showWarningMessage(warnText, ADVANCE_PHASE, ALWAYS);
+        await handleAdvancePhaseChoice(rootDir, specRel, choice);
+      }
+    } else if (alwaysAdvance) {
       vscode.window.showInformationMessage(base);
+      enqueuePhaseAdvanceSafely(rootDir, specRel);
+    } else {
+      const choice = await vscode.window.showInformationMessage(base, ADVANCE_PHASE, ALWAYS);
+      await handleAdvancePhaseChoice(rootDir, specRel, choice);
     }
 
     // First-approve-only tip that editing revokes approval (#104 — show once, not
@@ -244,8 +330,6 @@ export async function approveSpecCommand(
         );
       }
     }
-
-    await vscode.commands.executeCommand('minspec.refreshTree');
   } catch (err) {
     vscode.window.showErrorMessage(
       `MinSpec: Failed to approve — ${err instanceof Error ? err.message : String(err)}`,

@@ -139,6 +139,14 @@ describe('Invariant 2: No backend — no network calls', () => {
     // shells `git`. Tier-0 boundary interpretation to be ratified by a DR.
     // See ruleset-advisor.ts defaultCommandRunner.
     'lib/ruleset-advisor.ts',
+    // SPEC-039 "Push docs via lane": the ONLY command that pushes. It shells the
+    // user's authenticated `git`/`gh` to open a docs-only PR — and ONLY after an
+    // explicit modal confirmation that names the network action (FR-3 / INV-1).
+    // MinSpec opens no socket itself; the network actor is the user's own CLI,
+    // same Tier-1 local-tool-delegation posture (DR-004) as github.ts/ruleset-
+    // advisor.ts. Every wire call runs strictly after consent. See
+    // commands/push-docs-lane.ts pushDocsLaneCommand.
+    'commands/push-docs-lane.ts',
   ]);
 
   // Files allowed to *name* HTTP clients as detection data (not call them). They

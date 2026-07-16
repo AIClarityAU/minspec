@@ -191,6 +191,33 @@ describe('MINSPEC_GITIGNORE_ENTRIES — coverage of machine-local state files', 
   });
 });
 
+describe('root .gitignore — mirrors MINSPEC_GITIGNORE_ENTRIES (#794)', () => {
+  // T0 invariant gate: this repo's OWN root .gitignore must list every entry in
+  // MINSPEC_GITIGNORE_ENTRIES. Without this, an entry can be added to the
+  // scaffold list (applied to newly-scaffolded projects) while the monorepo's
+  // own root file silently omits it — a present-but-asymmetric validator gap
+  // that already leaked twice (#755: .minspec/queue/; #790: agent-dispatch
+  // sidecars only gitignored reactively). Fails CI the moment the two drift.
+  const repoRootGitignorePath = path.join(__dirname, '..', '..', '..', '.gitignore');
+  const repoRootGitignore = fs.readFileSync(repoRootGitignorePath, 'utf-8');
+  const repoRootGitignoreLines = new Set(
+    repoRootGitignore
+      .split('\n')
+      .map((line) => line.trim())
+      .filter((line) => line.length > 0),
+  );
+
+  it('contains every MINSPEC_GITIGNORE_ENTRIES entry', () => {
+    for (const entry of MINSPEC_GITIGNORE_ENTRIES) {
+      expect(
+        repoRootGitignoreLines.has(entry),
+        `root .gitignore is missing scaffold entry "${entry}" — add it to keep ` +
+          'the monorepo checkout gitignore-consistent with newly-scaffolded projects',
+      ).toBe(true);
+    }
+  });
+});
+
 describe('refreshHarnessFiles() — gitignore backfill for existing projects', () => {
   let tmpDir: string;
 

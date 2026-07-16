@@ -57,6 +57,17 @@ function signal(name: string, over: Partial<ClassificationSignal> = {}): Classif
   };
 }
 
+/** #490 / DR-058 — the affirmative low-blast signal (docs/test-only certification). */
+function lowBlastDocsTestOnly(): ClassificationSignal {
+  return {
+    name: 'low_blast_docs_test_only',
+    value: true,
+    weight: 0,
+    tierContribution: 'T1',
+    axis: 'consequence',
+  };
+}
+
 function greenReviewSignals(over: Partial<ReviewSignalsInput> = {}): ReviewSignalsInput {
   return {
     rootCause: 'validator flagged dangling refs but not missing ones',
@@ -85,7 +96,10 @@ function eligibleInput(over: Partial<AutoMergeInput> = {}): AutoMergeInput {
   return {
     reviewSignals: greenReviewSignals(),
     hollowFindings: [],
-    consequenceSignals: [reachUnavailable()], // low-blast, no exported touch
+    // #490 / DR-058: low-blast now requires an AFFIRMATIVE signal — the eligible
+    // shape carries a docs/test-only certification (reach-unavailable alone is
+    // unmeasured → high). No exported touch.
+    consequenceSignals: [reachUnavailable(), lowBlastDocsTestOnly()],
     mode: 'consequence-hybrid',
     proverResult: provenProver(),
     ...over,
@@ -251,12 +265,21 @@ describe('SPEC-024 FR-5 — blast classification defaults UNKNOWN names to high'
     expect(classifyBlast([signal(name)], false)).toBe('high');
   });
 
-  it('reach_unavailable ONLY, no exported touch → low', () => {
-    expect(classifyBlast([reachUnavailable()], false)).toBe('low');
+  it('reach_unavailable ONLY, no exported touch → high (unmeasured, no affirmative low signal — #490/DR-058)', () => {
+    expect(classifyBlast([reachUnavailable()], false)).toBe('high');
   });
 
-  it('an empty signal set → low', () => {
-    expect(classifyBlast([], false)).toBe('low');
+  it('an empty signal set → high (unmeasured ≠ safe — the #490 fix / DR-058)', () => {
+    expect(classifyBlast([], false)).toBe('high');
+  });
+
+  it('an affirmative low-blast signal → low (docs/test-only certification)', () => {
+    expect(classifyBlast([lowBlastDocsTestOnly()], false)).toBe('low');
+    expect(classifyBlast([reachUnavailable(), lowBlastDocsTestOnly()], false)).toBe('low');
+  });
+
+  it('a recognized high signal overrides an affirmative low signal', () => {
+    expect(classifyBlast([lowBlastDocsTestOnly(), signal('manifest_changed')], false)).toBe('high');
   });
 
   it('a novel signal name drives the decision through decideAutoMerge → high-blast, ineligible', () => {
@@ -527,6 +550,33 @@ describe('#489 — Signal-1 uses the real diff, not the agent self-report', () =
 
   it('absent changedFilePaths falls back to the review-signal diff (pure-unit-test path preserved)', () => {
     const d = decideAutoMerge(eligibleInput()); // no real-diff override supplied
+    expect(d.eligible).toBe(true);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #490 / DR-058 — an opaque change (zero recognized signals) HOLDS. The
+// classifyBlast unit tests pin the inversion; these pin the end-to-end decision:
+// a change the analyzers said NOTHING about is unmeasured → high → hold, and only
+// an affirmative low-blast certification keeps a change eligible.
+// ─────────────────────────────────────────────────────────────────────────────
+describe('#490 — an opaque change (zero recognized signals) holds for a human', () => {
+  it('empty consequenceSignals → high-blast → ineligible (the #490 hole, closed)', () => {
+    const d = decideAutoMerge(eligibleInput({ consequenceSignals: [] }));
+    expect(d.blast).toBe('high');
+    expect(d.eligible).toBe(false);
+    expect(d.failed).toContain('high-blast');
+  });
+
+  it('reach-unavailable-only (no affirmative low) → ineligible', () => {
+    const d = decideAutoMerge(eligibleInput({ consequenceSignals: [reachUnavailable()] }));
+    expect(d.eligible).toBe(false);
+    expect(d.failed).toContain('high-blast');
+  });
+
+  it('the affirmative docs/test-only certification keeps a change eligible', () => {
+    const d = decideAutoMerge(eligibleInput()); // carries lowBlastDocsTestOnly()
+    expect(d.blast).toBe('low');
     expect(d.eligible).toBe(true);
   });
 });

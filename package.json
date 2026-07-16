@@ -8,6 +8,7 @@
   ],
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || true",
+    "pretest": "npm run build --workspace=@aiclarity/shared",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
