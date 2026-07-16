@@ -50,5 +50,6 @@
   },
   "autoMerge": {
     "native": true
-  }
+  },
+  "ownershipDeclaration": "warn"
 }

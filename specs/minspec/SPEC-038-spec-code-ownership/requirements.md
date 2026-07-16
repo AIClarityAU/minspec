@@ -12,8 +12,8 @@ phases:
   specify: done   # draft merged via PR #769, 2026-07-14
   clarify: done   # OQ-1..5 confirmed by Paul Harvey 2026-07-14 (see Clarify)
   plan: done   # design.md merged #772; PQ-1/PQ-2 both resolved at Tasks 2026-07-14 (see design.md)
-  tasks: in-progress   # tasks.md drafted 2026-07-14
-  implement: pending
+  tasks: done   # tasks.md merged PR #774, 2026-07-14
+  implement: in-progress   # Slice 1 (rule ships as warn) built 2026-07-16; backfill + flip pending
 ---
 
 # MinSpec — Required `implements:`/`affects:` spec→code ownership declaration (Requirements)

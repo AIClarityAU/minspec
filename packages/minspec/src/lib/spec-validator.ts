@@ -17,6 +17,7 @@ import { TIERS } from './config';
 import { epicRefValue } from './epic-manager';
 import { deriveStatus, type ExplicitTerminal, type PhaseState } from './lifecycle';
 import type { ApprovalStatus } from './approval';
+import { isValidOwnedPath } from './ownership-path-rules';
 
 /** A cross-cutting concern a spec may touch, each requiring a specific artifact. */
 export type Aspect = 'ux' | 'api' | 'data' | 'architecture';
@@ -715,6 +716,100 @@ export interface ValidateSpecOptions {
   readonly siblingShardFiles?: readonly ShardIdFile[];
 }
 
+// ─── Spec→code ownership (SPEC-038 / #460) ───────────────────────────────────
+
+/**
+ * Raw tokens of a frontmatter list `key:` — the TS mirror of `spec-gate.py`
+ * `fm_list`: accepts inline `key: a, b` / `key: [a, b]` and the block form
+ * (`key:` alone, then `  - item` lines). Quotes/whitespace stripped. Empty when
+ * the key is absent. Purely a tokenizer — path validity is `isValidOwnedPath`.
+ */
+function fmListField(raw: string, key: string): string[] {
+  const block = raw.match(FRONTMATTER_BLOCK_RE);
+  if (!block) return [];
+  const inline = rawFrontmatterField(raw, key);
+  if (inline !== undefined) {
+    return inline
+      .split(/[,\s[\]]+/)
+      .filter((t) => t.length > 0)
+      .map((t) => t.replace(/^["']+|["']+$/g, ''));
+  }
+  // Block-list form.
+  const lines = block[1].split('\n');
+  const keyLine = new RegExp(`^${key}[ \\t]*:[ \\t]*(?:#.*)?$`);
+  const item = /^[ \t]+-[ \t]*(.+?)[ \t]*(?:#.*)?$/;
+  const toks: string[] = [];
+  for (let i = 0; i < lines.length; i++) {
+    if (keyLine.test(lines[i])) {
+      for (const cont of lines.slice(i + 1)) {
+        if (/^[ \t]*$/.test(cont)) continue;
+        const m = cont.match(item);
+        if (!m) break; // de-indented / next key → list ended
+        toks.push(m[1].replace(/^["']+|["']+$/g, ''));
+      }
+      break;
+    }
+  }
+  return toks;
+}
+
+/**
+ * SPEC-038 / #460 — required `implements:`/`affects:` spec→code ownership.
+ *
+ * The symmetric rule pair (INV-2 / #137), fired only for a **primary requirements
+ * spec that is T3/T4 and past Clarify** (FR-3 / FR-6):
+ *  - `ownership.implements.missing` — declares neither a non-empty `implements:`
+ *    nor the `implements: none` + `implements_reason:` escape. Severity from
+ *    `config.ownershipDeclaration` (default `warn`, FR-7 ratchet).
+ *  - `ownership.implements.invalid` — a present `implements:`/`affects:` token is
+ *    not a valid owned-code path (always `error`).
+ *
+ * Path validity mirrors the spec-gate via `isValidOwnedPath` (parity-pinned). This
+ * only PRODUCES + VALIDATES the signal the gate already consumes — no gate change (FR-8).
+ */
+export function validateOwnership(spec: ParsedSpec, config: MinspecConfig): ValidationViolation[] {
+  const specType = (spec.frontmatter.type ?? '').toLowerCase();
+  const tier = spec.frontmatter.tier;
+  if (!isPrimarySpec(specType) || TIER_RANK[tier] < 3 || spec.frontmatter.phases.clarify !== 'done') {
+    return [];
+  }
+  const raw = spec.raw;
+  const out: ValidationViolation[] = [];
+
+  const implTokens = fmListField(raw, 'implements');
+  const isNoneEscape = implTokens.length === 1 && implTokens[0].toLowerCase() === 'none';
+  const reason = rawFrontmatterField(raw, 'implements_reason');
+  const declaresCode = implTokens.length > 0 && !isNoneEscape;
+  const validEscape = isNoneEscape && reason !== undefined;
+
+  // Missing-direction (#137): no real declaration and no satisfied escape.
+  if (!declaresCode && !validEscape) {
+    out.push({
+      rule: 'ownership.implements.missing',
+      severity: config.ownershipDeclaration === 'error' ? 'error' : 'warning',
+      message: `${tier} spec past Clarify does not declare its owned code (implements:).`,
+      fixHint:
+        'Add an `implements:` frontmatter list of the repo-relative code paths this spec creates/owns (e.g. `implements: [packages/minspec/src/lib/foo.ts]`) — or, for a spec that owns no code, `implements: none` plus a one-line `implements_reason:`. This is what arms the spec-gate for this spec (SPEC-038 / #460).',
+    });
+  }
+
+  // Validity-direction: every present path must be a valid owned-code path
+  // (the `none` escape is not a path, so it is exempt).
+  const paths = isNoneEscape ? [] : implTokens;
+  const bad = [...paths, ...fmListField(raw, 'affects')].filter((t) => !isValidOwnedPath(t));
+  if (bad.length > 0) {
+    out.push({
+      rule: 'ownership.implements.invalid',
+      severity: 'error',
+      message: `implements:/affects: contains invalid owned-code path(s): ${bad.join(', ')}.`,
+      fixHint:
+        'Each entry must be a repo-relative path to a source file — no absolute paths, no `../` escapes, no build/vendored dirs, and a source extension. A not-yet-created path is fine (greenfield ownership). Fix or remove the offending token(s).',
+    });
+  }
+
+  return out;
+}
+
 export function validateSpec(
   spec: ParsedSpec,
   config: MinspecConfig,
@@ -731,6 +826,9 @@ export function validateSpec(
   const raw = spec.raw;
   const rawLower = raw.toLowerCase();
   const violations: ValidationViolation[] = [];
+
+  // Spec→code ownership declaration (SPEC-038 / #460).
+  violations.push(...validateOwnership(spec, config));
 
   // 0. Epic reference (soft — warnings only, DR-013 FR-9). Two failure modes,
   //    both leave the spec stranded under "(no epic)":

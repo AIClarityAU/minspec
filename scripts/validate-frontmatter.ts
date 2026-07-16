@@ -15,10 +15,11 @@ import { validateDrSequence, validateDrIndexStatus } from '../packages/minspec/s
 import {
   validateSplitLayoutCoverage,
   checkAcceptanceCriteria,
+  validateOwnership,
   type SplitLayoutFile,
 } from '../packages/minspec/src/lib/spec-validator';
 import { parseSpec } from '../packages/minspec/src/lib/spec';
-import { DEFAULT_CONFIG } from '../packages/minspec/src/lib/config';
+import { DEFAULT_CONFIG, loadConfig } from '../packages/minspec/src/lib/config';
 import type { Tier } from '../packages/minspec/src/lib/config';
 import {
   checkReferences,
@@ -405,6 +406,26 @@ try {
     const violation = checkAcceptanceCriteria(parseSpec(content));
     if (violation) {
       fail(file, `${violation.message} ${violation.fixHint}`);
+    }
+  }
+} catch {
+  // specs/ unreadable / absent — nothing to validate, stay silent.
+}
+
+// Rule 15 (#460, SPEC-038): T3/T4 specs past Clarify must declare their owned
+// code (implements:/affects:). `validateOwnership` is the SAME function the
+// in-extension approve gate (`validateSpec`) calls — enforced identically on the
+// commit/CI surface, not a reimplementation that could drift (Goal G-6, the #654
+// lesson). Ships as `warn` per `ownershipDeclaration` (FR-7 ratchet) — inert
+// until the corpus is backfilled, then a one-line flip to `error` makes it FATAL
+// here too. `ownership.implements.invalid` is always fatal (a malformed path).
+try {
+  const ownCfg = loadConfig(ROOT);
+  for (const file of glob(specsDir, '.md')) {
+    const content = readFileSync(file, 'utf-8');
+    for (const v of validateOwnership(parseSpec(content), ownCfg)) {
+      if (v.severity === 'error') fail(file, `${v.message} ${v.fixHint}`);
+      else warn(`ownership ${relative(ROOT, file)}: ${v.message}`);
     }
   }
 } catch {

@@ -10,10 +10,17 @@
  * Ships as `warn` by default (FR-7); tests force severity by rule identity, not
  * config, so they hold across the warn→error ratchet.
  */
+import { execFileSync } from 'node:child_process';
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, it, expect } from 'vitest';
 import { validateSpec } from '../src/lib/spec-validator';
 import { parseSpec } from '../src/lib/spec';
 import { DEFAULT_CONFIG } from '../src/lib/config';
+
+const AC5_DIR = dirname(fileURLToPath(import.meta.url));
 
 const MISSING = 'ownership.implements.missing';
 const INVALID = 'ownership.implements.invalid';
@@ -100,5 +107,45 @@ describe('SPEC-038 ownership declaration (#460)', () => {
   // ── Trigger predicate (P2 — phases.clarify) ───────────────────────────────
   it('a T3 still in Clarify (clarify: pending) is NOT yet required', () => {
     expect(rules(ownSpec({ tier: 'T3', clarify: 'pending' }))).not.toContain(MISSING);
+  });
+});
+
+describe('SPEC-038 AC-5 — the produced signal arms the real spec-gate (#460)', () => {
+  const gateSh = resolve(AC5_DIR, '../../../scripts/hooks/spec-gate.sh');
+
+  function gateDecision(cwd: string, filePath: string): string {
+    const envelope = JSON.stringify({ tool_name: 'Write', tool_input: { file_path: filePath }, cwd });
+    try {
+      return execFileSync('bash', [gateSh], { input: envelope, encoding: 'utf-8', env: process.env });
+    } catch (e) {
+      const err = e as { stdout?: string; stderr?: string };
+      return (err.stdout ?? '') + (err.stderr ?? '');
+    }
+  }
+
+  it('an unapproved T3 spec that declares implements: blocks creation of the declared (non-existent) file, but not an undeclared sibling', () => {
+    const tmp = mkdtempSync(join(tmpdir(), 'own-ac5-'));
+    try {
+      execFileSync('git', ['init', '-q'], { cwd: tmp });
+      mkdirSync(join(tmp, '.minspec'), { recursive: true });
+      writeFileSync(join(tmp, '.minspec/config.json'), '{"version":"1"}');
+      const specDir = join(tmp, 'specs/minspec/SPEC-900-ac5');
+      mkdirSync(specDir, { recursive: true });
+      writeFileSync(
+        join(specDir, 'requirements.md'),
+        [
+          '---', 'id: SPEC-900', 'title: AC5 fixture', 'tier: T3', 'status: implementing',
+          'created: 2026-07-15', 'implements: [src/owned.ts]',
+          'phases:', '  specify: done', '  clarify: done', '  plan: in-progress',
+          '  tasks: pending', '  implement: pending', '---', '', '## Specify', 'x', '',
+        ].join('\n'),
+      );
+      // declared, unapproved → creation blocked (the declaration arms the gate)
+      expect(gateDecision(tmp, join(tmp, 'src/owned.ts'))).toContain('deny');
+      // undeclared sibling → not owned → allowed (doc-before-CODE is per-declaration, not a repo freeze)
+      expect(gateDecision(tmp, join(tmp, 'src/other.ts'))).toContain('allow');
+    } finally {
+      rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
