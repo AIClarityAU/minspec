@@ -61,9 +61,12 @@ if git -C "$wt" diff --cached --quiet; then
   exit 0
 fi
 # --no-verify: the ephemeral worktree has no node_modules / built @aiclarity/shared,
-# so the repo's pre-commit validate hook (tsx) crashes on module load. Local hooks
-# are a fast-fail convenience; CI's MinSpec-validate required check is the guarantee
-# on the docs-lane PR (DR-037). Skip them here.
+# so .githooks/pre-commit's `npm run validate` step crashes on module load (a require
+# error, not a validation failure). Safe to skip because the SAME `npm run validate`
+# is re-run and REQUIRED on the docs-lane PR by ci.yml's `lint` job — NOT the no-op
+# minspec-validate.yml stub. commit-msg RCDD fires only on `fix:` (lane commits are
+# `docs(...)`, N/A). Residual gap, stated honestly: the DR-029 born-`proposed` gate has
+# no CI equivalent — fine, since a new DR goes via a review PR (DR-051 §4), not the lane.
 git -C "$wt" commit -q --no-verify -m "$msg"
 git -C "$wt" push -q -u origin "$branch"
 

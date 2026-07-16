@@ -330,10 +330,15 @@ export async function pushDocsLaneCommand(
 
       try {
         // --no-verify: the ephemeral worktree has no node_modules / built
-        // @aiclarity/shared, so the repo's pre-commit validate hook (tsx) crashes on
-        // module load (not a validation failure — a require error). Local hooks are a
-        // fast-fail convenience; CI's MinSpec-validate required check is the guarantee
-        // on the docs-lane PR (DR-037). Skip them here.
+        // @aiclarity/shared, so `.githooks/pre-commit`'s `npm run validate` step
+        // crashes on module load (a require error, not a validation failure). Safe to
+        // skip because the SAME `npm run validate` is re-run and REQUIRED on the
+        // docs-lane PR by `ci.yml`'s `lint` job — NOT the no-op `minspec-validate.yml`
+        // stub (its validator is unpublished). The other skipped gate, `commit-msg`
+        // RCDD, fires only on `fix:` subjects; lane commits are `docs(...)`, so it is
+        // N/A. Honest residual gap: the DR-029 "new DR born `proposed`" gate has no CI
+        // equivalent — acceptable because a new DR goes via a review PR (DR-051 §4),
+        // not this mechanical lane, and ai-review still reads every docs-lane PR.
         await run('git', ['commit', '--no-verify', '-m', message], { cwd: wt });
       } catch (err) {
         // A hook rejection or (more likely, given --no-verify) a git error — surface it.
