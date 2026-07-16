@@ -530,3 +530,210 @@ export async function createRequiredChecksRuleset(
 
   return { created: false, forbidden, detail: result.stderr || result.stdout };
 }
+
+// ---------------------------------------------------------------------------
+// #564 slices 2/3 · SPEC-033 FR-3 — provision the FULL producible check set,
+// SYMMETRICALLY (add missing checks to an existing ruleset).
+//
+// `hasRequiredChecksRuleset` only answered "does ANY ruleset require checks?", so
+// a ruleset requiring just `MinSpec SDD validation` read as "configured" and the
+// `ai-review` / `ready-to-merge` checks scaffolded later (#564) were never added —
+// the sealbox gap, the same present-not-missing asymmetry as the validator class.
+// These close it: read WHICH contexts a ruleset requires, and ADD any missing ones
+// to the existing ruleset (not only create-if-absent).
+// ---------------------------------------------------------------------------
+
+/** Whether a `gh api` failure haystack indicates an authorization problem. */
+function isForbidden(haystack: string): boolean {
+  return (
+    /\b403\b/.test(haystack) ||
+    /forbidden/i.test(haystack) ||
+    /must have admin/i.test(haystack) ||
+    /resource not accessible/i.test(haystack)
+  );
+}
+
+/** The default-branch ruleset that guards checks: its id + the contexts it requires. */
+export interface ExistingRequiredChecks {
+  readonly rulesetId: number;
+  readonly contexts: string[];
+}
+
+/** Permissive view of a ruleset PUT/GET body — only the fields we read/preserve. */
+interface RulesetFull {
+  name?: string;
+  target?: string;
+  enforcement?: string;
+  conditions?: unknown;
+  bypass_actors?: unknown;
+  rules?: Array<{
+    type?: string;
+    parameters?: {
+      required_status_checks?: Array<{ context?: string; integration_id?: number }>;
+    } & Record<string, unknown>;
+  }>;
+}
+
+/** Pull the `required_status_checks` contexts out of a parsed ruleset (pure, tolerant). */
+function extractRequiredContexts(detail: RulesetFull): string[] {
+  const rule = Array.isArray(detail.rules)
+    ? detail.rules.find((r) => r?.type === 'required_status_checks')
+    : undefined;
+  const checks = rule?.parameters?.required_status_checks;
+  if (!Array.isArray(checks)) return [];
+  return checks
+    .map((c) => c?.context)
+    .filter((c): c is string => typeof c === 'string' && c.length > 0);
+}
+
+/**
+ * The default-branch ruleset's id + the status-check contexts it CURRENTLY
+ * requires, or `null` when no active branch ruleset guards checks. Unlike
+ * {@link hasRequiredChecksRuleset} (a bare exists-bool), this returns WHICH
+ * contexts are required, so the caller can add any missing to an existing ruleset
+ * (the sealbox case). Read-only config probe (DR-050). `null` on any read/parse
+ * failure ⇒ the caller treats it as "none" and offers to create.
+ */
+export async function listRequiredCheckContexts(
+  owner: string,
+  repo: string,
+  run: CommandRunner,
+): Promise<ExistingRequiredChecks | null> {
+  const list = await runSafe(run, 'gh', ['api', `repos/${owner}/${repo}/rulesets`]);
+  if (list.code !== 0) return null;
+  let rulesets: Array<{ id?: number; target?: string; enforcement?: string }>;
+  try {
+    const parsed = JSON.parse(list.stdout);
+    if (!Array.isArray(parsed)) return null;
+    rulesets = parsed;
+  } catch {
+    return null;
+  }
+  for (const rs of rulesets) {
+    if (rs.target !== 'branch') continue;
+    if (rs.enforcement === 'disabled') continue;
+    if (typeof rs.id !== 'number') continue;
+    const detail = await runSafe(run, 'gh', ['api', `repos/${owner}/${repo}/rulesets/${rs.id}`]);
+    if (detail.code !== 0) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(detail.stdout);
+    } catch {
+      continue;
+    }
+    if (rulesetGuardsDefaultBranchChecks(parsed)) {
+      return { rulesetId: rs.id, contexts: extractRequiredContexts(parsed as RulesetFull) };
+    }
+  }
+  return null;
+}
+
+/**
+ * Is the reviewer pipeline OPERATIONAL on the repo — are the secrets that make
+ * `ai-review.yml`/`ready-to-merge.yml` actually post a pass present? Checks for
+ * `CLAUDE_CODE_OAUTH_TOKEN` AND `MINSPEC_APP_ID` in the repo's Actions secrets
+ * (names only — a GET of the repo's OWN secret NAMES, no values, same read-only
+ * class as the rulesets probe). This is the {@link
+ * TieredRequiredCheckInputs.reviewerConfigured} guard: never require a Tier-A
+ * check the repo cannot yet produce (the #559 deadlock). Fail-safe: any read
+ * failure ⇒ `false` ⇒ the Tier-A checks stay OUT of the required set.
+ */
+export async function probeReviewerConfigured(
+  owner: string,
+  repo: string,
+  run: CommandRunner,
+): Promise<boolean> {
+  const res = await runSafe(run, 'gh', [
+    'api',
+    `repos/${owner}/${repo}/actions/secrets`,
+    '--jq',
+    '[.secrets[].name]',
+  ]);
+  if (res.code !== 0) return false;
+  let names: unknown;
+  try {
+    names = JSON.parse(res.stdout);
+  } catch {
+    return false;
+  }
+  if (!Array.isArray(names)) return false;
+  const set = new Set(names.filter((n): n is string => typeof n === 'string'));
+  return set.has('CLAUDE_CODE_OAUTH_TOKEN') && set.has('MINSPEC_APP_ID');
+}
+
+/** Outcome of adding missing contexts to an existing ruleset. */
+export interface UpdateRulesetOutcome {
+  /** Whether the ruleset now requires all wanted contexts (PUT ok, or already satisfied). */
+  updated: boolean;
+  /** True on an authorization failure (403 / missing admin). */
+  forbidden: boolean;
+  /** Captured diagnostics (empty on success). */
+  detail: string;
+}
+
+/**
+ * Add `addContexts` to an existing ruleset's `required_status_checks` rule
+ * (idempotent union — contexts already required are preserved, including any
+ * `integration_id` pins). GETs the ruleset, merges, and PUTs the whole thing back
+ * (GitHub ruleset update is a full replacement — there is no PATCH). Only the
+ * `required_status_checks` context list changes; name, enforcement, conditions,
+ * bypass actors, and every other rule are preserved verbatim. MUTATING — the
+ * caller gates it behind explicit consent (DR-050 / SPEC-033 FR-3).
+ */
+export async function updateRulesetRequiredChecks(
+  owner: string,
+  repo: string,
+  run: CommandRunner,
+  rulesetId: number,
+  addContexts: readonly string[],
+): Promise<UpdateRulesetOutcome> {
+  const got = await runSafe(run, 'gh', ['api', `repos/${owner}/${repo}/rulesets/${rulesetId}`]);
+  if (got.code !== 0) {
+    return { updated: false, forbidden: isForbidden(got.stdout + got.stderr), detail: got.stderr || got.stdout };
+  }
+  let detail: RulesetFull;
+  try {
+    detail = JSON.parse(got.stdout) as RulesetFull;
+  } catch {
+    return { updated: false, forbidden: false, detail: 'could not parse the existing ruleset' };
+  }
+  const rules = Array.isArray(detail.rules) ? detail.rules : [];
+  const rule = rules.find((r) => r?.type === 'required_status_checks');
+  if (!rule) {
+    return { updated: false, forbidden: false, detail: 'ruleset has no required_status_checks rule' };
+  }
+  const existing = Array.isArray(rule.parameters?.required_status_checks)
+    ? rule.parameters!.required_status_checks!
+    : [];
+  const have = new Set(existing.map((c) => c?.context));
+  const missing = addContexts.filter((c) => !have.has(c));
+  if (missing.length === 0) return { updated: true, forbidden: false, detail: 'already satisfied' };
+
+  const newRules = rules.map((r) =>
+    r?.type === 'required_status_checks'
+      ? {
+          ...r,
+          parameters: {
+            ...r.parameters,
+            required_status_checks: [...existing, ...missing.map((context) => ({ context }))],
+          },
+        }
+      : r,
+  );
+  const body = JSON.stringify({
+    name: detail.name,
+    target: detail.target ?? 'branch',
+    enforcement: detail.enforcement ?? 'active',
+    conditions: detail.conditions,
+    rules: newRules,
+    ...(detail.bypass_actors ? { bypass_actors: detail.bypass_actors } : {}),
+  });
+  const put = await runSafe(
+    run,
+    'gh',
+    ['api', '-X', 'PUT', `repos/${owner}/${repo}/rulesets/${rulesetId}`, '--input', '-'],
+    body,
+  );
+  if (put.code === 0) return { updated: true, forbidden: false, detail: '' };
+  return { updated: false, forbidden: isForbidden(put.stdout + put.stderr), detail: put.stderr || put.stdout };
+}

@@ -59,6 +59,9 @@ import {
   resolveTieredRequiredChecks,
   AI_REVIEW_CHECK,
   READY_TO_MERGE_CHECK,
+  listRequiredCheckContexts,
+  probeReviewerConfigured,
+  updateRulesetRequiredChecks,
 } from '../src/lib/ruleset-advisor';
 import { offerRulesetAdvisory, resolveRequiredChecks } from '../src/commands/init';
 import { MANAGED_REGION_TEMPLATES } from '../src/lib/template-registry';
@@ -161,7 +164,14 @@ describe('hasRequiredChecksRuleset()', () => {
         return ok(
           JSON.stringify({
             conditions: { ref_name: { include: ['~DEFAULT_BRANCH'] } },
-            rules: [{ type: 'required_status_checks' }],
+            rules: [
+              {
+                type: 'required_status_checks',
+                // Requires exactly the injected wanted set (['lint','test']) → the
+                // symmetric check finds nothing missing → SILENT (fully configured).
+                parameters: { required_status_checks: [{ context: 'lint' }, { context: 'test' }] },
+              },
+            ],
           }),
         );
       }
@@ -551,7 +561,14 @@ describe('offerRulesetAdvisory() — autonomous probe + single-consent create (#
         return ok(
           JSON.stringify({
             conditions: { ref_name: { include: ['~DEFAULT_BRANCH'] } },
-            rules: [{ type: 'required_status_checks' }],
+            rules: [
+              {
+                type: 'required_status_checks',
+                // Requires exactly the injected wanted set (['lint','test']) → the
+                // symmetric check finds nothing missing → SILENT (fully configured).
+                parameters: { required_status_checks: [{ context: 'lint' }, { context: 'test' }] },
+              },
+            ],
           }),
         );
       }
@@ -579,7 +596,14 @@ describe('offerRulesetAdvisory() — autonomous probe + single-consent create (#
         return ok(
           JSON.stringify({
             conditions: { ref_name: { include: ['~DEFAULT_BRANCH'] } },
-            rules: [{ type: 'required_status_checks' }],
+            rules: [
+              {
+                type: 'required_status_checks',
+                // Requires exactly the injected wanted set (['lint','test']) → the
+                // symmetric check finds nothing missing → SILENT (fully configured).
+                parameters: { required_status_checks: [{ context: 'lint' }, { context: 'test' }] },
+              },
+            ],
           }),
         );
       }
@@ -594,6 +618,36 @@ describe('offerRulesetAdvisory() — autonomous probe + single-consent create (#
     expect(calls.some((c) => apiPath(c.args) === 'repos/o/r/rulesets')).toBe(true);
     expect(calls.some((c) => c.args.includes('POST'))).toBe(false);
     expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it('CASE (add — the sealbox gap): ruleset missing checks → offers ADD → PUT adds them, preserves existing, no POST', async () => {
+    const { run, calls } = makeRunner((_c, args) => {
+      if (args[0] === '--version') return ok('gh 2');
+      if (args[0] === 'auth') return ok('ok');
+      const isPut = args.includes('PUT');
+      if (apiPath(args) === 'repos/o/r/rulesets') {
+        return ok(JSON.stringify([{ id: 9, target: 'branch', enforcement: 'active' }]));
+      }
+      if (args.includes('repos/o/r/rulesets/9') && !isPut) return ok(rulesetDetail(9, ['MinSpec SDD validation']));
+      if (args.includes('repos/o/r/rulesets/9') && isPut) return ok('{}');
+      return undefined;
+    });
+    showInfo.mockResolvedValueOnce('Add checks'); // user accepts the add offer
+
+    // Injected wanted = the full governance set; the existing ruleset has only validation.
+    await offerRulesetAdvisory('/ws', deps(run, ['MinSpec SDD validation', 'ai-review', 'ready-to-merge']));
+
+    // Offered ADD (not create) — naming the missing checks — with the consent actions.
+    expect(String(showInfo.mock.calls[0][0])).toMatch(/does not require .*ai-review.*ready-to-merge/i);
+    expect(showInfo.mock.calls[0].slice(1)).toEqual(['Add checks', 'Not now', 'Learn more']);
+    // PUT updated the EXISTING ruleset (no create), adding the missing checks and
+    // preserving the one already required.
+    const put = calls.find((c) => c.args.includes('PUT'));
+    expect(put?.stdin).toContain('MinSpec SDD validation');
+    expect(put?.stdin).toContain('ai-review');
+    expect(put?.stdin).toContain('ready-to-merge');
+    expect(calls.some((c) => c.args.includes('POST'))).toBe(false);
+    expect(String(showInfo.mock.calls[1][0])).toMatch(/added/i);
   });
 
   it('CASE 3+4: none found → exactly ONE create-offer toast; on Create → POST + success toast', async () => {
@@ -648,19 +702,22 @@ describe('offerRulesetAdvisory() — autonomous probe + single-consent create (#
     expect(String(showInfo.mock.calls[0][0])).toMatch(/ready-to-merge/);
   });
 
-  it('CONFIGURABLE: with no injected checks the create reads the config setting', async () => {
+  it('CONFIGURABLE: with no injected checks the create resolves the tiered set (validation + config extras)', async () => {
     const { run, calls } = makeRunner((_c, args) => {
       if (args[0] === '--version') return ok('gh 2');
       if (args[0] === 'auth') return ok('ok');
+      // No reviewer secrets in this fixture → Tier-A stays out (no #559 deadlock).
+      if (apiPath(args) === 'repos/o/r/actions/secrets') return ok('[]');
       if (apiPath(args) === 'repos/o/r/rulesets' && !args.includes('POST')) return ok('[]');
       if (args.includes('POST')) return ok('{"id":7}');
       return undefined;
     });
-    // The `minspec.ruleset.requiredChecks` setting adds `build`.
-    mockConfigValue = ['lint', 'test', 'build'];
+    // The `minspec.ruleset.requiredChecks` setting adds `build` (now ADDITIVE:
+    // MinSpec SDD validation is always required; user extras layer on top).
+    mockConfigValue = ['build'];
     showInfo.mockResolvedValueOnce('Create ruleset');
 
-    // Omit deps.requiredChecks so resolveRequiredChecks() reads the config.
+    // Omit deps.requiredChecks so resolveWantedChecks() probes + resolves the set.
     await offerRulesetAdvisory('/ws', { run, resolveRepo, openExternal, isRepo });
 
     const post = calls.find((c) => c.args.includes('POST'))!;
@@ -668,9 +725,10 @@ describe('offerRulesetAdvisory() — autonomous probe + single-consent create (#
       rules: Array<{ type: string; parameters: { required_status_checks: Array<{ context: string }> } }>;
     };
     const rule = body.rules.find((r) => r.type === 'required_status_checks')!;
+    // Validation is non-negotiable + the config extra. Tier-A absent (no secrets,
+    // no scaffolded workflows in this fixture folder). Deny-by-default deadlock-safe.
     expect(rule.parameters.required_status_checks.map((c) => c.context)).toEqual([
-      'lint',
-      'test',
+      'MinSpec SDD validation',
       'build',
     ]);
   });
@@ -797,5 +855,112 @@ describe('offerRulesetAdvisory() — autonomous probe + single-consent create (#
     expect(showInfo).not.toHaveBeenCalled();
     expect(openExternal).not.toHaveBeenCalled();
     expect(resolveRepo).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #564 slices 2/3 · SPEC-033 FR-3 — the full producible check set, symmetric
+// (add missing checks to an existing ruleset — the sealbox gap).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A ruleset detail JSON guarding the default branch with the given required contexts. */
+function rulesetDetail(id: number, contexts: string[]): string {
+  return JSON.stringify({
+    id,
+    name: RULESET_NAME,
+    target: 'branch',
+    enforcement: 'active',
+    conditions: { ref_name: { include: ['~DEFAULT_BRANCH'], exclude: [] } },
+    rules: [
+      {
+        type: 'required_status_checks',
+        parameters: {
+          strict_required_status_checks_policy: false,
+          required_status_checks: contexts.map((context) => ({ context })),
+        },
+      },
+    ],
+  });
+}
+
+describe('listRequiredCheckContexts — symmetric detection (which checks, not just "a ruleset exists")', () => {
+  it('returns the ruleset id + its required contexts', async () => {
+    const { run } = makeRunner((_c, args) => {
+      const p = apiPath(args);
+      if (p === 'repos/o/r/rulesets') return ok(JSON.stringify([{ id: 42, target: 'branch', enforcement: 'active' }]));
+      if (p === 'repos/o/r/rulesets/42') return ok(rulesetDetail(42, ['MinSpec SDD validation']));
+      return undefined;
+    });
+    expect(await listRequiredCheckContexts('o', 'r', run)).toEqual({
+      rulesetId: 42,
+      contexts: ['MinSpec SDD validation'],
+    });
+  });
+
+  it('null when no branch ruleset guards checks', async () => {
+    const { run } = makeRunner((_c, args) =>
+      apiPath(args) === 'repos/o/r/rulesets' ? ok('[]') : undefined,
+    );
+    expect(await listRequiredCheckContexts('o', 'r', run)).toBeNull();
+  });
+
+  it('null on a read failure (never suppress provisioning)', async () => {
+    const { run } = makeRunner(() => fail(1, 'boom'));
+    expect(await listRequiredCheckContexts('o', 'r', run)).toBeNull();
+  });
+});
+
+describe('probeReviewerConfigured — Tier-A producibility (no #559 deadlock)', () => {
+  const secrets = (names: string[]) =>
+    makeRunner((_c, args) =>
+      apiPath(args) === 'repos/o/r/actions/secrets' ? ok(JSON.stringify(names)) : undefined,
+    ).run;
+
+  it('true when BOTH CLAUDE_CODE_OAUTH_TOKEN and MINSPEC_APP_ID are set', async () => {
+    expect(
+      await probeReviewerConfigured('o', 'r', secrets(['CLAUDE_CODE_OAUTH_TOKEN', 'MINSPEC_APP_ID', 'MINSPEC_APP_PRIVATE_KEY'])),
+    ).toBe(true);
+  });
+  it('false when the reviewer token is missing', async () => {
+    expect(await probeReviewerConfigured('o', 'r', secrets(['MINSPEC_APP_ID']))).toBe(false);
+  });
+  it('false (fail-safe) on a read failure', async () => {
+    const { run } = makeRunner(() => fail(1, 'nope'));
+    expect(await probeReviewerConfigured('o', 'r', run)).toBe(false);
+  });
+});
+
+describe('updateRulesetRequiredChecks — add missing checks to an existing ruleset', () => {
+  function runner(getReply: Reply, putOk = true) {
+    return makeRunner((_c, args) => {
+      const isPut = args.includes('PUT');
+      if (args.includes('repos/o/r/rulesets/42') && !isPut) return getReply;
+      if (args.includes('repos/o/r/rulesets/42') && isPut) return putOk ? ok('{}') : fail(403, 'must have admin');
+      return undefined;
+    });
+  }
+
+  it('PUTs the union — adds the missing checks, preserves the existing one', async () => {
+    const { run, calls } = runner(ok(rulesetDetail(42, ['MinSpec SDD validation'])));
+    const out = await updateRulesetRequiredChecks('o', 'r', run, 42, ['ai-review', 'ready-to-merge']);
+    expect(out.updated).toBe(true);
+    const put = calls.find((c) => c.args.includes('PUT'));
+    expect(put?.stdin).toContain('MinSpec SDD validation'); // preserved
+    expect(put?.stdin).toContain('ai-review');
+    expect(put?.stdin).toContain('ready-to-merge');
+  });
+
+  it('no-op (updated, no PUT) when all wanted checks are already required', async () => {
+    const { run, calls } = runner(ok(rulesetDetail(42, ['MinSpec SDD validation', 'ai-review', 'ready-to-merge'])));
+    const out = await updateRulesetRequiredChecks('o', 'r', run, 42, ['ai-review', 'ready-to-merge']);
+    expect(out.updated).toBe(true);
+    expect(calls.some((c) => c.args.includes('PUT'))).toBe(false); // nothing to write
+  });
+
+  it('reports forbidden on a 403 PUT', async () => {
+    const { run } = runner(ok(rulesetDetail(42, ['MinSpec SDD validation'])), false);
+    const out = await updateRulesetRequiredChecks('o', 'r', run, 42, ['ai-review']);
+    expect(out.updated).toBe(false);
+    expect(out.forbidden).toBe(true);
   });
 });
