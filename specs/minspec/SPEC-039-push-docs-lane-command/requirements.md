@@ -36,3 +36,10 @@ terminal. Grain (a) of the docs-lane ergonomics; auto-on-approve (#788) is defer
 - **INV-2 (corpus-only)** A non-docs path is never pushed — `isDocsCorpusPath` rejects it.
 - **INV-3 (primary untouched)** primary HEAD + index unchanged after any run/failure.
 - **INV-4 (never throws)** every failure mode returns a typed result → advisory toast.
+
+## Delivery
+Shipped in PR #797 (command + keybinding `ctrl+k ctrl+p`, 49 tests); the lane
+foundation (`docs-lane.yml` + `scripts/push-docs.sh`) in #781. The editor command
+is for a human editing docs; the CLI (`push-docs.sh`) is the agent's primitive,
+since docs edits are generally agent-driven. This very note was landed through the
+lane as the first agent-driven end-to-end exercise of it.
