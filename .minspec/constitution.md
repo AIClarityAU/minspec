@@ -12,7 +12,7 @@
 - Avoid nagging
 - Specs are living documents, not bureaucracy
 - Record hard-to-reverse decisions as decision records before implementing
-- Conform to Spec Kit conventions by default
+- **Conform to Spec Kit conventions by default.** Mirror Spec Kit's artifact names, folders, and command surface so a Spec-Kit user transitions with near-zero relearning. Diverge only where a recorded decision says our model requires it — deterministic write-time enforcement (G-7), `SPEC-NNN` ids (DR-027), the `.minspec` store, the never-wrong signpost (DR-055 §3). Familiar surface, stronger engine.
 - Don't hope an LLM will follow rules - enforce it via code
 
 ## Constraints
