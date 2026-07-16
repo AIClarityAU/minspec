@@ -728,7 +728,7 @@ describe('offerRulesetAdvisory() — autonomous probe + single-consent create (#
     const { run, calls } = makeRunner((_c, args) => {
       if (args[0] === '--version') return ok('gh 2');
       if (args[0] === 'auth') return ok('ok');
-      if (apiPath(args) === 'repos/o/r/actions/secrets') return ok(JSON.stringify(['CLAUDE_CODE_OAUTH_TOKEN', 'MINSPEC_APP_ID']));
+      if (apiPath(args) === 'repos/o/r/actions/secrets') return ok(JSON.stringify(['CLAUDE_CODE_OAUTH_TOKEN', 'MINSPEC_APP_ID', 'MINSPEC_APP_PRIVATE_KEY']));
       if (apiPath(args) === 'repos/o/r/rulesets') return ok(JSON.stringify([{ id: 9, target: 'branch', enforcement: 'active' }]));
       if (args.includes('repos/o/r/rulesets/9') && !args.includes('PUT')) return ok(rulesetDetail(9, ['MinSpec SDD validation']));
       if (args.includes('repos/o/r/rulesets/9') && args.includes('PUT')) return ok('{}');
@@ -747,6 +747,31 @@ describe('offerRulesetAdvisory() — autonomous probe + single-consent create (#
 
     const put = calls.find((c) => c.args.includes('PUT'));
     expect(put?.stdin).toContain('ai-review'); // producible → kept
+  });
+
+  it('CREATE guard: all-Tier-A candidate + no reviewer secrets → nothing safe to require, NO ruleset created', async () => {
+    const { run, calls } = makeRunner((_c, args) => {
+      if (args[0] === '--version') return ok('gh 2');
+      if (args[0] === 'auth') return ok('ok');
+      if (apiPath(args) === 'repos/o/r/actions/secrets') return ok('[]'); // reviewer NOT configured
+      if (apiPath(args) === 'repos/o/r/rulesets' && !args.includes('POST')) return ok('[]'); // no ruleset
+      return undefined;
+    });
+    showInfo.mockResolvedValueOnce('Create ruleset');
+
+    // Contrived Tier-A-only candidate → safeWrite drops it all → write is empty →
+    // the create-path guard must NOT POST an empty ruleset (parity with the add path).
+    await offerRulesetAdvisory('/ws', {
+      run,
+      resolveRepo,
+      openExternal,
+      isRepo,
+      requiredChecks: ['ai-review'],
+      tierA: ['ai-review'],
+    });
+
+    expect(calls.some((c) => apiPath(c.args) === 'repos/o/r/actions/secrets')).toBe(true); // probed post-consent
+    expect(calls.some((c) => c.args.includes('POST'))).toBe(false); // NO empty ruleset created
   });
 
   it('CASE 3+4: none found → exactly ONE create-offer toast; on Create → POST + success toast', async () => {
@@ -1015,13 +1040,16 @@ describe('probeReviewerConfigured — Tier-A producibility (no #559 deadlock)', 
       apiPath(args) === 'repos/o/r/actions/secrets' ? ok(JSON.stringify(names)) : undefined,
     ).run;
 
-  it('true when BOTH CLAUDE_CODE_OAUTH_TOKEN and MINSPEC_APP_ID are set', async () => {
+  it('true when ALL THREE (OAuth token + App ID + App private key) are set', async () => {
     expect(
       await probeReviewerConfigured('o', 'r', secrets(['CLAUDE_CODE_OAUTH_TOKEN', 'MINSPEC_APP_ID', 'MINSPEC_APP_PRIVATE_KEY'])),
     ).toBe(true);
   });
-  it('false when the reviewer token is missing', async () => {
-    expect(await probeReviewerConfigured('o', 'r', secrets(['MINSPEC_APP_ID']))).toBe(false);
+  it('false when the OAuth token is missing', async () => {
+    expect(await probeReviewerConfigured('o', 'r', secrets(['MINSPEC_APP_ID', 'MINSPEC_APP_PRIVATE_KEY']))).toBe(false);
+  });
+  it('false when MINSPEC_APP_PRIVATE_KEY is missing — the App token cannot be minted (#559 deadlock this guard prevents)', async () => {
+    expect(await probeReviewerConfigured('o', 'r', secrets(['CLAUDE_CODE_OAUTH_TOKEN', 'MINSPEC_APP_ID']))).toBe(false);
   });
   it('false (fail-safe) on a read failure', async () => {
     const { run } = makeRunner(() => fail(1, 'nope'));

@@ -590,6 +590,19 @@ export async function offerRulesetAdvisory(
       );
       if (choice === RULESET_CREATE_ACTION) {
         const { write, dropped } = await safeWrite(candidate);
+        if (write.length === 0) {
+          // Defensive parity with the add branch: never create an empty ruleset.
+          // Unreachable while every candidate carries the non-Tier-A `MinSpec SDD
+          // validation`, but not contingent on that invariant holding for any
+          // future candidate source (an all-Tier-A candidate with no secrets set).
+          await linkRulesetDocs(
+            `MinSpec: ${candidate.join(' + ')} need the reviewer secrets ` +
+              `(CLAUDE_CODE_OAUTH_TOKEN + MINSPEC_APP_ID + MINSPEC_APP_PRIVATE_KEY) set before they ` +
+              `can be required — see the GitHub docs.`,
+            openExternal,
+          );
+          return;
+        }
         const outcome = await createRequiredChecksRuleset(owner, name, run, write);
         if (outcome.created) {
           vscode.window.showInformationMessage(

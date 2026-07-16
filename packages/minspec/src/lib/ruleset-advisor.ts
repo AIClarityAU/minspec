@@ -633,8 +633,11 @@ export async function listRequiredCheckContexts(
 /**
  * Is the reviewer pipeline OPERATIONAL on the repo — are the secrets that make
  * `ai-review.yml`/`ready-to-merge.yml` actually post a pass present? Checks for
- * `CLAUDE_CODE_OAUTH_TOKEN` AND `MINSPEC_APP_ID` in the repo's Actions secrets
- * (NAMES only — never values). This is the {@link
+ * ALL THREE — `CLAUDE_CODE_OAUTH_TOKEN` AND `MINSPEC_APP_ID` AND
+ * `MINSPEC_APP_PRIVATE_KEY` — in the repo's Actions secrets (NAMES only, never
+ * values). All three are load-bearing (SPEC-033 FR-4/D-3): the App token is minted
+ * from the ID + private-key PEM, and the reviewer runs on the OAuth token; a missing
+ * one means no ai-review check is ever posted. This is the {@link
  * TieredRequiredCheckInputs.reviewerConfigured} guard: never require a Tier-A check
  * the repo cannot yet produce (the #559 deadlock). Fail-safe: any read failure ⇒
  * `false` ⇒ the Tier-A checks stay OUT of the required set.
@@ -665,7 +668,16 @@ export async function probeReviewerConfigured(
   }
   if (!Array.isArray(names)) return false;
   const set = new Set(names.filter((n): n is string => typeof n === 'string'));
-  return set.has('CLAUDE_CODE_OAUTH_TOKEN') && set.has('MINSPEC_APP_ID');
+  // ALL THREE are required for ai-review.yml to post its check (SPEC-033 FR-4/D-3):
+  // CLAUDE_CODE_OAUTH_TOKEN (inference) + MINSPEC_APP_ID + MINSPEC_APP_PRIVATE_KEY
+  // (the raw PEM `create-github-app-token` mints the bot token from). Omitting the
+  // private key would falsely deem a repo "configured" → require ai-review it cannot
+  // produce → deadlock every merge (#559 — the exact failure this guard prevents).
+  return (
+    set.has('CLAUDE_CODE_OAUTH_TOKEN') &&
+    set.has('MINSPEC_APP_ID') &&
+    set.has('MINSPEC_APP_PRIVATE_KEY')
+  );
 }
 
 /** Outcome of adding missing contexts to an existing ruleset. */
