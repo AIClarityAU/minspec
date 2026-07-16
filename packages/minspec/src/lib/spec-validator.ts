@@ -727,9 +727,13 @@ export interface ValidateSpecOptions {
 function fmListField(raw: string, key: string): string[] {
   const block = raw.match(FRONTMATTER_BLOCK_RE);
   if (!block) return [];
-  const inline = rawFrontmatterField(raw, key);
-  if (inline !== undefined) {
-    return inline
+  // Mirror the gate's `fm_value` EXACTLY (spec-gate.py): it captures the value
+  // WITHOUT stripping an inline `# comment`, so a path-shaped token in a trailing
+  // comment is tokenized (and owned) by the gate. We must see the same tokens, or
+  // a comment-path would arm the gate on something the validator ignores (#802).
+  const inline = block[1].match(new RegExp(`^${key}:\\s*(.+?)\\s*$`, 'm'));
+  if (inline) {
+    return inline[1]
       .split(/[,\s[\]]+/)
       .filter((t) => t.length > 0)
       .map((t) => t.replace(/^["']+|["']+$/g, ''));
@@ -796,7 +800,10 @@ export function validateOwnership(spec: ParsedSpec, config: MinspecConfig): Vali
   // Validity-direction: every present path must be a valid owned-code path
   // (the `none` escape is not a path, so it is exempt).
   const paths = isNoneEscape ? [] : implTokens;
-  const bad = [...paths, ...fmListField(raw, 'affects')].filter((t) => !isValidOwnedPath(t));
+  // Flag only PATH-SHAPED tokens (containing `/`) that fail validity: the gate's
+  // `consider()` silently skips non-path tokens (barewords, comment words), so we
+  // must too — else a normal trailing `# comment` on the line would false-flag (#802).
+  const bad = [...paths, ...fmListField(raw, 'affects')].filter((t) => t.includes('/') && !isValidOwnedPath(t));
   if (bad.length > 0) {
     out.push({
       rule: 'ownership.implements.invalid',
