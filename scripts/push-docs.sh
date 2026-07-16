@@ -31,18 +31,47 @@ root="$(git rev-parse --show-toplevel)"
 slug="$(gh repo view --json nameWithOwner -q .nameWithOwner)"
 git -C "$root" fetch -q origin main
 
-# Default file set: changed working-tree paths that are inside the docs corpus.
+# Snapshot of the working tree's porcelain status, keyed by path — used to
+# classify each path as an add/modify (copied into the worktree) vs a deletion
+# (`git rm`'d there), since a deleted path has no on-disk content and existence
+# alone can't tell the two apart. Kept separate from the (ordered) gather below
+# so the default file set still follows git's own listing order.
+declare -A path_status=()
+status_lines=()
+while IFS= read -r line; do
+  [ -n "$line" ] || continue
+  status_lines+=("$line")
+  code="${line:0:2}"
+  p="${line:3}"
+  p="${p##*-> }"
+  path_status["$p"]="$code"
+done < <(git -C "$root" status --porcelain)
+
+# Default file set: changed working-tree paths that are inside the docs corpus,
+# in git's own listing order.
 if [ "${#files[@]}" -eq 0 ]; then
-  while IFS= read -r f; do
-    [[ "$f" =~ $CORPUS ]] && files+=("$f")
-  done < <(git -C "$root" status --porcelain | sed 's/^...//' | sed 's/^.*-> //')
+  for line in "${status_lines[@]}"; do
+    p="${line:3}"
+    p="${p##*-> }"
+    [[ "$p" =~ $CORPUS ]] && files+=("$p")
+  done
   [ "${#files[@]}" -gt 0 ] || { echo "push-docs: no changed docs-corpus files found" >&2; exit 1; }
 fi
 
-# Client-side guard: every explicit/gathered path must be docs corpus.
+# Client-side guard + classify: every explicit/gathered path must be docs corpus.
+# A deletion (` D` worktree / `D ` staged) has nothing on disk to copy — it's
+# `git rm`'d in the worktree instead, alongside the copied adds/mods.
+add_files=()
+del_files=()
 for f in "${files[@]}"; do
   [[ "$f" =~ $CORPUS ]] || { echo "push-docs: refusing non-docs path: $f" >&2; exit 1; }
-  [ -e "$root/$f" ] || { echo "push-docs: no such file: $f" >&2; exit 1; }
+  case "${path_status[$f]:-}" in
+    ' D'|'D ') del_files+=("$f") ;;
+    *)
+      [ -e "$root/$f" ] || { echo "push-docs: no such file: $f" >&2; exit 1; }
+      add_files+=("$f")
+      ;;
+  esac
 done
 
 branch="docs-lane/$(git -C "$root" rev-parse --short HEAD)-$$"
@@ -51,11 +80,16 @@ cleanup() { git -C "$root" worktree remove --force "$wt" 2>/dev/null || true; }
 trap cleanup EXIT
 
 git -C "$root" worktree add -q -b "$branch" "$wt" origin/main
-for f in "${files[@]}"; do
+for f in "${add_files[@]}"; do
   mkdir -p "$wt/$(dirname "$f")"
   cp "$root/$f" "$wt/$f"
 done
 git -C "$wt" add -A
+for f in "${del_files[@]}"; do
+  # --ignore-unmatch: the path may already be absent from origin/main (e.g. added
+  # then deleted before ever landing on the lane) — that's a no-op, not an error.
+  git -C "$wt" rm -q --ignore-unmatch -- "$f"
+done
 if git -C "$wt" diff --cached --quiet; then
   echo "push-docs: no delta vs origin/main — nothing to push" >&2
   exit 0
