@@ -17,7 +17,7 @@ import { TIERS } from './config';
 import { epicRefValue } from './epic-manager';
 import { deriveStatus, type ExplicitTerminal, type PhaseState } from './lifecycle';
 import type { ApprovalStatus } from './approval';
-import { isValidOwnedPath } from './ownership-path-rules';
+import { isValidOwnedPath, isEscapingPath } from './ownership-path-rules';
 
 /** A cross-cutting concern a spec may touch, each requiring a specific artifact. */
 export type Aspect = 'ux' | 'api' | 'data' | 'architecture';
@@ -727,13 +727,14 @@ export interface ValidateSpecOptions {
 function fmListField(raw: string, key: string): string[] {
   const block = raw.match(FRONTMATTER_BLOCK_RE);
   if (!block) return [];
-  // Mirror the gate's `fm_value` EXACTLY (spec-gate.py): it captures the value
-  // WITHOUT stripping an inline `# comment`, so a path-shaped token in a trailing
-  // comment is tokenized (and owned) by the gate. We must see the same tokens, or
-  // a comment-path would arm the gate on something the validator ignores (#802).
-  const inline = block[1].match(new RegExp(`^${key}:\\s*(.+?)\\s*$`, 'm'));
-  if (inline) {
-    return inline[1]
+  // Strip an inline `# comment` (rawFrontmatterField) — a comment is prose, not a
+  // declaration, so its tokens must never enter the owned/validity set. Deliberately
+  // fail-safe vs the gate's `fm_value` (which keeps comment tokens): the gate may own
+  // a comment-path the validator ignores, never the reverse — a false positive on a
+  // valid spec is the worse failure here (#812).
+  const inline = rawFrontmatterField(raw, key);
+  if (inline !== undefined) {
+    return inline
       .split(/[,\s[\]]+/)
       .filter((t) => t.length > 0)
       .map((t) => t.replace(/^["']+|["']+$/g, ''));
@@ -783,10 +784,13 @@ export function validateOwnership(spec: ParsedSpec, config: MinspecConfig): Vali
   const implTokens = fmListField(raw, 'implements');
   const isNoneEscape = implTokens.length === 1 && implTokens[0].toLowerCase() === 'none';
   const reason = rawFrontmatterField(raw, 'implements_reason');
-  const declaresCode = implTokens.length > 0 && !isNoneEscape;
+  // A real declaration = ≥1 token the gate would actually OWN (isValidOwnedPath). A
+  // token that owns nothing (bareword, infra, wrong-ext) leaves the gate un-armed, so
+  // it does not satisfy the requirement — it counts as still-missing.
+  const declaresCode = implTokens.some(isValidOwnedPath);
   const validEscape = isNoneEscape && reason !== undefined;
 
-  // Missing-direction (#137): no real declaration and no satisfied escape.
+  // Missing-direction (#137): no owned-path declaration and no satisfied escape.
   if (!declaresCode && !validEscape) {
     out.push({
       rule: 'ownership.implements.missing',
@@ -797,13 +801,12 @@ export function validateOwnership(spec: ParsedSpec, config: MinspecConfig): Vali
     });
   }
 
-  // Validity-direction: every present path must be a valid owned-code path
-  // (the `none` escape is not a path, so it is exempt).
+  // Validity-direction (FR-4/AC-4): flag a declared path that ESCAPES the repo
+  // (absolute / `..`). NOT infra/wrong-ext tokens — the gate's `consider()` silently
+  // skips those (they own nothing, harmlessly), so flagging them would be stricter
+  // than the gate and false-positive a valid spec (#812). The `none` escape is exempt.
   const paths = isNoneEscape ? [] : implTokens;
-  // Flag only PATH-SHAPED tokens (containing `/`) that fail validity: the gate's
-  // `consider()` silently skips non-path tokens (barewords, comment words), so we
-  // must too — else a normal trailing `# comment` on the line would false-flag (#802).
-  const bad = [...paths, ...fmListField(raw, 'affects')].filter((t) => t.includes('/') && !isValidOwnedPath(t));
+  const bad = [...paths, ...fmListField(raw, 'affects')].filter(isEscapingPath);
   if (bad.length > 0) {
     out.push({
       rule: 'ownership.implements.invalid',

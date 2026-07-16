@@ -149,3 +149,28 @@ describe('SPEC-038 AC-5 — the produced signal arms the real spec-gate (#460)',
     }
   });
 });
+
+describe('SPEC-038 #812 — comment + escape semantics', () => {
+  it('a path mentioned only in a trailing # comment is NOT flagged (regression: MEDIUM false-positive)', () => {
+    const r = rules(ownSpec({ implementsVal: '[pkg/a.ts]  # supersedes docs/DR-050.md' }));
+    expect(r).not.toContain(INVALID); // docs/DR-050.md lives in the comment → never seen
+    expect(r).not.toContain(MISSING); // pkg/a.ts is a real declaration
+  });
+
+  it('implements: none + a trailing comment STILL requires a reason (regression: none-escape evasion)', () => {
+    expect(rules(ownSpec({ implementsVal: 'none  # owns no code' }))).toContain(MISSING);
+    expect(rules(ownSpec({ implementsVal: 'none  # owns no code', reason: 'policy spec' }))).not.toContain(MISSING);
+  });
+
+  it('a declared infra/wrong-ext path is NOT invalid (only escapes are), but owns nothing → missing', () => {
+    const infra = rules(ownSpec({ implementsVal: '[node_modules/x.js]' }));
+    expect(infra).not.toContain(INVALID); // not an escape (FR-4) — the gate silently skips it
+    expect(infra).toContain(MISSING); // ...but it arms nothing, so it is not a real declaration
+  });
+
+  it('an escaping path IS invalid even alongside a valid one', () => {
+    const r = rules(ownSpec({ implementsVal: '[pkg/a.ts, ../evil.ts]' }));
+    expect(r).toContain(INVALID);
+    expect(r).not.toContain(MISSING); // pkg/a.ts is a valid declaration
+  });
+});

@@ -111,16 +111,26 @@ describe('SPEC-038 #802 — isValidOwnedPath agrees with the real gate, case-by-
   afterAll(() => rmSync(tmp, { recursive: true, force: true }));
 
   function gateOwns(p: string): boolean {
+    // Strip the kill-switch so an inherited MINSPEC_GATE_OFF=1 can't make the gate
+    // fail open and turn this into a silent pass/spurious fail (#812).
+    const env = { ...process.env };
+    delete env.MINSPEC_GATE_OFF;
     const envelope = JSON.stringify({ tool_name: 'Write', tool_input: { file_path: join(tmp, p) }, cwd: tmp });
     let out = '';
     try {
-      out = execFileSync('bash', [gateSh], { input: envelope, encoding: 'utf-8', env: process.env });
+      out = execFileSync('bash', [gateSh], { input: envelope, encoding: 'utf-8', env });
     } catch (e) {
       const err = e as { stdout?: string; stderr?: string };
       out = (err.stdout ?? '') + (err.stderr ?? '');
     }
     return out.includes('deny');
   }
+
+  it('control: the gate is actually active (a known-owned path denies)', () => {
+    // If this fails the gate is inert (kill-switch / missing python) and the matrix
+    // below would be meaningless — assert liveness first.
+    expect(gateOwns('pkg/a.ts')).toBe(true);
+  });
 
   it.each(CASES)('gate own-decision == isValidOwnedPath for %s', (p) => {
     expect(gateOwns(p)).toBe(isValidOwnedPath(p));
