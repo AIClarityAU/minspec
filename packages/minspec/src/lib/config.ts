@@ -48,6 +48,14 @@ export interface MinspecConfig {
   readonly specsLayout: SpecsLayout;
   readonly phaseMappings: Record<Tier, TierPhaseMapping>;
   readonly coverage: CoverageConfig;
+  /**
+   * Severity of the SPEC-038 `ownership.implements.missing` rule (#460). `warn`
+   * (default, pre-backfill) surfaces undeclared T3/T4 specs without blocking;
+   * flip to `error` once the corpus is backfilled (FR-7 ratchet). The companion
+   * `ownership.implements.invalid` is always an error regardless of this dial.
+   * Absent → treated as `warn`.
+   */
+  readonly ownershipDeclaration?: 'warn' | 'error';
 }
 
 /** 80% statement/branch/function/line coverage — the commonly-cited industry bar. */
@@ -71,6 +79,7 @@ export const DEFAULT_CONFIG: MinspecConfig = {
     T4: { requiredPhases: ['specify', 'clarify', 'plan', 'tasks', 'implement'], optionalPhases: [] },
   },
   coverage: { minimumPercentage: DEFAULT_COVERAGE_MINIMUM },
+  ownershipDeclaration: 'warn',
 };
 
 /** Deep merge user config over defaults. User values win. */

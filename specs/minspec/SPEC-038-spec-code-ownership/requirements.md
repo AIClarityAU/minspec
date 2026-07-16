@@ -9,11 +9,11 @@ epic: EPIC-003  # SDD Core Methodology — the spec→code ownership contract
 aspects: [traceability, validation, governance, tier-0, spec-gate]
 relates_to: [DR-012, DR-031, DR-056, SPEC-004, DR-003]
 phases:
-  specify: done
-  clarify: done
-  plan: done
-  tasks: in-progress
-  implement: pending
+  specify: done   # draft merged via PR #769, 2026-07-14
+  clarify: done   # OQ-1..5 confirmed by Paul Harvey 2026-07-14 (see Clarify)
+  plan: done   # design.md merged #772; PQ-1/PQ-2 both resolved at Tasks 2026-07-14 (see design.md)
+  tasks: done   # tasks.md merged PR #774, 2026-07-14
+  implement: in-progress   # Slice 1 (rule ships as warn) built 2026-07-16; backfill + flip pending
 ---
 
 # MinSpec — Required `implements:`/`affects:` spec→code ownership declaration (Requirements)
