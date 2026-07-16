@@ -248,6 +248,42 @@ ensure_fresh_run_dir() {
   return 0
 }
 
+# sync_shared_checkouts (founder ask 2026-07-16): keep the SHARED human checkouts
+# — this MinSpecPro plus the sibling scroogellm/sealbox repos — fast-forwarded to
+# origin/main each cycle, so live editor sessions and this drain do not silently
+# drift behind. STRICTLY SAFE by construction:
+#   • fast-forward ONLY (`merge --ff-only`) — never reset/rebase/force; a diverged
+#     or non-main checkout is left exactly as-is (another session may be live on it).
+#   • only touches a checkout that is on `main` with NO real uncommitted content.
+#   • `update-index --refresh` first clears STAT-dirty (a file whose mtime was
+#     touched but whose content is identical to HEAD) so it does not block the ff —
+#     this exact case (constitution.md) silently blocked syncing for hours.
+# Read-only fetch + a guarded ff can never strand another session's work, so this
+# is safe to run unconditionally at the top of every cycle. Disable with
+# MINSPEC_DRAIN_SYNC_CHECKOUTS=0.
+sync_shared_checkouts() {
+  [[ "${MINSPEC_DRAIN_SYNC_CHECKOUTS:-1}" == "0" ]] && return 0
+  local base d branch
+  base="$(dirname "$PRIMARY_ROOT")"
+  for d in "$PRIMARY_ROOT" "$base/scroogellm" "$base/sealbox"; do
+    [[ -d "$d/.git" ]] || continue
+    git -C "$d" fetch origin --prune -q 2>/dev/null || continue
+    git -C "$d" update-index -q --refresh 2>/dev/null || true
+    branch="$(git -C "$d" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
+    if [[ "$branch" == "main" ]] \
+        && git -C "$d" diff --quiet 2>/dev/null \
+        && git -C "$d" diff --cached --quiet 2>/dev/null; then
+      if [[ "$(git -C "$d" rev-list --count HEAD..origin/main 2>/dev/null || echo 0)" -gt 0 ]]; then
+        git -C "$d" merge --ff-only origin/main -q 2>/dev/null \
+          && echo "[drain] synced $(basename "$d") → $(git -C "$d" rev-parse --short HEAD)" \
+          || echo "[drain] sync skip $(basename "$d") — main not fast-forwardable (diverged), left as-is"
+      fi
+    else
+      echo "[drain] sync skip $(basename "$d") — branch=$branch or uncommitted changes, left as-is"
+    fi
+  done
+}
+
 # run_cycle: ONE drain pass = triage inbox → dispatch every resulting agent-ready
 # issue → sweep open PRs and remediate fixable problems, all sequentially. Return
 # code drives the
@@ -264,6 +300,11 @@ run_cycle() {
   # CURRENT orchestration (self-heal, not die-on-stale). Never fatal — on failure it
   # falls back to in-place scripts and the cycle proceeds.
   ensure_fresh_run_dir
+
+  # Keep the shared human checkouts (this repo + siblings) current with origin/main
+  # — fast-forward-only, main-and-clean only, never force. Best-effort; a failure
+  # here must never abort the cycle.
+  sync_shared_checkouts || true
 
   # Step 1: triage inbox issues → labels T1/T2 as agent-ready
   inbox_issues=$(gh issue list --repo "$REPO" --label "inbox" \
