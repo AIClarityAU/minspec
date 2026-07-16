@@ -490,4 +490,12 @@ The continuous drain (#239) triages the inbox and dispatches agent-ready issues,
 <!-- dr-summary:DR-061 auto=3588d3052bff -->
 Auto-merge has been **deny-by-default** since DR-033 §6: a PR holds for a human unless the SPEC-024 **consequence-hybrid** gate certifies it low-blast. But that gate measures blast via the #88 consequence analyzers on a real cross-file index (#195) — **all still open**. With no analyzers, the gate scores every change high (INV-2: unmeasured blast = high) → HOLD. So the *designed* auto-merge cannot function today, and won't for weeks. DR-058 hardened that gate further (affirmative evidence required), widening — not closing…
 <!-- /dr-summary:DR-061 -->
+
+## [DR-062 — Cross-artifact approval validity — depends_on becomes an input to staleness, ADR/epic get hash-locked records, and no-implementing-unapproved moves to an actor-agnostic gate](DR-062.md)
+
+*Status: proposed · Date: 2026-07-16*
+
+<!-- dr-summary:DR-062 auto=ff15b49d4cfd -->
+A read-only audit of the approvables system established three facts, each with file:line evidence: 1. **Approval validity is per-artifact-content only.** A spec's approval binds a canonical hash of *its own* content (approval.ts:306-313). depends_on / relates_to / supersedes edges are parsed and walked, but **only** for corruption detection and priority ordering (next-task.ts:262-395) — never as an input to approval validity. So when an upstream approvable a spec depends on changes, the dependent stays approved, signed off against content that no longer…
+<!-- /dr-summary:DR-062 -->
 <!-- minspec:dr-index:end -->
