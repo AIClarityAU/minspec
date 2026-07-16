@@ -296,6 +296,42 @@ jobs:
                 `passVerified=${passProvenance.verified})`,
             );
 
+            // ── SPEC-031 FR-9a — sync the `awaiting-approval` "your turn" signal ──
+            // ONE authoritative owner: the label tracks THIS gate's decision on every
+            // PR event, so a flip to red (stale-strip / forged-revert / changes) that
+            // drives status.state to 'failure' also clears the label here — no extra
+            // mirror site. Present only when the gate is GREEN and the PR will not
+            // merge itself (auto-merge unarmed); a robot-merged PR is never a human's
+            // turn. Best-effort: the commit status above is the load-bearing signal,
+            // this label is a convenience filter on top of it and must never fail the gate.
+            try {
+              const wantAwait = guard.shouldAwaitApproval({
+                statusState: status.state,
+                autoMergeArmed: Boolean(pr.auto_merge),
+              });
+              if (wantAwait) {
+                await github.rest.issues.addLabels({
+                  owner,
+                  repo,
+                  issue_number: pr.number,
+                  labels: [guard.AWAITING_APPROVAL],
+                });
+              } else {
+                await github.rest.issues
+                  .removeLabel({
+                    owner,
+                    repo,
+                    issue_number: pr.number,
+                    name: guard.AWAITING_APPROVAL,
+                  })
+                  .catch((e) => {
+                    if (!guard.isBenignRemovalError(e.status)) throw e;
+                  });
+              }
+            } catch (e) {
+              core.warning(`could not sync ${guard.AWAITING_APPROVAL}: ${e.message}`);
+            }
+
             // ── Cleanup + audit trail for the revert/strip guards ──────────
             // The security-critical removal is NOT best-effort: on a revert/strip,
             // if removeLabel fails with anything other than 404 (already gone) we
