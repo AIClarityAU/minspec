@@ -58,3 +58,19 @@ export function isValidOwnedPath(token: string): boolean {
 
   return true;
 }
+
+/**
+ * True iff `token` is a path that **escapes the repo root** — an absolute path, a
+ * `../` climb, or any `..` segment. This is the genuinely-invalid case per FR-4/AC-4:
+ * a declared ownership path must be repo-relative. It is a strict subset of
+ * `!isValidOwnedPath` — infra-prefixed / wrong-extension tokens are NOT escaping
+ * (the gate silently skips them, so flagging them would false-positive a valid spec).
+ * Bare tokens (no `/`) are not paths and are not escaping.
+ */
+export function isEscapingPath(token: string): boolean {
+  let t = token.trim().replace(/^"+|"+$/g, '').replace(/^'+|'+$/g, '').trim();
+  if (!t || !t.includes('/')) return false;
+  let p = t.replace(/\\/g, '/');
+  if (p.startsWith('./')) p = p.slice(2);
+  return p.startsWith('/') || p.startsWith('../') || p.split('/').includes('..');
+}
