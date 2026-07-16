@@ -107,6 +107,21 @@ enough human") — and matches how the PR reviewer already runs (#342), extended
 - **INV-7 — MinSpec-the-extension stays Tier-0.** The reviewer LLM call is external
   (dispatch / CI). MinSpec only reads labels/status and renders — no in-process model or
   network call (consistency with SPEC-025 INV-1 / DR-004).
+- **INV-8 — One positive "your turn" signal (DR-063).** A human-gated Approvable that is
+  AI-greenlit and still awaiting its human keystroke is marked by EXACTLY ONE positive
+  label — `awaiting-approval`. "My turn" is therefore a single-label filter, NEVER an AND
+  of `ai-review:*:pass` and a negative label. It is applied only when the type is greenlit,
+  prior-stage gates are clear, the human gate is still open, and (on the PR surface) the PR
+  is not self-merging (no auto-merge armed). It is removed the instant it no longer holds —
+  the gate stops being green (a flip to `changes`, a stale/forged-pass strip #359 / #397),
+  an auto-merge arms, or the human acts (on the PR surface the keystroke IS the merge, which
+  closes the PR and clears the label with it; on the doc surface — FR-9b, forward — an
+  *Approve* strips it). **Shipped scope:** the PR-surface applier (FR-9a) keys on the
+  ready-to-merge gate state plus the merge; the on-*Approve* strip for docs lands with the
+  #527 runner. It NEVER coexists with `ai-review:*:changes` (INV-4), and it advises only —
+  it is not a gate and grants no merge power (INV-2). It supersedes the overloaded eager
+  `needs-human-review`, which conflated "AI failed → fix" with "AI passed → approve"
+  (retirement tracked in #816).
 
 ## Functional Requirements
 
@@ -184,6 +199,27 @@ enough human") — and matches how the PR reviewer already runs (#342), extended
   Approvable types are human-gated (Spec, Plan, DR, constitution invariant, PR-to-main,
   Epic), AI-reviewed-only (Issue), or config-dependent (design.md, tasks.md — FR-6). The
   resolver (FR-4) and the gate placement both read this one table.
+- **FR-9 — Ship the `awaiting-approval` queue signal (materialises DR-063).** Realise INV-8
+  as a concrete label, applied by a SINGLE authoritative owner per surface (never scattered
+  across every apply/strip site):
+  - **FR-9a — PR surface (this change).** `.github/workflows/ready-to-merge.yml` — already the
+    sole owner of the verified-fresh-pass decision on every PR event — applies / removes
+    `awaiting-approval` in lock-step with its own `success` state, skipping application when
+    native auto-merge (DR-061) is armed (that PR merges itself; not a human turn). The decision
+    is a pure, tested seam `shouldAwaitApproval({ statusState, autoMergeArmed })` in
+    `.github/scripts/ai-review-guard.js`. Every stale-strip / forged-revert / flip already
+    drives that state to `failure`, so removal needs no extra mirror site. The label write is
+    best-effort and never fails the load-bearing commit status.
+  - **FR-9b — Doc-approvable surface (forward, with the #527 runner).** When the per-type CI
+    runner (FR-3) records `ai-review:<type>:pass` on a human-gated type, it applies
+    `awaiting-approval`; the signpost predicate (FR-4) reads this one label. Until #527 lands,
+    `review-approvable.sh` stays a label-less local preview (its verdict surfaces as a
+    `needs-review` issue, e.g. #793), so the doc-surface applier is NOT yet built — only the
+    PR-surface applier (FR-9a) ships now.
+  - **FR-9c — Supersession.** `awaiting-approval` is the canonical "human's turn" signal.
+    Retiring the eager `needs-human-review`-on-`changes` (so that label means only
+    "automation exhausted → human fix") is the subtractive follow-up tracked in #816 —
+    deliberately NOT bundled with this additive label, because it touches fail-closed semantics.
 
 ## Out of scope
 
@@ -239,6 +275,10 @@ No follow-up tasks deferred — the spec is Plan-ready once a human approves it.
   gates (INV-5).
 - The Issue reviewer runs and records `ai-review:issue:*`, and **never** produces a
   human-gate task (INV-3).
+- A human-gated PR that reaches a verified-fresh `ai-review:pass` with no auto-merge armed
+  carries `awaiting-approval`; the moment its pass is stripped (new commits) or flips to
+  `changes`, `awaiting-approval` is gone — so "my turn" is a truthful single-label filter,
+  and it never coexists with `ai-review:changes` (INV-8 / FR-9a).
 - Auto-approve **off** (default): a greenlit `design.md` still requires a human keystroke.
   Auto-approve **on**: the same greenlit `design.md` advances with no human. A greenlit
   **DR** requires a human keystroke even with auto-approve on (INV-6).

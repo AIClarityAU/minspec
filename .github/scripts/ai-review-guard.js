@@ -42,6 +42,15 @@ const PASS_STATUS_CONTEXT = 'ai-review/pass';
 // isQuotaExhaustion() and the ai-review-retry workflow.
 const BLOCKED = 'ai-review:blocked';
 
+// DR-063 (materialised as SPEC-031 INV-8 / FR-9a) — the single positive "your turn"
+// queue signal. Present
+// on a PR whose independent AI review has PASSED (the `ready-to-merge` gate is
+// green) and whose ONLY remaining gate is a human keystroke. It is the canonical
+// "my turn" filter, replacing the ambiguous read of `ai-review:pass` plus a
+// negative label — and it never coexists with `ai-review:changes` (a failing gate
+// removes it). Owned by ONE applier (ready-to-merge.yml), driven by shouldAwaitApproval().
+const AWAITING_APPROVAL = 'awaiting-approval';
+
 // Detect, from a failed `claude -p` reviewer invocation's combined output, whether
 // the cause is an exhausted subscription quota / rate-limit / overload (a transient,
 // retry-able, NOT-your-code condition) versus a genuine crash. review-branch.sh
@@ -285,6 +294,21 @@ function decideStatus({ labels, provenanceRevert, stalenessStrip, passProvenance
   };
 }
 
+// DR-063 / SPEC-031 FR-9a — should the `awaiting-approval` "your turn" signal be
+// PRESENT on this PR? Pure and side-effect-free so it is unit-testable; ready-to-merge.yml
+// applies/removes the label from this boolean on every PR event. Both conditions
+// required:
+//   - statusState === 'success' — the ready-to-merge gate (decideStatus, the sole
+//     authority) is GREEN: a verified, fresh, un-reverted pass with no outstanding
+//     `ai-review:changes`. Every stale-strip / forged-revert / changes-flip already
+//     drives this to 'failure', so the label is removed with NO extra mirror site.
+//   - !autoMergeArmed — the PR will NOT merge itself. A PR with native auto-merge
+//     armed (DR-061) merges the instant the gate greens, so it is the ROBOT's turn,
+//     never a human's — it must never enter the "my turn" queue.
+function shouldAwaitApproval({ statusState, autoMergeArmed } = {}) {
+  return statusState === 'success' && !autoMergeArmed;
+}
+
 // Map the reviewer's FINAL verdict label — plus whether the PR touches the
 // review machinery — to the `ai-review` check-run's conclusion + human-
 // readable title/summary.
@@ -391,6 +415,8 @@ module.exports = {
   PASS,
   CHANGES,
   BLOCKED,
+  AWAITING_APPROVAL,
+  shouldAwaitApproval,
   isQuotaExhaustion,
   parseAllowlist,
   isAuthorizedReviewer,

@@ -20,6 +20,8 @@ const {
   verifyHeadPassStatus,
   PASS_STATUS_CONTEXT,
   decideStatus,
+  shouldAwaitApproval,
+  AWAITING_APPROVAL,
   decideReviewCheck,
   isBenignRemovalError,
   sanitizeLogin,
@@ -491,4 +493,38 @@ test('decideStatus: verified label but UNVERIFIED head status → red (the #466 
 test('decideStatus: headStatus OMITTED → not required (rollout / base-guard-predates-#466 compat)', () => {
   const s = decideStatus({ labels: [PASS, 'feat'], passProvenance: VERIFIED_PROV });
   assert.equal(s.state, 'success');
+});
+
+// ── DR-063 / SPEC-031 FR-9a — awaiting-approval "your turn" queue signal ──────
+test('shouldAwaitApproval: green gate + no auto-merge → your turn (label present)', () => {
+  assert.equal(shouldAwaitApproval({ statusState: 'success', autoMergeArmed: false }), true);
+});
+
+test('shouldAwaitApproval: green gate but auto-merge armed → robot merges it, NOT your turn', () => {
+  assert.equal(shouldAwaitApproval({ statusState: 'success', autoMergeArmed: true }), false);
+});
+
+test('shouldAwaitApproval: failing gate → never your turn (any auto-merge state)', () => {
+  assert.equal(shouldAwaitApproval({ statusState: 'failure', autoMergeArmed: false }), false);
+  assert.equal(shouldAwaitApproval({ statusState: 'failure', autoMergeArmed: true }), false);
+});
+
+test('shouldAwaitApproval: only literal success counts (pending/error/undefined → false, fail-closed)', () => {
+  assert.equal(shouldAwaitApproval({ statusState: 'pending', autoMergeArmed: false }), false);
+  assert.equal(shouldAwaitApproval({ statusState: 'error', autoMergeArmed: false }), false);
+  assert.equal(shouldAwaitApproval({ statusState: undefined, autoMergeArmed: false }), false);
+  assert.equal(shouldAwaitApproval({}), false);
+  assert.equal(shouldAwaitApproval(), false);
+});
+
+test('shouldAwaitApproval: a stripped/reverted pass drives decideStatus→failure→label removed (integration with the sole owner)', () => {
+  // A stale-strip makes decideStatus red; shouldAwaitApproval then returns false,
+  // so ready-to-merge.yml removes the label with NO extra mirror site (FR-9a).
+  const red = decideStatus({ labels: [PASS], stalenessStrip: true, passProvenance: VERIFIED_PROV });
+  assert.equal(red.state, 'failure');
+  assert.equal(shouldAwaitApproval({ statusState: red.state, autoMergeArmed: false }), false);
+});
+
+test('AWAITING_APPROVAL: is the canonical label string', () => {
+  assert.equal(AWAITING_APPROVAL, 'awaiting-approval');
 });
