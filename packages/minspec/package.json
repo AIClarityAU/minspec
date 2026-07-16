@@ -260,6 +260,10 @@
         "title": "MinSpec: Approve/Accept Active",
         "shortTitle": "Approve/Accept",
         "icon": "$(check-all)"
+      },
+      {
+        "command": "minspec.pushDocsLane",
+        "title": "MinSpec: Push docs via lane"
       }
     ],
     "keybindings": [
@@ -272,6 +276,12 @@
         "command": "minspec.nextTask",
         "key": "ctrl+k ctrl+n",
         "mac": "cmd+k cmd+n",
+        "when": "workspaceFolderCount != 0"
+      },
+      {
+        "command": "minspec.pushDocsLane",
+        "key": "ctrl+k ctrl+p",
+        "mac": "cmd+k cmd+p",
         "when": "workspaceFolderCount != 0"
       }
     ],

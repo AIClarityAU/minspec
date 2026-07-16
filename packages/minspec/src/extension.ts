@@ -19,6 +19,7 @@ import { ApprovalDiffContentProvider, showChangesSinceApproval } from './lib/app
 import { approveActiveCommand } from './commands/approve-active';
 import { validateSpecCommand } from './commands/validate';
 import { viewDesignCommand, viewTasksCommand } from './commands/view-phase-file';
+import { pushDocsLaneCommand } from './commands/push-docs-lane';
 import { SpecTreeProvider } from './views/spec-tree-provider';
 import { EpicReorderDragAndDropController } from './views/epic-dnd-controller';
 import { AdrTreeProvider } from './views/adr-tree-provider';
@@ -383,6 +384,11 @@ export function activate(context: vscode.ExtensionContext): void {
       await approveActiveCommand(node);
     }),
     vscode.commands.registerCommand('minspec.validateSpec', (node) => validateSpecCommand(node)),
+    // SPEC-039: open a docs-only PR on the docs-lane from inside the editor.
+    // folderArg is optional (tests/programmatic); the command resolves the target
+    // folder interactively when omitted. Best-effort — never rejects (INV-4).
+    vscode.commands.registerCommand('minspec.pushDocsLane', (folderArg?: string) =>
+      pushDocsLaneCommand(folderArg)),
     vscode.commands.registerCommand('minspec.viewDesign', (node) => viewDesignCommand(node)),
     vscode.commands.registerCommand('minspec.viewTasks', (node) => viewTasksCommand(node)),
     vscode.commands.registerCommand('minspec.showSpecPanel', async (specFilePath?: string) => {
