@@ -19,9 +19,15 @@ import {
   DEFAULT_REQUIRED_CHECK_CONTEXTS,
   createRequiredChecksRuleset,
   defaultCommandRunner,
-  hasRequiredChecksRuleset,
   isGhReady,
   resolveCheckContexts,
+  listRequiredCheckContexts,
+  probeReviewerConfigured,
+  updateRulesetRequiredChecks,
+  resolveTieredRequiredChecks,
+  detectCodeChecks,
+  AI_REVIEW_CHECK,
+  READY_TO_MERGE_CHECK,
 } from '../lib/ruleset-advisor';
 
 /**
@@ -315,6 +321,13 @@ const RULESET_DOCS_ACTION = 'View GitHub docs';
  * 2026-07-01) — the create fires only when the user picks it.
  */
 const RULESET_CREATE_ACTION = 'Create ruleset';
+/**
+ * Add-offer action: WRITE the missing required checks into an EXISTING ruleset
+ * (the sealbox case — a ruleset that predates the ai-review/ready-to-merge
+ * checks). Like {@link RULESET_CREATE_ACTION}, this click IS the consent for the
+ * mutation.
+ */
+const RULESET_ADD_ACTION = 'Add checks';
 /** Create-offer action: decline — make no `gh api` write. */
 const RULESET_DECLINE_ACTION = 'Not now';
 /** Create-offer action: open the rulesets docs instead of creating. */
@@ -386,6 +399,48 @@ export function resolveRequiredChecks(): string[] {
   );
 }
 
+/**
+ * Probe the repo + resolve the FULL producible required-check set for it (#564 /
+ * SPEC-033 FR-3). Never requires a check the repo cannot yet produce (the #559
+ * deadlock): Tier-A (`ai-review`/`ready-to-merge`) only when their workflow files
+ * are scaffolded AND ALL the reviewer secrets are configured; Tier-B (`lint`/`test`/
+ * `build`) only when `package.json` has a runnable script; plus the user's
+ * `minspec.ruleset.requiredChecks` extras.
+ *
+ * Network posture (Tier-0): the fs reads are local; the reviewer-secret-NAMES
+ * probe ({@link probeReviewerConfigured}) is an AUTONOMOUS read-only GET of the
+ * repo's OWN Actions-secret NAMES (never values) — the same read-only-config
+ * class as the rulesets probe, egressing nothing. It runs here in the detection
+ * path with NO consent toast in front of it, on the same basis as
+ * {@link hasRequiredChecksRuleset}. This autonomy is authorised by DR-050
+ * (Amendment 2026-07-16), which extends the read-only-config-probe carve-out to
+ * the `actions/secrets` NAMES read (materialising the founder's decision on #796).
+ */
+async function resolveWantedChecks(
+  folder: string,
+  owner: string,
+  repo: string,
+  run: CommandRunner,
+): Promise<string[]> {
+  const hasWorkflow = (file: string): boolean =>
+    fs.existsSync(path.join(folder, '.github', 'workflows', file));
+  let scripts: Record<string, unknown> | null = null;
+  try {
+    const pkg = JSON.parse(fs.readFileSync(path.join(folder, 'package.json'), 'utf8'));
+    scripts = pkg && typeof pkg === 'object' ? ((pkg as { scripts?: Record<string, unknown> }).scripts ?? null) : null;
+  } catch {
+    scripts = null;
+  }
+  const reviewerConfigured = await probeReviewerConfigured(owner, repo, run);
+  return resolveTieredRequiredChecks({
+    aiReviewWorkflowScaffolded: hasWorkflow('ai-review.yml'),
+    readyToMergeWorkflowScaffolded: hasWorkflow('ready-to-merge.yml'),
+    reviewerConfigured,
+    codeChecks: detectCodeChecks(scripts),
+    userChecks: resolveRequiredChecks(),
+  });
+}
+
 /** Show an info toast linking the rulesets docs, with a one-click open action. */
 async function linkRulesetDocs(
   message: string,
@@ -418,12 +473,16 @@ async function linkRulesetDocs(
  *           - "Not now"/dismiss → nothing.
  *           - "Learn more"     → open the rulesets docs.
  *
- * Why the probe is autonomous: `isGhReady` and `hasRequiredChecksRuleset` are a
- * read-only capability probe + a GET of the repo's OWN configuration — they
- * egress no user artifacts, spec content, or telemetry (the same class as
- * MinSpec shelling `git fetch`). Per DR-050 they need no prior consent toast.
- * Only the CREATE mutates the repo, so it is the one action gated on an explicit
- * click.
+ * Why the probe is autonomous: `isGhReady`, `hasRequiredChecksRuleset` /
+ * `listRequiredCheckContexts`, and the reviewer-secret-NAMES probe
+ * ({@link probeReviewerConfigured}, via {@link resolveWantedChecks}) are a
+ * read-only capability probe + GETs of the repo's OWN configuration — they
+ * egress no user artifacts, spec content, secret VALUES, or telemetry (the same
+ * class as MinSpec shelling `git fetch`). Per DR-050 they need no prior consent
+ * toast: the rulesets read under Amendment 2026-07-01, and the `actions/secrets`
+ * NAMES read under Amendment 2026-07-16 (materialising the founder's decision on
+ * #796). Only the CREATE/ADD mutates the repo, so it is the one action gated on
+ * an explicit click.
  *
  * The created ruleset's required checks come from
  * {@link resolveRequiredChecks} (the `minspec.ruleset.requiredChecks` setting,
@@ -484,49 +543,85 @@ export async function offerRulesetAdvisory(
     }
     const [owner, name] = repo.split('/');
 
+    // The WANTED producible check set. `deps.requiredChecks` overrides (tests /
+    // explicit set); else probe the repo + resolve the tiered set (#564) so we
+    // only ever require checks the repo can actually PRODUCE (no #559 deadlock).
+    const wanted = deps.requiredChecks
+      ? [...deps.requiredChecks]
+      : await resolveWantedChecks(folder, owner, name, run);
+
     // AUTO-PROBE (read-only config GET) — runs autonomously, NO consent toast.
     // A GET of the repo's OWN rulesets egresses no user data (same class as
-    // `git fetch`); per DR-050 Amendment 2026-07-01 no prior opt-in is required.
-    // A qualifying ruleset already protects the default branch → SILENT (there
-    // is nothing for the user to do, so we show no toast at all).
-    if (await hasRequiredChecksRuleset(owner, name, run)) {
-      return;
-    }
+    // `git fetch`); per DR-050 no prior opt-in is required. SYMMETRIC (#564 /
+    // SPEC-033 FR-3): we compare WHICH checks the ruleset requires to `wanted`,
+    // not merely "does a ruleset exist" — the sealbox asymmetry where a ruleset
+    // requiring only `MinSpec SDD validation` read as "configured" and never
+    // gained ai-review/ready-to-merge. Fully satisfied ⇒ SILENT.
+    const existing = await listRequiredCheckContexts(owner, name, run);
+    const have = new Set(existing?.contexts ?? []);
+    const missing = wanted.filter((c) => !have.has(c));
+    if (missing.length === 0) return;
 
-    // None found → exactly ONE toast: offer to create. This is the ONLY toast
-    // in the happy path, and it is the consent gate for the MUTATING create.
-    const requiredChecks = deps.requiredChecks ?? resolveRequiredChecks();
-    const choice = await vscode.window.showInformationMessage(
-      `MinSpec: ${repo} has no branch ruleset requiring CI checks ` +
-        `(${requiredChecks.join(' + ')}) on its default branch. Create one?`,
-      RULESET_CREATE_ACTION,
-      RULESET_DECLINE_ACTION,
-      RULESET_LEARN_MORE_ACTION,
-    );
-
-    if (choice === RULESET_CREATE_ACTION) {
-      // CREATE (MUTATING network) — reached ONLY on the explicit "Create
-      // ruleset" click; that click IS the consent for the mutation (DR-050).
-      const outcome = await createRequiredChecksRuleset(owner, name, run, requiredChecks);
-      if (outcome.created) {
-        vscode.window.showInformationMessage(
-          `MinSpec: created a ruleset requiring ${requiredChecks.join(' + ')} on ${repo}'s default branch.`,
+    if (!existing) {
+      // No ruleset at all → offer to CREATE with the full wanted set. The click
+      // IS the consent for the mutation (DR-050).
+      const choice = await vscode.window.showInformationMessage(
+        `MinSpec: ${repo} has no branch ruleset requiring CI checks ` +
+          `(${wanted.join(' + ')}) on its default branch. Create one?`,
+        RULESET_CREATE_ACTION,
+        RULESET_DECLINE_ACTION,
+        RULESET_LEARN_MORE_ACTION,
+      );
+      if (choice === RULESET_CREATE_ACTION) {
+        const outcome = await createRequiredChecksRuleset(owner, name, run, wanted);
+        if (outcome.created) {
+          vscode.window.showInformationMessage(
+            `MinSpec: created a ruleset requiring ${wanted.join(' + ')} on ${repo}'s default branch.`,
+          );
+          return;
+        }
+        const why = outcome.forbidden ? 'your gh token lacks repo-admin scope' : 'the request failed';
+        await linkRulesetDocs(
+          `MinSpec: could not create the ruleset (${why}). Create it manually — see the GitHub docs.`,
+          openExternal,
         );
         return;
       }
-      // 403 (no admin scope) or any other error → fall back to the docs link.
-      const why = outcome.forbidden
-        ? 'your gh token lacks repo-admin scope'
-        : 'the request failed';
+      if (choice === RULESET_LEARN_MORE_ACTION) openExternal(RULESET_DOCS_URL);
+      return;
+    }
+
+    // A ruleset EXISTS but is MISSING required checks (the sealbox case) → offer
+    // to ADD them so PRs can't merge unreviewed. The click IS the consent.
+    // "without the AI-review gate" only holds when a Tier-A check (ai-review /
+    // ready-to-merge) is among the missing set — a Tier-B-only gap (lint/test/
+    // build) has nothing to do with AI review, so name the consequence generically.
+    const missingGateCheck = missing.some((c) => c === AI_REVIEW_CHECK || c === READY_TO_MERGE_CHECK);
+    const consequence = missingGateCheck
+      ? 'so a PR could merge without the AI-review gate'
+      : 'so a PR could merge without full CI coverage';
+    const choice = await vscode.window.showInformationMessage(
+      `MinSpec: ${repo}'s branch ruleset does not require ${missing.join(' + ')}` +
+        ` — ${consequence}. Add ${missing.length === 1 ? 'it' : 'them'}?`,
+      RULESET_ADD_ACTION,
+      RULESET_DECLINE_ACTION,
+      RULESET_LEARN_MORE_ACTION,
+    );
+    if (choice === RULESET_ADD_ACTION) {
+      const outcome = await updateRulesetRequiredChecks(owner, name, run, existing.rulesetId, missing);
+      if (outcome.updated) {
+        vscode.window.showInformationMessage(
+          `MinSpec: added ${missing.join(' + ')} to ${repo}'s branch ruleset.`,
+        );
+        return;
+      }
+      const why = outcome.forbidden ? 'your gh token lacks repo-admin scope' : 'the request failed';
       await linkRulesetDocs(
-        `MinSpec: could not create the ruleset (${why}). Create it manually — see the GitHub docs.`,
+        `MinSpec: could not update the ruleset (${why}). Add the checks manually — see the GitHub docs.`,
         openExternal,
       );
       return;
     }
-
-    // "Learn more" → open the rulesets docs. "Not now"/dismiss → nothing (no
-    // further network).
     if (choice === RULESET_LEARN_MORE_ACTION) openExternal(RULESET_DOCS_URL);
   } catch {
     // Advisory only — never let a ruleset-advisory failure break init.
@@ -829,7 +924,7 @@ async function surfaceManagedRegionWarning(folder: string, w: ManagedRegionWarni
 
 export async function initRefreshCommand(
   folderArg?: string,
-  deps?: OfferScaffoldCommitDeps,
+  deps?: OfferScaffoldCommitDeps & { ruleset?: RulesetAdvisoryDeps },
 ): Promise<void> {
   const folder = folderArg ?? (await resolveTargetFolder());
   if (!folder) return;
@@ -857,6 +952,11 @@ export async function initRefreshCommand(
   // auto-bootstrap) rewrites the harness files but leaves them stranded
   // uncommitted, unlike init. Best-effort, non-modal; never blocks the refresh.
   await offerScaffoldCommit(folder, { ...deps, variant: 'refresh' });
+  // Post-refresh ruleset advisory — the SAME governance provisioning init gives
+  // (#564 / SPEC-033 FR-3). Refresh is where an EXISTING repo whose ruleset
+  // predates the ai-review/ready-to-merge checks (the sealbox case) gets offered
+  // the missing required checks; without this, only freshly-inited repos would.
+  await offerRulesetAdvisory(folder, deps?.ruleset);
 }
 
 /** Extract a human-readable message from an unknown thrown value. */

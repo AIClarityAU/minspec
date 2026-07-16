@@ -15,28 +15,36 @@
  * posture by which it already shells `git`.
  *
  * Two distinct classes of network action live here, gated differently per
- * DR-050 (Amendment 2026-07-01):
+ * DR-050 (Amendments 2026-07-01 and 2026-07-16):
  *
  *   - READ-ONLY CONFIG PROBE (autonomous) — {@link isGhReady} (probe the *local*
- *     `gh`) and {@link hasRequiredChecksRuleset} (a `gh api .../rulesets` GET of
- *     the repo's OWN settings). These egress NO user artifacts, spec content, or
- *     telemetry — they read the repo's own configuration, the same class as
- *     MinSpec shelling `git fetch`. They run AUTONOMOUSLY on init once `gh` is
- *     ready and the repo resolves; NO prior consent toast is required.
+ *     `gh`), {@link hasRequiredChecksRuleset} / {@link listRequiredCheckContexts}
+ *     (a `gh api .../rulesets` GET of the repo's OWN settings), and
+ *     {@link probeReviewerConfigured} (a `gh api .../actions/secrets` GET of the
+ *     repo's OWN secret NAMES — never values). These egress NO user artifacts,
+ *     spec content, secret values, or telemetry — they read the repo's own
+ *     configuration, the same class as MinSpec shelling `git fetch`. They run
+ *     AUTONOMOUSLY on init once `gh` is ready and the repo resolves; NO prior
+ *     consent toast is required. The rulesets read is authorised by Amendment
+ *     2026-07-01; the `actions/secrets` NAMES read by Amendment 2026-07-16
+ *     (materialising the founder's decision on #796) — on the SAME basis: it
+ *     reads the repo's OWN config and egresses nothing.
  *
  *   - MUTATING / EGRESSING ACTION (consent-gated) — {@link
  *     createRequiredChecksRuleset} (the `gh api -X POST .../rulesets` that WRITES
- *     a ruleset to the repo). This mutates the user's repository, so it fires
- *     ONLY on the user's explicit "Create ruleset" click — that click IS the
- *     consent for the mutation. Nothing writes autonomously.
+ *     a ruleset) and {@link updateRulesetRequiredChecks} (the `-X PUT` that adds
+ *     missing checks to one). These mutate the user's repository, so they fire
+ *     ONLY on the user's explicit "Create ruleset" / "Add checks" click — that
+ *     click IS the consent for the mutation. Nothing writes autonomously.
  *
- * The ONLY toast shown is the single "create one?" offer — and only when the
- * autonomous probe finds NO qualifying ruleset. If one already exists the whole
- * flow is silent. The always-available fallback ({@link RULESET_DOCS_URL}) makes
- * zero network calls.
+ * The ONLY toast shown is the single "create one?" / "add them?" offer — and only
+ * when the autonomous probe finds a missing check. If the ruleset is already fully
+ * configured the whole flow is silent. The always-available fallback
+ * ({@link RULESET_DOCS_URL}) makes zero network calls.
  *
- * Every MUTATING network action is consent-gated; the read-only probe is
- * autonomous. This is ratified by DR-050 (Amendment 2026-07-01).
+ * Every MUTATING network action is consent-gated; every read-only config probe
+ * (rulesets AND secret-names) is autonomous. This is ratified by DR-050
+ * (Amendments 2026-07-01 and 2026-07-16).
  *
  * Purity / testability: the detection/creation functions never import
  * `child_process` at a call site — all process execution is funnelled through
@@ -382,12 +390,15 @@ export interface TieredRequiredCheckInputs {
   /** `.github/workflows/ready-to-merge.yml` is scaffolded in the target repo. */
   readonly readyToMergeWorkflowScaffolded: boolean;
   /**
-   * The reviewer pipeline is OPERATIONAL — the required secrets (CLAUDE_CODE_OAUTH_TOKEN
-   * + the App) are configured, so ai-review.yml/ready-to-merge.yml actually post their
-   * checks/verdict. Defaults to FALSE (fail-safe): a Tier-A check is never made required
-   * until the caller affirms the repo can produce a pass, so a naive caller can never
-   * mint a deadlocking ruleset. Detecting this is issue #564 slice 3 (a consent-gated
-   * `gh secret list` probe), out of the scaffolding scope.
+   * The reviewer pipeline is OPERATIONAL — ALL of {@link REVIEWER_SECRETS}
+   * (CLAUDE_CODE_OAUTH_TOKEN + the App's id AND private key) are configured, so
+   * ai-review.yml/ready-to-merge.yml actually post their checks/verdict. Defaults to
+   * FALSE (fail-safe): a Tier-A check is never made required until the caller affirms
+   * the repo can produce a pass, so a naive caller can never mint a deadlocking
+   * ruleset. The affirmation comes from {@link probeReviewerConfigured} (secret NAMES
+   * only, all three), which the init/refresh caller runs AUTONOMOUSLY in the detection
+   * path — a read-only GET of the repo's OWN config, authorised by DR-050 (Amendment
+   * 2026-07-16), on the same basis as the autonomous rulesets probe.
    */
   readonly reviewerConfigured?: boolean;
   /** Tier-B checks the repo can produce (from {@link detectCodeChecks}); absent ⇒ none. */
@@ -529,4 +540,250 @@ export async function createRequiredChecksRuleset(
     /resource not accessible/i.test(haystack);
 
   return { created: false, forbidden, detail: result.stderr || result.stdout };
+}
+
+// ---------------------------------------------------------------------------
+// #564 slices 2/3 · SPEC-033 FR-3 — provision the FULL producible check set,
+// SYMMETRICALLY (add missing checks to an existing ruleset).
+//
+// `hasRequiredChecksRuleset` only answered "does ANY ruleset require checks?", so
+// a ruleset requiring just `MinSpec SDD validation` read as "configured" and the
+// `ai-review` / `ready-to-merge` checks scaffolded later (#564) were never added —
+// the sealbox gap, the same present-not-missing asymmetry as the validator class.
+// These close it: read WHICH contexts a ruleset requires, and ADD any missing ones
+// to the existing ruleset (not only create-if-absent).
+// ---------------------------------------------------------------------------
+
+/** Whether a `gh api` failure haystack indicates an authorization problem. */
+function isForbidden(haystack: string): boolean {
+  return (
+    /\b403\b/.test(haystack) ||
+    /forbidden/i.test(haystack) ||
+    /must have admin/i.test(haystack) ||
+    /resource not accessible/i.test(haystack)
+  );
+}
+
+/** The default-branch ruleset that guards checks: its id + the contexts it requires. */
+export interface ExistingRequiredChecks {
+  readonly rulesetId: number;
+  readonly contexts: string[];
+}
+
+/** Permissive view of a ruleset PUT/GET body — only the fields we read/preserve. */
+interface RulesetFull {
+  name?: string;
+  target?: string;
+  enforcement?: string;
+  conditions?: unknown;
+  bypass_actors?: unknown;
+  rules?: Array<{
+    type?: string;
+    parameters?: {
+      required_status_checks?: Array<{ context?: string; integration_id?: number }>;
+    } & Record<string, unknown>;
+  }>;
+}
+
+/** Pull the `required_status_checks` contexts out of a parsed ruleset (pure, tolerant). */
+function extractRequiredContexts(detail: RulesetFull): string[] {
+  const rule = Array.isArray(detail.rules)
+    ? detail.rules.find((r) => r?.type === 'required_status_checks')
+    : undefined;
+  const checks = rule?.parameters?.required_status_checks;
+  if (!Array.isArray(checks)) return [];
+  return checks
+    .map((c) => c?.context)
+    .filter((c): c is string => typeof c === 'string' && c.length > 0);
+}
+
+/**
+ * The default-branch ruleset's id + the status-check contexts it CURRENTLY
+ * requires, or `null` when no active branch ruleset guards checks. Unlike
+ * {@link hasRequiredChecksRuleset} (a bare exists-bool), this returns WHICH
+ * contexts are required, so the caller can add any missing to an existing ruleset
+ * (the sealbox case). Read-only config probe (DR-050). `null` on any read/parse
+ * failure ⇒ the caller treats it as "none" and offers to create.
+ */
+export async function listRequiredCheckContexts(
+  owner: string,
+  repo: string,
+  run: CommandRunner,
+): Promise<ExistingRequiredChecks | null> {
+  const list = await runSafe(run, 'gh', ['api', `repos/${owner}/${repo}/rulesets`]);
+  if (list.code !== 0) return null;
+  let rulesets: Array<{ id?: number; target?: string; enforcement?: string }>;
+  try {
+    const parsed = JSON.parse(list.stdout);
+    if (!Array.isArray(parsed)) return null;
+    rulesets = parsed;
+  } catch {
+    return null;
+  }
+  for (const rs of rulesets) {
+    if (rs.target !== 'branch') continue;
+    if (rs.enforcement === 'disabled') continue;
+    if (typeof rs.id !== 'number') continue;
+    const detail = await runSafe(run, 'gh', ['api', `repos/${owner}/${repo}/rulesets/${rs.id}`]);
+    if (detail.code !== 0) continue;
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(detail.stdout);
+    } catch {
+      continue;
+    }
+    if (rulesetGuardsDefaultBranchChecks(parsed)) {
+      return { rulesetId: rs.id, contexts: extractRequiredContexts(parsed as RulesetFull) };
+    }
+  }
+  return null;
+}
+
+/**
+ * The repo Actions secrets the scaffolded `ai-review.yml` requires before it will
+ * run the independent reviewer and post the `ai-review` check. Its guard step
+ * (`if [ -z "$OAUTH_TOKEN" ] || [ -z "$APP_ID" ] || [ -z "$APP_KEY" ]`) skips the
+ * WHOLE workflow — posting a NOTICE and NO check-run — unless ALL THREE are set:
+ *
+ *   - `CLAUDE_CODE_OAUTH_TOKEN` — the inference credential for `claude -p`.
+ *   - `MINSPEC_APP_ID`          — the GitHub App that posts/labels as the bot.
+ *   - `MINSPEC_APP_PRIVATE_KEY` — the App's PEM; the token mint fails without it.
+ *
+ * Kept as the SINGLE SOURCE OF TRUTH so {@link probeReviewerConfigured} can never
+ * drift from the workflow's guard again — the #559 deadlock this whole probe exists
+ * to prevent (see the regression test). If `ai-review.yml`'s required secrets ever
+ * change, change them HERE.
+ */
+export const REVIEWER_SECRETS = [
+  'CLAUDE_CODE_OAUTH_TOKEN',
+  'MINSPEC_APP_ID',
+  'MINSPEC_APP_PRIVATE_KEY',
+] as const;
+
+/**
+ * Is the reviewer pipeline OPERATIONAL on the repo — are the secrets that make
+ * `ai-review.yml`/`ready-to-merge.yml` actually post a pass present? Checks that
+ * EVERY secret in {@link REVIEWER_SECRETS} (`CLAUDE_CODE_OAUTH_TOKEN`,
+ * `MINSPEC_APP_ID`, AND `MINSPEC_APP_PRIVATE_KEY`) is present in the repo's Actions
+ * secrets (NAMES only — never values). This is the {@link
+ * TieredRequiredCheckInputs.reviewerConfigured} guard: never require a Tier-A check
+ * the repo cannot yet produce (the #559 deadlock). Fail-safe: any read failure ⇒
+ * `false` ⇒ the Tier-A checks stay OUT of the required set.
+ *
+ * DEADLOCK NOTE (#559 regression): checking only 2 of the 3 secrets (an earlier
+ * bug) reported "configured" while `MINSPEC_APP_PRIVATE_KEY` was still absent — so
+ * `ai-review` was made a REQUIRED check, but the workflow's own guard skipped and
+ * NEVER posted it, blocking every merge. The check set here MUST equal the
+ * workflow's guard set, hence the shared {@link REVIEWER_SECRETS} constant.
+ *
+ * NETWORK POSTURE — AUTONOMOUS read-only config probe. This is a `gh api GET
+ * repos/{owner}/{repo}/actions/secrets` read of the repo's OWN secret NAMES (never
+ * values), egressing nothing — the same read-only-config class as the rulesets
+ * probe ({@link hasRequiredChecksRuleset}). Per DR-050 (Amendment 2026-07-16 —
+ * materialising the founder's decision on #796) the init/refresh caller runs it
+ * AUTONOMOUSLY in the detection path (via {@link resolveTieredRequiredChecks}
+ * inputs), with NO prior consent toast — on the same basis as the rulesets read.
+ * It opens no socket (delegated to the user's `gh`) and the always-available docs
+ * fallback keeps a zero-network path.
+ */
+export async function probeReviewerConfigured(
+  owner: string,
+  repo: string,
+  run: CommandRunner,
+): Promise<boolean> {
+  const res = await runSafe(run, 'gh', [
+    'api',
+    `repos/${owner}/${repo}/actions/secrets`,
+    '--jq',
+    '[.secrets[].name]',
+  ]);
+  if (res.code !== 0) return false;
+  let names: unknown;
+  try {
+    names = JSON.parse(res.stdout);
+  } catch {
+    return false;
+  }
+  if (!Array.isArray(names)) return false;
+  const set = new Set(names.filter((n): n is string => typeof n === 'string'));
+  // ALL THREE secrets the ai-review.yml guard requires must be present, or the
+  // workflow skips (posts a NOTICE, no `ai-review` check) — see REVIEWER_SECRETS.
+  return REVIEWER_SECRETS.every((name) => set.has(name));
+}
+
+/** Outcome of adding missing contexts to an existing ruleset. */
+export interface UpdateRulesetOutcome {
+  /** Whether the ruleset now requires all wanted contexts (PUT ok, or already satisfied). */
+  updated: boolean;
+  /** True on an authorization failure (403 / missing admin). */
+  forbidden: boolean;
+  /** Captured diagnostics (empty on success). */
+  detail: string;
+}
+
+/**
+ * Add `addContexts` to an existing ruleset's `required_status_checks` rule
+ * (idempotent union — contexts already required are preserved, including any
+ * `integration_id` pins). GETs the ruleset, merges, and PUTs the whole thing back
+ * (GitHub ruleset update is a full replacement — there is no PATCH). Only the
+ * `required_status_checks` context list changes; name, enforcement, conditions,
+ * bypass actors, and every other rule are preserved verbatim. MUTATING — the
+ * caller gates it behind explicit consent (DR-050 / SPEC-033 FR-3).
+ */
+export async function updateRulesetRequiredChecks(
+  owner: string,
+  repo: string,
+  run: CommandRunner,
+  rulesetId: number,
+  addContexts: readonly string[],
+): Promise<UpdateRulesetOutcome> {
+  const got = await runSafe(run, 'gh', ['api', `repos/${owner}/${repo}/rulesets/${rulesetId}`]);
+  if (got.code !== 0) {
+    return { updated: false, forbidden: isForbidden(got.stdout + got.stderr), detail: got.stderr || got.stdout };
+  }
+  let detail: RulesetFull;
+  try {
+    detail = JSON.parse(got.stdout) as RulesetFull;
+  } catch {
+    return { updated: false, forbidden: false, detail: 'could not parse the existing ruleset' };
+  }
+  const rules = Array.isArray(detail.rules) ? detail.rules : [];
+  const rule = rules.find((r) => r?.type === 'required_status_checks');
+  if (!rule) {
+    return { updated: false, forbidden: false, detail: 'ruleset has no required_status_checks rule' };
+  }
+  const existing = Array.isArray(rule.parameters?.required_status_checks)
+    ? rule.parameters!.required_status_checks!
+    : [];
+  const have = new Set(existing.map((c) => c?.context));
+  const missing = addContexts.filter((c) => !have.has(c));
+  if (missing.length === 0) return { updated: true, forbidden: false, detail: 'already satisfied' };
+
+  const newRules = rules.map((r) =>
+    r?.type === 'required_status_checks'
+      ? {
+          ...r,
+          parameters: {
+            ...r.parameters,
+            required_status_checks: [...existing, ...missing.map((context) => ({ context }))],
+          },
+        }
+      : r,
+  );
+  const body = JSON.stringify({
+    name: detail.name,
+    target: detail.target ?? 'branch',
+    enforcement: detail.enforcement ?? 'active',
+    conditions: detail.conditions,
+    rules: newRules,
+    ...(detail.bypass_actors ? { bypass_actors: detail.bypass_actors } : {}),
+  });
+  const put = await runSafe(
+    run,
+    'gh',
+    ['api', '-X', 'PUT', `repos/${owner}/${repo}/rulesets/${rulesetId}`, '--input', '-'],
+    body,
+  );
+  if (put.code === 0) return { updated: true, forbidden: false, detail: '' };
+  return { updated: false, forbidden: isForbidden(put.stdout + put.stderr), detail: put.stderr || put.stdout };
 }
