@@ -386,8 +386,10 @@ export interface TieredRequiredCheckInputs {
    * + the App) are configured, so ai-review.yml/ready-to-merge.yml actually post their
    * checks/verdict. Defaults to FALSE (fail-safe): a Tier-A check is never made required
    * until the caller affirms the repo can produce a pass, so a naive caller can never
-   * mint a deadlocking ruleset. Detecting this is issue #564 slice 3 (a consent-gated
-   * `gh secret list` probe), out of the scaffolding scope.
+   * mint a deadlocking ruleset. The affirmation comes from {@link
+   * probeReviewerConfigured} (secret NAMES only), which the init/refresh caller runs
+   * POST-CONSENT — after the user has clicked "Create"/"Add checks" — so the secret
+   * read is gated behind the write consent and never fires on the autonomous probe.
    */
   readonly reviewerConfigured?: boolean;
   /** Tier-B checks the repo can produce (from {@link detectCodeChecks}); absent ⇒ none. */
@@ -632,11 +634,16 @@ export async function listRequiredCheckContexts(
  * Is the reviewer pipeline OPERATIONAL on the repo — are the secrets that make
  * `ai-review.yml`/`ready-to-merge.yml` actually post a pass present? Checks for
  * `CLAUDE_CODE_OAUTH_TOKEN` AND `MINSPEC_APP_ID` in the repo's Actions secrets
- * (names only — a GET of the repo's OWN secret NAMES, no values, same read-only
- * class as the rulesets probe). This is the {@link
- * TieredRequiredCheckInputs.reviewerConfigured} guard: never require a Tier-A
- * check the repo cannot yet produce (the #559 deadlock). Fail-safe: any read
- * failure ⇒ `false` ⇒ the Tier-A checks stay OUT of the required set.
+ * (NAMES only — never values). This is the {@link
+ * TieredRequiredCheckInputs.reviewerConfigured} guard: never require a Tier-A check
+ * the repo cannot yet produce (the #559 deadlock). Fail-safe: any read failure ⇒
+ * `false` ⇒ the Tier-A checks stay OUT of the required set.
+ *
+ * CONSENT: this reads the repo's config, so the init/refresh caller invokes it only
+ * POST-CONSENT — after the user clicks "Create"/"Add checks" — and only when a
+ * Tier-A check is actually about to be written. It is NOT part of the autonomous
+ * read-only probe (DR-050 scopes that to the rulesets read alone); gating it behind
+ * the write consent keeps the autonomous-network surface unchanged.
  */
 export async function probeReviewerConfigured(
   owner: string,

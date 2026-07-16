@@ -674,6 +674,81 @@ describe('offerRulesetAdvisory() — autonomous probe + single-consent create (#
     expect(message).not.toMatch(/AI-review gate/i);
   });
 
+  it('AUTONOMOUS PROBE reads ONLY rulesets — no secret read until write consent (DR-050), even with a Tier-A candidate', async () => {
+    const { run, calls } = makeRunner((_c, args) => {
+      if (args[0] === '--version') return ok('gh 2');
+      if (args[0] === 'auth') return ok('ok');
+      if (apiPath(args) === 'repos/o/r/rulesets') return ok('[]');
+      return undefined;
+    });
+    showInfo.mockResolvedValueOnce('Not now'); // decline → no write
+
+    await offerRulesetAdvisory('/ws', {
+      run,
+      resolveRepo,
+      openExternal,
+      isRepo,
+      requiredChecks: ['MinSpec SDD validation', 'ai-review'],
+      tierA: ['ai-review'],
+    });
+
+    // THE FIX: the secret-names GET NEVER fires on the pre-consent autonomous probe.
+    expect(calls.some((c) => apiPath(c.args) === 'repos/o/r/actions/secrets')).toBe(false);
+    expect(calls.some((c) => c.args.includes('POST'))).toBe(false); // declined
+  });
+
+  it('POST-CONSENT drop: reviewer secrets absent → the probe fires only after consent, drops ai-review, no PUT', async () => {
+    const { run, calls } = makeRunner((_c, args) => {
+      if (args[0] === '--version') return ok('gh 2');
+      if (args[0] === 'auth') return ok('ok');
+      if (apiPath(args) === 'repos/o/r/actions/secrets') return ok('[]'); // reviewer NOT configured
+      if (apiPath(args) === 'repos/o/r/rulesets') return ok(JSON.stringify([{ id: 9, target: 'branch', enforcement: 'active' }]));
+      if (args.includes('repos/o/r/rulesets/9') && !args.includes('PUT')) return ok(rulesetDetail(9, ['MinSpec SDD validation']));
+      return undefined;
+    });
+    showInfo.mockResolvedValueOnce('Add checks');
+
+    await offerRulesetAdvisory('/ws', {
+      run,
+      resolveRepo,
+      openExternal,
+      isRepo,
+      requiredChecks: ['MinSpec SDD validation', 'ai-review'],
+      tierA: ['ai-review'],
+    });
+
+    // Secrets probed (POST-consent) → not configured → ai-review dropped → nothing safe → NO PUT.
+    expect(calls.some((c) => apiPath(c.args) === 'repos/o/r/actions/secrets')).toBe(true);
+    expect(calls.some((c) => c.args.includes('PUT'))).toBe(false);
+    // The second toast tells the user to set the reviewer secrets first.
+    expect(String(showInfo.mock.calls[1][0])).toMatch(/reviewer secrets/i);
+  });
+
+  it('POST-CONSENT keep: reviewer secrets present → probe keeps ai-review and PUTs it', async () => {
+    const { run, calls } = makeRunner((_c, args) => {
+      if (args[0] === '--version') return ok('gh 2');
+      if (args[0] === 'auth') return ok('ok');
+      if (apiPath(args) === 'repos/o/r/actions/secrets') return ok(JSON.stringify(['CLAUDE_CODE_OAUTH_TOKEN', 'MINSPEC_APP_ID']));
+      if (apiPath(args) === 'repos/o/r/rulesets') return ok(JSON.stringify([{ id: 9, target: 'branch', enforcement: 'active' }]));
+      if (args.includes('repos/o/r/rulesets/9') && !args.includes('PUT')) return ok(rulesetDetail(9, ['MinSpec SDD validation']));
+      if (args.includes('repos/o/r/rulesets/9') && args.includes('PUT')) return ok('{}');
+      return undefined;
+    });
+    showInfo.mockResolvedValueOnce('Add checks');
+
+    await offerRulesetAdvisory('/ws', {
+      run,
+      resolveRepo,
+      openExternal,
+      isRepo,
+      requiredChecks: ['MinSpec SDD validation', 'ai-review'],
+      tierA: ['ai-review'],
+    });
+
+    const put = calls.find((c) => c.args.includes('PUT'));
+    expect(put?.stdin).toContain('ai-review'); // producible → kept
+  });
+
   it('CASE 3+4: none found → exactly ONE create-offer toast; on Create → POST + success toast', async () => {
     const { run, calls } = makeRunner((_c, args) => {
       if (args[0] === '--version') return ok('gh 2');
