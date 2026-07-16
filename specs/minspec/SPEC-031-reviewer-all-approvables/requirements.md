@@ -111,12 +111,17 @@ enough human") — and matches how the PR reviewer already runs (#342), extended
   AI-greenlit and still awaiting its human keystroke is marked by EXACTLY ONE positive
   label — `awaiting-approval`. "My turn" is therefore a single-label filter, NEVER an AND
   of `ai-review:*:pass` and a negative label. It is applied only when the type is greenlit,
-  prior-stage gates are clear, the human gate is still open, and the PR is not self-merging
-  (no auto-merge armed); it is removed the instant any of those ceases — a flip to `changes`,
-  a stale/forged-pass strip (#359 / #397), the human approval, or an auto-merge. It NEVER
-  coexists with `ai-review:*:changes` (INV-4), and it advises only — it is not a gate and
-  grants no merge power (INV-2). It supersedes the overloaded eager `needs-human-review`,
-  which conflated "AI failed → fix" with "AI passed → approve" (retirement tracked in #816).
+  prior-stage gates are clear, the human gate is still open, and (on the PR surface) the PR
+  is not self-merging (no auto-merge armed). It is removed the instant it no longer holds —
+  the gate stops being green (a flip to `changes`, a stale/forged-pass strip #359 / #397),
+  an auto-merge arms, or the human acts (on the PR surface the keystroke IS the merge, which
+  closes the PR and clears the label with it; on the doc surface — FR-9b, forward — an
+  *Approve* strips it). **Shipped scope:** the PR-surface applier (FR-9a) keys on the
+  ready-to-merge gate state plus the merge; the on-*Approve* strip for docs lands with the
+  #527 runner. It NEVER coexists with `ai-review:*:changes` (INV-4), and it advises only —
+  it is not a gate and grants no merge power (INV-2). It supersedes the overloaded eager
+  `needs-human-review`, which conflated "AI failed → fix" with "AI passed → approve"
+  (retirement tracked in #816).
 
 ## Functional Requirements
 

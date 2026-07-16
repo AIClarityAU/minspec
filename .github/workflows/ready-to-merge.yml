@@ -305,6 +305,12 @@ jobs:
             // turn. Best-effort: the commit status above is the load-bearing signal,
             // this label is a convenience filter on top of it and must never fail the gate.
             try {
+              // `pr` is the `pull_request` webhook payload, which always carries
+              // `auto_merge` (null when unarmed, an object when armed) — so
+              // Boolean(pr.auto_merge) is well-defined on every trigger this workflow
+              // listens to. Were it ever absent it reads as `false` (human turn): a
+              // safe fail-direction, since the only cost is a transient advisory label
+              // on a PR that then auto-merges and closes.
               const wantAwait = guard.shouldAwaitApproval({
                 statusState: status.state,
                 autoMergeArmed: Boolean(pr.auto_merge),
