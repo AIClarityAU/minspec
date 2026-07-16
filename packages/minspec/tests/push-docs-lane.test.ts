@@ -42,6 +42,7 @@ import { resolveTargetFolder } from '../src/lib/resolve-folder';
 import {
   pushDocsLaneCommand,
   parsePorcelainPaths,
+  parsePorcelainEntries,
   slugFromOriginUrl,
   type ExecRun,
 } from '../src/commands/push-docs-lane';
@@ -360,6 +361,73 @@ describe('pushDocsLaneCommand — opens the PR on the happy path', () => {
     expect(calls.some((c) => c.file === 'git' && c.args[0] === 'push')).toBe(false);
     expect(calls.some((c) => c.file === 'git' && c.args[0] === 'worktree' && c.args[1] === 'remove')).toBe(true);
   });
+
+  // ── #798: a pure/mixed deletion is representable — `git rm` in the worktree,
+  //    not just a copy of adds/mods (a deletion has no on-disk content to copy).
+  it('delete-only: a removed doc is git rm-ed in the worktree, not silently filtered out', async () => {
+    // Nothing written to disk — the file is gone (that's the deletion). The
+    // porcelain worktree-deletion code is ` D` (unstaged) in the second column.
+    const map: Record<string, ResponderVal> = {
+      ...LOCAL_PROBES(root, ' D docs/decisions/DR-001.md\n'),
+      'gh auth status': 'Logged in to github.com\n',
+      'git fetch origin main': '',
+      'git worktree add': '',
+      'git rm': '',
+      'git diff --cached --quiet': Object.assign(new Error('exit 1'), { stderr: '' }),
+      'git commit': '',
+      'git push': '',
+      'gh pr create': 'https://github.com/AIClarityAU/minspec/pull/1000\n',
+      'git worktree remove': '',
+    };
+    const { run, calls } = responder(map);
+    showWarn.mockResolvedValueOnce('Open docs-lane PR');
+    showInput.mockResolvedValueOnce('docs: remove DR-001');
+
+    const res = await pushDocsLaneCommand(root, { run });
+
+    expect(res.outcome).toBe('pushed');
+    expect(res.files).toEqual(['docs/decisions/DR-001.md']);
+    expect(res.branch).toBe('docs-lane/abc1234-1');
+
+    // No copy-based `git add` ever ran — there was nothing to copy.
+    expect(calls.some((c) => c.file === 'git' && c.args[0] === 'add')).toBe(false);
+    // The deletion was staged via `git rm --ignore-unmatch` with a literal pathspec.
+    const rmCall = calls.find((c) => c.file === 'git' && c.args[0] === 'rm');
+    expect(rmCall).toBeDefined();
+    expect(rmCall!.args).toEqual(['rm', '-q', '--ignore-unmatch', '--', 'docs/decisions/DR-001.md']);
+  });
+
+  it('mixed add+delete: one file copied/added, one file git rm-ed, in the same lane push', async () => {
+    // One doc still on disk (add/modify), one doc gone (deletion) — both docs-corpus.
+    writeDoc('docs/decisions/DR-002.md');
+    const map: Record<string, ResponderVal> = {
+      ...LOCAL_PROBES(root, ' M docs/decisions/DR-002.md\nD  docs/decisions/DR-001.md\n'),
+      'gh auth status': 'Logged in to github.com\n',
+      'git fetch origin main': '',
+      'git worktree add': '',
+      'git add --': '',
+      'git rm': '',
+      'git diff --cached --quiet': Object.assign(new Error('exit 1'), { stderr: '' }),
+      'git commit': '',
+      'git push': '',
+      'gh pr create': 'https://github.com/AIClarityAU/minspec/pull/1001\n',
+      'git worktree remove': '',
+    };
+    const { run, calls } = responder(map);
+    showWarn.mockResolvedValueOnce('Open docs-lane PR');
+    showInput.mockResolvedValueOnce('docs: update DR-002, remove DR-001');
+
+    const res = await pushDocsLaneCommand(root, { run });
+
+    expect(res.outcome).toBe('pushed');
+    expect(res.files).toEqual(['docs/decisions/DR-002.md', 'docs/decisions/DR-001.md']);
+    expect(res.branch).toBe('docs-lane/abc1234-2');
+
+    const addCall = calls.find((c) => c.file === 'git' && c.args[0] === 'add');
+    expect(addCall!.args).toEqual(['add', '--', 'docs/decisions/DR-002.md']);
+    const rmCall = calls.find((c) => c.file === 'git' && c.args[0] === 'rm');
+    expect(rmCall!.args).toEqual(['rm', '-q', '--ignore-unmatch', '--', 'docs/decisions/DR-001.md']);
+  });
 });
 
 // =============================================================================
@@ -379,6 +447,23 @@ describe('parsePorcelainPaths', () => {
   });
   it('drops blank lines and CRs', () => {
     expect(parsePorcelainPaths(' M docs/a.md\r\n\n')).toEqual(['docs/a.md']);
+  });
+});
+
+describe('parsePorcelainEntries', () => {
+  it('carries the raw XY status alongside each path (worktree vs staged deletion)', () => {
+    expect(
+      parsePorcelainEntries(' D docs/a.md\nD  docs/b.md\n M docs/c.md\n'),
+    ).toEqual([
+      { path: 'docs/a.md', status: ' D' },
+      { path: 'docs/b.md', status: 'D ' },
+      { path: 'docs/c.md', status: ' M' },
+    ]);
+  });
+  it('keeps the NEW path (with the rename status) for a rename', () => {
+    expect(parsePorcelainEntries('R  docs/old.md -> docs/new.md\n')).toEqual([
+      { path: 'docs/new.md', status: 'R ' },
+    ]);
   });
 });
 

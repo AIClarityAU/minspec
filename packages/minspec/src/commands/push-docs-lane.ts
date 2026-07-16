@@ -141,24 +141,46 @@ function isAuthError(message: string): boolean {
   );
 }
 
+/** One `git status --porcelain` (v1) line: a repo-relative path plus its raw XY status. */
+export interface PorcelainEntry {
+  readonly path: string;
+  /** The raw two-char `XY` status code (e.g. `' M'`, `'A '`, `' D'`, `'D '`, `'??'`, `'R '`). */
+  readonly status: string;
+}
+
 /**
- * Parse `git status --porcelain` (v1) output into repo-relative paths. Strips the
- * two-char `XY` status + its trailing space (`line.slice(3)`), and for a rename/
- * copy (`old -> new`) keeps the NEW path. Blank lines are dropped. Run with
- * `-c core.quotePath=false` upstream so non-ASCII paths arrive literally (no
- * octal-escaped quoting to undo).
+ * Parse `git status --porcelain` (v1) output into `{ path, status }` entries.
+ * Splits off the two-char `XY` status (`line.slice(0, 2)`) from its trailing
+ * space (`line.slice(3)`), and for a rename/copy (`old -> new`) keeps the NEW
+ * path. Blank lines are dropped. Run with `-c core.quotePath=false` upstream so
+ * non-ASCII paths arrive literally (no octal-escaped quoting to undo).
  */
-export function parsePorcelainPaths(stdout: string): string[] {
-  const out: string[] = [];
+export function parsePorcelainEntries(stdout: string): PorcelainEntry[] {
+  const out: PorcelainEntry[] = [];
   for (const raw of stdout.split('\n')) {
     const line = raw.replace(/\r$/, '');
     if (line.length <= 3) continue; // '' or a truncated line
+    const status = line.slice(0, 2);
     let p = line.slice(3);
     const arrow = p.indexOf(' -> ');
     if (arrow !== -1) p = p.slice(arrow + 4);
-    if (p.length > 0) out.push(p);
+    if (p.length > 0) out.push({ path: p, status });
   }
   return out;
+}
+
+/** Parse `git status --porcelain` (v1) output into repo-relative paths only. */
+export function parsePorcelainPaths(stdout: string): string[] {
+  return parsePorcelainEntries(stdout).map((e) => e.path);
+}
+
+/**
+ * True for a deletion the copy-based lane cannot represent by copying (the file
+ * is gone from disk): a worktree deletion (`' D'`) or a staged deletion (`'D '`).
+ * These are `git rm`'d in the lane worktree instead of copied.
+ */
+function isDeletionStatus(status: string): boolean {
+  return status === ' D' || status === 'D ';
 }
 
 /**
@@ -241,23 +263,30 @@ export async function pushDocsLaneCommand(
     }
 
     // 6. Gather working-tree changes limited to the docs corpus (local — INV-2).
-    //    core.quotePath=false so non-ASCII paths come through literally.
+    //    core.quotePath=false so non-ASCII paths come through literally. Split
+    //    into adds/modifies (present on disk — copied into the worktree) and
+    //    deletions (gone from disk — `git rm`'d there instead, since a deleted
+    //    path has nothing to copy but is still a representable docs-lane change).
     let files: string[];
+    let addFiles: string[];
+    let deletedFiles: string[];
     try {
       const status = (
         await run('git', ['-c', 'core.quotePath=false', 'status', '--porcelain'], { cwd: root })
       ).stdout;
-      const docs = parsePorcelainPaths(status).filter(isDocsCorpusPath);
-      // Copy-based lane: only files present on disk (adds/modifies) can be copied
-      // into the worktree. A pure deletion is not representable here (same as the
-      // CLI helper) — filter it out; deletions via the lane are a follow-up.
-      files = docs.filter((f) => {
-        try {
-          return fs.existsSync(path.join(root, f));
-        } catch {
-          return false;
-        }
-      });
+      const docs = parsePorcelainEntries(status).filter((e) => isDocsCorpusPath(e.path));
+      deletedFiles = docs.filter((e) => isDeletionStatus(e.status)).map((e) => e.path);
+      addFiles = docs
+        .filter((e) => !isDeletionStatus(e.status))
+        .map((e) => e.path)
+        .filter((f) => {
+          try {
+            return fs.existsSync(path.join(root, f));
+          } catch {
+            return false;
+          }
+        });
+      files = [...addFiles, ...deletedFiles];
     } catch (err) {
       return await surface({ outcome: 'failed', error: describeError(err) });
     }
@@ -303,8 +332,8 @@ export async function pushDocsLaneCommand(
         return await surface({ outcome: 'failed', error: describeError(err) });
       }
 
-      // Copy each docs file from the primary working tree into the worktree.
-      for (const f of files) {
+      // Copy each add/modify docs file from the primary working tree into the worktree.
+      for (const f of addFiles) {
         const dst = path.join(wt, f);
         fs.mkdirSync(path.dirname(dst), { recursive: true });
         fs.copyFileSync(path.join(root, f), dst);
@@ -312,10 +341,23 @@ export async function pushDocsLaneCommand(
 
       // Stage EXACTLY these paths (literal pathspecs via the runner env) — never a
       // blanket `add -A`, so nothing incidental is ever committed (INV-2).
-      try {
-        await run('git', ['add', '--', ...files], { cwd: wt });
-      } catch (err) {
-        return await surface({ outcome: 'failed', error: describeError(err) });
+      if (addFiles.length > 0) {
+        try {
+          await run('git', ['add', '--', ...addFiles], { cwd: wt });
+        } catch (err) {
+          return await surface({ outcome: 'failed', error: describeError(err) });
+        }
+      }
+
+      // `git rm` the deletions — there's nothing on disk to copy. `--ignore-unmatch`
+      // keeps an already-absent-on-origin/main path (e.g. added then deleted before
+      // ever landing) a no-op instead of a hard failure.
+      if (deletedFiles.length > 0) {
+        try {
+          await run('git', ['rm', '-q', '--ignore-unmatch', '--', ...deletedFiles], { cwd: wt });
+        } catch (err) {
+          return await surface({ outcome: 'failed', error: describeError(err) });
+        }
       }
 
       // Nothing differs from origin/main → already-pushed docs; report, don't
