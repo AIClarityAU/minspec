@@ -15,28 +15,36 @@
  * posture by which it already shells `git`.
  *
  * Two distinct classes of network action live here, gated differently per
- * DR-050 (Amendment 2026-07-01):
+ * DR-050 (Amendments 2026-07-01 and 2026-07-16):
  *
  *   - READ-ONLY CONFIG PROBE (autonomous) — {@link isGhReady} (probe the *local*
- *     `gh`) and {@link hasRequiredChecksRuleset} (a `gh api .../rulesets` GET of
- *     the repo's OWN settings). These egress NO user artifacts, spec content, or
- *     telemetry — they read the repo's own configuration, the same class as
- *     MinSpec shelling `git fetch`. They run AUTONOMOUSLY on init once `gh` is
- *     ready and the repo resolves; NO prior consent toast is required.
+ *     `gh`), {@link hasRequiredChecksRuleset} / {@link listRequiredCheckContexts}
+ *     (a `gh api .../rulesets` GET of the repo's OWN settings), and
+ *     {@link probeReviewerConfigured} (a `gh api .../actions/secrets` GET of the
+ *     repo's OWN secret NAMES — never values). These egress NO user artifacts,
+ *     spec content, secret values, or telemetry — they read the repo's own
+ *     configuration, the same class as MinSpec shelling `git fetch`. They run
+ *     AUTONOMOUSLY on init once `gh` is ready and the repo resolves; NO prior
+ *     consent toast is required. The rulesets read is authorised by Amendment
+ *     2026-07-01; the `actions/secrets` NAMES read by Amendment 2026-07-16
+ *     (materialising the founder's decision on #796) — on the SAME basis: it
+ *     reads the repo's OWN config and egresses nothing.
  *
  *   - MUTATING / EGRESSING ACTION (consent-gated) — {@link
  *     createRequiredChecksRuleset} (the `gh api -X POST .../rulesets` that WRITES
- *     a ruleset to the repo). This mutates the user's repository, so it fires
- *     ONLY on the user's explicit "Create ruleset" click — that click IS the
- *     consent for the mutation. Nothing writes autonomously.
+ *     a ruleset) and {@link updateRulesetRequiredChecks} (the `-X PUT` that adds
+ *     missing checks to one). These mutate the user's repository, so they fire
+ *     ONLY on the user's explicit "Create ruleset" / "Add checks" click — that
+ *     click IS the consent for the mutation. Nothing writes autonomously.
  *
- * The ONLY toast shown is the single "create one?" offer — and only when the
- * autonomous probe finds NO qualifying ruleset. If one already exists the whole
- * flow is silent. The always-available fallback ({@link RULESET_DOCS_URL}) makes
- * zero network calls.
+ * The ONLY toast shown is the single "create one?" / "add them?" offer — and only
+ * when the autonomous probe finds a missing check. If the ruleset is already fully
+ * configured the whole flow is silent. The always-available fallback
+ * ({@link RULESET_DOCS_URL}) makes zero network calls.
  *
- * Every MUTATING network action is consent-gated; the read-only probe is
- * autonomous. This is ratified by DR-050 (Amendment 2026-07-01).
+ * Every MUTATING network action is consent-gated; every read-only config probe
+ * (rulesets AND secret-names) is autonomous. This is ratified by DR-050
+ * (Amendments 2026-07-01 and 2026-07-16).
  *
  * Purity / testability: the detection/creation functions never import
  * `child_process` at a call site — all process execution is funnelled through
@@ -382,14 +390,15 @@ export interface TieredRequiredCheckInputs {
   /** `.github/workflows/ready-to-merge.yml` is scaffolded in the target repo. */
   readonly readyToMergeWorkflowScaffolded: boolean;
   /**
-   * The reviewer pipeline is OPERATIONAL — the required secrets (CLAUDE_CODE_OAUTH_TOKEN
-   * + the App) are configured, so ai-review.yml/ready-to-merge.yml actually post their
-   * checks/verdict. Defaults to FALSE (fail-safe): a Tier-A check is never made required
-   * until the caller affirms the repo can produce a pass, so a naive caller can never
-   * mint a deadlocking ruleset. The affirmation comes from {@link
-   * probeReviewerConfigured} (secret NAMES only), which the init/refresh caller runs
-   * POST-CONSENT — after the user has clicked "Create"/"Add checks" — so the secret
-   * read is gated behind the write consent and never fires on the autonomous probe.
+   * The reviewer pipeline is OPERATIONAL — ALL of {@link REVIEWER_SECRETS}
+   * (CLAUDE_CODE_OAUTH_TOKEN + the App's id AND private key) are configured, so
+   * ai-review.yml/ready-to-merge.yml actually post their checks/verdict. Defaults to
+   * FALSE (fail-safe): a Tier-A check is never made required until the caller affirms
+   * the repo can produce a pass, so a naive caller can never mint a deadlocking
+   * ruleset. The affirmation comes from {@link probeReviewerConfigured} (secret NAMES
+   * only, all three), which the init/refresh caller runs AUTONOMOUSLY in the detection
+   * path — a read-only GET of the repo's OWN config, authorised by DR-050 (Amendment
+   * 2026-07-16), on the same basis as the autonomous rulesets probe.
    */
   readonly reviewerConfigured?: boolean;
   /** Tier-B checks the repo can produce (from {@link detectCodeChecks}); absent ⇒ none. */
@@ -631,22 +640,51 @@ export async function listRequiredCheckContexts(
 }
 
 /**
+ * The repo Actions secrets the scaffolded `ai-review.yml` requires before it will
+ * run the independent reviewer and post the `ai-review` check. Its guard step
+ * (`if [ -z "$OAUTH_TOKEN" ] || [ -z "$APP_ID" ] || [ -z "$APP_KEY" ]`) skips the
+ * WHOLE workflow — posting a NOTICE and NO check-run — unless ALL THREE are set:
+ *
+ *   - `CLAUDE_CODE_OAUTH_TOKEN` — the inference credential for `claude -p`.
+ *   - `MINSPEC_APP_ID`          — the GitHub App that posts/labels as the bot.
+ *   - `MINSPEC_APP_PRIVATE_KEY` — the App's PEM; the token mint fails without it.
+ *
+ * Kept as the SINGLE SOURCE OF TRUTH so {@link probeReviewerConfigured} can never
+ * drift from the workflow's guard again — the #559 deadlock this whole probe exists
+ * to prevent (see the regression test). If `ai-review.yml`'s required secrets ever
+ * change, change them HERE.
+ */
+export const REVIEWER_SECRETS = [
+  'CLAUDE_CODE_OAUTH_TOKEN',
+  'MINSPEC_APP_ID',
+  'MINSPEC_APP_PRIVATE_KEY',
+] as const;
+
+/**
  * Is the reviewer pipeline OPERATIONAL on the repo — are the secrets that make
- * `ai-review.yml`/`ready-to-merge.yml` actually post a pass present? Checks for
- * ALL THREE — `CLAUDE_CODE_OAUTH_TOKEN` AND `MINSPEC_APP_ID` AND
- * `MINSPEC_APP_PRIVATE_KEY` — in the repo's Actions secrets (NAMES only, never
- * values). All three are load-bearing (SPEC-033 FR-4/D-3): the App token is minted
- * from the ID + private-key PEM, and the reviewer runs on the OAuth token; a missing
- * one means no ai-review check is ever posted. This is the {@link
+ * `ai-review.yml`/`ready-to-merge.yml` actually post a pass present? Checks that
+ * EVERY secret in {@link REVIEWER_SECRETS} (`CLAUDE_CODE_OAUTH_TOKEN`,
+ * `MINSPEC_APP_ID`, AND `MINSPEC_APP_PRIVATE_KEY`) is present in the repo's Actions
+ * secrets (NAMES only — never values). This is the {@link
  * TieredRequiredCheckInputs.reviewerConfigured} guard: never require a Tier-A check
  * the repo cannot yet produce (the #559 deadlock). Fail-safe: any read failure ⇒
  * `false` ⇒ the Tier-A checks stay OUT of the required set.
  *
- * CONSENT: this reads the repo's config, so the init/refresh caller invokes it only
- * POST-CONSENT — after the user clicks "Create"/"Add checks" — and only when a
- * Tier-A check is actually about to be written. It is NOT part of the autonomous
- * read-only probe (DR-050 scopes that to the rulesets read alone); gating it behind
- * the write consent keeps the autonomous-network surface unchanged.
+ * DEADLOCK NOTE (#559 regression): checking only 2 of the 3 secrets (an earlier
+ * bug) reported "configured" while `MINSPEC_APP_PRIVATE_KEY` was still absent — so
+ * `ai-review` was made a REQUIRED check, but the workflow's own guard skipped and
+ * NEVER posted it, blocking every merge. The check set here MUST equal the
+ * workflow's guard set, hence the shared {@link REVIEWER_SECRETS} constant.
+ *
+ * NETWORK POSTURE — AUTONOMOUS read-only config probe. This is a `gh api GET
+ * repos/{owner}/{repo}/actions/secrets` read of the repo's OWN secret NAMES (never
+ * values), egressing nothing — the same read-only-config class as the rulesets
+ * probe ({@link hasRequiredChecksRuleset}). Per DR-050 (Amendment 2026-07-16 —
+ * materialising the founder's decision on #796) the init/refresh caller runs it
+ * AUTONOMOUSLY in the detection path (via {@link resolveTieredRequiredChecks}
+ * inputs), with NO prior consent toast — on the same basis as the rulesets read.
+ * It opens no socket (delegated to the user's `gh`) and the always-available docs
+ * fallback keeps a zero-network path.
  */
 export async function probeReviewerConfigured(
   owner: string,
@@ -668,16 +706,9 @@ export async function probeReviewerConfigured(
   }
   if (!Array.isArray(names)) return false;
   const set = new Set(names.filter((n): n is string => typeof n === 'string'));
-  // ALL THREE are required for ai-review.yml to post its check (SPEC-033 FR-4/D-3):
-  // CLAUDE_CODE_OAUTH_TOKEN (inference) + MINSPEC_APP_ID + MINSPEC_APP_PRIVATE_KEY
-  // (the raw PEM `create-github-app-token` mints the bot token from). Omitting the
-  // private key would falsely deem a repo "configured" → require ai-review it cannot
-  // produce → deadlock every merge (#559 — the exact failure this guard prevents).
-  return (
-    set.has('CLAUDE_CODE_OAUTH_TOKEN') &&
-    set.has('MINSPEC_APP_ID') &&
-    set.has('MINSPEC_APP_PRIVATE_KEY')
-  );
+  // ALL THREE secrets the ai-review.yml guard requires must be present, or the
+  // workflow skips (posts a NOTICE, no `ai-review` check) — see REVIEWER_SECRETS.
+  return REVIEWER_SECRETS.every((name) => set.has(name));
 }
 
 /** Outcome of adding missing contexts to an existing ruleset. */

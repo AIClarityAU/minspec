@@ -371,17 +371,9 @@ export interface RulesetAdvisoryDeps {
    * {@link resolveRequiredChecks}); falls back to
    * {@link DEFAULT_REQUIRED_CHECK_CONTEXTS} when unset/malformed. Injectable so
    * tests can assert the configured set is honoured without touching VS Code
-   * config. Interpreted as the CANDIDATE set; with it injected, `tierA` defaults
-   * to empty (no post-consent secret gating) unless also supplied.
+   * config.
    */
   requiredChecks?: readonly string[];
-  /**
-   * Which of {@link requiredChecks} are Tier-A (`ai-review`/`ready-to-merge`) — the
-   * checks whose reviewer secrets are re-verified POST-consent before they are
-   * written (dropped if not producible, #559). Injectable so tests can drive the
-   * drop-Tier-A path without touching fs/secrets. Defaults to empty.
-   */
-  tierA?: readonly string[];
 }
 
 /**
@@ -408,19 +400,28 @@ export function resolveRequiredChecks(): string[] {
 }
 
 /**
- * Resolve the CANDIDATE required-check set for the repo from LOCAL signals ONLY —
- * no network. Honours DR-050: the autonomous auto-probe reads only the repo's own
- * rulesets, nothing else. Tier-A (`ai-review`/`ready-to-merge`) are CANDIDATES
- * whenever their workflow file is scaffolded; whether they are actually PRODUCIBLE
- * (the reviewer secrets are set) is verified POST-consent, at write time
- * (`probeReviewerConfigured`), so that secret-names read stays CONSENT-GATED and
- * never widens the autonomous-network surface — and only fires when a Tier-A check
- * is actually about to be written. Tier-B (`lint`/`test`/`build`) only when
- * `package.json` runs them; plus the user's `minspec.ruleset.requiredChecks`
- * extras. Returns the candidate set and, separately, which of it is Tier-A, so the
- * write path can drop those if the reviewer is not yet configured (#559 deadlock).
+ * Probe the repo + resolve the FULL producible required-check set for it (#564 /
+ * SPEC-033 FR-3). Never requires a check the repo cannot yet produce (the #559
+ * deadlock): Tier-A (`ai-review`/`ready-to-merge`) only when their workflow files
+ * are scaffolded AND ALL the reviewer secrets are configured; Tier-B (`lint`/`test`/
+ * `build`) only when `package.json` has a runnable script; plus the user's
+ * `minspec.ruleset.requiredChecks` extras.
+ *
+ * Network posture (Tier-0): the fs reads are local; the reviewer-secret-NAMES
+ * probe ({@link probeReviewerConfigured}) is an AUTONOMOUS read-only GET of the
+ * repo's OWN Actions-secret NAMES (never values) — the same read-only-config
+ * class as the rulesets probe, egressing nothing. It runs here in the detection
+ * path with NO consent toast in front of it, on the same basis as
+ * {@link hasRequiredChecksRuleset}. This autonomy is authorised by DR-050
+ * (Amendment 2026-07-16), which extends the read-only-config-probe carve-out to
+ * the `actions/secrets` NAMES read (materialising the founder's decision on #796).
  */
-function resolveCandidateChecks(folder: string): { candidate: string[]; tierA: string[] } {
+async function resolveWantedChecks(
+  folder: string,
+  owner: string,
+  repo: string,
+  run: CommandRunner,
+): Promise<string[]> {
   const hasWorkflow = (file: string): boolean =>
     fs.existsSync(path.join(folder, '.github', 'workflows', file));
   let scripts: Record<string, unknown> | null = null;
@@ -430,21 +431,14 @@ function resolveCandidateChecks(folder: string): { candidate: string[]; tierA: s
   } catch {
     scripts = null;
   }
-  const wfAiReview = hasWorkflow('ai-review.yml');
-  const wfReadyToMerge = hasWorkflow('ready-to-merge.yml');
-  const candidate = resolveTieredRequiredChecks({
-    aiReviewWorkflowScaffolded: wfAiReview,
-    readyToMergeWorkflowScaffolded: wfReadyToMerge,
-    // CANDIDATE: assume producible here; the write path re-checks the reviewer
-    // secrets (post-consent) and drops any Tier-A check not yet producible.
-    reviewerConfigured: true,
+  const reviewerConfigured = await probeReviewerConfigured(owner, repo, run);
+  return resolveTieredRequiredChecks({
+    aiReviewWorkflowScaffolded: hasWorkflow('ai-review.yml'),
+    readyToMergeWorkflowScaffolded: hasWorkflow('ready-to-merge.yml'),
+    reviewerConfigured,
     codeChecks: detectCodeChecks(scripts),
     userChecks: resolveRequiredChecks(),
   });
-  const tierA: string[] = [];
-  if (wfReadyToMerge) tierA.push(READY_TO_MERGE_CHECK);
-  if (wfAiReview) tierA.push(AI_REVIEW_CHECK);
-  return { candidate, tierA };
 }
 
 /** Show an info toast linking the rulesets docs, with a one-click open action. */
@@ -479,12 +473,16 @@ async function linkRulesetDocs(
  *           - "Not now"/dismiss → nothing.
  *           - "Learn more"     → open the rulesets docs.
  *
- * Why the probe is autonomous: `isGhReady` and `hasRequiredChecksRuleset` are a
- * read-only capability probe + a GET of the repo's OWN configuration — they
- * egress no user artifacts, spec content, or telemetry (the same class as
- * MinSpec shelling `git fetch`). Per DR-050 they need no prior consent toast.
- * Only the CREATE mutates the repo, so it is the one action gated on an explicit
- * click.
+ * Why the probe is autonomous: `isGhReady`, `hasRequiredChecksRuleset` /
+ * `listRequiredCheckContexts`, and the reviewer-secret-NAMES probe
+ * ({@link probeReviewerConfigured}, via {@link resolveWantedChecks}) are a
+ * read-only capability probe + GETs of the repo's OWN configuration — they
+ * egress no user artifacts, spec content, secret VALUES, or telemetry (the same
+ * class as MinSpec shelling `git fetch`). Per DR-050 they need no prior consent
+ * toast: the rulesets read under Amendment 2026-07-01, and the `actions/secrets`
+ * NAMES read under Amendment 2026-07-16 (materialising the founder's decision on
+ * #796). Only the CREATE/ADD mutates the repo, so it is the one action gated on
+ * an explicit click.
  *
  * The created ruleset's required checks come from
  * {@link resolveRequiredChecks} (the `minspec.ruleset.requiredChecks` setting,
@@ -545,68 +543,40 @@ export async function offerRulesetAdvisory(
     }
     const [owner, name] = repo.split('/');
 
-    // The CANDIDATE producible check set — from LOCAL signals only, NO network
-    // (`deps.requiredChecks` overrides for tests / an explicit set). `tierA` is
-    // which of it needs the reviewer secrets; those are re-checked POST-consent at
-    // write time, so no autonomous secret read ever happens (DR-050 / #559 guard).
-    const { candidate, tierA } = deps.requiredChecks
-      ? { candidate: [...deps.requiredChecks], tierA: [...(deps.tierA ?? [])] }
-      : resolveCandidateChecks(folder);
+    // The WANTED producible check set. `deps.requiredChecks` overrides (tests /
+    // explicit set); else probe the repo + resolve the tiered set (#564) so we
+    // only ever require checks the repo can actually PRODUCE (no #559 deadlock).
+    const wanted = deps.requiredChecks
+      ? [...deps.requiredChecks]
+      : await resolveWantedChecks(folder, owner, name, run);
 
-    // AUTO-PROBE (read-only config GET) — runs autonomously, NO consent toast, and
-    // reads ONLY the repo's own rulesets (nothing else; DR-050). SYMMETRIC (#564 /
-    // SPEC-033 FR-3): compare WHICH checks the ruleset requires to the candidate,
+    // AUTO-PROBE (read-only config GET) — runs autonomously, NO consent toast.
+    // A GET of the repo's OWN rulesets egresses no user data (same class as
+    // `git fetch`); per DR-050 no prior opt-in is required. SYMMETRIC (#564 /
+    // SPEC-033 FR-3): we compare WHICH checks the ruleset requires to `wanted`,
     // not merely "does a ruleset exist" — the sealbox asymmetry where a ruleset
-    // requiring only `MinSpec SDD validation` read as "configured" and never gained
-    // ai-review/ready-to-merge. Fully satisfied ⇒ SILENT.
+    // requiring only `MinSpec SDD validation` read as "configured" and never
+    // gained ai-review/ready-to-merge. Fully satisfied ⇒ SILENT.
     const existing = await listRequiredCheckContexts(owner, name, run);
     const have = new Set(existing?.contexts ?? []);
-    const missing = candidate.filter((c) => !have.has(c));
+    const missing = wanted.filter((c) => !have.has(c));
     if (missing.length === 0) return;
 
-    // POST-CONSENT producibility. Once the user has consented to a WRITE, resolve
-    // the SAFE subset to require — dropping any Tier-A check whose reviewer secrets
-    // aren't set (requiring it would deadlock every merge, #559). The secret-NAMES
-    // read happens HERE, gated behind the write consent, and ONLY when a Tier-A
-    // check is actually about to be written — never on the autonomous probe.
-    const safeWrite = async (target: string[]): Promise<{ write: string[]; dropped: string[] }> => {
-      const targetTierA = tierA.filter((c) => target.includes(c));
-      if (targetTierA.length === 0) return { write: target, dropped: [] };
-      if (await probeReviewerConfigured(owner, name, run)) return { write: target, dropped: [] };
-      const drop = new Set(targetTierA);
-      return { write: target.filter((c) => !drop.has(c)), dropped: [...drop] };
-    };
-    const droppedNote = (dropped: string[]): string =>
-      dropped.length ? ` (skipped ${dropped.join(' + ')} — set the reviewer secrets first)` : '';
-
     if (!existing) {
-      // No ruleset at all → offer to CREATE. The click IS the consent (DR-050).
+      // No ruleset at all → offer to CREATE with the full wanted set. The click
+      // IS the consent for the mutation (DR-050).
       const choice = await vscode.window.showInformationMessage(
         `MinSpec: ${repo} has no branch ruleset requiring CI checks ` +
-          `(${candidate.join(' + ')}) on its default branch. Create one?`,
+          `(${wanted.join(' + ')}) on its default branch. Create one?`,
         RULESET_CREATE_ACTION,
         RULESET_DECLINE_ACTION,
         RULESET_LEARN_MORE_ACTION,
       );
       if (choice === RULESET_CREATE_ACTION) {
-        const { write, dropped } = await safeWrite(candidate);
-        if (write.length === 0) {
-          // Defensive parity with the add branch: never create an empty ruleset.
-          // Unreachable while every candidate carries the non-Tier-A `MinSpec SDD
-          // validation`, but not contingent on that invariant holding for any
-          // future candidate source (an all-Tier-A candidate with no secrets set).
-          await linkRulesetDocs(
-            `MinSpec: ${candidate.join(' + ')} need the reviewer secrets ` +
-              `(CLAUDE_CODE_OAUTH_TOKEN + MINSPEC_APP_ID + MINSPEC_APP_PRIVATE_KEY) set before they ` +
-              `can be required — see the GitHub docs.`,
-            openExternal,
-          );
-          return;
-        }
-        const outcome = await createRequiredChecksRuleset(owner, name, run, write);
+        const outcome = await createRequiredChecksRuleset(owner, name, run, wanted);
         if (outcome.created) {
           vscode.window.showInformationMessage(
-            `MinSpec: created a ruleset requiring ${write.join(' + ')} on ${repo}'s default branch${droppedNote(dropped)}.`,
+            `MinSpec: created a ruleset requiring ${wanted.join(' + ')} on ${repo}'s default branch.`,
           );
           return;
         }
@@ -638,21 +608,10 @@ export async function offerRulesetAdvisory(
       RULESET_LEARN_MORE_ACTION,
     );
     if (choice === RULESET_ADD_ACTION) {
-      const { write, dropped } = await safeWrite(missing);
-      if (write.length === 0) {
-        // Everything missing was an unproducible Tier-A check — nothing safe to add
-        // yet (requiring it would deadlock). Point at the reviewer-secret setup.
-        await linkRulesetDocs(
-          `MinSpec: ${missing.join(' + ')} need the reviewer secrets ` +
-            `(CLAUDE_CODE_OAUTH_TOKEN + the App) set before they can be required — see the GitHub docs.`,
-          openExternal,
-        );
-        return;
-      }
-      const outcome = await updateRulesetRequiredChecks(owner, name, run, existing.rulesetId, write);
+      const outcome = await updateRulesetRequiredChecks(owner, name, run, existing.rulesetId, missing);
       if (outcome.updated) {
         vscode.window.showInformationMessage(
-          `MinSpec: added ${write.join(' + ')} to ${repo}'s branch ruleset${droppedNote(dropped)}.`,
+          `MinSpec: added ${missing.join(' + ')} to ${repo}'s branch ruleset.`,
         );
         return;
       }
