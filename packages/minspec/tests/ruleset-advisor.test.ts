@@ -650,6 +650,30 @@ describe('offerRulesetAdvisory() — autonomous probe + single-consent create (#
     expect(String(showInfo.mock.calls[1][0])).toMatch(/added/i);
   });
 
+  it('CASE (add, Tier-B only): missing checks are lint/test/build only → copy says "full CI coverage", not "AI-review gate"', async () => {
+    const { run } = makeRunner((_c, args) => {
+      if (args[0] === '--version') return ok('gh 2');
+      if (args[0] === 'auth') return ok('ok');
+      const isPut = args.includes('PUT');
+      if (apiPath(args) === 'repos/o/r/rulesets') {
+        return ok(JSON.stringify([{ id: 9, target: 'branch', enforcement: 'active' }]));
+      }
+      if (args.includes('repos/o/r/rulesets/9') && !isPut) return ok(rulesetDetail(9, ['MinSpec SDD validation']));
+      if (args.includes('repos/o/r/rulesets/9') && isPut) return ok('{}');
+      return undefined;
+    });
+    showInfo.mockResolvedValueOnce('Not now'); // decline; only the offer copy is under test
+
+    // Injected wanted = validation + a Tier-B check; the existing ruleset has
+    // only validation, so the missing set is Tier-B-only (no ai-review/ready-to-merge).
+    await offerRulesetAdvisory('/ws', deps(run, ['MinSpec SDD validation', 'lint']));
+
+    const message = String(showInfo.mock.calls[0][0]);
+    expect(message).toMatch(/does not require lint/i);
+    expect(message).toMatch(/without full CI coverage/i);
+    expect(message).not.toMatch(/AI-review gate/i);
+  });
+
   it('CASE 3+4: none found → exactly ONE create-offer toast; on Create → POST + success toast', async () => {
     const { run, calls } = makeRunner((_c, args) => {
       if (args[0] === '--version') return ok('gh 2');

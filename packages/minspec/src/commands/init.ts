@@ -26,6 +26,8 @@ import {
   updateRulesetRequiredChecks,
   resolveTieredRequiredChecks,
   detectCodeChecks,
+  AI_REVIEW_CHECK,
+  READY_TO_MERGE_CHECK,
 } from '../lib/ruleset-advisor';
 
 /**
@@ -579,9 +581,16 @@ export async function offerRulesetAdvisory(
 
     // A ruleset EXISTS but is MISSING required checks (the sealbox case) → offer
     // to ADD them so PRs can't merge unreviewed. The click IS the consent.
+    // "without the AI-review gate" only holds when a Tier-A check (ai-review /
+    // ready-to-merge) is among the missing set — a Tier-B-only gap (lint/test/
+    // build) has nothing to do with AI review, so name the consequence generically.
+    const missingGateCheck = missing.some((c) => c === AI_REVIEW_CHECK || c === READY_TO_MERGE_CHECK);
+    const consequence = missingGateCheck
+      ? 'so a PR could merge without the AI-review gate'
+      : 'so a PR could merge without full CI coverage';
     const choice = await vscode.window.showInformationMessage(
       `MinSpec: ${repo}'s branch ruleset does not require ${missing.join(' + ')}` +
-        ` — so a PR could merge without the AI-review gate. Add ${missing.length === 1 ? 'it' : 'them'}?`,
+        ` — ${consequence}. Add ${missing.length === 1 ? 'it' : 'them'}?`,
       RULESET_ADD_ACTION,
       RULESET_DECLINE_ACTION,
       RULESET_LEARN_MORE_ACTION,
