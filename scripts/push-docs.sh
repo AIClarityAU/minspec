@@ -60,7 +60,11 @@ if git -C "$wt" diff --cached --quiet; then
   echo "push-docs: no delta vs origin/main — nothing to push" >&2
   exit 0
 fi
-git -C "$wt" commit -q -m "$msg"
+# --no-verify: the ephemeral worktree has no node_modules / built @aiclarity/shared,
+# so the repo's pre-commit validate hook (tsx) crashes on module load. Local hooks
+# are a fast-fail convenience; CI's MinSpec-validate required check is the guarantee
+# on the docs-lane PR (DR-037). Skip them here.
+git -C "$wt" commit -q --no-verify -m "$msg"
 git -C "$wt" push -q -u origin "$branch"
 
 pr_url="$(gh pr create --repo "$slug" --base main --head "$branch" \

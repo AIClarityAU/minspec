@@ -328,6 +328,14 @@ describe('pushDocsLaneCommand — opens the PR on the happy path', () => {
     const addCall = calls.find((c) => c.file === 'git' && c.args[0] === 'add');
     expect(addCall!.args).toEqual(['add', '--', 'docs/decisions/DR-042.md']);
 
+    // Commit MUST use --no-verify: the ephemeral worktree has no node_modules /
+    // built @aiclarity/shared, so the pre-commit validate hook crashes on module
+    // load. CI's MinSpec-validate required check is the real gate (DR-037). This
+    // regression guard exists because the live docs-lane self-test (SPEC-039)
+    // failed exactly here before --no-verify was added.
+    const commitCall = calls.find((c) => c.file === 'git' && c.args[0] === 'commit');
+    expect(commitCall!.args).toContain('--no-verify');
+
     // Worktree cleaned up (INV-4 finally).
     expect(calls.some((c) => c.file === 'git' && c.args[0] === 'worktree' && c.args[1] === 'remove')).toBe(true);
 
