@@ -14,7 +14,11 @@
 #               the working tree's changed files intersected with the docs corpus.
 set -euo pipefail
 
-CORPUS='^(specs/|docs/|\.minspec/approvals/|[^/]+\.md$)'
+# Docs corpus — single source of truth shared with dispatch-issue.sh's #833
+# auto-merge guard (see scripts/lib/docs-corpus.sh). Kept in lock-step with the TS
+# canonical (docs-corpus.ts) and docs-lane.yml.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/docs-corpus.sh"
+CORPUS="$DOCS_CORPUS_RE"
 
 msg=""
 files=()
