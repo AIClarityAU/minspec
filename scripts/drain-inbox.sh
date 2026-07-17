@@ -273,7 +273,9 @@ sync_shared_checkouts() {
     [[ -d "$d/.git" ]] || continue
     # READ-ONLY: fetch updates origin/* refs; it never moves HEAD or the working
     # tree, so a concurrent session on this checkout is never disturbed (rule #8).
-    git -C "$d" fetch origin --prune -q 2>/dev/null || continue
+    # GIT_TERMINAL_PROMPT=0: this loop is disowned/background — a checkout without
+    # cached credentials must fail fast, never block the cycle on a hidden prompt.
+    GIT_TERMINAL_PROMPT=0 git -C "$d" fetch origin --prune -q 2>/dev/null || continue
     behind="$(git -C "$d" rev-list --count HEAD..@{u} 2>/dev/null || echo '?')"
     [[ "$behind" != "0" && "$behind" != "?" ]] \
       && echo "[drain] fetched $(basename "$d") — $behind behind upstream (NOT fast-forwarded: shared checkout, rule #8 — its owner ff's it)"
