@@ -47,6 +47,8 @@
 #                                    instead of a self-synced run dir (#773 opt-out).
 #   MINSPEC_DRAIN_RUN_DIR=<path>   — where the self-synced run-dir worktree lives
 #                                    (default /tmp/minspec-drain-run).
+#   MINSPEC_DRAIN_SYNC_CHECKOUTS=0 — skip the per-cycle READ-ONLY fetch of the
+#                                    shared human checkouts' origin refs (default on).
 #
 # Opt-in is the once-off permission gate (#239): set it once with --enable-auto,
 # then the session-start hook drains automatically thereafter. The pref lives in
@@ -248,39 +250,33 @@ ensure_fresh_run_dir() {
   return 0
 }
 
-# sync_shared_checkouts (founder ask 2026-07-16): keep the SHARED human checkouts
-# — this MinSpecPro plus the sibling scroogellm/sealbox repos — fast-forwarded to
-# origin/main each cycle, so live editor sessions and this drain do not silently
-# drift behind. STRICTLY SAFE by construction:
-#   • fast-forward ONLY (`merge --ff-only`) — never reset/rebase/force; a diverged
-#     or non-main checkout is left exactly as-is (another session may be live on it).
-#   • only touches a checkout that is on `main` with NO real uncommitted content.
-#   • `update-index --refresh` first clears STAT-dirty (a file whose mtime was
-#     touched but whose content is identical to HEAD) so it does not block the ff —
-#     this exact case (constitution.md) silently blocked syncing for hours.
-# Read-only fetch + a guarded ff can never strand another session's work, so this
-# is safe to run unconditionally at the top of every cycle. Disable with
-# MINSPEC_DRAIN_SYNC_CHECKOUTS=0.
+# sync_shared_checkouts (founder ask 2026-07-16): keep the SHARED human checkouts'
+# ORIGIN REFS current each cycle — a READ-ONLY `git fetch` and NOTHING more. It
+# deliberately does NOT fast-forward/merge/reset/checkout any shared checkout.
+#
+# WHY fetch-only (rule #8 / #168 / DR-051 §4a — load-bearing): moving the HEAD or
+# working tree of the primary (or a sibling) checkout is exactly what the "RULE #8
+# SAFETY" invariant above forbids and what ensure_fresh_run_dir's run-dir design
+# exists to avoid — a `merge --ff-only` mutates the tree of any live peer editor
+# session (the #168 drift), and the clean-tree guard is a TOCTOU snapshot (a peer
+# can dirty the tree between the check and the merge). `fetch` never moves HEAD, so
+# it is safe to run unconditionally; each human/session fast-forwards its OWN
+# checkout when it is the active owner. Fetching a sibling repo is likewise
+# read-only (no state mutation, so no DR-027 cross-boundary concern).
+#
+# Disable with MINSPEC_DRAIN_SYNC_CHECKOUTS=0.
 sync_shared_checkouts() {
   [[ "${MINSPEC_DRAIN_SYNC_CHECKOUTS:-1}" == "0" ]] && return 0
-  local base d branch
+  local base d behind
   base="$(dirname "$PRIMARY_ROOT")"
   for d in "$PRIMARY_ROOT" "$base/scroogellm" "$base/sealbox"; do
     [[ -d "$d/.git" ]] || continue
+    # READ-ONLY: fetch updates origin/* refs; it never moves HEAD or the working
+    # tree, so a concurrent session on this checkout is never disturbed (rule #8).
     git -C "$d" fetch origin --prune -q 2>/dev/null || continue
-    git -C "$d" update-index -q --refresh 2>/dev/null || true
-    branch="$(git -C "$d" rev-parse --abbrev-ref HEAD 2>/dev/null || echo '?')"
-    if [[ "$branch" == "main" ]] \
-        && git -C "$d" diff --quiet 2>/dev/null \
-        && git -C "$d" diff --cached --quiet 2>/dev/null; then
-      if [[ "$(git -C "$d" rev-list --count HEAD..origin/main 2>/dev/null || echo 0)" -gt 0 ]]; then
-        git -C "$d" merge --ff-only origin/main -q 2>/dev/null \
-          && echo "[drain] synced $(basename "$d") → $(git -C "$d" rev-parse --short HEAD)" \
-          || echo "[drain] sync skip $(basename "$d") — main not fast-forwardable (diverged), left as-is"
-      fi
-    else
-      echo "[drain] sync skip $(basename "$d") — branch=$branch or uncommitted changes, left as-is"
-    fi
+    behind="$(git -C "$d" rev-list --count HEAD..@{u} 2>/dev/null || echo '?')"
+    [[ "$behind" != "0" && "$behind" != "?" ]] \
+      && echo "[drain] fetched $(basename "$d") — $behind behind upstream (NOT fast-forwarded: shared checkout, rule #8 — its owner ff's it)"
   done
 }
 
@@ -301,9 +297,8 @@ run_cycle() {
   # falls back to in-place scripts and the cycle proceeds.
   ensure_fresh_run_dir
 
-  # Keep the shared human checkouts (this repo + siblings) current with origin/main
-  # — fast-forward-only, main-and-clean only, never force. Best-effort; a failure
-  # here must never abort the cycle.
+  # Keep the shared human checkouts' origin refs current — READ-ONLY fetch, never
+  # moves a shared HEAD (rule #8 / #168). Best-effort; never aborts the cycle.
   sync_shared_checkouts || true
 
   # Step 1: triage inbox issues → labels T1/T2 as agent-ready
