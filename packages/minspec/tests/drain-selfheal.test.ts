@@ -258,6 +258,9 @@ describe('dispatch-issue.sh: native auto-merge deny-by-default (behavioral seam)
       fs.mkdirSync(path.join(root, '.minspec'), { recursive: true });
       fs.copyFileSync(DISPATCH, path.join(root, 'scripts', 'dispatch-issue.sh'));
       fs.copyFileSync(path.resolve(__dirname, '../../../scripts/lib/agent-egress.sh'), path.join(root, 'scripts', 'lib', 'agent-egress.sh'));
+      // dispatch-issue.sh also sources lib/docs-corpus.sh at startup (#833) — copy it
+      // too, or `source` aborts under `set -u` before the --check-native-automerge seam.
+      fs.copyFileSync(path.resolve(__dirname, '../../../scripts/lib/docs-corpus.sh'), path.join(root, 'scripts', 'lib', 'docs-corpus.sh'));
       fs.writeFileSync(path.join(root, '.minspec', 'config.json'), JSON.stringify({ version: 1 })); // no autoMerge
       expect(check({}, root)).toEqual({ code: 1, out: 'off' });
     } finally {
