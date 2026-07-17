@@ -8,6 +8,7 @@ product: minspec
 epic: EPIC-003  # SDD Core Methodology — the spec→code ownership contract
 aspects: [traceability, validation, governance, tier-0, spec-gate]
 relates_to: [DR-012, DR-031, DR-056, SPEC-004, DR-003]
+implements: [packages/minspec/src/lib/ownership-path-rules.ts, packages/minspec/tests/ownership.test.ts, packages/minspec/tests/ownership-path-parity.test.ts]
 phases:
   specify: done   # draft merged via PR #769, 2026-07-14
   clarify: done   # OQ-1..5 confirmed by Paul Harvey 2026-07-14 (see Clarify)

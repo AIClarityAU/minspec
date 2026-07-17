@@ -28,7 +28,8 @@ const INVALID = 'ownership.implements.invalid';
 /** Build a raw spec with ownership frontmatter + phase state. */
 function ownSpec(o: {
   tier?: string;
-  clarify?: string; // clarify phase status (default done = past Clarify)
+  clarify?: string; // clarify phase status (default done)
+  plan?: string; // plan phase status (default done = in the build path, triggers the rule)
   implementsVal?: string; // raw value after `implements:` (omit = absent)
   affectsVal?: string;
   reason?: string; // implements_reason:
@@ -49,7 +50,7 @@ function ownSpec(o: {
     'phases:',
     '  specify: done',
     `  clarify: ${o.clarify ?? 'done'}`,
-    '  plan: pending',
+    `  plan: ${o.plan ?? 'done'}`,
     '  tasks: pending',
     '  implement: pending',
     '---',
@@ -105,8 +106,13 @@ describe('SPEC-038 ownership declaration (#460)', () => {
   });
 
   // ── Trigger predicate (P2 — phases.clarify) ───────────────────────────────
-  it('a T3 still in Clarify (clarify: pending) is NOT yet required', () => {
-    expect(rules(ownSpec({ tier: 'T3', clarify: 'pending' }))).not.toContain(MISSING);
+  it('a T3 not yet in the build path (plan: pending) is NOT yet required (FR-3)', () => {
+    // clarify-done but plan-pending = parked after Clarify, owns no code yet → exempt
+    expect(rules(ownSpec({ tier: 'T3', plan: 'pending' }))).not.toContain(MISSING);
+  });
+
+  it('a T3 with plan in-progress IS required (in the build path)', () => {
+    expect(rules(ownSpec({ tier: 'T3', plan: 'in-progress' }))).toContain(MISSING);
   });
 });
 

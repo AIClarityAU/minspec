@@ -8,6 +8,7 @@ epic: EPIC-002  # Signpost Integrity
 aspects: [ux]
 depends_on: [SPEC-017, SPEC-022]
 relates_to: [SPEC-015, SPEC-018, SPEC-026, DR-012, DR-034]
+implements: [packages/minspec/src/lib/approval-diff.ts, packages/minspec/tests/approval-diff.test.ts]
 phases:
   specify: done
   clarify: done   # FR-OQ1 resolved by Paul Harvey 2026-07-03 (see Clarify); FR-OQ2/FR-OQ3 resolved by eng default

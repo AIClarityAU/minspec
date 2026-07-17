@@ -775,7 +775,14 @@ function fmListField(raw: string, key: string): string[] {
 export function validateOwnership(spec: ParsedSpec, config: MinspecConfig): ValidationViolation[] {
   const specType = (spec.frontmatter.type ?? '').toLowerCase();
   const tier = spec.frontmatter.tier;
-  if (!isPrimarySpec(specType) || TIER_RANK[tier] < 3 || spec.frontmatter.phases.clarify !== 'done') {
+  // Fire only once the spec has entered the build path — "plan in-progress or later"
+  // (FR-3), NOT merely clarify-done. A spec parked after Clarify but not yet planned/
+  // built owns no code yet, so requiring a declaration there is premature (Slice-2
+  // backfill finding: the earlier `clarify === 'done'` trigger false-flagged four
+  // never-implemented specs — SPEC-026/027/031/034).
+  const plan = spec.frontmatter.phases.plan;
+  const inBuildPath = plan === 'in-progress' || plan === 'done';
+  if (!isPrimarySpec(specType) || TIER_RANK[tier] < 3 || !inBuildPath) {
     return [];
   }
   const raw = spec.raw;
