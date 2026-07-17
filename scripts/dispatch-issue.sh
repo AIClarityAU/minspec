@@ -49,6 +49,26 @@ if [[ "${ISSUE:-}" == "--check-native-automerge" ]]; then
   if native_automerge_enabled; then echo "on"; exit 0; else echo "off"; exit 1; fi
 fi
 
+# paths_have_approvable_doc (#833): does a set of changed paths (newline-separated on
+# stdin) include a design-bearing APPROVABLE doc — a spec doc, a Decision Register
+# entry, or a domain/epic doc? These are HUMAN / docs-lane merge decisions, not
+# code-quality ones: an `ai-review:pass` vets whether a DIFF is sound, NOT whether a
+# design choice baked into a requirements.md / DR is the human's to make. So an
+# agent-dispatched PR touching any of them must NOT arm native auto-merge (DR-061) —
+# it lands as a human-reviewed proposal, exactly like the machinery self-edit
+# exclusion. Exit 0 (= YES, withhold auto-merge) if ANY path matches, else 1.
+# The spec-gate deliberately ALLOWS editing these docs (doc-before-CODE, so a spec
+# can be fixed toward approval); this is the symmetric MERGE-side guard that stops
+# such an edit from auto-landing as if it were approved.
+paths_have_approvable_doc() {
+  grep -qE '^(specs/.+\.md|docs/decisions/DR-[0-9][^/]*\.md|docs/domain/.+\.md|docs/epics/.+\.md)$'
+}
+
+# Pure seam: prove the approvable-doc classifier without gh/dispatch. Paths on stdin.
+if [[ "${ISSUE:-}" == "--paths-have-approvable-doc" ]]; then
+  if paths_have_approvable_doc; then echo "hold"; exit 0; else echo "arm"; exit 1; fi
+fi
+
 shift || true
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -346,6 +366,7 @@ run_reviewer_stage() {
   #    .github/workflows/ready-to-merge.yml — do NOT invent new label names).
   gh label create "ai-review:pass"    --repo "$REPO" --color 0e8a16 --description "Independent AI review passed (advisory)" 2>/dev/null || true
   gh label create "ai-review:changes" --repo "$REPO" --color d93f0b --description "Independent AI review requested changes"  2>/dev/null || true
+  gh label create "needs-human-review" --repo "$REPO" --color fbca04 --description "Held for a human — auto-merge withheld (e.g. approvable-doc change, #833)" 2>/dev/null || true
 
   # 6. Confirm a PR exists for this branch, creating one if not. Direct pushes to
   #    main are blocked by a branch-protection ruleset, so a PR is MANDATORY for
@@ -369,8 +390,21 @@ run_reviewer_stage() {
   #     HITL stays intact: the ai-review panel IS the gate; a machinery PR (self-edit
   #     guard) can never get ai-review:pass, so it never auto-merges. Best-effort:
   #     `--auto` errors on an already-clean/blocked PR are non-fatal.
+  #     #833 exclusion: a PR that edits a design-bearing APPROVABLE doc (spec / DR /
+  #     domain / epic) must NOT auto-merge — ai-review vets code, not whether a design
+  #     decision baked into that doc is the human's to make. Such PRs are held
+  #     needs-human-review (the docs-lane / Approve owns their merge). Fail CLOSED: if
+  #     the changed-file list can't be enumerated we cannot prove it is code-only, so
+  #     we withhold rather than risk auto-landing an approvable-doc change.
   if native_automerge_enabled; then
-    if gh pr merge "$pr_num" --repo "$REPO" --squash --auto 2>/dev/null; then
+    local changed_files
+    if ! changed_files=$(gh pr diff "$pr_num" --repo "$REPO" --name-only 2>/dev/null); then
+      gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+      echo "  → native auto-merge WITHHELD on PR #$pr_num — could not enumerate changed files; failing closed (#833). Labeled needs-human-review."
+    elif printf '%s\n' "$changed_files" | paths_have_approvable_doc; then
+      gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+      echo "  → native auto-merge WITHHELD on PR #$pr_num — touches an approvable doc (spec/DR/domain/epic); a human owns this merge (#833). Labeled needs-human-review."
+    elif gh pr merge "$pr_num" --repo "$REPO" --squash --auto 2>/dev/null; then
       echo "  → native auto-merge armed on PR #$pr_num (merges on ai-review:pass)"
     else
       echo "  → native auto-merge could not be armed on PR #$pr_num (may already be mergeable/blocked) — left for the gate/human"
