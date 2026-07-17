@@ -60,17 +60,14 @@ if git -C "$wt" diff --cached --quiet; then
   echo "push-docs: no delta vs origin/main — nothing to push" >&2
   exit 0
 fi
-# --no-verify: the ephemeral worktree has no node_modules / built @aiclarity/shared,
-# so .githooks/pre-commit's `npm run validate` step crashes on module load (a require
-# error, not a validation failure). Safe to skip because the SAME `npm run validate`
-# is re-run and REQUIRED on the docs-lane PR by ci.yml's `lint` job — NOT the no-op
-# minspec-validate.yml stub. commit-msg RCDD fires only on `fix:` subjects; the default
-# `-m` is `docs(...)`, but `$msg` is a raw caller-supplied flag with no prefix check, so
-# a caller-typed `fix:` message would skip RCDD with no CI backstop. Accepted: RCDD is a
-# process gate, not a product-safety invariant, and ai-review still reads every lane PR.
-# Residual gap, stated honestly: the DR-029 born-`proposed` gate has no CI equivalent —
-# fine, since a new DR goes via a review PR (DR-051 §4), not the lane.
-git -C "$wt" commit -q --no-verify -m "$msg"
+# DR_INDEX_GATE_OFF=1 (NOT --no-verify): the ephemeral worktree has no node_modules /
+# built @aiclarity/shared, so ONLY .githooks/pre-commit's `npm run validate` step crashes
+# on module load. That step has this dedicated kill-switch, and it is the right scope —
+# the same `npm run validate` is re-run + REQUIRED on the docs-lane PR by ci.yml's `lint`
+# job. Targeting just that step KEEPS the two pure-bash gates active (they need no deps):
+# the DR-029 born-`proposed` gate (load-bearing — the lane pushes docs/decisions/DR-*.md)
+# and the commit-msg RCDD gate. No invariant hole (vs the blunt --no-verify).
+DR_INDEX_GATE_OFF=1 git -C "$wt" commit -q -m "$msg"
 git -C "$wt" push -q -u origin "$branch"
 
 pr_url="$(gh pr create --repo "$slug" --base main --head "$branch" \

@@ -84,7 +84,7 @@ export interface PushDocsResult {
 export type ExecRun = (
   file: 'git' | 'gh',
   args: readonly string[],
-  opts?: { cwd?: string },
+  opts?: { cwd?: string; env?: Record<string, string> },
 ) => Promise<{ stdout: string; stderr: string }>;
 
 /** Dependencies, all optional — production uses the defaults; tests inject stubs. */
@@ -105,7 +105,7 @@ export function defaultExecRun(): ExecRun {
       cwd: opts?.cwd,
       timeout: GIT_TIMEOUT_MS,
       maxBuffer: 8 * 1024 * 1024,
-      env: { ...process.env, GIT_LITERAL_PATHSPECS: '1' },
+      env: { ...process.env, GIT_LITERAL_PATHSPECS: '1', ...opts?.env },
     });
     return { stdout: stdout.toString(), stderr: stderr.toString() };
   };
@@ -329,20 +329,16 @@ export async function pushDocsLaneCommand(
       if (!hasDelta) return await surface({ outcome: 'no-delta', files });
 
       try {
-        // --no-verify: the ephemeral worktree has no node_modules / built
-        // @aiclarity/shared, so `.githooks/pre-commit`'s `npm run validate` step
-        // crashes on module load (a require error, not a validation failure). Safe to
-        // skip because the SAME `npm run validate` is re-run and REQUIRED on the
-        // docs-lane PR by `ci.yml`'s `lint` job — NOT the no-op `minspec-validate.yml`
-        // stub (its validator is unpublished). The other skipped gate, `commit-msg`
-        // RCDD, fires only on `fix:` subjects; the default message is `docs(...)`, but
-        // `message` is free text from the input box (promptMessage), so a user-typed
-        // `fix:` subject would skip RCDD with no CI backstop. Accepted: RCDD is a
-        // process gate, not a product-safety invariant, and ai-review still reads every
-        // lane PR. Honest residual gap: the DR-029 "new DR born `proposed`" gate has no
-        // CI equivalent — acceptable because a new DR goes via a review PR (DR-051 §4),
-        // not this mechanical lane, and ai-review still reads every docs-lane PR.
-        await run('git', ['commit', '--no-verify', '-m', message], { cwd: wt });
+        // DR_INDEX_GATE_OFF=1 (NOT --no-verify): the ephemeral worktree has no
+        // node_modules / built @aiclarity/shared, so ONLY `.githooks/pre-commit`'s
+        // `npm run validate` step crashes on module load (a require error). That step
+        // has this dedicated kill-switch, and it is the exactly-right scope: the same
+        // `npm run validate` is re-run and REQUIRED on the docs-lane PR by `ci.yml`'s
+        // `lint` job. Using the targeted env instead of `--no-verify` KEEPS the two
+        // pure-bash gates active (both run fine without node_modules): the DR-029
+        // born-`proposed` gate — load-bearing, since the lane pushes
+        // `docs/decisions/DR-*.md` — and the commit-msg RCDD gate. No invariant hole.
+        await run('git', ['commit', '-m', message], { cwd: wt, env: { DR_INDEX_GATE_OFF: '1' } });
       } catch (err) {
         // A hook rejection or (more likely, given --no-verify) a git error — surface it.
         return await surface({ outcome: 'failed', error: describeError(err) });

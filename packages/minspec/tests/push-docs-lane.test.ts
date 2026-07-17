@@ -59,6 +59,7 @@ interface Call {
   file: string;
   args: string[];
   cwd?: string;
+  env?: Record<string, string>;
   key: string;
 }
 
@@ -66,7 +67,7 @@ function responder(map: Record<string, ResponderVal>): { run: ExecRun; calls: Ca
   const calls: Call[] = [];
   const run: ExecRun = async (file, args, opts) => {
     const key = `${file} ${args.join(' ')}`;
-    calls.push({ file, args: [...args], cwd: opts?.cwd, key });
+    calls.push({ file, args: [...args], cwd: opts?.cwd, env: opts?.env, key });
     let val: ResponderVal | undefined = map[key];
     if (val === undefined) {
       const hit = Object.entries(map).find(([k]) => key.startsWith(k));
@@ -328,12 +329,14 @@ describe('pushDocsLaneCommand — opens the PR on the happy path', () => {
     const addCall = calls.find((c) => c.file === 'git' && c.args[0] === 'add');
     expect(addCall!.args).toEqual(['add', '--', 'docs/decisions/DR-042.md']);
 
-    // Commit MUST use --no-verify: the ephemeral worktree has no node_modules /
-    // built @aiclarity/shared, so .githooks/pre-commit's `npm run validate` crashes
-    // on module load. The same validation is re-run + required on the PR by ci.yml
-    // lint (`npm run validate`), so skipping the local hook is safe. Guard locks the arg.
+    // Commit MUST scope the hook-skip to DR_INDEX_GATE_OFF, NOT the blunt
+    // --no-verify: the ephemeral worktree lacks node_modules, so only the pre-commit
+    // `npm run validate` step crashes; that step is re-run + required on the PR
+    // (ci.yml lint). The pure-bash DR-029 born-proposed + commit-msg RCDD gates MUST
+    // stay active — --no-verify would disable them. Guard both directions.
     const commitCall = calls.find((c) => c.file === 'git' && c.args[0] === 'commit');
-    expect(commitCall!.args).toContain('--no-verify');
+    expect(commitCall!.env?.DR_INDEX_GATE_OFF).toBe('1');
+    expect(commitCall!.args).not.toContain('--no-verify');
 
     // Worktree cleaned up (INV-4 finally).
     expect(calls.some((c) => c.file === 'git' && c.args[0] === 'worktree' && c.args[1] === 'remove')).toBe(true);
