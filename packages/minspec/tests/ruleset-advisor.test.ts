@@ -66,6 +66,9 @@ import {
 } from '../src/lib/ruleset-advisor';
 import { offerRulesetAdvisory, resolveRequiredChecks } from '../src/commands/init';
 import { MANAGED_REGION_TEMPLATES } from '../src/lib/template-registry';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { createRequire } from 'node:module';
 
 // ─── Test runner factory ─────────────────────────────────────────────────────
 
@@ -1066,5 +1069,119 @@ describe('updateRulesetRequiredChecks — add missing checks to an existing rule
     const out = await updateRulesetRequiredChecks('o', 'r', run, 42, ['ai-review']);
     expect(out.updated).toBe(false);
     expect(out.forbidden).toBe(true);
+  });
+});
+
+// =============================================================================
+// ENFORCE (#820): the required-check NAME constants are bound to the code that
+// actually PRODUCES those checks — constitution: "don't trust the model to
+// follow a rule — enforce it." (Template: reviewer-secrets-enforcement.test.ts.)
+//
+// The ruleset advisor asks a repo's branch ruleset to REQUIRE these contexts:
+//   AI_REVIEW_CHECK      ('ai-review')      — the reviewer's own check-run
+//   READY_TO_MERGE_CHECK ('ready-to-merge') — the merge-gate commit status
+// If the producer that POSTS one of those contexts is renamed while the constant
+// here is left stale (or vice-versa), the ruleset requires a context nothing ever
+// posts → every PR is permanently blocked or admin-force-merged (the DEADLOCK→
+// BYPASS class). The pre-existing Tier-A assertions (`toContain(AI_REVIEW_CHECK)`
+// over a set BUILT from the same constant) are tautological — tied to no producer.
+// These add the missing producer-anchored equalities, so a rename fails CI here.
+//
+// PRODUCERS bound:
+//   1. AI_REVIEW_CHECK      ⟷ .github/scripts/ai-review-guard.js — the `.name`
+//      field of the EXPORTED pure `decideReviewCheck()` (its private CHECK_NAME).
+//   2. READY_TO_MERGE_CHECK ⟷ .github/workflows/ready-to-merge.yml — the
+//      `context:` literal on its `createCommitStatus` calls (the SOLE writer of
+//      that status).
+// CONSUMER also bound: #820 named "A5 remediate-pr.sh" and assumed it absent — it
+// is NOT. It lives in `scripts/` (not `.github/scripts/`) and hardcodes the
+// `ai-review` check name in its jq `.name` rollup filters, so the same rename
+// would silently strand it too; bind it while it exists.
+//
+// NOTE: ai-review.yml / guard.js also expose an `ai-review/pass` *status* context
+// (PASS_STATUS_CONTEXT) — a DIFFERENT concern owned by #822. The ready-to-merge
+// assertion excludes any `ai-review/*` context so it cannot be confused by it.
+// =============================================================================
+
+/** Walk up from cwd to the worktree root (the dir holding the real workflow). */
+function findCheckNameRepoRoot(): string {
+  let dir = process.cwd();
+  for (let i = 0; i < 10; i++) {
+    if (fs.existsSync(path.join(dir, '.github/workflows/ready-to-merge.yml'))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error('could not locate repo root (…/.github/workflows/ready-to-merge.yml)');
+}
+
+/**
+ * The `ai-review` check name as PRODUCED by ai-review-guard.js. PREFER loading the
+ * real module (so the binding tracks the shipped code): `decideReviewCheck()`
+ * returns `{ name: CHECK_NAME, … }`, and CHECK_NAME is the private literal the
+ * check-run is posted under. Fall back to text-parsing `const CHECK_NAME = '…'`
+ * only if `require` cannot load the module for some reason.
+ */
+function producedAiReviewCheckName(root: string): string {
+  const guardPath = path.resolve(root, '.github/scripts/ai-review-guard.js');
+  try {
+    const req = createRequire(import.meta.url);
+    const guard = req(guardPath) as {
+      decideReviewCheck: (label: string, isMachineryPr: boolean) => { name: string };
+    };
+    return guard.decideReviewCheck('ai-review:pass', false).name;
+  } catch {
+    const src = fs.readFileSync(guardPath, 'utf8');
+    const m = src.match(/const\s+CHECK_NAME\s*=\s*['"]([^'"]+)['"]/);
+    if (!m) throw new Error('could not load or parse CHECK_NAME from ai-review-guard.js');
+    return m[1];
+  }
+}
+
+/** Every DISTINCT commit-status `context:` string literal a workflow YAML posts. */
+function commitStatusContexts(yaml: string): string[] {
+  return [...new Set([...yaml.matchAll(/\bcontext:\s*['"]([^'"]+)['"]/g)].map((m) => m[1]))];
+}
+
+describe('ENFORCE: check-name constants bound to producers (#820)', () => {
+  const root = findCheckNameRepoRoot();
+
+  it('AI_REVIEW_CHECK ⟷ ai-review-guard.js decideReviewCheck().name (rename on either side ⇒ RED)', () => {
+    // The reviewer posts its check-run under CHECK_NAME via decideReviewCheck();
+    // the ruleset requires AI_REVIEW_CHECK. They MUST be the same string, or the
+    // required context is never posted → every PR deadlocks.
+    expect(producedAiReviewCheckName(root)).toBe(AI_REVIEW_CHECK);
+  });
+
+  it('READY_TO_MERGE_CHECK ⟷ ready-to-merge.yml `context:` (the sole writer of that status)', () => {
+    const yaml = fs.readFileSync(
+      path.join(root, '.github/workflows/ready-to-merge.yml'),
+      'utf8',
+    );
+    const contexts = commitStatusContexts(yaml);
+    // Exclude ai-review/* status contexts (#822's concern) so this is SPECIFIC to
+    // the ready-to-merge gate. ready-to-merge.yml is the SINGLE writer of its
+    // status, so after that exclusion it posts EXACTLY the one gate context —
+    // which must equal the constant the ruleset requires.
+    const gateContexts = contexts.filter((c) => !c.startsWith('ai-review/'));
+    expect(gateContexts).toEqual([READY_TO_MERGE_CHECK]);
+  });
+
+  it('CONSUMER: remediate-pr.sh identifies the ai-review check by AI_REVIEW_CHECK', () => {
+    // #820 called this "A5 remediate-pr.sh" and assumed it absent; it is not — it
+    // lives in scripts/ (not .github/scripts/) and hardcodes the check name in its
+    // jq `.name` rollup filters to route the reviewer's own check away from the
+    // generic failing-checks path. A producer-side rename would silently strand
+    // these filters, so bind them too.
+    const remediatePath = path.resolve(root, 'scripts/remediate-pr.sh');
+    if (!fs.existsSync(remediatePath)) return; // absent ⇒ only the 2 producers above apply
+    const src = fs.readFileSync(remediatePath, 'utf8');
+    const nameFilterLiterals = [
+      ...src.matchAll(/\(\.name\s*\/\/\s*""\)\s*[=!]=\s*"([^"]+)"/g),
+    ].map((m) => m[1]);
+    // The script's purpose depends on singling out the reviewer's own check, so it
+    // MUST contain at least one such filter; every one must name AI_REVIEW_CHECK.
+    expect(nameFilterLiterals.length).toBeGreaterThan(0);
+    for (const lit of new Set(nameFilterLiterals)) expect(lit).toBe(AI_REVIEW_CHECK);
   });
 });
