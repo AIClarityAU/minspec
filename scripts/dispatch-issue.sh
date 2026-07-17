@@ -56,20 +56,30 @@ if [[ "${ISSUE:-}" == "--check-native-automerge" ]]; then
 fi
 
 # paths_have_approvable_doc (#833): does a set of changed paths (newline-separated on
-# stdin) touch the docs-lane / human-owned corpus (specs/**, docs/**,
-# .minspec/approvals/**, top-level *.md)? Those are HUMAN / docs-lane merge decisions,
-# not code-quality ones: an `ai-review:pass` vets whether a DIFF is sound, NOT whether
-# a design choice baked into a requirements.md / DR — or a change to the sign-off
-# ledger under .minspec/approvals/ — is the human's to make. So an agent-dispatched PR
-# touching any of them must NOT arm native auto-merge (DR-061); it lands as a
-# human-reviewed proposal, exactly like the machinery self-edit exclusion.
+# stdin) touch something a HUMAN — not `ai-review:pass` — must own the merge of? An
+# ai-review:pass vets whether a DIFF is sound, NOT whether a design choice baked into a
+# requirements.md / DR, a change to the sign-off ledger, or a relaxation of a GOVERNANCE
+# POLICY is the human's call. Such an agent PR must NOT arm native auto-merge (DR-061);
+# it lands as a human-reviewed proposal, like the machinery self-edit exclusion.
+#
+# The withhold set is the UNION of two intentionally-distinct mandates (a documented
+# SUPERSET of the docs-lane push corpus, NOT a divergent copy of it):
+#   1. DOCS_CORPUS_RE — the docs-lane / human-owned DOC corpus (specs/**, docs/**,
+#      .minspec/approvals/**, top-level *.md), the SHARED single source of truth that
+#      keeps this the 4th lock-step enforcer alongside push-docs.sh / docs-corpus.ts /
+#      docs-lane.yml.
+#   2. .minspec/ governance-config + .cursorrules — NOT docs-lane documents (so they
+#      stay OUT of DOCS_CORPUS_RE), but human-owned policy: .minspec/config.json holds
+#      the auto-merge + ownership-enforcement DIALS THEMSELVES (an agent could weaken
+#      the very gate and self-merge — the highest-value hole, #834 re-review),
+#      .minspec/constitution.md the invariants, .minspec/project-prefixes.md the
+#      DR-053 ref grammar, and .cursorrules the top-level agent-behaviour rules. All of
+#      .minspec/ is governance/config/state — none should auto-merge on ai-review:pass.
 # The spec-gate deliberately ALLOWS editing spec docs (doc-before-CODE, so a spec can
-# be fixed toward approval); this is the symmetric MERGE-side guard.
-# Uses the SHARED DOCS_CORPUS_RE (single source of truth) so this is the 4th lock-step
-# enforcer of the corpus, never a divergent 4th definition. Exit 0 (= withhold) if ANY
-# path matches, else 1.
+# be fixed toward approval); this is the symmetric MERGE-side guard. Exit 0 (= withhold)
+# if ANY path matches, else 1.
 paths_have_approvable_doc() {
-  grep -qE "$DOCS_CORPUS_RE"
+  grep -qE "${DOCS_CORPUS_RE}"'|^\.minspec/|^\.cursorrules$'
 }
 
 # Pure seam: prove the approvable-doc classifier without gh/dispatch. Paths on stdin.

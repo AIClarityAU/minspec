@@ -98,13 +98,32 @@ describe('dispatch-issue.sh — docs-corpus auto-merge exclusion (#833)', () => 
       'package.json',
       'tsconfig.json',
       'packages/minspec/README.md', // NESTED *.md is not top-level
-      '.minspec/config.json', // under .minspec but NOT approvals/
       'specifications/foo.md', // not specs/
     ]) {
       it(`arms: ${p}`, () => {
         const r = classify(p + '\n');
         expect(r.code, r.out).toBe(1);
         expect(r.out).toBe('arm');
+      });
+    }
+  });
+
+  describe('HOLDS auto-merge — .minspec/ governance-config + top-level agent rules (#834 re-review)', () => {
+    // NOT docs-lane documents (so they stay OUT of DOCS_CORPUS_RE), but human-owned
+    // policy the guard withholds as a documented superset. config.json is the
+    // highest-value hole — it holds the autoMerge/ownership dials themselves.
+    for (const p of [
+      '.minspec/config.json',
+      '.minspec/project-prefixes.md',
+      '.minspec/constitution.md',
+      '.minspec/generated-hashes.json',
+      '.minspec/hooks/pre-commit',
+      '.cursorrules',
+    ]) {
+      it(`holds: ${p}`, () => {
+        const r = classify(p + '\n');
+        expect(r.code, r.out).toBe(0);
+        expect(r.out).toBe('hold');
       });
     }
   });
@@ -121,12 +140,18 @@ describe('dispatch-issue.sh — docs-corpus auto-merge exclusion (#833)', () => 
     });
   });
 
-  describe('KNOWN RESIDUAL (tracked) — outside the current corpus, so ARMs', () => {
-    // These approvables sit OUTSIDE the canonical corpus regex; covering them is a
-    // SPEC-039 corpus amendment across all four enforcers (filed follow-up), NOT a
-    // silent divergence here. Asserted so the residual is explicit, not hidden.
-    for (const p of ['.minspec/constitution.md', '.cursorrules']) {
-      it(`arms (residual): ${p}`, () => {
+  describe('KNOWN RESIDUAL (tracked #835) — case-insensitivity only', () => {
+    // The governance-config holes (constitution.md, config.json, project-prefixes.md,
+    // .cursorrules) are now COVERED by the .minspec/ + .cursorrules superset above.
+    // The one remaining residual is case-insensitivity: the regex is lowercase-only, so
+    // a mis-cased real doc arms. Dampened (the frontmatter validator is also
+    // case-sensitive, so mis-cased docs are shadows the whole system ignores). Asserted
+    // so the residual stays explicit, not hidden. Closing it is #835.
+    // NB: the residual is only a mis-cased PREFIX (SPECS/) or a mis-cased TOP-LEVEL
+    // extension (CLAUDE.MD). A case variant in a subpath/extension UNDER specs/ or docs/
+    // (e.g. specs/foo.MD, docs/Decisions/x.md) correctly HOLDS via the broad prefix.
+    for (const p of ['SPECS/foo.md', 'DOCS/x.md', '.MINSPEC/approvals/x.json', 'CLAUDE.MD']) {
+      it(`arms (case residual): ${p}`, () => {
         expect(classify(p + '\n').out).toBe('arm');
       });
     }
@@ -142,14 +167,25 @@ describe('dispatch-issue.sh — docs-corpus auto-merge exclusion (#833)', () => 
       const tsRe = DOCS_CORPUS_REGEX.source.replace(/\\\//g, '/');
       expect(bashRe).toBe(tsRe);
     });
+
+    it('docs-lane.yml allowed= is byte-identical to the bash DOCS_CORPUS_RE (4th enforcer pinned)', () => {
+      // docs-corpus.sh's header claims byte-identity with docs-lane.yml; pin it so the
+      // yml can't silently drift (#834 re-review LOW finding).
+      const lib = fs.readFileSync(corpusLibPath, 'utf-8');
+      const bashRe = lib.match(/DOCS_CORPUS_RE='([^']+)'/)![1];
+      const yml = fs.readFileSync(path.join(root, '.github', 'workflows', 'docs-lane.yml'), 'utf-8');
+      const ymlMatch = yml.match(/allowed='([^']+)'/);
+      expect(ymlMatch, "allowed='...' not found in docs-lane.yml").not.toBeNull();
+      expect(ymlMatch![1]).toBe(bashRe);
+    });
   });
 
   describe('static: the arm site wires the exclusion and fails closed', () => {
     const content = fs.readFileSync(scriptPath, 'utf-8');
 
-    it('sources the shared corpus and uses it in the classifier', () => {
+    it('sources the shared corpus and uses it (+ the .minspec/ governance superset)', () => {
       expect(content).toMatch(/source\s+"\$\{SCRIPT_DIR\}\/lib\/docs-corpus\.sh"/);
-      expect(content).toMatch(/grep -qE "\$DOCS_CORPUS_RE"/);
+      expect(content).toMatch(/grep -qE "\$\{DOCS_CORPUS_RE\}"'\|\^\\\.minspec\/\|\^\\\.cursorrules\$'/);
     });
 
     it('the arm block consults the classifier before arming, via a here-string (no SIGPIPE)', () => {
