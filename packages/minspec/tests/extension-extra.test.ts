@@ -307,6 +307,8 @@ function makeMockContext(overrides: Partial<Record<string, any>> = {}) {
     subscriptions,
     globalState: { get: vi.fn(() => undefined), update: vi.fn() },
     workspaceState: { get: vi.fn((_k: string, def: any) => def), update: vi.fn() },
+    // SPEC-026 FR-11: activate() sets MINSPEC_SESSION_ID via this collection.
+    environmentVariableCollection: { replace: vi.fn(), append: vi.fn(), prepend: vi.fn(), clear: vi.fn() },
     ...overrides,
   } as unknown as vscode.ExtensionContext;
 }

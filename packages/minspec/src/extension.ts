@@ -30,6 +30,7 @@ import { MinSpecStatusBar, MinSpecNextTaskStatusBar, MinSpecScaffoldCommitStatus
 import { nextTaskCommand, computeNextTask } from './commands/next-task';
 import { SpecPanel } from './views/spec-panel';
 import { loadSession, saveSession, addToScope, isFileInScope } from './lib/session';
+import { SessionPresenceManager } from './lib/presence';
 import { detectTools, getToolFilePath, type DetectedTools } from './lib/tool-detector';
 import { injectContextToFile, removeContextFromFile, type ActiveSpecContext } from './lib/context-injector';
 import { parkTopic, createParkingLotEntry } from './lib/parking-lot';
@@ -99,6 +100,19 @@ export function activate(context: vscode.ExtensionContext): void {
   // startup. All file watchers below derive their base from this single value
   // so the watcher and its consumers always point at the same folder (#123).
   const workspaceRoot = resolveTargetFolderNonInteractive();
+
+  // ─── Session presence heartbeat (SPEC-026 FR-1..7) ──────────────────────────
+  // Writes .minspec/sessions/<uuid>.session.json immediately, refreshes it every
+  // 30s, and prunes dead peers on read. This is the load-bearing prerequisite for
+  // the drain's presence-gated fast-forward: with no heartbeat running,
+  // isCheckoutOccupied is always TRUE ⇒ every shared checkout stays fetch-only
+  // (exactly today's safe behaviour). Tier-0 / offline — fs + git + crypto only.
+  const presence = new SessionPresenceManager(workspaceRoot);
+  presence.start(); // FR-3
+  context.subscriptions.push(presence); // FR-6 — presence.dispose() → stop() (never throws)
+  // FR-11: expose this session's id to shell-driven agents in the integrated
+  // terminal so their commit trailer / gate self-identify with the same id.
+  context.environmentVariableCollection?.replace('MINSPEC_SESSION_ID', presence.sessionId);
 
   // Active spec panel
   const specPanel = new SpecPanel();

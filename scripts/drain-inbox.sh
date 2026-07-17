@@ -101,7 +101,10 @@ LOG="${MINSPEC_DRAIN_LOG:-/tmp/minspec-drain-inbox.log}"
 # construction, self-healing, and NEVER touching the primary's HEAD/working tree
 # (rule #8). Overridable for tests; opt out with MINSPEC_DRAIN_SELF_REFRESH=0.
 DRAIN_RUN_DIR="${MINSPEC_DRAIN_RUN_DIR:-/tmp/minspec-drain-run}"
-PRIMARY_ROOT="$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "${SCRIPT_DIR}/.." && pwd))"
+# The shared checkout the drain runs from — the root whose .minspec/sessions/ the
+# presence gate reads. Env-overridable so the FR-14 parity harness (and unit tests)
+# can point it at a hermetic fixture without a full git clone.
+PRIMARY_ROOT="${MINSPEC_DRAIN_PRIMARY_ROOT:-$(git -C "$SCRIPT_DIR" rev-parse --show-toplevel 2>/dev/null || (cd "${SCRIPT_DIR}/.." && pwd))}"
 
 # ── Continuous-loop tunables (env-overridable) ───────────────────────────────
 INTERVAL="${MINSPEC_DRAIN_INTERVAL:-1200}"           # 20 min between cycles
@@ -125,6 +128,94 @@ is_quota() {
 # session_alive <pid>: exit 0 while the session process is alive, 1 once it is
 # gone. `kill -0` sends no signal — it only probes existence/permission.
 session_alive() { kill -0 "${1:?session_alive needs a pid}" 2>/dev/null; }
+
+# ── Session-presence reader (SPEC-026 FR-4 / the sync gate) ────────────────────
+# These shell constants MUST equal presence.ts HEARTBEAT_SECS / STALE_SECS
+# (SPEC-026 FR-3/FR-14). threshold = 4 × heartbeat. Change BOTH or neither — the
+# golden-fixture parity test (FR-14 family) fails on drift.
+PRESENCE_HEARTBEAT_SECS=30                 # MUST equal presence.ts HEARTBEAT_SECS
+PRESENCE_STALE_SECS=120                    # MUST equal presence.ts STALE_SECS (= 4 × PRESENCE_HEARTBEAT_SECS)
+SESSIONS_DIR_REL=".minspec/sessions"
+
+# checkout_occupied <checkout_root>
+#   exit 0 → OCCUPIED (fail-safe): caller stays fetch-only.
+#   exit 1 → PROVABLY DORMANT: caller may fast-forward.
+# Mirrors presence.ts isCheckoutOccupied EXACTLY (jq-free, grep/sed per the FR-12
+# hook idiom; parses the atomic pretty-printed records, one field per line).
+# FAIL-SAFE: missing dir / empty / unreadable / unparseable / date/kill error ⇒
+# exit 0. Positive dormancy = (≥1 LIVE record ANYWHERE) AND (0 live records for
+# this root). "Nobody demonstrably live" is treated as occupied, not ff-able.
+checkout_occupied() {
+  local target sdir now f body wt seen pid seen_epoch age wt_canon
+  local live_total=0 claims=0
+  target="$(readlink -m -- "${1:?checkout_occupied needs a root}" 2>/dev/null || echo "$1")"
+  sdir="${PRIMARY_ROOT}/${SESSIONS_DIR_REL}"
+  [[ -d "$sdir" ]] || return 0
+  now="$(date -u +%s 2>/dev/null)" || return 0
+  shopt -s nullglob; local files=( "$sdir"/*.session.json ); shopt -u nullglob
+  (( ${#files[@]} > 0 )) || return 0
+  for f in "${files[@]}"; do
+    body="$(cat "$f" 2>/dev/null)" || return 0
+    wt="$(  sed -n 's/.*"worktreeRoot"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' <<<"$body" | head -n1)"
+    seen="$(sed -n 's/.*"lastSeen"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p'     <<<"$body" | head -n1)"
+    pid="$( sed -n 's/.*"pid"[[:space:]]*:[[:space:]]*\([0-9][0-9]*\).*/\1/p'      <<<"$body" | head -n1)"
+    [[ -n "$wt" && -n "$seen" && -n "$pid" ]] || return 0      # malformed ⇒ occupied
+    seen_epoch="$(date -u -d "$seen" +%s 2>/dev/null)" || return 0
+    [[ -n "$seen_epoch" ]] || return 0
+    age=$(( now - seen_epoch ))
+    (( age < PRESENCE_STALE_SECS )) || continue                # stale ⇒ dead
+    kill -0 "$pid" 2>/dev/null      || continue                # pid gone ⇒ dead
+    live_total=$(( live_total + 1 ))
+    wt_canon="$(readlink -m -- "$wt" 2>/dev/null || echo "$wt")"
+    [[ "$wt_canon" == "$target" ]] && claims=$(( claims + 1 ))
+  done
+  (( live_total > 0 )) || return 0     # nobody demonstrably live ⇒ occupied
+  (( claims == 0 )) && return 1        # dormant → safe to ff
+  return 0                             # a live peer claims it ⇒ occupied
+}
+
+# sync_shared_checkouts (#168 / DR-051 §4a; reconciles "keep checkouts current"
+# with rule #8 "never mutate a live session's tree"). For EACH checkout git tracks,
+# ff to origin/<default> ONLY when ALL hold; else fetch-only:
+#   G1 on the default branch (HEAD == main) — never touch a feature-branch WIP tree
+#   G2 content-clean (`git status --porcelain` empty) — no WIP to stomp
+#   G3 NOT presence-occupied (checkout_occupied → exit 1: provably dormant)
+#   G4 a TRUE fast-forward (HEAD is an ancestor of origin/<default>) — never a
+#      merge commit, never reset/rebase (no commit/WIP loss).
+# Fetch is read-only (never moves HEAD) ⇒ always safe, runs unconditionally.
+# FAIL-SAFE: any doubt (occupied / dirty / off-main / diverged / git error) ⇒
+# fetch-only. Skipped ff ⇒ stale checkout (harmless, retried); wrong ff ⇒ live-WIP
+# corruption (unrecoverable). Kill-switch MINSPEC_DRAIN_GATED_FF=0.
+sync_shared_checkouts() {
+  [[ "${MINSPEC_DRAIN_GATED_FF:-1}" == "0" ]] && return 0
+  local db origin_ref root head_sha origin_sha base
+  # `|| true` inside the substitution: under `set -euo pipefail` an unset origin/HEAD
+  # makes symbolic-ref exit 128, which would otherwise abort the whole drain.
+  db="$(git -C "$PRIMARY_ROOT" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)"
+  db="${db:-main}"                                   # origin/HEAD often unset locally → main
+  origin_ref="origin/${db}"
+  git -C "$PRIMARY_ROOT" fetch origin "$db" -q 2>/dev/null || true   # read-only; safe on occupied trees
+  origin_sha="$(git -C "$PRIMARY_ROOT" rev-parse "$origin_ref" 2>/dev/null)" || return 0
+  [[ -n "$origin_sha" ]] || return 0
+
+  git -C "$PRIMARY_ROOT" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p' \
+  | while IFS= read -r root; do
+      [[ -n "$root" && -d "$root" ]] || continue
+      # never touch the drain's own detached run-dir (hard-reset elsewhere)
+      [[ "$(readlink -m -- "$root" 2>/dev/null)" == "$(readlink -m -- "$DRAIN_RUN_DIR" 2>/dev/null)" ]] && continue
+      [[ "$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null)" == "$db" ]] || continue   # G1
+      [[ -z "$(git -C "$root" status --porcelain 2>/dev/null)" ]] || continue                   # G2
+      checkout_occupied "$root" && continue                                                     # G3 (occupied ⇒ skip)
+      head_sha="$(git -C "$root" rev-parse HEAD 2>/dev/null)" || continue
+      [[ "$head_sha" == "$origin_sha" ]] && continue          # already current
+      base="$(git -C "$root" merge-base HEAD "$origin_ref" 2>/dev/null)" || continue
+      [[ "$base" == "$head_sha" ]] || continue                # G4: diverged (local commits) ⇒ skip, never reset
+      git -C "$root" merge --ff-only "$origin_ref" -q 2>/dev/null \
+        && echo "[drain] fast-forwarded DORMANT checkout $root → ${origin_ref} (${origin_sha:0:7})." \
+        || echo "[drain] WARNING: ff of $root refused by git — left as-is (fetch-only)." >&2
+    done || true   # never let the loop pipeline's exit status trip `set -e`
+  return 0
+}
 
 # resolve_session_pid: print the PID of the Claude Code session that (transitively)
 # launched us, so the loop can watch it. MUST be called in the FOREGROUND, before
@@ -264,6 +355,15 @@ run_cycle() {
   # CURRENT orchestration (self-heal, not die-on-stale). Never fatal — on failure it
   # falls back to in-place scripts and the cycle proceeds.
   ensure_fresh_run_dir
+
+  # Keep USER-FACING dormant shared checkouts current (gated; #168 / DR-051 §4a).
+  # Runs every one-shot AND every continuous-loop iteration, which is the whole
+  # requirement — it is deliberately AFTER ensure_fresh_run_dir so #773's "refresh
+  # before dispatching" guarantee stays literal. The two are independent: the run
+  # dir is hard-reset by ensure_fresh_run_dir and is explicitly excluded from the
+  # sync loop, so neither can observe the other's effect. Never mutates a live
+  # session's tree — fail-safe toward fetch-only.
+  sync_shared_checkouts
 
   # Step 1: triage inbox issues → labels T1/T2 as agent-ready
   inbox_issues=$(gh issue list --repo "$REPO" --label "inbox" \
@@ -422,6 +522,18 @@ case "${1:-}" in
     ;;
   --resolve-session-pid)
     resolve_session_pid; echo
+    exit 0
+    ;;
+  --checkout-occupied)
+    # Pure seam mirroring presence.ts isCheckoutOccupied — the FR-14 golden-fixture
+    # parity harness drives this against the TS engine. Prints occupied/dormant.
+    if checkout_occupied "${2:?Usage: drain-inbox.sh --checkout-occupied <root>}"; then
+      echo "occupied"; exit 0; else echo "dormant"; exit 1; fi
+    ;;
+  --sync-checkouts)
+    # Seam: run ONE gated-ff pass over the shared checkouts without the whole loop,
+    # so a test can assert dormant checkouts advance and live/dirty ones don't.
+    sync_shared_checkouts
     exit 0
     ;;
   --refresh-run-dir)

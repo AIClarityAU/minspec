@@ -12,6 +12,11 @@ export interface SessionState {
   readonly startedAt: string;       // ISO timestamp
   readonly specIds: string[];       // specs being worked on
   readonly fileAllowlist: string[]; // relative paths within scope
+  // SPEC-026 FR-3: the presence heartbeat's UUID-v4 for this activation, written
+  // back here so a shell-driven agent's prepare-commit-msg trailer and
+  // $MINSPEC_SESSION_ID resolve to the SAME id the presence record carries.
+  // Optional: a session declared before presence ran (or by the CLI) has none.
+  readonly sessionId?: string;
 }
 
 const SESSION_FILE = 'session.json';
@@ -46,6 +51,8 @@ export function loadSession(rootDir: string): SessionState | null {
       startedAt: parsed.startedAt,
       specIds: Array.isArray(parsed.specIds) ? parsed.specIds : [],
       fileAllowlist: Array.isArray(parsed.fileAllowlist) ? parsed.fileAllowlist : [],
+      // SPEC-026 FR-3: round-trip the presence sessionId when present.
+      ...(typeof parsed.sessionId === 'string' ? { sessionId: parsed.sessionId } : {}),
     };
   } catch {
     return null;
