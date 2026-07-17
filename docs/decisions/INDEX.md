@@ -506,4 +506,12 @@ A read-only audit of the approvables system established three facts, each with f
 <!-- dr-summary:DR-063 auto=78ca4574c42b -->
 The independent AI reviewer (DR-033 §6) records a PR verdict as ai-review:{pass,changes,blocked,pending}. On any non-pass, .github/workflows/ai-review.yml **also** applies needs-human-review **unconditionally at t=0** (ai-review.yml L568-574 and L606-608). Two problems compound: 1. **ai-review:changes is overloaded.** It means both *"the reviewer read the code and wants specific fixes"* (substantive, AI-remediable) and *"the review could not produce a trustworthy green"* (procedural fail-closed — garbled/injected/truncated verdict, ESCALATE, workflow error). Different meanings, one label.
 <!-- /dr-summary:DR-063 -->
+
+## [DR-064 — Machine-enforce the layer-import contract — eslint no-restricted-imports + an in-repo (dependency-free) cycle gate; ban type edges too; ship error-rules only after the tree is made clean; vscode-purity ships at warn](DR-064.md)
+
+*Status: proposed · Date: 2026-07-17*
+
+<!-- dr-summary:DR-064 auto=0000000000000000 -->
+MinSpec's layered architecture (lib never imports views/commands, @aiclarity/shared barrel-only, no runtime cycles) is held by convention alone and has already leaked — 2 lib→views inversions, 3 one-edit-away cycles, 7 vscode-coupled lib files, listSpecs living in a UI file. SPEC-040 (#690) flagged the eslint-encoded layering contract as a costly-to-reverse architectural artifact with no DR. This records the decision to machine-enforce it: eslint no-restricted-imports for direction/depth + an in-repo dependency-free cycle checker adapting next-task.ts detectCycles (resolves OQ-1); ban type edges too (OQ-2); @typescript-eslint/no-restricted-imports + parserOptions.project (OQ-3); ship error-rules green only after the FR-4/FR-5 refactors; vscode-purity at warn until #830. Gates-not-conventions (#137/DR-003), enforced offline (INV-1/DR-054), same thesis as SPEC-038/#460.
+<!-- /dr-summary:DR-064 -->
 <!-- minspec:dr-index:end -->

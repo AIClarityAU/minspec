@@ -7,7 +7,7 @@ tier: T4
 product: minspec
 epic: EPIC-003  # SDD Core Methodology — code-change safety
 aspects: [architecture, tier-0, governance, validation]
-relates_to: [SPEC-038, DR-003, DR-014]
+relates_to: [SPEC-038, DR-003, DR-014, DR-064]
 phases:
   specify: in-progress
   clarify: pending
@@ -71,10 +71,12 @@ The lesson SPEC-038 proved: **deterministic gates change behaviour; conventions 
 
 ## Open Questions
 
-- **OQ-1 — cycle-checker.** `madge --circular` (dev-dep + transitive deps), `dependency-cruiser` (heavier), or a **small in-repo checker adapting `packages/shared/src/next-task.ts`'s proven three-color-DFS `detectCycles`** (currently over the `depends_on` DAG — the same algorithm applied to the module import graph). The in-repo route adds no supply-chain surface and satisfies INV-1 best. *(Corrects an earlier draft claim that "the audit already prototyped a checker" — it did not; `detectCycles` is the real reusable asset.)* Leaning: in-repo checker.
-- **OQ-2 — type-only `lib→views`.** Ban them too (FR-5 removes the type), or allow type-only edges (no runtime coupling)? Leaning: ban — a clean "`lib` imports nothing from `views`" is simpler to gate.
-- **OQ-3 — eslint mechanism.** Base `no-restricted-imports` can't distinguish type vs value; "ban type too" (OQ-2) requires `@typescript-eslint/no-restricted-imports` + `parserOptions.project` (the config has none today). Weigh adding type-aware linting (slower) vs a lighter path. `eslint-plugin-boundaries` is a heavier alternative.
-- **OQ-4 — home for relocated utilities** (`fromFrontmatter`/`computeProgress`, the `SpecNode` subset, and — if FR-6 runs — `slugify`) — one `lib/util` module or each beside its most-related lib module. Plan-level.
+> **OQ-1/OQ-2/OQ-3 resolved by [DR-064](../../../docs/decisions/DR-064.md)** (the three load-bearing, costly-to-reverse choices). OQ-4 stays Plan-level (cheap to reverse) by design. Resolutions folded below; Clarify closes on these.
+
+- **OQ-1 — cycle-checker.** `madge --circular` (dev-dep + transitive deps), `dependency-cruiser` (heavier), or a **small in-repo checker adapting `packages/shared/src/next-task.ts`'s proven three-color-DFS `detectCycles`** (currently over the `depends_on` DAG — the same algorithm applied to the module import graph). The in-repo route adds no supply-chain surface and satisfies INV-1 best. *(Corrects an earlier draft claim that "the audit already prototyped a checker" — it did not; `detectCycles` is the real reusable asset.)* **Resolved (DR-064 §1): in-repo checker** — madge/dependency-cruiser rejected for supply-chain surface + offline (INV-1) cost.
+- **OQ-2 — type-only `lib→views`.** Ban them too (FR-5 removes the type), or allow type-only edges (no runtime coupling)? **Resolved (DR-064 §2): ban type too** — a clean "`lib` imports nothing from the UI layers" is unambiguous, and FR-5 removes the one type edge so it costs nothing on the shipped tree.
+- **OQ-3 — eslint mechanism.** Base `no-restricted-imports` can't distinguish type vs value; "ban type too" (OQ-2) requires `@typescript-eslint/no-restricted-imports` + `parserOptions.project` (the config has none today). Weigh adding type-aware linting (slower) vs a lighter path. `eslint-plugin-boundaries` is a heavier alternative. **Resolved (DR-064 §3): `@typescript-eslint/no-restricted-imports` with `allowTypeImports:false` + add `parserOptions.project`** (plugin+parser are already deps — no new dependency); documented fallback to value-only if type-aware lint cost is unacceptable (R3); `eslint-plugin-boundaries` rejected (new dep).
+- **OQ-4 — home for relocated utilities** (`fromFrontmatter`/`computeProgress`, the `SpecNode` subset, and — if FR-6 runs — `slugify`) — one `lib/util` module or each beside its most-related lib module. **Plan-level (unresolved by design — cheap to reverse; DR-064 §5).** Leaning: co-locate beside the most-related lib module, not a grab-bag `lib/util`.
 
 ## Invariants
 
