@@ -340,7 +340,9 @@ export async function pushDocsLaneCommand(
         // `docs/decisions/DR-*.md` — and the commit-msg RCDD gate. No invariant hole.
         await run('git', ['commit', '-m', message], { cwd: wt, env: { DR_INDEX_GATE_OFF: '1' } });
       } catch (err) {
-        // A hook rejection or (more likely, given --no-verify) a git error — surface it.
+        // A live hook rejection — DR-029 born-`proposed` on a bad new DR, or commit-msg
+        // RCDD on a `fix:` subject (both still run; only the deps-crashing validate step
+        // is skipped via DR_INDEX_GATE_OFF) — or a plain git error. Surface it.
         return await surface({ outcome: 'failed', error: describeError(err) });
       }
 
