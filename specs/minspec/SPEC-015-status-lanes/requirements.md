@@ -6,6 +6,8 @@ tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology
 depends_on: [DR-012]
+implements: none
+implements_reason: built by modifying shared spec.ts / spec-tree-provider.ts (+ their existing tests); created no new source file (SPEC-038 Slice-2 backfill, forensic)
 phases:
   specify: done
   plan: done
