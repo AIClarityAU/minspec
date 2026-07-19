@@ -145,15 +145,41 @@ SESSIONS_DIR_REL=".minspec/sessions"
 # FAIL-SAFE: missing dir / empty / unreadable / unparseable / date/kill error ⇒
 # exit 0. Positive dormancy = (≥1 LIVE record ANYWHERE) AND (0 live records for
 # this root). "Nobody demonstrably live" is treated as occupied, not ff-able.
+# Each session writes into ITS OWN worktree's .minspec/sessions/ (presence.ts
+# writeHeartbeat), NOT the primary's — so BOTH conditions scan EVERY worktree's own
+# sessions dir. Reading only PRIMARY_ROOT would miss a live on-main sibling and ff
+# a live tree (PR #846). Enumerate worktrees via `git worktree list --porcelain`;
+# ALWAYS include PRIMARY_ROOT; dedup by canonical path; git failure ⇒ just primary.
 checkout_occupied() {
-  local target sdir now f body wt seen pid seen_epoch age wt_canon
+  local target now f body wt seen pid seen_epoch age wt_canon root sdir wt_line p pcanon
   local live_total=0 claims=0
+  local -a roots=() files=()
+  local seen_roots=" "
   target="$(readlink -m -- "${1:?checkout_occupied needs a root}" 2>/dev/null || echo "$1")"
-  sdir="${PRIMARY_ROOT}/${SESSIONS_DIR_REL}"
-  [[ -d "$sdir" ]] || return 0
   now="$(date -u +%s 2>/dev/null)" || return 0
-  shopt -s nullglob; local files=( "$sdir"/*.session.json ); shopt -u nullglob
-  (( ${#files[@]} > 0 )) || return 0
+
+  # Collect every worktree root (canonical, deduped), ALWAYS including PRIMARY_ROOT.
+  while IFS= read -r wt_line; do
+    p="${wt_line#worktree }"
+    [[ -n "$p" ]] || continue
+    pcanon="$(readlink -m -- "$p" 2>/dev/null || echo "$p")"
+    [[ "$seen_roots" == *" $pcanon "* ]] && continue
+    seen_roots+="$pcanon "
+    roots+=( "$pcanon" )
+  done < <(git -C "$PRIMARY_ROOT" worktree list --porcelain 2>/dev/null | sed -n 's/^worktree //p')
+  pcanon="$(readlink -m -- "$PRIMARY_ROOT" 2>/dev/null || echo "$PRIMARY_ROOT")"
+  [[ "$seen_roots" == *" $pcanon "* ]] || roots+=( "$pcanon" )   # ALWAYS include primary
+
+  # Gather *.session.json across EVERY worktree's own sessions dir.
+  shopt -s nullglob
+  for root in "${roots[@]}"; do
+    sdir="${root}/${SESSIONS_DIR_REL}"
+    [[ -d "$sdir" ]] || continue
+    files+=( "$sdir"/*.session.json )
+  done
+  shopt -u nullglob
+  (( ${#files[@]} > 0 )) || return 0                            # no records anywhere ⇒ occupied
+
   for f in "${files[@]}"; do
     body="$(cat "$f" 2>/dev/null)" || return 0
     wt="$(  sed -n 's/.*"worktreeRoot"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' <<<"$body" | head -n1)"

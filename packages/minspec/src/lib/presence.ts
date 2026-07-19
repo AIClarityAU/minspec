@@ -155,12 +155,44 @@ function isValidRecord(v: unknown): v is SessionPresenceRecord {
 // ── THE SYNC-GATE PRIMITIVE (FR-9 family / #168 / DR-051 §4a) ────────────────────
 
 /**
+ * Every worktree root the primary's repo tracks, so the sync gate can read EACH
+ * worktree's OWN `.minspec/sessions/` (that is where `SessionPresenceManager`
+ * writes — `sessionsDir` is `<this worktree>/.minspec/sessions`, NOT the primary's;
+ * see `writeHeartbeat`). Reading only the primary's dir would render a live session
+ * in a linked on-`main` worktree invisible and let the gate ff a live tree (PR #846).
+ *
+ * Enumerated via `git worktree list --porcelain` run FROM `primaryRoot` (the same
+ * allowlisted `child_process`/git seam the manager already uses). ALWAYS includes
+ * `primaryRoot` itself; dedups by `path.resolve`. On ANY git failure (not a repo,
+ * git absent, detached) falls back to `[resolve(primaryRoot)]` so single-root
+ * callers and the golden-fixture parity tests keep their exact prior behaviour.
+ */
+export function listWorktreeRoots(primaryRoot: string): string[] {
+  const roots = new Set<string>([path.resolve(primaryRoot)]);
+  const out = gitOut(primaryRoot, ['worktree', 'list', '--porcelain']);
+  if (out) {
+    for (const line of out.split('\n')) {
+      // Porcelain: each worktree block opens with `worktree <absolute-path>`.
+      if (line.startsWith('worktree ')) {
+        const p = line.slice('worktree '.length).trim();
+        if (p) roots.add(path.resolve(p));
+      }
+    }
+  }
+  return [...roots];
+}
+
+/**
  * TRUE = occupied ⇒ caller must NOT fast-forward (fetch-only). FALSE is returned
  * ONLY on POSITIVE proof of dormancy, which requires BOTH:
- *   (a) presence is demonstrably running — ≥1 LIVE record exists ANYWHERE (an empty
- *       / all-stale / all-corrupt dir is indistinguishable from "heartbeat not
- *       running" ⇒ occupied), AND
+ *   (a) presence is demonstrably running — ≥1 LIVE record exists ANYWHERE (across
+ *       EVERY worktree's own `.minspec/sessions/`; an empty / all-stale / all-corrupt
+ *       set is indistinguishable from "heartbeat not running" ⇒ occupied), AND
  *   (b) NO live record's worktreeRoot resolves to this checkout.
+ *
+ * Both conditions scan EVERY worktree's own sessions dir (via `listWorktreeRoots`),
+ * because each session writes into its OWN worktree — a primary-only read misses a
+ * live sibling and is the PR #846 corruption hole.
  *
  * FAIL-SAFE: any missing dir / read / parse / kill error ⇒ TRUE (occupied). This is
  * the OPPOSITE fail-direction from the FR-12 pre-commit backstop (which fails
@@ -170,13 +202,16 @@ function isValidRecord(v: unknown): v is SessionPresenceRecord {
 export function isCheckoutOccupied(rootDir: string, worktreeRoot: string, now = Date.now()): boolean {
   let entries: { rec: SessionPresenceRecord | null; file: string }[];
   try {
-    entries = readAllRecords(rootDir);
+    entries = [];
+    for (const root of listWorktreeRoots(rootDir)) {
+      entries.push(...readAllRecords(root)); // aggregate every worktree's OWN dir
+    }
   } catch {
     return true; // any read error ⇒ occupied
   }
   const live: SessionPresenceRecord[] = [];
   for (const { rec } of entries) {
-    if (!rec) return true; // corrupt/malformed ⇒ can't attribute ⇒ occupied
+    if (!rec) return true; // corrupt/malformed ANYWHERE ⇒ can't attribute ⇒ occupied
     try {
       if (isRecordLive(rec, now)) live.push(rec);
     } catch {

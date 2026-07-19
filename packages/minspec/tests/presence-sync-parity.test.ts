@@ -1,15 +1,28 @@
 /**
- * SPEC-026 FR-14 (family) — Bash ⇔ TypeScript presence-gate parity + the gated-ff.
+ * Presence SYNC-GATE — Bash ⇔ TypeScript parity + the gated fast-forward.
  *
- * Two obligations:
+ * Covers the sync-gate primitive (`isCheckoutOccupied` / `--checkout-occupied`) and
+ * `sync_shared_checkouts`, NOT the whole FR-14 heartbeat/liveness surface (the
+ * constant tie-back below is the only FR-3/FR-14 assertion here — a narrow slice, not
+ * "FR-14 coverage"). Two obligations:
  *  1. PARITY: TS `isCheckoutOccupied` and the bash `drain-inbox.sh --checkout-occupied`
  *     seam MUST return the SAME occupied/dormant verdict on one shared golden-fixture
  *     set (live / stale-by-1s / dead-pid / empty-dir / corrupt-record /
- *     same-vs-different worktreeRoot / empty-allowlist). CI fails on drift.
+ *     same-vs-different worktreeRoot / empty-allowlist), and BOTH must scan every
+ *     worktree's OWN `.minspec/sessions/` (PR #846), not just the primary's. CI fails
+ *     on drift.
  *  2. GATED-FF BEHAVIOUR: `sync_shared_checkouts` ff's a DORMANT, on-main, clean
  *     checkout to origin/main, and refuses (fetch-only) when the checkout is
  *     presence-OCCUPIED, dirty, off-main, or diverged. Rule #8: a live tree is never
  *     mutated.
+ *
+ * TOCTOU note: the gate is a point-in-time read taken just BEFORE the `merge --ff-only`.
+ * A session that starts in the window between the occupancy check and the ff is not
+ * seen by that pass. This residual race is bounded and self-correcting: the ff only
+ * ever advances a CLEAN checkout by a true fast-forward (no commit/WIP loss), the
+ * newly-started session re-derives its worktree from the moved HEAD, and the next
+ * drain cycle re-reads presence. Closing it fully would need a cross-process lock on
+ * the checkout; deliberately out of scope for the file-based heartbeat.
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
@@ -208,6 +221,11 @@ function buildRepo(root: string): { primary: string; sibling: string; c1: string
   fs.mkdirSync(origin);
   git(origin, 'init', '--bare', '-b', 'main');
   git(root, 'clone', origin, primary);
+  // Mirror the real repo: .minspec/sessions/ is gitignored, so a live session's
+  // presence file NEVER dirties its worktree. This is what makes the #846 scenario
+  // possible — a live but CLEAN on-main sibling that G2 (content-clean) waves through,
+  // leaving occupancy (G3) as the ONLY guard against ff'ing a live tree.
+  fs.writeFileSync(path.join(primary, '.gitignore'), '.minspec/sessions/\n');
   fs.writeFileSync(path.join(primary, 'a.txt'), 'c1');
   git(primary, 'add', '.');
   git(primary, 'commit', '-m', 'c1');
@@ -237,6 +255,13 @@ function buildRepo(root: string): { primary: string; sibling: string; c1: string
   return { primary, sibling, c1, c2 };
 }
 
+/**
+ * Write a live presence record into `sessionsRoot`'s OWN `.minspec/sessions/`, tagged
+ * with `worktreeRoot`. In production a session ALWAYS writes into its own worktree
+ * (`sessionsRoot === worktreeRoot`); the gate must therefore read every worktree's own
+ * dir, not just the primary's (PR #846). Passing a `worktreeRoot` that differs from
+ * `sessionsRoot` reproduces the OLD masking bug on purpose and should not be needed.
+ */
 function writeLiveClaim(sessionsRoot: string, worktreeRoot: string): void {
   const sdir = path.join(sessionsRoot, '.minspec', 'sessions');
   fs.mkdirSync(sdir, { recursive: true });
@@ -273,12 +298,33 @@ describe('sync_shared_checkouts: gated fast-forward (rule #8 / #168)', () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gatedff-occ-'));
     try {
       const { primary, sibling, c1 } = buildRepo(root);
-      // A live claim on BOTH primary and sibling ⇒ both occupied ⇒ neither ff'd.
+      // A live claim on BOTH checkouts ⇒ both occupied ⇒ neither ff'd. Each session
+      // records into ITS OWN worktree's sessions dir (the real write path) — the
+      // sibling's record lives in sibling/.minspec/sessions/, NOT the primary's.
       writeLiveClaim(primary, primary);
-      writeLiveClaim(primary, sibling);
+      writeLiveClaim(sibling, sibling);
       runSync(primary);
       expect(git(sibling, 'rev-parse', 'HEAD'), 'occupied sibling must stay stale').toBe(c1);
       expect(git(primary, 'rev-parse', 'HEAD')).toBe(c1);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('OCCUPIES an on-main sibling whose LIVE record lives in the SIBLING\'s OWN sessions dir (PR #846 — per-worktree read)', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gatedff-perwt-'));
+    try {
+      const { primary, sibling, c1 } = buildRepo(root);
+      // The launcher is live on the primary, so the gate is NOT merely the "nobody
+      // live" fail-safe: presence IS demonstrably running. A SECOND live session runs
+      // in the on-main sibling and, as in production, records itself into the SIBLING's
+      // OWN .minspec/sessions/ — never the primary's. A primary-only read (pre-#846)
+      // would see no claim on the sibling, call it DORMANT, and ff a LIVE clean tree —
+      // the exact rule-#8/#168 corruption DR-065 says is impossible.
+      writeLiveClaim(primary, primary);
+      writeLiveClaim(sibling, sibling);
+      runSync(primary);
+      expect(git(sibling, 'rev-parse', 'HEAD'), 'live on-main sibling must NOT be ff\'d').toBe(c1);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
@@ -331,6 +377,38 @@ describe('sync_shared_checkouts: gated fast-forward (rule #8 / #168)', () => {
       runSync(primary);
       expect(git(sibling, 'rev-parse', 'HEAD'), 'no live session ⇒ fail-safe, no ff').toBe(c1);
       expect(git(primary, 'rev-parse', 'HEAD')).toBe(c1);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
+// ── TS isCheckoutOccupied: per-worktree sessions aggregation (PR #846) ─────────
+// The bash gated-ff tests above prove the SHELL reader; these prove the TS reader
+// scans every worktree's OWN sessions dir too (bash⇔TS parity of the fix). A session
+// records into ITS OWN worktree, so a primary-rooted read must still discover it.
+describe('isCheckoutOccupied: per-worktree sessions aggregation (PR #846)', () => {
+  it('a live record in the SIBLING\'s OWN dir OCCUPIES the sibling (read rooted at primary)', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ts-perwt-'));
+    try {
+      const { primary, sibling } = buildRepo(root);
+      writeLiveClaim(primary, primary); // launcher live on primary — defeats the fail-safe path
+      writeLiveClaim(sibling, sibling); // sibling session in ITS OWN dir (real write path)
+      // Pre-#846 this read only saw primary/.minspec/sessions/ and called the sibling
+      // DORMANT; it must now aggregate the sibling's own dir and report OCCUPIED.
+      expect(isCheckoutOccupied(primary, sibling)).toBe(true);
+      expect(isCheckoutOccupied(primary, primary)).toBe(true);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it('still reports a sibling DORMANT when only the launcher (on primary) is live', () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'ts-perwt-dormant-'));
+    try {
+      const { primary, sibling } = buildRepo(root);
+      writeLiveClaim(primary, primary);
+      expect(isCheckoutOccupied(primary, sibling)).toBe(false);
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
