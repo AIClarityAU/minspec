@@ -21,6 +21,12 @@ FORCE_ROLE=""
 # shellcheck source=scripts/lib/agent-egress.sh
 source "${SCRIPT_DIR}/lib/agent-egress.sh"
 
+# Docs-lane / human-owned path corpus (#833) — single source of truth shared with
+# push-docs.sh and kept in lock-step with docs-corpus.ts / docs-lane.yml. Defines
+# DOCS_CORPUS_RE, used below to WITHHOLD native auto-merge on approvable-doc PRs.
+# shellcheck source=scripts/lib/docs-corpus.sh
+source "${SCRIPT_DIR}/lib/docs-corpus.sh"
+
 # native_automerge_enabled: is GitHub-native auto-merge (merge on ai-review:pass, no
 # blast gate) turned on for this project? Policy source, in order: MINSPEC_AUTOMERGE_NATIVE
 # env (1/0 override for CI/one-off), else `.minspec/config.json` autoMerge.native.
@@ -47,6 +53,38 @@ native_automerge_enabled() {
 # absent → off, env=0 overrides config-on) rather than grepping the source.
 if [[ "${ISSUE:-}" == "--check-native-automerge" ]]; then
   if native_automerge_enabled; then echo "on"; exit 0; else echo "off"; exit 1; fi
+fi
+
+# paths_have_approvable_doc (#833): does a set of changed paths (newline-separated on
+# stdin) touch something a HUMAN — not `ai-review:pass` — must own the merge of? An
+# ai-review:pass vets whether a DIFF is sound, NOT whether a design choice baked into a
+# requirements.md / DR, a change to the sign-off ledger, or a relaxation of a GOVERNANCE
+# POLICY is the human's call. Such an agent PR must NOT arm native auto-merge (DR-061);
+# it lands as a human-reviewed proposal, like the machinery self-edit exclusion.
+#
+# The withhold set is the UNION of two intentionally-distinct mandates (a documented
+# SUPERSET of the docs-lane push corpus, NOT a divergent copy of it):
+#   1. DOCS_CORPUS_RE — the docs-lane / human-owned DOC corpus (specs/**, docs/**,
+#      .minspec/approvals/**, top-level *.md), the SHARED single source of truth that
+#      keeps this the 4th lock-step enforcer alongside push-docs.sh / docs-corpus.ts /
+#      docs-lane.yml.
+#   2. .minspec/ governance-config + .cursorrules — NOT docs-lane documents (so they
+#      stay OUT of DOCS_CORPUS_RE), but human-owned policy: .minspec/config.json holds
+#      the auto-merge + ownership-enforcement DIALS THEMSELVES (an agent could weaken
+#      the very gate and self-merge — the highest-value hole, #834 re-review),
+#      .minspec/constitution.md the invariants, .minspec/project-prefixes.md the
+#      DR-053 ref grammar, and .cursorrules the top-level agent-behaviour rules. All of
+#      .minspec/ is governance/config/state — none should auto-merge on ai-review:pass.
+# The spec-gate deliberately ALLOWS editing spec docs (doc-before-CODE, so a spec can
+# be fixed toward approval); this is the symmetric MERGE-side guard. Exit 0 (= withhold)
+# if ANY path matches, else 1.
+paths_have_approvable_doc() {
+  grep -qE "${DOCS_CORPUS_RE}"'|^\.minspec/|^\.cursorrules$'
+}
+
+# Pure seam: prove the approvable-doc classifier without gh/dispatch. Paths on stdin.
+if [[ "${ISSUE:-}" == "--paths-have-approvable-doc" ]]; then
+  if paths_have_approvable_doc; then echo "hold"; exit 0; else echo "arm"; exit 1; fi
 fi
 
 shift || true
@@ -346,6 +384,7 @@ run_reviewer_stage() {
   #    .github/workflows/ready-to-merge.yml — do NOT invent new label names).
   gh label create "ai-review:pass"    --repo "$REPO" --color 0e8a16 --description "Independent AI review passed (advisory)" 2>/dev/null || true
   gh label create "ai-review:changes" --repo "$REPO" --color d93f0b --description "Independent AI review requested changes"  2>/dev/null || true
+  gh label create "needs-human-review" --repo "$REPO" --color fbca04 --description "Held for a human — auto-merge withheld (e.g. approvable-doc change, #833)" 2>/dev/null || true
 
   # 6. Confirm a PR exists for this branch, creating one if not. Direct pushes to
   #    main are blocked by a branch-protection ruleset, so a PR is MANDATORY for
@@ -369,8 +408,26 @@ run_reviewer_stage() {
   #     HITL stays intact: the ai-review panel IS the gate; a machinery PR (self-edit
   #     guard) can never get ai-review:pass, so it never auto-merges. Best-effort:
   #     `--auto` errors on an already-clean/blocked PR are non-fatal.
+  #     #833 exclusion: a PR that touches the docs-lane / human-owned corpus (specs/**,
+  #     docs/**, .minspec/approvals/**, top-level *.md) must NOT auto-merge — ai-review
+  #     vets code, not whether a design decision baked into that doc (or a change to the
+  #     sign-off ledger) is the human's to make. Such PRs are held needs-human-review
+  #     (the docs-lane / Approve owns their merge). Fail CLOSED twice: (a) if the diff
+  #     can't be enumerated (nonzero), and (b) if enumeration succeeds but is EMPTY — we
+  #     cannot positively prove it is code-only, so withhold rather than risk
+  #     auto-landing an approvable-doc change.
   if native_automerge_enabled; then
-    if gh pr merge "$pr_num" --repo "$REPO" --squash --auto 2>/dev/null; then
+    local changed_files
+    if ! changed_files=$(gh pr diff "$pr_num" --repo "$REPO" --name-only 2>/dev/null); then
+      gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+      echo "  → native auto-merge WITHHELD on PR #$pr_num — could not enumerate changed files; failing closed (#833). Labeled needs-human-review."
+    elif [[ -z "${changed_files//[$'\n\r\t ']/}" ]]; then
+      gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+      echo "  → native auto-merge WITHHELD on PR #$pr_num — empty changed-file enumeration; failing closed (#833). Labeled needs-human-review."
+    elif paths_have_approvable_doc <<<"$changed_files"; then
+      gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+      echo "  → native auto-merge WITHHELD on PR #$pr_num — touches the docs-lane corpus (spec/DR/docs/approval-ledger/top-level .md); a human owns this merge (#833). Labeled needs-human-review."
+    elif gh pr merge "$pr_num" --repo "$REPO" --squash --auto 2>/dev/null; then
       echo "  → native auto-merge armed on PR #$pr_num (merges on ai-review:pass)"
     else
       echo "  → native auto-merge could not be armed on PR #$pr_num (may already be mergeable/blocked) — left for the gate/human"

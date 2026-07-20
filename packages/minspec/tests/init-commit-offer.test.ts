@@ -357,6 +357,37 @@ describe('post-refresh commit offer — init/refresh symmetry (RCDD 2026-07-10)'
       expect(committer.commit).toHaveBeenCalledTimes(1);
     });
   });
+
+  describe('initRefreshCommand() integration — the ruleset advisory is reachable via refresh (#557; SPEC-033 FR-3)', () => {
+    it('invokes offerRulesetAdvisory after a real refresh (wiring regression)', async () => {
+      // A real, already-initialized project: scaffold + harness on disk, in a repo.
+      fs.mkdirSync(path.join(tmpDir, '.git'), { recursive: true });
+      scaffold(tmpDir);
+      generateHarnessFiles(tmpDir);
+
+      const { committer } = makeCommitterStub(true);
+      // Dismiss every toast deterministically — this test only cares whether the
+      // advisory's `gh` probe fired, not what the user does with it.
+      vi.mocked(vscode.window.showInformationMessage).mockResolvedValue(undefined);
+
+      const ghCalls: string[][] = [];
+      const run = vi.fn(async (_cmd: string, args: string[]) => {
+        ghCalls.push(args);
+        if (args[0] === '--version') throw new Error('ENOENT'); // gh absent → cheap, deterministic exit
+        return { code: 0, stdout: '', stderr: '' };
+      });
+
+      await initRefreshCommand(tmpDir, {
+        makeCommitter: async () => committer,
+        ruleset: { run },
+      });
+
+      // `offerRulesetAdvisory`'s `isGhReady` probe (`gh --version`) ran — proving
+      // `initRefreshCommand` actually reaches the advisory, not merely that the
+      // refresh + commit-offer steps ran (previously untested at init.ts:934).
+      expect(ghCalls.some((args) => args[0] === '--version')).toBe(true);
+    });
+  });
 });
 
 /**

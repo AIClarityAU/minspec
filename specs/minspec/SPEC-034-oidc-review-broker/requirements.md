@@ -9,6 +9,8 @@ epic: EPIC-009  # Team Readiness
 aspects: [reviewer, provenance, github-app, oidc, broker, tier-2, team]
 depends_on: [DR-054, DR-033, DR-017, DR-004]
 relates_to: [SPEC-031, SPEC-033, DR-047, DR-050]
+implements: none
+implements_reason: OIDC review-broker (CF Worker) specified with design/tasks but not yet built; declares its owned files on implementation (SPEC-038 Slice-2 backfill)
 phases:
   specify: done
   clarify: done

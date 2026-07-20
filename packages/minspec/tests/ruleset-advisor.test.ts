@@ -59,9 +59,16 @@ import {
   resolveTieredRequiredChecks,
   AI_REVIEW_CHECK,
   READY_TO_MERGE_CHECK,
+  listRequiredCheckContexts,
+  probeReviewerConfigured,
+  REVIEWER_SECRETS,
+  updateRulesetRequiredChecks,
 } from '../src/lib/ruleset-advisor';
 import { offerRulesetAdvisory, resolveRequiredChecks } from '../src/commands/init';
 import { MANAGED_REGION_TEMPLATES } from '../src/lib/template-registry';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import { createRequire } from 'node:module';
 
 // ─── Test runner factory ─────────────────────────────────────────────────────
 
@@ -161,7 +168,14 @@ describe('hasRequiredChecksRuleset()', () => {
         return ok(
           JSON.stringify({
             conditions: { ref_name: { include: ['~DEFAULT_BRANCH'] } },
-            rules: [{ type: 'required_status_checks' }],
+            rules: [
+              {
+                type: 'required_status_checks',
+                // Requires exactly the injected wanted set (['lint','test']) → the
+                // symmetric check finds nothing missing → SILENT (fully configured).
+                parameters: { required_status_checks: [{ context: 'lint' }, { context: 'test' }] },
+              },
+            ],
           }),
         );
       }
@@ -551,7 +565,14 @@ describe('offerRulesetAdvisory() — autonomous probe + single-consent create (#
         return ok(
           JSON.stringify({
             conditions: { ref_name: { include: ['~DEFAULT_BRANCH'] } },
-            rules: [{ type: 'required_status_checks' }],
+            rules: [
+              {
+                type: 'required_status_checks',
+                // Requires exactly the injected wanted set (['lint','test']) → the
+                // symmetric check finds nothing missing → SILENT (fully configured).
+                parameters: { required_status_checks: [{ context: 'lint' }, { context: 'test' }] },
+              },
+            ],
           }),
         );
       }
@@ -567,6 +588,49 @@ describe('offerRulesetAdvisory() — autonomous probe + single-consent create (#
     expect(showInfo).not.toHaveBeenCalled();
   });
 
+  it('AUTO-PROBE: the reviewer-secret NAMES GET fires autonomously on init — NO consent toast (DR-050 Amendment 2026-07-16, #796)', async () => {
+    // No injected `requiredChecks` → the detection path runs resolveWantedChecks(),
+    // which probes the repo's OWN Actions-secret NAMES autonomously. The ruleset is
+    // already fully satisfied, so the flow is SILENT — yet the secret probe still
+    // fired, proving it is not gated behind any write-consent toast.
+    const { run, calls } = makeRunner((_c, args) => {
+      if (args[0] === '--version') return ok('gh 2');
+      if (args[0] === 'auth') return ok('ok');
+      const p = apiPath(args);
+      if (p === 'repos/o/r/actions/secrets') {
+        return ok(JSON.stringify(['CLAUDE_CODE_OAUTH_TOKEN', 'MINSPEC_APP_ID', 'MINSPEC_APP_PRIVATE_KEY']));
+      }
+      if (p === 'repos/o/r/rulesets') {
+        return ok(JSON.stringify([{ id: 1, target: 'branch', enforcement: 'active' }]));
+      }
+      if (p === 'repos/o/r/rulesets/1') {
+        return ok(
+          JSON.stringify({
+            conditions: { ref_name: { include: ['~DEFAULT_BRANCH'] } },
+            rules: [
+              {
+                // Fully satisfied against the resolved wanted set (validation only,
+                // no scaffolded workflows in this fixture folder) → SILENT.
+                type: 'required_status_checks',
+                parameters: { required_status_checks: [{ context: 'MinSpec SDD validation' }] },
+              },
+            ],
+          }),
+        );
+      }
+      return undefined;
+    });
+    // NO showInfo mock queued — the secret probe must not depend on a user click.
+
+    await offerRulesetAdvisory('/ws', { run, resolveRepo, openExternal, isRepo });
+
+    // The reviewer-secret-NAMES GET ran autonomously, before (indeed without) any toast.
+    expect(calls.some((c) => apiPath(c.args) === 'repos/o/r/actions/secrets')).toBe(true);
+    expect(showInfo).not.toHaveBeenCalled();
+    // Purely a read: no mutation fired.
+    expect(calls.some((c) => c.args.includes('POST') || c.args.includes('PUT'))).toBe(false);
+  });
+
   it('CASE 2: gh present + ruleset already exists → SILENT (no toast at all), NO create', async () => {
     const { run, calls } = makeRunner((_c, args) => {
       if (args[0] === '--version') return ok('gh 2');
@@ -579,7 +643,14 @@ describe('offerRulesetAdvisory() — autonomous probe + single-consent create (#
         return ok(
           JSON.stringify({
             conditions: { ref_name: { include: ['~DEFAULT_BRANCH'] } },
-            rules: [{ type: 'required_status_checks' }],
+            rules: [
+              {
+                type: 'required_status_checks',
+                // Requires exactly the injected wanted set (['lint','test']) → the
+                // symmetric check finds nothing missing → SILENT (fully configured).
+                parameters: { required_status_checks: [{ context: 'lint' }, { context: 'test' }] },
+              },
+            ],
           }),
         );
       }
@@ -594,6 +665,60 @@ describe('offerRulesetAdvisory() — autonomous probe + single-consent create (#
     expect(calls.some((c) => apiPath(c.args) === 'repos/o/r/rulesets')).toBe(true);
     expect(calls.some((c) => c.args.includes('POST'))).toBe(false);
     expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it('CASE (add — the sealbox gap): ruleset missing checks → offers ADD → PUT adds them, preserves existing, no POST', async () => {
+    const { run, calls } = makeRunner((_c, args) => {
+      if (args[0] === '--version') return ok('gh 2');
+      if (args[0] === 'auth') return ok('ok');
+      const isPut = args.includes('PUT');
+      if (apiPath(args) === 'repos/o/r/rulesets') {
+        return ok(JSON.stringify([{ id: 9, target: 'branch', enforcement: 'active' }]));
+      }
+      if (args.includes('repos/o/r/rulesets/9') && !isPut) return ok(rulesetDetail(9, ['MinSpec SDD validation']));
+      if (args.includes('repos/o/r/rulesets/9') && isPut) return ok('{}');
+      return undefined;
+    });
+    showInfo.mockResolvedValueOnce('Add checks'); // user accepts the add offer
+
+    // Injected wanted = the full governance set; the existing ruleset has only validation.
+    await offerRulesetAdvisory('/ws', deps(run, ['MinSpec SDD validation', 'ai-review', 'ready-to-merge']));
+
+    // Offered ADD (not create) — naming the missing checks — with the consent actions.
+    expect(String(showInfo.mock.calls[0][0])).toMatch(/does not require .*ai-review.*ready-to-merge/i);
+    expect(showInfo.mock.calls[0].slice(1)).toEqual(['Add checks', 'Not now', 'Learn more']);
+    // PUT updated the EXISTING ruleset (no create), adding the missing checks and
+    // preserving the one already required.
+    const put = calls.find((c) => c.args.includes('PUT'));
+    expect(put?.stdin).toContain('MinSpec SDD validation');
+    expect(put?.stdin).toContain('ai-review');
+    expect(put?.stdin).toContain('ready-to-merge');
+    expect(calls.some((c) => c.args.includes('POST'))).toBe(false);
+    expect(String(showInfo.mock.calls[1][0])).toMatch(/added/i);
+  });
+
+  it('CASE (add, Tier-B only): missing checks are lint/test/build only → copy says "full CI coverage", not "AI-review gate"', async () => {
+    const { run } = makeRunner((_c, args) => {
+      if (args[0] === '--version') return ok('gh 2');
+      if (args[0] === 'auth') return ok('ok');
+      const isPut = args.includes('PUT');
+      if (apiPath(args) === 'repos/o/r/rulesets') {
+        return ok(JSON.stringify([{ id: 9, target: 'branch', enforcement: 'active' }]));
+      }
+      if (args.includes('repos/o/r/rulesets/9') && !isPut) return ok(rulesetDetail(9, ['MinSpec SDD validation']));
+      if (args.includes('repos/o/r/rulesets/9') && isPut) return ok('{}');
+      return undefined;
+    });
+    showInfo.mockResolvedValueOnce('Not now'); // decline; only the offer copy is under test
+
+    // Injected wanted = validation + a Tier-B check; the existing ruleset has
+    // only validation, so the missing set is Tier-B-only (no ai-review/ready-to-merge).
+    await offerRulesetAdvisory('/ws', deps(run, ['MinSpec SDD validation', 'lint']));
+
+    const message = String(showInfo.mock.calls[0][0]);
+    expect(message).toMatch(/does not require lint/i);
+    expect(message).toMatch(/without full CI coverage/i);
+    expect(message).not.toMatch(/AI-review gate/i);
   });
 
   it('CASE 3+4: none found → exactly ONE create-offer toast; on Create → POST + success toast', async () => {
@@ -648,19 +773,22 @@ describe('offerRulesetAdvisory() — autonomous probe + single-consent create (#
     expect(String(showInfo.mock.calls[0][0])).toMatch(/ready-to-merge/);
   });
 
-  it('CONFIGURABLE: with no injected checks the create reads the config setting', async () => {
+  it('CONFIGURABLE: with no injected checks the create resolves the tiered set (validation + config extras)', async () => {
     const { run, calls } = makeRunner((_c, args) => {
       if (args[0] === '--version') return ok('gh 2');
       if (args[0] === 'auth') return ok('ok');
+      // No reviewer secrets in this fixture → Tier-A stays out (no #559 deadlock).
+      if (apiPath(args) === 'repos/o/r/actions/secrets') return ok('[]');
       if (apiPath(args) === 'repos/o/r/rulesets' && !args.includes('POST')) return ok('[]');
       if (args.includes('POST')) return ok('{"id":7}');
       return undefined;
     });
-    // The `minspec.ruleset.requiredChecks` setting adds `build`.
-    mockConfigValue = ['lint', 'test', 'build'];
+    // The `minspec.ruleset.requiredChecks` setting adds `build` (now ADDITIVE:
+    // MinSpec SDD validation is always required; user extras layer on top).
+    mockConfigValue = ['build'];
     showInfo.mockResolvedValueOnce('Create ruleset');
 
-    // Omit deps.requiredChecks so resolveRequiredChecks() reads the config.
+    // Omit deps.requiredChecks so resolveWantedChecks() probes + resolves the set.
     await offerRulesetAdvisory('/ws', { run, resolveRepo, openExternal, isRepo });
 
     const post = calls.find((c) => c.args.includes('POST'))!;
@@ -668,9 +796,10 @@ describe('offerRulesetAdvisory() — autonomous probe + single-consent create (#
       rules: Array<{ type: string; parameters: { required_status_checks: Array<{ context: string }> } }>;
     };
     const rule = body.rules.find((r) => r.type === 'required_status_checks')!;
+    // Validation is non-negotiable + the config extra. Tier-A absent (no secrets,
+    // no scaffolded workflows in this fixture folder). Deny-by-default deadlock-safe.
     expect(rule.parameters.required_status_checks.map((c) => c.context)).toEqual([
-      'lint',
-      'test',
+      'MinSpec SDD validation',
       'build',
     ]);
   });
@@ -797,5 +926,262 @@ describe('offerRulesetAdvisory() — autonomous probe + single-consent create (#
     expect(showInfo).not.toHaveBeenCalled();
     expect(openExternal).not.toHaveBeenCalled();
     expect(resolveRepo).not.toHaveBeenCalled();
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// #564 slices 2/3 · SPEC-033 FR-3 — the full producible check set, symmetric
+// (add missing checks to an existing ruleset — the sealbox gap).
+// ─────────────────────────────────────────────────────────────────────────────
+
+/** A ruleset detail JSON guarding the default branch with the given required contexts. */
+function rulesetDetail(id: number, contexts: string[]): string {
+  return JSON.stringify({
+    id,
+    name: RULESET_NAME,
+    target: 'branch',
+    enforcement: 'active',
+    conditions: { ref_name: { include: ['~DEFAULT_BRANCH'], exclude: [] } },
+    rules: [
+      {
+        type: 'required_status_checks',
+        parameters: {
+          strict_required_status_checks_policy: false,
+          required_status_checks: contexts.map((context) => ({ context })),
+        },
+      },
+    ],
+  });
+}
+
+describe('listRequiredCheckContexts — symmetric detection (which checks, not just "a ruleset exists")', () => {
+  it('returns the ruleset id + its required contexts', async () => {
+    const { run } = makeRunner((_c, args) => {
+      const p = apiPath(args);
+      if (p === 'repos/o/r/rulesets') return ok(JSON.stringify([{ id: 42, target: 'branch', enforcement: 'active' }]));
+      if (p === 'repos/o/r/rulesets/42') return ok(rulesetDetail(42, ['MinSpec SDD validation']));
+      return undefined;
+    });
+    expect(await listRequiredCheckContexts('o', 'r', run)).toEqual({
+      rulesetId: 42,
+      contexts: ['MinSpec SDD validation'],
+    });
+  });
+
+  it('null when no branch ruleset guards checks', async () => {
+    const { run } = makeRunner((_c, args) =>
+      apiPath(args) === 'repos/o/r/rulesets' ? ok('[]') : undefined,
+    );
+    expect(await listRequiredCheckContexts('o', 'r', run)).toBeNull();
+  });
+
+  it('null on a read failure (never suppress provisioning)', async () => {
+    const { run } = makeRunner(() => fail(1, 'boom'));
+    expect(await listRequiredCheckContexts('o', 'r', run)).toBeNull();
+  });
+});
+
+describe('probeReviewerConfigured — Tier-A producibility (no #559 deadlock)', () => {
+  const secrets = (names: string[]) =>
+    makeRunner((_c, args) =>
+      apiPath(args) === 'repos/o/r/actions/secrets' ? ok(JSON.stringify(names)) : undefined,
+    ).run;
+
+  it('true only when ALL THREE reviewer secrets are set', async () => {
+    expect(
+      await probeReviewerConfigured(
+        'o',
+        'r',
+        secrets(['CLAUDE_CODE_OAUTH_TOKEN', 'MINSPEC_APP_ID', 'MINSPEC_APP_PRIVATE_KEY']),
+      ),
+    ).toBe(true);
+  });
+
+  // ── #559 DEADLOCK REGRESSION (T3) ──────────────────────────────────────────
+  // The earlier probe checked only 2 of the 3 secrets the ai-review.yml guard
+  // requires — so a repo with OAUTH + APP_ID but NO APP_PRIVATE_KEY read as
+  // "configured", `ai-review` was made a REQUIRED check, yet the workflow's own
+  // guard skipped and never posted it → every merge permanently blocked (#559).
+  // This case FAILS on the 2-of-3 logic (it returned true) and PASSES on the fix.
+  it('false when MINSPEC_APP_PRIVATE_KEY is missing (only OAUTH + APP_ID set) — #559 deadlock regression', async () => {
+    expect(
+      await probeReviewerConfigured('o', 'r', secrets(['CLAUDE_CODE_OAUTH_TOKEN', 'MINSPEC_APP_ID'])),
+    ).toBe(false);
+  });
+
+  it('false when the inference token (CLAUDE_CODE_OAUTH_TOKEN) is missing', async () => {
+    expect(
+      await probeReviewerConfigured('o', 'r', secrets(['MINSPEC_APP_ID', 'MINSPEC_APP_PRIVATE_KEY'])),
+    ).toBe(false);
+  });
+
+  it('false when the App id (MINSPEC_APP_ID) is missing', async () => {
+    expect(
+      await probeReviewerConfigured('o', 'r', secrets(['CLAUDE_CODE_OAUTH_TOKEN', 'MINSPEC_APP_PRIVATE_KEY'])),
+    ).toBe(false);
+  });
+
+  it('the probe set equals the ai-review.yml guard set (REVIEWER_SECRETS is the single source of truth)', async () => {
+    // If every REVIEWER_SECRETS name is present the probe is true; dropping any one
+    // flips it to false — so the probe can never drift below the workflow's guard.
+    expect(await probeReviewerConfigured('o', 'r', secrets([...REVIEWER_SECRETS]))).toBe(true);
+    for (const omit of REVIEWER_SECRETS) {
+      const partial = REVIEWER_SECRETS.filter((n) => n !== omit);
+      expect(await probeReviewerConfigured('o', 'r', secrets([...partial]))).toBe(false);
+    }
+  });
+
+  it('false (fail-safe) on a read failure', async () => {
+    const { run } = makeRunner(() => fail(1, 'nope'));
+    expect(await probeReviewerConfigured('o', 'r', run)).toBe(false);
+  });
+});
+
+describe('updateRulesetRequiredChecks — add missing checks to an existing ruleset', () => {
+  function runner(getReply: Reply, putOk = true) {
+    return makeRunner((_c, args) => {
+      const isPut = args.includes('PUT');
+      if (args.includes('repos/o/r/rulesets/42') && !isPut) return getReply;
+      if (args.includes('repos/o/r/rulesets/42') && isPut) return putOk ? ok('{}') : fail(403, 'must have admin');
+      return undefined;
+    });
+  }
+
+  it('PUTs the union — adds the missing checks, preserves the existing one', async () => {
+    const { run, calls } = runner(ok(rulesetDetail(42, ['MinSpec SDD validation'])));
+    const out = await updateRulesetRequiredChecks('o', 'r', run, 42, ['ai-review', 'ready-to-merge']);
+    expect(out.updated).toBe(true);
+    const put = calls.find((c) => c.args.includes('PUT'));
+    expect(put?.stdin).toContain('MinSpec SDD validation'); // preserved
+    expect(put?.stdin).toContain('ai-review');
+    expect(put?.stdin).toContain('ready-to-merge');
+  });
+
+  it('no-op (updated, no PUT) when all wanted checks are already required', async () => {
+    const { run, calls } = runner(ok(rulesetDetail(42, ['MinSpec SDD validation', 'ai-review', 'ready-to-merge'])));
+    const out = await updateRulesetRequiredChecks('o', 'r', run, 42, ['ai-review', 'ready-to-merge']);
+    expect(out.updated).toBe(true);
+    expect(calls.some((c) => c.args.includes('PUT'))).toBe(false); // nothing to write
+  });
+
+  it('reports forbidden on a 403 PUT', async () => {
+    const { run } = runner(ok(rulesetDetail(42, ['MinSpec SDD validation'])), false);
+    const out = await updateRulesetRequiredChecks('o', 'r', run, 42, ['ai-review']);
+    expect(out.updated).toBe(false);
+    expect(out.forbidden).toBe(true);
+  });
+});
+
+// =============================================================================
+// ENFORCE (#820): the required-check NAME constants are bound to the code that
+// actually PRODUCES those checks — constitution: "don't trust the model to
+// follow a rule — enforce it." (Template: reviewer-secrets-enforcement.test.ts.)
+//
+// The ruleset advisor asks a repo's branch ruleset to REQUIRE these contexts:
+//   AI_REVIEW_CHECK      ('ai-review')      — the reviewer's own check-run
+//   READY_TO_MERGE_CHECK ('ready-to-merge') — the merge-gate commit status
+// If the producer that POSTS one of those contexts is renamed while the constant
+// here is left stale (or vice-versa), the ruleset requires a context nothing ever
+// posts → every PR is permanently blocked or admin-force-merged (the DEADLOCK→
+// BYPASS class). The pre-existing Tier-A assertions (`toContain(AI_REVIEW_CHECK)`
+// over a set BUILT from the same constant) are tautological — tied to no producer.
+// These add the missing producer-anchored equalities, so a rename fails CI here.
+//
+// PRODUCERS bound:
+//   1. AI_REVIEW_CHECK      ⟷ .github/scripts/ai-review-guard.js — the `.name`
+//      field of the EXPORTED pure `decideReviewCheck()` (its private CHECK_NAME).
+//   2. READY_TO_MERGE_CHECK ⟷ .github/workflows/ready-to-merge.yml — the
+//      `context:` literal on its `createCommitStatus` calls (the SOLE writer of
+//      that status).
+// CONSUMER also bound: #820 named "A5 remediate-pr.sh" and assumed it absent — it
+// is NOT. It lives in `scripts/` (not `.github/scripts/`) and hardcodes the
+// `ai-review` check name in its jq `.name` rollup filters, so the same rename
+// would silently strand it too; bind it while it exists.
+//
+// NOTE: ai-review.yml / guard.js also expose an `ai-review/pass` *status* context
+// (PASS_STATUS_CONTEXT) — a DIFFERENT concern owned by #822. The ready-to-merge
+// assertion excludes any `ai-review/*` context so it cannot be confused by it.
+// =============================================================================
+
+/** Walk up from cwd to the worktree root (the dir holding the real workflow). */
+function findCheckNameRepoRoot(): string {
+  let dir = process.cwd();
+  for (let i = 0; i < 10; i++) {
+    if (fs.existsSync(path.join(dir, '.github/workflows/ready-to-merge.yml'))) return dir;
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  throw new Error('could not locate repo root (…/.github/workflows/ready-to-merge.yml)');
+}
+
+/**
+ * The `ai-review` check name as PRODUCED by ai-review-guard.js. PREFER loading the
+ * real module (so the binding tracks the shipped code): `decideReviewCheck()`
+ * returns `{ name: CHECK_NAME, … }`, and CHECK_NAME is the private literal the
+ * check-run is posted under. Fall back to text-parsing `const CHECK_NAME = '…'`
+ * only if `require` cannot load the module for some reason.
+ */
+function producedAiReviewCheckName(root: string): string {
+  const guardPath = path.resolve(root, '.github/scripts/ai-review-guard.js');
+  try {
+    const req = createRequire(import.meta.url);
+    const guard = req(guardPath) as {
+      decideReviewCheck: (label: string, isMachineryPr: boolean) => { name: string };
+    };
+    return guard.decideReviewCheck('ai-review:pass', false).name;
+  } catch {
+    const src = fs.readFileSync(guardPath, 'utf8');
+    const m = src.match(/const\s+CHECK_NAME\s*=\s*['"]([^'"]+)['"]/);
+    if (!m) throw new Error('could not load or parse CHECK_NAME from ai-review-guard.js');
+    return m[1];
+  }
+}
+
+/** Every DISTINCT commit-status `context:` string literal a workflow YAML posts. */
+function commitStatusContexts(yaml: string): string[] {
+  return [...new Set([...yaml.matchAll(/\bcontext:\s*['"]([^'"]+)['"]/g)].map((m) => m[1]))];
+}
+
+describe('ENFORCE: check-name constants bound to producers (#820)', () => {
+  const root = findCheckNameRepoRoot();
+
+  it('AI_REVIEW_CHECK ⟷ ai-review-guard.js decideReviewCheck().name (rename on either side ⇒ RED)', () => {
+    // The reviewer posts its check-run under CHECK_NAME via decideReviewCheck();
+    // the ruleset requires AI_REVIEW_CHECK. They MUST be the same string, or the
+    // required context is never posted → every PR deadlocks.
+    expect(producedAiReviewCheckName(root)).toBe(AI_REVIEW_CHECK);
+  });
+
+  it('READY_TO_MERGE_CHECK ⟷ ready-to-merge.yml `context:` (the sole writer of that status)', () => {
+    const yaml = fs.readFileSync(
+      path.join(root, '.github/workflows/ready-to-merge.yml'),
+      'utf8',
+    );
+    const contexts = commitStatusContexts(yaml);
+    // Exclude ai-review/* status contexts (#822's concern) so this is SPECIFIC to
+    // the ready-to-merge gate. ready-to-merge.yml is the SINGLE writer of its
+    // status, so after that exclusion it posts EXACTLY the one gate context —
+    // which must equal the constant the ruleset requires.
+    const gateContexts = contexts.filter((c) => !c.startsWith('ai-review/'));
+    expect(gateContexts).toEqual([READY_TO_MERGE_CHECK]);
+  });
+
+  it('CONSUMER: remediate-pr.sh identifies the ai-review check by AI_REVIEW_CHECK', () => {
+    // #820 called this "A5 remediate-pr.sh" and assumed it absent; it is not — it
+    // lives in scripts/ (not .github/scripts/) and hardcodes the check name in its
+    // jq `.name` rollup filters to route the reviewer's own check away from the
+    // generic failing-checks path. A producer-side rename would silently strand
+    // these filters, so bind them too.
+    const remediatePath = path.resolve(root, 'scripts/remediate-pr.sh');
+    if (!fs.existsSync(remediatePath)) return; // absent ⇒ only the 2 producers above apply
+    const src = fs.readFileSync(remediatePath, 'utf8');
+    const nameFilterLiterals = [
+      ...src.matchAll(/\(\.name\s*\/\/\s*""\)\s*[=!]=\s*"([^"]+)"/g),
+    ].map((m) => m[1]);
+    // The script's purpose depends on singling out the reviewer's own check, so it
+    // MUST contain at least one such filter; every one must name AI_REVIEW_CHECK.
+    expect(nameFilterLiterals.length).toBeGreaterThan(0);
+    for (const lit of new Set(nameFilterLiterals)) expect(lit).toBe(AI_REVIEW_CHECK);
   });
 });

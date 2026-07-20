@@ -66,9 +66,29 @@ behaviour text verbatim:
 - **After:** `# Editing voids approval (hash in .minspec/approvals.json → stale); re-run "MinSpec: Approve Spec".`
 
 Code comments that reference DR-012 to explain *why* the footer exists
-([`spec.ts:307`](../../../packages/minspec/src/lib/spec.ts),
-[`spec.ts:401-403`](../../../packages/minspec/src/lib/spec.ts)) are internal and MUST
-remain.
+([`spec.ts`](../../../packages/minspec/src/lib/spec.ts) internal comments) are internal
+and MUST remain. *(FR-1 already landed — the footer line was removed; see the `spec.ts`
+comment "the DR-012 … reminder line was removed here". Retained as the contract of
+record; the live leak is now FR-1b.)*
+
+### FR-1b: Strip the scaffold `tasks.md` leak (second live egress leak, #669)
+
+A second emitted leak of the same class is **live**: the split-layout `tasks.md`
+scaffolder writes an internal ref into **the user's project file**. The scaffolded body
+carries the literal comment
+`Ticking a checkbox here is body-only — it never voids spec approval (DR-035).`
+([`scaffold.ts` `buildTasksMdContent`](../../../packages/minspec/src/lib/scaffold.ts),
+added by #225 after this spec) — a `DR-035` literal in a surface INV-1 governs.
+
+The scaffolded comment MUST drop the internal ref, keeping the behaviour text verbatim:
+
+- **Before:** `… it never voids spec approval (DR-035).`
+- **After:** `… it never voids spec approval.`
+
+Per the DR-003 data-only-fix corollary this string strip is only the **data-fix half**;
+the durable fix is FR-2 registering the scaffolder as an emit surface (below), so the
+class is un-committable. Stripping the string without registering the surface leaves the
+gate blind to the next scaffold-emitted ref. Both are required.
 
 ### FR-2: Output-provenance gate (render test — the INV-1 enforcement)
 
@@ -79,6 +99,11 @@ A T0 test MUST render every emit surface and assert none contains
 - every entry of `TEMPLATES` (rendered with representative substitution data),
 - `generateSpecContent(...)` output,
 - `generateAdrContent(...)` output,
+- the split-layout `tasks.md` scaffolder — `buildTasksMdContent(...)` /
+  `scaffoldTasksMd(...)` output (the emit path added by #225 that writes `tasks.md`
+  into the user's project; it is the FR-1b live-leak surface, and was absent from this
+  list because it postdated the spec — registered here per the "any new emit path MUST
+  register" rule below),
 - the Decision-Register INDEX / summary generators' output,
 - webview HTML producers (e.g. `spec-panel-html`).
 
@@ -101,11 +126,14 @@ sources — for `(DR|SPEC|EPIC)-<digits>` literals. It MUST:
 
 ### FR-4: No regression of existing artifacts
 
-Running the gate against the current tree MUST surface exactly the FR-1 leak (and, once
-FR-1 lands, pass clean). The pre-existing dogfooded
+Running the gate against the current tree MUST surface every currently-live leak and, once
+FR-1 + FR-1b land, pass clean. As of #669 the FR-1 spec-footer leak is already stripped in
+`spec.ts`; the single remaining live leak is the FR-1b scaffold `tasks.md` `DR-035`
+literal. The gate (FR-2, once the scaffolder surface is registered) MUST flag that literal
+*before* the FR-1b strip and pass *after*. The pre-existing dogfooded
 [`specs/minspec/requirements.md`](../requirements.md) frontmatter footer is regenerated
-output, not hand-authored content — it is corrected by FR-1's generator change on next
-write, and MAY be edited in place to clear the gate.
+output, not hand-authored content — corrected by FR-1's generator change on next write, and
+MAY be edited in place to clear the gate.
 
 ---
 
@@ -117,12 +145,16 @@ test green (see Test / Verification below).*
 - [ ] **Footer carries no internal ref** — output of `generateSpecContent(...)` contains
       the approval-behaviour footer with **no** trailing `DR-012` and no
       `(DR|SPEC|EPIC)-\d+` literal anywhere; the explanatory code comments at
-      [`spec.ts:307`](../../../packages/minspec/src/lib/spec.ts) /
-      [`spec.ts:401-403`](../../../packages/minspec/src/lib/spec.ts) remain. *(FR-1, INV-1)*
+      the `spec.ts` explanatory code comments remain. *(FR-1, INV-1)*
+- [ ] **Scaffold `tasks.md` carries no internal ref** — output of `buildTasksMdContent(...)`
+      / `scaffoldTasksMd(...)` contains the checkbox-scope comment with **no** trailing
+      `(DR-035)` and no `(DR|SPEC|EPIC)-\d+` literal; the behaviour text is unchanged.
+      *(FR-1b, INV-1)*
 - [ ] **Render gate green on all emit surfaces** — a T0 test renders every `TEMPLATES`
-      entry, `generateSpecContent`, `generateAdrContent`, the INDEX/summary generators,
-      and the webview-HTML producers, and asserts none matches `/\b(DR|SPEC|EPIC)-\d+\b/`;
-      the placeholders `DR-NNN` / `SPEC-NNN` / `EPIC-NNN` pass. *(FR-2, INV-1)*
+      entry, `generateSpecContent`, `generateAdrContent`, **the `tasks.md` scaffolder
+      (`buildTasksMdContent`)**, the INDEX/summary generators, and the webview-HTML
+      producers, and asserts none matches `/\b(DR|SPEC|EPIC)-\d+\b/`; the placeholders
+      `DR-NNN` / `SPEC-NNN` / `EPIC-NNN` pass. *(FR-2, INV-1)*
 - [ ] **Gate bites (negative proof)** — injecting a `DR-012` literal into any registered
       emit surface makes the FR-2 test fail; removing it makes it pass — proving the gate
       is not vacuous. *(FR-2)*
@@ -172,4 +204,6 @@ test green (see Test / Verification below).*
 - **Epic:** [EPIC-002 Signpost Integrity](../../../docs/epics/EPIC-002-signpost-integrity.md)
 - **Sibling asymmetry-gate lineage:** [DR-003](../../../docs/decisions/DR-003.md)
   Phase 4; SPEC-004 / `#115` / `#126`.
+- **Second live leak (FR-1b):** `#669` (doc-honesty actioning tracker); scaffolder
+  origin `#225`.
 - **Next phases (T3):** plan → tasks → implement, on approval.

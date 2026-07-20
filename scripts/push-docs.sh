@@ -14,7 +14,11 @@
 #               the working tree's changed files intersected with the docs corpus.
 set -euo pipefail
 
-CORPUS='^(specs/|docs/|\.minspec/approvals/|[^/]+\.md$)'
+# Docs corpus — single source of truth shared with dispatch-issue.sh's #833
+# auto-merge guard (see scripts/lib/docs-corpus.sh). Kept in lock-step with the TS
+# canonical (docs-corpus.ts) and docs-lane.yml.
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/docs-corpus.sh"
+CORPUS="$DOCS_CORPUS_RE"
 
 msg=""
 files=()
@@ -94,7 +98,14 @@ if git -C "$wt" diff --cached --quiet; then
   echo "push-docs: no delta vs origin/main — nothing to push" >&2
   exit 0
 fi
-git -C "$wt" commit -q -m "$msg"
+# DR_INDEX_GATE_OFF=1 (NOT --no-verify): the ephemeral worktree has no node_modules /
+# built @aiclarity/shared, so ONLY .githooks/pre-commit's `npm run validate` step crashes
+# on module load. That step has this dedicated kill-switch, and it is the right scope —
+# the same `npm run validate` is re-run + REQUIRED on the docs-lane PR by ci.yml's `lint`
+# job. Targeting just that step KEEPS the two pure-bash gates active (they need no deps):
+# the DR-029 born-`proposed` gate (load-bearing — the lane pushes docs/decisions/DR-*.md)
+# and the commit-msg RCDD gate. No invariant hole (vs the blunt --no-verify).
+DR_INDEX_GATE_OFF=1 git -C "$wt" commit -q -m "$msg"
 git -C "$wt" push -q -u origin "$branch"
 
 pr_url="$(gh pr create --repo "$slug" --base main --head "$branch" \

@@ -28,7 +28,8 @@ const INVALID = 'ownership.implements.invalid';
 /** Build a raw spec with ownership frontmatter + phase state. */
 function ownSpec(o: {
   tier?: string;
-  clarify?: string; // clarify phase status (default done = past Clarify)
+  clarify?: string; // clarify phase status (default done)
+  plan?: string; // plan phase status (default done = in the build path, triggers the rule)
   implementsVal?: string; // raw value after `implements:` (omit = absent)
   affectsVal?: string;
   reason?: string; // implements_reason:
@@ -49,7 +50,7 @@ function ownSpec(o: {
     'phases:',
     '  specify: done',
     `  clarify: ${o.clarify ?? 'done'}`,
-    '  plan: pending',
+    `  plan: ${o.plan ?? 'done'}`,
     '  tasks: pending',
     '  implement: pending',
     '---',
@@ -105,8 +106,13 @@ describe('SPEC-038 ownership declaration (#460)', () => {
   });
 
   // ── Trigger predicate (P2 — phases.clarify) ───────────────────────────────
-  it('a T3 still in Clarify (clarify: pending) is NOT yet required', () => {
-    expect(rules(ownSpec({ tier: 'T3', clarify: 'pending' }))).not.toContain(MISSING);
+  it('a T3 not yet in the build path (plan: pending) is NOT yet required (FR-3)', () => {
+    // clarify-done but plan-pending = parked after Clarify, owns no code yet → exempt
+    expect(rules(ownSpec({ tier: 'T3', plan: 'pending' }))).not.toContain(MISSING);
+  });
+
+  it('a T3 with plan in-progress IS required (in the build path)', () => {
+    expect(rules(ownSpec({ tier: 'T3', plan: 'in-progress' }))).toContain(MISSING);
   });
 });
 
@@ -147,5 +153,30 @@ describe('SPEC-038 AC-5 — the produced signal arms the real spec-gate (#460)',
     } finally {
       rmSync(tmp, { recursive: true, force: true });
     }
+  });
+});
+
+describe('SPEC-038 #812 — comment + escape semantics', () => {
+  it('a path mentioned only in a trailing # comment is NOT flagged (regression: MEDIUM false-positive)', () => {
+    const r = rules(ownSpec({ implementsVal: '[pkg/a.ts]  # supersedes docs/DR-050.md' }));
+    expect(r).not.toContain(INVALID); // docs/DR-050.md lives in the comment → never seen
+    expect(r).not.toContain(MISSING); // pkg/a.ts is a real declaration
+  });
+
+  it('implements: none + a trailing comment STILL requires a reason (regression: none-escape evasion)', () => {
+    expect(rules(ownSpec({ implementsVal: 'none  # owns no code' }))).toContain(MISSING);
+    expect(rules(ownSpec({ implementsVal: 'none  # owns no code', reason: 'policy spec' }))).not.toContain(MISSING);
+  });
+
+  it('a declared infra/wrong-ext path is NOT invalid (only escapes are), but owns nothing → missing', () => {
+    const infra = rules(ownSpec({ implementsVal: '[node_modules/x.js]' }));
+    expect(infra).not.toContain(INVALID); // not an escape (FR-4) — the gate silently skips it
+    expect(infra).toContain(MISSING); // ...but it arms nothing, so it is not a real declaration
+  });
+
+  it('an escaping path IS invalid even alongside a valid one', () => {
+    const r = rules(ownSpec({ implementsVal: '[pkg/a.ts, ../evil.ts]' }));
+    expect(r).toContain(INVALID);
+    expect(r).not.toContain(MISSING); // pkg/a.ts is a valid declaration
   });
 });

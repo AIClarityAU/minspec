@@ -84,7 +84,7 @@ export interface PushDocsResult {
 export type ExecRun = (
   file: 'git' | 'gh',
   args: readonly string[],
-  opts?: { cwd?: string },
+  opts?: { cwd?: string; env?: Record<string, string> },
 ) => Promise<{ stdout: string; stderr: string }>;
 
 /** Dependencies, all optional — production uses the defaults; tests inject stubs. */
@@ -105,7 +105,7 @@ export function defaultExecRun(): ExecRun {
       cwd: opts?.cwd,
       timeout: GIT_TIMEOUT_MS,
       maxBuffer: 8 * 1024 * 1024,
-      env: { ...process.env, GIT_LITERAL_PATHSPECS: '1' },
+      env: { ...process.env, GIT_LITERAL_PATHSPECS: '1', ...opts?.env },
     });
     return { stdout: stdout.toString(), stderr: stderr.toString() };
   };
@@ -371,9 +371,20 @@ export async function pushDocsLaneCommand(
       if (!hasDelta) return await surface({ outcome: 'no-delta', files });
 
       try {
-        await run('git', ['commit', '-m', message], { cwd: wt });
+        // DR_INDEX_GATE_OFF=1 (NOT --no-verify): the ephemeral worktree has no
+        // node_modules / built @aiclarity/shared, so ONLY `.githooks/pre-commit`'s
+        // `npm run validate` step crashes on module load (a require error). That step
+        // has this dedicated kill-switch, and it is the exactly-right scope: the same
+        // `npm run validate` is re-run and REQUIRED on the docs-lane PR by `ci.yml`'s
+        // `lint` job. Using the targeted env instead of `--no-verify` KEEPS the two
+        // pure-bash gates active (both run fine without node_modules): the DR-029
+        // born-`proposed` gate — load-bearing, since the lane pushes
+        // `docs/decisions/DR-*.md` — and the commit-msg RCDD gate. No invariant hole.
+        await run('git', ['commit', '-m', message], { cwd: wt, env: { DR_INDEX_GATE_OFF: '1' } });
       } catch (err) {
-        // A hook (RCDD/DR-born/spec-gate) rejected the docs commit — surface it.
+        // A live hook rejection — DR-029 born-`proposed` on a bad new DR, or commit-msg
+        // RCDD on a `fix:` subject (both still run; only the deps-crashing validate step
+        // is skipped via DR_INDEX_GATE_OFF) — or a plain git error. Surface it.
         return await surface({ outcome: 'failed', error: describeError(err) });
       }
 

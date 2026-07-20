@@ -139,6 +139,15 @@ describe('Invariant 2: No backend — no network calls', () => {
     // shells `git`. Tier-0 boundary interpretation to be ratified by a DR.
     // See ruleset-advisor.ts defaultCommandRunner.
     'lib/ruleset-advisor.ts',
+    // SPEC-026 FR-2/FR-3: the presence heartbeat stamps each record with the
+    // session's `branch` (`git branch --show-current`) and `worktreeRoot`
+    // (`git rev-parse --show-toplevel`). worktreeRoot MUST be git's own canonical
+    // toplevel — it is the sync-gate discriminator the drain compares against each
+    // `git worktree list` entry, so deriving it any other way would risk a linked
+    // worktree's records colliding with the primary's and a live tree being
+    // fast-forwarded under. Local git reads, no network, never writes/pushes —
+    // same Tier-0 posture as approval.ts. See presence.ts gitOut/writeHeartbeat.
+    'lib/presence.ts',
     // SPEC-039 "Push docs via lane": the ONLY command that pushes. It shells the
     // user's authenticated `git`/`gh` to open a docs-only PR — and ONLY after an
     // explicit modal confirmation that names the network action (FR-3 / INV-1).

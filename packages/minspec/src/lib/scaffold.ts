@@ -254,6 +254,11 @@ export function findSpecDirsMissingTasksMd(rootDir: string): MissingTasksMdSpec[
 export const MINSPEC_GITIGNORE_MARKER = '# MinSpec ephemeral data';
 export const MINSPEC_GITIGNORE_ENTRIES = [
   '.minspec/session.json',
+  // SPEC-026 FR-1 / INV-1: the session-presence heartbeat directory. One file per
+  // live extension-host activation (<uuid>.session.json), refreshed every 30s,
+  // pruned on the 120s stale threshold. Process-local ephemeral state — never
+  // committed; a fresh clone must not contain it.
+  '.minspec/sessions/',
   '.minspec/calibration.json',
   // Machine-local merge-refresh drift-detection state, rebuilt on every
   // generate/refresh — must be gitignored, never committed. These mirror

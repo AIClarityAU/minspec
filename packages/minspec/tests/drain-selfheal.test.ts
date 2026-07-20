@@ -145,11 +145,18 @@ describe('dispatch-issue.sh: native auto-merge is policy-gated (DR-061)', () => 
   });
 
   it('arms `gh pr merge --auto` ONLY behind the policy gate', () => {
-    // The --auto marking must be inside a native_automerge_enabled guard.
+    // The --auto marking must sit INSIDE an open `if native_automerge_enabled; then`
+    // block. (Block-membership, not char-proximity: the #833 approvable-doc exclusion
+    // legitimately adds fail-closed + doc-check branches between the guard and the
+    // arm, so a fixed-width window would false-positive while the invariant holds.)
     const idx = DISPATCH_SRC.indexOf('--squash --auto');
     expect(idx).toBeGreaterThan(-1);
-    const before = DISPATCH_SRC.slice(Math.max(0, idx - 400), idx);
-    expect(before).toContain('native_automerge_enabled');
+    const guardIdx = DISPATCH_SRC.lastIndexOf('if native_automerge_enabled; then', idx);
+    expect(guardIdx, 'no native_automerge_enabled guard precedes the --auto arm').toBeGreaterThan(-1);
+    // No block-closing `fi` may appear between the guard and the arm (that would put
+    // the arm OUTSIDE the policy gate). Nested `if ... then` without a `fi` is fine.
+    const between = DISPATCH_SRC.slice(guardIdx, idx);
+    expect(between, 'a `fi` closes the policy gate before the --auto arm').not.toMatch(/^\s*fi\s*$/m);
   });
 });
 
@@ -251,6 +258,9 @@ describe('dispatch-issue.sh: native auto-merge deny-by-default (behavioral seam)
       fs.mkdirSync(path.join(root, '.minspec'), { recursive: true });
       fs.copyFileSync(DISPATCH, path.join(root, 'scripts', 'dispatch-issue.sh'));
       fs.copyFileSync(path.resolve(__dirname, '../../../scripts/lib/agent-egress.sh'), path.join(root, 'scripts', 'lib', 'agent-egress.sh'));
+      // dispatch-issue.sh also sources lib/docs-corpus.sh at startup (#833) — copy it
+      // too, or `source` aborts under `set -u` before the --check-native-automerge seam.
+      fs.copyFileSync(path.resolve(__dirname, '../../../scripts/lib/docs-corpus.sh'), path.join(root, 'scripts', 'lib', 'docs-corpus.sh'));
       fs.writeFileSync(path.join(root, '.minspec', 'config.json'), JSON.stringify({ version: 1 })); // no autoMerge
       expect(check({}, root)).toEqual({ code: 1, out: 'off' });
     } finally {
