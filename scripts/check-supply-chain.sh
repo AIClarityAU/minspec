@@ -10,6 +10,9 @@
 # Catalogs live in ~/.cache/bumblebee/catalogs/*.json. Empty catalog dir =
 # pre-flight inventory only (script still fails on bumblebee errors).
 #
+# BUMBLEBEE_VERSION below also pins scripts/fetch-bumblebee-catalogs.sh's
+# catalog fetch ref — bump both together, never just one (#848).
+#
 # Read-only: bumblebee never executes package managers or reads source files.
 # https://github.com/perplexityai/bumblebee
 
