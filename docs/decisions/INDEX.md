@@ -514,4 +514,12 @@ The independent AI reviewer (DR-033 §6) records a PR verdict as ai-review:{pass
 <!-- dr-summary:DR-064 auto=0000000000000000 -->
 MinSpec's layered architecture (lib never imports views/commands, @aiclarity/shared barrel-only, no runtime cycles) is held by convention alone and has already leaked — 2 lib→views inversions, 3 one-edit-away cycles, 7 vscode-coupled lib files, listSpecs living in a UI file. SPEC-040 (#690) flagged the eslint-encoded layering contract as a costly-to-reverse architectural artifact with no DR. This records the decision to machine-enforce it: eslint no-restricted-imports for direction/depth + an in-repo dependency-free cycle checker adapting next-task.ts detectCycles (resolves OQ-1); ban type edges too (OQ-2); @typescript-eslint/no-restricted-imports + parserOptions.project (OQ-3); ship error-rules green only after the FR-4/FR-5 refactors; vscode-purity at warn until #830. Gates-not-conventions (#137/DR-003), enforced offline (INV-1/DR-054), same thesis as SPEC-038/#460.
 <!-- /dr-summary:DR-064 -->
+
+## [DR-065 — The sole sanctioned exception to "never move a shared HEAD" — a drain/loop MAY fast-forward a shared checkout only on positive presence-proof that no live session claims it; absence of proof is fetch-only](DR-065.md)
+
+*Status: proposed · Date: 2026-07-17*
+
+<!-- dr-summary:DR-065 auto=0000000000000000 -->
+Two held rules contradict: rule #8 / DR-051 §4a says never move a shared checkout's HEAD (moving it under a live session strands WIP — unrecoverable, the #168 incident), while DR-051 §4c says a checkout on main but behind origin/main makes gates judge stale content — wrong verdicts (the stranded SPEC-024 approval). SPEC-026's presence layer makes occupancy observable (worktreeRoot + pid, live iff lastSeen<120s AND pid alive), so this records the one sanctioned exception: a drain MAY `merge --ff-only` a shared checkout ONLY on positive proof of dormancy — ≥1 live record exists anywhere AND none claims this worktreeRoot — because an unoccupied checkout has no live tree to disturb. Absence of proof (empty/stale/corrupt/unreadable presence dir) ⇒ occupied ⇒ fetch-only. Gated by a conjunction of four guards (on-main, content-clean, dormant, true-ff); fetch stays unconditional (read-only); fails opposite to FR-12's fail-open backstop because each gate fails toward its own cheap error. Scope is deliberately minimal (§5) — never reset/rebase/switch, never feature branches, never the Tier-0 extension.
+<!-- /dr-summary:DR-065 -->
 <!-- minspec:dr-index:end -->

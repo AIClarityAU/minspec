@@ -173,6 +173,12 @@ describe('MINSPEC_GITIGNORE_ENTRIES — coverage of machine-local state files', 
     expect(MINSPEC_GITIGNORE_ENTRIES).toContain('.minspec/template-baseline.json');
   });
 
+  // SPEC-026 INV-1: the presence heartbeat directory must be gitignored by
+  // construction — one <uuid>.session.json per live activation, never committed.
+  it('includes the session-presence directory (SPEC-026 FR-1 / INV-1)', () => {
+    expect(MINSPEC_GITIGNORE_ENTRIES).toContain('.minspec/sessions/');
+  });
+
   // ASYMMETRY GATE (durable fix): the merge-refresh state files are the source of
   // truth for their own filenames. This ties the gitignore literals back to those
   // constants, so renaming a state file without updating the ignore list — the
