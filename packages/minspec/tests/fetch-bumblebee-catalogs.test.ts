@@ -110,4 +110,23 @@ describe('fetch-bumblebee-catalogs.sh — pins catalog fetch to BUMBLEBEE_VERSIO
     const { target } = runFetch('v0.1.2');
     expect(fs.existsSync(path.join(target, 'fake-catalog.json'))).toBe(true);
   });
+
+  // #848 review (low): the v0.1.2 default is declared in BOTH scripts. CI couples
+  // them via the env var, but a LOCAL run reads each script's own literal — so the
+  // two can silently drift, which is the exact skew (#836) this fix exists to close.
+  // A comment cross-reference cannot enforce that; this gate can.
+  it('both scripts declare the SAME BUMBLEBEE_VERSION default (no literal drift)', () => {
+    const CHECK_SCRIPT = path.resolve(__dirname, '../../../scripts/check-supply-chain.sh');
+    const defaultOf = (file: string): string => {
+      const m = fs
+        .readFileSync(file, 'utf-8')
+        .match(/BUMBLEBEE_VERSION="\$\{BUMBLEBEE_VERSION:-([^}"]+)\}"/);
+      expect(m, `no BUMBLEBEE_VERSION default found in ${path.basename(file)}`).toBeTruthy();
+      return m![1];
+    };
+    const fetchDefault = defaultOf(FETCH_SCRIPT);
+    const checkDefault = defaultOf(CHECK_SCRIPT);
+    expect(fetchDefault).toBe(checkDefault);
+    // Bumping the scanner and the catalog ref is ONE change — never bump one alone.
+  });
 });
