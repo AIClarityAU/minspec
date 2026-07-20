@@ -91,6 +91,7 @@ permissions:
   statuses: write        # post the `ready-to-merge` commit status on the PR head SHA
   pull-requests: write   # remove a stale/forged `ai-review:pass` + post an audit comment
   issues: read           # read the PR's label timeline (issue events API) for pass provenance
+  checks: read           # #810 — read the head's `ai-review` verdict check-run (2nd SHA-bound witness)
   contents: read         # checkout the trusted base commit + read the head commit's timestamp
 
 jobs:
@@ -240,15 +241,28 @@ jobs:
               });
             }
 
-            // ── #466 SHA-bound witness — the CURRENT head SHA must carry
-            //    `ai-review/pass`=success from an allowlisted reviewer. This is the
-            //    EXACT recency proof the timestamp check only approximates. OPTIONAL
-            //    during rollout: enforced only when the trusted BASE guard exposes
-            //    verifyHeadPassStatus; left undefined otherwise, which decideStatus
+            // ── #466 + #810 SHA-bound witness — the CURRENT head SHA must carry a
+            //    verified proof that THIS commit is the one that was reviewed. This
+            //    is the EXACT recency proof the timestamp check only approximates.
+            //    TWO independent channels can carry it, and EITHER suffices:
+            //      • `ai-review/pass`=success commit status  (#466)
+            //      • `ai-review`=success check-run           (#810)
+            //    Both are bound to the head SHA and both are provenance-checked
+            //    against the SAME AI_REVIEW_BOT_LOGINS allowlist, so accepting
+            //    either weakens nothing — it only removes the single point of
+            //    failure that made this gate unsatisfiable repo-wide: the status
+            //    POST is best-effort and was 403'ing (the reviewer App lacks
+            //    `statuses: write`), so the sole accepted witness never existed and
+            //    every merge became an `--admin` bypass of the whole gate.
+            //    OPTIONAL during rollout: enforced only when the trusted BASE guard
+            //    exposes the verifier; left undefined otherwise, which decideStatus
             //    treats as "not required" (prior behaviour preserved).
             let headStatus; // undefined ⇒ decideStatus does not require it
+            const hasWitnessVerifier =
+              typeof guard.verifyHeadPassWitness === 'function' ||
+              typeof guard.verifyHeadPassStatus === 'function';
             if (
-              typeof guard.verifyHeadPassStatus === 'function' &&
+              hasWitnessVerifier &&
               labels.includes(guard.PASS) &&
               !provenance.revert &&
               !staleness.strip
@@ -258,14 +272,36 @@ jobs:
                   github.rest.repos.listCommitStatusesForRef,
                   { owner, repo, ref: pr.head.sha, per_page: 100 },
                 );
-                headStatus = guard.verifyHeadPassStatus({ statuses, allowlist });
+                if (typeof guard.verifyHeadPassWitness === 'function') {
+                  // #810 — also read the head's check-runs. Filtered by name at the
+                  // API so a busy head doesn't paginate needlessly; the guard
+                  // re-checks the name, the `head_sha`, the completion/conclusion
+                  // and the posting App's identity itself (never trusts this query).
+                  const checkRuns = await github.paginate(github.rest.checks.listForRef, {
+                    owner,
+                    repo,
+                    ref: pr.head.sha,
+                    check_name: guard.CHECK_NAME,
+                    per_page: 100,
+                  });
+                  headStatus = guard.verifyHeadPassWitness({
+                    statuses,
+                    checkRuns,
+                    allowlist,
+                    headSha: pr.head.sha,
+                  });
+                } else {
+                  // Base guard predates #810 — status-only witness (prior behaviour).
+                  headStatus = guard.verifyHeadPassStatus({ statuses, allowlist });
+                }
               } catch (e) {
                 core.warning(
-                  `could not read head commit statuses ${pr.head.sha}: ${e.message}`,
+                  `could not read the head witnesses for ${pr.head.sha}: ${e.message}`,
                 );
                 headStatus = {
                   verified: false,
-                  reason: 'could not read the head commit statuses to bind the pass (#466)',
+                  reason:
+                    'could not read the head commit statuses/check-runs to bind the pass (#466/#810)',
                 };
               }
             }
