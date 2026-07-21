@@ -45,8 +45,10 @@
 #   MINSPEC_SESSION_PID=<pid>      — explicit session anchor (else auto-resolved).
 #   MINSPEC_DRAIN_SELF_REFRESH=0   — run the pipeline in place from SCRIPT_DIR
 #                                    instead of a self-synced run dir (#773 opt-out).
-#   MINSPEC_DRAIN_GATED_FF=0       — disable the presence-gated fast-forward of
-#                                    dormant shared checkouts (DR-065); fetch stays.
+#   MINSPEC_DRAIN_GATED_FF=0       — disable the presence-gated sync step ENTIRELY
+#                                    (DR-065): the early return precedes the fetch, so
+#                                    neither the dormant-checkout fast-forward NOR the
+#                                    read-only origin fetch runs.
 #   MINSPEC_DRAIN_RUN_DIR=<path>   — where the self-synced run-dir worktree lives
 #                                    (default /tmp/minspec-drain-run).
 #
