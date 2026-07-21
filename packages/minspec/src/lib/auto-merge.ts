@@ -103,22 +103,42 @@ export type DecideAutoMerge = (input: AutoMergeInput) => AutoMergeDecision;
 
 // ─── FR-5 signal-name recognition sets (deny-by-default) ─────────────────────
 
+// SSOT (#824). These sets are the single source of truth for the consequence-signal
+// vocabulary, and are EXPORTED so the PRODUCE side (consequence-analyzers.ts) and the
+// INJECT side (scripts/auto-merge-gate.ts) can be bound to them by a T0 parity test
+// (signal-names-parity.test.ts) instead of a human keeping three files aligned.
+// They live HERE rather than in a separate `signal-names.ts` on purpose: SPEC-024
+// INV-6 requires this module to import only TYPES so it stays a leaf with zero
+// runtime deps, and value-importing a constants module would violate that invariant.
+
+/** The `public_api_*` names — presence ⇒ the diff touches an exported surface (FR-4a). */
+export const PUBLIC_API_NAMES: ReadonlySet<string> = new Set([
+  'public_api_added',
+  'public_api_changed',
+  'public_api_removed',
+]);
+
 /**
  * The analyzer's REAL emitted high-blast signal names (from consequence-analyzers.ts,
  * SPEC-023). A change tripping ANY of these is high-blast. Growth requires a
  * deliberate edit here — never silent drift.
+ *
+ * The `public_api_*` members are SPREAD FROM {@link PUBLIC_API_NAMES} rather than
+ * re-typed (#824, hazard A7). While the two were independent literal lists, adding a
+ * 4th `public_api_*` signal to one but not the other left
+ * `deriveTouchesExportedSurface` true while `classifyBlast` stayed low — an
+ * exported-surface change that auto-merges to main unseen, the ONLY false-green in
+ * the set. Spreading makes that state unrepresentable by construction.
  */
-const HIGH_SIGNAL_NAMES: ReadonlySet<string> = new Set([
+export const HIGH_SIGNAL_NAMES: ReadonlySet<string> = new Set([
   // FR-3 irreversibility
   'irreversible_deletion',
   'irreversible_migration',
   'destructive_schema_op',
   // FR-4 sensitive-sink
   'sensitive_sink',
-  // FR-2 public-API surface delta
-  'public_api_added',
-  'public_api_changed',
-  'public_api_removed',
+  // FR-2 public-API surface delta (derived — never re-typed; see above)
+  ...PUBLIC_API_NAMES,
   // FR-5 concurrency (its `explain` covers timer/transaction sub-patterns)
   'concurrency',
   // Defense-in-depth (BLOCKER 1 / #414): the public-API analyzer skips non-code
@@ -131,19 +151,12 @@ const HIGH_SIGNAL_NAMES: ReadonlySet<string> = new Set([
   'manifest_changed',
 ]);
 
-/** The `public_api_*` names — presence ⇒ the diff touches an exported surface (FR-4a). */
-const PUBLIC_API_NAMES: ReadonlySet<string> = new Set([
-  'public_api_added',
-  'public_api_changed',
-  'public_api_removed',
-]);
-
 /**
  * The impact-reach degrade marker (SPEC-023 FR-1). It is RECOGNIZED but is NOT
  * itself high-blast — its effect on the decision is the FR-4 condition (combined
  * with `touchesExportedSurface`). It is NOT counted toward `low` either.
  */
-const REACH_UNAVAILABLE = 'reach_unavailable';
+export const REACH_UNAVAILABLE = 'reach_unavailable';
 
 /**
  * Affirmative low-blast signal names (DR-058 / #490). A change classifies `low`
@@ -156,7 +169,25 @@ const REACH_UNAVAILABLE = 'reach_unavailable';
  * files, so no product source ships (gate-injected by `detectLowBlastDocsTest`).
  */
 export const LOW_BLAST_DOCS_TEST = 'low_blast_docs_test_only';
-const LOW_BLAST_SIGNAL_NAMES: ReadonlySet<string> = new Set([LOW_BLAST_DOCS_TEST]);
+export const LOW_BLAST_SIGNAL_NAMES: ReadonlySet<string> = new Set([LOW_BLAST_DOCS_TEST]);
+
+/**
+ * Every signal name this module RECOGNIZES — the union of high-blast, affirmative-low,
+ * and the reach-degrade marker. Anything outside it is UNKNOWN and falls to
+ * deny-by-default (`high`).
+ *
+ * Exported as the recognize-side contract for the T0 parity test (#824, hazard A8):
+ * an analyzer or gate injector that emits a name absent from this set silently loses
+ * its meaning — a forgotten HIGH fails safe (unknown ⇒ high), but a forgotten
+ * affirmative-LOW does not: the change stops classifying `low` and the PR holds
+ * forever, defeating the feature quietly. Binding emit ⊆ RECOGNIZED in CI is what
+ * makes that drift impossible rather than merely discouraged.
+ */
+export const RECOGNIZED: ReadonlySet<string> = new Set([
+  ...HIGH_SIGNAL_NAMES,
+  ...LOW_BLAST_SIGNAL_NAMES,
+  REACH_UNAVAILABLE,
+]);
 
 // ─── FR-4a `touchesExportedSurface` (DERIVED, single source of truth) ─────────
 
