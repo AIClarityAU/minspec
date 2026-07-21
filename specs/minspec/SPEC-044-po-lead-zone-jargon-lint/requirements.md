@@ -10,7 +10,8 @@ epic: EPIC-009  # Team Readiness
 depends_on: [DR-066, SPEC-013]
 relates_to: [SPEC-043, SPEC-006, SPEC-045]
 phases:
-  specify: in-progress
+  specify: done
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -36,14 +37,18 @@ SPEC-013's zone/divider and SPEC-006's vacuity detection.
 
 ## Requirements
 
-- **FR-1 (position — hard gate).** A PO-facing file MUST open with a plain-language lead zone
-  (above the SPEC-013 `core-end` divider). A missing or mis-ordered lead is an **error**
-  (deterministic; reuse the section registry).
+- **FR-1 (position — hard gate).** The PO-facing file MUST open with a plain-language lead
+  zone (above the SPEC-013 `core-end` divider). A missing or mis-ordered lead is an **error**
+  (deterministic; reuse the section registry). One rule, applied to whichever file holds PO
+  content — `requirements.md` in a split spec, or the top of a single-file
+  (SPEC-043-exempt) spec (RD-2).
 - **FR-2 (jargon — advisory).** A lint flags developer/CS jargon in the PO lead zone against
   a configurable per-audience lexicon. **Warning** severity, never a hard block.
 - **FR-3 (per-audience lexicon).** The lexicon is per-project and per-audience (MinSpec's own
-  PO is semi-technical; a marketing audience is not), seeded from the audit's recurrent terms
-  (`T0`–`T4`, file paths, `code()`, `frontmatter`, `gate`, `CI`, git internals, `hash`).
+  PO is semi-technical; a marketing audience is not). It ships with a **deterministic default
+  seed** (the audit's recurrent terms — `T0`–`T4`, file paths, `code()`, `frontmatter`,
+  `gate`, `CI`, git internals, `hash`) and lives as **project-owned data** in `.minspec/`,
+  team-curated via an add-term command; no central authority (RD-1).
 - **FR-4 (vacuity guard).** The lint must not reward empty plain-language filler: reuse the
   SPEC-006 / SPEC-013 hollow/tautology detection to warn when a lead is jargon-free but
   vacuous.
@@ -62,11 +67,16 @@ SPEC-013's zone/divider and SPEC-006's vacuity detection.
 - [ ] **AC-4 (FR-4).** A jargon-free but tautological lead warns.
 - [ ] **AC-5 (FR-6).** No UI/status renders "PO-readable ✓" from the lint.
 
-## Open Questions
+## Resolved Decisions (Clarify)
 
-- **OQ-1.** Lexicon seeding + curation — who maintains the per-audience list?
-- **OQ-2.** Does the position gate apply only within the PO file, or also define the top-zone
-  for single-file (SPEC-043-exempt) specs?
+- **RD-1 (lexicon curation) — deterministic seed + project-owned data.** Ship a default
+  jargon list (from the audit); store the per-audience lexicon as project-owned data in
+  `.minspec/`, curated by the team; MinSpec offers the seed + an add-term command. No central
+  authority — mirrors the deterministic-default-then-human-curates pattern (constitution
+  proposer / `suggestPrefixDeterministic`).
+- **RD-2 (scope) — one rule, whichever file holds PO content.** The lead-zone position gate
+  applies to `requirements.md` in a split spec and to the top of a single-file
+  (SPEC-043-exempt) spec alike: "a PO lead zone leads the PO-facing file."
 
 ## Out of scope
 

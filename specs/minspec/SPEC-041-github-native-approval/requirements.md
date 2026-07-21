@@ -10,7 +10,8 @@ epic: EPIC-006  # Trust, Consent & Supply Chain
 depends_on: [DR-066, SPEC-022, DR-056, DR-012]
 relates_to: [SPEC-042, SPEC-043]
 phases:
-  specify: in-progress
+  specify: done
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -47,15 +48,19 @@ a per-file approval already scopes each role to their own files.
   file is routed to; deny-by-default if they are not a member.
 - **FR-4 (materialise the record).** For each covered file the Action recomputes the
   canonical hash via the SPEC-022 FR-3 shared canonicalizer (Node module / Python twin)
-  and writes the committed `ApprovalRecord` attributing the reviewer's verified GitHub
-  identity (mapped to an email) — never the Action's identity. DR-056's human-not-bot gate
-  passes because `approvedBy` is the human.
+  and writes the committed `ApprovalRecord` attributing the reviewer — never the Action's
+  identity. The attributed `approvedBy` is the reviewer's GitHub-**verified** email, or
+  `<id>+<login>@users.noreply.github.com` when no verified public email exists, and the
+  record also stores `approverLogin`; reviewers of `type:"Bot"` or on the DR-056 denylist
+  are rejected (RD-1). DR-056's human-not-bot gate passes because `approvedBy` is the human.
 - **FR-5 (self-consistency).** The sidecar write is committed to the PR branch and must not
   invalidate the approval it records (sidecars are excluded from the spec content hash).
 - **FR-6 (freshness by hash, not review-state).** The committed sidecar hash is the arbiter
   of freshness. A later push changing only lifecycle fields (`status`/`phases`) must not
   invalidate; a content change invalidates per SPEC-022 — regardless of GitHub's own
-  dismiss-stale behaviour.
+  dismiss-stale behaviour. Merge is gated on a MinSpec approval **status check** computed
+  from the committed sidecar, **not** on GitHub's native review-approved state, so GitHub's
+  dismiss-stale-on-push is cosmetic and never invalidates a hash-valid approval (RD-3).
 - **FR-7 (optional, offline preserved).** The networked path is opt-in per project (enable
   the Action + CODEOWNERS). The offline `MinSpec: Approve` command remains and writes an
   identical record. No MinSpec-core file gains a network dependency — the Action lives in
@@ -83,13 +88,20 @@ a per-file approval already scopes each role to their own files.
       the identical record offline.
 - [ ] **AC-6 (FR-4).** The hash the Action computes matches the Node/Python twin byte-for-byte.
 
-## Open Questions
+## Resolved Decisions (Clarify)
 
-- **OQ-1.** GitHub identity → email mapping for `approvedBy` (verified commit email vs
-  profile email).
-- **OQ-2.** Support a `/approve` PR-comment command as a secondary ingress, or review-only?
-- **OQ-3.** Reconcile GitHub's mandatory dismiss-stale-on-push with lifecycle-only edits —
-  may require the Action to re-materialise automatically.
+- **RD-1 (identity → email).** Attribute `approvedBy` to the reviewer's GitHub-**verified**
+  email; when none is public, use the GitHub noreply `<id>+<login>@users.noreply.github.com`
+  and also store `approverLogin`, so provenance is never `unknown`. Reject `type:"Bot"`
+  reviewers and DR-056-denylisted identities. (Verified identity is *stronger* provenance
+  than the self-asserted local git email.)
+- **RD-2 (ingress) — review-only for v1.** The native *Approve* review event is the
+  canonical, CODEOWNERS-gated, hard-to-forge signal. A `/approve` PR-comment (not
+  CODEOWNERS-gated, easier to spoof) is **deferred**, keeping the surface minimal.
+- **RD-3 (dismiss-stale) — sidecar status check is the arbiter.** Merges gate on a MinSpec
+  approval status check derived from the committed sidecar, not GitHub's review-approved
+  state; GitHub's dismiss-stale-on-push is cosmetic and never invalidates a hash-valid
+  approval. No auto-re-materialise needed.
 
 ## Out of scope
 

@@ -10,7 +10,8 @@ epic: EPIC-009  # Team Readiness
 depends_on: [DR-066, SPEC-013]
 relates_to: [SPEC-041, SPEC-044, SPEC-038]
 phases:
-  specify: in-progress
+  specify: done
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -34,9 +35,12 @@ authoring gate that keeps new specs conformant, reusing SPEC-013's section machi
 
 ## Requirements
 
-- **FR-1 (audience→file map).** Define the map as data: default `requirements.md` = PO;
-  `design.md`, `tasks.md` = engineering; extensible per project/role. It is the single
-  source the validator and CODEOWNERS globs (SPEC-041) both read.
+- **FR-1 (audience→file map, single source of truth).** Define the map as data: default
+  `requirements.md` = PO; `design.md`, `tasks.md` = engineering; extensible per project/role.
+  It is **authoritative**: the SPEC-041 `CODEOWNERS` globs are **generated from it** (with a
+  validation that flags drift), so routing can never silently diverge from the map (RD-2).
+  The map is an attribute on SPEC-013's existing section registry, not a parallel registry
+  (RD-1).
 - **FR-2 (mixed-file detection).** The validator warns when a file mixes audiences — e.g.
   engineering-typed content in `requirements.md` — using the DR-053 paragraph-type signal
   where present, else a heuristic heading set.
@@ -59,11 +63,15 @@ authoring gate that keeps new specs conformant, reusing SPEC-013's section machi
 - [ ] **AC-4 (FR-6).** `MinSpec: Specify` scaffolds `requirements.md` + `design.md` +
       `tasks.md` for a T3+.
 
-## Open Questions
+## Resolved Decisions (Clarify)
 
-- **OQ-1.** Reuse SPEC-013's section registry + `core-end` divider, or a new audience registry?
-- **OQ-2.** Is the audience→file map the single source of truth for the CODEOWNERS globs
-  (SPEC-041), generated from it?
+- **RD-1 (registry) — reuse SPEC-013.** Audience is an attribute on SPEC-013's existing
+  section registry + `core-end` divider, not a parallel registry — one source, no drift
+  (the SPEC-030 two-sources-of-truth failure mode avoided).
+- **RD-2 (single source) — map is authoritative; CODEOWNERS generated from it.** The
+  audience→file map is the one source of truth; SPEC-041's `CODEOWNERS` globs are generated
+  and drift-validated from it, offline (Tier-0). Prevents routing silently diverging from
+  the map.
 
 ## Out of scope
 
