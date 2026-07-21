@@ -239,6 +239,111 @@ function verifyHeadPassStatus({ statuses, allowlist } = {}) {
   };
 }
 
+// #810 — is `slug` one of the configured reviewer identities, when the value comes
+// from a CHECK-RUN's `app.slug` rather than a user/bot login? The two GitHub
+// surfaces spell the SAME identity differently: a commit status's `creator.login`
+// for a GitHub App is `minspec-sdd[bot]`, while a check-run's `app.slug` is the
+// bare `minspec-sdd`. The allowlist (AI_REVIEW_BOT_LOGINS) is written in the
+// `[bot]` form, so accept either spelling of the same app — and ONLY those two,
+// never a prefix/substring match.
+function isAuthorizedApp(slug, allowlist) {
+  if (!slug) return false;
+  const s = String(slug).toLowerCase();
+  const list = Array.isArray(allowlist) ? allowlist : [];
+  return list.includes(s) || list.includes(`${s}[bot]`);
+}
+
+// #810 — the SECOND SHA-bound pass witness: the `ai-review` CHECK-RUN.
+//
+// WHY A SECOND WITNESS. The `ai-review/pass` commit status (verifyHeadPassStatus)
+// requires the reviewer App to hold `statuses: write`. When that permission is
+// absent every witness post 403s, and — because the post was best-effort — the
+// gate silently had NO witness to find, so `ready-to-merge` was red on EVERY PR
+// including genuine passes, making native/auto-merge impossible and every merge an
+// `--admin` bypass (#810, the #560 failure class). The reviewer App already posts
+// the `ai-review` check-run under `checks: write`, and a check-run is bound to its
+// `head_sha` exactly as a status is bound to its SHA — so it is an equally exact,
+// equally fail-closed witness on an INDEPENDENT permission. Requiring EITHER (not
+// both) removes the single point of silent failure without loosening anything:
+// each witness on its own already proves "this exact SHA was reviewed and passed,
+// attested by the allowlisted reviewer identity".
+//
+// NOT A WEAKENING: `decideReviewCheck` emits `success` ONLY for a genuine
+// `ai-review:pass` on a non-machinery PR (machinery → `neutral`, everything else →
+// `failure`/`action_required`), so a `success` conclusion carries exactly the same
+// meaning as `ai-review/pass`=success. Forging it needs the App's own credentials —
+// the same bar as forging the status.
+//
+// `checkRuns` is the check-run list for the CURRENT head SHA. `headSha`, when
+// supplied, is re-checked against each run's own `head_sha` (defence in depth
+// against a caller that queried the wrong ref).
+function verifyHeadPassCheckRun({ checkRuns, allowlist, headSha } = {}) {
+  const list = Array.isArray(allowlist) ? allowlist : [];
+  if (list.length === 0) {
+    return {
+      verified: false,
+      reason:
+        'reviewer-bot allowlist (AI_REVIEW_BOT_LOGINS) is unset — head-check-run provenance cannot be verified',
+    };
+  }
+  const ours = (Array.isArray(checkRuns) ? checkRuns : []).filter(
+    (c) => c && c.name === CHECK_NAME && (!headSha || !c.head_sha || c.head_sha === headSha),
+  );
+  if (ours.length === 0) {
+    return {
+      verified: false,
+      reason: `no \`${CHECK_NAME}\` check-run on the current head commit`,
+    };
+  }
+  // Most-recent by completion (fall back to start time, then to array order).
+  const stamp = (c) => Date.parse(c.completed_at || c.started_at || '') || 0;
+  const latest = ours.reduce((a, b) => (stamp(b) >= stamp(a) ? b : a));
+  if (latest.status !== 'completed') {
+    return {
+      verified: false,
+      reason: `\`${CHECK_NAME}\` on the current head is not completed yet`,
+    };
+  }
+  if (latest.conclusion !== 'success') {
+    return {
+      verified: false,
+      reason: `\`${CHECK_NAME}\` on the current head concluded '${sanitizeLogin(latest.conclusion)}', not success`,
+    };
+  }
+  const slug = latest.app && latest.app.slug;
+  if (!isAuthorizedApp(slug, list)) {
+    return {
+      verified: false,
+      reason: `\`${CHECK_NAME}\` on the current head was posted by \`${sanitizeLogin(slug)}\`, not an allowlisted reviewer`,
+    };
+  }
+  return {
+    verified: true,
+    reason: `\`${CHECK_NAME}\`=success check-run on the current head SHA, from an allowlisted reviewer`,
+  };
+}
+
+// #810 — the combined SHA-bound pass witness. Verified iff EITHER independent
+// witness verifies: the `ai-review/pass` commit STATUS (needs the App's
+// `statuses: write`) or the `ai-review` CHECK-RUN (needs `checks: write`). Both
+// are bound to the exact head SHA and both require the allowlisted reviewer
+// identity, so OR-ing them adds redundancy against a missing permission or a
+// transient post failure WITHOUT admitting any pass the individual checks would
+// have refused. Neither present ⇒ not verified ⇒ `ready-to-merge` stays RED.
+function verifyHeadPassWitness({ statuses, checkRuns, allowlist, headSha } = {}) {
+  const viaStatus = verifyHeadPassStatus({ statuses, allowlist });
+  if (viaStatus.verified) return { ...viaStatus, via: 'status' };
+  const viaCheck = verifyHeadPassCheckRun({ checkRuns, allowlist, headSha });
+  if (viaCheck.verified) return { ...viaCheck, via: 'check-run' };
+  return {
+    verified: false,
+    via: null,
+    // Name BOTH misses — a reader must be able to tell "the App cannot post
+    // statuses" apart from "the review never passed on this SHA".
+    reason: `${viaStatus.reason}; and ${viaCheck.reason}`,
+  };
+}
+
 // Compute the `ready-to-merge` commit status. The status is the authoritative
 // gate, so it is derived from the *decided* effective label set (pass removed if
 // it was reverted or stripped) AND from the provenance-recency verification of
@@ -255,10 +360,13 @@ function decideStatus({ labels, provenanceRevert, stalenessStrip, passProvenance
   // A surviving pass counts only if its provenance was verified upstream.
   const passVerified = passPresent && !!(passProvenance && passProvenance.verified);
   // #466 — the SHA-bound witness must ALSO confirm THIS head was the reviewed one.
-  // `headStatus` is OPTIONAL: when omitted (a caller/base guard that predates #466,
-  // during rollout) it is NOT required — behaviour is unchanged. When supplied it
-  // gates: an unverified head status blocks green even with a provenance-verified
-  // label (that is exactly the stale-pass-on-a-new-head case #466 closes).
+  // `headStatus` is the result of verifyHeadPassWitness (#810: the `ai-review/pass`
+  // STATUS *or* the `ai-review` CHECK-RUN on this SHA — either alone suffices, both
+  // absent does not). It is OPTIONAL: when omitted (a caller/base guard that
+  // predates #466, during rollout) it is NOT required — behaviour is unchanged.
+  // When supplied it gates: an unverified witness blocks green even with a
+  // provenance-verified label (exactly the stale-pass-on-a-new-head case #466
+  // closes, and the missing-witness case #810 must keep RED).
   const headVerified = headStatus === undefined ? true : !!(headStatus && headStatus.verified);
   const isGreen = passVerified && headVerified && !eff.has(CHANGES);
 
@@ -424,7 +532,11 @@ module.exports = {
   decideStalenessStrip,
   verifyPassProvenance,
   verifyHeadPassStatus,
+  verifyHeadPassCheckRun,
+  verifyHeadPassWitness,
+  isAuthorizedApp,
   PASS_STATUS_CONTEXT,
+  CHECK_NAME,
   decideStatus,
   decideReviewCheck,
   isBenignRemovalError,

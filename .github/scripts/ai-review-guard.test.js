@@ -18,7 +18,11 @@ const {
   decideStalenessStrip,
   verifyPassProvenance,
   verifyHeadPassStatus,
+  verifyHeadPassCheckRun,
+  verifyHeadPassWitness,
+  isAuthorizedApp,
   PASS_STATUS_CONTEXT,
+  CHECK_NAME,
   decideStatus,
   shouldAwaitApproval,
   AWAITING_APPROVAL,
@@ -493,6 +497,210 @@ test('decideStatus: verified label but UNVERIFIED head status → red (the #466 
 test('decideStatus: headStatus OMITTED → not required (rollout / base-guard-predates-#466 compat)', () => {
   const s = decideStatus({ labels: [PASS, 'feat'], passProvenance: VERIFIED_PROV });
   assert.equal(s.state, 'success');
+});
+
+// ── #810 verifyHeadPassCheckRun / verifyHeadPassWitness — the SECOND witness ──
+// The `ai-review/pass` STATUS needed the App's `statuses: write`; when that
+// permission was absent every post 403'd silently and `ready-to-merge` was RED on
+// EVERY genuine pass (auto-merge dead, every merge an --admin bypass). The
+// `ai-review` CHECK-RUN is an equally SHA-bound, equally App-attested witness on
+// an INDEPENDENT permission. These tests pin both halves of the contract: a
+// genuine head-bound pass greens via EITHER witness, and stale/forged still red.
+const HEAD = 'a'.repeat(40);
+const OTHER_HEAD = 'b'.repeat(40);
+const okCheck = (over = {}) => ({
+  name: CHECK_NAME,
+  status: 'completed',
+  conclusion: 'success',
+  head_sha: HEAD,
+  completed_at: '2026-07-14T10:00:00Z',
+  app: { slug: 'minspec-sdd', id: 4212099 },
+  ...over,
+});
+
+test('isAuthorizedApp: a check-run app.slug matches its `[bot]`-suffixed allowlist entry', () => {
+  assert.equal(isAuthorizedApp('minspec-sdd', BOTS), true);
+  assert.equal(isAuthorizedApp('MINSPEC-SDD', BOTS), true);
+  assert.equal(isAuthorizedApp('minspec-sdd[bot]', BOTS), true);
+});
+
+test('isAuthorizedApp: no prefix/substring matching, and empty authorizes nobody', () => {
+  assert.equal(isAuthorizedApp('minspec', BOTS), false);
+  assert.equal(isAuthorizedApp('minspec-sdd-evil', BOTS), false);
+  assert.equal(isAuthorizedApp('', BOTS), false);
+  assert.equal(isAuthorizedApp('minspec-sdd', []), false);
+});
+
+test('verifyHeadPassCheckRun: ai-review=success from the allowlisted App on this head → verified', () => {
+  const r = verifyHeadPassCheckRun({ checkRuns: [okCheck()], allowlist: BOTS, headSha: HEAD });
+  assert.equal(r.verified, true);
+});
+
+test('verifyHeadPassCheckRun: no ai-review check-run on the head → not verified', () => {
+  const r = verifyHeadPassCheckRun({
+    checkRuns: [okCheck({ name: 'lint' })],
+    allowlist: BOTS,
+    headSha: HEAD,
+  });
+  assert.equal(r.verified, false);
+});
+
+test('verifyHeadPassCheckRun: a MACHINERY PR (neutral) is NOT a pass witness — neutral/failure/action_required all red', () => {
+  for (const conclusion of ['neutral', 'failure', 'action_required', 'skipped', null]) {
+    assert.equal(
+      verifyHeadPassCheckRun({ checkRuns: [okCheck({ conclusion })], allowlist: BOTS, headSha: HEAD })
+        .verified,
+      false,
+      `conclusion=${conclusion} must not verify`,
+    );
+  }
+});
+
+test('verifyHeadPassCheckRun: an in-progress check-run is not a witness (only completed counts)', () => {
+  const r = verifyHeadPassCheckRun({
+    checkRuns: [okCheck({ status: 'in_progress', conclusion: null })],
+    allowlist: BOTS,
+    headSha: HEAD,
+  });
+  assert.equal(r.verified, false);
+});
+
+test('verifyHeadPassCheckRun: success from a NON-allowlisted app → not verified (forged witness)', () => {
+  assert.equal(
+    verifyHeadPassCheckRun({
+      checkRuns: [okCheck({ app: { slug: 'github-actions' } })],
+      allowlist: BOTS,
+      headSha: HEAD,
+    }).verified,
+    false,
+  );
+});
+
+test('verifyHeadPassCheckRun: a check-run bound to a DIFFERENT sha is not a witness for this head (stale)', () => {
+  assert.equal(
+    verifyHeadPassCheckRun({ checkRuns: [okCheck({ head_sha: OTHER_HEAD })], allowlist: BOTS, headSha: HEAD })
+      .verified,
+    false,
+  );
+});
+
+test('verifyHeadPassCheckRun: allowlist unset → not verified (fail closed)', () => {
+  assert.equal(verifyHeadPassCheckRun({ checkRuns: [okCheck()], allowlist: [], headSha: HEAD }).verified, false);
+});
+
+test('verifyHeadPassCheckRun: uses the MOST RECENT run (a later failure supersedes an earlier success)', () => {
+  const older = okCheck({ conclusion: 'success', completed_at: '2026-07-14T10:00:00Z' });
+  const newer = okCheck({ conclusion: 'failure', completed_at: '2026-07-14T11:00:00Z' });
+  assert.equal(verifyHeadPassCheckRun({ checkRuns: [older, newer], allowlist: BOTS, headSha: HEAD }).verified, false);
+  assert.equal(verifyHeadPassCheckRun({ checkRuns: [newer, older], allowlist: BOTS, headSha: HEAD }).verified, false);
+});
+
+test('#810 witness: the CHECK-RUN alone verifies when the status is missing (the App lacks statuses:write)', () => {
+  const w = verifyHeadPassWitness({ statuses: [], checkRuns: [okCheck()], allowlist: BOTS, headSha: HEAD });
+  assert.equal(w.verified, true);
+  assert.equal(w.via, 'check-run');
+});
+
+test('#810 witness: the STATUS alone verifies when the check-run is missing (the App lacks checks:write)', () => {
+  const w = verifyHeadPassWitness({ statuses: [okStatus()], checkRuns: [], allowlist: BOTS, headSha: HEAD });
+  assert.equal(w.verified, true);
+  assert.equal(w.via, 'status');
+});
+
+test('#810 witness: NEITHER witness on the head → not verified, and the reason names BOTH misses', () => {
+  const w = verifyHeadPassWitness({ statuses: [], checkRuns: [], allowlist: BOTS, headSha: HEAD });
+  assert.equal(w.verified, false);
+  assert.equal(w.via, null);
+  assert.match(w.reason, new RegExp(PASS_STATUS_CONTEXT.replace('/', '\\/')));
+  assert.match(w.reason, /check-run/);
+});
+
+test('#810 witness: a FAILING status is not rescued by a FAILING check-run (no OR-ing of red into green)', () => {
+  const w = verifyHeadPassWitness({
+    statuses: [okStatus({ state: 'failure' })],
+    checkRuns: [okCheck({ conclusion: 'failure' })],
+    allowlist: BOTS,
+    headSha: HEAD,
+  });
+  assert.equal(w.verified, false);
+});
+
+// ── #810 END-TO-END through decideStatus: the two invariants that must survive ─
+test('#810 T0: a GENUINE head-bound pass (verified label + head witness) is GREEN — the bug this fixes', () => {
+  const witness = verifyHeadPassWitness({
+    statuses: [],
+    checkRuns: [okCheck()],
+    allowlist: BOTS,
+    headSha: HEAD,
+  });
+  const s = decideStatus({
+    labels: [PASS, 'feat'],
+    passProvenance: verifyPassProvenance({
+      labelActor: 'minspec-sdd[bot]',
+      labelAppliedAt: AFTER_HEAD,
+      headCommittedAt: HEAD_AT,
+      allowlist: BOTS,
+    }),
+    headStatus: witness,
+  });
+  assert.equal(s.state, 'success');
+  assert.equal(s.description, 'AI review passed');
+});
+
+test('#810 T0 (fail-closed #1): a STALE pass — review ran on an older head, head has since moved — stays RED', () => {
+  // The label is real and bot-applied, but every witness is bound to the OLD sha,
+  // so nothing on the CURRENT head proves it was reviewed.
+  const witness = verifyHeadPassWitness({
+    statuses: [],
+    checkRuns: [okCheck({ head_sha: OTHER_HEAD })],
+    allowlist: BOTS,
+    headSha: HEAD,
+  });
+  assert.equal(witness.verified, false);
+  const s = decideStatus({
+    labels: [PASS],
+    passProvenance: { verified: true, reason: 'bot-applied' },
+    headStatus: witness,
+  });
+  assert.equal(s.state, 'failure');
+  assert.match(s.description, /not bound to this commit/i);
+});
+
+test('#810 T0 (fail-closed #2): a FORGED hand-set ai-review:pass with no real review stays RED', () => {
+  // A human hand-applies the label (#397/#200): provenance fails AND no witness
+  // exists on the head — a forger can produce neither, since both require the App.
+  const prov = verifyPassProvenance({
+    labelActor: 'some-human',
+    labelAppliedAt: AFTER_HEAD,
+    headCommittedAt: HEAD_AT,
+    allowlist: BOTS,
+  });
+  const witness = verifyHeadPassWitness({ statuses: [], checkRuns: [], allowlist: BOTS, headSha: HEAD });
+  assert.equal(prov.verified, false);
+  assert.equal(witness.verified, false);
+  const s = decideStatus({ labels: [PASS], passProvenance: prov, headStatus: witness });
+  assert.equal(s.state, 'failure');
+});
+
+test('#810 T0 (fail-closed #3): a head witness can NEVER green a pass whose label provenance failed', () => {
+  // Even with a perfect, allowlisted, head-bound witness, an unverified label
+  // (e.g. applied by a human after a real bot review of the same sha) is red —
+  // the two checks are AND-ed, never OR-ed.
+  const s = decideStatus({
+    labels: [PASS],
+    passProvenance: { verified: false, reason: 'applied by a human' },
+    headStatus: verifyHeadPassWitness({ statuses: [okStatus()], checkRuns: [okCheck()], allowlist: BOTS, headSha: HEAD }),
+  });
+  assert.equal(s.state, 'failure');
+});
+
+test('#810 T0 (fail-closed #4): ai-review:changes still beats a perfect witness', () => {
+  const s = decideStatus({
+    labels: [PASS, CHANGES],
+    passProvenance: { verified: true },
+    headStatus: verifyHeadPassWitness({ statuses: [okStatus()], checkRuns: [okCheck()], allowlist: BOTS, headSha: HEAD }),
+  });
+  assert.equal(s.state, 'failure');
 });
 
 // ── DR-063 / SPEC-031 FR-9a — awaiting-approval "your turn" queue signal ──────

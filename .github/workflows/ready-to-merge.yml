@@ -86,9 +86,27 @@ on:
     # Every `pull_request` event carries `pull_request.base.sha`, which the
     # self-forge defence pins the checkout to (see SECURITY above).
     types: [opened, synchronize, reopened, labeled, unlabeled]
+  # #810 — RE-EVALUATE WHEN THE WITNESS LANDS. The SHA-bound pass witness is
+  # posted by the ai-review run, but posting a commit status or a check-run emits
+  # NO `pull_request` event. So on a stable head (no further pushes, no further
+  # label changes) nothing re-ran this gate after the witness appeared, and a
+  # genuine pass could stay RED forever — auto-merge dead, every merge an
+  # `--admin` bypass. Re-running on the reviewer workflow's completion closes
+  # that: the witness is always in place by then (the whole run is finished).
+  #
+  # SAFE BY CONSTRUCTION: a `workflow_run` job runs the workflow file from the
+  # DEFAULT BRANCH, never the PR's, so the self-forge defence is if anything
+  # stronger here. And the run takes the VERIFY-ONLY path (`action` is neither
+  # `labeled` nor `synchronize`, so neither active guard fires) — it can only
+  # green a pass that independently re-verifies provenance AND the head witness,
+  # exactly as the `pull_request` path does. It cannot fabricate either.
+  workflow_run:
+    workflows: ["ai-review-runner"]
+    types: [completed]
 
 permissions:
-  statuses: write        # post the `ready-to-merge` commit status on the PR head SHA
+  statuses: write        # post the `ready-to-merge` commit status on the PR head SHA (and read the head's `ai-review/pass` witness)
+  checks: read           # read the head's `ai-review` check-run — the second SHA-bound pass witness (#810)
   pull-requests: write   # remove a stale/forged `ai-review:pass` + post an audit comment
   issues: read           # read the PR's label timeline (issue events API) for pass provenance
   contents: read         # checkout the trusted base commit + read the head commit's timestamp
@@ -97,6 +115,61 @@ jobs:
   ready-to-merge:
     runs-on: ubuntu-latest
     steps:
+      # ── #810 — resolve WHICH PR this run is gating, before any checkout ─────
+      # On `pull_request` the payload IS the answer (unchanged behaviour: the
+      # GitHub-signed `pull_request.base.sha` still pins the checkout). On the
+      # `workflow_run` re-evaluation there is no PR in the payload, so resolve it
+      # from the reviewer run's head SHA and read the AUTHORITATIVE, CURRENT PR
+      # from the API — never from the (possibly stale) workflow_run snapshot, so
+      # a head that moved since the review is evaluated against its NEW head and
+      # correctly finds no witness. Nothing here trusts PR-authored text: only a
+      # PR number and GitHub-assigned commit SHAs leave this step, and they are
+      # consumed via `env:`/action inputs, never interpolated into a shell.
+      # `found=false` (no open PR for that SHA, or an ambiguous match) simply
+      # skips the remaining steps — this trigger is an EXTRA re-evaluation, so
+      # skipping never greens anything and never reds anything.
+      - name: Resolve the PR under evaluation
+        id: resolve
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const skip = (why) => {
+              core.notice(`ready-to-merge: no PR to evaluate — ${why}`);
+              core.setOutput('found', 'false');
+            };
+
+            if (context.eventName === 'pull_request') {
+              const pr = context.payload.pull_request;
+              core.setOutput('found', 'true');
+              core.setOutput('pr_number', String(pr.number));
+              core.setOutput('base_sha', pr.base.sha);
+              return;
+            }
+
+            const wr = context.payload.workflow_run || {};
+            let number = (wr.pull_requests || []).map((p) => p.number)[0];
+            if (!number && wr.head_sha) {
+              // `workflow_run.pull_requests` is empty for some (notably fork)
+              // runs — fall back to the SHA→PR association.
+              const { data } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                owner,
+                repo,
+                commit_sha: wr.head_sha,
+              });
+              const open = data.filter((p) => p.state === 'open');
+              // Exactly one open PR, or we cannot tell which one this run gated.
+              if (open.length === 1) number = open[0].number;
+              else if (open.length > 1) return skip('the reviewed commit belongs to several open PRs');
+            }
+            if (!number) return skip('the reviewer run is not associated with an open PR');
+
+            const { data: pr } = await github.rest.pulls.get({ owner, repo, pull_number: number });
+            if (pr.state !== 'open') return skip(`PR #${number} is not open`);
+            core.setOutput('found', 'true');
+            core.setOutput('pr_number', String(pr.number));
+            core.setOutput('base_sha', pr.base.sha);
+
       # ── Fail closed if we cannot pin the checkout to a trusted base commit ──
       # The guard script is `require`d from the checked-out tree and IS the
       # security decision, so it must come from the trusted base — never the PR's
@@ -106,11 +179,12 @@ jobs:
       # (not interpolated into the script body) — injection-safe, and it is a
       # GitHub-assigned commit id, not attacker free-text.
       - name: Require a trusted base commit
+        if: steps.resolve.outputs.found == 'true'
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ steps.resolve.outputs.base_sha }}
         run: |
           if [ -z "$BASE_SHA" ]; then
-            echo "::error::No pull_request.base.sha to pin the checkout — refusing to run the guard against an unpinned tree (fail closed)."
+            echo "::error::No base SHA to pin the checkout — refusing to run the guard against an unpinned tree (fail closed)."
             exit 1
           fi
 
@@ -119,13 +193,17 @@ jobs:
       # file cannot influence its own gate (self-forge defence, see SECURITY).
       # persist-credentials:false keeps the token out of git config (never pushes).
       - uses: actions/checkout@v5
+        if: steps.resolve.outputs.found == 'true'
         with:
-          ref: ${{ github.event.pull_request.base.sha }}
+          ref: ${{ steps.resolve.outputs.base_sha }}
           persist-credentials: false
 
       - name: Enforce ai-review label integrity and reflect the merge gate
+        if: steps.resolve.outputs.found == 'true'
         uses: actions/github-script@v7
         env:
+          # The PR resolved above — a number, used only as a typed API argument.
+          PR_NUMBER: ${{ steps.resolve.outputs.pr_number }}
           # Built-in token; scoped by the permissions block above.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Allowlist of logins permitted to apply ai-review:* labels. Configured
@@ -134,8 +212,27 @@ jobs:
         with:
           script: |
             const path = require('path');
-            const pr = context.payload.pull_request;
             const { owner, repo } = context.repo;
+
+            // ── The PR under evaluation, and the ACTION that drives the two
+            //    active guards. On `pull_request` both come from the signed
+            //    webhook payload (unchanged). On the #810 `workflow_run`
+            //    re-evaluation we re-read the PR from the API and use a synthetic
+            //    action that is neither `labeled` nor `synchronize`, so
+            //    decideProvenanceRevert / decideStalenessStrip BOTH decline —
+            //    this path only ever VERIFIES, it never reverts, strips, or
+            //    fabricates provenance.
+            let pr = context.payload.pull_request;
+            let action = context.payload.action;
+            if (!pr) {
+              const { data } = await github.rest.pulls.get({
+                owner,
+                repo,
+                pull_number: Number(process.env.PR_NUMBER),
+              });
+              pr = data;
+              action = 'workflow_run';
+            }
 
             // ── Load the guard from the TRUSTED BASE tree (self-forge defence) ─
             // If it is missing/unreadable — e.g. before the branch that adds the
@@ -162,7 +259,6 @@ jobs:
               return;
             }
 
-            const action = context.payload.action;
             const labels = (pr.labels || []).map((l) => l.name);
             // The just-added label (labeled events) and the actor who added it.
             const addedLabel = context.payload.label && context.payload.label.name;
@@ -240,15 +336,27 @@ jobs:
               });
             }
 
-            // ── #466 SHA-bound witness — the CURRENT head SHA must carry
-            //    `ai-review/pass`=success from an allowlisted reviewer. This is the
-            //    EXACT recency proof the timestamp check only approximates. OPTIONAL
-            //    during rollout: enforced only when the trusted BASE guard exposes
-            //    verifyHeadPassStatus; left undefined otherwise, which decideStatus
+            // ── #466 + #810 SHA-bound witness — the CURRENT head SHA must carry a
+            //    pass witness from an allowlisted reviewer: EITHER the
+            //    `ai-review/pass` commit STATUS (App `statuses: write`) OR the
+            //    `ai-review` CHECK-RUN concluded `success` (App `checks: write`).
+            //    Either alone is an exact recency proof that THIS commit was
+            //    reviewed and passed — the proof the timestamp check only
+            //    approximates. Two witnesses on two independent App permissions
+            //    remove #810's single point of silent failure (a missing
+            //    `statuses: write` made the sole witness un-postable, so the gate
+            //    was red on every genuine pass) without admitting anything either
+            //    check alone would refuse. Neither present ⇒ RED.
+            //    OPTIONAL during rollout: enforced only when the trusted BASE guard
+            //    exposes the verifier; left undefined otherwise, which decideStatus
             //    treats as "not required" (prior behaviour preserved).
+            const verifyWitness =
+              typeof guard.verifyHeadPassWitness === 'function'
+                ? guard.verifyHeadPassWitness
+                : guard.verifyHeadPassStatus; // pre-#810 base guard: status only
             let headStatus; // undefined ⇒ decideStatus does not require it
             if (
-              typeof guard.verifyHeadPassStatus === 'function' &&
+              typeof verifyWitness === 'function' &&
               labels.includes(guard.PASS) &&
               !provenance.revert &&
               !staleness.strip
@@ -258,14 +366,31 @@ jobs:
                   github.rest.repos.listCommitStatusesForRef,
                   { owner, repo, ref: pr.head.sha, per_page: 100 },
                 );
-                headStatus = guard.verifyHeadPassStatus({ statuses, allowlist });
+                // The check-run list is only needed by the #810-aware verifier;
+                // an empty array keeps the pre-#810 fallback behaving as before.
+                let checkRuns = [];
+                if (guard.verifyHeadPassWitness) {
+                  checkRuns = await github.paginate(github.rest.checks.listForRef, {
+                    owner,
+                    repo,
+                    ref: pr.head.sha,
+                    per_page: 100,
+                  });
+                }
+                headStatus = verifyWitness({
+                  statuses,
+                  checkRuns,
+                  allowlist,
+                  headSha: pr.head.sha,
+                });
               } catch (e) {
                 core.warning(
-                  `could not read head commit statuses ${pr.head.sha}: ${e.message}`,
+                  `could not read the head commit's pass witnesses ${pr.head.sha}: ${e.message}`,
                 );
                 headStatus = {
                   verified: false,
-                  reason: 'could not read the head commit statuses to bind the pass (#466)',
+                  reason:
+                    'could not read the head commit witnesses to bind the pass (#466/#810)',
                 };
               }
             }

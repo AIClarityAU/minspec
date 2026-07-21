@@ -94,13 +94,19 @@
 #      `pull-requests: write` + `issues: write` (labels/comments use the issues
 #      API) + `checks: write` (the honest `ai-review` verdict check-run) +
 #      `statuses: write` (#466 — the SHA-bound `ai-review/pass` commit status the
-#      bot posts on the reviewed head SHA; ready-to-merge REQUIRES it on the current
-#      head, so the pass is bound to the exact commit reviewed). If `checks: write`
-#      is absent the review still works — the verdict check is simply not posted
-#      (best-effort), never a false green. If `statuses: write` is absent the bot
-#      cannot post `ai-review/pass`, so ready-to-merge stays RED (fail-closed) until
-#      the App is granted it — deny-by-default, never a false green (same posture as
-#      an unset `AI_REVIEW_BOT_LOGINS`).
+#      bot posts on the reviewed head SHA; ready-to-merge REQUIRES a witness on the
+#      current head, so the pass is bound to the exact commit reviewed).
+#      #810 — THE TWO SHA-BOUND WITNESSES ARE REDUNDANT, NOT SEQUENTIAL. The
+#      `ai-review/pass` STATUS (`statuses: write`) and the `ai-review` CHECK-RUN
+#      (`checks: write`) are each, on their own, an exact "this SHA was reviewed and
+#      passed" proof from the App; ready-to-merge accepts EITHER. That matters
+#      because when `statuses: write` was missing, the sole witness 403'd silently
+#      on every run and `ready-to-merge` was RED on every genuine pass — auto-merge
+#      dead, every merge an `--admin` bypass. Grant BOTH so one missing permission
+#      degrades to redundancy rather than a repo-wide outage. If NEITHER can be
+#      posted the run now FAILS LOUDLY and withdraws the pass (see the witness-or-
+#      fail block in the final step) — deny-by-default, never a false green, and
+#      never again a silent one.
 #   3. AFTER a verified run: set repo variable `AI_REVIEW_BOT_LOGINS =
 #      minspec-sdd[bot]` (so ready-to-merge.yml trusts ONLY the bot) and add the
 #      `ai-review` verdict check as a REQUIRED check in the branch ruleset
@@ -502,6 +508,7 @@ jobs:
       # Post + label AS THE BOT. GH_TOKEN = App token (this is the ONLY step, with
       # the fail-closed one, that holds it). No CLAUDE_CODE_OAUTH_TOKEN here.
       - name: Post verdict + apply label as minspec-sdd[bot]
+        id: post
         if: steps.guard.outputs.configured == 'true'
         env:
           GH_TOKEN: ${{ steps.app-token.outputs.token }}
@@ -537,18 +544,58 @@ jobs:
           # ── #466 SHA-bound pass witness ──────────────────────────────────────
           # Post `ai-review/pass` on the EXACT head SHA this review evaluated,
           # BEFORE applying the label. ready-to-merge fires on the `labeled` event
-          # and requires this status on the CURRENT head, so posting it first means
-          # the SHA-bound witness is present when the gate reads it — closing the
-          # TOCTOU where a stale label from an older head could green a newer,
-          # unreviewed head. `success` ONLY on a genuine pass; every other verdict
-          # (changes / blocked) posts `failure`, so the head SHA always carries a
-          # definitive verdict. Best-effort: a failed post leaves NO status ⇒
-          # ready-to-merge stays red (fail-closed), never a false green.
+          # and requires a witness on the CURRENT head, so posting it FIRST means
+          # the SHA-bound witness is already there when the gate reads it — closing
+          # the TOCTOU where a stale label from an older head could green a newer,
+          # unreviewed head. THIS ORDERING IS LOAD-BEARING (#466): never move the
+          # witness post after the `gh pr edit --add-label` below.
+          # `success` ONLY on a genuine pass; every other verdict (changes /
+          # blocked) posts `failure`, so the head SHA always carries a definitive
+          # verdict.
+          #
+          # #810 — NOT best-effort any more. This post used to end in `|| true`,
+          # so when the App lacked `statuses: write` every attempt 403'd SILENTLY:
+          # the label landed, the witness never did, and `ready-to-merge` was RED on
+          # every genuine pass — auto-merge dead repo-wide, every merge an `--admin`
+          # bypass (the #560 failure class). Fail-closed was preserved (no witness ⇒
+          # red) but the FAILURE WAS INVISIBLE, which is the actual defect. So now:
+          # retry transient errors, READ THE STATUS BACK to confirm it landed, and
+          # record the outcome for the witness-or-fail check in the final step.
+          # A permission error (403) is not transient — stop retrying immediately.
           if [ "$LABEL" = "ai-review:pass" ]; then PASS_STATE=success; else PASS_STATE=failure; fi
-          gh api "repos/$REPO/statuses/$PR_HEAD_SHA" \
-            -f state="$PASS_STATE" \
-            -f context="ai-review/pass" \
-            -f description="ai-review verdict: $LABEL (bound to this commit)" >/dev/null || true
+          STATUS_WITNESS=no
+          for attempt in 1 2 3; do
+            if gh api "repos/$REPO/statuses/$PR_HEAD_SHA" \
+                 -f state="$PASS_STATE" \
+                 -f context="ai-review/pass" \
+                 -f description="ai-review verdict: $LABEL (bound to this commit)" \
+                 >/dev/null 2>"$RUNNER_TEMP/status-err.txt"; then
+              STATUS_WITNESS=yes
+              break
+            fi
+            ERR="$(cat "$RUNNER_TEMP/status-err.txt" 2>/dev/null || true)"
+            echo "::warning title=ai-review/pass status post failed (attempt $attempt)::$ERR"
+            case "$ERR" in
+              *"Resource not accessible"*|*"Not Found"*|*"Bad credentials"*)
+                echo "::warning::Not a transient error — the minspec-sdd App is missing \`statuses: write\`. Skipping retries; the \`ai-review\` check-run is the fallback witness (#810)."
+                break
+                ;;
+            esac
+            sleep $((attempt * 3))
+          done
+
+          # Read back: a 2xx is not proof the status is visible on the SHA. The
+          # statuses endpoint returns newest-first, so `.[0]` is the effective one
+          # — exactly what ready-to-merge's verifier will resolve to.
+          if [ "$STATUS_WITNESS" = "yes" ]; then
+            READBACK="$(gh api "repos/$REPO/commits/$PR_HEAD_SHA/statuses" \
+              --jq 'map(select(.context == "ai-review/pass")) | .[0].state // ""' 2>/dev/null || true)"
+            if [ "$READBACK" != "$PASS_STATE" ]; then
+              echo "::warning title=ai-review/pass status not readable back::Posted, but the effective status on $PR_HEAD_SHA reads '$READBACK', not '$PASS_STATE'."
+              STATUS_WITNESS=no
+            fi
+          fi
+          echo "status_witness=$STATUS_WITNESS" >> "$GITHUB_OUTPUT"
 
           # Apply the decided label FIRST (load-bearing), then clear the other two
           # verdict labels + the in-progress marker (tolerate their absence).
@@ -655,6 +702,11 @@ jobs:
           # divergent definition. Empty/missing (review step never completed)
           # defaults to "false" below, never a false machinery exemption.
           IS_MACHINERY: ${{ steps.review.outputs.is_machinery }}
+          # #810 — the PR to annotate, and whether the FIRST witness (the
+          # `ai-review/pass` commit status, posted before the label) actually
+          # landed. Empty when the post step never ran → treated as "no".
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          STATUS_WITNESS: ${{ steps.post.outputs.status_witness }}
         run: |
           set -uo pipefail
           if [ -z "${GH_TOKEN:-}" ]; then
@@ -688,9 +740,56 @@ jobs:
             echo "::warning title=ai-review check not posted::Could not compute the verdict check-run body. The label/comment remain authoritative."
             exit 0
           fi
-          # POST the check-run on the PR head SHA as the bot. Best-effort: a failure
-          # (e.g. the App lacks `checks: write`) must NOT red the run.
-          if ! gh api -X POST "repos/$REPO/check-runs" --input "$BODY" >/dev/null; then
-            echo "::warning title=ai-review check not posted::Posting the ai-review verdict check-run failed (grant the minspec-sdd App \`checks: write\`). The label/comment remain authoritative."
+          # POST the check-run on the PR head SHA as the bot, with retries. #810:
+          # this check-run is now also the SECOND SHA-bound pass witness that
+          # ready-to-merge accepts (it is bound to `head_sha` exactly as a commit
+          # status is bound to its SHA, and carries the App's own identity), so a
+          # silently-dropped post is no longer merely cosmetic.
+          CHECK_WITNESS=no
+          for attempt in 1 2 3; do
+            if gh api -X POST "repos/$REPO/check-runs" --input "$BODY" >/dev/null 2>"$RUNNER_TEMP/check-err.txt"; then
+              CHECK_WITNESS=yes
+              break
+            fi
+            ERR="$(cat "$RUNNER_TEMP/check-err.txt" 2>/dev/null || true)"
+            echo "::warning title=ai-review check-run post failed (attempt $attempt)::$ERR"
+            case "$ERR" in
+              *"Resource not accessible"*|*"Not Found"*|*"Bad credentials"*)
+                echo "::warning::Not a transient error — grant the minspec-sdd App \`checks: write\`."
+                break
+                ;;
+            esac
+            sleep $((attempt * 3))
+          done
+
+          # Read back: confirm the check-run is actually visible on the head SHA
+          # with the conclusion we posted — a 2xx alone is not proof.
+          if [ "$CHECK_WITNESS" = "yes" ]; then
+            WANT="$(node -e 'const g=require(process.env.GITHUB_WORKSPACE+"/.github/scripts/ai-review-guard.js");process.stdout.write(g.decideReviewCheck(process.env.VERDICT_LABEL||"",process.env.IS_MACHINERY==="true").conclusion)')"
+            GOT="$(gh api "repos/$REPO/commits/$HEAD_SHA/check-runs" \
+              --jq '.check_runs | map(select(.name == "ai-review")) | .[0].conclusion // ""' 2>/dev/null || true)"
+            if [ "$GOT" != "$WANT" ]; then
+              echo "::warning title=ai-review check-run not readable back::Posted, but the check-run on $HEAD_SHA reads '$GOT', not '$WANT'."
+              CHECK_WITNESS=no
+            fi
+          fi
+
+          # ── #810 WITNESS-OR-FAIL (the silent-failure path, closed) ───────────
+          # A `pass` verdict with NO SHA-bound witness on the head is exactly the
+          # state that made `ready-to-merge` permanently RED while everything else
+          # looked green. The gate is right to stay red (fail-closed), but the
+          # condition must never again be SILENT. If the verdict is `pass` and
+          # NEITHER witness landed, make the state honest and loud: strip the
+          # (now unusable) pass, fail closed to `changes`, explain in a comment,
+          # and red the run. Non-pass verdicts need no witness-or-fail — the gate
+          # is already red for them, so a missing witness changes nothing.
+          if [ "$VERDICT_LABEL" = "ai-review:pass" ] \
+             && [ "${STATUS_WITNESS:-no}" != "yes" ] && [ "$CHECK_WITNESS" != "yes" ]; then
+            echo "::error title=AI review passed but no SHA-bound witness could be posted::Neither the \`ai-review/pass\` commit status nor the \`ai-review\` check-run could be written to $HEAD_SHA, so \`ready-to-merge\` cannot go green (#810). Grant the minspec-sdd GitHub App \`statuses: write\` AND \`checks: write\` on this repo's installation, then re-run this workflow."
+            gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$(printf '## 🤖 AI review — witness could not be posted (fail-closed)\n\nThe independent review **passed**, but neither SHA-bound pass witness could be written to `%s`:\n\n- `ai-review/pass` commit status — needs the `minspec-sdd` App to hold **`statuses: write`**\n- `ai-review` check-run — needs **`checks: write`**\n\nWithout a witness bound to this commit, `ready-to-merge` stays RED by design (#466/#810), so the pass label would be unusable and misleading. It has been withdrawn and this PR is marked `ai-review:changes` until the App permissions are granted and the review is re-run.\n\n_Posted by minspec-sdd[bot]._' "$HEAD_SHA")" 2>/dev/null || true
+            gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "ai-review:pass" 2>/dev/null || true
+            gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label "ai-review:changes" 2>/dev/null || true
+            gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+            exit 1
           fi
           exit 0
