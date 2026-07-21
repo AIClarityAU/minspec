@@ -45,6 +45,10 @@
 #   MINSPEC_SESSION_PID=<pid>      — explicit session anchor (else auto-resolved).
 #   MINSPEC_DRAIN_SELF_REFRESH=0   — run the pipeline in place from SCRIPT_DIR
 #                                    instead of a self-synced run dir (#773 opt-out).
+#   MINSPEC_DRAIN_GATED_FF=0       — disable the presence-gated sync step ENTIRELY
+#                                    (DR-065): the early return precedes the fetch, so
+#                                    neither the dormant-checkout fast-forward NOR the
+#                                    read-only origin fetch runs.
 #   MINSPEC_DRAIN_RUN_DIR=<path>   — where the self-synced run-dir worktree lives
 #                                    (default /tmp/minspec-drain-run).
 #
@@ -220,7 +224,9 @@ sync_shared_checkouts() {
   db="$(git -C "$PRIMARY_ROOT" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)"
   db="${db:-main}"                                   # origin/HEAD often unset locally → main
   origin_ref="origin/${db}"
-  git -C "$PRIMARY_ROOT" fetch origin "$db" -q 2>/dev/null || true   # read-only; safe on occupied trees
+  # GIT_TERMINAL_PROMPT=0: this loop is disowned/background — a checkout without
+  # cached credentials must fail fast, never block the cycle on a hidden prompt.
+  GIT_TERMINAL_PROMPT=0 git -C "$PRIMARY_ROOT" fetch origin "$db" -q 2>/dev/null || true   # read-only; safe on occupied trees
   origin_sha="$(git -C "$PRIMARY_ROOT" rev-parse "$origin_ref" 2>/dev/null)" || return 0
   [[ -n "$origin_sha" ]] || return 0
 
@@ -304,7 +310,7 @@ ensure_fresh_run_dir() {
         return 0 ;;
   esac
 
-  git -C "$PRIMARY_ROOT" fetch origin main -q 2>/dev/null || true
+  GIT_TERMINAL_PROMPT=0 git -C "$PRIMARY_ROOT" fetch origin main -q 2>/dev/null || true
 
   # (Re)create the worktree if it is missing or not a usable checkout. Use git's own
   # worktree removal (not a blind rm) to unregister a stale/broken one; only rm a
