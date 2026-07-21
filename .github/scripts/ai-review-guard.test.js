@@ -18,6 +18,8 @@ const {
   decideStalenessStrip,
   verifyPassProvenance,
   verifyHeadPassStatus,
+  verifyHeadPassCheckRun,
+  verifyHeadPassWitness,
   PASS_STATUS_CONTEXT,
   decideStatus,
   shouldAwaitApproval,
@@ -493,6 +495,148 @@ test('decideStatus: verified label but UNVERIFIED head status → red (the #466 
 test('decideStatus: headStatus OMITTED → not required (rollout / base-guard-predates-#466 compat)', () => {
   const s = decideStatus({ labels: [PASS, 'feat'], passProvenance: VERIFIED_PROV });
   assert.equal(s.state, 'success');
+});
+
+// ── #810 verifyHeadPassCheckRun / verifyHeadPassWitness — the SECOND witness ──
+// #466's `ai-review/pass` commit status was the SOLE witness the gate would
+// accept. Its post is best-effort (`|| true`) and was returning HTTP 403
+// ("Resource not accessible by integration" — the App lacks `statuses: write`),
+// so the witness was NEVER written while the `ai-review:pass` label still landed:
+// `ready-to-merge` was unsatisfiable repo-wide and every merge became an --admin
+// bypass. The `ai-review` CHECK-RUN is posted successfully by the same App on the
+// same head SHA and is an equally strong witness — intrinsically SHA-bound
+// (`head_sha`) and carrying a server-attested App identity — so the gate accepts
+// EITHER. Neither witness is weakened: absence of both is still red.
+const HEAD_SHA = 'a1b2c3d4e5f60718293a4b5c6d7e8f9012345678';
+const OTHER_SHA = '0000000000000000000000000000000000000000';
+const okCheckRun = (over = {}) => ({
+  name: 'ai-review',
+  head_sha: HEAD_SHA,
+  status: 'completed',
+  conclusion: 'success',
+  completed_at: '2026-07-14T10:00:00Z',
+  app: { slug: 'minspec-sdd' },
+  ...over,
+});
+
+// ── T0 (#810) — the headline invariant this bug violated ─────────────────────
+test('#810 T0: verified fresh ai-review:pass bound to head via the check-run (no ai-review/pass status) → gate greens + awaiting-approval', () => {
+  const witness = verifyHeadPassWitness({
+    statuses: [], // the 403'd best-effort status never landed — the bug
+    checkRuns: [okCheckRun()],
+    allowlist: BOTS,
+    headSha: HEAD_SHA,
+  });
+  assert.equal(witness.verified, true);
+
+  const s = decideStatus({ labels: [PASS], passProvenance: VERIFIED_PROV, headStatus: witness });
+  assert.equal(s.state, 'success');
+  // DR-063 / #817 — the "my turn" signal must start working off this green.
+  assert.equal(shouldAwaitApproval({ statusState: s.state, autoMergeArmed: false }), true);
+});
+
+test('#810: the ai-review/pass STATUS alone still verifies (the #466 witness is unchanged)', () => {
+  const w = verifyHeadPassWitness({
+    statuses: [okStatus()],
+    checkRuns: [],
+    allowlist: BOTS,
+    headSha: HEAD_SHA,
+  });
+  assert.equal(w.verified, true);
+});
+
+test('#810: NEITHER witness on head → not verified (stale/absent pass stays red — #466 hole not reopened)', () => {
+  const w = verifyHeadPassWitness({ statuses: [], checkRuns: [], allowlist: BOTS, headSha: HEAD_SHA });
+  assert.equal(w.verified, false);
+  assert.match(w.reason, /not bound|no .*witness|does not correspond/i);
+});
+
+test('#810: check-run on a DIFFERENT head_sha → not verified (SHA-binding, #466/#776)', () => {
+  assert.equal(
+    verifyHeadPassCheckRun({ checkRuns: [okCheckRun({ head_sha: OTHER_SHA })], allowlist: BOTS, headSha: HEAD_SHA })
+      .verified,
+    false,
+  );
+});
+
+test('#810: check-run conclusion=neutral (machinery self-exemption) is NOT a pass witness', () => {
+  assert.equal(
+    verifyHeadPassCheckRun({ checkRuns: [okCheckRun({ conclusion: 'neutral' })], allowlist: BOTS, headSha: HEAD_SHA })
+      .verified,
+    false,
+  );
+});
+
+test('#810: check-run conclusion=failure/action_required is NOT a pass witness', () => {
+  for (const conclusion of ['failure', 'action_required', 'cancelled', null]) {
+    assert.equal(
+      verifyHeadPassCheckRun({ checkRuns: [okCheckRun({ conclusion })], allowlist: BOTS, headSha: HEAD_SHA }).verified,
+      false,
+      `conclusion=${conclusion} must not verify`,
+    );
+  }
+});
+
+test('#810: check-run still in progress (status!=completed) is NOT a pass witness', () => {
+  assert.equal(
+    verifyHeadPassCheckRun({
+      checkRuns: [okCheckRun({ status: 'in_progress', conclusion: null })],
+      allowlist: BOTS,
+      headSha: HEAD_SHA,
+    }).verified,
+    false,
+  );
+});
+
+test('#810: check-run from a NON-allowlisted App → not verified (forged by another app/workflow, #397)', () => {
+  // A PR-authored workflow can post a check-run named `ai-review`, but its App
+  // identity is `github-actions`, never the reviewer App — provenance rejects it.
+  assert.equal(
+    verifyHeadPassCheckRun({
+      checkRuns: [okCheckRun({ app: { slug: 'github-actions' } })],
+      allowlist: BOTS,
+      headSha: HEAD_SHA,
+    }).verified,
+    false,
+  );
+});
+
+test('#810: a check-run with some OTHER name is not the ai-review witness', () => {
+  assert.equal(
+    verifyHeadPassCheckRun({ checkRuns: [okCheckRun({ name: 'build' })], allowlist: BOTS, headSha: HEAD_SHA })
+      .verified,
+    false,
+  );
+});
+
+test('#810: allowlist unset → neither witness verifies (deny-by-default)', () => {
+  assert.equal(verifyHeadPassCheckRun({ checkRuns: [okCheckRun()], allowlist: [], headSha: HEAD_SHA }).verified, false);
+  assert.equal(
+    verifyHeadPassWitness({ statuses: [okStatus()], checkRuns: [okCheckRun()], allowlist: [], headSha: HEAD_SHA })
+      .verified,
+    false,
+  );
+});
+
+test('#810: uses the MOST RECENT ai-review check-run (a later failure supersedes an earlier success, either order)', () => {
+  const older = okCheckRun({ conclusion: 'success', completed_at: '2026-07-14T10:00:00Z' });
+  const newer = okCheckRun({ conclusion: 'failure', completed_at: '2026-07-14T11:00:00Z' });
+  assert.equal(verifyHeadPassCheckRun({ checkRuns: [older, newer], allowlist: BOTS, headSha: HEAD_SHA }).verified, false);
+  assert.equal(verifyHeadPassCheckRun({ checkRuns: [newer, older], allowlist: BOTS, headSha: HEAD_SHA }).verified, false);
+});
+
+test('#810: a FAILING ai-review/pass status does not veto a genuine passing check-run (either witness suffices)', () => {
+  const w = verifyHeadPassWitness({
+    statuses: [okStatus({ state: 'failure' })],
+    checkRuns: [okCheckRun()],
+    allowlist: BOTS,
+    headSha: HEAD_SHA,
+  });
+  assert.equal(w.verified, true);
+});
+
+test('#810: headSha omitted → the check-run head_sha is not second-guessed (caller already queried by head ref)', () => {
+  assert.equal(verifyHeadPassCheckRun({ checkRuns: [okCheckRun()], allowlist: BOTS }).verified, true);
 });
 
 // ── DR-063 / SPEC-031 FR-9a — awaiting-approval "your turn" queue signal ──────

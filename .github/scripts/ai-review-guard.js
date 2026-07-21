@@ -34,6 +34,12 @@ const CHANGES = 'ai-review:changes';
 // presence on the CURRENT head is an exact proof that THIS commit was reviewed —
 // unlike the timestamp proxy in `verifyPassProvenance`.
 const PASS_STATUS_CONTEXT = 'ai-review/pass';
+// The name of the honest verdict CHECK-RUN posted by decideReviewCheck (below).
+// Declared here, with the other wire-format constants, because #810 made it a
+// SECOND load-bearing head witness read by verifyHeadPassCheckRun — producer
+// (decideReviewCheck) and verifier (verifyHeadPassCheckRun) must bind the SAME
+// constant so the two can never drift apart (#822).
+const CHECK_NAME = 'ai-review';
 // The reviewer could NOT run to a verdict for a TRANSIENT, non-code reason —
 // almost always the Claude subscription's session quota being exhausted, but also
 // a rate-limit / overload / auth blip. This is NOT a review of the PR: it must be
@@ -239,6 +245,117 @@ function verifyHeadPassStatus({ statuses, allowlist } = {}) {
   };
 }
 
+// #810 — the SECOND head-bound witness: the `ai-review` CHECK-RUN.
+//
+// WHY THIS EXISTS. #466 made the `ai-review/pass` commit status the SOLE witness
+// the gate would accept, and ai-review.yml posts it BEST-EFFORT (`|| true`). That
+// POST was returning `403 Resource not accessible by integration` — the reviewer
+// App installation lacks `statuses: write` — so the witness was never written on
+// ANY commit while the `ai-review:pass` label still landed. `ready-to-merge` was
+// therefore unsatisfiable repo-wide and every merge became an `--admin` bypass,
+// which skips the entire required gate (the #466/#776 SHA-binding included).
+//
+// The `ai-review` check-run is posted by the SAME App (via `checks: write`, which
+// it does have) on the SAME head SHA, and is an equally strong witness:
+//   • SHA-bound INTRINSICALLY — a check-run carries `head_sha`; unlike a status it
+//     cannot be re-pointed after the fact. We additionally assert it equals the
+//     head we were asked about (defence in depth against a caller querying by the
+//     wrong ref).
+//   • PROVENANCE is server-attested — `app.slug` is assigned by GitHub, not
+//     claimable by the poster. A PR-authored workflow can post a check-run named
+//     `ai-review`, but it posts as `github-actions`, which the SAME configured
+//     AI_REVIEW_BOT_LOGINS allowlist rejects. (We deliberately match against that
+//     existing allowlist rather than pinning an App *id* — a wrong App-id pin is
+//     precisely the unsatisfiable-required-check failure #560 fixed.)
+//
+// STRICTNESS. Only `status: 'completed'` + `conclusion: 'success'` is a pass
+// witness. `neutral` (decideReviewCheck's machinery self-exemption) is NOT — a
+// machinery PR is exempt from the CHECK, never certified as reviewed — and
+// `failure` / `action_required` / anything else is not. Deny-by-default
+// throughout: empty allowlist, unknown app, missing fields ⇒ not verified.
+const PASS_CHECK_NAME = CHECK_NAME;
+function verifyHeadPassCheckRun({ checkRuns, allowlist, headSha } = {}) {
+  const list = Array.isArray(allowlist) ? allowlist : [];
+  if (list.length === 0) {
+    return {
+      verified: false,
+      reason:
+        'reviewer-bot allowlist (AI_REVIEW_BOT_LOGINS) is unset — check-run provenance cannot be verified',
+    };
+  }
+  const ours = (Array.isArray(checkRuns) ? checkRuns : []).filter(
+    (c) =>
+      c &&
+      c.name === PASS_CHECK_NAME &&
+      // Only enforce the SHA match when the caller told us which head to expect;
+      // the workflow queries BY the head ref, so this is a belt-and-braces check.
+      (headSha === undefined || c.head_sha === headSha),
+  );
+  if (ours.length === 0) {
+    return {
+      verified: false,
+      reason: `no \`${PASS_CHECK_NAME}\` check-run on the current head commit — the greenlight does not correspond to this SHA (#810)`,
+    };
+  }
+  // Most-recent wins, so a re-review that later FAILS supersedes an earlier pass.
+  const latest = ours.reduce((a, b) => (checkRunTime(b) >= checkRunTime(a) ? b : a));
+  if (latest.status !== 'completed') {
+    return {
+      verified: false,
+      reason: `\`${PASS_CHECK_NAME}\` on the current head is still '${sanitizeLogin(latest.status)}', not completed`,
+    };
+  }
+  if (latest.conclusion !== 'success') {
+    return {
+      verified: false,
+      reason: `\`${PASS_CHECK_NAME}\` on the current head concluded '${sanitizeLogin(latest.conclusion)}', not success`,
+    };
+  }
+  const app = latest.app || {};
+  // A GitHub App's check-run identity is its `slug`; the allowlist is written in
+  // login form (`minspec-sdd[bot]`), so accept either spelling of the same App.
+  const identities = [app.slug, app.slug ? `${app.slug}[bot]` : null].filter(Boolean);
+  if (!identities.some((id) => isAuthorizedReviewer(id, list))) {
+    return {
+      verified: false,
+      reason: `\`${PASS_CHECK_NAME}\` on the current head was posted by \`${sanitizeLogin(app.slug)}\`, not an allowlisted reviewer`,
+    };
+  }
+  return {
+    verified: true,
+    reason: `\`${PASS_CHECK_NAME}\`=success on the current head SHA, from an allowlisted reviewer App`,
+  };
+}
+
+// Sort key for check-runs: completion time, falling back to start time so an
+// unfinished run still orders sensibly. Unparseable ⇒ -Infinity (never "latest").
+function checkRunTime(c) {
+  const t = Date.parse((c && (c.completed_at || c.started_at)) || '');
+  return Number.isFinite(t) ? t : -Infinity;
+}
+
+// #810 — the head-bound pass witness, from EITHER channel.
+//
+// The gate needs ONE proof that THIS head SHA was the reviewed one. Two
+// independent channels can carry it, each SHA-bound and each provenance-checked
+// against the same allowlist: the #466 `ai-review/pass` commit status, and the
+// `ai-review` check-run. Requiring BOTH would keep the gate hostage to whichever
+// App permission is missing (that is the bug); accepting EITHER removes the
+// single point of failure without weakening anything — a forged, stale, machinery
+// -exempt, or absent pass fails BOTH channels and the gate stays red.
+function verifyHeadPassWitness({ statuses, checkRuns, allowlist, headSha } = {}) {
+  const viaStatus = verifyHeadPassStatus({ statuses, allowlist });
+  if (viaStatus.verified) return viaStatus;
+  const viaCheck = verifyHeadPassCheckRun({ checkRuns, allowlist, headSha });
+  if (viaCheck.verified) return viaCheck;
+  return {
+    verified: false,
+    // Lead with the check-run reason: with `statuses: write` missing it is the
+    // channel an operator can actually act on, and decideStatus truncates to 140.
+    reason: `not bound to this head — ${viaCheck.reason}; and ${viaStatus.reason}`,
+  };
+}
+
 // Compute the `ready-to-merge` commit status. The status is the authoritative
 // gate, so it is derived from the *decided* effective label set (pass removed if
 // it was reverted or stripped) AND from the provenance-recency verification of
@@ -341,7 +458,10 @@ function shouldAwaitApproval({ statusState, autoMergeArmed } = {}) {
 // "indeterminate" case (the changed-file diff itself could not be computed):
 // that case must stay fail-closed to `failure`, not `neutral` — otherwise a
 // PR could win the exemption simply by making the diff computation error.
-const CHECK_NAME = 'ai-review';
+//
+// The check's NAME is the shared `CHECK_NAME` constant declared at the top of
+// this module — verifyHeadPassCheckRun (#810) reads check-runs by that same
+// constant, so the producer and the verifier cannot drift apart (#822).
 function decideReviewCheck(label, isMachineryPr) {
   const machinery = isMachineryPr === true;
   const pass = !machinery && label === PASS;
@@ -424,7 +544,10 @@ module.exports = {
   decideStalenessStrip,
   verifyPassProvenance,
   verifyHeadPassStatus,
+  verifyHeadPassCheckRun,
+  verifyHeadPassWitness,
   PASS_STATUS_CONTEXT,
+  CHECK_NAME,
   decideStatus,
   decideReviewCheck,
   isBenignRemovalError,
