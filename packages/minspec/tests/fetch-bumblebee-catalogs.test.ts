@@ -111,22 +111,46 @@ describe('fetch-bumblebee-catalogs.sh — pins catalog fetch to BUMBLEBEE_VERSIO
     expect(fs.existsSync(path.join(target, 'fake-catalog.json'))).toBe(true);
   });
 
-  // #848 review (low): the v0.1.2 default is declared in BOTH scripts. CI couples
-  // them via the env var, but a LOCAL run reads each script's own literal — so the
-  // two can silently drift, which is the exact skew (#836) this fix exists to close.
-  // A comment cross-reference cannot enforce that; this gate can.
-  it('both scripts declare the SAME BUMBLEBEE_VERSION default (no literal drift)', () => {
+  // #848 review (Architect, blocking): the bumblebee version is declared in FOUR
+  // places — the two scripts' `${BUMBLEBEE_VERSION:-vX}` defaults (catalog fetch +
+  // scanner install) AND the two CI workflows' `go install ...bumblebee@vX` literals
+  // (ci.yml, supply-chain-daily.yml). Neither workflow exports BUMBLEBEE_VERSION, so
+  // CI reads each literal independently exactly like a local run — bumping any ONE
+  // alone reintroduces the #836 schema skew (e.g. new scanner binary vs old catalog
+  // ref) that #848 exists to close. The workflow literal is in fact the largest drift
+  // vector, and a prose "keep these in sync" comment cannot enforce it. This gate asserts
+  // all four agree, so any single-sided bump fails CI and cannot merge.
+  it('all four bumblebee version references agree (scripts + CI workflows — no drift)', () => {
+    const REPO_ROOT = path.resolve(__dirname, '../../..');
     const CHECK_SCRIPT = path.resolve(__dirname, '../../../scripts/check-supply-chain.sh');
-    const defaultOf = (file: string): string => {
+    const CI_WORKFLOW = path.join(REPO_ROOT, '.github/workflows/ci.yml');
+    const DAILY_WORKFLOW = path.join(REPO_ROOT, '.github/workflows/supply-chain-daily.yml');
+
+    // Script defaults: `BUMBLEBEE_VERSION="${BUMBLEBEE_VERSION:-v0.1.2}"`
+    const scriptDefaultOf = (file: string): string => {
       const m = fs
         .readFileSync(file, 'utf-8')
         .match(/BUMBLEBEE_VERSION="\$\{BUMBLEBEE_VERSION:-([^}"]+)\}"/);
       expect(m, `no BUMBLEBEE_VERSION default found in ${path.basename(file)}`).toBeTruthy();
       return m![1];
     };
-    const fetchDefault = defaultOf(FETCH_SCRIPT);
-    const checkDefault = defaultOf(CHECK_SCRIPT);
-    expect(fetchDefault).toBe(checkDefault);
-    // Bumping the scanner and the catalog ref is ONE change — never bump one alone.
+    // Workflow install literals: `go install ...bumblebee@v0.1.2`
+    const workflowPinOf = (file: string): string => {
+      const m = fs.readFileSync(file, 'utf-8').match(/bumblebee@(v[^\s'"]+)/);
+      expect(m, `no bumblebee@<version> install pin found in ${path.basename(file)}`).toBeTruthy();
+      return m![1];
+    };
+
+    const refs = {
+      'fetch-bumblebee-catalogs.sh': scriptDefaultOf(FETCH_SCRIPT),
+      'check-supply-chain.sh': scriptDefaultOf(CHECK_SCRIPT),
+      'ci.yml': workflowPinOf(CI_WORKFLOW),
+      'supply-chain-daily.yml': workflowPinOf(DAILY_WORKFLOW),
+    };
+
+    // Every reference must equal the canonical script default — a single-sided bump
+    // (scanner without catalog, or workflow without script) fails here.
+    const canonical = refs['check-supply-chain.sh'];
+    expect(Object.values(refs).every((v) => v === canonical), JSON.stringify(refs)).toBe(true);
   });
 });
