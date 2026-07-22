@@ -23,7 +23,10 @@ jobs:
     # early-warning against newly-known-bad deps, so it must read the LATEST catalogs
     # — unlike the per-PR gate in ci.yml, which pins to v0.1.2 for reproducibility.
     # Both the scanner binary and the catalog fetch derive from this ONE ref, so they
-    # advance in lockstep and cannot reintroduce the #836 schema skew.
+    # track HEAD together — closing the persistent pinned-reader-vs-advancing-catalog
+    # skew of #836. (Caveat: `go install @main` resolves via the Go module proxy while
+    # the catalog fetch hits GitHub live, so across a HEAD advance the binary can briefly
+    # lag the catalogs by a commit — transient and self-correcting, not #836's failure.)
     env:
       BUMBLEBEE_VERSION: main
     steps:

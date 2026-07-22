@@ -138,7 +138,10 @@ describe('fetch-bumblebee-catalogs.sh — pins catalog fetch to BUMBLEBEE_VERSIO
   // defeating its documented purpose. Fix: the per-PR references stay pinned & MUST agree
   // (a scanner/catalog skew there re-opens the #836 schema break); the daily job drives
   // BOTH its scanner install and its catalog fetch from ONE `BUMBLEBEE_VERSION: main` job
-  // env, so it tracks HEAD and stays lockstep-by-construction (never skewed within itself).
+  // env, so it tracks HEAD from a single source — closing #836's persistent skew (a
+  // pinned reader against advancing catalogs). It is not an absolute guarantee: `go
+  // install @main` (Go module proxy) and the live `gh api ref=main` fetch can differ by
+  // one commit across a HEAD advance — transient and self-correcting, not #836.
   it('per-PR references stay pinned and agree (fetch script + check script + ci.yml)', () => {
     const pinned = {
       'fetch-bumblebee-catalogs.sh': scriptDefaultOf(FETCH_SCRIPT),
