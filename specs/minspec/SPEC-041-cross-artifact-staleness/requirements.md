@@ -10,8 +10,8 @@ aspects: [approval, staleness, tier-0, hitl, never-wrong]
 depends_on: [SPEC-022, SPEC-012]
 relates_to: [SPEC-029, DR-062, DR-034, DR-012]
 phases:
-  specify: in-progress
-  clarify: pending
+  specify: done
+  clarify: done   # FR-OQ1/OQ2 resolved (proposed defaults), OQ3/OQ4 confirmed — drafted by Claude (agent) 2026-07-17 per maintainer "you draft"; human ratifies at Approve
   plan: pending
   tasks: pending
   implement: pending
@@ -77,6 +77,24 @@ Staleness is **DERIVED on read, never an event that mutates a committed sign-off
 - **FR-OQ2 (which edge kinds fingerprint).** `depends_on` only, or also `relates_to`/`supersedes`? *Proposed:* `depends_on` only (blocking edges); `relates_to` is advisory and must not produce a re-approval demand. Resolve in Clarify.
 - **FR-OQ3 (baseline portability).** Confirm `upstreamDeps` hashes live in the committed sidecar (portable across clones), unlike the per-machine body baseline (`refs/minspec/snapshots/*`). *Proposed:* yes — hashes are small and belong in the committed record.
 - **FR-OQ4 (scope of the demand).** Does `upstream-stale` affect only the derived status + resolver + UI here, or also gate commits? *Proposed:* only status/resolver/UI in this spec; the commit/CI gate is DR-062 §3's separate spec.
+
+## Clarify
+
+*Resolutions drafted by Claude (agent) 2026-07-17 as engineering defaults, per the maintainer's "you draft" instruction. Each is the proposed default from Open Questions, chosen with rationale. **These are confirm-or-redirect drafts — the human ratifies them at Approve Spec** (the hash-lock gate); nothing here is a human sign-off.*
+
+- **FR-OQ1 — dirty upstream at approve time → RESOLVED: snapshot the target's current canonical hash regardless of the target's approval state; do NOT block B's approval.**
+  The fingerprint measures *drift from the content B's approver actually saw*, which is well-defined whatever A's status is. Blocking B until every upstream is clean over-couples the graph (mutual-dependency deadlock; perpetual-churn starvation). And an unapproved upstream A is *already* surfaced independently — A is not `gateCleared`, so the resolver already floors B / raises a gate-violation via the existing `depends_on` path (FR-4). No second mechanism needed.
+
+- **FR-OQ2 — which edge kinds fingerprint → RESOLVED: `depends_on` only.**
+  `depends_on` is the blocking, semantic-dependency edge. `relates_to` is advisory (tie-clustering only, never gates); emitting a re-approval demand from a `relates_to` edit would break its advisory contract and generate noise. `supersedes` is a pruning edge — the target is being *replaced*, so its content drift is irrelevant. A genuine content dependency must therefore be authored as `depends_on` (which [#803](https://github.com/AIClarityAU/minspec/issues/803)'s symmetric linter helps enforce), not smuggled through `relates_to`.
+
+- **FR-OQ3 — baseline portability → CONFIRMED: `upstreamDeps` (ref + hash) lives in the committed, path-keyed sidecar.**
+  It travels with the repo — a fresh clone, CI, or a teammate all compute the identical `upstream-stale` verdict. Unlike the per-machine body baseline (`refs/minspec/snapshots/*`, un-pushed), the hashes are small strings and belong in the committed record. This is what makes `upstream-stale` a *portable, CI-checkable* fact — a precondition for the future commit/CI gate ([#861](https://github.com/AIClarityAU/minspec/issues/861)). Promoted from open question to stated design fact.
+
+- **FR-OQ4 — scope of the demand → CONFIRMED: in SPEC-041, `upstream-stale` affects only derived status + resolver ordering + signpost/UI (advisory). It does NOT block commits.**
+  The hard gate that blocks impl edits when an approvable is `upstream-stale` is DR-062 §3 / [#861](https://github.com/AIClarityAU/minspec/issues/861) — a separate spec with its own review. Keeping SPEC-041 advisory matches the never-wrong posture (surface the fact; the human decides) and avoids coupling a schema + propagation change to a new enforcement gate in one spec.
+
+No follow-up tasks generated — all four resolve to a stated default; none blocks the Plan phase. FR-OQ1's optional `refState` field (record the target's derived status at snapshot time, to enrich the diff UI) is noted as a Plan-phase nice-to-have, not a requirement.
 
 ## Acceptance Criteria
 
