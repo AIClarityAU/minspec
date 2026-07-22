@@ -8,12 +8,16 @@ product: minspec
 epic: EPIC-003  # SDD Core Methodology — code-change safety
 aspects: [architecture, tier-0, governance, validation]
 relates_to: [SPEC-038, DR-003, DR-014, DR-064]
-# Owned code (SPEC-038 FR-3). Certain now; Plan (design.md) finalises the cycle-checker
-# filename and adds `affects:` for the moved/edited surfaces (active-spec, approval-diff,
-# spec-tree-provider, status-bar, eslint config).
+# Owned code (SPEC-038 FR-3). Finalised at Plan (design.md §File plan). `affects:` for the
+# moved/edited shared surfaces (eslint.config.mjs, status-bar, active-spec, approval-diff,
+# spec-tree-provider, spec-manager, spec-panel, the 3 command files, tsconfig, package.json)
+# is deliberately deferred to Implement — SPEC-038 edit-locks affects: paths identically to
+# implements:, so declaring live shared files under this stale spec would block concurrent edits.
 implements:
   - packages/minspec/src/lib/spec-catalog.ts        # FR-4 — new Tier-0 catalog (extracted recursive listSpecs)
-  - packages/minspec/src/lib/import-cycle-check.ts   # FR-2 — in-repo cycle gate (DR-064 §1); exact name confirmed in Plan
+  - packages/minspec/src/lib/spec-progress.ts        # FR-5a — new Tier-0 home for fromFrontmatter/computeProgress (OQ-4)
+  - packages/minspec/src/lib/import-cycle-check.ts   # FR-2 — in-repo cycle-graph builder + DFS (DR-064 §1)
+  - scripts/check-import-cycles.ts                    # FR-2 — CI runner (npx tsx); npm run check:cycles
 phases:
   specify: done
   clarify: done
