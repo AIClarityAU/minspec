@@ -19,6 +19,13 @@ permissions:
 jobs:
   scan:
     runs-on: ubuntu-latest
+    # The daily scan tracks upstream HEAD (see the DR follow-up on #850): its job is
+    # early-warning against newly-known-bad deps, so it must read the LATEST catalogs
+    # — unlike the per-PR gate in ci.yml, which pins to v0.1.2 for reproducibility.
+    # Both the scanner binary and the catalog fetch derive from this ONE ref, so they
+    # advance in lockstep and cannot reintroduce the #836 schema skew.
+    env:
+      BUMBLEBEE_VERSION: main
     steps:
       - uses: actions/checkout@v5
         with:
@@ -36,7 +43,9 @@ jobs:
       - run: npm ci
 
       - name: Install bumblebee
-        run: go install github.com/perplexityai/bumblebee/cmd/bumblebee@v0.1.2
+        # @${BUMBLEBEE_VERSION} (job env = main) — latest scanner, in lockstep with
+        # the catalog fetch below which reads the same var; ci.yml stays pinned.
+        run: go install "github.com/perplexityai/bumblebee/cmd/bumblebee@${BUMBLEBEE_VERSION}"
 
       - name: Fetch threat catalogs
         env:

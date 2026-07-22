@@ -111,46 +111,60 @@ describe('fetch-bumblebee-catalogs.sh — pins catalog fetch to BUMBLEBEE_VERSIO
     expect(fs.existsSync(path.join(target, 'fake-catalog.json'))).toBe(true);
   });
 
-  // #848 review (Architect, blocking): the bumblebee version is declared in FOUR
-  // places — the two scripts' `${BUMBLEBEE_VERSION:-vX}` defaults (catalog fetch +
-  // scanner install) AND the two CI workflows' `go install ...bumblebee@vX` literals
-  // (ci.yml, supply-chain-daily.yml). Neither workflow exports BUMBLEBEE_VERSION, so
-  // CI reads each literal independently exactly like a local run — bumping any ONE
-  // alone reintroduces the #836 schema skew (e.g. new scanner binary vs old catalog
-  // ref) that #848 exists to close. The workflow literal is in fact the largest drift
-  // vector, and a prose "keep these in sync" comment cannot enforce it. This gate asserts
-  // all four agree, so any single-sided bump fails CI and cannot merge.
-  it('all four bumblebee version references agree (scripts + CI workflows — no drift)', () => {
-    const REPO_ROOT = path.resolve(__dirname, '../../..');
-    const CHECK_SCRIPT = path.resolve(__dirname, '../../../scripts/check-supply-chain.sh');
-    const CI_WORKFLOW = path.join(REPO_ROOT, '.github/workflows/ci.yml');
-    const DAILY_WORKFLOW = path.join(REPO_ROOT, '.github/workflows/supply-chain-daily.yml');
+  const REPO_ROOT = path.resolve(__dirname, '../../..');
+  const CHECK_SCRIPT = path.resolve(__dirname, '../../../scripts/check-supply-chain.sh');
+  const CI_WORKFLOW = path.join(REPO_ROOT, '.github/workflows/ci.yml');
+  const DAILY_WORKFLOW = path.join(REPO_ROOT, '.github/workflows/supply-chain-daily.yml');
 
-    // Script defaults: `BUMBLEBEE_VERSION="${BUMBLEBEE_VERSION:-v0.1.2}"`
-    const scriptDefaultOf = (file: string): string => {
-      const m = fs
-        .readFileSync(file, 'utf-8')
-        .match(/BUMBLEBEE_VERSION="\$\{BUMBLEBEE_VERSION:-([^}"]+)\}"/);
-      expect(m, `no BUMBLEBEE_VERSION default found in ${path.basename(file)}`).toBeTruthy();
-      return m![1];
-    };
-    // Workflow install literals: `go install ...bumblebee@v0.1.2`
-    const workflowPinOf = (file: string): string => {
-      const m = fs.readFileSync(file, 'utf-8').match(/bumblebee@(v[^\s'"]+)/);
-      expect(m, `no bumblebee@<version> install pin found in ${path.basename(file)}`).toBeTruthy();
-      return m![1];
-    };
+  // Script defaults: `BUMBLEBEE_VERSION="${BUMBLEBEE_VERSION:-v0.1.2}"`
+  const scriptDefaultOf = (file: string): string => {
+    const m = fs
+      .readFileSync(file, 'utf-8')
+      .match(/BUMBLEBEE_VERSION="\$\{BUMBLEBEE_VERSION:-([^}"]+)\}"/);
+    expect(m, `no BUMBLEBEE_VERSION default found in ${path.basename(file)}`).toBeTruthy();
+    return m![1];
+  };
+  // Hardcoded workflow install literal: `go install ...bumblebee@v0.1.2` (ci.yml only).
+  const workflowLiteralOf = (file: string): string | null => {
+    const m = fs.readFileSync(file, 'utf-8').match(/bumblebee@(v[^\s'"$]+)/);
+    return m ? m[1] : null;
+  };
 
-    const refs = {
+  // #850 review (Architect, blocking): the two scans have OPPOSITE version needs.
+  //   • Per-PR gate (ci.yml) must be REPRODUCIBLE → pin scanner+catalogs to v0.1.2.
+  //   • Daily scan (supply-chain-daily.yml) is an EARLY-WARNING system → must read the
+  //     LATEST upstream catalogs, or it runs false-green on stale threat intel.
+  // Pinning the shared fetch script froze the daily scan too (it inherited the default),
+  // defeating its documented purpose. Fix: the per-PR references stay pinned & MUST agree
+  // (a scanner/catalog skew there re-opens the #836 schema break); the daily job drives
+  // BOTH its scanner install and its catalog fetch from ONE `BUMBLEBEE_VERSION: main` job
+  // env, so it tracks HEAD and stays lockstep-by-construction (never skewed within itself).
+  it('per-PR references stay pinned and agree (fetch script + check script + ci.yml)', () => {
+    const pinned = {
       'fetch-bumblebee-catalogs.sh': scriptDefaultOf(FETCH_SCRIPT),
       'check-supply-chain.sh': scriptDefaultOf(CHECK_SCRIPT),
-      'ci.yml': workflowPinOf(CI_WORKFLOW),
-      'supply-chain-daily.yml': workflowPinOf(DAILY_WORKFLOW),
+      'ci.yml': workflowLiteralOf(CI_WORKFLOW),
     };
+    expect(pinned['ci.yml'], 'ci.yml must keep a hardcoded bumblebee@vX pin').toBeTruthy();
+    const canonical = pinned['check-supply-chain.sh'];
+    // A single-sided bump (scanner without catalog, or ci.yml without the scripts)
+    // fails here — that skew is exactly the #836 schema break these pins prevent.
+    expect(Object.values(pinned).every((v) => v === canonical), JSON.stringify(pinned)).toBe(true);
+  });
 
-    // Every reference must equal the canonical script default — a single-sided bump
-    // (scanner without catalog, or workflow without script) fails here.
-    const canonical = refs['check-supply-chain.sh'];
-    expect(Object.values(refs).every((v) => v === canonical), JSON.stringify(refs)).toBe(true);
+  it('daily scan tracks HEAD via a single lockstep ref (no frozen catalogs, no self-skew)', () => {
+    const daily = fs.readFileSync(DAILY_WORKFLOW, 'utf-8');
+    // It must NOT carry a hardcoded scanner pin — that is what froze it (the regression).
+    expect(
+      workflowLiteralOf(DAILY_WORKFLOW),
+      'daily scan must not hardcode bumblebee@vX — it would freeze the early-warning catalogs',
+    ).toBeNull();
+    // Scanner install + catalog fetch derive from ONE job-level ref → lockstep.
+    expect(daily, 'daily job must set a single BUMBLEBEE_VERSION ref').toMatch(
+      /^\s*BUMBLEBEE_VERSION:\s*\S+/m,
+    );
+    expect(daily, 'daily scanner install must read that ref, not a literal').toMatch(
+      /bumblebee@\$\{BUMBLEBEE_VERSION\}/,
+    );
   });
 });
