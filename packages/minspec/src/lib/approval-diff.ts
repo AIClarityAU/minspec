@@ -90,6 +90,27 @@ function buildDiffUri(side: DiffSide, specFilePath: string): vscode.Uri {
 }
 
 /**
+ * Recover the real spec file path from an approval-diff editor URI, or undefined
+ * when `uri` is not one of this feature's virtual documents. The inverse of
+ * `buildDiffUri`: the "changes since approval" diff's two sides are virtual docs
+ * whose path is `/<side>/<base64url(specFilePath)>` — the spec path is encoded,
+ * never a `file:` fsPath. A command acting on "the active editor" (Alt+A /
+ * approveActive) uses this to detect the spec BEHIND the diff instead of the
+ * un-classifiable virtual URI. Never throws — a malformed encoding yields
+ * undefined, so the caller falls back cleanly.
+ */
+export function specPathFromApprovalDiffUri(uri: vscode.Uri): string | undefined {
+  if (uri.scheme !== SCHEME) return undefined;
+  const [, , encoded] = uri.path.split('/'); // '' / side / encodedPath
+  if (!encoded) return undefined;
+  try {
+    return decodePath(encoded);
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * `minspec.showChangesSinceApproval` — FR-5/FR-6/FR-7/FR-8.
  *
  * Reached three ways, normalized here:
