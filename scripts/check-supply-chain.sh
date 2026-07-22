@@ -12,6 +12,14 @@
 #
 # Read-only: bumblebee never executes package managers or reads source files.
 # https://github.com/perplexityai/bumblebee
+#
+# Exit codes (#869 — callers MUST branch on these, not just "nonzero"):
+#   0 = scan ran to completion, no threat-catalog matches
+#   1 = scan ran to completion AND found a real threat-catalog match
+#   2 = scan did NOT run to completion (missing Go toolchain, bumblebee
+#       install failure, scanner crash) — an infra/tooling problem, not a
+#       security finding. Callers must not file a "compromised package
+#       detected" alert for this code.
 
 set -e
 
@@ -33,10 +41,15 @@ if [ ! -x "$BUMBLEBEE_BIN" ]; then
   if [ ! -x "$GO_BIN" ]; then
     echo "check-supply-chain: Go toolchain not found at $GO_BIN" >&2
     echo "  required for bumblebee install. Set GO_BIN or install Go 1.25+." >&2
-    exit 1
+    echo "  (exit 2: could not run — not a threat finding)" >&2
+    exit 2
   fi
   echo "check-supply-chain: installing bumblebee $BUMBLEBEE_VERSION..." >&2
-  GOBIN="$HOME/go/bin" "$GO_BIN" install "github.com/perplexityai/bumblebee/cmd/bumblebee@$BUMBLEBEE_VERSION"
+  if ! GOBIN="$HOME/go/bin" "$GO_BIN" install "github.com/perplexityai/bumblebee/cmd/bumblebee@$BUMBLEBEE_VERSION"; then
+    echo "check-supply-chain: bumblebee@$BUMBLEBEE_VERSION install failed" >&2
+    echo "  (exit 2: could not run — not a threat finding; upstream install target may be broken/unreachable)" >&2
+    exit 2
+  fi
 fi
 
 mkdir -p "$OUT_DIR" "$CATALOG_DIR"
@@ -48,12 +61,16 @@ fi
 
 echo "check-supply-chain: scanning $REPO_ROOT" >&2
 
-"$BUMBLEBEE_BIN" scan \
+if ! "$BUMBLEBEE_BIN" scan \
   --profile project \
   --root "$REPO_ROOT" \
   --output file \
   --output-file "$OUT_FILE" \
-  $CATALOG_FLAG
+  $CATALOG_FLAG; then
+  echo "check-supply-chain: bumblebee scan errored/crashed" >&2
+  echo "  (exit 2: could not run — not a threat finding; the scanner itself did not complete)" >&2
+  exit 2
+fi
 
 if [ -n "$CATALOG_FLAG" ]; then
   FINDINGS=$(grep -c '"record_type":"finding"' "$OUT_FILE" 2>/dev/null || true)
