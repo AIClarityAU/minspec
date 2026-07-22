@@ -26,9 +26,12 @@ jobs:
     # compromise = arbitrary code exec with a write token (#850 security). Catalog data
     # is fetched, not executed, so floating BUMBLEBEE_CATALOG_REF=main is bounded to
     # false results (and even those are neutralised before reaching the issue body).
-    # New threat entries in the pinned reader's schema are still caught; a schema advance
-    # past v0.1.2 makes the scan fail closed with a distinct exit code (2), reported by the
-    # step below as a "bump bumblebee" ops alert — never a false compromise finding.
+    # New threat entries in the pinned reader's schema are caught; a catalog whose
+    # schema_version the reader REJECTS makes the scan fail closed with exit code 2,
+    # reported below as a "bump bumblebee" ops alert — never a false compromise finding.
+    # LIMIT: an additive change that keeps the schema_version but adds a threat via fields
+    # the pinned matcher ignores parses clean and may be silently unmatched (false green);
+    # pinning the matcher bounds freshness to its schema — see DR-005.
     env:
       BUMBLEBEE_VERSION: v0.1.2      # pinned scanner binary — never floated (#850)
       BUMBLEBEE_CATALOG_REF: main    # data-only catalog ref — floats for freshness

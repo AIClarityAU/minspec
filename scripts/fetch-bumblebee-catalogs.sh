@@ -20,10 +20,13 @@
 # The daily early-warning scan overrides ONLY BUMBLEBEE_CATALOG_REF=main to read the
 # freshest catalogs while the BINARY stays pinned — so a compromised upstream cannot
 # ship executable code into the token-scoped CI job (#850 security). New threat entries
-# within the pinned schema are caught; a schema advance past the pinned reader makes
-# check-supply-chain.sh fail closed with a distinct exit code (2), which the daily
-# workflow reports as a "bump bumblebee" ops alert — never a false compromise finding,
-# never executed as code.
+# expressed in the pinned reader's schema are caught. A catalog whose schema_version the
+# pinned reader REJECTS makes check-supply-chain.sh fail closed with a distinct exit code
+# (2) — a "bump bumblebee" ops alert, never a false compromise, never executed as code.
+# LIMIT: an ADDITIVE catalog change that keeps the schema_version but encodes a threat via
+# fields the pinned matcher does not read parses without error and may be silently
+# unmatched (false green). Pinning the matcher for safety bounds freshness to the pinned
+# schema; catching genuinely new threat EXPRESSIONS needs a reviewed reader bump (DR-005).
 
 set -e
 

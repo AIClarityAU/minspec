@@ -193,3 +193,72 @@ describe('fetch-bumblebee-catalogs.sh — pins catalog fetch to BUMBLEBEE_VERSIO
     );
   });
 });
+
+// #850 review (adversarial re-verify, low): the exit-2 fail-closed contract is the
+// SECURITY CORE of the fix — a scan ERROR (schema the pinned reader rejects) must exit 2
+// (→ low-noise "bump" alert), a real FINDING must exit 1 (→ P1), a clean scan exit 0.
+// String-literal pin tests can't catch a regression that mis-wires those codes; this
+// stubs the scanner binary and exercises the real check-supply-chain.sh.
+describe('check-supply-chain.sh — distinct exit codes: scan-error(2) vs finding(1) vs clean(0)', () => {
+  const CHECK_SCRIPT = path.resolve(__dirname, '../../../scripts/check-supply-chain.sh');
+  let scratch: string;
+  let binDir: string;
+  let catDir: string;
+
+  beforeEach(() => {
+    scratch = fs.mkdtempSync(path.join(os.tmpdir(), 'csc-scratch-'));
+    binDir = fs.mkdtempSync(path.join(os.tmpdir(), 'csc-bin-'));
+    catDir = path.join(scratch, 'catalogs');
+    fs.mkdirSync(catDir);
+    // A catalog file must exist or check-supply-chain.sh runs inventory-only (no findings path).
+    fs.writeFileSync(path.join(catDir, 'cat.json'), '{"schema_version":"0.1.0"}');
+  });
+  afterEach(() => {
+    fs.rmSync(scratch, { recursive: true, force: true });
+    fs.rmSync(binDir, { recursive: true, force: true });
+  });
+
+  // Fake bumblebee: parse --output-file, behave per FAKE_BB_MODE.
+  const FAKE_BB = `#!/usr/bin/env bash
+out=""
+while [ $# -gt 0 ]; do case "$1" in --output-file) out="$2"; shift 2;; *) shift;; esac; done
+case "$FAKE_BB_MODE" in
+  error)   echo "unsupported exposure catalog schema_version" >&2; exit 3;;
+  finding) printf '%s\\n' '{"record_type":"package","name":"x"}' '{"record_type":"finding","name":"evil"}' > "$out"; exit 0;;
+  *)       printf '%s\\n' '{"record_type":"package","name":"x"}' > "$out"; exit 0;;
+esac
+`;
+
+  const runCheck = (mode: string): number => {
+    const fakePath = path.join(binDir, 'bumblebee');
+    fs.writeFileSync(fakePath, FAKE_BB);
+    fs.chmodSync(fakePath, 0o755);
+    try {
+      execFileSync('sh', [CHECK_SCRIPT], {
+        env: {
+          PATH: process.env.PATH,
+          HOME: process.env.HOME,
+          BUMBLEBEE_BIN: fakePath,
+          BUMBLEBEE_CATALOGS: catDir,
+          FAKE_BB_MODE: mode,
+        },
+        cwd: scratch,
+        encoding: 'utf-8',
+        stdio: 'pipe',
+      });
+      return 0;
+    } catch (e: unknown) {
+      return (e as { status?: number }).status ?? -1;
+    }
+  };
+
+  it('scan error (scanner exits non-zero) → exit 2, NOT 1 (a schema advance is never filed as a finding)', () => {
+    expect(runCheck('error')).toBe(2);
+  });
+  it('a real finding record → exit 1', () => {
+    expect(runCheck('finding')).toBe(1);
+  });
+  it('clean scan → exit 0', () => {
+    expect(runCheck('clean')).toBe(0);
+  });
+});
