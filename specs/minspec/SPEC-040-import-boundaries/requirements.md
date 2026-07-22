@@ -2,16 +2,22 @@
 id: SPEC-040
 type: requirements
 # 🔒 Once approved, hash-locked: approved bytes recorded in .minspec/approvals.json[SPEC-040].specHash. ANY edit voids approval (hash → stale) — re-run "MinSpec: Approve Spec". DR-012.
-status: specifying
+status: specifying  # advance→plan staled the approval when `implements:` was added (below); re-approve (Alt+A). DR-012.
 tier: T4
 product: minspec
 epic: EPIC-003  # SDD Core Methodology — code-change safety
 aspects: [architecture, tier-0, governance, validation]
 relates_to: [SPEC-038, DR-003, DR-014, DR-064]
+# Owned code (SPEC-038 FR-3). Certain now; Plan (design.md) finalises the cycle-checker
+# filename and adds `affects:` for the moved/edited surfaces (active-spec, approval-diff,
+# spec-tree-provider, status-bar, eslint config).
+implements:
+  - packages/minspec/src/lib/spec-catalog.ts        # FR-4 — new Tier-0 catalog (extracted recursive listSpecs)
+  - packages/minspec/src/lib/import-cycle-check.ts   # FR-2 — in-repo cycle gate (DR-064 §1); exact name confirmed in Plan
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
