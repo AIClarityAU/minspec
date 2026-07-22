@@ -522,4 +522,12 @@ MinSpec's layered architecture (lib never imports views/commands, @aiclarity/sha
 <!-- dr-summary:DR-065 auto=0000000000000000 -->
 Two held rules contradict: rule #8 / DR-051 §4a says never move a shared checkout's HEAD (moving it under a live session strands WIP — unrecoverable, the #168 incident), while DR-051 §4c says a checkout on main but behind origin/main makes gates judge stale content — wrong verdicts (the stranded SPEC-024 approval). SPEC-026's presence layer makes occupancy observable (worktreeRoot + pid, live iff lastSeen<120s AND pid alive), so this records the one sanctioned exception: a drain MAY `merge --ff-only` a shared checkout ONLY on positive proof of dormancy — ≥1 live record exists anywhere AND none claims this worktreeRoot — because an unoccupied checkout has no live tree to disturb. Absence of proof (empty/stale/corrupt/unreadable presence dir) ⇒ occupied ⇒ fetch-only. Gated by a conjunction of four guards (on-main, content-clean, dormant, true-ff); fetch stays unconditional (read-only); fails opposite to FR-12's fail-open backstop because each gate fails toward its own cheap error. Scope is deliberately minimal (§5) — never reset/rebase/switch, never feature branches, never the Tier-0 extension.
 <!-- /dr-summary:DR-065 -->
+
+## [DR-066 — No silent gate — a required/merge-gating check must fail visibly, never best-effort, and never hinge on a single disableable producer](DR-066.md)
+
+*Status: proposed · Date: 2026-07-22*
+
+<!-- dr-summary:DR-066 auto=fc5103ae0bbb -->
+Three times in this repo, a merge gate that *looked* present enforced **nothing**, and the symptom each time was identical — "every merge needs --admin", i.e. the required gate was being bypassed on every landing: 1. **#560** — the ai-review required-check context was pinned to the **wrong GitHub App id**, so the ruleset waited on a check that could never post → unsatisfiable → every merge a bypass. 2. **#810** — ai-review.yml posted the load-bearing ai-review/pass commit status **best-effort** (gh…
+<!-- /dr-summary:DR-066 -->
 <!-- minspec:dr-index:end -->
