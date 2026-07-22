@@ -133,10 +133,14 @@ These land at `error` only **after** FR-4/FR-5 make the tree clean (AC-5), so `m
 
 ## FR-3 — vscode-purity rule (`warn`)
 
-A second `lib/**`-scoped `no-restricted-imports` entry bans `vscode` at **`warn`**. 7 files violate
-today (`resolve-folder, diagnostics, active-spec, ai-usage-detector, approval-diff, bridge, active-adr`).
-AC-3 asserts the warn **count == 7** by test, so the `warn`→`error` flip when #830 lands is a
-one-line change verified by the same test. Never dodged via per-file `eslint-disable` (INV-4).
+A second `lib/**`-scoped `@typescript-eslint/no-restricted-imports` entry bans `vscode` at **`warn`**,
+with **`allowTypeImports: true`** (unlike FR-1, which sets it `false`): a type-only `import type * as
+vscode` is compile-erased, pulls in no vscode runtime, and stays Tier-0-pure (DR-014), so it is exempt.
+7 files **value**-import (runtime) vscode today (`resolve-folder, diagnostics, active-spec,
+ai-usage-detector, approval-diff, bridge, active-adr`); `lib/presence.ts` type-only-imports it for a
+`vscode.Event<number>` type and is therefore **not** counted (count is 7, not 8). AC-3 asserts the warn
+**count == 7** by test, so the `warn`→`error` flip when #830 lands is a one-line change verified by the
+same test. Never dodged via per-file `eslint-disable` (INV-4).
 
 ## FR-2 — the in-repo cycle gate (`error`)
 
