@@ -19,16 +19,19 @@ permissions:
 jobs:
   scan:
     runs-on: ubuntu-latest
-    # The daily scan tracks upstream HEAD (see the DR follow-up on #850): its job is
-    # early-warning against newly-known-bad deps, so it must read the LATEST catalogs
-    # — unlike the per-PR gate in ci.yml, which pins to v0.1.2 for reproducibility.
-    # Both the scanner binary and the catalog fetch derive from this ONE ref, so they
-    # track HEAD together — closing the persistent pinned-reader-vs-advancing-catalog
-    # skew of #836. (Caveat: `go install @main` resolves via the Go module proxy while
-    # the catalog fetch hits GitHub live, so across a HEAD advance the binary can briefly
-    # lag the catalogs by a commit — transient and self-correcting, not #836's failure.)
+    # The daily scan is early-warning against newly-known-bad deps, so it reads the
+    # LATEST catalogs — but ONLY the catalogs. The scanner BINARY stays pinned exactly
+    # like ci.yml: a floating `bumblebee@main` would execute unpinned upstream code every
+    # day inside a job holding GITHUB_TOKEN with `issues: write`, so an upstream
+    # compromise = arbitrary code exec with a write token (#850 security). Catalog data
+    # is fetched, not executed, so floating BUMBLEBEE_CATALOG_REF=main is bounded to
+    # false results (and even those are neutralised before reaching the issue body).
+    # New threat entries in the pinned reader's schema are still caught; a schema advance
+    # past v0.1.2 makes the scan fail closed with a distinct exit code (2), reported by the
+    # step below as a "bump bumblebee" ops alert — never a false compromise finding.
     env:
-      BUMBLEBEE_VERSION: main
+      BUMBLEBEE_VERSION: v0.1.2      # pinned scanner binary — never floated (#850)
+      BUMBLEBEE_CATALOG_REF: main    # data-only catalog ref — floats for freshness
     steps:
       - uses: actions/checkout@v5
         with:
@@ -46,8 +49,8 @@ jobs:
       - run: npm ci
 
       - name: Install bumblebee
-        # @${BUMBLEBEE_VERSION} (job env = main) — latest scanner, in lockstep with
-        # the catalog fetch below which reads the same var; ci.yml stays pinned.
+        # Pinned binary (@${BUMBLEBEE_VERSION} = v0.1.2) — NOT floated. Only the catalog
+        # fetch below (BUMBLEBEE_CATALOG_REF=main) tracks HEAD; the executed code is pinned.
         run: go install "github.com/perplexityai/bumblebee/cmd/bumblebee@${BUMBLEBEE_VERSION}"
 
       - name: Fetch threat catalogs
@@ -61,13 +64,19 @@ jobs:
           BUMBLEBEE_CATALOGS: ${{ github.workspace }}/.bumblebee-catalogs
         run: |
           export BUMBLEBEE_BIN="$HOME/go/bin/bumblebee"
+          # Capture check-supply-chain.sh's OWN exit code, not tee's. Piping into tee
+          # makes `$?` reflect tee (≈always 0), which silently disabled the branches
+          # below — the daily scan never filed anything. 0=clean, 1=finding, 2=scan error.
           set +e
-          ./scripts/check-supply-chain.sh 2>&1 | tee scan-output.log
-          echo "exit_code=$?" >> "$GITHUB_OUTPUT"
+          ./scripts/check-supply-chain.sh > scan-output.log 2>&1
+          rc=$?
           set -e
+          cat scan-output.log
+          echo "exit_code=$rc" >> "$GITHUB_OUTPUT"
 
       - name: File issue on findings
-        if: steps.scan.outputs.exit_code != '0'
+        # exit_code 1 = a real compromised-dependency finding (2 = scan error, handled below).
+        if: steps.scan.outputs.exit_code == '1'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           SERVER_URL: ${{ github.server_url }}
@@ -81,7 +90,11 @@ jobs:
           {
             printf '%s\n' "Daily supply-chain scan against \`main\` detected one or more bundled dependencies matching the upstream bumblebee threat catalog."
             printf '\n## Scan output\n\n```\n'
-            tail -40 scan-output.log
+            # The scan text embeds finding records whose fields come from upstream catalog
+            # data (floated to HEAD) — untrusted. Neutralise markdown control chars before
+            # it reaches the issues:write issue body: strip backticks (no code-fence
+            # breakout) and @ (no unintended mentions / notification+backlink spam).
+            tail -40 scan-output.log | sed 's/`/ /g; s/@/ /g'
             printf '\n```\n\n'
             printf '## What to do\n\n'
             printf '1. Identify the affected package(s) from the finding records below.\n'
@@ -98,6 +111,34 @@ jobs:
             --label "security,inbox,P1" \
             --body-file "$BODY_FILE"
 
+      - name: File scan-error alert (scan could not run)
+        # exit_code 2 = the scanner errored (e.g. the floated catalog schema advanced past
+        # the pinned reader), so the scan could NOT run. This is a "bump bumblebee" ops
+        # signal, NOT a compromised-dependency finding — file a low-noise issue (no
+        # security/P1 label, no compromise language), so a schema advance never masquerades
+        # as a live compromise (#850 / #869).
+        if: steps.scan.outputs.exit_code == '2'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SERVER_URL: ${{ github.server_url }}
+          REPOSITORY: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -e
+          BODY_FILE="$(mktemp)"
+          {
+            printf '%s\n' "The daily supply-chain scan could not run — bumblebee exited with a scan error (not a finding)."
+            printf '\n%s\n' "Most likely the upstream threat-intel catalog schema advanced past the pinned reader (the scanner binary is pinned for supply-chain safety; only catalogs float to HEAD). Bump the pinned BUMBLEBEE_VERSION across check-supply-chain.sh, ci.yml and supply-chain-daily.yml together."
+            printf '\n## Scanner output\n\n```\n'
+            tail -40 scan-output.log | sed 's/`/ /g; s/@/ /g'
+            printf '\n```\n\n'
+            printf 'Workflow: %s/%s/actions/runs/%s\n' "$SERVER_URL" "$REPOSITORY" "$RUN_ID"
+          } > "$BODY_FILE"
+          gh issue create \
+            --title "ops: daily supply-chain scan could not run (bump bumblebee)" \
+            --label "inbox" \
+            --body-file "$BODY_FILE"
+
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -106,6 +147,8 @@ jobs:
           if-no-files-found: warn
           retention-days: 90
 
-      - name: Fail if findings
+      - name: Fail the run on a finding or a scan error
+        # Both a real finding (1) and a scan-that-could-not-run (2) are actionable and
+        # must red the workflow — an alert issue alone is easy to miss.
         if: steps.scan.outputs.exit_code != '0'
         run: exit 1

@@ -51,12 +51,30 @@ fi
 
 echo "check-supply-chain: scanning $REPO_ROOT" >&2
 
+# A non-zero exit from the scanner ITSELF is a SCAN ERROR (an unsupported catalog
+# schema for the pinned reader, a parse failure, I/O) — NOT a compromised-dependency
+# finding. Surface it with a DISTINCT exit code (2) so callers (the daily workflow)
+# report "scan could not run — bump bumblebee" instead of a false compromise alarm.
+# This matters now that the daily scan floats catalogs to upstream HEAD: a schema
+# advance past the pinned reader must fail closed as a bump signal, never as a P1
+# "compromised dependency" (#850 security / #869). Real findings keep exit 1 below.
+set +e
 "$BUMBLEBEE_BIN" scan \
   --profile project \
   --root "$REPO_ROOT" \
   --output file \
   --output-file "$OUT_FILE" \
   $CATALOG_FLAG
+SCAN_RC=$?
+set -e
+if [ "$SCAN_RC" -ne 0 ]; then
+  echo "" >&2
+  echo "✗ check-supply-chain: bumblebee scan errored (rc=$SCAN_RC) — the scan could NOT run." >&2
+  echo "  Most likely the pinned reader (bumblebee $BUMBLEBEE_VERSION) does not support the" >&2
+  echo "  fetched catalog schema. Bump the pinned bumblebee version. This is a scan error," >&2
+  echo "  NOT a compromised-dependency finding." >&2
+  exit 2
+fi
 
 if [ -n "$CATALOG_FLAG" ]; then
   FINDINGS=$(grep -c '"record_type":"finding"' "$OUT_FILE" 2>/dev/null || true)

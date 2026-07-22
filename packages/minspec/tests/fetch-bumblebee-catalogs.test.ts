@@ -130,44 +130,66 @@ describe('fetch-bumblebee-catalogs.sh — pins catalog fetch to BUMBLEBEE_VERSIO
     return m ? m[1] : null;
   };
 
-  // #850 review (Architect, blocking): the two scans have OPPOSITE version needs.
-  //   • Per-PR gate (ci.yml) must be REPRODUCIBLE → pin scanner+catalogs to v0.1.2.
-  //   • Daily scan (supply-chain-daily.yml) is an EARLY-WARNING system → must read the
-  //     LATEST upstream catalogs, or it runs false-green on stale threat intel.
-  // Pinning the shared fetch script froze the daily scan too (it inherited the default),
-  // defeating its documented purpose. Fix: the per-PR references stay pinned & MUST agree
-  // (a scanner/catalog skew there re-opens the #836 schema break); the daily job drives
-  // BOTH its scanner install and its catalog fetch from ONE `BUMBLEBEE_VERSION: main` job
-  // env, so it tracks HEAD from a single source — closing #836's persistent skew (a
-  // pinned reader against advancing catalogs). It is not an absolute guarantee: `go
-  // install @main` (Go module proxy) and the live `gh api ref=main` fetch can differ by
-  // one commit across a HEAD advance — transient and self-correcting, not #836.
-  it('per-PR references stay pinned and agree (fetch script + check script + ci.yml)', () => {
-    const pinned = {
+  // yaml env value: `KEY: value   # comment` → 'value'
+  const ymlEnvOf = (file: string, key: string): string | null => {
+    const m = fs.readFileSync(file, 'utf-8').match(new RegExp(`^\\s*${key}:\\s*(\\S+)`, 'm'));
+    return m ? m[1] : null;
+  };
+
+  // #850 review (Security blocking + Architect): the two scans have different needs,
+  // resolved by decoupling the EXECUTED binary from the fetched catalog DATA.
+  //   • The scanner BINARY is pinned EVERYWHERE — ci.yml, both scripts, and the daily
+  //     job — so no scan ever `go install`s a floating `bumblebee@main`; a compromised
+  //     upstream cannot execute code in a job holding GITHUB_TOKEN + `issues: write` (#850).
+  //   • Only the daily scan's CATALOG ref floats (BUMBLEBEE_CATALOG_REF=main) for
+  //     early-warning freshness; catalog data is read, not executed, so the blast radius
+  //     is bounded to false results, and a schema advance past the pinned reader fails
+  //     closed and is surfaced as a bump signal (#869), never executed.
+  it('the executed bumblebee binary is pinned everywhere — ci.yml, scripts, AND daily (never floated)', () => {
+    const binary = {
       'fetch-bumblebee-catalogs.sh': scriptDefaultOf(FETCH_SCRIPT),
       'check-supply-chain.sh': scriptDefaultOf(CHECK_SCRIPT),
       'ci.yml': workflowLiteralOf(CI_WORKFLOW),
+      'supply-chain-daily.yml': ymlEnvOf(DAILY_WORKFLOW, 'BUMBLEBEE_VERSION'),
     };
-    expect(pinned['ci.yml'], 'ci.yml must keep a hardcoded bumblebee@vX pin').toBeTruthy();
-    const canonical = pinned['check-supply-chain.sh'];
-    // A single-sided bump (scanner without catalog, or ci.yml without the scripts)
-    // fails here — that skew is exactly the #836 schema break these pins prevent.
-    expect(Object.values(pinned).every((v) => v === canonical), JSON.stringify(pinned)).toBe(true);
+    // Every executed-binary reference must be a pinned release tag (vX...), never a branch.
+    for (const [where, ref] of Object.entries(binary)) {
+      expect(ref, `no pinned bumblebee binary ref in ${where}`).toBeTruthy();
+      expect(
+        /^v\d/.test(ref!),
+        `${where} binary ref '${ref}' must be a pinned vX tag, not a floating ref`,
+      ).toBe(true);
+    }
+    // ...and they must all agree — a single-sided bump re-opens the #836 schema break.
+    const canonical = binary['check-supply-chain.sh'];
+    expect(Object.values(binary).every((v) => v === canonical), JSON.stringify(binary)).toBe(true);
   });
 
-  it('daily scan tracks HEAD via a single lockstep ref (no frozen catalogs, no self-skew)', () => {
+  it('the daily scan floats ONLY the catalog data ref, never the executed binary (#850 security)', () => {
     const daily = fs.readFileSync(DAILY_WORKFLOW, 'utf-8');
-    // It must NOT carry a hardcoded scanner pin — that is what froze it (the regression).
-    expect(
-      workflowLiteralOf(DAILY_WORKFLOW),
-      'daily scan must not hardcode bumblebee@vX — it would freeze the early-warning catalogs',
-    ).toBeNull();
-    // Scanner install + catalog fetch derive from ONE job-level ref → lockstep.
-    expect(daily, 'daily job must set a single BUMBLEBEE_VERSION ref').toMatch(
-      /^\s*BUMBLEBEE_VERSION:\s*\S+/m,
-    );
-    expect(daily, 'daily scanner install must read that ref, not a literal').toMatch(
+    // Binary install reads the PINNED BUMBLEBEE_VERSION env, not a hardcoded/floating ref.
+    expect(daily, 'daily binary install must use ${BUMBLEBEE_VERSION} (pinned)').toMatch(
       /bumblebee@\$\{BUMBLEBEE_VERSION\}/,
+    );
+    // Catalog ref floats independently — set on the daily job, and NOT a pinned tag.
+    const catalogRef = ymlEnvOf(DAILY_WORKFLOW, 'BUMBLEBEE_CATALOG_REF');
+    expect(catalogRef, 'daily must set BUMBLEBEE_CATALOG_REF to float catalogs').toBeTruthy();
+    expect(
+      /^v\d/.test(catalogRef!),
+      `daily catalog ref '${catalogRef}' should track HEAD (a branch), not a pinned tag`,
+    ).toBe(false);
+    // The fetch script derives the catalog `ref=` from BUMBLEBEE_CATALOG_REF (data),
+    // defaulting to BUMBLEBEE_VERSION (binary) — the decoupling that lets catalogs float
+    // safely while the executed binary stays pinned.
+    const fetch = fs.readFileSync(FETCH_SCRIPT, 'utf-8');
+    expect(fetch, 'fetch script must default BUMBLEBEE_CATALOG_REF to BUMBLEBEE_VERSION').toMatch(
+      /BUMBLEBEE_CATALOG_REF="\$\{BUMBLEBEE_CATALOG_REF:-\$BUMBLEBEE_VERSION\}"/,
+    );
+    expect(fetch, 'catalog fetch must use ref=${BUMBLEBEE_CATALOG_REF}').toMatch(
+      /ref=\$\{BUMBLEBEE_CATALOG_REF\}/,
+    );
+    expect(fetch, 'catalog fetch must NOT ref off BUMBLEBEE_VERSION directly (that would re-couple)').not.toMatch(
+      /ref=\$\{BUMBLEBEE_VERSION\}/,
     );
   });
 });
