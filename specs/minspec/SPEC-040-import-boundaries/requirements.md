@@ -2,16 +2,26 @@
 id: SPEC-040
 type: requirements
 # 🔒 Once approved, hash-locked: approved bytes recorded in .minspec/approvals.json[SPEC-040].specHash. ANY edit voids approval (hash → stale) — re-run "MinSpec: Approve Spec". DR-012.
-status: specifying
+status: specifying  # advance→plan staled the approval when `implements:` was added (below); re-approve (Alt+A). DR-012.
 tier: T4
 product: minspec
 epic: EPIC-003  # SDD Core Methodology — code-change safety
 aspects: [architecture, tier-0, governance, validation]
 relates_to: [SPEC-038, DR-003, DR-014, DR-064]
+# Owned code (SPEC-038 FR-3). Finalised at Plan (design.md §File plan). `affects:` for the
+# moved/edited shared surfaces (eslint.config.mjs, status-bar, active-spec, approval-diff,
+# spec-tree-provider, spec-manager, spec-panel, the 3 command files, tsconfig, package.json)
+# is deliberately deferred to Implement — SPEC-038 edit-locks affects: paths identically to
+# implements:, so declaring live shared files under this stale spec would block concurrent edits.
+implements:
+  - packages/minspec/src/lib/spec-catalog.ts        # FR-4 — new Tier-0 catalog (extracted recursive listSpecs)
+  - packages/minspec/src/lib/spec-progress.ts        # FR-5a — new Tier-0 home for fromFrontmatter/computeProgress (OQ-4)
+  - packages/minspec/src/lib/import-cycle-check.ts   # FR-2 — in-repo cycle-graph builder + DFS (DR-064 §1)
+  - scripts/check-import-cycles.ts                    # FR-2 — CI runner (npx tsx); npm run check:cycles
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -40,7 +50,7 @@ The lesson SPEC-038 proved: **deterministic gates change behaviour; conventions 
   - `lib/**` MUST NOT import from `../views` or `../commands`, **value or type** (OQ-2: banning type too keeps the rule a simple "`lib` imports nothing from the UI layers"; note this needs `@typescript-eslint/no-restricted-imports` with `allowTypeImports:false` + a `parserOptions.project`, since base eslint can't see type-only imports — OQ-3).
   - No **deep** `@aiclarity/shared/*` imports anywhere — barrel-only (`@aiclarity/shared`), per DR-014. (Preventive — zero violations today.)
 - **FR-2 — No runtime import cycles (CI gate), at `error`.** A **value-import** cycle among `packages/minspec/src` modules fails CI. There are **zero today** (the three cycles are type-only-closed), so the gate ships green; it guards every future edit — including a `type`→value flip that would introduce one. Runs **offline** (INV-1).
-- **FR-3 — vscode-purity rule, shipped at `warn`.** Only `commands/**`, `views/**`, `extension.ts` should import `vscode`; a `lib/**` file importing it is flagged. **7 `lib/` files import vscode today** (`diagnostics`, `active-adr`, `resolve-folder`, `bridge`, `ai-usage-detector`, `active-spec`, `approval-diff`) with deep API use — relocating them is [#830](https://github.com/AIClarityAU/minspec/issues/830). Until then this rule is `warn`, not `error` (so `main` is never red); it flips to `error` when #830 lands.
+- **FR-3 — vscode-purity rule, shipped at `warn`.** Only `commands/**`, `views/**`, `extension.ts` should import the `vscode` **runtime**; a `lib/**` file that **value**-imports it is flagged. **Type-only vscode imports are exempt** — FR-3 uses `allowTypeImports: true`, deliberately the *opposite* of FR-1's views/commands ban: an `import type * as vscode` is erased at compile time, pulls in no vscode runtime, and so does not break Tier-0 purity (DR-014/INV-3). FR-1 bans type edges because a `lib→views` type import is still an architectural inversion one edit from a value edge; a `lib→vscode` type import carries no such runtime coupling, so it is allowed. **7 `lib/` files runtime (value)-import vscode today** (`diagnostics`, `active-adr`, `resolve-folder`, `bridge`, `ai-usage-detector`, `active-spec`, `approval-diff`) with deep API use — relocating them is [#830](https://github.com/AIClarityAU/minspec/issues/830). `lib/presence.ts` is **not** among them: it type-only-imports `vscode` for a `vscode.Event<number>` annotation and stays runtime-pure, so it is exempt and the count is 7, not 8. Until #830 this rule is `warn`, not `error` (so `main` is never red); it flips to `error` when #830 lands.
 - **FR-4 — Prerequisite refactor A: extract the recursive `listSpecs`.** Move the recursive `listSpecs()` from `views/spec-tree-provider.ts` into a new Tier-0 `lib/spec-catalog.ts`; the `approve`/`approve-active`/`validate` flows import it from `lib`. **Note the collision:** a *second, different* `listSpecs` (flat, top-level-only) already exists at `lib/spec-manager.ts:406` and is consumed by `views/spec-panel.ts` — Plan MUST disambiguate the two (rename one, or consolidate; the flat one misses nested specs, a latent `spec-panel` bug worth surfacing).
 - **FR-5 — Prerequisite refactor B: reverse the two `lib→views` inversions.**
   - Move `fromFrontmatter`/`computeProgress` from `views/status-bar` into `lib`, fixing `active-spec.ts`.
