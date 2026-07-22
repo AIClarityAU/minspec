@@ -61,6 +61,20 @@ function setActiveFile(fsPath: string | undefined): void {
     fsPath === undefined ? undefined : { document: { uri: { fsPath } } };
 }
 
+/**
+ * Point the active editor at a SPEC-029 "changes since approval" diff-side URI:
+ * scheme `minspec-approval-diff`, path `/<side>/<base64url(specPath)>`. The spec
+ * path is encoded, never an fsPath — the case Alt+A must decode to approve the
+ * spec on screen rather than fall through to the recent-viewed picker.
+ */
+function setActiveDiffEditor(specPath: string, side: 'approved' | 'current' = 'current'): void {
+  const enc = Buffer.from(specPath, 'utf-8').toString('base64url');
+  const p = `/${side}/${enc}`;
+  (vscode.window as { activeTextEditor: unknown }).activeTextEditor = {
+    document: { uri: { scheme: 'minspec-approval-diff', path: p, fsPath: p } },
+  };
+}
+
 /** Set (or clear) the active markdown-preview tab the picker guard inspects. */
 function setPreviewTab(label: string | undefined): void {
   (vscode.window as { tabGroups: { activeTabGroup: { activeTab: unknown } } }).tabGroups.activeTabGroup.activeTab =
@@ -146,6 +160,26 @@ describe('approveActiveCommand — editor routing (direct, resolved node)', () =
     await approveActiveCommand();
     expect(executeCommand).toHaveBeenCalledExactlyOnceWith(APPROVE_COMMAND.spec, {
       spec: spec('SPEC-001', filePath),
+    });
+  });
+
+  it('routes the spec BEHIND a "changes since approval" diff to approveSpec (Alt+A on the diff view)', async () => {
+    const filePath = '/tmp/ws/specs/minspec/SPEC-021/requirements.md';
+    listSpecsMock.mockReturnValue([spec('SPEC-021', filePath)]);
+    setActiveDiffEditor(filePath); // diff URI, not a file:// fsPath
+    await approveActiveCommand();
+    expect(executeCommand).toHaveBeenCalledExactlyOnceWith(APPROVE_COMMAND.spec, {
+      spec: spec('SPEC-021', filePath),
+    });
+  });
+
+  it('decodes the spec from the APPROVED diff side too (either pane is focusable)', async () => {
+    const filePath = '/tmp/ws/specs/minspec/SPEC-021/requirements.md';
+    listSpecsMock.mockReturnValue([spec('SPEC-021', filePath)]);
+    setActiveDiffEditor(filePath, 'approved');
+    await approveActiveCommand();
+    expect(executeCommand).toHaveBeenCalledExactlyOnceWith(APPROVE_COMMAND.spec, {
+      spec: spec('SPEC-021', filePath),
     });
   });
 

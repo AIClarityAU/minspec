@@ -30,6 +30,7 @@ import {
   resolveDiffSide,
   ApprovalDiffContentProvider,
   showChangesSinceApproval,
+  specPathFromApprovalDiffUri,
 } from '../src/lib/approval-diff';
 
 let tmp: string;
@@ -169,6 +170,32 @@ describe('resolveDiffSide', () => {
     const enc = Buffer.from(specPath, 'utf-8').toString('base64url');
     const uri = { path: `/current/${enc}` } as unknown as vscode.Uri;
     expect(provider.provideTextDocumentContent(uri)).toContain('Original body.');
+  });
+});
+
+// ── specPathFromApprovalDiffUri — decode the spec behind a diff (Alt+A) ──────
+
+describe('specPathFromApprovalDiffUri', () => {
+  const build = (side: string, p: string) =>
+    ({
+      scheme: 'minspec-approval-diff',
+      path: `/${side}/${Buffer.from(p, 'utf-8').toString('base64url')}`,
+    }) as unknown as vscode.Uri;
+
+  it('decodes the spec path from either diff side (inverse of buildDiffUri)', () => {
+    const p = '/ws/specs/minspec/SPEC-021/requirements.md';
+    expect(specPathFromApprovalDiffUri(build('current', p))).toBe(p);
+    expect(specPathFromApprovalDiffUri(build('approved', p))).toBe(p);
+  });
+
+  it('round-trips a spec path containing spaces losslessly', () => {
+    const p = '/ws/specs/minspec/SPEC WITH SPACE/requirements.md';
+    expect(specPathFromApprovalDiffUri(build('current', p))).toBe(p);
+  });
+
+  it('returns undefined for a non-diff scheme (e.g. a real file URI)', () => {
+    const uri = { scheme: 'file', path: '/ws/x/requirements.md' } as unknown as vscode.Uri;
+    expect(specPathFromApprovalDiffUri(uri)).toBeUndefined();
   });
 });
 

@@ -7,6 +7,7 @@ import { classifyApprovablePath, type ApprovableKind } from '../lib/approvable';
 import { recentApprovables } from '../lib/recent-approvables';
 import { getApprovalStatus } from '../lib/approval';
 import { folderForFile } from '../lib/resolve-folder';
+import { specPathFromApprovalDiffUri } from '../lib/approval-diff';
 
 /**
  * Unified, context-aware Approve/Accept (Alt+A) — issues #303, #377.
@@ -64,9 +65,20 @@ export function classifyNode(node: unknown): ApprovableKind | undefined {
   return undefined;
 }
 
-/** The active editor's file path, or undefined when no editor is focused. */
+/**
+ * The approvable file path behind the active editor, or undefined when no editor
+ * is focused. Normally the editor's own file path; but when the active editor is
+ * a SPEC-029 "changes since approval" diff — a virtual document whose URI encodes
+ * the spec path rather than being a `file:` URI — the real spec path is decoded
+ * from it, so Alt+A approves the spec being diffed instead of falling through to
+ * the recent-viewed picker (the diff URI is un-classifiable, and viewing it never
+ * records the spec as recent). The keybinding fires on `editorTextFocus`, so the
+ * focused diff pane is a real TextEditor and `activeTextEditor` carries its URI.
+ */
 function activeEditorPath(): string | undefined {
-  return vscode.window.activeTextEditor?.document?.uri?.fsPath;
+  const uri = vscode.window.activeTextEditor?.document?.uri;
+  if (!uri) return undefined;
+  return specPathFromApprovalDiffUri(uri) ?? uri.fsPath;
 }
 
 function decisionsDirOverride(): { decisionsDir: string } | undefined {
