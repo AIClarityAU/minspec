@@ -493,7 +493,7 @@ Auto-merge has been **deny-by-default** since DR-033 §6: a PR holds for a human
 
 ## [DR-062 — Cross-artifact approval validity — depends_on becomes an input to staleness, ADR/epic get hash-locked records, and no-implementing-unapproved moves to an actor-agnostic gate](DR-062.md)
 
-*Status: proposed · Date: 2026-07-16*
+*Status: accepted · Date: 2026-07-16*
 
 <!-- dr-summary:DR-062 auto=ff15b49d4cfd -->
 A read-only audit of the approvables system established three facts, each with file:line evidence: 1. **Approval validity is per-artifact-content only.** A spec's approval binds a canonical hash of *its own* content (approval.ts:306-313). depends_on / relates_to / supersedes edges are parsed and walked, but **only** for corruption detection and priority ordering (next-task.ts:262-395) — never as an input to approval validity. So when an upstream approvable a spec depends on changes, the dependent stays approved, signed off against content that no longer…
