@@ -261,4 +261,35 @@ esac
   it('clean scan → exit 0', () => {
     expect(runCheck('clean')).toBe(0);
   });
+
+  const runInstallCase = (goBin: string): number => {
+    try {
+      execFileSync('sh', [CHECK_SCRIPT], {
+        env: {
+          PATH: process.env.PATH,
+          HOME: process.env.HOME,
+          BUMBLEBEE_BIN: path.join(scratch, 'no-such-bumblebee'),
+          GO_BIN: goBin,
+          BUMBLEBEE_CATALOGS: catDir,
+        },
+        cwd: scratch,
+        encoding: 'utf-8',
+        stdio: 'pipe',
+      });
+      return 0;
+    } catch (e: unknown) {
+      return (e as { status?: number }).status ?? -1;
+    }
+  };
+
+  it('missing bumblebee + FAILING Go install → exit 2 (could-not-run, not a finding)', () => {
+    const goFail = path.join(binDir, 'go');
+    fs.writeFileSync(goFail, '#!/usr/bin/env bash\nexit 1\n');
+    fs.chmodSync(goFail, 0o755);
+    expect(runInstallCase(goFail)).toBe(2);
+  });
+
+  it('missing bumblebee + MISSING Go toolchain → exit 2', () => {
+    expect(runInstallCase(path.join(scratch, 'no-such-go'))).toBe(2);
+  });
 });

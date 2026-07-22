@@ -15,6 +15,14 @@
 #
 # Read-only: bumblebee never executes package managers or reads source files.
 # https://github.com/perplexityai/bumblebee
+#
+# Exit codes (#869 — callers MUST branch on these, not just "nonzero"):
+#   0 = scan ran to completion, no threat-catalog matches
+#   1 = scan ran to completion AND found a real threat-catalog match (a finding)
+#   2 = scan did NOT run to completion (missing Go toolchain, bumblebee install
+#       failure, or scanner crash / unsupported catalog schema) — an infra/tooling
+#       problem, NOT a security finding. Callers must not file a "compromised package
+#       detected" alert for this code; it means "bump/repair bumblebee", not "compromise".
 
 set -e
 
@@ -31,15 +39,21 @@ CATALOG_DIR="${BUMBLEBEE_CATALOGS:-$HOME/.cache/bumblebee/catalogs}"
 OUT_DIR="$REPO_ROOT/.cache/supply-chain"
 OUT_FILE="$OUT_DIR/$(date +%Y%m%d-%H%M%S).ndjson"
 
-# Self-install bumblebee on first run.
+# Self-install bumblebee on first run. A missing toolchain or a failed install is a
+# scan-COULD-NOT-RUN condition (exit 2), never a finding — the scan never happened.
 if [ ! -x "$BUMBLEBEE_BIN" ]; then
   if [ ! -x "$GO_BIN" ]; then
     echo "check-supply-chain: Go toolchain not found at $GO_BIN" >&2
     echo "  required for bumblebee install. Set GO_BIN or install Go 1.25+." >&2
-    exit 1
+    echo "  (exit 2: could not run — not a threat finding)" >&2
+    exit 2
   fi
   echo "check-supply-chain: installing bumblebee $BUMBLEBEE_VERSION..." >&2
-  GOBIN="$HOME/go/bin" "$GO_BIN" install "github.com/perplexityai/bumblebee/cmd/bumblebee@$BUMBLEBEE_VERSION"
+  if ! GOBIN="$HOME/go/bin" "$GO_BIN" install "github.com/perplexityai/bumblebee/cmd/bumblebee@$BUMBLEBEE_VERSION"; then
+    echo "check-supply-chain: bumblebee@$BUMBLEBEE_VERSION install failed" >&2
+    echo "  (exit 2: could not run — not a threat finding; the pinned install target may be unreachable)" >&2
+    exit 2
+  fi
 fi
 
 mkdir -p "$OUT_DIR" "$CATALOG_DIR"
