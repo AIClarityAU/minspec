@@ -1,19 +1,20 @@
 ---
 id: SPEC-031
 type: requirements
-status: specifying
+status: implementing
 tier: T3
 product: minspec
 epic: EPIC-010  # Reviewer Across All Approvables
 aspects: [reviewer, hitl, never-wrong, signpost]
 depends_on: [SPEC-012]
 relates_to: [SPEC-010, SPEC-024, DR-047, DR-033, DR-041, DR-023]
+implements: [scripts/review-pr.sh, .github/workflows/ai-review.yml, scripts/review-decide.sh]  # per-type reviewer prompts (FR-1/#527), per-type recording (FR-3/#530), ordering gate (FR-5/#529). FR-4 resolver owned by SPEC-012; extension stays Tier-0.
 phases:
-  specify: done          # requirements drafted 2026-07-05
-  clarify: done          # OQ-1..4 resolved 2026-07-06 (Paul Harvey) — see Clarify section
-  plan: not-started      # awaiting human Approve Spec before Plan
-  tasks: not-started
-  implement: not-started
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # MinSpec — Independent AI Review Across Every Approvable Type — Requirements
