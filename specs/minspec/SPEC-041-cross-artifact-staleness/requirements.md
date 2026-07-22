@@ -6,13 +6,15 @@ status: specifying
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — approval validity
-aspects: [approval, staleness, tier-0, hitl, never-wrong]
+aspects: [approval, staleness, tier-0, hitl, never-wrong, ux, architecture]
 depends_on: [SPEC-022, SPEC-012]
 relates_to: [SPEC-029, DR-062, DR-034, DR-012]
+implements: [packages/minspec/src/lib/approval.ts, packages/minspec/src/lib/adr-manager.ts, packages/minspec/src/lib/epic-manager.ts, packages/minspec/tests/cross-artifact-staleness.test.ts]
+affects: [packages/shared/src/next-task.ts, packages/shared/src/canonical.ts, packages/minspec/src/lib/approval-store.ts, packages/minspec/src/lib/artifact-graph.ts, packages/minspec/src/views/spec-tree-provider.ts, packages/minspec/src/extension.ts, packages/minspec/src/lib/approval-diff.ts]
 phases:
   specify: done
   clarify: done   # FR-OQ1/OQ2 resolved (proposed defaults), OQ3/OQ4 confirmed — drafted by Claude (agent) 2026-07-17 per maintainer "you draft"; human ratifies at Approve
-  plan: pending
+  plan: done   # design.md — approach, Architecture/Contracts/UX artifacts, slice plan, 0-dep budget. Drafted by Claude (agent) 2026-07-22; human ratifies at Approve
   tasks: pending
   implement: pending
 ---
