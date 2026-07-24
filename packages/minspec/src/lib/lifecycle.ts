@@ -97,8 +97,9 @@ export type ExplicitTerminal = 'archived' | 'superseded' | undefined;
  *   | explicitTerminal set (archived) | that terminal (human act, INV-6)        |
  *   | all phases pending              | new                                     |
  *   | not approved                    | specifying (unapproved cannot pass, INV-1) |
- *   | approved + all required done    | done (v1: implement-phase signal, #116) |
- *   | approved + implement in progress| implementing                           |
+ *   | approved + all required done             | done                           |
+ *   | approved + implement in progress/done    | implementing                   |
+ *   | approved + plan/tasks, implement pending | planning (#886, DR-067)        |
  *
  * The gate and validator read THIS, never the literal `status:` line — so
  * `implementing`/`done` is structurally impossible without a current approval
@@ -112,8 +113,11 @@ export function deriveStatus(
   if (explicitTerminal) return explicitTerminal; // INV-6 — human act, never inferred
   if (allPending(phases)) return 'new';
   if (approvalState !== 'approved') return 'specifying'; // INV-1 — unapproved cannot pass
-  if (allRequiredDone(phases)) return 'done'; // v1: see #116 deferral (implement-phase signal)
-  return 'implementing';
+  if (allRequiredDone(phases)) return 'done';
+  // #886 (DR-067): 'implementing' only once the implement phase has actually started;
+  // an approved spec still in plan/tasks is 'planning' — honest, not a false signpost.
+  if (phases.implement === 'in-progress' || phases.implement === 'done') return 'implementing';
+  return 'planning';
 }
 
 /**
@@ -130,6 +134,13 @@ export function deriveStatus(
  * - Current phase is specify or clarify → 'specifying'
  * - Current phase is plan, tasks, or implement → 'implementing'
  * - (archived is set explicitly, not derived from phases)
+ *
+ * DR-067 §3 — FREEZE-GATE TWIN, DO NOT ALIGN TO deriveStatus/#886. This keeps
+ * plan/tasks in the 'implementing' band on purpose: it mirrors the Python
+ * `phase_intent_status` (spec-gate.py) that decides the freeze range. Narrowing it
+ * so plan/tasks return 'planning' would drop unapproved plan/tasks specs OUT of the
+ * gate range → their impl code becomes editable → silently reopens the DR-362 hole.
+ * The #886 'planning' split lives ONLY in deriveStatus (the signpost), never here.
  */
 export function getSpecStatus(phases: PhaseState): SpecStatus {
   if (allPending(phases)) return 'new';

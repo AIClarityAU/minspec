@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import type { Tier, Phase } from './config';
 import { PHASES } from './config';
-import { getSpecStatus, phasesForApproval } from './lifecycle';
+import { deriveStatus, phasesForApproval } from './lifecycle';
 import { bodyStatusToken } from './status-parity';
 
 /** Status of an individual phase */
@@ -13,7 +13,7 @@ export type PhaseStatus = 'pending' | 'in-progress' | 'done' | 'skipped';
  * status (e.g. the tree's status lanes, SPEC-015 INV-1) import it so adding a
  * status here forces a decision everywhere it matters.
  */
-export const SPEC_STATUSES = ['new', 'specifying', 'implementing', 'done', 'archived', 'superseded'] as const;
+export const SPEC_STATUSES = ['new', 'specifying', 'planning', 'implementing', 'done', 'archived', 'superseded'] as const;
 
 /** Lifecycle status of the entire spec */
 export type SpecStatus = typeof SPEC_STATUSES[number];
@@ -578,25 +578,32 @@ export function advanceSpecToImplementing(filePath: string): SpecStatus {
   }
 
   const newPhases = phasesForApproval(parseSpec(content).frontmatter.phases);
-  const target = getSpecStatus(newPhases);
+  // DR-067 (#886): write the APPROVAL-AWARE derived status (deriveStatus), not the
+  // phases-only getSpecStatus — so an approved-but-pre-implement spec is stamped
+  // `planning` (matching what the validator/tree derive; no mirror-drift), and only
+  // a spec whose implement phase has started is stamped `implementing`. This caller
+  // runs solely at approval, so the 'approved' verdict is correct here.
+  const target = deriveStatus(newPhases, 'approved', undefined);
   setSpecPhases(filePath, newPhases);
 
   // Derive the status from the PERSISTED bytes (never the in-memory map) so the
-  // `status:` line and the phases-derived status are identical by construction.
-  const persistedStatus = getSpecStatus(
+  // `status:` line and the derived status are identical by construction.
+  const persistedStatus = deriveStatus(
     parseSpec(fs.readFileSync(filePath, 'utf-8')).frontmatter.phases,
+    'approved',
+    undefined,
   );
   const status = setSpecStatus(filePath, persistedStatus);
 
   // Enforced invariant (defense-in-depth): the persisted `status:` line MUST equal
-  // the status its persisted `phases:` map derives. True by construction above;
-  // asserting it turns any future regression into a loud throw, never a silent
-  // self-contradicting file (#148).
+  // the status its persisted `phases:` map derives (approval-aware). True by
+  // construction above; asserting it turns any future regression into a loud throw,
+  // never a silent self-contradicting file (#148).
   const after = parseSpec(fs.readFileSync(filePath, 'utf-8')).frontmatter;
-  if (after.status !== getSpecStatus(after.phases)) {
+  if (after.status !== deriveStatus(after.phases, 'approved', undefined)) {
     throw new Error(
       `advanceSpecToImplementing left ${filePath} desynced: status=${after.status} ` +
-        `but its phases derive ${getSpecStatus(after.phases)} (should be impossible).`,
+        `but its phases derive ${deriveStatus(after.phases, 'approved', undefined)} (should be impossible).`,
     );
   }
 

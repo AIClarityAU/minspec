@@ -1154,8 +1154,9 @@ function cap(s: string): string {
 const LIFECYCLE_RANK: Partial<Record<SpecStatus, number>> = {
   new: 0,
   specifying: 1,
-  implementing: 2,
-  done: 3,
+  planning: 2, // DR-067 (#886): approved, pre-implement — ranks above specifying, below implementing
+  implementing: 3,
+  done: 4,
 };
 
 /**

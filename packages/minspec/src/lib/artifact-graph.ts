@@ -64,6 +64,11 @@ const EPIC_STATUS_MAP = {
 const SPEC_STATUS_MAP = {
   new: 'new',
   specifying: 'specifying',
+  // DR-067 (#886): 'planning' (approved, pre-implement) maps to the resolver's
+  // 'implementing' — an approved-planning spec IS in-flight, so every resolver seam
+  // (answer-OQ, isAdvancing, spec-ahead-of-epic, flooring) treats it exactly as before.
+  // This mapping is behaviour-neutral for next-task and MUST stay 'implementing'.
+  planning: 'implementing',
   implementing: 'implementing',
   done: 'done',
   archived: 'archived',

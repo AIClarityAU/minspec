@@ -530,4 +530,12 @@ Two held rules contradict: rule #8 / DR-051 §4a says never move a shared checko
 <!-- dr-summary:DR-066 auto=fc5103ae0bbb -->
 Three times in this repo, a merge gate that *looked* present enforced **nothing**, and the symptom each time was identical — "every merge needs --admin", i.e. the required gate was being bypassed on every landing: 1. **#560** — the ai-review required-check context was pinned to the **wrong GitHub App id**, so the ruleset waited on a check that could never post → unsatisfiable → every merge a bypass. 2. **#810** — ai-review.yml posted the load-bearing ai-review/pass commit status **best-effort** (gh…
 <!-- /dr-summary:DR-066 -->
+
+## [DR-067 — Add a 'planning' lifecycle status — approved-but-pre-implementation is not 'implementing' (fixes the #886 false signpost)](DR-067.md)
+
+*Status: proposed · Date: 2026-07-24*
+
+<!-- dr-summary:DR-067 auto=29722db03da9 -->
+deriveStatus — the authoritative, approval-aware SIGNPOST derivation (DR-034) — returns implementing for **any approved spec that is not all-done**: Approval sets the first build-band phase (plan) to in-progress (phasesForApproval), so a spec approved while still at **Plan/Tasks — implement phase pending, zero code** derives to implementing. That is a **DR-003 false signpost** — the project's stated worst defect: the signpost claims code is being written when none exists. The deterministic literal-vs-derived validator cannot catch it (literal == derived); only the…
+<!-- /dr-summary:DR-067 -->
 <!-- minspec:dr-index:end -->

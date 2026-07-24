@@ -7,7 +7,7 @@ import {
   setSpecPhases,
   advanceSpecToImplementing,
 } from '../src/lib/spec';
-import { phasesForApproval, getSpecStatus } from '../src/lib/lifecycle';
+import { phasesForApproval, getSpecStatus, deriveStatus } from '../src/lib/lifecycle';
 import type { PhaseState } from '../src/lib/lifecycle';
 
 // ─── #148 regression: approval must keep the literal `status:` line and the
@@ -168,15 +168,16 @@ phases:
 `,
     );
     const result = advanceSpecToImplementing(p);
-    expect(result).toBe('implementing');
+    // DR-067 (#886): approved + plan in-progress (implement not started) → 'planning'.
+    expect(result).toBe('planning');
     const parsed = parseSpec(fs.readFileSync(p, 'utf-8'));
     // Status line flipped.
-    expect(parsed.frontmatter.status).toBe('implementing');
+    expect(parsed.frontmatter.status).toBe('planning');
     // Phases map advanced in lockstep.
     expect(parsed.frontmatter.phases.specify).toBe('done');
     expect(parsed.frontmatter.phases.plan).toBe('in-progress');
-    // THE INVARIANT: literal status === status derived from the persisted phases.
-    expect(getSpecStatus(parsed.frontmatter.phases)).toBe(parsed.frontmatter.status);
+    // THE INVARIANT (approval-aware, DR-067): literal status === deriveStatus(persisted phases).
+    expect(deriveStatus(parsed.frontmatter.phases, 'approved', undefined)).toBe(parsed.frontmatter.status);
   });
 
   it('falls back to a status-only flip when the spec has no phases block', () => {
@@ -211,8 +212,9 @@ phases:
     advanceSpecToImplementing(p);
     const parsed = parseSpec(fs.readFileSync(p, 'utf-8'));
     expect(parsed.frontmatter.phases.clarify).toBe('skipped');
-    expect(parsed.frontmatter.status).toBe('implementing');
-    expect(getSpecStatus(parsed.frontmatter.phases)).toBe('implementing');
+    // DR-067: approved + plan in-progress (implement not started) → 'planning'.
+    expect(parsed.frontmatter.status).toBe('planning');
+    expect(deriveStatus(parsed.frontmatter.phases, 'approved', undefined)).toBe('planning');
   });
 
   // ─── #148 MAJOR (degenerate block). A phases block carrying only an early-band
@@ -238,17 +240,18 @@ phases:
 # Title
 `,
     );
-    // The advance is un-realizable without desync, so it is REJECTED (the gate) —
-    // NOT silently written as a status the bytes won't reproduce. Pre-fix this did
-    // not throw (it returned 'implementing'), so this expectation was red.
-    expect(() => advanceSpecToImplementing(p)).toThrow(/implementing-band|desync|disagree/i);
+    // DR-067 (#886): the writer now derives via the approval-aware deriveStatus, which
+    // returns 'planning' for an approved spec whose implement phase has not started —
+    // a value the persisted (specify-only) bytes REPRODUCE, so there is no #148 desync
+    // and no throw. (The degenerate gate still fires for a would-be 'implementing' the
+    // bytes can't persist; a specify-only block never targets 'implementing'.)
+    expect(advanceSpecToImplementing(p)).toBe('planning');
 
-    // THE INVARIANT, whatever the outcome: the persisted `status:` line equals the
-    // status its persisted `phases:` map derives — the file is never left desynced.
-    // Pre-fix the bytes read `status: implementing` while the phases derived
-    // `specifying`, so this too was red.
+    // THE INVARIANT (approval-aware, DR-067): the persisted `status:` line equals the
+    // status its persisted `phases:` map derives — never desynced.
     const after = parseSpec(fs.readFileSync(p, 'utf-8')).frontmatter;
-    expect(after.status).toBe(getSpecStatus(after.phases));
+    expect(after.status).toBe('planning');
+    expect(after.status).toBe(deriveStatus(after.phases, 'approved', undefined));
   });
 
   // #667: advanceSpecToImplementing (the Approve Spec write path) flipped the
@@ -278,8 +281,9 @@ phases:
     );
     advanceSpecToImplementing(p);
     const after = fs.readFileSync(p, 'utf-8');
-    expect(after).toContain('status: implementing');
-    expect(after).toContain('**Status:** Implementing (SDD Specify phase)');
+    // DR-067: approved + plan in-progress → 'planning' (body line synced in lockstep, #667).
+    expect(after).toContain('status: planning');
+    expect(after).toContain('**Status:** Planning (SDD Specify phase)');
   });
 
   it('syncs the body **Status:** line for the no-phases-block fallback (#667)', () => {

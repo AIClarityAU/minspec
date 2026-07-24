@@ -571,8 +571,16 @@ describe('SPEC-022 deriveStatus — INV-1 (approval gates implementing/done)', (
     expect(deriveStatus(allDone, 'stale', undefined)).toBe('specifying');
   });
 
-  it('returns implementing only when approved AND mid-implementation', () => {
-    expect(deriveStatus(inImpl, 'approved', undefined)).toBe('implementing');
+  it('returns planning when approved but the implement phase has NOT started (#886, DR-067)', () => {
+    // approved, still in plan/tasks, implement pending → honest 'planning', not a false 'implementing'.
+    expect(deriveStatus(inImpl, 'approved', undefined)).toBe('planning');
+  });
+
+  it('returns implementing only when approved AND the implement phase has started (#886 boundary)', () => {
+    const implStarted = makePhases({
+      specify: 'done', clarify: 'done', plan: 'done', tasks: 'done', implement: 'in-progress',
+    });
+    expect(deriveStatus(implStarted, 'approved', undefined)).toBe('implementing');
   });
 
   it('returns done only when approved AND all required phases complete', () => {
@@ -651,21 +659,30 @@ describe('SPEC-022 getSpecStatus — preview-only shim (regression)', () => {
   // phase — INV-1). That divergence is exactly why deriveStatus, not getSpecStatus,
   // is the authoritative status; getSpecStatus stays a phases-only TRANSITION
   // preview. This test pins both the agreement AND the intended divergence.
-  it('agrees with deriveStatus on new/done/mid-impl; diverges (by design) in the specify/clarify range', () => {
-    // Agreement cases.
+  it('agrees with deriveStatus on new/done/implement-started; diverges (by design) once #886 splits plan/tasks off as planning', () => {
+    // Agreement cases: new, all-done, and implement phase in-progress.
     expect(getSpecStatus(createInitialPhases())).toBe(
       deriveStatus(createInitialPhases(), 'approved', undefined),
     ); // both 'new'
-    const midImpl = makePhases({ specify: 'done', clarify: 'skipped', plan: 'in-progress' });
-    expect(getSpecStatus(midImpl)).toBe(deriveStatus(midImpl, 'approved', undefined)); // both 'implementing'
     const allDone = makePhases({
       specify: 'done', clarify: 'done', plan: 'done', tasks: 'done', implement: 'done',
     });
     expect(getSpecStatus(allDone)).toBe(deriveStatus(allDone, 'approved', undefined)); // both 'done'
+    const implStarted = makePhases({
+      specify: 'done', clarify: 'done', plan: 'done', tasks: 'done', implement: 'in-progress',
+    });
+    expect(getSpecStatus(implStarted)).toBe(deriveStatus(implStarted, 'approved', undefined)); // both 'implementing'
 
-    // Intended divergence: specify in-progress.
+    // Intended divergence #1 (#886/DR-067): plan/tasks in progress, implement pending.
+    // getSpecStatus is phase-position (plan → 'implementing', the FREEZE-GATE band, unchanged);
+    // deriveStatus is approval+implement-aware → 'planning'. This divergence is the whole point.
+    const midImpl = makePhases({ specify: 'done', clarify: 'skipped', plan: 'in-progress' });
+    expect(getSpecStatus(midImpl)).toBe('implementing');
+    expect(deriveStatus(midImpl, 'approved', undefined)).toBe('planning');
+
+    // Intended divergence #2: specify/clarify in progress (approved but not building → planning).
     const earlyPhase = makePhases({ specify: 'in-progress' });
     expect(getSpecStatus(earlyPhase)).toBe('specifying'); // legacy preview (current-phase signal)
-    expect(deriveStatus(earlyPhase, 'approved', undefined)).toBe('implementing'); // approval-driven
+    expect(deriveStatus(earlyPhase, 'approved', undefined)).toBe('planning');
   });
 });
