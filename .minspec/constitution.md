@@ -3,6 +3,7 @@
 ## Invariants
 
 - Core functionality works offline — no network calls without explicit user consent
+- No silent gate — a required or merge-gating check fails visibly, never best-effort: no load-bearing gate signal is written with a swallowed error (`|| true`), a missing or errored witness fails the gate closed and visibly (never silently passes or stops evaluating), and no required check hinges on a single producer that one permission/config gap can disable (provide an independent second witness). (DR-066; instances #560/#810/#857.)
 
 ## Principles
 
