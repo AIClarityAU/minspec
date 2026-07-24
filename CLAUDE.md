@@ -14,6 +14,7 @@ These rules must never be violated. All changes must preserve them.
 > Summarized from `.minspec/constitution.md` — each line is the invariant's lead sentence. See the constitution for the full text, rationale, and SPEC/DR references; edit invariants there, not here.
 
 1. Core functionality works offline — no network calls without explicit user consent
+2. No silent gate — a required or merge-gating check fails visibly, never best-effort (DR-066)
 
 ## SDD Methodology
 
