@@ -1137,10 +1137,17 @@ describe('validateSpec — INV-4 literal/derived status mirror drift', () => {
   });
 
   it('no drift warning when the literal matches the derived status', () => {
-    // Approved + plan in progress → derives 'implementing', literal agrees.
-    const src = spec({ status: 'implementing', phases: IMPL_PHASES }, FULL_T3);
+    // DR-067 (#886): approved + plan in progress (implement not started) → derives 'planning'; literal agrees.
+    const src = spec({ status: 'planning', phases: IMPL_PHASES }, FULL_T3);
     const result = validateSpec(parseSpec(src), DEFAULT_CONFIG, { approvalState: 'approved' });
     expect(result.violations.some((v) => v.rule === 'status.mirror-drift')).toBe(false);
+  });
+
+  it('drifts when an approved pre-implement spec still claims implementing (#886/DR-067)', () => {
+    // The exact #886 false signpost: literal 'implementing' but approved + plan-in-progress derives 'planning'.
+    const src = spec({ status: 'implementing', phases: IMPL_PHASES }, FULL_T3);
+    const result = validateSpec(parseSpec(src), DEFAULT_CONFIG, { approvalState: 'approved' });
+    expect(result.violations.some((v) => v.rule === 'status.mirror-drift')).toBe(true);
   });
 
   it('the gate reads DERIVED status: an unapproved spec deriving to specifying does not drift when its literal is specifying', () => {

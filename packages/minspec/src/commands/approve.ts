@@ -260,9 +260,9 @@ export async function approveSpecCommand(
     // the status line and the phases-derived status cannot diverge (#148).
     const wasPreImpl =
       parsed.frontmatter.status === 'new' || parsed.frontmatter.status === 'specifying';
-    if (wasPreImpl) {
-      advanceSpecToImplementing(spec.filePath); // mirror; phases-aware, no longer affects the hash
-    }
+    // mirror; phases-aware, no longer affects the hash. Returns the new derived status
+    // (DR-067 / #886: 'planning' when the implement phase hasn't started, else 'implementing').
+    const newStatus = wasPreImpl ? advanceSpecToImplementing(spec.filePath) : undefined;
     recordApproval(rootDir, spec.filePath, spec.tier, email);
 
     // Commit-on-approve (SPEC-022 FR-1): the flipped doc + attributed record
@@ -281,7 +281,7 @@ export async function approveSpecCommand(
 
     const base =
       (wasPreImpl
-        ? `MinSpec: ✓ Approved ${spec.id} for implementation (status → implementing).`
+        ? `MinSpec: ✓ Approved ${spec.id} for implementation (status → ${newStatus ?? 'planning'}).`
         : `MinSpec: ✓ Approved ${spec.id} for implementation.`) + commitSuffix;
 
     // Refresh the tree BEFORE the follow-up toast: the toast carries action

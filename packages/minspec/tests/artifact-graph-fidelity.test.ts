@@ -203,6 +203,23 @@ describe('INV-FIDELITY: buildArtifactGraph maps the workspace exactly', () => {
     expect(byId['SPEC-004']).toMatchObject({ status: 'archived' });
   });
 
+  it('maps an approved pre-implement spec (derives planning) to the resolver "implementing" — DR-067/#886', () => {
+    // Approved, plan in-progress, implement NOT started → deriveStatus (the signpost) yields
+    // 'planning'; the resolver maps 'planning' → 'implementing' (SPEC_STATUS_MAP), so every
+    // next-task seam (answer-OQ, isAdvancing, spec-ahead-of-epic, flooring) treats it as
+    // in-flight — behaviour-neutral. This LOCKS that mapping: a future change to
+    // planning→'specifying' (compile-valid) would fail here, not silently drop OQ surfacing.
+    const p = write('specs/p/SPEC-011-plan/requirements.md', specFile({
+      id: 'SPEC-011', tier: 'T3', status: 'planning',
+      phases: { specify: 'done', clarify: 'done', plan: 'in-progress', tasks: 'pending', implement: 'pending' },
+    }));
+    approveSpec(root, p, 'T3', 'tester@example.com', fixedClock);
+    const g = buildArtifactGraph(root);
+    expect(g.specs.find((s) => s.id === 'SPEC-011')).toMatchObject({
+      status: 'implementing', approvalState: 'approved',
+    });
+  });
+
   it('maps ADR status + epic faithfully', () => {
     const g = buildArtifactGraph(root);
     const byId = Object.fromEntries(g.adrs.map((a) => [a.id, a]));

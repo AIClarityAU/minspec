@@ -48,7 +48,11 @@ export async function findActiveSpec(rootDir: string): Promise<string | null> {
     try {
       const content = fs.readFileSync(filePath, 'utf-8');
       const spec = parseSpec(content);
-      if (spec.frontmatter.status === 'implementing' || spec.frontmatter.status === 'specifying') {
+      if (
+        spec.frontmatter.status === 'implementing' ||
+        spec.frontmatter.status === 'planning' || // DR-067 (#886): approved, pre-implement is still active
+        spec.frontmatter.status === 'specifying'
+      ) {
         return filePath;
       }
     } catch {

@@ -187,6 +187,10 @@ interface StatusGroup {
 // a lane here.
 export const STATUS_GROUPS: StatusGroup[] = [
   { label: 'Specifying', statuses: ['new', 'specifying'], defaultExpanded: true },
+  // `planning` (DR-067 / #886): approved, but the implement phase has not started —
+  // its own active lane between Specifying and Implementing (honest, not a false
+  // 'implementing'). Approval is orthogonal (shown via the row icon, not the lane).
+  { label: 'Planning', statuses: ['planning'], defaultExpanded: true },
   { label: 'Implementing', statuses: ['implementing'], defaultExpanded: true },
   { label: 'Done', statuses: ['done'], defaultExpanded: false },
   { label: 'Archived', statuses: ['archived'], defaultExpanded: false },
@@ -245,6 +249,7 @@ function statusIcon(status: SpecStatus): string {
   switch (status) {
     case 'new': return 'circle-outline';
     case 'specifying': return 'sync';
+    case 'planning': return 'checklist'; // DR-067: approved, pre-implement
     case 'implementing': return 'sync';
     case 'done': return 'check';
     case 'archived': return 'archive';
