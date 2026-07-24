@@ -1,9 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-040-import-boundaries/requirements.md",
-  "specHash": "313b4151f67b03e0aec93116ffa5010aefc41abd16885ec5fcaccdf844875972",
-  "approvedAt": "2026-07-22T05:25:00.007Z",
+  "specHash": "ad52ff3ab00b468b0dd785e104b571a6900e9aebdcc94c7e09c94396e1478cb8",
+  "approvedAt": "2026-07-22T07:22:27.772Z",
   "approvedBy": "github@harvest316.com",
   "tier": "T4",
   "migrated": false,
-  "baselineBlob": "aaf7f5ddb800119443faf8711ce45d011d09f721"
+  "baselineBlob": "a745896c26a4852e9e52c83e1994a16333a1ee76"
 }
