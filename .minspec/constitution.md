@@ -43,6 +43,17 @@ within a severity class — never an LLM judgement (DR-039, DR-019).
    agent — reproducible, testable, auditable (Tier-0, DR-004 / DR-014).
 7. **G-7 — Editor-native SDD / CDD / WSJF.** Methodology enforced *in the editor at write
    time*, not bolted on as a separate CLI or IDE (the differentiator vs spec-kit / Kiro).
+8. **G-8 — Git transparency (hide VCS complexity).** MinSpec handles git *for* the
+   developer. The primary checkout stays **clean, on `main`, synced with origin, and
+   holding the latest docs** at (almost) all times — the only expected diff is what the
+   dev directly modified. A non-git-literate dev never has to understand or resolve
+   branches, rebases, stranded approvals, or push rejections: MinSpec routes approvals to
+   origin, and syncs / reconciles the checkout transparently. This must remain fully
+   **interoperable** — the same repo is safe for git-literate teammates working with
+   normal git at the same time (no bespoke VCS, no rewriting shared history). Tracked:
+   [#880](https://github.com/AIClarityAU/minspec/issues/880) (approvals stop stranding),
+   [#888](https://github.com/AIClarityAU/minspec/issues/888) (autonomous sync/merge loop),
+   [#890](https://github.com/AIClarityAU/minspec/issues/890) (harness-refresh consistency).
 
 ## Phases
 
