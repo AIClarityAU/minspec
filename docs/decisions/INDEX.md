@@ -501,7 +501,7 @@ A read-only audit of the approvables system established three facts, each with f
 
 ## [DR-063 — The `awaiting-approval` queue signal — one positive "your turn" label, single-owner, decoupled from the AI-failure path](DR-063.md)
 
-*Status: proposed · Date: 2026-07-16*
+*Status: accepted · Date: 2026-07-16*
 
 <!-- dr-summary:DR-063 auto=78ca4574c42b -->
 The independent AI reviewer (DR-033 §6) records a PR verdict as ai-review:{pass,changes,blocked,pending}. On any non-pass, .github/workflows/ai-review.yml **also** applies needs-human-review **unconditionally at t=0** (ai-review.yml L568-574 and L606-608). Two problems compound: 1. **ai-review:changes is overloaded.** It means both *"the reviewer read the code and wants specific fixes"* (substantive, AI-remediable) and *"the review could not produce a trustworthy green"* (procedural fail-closed — garbled/injected/truncated verdict, ESCALATE, workflow error). Different meanings, one label.
