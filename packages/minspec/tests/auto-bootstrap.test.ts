@@ -813,6 +813,175 @@ describe('auto-bootstrap', () => {
   });
 
   // =========================================================================
+  // #883: per-signature answer memory — an already-answered bootstrap prompt is
+  // NOT re-offered until its underlying state signature genuinely changes.
+  //
+  // Before this fix runBootstrap persisted a preference ONLY on the "Don't ask
+  // again" branch. Clicking the primary action or dismissing with the X recorded
+  // NOTHING, so the step stayed eligible every activation — re-flooding onboarding
+  // toasts on each vsix upgrade (the refresh step in particular, whose drift
+  // re-fires on every template bump).
+  // =========================================================================
+
+  describe('runBootstrap() — per-signature answer memory (#883)', () => {
+    /**
+     * A controllable step whose signature and skip flag we can drive. `shouldRun`
+     * mirrors the real steps (honours its DONT_ASK boolean) so the forever-skip
+     * path is modelled faithfully; the ONLY thing that stops a re-offer between
+     * activations is the new per-signature suppression.
+     */
+    function makeSigStep(overrides: Partial<BootstrapStep> = {}): BootstrapStep {
+      return {
+        kind: 'classify',
+        shouldRun: (_root, prefs) => !prefs.skipClassifyPrompt,
+        message: 'MinSpec: signature-test prompt?',
+        primaryAction: 'Do It',
+        commandId: 'minspec.classify',
+        skipPrefKey: 'skipClassifyPrompt',
+        signature: () => 'sig-A',
+        ...overrides,
+      };
+    }
+
+    it('T3a: picking the PRIMARY action records the signature → same signature is NOT re-offered', async () => {
+      const step = makeSigStep({ signature: () => 'sig-A' });
+
+      const first = makeVsCodeStub({ response: 'Do It' });
+      const r1 = await runBootstrap(tmpDir, first.stub, [step]);
+      expect(r1.offered).toBe('classify');
+      expect(r1.choice).toBe('Do It');
+      expect(first.showPrompt).toHaveBeenCalledTimes(1);
+      // The answer is persisted keyed by the step's skip flag.
+      expect(loadPreferences(tmpDir).answeredSignatures?.skipClassifyPrompt).toBe('sig-A');
+
+      // Second activation, identical underlying state → suppressed (no re-offer).
+      const second = makeVsCodeStub({ response: 'Do It' });
+      const r2 = await runBootstrap(tmpDir, second.stub, [step]);
+      expect(second.showPrompt).not.toHaveBeenCalled();
+      expect(r2.offered).toBeNull();
+    });
+
+    it('T3b: DISMISSING (X / undefined) records the signature → same signature is NOT re-offered', async () => {
+      const step = makeSigStep({ signature: () => 'sig-A' });
+
+      const first = makeVsCodeStub({ response: undefined });
+      const r1 = await runBootstrap(tmpDir, first.stub, [step]);
+      expect(r1.offered).toBe('classify');
+      expect(r1.choice).toBeNull();
+      expect(first.showPrompt).toHaveBeenCalledTimes(1);
+      expect(loadPreferences(tmpDir).answeredSignatures?.skipClassifyPrompt).toBe('sig-A');
+
+      const second = makeVsCodeStub({ response: undefined });
+      const r2 = await runBootstrap(tmpDir, second.stub, [step]);
+      expect(second.showPrompt).not.toHaveBeenCalled();
+      expect(r2.offered).toBeNull();
+    });
+
+    it('T3c: a CHANGED signature re-offers the step (new underlying state legitimately re-asks)', async () => {
+      let sig = 'sig-A';
+      const step = makeSigStep({ signature: () => sig });
+
+      const first = makeVsCodeStub({ response: undefined });
+      await runBootstrap(tmpDir, first.stub, [step]);
+      expect(first.showPrompt).toHaveBeenCalledTimes(1);
+
+      // Simulate a genuine state change (e.g. a new template bump) → new signature.
+      sig = 'sig-B';
+      const second = makeVsCodeStub({ response: undefined });
+      const r2 = await runBootstrap(tmpDir, second.stub, [step]);
+      expect(second.showPrompt).toHaveBeenCalledTimes(1);
+      expect(r2.offered).toBe('classify');
+    });
+
+    it('T3d: "Don\'t ask again" stays a forever-skip even after the signature changes', async () => {
+      let sig = 'sig-A';
+      const step = makeSigStep({ signature: () => sig });
+
+      const first = makeVsCodeStub({ response: "Don't ask again" });
+      const r1 = await runBootstrap(tmpDir, first.stub, [step]);
+      expect(r1.choice).toBe("Don't ask again");
+      expect(loadPreferences(tmpDir).skipClassifyPrompt).toBe(true);
+
+      // A brand-new signature must NOT resurrect a DONT_ASK'd prompt.
+      sig = 'sig-B';
+      const second = makeVsCodeStub({ response: undefined });
+      const r2 = await runBootstrap(tmpDir, second.stub, [step]);
+      expect(second.showPrompt).not.toHaveBeenCalled();
+      expect(r2.offered).toBeNull();
+    });
+
+    it('T3e: back-compat — a preferences.json WITHOUT answeredSignatures still offers on first run', async () => {
+      // A legacy prefs file that predates the answeredSignatures field.
+      savePreferences(tmpDir, { skipInitPrompt: false });
+      expect(loadPreferences(tmpDir).answeredSignatures).toBeUndefined();
+
+      const step = makeSigStep({ signature: () => 'sig-A' });
+      const { stub, showPrompt } = makeVsCodeStub({ response: undefined });
+      const r = await runBootstrap(tmpDir, stub, [step]);
+      expect(showPrompt).toHaveBeenCalledTimes(1);
+      expect(r.offered).toBe('classify');
+    });
+
+    it('T3f (I5): recording one step\'s signature MERGES — it does not clobber a sibling entry', async () => {
+      // A pre-existing answer for the epic-backfill step must survive when the
+      // classify step records its own signature (map is keyed by skipPrefKey).
+      savePreferences(tmpDir, { answeredSignatures: { skipBackfillPrompt: 'epics-sig' } });
+
+      const step = makeSigStep({
+        skipPrefKey: 'skipClassifyPrompt',
+        signature: () => 'classify-sig',
+      });
+      const { stub } = makeVsCodeStub({ response: undefined });
+      await runBootstrap(tmpDir, stub, [step]);
+
+      const sigs = loadPreferences(tmpDir).answeredSignatures ?? {};
+      expect(sigs.skipBackfillPrompt).toBe('epics-sig'); // preserved
+      expect(sigs.skipClassifyPrompt).toBe('classify-sig'); // added
+    });
+
+    it('T3g (I3): the REAL refresh step suppresses a re-offer for the SAME drift, but re-asks on a genuinely new template bump', async () => {
+      const refreshStep = BOOTSTRAP_STEPS.find((s) => s.kind === 'refresh')!;
+      expect(refreshStep.signature).toBeDefined();
+
+      // Establish a real project + baseline, then simulate a template bump by
+      // moving one recorded section hash so drift fires.
+      generateHarnessFiles(tmpDir);
+      const relPath = TEMPLATE_OUTPUT_PATHS['CLAUDE.md'];
+      const good = loadTemplateBaseline(tmpDir);
+      saveTemplateBaseline(tmpDir, {
+        ...good,
+        [relPath]: { ...good[relPath], Overview: 'stale-from-older-template-A' },
+      });
+      expect(hasHarnessDrift(tmpDir)).toBe(true); // precondition: refresh really fires
+
+      // 1) First activation: refresh offered, user dismisses (X). Signature recorded.
+      const a1 = makeVsCodeStub({ response: undefined });
+      const r1 = await runBootstrap(tmpDir, a1.stub, [refreshStep]);
+      expect(r1.offered).toBe('refresh');
+      expect(a1.showPrompt).toHaveBeenCalledTimes(1);
+
+      // 2) Same drift on the next activation → suppressed (the #883 re-flood fix).
+      const a2 = makeVsCodeStub({ response: undefined });
+      const r2 = await runBootstrap(tmpDir, a2.stub, [refreshStep]);
+      expect(a2.showPrompt).not.toHaveBeenCalled();
+      expect(r2.offered).toBeNull();
+
+      // 3) A genuinely NEW template bump: a DIFFERENT section now drifts, so the
+      //    drift signature changes and refresh legitimately re-asks (drift
+      //    detector preserved — I3, do NOT over-suppress).
+      saveTemplateBaseline(tmpDir, {
+        ...good,
+        [relPath]: { ...good[relPath], Commands: 'stale-from-newer-template-B' },
+      });
+      expect(hasHarnessDrift(tmpDir)).toBe(true);
+      const a3 = makeVsCodeStub({ response: undefined });
+      const r3 = await runBootstrap(tmpDir, a3.stub, [refreshStep]);
+      expect(a3.showPrompt).toHaveBeenCalledTimes(1);
+      expect(r3.offered).toBe('refresh');
+    });
+  });
+
+  // =========================================================================
   // Git watcher path filter
   // =========================================================================
 
