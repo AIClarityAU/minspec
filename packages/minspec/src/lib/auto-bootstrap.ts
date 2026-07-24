@@ -50,6 +50,22 @@ export interface BootstrapPreferences {
    * cross-suppresses the epic-backfill or DESIGN.md-stub offers (and vice-versa).
    */
   readonly skipTasksMdPrompt?: boolean;
+  /**
+   * Per-(prompt, state-signature) answer memory (#883). Maps a step's unique
+   * `skipPrefKey` (e.g. `"skipRefreshPrompt"`) → the state SIGNATURE the user last
+   * answered for. A step is suppressed on later activations while its current
+   * signature equals the recorded one, so an already-answered prompt is NOT
+   * re-offered until the underlying state genuinely changes (e.g. a NEW template
+   * bump makes drift differ). This is a SOFTER memory than the `skip*` booleans:
+   *   - the `skip*` booleans (from "Don't ask again") are a forever-skip;
+   *   - `answeredSignatures` is "you already dealt with THIS state" and self-clears
+   *     when the state moves.
+   * Additive + optional: a preferences.json without it behaves exactly as before
+   * (no suppression) until a fresh answer is recorded (#883 back-compat). Keyed by
+   * the UNIQUE `skipPrefKey`, never by `kind`, so the three `kind: 'backfill'`
+   * steps never cross-suppress.
+   */
+  readonly answeredSignatures?: Record<string, string>;
 }
 
 const PREFS_FILENAME = 'preferences.json';
@@ -163,6 +179,54 @@ export function hasHarnessDrift(rootDir: string): boolean {
   }
 
   return false;
+}
+
+/**
+ * A stable, pure-local-FS signature of the CURRENT harness-drift state (#883).
+ *
+ * Captures every drifted `(relPath, heading, currentTemplateHash)` tuple — the
+ * exact sections `hasHarnessDrift` would trip on — sorted and JSON-encoded. The
+ * signature is used as the refresh step's per-answer key: it CHANGES iff the set
+ * of drifted sections OR the bundled template's hash for any of them changes —
+ * i.e. iff the bundled template genuinely moves upstream again. So dismissing the
+ * refresh prompt suppresses it only until the NEXT real template bump, at which
+ * point the signature differs and refresh legitimately re-asks (I3 — never
+ * over-suppress; the drift detector's purpose is preserved).
+ *
+ * Deterministic + offline (Tier 0). Returns `''` when there is no drift (or the
+ * project is uninitialized / has no baseline) — in practice the refresh step's
+ * `signature` is only consulted while `hasHarnessDrift` is already true, so the
+ * value is non-empty when it matters.
+ */
+export function harnessDriftSignature(rootDir: string): string {
+  if (!isMinspecInitialized(rootDir)) return '';
+
+  const baseline = loadTemplateBaseline(rootDir);
+  if (Object.keys(baseline).length === 0) return '';
+
+  const current = computeTemplateBaseline();
+  const drifted: string[] = [];
+
+  for (const relPath of Object.keys(current)) {
+    if (!fs.existsSync(path.join(rootDir, relPath))) continue;
+
+    const recordedHashes = baseline[relPath];
+    const currentHashes = current[relPath];
+    if (!recordedHashes || !currentHashes) continue;
+
+    for (const heading of Object.keys(currentHashes)) {
+      const recorded = recordedHashes[heading];
+      const now = currentHashes[heading];
+      if (recorded && now && recorded !== now) {
+        // Key on the CURRENT template hash so a further upstream bump to the same
+        // section (a new `now`) yields a new signature and re-asks.
+        drifted.push(`${relPath} ${heading} ${now}`);
+      }
+    }
+  }
+
+  drifted.sort();
+  return JSON.stringify(drifted);
 }
 
 /**
@@ -443,6 +507,19 @@ export interface BootstrapStep {
    * toast already promised the AI pass, so the command must not re-ask (#213).
    */
   readonly commandArg?: unknown;
+  /**
+   * Optional per-answer state SIGNATURE (#883). Returns a stable, pure-local-FS,
+   * offline (Tier 0) string capturing the state that made this step eligible.
+   * Once the user answers a prompt (primary action, "Always", or dismiss), the
+   * signature is recorded under `skipPrefKey` in `answeredSignatures`, and the
+   * step is suppressed on later activations while its current signature is
+   * unchanged — killing the re-flood of an already-answered prompt (notably the
+   * refresh step on every vsix upgrade). A genuine state change yields a new
+   * signature, so the prompt legitimately re-asks. When absent, the step has no
+   * signature memory and behaves exactly as before (offered whenever `shouldRun`
+   * and no `skip*` boolean suppresses it).
+   */
+  readonly signature?: (rootDir: string) => string;
 }
 
 const DONT_ASK = "Don't ask again";
@@ -458,6 +535,9 @@ export const BOOTSTRAP_STEPS: readonly BootstrapStep[] = [
     primaryAction: 'Initialize',
     commandId: 'minspec.init',
     skipPrefKey: 'skipInitPrompt',
+    // Uninitialized is a single binary state — once initialized, `shouldRun` is
+    // already false, so a constant is enough (#883).
+    signature: () => 'uninit',
   },
   {
     kind: 'refresh',
@@ -470,6 +550,10 @@ export const BOOTSTRAP_STEPS: readonly BootstrapStep[] = [
     primaryAction: 'Refresh',
     commandId: 'minspec.initRefresh',
     skipPrefKey: 'skipRefreshPrompt',
+    // The correctness keystone (#883): the signature is a digest of the CURRENT
+    // drift, so dismissing suppresses re-flood on every upgrade but a GENUINE new
+    // template bump changes the drift → new signature → refresh re-asks (I3).
+    signature: (rootDir) => harnessDriftSignature(rootDir),
   },
   {
     kind: 'classify',
@@ -483,6 +567,16 @@ export const BOOTSTRAP_STEPS: readonly BootstrapStep[] = [
     commandId: 'minspec.classify',
     skipPrefKey: 'skipClassifyPrompt',
     alwaysAction: 'Always',
+    // The `.git/index` mtime is exactly the signal `hasUnclassifiedChanges` keys
+    // on: unchanged since the last answer → same staging state → don't re-ask;
+    // new staging activity bumps the mtime → new signature → re-ask (#883).
+    signature: (rootDir) => {
+      try {
+        return String(fs.statSync(path.join(rootDir, '.git', 'index')).mtimeMs);
+      } catch {
+        return 'no-index';
+      }
+    },
   },
   {
     kind: 'backfill',
@@ -496,6 +590,24 @@ export const BOOTSTRAP_STEPS: readonly BootstrapStep[] = [
     commandId: 'minspec.backfillEpics',
     skipPrefKey: 'skipBackfillPrompt',
     commandArg: { aiConsent: true },
+    // Gap identity: whether an epic registry exists + how many artifacts are
+    // untagged. Adding/removing untagged artifacts (or establishing the registry)
+    // moves the signature → re-ask; an unchanged gap stays suppressed (#883).
+    signature: (rootDir) => {
+      let untagged = 0;
+      try {
+        untagged = collectArtifacts(rootDir).filter((a) => !a.epic).length;
+      } catch {
+        // best-effort — fall through to a stable default
+      }
+      let hasRegistry = false;
+      try {
+        hasRegistry = listEpics(rootDir).length > 0;
+      } catch {
+        // best-effort
+      }
+      return `${hasRegistry ? 'reg' : 'noreg'}:${untagged}`;
+    },
   },
   {
     // #315 backfill: existing projects keep the empty DESIGN.md stub that #206
@@ -514,6 +626,9 @@ export const BOOTSTRAP_STEPS: readonly BootstrapStep[] = [
     primaryAction: 'Remove',
     commandId: '',
     skipPrefKey: 'skipDesignStubPrompt',
+    // A pristine stub is a single binary state — once removed or given real
+    // content, `shouldRun` is already false, so a constant is enough (#883).
+    signature: () => 'pristine',
     action: (rootDir) => {
       // Re-check immediately before deleting: the file may have gained content
       // between detection and the user's click. Never delete real content.
@@ -542,6 +657,19 @@ export const BOOTSTRAP_STEPS: readonly BootstrapStep[] = [
     primaryAction: 'Create tasks.md',
     commandId: '',
     skipPrefKey: 'skipTasksMdPrompt',
+    // Identity of the gap: the sorted set of spec ids still missing a tasks.md.
+    // Creating one (or a new split-spec appearing) changes the set → re-ask; an
+    // unchanged gap stays suppressed (#883).
+    signature: (rootDir) => {
+      try {
+        return findSpecDirsMissingTasksMd(rootDir)
+          .map((s) => s.id)
+          .sort()
+          .join(',');
+      } catch {
+        return '';
+      }
+    },
     action: (rootDir) => {
       // Re-resolve at click time — a dir may have gained a tasks.md since
       // detection. scaffoldTasksMd is itself idempotent (skips an existing file).
@@ -561,9 +689,16 @@ export const BOOTSTRAP_STEPS: readonly BootstrapStep[] = [
  *   - "Always" (when offered) → enables auto-run for the step, then runs once
  *   - "Primary" → runs the associated command once
  *   - "Don't ask again" → writes the corresponding skip flag to preferences
- *   - Dismissing the toast (the X) → no-op (eligible again next activation).
- *     There is no explicit "Not Now": the toast's close button already does
- *     exactly that, so a dedicated button was redundant.
+ *   - Dismissing the toast (the X) → eligible again only when the underlying
+ *     state changes. There is no explicit "Not Now": the toast's close button
+ *     already does exactly that, so a dedicated button was redundant.
+ *
+ * On EVERY resolution that is not "Don't ask again" (primary action, "Always",
+ * in-process action, or dismiss), the step's state SIGNATURE is recorded under
+ * its `skipPrefKey` in `answeredSignatures` (#883). The next activation suppresses
+ * the step while that signature is unchanged, so an already-answered prompt is not
+ * re-offered until its state genuinely moves (e.g. a NEW template bump re-arms the
+ * refresh prompt). "Don't ask again" remains a forever-skip via its `skip*` flag.
  *
  * Returns a result object describing what (if anything) was offered, so tests
  * can assert behavior without inspecting vscode mocks.
@@ -572,6 +707,28 @@ export interface BootstrapResult {
   readonly enabled: boolean;
   readonly offered: PromptKind | null;
   readonly choice: string | null;
+}
+
+/**
+ * Persist the step's current state signature under its unique `skipPrefKey` (#883).
+ *
+ * MERGES into any existing `answeredSignatures` map by spreading it first: although
+ * `savePreferences` deep-merges TOP-LEVEL keys, a nested `answeredSignatures` object
+ * in the update would REPLACE the whole map, so sibling entries (other steps'
+ * answers) must be carried forward here. Keyed by `skipPrefKey` — never `kind` — so
+ * the three `kind: 'backfill'` steps never cross-suppress (I5). A step with no
+ * `signature` records nothing (it keeps its prior, signature-less behavior).
+ */
+function recordAnsweredSignature(rootDir: string, step: BootstrapStep): void {
+  if (!step.signature) return;
+  const sig = step.signature(rootDir);
+  const current = loadPreferences(rootDir);
+  savePreferences(rootDir, {
+    answeredSignatures: {
+      ...(current.answeredSignatures ?? {}),
+      [step.skipPrefKey]: sig,
+    },
+  });
 }
 
 export async function runBootstrap(
@@ -591,6 +748,17 @@ export async function runBootstrap(
   for (const step of steps) {
     if (!step.shouldRun(rootDir, prefs)) continue;
 
+    // #883: suppress a step that was ALREADY answered for its current state
+    // signature — an already-answered prompt is not re-offered until the
+    // underlying state genuinely changes. This is deliberately additional to (and
+    // separate from) the `skip*` boolean path, which `shouldRun` already enforces
+    // as a forever-skip; the boolean path is left completely untouched here. A
+    // step with no `signature` is never suppressed by this gate.
+    if (step.signature) {
+      const sig = step.signature(rootDir);
+      if (prefs.answeredSignatures?.[step.skipPrefKey] === sig) continue;
+    }
+
     // "Always" first (most prominent / default), then the one-shot primary,
     // then the opt-out. No "Not Now" — the toast's X already dismisses.
     const actions = [
@@ -607,6 +775,7 @@ export async function runBootstrap(
         await vscode.enableAutoClassify(rootDir);
       }
       await vscode.executeCommand(step.commandId, rootDir, step.commandArg);
+      recordAnsweredSignature(rootDir, step);
     } else if (choice === step.primaryAction) {
       if (step.action) {
         // In-process effect (e.g. DESIGN.md stub removal, #315) — no command.
@@ -617,8 +786,15 @@ export async function runBootstrap(
         // specific arg (backfill → AI consent).
         await vscode.executeCommand(step.commandId, rootDir, step.commandArg);
       }
+      recordAnsweredSignature(rootDir, step);
     } else if (choice === DONT_ASK) {
+      // Forever-skip via the boolean flag (unchanged, honored by `shouldRun`).
       savePreferences(rootDir, { [step.skipPrefKey]: true });
+    } else {
+      // Dismissed (the X / `undefined`) or any other resolution — still an
+      // answer to THIS state, so record the signature so it is not re-flooded
+      // until the state changes (#883).
+      recordAnsweredSignature(rootDir, step);
     }
 
     return {
