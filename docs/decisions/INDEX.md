@@ -525,7 +525,7 @@ Two held rules contradict: rule #8 / DR-051 §4a says never move a shared checko
 
 ## [DR-066 — No silent gate — a required/merge-gating check must fail visibly, never best-effort, and never hinge on a single disableable producer](DR-066.md)
 
-*Status: proposed · Date: 2026-07-22*
+*Status: accepted · Date: 2026-07-22*
 
 <!-- dr-summary:DR-066 auto=fc5103ae0bbb -->
 Three times in this repo, a merge gate that *looked* present enforced **nothing**, and the symptom each time was identical — "every merge needs --admin", i.e. the required gate was being bypassed on every landing: 1. **#560** — the ai-review required-check context was pinned to the **wrong GitHub App id**, so the ruleset waited on a check that could never post → unsatisfiable → every merge a bypass. 2. **#810** — ai-review.yml posted the load-bearing ai-review/pass commit status **best-effort** (gh…
