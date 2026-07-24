@@ -272,6 +272,12 @@ export const MINSPEC_GITIGNORE_ENTRIES = [
   // consumer dequeues it. Never committed — it is machine-local intent, not
   // ground truth (the approval sidecar under .minspec/approvals/ is that).
   '.minspec/queue/',
+  // Harness-owned worktree checkouts (created by the agent harness / EnterWorktree).
+  // Transient, machine-local, auto-removed — must never be tracked, or a stray
+  // second checkout shows up as untracked noise in the source-control panel (G-8:
+  // keep the primary checkout clean). Not under .claude/commands/, so unaffected by
+  // the slash-command-shim carve-out some repos keep in their own .gitignore.
+  '.claude/worktrees/',
 ];
 
 /**
