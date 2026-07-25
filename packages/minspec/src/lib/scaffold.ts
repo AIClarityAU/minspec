@@ -741,8 +741,8 @@ export function checkManagedRegionMarkers(
 }
 
 /**
- * Record the hash manifest from the FINAL on-disk bytes, verify it against disk,
- * and persist it LAST (SPEC-043 D1/D2/D7 + Slice 2 gate).
+ * Record the hash manifest from the FINAL on-disk bytes, run the fail-closed
+ * self-check, and persist it LAST (SPEC-043 D1/D2/D7 + Slice 2 gate).
  *
  * MUST be called only after EVERY write path — the section-merge loop,
  * `seedConstitution`, and `generateSlashCommandShims`'s AGENTS.md injection — has
@@ -750,12 +750,21 @@ export function checkManagedRegionMarkers(
  * touched a file. For each present {@link TEMPLATE_OUTPUT_PATHS} file, records
  * `sectionHashesFromMarkdown(disk)`; a tracked file absent on disk is skipped, and
  * any key not in the current tracked set is pruned by rebuilding the manifest from
- * scratch (FR-3a stale-key prune). Then the fail-closed self-check
- * ({@link verifyGeneratedHashesConsistent}) re-reads disk and asserts consistency;
- * on ANY present-and-tracked mismatch it THROWS before `saveHashes`, so nothing is
- * persisted and the previous last-good manifest survives (INV-3 / D4).
+ * scratch (FR-3a stale-key prune).
+ *
+ * That recording IS the active #890 fix: the manifest is a faithful hash of final
+ * disk. The subsequent {@link verifyGeneratedHashesConsistent} call is a FAIL-CLOSED
+ * TRIPWIRE, not active runtime protection — it re-reads the SAME final disk with the
+ * SAME helper the recording just used, so in this correct code it is green by
+ * construction and CANNOT throw here (Slice 1 guarantees record == verify). It earns
+ * its place by failing closed — throwing before `saveHashes`, so nothing is persisted
+ * and the last-good manifest survives (INV-3 / D4) — only if a FUTURE refactor
+ * reintroduces a record-before-write path (recording the manifest from a non-disk
+ * source, or before a later mutator) that makes the recorded set diverge from final
+ * disk. The predicate is exported and reusable for that guarantee and for an
+ * independent commit/CI-time consistency check (#760); it does not defend #890 alone.
  */
-function recordVerifyAndSaveManifest(rootDir: string): void {
+export function recordVerifyAndSaveManifest(rootDir: string): void {
   const allHashes: Record<string, SectionHashes> = {};
   for (const name of TEMPLATE_NAMES) {
     const relativePath = TEMPLATE_OUTPUT_PATHS[name];
@@ -849,9 +858,10 @@ export function generateHarnessFiles(rootDir: string): void {
   // the writer for the AGENTS.md table.
   generateSlashCommandShims(rootDir, { tools });
 
-  // SPEC-043 D1/D2/D7 + Slice 2: record the manifest from the FINAL on-disk bytes
-  // (after the AGENTS.md slash injection), verify it against disk, and persist
-  // LAST — abort-without-persist on any mismatch.
+  // SPEC-043 D1/D2/D7: record the manifest from the FINAL on-disk bytes (after the
+  // AGENTS.md slash injection) and persist LAST — the active #890 fix. The embedded
+  // self-check is a fail-closed tripwire (green by construction here; guards a future
+  // record-before-write regression, INV-3 / D4), not standalone #890 protection.
   recordVerifyAndSaveManifest(rootDir);
 }
 
@@ -937,9 +947,10 @@ export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
   // path above, so this no longer owns them.
   generateSlashCommandShims(rootDir, { tools });
 
-  // SPEC-043 D1/D2/D7 + Slice 2: record the manifest from the FINAL on-disk bytes
-  // (after the AGENTS.md slash injection), verify against disk, and persist LAST —
-  // abort-without-persist on any mismatch (INV-3 / D4).
+  // SPEC-043 D1/D2/D7: record the manifest from the FINAL on-disk bytes (after the
+  // AGENTS.md slash injection) and persist LAST — the active #890 fix. The embedded
+  // self-check is a fail-closed tripwire (green by construction here; guards a future
+  // record-before-write regression, INV-3 / D4), not standalone #890 protection.
   recordVerifyAndSaveManifest(rootDir);
 
   return managedRegionWarnings;

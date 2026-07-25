@@ -10,13 +10,14 @@
  * Test tiers (per design.md):
  *   T0  INV-1 manifest == hash(disk) for every tracked file (incl. AGENTS.md post-injection)
  *   T0  INV-2 refresh-vs-refresh idempotence: R2 bumps zero hashes (files + JSON byte-identical)
- *   T0  INV-3 the gate flags an injected manifest≠disk mismatch; the write path does not persist it
+ *   T0  INV-3 predicate flags an injected manifest≠disk mismatch (read-only); and the write-path
+ *          gate (recordVerifyAndSaveManifest) aborts-without-persist when record/disk actually diverge
  *   T0  INV-4 determinism: N settled refreshes yield a byte-identical manifest
  *   T1  sectionHashesFromMarkdown / verifyGeneratedHashesConsistent contract truth-tables
  *   T3  AC-1 / sealbox #21 internal `\n\n\n` normalization gap (red-before-green)
  *   T3  AC-7 AGENTS.md post-merge injection ordering (FR-6, red-before-green)
  */
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
@@ -25,12 +26,45 @@ import {
   hashSection,
   mergeFile,
   loadHashes,
-  saveHashes,
   sectionHashesFromMarkdown,
   verifyGeneratedHashesConsistent,
 } from '../src/lib/merge-refresh';
-import { generateHarnessFiles, refreshHarnessFiles } from '../src/lib/scaffold';
+import {
+  generateHarnessFiles,
+  refreshHarnessFiles,
+  recordVerifyAndSaveManifest,
+} from '../src/lib/scaffold';
 import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS } from '../src/lib/template-registry';
+
+// ── fs divergence harness (write-path throw coverage, INV-3/AC-3) ─────────────
+// `vi.spyOn(fs, 'readFileSync')` cannot redefine the non-configurable ESM namespace,
+// so to genuinely exercise recordVerifyAndSaveManifest's fail-closed abort we mock 'fs'
+// file-wide as a pure passthrough that — ONLY when armed — corrupts the SECOND read of
+// one target file (the VERIFY read) so it diverges from the FIRST (RECORD) read. All
+// library fs imports are `import * as fs from 'fs'`, so the namespace override reaches
+// scaffold.ts and merge-refresh.ts. Disarmed (`targetAbs === null`) it is transparent,
+// so every other test in this file is unaffected.
+const fsDivergence = vi.hoisted(() => ({ targetAbs: null as string | null, reads: 0 }));
+
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  const nodePath = await import('path');
+  const readFileSync = ((p: unknown, opts?: unknown) => {
+    const real = (actual.readFileSync as (a: unknown, b?: unknown) => unknown)(p, opts);
+    if (
+      fsDivergence.targetAbs &&
+      typeof p === 'string' &&
+      nodePath.resolve(p) === fsDivergence.targetAbs &&
+      typeof real === 'string'
+    ) {
+      fsDivergence.reads += 1;
+      // 1st read = RECORD (real bytes); 2nd = VERIFY (diverged) → record ≠ disk.
+      if (fsDivergence.reads >= 2) return `${real}DIVERGED_BY_TEST\n`;
+    }
+    return real;
+  }) as typeof actual.readFileSync;
+  return { ...actual, readFileSync };
+});
 
 const hashesPath = (root: string) =>
   path.join(root, '.minspec', 'generated-hashes.json');
@@ -237,7 +271,13 @@ describe('SPEC-043 invariants (T0)', () => {
     expect(manifestR2).toBe(manifestR1);
   });
 
-  it('INV-3 / AC-3: an inconsistent manifest is caught and the last-good manifest is NOT clobbered', () => {
+  it('INV-3 (predicate): a bad-hash manifest is flagged, the read-only predicate never writes, and a real refresh stays consistent', () => {
+    // This proves the PREDICATE half of INV-3 and only that: verifyGeneratedHashesConsistent
+    // detects an injected manifest≠disk mismatch and is read-only. It does NOT exercise the
+    // write-path abort — the poisoned manifest is hand-built in memory, not produced by the
+    // real recording path (which records from the SAME disk it verifies, so on its own it can
+    // never diverge). The write-path abort-without-persist contract (AC-3 / D4) is proven
+    // separately, by driving recordVerifyAndSaveManifest into its throw, in the test below.
     generateHarnessFiles(tmp);
     refreshHarnessFiles(tmp);
     const lastGoodBytes = fs.readFileSync(hashesPath(tmp), 'utf-8');
@@ -251,15 +291,44 @@ describe('SPEC-043 invariants (T0)', () => {
     const violations = verifyGeneratedHashesConsistent(tmp, poisoned);
     expect(violations.length).toBeGreaterThan(0);
 
-    // The write path's fail-closed contract (D4): persist ONLY when violations are
-    // empty. Here the guard trips, so saveHashes is never reached...
-    if (violations.length === 0) saveHashes(tmp, poisoned); // unreachable
-    // ...and the on-disk manifest is byte-unchanged — last-good preserved.
+    // The predicate is pure/read-only: inspecting a poisoned manifest never touches disk.
     expect(fs.readFileSync(hashesPath(tmp), 'utf-8')).toBe(lastGoodBytes);
 
-    // A real refresh over the good tree never throws and never persists a lie.
+    // A real refresh over the good tree never throws and its manifest verifies clean — the
+    // write-path tripwire is green by construction (Slice 1), exactly as documented.
     expect(() => refreshHarnessFiles(tmp)).not.toThrow();
     expect(verifyGeneratedHashesConsistent(tmp, loadHashes(tmp))).toEqual([]);
+  });
+
+  it('INV-3 / AC-3 (write path): recordVerifyAndSaveManifest aborts WITHOUT persisting when the recorded manifest diverges from final disk', () => {
+    // The actual fail-closed guarantee the gate exists for. It CANNOT arise in the current
+    // correct write path — Slice 1 records the manifest from the SAME final disk the self-check
+    // re-reads, so record == verify by construction. We simulate a FUTURE record-before-write
+    // regression (equivalently, a post-record mutation of a tracked file) by making the VERIFY
+    // read of one tracked file return different bytes than the RECORD read, and prove the write
+    // path fails closed: it throws the abort error AND leaves the last-good manifest
+    // byte-unchanged (nothing persisted).
+    scaffoldSettled(tmp);
+    const lastGoodBytes = fs.readFileSync(hashesPath(tmp), 'utf-8');
+
+    // recordVerifyAndSaveManifest reads each tracked file exactly twice: once while RECORDING
+    // (its record loop) and once while VERIFYING (inside verifyGeneratedHashesConsistent),
+    // record strictly before verify. Arm the fs harness on CLAUDE.md so only the SECOND read
+    // diverges — its recorded hash (real bytes) then disagrees with its verified hash (mutated
+    // bytes), the exact record/disk divergence a record-before-write refactor would produce.
+    fsDivergence.targetAbs = path.resolve(tmp, TEMPLATE_OUTPUT_PATHS['CLAUDE.md']);
+    fsDivergence.reads = 0;
+    try {
+      expect(() => recordVerifyAndSaveManifest(tmp)).toThrow(/MinSpec refresh aborted/);
+      // The divergent file's second (verify) read fired — the throw path was actually taken,
+      // not short-circuited before verification.
+      expect(fsDivergence.reads).toBeGreaterThanOrEqual(2);
+    } finally {
+      fsDivergence.targetAbs = null;
+    }
+
+    // Abort-without-persist (D4): the on-disk manifest is byte-identical to the last-good one.
+    expect(fs.readFileSync(hashesPath(tmp), 'utf-8')).toBe(lastGoodBytes);
   });
 
   it('INV-4 / AC-5: the manifest is byte-identical across N settled refreshes', () => {

@@ -52,11 +52,18 @@ group ends suite-green (INV-5) before the next starts. Traces to
   hashes, return violations. Absent file → skip (FR-3a). Deterministic, offline (INV-4).
 - [x] **2.2** `scaffold.ts`: call the gate inside `recordVerifyAndSaveManifest` **after** the
   final-disk recording and **before** the moved `saveHashes`; a non-empty result THROWS a
-  descriptive error → nothing persisted, last-good manifest intact (D4). `init.ts` renders the
-  thrown error via its existing try/catch — no `init.ts` change (D3).
-- [x] **2.3** T0 gate tests: `verifyGeneratedHashesConsistent` returns `[]` on a fresh tree, flags
-  a drifted section, skips an absent-file entry (AC-8); the write-path guard does not clobber the
-  last-good manifest on an injected mismatch (AC-3).
+  descriptive error → nothing persisted, last-good manifest intact (D4). Because the recording
+  reads the **same** final disk the gate re-reads, this is **green by construction** — a
+  fail-closed *tripwire* for a future record-before-write regression, **not** the active #890
+  fix (Slice 1 is). `init.ts` renders the thrown error via its existing try/catch — no `init.ts`
+  change (D3).
+- [x] **2.3** T0 gate tests, two halves: **(a) predicate** — `verifyGeneratedHashesConsistent`
+  returns `[]` on a fresh tree, flags a drifted section, skips an absent-file entry (AC-8);
+  **(b) write path** — `recordVerifyAndSaveManifest` is driven into its throw by diverging the
+  VERIFY read from the RECORD read (simulating the record-before-write divergence the tripwire
+  guards against, since it cannot fire on correct code) and asserted to abort **without**
+  persisting, leaving the last-good manifest byte-unchanged (AC-3). The earlier poisoned-in-memory
+  assertion covered only the predicate; (b) adds the genuine write-path abort coverage.
 - [x] **2.4** ✅ Checkpoint: full `packages/minspec` suite green.
 
 ## Notes / deviations

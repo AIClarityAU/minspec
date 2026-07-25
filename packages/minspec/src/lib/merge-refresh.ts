@@ -341,19 +341,28 @@ export interface ManifestInconsistency {
 }
 
 /**
- * Fail-closed self-check (SPEC-043 FR-3 / FR-3a / INV-3). For every file path in
- * `hashes` that is ALSO present on disk, re-read the file, hash its sections
- * through the one shared {@link sectionHashesFromMarkdown} helper, and assert
- * every recorded section hash equals the on-disk section hash. Returns the list
- * of violations — empty ⇒ the manifest is consistent with disk.
+ * Fail-closed consistency predicate (SPEC-043 FR-3 / FR-3a / INV-3). For every file
+ * path in `hashes` that is ALSO present on disk, re-read the file, hash its sections
+ * through the one shared {@link sectionHashesFromMarkdown} helper, and assert every
+ * recorded section hash equals the on-disk section hash. Returns the list of
+ * violations — empty ⇒ the manifest is consistent with disk.
  *
  * A recorded path whose file is ABSENT on disk is SKIPPED, not a violation
  * (FR-3a): a legitimately-removed template must never brick a refresh. A recorded
  * *section* that is missing from an otherwise-present file IS a violation — the
  * manifest is claiming a hash for content that is not on disk.
  *
- * Deterministic, offline (pure fs + SHA-256, INV-4). Callers abort-without-persist
- * on any non-empty result (D4), so the last-good manifest survives a mismatch.
+ * NOTE on the write-path caller (`recordVerifyAndSaveManifest` in scaffold.ts): there
+ * the manifest is recorded from the SAME final disk this function re-reads, so the
+ * result is EMPTY by construction (Slice 1) — the gate is a fail-closed tripwire that
+ * cannot fire in correct code, and defends only against a FUTURE change that records
+ * the manifest from a non-disk source (record-before-write). Its independent value is
+ * as a reusable predicate: an offline commit/CI-time check (#760) that hashes the
+ * manifest against disk at a DIFFERENT time than it was recorded CAN legitimately
+ * catch drift, and that is where this predicate actively earns its keep.
+ *
+ * Deterministic, offline (pure fs + SHA-256, INV-4). Read-only — it never writes. The
+ * write-path caller aborts-without-persist on any non-empty result (D4).
  */
 export function verifyGeneratedHashesConsistent(
   rootDir: string,
