@@ -8,7 +8,7 @@ epic: EPIC-003  # SDD Core — onboarding front door (see notes re: dedicated on
 
 # MinSpec — Onboarding consolidation (Plan)
 
-**Reads:** [requirements.md](requirements.md) — FRs, invariants (INV-1..6), and the vertical slices. The Open Questions (FR-OQ1..3) are **not yet settled**: each carries only a *proposed* engineering default with "Resolve in Clarify," and the requirements frontmatter is `clarify: pending`. **This plan assumes those proposals and is contingent on them** — it is drafted ahead of Clarify (frontmatter `plan: in-progress`), not over a closed Clarify, and must be revisited if any proposal changes at ratification. This document is **HOW**, not WHAT/WHY. Phase-2 work (constitution [Phases](../../../.minspec/constitution.md#L94)); must not displace an unmet Phase-1 item.
+**Reads:** [requirements.md](requirements.md) — FRs, invariants (INV-1..6), the vertical slices, and the **now-settled** Open Questions (FR-OQ1..3, resolved in Clarify 2026-07-25: coverage kept as a non-enforced seed; approver editable + offline-seeded + click-gated GitHub flag; `silentRefresh`/#186 kept a dependency, rendered Planned). This plan was drafted against those proposals and its contingency held, so `clarify: done` and `plan: done`. This document is **HOW**, not WHAT/WHY. Phase-2 work (constitution [Phases](../../../.minspec/constitution.md#L94)); must not displace an unmet Phase-1 item.
 
 **Prototype:** the layout below realises the reviewed interactive prototype — private Artifact `ddfe8bfe-3c4e-433f-a15d-d60af692ef00` (**owner-only**; a design reference, never a shipped or shared asset). Where prose and prototype disagree, this document wins.
 

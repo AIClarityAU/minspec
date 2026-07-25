@@ -12,8 +12,8 @@ implements: [packages/minspec/src/commands/getting-started.ts, packages/minspec/
 affects: [packages/minspec/package.json, packages/minspec/src/lib/auto-bootstrap.ts, packages/minspec/src/commands/init.ts, packages/minspec/src/commands/approve.ts, packages/minspec/src/extension.ts]
 phases:
   specify: done
-  clarify: pending
-  plan: in-progress   # design.md drafted (approach, webview-vs-walkthrough decision, per-action consent, slice plan, 0-dep budget) by Claude (agent) 2026-07-25 — but CONTINGENT on the FR-OQ1..3 proposals, which Clarify must ratify before plan closes. Not "done" while clarify: pending (SDD sequence specify → clarify → plan).
+  clarify: done   # FR-OQ1 keep-coverage (maintainer instruction), FR-OQ2 editable+flag-mismatch, FR-OQ3 #186-as-dependency — all resolved AS the proposed defaults; ratified by the maintainer 2026-07-25 (AskUserQuestion). Human hash-locks at Approve Spec.
+  plan: done   # design.md — its stated contingency held (all three OQs resolved as proposed), so the Plan closes with Clarify. Drafted by Claude (agent) 2026-07-25; human ratifies at Approve Spec.
   tasks: pending
   implement: pending
 ---
@@ -100,7 +100,16 @@ The page is **offline UI over settings that already exist**. It renders with **z
 
 ## Clarify
 
-*Pending. Resolutions to be drafted as engineering defaults (the proposals above) and ratified by the human at Approve Spec — nothing here is a human sign-off yet. (Frontmatter `clarify: pending`; design.md is drafted **contingent** on these proposals and is not marked `plan: done` until Clarify closes.)*
+*Each Open Question resolved to its proposed default. FR-OQ2 and FR-OQ3 were **explicitly ratified by the maintainer** on 2026-07-25 (chosen from the two alternatives); FR-OQ1 follows the maintainer's earlier "add the coverage percent" instruction. These close Clarify (`clarify: done`) and, because the Plan's stated contingency held, close Plan (`plan: done`). The final hash-lock sign-off remains the separate **MinSpec: Approve Spec** act — nothing here is that sign-off.*
+
+- **FR-OQ1 — coverage on the page vs Settings-only → RESOLVED: keep it on the page, honestly framed as a non-enforced seed (FR-11).**
+  Setup is exactly when a team-policy coverage seed matters, and FR-11's honest helper text ("seeds `.minspec/config.json` / the CI gate; **not** enforced by the extension", matching [package.json:529](../../../packages/minspec/package.json#L529)) forecloses the "implies enforcement" failure. Per the maintainer's explicit instruction to surface the coverage percentage.
+
+- **FR-OQ2 — approver identity: `gh`-locked vs offline-default-and-flagged → RESOLVED: editable, seeded offline, GitHub verification a separate click-gated action.**
+  The field seeds from the offline `resolveApproverEmail` (git config / `minspec.approverEmail`, zero network — INV-1); a click-gated "Verify against GitHub" (FR-5) raises a **non-blocking amber flag** on divergence. A hard lock was rejected: it breaks the legitimate corporate-email ≠ `gh`-login case, seeding from `gh` on render would violate the Tier-0 offline invariant, and the DR-056 gate already refuses non-human identities at approve time — the page nudges verifiability without owning enforcement. Maintainer-ratified 2026-07-25.
+
+- **FR-OQ3 — does `silentRefresh` (#186) ship with this spec → RESOLVED: no; keep it a dependency.**
+  This spec renders the `silentRefresh` switch as **Planned/disabled** (INV-5) and surfaces the built manual `minspec.initRefresh` action (FR-16) as the working refresh path. [#186] is its own behavioural change (auto-merging harness updates) with its own review surface; folding it in would push this spec past T3. Maintainer-ratified 2026-07-25.
 
 ## Acceptance Criteria
 
