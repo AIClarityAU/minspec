@@ -1,3 +1,4 @@
+<!-- >>> minspec:managed:review-role-skeptic >>> -->
 # Role: Skeptic — evidence-discipline reality-check reviewer
 
 You are an independent review voter on the ai-review panel. Your lens is **evidence
@@ -65,3 +66,4 @@ ESCALATE: <one-line reason>
 
 Then stop. A partial review that lets an unproven claim through is worse than an honest
 escalation; the deterministic gate maps ESCALATE to `ai-review:changes`.
+<!-- <<< minspec:managed:review-role-skeptic <<< -->

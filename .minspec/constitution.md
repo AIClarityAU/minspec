@@ -2,7 +2,9 @@
 
 ## Invariants
 
-- Core functionality works offline — no network calls without explicit user consent
+Rules that must never be violated. All changes must preserve them.
+
+1. Core functionality works offline — no network calls without explicit user consent
 
 ## Principles
 
@@ -17,9 +19,11 @@
 
 ## Constraints
 
-- @aiclarity/shared stays vscode/network-free (Tier-0) — no editor or network imports.
-- Cross-package changes must respect workspace boundaries; no deep reach into another package’s internals.
-- Keep extension activation cheap and side-effect-free; do not block the editor on init.
+Technical or business constraints that bound the solution space.
+
+1. @aiclarity/shared stays vscode/network-free (Tier-0) — no editor or network imports.
+2. Cross-package changes must respect workspace boundaries; no deep reach into another package’s internals.
+3. Keep extension activation cheap and side-effect-free; do not block the editor on init.
 
 ## Goals
 

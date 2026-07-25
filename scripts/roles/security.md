@@ -1,3 +1,4 @@
+<!-- >>> minspec:managed:review-role-security >>> -->
 # Role: Security — security review agent
 
 ## Responsibilities
@@ -46,3 +47,4 @@ ESCALATION RULE: If you cannot fully and correctly complete this task — due to
 ESCALATE: <one-line reason>
 
 Then stop. Do not attempt a partial solution. The caller will retry with a more capable model.
+<!-- <<< minspec:managed:review-role-security <<< -->

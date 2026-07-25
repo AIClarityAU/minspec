@@ -1,3 +1,4 @@
+# >>> minspec:managed:ai-review-workflow >>>
 # ai-review — independent AI reviewer in CI, posting AS THE APP (#342 Track B, #428)
 #
 # Runs the credential-free independent reviewer over a PR's diff and posts the
@@ -722,3 +723,4 @@ jobs:
           gh pr edit "$PR_NUMBER" --repo "$REPO" --add-reviewer "$REVIEWERS" 2>/dev/null || true
           # Re-fail so the job status honestly reflects the error (label recovered).
           exit 1
+# <<< minspec:managed:ai-review-workflow <<<
