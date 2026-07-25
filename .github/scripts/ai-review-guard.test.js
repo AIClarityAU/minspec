@@ -23,6 +23,7 @@ const {
   PASS_STATUS_CONTEXT,
   decideStatus,
   shouldAwaitApproval,
+  shouldSummonHumanReview,
   AWAITING_APPROVAL,
   decideReviewCheck,
   isBenignRemovalError,
@@ -671,4 +672,65 @@ test('shouldAwaitApproval: a stripped/reverted pass drives decideStatus→failur
 
 test('AWAITING_APPROVAL: is the canonical label string', () => {
   assert.equal(AWAITING_APPROVAL, 'awaiting-approval');
+});
+
+// ── #816 — needs-human-review means "a human is genuinely the next actor" ─────
+// The Post step summons a human via this seam. The retirement: a NORMAL
+// (non-machinery) `ai-review:changes` no longer summons a human at t=0
+// (remediate-pr.sh does so only at exhaustion); a MACHINERY PR still does.
+test('shouldSummonHumanReview: MACHINERY ai-review:changes → summon a human (kept)', () => {
+  assert.equal(shouldSummonHumanReview({ label: CHANGES, isMachinery: true }), true);
+});
+
+test('shouldSummonHumanReview: MACHINERY ai-review:pass → summon a human (gate cannot certify itself, #596)', () => {
+  assert.equal(shouldSummonHumanReview({ label: PASS, isMachinery: true }), true);
+});
+
+test('shouldSummonHumanReview: NORMAL (non-machinery) ai-review:changes → NO summon at t=0 (#816 retirement)', () => {
+  // The core of #816: a normal changes verdict is auto-remediated by remediate-pr.sh
+  // (bounded attempts) BEFORE a human is needed, so it must NOT be flagged here.
+  assert.equal(shouldSummonHumanReview({ label: CHANGES, isMachinery: false }), false);
+});
+
+test('shouldSummonHumanReview: NORMAL passing PR → NO summon (belongs in awaiting-approval)', () => {
+  assert.equal(shouldSummonHumanReview({ label: PASS, isMachinery: false }), false);
+});
+
+test('shouldSummonHumanReview: ai-review:blocked → NEVER summon (retry-able quota, both machinery states)', () => {
+  // A blocked verdict means the reviewer could not RUN — retry-able, not a code
+  // verdict; ai-review-retry re-runs it. It must never pull in a human, even for
+  // a machinery PR (whose merge is still held by machinery-review-required).
+  assert.equal(shouldSummonHumanReview({ label: BLOCKED, isMachinery: false }), false);
+  assert.equal(shouldSummonHumanReview({ label: BLOCKED, isMachinery: true }), false);
+});
+
+test('shouldSummonHumanReview: deny-by-default on missing/garbage input (advisory not applied; gate still holds)', () => {
+  assert.equal(shouldSummonHumanReview({}), false);
+  assert.equal(shouldSummonHumanReview(), false);
+  assert.equal(shouldSummonHumanReview({ label: 'nonsense', isMachinery: false }), false);
+});
+
+// Invariant (SPEC-031 INV-8 spirit): `awaiting-approval` and `needs-human-review`
+// are mutually exclusive BY CONSTRUCTION. A passing non-machinery PR is the human's
+// turn via awaiting-approval and is NOT summoned here; a machinery pass is summoned
+// here and — its ready-to-merge held red (no SHA-bound witness) — never awaits.
+test('#816 invariant: passing non-machinery PR → awaiting-approval, NOT needs-human-review', () => {
+  const green = decideStatus({ labels: [PASS], passProvenance: VERIFIED_PROV });
+  assert.equal(green.state, 'success');
+  assert.equal(shouldAwaitApproval({ statusState: green.state, autoMergeArmed: false }), true);
+  assert.equal(shouldSummonHumanReview({ label: PASS, isMachinery: false }), false);
+});
+
+test('#816 invariant: machinery pass → needs-human-review, and ready-to-merge held red so NOT awaiting-approval', () => {
+  // A machinery PR posts no SHA-bound pass witness (#596), so decideStatus stays red
+  // even with a provenance-verified label → shouldAwaitApproval is false, while the
+  // human IS summoned. The two signals never coexist.
+  const held = decideStatus({
+    labels: [PASS],
+    passProvenance: VERIFIED_PROV,
+    headStatus: { verified: false, reason: 'machinery PR posts no ai-review/pass witness' },
+  });
+  assert.equal(held.state, 'failure');
+  assert.equal(shouldAwaitApproval({ statusState: held.state, autoMergeArmed: false }), false);
+  assert.equal(shouldSummonHumanReview({ label: PASS, isMachinery: true }), true);
 });

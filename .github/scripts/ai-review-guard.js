@@ -515,6 +515,42 @@ function decideReviewCheck(label, isMachineryPr) {
   return { name: CHECK_NAME, conclusion, title, summary };
 }
 
+// #816 — the "summon a human" decision for the ai-review Post step.
+//
+// `needs-human-review` must mean exactly ONE thing: a human is GENUINELY the next
+// actor — NOT merely "AI review has not passed (yet)". That keeps `awaiting-approval`
+// (DR-063) the unambiguous positive "my turn" filter, and stops the human queue
+// being polluted by PRs the pipeline will remediate on its own.
+//
+// A human is the next actor at review-time in exactly one case: a MACHINERY PR
+// (changed paths match `.github/`/`scripts/`, the SELF_EDIT_KIND==="machinery"
+// predicate). A gate cannot certify a change to itself, so such a PR can NEVER
+// auto-remediate to a green `ready-to-merge` — a human must clear it (this pairs
+// with the `machinery-review-required` check, #596). That holds whether the
+// machinery PR's honest code verdict is `ai-review:pass` or `ai-review:changes`.
+//
+// It is NOT the next actor — so we do NOT summon one — for:
+//   • a NORMAL (non-machinery) `ai-review:changes`: `remediate-pr.sh` auto-
+//     remediates it (bounded attempts) and applies `needs-human-review` ITSELF
+//     only at exhaustion (cap / escalate / quarantine / conflict). Flagging it
+//     here at t=0 is premature — the #816 retirement.
+//   • ANY `ai-review:blocked` (machinery or not): the reviewer could not RUN
+//     (quota / rate-limit / overload) — retry-able, NOT a verdict on the code; the
+//     ai-review-retry workflow re-runs it. Never a human-review situation.
+//   • a passing NON-machinery PR: it belongs in `awaiting-approval`, not here.
+//
+// This governs only the ADVISORY `needs-human-review` label; the load-bearing merge
+// hold is `ready-to-merge` (decideStatus), which stays red independently for every
+// un-passed / machinery PR — so retiring the eager label can never let anything
+// merge early. Pure and side-effect-free (mirrors shouldAwaitApproval /
+// decideReviewCheck) so ai-review.yml decides via this SAME tested seam: bash and
+// JS cannot drift. Deny-by-default: a missing/unknown label with isMachinery unset
+// returns false (advisory not applied; the gate still holds red).
+function shouldSummonHumanReview({ label, isMachinery } = {}) {
+  if (label === BLOCKED) return false; // retry-able — ai-review-retry re-runs it, never a human
+  return isMachinery === true; // only a machinery PR genuinely needs a human at t=0 now
+}
+
 // Is a label-removal API failure safe to ignore? ONLY a 404 (the label is
 // already gone — e.g. a concurrent removal). Any other status (rate limit, 5xx,
 // 403) means the forged/stale `ai-review:pass` may STILL be present, so the
@@ -537,6 +573,7 @@ module.exports = {
   BLOCKED,
   AWAITING_APPROVAL,
   shouldAwaitApproval,
+  shouldSummonHumanReview,
   isQuotaExhaustion,
   parseAllowlist,
   isAuthorizedReviewer,
