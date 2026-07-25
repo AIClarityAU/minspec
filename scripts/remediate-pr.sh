@@ -22,8 +22,9 @@
 #   • merge CONFLICTS    — LLM conflict resolution can silently mismerge; left for a
 #                          human (already has needs-human-review from the reviewer).
 #
-# Scope guard: only AUTOMATION branches (agent/*, fix/*, feat/*). A hand-crafted
-# human PR is never auto-edited under this sweep.
+# Scope guard: only AUTOMATION branches — the agent/fix/feat prefixes, delimited by
+# EITHER a slash or a dash (agent/*, fix/*, feat/*, and agent-*, fix-*, feat-*). A
+# hand-crafted human PR is never auto-edited under this sweep.
 #
 # Security model (identical to dispatch-issue.sh, reused not re-implemented):
 #   • the agent is CREDENTIAL-FREE (no gh / git push / remote / network tools). It
@@ -51,8 +52,16 @@ MAX_ATTEMPTS="${MINSPEC_REMEDIATE_MAX_ATTEMPTS:-2}"
 # Marker embedded in every remediation comment so we can COUNT prior attempts on a
 # PR (bounds the runaway loop) without a stateful store.
 ATTEMPT_MARKER="<!-- minspec-auto-remediation -->"
-# Automation-branch prefixes this sweep is allowed to touch.
-AUTOMATION_BRANCH_RE='^(agent|fix|feat)/'
+# Distinct marker for the one-shot "remediation capped" notice. Kept SEPARATE from
+# ATTEMPT_MARKER so posting the notice never inflates the attempt count, and so the
+# cap block can self-deduplicate (post the comment once, stay silent on later sweeps).
+CAPPED_MARKER="<!-- minspec-remediate-capped -->"
+# Automation-branch prefixes this sweep is allowed to touch. The delimiter class
+# [/-] matches BOTH slash-delimited (fix/886-x) and dash-delimited (fix-886-x)
+# automation branches; it still requires one of the three prefixes followed by a
+# real delimiter, so it never over-matches human branches like `fixture-…` (the
+# char after `fix` there is a letter, not `/` or `-`).
+AUTOMATION_BRANCH_RE='^(agent|fix|feat)[/-]'
 
 # ── Pure classifier (no gh/git/claude — safe to unit-test in isolation) ────────
 # Decide, from a PR's already-fetched attributes, what remediation (if any) applies.
@@ -197,6 +206,15 @@ if [[ "$ACTION" == agent-* ]]; then
     gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
       --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
     gh pr edit "$PR" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+    # Notify beyond the label: a label is easy to miss, so post a single PR comment
+    # the FIRST time we cap this PR. Idempotent — the cap condition stays true on every
+    # later drain sweep, so we count existing CAPPED_MARKER comments and only post when
+    # none exists, never spamming a fresh comment each cycle.
+    CAPPED_COUNT=$(gh pr view "$PR" --repo "$REPO" --json comments \
+      --jq "[.comments[] | select(.body | contains(\"$CAPPED_MARKER\"))] | length" 2>/dev/null || echo 0)
+    if [[ "${CAPPED_COUNT:-0}" -eq 0 ]]; then
+      gh pr comment "$PR" --repo "$REPO" --body "$(printf '## 🛑 Auto-remediation capped — needs a human\n\nThis PR reached the automated-remediation cap (%s attempt(s), `MINSPEC_REMEDIATE_MAX_ATTEMPTS`) without clearing its gate, so automated attempts have stopped. It is labelled `needs-human-review`; a human needs to take it from here. %s' "$MAX_ATTEMPTS" "$CAPPED_MARKER")" 2>/dev/null || true
+    fi
     exit 0
   fi
   echo "  Attempt $((ATTEMPTS + 1))/$MAX_ATTEMPTS."
