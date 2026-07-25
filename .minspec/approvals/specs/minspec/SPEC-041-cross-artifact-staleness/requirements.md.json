@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-041-cross-artifact-staleness/requirements.md",
+  "specHash": "2ae656f988a4d158caf34b6382699d3a8517f18b032fb685f2ae1226dbf83d71",
+  "approvedAt": "2026-07-25T10:17:04.427Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "3c7e18cb31389a132074c772a33b7d334c7787d8"
+}
