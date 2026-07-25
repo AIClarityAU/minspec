@@ -16,6 +16,10 @@ coverage/
 !.claude/commands/
 .claude/commands/*
 !.claude/commands/minspec-*.md
+# Explicit literal (redundant with .claude/* above, but the #794 parity test
+# requires every MINSPEC_GITIGNORE_ENTRIES entry to appear verbatim, so newly-
+# scaffolded projects and this monorepo checkout stay gitignore-consistent).
+.claude/worktrees/
 __pycache__/
 
 # Agent-dispatch sidecars (DR-008 / scripts/dispatch-issue.sh) — worktree-local
