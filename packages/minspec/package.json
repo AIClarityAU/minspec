@@ -2,7 +2,7 @@
   "name": "minspec",
   "displayName": "MinSpec",
   "description": "Complexity-adaptive specification-driven development. Classifies changes into tiers and applies proportional ceremony — a one-line fix needs one sentence of spec, an architecture rewrite gets the full treatment.",
-  "version": "0.1.19",
+  "version": "0.1.20",
   "private": true,
   "publisher": "aiclarity",
   "license": "MIT",
@@ -301,6 +301,13 @@
         }
       ]
     },
+    "submenus": [
+      {
+        "id": "minspec.createMenu",
+        "label": "MinSpec: Create…",
+        "icon": "$(add)"
+      }
+    ],
     "menus": {
       "commandPalette": [
         {
@@ -322,28 +329,8 @@
       ],
       "view/title": [
         {
-          "command": "minspec.refreshTree",
-          "when": "view == minspecStatus",
-          "group": "navigation"
-        },
-        {
           "command": "minspec.specExplorer.toggleEpicGrouping",
           "when": "view == minspecStatus",
-          "group": "navigation"
-        },
-        {
-          "command": "minspec.refreshTree",
-          "when": "view == minspecAdrs",
-          "group": "navigation"
-        },
-        {
-          "command": "minspec.createAdr",
-          "when": "view == minspecAdrs",
-          "group": "navigation"
-        },
-        {
-          "command": "minspec.regenerateDrIndex",
-          "when": "view == minspecAdrs",
           "group": "navigation"
         },
         {
@@ -352,8 +339,8 @@
           "group": "navigation"
         },
         {
-          "command": "minspec.createEpic",
-          "when": "view == minspecAdrs",
+          "submenu": "minspec.createMenu",
+          "when": "view == minspecAdrs && config.minspec.manualCreate.enabled",
           "group": "navigation"
         },
         {
@@ -365,6 +352,16 @@
           "command": "minspec.refreshBacklog",
           "when": "view == minspecBacklog",
           "group": "navigation"
+        }
+      ],
+      "minspec.createMenu": [
+        {
+          "command": "minspec.createAdr",
+          "group": "1_create@1"
+        },
+        {
+          "command": "minspec.createEpic",
+          "group": "1_create@2"
         }
       ],
       "view/item/context": [
@@ -481,6 +478,11 @@
           "type": "boolean",
           "default": true,
           "description": "Auto-detect missing initialization, harness drift, and unclassified changes — and offer to run setup/refresh/classify. Per-prompt 'Don't ask again' choices are persisted in .minspec/preferences.json."
+        },
+        "minspec.manualCreate.enabled": {
+          "type": "boolean",
+          "default": false,
+          "description": "Show the manual 'Create Decision' / 'Create Epic' (+) buttons in the Decisions view toolbar. Off by default: with an AI assistant you normally create decisions and epics by asking it. Turn on for air-gapped / LLM-off (Tier-0) work, where the manual buttons are the primary way to author them."
         },
         "minspec.autoClassifyOnCommit": {
           "type": "boolean",
