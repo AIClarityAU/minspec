@@ -173,7 +173,7 @@ DR-009 validated the tier classifier against SWE-bench-Verified via out-of-tree 
 
 ## [DR-022 — Ceremony = risk-response — a blast-radius (consequence) profile, screen-gated, replaces diff-size tier as the unit](DR-022.md)
 
-*Status: proposed · Date: 2026-06-01*
+*Status: accepted · Date: 2026-06-01*
 
 <!-- dr-summary:DR-022 auto=12b5e81fd1b0 -->
 "Just Enough Spec" tiers ceremony (T1–T4) by **diff size** — git-analyzer.ts feeds classify() (max tierContribution across signals); the per-tier phase set lives in .minspec/config.json. Two findings forced a rethink this session: 1. **"Just Enough Spec" conflated two dials** — *consideration* (how thoroughly a change is thought through) and *ceremony* (how much the human must read/approve). Tiering tied them because the historical cost was *human authoring*. The LLM authors now: consideration should be thorough on *every* change (nearly free); ceremony should…
@@ -197,7 +197,7 @@ DR-022 was accepted in-session as a T4 keystone: it reframes ceremony around a c
 
 ## [DR-025 — Canonical spec frontmatter schema owns field order — one source, one gate](DR-025.md)
 
-*Status: proposed · Date: 2026-06-01*
+*Status: accepted · Date: 2026-06-01*
 
 <!-- dr-summary:DR-025 auto=11de7e600c38 -->
 Spec frontmatter field ordering has drifted across **three generations**, visible chronologically by SPEC id: | Gen | Order | Specs | |---|---|---| | G1 epic-first | epic, id, type, [tier], status, product | scroogellm 100/101/102, minspec 001/002/003, SPEC-005, SPEC-006 | | G2 id-first, epic-last | id, type, [tier], status, product, epic | SPEC-004, 007/008/009, 010, 011 | | G3 id-first, tier-after-status, +refs | id, type, status, tier, product, epic, depends_on/aspects/relates_to | SPEC-012, 013, 014, 015 |

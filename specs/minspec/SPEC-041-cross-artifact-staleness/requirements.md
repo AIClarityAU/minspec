@@ -2,7 +2,7 @@
 id: SPEC-041
 type: requirements
 # 🔒 Once approved, hash-locked: approved bytes recorded in .minspec/approvals.json[SPEC-041].specHash. ANY edit voids approval (hash → stale) — re-run "MinSpec: Approve Spec". DR-012.
-status: specifying
+status: implementing
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — approval validity
@@ -13,9 +13,9 @@ implements: [packages/minspec/src/lib/approval.ts, packages/minspec/src/lib/adr-
 affects: [packages/shared/src/next-task.ts, packages/shared/src/canonical.ts, packages/minspec/src/lib/approval-store.ts, packages/minspec/src/lib/artifact-graph.ts, packages/minspec/src/views/spec-tree-provider.ts, packages/minspec/src/extension.ts, packages/minspec/src/lib/approval-diff.ts]
 phases:
   specify: done
-  clarify: done   # FR-OQ1/OQ2 resolved (proposed defaults), OQ3/OQ4 confirmed — drafted by Claude (agent) 2026-07-17 per maintainer "you draft"; human ratifies at Approve
-  plan: done   # design.md — approach, Architecture/Contracts/UX artifacts, slice plan, 0-dep budget. Drafted by Claude (agent) 2026-07-22; human ratifies at Approve
-  tasks: pending
+  clarify: done
+  plan: done
+  tasks: in-progress
   implement: pending
 ---
 
