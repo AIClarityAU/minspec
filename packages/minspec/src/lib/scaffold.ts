@@ -272,6 +272,12 @@ export const MINSPEC_GITIGNORE_ENTRIES = [
   // consumer dequeues it. Never committed — it is machine-local intent, not
   // ground truth (the approval sidecar under .minspec/approvals/ is that).
   '.minspec/queue/',
+  // Machine-local UI dismissal state (answeredSignatures: which one-shot prompts
+  // this machine has already answered — e.g. skipClassifyPrompt, skipRefreshPrompt).
+  // Rewritten by the ext at runtime; never committed, or it surfaces as perpetual
+  // dirty noise and gets swept into "junk" commits (G-8). Sibling of the other
+  // machine-local .minspec/*.json entries above; was the one that got missed.
+  '.minspec/preferences.json',
   // Harness-owned worktree checkouts (created by the agent harness / EnterWorktree).
   // Transient, machine-local, auto-removed — must never be tracked, or a stray
   // second checkout shows up as untracked noise in the source-control panel (G-8:
