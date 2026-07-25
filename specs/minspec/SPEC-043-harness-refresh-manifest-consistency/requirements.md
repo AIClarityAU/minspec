@@ -2,7 +2,7 @@
 id: SPEC-043
 type: requirements
 # 🔒 Once approved, hash-locked: approved bytes recorded in .minspec/approvals.json[SPEC-043].specHash. ANY edit voids approval (hash → stale) — re-run "MinSpec: Approve Spec". DR-012.
-status: specifying
+status: implementing
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — derived-state truthfulness (the harness-refresh hash manifest must not lie about what changed)
@@ -13,9 +13,9 @@ implements: [packages/minspec/src/lib/merge-refresh.ts, packages/minspec/src/lib
 affects: []
 phases:
   specify: done
-  clarify: done   # OQ-1..OQ-4 resolved as engineering defaults (drafted by Claude (agent) 2026-07-25 per "you draft"); human ratifies at Approve
-  plan: done      # design.md — approach, fix, fail-closed gate, slice plan, 0-dep budget. Drafted by Claude (agent) 2026-07-25; human ratifies at Approve
-  tasks: pending
+  clarify: done
+  plan: done
+  tasks: in-progress
   implement: pending
 ---
 
