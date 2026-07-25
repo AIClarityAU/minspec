@@ -466,12 +466,30 @@ export function renderManagedFile(tpl: ManagedRegionTemplate): string {
 
 /**
  * GitHub Actions workflow: the authoritative post-push MinSpec validation gate
- * (DR-037, #249). Runs the Node-tier validator on every push / PR so that
- * contributors without the local git hooks — or any local bypass — are still
- * caught before merge. Local hook = fast fail; CI = never-merge guarantee.
+ * (DR-037, #249). Runs the validator on every push / PR so that contributors
+ * without the local git hooks — or any local bypass — are still caught before
+ * merge. Local hook = fast fail; CI = never-merge guarantee.
+ *
+ * FAIL-CLOSED (DR-066 "No silent gate", #811). `MinSpec SDD validation` is a
+ * REQUIRED status check (ruleset-advisor DEFAULT_REQUIRED_CHECK_CONTEXTS), so it
+ * must have a reachable red path and must NEVER conclude success without actually
+ * validating. The step runs the highest-fidelity validator that is genuinely
+ * present, letting its exit code gate the job:
+ *   1. `npm run validate` — the full Node validator, when the repo defines it
+ *      (minspec's own tree, and any JS repo that wires it up);
+ *   2. `python3 .minspec/hooks/validate.py` — the portable DR-037 validator,
+ *      scaffolded into every MinSpec-inited repo (stock python3, no install);
+ *   3. `@aiclarity/minspec-validator` — the published portable validator, once it
+ *      exists and is resolvable (`--no-install` NEVER network-fetches, so an
+ *      unclaimed scope can't be dependency-confusion-hijacked into CI).
+ * If NONE is present the job FAILS — the one thing a required check may never do
+ * is pass without validating. There is deliberately no branch that exits 0
+ * without a validator having run (that was the #811 always-green bug).
  *
  * Pinned to a literal YAML string (no Handlebars): it is project-independent and
- * must remain byte-stable so the refreshed region matches exactly.
+ * must remain byte-stable so the refreshed region matches exactly. The job
+ * \`name: MinSpec SDD validation\` is the required-check CONTEXT — do not rename it
+ * or branch protection strands every PR on a context that no longer reports.
  */
 const MINSPEC_VALIDATE_WORKFLOW = `name: MinSpec Validate
 
@@ -495,18 +513,28 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Run MinSpec validation
+      - name: Run MinSpec validation (fail-closed — DR-066)
         run: |
-          # @aiclarity/minspec-validator is not yet published. --no-install is
-          # deliberate: it NEVER fetches from the registry, so an unclaimed scope
-          # can't be dependency-confusion-hijacked into running in CI. Once the
-          # package is a real devDependency (installed by an npm-install step
-          # added alongside this), this branch runs it for real and its exit
-          # code gates the job — no silent pass-through of a genuine failure.
-          if npx --no-install @aiclarity/minspec-validator --version >/dev/null 2>&1; then
+          # A required check must have a reachable red path and must NEVER conclude
+          # success without validating (DR-066 "No silent gate", clause 2 / #811).
+          # Run the highest-fidelity validator that is actually present and let its
+          # exit code gate the job. Do NOT add a branch that exits 0 without a
+          # validator having run — that was the #811 always-green bug.
+          if [ -f package.json ] && node -e "process.exit((require('./package.json').scripts||{}).validate?0:1)" 2>/dev/null; then
+            echo "MinSpec SDD validation: running 'npm run validate' (Node validator)."
+            npm ci
+            npm run validate
+          elif [ -f .minspec/hooks/validate.py ] && command -v python3 >/dev/null 2>&1; then
+            echo "MinSpec SDD validation: running 'python3 .minspec/hooks/validate.py' (portable validator)."
+            python3 .minspec/hooks/validate.py
+          elif npx --no-install @aiclarity/minspec-validator --version >/dev/null 2>&1; then
+            echo "MinSpec SDD validation: running '@aiclarity/minspec-validator'."
             npx --no-install @aiclarity/minspec-validator
           else
-            echo "minspec-validator not installed — skipping (frontmatter is validated by the lint job / local hooks)"
+            echo "MinSpec SDD validation: no validator found." >&2
+            echo "Looked for an npm 'validate' script, .minspec/hooks/validate.py, or @aiclarity/minspec-validator." >&2
+            echo "A required check must fail closed (DR-066); it may never pass without validating." >&2
+            exit 1
           fi`;
 
 /**
