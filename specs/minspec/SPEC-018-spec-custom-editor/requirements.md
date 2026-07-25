@@ -259,13 +259,17 @@ research spike rather than a settled answer:
   **one-click, zero-typing preset of the FR-12 / FR-16 chat channel**, seeded with a canonical
   read-only prompt (*"explain this section in plain language; do **not** modify the document"*).
   It reuses the FR-12/FR-16 channel **wholesale** — it is **not** a new AI seam — and inherits
-  the same Tier-0 boundary (FR-8): the `?` click writes an **LLM-free request** to the DR-057
-  `.minspec/queue` primitive ([`phase-advance-queue.ts`](../../../packages/minspec/src/lib/phase-advance-queue.ts)),
-  a consumer/agent generates, and `packages/minspec` only **renders** the reply — never a network
-  call. **Distinct from its siblings by being read-only:** unlike FR-11 (pen = revise) and FR-12
-  (chat = *propose an edit*), Explain MUST NOT produce a `WorkspaceEdit`, MUST NOT touch the
-  document bytes or its canonical hash, and therefore MUST NOT void approval (INV — Viewer-safe /
-  edit-is-explicit — Explain is neither a pen nor a chat *edit*). Keyboard-first: revealed on
+  the same Tier-0 boundary (FR-8): the `?` click hands that **single** host-delegated channel
+  (SPEC-014 FR-OQ2) an **LLM-free request**, a consumer/agent generates, and `packages/minspec`
+  only **renders** the reply — never a network call. (The DR-057 `.minspec/queue` primitive,
+  [`phase-advance-queue.ts`](../../../packages/minspec/src/lib/phase-advance-queue.ts), is **one
+  candidate** for that channel, pinned at plan alongside FR-OQ2 — not a second path.) **Distinct
+  from its siblings by being read-only:** unlike FR-11 (pen = revise) and FR-12 (chat = *propose
+  an edit*), Explain MUST NOT produce a `WorkspaceEdit`, MUST NOT touch the document bytes or its
+  canonical hash, and therefore MUST NOT void approval (INV — Viewer-safe / edit-is-explicit). The
+  read-only-vs-edit line is enforced by the FR-12 **propose-diff-then-apply gate**, never by an
+  LLM intent-guess: the model may infer intent for what to *say / propose*, but only the human's
+  apply step writes and voids approval (see FR-OQ8). Keyboard-first: revealed on
   section focus with a two-key chord, the hotkey shown in its tooltip (keyboard-over-mouse). When
   no explainer consumer/agent is present it MUST **degrade honestly** to a "no explainer
   available" notice ([SPEC-013](../SPEC-013-risk-section-policy/requirements.md) floor) — never a
@@ -399,6 +403,13 @@ research spike rather than a settled answer:
   toolbar + status are **one** bar; the approval CTA reads *Pre-approve/Approve/Re-approve* by
   state (no red "void" banner), and *Re-approve* highlights the changed sections (FR-15); the bar
   shows no `viewType` / "viewer read-only" / "Open as plain text" button.
+- [ ] **AC-19 (FR-18 / INV-Viewer-safe).** The `?` Explain control (section hover toolbar; and, at
+  document scope, the SPEC-014 action bar) issues a read-only "explain in plain language" request
+  through the **same** channel as FR-12 (AC-8 import-ban holds); it produces **zero**
+  `WorkspaceEdit`, leaves document bytes + canonical hash unchanged, and does **not** void
+  approval; when no explainer is available it renders a visible "no explainer available" notice,
+  never a silent no-op or a fabricated answer. A test asserts: Explain ⇒ zero document edits +
+  byte-identical file; no-explainer ⇒ the honest-degrade notice.
 
 ## Coverage Map (session ask → FR)
 
@@ -423,6 +434,8 @@ research spike rather than a settled answer:
 | highlight diffs subtly, not underline-everything | FR-15 |
 | different diff colour per commit + selectable timeline/legend | → **#544** (parked) |
 | converse with the LLM about the doc (explain / discuss), fork a session, file an issue | FR-16 (+ FR-OQ7) |
+| one-click "explain this to me", cheaper than approving (rubber-stamp exit) | FR-18 (read-only preset of the FR-12/16 chat) |
+| "just one chat button, let the model decide what happens" (simpler UX) | FR-OQ8 (collapse pen/chat/explain; intent inferred, write stays gated) |
 | merge both sidebars → TOC as outline inside the MinSpec Explorer | FR-9 |
 | use native VS Code tabs; combine top+bottom bar; approve/re-approve CTA not a red warning; drop viewType / "read-only" / plain-text button | FR-17 |
 | init question/toast to use the new editor | FR-14 |
@@ -554,6 +567,7 @@ host-delegated AI channel).
 | FR-15 | T0/T2 | A changed run shows a gutter change-bar + light tint (no dense underline); T0 asserts the highlight writes zero document bytes; the #544 per-commit timeline is not asserted here. |
 | FR-16 | T2/T0 | Chat answers a non-edit question in-thread; request-edit routes to FR-12; fork-to-session and file-as-issue actions fire; an out-of-editor edit re-renders live (FR-4 watcher); import-ban holds (T0). |
 | FR-17 | T2 | No own tab strip (native tabs); one combined bar; approval CTA label tracks state (Pre-approve/Approve/Re-approve); Re-approve highlights changed sections; no viewType / read-only / plain-text button in the bar. |
+| FR-18 | T0/T2 | Explain issues a read-only "explain" request via FR-12's channel; T0 asserts **zero** `WorkspaceEdit` + byte-identical file + no core network import; the no-explainer path renders the honest-degrade notice, never a fabricated answer. |
 
 ## Alternatives Considered
 
@@ -621,6 +635,18 @@ tasks live in tasks.md.*
   proposals and review as a batch, showing the combined diff (FR-15). Interacts with SPEC-014's
   channel choice (FR-OQ2) and is **scrooge-adjacent** (this whole feature is paused until Scrooge
   v1). *(Open — plan when work resumes; no v1 DoD AC.)*
+- **FR-OQ8 — collapse pen/chat/explain to one chat entry with model-inferred intent (plan).**
+  Rather than distinct pen (FR-11), chat (FR-12) and Explain (FR-18) controls, expose **one chat
+  entry point** per section and let the model infer whether the ask is explain/discuss (read-only
+  reply) or a revision (propose a diff) — the user's steer (2026-07-25), simpler UX. **Hard
+  constraint that bounds it:** the read-only-vs-edit line is an **approval-gate** boundary
+  (DR-012) — the model may infer intent for what to *say / propose*, but only the human's
+  apply-the-diff step (FR-12 / FR-15) may write and void approval; the model's intent-guess MUST
+  NOT be what decides a write (else "explain" misheard as "revise" silently voids an approval — an
+  LLM in the never-wrong decision path). The one-click `?` (FR-18) survives as a zero-typing preset
+  of that single entry. Also decide whether the non-LLM **comment/concern pin** (a human
+  annotation, SPEC-014 FR-3) stays a separate primitive or folds in as a chat "file as concern"
+  action (FR-16). *(Open — plan; no DoD AC. [#914](https://github.com/AIClarityAU/minspec/issues/914).)*
 
 ## Follow-ups (tracked)
 
