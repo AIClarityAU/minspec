@@ -21,11 +21,31 @@ vi.mock('vscode', () => ({
 import * as vscode from 'vscode';
 import {
   MinSpecScaffoldCommitStatusBar,
+  MinSpecNextTaskStatusBar,
   formatScaffoldCommitText,
+  formatKeybindingForDisplay,
+  resolveNextTaskKeybinding,
   computeProgress,
   fromFrontmatter,
 } from '../src/views/status-bar';
 import type { SpecFrontmatter } from '../src/lib/spec';
+import type { NextTask } from '@aiclarity/shared';
+
+function nextTask(overrides: Partial<NextTask> = {}): NextTask {
+  return {
+    kind: 'spec-approve',
+    targetId: 'SPEC-001',
+    imperative: 'Approve SPEC-001',
+    severityClass: 'pending',
+    evidence: {
+      severityClass: 'pending',
+      rule: 'pending.spec-approve',
+      explanation: 'SPEC-001 is unapproved',
+      refs: ['SPEC-001'],
+    },
+    ...overrides,
+  };
+}
 
 // NOTE: the per-spec "tier | phase | progress" status-bar item (MinSpecStatusBar,
 // formatStatusBarText, formatTooltip) was removed — it wasn't useful across
@@ -247,5 +267,109 @@ describe('MinSpecScaffoldCommitStatusBar class', () => {
     const bar = new MinSpecScaffoldCommitStatusBar();
     bar.dispose();
     expect(mockStatusBarItem.dispose).toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// formatKeybindingForDisplay() — pretty-print a VS Code keybinding string (#934)
+// =============================================================================
+
+describe('formatKeybindingForDisplay', () => {
+  it('renders a single Alt key as Alt+N', () => {
+    expect(formatKeybindingForDisplay('alt+n')).toBe('Alt+N');
+  });
+
+  it('renders a two-stroke chord space-separated', () => {
+    expect(formatKeybindingForDisplay('ctrl+k ctrl+n')).toBe('Ctrl+K Ctrl+N');
+  });
+
+  it('canonicalises known modifier casing (cmd/shift)', () => {
+    expect(formatKeybindingForDisplay('cmd+shift+p')).toBe('Cmd+Shift+P');
+  });
+
+  it('tolerates stray whitespace', () => {
+    expect(formatKeybindingForDisplay('  alt+n  ')).toBe('Alt+N');
+  });
+});
+
+// =============================================================================
+// resolveNextTaskKeybinding() — read the shipped default from the manifest (#934)
+// =============================================================================
+
+describe('resolveNextTaskKeybinding', () => {
+  const manifest = {
+    contributes: {
+      keybindings: [
+        { command: 'minspec.approveActive', key: 'alt+a' },
+        { command: 'minspec.nextTask', key: 'alt+n' },
+      ],
+    },
+  };
+
+  it('finds and formats the minspec.nextTask binding', () => {
+    expect(resolveNextTaskKeybinding(manifest)).toBe('Alt+N');
+  });
+
+  it('returns undefined when the command is not bound', () => {
+    expect(resolveNextTaskKeybinding({ contributes: { keybindings: [] } })).toBeUndefined();
+  });
+
+  it('returns undefined for a manifest with no keybindings section', () => {
+    expect(resolveNextTaskKeybinding({})).toBeUndefined();
+    expect(resolveNextTaskKeybinding(undefined)).toBeUndefined();
+  });
+
+  it('prefers the mac override on darwin', () => {
+    const macManifest = {
+      contributes: {
+        keybindings: [{ command: 'minspec.nextTask', key: 'alt+n', mac: 'cmd+n' }],
+      },
+    };
+    const original = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+    try {
+      expect(resolveNextTaskKeybinding(macManifest)).toBe('Cmd+N');
+    } finally {
+      Object.defineProperty(process, 'platform', { value: original, configurable: true });
+    }
+  });
+});
+
+// =============================================================================
+// MinSpecNextTaskStatusBar — signpost tooltip carries the hotkey (#934)
+// =============================================================================
+
+describe('MinSpecNextTaskStatusBar class', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockStatusBarItem.text = '';
+    mockStatusBarItem.tooltip = '';
+    mockStatusBarItem.command = '';
+  });
+
+  it('binds the item to minspec.nextTask at priority 99', () => {
+    new MinSpecNextTaskStatusBar('Alt+N');
+    expect(vscode.window.createStatusBarItem).toHaveBeenCalledWith(1, 99); // Left=1
+    expect(mockStatusBarItem.command).toBe('minspec.nextTask');
+  });
+
+  it('appends the shortcut to the tooltip for a pending task', () => {
+    const bar = new MinSpecNextTaskStatusBar('Alt+N');
+    bar.update(nextTask());
+    expect(mockStatusBarItem.tooltip).toBe('SPEC-001 is unapproved\nShortcut: Alt+N');
+    expect(mockStatusBarItem.show).toHaveBeenCalled();
+  });
+
+  it('shows the shortcut even in the "clear" state', () => {
+    const bar = new MinSpecNextTaskStatusBar('Alt+N');
+    bar.update(null);
+    expect(mockStatusBarItem.tooltip).toBe('No pending review tasks.\nShortcut: Alt+N');
+  });
+
+  it('omits the shortcut line when no keybinding is known (never invents one)', () => {
+    const bar = new MinSpecNextTaskStatusBar(undefined);
+    bar.update(nextTask());
+    expect(mockStatusBarItem.tooltip).toBe('SPEC-001 is unapproved');
+    expect(mockStatusBarItem.tooltip).not.toContain('Shortcut');
   });
 });
