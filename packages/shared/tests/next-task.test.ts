@@ -16,6 +16,7 @@ import {
   resolveNextTask,
   resolvePipeline,
   resolveCorruption,
+  formatNextTaskLabel,
   type ArtifactGraph,
   type EpicNode,
   type SpecNode,
@@ -323,6 +324,36 @@ describe('FR-13 — cross-cutting edges', () => {
     const dangling = resolveCorruption(g).filter((c) => c.kind === 'dangling-ref');
     expect(dangling).toHaveLength(1);
     expect(dangling[0].refs).toStrictEqual(['SPEC-001', 'SPEC-999']);
+  });
+
+  it('#893-relates-dangling: a dangling relates_to is NOT corruption and NOT a gate-violation', () => {
+    // relates_to is the soft, non-gating edge (already exempt from acyclicity). A
+    // dangling relates_to is commonly a legitimate cross-register ref (a local DR
+    // relating to a parent-register DR that does not resolve in this repo). It must
+    // NOT surface as a top gate-violation that buries the real next human task.
+    const g = graph({
+      // One genuine pending decision to be surfaced instead of the dangler.
+      adrs: [mkAdr('DR-001', 'proposed')],
+      specs: [mkSpec('SPEC-001', 'specifying', 'unapproved')],
+      edges: [{ kind: 'relates_to', from: 'DR-001', to: 'DR-355' }], // DR-355 = parent register, unresolved here
+    });
+    // No dangling-ref corruption emitted for the soft edge.
+    expect(resolveCorruption(g).filter((c) => c.kind === 'dangling-ref')).toHaveLength(0);
+    // The next task is a real pending decision, not a "state unclear" gate-violation.
+    const next = resolveNextTask(g)!;
+    expect(next.severityClass).not.toBe('gate-violation');
+    expect(next.evidence.rule).not.toMatch(/^dangling\./);
+  });
+
+  it('#893-gating-dangling-still-corruption: a dangling supersedes/depends_on remains corruption', () => {
+    // The fix is scoped to relates_to only — the GATING edges still fail loudly.
+    const g = graph({
+      specs: [mkSpec('SPEC-001', 'implementing', 'approved')],
+      edges: [{ kind: 'supersedes', from: 'SPEC-001', to: 'SPEC-777' }],
+    });
+    const dangling = resolveCorruption(g).filter((c) => c.kind === 'dangling-ref');
+    expect(dangling).toHaveLength(1);
+    expect(dangling[0].refs).toStrictEqual(['SPEC-001', 'SPEC-777']);
   });
 
   it('FR-13-blocks: a depends_on dependent ranks below its blocker (blocker has HIGHER id)', () => {
@@ -643,5 +674,32 @@ describe('#227 answer-OQ — open-questions gate', () => {
     for (let i = 0; i < 5; i++) {
       expect(resolveNextTask(g)).toStrictEqual(first);
     }
+  });
+});
+
+// =====================================================================
+// formatNextTaskLabel — the ONE canonical signpost label (shared by the
+// status-bar item AND the planned DAG-viz node, #742/#48)
+// =====================================================================
+describe('formatNextTaskLabel — single-source signpost wording', () => {
+  it('null → "clear"', () => {
+    expect(formatNextTaskLabel(null)).toBe('clear');
+  });
+
+  it('task → "Next Task: <imperative>", verbatim from the resolved imperative', () => {
+    const g = graph({
+      epics: [mkEpic('EPIC-001', 'active', { order: 1 })],
+      specs: [mkSpec('SPEC-001', 'specifying', 'unapproved', { epic: 'EPIC-001' })],
+    });
+    const next = resolveNextTask(g)!;
+    expect(next.imperative).toBe('Approve SPEC-001');
+    // The label carries the imperative unchanged — so every surface reads the same.
+    expect(formatNextTaskLabel(next)).toBe('Next Task: Approve SPEC-001');
+  });
+
+  it('is pure — same NextTask yields the same string', () => {
+    const g = graph({ adrs: [mkAdr('DR-001', 'proposed')] });
+    const next = resolveNextTask(g);
+    expect(formatNextTaskLabel(next)).toBe(formatNextTaskLabel(next));
   });
 });

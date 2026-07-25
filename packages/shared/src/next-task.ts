@@ -298,6 +298,16 @@ function detectDangling(graph: ArtifactGraph, index: Index): Corruption[] {
     }
   }
   for (const edge of graph.edges ?? []) {
+    // #893: `relates_to` is the SOFT, non-gating edge (tie-influence only;
+    // already exempt from acyclicity in detectCycles). A dangling `relates_to`
+    // is commonly a legitimate CROSS-REGISTER reference — e.g. a local DR that
+    // `relates_to` a parent-register DR (mmo-platform DR-3xx) that correctly does
+    // not resolve in THIS repo's index. Flagging it as `dangling-ref` promotes it
+    // to a top gate-violation (see generateNodes Class-A loop), which buries every
+    // real human task behind a spurious "state unclear" signpost. Only the GATING
+    // edge kinds (`depends_on` / `supersedes`) dangling are corruption. A broken
+    // soft link is at most a lint, never a signpost-blocking violation.
+    if (edge.kind === 'relates_to') continue;
     if (!index.byId.has(edge.from)) {
       note(`edge-from:${edge.from}->${edge.to}`, {
         kind: 'dangling-ref',
@@ -1002,4 +1012,26 @@ export function resolvePipeline(graph: ArtifactGraph): NextTask[] {
  */
 export function resolveNextTask(graph: ArtifactGraph): NextTask | null {
   return resolvePipeline(graph)[0] ?? null;
+}
+
+// =====================================================================
+// Presentation — the ONE canonical signpost label (pure, surface-agnostic)
+// =====================================================================
+
+/**
+ * The canonical, icon-free next-task label. This is the SINGLE SOURCE OF TRUTH
+ * for the wording every surface shows, so the status-bar signpost and the
+ * planned DAG-visualisation node (#742/#48) always read identically — "just make
+ * sure it says the same thing in both places". Each surface adds its own chrome
+ * (the status bar prepends a `$(milestone)` codicon + the "MinSpec" brand; the
+ * webview renders its own node styling), but the phrase itself always comes from
+ * here.
+ *
+ *   task → `Next Task: <imperative>`   e.g. "Next Task: Accept DR-022"
+ *   null → `clear`
+ *
+ * Pure and deterministic — no vscode, no icons. Same NextTask → same string.
+ */
+export function formatNextTaskLabel(task: NextTask | null): string {
+  return task ? `Next Task: ${task.imperative}` : 'clear';
 }
