@@ -26,7 +26,12 @@ import { AdrTreeProvider } from './views/adr-tree-provider';
 import { FrontmatterCompletionProvider } from './views/frontmatter-completion';
 import { BacklogTreeProvider } from './views/backlog-view';
 import { TreeExpansionMemory } from './views/tree-expansion-memory';
-import { MinSpecNextTaskStatusBar, MinSpecScaffoldCommitStatusBar, fromFrontmatter } from './views/status-bar';
+import {
+  MinSpecNextTaskStatusBar,
+  MinSpecScaffoldCommitStatusBar,
+  fromFrontmatter,
+  resolveNextTaskKeybinding,
+} from './views/status-bar';
 import { nextTaskCommand, computeNextTask } from './commands/next-task';
 import { SpecPanel } from './views/spec-panel';
 import { loadSession, saveSession, addToScope, isFileInScope } from './lib/session';
@@ -215,7 +220,9 @@ export function activate(context: vscode.ExtensionContext): void {
   // Next-task signpost status bar (SPEC-012 / DR-019). Workspace-wide; click /
   // chord → minspec.nextTask. Cached value, recomputed only on debounced file
   // events below — never rebuilt on render.
-  const nextTaskStatusBar = new MinSpecNextTaskStatusBar();
+  const nextTaskStatusBar = new MinSpecNextTaskStatusBar(
+    resolveNextTaskKeybinding(context.extension?.packageJSON),
+  );
   let nextTaskTimer: ReturnType<typeof setTimeout> | undefined;
   const refreshNextTask = () => {
     if (!workspaceRoot) {

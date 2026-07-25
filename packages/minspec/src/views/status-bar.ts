@@ -107,16 +107,75 @@ export function formatNextTaskText(task: NextTask | null): string {
   return `$(milestone) MinSpec ${formatNextTaskLabel(task)}`;
 }
 
+/** Modifier tokens whose canonical casing isn't just capitalize-first. */
+const KEY_TOKEN_CASE: Record<string, string> = {
+  ctrl: 'Ctrl',
+  cmd: 'Cmd',
+  alt: 'Alt',
+  option: 'Option',
+  shift: 'Shift',
+  meta: 'Meta',
+  win: 'Win',
+};
+
+/**
+ * Pretty-print a VS Code keybinding string for human display.
+ *   'alt+n'          → 'Alt+N'
+ *   'ctrl+k ctrl+n'  → 'Ctrl+K Ctrl+N'   (space-separated = chord)
+ * Pure formatting — never asserts the binding is *active*, only how a given
+ * string reads. The string itself must come from the manifest (single source).
+ */
+export function formatKeybindingForDisplay(binding: string): string {
+  return binding
+    .trim()
+    .split(/\s+/) // chord segments
+    .map((segment) =>
+      segment
+        .split('+')
+        .map((tok) => KEY_TOKEN_CASE[tok.toLowerCase()] ?? tok.charAt(0).toUpperCase() + tok.slice(1))
+        .join('+'),
+    )
+    .join(' ');
+}
+
+/**
+ * Resolve the *shipped default* hotkey for `minspec.nextTask` from the
+ * extension manifest — never a string duplicated in code (that would drift, the
+ * exact never-wrong failure this product exists to prevent). Reads
+ * `contributes.keybindings`, platform-selects the `mac` override when present,
+ * and formats for display. Returns undefined if the command isn't bound.
+ *
+ * Caveat: VS Code exposes no public API for the *effective* (user-overridden)
+ * binding, so this reflects what MinSpec ships. A 'Change…' affordance into the
+ * Keyboard Shortcuts editor is the honest escape hatch (tracked follow-up).
+ */
+export function resolveNextTaskKeybinding(
+  packageJSON:
+    | { contributes?: { keybindings?: ReadonlyArray<{ command?: string; key?: string; mac?: string }> } }
+    | undefined,
+): string | undefined {
+  const entry = packageJSON?.contributes?.keybindings?.find((k) => k.command === 'minspec.nextTask');
+  if (!entry) return undefined;
+  const raw = process.platform === 'darwin' ? entry.mac ?? entry.key : entry.key;
+  return raw ? formatKeybindingForDisplay(raw) : undefined;
+}
+
 /**
  * The workspace-wide next-task signpost. Clicking it (or the `minspec.nextTask`
- * chord) reveals the target artifact and shows the imperative. The displayed
+ * hotkey) reveals the target artifact and shows the imperative. The displayed
  * `NextTask` is cached by the caller and only recomputed on debounced file
  * events — `update()` itself never rebuilds the graph (keep it cheap).
+ *
+ * `keybindingLabel` (from {@link resolveNextTaskKeybinding}) is appended to the
+ * tooltip so the shortcut is discoverable without hunting the palette — a
+ * shortcut the user can't see, she can't use.
  */
 export class MinSpecNextTaskStatusBar {
   private statusBarItem: vscode.StatusBarItem;
+  private readonly keybindingLabel: string | undefined;
 
-  constructor() {
+  constructor(keybindingLabel?: string) {
+    this.keybindingLabel = keybindingLabel;
     this.statusBarItem = vscode.window.createStatusBarItem(
       vscode.StatusBarAlignment.Left,
       99, // just left of the per-spec progress item (priority 100)
@@ -128,9 +187,10 @@ export class MinSpecNextTaskStatusBar {
   update(task: NextTask | null): void {
     const text = formatNextTaskText(task);
     this.statusBarItem.text = text;
-    this.statusBarItem.tooltip = task
-      ? task.evidence.explanation
-      : 'No pending review tasks.';
+    const base = task ? task.evidence.explanation : 'No pending review tasks.';
+    this.statusBarItem.tooltip = this.keybindingLabel
+      ? `${base}\nShortcut: ${this.keybindingLabel}`
+      : base;
     this.statusBarItem.accessibilityInformation = {
       label: task ? `MinSpec next task: ${task.imperative}` : 'MinSpec: no pending review tasks',
     };
