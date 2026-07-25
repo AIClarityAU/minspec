@@ -91,9 +91,10 @@ The three consumers repoint:
   `type SpecSummary`; `spec-catalog` re-exports `SpecSummary` from `lib/spec-manager` for a one-line diff).
 
 **Disambiguation (the naming collision).** A *second, different* `listSpecs` — the **shallow,
-top-level-only** scan at `lib/spec-manager.ts:406` (consumed by `views/spec-panel.ts`) — misses
-product-nested specs (`specs/minspec/SPEC-040/…`). Decision: **rename the shallow one
-`listSpecsShallow`** and repoint `spec-panel.ts`; behaviour-preserving (INV-2), no consolidation.
+top-level-only** scan at `lib/spec-manager.ts:406` (consumed by `views/spec-panel.ts` **and** the
+in-file `migrateLayout` at `lib/spec-manager.ts:614`) — misses product-nested specs
+(`specs/minspec/SPEC-040/…`). Decision: **rename the shallow one `listSpecsShallow`** and repoint
+both call sites; behaviour-preserving (INV-2), no consolidation.
 The nested-miss is a **latent `spec-panel` bug**, surfaced per R4 as **[#877](https://github.com/AIClarityAU/minspec/issues/877)**,
 **not** silently fixed inside this refactor (fixing it would change `spec-panel` output — scope creep).
 
@@ -147,7 +148,7 @@ one-line change verified by the same test. Never dodged via per-file `eslint-dis
    imports** — skip `importClause.isTypeOnly` and drop type-only named specifiers
    (`import { type X }`). Resolve relative specifiers to on-disk `.ts` files (mirror TS module
    resolution for `./`/`../`; ignore bare/`@aiclarity/*` specifiers — not in-package).
-2. **Detect cycles** with the iterative three-color DFS ported from `next-task.ts:327`
+2. **Detect cycles** with the iterative three-color DFS ported from `next-task.ts:337`
    `detectCycles` (explicit stack, deterministic neighbour order, O(V+E) — no recursion). A GRAY
    back-edge names the exact member chain.
 3. Export `findValueImportCycles(srcRoot): ImportCycle[]`.
