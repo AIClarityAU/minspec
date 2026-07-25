@@ -530,4 +530,12 @@ Two held rules contradict: rule #8 / DR-051 §4a says never move a shared checko
 <!-- dr-summary:DR-066 auto=fc5103ae0bbb -->
 Three times in this repo, a merge gate that *looked* present enforced **nothing**, and the symptom each time was identical — "every merge needs --admin", i.e. the required gate was being bypassed on every landing: 1. **#560** — the ai-review required-check context was pinned to the **wrong GitHub App id**, so the ruleset waited on a check that could never post → unsatisfiable → every merge a bypass. 2. **#810** — ai-review.yml posted the load-bearing ai-review/pass commit status **best-effort** (gh…
 <!-- /dr-summary:DR-066 -->
+
+## [DR-067 — Coordinated self-completing sessions — a session claims work under an expiring presence-lease before touching it, shepherds its own PR to merge, wraps up on exit, and the drain is demoted from primary fixer to orphan-fallback (reclaim only expired leases)](DR-067.md)
+
+*Status: proposed · Date: 2026-07-25*
+
+<!-- dr-summary:DR-067 auto=38843581fe9a -->
+The autonomous pipeline (triage → dispatch → build → review → merge) is live (DR-060/DR-061), but its **work-assignment model is a single shared drain that both dispatches AND fixes everything**, with no atomic notion of "who owns this item right now." Four founder requests on 2026-07-25 name the same missing primitive from four angles:
+<!-- /dr-summary:DR-067 -->
 <!-- minspec:dr-index:end -->
