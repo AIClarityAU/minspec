@@ -1,22 +1,9 @@
 ---
 id: SPEC-043
 type: design
-# 🔒 Once approved, hash-locked: approved bytes recorded in .minspec/approvals.json[SPEC-043].specHash. ANY edit voids approval (hash → stale) — re-run "MinSpec: Approve Spec". DR-012.
 status: specifying
-tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — derived-state truthfulness (harness-refresh hash manifest)
-aspects: [harness-refresh, integrity, never-wrong, tier-0, determinism, idempotency, self-check, rcdd]
-depends_on: []
-relates_to: [SPEC-005, SPEC-033, DR-003, DR-028]
-implements: [packages/minspec/src/lib/merge-refresh.ts, packages/minspec/src/lib/scaffold.ts, packages/minspec/tests/merge-refresh-890.test.ts]
-affects: []
-phases:
-  specify: done
-  clarify: done
-  plan: done
-  tasks: pending
-  implement: pending
 ---
 
 # MinSpec — Harness-refresh manifest consistency (Plan)

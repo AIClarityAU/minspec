@@ -15,8 +15,8 @@ phases:
   specify: done
   clarify: done
   plan: done
-  tasks: in-progress
-  implement: pending
+  tasks: done
+  implement: done
 ---
 
 # MinSpec — Harness-refresh manifest consistency (Requirements)
