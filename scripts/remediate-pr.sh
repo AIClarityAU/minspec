@@ -20,7 +20,8 @@
 #
 # NOT handled (surfaced, never auto-fixed):
 #   • merge CONFLICTS    — LLM conflict resolution can silently mismerge; left for a
-#                          human (already has needs-human-review from the reviewer).
+#                          human and self-labelled needs-human-review here (#816: the
+#                          ai-review reviewer no longer eagerly applies it at t=0).
 #
 # Scope guard: only AUTOMATION branches — the agent/fix/feat prefixes, delimited by
 # EITHER a slash or a dash (agent/*, fix/*, feat/*, and agent-*, fix-*, feat-*). A
@@ -180,7 +181,19 @@ case "$ACTION" in
   skip-not-automation)
     echo "  Not an automation branch ($BRANCH) — leaving for its author."; exit 0 ;;
   skip-conflict)
-    echo "  Merge conflict — not auto-resolving (left for a human; surfaced by needs-human-review)."; exit 0 ;;
+    # A merge conflict is a TERMINAL, human-only state (LLM conflict resolution can
+    # silently mismerge). This is an exhaustion-class apply: label it needs-human-review
+    # HERE, self-sufficiently, rather than relying on the ai-review reviewer having
+    # eagerly flagged it — since #816 the reviewer no longer applies needs-human-review
+    # to a normal ai-review:changes at t=0, so a conflicting PR would otherwise carry
+    # no human signal. (ready-to-merge stays the load-bearing hold either way.)
+    echo "  Merge conflict — not auto-resolving (left for a human)."
+    if ! $DRY_RUN; then
+      gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
+        --description "A human is the next actor — auto-merge withheld" 2>/dev/null || true
+      gh pr edit "$PR" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+    fi
+    exit 0 ;;
   skip-clean)
     echo "  No fixable problem — nothing to do."; exit 0 ;;
 esac
