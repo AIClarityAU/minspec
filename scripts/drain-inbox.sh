@@ -382,6 +382,7 @@ ensure_fresh_run_dir() {
 #  cycle instead of stopping the loop when the checkout falls behind main.)
 run_cycle() {
   local inbox_issues all_ready n out drc cap
+  local ac_halt ac_sig ac_consec
 
   # #773: refresh the run dir FIRST, so triage/dispatch/remediate all execute the
   # CURRENT orchestration (self-heal, not die-on-stale). Never fatal — on failure it
@@ -420,6 +421,22 @@ run_cycle() {
   # the pipeline scripts run from a worktree hard-synced to origin/main, and
   # MINSPEC_FRESHNESS_CHECKED is exported so the children trust it. No terminal
   # "die on stale" (the old rc-43 path) — staleness is impossible by construction.
+
+  # ── Autocompact circuit-breaker (#912) ──────────────────────────────────────
+  # Failure mode this guards: EVERY dispatched build agent dies with the autocompact
+  # context-thrash signature (a systemically-broken dispatch path — e.g. a bloated
+  # ambient context, a bad model pin), so the drain burns quota escalating the whole
+  # agent-ready queue to zero PRs. Count CONSECUTIVE dispatches whose output carries
+  # the signature; after N in a row (MINSPEC_DISPATCH_AUTOCOMPACT_HALT, default 3),
+  # HALT dispatch for the REST of this cycle and alert loudly instead of grinding
+  # through every remaining issue. A dispatch that does NOT show the signature resets
+  # the run to 0, so a one-off blip never trips it. The PR sweep (Step 3) still runs.
+  # Threshold 0 disables the breaker; the signature is overridable in case the
+  # harness reworks the wording (MINSPEC_DISPATCH_AUTOCOMPACT_SIG).
+  ac_halt="${MINSPEC_DISPATCH_AUTOCOMPACT_HALT:-3}"
+  ac_sig="${MINSPEC_DISPATCH_AUTOCOMPACT_SIG:-Autocompact is thrashing}"
+  ac_consec=0
+
   echo "[drain] dispatching $(echo "$all_ready" | wc -l | tr -d ' ') agent-ready issue(s)..."
   for n in $all_ready; do
     echo "[drain] dispatching #$n..."
@@ -435,6 +452,20 @@ run_cycle() {
       return 42
     fi
     [[ "$drc" -ne 0 ]] && echo "[drain] WARNING: dispatch failed for #$n (rc=$drc)"
+    # #912: track consecutive autocompact-thrash crashes; halt the dispatch loop
+    # once the run reaches the threshold (the dispatch path is broken this cycle).
+    if [[ "$ac_halt" != "0" ]] && grep -qiF -- "$ac_sig" <<<"$out"; then
+      ac_consec=$(( ac_consec + 1 ))
+      echo "[drain] ⚠️  dispatch #$n crashed with the autocompact context-thrash signature (${ac_consec}/${ac_halt} consecutive) — see #912."
+      if (( ac_consec >= ac_halt )); then
+        echo "[drain] 🛑 HALTING dispatch for the rest of this cycle: ${ac_consec} consecutive dispatches crashed with '${ac_sig}'." >&2
+        echo "[drain]     The dispatched build agent is starting near the context limit — refusing to burn more quota on a broken path (#912)." >&2
+        echo "[drain]     Tune/disable with MINSPEC_DISPATCH_AUTOCOMPACT_HALT=<N> (0 disables). PR remediation (Step 3) still runs." >&2
+        break
+      fi
+    else
+      ac_consec=0
+    fi
   done
 
   # Step 3: sweep open PRs for FIXABLE problems and auto-remediate them (conflicts

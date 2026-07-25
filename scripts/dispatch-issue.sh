@@ -180,6 +180,41 @@ else
   ROLE_PROMPT=""
 fi
 
+# ── Context-slim dispatch (#912) ──────────────────────────────────────────────
+# ROOT CAUSE of the autocompact-thrash outage: the dev run below used the DEFAULT
+# claude-code system prompt while cwd is the agent worktree, so claude auto-loaded
+# the large project CLAUDE.md + the global ~/.claude/CLAUDE.md + auto-memory as
+# AMBIENT context BEFORE the task even started. The run began near the context
+# limit, so autocompact fired immediately and refilled to the limit within ~3
+# turns → the harness aborted EVERY dispatched build (~30 escalations, 0 PRs).
+#
+# Fix: pass the role as the SYSTEM PROMPT via --system-prompt-file, which replaces
+# the default system-prompt construction that injects CLAUDE.md/memory. This is
+# exactly what the review/triage/architect agents already do (review-branch.sh:148,
+# triage-inbox.sh:69) — proven, and crucially AUTH-NEUTRAL: subscription OAuth is
+# preserved (no API key is forced; review-branch.sh's non-payg path uses
+# --system-prompt-file on the OAuth credential). Nothing is lost — the agent is
+# still explicitly told to `Read CLAUDE.md` on demand (see the user prompt below +
+# dev.md line 13), so invariants are read WHEN NEEDED instead of paid for on every
+# turn. Unlike --bare (which forces ANTHROPIC_API_KEY and would break the
+# subscription-default billing model, DR-016/017), this changes neither auth nor
+# billing.
+#
+# Instant revert, no code change: MINSPEC_DISPATCH_SLIM_CONTEXT=0 restores the
+# pre-#912 shape (role embedded in the user prompt, default system prompt with its
+# ambient CLAUDE.md load).
+SYS_PROMPT_ARGS=()
+ROLE_SECTION=""
+if [[ "${MINSPEC_DISPATCH_SLIM_CONTEXT:-1}" != "0" && -f "$ROLE_FILE" ]]; then
+  SYS_PROMPT_ARGS=(--system-prompt-file "$ROLE_FILE")
+  echo "Context-slim: role via --system-prompt-file — ambient CLAUDE.md/memory not auto-loaded (#912)"
+else
+  # Kill-switch, or no role file: keep the role in the user prompt (pre-#912 shape).
+  # Direct $'...' assignment (NOT $(printf ...), which strips the trailing newlines
+  # command substitution always eats) so the closing "---" separator survives.
+  ROLE_SECTION=$'## Role Instructions\n\n'"$ROLE_PROMPT"$'\n\n---\n\n'
+fi
+
 # Label as running
 gh issue edit "$ISSUE" --repo "$REPO" \
   --remove-label "agent-ready" \
@@ -231,13 +266,7 @@ ${ISSUE_BODY}
 
 ---
 
-## Role Instructions
-
-${ROLE_PROMPT}
-
----
-
-## Context
+${ROLE_SECTION}## Context
 
 Repo: ${REPO}
 Worktree: ${WORKTREE}
@@ -558,6 +587,7 @@ echo "Model: $RUN_MODEL (role: $ROLE)"
 # primitive (cron/loop-able). It exits 0 even when the agent self-escalates, so
 # detect ESCALATE: in the output rather than relying on exit code.
 if (cd "$WORKTREE" && claude -p "$RUN_PROMPT" \
+      "${SYS_PROMPT_ARGS[@]}" \
       --model "$RUN_MODEL" \
       --allowedTools "$ALLOWED_TOOLS" \
       --output-format text 2>&1 | tee "$LOG"); then
