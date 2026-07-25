@@ -14,7 +14,6 @@ let subscriptions: any[] = [];
 const mockSpecTreeProvider = { refresh: vi.fn(), setExpansionMemory: vi.fn() };
 const mockAdrTreeProvider = { refresh: vi.fn(), setExpansionMemory: vi.fn() };
 const mockBacklogTreeProvider = { refresh: vi.fn(), refreshIfStale: vi.fn(), setExpansionMemory: vi.fn() };
-const mockStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockNextTaskStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockScaffoldCommitStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockSpecPanel = { show: vi.fn(), refresh: vi.fn(), dispose: vi.fn() };
@@ -228,7 +227,6 @@ vi.mock('../src/views/backlog-view', () => ({
 // current phase from frontmatter the same way the bar does (#149).
 vi.mock('../src/views/status-bar', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/views/status-bar')>()),
-  MinSpecStatusBar: vi.fn(function () { return mockStatusBar; }),
   MinSpecNextTaskStatusBar: vi.fn(function () { return mockNextTaskStatusBar; }),
   MinSpecScaffoldCommitStatusBar: vi.fn(function () { return mockScaffoldCommitStatusBar; }),
 }));
@@ -320,7 +318,7 @@ import {
 } from '../src/lib/context-injector';
 import { loadSession, saveSession, addToScope, isFileInScope } from '../src/lib/session';
 import { createParkingLotEntry, parkTopic } from '../src/lib/parking-lot';
-import { MinSpecStatusBar, MinSpecScaffoldCommitStatusBar } from '../src/views/status-bar';
+import { MinSpecScaffoldCommitStatusBar } from '../src/views/status-bar';
 import { SpecPanel } from '../src/views/spec-panel';
 import { SpecTreeProvider } from '../src/views/spec-tree-provider';
 import { AdrTreeProvider } from '../src/views/adr-tree-provider';
@@ -648,17 +646,6 @@ describe('activate()', () => {
     expect(MinSpecSpecFileLensProvider).toHaveBeenCalledWith(
       '/tmp/test-workspace',
     );
-  });
-
-  // -------------------------------------------------------------------------
-  // Status bar
-  // -------------------------------------------------------------------------
-
-  it('creates and initializes the status bar with null', () => {
-    activate(makeMockContext());
-
-    expect(MinSpecStatusBar).toHaveBeenCalled();
-    expect(mockStatusBar.update).toHaveBeenCalledWith(null);
   });
 
   // -------------------------------------------------------------------------

@@ -28,7 +28,6 @@ let subscriptions: any[] = [];
 const mockSpecTreeProvider = { refresh: vi.fn(), setExpansionMemory: vi.fn(), epicGrouping: { set: vi.fn(), toggle: vi.fn(() => true) } };
 const mockAdrTreeProvider = { refresh: vi.fn(), setExpansionMemory: vi.fn(), epicGrouping: { set: vi.fn(), toggle: vi.fn(() => true) } };
 const mockBacklogTreeProvider = { refresh: vi.fn(), refreshIfStale: vi.fn(), setExpansionMemory: vi.fn(), epicGrouping: { set: vi.fn(), toggle: vi.fn(() => true) } };
-const mockStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockNextTaskStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockScaffoldCommitStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockSpecPanel = { show: vi.fn(), refresh: vi.fn(), dispose: vi.fn() };
@@ -192,10 +191,9 @@ vi.mock('../src/views/frontmatter-completion', () => ({
   FrontmatterCompletionProvider: vi.fn(function () { return {}; }),
 }));
 // Partial mock: keep real pure helpers (fromFrontmatter) so injectContext can
-// derive currentPhase the same way the status bar does.
+// derive currentPhase from spec frontmatter.
 vi.mock('../src/views/status-bar', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/views/status-bar')>()),
-  MinSpecStatusBar: vi.fn(function () { return mockStatusBar; }),
   MinSpecNextTaskStatusBar: vi.fn(function () { return mockNextTaskStatusBar; }),
   MinSpecScaffoldCommitStatusBar: vi.fn(function () { return mockScaffoldCommitStatusBar; }),
 }));
@@ -692,72 +690,23 @@ describe('injectContext command — no workspace', () => {
 });
 
 // ===========================================================================
-// onSpecsChanged status-bar refresh path (lines 257-268)
+// onSpecsChanged watcher path — refresh tree + panel (status-bar item removed)
 // ===========================================================================
 
-describe('spec watcher onSpecsChanged status-bar update', () => {
-  it('reads + parses the active spec and updates the status bar from its frontmatter', async () => {
-    const { findActiveSpec } = await import('../src/lib/active-spec');
-    const SPEC_PATH = '/tmp/test-workspace/specs/SPEC-001.md';
-    vi.mocked(findActiveSpec).mockResolvedValue(SPEC_PATH);
-    vi.mocked(fs.readFileSync as any).mockReturnValue('---\nraw\n---\n');
-    vi.mocked(parseSpec as any).mockReturnValue({
-      frontmatter: {
-        id: 'SPEC-001',
-        title: 'X',
-        tier: 'T2',
-        status: 'specifying',
-        phases: { specify: 'in-progress', plan: 'pending' },
-      },
-    });
-
+describe('spec watcher onSpecsChanged', () => {
+  it('refreshes the spec tree and panel when a spec file changes', () => {
     activate(makeMockContext());
 
     // The spec watcher is the first watcher created (index 0).
     const specWatcher = createdWatchers[0];
-    const onChange = specWatcher.onDidChange.mock.calls[0][0] as () => Promise<void>;
-    mockStatusBar.update.mockClear();
+    const onChange = specWatcher.onDidChange.mock.calls[0][0] as () => void;
+    mockSpecTreeProvider.refresh.mockClear();
+    mockSpecPanel.refresh.mockClear();
 
-    await onChange();
+    onChange();
 
     expect(mockSpecTreeProvider.refresh).toHaveBeenCalled();
     expect(mockSpecPanel.refresh).toHaveBeenCalled();
-    // It updated with a non-null payload derived from the parsed frontmatter.
-    expect(mockStatusBar.update).toHaveBeenCalled();
-    expect(mockStatusBar.update.mock.calls.at(-1)?.[0]).not.toBeNull();
-  });
-
-  it('falls back to status-bar update(null) when reading the active spec throws', async () => {
-    const { findActiveSpec } = await import('../src/lib/active-spec');
-    vi.mocked(findActiveSpec).mockResolvedValue('/tmp/test-workspace/specs/SPEC-001.md');
-    vi.mocked(fs.readFileSync as any).mockImplementation(() => {
-      throw new Error('gone');
-    });
-
-    activate(makeMockContext());
-
-    const specWatcher = createdWatchers[0];
-    const onChange = specWatcher.onDidChange.mock.calls[0][0] as () => Promise<void>;
-    mockStatusBar.update.mockClear();
-
-    await onChange();
-
-    expect(mockStatusBar.update).toHaveBeenLastCalledWith(null);
-  });
-
-  it('updates status bar with null when there is no active spec', async () => {
-    const { findActiveSpec } = await import('../src/lib/active-spec');
-    vi.mocked(findActiveSpec).mockResolvedValue(null);
-
-    activate(makeMockContext());
-
-    const specWatcher = createdWatchers[0];
-    const onChange = specWatcher.onDidChange.mock.calls[0][0] as () => Promise<void>;
-    mockStatusBar.update.mockClear();
-
-    await onChange();
-
-    expect(mockStatusBar.update).toHaveBeenLastCalledWith(null);
   });
 });
 
