@@ -501,7 +501,7 @@ A read-only audit of the approvables system established three facts, each with f
 
 ## [DR-063 — The `awaiting-approval` queue signal — one positive "your turn" label, single-owner, decoupled from the AI-failure path](DR-063.md)
 
-*Status: proposed · Date: 2026-07-16*
+*Status: accepted · Date: 2026-07-16*
 
 <!-- dr-summary:DR-063 auto=78ca4574c42b -->
 The independent AI reviewer (DR-033 §6) records a PR verdict as ai-review:{pass,changes,blocked,pending}. On any non-pass, .github/workflows/ai-review.yml **also** applies needs-human-review **unconditionally at t=0** (ai-review.yml L568-574 and L606-608). Two problems compound: 1. **ai-review:changes is overloaded.** It means both *"the reviewer read the code and wants specific fixes"* (substantive, AI-remediable) and *"the review could not produce a trustworthy green"* (procedural fail-closed — garbled/injected/truncated verdict, ESCALATE, workflow error). Different meanings, one label.
@@ -525,7 +525,7 @@ Two held rules contradict: rule #8 / DR-051 §4a says never move a shared checko
 
 ## [DR-066 — No silent gate — a required/merge-gating check must fail visibly, never best-effort, and never hinge on a single disableable producer](DR-066.md)
 
-*Status: proposed · Date: 2026-07-22*
+*Status: accepted · Date: 2026-07-22*
 
 <!-- dr-summary:DR-066 auto=fc5103ae0bbb -->
 Three times in this repo, a merge gate that *looked* present enforced **nothing**, and the symptom each time was identical — "every merge needs --admin", i.e. the required gate was being bypassed on every landing: 1. **#560** — the ai-review required-check context was pinned to the **wrong GitHub App id**, so the ruleset waited on a check that could never post → unsatisfiable → every merge a bypass. 2. **#810** — ai-review.yml posted the load-bearing ai-review/pass commit status **best-effort** (gh…
