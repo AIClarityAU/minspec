@@ -33,6 +33,64 @@ while IFS=$'\t' read -r _status path; do
   fi
 done < <(git diff --cached --name-status --diff-filter=A)
 
+# ── committable-symlink gate (#913 / bit #900) ───────────────────────────────
+# `.gitignore`'s `node_modules/` pattern matches a DIRECTORY, not a symlink FILE
+# named `node_modules`, so `git add` happily accepts a symlink. Build/test
+# worktrees routinely `ln -s <primary>/node_modules` to share hoisted deps; if
+# one is staged before removal it commits an ABSOLUTE dev-machine path that
+# breaks every other checkout and CI (the exact defect in PR #900).
+#
+# Reject a staged symlink (git mode 120000) when ANY of:
+#   • its own name is `node_modules` (at any depth) — shared hoisted deps are
+#     machine-local and must never enter history, whatever the target;
+#   • its target is an ABSOLUTE path (non-portable, dev-machine-specific);
+#   • its target lexically ESCAPES the repository root (`../…` climbs out).
+#
+# Bypass (rare, e.g. an intentional in-repo relative symlink this heuristic
+# can't distinguish): SYMLINK_GATE_OFF=1 git commit ...
+if [ "${SYMLINK_GATE_OFF:-}" != "1" ]; then
+  # True (0) if resolving $2 (a relative target) from directory $1 climbs above
+  # the repo root — purely lexical, no realpath/filesystem dependency so it works
+  # even when the target does not yet exist on this machine.
+  symlink_escapes_repo() {
+    local combined="$1/$2" depth=0 comp
+    local old_ifs="$IFS"
+    IFS='/'
+    for comp in $combined; do
+      case "$comp" in
+        '' | .) : ;;
+        ..)
+          depth=$((depth - 1))
+          if [ "$depth" -lt 0 ]; then IFS="$old_ifs"; return 0; fi
+          ;;
+        *) depth=$((depth + 1)) ;;
+      esac
+    done
+    IFS="$old_ifs"
+    return 1
+  }
+
+  while IFS= read -r linkpath; do
+    [ -n "$linkpath" ] || continue
+    target=$(git show ":$linkpath" 2>/dev/null || true)
+    base=$(basename "$linkpath")
+    reason=""
+    if [ "$base" = "node_modules" ]; then
+      reason="a 'node_modules' symlink must never be committed (shared hoisted deps are machine-local)"
+    elif [ "${target#/}" != "$target" ]; then
+      reason="its target '$target' is an absolute path (non-portable / dev-machine-specific)"
+    elif symlink_escapes_repo "$(dirname "$linkpath")" "$target"; then
+      reason="its target '$target' escapes the repository root"
+    fi
+    if [ -n "$reason" ]; then
+      echo "✖ symlink gate (#913): refusing staged symlink '$linkpath' — $reason." >&2
+      echo "  Unstage it (git rm --cached '$linkpath') and use a real, in-repo relative link if you truly need one." >&2
+      echo "  Override (rare, intentional in-repo relative symlink): SYMLINK_GATE_OFF=1 git commit ..." >&2
+      fail=1
+    fi
+  done < <(git diff --cached --raw --diff-filter=AMT | awk -F'\t' '{ n = split($1, a, " "); if (a[2] == "120000") print $2 }')
+fi
+
 # ── validate gate: frontmatter + dangling-ref + DR-index integrity ───────────
 # `npm run validate` (validate-frontmatter.ts) scans the WHOLE artifact corpus:
 # docs/decisions/ (DR sequence + #220 INDEX-status drift), specs/ (frontmatter +
