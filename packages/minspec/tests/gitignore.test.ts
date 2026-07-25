@@ -179,6 +179,13 @@ describe('MINSPEC_GITIGNORE_ENTRIES — coverage of machine-local state files', 
     expect(MINSPEC_GITIGNORE_ENTRIES).toContain('.minspec/sessions/');
   });
 
+  // G-8 (git transparency): harness-owned worktree checkouts are transient and
+  // machine-local; if not ignored they surface as untracked noise in the primary
+  // checkout's source-control panel, which G-8 exists to keep clean.
+  it('includes the harness worktree directory (.claude/worktrees/, G-8)', () => {
+    expect(MINSPEC_GITIGNORE_ENTRIES).toContain('.claude/worktrees/');
+  });
+
   // ASYMMETRY GATE (durable fix): the merge-refresh state files are the source of
   // truth for their own filenames. This ties the gitignore literals back to those
   // constants, so renaming a state file without updating the ignore list — the
