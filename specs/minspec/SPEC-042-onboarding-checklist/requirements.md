@@ -2,7 +2,7 @@
 id: SPEC-042
 type: requirements
 # 🔒 Once approved, hash-locked: approved bytes recorded in .minspec/approvals.json[SPEC-042].specHash. ANY edit voids approval (hash → stale) — re-run "MinSpec: Approve Spec". DR-012.
-status: specifying
+status: implementing
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core — the onboarding page is the front door to init/classify/refresh/approval gates (see notes: a dedicated onboarding/first-run EPIC would be the ideal home)
@@ -12,8 +12,8 @@ implements: [packages/minspec/src/commands/getting-started.ts, packages/minspec/
 affects: [packages/minspec/package.json, packages/minspec/src/lib/auto-bootstrap.ts, packages/minspec/src/commands/init.ts, packages/minspec/src/commands/approve.ts, packages/minspec/src/extension.ts]
 phases:
   specify: done
-  clarify: pending
-  plan: in-progress   # design.md drafted (approach, webview-vs-walkthrough decision, per-action consent, slice plan, 0-dep budget) by Claude (agent) 2026-07-25 — but CONTINGENT on the FR-OQ1..3 proposals, which Clarify must ratify before plan closes. Not "done" while clarify: pending (SDD sequence specify → clarify → plan).
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
