@@ -34,14 +34,24 @@
 #     SELF-EDIT GUARD below, NOT by the base checkout. The untrusted head is fetched
 #     for the `git diff base...head` ONLY — its file CONTENTS are seen solely as
 #     diff DATA, never checked out into the workspace and never executed.
-#   • SELF-EDIT GUARD (fail closed). Because ai-review.yml runs from head, the
-#     reviewer cannot self-certify a PR that rewrites the reviewer. So if the PR's
-#     changed-file set touches `.github/` OR `scripts/` — or cannot be computed at
-#     all — the verdict is FORCED to `ai-review:changes` regardless of the agent's
-#     output, and the run posts a "machinery touched → human review required"
-#     notice. Auto-pass is therefore impossible on a self-editing PR. Fail closed:
-#     an errored/empty changed-file computation is treated AS a self-edit
-#     (→ changes), never as clean.
+#   • SELF-EDIT GUARD (fail closed on MERGE, #596-disambiguated). Because
+#     ai-review.yml runs from head, the reviewer cannot self-CERTIFY (auto-merge) a
+#     PR that rewrites the reviewer. The guard now keeps two orthogonal states
+#     DISTINCT, so a machinery PR's honest code verdict is never conflated with a
+#     reviewer-requested change (#596 — the conflation hid the real #900 blocker):
+#       – MACHINERY (changed set touches `.github/` OR `scripts/`): the panel's
+#         honest verdict is KEPT as the `ai-review:*` label — a clean machinery PR
+#         reads `ai-review:pass`, a genuinely-flagged one reads `ai-review:changes`,
+#         each surfacing distinctly. Auto-MERGE is instead held by a SEPARATE,
+#         clearly-named human gate: the `needs-human-review` label, the
+#         `machinery-review-required` check (`action_required`), and `ready-to-merge`
+#         staying red because NO SHA-bound pass witness is posted for a machinery PR
+#         (its `ai-review` check-run is `neutral` and its `ai-review/pass` commit
+#         status is `failure`).
+#       – INDETERMINATE (changed set cannot be computed at all): the verdict is
+#         FORCED to `ai-review:changes` — we cannot prove the PR is clean, so fail
+#         closed; an errored/empty changed-file computation is treated AS a self-edit.
+#     Auto-MERGE is therefore impossible on a self-editing PR in both sub-cases.
 #   • `pull_request` (NOT `pull_request_target`): the latter would run untrusted
 #     PR code WITH secrets — a well-known exfil hole. Our PRs are same-repo
 #     branches, so secrets are available under plain `pull_request`. A FORK PR
@@ -70,12 +80,14 @@
 #     cannot feed auto-merge mid-run. The COMPLETE fix — ready-to-merge verifying
 #     the pass was applied to the CURRENT head SHA — is a follow-up in
 #     ready-to-merge.yml (deliberately NOT edited from here).
-#   • Fail closed everywhere: any error, missing verdict, a security-role (any
-#     code change) that requests changes, or a PR that edits the review machinery
-#     (`.github/`/`scripts/`) → `ai-review:changes`. A spurious `pass` is the worst
-#     outcome (it feeds auto-merge), so `pass` is emitted ONLY on an unambiguous
-#     clean verdict from every required role AND only when the PR does not touch
-#     the machinery.
+#   • Fail closed everywhere: any error, missing verdict, or a security-role (any
+#     code change) that requests changes → `ai-review:changes`. A spurious auto-MERGE
+#     is the worst outcome (never a spurious label), so a machinery PR
+#     (`.github/`/`scripts/`) can NEVER auto-merge — but its `ai-review:*` LABEL now
+#     reflects the panel's honest code verdict (#596); the merge hold is the separate
+#     `machinery-review-required` / `needs-human-review` human gate plus a red
+#     `ready-to-merge`, NOT a masked `ai-review:changes`. An indeterminate
+#     changed-file set still fails closed to `ai-review:changes`.
 #   • RESIDUALS (known, LOW; tracked with #458). (a) redact() scrubs the literal
 #     token value and `sk-ant-*`; an agent that re-encodes the token before echoing
 #     it (base64/hex/split) could slip past the literal scrub — but the no-tools
@@ -410,12 +422,23 @@ jobs:
             FINAL="ai-review:blocked"
           fi
 
-          # ── self-edit OVERRIDE (fail closed): a PR touching the review machinery
-          #    (`.github/`/`scripts/`), or one whose changed set could not be
-          #    determined, can NEVER auto-pass — no matter what the roles decided.
-          #    Applied AFTER the combine so the reviewer still ran for information
-          #    but cannot yield a green on a PR that edits its own gate. ──
-          if [ "$SELF_EDIT" = "yes" ]; then
+          # ── self-edit handling (fail closed on MERGE, #596-disambiguated) ──
+          #    A PR touching the review machinery, or one whose changed set could not
+          #    be determined, can NEVER auto-MERGE — but the two cases are kept
+          #    DISTINCT so a machinery PR's honest code verdict is not conflated with a
+          #    reviewer-requested change (#596 — a real `ai-review:changes` was
+          #    indistinguishable from the guard, which hid the #900 blocker):
+          #      • MACHINERY → KEEP the panel's verdict as the label (FINAL is left as
+          #        the combine result: a clean machinery PR reads `ai-review:pass`, a
+          #        genuinely-flagged one reads `ai-review:changes`). The MERGE hold is
+          #        carried SEPARATELY (post step): the `needs-human-review` label, the
+          #        `machinery-review-required` check, and `ready-to-merge` staying red
+          #        because no SHA-bound pass witness is posted for a machinery PR.
+          #      • INDETERMINATE → FORCE `ai-review:changes` (cannot prove clean).
+          #    is_machinery (below) is the SAME predicate and still drives the
+          #    `ai-review` check-run to `neutral` for machinery, so that check is never
+          #    a pass witness and the required gate self-exempts exactly as before. ──
+          if [ "$SELF_EDIT" = "yes" ] && [ "$SELF_EDIT_KIND" != "machinery" ]; then
             FINAL="ai-review:changes"
           fi
 
@@ -465,12 +488,14 @@ jobs:
             else
               if [ "$SELF_EDIT" = "yes" ]; then
                 if [ "$SELF_EDIT_KIND" = "machinery" ]; then
-                  echo "> ⚠️ **This PR modifies the AI-review machinery (\`.github/\`/\`scripts/\`) — auto-pass is disabled; a human must review.**"
+                  echo "> ⚠️ **This PR modifies the AI-review machinery (\`.github/\`/\`scripts/\`) — the code review still ran; its honest verdict is \`$FINAL\` (above), but a human must review because a gate cannot certify a change to itself.**"
+                  echo ">"
+                  echo "> The code-review verdict is reported AS-IS — it is **not** masked as \`ai-review:changes\` (#596), so a genuine reviewer-requested change on a machinery PR still surfaces distinctly. Auto-merge is held by a SEPARATE human gate instead: the \`needs-human-review\` label, the \`machinery-review-required\` check, and \`ready-to-merge\` staying red (no SHA-bound pass witness is posted for a machinery PR)."
                 else
                   echo "> ⚠️ **The set of changed files could not be verified — auto-pass is disabled (fail closed); a human must review.**"
+                  echo ">"
+                  echo "> \`on: pull_request\` runs this workflow from the PR head, so a change that cannot be enumerated cannot self-certify. The verdict is forced to \`ai-review:changes\` regardless of the reviewer's output below (which still runs, for information)."
                 fi
-                echo ">"
-                echo "> \`on: pull_request\` runs this workflow from the PR head, so a change to the gate itself cannot self-certify. The verdict is forced to \`ai-review:changes\` regardless of the reviewer's output below (which still runs, for information)."
                 echo
               fi
               echo "### Reviewer"
@@ -598,6 +623,74 @@ jobs:
           fi
           exit 0
 
+      # ── SEPARATE, clearly-named machinery human-gate check (#596) ─────────────
+      # A machinery PR (touches `.github/`/`scripts/`) now keeps the panel's HONEST
+      # `ai-review:*` label (a clean one reads `ai-review:pass`), so the merge hold
+      # can no longer ride on a masked `ai-review:changes`. This posts the distinct,
+      # requireable `machinery-review-required` check-run on the head SHA:
+      #   • is_machinery == true → `action_required` (BLOCKS — a human must review a
+      #     change to the review machinery itself; a gate cannot certify itself), and
+      #   • otherwise            → `success` (so this check is SAFE to mark REQUIRED in
+      #     the branch ruleset without making every non-machinery PR unsatisfiable —
+      #     the #560 trap; a sound required check must report on EVERY PR).
+      # ADDITIVE and defence-in-depth: `ready-to-merge` (already required) stays red
+      # for a machinery PR independently (no SHA-bound pass witness), so the merge hold
+      # holds even if this check is never added to the ruleset. Posted AS THE BOT,
+      # best-effort: a post failure degrades to a warning and never reds the job. Only
+      # trusted values reach the shell (App token, repo slug, GitHub-assigned head SHA,
+      # and our own gate's machinery flag) — no PR-controlled text.
+      - name: Post `machinery-review-required` human-gate check as minspec-sdd[bot]
+        if: always() && steps.guard.outputs.configured == 'true'
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          # Our own gate's machinery predicate (SELF_EDIT_KIND == "machinery"), reused
+          # via the review step output — never PR-controlled text. Empty (review step
+          # never completed) defaults to non-machinery → success below; this check can
+          # never green-exempt a machinery PR by defaulting, and the job's other
+          # fail-closed paths still block.
+          IS_MACHINERY: ${{ steps.review.outputs.is_machinery }}
+        run: |
+          set -uo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "::warning title=machinery-review-required check not posted::No App token (mint skipped/failed) — cannot post the machinery human-gate check. \`ready-to-merge\` remains the load-bearing hold."
+            exit 0
+          fi
+          if [ "${IS_MACHINERY:-false}" = "true" ]; then
+            CONCLUSION=action_required
+            TITLE="Machinery PR — human review required"
+            SUMMARY="This PR changes the AI-review machinery (\`.github/\` or \`scripts/\`). The independent code review still ran and its honest verdict is on the \`ai-review\` check / label — but a gate cannot certify a change to itself, so a human must review and clear this before merge. \`ready-to-merge\` also stays red until then (#596)."
+          else
+            CONCLUSION=success
+            TITLE="Not a machinery PR — no extra human gate"
+            SUMMARY="This PR does not change the AI-review machinery, so no machinery-specific human gate applies. The \`ai-review\` check + \`ready-to-merge\` status remain the merge gate (#596)."
+          fi
+          # Build the check-run body with node so title/summary are JSON-encoded
+          # safely (values are trusted, but this avoids any quoting hazard). node is
+          # on PATH whenever setup-node ran; if it did not (an earlier step failed),
+          # the `if !` catches the missing binary → warning → exit 0 (non-fatal).
+          BODY="$RUNNER_TEMP/machinery-review-check.json"
+          if ! CONCLUSION="$CONCLUSION" TITLE="$TITLE" SUMMARY="$SUMMARY" HEAD_SHA="$HEAD_SHA" BODY="$BODY" node -e '
+            const fs = require("fs");
+            fs.writeFileSync(process.env.BODY, JSON.stringify({
+              name: "machinery-review-required",
+              head_sha: process.env.HEAD_SHA,
+              status: "completed",
+              conclusion: process.env.CONCLUSION,
+              output: { title: process.env.TITLE, summary: process.env.SUMMARY },
+            }));
+          '; then
+            echo "::warning title=machinery-review-required check not posted::Could not build the check body. \`ready-to-merge\` remains the load-bearing hold."
+            exit 0
+          fi
+          # POST as the bot. Best-effort: a failure (e.g. missing `checks: write`) must
+          # NOT red the run — ready-to-merge independently holds a machinery PR.
+          if ! gh api -X POST "repos/$REPO/check-runs" --input "$BODY" >/dev/null; then
+            echo "::warning title=machinery-review-required check not posted::Posting failed (grant the minspec-sdd App \`checks: write\`). \`ready-to-merge\` remains the load-bearing hold."
+          fi
+          exit 0
+
       # Post + label AS THE BOT. GH_TOKEN = App token (this is the ONLY step, with
       # the fail-closed one, that holds it). No CLAUDE_CODE_OAUTH_TOKEN here.
       - name: Post verdict + apply label as minspec-sdd[bot]
@@ -609,6 +702,11 @@ jobs:
           # #466 — the EXACT SHA this review evaluated, for the SHA-bound pass status.
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           LABEL: ${{ steps.review.outputs.label }}
+          # #596 — the SAME machinery predicate the review step computed
+          # (SELF_EDIT_KIND == "machinery"). A machinery PR keeps its honest label but
+          # must NOT post a success pass witness and MUST pull in a human — driven
+          # below off this flag. Empty (review step never completed) ⇒ non-machinery.
+          IS_MACHINERY: ${{ steps.review.outputs.is_machinery }}
           BODY_FILE: ${{ steps.review.outputs.body-file }}
           # Human-reviewer fallback for the fail-closed (`ai-review:changes`) path
           # below. Comma-separated logins from the repo variable if set, else the
@@ -655,11 +753,29 @@ jobs:
           # required gate. It stays non-fatal (hard-failing here would fail-close
           # EVERY review into `ai-review:changes` over a missing permission), but it
           # must never be silent again: surface an actionable Actions warning.
-          if [ "$LABEL" = "ai-review:pass" ]; then PASS_STATE=success; else PASS_STATE=failure; fi
+          # #596 — a MACHINERY PR NEVER posts a `success` pass witness, even when the
+          # code review passed. `ai-review:pass` on a machinery PR is the honest CODE
+          # verdict, but a gate cannot certify a change to itself, so `ready-to-merge`
+          # must stay RED (its SHA-bound witness absent) until a human clears the
+          # separate machinery gate. Both head-witness channels are therefore kept
+          # non-passing for machinery: this `ai-review/pass` status is `failure`, and
+          # the `ai-review` check-run is `neutral` (decideReviewCheck). Non-machinery
+          # pass → `success` witness exactly as before.
+          if [ "$LABEL" = "ai-review:pass" ] && [ "${IS_MACHINERY:-false}" != "true" ]; then
+            PASS_STATE=success
+            PASS_DESC="ai-review verdict: $LABEL (bound to this commit)"
+          else
+            PASS_STATE=failure
+            if [ "$LABEL" = "ai-review:pass" ] && [ "${IS_MACHINERY:-false}" = "true" ]; then
+              PASS_DESC="ai-review:pass (code) — machinery PR: human gate required, ready-to-merge held red (#596)"
+            else
+              PASS_DESC="ai-review verdict: $LABEL (bound to this commit)"
+            fi
+          fi
           if ! gh api "repos/$REPO/statuses/$PR_HEAD_SHA" \
             -f state="$PASS_STATE" \
             -f context="ai-review/pass" \
-            -f description="ai-review verdict: $LABEL (bound to this commit)" >/dev/null 2>&1; then
+            -f description="$PASS_DESC" >/dev/null 2>&1; then
             echo "::warning title=ai-review/pass status not posted::Could not post the \`ai-review/pass\` commit status on $PR_HEAD_SHA (usually a missing \`statuses: write\` permission on the minspec-sdd App installation — grant it). The SHA-bound pass witness now falls back to the \`ai-review\` check-run (#810); the gate is not a false green either way."
           fi
 
@@ -672,13 +788,20 @@ jobs:
           done
           gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "ai-review:pending" 2>/dev/null || true
 
-          # Fail-closed → pull a human in — ONLY for a real `ai-review:changes`
-          # (normal request-changes OR the self-edit override). A `blocked` verdict
-          # is retry-able (the reviewer never ran), NOT a human-review situation, so
-          # it must NOT summon a reviewer or the needs-human-review label — the
+          # Pull a human in for EITHER fail-closed situation (#596):
+          #   • a real `ai-review:changes` (normal request-changes, or the
+          #     INDETERMINATE self-edit force), OR
+          #   • a MACHINERY PR whose code review PASSED — the code is clean, but a
+          #     gate cannot certify a change to itself, so a human must review the
+          #     machinery edit before it merges. Without this, a machinery PR now
+          #     keeps its honest `ai-review:pass` label and would carry NO human
+          #     signal; `needs-human-review` also blocks the agent dispatch path
+          #     (scripts/dispatch-ready-check.sh), completing the separate gate.
+          # A `blocked` verdict is retry-able (the reviewer never ran), NOT a
+          # human-review situation, so it must NOT summon a reviewer — the
           # ai-review-retry workflow re-runs it when quota returns. All best-effort
           # (`|| true`): the label above is the authoritative signal.
-          if [ "$LABEL" = "ai-review:changes" ]; then
+          if [ "$LABEL" = "ai-review:changes" ] || { [ "${IS_MACHINERY:-false}" = "true" ] && [ "$LABEL" = "ai-review:pass" ]; }; then
             REVIEWERS="${REVIEWERS:-$OWNER}"
             gh label create "needs-human-review" --repo "$REPO" \
               --color FBCA04 --description "AI review failed closed — a human must resolve" 2>/dev/null || true
