@@ -2,7 +2,7 @@
 id: SPEC-040
 type: tasks
 # 🔒 Editing voids approval (hash in .minspec/approvals.json → stale); re-run "MinSpec: Approve Spec". DR-012
-status: specifying  # Tasks phase in progress
+status: implementing  # spec approved (requirements.md, github@ ad52ff3a); tasks.md is not separately approvable (#630)
 tier: T4
 product: minspec
 epic: EPIC-003  # SDD Core Methodology — code-change safety
