@@ -100,11 +100,43 @@ function sectionsToMarkdown(sections: Section[]): string {
 
 /**
  * Build a hash map for all sections in the content.
+ *
+ * NOTE: last-occurrence-wins for a duplicate heading (a later section clobbers
+ * an earlier one of the same name). Retained for the raw-template baseline path
+ * (`computeTemplateBaseline`) and any non-manifest caller, but is NO LONGER the
+ * manifest's source of truth — the persisted manifest is recorded from the final
+ * on-disk bytes through {@link sectionHashesFromMarkdown} (first-occurrence-wins),
+ * so a duplicate-heading document can never make the recorder and the self-check
+ * disagree (SPEC-043 D2/D8).
  */
 export function buildSectionHashes(sections: Section[]): SectionHashes {
   const hashes: Record<string, string> = {};
   for (const section of sections) {
     hashes[section.heading] = hashSection(section.body);
+  }
+  return hashes;
+}
+
+/**
+ * Hash every section of an ALREADY-FINALIZED markdown document — i.e. the exact
+ * bytes on disk — keyed by heading, **first-occurrence-wins** for a duplicate
+ * heading (mirroring {@link mergeFile}'s preserve pass, :216-218: the first
+ * occurrence's hash is authoritative and a later duplicate never clobbers it).
+ *
+ * This is the SINGLE hashing path for every manifest recording site (SPEC-043
+ * FR-1/FR-2/D2): the manifest is always the hash of what is finally on disk,
+ * re-read after every write path (merge, `seedConstitution`, and the AGENTS.md
+ * slash-section injection) has run — so `manifest == hash(disk)` by construction,
+ * no matter which mechanism last touched the file. Pure, deterministic, offline.
+ */
+export function sectionHashesFromMarkdown(content: string): SectionHashes {
+  const hashes: Record<string, string> = {};
+  for (const section of parseSections(content)) {
+    // First-occurrence-wins: a later duplicate heading never overwrites the hash
+    // of the first occurrence (matches mergeFile's preserve pass).
+    if (!(section.heading in hashes)) {
+      hashes[section.heading] = hashSection(section.body);
+    }
   }
   return hashes;
 }
@@ -291,6 +323,76 @@ export function saveTemplateBaseline(rootDir: string, baseline: GeneratedHashes)
   const baselinePath = path.join(rootDir, '.minspec', TEMPLATE_BASELINE_FILENAME);
   fs.mkdirSync(path.dirname(baselinePath), { recursive: true });
   fs.writeFileSync(baselinePath, JSON.stringify(baseline, null, 2) + '\n');
+}
+
+/**
+ * A single manifest/disk disagreement discovered by
+ * {@link verifyGeneratedHashesConsistent} (SPEC-043 FR-3 / INV-3).
+ */
+export interface ManifestInconsistency {
+  /** Relative path of the managed file whose recorded hash disagrees with disk. */
+  readonly filePath: string;
+  /** The section (heading) whose recorded hash ≠ its on-disk body hash. */
+  readonly heading: string;
+  /** Hash recorded in the (in-memory / generated) manifest. */
+  readonly recorded: string;
+  /** `hashSection` of the section's current on-disk body (or a marker when absent). */
+  readonly onDisk: string;
+}
+
+/**
+ * Fail-closed consistency predicate (SPEC-043 FR-3 / FR-3a / INV-3). For every file
+ * path in `hashes` that is ALSO present on disk, re-read the file, hash its sections
+ * through the one shared {@link sectionHashesFromMarkdown} helper, and assert every
+ * recorded section hash equals the on-disk section hash. Returns the list of
+ * violations — empty ⇒ the manifest is consistent with disk.
+ *
+ * A recorded path whose file is ABSENT on disk is SKIPPED, not a violation
+ * (FR-3a): a legitimately-removed template must never brick a refresh. A recorded
+ * *section* that is missing from an otherwise-present file IS a violation — the
+ * manifest is claiming a hash for content that is not on disk.
+ *
+ * NOTE on the write-path caller (`recordVerifyAndSaveManifest` in scaffold.ts): there
+ * the manifest is recorded from the SAME final disk this function re-reads, so the
+ * result is EMPTY by construction (Slice 1) — the gate is a fail-closed tripwire that
+ * cannot fire in correct code, and defends only against a FUTURE change that records
+ * the manifest from a non-disk source (record-before-write). Its independent value is
+ * as a reusable predicate: an offline commit/CI-time check (#760) that hashes the
+ * manifest against disk at a DIFFERENT time than it was recorded CAN legitimately
+ * catch drift, and that is where this predicate actively earns its keep.
+ *
+ * Deterministic, offline (pure fs + SHA-256, INV-4). Read-only — it never writes. The
+ * write-path caller aborts-without-persist on any non-empty result (D4).
+ */
+export function verifyGeneratedHashesConsistent(
+  rootDir: string,
+  hashes: GeneratedHashes,
+): ManifestInconsistency[] {
+  const violations: ManifestInconsistency[] = [];
+  for (const filePath of Object.keys(hashes)) {
+    const fullPath = path.join(rootDir, filePath);
+    if (!fs.existsSync(fullPath)) continue; // absent file → skip (FR-3a)
+    let content: string;
+    try {
+      content = fs.readFileSync(fullPath, 'utf-8');
+    } catch {
+      continue; // unreadable → treat as absent, never abort on an fs error
+    }
+    const diskHashes = sectionHashesFromMarkdown(content);
+    const recorded = hashes[filePath];
+    for (const heading of Object.keys(recorded)) {
+      const onDisk = diskHashes[heading];
+      if (onDisk !== recorded[heading]) {
+        violations.push({
+          filePath,
+          heading,
+          recorded: recorded[heading],
+          onDisk: onDisk ?? '(section absent on disk)',
+        });
+      }
+    }
+  }
+  return violations;
 }
 
 // ---------------------------------------------------------------------------
