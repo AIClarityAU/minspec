@@ -209,6 +209,23 @@ for content-bearing artifacts (specs, ADRs).
 - **FR-15 (progress affordance).** The walk MUST show position ("3 of 7 pending") and let
   the reviewer expand the full pending pipeline on demand (SPEC-012 FR-6 — pipeline is
   optional expansion, collapsed by default).
+- **FR-18 (Explain — a read-only exit cheaper than approving).** The review action bar (beside
+  the FR-10 Approve control and the FR-14 skip/stop) MUST expose a **`?` "Explain" control** at
+  **document scope**: a one-click request for a plain-language explanation of the artifact under
+  review. It is **read-only** — it MUST NOT run the FR-6 revision/delegation path, MUST NOT
+  mutate the artifact or its sidecar, and MUST NOT bypass or alter the FR-10 approval gate (a
+  non-destructive sibling of the FR-3 comment pins). It routes **identically to the Tier-0 AI
+  path this spec already delegates** (FR-6 / FR-OQ2): the click hands an **LLM-free request** to
+  the host (the DR-057 `.minspec/queue` primitive or the chosen revision channel), a
+  consumer/agent generates, and `packages/minspec` only **renders** the reply — **no** network
+  import in core (FR-17). When no explainer is available it MUST **degrade honestly** to a "no
+  explainer available" notice, never a silent no-op or a fabricated answer. The mirror of
+  SPEC-018 FR-18 (same control, at document scope in the walk rather than per-section).
+  *Rationale:* directly answers this spec's **R6 approve-chain-fatigue → rubber-stamping** risk —
+  it gives the reviewer an "explain this to me" exit **cheaper than approving**, without adding a
+  second "approve — not understood" button (which would *sanction* the very rubber-stamping the
+  never-wrong signpost exists to prevent). *(Triggered 2026-07-25;
+  [#914](https://github.com/AIClarityAU/minspec/issues/914).)*
 
 ### Packaging & boundary
 

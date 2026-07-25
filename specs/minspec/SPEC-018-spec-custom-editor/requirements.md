@@ -252,6 +252,32 @@ research spike rather than a settled answer:
   **[SPEC-014](../SPEC-014-review-webview/requirements.md)'s approve loop** surfaced here — this
   spec only positions it, it does not redefine the gate (DR-012 / SPEC-022 own that).
 
+### Explain affordance (2026-07-25)
+
+- **FR-18 (Explain — read-only, one-click preset of the chat channel).** The section hover
+  toolbar (FR-11 pen / FR-12 chat) MUST also expose a **`?` "Explain" control**: a
+  **one-click, zero-typing preset of the FR-12 / FR-16 chat channel**, seeded with a canonical
+  read-only prompt (*"explain this section in plain language; do **not** modify the document"*).
+  It reuses the FR-12/FR-16 channel **wholesale** — it is **not** a new AI seam — and inherits
+  the same Tier-0 boundary (FR-8): the `?` click writes an **LLM-free request** to the DR-057
+  `.minspec/queue` primitive ([`phase-advance-queue.ts`](../../../packages/minspec/src/lib/phase-advance-queue.ts)),
+  a consumer/agent generates, and `packages/minspec` only **renders** the reply — never a network
+  call. **Distinct from its siblings by being read-only:** unlike FR-11 (pen = revise) and FR-12
+  (chat = *propose an edit*), Explain MUST NOT produce a `WorkspaceEdit`, MUST NOT touch the
+  document bytes or its canonical hash, and therefore MUST NOT void approval (INV — Viewer-safe /
+  edit-is-explicit — Explain is neither a pen nor a chat *edit*). Keyboard-first: revealed on
+  section focus with a two-key chord, the hotkey shown in its tooltip (keyboard-over-mouse). When
+  no explainer consumer/agent is present it MUST **degrade honestly** to a "no explainer
+  available" notice ([SPEC-013](../SPEC-013-risk-section-policy/requirements.md) floor) — never a
+  silent no-op or a fabricated answer. *Rationale:* makes "I don't understand this" a **cheaper,
+  truthful** exit than approving — the read-only counter to the approve-chain rubber-stamp risk
+  that a second "approve — not understood" button or a confidence slider would instead
+  **sanction** (rejected against constitution *"avoid UX patterns that train the user into
+  rubber-stamping"*; a self-report is the weakest, most-biased signal — the deterministic measure
+  is SPEC-017 M1/M2 rework %). *(Triggered by the rubber-stamp affordance discussion, 2026-07-25;
+  [#914](https://github.com/AIClarityAU/minspec/issues/914). Mirrored at document scope in the
+  SPEC-014 reviewer action bar — SPEC-014 FR-18.)*
+
 *Expensive-to-reverse commitments, ranked most→least.*
 
 1. **`customEditors` `viewType` + selector globs (FR-2).** A public-ish contract: once users
