@@ -3,7 +3,7 @@
     "__preamble__": "b0cecc2c1af0888fc61a00fe09957b1a0e769f847d6eff5b2aae4edec70796ab",
     "Project Context": "c56fd6ffbf458f31f9ac33046835ee6d110d9902fe55678e5b74939276cac59e",
     "Invariants": "5ed75531d84d019b810cf6b0750412ee7592e2137ab46425e93d1a0bcd4e7f20",
-    "Principles": "b22b7d4e98ac28a7dc29dce6fff50e3041388fe7429b6973c78720a427e9ab0e",
+    "Principles": "d7c5559158c2ac87673b1e897c3da66eb053e3abb662f2cac0853a4879215a11",
     "Before Making Changes": "7b3bdfacb27375a90eb52c71d1de9995e0000fb50da312d1c8b3f17385644bd7",
     "Coding Standards": "89ab084719acfcbe5296dfb31a2f302c2ef49f8f0e3cdbc528e125244af758fb"
   },
@@ -18,10 +18,10 @@
   },
   ".minspec/constitution.md": {
     "__preamble__": "fb86119423ac547e0ea2a4f12e5dc30660310a96630d5261a5e849dbbe7c3767",
-    "Invariants": "a53bd5942a856f9d038a8ce38fcf82db4625b3ec33b94346a4e5a147ae230284",
-    "Principles": "b22b7d4e98ac28a7dc29dce6fff50e3041388fe7429b6973c78720a427e9ab0e",
-    "Constraints": "1f80a4be1e5efd33ee650c49a5b3f9cba82ab131ff6558774c04f8b6ceee7ae5",
-    "Goals": "53d9eafc49553c566cbf6eef8934ee94324a58895a5bfc4a7329d1ba5a7488f0",
+    "Invariants": "1ddac97fe4e4f23ec3f9e4508c636045cc75dbcd175aa74c304b106d3dc23966",
+    "Principles": "d7c5559158c2ac87673b1e897c3da66eb053e3abb662f2cac0853a4879215a11",
+    "Constraints": "8b4c050127f2d0508219f8ae2c34bf74428d9b139b50615f7cb519d3357d76ce",
+    "Goals": "3d4f7d3b84157face4fcee2cf3b7c181201998dc22beb2604353de9cd8f0be35",
     "Phases": "56ecaf73e96fe04b65545f5141760bbfdabe5e06644a4f2ab36deb448483a8a9",
     "Glossary": "fe0bb1a241cb9abe70848e15074b86e7e92575ae5df07840107b63ad253f0679"
   },
@@ -65,6 +65,6 @@
     "Current Work": "b7b44b83ea0b10aa1e4fd90abd38c5e4b7683784448562f61a370220f1fa78c4",
     "Testing": "e7969f422355a257bf1dc584cc0aa765d0cb79ec9c97a4439a4af4fee9f3436c",
     "Do Not": "c7d2d2b29dc4d34678916e5d8e78a2312c7725b93197ca383786f6b1d5fa3179",
-    "Spec Kit Slash Commands": "336ffe2e65dda58fd2c66c03f4eb1067f0974edd18b7ec35afd7d2ab691162fc"
+    "Spec Kit Slash Commands": "142543a35c4b3522c5eeb29aaa1ae1970567c4c1b802bb8e34cb5864b726a0a1"
   }
 }
