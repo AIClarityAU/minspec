@@ -17,8 +17,12 @@ export type ListEpicsFn = (rootDir: string) => EpicSummary[];
 /**
  * Map an epic status to a ThemeIcon id. A `proposed` epic must read as visually
  * distinct from active/done so a freshly-minted, member-less epic awaiting
- * approval stands out (#67). Active epics keep the familiar `milestone` glyph.
- * (`lightbulb` mirrors the "needs a decision" feel; cf. ADR proposed → question.)
+ * approval stands out (#67). Active epics use `list-tree` — an epic is a
+ * container of specs/DRs, which the tree glyph conveys. The `milestone`
+ * ("signpost") glyph is deliberately NOT used here: it now belongs to the
+ * Next-Task signpost status-bar item, so reusing it for epics would be a
+ * confusing double-meaning. (`lightbulb` still mirrors the "needs a decision"
+ * feel for proposed; cf. ADR proposed → question.)
  */
 function epicStatusIcon(status: EpicSummary['status'] | undefined): string {
   switch (status) {
@@ -26,7 +30,7 @@ function epicStatusIcon(status: EpicSummary['status'] | undefined): string {
     case 'done': return 'check';
     case 'abandoned': return 'circle-slash';
     case 'active':
-    default: return 'milestone';
+    default: return 'list-tree';
   }
 }
 

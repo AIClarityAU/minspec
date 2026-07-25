@@ -970,7 +970,7 @@ describe('SpecTreeProvider — epic grouping', () => {
     const p = new SpecTreeProvider('/ws', () => [makeSpec({ id: 'SPEC-050', status: 'new' })], undefined, () => proposed);
     const node = epicGroups(p).find(g => g.groupLabel.startsWith('New Thing'))!;
     expect(node.description).toBe('proposed');               // not '0/0'
-    expect((node.iconPath as { id: string }).id).toBe('lightbulb'); // distinct from 'milestone'
+    expect((node.iconPath as { id: string }).id).toBe('lightbulb'); // distinct from active's list-tree
     // a11y label carries the status too
     expect((node as unknown as { accessibilityInformation: { label: string } }).accessibilityInformation.label)
       .toContain('status proposed');
@@ -990,11 +990,11 @@ describe('SpecTreeProvider — epic grouping', () => {
     expect((node.iconPath as { id: string }).id).toBe('lightbulb');
   });
 
-  it('active/done epics WITH members render exactly as before — milestone icon + done/total (#67 no-regression)', () => {
+  it('active/done epics WITH members render list-tree icon + done/total (#67 no-regression; milestone freed for the Next-Task signpost)', () => {
     const p = new SpecTreeProvider('/ws', () => SPECS, undefined, () => EPICS);
     const telemetry = epicGroups(p).find(g => g.groupLabel.startsWith('Telemetry'))!;
     expect(telemetry.description).toBe('1/2');
-    expect((telemetry.iconPath as { id: string }).id).toBe('milestone');
+    expect((telemetry.iconPath as { id: string }).id).toBe('list-tree');
     expect(telemetry.contextValue).toBe('epicGroup.active');
   });
 
@@ -1006,7 +1006,7 @@ describe('SpecTreeProvider — epic grouping', () => {
     const node = epicGroups(p).find(g => g.groupLabel.startsWith('Lonely'))!;
     expect(node).toBeDefined();
     expect(node.description).toBe('active');                 // status word, not 0/0
-    expect((node.iconPath as { id: string }).id).toBe('milestone');
+    expect((node.iconPath as { id: string }).id).toBe('list-tree');
     expect(node.contextValue).toBe('epicGroup.active');      // accept tick does NOT show (only proposed)
   });
 
