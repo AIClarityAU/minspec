@@ -31,7 +31,10 @@
 set -e
 
 TARGET="${1:-$HOME/.cache/bumblebee/catalogs}"
-BUMBLEBEE_VERSION="${BUMBLEBEE_VERSION:-v0.1.2}"
+# Pinned to a main SHA that reads exposure-catalog schema 0.2.0. No released tag
+# reads 0.2.0 (v0.1.2, the latest, only reads 0.1.0); a checksum-pinned SHA is
+# immutable + GOSUMDB-verified and satisfies #850's "never floating" intent (DR-005/#866).
+BUMBLEBEE_VERSION="${BUMBLEBEE_VERSION:-4a02b80aaca86641767c0d6cbe77c6856e4b481b}"
 # Data-only fetch ref — may float ahead of the (executed) binary; defaults to it.
 BUMBLEBEE_CATALOG_REF="${BUMBLEBEE_CATALOG_REF:-$BUMBLEBEE_VERSION}"
 mkdir -p "$TARGET"

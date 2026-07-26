@@ -51,6 +51,12 @@ __pycache__/
 # SPEC-024 auto-merge decision audit trail (FR-7). Machine-local, append-only,
 # rebuilt/extended on every gate invocation — never committed.
 .minspec/auto-merge-audit.log
+# SPEC-044 / DR-067 work-item claim lease: per-item flock lockfiles
+# (issue-N.lock) + the per-session claimed-items registry (claimed-<sid>.list).
+# Machine-local, ephemeral, auto-released on process death — never committed.
+# (Scaffold mirror into MINSPEC_GITIGNORE_ENTRIES is a tracked follow-up, so this
+# entry is intentionally repo-local only for now.)
+.minspec/locks/
 # Machine-local merge-refresh drift-detection state, rebuilt on every
 # generate/refresh — must be gitignored, never committed. Mirrors
 # MINSPEC_GITIGNORE_ENTRIES in packages/minspec/src/lib/scaffold.ts (kept in
