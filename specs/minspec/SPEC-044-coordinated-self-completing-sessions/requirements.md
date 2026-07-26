@@ -2,7 +2,7 @@
 id: SPEC-044
 type: requirements
 # 🔒 Once approved, hash-locked: approved bytes recorded in .minspec/approvals.json[SPEC-044].specHash. ANY edit voids approval (hash → stale) — re-run "MinSpec: Approve Spec". DR-012.
-status: specifying
+status: implementing
 tier: T4
 product: minspec
 epic: EPIC-009  # Team Readiness — concurrent multi-session coordination (the presence lease's third consumer: work-item claims)
@@ -16,7 +16,7 @@ phases:
   specify: done
   clarify: done
   plan: done
-  tasks: pending
+  tasks: in-progress
   implement: pending
 ---
 
