@@ -754,6 +754,18 @@ shepherd_own_pr() {
       | if length > 0 then "yes" else "no" end' <<<"$pr_json")
     [[ ",$labels_csv," == *",ai-review:changes,"* ]] && ai_review_bad=yes
 
+    # Is anything ASYNCHRONOUS still able to change the outcome? Without this the
+    # shepherd would poll the whole ceiling on a healthy PR whose only remaining gate
+    # is a human — an hour of blocked dispatch followed by a false "reached its
+    # ceiling" hand-off on a PR that nothing was wrong with.
+    local checks_pending automerge_armed
+    checks_pending=$(jq -r '
+      [ .statusCheckRollup[]? | (.status // "") ]
+      | map(select(. == "QUEUED" or . == "IN_PROGRESS" or . == "PENDING" or . == "WAITING"))
+      | if length > 0 then "yes" else "no" end' <<<"$pr_json")
+    automerge_armed=no
+    [[ "$(jq -r '.autoMergeRequest // "null"' <<<"$pr_json")" != "null" ]] && automerge_armed=yes
+
     local action holds attempts decision
     action=$("${SCRIPT_DIR}/remediate-pr.sh" --classify \
                "$BRANCH" "$mergeable" "$merge_state" "$labels_csv" \
@@ -769,9 +781,10 @@ shepherd_own_pr() {
 
     decision=$(bash "${SCRIPT_DIR}/lib/shepherd-pr.sh" --decide \
                  "$action" "$merged" "$holds" "${attempts:-0}" \
-                 "$SHEPHERD_MAX_ATTEMPTS" "$elapsed" "$SHEPHERD_MAX_SECS" 2>/dev/null || echo "stop-not-automation")
+                 "$SHEPHERD_MAX_ATTEMPTS" "$elapsed" "$SHEPHERD_MAX_SECS" \
+                 "$checks_pending" "$automerge_armed" 2>/dev/null || echo "stop-not-automation")
 
-    echo "  shepherd PR #$pr_num: action=$action merged=$merged holds=$holds attempts=${attempts:-0} elapsed=${elapsed}s → $decision"
+    echo "  shepherd PR #$pr_num: action=$action merged=$merged holds=$holds attempts=${attempts:-0} elapsed=${elapsed}s pending=$checks_pending automerge=$automerge_armed → $decision"
 
     case "$decision" in
       stop-merged)
@@ -786,6 +799,13 @@ shepherd_own_pr() {
         shepherd_hand_off "$pr_num" "the branch conflicts with \`main\`, and resolving a conflict is a human's merge decision"; return 0 ;;
       stop-not-automation)
         echo "  PR #$pr_num is outside the automation scope — leaving it alone."; return 0 ;;
+      stop-awaiting-human)
+        # Healthy PR, nothing asynchronous left to wait for. Exit QUIETLY: no hand-off
+        # comment and no needs-human-review, because nothing failed and the auto-merge
+        # gate above has already applied whatever hold signal is correct. Saying
+        # "handed off" here would be a false signpost on a green PR.
+        echo "  PR #$pr_num is green with no automated gate left — awaiting a human. Not polling further."
+        return 0 ;;
       wait)
         : ;;  # green but unmerged: waiting on checks, native auto-merge, or a human
       do-rebase)
@@ -867,7 +887,10 @@ if (( BUILD_DEADLINE > 0 )); then
       --remove-label "agent-running" --add-label "needs-human-review" 2>/dev/null || true
     exit 0
   fi
-  BUILD_TIMEOUT_ARGS=(timeout "${BUILD_REMAINING}s")
+  # --kill-after: SIGTERM at the ceiling, then SIGKILL 30s later. Without it a
+  # `claude` process that ignores SIGTERM would still hang past the ceiling, which
+  # would defeat the bound FR-12 exists to guarantee.
+  BUILD_TIMEOUT_ARGS=(timeout --kill-after=30s "${BUILD_REMAINING}s")
 fi
 
 # Headless run inside the worktree. `claude -p` is the only automatable launch
@@ -995,14 +1018,6 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" claude -p "$RUN_PROMPT" \
       # aborting the script if the stage errors.
       run_reviewer_stage || echo "WARNING: reviewer stage errored (see $LOG) — treat as ai-review:changes" >&2
 
-      # ── SPEC-044 Slice 2: creator-owned PR shepherding (FR-4/D4) ────────────
-      # This session opened the PR, so this session drives it to merge rather than
-      # leaving it for the drain's re-cloning, context-exhausted remediator (#912).
-      # never-throw, exactly like the reviewer stage above: a shepherd failure must
-      # not block the agent-done labelling, and the drain's orphan-fallback (Slice 3)
-      # remains the safety net.
-      shepherd_own_pr || echo "WARNING: creator-shepherd errored (see $LOG) — PR left for the drain/human" >&2
-
       # ── SPEC-024: auto-merge eligibility gate (FR-6/FR-7/FR-8) ──────────────
       # After the branch is pushed and the gate checks are green (GATE_* above),
       # decide merge-vs-hold. The IMPURE work (FR-2 red→green prover, analyzers,
@@ -1122,6 +1137,21 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" claude -p "$RUN_PROMPT" \
     gh issue edit "$ISSUE" --repo "$REPO" \
       --remove-label "agent-running" --add-label "agent-done" 2>/dev/null || true
     echo "Agent completed issue #$ISSUE (role: $ROLE). Worktree: $WORKTREE"
+
+    # ── SPEC-044 Slice 2: creator-owned PR shepherding (FR-4/D4) ──────────────
+    # This session opened the PR, so this session drives it to merge rather than
+    # leaving it for the drain's re-cloning, context-exhausted remediator (#912).
+    #
+    # Ordering is load-bearing: this MUST run AFTER the SPEC-024 auto-merge gate
+    # above, which is the in-process merge actor (`gh pr merge --squash`). Placed
+    # before it, a clean PR classifies `skip-clean`, polls the entire ceiling
+    # without ever observing a merge, hands off as "no further automated attempts"
+    # — and is then merged by the very gate it just gave up on. Running after the
+    # gate means an in-process merge is observed immediately as `stop-merged`.
+    #
+    # never-throw, like the reviewer stage: a shepherd failure must not change the
+    # agent-done outcome, and the drain's orphan-fallback (Slice 3) is the net.
+    shepherd_own_pr || echo "WARNING: creator-shepherd errored (see $LOG) — PR left for the drain/human" >&2
     fi  # end egress guard: clean-publish branch (quarantine handled above)
   fi
 else

@@ -27,9 +27,10 @@
 #
 # Testable pure seam (no gh/git/claude):
 #   scripts/lib/shepherd-pr.sh --decide <action> <merged:yes|no> <holds:yes|no> \
-#       <attempts> <max_attempts> <elapsed_secs> <max_secs>
+#       <attempts> <max_attempts> <elapsed_secs> <max_secs> \
+#       <checks_pending:yes|no> <automerge_armed:yes|no>
 #     → prints ONE token: stop-merged | stand-down | stop-timeout | stop-not-automation
-#       | stop-conflict | stop-capped | do-rebase | do-fix | wait
+#       | stop-conflict | stop-capped | stop-awaiting-human | do-rebase | do-fix | wait
 
 set -euo pipefail
 
@@ -49,6 +50,7 @@ SHEPHERD_MAX_ATTEMPTS="${MINSPEC_REMEDIATE_MAX_ATTEMPTS:-2}"  # shares the drain
 #   4. then the classify_pr token decides the action.
 shepherd_decide() {
   local action="$1" merged="$2" holds="$3" attempts="$4" max_attempts="$5" elapsed="$6" max_secs="$7"
+  local checks_pending="${8:-no}" automerge_armed="${9:-no}"
 
   if [[ "$merged" == "yes" ]]; then
     echo "stop-merged"; return 0
@@ -76,10 +78,21 @@ shepherd_decide() {
         echo "do-fix"
       fi ;;
     skip-clean)
-      # Nothing fixable: green-but-unmerged means we are waiting on checks, native
-      # auto-merge, or a human gate. Keep polling until the ceiling — do NOT declare
-      # success, because unmerged is not merged.
-      echo "wait" ;;
+      # Nothing fixable, and unmerged is NOT success — so we never declare done here.
+      # But whether to keep POLLING depends on whether anything asynchronous can still
+      # change the outcome:
+      #   • checks still running    ⇒ wait (a red check may yet appear)
+      #   • auto-merge armed        ⇒ wait (GitHub will merge it without us)
+      #   • neither                 ⇒ the only remaining gate is a HUMAN, and no amount
+      #     of polling moves a human. Burning the full ceiling here would block the
+      #     dispatch for an hour and then emit a "reached its ceiling" hand-off on a
+      #     perfectly healthy PR — a self-contradicting false signpost. Exit honestly
+      #     instead, and leave the PR to the gate that already labelled it.
+      if [[ "$checks_pending" == "yes" || "$automerge_armed" == "yes" ]]; then
+        echo "wait"
+      else
+        echo "stop-awaiting-human"
+      fi ;;
     *)
       # Unknown token ⇒ fail closed: stop and leave it for a human rather than guess.
       echo "stop-not-automation" ;;
@@ -89,10 +102,10 @@ shepherd_decide() {
 # ── Pure seam dispatch ────────────────────────────────────────────────────────
 if [[ "${1:-}" == "--decide" ]]; then
   shift
-  if [[ $# -ne 7 ]]; then
-    echo "Usage: shepherd-pr.sh --decide <action> <merged> <holds> <attempts> <max_attempts> <elapsed_secs> <max_secs>" >&2
+  if [[ $# -ne 9 ]]; then
+    echo "Usage: shepherd-pr.sh --decide <action> <merged> <holds> <attempts> <max_attempts> <elapsed_secs> <max_secs> <checks_pending> <automerge_armed>" >&2
     exit 2
   fi
-  shepherd_decide "$1" "$2" "$3" "$4" "$5" "$6" "$7"
+  shepherd_decide "$1" "$2" "$3" "$4" "$5" "$6" "$7" "$8" "$9"
   exit 0
 fi

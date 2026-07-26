@@ -25,6 +25,8 @@ interface DecideArgs {
   maxAttempts?: number;
   elapsed?: number;
   maxSecs?: number;
+  checksPending?: 'yes' | 'no';
+  automergeArmed?: 'yes' | 'no';
 }
 
 /** Run `--decide`; returns the single action token. */
@@ -36,6 +38,10 @@ function decide({
   maxAttempts = 2,
   elapsed = 0,
   maxSecs = 3600,
+  // Default to "something async is still in flight" so the pre-existing cases keep
+  // exercising the polling path; the human-gate cases opt out explicitly.
+  checksPending = 'yes',
+  automergeArmed = 'no',
 }: DecideArgs): string {
   return execFileSync(
     'bash',
@@ -49,6 +55,8 @@ function decide({
       String(maxAttempts),
       String(elapsed),
       String(maxSecs),
+      checksPending,
+      automergeArmed,
     ],
     { encoding: 'utf-8' },
   ).trim();
@@ -148,7 +156,45 @@ describe('shepherd --decide: action routing (D4 — classify_pr is the one sourc
   it('waits — never claims success — while green but unmerged', () => {
     // "Nothing fixable" is not "merged". Declaring done here would be the classic
     // false signpost this project treats as the worst defect.
-    expect(decide({ action: 'skip-clean' })).toBe('wait');
+    expect(decide({ action: 'skip-clean', checksPending: 'yes' })).toBe('wait');
+  });
+});
+
+describe('shepherd --decide: polling only while something async can still change', () => {
+  // Regression for the blocking review finding on PR #975: with the shepherd running
+  // before the merge actor, a clean PR polled the full hour and then emitted a
+  // "reached its ceiling" hand-off on a PR that nothing was wrong with — which the
+  // auto-merge gate then merged anyway. Polling must be tied to an async actor.
+  it('keeps polling while checks are still running', () => {
+    expect(decide({ action: 'skip-clean', checksPending: 'yes', automergeArmed: 'no' })).toBe('wait');
+  });
+
+  it('keeps polling while auto-merge is armed — GitHub will merge without us', () => {
+    expect(decide({ action: 'skip-clean', checksPending: 'no', automergeArmed: 'yes' })).toBe('wait');
+  });
+
+  it('stops promptly when the only remaining gate is a HUMAN', () => {
+    // No polling can move a human; burning the ceiling here wastes an hour of blocked
+    // dispatch and then lies about why it stopped.
+    expect(decide({ action: 'skip-clean', checksPending: 'no', automergeArmed: 'no' })).toBe(
+      'stop-awaiting-human',
+    );
+  });
+
+  it('never reports awaiting-human as a timeout or a hand-off', () => {
+    const t = decide({ action: 'skip-clean', checksPending: 'no', automergeArmed: 'no' });
+    expect(t).not.toBe('stop-timeout');
+    expect(t).not.toBe('stop-capped');
+  });
+
+  it('a real failure still outranks the awaiting-human shortcut', () => {
+    // A red check must be fixed, not shrugged off as "waiting for a human".
+    expect(decide({ action: 'agent-remediate-checks', checksPending: 'no', automergeArmed: 'no' })).toBe(
+      'do-fix',
+    );
+    expect(decide({ action: 'skip-conflict', checksPending: 'no', automergeArmed: 'no' })).toBe(
+      'stop-conflict',
+    );
   });
 
   it('fails closed on an unknown token instead of guessing', () => {
@@ -198,10 +244,54 @@ describe('shepherd wiring: the loop is bounded by CODE, not by a token', () => {
 
   it('bounds the BUILD phase by the absolute claim lifetime (FR-12)', () => {
     expect(code).toMatch(/BUILD_DEADLINE=\$\(\( \$\(date -u \+%s\) \+ LEASE_ABS_MAX_SECS \)\)/);
-    expect(code).toMatch(/BUILD_TIMEOUT_ARGS=\(timeout "\$\{BUILD_REMAINING\}s"\)/);
+    expect(code).toMatch(/BUILD_TIMEOUT_ARGS=\(timeout --kill-after=30s "\$\{BUILD_REMAINING\}s"\)/);
   });
 
   it('tears the renew ticker down in the same EXIT trap that releases the claim (D10)', () => {
     expect(code).toMatch(/trap 'lease_stop_renew_ticker; lease_release_all[^']*' EXIT/);
+  });
+
+  it('runs the shepherd AFTER the in-process merge actor, never before it', () => {
+    // Regression for the blocking finding on PR #975. Placed before `gh pr merge`,
+    // a clean PR polls the whole ceiling, hands off as "no further automated
+    // attempts", and is then merged by the very gate it gave up on.
+    const mergeActor = code.indexOf('gh pr merge "$PR_NUM"');
+    const shepherdCall = code.indexOf('shepherd_own_pr ||');
+    expect(mergeActor, 'the SPEC-024 merge actor must exist').toBeGreaterThan(-1);
+    expect(shepherdCall, 'the shepherd must be invoked').toBeGreaterThan(-1);
+    expect(shepherdCall).toBeGreaterThan(mergeActor);
+  });
+
+  it('kills a build that ignores SIGTERM, so the FR-12 ceiling really bounds it', () => {
+    expect(code).toMatch(/timeout --kill-after=30s/);
+  });
+});
+
+describe('lease renew ticker: starts a live process and reaps it (D10 smoke)', () => {
+  it('sets a live pid on start, and clears + kills it on stop', () => {
+    const LEASE = path.resolve(__dirname, '../../../scripts/lib/issue-lease.sh');
+    const script = `
+      set -uo pipefail
+      export MINSPEC_LEASE_REPO=owner/repo
+      source ${JSON.stringify(LEASE)}
+      LEASE_RENEW_SECS=1
+      lease_renew() { :; }          # stub: the ticker must not touch the network here
+      lease_start_renew_ticker 123
+      [[ -n "$_LEASE_TICKER_PID" ]] || { echo NO_PID; exit 1; }
+      pid=$_LEASE_TICKER_PID
+      kill -0 "$pid" 2>/dev/null || { echo NOT_ALIVE; exit 1; }
+      lease_start_renew_ticker 123  # idempotent: must not spawn a second ticker
+      [[ "$_LEASE_TICKER_PID" == "$pid" ]] || { echo SPAWNED_TWICE; exit 1; }
+      lease_stop_renew_ticker
+      [[ -z "$_LEASE_TICKER_PID" ]] || { echo PID_NOT_CLEARED; exit 1; }
+      sleep 0.4
+      if kill -0 "$pid" 2>/dev/null; then echo STILL_ALIVE; exit 1; fi
+      echo OK
+    `;
+    const out = execFileSync('bash', ['-c', script], {
+      encoding: 'utf-8',
+      cwd: path.resolve(__dirname, '../../..'),
+    }).trim();
+    expect(out).toBe('OK');
   });
 });
