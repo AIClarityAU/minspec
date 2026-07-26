@@ -166,6 +166,18 @@ decision or a follow-up task. (Clarify was `done` pre-Plan; these refine it.)
   **Decided:** yes — unknown/absent audience → `human` (never `auto` by accident); an unknown
   key is a validator error (rule lives in SPEC-047). `CURRENT_POLICY_SCHEMA_VERSION` is bumped
   by the extension on any audience-membership/policy-schema change, forcing human re-confirm.
+- **CQ-8 — `CURRENT_POLICY_SCHEMA_VERSION` single source (twin drift).** Where does the version
+  live so TS and the Python twin read one value? **Decided:** a single source of truth in
+  `packages/shared` (exported constant); the Python `spec-gate.py` reads the same value from a
+  shared file (not a hand-copied literal), and the golden-fixture parity test asserts TS==Python
+  equality — a copied constant that drifts is exactly the twin-parity failure the fixtures exist
+  to catch.
+- **CQ-9 — `affects:`-file edits vs owner re-approval (cross-artifact).** Editing `approval.ts`/
+  `approval-store.ts` (owned by SPEC-041) and `spec-gate.py` (gate spec) — does SPEC-046's change
+  require the owning spec's re-approval under DR-062 cross-artifact staleness? **Decided +
+  follow-up task:** an `affects:` edit claims no ownership but may mark the owner spec's approval
+  stale (DR-062); it does not block *this* Plan, but before the **code** PR merges the owner spec
+  (SPEC-041) must ack / re-approve. Follow-up task: confirm the owner-ack protocol at implement.
 
 ## Costly to Refactor
 
