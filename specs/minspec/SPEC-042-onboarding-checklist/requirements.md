@@ -13,8 +13,8 @@ affects: [packages/minspec/package.json, packages/minspec/src/lib/auto-bootstrap
 phases:
   specify: done
   clarify: done
-  plan: in-progress
-  tasks: pending
+  plan: done
+  tasks: in-progress
   implement: pending
 ---
 
@@ -94,13 +94,17 @@ The page is **offline UI over settings that already exist**. It renders with **z
 
 ## Open Questions
 
-- **FR-OQ1 (coverage: keep on the page vs Settings-only).** Should `minspec.coverage.minimumPercentage` appear on the onboarding page at all, or only in the Settings editor? *Proposed:* **keep it, honestly framed as a non-enforced seed** — setup is exactly when a team-policy seed matters, and the honest frame (FR-11) prevents the "implies enforcement" failure. Resolve in Clarify.
-- **FR-OQ2 (approver identity: `gh`-locked vs offline-default-and-flagged).** Hard-lock the approver field to the `gh` identity, or keep it editable, seeded offline, with GitHub verification a separate action? *Proposed:* **editable, seeded offline from `git config` on render (zero network), with a click-gated "Verify against GitHub" action that raises a non-blocking amber flag on divergence** (FR-5) — a hard lock breaks the legitimate corporate-email ≠ `gh`-login case, seeding from `gh` on render would violate the Tier-0 offline invariant, and the DR-056 gate already refuses non-human identities downstream. Resolve in Clarify.
-- **FR-OQ3 (does `silentRefresh` [#186] ship with this spec?).** Ship silent-refresh behavior as part of this spec, or keep it a dependency and render only a Planned switch (with the built manual `minspec.initRefresh` action as the working refresh path, FR-16)? *Proposed:* **keep it a dependency** — [#186] is its own behavioral change with its own review; this spec renders the switch as Planned/disabled (INV-5) and surfaces the manual refresh action instead. Resolve in Clarify.
+- **FR-OQ1 (coverage: keep on the page vs Settings-only).** Should `minspec.coverage.minimumPercentage` appear on the onboarding page at all, or only in the Settings editor? *Proposed:* **keep it, honestly framed as a non-enforced seed** — setup is exactly when a team-policy seed matters, and the honest frame (FR-11) prevents the "implies enforcement" failure. Resolved in Clarify (below).
+- **FR-OQ2 (approver identity: `gh`-locked vs offline-default-and-flagged).** Hard-lock the approver field to the `gh` identity, or keep it editable, seeded offline, with GitHub verification a separate action? *Proposed:* **editable, seeded offline from `git config` on render (zero network), with a click-gated "Verify against GitHub" action that raises a non-blocking amber flag on divergence** (FR-5) — a hard lock breaks the legitimate corporate-email ≠ `gh`-login case, seeding from `gh` on render would violate the Tier-0 offline invariant, and the DR-056 gate already refuses non-human identities downstream. Resolved in Clarify (below).
+- **FR-OQ3 (does `silentRefresh` [#186] ship with this spec?).** Ship silent-refresh behavior as part of this spec, or keep it a dependency and render only a Planned switch (with the built manual `minspec.initRefresh` action as the working refresh path, FR-16)? *Proposed:* **keep it a dependency** — [#186] is its own behavioral change with its own review; this spec renders the switch as Planned/disabled (INV-5) and surfaces the manual refresh action instead. Resolved in Clarify (below).
 
 ## Clarify
 
-*Pending. Resolutions to be drafted as engineering defaults (the proposals above) and ratified by the human at Approve Spec — nothing here is a human sign-off yet. (Frontmatter `clarify: pending`; design.md is drafted **contingent** on these proposals and is not marked `plan: done` until Clarify closes.)*
+Resolved 2026-07-25/26; each proposal above was put to the human during the prototype review and **ratified as stated**, then sealed by the hash-lock sign-off (`status: implementing`, [approvals.json](../../../.minspec/approvals.json) `SPEC-042`). All three resolutions land on the *proposed* default, so design.md's stated contingency **held** and `plan` closes with it.
+
+- **FR-OQ1 → keep the coverage field, framed as a seed (FR-11 unchanged).** The number field stays on the page. Its helper copy is the verbatim [package.json:529](../../../packages/minspec/package.json#L529) framing — *seeds `.minspec/config.json` / the CI gate; the extension itself does not enforce it* — which is **accurate**: enforcement is real but lives outside the extension, in [`vitest.config.ts:11`](../../../vitest.config.ts#L11) → [`thresholds`:42-47](../../../vitest.config.ts#L42) reading `config.json`'s `coverage.minimumPercentage` (shipped by `7fa94f9`, [#553]). **Correction of record:** an earlier amendment on the closed [#918] gated this field on [#920] and called the value "inert" and the strings "false" — that premise was **wrong** (the grep behind it was scoped to `packages/*/src` and missed the repo-root build config); an independent reviewer caught it and it is **not** re-landed here. [#920] survives only in a **narrowed** form — a *scaffolded* project inherits the config seed without any scaffolded vitest/CI gate — which this page does not touch (see Out of scope, "Actual coverage enforcement").
+- **FR-OQ2 → editable, offline-seeded, click-gated GitHub verification (FR-5 as written).** Not hard-locked to the `gh` identity: the corporate-email ≠ `gh`-login case is legitimate, seeding from `gh` on render would breach INV-1, and [DR-056] already adjudicates identity downstream ([approve.ts:240](../../../packages/minspec/src/commands/approve.ts#L240)). Divergence raises the **non-blocking amber flag** only after an explicit *Verify against GitHub* click.
+- **FR-OQ3 → `silentRefresh` stays a dependency ([#186]); the page renders it Planned/disabled.** Its behavior is its own change with its own review; the **built** refresh path surfaced here is the manual per-click `minspec.initRefresh` action (FR-16), so no live no-op is rendered (INV-5).
 
 ## Acceptance Criteria
 

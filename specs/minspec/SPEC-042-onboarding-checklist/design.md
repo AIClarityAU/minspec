@@ -1,14 +1,17 @@
 ---
 id: SPEC-042
 type: design
-status: specifying
+# status tracks the approved requirements.md (implementing). A closed plan
+# (`plan: done`) under an approved spec must not still advertise `specifying` —
+# that is the self-contradiction #918's review blocked on.
+status: implementing
 product: minspec
 epic: EPIC-003  # SDD Core — onboarding front door (see notes re: dedicated onboarding epic)
 ---
 
 # MinSpec — Onboarding consolidation (Plan)
 
-**Reads:** [requirements.md](requirements.md) — FRs, invariants (INV-1..6), and the vertical slices. The Open Questions (FR-OQ1..3) are **not yet settled**: each carries only a *proposed* engineering default with "Resolve in Clarify," and the requirements frontmatter is `clarify: pending`. **This plan assumes those proposals and is contingent on them** — it is drafted ahead of Clarify (frontmatter `plan: in-progress`), not over a closed Clarify, and must be revisited if any proposal changes at ratification. This document is **HOW**, not WHAT/WHY. Phase-2 work (constitution [Phases](../../../.minspec/constitution.md#L94)); must not displace an unmet Phase-1 item.
+**Reads:** [requirements.md](requirements.md) — FRs, invariants (INV-1..6), the vertical slices, and the **now-settled** Open Questions (FR-OQ1..3, resolved in [Clarify](requirements.md#clarify) 2026-07-25/26: coverage field kept with the FR-11 seed framing; approver editable + offline-seeded + click-gated GitHub flag; `silentRefresh`/[#186] kept a dependency, rendered Planned). This plan was drafted ahead of Clarify against those proposals and **every one was ratified as proposed**, so its contingency held unchanged and the plan closes: `clarify: done`, `plan: done`. This document is **HOW**, not WHAT/WHY. Phase-2 work (constitution [Phases](../../../.minspec/constitution.md#L94)); must not displace an unmet Phase-1 item.
 
 **Prototype:** the layout below realises the reviewed interactive prototype — private Artifact `ddfe8bfe-3c4e-433f-a15d-d60af692ef00` (**owner-only**; a design reference, never a shipped or shared asset). Where prose and prototype disagree, this document wins.
 
@@ -193,7 +196,7 @@ Keys: a keyboard shortcut renders wherever a row carries one (FR-9 — shown whe
 Inherits requirements R1 (default-flip back-compat — mitigated by VS Code's "default only where unset", D5), R2 (amber reads as block — copy + editable field + separate verify click, D4), R3 (toast/page double-surface — shared [#883] memory + `autoBootstrap.enabled`, D6/footer), and R4 (Phase-2 crowding Phase-1 — INV-6 banner + resolver rank). Added:
 - **D1 walkthrough coexistence.** Two "getting started" entry points (the webview command and the pre-existing walkthrough) could confuse — mitigated by making the walkthrough deep-link into the page rather than duplicate it.
 - **D4 `gh` shell dependency.** The GitHub verification needs `gh`; absent/air-gapped it simply does not verify and the offline seed stands (never blocks, never networks silently on render). Documented so a reviewer does not read the offline-only render as a gap.
-- **Plan drafted ahead of Clarify.** This plan is `plan: in-progress` and contingent on the FR-OQ1..3 proposals; if Clarify ratifies a different resolution (e.g. hard-locking the approver field, FR-OQ2), D4 and Slice 3 must be revised before `plan: done`.
+- **~~Plan drafted ahead of Clarify~~ — retired 2026-07-26 (contingency held).** This plan *was* drafted ahead of Clarify and contingent on the FR-OQ1..3 proposals. Clarify ratified all three **as proposed**, so no revision to D4 or Slice 3 was needed and the plan closed at `plan: done`. Kept as a record of the risk and its resolution, not as a live risk.
 
 ## Traceability
 
