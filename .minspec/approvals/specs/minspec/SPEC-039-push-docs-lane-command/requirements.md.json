@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-039-push-docs-lane-command/requirements.md",
+  "specHash": "6215d3f9eaa2b7f1a5ed9d725998ad5cbcfe941059b3e16891dbec1a30f78872",
+  "approvedAt": "2026-07-26T03:18:29.416Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T2",
+  "migrated": false,
+  "baselineBlob": "c8e751ded4d4bc43751ea2f915ebbc55dd9b0ecc"
+}
