@@ -1,0 +1,98 @@
+#!/usr/bin/env bash
+# shepherd-pr.sh — SPEC-044 Slice 2: creator-owned PR shepherding (FR-4, FR-12, INV-5).
+#
+# The session that OPENED a PR drives it to merge, rather than handing it to the drain.
+# Why: the drain's fresh remediator re-clones and starts near the context limit, which
+# is the #912 crash-thrash outage. The creator still holds the WARM worktree + branch,
+# so it re-drives its own PR without a re-clone and with a NON-exhausted fix agent
+# (DR-067 D4). The drain is demoted to orphan-fallback in Slice 3.
+#
+# Honest scope (D4): the original build agent's in-context reasoning does NOT persist
+# across invocations — the fix agent still re-reads the PR feedback and diff. What
+# carries over is the warm worktree/branch and a fresh context budget.
+#
+# Security model — identical to dispatch-issue.sh / remediate-pr.sh, reused not
+# re-implemented:
+#   • the fix agent is CREDENTIAL-FREE (no gh / git push / remote). It edits + commits
+#     locally only; THIS parent performs every credentialed op (INV-5).
+#   • every credentialed step is gated by `issue-lease.sh verify-holds` (D3) — an owner
+#     that was reclaimed mid-flight stands down instead of pushing.
+#   • `ai-review:*` labels are NEVER mutated here — CI owns them (#600). We push; the
+#     re-push re-triggers the reviewer.
+#   • conflicts are SURFACED, never auto-resolved.
+#
+# One source of truth for "what is fixable": the action token comes from
+# remediate-pr.sh's tested `--classify` seam (D4/D5) — this file never re-implements
+# classify_pr.
+#
+# Testable pure seam (no gh/git/claude):
+#   scripts/lib/shepherd-pr.sh --decide <action> <merged:yes|no> <holds:yes|no> \
+#       <attempts> <max_attempts> <elapsed_secs> <max_secs>
+#     → prints ONE token: stop-merged | stand-down | stop-timeout | stop-not-automation
+#       | stop-conflict | stop-capped | do-rebase | do-fix | wait
+
+set -euo pipefail
+
+# Bounded-shepherd constants (FR-4). These bound only the POST-PR phase; the BUILD
+# phase is bounded separately by LEASE_ABS_MAX_SECS (D10/FR-12) in issue-lease.sh.
+SHEPHERD_MAX_SECS="${MINSPEC_SHEPHERD_MAX_SECS:-3600}"   # wall-clock ceiling for the whole loop
+SHEPHERD_POLL_SECS="${MINSPEC_SHEPHERD_POLL_SECS:-60}"   # gap between PR state reads
+SHEPHERD_MAX_ATTEMPTS="${MINSPEC_REMEDIATE_MAX_ATTEMPTS:-2}"  # shares the drain's cap vocabulary
+
+# ── Pure decision seam ────────────────────────────────────────────────────────
+# Ordering is load-bearing:
+#   1. merged wins outright — a terminal, read-only observation; report it honestly
+#      even if the claim has since moved.
+#   2. holds=no ⇒ stand down BEFORE any credentialed op (D3). A reclaimed owner must
+#      never push, arm auto-merge, or dispatch a fix agent.
+#   3. the wall-clock ceiling (FR-4) — bound before electing more work.
+#   4. then the classify_pr token decides the action.
+shepherd_decide() {
+  local action="$1" merged="$2" holds="$3" attempts="$4" max_attempts="$5" elapsed="$6" max_secs="$7"
+
+  if [[ "$merged" == "yes" ]]; then
+    echo "stop-merged"; return 0
+  fi
+  if [[ "$holds" != "yes" ]]; then
+    echo "stand-down"; return 0
+  fi
+  if (( elapsed >= max_secs )); then
+    echo "stop-timeout"; return 0
+  fi
+
+  case "$action" in
+    skip-not-automation)
+      # Never auto-drive a hand-crafted human PR.
+      echo "stop-not-automation" ;;
+    skip-conflict)
+      # Surface only — a conflict is a human's merge decision, never auto-resolved.
+      echo "stop-conflict" ;;
+    rebase-only)
+      echo "do-rebase" ;;
+    agent-remediate-checks|agent-remediate-review)
+      if (( attempts >= max_attempts )); then
+        echo "stop-capped"
+      else
+        echo "do-fix"
+      fi ;;
+    skip-clean)
+      # Nothing fixable: green-but-unmerged means we are waiting on checks, native
+      # auto-merge, or a human gate. Keep polling until the ceiling — do NOT declare
+      # success, because unmerged is not merged.
+      echo "wait" ;;
+    *)
+      # Unknown token ⇒ fail closed: stop and leave it for a human rather than guess.
+      echo "stop-not-automation" ;;
+  esac
+}
+
+# ── Pure seam dispatch ────────────────────────────────────────────────────────
+if [[ "${1:-}" == "--decide" ]]; then
+  shift
+  if [[ $# -ne 7 ]]; then
+    echo "Usage: shepherd-pr.sh --decide <action> <merged> <holds> <attempts> <max_attempts> <elapsed_secs> <max_secs>" >&2
+    exit 2
+  fi
+  shepherd_decide "$1" "$2" "$3" "$4" "$5" "$6" "$7"
+  exit 0
+fi
