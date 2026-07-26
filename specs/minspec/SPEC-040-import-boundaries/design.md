@@ -1,7 +1,7 @@
 ---
 id: SPEC-040
 type: design
-status: specifying  # Plan in progress; requirements.md approval is stale pending re-approval (Alt+A)
+status: implementing  # spec approved (requirements.md, github@ ad52ff3a); design.md not separately approvable (#630/#951)
 tier: T4
 product: minspec
 epic: EPIC-003  # SDD Core Methodology — code-change safety
