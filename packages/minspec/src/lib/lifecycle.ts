@@ -99,7 +99,7 @@ export type ExplicitTerminal = 'archived' | 'superseded' | undefined;
  *   | not approved                    | specifying (unapproved cannot pass, INV-1) |
  *   | approved + all required done             | done                           |
  *   | approved + implement in progress/done    | implementing                   |
- *   | approved + plan/tasks, implement pending | planning (#886, DR-067)        |
+ *   | approved + plan/tasks, implement pending | planning (#886, DR-069)        |
  *
  * The gate and validator read THIS, never the literal `status:` line — so
  * `implementing`/`done` is structurally impossible without a current approval
@@ -114,7 +114,7 @@ export function deriveStatus(
   if (allPending(phases)) return 'new';
   if (approvalState !== 'approved') return 'specifying'; // INV-1 — unapproved cannot pass
   if (allRequiredDone(phases)) return 'done';
-  // #886 (DR-067): 'implementing' only once the implement phase has actually started;
+  // #886 (DR-069): 'implementing' only once the implement phase has actually started;
   // an approved spec still in plan/tasks is 'planning' — honest, not a false signpost.
   if (phases.implement === 'in-progress' || phases.implement === 'done') return 'implementing';
   return 'planning';
@@ -135,7 +135,7 @@ export function deriveStatus(
  * - Current phase is plan, tasks, or implement → 'implementing'
  * - (archived is set explicitly, not derived from phases)
  *
- * DR-067 §3 — FREEZE-GATE TWIN, DO NOT ALIGN TO deriveStatus/#886. This keeps
+ * DR-069 §3 — FREEZE-GATE TWIN, DO NOT ALIGN TO deriveStatus/#886. This keeps
  * plan/tasks in the 'implementing' band on purpose: it mirrors the Python
  * `phase_intent_status` (spec-gate.py) that decides the freeze range. Narrowing it
  * so plan/tasks return 'planning' would drop unapproved plan/tasks specs OUT of the

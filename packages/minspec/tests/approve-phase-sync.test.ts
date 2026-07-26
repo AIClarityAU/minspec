@@ -168,7 +168,7 @@ phases:
 `,
     );
     const result = advanceSpecToImplementing(p);
-    // DR-067 (#886): approved + plan in-progress (implement not started) → 'planning'.
+    // DR-069 (#886): approved + plan in-progress (implement not started) → 'planning'.
     expect(result).toBe('planning');
     const parsed = parseSpec(fs.readFileSync(p, 'utf-8'));
     // Status line flipped.
@@ -176,7 +176,7 @@ phases:
     // Phases map advanced in lockstep.
     expect(parsed.frontmatter.phases.specify).toBe('done');
     expect(parsed.frontmatter.phases.plan).toBe('in-progress');
-    // THE INVARIANT (approval-aware, DR-067): literal status === deriveStatus(persisted phases).
+    // THE INVARIANT (approval-aware, DR-069): literal status === deriveStatus(persisted phases).
     expect(deriveStatus(parsed.frontmatter.phases, 'approved', undefined)).toBe(parsed.frontmatter.status);
   });
 
@@ -212,7 +212,7 @@ phases:
     advanceSpecToImplementing(p);
     const parsed = parseSpec(fs.readFileSync(p, 'utf-8'));
     expect(parsed.frontmatter.phases.clarify).toBe('skipped');
-    // DR-067: approved + plan in-progress (implement not started) → 'planning'.
+    // DR-069: approved + plan in-progress (implement not started) → 'planning'.
     expect(parsed.frontmatter.status).toBe('planning');
     expect(deriveStatus(parsed.frontmatter.phases, 'approved', undefined)).toBe('planning');
   });
@@ -240,14 +240,14 @@ phases:
 # Title
 `,
     );
-    // DR-067 (#886): the writer now derives via the approval-aware deriveStatus, which
+    // DR-069 (#886): the writer now derives via the approval-aware deriveStatus, which
     // returns 'planning' for an approved spec whose implement phase has not started —
     // a value the persisted (specify-only) bytes REPRODUCE, so there is no #148 desync
     // and no throw. (The degenerate gate still fires for a would-be 'implementing' the
     // bytes can't persist; a specify-only block never targets 'implementing'.)
     expect(advanceSpecToImplementing(p)).toBe('planning');
 
-    // THE INVARIANT (approval-aware, DR-067): the persisted `status:` line equals the
+    // THE INVARIANT (approval-aware, DR-069): the persisted `status:` line equals the
     // status its persisted `phases:` map derives — never desynced.
     const after = parseSpec(fs.readFileSync(p, 'utf-8')).frontmatter;
     expect(after.status).toBe('planning');
@@ -281,7 +281,7 @@ phases:
     );
     advanceSpecToImplementing(p);
     const after = fs.readFileSync(p, 'utf-8');
-    // DR-067: approved + plan in-progress → 'planning' (body line synced in lockstep, #667).
+    // DR-069: approved + plan in-progress → 'planning' (body line synced in lockstep, #667).
     expect(after).toContain('status: planning');
     expect(after).toContain('**Status:** Planning (SDD Specify phase)');
   });

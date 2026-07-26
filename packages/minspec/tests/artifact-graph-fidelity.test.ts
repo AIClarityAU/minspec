@@ -203,7 +203,7 @@ describe('INV-FIDELITY: buildArtifactGraph maps the workspace exactly', () => {
     expect(byId['SPEC-004']).toMatchObject({ status: 'archived' });
   });
 
-  it('maps an approved pre-implement spec (derives planning) to the resolver "implementing" — DR-067/#886', () => {
+  it('maps an approved pre-implement spec (derives planning) to the resolver "implementing" — DR-069/#886', () => {
     // Approved, plan in-progress, implement NOT started → deriveStatus (the signpost) yields
     // 'planning'; the resolver maps 'planning' → 'implementing' (SPEC_STATUS_MAP), so every
     // next-task seam (answer-OQ, isAdvancing, spec-ahead-of-epic, flooring) treats it as

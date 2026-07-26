@@ -28,7 +28,7 @@ export type ArtifactKind = 'spec' | 'dr';
 const SPEC_STATUS_WORDS: ReadonlySet<string> = new Set([
   'new',
   'specifying',
-  'planning', // DR-067 (#886)
+  'planning', // DR-069 (#886)
   'implementing',
   'done',
   'archived',

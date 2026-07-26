@@ -26,7 +26,7 @@ import { listEpics } from '../lib/epic-manager';
 export const SPEC_STATUS_VALUES = [
   'new',
   'specifying',
-  'planning', // DR-067 (#886): approved, implement phase not started
+  'planning', // DR-069 (#886): approved, implement phase not started
   'implementing',
   'done',
   'archived',

@@ -343,13 +343,13 @@ describe('SpecTreeProvider', () => {
   });
 
   describe('getChildren(undefined) — root level', () => {
-    it('returns a rollup node plus 6 lifecycle group nodes (SPEC-015; +Superseded SPEC-017; +Planning DR-067)', () => {
+    it('returns a rollup node plus 6 lifecycle group nodes (SPEC-015; +Superseded SPEC-017; +Planning DR-069)', () => {
       const root = provider.getChildren(undefined);
       expect(root[0]).toBeInstanceOf(RollupNode);
       expect(groupsOf(provider)).toHaveLength(6);
     });
 
-    it('returns groups in order: Specifying, Planning, Implementing, Done, Archived, Superseded (SPEC-015 / SPEC-017 / DR-067)', () => {
+    it('returns groups in order: Specifying, Planning, Implementing, Done, Archived, Superseded (SPEC-015 / SPEC-017 / DR-069)', () => {
       const groups = groupsOf(provider);
       expect(groups[0].label).toBe('Specifying');
       expect(groups[1].label).toBe('Planning');
@@ -363,7 +363,7 @@ describe('SpecTreeProvider', () => {
       const groups = groupsOf(provider);
       // Expanded = 2
       expect(groups[0].collapsibleState).toBe(2);
-      expect(groups[1].collapsibleState).toBe(2); // Planning (DR-067)
+      expect(groups[1].collapsibleState).toBe(2); // Planning (DR-069)
       expect(groups[2].collapsibleState).toBe(2);
     });
 
@@ -407,7 +407,7 @@ describe('SpecTreeProvider', () => {
 
     it('returns specs belonging to the Implementing group', () => {
       const groups = groupsOf(provider);
-      const specs = provider.getChildren(groups[2]) as SpecNode[]; // DR-067: Implementing now at index 2 (Planning inserted at 1)
+      const specs = provider.getChildren(groups[2]) as SpecNode[]; // DR-069: Implementing now at index 2 (Planning inserted at 1)
 
       expect(specs).toHaveLength(1);
       expect(specs[0].label).toBe('003: Dashboard');
@@ -415,7 +415,7 @@ describe('SpecTreeProvider', () => {
 
     it('returns specs belonging to the Done group', () => {
       const groups = groupsOf(provider);
-      const specs = provider.getChildren(groups[3]) as SpecNode[]; // DR-067: Done at index 3 (Planning inserted)
+      const specs = provider.getChildren(groups[3]) as SpecNode[]; // DR-069: Done at index 3 (Planning inserted)
 
       expect(specs).toHaveLength(1);
       expect(specs[0].label).toBe('010: Login page');
@@ -423,7 +423,7 @@ describe('SpecTreeProvider', () => {
 
     it('returns specs belonging to the Archived group', () => {
       const groups = groupsOf(provider);
-      const specs = provider.getChildren(groups[4]) as SpecNode[]; // DR-067: Archived at index 4
+      const specs = provider.getChildren(groups[4]) as SpecNode[]; // DR-069: Archived at index 4
 
       expect(specs).toHaveLength(1);
       expect(specs[0].label).toBe('020: Old feature');
@@ -449,7 +449,7 @@ describe('SpecTreeProvider', () => {
     it('has description with tier, progress meter, percent and phase (DR-012)', () => {
       const groups = groupsOf(provider);
       const specifying = provider.getChildren(groups[0]) as SpecNode[]; // new + specifying
-      const implementing = provider.getChildren(groups[2]) as SpecNode[]; // DR-067: Implementing at index 2
+      const implementing = provider.getChildren(groups[2]) as SpecNode[]; // DR-069: Implementing at index 2
       expect(specifying[0].description).toMatch(/^T1 \u00b7 [\u25b0\u25b1]+ \d+% \u00b7 specify$/);
       expect(specifying[1].description).toMatch(/^T3 \u00b7 [\u25b0\u25b1]+ \d+% \u00b7 clarify$/);
       expect(implementing[0].description).toMatch(/^T4 \u00b7 [\u25b0\u25b1]+ \d+% \u00b7 implement$/);
@@ -457,7 +457,7 @@ describe('SpecTreeProvider', () => {
 
     it('shows "complete" when no current phase', () => {
       const groups = groupsOf(provider);
-      const doneSpecs = provider.getChildren(groups[3]) as SpecNode[]; // Done lane (DR-067: index 3)
+      const doneSpecs = provider.getChildren(groups[3]) as SpecNode[]; // Done lane (DR-069: index 3)
       expect(doneSpecs[0].description).toMatch(/^T2 \u00b7 [\u25b0\u25b1]+ \d+% \u00b7 complete$/);
     });
 
@@ -470,7 +470,7 @@ describe('SpecTreeProvider', () => {
       // specifying -> sync
       expect((specifying[1].iconPath as { id: string }).id).toBe('sync');
 
-      // implementing -> sync (DR-067: Implementing at index 2)
+      // implementing -> sync (DR-069: Implementing at index 2)
       const implementing = provider.getChildren(groups[2]) as SpecNode[];
       expect((implementing[0].iconPath as { id: string }).id).toBe('sync');
 

@@ -574,7 +574,7 @@ export function advanceSpecToImplementing(filePath: string): SpecStatus {
   // No `phases:` block → the `status:` line is the sole lifecycle representation;
   // a status-only flip has nothing to contradict.
   //
-  // DR-067 (#886) RESIDUAL (tracked #957): a phaseless spec has no phase signal to
+  // DR-069 (#886) RESIDUAL (tracked #957): a phaseless spec has no phase signal to
   // distinguish planning from implementing, so this branch still hard-stamps
   // `implementing` at approval — the one shape where the #886 false-signpost fix
   // (which lives in deriveStatus + the phases-block branch below) cannot apply. An
@@ -585,7 +585,7 @@ export function advanceSpecToImplementing(filePath: string): SpecStatus {
   }
 
   const newPhases = phasesForApproval(parseSpec(content).frontmatter.phases);
-  // DR-067 (#886): write the APPROVAL-AWARE derived status (deriveStatus), not the
+  // DR-069 (#886): write the APPROVAL-AWARE derived status (deriveStatus), not the
   // phases-only getSpecStatus — so an approved-but-pre-implement spec is stamped
   // `planning` (matching what the validator/tree derive; no mirror-drift), and only
   // a spec whose implement phase has started is stamped `implementing`. This caller

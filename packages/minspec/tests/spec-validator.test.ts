@@ -1137,13 +1137,13 @@ describe('validateSpec — INV-4 literal/derived status mirror drift', () => {
   });
 
   it('no drift warning when the literal matches the derived status', () => {
-    // DR-067 (#886): approved + plan in progress (implement not started) → derives 'planning'; literal agrees.
+    // DR-069 (#886): approved + plan in progress (implement not started) → derives 'planning'; literal agrees.
     const src = spec({ status: 'planning', phases: IMPL_PHASES }, FULL_T3);
     const result = validateSpec(parseSpec(src), DEFAULT_CONFIG, { approvalState: 'approved' });
     expect(result.violations.some((v) => v.rule === 'status.mirror-drift')).toBe(false);
   });
 
-  it('drifts when an approved pre-implement spec still claims implementing (#886/DR-067)', () => {
+  it('drifts when an approved pre-implement spec still claims implementing (#886/DR-069)', () => {
     // The exact #886 false signpost: literal 'implementing' but approved + plan-in-progress derives 'planning'.
     const src = spec({ status: 'implementing', phases: IMPL_PHASES }, FULL_T3);
     const result = validateSpec(parseSpec(src), DEFAULT_CONFIG, { approvalState: 'approved' });
@@ -1187,7 +1187,7 @@ describe('validateStatusMonotonicity — cross-artifact status (#277)', () => {
   const DONE = {
     specify: 'done', clarify: 'done', plan: 'done', tasks: 'done', implement: 'done',
   } as const;
-  // DR-067 (#886): approved, plan/tasks done, implement NOT started → derives `planning`.
+  // DR-069 (#886): approved, plan/tasks done, implement NOT started → derives `planning`.
   const PLANNING = {
     specify: 'done', clarify: 'done', plan: 'done', tasks: 'done', implement: 'pending',
   } as const;
@@ -1274,7 +1274,7 @@ describe('validateStatusMonotonicity — cross-artifact status (#277)', () => {
     expect(v!.message).toContain('new');
   });
 
-  // DR-067 (#886) §4: pins LIFECYCLE_RANK.planning = 2 — strictly above `specifying`
+  // DR-069 (#886) §4: pins LIFECYCLE_RANK.planning = 2 — strictly above `specifying`
   // (1) and below `implementing` (3) — via observable monotonicity behaviour, so the
   // rank cannot silently drift. (The DR §4 "silent if missed" wiring, now test-forced.)
   it('does NOT flag a `planning` parent ahead of a `specifying` child (planning > specifying)', () => {

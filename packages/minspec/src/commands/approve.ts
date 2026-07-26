@@ -261,7 +261,7 @@ export async function approveSpecCommand(
     const wasPreImpl =
       parsed.frontmatter.status === 'new' || parsed.frontmatter.status === 'specifying';
     // mirror; phases-aware, no longer affects the hash. Returns the new derived status
-    // (DR-067 / #886: 'planning' when the implement phase hasn't started, else 'implementing').
+    // (DR-069 / #886: 'planning' when the implement phase hasn't started, else 'implementing').
     const newStatus = wasPreImpl ? advanceSpecToImplementing(spec.filePath) : undefined;
     recordApproval(rootDir, spec.filePath, spec.tier, email);
 

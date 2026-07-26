@@ -571,7 +571,7 @@ describe('SPEC-022 deriveStatus — INV-1 (approval gates implementing/done)', (
     expect(deriveStatus(allDone, 'stale', undefined)).toBe('specifying');
   });
 
-  it('returns planning when approved but the implement phase has NOT started (#886, DR-067)', () => {
+  it('returns planning when approved but the implement phase has NOT started (#886, DR-069)', () => {
     // approved, still in plan/tasks, implement pending → honest 'planning', not a false 'implementing'.
     expect(deriveStatus(inImpl, 'approved', undefined)).toBe('planning');
   });
@@ -673,7 +673,7 @@ describe('SPEC-022 getSpecStatus — preview-only shim (regression)', () => {
     });
     expect(getSpecStatus(implStarted)).toBe(deriveStatus(implStarted, 'approved', undefined)); // both 'implementing'
 
-    // Intended divergence #1 (#886/DR-067): plan/tasks in progress, implement pending.
+    // Intended divergence #1 (#886/DR-069): plan/tasks in progress, implement pending.
     // getSpecStatus is phase-position (plan → 'implementing', the FREEZE-GATE band, unchanged);
     // deriveStatus is approval+implement-aware → 'planning'. This divergence is the whole point.
     const midImpl = makePhases({ specify: 'done', clarify: 'skipped', plan: 'in-progress' });
