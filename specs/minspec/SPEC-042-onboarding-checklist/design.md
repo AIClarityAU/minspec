@@ -1,12 +1,15 @@
 ---
 id: SPEC-042
 type: design
-# Tracks requirements.md's status, which was de-escalated implementing -> specifying when
-# this PR's edits voided SPEC-042's approval (see requirements.md's Clarify note). design.md
-# has no approval record of its own — only requirements.md is signed — so this field is
-# descriptive, never a seal. Both flip back to implementing when the human re-runs
-# "MinSpec: Approve Spec". Repo-wide sibling-status drift: #972.
-status: specifying
+# Tracks requirements.md's status. design.md has no approval record of its own — only
+# requirements.md is signed — so this field is descriptive, never a seal.
+# Restored to implementing after the human re-approved SPEC-042 at 2026-07-26T10:48:33Z
+# (specHash 7d77fd0a…, approvedBy github@harvest316.com; routed to origin as #996).
+# NOTE: approve does NOT touch this file — the 10:48 approve commit changed only
+# requirements.md + its sidecar, so a sibling's status is maintained BY HAND and silently
+# lags every approval. An earlier revision of this comment claimed both siblings "flip back"
+# automatically; that was wrong. The gate for it is #972.
+status: implementing
 product: minspec
 epic: EPIC-003  # SDD Core — onboarding front door (see notes re: dedicated onboarding epic)
 ---

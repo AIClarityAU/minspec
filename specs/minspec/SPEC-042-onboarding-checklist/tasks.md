@@ -1,10 +1,12 @@
 ---
 id: SPEC-042
 type: tasks
-# Tracks requirements.md's status, de-escalated to specifying while SPEC-042's approval is
-# stale (this PR's edits voided it — see requirements.md's Clarify note). Flips back to
-# implementing when the human re-runs "MinSpec: Approve Spec". No code lands until then.
-status: specifying
+# Tracks requirements.md's status. Restored to implementing after the human re-approved
+# SPEC-042 at 2026-07-26T10:48:33Z (specHash 7d77fd0a…; routed to origin as #996), which
+# unblocks Slice-1 work. NOTE: approve does NOT touch this file — a sibling's status is
+# maintained BY HAND and silently lags every approval. An earlier revision of this comment
+# claimed it "flips back" automatically; that was wrong. The gate for it is #972.
+status: implementing
 # tier lives on requirements.md (the single tier-carrying approvable, per the
 # spec-gate convention). A tier on a NON-approved sibling doc is treated by
 # spec-gate.py as a second unapproved spec and can shadow the approved
