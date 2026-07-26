@@ -54,6 +54,12 @@ const SOURCES = [
     stripShebang: false,
   },
   {
+    constName: 'DOCS_LANE_WORKFLOW',
+    srcPath: '.github/workflows/docs-lane.yml',
+    doc: 'Verbatim body of `.github/workflows/docs-lane.yml`.',
+    stripShebang: false,
+  },
+  {
     constName: 'REVIEW_BRANCH_SH',
     srcPath: 'scripts/review-branch.sh',
     doc: 'Verbatim body of `scripts/review-branch.sh` (shebang stripped — supplied via preamble).',

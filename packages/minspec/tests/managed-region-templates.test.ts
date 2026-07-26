@@ -323,6 +323,7 @@ const CI_STACK: ReadonlyArray<{
   { name: 'ai-review-workflow', outputPath: '.github/workflows/ai-review.yml', style: 'hash', executable: false, shebang: false },
   { name: 'ready-to-merge-workflow', outputPath: '.github/workflows/ready-to-merge.yml', style: 'hash', executable: false, shebang: false },
   { name: 'ai-review-retry-workflow', outputPath: '.github/workflows/ai-review-retry.yml', style: 'hash', executable: false, shebang: false },
+  { name: 'docs-lane-workflow', outputPath: '.github/workflows/docs-lane.yml', style: 'hash', executable: false, shebang: false },
   { name: 'review-branch-script', outputPath: 'scripts/review-branch.sh', style: 'hash', executable: true, shebang: true },
   { name: 'review-decide-script', outputPath: 'scripts/review-decide.sh', style: 'hash', executable: true, shebang: true },
   { name: 'review-role-reviewer', outputPath: 'scripts/roles/reviewer.md', style: 'html', executable: false, shebang: false },
@@ -341,7 +342,7 @@ describe('#564 CI-review stack — registry membership + [0] stability', () => {
     expect(MANAGED_REGION_TEMPLATES[0].outputPath).toBe(WORKFLOW_PATH);
   });
 
-  it('registers all eight stack templates with the right output path / comment style / mode', () => {
+  it('registers all eleven stack templates with the right output path / comment style / mode', () => {
     for (const t of CI_STACK) {
       const tpl = tplByName(t.name);
       expect(tpl, `template ${t.name} is registered`).toBeDefined();
@@ -385,7 +386,7 @@ describe('#564 CI-review stack — portability (embedded copy == the repo’s ow
   }
 
   it('carries ZERO hardcoded owner/repo — identities come from github.* + repo secrets/vars', () => {
-    for (const name of ['ai-review-workflow', 'ready-to-merge-workflow', 'ai-review-retry-workflow']) {
+    for (const name of ['ai-review-workflow', 'ready-to-merge-workflow', 'ai-review-retry-workflow', 'docs-lane-workflow']) {
       const yaml = tplByName(name)!.content;
       // No literal `AIClarityAU/minspec` (or the pre-move `harvest316/minspec`) slug.
       expect(yaml).not.toMatch(/AIClarityAU\/minspec\b/);
