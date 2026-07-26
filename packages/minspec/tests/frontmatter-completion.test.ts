@@ -24,6 +24,9 @@ import {
   PHASE_STATUS_VALUES,
   type FrontmatterCompletionContext,
 } from '../src/views/frontmatter-completion';
+// Lifecycle source of truth — imported directly so the force-binding guard below
+// compares the completion list against the union itself, not against a copy.
+import { SPEC_STATUSES } from '../src/lib/spec';
 
 /** Build a context from a multi-line doc string + the line being edited. */
 function ctx(
@@ -52,6 +55,22 @@ describe('frontmatterValueCompletions()', () => {
         ctx('requirements.md', SPEC_DOC, 3, 'status: '),
       );
       expect(result).toEqual([...SPEC_STATUS_VALUES]);
+    });
+
+    // Force-binding guard. The assertion above compares the completion output to
+    // SPEC_STATUS_VALUES, so it stays green no matter what that constant holds —
+    // it proves routing, not correctness of the list. This one anchors the list to
+    // the LIFECYCLE SOURCE OF TRUTH (lib/spec.ts SPEC_STATUSES), so a status added
+    // to the union but not offered for completion (or vice versa) turns it red.
+    // SPEC_STATUS_VALUES is currently a direct alias, which makes divergence
+    // structurally impossible; this guard is what catches a future edit that
+    // re-copies the list by hand — the exact drift that left `superseded`
+    // unofferable and made DR-069's `planning` a two-file change.
+    it('spec status completions are exactly lib/spec.ts SPEC_STATUSES (no hand-copied drift)', () => {
+      const result = frontmatterValueCompletions(
+        ctx('requirements.md', SPEC_DOC, 3, 'status: '),
+      );
+      expect(result).toEqual([...SPEC_STATUSES]);
     });
   });
 
