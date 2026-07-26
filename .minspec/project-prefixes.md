@@ -6,7 +6,8 @@ ids stay unprefixed — DR-027 keeps a separate SDD register per repo, so a bare
 [DR-053](../docs/decisions/DR-053.md)). A reference that **spans projects** carries
 its target project's code.
 
-**Reference grammar (DR-053 v2 — proposed).** Every referenceable item has a
+**Reference grammar (DR-053 v2 — accepted 2026-07-14; emitter still v1, see #679).**
+Every referenceable item has a
 slash-joined, zero-padding-free id of up to three segments that **elide**
 left-to-right when context implies them:
 

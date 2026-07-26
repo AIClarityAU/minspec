@@ -207,9 +207,9 @@ hover cards for project vocabulary/jargon — is a sibling feature tracked separ
 
 ## Dependencies
 
-- **DR-053 v2 (proposed)** — the reference grammar + `project-prefix` resolver this
-  feature detects and resolves against. Blocked on DR-053 acceptance + its module update
-  for the full paragraph grammar; the **approvable-level** subset (`SPEC-014`, `#500`)
-  can render against the v1 resolver today.
+- **DR-053 v2 (accepted 2026-07-14)** — the reference grammar + `project-prefix` resolver
+  this feature detects and resolves against. DR-053 acceptance is no longer a blocker; the
+  remaining dependency is its module update for the full paragraph grammar (#679). The
+  **approvable-level** subset (`SPEC-014`, `#500`) can render against the v1 resolver today.
 - **SPEC-018 / SPEC-014** — the webview render host. Paused (token economy); this spec
   ships when that work resumes.
