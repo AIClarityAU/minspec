@@ -1,7 +1,10 @@
 ---
 id: SPEC-042
 type: tasks
-status: implementing
+# Tracks requirements.md's status, de-escalated to specifying while SPEC-042's approval is
+# stale (this PR's edits voided it — see requirements.md's Clarify note). Flips back to
+# implementing when the human re-runs "MinSpec: Approve Spec". No code lands until then.
+status: specifying
 # tier lives on requirements.md (the single tier-carrying approvable, per the
 # spec-gate convention). A tier on a NON-approved sibling doc is treated by
 # spec-gate.py as a second unapproved spec and can shadow the approved
@@ -204,7 +207,7 @@ This is the only slice that introduces an external read — every one of them is
       on click only (FR-17). **No new install logic.**
 - [ ] `getting-started-webview.ts` — the coverage number field bound to
       `minspec.coverage.minimumPercentage`, helper copy **verbatim from**
-      [package.json:529](../../../packages/minspec/package.json#L529) (FR-11 / AC-9); and
+      [package.json:528](../../../packages/minspec/package.json#L528) (FR-11 / AC-9); and
       the Scrooge nudge row rendered **on** with no off-control (FR-12).
 - [ ] `packages/minspec/src/commands/init.ts` (**affects — reuse only**) — expose/reuse the
       existing install + refresh entry points for the buttons. No new network capability

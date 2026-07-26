@@ -1,13 +1,12 @@
 ---
 id: SPEC-042
 type: design
-# Tracks requirements.md's own frontmatter `status: implementing` (requirements.md:5,
-# set by the approve commit b2ea927) — a verifiable field, not an inference. A closed
-# plan (`plan: done`) under it must not still advertise `specifying`: that is the
-# self-contradiction #918's review blocked on. design.md has no approval record of its
-# own (only requirements.md is signed), so this field is descriptive, not a seal.
-# Repo-wide sibling-status drift (SPEC-040/041/043/046) is tracked at #972.
-status: implementing
+# Tracks requirements.md's status, which was de-escalated implementing -> specifying when
+# this PR's edits voided SPEC-042's approval (see requirements.md's Clarify note). design.md
+# has no approval record of its own — only requirements.md is signed — so this field is
+# descriptive, never a seal. Both flip back to implementing when the human re-runs
+# "MinSpec: Approve Spec". Repo-wide sibling-status drift: #972.
+status: specifying
 product: minspec
 epic: EPIC-003  # SDD Core — onboarding front door (see notes re: dedicated onboarding epic)
 ---
@@ -191,7 +190,7 @@ Keys: a keyboard shortcut renders wherever a row carries one (FR-9 — shown whe
 
 - **T0 (invariants, before implementation):** INV-1 — a network-recording harness asserts **zero** network/external calls on open/render (identity seeded offline), and that Backfill/Install/Refresh-now/Verify-against-GitHub fire only on explicit click (AC-1, AC-6, AC-12, AC-13, AC-14). INV-2 — a DOM/structure test asserts **no** progress-meter/"N of M" element exists (AC-2). INV-3 — a dismissal round-trips through `answeredSignatures` and re-appears on a signature change (AC-3). INV-4 — the identity row renders the offline value with zero network and the page writes **only** `minspec.approverEmail`, never an approval record; the `gh` read fires only on the Verify click, and an air-gapped host renders without hanging (AC-5, AC-14). INV-5 — `silentRefresh` renders disabled/Planned; the `advancePhaseOnApprove` default flip preserves an explicitly-set value.
 - **T1 (contract):** `onboarding-settings.ts` model builder — each row maps to its real `minspec.*` id / command id; `rowClickToggles` true **only** for non-planned `toggle` rows (AC-7); `ApproverIdentity` — offline `value` seed with no network, and the `divergesFromGh` truth table (only populated post-verify).
-- **T2 (feature, per slice):** AC-4 (switch↔setting binding; defaults), AC-8 ("Show setting ids" off; footer; shortcut shown where a binding exists), AC-9 (coverage helper copy matches [package.json:529](../../../packages/minspec/package.json#L529)), AC-10 (Scrooge shown-on, never written false), AC-11 (no reading-time/conformance control), AC-12 (Refresh now → `minspec.initRefresh` on click only), AC-13 (Install button on click only, absent-button would fail).
+- **T2 (feature, per slice):** AC-4 (switch↔setting binding; defaults), AC-8 ("Show setting ids" off; footer; shortcut shown where a binding exists), AC-9 (coverage helper copy matches [package.json:528](../../../packages/minspec/package.json#L528)), AC-10 (Scrooge shown-on, never written false), AC-11 (no reading-time/conformance control), AC-12 (Refresh now → `minspec.initRefresh` on click only), AC-13 (Install button on click only, absent-button would fail).
 - **T3 (regression):** one per bug found during implement.
 
 ## Risks
