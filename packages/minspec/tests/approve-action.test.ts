@@ -418,7 +418,7 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
     );
   });
 
-  it('advances status to implementing when spec was pre-impl (status=specifying)', async () => {
+  it('advances status to planning when spec was pre-impl (status=specifying)', async () => {
     pickFirst();
     vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec('specifying') as never);
     vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
@@ -431,10 +431,10 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
     expect(advanceSpecToImplementing).toHaveBeenCalledWith(
       '/tmp/ws/specs/minspec/SPEC-001/spec.md',
     );
-    expect(infoMessages().some((m) => m.includes('status → implementing'))).toBe(true);
+    expect(infoMessages().some((m) => m.includes('status → planning'))).toBe(true);
   });
 
-  it('advances status to implementing when spec was pre-impl (status=new)', async () => {
+  it('advances status to planning when spec was pre-impl (status=new)', async () => {
     pickFirst();
     vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec('new') as never);
     vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
@@ -445,7 +445,7 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
     expect(advanceSpecToImplementing).toHaveBeenCalledWith(
       '/tmp/ws/specs/minspec/SPEC-001/spec.md',
     );
-    expect(infoMessages().some((m) => m.includes('status → implementing'))).toBe(true);
+    expect(infoMessages().some((m) => m.includes('status → planning'))).toBe(true);
   });
 
   it('does NOT flip status when spec is already implementing', async () => {

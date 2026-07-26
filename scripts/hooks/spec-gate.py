@@ -200,6 +200,15 @@ def phase_intent_status(phases, explicit_terminal):
     real approval verdict decides allow/deny. Using deriveStatus here instead
     would mis-gate a specify-phase spec, because deriveStatus discriminates
     specifying<->implementing by approval, not phase.
+
+    DR-069 §3 — FREEZE-GATE, DO NOT ALIGN TO deriveStatus/#886. deriveStatus now
+    returns 'planning' for approved plan/tasks specs (implement not started), but this
+    gate MUST keep plan/tasks in the 'implementing' band: narrowing it so plan/tasks
+    return 'planning'/'specifying' would drop unapproved plan/tasks specs out of the
+    gate range (the `intended not in ('implementing','done')` skip below) and silently
+    reopen the freeze hole that DR-012/DR-031 close (the local-register ids; DR-362 is
+    the mmo-platform parent-register number, not valid here). The #886 split lives ONLY
+    in deriveStatus (the signpost).
     """
     if explicit_terminal:
         return explicit_terminal

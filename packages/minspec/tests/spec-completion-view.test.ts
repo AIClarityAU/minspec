@@ -300,6 +300,6 @@ describe('FrontmatterCompletionProvider.provideCompletionItems()', () => {
     const items = provider.provideCompletionItems(doc as any, pos as any);
 
     // Empty fileName is not a DR file, so spec statuses are offered
-    expect(items.map(i => i.label)).toEqual(['new', 'specifying', 'implementing', 'done', 'archived']);
+    expect(items.map(i => i.label)).toEqual(['new', 'specifying', 'planning', 'implementing', 'done', 'archived']);
   });
 });

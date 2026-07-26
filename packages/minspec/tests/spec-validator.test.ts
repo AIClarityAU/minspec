@@ -1137,10 +1137,17 @@ describe('validateSpec — INV-4 literal/derived status mirror drift', () => {
   });
 
   it('no drift warning when the literal matches the derived status', () => {
-    // Approved + plan in progress → derives 'implementing', literal agrees.
-    const src = spec({ status: 'implementing', phases: IMPL_PHASES }, FULL_T3);
+    // DR-069 (#886): approved + plan in progress (implement not started) → derives 'planning'; literal agrees.
+    const src = spec({ status: 'planning', phases: IMPL_PHASES }, FULL_T3);
     const result = validateSpec(parseSpec(src), DEFAULT_CONFIG, { approvalState: 'approved' });
     expect(result.violations.some((v) => v.rule === 'status.mirror-drift')).toBe(false);
+  });
+
+  it('drifts when an approved pre-implement spec still claims implementing (#886/DR-069)', () => {
+    // The exact #886 false signpost: literal 'implementing' but approved + plan-in-progress derives 'planning'.
+    const src = spec({ status: 'implementing', phases: IMPL_PHASES }, FULL_T3);
+    const result = validateSpec(parseSpec(src), DEFAULT_CONFIG, { approvalState: 'approved' });
+    expect(result.violations.some((v) => v.rule === 'status.mirror-drift')).toBe(true);
   });
 
   it('the gate reads DERIVED status: an unapproved spec deriving to specifying does not drift when its literal is specifying', () => {
@@ -1179,6 +1186,10 @@ describe('validateStatusMonotonicity — cross-artifact status (#277)', () => {
   } as const;
   const DONE = {
     specify: 'done', clarify: 'done', plan: 'done', tasks: 'done', implement: 'done',
+  } as const;
+  // DR-069 (#886): approved, plan/tasks done, implement NOT started → derives `planning`.
+  const PLANNING = {
+    specify: 'done', clarify: 'done', plan: 'done', tasks: 'done', implement: 'pending',
   } as const;
 
   const f = (
@@ -1261,6 +1272,32 @@ describe('validateStatusMonotonicity — cross-artifact status (#277)', () => {
     const v = r.violations.find((x) => x.rule === 'status.cross-artifact.regression');
     expect(v).toBeDefined();
     expect(v!.message).toContain('new');
+  });
+
+  // DR-069 (#886) §4: pins LIFECYCLE_RANK.planning = 2 — strictly above `specifying`
+  // (1) and below `implementing` (3) — via observable monotonicity behaviour, so the
+  // rank cannot silently drift. (The DR §4 "silent if missed" wiring, now test-forced.)
+  it('does NOT flag a `planning` parent ahead of a `specifying` child (planning > specifying)', () => {
+    const r = validateStatusMonotonicity([
+      f('requirements', PLANNING, 'approved'),
+      f('tasks', SPECIFYING, 'unapproved'),
+    ]);
+    // parent derives `planning` (rank 2), child `specifying` (rank 1) → parent ≥ child.
+    expect(r.notSplitLayout).toBe(false);
+    expect(r.violations).toHaveLength(0);
+  });
+
+  it('flags a `planning` parent behind an `implementing` child (planning < implementing)', () => {
+    const r = validateStatusMonotonicity([
+      f('requirements', PLANNING, 'approved'),
+      f('tasks', IMPLEMENTING, 'approved'),
+    ]);
+    // parent derives `planning` (rank 2), child `implementing` (rank 3) → parent < child.
+    const v = r.violations.find((x) => x.rule === 'status.cross-artifact.regression');
+    expect(v).toBeDefined();
+    expect(v!.severity).toBe('warning');
+    expect(v!.message).toContain('planning');
+    expect(v!.message).toContain('implementing');
   });
 });
 
