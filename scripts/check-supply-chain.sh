@@ -39,6 +39,51 @@ CATALOG_DIR="${BUMBLEBEE_CATALOGS:-$HOME/.cache/bumblebee/catalogs}"
 OUT_DIR="$REPO_ROOT/.cache/supply-chain"
 OUT_FILE="$OUT_DIR/$(date +%Y%m%d-%H%M%S).ndjson"
 
+# --- Scan-output retention (#915) -------------------------------------------
+# check-supply-chain writes a NEW timestamped NDJSON every run (OUT_FILE above) and,
+# being a `bumblebee scan` caller, also grows the bumblebee tool cache (scans/<date>/
+# per-run outputs + a malicious-packages clone under sources/). Nothing ever pruned those
+# per-run outputs, so on a persistent/local machine they accumulated without bound — the
+# cache reached ~11G and helped fill the container disk (2026-07-25). Keep only the last
+# few runs: enough to diff a scan against its predecessor, bounded in size.
+SUPPLY_CHAIN_KEEP="${SUPPLY_CHAIN_KEEP:-2}"          # most-recent runs to retain (>=1)
+[ "$SUPPLY_CHAIN_KEEP" -ge 1 ] 2>/dev/null || SUPPLY_CHAIN_KEEP=2
+# Root of the bumblebee tool's OWN cache (its scans/<date>/ history and any sources/
+# clone). Honored (BUMBLEBEE_CACHE) so the cache can be relocated off the overlay if a
+# writable volume is ever mounted; defaults to the standard location.
+BUMBLEBEE_CACHE="${BUMBLEBEE_CACHE:-$HOME/.cache/bumblebee}"
+
+# Keep the $1 newest entries from the remaining args (files OR dirs); delete the rest.
+# Scan outputs are date/timestamp-named, so a reverse lexical sort is chronological.
+# No-op when the glob matched nothing (the literal pattern is passed through unchanged).
+prune_keep_latest() {
+  keep="$1"
+  shift
+  for e in "$@"; do [ -e "$e" ] || return 0; break; done
+  printf '%s\n' "$@" | sort -r | tail -n +"$((keep + 1))" | while IFS= read -r e; do
+    if [ -e "$e" ]; then rm -rf "$e"; fi
+  done
+}
+
+# Best-effort housekeeping of the shared bumblebee cache. Prune old scans/<date>/ dirs and
+# gc the malicious-packages clone (created by the cross-project catalog updater, not here)
+# so the cache can't balloon. Pure maintenance — callers wrap this in `|| true`; it must
+# never influence the security gate's exit status.
+prune_bumblebee_cache() {
+  cache="$1"
+  keep="$2"
+  [ -d "$cache" ] || return 0
+  if [ -d "$cache/scans" ]; then
+    prune_keep_latest "$keep" "$cache"/scans/*/
+  fi
+  clone="$cache/sources/malicious-packages"
+  if [ -d "$clone/.git" ]; then
+    git -C "$clone" gc --prune=now --quiet || true
+  fi
+  return 0
+}
+# ----------------------------------------------------------------------------
+
 # Self-install bumblebee on first run. A missing toolchain or a failed install is a
 # scan-COULD-NOT-RUN condition (exit 2), never a finding — the scan never happened.
 if [ ! -x "$BUMBLEBEE_BIN" ]; then
@@ -89,6 +134,13 @@ if [ "$SCAN_RC" -ne 0 ]; then
   echo "  NOT a compromised-dependency finding." >&2
   exit 2
 fi
+
+# Retention (#915): the scan ran to completion, so prune per-run outputs before returning
+# the gate result below. Neither the repo cache nor the shared bumblebee cache may grow
+# without bound. Housekeeping only — wrapped so a prune failure can never change the exit
+# code the findings check computes next.
+prune_keep_latest "$SUPPLY_CHAIN_KEEP" "$OUT_DIR"/*.ndjson || true
+prune_bumblebee_cache "$BUMBLEBEE_CACHE" "$SUPPLY_CHAIN_KEEP" || true
 
 if [ -n "$CATALOG_FLAG" ]; then
   FINDINGS=$(grep -c '"record_type":"finding"' "$OUT_FILE" 2>/dev/null || true)
