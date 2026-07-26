@@ -161,9 +161,15 @@ This is the only slice that introduces an external read — every one of them is
       network; on an air-gapped host (spawn fails / `gh` absent) the page renders without
       hanging and the offline value stands.
 - [ ] `getting-started.test.ts` — **INV-4 / AC-5**: entering a valid email writes **only**
-      `minspec.approverEmail` and **no approval record** — asserted by watching
-      `.minspec/approvals.json` for zero writes across the whole interaction (the page
-      must never mint a sign-off; DR-056 stays the sole adjudicator).
+      `minspec.approverEmail` and **no approval record** — asserted by watching the **real
+      approval store**, the per-file sidecar tree `.minspec/approvals/**` (37 tracked
+      records; `.minspec/approvals/specs/<specPath>.json`), for zero writes across the
+      whole interaction. The watch must be the **directory tree**, not the legacy
+      `.minspec/approvals.json` path — that path is gitignored ([.gitignore:92](../../../.gitignore#L92))
+      and absent from every checkout, so watching it would assert nothing and let a
+      spurious sign-off through (#974). The page must never mint a sign-off; DR-056
+      ([approve.ts:240](../../../packages/minspec/src/commands/approve.ts#L240)) stays the
+      sole adjudicator.
 - [ ] `getting-started.test.ts` — **FR-14 / AC-6, AC-12, AC-13**: render-only tests assert
       `minspec.backfillEpics`, `minspec.initRefresh`, and the GitHub-PR-extension install
       path each fire **zero** times on render, and exactly once on their button click.
