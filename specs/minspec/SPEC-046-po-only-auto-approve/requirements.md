@@ -131,6 +131,42 @@ record — which makes the DR-056/containment invariants airtight by constructio
   RD-2 no-churn falls out for free. The adversary's one catch — virtual moves the DR-056 surface
   onto `config.json` — is closed by INV-5. See [design.md](./design.md).
 
+## Clarifications (post-Plan)
+
+Concrete questions the Plan surfaced ([design.md](./design.md) *Open decisions*), each with a
+decision or a follow-up task. (Clarify was `done` pre-Plan; these refine it.)
+
+- **CQ-1 — Terminal-collapse cue.** When an auto-approved spec reaches `done`/`archived`, does
+  it keep a visible cue, or does terminal erase the approval axis for both kinds?
+  **Decided:** keep a distinct tooltip line "advanced under auto policy — no human review" on
+  terminal auto-advanced specs (cheap, preserves honesty); the absent sidecar stays the audit
+  distinguisher.
+- **CQ-2 — Positive git artifact.** Does auto-approval emit a positive artifact (append-only
+  `.minspec/auto-approvals.log` / frontmatter note), or is config-commit git-blame + sidecar
+  absence enough? **Decided (v1):** no per-item artifact — the human-authored config commit
+  (git-blame: who/when/which audience) is the provenance. **Follow-up task:** revisit if
+  per-item audit granularity is later required.
+- **CQ-3 — Prospective-waiver scope.** Does `auto` apply to all future specs in the audience,
+  or only specs whose creation commit is human-authored? **Decided (v1):** all future specs —
+  the policy-authorship gate (INV-5) already forces the policy edit human and routes agent
+  config edits to the human lane. **Follow-up task:** add an optional per-spec creation-author
+  check if the standing-waiver risk proves real (weigh vs solo-dev ergonomics).
+- **CQ-4 — Resolver memoization.** Is the injected-policy path in `buildArtifactGraph`
+  mandatory? **Decided:** `getApprovalStatus` takes an optional policy param (internal resolve
+  when omitted); the hot loop injects a policy resolved from a config loaded once per graph
+  build.
+- **CQ-5 — Auto-approved tree glyph.** Which codicon (must differ from `lock` and `warning`)?
+  **Follow-up task (UX/impeccable):** pick the glyph; implement uses a distinct placeholder
+  (e.g. `pass-filled`/`shield`) until chosen. Not blocking the logic.
+- **CQ-6 — FR-3 amendment (governance).** Does "config-is-the-record, no per-approvable
+  sidecar" hold, or do reviewers require per-item provenance? **Blocking, human-gated:** pending
+  DR-068 acceptance + SPEC-046 review. If rejected → fallback persist/hybrid (re-introduces the
+  write-trigger/sweep/bot-writes INV-4 tension). This gates implementation start.
+- **CQ-7 — `audience:` frontmatter validation.** Closed-set against config-declared keys only?
+  **Decided:** yes — unknown/absent audience → `human` (never `auto` by accident); an unknown
+  key is a validator error (rule lives in SPEC-047). `CURRENT_POLICY_SCHEMA_VERSION` is bumped
+  by the extension on any audience-membership/policy-schema change, forcing human re-confirm.
+
 ## Costly to Refactor
 
 The committed cross-language contract is the `audiences` config schema, the `policyVersion` /
