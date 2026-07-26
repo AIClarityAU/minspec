@@ -16,9 +16,11 @@
 # The docs-corpus lock-step test pins the TS copy; the dispatch test pins THIS copy
 # against it.
 #
-# Coverage: specs/** · docs/** · .minspec/approvals/** · top-level *.md.
+# Coverage: specs/** · docs/** · skills/**/*.md (markdown ONLY — a bare skills/
+# arm would admit skills/foo/run.sh onto an auto-merge lane) · .minspec/approvals/**
+# · top-level *.md.
 # Known residual (tracked, NOT covered here so the four enforcers stay in lock-step):
 # .minspec/constitution.md and .cursorrules are approvables but sit outside this
 # regex; extending the corpus to them is a SPEC-039 amendment across all enforcers.
 # shellcheck disable=SC2034
-DOCS_CORPUS_RE='^(specs/|docs/|\.minspec/approvals/|[^/]+\.md$)'
+DOCS_CORPUS_RE='^(specs/|docs/|skills/.*\.md$|\.minspec/approvals/|[^/]+\.md$)'

@@ -34,7 +34,7 @@ epic: EPIC-009  # Team Readiness — docs-lane push ergonomics (grain a of #575/
 
 ## Tests
 - `packages/minspec/tests/docs-corpus.test.ts` — INV-2: corpus accepts specs/**, docs/**,
-  .minspec/approvals/**, top-level *.md; rejects packages/**, src/**, .github/**, nested
+  skills/**/*.md, .minspec/approvals/**, top-level *.md; rejects packages/**, src/**, .github/**, non-markdown under skills/ (e.g. skills/foo/run.sh), nested
   non-doc *.md (e.g. `packages/x/y.md`? decide: top-level only — `[^/]+\.md$` means no
   slash, so nested .md is rejected — test that).
 - `packages/minspec/tests/push-docs-lane.test.ts` — the "no docs changes ⇒ info toast, no

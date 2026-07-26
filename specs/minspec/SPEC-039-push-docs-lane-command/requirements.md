@@ -18,8 +18,8 @@ terminal. Grain (a) of the docs-lane ergonomics; auto-on-approve (#788) is defer
 - **FR-1** Command `minspec.pushDocsLane` titled "MinSpec: Push docs via lane" in the
   palette, plus a non-conflicting keybinding (a two-key chord) shown in the palette.
 - **FR-2** On invoke, gather working-tree changed paths limited to the docs corpus
-  (`specs/**`, `docs/**`, `.minspec/approvals/**`, top-level `*.md`). None → advisory
-  toast "No docs changes to push", stop.
+  (`specs/**`, `docs/**`, `skills/**/*.md`, `.minspec/approvals/**`, top-level `*.md`). None →
+  advisory toast "No docs changes to push", stop.
 - **FR-3** Before any network, a confirmation surfaces the file list AND that this
   opens a PR (a network action) — explicit consent for constitution invariant #1.
 - **FR-4** On confirm: create a temp worktree off `origin/main`, copy the docs files
