@@ -166,6 +166,13 @@ jobs:
     needs: build
     permissions:
       contents: read
+    env:
+      # Pinned scanner binary: a main SHA reading exposure-catalog schema 0.2.0.
+      # No released tag reads 0.2.0 (v0.1.2, the latest, reads only 0.1.0); a
+      # checksum-pinned SHA is immutable + GOSUMDB-verified and satisfies #850's
+      # "never floating" intent. The Fetch step inherits this, so CI catalogs pin
+      # to the SAME ref — a reproducible per-PR gate. See DR-005 / #866.
+      BUMBLEBEE_VERSION: 4a02b80aaca86641767c0d6cbe77c6856e4b481b
     steps:
       - uses: actions/checkout@v5
 
@@ -181,7 +188,7 @@ jobs:
       - run: npm ci
 
       - name: Install bumblebee
-        run: go install github.com/perplexityai/bumblebee/cmd/bumblebee@v0.1.2
+        run: go install "github.com/perplexityai/bumblebee/cmd/bumblebee@${BUMBLEBEE_VERSION}"
 
       - name: Fetch threat catalogs
         env:

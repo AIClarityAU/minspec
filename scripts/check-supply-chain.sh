@@ -10,8 +10,10 @@
 # Catalogs live in ~/.cache/bumblebee/catalogs/*.json. Empty catalog dir =
 # pre-flight inventory only (script still fails on bumblebee errors).
 #
-# BUMBLEBEE_VERSION below also pins scripts/fetch-bumblebee-catalogs.sh's
-# catalog fetch ref — bump both together, never just one (#848).
+# BUMBLEBEE_VERSION below also pins scripts/fetch-bumblebee-catalogs.sh's catalog
+# fetch ref. The version pins across FOUR surfaces (both scripts + ci.yml +
+# supply-chain-daily.yml) — bump all four together; the drift test
+# (packages/minspec/tests/fetch-bumblebee-catalogs.test.ts) enforces they agree (#848/#850).
 #
 # Read-only: bumblebee never executes package managers or reads source files.
 # https://github.com/perplexityai/bumblebee
@@ -32,7 +34,9 @@ if [ "${SKIP_SUPPLY_CHAIN_CHECK}" = "1" ]; then
 fi
 
 REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
-BUMBLEBEE_VERSION="${BUMBLEBEE_VERSION:-v0.1.2}"
+# Pinned to a main SHA reading exposure-catalog schema 0.2.0 (no released tag does;
+# checksum-pinned SHA = immutable + GOSUMDB-verified, #850-intent-safe). DR-005/#866.
+BUMBLEBEE_VERSION="${BUMBLEBEE_VERSION:-4a02b80aaca86641767c0d6cbe77c6856e4b481b}"
 BUMBLEBEE_BIN="${BUMBLEBEE_BIN:-$HOME/go/bin/bumblebee}"
 GO_BIN="${GO_BIN:-$HOME/.local/opt/go1.26.3/bin/go}"
 CATALOG_DIR="${BUMBLEBEE_CATALOGS:-$HOME/.cache/bumblebee/catalogs}"

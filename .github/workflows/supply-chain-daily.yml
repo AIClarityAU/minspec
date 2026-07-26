@@ -33,7 +33,7 @@ jobs:
     # the pinned matcher ignores parses clean and may be silently unmatched (false green);
     # pinning the matcher bounds freshness to its schema — see DR-005.
     env:
-      BUMBLEBEE_VERSION: v0.1.2      # pinned scanner binary — never floated (#850)
+      BUMBLEBEE_VERSION: 4a02b80aaca86641767c0d6cbe77c6856e4b481b  # pinned scanner binary — main SHA reading schema 0.2.0 (no released tag does); never floated (#850, DR-005/#866)
       BUMBLEBEE_CATALOG_REF: main    # data-only catalog ref — floats for freshness
     steps:
       - uses: actions/checkout@v5
@@ -52,8 +52,8 @@ jobs:
       - run: npm ci
 
       - name: Install bumblebee
-        # Pinned binary (@${BUMBLEBEE_VERSION} = v0.1.2) — NOT floated. Only the catalog
-        # fetch below (BUMBLEBEE_CATALOG_REF=main) tracks HEAD; the executed code is pinned.
+        # Pinned binary (@${BUMBLEBEE_VERSION}, a checksum-pinned main SHA) — NOT floated.
+        # Only the catalog fetch below (BUMBLEBEE_CATALOG_REF=main) tracks HEAD; executed code is pinned.
         run: go install "github.com/perplexityai/bumblebee/cmd/bumblebee@${BUMBLEBEE_VERSION}"
 
       - name: Fetch threat catalogs

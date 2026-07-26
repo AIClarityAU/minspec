@@ -2,7 +2,8 @@
  * T3 — fetch-bumblebee-catalogs.sh version-skew regression (#848).
  *
  * check-supply-chain.sh pins the bumblebee scanner binary to BUMBLEBEE_VERSION
- * (default v0.1.2). fetch-bumblebee-catalogs.sh fetched the exposure catalogs
+ * (default: a checksum-pinned main SHA reading exposure schema 0.2.0 — DR-005/#866).
+ * fetch-bumblebee-catalogs.sh fetched the exposure catalogs
  * from the upstream repo's default-branch HEAD with no version pin at all, so
  * the catalog schema could (and did) advance past what the pinned reader
  * supports — the scan then failed closed with "unsupported exposure catalog
@@ -116,7 +117,7 @@ describe('fetch-bumblebee-catalogs.sh — pins catalog fetch to BUMBLEBEE_VERSIO
   const CI_WORKFLOW = path.join(REPO_ROOT, '.github/workflows/ci.yml');
   const DAILY_WORKFLOW = path.join(REPO_ROOT, '.github/workflows/supply-chain-daily.yml');
 
-  // Script defaults: `BUMBLEBEE_VERSION="${BUMBLEBEE_VERSION:-v0.1.2}"`
+  // Script defaults: `BUMBLEBEE_VERSION="${BUMBLEBEE_VERSION:-<pinned ref>}"` (a vX tag or a full SHA)
   const scriptDefaultOf = (file: string): string => {
     const m = fs
       .readFileSync(file, 'utf-8')
@@ -124,12 +125,6 @@ describe('fetch-bumblebee-catalogs.sh — pins catalog fetch to BUMBLEBEE_VERSIO
     expect(m, `no BUMBLEBEE_VERSION default found in ${path.basename(file)}`).toBeTruthy();
     return m![1];
   };
-  // Hardcoded workflow install literal: `go install ...bumblebee@v0.1.2` (ci.yml only).
-  const workflowLiteralOf = (file: string): string | null => {
-    const m = fs.readFileSync(file, 'utf-8').match(/bumblebee@(v[^\s'"$]+)/);
-    return m ? m[1] : null;
-  };
-
   // yaml env value: `KEY: value   # comment` → 'value'
   const ymlEnvOf = (file: string, key: string): string | null => {
     const m = fs.readFileSync(file, 'utf-8').match(new RegExp(`^\\s*${key}:\\s*(\\S+)`, 'm'));
@@ -149,15 +144,20 @@ describe('fetch-bumblebee-catalogs.sh — pins catalog fetch to BUMBLEBEE_VERSIO
     const binary = {
       'fetch-bumblebee-catalogs.sh': scriptDefaultOf(FETCH_SCRIPT),
       'check-supply-chain.sh': scriptDefaultOf(CHECK_SCRIPT),
-      'ci.yml': workflowLiteralOf(CI_WORKFLOW),
+      'ci.yml': ymlEnvOf(CI_WORKFLOW, 'BUMBLEBEE_VERSION'),
       'supply-chain-daily.yml': ymlEnvOf(DAILY_WORKFLOW, 'BUMBLEBEE_VERSION'),
     };
-    // Every executed-binary reference must be a pinned release tag (vX...), never a branch.
+    // Every executed-binary reference must be IMMUTABLE — a pinned release tag
+    // (vX...) OR a full 40-hex commit SHA. #850's requirement is "never floating"
+    // (no `@main` that auto-pulls upstream code into a token-scoped job); a
+    // checksum-pinned SHA is immutable + GOSUMDB-verified and meets that intent.
+    // We use a SHA while no released tag reads exposure schema 0.2.0 (DR-005/#866).
+    // A branch name (`main`) matches NEITHER pattern and is still rejected.
     for (const [where, ref] of Object.entries(binary)) {
       expect(ref, `no pinned bumblebee binary ref in ${where}`).toBeTruthy();
       expect(
-        /^v\d/.test(ref!),
-        `${where} binary ref '${ref}' must be a pinned vX tag, not a floating ref`,
+        /^(v\d[\w.-]*|[0-9a-f]{40})$/.test(ref!),
+        `${where} binary ref '${ref}' must be a pinned vX tag or a full commit SHA, not a floating ref`,
       ).toBe(true);
     }
     // ...and they must all agree — a single-sided bump re-opens the #836 schema break.
