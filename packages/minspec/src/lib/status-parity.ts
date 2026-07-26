@@ -18,7 +18,28 @@
  *
  * Body status conventions:
  *   - spec: a `**Status:** <word> …` line (the `<word>` may be followed by free prose).
- *   - DR:   a `## Status` heading, then the first non-empty line's leading word.
+ *   - DR:   a `## Status` heading, then the first non-empty line's leading word, which the
+ *           house style EMPHASISES (`**Accepted**, 2026-07-26`).
+ *
+ * #968 — two defects fixed here, one of them structural:
+ *
+ *  1. The DR arm matched `/^([A-Za-z]+)/` directly against the line, so an emphasised word
+ *     ("**Proposed**, …") began with `*`, failed, and yielded no token. Measured at the
+ *     time: 22 DRs carried a body `## Status`, 2 were emphasised, and those same 2 were the
+ *     register's ONLY genuine mismatches — the gate missed 2/2 real defects while correctly
+ *     clearing the 20 unemphasised ones. Leading emphasis is now stripped before matching.
+ *
+ *  2. More importantly, `null` was OVERLOADED — it meant both "consistent / nothing to
+ *     compare" and "this line defeated the parser". Those are opposite facts, and collapsing
+ *     them is why (1) hid for weeks: an inert branch was indistinguishable from a passing
+ *     one. `inspectStatusLine` now reports WHICH non-comparable case occurred, so callers can
+ *     surface "I could not read this" instead of silently treating it as agreement. Fixing
+ *     only the regex would have left the next unrecognised shape just as silent
+ *     (constitution invariant #2 — no silent gate).
+ *
+ * The conservative contract is unchanged: `unparseable` and `freeform` still produce NO
+ * parity finding. Visibility is the caller's job (the validator WARNs); this module never
+ * escalates an unreadable line into a blocking error.
  */
 
 /** Which artifact family — decides the recognised status vocabulary. */
@@ -55,41 +76,95 @@ export interface BodyStatus {
 }
 
 /**
- * Extract the body status line's leading RECOGNISED status token, or null when there is
- * no body status line, or its leading token is not a recognised status word (free-form).
- * Returning null on an unrecognised token is what makes the parity check false-positive
- * free.
+ * What the body status line turned out to be. The three non-comparable cases are kept
+ * DISTINCT on purpose (#968): collapsing them into a bare `null` is what let an inert
+ * parser branch masquerade as a passing check.
+ *
+ *  - `comparable`  — a recognised status word was read; parity can be judged.
+ *  - `freeform`    — a word was read but it is not in this artifact's vocabulary
+ *                    ("Clarify complete — awaiting Accept"). Legitimate and common; not a
+ *                    defect, and deliberately low-noise.
+ *  - `unparseable` — a status line EXISTS but no leading word could be read from it. This
+ *                    is the dangerous class: it means the corpus uses a shape this module
+ *                    does not understand, so the gate is silently not running on that file.
+ *  - `absent`      — no status line at all. Nothing to check.
  */
-export function bodyStatusToken(content: string, kind: ArtifactKind): BodyStatus | null {
+export type BodyStatusResult =
+  | { readonly kind: 'comparable'; readonly token: string; readonly line: number }
+  | { readonly kind: 'freeform'; readonly token: string; readonly line: number }
+  | { readonly kind: 'unparseable'; readonly line: number; readonly text: string }
+  | { readonly kind: 'absent' };
+
+/**
+ * Leading markdown emphasis (`**`, `__`, `*`, `_`) carries no semantic weight for a status
+ * word, but it does defeat a `^[A-Za-z]` match — which was exactly bug #968. Stripping it is
+ * safe because the RECOGNISED-word guard downstream is unchanged: widening what can be READ
+ * never widens what counts as a status.
+ */
+function stripLeadingEmphasis(line: string): string {
+  return line.replace(/^[*_]+/, '');
+}
+
+function classify(raw: string, line: number, words: ReadonlySet<string>): BodyStatusResult {
+  const m = stripLeadingEmphasis(raw.trim()).match(/^([A-Za-z]+)/);
+  if (!m) return { kind: 'unparseable', line, text: raw.trim().slice(0, 80) };
+  const token = m[1].toLowerCase();
+  return words.has(token) ? { kind: 'comparable', token, line } : { kind: 'freeform', token, line };
+}
+
+/**
+ * Inspect the body status line and report which case it is. Never throws.
+ *
+ * Prefer this over {@link bodyStatusToken} when you care about the DIFFERENCE between
+ * "agrees" and "could not be read" — e.g. a validator that should warn about shapes it
+ * cannot parse rather than passing them in silence.
+ */
+export function inspectStatusLine(content: string, kind: ArtifactKind): BodyStatusResult {
   const lines = content.split('\n');
   const words = statusWords(kind);
 
   if (kind === 'spec') {
     for (let i = 0; i < lines.length; i++) {
+      if (!/^\*\*Status:\*\*/.test(lines[i])) continue;
+      // NB: the spec token is deliberately NOT emphasis-stripped. `setBodyStatusToken`
+      // (spec.ts) rewrites this line with /^(\*\*Status:\*\*[ \t]*)[A-Za-z]+/, so reading a
+      // shape the writer cannot rewrite would reintroduce the read/write asymmetry this
+      // module exists to prevent. No spec in the corpus emphasises its token; if one ever
+      // does, it surfaces as `unparseable` (visible) rather than being silently skipped.
       const m = lines[i].match(/^\*\*Status:\*\*\s*([A-Za-z]+)/);
-      if (m) {
-        const token = m[1].toLowerCase();
-        return words.has(token) ? { token, line: i + 1 } : null;
-      }
+      if (!m) return { kind: 'unparseable', line: i + 1, text: lines[i].trim().slice(0, 80) };
+      const token = m[1].toLowerCase();
+      return words.has(token)
+        ? { kind: 'comparable', token, line: i + 1 }
+        : { kind: 'freeform', token, line: i + 1 };
     }
-    return null;
+    return { kind: 'absent' };
   }
 
   // DR: the `## Status` section — the first non-empty line after the heading.
   for (let i = 0; i < lines.length; i++) {
-    if (/^##\s+Status\b/i.test(lines[i])) {
-      for (let j = i + 1; j < lines.length; j++) {
-        const line = lines[j].trim();
-        if (!line) continue;
-        const m = line.match(/^([A-Za-z]+)/);
-        if (!m) return null;
-        const token = m[1].toLowerCase();
-        return words.has(token) ? { token, line: j + 1 } : null;
-      }
-      return null;
+    if (!/^##\s+Status\b/i.test(lines[i])) continue;
+    for (let j = i + 1; j < lines.length; j++) {
+      if (!lines[j].trim()) continue;
+      return classify(lines[j], j + 1, words);
     }
+    return { kind: 'absent' };
   }
-  return null;
+  return { kind: 'absent' };
+}
+
+/**
+ * Extract the body status line's leading RECOGNISED status token, or null when there is
+ * no body status line, or its leading token is not a recognised status word (free-form).
+ * Returning null on an unrecognised token is what makes the parity check false-positive
+ * free.
+ *
+ * Thin wrapper over {@link inspectStatusLine}, kept for callers that only need the token
+ * (notably `setBodyStatusToken` in spec.ts, the write-path half of this gate).
+ */
+export function bodyStatusToken(content: string, kind: ArtifactKind): BodyStatus | null {
+  const r = inspectStatusLine(content, kind);
+  return r.kind === 'comparable' ? { token: r.token, line: r.line } : null;
 }
 
 export interface StatusParityFinding {
@@ -121,8 +196,10 @@ export function checkStatusParity(
     .toLowerCase()
     .split(/\s+/)[0] ?? '';
   if (!fm) return null;
-  const body = bodyStatusToken(content, kind);
-  if (!body) return null;
+  const body = inspectStatusLine(content, kind);
+  // Only a recognised token is comparable. `freeform` / `unparseable` / `absent` never
+  // produce a finding — see the module header on why unreadable must not mean "blocking".
+  if (body.kind !== 'comparable') return null;
   if (body.token === fm) return null;
   return { frontmatter: fm, body: body.token, line: body.line };
 }
