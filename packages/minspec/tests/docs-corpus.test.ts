@@ -4,8 +4,9 @@
  * INV-2 (corpus-only): a non-docs path is NEVER in the corpus, so it can never be
  * pushed onto the auto-merging docs-lane. These tests pin the predicate to the
  * SAME corpus the workflow (`docs-lane.yml`) and the CLI (`push-docs.sh`) enforce:
- *   accept  specs/**, docs/**, .minspec/approvals/**, top-level *.md
- *   reject  everything else — notably code, .github/**, and NESTED *.md.
+ *   accept  specs/**, docs/**, markdown under skills/, .minspec/approvals/**, top-level *.md
+ *   reject  everything else — notably code, .github/**, NESTED *.md, and any
+ *           NON-markdown file under skills/ (an executable must never ride the lane).
  *
  * Pure: this file exercises the predicate with zero I/O (INV-1 corollary).
  */
@@ -23,8 +24,8 @@ describe('isDocsCorpusPath — accepts the docs corpus', () => {
     'docs/epics/EP-001.md',
     '.minspec/approvals/specs/minspec/SPEC-039/requirements.md.json',
     '.minspec/approvals/DR-001.md.json',
-    'skills/scrooge-delegate/SKILL.md', // agent skill definitions — prose, not product code
-    'skills/anything/nested/deep.md', // any depth under skills/
+    'skills/scrooge-delegate/SKILL.md', // agent skill definitions — markdown prose only
+    'skills/anything/nested/deep.md', // any depth under skills/, so long as it is .md
     'README.md', // top-level markdown
     'CLAUDE.md',
     'CHANGELOG.md',
@@ -53,6 +54,16 @@ describe('isDocsCorpusPath — rejects everything outside the corpus', () => {
     'specifications/foo.md', // not `specs/`
     '.minspec/config.json', // under .minspec but NOT approvals/
     '.minspec/approvals.json', // the legacy map file (has no trailing slash — not approvals/**)
+    // A skill directory may hold EXECUTABLES. The corpus admits only its markdown, so a
+    // script can never ride the auto-merging lane on the strength of a comment claiming
+    // "skills are just prose" (the unproven-absolute / silent-gate class inv. #2 + DR-066
+    // forbid). These are the enforcement proof for that claim.
+    'skills/foo/run.sh',
+    'skills/foo/run.py',
+    'skills/scrooge-delegate/install.sh',
+    'skills/foo/Makefile',
+    'skills/README', // no extension at all
+    'skills/bad.md.sh', // suffix-confusion: `.md` mid-name, NOT the extension (anchored $)
   ];
   for (const p of rejected) {
     it(`rejects ${p}`, () => {
@@ -92,14 +103,14 @@ describe('corpus constants stay in lock-step with the workflow', () => {
   it('DOCS_CORPUS_REGEX mirrors docs-lane.yml / push-docs.sh exactly', () => {
     // If this literal changes, docs-lane.yml `allowed=` and push-docs.sh `CORPUS=`
     // MUST change too, or the three enforcers disagree (never-wrong is lost).
-    expect(DOCS_CORPUS_REGEX.source).toBe('^(specs\\/|docs\\/|skills\\/|\\.minspec\\/approvals\\/|[^/]+\\.md$)');
+    expect(DOCS_CORPUS_REGEX.source).toBe('^(specs\\/|docs\\/|skills\\/.*\\.md$|\\.minspec\\/approvals\\/|[^/]+\\.md$)');
   });
 
   it('DOCS_CORPUS lists the five human-readable corpus entries', () => {
     expect(DOCS_CORPUS).toEqual([
       'specs/**',
       'docs/**',
-      'skills/**',
+      'skills/**/*.md',
       '.minspec/approvals/**',
       '*.md (top-level only)',
     ]);
