@@ -538,6 +538,7 @@ Three times in this repo, a merge gate that *looked* present enforced **nothing*
 <!-- dr-summary:DR-067 auto=38843581fe9a -->
 The autonomous pipeline (triage → dispatch → build → review → merge) is live (DR-060/DR-061), but its **work-assignment model is a single shared drain that both dispatches AND fixes everything**, with no atomic notion of "who owns this item right now." Four founder requests on 2026-07-25 name the same missing primitive from four angles:
 <!-- /dr-summary:DR-067 -->
+
 ## [DR-068 — Audience-partitioned approvables — a role-based review split by file separation, with a PO-only auto-approve mode](DR-068.md)
 
 *Status: proposed · Date: 2026-07-21*
