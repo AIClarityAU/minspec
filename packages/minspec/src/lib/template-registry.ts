@@ -21,6 +21,7 @@ import {
   AI_REVIEW_WORKFLOW,
   READY_TO_MERGE_WORKFLOW,
   AI_REVIEW_RETRY_WORKFLOW,
+  DOCS_LANE_WORKFLOW,
   REVIEW_BRANCH_SH,
   REVIEW_DECIDE_SH,
   ROLE_REVIEWER_MD,
@@ -1071,6 +1072,17 @@ const CI_REVIEW_STACK_TEMPLATES: readonly ManagedRegionTemplate[] = [
     outputPath: '.github/workflows/ai-review-retry.yml',
     commentStyle: 'hash',
     content: AI_REVIEW_RETRY_WORKFLOW,
+  },
+  {
+    // The docs-lane (DR-051 Option 2, #575): a docs-only PR that opts in auto-merges
+    // once the required checks pass. Shipped so an initialized repo GETS the lane
+    // instead of hand-maintaining it — the corpus it enforces is generated from this
+    // repo's own docs-lane.yml (one of the four lock-step SPEC-039 INV-2 enforcers),
+    // so a downstream copy can never drift from the canonical corpus.
+    name: 'docs-lane-workflow',
+    outputPath: '.github/workflows/docs-lane.yml',
+    commentStyle: 'hash',
+    content: DOCS_LANE_WORKFLOW,
   },
   {
     name: 'review-branch-script',
