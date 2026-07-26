@@ -12,80 +12,11 @@
 
 import * as vscode from 'vscode';
 import { formatNextTaskLabel, type NextTask } from '@aiclarity/shared';
-import type { SpecFrontmatter, PhaseStatus } from '../lib/spec';
-import type { Phase, Tier } from '../lib/config';
-import { PHASES, DEFAULT_CONFIG } from '../lib/config';
 
-/** Lightweight summary passed to the status bar for display */
-export interface StatusBarSpec {
-  readonly id: string;
-  readonly title: string;
-  readonly tier: string;
-  readonly currentPhase: Phase | null;
-  readonly phases: Record<Phase, PhaseStatus>;
-}
-
-/**
- * Build a StatusBarSpec from a SpecFrontmatter.
- * Determines the current phase from the phases map.
- */
-export function fromFrontmatter(fm: SpecFrontmatter): StatusBarSpec {
-  let currentPhase: Phase | null = null;
-  // First check for in-progress
-  for (const phase of PHASES) {
-    if (fm.phases[phase] === 'in-progress') {
-      currentPhase = phase;
-      break;
-    }
-  }
-  // If none in-progress, find first pending
-  if (!currentPhase) {
-    for (const phase of PHASES) {
-      if (fm.phases[phase] === 'pending') {
-        currentPhase = phase;
-        break;
-      }
-    }
-  }
-
-  return {
-    id: fm.id,
-    title: fm.title,
-    tier: fm.tier,
-    currentPhase,
-    phases: fm.phases,
-  };
-}
-
-/**
- * Compute a tier-aware completion percentage from a phases map (#38).
- *
- * When `tier` is given, the denominator is the phases that tier *requires*
- * (DR-362 `phaseProgress` logic, replicated locally) — so a T1 spec reads 100%
- * once `specify` is done, while a T4 needs all five phases. When `tier` is
- * omitted, the denominator is the full five-phase pipeline (the legacy
- * whole-pipeline semantics — what the active-spec summary in `lib/active-spec.ts`
- * passes). Done + skipped count as completed. Returns the progress token
- * "· N%" — no redundant " done" suffix (#97).
- */
-export function computeProgress(
-  phases: Record<Phase, PhaseStatus>,
-  tier?: string,
-): string {
-  const required: readonly Phase[] =
-    tier === undefined
-      ? PHASES
-      : DEFAULT_CONFIG.phaseMappings[tier as Tier]?.requiredPhases ?? ['specify'];
-  let completed = 0;
-  for (const phase of required) {
-    const status = phases[phase];
-    if (status === 'done' || status === 'skipped') {
-      completed++;
-    }
-  }
-  const pct = required.length === 0 ? 0 : Math.round((completed / required.length) * 100);
-  return `· ${pct}%`;
-}
+// SPEC-040 FR-5: `StatusBarSpec`, `fromFrontmatter`, and `computeProgress` moved
+// to `lib/spec-progress.ts`. They are pure frontmatter derivations with Tier-0
+// consumers (`lib/active-spec.ts`), and keeping them here forced a lib→views
+// import — the layering inversion FR-1 bans. Import them from `../lib/spec-progress`.
 
 // ─── Next-Task signpost status bar (SPEC-012 / DR-019) ──────────────────────
 

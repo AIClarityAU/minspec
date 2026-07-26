@@ -3,7 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { loadConfig, applyVSCodeOverrides, resolveAndValidate } from './config';
 import { parseSpec } from './spec';
-import { fromFrontmatter, computeProgress } from '../views/status-bar';
+import { fromFrontmatter, computeProgress } from './spec-progress';
 
 /**
  * Find the most likely active spec file in the workspace.

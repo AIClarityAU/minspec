@@ -29,9 +29,9 @@ import { TreeExpansionMemory } from './views/tree-expansion-memory';
 import {
   MinSpecNextTaskStatusBar,
   MinSpecScaffoldCommitStatusBar,
-  fromFrontmatter,
   resolveNextTaskKeybinding,
 } from './views/status-bar';
+import { fromFrontmatter } from './lib/spec-progress';
 import { nextTaskCommand, computeNextTask } from './commands/next-task';
 import { SpecPanel } from './views/spec-panel';
 import { loadSession, saveSession, addToScope, isFileInScope } from './lib/session';
