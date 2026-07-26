@@ -144,19 +144,20 @@ decision or a follow-up task. (Clarify was `done` pre-Plan; these refine it.)
 - **CQ-2 — Positive git artifact.** Does auto-approval emit a positive artifact (append-only
   `.minspec/auto-approvals.log` / frontmatter note), or is config-commit git-blame + sidecar
   absence enough? **Decided (v1):** no per-item artifact — the human-authored config commit
-  (git-blame: who/when/which audience) is the provenance. **Follow-up task:** revisit if
-  per-item audit granularity is later required.
+  (git-blame: who/when/which audience) is the provenance. **Follow-up task ([#952](https://github.com/AIClarityAU/minspec/issues/952)):**
+  revisit if per-item audit granularity is later required.
 - **CQ-3 — Prospective-waiver scope.** Does `auto` apply to all future specs in the audience,
   or only specs whose creation commit is human-authored? **Decided (v1):** all future specs —
   the policy-authorship gate (INV-5) already forces the policy edit human and routes agent
-  config edits to the human lane. **Follow-up task:** add an optional per-spec creation-author
-  check if the standing-waiver risk proves real (weigh vs solo-dev ergonomics).
+  config edits to the human lane. **Follow-up task ([#953](https://github.com/AIClarityAU/minspec/issues/953)):**
+  add an optional per-spec creation-author check if the standing-waiver risk proves real (weigh
+  vs solo-dev ergonomics).
 - **CQ-4 — Resolver memoization.** Is the injected-policy path in `buildArtifactGraph`
   mandatory? **Decided:** `getApprovalStatus` takes an optional policy param (internal resolve
   when omitted); the hot loop injects a policy resolved from a config loaded once per graph
   build.
 - **CQ-5 — Auto-approved tree glyph.** Which codicon (must differ from `lock` and `warning`)?
-  **Follow-up task (UX/impeccable):** pick the glyph; implement uses a distinct placeholder
+  **Follow-up task ([#954](https://github.com/AIClarityAU/minspec/issues/954), UX/impeccable):** pick the glyph; implement uses a distinct placeholder
   (e.g. `pass-filled`/`shield`) until chosen. Not blocking the logic.
 - **CQ-6 — FR-3 amendment (governance).** Does "config-is-the-record, no per-approvable
   sidecar" hold, or do reviewers require per-item provenance? **Blocking, human-gated:** pending
@@ -177,7 +178,7 @@ decision or a follow-up task. (Clarify was `done` pre-Plan; these refine it.)
   require the owning spec's re-approval under DR-062 cross-artifact staleness? **Decided +
   follow-up task:** an `affects:` edit claims no ownership but may mark the owner spec's approval
   stale (DR-062); it does not block *this* Plan, but before the **code** PR merges the owner spec
-  (SPEC-041) must ack / re-approve. Follow-up task: confirm the owner-ack protocol at implement.
+  (SPEC-041) must ack / re-approve. Follow-up task ([#955](https://github.com/AIClarityAU/minspec/issues/955)): confirm the owner-ack protocol at implement.
 
 ## Costly to Refactor
 
