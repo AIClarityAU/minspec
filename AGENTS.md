@@ -37,6 +37,15 @@ Before starting work, classify the task by its **mechanical scope** (blast radiu
 
 The classifier sees scope, not difficulty. A subtle one-line fix and a trivial one are the same size — so the predicted tier is a **floor**: raise it when a change is harder than its footprint, never lower it below the prediction.
 
+## Naming waves, phases, and batches
+
+Never refer to a group of work by a bare number.
+
+- **Name what you coin.** A wave, batch, or group you invent gets a descriptive name ("the mechanical-bugfix wave"), never "Wave 1".
+- **Gloss what is predefined.** When an identifier is fixed and numeric (`Phase 2`, `Slice 3`, `T3`), append a short reminder of what it covers the first time it appears in any response, doc, issue, PR, or commit — e.g. "Phase 2 (Public-ready — polish)".
+
+A bare number makes the reader stop and look it up; a two-word gloss costs nothing.
+
 ## Rules
 
 1. Never skip the spec phase, even for T1.

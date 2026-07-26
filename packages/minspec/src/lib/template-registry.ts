@@ -95,6 +95,15 @@ This project uses Specification-Driven Development. Tasks are classified by **me
 | T3 | Full spec cycle | specify, plan, tasks, implement |
 | T4 | Complete ceremony | all phases |
 
+## Naming waves, phases, and batches
+
+Never refer to a group of work by a bare number.
+
+- **Name what you coin.** A wave, batch, or group you invent gets a descriptive name ("the mechanical-bugfix wave"), never "Wave 1".
+- **Gloss what is predefined.** When an identifier is fixed and numeric (\`Phase 2\`, \`Slice 3\`, \`T3\`), append a short reminder of what it covers the first time it appears in any response, doc, issue, PR, or commit — e.g. "Phase 2 (Public-ready — polish)".
+
+A bare number makes the reader stop and look it up; a two-word gloss costs nothing.
+
 ## File Locations
 
 | Artifact | Location |
@@ -160,6 +169,15 @@ Before starting work, classify the task by its **mechanical scope** (blast radiu
 
 The classifier sees scope, not difficulty. A subtle one-line fix and a trivial one are the same size — so the predicted tier is a **floor**: raise it when a change is harder than its footprint, never lower it below the prediction.
 
+## Naming waves, phases, and batches
+
+Never refer to a group of work by a bare number.
+
+- **Name what you coin.** A wave, batch, or group you invent gets a descriptive name ("the mechanical-bugfix wave"), never "Wave 1".
+- **Gloss what is predefined.** When an identifier is fixed and numeric (\`Phase 2\`, \`Slice 3\`, \`T3\`), append a short reminder of what it covers the first time it appears in any response, doc, issue, PR, or commit — e.g. "Phase 2 (Public-ready — polish)".
+
+A bare number makes the reader stop and look it up; a two-word gloss costs nothing.
+
 ## Rules
 
 1. Never skip the spec phase, even for T1.
@@ -203,6 +221,15 @@ This project uses MinSpec SDD methodology. Specs in \`{{specsDir}}/\`, decisions
 2. Classify the change by mechanical scope (T1-T4) — how far it reaches, not how hard it feels
 3. Follow the appropriate ceremony level (the predicted tier is a floor — raise it, never lower it)
 4. Never violate the invariants listed above
+
+## Naming waves, phases, and batches
+
+Never refer to a group of work by a bare number.
+
+- **Name what you coin.** A wave, batch, or group you invent gets a descriptive name ("the mechanical-bugfix wave"), never "Wave 1".
+- **Gloss what is predefined.** When an identifier is fixed and numeric (\`Phase 2\`, \`Slice 3\`, \`T3\`), append a short reminder of what it covers the first time it appears in any response, doc, issue, PR, or commit — e.g. "Phase 2 (Public-ready — polish)".
+
+A bare number makes the reader stop and look it up; a two-word gloss costs nothing.
 
 ## Coding Standards
 

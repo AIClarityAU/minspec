@@ -27,6 +27,15 @@ This project uses Specification-Driven Development. Tasks are classified by **me
 | T3 | Full spec cycle | specify, plan, tasks, implement |
 | T4 | Complete ceremony | all phases |
 
+## Naming waves, phases, and batches
+
+Never refer to a group of work by a bare number.
+
+- **Name what you coin.** A wave, batch, or group you invent gets a descriptive name ("the mechanical-bugfix wave"), never "Wave 1".
+- **Gloss what is predefined.** When an identifier is fixed and numeric (`Phase 2`, `Slice 3`, `T3`), append a short reminder of what it covers the first time it appears in any response, doc, issue, PR, or commit — e.g. "Phase 2 (Public-ready — polish)".
+
+A bare number makes the reader stop and look it up; a two-word gloss costs nothing.
+
 ## File Locations
 
 | Artifact | Location |
