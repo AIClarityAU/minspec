@@ -12,7 +12,7 @@ type: requirements
 # state the sidecar no longer backs. Only the human's Alt+A may set it back — an agent writing
 # the sidecar itself would be forging a sign-off. Under-claiming is the never-wrong direction,
 # and it makes spec-gate enforce the gate instead of a prose note (#971 Architect finding).
-status: specifying
+status: implementing
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core — the onboarding page is the front door to init/classify/refresh/approval gates (see notes: a dedicated onboarding/first-run EPIC would be the ideal home)
