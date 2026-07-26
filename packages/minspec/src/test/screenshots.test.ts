@@ -103,6 +103,20 @@ suite('Screenshots', () => {
     } catch {
       console.log('  Screenshot capture: PIL not available — tests will skip capture');
     }
+
+    // Skip the ENTIRE suite when capture is unavailable (#973). Without capture these
+    // tests execute zero assertions — every body returns early at the `!captureAvailable`
+    // guard — yet they still drive live VS Code UI: opening a Quick Pick, waiting on
+    // render timings, and awaiting a command promise that `closeQuickOpen` does not
+    // always settle. That is all risk and no signal: the suite can FAIL (a 30s timeout,
+    // which is exactly how it blocked #900) but can never pass meaningfully.
+    //
+    // CI has no Pillow, so this skips there and the screenshot tooling keeps working
+    // locally, where Pillow is installed and the assertions are real.
+    if (!captureAvailable) {
+      console.log('  Skipping the Screenshots suite entirely — no capture, so no assertions to make.');
+      this.skip();
+    }
   });
 
   test('sidebar — spec tree view grouped by status', async function () {
