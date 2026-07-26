@@ -730,8 +730,11 @@ shepherd_own_pr() {
   while (( $(date -u +%s) <= loop_deadline )); do
     local now elapsed pr_json state merged mergeable merge_state labels_csv
     now=$(date -u +%s); elapsed=$(( now - started ))
+    # Every root field read below MUST appear in this list — a jq read of an unfetched
+    # field silently yields null, which is how `automerge_armed` was pinned to "no" and
+    # the wait-while-armed branch became dead code. Enforced by a wiring test.
     pr_json=$(gh pr view "$pr_num" --repo "$REPO" \
-                --json state,mergeable,mergeStateStatus,labels,statusCheckRollup 2>/dev/null || echo '{}')
+                --json state,mergeable,mergeStateStatus,labels,statusCheckRollup,autoMergeRequest 2>/dev/null || echo '{}')
     state=$(jq -r '.state // "UNKNOWN"' <<<"$pr_json")
     mergeable=$(jq -r '.mergeable // "UNKNOWN"' <<<"$pr_json")
     merge_state=$(jq -r '.mergeStateStatus // "UNKNOWN"' <<<"$pr_json")

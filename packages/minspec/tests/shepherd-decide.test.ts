@@ -265,6 +265,56 @@ describe('shepherd wiring: the loop is bounded by CODE, not by a token', () => {
   it('kills a build that ignores SIGTERM, so the FR-12 ceiling really bounds it', () => {
     expect(code).toMatch(/timeout --kill-after=30s/);
   });
+
+  // Regression + gate for the second review round on PR #975. `automerge_armed` read
+  // `.autoMergeRequest` from a `gh pr view --json` list that never requested it, so jq
+  // returned null forever: the wait-while-armed branch was dead code, and a PR GitHub
+  // would auto-merge got `stop-awaiting-human` instead. A missing --json field fails
+  // SILENTLY (null, not an error), so the class needs a gate, not just the one fix.
+  describe('every root field read from $pr_json is actually fetched', () => {
+    const body = (() => {
+      const start = code.indexOf('shepherd_own_pr() {');
+      return code.slice(start, code.indexOf('\n}', start));
+    })();
+
+    /**
+     * The field list on the `pr_json` fetch specifically — NOT merely the first
+     * `--json` in the function, which belongs to the `gh pr list --json number`
+     * lookup above it and would make this gate vacuously pass.
+     */
+    const fetched = (body.match(/pr_json=\$\(gh pr view[\s\S]*?--json ([A-Za-z,]+)/)?.[1] ?? '')
+      .split(',')
+      .filter(Boolean);
+
+    /** Root-level fields read by every jq program applied to $pr_json. */
+    const rootsRead = (() => {
+      const roots = new Set<string>();
+      for (const m of body.matchAll(/jq -r '([\s\S]*?)'\s*<<<"\$pr_json"/g)) {
+        // A root access either starts the program or follows an opening bracket;
+        // nested reads (`| (.status`, `]?.name`) are deliberately not matched.
+        for (const f of m[1].matchAll(/(?:^|\[\s*)\.([A-Za-z][A-Za-z0-9_]*)/gm)) {
+          roots.add(f[1]);
+        }
+      }
+      return [...roots];
+    })();
+
+    it('is wired to the real fetch and real reads, not an empty set', () => {
+      // Without this, an extraction bug would make every case below pass trivially.
+      expect(fetched).toContain('state');
+      expect(fetched.length).toBeGreaterThan(1);
+      expect(rootsRead.length).toBeGreaterThan(1);
+    });
+
+    it('fetches autoMergeRequest — the field whose absence killed the armed branch', () => {
+      expect(fetched).toContain('autoMergeRequest');
+      expect(rootsRead).toContain('autoMergeRequest');
+    });
+
+    it.each(rootsRead)('root field .%s is in the --json fetch list', (field) => {
+      expect(fetched).toContain(field);
+    });
+  });
 });
 
 describe('lease renew ticker: starts a live process and reaps it (D10 smoke)', () => {
