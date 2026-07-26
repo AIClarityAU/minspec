@@ -1,9 +1,12 @@
 ---
 id: SPEC-042
 type: design
-# status tracks the approved requirements.md (implementing). A closed plan
-# (`plan: done`) under an approved spec must not still advertise `specifying` —
-# that is the self-contradiction #918's review blocked on.
+# Tracks requirements.md's own frontmatter `status: implementing` (requirements.md:5,
+# set by the approve commit b2ea927) — a verifiable field, not an inference. A closed
+# plan (`plan: done`) under it must not still advertise `specifying`: that is the
+# self-contradiction #918's review blocked on. design.md has no approval record of its
+# own (only requirements.md is signed), so this field is descriptive, not a seal.
+# Repo-wide sibling-status drift (SPEC-040/041/043/046) is tracked at #972.
 status: implementing
 product: minspec
 epic: EPIC-003  # SDD Core — onboarding front door (see notes re: dedicated onboarding epic)
