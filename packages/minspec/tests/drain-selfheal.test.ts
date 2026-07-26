@@ -261,6 +261,9 @@ describe('dispatch-issue.sh: native auto-merge deny-by-default (behavioral seam)
       // dispatch-issue.sh also sources lib/docs-corpus.sh at startup (#833) — copy it
       // too, or `source` aborts under `set -u` before the --check-native-automerge seam.
       fs.copyFileSync(path.resolve(__dirname, '../../../scripts/lib/docs-corpus.sh'), path.join(root, 'scripts', 'lib', 'docs-corpus.sh'));
+      // dispatch-issue.sh sources lib/issue-lease.sh (SPEC-044 claim lease) at startup —
+      // copy it too, else the source aborts before the --check-native-automerge seam.
+      fs.copyFileSync(path.resolve(__dirname, '../../../scripts/lib/issue-lease.sh'), path.join(root, 'scripts', 'lib', 'issue-lease.sh'));
       fs.writeFileSync(path.join(root, '.minspec', 'config.json'), JSON.stringify({ version: 1 })); // no autoMerge
       expect(check({}, root)).toEqual({ code: 1, out: 'off' });
     } finally {
