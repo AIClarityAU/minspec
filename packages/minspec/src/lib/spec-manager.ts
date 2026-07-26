@@ -403,7 +403,7 @@ export function createSpec(
  * Returns specs from both flat files and spec-kit directories
  * (so a project mid-migration stays readable).
  */
-export function listSpecs(
+export function listSpecsShallow(
   rootDir: string,
   filter?: { status?: SpecStatus; tier?: Tier },
 ): SpecSummary[] {
@@ -611,7 +611,7 @@ export function migrateLayout(rootDir: string, target: SpecsLayout): MigrationRe
     return { success: true, migrated: 0, target };
   }
 
-  const summaries = listSpecs(rootDir);
+  const summaries = listSpecsShallow(rootDir);
   let migrated = 0;
   const toDelete: SpecEntry[] = [];
 

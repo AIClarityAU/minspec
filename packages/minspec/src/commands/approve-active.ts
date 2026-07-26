@@ -2,7 +2,7 @@ import * as vscode from 'vscode';
 import * as path from 'path';
 import { listEpics, type EpicSummary } from '../lib/epic-manager';
 import { listAdrs, type AdrSummary } from '../lib/adr-manager';
-import { listSpecs, type SpecSummary } from '../views/spec-tree-provider';
+import { listSpecs, type SpecSummary } from '../lib/spec-catalog';
 import { classifyApprovablePath, type ApprovableKind } from '../lib/approvable';
 import { recentApprovables } from '../lib/recent-approvables';
 import { getApprovalStatus } from '../lib/approval';

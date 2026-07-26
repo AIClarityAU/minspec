@@ -18,7 +18,7 @@ import { classify, overrideClassification, type ClassificationSignal } from '../
 import { DEFAULT_CONFIG } from '../src/lib/config';
 import {
   createSpec,
-  listSpecs,
+  listSpecsShallow,
   getSpec,
   transitionPhase,
   archiveSpecById,
@@ -114,7 +114,7 @@ describe('Feature: Spec CRUD', () => {
     expect(fs.existsSync(summary.filePath)).toBe(true);
 
     // LIST
-    const specs = listSpecs(tmpDir);
+    const specs = listSpecsShallow(tmpDir);
     expect(specs).toHaveLength(1);
     expect(specs[0].id).toBe('SPEC-001');
 
@@ -152,7 +152,7 @@ describe('Feature: Spec CRUD', () => {
     createSpec(tmpDir, 'Second feature');
     createSpec(tmpDir, 'Third feature');
 
-    const specs = listSpecs(tmpDir);
+    const specs = listSpecsShallow(tmpDir);
     expect(specs.map(s => s.id)).toEqual(['SPEC-001', 'SPEC-002', 'SPEC-003']);
   });
 
@@ -162,11 +162,11 @@ describe('Feature: Spec CRUD', () => {
 
     archiveSpecById(tmpDir, 'SPEC-002');
 
-    const active = listSpecs(tmpDir, { status: 'new' });
+    const active = listSpecsShallow(tmpDir, { status: 'new' });
     expect(active).toHaveLength(1);
     expect(active[0].id).toBe('SPEC-001');
 
-    const archived = listSpecs(tmpDir, { status: 'archived' });
+    const archived = listSpecsShallow(tmpDir, { status: 'archived' });
     expect(archived).toHaveLength(1);
     expect(archived[0].id).toBe('SPEC-002');
   });

@@ -28,7 +28,7 @@ vi.mock('vscode', () => ({
 // listSpecs scans the workspace — mock it wholesale (also avoids loading the
 // provider's heavy import chain). parseSpec stays REAL so the id-from-editor
 // resolution is genuinely exercised.
-vi.mock('../src/views/spec-tree-provider', () => ({
+vi.mock('../src/lib/spec-catalog', () => ({
   listSpecs: vi.fn(),
 }));
 
@@ -46,7 +46,7 @@ import {
   approveSpecCommand,
   revokeApprovalCommand,
 } from '../src/commands/approve';
-import { listSpecs } from '../src/views/spec-tree-provider';
+import { listSpecs } from '../src/lib/spec-catalog';
 import { revokeApproval, getApprovalStatus } from '../src/lib/approval';
 import type { ApprovalStatus } from '../src/lib/approval';
 import type { SpecSummary } from '../src/views/spec-tree-provider';

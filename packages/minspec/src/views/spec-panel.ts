@@ -4,7 +4,7 @@ import { readSpecFile, writeSpec } from '../lib/spec';
 import type { Phase } from '../lib/config';
 import { getHtml, getErrorHtml, toggleTask } from './spec-panel-html';
 import type { ClassificationSummary } from './spec-panel-html';
-import { listSpecs } from '../lib/spec-manager';
+import { listSpecsShallow } from '../lib/spec-manager';
 import { computeSpecRework, computeWastedReview } from '../lib/trust-metrics';
 import type { TrustChartModel } from '@aiclarity/shared';
 import { folderForFile } from '../lib/resolve-folder';
@@ -107,9 +107,9 @@ export class SpecPanel {
     const rootDir = folderForFile(this.specFilePath);
     if (!rootDir) return undefined;
 
-    let specs: ReturnType<typeof listSpecs>;
+    let specs: ReturnType<typeof listSpecsShallow>;
     try {
-      specs = listSpecs(rootDir);
+      specs = listSpecsShallow(rootDir);
     } catch {
       return undefined; // unreadable spec tree → no chart, never throw
     }
