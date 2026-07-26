@@ -533,7 +533,7 @@ Three times in this repo, a merge gate that *looked* present enforced **nothing*
 
 ## [DR-067 — Coordinated self-completing sessions — a session claims work under an expiring presence-lease before touching it, shepherds its own PR to merge, wraps up on exit, and the drain is demoted from primary fixer to orphan-fallback (reclaim only expired leases)](DR-067.md)
 
-*Status: proposed · Date: 2026-07-25*
+*Status: accepted · Date: 2026-07-25*
 
 <!-- dr-summary:DR-067 auto=38843581fe9a -->
 The autonomous pipeline (triage → dispatch → build → review → merge) is live (DR-060/DR-061), but its **work-assignment model is a single shared drain that both dispatches AND fixes everything**, with no atomic notion of "who owns this item right now." Four founder requests on 2026-07-25 name the same missing primitive from four angles:
