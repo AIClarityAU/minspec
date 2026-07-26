@@ -27,6 +27,16 @@ source "${SCRIPT_DIR}/lib/agent-egress.sh"
 # shellcheck source=scripts/lib/docs-corpus.sh
 source "${SCRIPT_DIR}/lib/docs-corpus.sh"
 
+# SPEC-044 / DR-067 work-item claim lease. Sourced (not executed) so the per-item
+# flock (lease_flock) is held in THIS parent process for the whole build — a
+# subprocess would release it on exit. Provides lease_flock / lease_gate_open_unshipped
+# / lease_acquire / lease_worktree_path / lease_self_sid used by the check-then-claim
+# first-step below. Every gh call it makes is parent-side (INV-5: the agent stays
+# credential-free). Correctness of at-most-one-owner rests on the hard PR-per-head CAS
+# + same-host flock, never on this soft claim (see the file header).
+# shellcheck source=scripts/lib/issue-lease.sh
+source "${SCRIPT_DIR}/lib/issue-lease.sh"
+
 # native_automerge_enabled: is GitHub-native auto-merge (merge on ai-review:pass, no
 # blast gate) turned on for this project? Policy source, in order: MINSPEC_AUTOMERGE_NATIVE
 # env (1/0 override for CI/one-off), else `.minspec/config.json` autoMerge.native.
@@ -215,14 +225,52 @@ else
   ROLE_SECTION=$'## Role Instructions\n\n'"$ROLE_PROMPT"$'\n\n---\n\n'
 fi
 
-# Label as running
+# ── SPEC-044 Slice 1: check-then-claim under an expiring lease (FR-1/DR-067) ──
+# The FIRST real step of processing this issue — BEFORE the worktree, before any
+# edit. Reuses the presence lease's liveness semantics as a work-item claim. If a
+# LIVE claim owned by another session exists, STAND DOWN cleanly (exit 0 — a
+# deferral, NOT an error). Exactly-one-owner rests on the HARD layers (the same-host
+# flock here + the concurrent PR-per-head CAS + the D12 sequential gate), never on
+# this soft claim (DR-066: the agent-running label is a cosmetic mirror, never the
+# authority). Kill-switch MINSPEC_CLAIM_OFF=1 restores the pre-SPEC-044 marker flip.
+BRANCH="agent/issue-${ISSUE}"
+export MINSPEC_LEASE_REPO="$REPO"
+export MINSPEC_LEASE_WORKTREE_BASE="$WORKTREE_BASE"   # keep the lib's claim-unique path under this dispatcher's base
+if [[ "${MINSPEC_CLAIM_OFF:-0}" != "1" ]]; then
+  # D11/FR-11 same-host flock — a real same-host CAS, auto-released on process death.
+  # Held in THIS parent (fd 200, via the sourced lib) for the dispatch's lifetime, so a
+  # second local racer cannot mutate this item's worktree/branch under us (INV-7).
+  if ! lease_flock "$ISSUE"; then
+    echo "Standing down on #$ISSUE — another live local session holds the per-item flock (FR-11/INV-7)."
+    exit 0
+  fi
+  # D12/FR-3b sequential guard — refuse a closed/already-shipped item BEFORE any build.
+  # The PR-per-head CAS window closes on merge, so at-most-one-merge across TIME rests here.
+  if ! lease_gate_open_unshipped "$ISSUE"; then
+    echo "Refusing #$ISSUE — issue is closed or already shipped (FR-3b/INV-1). Never re-dispatched."
+    exit 0
+  fi
+  # Soft claim: post → re-read TO EXHAUSTION → verify winner (FR-1/FR-2). Not the
+  # winner, or a provably-incomplete enumeration ⇒ stand down (INV-6).
+  if ! lease_acquire "$ISSUE"; then
+    echo "Standing down on #$ISSUE — a live claim owned by another session wins the check (FR-1/FR-2/INV-6)."
+    exit 0
+  fi
+  echo "Claimed #$ISSUE (session $(lease_self_sid)) — proceeding to build."
+fi
+
+# Label as running — a COSMETIC MIRROR of the claim only, applied AFTER a won claim,
+# never the authority (D8/FR-9/DR-066: a label is a single, overwritable, non-atomic
+# producer). No ownership decision ever reads it.
 gh issue edit "$ISSUE" --repo "$REPO" \
   --remove-label "agent-ready" \
   --add-label "agent-running" 2>/dev/null || true
 
-# Create worktree
-BRANCH="agent/issue-${ISSUE}"
-WORKTREE="${WORKTREE_BASE}/issue-${ISSUE}"
+# Create worktree — CLAIM-UNIQUE path (D11/INV-7): ${BASE}/issue-N-<sessionId>, so two
+# same-host racers never share a directory and the cleanup below only ever touches THIS
+# session's own stale dir (pre-SPEC-044 used the shared ${BASE}/issue-N, where racer B
+# force-removed racer A's LIVE worktree mid-build — the R7 corruption).
+WORKTREE="$(lease_worktree_path "$ISSUE")"
 
 if [[ -d "$WORKTREE" ]]; then
   echo "Cleaning up existing worktree at $WORKTREE"

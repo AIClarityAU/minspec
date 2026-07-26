@@ -90,6 +90,105 @@ export function isRecordLive(r: SessionPresenceRecord, now = Date.now()): boolea
   return pidAlive(r.pid);
 }
 
+// ── THE WORK-ITEM CLAIM LEASE (SPEC-044 / DR-067) — Tier-0 primitive naming ──────
+//
+// The presence heartbeat above IS an expiring lease: a record is *held* while it is
+// renewed within a TTL and its owner is alive, and a reaper reclaims the stale ones
+// (getActiveSessions prunes on read). DR-065 gave that lease a second consumer (the
+// sync gate). SPEC-044 gives it a THIRD — the work-item claim: "session S owns issue
+// / PR N right now" is exactly a lease over a work item, arbitrated under contention
+// and reclaimed on expiry.
+//
+// This section names that primitive in the offline core WITHOUT adding any network:
+// the *semantics* (a renewed-within-TTL liveness predicate + a deterministic winner)
+// live here as pure functions; every networked consumer — posting a GitHub claim,
+// polling, merging, pushing — plus the local flock/worktree machinery lives in the
+// Tier-1 `scripts/` layer (`scripts/lib/issue-lease.sh`), NEVER in this module
+// (INV-3 / constitution invariant #1; the tier0-import-ban gate keeps it honest).
+//
+// Only the LIVENESS predicate (`isClaimLive`) is mirrored byte-for-byte by the Tier-1
+// bash reader (`issue-lease.sh --is-live`) — the FR-10 parity gate, the DR-065 §4
+// discipline extended to a third reader. The WINNER function (`pickClaimWinner`) is
+// deliberately OUTSIDE that byte-parity: it is substrate-specific (it keys on the
+// GitHub-assigned monotonic `serverOrder`, whereas presence arbitrates on `startedAt`
+// and exports no winner at all), so it carries its OWN test, not a cross-reader
+// byte-comparison (D2/FR-2/AC-9).
+
+// Paired work-item lease constants (SPEC-044 D10 / OQ-2). DISTINCT from the presence
+// heartbeat (HEARTBEAT_SECS=30 / STALE_SECS=120): a build/shepherd runs many minutes,
+// so the work-item claim carries its OWN, longer TTL, renewed on a wall-clock timer
+// independent of build progress. PAIRED as LEASE_TTL_SECS = 4 × LEASE_RENEW_SECS,
+// mirroring the STALE = 4 × HEARTBEAT discipline. LEASE_TTL_SECS is the ONE value
+// parity-shared with the bash reader (`scripts/lib/issue-lease.sh` LEASE_TTL_SECS) —
+// change BOTH or neither; the FR-10 liveness-parity test fails on drift. The absolute
+// max-claim-lifetime ceiling (FR-12) is claim-specific and lives ONLY in the Tier-1
+// bash layer — it is NOT part of this core liveness predicate nor the parity set.
+export const LEASE_RENEW_SECS = 60;
+export const LEASE_TTL_SECS = 240; // = 4 × LEASE_RENEW_SECS (paired); mirrored by issue-lease.sh
+
+/**
+ * SPEC-044 work-item claim record. The soft-claim payload a session posts to a work
+ * item (issue/PR). `serverOrder` is the GitHub-assigned monotonic comment/record id —
+ * the strict total order a label cannot give, and the winner key (FR-2). `claimedAt`
+ * is carried as metadata only and is NEVER a deciding key (cross-machine clock skew).
+ */
+export interface WorkItemClaim {
+  sessionId: string;
+  host: string;
+  worktreeRoot: string;
+  pid: number;
+  claimedAt: string; // ISO-8601 UTC — METADATA only, never an arbitration key
+  lastRenewed: string; // ISO-8601 UTC — the heartbeat that TTL freshness is measured against
+  serverOrder: number; // server-assigned monotonic id — the winner key (FR-2)
+}
+
+/**
+ * FR-8 / D3 — a work-item claim is LIVE iff its heartbeat (`lastRenewed`) is within
+ * LEASE_TTL_SECS AND (foreign-host OR pid alive). Same machine: `lastRenewed` fresh
+ * AND `process.kill(pid,0)` alive — the isRecordLive shape. Foreign host: TTL ALONE
+ * (a foreign pid is unobservable, so a foreign claim degrades to the safe side — an
+ * un-renewed foreign claim expires and becomes reclaimable). `sameMachine` is DECIDED
+ * BY THE CALLER (a local os.hostname() comparison) and PASSED IN — core never resolves
+ * a host, so "same host?" never reaches for the network (D7/INV-3).
+ *
+ * This is the ONE predicate the Tier-1 bash readers mirror byte-for-byte (FR-10). The
+ * absolute-max-lifetime ceiling (FR-12) is a Tier-1-only addition and is deliberately
+ * NOT applied here, so this stays exactly the liveness half the parity gate compares.
+ */
+export function isClaimLive(c: WorkItemClaim, now: number, sameMachine: boolean): boolean {
+  const renewed = Date.parse(c.lastRenewed);
+  if (!Number.isFinite(renewed)) return false; // unparseable heartbeat ⇒ dead
+  if (now - renewed >= LEASE_TTL_SECS * 1000) return false; // stale heartbeat ⇒ dead
+  if (sameMachine && !pidAlive(c.pid)) return false; // same-machine dead pid ⇒ dead
+  return true; // foreign host ⇒ judged by TTL alone (safe degrade)
+}
+
+/**
+ * FR-2 / D2 — the deterministic winner among the LIVE claims: earliest `serverOrder`,
+ * with `sessionId` as the final tiebreak for the degenerate equal-id case. `claimedAt`
+ * is NEVER a deciding key. Returns null when no claim is live.
+ *
+ * Liveness here is the cross-machine-safe degrade — TTL freshness ALONE (no pid, no
+ * host): the winner ARBITRATION does not need the same-machine pid refinement (that is
+ * a liveness detail the operational classify-claim seam applies), and keeping it
+ * host/pid-free lets this be a pure function of the records + clock. SUBSTRATE-SPECIFIC
+ * (keys on serverOrder) and pure — it has its OWN test (AC-9), deliberately NOT in the
+ * byte-parity set (presence exports no winner and keys arbitration on startedAt).
+ */
+export function pickClaimWinner(claims: WorkItemClaim[], now: number): WorkItemClaim | null {
+  const live = claims.filter((c) => {
+    const renewed = Date.parse(c.lastRenewed);
+    return Number.isFinite(renewed) && now - renewed < LEASE_TTL_SECS * 1000;
+  });
+  if (live.length === 0) return null;
+  live.sort((a, b) => {
+    if (a.serverOrder !== b.serverOrder) return a.serverOrder - b.serverOrder;
+    // Deterministic tiebreak for the degenerate equal-serverOrder case only.
+    return a.sessionId < b.sessionId ? -1 : a.sessionId > b.sessionId ? 1 : 0;
+  });
+  return live[0];
+}
+
 /**
  * Read every `*.session.json` in `<rootDir>/.minspec/sessions/`. Each entry is
  * `{ rec, file }`; a corrupt/unparseable file yields `{ rec: null, file }` (a prune

@@ -2,8 +2,12 @@
 id: SPEC-044
 type: design
 # 🔒 Once approved, hash-locked: approved bytes recorded in .minspec/approvals.json[SPEC-044].specHash. ANY edit voids approval (hash → stale) — re-run "MinSpec: Approve Spec". DR-012.
-status: specifying
-tier: T4
+status: implementing
+# tier lives on requirements.md (the single tier-carrying approvable, per the
+# spec-gate convention "only requirements.md carries the tier"). A T3/T4 tier on
+# a NON-approved sibling doc (design/plan/tasks) is treated by spec-gate.py as a
+# second unapproved spec and, via its dedup-by-id over an unsorted glob, can
+# shadow the approved requirements.md — so this doc deliberately omits it. (SPEC-044 is T4.)
 product: minspec
 epic: EPIC-009  # Team Readiness — concurrent multi-session coordination (presence lease's third consumer)
 aspects: [session-coordination, lease, claim, orphan-fallback, pr-shepherd, wrapup, optimistic-concurrency, tier-0, offline, determinism, never-wrong, exactly-one-owner]
@@ -16,8 +20,8 @@ phases:
   specify: done
   clarify: done
   plan: done
-  tasks: pending
-  implement: pending
+  tasks: in-progress
+  implement: in-progress
 ---
 
 # MinSpec — Coordinated self-completing sessions (Plan)
