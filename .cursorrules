@@ -27,6 +27,15 @@ This project uses MinSpec SDD methodology. Specs in `specs/`, decisions in `docs
 3. Follow the appropriate ceremony level (the predicted tier is a floor — raise it, never lower it)
 4. Never violate the invariants listed above
 
+## Naming waves, phases, and batches
+
+Never refer to a group of work by a bare number.
+
+- **Name what you coin.** A wave, batch, or group you invent gets a descriptive name ("the mechanical-bugfix wave"), never "Wave 1".
+- **Gloss what is predefined.** When an identifier is fixed and numeric (`Phase 2`, `Slice 3`, `T3`), append a short reminder of what it covers the first time it appears in any response, doc, issue, PR, or commit — e.g. "Phase 2 (Public-ready — polish)".
+
+A bare number makes the reader stop and look it up; a two-word gloss costs nothing.
+
 ## Coding Standards
 
 - Follow existing patterns in the codebase
