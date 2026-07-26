@@ -20,161 +20,44 @@ vi.mock('vscode', () => ({
 
 import * as vscode from 'vscode';
 import {
-  MinSpecStatusBar,
   MinSpecScaffoldCommitStatusBar,
-  formatStatusBarText,
-  formatTooltip,
+  MinSpecNextTaskStatusBar,
   formatScaffoldCommitText,
+  formatKeybindingForDisplay,
+  resolveNextTaskKeybinding,
   computeProgress,
   fromFrontmatter,
 } from '../src/views/status-bar';
-import type { StatusBarSpec } from '../src/views/status-bar';
 import type { SpecFrontmatter } from '../src/lib/spec';
+import type { NextTask } from '@aiclarity/shared';
 
-// --- Helpers ---
-
-function makeSpec(overrides: Partial<StatusBarSpec> = {}): StatusBarSpec {
+function nextTask(overrides: Partial<NextTask> = {}): NextTask {
   return {
-    id: 'SPEC-001',
-    title: 'Add rate limiting',
-    tier: 'T2',
-    currentPhase: 'plan',
-    phases: {
-      specify: 'done',
-      clarify: 'skipped',
-      plan: 'in-progress',
-      tasks: 'pending',
-      implement: 'pending',
+    kind: 'spec-approve',
+    targetId: 'SPEC-001',
+    imperative: 'Approve SPEC-001',
+    severityClass: 'pending',
+    evidence: {
+      severityClass: 'pending',
+      rule: 'pending.spec-approve',
+      explanation: 'SPEC-001 is unapproved',
+      refs: ['SPEC-001'],
     },
     ...overrides,
   };
 }
 
-// =============================================================================
-// T0 INVARIANT TESTS — Status bar contract
-// =============================================================================
-
-describe('T0 Invariants — Status Bar', () => {
-  it('Invariant: null spec always shows "No active spec"', () => {
-    const text = formatStatusBarText(null);
-    expect(text).toBe('$(shield) MinSpec: No active spec');
-  });
-
-  it('Invariant: non-null spec always includes tier, phase, and progress', () => {
-    const spec = makeSpec();
-    const text = formatStatusBarText(spec);
-    expect(text).toContain('T2');
-    expect(text).toContain('Plan');
-    expect(text).toMatch(/· \d+%/);
-  });
-
-  it('Invariant: progress never contains the redundant " done" suffix (#97)', () => {
-    const spec = makeSpec();
-    expect(computeProgress(spec.phases, spec.tier)).not.toContain('done');
-    expect(formatStatusBarText(spec)).not.toContain('done');
-  });
-
-  it('Invariant: progress is a tier-aware percentage token "· N%" (#38)', () => {
-    const spec = makeSpec();
-    const progress = computeProgress(spec.phases, spec.tier);
-    expect(progress).toMatch(/^· \d+%$/);
-  });
-
-  it('Invariant: dispose cleans up the status bar item', () => {
-    vi.clearAllMocks();
-    // Reset mock item state
-    mockStatusBarItem.text = '';
-    mockStatusBarItem.tooltip = '';
-    mockStatusBarItem.command = '';
-
-    const bar = new MinSpecStatusBar();
-    bar.dispose();
-    expect(mockStatusBarItem.dispose).toHaveBeenCalled();
-  });
-});
+// NOTE: the per-spec "tier | phase | progress" status-bar item (MinSpecStatusBar,
+// formatStatusBarText, formatTooltip) was removed — it wasn't useful across
+// multi-spec sessions and its identity now belongs in the session/tab title
+// (#897). `computeProgress` / `fromFrontmatter` survive as shared helpers
+// (used by lib/active-spec.ts), so their contract is still tested here. The
+// Next-Task signpost's own formatter (formatNextTaskText) is covered in
+// next-task-command.test.ts.
 
 // =============================================================================
-// T2 FEATURE TESTS — Formatting and behavior
+// computeProgress() — tier-aware completion percentage (#38)
 // =============================================================================
-
-describe('formatStatusBarText()', () => {
-  it('shows "No active spec" when null', () => {
-    expect(formatStatusBarText(null)).toBe('$(shield) MinSpec: No active spec');
-  });
-
-  it('formats with tier, current phase, and tier-aware percentage', () => {
-    // T3 requires specify+plan+tasks+implement (4 phases); specify+plan done
-    // (clarify is NOT required at T3, so it does not count) → 2/4 = 50%
-    const spec = makeSpec({
-      tier: 'T3',
-      currentPhase: 'tasks',
-      phases: {
-        specify: 'done',
-        clarify: 'done',
-        plan: 'done',
-        tasks: 'in-progress',
-        implement: 'pending',
-      },
-    });
-    expect(formatStatusBarText(spec)).toBe('$(shield) MinSpec: T3 | Tasks | · 50%');
-  });
-
-  it('shows "Done" and 100% when no current phase (all complete)', () => {
-    const spec = makeSpec({
-      currentPhase: null,
-      phases: {
-        specify: 'done',
-        clarify: 'done',
-        plan: 'done',
-        tasks: 'done',
-        implement: 'done',
-      },
-    });
-    expect(formatStatusBarText(spec)).toBe('$(shield) MinSpec: T2 | Done | · 100%');
-  });
-
-  it('shows T1 with Specify phase at 0%', () => {
-    const spec = makeSpec({
-      tier: 'T1',
-      currentPhase: 'specify',
-      phases: {
-        specify: 'in-progress',
-        clarify: 'pending',
-        plan: 'pending',
-        tasks: 'pending',
-        implement: 'pending',
-      },
-    });
-    expect(formatStatusBarText(spec)).toBe('$(shield) MinSpec: T1 | Specify | · 0%');
-  });
-
-  it('counts skipped phases as completed in the percentage', () => {
-    // T2 requires specify+plan (2 phases); specify done, plan in-progress → 50%
-    const spec = makeSpec({
-      tier: 'T2',
-      currentPhase: 'plan',
-      phases: {
-        specify: 'done',
-        clarify: 'skipped',
-        plan: 'in-progress',
-        tasks: 'pending',
-        implement: 'pending',
-      },
-    });
-    expect(formatStatusBarText(spec)).toBe('$(shield) MinSpec: T2 | Plan | · 50%');
-  });
-});
-
-describe('formatTooltip()', () => {
-  it('shows spec ID and title', () => {
-    const spec = makeSpec({ id: 'SPEC-042', title: 'Fix login redirect' });
-    expect(formatTooltip(spec)).toBe('SPEC-042: Fix login redirect');
-  });
-
-  it('shows helpful text when null', () => {
-    expect(formatTooltip(null)).toBe('No active spec. Click to select one.');
-  });
-});
 
 describe('computeProgress()', () => {
   it('returns "· 0%" when all required phases pending', () => {
@@ -269,6 +152,10 @@ describe('computeProgress()', () => {
   });
 });
 
+// =============================================================================
+// fromFrontmatter() — derive the current phase for the active-spec summary
+// =============================================================================
+
 describe('fromFrontmatter()', () => {
   it('derives current phase from in-progress phase', () => {
     const fm: SpecFrontmatter = {
@@ -330,66 +217,6 @@ describe('fromFrontmatter()', () => {
   });
 });
 
-describe('MinSpecStatusBar class', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-    // Reset mock item state between tests
-    mockStatusBarItem.text = '';
-    mockStatusBarItem.tooltip = '';
-    mockStatusBarItem.command = '';
-  });
-
-  it('creates a status bar item on construction', () => {
-    new MinSpecStatusBar();
-    expect(vscode.window.createStatusBarItem).toHaveBeenCalledWith(1, 100); // Left=1, priority=100
-  });
-
-  it('sets command to minspec.status', () => {
-    new MinSpecStatusBar();
-    expect(mockStatusBarItem.command).toBe('minspec.status');
-  });
-
-  it('update(null) shows "No active spec" and calls show()', () => {
-    const bar = new MinSpecStatusBar();
-    bar.update(null);
-
-    expect(mockStatusBarItem.text).toBe('$(shield) MinSpec: No active spec');
-    expect(mockStatusBarItem.tooltip).toBe('No active spec. Click to select one.');
-    expect(mockStatusBarItem.show).toHaveBeenCalled();
-  });
-
-  it('update(spec) shows formatted text and tooltip', () => {
-    const bar = new MinSpecStatusBar();
-
-    const spec = makeSpec({
-      id: 'SPEC-007',
-      title: 'Add caching layer',
-      tier: 'T3',
-      currentPhase: 'implement',
-      phases: {
-        specify: 'done',
-        clarify: 'done',
-        plan: 'done',
-        tasks: 'done',
-        implement: 'in-progress',
-      },
-    });
-    bar.update(spec);
-
-    // T3 requires specify+plan+tasks+implement; first 3 done, implement
-    // in-progress → 3/4 = 75% (clarify done but not required at T3)
-    expect(mockStatusBarItem.text).toBe('$(shield) MinSpec: T3 | Implement | · 75%');
-    expect(mockStatusBarItem.tooltip).toBe('SPEC-007: Add caching layer');
-    expect(mockStatusBarItem.show).toHaveBeenCalled();
-  });
-
-  it('dispose calls dispose on the underlying item', () => {
-    const bar = new MinSpecStatusBar();
-    bar.dispose();
-    expect(mockStatusBarItem.dispose).toHaveBeenCalled();
-  });
-});
-
 // =============================================================================
 // Harness-refresh commit recovery status bar (#758)
 // =============================================================================
@@ -440,5 +267,109 @@ describe('MinSpecScaffoldCommitStatusBar class', () => {
     const bar = new MinSpecScaffoldCommitStatusBar();
     bar.dispose();
     expect(mockStatusBarItem.dispose).toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// formatKeybindingForDisplay() — pretty-print a VS Code keybinding string (#934)
+// =============================================================================
+
+describe('formatKeybindingForDisplay', () => {
+  it('renders a single Alt key as Alt+N', () => {
+    expect(formatKeybindingForDisplay('alt+n')).toBe('Alt+N');
+  });
+
+  it('renders a two-stroke chord space-separated', () => {
+    expect(formatKeybindingForDisplay('ctrl+k ctrl+n')).toBe('Ctrl+K Ctrl+N');
+  });
+
+  it('canonicalises known modifier casing (cmd/shift)', () => {
+    expect(formatKeybindingForDisplay('cmd+shift+p')).toBe('Cmd+Shift+P');
+  });
+
+  it('tolerates stray whitespace', () => {
+    expect(formatKeybindingForDisplay('  alt+n  ')).toBe('Alt+N');
+  });
+});
+
+// =============================================================================
+// resolveNextTaskKeybinding() — read the shipped default from the manifest (#934)
+// =============================================================================
+
+describe('resolveNextTaskKeybinding', () => {
+  const manifest = {
+    contributes: {
+      keybindings: [
+        { command: 'minspec.approveActive', key: 'alt+a' },
+        { command: 'minspec.nextTask', key: 'alt+n' },
+      ],
+    },
+  };
+
+  it('finds and formats the minspec.nextTask binding', () => {
+    expect(resolveNextTaskKeybinding(manifest)).toBe('Alt+N');
+  });
+
+  it('returns undefined when the command is not bound', () => {
+    expect(resolveNextTaskKeybinding({ contributes: { keybindings: [] } })).toBeUndefined();
+  });
+
+  it('returns undefined for a manifest with no keybindings section', () => {
+    expect(resolveNextTaskKeybinding({})).toBeUndefined();
+    expect(resolveNextTaskKeybinding(undefined)).toBeUndefined();
+  });
+
+  it('prefers the mac override on darwin', () => {
+    const macManifest = {
+      contributes: {
+        keybindings: [{ command: 'minspec.nextTask', key: 'alt+n', mac: 'cmd+n' }],
+      },
+    };
+    const original = process.platform;
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true });
+    try {
+      expect(resolveNextTaskKeybinding(macManifest)).toBe('Cmd+N');
+    } finally {
+      Object.defineProperty(process, 'platform', { value: original, configurable: true });
+    }
+  });
+});
+
+// =============================================================================
+// MinSpecNextTaskStatusBar — signpost tooltip carries the hotkey (#934)
+// =============================================================================
+
+describe('MinSpecNextTaskStatusBar class', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockStatusBarItem.text = '';
+    mockStatusBarItem.tooltip = '';
+    mockStatusBarItem.command = '';
+  });
+
+  it('binds the item to minspec.nextTask at priority 99', () => {
+    new MinSpecNextTaskStatusBar('Alt+N');
+    expect(vscode.window.createStatusBarItem).toHaveBeenCalledWith(1, 99); // Left=1
+    expect(mockStatusBarItem.command).toBe('minspec.nextTask');
+  });
+
+  it('appends the shortcut to the tooltip for a pending task', () => {
+    const bar = new MinSpecNextTaskStatusBar('Alt+N');
+    bar.update(nextTask());
+    expect(mockStatusBarItem.tooltip).toBe('SPEC-001 is unapproved\nShortcut: Alt+N');
+    expect(mockStatusBarItem.show).toHaveBeenCalled();
+  });
+
+  it('shows the shortcut even in the "clear" state', () => {
+    const bar = new MinSpecNextTaskStatusBar('Alt+N');
+    bar.update(null);
+    expect(mockStatusBarItem.tooltip).toBe('No pending review tasks.\nShortcut: Alt+N');
+  });
+
+  it('omits the shortcut line when no keybinding is known (never invents one)', () => {
+    const bar = new MinSpecNextTaskStatusBar(undefined);
+    bar.update(nextTask());
+    expect(mockStatusBarItem.tooltip).toBe('SPEC-001 is unapproved');
+    expect(mockStatusBarItem.tooltip).not.toContain('Shortcut');
   });
 });

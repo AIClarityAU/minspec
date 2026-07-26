@@ -209,6 +209,25 @@ for content-bearing artifacts (specs, ADRs).
 - **FR-15 (progress affordance).** The walk MUST show position ("3 of 7 pending") and let
   the reviewer expand the full pending pipeline on demand (SPEC-012 FR-6 — pipeline is
   optional expansion, collapsed by default).
+- **FR-18 (Explain — a read-only exit cheaper than approving).** The review action bar (beside
+  the FR-10 Approve control and the FR-14 skip/stop) MUST expose a **`?` "Explain" control** at
+  **document scope**: a one-click request for a plain-language explanation of the artifact under
+  review. It is **read-only** — it MUST NOT run the FR-6 revision/delegation path, MUST NOT
+  mutate the artifact or its sidecar, and MUST NOT bypass or alter the FR-10 approval gate (a
+  non-destructive sibling of the FR-3 comment pins). It routes through the **single** AI seam
+  this spec's revision loop already delegates to — the one channel **FR-OQ2** resolves
+  (chat-participant / `minspec.dispatchRevision` / prompt-file / DR-017 broker) — **never a second
+  seam**: the click hands that channel an **LLM-free request**, a consumer/agent generates, and
+  `packages/minspec` only **renders** the reply — **no** network import in core (FR-17). (The
+  DR-057 `.minspec/queue` primitive is **one candidate** for that channel, to be pinned at plan
+  alongside FR-OQ2 — not an alternative path.) When no explainer is available it MUST **degrade honestly** to a "no
+  explainer available" notice, never a silent no-op or a fabricated answer. The mirror of
+  SPEC-018 FR-18 (same control, at document scope in the walk rather than per-section).
+  *Rationale:* directly answers this spec's **R6 approve-chain-fatigue → rubber-stamping** risk —
+  it gives the reviewer an "explain this to me" exit **cheaper than approving**, without adding a
+  second "approve — not understood" button (which would *sanction* the very rubber-stamping the
+  never-wrong signpost exists to prevent). *(Triggered 2026-07-25;
+  [#914](https://github.com/AIClarityAU/minspec/issues/914).)*
 
 ### Packaging & boundary
 
@@ -347,6 +366,11 @@ Checkbox DoD tracing the FRs. The feature is "done" only when all hold.
   demand, collapsed by default (FR-15).
 - [ ] **Pure render layer** — all render/highlight/markup generation is `vscode`-free,
   network-free, and unit-tested; the shell only wires messages + file I/O (FR-16).
+- [ ] **Explain is a read-only exit** — the `?` control issues a plain-language "explain" request
+  through FR-OQ2's single channel and produces **zero** mutation: no `WorkspaceEdit`, no artifact
+  or sidecar change, no content-hash change, no approval void, no core network import; when no
+  explainer is reachable it shows a visible "no explainer available" notice, never a silent no-op
+  or a fabricated answer (FR-18, INV — Non-destructive review).
 
 ## Coverage Map (session asks → FR)
 
@@ -362,6 +386,7 @@ Checkbox DoD tracing the FRs. The feature is "done" only when all hold.
 | Approve shows the next spec/dr/issue/doc | FR-11, FR-12 |
 | "whatever the next-human-task signpost points to" | FR-12 (consume SPEC-012) |
 | "probably includes gh issues too" | FR-12 + §Dependencies (SPEC-012 issue node) |
+| one-click "explain this to me", cheaper than approving (rubber-stamp exit) | FR-18 |
 | "rules getting in the way" (Tier-0 vs AI) | §Tier-0 reframe, FR-6, FR-17 |
 | Doesn't replace existing stepper | Surfaces §, additive |
 
@@ -496,6 +521,7 @@ Per-FR test tier + a one-line assertion sketch.
 | FR-14 (skip non-mutating) | T2 | Skip advances and leaves the skipped artifact + its hash untouched. |
 | FR-16 (pure functions) | T2 | render/highlight helpers run with no `vscode` and no file I/O in scope. |
 | FR-9 (re-hash visible) | T3 | a revision flips a prior `approved` to `stale` and the Approve step shows the re-hash. |
+| FR-18 (Explain read-only) | T0/T2 | Explain issues an "explain" request via FR-OQ2's channel; T0 asserts zero `WorkspaceEdit` + unchanged artifact/hash + no `http`/`https`/`fetch`/`net` import; the no-explainer path renders the honest-degrade notice, never a fabricated answer. |
 
 ## Alternatives Considered
 

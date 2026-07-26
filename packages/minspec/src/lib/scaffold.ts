@@ -18,15 +18,16 @@ import {
 } from './template-registry';
 import { execFileSync } from 'child_process';
 import {
-  parseSections,
-  buildSectionHashes,
   mergeFile,
   loadHashes,
   saveHashes,
   saveTemplateBaseline,
+  sectionHashesFromMarkdown,
+  verifyGeneratedHashesConsistent,
   splitManagedRegion,
   spliceManagedRegion,
   type GeneratedHashes,
+  type SectionHashes,
 } from './merge-refresh';
 import {
   generateSlashCommandShims,
@@ -45,30 +46,32 @@ const CONSTITUTION_REL_PATH = TEMPLATE_OUTPUT_PATHS['constitution.md'];
  * SPEC-025 FR-4/FR-5: seed the constitution with deterministic DRAFT entries so
  * it is never empty (INV-4). Reads the current constitution, runs the offline
  * seed provider over the assembled context manifest, integrates additively
- * (never overwriting human content, idempotent), writes the result back, and
- * re-hashes the file so later refresh-merge treats the seeded DRAFT sections as
- * template-origin (preserving INV-2 on subsequent human edits).
+ * (never overwriting human content, idempotent), and writes the result back.
  *
- * Mutates `allHashes` in place for the constitution's relative path and returns
- * it. Best-effort: callers wrap in try/catch so a proposer failure never breaks
- * init (mirrors writeEpicIndex).
+ * SPEC-043 D8: `seedConstitution` NO LONGER feeds the hash manifest. It writes
+ * `constitution.md` and returns; the manifest is recorded once, LAST, from the
+ * final on-disk bytes of every tracked file through `sectionHashesFromMarkdown`
+ * (first-occurrence-wins). This retires the old last-occurrence-wins
+ * `buildSectionHashes(parseSections(merged))` recording, which could disagree
+ * with the first-wins self-check on a duplicate-heading constitution.
+ *
+ * Best-effort: callers wrap in try/catch so a proposer failure never breaks
+ * init/refresh (mirrors writeEpicIndex).
  */
-function seedConstitution(rootDir: string, allHashes: GeneratedHashes): GeneratedHashes {
+function seedConstitution(rootDir: string): void {
   const fullPath = path.join(rootDir, CONSTITUTION_REL_PATH);
-  if (!fs.existsSync(fullPath)) return allHashes;
+  if (!fs.existsSync(fullPath)) return;
 
   const existing = fs.readFileSync(fullPath, 'utf-8');
   const manifest = assembleContext(rootDir);
   const proposal = seedProvider.propose(manifest, CONSTITUTION_SECTION_SCHEMA);
   // seedProvider is synchronous (FR-5); integrate expects a resolved Proposal.
-  if (proposal instanceof Promise) return allHashes;
+  if (proposal instanceof Promise) return;
 
   const { merged } = integrateProposal(existing, proposal);
-  if (merged === existing) return allHashes;
+  if (merged === existing) return;
 
   fs.writeFileSync(fullPath, merged);
-  const sections = parseSections(merged);
-  return { ...allHashes, [CONSTITUTION_REL_PATH]: buildSectionHashes(sections) };
 }
 
 export { DEFAULT_CONFIG };
@@ -272,6 +275,18 @@ export const MINSPEC_GITIGNORE_ENTRIES = [
   // consumer dequeues it. Never committed — it is machine-local intent, not
   // ground truth (the approval sidecar under .minspec/approvals/ is that).
   '.minspec/queue/',
+  // Machine-local UI dismissal state (answeredSignatures: which one-shot prompts
+  // this machine has already answered — e.g. skipClassifyPrompt, skipRefreshPrompt).
+  // Rewritten by the ext at runtime; never committed, or it surfaces as perpetual
+  // dirty noise and gets swept into "junk" commits (G-8). Sibling of the other
+  // machine-local .minspec/*.json entries above; was the one that got missed.
+  '.minspec/preferences.json',
+  // Harness-owned worktree checkouts (created by the agent harness / EnterWorktree).
+  // Transient, machine-local, auto-removed — must never be tracked, or a stray
+  // second checkout shows up as untracked noise in the source-control panel (G-8:
+  // keep the primary checkout clean). Not under .claude/commands/, so unaffected by
+  // the slash-command-shim carve-out some repos keep in their own .gitignore.
+  '.claude/worktrees/',
 ];
 
 /**
@@ -726,6 +741,59 @@ export function checkManagedRegionMarkers(
 }
 
 /**
+ * Record the hash manifest from the FINAL on-disk bytes, run the fail-closed
+ * self-check, and persist it LAST (SPEC-043 D1/D2/D7 + Slice 2 gate).
+ *
+ * MUST be called only after EVERY write path — the section-merge loop,
+ * `seedConstitution`, and `generateSlashCommandShims`'s AGENTS.md injection — has
+ * run, so the manifest equals disk by construction no matter which mechanism last
+ * touched a file. For each present {@link TEMPLATE_OUTPUT_PATHS} file, records
+ * `sectionHashesFromMarkdown(disk)`; a tracked file absent on disk is skipped, and
+ * any key not in the current tracked set is pruned by rebuilding the manifest from
+ * scratch (FR-3a stale-key prune).
+ *
+ * That recording IS the active #890 fix: the manifest is a faithful hash of final
+ * disk. The subsequent {@link verifyGeneratedHashesConsistent} call is a FAIL-CLOSED
+ * TRIPWIRE, not active runtime protection — it re-reads the SAME final disk with the
+ * SAME helper the recording just used, so in this correct code it is green by
+ * construction and CANNOT throw here (Slice 1 guarantees record == verify). It earns
+ * its place by failing closed — throwing before `saveHashes`, so nothing is persisted
+ * and the last-good manifest survives (INV-3 / D4) — only if a FUTURE refactor
+ * reintroduces a record-before-write path (recording the manifest from a non-disk
+ * source, or before a later mutator) that makes the recorded set diverge from final
+ * disk. The predicate is exported and reusable for that guarantee and for an
+ * independent commit/CI-time consistency check (#760); it does not defend #890 alone.
+ */
+export function recordVerifyAndSaveManifest(rootDir: string): void {
+  const allHashes: Record<string, SectionHashes> = {};
+  for (const name of TEMPLATE_NAMES) {
+    const relativePath = TEMPLATE_OUTPUT_PATHS[name];
+    const fullPath = path.join(rootDir, relativePath);
+    if (!fs.existsSync(fullPath)) continue; // absent tracked file → skip (FR-3a)
+    const disk = fs.readFileSync(fullPath, 'utf-8');
+    allHashes[relativePath] = sectionHashesFromMarkdown(disk);
+  }
+
+  const inconsistencies = verifyGeneratedHashesConsistent(rootDir, allHashes);
+  if (inconsistencies.length > 0) {
+    const detail = inconsistencies
+      .map(
+        (v) =>
+          `  - ${v.filePath} › ${v.heading}: manifest ${v.recorded.slice(0, 8)} ≠ disk ${v.onDisk.slice(0, 8)}`,
+      )
+      .join('\n');
+    throw new Error(
+      'MinSpec refresh aborted: the generated-hashes manifest disagrees with the files ' +
+        'on disk (a recorded section hash does not match its on-disk content). Nothing was ' +
+        'persisted; the previous manifest is intact. Re-run "MinSpec: Refresh Harness Files".\n' +
+        detail,
+    );
+  }
+
+  saveHashes(rootDir, allHashes);
+}
+
+/**
  * Generate all harness files from templates.
  * Only writes files that do not already exist (first-time init).
  * Stores initial section hashes for future merge-on-refresh.
@@ -738,33 +806,28 @@ export function generateHarnessFiles(rootDir: string): void {
   const config = loadConfig(rootDir);
   const context = buildContext(rootDir, config);
   const rendered = renderAll(context);
-  let allHashes: GeneratedHashes = loadHashes(rootDir);
 
   for (const name of TEMPLATE_NAMES) {
     const relativePath = TEMPLATE_OUTPUT_PATHS[name];
     const fullPath = path.join(rootDir, relativePath);
     const content = rendered.get(name)!;
 
-    // Only write if file doesn't exist (first-time generation)
+    // Only write if file doesn't exist (first-time generation). The manifest is
+    // recorded LAST from the final on-disk bytes (SPEC-043), not here.
     if (!fs.existsSync(fullPath)) {
       fs.mkdirSync(path.dirname(fullPath), { recursive: true });
       fs.writeFileSync(fullPath, content);
-
-      // Store initial section hashes
-      const sections = parseSections(content);
-      allHashes = { ...allHashes, [relativePath]: buildSectionHashes(sections) };
     }
   }
 
   // SPEC-025 FR-4/FR-5: seed the freshly written constitution so first-init is
-  // never empty. Best-effort — a proposer failure must never break init.
+  // never empty. Best-effort — a proposer failure must never break init. Writes
+  // the file only; no longer a manifest source (SPEC-043 D8).
   try {
-    allHashes = seedConstitution(rootDir, allHashes);
+    seedConstitution(rootDir);
   } catch {
     // best-effort — the constitution stays as the template scaffold on failure.
   }
-
-  saveHashes(rootDir, allHashes);
 
   // Record the raw-template baseline so drift detection compares like-for-like
   // (raw template now vs raw template at generation), never raw vs the rendered/
@@ -794,6 +857,12 @@ export function generateHarnessFiles(rootDir: string): void {
   // above, so this is a no-op for those (they already exist with markers); it remains
   // the writer for the AGENTS.md table.
   generateSlashCommandShims(rootDir, { tools });
+
+  // SPEC-043 D1/D2/D7: record the manifest from the FINAL on-disk bytes (after the
+  // AGENTS.md slash injection) and persist LAST — the active #890 fix. The embedded
+  // self-check is a fail-closed tripwire (green by construction here; guards a future
+  // record-before-write regression, INV-3 / D4), not standalone #890 protection.
+  recordVerifyAndSaveManifest(rootDir);
 }
 
 /**
@@ -820,7 +889,9 @@ export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
 
   const config = loadConfig(rootDir);
   const context = buildContext(rootDir, config);
-  let allHashes: GeneratedHashes = loadHashes(rootDir);
+  // Prior manifest — the merge DECISION input only (which body to keep, INV-5).
+  // It is NOT the recorded manifest: that is rebuilt LAST from final on-disk bytes.
+  const priorHashes: GeneratedHashes = loadHashes(rootDir);
 
   for (const name of TEMPLATE_NAMES) {
     const relativePath = TEMPLATE_OUTPUT_PATHS[name];
@@ -831,27 +902,23 @@ export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
       // File doesn't exist yet — write fresh
       fs.mkdirSync(path.dirname(fullPath), { recursive: true });
       fs.writeFileSync(fullPath, generated);
-      const sections = parseSections(generated);
-      allHashes = { ...allHashes, [relativePath]: buildSectionHashes(sections) };
     } else {
-      // File exists — merge
+      // File exists — merge (decision logic + oldHashes reads unchanged, INV-5).
       const existing = fs.readFileSync(fullPath, 'utf-8');
-      const oldHashes = allHashes[relativePath] ?? {};
-      const { merged, newHashes } = mergeFile(existing, generated, oldHashes);
+      const oldHashes = priorHashes[relativePath] ?? {};
+      const { merged } = mergeFile(existing, generated, oldHashes);
       fs.writeFileSync(fullPath, merged);
-      allHashes = { ...allHashes, [relativePath]: newHashes };
     }
   }
 
   // SPEC-025 FR-4/FR-5: re-seed after merge so a still-empty section gains DRAFT
   // entries on refresh too; additive + idempotent, never overwrites human edits.
+  // Writes the file only; no longer a manifest source (SPEC-043 D8).
   try {
-    allHashes = seedConstitution(rootDir, allHashes);
+    seedConstitution(rootDir);
   } catch {
     // best-effort — never break a refresh on a proposer failure.
   }
-
-  saveHashes(rootDir, allHashes);
 
   // Re-record the raw-template baseline: after a refresh the user's files are in
   // sync with the current bundled template, so drift must read false until the
@@ -879,6 +946,12 @@ export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
   // Claude per-command files and the Cursor file are refreshed by the managed-region
   // path above, so this no longer owns them.
   generateSlashCommandShims(rootDir, { tools });
+
+  // SPEC-043 D1/D2/D7: record the manifest from the FINAL on-disk bytes (after the
+  // AGENTS.md slash injection) and persist LAST — the active #890 fix. The embedded
+  // self-check is a fail-closed tripwire (green by construction here; guards a future
+  // record-before-write regression, INV-3 / D4), not standalone #890 protection.
+  recordVerifyAndSaveManifest(rootDir);
 
   return managedRegionWarnings;
 }

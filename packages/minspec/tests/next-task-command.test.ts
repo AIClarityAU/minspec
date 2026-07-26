@@ -39,7 +39,11 @@ vi.mock('../src/lib/artifact-graph', () => ({
   artifactFileIndex: vi.fn(() => new Map<string, string>()),
 }));
 
-vi.mock('@aiclarity/shared', () => ({
+// Partial mock: stub resolveNextTask, but keep the real pure presentation
+// helper (formatNextTaskLabel) so the signpost text reads the same wording the
+// shared module defines (single source, #742/#48).
+vi.mock('@aiclarity/shared', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('@aiclarity/shared')>()),
   resolveNextTask: vi.fn(),
 }));
 
@@ -124,7 +128,9 @@ describe('formatNextTaskText', () => {
   it('null → clear', () => {
     expect(formatNextTaskText(null)).toBe('$(check) MinSpec: clear');
   });
-  it('task → arrow + imperative', () => {
-    expect(formatNextTaskText(task())).toBe('$(arrow-right) MinSpec: Approve SPEC-001');
+  it('task → milestone (signpost) icon + shared "Next Task:" label + imperative', () => {
+    // Wording after the icon/brand comes from @aiclarity/shared formatNextTaskLabel
+    // so this reads identically to the planned DAG-viz node (#742/#48).
+    expect(formatNextTaskText(task())).toBe('$(milestone) MinSpec Next Task: Approve SPEC-001');
   });
 });

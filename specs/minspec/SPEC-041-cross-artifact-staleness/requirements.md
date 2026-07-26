@@ -2,7 +2,7 @@
 id: SPEC-041
 type: requirements
 # 🔒 Once approved, hash-locked: approved bytes recorded in .minspec/approvals.json[SPEC-041].specHash. ANY edit voids approval (hash → stale) — re-run "MinSpec: Approve Spec". DR-012.
-status: specifying
+status: implementing
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — approval validity
@@ -13,9 +13,9 @@ implements: [packages/minspec/src/lib/approval.ts, packages/minspec/src/lib/adr-
 affects: [packages/shared/src/next-task.ts, packages/shared/src/canonical.ts, packages/minspec/src/lib/approval-store.ts, packages/minspec/src/lib/artifact-graph.ts, packages/minspec/src/views/spec-tree-provider.ts, packages/minspec/src/extension.ts, packages/minspec/src/lib/approval-diff.ts]
 phases:
   specify: done
-  clarify: done   # FR-OQ1/OQ2 resolved (proposed defaults), OQ3/OQ4 confirmed — drafted by Claude (agent) 2026-07-17 per maintainer "you draft"; human ratifies at Approve
-  plan: done   # design.md — approach, Architecture/Contracts/UX artifacts, slice plan, 0-dep budget. Drafted by Claude (agent) 2026-07-22; human ratifies at Approve
-  tasks: pending
+  clarify: done
+  plan: done
+  tasks: in-progress
   implement: pending
 ---
 
@@ -49,8 +49,8 @@ Staleness is **DERIVED on read, never an event that mutates a committed sign-off
 - **FR-4 (propagation reuses existing machinery).** `upstream-stale` joins the resolver's `gateCleared`-false set ([next-task.ts:216-229](../../../packages/shared/src/next-task.ts#L216)) alongside `unapproved`/`stale`, so an `upstream-stale` B floors its dependents and an *advancing* `upstream-stale` B becomes a gate-violation exactly like `implementing-unapproved`. **No new DAG edge type** (projection onto the existing `depends_on` set).
 - **FR-5 (reverse-dependency index).** A new pure function keyed by `edge.to` (the missing inverse of the current forward blockers map) answers "which approved artifacts recorded a now-stale hash for X" given an edit to X.
 - **FR-6 (surfacing — extends SPEC-029).** On the debounced save-recompute ([onDidSaveTextDocument extension.ts:561](../../../packages/minspec/src/extension.ts#L561), debounced per the note at [extension.ts:220](../../../packages/minspec/src/extension.ts#L220)), affected approved dependents surface via a **non-modal toast** over the visible artifact (never focus-stealing, per the HITL-UX rule) — *"DR-019 changed — N approved artifacts depend on it. **Alt+R** to review."* — opening a "Needs Re-Approval — upstream changed" group (extend [SPEC-029](../SPEC-029-approval-staleness-ux/requirements.md)'s group), each entry showing a whole-doc diff of the changed upstream vs the approved-against hash.
-- **FR-7 (one-key human re-ack).** **Alt+A** on a dependent = "immaterial" → re-snapshot that upstream hash to current, clearing `upstream-stale`; an attributed human ack committed via the existing commit-on-approve path. The tool **never** LLM-judges materiality and **never** auto-acks. Alternatively the human edits to accommodate, then approves normally.
-- **FR-8 (migration).** Existing accepted ADRs/epics are backfilled with a record (`migrated: true`), mirroring the FR-5 spec backfill of [DR-034](../../../docs/decisions/DR-034.md)/SPEC-022. No accepted decision is left recordless.
+- **FR-7 (one-key human re-ack).** **Alt+A** on a dependent = "immaterial" → re-snapshot that upstream hash to current, clearing `upstream-stale`; an attributed human ack committed via the existing commit-on-approve path. The tool **never** LLM-judges materiality and **never** auto-acknowledges. Alternatively the human edits to accommodate, then approves normally.
+- **FR-8 (migration).** Existing accepted ADRs/epics are backfilled with a record (`migrated: true`), mirroring the FR-5 spec backfill of [DR-034](../../../docs/decisions/DR-034.md)/SPEC-022. No accepted decision is left record-less.
 
 ## Invariants
 
@@ -106,7 +106,7 @@ No follow-up tasks generated — all four resolve to a stated default; none bloc
 - **AC-4 (FR-5).** Given an edit to X, the reverse index returns exactly the set of approved artifacts whose recorded hash for X no longer matches — no more, no fewer.
 - **AC-5 (FR-7, INV-3).** Alt-A re-ack clears `upstream-stale` by re-snapshotting to current, writes an attributed record, and commits it via commit-on-approve; a test asserts no background/automated path ever clears it.
 - **AC-6 (INV-1, INV-2, INV-5).** A test asserts the staleness recompute performs zero writes to any approval sidecar and that no network/LLM call is reachable from the derive/resolve path; byte-identical verdict across N runs on a fixed fixture.
-- **AC-7 (FR-8).** Migration backfills a record with `migrated: true` for every already-accepted ADR and epic; none is left recordless.
+- **AC-7 (FR-8).** Migration backfills a record with `migrated: true` for every already-accepted ADR and epic; none is left record-less.
 
 ## Risks
 

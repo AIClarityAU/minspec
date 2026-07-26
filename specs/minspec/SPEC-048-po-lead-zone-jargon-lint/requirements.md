@@ -1,0 +1,89 @@
+---
+id: SPEC-048
+title: PO-facing lead zone (position gate) + jargon advisory lint
+type: requirements
+status: specifying
+tier: T3
+product: minspec
+created: 2026-07-21
+epic: EPIC-009  # Team Readiness
+depends_on: [DR-068, SPEC-013]
+relates_to: [SPEC-047, SPEC-006, SPEC-049]
+phases:
+  specify: done
+  clarify: done
+  plan: pending
+  tasks: pending
+  implement: pending
+---
+
+# SPEC-048: PO-facing lead zone (position gate) + jargon advisory lint
+
+## Summary
+
+Make sure a product owner can always start reading at the top and understand what a spec is
+about, in plain words. We do two different things: *require* that the plain-language part
+comes first (a firm rule, because position is easy to check), and *advise* on wording by
+flagging developer jargon (a suggestion, not a wall, because "plain enough" can't be checked
+exactly).
+
+## Context
+
+The 2026-07-21 audit found ≈96% of PO-facing paragraphs carry developer jargon — so
+separating files (SPEC-047) surfaces the right content but not readable content. DR-068 (R1)
+makes readable authoring a precondition, and splits the rule by enforceability: position is
+deterministic (hard-gate); jargon is not (advise). This spec implements that split, reusing
+SPEC-013's zone/divider and SPEC-006's vacuity detection.
+
+## Requirements
+
+- **FR-1 (position — hard gate).** The PO-facing file MUST open with a plain-language lead
+  zone (above the SPEC-013 `core-end` divider). A missing or mis-ordered lead is an **error**
+  (deterministic; reuse the section registry). One rule, applied to whichever file holds PO
+  content — `requirements.md` in a split spec, or the top of a single-file
+  (SPEC-047-exempt) spec (RD-2).
+- **FR-2 (jargon — advisory).** A lint flags developer/CS jargon in the PO lead zone against
+  a configurable per-audience lexicon. **Warning** severity, never a hard block.
+- **FR-3 (per-audience lexicon).** The lexicon is per-project and per-audience (MinSpec's own
+  PO is semi-technical; a marketing audience is not). It ships with a **deterministic default
+  seed** (the audit's recurrent terms — `T0`–`T4`, file paths, `code()`, `frontmatter`,
+  `gate`, `CI`, git internals, `hash`) and lives as **project-owned data** in `.minspec/`,
+  team-curated via an add-term command; no central authority (RD-1).
+- **FR-4 (vacuity guard).** The lint must not reward empty plain-language filler: reuse the
+  SPEC-006 / SPEC-013 hollow/tautology detection to warn when a lead is jargon-free but
+  vacuous.
+- **FR-5 (rewrite-assist).** Offer an AI-delegated "rephrase in plain language" (Tier-1
+  delegation per SPEC-014 / DR-017; the offline core is unaffected). Optional, never required.
+- **FR-6 (honesty).** A lint pass means "no flagged terms," never "a PO will understand this."
+  No surface renders a comprehensibility claim from the lint.
+- **FR-7 (warn-first, no backfill).** The jargon advisory ratchets warn→(optional) stricter;
+  existing specs are not retro-fitted (96% would fail).
+
+## Acceptance Criteria
+
+- [ ] **AC-1 (FR-1).** A PO file without a lead zone fails `validate` (error).
+- [ ] **AC-2 (FR-2).** Jargon in the lead zone warns, does not block.
+- [ ] **AC-3 (FR-3).** A term on the project allowlist does not warn.
+- [ ] **AC-4 (FR-4).** A jargon-free but tautological lead warns.
+- [ ] **AC-5 (FR-6).** No UI/status renders "PO-readable ✓" from the lint.
+
+## Resolved Decisions (Clarify)
+
+- **RD-1 (lexicon curation) — deterministic seed + project-owned data.** Ship a default
+  jargon list (from the audit); store the per-audience lexicon as project-owned data in
+  `.minspec/`, curated by the team; MinSpec offers the seed + an add-term command. No central
+  authority — mirrors the deterministic-default-then-human-curates pattern (constitution
+  proposer / `suggestPrefixDeterministic`).
+- **RD-2 (scope) — one rule, whichever file holds PO content.** The lead-zone position gate
+  applies to `requirements.md` in a split spec and to the top of a single-file
+  (SPEC-047-exempt) spec alike: "a PO lead zone leads the PO-facing file."
+
+## Out of scope
+
+- File separation (SPEC-047); enforcing *wording* as a hard gate (explicitly rejected —
+  advisory only).
+
+## Traceability
+
+DR-068 (R1, the position/jargon split); SPEC-013 (zone + divider); SPEC-006 (hollow
+detection); DR-017 (delegation); SPEC-049 (applies to DR lead summaries); EPIC-009.

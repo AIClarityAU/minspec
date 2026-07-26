@@ -173,7 +173,7 @@ DR-009 validated the tier classifier against SWE-bench-Verified via out-of-tree 
 
 ## [DR-022 — Ceremony = risk-response — a blast-radius (consequence) profile, screen-gated, replaces diff-size tier as the unit](DR-022.md)
 
-*Status: proposed · Date: 2026-06-01*
+*Status: accepted · Date: 2026-06-01*
 
 <!-- dr-summary:DR-022 auto=12b5e81fd1b0 -->
 "Just Enough Spec" tiers ceremony (T1–T4) by **diff size** — git-analyzer.ts feeds classify() (max tierContribution across signals); the per-tier phase set lives in .minspec/config.json. Two findings forced a rethink this session: 1. **"Just Enough Spec" conflated two dials** — *consideration* (how thoroughly a change is thought through) and *ceremony* (how much the human must read/approve). Tiering tied them because the historical cost was *human authoring*. The LLM authors now: consideration should be thorough on *every* change (nearly free); ceremony should…
@@ -197,7 +197,7 @@ DR-022 was accepted in-session as a T4 keystone: it reframes ceremony around a c
 
 ## [DR-025 — Canonical spec frontmatter schema owns field order — one source, one gate](DR-025.md)
 
-*Status: proposed · Date: 2026-06-01*
+*Status: accepted · Date: 2026-06-01*
 
 <!-- dr-summary:DR-025 auto=11de7e600c38 -->
 Spec frontmatter field ordering has drifted across **three generations**, visible chronologically by SPEC id: | Gen | Order | Specs | |---|---|---| | G1 epic-first | epic, id, type, [tier], status, product | scroogellm 100/101/102, minspec 001/002/003, SPEC-005, SPEC-006 | | G2 id-first, epic-last | id, type, [tier], status, product, epic | SPEC-004, 007/008/009, 010, 011 | | G3 id-first, tier-after-status, +refs | id, type, status, tier, product, epic, depends_on/aspects/relates_to | SPEC-012, 013, 014, 015 |
@@ -501,7 +501,7 @@ A read-only audit of the approvables system established three facts, each with f
 
 ## [DR-063 — The `awaiting-approval` queue signal — one positive "your turn" label, single-owner, decoupled from the AI-failure path](DR-063.md)
 
-*Status: proposed · Date: 2026-07-16*
+*Status: accepted · Date: 2026-07-16*
 
 <!-- dr-summary:DR-063 auto=78ca4574c42b -->
 The independent AI reviewer (DR-033 §6) records a PR verdict as ai-review:{pass,changes,blocked,pending}. On any non-pass, .github/workflows/ai-review.yml **also** applies needs-human-review **unconditionally at t=0** (ai-review.yml L568-574 and L606-608). Two problems compound: 1. **ai-review:changes is overloaded.** It means both *"the reviewer read the code and wants specific fixes"* (substantive, AI-remediable) and *"the review could not produce a trustworthy green"* (procedural fail-closed — garbled/injected/truncated verdict, ESCALATE, workflow error). Different meanings, one label.
@@ -525,11 +525,27 @@ Two held rules contradict: rule #8 / DR-051 §4a says never move a shared checko
 
 ## [DR-066 — No silent gate — a required/merge-gating check must fail visibly, never best-effort, and never hinge on a single disableable producer](DR-066.md)
 
-*Status: proposed · Date: 2026-07-22*
+*Status: accepted · Date: 2026-07-22*
 
 <!-- dr-summary:DR-066 auto=fc5103ae0bbb -->
 Three times in this repo, a merge gate that *looked* present enforced **nothing**, and the symptom each time was identical — "every merge needs --admin", i.e. the required gate was being bypassed on every landing: 1. **#560** — the ai-review required-check context was pinned to the **wrong GitHub App id**, so the ruleset waited on a check that could never post → unsatisfiable → every merge a bypass. 2. **#810** — ai-review.yml posted the load-bearing ai-review/pass commit status **best-effort** (gh…
 <!-- /dr-summary:DR-066 -->
+
+## [DR-067 — Coordinated self-completing sessions — a session claims work under an expiring presence-lease before touching it, shepherds its own PR to merge, wraps up on exit, and the drain is demoted from primary fixer to orphan-fallback (reclaim only expired leases)](DR-067.md)
+
+*Status: accepted · Date: 2026-07-25*
+
+<!-- dr-summary:DR-067 auto=38843581fe9a -->
+The autonomous pipeline (triage → dispatch → build → review → merge) is live (DR-060/DR-061), but its **work-assignment model is a single shared drain that both dispatches AND fixes everything**, with no atomic notion of "who owns this item right now." Four founder requests on 2026-07-25 name the same missing primitive from four angles:
+<!-- /dr-summary:DR-067 -->
+
+## [DR-068 — Audience-partitioned approvables — a role-based review split by file separation, with a PO-only auto-approve mode](DR-068.md)
+
+*Status: proposed · Date: 2026-07-21*
+
+<!-- dr-summary:DR-068 auto=0000000000000000 -->
+Specs interleave a product-owner audience (what/why) with an engineering audience (how), and there is no audience/owner primitive; approval is per-spec-file (SPEC-022), single-approver-suffices. This records a universal (not opt-in; no corpus backfill), role-based audience partition where audience = whole files mapped to roles. Four decisions: (1) keep each audience in separate files (requirements.md = PO, design/tasks = engineering) — per-file sidecars already make each file its own hash-bound approval unit, so sub-file paragraph projection is DROPPED, removing the DR-053 dependency and matching the per-file granularity of GitHub/CODEOWNERS/sidecars; (2) the audience→file→role map is N-role extensible (future teams roles: UX/marketing/BA); (3) the approval ingress is multi-surface and audience-agnostic — offline MinSpec: Approve plus GitHub-native review that closes the mobile gap for ALL committers, a consent-gated Action materialising the sidecar attributing the human approver, so the offline invariant holds; PRs are NOT split by audience by default (opt-in only); (4) a PO-only mode auto-approves technical approvables for solo devs. The Plan (SPEC-046 design.md) resolved auto-approve as a VIRTUAL derived state, not a written record — the committed config policy is the record, so nothing mints a kind:auto sidecar (INV-4 by absence) and DR-056's human writer path is untouched; freshness is policy-bound (no churn); the one cost (DR-056 surface moves onto config.json) is closed by a policy-authorship gate (commit + CI + merge-lane). Materialises SPEC-045..049. A corpus jargon audit (≈96% of PO-facing paragraphs carry developer jargon) makes an authoring-accessibility guideline + lint a precondition.
+<!-- /dr-summary:DR-068 -->
 
 ## [DR-069 — Add a 'planning' lifecycle status — approved-but-pre-implementation is not 'implementing' (fixes the #886 false signpost)](DR-069.md)
 

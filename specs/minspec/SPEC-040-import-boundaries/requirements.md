@@ -21,8 +21,8 @@ implements:
 phases:
   specify: done
   clarify: done
-  plan: in-progress
-  tasks: pending
+  plan: done
+  tasks: in-progress
   implement: pending
 ---
 

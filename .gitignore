@@ -1,4 +1,8 @@
 node_modules/
+# Bare form (no trailing slash) also ignores a `node_modules` SYMLINK file — the
+# `node_modules/` dir pattern above does NOT match a symlink named node_modules,
+# which let an absolute-path dev symlink get committed (#913 / bit #900).
+node_modules
 out/
 dist/
 *.vsix
@@ -16,6 +20,10 @@ coverage/
 !.claude/commands/
 .claude/commands/*
 !.claude/commands/minspec-*.md
+# Explicit literal (redundant with .claude/* above, but the #794 parity test
+# requires every MINSPEC_GITIGNORE_ENTRIES entry to appear verbatim, so newly-
+# scaffolded projects and this monorepo checkout stay gitignore-consistent).
+.claude/worktrees/
 __pycache__/
 
 # Agent-dispatch sidecars (DR-008 / scripts/dispatch-issue.sh) — worktree-local
@@ -50,6 +58,10 @@ __pycache__/
 # wrote template-baseline.json without adding these entries (#380 follow-up).
 .minspec/generated-hashes.json
 .minspec/template-baseline.json
+# Machine-local UI dismissal state (answeredSignatures), rewritten by the ext at
+# runtime — never committed. Mirrors MINSPEC_GITIGNORE_ENTRIES; was the sibling
+# .minspec/*.json entry that got missed, so it kept surfacing as "junk" (G-8).
+.minspec/preferences.json
 
 # Classifier validation: fetched SWE-bench data (DR-009 — patches not committed)
 scripts/classifier-validation/.data/
