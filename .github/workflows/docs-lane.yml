@@ -37,8 +37,8 @@ jobs:
           REPO: ${{ github.repository }}
         run: |
           set -euo pipefail
-          # Allowed corpus: specs, docs, approval records, top-level markdown.
-          allowed='^(specs/|docs/|\.minspec/approvals/|[^/]+\.md$)'
+          # Allowed corpus: specs, docs, skills, approval records, top-level markdown.
+          allowed='^(specs/|docs/|skills/|\.minspec/approvals/|[^/]+\.md$)'
           mapfile -t files < <(gh api --paginate "repos/$REPO/pulls/$PR/files" -q '.[].filename')
           if [ "${#files[@]}" -eq 0 ]; then
             echo "::error::docs-lane: PR #$PR has no files"

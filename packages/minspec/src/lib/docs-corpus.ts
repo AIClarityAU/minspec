@@ -28,6 +28,7 @@
 export const DOCS_CORPUS = [
   'specs/**',
   'docs/**',
+  'skills/**',
   '.minspec/approvals/**',
   '*.md (top-level only)',
 ] as const;
@@ -37,11 +38,16 @@ export const DOCS_CORPUS = [
  * `CORPUS` exactly: a repo-relative, forward-slash path is in the corpus iff it
  *   - is under `specs/`, or
  *   - is under `docs/`, or
+ *   - is under `skills/` — agent skill definitions. Prose/instruction content, not
+ *     executable product code, and (like the harness-managed `CLAUDE.md`/`AGENTS.md`
+ *     already in this corpus via the top-level `*.md` arm) authored to be read by an
+ *     agent rather than run. ai-review still runs on every docs-lane PR, so a skill
+ *     change is reviewed — it simply is not held for a human merge keystroke.
  *   - is under `.minspec/approvals/`, or
  *   - is a top-level markdown file (`[^/]+\.md$` — NO slash, so a NESTED `.md`
  *     such as `packages/x/y.md` is deliberately NOT in the corpus).
  */
-export const DOCS_CORPUS_REGEX = /^(specs\/|docs\/|\.minspec\/approvals\/|[^/]+\.md$)/;
+export const DOCS_CORPUS_REGEX = /^(specs\/|docs\/|skills\/|\.minspec\/approvals\/|[^/]+\.md$)/;
 
 /**
  * True iff `rel` — a repo-relative path — belongs to the docs corpus and may

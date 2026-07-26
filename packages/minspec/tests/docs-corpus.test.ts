@@ -23,6 +23,8 @@ describe('isDocsCorpusPath — accepts the docs corpus', () => {
     'docs/epics/EP-001.md',
     '.minspec/approvals/specs/minspec/SPEC-039/requirements.md.json',
     '.minspec/approvals/DR-001.md.json',
+    'skills/scrooge-delegate/SKILL.md', // agent skill definitions — prose, not product code
+    'skills/anything/nested/deep.md', // any depth under skills/
     'README.md', // top-level markdown
     'CLAUDE.md',
     'CHANGELOG.md',
@@ -90,13 +92,14 @@ describe('corpus constants stay in lock-step with the workflow', () => {
   it('DOCS_CORPUS_REGEX mirrors docs-lane.yml / push-docs.sh exactly', () => {
     // If this literal changes, docs-lane.yml `allowed=` and push-docs.sh `CORPUS=`
     // MUST change too, or the three enforcers disagree (never-wrong is lost).
-    expect(DOCS_CORPUS_REGEX.source).toBe('^(specs\\/|docs\\/|\\.minspec\\/approvals\\/|[^/]+\\.md$)');
+    expect(DOCS_CORPUS_REGEX.source).toBe('^(specs\\/|docs\\/|skills\\/|\\.minspec\\/approvals\\/|[^/]+\\.md$)');
   });
 
-  it('DOCS_CORPUS lists the four human-readable corpus entries', () => {
+  it('DOCS_CORPUS lists the five human-readable corpus entries', () => {
     expect(DOCS_CORPUS).toEqual([
       'specs/**',
       'docs/**',
+      'skills/**',
       '.minspec/approvals/**',
       '*.md (top-level only)',
     ]);
