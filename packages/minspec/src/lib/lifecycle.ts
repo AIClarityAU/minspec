@@ -139,7 +139,9 @@ export function deriveStatus(
  * plan/tasks in the 'implementing' band on purpose: it mirrors the Python
  * `phase_intent_status` (spec-gate.py) that decides the freeze range. Narrowing it
  * so plan/tasks return 'planning' would drop unapproved plan/tasks specs OUT of the
- * gate range → their impl code becomes editable → silently reopens the DR-362 hole.
+ * gate range → their impl code becomes editable → silently reopens the freeze hole
+ * that DR-012/DR-031 close (the local-register ids for this gate; DR-362 is the
+ * mmo-platform parent-register number, not valid here).
  * The #886 'planning' split lives ONLY in deriveStatus (the signpost), never here.
  */
 export function getSpecStatus(phases: PhaseState): SpecStatus {

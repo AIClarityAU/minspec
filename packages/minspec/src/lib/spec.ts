@@ -573,6 +573,13 @@ export function advanceSpecToImplementing(filePath: string): SpecStatus {
   }
   // No `phases:` block → the `status:` line is the sole lifecycle representation;
   // a status-only flip has nothing to contradict.
+  //
+  // DR-067 (#886) RESIDUAL (tracked #957): a phaseless spec has no phase signal to
+  // distinguish planning from implementing, so this branch still hard-stamps
+  // `implementing` at approval — the one shape where the #886 false-signpost fix
+  // (which lives in deriveStatus + the phases-block branch below) cannot apply. An
+  // approved-but-pre-implement phaseless spec therefore reads `implementing` here;
+  // #957 tracks defaulting it to `planning` or requiring a phases block at approval.
   if (!/^phases[ \t]*:/m.test(fmMatch[1])) {
     return setSpecStatus(filePath, 'implementing');
   }

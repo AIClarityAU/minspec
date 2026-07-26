@@ -206,7 +206,9 @@ def phase_intent_status(phases, explicit_terminal):
     gate MUST keep plan/tasks in the 'implementing' band: narrowing it so plan/tasks
     return 'planning'/'specifying' would drop unapproved plan/tasks specs out of the
     gate range (the `intended not in ('implementing','done')` skip below) and silently
-    reopen the DR-362 hole. The #886 split lives ONLY in deriveStatus (the signpost).
+    reopen the freeze hole that DR-012/DR-031 close (the local-register ids; DR-362 is
+    the mmo-platform parent-register number, not valid here). The #886 split lives ONLY
+    in deriveStatus (the signpost).
     """
     if explicit_terminal:
         return explicit_terminal

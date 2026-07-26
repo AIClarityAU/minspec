@@ -1187,6 +1187,10 @@ describe('validateStatusMonotonicity — cross-artifact status (#277)', () => {
   const DONE = {
     specify: 'done', clarify: 'done', plan: 'done', tasks: 'done', implement: 'done',
   } as const;
+  // DR-067 (#886): approved, plan/tasks done, implement NOT started → derives `planning`.
+  const PLANNING = {
+    specify: 'done', clarify: 'done', plan: 'done', tasks: 'done', implement: 'pending',
+  } as const;
 
   const f = (
     type: string,
@@ -1268,6 +1272,32 @@ describe('validateStatusMonotonicity — cross-artifact status (#277)', () => {
     const v = r.violations.find((x) => x.rule === 'status.cross-artifact.regression');
     expect(v).toBeDefined();
     expect(v!.message).toContain('new');
+  });
+
+  // DR-067 (#886) §4: pins LIFECYCLE_RANK.planning = 2 — strictly above `specifying`
+  // (1) and below `implementing` (3) — via observable monotonicity behaviour, so the
+  // rank cannot silently drift. (The DR §4 "silent if missed" wiring, now test-forced.)
+  it('does NOT flag a `planning` parent ahead of a `specifying` child (planning > specifying)', () => {
+    const r = validateStatusMonotonicity([
+      f('requirements', PLANNING, 'approved'),
+      f('tasks', SPECIFYING, 'unapproved'),
+    ]);
+    // parent derives `planning` (rank 2), child `specifying` (rank 1) → parent ≥ child.
+    expect(r.notSplitLayout).toBe(false);
+    expect(r.violations).toHaveLength(0);
+  });
+
+  it('flags a `planning` parent behind an `implementing` child (planning < implementing)', () => {
+    const r = validateStatusMonotonicity([
+      f('requirements', PLANNING, 'approved'),
+      f('tasks', IMPLEMENTING, 'approved'),
+    ]);
+    // parent derives `planning` (rank 2), child `implementing` (rank 3) → parent < child.
+    const v = r.violations.find((x) => x.rule === 'status.cross-artifact.regression');
+    expect(v).toBeDefined();
+    expect(v!.severity).toBe('warning');
+    expect(v!.message).toContain('planning');
+    expect(v!.message).toContain('implementing');
   });
 });
 
