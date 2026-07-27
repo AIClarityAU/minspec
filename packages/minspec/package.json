@@ -2,7 +2,7 @@
   "name": "minspec",
   "displayName": "MinSpec",
   "description": "Complexity-adaptive specification-driven development. Classifies changes into tiers and applies proportional ceremony — a one-line fix needs one sentence of spec, an architecture rewrite gets the full treatment.",
-  "version": "0.1.23",
+  "version": "0.1.24",
   "private": true,
   "publisher": "aiclarity",
   "license": "MIT",
@@ -495,7 +495,11 @@
         },
         "minspec.pushOnApprove": {
           "type": "string",
-          "enum": ["never", "prompt", "always"],
+          "enum": [
+            "never",
+            "prompt",
+            "always"
+          ],
           "default": "prompt",
           "enumDescriptions": [
             "Never push. Approvals stay local until you push them yourself (fully offline).",
@@ -506,8 +510,13 @@
         },
         "minspec.protectedBranches": {
           "type": "array",
-          "items": { "type": "string" },
-          "default": ["main", "master"],
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "main",
+            "master"
+          ],
           "markdownDescription": "Branches that reject a direct push (branch protection / required PR). Used by `#minspec.pushOnApprove#` to push an approval on a new branch for a PR instead of attempting a push that would be rejected. Read from settings rather than probed, so the decision needs no network call."
         },
         "minspec.autoBackfillUseAi": {
