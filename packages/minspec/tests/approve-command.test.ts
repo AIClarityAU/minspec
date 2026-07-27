@@ -25,9 +25,9 @@ vi.mock('vscode', () => ({
   Uri: { file: (p: string) => ({ fsPath: p, scheme: 'file' }) },
 }));
 
-// listSpecs scans the workspace — mock it wholesale (also avoids loading the
-// provider's heavy import chain). parseSpec stays REAL so the id-from-editor
-// resolution is genuinely exercised.
+// listSpecs scans the workspace — mock the whole lib/spec-catalog module so no
+// real fs walk runs. parseSpec stays REAL so the id-from-editor resolution is
+// genuinely exercised.
 vi.mock('../src/lib/spec-catalog', () => ({
   listSpecs: vi.fn(),
 }));
@@ -49,7 +49,7 @@ import {
 import { listSpecs } from '../src/lib/spec-catalog';
 import { revokeApproval, getApprovalStatus } from '../src/lib/approval';
 import type { ApprovalStatus } from '../src/lib/approval';
-import type { SpecSummary } from '../src/views/spec-tree-provider';
+import type { SpecSummary } from '../src/lib/spec-manager';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 

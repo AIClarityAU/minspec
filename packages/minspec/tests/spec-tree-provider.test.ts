@@ -35,7 +35,8 @@ vi.mock('vscode', () => ({
   workspace: { workspaceFolders: undefined },
 }));
 
-import type { SpecSummary, ApprovalLookupFn } from '../src/views/spec-tree-provider';
+import type { ApprovalLookupFn } from '../src/views/spec-tree-provider';
+import type { SpecSummary } from '../src/lib/spec-manager';
 import { SpecTreeProvider, SpecGroupNode, SpecNode, RollupNode, STATUS_GROUPS, compressSpecId, stripProductPrefix } from '../src/views/spec-tree-provider';
 import { listSpecs } from '../src/lib/spec-catalog';
 import { EpicGroupNode } from '../src/views/epic-grouping';
@@ -263,7 +264,8 @@ describe('SpecTreeProvider', () => {
     // SpecNode reads spec.hasDesignFile/hasTasksFile — it does no fs I/O of its
     // own (that would risk re-deriving "sibling file exists" instead of "sibling
     // file belongs to ME", the exact bug listSpecs()'s own rolesById map exists
-    // to avoid; see the listSpecs() describe block below for that coverage).
+    // to avoid; that coverage lives with the scan, in spec-catalog.test.ts's
+    // listSpecs() describe block, since SPEC-040 FR-4 moved it to lib).
     describe('hasDesign/hasTasks flags (gate View Design / View Tasks menu items)', () => {
       it('no flags when the summary carries neither', () => {
         const spec = makeSpec({});

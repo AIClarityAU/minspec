@@ -19,7 +19,8 @@ export type ApprovableKind = 'spec' | 'adr' | 'epic';
 //   - decisions are DR-NNN(.*).md (adr-manager ADR_FILE_RE / active-adr).
 //   - epics are EPIC-NNN(.*).md (epic-manager EPIC_FILE_RE).
 //   - specs are the canonical requirements.md / spec.md inside a spec folder
-//     (spec-tree-provider's CANONICAL_SPEC_NAMES preference order).
+//     (the requirements.md ▸ spec.md preference order `lib/spec-catalog`'s
+//     `listSpecs` uses to pick a split-layout spec's representative file).
 const ADR_FILE_RE = /^DR-\d+.*\.md$/i;
 const EPIC_FILE_RE = /^EPIC-\d+.*\.md$/i;
 const SPEC_FILE_NAMES = new Set(['requirements.md', 'spec.md']);

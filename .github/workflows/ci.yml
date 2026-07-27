@@ -28,6 +28,14 @@ jobs:
       - name: Validate frontmatter
         run: npm run validate
 
+      # SPEC-040 FR-2: fails on any RUNTIME (value-import) cycle under
+      # packages/minspec/src. The known lib cycles are each held open by one
+      # `import type` edge, which the compiler erases — so this ships green and
+      # guards the next type→value flip that would close one for real. eslint
+      # cannot see across files, so this is its own gate, not a lint rule.
+      - name: Check import cycles
+        run: npm run check:cycles
+
       # Pure decision logic behind the ai-review label-integrity gate
       # (.github/workflows/ready-to-merge.yml). Lives under .github/scripts so it
       # is outside vitest's packages/* include; run it directly on Node so the

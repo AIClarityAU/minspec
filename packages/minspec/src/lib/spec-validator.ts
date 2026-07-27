@@ -1251,7 +1251,7 @@ export function validateStatusMonotonicity(
 //
 // A spec-kit directory (`SPEC-NNN-slug/`) splits one spec across sibling shard
 // files: requirements.md/spec.md is the canonical/primary file, design.md /
-// plan.md / tasks.md are secondaries. `listSpecs` (spec-tree-provider.ts)
+// plan.md / tasks.md are secondaries. `listSpecs` (lib/spec-catalog.ts)
 // collapses shards that share one id into a single tree entry — but nothing
 // asserted a shard's id actually EQUALS its directory's canonical id. SPEC-007's
 // design.md/tasks.md carried freshly-minted ids (SPEC-008/SPEC-009) instead of

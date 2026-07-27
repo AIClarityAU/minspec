@@ -658,7 +658,7 @@ describe('INV-SHARD-ID: spec shards in a directory carry a single id', () => {
 
   // Canonical per-phase shard filenames. When >1 of these live in one directory
   // they are shards of the SAME spec, so listSpecs collapses them BY SHARED id
-  // (spec-tree-provider.ts). Divergent ids defeat the collapse and each shard
+  // (lib/spec-catalog.ts). Divergent ids defeat the collapse and each shard
   // surfaces as its own phantom spec — exactly how SPEC-007's design.md/tasks.md
   // became phantom SPEC-008/SPEC-009 (#438). Body-only shards (plan.md/tasks.md
   // in strict spec-kit layout) carry no frontmatter id and are ignored here; the

@@ -252,3 +252,37 @@ phases:
   });
 });
 
+// ─── AC-6: the fs scan stays OUT of the view ─────────────────────────────────
+//
+// The behavioural tests above all call `listSpecs` from lib, so they pass just
+// as happily if a SECOND recursive scan is re-introduced into
+// views/spec-tree-provider.ts alongside it — the exact regression FR-4 exists to
+// prevent, and one no behavioural assertion can see. AC-6's "spec-tree-provider
+// no longer defines the fs scan" clause therefore needs a source-level check.
+// Mirrors the read-the-source pattern import-boundaries.test.ts uses for
+// presence.ts's type-only vscode import.
+const SPEC_TREE_PROVIDER = path.resolve(__dirname, '..', 'src', 'views', 'spec-tree-provider.ts');
+
+describe('AC-6: spec-tree-provider delegates the fs scan to lib/spec-catalog', () => {
+  const source = fs.readFileSync(SPEC_TREE_PROVIDER, 'utf8');
+
+  it('does not read the specs directory itself', () => {
+    expect(
+      source,
+      'views/spec-tree-provider.ts calls readdirSync again. SPEC-040 FR-4 moved the recursive ' +
+        'spec scan to lib/spec-catalog precisely so the approve/approve-active/validate flows ' +
+        'stop depending on a high-churn UI file — a second scan in the view re-opens that ' +
+        'coupling and lets the two silently diverge. Extend lib/spec-catalog instead.',
+    ).not.toContain('readdirSync');
+  });
+
+  it('imports the catalog scan from lib/spec-catalog', () => {
+    expect(
+      /^import \{[^}]*\blistSpecs\b[^}]*\} from '\.\.\/lib\/spec-catalog';$/m.test(source),
+      'views/spec-tree-provider.ts no longer imports listSpecs from ../lib/spec-catalog. ' +
+        'The view must keep consuming the Tier-0 catalog (AC-6) rather than growing its own ' +
+        'scan; if the import genuinely moved, repoint this assertion at its new lib home.',
+    ).toBe(true);
+  });
+});
+

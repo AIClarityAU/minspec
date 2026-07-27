@@ -123,7 +123,7 @@ import {
   getApprovalStatus,
 } from '../src/lib/approval';
 import type { ApprovalStatus } from '../src/lib/approval';
-import type { SpecSummary } from '../src/views/spec-tree-provider';
+import type { SpecSummary } from '../src/lib/spec-manager';
 import { readSpecFile, advanceSpecToImplementing } from '../src/lib/spec';
 import { validateSpec } from '../src/lib/spec-validator';
 import { readShardIdFiles } from '../src/lib/spec-layout';

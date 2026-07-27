@@ -65,7 +65,7 @@ import { validateSpec } from '../src/lib/spec-validator';
 import { epicRefSet } from '../src/lib/epic-manager';
 import { getApprovalStatus } from '../src/lib/approval';
 import { readShardIdFiles } from '../src/lib/spec-layout';
-import type { SpecSummary } from '../src/views/spec-tree-provider';
+import type { SpecSummary } from '../src/lib/spec-manager';
 import type { ValidationResult, ValidationViolation } from '../src/lib/spec-validator';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

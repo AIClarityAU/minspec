@@ -41,7 +41,7 @@ import {
 import { listEpics, type EpicSummary } from '../src/lib/epic-manager';
 import { listAdrs, type AdrSummary } from '../src/lib/adr-manager';
 import { listSpecs } from '../src/lib/spec-catalog';
-import type { SpecSummary } from '../src/views/spec-tree-provider';
+import type { SpecSummary } from '../src/lib/spec-manager';
 import { recentApprovables } from '../src/lib/recent-approvables';
 import { getApprovalStatus } from '../src/lib/approval';
 

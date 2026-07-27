@@ -181,11 +181,19 @@ function goalRankOf(fmBlock: string, goalRanks: Map<string, number>): number | u
 // ───────────────────────────────────────────────────────────────────────────
 // Spec discovery — recursive walk + split-layout dedupe.
 //
-// `listSpecs` reads only top-level `specs/` entries, so the real repo's nested
-// `specs/<product>/<feature>/requirements.md` (two levels deep) is invisible to
-// it (the §1f gap). We do our own recursive walk and dedupe split-layout siblings
-// (`requirements.md` / `design.md` / `tasks.md` sharing one id) by id, taking the
-// `specify`-phase file that OWNS approval as the canonical node:
+// Deliberately NOT shared with `lib/spec-catalog`'s recursive `listSpecs`: that
+// returns `SpecSummary`, a pane-shaped projection which drops both the parsed
+// body and the raw frontmatter block. The graph needs the whole `ParsedSpec`
+// per spec — `parsed.raw` is what `frontmatterBlock` re-reads below to resolve
+// the `goal:`/`epic:` refs `SpecSummary` never carries — so it walks once here.
+// Beware the near-namesake: the top-level-only scan this comment once cited as
+// the reason for the walk is `listSpecsShallow` (`lib/spec-manager`), renamed
+// out of the way by SPEC-040 FR-4; `listSpecs` is the recursive one and does
+// reach the real repo's nested `specs/<product>/<feature>/requirements.md`.
+//
+// The walk dedupes split-layout siblings (`requirements.md` / `design.md` /
+// `tasks.md` sharing one id) by id, taking the `specify`-phase file that OWNS
+// approval as the canonical node:
 //   requirements.md  ▸  spec.md  ▸  (first seen)
 // ───────────────────────────────────────────────────────────────────────────
 

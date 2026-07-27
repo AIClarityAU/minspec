@@ -17,8 +17,6 @@ import type { SpecSummary } from '../lib/spec-manager';
 import { EpicGroupingState, EpicGroupNode, buildEpicGroups } from './epic-grouping';
 import type { ListEpicsFn } from './epic-grouping';
 import { TreeExpansionMemory } from './tree-expansion-memory';
-export type { SpecSummary };
-
 import { listSpecs } from '../lib/spec-catalog';
 
 // --- Status grouping ---
