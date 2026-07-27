@@ -20,7 +20,7 @@ vi.mock('vscode', () => ({
 
 // ─── Mock lib deps ────────────────────────────────────────────────────────────
 
-vi.mock('../src/views/spec-tree-provider', () => ({
+vi.mock('../src/lib/spec-catalog', () => ({
   listSpecs: vi.fn(),
 }));
 
@@ -58,14 +58,14 @@ vi.mock('../src/lib/spec-layout', () => ({
 
 import * as vscode from 'vscode';
 import { validateSpecCommand } from '../src/commands/validate';
-import { listSpecs } from '../src/views/spec-tree-provider';
+import { listSpecs } from '../src/lib/spec-catalog';
 import { readSpecFile } from '../src/lib/spec';
 import { loadConfig } from '../src/lib/config';
 import { validateSpec } from '../src/lib/spec-validator';
 import { epicRefSet } from '../src/lib/epic-manager';
 import { getApprovalStatus } from '../src/lib/approval';
 import { readShardIdFiles } from '../src/lib/spec-layout';
-import type { SpecSummary } from '../src/views/spec-tree-provider';
+import type { SpecSummary } from '../src/lib/spec-manager';
 import type { ValidationResult, ValidationViolation } from '../src/lib/spec-validator';
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────

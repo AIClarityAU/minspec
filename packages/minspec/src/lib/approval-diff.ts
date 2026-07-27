@@ -18,7 +18,18 @@ import * as path from 'path';
 import * as vscode from 'vscode';
 import { getApprovalRecord, recoverBaseline, recoverBaselineFromHistory } from './approval';
 import { getSpecBodyOnly } from '@aiclarity/shared';
-import type { SpecNode } from '../views/spec-tree-provider';
+/**
+ * SPEC-040 FR-5: the structural shape of the tree row VS Code hands to the
+ * context-menu command. Declared locally instead of importing `SpecNode` from
+ * `views/spec-tree-provider` — that was a Tier-0 `lib` file reaching *up* into
+ * `views` (the layering inversion FR-1 bans) purely to name a type. The real
+ * `SpecNode` structurally satisfies this (it exposes `spec: SpecSummary`), so
+ * every existing call site still type-checks with no cast at the boundary, and
+ * `lib` no longer depends on how the tree renders.
+ */
+export interface SpecNodeArg {
+  readonly spec: { readonly filePath: string };
+}
 
 export type DiffSide = 'approved' | 'current';
 
@@ -121,10 +132,10 @@ export function specPathFromApprovalDiffUri(uri: vscode.Uri): string | undefined
  * `rootDir` is injected by the registration closure (extension.ts), never a
  * passed command argument.
  */
-export async function showChangesSinceApproval(rootDir: string, arg?: SpecNode | string): Promise<void> {
+export async function showChangesSinceApproval(rootDir: string, arg?: SpecNodeArg | string): Promise<void> {
   const specFilePath: string | undefined =
     typeof arg === 'string' ? arg
-      : arg && typeof arg === 'object' && 'spec' in arg ? (arg as SpecNode).spec.filePath
+      : arg && typeof arg === 'object' && 'spec' in arg ? (arg as SpecNodeArg).spec.filePath
         : vscode.window.activeTextEditor?.document.uri.fsPath;
 
   const degrade = (message: string): void => {

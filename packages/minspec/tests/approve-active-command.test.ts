@@ -24,7 +24,7 @@ vi.mock('vscode', () => ({
 // artifact?" — mock them so routing is exercised without touching the filesystem.
 vi.mock('../src/lib/epic-manager', () => ({ listEpics: vi.fn(() => []) }));
 vi.mock('../src/lib/adr-manager', () => ({ listAdrs: vi.fn(() => []) }));
-vi.mock('../src/views/spec-tree-provider', () => ({ listSpecs: vi.fn(() => []) }));
+vi.mock('../src/lib/spec-catalog', () => ({ listSpecs: vi.fn(() => []) }));
 vi.mock('../src/lib/recent-approvables', () => ({ recentApprovables: vi.fn(() => []) }));
 // Approval status drives the spec pending-filter; default everything to unapproved.
 vi.mock('../src/lib/approval', () => ({ getApprovalStatus: vi.fn(() => 'unapproved') }));
@@ -40,8 +40,8 @@ import {
 } from '../src/commands/approve-active';
 import { listEpics, type EpicSummary } from '../src/lib/epic-manager';
 import { listAdrs, type AdrSummary } from '../src/lib/adr-manager';
-import { listSpecs } from '../src/views/spec-tree-provider';
-import type { SpecSummary } from '../src/views/spec-tree-provider';
+import { listSpecs } from '../src/lib/spec-catalog';
+import type { SpecSummary } from '../src/lib/spec-manager';
 import { recentApprovables } from '../src/lib/recent-approvables';
 import { getApprovalStatus } from '../src/lib/approval';
 

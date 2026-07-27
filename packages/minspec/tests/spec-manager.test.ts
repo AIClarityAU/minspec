@@ -4,7 +4,7 @@ import * as path from 'path';
 import * as os from 'os';
 import {
   createSpec,
-  listSpecs,
+  listSpecsShallow,
   getSpec,
   transitionPhase,
   archiveSpecById,
@@ -275,7 +275,7 @@ phases:
   });
 });
 
-describe('listSpecs()', () => {
+describe('listSpecsShallow()', () => {
   let rootDir: string;
 
   beforeEach(() => {
@@ -287,7 +287,7 @@ describe('listSpecs()', () => {
   });
 
   it('returns empty array when no specs exist', () => {
-    expect(listSpecs(rootDir)).toEqual([]);
+    expect(listSpecsShallow(rootDir)).toEqual([]);
   });
 
   it('lists all specs', () => {
@@ -295,7 +295,7 @@ describe('listSpecs()', () => {
     createSpec(rootDir, 'Second');
     createSpec(rootDir, 'Third');
 
-    const specs = listSpecs(rootDir);
+    const specs = listSpecsShallow(rootDir);
     expect(specs).toHaveLength(3);
     expect(specs[0].id).toBe('SPEC-001');
     expect(specs[1].id).toBe('SPEC-002');
@@ -308,11 +308,11 @@ describe('listSpecs()', () => {
     const s2 = createSpec(rootDir, 'Active spec');
     transitionPhase(rootDir, s2.id, 'advance');
 
-    const newSpecs = listSpecs(rootDir, { status: 'new' });
+    const newSpecs = listSpecsShallow(rootDir, { status: 'new' });
     expect(newSpecs).toHaveLength(1);
     expect(newSpecs[0].id).toBe('SPEC-001');
 
-    const specifyingSpecs = listSpecs(rootDir, { status: 'specifying' });
+    const specifyingSpecs = listSpecsShallow(rootDir, { status: 'specifying' });
     expect(specifyingSpecs).toHaveLength(1);
     expect(specifyingSpecs[0].id).toBe('SPEC-002');
   });
@@ -322,7 +322,7 @@ describe('listSpecs()', () => {
     createSpec(rootDir, 'Medium task', 'T2');
     createSpec(rootDir, 'Complex task', 'T3');
 
-    const t1Specs = listSpecs(rootDir, { tier: 'T1' });
+    const t1Specs = listSpecsShallow(rootDir, { tier: 'T1' });
     expect(t1Specs).toHaveLength(1);
     expect(t1Specs[0].title).toBe('Simple fix');
   });
@@ -331,7 +331,7 @@ describe('listSpecs()', () => {
     createSpec(rootDir, 'T1 new', 'T1');
     createSpec(rootDir, 'T2 new', 'T2');
 
-    const results = listSpecs(rootDir, { status: 'new', tier: 'T1' });
+    const results = listSpecsShallow(rootDir, { status: 'new', tier: 'T1' });
     expect(results).toHaveLength(1);
     expect(results[0].title).toBe('T1 new');
   });
@@ -342,7 +342,7 @@ describe('listSpecs()', () => {
     const specsDir = path.join(rootDir, DEFAULT_CONFIG.specsDir);
     fs.writeFileSync(path.join(specsDir, 'README.md'), '# Readme\n');
 
-    const specs = listSpecs(rootDir);
+    const specs = listSpecsShallow(rootDir);
     expect(specs).toHaveLength(1);
   });
 
@@ -353,8 +353,8 @@ describe('listSpecs()', () => {
       `---\nid: SPEC-001\ntitle: Scoped spec\ntier: T2\nstatus: new\ncreated: 2026-01-01\nproduct: scroogellm\nphases:\n  specify: pending\n  clarify: pending\n  plan: pending\n  tasks: pending\n  implement: pending\n---\n\n# Scoped spec\n`,
     );
 
-    const [summary] = listSpecs(rootDir);
-    // Bug: buildSummary omitted product, so listSpecs/getSpec returned product=undefined.
+    const [summary] = listSpecsShallow(rootDir);
+    // Bug: buildSummary omitted product, so listSpecsShallow/getSpec returned product=undefined.
     expect(summary.product).toBe('scroogellm');
     expect(getSpec(rootDir, 'SPEC-001')!.summary.product).toBe('scroogellm');
   });
@@ -367,7 +367,7 @@ describe('listSpecs()', () => {
       '---\r\nid: SPEC-001\r\ntitle: Windows authored\r\ntier: T2\r\nstatus: new\r\ncreated: 2026-06-05\r\n---\r\n\r\n## Specify\r\n\r\nBody.\r\n';
     writeRawSpec(rootDir, 'SPEC-001-windows-authored.md', crlf);
 
-    const specs = listSpecs(rootDir);
+    const specs = listSpecsShallow(rootDir);
     expect(specs).toHaveLength(1);
     expect(specs[0].id).toBe('SPEC-001');
     expect(specs[0].title).toBe('Windows authored');
@@ -607,7 +607,7 @@ describe('deleteSpec()', () => {
 
     deleteSpec(rootDir, 'SPEC-001', true);
 
-    const specs = listSpecs(rootDir);
+    const specs = listSpecsShallow(rootDir);
     expect(specs).toHaveLength(1);
     expect(specs[0].id).toBe('SPEC-002');
   });
@@ -684,16 +684,16 @@ describe('spec-kit layout — createSpec', () => {
     expect(summary.filePath.endsWith(path.join('001-another-feature', 'spec.md'))).toBe(true);
   });
 
-  it('listSpecs surfaces spec-kit specs', () => {
+  it('listSpecsShallow surfaces spec-kit specs', () => {
     createSpec(rootDir, 'First');
     createSpec(rootDir, 'Second');
-    const specs = listSpecs(rootDir);
+    const specs = listSpecsShallow(rootDir);
     expect(specs).toHaveLength(2);
     expect(specs[0].id).toBe('SPEC-001');
     expect(specs[1].id).toBe('SPEC-002');
   });
 
-  it('listSpecs reads flat + spec-kit side by side (mixed project)', () => {
+  it('listSpecsShallow reads flat + spec-kit side by side (mixed project)', () => {
     // Create a spec in spec-kit layout (current config)
     createSpec(rootDir, 'New kit spec');
 
@@ -717,7 +717,7 @@ phases:
 `,
     );
 
-    const specs = listSpecs(rootDir);
+    const specs = listSpecsShallow(rootDir);
     expect(specs).toHaveLength(2);
     const ids = specs.map(s => s.id).sort();
     expect(ids).toEqual(['SPEC-001', 'SPEC-002']);

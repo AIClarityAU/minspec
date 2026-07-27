@@ -60,7 +60,8 @@ vi.mock('vscode', () => ({
 }));
 
 import { SpecTreeProvider, SpecNode } from '../src/views/spec-tree-provider';
-import type { SpecSummary, SpecTreeNode } from '../src/views/spec-tree-provider';
+import type { SpecTreeNode } from '../src/views/spec-tree-provider';
+import type { SpecSummary } from '../src/lib/spec-manager';
 import { AdrTreeProvider, AdrNode } from '../src/views/adr-tree-provider';
 import type { AdrTreeNode, ListAdrsFn } from '../src/views/adr-tree-provider';
 import type { AdrSummary } from '../src/lib/adr-manager';

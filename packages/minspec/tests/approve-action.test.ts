@@ -66,7 +66,7 @@ vi.mock('../src/lib/phase-advance-queue', () => ({
   enqueuePhaseAdvance: vi.fn(),
 }));
 
-vi.mock('../src/views/spec-tree-provider', () => ({
+vi.mock('../src/lib/spec-catalog', () => ({
   listSpecs: vi.fn(),
 }));
 
@@ -116,14 +116,14 @@ vi.mock('../src/lib/spec-layout', () => ({
 
 import * as vscode from 'vscode';
 import { approveSpecCommand, revokeApprovalCommand } from '../src/commands/approve';
-import { listSpecs } from '../src/views/spec-tree-provider';
+import { listSpecs } from '../src/lib/spec-catalog';
 import {
   approveSpec,
   revokeApproval,
   getApprovalStatus,
 } from '../src/lib/approval';
 import type { ApprovalStatus } from '../src/lib/approval';
-import type { SpecSummary } from '../src/views/spec-tree-provider';
+import type { SpecSummary } from '../src/lib/spec-manager';
 import { readSpecFile, advanceSpecToImplementing } from '../src/lib/spec';
 import { validateSpec } from '../src/lib/spec-validator';
 import { readShardIdFiles } from '../src/lib/spec-layout';

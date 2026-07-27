@@ -1,7 +1,7 @@
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
-import type { SpecSummary } from '../views/spec-tree-provider';
+import type { SpecSummary } from '../lib/spec-manager';
 
 /** A tree node carrying a SpecSummary (from the spec tree context menu). */
 interface SpecNodeLike {

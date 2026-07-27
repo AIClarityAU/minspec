@@ -195,8 +195,8 @@ function findRequirementLine(document: vscode.TextDocument, requirementKey: stri
 /**
  * Rank a spec phase-file basename so a split-layout spec (requirements/design/
  * tasks.md sharing one `id`) resolves to its canonical file. Mirrors the ranking
- * used by spec-tree-provider's listSpecs: requirements.md wins, then spec.md,
- * then design.md, then anything else. Lower rank = preferred.
+ * used by `lib/spec-catalog`'s recursive `listSpecs` (its `rankOf`): requirements.md
+ * wins, then spec.md, then design.md, then anything else. Lower rank = preferred.
  */
 function specFileRank(name: string): number {
   return name === 'requirements.md' ? 0
@@ -212,7 +212,7 @@ function specFileRank(name: string): number {
  * `id: SPEC-NNN` is in frontmatter, NOT the filename (#150). A flat
  * `readdirSync` + filename `startsWith(specId)` scan therefore never matched
  * the nested layout and goToSpec always failed. We now recurse the specs tree
- * (mirroring spec-tree-provider's `walk`), parse each `.md`'s frontmatter, and
+ * (mirroring `lib/spec-catalog`'s `walk`), parse each `.md`'s frontmatter, and
  * return the file whose `id` equals specId — tie-breaking toward the canonical
  * requirements.md/spec.md. The old filename `startsWith` match is kept only as a
  * fallback for genuinely flat layouts (e.g. `SPEC-001.md` at the top level).

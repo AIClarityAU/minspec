@@ -1,6 +1,6 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
-import { listSpecs, type SpecSummary } from '../views/spec-tree-provider';
+import { listSpecs, type SpecSummary } from '../lib/spec-catalog';
 import { readSpecFile, advanceSpecToImplementing } from '../lib/spec';
 import { loadConfig } from '../lib/config';
 import { validateSpec } from '../lib/spec-validator';

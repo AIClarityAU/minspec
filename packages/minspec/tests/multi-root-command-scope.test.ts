@@ -55,7 +55,11 @@ const SPEC_IN_B = '/tmp/root-b/specs/minspec/SPEC-042/spec.md';
 
 // ─── Command-specific lib mocks ────────────────────────────────────────────────
 
-vi.mock('../src/views/spec-tree-provider', () => ({
+// The catalog scan, stubbed so no command under test walks a real fs tree.
+// SPEC-040 FR-4 moved the recursive listSpecs out of views/spec-tree-provider
+// into lib/spec-catalog — the module named here must be the one the commands
+// actually import, or the stub silently mocks nothing.
+vi.mock('../src/lib/spec-catalog', () => ({
   listSpecs: vi.fn(() => []),
 }));
 vi.mock('../src/lib/spec', () => ({
@@ -115,7 +119,7 @@ import {
   revokeApproval as removeApproval,
   getApprovalStatus,
 } from '../src/lib/approval';
-import type { SpecSummary } from '../src/views/spec-tree-provider';
+import type { SpecSummary } from '../src/lib/spec-manager';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 

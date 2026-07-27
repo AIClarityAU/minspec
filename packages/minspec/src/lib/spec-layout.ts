@@ -192,7 +192,8 @@ const SPEC_TYPE_SET = new Set<string>(SPLIT_LAYOUT_TYPE_NAMES);
  *   (#277) already filter on. A file merely NAMED e.g. "design.md", with no
  *   `type:` set, is an ordinary independent single-file spec that happens to
  *   share a canonical basename with an unrelated spec in the same directory
- *   (spec-tree-provider.ts's documented per-file-id invariant, lines 51-58) —
+ *   (the per-file-id invariant documented on `listSpecs`'s `rolesById` map in
+ *   lib/spec-catalog.ts) —
  *   not a shard, and must not be compared.
  * - The strict GitHub Spec Kit convention (`spec.md`/`plan.md`/`tasks.md`,
  *   body-only except spec.md, no `type:` field at all): genuineness instead

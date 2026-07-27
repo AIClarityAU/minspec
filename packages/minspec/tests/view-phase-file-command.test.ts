@@ -13,7 +13,7 @@ vi.mock('fs');
 
 import * as vscode from 'vscode';
 import { viewDesignCommand, viewTasksCommand } from '../src/commands/view-phase-file';
-import type { SpecSummary } from '../src/views/spec-tree-provider';
+import type { SpecSummary } from '../src/lib/spec-manager';
 
 function summary(filePath: string): SpecSummary {
   return {

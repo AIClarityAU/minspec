@@ -54,7 +54,8 @@ vi.mock('vscode', () => ({
 import * as vscode from 'vscode';
 import { allWorkspaceRoots } from '../src/lib/resolve-folder';
 import { SpecTreeProvider, SpecNode } from '../src/views/spec-tree-provider';
-import type { SpecSummary, SpecTreeNode } from '../src/views/spec-tree-provider';
+import type { SpecTreeNode } from '../src/views/spec-tree-provider';
+import type { SpecSummary } from '../src/lib/spec-manager';
 import { AdrTreeProvider, AdrNode } from '../src/views/adr-tree-provider';
 import type { AdrTreeNode } from '../src/views/adr-tree-provider';
 import type { AdrSummary } from '../src/lib/adr-manager';

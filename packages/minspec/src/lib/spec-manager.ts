@@ -44,10 +44,12 @@ export interface SpecSummary {
    * id, not merely a file with that name sitting in the same directory (a flat
    * directory can hold several independently-numbered specs, e.g. this repo's
    * own specs/minspec/{requirements,design,tasks}.md are SPEC-001/002/003, not
-   * three phase-files of one spec). Computed once in listSpecs()'s directory
-   * walk, which already parses every candidate file's frontmatter — gates the
-   * SPECS-pane's "View Design"/"View Tasks" menu items without re-deriving the
-   * same fact via a second fs pass per node, per render.
+   * three phase-files of one spec). Computed once in the recursive
+   * `listSpecs()`'s directory walk (`lib/spec-catalog.ts`, which already parses
+   * every candidate file's frontmatter) — gates the SPECS-pane's "View Design"/
+   * "View Tasks" menu items without re-deriving the same fact via a second fs
+   * pass per node, per render. Optional because the shallow `listSpecsShallow`
+   * below builds its summaries via `buildSummary`, which never populates them.
    */
   readonly hasDesignFile?: boolean;
   readonly hasTasksFile?: boolean;
@@ -403,7 +405,7 @@ export function createSpec(
  * Returns specs from both flat files and spec-kit directories
  * (so a project mid-migration stays readable).
  */
-export function listSpecs(
+export function listSpecsShallow(
   rootDir: string,
   filter?: { status?: SpecStatus; tier?: Tier },
 ): SpecSummary[] {
@@ -611,7 +613,7 @@ export function migrateLayout(rootDir: string, target: SpecsLayout): MigrationRe
     return { success: true, migrated: 0, target };
   }
 
-  const summaries = listSpecs(rootDir);
+  const summaries = listSpecsShallow(rootDir);
   let migrated = 0;
   const toDelete: SpecEntry[] = [];
 

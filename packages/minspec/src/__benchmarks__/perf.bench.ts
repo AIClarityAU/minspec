@@ -47,7 +47,7 @@ import type { MinspecConfig, Tier } from '../lib/config';
 import { DEFAULT_CONFIG } from '../lib/config';
 import { parseSpec } from '../lib/spec';
 import { SpecTreeProvider } from '../views/spec-tree-provider';
-import type { SpecSummary } from '../views/spec-tree-provider';
+import type { SpecSummary } from '../lib/spec-manager';
 import type { TraceabilityData } from '../lib/traceability';
 import { findRequirementsForFile, addFileMapping, addTestMapping } from '../lib/traceability';
 
