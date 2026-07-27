@@ -26,7 +26,7 @@ import {
   type ReferenceRegistry,
 } from '../packages/minspec/src/lib/reference-checker';
 import { listOrphanedRecords } from '../packages/minspec/src/lib/approval-store';
-import { checkStatusParity } from '../packages/minspec/src/lib/status-parity';
+import { checkStatusParity, inspectStatusLine } from '../packages/minspec/src/lib/status-parity';
 import { checkManagedRegionMarkers } from '../packages/minspec/src/lib/scaffold';
 import { SELF_HOSTED_TEMPLATE_NAMES } from '../packages/minspec/src/lib/template-registry';
 import { detectTools } from '../packages/minspec/src/lib/tool-detector';
@@ -340,11 +340,21 @@ try {
 // line whose leading token is a RECOGNISED status word AND differs is flagged, so free-form
 // status prose ("Clarify complete — awaiting Approve", "Specifying (derived — …)") can never
 // false-positive (a false error would block a legitimate commit).
+//
+// Rule 11b (WARN, #968): a status line the parser CANNOT READ must be visible.
+// A silent non-comparable is how #968 hid — the DR arm could not read an emphasised
+// "**Proposed**, …" line, returned "not comparable", and that was indistinguishable from
+// "agrees". The register's only 2 real mismatches were exactly the 2 files it could not
+// read, so the FATAL rule above reported nothing while missing 2/2 defects. Reading
+// failures are now counted and surfaced: still non-blocking (an unreadable line is not
+// proof of a defect, and a false FATAL would block legitimate commits), but never silent.
+// Constitution invariant #2 — no silent gate.
 try {
   const parityFiles: { file: string; kind: 'spec' | 'dr' }[] = [
     ...safeGlob(specsDir, '.md').map((file) => ({ file, kind: 'spec' as const })),
     ...safeGlob(resolveDecisionsDir(), '.md').map((file) => ({ file, kind: 'dr' as const })),
   ];
+  const unreadable: string[] = [];
   for (const { file, kind } of parityFiles) {
     const content = readFileSync(file, 'utf-8');
     const fm = parseFrontmatter(content);
@@ -355,6 +365,17 @@ try {
         `status parity (#626) — frontmatter \`status: ${finding.frontmatter}\` disagrees with the body status line "${finding.body}" (line ${finding.line}). Reconcile the two: advance/correct whichever is stale. A file showing two different statuses is a false signpost.`,
       );
     }
+    const shape = inspectStatusLine(content, kind);
+    if (shape.kind === 'unparseable') {
+      unreadable.push(`${relative(ROOT, file)}:${shape.line} "${shape.text}"`);
+    }
+  }
+  if (unreadable.length > 0) {
+    const shown = unreadable.slice(0, 5).join('; ');
+    const more = unreadable.length > 5 ? ` (+${unreadable.length - 5} more)` : '';
+    warn(
+      `status parity (#968) — ${unreadable.length} status line(s) exist but could not be read, so rule 11 is NOT checking them: ${shown}${more}. Either reword to lead with a status word, or teach status-parity.ts the shape.`,
+    );
   }
 } catch {
   // Corpus unreadable / absent — nothing to check.

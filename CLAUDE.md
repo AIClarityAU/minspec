@@ -146,7 +146,7 @@ reference that **spans projects** — a minspec DR citing a scrooge spec, a comm
 or issue body pointing at another repo's item — carries the target project's code
 from `.minspec/project-prefixes.md`, so the ref is unambiguous out of context.
 
-**DR-053 v2 (proposed) — paragraph-addressable, slash-joined, no-pad.** Every
+**DR-053 v2 (accepted 2026-07-14) — paragraph-addressable, slash-joined, no-pad.** Every
 referenceable item (approvable *and* the typed paragraphs/rows inside it) has an id
 of up to three segments that **elide** left-to-right when context implies them:
 
@@ -157,10 +157,11 @@ of up to three segments that **elide** left-to-right when context implies them:
   (`FR OQ R AC INV AL CR CQ FU M G RD DV`) + number (see DR-053 §3 for the table).
 - Store the **fullest unambiguous form for the scope**; elision is display-only.
 
-> **Transition.** v2 is `proposed`, not accepted; the corpus is **not migrated yet**
-> (record now, reformat later). The `project-prefix` module still emits the **v1**
-> dash grammar (`MS-SPEC-019` → now `MIN-SPEC-019` with the 3-letter code) until its
-> tracked follow-up lands the `/`-joined paragraph grammar. Until then, write refs in
+> **Transition.** v2 is **accepted** (2026-07-14) but **not yet shipped** — accepted is a
+> decision, not an implementation. The corpus is **not migrated yet** (record now, reformat
+> later) and the `project-prefix` module still emits the **v1** dash grammar
+> (`MS-SPEC-019` → now `MIN-SPEC-019` with the 3-letter code) until #679 lands the
+> `/`-joined paragraph grammar and #681 migrates the corpus. Until then, write refs in
 > whichever form is clearest and don't mass-rewrite.
 
 An **unknown** code is advisory — the assistant suggests one (`suggestPrefixDeterministic`
