@@ -11,7 +11,7 @@ type: requirements
 # together with the sidecar. An agent must never hand-write either — that forges a sign-off.
 # When an edit voids the approval, the honest interim is to set this DOWN to `specifying`
 # (under-claim) and let spec-gate block; only the human's Alt+A restores it.
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core — the onboarding page is the front door to init/classify/refresh/approval gates (see notes: a dedicated onboarding/first-run EPIC would be the ideal home)
