@@ -190,8 +190,10 @@ vi.mock('../src/views/backlog-view', () => ({
 vi.mock('../src/views/frontmatter-completion', () => ({
   FrontmatterCompletionProvider: vi.fn(function () { return {}; }),
 }));
-// Partial mock: keep real pure helpers (fromFrontmatter) so injectContext can
-// derive currentPhase from spec frontmatter.
+// Partial mock: stub the status-bar classes and forward the module's other real
+// exports. `fromFrontmatter` moved to `lib/spec-progress` in SPEC-040 FR-5 and is
+// no longer mocked here at all, so injectContext still derives currentPhase from
+// spec frontmatter via the real helper.
 vi.mock('../src/views/status-bar', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/views/status-bar')>()),
   MinSpecNextTaskStatusBar: vi.fn(function () { return mockNextTaskStatusBar; }),

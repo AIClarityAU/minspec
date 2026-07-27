@@ -222,9 +222,13 @@ vi.mock('../src/views/adr-tree-provider', () => ({
 vi.mock('../src/views/backlog-view', () => ({
   BacklogTreeProvider: vi.fn(function () { return mockBacklogTreeProvider; }),
 }));
-// Partial mock: stub the status-bar class but forward the real pure helpers
-// (fromFrontmatter, computeProgress, …) so injectContextCommand can derive the
-// current phase from frontmatter the same way the bar does (#149).
+// Partial mock: stub the status-bar classes, forwarding everything else through
+// `importOriginal`. Since SPEC-040 FR-5 the pure helpers (fromFrontmatter,
+// computeProgress) no longer live here — extension.ts imports them from the
+// unmocked `lib/spec-progress`, so injectContextCommand still derives the
+// current phase from frontmatter exactly as before (#149). The spread is kept
+// because this mock must not blank out the module's remaining real exports
+// (formatNextTaskText, resolveNextTaskKeybinding, …).
 vi.mock('../src/views/status-bar', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/views/status-bar')>()),
   MinSpecNextTaskStatusBar: vi.fn(function () { return mockNextTaskStatusBar; }),
