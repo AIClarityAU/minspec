@@ -128,6 +128,15 @@ describe('Invariant 2: No backend — no network calls', () => {
     // no network, never pushes — same Tier-0 posture as approval.ts. See
     // approve-commit.ts commitApproval.
     'lib/approve-commit.ts',
+    // Push-on-approve: the fix for approvals stranded on one machine (Alt+A commits
+    // but never pushes; approvals are made on protected `main`, where a direct push
+    // is rejected). UNLIKE every other entry above, this one DOES make a network
+    // call — so it is allowlisted on the CONSENT clause of constitution invariant #1
+    // ("no network calls without explicit user consent"), not on a "local git only"
+    // claim. It is unreachable unless `minspec.pushOnApprove` is `always` (the
+    // setting IS the consent) or the user clicks Push on the `prompt` default; the
+    // shipped default sends nothing. See approve-push.ts pushApproval.
+    'lib/approve-push.ts',
     // DR-037 / #247: scaffold points the project's git `core.hooksPath` at
     // .minspec/hooks (via `git config --local core.hooksPath`) so the
     // editor-independent SDD hooks run on every commit. Local git config write —

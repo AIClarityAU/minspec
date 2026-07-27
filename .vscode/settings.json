@@ -10,6 +10,15 @@
     ],
     "minspec.autoClassifyOnCommit": true,
 
+    // Push every approval as soon as it is committed. Setting this IS the explicit
+    // consent constitution invariant #1 requires — the shipped DEFAULT is "prompt",
+    // which sends nothing until you click; this repo opts in deliberately.
+    // `main` is protected here, so a direct push would be rejected: MinSpec instead
+    // pushes the same commit on an `approvals/…` branch and offers the PR link.
+    // Without this, every Alt+A strands its record on one machine (three duplicate
+    // recovery PRs were opened for the same two records on 2026-07-27).
+    "minspec.pushOnApprove": "always",
+
     // Surface the stdlib-unittest hook tests (scripts/hooks/test_*.py) in the
     // Testing panel. These run canonical.py / the spec-gate as subprocesses and
     // are invisible to the Vitest and Extension Test Runner controllers.
