@@ -65,15 +65,43 @@ if [[ "${ISSUE:-}" == "--check-native-automerge" ]]; then
   if native_automerge_enabled; then echo "on"; exit 0; else echo "off"; exit 1; fi
 fi
 
-# paths_have_approvable_doc (#833): does a set of changed paths (newline-separated on
-# stdin) touch something a HUMAN — not `ai-review:pass` — must own the merge of? An
-# ai-review:pass vets whether a DIFF is sound, NOT whether a design choice baked into a
-# requirements.md / DR, a change to the sign-off ledger, or a relaxation of a GOVERNANCE
-# POLICY is the human's call. Such an agent PR must NOT arm native auto-merge (DR-061);
-# it lands as a human-reviewed proposal, like the machinery self-edit exclusion.
+# PUBLISH_PATH_RE (#981) — paths whose MERGE TO MAIN *is* a publish to the public
+# internet. Mandate 3 of the withhold set below; kept as a NAMED constant (not inlined)
+# so the thing that makes it load-bearing can be named:
 #
-# The withhold set is the UNION of two intentionally-distinct mandates (a documented
-# SUPERSET of the docs-lane push corpus, NOT a divergent copy of it):
+#   .github/workflows/deploy-sites.yml — `on: push → branches:[main] → paths:` runs
+#   `wrangler pages deploy` against the PUBLIC Cloudflare Pages project (minspec.dev).
+#   There is no separate deploy keystroke after the merge, so for these paths merging
+#   and publishing are the SAME event.
+#
+# Arms:
+#   ^sites/                                — every deployed site directory.
+#   ^\.github/workflows/deploy-sites\.yml$ — the deploy definition is itself a push-path
+#     trigger. DEFENCE-IN-DEPTH, not the primary control: `^\.github/` can never earn a
+#     valid `ai-review:pass` (ai-review.yml's self-edit machinery guard forces `changes`
+#     and posts no SHA-bound pass witness), so this arm is deliberately redundant with
+#     that guard — do NOT drop it as "already covered", because it is what lets the
+#     lock-step sync test below be TOTAL over the workflow's `paths:` list.
+#
+# LOCK-STEP: a sync test (packages/minspec/tests/dispatch-automerge-publish-exclusion.
+# test.ts) asserts this regex still covers every `paths:` entry under `on.push` — and
+# every matrix `dir:` — in deploy-sites.yml, so a newly-deployed directory added to the
+# workflow cannot silently escape the withhold.
+PUBLISH_PATH_RE='^sites/|^\.github/workflows/deploy-sites\.yml$'
+
+# paths_have_approvable_doc (#833, extended #981): does a set of changed paths
+# (newline-separated on stdin) touch something a HUMAN — not `ai-review:pass` — must own
+# the merge of? An ai-review:pass vets whether a DIFF is sound, NOT whether a design
+# choice baked into a requirements.md / DR, a change to the sign-off ledger, a
+# relaxation of a GOVERNANCE POLICY, or the act of PUBLISHING to the public internet is
+# the human's call. Such an agent PR must NOT arm native auto-merge (DR-061); it lands
+# as a human-reviewed proposal, like the machinery self-edit exclusion. (The name is
+# historical — the predicate it answers is the broader "must a human own this merge?";
+# it is the pure seam's stable contract, so it is kept rather than churned.)
+#
+# The withhold set is the UNION of three intentionally-distinct mandates (a documented
+# SUPERSET of the docs-lane push corpus, NOT a divergent copy of it) — two about WHO
+# OWNS THE CONTENT, one about WHAT MERGING THE PATH DOES:
 #   1. DOCS_CORPUS_RE — the docs-lane / human-owned DOC corpus (specs/**, docs/**,
 #      .minspec/approvals/**, top-level *.md), the SHARED single source of truth that
 #      keeps this the 4th lock-step enforcer alongside push-docs.sh / docs-corpus.ts /
@@ -85,14 +113,26 @@ fi
 #      .minspec/constitution.md the invariants, .minspec/project-prefixes.md the
 #      DR-053 ref grammar, and .cursorrules the top-level agent-behaviour rules. All of
 #      .minspec/ is governance/config/state — none should auto-merge on ai-review:pass.
+#   3. PUBLISH_PATH_RE (#981) — CONSEQUENCE, not ownership: merging the path publishes
+#      to the public internet (sites/** → Cloudflare Pages). Mandates 1-2 both ask "who
+#      wrote this?"; nothing asked "what does landing it DO?", so a sites/**-only agent
+#      PR with a genuine ai-review:pass armed native auto-merge and self-published with
+#      ZERO human keystrokes. The maintainer's standing "published sites are human-only"
+#      policy existed ONLY as prose in an LLM triage prompt (scripts/roles/triage.md:38)
+#      — an instruction the model must remember, which is not a gate. Constitution
+#      invariant DR-066 (no silent gate) + "enforce via code, don't hope" ⇒ deterministic
+#      withhold here. NB triage.md's filter is issue-level anyway; it can never bind a
+#      diff, since any issue's build may touch sites/**.
 # The spec-gate deliberately ALLOWS editing spec docs (doc-before-CODE, so a spec can
 # be fixed toward approval); this is the symmetric MERGE-side guard. Exit 0 (= withhold)
-# if ANY path matches, else 1.
+# if ANY path matches, else 1. Fail-closed on an unknown/unreadable changed-set is NOT
+# this pure classifier's job — it lives at the arm site (the nonzero + empty branches),
+# so "no match" is never conflated with "could not tell".
 paths_have_approvable_doc() {
-  grep -qE "${DOCS_CORPUS_RE}"'|^\.minspec/|^\.cursorrules$'
+  grep -qE "${DOCS_CORPUS_RE}"'|^\.minspec/|^\.cursorrules$'"|${PUBLISH_PATH_RE}"
 }
 
-# Pure seam: prove the approvable-doc classifier without gh/dispatch. Paths on stdin.
+# Pure seam: prove the withhold classifier without gh/dispatch. Paths on stdin.
 if [[ "${ISSUE:-}" == "--paths-have-approvable-doc" ]]; then
   if paths_have_approvable_doc; then echo "hold"; exit 0; else echo "arm"; exit 1; fi
 fi
@@ -503,7 +543,19 @@ run_reviewer_stage() {
       echo "  → native auto-merge WITHHELD on PR #$pr_num — empty changed-file enumeration; failing closed (#833). Labeled needs-human-review."
     elif paths_have_approvable_doc <<<"$changed_files"; then
       gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
-      echo "  → native auto-merge WITHHELD on PR #$pr_num — touches the docs-lane corpus (spec/DR/docs/approval-ledger/top-level .md); a human owns this merge (#833). Labeled needs-human-review."
+      # Name the mandate that ACTUALLY matched. The withhold DECISION above is the sole
+      # authority; this only DESCRIBES it, so the two can never disagree about whether
+      # to hold. Reporting "docs-lane corpus" for a sites/** publish PR would be a false
+      # signpost (never-wrong), which is why this is not one fixed string.
+      # Shape note: a default + `&&` override, NOT an if/else/fi block — a `fi` between
+      # the `native_automerge_enabled` guard and the `--auto` arm below is how
+      # drain-selfheal.test.ts detects the policy gate being closed early, so the arm
+      # stays provably inside the single guarded block. errexit-safe: a non-matching
+      # grep is exempt as a non-final command of an `&&` list.
+      local hold_why="touches the docs-lane corpus / .minspec governance config (spec/DR/docs/approval-ledger/top-level .md) (#833)"
+      grep -qE "${PUBLISH_PATH_RE}" <<<"$changed_files" \
+        && hold_why="touches a PUBLISH path (sites/** → public Cloudflare Pages via deploy-sites.yml) — merging IS publishing (#981)"
+      echo "  → native auto-merge WITHHELD on PR #$pr_num — ${hold_why}; a human owns this merge. Labeled needs-human-review."
     elif gh pr merge "$pr_num" --repo "$REPO" --squash --auto 2>/dev/null; then
       echo "  → native auto-merge armed on PR #$pr_num (merges on ai-review:pass)"
     else
