@@ -104,17 +104,35 @@ suite('Screenshots', () => {
       console.log('  Screenshot capture: PIL not available — tests will skip capture');
     }
 
-    // Skip the ENTIRE suite when capture is unavailable (#973). Without capture these
-    // tests execute zero assertions — every body returns early at the `!captureAvailable`
-    // guard — yet they still drive live VS Code UI: opening a Quick Pick, waiting on
-    // render timings, and awaiting a command promise that `closeQuickOpen` does not
-    // always settle. That is all risk and no signal: the suite can FAIL (a 30s timeout,
-    // which is exactly how it blocked #900) but can never pass meaningfully.
+    // Capture-INDEPENDENT fixture checks, hoisted here deliberately (#973 review).
+    // The per-test bodies are skipped below when capture is unavailable, so any check
+    // left inside them would silently stop running in CI. These two are real signals
+    // that do not depend on capture — the workspace fixtures the suite is built on —
+    // so they run unconditionally here rather than being dropped with the skip:
+    //   • specs/SPEC-001-user-auth.md — asserted directly by `spec-panel`
+    //   • src/example.ts             — `codelens` calls openTextDocument on it, which
+    //                                   throws if it is missing
+    assert.ok(
+      fs.existsSync(path.join(workspaceRoot, 'specs', 'SPEC-001-user-auth.md')),
+      'SPEC-001-user-auth.md fixture should exist',
+    );
+    assert.ok(
+      fs.existsSync(path.join(workspaceRoot, 'src', 'example.ts')),
+      'src/example.ts fixture should exist (the codelens screenshot depends on it)',
+    );
+
+    // Skip the remaining suite when capture is unavailable (#973). With the two fixture
+    // checks above hoisted out, every assertion left in the test bodies is about a PNG
+    // that was never taken — so without capture those bodies assert nothing, while still
+    // driving live VS Code UI: opening a Quick Pick, waiting on render timings, and
+    // awaiting a command promise that `closeQuickOpen` does not always settle. That is
+    // risk without signal: they can FAIL (a 30s timeout, exactly how this blocked #900)
+    // but cannot pass meaningfully.
     //
-    // CI has no Pillow, so this skips there and the screenshot tooling keeps working
-    // locally, where Pillow is installed and the assertions are real.
+    // CI has no Pillow, so this skips there; the screenshot tooling keeps working
+    // locally, where Pillow is installed and the capture assertions are real.
     if (!captureAvailable) {
-      console.log('  Skipping the Screenshots suite entirely — no capture, so no assertions to make.');
+      console.log('  Skipping the Screenshots captures — no PIL; fixture checks above still ran.');
       this.skip();
     }
   });
@@ -155,9 +173,10 @@ suite('Screenshots', () => {
   test('spec-panel — active spec panel webview', async function () {
     this.timeout(30000);
 
-    // Open the spec panel with SPEC-001 fixture
+    // Open the spec panel with SPEC-001 fixture. Its existence is asserted in
+    // suiteSetup (capture-independent, so it still runs when captures are skipped);
+    // re-asserting here would duplicate a check that is already guaranteed.
     const specPath = path.join(workspaceRoot, 'specs', 'SPEC-001-user-auth.md');
-    assert.ok(fs.existsSync(specPath), 'SPEC-001-user-auth.md fixture should exist');
 
     await vscode.commands.executeCommand('minspec.showSpecPanel', specPath);
     // Webviews need extra time to render
