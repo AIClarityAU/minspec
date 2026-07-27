@@ -291,6 +291,41 @@ lease_release_all() {
   return 0
 }
 
+# ── Parent-side renew ticker (D10/FR-12; sourced-only API) ───────────────────
+# The agent is CREDENTIAL-FREE (INV-5) so it cannot renew its own claim, and the parent
+# is blocked on the agent subprocess. So the PARENT drives renewal: a background subshell
+# that renews on a WALL-CLOCK timer, INDEPENDENT of build progress — a long, quiet build
+# can never expire its own live claim. Torn down in the same EXIT trap that releases the
+# lease (D6), so it can never outlive the work it protects.
+#
+# Build-independent renew means a HUNG owner (live parent, live ticker, wedged build)
+# would otherwise hold its claim forever. That is bounded by the ABS_MAX ceiling in
+# is_claim_live (claimedAt + LEASE_ABS_MAX_SECS), NOT by the ticker.
+#
+# Not exposed on the CLI: a standalone ticker would die with its own process, so it is
+# only meaningful to a caller that SOURCES this lib and holds it for the build.
+_LEASE_TICKER_PID=""
+
+lease_start_renew_ticker() {
+  local item="${1:?lease_start_renew_ticker needs an item}"
+  [[ -z "$_LEASE_TICKER_PID" ]] || return 0    # idempotent — exactly one ticker per dispatch
+  ( while sleep "$LEASE_RENEW_SECS"; do lease_renew "$item" >/dev/null 2>&1 || true; done ) &
+  _LEASE_TICKER_PID=$!
+  return 0
+}
+
+lease_stop_renew_ticker() {
+  [[ -n "$_LEASE_TICKER_PID" ]] || return 0
+  # Children first: killing the subshell alone would orphan its in-flight `sleep`.
+  # `-P` matches by PARENT pid, so this can never self-match the caller the way a
+  # `pkill -f <pattern>` would.
+  pkill -P "$_LEASE_TICKER_PID" 2>/dev/null || true
+  kill "$_LEASE_TICKER_PID" 2>/dev/null || true
+  wait "$_LEASE_TICKER_PID" 2>/dev/null || true
+  _LEASE_TICKER_PID=""
+  return 0
+}
+
 # reclaim?: drain orphan gate (Slice 3 consumer). Exit 0 iff the claim is absent/expired
 # AND (if stale) the TWO-PHASE grace handshake confirms the owner did not re-assert.
 # A LIVE non-self claim ⇒ exit 1 (skip-live-owned). Kept here so the seam is one source
