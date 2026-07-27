@@ -1,12 +1,11 @@
 ---
 id: SPEC-042
 type: design
-# Tracks requirements.md's status, which was de-escalated implementing -> specifying when
-# this PR's edits voided SPEC-042's approval (see requirements.md's Clarify note). design.md
-# has no approval record of its own — only requirements.md is signed — so this field is
-# descriptive, never a seal. Both flip back to implementing when the human re-runs
-# "MinSpec: Approve Spec". Repo-wide sibling-status drift: #972.
-status: specifying
+# NO `status:` here — deliberately. Only requirements.md carries an approval record, so only
+# it carries approval-derived state (mirroring the existing "only requirements.md carries the
+# tier" convention). "MinSpec: Approve Spec" never touches this file, so a status here could
+# only be hand-maintained and would silently lag every approval — the drift #972 exists to
+# kill, observed live on #971/#996. Read the sidecar for SPEC-042's real approval state.
 product: minspec
 epic: EPIC-003  # SDD Core — onboarding front door (see notes re: dedicated onboarding epic)
 ---

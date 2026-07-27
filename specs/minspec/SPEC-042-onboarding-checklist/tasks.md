@@ -1,10 +1,11 @@
 ---
 id: SPEC-042
 type: tasks
-# Tracks requirements.md's status, de-escalated to specifying while SPEC-042's approval is
-# stale (this PR's edits voided it — see requirements.md's Clarify note). Flips back to
-# implementing when the human re-runs "MinSpec: Approve Spec". No code lands until then.
-status: specifying
+# NO `status:` here — deliberately. Only requirements.md carries an approval record, so only
+# it carries approval-derived state (mirroring the existing "only requirements.md carries the
+# tier" convention). "MinSpec: Approve Spec" never touches this file, so a status here could
+# only be hand-maintained and would silently lag every approval — the drift #972 exists to
+# kill, observed live on #971/#996. Read the sidecar for SPEC-042's real approval state.
 # tier lives on requirements.md (the single tier-carrying approvable, per the
 # spec-gate convention). A tier on a NON-approved sibling doc is treated by
 # spec-gate.py as a second unapproved spec and can shadow the approved
