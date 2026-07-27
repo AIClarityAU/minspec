@@ -186,10 +186,20 @@ Each step is independently committable and suite-green; the `error` rules are ph
 
 ## Risks (deltas from requirements R1–R4)
 
-- **R3 measurement (owed by this Plan).** Before FR-1 lands at `error`, measure `npm run lint`
-  wall-time with `parserOptions.project` enabled vs today. If type-aware linting is unacceptably
-  slow, fall back to value-only `no-restricted-imports` (OQ-2 "allow type-only") per DR-064 §3 —
-  a strictly weaker but still-directional rule — **not** abandoning the gate. Record the number.
+- **R3 measurement (owed by this Plan) — DISCHARGED at Implement.** `npm run lint` median
+  **2.76s** without type-aware parsing vs **4.90s** with it (3 runs each, same machine, warm
+  cache): **~1.8×, +2.1s absolute**. That is far under any threshold that would justify the
+  fallback, so the type-aware rules ship as designed and the value-only fallback (OQ-2 "allow
+  type-only", DR-064 §3) is **not** taken. The number is also recorded beside the config block
+  itself, so the decision and its evidence live together.
+- **Implementation deviation from DR-064 §3, recorded here rather than left silent.** §3 specifies
+  `parserOptions.project` naming the minspec + shared tsconfigs. It was implemented as
+  **`projectService: true`** (plus `tsconfigRootDir`) — the stable, documented form in
+  `@typescript-eslint` v8, which discovers each package's own tsconfig itself. Equivalent in
+  effect (the parser sees type-only imports, which is all §3 requires) and strictly less
+  duplication: an explicit project array is a second copy of the package list that drifts when a
+  package is added. Consequence worth noting: `packages/minspec/tsconfig.json` was therefore
+  never edited, so it is absent from `affects:` despite the Plan forecasting it.
 - R1/R2/R4 unchanged; R4's `spec-panel` nested-miss is filed as a surfaced bug, not carried.
 
 ## Out of scope (mirrors requirements)

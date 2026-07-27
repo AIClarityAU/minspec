@@ -8,22 +8,52 @@ product: minspec
 epic: EPIC-003  # SDD Core Methodology — code-change safety
 aspects: [architecture, tier-0, governance, validation]
 relates_to: [SPEC-038, DR-003, DR-014, DR-064]
-# Owned code (SPEC-038 FR-3). Finalised at Plan (design.md §File plan). `affects:` for the
-# moved/edited shared surfaces (eslint.config.mjs, status-bar, active-spec, approval-diff,
-# spec-tree-provider, spec-manager, spec-panel, the 3 command files, tsconfig, package.json)
-# is deliberately deferred to Implement — SPEC-038 edit-locks affects: paths identically to
-# implements:, so declaring live shared files under this stale spec would block concurrent edits.
+# Owned code (SPEC-038 FR-3). Finalised at Plan (design.md §File plan); `affects:` promoted at
+# Implement as planned — it was deferred while the approval was stale because SPEC-038 edit-locks
+# affects: paths identically to implements:, and declaring live shared files under a stale spec
+# would have blocked concurrent edits to them.
 implements:
-  - packages/minspec/src/lib/spec-catalog.ts        # FR-4 — new Tier-0 catalog (extracted recursive listSpecs)
+  - packages/minspec/src/lib/spec-catalog.ts         # FR-4 — new Tier-0 catalog (extracted recursive listSpecs)
   - packages/minspec/src/lib/spec-progress.ts        # FR-5a — new Tier-0 home for fromFrontmatter/computeProgress (OQ-4)
   - packages/minspec/src/lib/import-cycle-check.ts   # FR-2 — in-repo cycle-graph builder + DFS (DR-064 §1)
-  - scripts/check-import-cycles.ts                    # FR-2 — CI runner (npx tsx); npm run check:cycles
+  - scripts/check-import-cycles.ts                   # FR-2 — CI runner (npx tsx); npm run check:cycles
+  - packages/minspec/tests/spec-catalog.test.ts      # AC-6
+  - packages/minspec/tests/spec-progress.test.ts     # FR-5a — needs no vscode mock, which is the property under test
+  - packages/minspec/tests/import-cycle-check.test.ts      # AC-4 (library level)
+  - packages/minspec/tests/check-import-cycles-cli.test.ts # AC-4 (gate level — the runner's exit codes)
+  - packages/minspec/tests/import-boundaries.test.ts       # AC-1, AC-2, AC-3, AC-5
+# Pre-existing files this spec edits. Corrected against what was ACTUALLY touched, not the
+# Plan's forecast: `packages/minspec/tsconfig.json` is absent because DR-064 §3's
+# `parserOptions.project` was implemented as `projectService: true` (equivalent, self-configuring
+# — it reads each package's own tsconfig), so no tsconfig needed editing; `extension.ts` and
+# `.github/workflows/ci.yml` are present because they did.
+affects:
+  - eslint.config.mjs                                # FR-1/FR-3 — the layering rules themselves
+  - package.json                                     # FR-2 — npm run check:cycles
+  - .github/workflows/ci.yml                         # FR-2 — the CI gate step
+  - packages/minspec/src/extension.ts                # FR-5a — fromFrontmatter import repointed to lib
+  - packages/minspec/src/views/status-bar.ts         # FR-5a — source of the moved helpers
+  - packages/minspec/src/views/spec-tree-provider.ts # FR-4 source; FR-5 dropped its SpecSummary re-export
+  - packages/minspec/src/views/spec-panel.ts         # FR-4 — repointed to listSpecsShallow
+  - packages/minspec/src/views/codelens-provider.ts  # FR-4 — comments naming listSpecs's old home
+  - packages/minspec/src/lib/active-spec.ts          # FR-5a — the lib→views inversion this removes
+  - packages/minspec/src/lib/approval-diff.ts        # FR-5b — local SpecNodeArg replaces the SpecNode type edge
+  - packages/minspec/src/lib/spec-manager.ts         # FR-4 — listSpecs → listSpecsShallow disambiguation
+  - packages/minspec/src/lib/artifact-graph.ts       # FR-4 — comment inverted by the rename
+  - packages/minspec/src/lib/approvable.ts           # FR-4 — comment naming listSpecs's old home
+  - packages/minspec/src/lib/spec-layout.ts          # FR-4 — comment naming listSpecs's old home
+  - packages/minspec/src/lib/spec-validator.ts       # FR-4 — comment naming listSpecs's old home
+  - packages/minspec/src/commands/approve.ts         # FR-4 — import repointed to lib/spec-catalog
+  - packages/minspec/src/commands/approve-active.ts  # FR-4 — import repointed to lib/spec-catalog
+  - packages/minspec/src/commands/validate.ts        # FR-4 — import repointed to lib/spec-catalog
+  - packages/minspec/src/commands/view-phase-file.ts # FR-5 — SpecSummary now from lib, not via the view
+  - packages/minspec/src/__benchmarks__/perf.bench.ts # FR-5 — same re-export repoint
 phases:
   specify: done
   clarify: done
   plan: done
-  tasks: in-progress
-  implement: pending
+  tasks: done
+  implement: in-progress
 ---
 
 # MinSpec — Machine-enforced import boundaries (Requirements)
