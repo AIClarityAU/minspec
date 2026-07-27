@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
 import { commitApproval, isUntrackedAtHead, type CommitApprovalResult } from '../lib/approve-commit';
+import { pushApproval, type PushApprovalResult } from '../lib/approve-push';
 
 /**
  * Bridge between the approve/accept commands and the Tier-0 {@link commitApproval}
@@ -34,8 +35,14 @@ export async function commitApprovalIfEnabled(
   if (!commitOnApproveEnabled()) return { suffix: '' };
   const result = await commitApproval(rootDir, absPaths, message);
   switch (result.outcome) {
-    case 'committed':
-      return { suffix: ' · committed', result };
+    case 'committed': {
+      // Push from HERE, not from each caller: spec-approve, ADR-accept and
+      // epic-accept all funnel through this helper, so wiring it once means no
+      // approval path can silently miss it as new ones are added.
+      const slug = (result.paths?.[0] ?? message).replace(/\.[a-z]+$/i, '');
+      const { suffix: pushSuffix } = await pushApprovalIfEnabled(rootDir, slug);
+      return { suffix: ` · committed${pushSuffix}`, result };
+    }
     case 'detached-head':
       // A commit here would be orphaned by the next checkout — refuse and say so.
       return { suffix: ' · not committed (detached HEAD — switch to a branch)', result };
@@ -46,6 +53,93 @@ export async function commitApprovalIfEnabled(
       return { suffix: ' · commit failed — files staged (see console)', result };
     default:
       // 'not-a-repo' | 'nothing-to-commit' — no net change worth reporting.
+      return { suffix: '', result };
+  }
+}
+
+/** How aggressively an approval commit should be pushed. Default `prompt`. */
+export type PushOnApproveMode = 'never' | 'prompt' | 'always';
+
+export function pushOnApproveMode(): PushOnApproveMode {
+  const v = vscode.workspace.getConfiguration('minspec').get<string>('pushOnApprove', 'prompt');
+  return v === 'never' || v === 'always' ? v : 'prompt';
+}
+
+function protectedBranches(): string[] {
+  return vscode.workspace
+    .getConfiguration('minspec')
+    .get<string[]>('protectedBranches', ['main', 'master']);
+}
+
+/**
+ * Push the approval commit, so a sign-off cannot be stranded on one machine
+ * (the Alt+A stranding bug: commit-on-approve commits but never pushes, approvals
+ * are made on protected `main`, and a direct push there is rejected).
+ *
+ * OFFLINE INVARIANT (constitution #1). A push is a network call, so:
+ *   • `never`  — returns immediately; no git, no network.
+ *   • `prompt` — DEFAULT. Shows a NON-MODAL notification and pushes only if the user
+ *                clicks. The click is the explicit consent. Dismissing is a no-op,
+ *                and the approval is already safely committed locally either way.
+ *   • `always` — the user set this deliberately; the setting is the consent.
+ *
+ * Never rejects: a push failure is surfaced in the suffix, never swallowed, because
+ * the user must know the record is still local-only.
+ */
+export async function pushApprovalIfEnabled(
+  rootDir: string,
+  slug: string,
+): Promise<{ suffix: string; result?: PushApprovalResult }> {
+  const mode = pushOnApproveMode();
+  if (mode === 'never') return { suffix: '' };
+
+  if (mode === 'prompt') {
+    // Non-modal (project preference: never steal focus from the artifact being
+    // approved). `showInformationMessage` with actions is notification-area only.
+    const choice = await vscode.window.showInformationMessage(
+      'Approval committed locally. Push it so the sign-off is not stranded on this machine?',
+      'Push',
+      'Not now',
+    );
+    if (choice !== 'Push') return { suffix: ' · not pushed' };
+  }
+
+  // Defensive guard so "never rejects" is a LOCAL guarantee, not one borrowed from
+  // pushApproval. `commitApprovalIfEnabled` documents never-rejects and now awaits this
+  // function; relying on the seam's contract transitively means a future change there
+  // could silently break an approval toast that has nothing to do with pushing.
+  let result: PushApprovalResult;
+  try {
+    result = await pushApproval(rootDir, { protectedBranches: protectedBranches(), slug });
+  } catch (err) {
+    console.warn(`MinSpec: push-on-approve threw — ${err instanceof Error ? err.message : String(err)}`);
+    return { suffix: ' · push failed — still local only (see console)' };
+  }
+  switch (result.outcome) {
+    case 'pushed':
+      return { suffix: ' · pushed', result };
+    case 'pushed-branch': {
+      // The branch is on the remote; opening the PR is one click. Offer it rather
+      // than opening a browser unasked.
+      if (result.compareUrl) {
+        const url = result.compareUrl;
+        void vscode.window
+          .showInformationMessage(
+            `Approval pushed on '${result.branch}' (this branch is protected, so it needs a PR).`,
+            'Open PR',
+          )
+          .then((c) => {
+            if (c === 'Open PR') void vscode.env.openExternal(vscode.Uri.parse(url));
+          });
+      }
+      return { suffix: ` · pushed on ${result.branch} (open a PR)`, result };
+    }
+    case 'failed':
+      console.warn(`MinSpec: push-on-approve failed — ${result.error ?? 'git error'}`);
+      return { suffix: ' · push failed — still local only (see console)', result };
+    default:
+      // 'skipped' | 'not-a-repo' — nothing was pushable; the commit path already
+      // reported the relevant condition.
       return { suffix: '', result };
   }
 }

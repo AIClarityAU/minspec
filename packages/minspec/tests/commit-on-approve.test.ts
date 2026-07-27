@@ -25,7 +25,14 @@ import { execFileSync } from 'child_process';
 vi.mock('vscode', () => ({
   workspace: {
     getConfiguration: vi.fn(() => ({
-      get: vi.fn((key: string, def?: unknown) => (key === 'commitOnApprove' ? true : def)),
+      get: vi.fn((key: string, def?: unknown) => {
+        if (key === 'commitOnApprove') return true;
+        // These tests are about COMMITTING. Pin push off so they neither hit the
+        // network nor need the notification surface; the push path has its own
+        // unit tests (approve-push.test.ts) and wiring test (approve-push-wiring).
+        if (key === 'pushOnApprove') return 'never';
+        return def;
+      }),
     })),
   },
 }));

@@ -562,4 +562,12 @@ deriveStatus — the authoritative, approval-aware SIGNPOST derivation (DR-034) 
 <!-- dr-summary:DR-070 auto=089e9f27e494 -->
 This DR touches **only the pre-dispatch gate.** Relaxing it does not remove human work; it **moves** work downstream. Every design in this space must account for where the moved work lands. 287 open needs-review (verified live 2026-07-26; 72% of 398 open issues). The maintainer cannot process that queue, and #783 already records that inflow outruns resolution — the panel's 14-day re-measurement put creation at ~13/day against ~6/day closed, i.e. a **net +7/day**. A one-time purge does not fix a rate…
 <!-- /dr-summary:DR-070 -->
+
+## [DR-071 — Standing consent — a named setting is valid consent for a fixed, same-origin, repeating network action, where a per-action prompt would defeat the feature it gates](DR-071.md)
+
+*Status: proposed · Date: 2026-07-27*
+
+<!-- dr-summary:DR-071 auto=083ef1f2af49 -->
+Constitution invariant #1: *core functionality works offline — no network calls without explicit user consent.* **DR-050** implements it, and its rule #2 is explicit: DR-050 was minted for gh/CLI shelling, where the action's *target* varies per invocation — an arbitrary URL, an arbitrary API call, an arbitrary repo. Per-action consent is exactly right there: the user cannot pre-approve a target they have not seen.
+<!-- /dr-summary:DR-071 -->
 <!-- minspec:dr-index:end -->
