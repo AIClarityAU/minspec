@@ -37,11 +37,20 @@
 #   • runaway guard: two INDEPENDENT budgets — MINSPEC_REMEDIATE_MAX_ATTEMPTS genuine
 #     attempts + MINSPEC_REMEDIATE_MAX_CRASHES agent crashes, then a human. Never a loop.
 #
+# Orphan-fallback (SPEC-044 FR-6/INV-4): this sweep is NO LONGER the primary fixer.
+# The session that opened a PR shepherds it itself (DR-067 D4), so a PR whose work item
+# is held by a LIVE claim is left alone here — the drain only adopts ORPHANS (no claim,
+# or an expired one). Determined by `issue-lease.sh reclaim?`, failing closed.
+#
 # Testable pure seams (no gh/git/claude):
 #   scripts/remediate-pr.sh --classify <branch> <mergeable> <mergeStateStatus> \
-#       <labels_csv> <failing_non_review:yes|no> <ai_review_bad:yes|no>
-#     → prints ONE action token: skip-not-automation | skip-conflict |
+#       <labels_csv> <failing_non_review:yes|no> <ai_review_bad:yes|no> \
+#       [<live_nonself_claim:yes|no>]
+#     → prints ONE action token: skip-not-automation | skip-live-owned | skip-conflict |
 #       agent-remediate-checks | agent-remediate-review | rebase-only | skip-clean
+#     The 7th argument is OPTIONAL and defaults to "no", so the creator-shepherd's
+#     existing 6-argument call keeps working and is never told to stand down from the
+#     PR it owns.
 #   scripts/remediate-pr.sh --count-markers <marker> [author_logins_csv] < comments.json
 #     → prints how many comments the runaway guard would charge to that marker
 #   scripts/remediate-pr.sh --check-markers <marker> <marker> [marker...]
@@ -75,24 +84,38 @@ AUTOMATION_BRANCH_RE='^(agent|fix|feat)[/-]'
 # "skip" for anything unrecognised.
 classify_pr() {
   local branch="$1" mergeable="$2" merge_state="$3" labels_csv="$4" failing_non_review="$5" ai_review_bad="$6"
+  # SPEC-044 D5/FR-6: does a LIVE claim (owned by someone other than this caller) hold
+  # the work item this PR belongs to? Defaults "no" so the CREATOR — which is the owner
+  # and drove here deliberately — keeps its existing 6-argument contract and is never
+  # told to stand down from its own PR.
+  local live_nonself_claim="${7:-no}"
 
   # 1. Scope gate — only automation branches.
   if ! [[ "$branch" =~ $AUTOMATION_BRANCH_RE ]]; then
     echo "skip-not-automation"; return 0
   fi
-  # 2. Conflicts — surface only, never auto-resolve.
+  # 2. Owner gate (SPEC-044 FR-6/INV-4) — the drain is an ORPHAN-FALLBACK, not the
+  #    primary fixer. A live creator-claim means that session is shepherding its own
+  #    PR with the warm worktree and a fresh context budget (DR-067 D4); a second
+  #    remediator would duplicate the build and race the push. Ranked directly after
+  #    the scope gate so ownership is settled BEFORE any state is interpreted — a
+  #    conflicting or red PR that someone else owns is still not ours to touch.
+  if [[ "$live_nonself_claim" == "yes" ]]; then
+    echo "skip-live-owned"; return 0
+  fi
+  # 3. Conflicts — surface only, never auto-resolve.
   if [[ "$mergeable" == "CONFLICTING" || "$merge_state" == "DIRTY" ]]; then
     echo "skip-conflict"; return 0
   fi
-  # 3. A required check (other than ai-review) is red → fix the code first.
+  # 4. A required check (other than ai-review) is red → fix the code first.
   if [[ "$failing_non_review" == "yes" ]]; then
     echo "agent-remediate-checks"; return 0
   fi
-  # 4. Independent reviewer wants changes (label OR the ai-review check is red).
+  # 5. Independent reviewer wants changes (label OR the ai-review check is red).
   if [[ "$ai_review_bad" == "yes" ]] || [[ ",$labels_csv," == *",ai-review:changes,"* ]]; then
     echo "agent-remediate-review"; return 0
   fi
-  # 5. Behind base only — mechanical merge, no agent.
+  # 6. Behind base only — mechanical merge, no agent.
   if [[ "$merge_state" == "BEHIND" ]]; then
     echo "rebase-only"; return 0
   fi
@@ -254,13 +277,14 @@ cap_hit_summary() {
 # ── Pure seam dispatch ─────────────────────────────────────────────────────────
 if [[ "${1:-}" == "--classify" ]]; then
   shift
-  # Require exactly 6 positional args, but allow empties (labels_csv is often "") —
-  # so validate the COUNT, not each value (a `${n:?}` would reject an empty label).
-  if [[ $# -ne 6 ]]; then
-    echo "Usage: remediate-pr.sh --classify <branch> <mergeable> <mergeStateStatus> <labels_csv> <failing_non_review> <ai_review_bad>" >&2
+  # Require 6 or 7 positional args, but allow empties (labels_csv is often "") — so
+  # validate the COUNT, not each value (a `${n:?}` would reject an empty label). The
+  # 7th (live_nonself_claim) is optional so the creator's 6-arg contract is unchanged.
+  if [[ $# -ne 6 && $# -ne 7 ]]; then
+    echo "Usage: remediate-pr.sh --classify <branch> <mergeable> <mergeStateStatus> <labels_csv> <failing_non_review> <ai_review_bad> [<live_nonself_claim>]" >&2
     exit 2
   fi
-  classify_pr "$1" "$2" "$3" "$4" "$5" "$6"
+  classify_pr "$1" "$2" "$3" "$4" "$5" "$6" "${7:-no}"
   exit 0
 fi
 if [[ "${1:-}" == "--count-markers" ]]; then
@@ -381,12 +405,43 @@ AI_REVIEW_PENDING=$(jq -r '
   | map(select(. == "QUEUED" or . == "IN_PROGRESS" or . == "PENDING" or . == "WAITING"))
   | if length > 0 then "yes" else "no" end' <<<"$PR_JSON")
 
-ACTION=$(classify_pr "$BRANCH" "$MERGEABLE" "$MERGE_STATE" "$LABELS_CSV" "$FAILING_NON_REVIEW" "$AI_REVIEW_BAD")
-echo "PR #$PR [$BRANCH] mergeable=$MERGEABLE state=$MERGE_STATE failing_checks=$FAILING_NON_REVIEW ai_review_bad=$AI_REVIEW_BAD → $ACTION"
+# SPEC-044 FR-6/INV-4 — orphan-fallback gate. Which work ITEM does this PR belong to?
+# dispatch-issue.sh names its branches `agent/issue-N`, and the hand-rolled automation
+# branches carry the issue number the same way (`fix-886-…` → the `issue-(\d+)` form is
+# checked first, then a bare leading number).
+ITEM=""
+if [[ "$BRANCH" =~ issue-([0-9]+) ]]; then
+  ITEM="${BASH_REMATCH[1]}"
+elif [[ "$BRANCH" =~ ^(agent|fix|feat)[/-]([0-9]+) ]]; then
+  ITEM="${BASH_REMATCH[2]}"
+fi
+
+# `reclaim?` exits 0 ONLY when the item is provably reclaimable (no live claim). Any
+# nonzero — a live claim, or an enumeration we could not complete — means HANDS OFF:
+# either another session is actively shepherding this PR, or we cannot prove it is not.
+# Failing closed here costs one skipped sweep; failing open costs a duplicated build and
+# a push race against a live owner (INV-4/INV-6).
+LIVE_NONSELF_CLAIM=no
+if [[ -n "$ITEM" && "${MINSPEC_CLAIM_OFF:-0}" != "1" ]]; then
+  if ! MINSPEC_LEASE_REPO="$REPO" bash "${SCRIPT_DIR}/lib/issue-lease.sh" 'reclaim?' "$ITEM" >/dev/null 2>&1; then
+    LIVE_NONSELF_CLAIM=yes
+  fi
+fi
+
+ACTION=$(classify_pr "$BRANCH" "$MERGEABLE" "$MERGE_STATE" "$LABELS_CSV" "$FAILING_NON_REVIEW" "$AI_REVIEW_BAD" "$LIVE_NONSELF_CLAIM")
+echo "PR #$PR [$BRANCH] mergeable=$MERGEABLE state=$MERGE_STATE failing_checks=$FAILING_NON_REVIEW ai_review_bad=$AI_REVIEW_BAD item=${ITEM:-none} live_owned=$LIVE_NONSELF_CLAIM → $ACTION"
 
 case "$ACTION" in
   skip-not-automation)
     echo "  Not an automation branch ($BRANCH) — leaving for its author."; exit 0 ;;
+  skip-live-owned)
+    # SPEC-044 FR-6/INV-4: a live claim holds work item #$ITEM, so the session that
+    # opened this PR is shepherding it with the warm worktree and a fresh context
+    # budget (DR-067 D4). The drain is the ORPHAN-fallback — it adopts a PR only once
+    # that claim is absent or expired. Silent and side-effect-free on purpose: no
+    # label, no comment, no attempt consumed, because nothing is wrong here.
+    echo "  Work item #$ITEM is held by a live claim — its creator is shepherding this PR. Leaving it alone (orphan-fallback only)."
+    exit 0 ;;
   skip-conflict)
     # A merge conflict is a TERMINAL, human-only state (LLM conflict resolution can
     # silently mismerge). This is an exhaustion-class apply: label it needs-human-review
