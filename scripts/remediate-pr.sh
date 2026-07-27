@@ -34,8 +34,8 @@
 #     commits BEFORE the push and FAILS CLOSED on any secret/exfil hit.
 #   • ai-review:* labels are NEVER mutated here — CI (ai-review.yml, as the bot) owns
 #     them (#600). We only push; the re-push re-triggers the CI reviewer.
-#   • runaway guard: at most MINSPEC_REMEDIATE_MAX_ATTEMPTS (default 2) automated
-#     attempts per PR before it is left for a human — bounded quota, never a loop.
+#   • runaway guard: at most MINSPEC_REMEDIATE_MAX_ATTEMPTS (default 3 — raised from
+#     2: a crashed attempt burns quota without fixing anything) — never a loop.
 #
 # Testable pure seam (no gh/git/claude):
 #   scripts/remediate-pr.sh --classify <branch> <mergeable> <mergeStateStatus> \
@@ -49,7 +49,7 @@ REPO="AIClarityAU/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKTREE_BASE="/tmp/minspec-remediate"
 DRY_RUN=false
-MAX_ATTEMPTS="${MINSPEC_REMEDIATE_MAX_ATTEMPTS:-2}"
+MAX_ATTEMPTS="${MINSPEC_REMEDIATE_MAX_ATTEMPTS:-3}"
 # Marker embedded in every remediation comment so we can COUNT prior attempts on a
 # PR (bounds the runaway loop) without a stateful store.
 ATTEMPT_MARKER="<!-- minspec-auto-remediation -->"
