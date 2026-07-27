@@ -317,7 +317,7 @@ DR-019 makes next-task priority a deterministic DAG; the one thing the DAG canno
 
 ## [DR-040 — DR-023 follow-ups auto-materialize — friction-free auto-create of missing issues, not a blocking gate](DR-040.md)
 
-*Status: proposed · Date: 2026-06-23*
+*Status: accepted · Date: 2026-06-23*
 
 <!-- dr-summary:DR-040 auto=82b6b6f000aa -->
 DR-023 requires every DR to materialize its surfaced work as tracked issues/specs in a ## Follow-ups (tracked) section, with only a **soft validator warning** when items lack a ref. The session asked whether to *harden* this into a blocking gate — because un-materialized follow-ups are the mechanism by which "newer specs/DRs not yet turned into issues/PRs" stay invisible to the next-task DAG (DR-019): the resolver ranks structural edges, so prose-only follow-ups are simply not there.
