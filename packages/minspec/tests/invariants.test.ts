@@ -158,7 +158,10 @@ describe('Invariant 2: No backend — no network calls', () => {
     // fast-forwarded under. Local git reads, no network, never writes/pushes —
     // same Tier-0 posture as approval.ts. See presence.ts gitOut/writeHeartbeat.
     'lib/presence.ts',
-    // SPEC-039 "Push docs via lane": the ONLY command that pushes. It shells the
+    // SPEC-039 "Push docs via lane": one of exactly TWO push lanes (the other is
+    // approve-push.ts below, added by #1022 and ratified by DR-071 — this comment
+    // said "the ONLY command that pushes" until then, and a second lane made it
+    // false). It shells the
     // user's authenticated `git`/`gh` to open a docs-only PR — and ONLY after an
     // explicit modal confirmation that names the network action (FR-3 / INV-1).
     // MinSpec opens no socket itself; the network actor is the user's own CLI,

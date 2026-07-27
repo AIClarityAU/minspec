@@ -150,10 +150,14 @@ describe('pushApprovalIfEnabled: outcomes are reported honestly', () => {
     expect((await pushApprovalIfEnabled('/repo', 's')).suffix).toBe('');
   });
 
-  it('never throws — a push failure must not break the approval toast', async () => {
+  it('never throws, even if the seam rejects — the approval toast must survive', async () => {
+    // The first version of this test was named "never throws" while asserting
+    // `.rejects` — the name claimed an invariant its own body disproved, and the
+    // wiring had no guard backing it. Now the guarantee is LOCAL (try/catch in
+    // pushApprovalIfEnabled), so the name and the assertion finally agree.
     pushApprovalMock.mockRejectedValue(new Error('boom'));
-    await expect(pushApprovalIfEnabled('/repo', 's')).rejects.toBeTruthy();
-    // (pushApproval itself never rejects — see approve-push.ts; this documents that
-    // the guarantee lives in the seam, not here.)
+    const { suffix } = await pushApprovalIfEnabled('/repo', 's');
+    expect(suffix).toContain('failed');
+    expect(suffix).toContain('local only');
   });
 });

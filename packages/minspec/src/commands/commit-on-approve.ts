@@ -104,7 +104,17 @@ export async function pushApprovalIfEnabled(
     if (choice !== 'Push') return { suffix: ' · not pushed' };
   }
 
-  const result = await pushApproval(rootDir, { protectedBranches: protectedBranches(), slug });
+  // Defensive guard so "never rejects" is a LOCAL guarantee, not one borrowed from
+  // pushApproval. `commitApprovalIfEnabled` documents never-rejects and now awaits this
+  // function; relying on the seam's contract transitively means a future change there
+  // could silently break an approval toast that has nothing to do with pushing.
+  let result: PushApprovalResult;
+  try {
+    result = await pushApproval(rootDir, { protectedBranches: protectedBranches(), slug });
+  } catch (err) {
+    console.warn(`MinSpec: push-on-approve threw — ${err instanceof Error ? err.message : String(err)}`);
+    return { suffix: ' · push failed — still local only (see console)' };
+  }
   switch (result.outcome) {
     case 'pushed':
       return { suffix: ' · pushed', result };

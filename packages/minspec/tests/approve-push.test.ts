@@ -112,16 +112,26 @@ describe('approvalBranchName', () => {
   const NOW = new Date('2026-07-27T02:28:33.407Z');
 
   it('is deterministic and namespaced', () => {
-    expect(approvalBranchName('SPEC-042 requirements', NOW)).toBe('approvals/spec-042-requirements-20260727T022833Z');
+    expect(approvalBranchName('SPEC-042 requirements', NOW)).toBe(
+      'approvals/spec-042-requirements-20260727T022833407Z',
+    );
   });
 
   it('sanitises anything unsafe for a ref name', () => {
     const n = approvalBranchName('weird//..name~^:?*[', NOW);
-    expect(n).toMatch(/^approvals\/[a-z0-9-]+-\d{8}T\d{6}Z$/);
+    expect(n).toMatch(/^approvals\/[a-z0-9-]+-\d{8}T\d{9}Z$/);
   });
 
   it('never produces an empty slug', () => {
     expect(approvalBranchName('///', NOW)).toContain('approvals/record-');
+  });
+
+  it('keeps MILLISECONDS so two approvals in the same second cannot collide', () => {
+    // Truncating to whole seconds would derive the same branch twice, and the second
+    // `git branch` would fail — turning a claimed no-collision property into a bug.
+    const a = approvalBranchName('s', new Date('2026-07-27T02:28:33.100Z'));
+    const b = approvalBranchName('s', new Date('2026-07-27T02:28:33.900Z'));
+    expect(a).not.toBe(b);
   });
 });
 
@@ -136,18 +146,34 @@ describe('pushApproval: protected-branch path (the stranding fix)', () => {
     const res = await pushApproval('/repo', { protectedBranches: PROTECTED, slug: 'spec-042', now: new Date('2026-07-27T02:28:33.407Z') }, run);
 
     expect(res.outcome).toBe('pushed-branch');
-    expect(res.branch).toBe('approvals/spec-042-20260727T022833Z');
+    expect(res.branch).toBe('approvals/spec-042-20260727T022833407Z');
     expect(res.compareUrl).toContain('/compare/');
 
     const flat = calls.map((c) => c.join(' '));
     // Branch created AT HEAD — the checkout is never moved (rule #8: a shared
     // checkout must not be switched under another session).
-    expect(flat).toContain('branch approvals/spec-042-20260727T022833Z HEAD');
+    expect(flat).toContain('branch approvals/spec-042-20260727T022833407Z HEAD');
     expect(flat.some((c) => c.startsWith('push -u origin approvals/'))).toBe(true);
     // The doomed push that caused the whole bug must never be attempted.
     expect(flat).not.toContain('push -u origin main');
     expect(flat.some((c) => c.startsWith('checkout') || c.startsWith('switch'))).toBe(false);
     expect(flat.some((c) => c.startsWith('reset'))).toBe(false);
+  });
+
+  it('deletes the LOCAL branch after a successful push — the remote is the artefact', async () => {
+    // Under `always`, every Alt+A on a protected branch would otherwise leave a
+    // permanent throwaway ref and the branch list would fill within a day.
+    const { run, calls } = stubGit({
+      ...base,
+      'remote get-url origin': 'git@github.com:o/r.git\n',
+    });
+    const res = await pushApproval('/repo', { protectedBranches: PROTECTED, slug: 's', now: new Date() }, run);
+    expect(res.outcome).toBe('pushed-branch');
+    const flat = calls.map((c) => c.join(' '));
+    const pushAt = flat.findIndex((c) => c.startsWith('push -u origin approvals/'));
+    const delAt = flat.findIndex((c) => c.startsWith('branch -D approvals/'));
+    expect(pushAt).toBeGreaterThan(-1);
+    expect(delAt).toBeGreaterThan(pushAt); // deleted AFTER the push, never before
   });
 
   it('surfaces a push failure and cleans up the half-made branch', async () => {

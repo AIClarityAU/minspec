@@ -118,10 +118,15 @@ export function compareUrlFor(remoteUrl: string, branch: string): string | undef
 
 /**
  * A branch name for an approval pushed off a protected branch. Deterministic given
- * `now`, so it is testable and two approvals in the same session never collide.
+ * `now`, so it is testable.
+ *
+ * The stamp keeps MILLISECONDS deliberately: truncating to whole seconds would let
+ * two approvals in the same second derive the same branch, and `git branch` would
+ * then fail the second one. Millisecond precision makes the "no collision" property
+ * true rather than merely likely.
  */
 export function approvalBranchName(slug: string, now: Date): string {
-  const stamp = now.toISOString().replace(/[-:]/g, '').replace(/\.\d+Z$/, 'Z');
+  const stamp = now.toISOString().replace(/[-:]/g, '').replace(/\./g, '');
   const safe =
     slug
       .toLowerCase()
@@ -217,6 +222,17 @@ export async function pushApproval(
     compareUrl = compareUrlFor((await run(['remote', 'get-url', 'origin'])).trim(), newBranch);
   } catch {
     compareUrl = undefined; // a missing URL degrades the toast, never the push
+  }
+  // Delete the LOCAL branch now that the remote has it. Under `always` every Alt+A on
+  // a protected branch would otherwise leave a permanent throwaway ref, and the branch
+  // list would fill with `approvals/…` within a day. The remote branch (and its PR) is
+  // the artefact that matters; the commit is also still reachable from the local
+  // protected branch, so nothing is lost. Best-effort: failing to tidy up must never
+  // downgrade a push that already succeeded.
+  try {
+    await run(['branch', '-D', newBranch]);
+  } catch {
+    /* the ref lingers locally; harmless, and the push is what was asked for */
   }
   return { outcome: 'pushed-branch', branch: newBranch, compareUrl };
 }
