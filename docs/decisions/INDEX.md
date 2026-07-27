@@ -554,4 +554,12 @@ Specs interleave a product-owner audience (what/why) with an engineering audienc
 <!-- dr-summary:DR-069 auto=29722db03da9 -->
 deriveStatus — the authoritative, approval-aware SIGNPOST derivation (DR-034) — returns implementing for **any approved spec that is not all-done**: Approval sets the first build-band phase (plan) to in-progress (phasesForApproval), so a spec approved while still at **Plan/Tasks — implement phase pending, zero code** derives to implementing. That is a **DR-003 false signpost** — the project's stated worst defect: the signpost claims code is being written when none exists. The deterministic literal-vs-derived validator cannot catch it (literal == derived); only the…
 <!-- /dr-summary:DR-069 -->
+
+## [DR-070 — Standing dispatch policy — split the collapsed `needs-review` hold reason, then let a deny-by-default predicate lift ONLY the tier hold on hash-bound, decision-free, inward-facing work](DR-070.md)
+
+*Status: proposed · Date: 2026-07-26*
+
+<!-- dr-summary:DR-070 auto=089e9f27e494 -->
+This DR touches **only the pre-dispatch gate.** Relaxing it does not remove human work; it **moves** work downstream. Every design in this space must account for where the moved work lands. 287 open needs-review (verified live 2026-07-26; 72% of 398 open issues). The maintainer cannot process that queue, and #783 already records that inflow outruns resolution — the panel's 14-day re-measurement put creation at ~13/day against ~6/day closed, i.e. a **net +7/day**. A one-time purge does not fix a rate…
+<!-- /dr-summary:DR-070 -->
 <!-- minspec:dr-index:end -->
