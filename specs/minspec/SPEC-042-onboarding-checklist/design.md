@@ -1,11 +1,12 @@
 ---
 id: SPEC-042
 type: design
-# NO `status:` here — deliberately. Only requirements.md carries an approval record, so only
-# it carries approval-derived state (mirroring the existing "only requirements.md carries the
-# tier" convention). "MinSpec: Approve Spec" never touches this file, so a status here could
-# only be hand-maintained and would silently lag every approval — the drift #972 exists to
-# kill, observed live on #971/#996. Read the sidecar for SPEC-042's real approval state.
+# Mirrors requirements.md's status. This doc has NO approval record of its own — only
+# requirements.md is signed — so the field is descriptive, never a seal; read the sidecar for
+# the real state. Kept ONLY because spec-validator.ts:525 marks `status` required
+# UNCONDITIONALLY (unlike `tier`:529, which is requiredWhen: isPrimarySpec). Dropping it here
+# is the right end-state (#972) but needs that schema change first — a code fix, not a doc edit.
+status: specifying
 product: minspec
 epic: EPIC-003  # SDD Core — onboarding front door (see notes re: dedicated onboarding epic)
 ---
