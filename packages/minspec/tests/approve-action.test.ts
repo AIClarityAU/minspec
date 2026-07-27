@@ -418,10 +418,19 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
     );
   });
 
+  // The toast below reports the status advanceSpecToImplementing ACTUALLY returned
+  // (`status → ${newStatus ?? 'planning'}` in approve.ts). These tests therefore
+  // MUST stub a return value: left as a bare vi.fn() the mock returns undefined,
+  // the `?? 'planning'` fallback fires, and "status → planning" is asserted against
+  // a hard-coded literal rather than the derivation — so the test would stay green
+  // even if the real DR-069 (#886) derivation regressed to `implementing`. Stubbing
+  // the return binds the assertion to the seam under test; the third case below
+  // drives a DIFFERENT value through and proves the toast follows it.
   it('advances status to planning when spec was pre-impl (status=specifying)', async () => {
     pickFirst();
     vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec('specifying') as never);
     vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
+    vi.mocked(advanceSpecToImplementing).mockReturnValueOnce('planning' as never);
     vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce('Approve' as never);
 
     await approveSpecCommand(undefined);
@@ -438,6 +447,7 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
     pickFirst();
     vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec('new') as never);
     vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
+    vi.mocked(advanceSpecToImplementing).mockReturnValueOnce('planning' as never);
     vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce('Approve' as never);
 
     await approveSpecCommand(undefined);
@@ -446,6 +456,26 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
       '/tmp/ws/specs/minspec/SPEC-001/spec.md',
     );
     expect(infoMessages().some((m) => m.includes('status → planning'))).toBe(true);
+  });
+
+  // The binding proof for the two tests above: same pre-impl entry status, but the
+  // seam derives `implementing` (DR-069 keeps that verdict for a spec whose
+  // implement phase has already started, and for a phaseless spec — see
+  // advanceSpecToImplementing). The toast must REPORT that, not the `?? 'planning'`
+  // fallback. If someone re-hardcodes 'planning' into the message, only this test
+  // goes red.
+  it('reports the status the seam actually derived — implementing, not the planning fallback', async () => {
+    pickFirst();
+    vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec('specifying') as never);
+    vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
+    vi.mocked(advanceSpecToImplementing).mockReturnValueOnce('implementing' as never);
+    vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce('Approve' as never);
+
+    await approveSpecCommand(undefined);
+
+    const messages = infoMessages();
+    expect(messages.some((m) => m.includes('status → implementing'))).toBe(true);
+    expect(messages.some((m) => m.includes('status → planning'))).toBe(false);
   });
 
   it('does NOT flip status when spec is already implementing', async () => {

@@ -156,6 +156,28 @@ jobs:
         working-directory: packages/minspec
         run: tsc -p tsconfig.test.json
 
+      # Clean-tree precondition for the e2e run (#900). The e2e suite drives real
+      # commands against the checkout, and several of them read `git diff` — most
+      # notably `minspec.classify`, which returns silently on a clean tree but
+      # renders an interactive, button-bearing notification on a dirty one. That
+      # precondition was previously UNDECLARED and unasserted, so when `npm ci`
+      # clobbered a tracked path the only symptom was an opaque 30s mocha timeout
+      # inside a screenshot test, ~4 minutes into the job.
+      #
+      # This is the gate that was missing: assert it here, in one line, naming the
+      # offending path — BEFORE the e2e run rather than 30s into it. The e2e
+      # teardown was hardened independently (src/test/screenshots.test.ts) so a
+      # dirty tree can no longer hang the suite; this step keeps the dirtiness
+      # itself from passing silently.
+      - name: Assert checkout is clean after install + build
+        run: |
+          dirty=$(git status --porcelain)
+          if [ -n "$dirty" ]; then
+            echo "::error::Working tree is dirty after npm ci + build — a tracked path is being clobbered or a build artifact is unignored:"
+            printf '%s\n' "$dirty"
+            exit 1
+          fi
+
       - name: Run e2e tests
         working-directory: packages/minspec
         run: xvfb-run -a npm run test:e2e

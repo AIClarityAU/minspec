@@ -299,7 +299,13 @@ describe('FrontmatterCompletionProvider.provideCompletionItems()', () => {
 
     const items = provider.provideCompletionItems(doc as any, pos as any);
 
-    // Empty fileName is not a DR file, so spec statuses are offered
-    expect(items.map(i => i.label)).toEqual(['new', 'specifying', 'planning', 'implementing', 'done', 'archived']);
+    // Empty fileName is not a DR file, so spec statuses are offered.
+    // `superseded` joined the list when SPEC_STATUS_VALUES stopped being a
+    // hand-copied duplicate and became an alias of lib/spec.ts's SPEC_STATUSES:
+    // it was always a valid spec status (spec-validator.ts even requires a
+    // companion `superseded-by:` for it), the stale copy just omitted it.
+    expect(items.map(i => i.label)).toEqual([
+      'new', 'specifying', 'planning', 'implementing', 'done', 'archived', 'superseded',
+    ]);
   });
 });

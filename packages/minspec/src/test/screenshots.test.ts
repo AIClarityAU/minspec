@@ -165,8 +165,16 @@ suite('Screenshots', () => {
   test('classification — classify command UI', async function () {
     this.timeout(30000);
 
-    // Start the classify command — it opens a Quick Pick.
-    // We capture the screen with the Quick Pick visible.
+    // Start the classify command and capture the screen while its UI is up.
+    //
+    // Which surface appears depends on the checkout's git state, and BOTH must be
+    // dismissible here (see the teardown below):
+    //   • clean tree  → classifyCommand returns early at the `signals.length === 0`
+    //     guard (src/commands/classify.ts) having rendered nothing at all;
+    //   • dirty tree  → it renders a non-modal information message carrying action
+    //     buttons ("Show Details" / "Auto-classify from now on").
+    // In a multi-root workspace it can also raise a workspace-folder Quick Pick,
+    // though this single-root fixture never does.
     const classifyPromise = vscode.commands.executeCommand('minspec.classify');
     await waitForRender(1500);
 
@@ -181,14 +189,36 @@ suite('Screenshots', () => {
       }
     }
 
-    // Dismiss the Quick Pick so it doesn't block subsequent tests
+    // Dismiss BOTH interactive surfaces classify can raise, then bound the wait.
+    //
+    // #900 root cause: this teardown dismissed ONLY quick-input, and
+    // `workbench.action.closeQuickOpen` does not close NOTIFICATIONS. On a dirty
+    // checkout classify shows a non-modal information message WITH action buttons,
+    // and such a message's promise settles only when a button is clicked or the
+    // notification is closed — a toast ageing out of view does not close it. So
+    // `await classifyPromise` never settled and the test burned its full 30s budget
+    // and failed as a timeout. The surrounding try/catch could not help: it catches
+    // rejection, not a promise that never settles.
+    //
+    // The test's pass condition had therefore been an UNDECLARED environmental
+    // precondition — "the checkout happens to be clean" — which is exactly the state
+    // in which classify renders no UI at all, so the test named "classify command UI"
+    // asserted nothing about that UI and silently turned any dirty tree into a hang.
     await vscode.commands.executeCommand('workbench.action.closeQuickOpen');
-    // Let the classify promise settle (it may reject on dismiss)
-    try {
-      await classifyPromise;
-    } catch {
-      // Expected — command was cancelled
-    }
+    await vscode.commands.executeCommand('notifications.clearAll');
+
+    // Belt-and-braces: even with both surfaces dismissed, never let a pending
+    // interactive command consume the test budget. `executeCommand` returns a
+    // Thenable (no `.catch`), so adopt it into a real Promise first.
+    const SETTLE_BUDGET_MS = 2000;
+    let settleTimer: NodeJS.Timeout | undefined;
+    await Promise.race([
+      Promise.resolve(classifyPromise).catch(() => undefined),
+      new Promise<void>((resolve) => {
+        settleTimer = setTimeout(resolve, SETTLE_BUDGET_MS);
+      }),
+    ]);
+    if (settleTimer) clearTimeout(settleTimer);
   });
 
   test('codelens — CodeLens annotations in source file', async function () {

@@ -18,19 +18,30 @@
 
 import * as vscode from 'vscode';
 import { ADR_STATUS_VALUES } from '../lib/adr-manager';
+import { SPEC_STATUSES } from '../lib/spec';
 import { listEpics } from '../lib/epic-manager';
 
 // ─── Value tables (single source for completions) ────────────────────────────
 
-/** Spec lifecycle statuses — mirrors SpecStatus in lib/spec.ts. */
-export const SPEC_STATUS_VALUES = [
-  'new',
-  'specifying',
-  'planning', // DR-069 (#886): approved, implement phase not started
-  'implementing',
-  'done',
-  'archived',
-] as const;
+/**
+ * Spec lifecycle statuses — DERIVED from `SPEC_STATUSES` in lib/spec.ts, never
+ * re-typed.
+ *
+ * This used to be a hand-maintained copy that only *claimed* (in a comment) to
+ * mirror the real union, with nothing binding the two. It had already drifted:
+ * `superseded` is a first-class member of `SPEC_STATUSES` — the validator even
+ * requires a companion `superseded-by:` reference for it (spec-validator.ts) —
+ * yet the completion list omitted it, so authoring a status the tool accepts got
+ * no completion. Adding `planning` for DR-069 (#886) needed two edits in two
+ * files for the same reason, and a future status would need the same again.
+ *
+ * Aliasing the constant makes the two un-drift-able by construction: a status
+ * added to the union appears here with no second edit. `views/*` importing
+ * `lib/*` is the established direction in this package (spec-tree-provider,
+ * codelens-provider, spec-panel all import lib/spec), and `lib/spec.ts` imports
+ * no `vscode`, so this adds no dependency edge that did not already exist.
+ */
+export const SPEC_STATUS_VALUES = SPEC_STATUSES;
 
 /** Complexity tiers — mirrors Tier in lib/config.ts. */
 export const TIER_VALUES = ['T1', 'T2', 'T3', 'T4'] as const;

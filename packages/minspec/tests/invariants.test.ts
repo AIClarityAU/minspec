@@ -14,6 +14,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { execFileSync } from 'child_process';
 
 // Modules under test
 import { parseSpec, writeSpec } from '../src/lib/spec';
@@ -839,4 +840,130 @@ describe('Invariant 7: non-user contexts never reach the interactive folder pick
 
     expect(violations).toEqual([]);
   });
+});
+
+// ─── Invariant 8: no tracked symlink escapes the repository (#913 / #900) ────
+//
+// #900 root cause: a build/test worktree shared the primary checkout's hoisted
+// deps with `ln -s /home/<user>/code/MinSpecPro/node_modules node_modules`, and
+// that symlink got COMMITTED. `.gitignore` carried only the directory form
+// `node_modules/`, which matches a directory — not a SYMLINK FILE named
+// `node_modules` — so `git add` accepted it. The bare `node_modules` rule was
+// added afterwards, but gitignore has no power over an already-tracked path, so
+// the entry stayed in the index.
+//
+// The blast radius is every other checkout: CI materialises the link as a
+// dangling pointer to a path that does not exist on the runner, `npm ci` then
+// replaces it with a real directory, and the tracked path shows up as DELETED —
+// a permanently dirty tree in a fresh clone. In #900 that dirtiness surfaced
+// four minutes downstream as an opaque 30s timeout in an unrelated e2e
+// screenshot test, because `minspec.classify` reads `git diff` and renders an
+// interactive notification whenever the diff is non-empty.
+//
+// A gate for exactly this exists at `.githooks/pre-commit` (the "committable-
+// symlink gate", #913) — but it is CLIENT-side: it needs `core.hooksPath` to
+// have been pointed at `.githooks` (a fresh worktree may not have run the
+// `prepare` script), it is skipped on merges and rebases, and it is bypassable
+// with `SYMLINK_GATE_OFF=1`. In #900 it was all three: the offending symlink was
+// re-added by a commit made after that hook already existed. A gate enforced
+// only on the author's machine fails open, which is the "no silent gate"
+// invariant (constitution rule 2 / DR-066).
+//
+// This test is the server-side mirror. It runs in the `test` CI job against the
+// real index, cannot be bypassed by an env var, and states the rule positively:
+// a tracked symlink may point only INSIDE the repository, by a relative path.
+//
+// Deliberately a superset of the hook's three rules so CI is never weaker than
+// the hook:
+//   1. basename `node_modules` at any depth — machine-local hoisted deps must
+//      never enter history, whatever the target;
+//   2. an ABSOLUTE target — non-portable, valid only on the authoring machine;
+//   3. a relative target that lexically ESCAPES the repo root via `..`.
+//
+// Purely lexical, like the hook: no realpath, no filesystem probe, so the verdict
+// is identical on a machine where the target does not exist. Offline and fast —
+// two local git plumbing reads, no network.
+
+describe('Invariant 8: no tracked symlink points outside the repository (#913 / #900)', () => {
+  /** Git's own canonical toplevel, resolved FROM THIS TEST FILE (never hardcoded). */
+  function findRepoRoot(): string | null {
+    try {
+      return execFileSync('git', ['rev-parse', '--show-toplevel'], {
+        cwd: __dirname,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim();
+    } catch {
+      return null; // not a git checkout (e.g. an unpacked published tarball)
+    }
+  }
+
+  const repoRoot = findRepoRoot();
+
+  /**
+   * True when `target`, resolved relative to the directory holding the symlink,
+   * climbs above the repository root. Lexical only — `..` components are counted,
+   * the filesystem is never consulted.
+   */
+  function escapesRepo(linkDir: string, target: string): boolean {
+    const combined = path.posix.normalize(path.posix.join(linkDir, target));
+    return combined === '..' || combined.startsWith('../');
+  }
+
+  // Skipped only where there is no git index to inspect at all — never skipped in
+  // CI, which always runs from a real checkout.
+  (repoRoot ? it : it.skip)(
+    'every tracked symlink (git mode 120000) resolves inside the repo via a relative target',
+    () => {
+      const root = repoRoot as string;
+
+      // -z keeps paths NUL-separated, so a path containing a space or newline is
+      // still parsed correctly. Record shape: "<mode> <sha> <stage>\t<path>".
+      const raw = execFileSync('git', ['ls-files', '-s', '-z'], {
+        cwd: root,
+        encoding: 'utf-8',
+        maxBuffer: 32 * 1024 * 1024,
+      });
+
+      const symlinks: { linkPath: string; sha: string }[] = [];
+      for (const record of raw.split('\0')) {
+        if (!record) continue;
+        const tab = record.indexOf('\t');
+        if (tab === -1) continue;
+        const [mode, sha] = record.slice(0, tab).split(' ');
+        if (mode === '120000') symlinks.push({ linkPath: record.slice(tab + 1), sha });
+      }
+
+      const violations: { path: string; target: string; reason: string }[] = [];
+
+      for (const { linkPath, sha } of symlinks) {
+        // A symlink blob's CONTENT is its target string — read it by object id so
+        // the lookup can never be confused by a path that looks like a revision.
+        const target = execFileSync('git', ['cat-file', 'blob', sha], {
+          cwd: root,
+          encoding: 'utf-8',
+          maxBuffer: 1024 * 1024,
+        }).trim();
+
+        const linkDir = path.posix.dirname(linkPath.split(path.sep).join('/'));
+        let reason: string | null = null;
+
+        if (path.posix.basename(linkPath) === 'node_modules') {
+          reason = "a 'node_modules' symlink is machine-local hoisted deps and must never be tracked";
+        } else if (target.startsWith('/')) {
+          reason = 'its target is an absolute path (valid only on the authoring machine)';
+        } else if (escapesRepo(linkDir, target)) {
+          reason = 'its target escapes the repository root';
+        }
+
+        if (reason) violations.push({ path: linkPath, target, reason });
+      }
+
+      // Empty-array equality (not a bare length check) so a failure PRINTS the
+      // offending path, its target, and why — the gate must name the fix, not just
+      // go red. If this turns red: `git rm --cached <path>` and use a real in-repo
+      // relative link if you genuinely need one. Do not weaken the test.
+      expect(violations).toEqual([]);
+    },
+  );
 });
