@@ -14,24 +14,31 @@
 #
 # Bypass (rare retroactive record of an already-decided DR):
 #   ADR_BORN_GATE_OFF=1 git commit ...
+#
+# Scoped to JUST this DR-029 block (issue #1040) — it must disable only the
+# born-status check it names, never fall through as a whole-hook `exit 0`.
+# That used to also skip the unrelated committable-symlink gate (#913) and the
+# validate gate below, so the documented merge-commit workaround for THIS gate
+# silently disabled two gates it has nothing to do with — a silent gate,
+# which invariant 2 (constitution) forbids.
 set -euo pipefail
 
-[ "${ADR_BORN_GATE_OFF:-}" = "1" ] && exit 0
-
 fail=0
-while IFS=$'\t' read -r _status path; do
-  case "$path" in
-    docs/decisions/DR-*.md) ;;
-    *) continue ;;
-  esac
-  born=$(git show ":$path" | grep -m1 -E '^status:' | sed -E 's/^status:[[:space:]]*//; s/[[:space:]]*#.*//; s/[[:space:]]*$//')
-  if [ "$born" != "proposed" ] && [ "$born" != "draft" ]; then
-    echo "✖ DR-029 gate: new DR '$path' is born 'status: ${born:-<none>}' — must be 'proposed'." >&2
-    echo "  Acceptance is a separate human act (MinSpec: Accept ADR). Create proposed; accept after review." >&2
-    echo "  Override (rare retroactive record): ADR_BORN_GATE_OFF=1 git commit ..." >&2
-    fail=1
-  fi
-done < <(git diff --cached --name-status --diff-filter=A)
+if [ "${ADR_BORN_GATE_OFF:-}" != "1" ]; then
+  while IFS=$'\t' read -r _status path; do
+    case "$path" in
+      docs/decisions/DR-*.md) ;;
+      *) continue ;;
+    esac
+    born=$(git show ":$path" | grep -m1 -E '^status:' | sed -E 's/^status:[[:space:]]*//; s/[[:space:]]*#.*//; s/[[:space:]]*$//')
+    if [ "$born" != "proposed" ] && [ "$born" != "draft" ]; then
+      echo "✖ DR-029 gate: new DR '$path' is born 'status: ${born:-<none>}' — must be 'proposed'." >&2
+      echo "  Acceptance is a separate human act (MinSpec: Accept ADR). Create proposed; accept after review." >&2
+      echo "  Override (rare retroactive record): ADR_BORN_GATE_OFF=1 git commit ..." >&2
+      fail=1
+    fi
+  done < <(git diff --cached --name-status --diff-filter=A)
+fi
 
 # ── committable-symlink gate (#913 / bit #900) ───────────────────────────────
 # `.gitignore`'s `node_modules/` pattern matches a DIRECTORY, not a symlink FILE
