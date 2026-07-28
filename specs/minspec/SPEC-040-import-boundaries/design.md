@@ -1,7 +1,9 @@
 ---
 id: SPEC-040
 type: design
-status: implementing  # spec approved (requirements.md, github@ ad52ff3a); design.md not separately approvable (#630/#951)
+status: done  # SPEC-040 shipped in #1009 (19a6e08). Status mirrors requirements.md; design.md is not
+              # separately approvable (#630/#951) and carries no hash of its own. Sibling `status:` is a
+              # hand-maintained field with no gate — #972 tracks removing it corpus-wide.
 tier: T4
 product: minspec
 epic: EPIC-003  # SDD Core Methodology — code-change safety

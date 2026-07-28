@@ -2,7 +2,7 @@
 id: SPEC-040
 type: requirements
 # 🔒 Once approved, hash-locked: approved bytes recorded in .minspec/approvals.json[SPEC-040].specHash. ANY edit voids approval (hash → stale) — re-run "MinSpec: Approve Spec". DR-012.
-status: implementing
+status: done
 tier: T4
 product: minspec
 epic: EPIC-003  # SDD Core Methodology — code-change safety
@@ -53,7 +53,7 @@ phases:
   clarify: done
   plan: done
   tasks: done
-  implement: in-progress
+  implement: done
 ---
 
 # MinSpec — Machine-enforced import boundaries (Requirements)
