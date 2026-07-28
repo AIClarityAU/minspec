@@ -12,12 +12,15 @@ product: minspec
 epic: EPIC-009  # Team Readiness — docs-lane push ergonomics; grain (b) of #575/#781, the sibling of SPEC-039's grain (a)
 aspects: [approval, docs-lane, pull-request, auto-merge, consent, tier-1, hitl, g8-git-transparency]
 relates_to: [SPEC-039, DR-051, DR-060, DR-061, DR-012]
-implements: [packages/minspec/src/lib/approval-pr.ts, packages/minspec/tests/approval-pr.test.ts]
-# ownership (SPEC-038): approval-pr.ts is net-new and owned here. commit-on-approve.ts is
-# existing, undeclared-by-any-spec code this spec restructures — declared implements: to take
-# primary ownership (the SPEC-043/044 pattern for existing-but-owned code).
-# push-docs-lane.ts / approve-push.ts are REUSED seams (SPEC-039's and the Alt+A push path's):
-# modifies-not-owns, so they sit in affects:.
+implements: [packages/minspec/src/lib/approval-pr.ts, packages/minspec/src/commands/commit-on-approve.ts, packages/minspec/tests/approval-pr.test.ts]
+affects: [packages/minspec/package.json, packages/minspec/src/commands/push-docs-lane.ts]
+# ownership (SPEC-038). implements: approval-pr.ts + its test are net-new and owned here;
+# commit-on-approve.ts is existing code, declared by no other spec, that Slice 2 restructures —
+# declared implements: to take primary ownership (the SPEC-043/044 pattern for
+# existing-but-owned code). affects: package.json gains the FR-1 setting, and Slice 1 rewires
+# push-docs-lane.ts (SPEC-039's command) onto the extracted seam — modifies-not-owns.
+# NOT listed: approve-push.ts, which this spec only READS (its PushApprovalResult is consumed,
+# never modified), and push-docs-lane's tests, which AC-10 requires to pass unchanged.
 phases:
   specify: done
   clarify: pending
