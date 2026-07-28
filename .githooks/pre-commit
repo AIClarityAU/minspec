@@ -16,6 +16,64 @@
 #   ADR_BORN_GATE_OFF=1 git commit ...
 set -euo pipefail
 
+# ── protected-branch guard ───────────────────────────────────────────────────
+# Twin of the Stage 0 guard in the generated hook template
+# (packages/minspec/src/lib/template-registry.ts). This repo sets
+# core.hooksPath=.githooks, so the generated .minspec/hooks/pre-commit never
+# runs here — without this copy, the repo that SHIPS the guard would be the one
+# repo not protected by it. The two must not drift; a test asserts they carry
+# the same decisive lines.
+#
+# Why it exists: `main` is ruleset-gated on pull-request-only checks, so a
+# commit authored here can never be pushed. Without this the rejection arrives
+# at `git push`, after the work is already sealed into branch history.
+#
+# Runs BEFORE the bypasses below on purpose: ADR_BORN_GATE_OFF exits the whole
+# hook (#1040) and is set routinely for merge commits, so an unrelated flag must
+# not silently disable this gate. Once #1040 scopes that flag to its own gate,
+# this ordering stops being load-bearing.
+minspec_branch_guard() {
+  if [ "${MINSPEC_ALLOW_MAIN:-0}" = "1" ]; then return 0; fi
+  if [ "$(git config --get minspec.allowCommitOnDefaultBranch 2>/dev/null)" = "true" ]; then return 0; fi
+
+  guard_git_dir=$(git rev-parse --git-dir 2>/dev/null) || return 0
+  if [ -z "${guard_git_dir:-}" ]; then return 0; fi
+
+  for guard_marker in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
+    if [ -e "$guard_git_dir/$guard_marker" ]; then return 0; fi
+  done
+  if [ -d "$guard_git_dir/rebase-merge" ]; then return 0; fi
+  if [ -d "$guard_git_dir/rebase-apply" ]; then return 0; fi
+
+  guard_current=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) || return 0
+  if [ -z "${guard_current:-}" ]; then return 0; fi
+
+  guard_default=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+  if [ -z "${guard_default:-}" ]; then return 0; fi
+
+  if [ "$guard_current" != "$guard_default" ]; then return 0; fi
+
+  echo "✗ MinSpec gate: refusing to commit on '$guard_current' — this project's default branch." >&2
+  echo "  It is push-protected (pull-request-only checks), so this commit could not be" >&2
+  echo "  pushed and would strand the work in local history." >&2
+  echo "" >&2
+  echo "  Move the staged work onto a branch and commit there:" >&2
+  echo "      git switch -c <branch-name>" >&2
+  echo "      git commit ..." >&2
+  echo "" >&2
+  echo "  Already committed on $guard_current? Keep the work, then rewind the branch:" >&2
+  echo "      git branch <branch-name>" >&2
+  echo "      git reset --hard origin/$guard_default" >&2
+  echo "" >&2
+  echo "  Allow once:      MINSPEC_ALLOW_MAIN=1 git commit ..." >&2
+  echo "  Allow in future: git config minspec.allowCommitOnDefaultBranch true" >&2
+  return 1
+}
+
+if ! minspec_branch_guard; then
+  exit 1
+fi
+
 [ "${ADR_BORN_GATE_OFF:-}" = "1" ] && exit 0
 
 fail=0
