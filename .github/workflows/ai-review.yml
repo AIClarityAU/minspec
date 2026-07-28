@@ -524,7 +524,23 @@ jobs:
                 echo '```'
               fi
               echo
-              echo "_Independent fresh-context reviewers (\`scripts/review-branch.sh\`, no-tools agents reading the diff as untrusted data); each label decided by the deterministic fail-closed gate (\`scripts/review-decide.sh\`). Posted by \`minspec-sdd[bot]\` from CI — provenance is the App identity, verified here, not the label alone (#428, #342). Panel coverage (\`AI_REVIEW_COVERAGE\`): the combined verdict fails toward \`changes\` if ANY voter requests changes._"
+              # Coverage DISCLOSURE (no-silent-gate): name the voters that actually ran
+              # and, when coverage is reduced, say so IN THE COMMENT. Previously the
+              # active mode was echoed only to the CI log, so a repo running a thin
+              # panel produced a verdict indistinguishable from a full-panel one — a
+              # reduced gate that was invisible on the surface where the decision is
+              # consumed (this let a defect through on one repo while the same change
+              # was caught on another).
+              RAN_VOTERS="reviewer"
+              [ "$SECURITY_REQUIRED" = "yes" ] && RAN_VOTERS="$RAN_VOTERS + security"
+              [ "$ARCHITECT_REQUIRED" = "yes" ] && RAN_VOTERS="$RAN_VOTERS + architect"
+              [ "$SKEPTIC_REQUIRED" = "yes" ] && RAN_VOTERS="$RAN_VOTERS + skeptic"
+              if [ "$COVERAGE" = "panel" ]; then
+                COVERAGE_NOTE="Coverage \`$COVERAGE\` — voters that ran: **$RAN_VOTERS**."
+              else
+                COVERAGE_NOTE="⚠️ **Reduced coverage** — \`AI_REVIEW_COVERAGE=$COVERAGE\`, so the architect + skeptic voters did NOT run. Voters that ran: **$RAN_VOTERS**. A \`pass\` here is weaker evidence than a full-panel pass; unset the repo variable to restore the \`panel\` default."
+              fi
+              echo "_Independent fresh-context reviewers (\`scripts/review-branch.sh\`, no-tools agents reading the diff as untrusted data); each label decided by the deterministic fail-closed gate (\`scripts/review-decide.sh\`). Posted by \`minspec-sdd[bot]\` from CI — provenance is the App identity, verified here, not the label alone (#428, #342). $COVERAGE_NOTE The combined verdict fails toward \`changes\` if ANY voter requests changes._"
             fi
           } > "$BODY"
           echo "body-file=$BODY" >> "$GITHUB_OUTPUT"
