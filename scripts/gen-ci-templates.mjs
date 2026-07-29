@@ -60,12 +60,6 @@ const SOURCES = [
     stripShebang: false,
   },
   {
-    constName: 'APPROVAL_PROVENANCE_PY',
-    srcPath: 'scripts/approval-provenance.py',
-    doc: 'Verbatim body of `scripts/approval-provenance.py` (shebang stripped — supplied via preamble). Ships WITH review-branch.sh: that script invokes it, so a scaffolded repo missing it would silently lose the approval-provenance facts and fall back to the #1017 guess-the-worst behaviour.',
-    stripShebang: true,
-  },
-  {
     constName: 'REVIEW_BRANCH_SH',
     srcPath: 'scripts/review-branch.sh',
     doc: 'Verbatim body of `scripts/review-branch.sh` (shebang stripped — supplied via preamble).',

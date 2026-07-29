@@ -158,7 +158,12 @@ def report_for(base: str, head: str, sidecar: str) -> list[str]:
     spec_path, new_hash = _sidecar_fields(new_raw)
     _, old_hash = _sidecar_fields(old_raw)
 
-    lines = [sidecar]
+    # The sidecar PATH is attacker-controlled as well: a PR can add a file whose NAME
+    # contains `<`/`>`/spaces, and git does not quote those by default — so an unsanitised
+    # filename could inject `</approval_provenance>` and escape the trusted block just as
+    # a field value could. Sanitised at the branch head so every early return inherits it.
+    safe_sidecar = _sanitize(sidecar)
+    lines = [safe_sidecar]
     if new_raw is None:
         lines.append('  status: DELETED in this change (no record at head)')
         return lines
@@ -221,10 +226,26 @@ def report_for(base: str, head: str, sidecar: str) -> list[str]:
                 lines.append(
                     f'  previous record:   {_abbrev(old_hash)} — matched the spec at base'
                 )
-                lines.append(
-                    '  => The spec content changed between base and head, so the hash change '
-                    'tracks a real content change.'
-                )
+                # Same gating as the stale branch above, for the same reason. Fixing only
+                # one of the two twins last round left this one asserting a real content
+                # change on a pure-forgery path (spec untouched, hash edited), so the
+                # block reported MISMATCH and reassurance together.
+                if new_hash == actual:
+                    lines.append(
+                        '  => The spec content changed between base and head, so the hash change '
+                        'tracks a real content change.'
+                    )
+                elif spec_at_base == spec_now:
+                    lines.append(
+                        '  => The previous record was VALID and the spec did NOT change — yet the '
+                        'hash did. Nothing backs the new hash: treat the MISMATCH above as a real '
+                        'finding.'
+                    )
+                else:
+                    lines.append(
+                        '  => The spec did change here, but the new hash still matches nothing: '
+                        'treat the MISMATCH above as a real finding.'
+                    )
     return lines
 
 
