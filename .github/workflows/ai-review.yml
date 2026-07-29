@@ -812,10 +812,14 @@ jobs:
           #     code verdict is `ai-review:pass` or `ai-review:changes`.
           #     `needs-human-review` also blocks the agent dispatch path
           #     (scripts/dispatch-ready-check.sh), completing the separate gate.
-          # A NORMAL (non-machinery) `ai-review:changes` is NO LONGER flagged here at
-          # t=0 (#816 retirement): remediate-pr.sh auto-remediates it (bounded
-          # attempts) and applies `needs-human-review` ITSELF only at exhaustion
-          # (cap / escalate / quarantine / conflict). Eager-flagging it polluted the
+          # A NORMAL (non-machinery) `ai-review:changes` is no longer flagged here at
+          # t=0 (#816 retirement) — but ONLY WHERE THE REMEDIATION LANE EXISTS (the
+          # `REMEDIATION_AVAILABLE` probe below): remediate-pr.sh auto-remediates it
+          # (bounded attempts) and applies `needs-human-review` ITSELF only at
+          # exhaustion (cap / escalate / quarantine / conflict). Where that script is
+          # absent the retirement has no delegate, so the eager summon is restored
+          # (deny-by-default) rather than routing the PR to nobody. Eager-flagging it
+          # WHERE a remediator exists polluted the
           # positive "my turn" queue (`awaiting-approval`, DR-063) with PRs the
           # pipeline fixes on its own — it means "AI review hasn't passed yet", which is
           # not the same as "a human is needed". A retry-able `ai-review:blocked`
