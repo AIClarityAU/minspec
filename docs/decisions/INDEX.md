@@ -570,4 +570,12 @@ This DR touches **only the pre-dispatch gate.** Relaxing it does not remove huma
 <!-- dr-summary:DR-071 auto=083ef1f2af49 -->
 Constitution invariant #1: *core functionality works offline — no network calls without explicit user consent.* **DR-050** implements it, and its rule #2 is explicit: DR-050 was minted for gh/CLI shelling, where the action's *target* varies per invocation — an arbitrary URL, an arbitrary API call, an arbitrary repo. Per-action consent is exactly right there: the user cannot pre-approve a target they have not seen.
 <!-- /dr-summary:DR-071 -->
+
+## [DR-072 — The human-approval exit — a reviewing human lifts a `tier` hold by minting an attributed, body-bound verdict record, and can never lift a content-class hold](DR-072.md)
+
+*Status: proposed · Date: 2026-07-29*
+
+<!-- dr-summary:DR-072 auto=9c94528af6aa -->
+It also, unnoticed, made needs-review a **one-way door**. The only writer of such a record was the LLM triage gate, and re-running it re-derives the same hold. A human who had read an issue and wanted to say *"I've reviewed this, go"* had no way to say it.
+<!-- /dr-summary:DR-072 -->
 <!-- minspec:dr-index:end -->
