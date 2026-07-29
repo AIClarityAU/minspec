@@ -530,10 +530,14 @@ function decideReviewCheck(label, isMachineryPr) {
 // machinery PR's honest code verdict is `ai-review:pass` or `ai-review:changes`.
 //
 // It is NOT the next actor — so we do NOT summon one — for:
-//   • a NORMAL (non-machinery) `ai-review:changes`: `remediate-pr.sh` auto-
-//     remediates it (bounded attempts) and applies `needs-human-review` ITSELF
-//     only at exhaustion (cap / escalate / quarantine / conflict). Flagging it
-//     here at t=0 is premature — the #816 retirement.
+//   • a NORMAL (non-machinery) `ai-review:changes`, BUT ONLY where the
+//     remediation lane exists: `remediate-pr.sh` auto-remediates it (bounded
+//     attempts) and applies `needs-human-review` ITSELF only at exhaustion
+//     (cap / escalate / quarantine / conflict). Flagging it here at t=0 is
+//     premature — the #816 retirement. Where that script is ABSENT (a repo that
+//     has not adopted the dispatch lane) the retirement would delegate to
+//     nothing, so the eager summon is kept. Deny-by-default: the caller must
+//     prove the lane exists via `remediationAvailable: true`.
 //   • ANY `ai-review:blocked` (machinery or not): the reviewer could not RUN
 //     (quota / rate-limit / overload) — retry-able, NOT a verdict on the code; the
 //     ai-review-retry workflow re-runs it. Never a human-review situation.
@@ -546,9 +550,24 @@ function decideReviewCheck(label, isMachineryPr) {
 // decideReviewCheck) so ai-review.yml decides via this SAME tested seam: bash and
 // JS cannot drift. Deny-by-default: a missing/unknown label with isMachinery unset
 // returns false (advisory not applied; the gate still holds red).
-function shouldSummonHumanReview({ label, isMachinery } = {}) {
+function shouldSummonHumanReview({ label, isMachinery, remediationAvailable } = {}) {
   if (label === BLOCKED) return false; // retry-able — ai-review-retry re-runs it, never a human
-  return isMachinery === true; // only a machinery PR genuinely needs a human at t=0 now
+  if (isMachinery === true) return true; // a gate cannot certify a change to itself
+
+  // The #816 retirement is only safe where the delegate it names actually
+  // exists. It hands a normal `ai-review:changes` to `remediate-pr.sh`, which
+  // applies `needs-human-review` ITSELF at exhaustion. A consuming repo that
+  // has not adopted the dispatch lane has no such delegate, so retiring the
+  // eager summon there routes a flagged PR to nobody: not auto-remediated, not
+  // escalated, just quietly abandoned. Merge safety is unaffected either way
+  // (`ready-to-merge` holds red independently) — what is lost is liveness.
+  //
+  // Deny-by-default: summon unless the caller can PROVE the lane exists.
+  // `undefined` therefore keeps the eager behaviour, so a caller that does not
+  // pass the flag fails safe rather than silently dropping the backstop.
+  if (label === CHANGES && remediationAvailable !== true) return true;
+
+  return false;
 }
 
 // Is a label-removal API failure safe to ignore? ONLY a 404 (the label is

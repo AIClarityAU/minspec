@@ -826,10 +826,22 @@ jobs:
           # is the SAME tested pure seam (shouldSummonHumanReview) the tests lock, so
           # bash and JS cannot drift. All calls best-effort (`|| true`): the verdict
           # label above is the authoritative signal.
-          SUMMON_HUMAN=$(LABEL="$LABEL" IS_MACHINERY="${IS_MACHINERY:-false}" node -e '
+          # Does the remediation lane the #816 retirement delegates to actually
+          # exist here? A consuming repo that has not adopted the dispatch lane
+          # has no remediate-pr.sh, and retiring the eager summon there would
+          # route a flagged PR to nobody. Probed from disk, not assumed.
+          REMEDIATION_AVAILABLE=false
+          if [ -f "${GITHUB_WORKSPACE}/scripts/remediate-pr.sh" ]; then
+            REMEDIATION_AVAILABLE=true
+          fi
+          SUMMON_HUMAN=$(LABEL="$LABEL" IS_MACHINERY="${IS_MACHINERY:-false}" REMEDIATION_AVAILABLE="$REMEDIATION_AVAILABLE" node -e '
             const g = require(process.env.GITHUB_WORKSPACE + "/.github/scripts/ai-review-guard.js");
             process.stdout.write(
-              g.shouldSummonHumanReview({ label: process.env.LABEL, isMachinery: process.env.IS_MACHINERY === "true" })
+              g.shouldSummonHumanReview({
+                label: process.env.LABEL,
+                isMachinery: process.env.IS_MACHINERY === "true",
+                remediationAvailable: process.env.REMEDIATION_AVAILABLE === "true",
+              })
                 ? "yes" : "no",
             );
           ' 2>/dev/null || echo "no")
