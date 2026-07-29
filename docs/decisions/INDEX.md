@@ -469,7 +469,7 @@ classifyBlast(signals, touchesExportedSurface) (auto-merge.ts:188) returns 'low'
 
 ## [DR-059 — Commit-message prose deferrals must cite a follow-up — a blocking commit-msg gate, distinct from DR-040's DR-document auto-materialization](DR-059.md)
 
-*Status: proposed · Date: 2026-07-14*
+*Status: accepted · Date: 2026-07-14*
 
 <!-- dr-summary:DR-059 auto=e78d2df187eb -->
 Two mechanisms leak un-tracked work, on **two different surfaces**: 1. **DR-document follow-ups.** A DR's ## Follow-ups (tracked) bullets that carry no issue/spec ref. DR-040 governs this: on DR save, un-materialized bullets **auto-create** their issues (friction-free), and only genuinely broken refs surface. DR-040 deliberately **rejected a blocking gate** here — "only DR-012 approval blocks in MinSpec; a second blocking gate for bookkeeping" — because the author's curated list can be materialized *for* them, so friction is unwarranted.
@@ -557,7 +557,7 @@ deriveStatus — the authoritative, approval-aware SIGNPOST derivation (DR-034) 
 
 ## [DR-070 — Standing dispatch policy — split the collapsed `needs-review` hold reason, then let a deny-by-default predicate lift ONLY the tier hold on hash-bound, decision-free, inward-facing work](DR-070.md)
 
-*Status: proposed · Date: 2026-07-26*
+*Status: accepted · Date: 2026-07-26*
 
 <!-- dr-summary:DR-070 auto=089e9f27e494 -->
 This DR touches **only the pre-dispatch gate.** Relaxing it does not remove human work; it **moves** work downstream. Every design in this space must account for where the moved work lands. 287 open needs-review (verified live 2026-07-26; 72% of 398 open issues). The maintainer cannot process that queue, and #783 already records that inflow outruns resolution — the panel's 14-day re-measurement put creation at ~13/day against ~6/day closed, i.e. a **net +7/day**. A one-time purge does not fix a rate…

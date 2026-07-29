@@ -1,7 +1,7 @@
 ---
 id: SPEC-022
 type: requirements
-status: implementing
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity

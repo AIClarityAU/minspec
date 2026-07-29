@@ -1,7 +1,7 @@
 ---
 id: SPEC-026
 type: requirements
-status: implementing
+status: planning
 tier: T4
 product: minspec
 epic: EPIC-009  # Team Readiness — concurrent multi-session coordination

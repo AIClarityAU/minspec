@@ -225,11 +225,19 @@ describe('pre-commit protected-branch guard — the .githooks twin must not drif
     expect(fs.readFileSync(githook, 'utf8')).toContain(line);
   });
 
-  it('runs the guard BEFORE ADR_BORN_GATE_OFF can short-circuit the hook', () => {
-    // ADR_BORN_GATE_OFF=1 is set routinely for merge commits and exits the whole
-    // hook. If the guard sat after it, an unrelated flag would disable this gate.
+  it('is not preceded by any whole-hook `exit 0` that could skip it', () => {
+    // Originally this asserted the guard sat above ADR_BORN_GATE_OFF, which was a
+    // whole-hook `exit 0` set routinely for merge commits. #1043 scoped every
+    // bypass to its own block, so that specific ordering no longer matters — but
+    // the invariant behind it still does: any unconditional or flag-guarded
+    // top-level `exit 0` above the guard would disable it wholesale. Pin that
+    // directly rather than keeping an assertion whose stated reason is obsolete.
     const src = fs.readFileSync(githook, 'utf8');
-    expect(src.indexOf('minspec_branch_guard()')).toBeLessThan(src.indexOf('ADR_BORN_GATE_OFF:-'));
+    const guardAt = src.indexOf('minspec_branch_guard()');
+    expect(guardAt).toBeGreaterThan(-1);
+    const preceding = src.slice(0, guardAt).split('\n');
+    const offenders = preceding.filter((line) => /^\s*(\[[^\]]*\]\s*&&\s*)?exit\s+0\s*$/.test(line));
+    expect(offenders).toEqual([]);
   });
 
   it('BLOCKS a real commit on the default branch when run as the live hook', () => {

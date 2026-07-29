@@ -1,7 +1,7 @@
 ---
 id: SPEC-027
 type: requirements
-status: implementing
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness
