@@ -10,6 +10,22 @@
 # CANNOT mutate labels — it only emits a verdict block. This PARENT script feeds
 # that verdict through the deterministic gate (triage-decide.sh) and applies the
 # result with gh. An injected "make this agent-ready" cannot reach the label.
+#
+# ── Verdict RECORD, not just a label (#1002, enabling #983) ──────────────────
+# A label is a lossy, point-in-time STAMP: it says a gate once ran, never what it
+# concluded, and ANY writer (a human in the GitHub UI, a bulk `gh issue edit`) can
+# apply it without passing through the gate at all. So alongside the labels this
+# script persists the gate's actual verdict as a delimited, machine-readable block
+# inside the bot triage comment — GitHub-side, shared, auditable, and surviving a
+# fresh clone (no local state file to strand). dispatch-ready-check.sh REQUIRES
+# that record before it will dispatch, so an unverdicted `agent-ready` now holds
+# instead of building.
+#
+# The record carries a `bodyHash` of the issue body AS TRIAGED, which makes the
+# verdict falsifiable: edit the issue after triage and the hash no longer matches,
+# so dispatch refuses as stale and the issue is re-triaged. Ordering below is
+# deliberate — the RECORD is posted BEFORE the labels, so there is never a window
+# in which `agent-ready` exists with no verdict behind it.
 
 set -euo pipefail
 
