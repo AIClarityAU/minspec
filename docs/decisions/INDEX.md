@@ -469,7 +469,7 @@ classifyBlast(signals, touchesExportedSurface) (auto-merge.ts:188) returns 'low'
 
 ## [DR-059 — Commit-message prose deferrals must cite a follow-up — a blocking commit-msg gate, distinct from DR-040's DR-document auto-materialization](DR-059.md)
 
-*Status: proposed · Date: 2026-07-14*
+*Status: accepted · Date: 2026-07-14*
 
 <!-- dr-summary:DR-059 auto=e78d2df187eb -->
 Two mechanisms leak un-tracked work, on **two different surfaces**: 1. **DR-document follow-ups.** A DR's ## Follow-ups (tracked) bullets that carry no issue/spec ref. DR-040 governs this: on DR save, un-materialized bullets **auto-create** their issues (friction-free), and only genuinely broken refs surface. DR-040 deliberately **rejected a blocking gate** here — "only DR-012 approval blocks in MinSpec; a second blocking gate for bookkeeping" — because the author's curated list can be materialized *for* them, so friction is unwarranted.
@@ -509,7 +509,7 @@ The independent AI reviewer (DR-033 §6) records a PR verdict as ai-review:{pass
 
 ## [DR-064 — Machine-enforce the layer-import contract — eslint no-restricted-imports + an in-repo (dependency-free) cycle gate; ban type edges too; ship error-rules only after the tree is made clean; vscode-purity ships at warn](DR-064.md)
 
-*Status: proposed · Date: 2026-07-17*
+*Status: accepted · Date: 2026-07-17*
 
 <!-- dr-summary:DR-064 auto=0000000000000000 -->
 MinSpec's layered architecture (lib never imports views/commands, @aiclarity/shared barrel-only, no runtime cycles) is held by convention alone and has already leaked — 2 lib→views inversions, 3 one-edit-away cycles, 7 vscode-coupled lib files, listSpecs living in a UI file. SPEC-040 (#690) flagged the eslint-encoded layering contract as a costly-to-reverse architectural artifact with no DR. This records the decision to machine-enforce it: eslint no-restricted-imports for direction/depth + an in-repo dependency-free cycle checker adapting next-task.ts detectCycles (resolves OQ-1); ban type edges too (OQ-2); @typescript-eslint/no-restricted-imports + parserOptions.project (OQ-3); ship error-rules green only after the FR-4/FR-5 refactors; vscode-purity at warn until #830. Gates-not-conventions (#137/DR-003), enforced offline (INV-1/DR-054), same thesis as SPEC-038/#460.
@@ -554,4 +554,20 @@ Specs interleave a product-owner audience (what/why) with an engineering audienc
 <!-- dr-summary:DR-069 auto=29722db03da9 -->
 deriveStatus — the authoritative, approval-aware SIGNPOST derivation (DR-034) — returns implementing for **any approved spec that is not all-done**: Approval sets the first build-band phase (plan) to in-progress (phasesForApproval), so a spec approved while still at **Plan/Tasks — implement phase pending, zero code** derives to implementing. That is a **DR-003 false signpost** — the project's stated worst defect: the signpost claims code is being written when none exists. The deterministic literal-vs-derived validator cannot catch it (literal == derived); only the…
 <!-- /dr-summary:DR-069 -->
+
+## [DR-070 — Standing dispatch policy — split the collapsed `needs-review` hold reason, then let a deny-by-default predicate lift ONLY the tier hold on hash-bound, decision-free, inward-facing work](DR-070.md)
+
+*Status: accepted · Date: 2026-07-26*
+
+<!-- dr-summary:DR-070 auto=089e9f27e494 -->
+This DR touches **only the pre-dispatch gate.** Relaxing it does not remove human work; it **moves** work downstream. Every design in this space must account for where the moved work lands. 287 open needs-review (verified live 2026-07-26; 72% of 398 open issues). The maintainer cannot process that queue, and #783 already records that inflow outruns resolution — the panel's 14-day re-measurement put creation at ~13/day against ~6/day closed, i.e. a **net +7/day**. A one-time purge does not fix a rate…
+<!-- /dr-summary:DR-070 -->
+
+## [DR-071 — Standing consent — a named setting is valid consent for a fixed, same-origin, repeating network action, where a per-action prompt would defeat the feature it gates](DR-071.md)
+
+*Status: proposed · Date: 2026-07-27*
+
+<!-- dr-summary:DR-071 auto=083ef1f2af49 -->
+Constitution invariant #1: *core functionality works offline — no network calls without explicit user consent.* **DR-050** implements it, and its rule #2 is explicit: DR-050 was minted for gh/CLI shelling, where the action's *target* varies per invocation — an arbitrary URL, an arbitrary API call, an arbitrary repo. Per-action consent is exactly right there: the user cannot pre-approve a target they have not seen.
+<!-- /dr-summary:DR-071 -->
 <!-- minspec:dr-index:end -->

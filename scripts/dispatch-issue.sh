@@ -894,9 +894,13 @@ shepherd_own_pr() {
     [[ "$(jq -r '.autoMergeRequest // "null"' <<<"$pr_json")" != "null" ]] && automerge_armed=yes
 
     local action holds attempts decision
+    # The 7th argument is the SPEC-044 D5 owner-gate, and the creator passes "no"
+    # DELIBERATELY: the live claim on this item is our own, so `skip-live-owned` must
+    # never fire here. That token exists to keep the DRAIN off a PR whose creator is
+    # still shepherding it — the owner ignores it and drives its own PR (FR-6/INV-4).
     action=$("${SCRIPT_DIR}/remediate-pr.sh" --classify \
                "$BRANCH" "$mergeable" "$merge_state" "$labels_csv" \
-               "$failing_non_review" "$ai_review_bad" 2>/dev/null || echo "skip-clean")
+               "$failing_non_review" "$ai_review_bad" "no" 2>/dev/null || echo "skip-clean")
 
     # D3 — re-verify ownership BEFORE electing any credentialed step.
     holds=no

@@ -14,24 +14,115 @@
 #
 # Bypass (rare retroactive record of an already-decided DR):
 #   ADR_BORN_GATE_OFF=1 git commit ...
+#
+# Scoped to JUST this DR-029 block (issue #1040) — it must disable only the
+# born-status check it names, never fall through as a whole-hook `exit 0`.
+# That used to also skip the unrelated committable-symlink gate (#913) and the
+# validate gate below, so the documented merge-commit workaround for THIS gate
+# silently disabled two gates it has nothing to do with — a silent gate,
+# which invariant 2 (constitution) forbids.
 set -euo pipefail
 
-[ "${ADR_BORN_GATE_OFF:-}" = "1" ] && exit 0
+# ── protected-branch guard ───────────────────────────────────────────────────
+# Twin of the Stage 0 guard in the generated hook template
+# (packages/minspec/src/lib/template-registry.ts). This repo sets
+# core.hooksPath=.githooks, so the generated .minspec/hooks/pre-commit never
+# runs here — without this copy, the repo that SHIPS the guard would be the one
+# repo not protected by it. The two must not drift; a test asserts they carry
+# the same decisive lines.
+#
+# Why it exists: `main` is ruleset-gated on pull-request-only checks, so a
+# commit authored here can never be pushed. Without this the rejection arrives
+# at `git push`, after the work is already sealed into branch history.
+#
+# Kept FIRST so no other gate's bypass can disable it. That mattered acutely
+# before #1043, when ADR_BORN_GATE_OFF was a whole-hook `exit 0` set routinely
+# for merge commits; #1043 scoped every bypass to its own block, so ordering is
+# no longer load-bearing for correctness. It stays first as defence in depth,
+# and a test asserts no whole-hook `exit 0` is ever reintroduced above it.
+minspec_branch_guard() {
+  if [ "${MINSPEC_ALLOW_MAIN:-0}" = "1" ]; then return 0; fi
+  if [ "$(git config --get minspec.allowCommitOnDefaultBranch 2>/dev/null)" = "true" ]; then return 0; fi
+
+  guard_git_dir=$(git rev-parse --git-dir 2>/dev/null) || return 0
+  if [ -z "${guard_git_dir:-}" ]; then return 0; fi
+
+  for guard_marker in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
+    if [ -e "$guard_git_dir/$guard_marker" ]; then return 0; fi
+  done
+  if [ -d "$guard_git_dir/rebase-merge" ]; then return 0; fi
+  if [ -d "$guard_git_dir/rebase-apply" ]; then return 0; fi
+
+  guard_current=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) || return 0
+  if [ -z "${guard_current:-}" ]; then return 0; fi
+
+  guard_default=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+
+  # origin/HEAD is the precise answer but is NOT always populated — it is absent
+  # in both repos this guard was written for, which made the guard silently
+  # inert exactly where it was needed. `git remote set-head origin <branch>`
+  # repairs it, but the gate must not depend on someone having done that.
+  #
+  # Fall back to conventional protected names. Still not a hardcoded "main":
+  # only these names are treated as protected, any other branch is untouched,
+  # and the list is configurable per project.
+  #
+  # Gated on an `origin` remote existing. A repo with no remote has nothing to
+  # push to, so no branch in it can be push-protected and committing on `main`
+  # is entirely correct — scratch repos, fixtures and local-only projects must
+  # never be blocked.
+  if [ -z "${guard_default:-}" ] && git config --get remote.origin.url >/dev/null 2>&1; then
+    guard_candidates=$(git config --get minspec.protectedBranches 2>/dev/null || true)
+    if [ -z "${guard_candidates:-}" ]; then guard_candidates="main master trunk"; fi
+    for guard_name in $guard_candidates; do
+      if [ "$guard_current" = "$guard_name" ]; then
+        guard_default="$guard_name"
+        break
+      fi
+    done
+  fi
+
+  if [ -z "${guard_default:-}" ]; then return 0; fi
+
+  if [ "$guard_current" != "$guard_default" ]; then return 0; fi
+
+  echo "✗ MinSpec gate: refusing to commit on '$guard_current' — this project's default branch." >&2
+  echo "  It is push-protected (pull-request-only checks), so this commit could not be" >&2
+  echo "  pushed and would strand the work in local history." >&2
+  echo "" >&2
+  echo "  Move the staged work onto a branch and commit there:" >&2
+  echo "      git switch -c <branch-name>" >&2
+  echo "      git commit ..." >&2
+  echo "" >&2
+  echo "  Already committed on $guard_current? Keep the work, then rewind the branch:" >&2
+  echo "      git branch <branch-name>" >&2
+  echo "      git reset --hard origin/$guard_default" >&2
+  echo "" >&2
+  echo "  Allow once:      MINSPEC_ALLOW_MAIN=1 git commit ..." >&2
+  echo "  Allow in future: git config minspec.allowCommitOnDefaultBranch true" >&2
+  return 1
+}
+
+if ! minspec_branch_guard; then
+  exit 1
+fi
 
 fail=0
-while IFS=$'\t' read -r _status path; do
-  case "$path" in
-    docs/decisions/DR-*.md) ;;
-    *) continue ;;
-  esac
-  born=$(git show ":$path" | grep -m1 -E '^status:' | sed -E 's/^status:[[:space:]]*//; s/[[:space:]]*#.*//; s/[[:space:]]*$//')
-  if [ "$born" != "proposed" ] && [ "$born" != "draft" ]; then
-    echo "✖ DR-029 gate: new DR '$path' is born 'status: ${born:-<none>}' — must be 'proposed'." >&2
-    echo "  Acceptance is a separate human act (MinSpec: Accept ADR). Create proposed; accept after review." >&2
-    echo "  Override (rare retroactive record): ADR_BORN_GATE_OFF=1 git commit ..." >&2
-    fail=1
-  fi
-done < <(git diff --cached --name-status --diff-filter=A)
+if [ "${ADR_BORN_GATE_OFF:-}" != "1" ]; then
+  while IFS=$'\t' read -r _status path; do
+    case "$path" in
+      docs/decisions/DR-*.md) ;;
+      *) continue ;;
+    esac
+    born=$(git show ":$path" | grep -m1 -E '^status:' | sed -E 's/^status:[[:space:]]*//; s/[[:space:]]*#.*//; s/[[:space:]]*$//')
+    if [ "$born" != "proposed" ] && [ "$born" != "draft" ]; then
+      echo "✖ DR-029 gate: new DR '$path' is born 'status: ${born:-<none>}' — must be 'proposed'." >&2
+      echo "  Acceptance is a separate human act (MinSpec: Accept ADR). Create proposed; accept after review." >&2
+      echo "  Override (rare retroactive record): ADR_BORN_GATE_OFF=1 git commit ..." >&2
+      fail=1
+    fi
+  done < <(git diff --cached --name-status --diff-filter=A)
+fi
 
 # ── committable-symlink gate (#913 / bit #900) ───────────────────────────────
 # `.gitignore`'s `node_modules/` pattern matches a DIRECTORY, not a symlink FILE

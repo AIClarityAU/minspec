@@ -34,14 +34,31 @@
 #     commits BEFORE the push and FAILS CLOSED on any secret/exfil hit.
 #   • ai-review:* labels are NEVER mutated here — CI (ai-review.yml, as the bot) owns
 #     them (#600). We only push; the re-push re-triggers the CI reviewer.
-#   • runaway guard: at most MINSPEC_REMEDIATE_MAX_ATTEMPTS (default 3 — raised from
-#     2: a crashed attempt burns quota without fixing anything) — never a loop.
+#   • runaway guard: two INDEPENDENT budgets — MINSPEC_REMEDIATE_MAX_ATTEMPTS genuine
+#     attempts + MINSPEC_REMEDIATE_MAX_CRASHES agent crashes, then a human. Never a loop.
 #
-# Testable pure seam (no gh/git/claude):
+# Orphan-fallback (SPEC-044 FR-6/INV-4): this sweep is NO LONGER the primary fixer.
+# The session that opened a PR shepherds it itself (DR-067 D4), so a PR whose work item
+# is held by a LIVE claim is left alone here — the drain only adopts ORPHANS (no claim,
+# or an expired one). Determined by `issue-lease.sh reclaim?`, failing closed.
+#
+# Testable pure seams (no gh/git/claude):
 #   scripts/remediate-pr.sh --classify <branch> <mergeable> <mergeStateStatus> \
-#       <labels_csv> <failing_non_review:yes|no> <ai_review_bad:yes|no>
-#     → prints ONE action token: skip-not-automation | skip-conflict |
+#       <labels_csv> <failing_non_review:yes|no> <ai_review_bad:yes|no> \
+#       [<live_nonself_claim:yes|no>]
+#     → prints ONE action token: skip-not-automation | skip-live-owned | skip-conflict |
 #       agent-remediate-checks | agent-remediate-review | rebase-only | skip-clean
+#     The 7th argument is OPTIONAL and defaults to "no", so the creator-shepherd's
+#     existing 6-argument call keeps working and is never told to stand down from the
+#     PR it owns.
+#   scripts/remediate-pr.sh --count-markers <marker> [author_logins_csv] < comments.json
+#     → prints how many comments the runaway guard would charge to that marker
+#   scripts/remediate-pr.sh --check-markers <marker> <marker> [marker...]
+#     → exit 0 iff the markers are pairwise isolated (no equal/nested pair)
+#   scripts/remediate-pr.sh --sanitize-body < text   → prints the comment-safe form
+#   scripts/remediate-pr.sh --cap-notice-decision [author_logins_csv] < comments.json
+#     → prints post | skip — whether the one-shot "capped, needs a human" notice is
+#       posted this sweep (never skip unless authorship is provable)
 
 set -euo pipefail
 
@@ -49,14 +66,10 @@ REPO="AIClarityAU/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 WORKTREE_BASE="/tmp/minspec-remediate"
 DRY_RUN=false
-MAX_ATTEMPTS="${MINSPEC_REMEDIATE_MAX_ATTEMPTS:-3}"
-# Marker embedded in every remediation comment so we can COUNT prior attempts on a
-# PR (bounds the runaway loop) without a stateful store.
-ATTEMPT_MARKER="<!-- minspec-auto-remediation -->"
-# Distinct marker for the one-shot "remediation capped" notice. Kept SEPARATE from
-# ATTEMPT_MARKER so posting the notice never inflates the attempt count, and so the
-# cap block can self-deduplicate (post the comment once, stay silent on later sweeps).
-CAPPED_MARKER="<!-- minspec-remediate-capped -->"
+MAX_ATTEMPTS="${MINSPEC_REMEDIATE_MAX_ATTEMPTS:-2}"
+# Crashes get their OWN budget: an agent that dies produces no fix at all, so charging
+# it to the attempt cap spends genuine-remediation quota on nothing (#965).
+MAX_CRASHES="${MINSPEC_REMEDIATE_MAX_CRASHES:-2}"
 # Automation-branch prefixes this sweep is allowed to touch. The delimiter class
 # [/-] matches BOTH slash-delimited (fix/886-x) and dash-delimited (fix-886-x)
 # automation branches; it still requires one of the three prefixes followed by a
@@ -71,40 +84,246 @@ AUTOMATION_BRANCH_RE='^(agent|fix|feat)[/-]'
 # "skip" for anything unrecognised.
 classify_pr() {
   local branch="$1" mergeable="$2" merge_state="$3" labels_csv="$4" failing_non_review="$5" ai_review_bad="$6"
+  # SPEC-044 D5/FR-6: does a LIVE claim (owned by someone other than this caller) hold
+  # the work item this PR belongs to? Defaults "no" so the CREATOR — which is the owner
+  # and drove here deliberately — keeps its existing 6-argument contract and is never
+  # told to stand down from its own PR.
+  local live_nonself_claim="${7:-no}"
 
   # 1. Scope gate — only automation branches.
   if ! [[ "$branch" =~ $AUTOMATION_BRANCH_RE ]]; then
     echo "skip-not-automation"; return 0
   fi
-  # 2. Conflicts — surface only, never auto-resolve.
+  # 2. Owner gate (SPEC-044 FR-6/INV-4) — the drain is an ORPHAN-FALLBACK, not the
+  #    primary fixer. A live creator-claim means that session is shepherding its own
+  #    PR with the warm worktree and a fresh context budget (DR-067 D4); a second
+  #    remediator would duplicate the build and race the push. Ranked directly after
+  #    the scope gate so ownership is settled BEFORE any state is interpreted — a
+  #    conflicting or red PR that someone else owns is still not ours to touch.
+  if [[ "$live_nonself_claim" == "yes" ]]; then
+    echo "skip-live-owned"; return 0
+  fi
+  # 3. Conflicts — surface only, never auto-resolve.
   if [[ "$mergeable" == "CONFLICTING" || "$merge_state" == "DIRTY" ]]; then
     echo "skip-conflict"; return 0
   fi
-  # 3. A required check (other than ai-review) is red → fix the code first.
+  # 4. A required check (other than ai-review) is red → fix the code first.
   if [[ "$failing_non_review" == "yes" ]]; then
     echo "agent-remediate-checks"; return 0
   fi
-  # 4. Independent reviewer wants changes (label OR the ai-review check is red).
+  # 5. Independent reviewer wants changes (label OR the ai-review check is red).
   if [[ "$ai_review_bad" == "yes" ]] || [[ ",$labels_csv," == *",ai-review:changes,"* ]]; then
     echo "agent-remediate-review"; return 0
   fi
-  # 5. Behind base only — mechanical merge, no agent.
+  # 6. Behind base only — mechanical merge, no agent.
   if [[ "$merge_state" == "BEHIND" ]]; then
     echo "rebase-only"; return 0
   fi
   echo "skip-clean"
 }
 
+# ── Marker vocabulary + pure counting helpers ──────────────────────────────────
+# Markers embedded in remediation comments so prior outcomes can be COUNTED on a PR
+# (bounding the runaway loop) without a stateful store — one per outcome class:
+#   ATTEMPT_MARKER — a genuine attempt (fix pushed, escalation, quarantine) → MAX_ATTEMPTS
+#   CRASH_MARKER   — the agent crashed, no fix produced                     → MAX_CRASHES
+#   CAPPED_MARKER  — the one-shot "capped, needs a human" notice; in NEITHER counter, so
+#                    posting it inflates nothing and the cap block self-deduplicates.
+#
+# CROSS-COUNTING IS PREVENTED STRUCTURALLY, not by string trivia (#966). Pairwise
+# non-substring markers do NOT stop one body from carrying TWO of them — a whole-body
+# `contains` match therefore charged a single comment to several budgets at once (an
+# agent summary that discusses THIS script, or an ai-review comment quoting this diff,
+# reproduces all three markers verbatim; contaminating CAPPED_MARKER even suppressed the
+# "capped — needs a human" notice, a silent gate). Three layers now compose:
+#   1. POSITION — post_marked_comment is the ONLY emitter; it appends the marker as the
+#      body's last line. A body can end with at most one marker, so a marker merely
+#      QUOTED inside a body is counted by nothing.
+#   2. SANITISE — that same emitter neutralises `<!--`/`-->` in the (untrusted,
+#      agent-authored) body first, so quoted text cannot reach the terminal position or
+#      forge a marker at all.
+#   3. AUTHORSHIP — the counter only accepts comments written by this automation's own
+#      login, so a human's or the reviewer bot's comment can never be charged.
+# Each layer alone is bypassable; together, cross-counting is unreachable. If layer 3
+# cannot be applied (no resolvable login) the counter falls back to ANY author and can
+# only OVER-count — for the two BUDGET counters that caps sooner, never un-bounds the
+# loop. The one place over-counting is the DANGEROUS direction is the cap-notice dedup
+# (a phantom CAPPED_MARKER would suppress the "needs a human" notice — a silent gate),
+# so that decision lives in cap_notice_decision() below, which refuses to dedup at all
+# unless authorship is provable.
+ATTEMPT_MARKER="<!-- minspec-auto-remediation -->"
+CRASH_MARKER="<!-- minspec-remediate-crash -->"
+CAPPED_MARKER="<!-- minspec-remediate-capped -->"
+
+# Pairwise isolation gate. Compared by POSITION, never by value: an earlier version
+# tested `[[ $a != $b ]]` first, which let two IDENTICAL markers pass — the maximal-
+# collision case and the likeliest rename accident, i.e. exactly what this gate exists
+# to catch. Nested or equal markers would defeat the terminal match too, so they stay
+# a hard startup failure.
+assert_markers_isolated() {
+  local -a m=("$@")
+  local i j
+  for i in "${!m[@]}"; do
+    for j in "${!m[@]}"; do
+      if (( i == j )); then continue; fi
+      if [[ -z "${m[$i]}" ]]; then
+        echo "ERROR: marker #$((i + 1)) is empty — it would match every comment." >&2
+        return 1
+      fi
+      if [[ "${m[$j]}" == *"${m[$i]}"* ]]; then
+        echo "ERROR: marker #$((i + 1)) '${m[$i]}' is identical to or a substring of marker #$((j + 1)) '${m[$j]}' — counters would cross-count." >&2
+        return 1
+      fi
+    done
+  done
+  return 0
+}
+if ! assert_markers_isolated "$ATTEMPT_MARKER" "$CRASH_MARKER" "$CAPPED_MARKER"; then
+  exit 1
+fi
+
+# Neutralise HTML-comment delimiters so no interpolated string — an agent-authored
+# `.agent-summary.md`, an ESCALATE reason, a branch name — can carry a marker into a
+# comment this script posts. Both delimiters are broken, and the text stays readable
+# (nothing is truncated), so the human still sees what the agent wrote.
+sanitize_comment_body() { printf '%s' "${1-}" | sed -e 's/<!--/<!- -/g' -e 's/-->/- ->/g'; }
+
+# Count the comments the runaway guard charges to $1.
+#   $2 — the `gh pr view --json comments` JSON.
+#   $3 — CSV of author logins to accept; EMPTY means "any author" (the degraded,
+#        deliberately over-counting direction).
+# A comment counts only when the marker is the LAST non-whitespace text of its body —
+# the one position post_marked_comment ever writes one. Fail-soft: any jq/parse failure
+# yields 0 and the caller proceeds, as before.
+#
+# Each CSV element is TRIMMED before use, and login comparison is CASE-INSENSITIVE.
+# Both guard the same failure direction. MINSPEC_REMEDIATE_AUTHOR_LOGINS is written by
+# hand, and a human writes `op, second` at least as readily as `op,second`; an untrimmed
+# split turned the second login into " second", which matches no GitHub login, so that
+# operator's own marker comments counted ZERO. GitHub logins are themselves
+# case-insensitive, so `minspec-sdd[bot]` in the env vs `MinSpec-SDD[bot]` on the
+# comment would have counted zero for the same reason. Both are the UN-BOUNDING
+# direction — those attempts spend no budget, the cap never trips, remediation loops.
+count_markers_json() {
+  local marker="$1" json="$2" authors="${3:-}" out
+  out=$(jq --arg m "$marker" --arg authors "$authors" '
+    ($authors
+      | split(",")
+      | map(sub("^[[:space:]]+"; "") | sub("[[:space:]]+$"; "") | ascii_downcase)
+      | map(select(length > 0))) as $allow
+    | [ .comments[]?
+        | (((.author.login) // "") | ascii_downcase) as $login
+        | select(($allow | length) == 0 or (($allow | index($login)) != null))
+        | ((.body // "") | sub("[[:space:]]+$"; ""))
+        | select(endswith($m))
+      ] | length' <<<"$json" 2>/dev/null) || out=""
+  [[ "$out" =~ ^[0-9]+$ ]] || out=0
+  printf '%s\n' "$out"
+}
+
+# Is authorship PROVABLE from this allowlist — i.e. does it name at least one login?
+# Deliberately not `[[ -n "$csv" ]]`: after the trim above, a value like `" , "` is a
+# non-empty STRING that names nobody, and count_markers_json degrades it to any-author.
+# Treating that as provable would let the cap-notice dedup below run on an any-author
+# count — the exact silent gate it exists to prevent. One character that is neither
+# whitespace nor a comma is necessary and sufficient for a surviving element.
+authors_provable() { [[ "${1-}" =~ [^[:space:],] ]]; }
+
+# Should the one-shot "capped — needs a human" notice be posted this sweep?
+#   $1 — the author allowlist CSV (as passed to count_markers_json)
+#   $2 — the `gh pr view --json comments` JSON
+#   → prints `post` or `skip`
+# The cap condition stays true on every later drain sweep, so the notice deduplicates on
+# OUR OWN prior notice. Unlike the two BUDGET counters — where over-counting merely caps
+# sooner — over-counting HERE is the unsafe direction: a phantom CAPPED_MARKER (an
+# ai-review comment quoting this file, say) would suppress the notice forever and hand
+# the PR over with a label and no message, the silent gate constitution invariant #2
+# forbids. So dedup is attempted ONLY when authorship is provable; otherwise this always
+# says `post`. A repeated notice is noise; a missing one is a silent gate.
+cap_notice_decision() {
+  local authors="${1-}" json="${2-}" capped=0
+  if authors_provable "$authors"; then
+    capped=$(count_markers_json "$CAPPED_MARKER" "$json" "$authors")
+  fi
+  if [[ "${capped:-0}" -eq 0 ]]; then printf 'post\n'; else printf 'skip\n'; fi
+}
+
+# Which budgets are exhausted, as the sentence the human is told?
+#   $1 attempts  $2 max_attempts  $3 crashes  $4 max_crashes
+#   → prints the full clause, or NOTHING when no cap is hit (caller tests for empty).
+# BOTH budgets are reported, not the first one found. The earlier if/elif could only ever
+# name one cap while the notice asserted, unconditionally, that "only the cap named here
+# is exhausted" — false whenever both were at their limit, and actively harmful: a
+# maintainer raises MINSPEC_REMEDIATE_MAX_ATTEMPTS to unblock the PR, the next sweep caps
+# on crashes, and the PR bounces back. In a never-wrong product a capped-PR notice that
+# says something false about the other budget is a defect, so the trailing clause is
+# derived from how many actually tripped rather than hard-coded.
+cap_hit_summary() {
+  local attempts="${1:-0}" max_a="${2:-0}" crashes="${3:-0}" max_c="${4:-0}"
+  local -a hits=()
+  if [[ "$attempts" -ge "$max_a" ]]; then
+    hits+=("$(printf '%s automated remediation attempt(s), cap `MINSPEC_REMEDIATE_MAX_ATTEMPTS`=%s' "$attempts" "$max_a")")
+  fi
+  if [[ "$crashes" -ge "$max_c" ]]; then
+    hits+=("$(printf '%s agent crash(es), cap `MINSPEC_REMEDIATE_MAX_CRASHES`=%s' "$crashes" "$max_c")")
+  fi
+  case "${#hits[@]}" in
+    0) return 0 ;;
+    1) printf '%s — the other budget is NOT exhausted (attempts and crashes are budgeted separately)\n' "${hits[0]}" ;;
+    *) printf '%s AND %s — BOTH budgets are exhausted\n' "${hits[0]}" "${hits[1]}" ;;
+  esac
+}
+
 # ── Pure seam dispatch ─────────────────────────────────────────────────────────
 if [[ "${1:-}" == "--classify" ]]; then
   shift
-  # Require exactly 6 positional args, but allow empties (labels_csv is often "") —
-  # so validate the COUNT, not each value (a `${n:?}` would reject an empty label).
-  if [[ $# -ne 6 ]]; then
-    echo "Usage: remediate-pr.sh --classify <branch> <mergeable> <mergeStateStatus> <labels_csv> <failing_non_review> <ai_review_bad>" >&2
+  # Require 6 or 7 positional args, but allow empties (labels_csv is often "") — so
+  # validate the COUNT, not each value (a `${n:?}` would reject an empty label). The
+  # 7th (live_nonself_claim) is optional so the creator's 6-arg contract is unchanged.
+  if [[ $# -ne 6 && $# -ne 7 ]]; then
+    echo "Usage: remediate-pr.sh --classify <branch> <mergeable> <mergeStateStatus> <labels_csv> <failing_non_review> <ai_review_bad> [<live_nonself_claim>]" >&2
     exit 2
   fi
-  classify_pr "$1" "$2" "$3" "$4" "$5" "$6"
+  classify_pr "$1" "$2" "$3" "$4" "$5" "$6" "${7:-no}"
+  exit 0
+fi
+if [[ "${1:-}" == "--count-markers" ]]; then
+  shift
+  if [[ $# -lt 1 || $# -gt 2 ]]; then
+    echo "Usage: remediate-pr.sh --count-markers <marker> [author_logins_csv] < comments.json" >&2
+    exit 2
+  fi
+  count_markers_json "$1" "$(cat)" "${2:-}"
+  exit 0
+fi
+if [[ "${1:-}" == "--check-markers" ]]; then
+  shift
+  if [[ $# -lt 2 ]]; then
+    echo "Usage: remediate-pr.sh --check-markers <marker> <marker> [marker...]" >&2
+    exit 2
+  fi
+  if assert_markers_isolated "$@"; then exit 0; else exit 1; fi
+fi
+if [[ "${1:-}" == "--sanitize-body" ]]; then
+  sanitize_comment_body "$(cat)"
+  exit 0
+fi
+if [[ "${1:-}" == "--cap-notice-decision" ]]; then
+  shift
+  if [[ $# -gt 1 ]]; then
+    echo "Usage: remediate-pr.sh --cap-notice-decision [author_logins_csv] < comments.json" >&2
+    exit 2
+  fi
+  cap_notice_decision "${1:-}" "$(cat)"
+  exit 0
+fi
+if [[ "${1:-}" == "--cap-hit-summary" ]]; then
+  shift
+  if [[ $# -ne 4 ]]; then
+    echo "Usage: remediate-pr.sh --cap-hit-summary <attempts> <max_attempts> <crashes> <max_crashes>" >&2
+    exit 2
+  fi
+  cap_hit_summary "$1" "$2" "$3" "$4"
   exit 0
 fi
 
@@ -124,6 +343,18 @@ fi
 # Shared, tested units — reused, never re-implemented.
 # shellcheck source=lib/agent-egress.sh
 source "${SCRIPT_DIR}/lib/agent-egress.sh"
+
+# The ONLY place a marker is ever written to a PR. It sanitises the body (so nothing
+# interpolated into it can carry or forge a marker) and appends the marker on its own
+# final line — the exact position count_markers_json matches. Keeping emission in one
+# function is what makes the "one body ends with at most one marker" property hold by
+# construction instead of by convention.
+post_marked_comment() {
+  local marker="$1" body="$2"
+  gh pr comment "$PR" --repo "$REPO" \
+    --body "$(sanitize_comment_body "$body")
+${marker}" 2>/dev/null || true
+}
 
 # Same scoped, credential-free tool allow-list as dispatch-issue.sh (no gh / push /
 # remote / network — the agent edits + commits only; the parent publishes).
@@ -174,12 +405,43 @@ AI_REVIEW_PENDING=$(jq -r '
   | map(select(. == "QUEUED" or . == "IN_PROGRESS" or . == "PENDING" or . == "WAITING"))
   | if length > 0 then "yes" else "no" end' <<<"$PR_JSON")
 
-ACTION=$(classify_pr "$BRANCH" "$MERGEABLE" "$MERGE_STATE" "$LABELS_CSV" "$FAILING_NON_REVIEW" "$AI_REVIEW_BAD")
-echo "PR #$PR [$BRANCH] mergeable=$MERGEABLE state=$MERGE_STATE failing_checks=$FAILING_NON_REVIEW ai_review_bad=$AI_REVIEW_BAD → $ACTION"
+# SPEC-044 FR-6/INV-4 — orphan-fallback gate. Which work ITEM does this PR belong to?
+# dispatch-issue.sh names its branches `agent/issue-N`, and the hand-rolled automation
+# branches carry the issue number the same way (`fix-886-…` → the `issue-(\d+)` form is
+# checked first, then a bare leading number).
+ITEM=""
+if [[ "$BRANCH" =~ issue-([0-9]+) ]]; then
+  ITEM="${BASH_REMATCH[1]}"
+elif [[ "$BRANCH" =~ ^(agent|fix|feat)[/-]([0-9]+) ]]; then
+  ITEM="${BASH_REMATCH[2]}"
+fi
+
+# `reclaim?` exits 0 ONLY when the item is provably reclaimable (no live claim). Any
+# nonzero — a live claim, or an enumeration we could not complete — means HANDS OFF:
+# either another session is actively shepherding this PR, or we cannot prove it is not.
+# Failing closed here costs one skipped sweep; failing open costs a duplicated build and
+# a push race against a live owner (INV-4/INV-6).
+LIVE_NONSELF_CLAIM=no
+if [[ -n "$ITEM" && "${MINSPEC_CLAIM_OFF:-0}" != "1" ]]; then
+  if ! MINSPEC_LEASE_REPO="$REPO" bash "${SCRIPT_DIR}/lib/issue-lease.sh" 'reclaim?' "$ITEM" >/dev/null 2>&1; then
+    LIVE_NONSELF_CLAIM=yes
+  fi
+fi
+
+ACTION=$(classify_pr "$BRANCH" "$MERGEABLE" "$MERGE_STATE" "$LABELS_CSV" "$FAILING_NON_REVIEW" "$AI_REVIEW_BAD" "$LIVE_NONSELF_CLAIM")
+echo "PR #$PR [$BRANCH] mergeable=$MERGEABLE state=$MERGE_STATE failing_checks=$FAILING_NON_REVIEW ai_review_bad=$AI_REVIEW_BAD item=${ITEM:-none} live_owned=$LIVE_NONSELF_CLAIM → $ACTION"
 
 case "$ACTION" in
   skip-not-automation)
     echo "  Not an automation branch ($BRANCH) — leaving for its author."; exit 0 ;;
+  skip-live-owned)
+    # SPEC-044 FR-6/INV-4: a live claim holds work item #$ITEM, so the session that
+    # opened this PR is shepherding it with the warm worktree and a fresh context
+    # budget (DR-067 D4). The drain is the ORPHAN-fallback — it adopts a PR only once
+    # that claim is absent or expired. Silent and side-effect-free on purpose: no
+    # label, no comment, no attempt consumed, because nothing is wrong here.
+    echo "  Work item #$ITEM is held by a live claim — its creator is shepherding this PR. Leaving it alone (orphan-fallback only)."
+    exit 0 ;;
   skip-conflict)
     # A merge conflict is a TERMINAL, human-only state (LLM conflict resolution can
     # silently mismerge). This is an exhaustion-class apply: label it needs-human-review
@@ -209,28 +471,67 @@ if [[ "$ACTION" != "rebase-only" && "$AI_REVIEW_PENDING" == "yes" ]]; then
   exit 0
 fi
 
-# Runaway guard: count prior automated attempts (marker comments) on this PR. Once
-# the cap is hit, stop re-attempting and leave it for a human (bounded quota).
+# Runaway guard: TWO independent budgets, both counted from marker comments on this
+# PR (no stateful store). Genuine attempts spend MAX_ATTEMPTS; agent crashes — which
+# produce no fix — spend MAX_CRASHES instead, so neither class can exhaust the other's
+# quota. Whichever cap trips first stops automation and hands the PR to a human, and
+# the notice names WHICH one. Worst case is MAX_ATTEMPTS + MAX_CRASHES runs: finite.
 if [[ "$ACTION" == agent-* ]]; then
-  ATTEMPTS=$(gh pr view "$PR" --repo "$REPO" --json comments \
-    --jq "[.comments[] | select(.body | contains(\"$ATTEMPT_MARKER\"))] | length" 2>/dev/null || echo 0)
-  if [[ "${ATTEMPTS:-0}" -ge "$MAX_ATTEMPTS" ]]; then
-    echo "  $ATTEMPTS automated attempt(s) already made (cap=$MAX_ATTEMPTS) — leaving for a human."
+  # Whose comments count? Only the ones THIS automation wrote — a human or the ai-review
+  # bot quoting a marker (e.g. in a diff hunk of this very script) must never spend a
+  # budget. The posting identity is the login of the token we hold, so ask for it; extra
+  # logins can be added for a multi-operator drain via MINSPEC_REMEDIATE_AUTHOR_LOGINS.
+  #
+  # The allowlist is keyed on OUR OWN resolved login. MINSPEC_REMEDIATE_AUTHOR_LOGINS may
+  # only ever WIDEN a resolved identity — it can never stand in for an unresolved one.
+  # Testing the MERGED csv (the earlier shape) meant that when `gh api user` failed while
+  # the env var named some login that had not authored the comments, the merged value was
+  # non-empty, the guard believed authorship was provable, every comment was filtered out,
+  # and the counts came back 0 — so the cap never tripped. Measured on a PR with 10 prior
+  # attempt markers: env unset capped correctly; env set to a wrong login reported
+  # "Attempt 1/2" forever. Realistic, not contrived — a GITHUB_TOKEN sweep posting as
+  # `github-actions[bot]` while the operator configured `minspec-sdd[bot]`.
+  #
+  # Budget counters must only ever degrade toward OVER-counting (cap sooner: annoying but
+  # safe). UNDER-counting un-bounds the loop, so an unresolved identity falls all the way
+  # back to any-author rather than trusting an operator string we cannot corroborate.
+  SELF_LOGIN=$(gh api user --jq '.login' 2>/dev/null || true)
+  if authors_provable "$SELF_LOGIN"; then
+    AUTHOR_ALLOW="${SELF_LOGIN}${MINSPEC_REMEDIATE_AUTHOR_LOGINS:+,${MINSPEC_REMEDIATE_AUTHOR_LOGINS}}"
+  else
+    # Say so out loud rather than degrade quietly. Any-author can only over-count, never
+    # un-bound the loop — and the cap notice below stops deduplicating altogether, which
+    # is the safe direction for IT (a repeated notice is noise; a missing one is a silent
+    # gate). The two consumers of "is authorship provable" have opposite safe directions.
+    AUTHOR_ALLOW=""
+    echo "  NOTE: could not resolve this token's login (\`gh api user\` failed) — counting marker comments from ANY author this sweep (MINSPEC_REMEDIATE_AUTHOR_LOGINS widens a resolved identity, it cannot replace one)." >&2
+  fi
+  # One API read, three local counts. A comment is charged to a budget only when the
+  # marker is the terminal text of a body this automation authored, so no comment can
+  # ever be counted by more than one of them.
+  COMMENTS_JSON=$(gh pr view "$PR" --repo "$REPO" --json comments 2>/dev/null || echo '{"comments":[]}')
+  count_marker() { count_markers_json "$1" "$COMMENTS_JSON" "$AUTHOR_ALLOW"; }
+  ATTEMPTS=$(count_marker "$ATTEMPT_MARKER")
+  CRASHES=$(count_marker "$CRASH_MARKER")
+  # Which cap(s) are exhausted? Reported by the pure cap_hit_summary() seam, which names
+  # EVERY exhausted budget — never just the first — and derives its trailing clause from
+  # how many tripped, so the notice cannot tell the human something false.
+  CAP_HIT=$(cap_hit_summary "${ATTEMPTS:-0}" "$MAX_ATTEMPTS" "${CRASHES:-0}" "$MAX_CRASHES")
+  if [[ -n "$CAP_HIT" ]]; then
+    echo "  Cap reached ($CAP_HIT) — leaving for a human."
     gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
       --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
     gh pr edit "$PR" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
-    # Notify beyond the label: a label is easy to miss, so post a single PR comment
-    # the FIRST time we cap this PR. Idempotent — the cap condition stays true on every
-    # later drain sweep, so we count existing CAPPED_MARKER comments and only post when
-    # none exists, never spamming a fresh comment each cycle.
-    CAPPED_COUNT=$(gh pr view "$PR" --repo "$REPO" --json comments \
-      --jq "[.comments[] | select(.body | contains(\"$CAPPED_MARKER\"))] | length" 2>/dev/null || echo 0)
-    if [[ "${CAPPED_COUNT:-0}" -eq 0 ]]; then
-      gh pr comment "$PR" --repo "$REPO" --body "$(printf '## 🛑 Auto-remediation capped — needs a human\n\nThis PR reached the automated-remediation cap (%s attempt(s), `MINSPEC_REMEDIATE_MAX_ATTEMPTS`) without clearing its gate, so automated attempts have stopped. It is labelled `needs-human-review`; a human needs to take it from here. %s' "$MAX_ATTEMPTS" "$CAPPED_MARKER")" 2>/dev/null || true
+    # Notify beyond the label: a label is easy to miss, so post a PR comment the FIRST
+    # time we cap this PR. Whether this sweep posts or stays silent is the one decision
+    # constitution invariant #2 hangs on, so it lives in the pure, tested
+    # cap_notice_decision() seam above rather than inline here.
+    if [[ "$(cap_notice_decision "$AUTHOR_ALLOW" "$COMMENTS_JSON")" == "post" ]]; then
+      post_marked_comment "$CAPPED_MARKER" "$(printf '## 🛑 Auto-remediation capped — needs a human\n\nThis PR hit an automated-remediation cap — **%s** — without clearing its gate, so automated attempts have stopped. It is labelled `needs-human-review`; a human needs to take it from here.' "$CAP_HIT")"
     fi
     exit 0
   fi
-  echo "  Attempt $((ATTEMPTS + 1))/$MAX_ATTEMPTS."
+  echo "  Attempt $((ATTEMPTS + 1))/$MAX_ATTEMPTS (crashes so far: $CRASHES/$MAX_CRASHES)."
 fi
 
 # ── Build a worktree on the PR's EXISTING branch ───────────────────────────────
@@ -271,7 +572,7 @@ if [[ "$ACTION" == "rebase-only" ]]; then
   else
     git -C "$WORKTREE" merge --abort 2>/dev/null || true
     echo "  Merge hit conflicts — aborting and leaving for a human (surfaced)."
-    gh pr comment "$PR" --repo "$REPO" --body "$(printf 'Auto-remediation tried to merge \`origin/main\` to bring this branch up to date, but hit conflicts. Left for a human to resolve. %s' "$ATTEMPT_MARKER")" 2>/dev/null || true
+    post_marked_comment "$ATTEMPT_MARKER" 'Auto-remediation tried to merge `origin/main` to bring this branch up to date, but hit conflicts. Left for a human to resolve.'
   fi
   cleanup
   exit 0
@@ -369,7 +670,7 @@ while true; do
       gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
         --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
       gh pr edit "$PR" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
-      gh pr comment "$PR" --repo "$REPO" --body "$(printf 'Auto-remediation escalated and could not resolve this automatically: `%s`. Left for a human. %s' "$REASON" "$ATTEMPT_MARKER")" 2>/dev/null || true
+      post_marked_comment "$ATTEMPT_MARKER" "$(printf 'Auto-remediation escalated and could not resolve this automatically: `%s`. Left for a human.' "$REASON")"
       cleanup; exit 0
     fi
 
@@ -389,7 +690,7 @@ while true; do
       gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
         --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
       gh pr edit "$PR" --repo "$REPO" --add-label "agent-quarantined,needs-human-review" 2>/dev/null || true
-      gh pr comment "$PR" --repo "$REPO" --body "$(printf 'Auto-remediation was QUARANTINED: the pre-publish egress guard matched a secret/exfil marker in the agent output. Nothing was pushed; the worktree `%s` is left for a human to inspect. %s' "$WORKTREE" "$ATTEMPT_MARKER")" 2>/dev/null || true
+      post_marked_comment "$ATTEMPT_MARKER" "$(printf 'Auto-remediation was QUARANTINED: the pre-publish egress guard matched a secret/exfil marker in the agent output. Nothing was pushed; the worktree `%s` is left for a human to inspect.' "$WORKTREE")"
       echo "  Worktree left for inspection at: $WORKTREE"
       exit 0
     fi
@@ -404,15 +705,17 @@ while true; do
         agent-remediate-review) WHAT="addressed the independent AI review findings" ;;
         *)                      WHAT="fixed the failing CI checks" ;;
       esac
-      gh pr comment "$PR" --repo "$REPO" --body "$(printf '## 🤖 Auto-remediation — %s\n\n%s\n\n— pushed \`%s\` to \`%s\`. CI will re-run; the human still holds the merge. %s' "$WHAT" "$SUMMARY" "$SHA" "$BRANCH" "$ATTEMPT_MARKER")" 2>/dev/null || true
+      post_marked_comment "$ATTEMPT_MARKER" "$(printf '## 🤖 Auto-remediation — %s\n\n%s\n\n— pushed \`%s\` to \`%s\`. CI will re-run; the human still holds the merge.' "$WHAT" "$SUMMARY" "$SHA" "$BRANCH")"
       echo "  Pushed remediation ($SHA) to $BRANCH — CI will re-review PR #$PR."
     else
       echo "  WARNING: push failed for $BRANCH — worktree left at $WORKTREE for inspection." >&2
       exit 0
     fi
   else
+    # A crash produced NO fix, so it must not spend a genuine remediation attempt:
+    # comment with CRASH_MARKER, which the guard counts against MAX_CRASHES instead.
     echo "  Agent CRASHED remediating PR #$PR — see $LOG."
-    gh pr comment "$PR" --repo "$REPO" --body "$(printf 'Auto-remediation agent crashed while working on this PR. Left for a human. %s' "$ATTEMPT_MARKER")" 2>/dev/null || true
+    post_marked_comment "$CRASH_MARKER" 'Auto-remediation agent crashed while working on this PR (no fix was produced, so this counts against the separate crash budget `MINSPEC_REMEDIATE_MAX_CRASHES`, not the remediation-attempt budget).'
   fi
   break
 done

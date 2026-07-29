@@ -1,14 +1,16 @@
 ---
 id: SPEC-042
 type: tasks
-# Tracks requirements.md's status, de-escalated to specifying while SPEC-042's approval is
-# stale (this PR's edits voided it — see requirements.md's Clarify note). Flips back to
-# implementing when the human re-runs "MinSpec: Approve Spec". No code lands until then.
-status: specifying
 # tier lives on requirements.md (the single tier-carrying approvable, per the
 # spec-gate convention). A tier on a NON-approved sibling doc is treated by
 # spec-gate.py as a second unapproved spec and can shadow the approved
 # requirements.md — so this doc omits it. (SPEC-042 is T3.)
+# Mirrors requirements.md's status. This doc has NO approval record of its own — only
+# requirements.md is signed — so the field is descriptive, never a seal; read the sidecar for
+# the real state. Kept ONLY because spec-validator.ts:525 marks `status` required
+# UNCONDITIONALLY (unlike `tier`:529, which is requiredWhen: isPrimarySpec). Dropping it here
+# is the right end-state (#972) but needs that schema change first — a code fix, not a doc edit.
+status: specifying
 product: minspec
 epic: EPIC-003
 relates_to: [SPEC-018, SPEC-037, DR-056]

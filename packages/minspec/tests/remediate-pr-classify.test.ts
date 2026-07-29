@@ -8,7 +8,9 @@
  * drain-continuous.test.ts. These assert the safety-critical properties:
  *   • only automation branches (agent/*, fix/*, feat/*) are ever touched, and
  *   • merge conflicts are NEVER auto-remediated (surfaced for a human), and
- *   • priority: real check failures before a re-review; behind-base last.
+ *   • priority: real check failures before a re-review; behind-base last, and
+ *   • SPEC-044 FR-6/INV-4 — the drain is an ORPHAN-FALLBACK: a PR whose work item is
+ *     held by a live claim belongs to the session shepherding it, and is left alone.
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
@@ -18,7 +20,10 @@ import { execFileSync } from 'child_process';
 const SCRIPT = path.resolve(__dirname, '../../../scripts/remediate-pr.sh');
 const LIB = path.resolve(__dirname, '../../../scripts/lib/agent-egress.sh');
 
-// classify_pr(branch, mergeable, mergeState, labelsCsv, failingNonReview, aiReviewBad)
+// classify_pr(branch, mergeable, mergeState, labelsCsv, failingNonReview, aiReviewBad,
+//             [liveNonselfClaim])
+// The 7th is OPTIONAL (SPEC-044 D5). Omitting it exercises the creator-shepherd's
+// unchanged 6-argument contract; passing it exercises the drain's owner gate.
 function classify(
   branch: string,
   mergeable: string,
@@ -26,12 +31,11 @@ function classify(
   labelsCsv: string,
   failingNonReview: 'yes' | 'no',
   aiReviewBad: 'yes' | 'no',
+  liveNonselfClaim?: 'yes' | 'no',
 ): string {
-  return execFileSync(
-    'bash',
-    [SCRIPT, '--classify', branch, mergeable, mergeState, labelsCsv, failingNonReview, aiReviewBad],
-    { encoding: 'utf-8' },
-  ).trim();
+  const args = [SCRIPT, '--classify', branch, mergeable, mergeState, labelsCsv, failingNonReview, aiReviewBad];
+  if (liveNonselfClaim !== undefined) args.push(liveNonselfClaim);
+  return execFileSync('bash', args, { encoding: 'utf-8' }).trim();
 }
 
 describe('remediate-pr.sh --classify: scope gate (only automation branches)', () => {
@@ -85,7 +89,8 @@ describe('remediate-pr.sh --classify: input hygiene', () => {
     expect(classify('fix/x', 'MERGEABLE', 'CLEAN', '', 'no', 'no')).toBe('skip-clean');
   });
 
-  it('requires exactly 6 args (usage error otherwise)', () => {
+  it('requires 6 or 7 args (usage error otherwise)', () => {
+    // 7th = SPEC-044 live_nonself_claim, optional so the creator's 6-arg call stands.
     let code = 0;
     try {
       execFileSync('bash', [SCRIPT, '--classify', 'fix/x', 'MERGEABLE'], { encoding: 'utf-8', stdio: 'pipe' });
@@ -120,5 +125,79 @@ describe('remediate-pr.sh: shared egress guard is reused (no security-control dr
     const remediate = fs.readFileSync(SCRIPT, 'utf-8');
     expect(remediate).not.toMatch(/git .*log -p .*origin\/main/);
     expect(dispatch).not.toMatch(/local -a targets=\(\)/); // the old inline guard's array
+  });
+});
+
+describe('remediate-pr.sh --classify: SPEC-044 owner gate (drain = orphan-fallback)', () => {
+  // FR-6/INV-4. The drain is no longer the primary fixer: the session that opened a PR
+  // shepherds it with the warm worktree and a fresh context budget (DR-067 D4). A
+  // second remediator would duplicate the build and race the push — which is the #912
+  // outage this whole spec exists to end.
+  const FIXABLE: Array<[string, Parameters<typeof classify>]> = [
+    ['failing checks', ['agent/issue-1', 'MERGEABLE', 'UNSTABLE', '', 'yes', 'no', 'yes']],
+    ['review changes', ['agent/issue-1', 'MERGEABLE', 'BLOCKED', 'ai-review:changes', 'no', 'no', 'yes']],
+    ['behind base', ['agent/issue-1', 'MERGEABLE', 'BEHIND', '', 'no', 'no', 'yes']],
+    ['conflicting', ['agent/issue-1', 'CONFLICTING', 'DIRTY', '', 'no', 'no', 'yes']],
+    ['clean', ['agent/issue-1', 'MERGEABLE', 'CLEAN', '', 'no', 'no', 'yes']],
+  ];
+
+  it.each(FIXABLE)('a live claim outranks every other state (%s)', (_label, args) => {
+    expect(classify(...args)).toBe('skip-live-owned');
+  });
+
+  it('claims ownership BEFORE interpreting PR state — even a red PR is not ours', () => {
+    // Ordering matters: if the gate sat after the check/review arms, the drain would
+    // start remediating a live-owned PR the moment it went red — exactly the race.
+    expect(classify('agent/issue-1', 'MERGEABLE', 'UNSTABLE', 'ai-review:changes', 'yes', 'yes', 'yes')).toBe(
+      'skip-live-owned',
+    );
+  });
+
+  it('but scope still wins — a human branch is skipped as such, not as live-owned', () => {
+    expect(classify('main', 'MERGEABLE', 'UNSTABLE', '', 'yes', 'no', 'yes')).toBe('skip-not-automation');
+  });
+
+  it('adopts the PR normally once no live claim holds it (the ORPHAN case)', () => {
+    expect(classify('agent/issue-1', 'MERGEABLE', 'UNSTABLE', '', 'yes', 'no', 'no')).toBe(
+      'agent-remediate-checks',
+    );
+    expect(classify('agent/issue-1', 'MERGEABLE', 'BLOCKED', 'ai-review:changes', 'no', 'no', 'no')).toBe(
+      'agent-remediate-review',
+    );
+    expect(classify('agent/issue-1', 'MERGEABLE', 'BEHIND', '', 'no', 'no', 'no')).toBe('rebase-only');
+  });
+
+  it('defaults to "no" when omitted — the creator-shepherd contract is unchanged', () => {
+    // The creator IS the owner; skip-live-owned must never fire on its own PR, or the
+    // shepherd would stand down from the work it just built.
+    expect(classify('agent/issue-1', 'MERGEABLE', 'UNSTABLE', '', 'yes', 'no')).toBe('agent-remediate-checks');
+    expect(classify('agent/issue-1', 'CONFLICTING', 'DIRTY', '', 'no', 'no')).toBe('skip-conflict');
+  });
+
+  it('rejects a malformed arity rather than guessing', () => {
+    expect(() =>
+      execFileSync('bash', [SCRIPT, '--classify', 'agent/issue-1', 'MERGEABLE'], { encoding: 'utf-8' }),
+    ).toThrow();
+  });
+});
+
+describe('remediate-pr.sh: the drain honours the owner gate without extra wiring', () => {
+  const code = fs.readFileSync(SCRIPT, 'utf-8');
+
+  it('derives the work item from the branch and asks issue-lease reclaim?', () => {
+    expect(code).toMatch(/BRANCH" =~ issue-\(\[0-9\]\+\)/);
+    expect(code).toMatch(/issue-lease\.sh' 'reclaim\?'|issue-lease\.sh" 'reclaim\?'/);
+  });
+
+  it('fails CLOSED: any nonzero reclaim? means hands off', () => {
+    // reclaim? exits nonzero for BOTH "a live claim exists" and "could not enumerate".
+    // Treating only the former as owned would let a network blip race a live owner.
+    expect(code).toMatch(/if ! MINSPEC_LEASE_REPO="\$REPO" bash .*'reclaim\?' "\$ITEM"[^\n]*\n\s*LIVE_NONSELF_CLAIM=yes/);
+  });
+
+  it('takes no side effect on a live-owned PR — no label, comment, or attempt', () => {
+    const arm = code.slice(code.indexOf('  skip-live-owned)'), code.indexOf('  skip-conflict)'));
+    expect(arm).not.toMatch(/gh pr edit|gh pr comment|--add-label/);
+    expect(arm).toMatch(/exit 0/);
   });
 });

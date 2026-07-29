@@ -6,13 +6,12 @@ type: requirements
 # NOT .minspec/approvals.json — that legacy path is gitignored (.gitignore:92), so it is absent
 # from every checkout and is never this spec's record. The 37 tracked sidecars are the store (#974).
 # ANY edit voids approval (hash → stale) — re-run "MinSpec: Approve Spec". DR-012.
-# De-escalated implementing -> specifying 2026-07-26: `status: implementing` is written by
-# "MinSpec: Approve Spec" (approve.ts:284) and means "approved for implementation". Editing this
-# file voided that approval (hash stale), so the field would otherwise advertise an approved
-# state the sidecar no longer backs. Only the human's Alt+A may set it back — an agent writing
-# the sidecar itself would be forging a sign-off. Under-claiming is the never-wrong direction,
-# and it makes spec-gate enforce the gate instead of a prose note (#971 Architect finding).
-status: specifying
+# RULE (state-independent, so it cannot go stale): `status` is a tool-written mirror of the
+# DERIVED lifecycle status and is written ONLY by "MinSpec: Approve Spec" (approve.ts:284)
+# together with the sidecar. An agent must never hand-write either — that forges a sign-off.
+# When an edit voids the approval, the honest interim is to set this DOWN to `specifying`
+# (under-claim) and let spec-gate block; only the human's Alt+A restores it.
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core — the onboarding page is the front door to init/classify/refresh/approval gates (see notes: a dedicated onboarding/first-run EPIC would be the ideal home)
@@ -112,7 +111,7 @@ The page is **offline UI over settings that already exist**. It renders with **z
 
 Resolved 2026-07-25/26; each proposal above was put to the human during the prototype review and **ratified as stated**. All three land on the *proposed* default, so design.md's stated contingency **held** and `plan` closes with it.
 
-> **Approval state — this section is not a seal.** The approve act of `2026-07-25T09:33Z` (`specHash 14fb7cc7…`, `approvedBy github@harvest316.com` — recorded in [requirements.md.json](../../../.minspec/approvals/specs/minspec/SPEC-042-onboarding-checklist/requirements.md.json), the per-file sidecar — the tracked store; the legacy `.minspec/approvals.json` path is **gitignored** ([.gitignore:92](../../../.gitignore#L92)) and therefore absent from every checkout) covered the **pre-Clarify** bytes and set `status: implementing` ([approve.ts:284](../../../packages/minspec/src/commands/approve.ts#L284)). Writing this section **changes those bytes and voids that approval** ([DR-012](../../../docs/decisions/DR-012.md)) — the record reads `stale` until **MinSpec: Approve Spec** is re-run, so `status` has been **de-escalated back to `specifying`**: the field must not advertise an approved state the sidecar no longer backs, and only the human's `Alt+A` may restore it (an agent writing that sidecar would be forging a sign-off). Nothing below is a fresh human sign-off; it records what the human ratified in conversation, so the re-approval has something honest to sign.
+> **This section records ratification, not approval.** It states what the human settled in conversation so an approve act has something honest to sign. The **seal is always the sidecar** — [requirements.md.json](../../../.minspec/approvals/specs/minspec/SPEC-042-onboarding-checklist/requirements.md.json) (the tracked store; the legacy `.minspec/approvals.json` path is gitignored, [.gitignore:92](../../../.gitignore#L92), and absent from every checkout). Any edit here changes the bytes that sidecar hashes and therefore **voids the approval** ([DR-012](../../../docs/decisions/DR-012.md)) until **MinSpec: Approve Spec** is re-run — the gate working, not a fault. Read the sidecar, never this prose, for the current state.
 
 - **FR-OQ1 → keep the coverage field, framed as a seed (FR-11 unchanged).** The number field stays on the page. Its helper copy is the verbatim [package.json:528](../../../packages/minspec/package.json#L528) framing — *seeds `.minspec/config.json` / the CI gate; the extension itself does not enforce it* — which is **accurate**: enforcement is real but lives outside the extension, in [`vitest.config.ts:11`](../../../vitest.config.ts#L11) → [`thresholds`:42-47](../../../vitest.config.ts#L42) reading `config.json`'s `coverage.minimumPercentage` (shipped by `7fa94f9`, [#553]). **Correction of record:** an earlier amendment on the closed [#918] gated this field on [#920] and called the value "inert" and the strings "false" — that premise was **wrong** (the grep behind it was scoped to `packages/*/src` and missed the repo-root build config); an independent reviewer caught it and it is **not** re-landed here. [#920] survives only in a **narrowed** form — a *scaffolded* project inherits the config seed without any scaffolded vitest/CI gate — which this page does not touch (see Out of scope, "Actual coverage enforcement").
 - **FR-OQ2 → editable, offline-seeded, click-gated GitHub verification (FR-5 as written).** Not hard-locked to the `gh` identity: the corporate-email ≠ `gh`-login case is legitimate, seeding from `gh` on render would breach INV-1, and [DR-056] already adjudicates identity downstream ([approve.ts:240](../../../packages/minspec/src/commands/approve.ts#L240)). Divergence raises the **non-blocking amber flag** only after an explicit *Verify against GitHub* click.

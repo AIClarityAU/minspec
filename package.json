@@ -8,7 +8,7 @@
   ],
   "scripts": {
     "prepare": "git config core.hooksPath .githooks || true",
-    "pretest": "npm run build --workspace=@aiclarity/shared",
+    "pretest": "node scripts/check-node-modules-integrity.mjs && npm run build --workspace=@aiclarity/shared",
     "test": "vitest run",
     "test:watch": "vitest",
     "lint": "eslint .",
@@ -16,6 +16,7 @@
     "package": "npm run package --workspaces --if-present",
     "validate": "npx tsx scripts/validate-frontmatter.ts",
     "check:cycles": "npx tsx scripts/check-import-cycles.ts",
+    "facts": "npx tsx scripts/facts.ts",
     "validate:classifier": "vitest run classifier-validation"
   },
   "devDependencies": {
@@ -28,6 +29,7 @@
     "esbuild": "^0.28.0",
     "eslint": "^9.0.0",
     "mocha": "11.3.0",
+    "tsx": "4.23.1",
     "typescript": "^5.5.0",
     "vitest": "^4.1.7"
   },

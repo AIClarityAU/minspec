@@ -2,7 +2,7 @@
   "name": "minspec",
   "displayName": "MinSpec",
   "description": "Complexity-adaptive specification-driven development. Classifies changes into tiers and applies proportional ceremony — a one-line fix needs one sentence of spec, an architecture rewrite gets the full treatment.",
-  "version": "0.1.22",
+  "version": "0.1.24",
   "private": true,
   "publisher": "aiclarity",
   "license": "MIT",
@@ -492,6 +492,32 @@
           "type": "boolean",
           "default": true,
           "description": "When you approve a spec or accept a decision/epic (e.g. via Alt+A), commit the flipped document and the approval record together in one dedicated commit — so 'committed ground truth' is actually committed, never left sitting in the working tree. Pathspec-safe: only the approval's own files are committed, never other staged changes, and it refuses to commit in a detached HEAD. The commit runs your git hooks; it never pushes. Turn off to leave approvals staged for you to commit manually."
+        },
+        "minspec.pushOnApprove": {
+          "type": "string",
+          "enum": [
+            "never",
+            "prompt",
+            "always"
+          ],
+          "default": "prompt",
+          "enumDescriptions": [
+            "Never push. Approvals stay local until you push them yourself (fully offline).",
+            "Offer to push after each approval commit. Your click is the consent — nothing leaves the machine until you approve it.",
+            "Push automatically after each approval commit. Choosing this setting is itself the consent."
+          ],
+          "markdownDescription": "After an approval is committed (see `#minspec.commitOnApprove#`), get it to the remote so a sign-off cannot be stranded on one machine.\n\nIf the current branch is **protected** (see `#minspec.protectedBranches#`), a direct push would be rejected — so MinSpec instead creates a branch at the *same commit*, pushes that, and gives you a link to open the PR. Your checkout is never switched and no branch you are on is rewritten.\n\nA push is a network call, so the default is `prompt`: nothing is sent until you click."
+        },
+        "minspec.protectedBranches": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [
+            "main",
+            "master"
+          ],
+          "markdownDescription": "Branches that reject a direct push (branch protection / required PR). Used by `#minspec.pushOnApprove#` to push an approval on a new branch for a PR instead of attempting a push that would be rejected. Read from settings rather than probed, so the decision needs no network call."
         },
         "minspec.autoBackfillUseAi": {
           "type": "boolean",

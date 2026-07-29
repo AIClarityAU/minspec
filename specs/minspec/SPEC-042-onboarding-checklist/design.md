@@ -1,11 +1,11 @@
 ---
 id: SPEC-042
 type: design
-# Tracks requirements.md's status, which was de-escalated implementing -> specifying when
-# this PR's edits voided SPEC-042's approval (see requirements.md's Clarify note). design.md
-# has no approval record of its own — only requirements.md is signed — so this field is
-# descriptive, never a seal. Both flip back to implementing when the human re-runs
-# "MinSpec: Approve Spec". Repo-wide sibling-status drift: #972.
+# Mirrors requirements.md's status. This doc has NO approval record of its own — only
+# requirements.md is signed — so the field is descriptive, never a seal; read the sidecar for
+# the real state. Kept ONLY because spec-validator.ts:525 marks `status` required
+# UNCONDITIONALLY (unlike `tier`:529, which is requiredWhen: isPrimarySpec). Dropping it here
+# is the right end-state (#972) but needs that schema change first — a code fix, not a doc edit.
 status: specifying
 product: minspec
 epic: EPIC-003  # SDD Core — onboarding front door (see notes re: dedicated onboarding epic)
