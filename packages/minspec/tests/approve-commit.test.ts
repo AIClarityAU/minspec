@@ -243,3 +243,78 @@ describe('isUntrackedAtHead — detects a create that was never committed (#577)
     expect(await isUntrackedAtHead(tmp, drPath)).toBe(true);
   });
 });
+
+/**
+ * T3 regression — #1064 / #1022 / #874: the stranding family.
+ *
+ * Since #1041 the scaffolded pre-commit hook REFUSES a commit on the
+ * push-protected default branch, because such a commit can never be pushed.
+ * Accept ADR / Alt+A approve then wrote their files, hit the refusal, and left
+ * the tree dirty with NO signal — the maintainer believed the DR was ratified
+ * when it was not (reproduced live accepting DR-071, 2026-07-29).
+ *
+ * The fix resolves the DESTINATION before writing anything: on the default
+ * branch `commitApproval` must refuse up front with a typed
+ * `protected-branch` outcome, stage nothing, and commit nothing — leaving the
+ * command layer to offer a branch. Failing open (unknown default) preserves
+ * today's behaviour.
+ */
+describe('#1064 — destination guard on the default branch', () => {
+  function setDefaultBranch(dir: string, branch: string): void {
+    // origin/HEAD is a LOCAL ref, so this stays offline (Tier-0).
+    git(['remote', 'add', 'origin', dir], dir);
+    git(['update-ref', `refs/remotes/origin/${branch}`, 'HEAD'], dir);
+    git(['symbolic-ref', 'refs/remotes/origin/HEAD', `refs/remotes/origin/${branch}`], dir);
+  }
+
+  it('refuses on the default branch, staging nothing and committing nothing', async () => {
+    initRepo(tmp);
+    const seed = path.join(tmp, 'seed.md');
+    fs.writeFileSync(seed, 'seed\n');
+    git(['add', '.'], tmp);
+    git(['commit', '-m', 'seed'], tmp);
+    setDefaultBranch(tmp, 'main');
+
+    const doc = path.join(tmp, 'decision.md');
+    fs.writeFileSync(doc, 'status: accepted\n');
+    const before = git(['rev-parse', 'HEAD'], tmp).trim();
+
+    const res = await commitApproval(tmp, [doc], 'chore(accept): DR-071');
+
+    expect(res.outcome).toBe('protected-branch');
+    expect(res.branch).toEqual({ current: 'main', default: 'main' });
+    // no commit
+    expect(git(['rev-parse', 'HEAD'], tmp).trim()).toBe(before);
+    // invariant 3 — nothing left staged in the shared index
+    expect(git(['diff', '--cached', '--name-only'], tmp).trim()).toBe('');
+  });
+
+  it('commits normally on a feature branch (unchanged behaviour)', async () => {
+    initRepo(tmp);
+    fs.writeFileSync(path.join(tmp, 'seed.md'), 'seed\n');
+    git(['add', '.'], tmp);
+    git(['commit', '-m', 'seed'], tmp);
+    setDefaultBranch(tmp, 'main');
+    git(['switch', '-c', 'feat/x'], tmp);
+
+    const doc = path.join(tmp, 'decision.md');
+    fs.writeFileSync(doc, 'status: accepted\n');
+
+    const res = await commitApproval(tmp, [doc], 'chore(accept): DR-071');
+    expect(res.outcome).toBe('committed');
+  });
+
+  it('fails OPEN when the default branch cannot be determined (no origin/HEAD)', async () => {
+    initRepo(tmp);
+    fs.writeFileSync(path.join(tmp, 'seed.md'), 'seed\n');
+    git(['add', '.'], tmp);
+    git(['commit', '-m', 'seed'], tmp);
+    // deliberately NO origin/HEAD
+
+    const doc = path.join(tmp, 'decision.md');
+    fs.writeFileSync(doc, 'status: accepted\n');
+
+    const res = await commitApproval(tmp, [doc], 'chore(accept): DR-071');
+    expect(res.outcome).toBe('committed');
+  });
+});

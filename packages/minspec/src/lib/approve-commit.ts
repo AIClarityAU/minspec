@@ -23,6 +23,14 @@
  *   3. No stranded staging. `git add` touches the SHARED index; if the commit then
  *      fails, we `git reset` those exact paths so a failed approval never leaves
  *      files pre-staged for another session's bare commit to sweep up.
+ *   4. Resolve the DESTINATION before writing (#1064). Since #1041 the scaffolded
+ *      pre-commit hook refuses a commit on the push-protected default branch — a
+ *      commit there could never be pushed. Committing anyway produced the
+ *      stranding family (#1064 Accept ADR, #1022 Alt+A approve, #874 advance):
+ *      files written, commit refused, tree left dirty with NO signal. So on the
+ *      default branch we refuse UP FRONT with 'protected-branch', staging
+ *      nothing, and let the command layer offer a branch. Unknown destination
+ *      (detached, no origin/HEAD) FAILS OPEN — unchanged behaviour, never a block.
  *
  * ASYNC + bounded: git runs off the extension-host thread (async execFile) with a
  * timeout, so a slow user pre-commit hook can't freeze the UI on every Alt+A.
@@ -49,6 +57,7 @@ export type CommitApprovalOutcome =
   | 'not-a-repo' //        rootDir is not inside a git work tree — nothing to do
   | 'detached-head' //     HEAD is detached — refused (a commit here would be orphaned/lost)
   | 'nothing-to-commit' // no given path exists, or none differs from HEAD
+  | 'protected-branch' //  HEAD is the push-protected default branch — refused BEFORE staging (#1064)
   | 'failed'; //           git errored (e.g. a pre-commit hook rejected) — files un-staged again
 
 export interface CommitApprovalResult {
@@ -57,6 +66,9 @@ export interface CommitApprovalResult {
   readonly paths?: string[];
   /** Error detail incl. git/hook stderr (present on 'failed'). */
   readonly error?: string;
+  /** Current + default branch names (present on 'protected-branch'), so the
+   *  command layer can name the branch it is refusing to commit onto. */
+  readonly branch?: { readonly current: string; readonly default: string };
 }
 
 /**
@@ -130,6 +142,14 @@ export async function commitApproval(
     return { outcome: 'detached-head' };
   }
 
+  // 2b. Destination guard (invariant 4, #1064). MUST come before any `git add`
+  //     so a refusal leaves the shared index untouched. Fails open: when the
+  //     default branch cannot be determined we proceed exactly as before.
+  const branch = await resolveBranchDestination(run);
+  if (branch && branch.current === branch.default) {
+    return { outcome: 'protected-branch', branch };
+  }
+
   // 3. Keep only paths that exist on disk, made repo-relative. A path that
   //    resolves outside the repo (shouldn't happen) is dropped, never committed.
   const rel = absPaths
@@ -178,6 +198,75 @@ export async function commitApproval(
     // index for another session's bare commit to sweep up. Unstage them again.
     await unstage(run, rel);
     return { outcome: 'failed', error: describeError(err) };
+  }
+}
+
+/**
+ * Commit the approval paths on a NEW branch, then return HEAD to where it was.
+ *
+ * The recovery for `protected-branch` (#1064). Creating the branch and coming
+ * straight back means the user ends where they started, with the approval
+ * committed on a branch that CAN be pushed — instead of a dirty tree on a
+ * branch that can never accept the commit.
+ *
+ * Restores HEAD in a `finally`, so a failed commit cannot leave the checkout
+ * parked on a stray branch (project memory: never strand a shared checkout on
+ * an unexpected branch). Never rejects — every failure is a typed result.
+ */
+export async function commitApprovalOnNewBranch(
+  rootDir: string,
+  branchName: string,
+  absPaths: readonly string[],
+  message: string,
+  run: GitRun = defaultGitRun(rootDir),
+): Promise<CommitApprovalResult & { readonly createdBranch?: string }> {
+  let switched = false;
+  try {
+    await run(['switch', '-c', branchName]);
+    switched = true;
+  } catch (err) {
+    // Never fall back to committing on the protected branch — that recreates
+    // the very bug this guards (the #1054 rule: branch creation fails => commit
+    // NOTHING).
+    return { outcome: 'failed', error: describeError(err) };
+  }
+  try {
+    const res = await commitApproval(rootDir, absPaths, message, run);
+    return res.outcome === 'committed' ? { ...res, createdBranch: branchName } : res;
+  } finally {
+    if (switched) {
+      try {
+        await run(['switch', '-']);
+      } catch {
+        // HEAD could not be restored — the commit (if any) is still safe on the
+        // new branch. Left for the caller's advisory; never throw from here.
+      }
+    }
+  }
+}
+
+/**
+ * Current + default branch names, or `null` when either cannot be determined.
+ *
+ * OFFLINE (Tier-0): `origin/HEAD` is a LOCAL ref written by `git clone` / `git
+ * remote set-head` — reading it never touches the network. It is absent more
+ * often than it looks (worktrees added from a bare mirror, repos whose origin
+ * was added by hand), which is exactly why an unresolvable destination must
+ * FAIL OPEN rather than block an approval.
+ */
+export async function resolveBranchDestination(
+  run: GitRun,
+): Promise<{ current: string; default: string } | null> {
+  try {
+    const current = (await run(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+    if (!current || current === 'HEAD') return null; // detached — handled upstream
+    const ref = (await run(['rev-parse', '--abbrev-ref', 'origin/HEAD'])).trim();
+    // "origin/main" -> "main"; anything else is unusable.
+    const def = ref.startsWith('origin/') ? ref.slice('origin/'.length) : '';
+    if (!def) return null;
+    return { current, default: def };
+  } catch {
+    return null; // no origin/HEAD, git absent, timeout — fail open
   }
 }
 
