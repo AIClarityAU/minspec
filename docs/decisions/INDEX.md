@@ -549,7 +549,7 @@ Specs interleave a product-owner audience (what/why) with an engineering audienc
 
 ## [DR-069 — Add a 'planning' lifecycle status — approved-but-pre-implementation is not 'implementing' (fixes the #886 false signpost)](DR-069.md)
 
-*Status: proposed · Date: 2026-07-24*
+*Status: accepted · Date: 2026-07-24*
 
 <!-- dr-summary:DR-069 auto=29722db03da9 -->
 deriveStatus — the authoritative, approval-aware SIGNPOST derivation (DR-034) — returns implementing for **any approved spec that is not all-done**: Approval sets the first build-band phase (plan) to in-progress (phasesForApproval), so a spec approved while still at **Plan/Tasks — implement phase pending, zero code** derives to implementing. That is a **DR-003 false signpost** — the project's stated worst defect: the signpost claims code is being written when none exists. The deterministic literal-vs-derived validator cannot catch it (literal == derived); only the…
