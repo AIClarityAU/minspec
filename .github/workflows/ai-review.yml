@@ -338,13 +338,13 @@ jobs:
             SELF_EDIT_KIND=machinery
           fi
 
-          # ── reviewer role (always) ──
-          REVIEWER_OUT="$(bash scripts/review-branch.sh "$BASE" "$HEAD" --role reviewer || true)"
-          REVIEWER_LABEL="$(printf '%s\n' "$REVIEWER_OUT" | bash scripts/review-decide.sh || true)"
-          REVIEWER_BLOCK="$(printf '%s\n' "$REVIEWER_OUT" | extract_block | redact)"
-          [ -z "$REVIEWER_BLOCK" ] && REVIEWER_BLOCK="(reviewer emitted no verdict block — fail-closed to changes)"
-
-          # ── security role (runs on ANY code change; skipped only for docs-only PRs) ──
+          # ── which voters are REQUIRED (decided before any of them runs) ──
+          # Separating "who runs" from "run them" is what lets the panel run CONCURRENTLY
+          # below. The predicates themselves are unchanged.
+          #
+          # reviewer — always.
+          #
+          # security — runs on ANY code change; skipped only for docs-only PRs.
           # Agnostic — NO hardcoded monorepo path. Security flaws live in any executable
           # surface (sites/*.js, scripts/, .github/, config, packages/, …), not just
           # `packages/`, and the security lens has the SAME scope as the reviewer over
@@ -352,42 +352,90 @@ jobs:
           # docs/approvables). Durable per-project code-surface detection (init scans the
           # file list, dev confirms) is #453 / SPEC-033 D-4; this is the agnostic interim.
           SECURITY_REQUIRED=no
-          SECURITY_LABEL=""
-          SECURITY_BLOCK=""
           if [ "$CHANGED_OK" = "yes" ] && printf '%s\n' "$CHANGED" | grep -qvE '\.md$'; then
             SECURITY_REQUIRED=yes
-            SECURITY_OUT="$(bash scripts/review-branch.sh "$BASE" "$HEAD" --role security || true)"
+          fi
+          # architect (panel only) — design-fit / scope / contracts / missing-DR lens.
+          # Always-on in panel: design review applies to specs AND code, so it is NOT
+          # gated on the code-vs-docs split the security role uses.
+          # skeptic (panel only) — evidence discipline: unproven done/fixed/implemented
+          # claims, false status fields, hollow tests.
+          ARCHITECT_REQUIRED=no
+          SKEPTIC_REQUIRED=no
+          if [ "$COVERAGE" = "panel" ]; then
+            ARCHITECT_REQUIRED=yes
+            SKEPTIC_REQUIRED=yes
+          fi
+
+          # ── run every required voter CONCURRENTLY ──
+          # These were sequential, so wall-clock was the SUM of four independent
+          # `claude -p` calls — 10m07s for a 3-line docs diff on #1017, with each voter
+          # idle while the others ran. The voters share no state and their verdicts are
+          # combined only afterwards, so nothing ordered them; the cost was accidental.
+          #
+          # Deliberately NOT solved by dropping voters: fewer lenses is a weaker gate,
+          # and every one of them has caught a real defect this week. Concurrency buys
+          # the latency back while keeping the panel whole.
+          #
+          # Each voter writes its own file (no interleaved stdout), and each is already
+          # `|| true` so one failing voter cannot abort the others or the step.
+          VOTE_DIR="$(mktemp -d)"
+          run_voter() {  # $1 = role
+            bash scripts/review-branch.sh "$BASE" "$HEAD" --role "$1" > "$VOTE_DIR/$1.out" 2>/dev/null || true
+          }
+          # `if` rather than `cond && { … }`: this step inherits `-e` from the Actions
+          # default shell (`set -uo pipefail` does not clear it), and a false `&&` list
+          # is only exempt from `-e` by a subtlety not worth resting a merge gate on.
+          VOTER_PIDS=""
+          run_voter reviewer & VOTER_PIDS="$VOTER_PIDS $!"
+          if [ "$SECURITY_REQUIRED" = yes ]; then
+            run_voter security & VOTER_PIDS="$VOTER_PIDS $!"
+          fi
+          if [ "$ARCHITECT_REQUIRED" = yes ]; then
+            run_voter architect & VOTER_PIDS="$VOTER_PIDS $!"
+          fi
+          if [ "$SKEPTIC_REQUIRED" = yes ]; then
+            run_voter skeptic & VOTER_PIDS="$VOTER_PIDS $!"
+          fi
+          # Wait for ALL of them. A voter that dies still leaves an (empty) file, which
+          # the fail-closed reads below turn into `changes` — never a silent pass.
+          for p in $VOTER_PIDS; do wait "$p" || true; done
+
+          # ── collect verdicts (identical fail-closed handling to the sequential form) ──
+          read_vote() { [ -f "$VOTE_DIR/$1.out" ] && cat "$VOTE_DIR/$1.out" || true; }
+
+          REVIEWER_OUT="$(read_vote reviewer)"
+          REVIEWER_LABEL="$(printf '%s\n' "$REVIEWER_OUT" | bash scripts/review-decide.sh || true)"
+          REVIEWER_BLOCK="$(printf '%s\n' "$REVIEWER_OUT" | extract_block | redact)"
+          [ -z "$REVIEWER_BLOCK" ] && REVIEWER_BLOCK="(reviewer emitted no verdict block — fail-closed to changes)"
+
+          SECURITY_LABEL=""
+          SECURITY_BLOCK=""
+          if [ "$SECURITY_REQUIRED" = yes ]; then
+            SECURITY_OUT="$(read_vote security)"
             SECURITY_LABEL="$(printf '%s\n' "$SECURITY_OUT" | bash scripts/review-decide.sh || true)"
             SECURITY_BLOCK="$(printf '%s\n' "$SECURITY_OUT" | extract_block | redact)"
             [ -z "$SECURITY_BLOCK" ] && SECURITY_BLOCK="(security reviewer emitted no verdict block — fail-closed to changes)"
           fi
 
-          # ── architect role (panel coverage only) — design-fit / scope / contracts /
-          #    missing-DR lens. Always-on in panel: design review applies to specs AND
-          #    code, so it is NOT gated on the code-vs-docs split the security role uses.
-          ARCHITECT_REQUIRED=no
           ARCHITECT_LABEL=""
           ARCHITECT_BLOCK=""
-          if [ "$COVERAGE" = "panel" ]; then
-            ARCHITECT_REQUIRED=yes
-            ARCHITECT_OUT="$(bash scripts/review-branch.sh "$BASE" "$HEAD" --role architect || true)"
+          if [ "$ARCHITECT_REQUIRED" = yes ]; then
+            ARCHITECT_OUT="$(read_vote architect)"
             ARCHITECT_LABEL="$(printf '%s\n' "$ARCHITECT_OUT" | bash scripts/review-decide.sh || true)"
             ARCHITECT_BLOCK="$(printf '%s\n' "$ARCHITECT_OUT" | extract_block | redact)"
             [ -z "$ARCHITECT_BLOCK" ] && ARCHITECT_BLOCK="(architect emitted no verdict block — fail-closed to changes)"
           fi
 
-          # ── skeptic role (panel coverage only) — evidence discipline: unproven
-          #    done/fixed/implemented claims, false status fields, hollow tests. ──
-          SKEPTIC_REQUIRED=no
           SKEPTIC_LABEL=""
           SKEPTIC_BLOCK=""
-          if [ "$COVERAGE" = "panel" ]; then
-            SKEPTIC_REQUIRED=yes
-            SKEPTIC_OUT="$(bash scripts/review-branch.sh "$BASE" "$HEAD" --role skeptic || true)"
+          if [ "$SKEPTIC_REQUIRED" = yes ]; then
+            SKEPTIC_OUT="$(read_vote skeptic)"
             SKEPTIC_LABEL="$(printf '%s\n' "$SKEPTIC_OUT" | bash scripts/review-decide.sh || true)"
             SKEPTIC_BLOCK="$(printf '%s\n' "$SKEPTIC_OUT" | extract_block | redact)"
             [ -z "$SKEPTIC_BLOCK" ] && SKEPTIC_BLOCK="(skeptic emitted no verdict block — fail-closed to changes)"
           fi
+          rm -rf "$VOTE_DIR"
 
           # ── combine (N-voter panel): pass ONLY if EVERY required voter passed.
           #    Precedence is changes > blocked > pass: a real `changes` from ANY voter
