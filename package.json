@@ -16,6 +16,7 @@
     "package": "npm run package --workspaces --if-present",
     "validate": "npx tsx scripts/validate-frontmatter.ts",
     "check:cycles": "npx tsx scripts/check-import-cycles.ts",
+    "facts": "npx tsx scripts/facts.ts",
     "validate:classifier": "vitest run classifier-validation"
   },
   "devDependencies": {
