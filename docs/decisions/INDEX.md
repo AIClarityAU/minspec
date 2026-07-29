@@ -570,4 +570,12 @@ This DR touches **only the pre-dispatch gate.** Relaxing it does not remove huma
 <!-- dr-summary:DR-071 auto=083ef1f2af49 -->
 Constitution invariant #1: *core functionality works offline — no network calls without explicit user consent.* **DR-050** implements it, and its rule #2 is explicit: DR-050 was minted for gh/CLI shelling, where the action's *target* varies per invocation — an arbitrary URL, an arbitrary API call, an arbitrary repo. Per-action consent is exactly right there: the user cannot pre-approve a target they have not seen.
 <!-- /dr-summary:DR-071 -->
+
+## [DR-072 — The harness may write into a foreign tool's config file, but only by additive, idempotent, never-clobbering key-scoped merge](DR-072.md)
+
+*Status: proposed · Date: 2026-07-29*
+
+<!-- dr-summary:DR-072 auto=15c0b646c955 -->
+Constitution invariant: MinSpec is the **signpost**, and a signpost that is wrong is worse than no signpost. #1090 built a UserPromptSubmit hook that appends the approvable IDs a session is working on to the Claude Code session title, so the tab, the prompt box, and the /resume picker all name what is under work. It landed as scripts/hooks/session-title.* plus an entry in this repo's own .claude/settings.json — a MinSpecPro-local script.
+<!-- /dr-summary:DR-072 -->
 <!-- minspec:dr-index:end -->

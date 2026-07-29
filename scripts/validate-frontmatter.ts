@@ -381,11 +381,13 @@ try {
   // Corpus unreadable / absent — nothing to check.
 }
 
-// Rule 12 (FATAL, #678): packages/minspec/src/lib/ci-review-templates.ts must be
-// byte-identical to what scripts/gen-ci-templates.mjs regenerates from the repo's
-// own working CI-review stack (.github/workflows/ai-review.yml + ready-to-merge.yml
+// Rule 12 (FATAL, #678): every file scripts/gen-ci-templates.mjs generates —
+// packages/minspec/src/lib/ci-review-templates.ts and hook-templates.ts — must be
+// byte-identical to what the generator regenerates from the repo's own working
+// sources: the CI-review stack (.github/workflows/ai-review.yml + ready-to-merge.yml
 // + ai-review-retry.yml, scripts/review-branch.sh, scripts/review-decide.sh,
-// scripts/roles/*, .github/scripts/ai-review-guard.js). Editing any of those source
+// scripts/roles/*, .github/scripts/ai-review-guard.js) and the Claude Code hooks
+// (.claude/hooks/session-title.{sh,py}, #1093). Editing any of those source
 // files without regenerating the embedded copy used to drift silently — the
 // `ci-stack-portability` vitest suite was the only gate, and it only runs on
 // push/PR, so the drift landed on main before anyone caught it (3 recurrences:
@@ -397,14 +399,18 @@ try {
 async function checkCiReviewTemplatesFresh(): Promise<void> {
   try {
     const gen = await import('./gen-ci-templates.mjs');
-    const expected = gen.generateCiReviewTemplates(ROOT);
-    const outFile = join(ROOT, gen.OUTPUT_PATH);
-    const onDisk = readFileSync(outFile, 'utf-8');
-    if (onDisk !== expected) {
-      fail(
-        outFile,
-        'stale — drifted from .github/workflows/* + scripts/* sources (#678). Run: node scripts/gen-ci-templates.mjs',
-      );
+    // Iterate EVERY generated file the generator owns (the CI-review stack and the
+    // Claude Code hook stack, #1093) rather than naming one — a file added to the
+    // generator is gated here without anyone remembering to widen this rule.
+    for (const { outputPath, content } of gen.generateAll(ROOT)) {
+      const outFile = join(ROOT, outputPath);
+      const onDisk = readFileSync(outFile, 'utf-8');
+      if (onDisk !== content) {
+        fail(
+          outFile,
+          'stale — drifted from its on-disk sources (#678). Run: node scripts/gen-ci-templates.mjs',
+        );
+      }
     }
   } catch {
     // Generator or one of its source files unreadable/absent — nothing to check,

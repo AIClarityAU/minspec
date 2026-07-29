@@ -1,9 +1,14 @@
 #!/usr/bin/env bash
 # session-title.sh — UserPromptSubmit wrapper for session-title.py
 #
-# Thin wrapper, matching spec-gate.sh: the real logic lives in the .py so the
-# JSON envelope on stdin reaches it cleanly (a `python3 - <<HEREDOC` form would
-# steal stdin).
+# Scaffolded by MinSpec (`MinSpec: Initialize SDD Structure` / `Refresh Harness
+# Files`) into every Claude-Code-using project, and registered as a
+# `UserPromptSubmit` hook in .claude/settings.json.
+#
+# Thin wrapper: the real logic lives in the .py so the JSON envelope on stdin
+# reaches it cleanly (a `python3 - <<HEREDOC` form would steal stdin). Resolves
+# the .py as its own sibling, so the pair works from whatever directory the
+# harness scaffolds it into.
 #
 # Opt out for a session with MINSPEC_SESSION_TITLE_OFF=1.
 

@@ -35,6 +35,7 @@ import {
   buildLegacyBareClaudeShim,
 } from './slash-commands';
 import { detectTools, type DetectedTools } from './tool-detector';
+import { registerSessionTitleHook } from './claude-settings';
 import { writeEpicIndex } from './epic-manager';
 import { assembleContext } from './constitution-context';
 import { seedProvider, integrateProposal, CONSTITUTION_SECTION_SCHEMA } from './constitution-proposer';
@@ -408,6 +409,25 @@ function writeManagedFile(fullPath: string, tpl: ManagedRegionTemplate): void {
       // chmod can fail on filesystems without POSIX modes (e.g. some Windows
       // mounts). Git on those platforms ignores the bit anyway — best-effort.
     }
+  }
+}
+
+/**
+ * Register the scaffolded Claude Code hooks in the project's `.claude/settings.json`
+ * (#1093, DR-072). Scaffolding the hook files is inert on its own — Claude Code only
+ * runs a hook that is listed under its event.
+ *
+ * Gated on `tools.claude`, the same condition that gates scaffolding the hook files.
+ * The write itself is additive, idempotent, and never-clobbering (claude-settings.ts),
+ * and the whole call is best-effort: a cosmetic session title must never fail an init
+ * or a refresh.
+ */
+function registerClaudeHooks(rootDir: string, tools: DetectedTools): void {
+  if (!tools.claude) return;
+  try {
+    registerSessionTitleHook(rootDir);
+  } catch {
+    // Best-effort — the scaffolded hook simply stays unregistered.
   }
 }
 
@@ -844,6 +864,10 @@ export function generateHarnessFiles(rootDir: string): void {
   const tools = detectTools(rootDir);
   generateManagedRegionTemplates(rootDir, tools);
 
+  // Wire the just-scaffolded Claude Code hooks into .claude/settings.json (#1093) —
+  // the hook files are inert until the event lists them.
+  registerClaudeHooks(rootDir, tools);
+
   // Clean up any pre-#534 bare-name Claude shims left behind by a prior init of
   // this same directory (defensive — a fresh init normally has none).
   migrateLegacyClaudeSlashCommandShims(rootDir);
@@ -932,6 +956,11 @@ export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
   // current — the create-only behaviour is gone. Collect warnings to return.
   const tools = detectTools(rootDir);
   const managedRegionWarnings = refreshManagedRegionTemplates(rootDir, tools);
+
+  // Re-assert the Claude Code hook registration on refresh too, so a project
+  // scaffolded before #1093 — or one whose .claude/settings.json was reset — gains
+  // it. Idempotent: an existing registration is recognized and left alone.
+  registerClaudeHooks(rootDir, tools);
 
   // Migrate a pre-#534 project off the bare-name Claude shims (#534): the new
   // `minspec-<cmd>.md` files were just (re-)scaffolded above, so the stale

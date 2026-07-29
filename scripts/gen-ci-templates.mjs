@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /**
- * gen-ci-templates.mjs — regenerates packages/minspec/src/lib/ci-review-templates.ts
- * from the repo's own working CI-review stack (AIClarityAU/minspec#564, #678).
+ * gen-ci-templates.mjs — regenerates the extension's base64-embedded copies of the
+ * harness files this repo itself runs: ci-review-templates.ts from the CI-review
+ * stack (AIClarityAU/minspec#564, #678), and hook-templates.ts from the Claude Code
+ * hooks under .claude/hooks/ (#1093).
  *
  * PROBLEM THIS CLOSES: ci-review-templates.ts base64-embeds byte-exact copies of
  * .github/workflows/ai-review.yml, scripts/review-branch.sh, scripts/roles/*, etc.
@@ -15,12 +17,12 @@
  * a one-command fix instead of a silent main breakage.
  *
  * Usage:
- *   node scripts/gen-ci-templates.mjs           # regenerate + overwrite the .ts file
- *   node scripts/gen-ci-templates.mjs --check    # exit 1 if the committed file is stale (no write)
+ *   node scripts/gen-ci-templates.mjs           # regenerate + overwrite the .ts files
+ *   node scripts/gen-ci-templates.mjs --check    # exit 1 if a committed file is stale (no write)
  *
- * Also exports `generateCiReviewTemplates(repoRoot)` (pure — no I/O side effects
- * beyond reading the source files) so scripts/validate-frontmatter.ts can run the
- * identical check without shelling out to a child process.
+ * Also exports `generateAll(repoRoot)` (pure — no I/O side effects beyond reading the
+ * source files) so scripts/validate-frontmatter.ts can run the identical check over
+ * every generated file without shelling out to a child process.
  */
 
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -30,6 +32,7 @@ import { fileURLToPath } from 'node:url';
 const SCRIPT_DIR = dirname(fileURLToPath(import.meta.url));
 const DEFAULT_REPO_ROOT = join(SCRIPT_DIR, '..');
 const OUTPUT_PATH = 'packages/minspec/src/lib/ci-review-templates.ts';
+const HOOK_OUTPUT_PATH = 'packages/minspec/src/lib/hook-templates.ts';
 const LINE_WIDTH = 100;
 
 // Mirrors CI_STACK in packages/minspec/tests/managed-region-templates.test.ts —
@@ -136,6 +139,56 @@ const HEADER_LINES = [
   "export const REVIEW_SCRIPT_SHEBANG = '#!/usr/bin/env bash';",
 ].join('\n');
 
+// Mirrors HOOK_STACK in packages/minspec/tests/managed-region-templates.test.ts —
+// keep both lists in sync if the embedded hook stack grows (#1093).
+const HOOK_SOURCES = [
+  {
+    constName: 'SESSION_TITLE_SH',
+    srcPath: '.claude/hooks/session-title.sh',
+    doc: 'Verbatim body of `.claude/hooks/session-title.sh` (shebang stripped — supplied via preamble).',
+    stripShebang: true,
+  },
+  {
+    constName: 'SESSION_TITLE_PY',
+    srcPath: '.claude/hooks/session-title.py',
+    doc: 'Verbatim body of `.claude/hooks/session-title.py` (shebang stripped — supplied via preamble).',
+    stripShebang: true,
+  },
+];
+
+const HOOK_HEADER_LINES = [
+  '/**',
+  ' * hook-templates.ts — verbatim, byte-exact copies of the Claude Code hooks this',
+  " * repo itself runs, embedded so the harness scaffolder can write them into any",
+  ' * MinSpec-initialized project that uses Claude Code (AIClarityAU/minspec#1093).',
+  ' *',
+  ' * WHY base64 (not a template literal): the wrapper is dense with shell `${VAR}`',
+  ' * expansions (`${BASH_SOURCE[0]}`, `${MINSPEC_SESSION_TITLE_OFF:-0}`) — every one',
+  ' * of which a TS template literal would read as an interpolation — and the Python',
+  ' * hook is dense with regex backslashes. Hand-escaping that is a correctness hazard:',
+  ' * one missed escape silently corrupts a scaffolded hook. base64 needs zero escaping,',
+  " * so the embedded copy is byte-identical to this repo's own working file.",
+  ' *',
+  ' * Decoding is offline + deterministic (Buffer, no network) — Tier-0 safe (DR-004).',
+  ' *',
+  " * GENERATED from the repo's real `.claude/hooks/*` by scripts/gen-ci-templates.mjs.",
+  ' * Do not hand-edit the base64 blobs — run `node scripts/gen-ci-templates.mjs` to',
+  ' * regenerate. `npm run validate` fails with a stale-file error (and the fix command)',
+  ' * if this file drifts from that.',
+  ' */',
+  '',
+  '/** Decode a base64-embedded template back to its exact UTF-8 source bytes. */',
+  'function decode(b64: string): string {',
+  "  return Buffer.from(b64, 'base64').toString('utf8');",
+  '}',
+  '',
+  '/** Shebang the scaffolded session-title wrapper carries on line 1. */',
+  "export const SESSION_TITLE_SH_SHEBANG = '#!/usr/bin/env bash';",
+  '',
+  '/** Shebang the scaffolded session-title hook carries on line 1. */',
+  "export const SESSION_TITLE_PY_SHEBANG = '#!/usr/bin/env python3';",
+].join('\n');
+
 function wrapBase64(b64) {
   const lines = [];
   for (let i = 0; i < b64.length; i += LINE_WIDTH) {
@@ -158,10 +211,41 @@ function encodeConst({ constName, srcPath, doc, stripShebang }, repoRoot) {
   return `/** ${doc} */\nexport const ${constName}: string = decode(\n${body}\n);\n`;
 }
 
+function render({ header, sources }, repoRoot) {
+  const blocks = sources.map((source) => encodeConst(source, repoRoot));
+  return `${header}\n\n${blocks.join('\n')}\n`;
+}
+
+/**
+ * Every generated embedded-template file this script owns. Anything added here is
+ * regenerated, `--check`ed, and staleness-gated by `npm run validate` for free —
+ * a second generator (and a second gate to forget) is never needed.
+ */
+const GENERATED_FILES = [
+  { outputPath: OUTPUT_PATH, header: HEADER_LINES, sources: SOURCES },
+  { outputPath: HOOK_OUTPUT_PATH, header: HOOK_HEADER_LINES, sources: HOOK_SOURCES },
+];
+
 /** Pure: read the repo's working CI-review stack and render the embedded-copy file. */
 export function generateCiReviewTemplates(repoRoot) {
-  const blocks = SOURCES.map((source) => encodeConst(source, repoRoot));
-  return `${HEADER_LINES}\n\n${blocks.join('\n')}\n`;
+  return render(GENERATED_FILES[0], repoRoot);
+}
+
+/** Pure: read the repo's working Claude Code hooks and render the embedded-copy file. */
+export function generateHookTemplates(repoRoot) {
+  return render(GENERATED_FILES[1], repoRoot);
+}
+
+/**
+ * Pure: render EVERY generated file as `{ outputPath, content }`. The staleness
+ * check in scripts/validate-frontmatter.ts iterates this, so a newly-added entry
+ * is gated without touching the validator.
+ */
+export function generateAll(repoRoot) {
+  return GENERATED_FILES.map((file) => ({
+    outputPath: file.outputPath,
+    content: render(file, repoRoot),
+  }));
 }
 
 function isMainModule() {
@@ -170,21 +254,28 @@ function isMainModule() {
 
 if (isMainModule()) {
   const checkOnly = process.argv.includes('--check');
-  const outFull = join(DEFAULT_REPO_ROOT, OUTPUT_PATH);
-  const generated = generateCiReviewTemplates(DEFAULT_REPO_ROOT);
+  let stale = false;
 
-  if (checkOnly) {
-    const onDisk = readFileSync(outFull, 'utf8');
-    if (onDisk !== generated) {
-      console.error(`STALE: ${OUTPUT_PATH} does not match the regenerated output.`);
-      console.error('Run: node scripts/gen-ci-templates.mjs');
-      process.exit(1);
+  for (const { outputPath, content } of generateAll(DEFAULT_REPO_ROOT)) {
+    const outFull = join(DEFAULT_REPO_ROOT, outputPath);
+    if (checkOnly) {
+      const onDisk = readFileSync(outFull, 'utf8');
+      if (onDisk !== content) {
+        console.error(`STALE: ${outputPath} does not match the regenerated output.`);
+        stale = true;
+      } else {
+        console.log(`${outputPath} is up to date.`);
+      }
+    } else {
+      writeFileSync(outFull, content, 'utf8');
+      console.log(`Regenerated ${outputPath}`);
     }
-    console.log(`${OUTPUT_PATH} is up to date.`);
-  } else {
-    writeFileSync(outFull, generated, 'utf8');
-    console.log(`Regenerated ${OUTPUT_PATH}`);
+  }
+
+  if (stale) {
+    console.error('Run: node scripts/gen-ci-templates.mjs');
+    process.exit(1);
   }
 }
 
-export { OUTPUT_PATH, SOURCES };
+export { OUTPUT_PATH, SOURCES, HOOK_OUTPUT_PATH, HOOK_SOURCES };

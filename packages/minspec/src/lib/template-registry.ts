@@ -18,6 +18,12 @@ import {
 } from './slash-commands';
 import type { DetectedTools } from './tool-detector';
 import {
+  SESSION_TITLE_SH,
+  SESSION_TITLE_PY,
+  SESSION_TITLE_SH_SHEBANG,
+  SESSION_TITLE_PY_SHEBANG,
+} from './hook-templates';
+import {
   AI_REVIEW_WORKFLOW,
   READY_TO_MERGE_WORKFLOW,
   AI_REVIEW_RETRY_WORKFLOW,
@@ -1173,6 +1179,53 @@ export const SLASH_COMMAND_SHIM_TEMPLATES: readonly ManagedRegionTemplate[] = [
 // dev/triage/architect roles (dispatch-only, not used by ai-review.yml).
 // ---------------------------------------------------------------------------
 
+/**
+ * Directory the scaffolded Claude Code hooks live in — under `.claude/`, beside the
+ * `.claude/commands/` slash-command shims, because these are Claude-Code-specific
+ * harness files. Deliberately NOT `MINSPEC_HOOKS_DIR`: that directory is git's
+ * `core.hooksPath` (DR-037), where every file is a git hook by name.
+ */
+export const CLAUDE_HOOKS_DIR = '.claude/hooks';
+
+/**
+ * Claude Code hook stack (#1093, DR-072).
+ *
+ * `session-title.sh` + `session-title.py` are a `UserPromptSubmit` hook that appends
+ * the approvable IDs a session is working on (`SPEC-019 DR-071 #1082`) to the Claude
+ * Code session title, so the prompt box, the `/resume` picker, and the terminal tab
+ * name the approvables under work. Scaffolding the files is only half the job — the
+ * hook does nothing until it is registered in `.claude/settings.json`, which
+ * `registerSessionTitleHook` (claude-settings.ts) does additively.
+ *
+ * Tool-gated on `tools.claude` like the slash-command shims: a project that does not
+ * use Claude Code has no use for a Claude Code hook.
+ *
+ * The bodies are embedded byte-exact in `hook-templates.ts` (base64 — the wrapper is
+ * full of `${VAR}` shell expansions a TS template literal would eat as interpolations),
+ * generated from THIS repo's own working `.claude/hooks/*`, so a scaffolded project
+ * gets exactly the hook minspec itself runs.
+ */
+const CLAUDE_HOOK_TEMPLATES: readonly ManagedRegionTemplate[] = [
+  {
+    name: 'session-title-hook-wrapper',
+    outputPath: `${CLAUDE_HOOKS_DIR}/session-title.sh`,
+    commentStyle: 'hash',
+    content: SESSION_TITLE_SH,
+    executable: true,
+    preamble: SESSION_TITLE_SH_SHEBANG,
+    condition: (tools) => tools.claude,
+  },
+  {
+    name: 'session-title-hook',
+    outputPath: `${CLAUDE_HOOKS_DIR}/session-title.py`,
+    commentStyle: 'hash',
+    content: SESSION_TITLE_PY,
+    executable: true,
+    preamble: SESSION_TITLE_PY_SHEBANG,
+    condition: (tools) => tools.claude,
+  },
+];
+
 /** The three GitHub Actions workflows of the AI-review required-check stack (#564). */
 const CI_REVIEW_STACK_TEMPLATES: readonly ManagedRegionTemplate[] = [
   {
@@ -1254,7 +1307,8 @@ const CI_REVIEW_STACK_TEMPLATES: readonly ManagedRegionTemplate[] = [
 
 /**
  * Names of the managed-region templates whose canonical source is minspec's OWN
- * on-disk working file (the #564 CI-review stack), not a scaffolded output.
+ * on-disk working file (the #564 CI-review stack, the #1093 Claude Code hooks), not
+ * a scaffolded output.
  *
  * `checkManagedRegionMarkers` (scaffold.ts, #760) asserts every on-disk managed
  * template carries its markers — but minspec's own repo never marker-wraps these
@@ -1263,21 +1317,22 @@ const CI_REVIEW_STACK_TEMPLATES: readonly ManagedRegionTemplate[] = [
  * files' raw bytes) and gates their freshness a different way instead
  * (`checkCiReviewTemplatesFresh` in scripts/validate-frontmatter.ts, #678). Used
  * to exclude them from the marker-presence gate IN THIS REPO ONLY — derived from
- * `CI_REVIEW_STACK_TEMPLATES` so the exclusion list can never drift from the
+ * the template lists themselves so the exclusion can never drift from the
  * templates it names. A project that scaffolds FROM these templates (every
  * project other than minspec itself) has no such exclusion.
  */
-export const SELF_HOSTED_TEMPLATE_NAMES: readonly string[] = CI_REVIEW_STACK_TEMPLATES.map(
-  (t) => t.name,
-);
+export const SELF_HOSTED_TEMPLATE_NAMES: readonly string[] = [
+  ...CI_REVIEW_STACK_TEMPLATES,
+  ...CLAUDE_HOOK_TEMPLATES,
+].map((t) => t.name);
 
 /**
  * All managed-region templates in scaffold order.
  *
  * The tool-independent gate harness (CI workflow + git hooks, DR-037) stays FIRST so
  * the existing `MANAGED_REGION_TEMPLATES[0]` references in tests remain stable; the
- * AI-review required-check stack (#564) is appended after the DR-037 harness, and the
- * tool-gated slash-command shims (#241) last.
+ * AI-review required-check stack (#564) is appended after the DR-037 harness, then
+ * the tool-gated Claude Code hooks (#1093) and slash-command shims (#241) last.
  */
 export const MANAGED_REGION_TEMPLATES: readonly ManagedRegionTemplate[] = [
   {
@@ -1311,5 +1366,6 @@ export const MANAGED_REGION_TEMPLATES: readonly ManagedRegionTemplate[] = [
     preamble: '#!/usr/bin/env python3',
   },
   ...CI_REVIEW_STACK_TEMPLATES,
+  ...CLAUDE_HOOK_TEMPLATES,
   ...SLASH_COMMAND_SHIM_TEMPLATES,
 ] as const;

@@ -32,6 +32,7 @@ import {
 } from '../src/lib/scaffold';
 import {
   MANAGED_REGION_TEMPLATES,
+  SELF_HOSTED_TEMPLATE_NAMES,
   managedRegionStartMarker,
   managedRegionEndMarker,
   renderManagedBlock,
@@ -591,4 +592,83 @@ describe('rescaffoldManagedRegionFile (#604 — consent-gated whole-file rewrite
     generateHarnessFiles(tmpDir);
     expect(rescaffoldManagedRegionFile(tmpDir, 'no/such/path.yml')).toBe(false);
   });
+});
+
+// =============================================================================
+// #1093 / DR-072 — Claude Code hook stack
+//
+// `.claude/hooks/session-title.{sh,py}` is a `UserPromptSubmit` hook that appends
+// the approvable IDs a session is working on to the Claude Code session title. Like
+// the #564 CI stack, the embedded copies are generated from THIS repo's own working
+// files, so a scaffolded project gets exactly the hook minspec itself runs — and
+// like the slash-command shims, they are tool-gated: a project that does not use
+// Claude Code has no use for a Claude Code hook.
+// =============================================================================
+
+/** The two Claude Code hook templates and their expected shape. */
+const HOOK_STACK: ReadonlyArray<{ name: string; outputPath: string; shebang: string }> = [
+  {
+    name: 'session-title-hook-wrapper',
+    outputPath: '.claude/hooks/session-title.sh',
+    shebang: '#!/usr/bin/env bash',
+  },
+  {
+    name: 'session-title-hook',
+    outputPath: '.claude/hooks/session-title.py',
+    shebang: '#!/usr/bin/env python3',
+  },
+];
+
+/** A DetectedTools value with only the `claude` flag varying. */
+const toolsWithClaude = (claude: boolean) => ({
+  claude,
+  cursor: false,
+  cline: false,
+  agents: false,
+  windsurf: false,
+  aider: false,
+});
+
+describe('#1093 Claude Code hook stack — registry membership + tool gating', () => {
+  for (const h of HOOK_STACK) {
+    it(`registers ${h.outputPath} as an executable, Claude-gated template`, () => {
+      const tpl = tplByName(h.name);
+      expect(tpl, `template ${h.name} is registered`).toBeDefined();
+      expect(tpl!.outputPath).toBe(h.outputPath);
+      expect(tpl!.commentStyle).toBe('hash');
+      expect(tpl!.content.length).toBeGreaterThan(0);
+      // A hook only runs if it carries the execute bit and its shebang on line 1.
+      expect(tpl!.executable).toBe(true);
+      expect(tpl!.preamble).toBe(h.shebang);
+      // Tool-gated: scaffolded for a Claude Code project, skipped for any other.
+      expect(tpl!.condition).toBeDefined();
+      expect(tpl!.condition!(toolsWithClaude(true))).toBe(true);
+      expect(tpl!.condition!(toolsWithClaude(false))).toBe(false);
+    });
+  }
+
+  it('marks both hooks self-hosted, so this repo’s own markerless copies are exempt', () => {
+    // minspec's own .claude/hooks/* ARE the canonical source and carry no MinSpec
+    // markers; the marker-presence gate must skip them IN THIS REPO ONLY (#760).
+    for (const h of HOOK_STACK) {
+      expect(SELF_HOSTED_TEMPLATE_NAMES).toContain(h.name);
+    }
+  });
+});
+
+describe('#1093 Claude Code hook stack — portability (embedded copy == the repo’s own hook)', () => {
+  // Same T0 invariant as the CI stack: a scaffolded project must get a WORKING hook,
+  // so the embedded template has to be byte-identical to the file minspec itself runs.
+  const repoRoot = findRepoRoot();
+
+  for (const h of HOOK_STACK) {
+    it(`${h.outputPath} is byte-identical to the on-disk source`, () => {
+      const tpl = tplByName(h.name)!;
+      const real = fs.readFileSync(path.join(repoRoot, h.outputPath), 'utf-8');
+      const nl = real.indexOf('\n');
+      // Shebang lives in the preamble (line 1); the body is the managed content.
+      expect(real.slice(0, nl)).toBe(h.shebang);
+      expect(tpl.content).toBe(real.slice(nl + 1));
+    });
+  }
 });
