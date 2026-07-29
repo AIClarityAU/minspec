@@ -21,12 +21,16 @@ export function commitOnApproveEnabled(): boolean {
  *   ''                                        — setting off, not a repo, or no net change
  *   ' · committed'                            — the doc (+ record) were committed
  *   ' · not committed (detached HEAD)'        — refused so the approval isn't lost on next checkout
- *   ' · commit failed — files staged'         — git/hook rejected; approval on disk, uncommitted
+ *   ' · commit failed — approval saved …'     — git/hook rejected; approval on disk, uncommitted, unstaged
  *
  * Never rejects (delegates to `commitApproval`, which never rejects). A failed or
  * refused commit is surfaced (never-wrong: the user must know the approval is
  * uncommitted), with the full git/hook stderr logged for diagnosis.
  */
+/** Offer labels — worded to match #1054's harness-commit offer, so the two
+ *  destination guards read as one behaviour rather than two dialects. */
+const SHOW_FILES_ACTION = 'Show me the files';
+
 export async function commitApprovalIfEnabled(
   rootDir: string,
   absPaths: readonly string[],
@@ -43,14 +47,47 @@ export async function commitApprovalIfEnabled(
       const { suffix: pushSuffix } = await pushApprovalIfEnabled(rootDir, slug);
       return { suffix: ` · committed${pushSuffix}`, result };
     }
+    case 'protected-branch': {
+      // #1064: the default branch is push-protected, so a commit there could never
+      // be pushed and #1041's hook refuses it. NOTHING was staged. The defect this
+      // closes is the SILENCE — the maintainer saw the doc read `accepted` and
+      // reasonably believed it had landed. So say plainly what happened, what
+      // state the files are in, and what to do; never a bare console.warn.
+      //
+      // Deliberately NO auto-recovery here. Committing onto a side branch requires
+      // either moving the shared checkout's HEAD (forbidden — rule #8 / DR-051 §4a,
+      // whose sole sanctioned exception, DR-065, needed its own DR) or a temporary
+      // worktree (the push-docs-lane pattern). Routing an approval to a docs-lane
+      // PR is precisely SPEC-050's scope, which is specified and unblocked — so the
+      // one-click recovery lands there, built once, rather than as a second
+      // half-correct copy here.
+      const current = result.branch?.current ?? 'the default branch';
+      void vscode.window.showWarningMessage(
+        `Approval written but NOT committed: '${current}' is the default branch, ` +
+          `so a commit there could not be pushed. Your files are saved in the working ` +
+          `tree — commit them on a branch to keep them.`,
+        SHOW_FILES_ACTION,
+      ).then((choice) => {
+        if (choice === SHOW_FILES_ACTION) void vscode.commands.executeCommand('workbench.view.scm');
+      });
+      return {
+        suffix: ` · NOT committed (on ${current} — files left in your working tree)`,
+        result,
+      };
+    }
     case 'detached-head':
       // A commit here would be orphaned by the next checkout — refuse and say so.
       return { suffix: ' · not committed (detached HEAD — switch to a branch)', result };
     case 'failed':
       // Log the detail (incl. hook stderr); keep the toast short. The approval
       // record is already on disk — only the git commit failed.
+      //
+      // Says "in your working tree", NOT "files staged": `commitApproval`
+      // unstages these exact paths on failure (invariant 3), so the files are
+      // deliberately NOT left in the index. The old wording described the
+      // behaviour before that invariant existed and had become false.
       console.warn(`MinSpec: commit-on-approve failed — ${result.error ?? 'git error'}`);
-      return { suffix: ' · commit failed — files staged (see console)', result };
+      return { suffix: ' · commit failed — approval saved in your working tree (see console)', result };
     default:
       // 'not-a-repo' | 'nothing-to-commit' — no net change worth reporting.
       return { suffix: '', result };
@@ -65,6 +102,19 @@ export function pushOnApproveMode(): PushOnApproveMode {
   return v === 'never' || v === 'always' ? v : 'prompt';
 }
 
+/**
+ * Branches the REMOTE will reject a direct push to — used only by the push step.
+ *
+ * ⚠️ This is NOT the list the commit-destination guard uses. `minspec.protectedBranches`
+ * currently names TWO separate settings: this VS Code array (default
+ * `['main','master']`), and a git config string (default `main master trunk`) read
+ * by the #1041 pre-commit hook and by {@link resolveBranchDestination}. A shell hook
+ * cannot read VS Code settings, which is how the split arose. Setting one does not
+ * set the other, and their defaults disagree over `trunk`.
+ *
+ * Do not "unify" these by pointing one at the other in passing — that changes a
+ * published setting's meaning and needs its own decision. Tracked at #1111.
+ */
 function protectedBranches(): string[] {
   return vscode.workspace
     .getConfiguration('minspec')
