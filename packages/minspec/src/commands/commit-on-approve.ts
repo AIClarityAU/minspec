@@ -21,7 +21,7 @@ export function commitOnApproveEnabled(): boolean {
  *   ''                                        — setting off, not a repo, or no net change
  *   ' · committed'                            — the doc (+ record) were committed
  *   ' · not committed (detached HEAD)'        — refused so the approval isn't lost on next checkout
- *   ' · commit failed — files staged'         — git/hook rejected; approval on disk, uncommitted
+ *   ' · commit failed — approval saved …'     — git/hook rejected; approval on disk, uncommitted, unstaged
  *
  * Never rejects (delegates to `commitApproval`, which never rejects). A failed or
  * refused commit is surfaced (never-wrong: the user must know the approval is
@@ -81,8 +81,13 @@ export async function commitApprovalIfEnabled(
     case 'failed':
       // Log the detail (incl. hook stderr); keep the toast short. The approval
       // record is already on disk — only the git commit failed.
+      //
+      // Says "in your working tree", NOT "files staged": `commitApproval`
+      // unstages these exact paths on failure (invariant 3), so the files are
+      // deliberately NOT left in the index. The old wording described the
+      // behaviour before that invariant existed and had become false.
       console.warn(`MinSpec: commit-on-approve failed — ${result.error ?? 'git error'}`);
-      return { suffix: ' · commit failed — files staged (see console)', result };
+      return { suffix: ' · commit failed — approval saved in your working tree (see console)', result };
     default:
       // 'not-a-repo' | 'nothing-to-commit' — no net change worth reporting.
       return { suffix: '', result };
@@ -97,6 +102,19 @@ export function pushOnApproveMode(): PushOnApproveMode {
   return v === 'never' || v === 'always' ? v : 'prompt';
 }
 
+/**
+ * Branches the REMOTE will reject a direct push to — used only by the push step.
+ *
+ * ⚠️ This is NOT the list the commit-destination guard uses. `minspec.protectedBranches`
+ * currently names TWO separate settings: this VS Code array (default
+ * `['main','master']`), and a git config string (default `main master trunk`) read
+ * by the #1041 pre-commit hook and by {@link resolveBranchDestination}. A shell hook
+ * cannot read VS Code settings, which is how the split arose. Setting one does not
+ * set the other, and their defaults disagree over `trunk`.
+ *
+ * Do not "unify" these by pointing one at the other in passing — that changes a
+ * published setting's meaning and needs its own decision. Tracked at #1111.
+ */
 function protectedBranches(): string[] {
   return vscode.workspace
     .getConfiguration('minspec')

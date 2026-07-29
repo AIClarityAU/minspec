@@ -29,8 +29,12 @@
  *      stranding family (#1064 Accept ADR, #1022 Alt+A approve, #874 advance):
  *      files written, commit refused, tree left dirty with NO signal. So on the
  *      default branch we refuse UP FRONT with 'protected-branch', staging
- *      nothing, and let the command layer offer a branch. Unknown destination
- *      (detached, no origin/HEAD) FAILS OPEN — unchanged behaviour, never a block.
+ *      nothing, and let the command layer offer a branch. The refusal must fire
+ *      on EXACTLY the commits the hook refuses, no more: it runs first, so a
+ *      condition the hook would have allowed (a documented opt-out, an
+ *      in-progress merge) but this refuses is a false block with no escape.
+ *      Unknown destination (detached, no origin/HEAD, no remote) FAILS OPEN —
+ *      unchanged behaviour, never a block. See {@link resolveBranchDestination}.
  *
  * ASYNC + bounded: git runs off the extension-host thread (async execFile) with a
  * timeout, so a slow user pre-commit hook can't freeze the UI on every Alt+A.
@@ -53,6 +57,14 @@ const GIT_TIMEOUT_MS = 30_000;
 
 /** Fallback default-branch names, in the #1041 hook's order. Keep in sync with it. */
 const CONVENTIONAL_DEFAULT_BRANCHES = ['main', 'master', 'trunk'] as const;
+
+/**
+ * Git-dir entries marking an operation already in progress. The hook exempts all
+ * of these: a commit made mid-merge/cherry-pick/revert/rebase is how a branch
+ * legitimately LANDS on the default branch, not authored work being stranded.
+ */
+const IN_PROGRESS_MARKERS = ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD'] as const;
+const IN_PROGRESS_DIRS = ['rebase-merge', 'rebase-apply'] as const;
 
 /** Outcome of a commit-on-approve attempt. Never an exception — always one of these. */
 export type CommitApprovalOutcome =
@@ -204,64 +216,111 @@ export async function commitApproval(
   }
 }
 
+/** `git config --get <key>`, or '' when unset (git exits 1) or unreadable. */
+async function gitConfig(run: GitRun, key: string): Promise<string> {
+  try {
+    return (await run(['config', '--get', key])).trim();
+  } catch {
+    return '';
+  }
+}
+
 /**
- * Current + default branch names, or `null` when the destination cannot be
- * determined (fail open).
+ * Current + default branch names, or `null` when this commit would NOT be
+ * refused by the hook — either because the destination cannot be determined, or
+ * because the user has opted out (fail open in both cases).
  *
- * MIRRORS the #1041 pre-commit hook's contract deliberately — a narrower rule
- * here would make this guard INERT exactly where the hook fires, which is the
- * defect the first revision of this fix shipped. The hook (generated in
- * `template-registry.ts`) resolves the default branch as:
- *   1. `origin/HEAD` when present — a LOCAL ref, so the check stays offline; then
- *   2. when absent AND a `remote.origin.url` exists, the first of
- *      `main master trunk` that resolves as a local branch. The hook's own
- *      comment records that origin/HEAD is "absent in both repos this guard was
- *      written for", i.e. the fallback is the COMMON path, not the edge case.
+ * MIRRORS the #1041 pre-commit hook's `minspec_branch_guard()` — not just its
+ * default-branch RESOLUTION but its whole GUARD CONTRACT. Mirroring only half of
+ * it is worse than not mirroring at all: this guard runs BEFORE the hook, so any
+ * condition under which the hook would have allowed the commit and this one
+ * refuses is a false refusal the user cannot escape by any documented means.
+ * The first revision of this fix shipped exactly that. The hook's clauses, in
+ * its order (`template-registry.ts`):
+ *
+ *   1. `MINSPEC_GATE_OFF=1` — the whole hook exits 0, so nothing is refused.
+ *   2. `MINSPEC_ALLOW_MAIN=1` — the one-shot documented bypass.
+ *   3. `minspec.allowCommitOnDefaultBranch=true` — the per-repo opt-out.
+ *   4. an operation already in progress (merge / cherry-pick / revert / rebase)
+ *      — that is how a branch legitimately LANDS on the default branch.
+ *   5. detached HEAD — no branch name, nothing to strand work on.
+ *   6. `origin/HEAD` when present — a LOCAL ref, so the check stays offline.
+ *   7. when absent AND a `remote.origin.url` exists, the CURRENT branch is
+ *      treated as default only if its NAME is in `minspec.protectedBranches`
+ *      (space-separated; REPLACES the `main master trunk` default rather than
+ *      extending it). The hook's own comment records that origin/HEAD was
+ *      "absent in both repos this guard was written for" — the fallback is the
+ *      COMMON path, not the edge case.
+ *
+ * Note (7) tests the current branch's NAME. Picking the first conventional
+ * branch that merely EXISTS locally would diverge: on `master` with a stale
+ * local `main`, that yields default=`main` ≠ current, so the graceful
+ * `'protected-branch'` refusal never fires and the commit degrades to a raw
+ * hook rejection — the `'failed'` stranding this fix exists to end.
+ *
  * With no remote at all there is nothing to push to, so no branch can be
  * push-protected — the hook does not guard, and neither do we.
  *
  * Any change here must be mirrored in the hook (and vice versa); they are two
- * halves of one rule, like the existing template-registry drift test.
+ * halves of one rule, and `approve-commit-hook-parity.test.ts` drives one
+ * scenario table through BOTH so a divergence fails a test rather than a user.
+ *
+ * @param run injectable git runner
+ * @param env process environment (injectable so tests need not mutate the real one)
  */
 export async function resolveBranchDestination(
   run: GitRun,
+  env: NodeJS.ProcessEnv = process.env,
 ): Promise<{ current: string; default: string } | null> {
+  // (1-3) Documented bypasses. Each one means the hook would ALLOW this commit,
+  //       so refusing here would over-block a sanctioned opt-out.
+  if (env.MINSPEC_GATE_OFF === '1') return null;
+  if (env.MINSPEC_ALLOW_MAIN === '1') return null;
+  if ((await gitConfig(run, 'minspec.allowCommitOnDefaultBranch')) === 'true') return null;
+
+  // (4) An operation already in progress. Read the git dir from git itself
+  //     (absolute, so it does not depend on this process's cwd).
+  try {
+    const gitDir = (await run(['rev-parse', '--absolute-git-dir'])).trim();
+    if (!gitDir) return null;
+    for (const marker of IN_PROGRESS_MARKERS) {
+      if (fs.existsSync(path.join(gitDir, marker))) return null;
+    }
+    for (const dir of IN_PROGRESS_DIRS) {
+      if (fs.existsSync(path.join(gitDir, dir))) return null;
+    }
+  } catch {
+    return null; // cannot locate the git dir — exactly the hook's `return 0`
+  }
+
+  // (5) Detached HEAD. `symbolic-ref -q --short HEAD` exits non-zero there.
   let current: string;
   try {
-    current = (await run(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
+    current = (await run(['symbolic-ref', '-q', '--short', 'HEAD'])).trim();
   } catch {
     return null;
   }
-  if (!current || current === 'HEAD') return null; // detached — handled upstream
+  if (!current) return null;
 
-  // (1) origin/HEAD, the authoritative answer when it exists.
+  // (6) origin/HEAD, the authoritative answer when it exists.
   try {
-    const ref = (await run(['rev-parse', '--abbrev-ref', 'origin/HEAD'])).trim();
-    if (ref.startsWith('origin/')) {
-      const def = ref.slice('origin/'.length);
-      if (def) return { current, default: def };
-    }
+    const ref = (await run(['symbolic-ref', '-q', '--short', 'refs/remotes/origin/HEAD'])).trim();
+    const def = ref.startsWith('origin/') ? ref.slice('origin/'.length) : ref;
+    if (def) return { current, default: def };
   } catch {
     // fall through to the hook's fallback
   }
 
-  // (2) No origin/HEAD. Only meaningful when a remote exists — with no remote
+  // (7) No origin/HEAD. Only meaningful when a remote exists — with no remote
   //     nothing is push-protected (the hook's own reasoning).
-  try {
-    const url = (await run(['config', '--get', 'remote.origin.url'])).trim();
-    if (!url) return null;
-  } catch {
-    return null; // no remote configured — fail open, exactly like the hook
-  }
-  for (const candidate of CONVENTIONAL_DEFAULT_BRANCHES) {
-    try {
-      await run(['rev-parse', '--verify', '--quiet', `refs/heads/${candidate}`]);
-      return { current, default: candidate };
-    } catch {
-      // not this one
-    }
-  }
-  return null; // unknown destination — fail open
+  if (!(await gitConfig(run, 'remote.origin.url'))) return null;
+
+  const configured = await gitConfig(run, 'minspec.protectedBranches');
+  const candidates = configured
+    ? configured.split(/\s+/).filter(Boolean)
+    : [...CONVENTIONAL_DEFAULT_BRANCHES];
+  // The current branch's NAME decides — never "the first of these that exists".
+  return candidates.includes(current) ? { current, default: current } : null;
 }
 
 /**
