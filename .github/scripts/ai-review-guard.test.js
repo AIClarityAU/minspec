@@ -689,7 +689,53 @@ test('shouldSummonHumanReview: MACHINERY ai-review:pass → summon a human (gate
 test('shouldSummonHumanReview: NORMAL (non-machinery) ai-review:changes → NO summon at t=0 (#816 retirement)', () => {
   // The core of #816: a normal changes verdict is auto-remediated by remediate-pr.sh
   // (bounded attempts) BEFORE a human is needed, so it must NOT be flagged here.
-  assert.equal(shouldSummonHumanReview({ label: CHANGES, isMachinery: false }), false);
+  // Only valid where that lane EXISTS — the caller proves it.
+  assert.equal(
+    shouldSummonHumanReview({ label: CHANGES, isMachinery: false, remediationAvailable: true }),
+    false,
+  );
+});
+
+test('shouldSummonHumanReview: NORMAL ai-review:changes with NO remediation lane → summon (the retirement has no delegate)', () => {
+  // The #816 retirement delegates to remediate-pr.sh. A consuming repo that has
+  // not adopted the dispatch lane has no such script, so retiring the eager
+  // summon there routes a flagged PR to NOBODY — not remediated, not escalated.
+  // Merge safety is unaffected (ready-to-merge holds red independently); the
+  // loss is liveness, and a silently abandoned PR is exactly what this prevents.
+  assert.equal(
+    shouldSummonHumanReview({ label: CHANGES, isMachinery: false, remediationAvailable: false }),
+    true,
+  );
+});
+
+test('shouldSummonHumanReview: remediation availability is deny-by-default (unproven ⇒ summon)', () => {
+  // A caller that does not pass the flag must fail SAFE — keeping the human
+  // backstop — rather than silently inheriting the retirement. Anything that is
+  // not an explicit `true` counts as unproven.
+  assert.equal(shouldSummonHumanReview({ label: CHANGES, isMachinery: false }), true);
+  assert.equal(
+    shouldSummonHumanReview({ label: CHANGES, isMachinery: false, remediationAvailable: undefined }),
+    true,
+  );
+  assert.equal(
+    shouldSummonHumanReview({ label: CHANGES, isMachinery: false, remediationAvailable: 'true' }),
+    true,
+  );
+});
+
+test('shouldSummonHumanReview: remediation availability never overrides the blocked rule', () => {
+  // A blocked verdict is retry-able regardless of whether the lane exists.
+  assert.equal(
+    shouldSummonHumanReview({ label: BLOCKED, isMachinery: false, remediationAvailable: false }),
+    false,
+  );
+});
+
+test('shouldSummonHumanReview: a passing PR never summons, lane or no lane', () => {
+  assert.equal(
+    shouldSummonHumanReview({ label: PASS, isMachinery: false, remediationAvailable: false }),
+    false,
+  );
 });
 
 test('shouldSummonHumanReview: NORMAL passing PR → NO summon (belongs in awaiting-approval)', () => {
