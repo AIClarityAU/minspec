@@ -22,6 +22,7 @@ import {
   READY_TO_MERGE_WORKFLOW,
   AI_REVIEW_RETRY_WORKFLOW,
   DOCS_LANE_WORKFLOW,
+  APPROVAL_PROVENANCE_PY,
   REVIEW_BRANCH_SH,
   REVIEW_DECIDE_SH,
   ROLE_REVIEWER_MD,
@@ -1110,6 +1111,18 @@ const CI_REVIEW_STACK_TEMPLATES: readonly ManagedRegionTemplate[] = [
     outputPath: '.github/workflows/docs-lane.yml',
     commentStyle: 'hash',
     content: DOCS_LANE_WORKFLOW,
+  },
+  {
+    // Ships alongside review-branch.sh, which invokes it. Without this a scaffolded
+    // repo gets a review-branch.sh referencing an absent script: it degrades quietly
+    // via the existence guard, so the panel silently loses its approval-provenance
+    // facts and reverts to the #1017 guess-the-worst behaviour (ai-review#1026).
+    name: 'approval-provenance-script',
+    outputPath: 'scripts/approval-provenance.py',
+    commentStyle: 'hash',
+    content: APPROVAL_PROVENANCE_PY,
+    executable: true,
+    preamble: '#!/usr/bin/env python3\n',
   },
   {
     name: 'review-branch-script',

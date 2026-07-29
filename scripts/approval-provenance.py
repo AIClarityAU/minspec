@@ -80,6 +80,15 @@ def _show(ref: str, path: str) -> str | None:
         return None
 
 
+def merge_base(base: str, head: str) -> str:
+    """The `base...head` fork point — the SAME base `git diff base...head` compares
+    against. Reading the literal `base` instead would disagree with the diff whenever
+    the head has diverged, so a record could be judged against a tree the reviewer
+    never saw. Falls back to the literal ref if the merge-base cannot be computed."""
+    mb = _git('merge-base', base, head).strip()
+    return mb or base
+
+
 def changed_sidecars(base: str, head: str) -> list[str]:
     out = _git('diff', '--name-only', f'{base}...{head}')
     return sorted(
@@ -107,8 +116,39 @@ def _last_content_change(ref: str, spec_path: str) -> str:
     return out.strip()
 
 
+def _sanitize(s: str, limit: int = 200) -> str:
+    """Make an untrusted string safe to place inside the TRUSTED provenance block.
+
+    EVERY value interpolated into the report is attacker-influenceable: `specPath` and
+    `specHash` come from sidecar JSON in the diff, and a commit subject is authored by
+    whoever wrote the commit. Without this, a value containing a newline plus
+    `</approval_provenance>` would CLOSE the trusted wrapper and let the remainder be
+    read as further trusted machine-generated facts — precisely the escape the block
+    exists to prevent.
+
+    So: strip CR/LF (no new lines can be forged), neutralise angle brackets (no tag can
+    be closed or opened), and bound the length (no wall of text can bury the real facts).
+    """
+    out = []
+    for ch in s:
+        if ch in '\r\n':
+            out.append(' ')
+        elif ch == '<':
+            out.append('‹')
+        elif ch == '>':
+            out.append('›')
+        elif ch == '\t':
+            out.append(' ')
+        else:
+            out.append(ch)
+    cleaned = ''.join(out).strip()
+    return cleaned[:limit] + ('…' if len(cleaned) > limit else '')
+
+
 def _abbrev(h: str | None) -> str:
-    return f'{h[:SHORT]}…' if h else '(none)'
+    """Abbreviate a hash. Sanitised first: `specHash` is diff-controlled like any other
+    field, so it is never interpolated raw (a truncated newline would still forge a line)."""
+    return f'{_sanitize(h, SHORT)}…' if h else '(none)'
 
 
 def report_for(base: str, head: str, sidecar: str) -> list[str]:
@@ -126,7 +166,7 @@ def report_for(base: str, head: str, sidecar: str) -> list[str]:
         lines.append('  status: UNREADABLE sidecar (no specPath) — treat as a real finding')
         return lines
 
-    lines.append(f'  spec:              {spec_path}')
+    lines.append(f'  spec:              {_sanitize(spec_path)}')
     lines.append(f'  sidecar specHash:  {_abbrev(new_hash)}')
 
     spec_now = _show(head, spec_path)
@@ -141,7 +181,7 @@ def report_for(base: str, head: str, sidecar: str) -> list[str]:
     else:
         lines.append('  VERDICT:           MISMATCH — the record does NOT match its spec (a real finding)')
 
-    lines.append(f'  spec last changed: {_last_content_change(head, spec_path) or "(no history)"}')
+    lines.append(f'  spec last changed: {_sanitize(_last_content_change(head, spec_path)) or "(no history)"}')
 
     # The decisive fact the diff cannot show: was the PREVIOUS record already stale?
     # If so, re-approval was REQUIRED, and a changed specHash is expected, not suspect.
@@ -160,10 +200,23 @@ def report_for(base: str, head: str, sidecar: str) -> list[str]:
                     f'  previous record:   {_abbrev(old_hash)} — was ALREADY STALE at base '
                     '(did not match the spec then)'
                 )
-                lines.append(
-                    '  => The spec changed in an EARLIER commit, invalidating the old record. '
-                    'A changed specHash here is EXPECTED — this is a re-approval, not an unbacked edit.'
-                )
+                # The reassurance is gated on the HEAD record being valid. Staleness of
+                # the PREVIOUS record explains why the hash changed; it says nothing
+                # about whether the NEW hash is backed. Emitting it unconditionally
+                # would let a forged hash over a stale predecessor produce a block that
+                # says both "MISMATCH — a real finding" AND "this is EXPECTED", blunting
+                # the very gate this report exists to keep sharp.
+                if new_hash == actual:
+                    lines.append(
+                        '  => The spec changed in an EARLIER commit, invalidating the old record. '
+                        'A changed specHash here is EXPECTED — this is a re-approval, not an unbacked edit.'
+                    )
+                else:
+                    lines.append(
+                        '  => The old record was stale, so a CHANGED hash is expected — but the NEW '
+                        'hash matches nothing. Staleness does NOT explain this: treat the MISMATCH '
+                        'above as a real finding.'
+                    )
             else:
                 lines.append(
                     f'  previous record:   {_abbrev(old_hash)} — matched the spec at base'
@@ -176,6 +229,7 @@ def report_for(base: str, head: str, sidecar: str) -> list[str]:
 
 
 def build_report(base: str, head: str) -> str:
+    base = merge_base(base, head)   # agree with `git diff base...head` (see merge_base)
     sidecars = changed_sidecars(base, head)
     if not sidecars:
         return ''
