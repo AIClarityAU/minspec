@@ -29,7 +29,9 @@ import {
   ROLE_ARCHITECT_MD,
   ROLE_SKEPTIC_MD,
   AI_REVIEW_GUARD_JS,
+  APPROVAL_PROVENANCE_PY,
   REVIEW_SCRIPT_SHEBANG,
+  PY_SCRIPT_SHEBANG,
 } from './ci-review-templates';
 
 /**
@@ -1219,6 +1221,20 @@ const CI_REVIEW_STACK_TEMPLATES: readonly ManagedRegionTemplate[] = [
     content: REVIEW_DECIDE_SH,
     executable: true,
     preamble: REVIEW_SCRIPT_SHEBANG,
+  },
+  {
+    // Callee of review-branch.sh. It MUST be scaffolded alongside its caller: the
+    // caller guards on the file existing and degrades to an empty provenance block,
+    // so a repo that got the caller alone ran a permanently inert #1017 fix with no
+    // signal that anything was missing (AIClarityAU/sealbox#32). The
+    // `managed-script-dependencies` test now fails if a managed script references a
+    // path that is not itself a managed template.
+    name: 'approval-provenance-script',
+    outputPath: 'scripts/approval-provenance.py',
+    commentStyle: 'hash',
+    content: APPROVAL_PROVENANCE_PY,
+    executable: true,
+    preamble: PY_SCRIPT_SHEBANG,
   },
   {
     name: 'review-role-reviewer',
