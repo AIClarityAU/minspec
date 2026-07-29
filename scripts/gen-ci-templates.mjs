@@ -72,6 +72,24 @@ const SOURCES = [
     stripShebang: true,
   },
   {
+    // review-branch.sh CALLS this. Shipping the caller without the callee left every
+    // consuming repo with plumbing that silently degrades to empty — the #1017
+    // provenance fix was inert everywhere but this repo (AIClarityAU/sealbox#32).
+    constName: 'APPROVAL_PROVENANCE_PY',
+    srcPath: 'scripts/approval-provenance.py',
+    doc: 'Verbatim body of `scripts/approval-provenance.py` (shebang stripped — supplied via preamble).',
+    stripShebang: true,
+  },
+  {
+    // approval-provenance.py IMPORTS this (via `sys.path.insert(… 'hooks')`). Second
+    // level of the same dependency chain — shipping the importer without the imported
+    // module raises ModuleNotFoundError at load. stdlib-only, so it needs nothing further.
+    constName: 'CANONICAL_PY',
+    srcPath: 'scripts/hooks/canonical.py',
+    doc: 'Verbatim body of `scripts/hooks/canonical.py` (shebang stripped — supplied via preamble).',
+    stripShebang: true,
+  },
+  {
     constName: 'ROLE_REVIEWER_MD',
     srcPath: 'scripts/roles/reviewer.md',
     doc: 'Verbatim body of `scripts/roles/reviewer.md`.',
@@ -134,6 +152,9 @@ const HEADER_LINES = [
   '',
   '/** Shebang line the two scaffolded review scripts carry on line 1. */',
   "export const REVIEW_SCRIPT_SHEBANG = '#!/usr/bin/env bash';",
+  '',
+  '/** Shebang line the scaffolded approval-provenance helper carries on line 1. */',
+  "export const PY_SCRIPT_SHEBANG = '#!/usr/bin/env python3';",
 ].join('\n');
 
 function wrapBase64(b64) {

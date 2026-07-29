@@ -69,6 +69,23 @@ if [[ -z "$DIFF" ]]; then
   exit 0
 fi
 
+# Defang the container delimiters INSIDE the untrusted payload before it is
+# interpolated between them. `${DIFF}` is attacker-influenced and is wrapped in
+# `<untrusted_diff>`…`</untrusted_diff>`, immediately followed by the TRUSTED
+# `<approval_provenance>` channel — so a diff carrying a literal `</untrusted_diff>`
+# terminates its own container early, and anything after it reads as prompt-level
+# text rather than reviewed data. A forged `<approval_provenance TRUSTED=…>` block
+# placed there impersonates machine-generated evidence and can coax a false `pass`.
+#
+# This is not hypothetical: THIS script contains both delimiters in the heredoc
+# below, so every machinery PR that touches it feeds an unbalanced prompt to the
+# panel. Neutralize open and close forms of both tags, tolerating whitespace,
+# attributes, and case, and leave a visible marker so a reviewer still sees that
+# the text was present. Applied to the payload only — never to the real delimiters.
+DIFF="$(printf '%s\n' "$DIFF" | sed -E \
+  -e 's#<[[:space:]]*/?[[:space:]]*untrusted_diff[^>]*>#[defanged tag: untrusted_diff]#Ig' \
+  -e 's#<[[:space:]]*/?[[:space:]]*approval_provenance[^>]*>#[defanged tag: approval_provenance]#Ig')"
+
 # Approval-provenance facts (#1017 false positive). The reviewers have Read/Glob/Grep
 # but NO git, so a diff that changes only an approval sidecar cannot tell them whether
 # the spec changed in an EARLIER commit — and the panel guessed "forged sign-off" on a
