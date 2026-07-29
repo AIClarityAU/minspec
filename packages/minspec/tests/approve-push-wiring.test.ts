@@ -110,10 +110,17 @@ describe('pushApprovalIfEnabled: consent (constitution invariant #1)', () => {
     expect(pushApprovalMock.mock.calls[0][1]).toMatchObject({ protectedBranches: ['trunk'] });
   });
 
-  it('defaults protected branches to main/master when unset', async () => {
+  it('defaults protected branches to main/master/trunk when unset', async () => {
+    // `trunk` joined the default in #1054: the generated pre-commit hook already
+    // carried it while the extension side stopped at main/master, so a repo whose
+    // default branch is `trunk` was blocked at commit time but got no warning from
+    // the commit offer and a rejected direct push from approve. protected-branches-
+    // alignment.test.ts pins all three guards to this one list.
     CONFIG = { pushOnApprove: 'always' };
     await pushApprovalIfEnabled('/repo', 'spec-042');
-    expect(pushApprovalMock.mock.calls[0][1]).toMatchObject({ protectedBranches: ['main', 'master'] });
+    expect(pushApprovalMock.mock.calls[0][1]).toMatchObject({
+      protectedBranches: ['main', 'master', 'trunk'],
+    });
   });
 });
 

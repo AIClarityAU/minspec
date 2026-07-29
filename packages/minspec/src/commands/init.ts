@@ -215,11 +215,19 @@ export interface ScaffoldCommitter {
  *
  * Reads the SAME `minspec.protectedBranches` setting commit-on-approve consumes, so
  * a user who renames their default branch configures it once and every guard agrees.
- * The generated pre-commit hook reads the git-config twin (`minspec.protectedBranches`)
- * for the same reason. The default keeps `trunk` — the hook's list — since a
- * false negative here silently reinstates the stranding bug, while a false positive
- * only offers a branch the user can decline. Outside a VS Code host (tests, Tier-0
- * callers) `getConfiguration` is unavailable, so fall back to the literal list.
+ * The generated pre-commit hook reads the git-config twin of that key
+ * (template-registry.ts, `guard_candidates`) and falls back to the same three names.
+ *
+ * All three now agree on `['main','master','trunk']`. They did not before: the
+ * package.json default was `['main','master']` while the hook's fallback carried
+ * `trunk`, so in a VS Code host `get()` returned the package.json default and `trunk`
+ * protection existed ONLY in the hook — a repo defaulting to `trunk` was guarded at
+ * commit time but never warned by this offer. Aligned in package.json rather than by
+ * dropping `trunk` here: a false negative silently reinstates the stranding bug,
+ * while a false positive only offers a branch the user can decline.
+ *
+ * Outside a VS Code host (tests, Tier-0 callers) `getConfiguration` is unavailable,
+ * so fall back to the same literal list.
  */
 function conventionalDefaultBranches(): string[] {
   try {

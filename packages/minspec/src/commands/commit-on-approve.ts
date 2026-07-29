@@ -68,7 +68,7 @@ export function pushOnApproveMode(): PushOnApproveMode {
 function protectedBranches(): string[] {
   return vscode.workspace
     .getConfiguration('minspec')
-    .get<string[]>('protectedBranches', ['main', 'master']);
+    .get<string[]>('protectedBranches', ['main', 'master', 'trunk']);
 }
 
 /**
