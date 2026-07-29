@@ -387,14 +387,25 @@ jobs:
           # default shell (`set -uo pipefail` does not clear it), and a false `&&` list
           # is only exempt from `-e` by a subtlety not worth resting a merge gate on.
           VOTER_PIDS=""
+          # STAGGER the starts. Launching all four in the same instant made one voter
+          # come back `blocked` on the very first parallel run (#1086: reviewer blocked
+          # while security + architect + skeptic all passed — three simultaneous
+          # successes rule out a token-quota outage and point at a burst limit).
+          # A few seconds between starts costs almost nothing against a ~2.5min voter,
+          # and the combine precedence is `changes > blocked > pass`, so ONE blocked
+          # voter blocks the whole PR: a cheap desync is worth far more than the seconds.
+          VOTER_STAGGER_SECS="${VOTER_STAGGER_SECS:-5}"
           run_voter reviewer & VOTER_PIDS="$VOTER_PIDS $!"
           if [ "$SECURITY_REQUIRED" = yes ]; then
+            sleep "$VOTER_STAGGER_SECS"
             run_voter security & VOTER_PIDS="$VOTER_PIDS $!"
           fi
           if [ "$ARCHITECT_REQUIRED" = yes ]; then
+            sleep "$VOTER_STAGGER_SECS"
             run_voter architect & VOTER_PIDS="$VOTER_PIDS $!"
           fi
           if [ "$SKEPTIC_REQUIRED" = yes ]; then
+            sleep "$VOTER_STAGGER_SECS"
             run_voter skeptic & VOTER_PIDS="$VOTER_PIDS $!"
           fi
           # Wait for ALL of them. A voter that dies still leaves an (empty) file, which

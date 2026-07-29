@@ -47,7 +47,7 @@ describe('ai-review panel: launched concurrently', () => {
   it('uses `if` for conditional launches, not a `&&` list', () => {
     // The step inherits `-e` from the Actions default shell; a false `&&` list is only
     // exempt by a subtlety this merge gate should not depend on.
-    expect(wf).toMatch(/if \[ "\$SECURITY_REQUIRED" = yes \]; then\n\s*run_voter security &/);
+    expect(wf).toMatch(/if \[ "\$SECURITY_REQUIRED" = yes \]; then\n[\s\S]{0,120}?run_voter security &/);
     expect(wf).not.toMatch(/\[ "\$SKEPTIC_REQUIRED"\s*= yes \] && \{/);
   });
 });
@@ -79,6 +79,23 @@ describe('ai-review panel: still whole, still fail-closed', () => {
   });
 });
 
+describe('ai-review panel: starts are staggered (burst-limit desync)', () => {
+  it('spaces the launches instead of firing all four in the same instant', () => {
+    // #1086: the first parallel run came back with the reviewer `blocked` while the
+    // other three PASSED — three simultaneous successes rule out a token-quota outage
+    // and point at a burst limit. Combine precedence is changes > blocked > pass, so
+    // ONE blocked voter blocks the PR; a few seconds of desync is cheap insurance.
+    expect(wf).toMatch(/VOTER_STAGGER_SECS="\$\{VOTER_STAGGER_SECS:-\d+\}"/);
+    expect((wf.match(/sleep "\$VOTER_STAGGER_SECS"/g) ?? []).length).toBe(3);
+  });
+
+  it('does not stagger before the FIRST voter — that would be pure latency', () => {
+    const launchAt = wf.indexOf('run_voter reviewer &');
+    const staggerAt = wf.indexOf('sleep "$VOTER_STAGGER_SECS"');
+    expect(staggerAt).toBeGreaterThan(launchAt);
+  });
+});
+
 describe('ai-review panel: concurrency is real, not just structural', () => {
   it('runs four 1s voters in about 1s, not about 4s', () => {
     // Extracted launch/wait/collect logic against a STUB reviewer: this measures the
@@ -94,13 +111,14 @@ describe('ai-review panel: concurrency is real, not just structural', () => {
 set -uo pipefail
 BASE=b; HEAD=h
 SECURITY_REQUIRED=yes; ARCHITECT_REQUIRED=yes; SKEPTIC_REQUIRED=yes
+VOTER_STAGGER_SECS=0
 VOTE_DIR="$(mktemp -d)"
 run_voter() { bash scripts/review-branch.sh "$BASE" "$HEAD" --role "$1" > "$VOTE_DIR/$1.out" 2>/dev/null || true; }
 VOTER_PIDS=""
 run_voter reviewer & VOTER_PIDS="$VOTER_PIDS $!"
-if [ "$SECURITY_REQUIRED" = yes ]; then run_voter security & VOTER_PIDS="$VOTER_PIDS $!"; fi
-if [ "$ARCHITECT_REQUIRED" = yes ]; then run_voter architect & VOTER_PIDS="$VOTER_PIDS $!"; fi
-if [ "$SKEPTIC_REQUIRED" = yes ]; then run_voter skeptic & VOTER_PIDS="$VOTER_PIDS $!"; fi
+if [ "$SECURITY_REQUIRED" = yes ]; then sleep "$VOTER_STAGGER_SECS"; run_voter security & VOTER_PIDS="$VOTER_PIDS $!"; fi
+if [ "$ARCHITECT_REQUIRED" = yes ]; then sleep "$VOTER_STAGGER_SECS"; run_voter architect & VOTER_PIDS="$VOTER_PIDS $!"; fi
+if [ "$SKEPTIC_REQUIRED" = yes ]; then sleep "$VOTER_STAGGER_SECS"; run_voter skeptic & VOTER_PIDS="$VOTER_PIDS $!"; fi
 for p in $VOTER_PIDS; do wait "$p" || true; done
 grep -l 'verdict: pass' "$VOTE_DIR"/*.out | wc -l
 rm -rf "$VOTE_DIR"
