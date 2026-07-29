@@ -469,7 +469,7 @@ classifyBlast(signals, touchesExportedSurface) (auto-merge.ts:188) returns 'low'
 
 ## [DR-059 — Commit-message prose deferrals must cite a follow-up — a blocking commit-msg gate, distinct from DR-040's DR-document auto-materialization](DR-059.md)
 
-*Status: proposed · Date: 2026-07-14*
+*Status: accepted · Date: 2026-07-14*
 
 <!-- dr-summary:DR-059 auto=e78d2df187eb -->
 Two mechanisms leak un-tracked work, on **two different surfaces**: 1. **DR-document follow-ups.** A DR's ## Follow-ups (tracked) bullets that carry no issue/spec ref. DR-040 governs this: on DR save, un-materialized bullets **auto-create** their issues (friction-free), and only genuinely broken refs surface. DR-040 deliberately **rejected a blocking gate** here — "only DR-012 approval blocks in MinSpec; a second blocking gate for bookkeeping" — because the author's curated list can be materialized *for* them, so friction is unwarranted.
