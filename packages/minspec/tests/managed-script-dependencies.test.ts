@@ -1,6 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import * as posix from 'node:path/posix';
-import { MANAGED_REGION_TEMPLATES } from '../src/lib/template-registry';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { spawnSync } from 'node:child_process';
+import { MANAGED_REGION_TEMPLATES, renderManagedFile } from '../src/lib/template-registry';
 
 /**
  * Invariant (RCDD / DR-003 Phase 4): a managed script may only invoke files that
@@ -97,5 +101,49 @@ describe('managed scripts have no unmanaged dependencies', () => {
   it('scaffolds approval-provenance.py alongside its caller (the #1026 regression)', () => {
     expect(managedPaths.has('scripts/approval-provenance.py')).toBe(true);
     expect(managedPaths.has('scripts/review-branch.sh')).toBe(true);
+  });
+});
+
+/**
+ * The static check above reads `${SCRIPT_DIR}` references, so it only sees the
+ * dependency forms it was taught. It did NOT see that approval-provenance.py
+ * `sys.path.insert`s a sibling directory and imports `canonical` from it — a repo
+ * scaffolded with the static gate alone still died with ModuleNotFoundError on the
+ * first real invocation.
+ *
+ * So: scaffold the managed set into an empty directory and actually LOAD it. A
+ * runtime load is language-agnostic and needs no parser per import syntax — it fails
+ * on whatever the script genuinely cannot find, which is the property under test.
+ */
+describe('the scaffolded set runs standalone', () => {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-scaffold-'));
+
+  for (const tpl of MANAGED_REGION_TEMPLATES) {
+    const dest = path.join(root, tpl.outputPath);
+    fs.mkdirSync(path.dirname(dest), { recursive: true });
+    fs.writeFileSync(dest, renderManagedFile(tpl), 'utf8');
+  }
+
+  it('scaffolds approval-provenance.py and its transitive import', () => {
+    // Anti-vacuity: if the render loop ever wrote nothing, the load below would
+    // fail for the wrong reason (or the file would be absent and skipped).
+    expect(fs.existsSync(path.join(root, 'scripts/approval-provenance.py'))).toBe(true);
+    expect(fs.existsSync(path.join(root, 'scripts/hooks/canonical.py'))).toBe(true);
+  });
+
+  it('approval-provenance.py imports cleanly with only scaffolded files present', () => {
+    // No args → the script prints usage and exits 1, but ONLY after its imports have
+    // resolved. An unshipped dependency fails earlier, at module load.
+    const run = spawnSync('python3', [path.join(root, 'scripts/approval-provenance.py')], {
+      encoding: 'utf8',
+      cwd: root,
+    });
+    const stderr = run.stderr ?? '';
+    expect(
+      stderr,
+      `approval-provenance.py could not load from a freshly scaffolded tree:\n${stderr}`,
+    ).not.toMatch(/ModuleNotFoundError|ImportError|No such file or directory/);
+    // Positive assertion — it got far enough to reach its own argument handling.
+    expect(stderr).toMatch(/Usage/i);
   });
 });

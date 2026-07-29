@@ -81,6 +81,15 @@ const SOURCES = [
     stripShebang: true,
   },
   {
+    // approval-provenance.py IMPORTS this (via `sys.path.insert(… 'hooks')`). Second
+    // level of the same dependency chain — shipping the importer without the imported
+    // module raises ModuleNotFoundError at load. stdlib-only, so it needs nothing further.
+    constName: 'CANONICAL_PY',
+    srcPath: 'scripts/hooks/canonical.py',
+    doc: 'Verbatim body of `scripts/hooks/canonical.py` (shebang stripped — supplied via preamble).',
+    stripShebang: true,
+  },
+  {
     constName: 'ROLE_REVIEWER_MD',
     srcPath: 'scripts/roles/reviewer.md',
     doc: 'Verbatim body of `scripts/roles/reviewer.md`.',

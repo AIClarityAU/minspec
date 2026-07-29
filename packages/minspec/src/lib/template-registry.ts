@@ -30,6 +30,7 @@ import {
   ROLE_SKEPTIC_MD,
   AI_REVIEW_GUARD_JS,
   APPROVAL_PROVENANCE_PY,
+  CANONICAL_PY,
   REVIEW_SCRIPT_SHEBANG,
   PY_SCRIPT_SHEBANG,
 } from './ci-review-templates';
@@ -1233,6 +1234,17 @@ const CI_REVIEW_STACK_TEMPLATES: readonly ManagedRegionTemplate[] = [
     outputPath: 'scripts/approval-provenance.py',
     commentStyle: 'hash',
     content: APPROVAL_PROVENANCE_PY,
+    executable: true,
+    preamble: PY_SCRIPT_SHEBANG,
+  },
+  {
+    // Imported by approval-provenance.py at load time — second level of the same
+    // chain, and the reason the gate below runs the scaffolded set instead of only
+    // reading it. stdlib-only, so the chain terminates here.
+    name: 'canonical-hasher-python',
+    outputPath: 'scripts/hooks/canonical.py',
+    commentStyle: 'hash',
+    content: CANONICAL_PY,
     executable: true,
     preamble: PY_SCRIPT_SHEBANG,
   },
