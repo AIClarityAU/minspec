@@ -29,7 +29,10 @@ import {
   ROLE_ARCHITECT_MD,
   ROLE_SKEPTIC_MD,
   AI_REVIEW_GUARD_JS,
+  APPROVAL_PROVENANCE_PY,
+  CANONICAL_PY,
   REVIEW_SCRIPT_SHEBANG,
+  PY_SCRIPT_SHEBANG,
 } from './ci-review-templates';
 
 /**
@@ -597,7 +600,15 @@ export const MINSPEC_HOOKS_DIR = '.minspec/hooks';
 // ---------------------------------------------------------------------------
 
 /**
- * Shell `pre-commit` hook (DR-037 / #247, #244). Two stages over the staged tree:
+ * Shell `pre-commit` hook (DR-037 / #247, #244). Three stages over the staged tree:
+ *
+ *  0. Protected-branch guard: refuse an authored commit on the default branch,
+ *     which is push-protected and so can never receive a direct commit — the
+ *     rejection would otherwise surface only at `git push`, after the work is
+ *     already in branch history. Reads origin/HEAD (a local ref) so it stays
+ *     offline; fires only for authored commits, and fails OPEN on anything it
+ *     cannot determine. Opt out with MINSPEC_ALLOW_MAIN=1 or
+ *     `git config minspec.allowCommitOnDefaultBranch true`.
  *
  *  1. Secret scan (#244): if `gitleaks` is on PATH, run it on the staged changes and
  *     BLOCK on a finding. If gitleaks is absent, emit a one-line advisory and
@@ -625,6 +636,91 @@ set -u
 
 hook_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
+
+# ── Stage 0: protected-branch guard ──────────────────────────────────────────
+# A commit authored on the default branch usually cannot be PUSHED: projects
+# using this harness gate that branch on pull-request-only status checks, so the
+# rejection lands at \`git push\` — long after the work is sealed into branch
+# history, where recovering it needs branch surgery. Refusing here costs one
+# command; refusing at push time costs a rescue.
+#
+# Offline by construction: the default branch is read from
+# refs/remotes/origin/HEAD, a LOCAL ref written by \`git clone\` / \`git remote
+# set-head\`. No network call, no forge API — the guard works air-gapped.
+#
+# Deliberately narrow, because a gate that over-blocks gets switched off and a
+# switched-off gate is worth nothing. It fires ONLY for an authored commit on
+# the branch git itself reports as origin's default, and never for an
+# in-progress merge / cherry-pick / revert / rebase (those are how a branch
+# legitimately lands), never on a detached HEAD, and never when the default
+# branch cannot be determined — unknown fails OPEN, per the never-wrong rule.
+minspec_branch_guard() {
+  if [ "\${MINSPEC_ALLOW_MAIN:-0}" = "1" ]; then return 0; fi
+  if [ "$(git config --get minspec.allowCommitOnDefaultBranch 2>/dev/null)" = "true" ]; then return 0; fi
+
+  guard_git_dir=$(git rev-parse --git-dir 2>/dev/null) || return 0
+  if [ -z "\${guard_git_dir:-}" ]; then return 0; fi
+
+  for guard_marker in MERGE_HEAD CHERRY_PICK_HEAD REVERT_HEAD; do
+    if [ -e "$guard_git_dir/$guard_marker" ]; then return 0; fi
+  done
+  if [ -d "$guard_git_dir/rebase-merge" ]; then return 0; fi
+  if [ -d "$guard_git_dir/rebase-apply" ]; then return 0; fi
+
+  # Detached HEAD reports no branch name — nothing to strand work on.
+  guard_current=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) || return 0
+  if [ -z "\${guard_current:-}" ]; then return 0; fi
+
+  guard_default=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+
+  # origin/HEAD is the precise answer but is NOT always populated — it was absent
+  # in both repos this guard was written for, which made the guard silently inert
+  # exactly where it was needed. \`git remote set-head origin <branch>\` repairs
+  # it, but the gate must not depend on someone having done that.
+  #
+  # Fall back to conventional protected names. Still not a hardcoded "main": only
+  # these names are treated as protected, any other branch is untouched, and the
+  # list is configurable per project via minspec.protectedBranches.
+  #
+  # Gated on an \`origin\` remote existing. A repo with no remote has nothing to
+  # push to, so no branch in it can be push-protected and committing on \`main\` is
+  # entirely correct — scratch repos, fixtures and local-only projects must never
+  # be blocked.
+  if [ -z "\${guard_default:-}" ] && git config --get remote.origin.url >/dev/null 2>&1; then
+    guard_candidates=$(git config --get minspec.protectedBranches 2>/dev/null || true)
+    if [ -z "\${guard_candidates:-}" ]; then guard_candidates="main master trunk"; fi
+    for guard_name in $guard_candidates; do
+      if [ "$guard_current" = "$guard_name" ]; then
+        guard_default="$guard_name"
+        break
+      fi
+    done
+  fi
+
+  if [ -z "\${guard_default:-}" ]; then return 0; fi
+
+  if [ "$guard_current" != "$guard_default" ]; then return 0; fi
+
+  echo "✗ MinSpec gate: refusing to commit on '$guard_current' — this project's default branch." >&2
+  echo "  It is push-protected (pull-request-only checks), so this commit could not be" >&2
+  echo "  pushed and would strand the work in local history." >&2
+  echo "" >&2
+  echo "  Move the staged work onto a branch and commit there:" >&2
+  echo "      git switch -c <branch-name>" >&2
+  echo "      git commit ..." >&2
+  echo "" >&2
+  echo "  Already committed on $guard_current? Keep the work, then rewind the branch:" >&2
+  echo "      git branch <branch-name>" >&2
+  echo "      git reset --hard origin/$guard_default" >&2
+  echo "" >&2
+  echo "  Allow once:      MINSPEC_ALLOW_MAIN=1 git commit ..." >&2
+  echo "  Allow in future: git config minspec.allowCommitOnDefaultBranch true" >&2
+  return 1
+}
+
+if ! minspec_branch_guard; then
+  exit 1
+fi
 
 # ── Stage 1: secret scan (#244, gitleaks) ────────────────────────────────────
 # gitleaks is the recommended static, offline, read-only scanner. It is OPTIONAL:
@@ -1126,6 +1222,31 @@ const CI_REVIEW_STACK_TEMPLATES: readonly ManagedRegionTemplate[] = [
     content: REVIEW_DECIDE_SH,
     executable: true,
     preamble: REVIEW_SCRIPT_SHEBANG,
+  },
+  {
+    // Callee of review-branch.sh. It MUST be scaffolded alongside its caller: the
+    // caller guards on the file existing and degrades to an empty provenance block,
+    // so a repo that got the caller alone ran a permanently inert #1017 fix with no
+    // signal that anything was missing (AIClarityAU/sealbox#32). The
+    // `managed-script-dependencies` test now fails if a managed script references a
+    // path that is not itself a managed template.
+    name: 'approval-provenance-script',
+    outputPath: 'scripts/approval-provenance.py',
+    commentStyle: 'hash',
+    content: APPROVAL_PROVENANCE_PY,
+    executable: true,
+    preamble: PY_SCRIPT_SHEBANG,
+  },
+  {
+    // Imported by approval-provenance.py at load time — second level of the same
+    // chain, and the reason the gate below runs the scaffolded set instead of only
+    // reading it. stdlib-only, so the chain terminates here.
+    name: 'canonical-hasher-python',
+    outputPath: 'scripts/hooks/canonical.py',
+    commentStyle: 'hash',
+    content: CANONICAL_PY,
+    executable: true,
+    preamble: PY_SCRIPT_SHEBANG,
   },
   {
     name: 'review-role-reviewer',

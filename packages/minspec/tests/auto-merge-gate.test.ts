@@ -732,10 +732,19 @@ describe('#491 — audit-write failure fail-safes an eligible decision to HOLD',
 // #490 / DR-058 — detectLowBlastDocsTest is the affirmative low-blast analyzer:
 // it emits a low-blast signal ONLY when every changed path is docs and/or a test
 // (no product source). Absence of this signal is what makes an opaque change hold.
+//
+// #1001: the fixtures below deliberately use INWARD docs (specs/**, docs/decisions/**).
+// `README.md` / `CHANGELOG.md` / `LICENSE` used to stand in for "a genuine doc" here —
+// but those are OUTWARD-FACING (published to users), so they no longer certify low, and
+// using one as the "genuine doc" half of a taint case would make that case pass
+// VACUOUSLY. The outward exclusion itself is proven in outward-docs-exclusion.test.ts.
 // ─────────────────────────────────────────────────────────────────────────────
 describe('#490 / DR-058 — detectLowBlastDocsTest certifies a docs/test-only diff', () => {
   it('docs-only diff → affirmative low-blast signal', () => {
-    const sig = detectLowBlastDocsTest([cf({ path: 'README.md' }), cf({ path: 'docs/guide.md' })]);
+    const sig = detectLowBlastDocsTest([
+      cf({ path: 'specs/minspec/SPEC-001/design.md' }),
+      cf({ path: 'docs/guide.md' }),
+    ]);
     expect(sig?.name).toBe('low_blast_docs_test_only');
   });
 
@@ -745,17 +754,24 @@ describe('#490 / DR-058 — detectLowBlastDocsTest certifies a docs/test-only di
   });
 
   it('docs + test mix (no product code) → still certified', () => {
-    const sig = detectLowBlastDocsTest([cf({ path: 'CHANGELOG.md' }), cf({ path: 'a.spec.ts' })]);
+    const sig = detectLowBlastDocsTest([cf({ path: 'docs/decisions/DR-001.md' }), cf({ path: 'a.spec.ts' })]);
     expect(sig?.name).toBe('low_blast_docs_test_only');
   });
 
-  it('LICENSE (no extension) → certified docs', () => {
-    expect(detectLowBlastDocsTest([cf({ path: 'LICENSE' })])?.name).toBe('low_blast_docs_test_only');
+  it('a DOCS_BASENAMES doc with no extension → certified docs', () => {
+    // CONTRIBUTING/AUTHORS are the extensionless-basename arm of `isDocsPath`. (LICENSE
+    // and NOTICE are in that set too, but they are legal instruments that ship in the
+    // .vsix — #1001 excludes them, so they cannot serve as this fixture.)
+    expect(detectLowBlastDocsTest([cf({ path: 'CONTRIBUTING' })])?.name).toBe('low_blast_docs_test_only');
+    expect(detectLowBlastDocsTest([cf({ path: 'AUTHORS' })])?.name).toBe('low_blast_docs_test_only');
   });
 
   it('any product source file present → NO signal (opaque → the change will hold)', () => {
     expect(
-      detectLowBlastDocsTest([cf({ path: 'README.md' }), cf({ path: 'packages/minspec/src/lib/auth.ts' })]),
+      detectLowBlastDocsTest([
+        cf({ path: 'docs/decisions/DR-001.md' }),
+        cf({ path: 'packages/minspec/src/lib/auth.ts' }),
+      ]),
     ).toBeUndefined();
   });
 
@@ -775,7 +791,9 @@ describe('#490 / DR-058 — detectLowBlastDocsTest certifies a docs/test-only di
     expect(detectLowBlastDocsTest([cf({ path: '.github/CODEOWNERS' })])).toBeUndefined();
     expect(detectLowBlastDocsTest([cf({ path: 'docs/CODEOWNERS' })])).toBeUndefined();
     // even mixed with a genuine doc, the CODEOWNERS presence blocks certification
-    expect(detectLowBlastDocsTest([cf({ path: 'README.md' }), cf({ path: 'CODEOWNERS' })])).toBeUndefined();
+    expect(
+      detectLowBlastDocsTest([cf({ path: 'docs/decisions/DR-001.md' }), cf({ path: 'CODEOWNERS' })]),
+    ).toBeUndefined();
   });
 
   it('CODEOWNERS is affirmatively HIGH-blast (boundary), at any path', () => {
@@ -795,7 +813,7 @@ describe('#490 / DR-058 — detectLowBlastDocsTest certifies a docs/test-only di
     expect(detectLowBlastDocsTest([cf({ path: 'scripts/roles/reviewer.md' })])).toBeUndefined();
     // even mixed with a genuine doc, a role-prompt presence blocks certification
     expect(
-      detectLowBlastDocsTest([cf({ path: 'README.md' }), cf({ path: 'scripts/roles/dev.md' })]),
+      detectLowBlastDocsTest([cf({ path: 'docs/decisions/DR-001.md' }), cf({ path: 'scripts/roles/dev.md' })]),
     ).toBeUndefined();
   });
 
@@ -812,9 +830,12 @@ describe('#490 / DR-058 — detectLowBlastDocsTest certifies a docs/test-only di
   });
 
   it('regression guard: GENUINE docs still certify low (governance exclusion did not over-block)', () => {
-    expect(detectLowBlastDocsTest([cf({ path: 'README.md' }), cf({ path: 'docs/guide.md' })])?.name).toBe(
+    expect(
+      detectLowBlastDocsTest([cf({ path: 'specs/minspec/SPEC-001/design.md' }), cf({ path: 'docs/guide.md' })])
+        ?.name,
+    ).toBe('low_blast_docs_test_only');
+    expect(detectLowBlastDocsTest([cf({ path: 'docs/decisions/DR-001.md' })])?.name).toBe(
       'low_blast_docs_test_only',
     );
-    expect(detectLowBlastDocsTest([cf({ path: 'CHANGELOG.md' })])?.name).toBe('low_blast_docs_test_only');
   });
 });

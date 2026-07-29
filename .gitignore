@@ -20,6 +20,11 @@ coverage/
 !.claude/commands/
 .claude/commands/*
 !.claude/commands/minspec-*.md
+# Shared project config (hooks anchored to $CLAUDE_PROJECT_DIR) — deliberately
+# TRACKED so the team/CI get the same gates. `.claude/*` above would otherwise
+# claim to ignore it while git kept honouring the index, leaving a rule that
+# reads as working and does nothing (#1100).
+!.claude/settings.json
 # Explicit literal (redundant with .claude/* above, but the #794 parity test
 # requires every MINSPEC_GITIGNORE_ENTRIES entry to appear verbatim, so newly-
 # scaffolded projects and this monorepo checkout stay gitignore-consistent).

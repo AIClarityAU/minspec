@@ -678,6 +678,11 @@ function buildHollowFindings(changedFiles: ChangedFile[]): TestFinding[] {
 // (BOUNDARY_ROOT_BASENAMES), after the #490 review caught it certifying low here.
 // And even if a future overlap slipped in, `classifyBlast` checks high before low,
 // so a high signal always wins over an affirmative-low one.
+//
+// #1001 adds the third disjoint exclusion, on a different axis from the first two:
+// boundary/governance asks WHO OWNS the file; OUTWARD_DOC_PATTERN asks WHAT PUBLISHING
+// IT DOES. "Docs" is only a valid proxy for "low-consequence" while the prose stays
+// INSIDE the repo — see that constant for the full inverted-proxy rationale.
 
 /** Documentation / prose files (extension or well-known basename). */
 const DOCS_EXT_RE = /\.(md|mdx|markdown|txt|rst|adoc)$/i;
@@ -705,6 +710,95 @@ function isTestPath(p: string): boolean {
 }
 
 /**
+ * OUTWARD_DOC_PATTERN (#1001) — docs that FACE THE USER, excluded from the affirmative
+ * low-blast catalog above.
+ *
+ * THE INVERTED PROXY (the root cause this closes): {@link DOCS_EXT_RE} uses "is this a
+ * docs file?" as a proxy for "is this low-consequence?". For INWARD prose — a
+ * `specs/**\/requirements.md`, a `docs/decisions/DR-NNN.md` — the proxy holds: nobody
+ * outside the repo ever reads it, so a wrong word costs a follow-up commit. For OUTWARD
+ * prose the proxy is **inverted**: a `.md` that ships inside the published `.vsix`,
+ * renders on the Marketplace/GitHub landing page, states a public product claim, or
+ * deploys to minspec.dev has HIGHER consequence than most code, because a wrong word is
+ * published to users and cannot be un-said by a revert. Absent this constant, marketing /
+ * positioning / legal / README copy — the one content class the maintainer designates
+ * human-only — was the ONLY class carrying an affirmative low-blast certification
+ * pushing it toward auto-merge (worked example: #645, a `.md`-only diff that re-states
+ * the product's public network-posture claim).
+ *
+ * MERGE-SIDE TWIN of `scripts/dispatch-issue.sh`'s `PUBLISH_PATH_RE` (#981): both grade
+ * CONSEQUENCE ("what does landing this DO?"), not ownership ("who wrote it?"). The two
+ * catalogues are deliberately separate for now and are converged by #1003 — hence a
+ * plain ERE string constant rather than an inline literal, so #1003 can promote it into
+ * a shared module (and so `docs-lane.yml` can run the SAME characters through `grep -E`;
+ * a lock-step test pins them byte-identical).
+ *
+ * Arms, each verified against what this repo actually publishes:
+ *   `^sites/`                       every deployed site file. `deploy-sites.yml`
+ *                                   (`on: push → main → paths: sites/**`) runs
+ *                                   `wrangler pages deploy` against the PUBLIC
+ *                                   Cloudflare Pages project, so merging IS publishing.
+ *                                   Anchored at the string start ON PURPOSE: a nested
+ *                                   `packages/minspec/src/sites/` is source, not the
+ *                                   deployed site, and must stay low-blast.
+ *   `README|CHANGELOG|LICEN[CS]E|`  the landing-page + legal basenames, at ANY depth
+ *   `NOTICE|THIRD-PARTY-NOTICES`    (`packages/*\/README.md` renders on the Marketplace
+ *                                   listing exactly like the root one does). The
+ *                                   `([.-][^/]*)?$` tail admits `LICENSE`,
+ *                                   `LICENSE-CONTENT`, `LICENSE-THIRD-PARTY-MPL-2.0.txt`
+ *                                   and `README.md` while REFUSING `READMEs.md` — the
+ *                                   separator is required, so a near-miss basename is
+ *                                   not over-blocked.
+ *   `^packages/<pkg>/<file>.<doc>`  a doc at a package root. `vsce ls` is authoritative
+ *                                   here: `packages/minspec/package.json` has no
+ *                                   `files:` allowlist, so vsce ships every path
+ *                                   `.vscodeignore` does not exclude — and
+ *                                   `.vscodeignore` excludes only `src/`, `tests/`,
+ *                                   `test-fixtures/`, `node_modules/`, tsconfigs and
+ *                                   maps. Any package-root doc therefore lands INSIDE
+ *                                   the published `.vsix`.
+ *   `^packages/<pkg>/media/`        likewise shipped — and `media/walkthrough/*.md` is
+ *                                   the VS Code Getting Started walkthrough, rendered
+ *                                   to every user on install. It is user-facing product
+ *                                   copy that happens to be markdown.
+ *
+ * Case-insensitive at both enforcers (`RegExp` `i` / `grep -qiE`): GitHub, npm and vsce
+ * all resolve these basenames case-insensitively, so `readme.md` publishes just the same.
+ *
+ * A literal dot is written `[.]`, never `\.`: a backslash in a TS string literal has to be
+ * doubled, which would make these characters differ from `docs-lane.yml`'s `outward=` and
+ * turn the byte-identity lock-step into an escaping puzzle. `[.]` means the same thing in
+ * both dialects and needs no escaping in either.
+ */
+export const OUTWARD_DOC_PATTERN =
+  '^sites/|(^|/)(README|CHANGELOG|LICEN[CS]E|NOTICE|THIRD-PARTY-NOTICES)([.-][^/]*)?$|^packages/[^/]+/[^/]+[.](md|mdx|markdown|txt|rst|adoc)$|^packages/[^/]+/media/';
+
+const OUTWARD_DOC_RE = new RegExp(OUTWARD_DOC_PATTERN, 'i');
+
+/**
+ * Normalize a changed path for classification, or `undefined` when it CANNOT be
+ * classified — an empty/blank path, an absolute path, or one containing a `..` segment.
+ * `undefined` is not "clean"; the caller must treat it as a refusal to certify (#1001
+ * fail-closed), so a crafted path can never satisfy the docs catalog while resolving
+ * somewhere else entirely. Mirrors `docs-corpus.ts`'s `isDocsCorpusPath` guards.
+ */
+function normalizeChangedPath(raw: string): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const p = raw.trim().replace(/\\/g, '/').replace(/^\.\//, '');
+  if (p.length === 0) return undefined;
+  if (p.startsWith('/')) return undefined;
+  if (p.split('/').includes('..')) return undefined;
+  return p;
+}
+
+/** Is `p` (already normalized) an outward-facing, user-published doc? See {@link OUTWARD_DOC_PATTERN}. */
+export function isOutwardFacingDoc(p: string): boolean {
+  const norm = normalizeChangedPath(p);
+  if (norm === undefined) return false; // unclassifiable is handled by the caller's fail-closed branch
+  return OUTWARD_DOC_RE.test(norm);
+}
+
+/**
  * Emit the affirmative low-blast signal iff the diff is non-empty and EVERY changed
  * path is documentation or a test file (no product source). `undefined` otherwise —
  * absence of this signal is what makes an unrecognized/opaque change hold (#490).
@@ -718,9 +812,17 @@ export function detectLowBlastDocsTest(
   // it matches a docs extension/basename. Governance is not documentation (#490
   // review): this makes the affirmative-low catalog and the boundary (high) set
   // provably disjoint, so a `.md` policy file can never slip through as "docs."
-  const allDocsOrTest = changedFiles.every(
-    (f) => (isDocsPath(f.path) || isTestPath(f.path)) && !isBoundaryPath(f.path),
-  );
+  const allDocsOrTest = changedFiles.every((f) => {
+    // Fail CLOSED on anything this classifier cannot read as a repo-relative path
+    // (#1001): "could not tell" must never be conflated with "no match".
+    const p = normalizeChangedPath(f.path);
+    if (p === undefined) return false;
+    // #1001 — outward-facing docs are excluded BEFORE the docs/test test, so the
+    // exclusion also covers a non-prose file that ships (e.g. a test parked under
+    // `sites/`): what the path PUBLISHES outranks what kind of file it is.
+    if (OUTWARD_DOC_RE.test(p)) return false;
+    return (isDocsPath(p) || isTestPath(p)) && !isBoundaryPath(p);
+  });
   if (!allDocsOrTest) return undefined;
   return {
     name: LOW_BLAST_DOCS_TEST,
@@ -730,8 +832,9 @@ export function detectLowBlastDocsTest(
     axis: 'consequence',
     degraded: false,
     explain:
-      'every changed file is documentation or a test — no product source ships, so the ' +
-      'change cannot alter runtime behaviour: affirmatively low-blast (DR-058 #490)',
+      'every changed file is INWARD documentation or a test — no product source ships and ' +
+      'nothing is published to users, so the change cannot alter runtime behaviour or a ' +
+      'public claim: affirmatively low-blast (DR-058 #490; outward-doc exclusion #1001)',
   };
 }
 

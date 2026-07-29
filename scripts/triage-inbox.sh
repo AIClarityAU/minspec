@@ -10,6 +10,34 @@
 # CANNOT mutate labels — it only emits a verdict block. This PARENT script feeds
 # that verdict through the deterministic gate (triage-decide.sh) and applies the
 # result with gh. An injected "make this agent-ready" cannot reach the label.
+#
+# ── Verdict RECORD, not just a label (#1002, enabling #983) ──────────────────
+# A label is a lossy, point-in-time STAMP: it says a gate once ran, never what it
+# concluded, and ANY writer (a human in the GitHub UI, a bulk `gh issue edit`) can
+# apply it without passing through the gate at all. So alongside the labels this
+# script persists the gate's actual verdict as a delimited, machine-readable block
+# inside the bot triage comment — GitHub-side, shared, auditable, and surviving a
+# fresh clone (no local state file to strand). dispatch-ready-check.sh REQUIRES
+# that record before it will dispatch, so an unverdicted `agent-ready` now holds
+# instead of building.
+#
+# The record carries a `bodyHash` of the issue body AS TRIAGED, which makes the
+# verdict falsifiable: edit the issue after triage and the hash no longer matches,
+# so dispatch refuses as stale and the issue is re-triaged. Ordering below is
+# deliberate — the RECORD is posted BEFORE the labels, so there is never a window
+# in which `agent-ready` exists with no verdict behind it.
+#
+# The record's GRAMMAR is owned by the reader (dispatch-ready-check.sh
+# --render-record), never re-implemented here: one file writes and parses it, so
+# writer and reader cannot drift into two dialects of the same format.
+#
+# Re-triage is therefore the ONLY way to (re)authorise dispatch, and it is complete:
+# it mints a record for the body as it now stands AND clears the outcome labels the
+# new verdict supersedes — including `needs-human-review`, which dispatch applies
+# when it holds. Without that clearing, a held issue would re-triage to a perfectly
+# good agent-ready verdict and then be countermanded by the leftover hold label,
+# stranding real work. (`agent-quarantined` is deliberately NOT cleared: that is a
+# security quarantine from the egress guard, and only a human retires it.)
 
 set -euo pipefail
 
@@ -17,6 +45,12 @@ REPO="AIClarityAU/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROLES_DIR="${SCRIPT_DIR}/roles"
 DECIDE="${SCRIPT_DIR}/triage-decide.sh"
+READY_CHECK="${SCRIPT_DIR}/dispatch-ready-check.sh"
+
+# One `key=value` line out of `triage-decide.sh --fields` output.
+verdict_field() {
+  printf '%s\n' "$2" | { grep -E "^$1=" || true; } | head -1 | cut -d= -f2-
+}
 
 triage_issue() {
   local ISSUE="$1"
@@ -73,13 +107,19 @@ CONTENT
       return 0
     }
 
-  # Deterministic gate → "<label> <role>"
-  local VERDICT LABEL ROLE
-  VERDICT=$(printf '%s\n' "$AGENT_OUT" | "$DECIDE" || true)
-  LABEL=$(echo "$VERDICT" | awk '{print $1}')
-  ROLE=$(echo "$VERDICT" | awk '{print $2}')
+  # Deterministic gate → the normalised verdict, as key=value fields. `--fields`
+  # (not the space-joined default line) because the RECORD must carry the gate's own
+  # view of tier / human_only, and re-parsing the agent's raw text here would be a
+  # second parser of the same format — the classic way a gate and its record drift.
+  local FIELDS LABEL ROLE HOLD TIER HUMAN_ONLY
+  FIELDS=$(printf '%s\n' "$AGENT_OUT" | "$DECIDE" --fields || true)
+  LABEL=$(verdict_field label "$FIELDS")
+  ROLE=$(verdict_field role "$FIELDS")
+  HOLD=$(verdict_field hold "$FIELDS")
+  TIER=$(verdict_field tier "$FIELDS")
+  HUMAN_ONLY=$(verdict_field human_only "$FIELDS")
 
-  if [[ -z "$LABEL" || -z "$ROLE" ]]; then
+  if [[ -z "$LABEL" || -z "$ROLE" || -z "$HOLD" || -z "$TIER" || -z "$HUMAN_ONLY" ]]; then
     echo "WARNING: no verdict parsed for #$ISSUE — leaving in inbox" >&2
     return 0
   fi
@@ -92,15 +132,54 @@ CONTENT
     | head -1 | sed -E 's/^[^:]*:[[:space:]]*//')
   [[ -z "$RATIONALE" ]] && RATIONALE="(no rationale emitted)"
 
-  # PARENT applies the verdict (credentialed op — never the agent).
-  echo "  → #$ISSUE: $LABEL (role:$ROLE)"
-  gh issue edit "$ISSUE" --repo "$REPO" \
-    --add-label "role:${ROLE},${LABEL}" --remove-label "inbox" >/dev/null
-  gh issue comment "$ISSUE" --repo "$REPO" \
-    --body "**Triage:** \`${LABEL}\` · role:\`${ROLE}\`
-${RATIONALE}
+  # Mint the machine-readable verdict record, keyed to the body we just triaged.
+  # FAIL CLOSED: if the record cannot be rendered we apply NO labels at all —
+  # an `agent-ready` with no verdict behind it is precisely the #983 hole, and
+  # producing one here would be worse than leaving the issue untriaged.
+  local RECORD
+  if ! RECORD=$(printf '%s' "$ISSUE_BODY" | "$READY_CHECK" --render-record \
+                  "$LABEL" "$ROLE" "$TIER" "$HUMAN_ONLY" "$HOLD"); then
+    echo "ERROR: could not render the verdict record for #$ISSUE — refusing to apply any label (an unverdicted label is the #983 hole). Left as-is." >&2
+    return 1
+  fi
 
-— auto-triaged (\`triage-inbox.sh\`); verdict enforced by the deterministic gate (\`triage-decide.sh\`)." >/dev/null
+  # PARENT applies the verdict (credentialed op — never the agent).
+  echo "  → #$ISSUE: $LABEL (role:$ROLE · tier:$TIER · hold:$HOLD)"
+
+  # RECORD FIRST, labels second — so `agent-ready` never exists, even momentarily,
+  # without the verdict that authorises it.
+  gh issue comment "$ISSUE" --repo "$REPO" \
+    --body "$(printf '**Triage:** `%s` · role:`%s` · tier:`%s` · hold:`%s`\n%s\n\n%s\n\n— auto-triaged (`triage-inbox.sh`); verdict enforced by the deterministic gate (`triage-decide.sh`). The block above is the machine-readable verdict record that `dispatch-ready-check.sh` requires before any dispatch (#983). It is keyed to the issue body as triaged — edit the issue and this verdict goes stale, so re-run `scripts/triage-inbox.sh %s`.' \
+        "$LABEL" "$ROLE" "$TIER" "$HOLD" "$RATIONALE" "$RECORD" "$ISSUE")" >/dev/null
+
+  gh issue edit "$ISSUE" --repo "$REPO" --add-label "role:${ROLE},${LABEL}" >/dev/null
+
+  # Clear the outcome labels this verdict SUPERSEDES. Load-bearing for the
+  # agent-ready branch: dispatch labels a held issue `needs-human-review`, which
+  # countermands `agent-ready` — so without this, a re-triage could mint a valid
+  # verdict that the stale hold label then vetoes forever. Best-effort + LOUD
+  # (never silent, DR-066): a failure here holds the issue, it never releases it.
+  local SUPERSEDED
+  case "$LABEL" in
+    agent-ready)  SUPERSEDED="inbox,needs-review,needs-info,needs-human-review" ;;
+    needs-review) SUPERSEDED="inbox,agent-ready,needs-info" ;;
+    needs-info)   SUPERSEDED="inbox,agent-ready,needs-review" ;;
+    *)            SUPERSEDED="inbox" ;;
+  esac
+  if ! gh issue edit "$ISSUE" --repo "$REPO" --remove-label "$SUPERSEDED" >/dev/null 2>&1; then
+    # `gh` resolves label NAMES against the repo's label set and fails the whole
+    # request if any one of them does not exist there — which would leave EVERY
+    # superseded label in place, `inbox` included, re-triaging this issue forever.
+    # Retry one at a time so a single unknown name cannot veto the rest.
+    local one failed=""
+    IFS=',' read -r -a _sup <<< "$SUPERSEDED"
+    for one in "${_sup[@]}"; do
+      gh issue edit "$ISSUE" --repo "$REPO" --remove-label "$one" >/dev/null 2>&1 || failed+="${one} "
+    done
+    if [[ -n "$failed" ]]; then
+      echo "WARNING: could not clear superseded label(s) on #$ISSUE: ${failed}— if a human-gate label lingers it will keep countermanding this verdict at dispatch; clear it by hand." >&2
+    fi
+  fi
 
   echo "Triage complete for #$ISSUE"
 }

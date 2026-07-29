@@ -109,7 +109,7 @@ MinSpec tracks three artifact kinds that all describe the same underlying work b
 
 ## [DR-014 — Shared-code boundary — tier→package map, single-writer disk artifacts, version lockstep](DR-014.md)
 
-*Status: proposed · Date: 2026-05-31*
+*Status: accepted · Date: 2026-05-31*
 
 <!-- dr-summary:DR-014 auto=61216ded635c -->
 MinSpec (aiclarity.minspec) and ScroogeLLM (aiclarity.scroogellm) are two independent VS Code extensions in one monorepo. They can be installed **together** — either separately, or via the MinSpec Pro pack (aiclarity.minspec-pro), which is byte-identical at runtime to installing both (the pack only references them). So "both installed" is the case that must be safe; the pack is not a safeguard.
@@ -509,7 +509,7 @@ The independent AI reviewer (DR-033 §6) records a PR verdict as ai-review:{pass
 
 ## [DR-064 — Machine-enforce the layer-import contract — eslint no-restricted-imports + an in-repo (dependency-free) cycle gate; ban type edges too; ship error-rules only after the tree is made clean; vscode-purity ships at warn](DR-064.md)
 
-*Status: proposed · Date: 2026-07-17*
+*Status: accepted · Date: 2026-07-17*
 
 <!-- dr-summary:DR-064 auto=0000000000000000 -->
 MinSpec's layered architecture (lib never imports views/commands, @aiclarity/shared barrel-only, no runtime cycles) is held by convention alone and has already leaked — 2 lib→views inversions, 3 one-edit-away cycles, 7 vscode-coupled lib files, listSpecs living in a UI file. SPEC-040 (#690) flagged the eslint-encoded layering contract as a costly-to-reverse architectural artifact with no DR. This records the decision to machine-enforce it: eslint no-restricted-imports for direction/depth + an in-repo dependency-free cycle checker adapting next-task.ts detectCycles (resolves OQ-1); ban type edges too (OQ-2); @typescript-eslint/no-restricted-imports + parserOptions.project (OQ-3); ship error-rules green only after the FR-4/FR-5 refactors; vscode-purity at warn until #830. Gates-not-conventions (#137/DR-003), enforced offline (INV-1/DR-054), same thesis as SPEC-038/#460.
@@ -549,7 +549,7 @@ Specs interleave a product-owner audience (what/why) with an engineering audienc
 
 ## [DR-069 — Add a 'planning' lifecycle status — approved-but-pre-implementation is not 'implementing' (fixes the #886 false signpost)](DR-069.md)
 
-*Status: proposed · Date: 2026-07-24*
+*Status: accepted · Date: 2026-07-24*
 
 <!-- dr-summary:DR-069 auto=29722db03da9 -->
 deriveStatus — the authoritative, approval-aware SIGNPOST derivation (DR-034) — returns implementing for **any approved spec that is not all-done**: Approval sets the first build-band phase (plan) to in-progress (phasesForApproval), so a spec approved while still at **Plan/Tasks — implement phase pending, zero code** derives to implementing. That is a **DR-003 false signpost** — the project's stated worst defect: the signpost claims code is being written when none exists. The deterministic literal-vs-derived validator cannot catch it (literal == derived); only the…
@@ -565,7 +565,7 @@ This DR touches **only the pre-dispatch gate.** Relaxing it does not remove huma
 
 ## [DR-071 — Standing consent — a named setting is valid consent for a fixed, same-origin, repeating network action, where a per-action prompt would defeat the feature it gates](DR-071.md)
 
-*Status: proposed · Date: 2026-07-27*
+*Status: accepted · Date: 2026-07-27*
 
 <!-- dr-summary:DR-071 auto=083ef1f2af49 -->
 Constitution invariant #1: *core functionality works offline — no network calls without explicit user consent.* **DR-050** implements it, and its rule #2 is explicit: DR-050 was minted for gh/CLI shelling, where the action's *target* varies per invocation — an arbitrary URL, an arbitrary API call, an arbitrary repo. Per-action consent is exactly right there: the user cannot pre-approve a target they have not seen.
