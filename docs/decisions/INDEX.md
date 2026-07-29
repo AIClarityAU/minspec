@@ -109,7 +109,7 @@ MinSpec tracks three artifact kinds that all describe the same underlying work b
 
 ## [DR-014 — Shared-code boundary — tier→package map, single-writer disk artifacts, version lockstep](DR-014.md)
 
-*Status: proposed · Date: 2026-05-31*
+*Status: accepted · Date: 2026-05-31*
 
 <!-- dr-summary:DR-014 auto=61216ded635c -->
 MinSpec (aiclarity.minspec) and ScroogeLLM (aiclarity.scroogellm) are two independent VS Code extensions in one monorepo. They can be installed **together** — either separately, or via the MinSpec Pro pack (aiclarity.minspec-pro), which is byte-identical at runtime to installing both (the pack only references them). So "both installed" is the case that must be safe; the pack is not a safeguard.
