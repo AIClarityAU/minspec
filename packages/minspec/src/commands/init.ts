@@ -64,6 +64,10 @@ export const REFRESH_COMMIT_MESSAGE = 'chore: refresh MinSpec harness files';
 
 /** Toast action label that triggers the dedicated scaffold/refresh commit. */
 const COMMIT_ACTION = 'Commit them';
+/** Offered instead of {@link COMMIT_ACTION} when HEAD is the default branch. */
+const BRANCH_COMMIT_ACTION = 'Commit on a new branch';
+/** Escape hatch for a project whose default branch accepts direct commits. */
+const COMMIT_ANYWAY_ACTION = 'Commit here anyway';
 
 /**
  * Paths MinSpec init/refresh is responsible for writing. These are pathspecs
@@ -105,6 +109,19 @@ const SCAFFOLD_PATHSPECS: readonly string[] = [
   // directory, so an unrelated file a user placed alongside them (e.g. a
   // hand-written .claude/commands/my-own-command.md) is never swept in.
   ...MANAGED_REGION_TEMPLATES.map((tpl) => tpl.outputPath),
+  // The refresh manifests, which DESCRIBE the files listed above and are
+  // rewritten by the same refresh that rewrites them. Omitting them made every
+  // refresh commit partial by construction: the harness landed in one commit
+  // and its own manifests stayed dirty, so the user hand-committed the leftover
+  // afterwards every single time. Derived output that is coupled to a commit
+  // belongs IN that commit — a half-committed manifest set describes a tree
+  // that no longer exists.
+  //
+  // Whether these are tracked varies by project (MinSpecPro gitignores
+  // template-baseline.json; sealbox commits it), so staging filters ignored
+  // paths — listing one here never forces an ignored file into a commit.
+  '.minspec/generated-hashes.json',
+  '.minspec/template-baseline.json',
 ];
 
 /**
@@ -161,10 +178,30 @@ export async function collectDirtyScaffoldPaths(
 export interface ScaffoldCommitter {
   /** Whether `folder` is inside a git working tree. */
   isRepo(): Promise<boolean>;
-  /** Stage exactly the given pathspecs. */
+  /**
+   * Stage the given pathspecs, skipping any git ignores. Callers pass the
+   * managed set verbatim; whether a given manifest is tracked differs per
+   * project, and one ignored path must never fail the whole commit.
+   */
   add(paths: readonly string[]): Promise<void>;
   /** Create a single commit with `message` (staged content only). */
   commit(message: string): Promise<void>;
+  /**
+   * The branch this commit would land on, and the repo's default branch — or
+   * `null` when either cannot be determined (detached HEAD, no origin/HEAD).
+   *
+   * Committing onto a push-protected default branch produces a commit that can
+   * never be pushed, and the failure does not surface until `git push`, by
+   * which point the work is already in branch history. The offer needs to know
+   * the destination BEFORE it writes, not after.
+   *
+   * Optional so an existing stub committer stays valid: a committer that does
+   * not implement it is treated as "destination unknown", which preserves the
+   * previous behaviour exactly rather than blocking on missing information.
+   */
+  branchInfo?(): Promise<{ current: string; default: string } | null>;
+  /** Create and switch to `name`, so the commit lands somewhere pushable. */
+  createBranch?(name: string): Promise<void>;
   /**
    * Of `paths`, which currently show uncommitted changes (staged, unstaged, or
    * untracked) per `git status`. Used to decide whether the recoverable commit
@@ -187,10 +224,41 @@ async function defaultCommitter(folder: string): Promise<ScaffoldCommitter> {
       }
     },
     async add(paths) {
-      await git.add([...paths]);
+      // Drop ignored paths before staging. `git add` errors on an explicitly
+      // named ignored pathspec, which would fail the entire commit over a file
+      // the project deliberately does not track.
+      let stageable = [...paths];
+      try {
+        const ignored = new Set(await git.checkIgnore([...paths]));
+        if (ignored.size > 0) stageable = stageable.filter((p) => !ignored.has(p));
+      } catch {
+        // checkIgnore is an optimisation, not a gate — if it cannot run, fall
+        // through and let git decide.
+      }
+      if (stageable.length === 0) return;
+      await git.add(stageable);
     },
     async commit(message) {
       await git.commit(message);
+    },
+    async branchInfo() {
+      try {
+        const current = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim();
+        if (!current || current === 'HEAD') return null; // detached — no branch to strand
+        // origin/HEAD is a LOCAL ref written by clone / remote set-head, so this
+        // stays offline and never contacts the forge (Tier-0).
+        const ref = (await git.revparse(['--abbrev-ref', 'origin/HEAD'])).trim();
+        const def = ref.replace(/^origin\//, '');
+        if (!def || def === 'origin') return null;
+        return { current, default: def };
+      } catch {
+        // Unknown destination fails OPEN: the offer behaves exactly as it did
+        // before rather than blocking a repo we cannot reason about.
+        return null;
+      }
+    },
+    async createBranch(name) {
+      await git.checkout(['-b', name]);
     },
     async dirty(paths) {
       if (paths.length === 0) return [];
@@ -259,18 +327,78 @@ export async function offerScaffoldCommit(
   const committedNoun = refresh ? 'the refreshed harness files' : 'the scaffolded SDD structure';
 
   const summary = paths.join(', ');
-  const choice = await vscode.window.showInformationMessage(
-    `MinSpec ${verb}: ${summary}. Commit them now in a dedicated commit?`,
-    COMMIT_ACTION,
-  );
-  if (choice !== COMMIT_ACTION) return; // decline / dismiss → no-op
 
+  // Where would this commit land? A default branch is normally push-protected,
+  // so committing there produces a commit that can never be pushed — and the
+  // user does not find out until `git push`, by which time the work is in
+  // branch history and needs branch surgery to recover. Offer a branch instead
+  // of quietly writing somewhere unpushable.
+  const branch = await safeBranchInfo(committer);
+  const onDefaultBranch = branch !== null && branch.current === branch.default;
+
+  if (onDefaultBranch) {
+    const choice = await vscode.window.showWarningMessage(
+      `MinSpec ${verb}: ${summary}. You are on '${branch.current}', this project's default branch — ` +
+        'a commit there usually cannot be pushed. Commit on a new branch instead?',
+      BRANCH_COMMIT_ACTION,
+      COMMIT_ANYWAY_ACTION,
+    );
+    if (choice === BRANCH_COMMIT_ACTION) {
+      const name = harnessBranchName(refresh);
+      try {
+        if (!committer.createBranch) throw new Error('committer cannot create branches');
+        await committer.createBranch(name);
+      } catch (err) {
+        vscode.window.showWarningMessage(
+          `MinSpec: could not create branch '${name}' — ${describeError(err)}. ` +
+            `Nothing was committed; the ${verb} files are still in your working tree.`,
+        );
+        return;
+      }
+      await commitOrWarn(committer, paths, commitMessage, `${committedNoun} on '${name}'`);
+      return;
+    }
+    if (choice !== COMMIT_ANYWAY_ACTION) return; // decline / dismiss → no-op
+    // Fall through: the user explicitly chose to commit here anyway, which is
+    // correct for a project whose default branch is not protected.
+  } else {
+    const choice = await vscode.window.showInformationMessage(
+      `MinSpec ${verb}: ${summary}. Commit them now in a dedicated commit?`,
+      COMMIT_ACTION,
+    );
+    if (choice !== COMMIT_ACTION) return; // decline / dismiss → no-op
+  }
+
+  await commitOrWarn(committer, paths, commitMessage, committedNoun);
+}
+
+/** `branchInfo()` is advisory — a committer that cannot answer must not break the offer. */
+async function safeBranchInfo(
+  committer: ScaffoldCommitter,
+): Promise<{ current: string; default: string } | null> {
+  try {
+    return (await committer.branchInfo?.()) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+/** Branch name for harness output moved off the default branch. */
+export function harnessBranchName(refresh: boolean): string {
+  return refresh ? 'chore/minspec-harness-refresh' : 'chore/minspec-scaffold';
+}
+
+/** Stage + commit, reporting either outcome. Never throws. */
+async function commitOrWarn(
+  committer: ScaffoldCommitter,
+  paths: readonly string[],
+  message: string,
+  committedNoun: string,
+): Promise<void> {
   try {
     await committer.add(paths);
-    await committer.commit(commitMessage);
-    vscode.window.showInformationMessage(
-      `MinSpec: committed ${committedNoun} ("${commitMessage}").`,
-    );
+    await committer.commit(message);
+    vscode.window.showInformationMessage(`MinSpec: committed ${committedNoun} ("${message}").`);
   } catch (err) {
     vscode.window.showWarningMessage(
       `MinSpec: could not commit the scaffolded files — ${describeError(err)}. ` +
