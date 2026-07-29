@@ -29,6 +29,14 @@
 #   hold  ∈ {none, human, tier, info, unknown} — WHY this is not auto-buildable (#1002)
 # exit 0 always when a block is found; exit 2 (still prints a fail-closed line) if not.
 #
+# `--fields` prints the SAME decision as key=value lines instead of one space-joined
+# line, adding the two NORMALISED inputs the verdict record must carry for audit:
+#   label=… role=… hold=… tier=<T1|T2|T3|T4|unknown> human_only=<yes|no>
+# Same code path, same exit codes — only the projection differs. It exists so the
+# record written by triage-inbox.sh carries THIS gate's normalised view of tier /
+# human_only rather than a second, hand-rolled re-parse of the agent's raw text
+# (two parsers of one format is how a gate and its record start disagreeing).
+#
 # The third token exists because the label alone is a lossy, point-in-time STAMP of
 # a verdict: it records *that* a gate ran, never *what it concluded*. Downstream
 # (dispatch) needs the machine-readable reason to refuse a held item without
@@ -44,11 +52,33 @@
 
 set -eu
 
+MODE="line"
+if [[ "${1:-}" == "--fields" ]]; then
+  MODE="fields"
+fi
+
+# The two normalised inputs the decision is derived FROM, carried alongside the
+# outcome so a verdict record can state them. Initialised to the fail-closed values
+# so every early exit below still emits a complete, honest set.
+TIER_OUT="unknown"
+HUMAN_OUT="no"
+
+# emit <label> <role> <hold> — the single place either projection is written, so the
+# two output shapes can never describe different decisions.
+emit() {
+  if [[ "$MODE" == "fields" ]]; then
+    printf 'label=%s\nrole=%s\nhold=%s\ntier=%s\nhuman_only=%s\n' \
+      "$1" "$2" "$3" "$TIER_OUT" "$HUMAN_OUT"
+  else
+    printf '%s %s %s\n' "$1" "$2" "$3"
+  fi
+}
+
 INPUT="$(cat)"
 
 BLOCK="$(printf '%s\n' "$INPUT" | sed -n '/TRIAGE_VERDICT_BEGIN/,/TRIAGE_VERDICT_END/p')"
 if [[ -z "$BLOCK" ]]; then
-  echo "needs-review reviewer unknown"   # fail closed: no parseable verdict → human gate
+  emit needs-review reviewer unknown   # fail closed: no parseable verdict → human gate
   exit 2
 fi
 
@@ -79,9 +109,18 @@ esac
 # missing size), while the hold says what the gate concluded — and a garbled
 # field means it concluded nothing. Two axes, deliberately not conflated.
 case "$TIER" in
-  t1|t2|t3|t4) ;;
-  *) echo "needs-info $ROLE unknown"; exit 0 ;;
+  t1|t2|t3|t4) TIER_OUT="$(printf '%s' "$TIER" | tr '[:lower:]' '[:upper:]')" ;;
+  *) emit needs-info "$ROLE" unknown; exit 0 ;;
 esac
+
+# Normalised human_only, carried into the record. Note the asymmetry is deliberate:
+# only an explicit yes/true asserts human-only, and everything else (including a
+# missing field) reads as `no` — because the AFFIRMATIVE path is gated by `hold`,
+# which fails closed on its own. A missing human_only can therefore never turn a
+# held verdict into a buildable one.
+if [[ "$HUMAN" == "yes" || "$HUMAN" == "true" ]]; then
+  HUMAN_OUT="yes"
+fi
 
 # Deterministic gate — order matters, every fall-through lands on a human gate:
 # 1. human-only (any tier)            → needs-review  (hold: human)
@@ -89,16 +128,16 @@ esac
 # 3. T3/T4 (complex/architectural)    → needs-review  (hold: tier)
 # 4. T1/T2 AND agent-ready            → agent-ready   (hold: none — the ONLY auto path)
 # 5. anything else                    → needs-review  (hold: unknown — fail closed)
-if [[ "$HUMAN" == "yes" || "$HUMAN" == "true" ]]; then
-  echo "needs-review $ROLE human"; exit 0
+if [[ "$HUMAN_OUT" == "yes" ]]; then
+  emit needs-review "$ROLE" human; exit 0
 fi
 if [[ "$DECISION" == "needs-info" ]]; then
-  echo "needs-info $ROLE info"; exit 0
+  emit needs-info "$ROLE" info; exit 0
 fi
 if [[ "$TIER" == "t3" || "$TIER" == "t4" ]]; then
-  echo "needs-review $ROLE tier"; exit 0
+  emit needs-review "$ROLE" tier; exit 0
 fi
 if [[ "$TIER" == "t1" || "$TIER" == "t2" ]] && [[ "$DECISION" == "agent-ready" ]]; then
-  echo "agent-ready $ROLE none"; exit 0
+  emit agent-ready "$ROLE" none; exit 0
 fi
-echo "needs-review $ROLE unknown"; exit 0
+emit needs-review "$ROLE" unknown; exit 0

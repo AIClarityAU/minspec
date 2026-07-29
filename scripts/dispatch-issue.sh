@@ -183,30 +183,102 @@ if [[ "${MINSPEC_FRESHNESS_CHECKED:-}" != "1" ]]; then
 fi
 
 echo "Fetching issue #$ISSUE..."
-# Fetch `state` alongside labels: this view IS the point-in-time re-validation for
-# the #406 staleness re-check below (see it, right after the field extraction).
-ISSUE_JSON=$(gh issue view "$ISSUE" --repo "$REPO" --json body,title,labels,state)
+# Fetch `state` + `comments` alongside labels: this view IS the point-in-time
+# re-validation for the #406 staleness re-check AND the #983 verdict-record check
+# below. The verdict record lives in the triage comment (GitHub-side: shared,
+# auditable, and surviving a fresh clone — no local state file to strand), so the
+# comments are gate INPUT, not decoration.
+ISSUE_JSON=$(gh issue view "$ISSUE" --repo "$REPO" --json body,title,labels,state,comments)
 ISSUE_BODY=$(echo "$ISSUE_JSON" | jq -r '"# " + .title + "\n\n" + .body')
 ISSUE_TITLE=$(echo "$ISSUE_JSON" | jq -r '.title')
 ISSUE_LABELS=$(echo "$ISSUE_JSON" | jq -r '.labels[].name')
 ISSUE_STATE=$(echo "$ISSUE_JSON" | jq -r '.state')
 ISSUE_LABELS_CSV=$(echo "$ISSUE_JSON" | jq -r '[.labels[].name] | join(",")')
 
-# ── #406: re-validate readiness at dispatch time (not just at triage) ─────────
-# ROOT CAUSE: `agent-ready` is written ONCE at triage and never re-checked. Between
-# the drain enumerating the agent-ready set and THIS dispatcher launching (the drain
-# runs issues sequentially, so a slow earlier build defers later ones), the issue
-# may have been closed, re-triaged to needs-review, or quarantined — yet the stale
-# stamp would still make us build it. The gh view above re-fetched the issue's
-# CURRENT state; feed it to the pure, tested gate and ABORT CLEANLY (exit 0 — not an
-# error) unless it is still OPEN and still carries agent-ready. The gate aborts ONLY
-# on clear staleness signals (not-open, agent-ready gone, or a human-gate label), so
-# it never false-aborts valid work. SCOPE: this closes the label/open-state cases
-# only; full dependency-graph freshness (a linked SPEC's phase / a linked DR still
+# ── #406 + #983: re-validate readiness at dispatch time (not just at triage) ──
+# ROOT CAUSE (#406): `agent-ready` is written ONCE at triage and never re-checked.
+# Between the drain enumerating the agent-ready set and THIS dispatcher launching
+# (the drain runs issues sequentially, so a slow earlier build defers later ones),
+# the issue may have been closed, re-triaged to needs-review, or quarantined — yet
+# the stale stamp would still make us build it.
+#
+# ROOT CAUSE (#983): that re-check still only asked whether a COUNTERMANDING signal
+# was present — never whether an AFFIRMING verdict existed and still held. So any
+# writer of the label (a human in the GitHub UI, a bulk `gh issue edit`, a script)
+# inherited the triage gate's authority without passing through it; five hand-flipped
+# issues dispatched and burned tokens, one of them human-only-type. The gate now
+# REQUIRES the verdict record triage minted, keyed to a hash of the body as triaged.
+#
+# The gh view above re-fetched the issue's CURRENT state, labels and comments; feed
+# them to the pure, tested gate and ABORT CLEANLY (exit 0 — a deferral, not an error)
+# unless it is open, still labelled, and backed by a fresh affirming verdict. The
+# gate aborts only on clear signals, so it never false-aborts valid work — and every
+# refusal is a HOLD (nothing is deleted, `agent-ready` is never stripped here).
+# SCOPE: this closes the label/open-state staleness cases and the unverdicted-label
+# hole; full dependency-graph freshness (a linked SPEC's phase / a linked DR still
 # `accepted`) is the architect-flagged follow-up and is OUT OF SCOPE here.
-if ! READY_REASON=$("${SCRIPT_DIR}/dispatch-ready-check.sh" "$ISSUE_STATE" "$ISSUE_LABELS_CSV"); then
-  echo "Skipping #$ISSUE — no longer dispatchable at dispatch time: ${READY_REASON}"
-  echo "  (was agent-ready when the drain enumerated it; re-validated stale here — #406)"
+VERDICT_HOLD_MARKER="<!-- minspec-verdict-hold -->"
+
+# Make a verdict-class refusal VISIBLE (DR-066: a gate that fails closed in silence
+# is still a silent gate). Label it for a human and explain once — the comment is
+# marker-guarded so a continuous drain re-hitting the same hold can never spam it.
+# `agent-ready` is deliberately LEFT IN PLACE: the human decides whether to retire
+# the request or re-triage it; the dispatcher does not quietly rewrite their intent.
+surface_verdict_hold() {
+  local reason="$1" post="$2"
+  gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
+    --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
+  gh issue edit "$ISSUE" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+  if [[ "$post" == "1" ]]; then
+    gh issue comment "$ISSUE" --repo "$REPO" --body "$(printf '## ⏸ Held — no fresh triage verdict backs `agent-ready`\n\n`%s`\n\n`agent-ready` is a point-in-time STAMP of a verdict, not the verdict itself, so dispatch now requires the machine-readable verdict record that `scripts/triage-inbox.sh` writes into its triage comment (#983). This issue does not currently have a valid one, so the build was **held** — nothing was deleted and `agent-ready` was left alone.\n\n**To release it:** re-triage —\n```\nscripts/triage-inbox.sh %s\n```\nthat re-runs the deterministic gate over the issue as it stands now, writes a fresh verdict record, and clears this hold. If the gate concludes the issue is human-only or T3/T4, it will say so instead — which is the point.\n\n%s' \
+      "$reason" "$ISSUE" "$VERDICT_HOLD_MARKER")" 2>/dev/null || true
+  fi
+}
+
+if ! VERDICT_SRC=$(mktemp 2>/dev/null) || ! BODY_FILE=$(mktemp 2>/dev/null); then
+  # FAIL CLOSED: with no scratch file the verdict record cannot be checked at all,
+  # and "could not tell" must never be read as "ready" (#983).
+  rm -f "${VERDICT_SRC:-}" 2>/dev/null || true
+  echo "Skipping #$ISSUE — could not create the scratch files the verdict-record check needs (mktemp failed); failing closed rather than dispatching unverified (#983)."
+  exit 0
+fi
+# Every comment body, oldest→newest (the gate takes the LAST record, so a re-triage
+# always supersedes an older verdict).
+echo "$ISSUE_JSON" | jq -r '[.comments[]?.body // ""] | join("\n")' > "$VERDICT_SRC" 2>/dev/null || true
+# The body EXACTLY as triage composed it, so the two sides hash identical bytes.
+printf '%s' "$ISSUE_BODY" > "$BODY_FILE"
+
+HOLD_ALREADY_SURFACED=0
+if grep -qF -- "$VERDICT_HOLD_MARKER" "$VERDICT_SRC" 2>/dev/null; then
+  HOLD_ALREADY_SURFACED=1
+fi
+
+READY_REASON=""
+READY_OK=1
+READY_REASON=$("${SCRIPT_DIR}/dispatch-ready-check.sh" \
+  "$ISSUE_STATE" "$ISSUE_LABELS_CSV" "$VERDICT_SRC" "$BODY_FILE") || READY_OK=0
+rm -f "$VERDICT_SRC" "$BODY_FILE"
+
+if [[ "$READY_OK" -ne 1 ]]; then
+  echo "Skipping #$ISSUE — not dispatchable at dispatch time: ${READY_REASON}"
+  case "$READY_REASON" in
+    *'[closed]'*|*'[no-label]'*|*'[countermanded]'*)
+      # #406 staleness classes: self-evident from the issue's own state/labels, so
+      # a quiet skip is honest — no new label, no comment.
+      echo "  (was agent-ready when the drain enumerated it; re-validated stale here — #406)"
+      ;;
+    *)
+      # #983 verdict classes (and anything unrecognised — fail toward VISIBLE):
+      # the reason is NOT evident from the issue, so surface it.
+      if [[ "$HOLD_ALREADY_SURFACED" -eq 1 ]]; then
+        surface_verdict_hold "$READY_REASON" 0
+        echo "  (hold already explained on the issue — label re-applied, no duplicate comment)"
+      else
+        surface_verdict_hold "$READY_REASON" 1
+        echo "  (held for a human and explained on the issue — #983)"
+      fi
+      ;;
+  esac
   exit 0
 fi
 
