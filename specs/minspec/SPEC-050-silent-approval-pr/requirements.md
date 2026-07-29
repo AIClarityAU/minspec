@@ -11,7 +11,8 @@ tier: T2
 product: minspec
 epic: EPIC-009  # Team Readiness — docs-lane push ergonomics; grain (b) of #575/#781, the sibling of SPEC-039's grain (a)
 aspects: [approval, docs-lane, pull-request, auto-merge, consent, tier-1, hitl, g8-git-transparency]
-relates_to: [SPEC-039, DR-051, DR-060, DR-061, DR-012]
+depends_on: [DR-071]  # FR-8 ONLY — DR-071 is status:proposed; see FR-8's gate. FR-1..7 do not depend on it.
+relates_to: [SPEC-039, DR-050, DR-051, DR-060, DR-061, DR-012]
 implements: [packages/minspec/src/lib/approval-pr.ts, packages/minspec/src/commands/commit-on-approve.ts, packages/minspec/tests/approval-pr.test.ts]
 affects: [packages/minspec/package.json, packages/minspec/src/commands/push-docs-lane.ts]
 # ownership (SPEC-038). implements: approval-pr.ts + its test are net-new and owned here;
@@ -23,7 +24,7 @@ affects: [packages/minspec/package.json, packages/minspec/src/commands/push-docs
 # never modified), and push-docs-lane's tests, which AC-10 requires to pass unchanged.
 phases:
   specify: done
-  clarify: pending
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -35,7 +36,7 @@ phases:
 
 ## One-Sentence Scope
 
-When an approval commit has been pushed to a side branch because the current branch is protected, **finish the job**: open the `docs-lane` PR automatically (which the existing workflow turns into an auto-merge), instead of handing the developer a compare URL and a browser form — governed by a new per-developer setting whose default is automatic and whose `manual` value preserves today's behaviour exactly.
+When an approval commit has been pushed to a side branch because the current branch is protected, **finish the job**: open the `docs-lane` PR automatically (which the existing workflow turns into an auto-merge), instead of handing the developer a compare URL and a browser form — governed by a new per-developer setting whose default is automatic and whose `manual` value preserves today's behaviour exactly; and, **conditionally on [DR-071](../../../docs/decisions/DR-071.md) being accepted**, offer the developer a one-time "always push from now on" choice (FR-8) so the whole approval becomes zero-click. FR-8 touches the *whether-to-push* axis and is the spec's only dependency on an unratified rule; FR-1–FR-7 concern only the *what-to-do-once-pushed* axis and stand on their own.
 
 ## Context
 
@@ -71,10 +72,11 @@ Grounded in the current code, with `file:line` evidence.
 - **FR-5 (graceful degrade to today's behaviour).** `gh` absent, unauthenticated, offline, or `gh pr create` failing → fall back to **exactly** the FR-1 `manual` surface (notification + `Open PR` + compare URL) with a short reason appended. Never a thrown exception, never a silent nothing. *Rationale: SPEC-039 INV-4; the branch is already pushed, so the approval is safe either way and the developer must be told the PR was not opened.*
 - **FR-6 (idempotent).** If an open PR already exists for the branch, adopt it (report its URL) rather than creating a second one. *Rationale: a re-approval that reuses a branch must not fan out duplicate PRs.*
 - **FR-7 (`pushed` outcome untouched).** When the push went straight to a non-protected branch (`outcome: 'pushed'`), no PR is created — there is nothing to open. *Rationale: the PR exists only because a protected branch refuses a direct push.*
+- **FR-8 (one-time standing-consent offer — GATED on [DR-071](../../../docs/decisions/DR-071.md) acceptance; the contributed default is NOT changed).** **Blocking dependency:** DR-071 is `status: proposed`, and says so of itself — *"acceptance is a separate human act (MinSpec: Accept ADR) … nothing in this DR turns standing consent on for anyone."* **FR-8 must not be implemented until DR-071 is accepted.** If DR-071 is rejected or materially amended, FR-8 is dropped and the spec falls back to its original OQ-1 position — keep `prompt`, no standing-consent offer, one click per approval — with FR-1–FR-7 unaffected and still deliverable. The first time an approval reaches the `prompt` branch, the notification additionally offers **"Always push from now on"** alongside `Push` / `Not now`. Choosing it writes `minspec.pushOnApprove: 'always'` to the **user's own (Global) settings** — never the workspace file — and pushes. Every later approval is then silent end-to-end. The offer is shown **once**, remembered through the [#883] `answeredSignatures` model, and never re-nags. `package.json`'s contributed default **stays `prompt`**. *Rationale: this delivers zero-click approvals while satisfying [DR-071](../../../docs/decisions/DR-071.md) condition 1 verbatim — standing consent is "only ever reached by a user deliberately changing a setting", and clicking a named offer that writes that setting IS that deliberate act. It also honours DR-071's corollary that `always` is a personal decision belonging in personal settings, not a shared repo. Unlike the "prompt once per session" alternative DR-071 rejected, this boundary is visible ("from now on"), permanent, and auditable afterwards as a setting the user can read. **And the single prompt is a feature tour, not a tax:** it is the one moment the developer learns MinSpec will push, open and merge the approval PR for them. Defaulting the automation on silently would save one click but hide the capability — the user never discovers what the tool is doing on their behalf — while prompting every time trains the rubber-stamping the constitution forbids. One informed yes, then silence.*
 
 ## Invariants
 
-- **INV-1 (no new network boundary).** This spec adds **no** network action that `minspec.pushOnApprove` had not already authorized: it runs only after a **successful push** on the same approval act. With `pushOnApprove: never` — or when the user declines the `prompt` — **nothing here ever runs**. Constitution [invariant #1](../../../.minspec/constitution.md#L5) is preserved unchanged, not reinterpreted.
+- **INV-1 (no new network boundary; DR-071's five conditions all hold).** This spec adds **no** network action that `minspec.pushOnApprove` had not already authorized: PR creation runs only after a **successful push** on the same approval act. With `pushOnApprove: never` — or a declined `prompt` — **nothing here ever runs**. [DR-071](../../../docs/decisions/DR-071.md) requires any feature invoking standing consent to state which of its five conditions it satisfies; for FR-8: **(1)** the contributed default stays `prompt` and `always` is reached only by the user clicking a named offer; **(2)** the offer names the action ("Always push from now on") at the point of choosing; **(3)** same-origin — the repository's own configured remote, never a diff- or user-supplied destination; **(4)** fixed shape, user-initiated — the direct consequence of pressing `Alt+A`, never ambient, never on a timer, startup or file-watch; **(5)** failure is surfaced, never swallowed (FR-5, INV-5). **Honest statement of what changed:** for FR-1–FR-7 invariant #1 is preserved *self-standingly* — they add no network action at all. For **FR-8 only**, the justification is **DR-dependent**: it holds if and only if DR-071 is accepted, and DR-071 is currently `proposed`. That is a materially weaker footing than FR-1–FR-7's and is stated here rather than presented as equivalent.
 - **INV-2 (never a non-docs PR).** MinSpec labels `docs-lane` only for a branch whose changed paths are entirely within the lane allowlist; the workflow independently re-verifies and refuses loudly otherwise ([docs-lane.yml:52-54](../../../.github/workflows/docs-lane.yml#L52)). Two independent checks, and code physically cannot ride the lane.
 - **INV-3 (never moves the primary checkout).** No `checkout`, `switch`, `merge`, `rebase` or `reset` on the developer's working tree; the approval commit and its branch already exist. (Worktree rule [DR-046](../../../docs/decisions/DR-046.md) / rule #8.)
 - **INV-4 (never mints or edits an approval record).** This spec transports a record that **MinSpec: Approve Spec** already wrote. It never writes `status`, never writes a sidecar, never sets `approvedBy` ([DR-012](../../../docs/decisions/DR-012.md), and the forged-sign-off class of [#1025](https://github.com/AIClarityAU/minspec/issues/1025)).
@@ -87,16 +89,79 @@ Grounded in the current code, with `file:line` evidence.
 
 ## Out of scope (tracked elsewhere)
 
-- **Changing `pushOnApprove`'s default** from `prompt` to `always` — a genuine consent-model change, deliberately excluded here (see OQ-1).
+- **Changing `pushOnApprove`'s contributed default** from `prompt` to `always` — deliberately NOT done (DR-071 condition 1). FR-8 reaches the same zero-click outcome by letting the user set it themselves, once.
 - **Enabling auto-merge from the extension** — the lane workflow does it on the label; MinSpec calling `gh pr merge --auto` would duplicate a gate and bypass its docs-only re-verification.
 - **The AI panel's false forgery verdict** on approval PRs — [#1025](https://github.com/AIClarityAU/minspec/issues/1025), fix in flight at [#1026](https://github.com/AIClarityAU/minspec/pull/1026). Independent of this spec, but note that until it lands each auto-opened PR still draws a false blocking review, so this spec removes only one of the two frictions.
 - **Approval PRs for non-docs artifacts** — nothing outside the lane allowlist may be auto-labelled (INV-2).
 
 ## Open Questions
 
-- **OQ-1 (should `pushOnApprove`'s default become `always`?).** With `prompt` (today's default), the developer still clicks once per approval — so "silent by default" holds only *after* that click. Flipping the default to `always` would make the whole flow silent, but it makes a **network call the default with no per-action consent**, which is a constitution invariant #1 question, not a UX preference. *Proposed:* **keep `prompt` as the default in this spec**; the click that authorizes the push is a reasonable single consent point, and this spec removes every step after it. Revisit as its own change with its own DR if the founder wants full silence. Resolve in Clarify.
-- **OQ-2 (PR body content).** Should the body embed the approval record (hash, approver, tier) for reviewer provenance — which would help [#1026](https://github.com/AIClarityAU/minspec/pull/1026)'s panel — or stay minimal? *Proposed:* include hash, tier, approver and the commit SHA, since the panel demonstrably cannot derive provenance from a diff. Resolve in Clarify.
-- **OQ-3 (`manual` vs reusing `pushOnApprove`).** Should this be its own setting, or a fourth `pushOnApprove` value? *Proposed:* **its own setting** — the two axes are independent (whether to push; what to do once pushed), and overloading one enum makes `never`/`prompt`/`always`/`auto` incoherent. Resolve in Clarify.
+*All three resolved in Clarify (below) on 2026-07-28. Retained for the record; each bullet's
+trailing marker now points at its resolution rather than deferring it.*
+
+- **OQ-1 (should `pushOnApprove`'s default become `always`?).** With `prompt`, the developer still clicks once per approval, so "silent by default" holds only *after* that click. Flipping the contributed default would make the whole flow silent but makes a network call the default with no per-action consent. Resolved in Clarify (below).
+- **OQ-2 (PR body content).** Should the body embed the approval record (hash, approver, tier) for reviewer provenance, or stay minimal? Resolved in Clarify (below).
+- **OQ-3 (`manual` vs reusing `pushOnApprove`).** Own setting, or a fourth `pushOnApprove` value? Resolved in Clarify (below).
+
+## Clarify
+
+Resolved **2026-07-28**. OQ-1 was put to the founder as a three-way choice and answered
+directly; OQ-2 and OQ-3 land on their proposed engineering defaults. Nothing here is a
+human sign-off — the hash-lock ratification is the separate **MinSpec: Approve Spec** act.
+
+- **OQ-1 → zero-click approvals, delivered WITHOUT changing the contributed default (new FR-8).**
+  The founder chose *"flip to `always`, but confirm once"*: one consent moment ever, silence
+  thereafter. Implementing that as a literal default flip would violate
+  **[DR-071](../../../docs/decisions/DR-071.md) condition 1** — *"the shipped default must be
+  the prompting mode; standing consent is only ever reached by a user deliberately changing a
+  setting"* — and would need that DR amended and re-accepted before any code could land.
+
+  It does not need to be literal. DR-071 permits standing consent **reached by the user's own
+  deliberate act**, so FR-8 offers *"Always push from now on"* inside the existing prompt and,
+  on click, writes `minspec.pushOnApprove: 'always'` into the user's **Global** settings. The
+  observable behaviour is exactly what was chosen — one confirmation, then zero clicks forever
+  — while `package.json` keeps shipping `prompt`, DR-071 stands unamended, and its corollary
+  (*"`always` belongs in a user's own settings"*, not a shared `.vscode/settings.json`) is
+  honoured by construction. INV-1 records which of DR-071's five conditions each part satisfies,
+  as that DR requires of any feature citing it.
+
+  This is also the **revisit DR-071 explicitly invited**: its follow-ups deferred
+  open-the-PR-automatically with *"revisit if the click proves to be a real friction point."*
+  It did — the founder's 2026-07-28 report is that evidence.
+
+  **The dependency is unratified, and that is recorded rather than glossed.** DR-071 is
+  `status: proposed`; its own opening blockquote reads *"acceptance is a separate human act …
+  nothing in this DR turns standing consent on for anyone."* An earlier revision of this Clarify
+  spoke of DR-071 as binding ("stands unamended", "the rule DR-071 already establishes") — that
+  was wrong, and three reviewers were right to block it. FR-8 is therefore **gated**: it may not
+  be implemented until DR-071 is accepted, and if DR-071 is rejected or amended, OQ-1 falls back
+  to its original proposal (keep `prompt`; one click per approval). FR-1–FR-7 carry no such
+  dependency.
+
+  **Why a prompt at all, rather than shipping it on.** The founder's stated reason for
+  preferring one-time consent over a silent default is discoverability: the single prompt is
+  where the developer *realises what MinSpec is doing for them*. A capability that switches
+  itself on silently is a capability the user never learns they have — and cannot make an
+  informed choice to keep. This principle is absent from the constitution today (its nearest
+  neighbours are *"Just enough human"* and *"Avoid nagging"*, neither of which states it);
+  proposing it as a principle is tracked at **[#1056](https://github.com/AIClarityAU/minspec/issues/1056)**
+  (with the exact wording), so this spec does not smuggle a constitution change through a Clarify.
+
+- **OQ-2 → include the provenance facts.** The PR body carries the approved artifact, its
+  tier, the approver email, the `specHash`, and the approval commit SHA. Two reasons: the
+  review panel demonstrably cannot derive provenance from a diff
+  ([#1025](https://github.com/AIClarityAU/minspec/issues/1025) — it called two legitimate
+  human approvals forged, [#996](https://github.com/AIClarityAU/minspec/pull/996) and
+  [#1035](https://github.com/AIClarityAU/minspec/pull/1035)), and a human skimming the merge
+  queue can confirm *who signed what* without opening the diff. This is presentation of an
+  existing record only — **never** a substitute for the sidecar, and it does not make the body
+  authoritative (INV-4 still forbids writing any approval state here).
+
+- **OQ-3 → its own setting (`minspec.approvalPr`), as proposed.** The two axes are independent:
+  *whether to push* (`pushOnApprove`) and *what to do once pushed* (`approvalPr`). Folding them
+  into one enum would produce an incoherent `never | prompt | always | auto` in which `auto`
+  answers a different question from its siblings, and would make FR-8's one-time offer
+  unexpressible.
 
 ## Acceptance Criteria
 
