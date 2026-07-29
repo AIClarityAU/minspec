@@ -2,7 +2,7 @@
 id: SPEC-034
 type: requirements
 # 🔒 Once approved, hash-locked: approved bytes recorded in .minspec/approvals.json[SPEC-034].specHash. ANY edit voids approval (hash → stale) — re-run "MinSpec: Approve Spec". DR-012.
-status: implementing
+status: planning
 tier: T4
 product: minspec
 epic: EPIC-009  # Team Readiness
