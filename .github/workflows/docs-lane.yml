@@ -39,19 +39,44 @@ jobs:
           set -euo pipefail
           # Allowed corpus: specs, docs, skills markdown (.md ONLY), approval records, top-level markdown.
           allowed='^(specs/|docs/|skills/.*\.md$|\.minspec/approvals/|[^/]+\.md$)'
+          # OUTWARD-FACING DENYLIST (#1001), applied ON TOP of the corpus above.
+          # "Is it a doc?" is only a proxy for "is it low-consequence?" while the prose stays
+          # INSIDE the repo. It inverts for prose that FACES THE USER: README/CHANGELOG render
+          # on the Marketplace + GitHub landing pages, LICENSE/NOTICE are legal instruments,
+          # packages/*/media/walkthrough/*.md is the Getting Started copy shipped in the .vsix,
+          # and sites/** deploys to minspec.dev on merge. Those state PUBLIC PRODUCT CLAIMS —
+          # higher consequence than most code, and the maintainer's human-only class — so they
+          # must not auto-merge, even though the corpus regex above happily admits a top-level
+          # README.md. Kept BYTE-IDENTICAL to OUTWARD_DOC_PATTERN in scripts/auto-merge-gate.ts
+          # so the merge gate and this lane cannot disagree; the pairing is pinned by
+          # packages/minspec/tests/outward-docs-exclusion.test.ts. `allowed=` above is itself
+          # lock-step-pinned to docs-corpus.ts/.sh, which is why this is a SEPARATE denylist
+          # rather than an edit to the shared corpus.
+          outward='^sites/|(^|/)(README|CHANGELOG|LICEN[CS]E|NOTICE|THIRD-PARTY-NOTICES)([.-][^/]*)?$|^packages/[^/]+/[^/]+[.](md|mdx|markdown|txt|rst|adoc)$|^packages/[^/]+/media/'
           mapfile -t files < <(gh api --paginate "repos/$REPO/pulls/$PR/files" -q '.[].filename')
           if [ "${#files[@]}" -eq 0 ]; then
             echo "::error::docs-lane: PR #$PR has no files"
             exit 1
           fi
           bad=()
+          outward_bad=()
           for f in "${files[@]}"; do
             [[ "$f" =~ $allowed ]] || bad+=("$f")
+            # -i: GitHub/npm/vsce resolve these basenames case-insensitively, so `readme.md`
+            # publishes just the same. Guarded by `if` so `set -e` does not trip on grep's
+            # no-match exit 1.
+            if grep -qiE "$outward" <<<"$f"; then outward_bad+=("$f"); fi
           done
           if [ "${#bad[@]}" -gt 0 ]; then
             printf '::error::docs-lane label but non-docs path(s): %s\n' "${bad[*]}"
             gh pr comment "$PR" --repo "$REPO" --body \
               "🚫 **docs-lane misuse** — this PR carries \`docs-lane\` but touches non-docs path(s): \`${bad[*]}\`. Auto-merge NOT enabled. Remove the label and get a human review, or split the change." || true
+            exit 1
+          fi
+          if [ "${#outward_bad[@]}" -gt 0 ]; then
+            printf '::error::docs-lane: outward-facing (published) doc(s): %s\n' "${outward_bad[*]}"
+            gh pr comment "$PR" --repo "$REPO" --body \
+              "🚫 **docs-lane: outward-facing docs** — this PR changes doc(s) that are **published to users**: \`${outward_bad[*]}\`. README/CHANGELOG render on the Marketplace and GitHub landing pages, LICENSE/NOTICE are legal instruments, \`media/walkthrough/\` ships inside the \`.vsix\`, and \`sites/**\` deploys to minspec.dev on merge — so a wrong word here is published and cannot be un-said by a revert. Auto-merge NOT enabled (#1001); this needs a human merge keystroke. Split the inward docs into their own PR if you want them on the lane." || true
             exit 1
           fi
           echo "docs-only ✓ (${#files[@]} file(s)) — enabling auto-merge"
