@@ -304,17 +304,57 @@ describe('#1064 — destination guard on the default branch', () => {
     expect(res.outcome).toBe('committed');
   });
 
-  it('fails OPEN when the default branch cannot be determined (no origin/HEAD)', async () => {
+  it('fires via the hook FALLBACK when origin/HEAD is absent but a remote exists', async () => {
+    // The case the first revision of this fix got wrong. The #1041 hook falls back
+    // to main|master|trunk when origin/HEAD is missing, and its own comment says
+    // that is the COMMON path ("absent in both repos this guard was written for").
+    // A guard that failed open here would be inert exactly where the hook fires.
     initRepo(tmp);
     fs.writeFileSync(path.join(tmp, 'seed.md'), 'seed\n');
     git(['add', '.'], tmp);
     git(['commit', '-m', 'seed'], tmp);
-    // deliberately NO origin/HEAD
+    git(['remote', 'add', 'origin', 'https://example.invalid/repo.git'], tmp);
+    // deliberately NO origin/HEAD ref
+
+    const doc = path.join(tmp, 'decision.md');
+    fs.writeFileSync(doc, 'status: accepted\n');
+    const before = git(['rev-parse', 'HEAD'], tmp).trim();
+
+    const res = await commitApproval(tmp, [doc], 'chore(accept): DR-071');
+
+    expect(res.outcome).toBe('protected-branch');
+    expect(res.branch).toEqual({ current: 'main', default: 'main' });
+    expect(git(['rev-parse', 'HEAD'], tmp).trim()).toBe(before);
+    expect(git(['diff', '--cached', '--name-only'], tmp).trim()).toBe('');
+  });
+
+  it('fails OPEN with no remote at all (nothing to push to, so nothing protected)', async () => {
+    initRepo(tmp);
+    fs.writeFileSync(path.join(tmp, 'seed.md'), 'seed\n');
+    git(['add', '.'], tmp);
+    git(['commit', '-m', 'seed'], tmp);
+    // no origin/HEAD AND no remote — mirrors the hook, which does not guard here
 
     const doc = path.join(tmp, 'decision.md');
     fs.writeFileSync(doc, 'status: accepted\n');
 
     const res = await commitApproval(tmp, [doc], 'chore(accept): DR-071');
     expect(res.outcome).toBe('committed');
+  });
+
+  it('never moves the checkout: HEAD is on the same branch after a refusal', async () => {
+    initRepo(tmp);
+    fs.writeFileSync(path.join(tmp, 'seed.md'), 'seed\n');
+    git(['add', '.'], tmp);
+    git(['commit', '-m', 'seed'], tmp);
+    setDefaultBranch(tmp, 'main');
+
+    const doc = path.join(tmp, 'decision.md');
+    fs.writeFileSync(doc, 'status: accepted\n');
+    await commitApproval(tmp, [doc], 'chore(accept): DR-071');
+
+    // rule #8 / DR-051 §4a — the shared checkout's HEAD is never moved.
+    expect(git(['rev-parse', '--abbrev-ref', 'HEAD'], tmp).trim()).toBe('main');
+    expect(git(['branch', '--list'], tmp).trim()).toBe('* main');
   });
 });

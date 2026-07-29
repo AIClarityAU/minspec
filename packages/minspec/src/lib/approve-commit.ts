@@ -51,6 +51,9 @@ const execFileAsync = promisify(execFile);
 /** Max time (ms) any single git invocation may run — bounds a hung pre-commit hook. */
 const GIT_TIMEOUT_MS = 30_000;
 
+/** Fallback default-branch names, in the #1041 hook's order. Keep in sync with it. */
+const CONVENTIONAL_DEFAULT_BRANCHES = ['main', 'master', 'trunk'] as const;
+
 /** Outcome of a commit-on-approve attempt. Never an exception — always one of these. */
 export type CommitApprovalOutcome =
   | 'committed' //         the paths were committed
@@ -202,72 +205,63 @@ export async function commitApproval(
 }
 
 /**
- * Commit the approval paths on a NEW branch, then return HEAD to where it was.
+ * Current + default branch names, or `null` when the destination cannot be
+ * determined (fail open).
  *
- * The recovery for `protected-branch` (#1064). Creating the branch and coming
- * straight back means the user ends where they started, with the approval
- * committed on a branch that CAN be pushed — instead of a dirty tree on a
- * branch that can never accept the commit.
+ * MIRRORS the #1041 pre-commit hook's contract deliberately — a narrower rule
+ * here would make this guard INERT exactly where the hook fires, which is the
+ * defect the first revision of this fix shipped. The hook (generated in
+ * `template-registry.ts`) resolves the default branch as:
+ *   1. `origin/HEAD` when present — a LOCAL ref, so the check stays offline; then
+ *   2. when absent AND a `remote.origin.url` exists, the first of
+ *      `main master trunk` that resolves as a local branch. The hook's own
+ *      comment records that origin/HEAD is "absent in both repos this guard was
+ *      written for", i.e. the fallback is the COMMON path, not the edge case.
+ * With no remote at all there is nothing to push to, so no branch can be
+ * push-protected — the hook does not guard, and neither do we.
  *
- * Restores HEAD in a `finally`, so a failed commit cannot leave the checkout
- * parked on a stray branch (project memory: never strand a shared checkout on
- * an unexpected branch). Never rejects — every failure is a typed result.
- */
-export async function commitApprovalOnNewBranch(
-  rootDir: string,
-  branchName: string,
-  absPaths: readonly string[],
-  message: string,
-  run: GitRun = defaultGitRun(rootDir),
-): Promise<CommitApprovalResult & { readonly createdBranch?: string }> {
-  let switched = false;
-  try {
-    await run(['switch', '-c', branchName]);
-    switched = true;
-  } catch (err) {
-    // Never fall back to committing on the protected branch — that recreates
-    // the very bug this guards (the #1054 rule: branch creation fails => commit
-    // NOTHING).
-    return { outcome: 'failed', error: describeError(err) };
-  }
-  try {
-    const res = await commitApproval(rootDir, absPaths, message, run);
-    return res.outcome === 'committed' ? { ...res, createdBranch: branchName } : res;
-  } finally {
-    if (switched) {
-      try {
-        await run(['switch', '-']);
-      } catch {
-        // HEAD could not be restored — the commit (if any) is still safe on the
-        // new branch. Left for the caller's advisory; never throw from here.
-      }
-    }
-  }
-}
-
-/**
- * Current + default branch names, or `null` when either cannot be determined.
- *
- * OFFLINE (Tier-0): `origin/HEAD` is a LOCAL ref written by `git clone` / `git
- * remote set-head` — reading it never touches the network. It is absent more
- * often than it looks (worktrees added from a bare mirror, repos whose origin
- * was added by hand), which is exactly why an unresolvable destination must
- * FAIL OPEN rather than block an approval.
+ * Any change here must be mirrored in the hook (and vice versa); they are two
+ * halves of one rule, like the existing template-registry drift test.
  */
 export async function resolveBranchDestination(
   run: GitRun,
 ): Promise<{ current: string; default: string } | null> {
+  let current: string;
   try {
-    const current = (await run(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
-    if (!current || current === 'HEAD') return null; // detached — handled upstream
-    const ref = (await run(['rev-parse', '--abbrev-ref', 'origin/HEAD'])).trim();
-    // "origin/main" -> "main"; anything else is unusable.
-    const def = ref.startsWith('origin/') ? ref.slice('origin/'.length) : '';
-    if (!def) return null;
-    return { current, default: def };
+    current = (await run(['rev-parse', '--abbrev-ref', 'HEAD'])).trim();
   } catch {
-    return null; // no origin/HEAD, git absent, timeout — fail open
+    return null;
   }
+  if (!current || current === 'HEAD') return null; // detached — handled upstream
+
+  // (1) origin/HEAD, the authoritative answer when it exists.
+  try {
+    const ref = (await run(['rev-parse', '--abbrev-ref', 'origin/HEAD'])).trim();
+    if (ref.startsWith('origin/')) {
+      const def = ref.slice('origin/'.length);
+      if (def) return { current, default: def };
+    }
+  } catch {
+    // fall through to the hook's fallback
+  }
+
+  // (2) No origin/HEAD. Only meaningful when a remote exists — with no remote
+  //     nothing is push-protected (the hook's own reasoning).
+  try {
+    const url = (await run(['config', '--get', 'remote.origin.url'])).trim();
+    if (!url) return null;
+  } catch {
+    return null; // no remote configured — fail open, exactly like the hook
+  }
+  for (const candidate of CONVENTIONAL_DEFAULT_BRANCHES) {
+    try {
+      await run(['rev-parse', '--verify', '--quiet', `refs/heads/${candidate}`]);
+      return { current, default: candidate };
+    } catch {
+      // not this one
+    }
+  }
+  return null; // unknown destination — fail open
 }
 
 /**

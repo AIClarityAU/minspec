@@ -1,12 +1,6 @@
 import * as vscode from 'vscode';
-import * as path from 'path';
-import {
-  commitApproval,
-  commitApprovalOnNewBranch,
-  isUntrackedAtHead,
-  type CommitApprovalResult,
-} from '../lib/approve-commit';
-import { approvalBranchName, pushApproval, type PushApprovalResult } from '../lib/approve-push';
+import { commitApproval, isUntrackedAtHead, type CommitApprovalResult } from '../lib/approve-commit';
+import { pushApproval, type PushApprovalResult } from '../lib/approve-push';
 
 /**
  * Bridge between the approve/accept commands and the Tier-0 {@link commitApproval}
@@ -35,8 +29,7 @@ export function commitOnApproveEnabled(): boolean {
  */
 /** Offer labels — worded to match #1054's harness-commit offer, so the two
  *  destination guards read as one behaviour rather than two dialects. */
-const BRANCH_COMMIT_ACTION = 'Commit on a new branch';
-const LEAVE_IN_TREE_ACTION = 'Leave in working tree';
+const SHOW_FILES_ACTION = 'Show me the files';
 
 export async function commitApprovalIfEnabled(
   rootDir: string,
@@ -55,40 +48,31 @@ export async function commitApprovalIfEnabled(
       return { suffix: ` · committed${pushSuffix}`, result };
     }
     case 'protected-branch': {
-      // #1064: the default branch is push-protected, so a commit there could
-      // never be pushed and #1041's hook refuses it. Nothing was staged. Offer
-      // the one-click recovery instead of failing silently — the whole defect
-      // was that the maintainer believed the approval had landed when it had not.
+      // #1064: the default branch is push-protected, so a commit there could never
+      // be pushed and #1041's hook refuses it. NOTHING was staged. The defect this
+      // closes is the SILENCE — the maintainer saw the doc read `accepted` and
+      // reasonably believed it had landed. So say plainly what happened, what
+      // state the files are in, and what to do; never a bare console.warn.
+      //
+      // Deliberately NO auto-recovery here. Committing onto a side branch requires
+      // either moving the shared checkout's HEAD (forbidden — rule #8 / DR-051 §4a,
+      // whose sole sanctioned exception, DR-065, needed its own DR) or a temporary
+      // worktree (the push-docs-lane pattern). Routing an approval to a docs-lane
+      // PR is precisely SPEC-050's scope, which is specified and unblocked — so the
+      // one-click recovery lands there, built once, rather than as a second
+      // half-correct copy here.
       const current = result.branch?.current ?? 'the default branch';
-      const choice = await vscode.window.showWarningMessage(
-        `Approval written, but '${current}' is the default branch — a commit there cannot be pushed. Commit it on a new branch instead?`,
-        BRANCH_COMMIT_ACTION,
-        LEAVE_IN_TREE_ACTION,
-      );
-      if (choice !== BRANCH_COMMIT_ACTION) {
-        return {
-          suffix: ` · NOT committed (on ${current} — files left in your working tree)`,
-          result,
-        };
-      }
-      const slug = (absPaths[0] ?? message).replace(/\.[a-z]+$/i, '');
-      const branched = await commitApprovalOnNewBranch(
-        rootDir,
-        approvalBranchName(path.basename(slug), new Date()),
-        absPaths,
-        message,
-      );
-      if (branched.outcome !== 'committed') {
-        console.warn(`MinSpec: branch-commit failed — ${branched.error ?? 'git error'}`);
-        return {
-          suffix: ` · NOT committed (branch attempt failed — files left in your working tree)`,
-          result: branched,
-        };
-      }
-      const { suffix: pushSuffix } = await pushApprovalIfEnabled(rootDir, slug);
+      void vscode.window.showWarningMessage(
+        `Approval written but NOT committed: '${current}' is the default branch, ` +
+          `so a commit there could not be pushed. Your files are saved in the working ` +
+          `tree — commit them on a branch to keep them.`,
+        SHOW_FILES_ACTION,
+      ).then((choice) => {
+        if (choice === SHOW_FILES_ACTION) void vscode.commands.executeCommand('workbench.view.scm');
+      });
       return {
-        suffix: ` · committed on ${branched.createdBranch}${pushSuffix}`,
-        result: branched,
+        suffix: ` · NOT committed (on ${current} — files left in your working tree)`,
+        result,
       };
     }
     case 'detached-head':
