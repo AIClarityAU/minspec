@@ -60,7 +60,9 @@ interface Repo {
  * set-head`, so reading them costs no network call (Tier-0 invariant). Passing
  * null leaves origin/HEAD unset, modelling a repo with no remote.
  */
-function makeRepo(opts: { defaultBranch?: string | null; initialBranch?: string } = {}): Repo {
+function makeRepo(
+  opts: { defaultBranch?: string | null; initialBranch?: string; remote?: boolean } = {},
+): Repo {
   const initialBranch = opts.initialBranch ?? 'main';
   const defaultBranch = opts.defaultBranch === undefined ? initialBranch : opts.defaultBranch;
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-branch-guard-')));
@@ -69,6 +71,12 @@ function makeRepo(opts: { defaultBranch?: string | null; initialBranch?: string 
   git(dir, ['config', 'user.email', 'test@example.com']);
   git(dir, ['config', 'user.name', 'Test']);
   git(dir, ['config', 'commit.gpgsign', 'false']);
+  // A remote URL WITHOUT origin/HEAD is the real-world shape that made the
+  // guard inert: both repos it was written for look exactly like this. Opting
+  // out models a purely local repo, where no branch can be push-protected.
+  if (opts.remote !== false) {
+    git(dir, ['config', 'remote.origin.url', 'https://example.invalid/repo.git']);
+  }
 
   // Seed history without the hook installed, so setup can never be blocked by it.
   fs.writeFileSync(path.join(dir, 'seed.txt'), 'seed\n');
@@ -193,10 +201,70 @@ describe('pre-commit protected-branch guard — stays out of the way otherwise',
     });
   });
 
-  it('FAILS OPEN when the default branch is unknown (no remote)', () => {
+  it('FAILS OPEN on an unconventional branch name with no origin/HEAD', () => {
     // Never-wrong rule: a repo the guard cannot reason about must not be bricked.
-    withRepo({ defaultBranch: null }, (repo) => {
+    withRepo({ defaultBranch: null, initialBranch: 'delivery' }, (repo) => {
       expect(repo.commit('no remote here').code).toBe(0);
+    });
+  });
+});
+
+describe('pre-commit protected-branch guard — must not go inert without origin/HEAD', () => {
+  // The regression that shipped: origin/HEAD is NOT populated in every clone —
+  // it was absent in BOTH repos this guard was written for, so the guard hit its
+  // fail-open path and protected nothing. The original fixture always created
+  // the ref, which encoded the assumption instead of testing it. These cases
+  // model the real repos.
+
+  it.each(['main', 'master', 'trunk'])(
+    'still BLOCKS on conventional default branch %s with no origin/HEAD',
+    (branch) => {
+      withRepo({ defaultBranch: null, initialBranch: branch }, (repo) => {
+        const r = repo.commit('would have been stranded');
+        expect(r.code).not.toBe(0);
+        expect(r.stderr).toContain(branch);
+      });
+    },
+  );
+
+  it('leaves the branch tip unmoved in the no-origin/HEAD case', () => {
+    withRepo({ defaultBranch: null }, (repo) => {
+      const before = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo.dir, encoding: 'utf8' }).trim();
+      repo.commit('would have been stranded');
+      const after = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo.dir, encoding: 'utf8' }).trim();
+      expect(after).toBe(before);
+    });
+  });
+
+  it('honours minspec.protectedBranches for a non-conventional default name', () => {
+    withRepo({ defaultBranch: null, initialBranch: 'delivery' }, (repo) => {
+      git(repo.dir, ['config', 'minspec.protectedBranches', 'delivery release']);
+      expect(repo.commit('on a custom protected branch').code).not.toBe(0);
+    });
+  });
+
+  it('a configured list REPLACES the defaults rather than adding to them', () => {
+    // Opting a project into custom names must be able to opt `main` out.
+    withRepo({ defaultBranch: null, initialBranch: 'main' }, (repo) => {
+      git(repo.dir, ['config', 'minspec.protectedBranches', 'delivery']);
+      expect(repo.commit('main is not protected here').code).toBe(0);
+    });
+  });
+
+  it('ALLOWS committing on main in a repo with no remote at all', () => {
+    // Nothing to push to means nothing can be push-protected. Scratch repos,
+    // fixtures and local-only projects must stay completely unaffected —
+    // blocking them would be pure over-reach and get the gate switched off.
+    withRepo({ defaultBranch: null, remote: false }, (repo) => {
+      expect(repo.commit('local-only repo').code).toBe(0);
+    });
+  });
+
+  it('still prefers origin/HEAD when it IS set, over the name list', () => {
+    // A repo whose default branch is `delivery` must be guarded on `delivery`
+    // and left alone on `main`, regardless of conventional naming.
+    withRepo({ initialBranch: 'delivery', defaultBranch: 'delivery' }, (repo) => {
+      expect(repo.commit('on the real default').code).not.toBe(0);
     });
   });
 });

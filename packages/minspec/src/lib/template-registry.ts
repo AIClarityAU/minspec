@@ -669,6 +669,31 @@ minspec_branch_guard() {
   if [ -z "\${guard_current:-}" ]; then return 0; fi
 
   guard_default=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+
+  # origin/HEAD is the precise answer but is NOT always populated — it was absent
+  # in both repos this guard was written for, which made the guard silently inert
+  # exactly where it was needed. \`git remote set-head origin <branch>\` repairs
+  # it, but the gate must not depend on someone having done that.
+  #
+  # Fall back to conventional protected names. Still not a hardcoded "main": only
+  # these names are treated as protected, any other branch is untouched, and the
+  # list is configurable per project via minspec.protectedBranches.
+  #
+  # Gated on an \`origin\` remote existing. A repo with no remote has nothing to
+  # push to, so no branch in it can be push-protected and committing on \`main\` is
+  # entirely correct — scratch repos, fixtures and local-only projects must never
+  # be blocked.
+  if [ -z "\${guard_default:-}" ] && git config --get remote.origin.url >/dev/null 2>&1; then
+    guard_candidates=$(git config --get minspec.protectedBranches 2>/dev/null || true)
+    if [ -z "\${guard_candidates:-}" ]; then guard_candidates="main master trunk"; fi
+    for guard_name in $guard_candidates; do
+      if [ "$guard_current" = "$guard_name" ]; then
+        guard_default="$guard_name"
+        break
+      fi
+    done
+  fi
+
   if [ -z "\${guard_default:-}" ]; then return 0; fi
 
   if [ "$guard_current" != "$guard_default" ]; then return 0; fi
