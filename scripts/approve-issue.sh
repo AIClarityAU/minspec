@@ -21,7 +21,7 @@
 # after approving and the approval goes stale on its own. An override that skipped
 # the record would simply be #983 by another name.
 #
-# ── What it will and will not release (DR-070 §5.1 — policy, not a local choice) ─
+# ── What it will and will not release (DR-072 §3 — policy, not a local choice) ─
 #   hold: tier    ✅ "too big to auto-build". Human review is the designed remedy.
 #   hold: human   ❌ human_only is a CONTENT class (marketing / positioning / copy /
 #                    legal / decide). It says who may AUTHOR the work, not who may
@@ -199,24 +199,30 @@ fi
 # RECORD FIRST, labels second — so `agent-ready` never exists, even momentarily,
 # without the approval that authorises it.
 gh issue comment "$ISSUE" --repo "$REPO" --body "$(printf \
-  '## ✅ Approved for dispatch by a human\n\n**%s** reviewed this issue and lifted the `hold:%s` triage hold.\n\n> %s\n\n%s\n\nThis is a human approval recorded THROUGH the dispatch gate, not a label flipped around it (#1084): the block above is the machine-readable record `dispatch-ready-check.sh` requires, and it is keyed to the issue body as approved — **edit the issue and this approval goes stale**, exactly like a triage verdict. `hold:human`, `hold:info` and `hold:unknown` are never liftable this way (DR-070 §5.1).\n\nThe resulting PR still requires a human merge keystroke.' \
+  '## ✅ Approved for dispatch by a human\n\n**%s** reviewed this issue and lifted the `hold:%s` triage hold.\n\n> %s\n\n%s\n\nThis is a human approval recorded THROUGH the dispatch gate, not a label flipped around it (#1084): the block above is the machine-readable record `dispatch-ready-check.sh` requires, and it is keyed to the issue body as approved — **edit the issue and this approval goes stale**, exactly like a triage verdict. `hold:human`, `hold:info` and `hold:unknown` are never liftable this way (DR-072 §3).\n\nThe resulting PR still requires a human merge keystroke.' \
   "$APPROVER" "$V_HOLD" "$REASON" "$APPROVAL")" >/dev/null
 
 gh issue edit "$ISSUE" --repo "$REPO" --add-label "agent-ready" >/dev/null
 
-# Clear the labels this approval supersedes. Load-bearing: `needs-review` and
-# `needs-human-review` are COUNTERMANDING labels at dispatch, so leaving either in
-# place would let a valid approval be vetoed forever. Best-effort but LOUD, never
-# silent (DR-066) — and a failure here HOLDS the issue, it never releases it.
-# `agent-quarantined` is deliberately not cleared: that is a security quarantine
-# from the egress guard, and only a human retires it explicitly.
+# Clear the labels this approval supersedes. Load-bearing: these are COUNTERMANDING
+# labels at dispatch (dispatch-ready-check.sh's `countermanded` arm), so leaving any
+# of them in place would let a valid approval be vetoed forever. Best-effort but LOUD,
+# never silent (DR-066) — and a failure here HOLDS the issue, it never releases it.
+#
+# The set is kept BYTE-ALIGNED with that arm's list, `needs-info` included. A
+# hold:tier issue should never carry `needs-info` — but "should never" is exactly the
+# assumption #983 was built on: labels and records CAN disagree, and a stale
+# `needs-info` on an issue whose fresh verdict says `tier` would silently veto a valid
+# approval. Aligning the lists costs nothing and removes the divergence.
+# `agent-quarantined` is deliberately NOT cleared: that is a security quarantine from
+# the egress guard, and only a human retires it explicitly.
 if ! gh issue edit "$ISSUE" --repo "$REPO" \
-     --remove-label "needs-review,needs-human-review,inbox" >/dev/null 2>&1; then
+     --remove-label "needs-review,needs-info,needs-human-review,inbox" >/dev/null 2>&1; then
   # `gh` fails the whole request if ANY named label is absent from the repo, which
   # would leave every one of them in place. Retry singly so one unknown name cannot
   # veto the rest.
   failed=""
-  for one in needs-review needs-human-review inbox; do
+  for one in needs-review needs-info needs-human-review inbox; do
     gh issue edit "$ISSUE" --repo "$REPO" --remove-label "$one" >/dev/null 2>&1 || failed+="${one} "
   done
   if [[ -n "$failed" ]]; then

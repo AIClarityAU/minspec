@@ -54,7 +54,7 @@
 #   conjuncts: a non-bot `approvedBy`, and a `supersedes` naming a hold a human is
 #   permitted to lift.
 #
-# WHICH HOLDS A HUMAN MAY LIFT (DR-070 §5.1, verbatim policy — not a new judgment):
+# WHICH HOLDS A HUMAN MAY LIFT (DR-072 §3 — the table that owns this policy; derived from DR-070 §5, whose absolutes it may never widen):
 #   tier    ✅ "too big to auto-build". Human review is EXACTLY the designed remedy.
 #   human   ❌ human_only is a CONTENT class (marketing/positioning/legal/copy/
 #              decide), i.e. who may AUTHOR it — not who may permit it. No keystroke
@@ -138,7 +138,7 @@ RECORD_SCHEMA="minspec-triage-verdict/1"
 # build start. A reader that could not tell them apart would report "the gate passed
 # it" for both.
 RECORD_SCHEMA_HUMAN="minspec-human-approval/1"
-# The one hold a human approval may lift (DR-070 §5.1). A set, not a boolean, so
+# The one hold a human approval may lift (DR-072 §3). A set, not a boolean, so
 # widening it is a visible one-line diff in a tested file — never an emergent
 # consequence of some other change.
 APPROVABLE_HOLDS="tier"
@@ -204,7 +204,7 @@ if [[ "${1:-}" == "--may-approve" ]]; then
   # it is the one classification whose violation a build can never walk back, so it
   # is never inferred from a sibling field a garbled record could disagree with.
   if [[ "$a_human" != "no" ]]; then
-    echo "not-approvable [human-only]: verdict records human_only='${a_human:-<missing>}'. human_only is a CONTENT class (marketing, positioning, copy, legal, decide) — it says who may AUTHOR the work, not who may permit it, so no approval lifts it (DR-070 §5.2). If the classification is WRONG, fix the input: make the issue body unambiguous about its type and re-triage."
+    echo "not-approvable [human-only]: verdict records human_only='${a_human:-<missing>}'. human_only is a CONTENT class (marketing, positioning, copy, legal, decide) — it says who may AUTHOR the work, not who may permit it, so no approval lifts it (DR-072 §3). If the classification is WRONG, fix the input: make the issue body unambiguous about its type and re-triage."
     exit 1
   fi
   case "$a_hold" in
@@ -212,7 +212,7 @@ if [[ "${1:-}" == "--may-approve" ]]; then
       echo "not-approvable [already-ready]: hold is already 'none' — this issue needs no approval; it is dispatchable as it stands."
       exit 1 ;;
     human)
-      echo "not-approvable [hold-human]: hold='human' — see human_only above; absolute (DR-070 §5.1)."
+      echo "not-approvable [hold-human]: hold='human' — see human_only above; absolute (DR-072 §3)."
       exit 1 ;;
     info)
       echo "not-approvable [hold-info]: hold='info' — triage could not size this issue and asked for more information. Approval does not supply it: add what is missing to the issue, then re-triage."
@@ -279,7 +279,7 @@ if [[ "${1:-}" == "--render-approval" ]]; then
     exit 1
   fi
   if ! printf '%s\n' "$APPROVABLE_HOLDS" | tr ' ' '\n' | grep -Fxq -- "$a_sup"; then
-    echo "ERROR: supersedes='${a_sup:-<empty>}' is not a hold a human approval may lift (approvable: ${APPROVABLE_HOLDS}). Refusing to render (DR-070 §5.1)." >&2
+    echo "ERROR: supersedes='${a_sup:-<empty>}' is not a hold a human approval may lift (approvable: ${APPROVABLE_HOLDS}). Refusing to render (DR-072 §3)." >&2
     exit 1
   fi
   if ! a_hash="$(body_hash)"; then
@@ -434,7 +434,7 @@ if [[ "$IS_HUMAN_APPROVAL" -eq 1 ]]; then
   fi
   r_sup="$(printf '%s' "$(record_field supersedes)" | tr '[:upper:]' '[:lower:]')"
   if ! printf '%s\n' "$APPROVABLE_HOLDS" | tr ' ' '\n' | grep -Fxq -- "$r_sup"; then
-    refuse bad-supersedes "human-approval record claims to lift hold '${r_sup:-<missing>}', which no approval may lift (approvable: ${APPROVABLE_HOLDS}) — human_only, info and unknown holds are absolute (DR-070 §5.1)."
+    refuse bad-supersedes "human-approval record claims to lift hold '${r_sup:-<missing>}', which no approval may lift (approvable: ${APPROVABLE_HOLDS}) — human_only, info and unknown holds are absolute (DR-072 §3)."
   fi
 fi
 
