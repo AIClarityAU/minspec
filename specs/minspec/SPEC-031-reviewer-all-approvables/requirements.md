@@ -1,7 +1,7 @@
 ---
 id: SPEC-031
 type: requirements
-status: implementing
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-010  # Reviewer Across All Approvables
