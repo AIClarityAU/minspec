@@ -247,9 +247,31 @@ async function defaultCommitter(folder: string): Promise<ScaffoldCommitter> {
         if (!current || current === 'HEAD') return null; // detached — no branch to strand
         // origin/HEAD is a LOCAL ref written by clone / remote set-head, so this
         // stays offline and never contacts the forge (Tier-0).
-        const ref = (await git.revparse(['--abbrev-ref', 'origin/HEAD'])).trim();
-        const def = ref.replace(/^origin\//, '');
-        if (!def || def === 'origin') return null;
+        let def = '';
+        try {
+          const ref = (await git.revparse(['--abbrev-ref', 'origin/HEAD'])).trim();
+          const parsed = ref.replace(/^origin\//, '');
+          if (parsed && parsed !== 'origin') def = parsed;
+        } catch {
+          // Not populated in every clone — fall through to the name fallback.
+        }
+
+        // origin/HEAD is absent more often than it looks: it was missing in both
+        // repos this guard was built for, which made the equivalent hook-side
+        // check inert. Fall back to conventional names, but only when an origin
+        // remote exists — a repo with nothing to push to cannot have a
+        // push-protected branch, so a local-only project is never flagged.
+        if (!def) {
+          let hasOrigin = false;
+          try {
+            hasOrigin = Boolean((await git.getConfig('remote.origin.url')).value);
+          } catch {
+            hasOrigin = false;
+          }
+          if (!hasOrigin) return null;
+          if (!['main', 'master', 'trunk'].includes(current)) return null;
+          def = current;
+        }
         return { current, default: def };
       } catch {
         // Unknown destination fails OPEN: the offer behaves exactly as it did
