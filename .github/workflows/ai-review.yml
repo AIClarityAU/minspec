@@ -531,15 +531,39 @@ jobs:
               # reduced gate that was invisible on the surface where the decision is
               # consumed (this let a defect through on one repo while the same change
               # was caught on another).
+              #
+              # Naming only the PRESENT voters was still a silent gate. A docs-only PR
+              # posts a three-voter panel that is indistinguishable from a four-voter
+              # panel with one voter crashed or misconfigured: the reader sees an
+              # absence with no stated cause and cannot tell a deliberate scope rule
+              # from a broken one. So every ABSENT voter now carries its reason, and
+              # the reasons are single-sourced here rather than restated per mode.
+              # >>> coverage-disclosure (executed verbatim by ai-review-coverage-disclosure.test.ts)
               RAN_VOTERS="reviewer"
-              [ "$SECURITY_REQUIRED" = "yes" ] && RAN_VOTERS="$RAN_VOTERS + security"
-              [ "$ARCHITECT_REQUIRED" = "yes" ] && RAN_VOTERS="$RAN_VOTERS + architect"
-              [ "$SKEPTIC_REQUIRED" = "yes" ] && RAN_VOTERS="$RAN_VOTERS + skeptic"
-              if [ "$COVERAGE" = "panel" ]; then
-                COVERAGE_NOTE="Coverage \`$COVERAGE\` — voters that ran: **$RAN_VOTERS**."
+              SKIPPED_VOTERS=""
+              if [ "$SECURITY_REQUIRED" = "yes" ]; then
+                RAN_VOTERS="$RAN_VOTERS + security"
               else
-                COVERAGE_NOTE="⚠️ **Reduced coverage** — \`AI_REVIEW_COVERAGE=$COVERAGE\`, so the architect + skeptic voters did NOT run. Voters that ran: **$RAN_VOTERS**. A \`pass\` here is weaker evidence than a full-panel pass; unset the repo variable to restore the \`panel\` default."
+                SKIPPED_VOTERS="$SKIPPED_VOTERS **security** — docs-only change: every changed file is Markdown, so there is no code surface to review;"
               fi
+              if [ "$ARCHITECT_REQUIRED" = "yes" ]; then
+                RAN_VOTERS="$RAN_VOTERS + architect"
+              else
+                SKIPPED_VOTERS="$SKIPPED_VOTERS **architect** — disabled by \`AI_REVIEW_COVERAGE=$COVERAGE\`;"
+              fi
+              if [ "$SKEPTIC_REQUIRED" = "yes" ]; then
+                RAN_VOTERS="$RAN_VOTERS + skeptic"
+              else
+                SKIPPED_VOTERS="$SKIPPED_VOTERS **skeptic** — disabled by \`AI_REVIEW_COVERAGE=$COVERAGE\`;"
+              fi
+              SKIPPED_NOTE=""
+              [ -n "$SKIPPED_VOTERS" ] && SKIPPED_NOTE=" Did NOT run:${SKIPPED_VOTERS%;}."
+              if [ "$COVERAGE" = "panel" ]; then
+                COVERAGE_NOTE="Coverage \`$COVERAGE\` — voters that ran: **$RAN_VOTERS**.$SKIPPED_NOTE"
+              else
+                COVERAGE_NOTE="⚠️ **Reduced coverage** — \`AI_REVIEW_COVERAGE=$COVERAGE\`. Voters that ran: **$RAN_VOTERS**.$SKIPPED_NOTE A \`pass\` here is weaker evidence than a full-panel pass; unset the repo variable to restore the \`panel\` default."
+              fi
+              # <<< coverage-disclosure
               echo "_Independent fresh-context reviewers (\`scripts/review-branch.sh\`, no-tools agents reading the diff as untrusted data); each label decided by the deterministic fail-closed gate (\`scripts/review-decide.sh\`). Posted by \`minspec-sdd[bot]\` from CI — provenance is the App identity, verified here, not the label alone (#428, #342). $COVERAGE_NOTE The combined verdict fails toward \`changes\` if ANY voter requests changes._"
             fi
           } > "$BODY"
