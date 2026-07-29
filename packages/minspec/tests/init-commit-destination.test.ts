@@ -11,12 +11,14 @@
  * surfaced later at `git push`, by which point the work was in branch history
  * and needed branch surgery to recover.
  *
- * Compounding it, SCAFFOLD_PATHSPECS omitted `.minspec/generated-hashes.json`
- * and `.minspec/template-baseline.json` — the manifests that DESCRIBE the files
- * being committed and are rewritten by the same refresh. Every refresh commit
- * was therefore partial by construction, leaving the manifests dirty, so the
- * user hand-committed the remainder each time. Observed three times across two
- * repos: the harness commit, then a leftover "dregs" commit, both stranded.
+ * The "dregs" commit that always followed had a different cause than it first
+ * appeared. `.minspec/generated-hashes.json` and `.minspec/template-baseline.json`
+ * looked perpetually dirty after every refresh, which read as a partial commit —
+ * but MINSPEC_GITIGNORE_ENTRIES declares both machine-local and both .gitignores
+ * listed them. They were simply TRACKED, and git does not apply .gitignore to an
+ * already-indexed path, so those rules were inert (#1103, AIClarityAU/sealbox#33).
+ * Correctly ignored they are never dirty, so the fix is to keep them OUT of the
+ * staged set, not to add them to it.
  *
  * The guard has to be precise in both directions. It must stop the unpushable
  * commit, and it must not touch the ordinary case — a feature branch, or a repo
@@ -199,21 +201,26 @@ describe('harness commit offer — untouched for every ordinary case', () => {
   });
 });
 
-describe('harness commit offer — commits its own manifests, not a partial set', () => {
-  it('includes the refresh manifests in the staged set', () => {
-    // These describe the very files being committed and are rewritten by the
-    // same refresh. Excluding them is what left a dirty tree behind every time.
+describe('harness commit offer — never commits the machine-local manifests', () => {
+  it('excludes the refresh manifests from the staged set', () => {
+    // An earlier revision included these, reasoning that a refresh commit was
+    // partial without the manifests it rewrites. The premise was a broken
+    // observation: they LOOKED perpetually dirty only because both repos tracked
+    // them, despite MINSPEC_GITIGNORE_ENTRIES declaring them machine-local and
+    // both .gitignores listing them — and git does not apply .gitignore to an
+    // already-indexed path (#1103, AIClarityAU/sealbox#33). Correctly ignored,
+    // they are never dirty and there is nothing to sweep up.
     fs.mkdirSync(path.join(tmpDir, '.minspec'), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, '.minspec', 'generated-hashes.json'), '{}');
     fs.writeFileSync(path.join(tmpDir, '.minspec', 'template-baseline.json'), '{}');
 
     const paths = collectScaffoldPaths(tmpDir);
 
-    expect(paths).toContain('.minspec/generated-hashes.json');
-    expect(paths).toContain('.minspec/template-baseline.json');
+    expect(paths).not.toContain('.minspec/generated-hashes.json');
+    expect(paths).not.toContain('.minspec/template-baseline.json');
   });
 
-  it('stages the manifests as part of the accepted commit', async () => {
+  it('does not stage a manifest even when the user accepts the commit', async () => {
     fs.mkdirSync(path.join(tmpDir, '.minspec'), { recursive: true });
     fs.writeFileSync(path.join(tmpDir, '.minspec', 'generated-hashes.json'), '{}');
 
@@ -222,21 +229,10 @@ describe('harness commit offer — commits its own manifests, not a partial set'
 
     await offerScaffoldCommit(tmpDir, { makeCommitter: async () => committer, variant: 'refresh' });
 
-    expect(added[0]).toContain('.minspec/generated-hashes.json');
-  });
-
-  it('omits a manifest that is not present on disk', () => {
-    // collectScaffoldPaths stays existence-filtered: a project without a given
-    // manifest must not have git asked to stage a path that isn't there.
-    // (generateHarnessFiles writes both manifests, so remove one to model a
-    // project that does not carry it.)
-    const baseline = path.join(tmpDir, '.minspec', 'template-baseline.json');
-    expect(fs.existsSync(baseline)).toBe(true);
-    fs.rmSync(baseline);
-
-    const paths = collectScaffoldPaths(tmpDir);
-
-    expect(paths).not.toContain('.minspec/template-baseline.json');
-    expect(paths).toContain('.minspec/generated-hashes.json');
+    // Anti-vacuity: the commit DID happen and staged the real harness files —
+    // the manifests are absent by exclusion, not because nothing ran.
+    expect(added[0]).toContain('CLAUDE.md');
+    expect(added[0]).not.toContain('.minspec/generated-hashes.json');
+    expect(added[0]).not.toContain('.minspec/template-baseline.json');
   });
 });

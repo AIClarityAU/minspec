@@ -109,19 +109,18 @@ const SCAFFOLD_PATHSPECS: readonly string[] = [
   // directory, so an unrelated file a user placed alongside them (e.g. a
   // hand-written .claude/commands/my-own-command.md) is never swept in.
   ...MANAGED_REGION_TEMPLATES.map((tpl) => tpl.outputPath),
-  // The refresh manifests, which DESCRIBE the files listed above and are
-  // rewritten by the same refresh that rewrites them. Omitting them made every
-  // refresh commit partial by construction: the harness landed in one commit
-  // and its own manifests stayed dirty, so the user hand-committed the leftover
-  // afterwards every single time. Derived output that is coupled to a commit
-  // belongs IN that commit — a half-committed manifest set describes a tree
-  // that no longer exists.
+  // DELIBERATELY ABSENT: .minspec/generated-hashes.json and
+  // .minspec/template-baseline.json. An earlier revision of this list included
+  // them, on the theory that a refresh commit was partial without the manifests
+  // it rewrites. That theory was built on a broken observation — the manifests
+  // appeared dirty after every refresh because both repos TRACKED them, despite
+  // MINSPEC_GITIGNORE_ENTRIES declaring them machine-local and both .gitignores
+  // listing them. Git does not apply .gitignore to an already-indexed path, so
+  // those rules were inert (#1103, AIClarityAU/sealbox#33).
   //
-  // Whether these are tracked varies by project (MinSpecPro gitignores
-  // template-baseline.json; sealbox commits it), so staging filters ignored
-  // paths — listing one here never forces an ignored file into a commit.
-  '.minspec/generated-hashes.json',
-  '.minspec/template-baseline.json',
+  // Correctly ignored, they are never dirty and there is nothing to sweep up.
+  // They are per-machine derived state: committing them makes one developer's
+  // refresh look like drift on every other clone.
 ];
 
 /**
@@ -211,8 +210,36 @@ export interface ScaffoldCommitter {
   dirty(paths: readonly string[]): Promise<string[]>;
 }
 
-/** Default committer — wraps simple-git, lazily imported to keep init lean. */
-async function defaultCommitter(folder: string): Promise<ScaffoldCommitter> {
+/**
+ * Branch names treated as "probably the default" when `origin/HEAD` is absent.
+ *
+ * Reads the SAME `minspec.protectedBranches` setting commit-on-approve consumes, so
+ * a user who renames their default branch configures it once and every guard agrees.
+ * The generated pre-commit hook reads the git-config twin (`minspec.protectedBranches`)
+ * for the same reason. The default keeps `trunk` — the hook's list — since a
+ * false negative here silently reinstates the stranding bug, while a false positive
+ * only offers a branch the user can decline. Outside a VS Code host (tests, Tier-0
+ * callers) `getConfiguration` is unavailable, so fall back to the literal list.
+ */
+function conventionalDefaultBranches(): string[] {
+  try {
+    return vscode.workspace
+      .getConfiguration('minspec')
+      .get<string[]>('protectedBranches', ['main', 'master', 'trunk']);
+  } catch {
+    return ['main', 'master', 'trunk'];
+  }
+}
+
+/**
+ * Default committer — wraps simple-git, lazily imported to keep init lean.
+ *
+ * Exported for tests: every other test in this area injects a stub, which meant the
+ * real `add()` ignore-filter and `branchInfo()` resolution had no execution coverage
+ * at all. That is the exact shape of the #1057 fault, where a guard shipped inert
+ * because its fixture manufactured an `origin/HEAD` the real repos did not have.
+ */
+export async function defaultCommitter(folder: string): Promise<ScaffoldCommitter> {
   const { simpleGit } = await import('simple-git');
   const git = simpleGit(folder);
   return {
@@ -269,7 +296,7 @@ async function defaultCommitter(folder: string): Promise<ScaffoldCommitter> {
             hasOrigin = false;
           }
           if (!hasOrigin) return null;
-          if (!['main', 'master', 'trunk'].includes(current)) return null;
+          if (!conventionalDefaultBranches().includes(current)) return null;
           def = current;
         }
         return { current, default: def };
