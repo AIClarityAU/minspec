@@ -90,8 +90,13 @@ summarise() {
       else printf '%s passed' "$pass"; fi
       ;;
     vitest)
-      grep -m1 -E '^\s+Tests\s+' "$log" | sed -E 's/^\s+Tests\s+//; s/\s+$//' \
-        || printf 'no summary line — see log'
+      # `grep … | sed …  || fallback` binds the || to the PIPELINE's status, which
+      # is sed's — and sed succeeds on empty input. So a missing summary line
+      # produced empty detail instead of the fallback message. Capture first.
+      local line
+      line=$(grep -m1 -E '^[[:space:]]+Tests[[:space:]]+' "$log") \
+        || { printf 'no summary line — see log'; return; }
+      printf '%s' "$line" | sed -E 's/^[[:space:]]+Tests[[:space:]]+//; s/[[:space:]]+$//'
       ;;
     python)
       local ran

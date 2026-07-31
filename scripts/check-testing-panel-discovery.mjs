@@ -55,11 +55,21 @@ const WORKSPACE_FILE = path.join(WORKSPACE_ROOT, 'minspecpro.code-workspace');
 const BASENAME_PATTERNS = ['test', 'test-*', '*.test', '*-test', '*_test'];
 const EXTENSIONS = ['mjs', 'cjs', 'js'];
 
-// What the Testing panel MUST show. Each entry is a workspace folder plus the
-// repo-relative files that have to be discoverable. Keep this list honest: if a
-// suite genuinely cannot appear, it belongs in KNOWN_GAPS with a reason, not here.
+// What the Testing panel MUST show. Each entry is a sibling directory name in the
+// multi-root layout plus the repo-relative files that have to be discoverable. Keep
+// this list honest: if a suite genuinely cannot appear, it belongs in KNOWN_GAPS
+// with a reason, not here.
+//
+// `self: true` marks the entry for THIS repo. Do not identify it by directory name.
+// The bare-folder check used to derive its folder from basename(REPO_ROOT) and match
+// that against `folder` — which is 'MinSpecPro' only because this developer's clone
+// happens to be named that. On CI the checkout is /home/runner/work/minspec/minspec,
+// so the names never matched, every expectation was filtered out, and the script
+// reported "PASS all 0 expected suites discoverable" and exited 0. A checker that
+// passes with zero assertions is worse than no checker: it is a green signpost over
+// an unverified claim, which is the precise failure this file exists to prevent.
 const EXPECTED = [
-  { folder: 'MinSpecPro', files: ['.github/scripts/ai-review-guard.test.js'] },
+  { folder: 'MinSpecPro', self: true, files: ['.github/scripts/ai-review-guard.test.js'] },
   { folder: 'sealbox', files: ['.github/scripts/ai-review-guard.test.js'] },
   {
     folder: 'scroogellm',
@@ -150,7 +160,13 @@ function resolveConfigs() {
       label: `multi-root workspace (${path.basename(WORKSPACE_FILE)})`,
       include: s['nodejs-testing.include'] ?? ['./'],
       exclude: s['nodejs-testing.exclude'] ?? ['**/node_modules/**'],
-      folders: EXPECTED.map((e) => e.folder),
+      // Targets are resolved to real paths here, not matched by name later. A
+      // sibling that is not checked out is skipped at the filesystem check.
+      targets: EXPECTED.map((e) => ({
+        name: e.folder,
+        root: path.join(WORKSPACE_ROOT, e.folder),
+        files: e.files,
+      })),
     });
   } else {
     console.log(
@@ -162,12 +178,15 @@ function resolveConfigs() {
   const folderSettings = path.join(REPO_ROOT, '.vscode', 'settings.json');
   if (fs.existsSync(folderSettings)) {
     const s = readJsonc(folderSettings);
+    const self = EXPECTED.find((e) => e.self);
+    if (!self) throw new Error('EXPECTED has no entry marked `self: true`');
     found.push({
       label: 'this repo opened as a bare folder (.vscode/settings.json)',
       include: s['nodejs-testing.include'] ?? ['./'],
       exclude: s['nodejs-testing.exclude'] ?? ['**/node_modules/**'],
-      // A bare-folder open sees only this repo.
-      folders: [path.basename(REPO_ROOT)],
+      // REPO_ROOT, never basename matching — the clone's directory name is not
+      // ours to depend on (it is `minspec` on CI, `MinSpecPro` here).
+      targets: [{ name: path.basename(REPO_ROOT), root: REPO_ROOT, files: self.files }],
     });
   }
 
@@ -194,9 +213,7 @@ function main() {
     const { patterns, isMatch } = buildMatcher(cfg.include, cfg.exclude);
     console.log(`  -> ${patterns.length} picomatch pattern(s), dot:false\n`);
 
-    for (const { folder, files } of EXPECTED) {
-      if (!cfg.folders.includes(folder)) continue;
-      const folderRoot = path.join(WORKSPACE_ROOT, folder);
+    for (const { name: folder, root: folderRoot, files } of cfg.targets) {
       if (!fs.existsSync(folderRoot)) {
         console.log(`  SKIP  ${folder} — not checked out`);
         continue;
@@ -233,6 +250,23 @@ function main() {
   for (const g of KNOWN_GAPS) console.log(`  - ${g}`);
 
   console.log();
+
+  // THE GATE THIS SCRIPT WAS MISSING. Everything above can be individually correct
+  // and still assert nothing — a filter that matches no target, a config that
+  // resolves to no folders, an EXPECTED list someone empties. Reporting PASS in
+  // that state is a green signpost over an unverified claim, i.e. exactly the
+  // defect this file exists to catch, committed by the file itself. Zero checks is
+  // a failure, not a pass.
+  if (checked === 0) {
+    console.error(
+      'FAIL  the checker asserted NOTHING — 0 suites were checked.\n' +
+        '      This is a failure, not a pass: a discovery gate that verifies nothing\n' +
+        '      reports green over an unverified claim. Likely causes: no config file\n' +
+        '      resolved, or every expected folder is missing from disk.',
+    );
+    process.exit(1);
+  }
+
   if (failures > 0) {
     console.error(
       `FAIL  ${failures} of ${checked} expected node:test suite(s) would NOT appear in the Testing panel.`,
