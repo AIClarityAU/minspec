@@ -543,8 +543,17 @@ jobs:
               SKIPPED_VOTERS=""
               if [ "$SECURITY_REQUIRED" = "yes" ]; then
                 RAN_VOTERS="$RAN_VOTERS + security"
-              else
+              elif [ "$CHANGED_OK" = "yes" ]; then
                 SKIPPED_VOTERS="$SKIPPED_VOTERS **security** — docs-only change: every changed file is Markdown, so there is no code surface to review;"
+              else
+                # SECURITY_REQUIRED=no has TWO causes: the docs-only scope rule above,
+                # and a change list that could not be read at all (fetch/diff failure).
+                # Claiming "every changed file is Markdown" in the second case would
+                # assert a fact this run explicitly failed to establish — and would
+                # contradict the indeterminate-diff warning printed earlier in this
+                # same comment. The verdict is already fail-closed there; the reason
+                # must be too.
+                SKIPPED_VOTERS="$SKIPPED_VOTERS **security** — the changed-file list could not be read (\`git diff $BASE...$HEAD\` failed), so its docs-vs-code scope rule could not be evaluated;"
               fi
               if [ "$ARCHITECT_REQUIRED" = "yes" ]; then
                 RAN_VOTERS="$RAN_VOTERS + architect"

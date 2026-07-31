@@ -42,17 +42,39 @@ function disclosureBlock(): string {
   return wf.slice(firstLine + 1, end);
 }
 
-type Flags = { coverage: 'panel' | 'single'; security: boolean; architect: boolean; skeptic: boolean };
+/**
+ * The security voter has THREE reachable states, not two. `SECURITY_REQUIRED=yes`
+ * requires BOTH `CHANGED_OK=yes` AND a non-`.md` file, so an absent security voter
+ * means either "docs-only" or "the changed-file list could not be read at all".
+ * Those are different causes and must not share one hardcoded reason — a reader
+ * sent to check the docs-vs-code rule when the real problem was a failed diff is
+ * exactly the mislabeling this disclosure exists to prevent.
+ *
+ * `changed-failed` also pins CHANGED_OK=no, which is why security is a tri-state
+ * here rather than a boolean crossed with an independent CHANGED_OK: the pair
+ * (CHANGED_OK=no, SECURITY_REQUIRED=yes) is unreachable and testing it would
+ * assert behaviour the workflow can never produce.
+ */
+type SecurityState = 'ran' | 'docs-only' | 'changed-failed';
+type Flags = {
+  coverage: 'panel' | 'single';
+  security: SecurityState;
+  architect: boolean;
+  skeptic: boolean;
+};
 
-/** Run the real block with the four inputs it reads, and return the rendered note. */
+/** Run the real block with the inputs it reads, and return the rendered note. */
 function render({ coverage, security, architect, skeptic }: Flags): string {
   const yn = (b: boolean) => (b ? 'yes' : 'no');
   const script = [
     // Mirrors the workflow step's own options (`set -uo pipefail` under Actions' -e),
     // so an unset variable in the block fails here too.
     'set -euo pipefail',
+    // BASE/HEAD appear in the changed-failed reason; the step always has them set.
+    'BASE=basesha; HEAD=headsha',
     `COVERAGE=${coverage}`,
-    `SECURITY_REQUIRED=${yn(security)}`,
+    `CHANGED_OK=${security === 'changed-failed' ? 'no' : 'yes'}`,
+    `SECURITY_REQUIRED=${yn(security === 'ran')}`,
     `ARCHITECT_REQUIRED=${yn(architect)}`,
     `SKEPTIC_REQUIRED=${yn(skeptic)}`,
     disclosureBlock(),
@@ -63,7 +85,7 @@ function render({ coverage, security, architect, skeptic }: Flags): string {
 
 /** Every combination the workflow can actually produce. */
 const ALL_CASES: Flags[] = (['panel', 'single'] as const).flatMap((coverage) =>
-  [true, false].flatMap((security) =>
+  (['ran', 'docs-only', 'changed-failed'] as const).flatMap((security) =>
     [true, false].flatMap((architect) =>
       [true, false].map((skeptic) => ({ coverage, security, architect, skeptic })),
     ),
@@ -77,8 +99,11 @@ describe('ai-review coverage disclosure: no voter is absent without a reason', (
       const note = render(flags);
       expect(note.trim()).not.toBe(''); // non-vacuity: the block must render something
 
-      const absent = (['security', 'architect', 'skeptic'] as const).filter((v) => !flags[v]);
-      for (const voter of absent) {
+      const ran = (v: 'security' | 'architect' | 'skeptic') =>
+        v === 'security' ? flags.security === 'ran' : flags[v];
+      const voters = ['security', 'architect', 'skeptic'] as const;
+
+      for (const voter of voters.filter((v) => !ran(v))) {
         // Named as absent...
         expect(note, `${voter} absent but unnamed`).toContain(`**${voter}**`);
         // ...and the name is followed by a reason, not left bare.
@@ -86,37 +111,80 @@ describe('ai-review coverage disclosure: no voter is absent without a reason', (
           new RegExp(`\\*\\*${voter}\\*\\* — \\S`),
         );
       }
-      for (const voter of (['security', 'architect', 'skeptic'] as const).filter((v) => flags[v])) {
+      for (const voter of voters.filter(ran)) {
         // A voter that RAN must never appear in the did-not-run list.
         expect(note, `${voter} ran but was listed as skipped`).not.toMatch(
           new RegExp(`Did NOT run:[^]*\\*\\*${voter}\\*\\*`),
+        );
+      }
+
+      // The docs-only claim is an ASSERTION about the changed-file list. It must
+      // never appear on a run that failed to read that list.
+      if (flags.security === 'changed-failed') {
+        expect(note, 'claims a verified file list on a run that could not read one').not.toContain(
+          'every changed file is Markdown',
         );
       }
     },
   );
 
   it('states the real cause for each kind of absence, not a generic one', () => {
-    // Security is scope-gated on the code-vs-docs split; the panel voters are
-    // gated on the repo-level coverage variable. Two different causes — a reader
-    // fixing the wrong one is the failure this prevents.
-    const docsOnly = render({ coverage: 'panel', security: false, architect: true, skeptic: true });
+    // Three distinct causes. A reader sent to the wrong knob is the failure this
+    // prevents, so each absence names the condition that actually produced it.
+    const docsOnly = render({
+      coverage: 'panel',
+      security: 'docs-only',
+      architect: true,
+      skeptic: true,
+    });
     expect(docsOnly).toMatch(/\*\*security\*\* — docs-only change/);
     expect(docsOnly).toContain('every changed file is Markdown');
     expect(docsOnly).not.toContain('AI_REVIEW_COVERAGE=panel'); // wrong cause for this absence
 
-    const thin = render({ coverage: 'single', security: true, architect: false, skeptic: false });
+    const thin = render({
+      coverage: 'single',
+      security: 'ran',
+      architect: false,
+      skeptic: false,
+    });
     expect(thin).toMatch(/\*\*architect\*\* — disabled by `AI_REVIEW_COVERAGE=single`/);
     expect(thin).toMatch(/\*\*skeptic\*\* — disabled by `AI_REVIEW_COVERAGE=single`/);
   });
 
+  it('does not blame docs-only when the changed-file list could not be read', () => {
+    // #1102 review (all four voters): SECURITY_REQUIRED=no ALSO fires when
+    // CHANGED_OK!=yes. Hardcoding the docs-only reason there asserted a verified
+    // file list on the exact run that failed to verify one — and contradicted the
+    // indeterminate-diff warning printed earlier in the same comment.
+    const indeterminate = render({
+      coverage: 'panel',
+      security: 'changed-failed',
+      architect: true,
+      skeptic: true,
+    });
+    expect(indeterminate).toContain('**security** — the changed-file list could not be read');
+    expect(indeterminate).not.toContain('every changed file is Markdown');
+    expect(indeterminate).not.toContain('docs-only change');
+  });
+
   it('says nothing about absences when the full panel ran', () => {
-    const full = render({ coverage: 'panel', security: true, architect: true, skeptic: true });
+    const full = render({
+      coverage: 'panel',
+      security: 'ran',
+      architect: true,
+      skeptic: true,
+    });
     expect(full).toBe('Coverage `panel` — voters that ran: **reviewer + security + architect + skeptic**.');
     expect(full).not.toContain('Did NOT run');
   });
 
   it('keeps the reduced-coverage warning and the restore instruction', () => {
-    const thin = render({ coverage: 'single', security: true, architect: false, skeptic: false });
+    const thin = render({
+      coverage: 'single',
+      security: 'ran',
+      architect: false,
+      skeptic: false,
+    });
     expect(thin).toContain('Reduced coverage');
     expect(thin).toContain('AI_REVIEW_COVERAGE=single');
     expect(thin).toContain('weaker evidence than a full-panel pass');
