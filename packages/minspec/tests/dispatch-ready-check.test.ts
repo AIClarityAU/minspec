@@ -823,3 +823,56 @@ describe('dispatch-ready-check.sh — a QUOTED record cannot outrank the live ve
     expect(picked).not.toContain('hold: none');
   });
 });
+
+/**
+ * T0 — the WIRING, not just the filter (#1113).
+ *
+ * Adversarial review landed this one squarely: "deleting `--trusted-comment-bodies` from
+ * any of the three consumers leaves the suite green". Every test above proves the filter
+ * WORKS; none proved it is USED. A perfectly correct seam that nothing calls is a fix in
+ * name only, and this repo's own rule is that a false "implemented" is its worst defect.
+ *
+ * So these assert the call sites directly, and — equally important — that no consumer
+ * still carries the raw unfiltered join it replaced.
+ */
+describe('dispatch-ready-check.sh — the author filter is actually WIRED UP (#1113)', () => {
+  const REPO_ROOT = path.resolve(__dirname, '../../..');
+  const CONSUMERS = [
+    'scripts/dispatch-issue.sh',
+    'scripts/approve-issue.sh',
+    'scripts/approve-on-label.sh',
+    'scripts/lib/issue-lease.sh',
+  ];
+
+  it.each(CONSUMERS)('%s pipes its comment read through --trusted-comment-bodies', (rel) => {
+    const src = fs.readFileSync(path.join(REPO_ROOT, rel), 'utf-8');
+    expect(src).toContain('--trusted-comment-bodies');
+  });
+
+  it.each(CONSUMERS)('%s no longer joins ALL comment bodies unfiltered', (rel) => {
+    const code = fs
+      .readFileSync(path.join(REPO_ROOT, rel), 'utf-8')
+      .split('\n')
+      .filter((l) => !/^\s*#/.test(l))   // comments quote the old expression on purpose
+      .join('\n');
+    // The exact shape every consumer used before the fix.
+    expect(code).not.toMatch(/\.comments\[\][?]?\.body[^|]*\|\s*join/);
+    expect(code).not.toMatch(/\[\.comments\[\][?]?\.body/);
+  });
+
+  it('the two approval front ends select via --newest-record, not a local "last one" awk', () => {
+    for (const rel of ['scripts/approve-issue.sh', 'scripts/approve-on-label.sh']) {
+      const src = fs.readFileSync(path.join(REPO_ROOT, rel), 'utf-8');
+      expect(src, rel).toContain('--newest-record');
+      // A local copy of the selector is how two of three readers would keep the defect.
+      const code = src.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+      expect(code, rel).not.toMatch(/printf "%s", last/);
+    }
+  });
+
+  it('this wiring check is not vacuous — it fails on a file that lacks the call', () => {
+    // Guard the guard: prove the assertions above can actually fail.
+    const unrelated = fs.readFileSync(path.join(REPO_ROOT, 'scripts/triage-decide.sh'), 'utf-8');
+    expect(unrelated).not.toContain('--trusted-comment-bodies');
+  });
+});

@@ -173,8 +173,22 @@ lease_gate_open_unshipped() {
   local item="${1:?lease_gate_open_unshipped needs an item}" state
   state="$(gh issue view "$item" --repo "$MINSPEC_LEASE_REPO" --json state --jq '.state' 2>/dev/null || echo "")"
   [[ "$state" == "OPEN" ]] || return 1        # closed / unknown ⇒ refuse
-  if gh issue view "$item" --repo "$MINSPEC_LEASE_REPO" --json comments \
-       --jq '[.comments[].body] | join("\n")' 2>/dev/null | grep -qF "$SHIPPED_MARKER"; then
+  # TRUSTED authors only. This repo is PUBLIC, and this read used to join EVERY
+  # comment body from ANY author — so any internet user could post the marker (an
+  # HTML comment, which renders as NOTHING in the GitHub UI) and that issue could
+  # never be dispatched again. Permanent, invisible, zero-permission denial.
+  #
+  # Sharpening how live it was: `grep -rn 'minspec-shipped'` over the whole repo
+  # returns only the definition on line 52 — nothing anywhere WRITES this marker, so
+  # every possible match was necessarily attacker-authored.
+  #
+  # The general shape is worth naming: every gate here fails closed, which makes each
+  # one a DENIAL primitive as well as an escalation guard. An author filter is a DROP,
+  # so it protects the escalation direction and adds nothing in the denial direction —
+  # unless it is applied to the reads that can deny, like this one.
+  if gh issue view "$item" --repo "$MINSPEC_LEASE_REPO" --json comments 2>/dev/null \
+       | "$(dirname "${BASH_SOURCE[0]}")/../dispatch-ready-check.sh" --trusted-comment-bodies 2>/dev/null \
+       | grep -qF "$SHIPPED_MARKER"; then
     return 1                                   # already shipped ⇒ never re-dispatch
   fi
   return 0

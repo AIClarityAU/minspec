@@ -167,13 +167,23 @@ case "$PERM" in
 esac
 
 # ── The issue, and the verdict this approval would lift ──────────────────────
-ISSUE_JSON="$(gh issue view "$ISSUE" --repo "$REPO" --json body,title,state,comments 2>/dev/null)" || ISSUE_JSON=""
+ISSUE_JSON="$(gh issue view "$ISSUE" --repo "$REPO" --json body,title,state,labels,comments 2>/dev/null)" || ISSUE_JSON=""
 if [[ -z "$ISSUE_JSON" ]]; then
   say "ERROR: could not fetch #${ISSUE}. Failing closed."; exit 1
 fi
 STATE="$(printf '%s' "$ISSUE_JSON" | jq -r '.state')"
 if [[ "$STATE" != "OPEN" ]]; then
   say "#${ISSUE} is ${STATE} — nothing to approve."; exit 0
+fi
+
+# `agent-quarantined` is a SECURITY hold placed by the egress guard, and only a human
+# retires it explicitly. Without this check the script would mint an approval on a
+# quarantined issue and then strip `needs-human-review` — actively dismantling the
+# guard rather than merely ignoring it. Labels are fetched above solely for this.
+if printf '%s' "$ISSUE_JSON" | jq -e '[.labels[].name] | index("agent-quarantined")' >/dev/null 2>&1; then
+  bounce "This issue is \`agent-quarantined\` — a security hold from the egress guard, which only a human retires explicitly." \
+         "Retire the quarantine deliberately before approving anything here."
+  exit 0
 fi
 # Composed EXACTLY as triage-inbox.sh composes it, so both sides hash identical bytes.
 ISSUE_BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '"# " + .title + "\n\n" + .body')"
@@ -203,17 +213,23 @@ V_HOLD="$(record_field hold)"; V_HUMAN="$(record_field human_only)"
 V_ROLE="$(record_field role)"; V_TIER="$(record_field tier)"
 V_HASH="$(record_field bodyHash)"
 
-# The ordinary triage path: an affirmative verdict already authorises this label.
-if [[ "$(printf '%s' "$V_HOLD" | tr '[:upper:]' '[:lower:]')" == "none" ]]; then
-  say "#${ISSUE} already carries an affirmative verdict (hold:none) — no approval needed."
-  exit 0
-fi
-
-# ── Freshness FIRST: a verdict about a different body says nothing about this one ─
+# ── Freshness FIRST, before ANY other reading of the record ──────────────────
+# This used to sit AFTER the `hold: none` short-circuit below, which meant a STALE
+# `hold: none` record returned a green "no approval needed", left `agent-ready`
+# standing, and cleaned up nothing — while dispatch would separately refuse it as
+# stale. The human was told everything was fine about a label that could never build.
+# A verdict about a different body says nothing about this one, whatever it claims,
+# so freshness is now the first question asked of every record.
 NOW_HASH="sha256:$(printf '%s' "$ISSUE_BODY" | sha256sum | awk '{print $1}')"
 if [[ -z "$V_HASH" || "$V_HASH" != "$NOW_HASH" ]]; then
   bounce "The triage verdict on this issue is **stale** — the body has changed since it was triaged, so the verdict describes a different issue and approving it would approve something that no longer exists." \
          "$(printf 'Re-triage first:\n```\nscripts/triage-inbox.sh %s\n```' "$ISSUE")"
+  exit 0
+fi
+
+# The ordinary triage path: a FRESH affirmative verdict already authorises this label.
+if [[ "$(printf '%s' "$V_HOLD" | tr '[:upper:]' '[:lower:]')" == "none" ]]; then
+  say "#${ISSUE} already carries a fresh affirmative verdict (hold:none) — no approval needed."
   exit 0
 fi
 
@@ -232,8 +248,18 @@ if ! APPROVAL="$(printf '%s' "$ISSUE_BODY" | "$READY_CHECK" --render-approval \
   exit 1
 fi
 
-comment "$(printf '## ✅ Approved for dispatch by a human\n\n@%s applied `%s`, which lifted the `hold:%s` triage hold.\n\n%s\n\nThis approval was recorded THROUGH the dispatch gate rather than being a bare label flip (#1113): the block above is the machine-readable record `dispatch-ready-check.sh` requires, the approver is the account GitHub recorded as applying the label (confirmed against the issue timeline, not merely read from the webhook payload), and it is keyed to the issue body as approved — **edit the issue and this approval goes stale**, exactly like a triage verdict.\n\nThe resulting PR still requires a human merge keystroke.' \
-  "$SENDER" "$APPROVE_LABEL" "$V_HOLD" "$APPROVAL")"
+# RECORD FIRST, and NOT best-effort. This post carries the record itself, so it is the
+# load-bearing write of the whole flow: if it fails and we carry on, the countermanding
+# labels get stripped and `agent-ready` is left standing with NO verdict behind it —
+# which is #983 exactly, recreated by the very feature built to close it. A gate whose
+# load-bearing write is `|| true` is a silent gate (DR-066). Every other write here is
+# best-effort on purpose; this one must not be.
+if ! gh issue comment "$ISSUE" --repo "$REPO" --body "$(printf '## ✅ Approved for dispatch by a human\n\n@%s applied `%s`, which lifted the `hold:%s` triage hold.\n\n%s\n\nThis approval was recorded THROUGH the dispatch gate rather than being a bare label flip (#1113): the block above is the machine-readable record `dispatch-ready-check.sh` requires, the approver is the account GitHub recorded as applying the label (confirmed against the issue timeline, not merely read from the webhook payload), and it is keyed to the issue body as approved — **edit the issue and this approval goes stale**, exactly like a triage verdict.\n\nThe resulting PR still requires a human merge keystroke.' \
+  "$SENDER" "$APPROVE_LABEL" "$V_HOLD" "$APPROVAL")" >/dev/null; then
+  bounce "The approval record could not be posted, so the label does not stand." \
+         "Nothing was approved and no labels were cleared — an \`agent-ready\` with no verdict behind it is precisely the #983 hole. Re-apply the label to retry, or use \`scripts/approve-issue.sh ${ISSUE}\`."
+  exit 1
+fi
 
 # Clear the countermanding labels this approval supersedes. Byte-aligned with
 # dispatch-ready-check.sh's `countermanded` arm; a leftover hold label would veto a

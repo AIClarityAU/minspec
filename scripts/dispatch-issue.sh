@@ -250,9 +250,10 @@ fi
 # forging a record needs write access; on a public repo it needs none, and the
 # `bodyHash` is no obstacle because the issue body is public and the hash is therefore
 # computable by anyone. A stranger could post a `hold: none` record and it would be the
-# LAST one this gate read. Only the `agent-ready` label still required a permission —
-# and #1113 turns that into a one-click gesture. Filter by AUTHOR (which a comment body
-# cannot alter about itself) before the record is ever parsed.
+# LAST one this gate read. Nor was the `agent-ready` label a backstop:
+# `.github/ISSUE_TEMPLATE/agent-task.yml` hands it out on issue creation to anyone. The
+# RECORD is the only real boundary, so filter by AUTHOR (which a comment body cannot
+# alter about itself) before it is ever parsed.
 echo "$ISSUE_JSON" | "${SCRIPT_DIR}/dispatch-ready-check.sh" --trusted-comment-bodies \
   > "$VERDICT_SRC" 2>/dev/null || true
 # The body EXACTLY as triage composed it, so the two sides hash identical bytes.

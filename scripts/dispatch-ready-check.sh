@@ -306,11 +306,15 @@ fi
 # permission at all, and the `bodyHash` is no obstacle because the issue body is
 # public and the hash is therefore computable by anyone.
 #
-# The residual write-access requirement was the `agent-ready` LABEL — which #1113
-# now turns into a one-click approval gesture. Combined, a stranger's forged
-# `hold: tier` record plus the maintainer's ordinary label flip would approve an
-# issue the gate had actually held. So this filter is a PRECONDITION of shipping
-# #1113, not an optional hardening.
+# It was assumed that at least the `agent-ready` LABEL still required write access.
+# That is ALSO false: `.github/ISSUE_TEMPLATE/agent-task.yml` declares
+# `labels: ["agent-ready", "inbox"]`, so any internet user opening an Agent Task issue
+# receives the label on creation. What actually stops that dispatching is #983's record
+# requirement — the label alone is not, and never was, a permission boundary.
+#
+# So this filter is a PRECONDITION of shipping #1113, not an optional hardening: with
+# the label freely obtainable, the record is the ONLY thing standing between a stranger
+# and a build.
 #
 # Trust is by AUTHOR, which a comment body cannot alter about itself:
 #   • the gate's own bot login (passed in — App identities read as CONTRIBUTOR, so
