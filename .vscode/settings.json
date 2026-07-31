@@ -29,11 +29,12 @@
     "python.testing.pytestEnabled": false,
     "python.testing.unittestArgs": ["-v", "-s", "scripts/hooks", "-p", "test_*.py"],
 
-    // Pin the interpreter so discovery cannot fail with "Python interpreter not
-    // configured" on a fresh clone / new machine. These are stdlib-only unittest
-    // files (no venv, no requirements.txt), so the system python3 is the correct
-    // one — there is nothing to install.
-    "python.defaultInterpreterPath": "/usr/bin/python3",
+    // Deliberately NOT pinning python.defaultInterpreterPath here. It was set to
+    // /usr/bin/python3, which is a Linux-only absolute path in a git-tracked file in
+    // a public repo — wrong on Windows and on Homebrew macOS. It is only a first-run
+    // fallback, and these are stdlib-only unittest files with no venv and no
+    // requirements.txt, so the extension's own interpreter discovery is sufficient.
+    // Pin it in your USER settings if your machine needs it.
 
     // node:test suite (.github/scripts/*.test.js) — the ai-review label-integrity
     // logic. Plain `node --test`, no deps, so neither Vitest nor the Python
@@ -55,8 +56,10 @@
     // lives in the .code-workspace `settings` block and must be kept in step.
     //
     // Verified by scripts/check-testing-panel-discovery.mjs, which replays the
-    // extension's own glob algorithm and fails when an expected suite would not
-    // appear. Run it after touching either copy.
+    // extension's own glob algorithm against BOTH copies — this file (as a bare
+    // folder open) and the .code-workspace block (as a multi-root open) — and fails
+    // when an expected suite would not appear under either. Run it after touching
+    // either copy.
     "nodejs-testing.include": ["./", ".github"],
     "nodejs-testing.exclude": [
         // Restated because setting `exclude` REPLACES the extension's default rather

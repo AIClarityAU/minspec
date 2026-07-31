@@ -129,62 +129,107 @@ function buildMatcher(include, exclude) {
   };
 }
 
-function main() {
-  const listOnly = process.argv.includes('--list');
+// Resolve the config the extension would actually read, and say which one it is.
+//
+// There are two copies on purpose. Opened via minspecpro.code-workspace, only the
+// workspace-level block is read (the folder-level keys are WINDOW-scoped and get
+// dropped). Opened as a bare folder, the folder file IS the workspace config. Both
+// are checked so neither can drift unverified — the earlier version only read the
+// workspace copy while a comment in the folder file claimed this script verified it.
+//
+// A bare clone of just this repo has no parent workspace file at all. That is not a
+// failure: test-all.sh promises to stay useful for someone who cloned only MinSpec,
+// so a missing workspace file degrades to checking the folder copy alone.
+function resolveConfigs() {
+  const found = [];
 
-  if (!fs.existsSync(WORKSPACE_FILE)) {
-    console.error(`FAIL  workspace file not found: ${WORKSPACE_FILE}`);
-    process.exit(1);
+  if (fs.existsSync(WORKSPACE_FILE)) {
+    const ws = readJsonc(WORKSPACE_FILE);
+    const s = ws.settings ?? {};
+    found.push({
+      label: `multi-root workspace (${path.basename(WORKSPACE_FILE)})`,
+      include: s['nodejs-testing.include'] ?? ['./'],
+      exclude: s['nodejs-testing.exclude'] ?? ['**/node_modules/**'],
+      folders: EXPECTED.map((e) => e.folder),
+    });
+  } else {
+    console.log(
+      `note: ${path.basename(WORKSPACE_FILE)} not found beside this repo — ` +
+        `checking the bare-folder config only.\n`,
+    );
   }
 
-  const ws = readJsonc(WORKSPACE_FILE);
-  const settings = ws.settings ?? {};
-  const include = settings['nodejs-testing.include'] ?? ['./'];
-  const exclude = settings['nodejs-testing.exclude'] ?? ['**/node_modules/**'];
+  const folderSettings = path.join(REPO_ROOT, '.vscode', 'settings.json');
+  if (fs.existsSync(folderSettings)) {
+    const s = readJsonc(folderSettings);
+    found.push({
+      label: 'this repo opened as a bare folder (.vscode/settings.json)',
+      include: s['nodejs-testing.include'] ?? ['./'],
+      exclude: s['nodejs-testing.exclude'] ?? ['**/node_modules/**'],
+      // A bare-folder open sees only this repo.
+      folders: [path.basename(REPO_ROOT)],
+    });
+  }
 
-  console.log(`workspace: ${WORKSPACE_FILE}`);
-  console.log(`  nodejs-testing.include = ${JSON.stringify(include)}`);
-  console.log(`  nodejs-testing.exclude = ${JSON.stringify(exclude)}`);
+  return found;
+}
 
-  const { patterns, isMatch } = buildMatcher(include, exclude);
-  console.log(`  -> ${patterns.length} picomatch pattern(s), dot:false\n`);
+function main() {
+  const listOnly = process.argv.includes('--list');
+  const configs = resolveConfigs();
+
+  if (configs.length === 0) {
+    console.error('FAIL  no nodejs-testing configuration found in either location.');
+    process.exit(1);
+  }
 
   let failures = 0;
   let checked = 0;
 
-  for (const { folder, files } of EXPECTED) {
-    const folderRoot = path.join(WORKSPACE_ROOT, folder);
-    if (!fs.existsSync(folderRoot)) {
-      console.log(`SKIP  ${folder} — not checked out`);
-      continue;
-    }
-    for (const rel of files) {
-      checked++;
-      const abs = path.join(folderRoot, rel);
-      if (!fs.existsSync(abs)) {
-        console.log(`FAIL  ${folder}/${rel} — file does not exist`);
-        failures++;
+  for (const cfg of configs) {
+    console.log(`config: ${cfg.label}`);
+    console.log(`  nodejs-testing.include = ${JSON.stringify(cfg.include)}`);
+    console.log(`  nodejs-testing.exclude = ${JSON.stringify(cfg.exclude)}`);
+
+    const { patterns, isMatch } = buildMatcher(cfg.include, cfg.exclude);
+    console.log(`  -> ${patterns.length} picomatch pattern(s), dot:false\n`);
+
+    for (const { folder, files } of EXPECTED) {
+      if (!cfg.folders.includes(folder)) continue;
+      const folderRoot = path.join(WORKSPACE_ROOT, folder);
+      if (!fs.existsSync(folderRoot)) {
+        console.log(`  SKIP  ${folder} — not checked out`);
         continue;
       }
-      const globMatched = isMatch(rel);
-      // The extension also pre-checks the source for the specifier it imports; a
-      // file that never imports node:test yields zero test items even if the glob
-      // matches. Mirror that so a match here means a test really appears.
-      const importsNodeTest = fs.readFileSync(abs, 'utf8').includes('node:test');
+      for (const rel of files) {
+        checked++;
+        const abs = path.join(folderRoot, rel);
+        if (!fs.existsSync(abs)) {
+          console.log(`  FAIL  ${folder}/${rel} — file does not exist`);
+          failures++;
+          continue;
+        }
+        const globMatched = isMatch(rel);
+        // The extension also pre-checks the source for the specifier it imports; a
+        // file that never imports node:test yields zero test items even if the glob
+        // matches. Mirror that so a match here means a test really appears.
+        const importsNodeTest = fs.readFileSync(abs, 'utf8').includes('node:test');
 
-      if (globMatched && importsNodeTest) {
-        if (listOnly) console.log(`ok    ${folder}/${rel}`);
-      } else {
-        const why = !globMatched
-          ? 'glob does NOT match (dot-directory? include root missing?)'
-          : 'file does not import node:test';
-        console.log(`FAIL  ${folder}/${rel} — ${why}`);
-        failures++;
+        if (globMatched && importsNodeTest) {
+          if (listOnly) console.log(`  ok    ${folder}/${rel}`);
+        } else {
+          const why = !globMatched
+            ? 'glob does NOT match (dot-directory? include root missing?)'
+            : 'file does not import node:test';
+          console.log(`  FAIL  ${folder}/${rel} — ${why}`);
+          failures++;
+        }
       }
     }
+    console.log();
   }
 
-  console.log(`\nknown gaps (no Testing-panel controller):`);
+  console.log(`known gaps (no Testing-panel controller):`);
   for (const g of KNOWN_GAPS) console.log(`  - ${g}`);
 
   console.log();

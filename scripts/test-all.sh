@@ -130,8 +130,14 @@ run_suite() {
     record "$name" PASS "$(summarise "$kind" "$log")"
   else
     record "$name" FAIL "$(summarise "$kind" "$log")"
-    cp "$log" "${TMPDIR:-/tmp}/$(basename "$log")" 2>/dev/null \
-      && printf '%s  full log: %s%s\n' "$dim" "${TMPDIR:-/tmp}/$(basename "$log")" "$reset"
+    # LOG_DIR is removed by the EXIT trap, so a failing suite's log is copied out to
+    # survive the run. Via mktemp, not a name derived from the suite: a predictable
+    # path in a world-writable /tmp is a symlink-clobber target on a shared host.
+    local kept
+    kept=$(mktemp "${TMPDIR:-/tmp}/minspec-test-XXXXXXXX.log" 2>/dev/null) || kept=""
+    if [ -n "$kept" ] && cp "$log" "$kept" 2>/dev/null; then
+      printf '%s  full log: %s%s\n' "$dim" "$kept" "$reset"
+    fi
   fi
 }
 
