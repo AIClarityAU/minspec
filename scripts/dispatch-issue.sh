@@ -245,9 +245,20 @@ if ! VERDICT_SRC=$(mktemp 2>/dev/null) || ! BODY_FILE=$(mktemp 2>/dev/null); the
   echo "Skipping #$ISSUE — could not create the scratch files the verdict-record check needs (mktemp failed); failing closed rather than dispatching unverified (#983)."
   exit 0
 fi
-# Every comment body, oldest→newest (the gate takes the LAST record, so a re-triage
-# always supersedes an older verdict).
-echo "$ISSUE_JSON" | jq -r '[.comments[]?.body // ""] | join("\n")' > "$VERDICT_SRC" 2>/dev/null || true
+# Every TRUSTED comment body, oldest→newest (the gate takes the LAST record, so a
+# re-triage always supersedes an older verdict).
+#
+# The author filter is load-bearing, not tidiness. This repo is PUBLIC, so any GitHub
+# user can comment — and this line used to join EVERY comment body. #983 reasoned that
+# forging a record needs write access; on a public repo it needs none, and the
+# `bodyHash` is no obstacle because the issue body is public and the hash is therefore
+# computable by anyone. A stranger could post a `hold: none` record and it would be the
+# LAST one this gate read. Nor was the `agent-ready` label a backstop:
+# `.github/ISSUE_TEMPLATE/agent-task.yml` hands it out on issue creation to anyone. The
+# RECORD is the only real boundary, so filter by AUTHOR (which a comment body cannot
+# alter about itself) before it is ever parsed.
+echo "$ISSUE_JSON" | "${SCRIPT_DIR}/dispatch-ready-check.sh" --trusted-comment-bodies \
+  > "$VERDICT_SRC" 2>/dev/null || true
 # The body EXACTLY as triage composed it, so the two sides hash identical bytes.
 printf '%s' "$ISSUE_BODY" > "$BODY_FILE"
 

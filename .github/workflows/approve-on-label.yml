@@ -1,0 +1,85 @@
+# approve-on-label — the label flip IS the approval gesture again (#1113).
+#
+# The maintainer's original workflow was: change `needs-review` → `agent-ready` in the
+# GitHub UI. #983 correctly stopped that from dispatching, because the label was a
+# point-in-time STAMP of a verdict that nobody re-checked — five hand-flipped issues
+# built and burned tokens. But what was wrong was never "a human flipped a label"; it
+# was "nothing recorded WHO flipped it, or WHAT verdict they were overriding".
+#
+# So: keep the gesture, supply the record. This workflow turns the flip into a real,
+# attributed, body-bound human-approval record — the same one `scripts/approve-issue.sh`
+# mints on the command line, decided by the same pure predicate in
+# `scripts/dispatch-ready-check.sh`. Neither front end carries a policy of its own.
+#
+# It also makes the gesture SELF-CORRECTING: flipping the label on an issue the gate
+# will not release now removes the label again and comments the exact reason, instead of
+# silently dispatching (the old failure) or silently holding at dispatch time, far from
+# where the human acted.
+#
+# All logic lives in `scripts/approve-on-label.sh` so it is readable and unit-testable
+# (`--verify-label-event`); this file is only the trigger and the credential.
+name: approve-on-label
+
+on:
+  issues:
+    types: [labeled]
+
+# The workflow's own token needs nothing but the checkout. Every write below is made
+# with the App installation token minted in the job, so the actor is `minspec-sdd[bot]`
+# and the audit trail never records agent work under a human's account.
+permissions:
+  contents: read
+
+# Serialise per issue: two rapid label events must not race to mint two records.
+# NOT cancel-in-progress — every event has to reach a decision, and a cancelled run
+# would leave `agent-ready` standing with nothing behind it.
+concurrency:
+  group: approve-on-label-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  approve:
+    # Cheap pre-filter so unrelated label traffic costs nothing. The script re-reads
+    # and re-checks both of these from the event file — this `if` is an optimisation,
+    # never the guard.
+    if: >-
+      github.event.label.name == 'agent-ready' &&
+      !endsWith(github.event.sender.login, '[bot]')
+    runs-on: ubuntu-latest
+    steps:
+      # No `ref:` on purpose. For an `issues` event `github.sha`/`github.ref` already
+      # point at the default branch, so the checked-out gate scripts are the ones on
+      # `main` — never a version proposed by the work being approved. Writing the ref
+      # out explicitly would only add an interpolation into a `ref:` field, which is
+      # the ref-injection shape worth not having at all.
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          persist-credentials: false
+
+      - name: Check the App credential is configured
+        id: cfg
+        env:
+          APP_ID: ${{ secrets.MINSPEC_APP_ID }}
+          APP_KEY: ${{ secrets.MINSPEC_APP_PRIVATE_KEY }}
+        run: |
+          set -eu
+          if [ -z "${APP_ID}" ] || [ -z "${APP_KEY}" ]; then
+            echo "::error title=approve-on-label not configured::MINSPEC_APP_ID / MINSPEC_APP_PRIVATE_KEY are required. A human flipped a label expecting it to approve the issue; without the App token nothing can record that, so this FAILS rather than passing silently (DR-066 — no silent gate)."
+            exit 1
+          fi
+          echo "ok=true" >> "$GITHUB_OUTPUT"
+
+      - name: Mint the App installation token
+        id: app
+        uses: actions/create-github-app-token@f2acddfb5195534d487896a656232b016a682f3c # v1.9.0
+        with:
+          app-id: ${{ secrets.MINSPEC_APP_ID }}
+          private-key: ${{ secrets.MINSPEC_APP_PRIVATE_KEY }}
+
+      # No `${{ }}` interpolation of issue-controlled text anywhere in this run block:
+      # the script reads the issue number, label and sender from $GITHUB_EVENT_PATH
+      # itself, so an issue title or body can never reach the shell.
+      - name: Approve the issue, or bounce the label and say why
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+        run: bash scripts/approve-on-label.sh
