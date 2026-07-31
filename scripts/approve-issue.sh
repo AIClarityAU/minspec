@@ -111,13 +111,13 @@ fi
 # verdict is a PRECONDITION of approval, not an alternative to it.
 # TRUSTED comments only — this repo is PUBLIC, so an unfiltered read would let any
 # stranger's forged record become the verdict you believe you are approving.
+# Selection is the gate's own, not a local copy: `--newest-record` picks by the
+# record's OWN verdictAt rather than by position, so a stale record QUOTED inside a
+# later trusted comment cannot masquerade as the current verdict. A hand-rolled
+# "take the last one" here would have shown you a hold that is not the live one.
 RECORD="$(printf '%s' "$ISSUE_JSON" \
   | "$READY_CHECK" --trusted-comment-bodies \
-  | awk -v b="$RECORD_BEGIN" -v e="$RECORD_END" '
-      index($0, b) { buf = ""; inb = 1 }
-      inb          { buf = buf $0 "\n" }
-      index($0, e) { if (inb) { last = buf; inb = 0 } }
-      END          { printf "%s", last }')"
+  | "$READY_CHECK" --newest-record)"
 
 if [[ -z "$RECORD" ]]; then
   echo "ERROR: #${ISSUE} carries no triage verdict record, so there is no hold to approve." >&2

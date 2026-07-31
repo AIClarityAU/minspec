@@ -181,12 +181,12 @@ ISSUE_BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '"# " + .title + "\n\n" + .body'
 # TRUSTED comments only. On a PUBLIC repo anyone can comment, so an unfiltered read
 # would let a stranger's forged `hold: tier` block become the verdict this approval
 # claims to lift — turning the maintainer's ordinary label flip into an escalation.
+# Selection is the gate's own (`--newest-record`), which picks by the record's OWN
+# verdictAt rather than by position — so a stale record QUOTED inside a later trusted
+# comment cannot masquerade as the current verdict and turn a label flip into an
+# approval of a hold that is no longer live.
 RECORD="$(printf '%s' "$ISSUE_JSON" | "$READY_CHECK" --trusted-comment-bodies \
-  | awk -v b="$RECORD_BEGIN" -v e="$RECORD_END" '
-      index($0, b) { buf = ""; inb = 1 }
-      inb          { buf = buf $0 "\n" }
-      index($0, e) { if (inb) { last = buf; inb = 0 } }
-      END          { printf "%s", last }')"
+  | "$READY_CHECK" --newest-record)"
 
 if [[ -z "$RECORD" ]]; then
   bounce "This issue carries no triage verdict record, so there is no hold to approve — and an approval that is not OF a verdict would be a second admission lane that skips triage entirely (#983)." \

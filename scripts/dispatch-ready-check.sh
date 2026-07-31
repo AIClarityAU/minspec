@@ -32,13 +32,28 @@
 # record (--render-record, called by triage-inbox.sh) and PARSES it, so writer and
 # reader are the same code by construction and the round-trip is unit-testable.
 #
-# HONEST SCOPE — what this does NOT do: it does not bind the record to its AUTHOR.
-# Anyone with write access could hand-craft a record comment; what they can no
-# longer do is inherit the gate by *clicking a label*, because a forged record must
-# also carry a correct sha256 of the exact triaged body. That converts an accidental
-# one-click bypass into a deliberate forgery. Author/provenance binding (the
-# equivalent of ai-review.yml's bot allowlist, #397) is a separate, tracked
-# hardening — see the summary for #983.
+# ── CORRECTION (2026-07-31): the paragraph that used to sit here was WRONG ───
+# It read: "Anyone with WRITE ACCESS could hand-craft a record comment … a forged
+# record must also carry a correct sha256 of the exact triaged body."
+#
+# This repo is PUBLIC. Both halves fail: writing the comment needs no permission at
+# all, and the `bodyHash` is no obstacle because the issue body is public, so the
+# hash is computable by anyone. A HASH BINDS CONTENT, NEVER AUTHORSHIP — it was
+# doing real work against *staleness* and none whatever against *forgery*, and the
+# two were conflated. Recorded in DR-072 §5.
+#
+# Two things now stand where that reasoning did:
+#   1. `--trusted-comment-bodies` — records are read only from comments whose AUTHOR
+#      could legitimately write one (this gate's App, or OWNER/MEMBER/COLLABORATOR).
+#   2. `--newest-record` — selection is by the record's own `verdictAt`, not by
+#      position, because comment authorship is NOT record authorship: trusted writers
+#      republish text they did not author (a maintainer quoting a past verdict; the
+#      dispatcher echoing a build agent's summary verbatim).
+#
+# STILL OPEN, and stated so it is not mistaken for closed: a COLLABORATOR-authored
+# *triage* record is accepted, so the boundary is "people with write access" rather
+# than "the gate itself"; `approvedBy` is self-declared on the CLI path; and the
+# existing corpus has never been audited for an already-planted record. All #1105.
 #
 # ── #1084: the gate needed an EXIT, not just an entrance ─────────────────────
 # Closing the hole above left `needs-review` a one-way door: dispatch demanded a
@@ -71,10 +86,12 @@
 #                           (OPEN | CLOSED, case-insensitive).
 #     <labels-csv>          the issue's CURRENT labels, comma-separated (label NAMES).
 #                           May legitimately be empty (an issue with no labels).
-#     <verdict-source-file> a file holding the issue's comment bodies (the dispatcher
-#                           writes `[.comments[].body] | join("\n")`). The LAST
-#                           verdict record found in it wins, so a re-triage always
-#                           supersedes an earlier verdict.
+#     <verdict-source-file> a file holding the TRUSTED comment bodies (the dispatcher
+#                           pipes `gh issue view --json comments` through
+#                           `--trusted-comment-bodies`). The record with the NEWEST
+#                           `verdictAt` wins — not the textually last — so a re-triage
+#                           supersedes an earlier verdict while a stale record QUOTED
+#                           inside a later comment cannot.
 #     <body-file>           a file holding the issue body AS COMPOSED FOR TRIAGE
 #                           ("# " + title + "\n\n" + body), used to recompute bodyHash.
 #
@@ -100,7 +117,8 @@
 #               say why). Quiet.
 #             no-verdict | stale-verdict | bad-schema | human-only | held |
 #             decision | no-body | no-hash | no-approver | bot-approver |
-#             bad-supersedes — the #983/#1084 verdict classes: a HOLD that
+#             bad-supersedes | no-verdictat | bad-verdictat | future-verdict —
+#               the #983/#1084/#1113 verdict classes: a HOLD that
 #               is NOT self-evident from the issue, so the dispatcher SURFACES it
 #               (label + a one-time comment). A silent refusal would itself violate
 #               "no silent gate" (DR-066). Anything unrecognised is surfaced too —
@@ -187,6 +205,74 @@ body_hash() {
 # exist is an audit trail that lies. Neither bracket can forge a field (that needs a
 # newline or a colon, both still stripped).
 record_scrub() { printf '%s' "$1" | tr -cd 'A-Za-z0-9:._/[]-'; }
+
+# The NEWEST complete BEGIN..END range in the verdict source, by `verdictAt`.
+#
+# ── Why not simply the LAST one (as this did until 2026-07-31) ───────────────
+# Taking the textually-last record assumed that position in the joined text tracks
+# recency. It does not, and the gap is reachable with NO ATTACKER AT ALL:
+#
+#   `--trusted-comment-bodies` establishes authorship of the COMMENT. It cannot
+#   establish authorship of the RECORD, because trusted writers republish text they
+#   did not author. A maintainer writing "the first triage said: <pastes record> but
+#   I re-ran it and it now wants review" puts a stale record LAST — and the gate then
+#   dispatched an issue whose live verdict was `hold: tier`. Reproduced against a
+#   `hold: human` / `human_only: yes` verdict too, i.e. it defeated the one hold this
+#   design calls absolute. The same channel exists non-adversarially through
+#   `dispatch-issue.sh`, which posts a build agent's `.agent-summary.md` verbatim
+#   under a trusted identity.
+#
+# So recency is read from the record's OWN timestamp rather than inferred from where
+# it happens to sit. A quoted record is always older than the verdict it is quoted
+# beside, so it can no longer win. `verdictAt` is ISO-8601 UTC, which sorts
+# lexicographically in chronological order — no date parsing required. Ties (same
+# second) fall back to the later position, preserving the re-triage-supersedes rule.
+#
+# A record with no parseable `verdictAt` sorts below every dated one and is refused
+# outright downstream, so this can never silently prefer an undated record.
+newest_record() { _newest_record_impl < "$1"; }
+
+# Implementation reads stdin so the `--newest-record` entry point and the reader
+# below share ONE selector. The approval front ends each used to carry their own
+# copy of "take the last record", which is how two of the three readers would have
+# kept the quoted-record defect after the third was fixed.
+_newest_record_impl() {
+  awk -v b="$RECORD_BEGIN" -v e="$RECORD_END" '
+    function verdict_at(block,   n, lines, i, v) {
+      n = split(block, lines, "\n")
+      for (i = 1; i <= n; i++) {
+        if (lines[i] ~ /^[[:space:]]*[Vv][Ee][Rr][Dd][Ii][Cc][Tt][Aa][Tt][[:space:]]*:/) {
+          v = lines[i]
+          sub(/^[^:]*:[[:space:]]*/, "", v)
+          gsub(/[[:space:]\r]/, "", v)
+          return v
+        }
+      }
+      return ""
+    }
+    index($0, b) { buf = ""; inb = 1 }
+    inb          { buf = buf $0 "\n" }
+    index($0, e) {
+      if (inb) {
+        at = verdict_at(buf)
+        # >= not > : equal timestamps keep the LATER record, so a re-triage in the
+        # same second still supersedes the verdict it replaces.
+        if (!seen || at >= best_at) { best_at = at; best = buf; seen = 1 }
+        inb = 0
+      }
+    }
+    END { printf "%s", best }
+  ' 2>/dev/null
+}
+
+# Exposed so the credentialed approval front ends select a record with THIS code
+# rather than each carrying its own "take the last one" awk — which is exactly how
+# two of the three readers would have retained the quoted-record defect after the
+# third was fixed. Verdict source on stdin; prints the winning record block.
+if [[ "${1:-}" == "--newest-record" ]]; then
+  _newest_record_impl
+  exit 0
+fi
 
 # is_bot_identity <login> — true for GitHub App / bot logins. Load-bearing in BOTH
 # halves (approve-issue.sh refuses to mint under one; the reader refuses to honour
@@ -394,18 +480,6 @@ has_label() {
 # machine-readable code and the human sentence can never disagree.
 refuse() { echo "not-ready [$1]: $2"; exit 1; }
 
-# Last complete BEGIN..END range in the verdict source. LAST, not first: a
-# re-triage appends a newer record, and the newest verdict must supersede the
-# older one (otherwise a superseded agent-ready verdict would outlive its own
-# re-triage to needs-review).
-last_record() {
-  awk -v b="$RECORD_BEGIN" -v e="$RECORD_END" '
-    index($0, b) { buf = ""; inb = 1 }
-    inb          { buf = buf $0 "\n" }
-    index($0, e) { if (inb) { last = buf; inb = 0 } }
-    END          { printf "%s", last }
-  ' "$1" 2>/dev/null
-}
 
 # Single field out of the record block, trimmed; empty if absent.
 record_field() {
@@ -437,7 +511,7 @@ if [[ -z "$VERDICT_SRC" || ! -r "$VERDICT_SRC" ]]; then
   refuse no-verdict "no verdict source supplied to the gate (caller must pass the issue's comment bodies) — refusing rather than trusting the label alone"
 fi
 
-RECORD="$(last_record "$VERDICT_SRC")"
+RECORD="$(newest_record "$VERDICT_SRC")"
 if [[ -z "$RECORD" ]]; then
   refuse no-verdict "'agent-ready' is present but NO triage verdict record backs it — the label alone is not a verdict (#983). Re-triage with \`scripts/triage-inbox.sh <N>\` to mint one."
 fi
@@ -449,6 +523,29 @@ case "$r_gate" in
   "$RECORD_SCHEMA_HUMAN") IS_HUMAN_APPROVAL=1 ;;
   *) refuse bad-schema "verdict record declares gate '${r_gate:-<missing>}', which is neither '${RECORD_SCHEMA}' nor '${RECORD_SCHEMA_HUMAN}' — unrecognised schema, refusing rather than guessing. Re-triage to mint a current record." ;;
 esac
+
+# ── `verdictAt` is now load-bearing, so it has to be real ────────────────────
+# Recency selection above reads this field, which makes an absent or future-dated
+# timestamp a way to influence WHICH record wins. Both are refused.
+#
+# A future date is refused because a record cannot have been minted after now: it is
+# the residual of the quoted-record class, where the quoted text is fabricated rather
+# than copied. The clock bound is best-effort — if `date` cannot produce one we skip
+# THIS check rather than refuse everything, because the primary control (newest
+# `verdictAt` wins) needs no clock at all, and a gate that refuses all work because a
+# date utility is missing would be a far worse failure than the one it guards.
+r_at="$(record_field verdictAt)"
+if [[ -z "$r_at" ]]; then
+  refuse no-verdictat "verdict record carries no verdictAt — recency cannot be established, and an undated record can never be shown to be the current one. Re-triage."
+fi
+if ! [[ "$r_at" =~ ^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}Z$ ]]; then
+  refuse bad-verdictat "verdict record's verdictAt '${r_at}' is not ISO-8601 UTC (YYYY-MM-DDTHH:MM:SSZ) — refusing rather than guessing at its recency."
+fi
+if _skew_bound="$(date -u -d '+1 hour' +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)" && [[ -n "$_skew_bound" ]]; then
+  if [[ "$r_at" > "$_skew_bound" ]]; then
+    refuse future-verdict "verdict record is dated ${r_at}, which is in the future (now+1h is ${_skew_bound}) — a verdict cannot have been minted after it was read."
+  fi
+fi
 
 # Freshness FIRST: a record that is not about the issue as it stands now says
 # nothing about it, whatever its other fields claim.

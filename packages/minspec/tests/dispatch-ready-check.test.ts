@@ -721,3 +721,105 @@ describe('dispatch-ready-check.sh — a verdict is only as good as its author (p
     expect(r.out).toContain('[no-verdict]');
   });
 });
+
+/**
+ * T0 — comment authorship is NOT record authorship (#1113, found by adversarial review).
+ *
+ * `--trusted-comment-bodies` establishes who wrote the COMMENT. It cannot establish who
+ * wrote the RECORD, because the pipeline's own trusted writers republish text they did
+ * not author:
+ *   • a maintainer quoting a past verdict in a discussion comment; and
+ *   • `dispatch-issue.sh`, which posts a build agent's `.agent-summary.md` verbatim
+ *     under a trusted identity.
+ *
+ * Selecting the TEXTUALLY LAST record therefore let stale text win. Reproduced with no
+ * attacker at all: a maintainer writing "the first triage said: <record> but I re-ran it"
+ * re-armed an issue whose live verdict was `hold: tier` — and, worse, one whose live
+ * verdict was `hold: human`, the hold this design calls absolute.
+ *
+ * Fix: select by the record's OWN `verdictAt`. A quoted record is always older than the
+ * verdict it sits beside, so it can no longer win — which in turn makes `verdictAt`
+ * load-bearing, hence the absent / malformed / future-dated refusals below.
+ */
+describe('dispatch-ready-check.sh — a QUOTED record cannot outrank the live verdict (#1113)', () => {
+  const OLD = '2026-07-20T00:00:00Z';
+  const NEW = '2026-07-29T00:00:00Z';
+
+  it('THE ATTACK: a trusted human quoting a stale hold:none does NOT re-arm a tier hold', () => {
+    const staleGo = render({ decision: 'agent-ready', tier: 'T2', hold: 'none', verdictAt: OLD });
+    const liveHold = render({ decision: 'needs-review', tier: 'T3', hold: 'tier', verdictAt: NEW });
+    // A maintainer quoting the old record for context — the quote lands LAST.
+    const quoted = `For the record, the first triage said:\n\n${staleGo}\n\nbut I re-ran it and it now wants review.`;
+
+    const r = check('OPEN', 'agent-ready,role:dev', `${staleGo}\n${liveHold}\n${quoted}`);
+    expect(r.ok).toBe(false);
+    expect(r.out).toContain('[held]');
+  });
+
+  it('…and does not defeat hold:human either — the hold the design calls absolute', () => {
+    const staleGo = render({ decision: 'agent-ready', tier: 'T2', hold: 'none', verdictAt: OLD });
+    const liveHuman = render({ decision: 'needs-review', tier: 'T3', hold: 'human', human_only: 'yes', verdictAt: NEW });
+    const r = check('OPEN', 'agent-ready', `${staleGo}\n${liveHuman}\n\nquoting:\n${staleGo}`);
+    expect(r.ok).toBe(false);
+    expect(r.out).toContain('[human-only]');
+  });
+
+  it('a bot comment echoing an agent summary that quotes a stale record is equally inert', () => {
+    // dispatch-issue.sh posts .agent-summary.md verbatim under the bot identity, and the
+    // agent's prompt embeds the untrusted issue body — so this channel is real.
+    const staleGo = render({ decision: 'agent-ready', tier: 'T2', hold: 'none', verdictAt: OLD });
+    const liveHold = render({ decision: 'needs-review', tier: 'T3', hold: 'tier', verdictAt: NEW });
+    const summary = `## Agent summary\n\nWork done. Context from the original triage:\n${staleGo}\n\n— branch x @ y`;
+    const r = check('OPEN', 'agent-ready', `${liveHold}\n${summary}`);
+    expect(r.ok).toBe(false);
+    expect(r.out).toContain('[held]');
+  });
+
+  it('a genuine re-triage STILL supersedes — the fix must not break the thing it protects', () => {
+    const oldHold = render({ decision: 'needs-review', tier: 'T3', hold: 'tier', verdictAt: OLD });
+    const newGo = render({ decision: 'agent-ready', tier: 'T2', hold: 'none', verdictAt: NEW });
+    expect(check('OPEN', 'agent-ready,role:dev', `${oldHold}\n${newGo}`)).toEqual({ ok: true, out: 'ready' });
+  });
+
+  it('equal timestamps fall back to position, so a same-second re-triage still wins', () => {
+    const go = render({ decision: 'agent-ready', tier: 'T2', hold: 'none', verdictAt: NEW });
+    const hold = render({ decision: 'needs-review', tier: 'T3', hold: 'tier', verdictAt: NEW });
+    expect(check('OPEN', 'agent-ready', `${go}\n${hold}`).ok).toBe(false);
+    expect(check('OPEN', 'agent-ready,role:dev', `${hold}\n${go}`)).toEqual({ ok: true, out: 'ready' });
+  });
+
+  // ── verdictAt is now load-bearing, so it has to be real ──────────────────
+  it('a record with no verdictAt is refused, not silently preferred', () => {
+    const r = check('OPEN', 'agent-ready', render().replace(/^verdictAt:.*$\n/m, ''));
+    expect(r.ok).toBe(false);
+    expect(r.out).toContain('[no-verdictat]');
+  });
+
+  it.each(['not-a-date', '2026-07-29', '2026-07-29T00:00:00', '20260729T000000Z', ''])(
+    'a malformed verdictAt (%s) is refused rather than guessed at',
+    (bad) => {
+      const rec = render().replace(/^verdictAt:.*$/m, `verdictAt: ${bad}`);
+      const r = check('OPEN', 'agent-ready', rec);
+      expect(r.ok).toBe(false);
+      expect(r.out).toMatch(/\[(bad-verdictat|no-verdictat)\]/);
+    },
+  );
+
+  it('a FUTURE-dated record is refused — the residual of a fabricated quote', () => {
+    const r = check('OPEN', 'agent-ready', render({ verdictAt: '2099-01-01T00:00:00Z' }));
+    expect(r.ok).toBe(false);
+    expect(r.out).toContain('[future-verdict]');
+  });
+
+  it('--newest-record is one shared selector, not a copy in each front end', () => {
+    const older = render({ hold: 'none', verdictAt: OLD });
+    const newer = render({ decision: 'needs-review', hold: 'tier', verdictAt: NEW });
+    const picked = execFileSync('bash', [GATE, '--newest-record'], {
+      input: `${older}\n${newer}\n${older}`,  // stale copy quoted last
+      encoding: 'utf-8',
+    });
+    expect(picked).toContain('hold: tier');
+    expect(picked).toContain(NEW);
+    expect(picked).not.toContain('hold: none');
+  });
+});
