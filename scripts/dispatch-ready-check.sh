@@ -143,8 +143,24 @@ RECORD_SCHEMA_HUMAN="minspec-human-approval/1"
 # consequence of some other change.
 APPROVABLE_HOLDS="tier"
 # The App login whose comments carry the gate's own verdict records. Defined ONCE,
-# here, because every reader must agree on it; `gh` renders the App as `minspec-sdd`
-# (its authorAssociation is CONTRIBUTOR, so association alone would reject it).
+# here, because every reader must agree on it. Its authorAssociation is CONTRIBUTOR,
+# so association alone would reject the very writer every record comes from.
+#
+# ── The login form DEPENDS ON WHICH API YOU CALL (measured 2026-07-31) ────────
+#   gh issue view --json comments   (GraphQL)  → "minspec-sdd"        ← bare
+#   gh pr view    --json comments   (GraphQL)  → "minspec-sdd"        ← bare
+#   gh api repos/../issues/N/comments (REST)   → "minspec-sdd[bot]"   ← bracketed
+# Today all three readers use the GraphQL shape, so the bare form is what arrives. But
+# nothing at the call site makes that visible, REST is a perfectly reasonable thing to
+# switch to (`--paginate` alone is a good reason, and this repo already uses REST for
+# the timeline), and getting it wrong fails in the WORST direction: the filter would
+# silently drop every bot-authored record and the gate would refuse to dispatch
+# anything, with no error to explain why. So the comparison normalises BOTH sides —
+# lowercased, with a trailing `[bot]` stripped — and accepts either spelling.
+#
+# NOT `is_bot_identity`: that matches ANY `*[bot]` login, which would trust
+# `github-actions[bot]`, `dependabot[bot]` and every future App installed on the repo
+# to author verdict records. Only THIS gate's App may.
 RECORD_BOT_LOGIN="minspec-sdd"
 RECORD_MARKER="<!-- minspec-verdict-record -->"
 RECORD_BEGIN="MINSPEC_VERDICT_BEGIN"
@@ -222,9 +238,12 @@ if [[ "${1:-}" == "--trusted-comment-bodies" ]]; then
   t_bot="${1-$RECORD_BOT_LOGIN}"
   [[ -n "$t_bot" ]] || t_bot="$RECORD_BOT_LOGIN"
   jq -r --arg bot "$t_bot" '
+    # Normalise a login so the bare and `[bot]`-suffixed spellings of the SAME App
+    # compare equal, and case can never matter. Applied to both sides.
+    def botnorm: ascii_downcase | sub("\\[bot\\]$"; "");
     [ (.comments // [])[]
       | select(
-          ($bot != "" and ((.author.login // "") == $bot))
+          ($bot != "" and (((.author.login // "") | botnorm) == ($bot | botnorm)))
           or ((.authorAssociation // "") as $a
               | $a == "OWNER" or $a == "MEMBER" or $a == "COLLABORATOR")
         )

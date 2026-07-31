@@ -608,6 +608,38 @@ describe('dispatch-ready-check.sh — a verdict is only as good as its author (p
     expect(r.out).toContain('BOT-RECORD');
   });
 
+  /**
+   * The bot's login form DEPENDS ON WHICH API IS CALLED — measured live 2026-07-31:
+   *   gh issue view --json comments   (GraphQL)  → "minspec-sdd"
+   *   gh pr view    --json comments   (GraphQL)  → "minspec-sdd"
+   *   gh api repos/../issues/N/comments (REST)   → "minspec-sdd[bot]"
+   *
+   * All three readers use the GraphQL shape today, so the bare form is what arrives —
+   * but nothing at the call site makes that visible, and this same script already uses
+   * REST for the timeline. Getting it wrong fails in the WORST direction: every
+   * bot-authored record silently dropped, every dispatch refused, no error saying why.
+   *
+   * A fixture pinned to ONE spelling would encode that assumption and go green while
+   * production broke. So both spellings are asserted, in both directions.
+   */
+  it.each(['minspec-sdd', 'minspec-sdd[bot]', 'MINSPEC-SDD', 'Minspec-Sdd[bot]'])(
+    'accepts the gate bot spelled %s — the login form varies by API, so neither spelling may be assumed',
+    (login) => {
+      const r = filter({ comments: [c('BOT-RECORD', login, 'CONTRIBUTOR')] });
+      expect(r.out).toContain('BOT-RECORD');
+    },
+  );
+
+  it('does NOT widen to every bot — only THIS gate\'s App may author a record', () => {
+    // The reviewers suggested reusing `is_bot_identity`, which matches any `*[bot]`.
+    // That would trust every App installed on the repo, now and in future, to write
+    // verdict records — a strictly worse trust boundary than the one being fixed.
+    for (const other of ['github-actions[bot]', 'dependabot[bot]', 'renovate[bot]', 'copilot[bot]']) {
+      const r = filter({ comments: [c('OTHER-BOT-PAYLOAD', other, 'CONTRIBUTOR')] });
+      expect(r.out, other).not.toContain('OTHER-BOT-PAYLOAD');
+    }
+  });
+
   it('keeps OWNER / MEMBER / COLLABORATOR', () => {
     for (const assoc of ['OWNER', 'MEMBER', 'COLLABORATOR']) {
       const r = filter({ comments: [c(`FROM-${assoc}`, 'harvest316', assoc)] });
@@ -625,7 +657,12 @@ describe('dispatch-ready-check.sh — a verdict is only as good as its author (p
   });
 
   it('a login merely RESEMBLING the bot is not the bot', () => {
-    for (const impostor of ['minspec-sdd2', 'Minspec-sdd', 'not-minspec-sdd', 'minspec-sd']) {
+    // NB `Minspec-sdd` is NOT an impostor: GitHub logins are case-insensitively
+    // unique, so that IS the same account. Only genuinely different logins here.
+    for (const impostor of [
+      'minspec-sdd2', 'not-minspec-sdd', 'minspec-sd',
+      'minspec-sdd2[bot]', 'minspec-sdd-x[bot]', 'xminspec-sdd',
+    ]) {
       const r = filter({ comments: [c('IMPOSTOR', impostor, 'NONE')] });
       expect(r.out, impostor).not.toContain('IMPOSTOR');
     }
