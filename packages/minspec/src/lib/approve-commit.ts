@@ -157,14 +157,6 @@ export async function commitApproval(
     return { outcome: 'detached-head' };
   }
 
-  // 2b. Destination guard (invariant 4, #1064). MUST come before any `git add`
-  //     so a refusal leaves the shared index untouched. Fails open: when the
-  //     default branch cannot be determined we proceed exactly as before.
-  const branch = await resolveBranchDestination(run);
-  if (branch && branch.current === branch.default) {
-    return { outcome: 'protected-branch', branch };
-  }
-
   // 3. Keep only paths that exist on disk, made repo-relative. A path that
   //    resolves outside the repo (shouldn't happen) is dropped, never committed.
   const rel = absPaths
@@ -178,6 +170,40 @@ export async function commitApproval(
     .map((p) => path.relative(rootDir, p))
     .filter((p) => p.length > 0 && !p.startsWith('..' + path.sep) && p !== '..');
   if (rel.length === 0) return { outcome: 'nothing-to-commit' };
+
+  // 3b. Net-change probe, BEFORE the destination guard. `git status` is
+  //     read-only — it stages nothing, so this does not weaken invariant 4
+  //     (the point of which is that a REFUSAL leaves the shared index
+  //     untouched, not that no git command may run first).
+  //
+  //     Ordering matters for truthfulness. A re-approve that changed neither
+  //     the doc nor the record is a no-op; if the destination guard ran first
+  //     it would answer 'protected-branch' and the command layer would warn
+  //     "approval written but NOT committed — files left in your working tree"
+  //     about a commit that was never going to happen and files that do not
+  //     differ from HEAD. Refusing a no-op is also strictly MORE than the hook
+  //     refuses, which invariant 4 forbids.
+  //
+  //     `--untracked-files=all` because a brand-new sidecar is untracked and
+  //     would otherwise read as "no change" — the inverse false answer.
+  //     Advisory: if status fails we fall through to the post-add check below,
+  //     which is the pre-existing behaviour.
+  try {
+    const status = (
+      await run(['status', '--porcelain', '--untracked-files=all', '--', ...rel])
+    ).trim();
+    if (!status) return { outcome: 'nothing-to-commit', paths: rel };
+  } catch {
+    // fall through — step 5 still catches the no-change case after staging
+  }
+
+  // 3c. Destination guard (invariant 4, #1064). MUST come before any `git add`
+  //     so a refusal leaves the shared index untouched. Fails open: when the
+  //     default branch cannot be determined we proceed exactly as before.
+  const branch = await resolveBranchDestination(run);
+  if (branch && branch.current === branch.default) {
+    return { outcome: 'protected-branch', branch };
+  }
 
   // 4. Stage exactly these paths (this is what makes a NEW untracked sidecar
   //    committable by the pathspec commit below).
