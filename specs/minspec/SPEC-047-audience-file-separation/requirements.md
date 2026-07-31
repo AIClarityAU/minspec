@@ -2,7 +2,7 @@
 id: SPEC-047
 title: Audience file-separation authoring discipline + validator
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 created: 2026-07-21
@@ -12,7 +12,7 @@ relates_to: [SPEC-045, SPEC-048, SPEC-038]
 phases:
   specify: done
   clarify: done
-  plan: pending
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
