@@ -876,3 +876,79 @@ describe('dispatch-ready-check.sh — the author filter is actually WIRED UP (#1
     expect(unrelated).not.toContain('--trusted-comment-bodies');
   });
 });
+
+/**
+ * T0 — a malformed `verdictAt` must not win record selection (#1113 review follow-up).
+ *
+ * Ranking is a lexical string compare, so an unvalidated key let `not-a-date` outrank
+ * every real timestamp ("n" > "2") from ANY position. The reader then refused the issue
+ * with `bad-verdictat` — the DENIAL direction of this gate family. Not a bypass, but a
+ * way to make a good issue undispatchable until re-triaged.
+ *
+ * Caught by the PR #1127 panel, which also noted the code comment claiming a bad value
+ * "sorts below every dated one" held only for the EMPTY case. It does now.
+ */
+describe('dispatch-ready-check.sh — a malformed verdictAt sorts LAST, not first', () => {
+  const VALID = '2026-07-29T00:00:00Z';
+  const pick = (src: string) =>
+    execFileSync('bash', [GATE, '--newest-record'], { input: src, encoding: 'utf-8' });
+
+  const MALFORMED = ['not-a-date', 'zzzz', '9999', 'tomorrow', '2026-07-29', 'x2026-07-29T00:00:00Z'];
+
+  it.each(MALFORMED)('a valid record beats a malformed one (%s) — malformed LAST', (bad) => {
+    const good = render({ decision: 'needs-review', hold: 'tier', verdictAt: VALID });
+    const junk = render({ hold: 'none' }).replace(/^verdictAt:.*$/m, `verdictAt: ${bad}`);
+    expect(pick(`${good}\n${junk}`), `order: good,junk (${bad})`).toContain(`verdictAt: ${VALID}`);
+  });
+
+  it.each(MALFORMED)('…and also when the malformed one comes FIRST (%s)', (bad) => {
+    const good = render({ decision: 'needs-review', hold: 'tier', verdictAt: VALID });
+    const junk = render({ hold: 'none' }).replace(/^verdictAt:.*$/m, `verdictAt: ${bad}`);
+    expect(pick(`${junk}\n${good}`), `order: junk,good (${bad})`).toContain(`verdictAt: ${VALID}`);
+  });
+
+  it('the live verdict survives, so a garbled record can no longer deny dispatch', () => {
+    const liveGo = render({ decision: 'agent-ready', tier: 'T2', hold: 'none', verdictAt: VALID });
+    const junk = render({ hold: 'tier' }).replace(/^verdictAt:.*$/m, 'verdictAt: not-a-date');
+    // Before the fix this refused [bad-verdictat]; now the real verdict is selected.
+    expect(check('OPEN', 'agent-ready,role:dev', `${liveGo}\n${junk}`)).toEqual({ ok: true, out: 'ready' });
+  });
+
+  it('a malformed record ALONE is still refused — it must not become silently valid', () => {
+    const junk = render().replace(/^verdictAt:.*$/m, 'verdictAt: not-a-date');
+    const r = check('OPEN', 'agent-ready', junk);
+    expect(r.ok).toBe(false);
+    expect(r.out).toContain('[bad-verdictat]');
+  });
+});
+
+/**
+ * T0 — every shell script must PARSE. Trivial, and it would have caught a real break.
+ *
+ * While fixing the malformed-verdictAt sort I wrote the word "record's" into a comment
+ * INSIDE a bash single-quoted awk program. The apostrophe closed the quote and broke
+ * `dispatch-ready-check.sh` entirely — every gate call exited 2. The unit tests caught
+ * it only as 86 unrelated failures, which is a slow and confusing way to learn that a
+ * file does not parse.
+ */
+describe('scripts/ — every shell script parses (bash -n)', () => {
+  const REPO_ROOT = path.resolve(__dirname, '../../..');
+  const SCRIPTS = fs
+    .readdirSync(path.join(REPO_ROOT, 'scripts'))
+    .filter((f) => f.endsWith('.sh'))
+    .map((f) => `scripts/${f}`)
+    .concat(
+      fs
+        .readdirSync(path.join(REPO_ROOT, 'scripts/lib'))
+        .filter((f) => f.endsWith('.sh'))
+        .map((f) => `scripts/lib/${f}`),
+    );
+
+  it('finds a non-trivial number of scripts (guards the guard)', () => {
+    expect(SCRIPTS.length).toBeGreaterThan(5);
+  });
+
+  it.each(SCRIPTS)('%s parses', (rel) => {
+    expect(() => execFileSync('bash', ['-n', path.join(REPO_ROOT, rel)], { encoding: 'utf-8' })).not.toThrow();
+  });
+});
