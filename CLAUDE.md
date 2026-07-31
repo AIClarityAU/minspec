@@ -194,6 +194,29 @@ tell that the gate is missing — fix the gate too (see DR-003 Phase 4 asymmetry
 Root-caused 2026-06-01: SPEC-004's missing `epic:` was first "fixed" with a data edit
 alone; the real defect was `validateSpec` flagging dangling refs but not missing ones.
 
+**Mechanism claims need the same bar (widened 2026-07-29, #1051).** Everything above
+covers one claim family — *"is this feature built?"*. It does not cover *"how does the
+system behave?"* A statement about behavior — "editing `status:` stales the approval",
+"the validator requires Z", "only #N tracks this", "this is N specs", "a hash cannot
+change without a content change" — is not licensed by a plausible inference from a true
+adjacent premise, even when every one of those examples was. Cite the code (`file:line`)
+or the computed value. `npm run facts` (#1050) answers the common ones in seconds; the
+artifact prose is not a citation, because prose can be wrong (#1049).
+
+The generalisation of *artifact-existence ≠ feature-existence* is **plausible-inference
+≠ observation** — both accept a proxy for the authoritative signal. Each example above
+was an actual failure this week, refuted in seconds by the code or a single grep/PR
+(editing `status:` does not stale the approval — canonicalization strips it; "only #N"
+was refuted by one open PR, #960; "6 specs" was refuted by one grep, #898; the hash claim
+was the ai-review false block, #1029).
+
+When a claim is inferred rather than checked, say so in the same sentence ("I believe X,
+unverified") so a reader knows which claims to spot-check — an unmarked declarative reads
+as verified. Note: this rule is itself prose, so it is model-trusted and will drift
+(constitution's *"enforce, don't trust the model"*) — #1049 removes the false premise
+this class reads from and #1050 makes checking cheap enough that guessing has no upside;
+this paragraph only names the standard.
+
 ## Agent Dispatch (Tier-Gated HITL)
 
 The `scripts/` dispatch below is the **dev-time** path for building this monorepo.
