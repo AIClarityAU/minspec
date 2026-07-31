@@ -77,6 +77,29 @@ describe('ai-review panel: still whole, still fail-closed', () => {
     expect(wf).toContain('RAN_VOTERS');
     expect(wf).toContain('Reduced coverage');
   });
+
+  it('keeps each voter DIAGNOSTICS — a blocked verdict must stay explainable', () => {
+    // The first parallel draft sent voter stderr to /dev/null. review-branch.sh writes
+    // its quota-vs-genuine-crash reasoning there, so discarding it made an
+    // `ai-review:blocked` impossible to check against what the CLI actually said —
+    // the reviewer flagged exactly this, then the next run blocked and the evidence
+    // was already gone. Diagnostics are captured per voter and replayed after the
+    // barrier: kept separate from stdout (which is the parsed verdict), never dropped.
+    expect(wf).not.toMatch(/review-branch\.sh[^\n]*2>\/dev\/null/);
+    expect(wf).toMatch(/2> "\$VOTE_DIR\/\$1\.err"/);
+    expect(wf).toMatch(/cat "\$VOTE_DIR\/\$role\.err"/);
+
+    // stderr must NOT be folded into the verdict stream — diagnostics reaching
+    // review-decide.sh could change a gate decision.
+    expect(wf).not.toMatch(/review-branch\.sh[^\n]*> "\$VOTE_DIR\/\$1\.out" 2>&1/);
+
+    // The replay happens after the wait barrier, or a still-running voter's file
+    // would be dumped half-written.
+    const barrierAt = wf.indexOf('for p in $VOTER_PIDS');
+    const replayAt = wf.indexOf('cat "$VOTE_DIR/$role.err"');
+    expect(barrierAt).toBeGreaterThan(-1);
+    expect(replayAt).toBeGreaterThan(barrierAt);
+  });
 });
 
 describe('ai-review panel: starts are staggered (burst-limit desync)', () => {

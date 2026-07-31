@@ -380,8 +380,17 @@ jobs:
           # Each voter writes its own file (no interleaved stdout), and each is already
           # `|| true` so one failing voter cannot abort the others or the step.
           VOTE_DIR="$(mktemp -d)"
+          # Voter stdout is the VERDICT (parsed); stderr is DIAGNOSTICS (quota vs
+          # genuine-crash messages, the agent-output dump). They must not be merged
+          # into one stream — stderr text in $1.out would be fed to review-decide.sh —
+          # but stderr must not be discarded either: `2>/dev/null` silently deleted the
+          # only evidence of WHY a voter failed, so a blocked verdict became
+          # undiagnosable after the fact. Keep them separate and both visible: stdout
+          # to the vote file, stderr to the Actions log, prefixed so parallel voters'
+          # lines stay attributable when they interleave.
           run_voter() {  # $1 = role
-            bash scripts/review-branch.sh "$BASE" "$HEAD" --role "$1" > "$VOTE_DIR/$1.out" 2>/dev/null || true
+            bash scripts/review-branch.sh "$BASE" "$HEAD" --role "$1" \
+              > "$VOTE_DIR/$1.out" 2> "$VOTE_DIR/$1.err" || true
           }
           # `if` rather than `cond && { … }`: this step inherits `-e` from the Actions
           # default shell (`set -uo pipefail` does not clear it), and a false `&&` list
@@ -411,6 +420,22 @@ jobs:
           # Wait for ALL of them. A voter that dies still leaves an (empty) file, which
           # the fail-closed reads below turn into `changes` — never a silent pass.
           for p in $VOTER_PIDS; do wait "$p" || true; done
+
+          # Replay each voter's diagnostics AFTER the barrier, attributed and grouped.
+          # Sequentially, review-branch.sh's stderr (quota-vs-genuine-crash messages,
+          # the agent-output dump) landed in the Actions log by default. Running the
+          # voters concurrently would interleave those streams unreadably, so they are
+          # captured per voter and replayed here — visible and attributable, instead of
+          # discarded. Losing them made a `blocked` verdict undiagnosable after the
+          # fact: the classifier's reason could not be checked against what the CLI
+          # actually said.
+          for role in reviewer security architect skeptic; do
+            if [ -s "$VOTE_DIR/$role.err" ]; then
+              echo "::group::voter stderr — $role"
+              cat "$VOTE_DIR/$role.err"
+              echo "::endgroup::"
+            fi
+          done
 
           # ── collect verdicts (identical fail-closed handling to the sequential form) ──
           read_vote() { [ -f "$VOTE_DIR/$1.out" ] && cat "$VOTE_DIR/$1.out" || true; }
