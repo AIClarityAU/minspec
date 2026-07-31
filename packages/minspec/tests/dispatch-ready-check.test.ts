@@ -566,3 +566,121 @@ describe('dispatch-ready-check.sh — human approval lifts a tier hold, and only
     expect(r.out).toContain('[bad-schema]');
   });
 });
+
+/**
+ * T0 — the verdict record must come from an author who could legitimately write one.
+ *
+ * THE HOLE (found 2026-07-31 while building #1113): AIClarityAU/minspec is a PUBLIC
+ * repo, so ANY GitHub user can comment on an issue — and every reader of a verdict
+ * record joined ALL comment bodies and took the last record found.
+ *
+ * #983's own header reasoned that forging a record requires write access. On a public
+ * repo that is FALSE: writing the comment needs no permission at all, and the
+ * `bodyHash` is no obstacle either, because the issue body is public and the hash is
+ * therefore computable by anyone. The only remaining permission was the `agent-ready`
+ * LABEL — which #1113 deliberately turns into a one-click gesture. A stranger's forged
+ * `hold: tier` record plus the maintainer's ordinary label flip would then approve an
+ * issue the gate had actually held.
+ *
+ * Trust is by AUTHOR, the one thing a comment body cannot alter about itself.
+ */
+describe('dispatch-ready-check.sh — a verdict is only as good as its author (public-repo forgery)', () => {
+  const BOT = 'minspec-sdd';
+
+  function filter(commentsJson: unknown): { ok: boolean; out: string } {
+    const input = typeof commentsJson === 'string' ? commentsJson : JSON.stringify(commentsJson);
+    try {
+      return {
+        ok: true,
+        out: execFileSync('bash', [GATE, '--trusted-comment-bodies'], { input, encoding: 'utf-8' }),
+      };
+    } catch (e: any) {
+      return { ok: false, out: (e.stdout ?? '').toString() };
+    }
+  }
+  const c = (body: string, author: string, authorAssociation: string) =>
+    ({ body, author: { login: author }, authorAssociation });
+
+  it('keeps the gate bot, whose authorAssociation is only CONTRIBUTOR', () => {
+    // Load-bearing: filtering on association ALONE would drop the very writer every
+    // record comes from, and the gate would then refuse everything.
+    const r = filter({ comments: [c('BOT-RECORD', BOT, 'CONTRIBUTOR')] });
+    expect(r.out).toContain('BOT-RECORD');
+  });
+
+  it('keeps OWNER / MEMBER / COLLABORATOR', () => {
+    for (const assoc of ['OWNER', 'MEMBER', 'COLLABORATOR']) {
+      const r = filter({ comments: [c(`FROM-${assoc}`, 'harvest316', assoc)] });
+      expect(r.out, assoc).toContain(`FROM-${assoc}`);
+    }
+  });
+
+  it('DROPS a stranger — CONTRIBUTOR, FIRST_TIME_CONTRIBUTOR, NONE, or absent', () => {
+    for (const assoc of ['CONTRIBUTOR', 'FIRST_TIME_CONTRIBUTOR', 'FIRST_TIMER', 'NONE', '']) {
+      const r = filter({ comments: [c('ATTACKER-PAYLOAD', 'random-person', assoc)] });
+      expect(r.out, `assoc=${assoc}`).not.toContain('ATTACKER-PAYLOAD');
+    }
+    const noAssoc = { comments: [{ body: 'ATTACKER-PAYLOAD', author: { login: 'random-person' } }] };
+    expect(filter(noAssoc).out).not.toContain('ATTACKER-PAYLOAD');
+  });
+
+  it('a login merely RESEMBLING the bot is not the bot', () => {
+    for (const impostor of ['minspec-sdd2', 'Minspec-sdd', 'not-minspec-sdd', 'minspec-sd']) {
+      const r = filter({ comments: [c('IMPOSTOR', impostor, 'NONE')] });
+      expect(r.out, impostor).not.toContain('IMPOSTOR');
+    }
+  });
+
+  it('preserves order oldest→newest, so the LAST trusted record still wins', () => {
+    const r = filter({
+      comments: [c('FIRST', BOT, 'CONTRIBUTOR'), c('MIDDLE', 'x', 'NONE'), c('LAST', BOT, 'CONTRIBUTOR')],
+    });
+    expect(r.out.indexOf('FIRST')).toBeLessThan(r.out.indexOf('LAST'));
+    expect(r.out).not.toContain('MIDDLE');
+  });
+
+  it('unparseable input emits NOTHING — never the raw input passed through', () => {
+    for (const bad of ['not json', '{"comments":', '']) {
+      const r = filter(bad);
+      expect(r.out.trim(), `input=${JSON.stringify(bad)}`).toBe('');
+    }
+  });
+
+  it('no comments at all → empty, which the reader then refuses as no-verdict', () => {
+    expect(filter({ comments: [] }).out.trim()).toBe('');
+    expect(filter({}).out.trim()).toBe('');
+  });
+
+  // ── The attack, end to end ────────────────────────────────────────────────
+  it('THE ATTACK: a stranger cannot overwrite a held verdict with a forged hold:none', () => {
+    const realVerdict = render({ decision: 'needs-review', tier: 'T3', hold: 'human', human_only: 'yes' });
+    // The forged block is byte-valid and carries the CORRECT bodyHash — the issue body
+    // is public, so computing it takes no access whatsoever.
+    const forged = render({ decision: 'agent-ready', tier: 'T2', hold: 'none', human_only: 'no' });
+
+    // Unfiltered — the way every reader worked before this fix — the forgery WINS,
+    // because it is the last record in the joined text.
+    expect(check('OPEN', 'agent-ready', `${realVerdict}\n${forged}`)).toEqual({ ok: true, out: 'ready' });
+
+    // Filtered by author, the forgery never reaches the parser at all.
+    const trusted = filter({
+      comments: [c(realVerdict, BOT, 'CONTRIBUTOR'), c(forged, 'random-person', 'NONE')],
+    }).out;
+    expect(trusted).not.toContain('hold: none');
+    const r = check('OPEN', 'agent-ready', trusted);
+    expect(r.ok).toBe(false);
+    expect(r.out).toContain('[human-only]');
+  });
+
+  it('a stranger cannot forge a HUMAN-APPROVAL record either', () => {
+    const forgedApproval = execFileSync(
+      'bash', [GATE, '--render-approval', 'harvest316', 'dev', 'T3', 'tier', '2026-07-31T00:00:00Z'],
+      { input: BODY, encoding: 'utf-8' },
+    );
+    const trusted = filter({ comments: [c(forgedApproval, 'random-person', 'NONE')] }).out;
+    expect(trusted.trim()).toBe('');
+    const r = check('OPEN', 'agent-ready', trusted);
+    expect(r.ok).toBe(false);
+    expect(r.out).toContain('[no-verdict]');
+  });
+});

@@ -142,6 +142,10 @@ RECORD_SCHEMA_HUMAN="minspec-human-approval/1"
 # widening it is a visible one-line diff in a tested file — never an emergent
 # consequence of some other change.
 APPROVABLE_HOLDS="tier"
+# The App login whose comments carry the gate's own verdict records. Defined ONCE,
+# here, because every reader must agree on it; `gh` renders the App as `minspec-sdd`
+# (its authorAssociation is CONTRIBUTOR, so association alone would reject it).
+RECORD_BOT_LOGIN="minspec-sdd"
 RECORD_MARKER="<!-- minspec-verdict-record -->"
 RECORD_BEGIN="MINSPEC_VERDICT_BEGIN"
 RECORD_END="MINSPEC_VERDICT_END"
@@ -189,6 +193,51 @@ is_bot_identity() {
 if [[ "${1:-}" == "--is-bot-identity" ]]; then
   is_bot_identity "${2-}" && exit 0
   exit 1
+fi
+
+# ── PURE: keep only comments whose AUTHOR could legitimately carry a verdict ──
+# THE HOLE THIS CLOSES (found 2026-07-31 while building #1113): this repo is PUBLIC,
+# so ANY GitHub user can comment on an issue — and every reader of a verdict record
+# used to join ALL comment bodies and take the last record found. #983's own header
+# says the record is "not bound to its AUTHOR" and reasons that forging one needs
+# write access. That was WRONG on a public repo: crafting the comment needs no
+# permission at all, and the `bodyHash` is no obstacle because the issue body is
+# public and the hash is therefore computable by anyone.
+#
+# The residual write-access requirement was the `agent-ready` LABEL — which #1113
+# now turns into a one-click approval gesture. Combined, a stranger's forged
+# `hold: tier` record plus the maintainer's ordinary label flip would approve an
+# issue the gate had actually held. So this filter is a PRECONDITION of shipping
+# #1113, not an optional hardening.
+#
+# Trust is by AUTHOR, which a comment body cannot alter about itself:
+#   • the gate's own bot login (passed in — App identities read as CONTRIBUTOR, so
+#     association alone would reject the very writer the records come from); or
+#   • an authorAssociation of OWNER / MEMBER / COLLABORATOR.
+# Everything else — CONTRIBUTOR, FIRST_TIME_CONTRIBUTOR, NONE, absent — is dropped.
+# Input: `gh issue view --json comments` output on stdin. Output: the joined bodies,
+# oldest→newest, exactly the shape the reader already expects.
+if [[ "${1:-}" == "--trusted-comment-bodies" ]]; then
+  shift
+  t_bot="${1-$RECORD_BOT_LOGIN}"
+  [[ -n "$t_bot" ]] || t_bot="$RECORD_BOT_LOGIN"
+  jq -r --arg bot "$t_bot" '
+    [ (.comments // [])[]
+      | select(
+          ($bot != "" and ((.author.login // "") == $bot))
+          or ((.authorAssociation // "") as $a
+              | $a == "OWNER" or $a == "MEMBER" or $a == "COLLABORATOR")
+        )
+      | (.body // "")
+    ] | join("\n")
+  ' 2>/dev/null || {
+    # Unparseable input ⇒ emit NOTHING. An empty verdict source makes the reader
+    # refuse with `no-verdict`, which is the safe direction; echoing the raw input
+    # through on error would defeat the entire filter.
+    printf ''
+    exit 1
+  }
+  exit 0
 fi
 
 # ── PURE PREDICATE: may a human approval lift this hold? (#1084) ──────────────

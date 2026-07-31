@@ -178,7 +178,10 @@ fi
 # Composed EXACTLY as triage-inbox.sh composes it, so both sides hash identical bytes.
 ISSUE_BODY="$(printf '%s' "$ISSUE_JSON" | jq -r '"# " + .title + "\n\n" + .body')"
 
-RECORD="$(printf '%s' "$ISSUE_JSON" | jq -r '[.comments[]?.body // ""] | join("\n")' \
+# TRUSTED comments only. On a PUBLIC repo anyone can comment, so an unfiltered read
+# would let a stranger's forged `hold: tier` block become the verdict this approval
+# claims to lift — turning the maintainer's ordinary label flip into an escalation.
+RECORD="$(printf '%s' "$ISSUE_JSON" | "$READY_CHECK" --trusted-comment-bodies \
   | awk -v b="$RECORD_BEGIN" -v e="$RECORD_END" '
       index($0, b) { buf = ""; inb = 1 }
       inb          { buf = buf $0 "\n" }

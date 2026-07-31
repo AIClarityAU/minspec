@@ -109,8 +109,10 @@ fi
 # Approving an issue that was never triaged would let this script become a second
 # admission lane that skips the gate entirely — precisely #983. So a fresh triage
 # verdict is a PRECONDITION of approval, not an alternative to it.
+# TRUSTED comments only — this repo is PUBLIC, so an unfiltered read would let any
+# stranger's forged record become the verdict you believe you are approving.
 RECORD="$(printf '%s' "$ISSUE_JSON" \
-  | jq -r '[.comments[]?.body // ""] | join("\n")' \
+  | "$READY_CHECK" --trusted-comment-bodies \
   | awk -v b="$RECORD_BEGIN" -v e="$RECORD_END" '
       index($0, b) { buf = ""; inb = 1 }
       inb          { buf = buf $0 "\n" }
