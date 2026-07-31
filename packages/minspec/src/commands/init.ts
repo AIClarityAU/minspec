@@ -6,6 +6,7 @@ import {
   generateHarnessFiles,
   refreshHarnessFiles,
   rescaffoldManagedRegionFile,
+  untrackedNoticeMessage,
   type ManagedRegionWarning,
 } from '../lib/scaffold';
 import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS, MANAGED_REGION_TEMPLATES } from '../lib/template-registry';
@@ -1030,9 +1031,13 @@ export async function initCommand(
   // write fails partway, the project is left with a partial .minspec/ (and the
   // drift detector then reports false drift). Catch any failure, surface exactly
   // what went wrong, and do NOT report a misleading "Initialized" success (#153).
+  let untrackedOnInit: string[] = [];
   try {
     scaffold(folder);
-    generateHarnessFiles(folder);
+    // `?? []` — a stubbed generateHarnessFiles (several suites mock it) returns
+    // undefined, and an un-iterable here would turn a reporting nicety into an
+    // init-breaking TypeError. Reporting must never be able to fail the command.
+    untrackedOnInit = generateHarnessFiles(folder) ?? [];
   } catch (err) {
     vscode.window.showErrorMessage(
       `MinSpec: Initialization failed — ${describeError(err)}. ` +
@@ -1043,6 +1048,17 @@ export async function initCommand(
   vscode.window.showInformationMessage(
     'MinSpec: Initialized .minspec/ and generated harness files.',
   );
+  // Report any `git rm --cached` the reconcile performed. initCommand is
+  // re-runnable and NOT gated on first-init, so Initialize on an already-broken
+  // repo does mutate the index — reporting it here is what keeps that from being
+  // a silent git action (#1146). Same surface the refresh path uses.
+  for (const outputPath of untrackedOnInit) {
+    await surfaceManagedRegionWarning(folder, {
+      outputPath,
+      message: untrackedNoticeMessage(outputPath),
+      kind: 'untracked',
+    });
+  }
   surfaceConstitutionNudge(folder);
   if (isFirstInit) {
     await offerCoverageThresholdPrompt(folder);

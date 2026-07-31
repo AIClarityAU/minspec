@@ -381,7 +381,14 @@ export function untrackDeclaredMachineLocalPaths(rootDir: string): string[] {
 /**
  * @returns the paths removed from the git index, for the caller to REPORT. Never
  * discard this — an unreported `git rm --cached` is precisely the invisible git
- * action G-8 exists to remove, and the two callers below thread it to the UI.
+ * action G-8 exists to remove.
+ *
+ * Both callers propagate it: {@link refreshHarnessFiles} turns each into an
+ * `'untracked'` {@link ManagedRegionWarning}, and {@link generateHarnessFiles}
+ * returns the list for `initCommand` to surface the same way. Each is covered by a
+ * test that asserts the path reaches the caller — the first revision of this change
+ * claimed the threading in prose while discarding the value, which is the defect
+ * this whole function exists to stop.
  */
 export function ensureGitignoreEntries(rootDir: string): string[] {
   // Reconcile FIRST, and unconditionally — before the early return below.
@@ -910,10 +917,15 @@ export function recordVerifyAndSaveManifest(rootDir: string): void {
  * Only writes files that do not already exist (first-time init).
  * Stores initial section hashes for future merge-on-refresh.
  */
-export function generateHarnessFiles(rootDir: string): void {
+export function generateHarnessFiles(rootDir: string): string[] {
   // Ensure .minspec/ exists
   scaffold(rootDir);
-  ensureGitignoreEntries(rootDir);
+  // Returned, not discarded. `initCommand` is re-runnable and is NOT gated on
+  // first-init, so Initialize on an already-broken repo — the exact population
+  // this reconcile targets — reaches here and can perform a `git rm --cached`.
+  // Discarding it would leave that index change silent on the init path while the
+  // refresh path reports it: the same G-8 defect, one caller over (#1146 review).
+  const untracked = ensureGitignoreEntries(rootDir);
 
   const config = loadConfig(rootDir);
   const context = buildContext(rootDir, config);
@@ -979,6 +991,8 @@ export function generateHarnessFiles(rootDir: string): void {
   // self-check is a fail-closed tripwire (green by construction here; guards a future
   // record-before-write regression, INV-3 / D4), not standalone #890 protection.
   recordVerifyAndSaveManifest(rootDir);
+
+  return untracked;
 }
 
 /**

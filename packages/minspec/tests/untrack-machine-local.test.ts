@@ -178,6 +178,28 @@ describe('the untrack is REPORTED, never silent', () => {
     expect(notice!.kind).not.toBe('missing-markers');
   });
 
+  it('generateHarnessFiles returns the untracked paths too (the INIT path)', () => {
+    // The second round of #1146 review: the first fix threaded the refresh path
+    // and left this one discarding. initCommand is re-runnable and NOT gated on
+    // first-init, so Initialize on an already-broken repo — exactly the population
+    // this reconcile targets — reaches here and mutates the index.
+    const dir = makeRepo();
+    expect(tracked(dir)).toContain('.minspec/generated-hashes.json');
+
+    const untracked = generateHarnessFiles(dir);
+
+    expect(untracked).toContain('.minspec/generated-hashes.json');
+    expect(untracked).toContain('.minspec/preferences.json');
+    expect(tracked(dir)).not.toContain('.minspec/generated-hashes.json');
+    // Still on disk — generate rewrites it immediately afterwards.
+    expect(fs.existsSync(path.join(dir, '.minspec/generated-hashes.json'))).toBe(true);
+  });
+
+  it('generateHarnessFiles returns [] when nothing was tracked', () => {
+    const dir = makeRepo({ commitFirst: false });
+    expect(generateHarnessFiles(dir)).toEqual([]);
+  });
+
   it('reports nothing when there was nothing to untrack', () => {
     const dir = makeRepo({ commitFirst: false });
     generateHarnessFiles(dir);
