@@ -238,6 +238,20 @@ newest_record() { _newest_record_impl < "$1"; }
 # kept the quoted-record defect after the third was fixed.
 _newest_record_impl() {
   awk -v b="$RECORD_BEGIN" -v e="$RECORD_END" '
+    # NOTE: this awk program is bash single-quoted, so NO APOSTROPHES below — one
+    # would close the quote and break the whole script. (It did, once.)
+    #
+    # Returns the verdictAt of a record ONLY when it is well-formed ISO-8601 UTC;
+    # anything else returns "" so it sorts BELOW every dated record.
+    #
+    # The shape check is load-bearing, not decoration. Ranking is a lexical string
+    # compare, and a malformed value like `not-a-date` compares ABOVE any real
+    # timestamp because "n" > "2". So an unvalidated key let a garbled record win
+    # selection from ANY position — and the reader then refused the whole issue with
+    # `bad-verdictat`. That is the denial direction of this gate family: not a bypass,
+    # but a way to make a perfectly good issue undispatchable until it is re-triaged.
+    # (An earlier comment here claimed a bad value "sorts below every dated one".
+    # That was true only of the EMPTY case; caught in review of PR #1127.)
     function verdict_at(block,   n, lines, i, v) {
       n = split(block, lines, "\n")
       for (i = 1; i <= n; i++) {
@@ -245,7 +259,9 @@ _newest_record_impl() {
           v = lines[i]
           sub(/^[^:]*:[[:space:]]*/, "", v)
           gsub(/[[:space:]\r]/, "", v)
-          return v
+          if (v ~ /^[0-9][0-9][0-9][0-9]-[0-9][0-9]-[0-9][0-9]T[0-9][0-9]:[0-9][0-9]:[0-9][0-9]Z$/)
+            return v
+          return ""
         }
       }
       return ""
