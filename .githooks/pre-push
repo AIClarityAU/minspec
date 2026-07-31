@@ -1,0 +1,64 @@
+#!/usr/bin/env bash
+# pre-push — refuse a push that would be rejected server-side for touching CI
+# workflows with a GitHub App credential (#1120).
+#
+# WHY A HOOK AND NOT ONLY SCRIPT CALL SITES. The scripted publish paths
+# (dispatch-issue.sh, remediate-pr.sh) get an explicit preflight, but the case
+# that actually bit — `MinSpec: Refresh Harness Files` rewriting five managed
+# workflow templates, then a human or agent pushing that by hand — involves no
+# script at all. Only a hook covers it.
+#
+# Sibling of the protected-branch guard in .githooks/pre-commit, written for the
+# same reason: the server's refusal arrives after the work is already sealed into
+# branch history, so the check has to happen locally and early.
+#
+# FAILS OPEN by design. If the credential is not an App token, if no workflow
+# file is touched, or if anything about the range cannot be determined, the push
+# proceeds. This guard exists to turn a cryptic server rejection into an
+# actionable message — never to become a new obstacle.
+#
+# Installed via core.hooksPath=.githooks (set by `npm install` → prepare).
+# Bypass: MINSPEC_ALLOW_WORKFLOW_PUSH=1 git push … / git config minspec.allowWorkflowPush true
+
+set -uo pipefail
+
+hook_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+lib="$hook_dir/../scripts/lib/workflow-paths.sh"
+
+# A repo that has the hook but not the lib (partial checkout, older branch)
+# must not be blocked from pushing.
+[ -f "$lib" ] || exit 0
+# shellcheck source=/dev/null
+. "$lib"
+
+workflow_push_allowed && exit 0
+push_credential_is_app_token || exit 0
+
+# git feeds one line per ref: <local ref> <local sha> <remote ref> <remote sha>
+zero='0000000000000000000000000000000000000000'
+touched=''
+
+while read -r _local_ref local_sha _remote_ref remote_sha; do
+  [ -n "${local_sha:-}" ] || continue
+  [ "$local_sha" = "$zero" ] && continue          # branch deletion
+
+  if [ "$remote_sha" = "$zero" ]; then
+    # New branch: the remote has no counterpart, so compare against the default
+    # branch instead of diffing against nothing (which would report every file).
+    base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null) || base=''
+    [ -n "$base" ] || base='origin/main'
+    range="$base..$local_sha"
+  else
+    range="$remote_sha..$local_sha"
+  fi
+
+  files=$(git diff --name-only "$range" 2>/dev/null) || continue
+  [ -n "$files" ] || continue
+  hits=$(printf '%s\n' "$files" | grep -E "$WORKFLOW_PATH_RE" || true)
+  [ -n "$hits" ] && touched="${touched}${hits}"$'\n'
+done
+
+[ -n "$touched" ] || exit 0
+
+printf '%s' "$touched" | grep -v '^$' | sort -u | workflow_push_refusal
+exit 1
