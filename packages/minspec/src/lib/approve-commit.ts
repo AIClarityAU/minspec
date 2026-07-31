@@ -184,8 +184,18 @@ export async function commitApproval(
   //     differ from HEAD. Refusing a no-op is also strictly MORE than the hook
   //     refuses, which invariant 4 forbids.
   //
-  //     `--untracked-files=all` because a brand-new sidecar is untracked and
-  //     would otherwise read as "no change" — the inverse false answer.
+  //     `--untracked-files=all` is LOAD-BEARING, and not for the obvious
+  //     reason: given an explicit pathspec, even the default `normal` mode does
+  //     list an untracked file (including one inside an untracked directory).
+  //     What the flag defends against is the USER'S OWN git config. With
+  //     `status.showUntrackedFiles=no` set — a common quiet-status preference —
+  //     the default probe returns EMPTY for a brand-new sidecar, this would
+  //     answer 'nothing-to-commit', and the approval would silently never be
+  //     committed: the exact silent-loss class #1064 exists to end, re-entered
+  //     through a config MinSpec does not control. Passing the mode explicitly
+  //     makes the probe independent of that setting. Do not "simplify" it away
+  //     — `approve-commit.test.ts` pins it with a `showUntrackedFiles=no` repo.
+  //
   //     Advisory: if status fails we fall through to the post-add check below,
   //     which is the pre-existing behaviour.
   try {

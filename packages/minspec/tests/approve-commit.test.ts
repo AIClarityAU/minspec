@@ -76,6 +76,32 @@ describe('commitApproval — pathspec-safe commit-on-approve', () => {
     expect(git(['status', '--porcelain']).trim()).toBe(''); // clean tree
   });
 
+  it('commits a brand-new sidecar even when the user set status.showUntrackedFiles=no', async () => {
+    // Pins `--untracked-files=all` on the net-change probe. That flag is NOT
+    // about untracked directories — given an explicit pathspec even the default
+    // `normal` mode lists an untracked file. It defends against the USER'S git
+    // config: with `status.showUntrackedFiles=no` the probe would come back
+    // EMPTY for a brand-new sidecar, answer 'nothing-to-commit', and the
+    // approval would silently never be committed — re-entering the #1064
+    // silent-loss class through a setting MinSpec does not control.
+    initRepo(tmp);
+    write('specs/minspec/SPEC-008-bar/requirements.md', 'body\n');
+    git(['add', '-A']);
+    git(['commit', '-m', 'init']);
+    git(['config', 'status.showUntrackedFiles', 'no']);
+
+    // ONLY a new untracked sidecar — nothing tracked was modified, so the probe
+    // is the sole thing standing between this approval and a silent no-op.
+    const rec = write('.minspec/approvals/specs/minspec/SPEC-008-bar/requirements.md.json', '{"a":1}\n');
+
+    const res = await commitApproval(tmp, [rec], 'chore(approve): SPEC-008 approved');
+
+    expect(res.outcome).toBe('committed');
+    expect(filesInHead()).toEqual([
+      '.minspec/approvals/specs/minspec/SPEC-008-bar/requirements.md.json',
+    ]);
+  });
+
   it('NEVER bundles another session\'s pre-staged file (the invariant)', async () => {
     initRepo(tmp);
     const doc = write('DR-001.md', 'status: proposed\n');
