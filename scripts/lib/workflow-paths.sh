@@ -40,7 +40,7 @@ paths_touch_workflows() {
   grep -qE "$WORKFLOW_PATH_RE"
 }
 
-# True when the credential git would use for `origin` is a GitHub App
+# True when the credential git would use for the push is a GitHub App
 # installation token, i.e. the push would be subject to the App's permissions.
 #
 # Detected from the USERNAME only — `x-access-token` is the fixed username git
@@ -49,10 +49,90 @@ paths_touch_workflows() {
 # with their own credential must never be blocked by this, so anything other than
 # that exact username returns false (fail OPEN — this guard exists to give a
 # better error, never to be a new obstacle).
+#
+# #1141 — THREE THINGS HERE ARE LOAD-BEARING. The original probe asked
+# `git credential fill` for a hardcoded `https://github.com` with no other
+# constraints, which was wrong in three separate ways:
+#
+#   1. WRONG SUBJECT. It probed the AMBIENT default credential for github.com,
+#      not the credential this push will use. Git resolves `credential.helper`
+#      as a multi-valued list evaluated system → global → local, stopping at the
+#      first helper that returns a complete credential. A machine with a global
+#      `credential.helper = store` therefore answered out of ~/.git-credentials
+#      before any repo-local helper was consulted — so the verdict was decided by
+#      whatever username happened to be cached on the box. Both failure
+#      directions were observed: an App-credentialed push on a machine caching a
+#      human PAT sailed through (fail-open, the exact #1120 rejection this exists
+#      to pre-empt), and a human on a machine that had last cached
+#      `x-access-token` was false-blocked. Now the push URL is the subject, via
+#      `git remote get-url --push`, which honours insteadOf/pushInsteadOf
+#      rewrites the way the push itself does.
+#
+#      WHAT THIS DOES AND DOES NOT SEE (verified, not assumed):
+#        • A credential helper answering for the push URL — seen.
+#        • A token embedded in the push URL's userinfo
+#          (https://x-access-token:…@github.com/…) — seen. `git credential fill`
+#          parses the username straight out of the URL, and it only reaches the
+#          probe at all BECAUSE the probe now keys on the real push URL; the old
+#          hardcoded host could never have seen it.
+#        • `http.extraheader` (an Authorization header injected directly) — NOT
+#          seen. It bypasses git's credential machinery entirely, so
+#          `git credential fill` returns nothing for it. The guard fails open
+#          there. That is a known residual gap, acceptable because this guard is
+#          advisory — it converts a server-side rejection into a better local
+#          message; it is not an access control.
+#
+#   2. IT PROMPTED ON THE TERMINAL. With no helper able to answer and a TTY
+#      attached, `git credential fill` does not fail quietly — it asks:
+#      `Username for 'https://github.com': `. The `2>/dev/null` on the old call
+#      could not suppress that, because git writes the prompt to /dev/tty, not to
+#      stderr. Verified under a real PTY: the old form emits the prompt, the new
+#      form prints `terminal prompts disabled` and emits nothing to the terminal.
+#      Where git can actually READ from the tty it blocks there waiting for input;
+#      where stdin is a pipe (as here) it fails immediately but still writes the
+#      prompt. Either way a contributor without a credential helper got mysterious
+#      output or a stall from a `git push` — and `npm install` sets
+#      core.hooksPath=.githooks, so that reaches everyone. GIT_TERMINAL_PROMPT=0
+#      makes it fail instead of asking.
+#
+#   3. NON-HTTPS REMOTES. An App installation token only ever travels over
+#      https. An ssh or filesystem remote cannot carry one, so it fails open
+#      rather than probing a URL git would not attach a credential to anyway.
 push_credential_is_app_token() {
-  local user
-  user=$(printf 'protocol=https\nhost=github.com\n\n' \
-         | git credential fill 2>/dev/null \
+  # Test seam. Deliberately checked HERE, inside the function, so it is reachable
+  # when this file is SOURCED — which is how the pre-push hook uses it. It
+  # previously existed only inside the `--check` block below, i.e. only when this
+  # file was EXECUTED, so no test of the hook could ever reach it. That is why the
+  # hook's tests were left depending on ambient machine credentials, which is the
+  # bug above.
+  #
+  # THIS IS A BYPASS, AND IT NOW APPLIES TO THE HOOK PATH TOO. MINSPEC_FAKE_APP_CRED=0
+  # forces the guard open exactly as MINSPEC_ALLOW_WORKFLOW_PUSH=1 does — it grants no
+  # capability that was not already granted, and this guard is advisory (it turns a
+  # server-side rejection into a better local message; it is not an access control).
+  # But it is a second env-var escape hatch, so it is named here rather than left to
+  # be discovered.
+  if [ -n "${MINSPEC_FAKE_APP_CRED:-}" ]; then
+    [ "${MINSPEC_FAKE_APP_CRED}" = "1" ]
+    return
+  fi
+
+  # Accepts either a remote NAME or a URL. git's pre-push hook is handed both
+  # ($1 = name, $2 = URL), and `git push https://… main` passes a bare URL as the
+  # name — so resolving only names would fail open on exactly the ad-hoc push most
+  # likely to carry an out-of-band credential.
+  local target="${1:-origin}" url user
+  case "$target" in
+    https://*|http://*|ssh://*|git@*|/*|./*|../*) url="$target" ;;
+    *) url=$(git remote get-url --push "$target" 2>/dev/null) || return 1 ;;
+  esac
+  case "$url" in
+    https://*) ;;
+    *) return 1 ;;
+  esac
+
+  user=$(printf 'url=%s\n\n' "$url" \
+         | GIT_TERMINAL_PROMPT=0 git credential fill 2>/dev/null \
          | sed -n 's/^username=//p' \
          | head -1) || return 1
   [ "$user" = "x-access-token" ]
@@ -102,10 +182,10 @@ workflow_push_allowed() {
 # and nothing else.
 if [ "${BASH_SOURCE[0]}" = "$0" ] && [ "${1:-}" = "--check" ]; then
   _wp_input=$(cat)
-  _wp_app="${MINSPEC_FAKE_APP_CRED:-}"
-  if [ -z "$_wp_app" ]; then
-    push_credential_is_app_token && _wp_app=1 || _wp_app=0
-  fi
+  # MINSPEC_FAKE_APP_CRED is honoured inside push_credential_is_app_token itself
+  # now, so this no longer needs to special-case it — one seam, one place, and the
+  # sourced path (the hook) gets the same behaviour this executed path does.
+  push_credential_is_app_token && _wp_app=1 || _wp_app=0
   if workflow_push_allowed; then
     echo clear
   elif [ "$_wp_app" = "1" ] && printf '%s\n' "$_wp_input" | paths_touch_workflows; then
