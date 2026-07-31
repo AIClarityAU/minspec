@@ -32,7 +32,12 @@ lib="$hook_dir/../scripts/lib/workflow-paths.sh"
 . "$lib"
 
 workflow_push_allowed && exit 0
-push_credential_is_app_token || exit 0
+
+# git hands pre-push the target as $1 (remote name) and $2 (resolved URL). Forward
+# it: without this the probe always keyed on `origin`, so `git push upstream …` or a
+# bare-URL push was judged by a remote it was not going to use. $2 is preferred
+# because git has already resolved it; $1 is the fallback, and `origin` the last one.
+push_credential_is_app_token "${2:-${1:-origin}}" || exit 0
 
 # git feeds one line per ref: <local ref> <local sha> <remote ref> <remote sha>
 zero='0000000000000000000000000000000000000000'
