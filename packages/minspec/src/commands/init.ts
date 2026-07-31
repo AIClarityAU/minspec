@@ -6,6 +6,7 @@ import {
   generateHarnessFiles,
   refreshHarnessFiles,
   rescaffoldManagedRegionFile,
+  untrackedNoticeMessage,
   type ManagedRegionWarning,
 } from '../lib/scaffold';
 import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS, MANAGED_REGION_TEMPLATES } from '../lib/template-registry';
@@ -1030,9 +1031,13 @@ export async function initCommand(
   // write fails partway, the project is left with a partial .minspec/ (and the
   // drift detector then reports false drift). Catch any failure, surface exactly
   // what went wrong, and do NOT report a misleading "Initialized" success (#153).
+  let untrackedOnInit: string[] = [];
   try {
     scaffold(folder);
-    generateHarnessFiles(folder);
+    // `?? []` — a stubbed generateHarnessFiles (several suites mock it) returns
+    // undefined, and an un-iterable here would turn a reporting nicety into an
+    // init-breaking TypeError. Reporting must never be able to fail the command.
+    untrackedOnInit = generateHarnessFiles(folder) ?? [];
   } catch (err) {
     vscode.window.showErrorMessage(
       `MinSpec: Initialization failed — ${describeError(err)}. ` +
@@ -1043,6 +1048,17 @@ export async function initCommand(
   vscode.window.showInformationMessage(
     'MinSpec: Initialized .minspec/ and generated harness files.',
   );
+  // Report any `git rm --cached` the reconcile performed. initCommand is
+  // re-runnable and NOT gated on first-init, so Initialize on an already-broken
+  // repo does mutate the index — reporting it here is what keeps that from being
+  // a silent git action (#1146). Same surface the refresh path uses.
+  for (const outputPath of untrackedOnInit) {
+    await surfaceManagedRegionWarning(folder, {
+      outputPath,
+      message: untrackedNoticeMessage(outputPath),
+      kind: 'untracked',
+    });
+  }
   surfaceConstitutionNudge(folder);
   if (isFirstInit) {
     await offerCoverageThresholdPrompt(folder);
@@ -1070,6 +1086,8 @@ export async function initCommand(
 const RESCAFFOLD_ACTION = 'Re-scaffold (overwrite)';
 /** Warning action: open the affected file so the user can inspect/fix it by hand. */
 const OPEN_FILE_ACTION = 'Open file';
+/** Untracked-notice action: the index changed, so show where to review and commit it. */
+const SHOW_SCM_ACTION = 'Show Source Control';
 
 /**
  * Surface a single {@link ManagedRegionWarning} left behind by
@@ -1086,6 +1104,26 @@ const OPEN_FILE_ACTION = 'Open file';
  */
 async function surfaceManagedRegionWarning(folder: string, w: ManagedRegionWarning): Promise<void> {
   const label = workspaceFolderLabel(folder);
+
+  // An 'untracked' notice reports a `git rm --cached`, not a scaffolding problem.
+  // "Re-scaffold" would be meaningless (nothing was scaffolded) and actively
+  // misleading, so this kind gets its own surface: state what changed to the index
+  // and offer the place to review and commit it (#1146).
+  if (w.kind === 'untracked') {
+    const choice = await vscode.window.showInformationMessage(
+      `[${label}] ${w.message}`,
+      SHOW_SCM_ACTION,
+      OPEN_FILE_ACTION,
+    );
+    if (choice === SHOW_SCM_ACTION) {
+      await vscode.commands.executeCommand('workbench.view.scm');
+    } else if (choice === OPEN_FILE_ACTION) {
+      const doc = await vscode.workspace.openTextDocument(path.join(folder, w.outputPath));
+      await vscode.window.showTextDocument(doc, { preview: false });
+    }
+    return;
+  }
+
   const choice = await vscode.window.showWarningMessage(
     `[${label}] ${w.message}`,
     RESCAFFOLD_ACTION,
