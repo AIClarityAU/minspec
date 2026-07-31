@@ -331,6 +331,45 @@ describe('commit-destination guard — parity with the #1041 pre-commit hook', (
     expect(staged).toBe('');
   });
 
+  it('a no-op re-approve on the default branch is silent, not a protected-branch warning', async () => {
+    // The guard must refuse no MORE than the hook does. A re-approve that
+    // changed neither the doc nor the record is a no-op — there is no commit to
+    // refuse, so answering 'protected-branch' would make the command layer warn
+    // "approval written but NOT committed — files left in your working tree"
+    // about files that are identical to HEAD. False on both halves.
+    const dir = makeRepo({ name: 'x', blocked: true, because: 'no-op re-approve' });
+    tempDirs.push(dir);
+    vi.stubEnv('MINSPEC_GATE_OFF', '');
+    vi.stubEnv('MINSPEC_ALLOW_MAIN', '');
+
+    // Commit the approval first (on a branch, so the guard is not in the way),
+    // then return to the default branch with the file matching HEAD exactly.
+    const approval = path.join(dir, 'approval.txt');
+    fs.writeFileSync(approval, 'approved\n');
+    git(dir, ['switch', '-q', '-c', 'tmp/seed-approval']);
+    git(dir, ['add', '--', 'approval.txt']);
+    git(dir, ['commit', '-q', '-m', 'chore(test): seed approval', '--no-verify']);
+    git(dir, ['switch', '-q', 'main']);
+    git(dir, ['merge', '-q', '--ff-only', 'tmp/seed-approval']);
+
+    const result = await commitApproval(dir, [approval], 'chore(test): approval', defaultGitRun(dir));
+    expect(result.outcome).toBe('nothing-to-commit');
+  });
+
+  it('a CHANGED approval on the default branch is still refused', async () => {
+    // The companion to the case above: the no-op probe must not swallow a real
+    // change and let it through to a hook rejection.
+    const dir = makeRepo({ name: 'x', blocked: true, because: 'real change still guarded' });
+    tempDirs.push(dir);
+    vi.stubEnv('MINSPEC_GATE_OFF', '');
+    vi.stubEnv('MINSPEC_ALLOW_MAIN', '');
+
+    const approval = path.join(dir, 'approval.txt');
+    fs.writeFileSync(approval, 'approved\n');
+    const result = await commitApproval(dir, [approval], 'chore(test): approval', defaultGitRun(dir));
+    expect(result.outcome).toBe('protected-branch');
+  });
+
   it('detached HEAD reports detached-head, not protected-branch', async () => {
     // Ordering matters: the detached guard runs first, so the user gets the
     // accurate reason. The hook allows detached commits, so a 'protected-branch'
