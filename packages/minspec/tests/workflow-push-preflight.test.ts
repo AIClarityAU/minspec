@@ -28,8 +28,27 @@ import { spawnSync } from 'node:child_process';
 const repoRoot = path.resolve(__dirname, '../../..');
 const made: string[] = [];
 
+/**
+ * Isolate from the developer's own git config.
+ *
+ * `credential.helper` is CUMULATIVE — git runs every configured helper in order and
+ * takes the first answer. This box has `credential.helper = store` in a global
+ * ~/.gitconfig, so `store` answers before the fixture's helper and the probe sees
+ * whatever real credential happens to be cached: `x-access-token` while an App token
+ * was cached (these tests passed), a human login once it was replaced (they failed).
+ *
+ * The fixture's helper must be the ONLY one, or the suite tests the machine it runs
+ * on rather than the guard. CI passed throughout precisely because it has no cached
+ * credential — the failure was invisible there.
+ */
+const ISOLATED_ENV = {
+  ...process.env,
+  GIT_CONFIG_GLOBAL: '/dev/null',
+  GIT_CONFIG_SYSTEM: '/dev/null',
+};
+
 function git(cwd: string, ...args: string[]) {
-  return spawnSync('git', args, { cwd, encoding: 'utf8' });
+  return spawnSync('git', args, { cwd, encoding: 'utf8', env: ISOLATED_ENV });
 }
 
 function mustGit(cwd: string, ...args: string[]) {
@@ -151,7 +170,7 @@ describe('pre-push blocks an App-credentialed workflow push', () => {
     const res = spawnSync('git', ['push', '-u', 'origin', 'chore/override'], {
       cwd: work,
       encoding: 'utf8',
-      env: { ...process.env, MINSPEC_ALLOW_WORKFLOW_PUSH: '1' },
+      env: { ...ISOLATED_ENV, MINSPEC_ALLOW_WORKFLOW_PUSH: '1' },
     });
     expect(res.status, res.stderr).toBe(0);
     expect(git(remote, 'rev-parse', '--verify', 'chore/override').status).toBe(0);

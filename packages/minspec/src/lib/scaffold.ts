@@ -321,7 +321,70 @@ export function scaffold(rootDir: string): void {
  * Idempotent: skips any entry already listed (exact match, ignoring leading
  * whitespace). Creates .gitignore if missing. Preserves existing content.
  */
+/**
+ * Untrack any path MinSpec declares machine-local that git is nonetheless tracking.
+ *
+ * WHY THIS EXISTS. Writing an entry into `.gitignore` does NOT make a file ignored —
+ * git does not apply `.gitignore` to a path already in the index. Every one of these
+ * repos was scaffolded, committed, and only later given the ignore entries, so the
+ * rules landed on files that were already tracked and have been inert ever since.
+ * The extension rewrites those files on every generate/refresh, they surface as
+ * modified, and they get swept into the next commit or sit as permanent dirty noise
+ * (G-8). Declaring intent was never enough; nothing reconciled it.
+ *
+ * `--cached` only: the file stays on disk and the extension keeps rewriting it. This
+ * removes it from the INDEX, which is what makes the existing ignore rule finally
+ * take effect. Reversible with `git add` if a project genuinely wants one tracked —
+ * in which case remove it from MINSPEC_GITIGNORE_ENTRIES, since that list is the
+ * declaration that it must not be.
+ *
+ * Best-effort and silent on failure (not a repo, no git, permission): returns what it
+ * actually untracked so the caller can SAY so. Never-wrong — a silent index change is
+ * exactly the kind of invisible git action G-8 exists to remove.
+ */
+export function untrackDeclaredMachineLocalPaths(rootDir: string): string[] {
+  const removed: string[] = [];
+  for (const entry of MINSPEC_GITIGNORE_ENTRIES) {
+    // A directory entry (`.minspec/sessions/`) is a valid pathspec without the
+    // trailing slash; `git ls-files` expands it to the tracked files beneath.
+    const pathspec = entry.endsWith('/') ? entry.slice(0, -1) : entry;
+    let tracked = '';
+    try {
+      tracked = execFileSync('git', ['ls-files', '-z', '--', pathspec], {
+        cwd: rootDir,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      });
+    } catch {
+      // Not a git repo, or no git on PATH — nothing to reconcile, and every
+      // subsequent entry would fail the same way.
+      return removed;
+    }
+    const paths = tracked.split('\0').filter((p) => p.length > 0);
+    if (paths.length === 0) continue;
+    try {
+      execFileSync('git', ['rm', '--cached', '-q', '--ignore-unmatch', '--', ...paths], {
+        cwd: rootDir,
+        encoding: 'utf-8',
+        stdio: ['ignore', 'ignore', 'ignore'],
+      });
+      removed.push(...paths);
+    } catch {
+      // Leave it tracked rather than half-reconciled; the next refresh retries.
+    }
+  }
+  return removed;
+}
+
 export function ensureGitignoreEntries(rootDir: string): void {
+  // Reconcile FIRST, and unconditionally — before the early return below.
+  //
+  // That return fires whenever `.gitignore` already lists every entry, which is the
+  // steady state of every already-scaffolded project. Putting the reconcile after it
+  // would skip precisely the repos that need it: the ones whose ignore rules are
+  // present, correct-looking, and inert because the files were tracked first.
+  untrackDeclaredMachineLocalPaths(rootDir);
+
   const gitignorePath = path.join(rootDir, '.gitignore');
   const existing = fs.existsSync(gitignorePath)
     ? fs.readFileSync(gitignorePath, 'utf-8')
