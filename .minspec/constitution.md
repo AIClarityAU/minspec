@@ -4,7 +4,6 @@
 
 - Core functionality works offline — no network calls without explicit user consent
 - No silent gate — a required or merge-gating check fails visibly, never best-effort: no load-bearing gate signal is written with a swallowed error (`|| true`), a missing or errored witness fails the gate closed and visibly (never silently passes or stops evaluating), and no required check hinges on a single producer that one permission/config gap can disable (provide an independent second witness). (DR-066; instances #560/#810/#857.)
-- MinSpec's blast radius is the project it is installed in — nothing MinSpec ships (extension write, harness file, hook, CI workflow, convention, or prose rule) may change behaviour in a repo, org, or machine-wide config that did not opt in, and the opt-in marker is `.minspec/` at the repo root. Machine-wide surfaces (`~/.claude/**`, `~/.gitconfig`, `~/.config/**`, shell profiles) are out of bounds for a per-project write, and any MinSpec rule that must live on one carries its own `.minspec/`-presence scope gate in its text. Inside scope a rule may be absolute; outside scope it does not exist. The only widening is an explicit, opt-in org-admin policy, never an implicit reach. (DR-074; DR-073 §4 is the narrow precedent; instance: minspec#1147.)
 
 ## Principles
 
