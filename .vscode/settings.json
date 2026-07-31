@@ -27,5 +27,46 @@
     // are invisible to the Vitest and Extension Test Runner controllers.
     "python.testing.unittestEnabled": true,
     "python.testing.pytestEnabled": false,
-    "python.testing.unittestArgs": ["-v", "-s", "scripts/hooks", "-p", "test_*.py"]
+    "python.testing.unittestArgs": ["-v", "-s", "scripts/hooks", "-p", "test_*.py"],
+
+    // Pin the interpreter so discovery cannot fail with "Python interpreter not
+    // configured" on a fresh clone / new machine. These are stdlib-only unittest
+    // files (no venv, no requirements.txt), so the system python3 is the correct
+    // one — there is nothing to install.
+    "python.defaultInterpreterPath": "/usr/bin/python3",
+
+    // node:test suite (.github/scripts/*.test.js) — the ai-review label-integrity
+    // logic. Plain `node --test`, no deps, so neither Vitest nor the Python
+    // controller sees it; atkeson.nodejs-testing does.
+    //
+    // ".github" in the include list is what makes it visible AT ALL. The extension
+    // builds its file matcher with picomatch and does not pass `dot: true`, and
+    // picomatch's "**/" will not traverse a leading-dot path SEGMENT — so under the
+    // default include of ["./"] this suite is undiscoverable and the panel just
+    // shows nothing. `include` REPLACES the default, so "./" must stay listed.
+    // (A leading-dot BASENAME is fine; only a dot DIRECTORY blocks it.)
+    //
+    // THESE KEYS ARE INERT WHEN THIS REPO IS OPENED VIA minspecpro.code-workspace.
+    // The extension declares no `scope` on its properties, so VS Code registers them
+    // as WINDOW scope and a multi-root FolderConfiguration drops them; separately,
+    // the extension reads them with no resource argument, so a folder value would
+    // never be consulted regardless. They are kept here for opening this repo ALONE,
+    // where folder settings are the workspace configuration. The multi-root copy
+    // lives in the .code-workspace `settings` block and must be kept in step.
+    //
+    // Verified by scripts/check-testing-panel-discovery.mjs, which replays the
+    // extension's own glob algorithm and fails when an expected suite would not
+    // appear. Run it after touching either copy.
+    "nodejs-testing.include": ["./", ".github"],
+    "nodejs-testing.exclude": [
+        // Restated because setting `exclude` REPLACES the extension's default rather
+        // than merging with it — dropping this would re-admit node_modules.
+        "**/node_modules/**",
+        // packages/minspec/out/test/*.test.js are compiled extension-host tests that
+        // fail under plain node ("Cannot find module 'vscode'"). They are NOT a live
+        // false-red source: they import mocha, not node:test, and the extension's own
+        // source pre-check discards any file lacking the specifier it imports. This
+        // entry saves a few file reads and states the intent; it is not a bug fix.
+        "**/out/**"
+    ]
 }
