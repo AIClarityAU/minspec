@@ -172,27 +172,43 @@ GUARD="${SCRIPT_DIR}/../.github/scripts/ai-review-guard.js"
 # The temp file is mktemp-private (0600) and removed on return.
 #
 # $1: "payg" → force a PAYG Anthropic API key (ANTHROPIC_API_KEY) instead of the
-# subscription OAuth token (the quota-failover path). Captures combined
-# stdout+stderr into AGENT_OUT; returns claude's exit code. Guarded so `set -e`
-# never aborts here.
+# subscription OAuth token (the quota-failover path). Returns claude's exit code,
+# guarded so `set -e` never aborts here.
+#
+# The two streams are captured SEPARATELY (#1131): stdout → AGENT_OUT is the review,
+# stderr → AGENT_ERR is the harness's own diagnostics. They were previously merged
+# with `2>&1`, which had two consequences — stderr text was forwarded into the stream
+# review-decide.sh parses as a verdict, and the quota classifier was fed the agent's
+# prose, so a review ABOUT quota handling classified as a quota outage.
+AGENT_OUT=""
+AGENT_ERR=""
 run_reviewer() {
   local rc=0
-  local promptfile
+  local promptfile errfile
   promptfile="$(mktemp)"
+  errfile="$(mktemp)"
   printf '%s' "$USER_CONTENT" >"$promptfile"
   if [[ "${1:-subscription}" == "payg" ]]; then
     AGENT_OUT=$( CLAUDE_CODE_OAUTH_TOKEN='' ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
       claude -p --system-prompt-file "$ROLE_FILE" \
-      --allowedTools "Read,Glob,Grep" --model opus --output-format text <"$promptfile" 2>&1 ) || rc=$?
+      --allowedTools "Read,Glob,Grep" --model opus --output-format text <"$promptfile" 2>"$errfile" ) || rc=$?
   else
     AGENT_OUT=$( claude -p --system-prompt-file "$ROLE_FILE" \
-      --allowedTools "Read,Glob,Grep" --model opus --output-format text <"$promptfile" 2>&1 ) || rc=$?
+      --allowedTools "Read,Glob,Grep" --model opus --output-format text <"$promptfile" 2>"$errfile" ) || rc=$?
   fi
-  rm -f "$promptfile"
+  AGENT_ERR="$(cat "$errfile")"
+  rm -f "$promptfile" "$errfile"
   return "$rc"
 }
 
-has_verdict() { printf '%s\n' "${1:-}" | grep -q 'REVIEW_VERDICT_BEGIN'; }
+# A verdict is COMPLETE only with both delimiters (#1131). An opening marker alone
+# means the agent died mid-review: forwarding that to the gate as a finished verdict
+# would let a half-written `verdict:` line decide a merge. Completeness — not the exit
+# status — is what makes the output a review.
+has_verdict() {
+  printf '%s\n' "${1:-}" | grep -q 'REVIEW_VERDICT_BEGIN' &&
+    printf '%s\n' "${1:-}" | grep -q 'REVIEW_VERDICT_END'
+}
 
 # Quota / rate-limit / transient? Delegate to the tested pure classifier so bash and
 # JS never drift. node is always present where this runs (CI setup-node; local
@@ -212,28 +228,50 @@ emit_unavailable() {
   printf 'REVIEW_UNAVAILABLE_BEGIN\nreason: quota\ndetail: |\n%s\nREVIEW_UNAVAILABLE_END\n' "${detail:-  (no detail captured; likely subscription session quota)}"
 }
 
-# 1) Try the reviewer on the subscription token. A clean run WITH a verdict → done.
-if run_reviewer subscription && has_verdict "$AGENT_OUT"; then
+# Which text may be shown to the quota classifier (#1131). The agent's own prose is
+# NOT evidence about the harness: a review that DISCUSSES quota handling — every
+# review of this very file — must not be read as a quota outage. The CLI reports its
+# failures on stderr, so stderr is the authority. Only when stderr is silent do we
+# fall back to stdout, because a CLI that printed its limit notice there would
+# otherwise be misread as a crash and blamed on the dev's code.
+quota_evidence() {
+  if [[ -n "${AGENT_ERR//[[:space:]]/}" ]]; then
+    printf '%s' "$AGENT_ERR"
+  else
+    printf '%s' "$AGENT_OUT"
+  fi
+}
+
+# 1) Try the reviewer on the subscription token. A COMPLETE verdict is a finished
+#    review and wins outright — the exit status is advisory, not authoritative
+#    (#1131). The CLI can exit non-zero after a review has been written in full
+#    (a late transport hiccup, a teardown warning); discarding a complete verdict
+#    over that lost real reviews AND then misattributed the loss to quota, because
+#    the discarded text was handed to a content matcher that saw its own subject
+#    matter. If the reviewer finished, use what it said.
+run_reviewer subscription || true
+if has_verdict "$AGENT_OUT"; then
   printf '%s\n' "$AGENT_OUT"
   exit 0
 fi
 
-# 2) No verdict. Distinguish a quota/transient block (retry-able, NOT the dev's code)
-#    from a genuine crash (fail closed to changes, as before).
-if is_quota "$AGENT_OUT"; then
+# 2) No complete verdict. Distinguish a quota/transient block (retry-able, NOT the
+#    dev's code) from a genuine crash (fail closed to changes, as before).
+if is_quota "$(quota_evidence)"; then
   # 2a) Optional PAYG-API failover before giving up — config-gated (AI_REVIEW_FAILOVER
   #     = "payg") AND a key present. Lets a dev who has run out of subscription quota
   #     keep reviewing on PAYG instead of stalling for the whole reset window.
   if [[ "${AI_REVIEW_FAILOVER:-wait}" == "payg" && -n "${ANTHROPIC_API_KEY:-}" ]]; then
     echo "review-branch.sh: subscription quota hit — failing over to PAYG API (role=$ROLE)" >&2
-    if run_reviewer payg && has_verdict "$AGENT_OUT"; then
+    run_reviewer payg || true
+    if has_verdict "$AGENT_OUT"; then
       printf '%s\n' "$AGENT_OUT"
       exit 0
     fi
     echo "review-branch.sh: PAYG failover also produced no verdict (role=$ROLE)" >&2
   fi
   echo "review-branch.sh: reviewer UNAVAILABLE (quota/transient, role=$ROLE) — → ai-review:blocked (retry-able)" >&2
-  emit_unavailable "$AGENT_OUT"
+  emit_unavailable "$(quota_evidence)"
   exit 0
 fi
 
@@ -241,4 +279,5 @@ fi
 #    closed to request-changes (never a false pass). Surface output on stderr.
 echo "review-branch.sh: reviewer agent (role=$ROLE) failed (non-quota) — gate fails closed" >&2
 printf '%s\n' "$AGENT_OUT" >&2
+printf '%s\n' "$AGENT_ERR" >&2
 exit 0
