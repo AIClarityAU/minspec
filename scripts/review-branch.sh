@@ -219,6 +219,14 @@ is_quota() {
   GUARD="$GUARD" node -e 'const g=require(process.env.GUARD);let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.exit(g.isQuotaExhaustion(s)?0:1));' <<<"${1:-}" 2>/dev/null
 }
 
+# STRICT classification, for text that may be the AGENT's prose rather than the
+# harness's own diagnostics. Requires the CLI's characteristic limit phrasing and
+# ignores the bare topic words a reviewer would use while DESCRIBING quota handling.
+is_quota_strict() {
+  [[ -f "$GUARD" ]] || return 1
+  GUARD="$GUARD" node -e 'const g=require(process.env.GUARD);let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.exit(g.isQuotaExhaustionStrict(s)?0:1));' <<<"${1:-}" 2>/dev/null
+}
+
 # Emit the distinct, machine-parseable "could not run" marker → review-decide.sh maps
 # it to ai-review:blocked (retry-able), never ai-review:changes. `detail` carries the
 # trimmed claude limit/reset lines for the PR comment.
@@ -228,19 +236,32 @@ emit_unavailable() {
   printf 'REVIEW_UNAVAILABLE_BEGIN\nreason: quota\ndetail: |\n%s\nREVIEW_UNAVAILABLE_END\n' "${detail:-  (no detail captured; likely subscription session quota)}"
 }
 
-# Which text may be shown to the quota classifier (#1131). The agent's own prose is
-# NOT evidence about the harness: a review that DISCUSSES quota handling — every
-# review of this very file — must not be read as a quota outage. The CLI reports its
-# failures on stderr, so stderr is the authority. Only when stderr is silent do we
-# fall back to stdout, because a CLI that printed its limit notice there would
-# otherwise be misread as a crash and blamed on the dev's code.
-quota_evidence() {
+# Is this failure a quota/transient outage? (#1131)
+#
+# The two streams carry different KINDS of text and are judged by different bars:
+#
+#   stderr — the harness talking. Judged by the full classifier, bare topic words and
+#            all, because that text is not authored by the model.
+#   stdout — may be the agent's own prose. Judged STRICTLY: only the CLI's
+#            characteristic limit phrasing counts, never a bare mention of "quota",
+#            which is what a review of THIS file says on every line.
+#
+# stderr is authoritative when it says anything at all; stdout is consulted only when
+# stderr is silent, so a CLI that printed its limit notice on stdout still yields a
+# retry-able `blocked` rather than a crash blamed on the dev's code. This closes the
+# residual gap the #1155 reviewers flagged: a genuine crash whose stdout happens to
+# discuss quota now fails closed to a human instead of looping as retry-able.
+quota_failure() {
   if [[ -n "${AGENT_ERR//[[:space:]]/}" ]]; then
-    printf '%s' "$AGENT_ERR"
+    is_quota "$AGENT_ERR"
   else
-    printf '%s' "$AGENT_OUT"
+    is_quota_strict "$AGENT_OUT"
   fi
 }
+
+# The text shown to a HUMAN in the unavailable marker — both streams, since by this
+# point we have already decided it was an outage and the reader wants the evidence.
+quota_detail() { printf '%s\n%s' "$AGENT_ERR" "$AGENT_OUT"; }
 
 # 1) Try the reviewer on the subscription token. A COMPLETE verdict is a finished
 #    review and wins outright — the exit status is advisory, not authoritative
@@ -257,7 +278,7 @@ fi
 
 # 2) No complete verdict. Distinguish a quota/transient block (retry-able, NOT the
 #    dev's code) from a genuine crash (fail closed to changes, as before).
-if is_quota "$(quota_evidence)"; then
+if quota_failure; then
   # 2a) Optional PAYG-API failover before giving up — config-gated (AI_REVIEW_FAILOVER
   #     = "payg") AND a key present. Lets a dev who has run out of subscription quota
   #     keep reviewing on PAYG instead of stalling for the whole reset window.
@@ -271,7 +292,7 @@ if is_quota "$(quota_evidence)"; then
     echo "review-branch.sh: PAYG failover also produced no verdict (role=$ROLE)" >&2
   fi
   echo "review-branch.sh: reviewer UNAVAILABLE (quota/transient, role=$ROLE) — → ai-review:blocked (retry-able)" >&2
-  emit_unavailable "$(quota_evidence)"
+  emit_unavailable "$(quota_detail)"
   exit 0
 fi
 

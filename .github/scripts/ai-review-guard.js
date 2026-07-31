@@ -76,6 +76,30 @@ function isQuotaExhaustion(text) {
     || /usage limit reached|limit reached|reached your (usage )?limit|weekly limit|session limit|5-?hour limit/i.test(s);
 }
 
+// STRICT variant for text that may be the AGENT's own prose rather than the harness's
+// diagnostics (#1131). The loose predicate above matches a bare `quota` anywhere, which
+// is correct for the CLI's stderr — that text is the harness talking — but wrong for
+// anything the model wrote: a review that DISCUSSES quota handling is not evidence of a
+// quota outage, and reading it as one loops a genuine crash forever as retry-able
+// `blocked` instead of failing closed to a human.
+//
+// So this keeps only phrasings that read as the CLI's own SENTENCES and drops every
+// bare topic word a reviewer would naturally use while describing the code — `quota`,
+// `overloaded`, `insufficient credit`, and also `rate limit`, which is exactly what a
+// review of the rate-limit handling says.
+//
+// Honest limit: classifying model-authored prose by content is unreliable in principle,
+// and this narrows the failure rather than eliminating it. It is acceptable because it
+// is a LAST-RESORT path — reached only when the CLI failed while writing nothing at all
+// to stderr — and because the residual error now falls toward failing closed to a human
+// rather than looping forever as retry-able.
+function isQuotaExhaustionStrict(text) {
+  const s = String(text == null ? '' : text);
+  return /usage limit reached|limit reached|reached your (usage )?limit|weekly limit|session limit|5-?hour limit/i.test(s)
+    || /\b(too many requests|429)\b/i.test(s)
+    || /\bresets? (at|in)\b/i.test(s);
+}
+
 // GitHub truncates commit-status descriptions at 140 chars; keep ours within it
 // even when a description carries a (potentially long) provenance reason.
 const MAX_DESCRIPTION = 140;
@@ -594,6 +618,7 @@ module.exports = {
   shouldAwaitApproval,
   shouldSummonHumanReview,
   isQuotaExhaustion,
+  isQuotaExhaustionStrict,
   parseAllowlist,
   isAuthorizedReviewer,
   decideProvenanceRevert,

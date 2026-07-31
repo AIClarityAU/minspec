@@ -164,6 +164,23 @@ describe('#1131 review-branch.sh — genuine outages and crashes are unchanged',
     expect(stdout).not.toContain('REVIEW_VERDICT_BEGIN');
   });
 
+  it('a crash whose STDOUT merely discusses quota is not blamed on quota (#1155 review)', () => {
+    // The residual gap both Reviewer and Architect flagged on #1155: with stderr
+    // silent, the stdout fallback used the LOOSE classifier, so a crash whose output
+    // happened to discuss quota handling — a review of this very file — still looped
+    // as retry-able `blocked`. The fallback now applies the STRICT classifier, which
+    // ignores the bare topic words a reviewer uses to describe the code.
+    const { stdout } = runWithStub({
+      stdout:
+        'Analysing the quota classifier and the rate limit branch; the overloaded path ' +
+        'and insufficient credit handling both look reachable.',
+      stderr: '',
+      code: 1,
+    });
+    expect(stdout).not.toContain('REVIEW_UNAVAILABLE_BEGIN');
+    expect(stdout).not.toContain('REVIEW_VERDICT_BEGIN');
+  });
+
   it('falls back to stdout when stderr is silent, so a real outage still blocks', () => {
     // Guards the over-correction: if the CLI ever prints its limit notice on stdout
     // and says nothing on stderr, that is still an outage, not the dev's code.
@@ -212,5 +229,45 @@ describe('#1131 ai-review-guard — the classifier itself is not weakened', () =
   it('classifies ordinary crash text as NOT quota, so it fails closed', () => {
     expect(guard.isQuotaExhaustion('Segmentation fault')).toBe(false);
     expect(guard.isQuotaExhaustion('TypeError: undefined is not a function')).toBe(false);
+  });
+
+  describe('isQuotaExhaustionStrict — for text that may be the agent’s own prose', () => {
+    it.each([
+      'Claude AI usage limit reached',
+      "You've reached your usage limit",
+      'weekly limit reached',
+      '5-hour limit reached',
+      'HTTP 429',
+      'too many requests',
+      'resets at 3pm',
+    ])('still recognises the CLI phrasing %j', (msg) => {
+      expect(guard.isQuotaExhaustionStrict(msg)).toBe(true);
+    });
+
+    it.each([
+      'the quota classifier',
+      'reviewing the rate limit branch',
+      'the overloaded path',
+      'insufficient credit handling',
+      'quota/non-quota failure messages',
+    ])('does NOT fire on review prose %j', (msg) => {
+      expect(guard.isQuotaExhaustionStrict(msg)).toBe(false);
+      // …while the loose predicate, correct for the harness's own stderr, does.
+      expect(guard.isQuotaExhaustion(msg)).toBe(true);
+    });
+
+    it('is strictly narrower than the loose predicate, never wider', () => {
+      // Anything strict accepts, loose must accept too — otherwise stderr (judged
+      // loosely) could reject an outage that stdout (judged strictly) would accept.
+      for (const s of [
+        'Claude AI usage limit reached',
+        'weekly limit',
+        'HTTP 429',
+        'too many requests',
+        'resets in 12 minutes',
+      ]) {
+        if (guard.isQuotaExhaustionStrict(s)) expect(guard.isQuotaExhaustion(s)).toBe(true);
+      }
+    });
   });
 });
