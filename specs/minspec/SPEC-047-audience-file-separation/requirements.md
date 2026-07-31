@@ -2,17 +2,19 @@
 id: SPEC-047
 title: Audience file-separation authoring discipline + validator
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 created: 2026-07-21
 epic: EPIC-009  # Team Readiness
 depends_on: [DR-068, SPEC-013]
 relates_to: [SPEC-045, SPEC-048, SPEC-038]
+implements: [packages/minspec/src/lib/audience-map.ts, packages/minspec/tests/audience-separation.test.ts]
+affects: [packages/minspec/src/lib/spec-validator.ts, packages/minspec/src/lib/spec-layout.ts, packages/minspec/src/lib/config.ts, packages/minspec/src/lib/scaffold.ts, packages/minspec/src/lib/auto-bootstrap.ts, packages/minspec/src/lib/slash-commands.ts, packages/minspec/src/lib/spec-manager.ts, scripts/validate-frontmatter.ts]  # modifies-not-owns: spec-validator/spec-layout/config carry the rule's wiring (SPEC-038 pattern), scaffold.ts + auto-bootstrap.ts are SPEC-043's #225 tasks.md machinery that FR-6 extends to design.md, slash-commands.ts is what "MinSpec: Specify" actually is. All new logic is isolated in the owned audience-map.ts.
 phases:
   specify: done
   clarify: done
-  plan: pending
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

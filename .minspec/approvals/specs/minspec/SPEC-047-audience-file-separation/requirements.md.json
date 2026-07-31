@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-047-audience-file-separation/requirements.md",
+  "specHash": "884a2cf4998a6a6a49b2f00572cd7c6e3a5343972126307a720920574d8740a8",
+  "approvedAt": "2026-07-29T07:28:11.239Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "69760b044e5c9638d11fd95d8be6fb727e65e48e"
+}
