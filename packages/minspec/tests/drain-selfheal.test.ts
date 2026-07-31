@@ -264,6 +264,10 @@ describe('dispatch-issue.sh: native auto-merge deny-by-default (behavioral seam)
       // dispatch-issue.sh sources lib/issue-lease.sh (SPEC-044 claim lease) at startup —
       // copy it too, else the source aborts before the --check-native-automerge seam.
       fs.copyFileSync(path.resolve(__dirname, '../../../scripts/lib/issue-lease.sh'), path.join(root, 'scripts', 'lib', 'issue-lease.sh'));
+      // dispatch-issue.sh sources lib/workflow-paths.sh (#1120 workflows-push
+      // preflight) at startup — same reason: a missing lib aborts the source before
+      // the seam ever runs, and the failure looks like an empty answer, not an error.
+      fs.copyFileSync(path.resolve(__dirname, '../../../scripts/lib/workflow-paths.sh'), path.join(root, 'scripts', 'lib', 'workflow-paths.sh'));
       fs.writeFileSync(path.join(root, '.minspec', 'config.json'), JSON.stringify({ version: 1 })); // no autoMerge
       expect(check({}, root)).toEqual({ code: 1, out: 'off' });
     } finally {

@@ -37,6 +37,9 @@ source "${SCRIPT_DIR}/lib/docs-corpus.sh"
 # shellcheck source=scripts/lib/issue-lease.sh
 source "${SCRIPT_DIR}/lib/issue-lease.sh"
 
+# shellcheck source=scripts/lib/workflow-paths.sh
+source "${SCRIPT_DIR}/lib/workflow-paths.sh"
+
 # native_automerge_enabled: is GitHub-native auto-merge (merge on ai-review:pass, no
 # blast gate) turned on for this project? Policy source, in order: MINSPEC_AUTOMERGE_NATIVE
 # env (1/0 override for CI/one-off), else `.minspec/config.json` autoMerge.native.
@@ -764,10 +767,31 @@ shepherd_hand_off() {
 # Publish from the WARM worktree. Fails CLOSED on the egress guard, and re-verifies the
 # claim immediately before the push (D3) so a reclaimed owner never publishes.
 shepherd_publish() {
-  local push_mode="${1:-}" matches
+  local push_mode="${1:-}" matches wf
   if ! matches=$(run_egress_guard); then
     quarantine_publish "$matches"
     return 1
+  fi
+  # "will the forge even accept this?" (#1120). The pushes below redirect stderr to
+  # /dev/null, so the .githooks/pre-push guard's message would be swallowed here even
+  # when it fires — and it does NOT fire at all for a worktree checked out from a
+  # branch that predates the hook. Check explicitly, and say so where it is visible.
+  #
+  # Unconditional: this path always pushes with the App installation token, so unlike
+  # the hook there is no credential to probe.
+  if ! workflow_push_allowed; then
+    wf=$(git -C "$WORKTREE" diff --name-only origin/main.."$BRANCH" 2>/dev/null \
+         | grep -E "$WORKFLOW_PATH_RE" || true)
+    if [[ -n "$wf" ]]; then
+      echo "  NOT publishing — $BRANCH changes CI workflow files and the App token"
+      echo "  has no 'workflows' permission, so the push would be rejected server-side:"
+      printf '%s\n' "$wf" | sed 's/^/      /'
+      echo "  Grant it (AIClarityAU/minspec#1120) or land these by hand."
+      # Return 1 only: every caller (shepherd_rebase → line 965, shepherd_fix →
+      # line 970) already routes a failed publish into shepherd_hand_off with the
+      # pr_num it holds. This function does not have that number in scope.
+      return 1
+    fi
   fi
   if [[ "${MINSPEC_CLAIM_OFF:-0}" != "1" ]] && ! lease_verify_holds "$ISSUE"; then
     echo "  Claim lost immediately before push — NOT publishing (D3/INV-5)."
