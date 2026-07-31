@@ -1188,7 +1188,7 @@ export const SLASH_COMMAND_SHIM_TEMPLATES: readonly ManagedRegionTemplate[] = [
 export const CLAUDE_HOOKS_DIR = '.claude/hooks';
 
 /**
- * Claude Code hook stack (#1093, DR-072).
+ * Claude Code hook stack (#1093, DR-073).
  *
  * `session-title.sh` + `session-title.py` are a `UserPromptSubmit` hook that appends
  * the approvable IDs a session is working on (`SPEC-019 DR-071 #1082`) to the Claude

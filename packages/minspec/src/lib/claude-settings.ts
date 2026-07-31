@@ -1,13 +1,13 @@
 /**
  * claude-settings.ts — register MinSpec's scaffolded Claude Code hooks in a
- * project's `.claude/settings.json` (#1093, DR-072).
+ * project's `.claude/settings.json` (#1093, DR-073).
  *
  * Scaffolding `.claude/hooks/session-title.{sh,py}` is only half the job: a Claude
  * Code hook does nothing until it is listed under the event that fires it. That
  * listing lives in `.claude/settings.json` — a file MinSpec does NOT own, and which
  * a project may already fill with its own hooks.
  *
- * So the contract here is deliberately narrow (DR-072):
+ * So the contract here is deliberately narrow (DR-073):
  *
  *  - **Additive only.** MinSpec appends ONE `UserPromptSubmit` entry. It never
  *    removes, reorders, rewrites, or reformats another hook — a foreign entry is

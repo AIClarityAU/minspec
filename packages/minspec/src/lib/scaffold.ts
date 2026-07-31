@@ -414,7 +414,7 @@ function writeManagedFile(fullPath: string, tpl: ManagedRegionTemplate): void {
 
 /**
  * Register the scaffolded Claude Code hooks in the project's `.claude/settings.json`
- * (#1093, DR-072). Scaffolding the hook files is inert on its own — Claude Code only
+ * (#1093, DR-073). Scaffolding the hook files is inert on its own — Claude Code only
  * runs a hook that is listed under its event.
  *
  * Gated on `tools.claude`, the same condition that gates scaffolding the hook files.

@@ -1,5 +1,5 @@
 /**
- * #1093 / DR-072 — registering MinSpec's scaffolded Claude Code hooks in a
+ * #1093 / DR-073 — registering MinSpec's scaffolded Claude Code hooks in a
  * project's `.claude/settings.json`.
  *
  * `.claude/settings.json` is NOT a MinSpec-owned file: a project may already fill it

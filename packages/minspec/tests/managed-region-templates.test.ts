@@ -595,7 +595,7 @@ describe('rescaffoldManagedRegionFile (#604 — consent-gated whole-file rewrite
 });
 
 // =============================================================================
-// #1093 / DR-072 — Claude Code hook stack
+// #1093 / DR-073 — Claude Code hook stack
 //
 // `.claude/hooks/session-title.{sh,py}` is a `UserPromptSubmit` hook that appends
 // the approvable IDs a session is working on to the Claude Code session title. Like
