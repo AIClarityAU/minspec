@@ -40,6 +40,31 @@
 # equivalent of ai-review.yml's bot allowlist, #397) is a separate, tracked
 # hardening — see the summary for #983.
 #
+# ── #1084: the gate needed an EXIT, not just an entrance ─────────────────────
+# Closing the hole above left `needs-review` a one-way door: dispatch demanded a
+# verdict with hold=none, and the only writer of such a verdict was the LLM triage
+# gate — which, re-run, re-derives the same hold. A human who had reviewed an issue
+# and wanted to say "I've read it, go" had NO way to. A gate that refuses valid work
+# is worse than the hole it closed, so this adds the missing exit — through the gate,
+# never around it:
+#
+#   scripts/approve-issue.sh <N>  mints a SECOND record schema
+#   (minspec-human-approval/1) carrying the approving human's identity, and the
+#   reader below accepts it on the same terms as a triage verdict PLUS two extra
+#   conjuncts: a non-bot `approvedBy`, and a `supersedes` naming a hold a human is
+#   permitted to lift.
+#
+# WHICH HOLDS A HUMAN MAY LIFT (DR-072 §3 — the table that owns this policy; derived from DR-070 §5, whose absolutes it may never widen):
+#   tier    ✅ "too big to auto-build". Human review is EXACTLY the designed remedy.
+#   human   ❌ human_only is a CONTENT class (marketing/positioning/legal/copy/
+#              decide), i.e. who may AUTHOR it — not who may permit it. No keystroke
+#              transfers authorship, so no approval lifts it. Absolute.
+#   info    ❌ the gate asked for missing information; approval does not supply it.
+#   unknown ❌ the gate concluded nothing, so there is nothing to approve. Re-triage.
+# A mis-CLASSIFIED issue is cured by fixing the input (edit the body so the type is
+# unambiguous, then re-triage — the bodyHash changes, so that is a real re-verdict),
+# never by overriding the classifier's output.
+#
 # Usage:
 #   dispatch-ready-check.sh <state> <labels-csv> <verdict-source-file> <body-file>
 #     <state>               the issue's CURRENT state from `gh issue view --json state`
@@ -57,6 +82,16 @@
 #     Issue body on stdin. Prints the comment-embeddable verdict record. This is the
 #     WRITER half of the same grammar — triage-inbox.sh's only way to mint a record.
 #
+#   dispatch-ready-check.sh --render-approval <approvedBy> <role> <tier> <supersedes> [approvedAt]
+#     Issue body on stdin. Prints a HUMAN-APPROVAL record (#1084) — the same grammar,
+#     a different schema. approve-issue.sh's only way to mint one.
+#
+#   dispatch-ready-check.sh --may-approve <hold> <human_only>
+#     Pure predicate: may a human approval lift this hold? Prints "approvable" (exit 0)
+#     or "not-approvable [<code>]: <reason>" (exit 1). It lives HERE, beside the reader
+#     that enforces the same rule, so approve-issue.sh (which holds credentials and is
+#     therefore not unit-testable) contains no policy of its own to drift.
+#
 # Exit 0  → STILL DISPATCHABLE. Prints "ready".
 # Exit 1  → NOT DISPATCHABLE. Prints one line: "not-ready [<code>]: <reason>".
 #           Codes, and how the dispatcher treats each:
@@ -64,7 +99,8 @@
 #               expected, self-evident skip (the issue's own state/labels already
 #               say why). Quiet.
 #             no-verdict | stale-verdict | bad-schema | human-only | held |
-#             decision | no-body | no-hash — the #983 verdict classes: a HOLD that
+#             decision | no-body | no-hash | no-approver | bot-approver |
+#             bad-supersedes — the #983/#1084 verdict classes: a HOLD that
 #               is NOT self-evident from the issue, so the dispatcher SURFACES it
 #               (label + a one-time comment). A silent refusal would itself violate
 #               "no silent gate" (DR-066). Anything unrecognised is surfaced too —
@@ -96,6 +132,16 @@ set -uo pipefail
 # unrecognised `gate:` value rather than guessing at fields it may not understand,
 # and every issue is re-triaged. That is deliberate — fail closed on schema drift.
 RECORD_SCHEMA="minspec-triage-verdict/1"
+# The human-approval schema (#1084) is deliberately a SEPARATE value rather than a
+# flag inside the triage record: the two are authorised by different parties, carry
+# different required fields, and the dispatch audit trail must say which one let a
+# build start. A reader that could not tell them apart would report "the gate passed
+# it" for both.
+RECORD_SCHEMA_HUMAN="minspec-human-approval/1"
+# The one hold a human approval may lift (DR-072 §3). A set, not a boolean, so
+# widening it is a visible one-line diff in a tested file — never an emergent
+# consequence of some other change.
+APPROVABLE_HOLDS="tier"
 RECORD_MARKER="<!-- minspec-verdict-record -->"
 RECORD_BEGIN="MINSPEC_VERDICT_BEGIN"
 RECORD_END="MINSPEC_VERDICT_END"
@@ -114,7 +160,74 @@ body_hash() {
 # rendered into a delimited block a parser later trusts — so constrain them here
 # rather than assuming. Anything outside [A-Za-z0-9:._/-] is dropped, which makes a
 # newline-bearing value unable to forge extra record fields.
-record_scrub() { printf '%s' "$1" | tr -cd 'A-Za-z0-9:._/-'; }
+#
+# `[` and `]` are in the allowlist so a GitHub App login (`minspec-sdd[bot]`) renders
+# FAITHFULLY. They were once excluded, which silently rewrote such a login to
+# `minspec-sddbot` — and a record whose approvedBy names an account that does not
+# exist is an audit trail that lies. Neither bracket can forge a field (that needs a
+# newline or a colon, both still stripped).
+record_scrub() { printf '%s' "$1" | tr -cd 'A-Za-z0-9:._/[]-'; }
+
+# is_bot_identity <login> — true for GitHub App / bot logins. Load-bearing in BOTH
+# halves (approve-issue.sh refuses to mint under one; the reader refuses to honour
+# one), so that the autonomous pipeline — which writes as `minspec-sdd[bot]` — can
+# never mint the human keystroke it exists to wait for.
+is_bot_identity() {
+  case "$(printf '%s' "$1" | tr '[:upper:]' '[:lower:]')" in
+    # `*[bot]` is GitHub's own suffix for every App identity, so it generalises to
+    # bots this repo has never seen. The two literals cover this pipeline's own
+    # identities in their bare form, since that is what a hand-forged record would
+    # most plausibly carry. A human login ending in "bot" (talbot, abbot) is
+    # deliberately NOT matched — the suffix rule is the bracketed form only.
+    *'[bot]'|'github-actions'|'minspec-sdd') return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+# Exposed as an entry point so approve-issue.sh asks THIS file rather than carrying a
+# second copy of the rule — two files half-knowing one predicate is how they drift.
+if [[ "${1:-}" == "--is-bot-identity" ]]; then
+  is_bot_identity "${2-}" && exit 0
+  exit 1
+fi
+
+# ── PURE PREDICATE: may a human approval lift this hold? (#1084) ──────────────
+# Exported as its own entry point so the credentialed writer (approve-issue.sh) and
+# the reader below decide by the SAME code, and so the policy is unit-testable
+# without gh. Deny is the default: an unrecognised hold falls through to a refusal.
+if [[ "${1:-}" == "--may-approve" ]]; then
+  shift
+  a_hold="$(printf '%s' "${1-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+  a_human="$(printf '%s' "${2-}" | tr '[:upper:]' '[:lower:]' | tr -d '[:space:]')"
+
+  # human_only is checked FIRST and independently of `hold`, mirroring the reader:
+  # it is the one classification whose violation a build can never walk back, so it
+  # is never inferred from a sibling field a garbled record could disagree with.
+  if [[ "$a_human" != "no" ]]; then
+    echo "not-approvable [human-only]: verdict records human_only='${a_human:-<missing>}'. human_only is a CONTENT class (marketing, positioning, copy, legal, decide) — it says who may AUTHOR the work, not who may permit it, so no approval lifts it (DR-072 §3). If the classification is WRONG, fix the input: make the issue body unambiguous about its type and re-triage."
+    exit 1
+  fi
+  case "$a_hold" in
+    none)
+      echo "not-approvable [already-ready]: hold is already 'none' — this issue needs no approval; it is dispatchable as it stands."
+      exit 1 ;;
+    human)
+      echo "not-approvable [hold-human]: hold='human' — see human_only above; absolute (DR-072 §3)."
+      exit 1 ;;
+    info)
+      echo "not-approvable [hold-info]: hold='info' — triage could not size this issue and asked for more information. Approval does not supply it: add what is missing to the issue, then re-triage."
+      exit 1 ;;
+    unknown)
+      echo "not-approvable [hold-unknown]: hold='unknown' — the gate reached no conclusion (no verdict block, or a garbled one), so there is no decision to approve. Re-triage with \`scripts/triage-inbox.sh <N>\`."
+      exit 1 ;;
+  esac
+  if printf '%s\n' "$APPROVABLE_HOLDS" | tr ' ' '\n' | grep -Fxq -- "$a_hold"; then
+    echo "approvable"
+    exit 0
+  fi
+  echo "not-approvable [bad-hold]: hold='${a_hold:-<missing>}' is not a hold a human approval may lift (approvable: ${APPROVABLE_HOLDS}) — refusing rather than guessing."
+  exit 1
+fi
 
 # ── WRITER: mint a verdict record (issue body on stdin) ───────────────────────
 if [[ "${1:-}" == "--render-record" ]]; then
@@ -142,6 +255,50 @@ if [[ "${1:-}" == "--render-record" ]]; then
   printf 'hold: %s\n'       "$r_hold"
   printf 'bodyHash: %s\n'   "$r_hash"
   printf 'verdictAt: %s\n'  "$r_at"
+  printf '%s\n' "$RECORD_END"
+  printf '```\n'
+  exit 0
+fi
+
+# ── WRITER: mint a HUMAN-APPROVAL record (#1084; issue body on stdin) ─────────
+# Emits `hold: none` + `decision: agent-ready` because that is what a human approval
+# MEANS — the hold is lifted — while `supersedes:` preserves which hold was lifted,
+# so the audit trail never loses the fact that this issue was once held and by what.
+if [[ "${1:-}" == "--render-approval" ]]; then
+  shift
+  a_by="$(record_scrub "${1:?usage: --render-approval <approvedBy> <role> <tier> <supersedes> [approvedAt]}")"
+  a_role="$(record_scrub "${2:?--render-approval needs <role>}")"
+  a_tier="$(record_scrub "${3:?--render-approval needs <tier>}")"
+  a_sup="$(record_scrub "${4:?--render-approval needs <supersedes>}")"
+  a_at="$(record_scrub "${5:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}")"
+  # Refuse at the WRITER too, not only at the reader: a record that could never be
+  # honoured must never be minted, or the issue acquires an approval comment that
+  # silently does nothing — a false signpost.
+  if [[ -z "$a_by" ]] || is_bot_identity "$a_by"; then
+    echo "ERROR: approvedBy='${a_by:-<empty>}' is empty or a bot identity — a human approval must name a human (#1084). Refusing to render." >&2
+    exit 1
+  fi
+  if ! printf '%s\n' "$APPROVABLE_HOLDS" | tr ' ' '\n' | grep -Fxq -- "$a_sup"; then
+    echo "ERROR: supersedes='${a_sup:-<empty>}' is not a hold a human approval may lift (approvable: ${APPROVABLE_HOLDS}). Refusing to render (DR-072 §3)." >&2
+    exit 1
+  fi
+  if ! a_hash="$(body_hash)"; then
+    echo "ERROR: cannot compute bodyHash (sha256sum unavailable) — refusing to render an unfalsifiable approval record." >&2
+    exit 1
+  fi
+  printf '%s\n' "$RECORD_MARKER"
+  printf '```\n'
+  printf '%s\n' "$RECORD_BEGIN"
+  printf 'gate: %s\n'       "$RECORD_SCHEMA_HUMAN"
+  printf 'decision: %s\n'   "agent-ready"
+  printf 'role: %s\n'       "$a_role"
+  printf 'tier: %s\n'       "$a_tier"
+  printf 'human_only: %s\n' "no"
+  printf 'hold: %s\n'       "none"
+  printf 'supersedes: %s\n' "$a_sup"
+  printf 'approvedBy: %s\n' "$a_by"
+  printf 'bodyHash: %s\n'   "$a_hash"
+  printf 'verdictAt: %s\n'  "$a_at"
   printf '%s\n' "$RECORD_END"
   printf '```\n'
   exit 0
@@ -218,9 +375,12 @@ if [[ -z "$RECORD" ]]; then
 fi
 
 r_gate="$(record_field gate)"
-if [[ "$r_gate" != "$RECORD_SCHEMA" ]]; then
-  refuse bad-schema "verdict record declares gate '${r_gate:-<missing>}', not '${RECORD_SCHEMA}' — unrecognised schema, refusing rather than guessing. Re-triage to mint a current record."
-fi
+IS_HUMAN_APPROVAL=0
+case "$r_gate" in
+  "$RECORD_SCHEMA")       IS_HUMAN_APPROVAL=0 ;;
+  "$RECORD_SCHEMA_HUMAN") IS_HUMAN_APPROVAL=1 ;;
+  *) refuse bad-schema "verdict record declares gate '${r_gate:-<missing>}', which is neither '${RECORD_SCHEMA}' nor '${RECORD_SCHEMA_HUMAN}' — unrecognised schema, refusing rather than guessing. Re-triage to mint a current record." ;;
+esac
 
 # Freshness FIRST: a record that is not about the issue as it stands now says
 # nothing about it, whatever its other fields claim.
@@ -259,6 +419,23 @@ fi
 r_decision="$(printf '%s' "$(record_field decision)" | tr '[:upper:]' '[:lower:]')"
 if [[ "$r_decision" != "agent-ready" ]]; then
   refuse decision "verdict decision is '${r_decision:-<missing>}', not agent-ready — record is inconsistent with its own hold, refusing"
+fi
+
+# ── #1084: extra conjuncts a HUMAN-APPROVAL record must also satisfy ──────────
+# Checked last, so a stale or self-inconsistent approval is reported by the more
+# informative shared code above rather than being masked by an approver complaint.
+if [[ "$IS_HUMAN_APPROVAL" -eq 1 ]]; then
+  r_by="$(record_field approvedBy)"
+  if [[ -z "$r_by" ]]; then
+    refuse no-approver "human-approval record names no approvedBy — an unattributed human approval is not a human approval (#1084). Re-approve with \`scripts/approve-issue.sh <N>\`."
+  fi
+  if is_bot_identity "$r_by"; then
+    refuse bot-approver "human-approval record was minted by the bot identity '${r_by}' — the autonomous pipeline may never mint the human keystroke it exists to wait for (#1084). A human must run \`scripts/approve-issue.sh <N>\`."
+  fi
+  r_sup="$(printf '%s' "$(record_field supersedes)" | tr '[:upper:]' '[:lower:]')"
+  if ! printf '%s\n' "$APPROVABLE_HOLDS" | tr ' ' '\n' | grep -Fxq -- "$r_sup"; then
+    refuse bad-supersedes "human-approval record claims to lift hold '${r_sup:-<missing>}', which no approval may lift (approvable: ${APPROVABLE_HOLDS}) — human_only, info and unknown holds are absolute (DR-072 §3)."
+  fi
 fi
 
 echo "ready"

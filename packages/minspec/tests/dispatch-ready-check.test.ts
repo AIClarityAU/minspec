@@ -370,3 +370,199 @@ describe('dispatch-ready-check.sh — writer/reader round-trip (no format drift)
     expect(r.out).toContain('[held]');
   });
 });
+
+/**
+ * T0 — #1084: the human-approval EXIT from a triage hold.
+ *
+ * #983 closed the "a label is not a verdict" hole by demanding a record with
+ * `hold: none`. The only writer of such a record was the LLM triage gate — which,
+ * re-run, re-derives the same hold — so `needs-review` became a ONE-WAY DOOR: a
+ * human who had reviewed an issue had no way to say "I've read it, go". A gate that
+ * refuses valid work is worse than the hole it closed.
+ *
+ * The exit is a SECOND record schema, minted by `scripts/approve-issue.sh`, that
+ * goes THROUGH the same reader (no `--force`, no label flip). These tests pin the
+ * two properties that keep it from being #983 by another name:
+ *   • it lifts ONLY `hold:tier` — `human`, `info` and `unknown` are absolute
+ *     (DR-070 §5.1), because human_only is a CONTENT class (who may AUTHOR) and no
+ *     keystroke transfers authorship; and
+ *   • it is attributed and hash-bound — an unattributed, bot-minted, or post-edit
+ *     approval is refused exactly as a stale triage verdict is.
+ */
+describe('dispatch-ready-check.sh — human approval lifts a tier hold, and only that (#1084)', () => {
+  /** Mint an approval record through the same script that reads it (round-trip). */
+  function approval(
+    { by = 'harvest316', role = 'dev', tier = 'T3', supersedes = 'tier', at = '2026-07-29T00:00:00Z' } = {},
+    body: string = BODY,
+  ): string {
+    return execFileSync('bash', [GATE, '--render-approval', by, role, tier, supersedes, at], {
+      input: body,
+      encoding: 'utf-8',
+    });
+  }
+
+  /** Rewrite one field of a rendered record — the only way to forge a shape the writer refuses to mint. */
+  function mutate(rec: string, field: string, value: string): string {
+    return rec.replace(new RegExp(`^${field}:.*$`, 'm'), `${field}: ${value}`);
+  }
+
+  /** The pure predicate, exercised directly. */
+  function mayApprove(hold: string, humanOnly: string): { ok: boolean; out: string } {
+    try {
+      return {
+        ok: true,
+        out: execFileSync('bash', [GATE, '--may-approve', hold, humanOnly], { encoding: 'utf-8' }).trim(),
+      };
+    } catch (e: any) {
+      return { ok: false, out: (e.stdout ?? '').toString().trim() };
+    }
+  }
+
+  // ── The go path ────────────────────────────────────────────────────────────
+  it('a fresh human approval of a tier hold → ready (the exit exists at all)', () => {
+    const r = check('OPEN', 'agent-ready,role:dev', approval());
+    expect(r.ok).toBe(true);
+    expect(r.out).toBe('ready');
+  });
+
+  it('--may-approve tier/no → approvable', () => {
+    expect(mayApprove('tier', 'no')).toEqual({ ok: true, out: 'approvable' });
+  });
+
+  // ── The absolute holds: no approval, in any shape, releases them ───────────
+  it.each([
+    ['human', 'yes', 'human-only'],
+    ['human', 'no', 'hold-human'],
+    ['info', 'no', 'hold-info'],
+    ['unknown', 'no', 'hold-unknown'],
+    ['none', 'no', 'already-ready'],
+    ['', 'no', 'bad-hold'],
+    ['garbled', 'no', 'bad-hold'],
+  ])('--may-approve %s/%s → refused [%s]', (hold, human, code) => {
+    const r = mayApprove(hold, human);
+    expect(r.ok).toBe(false);
+    expect(r.out).toContain(`[${code}]`);
+  });
+
+  it('human_only=yes is refused for EVERY hold — it is checked first and independently', () => {
+    for (const hold of ['tier', 'human', 'info', 'unknown', 'none', '']) {
+      const r = mayApprove(hold, 'yes');
+      expect(r.ok, `hold=${hold}`).toBe(false);
+      expect(r.out, `hold=${hold}`).toContain('[human-only]');
+    }
+  });
+
+  it('a missing human_only is refused too — absent is not "no" on the affirmative path', () => {
+    expect(mayApprove('tier', '').ok).toBe(false);
+  });
+
+  // ── The writer refuses to mint what the reader would refuse to honour ──────
+  it('--render-approval refuses a bot approver (the pipeline cannot approve itself)', () => {
+    for (const bot of ['minspec-sdd[bot]', 'github-actions[bot]', 'minspec-sdd']) {
+      expect(() => approval({ by: bot })).toThrow();
+    }
+  });
+
+  it('--render-approval refuses an empty approver', () => {
+    expect(() => approval({ by: '' })).toThrow();
+  });
+
+  it('--render-approval refuses to lift a hold no approval may lift', () => {
+    for (const hold of ['human', 'info', 'unknown', 'none', 'nonsense']) {
+      expect(() => approval({ supersedes: hold }), `supersedes=${hold}`).toThrow();
+    }
+  });
+
+  // ── The reader refuses the same shapes when hand-forged past the writer ────
+  it('a forged approval naming no approver → refused [no-approver]', () => {
+    const r = check('OPEN', 'agent-ready', mutate(approval(), 'approvedBy', ''));
+    expect(r.ok).toBe(false);
+    expect(r.out).toContain('[no-approver]');
+  });
+
+  it('a forged approval minted by the bot → refused [bot-approver]', () => {
+    const r = check('OPEN', 'agent-ready', mutate(approval(), 'approvedBy', 'minspec-sdd[bot]'));
+    expect(r.ok).toBe(false);
+    expect(r.out).toContain('[bot-approver]');
+  });
+
+  it('a forged approval claiming to lift human/info/unknown → refused [bad-supersedes]', () => {
+    for (const hold of ['human', 'info', 'unknown']) {
+      const r = check('OPEN', 'agent-ready', mutate(approval(), 'supersedes', hold));
+      expect(r.ok, `supersedes=${hold}`).toBe(false);
+      expect(r.out, `supersedes=${hold}`).toContain('[bad-supersedes]');
+    }
+  });
+
+  it('an approval with the supersedes line deleted entirely → refused', () => {
+    const r = check('OPEN', 'agent-ready', approval().replace(/^supersedes:.*$\n/m, ''));
+    expect(r.ok).toBe(false);
+    expect(r.out).toContain('[bad-supersedes]');
+  });
+
+
+  // Regression: `record_scrub` once stripped `[` and `]`, so `dependabot[bot]` was
+  // rewritten to `dependabotbot` — which no longer matched the `*[bot]` bot rule at
+  // EITHER end. The writer minted it and the reader honoured it, so any App identity
+  // other than the two named literals could mint a "human" approval. Caught while
+  // writing these tests, before it shipped.
+  it('a bracketed App login survives scrubbing intact, and is refused at both ends', () => {
+    expect(() => approval({ by: 'dependabot[bot]' })).toThrow();
+    const forged = mutate(approval(), 'approvedBy', 'dependabot[bot]');
+    expect(forged).toContain('dependabot[bot]');
+    const r = check('OPEN', 'agent-ready', forged);
+    expect(r.ok).toBe(false);
+    expect(r.out).toContain('[bot-approver]');
+  });
+
+  it('a real App login round-trips WITHOUT being mangled (audit fidelity)', () => {
+    const rec = execFileSync('bash', [GATE, '--render-record', 'agent-ready', 'dev', 'T2', 'no', 'none'], {
+      input: BODY, encoding: 'utf-8',
+    });
+    expect(rec).toContain('gate: minspec-triage-verdict/1');
+    // --is-bot-identity is the single definition both halves consult.
+    const isBot = (login: string) => {
+      try { execFileSync('bash', [GATE, '--is-bot-identity', login]); return true; } catch { return false; }
+    };
+    expect(isBot('minspec-sdd[bot]')).toBe(true);
+    expect(isBot('github-actions[bot]')).toBe(true);
+    expect(isBot('dependabot[bot]')).toBe(true);
+    expect(isBot('harvest316')).toBe(false);
+    // A human whose login merely ENDS in "bot" is not a bot — the rule is the
+    // bracketed form, so the gate never falsely refuses a real person.
+    expect(isBot('talbot')).toBe(false);
+  });
+
+  // ── Same falsifiability as a triage verdict ───────────────────────────────
+  it('editing the issue AFTER approving re-stales it — approval is body-bound, not permanent', () => {
+    const r = check('OPEN', 'agent-ready', approval(), `${BODY}\n\nEdited after approval.`);
+    expect(r.ok).toBe(false);
+    expect(r.out).toContain('[stale-verdict]');
+  });
+
+  it('a re-triage AFTER an approval supersedes it — the LAST record wins', () => {
+    const src = `${approval()}\n${render({ decision: 'needs-review', hold: 'human', human_only: 'yes' })}`;
+    const r = check('OPEN', 'agent-ready', src);
+    expect(r.ok).toBe(false);
+    expect(r.out).toContain('[human-only]');
+  });
+
+  it('an approval still supersedes an EARLIER held triage verdict (that is the point)', () => {
+    const src = `${render({ decision: 'needs-review', tier: 'T3', hold: 'tier' })}\n${approval()}`;
+    expect(check('OPEN', 'agent-ready', src)).toEqual({ ok: true, out: 'ready' });
+  });
+
+  it('countermanding labels still veto an approval — labels and record must BOTH agree', () => {
+    for (const gate of ['needs-review', 'needs-human-review', 'agent-quarantined']) {
+      const r = check('OPEN', `agent-ready,${gate}`, approval());
+      expect(r.ok, `gate=${gate}`).toBe(false);
+      expect(r.out, `gate=${gate}`).toContain('[countermanded]');
+    }
+  });
+
+  it('an unrecognised third schema is still refused — the widening is exactly two schemas', () => {
+    const r = check('OPEN', 'agent-ready', mutate(approval(), 'gate', 'minspec-something-else/9'));
+    expect(r.ok).toBe(false);
+    expect(r.out).toContain('[bad-schema]');
+  });
+});

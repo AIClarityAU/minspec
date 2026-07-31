@@ -515,9 +515,10 @@
           },
           "default": [
             "main",
-            "master"
+            "master",
+            "trunk"
           ],
-          "markdownDescription": "Branches that reject a direct push (branch protection / required PR). Used by `#minspec.pushOnApprove#` to push an approval on a new branch for a PR instead of attempting a push that would be rejected. Read from settings rather than probed, so the decision needs no network call."
+          "markdownDescription": "Branches that reject a direct push (branch protection / required PR). Used by `#minspec.pushOnApprove#` to push an approval on a new branch for a PR instead of attempting a push that would be rejected, and by the harness commit offer to avoid depositing a commit that could never be pushed. Read from settings rather than probed, so the decision needs no network call.\n\nThis default is the single source of truth: the generated pre-commit hook reads the git-config twin `minspec.protectedBranches` and falls back to the same three names, so all three guards agree."
         },
         "minspec.autoBackfillUseAi": {
           "type": "boolean",
