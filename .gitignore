@@ -25,6 +25,10 @@ coverage/
 # claim to ignore it while git kept honouring the index, leaving a rule that
 # reads as working and does nothing (#1100).
 !.claude/settings.json
+# MinSpec's scaffolded Claude Code hooks (#1093) — shared harness like the shims
+# above, and the canonical source the extension's embedded copies are generated
+# from, so they must be TRACKED. `.claude/*` would otherwise ignore the whole dir.
+!.claude/hooks/
 # Explicit literal (redundant with .claude/* above, but the #794 parity test
 # requires every MINSPEC_GITIGNORE_ENTRIES entry to appear verbatim, so newly-
 # scaffolded projects and this monorepo checkout stay gitignore-consistent).

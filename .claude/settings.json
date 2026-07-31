@@ -20,7 +20,7 @@
       {
         "hooks": [
           { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/hooks/scope-check.sh\"" },
-          { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/hooks/session-title.sh\"" }
+          { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/.claude/hooks/session-title.sh\"" }
         ]
       }
     ],
