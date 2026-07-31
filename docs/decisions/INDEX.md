@@ -586,4 +586,12 @@ It also, unnoticed, made needs-review a **one-way door**. The only writer of suc
 <!-- dr-summary:DR-073 auto=15c0b646c955 -->
 Constitution invariant: MinSpec is the **signpost**, and a signpost that is wrong is worse than no signpost. #1090 built a UserPromptSubmit hook that appends the approvable IDs a session is working on to the Claude Code session title, so the tab, the prompt box, and the /resume picker all name what is under work. It landed as scripts/hooks/session-title.* plus an entry in this repo's own .claude/settings.json — a MinSpecPro-local script.
 <!-- /dr-summary:DR-073 -->
+
+## [DR-074 — MinSpec's blast radius is the project it is installed in — every MinSpec rule that lives on a machine-wide surface carries its own `.minspec/`-presence scope gate, and the only widening is an explicit org-admin opt-in](DR-074.md)
+
+*Status: proposed · Date: 2026-07-31*
+
+<!-- dr-summary:DR-074 auto=d925302c5f59 -->
+MinSpec's harness has always been careful about *files*: every managed region is marker-bounded so a refresh overwrites MinSpec's part and preserves yours (#249, DR-037), and DR-073 §3 extended that to a foreign tool's config file under a four-part never-clobber contract. DR-073's rejected alternatives already contain this DR's ruling in miniature:
+<!-- /dr-summary:DR-074 -->
 <!-- minspec:dr-index:end -->
