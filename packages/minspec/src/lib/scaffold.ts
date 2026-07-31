@@ -343,47 +343,54 @@ export function scaffold(rootDir: string): void {
  * exactly the kind of invisible git action G-8 exists to remove.
  */
 export function untrackDeclaredMachineLocalPaths(rootDir: string): string[] {
-  const removed: string[] = [];
-  for (const entry of MINSPEC_GITIGNORE_ENTRIES) {
-    // A directory entry (`.minspec/sessions/`) is a valid pathspec without the
-    // trailing slash; `git ls-files` expands it to the tracked files beneath.
-    const pathspec = entry.endsWith('/') ? entry.slice(0, -1) : entry;
-    let tracked = '';
-    try {
-      tracked = execFileSync('git', ['ls-files', '-z', '--', pathspec], {
-        cwd: rootDir,
-        encoding: 'utf-8',
-        stdio: ['ignore', 'pipe', 'ignore'],
-      });
-    } catch {
-      // Not a git repo, or no git on PATH — nothing to reconcile, and every
-      // subsequent entry would fail the same way.
-      return removed;
-    }
-    const paths = tracked.split('\0').filter((p) => p.length > 0);
-    if (paths.length === 0) continue;
-    try {
-      execFileSync('git', ['rm', '--cached', '-q', '--ignore-unmatch', '--', ...paths], {
-        cwd: rootDir,
-        encoding: 'utf-8',
-        stdio: ['ignore', 'ignore', 'ignore'],
-      });
-      removed.push(...paths);
-    } catch {
-      // Leave it tracked rather than half-reconciled; the next refresh retries.
-    }
+  // A directory entry (`.minspec/sessions/`) is a valid pathspec without the
+  // trailing slash; `git ls-files` expands it to the tracked files beneath.
+  // All entries go in ONE invocation — per-entry calls meant a subprocess spawn
+  // for each of the eight on every generate/refresh, for a list that is almost
+  // always empty.
+  const pathspecs = MINSPEC_GITIGNORE_ENTRIES.map((e) => (e.endsWith('/') ? e.slice(0, -1) : e));
+
+  let tracked = '';
+  try {
+    tracked = execFileSync('git', ['ls-files', '-z', '--', ...pathspecs], {
+      cwd: rootDir,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch {
+    // Not a git repo, or no git on PATH — nothing to reconcile.
+    return [];
   }
-  return removed;
+
+  const paths = tracked.split('\0').filter((p) => p.length > 0);
+  if (paths.length === 0) return [];
+
+  try {
+    execFileSync('git', ['rm', '--cached', '-q', '--ignore-unmatch', '--', ...paths], {
+      cwd: rootDir,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'ignore', 'ignore'],
+    });
+  } catch {
+    // Leave them tracked rather than half-reconciled; the next refresh retries.
+    return [];
+  }
+  return paths;
 }
 
-export function ensureGitignoreEntries(rootDir: string): void {
+/**
+ * @returns the paths removed from the git index, for the caller to REPORT. Never
+ * discard this — an unreported `git rm --cached` is precisely the invisible git
+ * action G-8 exists to remove, and the two callers below thread it to the UI.
+ */
+export function ensureGitignoreEntries(rootDir: string): string[] {
   // Reconcile FIRST, and unconditionally — before the early return below.
   //
   // That return fires whenever `.gitignore` already lists every entry, which is the
   // steady state of every already-scaffolded project. Putting the reconcile after it
   // would skip precisely the repos that need it: the ones whose ignore rules are
   // present, correct-looking, and inert because the files were tracked first.
-  untrackDeclaredMachineLocalPaths(rootDir);
+  const untracked = untrackDeclaredMachineLocalPaths(rootDir);
 
   const gitignorePath = path.join(rootDir, '.gitignore');
   const existing = fs.existsSync(gitignorePath)
@@ -396,7 +403,7 @@ export function ensureGitignoreEntries(rootDir: string): void {
 
   const missing = MINSPEC_GITIGNORE_ENTRIES.filter((entry) => !existingLines.has(entry));
   if (missing.length === 0) {
-    return;
+    return untracked;
   }
 
   const hasMarker = existing.includes(MINSPEC_GITIGNORE_MARKER);
@@ -406,6 +413,7 @@ export function ensureGitignoreEntries(rootDir: string): void {
   const separator = existing.length > 0 && !existing.endsWith('\n\n') ? '\n' : '';
 
   fs.writeFileSync(gitignorePath, existing + prefix + separator + block);
+  return untracked;
 }
 
 /**
@@ -419,6 +427,27 @@ export interface ManagedRegionWarning {
   readonly outputPath: string;
   /** Human-readable, actionable message. */
   readonly message: string;
+  /**
+   * What KIND of notice this is, so the surfacing layer can offer the right
+   * actions. Optional and defaulting to `'missing-markers'` so every existing
+   * producer and consumer is unaffected.
+   *
+   * `'untracked'` notices must NOT offer "Re-scaffold" — nothing was scaffolded,
+   * a file was removed from the git index — which is why this discriminator
+   * exists rather than reusing the marker warning verbatim.
+   */
+  readonly kind?: 'missing-markers' | 'untracked';
+}
+
+/** The notice raised when a declared machine-local path is removed from the index. */
+export function untrackedNoticeMessage(outputPath: string): string {
+  return (
+    `${outputPath} was tracked by git but MinSpec declares it machine-local, so it ` +
+    'has been removed from the index (the file is untouched on disk). It was ' +
+    'rewritten on every refresh and showed as a permanent change; a .gitignore ' +
+    'entry alone could not stop that, because git does not ignore an already-' +
+    'tracked path. Commit this removal to make it stick. Reverse with `git add`.'
+  );
 }
 
 /**
@@ -972,7 +1001,9 @@ export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
   // Backfill any missing ignore entries on auto-refresh-on-open so existing
   // projects (scaffolded before a new state file was added) stop committing
   // machine-local merge-refresh state. Idempotent — adds only what's missing.
-  ensureGitignoreEntries(rootDir);
+  // Its return is the set of paths removed from the git index; it is REPORTED at
+  // the end of this function, never discarded (#1146 review).
+  const untrackedOnRefresh = ensureGitignoreEntries(rootDir);
 
   const config = loadConfig(rootDir);
   const context = buildContext(rootDir, config);
@@ -1045,5 +1076,14 @@ export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
   // record-before-write regression, INV-3 / D4), not standalone #890 protection.
   recordVerifyAndSaveManifest(rootDir);
 
-  return managedRegionWarnings;
+  // Report the index change. A `git rm --cached` is invisible in the editor
+  // otherwise, and an unreported one is the exact G-8 / never-wrong failure this
+  // feature's own docstring forbids — three reviewers on #1146 caught it discarded.
+  const untrackedNotices: ManagedRegionWarning[] = untrackedOnRefresh.map((outputPath) => ({
+    outputPath,
+    message: untrackedNoticeMessage(outputPath),
+    kind: 'untracked' as const,
+  }));
+
+  return [...managedRegionWarnings, ...untrackedNotices];
 }

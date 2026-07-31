@@ -1070,6 +1070,8 @@ export async function initCommand(
 const RESCAFFOLD_ACTION = 'Re-scaffold (overwrite)';
 /** Warning action: open the affected file so the user can inspect/fix it by hand. */
 const OPEN_FILE_ACTION = 'Open file';
+/** Untracked-notice action: the index changed, so show where to review and commit it. */
+const SHOW_SCM_ACTION = 'Show Source Control';
 
 /**
  * Surface a single {@link ManagedRegionWarning} left behind by
@@ -1086,6 +1088,26 @@ const OPEN_FILE_ACTION = 'Open file';
  */
 async function surfaceManagedRegionWarning(folder: string, w: ManagedRegionWarning): Promise<void> {
   const label = workspaceFolderLabel(folder);
+
+  // An 'untracked' notice reports a `git rm --cached`, not a scaffolding problem.
+  // "Re-scaffold" would be meaningless (nothing was scaffolded) and actively
+  // misleading, so this kind gets its own surface: state what changed to the index
+  // and offer the place to review and commit it (#1146).
+  if (w.kind === 'untracked') {
+    const choice = await vscode.window.showInformationMessage(
+      `[${label}] ${w.message}`,
+      SHOW_SCM_ACTION,
+      OPEN_FILE_ACTION,
+    );
+    if (choice === SHOW_SCM_ACTION) {
+      await vscode.commands.executeCommand('workbench.view.scm');
+    } else if (choice === OPEN_FILE_ACTION) {
+      const doc = await vscode.workspace.openTextDocument(path.join(folder, w.outputPath));
+      await vscode.window.showTextDocument(doc, { preview: false });
+    }
+    return;
+  }
+
   const choice = await vscode.window.showWarningMessage(
     `[${label}] ${w.message}`,
     RESCAFFOLD_ACTION,

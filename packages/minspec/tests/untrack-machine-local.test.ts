@@ -6,6 +6,8 @@ import { execFileSync } from 'node:child_process';
 import {
   ensureGitignoreEntries,
   untrackDeclaredMachineLocalPaths,
+  generateHarnessFiles,
+  refreshHarnessFiles,
   MINSPEC_GITIGNORE_ENTRIES,
 } from '../src/lib/scaffold';
 
@@ -127,6 +129,60 @@ describe('untrackDeclaredMachineLocalPaths', () => {
     // forever; now the pre-existing rule finally applies and status is clean.
     fs.writeFileSync(path.join(dir, '.minspec/generated-hashes.json'), '{"rewritten":1}\n');
     expect(git(dir, 'status', '--short')).toBe('');
+  });
+});
+
+describe('the untrack is REPORTED, never silent', () => {
+  /**
+   * The #1146 blocking finding, from three of four voters: the first revision called
+   * `untrackDeclaredMachineLocalPaths` and DISCARDED its return, so a `git rm --cached`
+   * ran invisibly during auto-refresh-on-open — the exact G-8 / never-wrong invisible
+   * git action the function's own docstring claimed to prevent. The docstring said
+   * "returns what it actually untracked so the caller can SAY so"; no caller said so.
+   */
+  it('ensureGitignoreEntries returns what it untracked', () => {
+    const dir = makeRepo();
+    fs.writeFileSync(path.join(dir, '.gitignore'), `${MINSPEC_GITIGNORE_ENTRIES.join('\n')}\n`);
+    git(dir, 'add', '.gitignore');
+    git(dir, 'commit', '-m', 'ignore');
+
+    const reported = ensureGitignoreEntries(dir);
+    expect(reported).toContain('.minspec/generated-hashes.json');
+    expect(reported).toContain('.minspec/preferences.json');
+  });
+
+  it('refreshHarnessFiles surfaces each untracked path as an `untracked` notice', () => {
+    const dir = makeRepo();
+    // A real harness so refresh runs end-to-end rather than bailing early.
+    generateHarnessFiles(dir);
+    git(dir, 'add', '-A');
+    git(dir, 'commit', '-m', 'scaffold');
+    // Re-track a declared machine-local file, i.e. the broken state in the wild.
+    fs.writeFileSync(path.join(dir, '.minspec/generated-hashes.json'), '{}\n');
+    git(dir, 'add', '-f', '.minspec/generated-hashes.json');
+    git(dir, 'commit', '-m', 're-track');
+    expect(tracked(dir)).toContain('.minspec/generated-hashes.json');
+
+    const warnings = refreshHarnessFiles(dir);
+
+    const notice = warnings.find((w) => w.outputPath === '.minspec/generated-hashes.json');
+    expect(notice, 'the untrack must reach the caller').toBeDefined();
+    expect(notice!.kind).toBe('untracked');
+    // The message has to say what happened to git AND that the file survives —
+    // a user seeing a deletion in Source Control needs both facts.
+    expect(notice!.message).toMatch(/removed from the index/);
+    expect(notice!.message).toMatch(/untouched on disk/);
+    expect(notice!.message).toMatch(/git add/);
+    // And it must not masquerade as a marker warning, whose surface offers
+    // "Re-scaffold" — meaningless here.
+    expect(notice!.kind).not.toBe('missing-markers');
+  });
+
+  it('reports nothing when there was nothing to untrack', () => {
+    const dir = makeRepo({ commitFirst: false });
+    generateHarnessFiles(dir);
+    const warnings = refreshHarnessFiles(dir);
+    expect(warnings.filter((w) => w.kind === 'untracked')).toEqual([]);
   });
 });
 

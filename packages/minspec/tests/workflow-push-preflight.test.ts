@@ -43,8 +43,10 @@ const made: string[] = [];
  */
 const ISOLATED_ENV = {
   ...process.env,
-  GIT_CONFIG_GLOBAL: '/dev/null',
-  GIT_CONFIG_SYSTEM: '/dev/null',
+  // os.devNull, not a literal '/dev/null' — the latter is Unix-only and would
+  // break a Windows run (#1146 review, low).
+  GIT_CONFIG_GLOBAL: os.devNull,
+  GIT_CONFIG_SYSTEM: os.devNull,
 };
 
 function git(cwd: string, ...args: string[]) {
