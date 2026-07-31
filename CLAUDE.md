@@ -14,7 +14,8 @@ These rules must never be violated. All changes must preserve them.
 > Summarized from `.minspec/constitution.md` — each line is the invariant's lead sentence. See the constitution for the full text, rationale, and SPEC/DR references; edit invariants there, not here.
 
 1. Core functionality works offline — no network calls without explicit user consent
-2. No silent gate — a required or merge-gating check fails visibly, never best-effort (DR-066)
+2. No silent gate — a required or merge-gating check fails visibly, never best-effort: no load-bearing gate signal is written with a swallowed error (`|| true`), a missing or errored witness fails the gate closed and visibly (never silently passes or stops evaluating), and no required check hinges on a single producer that one permission/config gap can disable (provide an independent second witness).
+3. MinSpec's blast radius is the project it is installed in — nothing MinSpec ships (extension write, harness file, hook, CI workflow, convention, or prose rule) may change behaviour in a repo, org, or machine-wide config that did not opt in, and the opt-in marker is `.minspec/` at the repo root.
 
 ## SDD Methodology
 

@@ -2,25 +2,32 @@
 
 ## Invariants
 
-- Core functionality works offline — no network calls without explicit user consent
-- No silent gate — a required or merge-gating check fails visibly, never best-effort: no load-bearing gate signal is written with a swallowed error (`|| true`), a missing or errored witness fails the gate closed and visibly (never silently passes or stops evaluating), and no required check hinges on a single producer that one permission/config gap can disable (provide an independent second witness). (DR-066; instances #560/#810/#857.)
+Rules that must never be violated. All changes must preserve them.
+
+1. Core functionality works offline — no network calls without explicit user consent
+2. No silent gate — a required or merge-gating check fails visibly, never best-effort: no load-bearing gate signal is written with a swallowed error (`|| true`), a missing or errored witness fails the gate closed and visibly (never silently passes or stops evaluating), and no required check hinges on a single producer that one permission/config gap can disable (provide an independent second witness). (DR-066; instances #560/#810/#857.)
+3. MinSpec's blast radius is the project it is installed in — nothing MinSpec ships (extension write, harness file, hook, CI workflow, convention, or prose rule) may change behaviour in a repo, org, or machine-wide config that did not opt in, and the opt-in marker is `.minspec/` at the repo root. Machine-wide surfaces (`~/.claude/**`, `~/.gitconfig`, `~/.config/**`, shell profiles) are out of bounds for a per-project write, and any MinSpec rule that must live on one carries its own `.minspec/`-presence scope gate in its text. Inside scope a rule may be absolute; outside scope it does not exist. The only widening is an explicit, opt-in org-admin policy, never an implicit reach. (DR-074; the narrow precedent is DR-073's rejected "install the hook globally in `~/.claude/settings.json`" alternative, generalised, with DR-073 §3's four-part contract governing how a foreign file may be written once it is in scope; instance: minspec#1147.)
 
 ## Principles
 
-- Just enough human
-- Avoid UX patterns that train user into rubber-stamping
-- User is always open to a better way - Push-back is welcome
-- Avoid nagging
-- Specs are living documents, not bureaucracy
-- Record hard-to-reverse decisions as decision records before implementing
-- **Conform to Spec Kit conventions by default.** Mirror Spec Kit's artifact names, folders, and command surface so a Spec-Kit user transitions with near-zero relearning. Diverge only where a recorded decision says our model requires it — deterministic write-time enforcement (G-7), `SPEC-NNN` ids (DR-027), the `.minspec` store, the never-wrong signpost (DR-055 §3). Familiar surface, stronger engine.
-- Don't hope an LLM will follow rules - enforce it via code
+Guidelines that should be followed. Can be bent in exceptional circumstances with justification.
+
+1. Just enough human
+2. Avoid UX patterns that train user into rubber-stamping
+3. User is always open to a better way - Push-back is welcome
+4. Avoid nagging
+5. Specs are living documents, not bureaucracy
+6. Record hard-to-reverse decisions as decision records before implementing
+7. **Conform to Spec Kit conventions by default.** Mirror Spec Kit's artifact names, folders, and command surface so a Spec-Kit user transitions with near-zero relearning. Diverge only where a recorded decision says our model requires it — deterministic write-time enforcement (G-7), `SPEC-NNN` ids (DR-027), the `.minspec` store, the never-wrong signpost (DR-055 §3). Familiar surface, stronger engine.
+8. Don't hope an LLM will follow rules - enforce it via code
 
 ## Constraints
 
-- @aiclarity/shared stays vscode/network-free (Tier-0) — no editor or network imports.
-- Cross-package changes must respect workspace boundaries; no deep reach into another package’s internals.
-- Keep extension activation cheap and side-effect-free; do not block the editor on init.
+Technical or business constraints that bound the solution space.
+
+1. @aiclarity/shared stays vscode/network-free (Tier-0) — no editor or network imports.
+2. Cross-package changes must respect workspace boundaries; no deep reach into another package’s internals.
+3. Keep extension activation cheap and side-effect-free; do not block the editor on init.
 
 ## Goals
 
