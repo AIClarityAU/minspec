@@ -589,7 +589,7 @@ Constitution invariant: MinSpec is the **signpost**, and a signpost that is wron
 
 ## [DR-074 — MinSpec's blast radius is the project it is installed in — every MinSpec rule that lives on a machine-wide surface carries its own `.minspec/`-presence scope gate, and the only widening is an explicit org-admin opt-in](DR-074.md)
 
-*Status: proposed · Date: 2026-07-31*
+*Status: accepted · Date: 2026-07-31*
 
 <!-- dr-summary:DR-074 auto=d925302c5f59 -->
 MinSpec's harness has always been careful about *files*: every managed region is marker-bounded so a refresh overwrites MinSpec's part and preserves yours (#249, DR-037), and DR-073 §3 extended that to a foreign tool's config file under a four-part never-clobber contract. DR-073's rejected alternatives already contain this DR's ruling in miniature:
