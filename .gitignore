@@ -107,3 +107,6 @@ packages/minspec/test-fixtures/workspace/.minspec/generated-hashes.json
 # ScroogeLLM content lives in the private scroogellm repo, never in public MinSpec (DR-027).
 # Gate: keep scrooge assets/site out of public history even if dropped into this tree.
 sites/scroogellm.com/
+
+# CodeGraph local index (33M+ SQLite db, machine-local, rebuilt on demand)
+.codegraph/
