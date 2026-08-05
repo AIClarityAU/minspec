@@ -11,12 +11,26 @@
  * These run real `git` in a temp repo.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { commitApproval, isUntrackedAtHead } from '../src/lib/approve-commit';
+
+// #1099 — this suite drives real `git` child processes per assertion (commitApproval
+// itself, plus the `git()` test helper). Under container scheduling contention a
+// single `git` invocation can queue past the 5s default testTimeout even though
+// nothing hung, and which suite trips it is non-deterministic run-to-run (#1099).
+// Raised HERE, per-file, not globally — a genuinely hung test elsewhere still fails
+// fast at the default. 30s is the value #1099 measured all affected suites passing
+// reliably at.
+beforeAll(() => {
+  vi.setConfig({ testTimeout: 30_000 });
+});
+afterAll(() => {
+  vi.resetConfig();
+});
 
 let tmp: string;
 

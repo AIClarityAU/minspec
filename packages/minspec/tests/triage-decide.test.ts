@@ -1,6 +1,19 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
+
+// #1099 — this suite drives real `bash`/`triage-decide.sh` child processes per
+// assertion. Under container scheduling contention a single invocation can queue
+// past the 5s default testTimeout even though nothing hung, and which suite trips
+// it is non-deterministic run-to-run (#1099). Raised HERE, per-file, not globally —
+// a genuinely hung test elsewhere still fails fast at the default. 30s is the value
+// #1099 measured all affected suites passing reliably at.
+beforeAll(() => {
+  vi.setConfig({ testTimeout: 30_000 });
+});
+afterAll(() => {
+  vi.resetConfig();
+});
 
 // T0 invariant test for the deterministic triage gate (scripts/triage-decide.sh).
 //
