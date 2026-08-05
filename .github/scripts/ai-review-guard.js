@@ -48,6 +48,135 @@ const CHECK_NAME = 'ai-review';
 // isQuotaExhaustion() and the ai-review-retry workflow.
 const BLOCKED = 'ai-review:blocked';
 
+// ── The verdict channel (DR-077, #1157/#1165) ────────────────────────────────
+//
+// The verdict used to be TEXT the reviewer typed, parsed back out of its prose.
+// That made every token the pipeline keys on a token an honest reviewer might
+// legitimately write — and a review of THIS file writes all of them. Eight
+// consumers could be flipped by a bare mention, and `BEGIN_COUNT != 1` caught
+// ambiguity but never forgery: a lone injected block decided `pass`.
+//
+// Now the verdict is a VALUE the reviewer returns (`claude -p --json-schema` →
+// `.structured_output`), and the block below is rendered by the PARENT from
+// validated fields. Two properties follow, and they are the whole point:
+//   • exactly one block exists, because we write it — the count guard can no
+//     longer be tripped by prose;
+//   • a quoted marker arrives as a JSON string VALUE, and a value cannot become
+//     structure.
+//
+// No `maxLength`, `maxItems` or `format` here, deliberately: a cap that makes the
+// model fail to produce `structured_output` would recreate #1157 as an
+// intermittent self-block correlated with THOROUGH reviews — the worst possible
+// correlation. Length is bounded at render time, where it can shorten display
+// text but can never withhold a verdict.
+const VERDICT_SCHEMA = {
+  type: 'object',
+  additionalProperties: false,
+  required: ['verdict', 'blocking', 'summary'],
+  properties: {
+    verdict: { type: 'string', enum: ['pass', 'changes'] },
+    blocking: { type: 'integer', minimum: 0 },
+    summary: { type: 'string' },
+    findings: {
+      type: 'array',
+      items: {
+        type: 'object',
+        additionalProperties: false,
+        required: ['severity', 'location', 'problem'],
+        properties: {
+          severity: { type: 'string' },
+          location: { type: 'string' },
+          problem: { type: 'string' },
+        },
+      },
+    },
+  },
+};
+
+// Neutralise every protocol token inside model-authored TEXT before it is
+// rendered between real delimiters. Without this the fix would be cosmetic: a
+// summary containing `REVIEW_VERDICT_BEGIN` would mint a second marker in the
+// block we just wrote, reproducing #1157 through the new channel. Mirrors the
+// diff-defanging in review-branch.sh, and leaves a visible marker so a reader
+// can still see that the text was there.
+function defangProtocolTokens(text) {
+  return String(text == null ? '' : text)
+    .replace(/\r/g, '')
+    // The replacement must NOT contain the token it replaces. review-decide.sh:41
+    // matches REVIEW_UNAVAILABLE as a BARE SUBSTRING, so a marker like
+    // "[defanged: REVIEW_UNAVAILABLE]" would still trip it — the defang would look
+    // applied and change nothing. Hyphens keep the text readable while breaking the
+    // literal the consumers grep for.
+    .replace(/REVIEW_VERDICT_(BEGIN|END)/g, (_m, k) => `[defanged marker: REVIEW-VERDICT-${k}]`)
+    .replace(
+      /REVIEW_UNAVAILABLE(_BEGIN|_END)?/g,
+      (_m, k) => `[defanged marker: REVIEW-UNAVAILABLE${k ? k.replace('_', '-') : ''}]`,
+    )
+    // Only the line-anchored form is load-bearing downstream (review-decide.sh
+    // greps `^[[:space:]]*ESCALATE:`), so neutralise it there and leave prose
+    // mentions mid-sentence readable.
+    .replace(/^(\s*)ESCALATE:/gm, '$1[defanged: ESCALATE]:');
+}
+
+// Bound a single rendered line. Applied to DISPLAY text only — never to the
+// verdict or blocking fields, so truncation can never change a decision.
+const MAX_FIELD = 500;
+function clampField(text) {
+  const s = defangProtocolTokens(text).replace(/\n+/g, ' ').trim();
+  return s.length <= MAX_FIELD ? s : `${s.slice(0, MAX_FIELD - 1)}…`;
+}
+
+/**
+ * Render the ONE canonical verdict block from a validated structured object.
+ * Returns '' for anything unusable, which downstream reads as "no verdict" and
+ * fails closed to ai-review:changes — never a spurious pass.
+ */
+function renderVerdictBlock(structured) {
+  const o = structured;
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return '';
+  const verdict = String(o.verdict ?? '').trim().toLowerCase();
+  if (verdict !== 'pass' && verdict !== 'changes') return '';
+  if (!Number.isInteger(o.blocking) || o.blocking < 0) return '';
+
+  const lines = [
+    'REVIEW_VERDICT_BEGIN',
+    `verdict: ${verdict}`,
+    `blocking: ${o.blocking}`,
+    `summary: ${clampField(o.summary) || '(no summary provided)'}`,
+  ];
+  const findings = Array.isArray(o.findings) ? o.findings : [];
+  if (findings.length > 0) {
+    lines.push('findings:');
+    for (const f of findings) {
+      if (!f || typeof f !== 'object') continue;
+      const sev = clampField(f.severity) || 'note';
+      const loc = clampField(f.location) || '(unspecified)';
+      const prob = clampField(f.problem) || '(no detail)';
+      lines.push(`- ${sev} ${loc} — ${prob}`);
+    }
+  }
+  lines.push('REVIEW_VERDICT_END');
+  return `${lines.join('\n')}\n`;
+}
+
+/**
+ * Extract the verdict block from `claude -p --output-format json` stdout.
+ * Fails closed ('') on anything unexpected: non-JSON, an error result, or a
+ * missing/!object `structured_output`. The agent cannot reach this function's
+ * input except through the schema-validated channel.
+ */
+function parseCliVerdict(stdoutText) {
+  let env;
+  try {
+    env = JSON.parse(String(stdoutText == null ? '' : stdoutText));
+  } catch {
+    return '';
+  }
+  if (!env || typeof env !== 'object') return '';
+  if (env.is_error === true) return '';
+  return renderVerdictBlock(env.structured_output);
+}
+
 // DR-063 (materialised as SPEC-031 INV-8 / FR-9a) — the single positive "your turn"
 // queue signal. Present
 // on a PR whose independent AI review has PASSED (the `ready-to-merge` gate is
@@ -619,6 +748,10 @@ module.exports = {
   shouldSummonHumanReview,
   isQuotaExhaustion,
   isQuotaExhaustionStrict,
+  VERDICT_SCHEMA,
+  defangProtocolTokens,
+  renderVerdictBlock,
+  parseCliVerdict,
   parseAllowlist,
   isAuthorizedReviewer,
   decideProvenanceRevert,
