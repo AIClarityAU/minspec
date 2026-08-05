@@ -409,7 +409,92 @@ describe('FR-13 — cross-cutting edges', () => {
     const violation = resolvePipeline(g).find((t) => t.evidence.rule === 'depends_on.uncleared');
     expect(violation).toBeDefined();
     expect(violation!.severityClass).toBe('gate-violation');
-    expect(violation!.targetId).toBe('SPEC-002');
+    // #1237: the target is the BLOCKER, not the blocked artifact. `minspec.nextTask`
+    // reveals `targetId`, so this is what decides which file the human is sent to —
+    // and the only actionable end of the edge is the un-cleared one.
+    expect(violation!.targetId).toBe('SPEC-001');
+  });
+
+  it('FR-13-advance-past (#1237): the imperative tells you to clear the blocker, and evidence keeps both ends', () => {
+    const g = graph({
+      epics: [mkEpic('EPIC-001', 'active', { order: 1 })],
+      specs: [
+        mkSpec('SPEC-001', 'specifying', 'unapproved', { epic: 'EPIC-001' }),
+        mkSpec('SPEC-002', 'implementing', 'approved', { epic: 'EPIC-001' }),
+      ],
+      edges: [{ kind: 'depends_on', from: 'SPEC-002', to: 'SPEC-001' }],
+    });
+    const v = resolvePipeline(g).find((t) => t.evidence.rule === 'depends_on.uncleared')!;
+    // The imperative's OBJECT is the blocker — asserted on the leading verb phrase so a
+    // future reword that quietly puts the blocked artifact back in front fails here.
+    expect(v.imperative).toMatch(/^Clear SPEC-001\b/);
+    expect(v.imperative).toContain('SPEC-002');
+    // Narrowing the target must not drop information: both ends stay in refs.
+    expect(v.evidence.refs).toContain('SPEC-001');
+    expect(v.evidence.refs).toContain('SPEC-002');
+  });
+
+  it('FR-13-advance-past (#1237): with several blockers, the first sorted one is the target and the rest are still named', () => {
+    const g = graph({
+      epics: [mkEpic('EPIC-001', 'active', { order: 1 })],
+      specs: [
+        mkSpec('SPEC-001', 'specifying', 'unapproved', { epic: 'EPIC-001' }),
+        mkSpec('SPEC-003', 'specifying', 'unapproved', { epic: 'EPIC-001' }),
+        mkSpec('SPEC-009', 'implementing', 'approved', { epic: 'EPIC-001' }),
+      ],
+      edges: [
+        // Deliberately declared out of order — the target must come from the
+        // compareIds sort in unclearedDependsOn, not from edge declaration order,
+        // or the signpost would be non-deterministic across graph rebuilds.
+        { kind: 'depends_on', from: 'SPEC-009', to: 'SPEC-003' },
+        { kind: 'depends_on', from: 'SPEC-009', to: 'SPEC-001' },
+      ],
+    });
+    const v = resolvePipeline(g).find((t) => t.evidence.rule === 'depends_on.uncleared')!;
+    expect(v.targetId).toBe('SPEC-001');
+    expect(v.imperative).toMatch(/^Clear SPEC-001\b/);
+    expect(v.imperative).toContain('SPEC-003');
+    expect(v.evidence.refs).toStrictEqual(['SPEC-009', 'SPEC-001', 'SPEC-003']);
+  });
+
+  it('FR-13-advance-past (#1237): two advancing artifacts sharing one blocker BOTH keep their violation', () => {
+    // Regression guard for the review finding on #1241: `artifactId` is the identity
+    // key for topoFloorBlock's `emitted` set, so pointing it at the shared blocker
+    // would collapse these two nodes into one — a gate that silently stops firing for
+    // the second artifact (constitution invariant #2, no silent gate).
+    const g = graph({
+      epics: [mkEpic('EPIC-001', 'active', { order: 1 })],
+      specs: [
+        mkSpec('SPEC-001', 'specifying', 'unapproved', { epic: 'EPIC-001' }),
+        mkSpec('SPEC-002', 'implementing', 'approved', { epic: 'EPIC-001' }),
+        mkSpec('SPEC-003', 'implementing', 'approved', { epic: 'EPIC-001' }),
+      ],
+      edges: [
+        { kind: 'depends_on', from: 'SPEC-002', to: 'SPEC-001' },
+        { kind: 'depends_on', from: 'SPEC-003', to: 'SPEC-001' },
+      ],
+    });
+    const violations = resolvePipeline(g).filter((t) => t.evidence.rule === 'depends_on.uncleared');
+    expect(violations).toHaveLength(2);
+    // Both point at the shared blocker...
+    expect(violations.map((v) => v.targetId)).toStrictEqual(['SPEC-001', 'SPEC-001']);
+    // ...but each still names its own advancing artifact, so neither is a duplicate.
+    const imperatives = violations.map((v) => v.imperative).sort();
+    expect(imperatives[0]).toContain('SPEC-002');
+    expect(imperatives[1]).toContain('SPEC-003');
+  });
+
+  it('FR-13-advance-past (#1237): the single signpost sends you to the blocker', () => {
+    const g = graph({
+      epics: [mkEpic('EPIC-001', 'active', { order: 1 })],
+      specs: [
+        mkSpec('SPEC-001', 'specifying', 'unapproved', { epic: 'EPIC-001' }),
+        mkSpec('SPEC-002', 'implementing', 'approved', { epic: 'EPIC-001' }),
+      ],
+      edges: [{ kind: 'depends_on', from: 'SPEC-002', to: 'SPEC-001' }],
+    });
+    // End-to-end through the one function the command and status bar both call.
+    expect(resolveNextTask(g)!.targetId).toBe('SPEC-001');
   });
 
   it('FR-13-supersedes: superseded target drops out, superseding node carries forward', () => {

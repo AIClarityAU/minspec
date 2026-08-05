@@ -649,14 +649,31 @@ function generateNodes(
     const node = index.byId.get(fromId)!;
     if (superseded.has(fromId)) continue;
     if (!isAdvancing(node, index)) continue; // merely-pending-with-blocker is floored later, not a violation
-    const kind = index.kindOf.get(fromId)!;
     const blockerList = blockers.join(', ');
+    // TARGET THE BLOCKER, NOT THE BLOCKED ARTIFACT (#1237). The actionable end of
+    // a `depends_on` edge is the thing that is not yet cleared: you cannot do
+    // anything to `fromId` that resolves this, and clearing the blocker resolves
+    // it by construction. Targeting `fromId` made `minspec.nextTask` open the file
+    // you must NOT work on (it reveals `task.targetId`) and left the real action as
+    // a parenthetical for the human to parse — technically true, practically wrong,
+    // which is exactly what EPIC-002 Signpost Integrity exists to prevent.
+    //
+    // `blockers` is `compareIds`-sorted by `unclearedDependsOn`, so picking the
+    // first is deterministic; the rest stay named in the imperative and `refs`, so
+    // no information is lost by narrowing the target to one.
+    //
+    // This also makes the two `depends_on` paths agree on which end is actionable:
+    // `topoFloorBlock` already sorts a merely-pending blocked node BELOW its
+    // blocker. Only this higher-severity advancing path had it backwards.
+    const primaryBlocker = blockers[0];
+    const kind = index.kindOf.get(primaryBlocker)!;
+    const alsoBlocking = blockers.length > 1 ? ` (also blocks via ${blockers.slice(1).join(', ')})` : '';
     ranked.push(
       mkRanked(
         {
           kind,
-          targetId: fromId,
-          imperative: `Resolve: ${fromId} advanced past un-cleared depends_on (${blockerList})`,
+          targetId: primaryBlocker,
+          imperative: `Clear ${primaryBlocker} — ${fromId} is advancing and depends on it${alsoBlocking}`,
           severityClass: 'gate-violation',
           evidence: {
             severityClass: 'gate-violation',
@@ -667,6 +684,19 @@ function generateNodes(
         },
         'gate-violation',
         {
+          // Every dial stays on the BLOCKED artifact. Two reasons, and the second
+          // is load-bearing:
+          //
+          // 1. epicOrder/goalRank/priority encode why this edge is URGENT — which
+          //    epic is advancing, at what goal and priority. That is a property of
+          //    the advance, not of the blocker sitting still.
+          // 2. `artifactId` is an IDENTITY KEY, not a display value: `topoFloorBlock`
+          //    uses it for its `emitted` set (`:989`, `:991`) and `compareRanked` for
+          //    the final tiebreak. Setting it to `primaryBlocker` would make it
+          //    non-unique whenever two advancing artifacts share one blocker, and the
+          //    emitted-set dedup would silently drop the second violation node — a
+          //    missing gate, which invariant #2 forbids. Only `targetId`, `imperative`
+          //    and `kind` describe where to send the human; only those change.
           epicOrder: resolveEpicOrder(epicOfRef(fromId, index), index),
           goalRank: goalRankOf(fromId, index),
           priority: priorityOf(fromId, index),
