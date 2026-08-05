@@ -23,13 +23,12 @@
  *      past half B. Pinning the two representations together is what makes the
  *      cross-PR check sound.
  *
- *   B. CROSS-PR — an id this PR adds must not already exist on the base branch,
- *      nor be added by another open PR. That half is network-fed and lands next;
- *      it lives in CI only, never in `packages/` (constitution invariant 1).
+ *   B. CROSS-PR (network-fed, decided purely) — an id this PR adds must not already
+ *      exist on the base branch, nor be added by another open PR.
  *
- * The rule is asserted by RUNNING the validator against a fixture register, never
- * by grepping its source for the rule's own name — which passes while inert (the
- * `specify_scope_stray` lesson).
+ * The decision logic for B is asserted by CALLING it, and the CLI around it by
+ * running it against a stub `gh` — never by grepping the workflow YAML for its own
+ * text, which passes while inert (the `specify_scope_stray` lesson).
  */
 
 import { describe, it, expect } from 'vitest';
@@ -44,10 +43,15 @@ import {
   drNumberFromPath,
   declaredIdFromContent,
   checkDeclaredDrIds,
+  claimedPathsFromPrFiles,
+  decideDrIdCollision,
   type DrFile,
+  type PrFileEntry,
 } from '../../../scripts/lib/dr-id-collision';
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
+const CLI = path.join(REPO_ROOT, 'scripts', 'check-dr-id-collision.ts');
+const WORKFLOW = path.join(REPO_ROOT, '.github', 'workflows', 'dr-id-collision.yml');
 
 const DIR = 'docs/decisions';
 
@@ -287,5 +291,313 @@ describe('A — the validator FAILS the build on it (behaviour, not a grep)', ()
     } finally {
       fs.rmSync(root, { recursive: true, force: true });
     }
+  });
+});
+
+// ─── B. Cross-PR decision seam ───────────────────────────────────────────────
+
+describe('B — claimedPathsFromPrFiles: only paths this PR INTRODUCES count', () => {
+  const entry = (filename: string, status: string, previous?: string): PrFileEntry => ({
+    filename,
+    status,
+    ...(previous ? { previous_filename: previous } : {}),
+  });
+
+  it('counts added, renamed and copied; ignores modified, removed and unchanged', () => {
+    const paths = claimedPathsFromPrFiles(
+      [
+        entry(`${DIR}/DR-077.md`, 'added'),
+        entry(`${DIR}/DR-079.md`, 'renamed', `${DIR}/DR-078.md`),
+        entry(`${DIR}/DR-080.md`, 'copied'),
+        entry(`${DIR}/DR-010.md`, 'modified'),
+        entry(`${DIR}/DR-011.md`, 'removed'),
+        entry(`${DIR}/DR-012.md`, 'unchanged'),
+        entry(`${DIR}/INDEX.md`, 'modified'),
+      ],
+      DIR,
+    );
+    // A `modified` DR already exists on the base branch — editing it is not a claim.
+    expect(paths).toEqual([`${DIR}/DR-077.md`, `${DIR}/DR-079.md`, `${DIR}/DR-080.md`]);
+  });
+
+  it('ignores everything outside the decisions dir', () => {
+    const paths = claimedPathsFromPrFiles(
+      [
+        entry('scripts/DR-077.md', 'added'),
+        entry('docs/decisions-archive/DR-077.md', 'added'),
+        entry(`${DIR}/DR-077.md`, 'added'),
+      ],
+      DIR,
+    );
+    expect(paths).toEqual([`${DIR}/DR-077.md`]);
+  });
+
+  it('honours a non-default decisions dir', () => {
+    expect(
+      claimedPathsFromPrFiles([entry('adr/DR-077.md', 'added')], 'adr'),
+    ).toEqual(['adr/DR-077.md']);
+  });
+});
+
+describe('B — decideDrIdCollision: fails closed on a taken id and names the next free one', () => {
+  const base = {
+    decisionsDir: DIR,
+    baseRef: 'main',
+    basePaths: [`${DIR}/DR-076.md`, `${DIR}/DR-077.md`, `${DIR}/DR-078.md`, `${DIR}/INDEX.md`],
+  };
+
+  it('passes a PR whose id nobody else holds', () => {
+    const v = decideDrIdCollision({
+      ...base,
+      subject: { pr: 1209, paths: [`${DIR}/DR-079.md`] },
+      otherPrs: [],
+    });
+    expect(v.ok).toBe(true);
+    expect(v.findings).toEqual([]);
+    expect(v.claimed).toEqual(['DR-079']);
+  });
+
+  it('passes a PR that adds no decision at all (so the check stays satisfiable as required)', () => {
+    const v = decideDrIdCollision({
+      ...base,
+      subject: { pr: 1251, paths: [] },
+      otherPrs: [{ pr: 1209, paths: [`${DIR}/DR-077.md`] }],
+    });
+    expect(v.ok).toBe(true);
+    expect(v.claimed).toEqual([]);
+    expect(v.findings).toEqual([]);
+  });
+
+  it('fails when the id is already on the base branch — the #1209 case, verbatim', () => {
+    const v = decideDrIdCollision({
+      ...base,
+      subject: { pr: 1209, paths: [`${DIR}/DR-077.md`] },
+      otherPrs: [],
+    });
+    expect(v.ok).toBe(false);
+    expect(v.findings).toHaveLength(1);
+    expect(v.findings[0].id).toBe('DR-077');
+    expect(v.findings[0].heldBy).toBe('main');
+    expect(v.findings[0].file).toBe(`${DIR}/DR-077.md`);
+    // The fix must be one rename with no guesswork: max(main ∪ open PRs) + 1.
+    expect(v.nextFreeId).toBe('DR-079');
+    expect(v.message).toContain('DR-077');
+    expect(v.message).toContain('DR-079');
+  });
+
+  it('fails when another OPEN PR claims the same id — the #1180 vs #1209 race', () => {
+    const v = decideDrIdCollision({
+      decisionsDir: DIR,
+      baseRef: 'main',
+      basePaths: [`${DIR}/DR-076.md`],
+      subject: { pr: 1209, paths: [`${DIR}/DR-077.md`] },
+      otherPrs: [{ pr: 1180, paths: [`${DIR}/DR-077.md`] }],
+    });
+    expect(v.ok).toBe(false);
+    expect(v.findings.map((f) => f.heldBy)).toEqual(['PR #1180']);
+    expect(v.nextFreeId).toBe('DR-078');
+    expect(v.message).toContain('#1180');
+  });
+
+  it('counts EVERY open PR when computing the next free id, not just the colliding one', () => {
+    // The decay case: a blocked PR must be told a number that survives the other
+    // work in flight, or it renumbers straight into the next collision.
+    const v = decideDrIdCollision({
+      decisionsDir: DIR,
+      baseRef: 'main',
+      basePaths: [`${DIR}/DR-077.md`],
+      subject: { pr: 1209, paths: [`${DIR}/DR-077.md`] },
+      otherPrs: [
+        { pr: 1225, paths: [`${DIR}/DR-078.md`] },
+        { pr: 1240, paths: [`${DIR}/DR-081.md`] },
+        { pr: 1241, paths: ['specs/minspec/spec.md'] },
+      ],
+    });
+    expect(v.ok).toBe(false);
+    expect(v.nextFreeId).toBe('DR-082');
+  });
+
+  it('fails when one PR claims the same id twice under two filenames', () => {
+    const v = decideDrIdCollision({
+      decisionsDir: DIR,
+      baseRef: 'main',
+      basePaths: [],
+      subject: { pr: 1209, paths: [`${DIR}/DR-077.md`, `${DIR}/DR-077-take-two.md`] },
+      otherPrs: [],
+    });
+    expect(v.ok).toBe(false);
+    expect(v.findings[0].heldBy).toBe('this PR');
+    expect(v.nextFreeId).toBe('DR-078');
+  });
+
+  it('treats DR-77 and DR-077 as the same claim across PRs', () => {
+    const v = decideDrIdCollision({
+      decisionsDir: DIR,
+      baseRef: 'main',
+      basePaths: [`${DIR}/DR-077.md`],
+      subject: { pr: 1209, paths: [`${DIR}/DR-77-unpadded.md`] },
+      otherPrs: [],
+    });
+    expect(v.ok).toBe(false);
+    expect(v.findings[0].id).toBe('DR-077');
+  });
+
+  it('starts at DR-001 on an empty register', () => {
+    const v = decideDrIdCollision({
+      decisionsDir: DIR,
+      baseRef: 'main',
+      basePaths: [],
+      subject: { pr: 1, paths: [] },
+      otherPrs: [],
+    });
+    expect(v.ok).toBe(true);
+    expect(v.nextFreeId).toBe('DR-001');
+  });
+
+  it('reports every colliding id, deterministically ordered', () => {
+    const v = decideDrIdCollision({
+      decisionsDir: DIR,
+      baseRef: 'main',
+      basePaths: [`${DIR}/DR-077.md`, `${DIR}/DR-078.md`],
+      subject: { pr: 1209, paths: [`${DIR}/DR-078.md`, `${DIR}/DR-077.md`] },
+      otherPrs: [],
+    });
+    expect(v.ok).toBe(false);
+    expect(v.findings.map((f) => f.id)).toEqual(['DR-077', 'DR-078']);
+  });
+});
+
+// ─── B (impure layer) — the CLI must fail CLOSED, per DR-066 ────────────────
+
+describe('B — check-dr-id-collision.ts fails closed when its witness is missing (DR-066)', () => {
+  /**
+   * Run the CLI against a stub `gh`, pinned via the `DR_ID_GH_BIN` test seam so no
+   * test can reach the real GitHub API (no network, no auth, no flake). The stub
+   * dispatches on its argv; anything it does not anticipate exits 1, so an
+   * unexpected call surfaces as a failure rather than as silent success.
+   */
+  function runCli(
+    args: string[],
+    stub: { script: string } | { bin: string },
+  ): { status: number; stdout: string; stderr: string } {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dr-id-cli-'));
+    let bin: string;
+    if ('bin' in stub) {
+      bin = stub.bin;
+    } else {
+      bin = path.join(tmp, 'gh');
+      fs.writeFileSync(bin, stub.script, { mode: 0o755 });
+    }
+    try {
+      const out = execFileSync('npx', ['tsx', CLI, ...args], {
+        cwd: REPO_ROOT,
+        encoding: 'utf-8',
+        env: { ...process.env, DR_ID_GH_BIN: bin, GITHUB_ACTIONS: '' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      return { status: 0, stdout: out, stderr: '' };
+    } catch (e) {
+      const err = e as { status?: number; stdout?: string; stderr?: string };
+      return { status: err.status ?? 1, stdout: err.stdout ?? '', stderr: err.stderr ?? '' };
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  }
+
+  const ARGS = ['--repo', 'AIClarityAU/minspec', '--pr', '1209', '--base', 'main'];
+
+  it('exits non-zero when gh errors — never green because it could not look', () => {
+    const r = runCli(ARGS, { script: '#!/bin/sh\necho "gh: HTTP 403" >&2\nexit 1\n' });
+    expect(r.status).not.toBe(0);
+    expect(`${r.stdout}${r.stderr}`).toMatch(/could not|fail|error/i);
+  });
+
+  it('exits non-zero when gh returns unparseable output', () => {
+    const r = runCli(ARGS, { script: '#!/bin/sh\necho "not json"\nexit 0\n' });
+    expect(r.status).not.toBe(0);
+  });
+
+  it('exits non-zero when gh is absent entirely (ENOENT carries no stderr of its own)', () => {
+    // The state a fresh runner or a stripped container is in. ENOENT from
+    // execFileSync has an empty `stderr`, so a naive handler would report an empty
+    // reason and — if it swallowed the throw — pass. It must be a loud red.
+    const r = runCli(ARGS, { bin: path.join(os.tmpdir(), 'definitely-no-such-gh-binary') });
+    expect(r.status).not.toBe(0);
+    expect(`${r.stdout}${r.stderr}`).toMatch(/FAILED CLOSED/);
+  });
+
+  it('reports the collision and the next free id end-to-end against a stub gh', () => {
+    // main holds DR-077 + DR-078; the subject PR adds DR-077; PR #1240 adds DR-081.
+    // The `api --paginate --slurp` responses use the PAGED shape real gh emits
+    // (an array of per-page arrays); `pr list --json` is flat, as real gh emits.
+    const script = `#!/bin/sh
+argv="$*"
+case "$argv" in
+  *"pulls/1209/files"*)
+    echo '[[{"filename":"docs/decisions/DR-077.md","status":"added"},{"filename":"docs/decisions/INDEX.md","status":"modified"}]]' ;;
+  *"pulls/1240/files"*)
+    echo '[[{"filename":"docs/decisions/DR-081.md","status":"added"}]]' ;;
+  *"contents/docs/decisions"*)
+    echo '[[{"path":"docs/decisions/DR-077.md","type":"file"},{"path":"docs/decisions/DR-078.md","type":"file"},{"path":"docs/decisions/INDEX.md","type":"file"}]]' ;;
+  *"pr list"*)
+    echo '[{"number":1209},{"number":1240}]' ;;
+  *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
+esac
+`;
+    const r = runCli(ARGS, { script });
+    expect(r.status).not.toBe(0);
+    const out = `${r.stdout}${r.stderr}`;
+    expect(out).toContain('DR-077');
+    // max(main 078 ∪ PR#1240 081 ∪ subject 077) + 1
+    expect(out).toContain('DR-082');
+  });
+
+  it('exits 0 when the PR adds no decision file at all', () => {
+    const script = `#!/bin/sh
+argv="$*"
+case "$argv" in
+  *"pulls/1209/files"*) echo '[[{"filename":"scripts/foo.ts","status":"added"}]]' ;;
+  *"contents/docs/decisions"*) echo '[[{"path":"docs/decisions/DR-077.md","type":"file"}]]' ;;
+  *"pr list"*) echo '[{"number":1209}]' ;;
+  *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
+esac
+`;
+    expect(runCli(ARGS, { script }).status).toBe(0);
+  });
+
+  it('fails closed when the base listing is EMPTY but this checkout holds unclaimed DRs', () => {
+    // The single-witness hole: a permission gap, a moved decisions dir or a wrong
+    // --base all return "nothing here", and reading that as "every id is free" turns
+    // the gate green over exactly the state it exists to reject (DR-066 clause 3).
+    // The local checkout is the independent second witness — it holds 78 DRs that
+    // this PR does not add, so an empty base listing is a contradiction, not a fact.
+    const script = `#!/bin/sh
+argv="$*"
+case "$argv" in
+  *"pulls/1209/files"*) echo '[[{"filename":"docs/decisions/DR-099.md","status":"added"}]]' ;;
+  *"contents/docs/decisions"*) echo '[[]]' ;;
+  *"pr list"*) echo '[{"number":1209}]' ;;
+  *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
+esac
+`;
+    const r = runCli(ARGS, { script });
+    expect(r.status).not.toBe(0);
+    expect(`${r.stdout}${r.stderr}`).toMatch(/FAILED CLOSED/);
+  });
+});
+
+// ─── Wiring — the CI half must be reachable, not merely defined ──────────────
+
+describe('the cross-PR half is wired into CI', () => {
+  it('the workflow exists, runs the real check, and is not path-filtered into unsatisfiability', () => {
+    expect(fs.existsSync(WORKFLOW)).toBe(true);
+    const yaml = fs.readFileSync(WORKFLOW, 'utf-8');
+    expect(yaml).toContain('scripts/check-dr-id-collision.ts');
+    expect(yaml).toMatch(/on:\s*\n\s*pull_request:/);
+    // A `paths:` filter would make a required check unsatisfiable on every PR that
+    // touches no decision — the #560 class of silent gate (DR-066). The CLI exits 0
+    // on such a PR instead, which is why it must run unconditionally.
+    const onBlock = yaml.slice(yaml.indexOf('on:'), yaml.indexOf('permissions:'));
+    expect(onBlock).not.toMatch(/^\s*paths(-ignore)?:/m);
   });
 });
