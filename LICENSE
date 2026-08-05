@@ -1,23 +1,52 @@
-Licensing — minspec-monorepo
-=============================
+# Licensing
 
-This repository is multi-licensed. Each package carries its own LICENSE file,
-which is authoritative for that package. See DR-018 for the rationale.
+This repository is **multi-licensed** per [DR-018](docs/decisions/DR-018.md). Each
+artifact's own `LICENSE` file is authoritative; this root file is the pointer and
+summary. Copyright (c) 2026 Audit&Fix (sole trader, ABN 19429399114).
 
-| Path                        | License      | What                                            |
-|-----------------------------|--------------|-------------------------------------------------|
-| packages/shared             | MPL-2.0      | Core library: tier classifier + contract types  |
-| packages/minspec            | MIT          | MinSpec VS Code extension (end-user app)         |
-| packages/scroogellm         | MIT          | ScroogeLLM VS Code extension (end-user app)      |
-| packages/extension-pack     | MIT          | MinSpec Pro extension pack                        |
-| docs/, sites/ copy, whitepaper | CC-BY-4.0 | Prose/content — see LICENSE-CONTENT              |
-| scripts/, root tooling      | MIT          | Dev-time monorepo tooling                         |
+| Artifact | License | File |
+|---|---|---|
+| `packages/shared` | **MPL-2.0** | [`packages/shared/LICENSE`](packages/shared/LICENSE) |
+| `packages/minspec` | **MIT** | [`packages/minspec/LICENSE`](packages/minspec/LICENSE) |
+| `packages/extension-pack` | **MIT** | [`packages/extension-pack/LICENSE`](packages/extension-pack/LICENSE) |
+| `scripts/`, root tooling | **MIT** | this file, MIT text below |
+| `docs/`, `sites/` copy, prose | **CC-BY-4.0** | [`LICENSE-CONTENT`](LICENSE-CONTENT) |
 
-Why MPL-2.0 for `packages/shared` and MIT for everything else: the shared
-package is the one reusable *library* and the project's core IP (the T1–T4
-complexity classifier). MPL-2.0's file-level copyleft keeps modifications to
-those source files open while still permitting commercial tools to depend on
-it. The extensions are end-user applications with no library to protect, so
-MIT removes all adoption friction. See docs/decisions/DR-018.md.
+**Why the split.** `packages/shared` is the one reusable library, so it carries
+MPL-2.0's file-level copyleft: modifications to those source files stay open, while any
+larger work - including a commercial one - may still depend on and link it. The
+extensions are end-user apps with no library to protect, so they are MIT to maximise
+adoption. Prose is content, so it takes a content licence rather than a code one.
 
-Copyright (c) 2026 AI Clarity.
+**Combining MPL and MIT is not a conflict.** MPL-2.0 is file-level copyleft: the MIT
+works may combine with the MPL files freely, and only the MPL'd source files themselves
+carry the share-modifications obligation. This is the standard "MPL library inside a
+permissive app" arrangement - no relicensing of the extensions, and no obligation on
+consumers beyond the shared files they modify.
+
+---
+
+## MIT License
+
+Applies to `scripts/`, root tooling, and any file in this repository not covered by a
+more specific `LICENSE` above.
+
+Copyright (c) 2026 Audit&Fix
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to deal
+in the Software without restriction, including without limitation the rights
+to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all
+copies or substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF, OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
