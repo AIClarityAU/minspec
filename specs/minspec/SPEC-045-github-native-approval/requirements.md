@@ -9,6 +9,20 @@ created: 2026-07-21
 epic: EPIC-006  # Trust, Consent & Supply Chain
 depends_on: [DR-068, SPEC-022, DR-056, DR-012]
 relates_to: [SPEC-046, SPEC-047]
+implements: [.github/workflows/approval-materialize.yml, scripts/materialize-approval.ts]
+affects: [CODEOWNERS]
+# ownership (SPEC-038). implements: both paths are net-new and owned here — the Action is
+# FR-2's trigger and FR-8's least-privilege surface; the script is FR-4's materializer,
+# split out of the workflow YAML deliberately so the canonical-hash + record-write logic
+# has a unit-testable seam (AC-6 asserts byte-for-byte parity with the Node/Python twin,
+# which cannot be exercised from inside a workflow step). FR-7 is why NEITHER lives in the
+# extension: "No MinSpec-core file gains a network dependency — the Action lives in
+# `.github/`, not the extension."
+# affects: CODEOWNERS gains the FR-1 audience→team globs — modifies-not-owns, since the
+# file predates this spec and SPEC-047 owns the audience→file map itself.
+# NOT listed: packages/shared/src/canonical.ts, which this spec only READS (FR-4 reuses
+# SPEC-022's canonicalizer, never modifies it), and .minspec/approvals/**, which is output
+# data rather than owned code.
 phases:
   specify: done
   clarify: done
