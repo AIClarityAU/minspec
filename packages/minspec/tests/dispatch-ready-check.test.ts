@@ -1009,7 +1009,17 @@ describe('dispatch-ready-check.sh — the author filter is actually WIRED UP (#1
 
     // And the read must still exist, so the assertion above cannot pass by deletion.
     expect(code).toContain('REVIEW_VERDICT_BEGIN');
-    expect(code).toContain('--trusted-comment-bodies');
+
+    // SCOPED to this read's own pipeline. A bare `toContain('--trusted-comment-bodies')`
+    // over the whole file is satisfied by the PRE-EXISTING verdict-record read ~1100
+    // lines earlier, so it proves nothing about THIS one — flagged in the PR #1257
+    // review as a title-overclaim, and it is the same "assertion weaker than its name"
+    // shape that keeps recurring. Anchor on the `feedback=` assignment instead.
+    const feedbackAt = code.indexOf('feedback=$(gh pr view');
+    expect(feedbackAt, 'the REVIEW_VERDICT read must exist').toBeGreaterThan(-1);
+    const readBlock = code.slice(feedbackAt, code.indexOf('fix_prompt=', feedbackAt));
+    expect(readBlock, 'the REVIEW_VERDICT read itself must pipe through the filter')
+      .toContain('--trusted-comment-bodies');
   });
 
   it('this wiring check is not vacuous — it fails on a file that lacks the call', () => {
