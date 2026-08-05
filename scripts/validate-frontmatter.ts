@@ -28,6 +28,7 @@ import {
 import { listOrphanedRecords } from '../packages/minspec/src/lib/approval-store';
 import { checkStatusParity, inspectStatusLine } from '../packages/minspec/src/lib/status-parity';
 import { checkManagedRegionMarkers } from '../packages/minspec/src/lib/scaffold';
+import { checkDeclaredDrIds } from './lib/dr-id-collision';
 import { SELF_HOSTED_TEMPLATE_NAMES } from '../packages/minspec/src/lib/template-registry';
 import { detectTools } from '../packages/minspec/src/lib/tool-detector';
 
@@ -264,6 +265,50 @@ try {
   }
 } catch {
   // Decisions dir unreadable / absent — nothing to validate, stay silent.
+}
+
+// Rule 17 (FATAL, #1226): two decision files declaring one `id:`, or a file whose
+// declared `id:` disagrees with its own filename.
+//
+// `nextAdrNumber` hands out `max(existing DR-NNN) + 1` computed against the LOCAL
+// checkout (adr-manager.ts:103) — correct in isolation, and unique only if DR
+// creation is serialised through `main`. Concurrent worktree sessions (#168, the
+// normal mode here) break that by design: two sessions branching from one `main`
+// both compute the same number, each correctly, neither able to see the other.
+//
+// Rule 6 above is NOT this check. It compares FILE NAMES, so `DR-079.md` declaring
+// `id: DR-077` is invisible to it — and it only WARNS, joining ~110 other warnings
+// nobody reads, which is how the gap survived to bite #1180/#1209. A DR id is the
+// register's primary key: two records under one id means one of them cannot be
+// cited, and merging over an already-accepted decision overwrites it silently. So
+// this is fatal, and the corpus was verified clean first so it ships green.
+//
+// The filename-mismatch half is load-bearing, not cosmetic: the CI half of this
+// gate (.github/workflows/dr-id-collision.yml) keys on FILENAMES, because a PR's
+// frontmatter is not cheaply readable across every open PR. A file free to declare
+// an id its name does not carry would walk straight past it.
+//
+// Tier-0 and offline — the decision logic is pure (scripts/lib/dr-id-collision.ts);
+// only the cross-PR half touches the network, and it lives in CI, never in
+// packages/ (constitution invariant 1).
+try {
+  const decisionsRoot = resolveDecisionsDir();
+  const drFiles = safeGlob(decisionsRoot, '.md').map((file) => ({
+    file: relative(ROOT, file),
+    content: readFileSync(file, 'utf-8'),
+  }));
+  for (const defect of checkDeclaredDrIds(drFiles)) {
+    fail(join(ROOT, defect.files[0]), `DR id ${defect.kind} — ${defect.message}`);
+  }
+} catch (err) {
+  // NOT a silent `catch {}`. Constitution invariant 2: a missing or errored witness
+  // fails closed AND VISIBLY, never quietly passes. A swallowed error here means the
+  // rule validated nothing while the build stayed green — indistinguishable, from the
+  // outside, from a register with no duplicates. (Same reasoning as Rule 16.)
+  warn(
+    `DR-id uniqueness check could not run (${err instanceof Error ? err.message : String(err)}) — ` +
+      'Rule 17 validated NOTHING this run; do not read the green as a collision-free register.',
+  );
 }
 
 // Rule 8 (FATAL): INDEX.md status must match each DR's frontmatter status
