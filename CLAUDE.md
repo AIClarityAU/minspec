@@ -37,6 +37,25 @@ Never refer to a group of work by a bare number.
 
 A bare number makes the reader stop and look it up; a two-word gloss costs nothing.
 
+## Human action items — mark them, then repeat them
+
+Anything waiting on the human — a decision, a credential, a manual step, a merge — is invisible unless it is marked. One marker, two places.
+
+- **Inline, the moment it arises.** Prefix the line with ➡️ mid-turn, where the need appears; never hold it back for the end.
+- **Again at the end of every turn.** Close the response with a `➡️ **Your turn**` block repeating every still-pending item, one ➡️ line each. Nothing pending → omit the block; an empty one teaches the reader to skip it.
+- **Reserve ➡️ for this.** Never decorate ordinary prose with it, so scanning for ➡️ never returns a false hit.
+- **Give each item a reply key.** One or two characters, restated on the line every turn so the human never scrolls back to find one: `m` merge · `c` close · `d` diff/details · `r` re-review · `s` skip.
+
+The same block lists every pull request this session opened that is still unmerged — clickable URL, the gate state already observed this turn, and its keys:
+
+```
+➡️ **Your turn**
+➡️ [#1231 dispatch env scrub](https://github.com/OWNER/REPO/pull/1231) — ai-review:pass · needs-review — `m` merge · `c` close · `d` diff
+➡️ Name the new hook — `a` agent-context · `b` session-context
+```
+
+Report the state you already observed; re-reading it from the git host is ordinary tool use, never a requirement, and MinSpec itself makes no network call.
+
 ## File Locations
 
 | Artifact | Location |
