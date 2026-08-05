@@ -11,12 +11,26 @@
  * root; `findRepoRoot` in facts.ts walks up looking for it) and spawns the real
  * script with cwd pointed at it.
  */
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeAll, afterAll, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { specHash } from '@aiclarity/shared';
+
+// #1099 — this suite spawns `npx tsx <facts.ts>` as a real child process per
+// assertion (Node module resolution + tsx compile overhead each call). Under
+// container scheduling contention a single invocation can queue past the 5s
+// default testTimeout even though nothing hung, and which suite trips it is
+// non-deterministic run-to-run (#1099). Raised HERE, per-file, not globally — a
+// genuinely hung test elsewhere still fails fast at the default. 30s is the value
+// #1099 measured all affected suites passing reliably at.
+beforeAll(() => {
+  vi.setConfig({ testTimeout: 30_000 });
+});
+afterAll(() => {
+  vi.resetConfig();
+});
 
 const SCRIPT = path.resolve(__dirname, '..', '..', '..', 'scripts', 'facts.ts');
 
