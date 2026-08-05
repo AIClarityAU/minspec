@@ -1,7 +1,7 @@
 name: Agent Task
 description: Well-scoped task ready for agent dispatch
 title: "[agent] "
-labels: ["agent-ready", "inbox"]
+labels: ["inbox"]
 body:
   - type: markdown
     attributes:
