@@ -268,6 +268,12 @@ describe('dispatch-issue.sh: native auto-merge deny-by-default (behavioral seam)
       // preflight) at startup — same reason: a missing lib aborts the source before
       // the seam ever runs, and the failure looks like an empty answer, not an error.
       fs.copyFileSync(path.resolve(__dirname, '../../../scripts/lib/workflow-paths.sh'), path.join(root, 'scripts', 'lib', 'workflow-paths.sh'));
+      // dispatch-issue.sh sources lib/agent-context.sh (the #912-recurrence
+      // setting-sources pin) at startup — same reason again. The source is
+      // deliberately NOT guarded by an `[[ -f ]]` test: a missing lib must abort
+      // loudly, because silently dropping the flag restores the roster-thrash
+      // outage it exists to prevent (no-silent-gate).
+      fs.copyFileSync(path.resolve(__dirname, '../../../scripts/lib/agent-context.sh'), path.join(root, 'scripts', 'lib', 'agent-context.sh'));
       fs.writeFileSync(path.join(root, '.minspec', 'config.json'), JSON.stringify({ version: 1 })); // no autoMerge
       expect(check({}, root)).toEqual({ code: 1, out: 'off' });
     } finally {

@@ -75,6 +75,17 @@ const SOURCES = [
     stripShebang: true,
   },
   {
+    // review-branch.sh SOURCES this at startup. Same dependency-chain lesson as
+    // APPROVAL_PROVENANCE_PY below: shipping the caller without the callee breaks
+    // every consuming repo. Here it would be worse than degraded — the source is
+    // deliberately unguarded (no `[[ -f ]]` fallback), so a missing lib aborts
+    // review-branch.sh outright. It must ship with its dependant.
+    constName: 'AGENT_CONTEXT_SH',
+    srcPath: 'scripts/lib/agent-context.sh',
+    doc: 'Verbatim body of `scripts/lib/agent-context.sh` (shebang stripped — supplied via preamble).',
+    stripShebang: true,
+  },
+  {
     // review-branch.sh CALLS this. Shipping the caller without the callee left every
     // consuming repo with plumbing that silently degrades to empty — the #1017
     // provenance fix was inert everywhere but this repo (AIClarityAU/sealbox#32).

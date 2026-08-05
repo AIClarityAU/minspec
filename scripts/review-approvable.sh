@@ -56,6 +56,9 @@ if [[ ! -f "$DOC" ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/agent-context.sh
+source "${SCRIPT_DIR}/lib/agent-context.sh"
+
 ROLE_FILE="${SCRIPT_DIR}/roles/${ROLE}.md"
 if [[ ! -f "$ROLE_FILE" ]]; then
   echo "review-approvable.sh: role file not found: $ROLE_FILE" >&2
@@ -164,9 +167,11 @@ run_reviewer() {
   elif [[ "${1:-subscription}" == "payg" ]]; then
     AGENT_OUT=$( CLAUDE_CODE_OAUTH_TOKEN='' ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
       claude -p --system-prompt-file "$ROLE_FILE" \
+      "${AGENT_CONTEXT_ARGS[@]}" \
       --allowedTools "Read,Glob,Grep" --model opus --output-format text <"$promptfile" 2>&1 ) || rc=$?
   else
     AGENT_OUT=$( claude -p --system-prompt-file "$ROLE_FILE" \
+      "${AGENT_CONTEXT_ARGS[@]}" \
       --allowedTools "Read,Glob,Grep" --model opus --output-format text <"$promptfile" 2>&1 ) || rc=$?
   fi
   rm -f "$promptfile"

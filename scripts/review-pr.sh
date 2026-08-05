@@ -43,6 +43,9 @@ PR="${1:?Usage: review-pr.sh <pr-number> [--repo owner/name]}"
 REPO="AIClarityAU/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROLES_DIR="${SCRIPT_DIR}/roles"
+# shellcheck source=scripts/lib/agent-context.sh
+source "${SCRIPT_DIR}/lib/agent-context.sh"
+
 DECIDE="${SCRIPT_DIR}/review-decide.sh"
 
 shift || true
@@ -144,6 +147,7 @@ REVIEW_PROMPT_FILE=$(mktemp)
 printf '%s' "$USER_CONTENT" >"$REVIEW_PROMPT_FILE"
 AGENT_OUT=$(claude -p \
   --system-prompt-file "${ROLES_DIR}/reviewer.md" \
+  "${AGENT_CONTEXT_ARGS[@]}" \
   --tools "" \
   --output-format text <"$REVIEW_PROMPT_FILE" 2>&1) || {
     rm -f "$REVIEW_PROMPT_FILE"

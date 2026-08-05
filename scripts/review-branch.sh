@@ -51,6 +51,9 @@ case "$ROLE" in
 esac
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=scripts/lib/agent-context.sh
+source "${SCRIPT_DIR}/lib/agent-context.sh"
+
 ROLE_FILE="${SCRIPT_DIR}/roles/${ROLE}.md"
 if [[ ! -f "$ROLE_FILE" ]]; then
   echo "review-branch.sh: role file not found: $ROLE_FILE" >&2
@@ -191,9 +194,11 @@ run_reviewer() {
   if [[ "${1:-subscription}" == "payg" ]]; then
     AGENT_OUT=$( CLAUDE_CODE_OAUTH_TOKEN='' ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
       claude -p --system-prompt-file "$ROLE_FILE" \
+      "${AGENT_CONTEXT_ARGS[@]}" \
       --allowedTools "Read,Glob,Grep" --model opus --output-format text <"$promptfile" 2>"$errfile" ) || rc=$?
   else
     AGENT_OUT=$( claude -p --system-prompt-file "$ROLE_FILE" \
+      "${AGENT_CONTEXT_ARGS[@]}" \
       --allowedTools "Read,Glob,Grep" --model opus --output-format text <"$promptfile" 2>"$errfile" ) || rc=$?
   fi
   AGENT_ERR="$(cat "$errfile")"

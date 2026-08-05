@@ -12,6 +12,9 @@ REPO="AIClarityAU/minspec"
 WORKTREE_BASE="/tmp/minspec-agent"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROLES_DIR="${SCRIPT_DIR}/roles"
+# shellcheck source=scripts/lib/agent-context.sh
+source "${SCRIPT_DIR}/lib/agent-context.sh"
+
 FORCE_ROLE=""
 
 # Shared pre-publish egress guard (#358) — single source of truth for the
@@ -851,6 +854,7 @@ shepherd_fix() {
   before_sha=$(git -C "$WORKTREE" rev-parse HEAD 2>/dev/null || echo "")
   echo "  Dispatching a fresh fix agent into the warm worktree (no re-clone)..."
   (cd "$WORKTREE" && claude -p "$fix_prompt" \
+       "${AGENT_CONTEXT_ARGS[@]}" \
        "${SYS_PROMPT_ARGS[@]}" \
        --model "$RUN_MODEL" \
        --allowedTools "$ALLOWED_TOOLS" \
@@ -1063,6 +1067,7 @@ fi
 # primitive (cron/loop-able). It exits 0 even when the agent self-escalates, so
 # detect ESCALATE: in the output rather than relying on exit code.
 if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" claude -p "$RUN_PROMPT" \
+      "${AGENT_CONTEXT_ARGS[@]}" \
       "${SYS_PROMPT_ARGS[@]}" \
       --model "$RUN_MODEL" \
       --allowedTools "$ALLOWED_TOOLS" \

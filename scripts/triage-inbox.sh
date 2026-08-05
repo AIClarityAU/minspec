@@ -44,6 +44,9 @@ set -euo pipefail
 REPO="AIClarityAU/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROLES_DIR="${SCRIPT_DIR}/roles"
+# shellcheck source=scripts/lib/agent-context.sh
+source "${SCRIPT_DIR}/lib/agent-context.sh"
+
 DECIDE="${SCRIPT_DIR}/triage-decide.sh"
 READY_CHECK="${SCRIPT_DIR}/dispatch-ready-check.sh"
 
@@ -101,6 +104,7 @@ CONTENT
   local AGENT_OUT
   AGENT_OUT=$(claude -p "$USER_CONTENT" \
     --system-prompt-file "${ROLES_DIR}/triage.md" \
+    "${AGENT_CONTEXT_ARGS[@]}" \
     --tools "" \
     --output-format text 2>&1) || {
       echo "WARNING: triage agent failed for #$ISSUE — leaving in inbox" >&2
