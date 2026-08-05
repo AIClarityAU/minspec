@@ -19,6 +19,12 @@
  *   facts approval <spec>  sidecar path, approvedBy, approvedAt, validity.
  *   facts owns <path>      which spec(s) declare this file in implements:/affects:.
  *
+ * `<spec>` (hash/status/approval) accepts an id (`SPEC-040`), a spec
+ * directory slug (`SPEC-040-import-boundaries`), or a file path — resolved
+ * via `listSpecs` (#1068, spec-catalog.ts), so you don't need to already know
+ * the product dir or which file (requirements.md vs spec.md) is canonical.
+ * `owns <path>` stays path-only — it is asking about an owned file, not a spec.
+ *
  * STRICTLY READ-ONLY (issue #1050 "Not in scope"): this file must never write,
  * mint, or mutate any spec, sidecar, or config — the moment it can flip a status or
  * mint an approval it becomes a forged-sign-off surface (#517). It only reads what
@@ -57,6 +63,7 @@ import {
 } from '../packages/minspec/src/lib/approval';
 import { sidecarPath } from '../packages/minspec/src/lib/approval-store';
 import { isValidOwnedPath } from '../packages/minspec/src/lib/ownership-path-rules';
+import { listSpecs, type SpecSummary } from '../packages/minspec/src/lib/spec-catalog';
 
 // ─── repo/root plumbing ──────────────────────────────────────────────────────
 
@@ -95,6 +102,103 @@ function readFileOrDie(p: string): string {
 function toRepoRelPosix(p: string): string {
   const abs = path.isAbsolute(p) ? p : path.resolve(process.cwd(), p);
   return path.relative(ROOT, abs).split(path.sep).join('/');
+}
+
+// ─── spec-id/slug resolution (#1068) ───────────────────────────────────────
+// `hash`/`status`/`approval` accept a `<spec>` arg. Requiring the caller to
+// already know the full file path (product dir, slug, requirements.md-vs-
+// spec.md) reintroduces the friction #1050 removed: three lookups before the
+// "cheap" check can run. Resolve an id (`SPEC-040`) or directory slug
+// (`SPEC-040-import-boundaries`) via the same `listSpecs` catalog the rest of
+// the extension uses, so the representative file (requirements.md/spec.md
+// preference, per spec-catalog.ts's `rankOf`) is picked the same way
+// everywhere. `owns` stays path-only (#1068: it is genuinely path-based).
+
+/** True when `arg` reads like a path the user typed, not a bare id/slug. */
+function looksLikePath(arg: string): boolean {
+  return arg.includes('/') || arg.includes(path.sep) || arg.endsWith('.md') || path.isAbsolute(arg);
+}
+
+/** Levenshtein edit distance — used only to power the "did you mean" hint. */
+function editDistance(a: string, b: string): number {
+  const dp: number[][] = Array.from({ length: a.length + 1 }, () => new Array<number>(b.length + 1).fill(0));
+  for (let i = 0; i <= a.length; i++) dp[i][0] = i;
+  for (let j = 0; j <= b.length; j++) dp[0][j] = j;
+  for (let i = 1; i <= a.length; i++) {
+    for (let j = 1; j <= b.length; j++) {
+      dp[i][j] =
+        a[i - 1] === b[j - 1]
+          ? dp[i - 1][j - 1]
+          : 1 + Math.min(dp[i - 1][j - 1], dp[i - 1][j], dp[i][j - 1]);
+    }
+  }
+  return dp[a.length][b.length];
+}
+
+/** Closest known spec id to `arg` by edit distance, or undefined if nothing is close. */
+function closestId(arg: string, ids: readonly string[]): string | undefined {
+  let best: string | undefined;
+  let bestDist = Infinity;
+  const upper = arg.toUpperCase();
+  for (const id of ids) {
+    const d = editDistance(upper, id.toUpperCase());
+    if (d < bestDist) {
+      bestDist = d;
+      best = id;
+    }
+  }
+  // Cap how far we'll reach so an unrelated arg doesn't produce a misleading guess.
+  return best !== undefined && bestDist <= Math.max(3, Math.ceil(upper.length / 3)) ? best : undefined;
+}
+
+/**
+ * Resolve a `<spec>` CLI arg to an absolute file path: a real path (today's
+ * behaviour, unchanged), a frontmatter `id` (`SPEC-040`), or a spec directory
+ * slug (`SPEC-040-import-boundaries`) — resolved via `listSpecs` (#1068).
+ *
+ * On a miss for an id/slug-shaped arg, dies with what was looked for and a
+ * "did you mean" hint instead of a filesystem error about a path the user
+ * never typed. A path-shaped arg (contains a separator, `.md`, or is
+ * absolute) that doesn't exist falls through unchanged — the caller's
+ * `readFileOrDie` reports the miss against the path the user actually typed.
+ */
+function resolveSpecArg(root: string, arg: string): string {
+  const asPath = resolveInputPath(arg);
+  if (fs.existsSync(asPath) && fs.statSync(asPath).isFile()) {
+    return asPath;
+  }
+
+  let specs: SpecSummary[];
+  try {
+    specs = listSpecs(root);
+  } catch {
+    specs = [];
+  }
+
+  const byId = specs.find((s) => s.id.toLowerCase() === arg.toLowerCase());
+  if (byId) return byId.filePath;
+
+  const bySlug = specs.filter(
+    (s) => path.basename(path.dirname(s.filePath)).toLowerCase() === arg.toLowerCase(),
+  );
+  if (bySlug.length === 1) return bySlug[0].filePath;
+  if (bySlug.length > 1) {
+    die(
+      `ambiguous spec "${arg}" matches multiple specs: ${bySlug
+        .map((s) => `${s.id} (${toRepoRelPosix(s.filePath)})`)
+        .join(', ')}`,
+    );
+  }
+
+  if (looksLikePath(arg)) {
+    return asPath; // preserve today's behaviour — readFileOrDie reports the miss
+  }
+
+  const suggestion = closestId(arg, specs.map((s) => s.id));
+  die(
+    `no spec with id "${arg}"${suggestion ? `; did you mean ${suggestion}?` : ''} ` +
+      '(looked for a matching id, directory slug, and file path — none found)',
+  );
 }
 
 // ─── local mirrors of spec-validator.ts's raw-frontmatter readers ───────────
@@ -177,8 +281,8 @@ function walkMarkdownFiles(dir: string): string[] {
 // ─── facts hash <spec> ────────────────────────────────────────────────────────
 
 function cmdHash(specArg: string | undefined): void {
-  if (!specArg) die('usage: facts hash <spec-file>');
-  const specPath = resolveInputPath(specArg);
+  if (!specArg) die('usage: facts hash <spec>');
+  const specPath = resolveSpecArg(ROOT, specArg);
   const raw = readFileOrDie(specPath);
   const computed = specHash(raw);
   const rel = specRelPath(ROOT, specPath);
@@ -205,8 +309,8 @@ function cmdHash(specArg: string | undefined): void {
 // ─── facts status <spec> ──────────────────────────────────────────────────────
 
 function cmdStatus(specArg: string | undefined): void {
-  if (!specArg) die('usage: facts status <spec-file>');
-  const specPath = resolveInputPath(specArg);
+  if (!specArg) die('usage: facts status <spec>');
+  const specPath = resolveSpecArg(ROOT, specArg);
   const raw = readFileOrDie(specPath);
   const parsed = parseSpec(raw);
   const fm = parsed.frontmatter;
@@ -275,8 +379,8 @@ function cmdFields(typeArg: string | undefined): void {
 // ─── facts approval <spec> ────────────────────────────────────────────────────
 
 function cmdApproval(specArg: string | undefined): void {
-  if (!specArg) die('usage: facts approval <spec-file>');
-  const specPath = resolveInputPath(specArg);
+  if (!specArg) die('usage: facts approval <spec>');
+  const specPath = resolveSpecArg(ROOT, specArg);
   const rel = specRelPath(ROOT, specPath);
   const sc = sidecarPath(ROOT, rel);
   const record = getApprovalRecord(ROOT, specPath);
@@ -342,6 +446,10 @@ function usage(): void {
       '  facts fields [type]    which frontmatter fields are required/conditional.',
       '  facts approval <spec>  sidecar path, approvedBy, approvedAt, validity.',
       '  facts owns <path>      which spec(s) declare this file in implements:/affects:.',
+      '',
+      '  <spec> (hash/status/approval) accepts an id (SPEC-040), a spec directory',
+      '  slug (SPEC-040-import-boundaries), or a file path.',
+      '  <path> (owns) is always a file path.',
       '',
       'Read-only. Never writes a file.',
     ].join('\n'),
