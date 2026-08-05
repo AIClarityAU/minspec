@@ -344,18 +344,41 @@ lease_stop_renew_ticker() {
 # AND (if stale) the TWO-PHASE grace handshake confirms the owner did not re-assert.
 # A LIVE non-self claim ⇒ exit 1 (skip-live-owned). Kept here so the seam is one source
 # of truth; the drain wiring lands in Slice 3.
+# reclaim_decision <claims_json> <self_sid> <now_epoch> <enum_complete:0|1>
+#   PURE half of `reclaim?` — no gh, so it is unit-testable like --classify-claim and
+#   --is-live (issue-lease-reclaim.test.ts). Exit 0 iff reclaimable, 1 iff hands-off.
+#
+#   Switches on classify_claim's DECISION TOKEN (line 1), which is the published
+#   contract. It must NEVER re-derive the answer from line 2 (the winning sessionId):
+#   line 2 carries `self_sid` for the `claim` decision and is EMPTY for `stand-down`,
+#   so "line 2 is empty" means the exact OPPOSITE of "no live claim" (#1198). That
+#   inference inverted both directions — a long-dead claim reported held forever, and
+#   an unprovable enumeration reported reclaimable, which INV-6 forbids.
+#
+#     claim       ⇒ no live claim  ⇒ reclaimable (0)
+#     own         ⇒ self holds it  ⇒ nothing to reclaim (1)
+#     stand-down  ⇒ live non-self owner, OR incomplete/unparseable enumeration ⇒ (1)
+#
+#   Fails CLOSED: an unrecognised token is treated as hands-off, so a future decision
+#   value cannot silently become "go ahead and take it".
+reclaim_decision() {
+  local claims_json="${1?reclaim_decision needs claims_json}" self_sid="${2:?reclaim_decision needs a self sid}"
+  local now="${3:?reclaim_decision needs now}" enum_complete="${4:?reclaim_decision needs enum_complete}"
+  local decision
+  decision="$(classify_claim "$claims_json" "$self_sid" "$now" "$enum_complete" | sed -n 1p)"
+  case "$decision" in
+    claim) return 0 ;;
+    own|stand-down) return 1 ;;
+    *) return 1 ;;   # unknown token ⇒ fail closed (INV-6)
+  esac
+}
+
 lease_reclaim_q() {
-  local item="${1:?lease_reclaim? needs an item}" sid now claims enum_complete winner
+  local item="${1:?lease_reclaim? needs an item}" sid now claims
   sid="$(lease_self_sid)"; now="$(date -u +%s)"
   if ! claims="$(lease_read_claims "$item")"; then return 1; fi   # can't prove expiry ⇒ do NOT reclaim (INV-6)
-  enum_complete=1
-  winner="$(classify_claim "$claims" "$sid" "$now" "$enum_complete" | sed -n 2p)"
-  # No live claim at all ⇒ reclaimable immediately.
-  [[ -z "$winner" ]] && return 0
-  # A live claim exists. If it is a live non-self owner, it is NOT reclaimable.
-  # (The two-phase grace-interval reclaim for a merely-suspended owner is the Slice-3
-  # wiring; this seam refuses to reclaim a claim the predicate deems live — INV-4.)
-  return 1
+  # Enumeration succeeded ⇒ complete. The decision itself is the pure seam above.
+  reclaim_decision "$claims" "$sid" "$now" 1
 }
 
 # ── CLI dispatch — ONLY when executed directly, never when sourced ───────────
@@ -365,6 +388,7 @@ if [[ "${BASH_SOURCE[0]}" == "${0}" ]]; then
     cat >&2 <<'EOF'
 Usage:
   issue-lease.sh --classify-claim <claims_json> <self_session_id> <now_epoch> <enum_complete:0|1>
+  issue-lease.sh --reclaim-decision <claims_json> <self_session_id> <now_epoch> <enum_complete:0|1>
   issue-lease.sh --is-live <lastRenewed> <claimedAt> <pid> <host> <self_host> <now_epoch>
   issue-lease.sh acquire|renew|verify-holds|release|reclaim?|worktree-path <item>
   issue-lease.sh release-all
@@ -375,6 +399,12 @@ EOF
       shift
       [[ $# -eq 4 ]] || { _usage; exit 2; }
       classify_claim "$1" "$2" "$3" "$4"; exit 0 ;;
+    --reclaim-decision)
+      # Pure seam mirroring `reclaim?` minus the gh fetch (#1198). Exit 0 reclaimable,
+      # 1 hands-off — the SAME two exit codes callers read from `reclaim?`.
+      shift
+      [[ $# -eq 4 ]] || { _usage; exit 2; }
+      if reclaim_decision "$1" "$2" "$3" "$4"; then echo "reclaimable"; exit 0; else echo "hands-off"; exit 1; fi ;;
     --is-live)
       shift
       [[ $# -eq 6 ]] || { _usage; exit 2; }
