@@ -345,6 +345,34 @@ if [[ "${1:-}" == "--is-bot-identity" ]]; then
   exit 1
 fi
 
+# ── PURE: neutralise control markers in AGENT-AUTHORED text (#1243) ──────────
+# THE SURFACE THIS CLOSES: `dispatch-issue.sh` posts a build agent's `.agent-summary.md`
+# VERBATIM as an issue comment, under a trusted identity — and that agent's prompt embeds
+# the untrusted issue body. So author trust, which proves who posted the COMMENT, says
+# nothing about who wrote the TEXT inside it (DR-072 §5a). Every downstream reader that
+# parses a sentinel out of comment bodies inherits attacker-influenceable content through
+# a channel it has every reason to trust.
+#
+# `--newest-record` (#1113) defends the readers that have a timestamp to rank by. It does
+# nothing for a marker whose mere PRESENCE is the signal — `<!-- minspec-shipped -->` was
+# exactly that, and a stranger planting it made an issue permanently undispatchable.
+#
+# So the fence is applied at the point of REPUBLICATION: strip the agent's ability to emit
+# any control token at all, rather than labelling it and hoping every future reader checks.
+# The markers are broken, not deleted — a reader still sees what the agent wrote, and can
+# see that it was fenced, which matters when the summary legitimately discusses them (this
+# repo's own agents write about verdict records all the time).
+fence_agent_text() {
+  sed -E \
+    -e 's/(MINSPEC_VERDICT|REVIEW_VERDICT|REVIEW_UNAVAILABLE)_(BEGIN|END)/\1-\2 (fenced: agent-authored)/g' \
+    -e 's/<!--[[:space:]]*(minspec-[a-z-]+)[[:space:]]*-->/(fenced HTML marker: \1)/g'
+}
+
+if [[ "${1:-}" == "--fence-agent-text" ]]; then
+  fence_agent_text
+  exit 0
+fi
+
 # ── PURE: keep only comments whose AUTHOR could legitimately carry a verdict ──
 # THE HOLE THIS CLOSES (found 2026-07-31 while building #1113): this repo is PUBLIC,
 # so ANY GitHub user can comment on an issue — and every reader of a verdict record
