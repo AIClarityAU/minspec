@@ -618,4 +618,12 @@ This repo's governance was sized for a team: protected main, human-approved PRs,
 <!-- dr-summary:DR-077 auto=0000000000000000 -->
 One rule — which commits the push-protected default branch may receive — is enforced in two places: the #1041 shell pre-commit hook (fires on every `git commit`) and the TypeScript `resolveBranchDestination` guard in commit-on-approve (runs before staging, so #1064's stranding is refused up front rather than left as a dirty tree). The duplication is deliberate: shelling out to the hook cannot run before staging or in a fresh clone, and generating both from one source is a large mechanism for one function. `approve-commit-hook-parity.test.ts` is the binding contract — one scenario table driven through both real implementations, failing on any divergence in either direction. Records the mirror-on-change rule, the sanctioned non-mirror at #1112 (git forbids a partial commit mid-merge), and the third `.githooks` twin bound by a weaker substring test.
 <!-- /dr-summary:DR-077 -->
+
+## [DR-078 — Standing push consent lives in the project's own gitignored preferences file — per-developer without being machine-wide, so DR-071's corollary and constitution invariant #3 stop contradicting each other](DR-078.md)
+
+*Status: proposed · Date: 2026-08-05*
+
+<!-- dr-summary:DR-078 auto=a199d8c14c18 -->
+Two accepted decisions pull in opposite directions, and SPEC-050 FR-8 sits exactly on the seam. The concrete failure (#1225): a developer with MinSpec projects A and B clicks "Always push from now on" while approving in A — a named, deliberate act scoped, in their mind, to A. The write is machine-wide. The next Alt+A in B pushes to B's origin and auto-opens a PR there, with no prompt and no moment at which B was consented to.
+<!-- /dr-summary:DR-078 -->
 <!-- minspec:dr-index:end -->
