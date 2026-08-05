@@ -1139,10 +1139,41 @@ describe('dispatch-ready-check.sh — fencing agent-authored text (#1243)', () =
     expect(out).toMatch(/fenced: agent-authored/);
   });
 
-  it('is wired into the echo site, not merely available', () => {
+  /**
+   * The fence must sit on the ASSEMBLED body, not on one input.
+   *
+   * The first version fenced `.agent-summary.md` alone — the INSTANCE. `SIGNALS_BLOCK` is
+   * appended to the same `$BODY` afterwards, rendered from the agent's own
+   * `.review-signals.json` (whose `rootCause` is emitted verbatim), so a forged record
+   * still reached a trusted comment through a sibling channel at the very same echo site.
+   * Caught by the PR #1260 skeptic. Fencing the assembled body is the PROPERTY: any future
+   * block appended to `$BODY` is covered without anyone remembering to fence it.
+   */
+  it('fences the ASSEMBLED body, after every block is appended', () => {
     const src = fs.readFileSync(path.resolve(__dirname, '../../../scripts/dispatch-issue.sh'), 'utf-8');
     const code = src.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
-    const echo = code.slice(code.indexOf('SUMMARY_FILE'), code.indexOf('SUMMARY_FILE') + 900);
-    expect(echo).toContain('--fence-agent-text');
+
+    const fenceAt = code.indexOf('--fence-agent-text');
+    const signalsAt = code.indexOf('SIGNALS_BLOCK');
+    // The NEXT post site after the fence — `gh issue comment "$ISSUE"` occurs four times
+    // in this file (the verdict-hold surface is the first, ~1100 lines earlier), so an
+    // unanchored indexOf finds the wrong one and the assertion fails on correct code.
+    const postAt = code.indexOf('gh issue comment "$ISSUE"', fenceAt);
+
+    expect(fenceAt, 'the fence must be called at all').toBeGreaterThan(-1);
+    expect(signalsAt, 'SIGNALS_BLOCK append must exist').toBeGreaterThan(-1);
+    expect(postAt, 'a post must follow the fence').toBeGreaterThan(-1);
+    // AFTER the signals block is appended, and BEFORE the comment is posted.
+    expect(fenceAt).toBeGreaterThan(signalsAt);
+    expect(fenceAt).toBeLessThan(postAt);
+  });
+
+  it('no agent-authored block is appended to BODY after the fence', () => {
+    // Guards the ordering above against a future append being added below it.
+    const src = fs.readFileSync(path.resolve(__dirname, '../../../scripts/dispatch-issue.sh'), 'utf-8');
+    const code = src.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+    const f = code.indexOf('--fence-agent-text');
+    const after = code.slice(f, code.indexOf('gh issue comment "$ISSUE"', f));
+    expect(after).not.toMatch(/BODY=\$\(printf[^)]*\$BODY/);
   });
 });

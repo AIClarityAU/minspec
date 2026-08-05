@@ -1352,19 +1352,7 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
       SHA=$(git -C "$WORKTREE" rev-parse --short HEAD)
       SUMMARY_FILE="${WORKTREE}/.agent-summary.md"
       if [[ -f "$SUMMARY_FILE" ]]; then
-        # FENCE the agent's own words before republishing them under a trusted identity
-        # (#1243). This comment is authored by the parent, so every downstream reader
-        # treats its body as trustworthy — but the text inside is the AGENT's, and that
-        # agent's prompt embedded the untrusted issue body. Author trust proves who posted
-        # the comment, never who wrote what is in it (DR-072 §5a).
-        #
-        # Without this, a summary containing a control sentinel is indistinguishable from
-        # a first-party one. `--newest-record` protects readers that can rank by timestamp;
-        # it does nothing for a marker whose mere PRESENCE is the signal, which is exactly
-        # how a planted `<!-- minspec-shipped -->` could make an issue undispatchable.
-        BODY=$(printf '%s\n\n— branch `%s` @ %s (auto-dispatched)' \
-                 "$(cat "$SUMMARY_FILE" | "${SCRIPT_DIR}/dispatch-ready-check.sh" --fence-agent-text)" \
-                 "$BRANCH" "$SHA")
+        BODY=$(printf '%s\n\n— branch `%s` @ %s (auto-dispatched)' "$(cat "$SUMMARY_FILE")" "$BRANCH" "$SHA")
       else
         BODY=$(printf 'Agent completed (no summary written).\n\n— branch `%s` @ %s (auto-dispatched)' "$BRANCH" "$SHA")
       fi
@@ -1438,6 +1426,22 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
       else
         echo "WARNING: could not render review signals — posting summary without the block"
       fi
+      # FENCE ONCE, ON THE ASSEMBLED BODY (#1243). This comment is authored by the
+      # parent, so every downstream reader treats it as first-party — but it carries
+      # AGENT-authored text, from an agent whose prompt embedded the untrusted issue
+      # body. Author trust proves who posted the comment, never who wrote what is inside
+      # it (DR-072 §5a).
+      #
+      # The first version of this fenced `.agent-summary.md` alone. That was fixing the
+      # INSTANCE: `SIGNALS_BLOCK` is appended above, rendered from the agent's own
+      # `.review-signals.json` (whose `rootCause` is emitted verbatim), so a forged
+      # record could still reach a trusted comment through a sibling channel at the very
+      # same echo site. Fencing the assembled body is the PROPERTY — any future block
+      # appended to `$BODY` is covered without anyone remembering to fence it.
+      #
+      # Safe to apply wholesale: the parent contributes no `minspec-*` marker of its own
+      # to this body, so nothing first-party is broken by it.
+      BODY=$(printf '%s' "$BODY" | "${SCRIPT_DIR}/dispatch-ready-check.sh" --fence-agent-text)
       gh issue comment "$ISSUE" --repo "$REPO" --body "$BODY" 2>/dev/null || true
 
       # Independent reviewer stage (#342) — runs AFTER the push/summary and adds
