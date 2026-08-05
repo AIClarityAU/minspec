@@ -30,6 +30,7 @@ import {
   DOCS_LANE_WORKFLOW,
   REVIEW_BRANCH_SH,
   REVIEW_DECIDE_SH,
+  AGENT_CONTEXT_SH,
   ROLE_REVIEWER_MD,
   ROLE_SECURITY_MD,
   ROLE_ARCHITECT_MD,
@@ -1274,6 +1275,20 @@ const CI_REVIEW_STACK_TEMPLATES: readonly ManagedRegionTemplate[] = [
     commentStyle: 'hash',
     content: REVIEW_DECIDE_SH,
     executable: true,
+    preamble: REVIEW_SCRIPT_SHEBANG,
+  },
+  {
+    // SOURCED by review-branch.sh at startup (the #912-recurrence setting-sources
+    // pin). Unlike approval-provenance.py below, the caller does NOT guard on this
+    // file existing — the source is deliberately unguarded, because silently
+    // dropping the flag restores the roster-thrash outage it prevents. A consuming
+    // repo that got the caller alone would therefore fail LOUDLY rather than
+    // degrade, which is correct, but it still must be scaffolded alongside.
+    name: 'agent-context-lib',
+    outputPath: 'scripts/lib/agent-context.sh',
+    commentStyle: 'hash',
+    content: AGENT_CONTEXT_SH,
+    executable: false,
     preamble: REVIEW_SCRIPT_SHEBANG,
   },
   {
