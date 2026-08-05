@@ -19,6 +19,31 @@ phases:
 
 # MinSpec — Approval-Staleness Prominence + Diff View (Requirements)
 
+> **Three corrections (2026-08-05, from a drift audit of the sign-off queue).**
+>
+> 1. **Why this reads `unapproved` — it was revoked, not never-reviewed.** This spec *was*
+>    approved on 2026-07-04. Commit `39b62664` ("chore(#714): revoke 22 unverified-provenance
+>    approvals") deleted its sidecar along with 21 others, because those approvals were
+>    minted when this repo's git identity was `claude@harvest316.com` and so "cannot be
+>    proven a human act" (DR-056 Decision 4). Most of the 22 have since been re-approved
+>    under `github@`; this one has not. The frontmatter `status: done` with every phase
+>    `done` is therefore accurate about the *code* and misleading about the *approval* —
+>    `deriveStatus` floors an unapproved spec to `specifying` (INV-1), so the fact oracle
+>    reports DRIFT. **Re-approval is a real human act, not a formality.**
+> 2. **AC-6 / INV-No-fabricated-diff no longer matches the shipped resolver.** AC-6 (:228-231)
+>    requires that an unrecoverable baseline shows "baseline unavailable" and opens no diff.
+>    The shipped path is `recoverBaseline(...) ?? recoverBaselineFromHistory(...)`
+>    (`packages/minspec/src/lib/approval.ts:172` and `:225`) — when the blob is unrecoverable
+>    it walks `git log` for the spec path and reconstructs the approved body from the first
+>    committed version (#701). So a diff *is* opened in a case AC-6 says must not open one.
+>    Whether that reconstruction counts as "fabricated" under the invariant is the open
+>    question; AC-6 as written is not what the code does.
+> 3. **Every `approval.ts` citation below has rotted.** The file is now 562 lines.
+>    `getApprovalStatus` is at :488 and `resolveStatus` at :478 (cited 228-235);
+>    `getApprovalRecord` at :494 (cited :235); `mintBaseline` at :131 and `recoverBaseline`
+>    at :172 (cited 104-186). The paths still resolve, so the existing reference-checker is
+>    green on all of them — the line-level gap tracked in #1252.
+
 **Date:** 2026-07-03
 **Status:** Done
 **Triggered by:** session — SPEC-026 showed a bare warning icon for "needs

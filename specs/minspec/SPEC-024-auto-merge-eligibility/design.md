@@ -71,7 +71,7 @@ reports the derived blast (`:330–337`).
   In v1 there is *no* low-blast signal, so the only `low` outcome is a signal set with at
   most the `reach_unavailable` marker and no exported touch (`:197`).
 - **D3 — Prover is the sole authority for the red→green proof (INV-3).**
-  `withProverAuthority` (`:292`) overwrites any agent-supplied
+  `withVerifiedAuthority` (`auto-merge.ts:380`) overwrites any agent-supplied
   `regressionProvenBaseRed`/`...HeadGreen` on `reviewSignals` with the prover's result;
   absent prover ⇒ both `false`. Rationale: an agent must not be able to self-certify the
   regression that lets its own PR merge.
