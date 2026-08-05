@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-# drain-inbox.sh — dispatch all agent-ready issues in background
+# drain-inbox.sh — dispatch all ready issues in background
+#   ready = `agent-ready` (full build) OR `agent-ready-specify` (auto-buildable
+#   T3/T4 — Specify phase only; DR-076 / #1169)
 #
 # Called from session-start.sh hook so inbox work piggybacks onto active
 # sessions without blocking the user. Each issue is dispatched sequentially
@@ -409,11 +411,25 @@ run_cycle() {
     done
   fi
 
-  # Step 2: drain whatever is now agent-ready (original + newly triaged)
-  all_ready=$(gh issue list --repo "$REPO" --label "agent-ready" \
-    --json number --jq '.[].number' 2>/dev/null || true)
+  # Step 2: drain whatever is now dispatchable (original + newly triaged).
+  #
+  # BOTH ready classes (#1169): `agent-ready` (full build) and `agent-ready-specify`
+  # (auto-buildable T3/T4 — Specify phase only, DR-076). Two separate `gh issue list`
+  # calls because `--label A --label B` is an AND, not an OR: one combined call would
+  # silently return the empty intersection and the specify queue would never drain —
+  # a verdict nothing dispatches is just a differently-shaped backlog. Which mode each
+  # issue runs in is decided by dispatch-issue.sh from the VERDICT RECORD, never from
+  # the label that put it in this list (#983).
+  all_ready=$(
+    {
+      gh issue list --repo "$REPO" --label "agent-ready" \
+        --json number --jq '.[].number' 2>/dev/null || true
+      gh issue list --repo "$REPO" --label "agent-ready-specify" \
+        --json number --jq '.[].number' 2>/dev/null || true
+    } | sort -un
+  )
   if [[ -z "$all_ready" ]]; then
-    echo "[drain] no agent-ready issues after triage — cycle done."
+    echo "[drain] no agent-ready / agent-ready-specify issues after triage — cycle done."
     return 0
   fi
 
@@ -650,8 +666,17 @@ INBOX_ISSUES=$(gh issue list --repo "$REPO" --label "inbox" \
   --json number --jq '.[].number' 2>/dev/null || true)
 [[ -n "$INBOX_ISSUES" ]] && INBOX_COUNT=$(echo "$INBOX_ISSUES" | wc -l | tr -d ' ')
 
-READY_ISSUES=$(gh issue list --repo "$REPO" --label "agent-ready" \
-  --json number --jq '.[].number' 2>/dev/null || true)
+# Both ready classes (#1169) — same OR-not-AND reason as run_cycle's Step 2. This
+# count decides whether a one-shot run exits early, so undercounting here would make
+# the drain report "nothing to do" while specify work sat queued.
+READY_ISSUES=$(
+  {
+    gh issue list --repo "$REPO" --label "agent-ready" \
+      --json number --jq '.[].number' 2>/dev/null || true
+    gh issue list --repo "$REPO" --label "agent-ready-specify" \
+      --json number --jq '.[].number' 2>/dev/null || true
+  } | sort -un
+)
 READY_COUNT=0
 [[ -n "$READY_ISSUES" ]] && READY_COUNT=$(echo "$READY_ISSUES" | wc -l | tr -d ' ')
 
@@ -665,7 +690,7 @@ if [[ "$TOTAL" -eq 0 ]] && { ! $CONTINUOUS || $DRY_RUN; }; then
 fi
 
 if [[ "$TOTAL" -gt 0 ]]; then
-  echo "📬  $INBOX_COUNT inbox + $READY_COUNT agent-ready issue(s) pending"
+  echo "📬  $INBOX_COUNT inbox + $READY_COUNT ready issue(s) pending (agent-ready + agent-ready-specify)"
 fi
 
 if $DRY_RUN; then

@@ -14,8 +14,15 @@ structured output stay exact. (Terse output on a high-volume mechanical role sav
 - Classify issue tier: T1 (trivial), T2 (standard), T3 (complex), T4 (architectural)
 - Decide which role should handle it: `dev`, `architect`, `security`, `reviewer`
 - Apply tier-gated dispatch (only for issues that PASS the human-only filter):
-  - T1-T2 auto-buildable → `decision: agent-ready`
-  - T3-T4 → `decision: needs-review` (human approves before dispatch)
+  - T1-T2 auto-buildable → `decision: agent-ready` (an agent builds it end to end)
+  - T3-T4 auto-buildable → `decision: agent-ready` **as well**. The deterministic
+    gate converts a T3/T4 affirmative into a **specify-only** dispatch
+    (`agent-ready-specify`, hold `specify`): the agent writes the spec and stops,
+    and the human's single review happens on that finished spec rather than on the
+    raw issue (DR-076 / #1169). Size alone is therefore **not** a reason to withhold
+    `agent-ready` — nothing gets built before the human approves the spec.
+  - T3-T4 you cannot judge auto-buildable → `decision: needs-review` (a human reads
+    the issue first; the gate holds it on `tier`, exactly as before)
 - Human-only (any tier) → `decision: needs-review`, `human_only: yes`
 - Insufficient info to tier → `decision: needs-info`
 - Emit the verdict as a single block (see **Output** below). You do NOT apply
@@ -28,7 +35,8 @@ judgment*. A trivial-looking `idea` or `decide` issue is still human-only. This
 filter is what makes unattended auto-drain safe (#172, signed off 2026-06-05). It
 fails CLOSED: when unsure whether an issue is auto-buildable, treat it as human-only.
 
-**Auto-buildable types** (may reach `agent-ready` if tier is T1-T2):
+**Auto-buildable types** (may reach `agent-ready` — a full build at T1-T2, a
+specify-only dispatch at T3-T4):
 `bug`, `feat` (infer scope from a loose acceptance criteria, state assumptions in
 the PR), `chore`, `docs`, `test`, `ci`, gate-repairs / validator-tightening.
 
@@ -51,7 +59,13 @@ changes, anything touching published sites or live outbound (email/SMS/spend).
 You hold NO tools that can edit labels or run commands. Your entire job is to emit
 one verdict block; the dispatcher (`triage-inbox.sh`) applies it, and a
 deterministic gate (`triage-decide.sh`) enforces the safety rules — a `human_only`
-or T3/T4 verdict can never become `agent-ready` even if you emit otherwise.
+verdict can never become `agent-ready`, and a T3/T4 one can only ever become
+`agent-ready-specify` (spec, then stop), even if you emit otherwise.
+
+The three tokens below are the WHOLE vocabulary: you cannot ask for a specify-only
+dispatch, because the gate derives that class from the tier itself. That is
+deliberate — you are reading an untrusted issue body, so an injected request for a
+particular dispatch mode must not be expressible.
 
 Emit this and nothing after it:
 
@@ -90,7 +104,9 @@ Rule #1 the dispatcher grants the triage agent no filesystem/network tools
    and `decision: needs-review` (regardless of tier)
 2. Exactly one verdict block emitted, all five fields present
 3. `role` is one of dev / architect / security / reviewer
-4. `decision: agent-ready` ONLY when type is auto-buildable AND tier is T1-T2
+4. `decision: agent-ready` ONLY when the type is auto-buildable. Tier does not gate
+   this token any more — it decides what the gate does with it (T1-T2 → full build,
+   T3-T4 → specify-only dispatch, DR-076 / #1169)
 5. `rationale` states, for `needs-review`, whether the hold is tier-complexity or
    human-only-type; for `needs-info`, exactly what is missing
 

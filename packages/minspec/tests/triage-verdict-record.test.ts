@@ -19,7 +19,10 @@
  *      issue would re-triage to a perfectly good verdict and then be countermanded
  *      by the leftover hold label, stranding real work;
  *   5. a human-only verdict writes a record that REFUSES at dispatch even if
- *      someone then hand-applies `agent-ready`.
+ *      someone then hand-applies `agent-ready`;
+ *   6. (#1169 / DR-076) an auto-buildable T3/T4 travels this path as the SPECIFY
+ *      class — `agent-ready-specify` + `hold: specify` — and the reader resolves it
+ *      to `ready-specify`, never to a full build.
  */
 import { describe, it, expect, beforeAll } from 'vitest';
 import * as path from 'path';
@@ -218,11 +221,40 @@ describe('triage-inbox.sh writes the verdict record dispatch requires (#983)', (
     expect(r.out).toContain('[human-only]');
   });
 
-  it('a T3 verdict refuses at dispatch even if agent-ready is hand-applied afterwards', () => {
-    const run = runTriage(verdict({ tier: 'T3', decision: 'agent-ready' }));
+  it('a T3 the agent did NOT call auto-buildable refuses at dispatch, hand-applied label or not', () => {
+    const run = runTriage(verdict({ tier: 'T3', decision: 'needs-review' }));
     const r = gate('agent-ready,role:dev', run.comment, dispatchBody);
     expect(r.ok).toBe(false);
     expect(r.out).toContain('[held]');
+  });
+
+  // ── #1169 / DR-076: the specify class travels the REAL writer path ──────────
+  it('an auto-buildable T3 is labelled and recorded as SPECIFY-ONLY, never as a full build', () => {
+    const run = runTriage(verdict({ tier: 'T3', decision: 'agent-ready', role: 'architect' }));
+    // The label the writer actually applied…
+    expect(run.calls.some((c) => c.includes('add=[role:architect,agent-ready-specify]')), run.calls.join('\n')).toBe(
+      true,
+    );
+    // …and the record it minted, read back by the gate that dispatch consults.
+    const r = gate('agent-ready-specify,role:architect', run.comment, dispatchBody);
+    expect(r.ok).toBe(true);
+    expect(r.out).toBe('ready-specify');
+    expect(run.comment).toContain('hold: specify');
+    expect(run.comment).toContain('decision: agent-ready-specify');
+  });
+
+  it('the specify verdict clears plain agent-ready (the two ready classes never co-exist)', () => {
+    const run = runTriage(verdict({ tier: 'T3', decision: 'agent-ready' }));
+    const removed = run.calls.find((c) => /remove=\[[^\]]+\]/.test(c));
+    expect(removed).toContain('agent-ready');
+    expect(removed).toContain('needs-human-review');
+    expect(removed).toContain('inbox');
+  });
+
+  it('a T1 verdict still clears any stale agent-ready-specify', () => {
+    const run = runTriage(verdict());
+    const removed = run.calls.find((c) => /remove=\[[^\]]+\]/.test(c));
+    expect(removed).toContain('agent-ready-specify');
   });
 
   it('a rejected BATCH label removal falls back to one-at-a-time, so inbox still clears', () => {

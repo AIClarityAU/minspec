@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
-# triage-inbox.sh — triage inbox issues into agent-ready / needs-review / needs-info
+# triage-inbox.sh — triage inbox issues into agent-ready / agent-ready-specify /
+#                   needs-review / needs-info
 # Usage: scripts/triage-inbox.sh [issue-number]
+#
+# `agent-ready-specify` (#1169, implementing DR-076) is the outcome for an
+# auto-buildable T3/T4: the agent may write the SPEC and must stop there, so the
+# human's single review moves off the raw issue and onto the finished spec. The
+# vocabulary the AGENT emits is unchanged — the deterministic gate derives the class
+# from tier (see triage-decide.sh).
 #
 # Without args: processes all issues labeled 'inbox'
 # With arg: triages single issue
@@ -81,7 +88,13 @@ Issue number: ${ISSUE}
 
 Classify this issue per your role instructions (apply the human-only type filter
 FIRST, then tier). You CANNOT edit labels or run any command — the dispatcher
-applies your verdict. Emit EXACTLY ONE verdict block, and nothing after it:
+applies your verdict.
+
+\`decision: agent-ready\` means "an agent may start on this", NOT "an agent may build
+all of it". For an auto-buildable T3/T4 the deterministic gate converts it into a
+SPECIFY-ONLY dispatch (DR-076 / #1169) — so do not withhold it just because the work
+is large. Withhold it when the issue is human-only, or when you cannot judge it
+auto-buildable at all. Emit EXACTLY ONE verdict block, and nothing after it:
 
 TRIAGE_VERDICT_BEGIN
 decision: agent-ready | needs-review | needs-info
@@ -150,6 +163,19 @@ CONTENT
   # PARENT applies the verdict (credentialed op — never the agent).
   echo "  → #$ISSUE: $LABEL (role:$ROLE · tier:$TIER · hold:$HOLD)"
 
+  # `gh issue edit --add-label` resolves label NAMES against the repo's label set and
+  # fails the whole request on an unknown one — and this script runs under
+  # `set -euo pipefail`, so a repo that has never seen `agent-ready-specify` (#1169)
+  # would abort the ENTIRE drain on the first T3/T4 verdict, not just skip an issue.
+  # Create it idempotently first. Best-effort is safe HERE and only here: the label is
+  # a cosmetic stamp, and if creation genuinely fails the `--add-label` below still
+  # fails LOUDLY, and dispatch then refuses with `no-label`. Nothing passes silently.
+  if [[ "$LABEL" == "agent-ready-specify" ]]; then
+    gh label create "agent-ready-specify" --repo "$REPO" --color 0e8a16 \
+      --description "Auto-buildable T3/T4 — dispatch the SPECIFY phase only; the human approves the spec before any implementation (DR-076 / #1169)" \
+      2>/dev/null || true
+  fi
+
   # RECORD FIRST, labels second — so `agent-ready` never exists, even momentarily,
   # without the verdict that authorises it.
   gh issue comment "$ISSUE" --repo "$REPO" \
@@ -163,12 +189,17 @@ CONTENT
   # countermands `agent-ready` — so without this, a re-triage could mint a valid
   # verdict that the stale hold label then vetoes forever. Best-effort + LOUD
   # (never silent, DR-066): a failure here holds the issue, it never releases it.
+  # The two ready labels supersede EACH OTHER as well (#1169). A T3/T4 re-triaged
+  # from `agent-ready-specify` up to plain `agent-ready` (or an issue whose tier fell
+  # the other way) must not end up wearing both: the dispatcher would then see a
+  # ready label whose class disagrees with the record it is about to read.
   local SUPERSEDED
   case "$LABEL" in
-    agent-ready)  SUPERSEDED="inbox,needs-review,needs-info,needs-human-review" ;;
-    needs-review) SUPERSEDED="inbox,agent-ready,needs-info" ;;
-    needs-info)   SUPERSEDED="inbox,agent-ready,needs-review" ;;
-    *)            SUPERSEDED="inbox" ;;
+    agent-ready)          SUPERSEDED="inbox,needs-review,needs-info,needs-human-review,agent-ready-specify" ;;
+    agent-ready-specify)  SUPERSEDED="inbox,needs-review,needs-info,needs-human-review,agent-ready" ;;
+    needs-review)         SUPERSEDED="inbox,agent-ready,agent-ready-specify,needs-info" ;;
+    needs-info)           SUPERSEDED="inbox,agent-ready,agent-ready-specify,needs-review" ;;
+    *)                    SUPERSEDED="inbox" ;;
   esac
   if ! gh issue edit "$ISSUE" --repo "$REPO" --remove-label "$SUPERSEDED" >/dev/null 2>&1; then
     # `gh` resolves label NAMES against the repo's label set and fails the whole

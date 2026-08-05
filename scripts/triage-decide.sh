@@ -5,8 +5,29 @@
 # the FINAL triage outcome to stdout as: "<final-label> <role> <hold>".
 #
 # This is the machine-checkable gate that BACKS the LLM's judgment — a human-only
-# or T3/T4 verdict can never become `agent-ready`, regardless of what the agent
+# or T3/T4 verdict can never become plain `agent-ready`, regardless of what the agent
 # "decided". It fails CLOSED: any missing/garbled field downgrades to a human gate.
+#
+# ── #1169 / DR-076: T3/T4 auto-buildable now dispatches SPECIFY-ONLY ──────────
+# DR-076 keeps exactly one review-shaped human moment: reading a T3/T4 SPEC before
+# anything is built from it. This gate used to spend a DIFFERENT one first — every
+# T3/T4 landed on `needs-review` (hold `tier`), so the human read the RAW ISSUE
+# before an agent could even write that spec, and then read the spec anyway at the
+# approval gate. Two human reads where the accepted decision funds one, and the
+# raw-issue read is the lower-leverage of the two: an unrefined issue body is
+# exactly the artifact the Specify phase exists to turn into something worth human
+# attention.
+#
+# So an auto-buildable, non-human-only T3/T4 now resolves to `agent-ready-specify`
+# (hold `specify`) — dispatchable for the SPECIFY PHASE ONLY. Nothing about the
+# IMPLEMENT path moved: plain `agent-ready` is still reachable from T1/T2 alone,
+# and building from a T3/T4 spec still waits on the human's spec approval.
+#
+# The class is DERIVED HERE from `tier`; the agent's input vocabulary is UNCHANGED
+# (`agent-ready | needs-review | needs-info`). That is deliberate — the agent reads
+# an untrusted issue body, so an injected "give me a specify dispatch" must not be
+# expressible. It also means the affirmative decision is still a single token, so
+# the agent cannot half-authorise anything.
 #
 # Why this exists: the triage agent reads an UNTRUSTED issue body (prompt-injection
 # surface). Per the repo's dispatch security model, the agent therefore gets NO
@@ -24,9 +45,10 @@
 #   TRIAGE_VERDICT_END
 #
 # stdout: one line "<label> <role> <hold>"
-#   label ∈ {agent-ready, needs-review, needs-info}
+#   label ∈ {agent-ready, agent-ready-specify, needs-review, needs-info}
 #   role  ∈ {dev, architect, security, reviewer}
-#   hold  ∈ {none, human, tier, info, unknown} — WHY this is not auto-buildable (#1002)
+#   hold  ∈ {none, specify, human, tier, info, unknown} — WHY this is not fully
+#           auto-buildable (#1002, extended #1169)
 # exit 0 always when a block is found; exit 2 (still prints a fail-closed line) if not.
 #
 # `--fields` prints the SAME decision as key=value lines instead of one space-joined
@@ -44,11 +66,23 @@
 # Mapping — each token names the BRANCH that fired, in the order below:
 #   human    human_only was asserted (any tier)      → needs-review
 #   info     the agent asked for more information     → needs-info
-#   tier     T3/T4: too much ceremony to auto-build   → needs-review
-#   none     the ONLY affirmative outcome             → agent-ready
+#   specify  T3/T4 auto-buildable: the SPEC may be    → agent-ready-specify
+#            written now; implementation stays held
+#            until the human approves that spec
+#   tier     T3/T4 the agent did NOT call            → needs-review
+#            auto-buildable — too much ceremony,
+#            a human reads it (the pre-#1169 T3/T4 outcome, now the residue)
+#   none     the ONLY unrestricted affirmative       → agent-ready
 #   unknown  no usable verdict could be derived — no verdict block at all, an
 #            unsizable/garbled tier, or a decision that fell through every rule.
 #            `unknown` is never affirmative; it is the fail-closed default.
+#
+# Label and hold are LOCKED IN PAIRS, and the pairs never cross:
+#   agent-ready          goes with none, and only none       (full build authorised)
+#   agent-ready-specify  goes with specify, and only specify  (spec authorised;
+#                                                              implementation is not)
+# Downstream reads the HOLD, not the label (#983: a label is a stamp of a verdict,
+# never the verdict), so a crossed pair would hand two readers two authorities.
 
 set -eu
 
@@ -123,11 +157,21 @@ if [[ "$HUMAN" == "yes" || "$HUMAN" == "true" ]]; then
 fi
 
 # Deterministic gate — order matters, every fall-through lands on a human gate:
-# 1. human-only (any tier)            → needs-review  (hold: human)
-# 2. agent asked for info             → needs-info    (hold: info)
-# 3. T3/T4 (complex/architectural)    → needs-review  (hold: tier)
-# 4. T1/T2 AND agent-ready            → agent-ready   (hold: none — the ONLY auto path)
-# 5. anything else                    → needs-review  (hold: unknown — fail closed)
+# 1. human-only (any tier)                 → needs-review          (hold: human)
+# 2. agent asked for info                  → needs-info            (hold: info)
+# 3. T3/T4 AND agent-ready (auto-buildable)→ agent-ready-specify   (hold: specify — #1169)
+# 4. T3/T4 otherwise                       → needs-review          (hold: tier)
+# 5. T1/T2 AND agent-ready                 → agent-ready           (hold: none — the ONLY
+#                                                                   unrestricted auto path)
+# 6. anything else                         → needs-review          (hold: unknown — fail closed)
+#
+# Rules 3 and 4 are two branches of the SAME tier, split on the agent's decision, and
+# the split is load-bearing rather than decoration: before #1169 the agent's
+# `decision` was ignored entirely at T3/T4, so making the tier alone route to a
+# specify dispatch would auto-specify issues the agent had explicitly declined to
+# call auto-buildable (a human-only-adjacent, unclear, or garbled one). Requiring the
+# affirmative token keeps every non-affirmative T3/T4 on exactly its pre-#1169
+# outcome — needs-review, hold `tier`.
 if [[ "$HUMAN_OUT" == "yes" ]]; then
   emit needs-review "$ROLE" human; exit 0
 fi
@@ -135,6 +179,9 @@ if [[ "$DECISION" == "needs-info" ]]; then
   emit needs-info "$ROLE" info; exit 0
 fi
 if [[ "$TIER" == "t3" || "$TIER" == "t4" ]]; then
+  if [[ "$DECISION" == "agent-ready" ]]; then
+    emit agent-ready-specify "$ROLE" specify; exit 0
+  fi
   emit needs-review "$ROLE" tier; exit 0
 fi
 if [[ "$TIER" == "t1" || "$TIER" == "t2" ]] && [[ "$DECISION" == "agent-ready" ]]; then
