@@ -57,6 +57,34 @@ const BLOCKED = 'ai-review:blocked';
 // removes it). Owned by ONE applier (ready-to-merge.yml), driven by shouldAwaitApproval().
 const AWAITING_APPROVAL = 'awaiting-approval';
 
+// #1247 — the NEGATIVE counterpart to AWAITING_APPROVAL: this PR declares a
+// dependency on something that is still open, so it is nobody's turn yet.
+//
+// Deliberately NOT named `blocked`: `ai-review:blocked` above already means
+// something entirely different (the reviewer could not RUN, a transient quota
+// condition). Two labels a human scans in the same list must not read as
+// variants of one another when they mean unrelated things.
+const BLOCKED_BY = 'blocked-by';
+
+// Declarations of a blocking dependency in a PR body, e.g.
+//
+//   Blocked by #1225
+//   Blocked by: #1225, #1179
+//   - **Blocked by** #1225
+//
+// STRICT BY DESIGN. The pattern anchors to the start of a line (after optional
+// markdown decoration) so ordinary prose — "this was blocked by a stale cache",
+// "#1225 blocked by design" — can never mint the label. A false `blocked-by`
+// parks a mergeable PR indefinitely, which is worse than not having the signal:
+// the whole point is that the queue tells the truth.
+//
+// Only `Blocked by` is recognised, NOT `Depends on`. PR bodies say "depends on"
+// loosely all the time ("depends on the seam landing first" as narrative), while
+// "Blocked by" reads as a declaration in every corpus I checked. One unambiguous
+// form beats two fuzzy ones — a second form can be added if a real body wants it.
+const BLOCKED_BY_LINE_RE = /^[\s>*_-]*\**\s*blocked\s+by\b\**\s*:?\s*(.+)$/gim;
+const ISSUE_REF_RE = /#(\d+)\b/g;
+
 // Detect, from a failed `claude -p` reviewer invocation's combined output, whether
 // the cause is an exhausted subscription quota / rate-limit / overload (a transient,
 // retry-able, NOT-your-code condition) versus a genuine crash. review-branch.sh
@@ -446,8 +474,52 @@ function decideStatus({ labels, provenanceRevert, stalenessStrip, passProvenance
 //   - !autoMergeArmed — the PR will NOT merge itself. A PR with native auto-merge
 //     armed (DR-061) merges the instant the gate greens, so it is the ROBOT's turn,
 //     never a human's — it must never enter the "my turn" queue.
-function shouldAwaitApproval({ statusState, autoMergeArmed } = {}) {
+//   - openBlockers is empty — nothing this PR declared `Blocked by` is still open.
+//     A PR waiting on another PR/issue is not a human's turn: pressing merge would
+//     land it out of order. #1224 is the case that prompted this (#1247): it read
+//     `ai-review:pass` + `awaiting-approval` while genuinely blocked on #1225, so
+//     the "my turn" queue was lying about a PR nobody could act on.
+//   - !isDraft — a draft cannot be merged at all, so it can never be a human's turn
+//     to merge it. Previously drafts entered the queue purely because the gate was
+//     green, which is how #1224 showed up there twice over.
+//
+// Both new conditions fail toward NOT-your-turn. That is the correct direction for
+// a positive signal: a missing "your turn" costs a glance at the queue, a false one
+// costs a merge nobody should have made.
+function shouldAwaitApproval({ statusState, autoMergeArmed, openBlockers, isDraft } = {}) {
+  if (isDraft) return false;
+  if (Array.isArray(openBlockers) && openBlockers.length > 0) return false;
   return statusState === 'success' && !autoMergeArmed;
+}
+
+// #1247 — extract every declared blocking dependency from a PR body. Pure:
+// text in → sorted, de-duplicated array of issue/PR NUMBERS out. Empty array for
+// null/undefined/no-declaration, so callers need no special-casing.
+//
+// Returns numbers (not `#N` strings) because the caller's next move is an API
+// lookup keyed by number; formatting back to `#N` is a display concern.
+function parseBlockedBy(body) {
+  const text = String(body == null ? '' : body);
+  const found = new Set();
+  BLOCKED_BY_LINE_RE.lastIndex = 0;
+  let line;
+  while ((line = BLOCKED_BY_LINE_RE.exec(text)) !== null) {
+    // Only the remainder of the declaring line is scanned for refs, so a `#N`
+    // three paragraphs later is never swept into an unrelated declaration.
+    const rest = line[1];
+    ISSUE_REF_RE.lastIndex = 0;
+    let ref;
+    while ((ref = ISSUE_REF_RE.exec(rest)) !== null) found.add(Number(ref[1]));
+  }
+  return [...found].sort((a, b) => a - b);
+}
+
+// #1247 — should the `blocked-by` label be PRESENT? True iff at least one declared
+// blocker is still open. Pure, and the exact complement of the openBlockers arm of
+// shouldAwaitApproval, so the two labels can never both be present: one function
+// decides, the applier mirrors it.
+function shouldMarkBlockedBy({ openBlockers } = {}) {
+  return Array.isArray(openBlockers) && openBlockers.length > 0;
 }
 
 // Map the reviewer's FINAL verdict label — plus whether the PR touches the
@@ -615,7 +687,10 @@ module.exports = {
   CHANGES,
   BLOCKED,
   AWAITING_APPROVAL,
+  BLOCKED_BY,
   shouldAwaitApproval,
+  parseBlockedBy,
+  shouldMarkBlockedBy,
   shouldSummonHumanReview,
   isQuotaExhaustion,
   isQuotaExhaustionStrict,

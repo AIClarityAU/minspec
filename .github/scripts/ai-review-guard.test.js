@@ -23,6 +23,9 @@ const {
   PASS_STATUS_CONTEXT,
   decideStatus,
   shouldAwaitApproval,
+  BLOCKED_BY,
+  parseBlockedBy,
+  shouldMarkBlockedBy,
   shouldSummonHumanReview,
   AWAITING_APPROVAL,
   decideReviewCheck,
@@ -779,4 +782,89 @@ test('#816 invariant: machinery pass → needs-human-review, and ready-to-merge 
   assert.equal(held.state, 'failure');
   assert.equal(shouldAwaitApproval({ statusState: held.state, autoMergeArmed: false }), false);
   assert.equal(shouldSummonHumanReview({ label: PASS, isMachinery: true }), true);
+});
+
+// ─── #1247 — blocked-by: a PR waiting on an open dependency is nobody's turn ───
+
+test('parseBlockedBy: recognises the plain declaration', () => {
+  assert.deepEqual(parseBlockedBy('Blocked by #1225'), [1225]);
+});
+
+test('parseBlockedBy: colon, several refs on one line, and markdown decoration', () => {
+  assert.deepEqual(parseBlockedBy('Blocked by: #1225, #1179'), [1179, 1225]);
+  assert.deepEqual(parseBlockedBy('- **Blocked by** #1225'), [1225]);
+  assert.deepEqual(parseBlockedBy('> blocked by #7'), [7]);
+});
+
+test('parseBlockedBy: de-duplicates and sorts numerically, not lexically', () => {
+  // Lexical sort would give [1225, 7, 90]; the numeric order is the readable one.
+  assert.deepEqual(parseBlockedBy('Blocked by #90\nBlocked by #7, #1225, #90'), [7, 90, 1225]);
+});
+
+test('parseBlockedBy: empty for no declaration, null, undefined, or empty body', () => {
+  assert.deepEqual(parseBlockedBy('Just an ordinary PR body mentioning #1225.'), []);
+  assert.deepEqual(parseBlockedBy(null), []);
+  assert.deepEqual(parseBlockedBy(undefined), []);
+  assert.deepEqual(parseBlockedBy(''), []);
+});
+
+test('parseBlockedBy: PROSE never mints the label (the false-positive that would park a mergeable PR)', () => {
+  // Each of these contains both the words and a #ref, but none is a declaration.
+  assert.deepEqual(parseBlockedBy('The deploy was blocked by a stale cache; see #1225.'), []);
+  assert.deepEqual(parseBlockedBy('#1225 was blocked by design.'), []);
+  assert.deepEqual(parseBlockedBy('Previously this got blocked by CI (#99) but no longer.'), []);
+});
+
+test('parseBlockedBy: a ref on a LATER line is not swept into an earlier declaration', () => {
+  assert.deepEqual(parseBlockedBy('Blocked by #1225\n\nAlso relates to #4242.'), [1225]);
+});
+
+test('shouldMarkBlockedBy: true only when a blocker is still open', () => {
+  assert.equal(shouldMarkBlockedBy({ openBlockers: [1225] }), true);
+  assert.equal(shouldMarkBlockedBy({ openBlockers: [] }), false);
+  assert.equal(shouldMarkBlockedBy({}), false);
+  assert.equal(shouldMarkBlockedBy(), false);
+});
+
+test('#1247: an open blocker beats a green gate — NOT your turn', () => {
+  assert.equal(
+    shouldAwaitApproval({ statusState: 'success', autoMergeArmed: false, openBlockers: [1225] }),
+    false,
+  );
+});
+
+test('#1247: a CLOSED blocker restores the your-turn signal', () => {
+  // The workflow passes only the still-open subset, so a resolved blocker is simply absent.
+  assert.equal(
+    shouldAwaitApproval({ statusState: 'success', autoMergeArmed: false, openBlockers: [] }),
+    true,
+  );
+});
+
+test('#1247: a draft is never your turn to merge, however green the gate', () => {
+  assert.equal(
+    shouldAwaitApproval({ statusState: 'success', autoMergeArmed: false, isDraft: true }),
+    false,
+  );
+});
+
+test('#1247: the two labels are mutually exclusive by construction', () => {
+  // One decision function drives both, so no PR can ever carry blocked-by AND
+  // awaiting-approval — the contradiction the queue must never show.
+  for (const openBlockers of [[], [1225], [1225, 1179]]) {
+    const args = { statusState: 'success', autoMergeArmed: false, openBlockers };
+    assert.equal(shouldAwaitApproval(args) && shouldMarkBlockedBy(args), false);
+  }
+});
+
+test('#1247: existing callers that pass neither new field keep their old behaviour', () => {
+  // Back-compat guard — ready-to-merge.yml is not the only reader over time.
+  assert.equal(shouldAwaitApproval({ statusState: 'success', autoMergeArmed: false }), true);
+  assert.equal(shouldAwaitApproval({ statusState: 'failure', autoMergeArmed: false }), false);
+});
+
+test('#1247: BLOCKED_BY is distinct from the reviewer-transient ai-review:blocked', () => {
+  assert.notEqual(BLOCKED_BY, BLOCKED);
+  assert.equal(BLOCKED_BY, 'blocked-by');
+  assert.equal(BLOCKED, 'ai-review:blocked');
 });
