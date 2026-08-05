@@ -11,7 +11,7 @@
 
 import { readdirSync, readFileSync, statSync, existsSync } from 'fs';
 import { join, relative, dirname } from 'path';
-import { validateDrSequence, validateDrIndexStatus } from '../packages/minspec/src/lib/adr-manager';
+import { validateDrSequence, validateDrIndexStatus, validateDrAmendments } from '../packages/minspec/src/lib/adr-manager';
 import {
   validateSplitLayoutCoverage,
   checkAcceptanceCriteria,
@@ -279,6 +279,29 @@ try {
   }
 } catch {
   // Decisions dir / INDEX.md unreadable / absent — nothing to validate.
+}
+
+// Rule 16 (FATAL, #1145): an ACCEPTED DR that claims to amend or supersede
+// another DR, whose target never mentions it. `acceptAdrCommand` sets one status
+// and regenerates INDEX.md — it NEVER opens a second file, so an amendment lives
+// entirely in a human remembering a sentence. Measured 2026-08-05: three accepted
+// DRs had claimed amendments their targets had never heard of, one of them
+// load-bearing (DR-070 §3 read "there is no second admission lane" while two
+// shipped front ends were a second authorising party). An accepted DR is
+// authoritative, so a stale one does not merely go out of date — it misinforms,
+// which is this product's worst defect class.
+//
+// FATAL rather than a warning, and the corpus was cleaned first so it starts
+// green: a warning joins ~110 others and is read by nobody, which is how the
+// original gap survived. `proposed` sources are exempt by construction — a
+// pending amendment is exactly what proposed means.
+try {
+  const amendmentGaps = validateDrAmendments(resolveDecisionsDir());
+  for (const g of amendmentGaps) {
+    fail(join(resolveDecisionsDir(), `${g.target}.md`), `DR amendment not carried out — ${g.message}`);
+  }
+} catch {
+  // Decisions dir unreadable / absent — nothing to validate.
 }
 
 // Rule 9 (non-fatal — Slice-1, #161): dangling-reference checker. Scans every

@@ -146,6 +146,113 @@ export interface DrSequenceWarning {
   readonly message: string;
 }
 
+/**
+ * An ACCEPTED decision that claims to amend or supersede another decision, where
+ * the target says nothing about it.
+ */
+export interface DrAmendmentGap {
+  /** The DR making the claim, e.g. `DR-072`. */
+  readonly source: string;
+  /** The DR it claims to change, e.g. `DR-070`. */
+  readonly target: string;
+  /** The verb as written: `amends` | `supersedes` | `amendment to`. */
+  readonly relation: string;
+  /** Human-readable, single-line explanation with a suggested action. */
+  readonly message: string;
+}
+
+/**
+ * Matches a claim that one decision changes another. Deliberately narrow: only
+ * the three verbs this corpus actually uses (measured 2026-08-05 over all DRs),
+ * because a looser pattern would fire on ordinary prose that merely *mentions*
+ * another DR — and a noisy gate is one that gets switched off.
+ */
+const DR_AMENDMENT_RE = /\b(amendment to|amends|supersedes)\s+(DR-\d+)/gi;
+
+/**
+ * Report ACCEPTED decisions whose amendment was never carried out.
+ *
+ * THE GAP THIS CLOSES (#1145): a DR that says "this amends DR-NNN" has no
+ * mechanism to make that happen. `acceptAdrCommand` sets the target DR's own
+ * status and regenerates INDEX.md — it never opens a second file. So the
+ * amendment lives entirely in a human remembering a sentence, which is the
+ * "enforce, do not trust" failure the constitution names.
+ *
+ * It is not hypothetical. Measured over the corpus on 2026-08-05, three accepted
+ * DRs claimed an amendment their target had never heard of — including DR-072 →
+ * DR-070, where the amended text was load-bearing: DR-070 §3 read "there is no
+ * second admission lane" while two shipped front ends were a second authorising
+ * party. An accepted DR is authoritative, so a stale one does not merely go out
+ * of date, it actively misinforms.
+ *
+ * Only `accepted` sources are reported. A `proposed` DR is SUPPOSED to have a
+ * pending amendment — that is what proposed means — so flagging it would train
+ * the reader to ignore this rule. Measured: 2 of the 4 unacknowledged claims in
+ * the corpus were `proposed` and correctly silent.
+ *
+ * Acknowledgement is deliberately loose: the target need only MENTION the source
+ * id anywhere. The rule proves a link was made, never that the prose is correct —
+ * it cannot, and pretending otherwise would be the false-signpost defect it exists
+ * to prevent.
+ *
+ * Pure, offline, Tier-0 (DR-004): reads files, no network, no AI.
+ *
+ * @param decisionsDir Absolute path to the resolved decisions directory.
+ */
+export function validateDrAmendments(decisionsDir: string): DrAmendmentGap[] {
+  if (!fs.existsSync(decisionsDir)) return [];
+
+  const bodies = new Map<string, string>();
+  for (const entry of fs.readdirSync(decisionsDir).sort()) {
+    if (!ADR_FILE_RE.test(entry)) continue;
+    const id = entry.slice(0, entry.lastIndexOf('.'));
+    try {
+      bodies.set(id, fs.readFileSync(path.join(decisionsDir, entry), 'utf-8'));
+    } catch {
+      // Unreadable file — skip it rather than fail the whole scan.
+    }
+  }
+
+  const gaps: DrAmendmentGap[] = [];
+  const seen = new Set<string>();
+
+  for (const [source, body] of [...bodies].sort(([a], [b]) => a.localeCompare(b))) {
+    if (!/^status:\s*accepted\s*$/m.test(body)) continue;
+
+    DR_AMENDMENT_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = DR_AMENDMENT_RE.exec(body)) !== null) {
+      const relation = m[1].toLowerCase();
+      const target = m[2].toUpperCase();
+      if (target === source) continue;               // self-reference, not an amendment
+
+      const targetBody = bodies.get(target);
+      if (targetBody === undefined) continue;        // dangling ref — Rule 9 owns that
+
+      // Does the target acknowledge the source AT ALL?
+      if (new RegExp(`\\b${source}\\b`).test(targetBody)) continue;
+
+      const key = `${source}->${target}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      gaps.push({
+        source,
+        target,
+        relation,
+        message:
+          `${source} (accepted) ${relation} ${target}, but ${target} never mentions ${source} — ` +
+          `the amendment was recorded and never carried out, so ${target} still reads as if ` +
+          `unchanged. Add a short "Amended by ${source}" note to ${target} at the point it ` +
+          `changes (see DR-070 §3 for the shape), or reword ${source} if it does not in fact ` +
+          `change ${target}.`,
+      });
+    }
+  }
+
+  return gaps;
+}
+
 /** The minimum digit width an id must use to count as correctly padded. */
 const ADR_MIN_PAD_WIDTH = 3;
 
