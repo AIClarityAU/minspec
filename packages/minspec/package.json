@@ -508,6 +508,20 @@
           ],
           "markdownDescription": "After an approval is committed (see `#minspec.commitOnApprove#`), get it to the remote so a sign-off cannot be stranded on one machine.\n\nIf the current branch is **protected** (see `#minspec.protectedBranches#`), a direct push would be rejected — so MinSpec instead creates a branch at the *same commit*, pushes that, and gives you a link to open the PR. Your checkout is never switched and no branch you are on is rewritten.\n\nA push is a network call, so the default is `prompt`: nothing is sent until you click."
         },
+        "minspec.approvalPr": {
+          "type": "string",
+          "scope": "window",
+          "enum": [
+            "auto",
+            "manual"
+          ],
+          "default": "auto",
+          "enumDescriptions": [
+            "Open the pull request for you, labelled for the docs-lane so it auto-merges — the approval finishes with no extra click.",
+            "Show a notification with an 'Open PR' link and the compare URL, and let you create the PR yourself. This is the behaviour from before this setting existed."
+          ],
+          "markdownDescription": "What MinSpec does **after** an approval commit has already been pushed to a side branch because the current branch is protected (see `#minspec.pushOnApprove#` and `#minspec.protectedBranches#`).\n\n- `auto` (default) — MinSpec runs your own authenticated `gh` to open the PR and applies the `docs-lane` label, which is what lets the lane workflow auto-merge it. The label is applied **only** when every committed path is docs (specs/, docs/, .minspec/approvals/, skills/*.md, top-level *.md); the workflow re-verifies this independently and refuses loudly otherwise, so code can never ride the lane.\n- `manual` — the previous behaviour, exactly.\n\nThis setting **never causes a push of its own**: it only ever runs on a branch `#minspec.pushOnApprove#` already pushed with your consent, so with `pushOnApprove` at `never` — or a declined prompt — nothing here runs at all.\n\nIf `gh` is missing, not logged in, or GitHub is unreachable, `auto` degrades to exactly the `manual` notification with the reason appended. The approval is already committed and pushed either way."
+        },
         "minspec.protectedBranches": {
           "type": "array",
           "items": {

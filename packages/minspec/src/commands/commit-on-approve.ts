@@ -1,6 +1,44 @@
 import * as vscode from 'vscode';
 import { commitApproval, isUntrackedAtHead, type CommitApprovalResult } from '../lib/approve-commit';
 import { pushApproval, type PushApprovalResult } from '../lib/approve-push';
+import {
+  buildApprovalPrBody,
+  defaultExecRun,
+  laneLabelsFor,
+  openPullRequest,
+  resolveHeadSha,
+  type ExecRun,
+  type OpenPrResult,
+} from '../lib/approval-pr';
+import { readRecord, toPosixRel } from '../lib/approval-store';
+
+/**
+ * `.minspec/preferences.json` accessors, loaded LAZILY and deliberately.
+ *
+ * `loadPreferences`/`savePreferences` live in `lib/auto-bootstrap.ts`, and they
+ * are the real #883 one-time-prompt store — re-implementing that JSON read/merge
+ * here would make TWO writers of one file with different merge semantics, which
+ * is precisely the hazard `recordAnsweredSignature`'s own comment warns about.
+ * So this uses that API unchanged.
+ *
+ * But a STATIC import of it would drag `auto-bootstrap`'s whole transitive graph
+ * — `template-registry`, `slash-commands`, `merge-refresh`, `epic-backfill` (and
+ * with it the `claude -p` scaffolding) — into every module that merely commits an
+ * approval. That is real weight on a hot path for two ~10-line fs helpers, and it
+ * also makes the approval bridge's module graph enormously wider than its job.
+ * A dynamic import keeps the graph as narrow as it was and evaluates that module
+ * only when the FR-8 offer is genuinely being made or answered.
+ *
+ * That is not hypothetical tidiness: the static version broke `approve-action`
+ * and `multi-root-command-scope`, which mock `lib/spec` with a partial factory
+ * that the newly-reachable `slash-commands.ts` then tripped over at module-eval
+ * time. The `.js` specifier and the shape of this helper follow the repo's
+ * existing precedent at `commands/classify.ts:163`; `import-cycle-check.ts`
+ * deliberately does not count a dynamic import as a graph edge, for this reason.
+ */
+async function preferencesApi(): Promise<typeof import('../lib/auto-bootstrap.js')> {
+  return import('../lib/auto-bootstrap.js');
+}
 
 /**
  * Bridge between the approve/accept commands and the Tier-0 {@link commitApproval}
@@ -44,7 +82,14 @@ export async function commitApprovalIfEnabled(
       // epic-accept all funnel through this helper, so wiring it once means no
       // approval path can silently miss it as new ones are added.
       const slug = (result.paths?.[0] ?? message).replace(/\.[a-z]+$/i, '');
-      const { suffix: pushSuffix } = await pushApprovalIfEnabled(rootDir, slug);
+      // SPEC-050 FR-2: thread the approval's own facts through, so a `pushed-branch`
+      // outcome can open a titled, labelled PR without re-deriving anything. Both
+      // are required for the auto path (see `openApprovalPr`) — `paths` is what
+      // PROVES the change is docs-only (INV-2), and `subject` is the PR title.
+      const { suffix: pushSuffix } = await pushApprovalIfEnabled(rootDir, slug, {
+        subject: message,
+        paths: result.paths,
+      });
       return { suffix: ` · committed${pushSuffix}`, result };
     }
     case 'protected-branch': {
@@ -103,6 +148,121 @@ export function pushOnApproveMode(): PushOnApproveMode {
 }
 
 /**
+ * SPEC-050 FR-1 — what to do once an approval has ALREADY been pushed to a side
+ * branch because the current branch is protected.
+ *
+ * A DIFFERENT axis from {@link pushOnApproveMode} (OQ-3): that one answers
+ * "should this leave the machine?", this one answers "now that it has, who
+ * finishes the job?". Folding them into one enum would produce an incoherent
+ * `never | prompt | always | auto` whose last member answers a different
+ * question from its siblings.
+ *
+ * Defaults to `auto` (the contributed default). An unrecognised value resolves
+ * to `auto` too — the setting only ever chooses WHO opens a PR for a branch that
+ * is already on the remote, so a typo cannot cause a push, a network call the
+ * user did not consent to, or a lost approval. Compare `pushOnApprove`, which
+ * fails to its SAFEST value because a typo there could otherwise send bytes.
+ */
+export type ApprovalPrMode = 'auto' | 'manual';
+
+export function approvalPrMode(): ApprovalPrMode {
+  const v = vscode.workspace.getConfiguration('minspec').get<string>('approvalPr', 'auto');
+  return v === 'manual' ? 'manual' : 'auto';
+}
+
+/** The push prompt's actions. Named constants so the tests assert the SAME strings the UI shows. */
+const PUSH_ACTION = 'Push';
+const ALWAYS_PUSH_ACTION = 'Always push from now on';
+const NOT_NOW_ACTION = 'Not now';
+/** The legacy `manual` surface's only action (FR-1/FR-5 must reproduce it byte-for-byte). */
+const OPEN_PR_ACTION = 'Open PR';
+
+/**
+ * `answeredSignatures` key for the FR-8 standing-consent offer (#883 model).
+ *
+ * The VALUE is a CONSTANT sentinel, not a derived state signature: unlike the
+ * harness-drift prompts — which legitimately re-arm when the underlying state
+ * moves — "would you like to stop being asked?" has no state that could make it
+ * a fair question a second time. A constant makes the memory a genuine
+ * show-once (`auto-bootstrap.ts`'s `() => 'uninit'` precedent).
+ */
+const PUSH_ALWAYS_OFFER_KEY = 'pushAlwaysOffer';
+const PUSH_ALWAYS_OFFER_SHOWN = 'offered';
+
+/**
+ * Has the one-time "Always push from now on" offer already been made?
+ *
+ * Reads `.minspec/preferences.json` — machine-local and gitignored, which is the
+ * right home: DR-071's corollary is that standing consent is a PERSONAL decision,
+ * so neither the offer's memory nor the setting it writes belongs to the repo.
+ * Any read failure answers "not yet offered", which at worst repeats one prompt;
+ * the opposite default would silently swallow the one moment the developer learns
+ * what MinSpec can do for them.
+ */
+async function pushAlwaysOfferAlreadyMade(rootDir: string): Promise<boolean> {
+  try {
+    const { loadPreferences } = await preferencesApi();
+    return (
+      loadPreferences(rootDir).answeredSignatures?.[PUSH_ALWAYS_OFFER_KEY] ===
+      PUSH_ALWAYS_OFFER_SHOWN
+    );
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Remember that the offer was shown, whatever the answer was (#883: recording on
+ * EVERY resolution — including a dismiss — is what stops the re-nag).
+ *
+ * SPREADS the existing map: `savePreferences` merges TOP-LEVEL keys only, so a
+ * bare `{ answeredSignatures: { … } }` would REPLACE the whole map and wipe the
+ * bootstrap steps' answers. Same hazard, same fix, as `recordAnsweredSignature`.
+ *
+ * Swallows every failure (read-only checkout, unwritable root, full disk): a
+ * preference write must never turn a SUCCESSFUL approval into a visible error.
+ */
+async function recordPushAlwaysOfferMade(rootDir: string): Promise<void> {
+  try {
+    const { loadPreferences, savePreferences } = await preferencesApi();
+    const current = loadPreferences(rootDir);
+    savePreferences(rootDir, {
+      answeredSignatures: {
+        ...(current.answeredSignatures ?? {}),
+        [PUSH_ALWAYS_OFFER_KEY]: PUSH_ALWAYS_OFFER_SHOWN,
+      },
+    });
+  } catch (err) {
+    console.warn(
+      `MinSpec: could not remember the push-always offer — ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+/**
+ * FR-8: write the user's standing consent to their OWN (Global) settings.
+ *
+ * `ConfigurationTarget.Global`, never `Workspace` — DR-071's corollary is that
+ * `always` is a personal decision that must not be committed into a shared
+ * `.vscode/settings.json` where it would become someone else's default they
+ * never chose. Swallow-and-warn on failure (the `approve.ts` precedent): the
+ * approval itself has already succeeded by the time this runs, and the caller
+ * pushes regardless — losing the PREFERENCE must never look like losing the
+ * approval.
+ */
+async function enableAlwaysPush(): Promise<void> {
+  try {
+    await vscode.workspace
+      .getConfiguration('minspec')
+      .update('pushOnApprove', 'always', vscode.ConfigurationTarget.Global);
+  } catch (err) {
+    console.warn(
+      `MinSpec: failed to persist pushOnApprove=always — ${err instanceof Error ? err.message : String(err)}`,
+    );
+  }
+}
+
+/**
  * Branches the REMOTE will reject a direct push to — used only by the push step.
  *
  * ⚠️ This is NOT the list the commit-destination guard uses. `minspec.protectedBranches`
@@ -122,6 +282,181 @@ function protectedBranches(): string[] {
 }
 
 /**
+ * What the approval flow knows about the commit it just made, handed to the push
+ * step so a `pushed-branch` outcome can finish into a PR (SPEC-050 FR-2).
+ *
+ * Every field is OPTIONAL and the whole object defaults to `{}`, so the eleven
+ * existing two-argument call sites keep compiling — but the auto path REQUIRES
+ * `subject` and `paths`, and refuses to run without them (see
+ * {@link openApprovalPr}). Optional-in-the-type, mandatory-in-the-behaviour is
+ * the right shape here: a caller that cannot say what it committed has not
+ * proven the change is docs-only, and must not get the auto-merge label.
+ */
+export interface ApprovalPushContext {
+  /** The approval commit's subject — becomes the PR title verbatim (FR-2). */
+  readonly subject?: string;
+  /** Repo-relative paths the approval commit carried (INV-2's evidence). */
+  readonly paths?: readonly string[];
+  /** Injected git/gh runner; production uses {@link defaultExecRun}. Tests pass a stub. */
+  readonly run?: ExecRun;
+}
+
+/**
+ * The pre-SPEC-050 surface, extracted verbatim: a non-modal notification whose
+ * `Open PR` action opens the compare URL, plus the status suffix.
+ *
+ * It is a FUNCTION rather than duplicated prose because FR-1 (`manual`) and all
+ * four FR-5 degrade paths must be the SAME surface, not five similar ones. With
+ * `reason` omitted the message and the suffix are byte-identical to what shipped
+ * before this spec — which is what makes "`manual` preserves today's behaviour
+ * exactly" a property of the code instead of a claim in a doc comment.
+ */
+function manualPrSurface(result: PushApprovalResult, reason?: string): string {
+  const because = reason ? ` — ${reason}` : '';
+  if (result.compareUrl) {
+    const url = result.compareUrl;
+    void vscode.window
+      .showInformationMessage(
+        `Approval pushed on '${result.branch}' (this branch is protected, so it needs a PR)${because}.`,
+        OPEN_PR_ACTION,
+      )
+      .then((c) => {
+        if (c === OPEN_PR_ACTION) void vscode.env.openExternal(vscode.Uri.parse(url));
+      });
+  }
+  return ` · pushed on ${result.branch} (open a PR${because})`;
+}
+
+/** Short, fixed reason per failed {@link openPullRequest} outcome (FR-5). */
+const PR_FAILURE_REASON: Record<string, string> = {
+  'gh-absent': 'the gh CLI is not installed',
+  'gh-unauthenticated': 'gh is not signed in',
+  offline: 'GitHub was unreachable',
+  failed: 'opening the PR failed (see console)',
+};
+
+/**
+ * Which of the committed paths is the APPROVABLE document (never the sidecar)?
+ *
+ * The sidecar is keyed BY the document's path, so `readRecord` must be given the
+ * document. Falls back to the first path when the commit is sidecar-only, which
+ * simply yields no record — and {@link buildApprovalPrBody} then omits those
+ * lines rather than inventing them.
+ */
+function approvableRelPath(paths: readonly string[]): string {
+  const rels = paths.map((p) => toPosixRel(p));
+  return rels.find((p) => !p.startsWith('.minspec/approvals/')) ?? rels[0];
+}
+
+/**
+ * SPEC-050's payload: open the docs-lane PR for an already-pushed approval branch.
+ *
+ * Reads as a sequence of refusals before it does anything, and every refusal
+ * lands on the SAME `manual` surface with a stated reason — never silence, never
+ * a throw (FR-5 / INV-5):
+ *
+ *   1. `approvalPr: manual` — the developer opted out. No `gh` runs at all.
+ *   2. No branch name — the push seam could not name what it pushed, so there is
+ *      no `--head` to give `gh`.
+ *   3. No `subject`/`paths` — FAIL CLOSED. INV-2 says MinSpec labels `docs-lane`
+ *      only for a branch PROVEN docs-only, and `paths` is that proof. A caller
+ *      that did not supply them has proven nothing, so it does not get the auto
+ *      path. (Constitution invariant #2: an unproven absolute fails closed AND
+ *      visibly — hence the `console.warn`, never a quiet downgrade.)
+ *
+ * Past those, note what is deliberately NOT here:
+ *   - No push, fetch, or checkout move (INV-1/INV-3). The only `git` call is
+ *     `rev-parse HEAD`, read-only, inside {@link resolveHeadSha}.
+ *   - No write of any kind (INV-4). `readRecord` reads the sidecar that
+ *     **MinSpec: Approve Spec** already wrote; nothing here writes a record, a
+ *     sidecar, or a `status:` line.
+ *   - No `base`/`slug` argument to `gh`: it resolves the base repo and ITS
+ *     default branch from `rootDir`'s `origin`, which is correct in a repo whose
+ *     default branch is not `main` and costs no extra local git call.
+ *   - No completing action on the success toast (FR-3/AC-3). The reported defect
+ *     is precisely that the last step gets handed back to the human, so the happy
+ *     path's notification takes ONE argument and carries no button. VS Code
+ *     linkifies the URL in the message text.
+ */
+async function openApprovalPr(
+  rootDir: string,
+  result: PushApprovalResult,
+  ctx: ApprovalPushContext,
+): Promise<{ suffix: string; pr?: OpenPrResult }> {
+  if (approvalPrMode() === 'manual') return { suffix: manualPrSurface(result) };
+
+  if (!result.branch) {
+    console.warn('MinSpec: approval PR skipped — the push seam reported no branch name.');
+    return { suffix: manualPrSurface(result, 'branch name unavailable') };
+  }
+  if (!ctx.subject || !ctx.paths || ctx.paths.length === 0) {
+    console.warn(
+      'MinSpec: approval PR skipped — the committed paths/subject were not supplied, so the ' +
+        'docs-only property (SPEC-050 INV-2) is unproven. Falling back to the manual surface.',
+    );
+    return { suffix: manualPrSurface(result, 'approval details unavailable') };
+  }
+
+  try {
+    const run = ctx.run ?? defaultExecRun();
+    // Normalize ONCE so the label decision, the sidecar lookup and the body all
+    // reason over the same strings — on Windows `commitApproval` hands back
+    // `path.relative` output with `\` separators, and three call sites each
+    // normalizing separately is how they drift apart. Purely a canonicalization:
+    // an absolute path or a `..` segment is still refused downstream.
+    const paths = ctx.paths.map((p) => toPosixRel(p));
+    // The ONE place the label is decided, and it is decided by evidence.
+    const labels = laneLabelsFor(paths);
+    const record = readRecord(rootDir, approvableRelPath(paths));
+    const sha = await resolveHeadSha(run, rootDir);
+
+    const pr = await openPullRequest({
+      run,
+      cwd: rootDir,
+      head: result.branch,
+      title: ctx.subject,
+      body: buildApprovalPrBody({ paths, record, sha, labels }),
+      labels,
+      // FR-6: a re-approval that reuses a branch must adopt the open PR, never
+      // fan out a second one.
+      adoptExisting: true,
+    });
+
+    // A PR whose paths are NOT all docs is still opened — the branch is already
+    // pushed, and leaving the developer without a PR would be the worse failure —
+    // but it goes UNLABELLED and the suffix says so, so "no auto-merge" is never
+    // a silent surprise.
+    const laneNote = labels.length === 0 ? ' — not docs-only, so no docs-lane label' : '';
+
+    switch (pr.outcome) {
+      case 'created':
+        void vscode.window.showInformationMessage(`MinSpec: approval PR opened — ${pr.url}`);
+        return { suffix: ` · pushed on ${result.branch} · PR opened${laneNote} (${pr.url})`, pr };
+      case 'adopted':
+        void vscode.window.showInformationMessage(`MinSpec: approval PR already open — ${pr.url}`);
+        return {
+          suffix: ` · pushed on ${result.branch} · PR already open (${pr.url})`,
+          pr,
+        };
+      default: {
+        if (pr.error) console.warn(`MinSpec: approval PR not opened — ${pr.error}`);
+        const reason = PR_FAILURE_REASON[pr.outcome] ?? 'the PR could not be opened';
+        return { suffix: manualPrSurface(result, reason), pr };
+      }
+    }
+  } catch (err) {
+    // INV-5 backstop. `openPullRequest` never rejects, but `defaultExecRun`,
+    // `readRecord` and the body builder are outside its guard — and an approval
+    // that IS committed and IS pushed must never be reported as lost because the
+    // convenience step threw.
+    console.warn(
+      `MinSpec: approval PR step threw — ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return { suffix: manualPrSurface(result, 'the PR step failed (see console)') };
+  }
+}
+
+/**
  * Push the approval commit, so a sign-off cannot be stranded on one machine
  * (the Alt+A stranding bug: commit-on-approve commits but never pushes, approvals
  * are made on protected `main`, and a direct push there is rejected).
@@ -133,25 +468,58 @@ function protectedBranches(): string[] {
  *                and the approval is already safely committed locally either way.
  *   • `always` — the user set this deliberately; the setting is the consent.
  *
+ * SPEC-050 adds two things on top of that, neither of which widens the boundary:
+ *   • FR-8 — the `prompt` notification offers "Always push from now on" ONCE. The
+ *     click is the user's own deliberate act of setting `always` in their Global
+ *     settings, which is exactly the route DR-071 condition 1 permits; the
+ *     CONTRIBUTED default stays `prompt`.
+ *   • FR-1/FR-2 — a `pushed-branch` outcome finishes into a docs-lane PR. That
+ *     runs strictly AFTER a successful push, so it adds no network act this
+ *     function had not already been authorized to perform (INV-1). With `never`,
+ *     or a declined prompt, this function returns before any of it.
+ *
  * Never rejects: a push failure is surfaced in the suffix, never swallowed, because
  * the user must know the record is still local-only.
  */
 export async function pushApprovalIfEnabled(
   rootDir: string,
   slug: string,
-): Promise<{ suffix: string; result?: PushApprovalResult }> {
+  ctx: ApprovalPushContext = {},
+): Promise<{ suffix: string; result?: PushApprovalResult; pr?: OpenPrResult }> {
   const mode = pushOnApproveMode();
   if (mode === 'never') return { suffix: '' };
 
   if (mode === 'prompt') {
     // Non-modal (project preference: never steal focus from the artifact being
     // approved). `showInformationMessage` with actions is notification-area only.
+    //
+    // FR-8: the FIRST time only, the standing-consent option rides along. `Push`
+    // stays the LEAD action deliberately — DR-071 condition 1 requires the shipped
+    // behaviour to be the prompting one, so the escape from prompting must be a
+    // deliberate, named, second choice rather than the reflex target.
+    const alreadyOffered = await pushAlwaysOfferAlreadyMade(rootDir);
+    const actions = alreadyOffered
+      ? [PUSH_ACTION, NOT_NOW_ACTION]
+      : [PUSH_ACTION, ALWAYS_PUSH_ACTION, NOT_NOW_ACTION];
     const choice = await vscode.window.showInformationMessage(
       'Approval committed locally. Push it so the sign-off is not stranded on this machine?',
-      'Push',
-      'Not now',
+      ...actions,
     );
-    if (choice !== 'Push') return { suffix: ' · not pushed' };
+    // Record on EVERY resolution, dismiss included (#883) — that is what makes it
+    // show-once rather than show-until-answered-a-particular-way. Deliberate
+    // trade-off: if `enableAlwaysPush` below fails to persist, the offer is still
+    // spent and the user keeps clicking `Push` per approval. That is a degradation
+    // the console warning explains, and it is the lesser evil against re-nagging
+    // someone who has already answered.
+    if (!alreadyOffered) await recordPushAlwaysOfferMade(rootDir);
+
+    if (choice === ALWAYS_PUSH_ACTION) {
+      // Write the standing consent, then FALL THROUGH and push. Returning here
+      // would drop the very approval whose prompt the user just answered `yes` to.
+      await enableAlwaysPush();
+    } else if (choice !== PUSH_ACTION) {
+      return { suffix: ' · not pushed' };
+    }
   }
 
   // Defensive guard so "never rejects" is a LOCAL guarantee, not one borrowed from
@@ -169,20 +537,12 @@ export async function pushApprovalIfEnabled(
     case 'pushed':
       return { suffix: ' · pushed', result };
     case 'pushed-branch': {
-      // The branch is on the remote; opening the PR is one click. Offer it rather
-      // than opening a browser unasked.
-      if (result.compareUrl) {
-        const url = result.compareUrl;
-        void vscode.window
-          .showInformationMessage(
-            `Approval pushed on '${result.branch}' (this branch is protected, so it needs a PR).`,
-            'Open PR',
-          )
-          .then((c) => {
-            if (c === 'Open PR') void vscode.env.openExternal(vscode.Uri.parse(url));
-          });
-      }
-      return { suffix: ` · pushed on ${result.branch} (open a PR)`, result };
+      // SPEC-050: the branch is on the remote and the developer is one browser
+      // round-trip plus a PR form away from a record they already signed. Finish
+      // the job (FR-2) unless they asked to hand-drive it (FR-1 `manual`), and
+      // degrade to exactly the old surface whenever we cannot (FR-5).
+      const { suffix, pr } = await openApprovalPr(rootDir, result, ctx);
+      return { suffix, result, pr };
     }
     case 'failed':
       console.warn(`MinSpec: push-on-approve failed — ${result.error ?? 'git error'}`);

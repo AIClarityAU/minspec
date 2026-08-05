@@ -159,16 +159,30 @@ describe('Invariant 2: No backend — no network calls', () => {
     // same Tier-0 posture as approval.ts. See presence.ts gitOut/writeHeartbeat.
     'lib/presence.ts',
     // SPEC-039 "Push docs via lane": one of exactly TWO push lanes (the other is
-    // approve-push.ts below, added by #1022 and ratified by DR-071 — this comment
+    // approve-push.ts above, added by #1022 and ratified by DR-071 — this comment
     // said "the ONLY command that pushes" until then, and a second lane made it
     // false). It shells the
-    // user's authenticated `git`/`gh` to open a docs-only PR — and ONLY after an
-    // explicit modal confirmation that names the network action (FR-3 / INV-1).
+    // user's authenticated `git`/`gh` to push a docs-only branch — and ONLY after
+    // an explicit modal confirmation that names the network action (FR-3 / INV-1).
     // MinSpec opens no socket itself; the network actor is the user's own CLI,
     // same Tier-1 local-tool-delegation posture (DR-004) as github.ts/ruleset-
     // advisor.ts. Every wire call runs strictly after consent. See
     // commands/push-docs-lane.ts pushDocsLaneCommand.
+    // NOTE (SPEC-050 Slice 1): the `gh pr create` half moved to lib/approval-pr.ts
+    // below; the `git fetch`/`push` half is still spawned from here, so this entry
+    // remains load-bearing rather than vestigial.
     'commands/push-docs-lane.ts',
+    // SPEC-050 FR-4 "the seam": the single `gh pr create` in the codebase, shared
+    // by SPEC-039's command and the approval flow. It had to live in lib/ — the
+    // Tier-0 layer rule forbids lib/** -> commands/**, so a lib seam can never
+    // import the command that used to own the runner. Like approve-push.ts (and
+    // UNLIKE the local-git entries above) this one DOES reach the network, so it
+    // is allowlisted on the CONSENT clause of constitution invariant #1, not on a
+    // "local git only" claim: it opens a PR for a branch that a consented push
+    // already put on the remote (SPEC-050 INV-1), it never pushes or fetches
+    // itself, and with `minspec.pushOnApprove` at its shipped `prompt` default
+    // nothing here runs until the user clicks. See approval-pr.ts openPullRequest.
+    'lib/approval-pr.ts',
   ]);
 
   // Files allowed to *name* HTTP clients as detection data (not call them). They
