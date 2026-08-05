@@ -81,3 +81,42 @@ if [[ -x "$DRAIN" ]]; then
     fi
   fi
 fi
+
+# --- Weekly tooling radar (#1210) ---
+# Trigger of last resort AND the only trigger available inside the dev container:
+# `~/.config/systemd/user` is a root-owned mount here, so the systemd timer that
+# scripts/tooling-radar/install.sh writes can only be installed from a host shell.
+# Rather than let the radar depend on a path that may not exist, it also rides
+# session start — the same pattern the inbox drain uses (#239).
+#
+# `--due` (NOT `--status`) decides whether to launch: --status answers "is the radar
+# healthy?", --due answers "should a scan start now?", and it applies backoff so a
+# failed scan retries in hours rather than on every single session start.
+#
+# The lock directory matters because several sessions routinely start at once; without
+# it, three windows opening together would run three scans and file the same findings
+# three times. mkdir is the atomic primitive that makes the check-and-claim one step.
+RADAR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/tooling-radar/run-radar.sh"
+RADAR_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
+# Linked worktrees share the repo but must not each launch a scan; in a worktree
+# --git-dir and --git-common-dir differ, in the primary checkout they match.
+if [[ -x "$RADAR" ]] \
+  && [[ "$(git rev-parse --git-dir 2>/dev/null)" == "$(git rev-parse --git-common-dir 2>/dev/null)" ]]; then
+  if ! "$RADAR" --status >/dev/null 2>&1; then
+    # Never-run, failed, or stale — each deserves a visible line. A radar that
+    # stopped running produces the same empty inbox as a quiet week, so silence
+    # here would be the failure mode the radar exists to avoid.
+    echo "📡 Tooling radar: $("$RADAR" --status 2>&1 | tail -1)"
+  fi
+  if "$RADAR" --due >/dev/null 2>&1; then
+    if mkdir "$RADAR_ROOT/.radar/.lock" 2>/dev/null; then
+      (
+        trap 'rmdir "$RADAR_ROOT/.radar/.lock" 2>/dev/null' EXIT
+        "$RADAR" >>"$RADAR_ROOT/.radar/run.log" 2>&1
+      ) &
+      disown 2>/dev/null || true
+      echo "    Scan due — running in the background; findings file as issues."
+      echo "    Watch: tail -f .radar/run.log · Health: scripts/tooling-radar/run-radar.sh --status"
+    fi
+  fi
+fi

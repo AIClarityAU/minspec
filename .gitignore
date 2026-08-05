@@ -110,3 +110,6 @@ sites/scroogellm.com/
 
 # CodeGraph local index (33M+ SQLite db, machine-local, rebuilt on demand)
 .codegraph/
+
+# Weekly tooling-radar output (briefings, raw transcripts, health record)
+.radar/
