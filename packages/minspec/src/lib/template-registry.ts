@@ -96,14 +96,20 @@ Exactly one per issue.
 | \`refactor\` | Structure changes, behaviour does not | ✅ |
 | \`test\` | Test coverage or harness | ✅ |
 | \`ci\` | Build or CI pipeline | ✅ |
-| \`documentation\` | Reference docs for developers | ✅ |
+| \`docs\` | Developer-facing documentation | ✅ |
 | \`idea\` | Not yet a decision | ❌ human-only |
 | \`decide\` | Asks for a product or architecture decision | ❌ human-only |
 | \`copy\` | User-facing wording | ❌ human-only |
 | \`marketing\` | Marketing content | ❌ human-only |
 | \`positioning\` | Product positioning, public claims | ❌ human-only |
 | \`legal\` | Legal, licensing, compliance | ❌ human-only |
-| \`monetization\` | Pricing, billing, revenue | ❌ human-only |
+| \`monetization\` / \`billing\` | Pricing, billing, revenue | ❌ human-only |
+
+> **These names are not stylistic.** They are the exact tokens the triage step classifies
+> against, so a rename here silently removes a classification input rather than tidying a
+> label. In particular it is \`docs\`, **not** GitHub's default \`documentation\` — shipping the
+> latter recreated the very "declared type with no label" gap this file exists to close, and
+> a test that hardcoded the wrong name passed green while it did.
 
 **Human-only is about AUTHORSHIP, not difficulty.** It says who may *write* the work, never
 who may permit it — so no approval, keystroke, or configuration value lifts it. A trivial
@@ -133,7 +139,7 @@ gh label create chore --color cfd3d7 --description "Maintenance, no behaviour ch
 gh label create refactor --color cfd3d7 --description "Structure changes, behaviour does not" --force
 gh label create test --color cfd3d7 --description "Test coverage or harness" --force
 gh label create ci --color cfd3d7 --description "Build or CI pipeline" --force
-gh label create documentation --color 0075ca --description "Reference docs for developers" --force
+gh label create docs --color 0075ca --description "Developer-facing documentation" --force
 gh label create idea --color d4c5f9 --description "Not yet a decision" --force
 gh label create decide --color b60205 --description "Human-only: asks for a product or architecture decision" --force
 gh label create copy --color b60205 --description "Human-only: user-facing wording" --force
@@ -141,6 +147,7 @@ gh label create marketing --color b60205 --description "Human-only: marketing co
 gh label create positioning --color b60205 --description "Human-only: positioning, public claims" --force
 gh label create legal --color b60205 --description "Human-only: legal, licensing, compliance" --force
 gh label create monetization --color b60205 --description "Human-only: pricing, billing, revenue" --force
+gh label create billing --color b60205 --description "Human-only: billing (sibling of monetization)" --force
 gh label create P1 --color b60205 --description "Now" --force
 gh label create P2 --color fbca04 --description "Next" --force
 gh label create P3 --color 0e8a16 --description "Someday" --force

@@ -44,26 +44,71 @@ describe('labels.md template', () => {
     expect(rendered()).not.toMatch(/\{\{/);
   });
 
-  it('documents every type the triage role classifies against', () => {
-    const out = rendered();
-    for (const type of [
-      'bug', 'feat', 'chore', 'refactor', 'test', 'ci', 'documentation',
-      'idea', 'decide', 'copy', 'marketing', 'positioning', 'legal', 'monetization',
-    ]) {
-      expect(out, `type ${type} missing from the vocabulary`).toContain(`\`${type}\``);
+  /**
+   * Derive the expected vocabulary FROM `scripts/roles/triage.md` — never a list written
+   * here. The first version of this test hardcoded `documentation`; triage classifies
+   * against `docs`. It passed green while `gh issue create --label docs` failed, i.e. it
+   * asserted a vocabulary the author invented and re-created the exact gap the template
+   * exists to close. A fixture that encodes the assumption under test proves nothing.
+   */
+  const TRIAGE_ROLE = path.resolve(__dirname, '../../../scripts/roles/triage.md');
+
+  /** Backticked tokens inside the two type paragraphs of the triage role. */
+  function declaredTypes(): string[] {
+    const src = fs.readFileSync(TRIAGE_ROLE, 'utf-8');
+    const grab = (heading: string): string[] => {
+      const i = src.indexOf(heading);
+      if (i < 0) throw new Error(`triage role has no "${heading}" section — parser is stale`);
+      const para = src.slice(i, src.indexOf('\n\n**How to apply', i) > -1
+        ? Math.min(src.indexOf('\n\n**', i + heading.length) + 1 || src.length, src.length)
+        : src.length);
+      return [...para.matchAll(/`([a-z][a-z-]*)`/g)].map((m) => m[1]);
+    };
+    const tokens = [...grab('**Auto-buildable types**'), ...grab('**Human-only types**')];
+    // `agent-ready` appears in that prose as the LIFECYCLE label a type may reach.
+    // It is not a type, and the template says explicitly that it must never be pre-applied.
+    return [...new Set(tokens.filter((t) => t !== 'agent-ready'))];
+  }
+
+  it('the triage role is readable and declares a non-trivial vocabulary', () => {
+    // Guard the guard: if the parser silently returned [], every assertion below would
+    // pass vacuously — which is precisely the failure this rewrite exists to prevent.
+    expect(fs.existsSync(TRIAGE_ROLE), `${TRIAGE_ROLE} missing`).toBe(true);
+    const types = declaredTypes();
+    expect(types.length).toBeGreaterThan(8);
+    expect(types).toContain('chore');   // the type whose absence started this
+    expect(types).toContain('docs');    // the type the first version of this test got wrong
+  });
+
+  it('documents every type the triage role classifies against, IN THE TABLE', () => {
+    // Scoped to table rows, not the whole document. A plain `toContain` was satisfiable by
+    // the explanatory note further down — which mentions `docs` while describing this very
+    // bug — so prose ABOUT the fix made the assertion pass on the broken table. Anything a
+    // narrative sentence can satisfy is not a check on the artifact.
+    const rows = rendered()
+      .split('\n')
+      .filter((l) => l.startsWith('| `'))
+      .join('\n');
+    for (const type of declaredTypes()) {
+      expect(rows, `type \`${type}\` is declared by triage.md but has no row in the type table`)
+        .toContain(`\`${type}\``);
     }
   });
 
-  it('ships a runnable create block covering the documented types', () => {
+  it('ships a create line for every type the triage role classifies against', () => {
     const out = rendered();
-    const creates = out.match(/^gh label create \S+/gm) ?? [];
-    const named = creates.map((l) => l.replace('gh label create ', ''));
-    for (const type of ['bug', 'feat', 'chore', 'refactor', 'test', 'ci', 'decide', 'copy']) {
-      expect(named, `no create line for ${type}`).toContain(type);
+    const created = (out.match(/^gh label create \S+/gm) ?? []).map((l) =>
+      l.replace('gh label create ', ''),
+    );
+    for (const type of declaredTypes()) {
+      expect(created, `no \`gh label create ${type}\` line — the type would stay unusable`)
+        .toContain(type);
     }
-    // `--force` so re-running after a description edit updates instead of failing.
-    for (const line of out.split('\n').filter((l) => l.startsWith('gh label create'))) {
-      expect(line, 'create line must be idempotent').toContain('--force');
+  });
+
+  it('every create line is idempotent, so the block is safe to re-run', () => {
+    for (const line of rendered().split('\n').filter((l) => l.startsWith('gh label create'))) {
+      expect(line).toContain('--force');
     }
   });
 
@@ -97,15 +142,32 @@ describe('labels.md template', () => {
         if (!entry.name.endsWith('.ts')) continue;
         if (entry.name === 'template-registry.ts') continue; // holds the documented script
         const src = fs.readFileSync(full, 'utf-8');
-        if (/gh\s+label\s+(create|edit|delete)/.test(src)) offenders.push(full);
+        // Matches the STATED invariant, not a subset of it: ANY `gh label` subcommand
+        // (including the reads `list` / `view` / `clone`) and any forge REST path ending
+        // in `/labels`. The first version checked only create|edit|delete, so its name
+        // promised more than it verified.
+        if (/gh\s+label\b/.test(src) || /["'`][^"'`]*\/labels(\/|["'`?])/.test(src)) offenders.push(full);
       }
     };
     walk(libDir);
     expect(offenders, `extension source must not mutate labels: ${offenders.join(', ')}`).toEqual([]);
   });
 
-  it('the offender scan is not vacuous — it would catch a real call', () => {
-    // Guard the guard: prove the regex matches the thing it is looking for.
-    expect(/gh\s+label\s+(create|edit|delete)/.test('await exec("gh label create foo")')).toBe(true);
+  it.each([
+    'await run("gh label create foo")',
+    'await run("gh label delete foo")',
+    'await run("gh label list")',            // a READ — the stated invariant covers it
+    'await api("repos/o/r/labels")',         // forge REST, no gh CLI involved
+    "await api('repos/o/r/labels/bug')",
+  ])('the offender scan is not vacuous — it catches %s', (sample) => {
+    const hit = /gh\s+label\b/.test(sample) || /["'`][^"'`]*\/labels(\/|["'`?])/.test(sample);
+    expect(hit).toBe(true);
+  });
+
+  it('…and does not fire on unrelated code', () => {
+    for (const benign of ['const labels = node.labels;', 'issue.labels.map(l => l.name)', '"/label-maker"']) {
+      const hit = /gh\s+label\b/.test(benign) || /["'`][^"'`]*\/labels(\/|["'`?])/.test(benign);
+      expect(hit, benign).toBe(false);
+    }
   });
 });
