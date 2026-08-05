@@ -115,7 +115,7 @@ CONTENT
   # ELIMINATED, not justified by triage.md's anti-injection prose (#344). `--tools
   # ""` disables the entire built-in tool set. We capture the returned text.
   local AGENT_OUT
-  AGENT_OUT=$(claude -p "$USER_CONTENT" \
+  AGENT_OUT=$("${AGENT_ENV_SCRUB[@]}" claude -p "$USER_CONTENT" \
     --system-prompt-file "${ROLES_DIR}/triage.md" \
     "${AGENT_CONTEXT_ARGS[@]}" \
     --tools "" \

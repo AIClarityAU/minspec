@@ -127,3 +127,45 @@ describe('T0: headless `claude -p` launchers pin their setting sources (no inher
     ).toEqual([]);
   });
 });
+
+describe('T0: headless `claude -p` launchers scrub the inherited autocompact override (#1203)', () => {
+  // `--setting-sources` selects which settings FILES load. It CANNOT unset a
+  // variable already exported in the process environment, and
+  // CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=55 reaches every dispatched agent by
+  // inheritance (VS Code session -> drain -> dispatch -> claude -p), making the
+  // run compact at 55% of its window. That roughly halves the usable span between
+  // compactions and is what turns an ordinary large read into the thrash abort.
+  // Verified on a live agent's /proc/<pid>/environ, not inferred.
+  const SCRUBS = /AGENT_ENV_SCRUB\[@\]|env -u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE/;
+
+  it('the shared lib scrubs the override by default', () => {
+    const lib = codeOf(LIB);
+    expect(lib).toMatch(/env -u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE/);
+    expect(lib).toMatch(/MINSPEC_AGENT_ENV_SCRUB/); // documented kill-switch
+  });
+
+  it('does NOT silently strip unrelated inherited config', () => {
+    // ANTHROPIC_BASE_URL is the scrooge tee-proxy (a deliberate measurement
+    // instrument) and CLAUDE_EFFORT is a cost choice. Neither is a correctness
+    // bug, so removing them as a side effect of a thrash fix would be an
+    // unrelated silent change.
+    const lib = codeOf(LIB);
+    expect(lib).not.toMatch(/env -u[^\n]*ANTHROPIC_BASE_URL/);
+    expect(lib).not.toMatch(/env -u[^\n]*CLAUDE_EFFORT/);
+  });
+
+  it('every `claude -p` launcher applies the scrub', () => {
+    const offenders = launcherScripts()
+      .filter((f) => !SCRUBS.test(codeOf(f)))
+      .map((f) => path.basename(f));
+    expect(
+      offenders,
+      offenders.length > 0
+        ? `These scripts launch \`claude -p\` without scrubbing the inherited ` +
+          `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE, so the agent compacts at the operator's ` +
+          `interactive threshold and thrashes (#1203). Expand "\${AGENT_ENV_SCRUB[@]}" ` +
+          `before \`claude\`. Offenders: ${offenders.join(', ')}.`
+        : 'all launchers scrub',
+    ).toEqual([]);
+  });
+});

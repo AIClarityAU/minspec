@@ -145,7 +145,7 @@ echo "Reviewing #$PR (no-tools reviewer over the diff)..."
 # regular-file redirect keeps the exit status purely claude's.
 REVIEW_PROMPT_FILE=$(mktemp)
 printf '%s' "$USER_CONTENT" >"$REVIEW_PROMPT_FILE"
-AGENT_OUT=$(claude -p \
+AGENT_OUT=$("${AGENT_ENV_SCRUB[@]}" claude -p \
   --system-prompt-file "${ROLES_DIR}/reviewer.md" \
   "${AGENT_CONTEXT_ARGS[@]}" \
   --tools "" \

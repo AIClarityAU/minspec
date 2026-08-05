@@ -1094,7 +1094,7 @@ shepherd_fix() {
 
   before_sha=$(git -C "$WORKTREE" rev-parse HEAD 2>/dev/null || echo "")
   echo "  Dispatching a fresh fix agent into the warm worktree (no re-clone)..."
-  (cd "$WORKTREE" && claude -p "$fix_prompt" \
+  (cd "$WORKTREE" && "${AGENT_ENV_SCRUB[@]}" claude -p "$fix_prompt" \
        "${AGENT_CONTEXT_ARGS[@]}" \
        "${SYS_PROMPT_ARGS[@]}" \
        --model "$RUN_MODEL" \
@@ -1307,7 +1307,7 @@ fi
 # Headless run inside the worktree. `claude -p` is the only automatable launch
 # primitive (cron/loop-able). It exits 0 even when the agent self-escalates, so
 # detect ESCALATE: in the output rather than relying on exit code.
-if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" claude -p "$RUN_PROMPT" \
+if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude -p "$RUN_PROMPT" \
       "${AGENT_CONTEXT_ARGS[@]}" \
       "${SYS_PROMPT_ARGS[@]}" \
       --model "$RUN_MODEL" \
