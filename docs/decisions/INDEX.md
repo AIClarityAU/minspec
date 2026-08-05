@@ -610,4 +610,12 @@ The trigger was a competitor scare (OmniRoute, 36k stars, free, MIT) that on aud
 <!-- dr-summary:DR-076 auto=68d50dda9baf -->
 This repo's governance was sized for a team: protected main, human-approved PRs, bot-attributed writes, presence coordination, docs-lane, --admin ceremonies. The founder built it for one stated purpose - "make sure the model didn't cut any corners and thought through its work properly" - but the human half has degraded to rubber-stamping: approvals granted without reading. A dead HITL layer is pure tax: it costs a keystroke and an interruption, catches nothing, and (worse, per the never-wrong invariant) records a human…
 <!-- /dr-summary:DR-076 -->
+
+## [DR-077 — The commit-destination rule has two implementations (a shell pre-commit hook and a TS guard) bound by a behavioral parity test — the duplication is deliberate, and the parity test is its binding contract](DR-077.md)
+
+*Status: proposed · Date: 2026-08-05*
+
+<!-- dr-summary:DR-077 auto=0000000000000000 -->
+One rule — which commits the push-protected default branch may receive — is enforced in two places: the #1041 shell pre-commit hook (fires on every `git commit`) and the TypeScript `resolveBranchDestination` guard in commit-on-approve (runs before staging, so #1064's stranding is refused up front rather than left as a dirty tree). The duplication is deliberate: shelling out to the hook cannot run before staging or in a fresh clone, and generating both from one source is a large mechanism for one function. `approve-commit-hook-parity.test.ts` is the binding contract — one scenario table driven through both real implementations, failing on any divergence in either direction. Records the mirror-on-change rule, the sanctioned non-mirror at #1112 (git forbids a partial commit mid-merge), and the third `.githooks` twin bound by a weaker substring test.
+<!-- /dr-summary:DR-077 -->
 <!-- minspec:dr-index:end -->

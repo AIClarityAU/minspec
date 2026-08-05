@@ -181,6 +181,71 @@ describe('scripts/facts.ts — the read-only facts oracle CLI (#1050)', () => {
     expect(output).toContain('cannot read file');
   });
 
+  it('hash: resolves <spec> by bare frontmatter id (#1068)', () => {
+    const root = tempRoot();
+    writeSpecFile(root, 'specs/demo/SPEC-100-widget-thing/requirements.md', SPEC_100);
+
+    const { status, output } = run(root, ['hash', 'SPEC-100']);
+
+    expect(status).toBe(0);
+    expect(output).toContain(`computed:  ${specHash(SPEC_100)}`);
+    expect(output).toContain('verdict:   UNAPPROVED');
+  });
+
+  it('hash: resolves <spec> by spec directory slug distinct from its id (#1068)', () => {
+    const root = tempRoot();
+    writeSpecFile(root, 'specs/demo/SPEC-100-widget-thing/requirements.md', SPEC_100);
+
+    const { status, output } = run(root, ['hash', 'SPEC-100-widget-thing']);
+
+    expect(status).toBe(0);
+    expect(output).toContain(`computed:  ${specHash(SPEC_100)}`);
+  });
+
+  it('status: resolves <spec> by bare frontmatter id (#1068)', () => {
+    const root = tempRoot();
+    writeSpecFile(root, 'specs/demo/SPEC-100-widget-thing/requirements.md', SPEC_100);
+
+    const { status, output } = run(root, ['status', 'SPEC-100']);
+
+    expect(status).toBe(0);
+    expect(output).toContain('frontmatter status:  implementing');
+  });
+
+  it('approval: resolves <spec> by bare frontmatter id (#1068)', () => {
+    const root = tempRoot();
+    writeSpecFile(root, 'specs/demo/SPEC-100-widget-thing/requirements.md', SPEC_100);
+
+    const { status, output } = run(root, ['approval', 'SPEC-100']);
+
+    expect(status).toBe(0);
+    expect(output).toContain('(MISSING)');
+    expect(output).toContain('validity:    UNAPPROVED');
+  });
+
+  it('hash: id/slug miss gives a "no spec with id" message with a did-you-mean hint, not a filesystem error (#1068)', () => {
+    const root = tempRoot();
+    writeSpecFile(root, 'specs/demo/SPEC-100-widget-thing/requirements.md', SPEC_100);
+
+    const { status, output } = run(root, ['hash', 'SPEC-099']);
+
+    expect(status).toBe(1);
+    expect(output).toContain('no spec with id "SPEC-099"');
+    expect(output).toContain('did you mean SPEC-100?');
+    expect(output).not.toContain('cannot read file');
+  });
+
+  it('hash: a path-shaped miss still reports the original filesystem error, not the id message (#1068)', () => {
+    const root = tempRoot();
+    writeSpecFile(root, 'specs/demo/SPEC-100-widget-thing/requirements.md', SPEC_100);
+
+    const { status, output } = run(root, ['hash', 'specs/does-not-exist.md']);
+
+    expect(status).toBe(1);
+    expect(output).toContain('cannot read file');
+    expect(output).not.toContain('no spec with id');
+  });
+
   it('status: MATCH when the frontmatter status agrees with deriveStatus()', () => {
     const root = tempRoot();
     // Unapproved -> deriveStatus derives 'specifying' regardless of phases; a
