@@ -129,6 +129,29 @@ describe('#1263 pre-push gate judges only the pushed commits', () => {
     expect(code).toBe(0);
   });
 
+  it('ALLOWS an incremental push to a branch whose EARLIER pushed commit touched a workflow', () => {
+    // The server judges only the ref-update range, so this push adds no workflow change:
+    // the workflow edit is already on the remote. Basing on the default branch instead of
+    // `remote_sha` would re-flag it on every subsequent push — trading one false positive
+    // for another, and breaking the same fail-open contract (#1273 architect review).
+    //
+    // WHAT THIS GUARDS: it passes against the ORIGINAL hook as well as the fixed one, so
+    // it is not evidence for the range fix. It fails against the intermediate
+    // "always $base...$local_sha" version — a regression introduced and caught during this
+    // PR's review. Kept so that regression cannot return unnoticed.
+    write('.github/workflows/deploy.yml', 'name: Deploy\non: push\n');
+    const pushed = commit('workflow edit — already on the remote');
+    write('src/feature.ts', 'export const b = 2;\n');
+    const next = commit('unrelated follow-up, no workflow touched');
+
+    // Premise: this really is an ordinary fast-forward, not a divergence.
+    expect(() => git('merge-base', '--is-ancestor', pushed, next)).not.toThrow();
+
+    const { code, err } = runHook(next, pushed);
+    expect(err).not.toMatch(/refusing to push/);
+    expect(code).toBe(0);
+  });
+
   it('ALLOWS a force-push after a rebase, where remote_sha is on the ABANDONED line', () => {
     // The else-arm's actual claim. `remote_sha` here is NOT an ancestor of `local_sha`:
     // the branch was rebased onto the advanced main, so the old tip sits on a discarded
