@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-050-silent-approval-pr/requirements.md",
+  "specHash": "fb80fcb0ed4d15291b3f402c261e3016cec669e9df01f1ffe512531414f72cb8",
+  "approvedAt": "2026-08-05T04:07:45.226Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T2",
+  "migrated": false,
+  "baselineBlob": "50847ec5fd8f206363dc4648a397a12444248257"
+}
