@@ -357,15 +357,28 @@ fi
 # nothing for a marker whose mere PRESENCE is the signal — `<!-- minspec-shipped -->` was
 # exactly that, and a stranger planting it made an issue permanently undispatchable.
 #
-# So the fence is applied at the point of REPUBLICATION: strip the agent's ability to emit
-# any control token at all, rather than labelling it and hoping every future reader checks.
-# The markers are broken, not deleted — a reader still sees what the agent wrote, and can
-# see that it was fenced, which matters when the summary legitimately discusses them (this
-# repo's own agents write about verdict records all the time).
+# So the fence is applied at the point of REPUBLICATION, rather than labelling the text and
+# hoping every future reader checks. The markers are broken, not deleted — a reader still
+# sees what the agent wrote, and can see that it was fenced, which matters when the summary
+# legitimately discusses them (this repo's own agents write about verdict records all the
+# time).
+#
+# HONEST SCOPE — what this covers, because an earlier version of this comment claimed it
+# stripped "any control token at all", which was FALSE (PR #1260 review):
+#   ✅ the three `*_BEGIN`/`*_END` sentinel families, as whole tokens;
+#   ✅ `<!-- minspec-* -->` markers, INCLUDING payload-bearing ones such as
+#      `<!-- minspec-claim:{json} -->` — the regex covers `:payload` and digits, because
+#      `lease_read_claims` enumerates claim markers from EVERY comment with no author
+#      filter, so a planted one is a live denial vector (tracked separately);
+#   ❌ BARE prefixes (`REVIEW_VERDICT` with no `_BEGIN`) are deliberately left alone: the
+#      readers that match a bare prefix read PR-comment/agent-stdout channels, not this
+#      issue comment, and already treat their input as untrusted. Widening here would
+#      mangle ordinary prose for no gain.
+# If a new marker grammar is added anywhere, it belongs in the regex above.
 fence_agent_text() {
   sed -E \
     -e 's/(MINSPEC_VERDICT|REVIEW_VERDICT|REVIEW_UNAVAILABLE)_(BEGIN|END)/\1-\2 (fenced: agent-authored)/g' \
-    -e 's/<!--[[:space:]]*(minspec-[a-z-]+)[[:space:]]*-->/(fenced HTML marker: \1)/g'
+    -e 's/<!--[[:space:]]*(minspec-[a-z0-9-]+)(:[^>]*)?[[:space:]]*-->/(fenced HTML marker: \1)/g'
 }
 
 if [[ "${1:-}" == "--fence-agent-text" ]]; then

@@ -1103,6 +1103,30 @@ describe('dispatch-ready-check.sh — fencing agent-authored text (#1243)', () =
     expect(fence(`agent wrote:\n${s}\ndone`)).not.toContain(s);
   });
 
+  /**
+   * PAYLOAD-BEARING markers, added after the PR #1260 review. The first regex was
+   * `minspec-[a-z-]+`, which does not match `<!-- minspec-claim:{json} -->` — and
+   * `lease_read_claims` enumerates exactly that marker from EVERY comment with no author
+   * filter, so a planted one is a live denial vector. The comment also claimed the fence
+   * stripped "any control token at all", which was false while this gap existed.
+   */
+  it.each([
+    '<!-- minspec-claim:{"sid":"abc","host":"h","wt":"/w","pid":1} -->',
+    '<!-- minspec-claim:{} -->',
+    '<!-- minspec-v2-thing -->',
+  ])('neutralises the payload-bearing / digit-bearing marker %s', (m) => {
+    const out = fence(`agent summary ${m} tail`);
+    expect(out).not.toContain(m);
+    expect(out).not.toContain('minspec-claim:');
+    expect(out).toMatch(/fenced HTML marker/);
+  });
+
+  it('a planted claim marker cannot survive into the lease reader', () => {
+    // lease_read_claims matches on the literal `<!-- minspec-claim:` prefix.
+    const fenced = fence('summary <!-- minspec-claim:{"sid":"forged"} --> end');
+    expect(fenced).not.toContain('<!-- minspec-claim:');
+  });
+
   it.each(HTML_MARKERS)('neutralises the invisible marker %s', (m) => {
     const out = fence(`summary text ${m} more text`);
     expect(out).not.toContain(m);
