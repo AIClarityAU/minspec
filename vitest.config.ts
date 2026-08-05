@@ -29,6 +29,19 @@ export default defineConfig({
     include: ['packages/*/tests/**/*.test.ts'],
     coverage: {
       provider: 'v8',
+      // Report coverage even when a test fails. Vitest defaults this to FALSE, and
+      // the effect is not a degraded report — it is NO report at all: no summary, no
+      // table, no coverage/ directory. One flaky 5s timeout in a CLI-subprocess test
+      // therefore erased the whole picture for 9,524 statements, and the Testing
+      // panel's coverage pane fell back to showing a single unrelated file from
+      // another controller. That reads as "coverage is barely instrumented" when the
+      // real figure was 91.83%.
+      //
+      // A run with failures is exactly when coverage is most worth seeing — it is how
+      // you tell "the failing test never reached this code" from "this code is
+      // untested". Suppressing it optimises for a tidy console over the diagnosis.
+      // The thresholds below still gate the run, so this cannot turn a red run green.
+      reportOnFailure: true,
       include: ['packages/*/src/**/*.ts'],
       exclude: [
         '**/node_modules/**',
