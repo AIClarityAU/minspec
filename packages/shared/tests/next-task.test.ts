@@ -457,6 +457,33 @@ describe('FR-13 — cross-cutting edges', () => {
     expect(v.evidence.refs).toStrictEqual(['SPEC-009', 'SPEC-001', 'SPEC-003']);
   });
 
+  it('FR-13-advance-past (#1237): two advancing artifacts sharing one blocker BOTH keep their violation', () => {
+    // Regression guard for the review finding on #1241: `artifactId` is the identity
+    // key for topoFloorBlock's `emitted` set, so pointing it at the shared blocker
+    // would collapse these two nodes into one — a gate that silently stops firing for
+    // the second artifact (constitution invariant #2, no silent gate).
+    const g = graph({
+      epics: [mkEpic('EPIC-001', 'active', { order: 1 })],
+      specs: [
+        mkSpec('SPEC-001', 'specifying', 'unapproved', { epic: 'EPIC-001' }),
+        mkSpec('SPEC-002', 'implementing', 'approved', { epic: 'EPIC-001' }),
+        mkSpec('SPEC-003', 'implementing', 'approved', { epic: 'EPIC-001' }),
+      ],
+      edges: [
+        { kind: 'depends_on', from: 'SPEC-002', to: 'SPEC-001' },
+        { kind: 'depends_on', from: 'SPEC-003', to: 'SPEC-001' },
+      ],
+    });
+    const violations = resolvePipeline(g).filter((t) => t.evidence.rule === 'depends_on.uncleared');
+    expect(violations).toHaveLength(2);
+    // Both point at the shared blocker...
+    expect(violations.map((v) => v.targetId)).toStrictEqual(['SPEC-001', 'SPEC-001']);
+    // ...but each still names its own advancing artifact, so neither is a duplicate.
+    const imperatives = violations.map((v) => v.imperative).sort();
+    expect(imperatives[0]).toContain('SPEC-002');
+    expect(imperatives[1]).toContain('SPEC-003');
+  });
+
   it('FR-13-advance-past (#1237): the single signpost sends you to the blocker', () => {
     const g = graph({
       epics: [mkEpic('EPIC-001', 'active', { order: 1 })],

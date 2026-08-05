@@ -684,13 +684,23 @@ function generateNodes(
         },
         'gate-violation',
         {
-          // Dials still come from the BLOCKED artifact: they encode why this edge
-          // is urgent (which epic is advancing, at what goal/priority), which is a
-          // property of the advance, not of the blocker sitting still.
+          // Every dial stays on the BLOCKED artifact. Two reasons, and the second
+          // is load-bearing:
+          //
+          // 1. epicOrder/goalRank/priority encode why this edge is URGENT — which
+          //    epic is advancing, at what goal and priority. That is a property of
+          //    the advance, not of the blocker sitting still.
+          // 2. `artifactId` is an IDENTITY KEY, not a display value: `topoFloorBlock`
+          //    uses it for its `emitted` set (`:989`, `:991`) and `compareRanked` for
+          //    the final tiebreak. Setting it to `primaryBlocker` would make it
+          //    non-unique whenever two advancing artifacts share one blocker, and the
+          //    emitted-set dedup would silently drop the second violation node — a
+          //    missing gate, which invariant #2 forbids. Only `targetId`, `imperative`
+          //    and `kind` describe where to send the human; only those change.
           epicOrder: resolveEpicOrder(epicOfRef(fromId, index), index),
           goalRank: goalRankOf(fromId, index),
           priority: priorityOf(fromId, index),
-          artifactId: primaryBlocker,
+          artifactId: fromId,
         },
       ),
     );
