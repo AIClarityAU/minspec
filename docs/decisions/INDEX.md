@@ -621,7 +621,7 @@ One rule — which commits the push-protected default branch may receive — is 
 
 ## [DR-078 — Standing push consent lives in the project's own gitignored preferences file — per-developer without being machine-wide, so DR-071's corollary and constitution invariant #3 stop contradicting each other](DR-078.md)
 
-*Status: proposed · Date: 2026-08-05*
+*Status: accepted · Date: 2026-08-05*
 
 <!-- dr-summary:DR-078 auto=a199d8c14c18 -->
 Two accepted decisions pull in opposite directions, and SPEC-050 FR-8 sits exactly on the seam. The concrete failure (#1225): a developer with MinSpec projects A and B clicks "Always push from now on" while approving in A — a named, deliberate act scoped, in their mind, to A. The write is machine-wide. The next Alt+A in B pushes to B's origin and auto-opens a PR there, with no prompt and no moment at which B was consented to.
