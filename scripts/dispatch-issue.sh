@@ -1096,10 +1096,22 @@ shepherd_fix() {
   # is now kept away from the agent entirely, rather than merely labelled.
   #
   # Trust anchor is `--trusted-comment-bodies`, the SAME tested seam the verdict-record
-  # readers use — not a new one. Measured before choosing it: of 565 REVIEW_VERDICT
-  # comments in this repo, 509 are the bot (CI) and 56 are a collaborator (the local
-  # `review_branch` path). A bot-only filter would therefore have silently discarded the
-  # local path's feedback, so "bot OR write-access" is the correct set, not a compromise.
+  # readers use — not a new one. #1135 proposed a bot-only allowlist instead; that was
+  # measured and rejected, because the local `review_branch` path posts under a
+  # COLLABORATOR account and bot-only would have silently discarded its feedback.
+  #
+  # The tally behind that (509 bot / 56 collaborator, of 565) is a point-in-time
+  # measurement a reader cannot check from this diff, so here is how to re-run it —
+  # a claim that cannot be re-derived is not evidence:
+  #
+  #   gh api graphql -f query='{repository(owner:"AIClarityAU",name:"minspec"){
+  #     pullRequests(first:50,states:[OPEN,CLOSED,MERGED]){nodes{
+  #       comments(first:100){nodes{author{login} authorAssociation body}}}}}}' \
+  #     | jq -r '..|objects|select(.body?|strings|contains("REVIEW_VERDICT_BEGIN"))
+  #              |.author.login' | sort | uniq -c
+  #
+  # The ratio is not load-bearing either way: what matters is that BOTH authors occur,
+  # which any non-zero collaborator count establishes.
   #
   # Residual, deliberately not chased here: a TRUSTED author could quote an older verdict
   # and it would win "last". Unlike the verdict-record case (#1113) the consequence is
