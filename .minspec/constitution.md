@@ -45,8 +45,11 @@ within a severity class — never an LLM judgement (DR-039, DR-019).
    else. The LLM does the thorough thinking; the human verifies signal, not content.
 4. **G-4 — Opinionated / signpost.** Always tell the human the one thing to review next,
    and park off-topic ideas instead of acting on them. Never a list, never wrong.
-5. **G-5 — Top of funnel into Scrooge.** MinSpec is the acquisition surface that feeds
-   ScroogeLLM — the money maker.
+5. **G-5 — RETIRED (DR-075, 2026-08-01).** Was "Top of funnel into Scrooge — MinSpec is
+   the acquisition surface that feeds ScroogeLLM, the money maker." Portfolio
+   monetization is closed and ScroogeLLM is shelved as a product (scrooge DR-021);
+   MinSpec is a solo-first personal tool, open-sourced as a gift, not a funnel. ID kept
+   so `goal: G-5` references resolve; rank slot intentionally left in place.
 6. **G-6 — Determinism as moat.** The same rule fires across editor, commit, CI, and
    agent — reproducible, testable, auditable (Tier-0, DR-004 / DR-014).
 7. **G-7 — Editor-native SDD / CDD / WSJF.** Methodology enforced *in the editor at write
@@ -100,9 +103,11 @@ agent-execute (DR-015), team/CI dispatch, DAG-viz polish, and marketing / site c
 
 ### Phase 2 — Public-ready (polish)
 
-Everything deferred above: Marketplace listing + onboarding, the Scrooge funnel (G-5),
-broader model / UX polish, team mode. May be polished incrementally **as long as no Phase-2
-item displaces an unmet Phase-1 item**.
+Everything deferred above: open-source readiness (#1171) + Marketplace listing +
+onboarding, broader model / UX polish. May be polished incrementally **as long as no
+Phase-2 item displaces an unmet Phase-1 item**. Removed from Phase 2 by DR-075: the
+Scrooge funnel (G-5 retired) and team mode (parked behind the future `mode: solo | team`
+profile, DR-076 — not a phase deliverable).
 
 ## Glossary
 

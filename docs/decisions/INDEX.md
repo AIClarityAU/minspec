@@ -597,7 +597,7 @@ MinSpec's harness has always been careful about *files*: every managed region is
 
 ## [DR-075 — MinSpec is a solo-first personal tool - open-sourced as a gift, not a funnel; team mode parked; portfolio monetization closed](DR-075.md)
 
-*Status: proposed · Date: 2026-08-01*
+*Status: accepted · Date: 2026-08-01*
 
 <!-- dr-summary:DR-075 auto=28f86198dcf6 -->
 The trigger was a competitor scare (OmniRoute, 36k stars, free, MIT) that on audit turned out NOT to occupy ScroogeLLM's chosen moat - its engineering is cache-aware but its headline savings math is cache-blind (verdict with file:line citations on scroogellm#120). The scan that followed (scroogellm#121, minspec#1168) established the real picture:
@@ -605,7 +605,7 @@ The trigger was a competitor scare (OmniRoute, 36k stars, free, MIT) that on aud
 
 ## [DR-076 — Solo mode - keep every gate that forces the model to think, cut every gate that exists only for multi-human trust](DR-076.md)
 
-*Status: proposed · Date: 2026-08-01*
+*Status: accepted · Date: 2026-08-01*
 
 <!-- dr-summary:DR-076 auto=68d50dda9baf -->
 This repo's governance was sized for a team: protected main, human-approved PRs, bot-attributed writes, presence coordination, docs-lane, --admin ceremonies. The founder built it for one stated purpose - "make sure the model didn't cut any corners and thought through its work properly" - but the human half has degraded to rubber-stamping: approvals granted without reading. A dead HITL layer is pure tax: it costs a keystroke and an interruption, catches nothing, and (worse, per the never-wrong invariant) records a human…

@@ -65,7 +65,7 @@ Monorepo for two VS Code extensions + extension pack:
 | Package | ID | Domain | Status |
 |---|---|---|---|
 | `packages/minspec` | `aiclarity.minspec` | minspec.dev | SDD Implement phase |
-| ↪ split out → **`AIClarityAU/scroogellm`** (private) | `aiclarity.scroogellm` | scroogellm.com | Moved to its own repo per DR-027; SDD Specify there. Code lands there (AIClarityAU/minspec#119), not in `packages/`. |
+| ↪ split out → **`AIClarityAU/scroogellm`** (private) | `aiclarity.scroogellm` | scroogellm.com | Moved to its own repo per DR-027. **Shelved as a product** (scrooge DR-021, 2026-08-01); tee-proxy + shadow classifier + safe-cut live on as dogfood measurement instruments only. No billing/GTM work. |
 | `packages/shared` | `@aiclarity/shared` | — | Tier-0 shared: contract types (no vscode/network). Classifier engine still lives in `packages/minspec/src/lib/classifier.ts` — DR-014's move to here is `status: proposed`, not executed (tracked: #54) |
 | `packages/extension-pack` | `aiclarity.minspec-pro` | — | References both |
 
@@ -120,7 +120,9 @@ Type: bug / feat / explore / plan
 
 MinSpec is at **Implement** phase. Work from `specs/minspec/tasks.md`.
 
-ScroogeLLM was split into its own **private** repo (`AIClarityAU/scroogellm`, `~/code/scroogellm`) per DR-027 and is in **Specify** there (SPEC-100/101/102). Do ScroogeLLM work in that repo, not here. Public proxy implementation tracked at AIClarityAU/minspec#119. Note: scroogellm keeps its OWN local DR register (independent of this repo's); DR-007/010 were imported there with their original numbers.
+ScroogeLLM was split into its own **private** repo (`AIClarityAU/scroogellm`, `~/code/scroogellm`) per DR-027, and is now **shelved as a product** (scrooge DR-021, accepted 2026-08-01) — only the measurement instruments (tee-proxy, shadow classifier, safe-cut, scrooge-delegate) stay live; no Specify-phase product work. Do any scrooge work in that repo, not here. Note: scroogellm keeps its OWN local DR register (independent of this repo's); DR-007/010 were imported there with their original numbers.
+
+**Solo mode (DR-075/DR-076, accepted 2026-08-01):** MinSpec is a solo-first personal tool; open-source as a gift (no publish deadline); team mode parked behind a future `mode: solo | team` profile. Ceremony: keep model-defending gates (hashes, validators, RCDD hook, ai-review gating merge, T0-first); HITL only for T3/T4 spec reading + irreversible acts. Implementation: #1169.
 
 ## Traceability Convention
 
