@@ -41,10 +41,13 @@
 #     OAuth path is preserved — verified by a probe run that completed normally
 #     under these sources. Unlike `--bare`, which forces ANTHROPIC_API_KEY and
 #     would break subscription-default billing (DR-016/017).
-#   * Dropping user scope ALSO drops `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=55`, an
-#     interactive-session preference that compounded the thrash by triggering
-#     compaction at 55% of the window. Headless builds get the default threshold
-#     back; the operator's own sessions are untouched.
+#   * It does NOT drop `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`. An earlier version of
+#     this comment claimed it did — that was wrong, and the correction matters:
+#     `--setting-sources` selects which settings FILES load, and cannot unset a
+#     variable that is already exported in the process environment. The override
+#     is inherited (session -> drain -> dispatch -> `claude -p`), so it survives
+#     any file-source selection. Removing it needs an explicit `env -u`, which is
+#     what AGENT_ENV_SCRUB below does. Do not delete that scrub as redundant.
 #   * User-scope hooks stop applying to headless runs (terminal naming, the
 #     caveman output-style hook, the primary-checkout guard). That is correct
 #     here: the agent runs in an isolated /tmp worktree and its allowlist admits
@@ -66,4 +69,38 @@ MINSPEC_AGENT_SETTING_SOURCES="${MINSPEC_AGENT_SETTING_SOURCES-project,local}"
 AGENT_CONTEXT_ARGS=()
 if [[ -n "$MINSPEC_AGENT_SETTING_SOURCES" ]]; then
   AGENT_CONTEXT_ARGS=(--setting-sources "$MINSPEC_AGENT_SETTING_SOURCES")
+fi
+
+# ── Inherited-environment scrub (#1203) ───────────────────────────────────────
+# `--setting-sources` above selects which settings FILES load. It cannot unset a
+# variable that is already exported in the process environment, and one of those
+# is actively harmful to a headless build:
+#
+#   CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=55
+#
+# It reaches every dispatched agent by inheritance — VS Code session ->
+# drain-inbox.sh -> dispatch-issue.sh -> `claude -p` — and makes the run compact at
+# 55% of its window instead of the default. That roughly halves the usable span
+# between compactions, which is precisely the condition that turns an ordinary
+# large file read into "the context refilled to the limit within 3 turns of the
+# previous compact" and aborts the build.
+#
+# Verified on a LIVE dispatched agent, not inferred:
+#   $ tr '\0' '\n' < /proc/<agent>/environ | grep AUTOCOMPACT
+#   CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=55
+# and run #1067 showed 8 compact summaries from 28 entries totalling ~60 KB — a
+# volume that cannot fill a 200k window once, let alone eight times.
+#
+# It is a legitimate INTERACTIVE preference, so it is scrubbed only for headless
+# agents; the operator's own sessions are untouched.
+#
+# Deliberately NOT scrubbed here: ANTHROPIC_BASE_URL (the scrooge tee-proxy, a
+# deliberate measurement instrument) and CLAUDE_EFFORT (a cost/behaviour choice,
+# not a correctness bug). Removing either as a side effect of a thrash fix would
+# be an unrelated silent change.
+#
+# Kill-switch: MINSPEC_AGENT_ENV_SCRUB=0 inherits the environment verbatim.
+AGENT_ENV_SCRUB=()
+if [[ "${MINSPEC_AGENT_ENV_SCRUB:-1}" != "0" ]]; then
+  AGENT_ENV_SCRUB=(env -u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE)
 fi

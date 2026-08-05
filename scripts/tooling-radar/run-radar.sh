@@ -137,7 +137,21 @@ echo "radar: scanning (model=$MODEL, web tools only) …"
 # packages/minspec/tests/tooling-radar.test.ts, which greps this file. If you add a
 # tool here, that test fails, and it is meant to: widening the scan stage's reach
 # is a security decision, not a config tweak.
-claude -p "$(cat "$PROMPT")" \
+# This stage is a headless `claude -p` launcher too, so it takes the same ambient-
+# context pin and inherited-env scrub as every other one (#1203). It lives one
+# directory deeper, which is why it was missed before — the enforcement gate is now
+# recursive so a nested launcher cannot slip through again.
+#
+# Sourced HERE, not at startup: the `--due` / `--status` seams above are pure
+# scheduling checks that never launch an agent, and they are exercised against stub
+# repos that stage only this file. Requiring the lib for them would make a
+# scheduling query fail on a missing agent dependency it does not use. The source
+# stays UNGUARDED so a genuinely missing lib still aborts the launch loudly.
+# shellcheck source=scripts/lib/agent-context.sh
+source "${SCRIPT_DIR}/../lib/agent-context.sh"
+
+"${AGENT_ENV_SCRUB[@]}" claude -p "$(cat "$PROMPT")" \
+  "${AGENT_CONTEXT_ARGS[@]}" \
   --model "$MODEL" \
   --output-format json \
   --allowedTools WebSearch WebFetch \

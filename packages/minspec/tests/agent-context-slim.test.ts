@@ -74,11 +74,18 @@ function codeOf(file: string): string {
 
 /** Scripts that launch a headless agent via `claude -p` / `claude --print`. */
 function launcherScripts(): string[] {
-  return fs
-    .readdirSync(SCRIPTS_DIR)
-    .filter((f) => f.endsWith('.sh'))
-    .map((f) => path.join(SCRIPTS_DIR, f))
-    .filter((f) => /\bclaude\s+(-p|--print)\b/.test(codeOf(f)));
+  // RECURSIVE on purpose. A non-recursive `scripts/*.sh` scan silently excluded
+  // scripts/tooling-radar/run-radar.sh — a real headless launcher — so it inherited
+  // the autocompact override while the gate reported everything covered. A gate that
+  // cannot see a whole directory is worse than no gate: it reports safety it has not
+  // checked.
+  const walk = (dir: string): string[] =>
+    fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) return e.name === 'node_modules' ? [] : walk(full);
+      return e.isFile() && e.name.endsWith('.sh') ? [full] : [];
+    });
+  return walk(SCRIPTS_DIR).filter((f) => /\bclaude\s+(-p|--print)\b/.test(codeOf(f)));
 }
 
 /**
@@ -92,7 +99,7 @@ describe('T0: headless `claude -p` launchers pin their setting sources (no inher
   it('finds the launcher scripts to guard (the scan is not vacuous)', () => {
     // Guards against the gate silently passing because the glob matched nothing
     // — a vacuously-green suite is the failure mode this repo keeps hitting.
-    expect(launcherScripts().length).toBeGreaterThanOrEqual(6);
+    expect(launcherScripts().length).toBeGreaterThanOrEqual(7); // incl. the nested run-radar.sh
   });
 
   it('ships the shared agent-context lib', () => {
@@ -124,6 +131,48 @@ describe('T0: headless `claude -p` launchers pin their setting sources (no inher
           `scripts/lib/agent-context.sh and expand "\${AGENT_CONTEXT_ARGS[@]}" in the invocation. ` +
           `Offenders: ${offenders.join(', ')}.`
         : 'all launchers pin their setting sources',
+    ).toEqual([]);
+  });
+});
+
+describe('T0: headless `claude -p` launchers scrub the inherited autocompact override (#1203)', () => {
+  // `--setting-sources` selects which settings FILES load. It CANNOT unset a
+  // variable already exported in the process environment, and
+  // CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=55 reaches every dispatched agent by
+  // inheritance (VS Code session -> drain -> dispatch -> claude -p), making the
+  // run compact at 55% of its window. That roughly halves the usable span between
+  // compactions and is what turns an ordinary large read into the thrash abort.
+  // Verified on a live agent's /proc/<pid>/environ, not inferred.
+  const SCRUBS = /AGENT_ENV_SCRUB\[@\]|env -u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE/;
+
+  it('the shared lib scrubs the override by default', () => {
+    const lib = codeOf(LIB);
+    expect(lib).toMatch(/env -u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE/);
+    expect(lib).toMatch(/MINSPEC_AGENT_ENV_SCRUB/); // documented kill-switch
+  });
+
+  it('does NOT silently strip unrelated inherited config', () => {
+    // ANTHROPIC_BASE_URL is the scrooge tee-proxy (a deliberate measurement
+    // instrument) and CLAUDE_EFFORT is a cost choice. Neither is a correctness
+    // bug, so removing them as a side effect of a thrash fix would be an
+    // unrelated silent change.
+    const lib = codeOf(LIB);
+    expect(lib).not.toMatch(/env -u[^\n]*ANTHROPIC_BASE_URL/);
+    expect(lib).not.toMatch(/env -u[^\n]*CLAUDE_EFFORT/);
+  });
+
+  it('every `claude -p` launcher applies the scrub', () => {
+    const offenders = launcherScripts()
+      .filter((f) => !SCRUBS.test(codeOf(f)))
+      .map((f) => path.basename(f));
+    expect(
+      offenders,
+      offenders.length > 0
+        ? `These scripts launch \`claude -p\` without scrubbing the inherited ` +
+          `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE, so the agent compacts at the operator's ` +
+          `interactive threshold and thrashes (#1203). Expand "\${AGENT_ENV_SCRUB[@]}" ` +
+          `before \`claude\`. Offenders: ${offenders.join(', ')}.`
+        : 'all launchers scrub',
     ).toEqual([]);
   });
 });

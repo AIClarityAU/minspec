@@ -656,7 +656,7 @@ ESCALATED_ALREADY=0
 
 echo "  Launching remediation agent (model: $RUN_MODEL, log: $LOG)..."
 while true; do
-  if (cd "$WORKTREE" && claude -p "$RUN_PROMPT" \
+  if (cd "$WORKTREE" && "${AGENT_ENV_SCRUB[@]}" claude -p "$RUN_PROMPT" \
         "${AGENT_CONTEXT_ARGS[@]}" \
         --model "$RUN_MODEL" \
         --allowedTools "$ALLOWED_TOOLS" \
