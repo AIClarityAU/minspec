@@ -80,6 +80,26 @@
 # unambiguous, then re-triage — the bodyHash changes, so that is a real re-verdict),
 # never by overriding the classifier's output.
 #
+# ── #1169 / DR-076: a SECOND affirmative outcome — specify-only ──────────────
+# An auto-buildable T3/T4 no longer parks on `hold: tier` waiting for a human to read
+# the raw issue. `triage-decide.sh` now resolves it to `agent-ready-specify` /
+# `hold: specify`, which this gate ADMITS — for the Specify phase only. DR-076 funds
+# one human read on such an item and spends it on the finished spec, not on the
+# unrefined issue body the Specify phase exists to replace.
+#
+# Two properties keep that from being a widening of the IMPLEMENT path:
+#   1. The gate says WHICH mode it authorised, in its own stdout: `ready` (full
+#      build) vs `ready-specify` (spec only). The dispatcher branches on that string
+#      and on nothing else, so it cannot mistake one for the other. Silence would
+#      have been the hole — a gate that admitted T3/T4 without naming the limit.
+#   2. `decision` and `hold` must AGREE — agent-ready goes with hold none, and
+#      agent-ready-specify with hold specify, never any other pairing. A crossed
+#      record is refused rather than resolved to its permissive half, so no single
+#      mutated field turns a spec authorisation into a build one.
+# The MODE is read from the RECORD, never from the label — that is #983's whole
+# thesis, and re-deriving it from `agent-ready-specify` would reinstate exactly the
+# label-as-authority hole this file exists to close.
+#
 # Usage:
 #   dispatch-ready-check.sh <state> <labels-csv> <verdict-source-file> <body-file>
 #     <state>               the issue's CURRENT state from `gh issue view --json state`
@@ -109,7 +129,11 @@
 #     that enforces the same rule, so approve-issue.sh (which holds credentials and is
 #     therefore not unit-testable) contains no policy of its own to drift.
 #
-# Exit 0  → STILL DISPATCHABLE. Prints "ready".
+# Exit 0  → STILL DISPATCHABLE. Prints "ready" (full build) or "ready-specify"
+#           (#1169: Specify phase only — the caller MUST run a specify-only agent
+#           and must not implement). A caller that ignores the distinction and
+#           builds on "ready-specify" defeats the gate; that is why the two strings
+#           differ rather than the mode riding on a label the caller re-reads.
 # Exit 1  → NOT DISPATCHABLE. Prints one line: "not-ready [<code>]: <reason>".
 #           Codes, and how the dispatcher treats each:
 #             closed | no-label | countermanded  — the #406 staleness classes: an
@@ -156,10 +180,18 @@ RECORD_SCHEMA="minspec-triage-verdict/1"
 # build start. A reader that could not tell them apart would report "the gate passed
 # it" for both.
 RECORD_SCHEMA_HUMAN="minspec-human-approval/1"
-# The one hold a human approval may lift (DR-072 §3). A set, not a boolean, so
-# widening it is a visible one-line diff in a tested file — never an emergent
-# consequence of some other change.
-APPROVABLE_HOLDS="tier"
+# The holds a human approval may lift (DR-072 §3). A set, not a boolean, so widening
+# it is a visible one-line diff in a tested file — never an emergent consequence of
+# some other change.
+#
+# `specify` (#1169) joins `tier` because it IS the tier hold, partially released: the
+# same "too big to auto-build" classification, with the Specify phase let through. If
+# the set had not followed the rename, every T3/T4 item would have become
+# un-approvable overnight and #1084's exit door — the human who has read the issue
+# and wants the full build — would have silently closed. That is a NARROWING of the
+# same authority, not a new one: nothing here lets an approval reach `human`, `info`
+# or `unknown`, which stay absolute.
+APPROVABLE_HOLDS="tier specify"
 # The App login whose comments carry the gate's own verdict records. Defined ONCE,
 # here, because every reader must agree on it. Its authorAssociation is CONTRIBUTOR,
 # so association alone would reject the very writer every record comes from.
@@ -515,8 +547,12 @@ if [[ "$state_uc" != "OPEN" ]]; then
   refuse closed "issue state is '${STATE}', not OPEN"
 fi
 
-if ! has_label "agent-ready"; then
-  refuse no-label "'agent-ready' label no longer present"
+# Either ready label satisfies the PRECONDITION; neither of them decides the MODE.
+# `agent-ready-specify` (#1169) is what triage applies to an auto-buildable T3/T4, so
+# refusing it here would make the gate reject the very work it authorised. Which of
+# the two modes runs is read from the RECORD below — the label is a stamp (#983).
+if ! has_label "agent-ready" && ! has_label "agent-ready-specify"; then
+  refuse no-label "neither 'agent-ready' nor 'agent-ready-specify' is present"
 fi
 
 # Any explicit human-gate / quarantine label countermands a lingering agent-ready.
@@ -591,19 +627,28 @@ if [[ "$r_human" != "no" ]]; then
   refuse human-only "verdict records human_only='${r_human:-<missing>}' — a human-only issue never auto-builds, whatever labels say (#983)"
 fi
 
-# `hold` names the branch the triage gate actually fired: none is the ONLY
-# affirmative value; human/tier/info/unknown are all refusals (and `unknown` is the
-# fail-closed default, so a garbled verdict lands here too).
+# `hold` names the branch the triage gate actually fired. TWO values are affirmative
+# and they authorise different things (#1169):
+#   none     → full build
+#   specify  → the Specify phase ONLY; implementation still waits on the human's
+#              spec approval
+# human/tier/info/unknown are all refusals (and `unknown` is the fail-closed default,
+# so a garbled verdict lands here too). MODE is the variable the caller acts on; it is
+# set here and nowhere else, so there is exactly one place that decides it.
 r_hold="$(printf '%s' "$(record_field hold)" | tr '[:upper:]' '[:lower:]')"
-if [[ "$r_hold" != "none" ]]; then
-  refuse held "verdict holds this issue: hold='${r_hold:-<missing>}' (none is the only auto-buildable outcome) — a human gate applies"
-fi
+case "$r_hold" in
+  none)    MODE="ready"; EXPECT_DECISION="agent-ready" ;;
+  specify) MODE="ready-specify"; EXPECT_DECISION="agent-ready-specify" ;;
+  *) refuse held "verdict holds this issue: hold='${r_hold:-<missing>}' (only 'none' = full build and 'specify' = spec-only are auto-buildable outcomes) — a human gate applies" ;;
+esac
 
-# Defense in depth: hold=none should already imply decision=agent-ready. If a record
-# somehow disagrees with itself, refuse rather than pick the permissive half.
+# Defense in depth: the hold already implies the decision, so a record that disagrees
+# with itself is refused rather than resolved to its permissive half. This is what
+# stops ONE mutated field from converting a spec authorisation into a build one — the
+# pair has to be forged consistently, and the bodyHash above still has to match.
 r_decision="$(printf '%s' "$(record_field decision)" | tr '[:upper:]' '[:lower:]')"
-if [[ "$r_decision" != "agent-ready" ]]; then
-  refuse decision "verdict decision is '${r_decision:-<missing>}', not agent-ready — record is inconsistent with its own hold, refusing"
+if [[ "$r_decision" != "$EXPECT_DECISION" ]]; then
+  refuse decision "verdict decision is '${r_decision:-<missing>}', but hold='${r_hold}' requires '${EXPECT_DECISION}' — record is inconsistent with its own hold, refusing"
 fi
 
 # ── #1084: extra conjuncts a HUMAN-APPROVAL record must also satisfy ──────────
@@ -623,5 +668,6 @@ if [[ "$IS_HUMAN_APPROVAL" -eq 1 ]]; then
   fi
 fi
 
-echo "ready"
+# The mode the caller must honour — "ready" (full build) or "ready-specify" (#1169).
+echo "$MODE"
 exit 0

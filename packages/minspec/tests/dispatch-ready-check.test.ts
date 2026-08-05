@@ -277,6 +277,100 @@ describe('dispatch-ready-check.sh — an agent-ready LABEL is not a verdict (#98
   });
 });
 
+describe('dispatch-ready-check.sh — the specify-only class (#1169 / DR-076)', () => {
+  // DR-076 funds ONE human read on a T3/T4 item: the finished spec. Triage used to
+  // spend it on the raw issue instead (hold=tier → needs-review), and the spec-gate
+  // then spent a second one on the spec. The gate now admits an auto-buildable
+  // T3/T4 for the SPECIFY PHASE ONLY, and says so in its own stdout — the mode is
+  // read from the RECORD, never from the label, because #983's whole thesis is that
+  // a label is a stamp of a verdict and never the verdict.
+  const SPECIFY = { decision: 'agent-ready-specify', hold: 'specify', tier: 'T3' } as const;
+
+  it('a specify verdict → ready-specify, NOT plain ready (the two modes are distinguishable)', () => {
+    const r = check('OPEN', 'agent-ready-specify,role:architect', render(SPECIFY));
+    expect(r.ok).toBe(true);
+    expect(r.out).toBe('ready-specify');
+  });
+
+  it('the agent-ready-specify LABEL alone satisfies the label precondition', () => {
+    // Without this the drain would label an issue for specify dispatch and the gate
+    // would refuse it as [no-label] — a gate refusing the work it just authorised.
+    const r = check('OPEN', 'agent-ready-specify', render(SPECIFY));
+    expect(r.ok).toBe(true);
+  });
+
+  it('a plain agent-ready verdict still yields plain `ready` (no accidental downgrade)', () => {
+    expect(check('OPEN', 'agent-ready,role:dev').out).toBe('ready');
+  });
+
+  it('the RECORD decides the mode, not the label — a specify verdict under an agent-ready label is STILL specify-only', () => {
+    const r = check('OPEN', 'agent-ready,role:architect', render(SPECIFY));
+    expect(r.ok).toBe(true);
+    expect(r.out).toBe('ready-specify');
+  });
+
+  it('a crossed record (specify hold, full-build decision) → REFUSE rather than pick the permissive half', () => {
+    const r = check('OPEN', 'agent-ready-specify', render({ hold: 'specify', decision: 'agent-ready', tier: 'T3' }));
+    expect(r.ok).toBe(false);
+    expect(r.out).toContain('[decision]');
+  });
+
+  it('a crossed record (full-build hold, specify decision) → REFUSE', () => {
+    const r = check('OPEN', 'agent-ready', render({ hold: 'none', decision: 'agent-ready-specify', tier: 'T3' }));
+    expect(r.ok).toBe(false);
+    expect(r.out).toContain('[decision]');
+  });
+
+  it('human_only=yes still refuses, even wearing the specify class', () => {
+    const r = check('OPEN', 'agent-ready-specify', render({ ...SPECIFY, human_only: 'yes' }));
+    expect(r.ok).toBe(false);
+    expect(r.out).toContain('[human-only]');
+  });
+
+  it('a specify verdict is still subject to every other conjunct (staleness, state, countermand)', () => {
+    expect(check('CLOSED', 'agent-ready-specify', render(SPECIFY)).out).toContain('[closed]');
+    expect(check('OPEN', 'agent-ready-specify,needs-review', render(SPECIFY)).out).toContain('[countermanded]');
+    expect(check('OPEN', 'agent-ready-specify', render(SPECIFY), BODY + '\nedited').out).toContain('[stale-verdict]');
+    expect(check('OPEN', 'agent-ready-specify', '').out).toContain('[no-verdict]');
+  });
+
+  it('every other hold is still refused — `specify` did not open the held set', () => {
+    for (const hold of ['tier', 'info', 'unknown', 'human']) {
+      const r = check('OPEN', 'agent-ready-specify', render({ hold, decision: 'needs-review', human_only: 'no' }));
+      expect(r.ok, `hold=${hold}`).toBe(false);
+      expect(r.out, `hold=${hold}`).toContain('[held]');
+    }
+  });
+
+  it('a human may still lift a specify hold — the #1084 exit door survives the rename', () => {
+    // T3/T4 items now carry hold=specify where they used to carry hold=tier. If the
+    // approvable set had not followed, a human who read the raw issue and wanted the
+    // full build would have had no way to say so — #1084's hole, reopened.
+    const may = (hold: string, human: string) => {
+      try {
+        return { ok: true, out: execFileSync('bash', [GATE, '--may-approve', hold, human], { encoding: 'utf-8' }).trim() };
+      } catch (e: any) {
+        return { ok: false, out: (e.stdout ?? '').toString().trim() };
+      }
+    };
+    expect(may('specify', 'no')).toEqual({ ok: true, out: 'approvable' });
+    // …and it is still refused for a human-only issue, like every other hold.
+    expect(may('specify', 'yes').ok).toBe(false);
+  });
+
+  it('a human approval of a specify hold renders a FULL-build record (hold none, decision agent-ready)', () => {
+    const rec = execFileSync(
+      'bash',
+      [GATE, '--render-approval', 'harvest316', 'architect', 'T3', 'specify', '2026-08-05T00:00:00Z'],
+      { input: BODY, encoding: 'utf-8' },
+    );
+    expect(rec).toContain('supersedes: specify');
+    const r = check('OPEN', 'agent-ready,role:architect', rec);
+    expect(r.ok).toBe(true);
+    expect(r.out).toBe('ready');
+  });
+});
+
 describe('dispatch-ready-check.sh — writer/reader round-trip (no format drift)', () => {
   // The record grammar is owned by ONE file precisely so the thing that writes it
   // and the thing that reads it cannot drift. These assert that contract directly.
@@ -345,29 +439,54 @@ describe('dispatch-ready-check.sh — writer/reader round-trip (no format drift)
     expect(r.out).toBe('ready');
   });
 
-  it('a T3 verdict travelling the same writer path is refused end-to-end', () => {
+  /** Drive the REAL triage gate, mint the record from its own fields, then read it back. */
+  function endToEnd(agentFields: Record<string, string>) {
     const DECIDE = path.resolve(__dirname, '../../../scripts/triage-decide.sh');
     const agentOut = [
       'TRIAGE_VERDICT_BEGIN',
-      'decision: agent-ready',     // the agent asked for auto-build…
-      'role: dev',
-      'tier: T3',                  // …but T3 never auto-builds
-      'human_only: no',
-      'rationale: architectural',
+      ...Object.entries(agentFields).map(([k, v]) => `${k}: ${v}`),
       'TRIAGE_VERDICT_END',
     ].join('\n');
     const fields = execFileSync('bash', [DECIDE, '--fields'], { input: agentOut, encoding: 'utf-8' });
     const get = (k: string) => fields.match(new RegExp(`^${k}=(.*)$`, 'm'))![1];
-    expect(get('hold')).toBe('tier');
     const rec = execFileSync(
       'bash',
       [GATE, '--render-record', get('label'), get('role'), get('tier'), get('human_only'), get('hold')],
       { input: BODY, encoding: 'utf-8' },
     );
+    return { hold: get('hold'), label: get('label'), rec };
+  }
+
+  it('a T3 the agent did NOT call auto-buildable is refused end-to-end, label or no label', () => {
+    const { hold, rec } = endToEnd({
+      decision: 'needs-review',
+      role: 'dev',
+      tier: 'T3',
+      human_only: 'no',
+      rationale: 'architectural, unclear scope',
+    });
+    expect(hold).toBe('tier');
     // Even if someone then hand-applies agent-ready, the RECORD still says tier.
     const r = check('OPEN', 'agent-ready,role:dev', rec);
     expect(r.ok).toBe(false);
     expect(r.out).toContain('[held]');
+  });
+
+  it('a T3 the agent DID call auto-buildable reaches specify-only end-to-end, never full build (#1169)', () => {
+    const { hold, label, rec } = endToEnd({
+      decision: 'agent-ready',
+      role: 'architect',
+      tier: 'T3',
+      human_only: 'no',
+      rationale: 'architectural but well-specified',
+    });
+    expect(hold).toBe('specify');
+    expect(label).toBe('agent-ready-specify');
+    const r = check('OPEN', 'agent-ready-specify,role:architect', rec);
+    expect(r.ok).toBe(true);
+    // The load-bearing half: the gate says spec-only, so a caller that acts on this
+    // string cannot start an implementation.
+    expect(r.out).toBe('ready-specify');
   });
 });
 
