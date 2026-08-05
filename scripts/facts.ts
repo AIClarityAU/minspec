@@ -63,6 +63,8 @@ import {
 } from '../packages/minspec/src/lib/approval';
 import { sidecarPath } from '../packages/minspec/src/lib/approval-store';
 import { isValidOwnedPath } from '../packages/minspec/src/lib/ownership-path-rules';
+import { type ArtifactKind } from '../packages/minspec/src/lib/status-parity';
+import { ADR_STATUS_VALUES } from '../packages/minspec/src/lib/adr-manager';
 import { listSpecs, type SpecSummary } from '../packages/minspec/src/lib/spec-catalog';
 
 // ─── repo/root plumbing ──────────────────────────────────────────────────────
@@ -261,6 +263,19 @@ function normalizeOwnedToken(token: string): string {
   return p;
 }
 
+/**
+ * Which artifact family a file belongs to — decides which status vocabulary is
+ * valid (#1067). Reuses the `ArtifactKind` type from status-parity.ts rather than
+ * inventing a second notion of "spec vs DR" (issue #1067 fix item 1). A DR is
+ * either physically under `docs/decisions/` or self-identifies via `id: DR-NNN`;
+ * anything else is treated as a spec.
+ */
+function detectArtifactKind(rel: string, id: string | undefined): ArtifactKind {
+  if (/^docs\/decisions\//.test(rel)) return 'dr';
+  if (id !== undefined && /^DR-\d+/.test(id)) return 'dr';
+  return 'spec';
+}
+
 /** Recursively collect every `.md` file under `dir` (specsDir walk). */
 function walkMarkdownFiles(dir: string): string[] {
   const out: string[] = [];
@@ -308,24 +323,67 @@ function cmdHash(specArg: string | undefined): void {
 
 // ─── facts status <spec> ──────────────────────────────────────────────────────
 
+/**
+ * #1067: `facts status` used to run `parseSpec()` unconditionally, even on DR
+ * files. `parseSpec`'s frontmatter parser silently coerces any `status:` value
+ * outside `SPEC_STATUSES` — which every DR status (proposed/accepted/deprecated/
+ * superseded) is — to `'new'`, deriveStatus then trivially agreed with that
+ * invented default, and the tool printed `verdict: MATCH`: a confidently wrong
+ * fact from the tool built specifically to prevent confidently-wrong facts.
+ *
+ * Fix: detect the artifact kind first (fix item 1) and branch. A DR has no
+ * phase-derived status, so there is nothing to derive or compare — print `n/a`
+ * and never emit MATCH/DRIFT for a DR (fix item 2). Both branches read the RAW
+ * frontmatter `status:` via `rawField` (not `parseSpec`'s coerced value) and say
+ * so explicitly when it isn't a member of the artifact's own status vocabulary,
+ * instead of silently substituting a default (fix item 3).
+ */
 function cmdStatus(specArg: string | undefined): void {
   if (!specArg) die('usage: facts status <spec>');
   const specPath = resolveSpecArg(ROOT, specArg);
   const raw = readFileOrDie(specPath);
+  const rel = specRelPath(ROOT, specPath);
+  const rawId = rawField(raw, 'id');
+  const rawStatus = rawField(raw, 'status');
+  const kind = detectArtifactKind(rel, rawId);
+
+  console.log(`artifact:            ${rel}${rawId ? ` (id: ${rawId})` : ''} [${kind}]`);
+
+  if (kind === 'dr') {
+    const known = rawStatus !== undefined && (ADR_STATUS_VALUES as readonly string[]).includes(rawStatus);
+    const shown =
+      rawStatus === undefined
+        ? '(absent)'
+        : known
+          ? rawStatus
+          : `${rawStatus} (not a DR status — expected one of: ${ADR_STATUS_VALUES.join(', ')})`;
+    console.log(`frontmatter status:  ${shown}`);
+    console.log('derived status:      n/a — DRs have no phase-derived status');
+    console.log('approval state:      n/a — DRs are not hash-locked (no approval sidecar)');
+    console.log('verdict:             n/a — nothing to compare');
+    return;
+  }
+
+  const known = rawStatus !== undefined && (SPEC_STATUSES as readonly string[]).includes(rawStatus);
   const parsed = parseSpec(raw);
   const fm = parsed.frontmatter;
-  const rel = specRelPath(ROOT, specPath);
-
   const approvalState = getApprovalStatus(ROOT, specPath);
   const explicitTerminal: ExplicitTerminal =
     fm.status === 'archived' ? 'archived' : fm.status === 'superseded' ? 'superseded' : undefined;
   const derived = deriveStatus(fm.phases, approvalState, explicitTerminal);
+  const shown =
+    rawStatus === undefined
+      ? '(absent)'
+      : known
+        ? rawStatus
+        : `${rawStatus} (not a spec status — is this a DR?)`;
 
-  console.log(`spec:                ${rel}${fm.id ? ` (id: ${fm.id})` : ''}`);
-  console.log(`frontmatter status:  ${fm.status}`);
+  console.log(`frontmatter status:  ${shown}`);
   console.log(`derived status:      ${derived}`);
   console.log(`approval state:      ${approvalState}`);
-  console.log(`verdict:             ${fm.status === derived ? 'MATCH' : 'DRIFT'}`);
+  console.log(
+    `verdict:             ${known ? (rawStatus === derived ? 'MATCH' : 'DRIFT') : 'n/a — frontmatter status is not a recognised spec status, cannot compare'}`,
+  );
 }
 
 // ─── facts fields [type] ──────────────────────────────────────────────────────
