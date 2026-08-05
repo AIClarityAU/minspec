@@ -8,6 +8,11 @@ dist/
 *.vsix
 .vscode-test/
 coverage/
+# coverage.py's data file. Not the same thing as coverage/ above (that is
+# Vitest's HTML report). Running the Python suite under coverage drops this in
+# the repo root, and it is a binary SQLite blob nobody wants in a diff.
+.coverage
+.coverage.*
 *.log
 .DS_Store
 
