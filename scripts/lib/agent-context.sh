@@ -41,10 +41,13 @@
 #     OAuth path is preserved — verified by a probe run that completed normally
 #     under these sources. Unlike `--bare`, which forces ANTHROPIC_API_KEY and
 #     would break subscription-default billing (DR-016/017).
-#   * Dropping user scope ALSO drops `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE=55`, an
-#     interactive-session preference that compounded the thrash by triggering
-#     compaction at 55% of the window. Headless builds get the default threshold
-#     back; the operator's own sessions are untouched.
+#   * It does NOT drop `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE`. An earlier version of
+#     this comment claimed it did — that was wrong, and the correction matters:
+#     `--setting-sources` selects which settings FILES load, and cannot unset a
+#     variable that is already exported in the process environment. The override
+#     is inherited (session -> drain -> dispatch -> `claude -p`), so it survives
+#     any file-source selection. Removing it needs an explicit `env -u`, which is
+#     what AGENT_ENV_SCRUB below does. Do not delete that scrub as redundant.
 #   * User-scope hooks stop applying to headless runs (terminal naming, the
 #     caveman output-style hook, the primary-checkout guard). That is correct
 #     here: the agent runs in an isolated /tmp worktree and its allowlist admits

@@ -74,11 +74,18 @@ function codeOf(file: string): string {
 
 /** Scripts that launch a headless agent via `claude -p` / `claude --print`. */
 function launcherScripts(): string[] {
-  return fs
-    .readdirSync(SCRIPTS_DIR)
-    .filter((f) => f.endsWith('.sh'))
-    .map((f) => path.join(SCRIPTS_DIR, f))
-    .filter((f) => /\bclaude\s+(-p|--print)\b/.test(codeOf(f)));
+  // RECURSIVE on purpose. A non-recursive `scripts/*.sh` scan silently excluded
+  // scripts/tooling-radar/run-radar.sh — a real headless launcher — so it inherited
+  // the autocompact override while the gate reported everything covered. A gate that
+  // cannot see a whole directory is worse than no gate: it reports safety it has not
+  // checked.
+  const walk = (dir: string): string[] =>
+    fs.readdirSync(dir, { withFileTypes: true }).flatMap((e) => {
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) return e.name === 'node_modules' ? [] : walk(full);
+      return e.isFile() && e.name.endsWith('.sh') ? [full] : [];
+    });
+  return walk(SCRIPTS_DIR).filter((f) => /\bclaude\s+(-p|--print)\b/.test(codeOf(f)));
 }
 
 /**
@@ -92,7 +99,7 @@ describe('T0: headless `claude -p` launchers pin their setting sources (no inher
   it('finds the launcher scripts to guard (the scan is not vacuous)', () => {
     // Guards against the gate silently passing because the glob matched nothing
     // — a vacuously-green suite is the failure mode this repo keeps hitting.
-    expect(launcherScripts().length).toBeGreaterThanOrEqual(6);
+    expect(launcherScripts().length).toBeGreaterThanOrEqual(7); // incl. the nested run-radar.sh
   });
 
   it('ships the shared agent-context lib', () => {
