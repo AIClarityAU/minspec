@@ -201,26 +201,68 @@ describe('approve-on-label.yml — permission before privilege (#1245)', () => {
     const lines = wf().split('\n');
     const mintIdx = lineOf('create-github-app-token');
     const guard = lines.slice(Math.max(0, mintIdx - 4), mintIdx).join('\n');
-    expect(guard).toMatch(/if:\s*steps\.perm\.outputs\.authorized == 'true'/);
+    expect(guard).toMatch(/if:\s*steps\.perm\.outputs\.authorized != 'false'/);
+  });
+
+  /**
+   * THREE outcomes, not two (PR #1258 architect, blocking).
+   *
+   * `GET /collaborators/{user}/permission` is a privileged read, and the default token's
+   * ability to make it is not something to assume — the pre-existing check deliberately
+   * used the broader App token. Collapsing "the check failed" into "the actor is denied"
+   * would let one 403 silently lock out every maintainer and bounce them with a
+   * `permission: none` message that is simply untrue: an errored witness reported as a
+   * verdict, which is constitution invariant 2 exactly.
+   */
+  it('an errored check yields `unknown` — never a denial', () => {
+    const body = wf();
+    expect(body).toContain('authorized=unknown');
+    // The failure branch must NOT emit a permission value that reads as a real answer.
+    expect(body).not.toMatch(/authorized=false[\s\S]{0,200}could not read/);
+  });
+
+  it('an errored check still mints and defers to the authoritative App-token check', () => {
+    // `!= 'false'` — true OR unknown proceed. A `== 'true'` gate would skip the mint on
+    // an errored check and strand the run with no decision at all.
+    const lines = wf().split('\n');
+    for (const anchor of ['create-github-app-token', 'run: bash scripts/approve-on-label.sh']) {
+      const i = lines.findIndex((l) => l.includes(anchor));
+      const block = lines.slice(Math.max(0, i - 6), i).join('\n');
+      expect(block, anchor).toMatch(/authorized != 'false'/);
+      expect(block, anchor).not.toMatch(/authorized == 'true'/);
+    }
+  });
+
+  it('the errored case is VISIBLE, not silent', () => {
+    // DR-066: a gate that cannot run must say so. A swallowed 403 that quietly changes
+    // behaviour is the silent gate this repo's invariant 2 forbids.
+    expect(wf()).toMatch(/::warning title=Early permission check could not run/);
+  });
+
+  it('only a DEFINITIVE deny bounces the label', () => {
+    const lines = wf().split('\n');
+    const i = lines.findIndex((l) => l.includes('Remove the label and explain'));
+    const block = lines.slice(i, i + 4).join('\n');
+    expect(block).toMatch(/authorized == 'false'/);
   });
 
   it('the approve step is gated too, so it can never run without the mint', () => {
     const lines = wf().split('\n');
     const runIdx = lineOf('run: bash scripts/approve-on-label.sh');
     const block = lines.slice(Math.max(0, runIdx - 6), runIdx).join('\n');
-    expect(block).toMatch(/if:\s*steps\.perm\.outputs\.authorized == 'true'/);
+    expect(block).toMatch(/if:\s*steps\.perm\.outputs\.authorized != 'false'/);
   });
 
   it('the unauthorized path still bounces — the fix must not cost the #1113 UX', () => {
     // A hard failure before the mint would have been simpler and worse: `agent-ready`
     // left standing with no explanation. The bounce is the point of the feature.
-    expect(wf()).toMatch(/if:\s*steps\.perm\.outputs\.authorized != 'true'/);
+    expect(wf()).toMatch(/if:\s*steps\.perm\.outputs\.authorized == 'false'/);
     expect(wf()).toMatch(/--remove-label agent-ready/);
   });
 
   it('the bounce uses the DEFAULT token, never the App token', () => {
     const lines = wf().split('\n');
-    const bounceIdx = lines.findIndex((l) => l.includes("authorized != 'true'"));
+    const bounceIdx = lines.findIndex((l) => l.includes('Remove the label and explain'));
     const block = lines.slice(bounceIdx, bounceIdx + 12).join('\n');
     expect(block).toContain('secrets.GITHUB_TOKEN');
     expect(block).not.toContain('steps.app.outputs.token');
