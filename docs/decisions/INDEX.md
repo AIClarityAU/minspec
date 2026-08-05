@@ -613,7 +613,7 @@ This repo's governance was sized for a team: protected main, human-approved PRs,
 
 ## [DR-077 — The commit-destination rule has two implementations (a shell pre-commit hook and a TS guard) bound by a behavioral parity test — the duplication is deliberate, and the parity test is its binding contract](DR-077.md)
 
-*Status: proposed · Date: 2026-08-05*
+*Status: accepted · Date: 2026-08-05*
 
 <!-- dr-summary:DR-077 auto=0000000000000000 -->
 One rule — which commits the push-protected default branch may receive — is enforced in two places: the #1041 shell pre-commit hook (fires on every `git commit`) and the TypeScript `resolveBranchDestination` guard in commit-on-approve (runs before staging, so #1064's stranding is refused up front rather than left as a dirty tree). The duplication is deliberate: shelling out to the hook cannot run before staging or in a fresh clone, and generating both from one source is a large mechanism for one function. `approve-commit-hook-parity.test.ts` is the binding contract — one scenario table driven through both real implementations, failing on any divergence in either direction. Records the mirror-on-change rule, the sanctioned non-mirror at #1112 (git forbids a partial commit mid-merge), and the third `.githooks` twin bound by a weaker substring test.
