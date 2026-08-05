@@ -133,8 +133,11 @@ the identical legacy toast plus a reason (FR-5).
 
 **2. `pushApprovalIfEnabled` gains the committed paths.** It is called with
 `(rootDir, slug)` today; the PR body needs the approval record and the changed paths need
-checking against the allowlist. `commitApprovalIfEnabled` already holds both — `result.paths`
-is set on `'committed'` ([approve-commit.ts:206](../../../packages/minspec/src/lib/approve-commit.ts#L206)).
+checking against the allowlist. `commitApprovalIfEnabled` already holds both —
+`CommitApprovalResult.paths` is declared at
+[approve-commit.ts:81](../../../packages/minspec/src/lib/approve-commit.ts#L81) and populated
+on the `'committed'` return at
+[approve-commit.ts:246](../../../packages/minspec/src/lib/approve-commit.ts#L246).
 So the signature becomes `(rootDir, slug, paths: readonly string[])`. No new plumbing, no new
 state: the caller passes what it already computed.
 
@@ -193,6 +196,8 @@ default **stays `prompt`** (DR-071 condition 1).
 
 - **The seam is a lib, not a command.** `approval-pr.ts` lives under `src/lib/` and imports no `vscode`. Both callers keep their own toasts. This is what makes AC-3, AC-7, AC-8 and AC-9 assertable on the *recorded runner argv* rather than by inspection.
 - **`not-docs-only` opens the PR unlabelled rather than refusing.** The branch is already pushed by the time the seam runs, so refusing would strand it — the exact failure family this spec exists to end. AC-2 requires only that it is never *labelled*; the lane workflow independently re-verifies and refuses loudly anyway ([docs-lane.yml:52-54](../../../.github/workflows/docs-lane.yml#L52)), so this is two checks, not a weakened one.
+
+  **An unlabelled PR must SAY it is unlabelled (AC-11 below).** Without the label the lane never runs, so the PR sits open forever with no auto-merge and no signal — silence that looks exactly like success. Opening it unlabelled is only safe *because* the user is told; the two are one decision, not a decision plus a nicety.
 - **Idempotency by create-then-adopt, not list-then-create.** `approvalBranchName` stamps to the millisecond ([approve-push.ts:128-138](../../../packages/minspec/src/lib/approve-push.ts#L128)), so a collision is rare; paying an extra `gh pr list` round-trip on every approval to handle it would tax the common path. Adopt on the "already exists" rejection instead — one call when it works, two only when it must be.
 - **The title mirrors the commit subject** (FR-2), so the PR and the commit are greppable by one string.
 - **`pushed` is untouched** (FR-7): the PR exists only because a protected branch refused a direct push.
@@ -210,6 +215,7 @@ T0/T1 first, all against a stub `ExecRun` recording every `(file, args, cwd)`:
 | `approval-pr.test.ts` — outcome matrix over stub responses | AC-4, FR-5, FR-6 |
 | `approval-pr.test.ts` — argv assertions: no `checkout`/`switch`/`merge`/`rebase`/`reset` ever recorded | AC-8, INV-3 |
 | `approval-pr.test.ts` — a non-allowlisted path yields `labelled: false` | AC-2, INV-2 |
+| `commit-on-approve` — a `not-docs-only` outcome surfaces a notification saying auto-merge will not run, and never the silent success surface | AC-11 |
 | `approval-pr-body.test.ts` — pure body-shape assertions | OQ-2 |
 | `commit-on-approve` — `auto` creates, `manual` does not | AC-1 |
 | `commit-on-approve` — `pushOnApprove: never`, and `prompt` declined, record **zero** runner calls | AC-7, INV-1 |

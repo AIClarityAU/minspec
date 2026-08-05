@@ -175,6 +175,7 @@ human sign-off — the hash-lock ratification is the separate **MinSpec: Approve
 - **AC-8 (INV-3).** No `git checkout`/`switch`/`merge`/`rebase`/`reset` is ever invoked — asserted on the recorded runner argv, not by inspection.
 - **AC-9 (INV-4).** No file under `.minspec/approvals/**` and no `status:` line is written anywhere on this path.
 - **AC-10 (FR-4).** SPEC-039's `minspec.pushDocsLane` command continues to pass its existing tests against the extracted seam (no behaviour change from Slice 1).
+- **AC-11 (INV-2, FR-3).** When a changed path falls outside the lane allowlist, the PR is opened **unlabelled** *and* the user is told so in the same act — the notification states that auto-merge will not run and why. Asserted structurally: an unlabelled outcome can never produce the silent success surface. *Rationale: without the `docs-lane` label the lane never runs ([docs-lane.yml:30](../../../.github/workflows/docs-lane.yml#L30)), so an unannounced unlabelled PR sits open forever with no auto-merge and no signal — silence indistinguishable from success, which is the stranding class this spec exists to end. Raised as a non-blocking review finding on the plan ([#1268](https://github.com/AIClarityAU/minspec/pull/1268)) and promoted to an AC rather than left as prose.*
 
 ## Risks
 
