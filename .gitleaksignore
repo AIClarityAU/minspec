@@ -1,0 +1,27 @@
+# gitleaks allowlist — every entry triaged 2026-08-05 during the #1171 pre-public sweep.
+# Format: fingerprint (commit:file:rule:line). Add ONLY after confirming a finding is
+# genuinely not a credential; an unexplained entry here is a hole, not a fix.
+#
+# Class 1 — `CLAUDE_CODE_OAUTH_TOKEN=''` : sets the var EMPTY on the PAYG review path so
+#   the reviewer uses ANTHROPIC_API_KEY instead of the subscription. Absence of a secret,
+#   not a secret. (Also matches base64-encoded inside ci-review-templates.ts.)
+# Class 2 — egress-scan test fixtures: deliberately fake tokens the scanner must BLOCK.
+#   Removing them would delete the test's subject.
+# Class 3 — Cloudflare Web Analytics `data-cf-beacon` token: public by design, served in
+#   the HTML of every page view. A site identifier, not a credential.
+# Class 4 — .minspec/generated-hashes.json: content hashes ("Key Components", "Secret
+#   Hygiene" are SECTION NAMES; the value is a sha).
+3bae61f64ec84289bd501dbc55b057a377134bbe:sites/minspec.dev/index.html:generic-api-key:1086
+3bae61f64ec84289bd501dbc55b057a377134bbe:sites/minspec.dev/privacy.html:generic-api-key:115
+3dabade156ec34ef0cb51a5402a46de2190bb2fe:packages/minspec/tests/egress-scan.test.ts:generic-api-key:193
+3dabade156ec34ef0cb51a5402a46de2190bb2fe:packages/minspec/tests/egress-scan.test.ts:generic-api-key:80
+3dabade156ec34ef0cb51a5402a46de2190bb2fe:packages/minspec/tests/egress-scan.test.ts:github-pat:80
+56e2efd14d6bd47ffddc5bf2470c305835b1818d:.minspec/generated-hashes.json:generic-api-key:13
+7971c778c677e60a46f91a30acefec71754f386d:packages/minspec/src/lib/ci-review-templates.ts:generic-api-key:979
+9b0dd4dce1e4165094351c366efad5294dcb5eb5:packages/minspec/src/lib/ci-review-templates.ts:generic-api-key:1493
+a03bfee40f5ba8365cda30d94522952681f7bc4a:scripts/review-approvable.sh:generic-api-key:165
+ab3d459a7a48040211458c443dc96c645858751d:packages/minspec/src/lib/ci-review-templates.ts:generic-api-key:1493
+ca49f94c5485b75b069e30fafbf9134d853bdc96:scripts/review-branch.sh:generic-api-key:129
+db2a36b5a0d699c8ee698fdd9951e877c6928b4b:packages/minspec/src/lib/ci-review-templates.ts:generic-api-key:1341
+f6a4f3ac737712754c6c18ad41f1cf51c3b9e5a8:sites/minspec.dev/index.html:generic-api-key:1086
+f6a4f3ac737712754c6c18ad41f1cf51c3b9e5a8:sites/minspec.dev/privacy.html:generic-api-key:115
