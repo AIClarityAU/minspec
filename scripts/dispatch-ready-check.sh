@@ -367,9 +367,15 @@ fi
 # stripped "any control token at all", which was FALSE (PR #1260 review):
 #   ✅ the three `*_BEGIN`/`*_END` sentinel families, as whole tokens;
 #   ✅ `<!-- minspec-* -->` markers, INCLUDING payload-bearing ones such as
-#      `<!-- minspec-claim:{json} -->` — the regex covers `:payload` and digits, because
-#      `lease_read_claims` enumerates claim markers from EVERY comment with no author
-#      filter, so a planted one is a live denial vector (tracked separately);
+#      `<!-- minspec-claim:{json} -->` — because `lease_read_claims` enumerates claim
+#      markers from EVERY comment with no author filter, so a planted one is a live
+#      denial vector (tracked separately as #1275).
+#
+#      The payload matcher is `([^-]|-[^-]|--[^>])*` — "any run not containing `-->`" —
+#      and NOT `[^>]*`. POSIX ERE has no lazy quantifier, and `[^>]*` stops at the FIRST
+#      `>`, which a payload may legitimately contain: `{"sessionId":"x>"}` sailed straight
+#      through while this comment claimed payload markers were covered. Anchor on the
+#      closing `-->`, never on a character the payload can hold.
 #   ❌ BARE prefixes (`REVIEW_VERDICT` with no `_BEGIN`) are deliberately left alone: the
 #      readers that match a bare prefix read PR-comment/agent-stdout channels, not this
 #      issue comment, and already treat their input as untrusted. Widening here would
@@ -378,7 +384,7 @@ fi
 fence_agent_text() {
   sed -E \
     -e 's/(MINSPEC_VERDICT|REVIEW_VERDICT|REVIEW_UNAVAILABLE)_(BEGIN|END)/\1-\2 (fenced: agent-authored)/g' \
-    -e 's/<!--[[:space:]]*(minspec-[a-z0-9-]+)(:[^>]*)?[[:space:]]*-->/(fenced HTML marker: \1)/g'
+    -e 's/<!--[[:space:]]*(minspec-[a-z0-9-]+)([^-]|-[^-]|--[^>])*-->/(fenced HTML marker: \1)/g'
 }
 
 if [[ "${1:-}" == "--fence-agent-text" ]]; then

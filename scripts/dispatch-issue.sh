@@ -1441,7 +1441,18 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
       #
       # Safe to apply wholesale: the parent contributes no `minspec-*` marker of its own
       # to this body, so nothing first-party is broken by it.
-      BODY=$(printf '%s' "$BODY" | "${SCRIPT_DIR}/dispatch-ready-check.sh" --fence-agent-text)
+      # Fail SAFE, not empty. A `sed`/handler failure would otherwise assign an empty
+      # BODY and post a blank comment — losing the agent's whole summary to a tool error.
+      # Keep the fenced text only if something actually came back; the fence is a
+      # hardening, and hardening that can destroy the payload it protects is a worse bug
+      # than the one it fixes.
+      if FENCED_BODY=$(printf '%s' "$BODY" | "${SCRIPT_DIR}/dispatch-ready-check.sh" --fence-agent-text) \
+           && [[ -n "$FENCED_BODY" ]]; then
+        BODY="$FENCED_BODY"
+      else
+        echo "WARNING: could not fence the agent summary — posting a SAFE PLACEHOLDER instead of unfenced text." >&2
+        BODY=$(printf 'Agent completed, but its summary could not be safely fenced for republication (#1243), so it is withheld rather than posted unchecked.\n\n— branch `%s` @ %s (auto-dispatched)' "$BRANCH" "$SHA")
+      fi
       gh issue comment "$ISSUE" --repo "$REPO" --body "$BODY" 2>/dev/null || true
 
       # Independent reviewer stage (#342) — runs AFTER the push/summary and adds
