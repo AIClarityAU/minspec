@@ -10,6 +10,35 @@ relates_to: [SPEC-024, SPEC-030, SPEC-034]  # SPEC-024 auto-merge gate consumes 
 
 # MinSpec — Repo Governance Provisioning (ai-review + branch protection on init/refresh) — Requirements
 
+> **Three corrections (2026-08-05, from a drift audit of the sign-off queue).** The spec's
+> design is untouched by these; its *stated conditions and evidence* have expired.
+>
+> 1. **The scaffold-default flip condition has already fired.** FR-7, INV-9 and D-7-rev
+>    default scaffolded repos to `pr-gate` "while #489/#490/#491/#466 are open", and say to
+>    flip to the consequence default once they close. **All four are CLOSED as completed**
+>    (#489 and #491 on 2026-07-14, #466 and #490 on 2026-07-15; #490's fix is recorded as
+>    DR-058) — within a day of this spec's last edit. The stated precondition for the flip
+>    is met, so the default this spec ships with needs a deliberate re-decision rather than
+>    an expired conditional.
+> 2. **The last live example of the problem is gone, and AC-2 is untestable as written.**
+>    Context (:41-44) calls `sealbox` "the sole accurate pre-fix example — still only
+>    `deploy-site.yml` + `minspec-validate.yml`", and AC-2 (:320-322) is written against
+>    that. `AIClarityAU/sealbox` now carries eight workflows — `ai-review.yml`,
+>    `ai-review-retry.yml`, `ci.yml`, `deploy-site.yml`, `docs-lane.yml`,
+>    `minspec-ci-parity.yml`, `minspec-validate.yml`, `ready-to-merge.yml` — **and** a
+>    `required_status_checks` ruleset on `main`. It exhibits neither gap AC-2 requires it
+>    to report. AC-2 needs a new fixture repo or a rewrite.
+> 3. **The `template-registry.ts` citations have rotted.** `MANAGED_REGION_TEMPLATES` is at
+>    `template-registry.ts:1533` (cited as `:937`), and the neighbouring line references in
+>    the same family have drifted with it. The paths resolve, so the reference-checker is
+>    green — the line-level gap tracked in #1252. Re-anchor the whole citation set before
+>    sign-off, since these are the spec's proof of its own premises.
+>
+> Note on protection reads: verify `main` protection via
+> `repos/{owner}/{repo}/rules/branches/main` (rulesets). This org uses rulesets, not classic
+> branch protection, so a 404 from `/branches/main/protection` is **not** evidence of an
+> unprotected branch.
+
 **Date:** 2026-07-07 (clarify refinements applied 2026-07-14 — [#703](https://github.com/AIClarityAU/minspec/issues/703))
 **Status:** Specifying (reopened for the #703 clarify refinements; re-approval pending — the prior approval was against pre-refinement bytes)
 **Triggered by:** [#557](https://github.com/AIClarityAU/minspec/issues/557) — "provision repo governance (branch protection + ai-review) on init/refresh — detect & offer to fix."

@@ -100,7 +100,8 @@ hover cards for project vocabulary/jargon — is a sibling feature tracked separ
   Python twin per INV-2) if it auto-regenerates, OR mandate `summary:` is human-frozen.
   Do not ship FR4 without deciding which.
 - **FR5 — live status, deterministically.** The card's **status** is read **live** from
-  the authoritative source (approvals.json + frontmatter `status`/phase), never guessed,
+  the authoritative source (the per-approvable sidecar under `.minspec/approvals/` +
+  frontmatter `status`/phase — i.e. `deriveStatus`'s inputs), never guessed,
   never a cached restatement. A cross-project target resolves via the table; if its repo
   is not locally available, the card **degrades** to code + title only (OQ2) — never a
   wrong status.
@@ -184,7 +185,7 @@ hover cards for project vocabulary/jargon — is a sibling feature tracked separ
 ## Invariants
 
 - **INV-live-status-deterministic** — a lozenge/card status is read from the
-  authoritative source (approvals.json / frontmatter), never LLM-guessed, never a stale
+  authoritative source (the `.minspec/approvals/` sidecar / frontmatter), never LLM-guessed, never a stale
   restatement. (Never-wrong: a signpost that lies is the worst defect — DR-003 evidence
   discipline.)
 - **INV-graceful-degrade** — an unknown or unresolvable reference renders as plain text;
