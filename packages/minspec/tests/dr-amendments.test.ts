@@ -145,6 +145,88 @@ describe('validateDrAmendments()', () => {
     expect(run()).toEqual([]);
   });
 
+  // ── Slugged filenames — createAdr emits DR-NNN-slug.md ───────────────────
+  /**
+   * REGRESSION (PR #1222 review, blocking): the id was keyed off the filename STEM.
+   * `ADR_FILE_RE` is /^DR-(\d+).*\.md$/ and the `.*` exists precisely because
+   * `createAdr` emits `DR-NNN-slug.md`. Stem-keying broke BOTH directions on a slugged
+   * file — a target lookup missed (gate silently enforcing nothing) and a slugged source
+   * searched for `\bDR-NNN-slug\b`, never matched, and being FATAL blocked every commit.
+   *
+   * The corpus has no slugged files today, so it would have shipped green and detonated
+   * on the next DR the extension created. These tests use slugs on purpose.
+   */
+  function drSlug(id: string, slug: string, status: 'accepted' | 'proposed', body = ''): void {
+    fs.writeFileSync(
+      path.join(dir, `${id}-${slug}.md`),
+      `---\nid: ${id}\nstatus: ${status}\ndate: 2026-08-05\ntitle: ${id}\n---\n\n# ${id}\n\n${body}\n`,
+    );
+  }
+
+  it('detects the gap when BOTH files are slugged', () => {
+    drSlug('DR-001', 'the-original', 'accepted', 'Original.');
+    drSlug('DR-002', 'the-amender', 'accepted', 'This amends DR-001.');
+    const gaps = run();
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0]).toMatchObject({ source: 'DR-002', target: 'DR-001' });
+  });
+
+  it('stays silent when a slugged target DOES acknowledge a slugged source', () => {
+    drSlug('DR-001', 'the-original', 'accepted', 'Original. Amended by DR-002.');
+    drSlug('DR-002', 'the-amender', 'accepted', 'This amends DR-001.');
+    expect(run()).toEqual([]);
+  });
+
+  it('matches a slugged source against an unslugged target and vice versa', () => {
+    drSlug('DR-001', 'slugged', 'accepted', 'Original.');
+    dr('DR-002', 'accepted', 'This amends DR-001.');
+    expect(run().map((g) => `${g.source}->${g.target}`)).toEqual(['DR-002->DR-001']);
+  });
+
+  it('the reported ids are BARE — never the filename stem', () => {
+    drSlug('DR-001', 'a-long-descriptive-slug', 'accepted', 'Original.');
+    drSlug('DR-002', 'another-slug-entirely', 'accepted', 'amends DR-001');
+    const [gap] = run();
+    expect(gap.source).toBe('DR-002');
+    expect(gap.target).toBe('DR-001');
+    expect(gap.message).not.toContain('slug');
+  });
+
+  // ── Attribution: whose claim is it? ──────────────────────────────────────
+  /**
+   * "X supersedes Y" written inside DR-Z is DR-Z DESCRIBING X, not DR-Z superseding Y.
+   * Real instance: DR-024 contains "DR-022 supersedes DR-020 only on its own acceptance".
+   * Without this the gate demands DR-020 acknowledge DR-024, which is not what the
+   * sentence says — and it was green only because DR-020 happens to mention DR-024.
+   */
+  it('does not attribute a claim whose subject is a DIFFERENT DR', () => {
+    dr('DR-020', 'accepted', 'Original.');
+    dr('DR-022', 'accepted', 'Something else.');
+    dr('DR-024', 'accepted', 'Note that DR-022 supersedes DR-020 only on its own acceptance.');
+    expect(run().filter((g) => g.source === 'DR-024')).toEqual([]);
+  });
+
+  it.each(['DR-022 supersedes', '**DR-022** supersedes', 'DR-022  amends'])(
+    'ignores the third-party form: %s',
+    (phrase) => {
+      dr('DR-020', 'accepted', 'Original.');
+      dr('DR-024', 'accepted', `Note that ${phrase} DR-020.`);
+      expect(run().filter((g) => g.source === 'DR-024')).toEqual([]);
+    },
+  );
+
+  it('STILL attributes when the subject is the containing DR itself', () => {
+    dr('DR-020', 'accepted', 'Original.');
+    dr('DR-024', 'accepted', 'DR-024 supersedes DR-020 in full.');
+    expect(run().map((g) => `${g.source}->${g.target}`)).toEqual(['DR-024->DR-020']);
+  });
+
+  it('a bare claim with no DR subject is still attributed to its file', () => {
+    dr('DR-020', 'accepted', 'Original.');
+    dr('DR-024', 'accepted', 'This decision supersedes DR-020.');
+    expect(run().map((g) => `${g.source}->${g.target}`)).toEqual(['DR-024->DR-020']);
+  });
+
   // ── The honest limit, stated as a test so nobody mistakes it for more ─────
   it('proves only that a LINK exists, never that the amended prose is correct', () => {
     // The target mentions the source in passing and says nothing about the change.

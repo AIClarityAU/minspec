@@ -300,8 +300,15 @@ try {
   for (const g of amendmentGaps) {
     fail(join(resolveDecisionsDir(), `${g.target}.md`), `DR amendment not carried out — ${g.message}`);
   }
-} catch {
-  // Decisions dir unreadable / absent — nothing to validate.
+} catch (err) {
+  // Deliberately NOT a silent `catch {}` like its siblings. Constitution invariant 2:
+  // a missing or errored witness must fail closed AND VISIBLY, never quietly pass. A
+  // swallowed error here means the gate validated nothing while the build stayed green
+  // — indistinguishable, from the outside, from a clean corpus. Warn rather than fail,
+  // because an unreadable decisions directory is a repo-shape problem this rule does
+  // not own; but say so out loud. (The identical silent catch in Rules 6/8 predates
+  // this and is left alone rather than widened here — noted for a separate sweep.)
+  warn(`DR-amendment check could not run (${err instanceof Error ? err.message : String(err)}) — Rule 16 validated NOTHING this run; do not read the green as a clean register.`);
 }
 
 // Rule 9 (non-fatal — Slice-1, #161): dangling-reference checker. Scans every

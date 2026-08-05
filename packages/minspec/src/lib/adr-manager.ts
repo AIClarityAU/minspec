@@ -204,8 +204,17 @@ export function validateDrAmendments(decisionsDir: string): DrAmendmentGap[] {
 
   const bodies = new Map<string, string>();
   for (const entry of fs.readdirSync(decisionsDir).sort()) {
-    if (!ADR_FILE_RE.test(entry)) continue;
-    const id = entry.slice(0, entry.lastIndexOf('.'));
+    const match = entry.match(ADR_FILE_RE);
+    if (!match) continue;
+    // Key by the BARE id, exactly as validateDrSequence and validateDrIndexStatus do.
+    // ADR_FILE_RE is /^DR-(\d+).*\.md$/ — the `.*` exists because `createAdr` emits
+    // `DR-NNN-slug.md`. Keying by the filename stem instead would break BOTH ways on a
+    // slugged file: a target lookup would miss (the gate silently enforcing nothing),
+    // and a slugged source would search for `\bDR-NNN-slug\b`, never match, and — being
+    // FATAL — block every commit on a garbled false positive. The corpus happens to have
+    // no slugged files today, so that bug would have shipped green and detonated on the
+    // next DR the extension created.
+    const id = `DR-${match[1]}`;
     try {
       bodies.set(id, fs.readFileSync(path.join(decisionsDir, entry), 'utf-8'));
     } catch {
@@ -226,11 +235,24 @@ export function validateDrAmendments(decisionsDir: string): DrAmendmentGap[] {
       const target = m[2].toUpperCase();
       if (target === source) continue;               // self-reference, not an amendment
 
+      // ATTRIBUTION: "X supersedes Y" written inside DR-Z is DR-Z *describing* X, not
+      // DR-Z superseding Y. Real instance — DR-024 contains "DR-022 supersedes DR-020
+      // only on its own acceptance". Without this the gate would demand DR-020
+      // acknowledge DR-024, which is simply not what the sentence says. It is green
+      // today only by coincidence (DR-020 happens to mention DR-024), and a FATAL gate
+      // must not rest on a coincidence.
+      const preceding = body.slice(Math.max(0, m.index - 24), m.index);
+      const subject = preceding.match(/(DR-\d+)[*_\s]*$/i);
+      if (subject && subject[1].toUpperCase() !== source) continue;
+
       const targetBody = bodies.get(target);
       if (targetBody === undefined) continue;        // dangling ref — Rule 9 owns that
 
-      // Does the target acknowledge the source AT ALL?
-      if (new RegExp(`\\b${source}\\b`).test(targetBody)) continue;
+      // Does the target acknowledge the source AT ALL? `source` is `DR-<digits>` by
+      // construction above, so it carries no regex metacharacters — escaped anyway so
+      // the safety does not depend on a derivation two screens away staying that way.
+      const escaped = source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      if (new RegExp(`\\b${escaped}\\b`).test(targetBody)) continue;
 
       const key = `${source}->${target}`;
       if (seen.has(key)) continue;
@@ -244,8 +266,8 @@ export function validateDrAmendments(decisionsDir: string): DrAmendmentGap[] {
           `${source} (accepted) ${relation} ${target}, but ${target} never mentions ${source} — ` +
           `the amendment was recorded and never carried out, so ${target} still reads as if ` +
           `unchanged. Add a short "Amended by ${source}" note to ${target} at the point it ` +
-          `changes (see DR-070 §3 for the shape), or reword ${source} if it does not in fact ` +
-          `change ${target}.`,
+          `actually changes — say what changed and what still stands — or reword ${source} ` +
+          `if it does not in fact change ${target}.`,
       });
     }
   }
