@@ -24,11 +24,19 @@ on:
   issues:
     types: [labeled]
 
-# The workflow's own token needs nothing but the checkout. Every write below is made
-# with the App installation token minted in the job, so the actor is `minspec-sdd[bot]`
-# and the audit trail never records agent work under a human's account.
+# Every AUTHORIZED write is made with the App installation token minted in the job, so
+# the actor is `minspec-sdd[bot]` and the audit trail never records agent work under a
+# human's account. The default token carries `issues: write` for ONE purpose only — the
+# unauthorized bounce below, which must be able to remove the label and explain itself
+# WITHOUT a broader App credential ever being minted for an actor who cannot approve.
 permissions:
   contents: read
+  # `issues: write` exists ONLY so the unauthorized path can remove the label and explain
+  # itself WITHOUT minting an App installation token (#1245). That is a net reduction in
+  # privilege, not an expansion: the default token scoped to this one repo replaces a
+  # broader App credential on exactly the path that should have had neither. Every
+  # authorized write below still goes through the App, so the audit trail is unchanged.
+  issues: write
 
 # Serialise per issue: two rapid label events must not race to mint two records.
 # NOT cancel-in-progress — every event has to reach a decision, and a cancelled run
@@ -69,8 +77,53 @@ jobs:
           fi
           echo "ok=true" >> "$GITHUB_OUTPUT"
 
+      # ── Permission BEFORE privilege (#1245) ────────────────────────────────
+      # The App installation token is broader than this job needs; minting it for an
+      # actor who turns out to have no write access hands a privileged credential to the
+      # unauthorized path. So the check moves ahead of the mint, and runs on the DEFAULT
+      # `GITHUB_TOKEN`, which needs no extra scope to read a collaborator permission.
+      #
+      # It does NOT hard-fail. A hard exit here would leave `agent-ready` standing with
+      # no explanation, losing the self-correcting bounce that is the point of #1113 —
+      # trading one hygiene problem for a worse UX one. Instead it records a verdict the
+      # later steps branch on, and the bounce still happens (see below).
+      #
+      # `SENDER` is passed via `env:`, never interpolated into the script body: a login
+      # is constrained, but the shape "untrusted field inside run:" is worth never having.
+      - name: Check the actor may approve, before any privilege is minted
+        id: perm
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SENDER: ${{ github.event.sender.login }}
+        run: |
+          set -eu
+          perm="$(gh api "repos/${GITHUB_REPOSITORY}/collaborators/${SENDER}/permission" \
+                    --jq '.permission' 2>/dev/null || echo "")"
+          case "${perm}" in
+            admin|write|maintain) echo "authorized=true"  >> "$GITHUB_OUTPUT" ;;
+            *)                    echo "authorized=false" >> "$GITHUB_OUTPUT" ;;
+          esac
+          echo "permission=${perm:-none}" >> "$GITHUB_OUTPUT"
+
+      # Bounce WITHOUT the App token. `issues: write` on the default token is a much
+      # narrower credential than an App installation token, so the unauthorized path
+      # costs strictly less privilege than it did before this change.
+      - name: Remove the label and explain, when the actor may not approve
+        if: steps.perm.outputs.authorized != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          ISSUE: ${{ github.event.issue.number }}
+          SENDER: ${{ github.event.sender.login }}
+          PERM: ${{ steps.perm.outputs.permission }}
+        run: |
+          set -eu
+          gh issue edit "$ISSUE" --repo "$GITHUB_REPOSITORY" --remove-label agent-ready >/dev/null 2>&1 || true
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "$(printf '## ⏸ `agent-ready` removed — @%s may not approve issues here\n\nApproving an issue for an agent to build requires write access to this repository; the permission recorded for this account is `%s`.\n\nThe label flip **is** the approval gesture (#1113) — it just has to pass the same gate the CLI does. Nothing was deleted. Ask a maintainer to approve it.' "$SENDER" "$PERM")" >/dev/null 2>&1 || true
+          echo "::notice::Bounced: ${SENDER} holds '${PERM}', which cannot approve."
+
       - name: Mint the App installation token
         id: app
+        if: steps.perm.outputs.authorized == 'true'
         uses: actions/create-github-app-token@f2acddfb5195534d487896a656232b016a682f3c # v1.9.0
         with:
           app-id: ${{ secrets.MINSPEC_APP_ID }}
@@ -80,6 +133,7 @@ jobs:
       # the script reads the issue number, label and sender from $GITHUB_EVENT_PATH
       # itself, so an issue title or body can never reach the shell.
       - name: Approve the issue, or bounce the label and say why
+        if: steps.perm.outputs.authorized == 'true'
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
         run: bash scripts/approve-on-label.sh
