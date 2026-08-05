@@ -45,7 +45,7 @@ function write(rel: string, body: string): void {
 
 function commit(msg: string): string {
   git('add', '-A');
-  git('-c', 'user.email=t@t', '-c', 'user.name=T', 'commit', '-q', '-m', msg);
+  git('commit', '-q', '-m', msg);
   return git('rev-parse', 'HEAD');
 }
 
@@ -63,6 +63,12 @@ function runHook(localSha: string, remoteSha: string = ZERO): { code: number; er
 beforeEach(() => {
   repo = fs.mkdtempSync(path.join(os.tmpdir(), 'prepush-'));
   git('init', '-q', '-b', 'main');
+  // Identity must live in the REPO, not on the individual commit commands: `git rebase`
+  // below creates commits of its own and never sees a `-c user.email` passed to `commit`.
+  // A dev box usually has a global identity so a per-command form still passes locally —
+  // a CI runner has none, and only the rebase case fails there. Set it once, here.
+  git('config', 'user.email', 't@t');
+  git('config', 'user.name', 'T');
   write('.github/workflows/ci.yml', 'name: CI\non: push\n');
   write('src/app.ts', 'export const a = 1;\n');
   const base = commit('base');
