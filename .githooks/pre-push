@@ -47,14 +47,36 @@ while read -r _local_ref local_sha _remote_ref remote_sha; do
   [ -n "${local_sha:-}" ] || continue
   [ "$local_sha" = "$zero" ] && continue          # branch deletion
 
-  if [ "$remote_sha" = "$zero" ]; then
-    # New branch: the remote has no counterpart, so compare against the default
-    # branch instead of diffing against nothing (which would report every file).
-    base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null) || base=''
-    [ -n "$base" ] || base='origin/main'
-    range="$base..$local_sha"
-  else
+  # Mirror what the SERVER evaluates: the ref-update range when there is one, the
+  # merge-base against the default branch when there is not (#1263). Getting here took
+  # three tries, and each wrong turn is worth naming because each was a FALSE REFUSAL —
+  # the direction this hook's header explicitly forbids ("never to become a new obstacle").
+  #
+  #   1. `$base..$local_sha` (two dots). `git diff A..B` is the two-endpoint diff
+  #      `git diff A B`, so every path where the BASE moved ahead was reported as changed
+  #      by this push. Any stale branch was refused as soon as main had touched
+  #      .github/workflows/** since the branch was cut.
+  #
+  #   2. `$remote_sha...$local_sha` for an existing branch. After a rebase the old remote
+  #      tip sits on an ABANDONED history predating main's workflow edits, so the
+  #      merge-base is older than main and the workflow file reappears. Three dots does not
+  #      rescue a base on a discarded line — measured, not assumed.
+  #
+  #   3. `$base...$local_sha` for EVERY case. Correct for new and rebased branches, but it
+  #      re-flags a workflow edit that is ALREADY on the remote, so an ordinary incremental
+  #      push to such a branch is refused for a file it did not change.
+  #
+  # The server judges a ref update by the commits the update actually adds. So: when
+  # `remote_sha` is a real ancestor of `local_sha` this is a fast-forward and that range IS
+  # the answer (two dots are correct precisely because it is an ancestor). Otherwise — new
+  # branch, or a force-push onto a diverged line — fall back to the merge-base against the
+  # default branch, which is what the remote already has.
+  base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null) || base=''
+  [ -n "$base" ] || base='origin/main'
+  if [ "$remote_sha" != "$zero" ] && git merge-base --is-ancestor "$remote_sha" "$local_sha" 2>/dev/null; then
     range="$remote_sha..$local_sha"
+  else
+    range="$base...$local_sha"
   fi
 
   files=$(git diff --name-only "$range" 2>/dev/null) || continue
