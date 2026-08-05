@@ -2,7 +2,7 @@
 id: SPEC-045
 title: GitHub-native approval for all audiences
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 created: 2026-07-21
@@ -12,7 +12,7 @@ relates_to: [SPEC-046, SPEC-047]
 phases:
   specify: done
   clarify: done
-  plan: pending
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

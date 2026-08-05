@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-045-github-native-approval/requirements.md",
+  "specHash": "2b737f2277fed2870b437df7ef330b776a295a46bf06e77c6d724894cadf2360",
+  "approvedAt": "2026-08-05T04:15:20.090Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "d0a3b2e9b78af2e2150bfe2b5c5066045d270aa2"
+}
