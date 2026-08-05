@@ -626,4 +626,12 @@ One rule — which commits the push-protected default branch may receive — is 
 <!-- dr-summary:DR-078 auto=a199d8c14c18 -->
 Two accepted decisions pull in opposite directions, and SPEC-050 FR-8 sits exactly on the seam. The concrete failure (#1225): a developer with MinSpec projects A and B clicks "Always push from now on" while approving in A — a named, deliberate act scoped, in their mind, to A. The write is machine-wide. The next Alt+A in B pushes to B's origin and auto-opens a PR there, with no prompt and no moment at which B was consented to.
 <!-- /dr-summary:DR-078 -->
+
+## [DR-079 — The verdict travels out of band - a reviewer's words must not be able to act as its verdict](DR-079.md)
+
+*Status: proposed · Date: 2026-08-05*
+
+<!-- dr-summary:DR-079 auto=ea255338bf34 -->
+The reviewer panel (DR-033 §6) runs four claude -p agents over a diff. Each is told to emit exactly one block: review-decide.sh then parses that block out of the agent's free-text output, and ai-review.yml extracts it again to render the PR comment.
+<!-- /dr-summary:DR-079 -->
 <!-- minspec:dr-index:end -->
