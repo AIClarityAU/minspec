@@ -82,7 +82,10 @@ set -euo pipefail
 
 REPO="AIClarityAU/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-DISPATCH="${SCRIPT_DIR}/dispatch-issue.sh"
+# Env-overridable for the same reason as MINSPEC_DRAIN_PRIMARY_ROOT below: the
+# #1208 concurrency harness points it at a hermetic stub so the fan-out can be
+# proven to actually overlap without launching real build agents.
+DISPATCH="${MINSPEC_DRAIN_DISPATCH:-${SCRIPT_DIR}/dispatch-issue.sh}"
 TRIAGE="${SCRIPT_DIR}/triage-inbox.sh"
 REMEDIATE="${SCRIPT_DIR}/remediate-pr.sh"
 PREF_FILE="$(cd "${SCRIPT_DIR}/.." && pwd)/.minspec/auto-drain"
@@ -119,7 +122,68 @@ POLL="${MINSPEC_DRAIN_POLL:-30}"                     # liveness-poll granularity
 MAX_LIFETIME="${MINSPEC_DRAIN_MAX_LIFETIME:-28800}"  # 8 h hard cap (backstop)
 MAX_CONSEC_FAIL="${MINSPEC_DRAIN_MAX_FAILURES:-3}"   # stop after N straight errors
 
+# Dispatch fan-out (#1208). Default 1 = the historical strictly-sequential walk,
+# byte-for-byte: parallelism is OPT-IN, never inherited. >1 dispatches up to N
+# issues concurrently, which is what turns spare quota into backlog throughput —
+# wall-clock, not budget, is the binding constraint on a serial drain.
+#
+# Safe because SPEC-044/DR-067 already built the concurrency invariants and the
+# serial loop simply never exercised them: a per-item flock (D11/FR-11),
+# claim-unique worktree paths ${BASE}/issue-N-<sessionId> (D11/INV-7, the fix for
+# the R7 shared-directory corruption), the PR-per-head CAS, and the D12 sequential
+# gate where at-most-one-merge across time actually rests. A racer that loses any
+# of those stands down cleanly (exit 0) rather than colliding.
+#
+# NOT solved here, and deliberately so: two queued issues that touch the SAME file
+# still produce competing PRs, because each agent branches from origin/main and
+# cannot see an unmerged sibling. That is true serially too (it is just slower to
+# hit), so it is tracked separately rather than pretended away — keep the default
+# at 1 until same-file serialisation exists, and de-duplicate the queue first.
+# (assigned below, once _validated_concurrency is defined)
+
 # ── Pure decision helpers (no gh/git/claude — safe to unit-test in isolation) ──
+
+# _validated_concurrency <raw>: echo a usable fan-out width. A malformed or absurd
+# value FAILS SAFE to 1 and says so on stderr — a silently-ignored knob would be a
+# gate that lies about what it is doing. Capped at 8: past that the box, not the
+# model, is the bottleneck, and every extra racer multiplies worktree disk churn.
+_validated_concurrency() {
+  local raw="${1-}"
+  if [[ ! "$raw" =~ ^[1-9][0-9]*$ ]]; then
+    [[ -n "$raw" && "$raw" != "1" ]] && \
+      echo "[drain] WARNING: MINSPEC_DRAIN_CONCURRENCY='${raw}' is not a positive integer — falling back to 1." >&2
+    echo 1; return 0
+  fi
+  if (( raw > 8 )); then
+    echo "[drain] WARNING: MINSPEC_DRAIN_CONCURRENCY=${raw} exceeds the cap of 8 — using 8." >&2
+    echo 8; return 0
+  fi
+  echo "$raw"
+}
+
+# _breaker_decide <halt> <outcomes-csv>: the autocompact circuit-breaker, made a
+# pure function so concurrency cannot quietly weaken it (#912/#1203 — it has now
+# caught a REAL systemic outage twice, so it must stay honest).
+#
+# Serially the rule was "N consecutive thrashed dispatches". Under fan-out
+# "consecutive" is ill-defined, so the rule becomes "the last N COMPLETIONS were
+# all thrash", ordered by completion. For width 1 the two are identical, which is
+# why the default path keeps exactly its old meaning. Outcomes are `1` (thrash) /
+# `0` (not), oldest first. halt=0 disables the breaker.
+_breaker_decide() {
+  local halt="${1:-3}" csv="${2-}"
+  [[ "$halt" == "0" ]] && { echo continue; return 0; }
+  local -a o=(); IFS=',' read -r -a o <<<"$csv"
+  local n=${#o[@]}
+  (( n < halt )) && { echo continue; return 0; }
+  local i
+  for (( i = n - halt; i < n; i++ )); do
+    [[ "${o[$i]}" == "1" ]] || { echo continue; return 0; }
+  done
+  echo halt
+}
+
+DISPATCH_CONCURRENCY="$(_validated_concurrency "${MINSPEC_DRAIN_CONCURRENCY:-1}")"
 
 # is_quota: read combined agent output on stdin; exit 0 iff it is a quota /
 # rate-limit / overload / retry signal (a transient, NOT-your-code condition).
@@ -384,7 +448,7 @@ ensure_fresh_run_dir() {
 #  cycle instead of stopping the loop when the checkout falls behind main.)
 run_cycle() {
   local inbox_issues all_ready n out drc cap
-  local ac_halt ac_sig ac_consec
+  local ac_halt ac_sig
 
   # #773: refresh the run dir FIRST, so triage/dispatch/remediate all execute the
   # CURRENT orchestration (self-heal, not die-on-stale). Never fatal — on failure it
@@ -453,36 +517,107 @@ run_cycle() {
   ac_sig="${MINSPEC_DISPATCH_AUTOCOMPACT_SIG:-Autocompact is thrashing}"
   ac_consec=0
 
-  echo "[drain] dispatching $(echo "$all_ready" | wc -l | tr -d ' ') agent-ready issue(s)..."
-  for n in $all_ready; do
-    echo "[drain] dispatching #$n..."
-    # Stream the dispatch output live to the drain log (via tee) AND capture it so
-    # we can classify a quota/limit signal from the text (dispatch-issue.sh exits 0
-    # even on a quota-blocked claude run — the signal is in the OUTPUT, so we read
-    # the text, never the exit code, exactly as review-branch.sh does).
-    cap=$(mktemp)
-    if "$DISPATCH" "$n" 2>&1 | tee "$cap"; then drc=0; else drc=$?; fi
-    out=$(cat "$cap" 2>/dev/null || true); rm -f "$cap"
-    if is_quota <<<"$out"; then
-      echo "[drain] Claude usage-limit signal while dispatching #$n — pausing this cycle (will back off, not fail)."
-      return 42
-    fi
-    [[ "$drc" -ne 0 ]] && echo "[drain] WARNING: dispatch failed for #$n (rc=$drc)"
-    # #912: track consecutive autocompact-thrash crashes; halt the dispatch loop
-    # once the run reaches the threshold (the dispatch path is broken this cycle).
+  echo "[drain] dispatching $(echo "$all_ready" | wc -l | tr -d ' ') agent-ready issue(s) (concurrency=${DISPATCH_CONCURRENCY})..."
+
+  # `ac_outcomes` is the breaker's completion-ordered history for this cycle: `1`
+  # per dispatch that carried the thrash signature, `0` otherwise. Both paths below
+  # append to it and both ask the SAME pure `_breaker_decide`, so widening the fan-out
+  # can never quietly weaken the gate that has already caught two real outages.
+  local ac_outcomes=""
+
+  # classify_dispatch <issue> <rc> <output>: shared post-processing for one finished
+  # dispatch. Prints "<thrash><quota>" as two digits. It must RETURN both verdicts
+  # rather than set a variable: every call site runs it inside `$(...)`, which is a
+  # SUBSHELL, so an assignment made in here would be discarded and the quota pause
+  # would silently never fire. Reads the TEXT, never the exit code — dispatch-issue.sh
+  # exits 0 even on a quota-blocked claude run.
+  classify_dispatch() {
+    local n="$1" drc="$2" out="$3" thrash=0 quota=0
+    is_quota <<<"$out" && quota=1
+    [[ "$drc" -ne 0 ]] && echo "[drain] WARNING: dispatch failed for #$n (rc=$drc)" >&2
     if [[ "$ac_halt" != "0" ]] && grep -qiF -- "$ac_sig" <<<"$out"; then
-      ac_consec=$(( ac_consec + 1 ))
-      echo "[drain] ⚠️  dispatch #$n crashed with the autocompact context-thrash signature (${ac_consec}/${ac_halt} consecutive) — see #912."
-      if (( ac_consec >= ac_halt )); then
-        echo "[drain] 🛑 HALTING dispatch for the rest of this cycle: ${ac_consec} consecutive dispatches crashed with '${ac_sig}'." >&2
-        echo "[drain]     The dispatched build agent is starting near the context limit — refusing to burn more quota on a broken path (#912)." >&2
-        echo "[drain]     Tune/disable with MINSPEC_DISPATCH_AUTOCOMPACT_HALT=<N> (0 disables). PR remediation (Step 3) still runs." >&2
-        break
-      fi
-    else
-      ac_consec=0
+      echo "[drain] ⚠️  dispatch #$n crashed with the autocompact context-thrash signature — see #912." >&2
+      thrash=1
     fi
-  done
+    printf '%s%s' "$thrash" "$quota"
+  }
+
+  announce_halt() {
+    echo "[drain] 🛑 HALTING dispatch for the rest of this cycle: the last ${ac_halt} dispatches to COMPLETE all crashed with '${ac_sig}'." >&2
+    echo "[drain]     The dispatched build agent is starting near the context limit — refusing to burn more quota on a broken path (#912)." >&2
+    echo "[drain]     Tune/disable with MINSPEC_DISPATCH_AUTOCOMPACT_HALT=<N> (0 disables). PR remediation (Step 3) still runs." >&2
+  }
+
+  local saw_quota=0 verdict=""
+
+  if (( DISPATCH_CONCURRENCY <= 1 )); then
+    # ── Serial path — the historical behaviour, unchanged. Output still streams
+    # LIVE through `tee`, which matters for a multi-minute build: a captured-then-
+    # dumped block would leave the log silent while work is happening.
+    for n in $all_ready; do
+      echo "[drain] dispatching #$n..."
+      cap=$(mktemp)
+      if "$DISPATCH" "$n" 2>&1 | tee "$cap"; then drc=0; else drc=$?; fi
+      out=$(cat "$cap" 2>/dev/null || true); rm -f "$cap"
+      verdict="$(classify_dispatch "$n" "$drc" "$out")"
+      ac_outcomes="${ac_outcomes:+$ac_outcomes,}${verdict:0:1}"
+      [[ "${verdict:1:1}" == "1" ]] && saw_quota=1
+      if (( saw_quota )); then
+        echo "[drain] Claude usage-limit signal while dispatching #$n — pausing this cycle (will back off, not fail)."
+        return 42
+      fi
+      [[ "$(_breaker_decide "$ac_halt" "$ac_outcomes")" == "halt" ]] && { announce_halt; break; }
+    done
+  else
+    # ── Parallel path (#1208) — launch up to N, reap as they finish.
+    # Each job tees to its own capture file AND to a per-issue prefixed stream, so
+    # concurrent builds stay live AND readable instead of interleaving anonymously.
+    local -A pid_issue=() pid_cap=()
+    local -a queue=($all_ready)
+    local qi=0 stop_launching=0 p rc n out
+
+    launch_next() {
+      local n="${queue[$qi]}"; qi=$(( qi + 1 ))
+      local cap; cap=$(mktemp)
+      echo "[drain] dispatching #$n... (in flight: $(( ${#pid_issue[@]} + 1 ))/${DISPATCH_CONCURRENCY})"
+      ( "$DISPATCH" "$n" 2>&1 | tee "$cap" | sed -u "s/^/[#${n}] /" ) &
+      local pid=$!
+      pid_issue[$pid]="$n"; pid_cap[$pid]="$cap"
+    }
+
+    while (( qi < ${#queue[@]} || ${#pid_issue[@]} > 0 )); do
+      while (( ! stop_launching && qi < ${#queue[@]} && ${#pid_issue[@]} < DISPATCH_CONCURRENCY )); do
+        launch_next
+      done
+      (( ${#pid_issue[@]} == 0 )) && break
+
+      # Reap exactly one finished job. `wait -n -p` needs bash 5.1+; `|| rc=$?` keeps
+      # a failed child from tripping `set -e`.
+      p=""; rc=0
+      wait -n -p p || rc=$?
+      [[ -z "$p" ]] && continue
+      n="${pid_issue[$p]:-}"; [[ -z "$n" ]] && continue
+      out=$(cat "${pid_cap[$p]}" 2>/dev/null || true); rm -f "${pid_cap[$p]}"
+      unset 'pid_issue[$p]' 'pid_cap[$p]'
+
+      verdict="$(classify_dispatch "$n" "$rc" "$out")"
+      ac_outcomes="${ac_outcomes:+$ac_outcomes,}${verdict:0:1}"
+      [[ "${verdict:1:1}" == "1" ]] && saw_quota=1
+
+      # A quota signal or a tripped breaker stops us LAUNCHING more, but never
+      # abandons work already in flight — an orphaned build would hold its claim
+      # until the TTL lapsed and leave a worktree behind.
+      if (( saw_quota )) && (( ! stop_launching )); then
+        echo "[drain] Claude usage-limit signal while dispatching #$n — draining ${#pid_issue[@]} in-flight build(s), then pausing this cycle."
+        stop_launching=1
+      fi
+      if (( ! stop_launching )) && [[ "$(_breaker_decide "$ac_halt" "$ac_outcomes")" == "halt" ]]; then
+        announce_halt; stop_launching=1
+      fi
+    done
+
+    (( saw_quota )) && return 42
+  fi
 
   # Step 3: sweep open PRs for FIXABLE problems and auto-remediate them (conflicts
   # are surfaced, not touched). remediate-pr.sh owns ALL the decision-making —
@@ -571,6 +706,20 @@ run_loop() {
 }
 
 case "${1:-}" in
+  --concurrency)
+    # Pure seam (#1208): print the VALIDATED fan-out width the loop would use, so a
+    # test can assert the default and the fail-safe without running a dispatch.
+    _validated_concurrency "${MINSPEC_DRAIN_CONCURRENCY:-1}"
+    exit 0
+    ;;
+  --breaker-decide)
+    # Pure seam (#1208): `--breaker-decide <halt> <outcomes-csv>` → halt|continue.
+    # The autocompact breaker is the gate that caught two real outages, so its rule
+    # is unit-tested directly rather than inferred from a live run.
+    shift
+    _breaker_decide "${1-}" "${2-}"
+    exit 0
+    ;;
   --pref-path)
     # Single source of truth for the opt-in pref location. The session-start
     # hook lives one directory deeper (scripts/hooks/) than this script, so it
