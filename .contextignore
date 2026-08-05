@@ -1,0 +1,67 @@
+# .contextignore — files an agent must never spend context reading.
+#
+# Read by claude-context-optimizer (MIT, github.com/egorfedorov/claude-context-optimizer),
+# which blocks `Read` on a match and tells the agent to Grep instead. Same syntax as
+# .gitignore.
+#
+# WHY THIS FILE EXISTS, beyond saving tokens: `skills/scrooge-delegate` already carries
+# the rule "never hand a subagent a task that must read a large or generated file
+# (>~30-50 KB, minified/base64/lockfile) — it thrashes a small-context subagent even when
+# perfectly specified". That was prose the model had to remember. This file makes it a
+# gate. Same "enforce, don't trust the model" move as the constitution's other rules.
+#
+# Entries are evidence-based: sized against `git ls-files | xargs du -k | sort -rn`
+# 2026-08-05, plus the untracked build/tooling dirs actually present in this checkout.
+#
+# TO ALLOW A BLOCKED READ: delete its line. To search inside a blocked file, use Grep —
+# it is not blocked, and it is the right tool for a lockfile or a bundle anyway.
+
+# ── Dependency + build output (never source of truth; regenerate, don't read) ──
+node_modules/**
+package-lock.json
+**/out/**
+**/dist/**
+coverage/**
+*.vsix
+*.tsbuildinfo
+
+# ── Generated / machine-owned state ───────────────────────────────────────────
+# .codegraph is a 33MB SQLite index — query it via the codegraph MCP tools, never read it.
+.codegraph/**
+.minspec/generated-hashes.json
+**/*.generated.*
+**/*.snap
+
+# ── Minified or bundled artifacts ─────────────────────────────────────────────
+*.min.js
+*.min.css
+*.map
+
+# ── Binary media (a Read spends tokens and returns nothing useful) ────────────
+# Site imagery and extension marketing assets: 800KB+ PNGs at the top of the size list.
+*.png
+*.jpg
+*.jpeg
+*.gif
+*.ico
+*.webp
+*.pdf
+*.woff
+*.woff2
+*.ttf
+*.eot
+sites/**/img/old/**
+
+# ── Lockfiles of other ecosystems (present or future) ─────────────────────────
+yarn.lock
+pnpm-lock.yaml
+*.lock
+
+# ── NOT ignored, deliberately ─────────────────────────────────────────────────
+# packages/minspec/src/lib/ci-review-templates.ts is 256KB / 2500 lines, the largest
+# source file here — but it is hand-maintained source with zero long/base64 lines
+# (checked: 0 lines over 200 chars), and the ai-review prompts live in it. Blocking it
+# would hide load-bearing logic. Read it with offset/limit instead.
+#
+# specs/**, docs/**, .minspec/** (except generated-hashes.json) stay readable — they are
+# the approvables, and reading them before changing them is the whole methodology.
