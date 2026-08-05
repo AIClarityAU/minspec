@@ -83,6 +83,18 @@ const BLOCKED_BY = 'blocked-by';
 // "Blocked by" reads as a declaration in every corpus I checked. One unambiguous
 // form beats two fuzzy ones — a second form can be added if a real body wants it.
 const BLOCKED_BY_LINE_RE = /^[\s>*_-]*\**\s*blocked\s+by\b\**\s*:?\s*(.+)$/gim;
+
+// Only the LEADING run of refs on a declaring line counts: `#N`, separated by
+// commas/`and`/whitespace. Scanning stops at the first token that is not one of
+// those, so a trailing explanation cannot smuggle in a second blocker.
+//
+// Found by using it: the first real declaration written against this parser read
+//   Blocked by #1225 — … (DR-078, merged as `proposed` in #1246, awaiting Accept)
+// and a whole-line scan returned [1225, 1246]. #1246 was already closed so nothing
+// broke, but the declaration was wrong, and a closed ref today is an open one
+// tomorrow. An explanation after the refs is the natural way to write this, so the
+// grammar has to expect it rather than the author having to remember.
+const BLOCKED_BY_REFS_RE = /^(?:\s*(?:,|and\b)?\s*#\d+)+/i;
 const ISSUE_REF_RE = /#(\d+)\b/g;
 
 // Detect, from a failed `claude -p` reviewer invocation's combined output, whether
@@ -505,8 +517,12 @@ function parseBlockedBy(body) {
   let line;
   while ((line = BLOCKED_BY_LINE_RE.exec(text)) !== null) {
     // Only the remainder of the declaring line is scanned for refs, so a `#N`
-    // three paragraphs later is never swept into an unrelated declaration.
-    const rest = line[1];
+    // three paragraphs later is never swept into an unrelated declaration — and
+    // only its LEADING ref run, so a trailing explanation on the same line
+    // cannot either.
+    const refRun = BLOCKED_BY_REFS_RE.exec(line[1]);
+    if (!refRun) continue;
+    const rest = refRun[0];
     ISSUE_REF_RE.lastIndex = 0;
     let ref;
     while ((ref = ISSUE_REF_RE.exec(rest)) !== null) found.add(Number(ref[1]));

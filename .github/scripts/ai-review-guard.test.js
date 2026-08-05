@@ -868,3 +868,22 @@ test('#1247: BLOCKED_BY is distinct from the reviewer-transient ai-review:blocke
   assert.equal(BLOCKED_BY, 'blocked-by');
   assert.equal(BLOCKED, 'ai-review:blocked');
 });
+
+test('parseBlockedBy: a trailing explanation on the SAME line cannot smuggle in a ref', () => {
+  // The exact line that exposed this — written by hand against the first revision,
+  // which returned [1225, 1246] because it scanned the whole line.
+  const body =
+    'Blocked by #1225 — FR-8 cannot be implemented until the standing-consent store ' +
+    'is settled (DR-078, merged as `proposed` in #1246, awaiting *Accept ADR*).';
+  assert.deepEqual(parseBlockedBy(body), [1225]);
+});
+
+test('parseBlockedBy: multiple refs still work before an explanation', () => {
+  assert.deepEqual(parseBlockedBy('Blocked by #7, #9 and #11 — see the thread on #4242.'), [7, 9, 11]);
+  assert.deepEqual(parseBlockedBy('Blocked by: #7, #9'), [7, 9]);
+});
+
+test('parseBlockedBy: a declaration with NO leading ref yields nothing', () => {
+  // "Blocked by the release freeze (see #1225)" is prose, not a declaration.
+  assert.deepEqual(parseBlockedBy('Blocked by the release freeze (see #1225).'), []);
+});
