@@ -47,25 +47,26 @@ while read -r _local_ref local_sha _remote_ref remote_sha; do
   [ -n "${local_sha:-}" ] || continue
   [ "$local_sha" = "$zero" ] && continue          # branch deletion
 
-  # THREE dots, not two (#1263). `git diff A..B` is the TWO-ENDPOINT diff `git diff A B`,
-  # so it reports every path where the BASE moved ahead as though this push changed it —
-  # and any branch even slightly stale was then refused the moment main had touched
-  # .github/workflows/** since the branch was cut. `A...B` diffs from the merge-base, i.e.
-  # exactly the changes this push introduces. The hook's contract is to fail OPEN; the
-  # two-dot form made it fail closed on correct work and sent the user to an org-owner
-  # permission change that was never the cause.
-  if [ "$remote_sha" = "$zero" ]; then
-    # New branch: the remote has no counterpart, so compare against the default
-    # branch instead of diffing against nothing (which would report every file).
-    base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null) || base=''
-    [ -n "$base" ] || base='origin/main'
-    range="$base...$local_sha"
-  else
-    # Three dots here too: for an ordinary fast-forward `remote_sha` is an ancestor and the
-    # two forms agree, but after a rebase the endpoints sit on diverged histories and the
-    # two-dot form mis-reports there for the same reason.
-    range="$remote_sha...$local_sha"
-  fi
+  # Always `<default-branch>...<local>` (#1263). Two things were wrong before:
+  #
+  #   1. TWO dots. `git diff A..B` is the two-endpoint diff `git diff A B`, so every path
+  #      where the BASE moved ahead was reported as changed by this push. Any branch even
+  #      slightly stale was refused the moment main had touched .github/workflows/** since
+  #      the branch was cut. `A...B` diffs from the merge-base — the changes this push
+  #      actually introduces.
+  #
+  #   2. Using `remote_sha` as the base for an existing branch. After a rebase the old
+  #      remote tip sits on an ABANDONED history that predates main's workflow edits, so
+  #      merge-base(old_tip, new_tip) is older than main and the workflow file reappears in
+  #      the diff. Three dots alone does not save it — measured, not assumed: the diverged
+  #      case failed against both the two-dot and the `remote_sha...` forms.
+  #
+  # The default branch is the right base in every case, because it is what the server
+  # already has. `base...local_sha` is exactly "workflow files this push would add on top
+  # of main", which is the question the server-side permission check asks.
+  base=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null) || base=''
+  [ -n "$base" ] || base='origin/main'
+  range="$base...$local_sha"
 
   files=$(git diff --name-only "$range" 2>/dev/null) || continue
   [ -n "$files" ] || continue

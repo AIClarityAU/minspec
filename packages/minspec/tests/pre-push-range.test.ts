@@ -109,14 +109,37 @@ describe('#1263 pre-push gate judges only the pushed commits', () => {
     expect(code).not.toBe(0);
   });
 
-  it('ALLOWS an update to an existing remote branch whose base moved on', () => {
-    // The `else` arm: remote_sha is a real ancestor here, but the same three-dot
-    // reasoning must hold once histories diverge (e.g. a force-push after a rebase).
+  it('ALLOWS a fast-forward update to an existing remote branch', () => {
+    // NOTE: `first` is a linear ancestor of `second`, so `first..second` and
+    // `first...second` are identical and this case passes against the UNFIXED hook
+    // too. It is a guard against regressing the ordinary path, NOT evidence for the
+    // else-arm fix — the diverged case below is what proves that.
     write('src/feature.ts', 'export const b = 2;\n');
     const first = commit('first');
     write('src/more.ts', 'export const c = 3;\n');
     const second = commit('second');
     const { code, err } = runHook(second, first);
+    expect(err).not.toMatch(/refusing to push/);
+    expect(code).toBe(0);
+  });
+
+  it('ALLOWS a force-push after a rebase, where remote_sha is on the ABANDONED line', () => {
+    // The else-arm's actual claim. `remote_sha` here is NOT an ancestor of `local_sha`:
+    // the branch was rebased onto the advanced main, so the old tip sits on a discarded
+    // history that predates main's workflow edit. Two-dot then reports that workflow file
+    // as changed by this push; three-dot diffs from the merge-base and does not.
+    write('src/feature.ts', 'export const b = 2;\n');
+    const oldTip = commit('feature work, pushed before the rebase');
+
+    git('rebase', 'origin/main');
+    const newTip = git('rev-parse', 'HEAD');
+
+    // Prove the premise rather than assume it: the histories really did diverge, so
+    // `oldTip` is NOT an ancestor of `newTip` (`--is-ancestor` exits nonzero => throws).
+    expect(newTip).not.toBe(oldTip);
+    expect(() => git('merge-base', '--is-ancestor', oldTip, newTip)).toThrow();
+
+    const { code, err } = runHook(newTip, oldTip);
     expect(err).not.toMatch(/refusing to push/);
     expect(code).toBe(0);
   });
