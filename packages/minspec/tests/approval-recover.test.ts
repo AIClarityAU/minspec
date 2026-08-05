@@ -167,7 +167,10 @@ describe('recoverProtectedBranchApproval — #1115', () => {
       expect(res.error).toContain('DR-029');
     });
 
-    it('an unexpected throw anywhere still degrades to failed, never propagates', async () => {
+    it('a non-Error thrown by the FIRST step is caught by that step, not the backstop', async () => {
+      // Renamed after review on #1255: the previous name claimed to exercise the
+      // outer INV-2 backstop, but `remote` has its own catch so it never got there.
+      // A test whose name overstates what it covers is worse than no test.
       const run: GitRun = async () => {
         throw { toString: () => 'weird non-Error' };
       };
@@ -176,8 +179,36 @@ describe('recoverProtectedBranchApproval — #1115', () => {
         run,
         mkTempDir: mkTemp,
       });
-      expect(res.outcome).toBe('no-remote'); // first step fails → typed, not thrown
+      expect(res.outcome).toBe('no-remote');
     });
+
+    it('INV-2 backstop: a throw from OUTSIDE any step-local catch still returns a typed result', async () => {
+      // mkTempDir sits between the `fetch` catch and the worktree catch, so it is
+      // the one seam reaching the function-level backstop. Verified by construction:
+      // if the backstop were removed this rejects instead of resolving.
+      const fx = fixture();
+      const res = await recoverProtectedBranchApproval(fx.root, fx.absPaths, 'm', OPTS, {
+        run: recorder().run,
+        mkTempDir: () => {
+          throw new Error('ENOSPC: no space left on device');
+        },
+      });
+      expect(res.outcome).toBe('failed');
+      expect(res.error).toContain('ENOSPC');
+    });
+  });
+
+  it('#1255: honours an explicit baseBranch — recovery is not hardcoded to main', async () => {
+    // The destination guard protects main/master/trunk, so a master-default repo
+    // must fetch and branch off `master`. Defaulting to `main` made the whole
+    // feature silently inert there.
+    const r = recorder();
+    await recover(r, fixture(), { baseBranch: 'master' });
+    const fetch = r.calls.find((c) => c[0] === 'fetch')!;
+    expect(fetch).toStrictEqual(['fetch', 'origin', 'master']);
+    const add = r.calls.find((c) => c[0] === 'worktree')!;
+    expect(add).toContain('origin/master');
+    expect(add).not.toContain('origin/main');
   });
 
   it('no delta vs the base → nothing-to-commit, and NO empty commit is made', async () => {

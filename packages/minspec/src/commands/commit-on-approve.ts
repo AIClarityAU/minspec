@@ -55,6 +55,7 @@ async function recoverOnProtectedBranch(
   absPaths: readonly string[],
   message: string,
   current: string,
+  baseBranch: string | undefined,
 ): Promise<{ suffix: string } | undefined> {
   const mode = pushOnApproveMode();
   if (mode === 'never') return undefined;
@@ -73,7 +74,13 @@ async function recoverOnProtectedBranch(
   const slug = (absPaths[0] ?? message).split(/[\\/]/).slice(-2).join('-').replace(/\.[a-z]+$/i, '');
   let res: RecoverResult;
   try {
-    res = await recoverProtectedBranchApproval(rootDir, absPaths, message, { slug });
+    // baseBranch MUST be the branch the guard actually refused, not a hardcoded
+    // 'main'. The destination guard fires on whatever `origin/HEAD` resolves to —
+    // and its fallback list is `main master trunk` — so on a `master`- or
+    // `trunk`-default repo, defaulting to `main` would `fetch origin main`, fail,
+    // and silently degrade to the honest warning. Recovery would be inert for a
+    // whole class of repos while appearing to be built. Caught in review on #1255.
+    res = await recoverProtectedBranchApproval(rootDir, absPaths, message, { slug, baseBranch });
   } catch (err) {
     // Defensive: the seam documents never-throws, but relying on that transitively
     // would let a future change there break an approval toast that has nothing to
@@ -138,7 +145,13 @@ export async function commitApprovalIfEnabled(
       // §4a) — approval-recover.ts copies into a separate worktree with a separate
       // index, and this arm still stages nothing in the primary.
       const current = result.branch?.current ?? 'the default branch';
-      const recovery = await recoverOnProtectedBranch(rootDir, absPaths, message, current);
+      const recovery = await recoverOnProtectedBranch(
+        rootDir,
+        absPaths,
+        message,
+        current,
+        result.branch?.current,
+      );
       if (recovery) return { ...recovery, result };
 
       // Fallback — unchanged: consent withheld, or recovery failed. Say plainly what
