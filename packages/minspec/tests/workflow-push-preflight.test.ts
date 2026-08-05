@@ -518,18 +518,38 @@ describe('the credential probe reads the push credential, not the machine', () =
       return;
     }
 
+    // script(1) runs its command through $SHELL, falling back to /bin/sh. That made
+    // this test depend on the AMBIENT shell of whoever launched vitest: bash from an
+    // interactive terminal (green), /bin/sh -> dash from the VS Code extension host
+    // (red). workflow-paths.sh is bash — `${BASH_SOURCE[0]}` alone makes dash exit
+    // with "Bad substitution" — so under the Testing panel this test failed with
+    //   expected 'sh: 183: …' to match /not-app/
+    // while passing from the CLI. Production is unaffected: .githooks/pre-push
+    // carries `#!/usr/bin/env bash`, so git never runs the lib under dash.
+    //
+    // The earlier guard checked that script EXISTS and is util-linux — a precondition
+    // this test already controlled — and never the one that actually varied: which
+    // shell the command would run under. Naming bash explicitly removes the variable
+    // rather than detecting it. Via a temp file, not `bash -c "…"`, so the snippet
+    // needs no second level of quoting inside script's own argument.
     const dir = probeRepo({}); // chain reset, no helper appended
-    const r = spawnSync(
-      'script',
-      [
-        '-qec',
-        `. "${repoRoot}/scripts/lib/workflow-paths.sh"; ` +
-          'push_credential_is_app_token && echo app || echo not-app',
-        '/dev/null',
-      ],
-      { cwd: dir, encoding: 'utf8', timeout: 15_000 },
+    const snippet = path.join(dir, 'probe.sh');
+    fs.writeFileSync(
+      snippet,
+      '#!/usr/bin/env bash\n' +
+        `. "${repoRoot}/scripts/lib/workflow-paths.sh"\n` +
+        'push_credential_is_app_token && echo app || echo not-app\n',
     );
+
+    const r = spawnSync('script', ['-qec', `bash ${snippet}`, '/dev/null'], {
+      cwd: dir,
+      encoding: 'utf8',
+      timeout: 15_000,
+    });
     const seen = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+    // Fail loudly if the harness itself broke, rather than letting a shell error
+    // satisfy "no prompt appeared" and turn this green for the wrong reason.
+    expect(seen, 'script/bash harness did not run').not.toMatch(/Bad substitution|not found/);
     expect(seen).not.toMatch(/Username for/);
     expect(seen).toMatch(/not-app/);
   });
