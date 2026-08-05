@@ -79,6 +79,24 @@ const SPEC_100 = [
   '',
 ].join('\n');
 
+function drFixture(id: string, status: string): string {
+  return [
+    '---',
+    `id: ${id}`,
+    'title: Demo decision',
+    `status: ${status}`,
+    'date: 2026-07-01',
+    '---',
+    '',
+    `# ${id}: Demo decision`,
+    '',
+    '## Status',
+    '',
+    `**${status.charAt(0).toUpperCase()}${status.slice(1)}**, 2026-07-01`,
+    '',
+  ].join('\n');
+}
+
 describe('scripts/facts.ts — the read-only facts oracle CLI (#1050)', () => {
   it('prints usage and exits 1 with no command', () => {
     const { status, output } = run(tempRoot(), []);
@@ -191,6 +209,53 @@ describe('scripts/facts.ts — the read-only facts oracle CLI (#1050)', () => {
     expect(output).toContain('frontmatter status:  implementing');
     expect(output).toContain('derived status:      specifying');
     expect(output).toContain('verdict:             DRIFT');
+  });
+
+  // #1067 — `facts status` on a DR used to run the SPEC status pipeline, which
+  // silently coerces any status: value outside SPEC_STATUSES (every DR status is)
+  // to 'new', and then printed a false 'verdict: MATCH'. One case per AdrStatus
+  // value (fix item 4): each must report its OWN status, not 'new', and must never
+  // print MATCH/DRIFT since nothing derived is being compared for a DR.
+  for (const drStatus of ['proposed', 'accepted', 'deprecated', 'superseded']) {
+    it(`status: a DR with status '${drStatus}' reports '${drStatus}', not 'new', and never MATCH — the #1067 class`, () => {
+      const root = tempRoot();
+      writeSpecFile(root, 'docs/decisions/DR-900.md', drFixture('DR-900', drStatus));
+
+      const { status, output } = run(root, ['status', 'docs/decisions/DR-900.md']);
+
+      expect(status).toBe(0);
+      expect(output).toContain(`frontmatter status:  ${drStatus}`);
+      expect(output).not.toContain('frontmatter status:  new');
+      expect(output).toContain('derived status:      n/a');
+      expect(output).toContain('verdict:             n/a');
+      expect(output).not.toContain('verdict:             MATCH');
+      expect(output).not.toContain('verdict:             DRIFT');
+    });
+  }
+
+  it('status: a DR with an unrecognised status says so explicitly instead of silently defaulting', () => {
+    const root = tempRoot();
+    writeSpecFile(root, 'docs/decisions/DR-901.md', drFixture('DR-901', 'bogus'));
+
+    const { status, output } = run(root, ['status', 'docs/decisions/DR-901.md']);
+
+    expect(status).toBe(0);
+    expect(output).toContain('frontmatter status:  bogus (not a DR status');
+    expect(output).not.toContain('frontmatter status:  new');
+    expect(output).toContain('verdict:             n/a');
+  });
+
+  it('status: a spec with an unrecognised status says so explicitly instead of silently defaulting to new', () => {
+    const root = tempRoot();
+    const spec = SPEC_100.replace('status: implementing', 'status: proposed');
+    writeSpecFile(root, 'specs/demo/SPEC-100/requirements.md', spec);
+
+    const { status, output } = run(root, ['status', 'specs/demo/SPEC-100/requirements.md']);
+
+    expect(status).toBe(0);
+    expect(output).toContain('frontmatter status:  proposed (not a spec status — is this a DR?)');
+    expect(output).not.toContain('frontmatter status:  new');
+    expect(output).toContain('verdict:             n/a — frontmatter status is not a recognised spec status');
   });
 
   it('fields: tier is required for a primary spec but not for a secondary split-layout file', () => {
