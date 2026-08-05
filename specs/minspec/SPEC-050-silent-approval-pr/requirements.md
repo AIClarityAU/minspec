@@ -6,7 +6,7 @@ type: requirements
 # RULE (state-independent): `status` is a tool-written mirror of the DERIVED lifecycle status,
 # written ONLY by "MinSpec: Approve Spec" (approve.ts:284) together with the sidecar. An agent
 # must never hand-write either. Read the sidecar, never this prose, for the current state.
-status: specifying
+status: planning
 tier: T2
 product: minspec
 epic: EPIC-009  # Team Readiness — docs-lane push ergonomics; grain (b) of #575/#781, the sibling of SPEC-039's grain (a)
@@ -25,7 +25,7 @@ affects: [packages/minspec/package.json, packages/minspec/src/commands/push-docs
 phases:
   specify: done
   clarify: done
-  plan: pending
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
