@@ -30,14 +30,21 @@ phases:
 >    `done` is therefore accurate about the *code* and misleading about the *approval* —
 >    `deriveStatus` floors an unapproved spec to `specifying` (INV-1), so the fact oracle
 >    reports DRIFT. **Re-approval is a real human act, not a formality.**
-> 2. **AC-6 / INV-No-fabricated-diff no longer matches the shipped resolver.** AC-6 (:228-231)
->    requires that an unrecoverable baseline shows "baseline unavailable" and opens no diff.
->    The shipped path is `recoverBaseline(...) ?? recoverBaselineFromHistory(...)`
->    (`packages/minspec/src/lib/approval.ts:172` and `:225`) — when the blob is unrecoverable
->    it walks `git log` for the spec path and reconstructs the approved body from the first
->    committed version (#701). So a diff *is* opened in a case AC-6 says must not open one.
->    Whether that reconstruction counts as "fabricated" under the invariant is the open
->    question; AC-6 as written is not what the code does.
+> 2. **AC-6's precondition is stale — but the invariant it protects still holds.** AC-6
+>    (:228-231) keys "baseline unavailable, open no diff" on `baselineBlob === ''` or a
+>    pruned blob. Since #701 the shipped path is
+>    `recoverBaseline(...) ?? recoverBaselineFromHistory(...)`
+>    (`packages/minspec/src/lib/approval.ts:172` and `:225`), so those two conditions no
+>    longer imply unrecoverable: the fallback walks the spec's own git history and returns a
+>    body **only** when `specHash(content) === record.specHash` (`approval.ts:251-252`) —
+>    the exact bytes the human approved, verified by hash — and returns `undefined`
+>    otherwise (`:255`), degrading to the same "baseline unavailable" message.
+>    **`INV-No-fabricated-diff` is therefore upheld, not violated**: nothing is
+>    reconstructed or approximated, and a non-matching history yields no diff. Reword AC-6
+>    to trigger on *"baseline unrecoverable after both `recoverBaseline` and the history
+>    fallback"* rather than on `baselineBlob === ''`, and add a case for the now-recoverable
+>    legacy/never-travelled-blob records (which #404's `classifyBaseline` already
+>    distinguishes). This is a precondition edit, not a design change.
 > 3. **Every `approval.ts` citation below has rotted.** The file is now 562 lines.
 >    `getApprovalStatus` is at :488 and `resolveStatus` at :478 (cited 228-235);
 >    `getApprovalRecord` at :494 (cited :235); `mintBaseline` at :131 and `recoverBaseline`
