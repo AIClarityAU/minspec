@@ -203,6 +203,22 @@ export interface ScaffoldCommitter {
   /** Create and switch to `name`, so the commit lands somewhere pushable. */
   createBranch?(name: string): Promise<void>;
   /**
+   * Whether a local branch called `name` already exists.
+   *
+   * {@link createBranch} is create-only (`git checkout -b`), so handing it a
+   * taken name is a hard error, not a fallback. Refresh is a RECURRING
+   * operation and its branch name was a CONSTANT, so the first refresh in a
+   * repo created the branch, its PR merged, the local ref survived (merged
+   * branches are not auto-deleted; a deleted remote only marks the local ref
+   * `[gone]`), and every later refresh collided — the offer dead-ended with
+   * the tree still dirty and no alternative name (#1298).
+   *
+   * Optional for the same reason `branchInfo` is: a committer that does not
+   * implement it is treated as "cannot tell", and cannot-tell falls through to
+   * the base name, which is exactly the previous behaviour.
+   */
+  branchExists?(name: string): Promise<boolean>;
+  /**
    * Of `paths`, which currently show uncommitted changes (staged, unstaged, or
    * untracked) per `git status`. Used to decide whether the recoverable commit
    * offer (#758) has anything to do — a scaffolded path that's already
@@ -318,6 +334,23 @@ export async function defaultCommitter(folder: string): Promise<ScaffoldCommitte
     async createBranch(name) {
       await git.checkout(['-b', name]);
     },
+    async branchExists(name) {
+      try {
+        // `--verify --quiet` prints the sha and exits 0 when the ref resolves,
+        // and exits 1 with no output when it does not. simple-git surfaces the
+        // non-zero exit as a throw, so both outcomes are covered.
+        const sha = await git.raw(['rev-parse', '--verify', '--quiet', `refs/heads/${name}`]);
+        return sha.trim().length > 0;
+      } catch {
+        // A ref that cannot be resolved is the ordinary "does not exist" case.
+        // Any other git failure lands here too, and reporting "free" is the
+        // safe read: the caller then tries the base name and, if that really is
+        // taken, `createBranch` fails exactly as it did before this probe
+        // existed. Guessing "taken" would instead push every repo onto a
+        // suffixed branch it never needed.
+        return false;
+      }
+    },
     async dirty(paths) {
       if (paths.length === 0) return [];
       try {
@@ -345,6 +378,11 @@ export interface OfferScaffoldCommitDeps {
    * diverge on WHETHER they offer to commit — only on the label.
    */
   variant?: 'scaffold' | 'refresh';
+  /**
+   * `YYYY-MM-DD` used to disambiguate a taken branch name. Injectable purely so
+   * tests can assert the exact branch created without depending on the clock.
+   */
+  today?: string;
 }
 
 /**
@@ -402,7 +440,14 @@ export async function offerScaffoldCommit(
       COMMIT_ANYWAY_ACTION,
     );
     if (choice === BRANCH_COMMIT_ACTION) {
-      const name = harnessBranchName(refresh);
+      // Resolve to a name that is FREE before creating it. `createBranch` is
+      // create-only, so a taken name is a hard failure with the tree left dirty
+      // and nothing else offered (#1298).
+      const name = await safeUniqueBranchName(
+        committer,
+        harnessBranchName(refresh),
+        deps.today ?? todayStamp(),
+      );
       try {
         if (!committer.createBranch) throw new Error('committer cannot create branches');
         await committer.createBranch(name);
@@ -438,6 +483,78 @@ async function safeBranchInfo(
     return (await committer.branchInfo?.()) ?? null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * How many numbered candidates {@link uniqueBranchName} will try after the
+ * dated one. A bound, not a budget: reaching it means something is wrong with
+ * the repo (or the probe), and looping forever would hang the offer.
+ */
+const MAX_BRANCH_SUFFIX = 50;
+
+/** Today as `YYYY-MM-DD`, the disambiguating suffix's date component. */
+export function todayStamp(now: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+/**
+ * The first branch name in the `base` family that `exists` reports as free.
+ *
+ * `base` → `base-YYYY-MM-DD` → `base-YYYY-MM-DD-2` … The base name is tried
+ * FIRST so the common case (a repo refreshing for the first time, or one that
+ * pruned its merged branches) still gets the plain, predictable name and no
+ * gratuitous suffix churn. The dated form matches the naming these repos
+ * already use by hand (`chore/harness-refresh-2026-07-16`) and says when the
+ * refresh happened, which the constant name never could.
+ *
+ * Pure apart from the injected `exists` probe, so the walk is unit-testable
+ * without a git repository.
+ *
+ * @throws when every candidate up to {@link MAX_BRANCH_SUFFIX} is taken,
+ * rather than returning a name it knows is unusable. The wrapper turns that
+ * into the base name, whose creation then fails LOUDLY with git's own
+ * "already exists" — a visible failure, never a silent reuse of a taken ref.
+ */
+export async function uniqueBranchName(
+  base: string,
+  exists: (name: string) => Promise<boolean>,
+  today: string,
+): Promise<string> {
+  if (!(await exists(base))) return base;
+  const dated = `${base}-${today}`;
+  if (!(await exists(dated))) return dated;
+  for (let n = 2; n <= MAX_BRANCH_SUFFIX; n += 1) {
+    const candidate = `${dated}-${n}`;
+    if (!(await exists(candidate))) return candidate;
+  }
+  throw new Error(
+    `'${base}' and every candidate through '${dated}-${MAX_BRANCH_SUFFIX}' already exist`,
+  );
+}
+
+/**
+ * {@link uniqueBranchName} against a committer whose `branchExists` is optional
+ * and best-effort.
+ *
+ * A committer that cannot probe (older stub, or a git error) yields the base
+ * name unchanged — the pre-#1298 behaviour exactly. Failing back to the base
+ * name rather than to a suffixed one matters: an unnecessary suffix would
+ * scatter branches across every repo that never had a collision, whereas the
+ * base name at worst reproduces the original error, which is already reported.
+ */
+async function safeUniqueBranchName(
+  committer: ScaffoldCommitter,
+  base: string,
+  today: string,
+): Promise<string> {
+  const probe = committer.branchExists?.bind(committer);
+  if (!probe) return base;
+  try {
+    return await uniqueBranchName(base, probe, today);
+  } catch {
+    return base;
   }
 }
 
