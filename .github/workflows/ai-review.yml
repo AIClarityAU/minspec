@@ -342,9 +342,18 @@ jobs:
           #                (workflow-file protection #1120), commit-msg. Added #1284 after
           #                PR #1273 changed the pre-push GATE and was classified "not
           #                machinery", so the review system certified a change to a gate.
+          #   template-registry.ts — GENERATES the .minspec/hooks/pre-commit gate that every
+          #                MinSpec-initialised project runs. Its blast radius is strictly
+          #                larger than .githooks/ (which is this repo only), so leaving it
+          #                out would have kept the bigger hole open. A single file rather
+          #                than a directory is deliberate: membership is decided by the test
+          #                below, not by where the code happens to live.
+          # MEMBERSHIP TEST for anything added here: does this code decide whether some other
+          # change is allowed — directly, or by generating the thing that decides? If yes it
+          # cannot certify itself, and it belongs in this set.
           # Read by packages/minspec/tests/machinery-paths.test.ts, which parses this line
           # and runs the pattern against a path table — keep the marker comment above it.
-          elif printf '%s\n' "$CHANGED" | grep -qE '^(\.github/|scripts/|\.githooks/)'; then
+          elif printf '%s\n' "$CHANGED" | grep -qE '^(\.github/|scripts/|\.githooks/|packages/minspec/src/lib/template-registry\.ts$)'; then
             SELF_EDIT=yes
             SELF_EDIT_KIND=machinery
           fi

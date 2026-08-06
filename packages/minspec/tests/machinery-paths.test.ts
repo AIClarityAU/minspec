@@ -55,6 +55,9 @@ describe('#1284 machinery path classification', () => {
     '.githooks/pre-push', // workflow-file protection (#1120)
     '.githooks/pre-commit', // protected-branch (#1041) + RCDD root-cause gate (DR-003)
     '.githooks/commit-msg',
+    // Generates .minspec/hooks/pre-commit for every MinSpec-initialised project, so its
+    // blast radius exceeds .githooks/ — it decides by generating the thing that decides.
+    'packages/minspec/src/lib/template-registry.ts',
   ];
 
   const notMachinery = [
@@ -84,5 +87,14 @@ describe('#1284 machinery path classification', () => {
     // `vendor/.github/workflows/x.yml` is not this repo's review machinery.
     expect(re.test('vendor/.github/workflows/x.yml')).toBe(false);
     expect(re.test('docs/scripts/example.sh')).toBe(false);
+  });
+
+  it('matches template-registry.ts EXACTLY, not its directory or neighbours', () => {
+    // The single-file entry is end-anchored on purpose: it admits one generator, not the
+    // whole lib/ tree. Without the `$` this would swallow every sibling module.
+    expect(re.test('packages/minspec/src/lib/template-registry.ts')).toBe(true);
+    expect(re.test('packages/minspec/src/lib/classifier.ts')).toBe(false);
+    expect(re.test('packages/minspec/src/lib/template-registry.test.ts')).toBe(false);
+    expect(re.test('packages/minspec/src/lib/template-registry.ts.bak')).toBe(false);
   });
 });
