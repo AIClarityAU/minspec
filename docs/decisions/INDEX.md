@@ -333,7 +333,7 @@ MinSpec tracks five artifact kinds that all share one property: a human must rea
 
 ## [DR-042 — Outcome metrics before engagement — sequence the trust-measurement build (outcome is the moat, engagement is the garnish)](DR-042.md)
 
-*Status: proposed · Date: 2026-06-26*
+*Status: accepted · Date: 2026-06-26*
 
 <!-- dr-summary:DR-042 auto=84fb071cc98c -->
 A review-telemetry audit (2026-06-26, 6-agent workflow, claims verified to file:line) asked whether MinSpec can today (a) **prove** the value of SDD and (b) **tune** the "just enough human" thesis (DR-029) — e.g. "this project has a high error rate; can we point to the cursory reviews that were rubber-stamped?"
