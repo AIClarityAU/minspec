@@ -137,6 +137,20 @@ describe('Invariant 2: No backend — no network calls', () => {
     // setting IS the consent) or the user clicks Push on the `prompt` default; the
     // shipped default sends nothing. See approve-push.ts pushApproval.
     'lib/approve-push.ts',
+    // #1115 protected-branch recovery: rescues an approval `commitApproval` REFUSED
+    // (HEAD is the push-protected default branch, #1064) by committing it in a
+    // throwaway worktree off `origin/<default>` and pushing. Like approve-push.ts —
+    // and unlike the local-git-only entries above — this DOES make network calls
+    // (`fetch`, `push`), so it is allowlisted on the CONSENT clause of constitution
+    // invariant #1, not on a "local git only" claim.
+    //
+    // It reuses `minspec.pushOnApprove` rather than introducing a second consent
+    // surface for the same act: unreachable unless that setting is `always` (the
+    // setting IS the consent) or the user clicks the named action on the `prompt`
+    // default. The shipped default sends nothing, and `never` reaches this module
+    // zero times — pinned in approval-recover-wiring.test.ts, not merely asserted.
+    // See approval-recover.ts recoverProtectedBranchApproval.
+    'lib/approval-recover.ts',
     // DR-037 / #247: scaffold points the project's git `core.hooksPath` at
     // .minspec/hooks (via `git config --local core.hooksPath`) so the
     // editor-independent SDD hooks run on every commit. Local git config write —

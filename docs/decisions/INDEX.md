@@ -626,4 +626,12 @@ One rule — which commits the push-protected default branch may receive — is 
 <!-- dr-summary:DR-078 auto=a199d8c14c18 -->
 Two accepted decisions pull in opposite directions, and SPEC-050 FR-8 sits exactly on the seam. The concrete failure (#1225): a developer with MinSpec projects A and B clicks "Always push from now on" while approving in A — a named, deliberate act scoped, in their mind, to A. The write is machine-wide. The next Alt+A in B pushes to B's origin and auto-opens a PR there, with no prompt and no moment at which B was consented to.
 <!-- /dr-summary:DR-078 -->
+
+## [DR-080 — Approval recovery is owned by the refusal that triggers it, not by SPEC-050 — the two axes are complementary, and the duplicated push logic is a dated loan against SPEC-050's seam](DR-080.md)
+
+*Status: proposed · Date: 2026-08-06*
+
+<!-- dr-summary:DR-080 auto=3485bfc12c76 -->
+commitApproval refuses to commit an approval when HEAD is the push-protected default branch (#1064); such a commit could never be pushed, and the #1041 pre-commit hook rejects it. **That refusal is correct and stays.** What was missing is what happens next.
+<!-- /dr-summary:DR-080 -->
 <!-- minspec:dr-index:end -->

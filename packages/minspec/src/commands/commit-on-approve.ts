@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { commitApproval, isUntrackedAtHead, type CommitApprovalResult } from '../lib/approve-commit';
 import { pushApproval, type PushApprovalResult } from '../lib/approve-push';
+import { recoverProtectedBranchApproval, type RecoverResult } from '../lib/approval-recover';
 
 /**
  * Bridge between the approve/accept commands and the Tier-0 {@link commitApproval}
@@ -30,6 +31,88 @@ export function commitOnApproveEnabled(): boolean {
 /** Offer labels — worded to match #1054's harness-commit offer, so the two
  *  destination guards read as one behaviour rather than two dialects. */
 const SHOW_FILES_ACTION = 'Show me the files';
+/** #1115 — the consent click that authorizes recovery's network step. */
+const RECOVER_ACTION = 'Save it on a branch';
+const OPEN_PR_ACTION = 'Open PR';
+
+/**
+ * #1115 — try to rescue an approval the destination guard refused, by committing it
+ * on a side branch and pushing. Returns the toast suffix on success, or `undefined`
+ * to mean "fall back to the honest warning" (consent withheld, or recovery failed).
+ *
+ * CONSENT (constitution invariant #1). Recovery pushes, so it is gated on the SAME
+ * `minspec.pushOnApprove` setting that governs every other approval push — not a new
+ * one. `never` ⇒ no network, ever, and no prompt. `prompt` ⇒ one click, which is the
+ * consent. `always` ⇒ the user set it deliberately; the setting is the consent.
+ * Reusing the existing tri-state matters: a second consent surface for the same
+ * network act is how a user ends up believing they have opted out when they have not.
+ *
+ * Never throws — `recoverProtectedBranchApproval` is typed-result-only, and anything
+ * unexpected degrades to `undefined` (the pre-#1115 behaviour).
+ */
+async function recoverOnProtectedBranch(
+  rootDir: string,
+  absPaths: readonly string[],
+  message: string,
+  current: string,
+  baseBranch: string | undefined,
+): Promise<{ suffix: string } | 'declined' | undefined> {
+  const mode = pushOnApproveMode();
+  if (mode === 'never') return undefined;
+  if (mode === 'prompt') {
+    // Non-modal (project preference: never steal focus from the artifact being
+    // approved). Names the destination, so the click is informed consent.
+    const choice = await vscode.window.showWarningMessage(
+      `Approval written but NOT committed: '${current}' is the default branch. ` +
+        `Save it on a branch and push, so the sign-off is not stranded here?`,
+      RECOVER_ACTION,
+      'Not now',
+    );
+    // 'declined', NOT undefined: the caller must not then show its own
+    // near-identical "NOT committed / default branch" warning. The user has just
+    // read that sentence and answered it — repeating it is the nagging the
+    // constitution warns about, and it makes a deliberate choice look like an
+    // error. The suffix still reports the honest state (#1255 review nit).
+    if (choice !== RECOVER_ACTION) return 'declined';
+  }
+
+  const slug = (absPaths[0] ?? message).split(/[\\/]/).slice(-2).join('-').replace(/\.[a-z]+$/i, '');
+  let res: RecoverResult;
+  try {
+    // baseBranch MUST be the branch the guard actually refused, not a hardcoded
+    // 'main'. The destination guard fires on whatever `origin/HEAD` resolves to —
+    // and its fallback list is `main master trunk` — so on a `master`- or
+    // `trunk`-default repo, defaulting to `main` would `fetch origin main`, fail,
+    // and silently degrade to the honest warning. Recovery would be inert for a
+    // whole class of repos while appearing to be built. Caught in review on #1255.
+    res = await recoverProtectedBranchApproval(rootDir, absPaths, message, { slug, baseBranch });
+  } catch (err) {
+    // Defensive: the seam documents never-throws, but relying on that transitively
+    // would let a future change there break an approval toast that has nothing to
+    // do with recovery (the same reasoning as pushApprovalIfEnabled's guard).
+    console.warn(`MinSpec: approval recovery threw — ${err instanceof Error ? err.message : String(err)}`);
+    return undefined;
+  }
+
+  if (res.outcome !== 'recovered') {
+    // Every non-success falls back to the honest warning, with the reason logged.
+    // NOT surfaced as a success suffix: the files really are still only local.
+    console.warn(`MinSpec: approval recovery ${res.outcome} — ${res.error ?? 'no detail'}`);
+    return undefined;
+  }
+
+  // Success. Non-blocking: the operation is COMPLETE, so the notification carries a
+  // convenience action, never one required to finish the job.
+  if (res.compareUrl) {
+    const url = res.compareUrl;
+    void vscode.window
+      .showInformationMessage(`Approval saved on '${res.branch}' and pushed.`, OPEN_PR_ACTION)
+      .then((c) => {
+        if (c === OPEN_PR_ACTION) void vscode.env.openExternal(vscode.Uri.parse(url));
+      });
+  }
+  return { suffix: ` · committed on ${res.branch} and pushed` };
+}
 
 export async function commitApprovalIfEnabled(
   rootDir: string,
@@ -54,14 +137,41 @@ export async function commitApprovalIfEnabled(
       // reasonably believed it had landed. So say plainly what happened, what
       // state the files are in, and what to do; never a bare console.warn.
       //
-      // Deliberately NO auto-recovery here. Committing onto a side branch requires
-      // either moving the shared checkout's HEAD (forbidden — rule #8 / DR-051 §4a,
-      // whose sole sanctioned exception, DR-065, needed its own DR) or a temporary
-      // worktree (the push-docs-lane pattern). Routing an approval to a docs-lane
-      // PR is precisely SPEC-050's scope, which is specified and unblocked — so the
-      // one-click recovery lands there, built once, rather than as a second
-      // half-correct copy here.
+      // #1115 / DR-080 — RECOVERY IS NOW ATTEMPTED, in a throwaway worktree off
+      // origin/<default>. See docs/decisions/DR-080.md for the recorded decision:
+      // it supersedes the deferral that used to stand here, states why SPEC-050's
+      // arm could not reach this case, and dates the duplicated-push-logic loan.
+      // The comment that stood here said auto-recovery belonged in SPEC-050. That
+      // was wrong in an instructive way: SPEC-050 fires on `pushed-branch`, which
+      // is produced by `pushApproval` — and `pushApproval` only ever runs from the
+      // `committed` arm above. On a repo where `main` IS the default branch, this
+      // arm returns first, so SPEC-050's payload was unreachable for exactly the
+      // case it was supposed to cover. Measured 2026-08-05: six ratifications
+      // stranded in one sitting while SPEC-050 was "the fix".
+      //
+      // Recovery still never moves the shared checkout's HEAD (rule #8 / DR-051
+      // §4a) — approval-recover.ts copies into a separate worktree with a separate
+      // index, and this arm still stages nothing in the primary.
       const current = result.branch?.current ?? 'the default branch';
+      const recovery = await recoverOnProtectedBranch(
+        rootDir,
+        absPaths,
+        message,
+        current,
+        result.branch?.current,
+      );
+      if (recovery === 'declined') {
+        // The user was asked and said no. Report the state honestly in the suffix,
+        // but do NOT re-show the warning they just dismissed.
+        return {
+          suffix: ` · NOT committed (on ${current} — files left in your working tree)`,
+          result,
+        };
+      }
+      if (recovery) return { ...recovery, result };
+
+      // Fallback — unchanged: consent withheld, or recovery failed. Say plainly what
+      // happened and what state the files are in; never a bare console.warn.
       void vscode.window.showWarningMessage(
         `Approval written but NOT committed: '${current}' is the default branch, ` +
           `so a commit there could not be pushed. Your files are saved in the working ` +
