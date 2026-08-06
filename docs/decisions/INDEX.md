@@ -341,7 +341,7 @@ A review-telemetry audit (2026-06-26, 6-agent workflow, claims verified to file:
 
 ## [DR-043 — Approval baseline stored as a pinned git blob referenced from the committed ledger (not a gzip sidecar)](DR-043.md)
 
-*Status: proposed · Date: 2026-06-27*
+*Status: accepted · Date: 2026-06-27*
 
 <!-- dr-summary:DR-043 auto=80394789285b -->
 SPEC-017 (Trust Dashboard) needs an **approval baseline** — the exact approved spec body at approval time — so it can later char-diff current-vs-approved and report rework % (M1). SPEC-017 FR-OQ4 originally resolved this *by engineering default* to: gzip the latest-approved body into a **git-ignored** .minspec/snapshots/ sidecar.
