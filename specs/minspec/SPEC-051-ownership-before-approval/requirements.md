@@ -11,8 +11,14 @@ product: minspec
 epic: EPIC-003  # SDD Core Methodology — the spec→code ownership contract (SPEC-038's sibling)
 aspects: [approval, ownership, spec-gate, lifecycle, docs-lane, hitl, tier-0, validation]
 relates_to: [SPEC-038, SPEC-022, DR-012, DR-034, DR-069, DR-078, DR-051, DR-003]
-# NOTE: no `implements:` yet — this spec is `specifying` (plan pending), so SPEC-038 FR-3
-# does not yet apply. Ownership is declared at Plan, per the very contract this spec is about.
+# Ownership (SPEC-038 FR-3): approval flipped `plan → in-progress`, arming the ownership
+# gate at `error` — the exact trap this spec exists to fix (#1317/#1323, its own repro).
+# Current-best list, derived from the mechanism sites this spec's Context cites as where
+# the fix must land; the Plan phase may refine it. Any refinement re-stales the approval
+# BY DESIGN — ownership changes are approval-bearing content, per this very spec.
+implements:
+  - packages/minspec/src/commands/approve.ts
+  - packages/minspec/src/lib/spec-validator.ts
 phases:
   specify: done
   clarify: done
