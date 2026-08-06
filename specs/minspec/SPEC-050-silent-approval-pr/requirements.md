@@ -25,8 +25,8 @@ affects: [packages/minspec/package.json, packages/minspec/src/commands/push-docs
 phases:
   specify: done
   clarify: done
-  plan: in-progress
-  tasks: pending
+  plan: done
+  tasks: done
   implement: pending
 ---
 

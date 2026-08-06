@@ -18,7 +18,7 @@ phases:
   specify: done
   clarify: done
   plan: done
-  tasks: in-progress
+  tasks: done
   implement: pending
 ---
 
