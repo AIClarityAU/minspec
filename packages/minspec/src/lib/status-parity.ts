@@ -150,6 +150,26 @@ export function inspectStatusLine(content: string, kind: ArtifactKind): BodyStat
     }
     return { kind: 'absent' };
   }
+
+  // FALLBACK: a blockquote status assertion near the head (#1223).
+  //
+  // Many DRs carry their real status caveat as a callout under the H1 rather than in a
+  // `## Status` section — `> **Status: proposed — scope-split by DR-024.**`. Without this
+  // the inspector returned `absent`, so Rule 11 compared NOTHING and passed in silence.
+  // DR-022 sat that way for two months: frontmatter `accepted`, its own body `proposed`,
+  // on a T4 decision about the ceremony model. One document, but the register's whole
+  // job is to be the thing you can trust without reading the prose.
+  //
+  // Deliberately narrow, because a false FATAL blocks legitimate commits: the line must
+  // start a blockquote and its FIRST field must literally be `Status:`. The recognised-
+  // word guard in `classify` is unchanged, so free-form text after the word still reads
+  // as `freeform` and never as a mismatch — widening what can be READ never widens what
+  // counts as a status.
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^>\s*[*_]{0,2}Status:\s*(.+)$/i);
+    if (m) return classify(m[1], i + 1, words);
+  }
+
   return { kind: 'absent' };
 }
 

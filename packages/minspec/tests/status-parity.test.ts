@@ -194,3 +194,72 @@ describe('inspectStatusLine — non-comparable cases are distinguishable (#968)'
     expect(inspectStatusLine(drBody('## Status\n'), 'dr')).toEqual({ kind: 'absent' });
   });
 });
+
+/**
+ * T0 — #1223: a DR's status assertion in a HEAD BLOCKQUOTE is comparable too.
+ *
+ * Many DRs carry their real status caveat as a callout under the H1 rather than in a
+ * `## Status` section. `inspectStatusLine` returned `absent` for that shape, so Rule 11
+ * compared NOTHING and passed in silence — the exact "reading failure indistinguishable
+ * from agreement" bug that #968 fixed for emphasis, recurring at a different shape.
+ *
+ * DR-022 sat that way: frontmatter `accepted`, `## Status` `accepted`, and its own head
+ * blockquote `proposed` — on a T4 decision about the ceremony model. Rule 11 compared the
+ * two that agreed and never saw the one that did not. One document, but a register whose
+ * whole job is to be trustworthy without reading the prose.
+ */
+
+describe('inspectStatusLine — DR head-blockquote status (#1223)', () => {
+  const dr = (body: string): string => `---\nid: DR-999\nstatus: accepted\n---\n\n# DR-999: X\n\n${body}\n`;
+
+  it('reads a blockquote status assertion when there is no ## Status section', () => {
+    const r = inspectStatusLine(dr('> **Status: proposed — scope-split by DR-024.** More prose.'), 'dr');
+    expect(r).toMatchObject({ kind: 'comparable', token: 'proposed' });
+  });
+
+  it.each([
+    '> **Status: proposed** — because reasons',
+    '> Status: proposed',
+    '> __Status: proposed__ trailing',
+    '>   **Status:   proposed**',
+    '> **status: PROPOSED**',
+  ])('tolerates emphasis, spacing and case: %s', (line) => {
+    const r = inspectStatusLine(dr(line), 'dr');
+    expect(r).toMatchObject({ kind: 'comparable', token: 'proposed' });
+  });
+
+  it('the ## Status section still WINS when both are present', () => {
+    // Order matters: the section is the canonical location, so a file with both is
+    // compared on the section. The blockquote is a fallback, not an override.
+    const body = '> **Status: proposed** caveat\n\n## Status\n\nAccepted (2026-01-01).';
+    expect(inspectStatusLine(dr(body), 'dr')).toMatchObject({ kind: 'comparable', token: 'accepted' });
+  });
+
+  // ── The widening must not create false FATALs ────────────────────────────
+  it('a blockquote that is not a status assertion is ignored', () => {
+    for (const line of [
+      '> **Note:** this supersedes DR-020.',
+      '> Born `proposed` per DR-029 — acceptance is a separate human act.',
+      '> The status of the analyzers is unresolved.',
+      '> **Statuses:** several.',
+    ]) {
+      expect(inspectStatusLine(dr(line), 'dr'), line).toMatchObject({ kind: 'absent' });
+    }
+  });
+
+  it('a blockquote whose status word is unrecognised reads FREEFORM, never a mismatch', () => {
+    // The recognised-word guard is unchanged: widening what can be READ must never
+    // widen what counts as a status, or prose becomes a build failure.
+    const r = inspectStatusLine(dr('> **Status: clarifying-ish, pending #91**'), 'dr');
+    expect(r.kind).toBe('freeform');
+  });
+
+  it('still returns absent when a DR has no status assertion at all', () => {
+    expect(inspectStatusLine(dr('Just prose, no status anywhere.'), 'dr')).toMatchObject({ kind: 'absent' });
+  });
+
+  it('specs are unaffected by the DR fallback', () => {
+    const spec = `---\nid: SPEC-999\n---\n\n> **Status: proposed** caveat\n`;
+    expect(inspectStatusLine(spec, 'spec')).toMatchObject({ kind: 'absent' });
+  });
+});
