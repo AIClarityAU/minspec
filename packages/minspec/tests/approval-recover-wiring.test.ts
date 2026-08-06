@@ -91,6 +91,26 @@ describe('protected-branch recovery wiring — #1115', () => {
     expect(r.suffix).toContain('NOT committed');
   });
 
+  it('#1255 nit: declining shows ONE warning, not the offer plus a near-identical repeat', async () => {
+    CONFIG.pushOnApprove = 'prompt';
+    WARN_CHOICE = 'Not now';
+    await commitApprovalIfEnabled('/root', ['/root/specs/x/requirements.md'], 'msg');
+    // Exactly the offer. Re-showing "NOT committed / default branch" after the user
+    // has just read and answered it makes a deliberate choice look like an error.
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('Save it on a branch');
+  });
+
+  it('pushOnApprove=never still shows the fallback warning — the user was never asked', async () => {
+    // The complement of the case above: silence here would leave the approval
+    // uncommitted with no signal at all, which is the #1064 defect.
+    CONFIG.pushOnApprove = 'never';
+    await commitApprovalIfEnabled('/root', ['/root/specs/x/requirements.md'], 'msg');
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]).toContain('default branch');
+    expect(warnings[0]).not.toContain('Save it on a branch');
+  });
+
   it('an ACCEPTED prompt runs recovery and reports the branch honestly', async () => {
     CONFIG.pushOnApprove = 'prompt';
     WARN_CHOICE = 'Save it on a branch';

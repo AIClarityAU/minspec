@@ -56,7 +56,7 @@ async function recoverOnProtectedBranch(
   message: string,
   current: string,
   baseBranch: string | undefined,
-): Promise<{ suffix: string } | undefined> {
+): Promise<{ suffix: string } | 'declined' | undefined> {
   const mode = pushOnApproveMode();
   if (mode === 'never') return undefined;
   if (mode === 'prompt') {
@@ -68,7 +68,12 @@ async function recoverOnProtectedBranch(
       RECOVER_ACTION,
       'Not now',
     );
-    if (choice !== RECOVER_ACTION) return undefined;
+    // 'declined', NOT undefined: the caller must not then show its own
+    // near-identical "NOT committed / default branch" warning. The user has just
+    // read that sentence and answered it — repeating it is the nagging the
+    // constitution warns about, and it makes a deliberate choice look like an
+    // error. The suffix still reports the honest state (#1255 review nit).
+    if (choice !== RECOVER_ACTION) return 'declined';
   }
 
   const slug = (absPaths[0] ?? message).split(/[\\/]/).slice(-2).join('-').replace(/\.[a-z]+$/i, '');
@@ -132,7 +137,10 @@ export async function commitApprovalIfEnabled(
       // reasonably believed it had landed. So say plainly what happened, what
       // state the files are in, and what to do; never a bare console.warn.
       //
-      // #1115 — RECOVERY IS NOW ATTEMPTED, in a throwaway worktree off origin/main.
+      // #1115 / DR-079 — RECOVERY IS NOW ATTEMPTED, in a throwaway worktree off
+      // origin/<default>. See docs/decisions/DR-079.md for the recorded decision:
+      // it supersedes the deferral that used to stand here, states why SPEC-050's
+      // arm could not reach this case, and dates the duplicated-push-logic loan.
       // The comment that stood here said auto-recovery belonged in SPEC-050. That
       // was wrong in an instructive way: SPEC-050 fires on `pushed-branch`, which
       // is produced by `pushApproval` — and `pushApproval` only ever runs from the
@@ -152,6 +160,14 @@ export async function commitApprovalIfEnabled(
         current,
         result.branch?.current,
       );
+      if (recovery === 'declined') {
+        // The user was asked and said no. Report the state honestly in the suffix,
+        // but do NOT re-show the warning they just dismissed.
+        return {
+          suffix: ` · NOT committed (on ${current} — files left in your working tree)`,
+          result,
+        };
+      }
       if (recovery) return { ...recovery, result };
 
       // Fallback — unchanged: consent withheld, or recovery failed. Say plainly what
