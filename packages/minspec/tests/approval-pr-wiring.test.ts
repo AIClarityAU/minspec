@@ -72,12 +72,17 @@ const H = vi.hoisted(() => ({
   updates: [] as { key: string; value: unknown; target: unknown }[],
   /** FR-8 F6: make the settings write reject, to prove it is swallowed. */
   updateRejects: false,
+  /** INV-5 (#1224): make the vscode API throw synchronously, to prove nothing escapes. */
+  vscodeThrows: false,
 }));
 
 vi.mock('vscode', () => ({
   workspace: {
     getConfiguration: () => ({
-      get: (key: string, def?: unknown) => (key in H.config ? H.config[key] : def),
+      get: (key: string, def?: unknown) => {
+        if (H.vscodeThrows) throw new Error('vscode host is unavailable');
+        return key in H.config ? H.config[key] : def;
+      },
       update: async (key: string, value: unknown, target: unknown) => {
         if (H.updateRejects) throw new Error('settings are read-only in this test');
         H.updates.push({ key, value, target });
@@ -430,6 +435,22 @@ describe('pushed-branch → approval PR (AC-1, AC-2)', () => {
     expect(prCreateCalls()).toHaveLength(1);
     expect(prCreateCalls()[0].args).not.toContain('docs-lane');
     expect(suffix).toContain('no docs-lane label');
+  });
+
+  it('INV-5 (#1224): a THROWING vscode host never rejects the approval — the guard covers the early returns', async () => {
+    // The defect: openApprovalPr's try opened AFTER approvalPrMode() and three
+    // manualPrSurface() calls, all of which touch the vscode API. A synchronous
+    // throw from any of them escaped, propagated through two unguarded awaits, and
+    // broke commitApprovalIfEnabled's documented never-rejects contract — surfacing
+    // as a failed APPROVAL rather than a failed PR-opening.
+    H.vscodeThrows = true;
+    try {
+      await expect(
+        pushApprovalIfEnabled(tmp, 'spec-050', { subject: SUBJECT, paths: DOCS_PATHS }),
+      ).resolves.toBeDefined();
+    } finally {
+      H.vscodeThrows = false;
+    }
   });
 
   it('INV-2 (#1224): an EMPTY diff is unproven, not vacuously docs-only', async () => {

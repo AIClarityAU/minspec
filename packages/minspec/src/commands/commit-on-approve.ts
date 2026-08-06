@@ -329,14 +329,33 @@ function manualPrSurface(result: PushApprovalResult, reason?: string): string {
   const because = reason ? ` — ${reason}` : '';
   if (result.compareUrl) {
     const url = result.compareUrl;
-    void vscode.window
-      .showInformationMessage(
-        `Approval pushed on '${result.branch}' (this branch is protected, so it needs a PR)${because}.`,
-        OPEN_PR_ACTION,
+    // INV-5 — the notification is fire-and-forget, so BOTH failure modes have to be
+    // handled here or they escape as unhandled rejections: the thenable rejecting
+    // (`.catch`), and `showInformationMessage` throwing synchronously (`try`).
+    // This surface is now reached from FIVE call sites — FR-1 `manual`, all four
+    // FR-5 degrade paths, and the INV-5 backstop itself — so a throw here would
+    // take down an approval that was already committed and pushed. It was extracted
+    // verbatim from the pre-SPEC-050 code, where it had one caller; the widened
+    // reach is what makes hardening it necessary. Caught on #1224.
+    try {
+      // Promise.resolve(...) because vscode hands back a `Thenable`, which has no
+      // `.catch` — chaining one directly is a type error, and without it a rejected
+      // toast becomes an unhandled rejection.
+      void Promise.resolve(
+        vscode.window.showInformationMessage(
+          `Approval pushed on '${result.branch}' (this branch is protected, so it needs a PR)${because}.`,
+          OPEN_PR_ACTION,
+        ),
       )
-      .then((c) => {
-        if (c === OPEN_PR_ACTION) void vscode.env.openExternal(vscode.Uri.parse(url));
-      });
+        .then((c) => {
+          if (c === OPEN_PR_ACTION) void vscode.env.openExternal(vscode.Uri.parse(url));
+        })
+        .catch(() => {
+          // The toast is advisory; the suffix below already tells the truth.
+        });
+    } catch {
+      // Same reasoning — never let the advisory surface fail the approval.
+    }
   }
   return ` · pushed on ${result.branch} (open a PR${because})`;
 }
@@ -397,21 +416,28 @@ async function openApprovalPr(
   result: PushApprovalResult,
   ctx: ApprovalPushContext,
 ): Promise<{ suffix: string; pr?: OpenPrResult }> {
-  if (approvalPrMode() === 'manual') return { suffix: manualPrSurface(result) };
-
-  if (!result.branch) {
-    console.warn('MinSpec: approval PR skipped — the push seam reported no branch name.');
-    return { suffix: manualPrSurface(result, 'branch name unavailable') };
-  }
-  if (!ctx.subject || !ctx.paths || ctx.paths.length === 0) {
-    console.warn(
-      'MinSpec: approval PR skipped — the committed paths/subject were not supplied, so the ' +
-        'docs-only property (SPEC-050 INV-2) is unproven. Falling back to the manual surface.',
-    );
-    return { suffix: manualPrSurface(result, 'approval details unavailable') };
-  }
-
+  // INV-5 — the guard opens HERE, before the first vscode call, not after the
+  // early returns. `approvalPrMode()` reads configuration and `manualPrSurface()`
+  // shows a notification; both were previously OUTSIDE the try, so a synchronous
+  // throw from either escaped this function, propagated through the unguarded
+  // awaits in `pushApprovalIfEnabled` and `commitApprovalIfEnabled`, and broke the
+  // latter's documented never-rejects contract — surfacing as a failed APPROVAL
+  // rather than a failed PR-opening. Caught by the invariant audit on #1224.
   try {
+    if (approvalPrMode() === 'manual') return { suffix: manualPrSurface(result) };
+
+    if (!result.branch) {
+      console.warn('MinSpec: approval PR skipped — the push seam reported no branch name.');
+      return { suffix: manualPrSurface(result, 'branch name unavailable') };
+    }
+    if (!ctx.subject || !ctx.paths || ctx.paths.length === 0) {
+      console.warn(
+        'MinSpec: approval PR skipped — the committed paths/subject were not supplied, so the ' +
+          'docs-only property (SPEC-050 INV-2) is unproven. Falling back to the manual surface.',
+      );
+      return { suffix: manualPrSurface(result, 'approval details unavailable') };
+    }
+
     const run = ctx.run ?? defaultExecRun();
     // Normalize ONCE so the label decision, the sidecar lookup and the body all
     // reason over the same strings — on Windows `commitApproval` hands back
@@ -472,7 +498,15 @@ async function openApprovalPr(
     console.warn(
       `MinSpec: approval PR step threw — ${err instanceof Error ? err.message : String(err)}`,
     );
-    return { suffix: manualPrSurface(result, 'the PR step failed (see console)') };
+    // The backstop must not itself be able to throw. `manualPrSurface` touches the
+    // vscode API, and if THAT is what failed above, calling it again here would
+    // rethrow straight out of the backstop — a guard that fails exactly when it is
+    // needed. Fall back to a plain string, which cannot.
+    try {
+      return { suffix: manualPrSurface(result, 'the PR step failed (see console)') };
+    } catch {
+      return { suffix: ` · pushed on ${result.branch} (open a PR — the PR step failed)` };
+    }
   }
 }
 
@@ -506,7 +540,23 @@ export async function pushApprovalIfEnabled(
   slug: string,
   ctx: ApprovalPushContext = {},
 ): Promise<{ suffix: string; result?: PushApprovalResult; pr?: OpenPrResult }> {
-  const mode = pushOnApproveMode();
+  let mode: PushOnApproveMode;
+  try {
+    mode = pushOnApproveMode();
+  } catch (err) {
+    // INV-5 — reading configuration touches the vscode host, which this function's
+    // never-rejects contract cannot assume is healthy. Found by the #1224 INV-5
+    // regression test, which showed the hole was WIDER than the audit reported:
+    // hardening `openApprovalPr` alone still let a throw escape from here.
+    //
+    // Fails toward `never`: with the host unreadable we cannot prove the user
+    // consented, and constitution invariant #1 makes "cannot prove consent" mean
+    // "send nothing". A push we are unsure about is the costlier error.
+    console.warn(
+      `MinSpec: could not read pushOnApprove — treating as 'never'. ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return { suffix: '' };
+  }
   if (mode === 'never') return { suffix: '' };
 
   if (mode === 'prompt') {
