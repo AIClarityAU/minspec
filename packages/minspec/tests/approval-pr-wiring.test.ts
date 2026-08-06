@@ -981,3 +981,72 @@ describe('FR-8: "Always push from now on" (DR-071)', () => {
     expect(fs.existsSync(path.join(tmp, '.minspec', 'preferences.json'))).toBe(false);
   });
 });
+
+// =============================================================================
+// #1224 review (HIGH) — the docs-lane label must survive the branch deletion
+// =============================================================================
+
+describe('INV-2 (#1224 review): the diff ref must outlive pushApproval', () => {
+  beforeEach(() => {
+    H.config = { pushOnApprove: 'always', approvalPr: 'auto' };
+    installRunner();
+  });
+
+  // `pushApproval` deletes the LOCAL branch before it returns `pushed-branch`
+  // (approve-push.ts:233), and a bare branch name does NOT DWIM to
+  // `refs/remotes/origin/…` for `git diff`. Passing `result.branch` therefore made
+  // the diff throw on EVERY protected-branch approval → `branchChangedPaths`
+  // returned undefined → `laneLabelsFor([])` → the docs-lane label was never
+  // applied on the one path that opens a PR. It failed closed (safe), but the
+  // feature's happy path — auto-merge of docs-only approvals — never fired once.
+  //
+  // The existing fixtures could not catch it: `DEFAULT_RESPONSES` keys on the
+  // command PREFIX, so the stubbed `git diff` answered successfully no matter
+  // which ref it was handed. A fixture that resolves a ref git would reject is a
+  // fixture that encodes the bug as correct behaviour, so the runner below
+  // resolves ONLY the surviving remote-tracking ref, exactly as git would.
+
+  it('passes a ref that still resolves after the local branch is deleted', async () => {
+    seedApprovedSpec(tmp);
+    await pushApprovalIfEnabled(tmp, 'spec-050', { subject: SUBJECT, paths: DOCS_PATHS });
+
+    const diff = calls.find((c) => c.key.startsWith('git diff --name-only -z'));
+    expect(diff, 'the label decision must actually run a diff').toBeDefined();
+    const range = diff!.args[diff!.args.length - 1];
+    expect(range).toContain(`origin/${BRANCH}`);
+    // The precise defect: the bare local name, which no longer exists by now.
+    expect(range.endsWith(`...${BRANCH}`)).toBe(false);
+  });
+
+  it('still labels docs-lane when ONLY the remote-tracking ref resolves', async () => {
+    seedApprovedSpec(tmp);
+    // A runner that behaves like real git after `git branch -D`: the bare name is
+    // gone, `origin/<branch>` remains. Pre-fix this yields NO docs-lane label.
+    H.runner = async (file: string, args: string[], opts?: { cwd?: string }) => {
+      const key = `${file} ${args.join(' ')}`;
+      const call = { file, args: [...args], cwd: opts?.cwd, key } as RecordedCall;
+      calls.push(call);
+      allCalls.push(call);
+      if (key.startsWith('git diff --name-only -z')) {
+        const range = args[args.length - 1];
+        if (!range.includes(`origin/${BRANCH}`)) {
+          throw new Error(`fatal: bad revision '${range}'`);
+        }
+        return { stdout: `${DOCS_PATHS.join('\0')}\0`, stderr: '' };
+      }
+      if (key.startsWith('git rev-parse HEAD')) return { stdout: `${HEAD_SHA}\n`, stderr: '' };
+      if (key.startsWith('gh pr create')) return { stdout: `${NEW_PR_URL}\n`, stderr: '' };
+      return { stdout: '', stderr: '' };
+    };
+
+    await pushApprovalIfEnabled(tmp, 'spec-050', { subject: SUBJECT, paths: DOCS_PATHS });
+
+    const create = prCreateCalls()[0];
+    expect(create, 'a PR should still be opened').toBeDefined();
+    // Assert the --label FLAG, not the whole argv: the PR body also contains the
+    // string "docs-lane" when explaining why the label was withheld, so a join()
+    // match passes even with no label attached — this assertion was vacuous on the
+    // first draft and went green against the unfixed code.
+    expect(flag(create, '--label')).toBe('docs-lane');
+  });
+});

@@ -608,7 +608,18 @@ async function openApprovalPr(
     // earlier local commits. Labelling from `paths` could mark a PR docs-only
     // while it genuinely changed code (#1224 review). `undefined` (range not
     // resolvable) → no label → no auto-merge → a human merges. Fails closed.
-    const changed = await branchChangedPaths(run, rootDir, PR_BASE, result.branch);
+    // …and it must name a ref that STILL EXISTS when the diff runs. `pushApproval`
+    // deletes the local branch before returning (approve-push.ts:233), so the bare
+    // name `result.branch` no longer resolves — and a bare name does not DWIM to
+    // `refs/remotes/origin/…` for `git diff`. Passing it made the diff throw on
+    // every protected-branch approval, so `branchChangedPaths` always returned
+    // undefined, `laneLabelsFor` always saw `[]`, and the docs-lane label was never
+    // applied on the one path that opens a PR — the feature's happy path was dead.
+    // The remote-tracking ref survives the delete (the push is `-u`, which creates
+    // `refs/remotes/origin/<branch>`), and it is also the more faithful ref: it is
+    // literally what the PR was opened from. Fails closed exactly as before if it
+    // cannot be resolved.
+    const changed = await branchChangedPaths(run, rootDir, PR_BASE, `origin/${result.branch}`);
     const labels = laneLabelsFor(changed);
     const record = readRecord(rootDir, approvableRelPath(paths));
     const sha = await resolveHeadSha(run, rootDir);
