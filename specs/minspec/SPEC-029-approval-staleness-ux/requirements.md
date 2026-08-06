@@ -257,10 +257,20 @@ Two gaps, addressed by two composed pieces:
   introduced.
 - [ ] **AC-5 (FR-7).** Clicking a spec row inside the Needs-Re-Approval group
   opens the diff view directly, without an intermediate step.
-- [ ] **AC-6 (FR-8 / INV-No-fabricated-diff).** With a legacy record
-  (`baselineBlob === ''`) or a pruned blob, the command shows the explicit
-  "baseline unavailable" message and opens no diff view; it never crashes or
-  shows an empty/misleading diff.
+- [ ] **AC-6a (FR-8 / INV-No-fabricated-diff) — unrecoverable ⇒ no diff.** When the
+  baseline is unrecoverable **after both** `recoverBaseline` *and* the
+  `recoverBaselineFromHistory` fallback (no committed version's canonical hash matches
+  `record.specHash` — a shallow/squashed clone, or content approved but never committed),
+  the command shows the explicit "baseline unavailable" message and opens no diff view;
+  it never crashes or shows an empty/misleading diff.
+- [ ] **AC-6b (#701) — recoverable-from-history ⇒ a real diff.** A legacy record
+  (`baselineBlob === ''`) or a blob that never travelled to this clone is **not** by
+  itself an unavailable baseline. When the history fallback finds a committed version
+  whose canonical hash equals `record.specHash`, the command opens a real diff against
+  that hash-matched approved body. *(Re-keyed from the old AC-6, which triggered on
+  `baselineBlob === ''` — a precondition #701 made stale. The invariant is unchanged:
+  content is shown only when hash-verified identical to what was approved
+  (`approval.ts:251-252`), never reconstructed. #1283.)*
 - [ ] **AC-7 (INV-Tier-0).** No networking import added to `packages/minspec`;
   the inherited import-ban T0 test passes.
 
