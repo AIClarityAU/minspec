@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-051-ownership-before-approval/requirements.md",
+  "specHash": "6b6d91f2140c0cedddf063e389adaa101616d88c4e8f279ccb5661ea04dd7650",
+  "approvedAt": "2026-08-06T21:28:10.684Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T4",
+  "migrated": false,
+  "baselineBlob": "08dfced9e8af9a0f54344852ef2f54f7eb441207"
+}

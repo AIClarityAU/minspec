@@ -333,7 +333,7 @@ MinSpec tracks five artifact kinds that all share one property: a human must rea
 
 ## [DR-042 — Outcome metrics before engagement — sequence the trust-measurement build (outcome is the moat, engagement is the garnish)](DR-042.md)
 
-*Status: proposed · Date: 2026-06-26*
+*Status: accepted · Date: 2026-06-26*
 
 <!-- dr-summary:DR-042 auto=84fb071cc98c -->
 A review-telemetry audit (2026-06-26, 6-agent workflow, claims verified to file:line) asked whether MinSpec can today (a) **prove** the value of SDD and (b) **tune** the "just enough human" thesis (DR-029) — e.g. "this project has a high error rate; can we point to the cursory reviews that were rubber-stamped?"
@@ -341,7 +341,7 @@ A review-telemetry audit (2026-06-26, 6-agent workflow, claims verified to file:
 
 ## [DR-043 — Approval baseline stored as a pinned git blob referenced from the committed ledger (not a gzip sidecar)](DR-043.md)
 
-*Status: proposed · Date: 2026-06-27*
+*Status: accepted · Date: 2026-06-27*
 
 <!-- dr-summary:DR-043 auto=80394789285b -->
 SPEC-017 (Trust Dashboard) needs an **approval baseline** — the exact approved spec body at approval time — so it can later char-diff current-vs-approved and report rework % (M1). SPEC-017 FR-OQ4 originally resolved this *by engineering default* to: gzip the latest-approved body into a **git-ignored** .minspec/snapshots/ sidecar.
@@ -581,7 +581,7 @@ It also, unnoticed, made needs-review a **one-way door**. The only writer of suc
 
 ## [DR-073 — The harness may write into a foreign tool's config file, but only by additive, idempotent, never-clobbering key-scoped merge](DR-073.md)
 
-*Status: proposed · Date: 2026-07-29*
+*Status: accepted · Date: 2026-07-29*
 
 <!-- dr-summary:DR-073 auto=15c0b646c955 -->
 Constitution invariant: MinSpec is the **signpost**, and a signpost that is wrong is worse than no signpost. #1090 built a UserPromptSubmit hook that appends the approvable IDs a session is working on to the Claude Code session title, so the tab, the prompt box, and the /resume picker all name what is under work. It landed as scripts/hooks/session-title.* plus an entry in this repo's own .claude/settings.json — a MinSpecPro-local script.
@@ -626,4 +626,12 @@ One rule — which commits the push-protected default branch may receive — is 
 <!-- dr-summary:DR-078 auto=a199d8c14c18 -->
 Two accepted decisions pull in opposite directions, and SPEC-050 FR-8 sits exactly on the seam. The concrete failure (#1225): a developer with MinSpec projects A and B clicks "Always push from now on" while approving in A — a named, deliberate act scoped, in their mind, to A. The write is machine-wide. The next Alt+A in B pushes to B's origin and auto-opens a PR there, with no prompt and no moment at which B was consented to.
 <!-- /dr-summary:DR-078 -->
+
+## [DR-080 — Approval recovery is owned by the refusal that triggers it, not by SPEC-050 — the two axes are complementary, and the duplicated push logic is a dated loan against SPEC-050's seam](DR-080.md)
+
+*Status: proposed · Date: 2026-08-06*
+
+<!-- dr-summary:DR-080 auto=3485bfc12c76 -->
+commitApproval refuses to commit an approval when HEAD is the push-protected default branch (#1064); such a commit could never be pushed, and the #1041 pre-commit hook rejects it. **That refusal is correct and stays.** What was missing is what happens next.
+<!-- /dr-summary:DR-080 -->
 <!-- minspec:dr-index:end -->
