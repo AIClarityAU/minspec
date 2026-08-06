@@ -25,8 +25,10 @@
  *         aggregated in an `afterEach` so it holds for tests added later too.
  *   AC-9  nothing under `.minspec/approvals/**` is written and no `status:` line
  *         is touched — asserted against a REAL temp repo, byte-for-byte.
- *   FR-8  the one-time "Always push from now on" offer: shown once, writes
- *         Global (never Workspace), then still pushes.
+ *   FR-8  the one-time "Always push from now on" offer: shown once, records the
+ *         consent PROJECT-LOCALLY in `.minspec/preferences.json` (DR-078 — NOT
+ *         ConfigurationTarget.Global, which constitution invariant #3 forbids),
+ *         then still pushes.
  *
  * The `gh`/`git` runner is ALWAYS a stub. `defaultExecRun` is mocked to hand back
  * the test's recorder and to THROW if a test forgot to install one, so a wiring
@@ -808,29 +810,52 @@ describe('FR-8: "Always push from now on" (DR-071)', () => {
     expect(H.info[0].actions).toEqual(['Push', 'Always push from now on', 'Not now']);
   });
 
-  it('writes pushOnApprove=always to GLOBAL settings and still pushes this approval', async () => {
+  it('records pushOnApprove=always PROJECT-LOCALLY and still pushes this approval (DR-078)', async () => {
     H.choice = 'Always push from now on';
     const { suffix } = await pushApprovalIfEnabled(tmp, 'spec-050', {
       subject: SUBJECT,
       paths: DOCS_PATHS,
     });
 
-    expect(H.updates).toEqual([
-      { key: 'pushOnApprove', value: 'always', target: vscode.ConfigurationTarget.Global },
-    ]);
+    expect(loadPreferences(tmp).pushOnApprove).toBe('always');
     // Falling through and pushing is load-bearing: returning here would drop the
     // very approval whose prompt the user just answered yes to.
     expect(pushApprovalMock).toHaveBeenCalledTimes(1);
     expect(suffix).toContain('pushed');
   });
 
-  it('NEVER writes the Workspace target (DR-071 corollary: it is a personal decision)', async () => {
+  it('DR-078 / constitution invariant #3: writes NO vscode setting at any target', async () => {
+    // FR-8's approved text says ConfigurationTarget.Global. That lands in
+    // ~/.config/Code/User/settings.json, which invariant #3 (DR-074, in force four
+    // days before SPEC-050 was approved) puts out of bounds for a per-project write:
+    // clicking "from now on" in project A would change project B, which never opted
+    // in. DR-078 resolved it to `.minspec/preferences.json` — gitignored, so not
+    // shared (DR-071's corollary holds), and inside the `.minspec/` opt-in marker.
     H.choice = 'Always push from now on';
     await pushApprovalIfEnabled(tmp, 'spec-050', { subject: SUBJECT, paths: DOCS_PATHS });
-    for (const u of H.updates) {
-      expect(u.target).not.toBe(vscode.ConfigurationTarget.Workspace);
-      expect(u.target).not.toBe(vscode.ConfigurationTarget.WorkspaceFolder);
-    }
+    expect(H.updates).toEqual([]);
+  });
+
+  it('DR-078: the standing consent is honoured on the NEXT approval, with no prompt', async () => {
+    // The point of storing it: a later approval in THIS project reads `always` and
+    // goes silent. Proves the effectivePushOnApproveMode accessor actually reads the
+    // store, not merely that the write happened.
+    savePreferences(tmp, { ...loadPreferences(tmp), pushOnApprove: 'always' } as never);
+    H.info.length = 0;
+    await pushApprovalIfEnabled(tmp, 'spec-050', { subject: SUBJECT, paths: DOCS_PATHS });
+    expect(H.info.some((i) => i.message.includes('Push it so the sign-off'))).toBe(false);
+    expect(pushApprovalMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('DR-078: a project preference does NOT leak into another project', async () => {
+    // The concrete failure invariant #3 forbids: consent given in A must not apply
+    // in B. Two roots, one preference — the second must still prompt.
+    savePreferences(tmp, { ...loadPreferences(tmp), pushOnApprove: 'always' } as never);
+    const otherRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'other-project-'));
+    H.choice = undefined;
+    H.info.length = 0;
+    await pushApprovalIfEnabled(otherRoot, 'spec-050', { subject: SUBJECT, paths: DOCS_PATHS });
+    expect(H.info.some((i) => i.message.includes('Push it so the sign-off'))).toBe(true);
   });
 
   it.each(['Push', 'Not now', 'Always push from now on', undefined])(
@@ -843,7 +868,21 @@ describe('FR-8: "Always push from now on" (DR-071)', () => {
       H.info.length = 0;
       H.config = { pushOnApprove: 'prompt', approvalPr: 'manual' };
       await pushApprovalIfEnabled(tmp, 'spec-050', { subject: SUBJECT, paths: DOCS_PATHS });
-      expect(H.info[0].actions).toEqual(['Push', 'Not now']);
+
+      if (choice === 'Always push from now on') {
+        // DR-078: the consent is now STORED and read back, so the next approval in
+        // this project does not prompt at all. That is the whole point of FR-8 —
+        // one informed yes, then silence — and it only became observable once the
+        // preference lived somewhere this accessor reads. Under the previous
+        // Global-settings write the stored value was never consulted here, so the
+        // prompt reappeared and this test asserted the two-action form.
+        expect(H.info.some((i) => i.message.includes('Push it so the sign-off'))).toBe(false);
+      } else {
+        // Declined or dismissed: consent was NOT granted, so the prompt returns —
+        // but the one-time offer is spent, so it is the two-action form, never the
+        // three-action one. This is the actual never-re-nag property.
+        expect(H.info[0].actions).toEqual(['Push', 'Not now']);
+      }
     },
   );
 

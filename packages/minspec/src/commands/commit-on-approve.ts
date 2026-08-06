@@ -253,27 +253,72 @@ async function recordPushAlwaysOfferMade(rootDir: string): Promise<void> {
   }
 }
 
+/** The key standing push consent is stored under in `.minspec/preferences.json`. */
+const PUSH_ALWAYS_PREF_KEY = 'pushOnApprove';
+
 /**
- * FR-8: write the user's standing consent to their OWN (Global) settings.
+ * FR-8: record the user's standing consent — PROJECT-LOCAL, per DR-080's sibling
+ * [DR-078](../../../../docs/decisions/DR-078.md) (accepted 2026-08-05).
  *
- * `ConfigurationTarget.Global`, never `Workspace` — DR-071's corollary is that
- * `always` is a personal decision that must not be committed into a shared
- * `.vscode/settings.json` where it would become someone else's default they
- * never chose. Swallow-and-warn on failure (the `approve.ts` precedent): the
- * approval itself has already succeeded by the time this runs, and the caller
- * pushes regardless — losing the PREFERENCE must never look like losing the
- * approval.
+ * NOT `ConfigurationTarget.Global`, which is what FR-8's approved text says. That
+ * lands in `~/.config/Code/User/settings.json`, and constitution invariant #3
+ * (DR-074, in force 2026-07-31 — four days before SPEC-050 was approved) names
+ * `~/.config/**` as out of bounds for a per-project write. Clicking "from now on"
+ * in project A would have silently changed behaviour in project B, which never
+ * opted in.
+ *
+ * DR-078 found the two decisions were never actually in conflict: DR-071's
+ * corollary rules out a SHARED location (a committed `.vscode/settings.json`),
+ * invariant #3 rules out a MACHINE-WIDE one. `.minspec/preferences.json` is
+ * neither — gitignored, so never imposed on a co-contributor, and inside the
+ * `.minspec/` opt-in marker. It also already holds this feature's own one-time
+ * offer memory, so the offer and the consent it grants now share one scope; they
+ * previously disagreed (offer per-repo, setting global), which is the asymmetry
+ * the #1224 audit flagged.
+ *
+ * SPEC-050 is hash-locked, so its "(Global)" parenthetical cannot be corrected
+ * without voiding the sign-off (#1179). DR-078 is the authority; the spec text is
+ * the stale artifact.
+ *
+ * Swallow-and-warn on failure (the `approve.ts` precedent): the approval has
+ * already succeeded and the caller pushes regardless — losing the PREFERENCE must
+ * never look like losing the approval.
  */
-async function enableAlwaysPush(): Promise<void> {
+async function enableAlwaysPush(rootDir: string): Promise<void> {
   try {
-    await vscode.workspace
-      .getConfiguration('minspec')
-      .update('pushOnApprove', 'always', vscode.ConfigurationTarget.Global);
+    const { loadPreferences, savePreferences } = await preferencesApi();
+    const current = loadPreferences(rootDir);
+    savePreferences(rootDir, {
+      ...current,
+      [PUSH_ALWAYS_PREF_KEY]: 'always',
+    } as Parameters<typeof savePreferences>[1]);
   } catch (err) {
     console.warn(
       `MinSpec: failed to persist pushOnApprove=always — ${err instanceof Error ? err.message : String(err)}`,
     );
   }
+}
+
+/**
+ * The SINGLE accessor for the effective push mode (DR-078 §4). No call site reads
+ * either store directly — a two-source read is how silent disagreements start, and
+ * `minspec.protectedBranches` (#1111) is a live example of that in this codebase.
+ *
+ * Project-local preference wins, then the VS Code setting (and its `prompt`
+ * default). The project preference is a narrower, more recently expressed intent
+ * than a global default; absent one, existing configurations keep working exactly
+ * as before.
+ */
+async function effectivePushOnApproveMode(rootDir: string): Promise<PushOnApproveMode> {
+  try {
+    const { loadPreferences } = await preferencesApi();
+    const stored = (loadPreferences(rootDir) as Record<string, unknown>)[PUSH_ALWAYS_PREF_KEY];
+    if (stored === 'never' || stored === 'prompt' || stored === 'always') return stored;
+  } catch {
+    // Unreadable preferences file → fall through to the VS Code setting. Not a
+    // failure worth surfacing: the setting still answers, and its default prompts.
+  }
+  return pushOnApproveMode();
 }
 
 /**
@@ -542,7 +587,9 @@ export async function pushApprovalIfEnabled(
 ): Promise<{ suffix: string; result?: PushApprovalResult; pr?: OpenPrResult }> {
   let mode: PushOnApproveMode;
   try {
-    mode = pushOnApproveMode();
+    // DR-078 §4: ONE accessor. Project-local preference first, then the VS Code
+    // setting — never both read directly at a call site.
+    mode = await effectivePushOnApproveMode(rootDir);
   } catch (err) {
     // INV-5 — reading configuration touches the vscode host, which this function's
     // never-rejects contract cannot assume is healthy. Found by the #1224 INV-5
@@ -586,7 +633,7 @@ export async function pushApprovalIfEnabled(
     if (choice === ALWAYS_PUSH_ACTION) {
       // Write the standing consent, then FALL THROUGH and push. Returning here
       // would drop the very approval whose prompt the user just answered `yes` to.
-      await enableAlwaysPush();
+      await enableAlwaysPush(rootDir);
     } else if (choice !== PUSH_ACTION) {
       return { suffix: ' · not pushed' };
     }
