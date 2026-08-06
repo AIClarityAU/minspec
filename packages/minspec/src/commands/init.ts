@@ -10,6 +10,7 @@ import {
   type ManagedRegionWarning,
 } from '../lib/scaffold';
 import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS, MANAGED_REGION_TEMPLATES } from '../lib/template-registry';
+import { CLAUDE_SETTINGS_PATH } from '../lib/claude-settings';
 import { resolveTargetFolder, workspaceFolderLabel } from '../lib/resolve-folder';
 import { setCoverageMinimum, DEFAULT_COVERAGE_MINIMUM } from '../lib/config';
 import { evaluateConstitution } from '../lib/constitution-nudge';
@@ -110,6 +111,20 @@ const SCAFFOLD_PATHSPECS: readonly string[] = [
   // directory, so an unrelated file a user placed alongside them (e.g. a
   // hand-written .claude/commands/my-own-command.md) is never swept in.
   ...MANAGED_REGION_TEMPLATES.map((tpl) => tpl.outputPath),
+  // The hook REGISTRATION, not just the hook (#1301). Scaffolding
+  // `.claude/hooks/session-title.{sh,py}` is only half the job — a Claude Code
+  // hook does nothing until it is listed under the event that fires it, and that
+  // listing is the `UserPromptSubmit` entry init/refresh merges into
+  // `.claude/settings.json` (claude-settings.ts, #1093 / DR-073). Omitting it
+  // here shipped a commit containing a present-but-INERT hook and left the
+  // registration dirty with no further prompt.
+  //
+  // "MinSpec does not own this file" is true but is not a reason to exclude it:
+  // CLAUDE.md, AGENTS.md and .cursorrules are equally user-authored and
+  // section-merged, and all three are staged. Ownership is handled by HOW the
+  // file is written (additive, idempotent, never-clobbers — DR-073), not by
+  // declining to commit what MinSpec just wrote into it.
+  CLAUDE_SETTINGS_PATH,
   // DELIBERATELY ABSENT: .minspec/generated-hashes.json and
   // .minspec/template-baseline.json. An earlier revision of this list included
   // them, on the theory that a refresh commit was partial without the manifests
