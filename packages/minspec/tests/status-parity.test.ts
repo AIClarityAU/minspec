@@ -5,6 +5,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import {
+  inspectAllStatusClaims,
   checkStatusParity,
   bodyStatusToken,
   inspectStatusLine,
@@ -196,17 +197,21 @@ describe('inspectStatusLine — non-comparable cases are distinguishable (#968)'
 });
 
 /**
- * T0 — #1223: a DR's status assertion in a HEAD BLOCKQUOTE is comparable too.
+ * T0 — #1223: a DR can assert its status in TWO places, and they can disagree.
  *
- * Many DRs carry their real status caveat as a callout under the H1 rather than in a
- * `## Status` section. `inspectStatusLine` returned `absent` for that shape, so Rule 11
- * compared NOTHING and passed in silence — the exact "reading failure indistinguishable
- * from agreement" bug that #968 fixed for emphasis, recurring at a different shape.
+ * DR-022 had THREE representations: frontmatter `accepted`, a `## Status` section
+ * `accepted`, and a head blockquote `proposed` — on a T4 decision about the ceremony
+ * model. `checkStatusParity` compares ONE body claim (the section), so it compared the two
+ * that agreed and never saw the third. It hid for two months.
  *
- * DR-022 sat that way: frontmatter `accepted`, `## Status` `accepted`, and its own head
- * blockquote `proposed` — on a T4 decision about the ceremony model. Rule 11 compared the
- * two that agreed and never saw the one that did not. One document, but a register whose
- * whole job is to be trustworthy without reading the prose.
+ * The first attempt at this fix added a blockquote fallback that only fires when there is
+ * NO `## Status` section — which does not help, because DR-022 HAS one. It looked correct
+ * only because the "proof" ran against a fabricated input with the section stripped. The
+ * real file returns `comparable: accepted`, verified.
+ *
+ * So the property is: compare EVERY comparable claim against frontmatter, and reject any
+ * that disagrees. A document showing two different statuses is a false signpost whichever
+ * one is read first.
  */
 
 describe('inspectStatusLine — DR head-blockquote status (#1223)', () => {
@@ -261,5 +266,48 @@ describe('inspectStatusLine — DR head-blockquote status (#1223)', () => {
   it('specs are unaffected by the DR fallback', () => {
     const spec = `---\nid: SPEC-999\n---\n\n> **Status: proposed** caveat\n`;
     expect(inspectStatusLine(spec, 'spec')).toMatchObject({ kind: 'absent' });
+  });
+});
+
+describe('inspectAllStatusClaims — every claim, not just the first (#1223)', () => {
+  const dr = (body: string, status = 'accepted'): string =>
+    `---\nid: DR-999\nstatus: ${status}\n---\n\n# DR-999: X\n\n${body}\n`;
+
+  it('returns BOTH the head blockquote and the ## Status section when both exist', () => {
+    // The exact DR-022 shape. `inspectStatusLine` sees only the section.
+    const body = '> **Status: proposed — scope-split by DR-024.**\n\n## Context\n\nstuff\n\n## Status\n\nAccepted (2026-07-25).';
+    const claims = inspectAllStatusClaims(dr(body), 'dr');
+    const tokens = claims.filter((c) => c.kind === 'comparable').map((c: any) => c.token).sort();
+    expect(tokens).toEqual(['accepted', 'proposed']);
+  });
+
+  it('the singular inspector still sees only ONE — which is why the plural exists', () => {
+    const body = '> **Status: proposed**\n\n## Status\n\nAccepted (2026-07-25).';
+    expect(inspectStatusLine(dr(body), 'dr')).toMatchObject({ kind: 'comparable', token: 'accepted' });
+  });
+
+  it('does not double-count when the blockquote IS the only claim', () => {
+    // With no `## Status`, inspectStatusLine already returns the blockquote; adding it
+    // again would make a caller tallying findings report the same defect twice.
+    const claims = inspectAllStatusClaims(dr('> **Status: proposed** caveat'), 'dr');
+    expect(claims).toHaveLength(1);
+  });
+
+  it('returns [] when a DR asserts no status anywhere', () => {
+    expect(inspectAllStatusClaims(dr('Just prose.'), 'dr')).toEqual([]);
+  });
+
+  it('specs are unaffected — the blockquote scan is DR-only', () => {
+    const spec = `---\nid: SPEC-9\n---\n\n> **Status: proposed**\n\n**Status:** implementing\n`;
+    const claims = inspectAllStatusClaims(spec, 'spec');
+    expect(claims.every((c) => c.kind !== 'comparable' || (c as any).token === 'implementing')).toBe(true);
+  });
+
+  it('a free-form second claim is never a mismatch', () => {
+    // Widening what can be READ must never widen what counts as a status, or prose
+    // becomes a build failure.
+    const body = '> **Status: clarifying-ish, pending #91**\n\n## Status\n\nAccepted (2026-01-01).';
+    const claims = inspectAllStatusClaims(dr(body), 'dr');
+    expect(claims.filter((c) => c.kind === 'comparable')).toHaveLength(1);
   });
 });
