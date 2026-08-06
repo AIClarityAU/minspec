@@ -581,7 +581,7 @@ It also, unnoticed, made needs-review a **one-way door**. The only writer of suc
 
 ## [DR-073 — The harness may write into a foreign tool's config file, but only by additive, idempotent, never-clobbering key-scoped merge](DR-073.md)
 
-*Status: proposed · Date: 2026-07-29*
+*Status: accepted · Date: 2026-07-29*
 
 <!-- dr-summary:DR-073 auto=15c0b646c955 -->
 Constitution invariant: MinSpec is the **signpost**, and a signpost that is wrong is worse than no signpost. #1090 built a UserPromptSubmit hook that appends the approvable IDs a session is working on to the Claude Code session title, so the tab, the prompt box, and the /resume picker all name what is under work. It landed as scripts/hooks/session-title.* plus an entry in this repo's own .claude/settings.json — a MinSpecPro-local script.
