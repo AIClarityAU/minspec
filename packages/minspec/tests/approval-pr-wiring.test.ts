@@ -13,9 +13,11 @@
  *         byte-for-byte.
  *   AC-2  the PR carries `docs-lane` and the approval commit's subject as its
  *         title; a fixture with a non-corpus path is NEVER labelled.
- *   AC-3  the happy path shows no notification with a COMPLETING action —
- *         asserted structurally (arity, then a click-simulation that changes
- *         nothing), so a future edit cannot reintroduce a required click.
+ *   AC-3  NEITHER success arm — `created` or `adopted` — shows a notification with
+ *         a COMPLETING action. Asserted structurally (arity, then a click-simulation
+ *         that changes nothing), so a future edit cannot reintroduce a required
+ *         click. Both arms, because #1224's audit proved by mutation that guarding
+ *         only `created` let one back in.
  *   AC-4  `gh-absent` / `gh-unauthenticated` / `offline` / `failed` each degrade
  *         to the manual surface with a reason, and none throws.
  *   AC-5  an already-open PR is adopted, never duplicated.
@@ -24,7 +26,9 @@
  *   AC-8  no `checkout`/`switch`/`merge`/`rebase`/`reset` in ANY recorded argv —
  *         aggregated in an `afterEach` so it holds for tests added later too.
  *   AC-9  nothing under `.minspec/approvals/**` is written and no `status:` line
- *         is touched — asserted against a REAL temp repo, byte-for-byte.
+ *         is touched — asserted against a REAL temp repo, byte-for-byte, on ALL
+ *         THREE arms (created, degrade, manual). #1224's audit showed a write
+ *         inserted on the degrade arm survived a created-only snapshot.
  *   FR-8  the one-time "Always push from now on" offer: shown once, records the
  *         consent PROJECT-LOCALLY in `.minspec/preferences.json` (DR-078 — NOT
  *         ConfigurationTarget.Global, which constitution invariant #3 forbids),
@@ -538,6 +542,23 @@ describe('AC-3: the success notification can never require a click (FR-3)', () =
     expect(H.info.some((n) => n.message.includes(NEW_PR_URL))).toBe(true);
   });
 
+  it('AC-3 (#1224): the ADOPTED arm is a success too, and must also have no completing action', async () => {
+    // The audit's mutation proof: the AC-3 guard ran only against `created`, so a
+    // required click reintroduced on the `adopted` notification survived the whole
+    // suite. approval-pr.ts states both are successes; the guard has to cover both.
+    installRunner({ 'gh pr list': `[{"url":"${EXISTING_PR_URL}","state":"OPEN"}]\n` });
+    const { pr } = await pushApprovalIfEnabled(tmp, 'spec-050', {
+      subject: SUBJECT,
+      paths: DOCS_PATHS,
+    });
+    await flush();
+
+    expect(pr?.outcome).toBe('adopted'); // anti-vacuity: the arm really ran
+    expect(H.info.length).toBeGreaterThan(0);
+    for (const n of H.info) expect(n.actions).toEqual([]);
+    expect(H.opened).toEqual([]);
+  });
+
   it('structural: simulating a click on an action that must not exist changes NOTHING', async () => {
     // If a future edit reintroduces a completing action, the two runs diverge —
     // either in what was recorded, in the suffix, or by opening a browser.
@@ -789,6 +810,39 @@ describe('AC-9: the PR path writes NOTHING (INV-4)', () => {
     expect(fs.readFileSync(path.join(tmp, ...SPEC_REL.split('/')), 'utf-8')).toContain(
       'status: approved',
     );
+  });
+
+  it('AC-9 (#1224): the DEGRADE arm writes nothing either', async () => {
+    // The audit's second mutation: the snapshot covered only `created`, so a
+    // sidecar write inserted on the failure path survived. INV-4 is a property of
+    // EVERY arm — a path that failed has no more licence to write approval state
+    // than one that succeeded.
+    H.config = { pushOnApprove: 'always', approvalPr: 'auto' };
+    installRunner({ 'gh pr create': enoent() });
+    seedApprovedSpec(tmp);
+
+    const before = snapshot(tmp);
+    const { pr } = await pushApprovalIfEnabled(tmp, 'spec-050', {
+      subject: SUBJECT,
+      paths: DOCS_PATHS,
+    });
+    expect(pr?.outcome).toBe('gh-absent'); // anti-vacuity: the degrade arm really ran
+    expect(snapshot(tmp)).toEqual(before);
+  });
+
+  it('AC-9 (#1224): the MANUAL arm writes nothing either', async () => {
+    // Third arm, same property: FR-1 `manual` returns before any gh call at all.
+    H.config = { pushOnApprove: 'always', approvalPr: 'manual' };
+    installRunner();
+    seedApprovedSpec(tmp);
+
+    const before = snapshot(tmp);
+    const { suffix } = await pushApprovalIfEnabled(tmp, 'spec-050', {
+      subject: SUBJECT,
+      paths: DOCS_PATHS,
+    });
+    expect(suffix).toBe(LEGACY_SUFFIX); // anti-vacuity
+    expect(snapshot(tmp)).toEqual(before);
   });
 });
 

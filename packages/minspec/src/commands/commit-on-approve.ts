@@ -508,8 +508,21 @@ async function openApprovalPr(
       title: ctx.subject,
       body: buildApprovalPrBody({ paths, record, sha, labels }),
       labels,
-      // FR-6: a re-approval that reuses a branch must adopt the open PR, never
-      // fan out a second one.
+      // FR-6: if an open PR already exists for this head, adopt it rather than
+      // fanning out a second one.
+      //
+      // HONEST SCOPE (#1224 review). The spec's risk table cites FR-6 as the
+      // mitigation for R2, "a branch reused across re-approvals fans out duplicate
+      // PRs". FR-6 as written does NOT mitigate that, because the premise is false:
+      // `approvalBranchName` (approve-push.ts) appends a millisecond-precision
+      // stamp specifically so two approvals can never collide, so approval branches
+      // are never reused and this probe can never match one. Re-approve the same
+      // spec twice and you still get two branches and two PRs.
+      //
+      // What FR-6 DOES buy is real but narrower: it makes PR-opening idempotent for
+      // one head — a retry after a partial failure, or `gh pr create` losing a race
+      // — which is why it stays. R2 itself is unmitigated and belongs in a
+      // follow-up, not in a comment that quietly implies otherwise.
       adoptExisting: true,
     });
 
