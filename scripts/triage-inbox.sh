@@ -227,9 +227,19 @@ CONTENT
   # queried. Every hold:* except the one just applied is superseded, including when the
   # new verdict is `none` (HOLD_LABEL empty) — an issue that became dispatchable must
   # stop claiming it is held.
-  local h
+  #
+  # ONLY the ones this issue ACTUALLY HAS. `hold:*` labels are created lazily (just the
+  # current one, above), so most do not exist repo-wide — and naming a nonexistent label
+  # makes `gh` reject the WHOLE remove request, which then falls into the retry below and
+  # reports "could not clear superseded label(s)". That warning is load-bearing: it means
+  # a human-gate label may be countermanding a valid verdict. Firing it routinely, for
+  # labels that were never there, trains the reader to ignore the one time it is real.
+  # (`backfill-hold-labels.sh` already guards this way; this is the same check.)
+  local h CURRENT_LABELS
+  CURRENT_LABELS=$(echo "$ISSUE_JSON" | jq -r '[.labels[].name] | join(",")')
   for h in human tier specify info unknown; do
     [[ "hold:${h}" == "$HOLD_LABEL" ]] && continue
+    [[ ",${CURRENT_LABELS}," == *",hold:${h},"* ]] || continue
     SUPERSEDED="${SUPERSEDED},hold:${h}"
   done
 

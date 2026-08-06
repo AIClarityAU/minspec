@@ -56,6 +56,17 @@ describe('hold:* labels (#1002)', () => {
     expect(src).toMatch(/SUPERSEDED="\$\{SUPERSEDED\},hold:\$\{h\}"/);
   });
 
+  it('supersedes ONLY labels the issue actually has — a false warning is worse than none', () => {
+    // `hold:*` labels are created lazily, so naming a nonexistent one makes `gh` reject
+    // the WHOLE remove request; that falls into the retry path and prints "could not
+    // clear superseded label(s)". That warning means a human-gate label may be
+    // countermanding a valid verdict — firing it routinely trains the reader to ignore
+    // the one time it is real. Flagged `medium` on PR #1291.
+    const src = read('scripts/triage-inbox.sh');
+    expect(src).toMatch(/CURRENT_LABELS=\$\(echo "\$ISSUE_JSON" \| jq -r/);
+    expect(src).toMatch(/\[\[ ",\$\{CURRENT_LABELS\}," == \*",hold:\$\{h\},"\* \]\] \|\| continue/);
+  });
+
   it('the supersede list covers every emitted non-none hold', () => {
     // THE COUPLING TEST. If triage-decide.sh grows a hold, this fails until the
     // supersede loop learns about it — otherwise a stale label would outlive its verdict.
