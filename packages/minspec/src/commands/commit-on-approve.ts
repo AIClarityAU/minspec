@@ -137,8 +137,8 @@ export async function commitApprovalIfEnabled(
       // reasonably believed it had landed. So say plainly what happened, what
       // state the files are in, and what to do; never a bare console.warn.
       //
-      // #1115 / DR-079 — RECOVERY IS NOW ATTEMPTED, in a throwaway worktree off
-      // origin/<default>. See docs/decisions/DR-079.md for the recorded decision:
+      // #1115 / DR-080 — RECOVERY IS NOW ATTEMPTED, in a throwaway worktree off
+      // origin/<default>. See docs/decisions/DR-080.md for the recorded decision:
       // it supersedes the deferral that used to stand here, states why SPEC-050's
       // arm could not reach this case, and dates the duplicated-push-logic loan.
       // The comment that stood here said auto-recovery belonged in SPEC-050. That
