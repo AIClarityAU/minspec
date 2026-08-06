@@ -5,7 +5,7 @@ type: requirements
 # .minspec/approvals/specs/minspec/SPEC-051-ownership-before-approval/requirements.md.json (.specHash).
 # `status`/`phases` are tool-written lifecycle mirrors (canonical.ts strips them from the hash);
 # never hand-write either. Read the sidecar, never this prose, for the current state.
-status: specifying
+status: planning
 tier: T4
 product: minspec
 epic: EPIC-003  # SDD Core Methodology — the spec→code ownership contract (SPEC-038's sibling)
@@ -14,9 +14,9 @@ relates_to: [SPEC-038, SPEC-022, DR-012, DR-034, DR-069, DR-078, DR-051, DR-003]
 # NOTE: no `implements:` yet — this spec is `specifying` (plan pending), so SPEC-038 FR-3
 # does not yet apply. Ownership is declared at Plan, per the very contract this spec is about.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
