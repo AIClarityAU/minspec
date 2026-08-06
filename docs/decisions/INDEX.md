@@ -301,7 +301,7 @@ MinSpec's SDD gates (spec id: frontmatter, RCDD root-cause line, ref-egress leak
 
 ## [DR-038 — Unified next-task graph surface — one clickable DAG of specs/DRs/epics/issues/PRs, subsuming the dependency-map and PR-queue surfaces](DR-038.md)
 
-*Status: proposed · Date: 2026-06-23*
+*Status: accepted · Date: 2026-06-23*
 
 <!-- dr-summary:DR-038 auto=a7bd12bc2a76 -->
 The next-task signpost (DR-019, SPEC-012) emits **one** next human task from a deterministic cross-artifact DAG. Today the *answer* (one task) and the *reasoning* (the DAG behind it) are separate ideas with separate, unbuilt surfaces: Three surfaces, three node vocabularies, one underlying graph. SPEC-010 FR-4 already requires the signpost to **show its evidence**; a local graph centred on the signpost node *is* that evidence rendered spatially — it turns an opaque verdict ("do X next") into an auditable one ("…because Y…
@@ -309,7 +309,7 @@ The next-task signpost (DR-019, SPEC-012) emits **one** next human task from a d
 
 ## [DR-039 — Goals drive priority — constitution Goals + goal-rank/epic.order as the deterministic human dial; auto-derived WSJF as a future upgrade](DR-039.md)
 
-*Status: proposed · Date: 2026-06-23*
+*Status: accepted · Date: 2026-06-23*
 
 <!-- dr-summary:DR-039 auto=65cf3bedc9db -->
 DR-019 makes next-task priority a deterministic DAG; the one thing the DAG cannot derive — relative importance between independent branches — it lifts into the human-set epic.order field. Three gaps surfaced this session: 1. **Is business value computed, and correctly?** Yes, but in the wrong place: a **WSJF** scorer exists (minspec.scoreWsjf, backlog.ts) — human-entered, 4 dimensions × 1–10 — but it scores **GitHub issues only**, is **not wired to the resolver**, and asks for four numbers per issue. That is…
@@ -333,7 +333,7 @@ MinSpec tracks five artifact kinds that all share one property: a human must rea
 
 ## [DR-042 — Outcome metrics before engagement — sequence the trust-measurement build (outcome is the moat, engagement is the garnish)](DR-042.md)
 
-*Status: proposed · Date: 2026-06-26*
+*Status: accepted · Date: 2026-06-26*
 
 <!-- dr-summary:DR-042 auto=84fb071cc98c -->
 A review-telemetry audit (2026-06-26, 6-agent workflow, claims verified to file:line) asked whether MinSpec can today (a) **prove** the value of SDD and (b) **tune** the "just enough human" thesis (DR-029) — e.g. "this project has a high error rate; can we point to the cursory reviews that were rubber-stamped?"
@@ -347,7 +347,7 @@ A review-telemetry audit (2026-06-26, 6-agent workflow, claims verified to file:
 SPEC-017 (Trust Dashboard) needs an **approval baseline** — the exact approved spec body at approval time — so it can later char-diff current-vs-approved and report rework % (M1). SPEC-017 FR-OQ4 originally resolved this *by engineering default* to: gzip the latest-approved body into a **git-ignored** .minspec/snapshots/ sidecar.
 <!-- /dr-summary:DR-043 -->
 
-## [DR-044 — The "Execute" extension is named SealBox and lives in its own private repo (split from the monorepo)](DR-044.md)
+## [DR-044 — The "Execute" extension is named SealBox and lives in its own repo (split from the monorepo)](DR-044.md)
 
 *Status: proposed · Date: 2026-06-28*
 
@@ -405,7 +405,7 @@ Invariant #1 (zero network in core) and DR-004's Tier-0 rule do not prohibit she
 
 ## [DR-051 — Artifact-class branch policy — approvables live on main; only code isolates in worktrees; approval state is the committed hash-matched sidecar, never git staging](DR-051.md)
 
-*Status: proposed · Date: 2026-07-01*
+*Status: accepted · Date: 2026-07-01*
 
 <!-- dr-summary:DR-051 auto=9b6f4ee6159c -->
 SPEC-026 treats the whole **corpus** — specs/**, docs/decisions/**, docs/epics/**, docs/domain/** — uniformly: worktree-steer (FR-9) would push a second live session editing *any* corpus file into its own worktree, and the pre-commit backstop (FR-12) guards all of it. The founder, reviewing SPEC-026, observed that **approvables are not code**:
@@ -413,7 +413,7 @@ SPEC-026 treats the whole **corpus** — specs/**, docs/decisions/**, docs/epics
 
 ## [DR-052 — Subscription-CLI-default billing, amended for Anthropic's consumer-OAuth ToS — genuine CLI direct; broker/Scrooge = API-key mode only; no multi-tenant](DR-052.md)
 
-*Status: proposed · Date: 2026-07-03*
+*Status: accepted · Date: 2026-07-03*
 
 <!-- dr-summary:DR-052 auto=0000000000000000 -->
 Issue #74 confirmed against Anthropic's official Legal-and-compliance docs that consumer OAuth is for individual native-app use only — routing subscription traffic through a broker/Scrooge or "on behalf of users" is prohibited, and the June-15 separate Agent-SDK credit is paused (still draws the interactive quota). Amends DR-016/DR-017: subscription mode = genuine `claude` CLI direct (no broker reroute), default subscription-CLI, ship both modes, broker/Scrooge = API-key mode only, no multi-tenant.
@@ -517,7 +517,7 @@ MinSpec's layered architecture (lib never imports views/commands, @aiclarity/sha
 
 ## [DR-065 — The sole sanctioned exception to "never move a shared HEAD" — a drain/loop MAY fast-forward a shared checkout only on positive presence-proof that no live session claims it; absence of proof is fetch-only](DR-065.md)
 
-*Status: proposed · Date: 2026-07-17*
+*Status: accepted · Date: 2026-07-17*
 
 <!-- dr-summary:DR-065 auto=0000000000000000 -->
 Two held rules contradict: rule #8 / DR-051 §4a says never move a shared checkout's HEAD (moving it under a live session strands WIP — unrecoverable, the #168 incident), while DR-051 §4c says a checkout on main but behind origin/main makes gates judge stale content — wrong verdicts (the stranded SPEC-024 approval). SPEC-026's presence layer makes occupancy observable (worktreeRoot + pid, live iff lastSeen<120s AND pid alive), so this records the one sanctioned exception: a drain MAY `merge --ff-only` a shared checkout ONLY on positive proof of dormancy — ≥1 live record exists anywhere AND none claims this worktreeRoot — because an unoccupied checkout has no live tree to disturb. Absence of proof (empty/stale/corrupt/unreadable presence dir) ⇒ occupied ⇒ fetch-only. Gated by a conjunction of four guards (on-main, content-clean, dormant, true-ff); fetch stays unconditional (read-only); fails opposite to FR-12's fail-open backstop because each gate fails toward its own cheap error. Scope is deliberately minimal (§5) — never reset/rebase/switch, never feature branches, never the Tier-0 extension.
@@ -634,4 +634,12 @@ Two accepted decisions pull in opposite directions, and SPEC-050 FR-8 sits exact
 <!-- dr-summary:DR-079 auto=ea255338bf34 -->
 The reviewer panel (DR-033 §6) runs four claude -p agents over a diff. Each is told to emit exactly one block: review-decide.sh then parses that block out of the agent's free-text output, and ai-review.yml extracts it again to render the PR comment.
 <!-- /dr-summary:DR-079 -->
+
+## [DR-080 — Approval recovery is owned by the refusal that triggers it, not by SPEC-050 — the two axes are complementary, and the duplicated push logic is a dated loan against SPEC-050's seam](DR-080.md)
+
+*Status: proposed · Date: 2026-08-06*
+
+<!-- dr-summary:DR-080 auto=3485bfc12c76 -->
+commitApproval refuses to commit an approval when HEAD is the push-protected default branch (#1064); such a commit could never be pushed, and the #1041 pre-commit hook rejects it. **That refusal is correct and stays.** What was missing is what happens next.
+<!-- /dr-summary:DR-080 -->
 <!-- minspec:dr-index:end -->

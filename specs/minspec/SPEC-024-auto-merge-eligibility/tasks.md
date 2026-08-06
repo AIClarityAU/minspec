@@ -29,7 +29,7 @@ epic: EPIC-007  # Agent Execute
 - [x] `classifyBlast` deny-by-default over signal names; unknown ⇒ high (`auto-merge.ts:180`; test `:223`,`:262`). *(FR-5)*
 - [x] `deriveTouchesExportedSurface` from `public_api_*` presence; degraded emissions still force true (`auto-merge.ts:154`; test `:301`). *(FR-4a)*
 - [x] `reachKnownLow` always false in v1 + reach-degrade escalation (`auto-merge.ts:232`; test `:344`). *(FR-4, INV-2)*
-- [x] `withProverAuthority` overwrites self-reported regression flags (`auto-merge.ts:292`; test `:159`). *(INV-3)*
+- [x] `withVerifiedAuthority` overwrites self-reported regression flags (`auto-merge.ts:380`). *(INV-3)* *(renamed from `withProverAuthority` by #489, which widened it to carry the real-diff authority too.)*
 - [x] Hollow/stub finding ⇒ ineligible; missing array ⇒ ineligible (`auto-merge.ts:352`; test `:207`). *(INV-4)*
 
 ## Slice 2 — FR-2 red→green prover (IO/exec)

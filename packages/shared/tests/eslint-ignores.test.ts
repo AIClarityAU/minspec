@@ -1,5 +1,21 @@
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest';
+
+// #1099 — `loadConfig()` below does a cold dynamic `import()` of the full ESLint
+// flat-config module graph (eslint.config.mjs + its plugin/parser deps), not a
+// child process, but it is the same class of flake: real, non-trivial I/O/module
+// resolution whose wall-clock is sensitive to container scheduling contention, not
+// to a defect. #1099 observed this suite tripping the 5s default testTimeout in one
+// run and a disjoint set of process-spawning suites in the next — same root cause,
+// different suite each time. Raised HERE, per-file, not globally — a genuinely hung
+// test elsewhere still fails fast at the default. 30s is the value #1099 measured
+// all affected suites passing reliably at.
+beforeAll(() => {
+  vi.setConfig({ testTimeout: 30_000 });
+});
+afterAll(() => {
+  vi.resetConfig();
+});
 
 // T3 regression (harvest316/minspec#257): `eslint .` OOM-crashed (exit 134,
 // "Aborted (core dumped)") after the vscode integration tests downloaded a full

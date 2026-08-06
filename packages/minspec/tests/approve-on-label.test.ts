@@ -16,6 +16,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import * as path from 'path';
+import * as fs from 'fs';
 import { execFileSync } from 'child_process';
 
 const SCRIPT = path.resolve(__dirname, '../../../scripts/approve-on-label.sh');
@@ -167,5 +168,121 @@ describe('approve-on-label.sh — the approval binds to a recorded human action 
     expect(code).toContain('--may-approve');
     expect(code).toContain('--render-approval');
     expect(code.length).toBeGreaterThan(1500);
+  });
+});
+
+/**
+ * T0 — #1245: permission is established BEFORE any privilege is minted.
+ *
+ * The App installation token is broader than this workflow needs. Minting it and only
+ * then asking whether the actor may approve hands a privileged credential to the
+ * unauthorized path. Ordering is the whole control, and ordering is exactly the kind of
+ * property that a later well-meaning edit silently reverses — so it is pinned here.
+ *
+ * Line-index assertions rather than a YAML parse: no YAML library is a dependency of this
+ * package, and adding one to assert step order would cost more than it proves.
+ */
+describe('approve-on-label.yml — permission before privilege (#1245)', () => {
+  const WF = path.resolve(__dirname, '../../../.github/workflows/approve-on-label.yml');
+  const wf = (): string => fs.readFileSync(WF, 'utf-8');
+  const lineOf = (needle: string): number => {
+    const i = wf().split('\n').findIndex((l) => l.includes(needle));
+    if (i < 0) throw new Error(`workflow has no line containing ${JSON.stringify(needle)}`);
+    return i;
+  };
+
+  it('the permission check runs BEFORE the App token is minted', () => {
+    expect(lineOf('id: perm')).toBeLessThan(lineOf('create-github-app-token'));
+  });
+
+  it('the mint is gated on the permission verdict, not merely ordered after it', () => {
+    // Ordering alone would still mint for an unauthorized actor — the step has to be
+    // skipped, not just sequenced.
+    const lines = wf().split('\n');
+    const mintIdx = lineOf('create-github-app-token');
+    const guard = lines.slice(Math.max(0, mintIdx - 4), mintIdx).join('\n');
+    expect(guard).toMatch(/if:\s*steps\.perm\.outputs\.authorized != 'false'/);
+  });
+
+  /**
+   * THREE outcomes, not two (PR #1258 architect, blocking).
+   *
+   * `GET /collaborators/{user}/permission` is a privileged read, and the default token's
+   * ability to make it is not something to assume — the pre-existing check deliberately
+   * used the broader App token. Collapsing "the check failed" into "the actor is denied"
+   * would let one 403 silently lock out every maintainer and bounce them with a
+   * `permission: none` message that is simply untrue: an errored witness reported as a
+   * verdict, which is constitution invariant 2 exactly.
+   */
+  it('an errored check yields `unknown` — never a denial', () => {
+    const body = wf();
+    expect(body).toContain('authorized=unknown');
+    // The failure branch must NOT emit a permission value that reads as a real answer.
+    expect(body).not.toMatch(/authorized=false[\s\S]{0,200}could not read/);
+  });
+
+  it('an errored check still mints and defers to the authoritative App-token check', () => {
+    // `!= 'false'` — true OR unknown proceed. A `== 'true'` gate would skip the mint on
+    // an errored check and strand the run with no decision at all.
+    const lines = wf().split('\n');
+    for (const anchor of ['create-github-app-token', 'run: bash scripts/approve-on-label.sh']) {
+      const i = lines.findIndex((l) => l.includes(anchor));
+      const block = lines.slice(Math.max(0, i - 6), i).join('\n');
+      expect(block, anchor).toMatch(/authorized != 'false'/);
+      expect(block, anchor).not.toMatch(/authorized == 'true'/);
+    }
+  });
+
+  it('the errored case is VISIBLE, not silent', () => {
+    // DR-066: a gate that cannot run must say so. A swallowed 403 that quietly changes
+    // behaviour is the silent gate this repo's invariant 2 forbids.
+    expect(wf()).toMatch(/::warning title=Early permission check could not run/);
+  });
+
+  it('only a DEFINITIVE deny bounces the label', () => {
+    const lines = wf().split('\n');
+    const i = lines.findIndex((l) => l.includes('Remove the label and explain'));
+    const block = lines.slice(i, i + 4).join('\n');
+    expect(block).toMatch(/authorized == 'false'/);
+  });
+
+  it('the approve step is gated too, so it can never run without the mint', () => {
+    const lines = wf().split('\n');
+    const runIdx = lineOf('run: bash scripts/approve-on-label.sh');
+    const block = lines.slice(Math.max(0, runIdx - 6), runIdx).join('\n');
+    expect(block).toMatch(/if:\s*steps\.perm\.outputs\.authorized != 'false'/);
+  });
+
+  it('the unauthorized path still bounces — the fix must not cost the #1113 UX', () => {
+    // A hard failure before the mint would have been simpler and worse: `agent-ready`
+    // left standing with no explanation. The bounce is the point of the feature.
+    expect(wf()).toMatch(/if:\s*steps\.perm\.outputs\.authorized == 'false'/);
+    expect(wf()).toMatch(/--remove-label agent-ready/);
+  });
+
+  it('the bounce uses the DEFAULT token, never the App token', () => {
+    const lines = wf().split('\n');
+    const bounceIdx = lines.findIndex((l) => l.includes('Remove the label and explain'));
+    const block = lines.slice(bounceIdx, bounceIdx + 12).join('\n');
+    expect(block).toContain('secrets.GITHUB_TOKEN');
+    expect(block).not.toContain('steps.app.outputs.token');
+  });
+
+  it('every event field reaches the shell via env:, never inside a run: body', () => {
+    // The safe pattern IS `KEY: ${{ github.event.x }}` under `env:` — the first version of
+    // this test flagged those and failed on correct code. The invariant is about WHERE the
+    // interpolation sits: an `env:` mapping or an expression context (`if:`, `group:`) is
+    // fine; anywhere else means the value is being pasted into a shell command.
+    const offenders = wf()
+      .split('\n')
+      .filter((l) => l.includes('${{ github.event.'))
+      .filter((l) => !/^\s+[A-Za-z_][A-Za-z0-9_]*:\s*\$\{\{/.test(l))   // env: / with: mapping
+      .filter((l) => !/^\s*(if|group):/.test(l))                          // expression context
+      .filter((l) => !/^\s+github\.event\./.test(l));                    // continuation of a multiline if:
+    expect(offenders, `event field outside env:/expression → ${offenders.join(' | ')}`).toEqual([]);
+  });
+
+  it('…and that check is not vacuous — the workflow does use event fields', () => {
+    expect(wf().split('\n').filter((l) => l.includes('${{ github.event.')).length).toBeGreaterThan(2);
   });
 });

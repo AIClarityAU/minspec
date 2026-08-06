@@ -11,15 +11,26 @@ relates_to: [SPEC-014, SPEC-012, SPEC-006]  # review-webview skim surface · nex
 # MinSpec — Auto-Merge Eligibility Gate (Requirements)
 
 **Date:** 2026-06-07
-**Status:** Specifying (derived — INV-1: unapproved ⇒ `specifying`, regardless of code state; see `deriveStatus`, `packages/minspec/src/lib/lifecycle.ts:114`). This is **not actually accurate to the codebase**: the gate is built, merged (#412), and running (`packages/shared/src/review-signals.ts`), with acceptance criteria backfilled (#492). But this T4 spec was never run through the real Approve step, so the derived status floors at `specifying` and cannot legitimately read `implementing` or `done` until a human approves it. Once approved, status will next derive from phase completion — `done` is additionally gated on open acceptance holes #489/#490/#491/#466 + INV-7 keyboard.
+**Status:** Specifying (derived — INV-1: unapproved ⇒ `specifying`, regardless of code state; see `deriveStatus`, `packages/minspec/src/lib/lifecycle.ts:114`). This is **not actually accurate to the codebase**: the gate is built, merged (#412), and running — `packages/minspec/src/lib/auto-merge.ts` (pure core) + `scripts/auto-merge-gate.ts` (IO/exec), as `design.md:28-37` states. *(Corrected 2026-08-05: this line previously cited `packages/shared/src/review-signals.ts`, which is the #180 review-signal renderer, not the gate.)* Acceptance criteria backfilled (#492). But this T4 spec was never run through the real Approve step, so the derived status floors at `specifying` and cannot legitimately read `implementing` or `done` until a human approves it. Once approved, status will next derive from phase completion — `done` is additionally gated on open acceptance holes #489/#490/#491/#466 + INV-7 keyboard.
 **Decision:** [DR-033](../../../docs/decisions/DR-033.md) §3 (this spec is the *consumer* that decision describes but never had)
 **Triggered by:** [#199](https://github.com/harvest316/minspec/issues/199) — "nothing consumes the signals to skip the PR gate; this is the actual auto-approve on-switch."
 **Epic:** [EPIC-007 Agent Execute](../../../docs/epics/EPIC-007-agent-execute.md)
 
-> ⚠️ **Read this one.** This is the single highest-consequence gate in MinSpec: it decides
+> ⚠️ **Read this one.** This is the highest-consequence gate in MinSpec: it decides
 > which PRs merge to `main` **with no human eyes**. Everything else in the auto-build chain
 > is an input; this is the decision. If any doc deserves a careful human read before build,
 > it is this one.
+>
+> *Scoped 2026-08-05: it is no longer the **only** no-human-eyes merge path.*
+> [DR-061](../../../docs/decisions/DR-061.md) (accepted 2026-07-15) installed **native
+> GitHub auto-merge** keyed on the `ready-to-merge` required check as an **interim** policy
+> superseding DR-033 §6 deny-by-default "until the consequence-hybrid blast gate's analyzers
+> land". So today two paths can merge without a human: this gate, invoked in the agent
+> dispatch lane (`scripts/dispatch-issue.sh:1476` → `scripts/auto-merge-gate.ts`), and the
+> native path armed by `.github/workflows/ready-to-merge.yml`. This spec is the designated
+> successor to the interim policy, not a dead letter — the analyzers it keys on now exist
+> (`packages/minspec/src/lib/consequence-analyzers.ts`), so DR-061's stated sunset condition
+> is worth re-checking.
 
 ---
 
@@ -142,11 +153,26 @@ merge-vs-hold decision. This spec is that decision.
   `concurrency` (its `explain` covers the timer/transaction sub-patterns — `concurrency` is the
   only emitted name) — trips, OR the FR-4 degrade condition holds, **OR any
   consequence signal name not in the low-blast recognition set is present**. A signal counts
-  toward `low` only if it is explicitly recognized as low-blast (currently: the `reach_unavailable`
-  degrade marker is handled by FR-4, not counted low here; there is no other low-blast signal in
-  v1). Any future analyzer signal is therefore `high` until this list is deliberately updated.
+  toward `low` only if it is explicitly recognized as low-blast. Any future analyzer signal is
+  therefore `high` until this list is deliberately updated.
   (This is the routing DR-033 §3 keys auto-merge on; erring `high` costs a 30s skim, erring
   `low` costs a bad `main`.)
+  - **Amended to match the shipped gate ([DR-058](../../../docs/decisions/DR-058.md) / #490,
+    2026-07-14).** Two clauses above were written against the pre-fix behaviour and are
+    corrected here rather than left to mislead:
+    1. **`low` requires AFFIRMATIVE low-blast evidence.** An **empty** signal set and a
+       **reach-only** set both classify **`high`**, not `low` — absence of evidence is
+       unmeasured, not safe. This was the #490 hole: the final `return` was `'low'`
+       (`packages/minspec/src/lib/auto-merge.ts:253-255`, whose comment records the
+       original defect verbatim).
+    2. **A low-blast signal name does exist in v1** — `low_blast_docs_test_only`
+       (`auto-merge.ts:171-172`, `LOW_BLAST_SIGNAL_NAMES`), emitted when the diff touches
+       only documentation and/or test files. The clause "there is no other low-blast signal
+       in v1" was true when written and is now false.
+
+    The deny-by-default *direction* of FR-5 is unchanged and was always right; what changed
+    is that the empty set now falls on the deny side too. Live contract: `classifyBlast`
+    (`auto-merge.ts:235-256`).
 - **FR-6 Loop integration.** In the #172 dispatch, after a PR's checks are green, call the
   prover (FR-2) + gate (FR-1). `eligible` ⇒ `gh pr merge --squash` (low-blast, no human).
   Else ⇒ **do not merge; emit a high-blast review task (FR-8)** carrying the #180 signal
@@ -374,9 +400,12 @@ tracked issues (Follow-ups) — an unmet ⛔ here is a live hole, not a note.
 - **Unmet, deferred (⛔ ⏳):** AC-22 + AC-23 — the FR-8 **in-IDE keyboard-first** surface;
   fallback (AC-21) covers the loop today, but **INV-7 has zero implementation** and must gate
   any SPEC-014-backed FR-8 build.
-- **Unmet, live holes (⛔):** AC-25..AC-28 — self-reported root cause, analyzer false-negative
-  on code, swallowed audit failure, TOCTOU merge SHA. These are the paths to a wrong auto-merge
-  the gate does **not** yet close; each is tracked (Follow-ups).
+- **Unmet, live holes (⛔):** ~~AC-25..AC-28~~ — **updated 2026-08-05: three of the four are
+  closed.** AC-25/#489 (self-reported root cause) is fixed — Signal-1's `changedFiles` is
+  overwritten with the real git diff via `withVerifiedAuthority` (`auto-merge.ts:380`).
+  AC-26/#490 (analyzer false-negative on code) is fixed and inverted — see FR-5's amendment
+  (DR-058). AC-27/#491 (swallowed audit failure) is fixed. All three issues are CLOSED as
+  completed. **AC-28 (TOCTOU merge SHA) remains genuinely open** — see Follow-ups.
 
 ## Contract (TypeScript sketch)
 
@@ -449,6 +478,10 @@ proven; a test red-on-head → not proven; missing test → not proven.
   filed per DR-023:** AC-25 self-reported root cause → [#489](https://github.com/AIClarityAU/minspec/issues/489);
   AC-26 analyzer false-negative on code → [#490](https://github.com/AIClarityAU/minspec/issues/490);
   AC-27 swallowed audit failure → [#491](https://github.com/AIClarityAU/minspec/issues/491);
-  AC-28 TOCTOU merge SHA → fold into [#466](https://github.com/AIClarityAU/minspec/issues/466).
+  AC-28 TOCTOU merge SHA → ~~fold into [#466](https://github.com/AIClarityAU/minspec/issues/466)~~
+  → **[#1262](https://github.com/AIClarityAU/minspec/issues/1262)**. *(Corrected 2026-08-05:
+  #466 is closed, and it closed a different link in the chain — SHA-binding the `ai-review:pass`
+  witness in `ready-to-merge.yml`, not binding the gate's own eligibility evaluation to the SHA
+  that merges. AC-28 was therefore untracked; #1262 now carries it.)*
 - `plan-gate` HITL mode (#183 option 2) — deferred.
 - Productize as the `aiclarity.agent-execute` gate surface (EPIC-007) — this dev-time gate is the prototype.

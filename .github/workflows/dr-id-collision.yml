@@ -1,0 +1,73 @@
+name: DR id collision
+
+# Makes a duplicate `DR-NNN` impossible to MERGE, and names the next free id at the
+# moment of the failure (#1226).
+#
+# ── What it closes ───────────────────────────────────────────────────────────
+# `nextAdrNumber` hands out `max(existing DR-NNN) + 1` computed against the LOCAL
+# checkout. That is unique only if DR creation is serialised through `main`, and
+# concurrent worktree sessions (#168, the normal mode here) break that by design:
+# two sessions branching from one `main` both compute the same number, each
+# correctly, neither able to see the other. Nothing rejected the duplicate.
+#
+# Worse, a blocked PR's number DECAYS. #1209 was renumbered twice in a single day
+# while it waited on a quota-blocked review, and ended up claiming DR-077 — by then
+# an ACCEPTED, MERGED decision. Merging it unchanged would have overwritten an
+# accepted record with a different one under the same primary key.
+#
+# ── Why it has no `paths:` filter ────────────────────────────────────────────
+# A `paths: ['docs/decisions/**']` filter would leave this check UNREPORTED on any
+# PR that touches no decision — and an unreported required check is unsatisfiable.
+# That is the #560 silent-gate class (DR-066): the gate looks present and enforces
+# nothing, so every merge becomes an `--admin` bypass. The check instead runs on
+# every PR and exits 0 in one API call when the PR adds no decision record.
+#
+# ── REQUIRED MANUAL STEP — make the gate enforcing ───────────────────────────
+# ➡️ A workflow cannot make itself gating. Add `dr-id-collision` as a required
+# status check in the `main` branch ruleset. Until then this is advisory only.
+#
+# ── Tier-0 boundary ──────────────────────────────────────────────────────────
+# The cross-PR awareness lives HERE and in `scripts/`, never in `packages/`. The
+# MinSpec extension makes no network call (constitution invariant 1, DR-004), so
+# `adr-manager.ts` still computes `max+1` offline; this is the gate that catches
+# what an offline computation cannot know.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+    branches: [main]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+concurrency:
+  group: dr-id-collision-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  dr-id-collision:
+    name: DR id uniqueness
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci
+
+      # Fail-closed (DR-066): the script exits non-zero on a collision AND on any
+      # inability to establish that there wasn't one — `gh` missing, erroring, or
+      # returning a shape it does not understand, and on a base listing that came
+      # back empty while the checkout holds decisions this PR does not add. There
+      # is no branch that exits 0 without a comparison having been made.
+      - name: Check DR id uniqueness across main and every open PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+          BASE_REF: ${{ github.event.pull_request.base.ref }}
+        run: npx tsx scripts/check-dr-id-collision.ts --repo "$REPO" --pr "$PR" --base "$BASE_REF"

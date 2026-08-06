@@ -141,7 +141,16 @@ on the `'committed'` return at
 So the signature becomes `(rootDir, slug, paths: readonly string[])`. No new plumbing, no new
 state: the caller passes what it already computed.
 
-### `packages/minspec/src/lib/approval-pr-body.ts` — NEW, pure
+### `buildApprovalPrBody` — pure, exported from `approval-pr.ts`
+
+> **Amended during Tasks (2026-08-06).** This was originally planned as its own file,
+> `approval-pr-body.ts`. It is **folded into `approval-pr.ts`** instead: `requirements.md`
+> is now approved and hash-locked (`75ecc600…`, `github@harvest316.com`, 2026-08-05) and its
+> `implements:` names exactly `approval-pr.ts`, `commit-on-approve.ts` and
+> `approval-pr.test.ts` — so a third owned source file would require editing `implements:`
+> and staling a fresh human approval for a file-layout preference. Folding is also cohesive
+> on its own terms: one lib that builds and opens a lane PR. Nothing about the function
+> changes — it stays pure and separately testable.
 
 PURE and separately testable, so OQ-2's provenance block is asserted without a runner:
 
@@ -216,7 +225,7 @@ T0/T1 first, all against a stub `ExecRun` recording every `(file, args, cwd)`:
 | `approval-pr.test.ts` — argv assertions: no `checkout`/`switch`/`merge`/`rebase`/`reset` ever recorded | AC-8, INV-3 |
 | `approval-pr.test.ts` — a non-allowlisted path yields `labelled: false` | AC-2, INV-2 |
 | `commit-on-approve` — a `not-docs-only` outcome surfaces a notification saying auto-merge will not run, and never the silent success surface | AC-11 |
-| `approval-pr-body.test.ts` — pure body-shape assertions | OQ-2 |
+| `approval-pr.test.ts` — `buildApprovalPrBody` pure body-shape assertions | OQ-2 |
 | `commit-on-approve` — `auto` creates, `manual` does not | AC-1 |
 | `commit-on-approve` — `pushOnApprove: never`, and `prompt` declined, record **zero** runner calls | AC-7, INV-1 |
 | `commit-on-approve` — `outcome: 'pushed'` runs no `gh` | AC-6 |
