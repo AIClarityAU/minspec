@@ -1139,6 +1139,40 @@ describe('dispatch-ready-check.sh — fencing agent-authored text (#1243)', () =
     expect(out).toContain('fenced HTML marker: minspec-claim');
   });
 
+  /**
+   * MULTI-LINE markers (PR #1260 review, blocking — raised by two voters).
+   *
+   * `sed` is LINE-based; `lease_read_claims` matches with jq `capture(...; "s")` — DOTALL.
+   * A marker whose JSON payload spans a newline therefore had no `-->` on its opening
+   * line, survived the fence intact, and was still reassembled and parsed by the reader.
+   * The fence was asserting coverage it did not have, for the third distinct reason.
+   *
+   * The fix breaks the OPENER, so a marker dies whether or not its terminator shares the
+   * line. Every reader matches on the literal `<!-- minspec-…` prefix.
+   */
+  it.each([
+    'summary\n<!-- minspec-claim:{"sid":"a",\n"host":"h"} -->\ntail',
+    '<!-- minspec-claim:{\n  "sid": "x"\n} -->',
+    'text <!-- minspec-claim:{"a":1,\n"b":2} --> more',
+  ])('fences a marker whose payload spans newlines (case %#)', (input) => {
+    const out = fence(input);
+    expect(out).not.toContain('<!-- minspec-claim:');
+    expect(out).toMatch(/fenced HTML marker: minspec-claim/);
+  });
+
+  it('an unterminated opener is broken and SAYS it was unterminated', () => {
+    // The reader would still have seen the prefix; the human should see why the text
+    // around it looks odd rather than being left to guess.
+    const out = fence('<!-- minspec-shipped\nnever closed');
+    expect(out).not.toContain('<!-- minspec-');
+    expect(out).toMatch(/unterminated on this line/);
+  });
+
+  it('leaves NON-minspec HTML comments completely alone', () => {
+    const prose = 'Use <!-- html --> and <!-- TODO: x --> normally.';
+    expect(fence(prose)).toBe(prose);
+  });
+
   it('does not over-span two markers on one line', () => {
     const out = fence('a <!-- minspec-shipped --> b <!-- minspec-claim:{} --> c');
     // Both fenced, and the text BETWEEN them survives — a greedy match would eat "b".

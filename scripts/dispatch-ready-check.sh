@@ -376,6 +376,16 @@ fi
 #      `>`, which a payload may legitimately contain: `{"sessionId":"x>"}` sailed straight
 #      through while this comment claimed payload markers were covered. Anchor on the
 #      closing `-->`, never on a character the payload can hold.
+#
+#      SECOND rule, and the one that actually makes the coverage claim true: `sed` is
+#      LINE-based, while `lease_read_claims` matches with jq `capture(...; "s")` — DOTALL.
+#      A marker whose payload spans a newline therefore had no `-->` on its opening line,
+#      survived the first rule intact, and was still reassembled and parsed by the reader.
+#      Rather than reach for slurp mode, the second rule breaks the OPENER itself, so a
+#      marker is neutralised whether or not its terminator is on the same line — the
+#      readers all match on the literal `<!-- minspec-…` prefix, so a broken opener defeats
+#      them regardless of what follows. THE FENCE MUST NOT ASSUME THE READER'S MATCHING
+#      MODE; it now holds under both.
 #   ❌ BARE prefixes (`REVIEW_VERDICT` with no `_BEGIN`) are deliberately left alone: the
 #      readers that match a bare prefix read PR-comment/agent-stdout channels, not this
 #      issue comment, and already treat their input as untrusted. Widening here would
@@ -384,7 +394,8 @@ fi
 fence_agent_text() {
   sed -E \
     -e 's/(MINSPEC_VERDICT|REVIEW_VERDICT|REVIEW_UNAVAILABLE)_(BEGIN|END)/\1-\2 (fenced: agent-authored)/g' \
-    -e 's/<!--[[:space:]]*(minspec-[a-z0-9-]+)([^-]|-[^-]|--[^>])*-->/(fenced HTML marker: \1)/g'
+    -e 's/<!--[[:space:]]*(minspec-[a-z0-9-]+)([^-]|-[^-]|--[^>])*-->/(fenced HTML marker: \1)/g' \
+    -e 's/<!--[[:space:]]*(minspec-[a-z0-9-]+)/(fenced HTML marker: \1) [unterminated on this line]/g'
 }
 
 if [[ "${1:-}" == "--fence-agent-text" ]]; then
