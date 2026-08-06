@@ -9,7 +9,7 @@
 # ── Why this is not just a label sweep ───────────────────────────────────────
 # `backfill-hold-labels.sh` recovers a hold reason from a RECORD. An issue triaged before
 # #983 has none — the reason was never written down, so it cannot be recovered, only
-# RE-DERIVED by running triage again. That is one `claude -p` call per issue: real spend,
+# RE-DERIVED by running triage again. That is one triage LLM call per issue: real spend,
 # and the reason this is a separate script with a separate opt-in rather than a flag on
 # the backfill.
 #
@@ -41,7 +41,12 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-command -v claude >/dev/null 2>&1 || { echo "ERROR: \`claude\` is not on PATH — triage cannot run." >&2; exit 1; }
+# NB: this script LAUNCHES NOTHING — `triage-inbox.sh` owns the agent invocation and its
+# context/env guards (#912, #1203). Deliberately no literal "claude -<flag>" anywhere in
+# the code below: the T0 launcher scan greps for it, and a match here would either add a
+# non-launcher to that gate's population or pressure someone into loosening it. Keep any
+# mention of the CLI in comments, not in executable strings.
+command -v claude >/dev/null 2>&1 || { echo "ERROR: the agent CLI is not on PATH — triage cannot run." >&2; exit 1; }
 [[ -x "$TRIAGE" || -r "$TRIAGE" ]] || { echo "ERROR: ${TRIAGE} missing." >&2; exit 1; }
 
 echo "Selecting OPEN issues with no trusted verdict record…"
@@ -78,7 +83,7 @@ if [[ "$APPLY" -ne 1 ]]; then
   echo "DRY RUN — no LLM call made, nothing changed. Oldest 20 of the selection:"
   head -20 "$TARGETS" | awk -F'\t' '{printf "  #%-7s %s\n", $1, $2}'
   echo
-  echo "Each of the ${COUNT} is ONE \`claude -p\` triage call. Re-run with --apply (optionally --max N)."
+  echo "Each of the ${COUNT} is ONE triage LLM call (via triage-inbox.sh). Re-run with --apply (optionally --max N)."
   exit 0
 fi
 
