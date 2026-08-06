@@ -16,6 +16,7 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import { AI_REVIEW_WORKFLOW } from '../src/lib/ci-review-templates';
 
 const WORKFLOW = path.resolve(__dirname, '../../../.github/workflows/ai-review.yml');
 
@@ -25,22 +26,28 @@ const WORKFLOW = path.resolve(__dirname, '../../../.github/workflows/ai-review.y
  * workflow is restructured — a test that quietly stops finding its subject is worse than
  * one that breaks.
  */
-function machineryRegex(): RegExp {
-  const src = fs.readFileSync(WORKFLOW, 'utf8');
+function machineryPattern(src: string, what: string): string {
   const lines = src.split('\n');
   const idx = lines.findIndex((l) => /SELF_EDIT_KIND=machinery/.test(l));
-  expect(idx, 'no SELF_EDIT_KIND=machinery line in ai-review.yml').toBeGreaterThan(-1);
+  expect(idx, `no SELF_EDIT_KIND=machinery line in ${what}`).toBeGreaterThan(-1);
 
   // The `elif ... grep -qE '<pattern>'` guard sits just above the assignment.
   const guard = lines
     .slice(Math.max(0, idx - 6), idx)
     .reverse()
     .find((l) => /grep -qE/.test(l));
-  expect(guard, 'no grep -qE guard above SELF_EDIT_KIND=machinery').toBeTruthy();
+  expect(guard, `no grep -qE guard above SELF_EDIT_KIND=machinery in ${what}`).toBeTruthy();
 
   const m = /grep -qE\s+'([^']+)'/.exec(guard as string);
   expect(m, `could not extract the pattern from: ${guard}`).toBeTruthy();
-  return new RegExp((m as RegExpExecArray)[1]);
+  // The RAW pattern string. Never round-trip through RegExp.source for comparison — JS
+  // normalises `/` to `\/` there, so a raw-vs-source compare fails on formatting rather
+  // than on drift.
+  return (m as RegExpExecArray)[1];
+}
+
+function machineryRegex(): RegExp {
+  return new RegExp(machineryPattern(fs.readFileSync(WORKFLOW, 'utf8'), 'ai-review.yml'));
 }
 
 describe('#1284 machinery path classification', () => {
@@ -58,6 +65,10 @@ describe('#1284 machinery path classification', () => {
     // Generates .minspec/hooks/pre-commit for every MinSpec-initialised project, so its
     // blast radius exceeds .githooks/ — it decides by generating the thing that decides.
     'packages/minspec/src/lib/template-registry.ts',
+    // Holds the verbatim ai-review workflow + review-decide.sh + ai-review-guard.js shipped
+    // downstream: the LARGEST blast radius here. Omitted in #1284's first pass — the same
+    // inconsistency that PR set out to fix — and caught by the architect voter.
+    'packages/minspec/src/lib/ci-review-templates.ts',
   ];
 
   const notMachinery = [
@@ -87,6 +98,21 @@ describe('#1284 machinery path classification', () => {
     // `vendor/.github/workflows/x.yml` is not this repo's review machinery.
     expect(re.test('vendor/.github/workflows/x.yml')).toBe(false);
     expect(re.test('docs/scripts/example.sh')).toBe(false);
+  });
+
+  it('the SHIPPED template carries the same pattern as the plaintext workflow', () => {
+    // Both the reviewer and skeptic voters flagged this on #1299: reading only the
+    // plaintext workflow leaves template↔workflow drift uncovered, and the shipped copy is
+    // the one every consuming repo actually runs. `npm run validate` enforces that the
+    // generated file is not STALE (#678); this asserts the classifier inside it agrees, so
+    // a downstream repo can never be running a narrower machinery set than this one.
+    // Import the module rather than regex-parsing its source: the blob is stored as many
+    // concatenated base64 chunks, so a source-level regex captures only the first one and
+    // would fail for reasons unrelated to drift.
+    const shipped = machineryPattern(AI_REVIEW_WORKFLOW, 'the shipped ci-review template');
+
+    // Same source of truth, so the two patterns must be character-identical.
+    expect(shipped).toBe(machineryPattern(fs.readFileSync(WORKFLOW, 'utf8'), 'ai-review.yml'));
   });
 
   it('matches template-registry.ts EXACTLY, not its directory or neighbours', () => {

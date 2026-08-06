@@ -348,12 +348,19 @@ jobs:
           #                out would have kept the bigger hole open. A single file rather
           #                than a directory is deliberate: membership is decided by the test
           #                below, not by where the code happens to live.
+          #   ci-review-templates.ts — holds the VERBATIM ai-review workflow, review-decide.sh
+          #                and ai-review-guard.js shipped to every consuming repo. By the
+          #                membership test it is machinery with the LARGEST blast radius of
+          #                anything here: a PR touching only this file changes the review gate
+          #                for every downstream project. It was omitted in the first pass of
+          #                #1284 — the same inconsistency the PR set out to fix — and added
+          #                after the architect voter caught it.
           # MEMBERSHIP TEST for anything added here: does this code decide whether some other
           # change is allowed — directly, or by generating the thing that decides? If yes it
           # cannot certify itself, and it belongs in this set.
           # Read by packages/minspec/tests/machinery-paths.test.ts, which parses this line
           # and runs the pattern against a path table — keep the marker comment above it.
-          elif printf '%s\n' "$CHANGED" | grep -qE '^(\.github/|scripts/|\.githooks/|packages/minspec/src/lib/template-registry\.ts$)'; then
+          elif printf '%s\n' "$CHANGED" | grep -qE '^(\.github/|scripts/|\.githooks/|packages/minspec/src/lib/(template-registry|ci-review-templates)\.ts$)'; then
             SELF_EDIT=yes
             SELF_EDIT_KIND=machinery
           fi
