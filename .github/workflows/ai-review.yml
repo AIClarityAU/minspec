@@ -333,7 +333,18 @@ jobs:
           if [ "$CHANGED_OK" != "yes" ]; then
             SELF_EDIT=yes
             SELF_EDIT_KIND=indeterminate
-          elif printf '%s\n' "$CHANGED" | grep -qE '^(\.github/|scripts/)'; then
+          # MACHINERY_PATHS_RE — the machinery path set (#1284). Gate-ness is a property of
+          # what the code DOES, not which directory it lives in: every entry here is code
+          # that decides whether some other change is allowed, so it cannot certify itself.
+          #   .github/   — the review workflows and their scripts
+          #   scripts/   — dispatch, review, remediation, the lease
+          #   .githooks/ — pre-commit (protected-branch #1041, RCDD DR-003), pre-push
+          #                (workflow-file protection #1120), commit-msg. Added #1284 after
+          #                PR #1273 changed the pre-push GATE and was classified "not
+          #                machinery", so the review system certified a change to a gate.
+          # Read by packages/minspec/tests/machinery-paths.test.ts, which parses this line
+          # and runs the pattern against a path table — keep the marker comment above it.
+          elif printf '%s\n' "$CHANGED" | grep -qE '^(\.github/|scripts/|\.githooks/)'; then
             SELF_EDIT=yes
             SELF_EDIT_KIND=machinery
           fi
