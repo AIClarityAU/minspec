@@ -1,9 +1,22 @@
 /**
  * approval-pr — the ONE place MinSpec opens a GitHub pull request (SPEC-050 FR-4).
  *
- * Extracted from `commands/push-docs-lane.ts` (SPEC-039) in SPEC-050 Slice 1 (the
- * seam) as a pure refactor: every symbol below arrived here byte-for-byte, and
- * SPEC-039's command is its first caller. The reason it had to MOVE rather than be
+ * Partly extracted from `commands/push-docs-lane.ts` (SPEC-039) in SPEC-050 Slice 1
+ * (the seam), with SPEC-039's command as its first caller. SEVEN symbols moved here
+ * byte-for-byte — `ExecRun`, `defaultExecRun`, `isEnoent`, `describeError`,
+ * `isNetworkError`, `isAuthError`, `slugFromOriginUrl`. Everything else is NET-NEW
+ * in SPEC-050 and must be read as new code, not skimmed as a move: `DOCS_LANE_LABEL`,
+ * the `OpenPr*` types, `buildPrCreateArgs`, `laneLabelsFor`, `branchChangedPaths`,
+ * `buildApprovalPrBody`, `resolveHeadSha`, `findOpenPrForHead`, `urlFromAlreadyExists`
+ * and `openPullRequest`.
+ *
+ * (An earlier revision of this header claimed "every symbol below arrived here
+ * byte-for-byte". That was false and actively harmful — a reviewer who believes it
+ * skims exactly the FR-6 adoption logic, the INV-2 label predicate and the body
+ * builder, which are the three places a bug would actually be. Corrected in the
+ * #1224 review.)
+ *
+ * The reason the moved symbols had to MOVE rather than be
  * imported in place is the Tier-0 layer rule — `eslint.config.mjs`'s
  * NO_UI_LAYER_FROM_LIB forbids `lib/** -> commands/**` at severity `error` with
  * `noInlineConfig: true` (pinned by `tests/import-boundaries.test.ts`), so a
@@ -28,14 +41,29 @@
  *     succeeded (SPEC-050 INV-1). MinSpec opens no socket itself — the same
  *     Tier-1 local-tool-delegation posture (DR-004) as `lib/approve-push.ts`.
  *   - The only in-repo dependency is `./docs-corpus`, a pure predicate that does
- *     zero I/O, so {@link laneLabelsFor} — the sole minter of the `docs-lane`
- *     label — is decidable offline.
+ *     zero I/O, so {@link laneLabelsFor} is decidable offline.
  *
  * NEVER-WRONG invariants this module owns (SPEC-050 INV-2/INV-4/INV-5):
- *   INV-2 (never a non-docs PR). {@link laneLabelsFor} is the ONLY place the
- *     `docs-lane` label is minted, and it mints it only when EVERY supplied path
- *     is in the corpus. Empty input yields no label — an unproven absolute fails
- *     closed (constitution invariant #2), never "probably docs".
+ *   INV-2 (never a non-docs PR). {@link laneLabelsFor} mints the `docs-lane` label
+ *     only when EVERY supplied path is in the corpus. Empty OR `undefined` input
+ *     yields no label — an unproven absolute fails closed (constitution invariant
+ *     #2), never "probably docs".
+ *
+ *     TWO THINGS THIS DOES NOT CLAIM, both corrected in the #1224 review:
+ *
+ *     (a) It is NOT the only place the label is minted. `push-docs-lane.ts` passes
+ *         `labels: [DOCS_LANE_LABEL]` as a literal, having filtered its own file
+ *         list through `isDocsCorpusPath` first. That path is safe, but it is safe
+ *         by habit at the call site rather than by this predicate — so do not read
+ *         a chokepoint guarantee here that the code does not provide. Folding that
+ *         caller onto {@link laneLabelsFor} would make the guarantee real; it is
+ *         out of SPEC-050's approved scope and is tracked rather than smuggled in.
+ *
+ *     (b) The predicate is only as good as the paths it is HANDED. Callers opening
+ *         a PR from a branch must pass {@link branchChangedPaths}' output — what
+ *         the PR really changes — not the paths of one commit on it. The first
+ *         revision passed the latter, which is how a docs-only label could have
+ *         landed on a PR that changed code.
  *   INV-4 (never mints or edits an approval record). Nothing here writes to disk.
  *     {@link buildApprovalPrBody} PRESENTS a record `MinSpec: Approve Spec`
  *     already wrote; the body is never authoritative (DR-012, #1025).
@@ -166,8 +194,11 @@ export interface OpenPrRequest {
   readonly title: string;
   readonly body: string;
   /**
-   * Labels to apply. Pass {@link laneLabelsFor}'s output, never a literal — that
-   * function is the single INV-2 chokepoint. An empty array emits no `--label`.
+   * Labels to apply. New callers should pass {@link laneLabelsFor}'s output rather
+   * than a literal, so the corpus decision is made by the predicate instead of at
+   * the call site. (`push-docs-lane.ts` predates that and still passes a literal
+   * after filtering its own list — safe, but not the same guarantee. See the INV-2
+   * note in this module's header.) An empty array emits no `--label`.
    */
   readonly labels: readonly string[];
   /** Base branch. Omitted → `gh` uses the base repo's own default branch. */
@@ -222,10 +253,12 @@ export function buildPrCreateArgs(
 }
 
 /**
- * INV-2 chokepoint: the ONLY place `docs-lane` is minted.
+ * INV-2 predicate: decides `docs-lane` from evidence. (NOT the only place the label
+ * is minted — `push-docs-lane.ts` passes a literal; see the header's INV-2 note.)
  *
  * Returns `[DOCS_LANE_LABEL]` iff `paths` is non-empty AND every entry is in the
- * docs corpus; `[]` otherwise. The non-empty requirement is not a formality — an
+ * docs corpus; `[]` otherwise — including for `undefined`, which means the caller
+ * could not determine the PR's real changed set. The non-empty requirement is not a formality — an
  * empty list would make `every` vacuously true, which is precisely the
  * unproven-absolute / silent-gate class constitution invariant #2 forbids. A
  * caller that cannot enumerate what it committed has not PROVEN the change is
@@ -235,7 +268,11 @@ export function buildPrCreateArgs(
  * server-side and refuses loudly on a mismatch — two witnesses, so a bug here
  * cannot land code on an auto-merge lane.
  */
-export function laneLabelsFor(paths: readonly string[]): string[] {
+export function laneLabelsFor(paths: readonly string[] | undefined): string[] {
+  // `undefined` means the caller COULD NOT DETERMINE the PR's real changed paths
+  // (see branchChangedPaths). Unproven is not the same as docs-only, and the
+  // fail-closed answer is no label — mirroring the constitution's "unmeasured
+  // blast = high blast" and invariant #2's refusal to let a missing witness pass.
   if (!Array.isArray(paths) || paths.length === 0) return [];
   return paths.every((p) => isDocsCorpusPath(p)) ? [DOCS_LANE_LABEL] : [];
 }
@@ -331,6 +368,44 @@ export async function resolveHeadSha(run: ExecRun, cwd: string): Promise<string 
   try {
     const sha = (await run('git', ['rev-parse', 'HEAD'], { cwd })).stdout.trim();
     return sha || undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * INV-2 EVIDENCE — every path the PR would actually change, as
+ * `git diff --name-only <base>...<head>` (three dots: merge-base to head).
+ *
+ * WHY THIS EXISTS. The first revision labelled from the APPROVAL COMMIT's paths.
+ * That is not the same set: the branch is created at the developer's local HEAD,
+ * so its real diff against the base is `merge-base(base, head)..head` and can
+ * carry earlier local commits touching anything at all. Labelling `docs-lane`
+ * from the narrower set meant a PR could be labelled docs-only while genuinely
+ * changing code — the exact thing INV-2 forbids. Caught in review on #1224.
+ *
+ * FAILS CLOSED, and that direction is load-bearing: any failure (git absent,
+ * unknown base, detached state, unreadable output) returns `undefined`, and
+ * {@link laneLabelsFor} treats `undefined` as "cannot prove docs-only" → NO
+ * label → no auto-merge → a human merges it. The costly error here is a
+ * non-docs PR riding an auto-merge lane; an unlabelled docs PR costs one
+ * keystroke.
+ *
+ * `-z` + NUL split so a path containing a newline cannot forge an extra entry.
+ */
+export async function branchChangedPaths(
+  run: ExecRun,
+  cwd: string,
+  base: string,
+  head: string,
+): Promise<string[] | undefined> {
+  try {
+    const { stdout } = await run('git', ['diff', '--name-only', '-z', `${base}...${head}`], { cwd });
+    const paths = stdout.split('\0').filter((p) => p.length > 0);
+    // An EMPTY diff is not evidence of docs-only — it means the range resolved to
+    // nothing, which on a branch we just pushed is a sign the range was wrong.
+    // Treat it as unprovable rather than vacuously-all-docs (`[].every()` is true).
+    return paths.length > 0 ? paths : undefined;
   } catch {
     return undefined;
   }

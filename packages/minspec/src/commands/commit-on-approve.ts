@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { commitApproval, isUntrackedAtHead, type CommitApprovalResult } from '../lib/approve-commit';
 import { pushApproval, type PushApprovalResult } from '../lib/approve-push';
 import {
+  branchChangedPaths,
   buildApprovalPrBody,
   defaultExecRun,
   laneLabelsFor,
@@ -176,6 +177,19 @@ const ALWAYS_PUSH_ACTION = 'Always push from now on';
 const NOT_NOW_ACTION = 'Not now';
 /** The legacy `manual` surface's only action (FR-1/FR-5 must reproduce it byte-for-byte). */
 const OPEN_PR_ACTION = 'Open PR';
+
+/**
+ * The ref the INV-2 diff is taken against. `openPullRequest` passes no `--base`,
+ * so `gh` uses the base repo's own default branch — and `origin/HEAD` is the
+ * local symbolic ref for exactly that. Using it keeps the label's evidence and
+ * the PR's actual base the SAME branch; hardcoding `origin/main` would silently
+ * measure the wrong range on a `master`- or `trunk`-default repo, which is the
+ * mistake #1255 had to fix in the sibling recovery path.
+ *
+ * When `origin/HEAD` is absent the diff simply fails, `branchChangedPaths`
+ * returns undefined, and the PR is opened UNLABELLED — the fail-closed direction.
+ */
+const PR_BASE = 'origin/HEAD';
 
 /**
  * `answeredSignatures` key for the FR-8 standing-consent offer (#883 model).
@@ -405,8 +419,14 @@ async function openApprovalPr(
     // normalizing separately is how they drift apart. Purely a canonicalization:
     // an absolute path or a `..` segment is still refused downstream.
     const paths = ctx.paths.map((p) => toPosixRel(p));
-    // The ONE place the label is decided, and it is decided by evidence.
-    const labels = laneLabelsFor(paths);
+    // INV-2 — the label is decided from what the PR ACTUALLY changes, not from
+    // what this approval commit touched. Those differ: the branch is created at
+    // local HEAD, so its diff against the base is merge-base..head and may carry
+    // earlier local commits. Labelling from `paths` could mark a PR docs-only
+    // while it genuinely changed code (#1224 review). `undefined` (range not
+    // resolvable) → no label → no auto-merge → a human merges. Fails closed.
+    const changed = await branchChangedPaths(run, rootDir, PR_BASE, result.branch);
+    const labels = laneLabelsFor(changed);
     const record = readRecord(rootDir, approvableRelPath(paths));
     const sha = await resolveHeadSha(run, rootDir);
 

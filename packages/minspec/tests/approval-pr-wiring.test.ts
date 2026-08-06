@@ -171,6 +171,12 @@ type Resp = string | Error | (() => never);
 
 const DEFAULT_RESPONSES: Record<string, Resp> = {
   'git rev-parse HEAD': `${HEAD_SHA}\n`,
+  // INV-2 evidence (#1224 review): the label is decided from what the PR ACTUALLY
+  // changes — `git diff --name-only -z origin/HEAD...<branch>` — not from the
+  // approval commit's paths. The default answer is the two docs-corpus paths, so
+  // the happy path labels docs-lane. Tests that need a non-docs or unresolvable
+  // range override this key.
+  'git diff --name-only -z': `${DOCS_PATHS.join('\0')}\0`,
   'gh pr create': `${NEW_PR_URL}\n`,
   // Unmapped `gh pr list` falls through to the empty-stdout default below, which
   // `findOpenPrForHead` reads as "no open PR" — the create path then runs.
@@ -377,6 +383,12 @@ describe('pushed-branch → approval PR (AC-1, AC-2)', () => {
   });
 
   it('NEVER labels a branch whose paths are not all docs (AC-2 negative, INV-2)', async () => {
+    // The non-docs path arrives through the BRANCH DIFF, which is what the label is
+    // now decided from (#1224 review). Expressing it via ctx.paths would no longer
+    // prove anything: the code stopped reading that set for this decision.
+    installRunner({
+      'git diff --name-only -z': `${SPEC_REL}\0packages/minspec/src/commands/commit-on-approve.ts\0`,
+    });
     const { suffix } = await pushApprovalIfEnabled(tmp, 'spec-050', {
       subject: SUBJECT,
       paths: [SPEC_REL, 'packages/minspec/src/commands/commit-on-approve.ts'],
@@ -391,6 +403,40 @@ describe('pushed-branch → approval PR (AC-1, AC-2)', () => {
     // rather than the one MinSpec would have preferred to open.
     expect(suffix).toContain('no docs-lane label');
     expect(flag(prCreateCalls()[0], '--body')).toContain('NOT labelled for the docs-lane');
+  });
+
+  it('INV-2 (#1224): a docs-only COMMIT on a branch that also changed code is NOT labelled', async () => {
+    // The defect this closes. The approval commit touches only docs, so the old
+    // code (which labelled from ctx.paths) said docs-lane — while the branch, cut
+    // at the developer's local HEAD, really changes source too. That is a non-docs
+    // PR on an auto-merge lane.
+    installRunner({
+      'git diff --name-only -z': `${SPEC_REL}\0packages/minspec/src/lib/spec.ts\0`,
+    });
+    await pushApprovalIfEnabled(tmp, 'spec-050', { subject: SUBJECT, paths: DOCS_PATHS });
+    expect(prCreateCalls()[0].args).not.toContain('docs-lane');
+  });
+
+  it('INV-2 (#1224): an UNRESOLVABLE diff range fails closed — no label, PR still opened', async () => {
+    // git absent, no origin/HEAD, a detached base: the range cannot be measured, so
+    // docs-only is unproven. Unproven must not read as proven (invariant #2). The
+    // PR is still opened — the branch is already pushed, and withholding it would
+    // strand the developer — it simply goes unlabelled and says so.
+    installRunner({ 'git diff --name-only -z': new Error('fatal: bad revision') });
+    const { suffix } = await pushApprovalIfEnabled(tmp, 'spec-050', {
+      subject: SUBJECT,
+      paths: DOCS_PATHS,
+    });
+    expect(prCreateCalls()).toHaveLength(1);
+    expect(prCreateCalls()[0].args).not.toContain('docs-lane');
+    expect(suffix).toContain('no docs-lane label');
+  });
+
+  it('INV-2 (#1224): an EMPTY diff is unproven, not vacuously docs-only', async () => {
+    // `[].every()` is true, so an empty path list would label docs-lane by accident.
+    installRunner({ 'git diff --name-only -z': '' });
+    await pushApprovalIfEnabled(tmp, 'spec-050', { subject: SUBJECT, paths: DOCS_PATHS });
+    expect(prCreateCalls()[0].args).not.toContain('docs-lane');
   });
 
   it('fails CLOSED when the committed paths were not supplied (INV-2 unproven)', async () => {
