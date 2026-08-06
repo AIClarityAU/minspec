@@ -94,8 +94,10 @@ fi
 #   ^sites/                                — every deployed site directory.
 #   ^\.github/workflows/deploy-sites\.yml$ — the deploy definition is itself a push-path
 #     trigger. DEFENCE-IN-DEPTH, not the primary control: `^\.github/` can never earn a
-#     valid `ai-review:pass` (ai-review.yml's self-edit machinery guard forces `changes`
-#     and posts no SHA-bound pass witness), so this arm is deliberately redundant with
+#     MERGE-ELIGIBLE pass — since #928 the self-edit machinery guard keeps the honest
+#     `ai-review:pass` LABEL but posts NO SHA-bound pass witness (`ai-review/pass`
+#     status forced `failure`, check-run `neutral`, and the verifier rejects `neutral`),
+#     so `ready-to-merge` stays red — and this arm is deliberately redundant with
 #     that guard — do NOT drop it as "already covered", because it is what lets the
 #     lock-step sync test below be TOTAL over the workflow's `paths:` list.
 #
@@ -830,7 +832,8 @@ run_reviewer_stage() {
   #     GitHub merges it the moment the required `ready-to-merge` check (= provenance-
   #     verified ai-review:pass) goes green — no human keystroke, no per-PR babysit.
   #     HITL stays intact: the ai-review panel IS the gate; a machinery PR (self-edit
-  #     guard) can never get ai-review:pass, so it never auto-merges. Best-effort:
+  #     guard) keeps its honest label but gets NO SHA-bound pass witness (#928), so
+  #     ready-to-merge stays red and it never auto-merges. Best-effort:
   #     `--auto` errors on an already-clean/blocked PR are non-fatal.
   #     #833 exclusion: a PR that touches the docs-lane / human-owned corpus (specs/**,
   #     docs/**, .minspec/approvals/**, top-level *.md) must NOT auto-merge — ai-review
