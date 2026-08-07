@@ -1,5 +1,5 @@
 ---
-id: SPEC-052
+id: SPEC-057
 title: Detect a shared checkout's protected branch sitting ahead of its pushed upstream — an independent second witness to the #1064/#1115 commit-time guard
 type: requirements
 status: specifying
