@@ -56,6 +56,7 @@ source "${SCRIPT_DIR}/lib/agent-context.sh"
 
 DECIDE="${SCRIPT_DIR}/triage-decide.sh"
 READY_CHECK="${SCRIPT_DIR}/dispatch-ready-check.sh"
+SHADOW="${SCRIPT_DIR}/shadow-triage.sh"
 
 # One `key=value` line out of `triage-decide.sh --fields` output.
 verdict_field() {
@@ -214,6 +215,29 @@ CONTENT
     if [[ -n "$failed" ]]; then
       echo "WARNING: could not clear superseded label(s) on #$ISSUE: ${failed}— if a human-gate label lingers it will keep countermanding this verdict at dispatch; clear it by hand." >&2
     fi
+  fi
+
+  # ── Shadow-triage instrument (#1338) — measurement only, never a control ────
+  # Runs GLM (z.ai) on the SAME prompt and pushes its output through the SAME gate
+  # binary, purely to record whether the two agree. It runs LAST, after every label
+  # and the verdict record are already applied, so nothing above can wait on a
+  # third-party endpoint. INERT until MINSPEC_SHADOW_TRIAGE_KEY is set.
+  #
+  # The call site is the shadow-only guarantee, and it is three properties, not a
+  # promise: stdout is discarded (so no verdict can be captured), the exit status is
+  # discarded (so it cannot branch anything), and the result is bound to no variable.
+  # There is deliberately no `$(...)` here for a later edit to make load-bearing.
+  # `|| true` is correct HERE and would be a DR-066 violation on a gate — see the
+  # fail-safe rationale in shadow-triage.sh (this signal reaches no decision).
+  if [[ -x "$SHADOW" ]]; then
+    local SHADOW_PROMPT SHADOW_FIELDS_FILE
+    SHADOW_PROMPT="$(mktemp)"
+    SHADOW_FIELDS_FILE="$(mktemp)"
+    printf '%s' "$USER_CONTENT" > "$SHADOW_PROMPT"
+    printf '%s\n' "$FIELDS" > "$SHADOW_FIELDS_FILE"
+    "$SHADOW" record --issue "$ISSUE" --repo "$REPO" \
+      --prompt-file "$SHADOW_PROMPT" --live-fields "$SHADOW_FIELDS_FILE" >/dev/null || true
+    rm -f "$SHADOW_PROMPT" "$SHADOW_FIELDS_FILE"
   fi
 
   echo "Triage complete for #$ISSUE"
