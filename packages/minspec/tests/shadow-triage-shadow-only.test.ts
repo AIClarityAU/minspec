@@ -25,6 +25,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { GH_BOT_STUB_ENV } from './helpers/gh-bot-env';
 
 // These specs drive real bash → claude/gh stub → triage-decide.sh → jq chains. Under
 // container scheduling contention a single invocation can queue past the 5s default
@@ -136,6 +137,10 @@ exit 0
     PATH: `${binDir}:${process.env.PATH ?? '/usr/bin:/bin'}`,
     HOME: process.env.HOME ?? '/tmp',
     MINSPEC_SHADOW_TRIAGE_LOG: shadowLog,
+    // triage-inbox.sh takes a bot identity before it writes (#1355). This env is
+    // hermetic by design, so it must supply the token source too — same reason it
+    // supplies a stubbed `gh` on PATH. Without it the script aborts before writing.
+    ...GH_BOT_STUB_ENV,
   };
   if (opts.key) env.MINSPEC_SHADOW_TRIAGE_KEY = opts.key;
   if (opts.disabled) env.MINSPEC_SHADOW_TRIAGE = '0';

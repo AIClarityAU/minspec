@@ -23,18 +23,16 @@
 // unmodified; only the source of the token is stubbed, exactly as `gh` itself is
 // stubbed. There is no branch in the shipped code that knows it is under test.
 
-import { chmodSync, mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+// The stub minter is COMMITTED, not generated here, so hermetic tests can point
+// at the same file. See packages/minspec/tests/helpers/gh-bot-env.ts — a test that
+// builds its env from scratch cannot see anything this file sets, and must spread
+// GH_BOT_STUB_ENV instead. Two entry points, one stub.
+import { fileURLToPath } from 'node:url';
 
-// A real installation token is opaque; the stub only has to be a single line so
-// gh-bot.sh's "one token, no newlines" validation is genuinely exercised.
 if (!process.env.MINSPEC_GH_APP_TOKEN_SCRIPT) {
-  const dir = mkdtempSync(join(tmpdir(), 'minspec-gh-bot-stub-'));
-  const stub = join(dir, 'gh-app-token-stub.sh');
-  writeFileSync(stub, '#!/usr/bin/env bash\necho ghs_stub_installation_token\n');
-  chmodSync(stub, 0o755);
-  process.env.MINSPEC_GH_APP_TOKEN_SCRIPT = stub;
+  process.env.MINSPEC_GH_APP_TOKEN_SCRIPT = fileURLToPath(
+    new URL('./packages/minspec/tests/helpers/gh-app-token-stub.sh', import.meta.url),
+  );
 }
 
 // Strip inherited credentials. With GH_TOKEN unset, gh-bot.sh takes its mint
