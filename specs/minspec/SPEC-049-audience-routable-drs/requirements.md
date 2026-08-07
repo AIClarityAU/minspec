@@ -2,7 +2,7 @@
 id: SPEC-049
 title: Audience-routable DRs — plain-language summaries + dual acceptance
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 created: 2026-07-21
@@ -12,7 +12,7 @@ relates_to: [SPEC-048, SPEC-022]
 phases:
   specify: done
   clarify: done
-  plan: pending
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
