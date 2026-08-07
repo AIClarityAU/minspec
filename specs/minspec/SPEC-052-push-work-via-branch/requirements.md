@@ -10,7 +10,7 @@ title: "Push work via branch" — land non-docs changes from a dirty primary che
 # (lifecycle.ts:115, INV-1 — "unapproved cannot pass"). It becomes 'planning' only once an
 # approval sidecar exists. An ai-review pass on PR #1318 read the pair as a misleading
 # signpost; it is the derived value. Left here so the next reader does not re-flag it.
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness — docs-lane push ergonomics; grain (c), the non-docs sibling of SPEC-039's grain (a)
@@ -19,7 +19,7 @@ relates_to: [SPEC-039, SPEC-026, SPEC-050, DR-051, DR-065]
 phases:
   specify: done
   clarify: done
-  plan: pending
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

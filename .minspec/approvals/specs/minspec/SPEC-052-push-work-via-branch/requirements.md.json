@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-052-push-work-via-branch/requirements.md",
+  "specHash": "aeea95cd098072faf632bbb0d14eb437a5c7d0f0f9aed531b8dfcf42ae90bae7",
+  "approvedAt": "2026-08-07T03:35:09.060Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "2f63bcb5b6ccc78ff54662043c3651e878af12fd"
+}
