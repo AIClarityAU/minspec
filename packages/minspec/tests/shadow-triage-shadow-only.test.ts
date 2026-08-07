@@ -135,6 +135,13 @@ exit 0
     PATH: `${binDir}:${process.env.PATH ?? '/usr/bin:/bin'}`,
     HOME: process.env.HOME ?? '/tmp',
     MINSPEC_SHADOW_TRIAGE_LOG: shadowLog,
+    // Pin the model so these cases stay HERMETIC. The shipped default is the
+    // `latest` sentinel, which resolves via GET /v1/models — a network call these
+    // tests must never make, and which would (correctly) skip the run when it fails,
+    // so no row would land and every assertion here would fail for the wrong reason.
+    // An explicit id short-circuits resolution entirely; the resolver itself is
+    // covered by fixtures in shadow-triage-isolation.test.ts.
+    MINSPEC_SHADOW_TRIAGE_MODEL: 'glm-5.2',
     // triage-inbox.sh takes a bot identity before it writes (#1355). This env is
     // hermetic by design, so it must supply the token source too — same reason it
     // supplies a stubbed `gh` on PATH. Without it the script aborts before writing.
