@@ -9,6 +9,10 @@ created: 2026-07-21
 epic: EPIC-009  # Team Readiness
 depends_on: [DR-068, SPEC-013]
 relates_to: [SPEC-047, SPEC-006, SPEC-049]
+# Ownership declared 2026-08-07: approval flipped `phases.plan` to `in-progress`, arming
+# SPEC-038 FR-3 at `error` and turning `main` red (the #1323 trap, third instance).
+implements: none
+implements_reason: specified but not yet built — Plan (in-progress) has not chosen the lead-zone position gate / jargon-lint module paths, and FR-4 reuses SPEC-006's existing vacuity guard rather than creating one. Declares its owned files on implementation, per the SPEC-034 precedent. This is a placeholder: replace with real paths at Plan.
 phases:
   specify: done
   clarify: done
