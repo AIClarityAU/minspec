@@ -349,7 +349,7 @@ SPEC-017 (Trust Dashboard) needs an **approval baseline** — the exact approved
 
 ## [DR-044 — The "Execute" extension is named SealBox and lives in its own repo (split from the monorepo)](DR-044.md)
 
-*Status: proposed · Date: 2026-06-28*
+*Status: accepted · Date: 2026-06-28*
 
 <!-- dr-summary:DR-044 auto=ac8869d3b81c -->
 DR-015 accepted a **third Tier-1 "Execute" extension** (autonomous agent dispatch) and — via its OQ-3 — placed it **inside** the public AIClarityAU/minspec monorepo as packages/agent-execute, shipped in the Pro pack, sharing @aiclarity/shared. Its name was deferred (OQ-4, #66), with aiclarity.agent-execute / "AgentSystem" as working placeholders. Its load-bearing security substrate is specified in SPEC-019 (credential-free sandbox, host-side broker, attestation) and the reality-check reviewer in SPEC-016.
@@ -373,7 +373,7 @@ SPEC-019's **FR-13** hands the agent's branch out as a diff and has the credenti
 
 ## [DR-047 — Independent AI review across every Approvable surface — generalises DR-033 §6 from PR-only to all Approvable types](DR-047.md)
 
-*Status: proposed · Date: 2026-06-30*
+*Status: accepted · Date: 2026-06-30*
 
 <!-- dr-summary:DR-047 auto=7fdce4e973c0 -->
 Whether an AI-reviewed doc needs a *human* gate depends on its criticality and the dev's coverage setting (Decisions 5–6), not on whether it was AI-reviewed. Every approvable is AI-reviewed; only the critical subset is human-gated. 1. **AI-authored by design.** The architect agent, Specify agent, and Propose-Constitution agent draft Specs, DRs, and constitution invariants. The human approval that follows is the **only check** — there is no independent review before the author hands work to the human. Self-attestation (author → human…
@@ -453,7 +453,7 @@ MinSpec captures the approver of a spec/DR as approvedBy = git config user.email
 
 ## [DR-057 — Generated approvables take the review lane — LLM-generated next-phase docs (tasks.md; design.md opt-in) route worktree→PR for independent AI review; human-authored approvables stay main-direct; the drain actions phase-advance by enqueue, never by running an LLM in the Tier-0 extension](DR-057.md)
 
-*Status: proposed · Date: 2026-07-14*
+*Status: accepted · Date: 2026-07-14*
 
 <!-- dr-summary:DR-057 auto=a02554d56427 -->
 The background piggyback loop (scripts/drain-inbox.sh, fired from the session-start hook) has ONE input source: **GitHub issues** (inbox → triage → agent-ready → dispatch-issue.sh → worktree → PR). It never reads .minspec/approvals/ sidecars or spec status: frontmatter. Meanwhile SDD phase-advance (specify→plan→tasks→implement) lives entirely in the VS Code extension as a human Command-Palette action. So an **approved plan stalled with no tasks.md** just sits there — nothing in the background loop notices or generates the next phase. The founder asked to close…
@@ -629,7 +629,7 @@ Two accepted decisions pull in opposite directions, and SPEC-050 FR-8 sits exact
 
 ## [DR-080 — Approval recovery is owned by the refusal that triggers it, not by SPEC-050 — the two axes are complementary, and the duplicated push logic is a dated loan against SPEC-050's seam](DR-080.md)
 
-*Status: proposed · Date: 2026-08-06*
+*Status: accepted · Date: 2026-08-06*
 
 <!-- dr-summary:DR-080 auto=3485bfc12c76 -->
 commitApproval refuses to commit an approval when HEAD is the push-protected default branch (#1064); such a commit could never be pushed, and the #1041 pre-commit hook rejects it. **That refusal is correct and stays.** What was missing is what happens next.

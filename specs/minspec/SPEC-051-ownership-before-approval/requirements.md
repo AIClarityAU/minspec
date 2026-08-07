@@ -11,8 +11,17 @@ product: minspec
 epic: EPIC-003  # SDD Core Methodology — the spec→code ownership contract (SPEC-038's sibling)
 aspects: [approval, ownership, spec-gate, lifecycle, docs-lane, hitl, tier-0, validation]
 relates_to: [SPEC-038, SPEC-022, DR-012, DR-034, DR-069, DR-078, DR-051, DR-003]
-# NOTE: no `implements:` yet — this spec is `specifying` (plan pending), so SPEC-038 FR-3
-# does not yet apply. Ownership is declared at Plan, per the very contract this spec is about.
+# Ownership declared 2026-08-07 to clear a RED `main` (#1323): approving this spec (#1300)
+# flipped `phases.plan` to `in-progress`, which armed SPEC-038 FR-3 at `error` and failed
+# `npm run validate` corpus-wide, blocking every open PR. The prior note here ("no
+# `implements:` yet — this spec is `specifying`") described the pre-approval state and was
+# stale the moment approval landed. Adding this field changes the approved bytes and stales
+# the human approval (canonical.ts strips only `status`/`phases`) — the exact trap §"Hash
+# semantics" below documents, now hit for real. Re-approval is a human act (FR-5): never
+# minted by an agent.
+implements: none
+implements_reason: modifies the existing approve/advance actors (approve.ts, spec.ts) and reuses SPEC-038's `ownership-path-rules` per FR-6; creates no new source file. FR-1 leaves the enforcement mechanism to Clarify/Plan — if Plan chooses a new module, replace this with that path.
+affects: [packages/minspec/src/commands/approve.ts, packages/minspec/src/lib/spec.ts, packages/minspec/src/lib/spec-validator.ts, packages/minspec/src/commands/commit-on-approve.ts]  # all owned elsewhere (approve.ts via SPEC-042/SPEC-046 affects:, ownership rules via SPEC-038 implements:) — this spec modifies, never owns
 phases:
   specify: done
   clarify: done
