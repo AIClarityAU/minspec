@@ -453,7 +453,7 @@ MinSpec captures the approver of a spec/DR as approvedBy = git config user.email
 
 ## [DR-057 — Generated approvables take the review lane — LLM-generated next-phase docs (tasks.md; design.md opt-in) route worktree→PR for independent AI review; human-authored approvables stay main-direct; the drain actions phase-advance by enqueue, never by running an LLM in the Tier-0 extension](DR-057.md)
 
-*Status: proposed · Date: 2026-07-14*
+*Status: accepted · Date: 2026-07-14*
 
 <!-- dr-summary:DR-057 auto=a02554d56427 -->
 The background piggyback loop (scripts/drain-inbox.sh, fired from the session-start hook) has ONE input source: **GitHub issues** (inbox → triage → agent-ready → dispatch-issue.sh → worktree → PR). It never reads .minspec/approvals/ sidecars or spec status: frontmatter. Meanwhile SDD phase-advance (specify→plan→tasks→implement) lives entirely in the VS Code extension as a human Command-Palette action. So an **approved plan stalled with no tasks.md** just sits there — nothing in the background loop notices or generates the next phase. The founder asked to close…
