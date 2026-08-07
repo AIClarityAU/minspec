@@ -349,7 +349,7 @@ SPEC-017 (Trust Dashboard) needs an **approval baseline** — the exact approved
 
 ## [DR-044 — The "Execute" extension is named SealBox and lives in its own repo (split from the monorepo)](DR-044.md)
 
-*Status: proposed · Date: 2026-06-28*
+*Status: accepted · Date: 2026-06-28*
 
 <!-- dr-summary:DR-044 auto=ac8869d3b81c -->
 DR-015 accepted a **third Tier-1 "Execute" extension** (autonomous agent dispatch) and — via its OQ-3 — placed it **inside** the public AIClarityAU/minspec monorepo as packages/agent-execute, shipped in the Pro pack, sharing @aiclarity/shared. Its name was deferred (OQ-4, #66), with aiclarity.agent-execute / "AgentSystem" as working placeholders. Its load-bearing security substrate is specified in SPEC-019 (credential-free sandbox, host-side broker, attestation) and the reality-check reviewer in SPEC-016.
