@@ -373,7 +373,7 @@ SPEC-019's **FR-13** hands the agent's branch out as a diff and has the credenti
 
 ## [DR-047 — Independent AI review across every Approvable surface — generalises DR-033 §6 from PR-only to all Approvable types](DR-047.md)
 
-*Status: proposed · Date: 2026-06-30*
+*Status: accepted · Date: 2026-06-30*
 
 <!-- dr-summary:DR-047 auto=7fdce4e973c0 -->
 Whether an AI-reviewed doc needs a *human* gate depends on its criticality and the dev's coverage setting (Decisions 5–6), not on whether it was AI-reviewed. Every approvable is AI-reviewed; only the critical subset is human-gated. 1. **AI-authored by design.** The architect agent, Specify agent, and Propose-Constitution agent draft Specs, DRs, and constitution invariants. The human approval that follows is the **only check** — there is no independent review before the author hands work to the human. Self-attestation (author → human…
