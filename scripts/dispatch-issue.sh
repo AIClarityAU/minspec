@@ -1408,7 +1408,78 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
       #    This is the real pre-publish gate; its result is authoritative, not
       #    the agent's claim. Each check is independent: a fail in one does not
       #    skip the others, so every status is reported truthfully.
-      gate_status() { ( cd "$WORKTREE" && "$@" >/dev/null 2>&1 ) && echo pass || echo fail; }
+      #
+      #    Each check is TIME-BOUNDED (#1304). Without a bound the `$(...)` blocks
+      #    until the child closes stdout, so ONE hung suite stalls the dispatcher —
+      #    and therefore the whole drain — indefinitely. A wedged vitest held this
+      #    gate for 19h23m on 2026-08-05, defeating BOTH the FR-12 claim lifetime
+      #    and the drain's own MAX_LIFETIME backstop (which is evaluated only
+      #    BETWEEN cycles, so a cycle that never returns can never reach it).
+      #    BUILD_TIMEOUT_ARGS above bounds the `claude -p` leg only, not this one.
+      #
+      #    A timed-out check reports `timeout`, NEVER `fail`. "We did not find out"
+      #    is a different fact from "it failed", and rendering the former as the
+      #    latter puts a verdict on the diff that the diff did not earn — observed
+      #    on PR #1302, whose entire diff was a single markdown file.
+      #
+      #    Budget = whatever is left of the claim lease, so the bound covers the
+      #    whole dispatch rather than just the agent leg. GATE_MAX_SECS caps any
+      #    single check so a slow one cannot eat the whole remaining lease and
+      #    starve the three after it; GATE_FALLBACK_SECS applies when no lease is
+      #    in force. Neither path can ever yield an unbounded run.
+      #    Sizing: these are BOUNDS, not SLAs. The failure being prevented is a
+      #    19-HOUR wedge, so the ceiling only has to be lower than "forever" while
+      #    staying clear of a healthy run. `npm test` was measured at >14 min on
+      #    this repo under normal load (2026-08-06), so a 15-min ceiling would have
+      #    false-timed-out a perfectly good suite; 45 min leaves real headroom.
+      #    Worst case all four checks time out at 45 min = 3 h, still bounded, and
+      #    the claim lease caps it further whenever one is in force.
+      GATE_MAX_SECS="${MINSPEC_GATE_MAX_SECS:-2700}"           # 45 min ceiling per check
+      GATE_FALLBACK_SECS="${MINSPEC_GATE_FALLBACK_SECS:-1800}" # 30 min when no lease
+
+      gate_budget() {
+        local remaining budget
+        if (( BUILD_DEADLINE > 0 )); then
+          remaining=$(( BUILD_DEADLINE - $(date -u +%s) ))
+          # Lease already spent: still bound the check (a floor), never unbounded.
+          (( remaining > 0 )) || remaining=60
+          budget=$remaining
+        else
+          budget=$GATE_FALLBACK_SECS
+        fi
+        if (( budget > GATE_MAX_SECS )); then
+          budget=$GATE_MAX_SECS
+        fi
+        echo "$budget"
+      }
+
+      # Exit 124 = SIGTERM at the ceiling; 137 = SIGKILL from --kill-after. Both mean
+      # "never finished", not "failed". Any other non-zero is a real check failure.
+      # `if ...; then rc=0; else rc=$?; fi` because `set -e` is in force (line 18):
+      # a bare call followed by `rc=$?` would abort the dispatch on the first red check.
+      gate_status() {
+        local budget rc
+        budget=$(gate_budget)
+        if ( cd "$WORKTREE" && timeout --kill-after=30s "${budget}s" "$@" >/dev/null 2>&1 ); then
+          rc=0
+        else
+          rc=$?
+        fi
+        case "$rc" in
+          0)
+            echo pass
+            ;;
+          124|137)
+            # Loud, never silent (constitution invariant 2): the status goes to
+            # stdout for the caller, the explanation to stderr for the log.
+            echo timeout
+            echo "Gate check '$*' TIMED OUT after ${budget}s for #$ISSUE — reporting 'timeout', not 'fail' (#1304)." >&2
+            ;;
+          *)
+            echo fail
+            ;;
+        esac
+      }
       GATE_TEST=$(gate_status npm test)
       GATE_LINT=$(gate_status npm run lint)
       GATE_BUILD=$(gate_status npm run build)
