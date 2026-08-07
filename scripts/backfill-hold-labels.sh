@@ -27,6 +27,12 @@ REPO="AIClarityAU/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 GATE="${SCRIPT_DIR}/dispatch-ready-check.sh"
 DECIDE="${SCRIPT_DIR}/triage-decide.sh"
+# Agent writes carry the BOT's identity, never the human's (#1355). Sourcing is
+# offline and cannot fail; only an actual write mints, so the default read-only
+# (no --apply) run needs no credential at all.
+# shellcheck source=scripts/lib/gh-bot.sh
+source "${SCRIPT_DIR}/lib/gh-bot.sh"
+gh_bot_init
 
 APPLY=0
 [[ "${1:-}" == "--apply" ]] && APPLY=1
