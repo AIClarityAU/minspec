@@ -160,19 +160,27 @@ test('a failing minter surfaces its stderr, and does not fall back', () => {
 // ── 4. inherited tokens (the CI path) ────────────────────────────────────────
 // A fake `gh` on PATH stands in for the identity probe, so these run offline.
 
-/** Put a stub `gh` on PATH whose `api user` prints `login`. */
-function stubGh(loginOutput, exitCode = 0) {
+/**
+ * Put a stub `gh` on PATH emitting `raw` verbatim. Callers pass whatever the real
+ * `gh api user` would emit — a JSON user object, a JSON error body, or nothing.
+ */
+function stubGh(raw, exitCode = 0) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-bot-ghstub-'));
   const p = path.join(dir, 'gh');
-  fs.writeFileSync(p, `#!/usr/bin/env bash\nprintf '%s' ${JSON.stringify(loginOutput)}\nexit ${exitCode}\n`);
+  fs.writeFileSync(p, `#!/usr/bin/env bash\nprintf '%s' ${JSON.stringify(raw)}\nexit ${exitCode}\n`);
   fs.chmodSync(p, 0o755);
   return dir;
+}
+
+/** The real `gh api user` returns a JSON object, not a bare login. */
+function stubGhLogin(login) {
+  return stubGh(JSON.stringify({ login, id: 1, type: login.endsWith('[bot]') ? 'Bot' : 'User' }));
 }
 
 test('an inherited token resolving to a BOT is accepted and left untouched', () => {
   const { status, out } = sh('gh_bot_init; _gh_bot_ensure; echo "TOKEN=$GH_TOKEN"', {
     GH_TOKEN: 'inherited_bot_token',
-    PATH: `${stubGh('minspec-sdd[bot]')}:${process.env.PATH}`,
+    PATH: `${stubGhLogin('minspec-sdd[bot]')}:${process.env.PATH}`,
   });
   assert.equal(status, 0, out);
   assert.match(out, /TOKEN=inherited_bot_token/, 'a bot token must not be replaced');
@@ -190,10 +198,42 @@ test('an inherited INSTALLATION token (gh api user 403s) is accepted', () => {
   assert.match(out, /TOKEN=ghs_installation/);
 });
 
+test('an EMPTY probe result fails closed — it is not proof of an installation token', () => {
+  // The fail-open found by review on #1401. "Not login-shaped" was read as "must
+  // be an installation token", so a probe that came back empty for ANY reason —
+  // network blip, rate limit, gh crash — waved a human PAT through. An empty
+  // answer is ambiguous, and ambiguity here must refuse.
+  const { status, out } = sh('gh_bot_init; _gh_bot_ensure', {
+    GH_TOKEN: 'maybe_a_human_pat',
+    PATH: `${stubGh('', 1)}:${process.env.PATH}`,
+  });
+  assert.equal(status, 1, 'an unverifiable identity must not be accepted');
+  assert.match(out, /identity could not be established/);
+});
+
+test('a probe that fails with an unrelated error also fails closed', () => {
+  const { status, out } = sh('gh_bot_init; _gh_bot_ensure', {
+    GH_TOKEN: 'maybe_a_human_pat',
+    PATH: `${stubGh('dial tcp: lookup api.github.com: no such host', 1)}:${process.env.PATH}`,
+  });
+  assert.equal(status, 1, 'a network error is not a 403');
+  assert.match(out, /identity could not be established/);
+});
+
+test('the unverifiable path still honours the explicit human override', () => {
+  const { status, out } = sh('gh_bot_init; _gh_bot_ensure', {
+    GH_TOKEN: 'human_pat',
+    MINSPEC_GH_BOT_ALLOW_HUMAN: '1',
+    PATH: `${stubGh('', 1)}:${process.env.PATH}`,
+  });
+  assert.equal(status, 0, 'the override must remain reachable on this path');
+  assert.match(out, /unverifiable/);
+});
+
 test('an inherited HUMAN token is REJECTED, naming the login', () => {
   const { status, out } = sh('gh_bot_init; _gh_bot_ensure', {
     GH_TOKEN: 'human_pat',
-    PATH: `${stubGh('harvest316')}:${process.env.PATH}`,
+    PATH: `${stubGhLogin('harvest316')}:${process.env.PATH}`,
   });
   assert.equal(status, 1, 'a human PAT in GH_TOKEN reintroduces the bug');
   assert.match(out, /harvest316/, 'must name whose identity it refused');
@@ -204,7 +244,7 @@ test('MINSPEC_GH_BOT_ALLOW_HUMAN=1 permits a human token, loudly', () => {
   const { status, out } = sh('gh_bot_init; _gh_bot_ensure', {
     GH_TOKEN: 'human_pat',
     MINSPEC_GH_BOT_ALLOW_HUMAN: '1',
-    PATH: `${stubGh('harvest316')}:${process.env.PATH}`,
+    PATH: `${stubGhLogin('harvest316')}:${process.env.PATH}`,
   });
   assert.equal(status, 0);
   assert.match(out, /WARNING: writing as HUMAN 'harvest316'/,
@@ -251,7 +291,7 @@ test('gh_bot_refresh never replaces an INHERITED token — it is not ours', () =
       GH_TOKEN: 'ci_supplied',
       MINSPEC_GH_BOT_MAX_AGE: '1',
       MINSPEC_GH_APP_TOKEN_SCRIPT: stubMinter('#!/usr/bin/env bash\necho ghs_should_not_be_used\n'),
-      PATH: `${stubGh('minspec-sdd[bot]')}:${process.env.PATH}`,
+      PATH: `${stubGhLogin('minspec-sdd[bot]')}:${process.env.PATH}`,
     },
   );
   assert.equal(status, 0, out);

@@ -215,12 +215,41 @@ _gh_bot_ensure() {
     # yields the whole JSON blob rather than nothing. Taking that at face value
     # classified every installation token as a human login and hard-failed CI.
     # Accept only something actually shaped like a GitHub login.
+    #
+    # AND an unrecognisable answer is NOT the same as a 403. An earlier version
+    # treated "not login-shaped" as "must be an installation token" and accepted
+    # it — so a probe that came back empty for ANY reason (network blip, rate
+    # limit, gh crash) would wave a human PAT straight through. That is a
+    # fail-OPEN on an ambiguous signal, in the one place this whole file exists
+    # to fail closed (#1401 security review). Now the 403 must be positively
+    # identified; anything else is refused.
+    #
     # `command gh`, never bare `gh` — bare would recurse into our own wrapper.
-    local login
-    login="$(command gh api user -q .login 2>/dev/null || true)"
-    if [[ ! "$login" =~ ^[A-Za-z0-9._-]+(\[bot\])?$ ]]; then
-      _GH_BOT_VERIFIED=1
-      return 0                      # no resolvable user ⇒ installation token
+    local probe rc login
+    probe="$(command gh api user 2>&1)" && rc=0 || rc=$?
+    login="$(printf '%s' "$probe" | { command grep -oE '"login"[[:space:]]*:[[:space:]]*"[^"]+"' || true; } \
+             | head -1 | sed -E 's/.*"([^"]+)"$/\1/')"
+
+    if [[ -z "$login" ]]; then
+      # No login in the answer. Only a recognisable "this token has no user"
+      # rejection may be read as an installation token.
+      if (( rc != 0 )) && printf '%s' "$probe" \
+           | command grep -qiE 'not accessible by integration|"status"[[:space:]]*:[[:space:]]*"?40[13]|HTTP 40[13]'; then
+        _GH_BOT_VERIFIED=1
+        return 0                    # positively identified installation token
+      fi
+      if [[ "${MINSPEC_GH_BOT_ALLOW_HUMAN:-}" == "1" ]]; then
+        echo "gh-bot: WARNING: GH_TOKEN identity unverifiable (gh api user exited ${rc}) — proceeding because MINSPEC_GH_BOT_ALLOW_HUMAN=1." >&2
+        _GH_BOT_VERIFIED=1
+        return 0
+      fi
+      gh_bot_die \
+"GH_TOKEN is set but its identity could not be established (gh api user exited ${rc}).
+  Refusing to write: an unverifiable token may be a human's, and this is the one
+  place that must not guess (#1355).
+  Response: $(printf '%s' "$probe" | head -c 200)
+  Unset GH_TOKEN to mint a bot token instead, or set MINSPEC_GH_BOT_ALLOW_HUMAN=1
+  if a human is deliberately running this."
     fi
     if _gh_bot_is_bot_login "$login"; then
       _GH_BOT_VERIFIED=1
