@@ -16,6 +16,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #1285: spawns real child processes per assertion — 5s default is a load metric,
+// not a hang signal. Enforced by shell-timeout-coverage.test.ts.
+useShellTimeout();
 
 const DRAIN = path.resolve(__dirname, '../../../scripts/drain-inbox.sh');
 const DISPATCH = path.resolve(__dirname, '../../../scripts/dispatch-issue.sh');
