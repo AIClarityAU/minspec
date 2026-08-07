@@ -862,7 +862,7 @@ export function violationsIntroducedByApproval(
   // Identity includes the message: two instances of the same rule (e.g. two bad
   // paths) are distinct findings, and collapsing them by rule alone would let a
   // newly-introduced one hide behind a pre-existing one.
-  const identity = (v: ValidationViolation): string => `${v.rule} ${v.message}`;
+  const identity = (v: ValidationViolation): string => `${v.rule}\x00${v.message}`;
   const errorsOf = (s: ParsedSpec): ValidationViolation[] =>
     validateSpec(s, config, options).violations.filter((v) => v.severity === 'error');
 
