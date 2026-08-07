@@ -2,7 +2,7 @@
 id: SPEC-048
 title: PO-facing lead zone (position gate) + jargon advisory lint
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 created: 2026-07-21
@@ -12,7 +12,7 @@ relates_to: [SPEC-047, SPEC-006, SPEC-049]
 phases:
   specify: done
   clarify: done
-  plan: pending
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
