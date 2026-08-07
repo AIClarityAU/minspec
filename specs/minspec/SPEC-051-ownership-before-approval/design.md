@@ -36,23 +36,49 @@ phases:
 
 ## The ordering constraint that drives the design
 
-`approveSpec` writes three side effects in sequence — status flip, baseline mint, sidecar
-write (`packages/minspec/src/lib/approval.ts:512-556`). `advanceSpecToImplementing`
-(`packages/minspec/src/lib/spec.ts:568`) runs *after* it, from the command layer.
+> **Corrected 2026-08-07.** An earlier version of this section stated the call order
+> **backwards** — it claimed `approveSpec` writes first and `advanceSpecToImplementing`
+> runs after. The opposite is true, and the correction inverts which call site is the
+> load-bearing one. The error was caught by a drift audit, not by review of the code it
+> cited. What follows is the verified order.
 
-So a guard placed **only** at the Plan flip is too late: the approval sidecar is already on
-disk when the refusal fires, leaving exactly the half-written state FR-3 forbids. The check
-must run **before any side effect**, in the same position and spirit as the DR-056 approver
-gate that already sits at the top of the same function:
+The command layer runs, in this order (`packages/minspec/src/commands/approve.ts`):
 
-```
-assertHumanApprover(email);            // DR-056 — deny before any side effect
-assertOwnershipDeclared(raw, config);  // SPEC-051 — same discipline, same position
-```
+| # | call (grep this, not the line) | writes |
+|---|---|---|
+| 1 | `checkApprover(` | nothing — pre-check, refuses early |
+| **2** | **`advanceSpecToImplementing(spec.filePath)`** | **`phases:` + `status:` to the spec file on disk** |
+| 3 | `recordApproval(` (= `approveSpec`) | baseline blob + approval sidecar |
+| 4 | `commitApprovalIfEnabled(` | the commit |
 
-That comment at `approval.ts:519-522` states the principle explicitly ("deny BEFORE any
-side effect ... so a denied identity never mints, mutates, or half-writes a record"). This
-design reuses it rather than inventing a second convention.
+> **Cite the ordering, not the coordinates.** As of `ae26100` those sit at `:260`, `:296`,
+> `:297`, `:307` — but that quadruple has already been wrong once in this very document. An
+> earlier revision cited `:229/:265/:266/:276`, which were correct when read and became stale
+> ~31 lines later the same day when the `#1317` block landed; the doc then shipped asserting
+> "verified" against anchors that had since moved, and `:265` now points into an unrelated
+> error toast. **The load-bearing fact is the relative order — 2 before 3 — which is stable;
+> the line numbers are not.** Re-derive them with
+> `grep -nE 'checkApprover\(|advanceSpecToImplementing\(spec|recordApproval\(|commitApprovalIfEnabled\(' packages/minspec/src/commands/approve.ts`
+> rather than trusting any number written here. (This is the line-level citation rot that
+> [#1252](https://github.com/AIClarityAU/minspec/issues/1252) exists to catch.)
+
+So the **Plan flip is the FIRST write**, not the last. Two consequences, both opposite to
+what the earlier draft said:
+
+1. **A guard placed only inside `approveSpec` is too late.** By the time it runs, step 2
+   has already flipped `phases.plan` to `in-progress` and persisted it — precisely the
+   half-written, gate-illegal state FR-3 forbids, and exactly the shape that took `main`
+   red four times on 2026-08-06/07.
+2. **`advanceSpecToImplementing` is the earliest point that can refuse before any byte is
+   written**, which makes it the primary guard site rather than the class-safety extra.
+
+The precedent to mirror is therefore **`checkApprover` (step 1)** — a command-layer
+pre-check that runs *before* the flip — not the lib-level `assertHumanApprover`. Note that
+`approval.ts:519-522` describes its own gate as denying "BEFORE any side effect (status
+flip, ...)"; that is true of everything `approveSpec` itself does, but the status flip
+happens in its **caller**, one line earlier, so the lib assert cannot protect it. The
+command's `checkApprover` pre-check (step 1) is what actually keeps a denied approver from
+mutating the file today.
 
 ## Components
 
@@ -79,8 +105,9 @@ enter the build band"**, not on already being in it.
 
 | Caller | Why |
 |---|---|
-| `approveSpec` (`approval.ts:512`) | Option A. Top of function, beside `assertHumanApprover`, before the first side effect. |
-| `advanceSpecToImplementing` (`spec.ts:568`) | DQ-2's shared guard. This is the single function that writes `plan → in-progress` via `phasesForApproval`. It has exactly **one production call site today** — `packages/minspec/src/commands/approve.ts:265` — so guarding it adds no coverage *now*; its whole value is that any **future** actor (DR-057's drain consumers, the phase-advance queue) inherits the check without having to remember it. That is DQ-2's stated rationale — fix the class, not today's actor — and it should be justified on those terms, not on a caller count. |
+| **`approve.ts` command, before the `advanceSpecToImplementing` call** | **Primary.** The only point that precedes every write, mirroring the `checkApprover` pre-check. Gives Option A's friendly, actionable refusal with nothing yet mutated. |
+| `approveSpec` (`approval.ts:512`) | Defence in depth at the lib boundary, for any caller that reaches `approveSpec` without going through the command. It cannot prevent the `advanceSpecToImplementing` flip, so it is a backstop — not the primary gate the earlier draft claimed. |
+| `advanceSpecToImplementing` (`spec.ts:568`) | DQ-2's shared guard. This is the single function that writes `plan → in-progress` via `phasesForApproval`. It has exactly **one production call site today** — in `packages/minspec/src/commands/approve.ts` — so guarding it adds no coverage *now*; its whole value is that any **future** actor (DR-057's drain consumers, the phase-advance queue) inherits the check without having to remember it. That is DQ-2's stated rationale — fix the class, not today's actor — and it should be justified on those terms, not on a caller count. |
 
 Both, not either: `approveSpec` gives the early, friendly refusal; `advanceSpecToImplementing`
 makes the *class* safe. A future actor that flips the band without going through approval
