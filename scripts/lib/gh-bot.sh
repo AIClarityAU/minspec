@@ -173,6 +173,13 @@ _gh_bot_is_write() {
           *mutation*) has_mutation=1 ;;
         esac
       done
+      # KNOWN CONSTRAINT (#1401 security review): the decision reads argv, so a
+      # mutation whose document arrives through a VARIABLE — `-f query="$MUT"` —
+      # looks like a read to both this and the guard, and would go out as the
+      # ambient identity. No current call site does it. If you add a GraphQL
+      # mutation, keep a literal `mutation` token in argv, or call
+      # `_gh_bot_ensure` yourself before the write. Tracked in the follow-up
+      # filed from that review.
       if (( is_graphql )); then
         (( has_mutation )) && return 0
         return 1

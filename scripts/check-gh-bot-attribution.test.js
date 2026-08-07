@@ -61,6 +61,27 @@ test('GREEN: the same write passes once gh-bot.sh is sourced', () => {
   assert.match(out, /OK — 1 file/);
 });
 
+test('RED: source WITHOUT gh_bot_init fails — the helper is inert until armed', () => {
+  // The blocking hole found by review on #1401. gh-bot.sh defines functions and
+  // variables when sourced but shadows nothing; only gh_bot_init creates the `gh`
+  // wrapper. A source-only script therefore calls the REAL gh under ambient
+  // founder credentials while looking compliant. This case passed the guard
+  // before the fix.
+  const { status, out } = runGuard({
+    'inert.sh': '#!/usr/bin/env bash\nsource "${SCRIPT_DIR}/lib/gh-bot.sh"\ngh issue comment 1 --repo o/r --body x\n',
+  });
+  assert.equal(status, 1, 'sourcing without arming must not satisfy the guard');
+  assert.match(out, /never calls gh_bot_init/);
+  assert.match(out, /INERT/, 'the message must say why this looks compliant but is not');
+});
+
+test('a commented-out gh_bot_init does not satisfy the requirement', () => {
+  const { status } = runGuard({
+    'commented.sh': '#!/usr/bin/env bash\nsource "${SCRIPT_DIR}/lib/gh-bot.sh"\n# gh_bot_init\ngh issue comment 1 --repo o/r --body x\n',
+  });
+  assert.equal(status, 1, 'a commented-out init arms nothing');
+});
+
 test('a write mentioned only in a comment is not flagged', () => {
   const { status } = runGuard({
     'docs.sh': '#!/usr/bin/env bash\n# we used to call `gh pr create` here\n   # gh issue edit 3\necho hi\n',

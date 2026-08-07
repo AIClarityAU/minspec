@@ -16,10 +16,17 @@
 # trusting the model and build the gate. This is that gate.
 #
 # ── The rule ──────────────────────────────────────────────────────────────────
-# A file under scripts/ that CONTAINS a `gh` write verb MUST source
-# lib/gh-bot.sh. That is all. It does not check call-site-by-call-site, because
-# gh-bot.sh works by exporting GH_TOKEN process-wide — one source covers every
-# `gh` invocation in the file.
+# A file under scripts/ that CONTAINS a `gh` write verb MUST both
+#   1. source lib/gh-bot.sh, AND
+#   2. call gh_bot_init.
+#
+# BOTH, because the helper is inert until init: sourcing defines functions and
+# variables, and only gh_bot_init creates the `gh` wrapper that is the entire
+# mechanism. Source-without-init writes as the human.
+#
+# It does not check call-site-by-call-site. Once armed, the wrapper shadows the
+# binary for the whole process, so one init covers every `gh` invocation in the
+# file — reads pass through, writes mint first.
 #
 # ── Deliberate limits, stated so a reader does not over-trust this ────────────
 #   * SHELL FILES ONLY (*.sh). `scripts/roles/*.md` are agent PROMPTS, not
@@ -113,15 +120,40 @@ while IFS= read -r file; do
     continue
   fi
 
+  # BOTH are required, and requiring only the first was a hole in this gate.
+  #
+  # gh-bot.sh is INERT until gh_bot_init runs: sourcing defines functions and
+  # variables but shadows nothing, and the `gh` wrapper — the whole mechanism —
+  # is created inside gh_bot_init. So a script that sources and forgets to init
+  # calls the real `gh` under ambient founder credentials while satisfying a
+  # source-only check. That is a silent gate admitting the exact bug this guard
+  # exists to catch (invariant 2). Caught by review on #1401; it slipped in when
+  # the helper moved from an eager GH_TOKEN export, where sourcing alone really
+  # was sufficient, to lazy init — and this check was not revisited.
+  #
   # Match the FILENAME, not a particular relative path: scripts/lib/issue-lease.sh
   # lives beside the helper and sources it as "${_ISSUE_LEASE_DIR}/gh-bot.sh",
   # with no "lib/" segment to match on.
-  if grep -qE '^[[:space:]]*(source|\.)[[:space:]].*gh-bot\.sh' "$file"; then
+  has_source=0; has_init=0
+  grep -qE '^[[:space:]]*(source|\.)[[:space:]].*gh-bot\.sh' "$file" && has_source=1
+  # A commented-out `# gh_bot_init` must not satisfy the requirement.
+  if grep -E '(^|[^[:alnum:]_-])gh_bot_init([^[:alnum:]_-]|$)' "$file" 2>/dev/null \
+       | grep -qvE '^[[:space:]]*#'; then
+    has_init=1
+  fi
+
+  if (( has_source && has_init )); then
     continue
   fi
 
   fail=1
-  echo "FAIL: ${rel} writes to GitHub but never sources lib/gh-bot.sh" >&2
+  if (( has_source )); then
+    # The subtler failure, so say exactly what is wrong: the helper is present but
+    # never armed, which looks compliant at a glance and writes as the human.
+    echo "FAIL: ${rel} sources lib/gh-bot.sh but never calls gh_bot_init — the helper is INERT, so these writes go out as the human" >&2
+  else
+    echo "FAIL: ${rel} writes to GitHub but never sources lib/gh-bot.sh" >&2
+  fi
   echo "$hits" | sed 's/^/    /' >&2
   echo >&2
 done < <(find "$SCAN_DIR" -type f -name '*.sh' | sort)

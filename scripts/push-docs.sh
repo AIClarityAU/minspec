@@ -21,8 +21,9 @@ source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/docs-corpus.sh"
 CORPUS="$DOCS_CORPUS_RE"
 
 # The docs-lane PR this opens is an AGENT write, so it must carry the bot's
-# identity rather than the human's (#1355). Aborts before any work if no bot
-# token can be obtained.
+# identity rather than the human's (#1355). Acquiring the token is LAZY: this
+# only arms a `gh` wrapper, and the mint (or a loud abort) happens at the first
+# write, not here.
 # shellcheck source=scripts/lib/gh-bot.sh
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/gh-bot.sh"
 gh_bot_init
