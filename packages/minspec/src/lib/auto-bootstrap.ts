@@ -33,84 +33,24 @@ import { findSpecDirsMissingTasksMd, scaffoldTasksMd } from './scaffold';
 // Preferences (persisted in .minspec/preferences.json)
 // ---------------------------------------------------------------------------
 
-export interface BootstrapPreferences {
-  readonly skipInitPrompt?: boolean;
-  readonly skipRefreshPrompt?: boolean;
-  readonly skipClassifyPrompt?: boolean;
-  readonly skipBackfillPrompt?: boolean;
-  /**
-   * Per-prompt opt-out for the DESIGN.md-stub-removal offer (#315). Distinct
-   * from `skipBackfillPrompt` (epic backfill) even though both are `kind:
-   * 'backfill'` — declining one must never suppress the other.
-   */
-  readonly skipDesignStubPrompt?: boolean;
-  /**
-   * Per-prompt opt-out for the missing-tasks.md offer (#225). A third
-   * `kind: 'backfill'` step with its own skip flag so declining it never
-   * cross-suppresses the epic-backfill or DESIGN.md-stub offers (and vice-versa).
-   */
-  readonly skipTasksMdPrompt?: boolean;
-  /**
-   * Per-(prompt, state-signature) answer memory (#883). Maps a step's unique
-   * `skipPrefKey` (e.g. `"skipRefreshPrompt"`) → the state SIGNATURE the user last
-   * answered for. A step is suppressed on later activations while its current
-   * signature equals the recorded one, so an already-answered prompt is NOT
-   * re-offered until the underlying state genuinely changes (e.g. a NEW template
-   * bump makes drift differ). This is a SOFTER memory than the `skip*` booleans:
-   *   - the `skip*` booleans (from "Don't ask again") are a forever-skip;
-   *   - `answeredSignatures` is "you already dealt with THIS state" and self-clears
-   *     when the state moves.
-   * Additive + optional: a preferences.json without it behaves exactly as before
-   * (no suppression) until a fresh answer is recorded (#883 back-compat). Keyed by
-   * the UNIQUE `skipPrefKey`, never by `kind`, so the three `kind: 'backfill'`
-   * steps never cross-suppress.
-   */
-  readonly answeredSignatures?: Record<string, string>;
-}
-
-const PREFS_FILENAME = 'preferences.json';
-
-/** Resolve the absolute path to `.minspec/preferences.json` */
-export function preferencesPath(rootDir: string): string {
-  return path.join(rootDir, '.minspec', PREFS_FILENAME);
-}
-
 /**
- * Load preferences from `.minspec/preferences.json`. Returns empty object if
- * file does not exist or is invalid JSON.
+ * The preference store moved to its own dependency-free module in #1319 (this
+ * file imports template-registry/epic-backfill/epic-manager/merge-refresh, and
+ * a command that only wants a preference must not drag those in). Re-exported
+ * here so every existing importer of `auto-bootstrap` keeps working unchanged.
  */
-export function loadPreferences(rootDir: string): BootstrapPreferences {
-  const filePath = preferencesPath(rootDir);
-  if (!fs.existsSync(filePath)) return {};
-  try {
-    const raw = fs.readFileSync(filePath, 'utf-8');
-    const parsed = JSON.parse(raw);
-    if (parsed && typeof parsed === 'object') {
-      return parsed as BootstrapPreferences;
-    }
-    return {};
-  } catch {
-    return {};
-  }
-}
-
-/**
- * Merge new preferences with existing ones and persist to disk.
- * Creates `.minspec/` if it does not exist.
- */
-export function savePreferences(
-  rootDir: string,
-  update: BootstrapPreferences,
-): void {
-  const minspecDir = path.join(rootDir, '.minspec');
-  fs.mkdirSync(minspecDir, { recursive: true });
-  const current = loadPreferences(rootDir);
-  const merged = { ...current, ...update };
-  fs.writeFileSync(
-    preferencesPath(rootDir),
-    JSON.stringify(merged, null, 2) + '\n',
-  );
-}
+import {
+  type BootstrapPreferences,
+  loadPreferences,
+  savePreferences,
+} from './preferences';
+export {
+  type BootstrapPreferences,
+  preferencesPath,
+  loadPreferences,
+  savePreferences,
+  resolveProjectPreference,
+} from './preferences';
 
 // ---------------------------------------------------------------------------
 // Detection — pure file-system checks (no vscode dependency)
