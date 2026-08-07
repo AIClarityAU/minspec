@@ -1357,6 +1357,28 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
         BODY=$(printf 'Agent completed (no summary written).\n\n— branch `%s` @ %s (auto-dispatched)' "$BRANCH" "$SHA")
       fi
 
+      # #1322 — the closing trailer is written by the PARENT, deterministically.
+      #
+      # Until now nothing anywhere in this pipeline closed the issue, and nothing
+      # asked GitHub to: the body was the agent's free-text summary plus a footer,
+      # so whether a completed issue ever closed depended on the model spontaneously
+      # writing a GitHub closing keyword. It usually did not. #1229 wrote
+      # "Fix for #1067:" and #1230 wrote "# #1068 —" — both perfectly reasonable
+      # prose, both bare references, so `closingIssuesReferences` was EMPTY on both
+      # and both issues stayed open after their PRs merged. Still carrying
+      # `agent-ready`, they were then eligible to be built all over again (#1305).
+      #
+      # Emitting six characters and a number in a fixed position is mechanical work,
+      # and mechanical work does not belong in a prompt. Do NOT "fix" this class by
+      # adding "remember to write Closes #N" to roles/dev.md — that is the same
+      # model-trust one layer up (constitution: enforce, don't trust the model).
+      #
+      # Idempotent: if the agent's summary already carries a closing keyword for THIS
+      # issue, adding a second is harmless to GitHub but noisy to a reader, so skip.
+      if ! grep -qiE "(clos(e|es|ed)|fix(es|ed)?|resolv(e|es|ed))[[:space:]]+#${ISSUE}\b" <<<"$BODY"; then
+        BODY=$(printf '%s\n\nCloses #%s' "$BODY" "$ISSUE")
+      fi
+
       # Append the honest 3-signal review block (#180) so the reviewer skims a
       # VERIFIED summary instead of reconstructing it. The renderer is pure +
       # tested in @aiclarity/shared; this runs in the PARENT (no agent creds).
@@ -1552,7 +1574,14 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
       echo "WARNING: push failed for $BRANCH — review worktree manually"
     fi
     gh issue edit "$ISSUE" --repo "$REPO" \
-      --remove-label "agent-running" --add-label "agent-done" 2>/dev/null || true
+      # #1305 — completion REPLACES readiness; it must not sit beside it. Dropping
+    # `agent-running` alone left `agent-ready` in place, so a finished issue stayed
+    # in the queue indefinitely and was re-dispatched: #1068 was re-claimed 44 min
+    # after completing, with its PR already merged. `agent-done` is now also in the
+    # countermand set (dispatch-ready-check.sh), so this is one of two independent
+    # witnesses rather than the only thing standing between a merged issue and a
+    # repeat build.
+    --remove-label "agent-running,agent-ready" --add-label "agent-done" 2>/dev/null || true
     echo "Agent completed issue #$ISSUE (role: $ROLE). Worktree: $WORKTREE"
 
     # ── SPEC-044 Slice 2: creator-owned PR shepherding (FR-4/D4) ──────────────
@@ -1573,8 +1602,17 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
   fi
 else
   gh issue edit "$ISSUE" --repo "$REPO" \
-    --remove-label "agent-running" --add-label "agent-escalated" 2>/dev/null || true
-  echo "Agent CRASHED on issue #$ISSUE (role: $ROLE). Review: $LOG"
+    # #1307 — a CRASH raises the human gate, exactly as a deliberate escalation does.
+    #
+    # This path stamped `agent-escalated` alone while the DR-355 escalation path above
+    # stamps `agent-escalated,needs-human-review`. Same outward marker, only one of
+    # them gating: `agent-escalated` countermanded nothing, so once anything restored
+    # `agent-ready` the issue was fully eligible again. #1112 went round that loop
+    # twice — crashed 07:51, silently requeued 09:54, claimed 22:24, crashed 23:06 —
+    # producing zero commits and never reaching a human. A crash is at least as
+    # strong a reason to stop as an agent's own admission that it cannot proceed.
+    --remove-label "agent-running,agent-ready" --add-label "agent-escalated,needs-human-review" 2>/dev/null || true
+  echo "Agent CRASHED on issue #$ISSUE (role: $ROLE) — held for a human (needs-human-review). Review: $LOG"
 fi
 
 # Every non-retry path (clean publish, final escalation, crash) falls through to
