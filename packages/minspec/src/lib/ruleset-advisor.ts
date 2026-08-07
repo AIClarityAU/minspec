@@ -661,6 +661,30 @@ export const REVIEWER_SECRETS = [
 ] as const;
 
 /**
+ * Secrets `ai-review.yml` REFERENCES but does not GATE on — present, the reviewer
+ * gains a capability; absent, it runs exactly as before.
+ *
+ *   - `ANTHROPIC_API_KEY` — the PAYG quota-failover credential. `review-branch.sh`
+ *     retries on it only when `AI_REVIEW_FAILOVER == payg` AND the key is set; with
+ *     neither, the default `wait` path is unchanged.
+ *
+ * Deliberately NOT part of {@link REVIEWER_SECRETS}, and the distinction is the whole
+ * point of this constant. {@link probeReviewerConfigured} answers "can this repo
+ * produce an `ai-review` check at all", and its answer decides whether `ai-review`
+ * may be a REQUIRED check. Fold an optional secret into that set and every repo
+ * without a PAYG key reports "not configured" — so the Tier-A checks are dropped from
+ * the required set and un-reviewed code can merge. That is the #559 deadlock's mirror
+ * image: #559 required a check the repo could not produce; this would stop requiring
+ * a check the repo produces perfectly well.
+ *
+ * The enforcement test binds `secrets.*` references in the workflow to the UNION of
+ * both constants, so a newly referenced secret still cannot appear without being
+ * declared here — the anti-drift property survives the split. Adding a name to THIS
+ * list is the explicit claim "the reviewer works without it".
+ */
+export const REVIEWER_OPTIONAL_SECRETS = ['ANTHROPIC_API_KEY'] as const;
+
+/**
  * Is the reviewer pipeline OPERATIONAL on the repo — are the secrets that make
  * `ai-review.yml`/`ready-to-merge.yml` actually post a pass present? Checks that
  * EVERY secret in {@link REVIEWER_SECRETS} (`CLAUDE_CODE_OAUTH_TOKEN`,
