@@ -72,23 +72,95 @@
 
 SHADOW_TRIAGE_SCHEMA="minspec-shadow-triage/1"
 
-# ── Pinned model ─────────────────────────────────────────────────────────────
-# "z.ai" is not a model. The coding plan serves GLM-5.2, GLM-5-Turbo and GLM-4.7
-# behind ONE Anthropic-compatible endpoint, with tier and quota deciding which
-# answers — so an unpinned pilot measures a moving target and its agreement number
-# means nothing (#1338). The id is recorded on EVERY row for the same reason: a log
-# that does not say which model produced a verdict cannot be re-read later.
+# ── Model selection: resolve "latest", never pin a version ───────────────────
+# "z.ai" is not a model, and it publishes NO floating alias — verified 2026-08-07
+# against a live key: GET /v1/models returns only concrete ids (glm-4.5, glm-4.5-air,
+# glm-4.6, glm-4.7, glm-5, glm-5-turbo, glm-5.1, glm-5.2), with no `latest` entry.
+# So "always use their latest" cannot be a pin; it must be RESOLVED per run.
 #
-# UNVERIFIED: this default id has not been confirmed against a live z.ai account,
-# because no key is configured yet. If z.ai rejects it, the rows will carry
-# `error` and the report will show 0 samples rather than silently measuring some
-# other model — override with MINSPEC_SHADOW_TRIAGE_MODEL.
-SHADOW_TRIAGE_DEFAULT_MODEL="glm-5.2"
+# The default is therefore the sentinel `latest`, resolved by `shadow_resolve_model`
+# from the newest `created_at` in that listing. An explicit
+# MINSPEC_SHADOW_TRIAGE_MODEL still wins, so a specific version can be forced.
+#
+# Measurement integrity is preserved NOT by pinning but by recording the RESOLVED id
+# on every row (#1338): the report groups by model, so a mid-pilot version change
+# splits the sample rather than silently averaging two models together. A log that
+# does not say which model produced a verdict cannot be re-read later.
+#
+# LITE VARIANTS ARE EXCLUDED. Newest-by-date would eventually select a smaller
+# sibling — a future `glm-5.3-air` or `-turbo` would be newest yet weaker, silently
+# DOWNGRADING the pilot while the log still said "latest". Suffixes in
+# SHADOW_TRIAGE_LITE_RE are skipped unless named explicitly.
+SHADOW_TRIAGE_DEFAULT_MODEL="latest"
+# Trailing lite/speed-tier suffixes. Anchored at end so `glm-5-turbo` matches but a
+# hypothetical `glm-turbo-pro` does not.
+SHADOW_TRIAGE_LITE_RE='-(air|turbo|flash|mini|lite)$'
 SHADOW_TRIAGE_DEFAULT_BASE_URL="https://api.z.ai/api/anthropic"
 SHADOW_TRIAGE_DEFAULT_TIMEOUT="120"
 
 shadow_key()      { printf '%s' "${MINSPEC_SHADOW_TRIAGE_KEY:-}"; }
 shadow_model()    { printf '%s' "${MINSPEC_SHADOW_TRIAGE_MODEL:-$SHADOW_TRIAGE_DEFAULT_MODEL}"; }
+
+# ── shadow_pick_latest_model — the PURE half of "latest" resolution ───────────
+# A /v1/models JSON body on stdin → the newest non-lite model id on stdout, or
+# nothing (exit 1) if none can be chosen. Pure: no network, no env, no clock, so
+# the selection rule is testable against fixtures without a z.ai account.
+#
+# "Newest" is `created_at`, NOT list order and NOT a version-string sort: 'glm-5.2'
+# vs 'glm-5-turbo' does not order correctly as text, and a lexical compare would
+# rank 'glm-4.7' above 'glm-5' (4>... no: '4'<'5' — but 'glm-5.1' vs 'glm-5.2' only
+# works by luck, and breaks entirely at a two-digit minor like 'glm-5.10').
+# created_at is the vendor's own statement of recency, so it is what we read.
+shadow_pick_latest_model() {
+  python3 -c '
+import json, re, sys
+LITE = re.compile(sys.argv[1])
+try:
+    body = json.load(sys.stdin)
+except Exception:
+    sys.exit(1)
+rows = body.get("data")
+if not isinstance(rows, list):
+    sys.exit(1)
+best = None
+for m in rows:
+    if not isinstance(m, dict):
+        continue
+    mid, created = m.get("id"), m.get("created_at")
+    if not isinstance(mid, str) or not isinstance(created, str) or not mid:
+        continue          # a malformed row is skipped, never guessed at
+    if LITE.search(mid):
+        continue          # lite sibling: newer is not better
+    if best is None or created > best[0]:
+        best = (created, mid)
+if best is None:
+    sys.exit(1)
+print(best[1])
+' "$SHADOW_TRIAGE_LITE_RE"
+}
+
+# ── shadow_resolve_model — the NETWORK half ──────────────────────────────────
+# Echoes the model id to actually use. An explicit MINSPEC_SHADOW_TRIAGE_MODEL (or
+# any value other than the `latest` sentinel) is returned untouched — no request.
+#
+# FAIL-SAFE, NOT FAIL-CLOSED, and deliberately so: this is a measurement instrument,
+# not a gate (contrast DR-066, which forbids swallowing a load-bearing GATE signal).
+# If the listing cannot be fetched or parsed, this exits non-zero and the CALLER
+# skips the shadow run recording `model-resolve-failed` — it must never fall back to
+# a guessed id, because a row labelled with the wrong model is worse than no row.
+shadow_resolve_model() {
+  local requested; requested="$(shadow_model)"
+  if [[ "$requested" != "latest" ]]; then printf '%s' "$requested"; return 0; fi
+
+  local key base body
+  key="$(shadow_key)"; base="$(shadow_base_url)"
+  [[ -z "$key" ]] && return 1
+  body="$(timeout 20 curl -sS --fail-with-body \
+      "${base%/}/v1/models" \
+      -H "x-api-key: ${key}" \
+      -H "anthropic-version: 2023-06-01" 2>/dev/null)" || return 1
+  printf '%s' "$body" | shadow_pick_latest_model
+}
 shadow_base_url() { printf '%s' "${MINSPEC_SHADOW_TRIAGE_BASE_URL:-$SHADOW_TRIAGE_DEFAULT_BASE_URL}"; }
 shadow_timeout()  { printf '%s' "${MINSPEC_SHADOW_TRIAGE_TIMEOUT:-$SHADOW_TRIAGE_DEFAULT_TIMEOUT}"; }
 

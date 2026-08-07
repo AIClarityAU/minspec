@@ -158,7 +158,14 @@ if ! printf '%s' "$VIS_JSON" | shadow_repo_public; then
   exit 0
 fi
 
-MODEL="$(shadow_model)"
+# Resolve the model BEFORE anything else costs time. With the default `latest`
+# sentinel this is one GET /v1/models; with an explicit id it is a no-op.
+# On failure we SKIP rather than fall back: a row labelled with a guessed model id
+# would corrupt the very measurement this harness exists to produce (#1338).
+if ! MODEL="$(shadow_resolve_model)" || [[ -z "$MODEL" ]]; then
+  note "could not resolve the latest z.ai model — skipped (no guessed fallback)."
+  exit 0
+fi
 BASE_URL="$(shadow_base_url)"
 TIMEOUT="$(shadow_timeout)"
 PROMPT="$(cat "$PROMPT_FILE")"
