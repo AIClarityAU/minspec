@@ -100,6 +100,10 @@ vi.mock('../src/lib/config', async (importOriginal) => ({
 
 vi.mock('../src/lib/spec-validator', () => ({
   validateSpec: vi.fn(),
+  // #1317: defaults to "the advance introduces nothing", so every pre-existing
+  // case here keeps approving exactly as before. The refusal path is exercised
+  // explicitly in the dedicated block at the end of this file.
+  violationsIntroducedByApproval: vi.fn(() => []),
 }));
 
 vi.mock('../src/lib/epic-manager', () => ({
@@ -125,7 +129,7 @@ import {
 import type { ApprovalStatus } from '../src/lib/approval';
 import type { SpecSummary } from '../src/lib/spec-manager';
 import { readSpecFile, advanceSpecToImplementing } from '../src/lib/spec';
-import { validateSpec } from '../src/lib/spec-validator';
+import { validateSpec, violationsIntroducedByApproval } from '../src/lib/spec-validator';
 import { readShardIdFiles } from '../src/lib/spec-layout';
 import { enqueuePhaseAdvance } from '../src/lib/phase-advance-queue';
 
@@ -930,5 +934,61 @@ describe('revokeApprovalCommand — action paths (post-selection)', () => {
     expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
       expect.stringContaining('Revoked approval for SPEC-005'),
     );
+  });
+});
+
+// ─── #1317: refuse to approve INTO a status the spec cannot satisfy ──────────
+//
+// The lib-level proof lives in approve-target-status-1317.test.ts. This block
+// proves the COMMAND is actually wired to it — a passing lib function that no
+// caller consults would leave the door exactly as open as before.
+describe('approveSpecCommand — target-status gate (#1317)', () => {
+  const armedError = {
+    rule: 'ownership.implements.missing',
+    severity: 'error' as const,
+    message: 'T3 spec past Clarify does not declare its owned code (implements:).',
+    fixHint: 'Add an `implements:` frontmatter list …',
+  };
+
+  // The revoke block above sets listSpecs with mockReturnValue (not …Once), so it
+  // persists into this one. Pin the spec under test rather than inheriting theirs.
+  beforeEach(() => {
+    vi.mocked(listSpecs).mockReturnValue([summary('SPEC-001', 'Test')]);
+    setStatuses({ 'SPEC-001': 'unapproved' });
+  });
+
+  it('refuses, writing nothing, when the advance would arm an error', async () => {
+    pickFirst();
+    vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec('specifying') as never);
+    // Complete in the state it is LEAVING — this is the whole point: the old code
+    // saw only this and approved.
+    vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
+    vi.mocked(violationsIntroducedByApproval).mockReturnValueOnce([armedError] as never);
+
+    await approveSpecCommand(undefined);
+
+    // Nothing was written: no status/phase flip, no approval record.
+    expect(advanceSpecToImplementing).not.toHaveBeenCalled();
+    expect(approveSpec).not.toHaveBeenCalled();
+
+    // And the human is told what, specifically, is unsatisfied.
+    const call = vi.mocked(vscode.window.showErrorMessage).mock.calls[0];
+    expect(call[0]).toContain('SPEC-001');
+    expect(call[0]).toContain('implements:');
+    expect((call[1] as { modal?: boolean } | undefined)?.modal).toBe(true);
+  });
+
+  it('approves normally when the advance introduces nothing', async () => {
+    pickFirst();
+    vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec('specifying') as never);
+    vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
+    vi.mocked(violationsIntroducedByApproval).mockReturnValueOnce([] as never);
+    vi.mocked(advanceSpecToImplementing).mockReturnValueOnce('planning' as never);
+
+    await approveSpecCommand(undefined);
+
+    // The gate must not become a blanket refusal — that would be a worse bug than
+    // the one it fixes, since it would block every approval in the repo.
+    expect(approveSpec).toHaveBeenCalled();
   });
 });
