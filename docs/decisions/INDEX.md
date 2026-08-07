@@ -637,7 +637,7 @@ commitApproval refuses to commit an approval when HEAD is the push-protected def
 
 ## [DR-081 — What ceremony a solo approval carries - SPEC-050 is carved out of DR-076's docs-lane park, and an approval-record PR self-exempts from ai-review behind a deterministic integrity check](DR-081.md)
 
-*Status: proposed · Date: 2026-08-07*
+*Status: accepted · Date: 2026-08-07*
 
 <!-- dr-summary:DR-081 auto=33d8e35e60a7 -->
 Two cuts to ceremony that only ever made sense for a team, with nothing machine-checkable removed. **SPEC-050 is carved out of DR-076's docs-lane park** - it was swept in by a filing error (`epic: EPIC-009`, whose own membership test it fails), not by a decision about solo approval landing. And **an approval-record PR self-exempts from `ai-review`**, returning `neutral` like a machinery PR, because its payload is a generated sidecar plus a `status:` flip with nothing to review; a deterministic `approval-integrity` check takes its place so the PR goes green honestly instead of needing `--admin` every time. The exemption covers the record, never the approvable - DR-047's substance gate is untouched.
