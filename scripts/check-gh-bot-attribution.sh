@@ -29,6 +29,11 @@
 #   * TEXTUAL, not semantic. It greps for command-shaped lines. A write built by
 #     string concatenation, or dispatched through a variable (`$GH issue ...`),
 #     slips past. This raises the floor; it is not a proof.
+#   * Only FULL-LINE comments are stripped. A code line carrying a write-shaped
+#     TRAILING comment (`some_cmd  # then gh pr create`) still matches and would
+#     fail the file. That direction is the safe one — a false FAIL is visible and
+#     one allowlist line or a reworded comment clears it, whereas a false PASS
+#     ships the bug — so it is left as-is rather than made cleverer.
 #   * The allowlist is the escape hatch, and every entry carries a reason.
 
 set -euo pipefail
@@ -58,10 +63,29 @@ allowlist_reason() {
   esac
 }
 
-# A `gh` subcommand that changes state. Kept deliberately wide — `gh label
-# create` was missed by the first inventory pass and is exactly the kind of verb
-# that quietly reintroduces the bug.
-WRITE_RE='(^|[^[:alnum:]_-])gh (issue|pr|label|release|workflow|repo|secret|variable|cache|run) (create|comment|edit|merge|review|close|reopen|delete|ready|lock|unlock|set|rename|transfer|cancel|rerun)|gh api [^|]*(-X|--method) *(POST|PATCH|PUT|DELETE)'
+# The write vocabulary is READ FROM the runtime helper, never restated here.
+#
+# It was restated here at first, and the two copies immediately disagreed: this
+# regex lacked `ruleset` and the add/remove/clone/... verbs, so `gh ruleset
+# create` would mint a token at runtime while this guard did not require the
+# script to source the helper at all — a hole in the gate, in the gate's own
+# vocabulary. One definition, two consumers.
+#
+# Sourcing gh-bot.sh is offline and side-effect-free: it defines variables and
+# functions and shadows `gh` only when gh_bot_init is called, which this does not.
+# shellcheck source=scripts/lib/gh-bot.sh
+source "${HERE}/lib/gh-bot.sh"
+
+WRITE_RE="(^|[^[:alnum:]_-])gh (${GH_BOT_WRITE_NOUNS}) (${GH_BOT_WRITE_VERBS})|gh api [^|]*((-X|--method) *(POST|PATCH|PUT|DELETE)|--input|-f |-F |--field|--raw-field)"
+
+# `gh api graphql -f query=...` is how BOTH reads and writes are issued, so the
+# regex above over-matches it. Mirror the runtime rule (_gh_bot_is_write): a
+# graphql line counts only when the document is a `mutation`. Without this the
+# guard would demand a bot identity from read-only query scripts, which the
+# runtime would then abort for want of a key — the two must agree exactly, or
+# the disagreement is either a false failure or a hole.
+GRAPHQL_READ_RE='graphql'
+GRAPHQL_WRITE_RE='mutation'
 
 fail=0
 checked=0
@@ -77,6 +101,9 @@ while IFS= read -r file; do
   # file emits "16:# ..." with no filename prefix, so a pattern expecting ":16:"
   # silently filters nothing.
   hits="$(grep -nE "$WRITE_RE" "$file" 2>/dev/null | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
+  # Drop graphql lines that carry no mutation — reads, per the runtime rule above.
+  hits="$(printf '%s' "$hits" | awk -v g="$GRAPHQL_READ_RE" -v m="$GRAPHQL_WRITE_RE" \
+            'NF && !($0 ~ g && $0 !~ m)' || true)"
   [[ -n "$hits" ]] || continue
 
   checked=$((checked + 1))

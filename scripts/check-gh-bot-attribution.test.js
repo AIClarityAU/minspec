@@ -83,6 +83,23 @@ test('`gh api -X POST` is caught', () => {
   assert.equal(status, 1);
 });
 
+test('a graphql MUTATION is caught', () => {
+  const { status, out } = runGuard({
+    'gql.sh': '#!/usr/bin/env bash\ngh api graphql -f query="mutation { addComment(x:1) { id } }"\n',
+  });
+  assert.equal(status, 1, `a graphql mutation is a write; got:\n${out}`);
+});
+
+test('a graphql QUERY is NOT flagged — the guard must match the runtime rule', () => {
+  // `-f query=` issues reads too (scripts/retriage-unrecorded.sh:58). If the guard
+  // demanded a bot identity here, the runtime would abort a read-only script for
+  // want of a key. Guard and runtime must agree exactly, in both directions.
+  const { status, out } = runGuard({
+    'gql.sh': '#!/usr/bin/env bash\nOUT="$(gh api graphql -f query="$Q" -F c="$CUR")"\n',
+  });
+  assert.equal(status, 0, `a graphql read must not be flagged; got:\n${out}`);
+});
+
 test('a sibling-path source is accepted (no "lib/" segment to match on)', () => {
   // Regression: scripts/lib/issue-lease.sh sources "${_DIR}/gh-bot.sh". An
   // earlier regex demanded a literal "lib/" and wrongly failed it.

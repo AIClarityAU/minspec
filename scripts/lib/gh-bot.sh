@@ -13,7 +13,7 @@
 #
 # minspec#995 already required App-token attribution. It was PROSE ONLY, and
 # nothing obeyed it: before this file, `grep -l gh-app-token scripts/*.sh` found
-# nothing across 55 write call sites in 10 files. A rule the model has to
+# nothing across 76 write call sites in 11 paths. A rule the model has to
 # remember is a rule that drifts — hence `scripts/check-gh-bot-attribution.sh`,
 # which fails CI if a write is reintroduced without sourcing this file.
 #
@@ -124,32 +124,65 @@ _gh_bot_mint() {
   _GH_BOT_MINTED_AT="$(date +%s)"
 }
 
+# ── THE write vocabulary — one definition, two consumers ──────────────────────
+# Both the runtime predicate below and the CI guard
+# (scripts/check-gh-bot-attribution.sh) answer the same question: "is this `gh`
+# invocation a write?" They MUST answer it identically.
+#
+# They did not, at first. The guard's regex lacked `ruleset` and the
+# add/remove/clone/... verbs that the runtime had, which opened a blind spot in
+# the gate: `gh ruleset create` would mint a token at runtime, yet the guard
+# would not REQUIRE that script to source this file — so a new script could ship
+# unattributed and still pass CI. That is precisely the failure this file's own
+# `_gh_bot_is_bot_login` header warns about, "two files half-knowing one
+# predicate", committed by the file that warns about it.
+#
+# So the vocabulary lives here, once, and the guard sources this file to read it.
+# Sourcing is safe and offline: it defines variables and functions, and shadows
+# nothing until gh_bot_init is called.
+GH_BOT_WRITE_NOUNS='issue|pr|label|release|workflow|repo|secret|variable|cache|run|ruleset'
+GH_BOT_WRITE_VERBS='create|comment|edit|merge|review|close|reopen|delete|ready|lock|unlock|set|rename|transfer|cancel|rerun|add|remove|clone|sync|archive|unarchive|restore'
+
 # ── Is this argv a WRITE? ─────────────────────────────────────────────────────
 # Conservative: anything uncertain counts as a write. A false "write" costs one
 # token mint; a false "read" ships the bug back.
 _gh_bot_is_write() {
   local noun="${1:-}" verb="${2:-}"
   case "$noun" in
-    issue|pr|label|release|workflow|repo|secret|variable|cache|run|ruleset)
-      case "$verb" in
-        create|comment|edit|merge|review|close|reopen|delete|ready|lock|unlock|\
-        set|rename|transfer|cancel|rerun|add|remove|clone|sync|archive|unarchive|restore)
-          return 0 ;;
-      esac
-      return 1 ;;
     api)
-      # `gh api` defaults to GET, but -f/-F/--input/--raw-field imply POST.
-      local a
-      for a in "$@"; do
-        case "$a" in
-          -X|--method) return 0 ;;   # method given explicitly — assume mutating
-          -f|-F|--field|--raw-field|--input) return 0 ;;
-          graphql) : ;;              # a mutation is indistinguishable here
+      # `gh api` defaults to GET; -f/-F/--raw-field/--input imply a POST body.
+      #
+      # GraphQL is the exception that needs care. `-f query=...` is how you pass
+      # ANY GraphQL document, read or write, so the -f rule alone would call every
+      # paginated query a write. That is not merely wasteful: a classified write
+      # MINTS, and so a read-only script would abort wherever no key exists.
+      # (retriage-unrecorded.sh is exactly that script — two reads, delegating all
+      # writing to triage-inbox.sh.) So for graphql, decide on the document: a
+      # `mutation` keyword in argv means write, otherwise read.
+      local -a args=("$@")
+      local i n="${#args[@]}" is_graphql=0 has_mutation=0 has_body=0
+      for ((i = 0; i < n; i++)); do
+        case "${args[i]}" in
+          graphql) is_graphql=1 ;;
+          -X|--method)
+            case "${args[i + 1]:-}" in
+              POST|PATCH|PUT|DELETE|post|patch|put|delete) return 0 ;;
+            esac ;;
+          --input) return 0 ;;
+          -f|-F|--field|--raw-field) has_body=1 ;;
+          *mutation*) has_mutation=1 ;;
         esac
       done
+      if (( is_graphql )); then
+        (( has_mutation )) && return 0
+        return 1
+      fi
+      (( has_body )) && return 0
       return 1 ;;
   esac
-  return 1
+  [[ "$noun" =~ ^($GH_BOT_WRITE_NOUNS)$ ]] || return 1
+  [[ "$verb" =~ ^($GH_BOT_WRITE_VERBS)$ ]] || return 1
+  return 0
 }
 
 # Mint/validate at most once per process. Called by the `gh` wrapper on a write.

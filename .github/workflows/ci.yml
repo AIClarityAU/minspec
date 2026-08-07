@@ -54,6 +54,13 @@ jobs:
       - name: Unit-test gh-bot attribution guard
         run: node --test scripts/check-gh-bot-attribution.test.js
 
+      # The write/read predicate and the credential handling behind it. Pins that
+      # the guard DERIVES its write vocabulary from gh-bot.sh rather than keeping a
+      # second copy — the two disagreed once, which left `gh ruleset create` able
+      # to mint at runtime while the guard never required attribution.
+      - name: Unit-test gh-bot write predicate + credential handling
+        run: node --test scripts/lib/gh-bot.test.js
+
   # Workflow-syntax + expression lint (#486 harden). CI validated YAML syntax but
   # NOT the GitHub Actions schema/expression grammar, so an invalid `${{ }}` reached
   # main and put ai-review into startup_failure REPO-WIDE (a literal empty `${{ }}`
