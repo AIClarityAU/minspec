@@ -146,9 +146,19 @@ Covers **FR-1, FR-2, FR-3, FR-5, FR-6, FR-7, FR-8**, **INV-1, INV-2, INV-4**, an
 - [ ] `packages/minspec/src/commands/commit-on-approve.ts` (**owned**) — add a third action,
       **"Always push from now on"**, to the `prompt` notification
       ([:146-155](../../../packages/minspec/src/commands/commit-on-approve.ts#L146)), beside
-      `Push` / `Not now`. On click: write `minspec.pushOnApprove: 'always'` to
-      `ConfigurationTarget.Global` — the user's **own** settings, never the workspace file
-      (DR-071's corollary) — then proceed with this push, so the click is not also a decline.
+      `Push` / `Not now`. On click: write the standing consent **per-project** to
+      `.minspec/preferences.json` (the same store as the `answeredSignatures` memory in the
+      next task) — then proceed with this push, so the click is not also a decline.
+      > ⚠️ **Corrected 2026-08-07 — do NOT write `ConfigurationTarget.Global` here.**
+      > This task previously said to, and that is superseded by
+      > [DR-078](../../../docs/decisions/DR-078.md) §1 (accepted 2026-08-05): "Not
+      > `ConfigurationTarget.Global`. Not `ConfigurationTarget.Workspace`." A `Global` write
+      > is machine-wide config in a repo that never opted in, which **constitution invariant
+      > 3 forbids**. This line was authored ~3 hours after DR-078 was accepted, so it
+      > re-introduced the exact ruling the DR had just overturned — and since an implementer
+      > works from this file, it was the copy that would actually have been built.
+      > (`requirements.md:75` still carries the old wording but is hash-locked; correcting it
+      > costs a re-approval, which DR-078 Consequences §1 already records.)
 - [ ] same file — show the offer **once**: record it under its own `skipPrefKey` in the #883
       `answeredSignatures` map via `loadPreferences` / `savePreferences`
       (`auto-bootstrap.ts:82` / `:101` / `:68`). Never re-nag.
