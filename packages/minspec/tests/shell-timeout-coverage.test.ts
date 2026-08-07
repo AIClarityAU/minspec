@@ -58,9 +58,24 @@ function shellCallCount(src: string): number {
   return matches ? matches.length : 0;
 }
 
-/** Either the shared helper or the hand-rolled form #1099 shipped — both are honest. */
+/**
+ * Either the shared helper or the hand-rolled form #1099 shipped — but only when the raise
+ * happens at MODULE SCOPE.
+ *
+ * A raise inside a hook is inert: vitest has already resolved every test's timeout by the
+ * time `beforeAll` fires, so the call succeeds, changes nothing, and the suite stays on the
+ * 5s default. That is precisely how #1399 hid — `useShellTimeout()` wrapped its
+ * `vi.setConfig` in `beforeAll`, all 20 opted-in suites were still at 5s, and the previous
+ * version of this function returned `true` for every one of them because it matched the
+ * text without caring where the text was.
+ */
 function raisesTimeout(src: string): boolean {
-  return /useShellTimeout\s*\(/.test(src) || /vi\.setConfig\s*\(\s*\{[^}]*testTimeout/.test(src);
+  const insideHook =
+    /\b(?:beforeAll|beforeEach)\s*\(\s*(?:async\s*)?\(\s*\)\s*=>\s*\{[^}]*?(?:vi\.setConfig\s*\(\s*\{[^}]*?testTimeout|useShellTimeout\s*\()/s;
+  if (insideHook.test(src)) return false;
+  return (
+    /^\s*useShellTimeout\s*\(/m.test(src) || /^\s*vi\.setConfig\s*\(\s*\{[^}]*testTimeout/m.test(src)
+  );
 }
 
 describe('#1285 shell-driving suites raise their testTimeout', () => {
@@ -111,5 +126,21 @@ describe('#1285 shell-driving suites raise their testTimeout', () => {
     expect(raisesTimeout('useShellTimeout();')).toBe(true);
     expect(raisesTimeout('vi.setConfig({ testTimeout: 30_000 });')).toBe(true);
     expect(raisesTimeout('// no timeout raise here')).toBe(false);
+  });
+
+  it('REJECTS a raise buried in a hook, which is inert (#1399)', () => {
+    // The regression that hid for the life of #1285/#1099. Both of these read as a
+    // timeout raise and neither one does anything: vitest resolves each test's timeout
+    // during collection, before any hook runs.
+    expect(raisesTimeout('beforeAll(() => {\n  vi.setConfig({ testTimeout: 30_000 });\n});')).toBe(
+      false,
+    );
+    expect(raisesTimeout('beforeAll(() => {\n  useShellTimeout();\n});')).toBe(false);
+    expect(raisesTimeout('beforeEach(async () => {\n  vi.setConfig({ testTimeout: 30_000 });\n});')).toBe(
+      false,
+    );
+    // …while the module-scope forms still count.
+    expect(raisesTimeout('useShellTimeout();\ndescribe("x", () => {});')).toBe(true);
+    expect(raisesTimeout('vi.setConfig({ testTimeout: 30_000 });\nafterAll(() => {});')).toBe(true);
   });
 });
