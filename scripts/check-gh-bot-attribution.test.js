@@ -113,6 +113,25 @@ test('a LOWERCASE method is caught — guard and runtime must agree on case', ()
   assert.equal(status, 1, `lowercase -X post is a write; got:\n${out}`);
 });
 
+// Every spelling gh accepts for the method flag. The equals form was caught by
+// the runtime but missed by this guard — the same parity gap twice, so all four
+// are pinned here and mirrored in scripts/lib/gh-bot.test.js.
+for (const form of ['-X POST', '-XPOST', '--method POST', '--method=POST', '--method=delete']) {
+  test(`method spelling is caught: gh api ${form}`, () => {
+    const { status, out } = runGuard({
+      'm.sh': `#!/usr/bin/env bash\ngh api ${form} "repos/o/r/issues"\n`,
+    });
+    assert.equal(status, 1, `"gh api ${form}" is a write; got:\n${out}`);
+  });
+}
+
+for (const argv of ['workflow run ci.yml', 'release upload v1 ./a.zip']) {
+  test(`mutating verb is caught: gh ${argv}`, () => {
+    const { status } = runGuard({ 'v.sh': `#!/usr/bin/env bash\ngh ${argv}\n` });
+    assert.equal(status, 1, `"gh ${argv}" mutates`);
+  });
+}
+
 test('a graphql MUTATION is caught', () => {
   const { status, out } = runGuard({
     'gql.sh': '#!/usr/bin/env bash\ngh api graphql -f query="mutation { addComment(x:1) { id } }"\n',

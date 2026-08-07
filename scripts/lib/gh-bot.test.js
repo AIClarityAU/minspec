@@ -67,6 +67,13 @@ const WRITES = [
   // while the runtime treated it as a write and attributed it to the human.
   'api -X post repos/o/r/issues',
   'api --method patch repos/o/r/issues/1',
+  // Equals and attached spellings — valid to gh, and missed by both sides once.
+  'api --method=POST repos/o/r/issues',
+  'api --method=delete repos/o/r/issues/comments/1',
+  'api -XPOST repos/o/r/issues',
+  // Mutating verbs that were absent from the vocabulary.
+  'workflow run ci.yml',
+  'release upload v1 ./asset.zip',
   'api repos/o/r/issues -f title=x',
   'api graphql -f query=mutation{addComment}',
 ];
@@ -208,6 +215,18 @@ test('an EMPTY probe result fails closed — it is not proof of an installation 
     PATH: `${stubGh('', 1)}:${process.env.PATH}`,
   });
   assert.equal(status, 1, 'an unverifiable identity must not be accepted');
+  assert.match(out, /identity could not be established/);
+});
+
+test('a 401 is NOT read as an installation token — that is a rejected credential', () => {
+  // An installation token is authenticated but user-less: 403. A 401 means the
+  // credential was refused, which is what an expired/revoked HUMAN PAT returns.
+  const body = '{"message":"Bad credentials","status":"401"}';
+  const { status, out } = sh('gh_bot_init; _gh_bot_ensure', {
+    GH_TOKEN: 'expired_human_pat',
+    PATH: `${stubGh(body, 1)}:${process.env.PATH}`,
+  });
+  assert.equal(status, 1, '401 must not be accepted as an installation token');
   assert.match(out, /identity could not be established/);
 });
 

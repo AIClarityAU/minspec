@@ -141,7 +141,10 @@ _gh_bot_mint() {
 # Sourcing is safe and offline: it defines variables and functions, and shadows
 # nothing until gh_bot_init is called.
 GH_BOT_WRITE_NOUNS='issue|pr|label|release|workflow|repo|secret|variable|cache|run|ruleset'
-GH_BOT_WRITE_VERBS='create|comment|edit|merge|review|close|reopen|delete|ready|lock|unlock|set|rename|transfer|cancel|rerun|add|remove|clone|sync|archive|unarchive|restore'
+# `run` covers `gh workflow run`; `upload` covers `gh release upload`. Both are
+# genuinely mutating and were missing (#1401 review) — they are listed with the
+# rest rather than special-cased, so the guard picks them up for free.
+GH_BOT_WRITE_VERBS='create|comment|edit|merge|review|close|reopen|delete|ready|lock|unlock|set|rename|transfer|cancel|rerun|add|remove|clone|sync|archive|unarchive|restore|run|upload'
 # Mutating HTTP methods for `gh api -X`. BOTH cases, and shared for the same
 # reason as the lists above: the guard once matched only uppercase while the
 # runtime accepted either, so `gh api -X post` in a non-sourcing script passed
@@ -170,8 +173,16 @@ _gh_bot_is_write() {
       for ((i = 0; i < n; i++)); do
         case "${args[i]}" in
           graphql) is_graphql=1 ;;
+          # Three spellings, all valid to gh's flag parser and all previously
+          # missed except the first: `-X POST`, `--method=POST`, `-XPOST`. The
+          # equals/attached forms slipped past BOTH runtime and guard, so such a
+          # write shipped as the human (#1401 review).
           -X|--method)
             [[ "${args[i + 1]:-}" =~ ^($GH_BOT_WRITE_METHODS)$ ]] && return 0 ;;
+          --method=*|-X=*)
+            [[ "${args[i]#*=}" =~ ^($GH_BOT_WRITE_METHODS)$ ]] && return 0 ;;
+          -X?*)
+            [[ "${args[i]#-X}" =~ ^($GH_BOT_WRITE_METHODS)$ ]] && return 0 ;;
           --input) return 0 ;;
           -f|-F|--field|--raw-field) has_body=1 ;;
           *mutation*) has_mutation=1 ;;
@@ -233,8 +244,13 @@ _gh_bot_ensure() {
     if [[ -z "$login" ]]; then
       # No login in the answer. Only a recognisable "this token has no user"
       # rejection may be read as an installation token.
+      # 403 ONLY, never 401. An installation token is authenticated but has no
+      # user, which is a 403. A 401 means the credential itself was rejected —
+      # an expired or revoked HUMAN PAT returns exactly that, and reading it as
+      # "must be an installation token" is the same guess this block exists to
+      # stop making (#1401 security review).
       if (( rc != 0 )) && printf '%s' "$probe" \
-           | command grep -qiE 'not accessible by integration|"status"[[:space:]]*:[[:space:]]*"?40[13]|HTTP 40[13]'; then
+           | command grep -qiE 'not accessible by integration|"status"[[:space:]]*:[[:space:]]*"?403|HTTP 403'; then
         _GH_BOT_VERIFIED=1
         return 0                    # positively identified installation token
       fi
