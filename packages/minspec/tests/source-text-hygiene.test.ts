@@ -26,29 +26,54 @@ import { execFileSync } from 'node:child_process';
  *
  * Scope note: this asserts on TRACKED files only (`git ls-files`), so a build
  * artifact or a fixture in a temp dir can never fail it — only something someone
- * actually committed.
+ * actually committed. Within that set it covers everything except known-binary
+ * extensions (see {@link BINARY_EXTENSIONS}), including extensionless files.
  */
 
 /** Repo root, from this test file's location (tests/ → package → packages/ → root). */
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 
 /**
- * Tracked paths that must be readable as text. Deliberately NOT "every tracked
- * file": images, fonts and `.vsix` fixtures are legitimately binary. Extension-based
- * rather than directory-based so a new source directory is covered the day it appears.
+ * Extensions that are legitimately binary. Everything else tracked must be text.
+ *
+ * This is a DENY-list, not an allow-list, and the inversion is deliberate. An
+ * allow-list of source extensions was the first cut, and #1384's review caught the
+ * hole: an **extensionless** tracked file matches no source extension, so it would
+ * be skipped. That is not a hypothetical corner — 12 tracked files have no
+ * extension, and five of them are the git hooks
+ * (`.githooks/{commit-msg,pre-commit,pre-push}`, `.minspec/hooks/{commit-msg,pre-commit}`).
+ * Those are the most safety-critical text in the repo AND the exact files the
+ * drift-parity greps compare between `.githooks/` and `.minspec/hooks/`. An
+ * allow-list that skips them protects everything except the gates.
+ *
+ * Inverting also makes the failure mode the right one. A new binary asset type
+ * fails this test until its extension is added here — a deliberate, reviewed act —
+ * rather than silently widening the blind spot. That is the constitution's
+ * "no silent gate": fail closed and visibly, never best-effort.
  */
-const TEXT_SOURCE_EXTENSIONS = [
-  '.ts',
-  '.tsx',
-  '.js',
-  '.mjs',
-  '.cjs',
-  '.json',
-  '.md',
-  '.yml',
-  '.yaml',
-  '.sh',
-  '.py',
+const BINARY_EXTENSIONS = [
+  '.png',
+  '.jpg',
+  '.jpeg',
+  '.gif',
+  '.webp',
+  '.ico',
+  '.pdf',
+  '.woff',
+  '.woff2',
+  '.ttf',
+  '.otf',
+  '.eot',
+  '.zip',
+  '.gz',
+  '.tgz',
+  '.vsix',
+  '.mp4',
+  '.mov',
+  '.webm',
+  '.mp3',
+  '.wav',
+  '.wasm',
 ];
 
 function trackedFiles(): string[] {
@@ -66,7 +91,7 @@ describe('#1266 — a tracked source file must be text, never binary', () => {
     const offenders: string[] = [];
 
     for (const rel of trackedFiles()) {
-      if (!TEXT_SOURCE_EXTENSIONS.includes(path.extname(rel).toLowerCase())) continue;
+      if (BINARY_EXTENSIONS.includes(path.extname(rel).toLowerCase())) continue;
 
       const abs = path.join(REPO_ROOT, rel);
       let buf: Buffer;
@@ -107,5 +132,34 @@ describe('#1266 — a tracked source file must be text, never binary', () => {
 
     // And the escape still denotes NUL — the reason the separator is unambiguous.
     expect(`a\x00b`.charCodeAt(1)).toBe(0);
+  });
+
+  it('covers extensionless tracked files — the git hooks above all', () => {
+    // Pins the deny-list inversion. An allow-list of source extensions skips every
+    // extensionless file, which would exempt the five hook scripts — the most
+    // safety-critical text here, and the files the drift-parity greps compare
+    // between .githooks/ and .minspec/hooks/. A gate that protects everything
+    // except the gates is the wrong gate, so this fails if anyone flips it back.
+    const hooks = [
+      '.githooks/commit-msg',
+      '.githooks/pre-commit',
+      '.githooks/pre-push',
+      '.minspec/hooks/commit-msg',
+      '.minspec/hooks/pre-commit',
+    ];
+
+    const tracked = new Set(trackedFiles());
+    for (const hook of hooks) {
+      // Guard the premise: if a hook is renamed or dropped, say so rather than
+      // passing vacuously on a path that no longer exists.
+      expect(tracked.has(hook), `${hook} is no longer tracked — update this list`).toBe(true);
+
+      expect(
+        BINARY_EXTENSIONS.includes(path.extname(hook).toLowerCase()),
+        `${hook} must be inside the NUL check, not skipped as binary`,
+      ).toBe(false);
+
+      expect(fs.readFileSync(path.join(REPO_ROOT, hook)).indexOf(0)).toBe(-1);
+    }
   });
 });
