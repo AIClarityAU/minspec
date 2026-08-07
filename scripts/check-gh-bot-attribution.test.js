@@ -104,6 +104,15 @@ test('`gh api -X POST` is caught', () => {
   assert.equal(status, 1);
 });
 
+test('a LOWERCASE method is caught — guard and runtime must agree on case', () => {
+  // The guard matched only uppercase while _gh_bot_is_write accepted either, so
+  // this exact line passed CI and still wrote as the human (#1401 security review).
+  const { status, out } = runGuard({
+    'lower.sh': '#!/usr/bin/env bash\ngh api -X post "repos/o/r/issues" -d x\n',
+  });
+  assert.equal(status, 1, `lowercase -X post is a write; got:\n${out}`);
+});
+
 test('a graphql MUTATION is caught', () => {
   const { status, out } = runGuard({
     'gql.sh': '#!/usr/bin/env bash\ngh api graphql -f query="mutation { addComment(x:1) { id } }"\n',

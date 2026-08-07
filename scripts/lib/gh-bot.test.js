@@ -63,6 +63,10 @@ const WRITES = [
   'ruleset create x',            // runtime-only once; now shared with the guard
   'api -X POST repos/o/r/issues',
   'api -X DELETE repos/o/r/issues/comments/1',
+  // Lowercase too: the guard matched only uppercase once, so `-X post` passed CI
+  // while the runtime treated it as a write and attributed it to the human.
+  'api -X post repos/o/r/issues',
+  'api --method patch repos/o/r/issues/1',
   'api repos/o/r/issues -f title=x',
   'api graphql -f query=mutation{addComment}',
 ];
@@ -151,6 +155,107 @@ test('a failing minter surfaces its stderr, and does not fall back', () => {
   assert.match(out, /exit 3/);
   assert.match(out, /key is bad/, 'the minter\'s own diagnosis must reach the operator');
   assert.doesNotMatch(out, /TOKEN=/);
+});
+
+// ── 4. inherited tokens (the CI path) ────────────────────────────────────────
+// A fake `gh` on PATH stands in for the identity probe, so these run offline.
+
+/** Put a stub `gh` on PATH whose `api user` prints `login`. */
+function stubGh(loginOutput, exitCode = 0) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-bot-ghstub-'));
+  const p = path.join(dir, 'gh');
+  fs.writeFileSync(p, `#!/usr/bin/env bash\nprintf '%s' ${JSON.stringify(loginOutput)}\nexit ${exitCode}\n`);
+  fs.chmodSync(p, 0o755);
+  return dir;
+}
+
+test('an inherited token resolving to a BOT is accepted and left untouched', () => {
+  const { status, out } = sh('gh_bot_init; _gh_bot_ensure; echo "TOKEN=$GH_TOKEN"', {
+    GH_TOKEN: 'inherited_bot_token',
+    PATH: `${stubGh('minspec-sdd[bot]')}:${process.env.PATH}`,
+  });
+  assert.equal(status, 0, out);
+  assert.match(out, /TOKEN=inherited_bot_token/, 'a bot token must not be replaced');
+});
+
+test('an inherited INSTALLATION token (gh api user 403s) is accepted', () => {
+  // The real 403 prints an error BODY to stdout, which once got mistaken for a
+  // login and hard-failed CI. Reproduce that exact shape.
+  const body = '{"message":"Resource not accessible by integration","status":"403"}';
+  const { status, out } = sh('gh_bot_init; _gh_bot_ensure; echo "TOKEN=$GH_TOKEN"', {
+    GH_TOKEN: 'ghs_installation',
+    PATH: `${stubGh(body, 1)}:${process.env.PATH}`,
+  });
+  assert.equal(status, 0, `an error body is not a login; got:\n${out}`);
+  assert.match(out, /TOKEN=ghs_installation/);
+});
+
+test('an inherited HUMAN token is REJECTED, naming the login', () => {
+  const { status, out } = sh('gh_bot_init; _gh_bot_ensure', {
+    GH_TOKEN: 'human_pat',
+    PATH: `${stubGh('harvest316')}:${process.env.PATH}`,
+  });
+  assert.equal(status, 1, 'a human PAT in GH_TOKEN reintroduces the bug');
+  assert.match(out, /harvest316/, 'must name whose identity it refused');
+  assert.match(out, /not a bot identity/);
+});
+
+test('MINSPEC_GH_BOT_ALLOW_HUMAN=1 permits a human token, loudly', () => {
+  const { status, out } = sh('gh_bot_init; _gh_bot_ensure', {
+    GH_TOKEN: 'human_pat',
+    MINSPEC_GH_BOT_ALLOW_HUMAN: '1',
+    PATH: `${stubGh('harvest316')}:${process.env.PATH}`,
+  });
+  assert.equal(status, 0);
+  assert.match(out, /WARNING: writing as HUMAN 'harvest316'/,
+    'an override must be visible, never silent');
+});
+
+// ── 5. refresh ───────────────────────────────────────────────────────────────
+
+test('gh_bot_refresh re-mints once OUR token is older than the max age', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-bot-refresh-'));
+  const counter = path.join(dir, 'calls');
+  const minter = path.join(dir, 'minter.sh');
+  fs.writeFileSync(minter, `#!/usr/bin/env bash\necho x >> ${JSON.stringify(counter)}\necho ghs_refreshed\n`);
+  fs.chmodSync(minter, 0o755);
+  const { status, out } = sh(
+    // Age the token past the threshold by rewinding the mint timestamp.
+    'gh_bot_init; _gh_bot_ensure; _GH_BOT_MINTED_AT=$(( _GH_BOT_MINTED_AT - 99999 )); gh_bot_refresh; echo "TOKEN=$GH_TOKEN"',
+    { MINSPEC_GH_APP_TOKEN_SCRIPT: minter, MINSPEC_GH_BOT_MAX_AGE: '10' },
+  );
+  assert.equal(status, 0, out);
+  assert.match(out, /re-minting/, 'a re-mint must be visible in the log');
+  assert.equal(fs.readFileSync(counter, 'utf8').trim().split('\n').length, 2,
+    'expected exactly one initial mint plus one refresh');
+});
+
+test('gh_bot_refresh is a no-op while the token still has headroom', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-bot-fresh-'));
+  const counter = path.join(dir, 'calls');
+  const minter = path.join(dir, 'minter.sh');
+  fs.writeFileSync(minter, `#!/usr/bin/env bash\necho x >> ${JSON.stringify(counter)}\necho ghs_fresh\n`);
+  fs.chmodSync(minter, 0o755);
+  const { status } = sh('gh_bot_init; _gh_bot_ensure; gh_bot_refresh; gh_bot_refresh', {
+    MINSPEC_GH_APP_TOKEN_SCRIPT: minter,
+  });
+  assert.equal(status, 0);
+  assert.equal(fs.readFileSync(counter, 'utf8').trim().split('\n').length, 1,
+    'a fresh token must not be re-minted');
+});
+
+test('gh_bot_refresh never replaces an INHERITED token — it is not ours', () => {
+  const { status, out } = sh(
+    'gh_bot_init; _gh_bot_ensure; _GH_BOT_MINTED_AT=0; gh_bot_refresh; echo "TOKEN=$GH_TOKEN"',
+    {
+      GH_TOKEN: 'ci_supplied',
+      MINSPEC_GH_BOT_MAX_AGE: '1',
+      MINSPEC_GH_APP_TOKEN_SCRIPT: stubMinter('#!/usr/bin/env bash\necho ghs_should_not_be_used\n'),
+      PATH: `${stubGh('minspec-sdd[bot]')}:${process.env.PATH}`,
+    },
+  );
+  assert.equal(status, 0, out);
+  assert.match(out, /TOKEN=ci_supplied/, 'a workflow-supplied token must survive refresh');
 });
 
 test('minting happens at most once per process', () => {

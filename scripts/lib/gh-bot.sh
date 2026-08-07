@@ -142,6 +142,12 @@ _gh_bot_mint() {
 # nothing until gh_bot_init is called.
 GH_BOT_WRITE_NOUNS='issue|pr|label|release|workflow|repo|secret|variable|cache|run|ruleset'
 GH_BOT_WRITE_VERBS='create|comment|edit|merge|review|close|reopen|delete|ready|lock|unlock|set|rename|transfer|cancel|rerun|add|remove|clone|sync|archive|unarchive|restore'
+# Mutating HTTP methods for `gh api -X`. BOTH cases, and shared for the same
+# reason as the lists above: the guard once matched only uppercase while the
+# runtime accepted either, so `gh api -X post` in a non-sourcing script passed
+# CI and still wrote as the human. A second parity gap of exactly the kind
+# single-sourcing is meant to make impossible (#1401 security review).
+GH_BOT_WRITE_METHODS='POST|PATCH|PUT|DELETE|post|patch|put|delete'
 
 # ── Is this argv a WRITE? ─────────────────────────────────────────────────────
 # Conservative: anything uncertain counts as a write. A false "write" costs one
@@ -165,9 +171,7 @@ _gh_bot_is_write() {
         case "${args[i]}" in
           graphql) is_graphql=1 ;;
           -X|--method)
-            case "${args[i + 1]:-}" in
-              POST|PATCH|PUT|DELETE|post|patch|put|delete) return 0 ;;
-            esac ;;
+            [[ "${args[i + 1]:-}" =~ ^($GH_BOT_WRITE_METHODS)$ ]] && return 0 ;;
           --input) return 0 ;;
           -f|-F|--field|--raw-field) has_body=1 ;;
           *mutation*) has_mutation=1 ;;

@@ -83,7 +83,7 @@ allowlist_reason() {
 # shellcheck source=scripts/lib/gh-bot.sh
 source "${HERE}/lib/gh-bot.sh"
 
-WRITE_RE="(^|[^[:alnum:]_-])gh (${GH_BOT_WRITE_NOUNS}) (${GH_BOT_WRITE_VERBS})|gh api [^|]*((-X|--method) *(POST|PATCH|PUT|DELETE)|--input|-f |-F |--field|--raw-field)"
+WRITE_RE="(^|[^[:alnum:]_-])gh (${GH_BOT_WRITE_NOUNS}) (${GH_BOT_WRITE_VERBS})|gh api [^|]*((-X|--method) *(${GH_BOT_WRITE_METHODS})|--input|-f |-F |--field|--raw-field)"
 
 # `gh api graphql -f query=...` is how BOTH reads and writes are issued, so the
 # regex above over-matches it. Mirror the runtime rule (_gh_bot_is_write): a
