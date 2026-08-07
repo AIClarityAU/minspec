@@ -90,13 +90,27 @@ fi
 DONE=0; FAILED=0
 while IFS=$'\t' read -r NUM TITLE; do
   [[ "$MAX" -gt 0 && "$DONE" -ge "$MAX" ]] && { echo "Reached --max ${MAX}; stopping. Re-run to continue — selection is live, so completed issues drop out."; break; }
-  printf '[%d/%s] #%s %s\n' "$((DONE + 1))" "$COUNT" "$NUM" "$TITLE"
-  if bash "$TRIAGE" "$NUM" >/dev/null 2>&1; then
+  printf '[%d/%s] #%s %s\n' "$((DONE + FAILED + 1))" "$COUNT" "$NUM" "$TITLE"
+
+  # VERIFY THE OUTCOME, never the exit code. `triage_issue` returns 0 on its SOFT-failure
+  # paths — "triage agent failed … leaving in inbox" and "no verdict parsed … leaving in
+  # inbox" (triage-inbox.sh:124,141) — so a run that produced no record reports success.
+  # The first pass of this script trusted that, counted ~103 non-triaged issues as done,
+  # and printed [287/287] while 184 still had no record. A success signal that does not
+  # mean success is worse than an error, because it stops you looking.
+  ERR="$(mktemp)"
+  bash "$TRIAGE" "$NUM" >/dev/null 2>"$ERR" || true
+  AFTER="$(gh issue view "$NUM" --repo "$REPO" --json comments 2>/dev/null \
+            | "$GATE" --trusted-comment-bodies 2>/dev/null | "$GATE" --newest-record 2>/dev/null)"
+  if [[ -n "$AFTER" ]]; then
     DONE=$((DONE + 1))
   else
     FAILED=$((FAILED + 1))
-    echo "  WARNING: triage failed for #${NUM} — left untouched, will be re-selected next run." >&2
+    # Surface the reason rather than discarding it — the first pass sent this to
+    # /dev/null and destroyed the only evidence of why 103 issues silently did nothing.
+    echo "  NOT RECORDED #${NUM}: $(tr '\n' ' ' < "$ERR" | tail -c 200)" >&2
   fi
+  rm -f "$ERR"
 done < "$TARGETS"
 
 echo
