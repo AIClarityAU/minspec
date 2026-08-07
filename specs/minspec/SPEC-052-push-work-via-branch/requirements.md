@@ -8,8 +8,8 @@ epic: EPIC-009  # Team Readiness — docs-lane push ergonomics; grain (c), the n
 aspects: [pull-request, consent, tier-1, hitl, g8-git-transparency, worktree, session-coordination]
 relates_to: [SPEC-039, SPEC-026, SPEC-050, DR-051, DR-065]
 phases:
-  specify: pending
-  clarify: pending
+  specify: done
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -150,22 +150,84 @@ normal PR rather than by auto-merge.
   worktrees root.
 - **AC-7** An all-docs selection surfaces the FR-10 redirect and does not open a
   PR unless the user declines the redirect.
+- **AC-8** Invoking twice in one session presents an all-deselected picker the
+  second time (OQ-2): a path deselected in run 1 is not pre-ticked in run 2.
+- **AC-9** With no SPEC-026 presence data available, the picker still renders and
+  highlights `origin/main` differences, and no label asserts session ownership
+  (OQ-3's degraded mode is a supported state, not a failure).
+- **AC-10** Invoked from a non-default branch, the confirmation names that fact
+  (FR-11) and the command still completes on confirm.
 
-## Open Questions
+## Resolved Questions (Clarify, 2026-08-07)
 
-- **OQ-1** Should the command refuse outright when the primary checkout is *not*
-  on the default branch — where the user could simply commit — or stay available
-  as a way to peel a subset of work onto a fresh branch? Leaning available: the
-  peel-a-subset case is real and the guard rails are the same.
-- **OQ-2** Should the selection persist across invocations within a session, so an
-  interrupted run can be resumed without re-picking? Persisting a file list is
-  cheap; persisting it wrongly re-bundles work the user deselected on purpose.
-- **OQ-3** Does FR-4's "claimed by another session" check require SPEC-026's
-  presence records to be implemented first, or can the default selection ship
-  without it and gain the filter later?
-- **OQ-4** Does this warrant a DR? It is additive and reversible in well under a
-  day, which says no — but it establishes a second sanctioned route for moving
-  work off a shared checkout, and DR-065 governs the first. Clarify decides.
+- **OQ-1 — off-default-branch: stay available. RESOLVED.** The peel-a-subset case
+  is real (you are on a feature branch and want to split unrelated work out), and
+  every guard rail is identical there: explicit selection, worktree isolation,
+  primary untouched. Refusing would make availability depend on repo state the
+  user has to reason about before invoking, and the cost of allowing it is one
+  extra branch and PR — benign and self-evident. **FR-11 added:** when HEAD is not
+  the default branch, the FR-5 confirmation says so, since a user who could simply
+  commit should be told that is the cheaper route before consenting to a PR.
+
+- **OQ-2 — do not persist the selection. RESOLVED.** The costs are asymmetric.
+  Re-ticking a few boxes after an interruption is small and bounded; silently
+  re-applying a remembered selection re-includes work the user deliberately
+  excluded — the exact failure FR-3 exists to prevent — and does it without the
+  user re-reading the list. A deselection is a deliberate act about *someone
+  else's* work, so it must not survive as invisible state. What may persist is the
+  picker's ordering and FR-4 highlighting, which are free and carry no decision.
+
+- **OQ-3 — ship FR-4 without SPEC-026's presence records. RESOLVED.** FR-4 only
+  *highlights*; FR-3 alone governs what travels, so the filter's absence cannot
+  produce a wrong commit — only a less helpful picker. Blocking a self-contained
+  command on an unrelated multi-session feature would be a dependency bought for
+  nothing. **FR-4 restated below** to make the degraded mode explicit rather than
+  implied: with no presence records, highlight means "differs from `origin/main`",
+  and the command must never imply it knows more than that.
+
+- **OQ-4 — yes, a short DR, written at Plan. RESOLVED.** Not for the command,
+  which is additive and reversible well inside a day, but for the *precedent*:
+  this establishes a **second** sanctioned route for moving work off a shared
+  checkout, and DR-065 governs the first. Without a record of where the boundary
+  sits, the next reader of DR-065 concludes presence-gated fast-forward is the
+  only sanctioned mechanism, and then either duplicates it or contradicts it. The
+  DR's subject is that boundary, not this command's design — so it belongs at
+  Plan, once the mechanism is settled. Tracked as a follow-up below.
+
+## Clarified Requirements
+
+These supersede the same-numbered items above.
+
+- **FR-1 (keybinding narrowed).** `Ctrl+K Ctrl+B` / `Cmd+K Cmd+B` is free of any
+  MinSpec-contributed binding — the extension contributes exactly three
+  (`alt+a` approveActive, `alt+n` nextTask, `ctrl+k ctrl+p` pushDocsLane), verified
+  in `packages/minspec/package.json`. It sits deliberately beside `Ctrl+K Ctrl+P`,
+  so the two lane commands share a prefix. **Not** verified against VS Code's own
+  defaults or another extension's bindings, which needs a running editor —
+  Plan must check *Preferences: Open Keyboard Shortcuts* for a conflict and, if
+  found, fall back to `Ctrl+K Ctrl+W` (work) before implementation.
+
+- **FR-4 (degraded mode made explicit).** Pre-highlight paths that differ from
+  `origin/main`. When SPEC-026 presence records are available, additionally
+  de-highlight paths another session has claimed. Neither signal ever ticks a box.
+  Where presence data is absent the picker must not imply it knows who owns what —
+  no "yours"/"theirs" labelling, only the plain `origin/main` difference.
+
+- **FR-11 (new).** When HEAD is not the repo's default branch, the FR-5
+  confirmation states that plainly and notes that committing directly is available
+  — the command still proceeds if the user confirms. Informative, never a refusal.
+
+## Follow-ups (tracked)
+
+- **#1316** — this spec's tracking issue.
+- **#809** — sweeps stranded *committed* work on primary main. Complementary, not
+  overlapping: that issue is about commits that already exist and cannot push,
+  this spec is about work that was never committable in the first place. Neither
+  subsumes the other, and both should land before the shared-checkout story is
+  whole.
+- **#1370** — the OQ-4 decision record, to be written at Plan: the boundary
+  between this command and DR-065's presence-gated fast-forward. Filed rather than
+  left as prose so the obligation is materialized (DR-023 forward rule).
 
 ## Follow-ups (tracked)
 
