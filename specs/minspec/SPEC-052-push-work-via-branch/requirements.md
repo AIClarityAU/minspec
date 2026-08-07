@@ -1,6 +1,15 @@
 ---
 id: SPEC-052
+type: requirements
 title: "Push work via branch" — land non-docs changes from a dirty primary checkout
+# `status`/`phases` are tool-written lifecycle mirrors (canonical.ts strips them from the
+# hash); once "MinSpec: Approve Spec" has run, never hand-write either.
+#
+# `specifying` alongside `clarify: done` is CORRECT, not drift: deriveStatus returns
+# 'specifying' for ANY unapproved spec regardless of how far its phases have advanced
+# (lifecycle.ts:115, INV-1 — "unapproved cannot pass"). It becomes 'planning' only once an
+# approval sidecar exists. An ai-review pass on PR #1318 read the pair as a misleading
+# signpost; it is the derived value. Left here so the next reader does not re-flag it.
 status: specifying
 tier: T3
 product: minspec
@@ -228,13 +237,3 @@ These supersede the same-numbered items above.
 - **#1370** — the OQ-4 decision record, to be written at Plan: the boundary
   between this command and DR-065's presence-gated fast-forward. Filed rather than
   left as prose so the obligation is materialized (DR-023 forward rule).
-
-## Follow-ups (tracked)
-
-- **#1316** — this spec's tracking issue, which carries OQ-1..OQ-4 for the Clarify
-  phase to resolve.
-- **#809** — sweeps stranded *committed* work on primary main. Complementary, not
-  overlapping: that issue is about commits that already exist and cannot push,
-  this spec is about work that was never committable in the first place. Neither
-  subsumes the other, and both should land before the shared-checkout story is
-  whole.
