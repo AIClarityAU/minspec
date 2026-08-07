@@ -629,7 +629,7 @@ Two accepted decisions pull in opposite directions, and SPEC-050 FR-8 sits exact
 
 ## [DR-080 — Approval recovery is owned by the refusal that triggers it, not by SPEC-050 — the two axes are complementary, and the duplicated push logic is a dated loan against SPEC-050's seam](DR-080.md)
 
-*Status: proposed · Date: 2026-08-06*
+*Status: accepted · Date: 2026-08-06*
 
 <!-- dr-summary:DR-080 auto=3485bfc12c76 -->
 commitApproval refuses to commit an approval when HEAD is the push-protected default branch (#1064); such a commit could never be pushed, and the #1041 pre-commit hook rejects it. **That refusal is correct and stays.** What was missing is what happens next.
