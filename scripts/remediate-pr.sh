@@ -66,6 +66,12 @@ REPO="AIClarityAU/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # shellcheck source=scripts/lib/agent-context.sh
 source "${SCRIPT_DIR}/lib/agent-context.sh"
+# Agent writes carry the BOT's identity, never the human's (#1355). This arms a
+# `gh` wrapper; acquiring the token is LAZY, so reads pass through untouched and
+# only the first WRITE mints — aborting there, loudly, if it cannot.
+# shellcheck source=scripts/lib/gh-bot.sh
+source "${SCRIPT_DIR}/lib/gh-bot.sh"
+gh_bot_init
 
 WORKTREE_BASE="/tmp/minspec-remediate"
 DRY_RUN=false
