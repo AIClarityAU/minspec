@@ -173,7 +173,7 @@ DR-009 validated the tier classifier against SWE-bench-Verified via out-of-tree 
 
 ## [DR-022 — Ceremony = risk-response — a blast-radius (consequence) profile, screen-gated, replaces diff-size tier as the unit](DR-022.md)
 
-*Status: accepted · Date: 2026-06-01*
+*Status: superseded · Date: 2026-06-01*
 
 <!-- dr-summary:DR-022 auto=12b5e81fd1b0 -->
 "Just Enough Spec" tiers ceremony (T1–T4) by **diff size** — git-analyzer.ts feeds classify() (max tierContribution across signals); the per-tier phase set lives in .minspec/config.json. Two findings forced a rethink this session: 1. **"Just Enough Spec" conflated two dials** — *consideration* (how thoroughly a change is thought through) and *ceremony* (how much the human must read/approve). Tiering tied them because the historical cost was *human authoring*. The LLM authors now: consideration should be thorough on *every* change (nearly free); ceremony should…

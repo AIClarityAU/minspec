@@ -26,7 +26,7 @@ import {
   type ReferenceRegistry,
 } from '../packages/minspec/src/lib/reference-checker';
 import { listOrphanedRecords } from '../packages/minspec/src/lib/approval-store';
-import { checkStatusParity, inspectStatusLine } from '../packages/minspec/src/lib/status-parity';
+import { checkStatusParity, inspectStatusLine, inspectAllStatusClaims } from '../packages/minspec/src/lib/status-parity';
 import { checkManagedRegionMarkers } from '../packages/minspec/src/lib/scaffold';
 import { checkDeclaredDrIds } from './lib/dr-id-collision';
 import { SELF_HOSTED_TEMPLATE_NAMES } from '../packages/minspec/src/lib/template-registry';
@@ -440,6 +440,24 @@ try {
         `status parity (#626) — frontmatter \`status: ${finding.frontmatter}\` disagrees with the body status line "${finding.body}" (line ${finding.line}). Reconcile the two: advance/correct whichever is stale. A file showing two different statuses is a false signpost.`,
       );
     }
+
+    // #1223: compare EVERY status claim, not just the one `checkStatusParity` picks.
+    // A DR can carry a `## Status` section AND a head blockquote, and they can disagree —
+    // DR-022 had frontmatter `accepted`, section `accepted`, blockquote `proposed`, so the
+    // singular check compared the two that agreed and never saw the third.
+    const fmToken = (fm.status ?? '').trim().split(/\s+/)[0]?.replace(/#.*$/, '').toLowerCase();
+    if (fmToken) {
+      for (const claim of inspectAllStatusClaims(content, kind)) {
+        if (claim.kind !== 'comparable') continue;
+        if (claim.token === fmToken) continue;
+        if (finding && finding.line === claim.line) continue; // already reported above
+        fail(
+          relative(ROOT, file),
+          `status parity (#1223) — frontmatter \`status: ${fmToken}\` disagrees with a SECOND status claim "${claim.token}" (line ${claim.line}). A document asserting its status in two places must say the same thing in both; whichever is stale, reconcile it.`,
+        );
+      }
+    }
+
     const shape = inspectStatusLine(content, kind);
     if (shape.kind === 'unparseable') {
       unreadable.push(`${relative(ROOT, file)}:${shape.line} "${shape.text}"`);
