@@ -517,6 +517,32 @@ function manualPrSurface(result: PushApprovalResult, reason?: string): string {
   return ` · pushed on ${result.branch} (open a PR${because})`;
 }
 
+/**
+ * Announce an opened approval PR — and, when it went out WITHOUT the `docs-lane`
+ * label, say so in the notification itself (AC-11).
+ *
+ * The status suffix already carries `laneNote`, but the suffix is not the surface a
+ * developer reads: the toast is. An unlabelled PR never reaches the lane
+ * (`docs-lane.yml:30` gates on the label), so it will sit open with no auto-merge
+ * until someone merges it by hand. A toast that says only "approval PR opened" is
+ * therefore **silence indistinguishable from success** — the stranding class this
+ * spec exists to end, re-entered at the last step.
+ *
+ * So the unlabelled case is a WARNING naming the consequence and the reason, not an
+ * info toast. Labelled — the happy path — is unchanged: informational, no action, so
+ * FR-3's "no click completes the operation" still holds on both branches.
+ */
+async function notifyPrOpened(message: string, labels: readonly string[]): Promise<void> {
+  if (labels.length > 0) {
+    await vscode.window.showInformationMessage(message);
+    return;
+  }
+  await vscode.window.showWarningMessage(
+    `${message} — but NOT labelled for the docs-lane, because it is not docs-only. ` +
+      `Auto-merge will not run; this PR needs a human merge.`,
+  );
+}
+
 /** Short, fixed reason per failed {@link openPullRequest} outcome (FR-5). */
 const PR_FAILURE_REASON: Record<string, string> = {
   'gh-absent': 'the gh CLI is not installed',
@@ -657,10 +683,10 @@ async function openApprovalPr(
 
     switch (pr.outcome) {
       case 'created':
-        void vscode.window.showInformationMessage(`MinSpec: approval PR opened — ${pr.url}`);
+        void notifyPrOpened(`MinSpec: approval PR opened — ${pr.url}`, labels);
         return { suffix: ` · pushed on ${result.branch} · PR opened${laneNote} (${pr.url})`, pr };
       case 'adopted':
-        void vscode.window.showInformationMessage(`MinSpec: approval PR already open — ${pr.url}`);
+        void notifyPrOpened(`MinSpec: approval PR already open — ${pr.url}`, labels);
         return {
           suffix: ` · pushed on ${result.branch} · PR already open (${pr.url})`,
           pr,

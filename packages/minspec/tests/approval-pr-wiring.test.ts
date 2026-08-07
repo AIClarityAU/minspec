@@ -416,6 +416,48 @@ describe('pushed-branch → approval PR (AC-1, AC-2)', () => {
     expect(flag(prCreateCalls()[0], '--body')).toContain('NOT labelled for the docs-lane');
   });
 
+  it('AC-11: an unlabelled PR says so in the NOTIFICATION, not just the suffix', async () => {
+    // The suffix is asserted above, but the suffix is not the surface a developer
+    // reads — the toast is. Without the label the lane never runs
+    // (docs-lane.yml:30), so the PR sits open needing a human merge. A toast that
+    // says only "approval PR opened" is silence indistinguishable from success,
+    // which is the stranding class this spec exists to end.
+    installRunner({
+      'git diff --name-only -z': `${SPEC_REL}\0packages/minspec/src/commands/commit-on-approve.ts\0`,
+    });
+    await pushApprovalIfEnabled(tmp, 'spec-050', {
+      subject: SUBJECT,
+      paths: [SPEC_REL, 'packages/minspec/src/commands/commit-on-approve.ts'],
+    });
+    await flush();
+
+    // Structural, per AC-11: an unlabelled outcome can never produce the plain
+    // success surface. Asserted as "no info toast at all", so a future edit cannot
+    // satisfy this by ALSO showing the silent one.
+    expect(H.info).toHaveLength(0);
+    expect(H.warn).toHaveLength(1);
+    const shown = H.warn[0].message;
+    expect(shown).toContain('NOT labelled for the docs-lane');
+    expect(shown).toContain('Auto-merge will not run');
+    // FR-3 still holds on this branch: informing is not the same as demanding a
+    // click, so the warning carries no action that completes the operation.
+    expect(H.warn[0].actions).toHaveLength(0);
+  });
+
+  it('AC-11 converse: a LABELLED PR gets the quiet info toast, with no scary warning', async () => {
+    // Guards the other direction — if the unlabelled warning leaked onto the happy
+    // path, every ordinary approval would cry wolf and the signal would be worth
+    // nothing. The happy path must stay informational.
+    installRunner({ 'git diff --name-only -z': `${SPEC_REL}\0` });
+    await pushApprovalIfEnabled(tmp, 'spec-050', { subject: SUBJECT, paths: DOCS_PATHS });
+    await flush();
+
+    expect(H.warn).toHaveLength(0);
+    expect(H.info).toHaveLength(1);
+    expect(H.info[0].message).toContain('approval PR opened');
+    expect(H.info[0].message).not.toContain('Auto-merge will not run');
+  });
+
   it('INV-2 (#1224): a docs-only COMMIT on a branch that also changed code is NOT labelled', async () => {
     // The defect this closes. The approval commit touches only docs, so the old
     // code (which labelled from ctx.paths) said docs-lane — while the branch, cut
