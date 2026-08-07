@@ -13,6 +13,13 @@ title: "Push work via branch" — land non-docs changes from a dirty primary che
 status: planning
 tier: T3
 product: minspec
+implements: [packages/minspec/src/commands/push-work-branch.ts, packages/minspec/tests/push-work-branch.test.ts]
+# ownership (SPEC-038). Both paths are NET-NEW — no `push-work-branch.*` exists today.
+# FR-1 names the command `minspec.pushWorkBranch`, and this repo files one command per
+# module under `src/commands/`, so the sibling of the existing `push-docs-lane.ts` (the
+# grain-(a) docs lane this spec is the non-docs counterpart to) is `push-work-branch.ts`.
+# NOT listed: `push-docs-lane.ts`, which this spec neither owns nor edits — FR-10 only
+# POINTS AT the docs lane when every selected path is inside the docs corpus.
 epic: EPIC-009  # Team Readiness — docs-lane push ergonomics; grain (c), the non-docs sibling of SPEC-039's grain (a)
 aspects: [pull-request, consent, tier-1, hitl, g8-git-transparency, worktree, session-coordination]
 relates_to: [SPEC-039, SPEC-026, SPEC-050, DR-051, DR-065]

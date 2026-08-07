@@ -36,6 +36,11 @@ import { execFileSync } from 'child_process';
 
 import { MANAGED_REGION_TEMPLATES, MINSPEC_HOOKS_DIR, renderManagedFile } from '../src/lib/template-registry';
 import { commitApproval, defaultGitRun } from '../src/lib/approve-commit';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #1285: spawns real child processes per assertion — 5s default is a load metric,
+// not a hang signal. Enforced by shell-timeout-coverage.test.ts.
+useShellTimeout();
 
 const PRE_COMMIT = `${MINSPEC_HOOKS_DIR}/pre-commit`;
 const hookText = () => renderManagedFile(MANAGED_REGION_TEMPLATES.find((t) => t.outputPath === PRE_COMMIT)!);

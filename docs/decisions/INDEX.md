@@ -173,7 +173,7 @@ DR-009 validated the tier classifier against SWE-bench-Verified via out-of-tree 
 
 ## [DR-022 — Ceremony = risk-response — a blast-radius (consequence) profile, screen-gated, replaces diff-size tier as the unit](DR-022.md)
 
-*Status: accepted · Date: 2026-06-01*
+*Status: superseded · Date: 2026-06-01*
 
 <!-- dr-summary:DR-022 auto=12b5e81fd1b0 -->
 "Just Enough Spec" tiers ceremony (T1–T4) by **diff size** — git-analyzer.ts feeds classify() (max tierContribution across signals); the per-tier phase set lives in .minspec/config.json. Two findings forced a rethink this session: 1. **"Just Enough Spec" conflated two dials** — *consideration* (how thoroughly a change is thought through) and *ceremony* (how much the human must read/approve). Tiering tied them because the historical cost was *human authoring*. The LLM authors now: consideration should be thorough on *every* change (nearly free); ceremony should…
@@ -637,7 +637,7 @@ commitApproval refuses to commit an approval when HEAD is the push-protected def
 
 ## [DR-081 — What ceremony a solo approval carries - SPEC-050 is carved out of DR-076's docs-lane park, and an approval-record PR self-exempts from ai-review behind a deterministic integrity check](DR-081.md)
 
-*Status: proposed · Date: 2026-08-07*
+*Status: accepted · Date: 2026-08-07*
 
 <!-- dr-summary:DR-081 auto=33d8e35e60a7 -->
 Two cuts to ceremony that only ever made sense for a team, with nothing machine-checkable removed. **SPEC-050 is carved out of DR-076's docs-lane park** - it was swept in by a filing error (`epic: EPIC-009`, whose own membership test it fails), not by a decision about solo approval landing. And **an approval-record PR self-exempts from `ai-review`**, returning `neutral` like a machinery PR, because its payload is a generated sidecar plus a `status:` flip with nothing to review; a deterministic `approval-integrity` check takes its place so the PR goes green honestly instead of needing `--admin` every time. The exemption covers the record, never the approvable - DR-047's substance gate is untouched.

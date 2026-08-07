@@ -1,5 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+/**
+ * Backing store for the mocked project-local preferences (#1319). Hoisted so the
+ * `vi.mock` factory below can close over it. Reset in `beforeEach` — it is a
+ * plain object, so `vi.clearAllMocks()` does not touch it.
+ */
+const { prefsState } = vi.hoisted(() => ({
+  prefsState: {} as Record<string, unknown>,
+}));
+
 // ─── Mock vscode ───────────────────────────────────────────────────────────
 
 vi.mock('vscode', () => ({
@@ -26,6 +35,23 @@ vi.mock('vscode', () => ({
 
 // ─── Mock lib deps ─────────────────────────────────────────────────────────
 
+/**
+ * The project-local preference store (#1319). Mocked so these tests never write
+ * a real `.minspec/preferences.json` under the fake FOLDER — a stray file there
+ * would leak the "Always" opt-in into later tests and later runs. Stateful, so a
+ * test that persists the opt-in sees it honoured on a subsequent read.
+ */
+vi.mock('../src/lib/preferences', () => ({
+  loadPreferences: vi.fn(() => prefsState),
+  savePreferences: vi.fn((_root: string, update: Record<string, unknown>) => {
+    Object.assign(prefsState, update);
+  }),
+  preferencesPath: vi.fn((root: string) => `${root}/.minspec/preferences.json`),
+  resolveProjectPreference: vi.fn((projectValue: unknown, settingValue: unknown) =>
+    projectValue !== undefined ? projectValue : settingValue,
+  ),
+}));
+
 vi.mock('../src/lib/epic-backfill', () => ({
   proposeHeuristic: vi.fn(),
   proposeAI: vi.fn(),
@@ -50,6 +76,7 @@ import {
   renderProposalMarkdown,
   type BackfillProposal,
 } from '../src/lib/epic-backfill';
+import { savePreferences } from '../src/lib/preferences';
 import { resolveTargetFolder } from '../src/lib/resolve-folder';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -81,6 +108,9 @@ const HEURISTIC_PROPOSAL = makeProposal(2, 3);
 describe('backfillEpicsCommand()', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Plain object — untouched by clearAllMocks. Without this the "Always" test
+    // leaks its persisted opt-in into every later test in the file (#1319).
+    for (const k of Object.keys(prefsState)) delete prefsState[k];
     // Sensible defaults — individual tests override as needed
     vi.mocked(resolveTargetFolder).mockResolvedValue(FOLDER);
     vi.mocked(proposeHeuristic).mockReturnValue(HEURISTIC_PROPOSAL);
@@ -412,12 +442,13 @@ describe('backfillEpicsCommand()', () => {
 
     await backfillEpicsCommand(FOLDER);
 
-    // Written globally — a personal preference, not project policy (#213).
-    expect(update).toHaveBeenCalledWith(
-      'autoBackfillUseAi',
-      true,
-      vscode.ConfigurationTarget.Global,
-    );
+    // #1319 / DR-078 §1: persisted to `.minspec/preferences.json`, scoped to
+    // THIS project. It used to write ConfigurationTarget.Global, which silently
+    // enabled an AI/network path in every other MinSpec project on the machine
+    // — projects that may have been chosen for the offline Tier-0 posture.
+    expect(savePreferences).toHaveBeenCalledWith(FOLDER, { autoBackfillUseAi: true });
+    // The machine-wide surface must be left completely untouched.
+    expect(update).not.toHaveBeenCalled();
     expect(proposeAI).toHaveBeenCalledWith(FOLDER);
   });
 

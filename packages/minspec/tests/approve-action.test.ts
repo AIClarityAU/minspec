@@ -19,11 +19,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // approveSpecCommand (approverEmail / commitOnApprove / advancePhaseOnApprove)
 // picks it up — unlike per-call `mockReturnValueOnce` chaining, which is
 // brittle to call-order changes in approve.ts.
-const { configState, configUpdate } = vi.hoisted(() => ({
+const { configState, configUpdate, prefsState } = vi.hoisted(() => ({
   configState: {
     commitOnApprove: false as unknown,
     advancePhaseOnApprove: false as unknown,
   },
+  /**
+   * Backing store for the mocked project-local preferences (#1319). Separate
+   * from `configState` on purpose: the whole point of DR-078 is that these are
+   * two DIFFERENT stores with a defined precedence, so a test must be able to
+   * set one without the other.
+   */
+  prefsState: {} as Record<string, unknown>,
   configUpdate: vi.fn((key: string, value: unknown) => {
     (configState as Record<string, unknown>)[key] = value;
     return Promise.resolve();
@@ -62,6 +69,27 @@ vi.mock('vscode', () => ({
 // The DR-057 §3 follow-up toast enqueues via this lib — mocked so these
 // command-level tests never touch real disk (the lib gets its own unit
 // coverage in phase-advance-queue.test.ts).
+/**
+ * The project-local preference store (#1319). MUST be mocked: these tests run
+ * against the shared fake root `/tmp/ws`, and the real `savePreferences` would
+ * write `/tmp/ws/.minspec/preferences.json` for real — a file that then leaks
+ * into every other test file using that same root, and across runs. Stateful,
+ * like `configState` above, so a test that persists "Always" sees it honoured.
+ */
+vi.mock('../src/lib/preferences', () => ({
+  loadPreferences: vi.fn(() => prefsState),
+  savePreferences: vi.fn((_root: string, update: Record<string, unknown>) => {
+    Object.assign(prefsState, update);
+  }),
+  preferencesPath: vi.fn((root: string) => `${root}/.minspec/preferences.json`),
+  // The real resolution rule (DR-078 §4) — project value wins whenever it is
+  // defined, including `false`. Kept faithful rather than stubbed, so these
+  // tests exercise the same precedence production does.
+  resolveProjectPreference: vi.fn((projectValue: unknown, settingValue: unknown) =>
+    projectValue !== undefined ? projectValue : settingValue,
+  ),
+}));
+
 vi.mock('../src/lib/phase-advance-queue', () => ({
   enqueuePhaseAdvance: vi.fn(),
 }));
@@ -132,6 +160,7 @@ import { readSpecFile, advanceSpecToImplementing } from '../src/lib/spec';
 import { validateSpec, violationsIntroducedByApproval } from '../src/lib/spec-validator';
 import { readShardIdFiles } from '../src/lib/spec-layout';
 import { enqueuePhaseAdvance } from '../src/lib/phase-advance-queue';
+import { savePreferences } from '../src/lib/preferences';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -225,6 +254,10 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
     // touch it — it's a plain object, not mock call/implementation state).
     configState.commitOnApprove = false;
     configState.advancePhaseOnApprove = false;
+    // Same reason as configState: a plain object, untouched by clearAllMocks.
+    // Without this the "Always" test leaks its persisted pref into every later
+    // test in the file (#1319).
+    for (const k of Object.keys(prefsState)) delete prefsState[k];
   });
 
   // ── no specs in workspace ────────────────────────────────────────────────
@@ -607,7 +640,7 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
       expect(enqueuePhaseAdvance).not.toHaveBeenCalled();
     });
 
-    it('"Always" persists the global pref AND enqueues immediately', async () => {
+    it('"Always" persists the PROJECT-LOCAL pref AND enqueues immediately', async () => {
       pickFirst();
       vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec() as never);
       vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
@@ -615,13 +648,15 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
 
       await approveSpecCommand(undefined);
 
-      // Written globally — a personal preference, not project policy (mirrors
-      // minspec.autoBackfillUseAi / backfill-epics.ts).
-      expect(configUpdate).toHaveBeenCalledWith(
-        'advancePhaseOnApprove',
-        true,
-        vscode.ConfigurationTarget.Global,
-      );
+      // #1319 / DR-078 §1: written to `.minspec/preferences.json`, scoped to
+      // THIS project. It used to go to ConfigurationTarget.Global, which
+      // constitution invariant 3 forbids — every other MinSpec project on the
+      // machine inherited it without opting in.
+      expect(savePreferences).toHaveBeenCalledWith('/tmp/ws', {
+        advancePhaseOnApprove: true,
+      });
+      // The machine-wide surface must be left completely untouched.
+      expect(configUpdate).not.toHaveBeenCalled();
       expect(enqueuePhaseAdvance).toHaveBeenCalledWith(
         '/tmp/ws',
         '/tmp/ws/specs/minspec/SPEC-001/spec.md',

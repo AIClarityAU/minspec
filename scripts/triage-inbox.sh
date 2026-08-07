@@ -177,13 +177,33 @@ CONTENT
       2>/dev/null || true
   fi
 
+  # #1002 — the HOLD REASON as a label, so the backlog is machine-addressable.
+  # `triage-decide.sh` computes WHY an issue is not fully auto-buildable and, until now,
+  # that reason survived only inside the verdict record. `needs-review` was byte-identical
+  # whether the bounce was a human-only content class, T3/T4 ceremony, missing information,
+  # or the fail-closed default — so "how many are held purely on tier?" could not be
+  # answered without re-running an LLM over the corpus.
+  #
+  # `none` gets NO label: it is the absence of a hold, and a `hold:none` sticker on every
+  # dispatchable issue would be noise on the one class nobody needs to filter for.
+  #
+  # Created idempotently for the same reason as above — an unknown label name fails the
+  # whole `--add-label` request under `set -euo pipefail`, which would abort the drain.
+  local HOLD_LABEL=""
+  if [[ -n "$HOLD" && "$HOLD" != "none" ]]; then
+    HOLD_LABEL="hold:${HOLD}"
+    gh label create "$HOLD_LABEL" --repo "$REPO" --color cfd3d7 \
+      --description "Held — reason recorded by triage (#1002)" 2>/dev/null || true
+  fi
+
   # RECORD FIRST, labels second — so `agent-ready` never exists, even momentarily,
   # without the verdict that authorises it.
   gh issue comment "$ISSUE" --repo "$REPO" \
     --body "$(printf '**Triage:** `%s` · role:`%s` · tier:`%s` · hold:`%s`\n%s\n\n%s\n\n— auto-triaged (`triage-inbox.sh`); verdict enforced by the deterministic gate (`triage-decide.sh`). The block above is the machine-readable verdict record that `dispatch-ready-check.sh` requires before any dispatch (#983). It is keyed to the issue body as triaged — edit the issue and this verdict goes stale, so re-run `scripts/triage-inbox.sh %s`.' \
         "$LABEL" "$ROLE" "$TIER" "$HOLD" "$RATIONALE" "$RECORD" "$ISSUE")" >/dev/null
 
-  gh issue edit "$ISSUE" --repo "$REPO" --add-label "role:${ROLE},${LABEL}" >/dev/null
+  gh issue edit "$ISSUE" --repo "$REPO" \
+    --add-label "role:${ROLE},${LABEL}${HOLD_LABEL:+,${HOLD_LABEL}}" >/dev/null
 
   # Clear the outcome labels this verdict SUPERSEDES. Load-bearing for the
   # agent-ready branch: dispatch labels a held issue `needs-human-review`, which
@@ -202,6 +222,28 @@ CONTENT
     needs-info)           SUPERSEDED="inbox,agent-ready,agent-ready-specify,needs-review" ;;
     *)                    SUPERSEDED="inbox" ;;
   esac
+
+  # A re-triage that changes the hold must not leave the OLD hold:* label behind: two
+  # contradicting reasons on one issue is worse than none, and this label exists to be
+  # queried. Every hold:* except the one just applied is superseded, including when the
+  # new verdict is `none` (HOLD_LABEL empty) — an issue that became dispatchable must
+  # stop claiming it is held.
+  #
+  # ONLY the ones this issue ACTUALLY HAS. `hold:*` labels are created lazily (just the
+  # current one, above), so most do not exist repo-wide — and naming a nonexistent label
+  # makes `gh` reject the WHOLE remove request, which then falls into the retry below and
+  # reports "could not clear superseded label(s)". That warning is load-bearing: it means
+  # a human-gate label may be countermanding a valid verdict. Firing it routinely, for
+  # labels that were never there, trains the reader to ignore the one time it is real.
+  # (`backfill-hold-labels.sh` already guards this way; this is the same check.)
+  local h CURRENT_LABELS
+  CURRENT_LABELS=$(echo "$ISSUE_JSON" | jq -r '[.labels[].name] | join(",")')
+  for h in human tier specify info unknown; do
+    [[ "hold:${h}" == "$HOLD_LABEL" ]] && continue
+    [[ ",${CURRENT_LABELS}," == *",hold:${h},"* ]] || continue
+    SUPERSEDED="${SUPERSEDED},hold:${h}"
+  done
+
   if ! gh issue edit "$ISSUE" --repo "$REPO" --remove-label "$SUPERSEDED" >/dev/null 2>&1; then
     # `gh` resolves label NAMES against the repo's label set and fails the whole
     # request if any one of them does not exist there — which would leave EVERY
