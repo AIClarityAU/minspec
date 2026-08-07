@@ -4,6 +4,9 @@ name: MinSpec Validate
 on:
   push:
   pull_request:
+  # #1394 — see ci.yml. A required check must report for the MERGE GROUP too, or a merge
+  # queue can never green anything. Inert until a queue exists on `main`.
+  merge_group:
 
 permissions:
   contents: read

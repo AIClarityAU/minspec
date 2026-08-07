@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # #1394 — required checks must also report for a MERGE GROUP, or a merge queue can
+  # never green anything. Inert until a queue is actually enabled on `main`: GitHub only
+  # emits `merge_group` when one exists, so this is a no-op prerequisite, not a behaviour
+  # change. It is here first precisely because enabling the queue BEFORE the triggers land
+  # blocks every merge in the repo.
+  merge_group:
+    branches: [main]
 
 permissions:
   contents: write
