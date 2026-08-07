@@ -24,6 +24,11 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROLES_DIR="${SCRIPT_DIR}/roles"
 # shellcheck source=scripts/lib/agent-context.sh
 source "${SCRIPT_DIR}/lib/agent-context.sh"
+# Agent writes carry the BOT's identity, never the human's (#1355). Aborts here,
+# before any work, if no bot token can be obtained.
+# shellcheck source=scripts/lib/gh-bot.sh
+source "${SCRIPT_DIR}/lib/gh-bot.sh"
+gh_bot_init
 
 FORCE_ROLE=""
 
@@ -823,6 +828,12 @@ run_reviewer_stage() {
     fi
     rm -f "$rb_scan"
   fi
+
+  # An installation token lives ~1h and an agent build routinely runs longer, so
+  # the token minted at startup may already be dead by the time we reach these
+  # post-build writes. Re-mint if it is near expiry — otherwise every write below
+  # 401s and the run looks like "the agent silently did nothing" (#1355).
+  gh_bot_refresh
 
   # 5. Ensure the ai-review:* labels exist (best-effort; exact vocab reused from
   #    .github/workflows/ready-to-merge.yml — do NOT invent new label names).

@@ -43,6 +43,17 @@ jobs:
       - name: Unit-test ai-review label guard
         run: node --test .github/scripts/ai-review-guard.test.js
 
+      # #1355: agent GitHub writes must carry the bot's identity, not the human's.
+      # minspec#995 already required this in CLAUDE.md prose and NOTHING obeyed it
+      # — 76 write call sites, zero App-token use — so the founder was recorded as
+      # the author of every agent issue/comment/label/merge (and auto-subscribed to
+      # each thread forever). This is the gate that replaces the prose.
+      - name: Check agent GitHub writes are bot-attributed
+        run: npm run check:gh-bot
+
+      - name: Unit-test gh-bot attribution guard
+        run: node --test scripts/check-gh-bot-attribution.test.js
+
   # Workflow-syntax + expression lint (#486 harden). CI validated YAML syntax but
   # NOT the GitHub Actions schema/expression grammar, so an invalid `${{ }}` reached
   # main and put ai-review into startup_failure REPO-WIDE (a literal empty `${{ }}`

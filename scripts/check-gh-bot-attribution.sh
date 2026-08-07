@@ -1,0 +1,128 @@
+#!/usr/bin/env bash
+#
+# check-gh-bot-attribution.sh — fail if a shell script writes to GitHub without
+# first taking a bot identity.
+#
+# THIS SCRIPT MUTATES NOTHING. It reads files and exits non-zero on a finding.
+#
+# ── Why this exists (#1355) ───────────────────────────────────────────────────
+# minspec#995 required agent GitHub writes to be App-token attributed. That rule
+# lived only in CLAUDE.md prose, and nothing obeyed it: at the time this guard
+# was written, `grep -l gh-app-token scripts/*.sh` matched NOTHING across 76
+# write call sites in 11 paths. Every agent-filed issue, comment, label and merge
+# was recorded as the founder.
+#
+# The constitution's answer to a rule the model has to remember is to stop
+# trusting the model and build the gate. This is that gate.
+#
+# ── The rule ──────────────────────────────────────────────────────────────────
+# A file under scripts/ that CONTAINS a `gh` write verb MUST source
+# lib/gh-bot.sh. That is all. It does not check call-site-by-call-site, because
+# gh-bot.sh works by exporting GH_TOKEN process-wide — one source covers every
+# `gh` invocation in the file.
+#
+# ── Deliberate limits, stated so a reader does not over-trust this ────────────
+#   * SHELL FILES ONLY (*.sh). `scripts/roles/*.md` are agent PROMPTS, not
+#     executables — some do mention `gh pr review`, and review-branch.sh:122
+#     explicitly instructs agents to ignore that step. A .ts/.mjs helper that
+#     shelled out to `gh` would NOT be caught; none does today.
+#   * TEXTUAL, not semantic. It greps for command-shaped lines. A write built by
+#     string concatenation, or dispatched through a variable (`$GH issue ...`),
+#     slips past. This raises the floor; it is not a proof.
+#   * The allowlist is the escape hatch, and every entry carries a reason.
+
+set -euo pipefail
+
+HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+ROOT="${1:-$(cd "${HERE}/.." && pwd)}"
+SCAN_DIR="${ROOT}/scripts"
+
+# ── Allowlist: path → reason. A bare path with no reason is not permitted. ────
+#
+# approve-issue.sh   Human-only BY DESIGN: TTY-required, no `--yes`, and it
+#                    refuses outright when `gh api user` resolves to a bot
+#                    (approve-issue.sh:169 → dispatch-ready-check.sh
+#                    --is-bot-identity). Its APPROVER *is* the authenticated
+#                    human, so its writes SHOULD carry that human. Sourcing
+#                    gh-bot.sh here would break approval entirely.
+#
+# review-branch.sh   The only match is the string "submit via `gh pr review`"
+#                    inside an agent-prompt heredoc (review-branch.sh:122),
+#                    which tells the agent to IGNORE that step. Prose, not a
+#                    call site.
+allowlist_reason() {
+  case "$1" in
+    scripts/approve-issue.sh) echo "human-only by design; APPROVER is the authenticated human (#1355)" ;;
+    scripts/review-branch.sh) echo "match is prose inside an agent prompt, not a call site (#1355)" ;;
+    *) return 1 ;;
+  esac
+}
+
+# A `gh` subcommand that changes state. Kept deliberately wide — `gh label
+# create` was missed by the first inventory pass and is exactly the kind of verb
+# that quietly reintroduces the bug.
+WRITE_RE='(^|[^[:alnum:]_-])gh (issue|pr|label|release|workflow|repo|secret|variable|cache|run) (create|comment|edit|merge|review|close|reopen|delete|ready|lock|unlock|set|rename|transfer|cancel|rerun)|gh api [^|]*(-X|--method) *(POST|PATCH|PUT|DELETE)'
+
+fail=0
+checked=0
+skipped=""
+
+[[ -d "$SCAN_DIR" ]] || { echo "check-gh-bot-attribution: no such directory: $SCAN_DIR" >&2; exit 2; }
+
+while IFS= read -r file; do
+  rel="${file#"$ROOT"/}"
+
+  # Strip full-line comments before matching, so a `# ... gh pr create ...`
+  # explanation never trips the guard. NOTE the anchor: `grep -n` on a SINGLE
+  # file emits "16:# ..." with no filename prefix, so a pattern expecting ":16:"
+  # silently filters nothing.
+  hits="$(grep -nE "$WRITE_RE" "$file" 2>/dev/null | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
+  [[ -n "$hits" ]] || continue
+
+  checked=$((checked + 1))
+
+  if reason="$(allowlist_reason "$rel")"; then
+    skipped+="  - ${rel} — ${reason}"$'\n'
+    continue
+  fi
+
+  # Match the FILENAME, not a particular relative path: scripts/lib/issue-lease.sh
+  # lives beside the helper and sources it as "${_ISSUE_LEASE_DIR}/gh-bot.sh",
+  # with no "lib/" segment to match on.
+  if grep -qE '^[[:space:]]*(source|\.)[[:space:]].*gh-bot\.sh' "$file"; then
+    continue
+  fi
+
+  fail=1
+  echo "FAIL: ${rel} writes to GitHub but never sources lib/gh-bot.sh" >&2
+  echo "$hits" | sed 's/^/    /' >&2
+  echo >&2
+done < <(find "$SCAN_DIR" -type f -name '*.sh' | sort)
+
+# Always print what was waived. A silently-skipped file reads as "covered".
+if [[ -n "$skipped" ]]; then
+  echo "Allowlisted (intentionally NOT bot-attributed):" >&2
+  printf '%s' "$skipped" >&2
+fi
+
+if (( fail )); then
+  cat >&2 <<'MSG'
+Agent GitHub writes must carry the bot's identity, not the human's (minspec#995,
+#1355). GitHub permanently auto-subscribes the AUTHOR of a thread, so a write
+made as the human subscribes them to it forever — and the audit trail then
+records a human as having done what an agent did.
+
+Fix: source the helper once, near the top of the script, after SCRIPT_DIR is set.
+
+    # shellcheck source=scripts/lib/gh-bot.sh
+    source "${SCRIPT_DIR}/lib/gh-bot.sh"
+    gh_bot_init
+
+That exports GH_TOKEN for the whole process, so individual `gh` calls need no
+change. If the script is genuinely a HUMAN action (like approve-issue.sh), add it
+to allowlist_reason() in this file with the reason spelled out.
+MSG
+  exit 1
+fi
+
+echo "check-gh-bot-attribution: OK — ${checked} file(s) with GitHub writes, all attributed or explicitly allowlisted."

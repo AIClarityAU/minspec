@@ -20,6 +20,13 @@ set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/docs-corpus.sh"
 CORPUS="$DOCS_CORPUS_RE"
 
+# The docs-lane PR this opens is an AGENT write, so it must carry the bot's
+# identity rather than the human's (#1355). Aborts before any work if no bot
+# token can be obtained.
+# shellcheck source=scripts/lib/gh-bot.sh
+source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/lib/gh-bot.sh"
+gh_bot_init
+
 msg=""
 files=()
 while [ $# -gt 0 ]; do

@@ -30,6 +30,13 @@
 : "${MINSPEC_LEASE_REPO:=AIClarityAU/minspec}"
 _ISSUE_LEASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"      # scripts/lib
 _ISSUE_LEASE_REPO_ROOT="$(cd "${_ISSUE_LEASE_DIR}/../.." && pwd)"      # repo root
+
+# Lease claim/renew/release write GitHub COMMENTS, so they must carry the bot's
+# identity, not the human's (#1355). Idempotent: when a caller that already ran
+# gh_bot_init sources this, gh_bot_init is a no-op.
+# shellcheck source=scripts/lib/gh-bot.sh
+source "${_ISSUE_LEASE_DIR}/gh-bot.sh"
+gh_bot_init
 : "${MINSPEC_LEASE_WORKTREE_BASE:=/tmp/minspec-agent}"
 
 # ── Work-item lease constants (SPEC-044 D10 / OQ-2) ──────────────────────────

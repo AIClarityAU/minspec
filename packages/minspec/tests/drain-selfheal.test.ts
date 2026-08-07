@@ -279,6 +279,10 @@ describe('dispatch-issue.sh: native auto-merge deny-by-default (behavioral seam)
       // loudly, because silently dropping the flag restores the roster-thrash
       // outage it exists to prevent (no-silent-gate).
       fs.copyFileSync(path.resolve(__dirname, '../../../scripts/lib/agent-context.sh'), path.join(root, 'scripts', 'lib', 'agent-context.sh'));
+      // dispatch-issue.sh sources lib/gh-bot.sh (#1355 bot attribution) at startup —
+      // same reason once more. Sourcing it is offline and cannot fail; only an actual
+      // GitHub WRITE mints, and this seam performs none.
+      fs.copyFileSync(path.resolve(__dirname, '../../../scripts/lib/gh-bot.sh'), path.join(root, 'scripts', 'lib', 'gh-bot.sh'));
       fs.writeFileSync(path.join(root, '.minspec', 'config.json'), JSON.stringify({ version: 1 })); // no autoMerge
       expect(check({}, root)).toEqual({ code: 1, out: 'off' });
     } finally {
