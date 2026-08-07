@@ -220,7 +220,7 @@ export function harnessDriftSignature(rootDir: string): string {
       if (recorded && now && recorded !== now) {
         // Key on the CURRENT template hash so a further upstream bump to the same
         // section (a new `now`) yields a new signature and re-asks.
-        drifted.push(`${relPath} ${heading} ${now}`);
+        drifted.push(`${relPath}\x00${heading}\x00${now}`);
       }
     }
   }
