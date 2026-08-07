@@ -20,7 +20,7 @@
  * says "shadow-only" in a comment and leaks anyway would sail through a grep.
  */
 
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, afterAll, vi } from 'vitest';
 import { execFileSync, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
@@ -29,9 +29,7 @@ import * as path from 'node:path';
 // These specs drive real bash → claude/gh stub → triage-decide.sh → jq chains. Under
 // container scheduling contention a single invocation can queue past the 5s default
 // even though nothing hung (#1099). Raised per-file, not globally.
-beforeAll(() => {
-  vi.setConfig({ testTimeout: 30_000 });
-});
+vi.setConfig({ testTimeout: 30_000 });
 afterAll(() => {
   vi.resetConfig();
 });

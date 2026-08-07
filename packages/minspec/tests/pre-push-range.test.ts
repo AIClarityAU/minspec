@@ -14,7 +14,7 @@
  * credential probe (the seam workflow-paths.sh exposes for exactly this), so the
  * decision is provable without a credential helper or network.
  */
-import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterAll, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -24,9 +24,7 @@ const HOOK = path.resolve(__dirname, '../../../.githooks/pre-push');
 const ZERO = '0'.repeat(40);
 
 // Spawns real `git` per assertion — see #1099 for why the default 5s is too tight here.
-beforeAll(() => {
-  vi.setConfig({ testTimeout: 30_000 });
-});
+vi.setConfig({ testTimeout: 30_000 });
 afterAll(() => {
   vi.resetConfig();
 });
