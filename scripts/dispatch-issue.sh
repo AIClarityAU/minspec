@@ -94,8 +94,10 @@ fi
 #   ^sites/                                — every deployed site directory.
 #   ^\.github/workflows/deploy-sites\.yml$ — the deploy definition is itself a push-path
 #     trigger. DEFENCE-IN-DEPTH, not the primary control: `^\.github/` can never earn a
-#     valid `ai-review:pass` (ai-review.yml's self-edit machinery guard forces `changes`
-#     and posts no SHA-bound pass witness), so this arm is deliberately redundant with
+#     MERGE-ELIGIBLE pass — since #928 the self-edit machinery guard keeps the honest
+#     `ai-review:pass` LABEL but posts NO SHA-bound pass witness (`ai-review/pass`
+#     status forced `failure`, check-run `neutral`, and the verifier rejects `neutral`),
+#     so `ready-to-merge` stays red — and this arm is deliberately redundant with
 #     that guard — do NOT drop it as "already covered", because it is what lets the
 #     lock-step sync test below be TOTAL over the workflow's `paths:` list.
 #
@@ -104,6 +106,20 @@ fi
 # every matrix `dir:` — in deploy-sites.yml, so a newly-deployed directory added to the
 # workflow cannot silently escape the withhold.
 PUBLISH_PATH_RE='^sites/|^\.github/workflows/deploy-sites\.yml$'
+
+# Mandate 4 of the withhold set below (#1264): the machinery SECOND WITNESS. ai-review's
+# self-edit guard already refuses machinery PRs a SHA-bound pass witness, holding
+# `ready-to-merge` red — but that hold had exactly ONE producer. If ai-review.yml's
+# suppression regresses, is skipped (workflow not run, quota outage, permission gap),
+# or its machinery regex is narrowed, dispatch has ALREADY armed `--auto` and nothing
+# else refuses the merge. Constitution invariant 2: no load-bearing gate hinges on a
+# single producer that one permission/config gap can disable — provide an independent
+# second witness. This mandate is that witness: dispatch declines to arm, independently
+# of anything ai-review does. Mirrors ai-review.yml's machinery regex
+# `^(\.github/|scripts/)` plus `^\.githooks/` (missing from the ai-review side too —
+# #1284). Kept a NAMED constant so the planned #509 narrowing (gate-critical vs
+# operational split) changes ONE definition, in lock-step with the ai-review side.
+MACHINERY_PATH_RE='^\.github/|^\.githooks/|^scripts/'
 
 # paths_have_approvable_doc (#833, extended #981): does a set of changed paths
 # (newline-separated on stdin) touch something a HUMAN — not `ai-review:pass` — must own
@@ -115,9 +131,10 @@ PUBLISH_PATH_RE='^sites/|^\.github/workflows/deploy-sites\.yml$'
 # historical — the predicate it answers is the broader "must a human own this merge?";
 # it is the pure seam's stable contract, so it is kept rather than churned.)
 #
-# The withhold set is the UNION of three intentionally-distinct mandates (a documented
+# The withhold set is the UNION of four intentionally-distinct mandates (a documented
 # SUPERSET of the docs-lane push corpus, NOT a divergent copy of it) — two about WHO
-# OWNS THE CONTENT, one about WHAT MERGING THE PATH DOES:
+# OWNS THE CONTENT, one about WHAT MERGING THE PATH DOES, one an INDEPENDENT SECOND
+# WITNESS to a hold that had a single producer:
 #   1. DOCS_CORPUS_RE — the docs-lane / human-owned DOC corpus (specs/**, docs/**,
 #      .minspec/approvals/**, top-level *.md), the SHARED single source of truth that
 #      keeps this the 4th lock-step enforcer alongside push-docs.sh / docs-corpus.ts /
@@ -139,13 +156,16 @@ PUBLISH_PATH_RE='^sites/|^\.github/workflows/deploy-sites\.yml$'
 #      invariant DR-066 (no silent gate) + "enforce via code, don't hope" ⇒ deterministic
 #      withhold here. NB triage.md's filter is issue-level anyway; it can never bind a
 #      diff, since any issue's build may touch sites/**.
+#   4. MACHINERY_PATH_RE (#1264) — SECOND WITNESS, not ownership: paths that define
+#      what merges/reviews/validates (.github/**, .githooks/**, scripts/**). See the
+#      constant's comment above; narrows in lock-step with ai-review's guard per #509.
 # The spec-gate deliberately ALLOWS editing spec docs (doc-before-CODE, so a spec can
 # be fixed toward approval); this is the symmetric MERGE-side guard. Exit 0 (= withhold)
 # if ANY path matches, else 1. Fail-closed on an unknown/unreadable changed-set is NOT
 # this pure classifier's job — it lives at the arm site (the nonzero + empty branches),
 # so "no match" is never conflated with "could not tell".
 paths_have_approvable_doc() {
-  grep -qE "${DOCS_CORPUS_RE}"'|^\.minspec/|^\.cursorrules$'"|${PUBLISH_PATH_RE}"
+  grep -qE "${DOCS_CORPUS_RE}"'|^\.minspec/|^\.cursorrules$'"|${PUBLISH_PATH_RE}|${MACHINERY_PATH_RE}"
 }
 
 # Pure seam: prove the withhold classifier without gh/dispatch. Paths on stdin.
@@ -830,7 +850,8 @@ run_reviewer_stage() {
   #     GitHub merges it the moment the required `ready-to-merge` check (= provenance-
   #     verified ai-review:pass) goes green — no human keystroke, no per-PR babysit.
   #     HITL stays intact: the ai-review panel IS the gate; a machinery PR (self-edit
-  #     guard) can never get ai-review:pass, so it never auto-merges. Best-effort:
+  #     guard) keeps its honest label but gets NO SHA-bound pass witness (#928), so
+  #     ready-to-merge stays red and it never auto-merges. Best-effort:
   #     `--auto` errors on an already-clean/blocked PR are non-fatal.
   #     #833 exclusion: a PR that touches the docs-lane / human-owned corpus (specs/**,
   #     docs/**, .minspec/approvals/**, top-level *.md) must NOT auto-merge — ai-review
@@ -860,6 +881,8 @@ run_reviewer_stage() {
       # stays provably inside the single guarded block. errexit-safe: a non-matching
       # grep is exempt as a non-final command of an `&&` list.
       local hold_why="touches the docs-lane corpus / .minspec governance config (spec/DR/docs/approval-ledger/top-level .md) (#833)"
+      grep -qE "${MACHINERY_PATH_RE}" <<<"$changed_files" \
+        && hold_why="touches machinery (.github/ .githooks/ scripts/) — dispatch is the second witness to the ai-review machinery hold (#1264)"
       grep -qE "${PUBLISH_PATH_RE}" <<<"$changed_files" \
         && hold_why="touches a PUBLISH path (sites/** → public Cloudflare Pages via deploy-sites.yml) — merging IS publishing (#981)"
       echo "  → native auto-merge WITHHELD on PR #$pr_num — ${hold_why}; a human owns this merge. Labeled needs-human-review."
