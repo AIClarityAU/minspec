@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-035-approvable-ref-lozenges/requirements.md",
+  "specHash": "3963d3e715094551f40217b7d0f9f8dcb9f63a7e274cf59fa02c35e4ddb7ea90",
+  "approvedAt": "2026-08-07T02:43:35.601Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "981cc04703ba5cc8c7b0ae75bd355bc35601b7f1"
+}
