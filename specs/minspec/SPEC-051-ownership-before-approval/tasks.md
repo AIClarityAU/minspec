@@ -70,17 +70,24 @@ first). Each task names its acceptance signal so "done" is checkable, not assert
 
 ## T4 — Wire the two call sites
 
-- [ ] **T4.1** `approveSpec` (`packages/minspec/src/lib/approval.ts:512`): call the assert
-      immediately after `assertHumanApprover(email)`, **before** the first read/hash/mint/
-      write. Same position and rationale as the DR-056 gate documented at `approval.ts:519-522`.
+> **Order matters, and an earlier draft had it backwards.** Verified call order in
+> `packages/minspec/src/commands/approve.ts`: `checkApprover` at `:229` → **`advanceSpecToImplementing`
+> at `:265` (writes `phases:`+`status:` to disk)** → `recordApproval` at `:266` (sidecar) →
+> `commitApprovalIfEnabled` at `:276`. The Plan flip is the FIRST write, so a guard living
+> only inside `approveSpec` cannot prevent it.
+
+- [ ] **T4.1 (primary)** `packages/minspec/src/commands/approve.ts`: call the guard **before
+      line 265**, alongside the existing `checkApprover` pre-check at `:229`. This is the
+      only point that precedes every write. Surface the refusal as an actionable message
+      naming the exact frontmatter line to add.
 - [ ] **T4.2** `advanceSpecToImplementing` (`packages/minspec/src/lib/spec.ts:568`): call it
       before `phasesForApproval` mutates anything — the shared guard for the class (DQ-2).
-      It has **one production call site today** (`packages/minspec/src/commands/approve.ts:265`), so this adds no
-      coverage now; its value is that any future advance actor inherits the check. Justify it
-      on that, never on a caller count.
-- [ ] **T4.3** `packages/minspec/src/commands/approve.ts`: surface the refusal as an
-      actionable message naming the exact frontmatter line to add, mirroring how the command
-      layer already pre-checks the approver for a friendlier message than the lib throw.
+      One production call site today (`packages/minspec/src/commands/approve.ts:265`), so it
+      adds no coverage now; its value is that any future advance actor inherits the check.
+      Justify it on that, never on a caller count.
+- [ ] **T4.3** `approveSpec` (`packages/minspec/src/lib/approval.ts:512`): defence in depth
+      at the lib boundary, for a caller that bypasses the command. Note it **cannot** prevent
+      the `:265` flip — it is a backstop, not the gate.
 
 ## T5 — Template prompt (DQ-1 Option C)
 

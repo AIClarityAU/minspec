@@ -36,23 +36,38 @@ phases:
 
 ## The ordering constraint that drives the design
 
-`approveSpec` writes three side effects in sequence — status flip, baseline mint, sidecar
-write (`packages/minspec/src/lib/approval.ts:512-556`). `advanceSpecToImplementing`
-(`packages/minspec/src/lib/spec.ts:568`) runs *after* it, from the command layer.
+> **Corrected 2026-08-07.** An earlier version of this section stated the call order
+> **backwards** — it claimed `approveSpec` writes first and `advanceSpecToImplementing`
+> runs after. The opposite is true, and the correction inverts which call site is the
+> load-bearing one. The error was caught by a drift audit, not by review of the code it
+> cited. What follows is the verified order.
 
-So a guard placed **only** at the Plan flip is too late: the approval sidecar is already on
-disk when the refusal fires, leaving exactly the half-written state FR-3 forbids. The check
-must run **before any side effect**, in the same position and spirit as the DR-056 approver
-gate that already sits at the top of the same function:
+The command layer runs, in this order (`packages/minspec/src/commands/approve.ts`):
 
-```
-assertHumanApprover(email);            // DR-056 — deny before any side effect
-assertOwnershipDeclared(raw, config);  // SPEC-051 — same discipline, same position
-```
+| line | call | writes |
+|---|---|---|
+| :229 | `checkApprover(...)` | nothing — pre-check, refuses early |
+| **:265** | **`advanceSpecToImplementing(spec.filePath)`** | **`phases:` + `status:` to the spec file on disk** |
+| :266 | `recordApproval(...)` (= `approveSpec`) | baseline blob + approval sidecar |
+| :276 | `commitApprovalIfEnabled(...)` | the commit |
 
-That comment at `approval.ts:519-522` states the principle explicitly ("deny BEFORE any
-side effect ... so a denied identity never mints, mutates, or half-writes a record"). This
-design reuses it rather than inventing a second convention.
+So the **Plan flip is the FIRST write**, not the last. Two consequences, both opposite to
+what the earlier draft said:
+
+1. **A guard placed only inside `approveSpec` is too late.** By the time it runs, `:265`
+   has already flipped `phases.plan` to `in-progress` and persisted it — precisely the
+   half-written, gate-illegal state FR-3 forbids, and exactly the shape that took `main`
+   red four times on 2026-08-06/07.
+2. **`advanceSpecToImplementing` is the earliest point that can refuse before any byte is
+   written**, which makes it the primary guard site rather than the class-safety extra.
+
+The precedent to mirror is therefore **`checkApprover` at `approve.ts:229`** — a command-layer
+pre-check that runs *before* the flip — not the lib-level `assertHumanApprover`. Note that
+`approval.ts:519-522` describes its own gate as denying "BEFORE any side effect (status
+flip, ...)"; that is true of everything `approveSpec` itself does, but the status flip
+happens in its **caller**, one line earlier, so the lib assert cannot protect it. The
+command's `:229` pre-check is what actually keeps a denied approver from mutating the file
+today.
 
 ## Components
 
@@ -79,7 +94,8 @@ enter the build band"**, not on already being in it.
 
 | Caller | Why |
 |---|---|
-| `approveSpec` (`approval.ts:512`) | Option A. Top of function, beside `assertHumanApprover`, before the first side effect. |
+| **`approve.ts` command, before `:265`** | **Primary.** The only point that precedes every write, mirroring `checkApprover` at `:229`. Gives Option A's friendly, actionable refusal with nothing yet mutated. |
+| `approveSpec` (`approval.ts:512`) | Defence in depth at the lib boundary, for any caller that reaches `approveSpec` without going through the command. It cannot prevent the `:265` flip, so it is a backstop — not the primary gate the earlier draft claimed. |
 | `advanceSpecToImplementing` (`spec.ts:568`) | DQ-2's shared guard. This is the single function that writes `plan → in-progress` via `phasesForApproval`. It has exactly **one production call site today** — `packages/minspec/src/commands/approve.ts:265` — so guarding it adds no coverage *now*; its whole value is that any **future** actor (DR-057's drain consumers, the phase-advance queue) inherits the check without having to remember it. That is DQ-2's stated rationale — fix the class, not today's actor — and it should be justified on those terms, not on a caller count. |
 
 Both, not either: `approveSpec` gives the early, friendly refusal; `advanceSpecToImplementing`
