@@ -164,6 +164,28 @@ function flagValues(h: Harness, flag: string): string[] {
   return out;
 }
 
+/**
+ * Assert the LIVE gate's verdict is what got applied — by content, never as an exact
+ * label string.
+ *
+ * The full label set belongs to `triage-inbox.sh` and legitimately grows: #1291 added
+ * `hold:*` after this file landed, and because neither PR's CI ever ran against a base
+ * carrying the other's change, both merged green and main went red. An exact-equality
+ * assertion here is a hand-maintained mirror of another module's policy with nothing
+ * binding the two, so it breaks on correct behaviour.
+ *
+ * What these tests are actually about is WHOSE verdict was applied, so pin the role and
+ * the review state — the two fields the shadow would have changed — and let the rest of
+ * the policy move. Exactly one `--add-label` is still required: the shadow must not add
+ * a second one.
+ */
+function expectLiveVerdictApplied(h: Harness): void {
+  const applied = flagValues(h, '--add-label');
+  expect(applied).toHaveLength(1);
+  expect(applied[0]).toContain('role:architect');
+  expect(applied[0]).toContain('needs-review');
+}
+
 const ghArgs = (h: Harness): string[] =>
   fs.existsSync(h.ghLog)
     ? fs
@@ -188,7 +210,7 @@ describe('shadow-triage — a contradicting shadow verdict changes NO outcome (#
     runTriage(h);
 
     // The live verdict (T3 + human_only) resolves to needs-review / architect.
-    expect(flagValues(h, '--add-label')).toEqual(['role:architect,needs-review']);
+    expectLiveVerdictApplied(h);
 
     // …and the shadow's "agent-ready · dev · T1" reached nothing. This is the
     // load-bearing assertion: `agent-ready` is what authorises an unattended build.
@@ -285,7 +307,7 @@ describe('shadow-triage — inert without a key, and real triage is untouched (#
 
     const calls = fs.readFileSync(h.claudeCalls, 'utf-8').split('\n').filter(Boolean);
     expect(calls).toEqual(['live']); // exactly one agent ran
-    expect(ghArgs(h)).toContain('role:architect,needs-review');
+    expectLiveVerdictApplied(h);
   });
 
   it('no key → a one-line note, not silence (an inert instrument must be visible as inert)', () => {
