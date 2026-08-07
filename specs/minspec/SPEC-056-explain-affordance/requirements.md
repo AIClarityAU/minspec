@@ -1,5 +1,5 @@
 ---
-id: SPEC-052
+id: SPEC-056
 type: requirements
 status: specifying
 tier: T3
@@ -80,9 +80,9 @@ SPEC-014 (`status: implementing`, requirements.md:3) has requirements only — n
 These are genuine forks a human must settle before Plan. None is guessed here.
 
 - **DQ-1 — Should this standalone spec exist at all, or is #914 already fully covered by SPEC-014 FR-18 + SPEC-018 FR-18?** The Explain interaction is *already* normative in both host specs, each with its own AC. Three options:
-  - **Option A — keep SPEC-052 as a thin coordinating spec (recommended).** It owns only the cross-cutting contract (FR-4), the shared seam agreement (FR-5), and the degrade floor (FR-6), and cross-references the host FRs for placement/interaction. Cost: one more spec to keep in sync; benefit: the shared queue/contract has a single owner instead of being implied by two FRs that could drift.
+  - **Option A — keep SPEC-056 as a thin coordinating spec (recommended).** It owns only the cross-cutting contract (FR-4), the shared seam agreement (FR-5), and the degrade floor (FR-6), and cross-references the host FRs for placement/interaction. Cost: one more spec to keep in sync; benefit: the shared queue/contract has a single owner instead of being implied by two FRs that could drift.
   - **Option B — fold everything back into the two FR-18s and close #914 as covered.** No new spec; the contract lives as a shared note in whichever host owns the chat channel (SPEC-018). Cost: the cross-boundary contract has no single home and is re-derived in two places (the exact drift this spec guards against). Benefit: less ceremony.
-  - **Option C — promote the shared contract into SPEC-018 (chat-channel owner) and have SPEC-014 FR-18 reference it.** No SPEC-052; SPEC-018 becomes the contract owner. Cost: SPEC-014's document-scope Explain now depends on a SPEC-018-internal type; benefit: one owner, no new spec.
+  - **Option C — promote the shared contract into SPEC-018 (chat-channel owner) and have SPEC-014 FR-18 reference it.** No SPEC-056; SPEC-018 becomes the contract owner. Cost: SPEC-014's document-scope Explain now depends on a SPEC-018-internal type; benefit: one owner, no new spec.
   - *Trade-off:* A gives the cross-boundary contract its own reviewable home at the cost of a third document; B/C avoid a new spec but leave the contract owned by prose in a host spec. If the human picks B or C, this spec should be **withdrawn**, not implemented — that is a legitimate, honest outcome of the Specify phase.
 
 - **DQ-2 — Which seam carries the Explain request, and what is the exact contract (FR-4/FR-5)?**
@@ -97,7 +97,7 @@ These are genuine forks a human must settle before Plan. None is guessed here.
 
 | # | Risk | Mitigation |
 |---|------|-----------|
-| R1 | Duplicate ownership: SPEC-052 + two host FR-18s describe the same control and drift apart. | DQ-1 forces an explicit owner choice; if A is kept, SPEC-052 owns *only* the contract/seam/degrade and cross-references (never restates) the host interaction FRs. |
+| R1 | Duplicate ownership: SPEC-056 + two host FR-18s describe the same control and drift apart. | DQ-1 forces an explicit owner choice; if A is kept, SPEC-056 owns *only* the contract/seam/degrade and cross-references (never restates) the host interaction FRs. |
 | R2 | A second AI seam sneaks in for Explain (Tier-0 / boundary regression). | FR-5 / INV-4 bind Explain to the single host-resolved seam; AC-6 + AC-3 assert no new transport and no core network import. |
 | R3 | The honest-degrade path is skipped and a fabricated "explanation" is shown when no consumer exists. | FR-6 / INV-3 mandate the SPEC-013 floor; AC-5 asserts the no-consumer render is distinguishable and never fabricated. |
 | R4 | Widening the shipped `PhaseAdvanceRequest` contract (DQ-2 A) breaks the existing phase-advance producer/consumer. | DQ-2 offers a non-invasive sibling shape (B); if A is chosen, a contract test covers both request kinds and DQ-3 checks the ADR bar. |

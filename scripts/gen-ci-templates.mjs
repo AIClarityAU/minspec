@@ -237,10 +237,15 @@ function encodeConst({ constName, srcPath, doc, stripShebang }, repoRoot) {
   }
   const b64 = Buffer.from(content, 'utf8').toString('base64');
   const lines = wrapBase64(b64);
-  const body = lines
-    .map((line, i) => `  '${line}'${i === lines.length - 1 ? ',' : ' +'}`)
-    .join('\n');
-  return `/** ${doc} */\nexport const ${constName}: string = decode(\n${body}\n);\n`;
+  // A JOINED ARRAY, not a `'a' + 'b' + ...` chain (#1284). A concatenation chain parses to
+  // a left-nested BinaryExpression one level deep per chunk, so ESLint's recursive-descent
+  // parser blows its stack once a source file gets big enough — `Parsing error: Maximum
+  // call stack size exceeded`, with no hint that the cause is file SIZE. That is a scaling
+  // cliff: it fires on whoever happens to push the workflow edit that crosses it, which was
+  // this PR's ~13 added comment lines. An array literal is FLAT — depth 1 regardless of
+  // length — so the cliff cannot return. `.join('')` is exact: no separator, no re-encoding.
+  const body = lines.map((line) => `    '${line}',`).join('\n');
+  return `/** ${doc} */\nexport const ${constName}: string = decode(\n  [\n${body}\n  ].join(''),\n);\n`;
 }
 
 function render({ header, sources }, repoRoot) {

@@ -30,6 +30,18 @@
 : "${MINSPEC_LEASE_REPO:=AIClarityAU/minspec}"
 _ISSUE_LEASE_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"      # scripts/lib
 _ISSUE_LEASE_REPO_ROOT="$(cd "${_ISSUE_LEASE_DIR}/../.." && pwd)"      # repo root
+
+# Lease claim/renew/release write GitHub COMMENTS, so they must carry the bot's
+# identity, not the human's (#1355).
+#
+# Sourced here, ARMED in the three writing functions rather than at file scope.
+# This is a library: arming at source time would shadow `gh` process-wide for
+# every consumer that merely wants `classify_claim` or `reclaim_decision`, which
+# is the same "do not silently redefine a command the caller did not ask about"
+# principle gh-bot.sh states about its own sourcing. gh_bot_init is idempotent
+# and offline, so calling it per-writer costs nothing. (#1401 architect review.)
+# shellcheck source=scripts/lib/gh-bot.sh
+source "${_ISSUE_LEASE_DIR}/gh-bot.sh"
 : "${MINSPEC_LEASE_WORKTREE_BASE:=/tmp/minspec-agent}"
 
 # ── Work-item lease constants (SPEC-044 D10 / OQ-2) ──────────────────────────
@@ -222,6 +234,7 @@ lease_read_claims() {
 # ── Credentialed ops (parent-side; the agent never calls these — INV-5) ──────
 # acquire: post claim → re-read to exhaustion → verify winner. Exit 0 iff own.
 lease_acquire() {
+  gh_bot_init   # arm bot attribution before this function's GitHub write (#1355)
   local item="${1:?lease_acquire needs an item}"
   local sid host wt pid now claimed
   sid="$(lease_self_sid)"; host="$(lease_self_host)"; wt="$(lease_worktree_path "$item")"
@@ -245,6 +258,7 @@ lease_acquire() {
 # renew: refresh this session's claim heartbeat (lastRenewed). Parent-side ticker (D10).
 # Edits the session's own claim comment in place (keeps serverOrder = winner key stable).
 lease_renew() {
+  gh_bot_init   # arm bot attribution before this function's GitHub write (#1355)
   local item="${1:?lease_renew needs an item}" sid host now
   sid="$(lease_self_sid)"; host="$(lease_self_host)"; now="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
   local cid claimed
@@ -274,6 +288,7 @@ lease_verify_holds() {
 
 # release: retract this session's claim comment(s) on this item (best-effort).
 lease_release() {
+  gh_bot_init   # arm bot attribution before this function's GitHub write (#1355)
   local item="${1:?lease_release needs an item}" sid
   sid="$(lease_self_sid)"
   local ids
