@@ -1573,15 +1573,21 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
     else
       echo "WARNING: push failed for $BRANCH — review worktree manually"
     fi
-    gh issue edit "$ISSUE" --repo "$REPO" \
-      # #1305 — completion REPLACES readiness; it must not sit beside it. Dropping
+    # #1305 — completion REPLACES readiness; it must not sit beside it. Dropping
     # `agent-running` alone left `agent-ready` in place, so a finished issue stayed
     # in the queue indefinitely and was re-dispatched: #1068 was re-claimed 44 min
     # after completing, with its PR already merged. `agent-done` is now also in the
     # countermand set (dispatch-ready-check.sh), so this is one of two independent
     # witnesses rather than the only thing standing between a merged issue and a
     # repeat build.
-    --remove-label "agent-running,agent-ready" --add-label "agent-done" 2>/dev/null || true
+    #
+    # Comments go ABOVE this command, never between the `\` and its continuation: a
+    # backslash-newline splices the next line on, so a comment there comments out the
+    # REST OF THE COMMAND. `bash -n` still passes, the orphaned `--remove-label …`
+    # line becomes a "command not found" swallowed by `|| true`, and the whole fix is
+    # silently inert. That is exactly how the first draft of this change shipped.
+    gh issue edit "$ISSUE" --repo "$REPO" \
+      --remove-label "agent-running,agent-ready" --add-label "agent-done" 2>/dev/null || true
     echo "Agent completed issue #$ISSUE (role: $ROLE). Worktree: $WORKTREE"
 
     # ── SPEC-044 Slice 2: creator-owned PR shepherding (FR-4/D4) ──────────────
@@ -1601,16 +1607,19 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
     fi  # end egress guard: clean-publish branch (quarantine handled above)
   fi
 else
+  # #1307 — a CRASH raises the human gate, exactly as a deliberate escalation does.
+  #
+  # This path stamped `agent-escalated` alone while the DR-355 escalation path above
+  # stamps `agent-escalated,needs-human-review`. Same outward marker, only one of
+  # them gating: `agent-escalated` countermanded nothing, so once anything restored
+  # `agent-ready` the issue was fully eligible again. #1112 went round that loop
+  # twice — crashed 07:51, silently requeued 09:54, claimed 22:24, crashed 23:06 —
+  # producing zero commits and never reaching a human. A crash is at least as
+  # strong a reason to stop as an agent's own admission that it cannot proceed.
+  #
+  # Comments ABOVE the command — see the note on the completion path above for why a
+  # comment between `\` and its continuation silently neutralises the whole call.
   gh issue edit "$ISSUE" --repo "$REPO" \
-    # #1307 — a CRASH raises the human gate, exactly as a deliberate escalation does.
-    #
-    # This path stamped `agent-escalated` alone while the DR-355 escalation path above
-    # stamps `agent-escalated,needs-human-review`. Same outward marker, only one of
-    # them gating: `agent-escalated` countermanded nothing, so once anything restored
-    # `agent-ready` the issue was fully eligible again. #1112 went round that loop
-    # twice — crashed 07:51, silently requeued 09:54, claimed 22:24, crashed 23:06 —
-    # producing zero commits and never reaching a human. A crash is at least as
-    # strong a reason to stop as an agent's own admission that it cannot proceed.
     --remove-label "agent-running,agent-ready" --add-label "agent-escalated,needs-human-review" 2>/dev/null || true
   echo "Agent CRASHED on issue #$ISSUE (role: $ROLE) — held for a human (needs-human-review). Review: $LOG"
 fi

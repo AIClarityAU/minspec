@@ -154,26 +154,67 @@ describe('#1322 — the PR body carries a deterministic Closes trailer', () => {
   });
 });
 
-describe('#1305/#1307 — completion and crash both drop agent-ready', () => {
-  // A source pin, deliberately narrow. Executing these paths means driving a whole
-  // dispatch against a live GitHub, which this suite does not do — so this asserts
-  // the label argv the dispatcher builds. It is weaker than the executed tests
-  // above and is here to catch a regression in the one detail that is easy to
-  // revert by accident, not to prove the flow end to end.
+describe('#1305/#1307 — completion and crash label writes actually execute', () => {
+  // The first draft of this suite substring-matched the script source. That passed
+  // while BOTH commands were dead: the comments had been placed between
+  // `gh issue edit ... \\` and its continuation, so the backslash-newline spliced the
+  // comment on and commented out the rest of the command. `bash -n` passed, the
+  // orphaned `--remove-label` line became a swallowed "command not found", and the
+  // whole fix was inert. The AI reviewer caught it; these assertions could not.
+  //
+  // So: EXECUTE the statement with a stub `gh` on PATH and assert the flags it
+  // actually received. A spliced comment means gh is never invoked at all, which
+  // fails loudly here.
   const content = fs.readFileSync(DISPATCH, 'utf-8');
 
-  it('the agent-done write also removes agent-ready', () => {
-    const line = content
-      .split('\n')
-      .find((l) => l.includes('--add-label "agent-done"'));
-    expect(line, 'the agent-done label write must exist').toBeDefined();
-    expect(line).toContain('agent-ready');
+  /** The label-write statement = the line carrying `marker` plus the line before it. */
+  function labelWriteStatement(marker: string): string {
+    const lines = content.split('\n');
+    const i = lines.findIndex((l) => l.includes(marker));
+    if (i < 1) throw new Error(`could not find the label write for ${marker}`);
+    return lines[i - 1] + '\n' + lines[i];
+  }
+
+  function runLabelWrite(marker: string): string {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'label-write-'));
+    const bin = path.join(dir, 'bin');
+    fs.mkdirSync(bin);
+    const log = path.join(dir, 'gh.log');
+    fs.writeFileSync(
+      path.join(bin, 'gh'),
+      `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> ${JSON.stringify(log)}\nexit 0\n`,
+      { mode: 0o755 },
+    );
+    const script = ['set -uo pipefail', 'ISSUE=4242', 'REPO=owner/repo', labelWriteStatement(marker)].join('\n');
+    try {
+      execFileSync('bash', ['-c', script], {
+        encoding: 'utf-8',
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+      });
+      return fs.existsSync(log) ? fs.readFileSync(log, 'utf-8') : '';
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  }
+
+  it('the completion write really runs, and really drops agent-ready', () => {
+    const call = runLabelWrite('--add-label "agent-done"');
+    expect(call, 'gh was never invoked — the command is dead').not.toBe('');
+    expect(call).toContain('issue edit 4242');
+    expect(call).toContain('--remove-label agent-running,agent-ready');
+    expect(call).toContain('--add-label agent-done');
   });
 
-  it('the crash path raises needs-human-review, like the escalation path', () => {
-    const line = content
-      .split('\n')
-      .find((l) => l.includes('--add-label "agent-escalated,needs-human-review"') && l.includes('agent-ready'));
-    expect(line, 'the crash path must apply needs-human-review AND drop agent-ready').toBeDefined();
+  it('the crash write really runs, and raises needs-human-review', () => {
+    // Marker must include the agent-ready removal: the DR-355 escalation path a few
+    // hundred lines earlier also ends in `--add-label "agent-escalated,needs-human-review"`,
+    // and matching that one instead would silently test the wrong statement.
+    const call = runLabelWrite(
+      '--remove-label "agent-running,agent-ready" --add-label "agent-escalated,needs-human-review"',
+    );
+    expect(call, 'gh was never invoked — the command is dead').not.toBe('');
+    expect(call).toContain('issue edit 4242');
+    expect(call).toContain('--remove-label agent-running,agent-ready');
+    expect(call).toContain('needs-human-review');
   });
 });
