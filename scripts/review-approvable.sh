@@ -170,7 +170,12 @@ run_reviewer() {
       "${AGENT_CONTEXT_ARGS[@]}" \
       --allowedTools "Read,Glob,Grep" --model opus --output-format text <"$promptfile" 2>&1 ) || rc=$?
   else
-    AGENT_OUT=$( "${AGENT_ENV_SCRUB[@]}" claude -p --system-prompt-file "$ROLE_FILE" \
+    # Scrubbed for the same reason as the payg branch's CLAUDE_CODE_OAUTH_TOKEN:
+    # an ambient ANTHROPIC_API_KEY outranks the subscription token inside
+    # `claude -p`, so leaving it set turns this path into an unintended (and
+    # possibly unfunded) PAYG call. See review-branch.sh's run_reviewer.
+    AGENT_OUT=$( ANTHROPIC_API_KEY='' \
+      "${AGENT_ENV_SCRUB[@]}" claude -p --system-prompt-file "$ROLE_FILE" \
       "${AGENT_CONTEXT_ARGS[@]}" \
       --allowedTools "Read,Glob,Grep" --model opus --output-format text <"$promptfile" 2>&1 ) || rc=$?
   fi

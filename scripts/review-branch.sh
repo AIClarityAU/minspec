@@ -197,7 +197,16 @@ run_reviewer() {
       "${AGENT_CONTEXT_ARGS[@]}" \
       --allowedTools "Read,Glob,Grep" --model opus --output-format text <"$promptfile" 2>"$errfile" ) || rc=$?
   else
-    AGENT_OUT=$( "${AGENT_ENV_SCRUB[@]}" claude -p --system-prompt-file "$ROLE_FILE" \
+    # ANTHROPIC_API_KEY is scrubbed here for the SAME reason the payg branch above
+    # scrubs CLAUDE_CODE_OAUTH_TOKEN: `claude -p` picks ONE credential, and an
+    # API key in the environment WINS over the subscription token. Leave it set and
+    # the "subscription" path silently bills (or fails on) PAYG — which is what
+    # happened once ai-review.yml started forwarding the key for the failover: three
+    # of four voters died with `Credit balance is too low` on a run that never
+    # intended to touch PAYG at all. The failover must be reachable ONLY through the
+    # explicit `run_reviewer payg` call, never by ambient environment.
+    AGENT_OUT=$( ANTHROPIC_API_KEY='' \
+      "${AGENT_ENV_SCRUB[@]}" claude -p --system-prompt-file "$ROLE_FILE" \
       "${AGENT_CONTEXT_ARGS[@]}" \
       --allowedTools "Read,Glob,Grep" --model opus --output-format text <"$promptfile" 2>"$errfile" ) || rc=$?
   fi
