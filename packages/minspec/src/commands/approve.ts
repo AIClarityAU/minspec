@@ -3,7 +3,12 @@ import * as vscode from 'vscode';
 import { listSpecs, type SpecSummary } from '../lib/spec-catalog';
 import { readSpecFile, advanceSpecToImplementing } from '../lib/spec';
 import { loadConfig } from '../lib/config';
-import { validateSpec, violationsIntroducedByApproval } from '../lib/spec-validator';
+import {
+  validateSpec,
+  violationsIntroducedByApproval,
+  assertOwnershipDeclared,
+  OwnershipUndeclaredError,
+} from '../lib/spec-validator';
 import { epicRefSet } from '../lib/epic-manager';
 import { readShardIdFiles } from '../lib/spec-layout';
 import {
@@ -291,6 +296,31 @@ export async function approveSpecCommand(
     // the status line and the phases-derived status cannot diverge (#148).
     const wasPreImpl =
       parsed.frontmatter.status === 'new' || parsed.frontmatter.status === 'specifying';
+
+    // SPEC-051 FR-1/FR-2 — the PRIMARY ownership guard, and the reason it lives HERE.
+    // `advanceSpecToImplementing` below is the FIRST write of the whole approve path: it
+    // persists `phases:`+`status:` before `recordApproval` mints anything. So a guard
+    // inside `approveSpec` would already be too late — the spec would be sitting in the
+    // `plan:in-progress` state that SPEC-038 FR-3 rejects at `error`, which is exactly what
+    // turned `main` red four times on 2026-08-06/07. Refuse before any byte is written,
+    // mirroring the `checkApprover` pre-check above.
+    if (wasPreImpl) {
+      try {
+        assertOwnershipDeclared(
+          parsed.raw,
+          parsed.frontmatter.type ?? '',
+          spec.tier,
+          parsed.frontmatter.phases?.plan,
+          spec.filePath,
+        );
+      } catch (err) {
+        if (err instanceof OwnershipUndeclaredError) {
+          await vscode.window.showErrorMessage(err.message, { modal: false });
+          return;
+        }
+        throw err;
+      }
+    }
     // mirror; phases-aware, no longer affects the hash. Returns the new derived status
     // (DR-069 / #886: 'planning' when the implement phase hasn't started, else 'implementing').
     const newStatus = wasPreImpl ? advanceSpecToImplementing(spec.filePath) : undefined;

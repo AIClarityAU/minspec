@@ -777,6 +777,103 @@ function fmListField(raw: string, key: string): string[] {
  * Path validity mirrors the spec-gate via `isValidOwnedPath` (parity-pinned). This
  * only PRODUCES + VALIDATES the signal the gate already consumes — no gate change (FR-8).
  */
+/**
+ * The one wording for "you must declare ownership", shared by the validator's violation and
+ * SPEC-051's pre-approval refusal — so the human reads the same fix in both places.
+ */
+export const OWNERSHIP_MISSING_FIX_HINT =
+  'Add an `implements:` frontmatter list of the repo-relative code paths this spec creates/owns (e.g. `implements: [packages/minspec/src/lib/foo.ts]`) — or, for a spec that owns no code, `implements: none` plus a one-line `implements_reason:`. This is what arms the spec-gate for this spec (SPEC-038 / #460).';
+
+/**
+ * The single ownership-declaration matcher (SPEC-051 INV-5).
+ *
+ * TRUE when a spec's raw frontmatter satisfies SPEC-038 FR-3: at least one token the
+ * spec-gate would actually OWN (`isValidOwnedPath`), OR the `implements: none` +
+ * `implements_reason:` escape (FR-4/FR-5 — the escape is not free, the reason is required).
+ *
+ * Deliberately takes ONLY `raw` and answers ONLY the declaration question. Scope (primary
+ * spec, tier >= T3) and timing (`validateOwnership` fires once `plan` is in the build band;
+ * SPEC-051's guard fires *before* that flip) are the CALLER's concern — that is the one
+ * intended difference between the two call sites, and keeping it out here is what lets both
+ * share this function without either weakening the other.
+ *
+ * `validateOwnership` and SPEC-051's `assertOwnershipDeclared` are its only callers; a
+ * parity test pins them to the same verdicts so a rule can never grow in one and not the
+ * other (SPEC-051 risk R5, DR-077's sanctioned shape for a duplicated rule).
+ */
+export function ownershipDeclared(raw: string): boolean {
+  // Unevaluable input (no raw bytes) is not a declaration verdict — say "declared" so this
+  // guard cannot refuse on something it never read. `validateOwnership` still runs against
+  // real parsed bytes downstream, so nothing is waved through permanently.
+  if (typeof raw !== 'string' || raw === '') return true;
+  const implTokens = fmListField(raw, 'implements');
+  const isNoneEscape = implTokens.length === 1 && implTokens[0].toLowerCase() === 'none';
+  const reason = rawFrontmatterField(raw, 'implements_reason');
+  // A real declaration = >=1 token the gate would actually OWN. A token that owns nothing
+  // (bareword, infra, wrong-ext) leaves the gate un-armed, so it does not satisfy the
+  // requirement — it counts as still-missing.
+  const declaresCode = implTokens.some(isValidOwnedPath);
+  const validEscape = isNoneEscape && reason !== undefined;
+  return declaresCode || validEscape;
+}
+
+/**
+ * Does this spec need an ownership declaration BEFORE it may cross into the build band?
+ *
+ * The scope gate is byte-identical to `validateOwnership`'s (primary spec, tier >= T3) —
+ * SPEC-051 AC-7. What differs is timing: this asks "is it about to enter", the validator
+ * asks "is it already in". A spec already past the flip is excluded here, because at that
+ * point the validator owns the complaint and re-refusing would block a legitimate re-approval.
+ */
+export function ownershipRequiredBeforeBuildBand(
+  specType: string,
+  tier: Tier,
+  planPhase: string | undefined,
+): boolean {
+  if (!isPrimarySpec((specType ?? '').toLowerCase())) return false;
+  // `?? 0` matters: an absent/unknown tier makes `TIER_RANK[tier]` undefined, and
+  // `undefined < 3` is FALSE — which would fall THROUGH to the declaration check instead of
+  // skipping it. Coerce to rank 0 so an untyped/malformed spec is out of scope here and the
+  // validator (which re-checks with the parsed tier) stays the backstop.
+  if ((TIER_RANK[tier] ?? 0) < 3) return false;
+  return planPhase !== 'in-progress' && planPhase !== 'done';
+}
+
+/** Thrown by {@link assertOwnershipDeclared}; carries the validator's own fixHint verbatim. */
+export class OwnershipUndeclaredError extends Error {
+  constructor(public readonly specPath: string) {
+    super(
+      `This spec must declare its owned code before it can be approved.\n\n${OWNERSHIP_MISSING_FIX_HINT}`,
+    );
+    this.name = 'OwnershipUndeclaredError';
+  }
+}
+
+/**
+ * SPEC-051 FR-1/FR-2: refuse to cross a T3/T4 primary spec into the Plan build band while
+ * its ownership is undeclared — BEFORE any byte is written.
+ *
+ * Approving a spec flips `plan` to `in-progress`, which arms SPEC-038 FR-3 at `error`; since
+ * `implements:` is hash-bearing content, adding it afterwards stales the approval that just
+ * triggered the demand. There is no edit that satisfies the validator and keeps the
+ * signature, so the only fix is to never manufacture the state. This threw four red `main`s
+ * on 2026-08-06/07 (SPEC-051, SPEC-048, SPEC-049, SPEC-035) before it existed.
+ *
+ * Never authors ownership on the human's behalf (FR-5 / risk R4) — it refuses and names the
+ * fix.
+ */
+export function assertOwnershipDeclared(
+  raw: string,
+  specType: string,
+  tier: Tier,
+  planPhase: string | undefined,
+  specPath: string,
+): void {
+  if (!ownershipRequiredBeforeBuildBand(specType, tier, planPhase)) return;
+  if (ownershipDeclared(raw)) return;
+  throw new OwnershipUndeclaredError(specPath);
+}
+
 export function validateOwnership(spec: ParsedSpec, config: MinspecConfig): ValidationViolation[] {
   const specType = (spec.frontmatter.type ?? '').toLowerCase();
   const tier = spec.frontmatter.tier;
@@ -795,21 +892,16 @@ export function validateOwnership(spec: ParsedSpec, config: MinspecConfig): Vali
 
   const implTokens = fmListField(raw, 'implements');
   const isNoneEscape = implTokens.length === 1 && implTokens[0].toLowerCase() === 'none';
-  const reason = rawFrontmatterField(raw, 'implements_reason');
-  // A real declaration = ≥1 token the gate would actually OWN (isValidOwnedPath). A
-  // token that owns nothing (bareword, infra, wrong-ext) leaves the gate un-armed, so
-  // it does not satisfy the requirement — it counts as still-missing.
-  const declaresCode = implTokens.some(isValidOwnedPath);
-  const validEscape = isNoneEscape && reason !== undefined;
 
   // Missing-direction (#137): no owned-path declaration and no satisfied escape.
-  if (!declaresCode && !validEscape) {
+  // Delegates to the SHARED predicate so the validator and SPEC-051's pre-approval
+  // guard can never drift apart (SPEC-051 INV-5 — one matcher, two call sites).
+  if (!ownershipDeclared(raw)) {
     out.push({
       rule: 'ownership.implements.missing',
       severity: config.ownershipDeclaration === 'error' ? 'error' : 'warning',
       message: `${tier} spec past Clarify does not declare its owned code (implements:).`,
-      fixHint:
-        'Add an `implements:` frontmatter list of the repo-relative code paths this spec creates/owns (e.g. `implements: [packages/minspec/src/lib/foo.ts]`) — or, for a spec that owns no code, `implements: none` plus a one-line `implements_reason:`. This is what arms the spec-gate for this spec (SPEC-038 / #460).',
+      fixHint: OWNERSHIP_MISSING_FIX_HINT,
     });
   }
 

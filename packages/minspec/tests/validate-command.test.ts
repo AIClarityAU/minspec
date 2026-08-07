@@ -34,6 +34,14 @@ vi.mock('../src/lib/config', async (importOriginal) => ({
 }));
 
 vi.mock('../src/lib/spec-validator', () => ({
+  // SPEC-051: the command imports the ownership guard from this module, so the mock
+  // must expose it — an absent export is `undefined` at the call site, which throws
+  // a TypeError and aborts the command before it ever reaches approveSpec.
+  // Default: a no-op (declared), so pre-existing cases approve exactly as before.
+  assertOwnershipDeclared: vi.fn(),
+  ownershipDeclared: vi.fn(() => true),
+  OwnershipUndeclaredError: class OwnershipUndeclaredError extends Error {},
+
   validateSpec: vi.fn(),
   // #1317: approve.ts binds this import at module load, so any suite whose graph
   // reaches it needs the export present even when it never exercises the gate.
