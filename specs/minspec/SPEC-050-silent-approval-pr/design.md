@@ -187,7 +187,7 @@ The `prompt` notification at
 [commit-on-approve.ts:146-155](../../../packages/minspec/src/commands/commit-on-approve.ts#L146)
 gains a third action, **"Always push from now on"**, beside `Push` / `Not now`. On click:
 
-1. `vscode.workspace.getConfiguration('minspec').update('pushOnApprove', 'always', ConfigurationTarget.Global)` — the **user's own** settings, never the workspace file (DR-071's corollary);
+1. ~~`vscode.workspace.getConfiguration('minspec').update('pushOnApprove', 'always', ConfigurationTarget.Global)`~~ — **superseded by [DR-078](../../../docs/decisions/DR-078.md) (accepted 2026-08-05).** Standing push consent is written **per-project** to `.minspec/preferences.json`, alongside the existing `answeredSignatures` one-time-offer memory — explicitly "Not `ConfigurationTarget.Global`. Not `ConfigurationTarget.Workspace`" (DR-078 §1). A `Global` write is machine-wide config in a repo that did not opt in, which **constitution invariant 3 forbids**. *(Corrected 2026-08-07: this line was authored 34 minutes AFTER DR-078 was accepted, so it re-introduced the ruling the DR had just overturned. `requirements.md:75` still carries the same superseded wording but is hash-locked — DR-078's Consequences §1 records that correction as the one genuinely expensive edit.)*
 2. proceed with the push for this approval, so the click is not also a decline.
 
 **Shown once, then never again.** Reuses the #883 model already built in
