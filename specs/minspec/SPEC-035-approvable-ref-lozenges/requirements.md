@@ -9,6 +9,10 @@ epic: EPIC-002  # Signpost Integrity
 aspects: [ux, traceability, render, tier-1, references]
 depends_on: [DR-053]   # the paragraph-addressable reference scheme this feature renders
 relates_to: [SPEC-014, SPEC-018, SPEC-029, DR-038, DR-032, SPEC-021]
+# Ownership declared 2026-08-07: approval flipped `phases.plan` to `in-progress`, arming
+# SPEC-038 FR-3 at `error` and turning `main` red (the #1323 trap, fifth instance).
+implements: none
+implements_reason: specified but not yet built — this feature is explicitly "queued, not now", paused with the SPEC-018 pretty-webview work pending the token economy, so its render-host module paths are undecided. FR1 reuses @aiclarity/shared's existing project-prefix rather than creating a resolver. Declares its owned files on implementation, per the SPEC-034 precedent. Placeholder: replace with real paths when the build resumes.
 phases:
   specify: done
   clarify: done
