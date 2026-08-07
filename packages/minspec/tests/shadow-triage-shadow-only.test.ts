@@ -194,8 +194,11 @@ describe('shadow-triage — a contradicting shadow verdict changes NO outcome (#
     const h = makeHarness({ key: 'zai-test-key' });
     runTriage(h);
 
-    // The live verdict (T3 + human_only) resolves to needs-review / architect.
-    expect(flagValues(h, '--add-label')).toEqual(['role:architect,needs-review']);
+    // The live verdict (T3 + human_only) resolves to needs-review / architect, and
+    // since #1002 the WHY is stamped alongside it as `hold:human` — one `--add-label`
+    // operand carrying all three. Asserted whole rather than by substring so a future
+    // change to the applied set has to be looked at rather than silently absorbed.
+    expect(flagValues(h, '--add-label')).toEqual(['role:architect,needs-review,hold:human']);
 
     // …and the shadow's "agent-ready · dev · T1" reached nothing. This is the
     // load-bearing assertion: `agent-ready` is what authorises an unattended build.
@@ -292,7 +295,7 @@ describe('shadow-triage — inert without a key, and real triage is untouched (#
 
     const calls = fs.readFileSync(h.claudeCalls, 'utf-8').split('\n').filter(Boolean);
     expect(calls).toEqual(['live']); // exactly one agent ran
-    expect(ghArgs(h)).toContain('role:architect,needs-review');
+    expect(ghArgs(h)).toContain('role:architect,needs-review,hold:human');
   });
 
   it('no key → a one-line note, not silence (an inert instrument must be visible as inert)', () => {
