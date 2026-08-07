@@ -1426,6 +1426,33 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
       else
         echo "WARNING: could not render review signals — posting summary without the block"
       fi
+      # FENCE ONCE, ON THE ASSEMBLED BODY (#1243). This comment is authored by the
+      # parent, so every downstream reader treats it as first-party — but it carries
+      # AGENT-authored text, from an agent whose prompt embedded the untrusted issue
+      # body. Author trust proves who posted the comment, never who wrote what is inside
+      # it (DR-072 §5a).
+      #
+      # The first version of this fenced `.agent-summary.md` alone. That was fixing the
+      # INSTANCE: `SIGNALS_BLOCK` is appended above, rendered from the agent's own
+      # `.review-signals.json` (whose `rootCause` is emitted verbatim), so a forged
+      # record could still reach a trusted comment through a sibling channel at the very
+      # same echo site. Fencing the assembled body is the PROPERTY — any future block
+      # appended to `$BODY` is covered without anyone remembering to fence it.
+      #
+      # Safe to apply wholesale: the parent contributes no `minspec-*` marker of its own
+      # to this body, so nothing first-party is broken by it.
+      # Fail SAFE, not empty. A `sed`/handler failure would otherwise assign an empty
+      # BODY and post a blank comment — losing the agent's whole summary to a tool error.
+      # Keep the fenced text only if something actually came back; the fence is a
+      # hardening, and hardening that can destroy the payload it protects is a worse bug
+      # than the one it fixes.
+      if FENCED_BODY=$(printf '%s' "$BODY" | "${SCRIPT_DIR}/dispatch-ready-check.sh" --fence-agent-text) \
+           && [[ -n "$FENCED_BODY" ]]; then
+        BODY="$FENCED_BODY"
+      else
+        echo "WARNING: could not fence the agent summary — posting a SAFE PLACEHOLDER instead of unfenced text." >&2
+        BODY=$(printf 'Agent completed, but its summary could not be safely fenced for republication (#1243), so it is withheld rather than posted unchecked.\n\n— branch `%s` @ %s (auto-dispatched)' "$BRANCH" "$SHA")
+      fi
       gh issue comment "$ISSUE" --repo "$REPO" --body "$BODY" 2>/dev/null || true
 
       # Independent reviewer stage (#342) — runs AFTER the push/summary and adds
