@@ -163,6 +163,86 @@ describe('implement hole — split layout (sibling tasks.md)', () => {
   });
 });
 
+describe('implement hole — parser hardening (#1436 review)', () => {
+  it('capital `[X]` counts as done, same as lowercase', () => {
+    approvedSpec('SPEC-001', ['- [X] done upper', '- [x] done lower'].join('\n'));
+    expect(specNode('SPEC-001').implementHole).toBeUndefined();
+  });
+
+  it('a `~~~` line inside a backtick fence does not close it', () => {
+    // Mismatched fence characters used to toggle one boolean, so an odd number
+    // of fence-ish lines left the flag stuck and every later task vanished —
+    // which is the original "reads clear while work is pending" bug.
+    approvedSpec(
+      'SPEC-001',
+      ['```markdown', '~~~', '- [ ] EXAMPLE, not real work', '```', '', '- [ ] the real one'].join('\n'),
+    );
+    const hole = specNode('SPEC-001').implementHole!;
+    expect(hole.remaining).toBe(1);
+    expect(hole.nextItem).toBe('the real one');
+  });
+
+  it('a shorter fence inside a longer one does not close it', () => {
+    approvedSpec(
+      'SPEC-001',
+      ['````markdown', '```', '- [ ] EXAMPLE inside the nested fence', '```', '````', '', '- [ ] the real one'].join('\n'),
+    );
+    const hole = specNode('SPEC-001').implementHole!;
+    expect(hole.remaining).toBe(1);
+    expect(hole.nextItem).toBe('the real one');
+  });
+
+  it('an UNCLOSED fence still reports a hole rather than reading as finished', () => {
+    // Everything after the fence is a code block per CommonMark, so the tasks
+    // are correctly invisible. The safe outcome is "no list", never "all done".
+    approvedSpec('SPEC-001', ['- [x] done before the fence', '```', '- [ ] swallowed'].join('\n'));
+    expect(specNode('SPEC-001').implementHole).toStrictEqual({ kind: 'missing-tasks' });
+  });
+
+  it('identifiers inside inline code keep their * and _', () => {
+    approvedSpec('SPEC-001', ['- [ ] rename `read_implement_hole` across `packages/**/*.test.ts`'].join('\n'));
+    expect(specNode('SPEC-001').implementHole!.nextItem).toBe(
+      'rename read_implement_hole across packages/**/*.test.ts',
+    );
+  });
+
+  it('emphasis OUTSIDE code spans is still stripped', () => {
+    approvedSpec('SPEC-001', ['- [ ] **(impl)** _wire_ it up'].join('\n'));
+    expect(specNode('SPEC-001').implementHole!.nextItem).toBe('(impl) wire it up');
+  });
+
+  it('a soft-wrapped item is marked as continuing, not presented as the whole task', () => {
+    approvedSpec('SPEC-001', ['- [ ] decide where the predicate lives: extend', '      the existing helper or add a new one'].join('\n'));
+    const next = specNode('SPEC-001').implementHole!.nextItem!;
+    expect(next).toBe('decide where the predicate lives: extend…');
+  });
+
+  it('clipping never splits an astral character', () => {
+    approvedSpec('SPEC-001', ['- [ ] ' + 'ab🚀'.repeat(40)].join('\n'));
+    const next = specNode('SPEC-001').implementHole!.nextItem!;
+    // A UTF-16 slice could land mid surrogate pair and emit a lone half.
+    expect(next.isWellFormed()).toBe(true);
+    expect(Array.from(next).length).toBeLessThanOrEqual(80);
+  });
+
+  it('a tasks.md belonging to ANOTHER spec is not claimed', () => {
+    // Flat layouts put several specs' files in one directory; sharing a folder
+    // is not owning the file. Claiming a neighbour's list would report their
+    // progress as this spec's.
+    const file = write('specs/flat/requirements.md', specFile('SPEC-001'));
+    write('specs/flat/tasks.md', tasksFile('SPEC-002', '- [x] someone else finished this'));
+    approveSpec(root, file, 'T3', 'tester@example.com', fixedClock);
+    expect(specNode('SPEC-001').implementHole).toStrictEqual({ kind: 'missing-tasks' });
+  });
+
+  it('a tasks.md with no id at all is still accepted as this spec`s', () => {
+    const file = write('specs/p/SPEC-001-x/requirements.md', specFile('SPEC-001'));
+    write('specs/p/SPEC-001-x/tasks.md', ['# Tasks', '', '- [ ] no frontmatter here'].join('\n'));
+    approveSpec(root, file, 'T3', 'tester@example.com', fixedClock);
+    expect(specNode('SPEC-001').implementHole!.kind).toBe('unchecked-tasks');
+  });
+});
+
 describe('implement hole — single-file layout (no sibling tasks.md)', () => {
   it('reads the spec`s own ## Tasks section, so a single-file spec is not mislabelled', () => {
     // MinSpec ships into repos that use the single-file layout; this monorepo
@@ -208,6 +288,21 @@ describe('implement hole — end to end through the resolver', () => {
     expect(resolvePipeline(g).map((t) => t.kind)).not.toContain('spec-approve');
     expect(resolveNextTask(g)).not.toBeNull();
     expect(resolveNextTask(g)!.targetId).toBe('SPEC-001');
+  });
+
+  it('a spec still being PLANNED is never told to implement (DR-069 false-signpost guard)', () => {
+    // The adapter folds `planning` into the resolver's `implementing`, so the
+    // resolver cannot tell the bands apart from `status` alone. Only the phase
+    // can. Without the phase gate this emitted "Implement SPEC-001: ...".
+    const file = write(
+      'specs/p/SPEC-001-x/requirements.md',
+      specFile('SPEC-001').replace('  implement: in-progress', '  implement: pending').replace('  plan: done', '  plan: in-progress'),
+    );
+    write('specs/p/SPEC-001-x/tasks.md', tasksFile('SPEC-001', '- [ ] not started yet'));
+    approveSpec(root, file, 'T3', 'tester@example.com', fixedClock);
+    const g = buildArtifactGraph(root);
+    expect(g.specs.find((s) => s.id === 'SPEC-001')!.status).toBe('implementing'); // the folded band
+    expect(resolvePipeline(g).map((t) => t.kind)).not.toContain('phase-action');
   });
 
   it('an UNREADABLE tasks.md degrades to missing-tasks rather than throwing (INV-DEGRADE)', () => {

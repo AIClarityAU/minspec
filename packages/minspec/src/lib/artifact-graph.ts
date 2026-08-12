@@ -280,36 +280,59 @@ function discoverSpecs(rootDir: string): Map<string, DiscoveredSpecFile> {
 // ───────────────────────────────────────────────────────────────────────────
 
 /**
- * A task line, in either checkbox dialect MinSpec accepts.
+ * A task line. Leading whitespace is allowed so an indented sub-task counts,
+ * matching what `spec.ts`'s `parseTasks` already does (it trims before testing
+ * its own `TASK_RE`, so the two agree on indentation).
  *
- * Deliberately WIDER than `spec.ts`'s `TASK_RE`, in two ways, because this
- * decides whether a human is told there is work left:
- *   - leading whitespace is allowed, so a nested/indented sub-task still counts;
- *   - `[~]` (in progress) is recognised and counted as OPEN. `spec.ts`'s regex
- *     matches only `[ xX]`, so a `[~]` line is invisible to it — a spec whose
- *     last task is in-progress would otherwise read as finished. Counting it as
- *     open is the honest reading; #1444 tracks converging the two regexes.
+ * The one deliberate WIDENING over `spec.ts` is `[~]` (in progress), which that
+ * regex does not match at all. A spec whose last task is underway would
+ * otherwise read as finished, and the human would be told they are clear
+ * mid-task. Counting it as open is the honest reading. #1465 tracks converging
+ * the two into a single shared predicate.
  */
 const TASK_LINE_RE = /^\s*- \[([ xX~])\]\s+(.+?)\s*$/;
 
-/** A fenced code block delimiter — checkbox-looking lines inside are examples. */
-const FENCE_RE = /^\s*(?:```|~~~)/;
+/**
+ * A fenced code block delimiter, capturing the fence character and its run
+ * length. Both matter: per CommonMark a fence is closed only by a fence of the
+ * SAME character that is at least as long, so a `~~~` inside a ``` block, or a
+ * 3-backtick fence inside a 4-backtick block, is literal text and must not
+ * close anything. Tracking only "saw a fence, flip a boolean" mis-pairs those
+ * and can leave the flag stuck, hiding every task after it — which would put
+ * the signpost right back to reading "clear" while work is pending (#1436).
+ */
+const FENCE_RE = /^\s{0,3}(`{3,}|~{3,})/;
 
 /** Longest `nextItem` handed to the resolver; the imperative is a ONE-LINE surface. */
 const NEXT_ITEM_MAX = 80;
 
 /**
- * Reduce a markdown task line to plain readable text: unwrap links, drop inline
- * emphasis/code marks, collapse whitespace, then clip to one line's worth.
- * Pure and deterministic.
+ * Reduce a markdown task line to plain readable text: unwrap links, drop
+ * emphasis marks, collapse whitespace, then clip to one line's worth.
+ *
+ * Emphasis is stripped only OUTSIDE inline-code spans. The text inside
+ * backticks is almost always the identifier or path the human has to act on
+ * (`snake_case_name`, `packages/**\/*.test.ts`), and blanket-stripping `*` and
+ * `_` renames it to something that does not exist. Clipping walks code POINTS,
+ * not UTF-16 units, so it can never split a surrogate pair and emit a lone
+ * half. Pure and deterministic.
  */
-function taskItemText(raw: string): string {
+function taskItemText(raw: string, softWrapped = false): string {
+  // Split on backticks: even indices are outside code spans, odd are inside.
   const clean = raw
-    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1') // [text](url) → text
-    .replace(/[`*_]/g, '')
+    .split('`')
+    .map((seg, i) => (i % 2 === 1 ? seg : seg.replace(/\[([^\]]+)\]\([^)]*\)/g, '$1').replace(/[*_]/g, '')))
+    .join('')
     .replace(/\s+/g, ' ')
     .trim();
-  return clean.length <= NEXT_ITEM_MAX ? clean : `${clean.slice(0, NEXT_ITEM_MAX - 1).trimEnd()}…`;
+
+  const points = Array.from(clean);
+  if (points.length > NEXT_ITEM_MAX) {
+    return `${points.slice(0, NEXT_ITEM_MAX - 1).join('').trimEnd()}…`;
+  }
+  // A soft-wrapped item continues on the next source line. Say so, rather than
+  // presenting the first line as if it were the whole task.
+  return softWrapped ? `${clean}…` : clean;
 }
 
 /** Tally of open/total task items, plus the first open item's text. */
@@ -317,25 +340,50 @@ interface TaskTally {
   total: number;
   remaining: number;
   nextItem?: string;
+  /** A fence was still open at EOF, so anything after it was swallowed. */
+  unterminatedFence?: boolean;
 }
 
-/** Count checkbox lines in a markdown body, ignoring fenced code blocks. */
+/**
+ * Count checkbox lines in a markdown body, ignoring fenced code blocks.
+ * Checkbox-shaped lines inside a fence are documentation examples, not work.
+ */
 function tallyTaskLines(body: string): TaskTally {
-  let inFence = false;
+  const lines = body.split('\n');
+  let fence: string | undefined; // the OPEN fence's marker, or undefined
   const tally: TaskTally = { total: 0, remaining: 0 };
-  for (const line of body.split('\n')) {
-    if (FENCE_RE.test(line)) {
-      inFence = !inFence;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const f = FENCE_RE.exec(line);
+    if (f) {
+      if (fence === undefined) {
+        fence = f[1];
+        continue;
+      }
+      // Close only on the same character, at least as long as the opener.
+      if (f[1][0] === fence[0] && f[1].length >= fence.length) fence = undefined;
       continue;
     }
-    if (inFence) continue;
+    if (fence !== undefined) continue;
+
     const m = TASK_LINE_RE.exec(line);
     if (!m) continue;
     tally.total++;
     if (m[1] === 'x' || m[1] === 'X') continue;
     tally.remaining++;
-    if (tally.nextItem === undefined) tally.nextItem = taskItemText(m[2]);
+    if (tally.nextItem === undefined) {
+      // Peek: an indented, non-checkbox, non-blank next line continues this item.
+      const nxt = lines[i + 1];
+      const softWrapped =
+        nxt !== undefined &&
+        /^\s+\S/.test(nxt) &&
+        !TASK_LINE_RE.test(nxt) &&
+        !FENCE_RE.test(nxt);
+      tally.nextItem = taskItemText(m[2], softWrapped);
+    }
   }
+  if (fence !== undefined) tally.unterminatedFence = true;
   return tally;
 }
 
@@ -359,7 +407,18 @@ function readImplementHole(disc: DiscoveredSpecFile): ImplementHole | undefined 
   const tasksPath = path.join(path.dirname(disc.filePath), 'tasks.md');
   let splitBody: string | undefined;
   try {
-    if (fs.existsSync(tasksPath)) splitBody = fs.readFileSync(tasksPath, 'utf-8');
+    if (fs.existsSync(tasksPath)) {
+      const raw = fs.readFileSync(tasksPath, 'utf-8');
+      // OWNERSHIP. Sharing a directory is not the same as owning the file. A
+      // flat layout can put several specs' canonical files side by side (this
+      // repo does exactly that at specs/<product>/), and attributing a
+      // neighbour's task list to this spec would report someone else's progress
+      // as its own. Claim the file only when its `id:` says so; a tasks.md with
+      // no id at all is still accepted, since the scaffolder's output and older
+      // hand-written lists predate the convention.
+      const owner = /^id:\s*(\S+)/m.exec(frontmatterBlock(raw))?.[1];
+      if (owner === undefined || owner === disc.parsed.frontmatter.id) splitBody = raw;
+    }
   } catch {
     /* unreadable — fall through to the single-file sections, then missing-tasks */
   }
@@ -383,6 +442,12 @@ function readImplementHole(disc: DiscoveredSpecFile): ImplementHole | undefined 
   // No task list anywhere — or one with no items in it. Either way the spec is
   // being implemented with nothing tracking that work.
   if (tally.total === 0) return { kind: 'missing-tasks' };
+  // An unterminated fence swallowed the rest of the file, so "nothing left
+  // open" is not something we actually know. Reporting no hole here would put
+  // a green tick on a spec whose remaining work is simply unreadable, which is
+  // the exact failure #1436 exists to remove. Report it as untracked instead:
+  // wrong in the harmless direction, and it points at the file to fix.
+  if (tally.remaining === 0 && tally.unterminatedFence) return { kind: 'missing-tasks' };
   if (tally.remaining === 0) return undefined; // every item checked → no hole
   return {
     kind: 'unchecked-tasks',

@@ -812,7 +812,7 @@ describe('INV-PA — phase-action implement-hole node (#1436)', () => {
       specs: [
         mkSpec('SPEC-001', 'implementing', 'approved', {
           epic: 'EPIC-001',
-          implementHole: HOLE_OPEN,
+          phase: 'implement', implementHole: HOLE_OPEN,
         }),
       ],
     });
@@ -830,7 +830,7 @@ describe('INV-PA — phase-action implement-hole node (#1436)', () => {
         specs: [
           mkSpec('SPEC-001', 'implementing', state, {
             epic: 'EPIC-001',
-            implementHole: HOLE_OPEN,
+            phase: 'implement', implementHole: HOLE_OPEN,
           }),
         ],
       });
@@ -844,14 +844,14 @@ describe('INV-PA — phase-action implement-hole node (#1436)', () => {
   it('INV-PA-3: terminal + superseded specs never emit phase-action even carrying a hole', () => {
     for (const status of ['done', 'archived', 'superseded'] as const) {
       const g = graph({
-        specs: [mkSpec('SPEC-001', status, 'approved', { implementHole: HOLE_OPEN })],
+        specs: [mkSpec('SPEC-001', status, 'approved', { phase: 'implement', implementHole: HOLE_OPEN })],
       });
       expect(resolvePipeline(g).map((t) => t.kind)).not.toContain('phase-action');
     }
     // Superseded-by-edge, not by status: the same exclusion must hold.
     const g = graph({
       specs: [
-        mkSpec('SPEC-001', 'implementing', 'approved', { implementHole: HOLE_OPEN }),
+        mkSpec('SPEC-001', 'implementing', 'approved', { phase: 'implement', implementHole: HOLE_OPEN }),
         mkSpec('SPEC-002', 'implementing', 'approved'),
       ],
       edges: [{ kind: 'supersedes', from: 'SPEC-002', to: 'SPEC-001' }],
@@ -875,11 +875,11 @@ describe('INV-PA — phase-action implement-hole node (#1436)', () => {
         // SPEC-001 sorts FIRST by id, so only the severity split can demote it.
         mkSpec('SPEC-001', 'implementing', 'approved', {
           epic: 'EPIC-001',
-          implementHole: HOLE_NONE,
+          phase: 'implement', implementHole: HOLE_NONE,
         }),
         mkSpec('SPEC-002', 'implementing', 'approved', {
           epic: 'EPIC-001',
-          implementHole: HOLE_OPEN,
+          phase: 'implement', implementHole: HOLE_OPEN,
         }),
       ],
     });
@@ -888,7 +888,63 @@ describe('INV-PA — phase-action implement-hole node (#1436)', () => {
     expect(pipe[0].severityClass).toBe('blocked-ready');
     expect(pipe[1].targetId).toBe('SPEC-001');
     expect(pipe[1].severityClass).toBe('pending');
-    expect(pipe[1].imperative).toBe('Author a task list for SPEC-001');
+    expect(pipe[1].imperative).toBe('Break SPEC-001 into tasks');
+  });
+
+  it('INV-PA-PHASE: a spec still being PLANNED emits nothing, however holed', () => {
+    // The adapter folds MinSpec's `planning` band (approved, implement not
+    // started) into the resolver's `implementing` on purpose (DR-069), so
+    // `status` alone cannot tell them apart. Gating on status alone told the
+    // human to "Implement SPEC-X" for specs mid-plan, which is the false
+    // signpost DR-069 exists to prevent. A task list is due from `tasks` on.
+    for (const phase of ['specify', 'clarify', 'plan'] as const) {
+      const g = graph({
+        epics: [mkEpic('EPIC-001', 'active', { order: 1 })],
+        specs: [
+          mkSpec('SPEC-001', 'implementing', 'approved', {
+            epic: 'EPIC-001',
+            phase,
+            implementHole: HOLE_OPEN,
+          }),
+        ],
+      });
+      expect(resolvePipeline(g).map((t) => t.kind)).not.toContain('phase-action');
+    }
+  });
+
+  it('INV-PA-PHASE-2: the `tasks` phase emits, and never claims the spec is being implemented', () => {
+    const g = graph({
+      epics: [mkEpic('EPIC-001', 'active', { order: 1 })],
+      specs: [
+        mkSpec('SPEC-001', 'implementing', 'approved', {
+          epic: 'EPIC-001',
+          phase: 'tasks',
+          implementHole: HOLE_OPEN,
+        }),
+      ],
+    });
+    const next = resolveNextTask(g)!;
+    expect(next.kind).toBe('phase-action');
+    expect(next.imperative).toBe('Finish the task list for SPEC-001: Wire the adapter');
+    expect(next.imperative).not.toContain('Implement');
+    expect(next.evidence.explanation).toBe('SPEC-001 is in the tasks phase with 3 of 10 tasks open');
+  });
+
+  it('INV-PA-STATUS: a non-implementing spec emits nothing even when approved and holed', () => {
+    // Guards the `status !== 'implementing'` line itself, which no other row
+    // reaches: `specifying` is the only approved-but-pre-implementing status,
+    // and it must not produce implement work.
+    const g = graph({
+      epics: [mkEpic('EPIC-001', 'active', { order: 1 })],
+      specs: [
+        mkSpec('SPEC-001', 'specifying', 'approved', {
+          epic: 'EPIC-001',
+          phase: 'implement',
+          implementHole: HOLE_OPEN,
+        }),
+      ],
+    });
+    expect(resolvePipeline(g).map((t) => t.kind)).not.toContain('phase-action');
   });
 
   it('INV-PA-OQ-ORDER: an unanswered open question outranks implementing against it', () => {
@@ -900,7 +956,7 @@ describe('INV-PA — phase-action implement-hole node (#1436)', () => {
         mkSpec('SPEC-001', 'implementing', 'approved', {
           epic: 'EPIC-001',
           hasUnresolvedOpenQuestions: true,
-          implementHole: HOLE_OPEN,
+          phase: 'implement', implementHole: HOLE_OPEN,
         }),
       ],
     });
@@ -921,25 +977,71 @@ describe('INV-PA — phase-action implement-hole node (#1436)', () => {
         mkSpec('SPEC-001', 'implementing', 'approved', {
           epic: 'EPIC-001',
           hasUnresolvedOpenQuestions: true,
-          implementHole: HOLE_OPEN,
+          phase: 'implement', implementHole: HOLE_OPEN,
         }),
         // Un-cleared dependency: SPEC-003 is unapproved, so the edge does not clear
         // and `floorDependsOn` runs over every severity block.
         mkSpec('SPEC-002', 'implementing', 'approved', {
           epic: 'EPIC-001',
-          implementHole: HOLE_OPEN,
+          phase: 'implement', implementHole: HOLE_OPEN,
         }),
         mkSpec('SPEC-003', 'specifying', 'unapproved', { epic: 'EPIC-001' }),
       ],
       edges: [{ kind: 'depends_on', from: 'SPEC-002', to: 'SPEC-003' }],
     });
+    // Assert the WHOLE order, not just membership. Keying the main loop on
+    // artifactId does not delete the second node outright — the leftover sweep
+    // re-adds it at the END — so a membership-only assertion passes through
+    // that regression. Position is what distinguishes "kept" from "shunted".
+    expect(resolvePipeline(g).map((t) => `${t.targetId}:${t.kind}`)).toStrictEqual([
+      // gate-violation: SPEC-002 advances past its un-cleared blocker. Points at
+      // the blocker, but ranks on SPEC-002 (artifactId), which is why it is not
+      // a duplicate of SPEC-003's own gate node three rows below.
+      'SPEC-003:spec-approve',
+      'SPEC-001:answer-OQ',
+      'SPEC-001:phase-action',
+      'SPEC-003:spec-approve',
+      // ...and SPEC-002's own node is floored BELOW the blocker it depends on,
+      // which is the flooring this dedup change had to leave intact.
+      'SPEC-002:phase-action',
+    ]);
+  });
+
+  it('INV-NODE-IDENTITY-2: the leftover sweep also keeps both nodes (cycle path)', () => {
+    // The main loop and the sweep are two separate places that must key on the
+    // NODE. A dependency cycle starves the main loop so the sweep runs, which
+    // is the only way to reach that second branch with duplicates present.
+    const g = graph({
+      epics: [mkEpic('EPIC-001', 'active', { order: 1 })],
+      specs: [
+        mkSpec('SPEC-001', 'implementing', 'approved', {
+          epic: 'EPIC-001',
+          phase: 'implement',
+          hasUnresolvedOpenQuestions: true,
+          implementHole: HOLE_OPEN,
+        }),
+        mkSpec('SPEC-002', 'implementing', 'approved', {
+          epic: 'EPIC-001',
+          phase: 'implement',
+          implementHole: HOLE_OPEN,
+        }),
+      ],
+      edges: [
+        { kind: 'depends_on', from: 'SPEC-001', to: 'SPEC-002' },
+        { kind: 'depends_on', from: 'SPEC-002', to: 'SPEC-001' },
+      ],
+    });
+    // THREE nodes on one artifact here: the cycle is corruption (a
+    // gate-violation carrying the spec's natural kind), plus the open question,
+    // plus the implement hole. All three must survive.
     const forSpec1 = resolvePipeline(g).filter((t) => t.targetId === 'SPEC-001');
-    expect(forSpec1.map((t) => t.kind)).toStrictEqual(['answer-OQ', 'phase-action']);
+    expect(forSpec1.map((t) => t.kind)).toStrictEqual(['spec-approve', 'answer-OQ', 'phase-action']);
+    expect(forSpec1[0].severityClass).toBe('gate-violation');
   });
 
   it('INV-PA-SHAPE: targetId stays a bare artifact id, and the contract keys are unchanged', () => {
     const g = graph({
-      specs: [mkSpec('SPEC-042', 'implementing', 'approved', { implementHole: HOLE_OPEN })],
+      specs: [mkSpec('SPEC-042', 'implementing', 'approved', { phase: 'implement', implementHole: HOLE_OPEN })],
     });
     const next = resolveNextTask(g)!;
     expect(next.kind).toBe('phase-action');
@@ -955,8 +1057,8 @@ describe('INV-PA — phase-action implement-hole node (#1436)', () => {
     const g = graph({
       epics: [mkEpic('EPIC-001', 'active', { order: 1 })],
       specs: [
-        mkSpec('SPEC-001', 'implementing', 'approved', { epic: 'EPIC-001', implementHole: HOLE_OPEN }),
-        mkSpec('SPEC-002', 'implementing', 'approved', { epic: 'EPIC-001', implementHole: HOLE_NONE }),
+        mkSpec('SPEC-001', 'implementing', 'approved', { epic: 'EPIC-001', phase: 'implement', implementHole: HOLE_OPEN }),
+        mkSpec('SPEC-002', 'implementing', 'approved', { epic: 'EPIC-001', phase: 'implement', implementHole: HOLE_NONE }),
       ],
     });
     const first = JSON.stringify(resolvePipeline(g));
@@ -967,6 +1069,7 @@ describe('INV-PA — phase-action implement-hole node (#1436)', () => {
     const g = graph({
       specs: [
         mkSpec('SPEC-001', 'implementing', 'approved', {
+          phase: 'implement',
           implementHole: { kind: 'unchecked-tasks', remaining: 2, total: 4 },
         }),
       ],

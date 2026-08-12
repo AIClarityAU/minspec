@@ -146,9 +146,9 @@ export interface ArtifactGraph {
 
 // ---- Output ----
 export type SeverityClass = 'gate-violation' | 'blocked-ready' | 'promote-parent' | 'pending';
-//  NOTE: 'phase-action' is in the kind UNION (DR-019/FR-8 vocabulary) but NOT
-//  emitted by the core slice — its source is SPEC-010 (FR-4, deferred). Declared
-//  for the typed seam, never produced.
+//  NOTE: 'phase-action' IS produced (#1436) — see the implement-hole generator
+//  below. It is authoring work, never an approval: SPEC-014 FR-13 forbids any
+//  surface rendering it with an Approve control.
 export type NodeKind = 'epic-promote' | 'spec-approve' | 'adr-accept' | 'phase-action' | 'answer-OQ';
 
 export interface Evidence {
@@ -721,13 +721,14 @@ function generateNodes(
           // 1. epicOrder/goalRank/priority encode why this edge is URGENT — which
           //    epic is advancing, at what goal and priority. That is a property of
           //    the advance, not of the blocker sitting still.
-          // 2. `artifactId` is an IDENTITY KEY, not a display value: `topoFloorBlock`
-          //    uses it for its `emitted` set (`:989`, `:991`) and `compareRanked` for
-          //    the final tiebreak. Setting it to `primaryBlocker` would make it
-          //    non-unique whenever two advancing artifacts share one blocker, and the
-          //    emitted-set dedup would silently drop the second violation node — a
-          //    missing gate, which invariant #2 forbids. Only `targetId`, `imperative`
-          //    and `kind` describe where to send the human; only those change.
+          // 2. `artifactId` is a BLOCKER/RANKING KEY, not a display value:
+          //    `topoFloorBlock` resolves `depends_on` satisfaction through it
+          //    (`clearedArtifacts`) and `compareRanked` uses it for the final
+          //    tiebreak. Setting it to `primaryBlocker` would attribute this
+          //    node's dials and blocker identity to the artifact sitting still,
+          //    inverting both. Only `targetId`, `imperative` and `kind` describe
+          //    where to send the human; only those change.
+          //    (Uniqueness is NOT required of it — see INV NODE IDENTITY.)
           epicOrder: resolveEpicOrder(epicOfRef(fromId, index), index),
           goalRank: goalRankOf(fromId, index),
           priority: priorityOf(fromId, index),
@@ -838,6 +839,13 @@ function generateNodes(
     // unapproved spec already emits a spec-approve node; telling the human to
     // implement something they have not signed off would invert the gate.
     if (s.approvalState !== 'approved') continue;
+    // PHASE GATE, and it is load-bearing (#1436 review). `status` alone is too
+    // coarse: the fs-adapter folds the `planning` band (approved, implement not
+    // started) into `implementing` on purpose, so gating on status alone told
+    // the human to "Implement SPEC-X" for specs still being planned — the exact
+    // false signpost DR-069 exists to prevent. A task list is only DUE from the
+    // `tasks` phase onward, so that is where a task hole means anything.
+    if (s.phase !== 'tasks' && s.phase !== 'implement') continue;
     const hole = s.implementHole;
     if (!hole) continue;
 
@@ -848,17 +856,21 @@ function generateNodes(
     const cls: SeverityClass =
       hole.kind === 'unchecked-tasks' ? blockedOrPending(epic) : 'pending';
 
+    // Name the phase the spec is ACTUALLY in. "Implement" is only true once the
+    // implement phase is the live one; during `tasks` the work is the list.
+    const inImplement = s.phase === 'implement';
     const imperative =
-      hole.kind === 'unchecked-tasks' && hole.nextItem
-        ? `Implement ${s.id}: ${hole.nextItem}`
-        : hole.kind === 'unchecked-tasks'
-          ? `Implement ${s.id}`
-          : `Author a task list for ${s.id}`;
+      hole.kind === 'missing-tasks'
+        ? `Break ${s.id} into tasks`
+        : `${inImplement ? 'Implement' : 'Finish the task list for'} ${s.id}${
+            hole.nextItem ? `: ${hole.nextItem}` : ''
+          }`;
 
+    const phaseWord = inImplement ? 'implementing' : 'in the tasks phase';
     const explanation =
       hole.kind === 'unchecked-tasks'
-        ? `${s.id} is implementing with ${hole.remaining} of ${hole.total} tasks open`
-        : `${s.id} is implementing with no task list — progress is untracked`;
+        ? `${s.id} is ${phaseWord} with ${hole.remaining} of ${hole.total} tasks open`
+        : `${s.id} is ${phaseWord} with no task list — progress is untracked`;
 
     ranked.push(
       mkRanked(
