@@ -1,7 +1,7 @@
 ---
 id: SPEC-058
 type: requirements
-status: specifying
+status: planning
 tier: T4
 product: minspec
 epic: EPIC-009  # Team Readiness — sibling of SPEC-039/SPEC-050's docs-lane ergonomics
@@ -21,9 +21,9 @@ affects:
   - packages/minspec/src/lib/approve-push.ts
   - .github/workflows/docs-lane.yml
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
