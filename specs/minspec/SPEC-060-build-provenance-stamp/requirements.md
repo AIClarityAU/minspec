@@ -11,8 +11,18 @@ product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain
 aspects: [provenance, build, packaging, signpost, dogfood, status-bar]
 relates_to: [SPEC-037, SPEC-050, DR-069, DR-003]
-# NOTE: no `implements:` yet — this spec is `specifying` (plan pending), so SPEC-038 FR-3
-# does not apply below the Plan boundary. Ownership is declared at Plan (SPEC-051 DQ-1).
+implements: none
+implements_reason: >-
+  Creates no new source file. `out/build-info.json` is a generated BUILD ARTIFACT, not
+  owned source - it is produced by the packaging step, never hand-edited, and is not a
+  valid owned-code path. Everything else this spec touches already exists and is owned
+  elsewhere (package.json, the dispatch script, spec.ts/lifecycle.ts), so the blast
+  radius goes under `affects:`.
+affects:
+  - packages/minspec/package.json
+  - packages/minspec/src/lib/spec.ts
+  - packages/minspec/src/lib/lifecycle.ts
+  - scripts/dispatch-issue.sh
 phases:
   specify: in-progress
   clarify: pending
