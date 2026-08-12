@@ -435,6 +435,11 @@ function readImplementHole(disc: DiscoveredSpecFile): ImplementHole | undefined 
         total: tally.total + t.total,
         remaining: tally.remaining + t.remaining,
         nextItem: tally.nextItem ?? t.nextItem,
+        // Carry the flag through the merge. Dropping it here would let a
+        // single-file spec whose open tasks are swallowed by an unterminated
+        // fence report "no hole" — the same false all-clear the split branch
+        // guards against, just one layout over.
+        unterminatedFence: tally.unterminatedFence || t.unterminatedFence,
       };
     }
   }

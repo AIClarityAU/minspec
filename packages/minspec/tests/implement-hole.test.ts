@@ -263,6 +263,17 @@ describe('implement hole — single-file layout (no sibling tasks.md)', () => {
     expect(hole.nextItem).toBe('build the thing');
   });
 
+  it('an unterminated fence in a SINGLE-FILE spec also reports a hole, not "all done"', () => {
+    // Same guard as the split branch. The accumulator has to carry the flag
+    // across the section merge, or this layout silently reads as finished.
+    approvedSpec(
+      'SPEC-001',
+      undefined,
+      ['## Tasks', '', '- [x] done before the fence', '```', '- [ ] swallowed'].join('\n'),
+    );
+    expect(specNode('SPEC-001').implementHole).toStrictEqual({ kind: 'missing-tasks' });
+  });
+
   it('a sibling tasks.md WINS over the spec`s own sections', () => {
     approvedSpec('SPEC-001', '- [x] all done in the sibling', ['## Tasks', '', '- [ ] stale inline copy'].join('\n'));
     expect(specNode('SPEC-001').implementHole).toBeUndefined();
