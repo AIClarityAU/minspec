@@ -7,8 +7,19 @@ product: minspec
 epic: EPIC-009  # Team Readiness — sibling of SPEC-039/SPEC-050's docs-lane ergonomics
 aspects: [docs-lane, harness-refresh, auto-merge, git-transparency, tier-0, rcdd]
 relates_to: [SPEC-039, SPEC-050, SPEC-043, SPEC-042, DR-051, DR-078, DR-003]
-# NOTE: no `implements:` yet — this spec is `specifying` (plan pending), so SPEC-038 FR-3
-# does not apply until Plan. Ownership is declared at Plan, per that contract.
+implements: none
+implements_reason: >-
+  Creates no new source file. Every path this spec touches already exists and is owned
+  elsewhere: it changes the docs-lane auto-merge path for DERIVED harness state, and the
+  `.minspec/*.json` files it governs are generated data, not owned code. Modify-don't-own,
+  so the blast radius goes under `affects:` - the same classification sibling SPEC-051
+  reached for the same shape.
+affects:
+  - packages/minspec/src/lib/docs-corpus.ts
+  - packages/minspec/src/commands/commit-on-approve.ts
+  - packages/minspec/src/lib/approval-pr.ts
+  - packages/minspec/src/lib/approve-push.ts
+  - .github/workflows/docs-lane.yml
 phases:
   specify: in-progress
   clarify: pending
