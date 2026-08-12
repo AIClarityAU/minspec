@@ -39,6 +39,12 @@ workflow_push_allowed && exit 0
 # because git has already resolved it; $1 is the fallback, and `origin` the last one.
 push_credential_is_app_token "${2:-${1:-origin}}" || exit 0
 
+# The credential IS an App token — but that only matters if the installation actually
+# lacks `workflows: write`. It no longer does (#1120), so probe before refusing rather
+# than refusing on a premise that expired. Fails CLOSED: an unanswerable probe leaves
+# the original refusal in place.
+workflow_permission_granted && exit 0
+
 # git feeds one line per ref: <local ref> <local sha> <remote ref> <remote sha>
 zero='0000000000000000000000000000000000000000'
 touched=''
