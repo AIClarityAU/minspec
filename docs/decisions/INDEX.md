@@ -141,7 +141,7 @@ DR-008 (accepted) makes unattended claude -p dispatch conditional on **Layer 2**
 
 ## [DR-018 — Licensing — MPL-2.0 for the shared core library, MIT for the extensions, CC-BY-4.0 for content](DR-018.md)
 
-*Status: accepted · Date: 2026-06-01*
+*Status: superseded · Date: 2026-06-01*
 
 <!-- dr-summary:DR-018 auto=6600f9fd3661 -->
 The monorepo ships open-source artifacts of three different kinds, and a single repo-wide license is wrong for all of them at once. The packages are not peers: packages/shared (@aiclarity/shared) is a reusable **library** — the T1–T4 complexity classifier engine plus the contract types — and it is the project's core IP (the classifier is the differentiator over GitHub Spec Kit, and its measurement direction is still an open research question, so improvements to it have outsized value). The two VS…
@@ -642,4 +642,12 @@ commitApproval refuses to commit an approval when HEAD is the push-protected def
 <!-- dr-summary:DR-081 auto=33d8e35e60a7 -->
 Two cuts to ceremony that only ever made sense for a team, with nothing machine-checkable removed. **SPEC-050 is carved out of DR-076's docs-lane park** - it was swept in by a filing error (`epic: EPIC-009`, whose own membership test it fails), not by a decision about solo approval landing. And **an approval-record PR self-exempts from `ai-review`**, returning `neutral` like a machinery PR, because its payload is a generated sidecar plus a `status:` flip with nothing to review; a deterministic `approval-integrity` check takes its place so the PR goes green honestly instead of needing `--admin` every time. The exemption covers the record, never the approvable - DR-047's substance gate is untouched.
 <!-- /dr-summary:DR-081 -->
+
+## [DR-083 — MIT for all code, superseding DR-018's MPL-2.0 core — the copyleft protected an IP position the project no longer holds](DR-083.md)
+
+*Status: proposed · Date: 2026-08-12*
+
+<!-- dr-summary:DR-083 auto=4b2195b31e89 -->
+DR-018 split the repo three ways: **MPL-2.0** for packages/shared, **MIT** for the extensions and tooling, **CC-BY-4.0** for prose. The split existed to protect one thing, and DR-018 says so plainly: packages/shared is *"the project's core IP (the classifier is the differentiator over GitHub Spec Kit)"*, and file-level copyleft was chosen so *"forking the classifier into a proprietary product now requires publishing changes to the shared source files"*.
+<!-- /dr-summary:DR-083 -->
 <!-- minspec:dr-index:end -->
