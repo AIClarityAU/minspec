@@ -2,16 +2,16 @@
 id: SPEC-057
 title: Detect a shared checkout's protected branch sitting ahead of its pushed upstream — an independent second witness to the #1064/#1115 commit-time guard
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 created: 2026-08-07
 epic: EPIC-009  # Team Readiness — session coordination / git transparency (G-8), sibling of DR-080 and SPEC-026
 relates_to: [DR-080, SPEC-050, SPEC-026, DR-051, DR-046, DR-065, DR-066, SPEC-032]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
