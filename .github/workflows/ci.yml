@@ -43,6 +43,16 @@ jobs:
       - name: Check import cycles
         run: npm run check:cycles
 
+      # Nothing else typechecks the source (#1424). `build` is esbuild, which STRIPS
+      # types without checking them; `vitest` transpiles per file for the same reason;
+      # and `build:shared`'s tsc covers only packages/shared. So a TypeScript error could
+      # merge past a fully green suite — and did: #1423 carried a TS2339 through 240/240
+      # test files and 4970 passing tests, caught by an AI reviewer rather than any gate.
+      # Measured 0 pre-existing errors in both packages when this was added, so it is
+      # required from day one rather than advisory-then-ratcheted.
+      - name: Typecheck
+        run: npm run typecheck
+
       # Pure decision logic behind the ai-review label-integrity gate
       # (.github/workflows/ready-to-merge.yml). Lives under .github/scripts so it
       # is outside vitest's packages/* include; run it directly on Node so the
