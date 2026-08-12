@@ -22,15 +22,11 @@ import * as zlib from 'zlib';
 import { execFileSync } from 'child_process';
 import { specHash, getSpecBodyOnly } from '@aiclarity/shared';
 import type { Tier } from './config';
-import { loadConfig } from './config';
 // SPEC-051 lib-boundary ownership guard. spec-validator imports THIS module type-only
 // (`import type { ApprovalStatus }`), which erases at compile time — so this value import
 // creates no runtime cycle. Verified by scripts/check-import-cycles.ts.
-import type { ValidationViolation } from './spec-validator';
-import { violationsIntroducedByApproval } from './spec-validator';
 import { parseSpec } from './spec';
-import { epicRefSet } from './epic-manager';
-import { readShardIdFiles } from './spec-layout';
+import { assertOwnershipDeclaredForAdvance } from './ownership-advance-guard';
 import {
   readRecord,
   writeRecord,
@@ -518,55 +514,6 @@ export function getApprovalRecord(rootDir: string, specFilePath: string): Approv
  * Approval NEVER fails on a mint error — any git/gzip error degrades; the record
  * is written regardless (INV — Non-destructive, AC-1).
  */
-/**
- * SPEC-051 — refuse an approval that would advance a spec into a state its own validator
- * rejects. Throws with the offending rules named; returns silently when the advance is
- * legal.
- *
- * Derives its own config and validation context rather than taking them as parameters:
- * a guard a caller can weaken by omitting an argument is not a guard. `epicRefSet` and
- * `readShardIdFiles` are the same context the command layer supplies — passed here so the
- * lib and the UI cannot reach different verdicts on the same spec.
- *
- * FAILS OPEN on its own infrastructure: if the file cannot be parsed or the config cannot
- * be read, approval proceeds. This gate exists to stop a KNOWN-bad advance, never to make
- * approval unavailable because the guard itself broke — the same fail-open contract the
- * pre-push and pre-commit hooks carry.
- */
-function assertAdvanceIsLegal(rootDir: string, specFilePath: string, raw: string): void {
-  let introduced: ValidationViolation[];
-  try {
-    const parsed = parseSpec(raw);
-    introduced = violationsIntroducedByApproval(parsed, loadConfig(rootDir), {
-      knownEpicRefs: epicRefSet(rootDir),
-      siblingShardFiles: readShardIdFiles(path.dirname(specFilePath)),
-    });
-  } catch (err) {
-    // Fail OPEN, but never SILENTLY. A bare `catch {}` here would make a persistent
-    // parse/config break indistinguishable from "the spec is fine" — a silent gate, which
-    // constitution invariant 2 forbids. Degrading is still correct (this guard exists to
-    // stop a known-bad advance, not to make approval unavailable when the guard itself
-    // breaks), and CI's `validateOwnership` remains the visible backstop — but the degrade
-    // is announced so a recurring one is discoverable rather than invisible.
-    console.warn(
-      `[minspec] ownership pre-check skipped for ${path.basename(specFilePath)} — the ` +
-        `guard could not evaluate it (${err instanceof Error ? err.message : String(err)}). ` +
-        'Approval proceeds; `npm run validate` remains the backstop.',
-    );
-    return;
-  }
-  if (introduced.length === 0) return;
-
-  const detail = introduced.map((v) => `  • ${v.message}\n    ↳ ${v.fixHint}`).join('\n');
-  throw new Error(
-    `Approval refused: ${path.basename(specFilePath)} is not ready for the status it would ` +
-      `be approved into.\n\n${detail}\n\n` +
-      'Approving advances this spec past Clarify, which arms rules that do not apply to it ' +
-      'yet. Fixing this now costs one edit; approving first means the edit lands on an ' +
-      'already-approved spec, staling the approval and needing a second human sign-off.',
-  );
-}
-
 export function approveSpec(
   rootDir: string,
   specFilePath: string,
@@ -616,7 +563,7 @@ export function approveSpec(
   //
   // Placed after the read (not a side effect) and before the hash/mint/write, so a refusal
   // leaves nothing half-written.
-  assertAdvanceIsLegal(rootDir, specFilePath, raw);
+  assertOwnershipDeclaredForAdvance(specFilePath, parseSpec(raw));
 
   const hash = specHash(raw); // canonical-hash boundary (SPEC-022)
 
