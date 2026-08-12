@@ -1,16 +1,22 @@
 ---
 id: SPEC-054
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain — DR-066's own domain (ai-review/ready-to-merge/bumblebee gate incidents)
 aspects: [ci, gates, required-checks, silent-failure, provenance, tier-0, lint, constitution]
 relates_to: [DR-066, DR-063, DR-005, DR-033, DR-055]
+# Ownership declared 2026-08-12 to clear a red `main`: approval flipped `phases.plan` to
+# `in-progress`, arming SPEC-038 FR-3 at `error`. Root cause is a STALE INSTALLED EXTENSION
+# (0.1.26 contains zero occurrences of `violationsIntroducedByApproval`), not a missing gate —
+# the #1317 guard exists on `main` and would have refused this. See the rebuild note in #1418.
+implements: none
+implements_reason: specified but not yet built — approved 2026-08-12 through an extension build (0.1.26, installed 2026-08-06) that predates both the SPEC-038 ownership rule and the #1317 pre-approval guard, so nothing refused the approval and the module paths were never chosen. Declares its owned files at implementation, per the SPEC-034 precedent. Placeholder: replace with real paths at Plan.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
