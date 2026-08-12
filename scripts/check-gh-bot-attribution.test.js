@@ -156,6 +156,18 @@ test('a DECLARED graphql read is not flagged', () => {
   assert.equal(status, 0, `gh_bot_graphql_read is the declaration; got:\n${out}`);
 });
 
+test('a subshell write is flagged when the body contains the letter "n"', () => {
+  // Regression for the `[^\n]*` bug (#1427 review). In POSIX ERE that class means
+  // "not a backslash and not the letter n", so any realistic body — npm, run,
+  // --json, a branch name — evaded the guard under GNU grep while still matching
+  // under this container's ugrep. Pin the realistic spelling, not just the toy one.
+  const { status, out } = runGuard({
+    'sub.sh': '#!/usr/bin/env bash\nbash -c \'npm run build && gh pr merge 1 --squash\'\n',
+  });
+  assert.equal(status, 1, `an "n" in the body must not hide the write; got:\n${out}`);
+  assert.match(out, /NEW shell process/);
+});
+
 test('a write from a NEW shell process is flagged even in a compliant file', () => {
   // #1413: the wrapper is a shell function and does not survive exec, so sourcing
   // and arming do not cure this — it must be reported on its own terms.

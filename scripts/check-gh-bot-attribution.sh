@@ -114,7 +114,18 @@ GRAPHQL_READ_DECL_RE='gh_bot_graphql_read'
 # gap fails loudly instead of writing as the human. Textual and therefore
 # partial — it catches `bash -c '... gh pr comment ...'`, not a write assembled
 # at runtime — but a visible partial beats a silent hole (invariant 2).
-SUBSHELL_WRITE_RE="(bash|sh|zsh)[[:space:]]+-c[^\n]*gh (${GH_BOT_WRITE_NOUNS}) (${GH_BOT_WRITE_VERBS})"
+# `.*`, NOT `[^\n]*`. In POSIX/GNU ERE a backslash inside a bracket expression is
+# literal, so `[^\n]` means "not a backslash and not the letter n" — verified:
+# GNU grep 3.11 does not match `n` against `^[^\n]$`. Any `bash -c` body with an
+# `n` before the write (npm, run, --json, a branch name) therefore slipped
+# through, so the guard silently caught almost nothing while claiming to catch
+# this class (invariant 2). `grep` is line-oriented, so `.` cannot span a newline
+# anyway and `.*` is both correct and portable.
+#
+# It passed locally because this container's `grep` is ugrep, which honours `\n`
+# as a newline escape. CI runs GNU grep. Same shape as the credential false-green
+# in #1401: a local tool that differs from the runner's.
+SUBSHELL_WRITE_RE="(bash|sh|zsh)[[:space:]]+-c.*gh (${GH_BOT_WRITE_NOUNS}) (${GH_BOT_WRITE_VERBS})"
 
 fail=0
 checked=0

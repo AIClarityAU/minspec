@@ -642,4 +642,12 @@ commitApproval refuses to commit an approval when HEAD is the push-protected def
 <!-- dr-summary:DR-081 auto=33d8e35e60a7 -->
 Two cuts to ceremony that only ever made sense for a team, with nothing machine-checkable removed. **SPEC-050 is carved out of DR-076's docs-lane park** - it was swept in by a filing error (`epic: EPIC-009`, whose own membership test it fails), not by a decision about solo approval landing. And **an approval-record PR self-exempts from `ai-review`**, returning `neutral` like a machinery PR, because its payload is a generated sidecar plus a `status:` flip with nothing to review; a deterministic `approval-integrity` check takes its place so the PR goes green honestly instead of needing `--admin` every time. The exemption covers the record, never the approvable - DR-047's substance gate is untouched.
 <!-- /dr-summary:DR-081 -->
+
+## [DR-082 — Agent GitHub writes take a bot identity through a lazy `gh` wrapper that fails closed, and a CI guard enforces it — because the rule already existed as prose and nothing obeyed it](DR-082.md)
+
+*Status: proposed · Date: 2026-08-07*
+
+<!-- dr-summary:DR-082 auto=c66ee732edcf -->
+minspec#995 decided that agent GitHub writes must be bot-attributed. DR-074 decided *where* that rule applies (only in repos with .minspec/). Neither recorded *how*, and the how was left to prose in CLAUDE.md. Prose did not hold. At the time #1355 was filed there were 76 write call sites across 11 paths in scripts/, and **not one** used the App token. Every agent-filed issue, comment, label and merge was recorded as the founder. The notification flood was the visible symptom; the…
+<!-- /dr-summary:DR-082 -->
 <!-- minspec:dr-index:end -->
