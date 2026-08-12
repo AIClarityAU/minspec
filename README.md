@@ -85,12 +85,12 @@ All architectural decisions land in [docs/decisions/](docs/decisions/INDEX.md) a
 
 ## License
 
-Multi-licensed — see [`LICENSE`](LICENSE) and [DR-018](docs/decisions/DR-018.md). Each package's `LICENSE` file is authoritative.
+All code is **MIT** — see [`LICENSE`](LICENSE). Prose is CC-BY-4.0. See [DR-082](docs/decisions/DR-082.md) for why, and [DR-018](docs/decisions/DR-018.md) for the multi-licence scheme it superseded.
 
 | Path | License |
 |---|---|
-| `packages/shared` (classifier engine + contracts) | **MPL-2.0** |
-| `packages/minspec`, `packages/extension-pack` | **MIT** |
+| `packages/shared` (contract types + canonical hashing) | **MIT** |
+| `packages/minspec`, `packages/extension-pack`, `scripts/` | **MIT** |
 | docs / site copy / whitepaper ([`LICENSE-CONTENT`](LICENSE-CONTENT)) | **CC-BY-4.0** |
 
 Publisher: `aiclarity`.
