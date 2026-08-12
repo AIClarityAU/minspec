@@ -29,6 +29,7 @@ import { listOrphanedRecords } from '../packages/minspec/src/lib/approval-store'
 import { checkStatusParity, inspectStatusLine, inspectAllStatusClaims } from '../packages/minspec/src/lib/status-parity';
 import { checkManagedRegionMarkers } from '../packages/minspec/src/lib/scaffold';
 import { checkDeclaredDrIds } from './lib/dr-id-collision';
+import { checkDeclaredSpecIds } from './lib/spec-id-collision';
 import { SELF_HOSTED_TEMPLATE_NAMES } from '../packages/minspec/src/lib/template-registry';
 import { detectTools } from '../packages/minspec/src/lib/tool-detector';
 
@@ -308,6 +309,44 @@ try {
   warn(
     `DR-id uniqueness check could not run (${err instanceof Error ? err.message : String(err)}) — ` +
       'Rule 17 validated NOTHING this run; do not read the green as a collision-free register.',
+  );
+}
+
+// Rule 18 (FATAL, #1418): the spec-side twin of Rule 17 — two spec directories
+// declaring one `id:`, or a spec whose declared `id:` disagrees with its directory.
+//
+// DR ids have been collision-checked since #1226; spec ids were not, and on 2026-08-07
+// FIVE specs simultaneously declared `id: SPEC-052`. Same lost-update cause as the DR
+// case: spec creation hands out `max(existing) + 1` against the LOCAL checkout, and
+// concurrent worktree sessions (#168, the normal mode here) each compute the same number
+// correctly without seeing the other.
+//
+// Fatal rather than a warning, for the reason Rule 17 records: an approval sidecar is
+// keyed by PATH but every human-facing lookup is keyed by ID, so a duplicate makes
+// `facts approval SPEC-NNN` answer about whichever directory it walks first — truthfully
+// about that file, while the maintainer's real approval sits on another. It joined ~110
+// warnings nobody reads is exactly how the DR gap survived; this one starts fatal.
+//
+// The corpus was verified clean (50 specs, zero duplicates, zero id/directory mismatches)
+// before this shipped, so it goes green on landing.
+try {
+  const specsRoot = join(ROOT, 'specs');
+  const specFiles = safeGlob(specsRoot, '.md')
+    .filter((file) => file.endsWith('requirements.md'))
+    .map((file) => ({
+      file: relative(ROOT, file),
+      content: readFileSync(file, 'utf-8'),
+    }));
+  for (const defect of checkDeclaredSpecIds(specFiles)) {
+    fail(join(ROOT, defect.files[0]), `Spec id ${defect.kind} — ${defect.message}`);
+  }
+} catch (err) {
+  // Same fail-visibly discipline as Rule 17 (constitution invariant 2): a swallowed error
+  // would mean this rule validated NOTHING while the build stayed green — indistinguishable
+  // from a corpus with no collisions.
+  warn(
+    `Spec-id uniqueness check could not run (${err instanceof Error ? err.message : String(err)}) — ` +
+      'Rule 18 validated NOTHING this run; do not read the green as a collision-free corpus.',
   );
 }
 
