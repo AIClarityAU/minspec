@@ -29,6 +29,14 @@ set -uo pipefail
 
 REPO="AIClarityAU/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# This script only READS (its GraphQL page and `gh issue view`); all writing is
+# delegated to triage-inbox.sh. It sources the helper for `gh_bot_graphql_read`,
+# the explicit declaration that its GraphQL document is a query (#1411), and arms
+# the wrapper so any future write here is attributed. Sourcing is offline: a
+# read-only run still needs no credential.
+# shellcheck source=scripts/lib/gh-bot.sh
+source "${SCRIPT_DIR}/lib/gh-bot.sh"
+gh_bot_init
 GATE="${SCRIPT_DIR}/dispatch-ready-check.sh"
 TRIAGE="${SCRIPT_DIR}/triage-inbox.sh"
 
@@ -55,7 +63,7 @@ Q='query($c:String){repository(owner:"AIClarityAU",name:"minspec"){issues(first:
 CUR="null"; TOTAL=0
 TARGETS="$(mktemp)"; trap 'rm -f "$TARGETS"' EXIT
 while :; do
-  OUT="$(gh api graphql -f query="$Q" -F c="$CUR" 2>/dev/null)" || { echo "ERROR: GraphQL page failed — stopping rather than acting on a partial view." >&2; exit 1; }
+  OUT="$(gh_bot_graphql_read -f query="$Q" -F c="$CUR" 2>/dev/null)" || { echo "ERROR: GraphQL page failed — stopping rather than acting on a partial view." >&2; exit 1; }
   N="$(printf '%s' "$OUT" | jq '.data.repository.issues.nodes|length')"
   TOTAL=$((TOTAL + N))
   for i in $(seq 0 $((N - 1))); do

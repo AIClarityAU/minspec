@@ -36,6 +36,15 @@
 #   * TEXTUAL, not semantic. It greps for command-shaped lines. A write built by
 #     string concatenation, or dispatched through a variable (`$GH issue ...`),
 #     slips past. This raises the floor; it is not a proof.
+#   * SUBSHELL BYPASS (#1413). The wrapper is a shell FUNCTION, so it covers this
+#     process and its command-substitution subshells — but not a genuinely new
+#     process, e.g. `bash -c 'gh issue comment ...'`, which would call the real
+#     `gh` under whatever credential is ambient. It is deliberately NOT
+#     `export -f`'d: that travels as BASH_FUNC_gh%% into EVERY descendant,
+#     including the `claude -p` agents that are credential-free by design
+#     (INV-5), and it would be bash-only anyway — a partial fix that reads as a
+#     complete one. Instead the guard flags the common spelling below, so the gap
+#     is loud rather than silent.
 #   * Only FULL-LINE comments are stripped. A code line carrying a write-shaped
 #     TRAILING comment (`some_cmd  # then gh pr create`) still matches and would
 #     fail the file. That direction is the safe one — a false FAIL is visible and
@@ -66,6 +75,7 @@ allowlist_reason() {
   case "$1" in
     scripts/approve-issue.sh) echo "human-only by design; APPROVER is the authenticated human (#1355)" ;;
     scripts/review-branch.sh) echo "match is prose inside an agent prompt, not a call site (#1355)" ;;
+    scripts/lib/gh-bot.sh) echo "IS the attribution mechanism — its \`command gh\` calls are the wrapper's own body and cannot source itself (#1411)" ;;
     *) return 1 ;;
   esac
 }
@@ -89,14 +99,22 @@ source "${HERE}/lib/gh-bot.sh"
 # out here and pinned by tests on both sides.
 WRITE_RE="(^|[^[:alnum:]_-])gh (${GH_BOT_WRITE_NOUNS}) (${GH_BOT_WRITE_VERBS})|gh api [^|]*((-X|--method)[= ]*(${GH_BOT_WRITE_METHODS})|--input|-f |-F |--field|--raw-field)"
 
-# `gh api graphql -f query=...` is how BOTH reads and writes are issued, so the
-# regex above over-matches it. Mirror the runtime rule (_gh_bot_is_write): a
-# graphql line counts only when the document is a `mutation`. Without this the
-# guard would demand a bot identity from read-only query scripts, which the
-# runtime would then abort for want of a key — the two must agree exactly, or
-# the disagreement is either a false failure or a hole.
-GRAPHQL_READ_RE='graphql'
-GRAPHQL_WRITE_RE='mutation'
+# GraphQL: a write unless the line DECLARES itself a read (#1411).
+#
+# The old rule keyed on a literal `mutation` token, which a document held in a
+# variable (`-f query="$MUT"`) simply does not have — so a mutation read as a
+# query on both sides and would have shipped as the human. Argv cannot answer
+# this, so the default is now the safe answer and a read must say so by calling
+# `gh_bot_graphql_read`. Mirrors _gh_bot_is_write exactly, in both directions.
+GRAPHQL_LINE_RE='gh api [^|]*graphql'
+GRAPHQL_READ_DECL_RE='gh_bot_graphql_read'
+
+# A write issued from a NEW bash process escapes the wrapper (#1413), because a
+# shell function is not inherited across exec. Flag the common spelling so the
+# gap fails loudly instead of writing as the human. Textual and therefore
+# partial — it catches `bash -c '... gh pr comment ...'`, not a write assembled
+# at runtime — but a visible partial beats a silent hole (invariant 2).
+SUBSHELL_WRITE_RE="(bash|sh|zsh)[[:space:]]+-c[^\n]*gh (${GH_BOT_WRITE_NOUNS}) (${GH_BOT_WRITE_VERBS})"
 
 fail=0
 checked=0
@@ -107,14 +125,36 @@ skipped=""
 while IFS= read -r file; do
   rel="${file#"$ROOT"/}"
 
+  # Checked FIRST and independently of everything below: a write spawned in a new
+  # shell process escapes the wrapper even in a fully compliant file, so sourcing
+  # and arming do not cure it (#1413). Reported separately for that reason.
+  sub_hits="$(grep -nE "$SUBSHELL_WRITE_RE" "$file" 2>/dev/null | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
+  if [[ -n "$sub_hits" ]] && ! allowlist_reason "$rel" >/dev/null; then
+    fail=1
+    echo "FAIL: ${rel} issues a GitHub write from a NEW shell process — the \`gh\` wrapper is a shell function and does not survive exec, so this writes as the human" >&2
+    echo "$sub_hits" | sed 's/^/    /' >&2
+    echo "    Fix: run the write in THIS shell (drop the \`bash -c\`), or have the inner script source lib/gh-bot.sh and call gh_bot_init itself." >&2
+    echo >&2
+  fi
+
   # Strip full-line comments before matching, so a `# ... gh pr create ...`
   # explanation never trips the guard. NOTE the anchor: `grep -n` on a SINGLE
   # file emits "16:# ..." with no filename prefix, so a pattern expecting ":16:"
   # silently filters nothing.
   hits="$(grep -nE "$WRITE_RE" "$file" 2>/dev/null | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
-  # Drop graphql lines that carry no mutation — reads, per the runtime rule above.
-  hits="$(printf '%s' "$hits" | awk -v g="$GRAPHQL_READ_RE" -v m="$GRAPHQL_WRITE_RE" \
-            'NF && !($0 ~ g && $0 !~ m)' || true)"
+
+  # Every `gh api graphql` line is a write UNLESS it declares itself a read.
+  # Two steps, because the main regex reaches graphql lines only when they carry
+  # a body flag: first drop the DECLARED reads, then add back any graphql line
+  # the main regex missed (e.g. a document supplied via --input or stdin).
+  hits="$(printf '%s' "$hits" | awk -v r="$GRAPHQL_READ_DECL_RE" 'NF && $0 !~ r' || true)"
+  extra="$(grep -nE "$GRAPHQL_LINE_RE" "$file" 2>/dev/null \
+             | grep -vE '^[0-9]+:[[:space:]]*#' \
+             | grep -vE "$GRAPHQL_READ_DECL_RE" || true)"
+  if [[ -n "$extra" ]]; then
+    hits="$(printf '%s\n%s' "$hits" "$extra" | awk 'NF' | sort -t: -k1,1n -u)"
+  fi
+
   [[ -n "$hits" ]] || continue
 
   checked=$((checked + 1))
@@ -181,9 +221,15 @@ Fix: source the helper once, near the top of the script, after SCRIPT_DIR is set
     source "${SCRIPT_DIR}/lib/gh-bot.sh"
     gh_bot_init
 
-That exports GH_TOKEN for the whole process, so individual `gh` calls need no
-change. If the script is genuinely a HUMAN action (like approve-issue.sh), add it
-to allowlist_reason() in this file with the reason spelled out.
+That arms a `gh` wrapper for the whole process, so individual `gh` calls need no
+change: reads pass through, and the first WRITE mints a bot token (or aborts).
+
+For a GraphQL line, note that `gh api graphql` counts as a WRITE by default — a
+document held in a variable cannot be classified from argv. If the document is
+provably a query, say so by calling `gh_bot_graphql_read` instead.
+
+If the script is genuinely a HUMAN action (like approve-issue.sh), add it to
+allowlist_reason() in this file with the reason spelled out.
 MSG
   exit 1
 fi

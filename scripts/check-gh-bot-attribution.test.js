@@ -139,14 +139,31 @@ test('a graphql MUTATION is caught', () => {
   assert.equal(status, 1, `a graphql mutation is a write; got:\n${out}`);
 });
 
-test('a graphql QUERY is NOT flagged — the guard must match the runtime rule', () => {
-  // `-f query=` issues reads too (scripts/retriage-unrecorded.sh:58). If the guard
-  // demanded a bot identity here, the runtime would abort a read-only script for
-  // want of a key. Guard and runtime must agree exactly, in both directions.
+test('an UNDECLARED graphql line is flagged — the document may be a mutation', () => {
+  // Inverted in #1411. `-f query="$MUT"` hides the document in a variable, so argv
+  // cannot tell a query from a mutation. The default must therefore be the safe
+  // answer; a read has to declare itself.
   const { status, out } = runGuard({
     'gql.sh': '#!/usr/bin/env bash\nOUT="$(gh api graphql -f query="$Q" -F c="$CUR")"\n',
   });
-  assert.equal(status, 0, `a graphql read must not be flagged; got:\n${out}`);
+  assert.equal(status, 1, `an undeclared graphql line is a write; got:\n${out}`);
+});
+
+test('a DECLARED graphql read is not flagged', () => {
+  const { status, out } = runGuard({
+    'gql.sh': '#!/usr/bin/env bash\nsource "${D}/lib/gh-bot.sh"\ngh_bot_init\nOUT="$(gh_bot_graphql_read -f query="$Q")"\n',
+  });
+  assert.equal(status, 0, `gh_bot_graphql_read is the declaration; got:\n${out}`);
+});
+
+test('a write from a NEW shell process is flagged even in a compliant file', () => {
+  // #1413: the wrapper is a shell function and does not survive exec, so sourcing
+  // and arming do not cure this — it must be reported on its own terms.
+  const { status, out } = runGuard({
+    'sub.sh': '#!/usr/bin/env bash\nsource "${D}/lib/gh-bot.sh"\ngh_bot_init\nbash -c \'gh issue comment 1 --repo o/r --body x\'\n',
+  });
+  assert.equal(status, 1, 'a subshell write escapes the wrapper');
+  assert.match(out, /NEW shell process/);
 });
 
 test('a sibling-path source is accepted (no "lib/" segment to match on)', () => {
