@@ -99,6 +99,16 @@ The issue's defect (a) ("approval sidecar + lifecycle edit written to the shared
 > undeclared spec is not refused, so re-approving after an ordinary edit cannot lock a
 > human out).
 >
+> **`advanceSpecToImplementing` is NOT guarded, and design.md §"Both, not either" plus
+> tasks.md T4.2 still mandate that it should be.** Recording the divergence rather than
+> quietly narrowing the requirement: guarding it needs `spec.ts` to import the validator,
+> but `spec-validator.ts` value-imports `./spec`, so the edge is a real runtime cycle.
+> Breaking it means moving `SPEC_STATUSES`/`SPEC_TYPES`/`stripInlineComment` out of
+> `spec.ts` — a refactor with its own blast radius, not a line of guard code. Its only
+> production caller (`commands/approve.ts:315`) is already refused upstream by #1317, so
+> the residual is a *future direct caller*, not a live hole. T4.2 stays open, filed as
+> [#1446](https://github.com/AIClarityAU/minspec/issues/1446); this spec does not claim it as delivered.
+>
 > Consequence for ceremony: the delivered blast radius is materially narrower than the T4
 > this spec was written at. Kept at T4 rather than re-tiered, because re-tiering is itself
 > a frontmatter edit and would cost a second re-stamp for no behavioural gain.

@@ -541,8 +541,19 @@ function assertAdvanceIsLegal(rootDir: string, specFilePath: string, raw: string
       knownEpicRefs: epicRefSet(rootDir),
       siblingShardFiles: readShardIdFiles(path.dirname(specFilePath)),
     });
-  } catch {
-    return; // guard infrastructure failed — do not block a legal approval
+  } catch (err) {
+    // Fail OPEN, but never SILENTLY. A bare `catch {}` here would make a persistent
+    // parse/config break indistinguishable from "the spec is fine" — a silent gate, which
+    // constitution invariant 2 forbids. Degrading is still correct (this guard exists to
+    // stop a known-bad advance, not to make approval unavailable when the guard itself
+    // breaks), and CI's `validateOwnership` remains the visible backstop — but the degrade
+    // is announced so a recurring one is discoverable rather than invisible.
+    console.warn(
+      `[minspec] ownership pre-check skipped for ${path.basename(specFilePath)} — the ` +
+        `guard could not evaluate it (${err instanceof Error ? err.message : String(err)}). ` +
+        'Approval proceeds; `npm run validate` remains the backstop.',
+    );
+    return;
   }
   if (introduced.length === 0) return;
 
@@ -581,9 +592,18 @@ export function approveSpec(
   // SPEC-051: ownership pre-check, at the LIB boundary for the same reason DR-056's
   // approver gate is here — approval ADVANCES the phase map, and some rules are gated on
   // that map, so a spec can be complete now and violate an error the instant it is
-  // advanced. #1317 closed the UI path (`commands/approve.ts`); this closes every OTHER
-  // caller — a script, a test, a future command, an agent driving the lib. Four red mains
-  // came through that gap.
+  // advanced. #1317 closed the UI path (`commands/approve.ts`); this closes every other
+  // caller OF THIS FUNCTION — a script, a test, a future command, an agent driving
+  // `approveSpec`. Four red mains came through that gap.
+  //
+  // NOT closed here, stated plainly rather than implied: `advanceSpecToImplementing`
+  // (`spec.ts`) is the function that actually WRITES `phases.plan: in-progress`, and it
+  // remains unguarded. Guarding it needs `spec.ts` to import the validator, but
+  // `spec-validator.ts` value-imports `./spec` (`SPEC_STATUSES`, `SPEC_TYPES`,
+  // `stripInlineComment`) — a real runtime cycle, and dodging the cycle checker with a
+  // lazy `require` would hide it rather than remove it. Its ONLY production caller today
+  // is `commands/approve.ts:315`, which #1317 already refuses before reaching. So the
+  // exposure is a future direct caller, not a live hole. Tracked as tasks.md T4.2.
   //
   // Reuses `violationsIntroducedByApproval` rather than a fresh predicate, which buys two
   // deliberate properties for free:
