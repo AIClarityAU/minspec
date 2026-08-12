@@ -292,7 +292,7 @@ describe('shadow-triage — one resolved model id reaches every surface', () => 
     // still resolves, which is only possible if no listing call was attempted.
     const r = spawnSync(
       'bash',
-      ['-c', `source "${LIB}" >/dev/null 2>&1; shadow_resolve_model`],
+      [SHADOW, '--resolve-model'],
       {
         encoding: 'utf-8',
         env: {

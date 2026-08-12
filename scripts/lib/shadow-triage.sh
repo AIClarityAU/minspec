@@ -63,7 +63,8 @@
 #   MINSPEC_SHADOW_TRIAGE_KEY       z.ai API key. ABSENT → the shadow step is skipped
 #                                   with a one-line note and real triage is untouched.
 #   MINSPEC_SHADOW_TRIAGE           set to 0 to hard-disable even with a key present.
-#   MINSPEC_SHADOW_TRIAGE_MODEL     pinned model id (default below).
+#   MINSPEC_SHADOW_TRIAGE_MODEL     model id, or the `latest` sentinel (the default),
+#                                   which the RUNNER resolves per run from /v1/models.
 #   MINSPEC_SHADOW_TRIAGE_BASE_URL  z.ai Anthropic-compatible endpoint.
 #   MINSPEC_SHADOW_TRIAGE_TIMEOUT   hard wall-clock bound, seconds (default 120).
 #   MINSPEC_SHADOW_TRIAGE_LOG       JSONL path (default .minspec/shadow-triage.jsonl).
@@ -83,9 +84,15 @@ SHADOW_TRIAGE_SCHEMA="minspec-shadow-triage/1"
 # MINSPEC_SHADOW_TRIAGE_MODEL still wins, so a specific version can be forced.
 #
 # Measurement integrity is preserved NOT by pinning but by recording the RESOLVED id
-# on every row (#1338): the report groups by model, so a mid-pilot version change
-# splits the sample rather than silently averaging two models together. A log that
-# does not say which model produced a verdict cannot be re-read later.
+# on every row (#1338). The report splits agreement BY MODEL and refuses to report
+# PASS at all when more than one model contributed, so a mid-pilot version change
+# cannot be averaged into a single meaningless figure — see `byModel` and the
+# mixed-model guard in scripts/shadow-triage-report.ts. A log that does not say which
+# model produced a verdict cannot be re-read later.
+#
+# The resolution itself is NETWORK work and therefore lives in the impure runner
+# (`shadow_resolve_model` in scripts/shadow-triage.sh). Only the PURE selection rule
+# below stays here, so this file's "nothing touches the network" contract holds.
 #
 # LITE VARIANTS ARE EXCLUDED. Newest-by-date would eventually select a smaller
 # sibling — a future `glm-5.3-air` or `-turbo` would be newest yet weaker, silently
@@ -139,28 +146,6 @@ print(best[1])
 ' "$SHADOW_TRIAGE_LITE_RE"
 }
 
-# ── shadow_resolve_model — the NETWORK half ──────────────────────────────────
-# Echoes the model id to actually use. An explicit MINSPEC_SHADOW_TRIAGE_MODEL (or
-# any value other than the `latest` sentinel) is returned untouched — no request.
-#
-# FAIL-SAFE, NOT FAIL-CLOSED, and deliberately so: this is a measurement instrument,
-# not a gate (contrast DR-066, which forbids swallowing a load-bearing GATE signal).
-# If the listing cannot be fetched or parsed, this exits non-zero and the CALLER
-# skips the shadow run recording `model-resolve-failed` — it must never fall back to
-# a guessed id, because a row labelled with the wrong model is worse than no row.
-shadow_resolve_model() {
-  local requested; requested="$(shadow_model)"
-  if [[ "$requested" != "latest" ]]; then printf '%s' "$requested"; return 0; fi
-
-  local key base body
-  key="$(shadow_key)"; base="$(shadow_base_url)"
-  [[ -z "$key" ]] && return 1
-  body="$(timeout 20 curl -sS --fail-with-body \
-      "${base%/}/v1/models" \
-      -H "x-api-key: ${key}" \
-      -H "anthropic-version: 2023-06-01" 2>/dev/null)" || return 1
-  printf '%s' "$body" | shadow_pick_latest_model
-}
 shadow_base_url() { printf '%s' "${MINSPEC_SHADOW_TRIAGE_BASE_URL:-$SHADOW_TRIAGE_DEFAULT_BASE_URL}"; }
 shadow_timeout()  { printf '%s' "${MINSPEC_SHADOW_TRIAGE_TIMEOUT:-$SHADOW_TRIAGE_DEFAULT_TIMEOUT}"; }
 
