@@ -1,7 +1,13 @@
 #!/usr/bin/env bash
 # Drive the REAL pre-push hook in a temp repo, exercising the #1120 capability probe.
-WT=/home/jason/code/.worktrees/minspec/gate-1120
-HOOK="$WT/.githooks/pre-push"
+# Derive the repo root from THIS script's location — never a hardcoded absolute path.
+# The first version pinned one developer's worktree, so on CI or any other checkout the
+# hook did not exist, every probe errored, and the "step aside" case failed: a committed
+# test with zero portable coverage. Caught by review on #1460, not by running it.
+SELF_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+REPO_ROOT=$(cd "$SELF_DIR" && git rev-parse --show-toplevel)
+HOOK="$REPO_ROOT/.githooks/pre-push"
+[ -f "$HOOK" ] || { echo "cannot find pre-push hook at $HOOK" >&2; exit 1; }
 ZERO=$(printf '0%.0s' {1..40})
 pass=0; fail=0
 

@@ -9,8 +9,16 @@
 #
 # `workflow_permission_granted` now asks instead of assuming, so the answer stays
 # correct in BOTH directions: it steps aside while the permission is held, and re-blocks
-# by itself if it is ever revoked. It fails CLOSED — an unanswerable probe refuses,
-# because a probe that cannot answer must never be read as a yes.
+# if it is revoked. It fails CLOSED — an unanswerable probe refuses, because a probe that
+# cannot answer must never be read as a yes.
+#
+# HONEST LIMIT on "re-blocks if revoked": a positive verdict is cached for
+# MINSPEC_PERM_TTL (24 h default), so a permission revoked mid-window still yields exit 0
+# until the cache expires, and the server rejects that push instead of this hook. That is
+# a deliberate trade — the alternative is a network call on every workflow push — and it
+# is acceptable only because this guard is ADVISORY: it converts a server rejection into
+# a better local message, it is not an access control. Set MINSPEC_PERM_TTL=0 to probe
+# every time.
 #
 # THE ORIGINAL PROBLEM (#1120). Agent git pushes authenticate as the `minspec-sdd` GitHub
 # App. GitHub treats `.github/workflows/**` as a permission of its own
@@ -204,8 +212,9 @@ workflow_push_allowed() {
 # TIER-0 POSTURE. MinSpec itself makes no network call; this is dev-time tooling in
 # `scripts/`, not shipped extension code, so the constraint does not apply — but the
 # cost is still paid only where it buys something:
-#   • ONLY on the path already about to block (workflow paths touched AND an App
-#     credential). An ordinary push never reaches here.
+#   • ONLY where it earns its cost: the hook calls this AFTER workflow-path detection,
+#     so an ordinary push never reaches it (verified by the call site, not asserted —
+#     the first version claimed this while sitting before the detection loop).
 #   • CACHED for MINSPEC_PERM_TTL seconds (default 24 h) in the git dir, so repeated
 #     pushes cost nothing.
 #   • FAILS CLOSED. No token script, no network, malformed output, or any error ⇒

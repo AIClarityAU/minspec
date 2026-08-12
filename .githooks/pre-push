@@ -39,12 +39,6 @@ workflow_push_allowed && exit 0
 # because git has already resolved it; $1 is the fallback, and `origin` the last one.
 push_credential_is_app_token "${2:-${1:-origin}}" || exit 0
 
-# The credential IS an App token — but that only matters if the installation actually
-# lacks `workflows: write`. It no longer does (#1120), so probe before refusing rather
-# than refusing on a premise that expired. Fails CLOSED: an unanswerable probe leaves
-# the original refusal in place.
-workflow_permission_granted && exit 0
-
 # git feeds one line per ref: <local ref> <local sha> <remote ref> <remote sha>
 zero='0000000000000000000000000000000000000000'
 touched=''
@@ -92,6 +86,16 @@ while read -r _local_ref local_sha _remote_ref remote_sha; do
 done
 
 [ -n "$touched" ] || exit 0
+
+# A workflow file IS touched and the credential IS an App token — the only situation
+# where the probe earns its cost. Placed HERE, after detection, so an ordinary push
+# never makes a network call (the review on #1460 caught the earlier placement, where
+# the comment claimed this and the code did the opposite).
+#
+# The credential mattering depends on whether the installation actually lacks
+# `workflows: write`. It no longer does (#1120), so ask rather than assume. Fails
+# CLOSED: an unanswerable probe leaves the refusal exactly as it was.
+workflow_permission_granted && exit 0
 
 printf '%s' "$touched" | grep -v '^$' | sort -u | workflow_push_refusal
 exit 1
