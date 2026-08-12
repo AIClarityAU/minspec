@@ -6,7 +6,8 @@ tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — a silently-incomplete signpost is a wrong signpost
 relates_to: [SPEC-040, SPEC-017, DR-003, DR-023]
-implements: [packages/minspec/src/lib/spec-manager.ts, packages/minspec/src/views/spec-panel.ts, packages/minspec/src/lib/artifact-graph.ts, packages/minspec/tests/spec-manager.test.ts, packages/minspec/tests/spec-panel-class.test.ts, packages/minspec/tests/features.test.ts]
+implements: [packages/minspec/src/lib/spec-manager.ts, packages/minspec/src/views/spec-panel.ts, packages/minspec/tests/spec-manager.test.ts, packages/minspec/tests/spec-panel-class.test.ts, packages/minspec/tests/features.test.ts]
+affects: [packages/minspec/src/lib/artifact-graph.ts]  # comment-only sweep at artifact-graph.ts:195. Owned elsewhere (SPEC-041 / SPEC-046 affects:) — SPEC-053 modifies, never owns.
 phases:
   specify: in-progress
   clarify: pending
