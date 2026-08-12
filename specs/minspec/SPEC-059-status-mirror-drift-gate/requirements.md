@@ -8,6 +8,18 @@ epic: EPIC-002  # Signpost Integrity
 aspects: [validation, governance, tier-0, spec-gate]
 depends_on: [SPEC-022]  # uses deriveStatus + the status.mirror-drift rule SPEC-022/DR-034 already built
 relates_to: [SPEC-014, SPEC-018, SPEC-010, DR-003, DR-034]
+implements: none
+implements_reason: >-
+  Creates no new source file. FR-2 wires the ALREADY-BUILT `status.mirror-drift` rule
+  (SPEC-022/DR-034, living in spec-validator.ts) onto the corpus surface in
+  validate-frontmatter.ts; FR-1 corrects two `status:` literals, which are spec data,
+  not owned code. Every path this spec touches is modified, never created, and is
+  owned elsewhere — so `implements: none` with the blast radius under `affects:`,
+  matching how sibling SPEC-051 classified the same modify-don't-own shape.
+affects:
+  - packages/minspec/src/lib/spec-validator.ts
+  - scripts/validate-frontmatter.ts
+  - packages/minspec/src/lib/artifact-graph.ts
 ---
 
 # MinSpec — Corpus-wide literal/derived status-mirror gate (Requirements)
@@ -166,6 +178,58 @@ per-spec `(phases, approvalState, explicitTerminal)` triple into the *same*
 - [ ] **AC-7 (FR-5).** The `npm run validate` output includes a total drift count across
   the corpus (e.g. "N specs with status/derived-status mismatch"), not only pass/fail.
 
+## Clarify — resolved
+
+Each decision below was answered by **running the tool**, not by reasoning about it. The
+original open questions and their recommendations are kept verbatim underneath, so the
+reasoning that produced each answer stays auditable.
+
+- **CQ-1 (scope) — RESOLVED: two named specs only.** Recommendation accepted as written.
+  FR-3 already ships the corpus check as WARN, not ERROR, so bounding the *data* fix
+  costs nothing: the gate still surfaces every other instance the moment it lands, and
+  the true corpus scope becomes measured rather than guessed. Broadening here would be
+  the scope-expansion this project's triage rules ask to confirm rather than assume.
+
+- **CQ-2 (what `deriveStatus` computes) — RESOLVED by measurement, and it is neither
+  answer offered.** This question recorded that the tool "has not been executed/observed
+  as part of this Specify pass". It has now been. `npm run facts status`, 2026-08-07:
+
+  | spec | frontmatter `status:` | derived | approval | verdict |
+  |---|---|---|---|---|
+  | SPEC-014 | `implementing` | **`new`** | approved | **DRIFT** |
+  | SPEC-018 | `implementing` | **`new`** | approved | **DRIFT** |
+
+  Not `specifying` (the issue's expectation) and not `planning` (this question's
+  hypothesis) — **`new`**, for both. Per the recorded recommendation the tool's output
+  wins, so FR-1's honest literal is `new`. That the derived value is the *lowest*
+  possible state while the literal claims the *build* state makes the drift wider than
+  the issue assumed, which strengthens FR-2 rather than changing it.
+
+  **The correction is free.** `packages/shared/src/canonical.ts:14` removes exactly the
+  lifecycle keys `status` and `phases` from the hashed bytes, so rewriting `status:` on
+  these two **approved** specs does not stale either approval. FR-1 therefore costs no
+  re-approval — worth stating explicitly, because the opposite assumption would have
+  made this spec look far more expensive than it is.
+
+- **CQ-3 (SPEC-018 shards) — RESOLVED by inspection: all three shards carry the lying
+  literal, none carries `phases:`.** Measured on `main`:
+
+  | file | `status:` | `phases:` block |
+  |---|---|---|
+  | `requirements.md` | `implementing` | none |
+  | `design.md` | `implementing` | none |
+  | `tasks.md` | `implementing` | none |
+
+  So the drift is replicated across all three files, and no shard is phase-bearing
+  today. FR-1 must correct **all three** literals for SPEC-018, not just
+  `requirements.md`, or the spec would leave two of the three still lying. Whether the
+  shards *should* gain their own `phases:` stays a Plan question against
+  `discoverSpecs`/`buildArtifactGraph`, per the original recommendation — but it is no
+  longer load-bearing for FR-1, which is about the literals that exist now.
+
+<details>
+<summary>Original open questions and recommendations (kept verbatim)</summary>
+
 ## Decisions needed (Clarify)
 
 - **Scope of "fix" — two named specs only, or the whole corpus?** The issue's Fix
@@ -202,6 +266,8 @@ per-spec `(phases, approvalState, explicitTerminal)` triple into the *same*
   *Recommendation: confirm at Plan against how `discoverSpecs`/`buildArtifactGraph`
   already resolve split-layout specs (Context) — reuse that answer rather than
   re-deciding it here.*
+
+</details>
 
 ## Invariants (must hold)
 
