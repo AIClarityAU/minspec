@@ -32,6 +32,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { approveSpec } from '../src/lib/approval';
+import { advanceSpecToImplementing } from '../src/lib/spec';
 import { readRecord } from '../src/lib/approval-store';
 
 let tmp: string;
@@ -158,5 +159,37 @@ describe('SPEC-051 — approveSpec refuses to advance a spec into a state it fai
       'id: SPEC-903\ntype: requirements\ntier: T4\nstatus: implementing\nproduct: minspec\nphases:\n  specify: done\n  clarify: done\n  plan: done\n  tasks: done\n  implement: in-progress',
     );
     expect(() => approveSpec(tmp, p, 'T4', 'paul@harvest316.com')).not.toThrow();
+  });
+
+  // ── #1446 / SPEC-051 T4.2: the PHASE WRITER is guarded too ──────────────────
+  // advanceSpecToImplementing is what actually writes `phases.plan: in-progress` — the
+  // state validateOwnership keys on. #1423 could not guard it: spec-validator
+  // value-imported ./spec, so closing the loop was a runtime cycle. Extracting the
+  // vocabulary + epicRefValue to ./spec-vocabulary opened the edge; these pin that the
+  // guard now reaches the writer, and that a refusal leaves the file untouched.
+  it('advanceSpecToImplementing REFUSES an undeclared T4 spec', () => {
+    ratchetToError();
+    const p = writeSpec(
+      'id: SPEC-904\ntype: requirements\ntier: T4\nstatus: specifying\nproduct: minspec\nphases:\n  specify: done\n  clarify: done\n  plan: pending\n  tasks: pending\n  implement: pending',
+    );
+    const before = fs.readFileSync(p, 'utf-8');
+    expect(() => advanceSpecToImplementing(p)).toThrow(/ownership|implements/i);
+    expect(fs.readFileSync(p, 'utf-8'), 'the phase map was written despite refusal').toBe(before);
+  });
+
+  it('advanceSpecToImplementing ALLOWS a declared spec, and writes the phase map', () => {
+    ratchetToError();
+    const p = writeSpec(
+      'id: SPEC-905\ntype: requirements\ntier: T4\nstatus: specifying\nproduct: minspec\nimplements: none\nimplements_reason: policy spec\nphases:\n  specify: done\n  clarify: done\n  plan: pending\n  tasks: pending\n  implement: pending',
+    );
+    expect(() => advanceSpecToImplementing(p)).not.toThrow();
+    expect(fs.readFileSync(p, 'utf-8')).toMatch(/plan:\s*in-progress/);
+  });
+
+  it('advanceSpecToImplementing is silent on the DEFAULT config, like approveSpec', () => {
+    const p = writeSpec(
+      'id: SPEC-906\ntype: requirements\ntier: T4\nstatus: specifying\nproduct: minspec\nphases:\n  specify: done\n  clarify: done\n  plan: pending\n  tasks: pending\n  implement: pending',
+    );
+    expect(() => advanceSpecToImplementing(p)).not.toThrow();
   });
 });

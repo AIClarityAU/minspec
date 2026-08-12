@@ -11,10 +11,14 @@
  */
 
 import type { ParsedSpec, SpecStatus } from './spec';
-import { SPEC_STATUSES, SPEC_TYPES, stripInlineComment } from './spec';
+// From the LEAF, not from './spec' (#1446). This was the only VALUE import of
+// './spec' here, and it was the runtime cycle that kept the SPEC-051 ownership
+// guard out of advanceSpecToImplementing. Type-only imports above are erased at
+// compile time and close nothing.
+import { SPEC_STATUSES, SPEC_TYPES, stripInlineComment, epicRefValue } from './spec-vocabulary';
 import type { Tier, MinspecConfig, Phase } from './config';
 import { TIERS } from './config';
-import { epicRefValue } from './epic-manager';
+
 import {
   deriveStatus,
   phasesForApproval,
