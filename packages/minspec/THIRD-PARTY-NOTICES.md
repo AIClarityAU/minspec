@@ -14,7 +14,7 @@ which esbuild's `--bundle` inlines into `out/extension.js`. It was licensed
 notice naming the covered portions, plus the §3.2 offer of source availability,
 and the package shipped the full MPL text as `LICENSE-THIRD-PARTY-MPL-2.0.txt`.
 
-[DR-082](../../docs/decisions/DR-082.md) relicensed `@aiclarity/shared` to
+[DR-083](../../docs/decisions/DR-083.md) relicensed `@aiclarity/shared` to
 **MIT** on 2026-08-12. Both obligations lapsed with it, so the section and the
 bundled MPL text file were removed. The bundled code and the extension around it
 are now under the same license, stated once in `LICENSE`.

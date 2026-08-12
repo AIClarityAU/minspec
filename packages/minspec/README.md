@@ -247,4 +247,4 @@ MinSpec collects **zero data**. No telemetry, no analytics, no accounts, no back
 
 ## License
 
-MIT, including the bundled `@aiclarity/shared` package. There is no second licence to reason about: DR-082 relicensed `shared` from MPL-2.0 to MIT on 2026-08-12, retiring the file-level-copyleft notice this section used to carry. See the repository `LICENSE`.
+MIT, including the bundled `@aiclarity/shared` package. There is no second licence to reason about: DR-083 relicensed `shared` from MPL-2.0 to MIT on 2026-08-12, retiring the file-level-copyleft notice this section used to carry. See the repository `LICENSE`.

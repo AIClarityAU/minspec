@@ -643,11 +643,11 @@ commitApproval refuses to commit an approval when HEAD is the push-protected def
 Two cuts to ceremony that only ever made sense for a team, with nothing machine-checkable removed. **SPEC-050 is carved out of DR-076's docs-lane park** - it was swept in by a filing error (`epic: EPIC-009`, whose own membership test it fails), not by a decision about solo approval landing. And **an approval-record PR self-exempts from `ai-review`**, returning `neutral` like a machinery PR, because its payload is a generated sidecar plus a `status:` flip with nothing to review; a deterministic `approval-integrity` check takes its place so the PR goes green honestly instead of needing `--admin` every time. The exemption covers the record, never the approvable - DR-047's substance gate is untouched.
 <!-- /dr-summary:DR-081 -->
 
-## [DR-082 — MIT for all code, superseding DR-018's MPL-2.0 core — the copyleft protected an IP position the project no longer holds](DR-082.md)
+## [DR-083 — MIT for all code, superseding DR-018's MPL-2.0 core — the copyleft protected an IP position the project no longer holds](DR-083.md)
 
 *Status: proposed · Date: 2026-08-12*
 
-<!-- dr-summary:DR-082 auto=4b2195b31e89 -->
+<!-- dr-summary:DR-083 auto=4b2195b31e89 -->
 DR-018 split the repo three ways: **MPL-2.0** for packages/shared, **MIT** for the extensions and tooling, **CC-BY-4.0** for prose. The split existed to protect one thing, and DR-018 says so plainly: packages/shared is *"the project's core IP (the classifier is the differentiator over GitHub Spec Kit)"*, and file-level copyleft was chosen so *"forking the classifier into a proprietary product now requires publishing changes to the shared source files"*.
-<!-- /dr-summary:DR-082 -->
+<!-- /dr-summary:DR-083 -->
 <!-- minspec:dr-index:end -->

@@ -85,7 +85,7 @@ All architectural decisions land in [docs/decisions/](docs/decisions/INDEX.md) a
 
 ## License
 
-All code is **MIT** — see [`LICENSE`](LICENSE). Prose is CC-BY-4.0. See [DR-082](docs/decisions/DR-082.md) for why, and [DR-018](docs/decisions/DR-018.md) for the multi-licence scheme it superseded.
+All code is **MIT** — see [`LICENSE`](LICENSE). Prose is CC-BY-4.0. See [DR-083](docs/decisions/DR-083.md) for why, and [DR-018](docs/decisions/DR-018.md) for the multi-licence scheme it superseded.
 
 | Path | License |
 |---|---|

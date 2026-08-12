@@ -45,7 +45,7 @@ the UI is what makes a capability compliant, not the absence of the capability.
   single-writer disk artifacts, version lockstep.
   [DR-018](../decisions/DR-018.md) — licensing: MPL-2.0 shared core, MIT
   extensions, CC-BY-4.0 content. **Superseded by**
-  [DR-082](../decisions/DR-082.md) — all code MIT; content stays CC-BY-4.0.
+  [DR-083](../decisions/DR-083.md) — all code MIT; content stays CC-BY-4.0.
 - **Reference:** `bumblebee` binary at `~/go/bin/bumblebee`, catalogs in
   `~/.cache/bumblebee/catalogs/` — the pre-publish gate per DR-005.
 - **Related (telemetry/upsell consent):** ScroogeLLM's
