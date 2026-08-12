@@ -236,4 +236,198 @@ describe('validateDrAmendments()', () => {
     dr('DR-002', 'accepted', 'This supersedes DR-001 entirely.');
     expect(run()).toEqual([]);
   });
+
+  // ── Frontmatter claims ───────────────────────────────────────────────────
+  /**
+   * A `supersedes_partial: [DR-NNN]` key is the SAME claim as the prose verb, written in
+   * machine-readable form — and `DR_AMENDMENT_RE` structurally cannot see it. The pattern
+   * requires whitespace after the verb, and a YAML key is followed by `_partial` or `:`,
+   * never a space. So every frontmatter-only claim was silently unchecked.
+   *
+   * Not hypothetical: three accepted DRs carry one today (DR-044 → DR-015, DR-049 → DR-044,
+   * DR-081 → DR-076 + DR-047). All four targets happen to acknowledge their amender, so the
+   * gate was green — by coincidence, which is exactly what a FATAL gate must not rest on.
+   *
+   * The frontmatter path is ADDITIVE. Every prose test above must keep passing unchanged,
+   * and a DR stating the same claim in both places must report ONCE, not twice.
+   */
+  function drFm(
+    id: string,
+    status: 'accepted' | 'proposed' | 'superseded',
+    extraFrontmatter: string,
+    body = '',
+  ): void {
+    fs.writeFileSync(
+      path.join(dir, `${id}.md`),
+      `---\nid: ${id}\nstatus: ${status}\ndate: 2026-08-05\ntitle: ${id}\n${extraFrontmatter}\n---\n\n# ${id}\n\n${body}\n`,
+    );
+  }
+
+  it('flags a frontmatter supersedes_partial whose target never mentions it', () => {
+    dr('DR-001', 'accepted', 'The original decision.');
+    drFm('DR-002', 'accepted', 'supersedes_partial: [DR-001]', 'Prose that names no verb.');
+    const gaps = run();
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0]).toMatchObject({
+      source: 'DR-002',
+      target: 'DR-001',
+      relation: 'supersedes_partial',
+    });
+  });
+
+  it('flags a plain frontmatter supersedes key', () => {
+    dr('DR-001', 'accepted', 'The original decision.');
+    drFm('DR-002', 'accepted', 'supersedes: [DR-001]');
+    expect(run()).toMatchObject([{ source: 'DR-002', target: 'DR-001', relation: 'supersedes' }]);
+  });
+
+  it('flags the bare-scalar form, with no brackets', () => {
+    dr('DR-001', 'accepted', 'The original decision.');
+    drFm('DR-002', 'accepted', 'supersedes: DR-001');
+    expect(run().map((g) => `${g.source}->${g.target}`)).toEqual(['DR-002->DR-001']);
+  });
+
+  it('reads every id in a multi-target array', () => {
+    dr('DR-001', 'accepted', 'A.');
+    dr('DR-002', 'accepted', 'B.');
+    drFm('DR-003', 'accepted', 'supersedes_partial: [DR-001, DR-002]');
+    expect(run().map((g) => g.target).sort()).toEqual(['DR-001', 'DR-002']);
+  });
+
+  /**
+   * DR-044 and DR-049 both carry a trailing `# …` note on the key, and those notes name
+   * OTHER DRs. Mining the comment would invent a target the author never claimed — a false
+   * FATAL, on a real corpus row, blocking every commit. Stop at the first `]`.
+   */
+  it('drops an inline trailing comment rather than mining it for targets', () => {
+    dr('DR-001', 'accepted', 'A.');
+    dr('DR-003', 'accepted', 'Untouched by the claim.');
+    drFm('DR-002', 'accepted', 'supersedes_partial: [DR-001]  # caching clause only, DR-003 is unaffected');
+    expect(run().map((g) => g.target)).toEqual(['DR-001']);
+  });
+
+  it('drops a trailing comment on the bare-scalar form too', () => {
+    dr('DR-001', 'accepted', 'A.');
+    dr('DR-003', 'accepted', 'Untouched by the claim.');
+    drFm('DR-002', 'accepted', 'supersedes: DR-001  # not DR-003');
+    expect(run().map((g) => g.target)).toEqual(['DR-001']);
+  });
+
+  it('takes only the FIRST id in an item — a parenthetical is not a second target', () => {
+    dr('DR-001', 'accepted', 'A.');
+    dr('DR-003', 'accepted', 'Untouched by the claim.');
+    drFm('DR-002', 'accepted', 'supersedes_partial: [**DR-001** (superseded in turn by DR-003)]');
+    expect(run().map((g) => g.target)).toEqual(['DR-001']);
+  });
+
+  it('stays silent when the frontmatter target DOES acknowledge the source', () => {
+    dr('DR-001', 'accepted', 'Original. > Amended by DR-002, see there.');
+    drFm('DR-002', 'accepted', 'supersedes_partial: [DR-001]');
+    expect(run()).toEqual([]);
+  });
+
+  /**
+   * THE CROSS-PATH DEDUPE. Prose and frontmatter must funnel through one dedupe key —
+   * `${source}->${target}`, which deliberately omits the relation — so a DR that states its
+   * claim both ways reports once. `relation` pins the ordering: prose runs first, so the
+   * human sentence's verb wins over the key name. Unpinned, a later reorder changes the
+   * output silently.
+   */
+  it('reports ONE gap when the same claim is made in both prose and frontmatter', () => {
+    dr('DR-001', 'accepted', 'Original.');
+    drFm('DR-002', 'accepted', 'supersedes_partial: [DR-001]', 'This amends DR-001 as well.');
+    const gaps = run();
+    expect(gaps).toHaveLength(1);
+    expect(gaps[0].relation).toBe('amends');
+  });
+
+  it('stays silent for a PROPOSED source claiming in frontmatter', () => {
+    dr('DR-001', 'accepted', 'Original, and it does not mention its amender.');
+    drFm('DR-002', 'proposed', 'supersedes_partial: [DR-001]');
+    expect(run()).toEqual([]);
+  });
+
+  it('stays silent for a dangling frontmatter target — Rule 9 owns those', () => {
+    drFm('DR-002', 'accepted', 'supersedes_partial: [DR-999]');
+    expect(run()).toEqual([]);
+  });
+
+  it('ignores a frontmatter self-reference', () => {
+    drFm('DR-002', 'accepted', 'supersedes: [DR-002]');
+    expect(run()).toEqual([]);
+  });
+
+  /**
+   * `superseded_by:` and `amended_by:` point the OTHER way — they ARE the acknowledgement,
+   * not the claim. A prefix or fuzzy key match would read them as claims and invert the
+   * gate, demanding that every amender acknowledge the DR it replaced. Exact keys only.
+   */
+  it.each(['superseded_by: [DR-002]', 'amended_by: [DR-002]', 'supersedes_by: [DR-002]'])(
+    'never sources a claim from the reciprocal key: %s',
+    (key) => {
+      drFm('DR-001', 'accepted', key, 'Original.');
+      dr('DR-002', 'accepted', 'Says nothing about its predecessor.');
+      expect(run().filter((g) => g.source === 'DR-001')).toEqual([]);
+    },
+  );
+
+  it.each(['supersedes_partial: []', 'supersedes: none', 'supersedes_partial: TBD'])(
+    'claims nothing, and does not throw, for the empty or non-id value: %s',
+    (key) => {
+      dr('DR-001', 'accepted', 'Original.');
+      drFm('DR-002', 'accepted', key);
+      expect(run()).toEqual([]);
+    },
+  );
+
+  it('detects a frontmatter claim across slugged filenames, reporting BARE ids', () => {
+    drSlug('DR-001', 'the-original', 'accepted', 'Original.');
+    fs.writeFileSync(
+      path.join(dir, 'DR-002-the-amender.md'),
+      '---\nid: DR-002\nstatus: accepted\ndate: 2026-08-05\ntitle: DR-002\nsupersedes_partial: [DR-001]\n---\n\n# DR-002\n',
+    );
+    const [gap] = run();
+    expect(gap).toMatchObject({ source: 'DR-002', target: 'DR-001' });
+    expect(gap.message).not.toContain('slug');
+  });
+
+  it('is deterministic on the frontmatter path too', () => {
+    dr('DR-001', 'accepted', 'A.');
+    dr('DR-002', 'accepted', 'B.');
+    drFm('DR-003', 'accepted', 'supersedes_partial: [DR-002]', 'amends DR-001');
+    const key = (): string[] => run().map((g) => `${g.source}->${g.target}`);
+    expect(key()).toEqual(key());
+  });
+
+  /**
+   * KNOWN LIMIT (tracked: AIClarityAU/minspec#1448) — the block-list YAML form is invisible.
+   * `parseFrontmatterYaml` matches /^(\w[\w-]*)\s*:\s*(.+)$/, and the `(.+)` requires content
+   * on the same line as the colon, so the key is never captured and the `- DR-NNN` lines
+   * match nothing. This is the same silent-miss shape as the bug above, one level down.
+   * Pinned so nobody mistakes the silence for coverage; no corpus DR uses this form today.
+   */
+  it('KNOWN LIMIT: a block-list frontmatter claim is not seen (#1448)', () => {
+    dr('DR-001', 'accepted', 'Original, unacknowledged.');
+    drFm('DR-002', 'accepted', 'supersedes_partial:\n  - DR-001');
+    expect(run()).toEqual([]);
+  });
+
+  /**
+   * ZERO-NEW-GAPS GUARD, hermetic replica of the three real corpus rows. Each target
+   * already carries a reciprocal note, so the corrected gate must stay silent on all of
+   * them. Cost of the replica form: a future corpus row in a shape not replicated here is
+   * not covered by it — the real corpus is covered by `npm run validate`, which already
+   * makes this FATAL on every commit, so a committed scan of docs/decisions/ would only
+   * add a second red for one cause.
+   */
+  it('stays silent on a replica of the three real corpus rows', () => {
+    dr('DR-015', 'accepted', 'Original. Amended by DR-044.');
+    dr('DR-047', 'accepted', 'Original. Amended by DR-081.');
+    dr('DR-076', 'accepted', 'Original. Amended by DR-081.');
+    drFm('DR-044', 'accepted', 'supersedes_partial: [DR-015]  # config-resolution clause only',
+      'Body. Amended by DR-049.');
+    drFm('DR-049', 'accepted', 'supersedes_partial: [DR-044]  # the ownership clause only');
+    drFm('DR-081', 'accepted', 'supersedes_partial: [DR-076, DR-047]');
+    expect(run()).toEqual([]);
+  });
 });
