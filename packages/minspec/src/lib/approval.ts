@@ -537,7 +537,6 @@ function assertAdvanceIsLegal(rootDir: string, specFilePath: string, raw: string
   let introduced: ValidationViolation[];
   try {
     const parsed = parseSpec(raw);
-    parsed.filePath = specFilePath;
     introduced = violationsIntroducedByApproval(parsed, loadConfig(rootDir), {
       knownEpicRefs: epicRefSet(rootDir),
       siblingShardFiles: readShardIdFiles(path.dirname(specFilePath)),
