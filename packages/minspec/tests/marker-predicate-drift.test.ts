@@ -39,6 +39,8 @@ const SEARCH_ROOTS = [
 const ALLOWLIST: Record<string, string> = {
   'scripts/dispatch-issue.sh':
     '#1445 — dispatch pipeline, a different surface from ai-review; these two sed calls feed a rendered summary, not a merge-gating label.',
+  'scripts/review-decide.sh':
+    '#1157 — the AMBIGUITY COUNTER is broad BY DESIGN and must stay so; see the asymmetry test below. Its extractor IS anchored.',
 };
 
 const MARKER = /REVIEW_VERDICT_BEGIN|REVIEW_VERDICT_END|REVIEW_UNAVAILABLE_BEGIN|REVIEW_UNAVAILABLE_END/;
@@ -99,6 +101,34 @@ describe('control-marker predicates are anchored and agree (#1157)', () => {
       expect(fs.existsSync(path.join(REPO, file)), `${file} is allowlisted but missing`).toBe(true);
       expect(reason, `${file}'s allowlist entry must cite an issue`).toMatch(/#\d+/);
     }
+  });
+
+  it('the ambiguity COUNTER stays broad while the EXTRACTOR stays anchored', () => {
+    // The asymmetry is the security property, and it is counter-intuitive enough that
+    // it was already broken once by a change that looked like a consistency cleanup.
+    // Anchoring the counter hides a reviewer's DECORATED marker (`**...**`, a trailing
+    // word, a heading) while an injected canonical block still counts — the count lands
+    // on 1, the guard passes, and the extractor reads the attacker's block. That is a
+    // false GREEN on a merge gate. This test exists to fail if anyone "tidies" it.
+    const src = fs.readFileSync(path.join(REPO, 'scripts/review-decide.sh'), 'utf-8');
+
+    const counter = src.split('\n').find((l) => l.includes('BEGIN_COUNT='));
+    expect(counter, 'BEGIN_COUNT assignment not found — did the gate get restructured?').toBeDefined();
+    expect(
+      counter,
+      'The ambiguity counter must NOT use the anchored predicate. A decorated reviewer ' +
+        'marker would stop counting, letting an injected canonical block become the only ' +
+        'counted block and decide the label. Keep the broad substring match.',
+    ).not.toMatch(/\[\[:space:\]\]|\$BEGIN_RE/);
+    expect(counter).toMatch(/grep -c\s+'REVIEW_VERDICT_BEGIN'/);
+
+    // The extractor, by contrast, must stay strict.
+    const extractor = src.split('\n').find((l) => l.includes('BLOCK=') && l.includes('sed'));
+    expect(extractor, 'BLOCK extractor not found').toBeDefined();
+    expect(
+      extractor,
+      'The extractor must stay anchored so a prose mention cannot start a block.',
+    ).toMatch(/\$BEGIN_RE|\[\[:space:\]\]/);
   });
 
   it('review-decide.sh and review-pr.sh agree on the predicate', () => {

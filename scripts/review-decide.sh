@@ -87,10 +87,36 @@ fi
 # `pass` instead of the reviewer's `changes`. Any count != 1 is anomalous
 # (injection echo, a malformed double-emit, or a truncated block) → distrust the
 # whole thing and block. Counted over the RAW input, not the sed-joined BLOCK, so a
-# quoted block that never closed its END still trips this. Counted with the SAME
-# whole-line predicate the extractor uses (see the marker definition above), so an
-# inline citation of the token in prose is not mistaken for a second block (#1157).
-BEGIN_COUNT="$(printf '%s\n' "$INPUT" | grep -cE "$BEGIN_RE" || true)"
+# quoted block that never closed its END still trips this.
+#
+# ── this counter is DELIBERATELY BROAD, and must stay that way ────────────────
+# It does NOT use $BEGIN_RE. The extractor and this counter answer different
+# questions and must be ASYMMETRIC:
+#
+#   extractor  — "which text is the verdict?"      → STRICT. A prose mention must
+#                                                     not start a block.
+#   this count — "is it ambiguous which block is
+#                 the verdict?"                    → BROAD. ANYTHING that looks
+#                                                     remotely like a second marker
+#                                                     is a reason to distrust.
+#
+# Anchoring this one too was a real false-green, caught before merge: the reviewer's
+# own marker line is free-form LLM markdown, so it may arrive decorated
+# (`**REVIEW_VERDICT_BEGIN**`, a trailing word, a `## ` heading) — and an untrusted
+# diff can ASK for that decoration. Under an anchored count the reviewer's decorated
+# marker becomes invisible while an injected canonical block still counts, so the
+# count lands on 1, this guard passes, and the extractor reads the ATTACKER's block.
+# Measured: reviewer honestly emits `verdict: changes, blocking: 3` with bolded
+# markers alongside an injected `verdict: pass` block → gate returned
+# `ai-review:pass`. Broad counting returns `changes`.
+#
+# The asymmetry costs a false `ai-review:changes` when a reviewer names the token in
+# prose without a second block present (the reviewer half of #1157, still open). That
+# is fail-CLOSED and merely annoying; the anchored version was fail-OPEN on a merge
+# gate. Never trade the second for the first. The real fix is to defang markers in the
+# untrusted diff before the agent ever reads them, so an honest reviewer has no live
+# marker to echo — see the pattern at dispatch-ready-check.sh:396.
+BEGIN_COUNT="$(printf '%s\n' "$INPUT" | grep -c 'REVIEW_VERDICT_BEGIN' || true)"
 if [[ "$BEGIN_COUNT" -ne 1 ]]; then
   echo "ai-review:changes"   # >1 verdict block → ambiguous/injected → fail closed
   exit 0
