@@ -653,7 +653,7 @@ minspec#995 decided that agent GitHub writes must be bot-attributed. DR-074 deci
 
 ## [DR-083 — MIT for all code, superseding DR-018's MPL-2.0 core — the copyleft protected an IP position the project no longer holds](DR-083.md)
 
-*Status: proposed · Date: 2026-08-12*
+*Status: accepted · Date: 2026-08-12*
 
 <!-- dr-summary:DR-083 auto=4b2195b31e89 -->
 DR-018 split the repo three ways: **MPL-2.0** for packages/shared, **MIT** for the extensions and tooling, **CC-BY-4.0** for prose. The split existed to protect one thing, and DR-018 says so plainly: packages/shared is *"the project's core IP (the classifier is the differentiator over GitHub Spec Kit)"*, and file-level copyleft was chosen so *"forking the classifier into a proprietary product now requires publishing changes to the shared source files"*.
