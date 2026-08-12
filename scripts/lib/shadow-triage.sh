@@ -1,10 +1,11 @@
 #!/usr/bin/env bash
 # scripts/lib/shadow-triage.sh — pure seams for the GLM shadow-triage instrument (#1338).
 #
-# This library holds ONLY pure functions: environment construction, argv construction,
-# repo-visibility policy, and field/agreement projection. Nothing here runs an agent,
-# writes a file, or touches the network. `scripts/shadow-triage.sh` is the impure
-# runner that composes them; the split exists so the security property below is
+# This library holds ONLY pure functions: request construction, response parsing,
+# model selection, repo-visibility policy, and field/agreement projection. Nothing
+# here writes a log row or decides anything; `shadow_http` / `shadow_resolve_model`
+# are the only functions that touch the network. `scripts/shadow-triage.sh` is the
+# impure runner that composes them; the split exists so the security property below is
 # testable as BEHAVIOUR rather than asserted by grepping a script for its own text.
 #
 # ══════════════════════════════════════════════════════════════════════════════
@@ -25,62 +26,88 @@
 # comment, or a dispatch.
 #
 # ══════════════════════════════════════════════════════════════════════════════
-# THE SECURITY PROPERTY — credential isolation (the single most important thing here)
+# THE TRANSPORT: a direct HTTPS request, NOT `claude -p` — and why that is SAFER
 # ══════════════════════════════════════════════════════════════════════════════
-# The shadow call points ANTHROPIC_BASE_URL at z.ai. If an Anthropic credential is
-# reachable at that moment, `claude -p` sends the founder's token TO A THIRD-PARTY
-# SERVER — a credential exfiltration, and far worse than any quota jam. There are TWO
-# distinct reachable credentials, and scrubbing the environment only closes one:
+# This instrument used to shell out to `claude -p` with ANTHROPIC_BASE_URL pointed at
+# z.ai. It cannot: measured on the operator box 2026-08-07, all three routes are dead.
 #
-#   1. ENVIRONMENT — CLAUDE_CODE_OAUTH_TOKEN / ANTHROPIC_API_KEY / ANTHROPIC_AUTH_TOKEN
-#      inherited from the operator's shell. Closed by `env -u` in shadow_build_env.
+#   `--bare` + ANTHROPIC_API_KEY=<z.ai key>   → "Invalid API key · Fix external API key"
+#   `--bare` + apiKeyHelper via --settings    → same
+#   no `--bare`, Anthropic env scrubbed       → IGNORED ANTHROPIC_BASE_URL and hit
+#                                               api.anthropic.com on the STORED
+#                                               credential, erroring "issue with the
+#                                               selected model (glm-5.2)"
 #
-#   2. THE ON-DISK CREDENTIAL STORE — `~/.claude/.credentials.json` (present on the
-#      operator box: 827 bytes, mode 600) plus the OS keychain. `env -u` CANNOT touch
-#      these, and an unauthenticated `claude -p` falls straight back to them.
+# The likely cause of the rejection is shape: a z.ai key is 49 characters and does not
+# carry Anthropic's `sk-ant-` prefix. Whatever the cause, the CLI is not a usable
+# client for this endpoint, so the transport is now a direct POST to /v1/messages.
 #
-# Measured on this box, not inferred — three probes against an unreachable base URL:
+# READ THE REMOVAL OF THE OLD SCRUB AS A STRENGTHENING, NOT A WEAKENING. The previous
+# apparatus — `--bare`, plus a long `env -u` list — existed for exactly one reason: a
+# CLI resolves credentials BY ITSELF. It reads ~/.claude/.credentials.json, the OS
+# keychain, ANTHROPIC_AUTH_TOKEN, a header bag, Bedrock/Vertex switches; the scrub was
+# a running attempt to enumerate and close every one of those doors, and it could only
+# ever be as complete as the enumeration (route 3 above is that enumeration failing in
+# practice — the CLI ignored the base URL and used the stored token anyway).
 #
-#   claude -p --bare  (no key in env)   → "Not logged in · Please run /login"
-#   claude -p --bare  (fake key in env) → "Invalid API key · Fix external API key"
-#   claude -p         (no key in env)   → answered normally
+# `curl` resolves nothing. It sends the bytes it is given. This request carries EXACTLY
+# ONE credential header, `x-api-key`, holding the z.ai key, and there is no code path by
+# which an Anthropic credential could join it: not from the environment (curl does not
+# read ANTHROPIC_*), not from disk (--disable ignores ~/.curlrc), not from a redirect
+# (--location is deliberately never passed, so the header cannot be replayed to another
+# host). The old exfiltration hazard is not mitigated here — it is structurally absent.
 #
-# The third probe is the hazard, demonstrated: with no `--bare`, the CLI silently
-# used the stored subscription credential. `--bare` is therefore LOAD-BEARING, not a
-# tidy-up — its documented contract (`claude --help`) is "Anthropic auth is strictly
-# ANTHROPIC_API_KEY or apiKeyHelper via --settings (OAuth and keychain are never
-# read)". Removing `--bare` from shadow_build_argv reopens the exfiltration path even
-# with every `env -u` below intact. Both halves are asserted in
-# packages/minspec/tests/shadow-triage-isolation.test.ts.
+# A second, quieter gain: the shadow path no longer runs `claude` at all, so it cannot
+# consume the very Anthropic quota (#1234) this instrument exists to help relieve.
 #
 # Related standing rule this honours: never route Claude subscription auth through a
-# third-party proxy. Using z.ai with z.ai's OWN key is the sanctioned path; inheriting
-# Anthropic auth is not.
+# third-party proxy. Using z.ai with z.ai's OWN key is the sanctioned path.
+#
+# ══════════════════════════════════════════════════════════════════════════════
+# THE KEY NEVER ENTERS ARGV
+# ══════════════════════════════════════════════════════════════════════════════
+# `/proc/<pid>/cmdline` is world-readable, so `-H "x-api-key: $KEY"` publishes the key
+# to every local user for the life of the request. That is a real finding, not a
+# hypothetical: the security reviewer flagged exactly that shape as `low` on the
+# model-resolution change that first introduced a curl call here.
+#
+# So every request is issued as `curl --config -` with the headers written to STDIN by
+# bash's `printf` BUILTIN — a builtin forks no process and therefore has no cmdline,
+# and the pipeline's subshell inherits the parent's unchanged cmdline. Verified by
+# observation on this box: with a sentinel key fed this way, /proc/<curl>/cmdline read
+# `curl --disable --silent --show-error … <url>` and the sentinel appeared in no
+# process's cmdline at all. Asserted in shadow-triage-isolation.test.ts against BOTH a
+# stub curl (which records the argv it really received) and a live curl read out of
+# /proc while a request is in flight.
 #
 # ══════════════════════════════════════════════════════════════════════════════
 # CONFIGURATION (all optional; the instrument is INERT until the key is set)
 # ══════════════════════════════════════════════════════════════════════════════
-#   MINSPEC_SHADOW_TRIAGE_KEY       z.ai API key. ABSENT → the shadow step is skipped
-#                                   with a one-line note and real triage is untouched.
-#   MINSPEC_SHADOW_TRIAGE           set to 0 to hard-disable even with a key present.
-#   MINSPEC_SHADOW_TRIAGE_MODEL     pinned model id (default below).
-#   MINSPEC_SHADOW_TRIAGE_BASE_URL  z.ai Anthropic-compatible endpoint.
-#   MINSPEC_SHADOW_TRIAGE_TIMEOUT   hard wall-clock bound, seconds (default 120).
-#   MINSPEC_SHADOW_TRIAGE_LOG       JSONL path (default .minspec/shadow-triage.jsonl).
+#   MINSPEC_SHADOW_TRIAGE_KEY         z.ai API key. ABSENT → the shadow step is skipped
+#                                     with a one-line note and real triage is untouched.
+#   MINSPEC_SHADOW_TRIAGE             set to 0 to hard-disable even with a key present.
+#   MINSPEC_SHADOW_TRIAGE_MODEL       explicit model id; overrides `latest` resolution.
+#   MINSPEC_SHADOW_TRIAGE_BASE_URL    z.ai Anthropic-compatible endpoint.
+#   MINSPEC_SHADOW_TRIAGE_TIMEOUT     hard wall-clock bound, seconds (default 120).
+#   MINSPEC_SHADOW_TRIAGE_MAX_TOKENS  response cap (default 1024 — see below).
+#   MINSPEC_SHADOW_TRIAGE_LOG         JSONL path (default .minspec/shadow-triage.jsonl).
 
 # shellcheck shell=bash
 
 SHADOW_TRIAGE_SCHEMA="minspec-shadow-triage/1"
 
 # ── Model selection: resolve "latest", never pin a version ───────────────────
-# "z.ai" is not a model, and it publishes NO floating alias — verified 2026-08-07
-# against a live key: GET /v1/models returns only concrete ids (glm-4.5, glm-4.5-air,
-# glm-4.6, glm-4.7, glm-5, glm-5-turbo, glm-5.1, glm-5.2), with no `latest` entry.
-# So "always use their latest" cannot be a pin; it must be RESOLVED per run.
+# "z.ai" is not a model, and it publishes NO floating alias. Captured from the live
+# endpoint on 2026-08-07 (`GET /v1/models`): only concrete ids come back — glm-4.5,
+# glm-4.5-air, glm-4.6, glm-4.7, glm-5, glm-5-turbo, glm-5.1, glm-5.2 — with no
+# `latest` entry. That captured response is committed verbatim as this resolver's
+# fixture in shadow-triage-isolation.test.ts, alongside the command that re-captures
+# it, so this paragraph is checkable rather than merely asserted.
 #
-# The default is therefore the sentinel `latest`, resolved by `shadow_resolve_model`
-# from the newest `created_at` in that listing. An explicit
-# MINSPEC_SHADOW_TRIAGE_MODEL still wins, so a specific version can be forced.
+# So "always use their latest" cannot be a pin; it must be RESOLVED per run. The
+# default is therefore the sentinel `latest`, resolved by `shadow_resolve_model` from
+# the newest `created_at` in that listing. An explicit MINSPEC_SHADOW_TRIAGE_MODEL
+# still wins, so a specific version can be forced.
 #
 # Measurement integrity is preserved NOT by pinning but by recording the RESOLVED id
 # on every row (#1338): the report groups by model, so a mid-pilot version change
@@ -98,18 +125,209 @@ SHADOW_TRIAGE_LITE_RE='-(air|turbo|flash|mini|lite)$'
 SHADOW_TRIAGE_DEFAULT_BASE_URL="https://api.z.ai/api/anthropic"
 SHADOW_TRIAGE_DEFAULT_TIMEOUT="120"
 
-shadow_key()      { printf '%s' "${MINSPEC_SHADOW_TRIAGE_KEY:-}"; }
-shadow_model()    { printf '%s' "${MINSPEC_SHADOW_TRIAGE_MODEL:-$SHADOW_TRIAGE_DEFAULT_MODEL}"; }
+# ── max_tokens: 1024, chosen against a measurement ───────────────────────────
+# MEASURED 2026-08-07 against the live endpoint, with the real scripts/roles/triage.md
+# as `system` and a one-line issue as the user turn: the whole verdict block cost
+# 51 output tokens (1826 in). 1024 is ~20x that, and both bounds are deliberate:
+#
+#   TOO TIGHT would corrupt the metric this instrument exists to produce. Conformance
+#   tolerates prose around the block (`shadow_block_conformant` scans for the
+#   sentinels), so a model that thinks aloud for a paragraph first would be cut off
+#   MID-BLOCK and recorded as `conformant:false` — a transport artefact scored as a
+#   GLM schema failure, feeding straight into #1338's 2% malformed-rate rollback
+#   trigger. A cap tuned to the happy path measures the cap, not the model.
+#
+#   TOO LOOSE (4k, 8k) buys nothing: the gate discards every token outside the block,
+#   so the extra budget can only fund an essay nobody reads, on a third party's quota,
+#   on every triaged issue.
+#
+# And if 1024 is ever wrong, the log SAYS so rather than absorbing it: a response with
+# `stop_reason: "max_tokens"` that failed conformance is recorded as the typed error
+# `truncated`, which the report counts as an endpoint error and therefore excludes
+# from the malformed rate. Override with MINSPEC_SHADOW_TRIAGE_MAX_TOKENS.
+SHADOW_TRIAGE_DEFAULT_MAX_TOKENS="1024"
+
+shadow_key()        { printf '%s' "${MINSPEC_SHADOW_TRIAGE_KEY:-}"; }
+shadow_model()      { printf '%s' "${MINSPEC_SHADOW_TRIAGE_MODEL:-$SHADOW_TRIAGE_DEFAULT_MODEL}"; }
+shadow_base_url()   { printf '%s' "${MINSPEC_SHADOW_TRIAGE_BASE_URL:-$SHADOW_TRIAGE_DEFAULT_BASE_URL}"; }
+shadow_timeout()    { printf '%s' "${MINSPEC_SHADOW_TRIAGE_TIMEOUT:-$SHADOW_TRIAGE_DEFAULT_TIMEOUT}"; }
+shadow_max_tokens() { printf '%s' "${MINSPEC_SHADOW_TRIAGE_MAX_TOKENS:-$SHADOW_TRIAGE_DEFAULT_MAX_TOKENS}"; }
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TRANSPORT SEAMS
+# ══════════════════════════════════════════════════════════════════════════════
+
+# ── shadow_curl_config — the ONLY place the credential appears ────────────────
+# Emits curl's config-file syntax on stdout, to be piped into `curl --config -`.
+#
+# The key is read from the environment HERE rather than passed in by a caller, so no
+# call site ever needs to hold it: there is exactly one expression in this codebase
+# that names the key, and it writes to a pipe. `printf` is a bash BUILTIN — it forks
+# nothing, so this never becomes a process with a cmdline for `ps` to show.
+#
+# NEVER add a debug seam that prints this. The absence of one is the point.
+shadow_curl_config() {
+  printf 'header = "x-api-key: %s"\n' "$(shadow_key)"
+  printf 'header = "anthropic-version: 2023-06-01"\n'
+  printf 'header = "content-type: application/json"\n'
+}
+
+# ── shadow_curl_argv — the request line, provably credential-free ─────────────
+# Populates SHADOW_CURL_ARGV for `<url> <out_file> <timeout> [post_body_file]`.
+# Nothing secret is placed here, and that is asserted behaviourally, not in a comment.
+#
+# Flags, each load-bearing:
+#   --disable          ignore ~/.curlrc, which could otherwise inject an Authorization
+#                      header or turn on redirect-following behind our back. curl
+#                      requires it to be the first argument.
+#   --config -         headers arrive on STDIN (see shadow_curl_config).
+#   --output FILE      the body goes to a file, so stdout carries ONLY the status code
+#                      and one can never be mistaken for the other by a parse.
+#   --write-out        the HTTP status, needed to type an error the body does not name.
+#   --max-time         curl's own bound, inside the runner's `timeout` wrapper.
+#   (no --location)    redirects are NOT followed. Following one would replay the
+#                      x-api-key header to whatever host the redirect named.
+shadow_curl_argv() {
+  local url="$1" out_file="$2" timeout_s="$3" post_body_file="${4:-}"
+  SHADOW_CURL_ARGV=(
+    curl
+    --disable
+    --silent --show-error
+    --max-time "$timeout_s"
+    --output "$out_file"
+    --write-out '%{http_code}'
+    --config -
+  )
+  if [[ -n "$post_body_file" ]]; then
+    SHADOW_CURL_ARGV+=(--request POST --data-binary "@${post_body_file}")
+  fi
+  SHADOW_CURL_ARGV+=("$url")
+}
+
+# ── shadow_http — issue one request; echo the HTTP status ─────────────────────
+# The single place the config pipe is wired to curl. Returns the exit status of the
+# request; curl's stderr is discarded so a vendor diagnostic can never carry request
+# detail into a log.
+#
+# Belt AND braces on the clock: curl's own `--max-time` runs INSIDE an external
+# `timeout` of the same bound, because a curl that wedges before its timer is armed
+# would otherwise have no cap at all — and an unbounded instrument becomes a latency
+# dependency of the real triage it is only supposed to watch. Both routes surface as
+# a single `timeout` reason to a reader of the log (124 from timeout, 28 from curl).
+shadow_http() {
+  local url="$1" out_file="$2" timeout_s="$3" post_body_file="${4:-}"
+  shadow_curl_argv "$url" "$out_file" "$timeout_s" "$post_body_file"
+  shadow_curl_config | timeout "$timeout_s" "${SHADOW_CURL_ARGV[@]}" 2>/dev/null
+}
+
+# ── shadow_request_body — the /v1/messages payload (pure) ─────────────────────
+# Shape verified against the live endpoint 2026-08-07: this exact body, with the real
+# scripts/roles/triage.md as `system`, returned a well-formed verdict block.
+#
+# `system` carries the role file and the user turn carries the issue text, mirroring
+# how the live triage call splits them (`--system-prompt-file` plus the prompt). A
+# shadow run that differed in task shape would measure a different task, and its
+# agreement number would not be evidence about anything the pilot cares about.
+#
+# Both are passed as FILES and read by jq's --rawfile, never interpolated: the issue
+# body is untrusted text and must not be able to close a string and inject JSON.
+shadow_request_body() {
+  local model="$1" max_tokens="$2" system_file="$3" prompt_file="$4"
+  jq -c -n \
+    --arg     model      "$model" \
+    --argjson max_tokens "$max_tokens" \
+    --rawfile system     "$system_file" \
+    --rawfile prompt     "$prompt_file" \
+    '{model: $model,
+      max_tokens: $max_tokens,
+      system: $system,
+      messages: [{role: "user", content: $prompt}]}'
+}
+
+# ── shadow_extract_text — assistant text out of the response (pure) ───────────
+# Reads a /v1/messages response on stdin; writes the concatenated `content[].text` to
+# stdout. Exit 1 when there is no assistant text to be had — a malformed body, an
+# error envelope, or an empty content array.
+#
+# THIS is what reaches the gate. Feeding the raw response JSON to `triage-decide.sh`
+# would appear to work today (the sentinels are still findable inside the JSON string)
+# and would break the instant a verdict arrived with an escaped newline in it, so the
+# extraction is explicit and its failure is a recorded reason rather than a silently
+# empty verdict.
+shadow_extract_text() {
+  local text
+  text="$(jq -j '
+    if (.content? | type) == "array"
+    then [ .content[] | select((.type? == "text") and ((.text? | type) == "string")) | .text ] | join("")
+    else empty end
+  ' 2>/dev/null)" || return 1
+  [[ -z "${text//[[:space:]]/}" ]] && return 1
+  printf '%s' "$text"
+}
+
+# ── shadow_stop_reason — why generation ended (pure) ──────────────────────────
+# Empty string when absent or unparseable. Read to tell a TRUNCATED response apart
+# from a model that genuinely failed the schema; see the max_tokens note above.
+shadow_stop_reason() {
+  jq -r 'if (.stop_reason? | type) == "string" then .stop_reason else "" end' 2>/dev/null || printf ''
+}
+
+# ── shadow_classify_error — a TYPED reason, never a mistaken verdict ──────────
+# Reads a response body on stdin, takes the HTTP status as $1. Exit 0 with a short
+# machine-stable reason on stdout when the body is an error; exit 1 when it is not.
+#
+# z.ai returns TWO different error envelopes, both observed live on 2026-08-07:
+#
+#   HTTP 400  {"type":"error","error":{"type":"invalid_request_error","code":"1211",
+#              "message":"[1211][Unknown Model, please check the model code.][…]"}}
+#   HTTP 401  {"error":{"message":"token expired or incorrect","type":"401"}}
+#
+# The second has NO top-level `"type":"error"`, so keying on that alone would let an
+# auth failure through as a "response" whose content array happens to be missing — the
+# row would then read `conformant:false` and count against GLM's schema discipline.
+# Hence the test is the presence of an `error` OBJECT, either envelope.
+#
+# The MESSAGE is deliberately not carried into the reason: it is vendor prose of
+# unbounded length and the one field that could conceivably echo request detail back
+# at us. Only the code / type / status — enough to group by in the report.
+shadow_classify_error() {
+  local status="${1:-}" body reason
+  body="$(cat)"
+  [[ -z "${body//[[:space:]]/}" ]] && { printf 'empty-response'; return 0; }
+
+  reason="$(printf '%s' "$body" | jq -r '
+    if (.error? | type) == "object"
+    then ((.error.code? // .error.type? // "unknown") | tostring)
+    else empty end
+  ' 2>/dev/null)"
+
+  if [[ -n "$reason" ]]; then
+    printf 'api-error:%s' "$reason"
+    return 0
+  fi
+
+  # Not an error envelope. Two remaining non-verdict cases, kept apart because they
+  # point at different faults: a body that is not JSON at all (gateway, HTML error
+  # page) versus well-formed JSON returned under a non-2xx status.
+  if ! printf '%s' "$body" | jq -e . >/dev/null 2>&1; then
+    if [[ "$status" =~ ^2[0-9][0-9]$ ]]; then printf 'unparseable-response'
+    else printf 'http-%s' "${status:-000}"; fi
+    return 0
+  fi
+  if [[ -n "$status" && ! "$status" =~ ^2[0-9][0-9]$ ]]; then
+    printf 'http-%s' "$status"
+    return 0
+  fi
+  return 1
+}
 
 # ── shadow_pick_latest_model — the PURE half of "latest" resolution ───────────
 # A /v1/models JSON body on stdin → the newest non-lite model id on stdout, or
 # nothing (exit 1) if none can be chosen. Pure: no network, no env, no clock, so
 # the selection rule is testable against fixtures without a z.ai account.
 #
-# "Newest" is `created_at`, NOT list order and NOT a version-string sort: 'glm-5.2'
-# vs 'glm-5-turbo' does not order correctly as text, and a lexical compare would
-# rank 'glm-4.7' above 'glm-5' (4>... no: '4'<'5' — but 'glm-5.1' vs 'glm-5.2' only
-# works by luck, and breaks entirely at a two-digit minor like 'glm-5.10').
+# "Newest" is `created_at`, NOT list order and NOT a version-string sort: a lexical
+# compare ranks 'glm-5.10' BELOW 'glm-5.9', and list order is not a recency guarantee.
 # created_at is the vendor's own statement of recency, so it is what we read.
 shadow_pick_latest_model() {
   python3 -c '
@@ -146,95 +364,26 @@ print(best[1])
 # FAIL-SAFE, NOT FAIL-CLOSED, and deliberately so: this is a measurement instrument,
 # not a gate (contrast DR-066, which forbids swallowing a load-bearing GATE signal).
 # If the listing cannot be fetched or parsed, this exits non-zero and the CALLER
-# skips the shadow run recording `model-resolve-failed` — it must never fall back to
-# a guessed id, because a row labelled with the wrong model is worse than no row.
+# skips the shadow run — it must never fall back to a guessed id, because a row
+# labelled with the wrong model is worse than no row.
+#
+# Uses the SAME credential-free request path as the verdict call, so the key is out
+# of `ps` for the listing too.
 shadow_resolve_model() {
   local requested; requested="$(shadow_model)"
   if [[ "$requested" != "latest" ]]; then printf '%s' "$requested"; return 0; fi
+  [[ -z "$(shadow_key)" ]] && return 1
 
-  local key base body
-  key="$(shadow_key)"; base="$(shadow_base_url)"
-  [[ -z "$key" ]] && return 1
-  body="$(timeout 20 curl -sS --fail-with-body \
-      "${base%/}/v1/models" \
-      -H "x-api-key: ${key}" \
-      -H "anthropic-version: 2023-06-01" 2>/dev/null)" || return 1
-  printf '%s' "$body" | shadow_pick_latest_model
-}
-shadow_base_url() { printf '%s' "${MINSPEC_SHADOW_TRIAGE_BASE_URL:-$SHADOW_TRIAGE_DEFAULT_BASE_URL}"; }
-shadow_timeout()  { printf '%s' "${MINSPEC_SHADOW_TRIAGE_TIMEOUT:-$SHADOW_TRIAGE_DEFAULT_TIMEOUT}"; }
-
-# ── shadow_build_env — the credential-isolation seam ──────────────────────────
-# Populates SHADOW_ENV_ARRAY with an `env` prefix that (a) removes every Anthropic
-# credential the process may have inherited and (b) supplies the z.ai key in its place.
-#
-# Ordering note, verified rather than assumed: GNU env applies its `-u` options BEFORE
-# the NAME=VALUE operands, so `env -u X X=v` yields X=v. The `-u` on a var we then set
-# is therefore not redundant — it is the FAIL-SAFE. If a future edit drops the
-# assignment, the variable is absent (the run fails to authenticate) rather than
-# inherited (the run ships an Anthropic token to z.ai). Absent beats inherited.
-#
-# Both key vars are set to the SAME z.ai key on purpose: the z.ai docs use
-# ANTHROPIC_AUTH_TOKEN (Bearer), while `--bare`'s documented contract reads
-# ANTHROPIC_API_KEY (x-api-key). Setting both covers either header convention, and
-# since both carry the z.ai key neither can leak an Anthropic credential.
-shadow_build_env() {
-  local key="$1" base_url="$2" model="$3"
-  SHADOW_ENV_ARRAY=(
-    env
-    # (1) Anthropic credentials — the exfiltration payload. Never inherited.
-    -u CLAUDE_CODE_OAUTH_TOKEN
-    -u ANTHROPIC_API_KEY
-    -u ANTHROPIC_AUTH_TOKEN
-    # (2) A header bag can carry an Authorization header, so it is a credential too.
-    -u ANTHROPIC_CUSTOM_HEADERS
-    # (3) Other providers' credentials — same exfiltration class, different vendor.
-    -u AWS_BEARER_TOKEN_BEDROCK
-    -u GOOGLE_APPLICATION_CREDENTIALS
-    -u ANTHROPIC_VERTEX_PROJECT_ID
-    # (4) Provider switches. Not credentials, but either one makes the CLI IGNORE
-    #     ANTHROPIC_BASE_URL, so the run would quietly measure a different provider
-    #     and log it as GLM — a false row is worse than a missing one.
-    -u CLAUDE_CODE_USE_BEDROCK
-    -u CLAUDE_CODE_USE_VERTEX
-    # (5) Inherited autocompact override (#1203) — same reason agent-context.sh
-    #     scrubs it for the live agent; a headless one-shot has no use for it.
-    -u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE
-    # ── and now, the only credential this call may hold ──
-    "ANTHROPIC_BASE_URL=${base_url}"
-    "ANTHROPIC_API_KEY=${key}"
-    "ANTHROPIC_AUTH_TOKEN=${key}"
-    # Pin the model on the ALIAS-RESOLUTION path as well as on the command line, so
-    # no resolution route inside the CLI can reach a different GLM than the one the
-    # row will claim was used.
-    "ANTHROPIC_DEFAULT_OPUS_MODEL=${model}"
-    "ANTHROPIC_DEFAULT_SONNET_MODEL=${model}"
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL=${model}"
-    # Keep incidental traffic off a third-party endpoint.
-    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1"
-  )
-}
-
-# ── shadow_build_argv — the invocation seam ───────────────────────────────────
-# Populates SHADOW_ARGV. Deliberately mirrors the LIVE triage call in
-# triage-inbox.sh (same prompt text, same `--system-prompt-file`, same `--tools ""`,
-# same `--output-format text`) — a shadow run that differs in task shape measures a
-# different task and its agreement number would be meaningless.
-#
-# Two flags differ from the live call, and both are load-bearing:
-#   --bare   the credential firewall documented at the top of this file.
-#   --model  the pin; without it the endpoint chooses, and #1338's whole objection
-#            is that an unpinned endpoint is a moving target.
-shadow_build_argv() {
-  local model="$1" role_file="$2" prompt="$3"
-  SHADOW_ARGV=(
-    claude -p "$prompt"
-    --bare
-    --model "$model"
-    --system-prompt-file "$role_file"
-    --tools ""
-    --output-format text
-  )
+  local out_file status rc base
+  out_file="$(mktemp)" || return 1
+  base="$(shadow_base_url)"
+  status="$(shadow_http "${base%/}/v1/models" "$out_file" 20)"
+  rc=$?
+  if [[ $rc -ne 0 || ! "$status" =~ ^2[0-9][0-9]$ ]]; then rm -f "$out_file"; return 1; fi
+  shadow_pick_latest_model < "$out_file"
+  rc=$?
+  rm -f "$out_file"
+  return $rc
 }
 
 # ── shadow_repo_public — jurisdiction policy (pure predicate) ─────────────────
