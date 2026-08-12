@@ -306,7 +306,14 @@ jobs:
           # interpolation). If the fetch fails, the diff is empty → fail closed.
           git fetch --no-tags --quiet origin "$HEAD" 2>/dev/null || true
 
-          extract_block() { sed -n '/REVIEW_VERDICT_BEGIN/,/REVIEW_VERDICT_END/p'; }
+          # Marker = the token ALONE ON A LINE, the SAME predicate review-decide.sh
+          # uses to decide the label (#1157). Display and decision must agree: when
+          # this extractor matched a marker the decider did not (or vice versa), the
+          # rendered block could read `verdict: pass` under an `ai-review:changes`
+          # label, and nothing detected the contradiction. Measured on #1209.
+          extract_block() {
+            sed -n '/^[[:space:]]*REVIEW_VERDICT_BEGIN[[:space:]]*$/,/^[[:space:]]*REVIEW_VERDICT_END[[:space:]]*$/p'
+          }
 
           # Scrub any inference-token value or `sk-ant-*` secret to `***` before the
           # reviewer text can reach the PR comment. Defeats a prompt-injected diff
@@ -606,7 +613,7 @@ jobs:
               echo "> 1. **Wait** for the quota window to reset — the retry workflow re-reviews automatically."
               echo "> 2. **Fail over to PAYG API** — set repo variable \`AI_REVIEW_FAILOVER=payg\` + secret \`ANTHROPIC_API_KEY\`; re-runs then use pay-as-you-go instead of the subscription quota."
               echo "> 3. Re-run the \`ai-review\` workflow manually once quota is back."
-              det=$(printf '%s\n' "$REVIEWER_OUT" | sed -n '/REVIEW_UNAVAILABLE_BEGIN/,/REVIEW_UNAVAILABLE_END/p' | redact)
+              det=$(printf '%s\n' "$REVIEWER_OUT" | sed -n '/^[[:space:]]*REVIEW_UNAVAILABLE_BEGIN[[:space:]]*$/,/^[[:space:]]*REVIEW_UNAVAILABLE_END[[:space:]]*$/p' | redact)
               if [ -n "$det" ]; then
                 echo
                 echo "<details><summary>reviewer output (redacted — may include the reset time)</summary>"
