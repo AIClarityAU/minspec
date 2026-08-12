@@ -1,9 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-051-ownership-before-approval/requirements.md",
-  "specHash": "affa8904ead50de532f74615e73a9d59b43e05014290ec395601a8af10272cbd",
-  "approvedAt": "2026-08-07T02:20:10.784Z",
+  "specHash": "533f897758448286470903d58de2428de204d95e25a1abb54a944cf4437a6597",
+  "approvedAt": "2026-08-12T06:12:24.022Z",
   "approvedBy": "github@harvest316.com",
   "tier": "T4",
   "migrated": false,
-  "baselineBlob": "08dfced9e8af9a0f54344852ef2f54f7eb441207"
+  "baselineBlob": "330c5bcd3289caf6967f19abcc73f4c6ad891a86"
 }
