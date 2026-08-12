@@ -6,6 +6,7 @@ tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — a silently-incomplete signpost is a wrong signpost
 relates_to: [SPEC-040, SPEC-017, DR-003, DR-023]
+implements: [packages/minspec/src/lib/spec-manager.ts, packages/minspec/src/views/spec-panel.ts, packages/minspec/src/lib/artifact-graph.ts, packages/minspec/tests/spec-manager.test.ts, packages/minspec/tests/spec-panel-class.test.ts, packages/minspec/tests/features.test.ts]
 phases:
   specify: in-progress
   clarify: pending

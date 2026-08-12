@@ -7,6 +7,7 @@ product: minspec
 epic: EPIC-002  # Signpost Integrity — a surface that names the wrong spec is a lying signpost
 aspects: [status-bar, signpost, window-title, tier-0, config-blast-radius, multi-session]
 relates_to: [SPEC-012, SPEC-026, SPEC-040, DR-019, DR-075, DR-076]
+implements: [packages/minspec/src/views/status-bar.ts, packages/minspec/tests/status-bar.test.ts]
 phases:
   specify: in-progress
   clarify: pending

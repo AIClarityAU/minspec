@@ -8,6 +8,7 @@ epic: EPIC-002  # Signpost Integrity — the Explain affordance is a rubber-stam
 aspects: [ux, tier-0, review, approval, honest-degrade]
 depends_on: [SPEC-014, SPEC-018]
 relates_to: [SPEC-014, SPEC-018, SPEC-013, SPEC-016, SPEC-017, DR-004, DR-057, DR-017, DR-012]
+implements: [packages/minspec/src/lib/explain-request.ts, packages/minspec/tests/explain-request.test.ts]
 ---
 
 # MinSpec — Explain (?) affordance: a read-only, one-click "explain this to me" exit on the review surfaces (Requirements)

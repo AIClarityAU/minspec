@@ -7,6 +7,7 @@ product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain — DR-066's own domain (ai-review/ready-to-merge/bumblebee gate incidents)
 aspects: [ci, gates, required-checks, silent-failure, provenance, tier-0, lint, constitution]
 relates_to: [DR-066, DR-063, DR-005, DR-033, DR-055]
+implements: [scripts/check-gate-signals.ts, scripts/audit-gate-witnesses.ts, scripts/lib/gate-manifest.ts, packages/minspec/tests/gate-signal-linter.test.ts]
 phases:
   specify: in-progress
   clarify: pending
