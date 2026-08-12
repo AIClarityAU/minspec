@@ -104,3 +104,52 @@ describe('checkReferences — invariants', () => {
     for (const x of v) expect(typeof x.message).toBe('string');
   });
 });
+
+describe('#1451 — relative file citations keep their ./ and ../ prefix', () => {
+  // The extraction regexes used to start with `\b`. A word boundary cannot exist
+  // between two non-word characters, so `\b` could never match at the leading `.`
+  // of a relative path: the engine skipped forward to the first word character and
+  // dropped the prefix. The truncated path then failed to resolve, and a perfectly
+  // correct citation was reported dangling. 28 of the 32 file findings on `main`
+  // were this. These assert the CAPTURED PATH, which is the thing that was wrong —
+  // asserting only "no violation" would pass for the wrong reason if resolution
+  // changed instead.
+  const pathsOf = (text: string): string[] =>
+    extractReferences(text)
+      .filter((r) => r.kind === 'file')
+      .map((r) => r.path!);
+
+  it('keeps ../ on a markdown-anchor citation, the SPEC-059 case verbatim', () => {
+    expect(pathsOf('([requirements.md:4](../SPEC-014-review-webview/requirements.md#L4))')).toEqual([
+      '../SPEC-014-review-webview/requirements.md',
+    ]);
+  });
+
+  it('keeps a multi-level ../../ prefix', () => {
+    expect(pathsOf('see ../../docs/research/x.md#L10')).toEqual(['../../docs/research/x.md']);
+  });
+
+  it('keeps ./ on an explicitly-current-dir citation', () => {
+    expect(pathsOf('./scripts/facts.ts#L3')).toEqual(['./scripts/facts.ts']);
+  });
+
+  it('keeps ../ on the colon citation shape too, not just the anchor shape', () => {
+    expect(pathsOf('../lib/canonical.ts:88')).toEqual(['../lib/canonical.ts']);
+  });
+
+  it('leaves root-relative paths exactly as they were — no over-capture', () => {
+    expect(pathsOf('packages/minspec/src/lib/canonical.ts:88')).toEqual([
+      'packages/minspec/src/lib/canonical.ts',
+    ]);
+    expect(pathsOf('src/foo.ts#L70-L100')).toEqual(['src/foo.ts']);
+    expect(pathsOf('a/b/c.ts#L1 and d/e/f.ts:9')).toEqual(['a/b/c.ts', 'd/e/f.ts']);
+  });
+
+  it('still refuses to start mid-path, which is what `\\b` was really buying', () => {
+    // The old anchor prevented matching from inside a longer path. The replacement
+    // lookbehind must keep that, or a citation could be captured from its middle.
+    expect(pathsOf('prefix/packages/minspec/src/foo.ts#L4')).toEqual([
+      'prefix/packages/minspec/src/foo.ts',
+    ]);
+  });
+});
