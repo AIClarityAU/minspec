@@ -1,7 +1,7 @@
 ---
 id: SPEC-056
 type: requirements
-status: specifying
+status: implementing
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — the Explain affordance is a rubber-stamp countermeasure on the review surfaces
