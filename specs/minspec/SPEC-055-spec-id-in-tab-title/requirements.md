@@ -7,7 +7,9 @@ product: minspec
 epic: EPIC-002  # Signpost Integrity — a surface that names the wrong spec is a lying signpost
 aspects: [status-bar, signpost, window-title, tier-0, config-blast-radius, multi-session]
 relates_to: [SPEC-012, SPEC-026, SPEC-040, DR-019, DR-075, DR-076]
-implements: [packages/minspec/src/views/status-bar.ts, packages/minspec/tests/status-bar.test.ts]
+implements: none
+implements_reason: creates no new file. The spec adds the spec id to an existing status-bar surface, so it modifies views/status-bar.ts (also edited under SPEC-026/SPEC-040) and extends its existing test file. Declared affects: rather than implements: so ownership of a shared view is not mis-recorded (ai-review, #1464).
+affects: [packages/minspec/src/views/status-bar.ts, packages/minspec/tests/status-bar.test.ts]
 phases:
   specify: in-progress
   clarify: pending

@@ -6,8 +6,9 @@ tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — a silently-incomplete signpost is a wrong signpost
 relates_to: [SPEC-040, SPEC-017, DR-003, DR-023]
-implements: [packages/minspec/src/lib/spec-manager.ts, packages/minspec/src/views/spec-panel.ts, packages/minspec/tests/spec-manager.test.ts, packages/minspec/tests/spec-panel-class.test.ts, packages/minspec/tests/features.test.ts]
-affects: [packages/minspec/src/lib/artifact-graph.ts, packages/minspec/src/lib/config.ts]  # comment-only sweeps (AC-5): artifact-graph.ts:195 and the SpecsLayout doc comment. Owned elsewhere — artifact-graph.ts by SPEC-041/SPEC-046 affects:, config.ts by SPEC-046 design.md implements:. Modifies, never owns.
+implements: none
+implements_reason: creates no new file. FR-1 repoints two callers and deletes listSpecsShallow, and FR-3 rewrites migrateLayout, all inside modules that already exist and are shared with other specs (spec-manager.ts also affects: SPEC-047; artifact-graph.ts affects: SPEC-041/SPEC-046; config.ts implements: SPEC-046 design.md). Declaring implements: on files it merely modifies would mis-record the owner and arm the spec-gate against concurrent edits to shared core (ai-review, #1464).
+affects: [packages/minspec/src/lib/spec-manager.ts, packages/minspec/src/views/spec-panel.ts, packages/minspec/src/lib/artifact-graph.ts, packages/minspec/src/lib/config.ts, packages/minspec/tests/spec-manager.test.ts, packages/minspec/tests/spec-panel-class.test.ts, packages/minspec/tests/features.test.ts]
 phases:
   specify: done
   clarify: done
