@@ -219,9 +219,14 @@ run_reviewer() {
 # means the agent died mid-review: forwarding that to the gate as a finished verdict
 # would let a half-written `verdict:` line decide a merge. Completeness — not the exit
 # status — is what makes the output a review.
+# Marker = the token ALONE ON A LINE, matching review-decide.sh (#1157). Substring
+# matching made a reviewer's PROSE MENTION of the token count as a block, so output
+# that carried no verdict at all looked complete: the quota path below never fired
+# and a transient failure was handed downstream as a code verdict instead of the
+# retry-able `blocked` the distinction exists to preserve.
 has_verdict() {
-  printf '%s\n' "${1:-}" | grep -q 'REVIEW_VERDICT_BEGIN' &&
-    printf '%s\n' "${1:-}" | grep -q 'REVIEW_VERDICT_END'
+  printf '%s\n' "${1:-}" | grep -qE '^[[:space:]]*REVIEW_VERDICT_BEGIN[[:space:]]*$' &&
+    printf '%s\n' "${1:-}" | grep -qE '^[[:space:]]*REVIEW_VERDICT_END[[:space:]]*$'
 }
 
 # Quota / rate-limit / transient? Delegate to the tested pure classifier so bash and

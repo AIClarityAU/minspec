@@ -183,7 +183,9 @@ run_reviewer() {
   return "$rc"
 }
 
-has_verdict() { printf '%s\n' "${1:-}" | grep -q 'REVIEW_VERDICT_BEGIN'; }
+# Marker = the token ALONE ON A LINE, matching review-decide.sh (#1157) — a prose
+# mention of the token is not a verdict block.
+has_verdict() { printf '%s\n' "${1:-}" | grep -qE '^[[:space:]]*REVIEW_VERDICT_BEGIN[[:space:]]*$'; }
 
 # Quota / rate-limit / transient? Delegate to the tested pure classifier so bash and
 # JS never drift. If node/guard is absent, treat as NOT quota (conservative → hard
