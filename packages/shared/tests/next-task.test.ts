@@ -788,3 +788,189 @@ describe('formatNextTaskLabel — single-source signpost wording', () => {
     expect(formatNextTaskLabel(next)).toBe(formatNextTaskLabel(next));
   });
 });
+
+// =====================================================================
+// INV-PA — phase-action, the implement-hole node (#1436)
+//
+// Before this, the resolver emitted nothing for a spec that was approved and
+// mid-implementation, so the signpost read "clear" while real work was pending.
+// These rows pin the GATE (what may emit), the RANKING (what wins), and the
+// SHAPE (what consumers can rely on).
+// =====================================================================
+const HOLE_OPEN: SpecNode['implementHole'] = {
+  kind: 'unchecked-tasks',
+  remaining: 3,
+  total: 10,
+  nextItem: 'Wire the adapter',
+};
+const HOLE_NONE: SpecNode['implementHole'] = { kind: 'missing-tasks' };
+
+describe('INV-PA — phase-action implement-hole node (#1436)', () => {
+  it('INV-PA-1: an approved, implementing spec with open tasks emits phase-action naming the next item', () => {
+    const g = graph({
+      epics: [mkEpic('EPIC-001', 'active', { order: 1 })],
+      specs: [
+        mkSpec('SPEC-001', 'implementing', 'approved', {
+          epic: 'EPIC-001',
+          implementHole: HOLE_OPEN,
+        }),
+      ],
+    });
+    const next = resolveNextTask(g)!;
+    expect(next.kind).toBe('phase-action');
+    expect(next.targetId).toBe('SPEC-001');
+    expect(next.imperative).toBe('Implement SPEC-001: Wire the adapter');
+    expect(next.evidence.explanation).toBe('SPEC-001 is implementing with 3 of 10 tasks open');
+  });
+
+  it('INV-PA-2 (DR-012 gate): an UNAPPROVED spec never emits phase-action, however open its tasks', () => {
+    for (const state of ['unapproved', 'stale'] as const) {
+      const g = graph({
+        epics: [mkEpic('EPIC-001', 'active', { order: 1 })],
+        specs: [
+          mkSpec('SPEC-001', 'implementing', state, {
+            epic: 'EPIC-001',
+            implementHole: HOLE_OPEN,
+          }),
+        ],
+      });
+      const kinds = resolvePipeline(g).map((t) => t.kind);
+      expect(kinds).not.toContain('phase-action');
+      // ...and the approval gate is what it DOES surface, so the human is not stranded.
+      expect(kinds).toContain('spec-approve');
+    }
+  });
+
+  it('INV-PA-3: terminal + superseded specs never emit phase-action even carrying a hole', () => {
+    for (const status of ['done', 'archived', 'superseded'] as const) {
+      const g = graph({
+        specs: [mkSpec('SPEC-001', status, 'approved', { implementHole: HOLE_OPEN })],
+      });
+      expect(resolvePipeline(g).map((t) => t.kind)).not.toContain('phase-action');
+    }
+    // Superseded-by-edge, not by status: the same exclusion must hold.
+    const g = graph({
+      specs: [
+        mkSpec('SPEC-001', 'implementing', 'approved', { implementHole: HOLE_OPEN }),
+        mkSpec('SPEC-002', 'implementing', 'approved'),
+      ],
+      edges: [{ kind: 'supersedes', from: 'SPEC-002', to: 'SPEC-001' }],
+    });
+    expect(resolvePipeline(g).filter((t) => t.targetId === 'SPEC-001')).toStrictEqual([]);
+  });
+
+  it('INV-PA-4: no hole ⇒ no node — a fully-checked spec is silent', () => {
+    const g = graph({
+      epics: [mkEpic('EPIC-001', 'active', { order: 1 })],
+      specs: [mkSpec('SPEC-001', 'implementing', 'approved', { epic: 'EPIC-001' })],
+    });
+    expect(resolveNextTask(g)).toBeNull();
+    expect(resolvePipeline(g)).toStrictEqual([]);
+  });
+
+  it('INV-PA-5: `missing-tasks` is the WEAKER signal — it never outranks real open work', () => {
+    const g = graph({
+      epics: [mkEpic('EPIC-001', 'active', { order: 1 })],
+      specs: [
+        // SPEC-001 sorts FIRST by id, so only the severity split can demote it.
+        mkSpec('SPEC-001', 'implementing', 'approved', {
+          epic: 'EPIC-001',
+          implementHole: HOLE_NONE,
+        }),
+        mkSpec('SPEC-002', 'implementing', 'approved', {
+          epic: 'EPIC-001',
+          implementHole: HOLE_OPEN,
+        }),
+      ],
+    });
+    const pipe = resolvePipeline(g);
+    expect(pipe[0].targetId).toBe('SPEC-002');
+    expect(pipe[0].severityClass).toBe('blocked-ready');
+    expect(pipe[1].targetId).toBe('SPEC-001');
+    expect(pipe[1].severityClass).toBe('pending');
+    expect(pipe[1].imperative).toBe('Author a task list for SPEC-001');
+  });
+
+  it('INV-PA-OQ-ORDER: an unanswered open question outranks implementing against it', () => {
+    // Both nodes tie on EVERY compareRanked term (same class, dials, id), so the
+    // outcome rests on generator order + a stable sort. Pin it: answer first.
+    const g = graph({
+      epics: [mkEpic('EPIC-001', 'active', { order: 1 })],
+      specs: [
+        mkSpec('SPEC-001', 'implementing', 'approved', {
+          epic: 'EPIC-001',
+          hasUnresolvedOpenQuestions: true,
+          implementHole: HOLE_OPEN,
+        }),
+      ],
+    });
+    const pipe = resolvePipeline(g);
+    expect(pipe.map((t) => t.kind)).toStrictEqual(['answer-OQ', 'phase-action']);
+    expect(resolveNextTask(g)!.kind).toBe('answer-OQ');
+  });
+
+  it('INV-NODE-IDENTITY: two nodes on ONE artifact both survive depends_on flooring', () => {
+    // REGRESSION (#1436). `topoFloorBlock` used to key its emitted-set on
+    // `artifactId`, so the second node for the same spec was dropped — in the
+    // main loop AND the leftover sweep. Flooring arms whenever ANY depends_on
+    // edge is un-cleared, so one unrelated edge anywhere used to silence a real
+    // pending task. Invariant #2: no gate may fail silently.
+    const g = graph({
+      epics: [mkEpic('EPIC-001', 'active', { order: 1 })],
+      specs: [
+        mkSpec('SPEC-001', 'implementing', 'approved', {
+          epic: 'EPIC-001',
+          hasUnresolvedOpenQuestions: true,
+          implementHole: HOLE_OPEN,
+        }),
+        // Un-cleared dependency: SPEC-003 is unapproved, so the edge does not clear
+        // and `floorDependsOn` runs over every severity block.
+        mkSpec('SPEC-002', 'implementing', 'approved', {
+          epic: 'EPIC-001',
+          implementHole: HOLE_OPEN,
+        }),
+        mkSpec('SPEC-003', 'specifying', 'unapproved', { epic: 'EPIC-001' }),
+      ],
+      edges: [{ kind: 'depends_on', from: 'SPEC-002', to: 'SPEC-003' }],
+    });
+    const forSpec1 = resolvePipeline(g).filter((t) => t.targetId === 'SPEC-001');
+    expect(forSpec1.map((t) => t.kind)).toStrictEqual(['answer-OQ', 'phase-action']);
+  });
+
+  it('INV-PA-SHAPE: targetId stays a bare artifact id, and the contract keys are unchanged', () => {
+    const g = graph({
+      specs: [mkSpec('SPEC-042', 'implementing', 'approved', { implementHole: HOLE_OPEN })],
+    });
+    const next = resolveNextTask(g)!;
+    expect(next.kind).toBe('phase-action');
+    // Consumers (status bar, realdata smoke test) match this exactly — the phase
+    // belongs in the imperative, never encoded into the id.
+    expect(next.targetId).toMatch(/^(SPEC|DR|EPIC)-\d+$/);
+    expect(Object.keys(next).sort()).toStrictEqual(
+      ['evidence', 'imperative', 'kind', 'severityClass', 'targetId'].sort(),
+    );
+  });
+
+  it('INV-PA-DET: phase-action nodes are deterministic across runs', () => {
+    const g = graph({
+      epics: [mkEpic('EPIC-001', 'active', { order: 1 })],
+      specs: [
+        mkSpec('SPEC-001', 'implementing', 'approved', { epic: 'EPIC-001', implementHole: HOLE_OPEN }),
+        mkSpec('SPEC-002', 'implementing', 'approved', { epic: 'EPIC-001', implementHole: HOLE_NONE }),
+      ],
+    });
+    const first = JSON.stringify(resolvePipeline(g));
+    for (let i = 0; i < 5; i++) expect(JSON.stringify(resolvePipeline(g))).toBe(first);
+  });
+
+  it('INV-PA-6: an open-task hole with no nextItem still produces a usable imperative', () => {
+    const g = graph({
+      specs: [
+        mkSpec('SPEC-001', 'implementing', 'approved', {
+          implementHole: { kind: 'unchecked-tasks', remaining: 2, total: 4 },
+        }),
+      ],
+    });
+    expect(resolveNextTask(g)!.imperative).toBe('Implement SPEC-001');
+  });
+});

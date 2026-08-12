@@ -31,6 +31,7 @@ import type {
   AdrNode,
   Edge,
   EdgeKind,
+  ImplementHole,
   EpicStatus as ResolverEpicStatus,
   SpecStatus as ResolverSpecStatus,
   AdrStatus as ResolverAdrStatus,
@@ -269,6 +270,129 @@ function discoverSpecs(rootDir: string): Map<string, DiscoveredSpecFile> {
 }
 
 // ───────────────────────────────────────────────────────────────────────────
+// Implement-phase hole (#1436) — the `phase-action` node source.
+//
+// The resolver is Tier-0 and may not touch a filesystem, so the "is this spec's
+// implement phase finished?" question is answered HERE and travels to it as
+// `SpecNode.implementHole` — the same seam `hasUnresolvedOpenQuestions` uses.
+// This computes a HOLE, never a severity or an ordering: that stays in the
+// resolver (INV-CONSUME).
+// ───────────────────────────────────────────────────────────────────────────
+
+/**
+ * A task line, in either checkbox dialect MinSpec accepts.
+ *
+ * Deliberately WIDER than `spec.ts`'s `TASK_RE`, in two ways, because this
+ * decides whether a human is told there is work left:
+ *   - leading whitespace is allowed, so a nested/indented sub-task still counts;
+ *   - `[~]` (in progress) is recognised and counted as OPEN. `spec.ts`'s regex
+ *     matches only `[ xX]`, so a `[~]` line is invisible to it — a spec whose
+ *     last task is in-progress would otherwise read as finished. Counting it as
+ *     open is the honest reading; #1444 tracks converging the two regexes.
+ */
+const TASK_LINE_RE = /^\s*- \[([ xX~])\]\s+(.+?)\s*$/;
+
+/** A fenced code block delimiter — checkbox-looking lines inside are examples. */
+const FENCE_RE = /^\s*(?:```|~~~)/;
+
+/** Longest `nextItem` handed to the resolver; the imperative is a ONE-LINE surface. */
+const NEXT_ITEM_MAX = 80;
+
+/**
+ * Reduce a markdown task line to plain readable text: unwrap links, drop inline
+ * emphasis/code marks, collapse whitespace, then clip to one line's worth.
+ * Pure and deterministic.
+ */
+function taskItemText(raw: string): string {
+  const clean = raw
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1') // [text](url) → text
+    .replace(/[`*_]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  return clean.length <= NEXT_ITEM_MAX ? clean : `${clean.slice(0, NEXT_ITEM_MAX - 1).trimEnd()}…`;
+}
+
+/** Tally of open/total task items, plus the first open item's text. */
+interface TaskTally {
+  total: number;
+  remaining: number;
+  nextItem?: string;
+}
+
+/** Count checkbox lines in a markdown body, ignoring fenced code blocks. */
+function tallyTaskLines(body: string): TaskTally {
+  let inFence = false;
+  const tally: TaskTally = { total: 0, remaining: 0 };
+  for (const line of body.split('\n')) {
+    if (FENCE_RE.test(line)) {
+      inFence = !inFence;
+      continue;
+    }
+    if (inFence) continue;
+    const m = TASK_LINE_RE.exec(line);
+    if (!m) continue;
+    tally.total++;
+    if (m[1] === 'x' || m[1] === 'X') continue;
+    tally.remaining++;
+    if (tally.nextItem === undefined) tally.nextItem = taskItemText(m[2]);
+  }
+  return tally;
+}
+
+/**
+ * The spec's implement-phase hole, or `undefined` when there is none.
+ *
+ * Reads BOTH layouts MinSpec supports, because the extension ships into repos
+ * this monorepo's own conventions do not describe (constitution invariant 3):
+ *   - SPLIT layout — a sibling `tasks.md` next to the canonical spec file.
+ *   - SINGLE-FILE layout — a `## Tasks` / `## Implement` section in the spec
+ *     itself, already parsed into `phaseSections` by `parseSpec`.
+ * Split wins when both exist; the sections are the fallback, so a single-file
+ * spec is never mislabelled as having no task list at all.
+ *
+ * An unreadable `tasks.md` degrades to `missing-tasks` rather than throwing
+ * (INV-DEGRADE): the human is still pointed at the right spec.
+ */
+function readImplementHole(disc: DiscoveredSpecFile): ImplementHole | undefined {
+  let tally: TaskTally = { total: 0, remaining: 0 };
+
+  const tasksPath = path.join(path.dirname(disc.filePath), 'tasks.md');
+  let splitBody: string | undefined;
+  try {
+    if (fs.existsSync(tasksPath)) splitBody = fs.readFileSync(tasksPath, 'utf-8');
+  } catch {
+    /* unreadable — fall through to the single-file sections, then missing-tasks */
+  }
+
+  if (splitBody !== undefined) {
+    tally = tallyTaskLines(splitBody);
+  } else {
+    // Single-file layout: whichever phase section carries the checkboxes.
+    for (const phase of ['tasks', 'implement'] as const) {
+      const body = disc.parsed.phaseSections[phase]?.body;
+      if (body === undefined) continue;
+      const t = tallyTaskLines(body);
+      tally = {
+        total: tally.total + t.total,
+        remaining: tally.remaining + t.remaining,
+        nextItem: tally.nextItem ?? t.nextItem,
+      };
+    }
+  }
+
+  // No task list anywhere — or one with no items in it. Either way the spec is
+  // being implemented with nothing tracking that work.
+  if (tally.total === 0) return { kind: 'missing-tasks' };
+  if (tally.remaining === 0) return undefined; // every item checked → no hole
+  return {
+    kind: 'unchecked-tasks',
+    remaining: tally.remaining,
+    total: tally.total,
+    nextItem: tally.nextItem,
+  };
+}
+
+// ───────────────────────────────────────────────────────────────────────────
 // Public adapter API.
 // ───────────────────────────────────────────────────────────────────────────
 
@@ -350,6 +474,10 @@ export function buildArtifactGraph(rootDir: string): ArtifactGraph {
       approvalState: APPROVAL_STATE_MAP[approvalState],
       goalRank: goalRankOf(fmBlock, goalRanks),
       priority: undefined,
+      // #1436 phase-action source. Computed for every spec; the resolver decides
+      // which ones it acts on (only approved + implementing specs qualify), so
+      // the gate stays in ONE place rather than being half-encoded here.
+      implementHole: readImplementHole(disc),
     });
   }
 
