@@ -96,6 +96,22 @@ export interface ShadowReport {
   /** Malformed %, over RESPONDED rows. null when there are none. */
   malformedPct: number | null;
   medianLatencyMs: number | null;
+  /**
+   * Per-model breakdown — the thing that makes a `latest`-resolved pilot honest.
+   *
+   * The pooled figures above answer "how did the shadow do", which is only a
+   * measurement if one model produced every row. With the model resolved per run,
+   * a z.ai release mid-pilot silently mixes two targets into one number — the exact
+   * hazard #1338 cited when it asked for a pin. Splitting here is what lets the id
+   * recorded on each row actually mean something.
+   */
+  byModel: Array<{
+    model: string;
+    n: number;
+    conformant: number;
+    tierTypeAgreementPct: number | null;
+    malformedPct: number | null;
+  }>;
   triggers: {
     agreement: { verdict: TriggerVerdict; value: number | null; threshold: number };
     malformed: { verdict: TriggerVerdict; value: number | null; threshold: number };
@@ -160,14 +176,43 @@ export function aggregate(rows: ShadowRow[]): ShadowReport {
   const malformedVerdict: TriggerVerdict =
     malformedPct == null ? 'INSUFFICIENT' : malformedPct <= MALFORMED_MAX_PCT ? 'PASS' : 'FAIL';
 
+  // Per-model split. Computed over the SAME row sets as the pooled figures so the
+  // two are directly comparable — conformance for agreement, responded for malformed.
+  const modelIds = [...new Set(rows.map((r) => r.model).filter(Boolean))].sort() as string[];
+  const byModel = modelIds.map((model) => {
+    const mine = rows.filter((r) => r.model === model);
+    const mineResponded = mine.filter((r) => r.error == null || r.error === '');
+    const mineConformant = mineResponded.filter((r) => r.conformant === true);
+    return {
+      model,
+      n: mine.length,
+      conformant: mineConformant.length,
+      tierTypeAgreementPct: pct(
+        mineConformant.filter((r) => r.agree?.tier === true && r.agree?.label === true).length,
+        mineConformant.length,
+      ),
+      malformedPct: pct(mineResponded.length - mineConformant.length, mineResponded.length),
+    };
+  });
+
   // FAIL dominates INSUFFICIENT dominates PASS: one tripped trigger is a rollback
   // regardless of the other, and a missing metric can never be reported as overall PASS.
-  const overall: TriggerVerdict =
+  //
+  // MIXED MODELS CANNOT PASS. With the model resolved per run rather than pinned, a
+  // log spanning a z.ai release pools two targets into one agreement figure, and a
+  // rollback verdict computed from that figure is a verdict about nothing. Printing
+  // a warning beside it is not enough — the automated trigger is what gets acted on,
+  // so the honest value is INSUFFICIENT: the samples exist, the comparison does not.
+  // FAIL still dominates, because a tripped threshold is real information even when
+  // the sample is mixed; only PASS is withheld.
+  const mixedModels = modelIds.length > 1;
+  const baseOverall: TriggerVerdict =
     agreementVerdict === 'FAIL' || malformedVerdict === 'FAIL'
       ? 'FAIL'
       : agreementVerdict === 'INSUFFICIENT' || malformedVerdict === 'INSUFFICIENT'
         ? 'INSUFFICIENT'
         : 'PASS';
+  const overall: TriggerVerdict = mixedModels && baseOverall === 'PASS' ? 'INSUFFICIENT' : baseOverall;
 
   return {
     n,
@@ -179,6 +224,7 @@ export function aggregate(rows: ShadowRow[]): ShadowReport {
     tierTypeAgreementPct,
     malformedPct,
     medianLatencyMs,
+    byModel,
     triggers: {
       agreement: { verdict: agreementVerdict, value: tierTypeAgreementPct, threshold: AGREEMENT_MIN_PCT },
       malformed: { verdict: malformedVerdict, value: malformedPct, threshold: MALFORMED_MAX_PCT },
@@ -197,7 +243,21 @@ export function formatReport(r: ShadowReport, unparseable = 0): string {
   // measurement of anything (#1338: "any pilot must pin the model explicitly").
   lines.push(`  model(s)           ${r.models.length ? r.models.join(', ') : '(none)'}`);
   if (r.models.length > 1) {
-    lines.push('    ⚠ more than one model in this log — the agreement figure mixes targets.');
+    lines.push('    ⚠ more than one model in this log — the POOLED figures below mix targets,');
+    lines.push('      so the overall verdict is held at INSUFFICIENT. Read the per-model split.');
+  }
+  // The per-model split is what makes a `latest`-resolved pilot readable. Printed
+  // whenever more than one model contributed, because that is exactly when the
+  // pooled number stops being a measurement of anything.
+  if (r.byModel.length > 1) {
+    lines.push('');
+    lines.push('  per model:');
+    for (const m of r.byModel) {
+      lines.push(
+        `    ${m.model.padEnd(14)} n=${String(m.n).padEnd(4)} conformant=${String(m.conformant).padEnd(4)}` +
+          ` tier+type=${show(m.tierTypeAgreementPct)} malformed=${show(m.malformedPct)}`,
+      );
+    }
   }
   lines.push(`  samples (n)        ${r.n}${r.n < TARGET_SAMPLE ? `  (pilot target: ${TARGET_SAMPLE})` : ''}`);
   lines.push(`    responded        ${r.responded}`);
