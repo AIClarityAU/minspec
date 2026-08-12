@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-059-status-mirror-drift-gate/requirements.md",
+  "specHash": "6d91c6e25ff26133587775f1127d05e5befd23ebed5adda5a63480ac7d8b9ce7",
+  "approvedAt": "2026-08-12T22:47:38.946Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "bd3e90954517796e5c97ee9fdd37c031622b028e"
+}
