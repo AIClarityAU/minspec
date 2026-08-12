@@ -645,7 +645,7 @@ Two cuts to ceremony that only ever made sense for a team, with nothing machine-
 
 ## [DR-082 — Agent GitHub writes take a bot identity through a lazy `gh` wrapper that fails closed, and a CI guard enforces it — because the rule already existed as prose and nothing obeyed it](DR-082.md)
 
-*Status: proposed · Date: 2026-08-07*
+*Status: accepted · Date: 2026-08-12*
 
 <!-- dr-summary:DR-082 auto=c66ee732edcf -->
 minspec#995 decided that agent GitHub writes must be bot-attributed. DR-074 decided *where* that rule applies (only in repos with .minspec/). Neither recorded *how*, and the how was left to prose in CLAUDE.md. Prose did not hold. At the time #1355 was filed there were 76 write call sites across 11 paths in scripts/, and **not one** used the App token. Every agent-filed issue, comment, label and merge was recorded as the founder. The notification flood was the visible symptom; the…
