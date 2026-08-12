@@ -22,6 +22,15 @@ import * as zlib from 'zlib';
 import { execFileSync } from 'child_process';
 import { specHash, getSpecBodyOnly } from '@aiclarity/shared';
 import type { Tier } from './config';
+import { loadConfig } from './config';
+// SPEC-051 lib-boundary ownership guard. spec-validator imports THIS module type-only
+// (`import type { ApprovalStatus }`), which erases at compile time — so this value import
+// creates no runtime cycle. Verified by scripts/check-import-cycles.ts.
+import type { ValidationViolation } from './spec-validator';
+import { violationsIntroducedByApproval } from './spec-validator';
+import { parseSpec } from './spec';
+import { epicRefSet } from './epic-manager';
+import { readShardIdFiles } from './spec-layout';
 import {
   readRecord,
   writeRecord,
@@ -509,6 +518,55 @@ export function getApprovalRecord(rootDir: string, specFilePath: string): Approv
  * Approval NEVER fails on a mint error — any git/gzip error degrades; the record
  * is written regardless (INV — Non-destructive, AC-1).
  */
+/**
+ * SPEC-051 — refuse an approval that would advance a spec into a state its own validator
+ * rejects. Throws with the offending rules named; returns silently when the advance is
+ * legal.
+ *
+ * Derives its own config and validation context rather than taking them as parameters:
+ * a guard a caller can weaken by omitting an argument is not a guard. `epicRefSet` and
+ * `readShardIdFiles` are the same context the command layer supplies — passed here so the
+ * lib and the UI cannot reach different verdicts on the same spec.
+ *
+ * FAILS OPEN on its own infrastructure: if the file cannot be parsed or the config cannot
+ * be read, approval proceeds. This gate exists to stop a KNOWN-bad advance, never to make
+ * approval unavailable because the guard itself broke — the same fail-open contract the
+ * pre-push and pre-commit hooks carry.
+ */
+function assertAdvanceIsLegal(rootDir: string, specFilePath: string, raw: string): void {
+  let introduced: ValidationViolation[];
+  try {
+    const parsed = parseSpec(raw);
+    introduced = violationsIntroducedByApproval(parsed, loadConfig(rootDir), {
+      knownEpicRefs: epicRefSet(rootDir),
+      siblingShardFiles: readShardIdFiles(path.dirname(specFilePath)),
+    });
+  } catch (err) {
+    // Fail OPEN, but never SILENTLY. A bare `catch {}` here would make a persistent
+    // parse/config break indistinguishable from "the spec is fine" — a silent gate, which
+    // constitution invariant 2 forbids. Degrading is still correct (this guard exists to
+    // stop a known-bad advance, not to make approval unavailable when the guard itself
+    // breaks), and CI's `validateOwnership` remains the visible backstop — but the degrade
+    // is announced so a recurring one is discoverable rather than invisible.
+    console.warn(
+      `[minspec] ownership pre-check skipped for ${path.basename(specFilePath)} — the ` +
+        `guard could not evaluate it (${err instanceof Error ? err.message : String(err)}). ` +
+        'Approval proceeds; `npm run validate` remains the backstop.',
+    );
+    return;
+  }
+  if (introduced.length === 0) return;
+
+  const detail = introduced.map((v) => `  • ${v.message}\n    ↳ ${v.fixHint}`).join('\n');
+  throw new Error(
+    `Approval refused: ${path.basename(specFilePath)} is not ready for the status it would ` +
+      `be approved into.\n\n${detail}\n\n` +
+      'Approving advances this spec past Clarify, which arms rules that do not apply to it ' +
+      'yet. Fixing this now costs one edit; approving first means the edit lands on an ' +
+      'already-approved spec, staling the approval and needing a second human sign-off.',
+  );
+}
+
 export function approveSpec(
   rootDir: string,
   specFilePath: string,
@@ -530,6 +588,36 @@ export function approveSpec(
   } catch {
     throw new Error(`Cannot read spec file to approve: ${specFilePath}`);
   }
+
+  // SPEC-051: ownership pre-check, at the LIB boundary for the same reason DR-056's
+  // approver gate is here — approval ADVANCES the phase map, and some rules are gated on
+  // that map, so a spec can be complete now and violate an error the instant it is
+  // advanced. #1317 closed the UI path (`commands/approve.ts`); this closes every other
+  // caller OF THIS FUNCTION — a script, a test, a future command, an agent driving
+  // `approveSpec`. Four red mains came through that gap.
+  //
+  // NOT closed here, stated plainly rather than implied: `advanceSpecToImplementing`
+  // (`spec.ts`) is the function that actually WRITES `phases.plan: in-progress`, and it
+  // remains unguarded. Guarding it needs `spec.ts` to import the validator, but
+  // `spec-validator.ts` value-imports `./spec` (`SPEC_STATUSES`, `SPEC_TYPES`,
+  // `stripInlineComment`) — a real runtime cycle, and dodging the cycle checker with a
+  // lazy `require` would hide it rather than remove it. Its ONLY production caller today
+  // is `commands/approve.ts:315`, which #1317 already refuses before reaching. So the
+  // exposure is a future direct caller, not a live hole. Tracked as tasks.md T4.2.
+  //
+  // Reuses `violationsIntroducedByApproval` rather than a fresh predicate, which buys two
+  // deliberate properties for free:
+  //   • config-respecting — it re-runs `validateSpec` under the caller's own config, so a
+  //     repo on the default `ownershipDeclaration: 'warn'` is not refused (FR-7 ratchet);
+  //   • only NEWLY-introduced errors — a spec already in the build band and already
+  //     undeclared is untouched, so re-approving after an ordinary edit cannot lock a
+  //     human out.
+  // Both are pinned by tests/ownership-guard.test.ts; neither is incidental.
+  //
+  // Placed after the read (not a side effect) and before the hash/mint/write, so a refusal
+  // leaves nothing half-written.
+  assertAdvanceIsLegal(rootDir, specFilePath, raw);
+
   const hash = specHash(raw); // canonical-hash boundary (SPEC-022)
 
   // 1. FR-4 body-only bytes — NOT the canonical-hash boundary. The baseline diff
