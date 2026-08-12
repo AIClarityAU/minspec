@@ -5,7 +5,7 @@ type: requirements
 # .minspec/approvals/specs/minspec/SPEC-060-build-provenance-stamp/requirements.md.json (.specHash).
 # `status`/`phases` are tool-written lifecycle mirrors (canonical.ts strips them from the hash);
 # never hand-write either. Read the sidecar, never this prose, for the current state.
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain
@@ -24,9 +24,9 @@ affects:
   - packages/minspec/src/lib/lifecycle.ts
   - scripts/dispatch-issue.sh
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
