@@ -81,7 +81,15 @@ const FRONTMATTER_GUIDANCE =
   `\`status:\` must be one of ${SPEC_STATUSES.map((s) => `\`${s}\``).join(', ')} ` +
   '(an absent or unrecognized value is silently coerced to "new" and flagged at approve), ' +
   'and set an explicit `tier:` (one of `T1`, `T2`, `T3`, `T4`) — a missing tier is flagged too. ' +
-  'Getting these right here is the point: the approve gate is only a backstop, not the place to discover gaps.';
+  'Getting these right here is the point: the approve gate is only a backstop, not the place to discover gaps.\n\n' +
+  '**A T3/T4 spec must also declare its owned code, in Specify — not later (#1489).** ' +
+  'Either `implements:` listing the repo-relative paths this spec will own, or the explicit escape ' +
+  '`implements: none` plus a one-line `implements_reason:` when it genuinely owns none ' +
+  '(a spec that only modifies files owned elsewhere puts those under the optional `affects:`). ' +
+  'Do NOT write a comment deferring this to Plan. Approval is what advances `plan` to `in-progress`, ' +
+  'which is exactly the condition SPEC-038 FR-3 fires on, so there is no moment "at Plan" in which to ' +
+  'add it — a spec without the declaration is refused at the approval keystroke. ' +
+  'Three specs shipped that deferral comment and all three were un-approvable.';
 
 /**
  * Shift-left aspect-artifact guidance (AIClarityAU/minspec#104). Built from
