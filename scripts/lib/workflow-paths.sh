@@ -1,7 +1,19 @@
 #!/usr/bin/env bash
 # workflow-paths.sh — is this push going to be refused for touching CI workflows?
 #
-# THE PROBLEM (#1120). Agent git pushes authenticate as the `minspec-sdd` GitHub
+# ⚠ STALE PREMISE, 2026-08-12 (#1120). The permission this gate pre-empts has since
+# been GRANTED: installation 144283146 reports `workflows=write`, read from the
+# installation's own permissions object via the App JWT — not inferred from a response
+# header, which reports what an endpoint accepts rather than what is granted. An
+# App-token push touching `.github/workflows/ci.yml` succeeded (#1453).
+#
+# This gate therefore now fires on pushes that would SUCCEED — a false refusal, the
+# direction that trains people to reach for the override until the day it matters.
+# Kept for now rather than deleted (the permission could be revoked, and the guard is
+# cheap) but it should be removed or made capability-probing; tracked on #1120. The
+# message below leads with the re-check rather than the org-owner setting.
+#
+# THE ORIGINAL PROBLEM (#1120). Agent git pushes authenticate as the `minspec-sdd` GitHub
 # App. GitHub treats `.github/workflows/**` as a permission of its own
 # (`workflows: write`) precisely so a compromised App cannot rewrite CI — and
 # `contents: write`, which the App does have, is documented as NOT sufficient.
@@ -149,16 +161,22 @@ workflow_push_refusal() {
   printf '%s\n' "$paths" | sed 's/^/      /' >&2
   echo "" >&2
   echo "  GitHub requires a separate 'workflows: write' permission for" >&2
-  echo "  .github/workflows/** — 'contents: write' is not enough — so this push" >&2
-  echo "  would be rejected by the server after the commit was already made." >&2
+  echo "  .github/workflows/** — 'contents: write' is not enough." >&2
   echo "" >&2
-  echo "  Fix it properly (one-time, org owner):" >&2
-  echo "      Org Settings → Developer settings → GitHub Apps → Edit →" >&2
-  echo "      Permissions & events → Repository permissions → Workflows →" >&2
-  echo "      'Read and write', then accept the permission update on the" >&2
-  echo "      installation. See AIClarityAU/minspec#1120." >&2
+  echo "  ⚠ THIS MAY NO LONGER APPLY. Measured 2026-08-12: installation 144283146" >&2
+  echo "  reports workflows=write (alongside contents/actions/checks/issues/" >&2
+  echo "  pull_requests/statuses/merge_queues=write), and an App-token push" >&2
+  echo "  touching .github/workflows/ci.yml SUCCEEDED — see #1453. The premise" >&2
+  echo "  behind this refusal was true when #1120 was filed and is not true now." >&2
   echo "" >&2
-  echo "  Push it now instead:" >&2
+  echo "  So before doing anything else, RE-CHECK rather than chasing a setting" >&2
+  echo "  that is already applied:" >&2
+  echo "      GH_TOKEN=\$(~/.claude/scripts/gh-app-token.sh) gh api \\" >&2
+  echo "        /installation/repositories >/dev/null && echo 'token OK'" >&2
+  echo "  and simply retry the push. If it succeeds, this gate is stale — say so" >&2
+  echo "  on AIClarityAU/minspec#1120 so it is removed rather than overridden." >&2
+  echo "" >&2
+  echo "  If the push genuinely IS rejected (permission later revoked):" >&2
   echo "      push with a human credential that carries the 'workflow' scope," >&2
   echo "      or split the workflow change into its own human-pushed commit." >&2
   echo "" >&2
