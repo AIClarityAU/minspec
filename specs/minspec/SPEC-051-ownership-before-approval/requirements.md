@@ -19,9 +19,15 @@ relates_to: [SPEC-038, SPEC-022, DR-012, DR-034, DR-069, DR-078, DR-051, DR-003]
 # the human approval (canonical.ts strips only `status`/`phases`) — the exact trap §"Hash
 # semantics" below documents, now hit for real. Re-approval is a human act (FR-5): never
 # minted by an agent.
-implements: none
-implements_reason: modifies the existing approve/advance actors (approve.ts, spec.ts) and reuses SPEC-038's `ownership-path-rules` per FR-6; creates no new source file. FR-1 leaves the enforcement mechanism to Clarify/Plan — if Plan chooses a new module, replace this with that path.
-affects: [packages/minspec/src/commands/approve.ts, packages/minspec/src/lib/spec.ts, packages/minspec/src/lib/spec-validator.ts, packages/minspec/src/commands/commit-on-approve.ts]  # all owned elsewhere (approve.ts via SPEC-042/SPEC-046 affects:, ownership rules via SPEC-038 implements:) — this spec modifies, never owns
+# Re-scoped 2026-08-07 (founder decision, #1339). The UI half of FR-2 SHIPPED
+# independently in #1317 (`violationsIntroducedByApproval` + the refusal at
+# commands/approve.ts), which this spec's requirements predate and did not account for.
+# The remaining scope is the LIB boundary — see the FR-2 scope note below. This edit and
+# the two field corrections beneath it are deliberately batched so the re-stamp is paid
+# ONCE (tasks.md T1.2). Re-approval is a human act (FR-5): never minted by an agent.
+implements: [packages/minspec/tests/ownership-guard.test.ts]
+implements_reason: superseded — the prior `none` + "creates no new source file" became false when this slice added the T0 guard suite above, which `isValidOwnedPath` counts as owned code. The production change remains an edit to existing, elsewhere-owned actors (see `affects:`), so the test suite is the only file this spec creates and therefore owns.
+affects: [packages/minspec/src/commands/approve.ts, packages/minspec/src/lib/approval.ts, packages/minspec/src/lib/spec.ts, packages/minspec/src/lib/spec-validator.ts, packages/minspec/src/commands/commit-on-approve.ts]  # all owned elsewhere (approve.ts via SPEC-042/SPEC-046 affects:, ownership rules via SPEC-038 implements:) — this spec modifies, never owns
 phases:
   specify: done
   clarify: done
@@ -72,6 +78,30 @@ The issue's defect (a) ("approval sidecar + lifecycle edit written to the shared
 - **FR-1 (ownership settled before the hash is minted).** The `implements:` ownership declaration (or the `implements: none` + `implements_reason:` escape) for a T3/T4 primary spec MUST be part of the **approved bytes** — present at the moment the approval hash is computed — so that entering the Plan build-band never requires a post-approval content edit. Whether this is enforced by a pre-approval precondition, by moving ownership authoring earlier in the lifecycle, or by both is a **Clarify decision** (see Decisions needed). *Rationale: the only durable fix for a stale-on-advance trap is to bake the contract into what was signed.*
 
 - **FR-2 (pre-check at the Plan-crossing act, refuse rather than strand).** The act that flips a T3/T4 spec's `phases.plan` to `in-progress` — today that is `approveSpec`/`advanceSpecToImplementing`, and any future advance actor — MUST run the SPEC-038 FR-3 ownership check **before** performing the flip. If ownership is undeclared, it MUST refuse the flip and surface an actionable prompt to declare ownership first (while the spec is still pre-Plan, so the declaration lands in the approved hash), instead of writing a `plan:in-progress` state that `validateOwnership` will immediately reject. *Rationale: mirror the validate gate at the transition, not only downstream at commit — the issue's fix #1.*
+
+> **FR-2 scope note (2026-08-07, #1339).** Half of this requirement shipped independently
+> while the spec sat in Plan. [#1317](https://github.com/AIClarityAU/minspec/issues/1317)
+> added `violationsIntroducedByApproval` (`spec-validator.ts`) and wired a refusal into
+> `commands/approve.ts`, closing the **UI** path a human clicks. This spec's requirements
+> predate that and do not account for it.
+>
+> What remained, and is what this spec now delivers: the **lib** boundary. `approveSpec`
+> (`lib/approval.ts`) had no guard, so every NON-UI caller — a script, a test, a future
+> command, an agent driving the lib — could still approve a spec straight into a state
+> `validateSpec` rejects. The guard now sits beside the DR-056 approver gate, for the same
+> stated reason: *every caller is gated here, not just the UI*.
+>
+> Two founder decisions bound the remainder, both pinned by tests rather than prose:
+> the guard is **config-respecting** (it reuses `violationsIntroducedByApproval`, so a repo
+> on the default `ownershipDeclaration: 'warn'` is not refused — the accepted cost is that
+> a fresh user repo stays reachable by the trap until SPEC-038's FR-7 ratchet flips), and
+> it refuses **only newly-introduced** violations (an already-implementing, already-
+> undeclared spec is not refused, so re-approving after an ordinary edit cannot lock a
+> human out).
+>
+> Consequence for ceremony: the delivered blast radius is materially narrower than the T4
+> this spec was written at. Kept at T4 rather than re-tiered, because re-tiering is itself
+> a frontmatter edit and would cost a second re-stamp for no behavioural gain.
 
 - **FR-3 (no silent stranded write; atomic-or-loud).** Every write the approve/advance path makes to the shared working tree (lifecycle edit + approval sidecar) MUST be committed via the docs-lane, or surface a loud, actionable error — never left as a silent uncommitted change on the shared tree. The `commitOnApprove` guarantee ([#576](https://github.com/AIClarityAU/minspec/issues/576)) MUST extend to whatever new declare-ownership step FR-1/FR-2 introduce, so the fix cannot itself create a fresh strand. *Rationale: the issue's fix #2; constitution invariant #2 (no silent gate) and the main-divergence/docs-lane stranding class ([#575](https://github.com/AIClarityAU/minspec/issues/575)).*
 
