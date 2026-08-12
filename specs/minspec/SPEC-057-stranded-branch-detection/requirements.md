@@ -8,6 +8,7 @@ product: minspec
 created: 2026-08-07
 epic: EPIC-009  # Team Readiness — session coordination / git transparency (G-8), sibling of DR-080 and SPEC-026
 relates_to: [DR-080, SPEC-050, SPEC-026, DR-051, DR-046, DR-065, DR-066, SPEC-032]
+implements: [packages/minspec/src/lib/stranded-branch.ts, packages/minspec/tests/stranded-branch.test.ts]
 phases:
   specify: in-progress
   clarify: pending

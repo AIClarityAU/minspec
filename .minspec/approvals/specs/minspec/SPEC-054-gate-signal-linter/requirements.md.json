@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-054-gate-signal-linter/requirements.md",
+  "specHash": "a328531b37871f1f0b962eebf9f297118152530666dc012e3414fabdd4fb1d96",
+  "approvedAt": "2026-08-12T22:03:10.327Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "21ee8ac01a43c6034137f4a936294b63b1604141"
+}
