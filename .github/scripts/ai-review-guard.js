@@ -691,6 +691,54 @@ function isBenignRemovalError(status) {
   return status === 404;
 }
 
+/** Every label this workflow uses to assert a verdict. Exactly one may survive. */
+const PENDING = 'ai-review:pending';
+const VERDICT_LABELS = [PASS, CHANGES, BLOCKED, PENDING];
+
+/**
+ * Which verdict labels must go, and what the PR must look like afterwards (#1468).
+ *
+ * The old code added the new label and best-effort-removed the others, discarding
+ * both the error and the result. When one removal silently failed, the PR carried
+ * `ai-review:pass` AND `ai-review:changes` at once, and `ready-to-merge` read the
+ * contradiction as "not passed" — a legitimately-passing PR that could never merge,
+ * with nothing on its surface explaining why. Observed on #1430.
+ *
+ * Pure so the rule is testable without a live PR: the caller does the I/O and then
+ * checks its own post-state against `expected`.
+ *
+ * @param {{current?: string[], verdict: string}} o - `current` = labels on the PR now.
+ * @returns {{expected: string[], remove: string[], add: string[]}}
+ *   `expected` is the FULL verdict-label set that must be present when done — always
+ *   exactly the one verdict. Non-verdict labels (docs-lane, needs-human-review, …) are
+ *   never touched and never appear here.
+ */
+function decideVerdictLabels({ current = [], verdict } = {}) {
+  if (!VERDICT_LABELS.includes(verdict)) {
+    throw new Error(`decideVerdictLabels: unknown verdict "${verdict}"`);
+  }
+  const present = new Set(current.filter((l) => VERDICT_LABELS.includes(l)));
+  return {
+    expected: [verdict],
+    remove: VERDICT_LABELS.filter((l) => l !== verdict && present.has(l)),
+    add: present.has(verdict) ? [] : [verdict],
+  };
+}
+
+/**
+ * Did the post-state land? Returns null when correct, else a human-readable fault.
+ * Used to fail the step LOUDLY rather than leave a wedged PR (invariant 2).
+ */
+function verdictLabelFault({ current = [], verdict } = {}) {
+  const got = current.filter((l) => VERDICT_LABELS.includes(l)).sort();
+  if (got.length === 1 && got[0] === verdict) return null;
+  if (got.length === 0) return `no verdict label present; expected exactly [${verdict}]`;
+  if (got.length > 1) {
+    return `contradictory verdict labels [${got.join(', ')}]; expected exactly [${verdict}]`;
+  }
+  return `verdict label is [${got[0]}]; expected exactly [${verdict}]`;
+}
+
 // Defensive: GitHub logins are [A-Za-z0-9-] (apps add a `[bot]` suffix), so they
 // can never contain markdown/backtick metacharacters — but strip backticks anyway
 // so a malformed value can never break out of the code span in an audit comment.
@@ -724,4 +772,8 @@ module.exports = {
   decideReviewCheck,
   isBenignRemovalError,
   sanitizeLogin,
+  PENDING,
+  VERDICT_LABELS,
+  decideVerdictLabels,
+  verdictLabelFault,
 };
