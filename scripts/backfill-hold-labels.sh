@@ -55,7 +55,7 @@ CUR="null"; PLANNED=0; SKIPPED_NORECORD=0; ALREADY=0; NOHOLD=0; TOTAL=0
 Q='query($c:String){repository(owner:"AIClarityAU",name:"minspec"){issues(first:50,after:$c,states:OPEN){pageInfo{hasNextPage endCursor}nodes{number labels(first:30){nodes{name}} comments(first:100){nodes{author{login} authorAssociation body}}}}}}'
 
 while :; do
-  OUT="$(gh api graphql -f query="$Q" -F c="$CUR" 2>/dev/null)" || { echo "ERROR: GraphQL page failed — stopping (partial run, nothing silently skipped)." >&2; exit 1; }
+  OUT="$(gh_bot_graphql_read -f query="$Q" -F c="$CUR" 2>/dev/null)" || { echo "ERROR: GraphQL page failed — stopping (partial run, nothing silently skipped)." >&2; exit 1; }
   COUNT="$(printf '%s' "$OUT" | jq '.data.repository.issues.nodes | length')"
   TOTAL=$((TOTAL + COUNT))
 

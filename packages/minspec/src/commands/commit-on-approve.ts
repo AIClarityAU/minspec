@@ -61,6 +61,7 @@ export function commitOnApproveEnabled(): boolean {
  *   ''                                        — setting off, not a repo, or no net change
  *   ' · committed'                            — the doc (+ record) were committed
  *   ' · not committed (detached HEAD)'        — refused so the approval isn't lost on next checkout
+ *   ' · not committed (merge/cherry-pick …)'  — git refuses a partial commit mid-operation (#1112)
  *   ' · commit failed — approval saved …'     — git/hook rejected; approval on disk, uncommitted, unstaged
  *
  * Never rejects (delegates to `commitApproval`, which never rejects). A failed or
@@ -236,6 +237,20 @@ export async function commitApprovalIfEnabled(
     case 'detached-head':
       // A commit here would be orphaned by the next checkout — refuse and say so.
       return { suffix: ' · not committed (detached HEAD — switch to a branch)', result };
+    case 'merge-in-progress': {
+      // #1112: git itself refuses a PARTIAL (pathspec) commit while a merge or
+      // cherry-pick is in progress — a real git constraint, not a MinSpec
+      // guard bug (commit-on-approve is pathspec-only by invariant 1, so a
+      // bare commit is not an available workaround). Nothing was staged. The
+      // approval doc (+ sidecar) are already saved on disk — only the commit
+      // is deferred, and finishing the operation then re-approving (or just
+      // committing by hand) resolves it.
+      const op = result.operation === 'cherry-pick' ? 'cherry-pick' : 'merge';
+      void vscode.window.showWarningMessage(
+        `Approval saved — finish the ${op} in progress, then commit it.`,
+      );
+      return { suffix: ` · not committed (${op} in progress — finish it, then commit)`, result };
+    }
     case 'failed':
       // Log the detail (incl. hook stderr); keep the toast short. The approval
       // record is already on disk — only the git commit failed.

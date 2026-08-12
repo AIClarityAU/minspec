@@ -265,11 +265,23 @@ jobs:
       # if every required role passed. CLAUDE_CODE_OAUTH_TOKEN is the INFERENCE
       # credential for `claude -p` here — the agent still has no actionable tool.
       # The App token is intentionally ABSENT from this step.
+      #
+      # ANTHROPIC_API_KEY / AI_REVIEW_FAILOVER are the quota-failover pair that
+      # review-branch.sh reads (`AI_REVIEW_FAILOVER == payg && -n ANTHROPIC_API_KEY`).
+      # Both are the SAME KIND of credential as the OAuth token above — inference
+      # only, no actionable tool — so this does not widen the step's authority. They
+      # are passed together deliberately: the script's condition needs both, so
+      # setting the repo variable without forwarding the secret (or the reverse)
+      # leaves the failover configured-looking but inert, which is the failure this
+      # wiring exists to prevent. With neither set, the expressions render empty and
+      # the default `wait` behaviour is unchanged.
       - name: Independent review → decide combined label
         id: review
         if: steps.guard.outputs.configured == 'true'
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AI_REVIEW_FAILOVER: ${{ vars.AI_REVIEW_FAILOVER }}
           AI_REVIEW_COVERAGE: ${{ vars.AI_REVIEW_COVERAGE }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -305,6 +317,16 @@ jobs:
             sed -E 's/sk-ant-[A-Za-z0-9_-]+/***/g' \
               | if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
                   awk -v tok="$CLAUDE_CODE_OAUTH_TOKEN" \
+                    '{ while ((p=index($0,tok))>0) $0=substr($0,1,p-1) "***" substr($0,p+length(tok)); print }'
+                else
+                  cat
+                fi \
+              | if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+                  # The sed above already catches today's `sk-ant-*` shape. This pass
+                  # does not trust that shape: it matches the key's LITERAL value, so
+                  # a future key format stays redacted without anyone remembering to
+                  # update a regex. Same treatment the OAuth token gets, same reason.
+                  awk -v tok="$ANTHROPIC_API_KEY" \
                     '{ while ((p=index($0,tok))>0) $0=substr($0,1,p-1) "***" substr($0,p+length(tok)); print }'
                 else
                   cat
