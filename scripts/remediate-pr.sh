@@ -668,6 +668,13 @@ while true; do
         --allowedTools "$ALLOWED_TOOLS" \
         --output-format text 2>&1 | tee "$LOG"); then
 
+    # The agent run above is the long pole and can outlast the ~1h installation
+    # token, and every write below this point would then 401 (#1412). Re-mint if
+    # near expiry — no-op with headroom, no-op for a CI-supplied token. Placed
+    # after the agent, not before, so the token is fresh for the WRITES rather
+    # than aged out during the run.
+    gh_bot_refresh
+
     if grep -q '^ESCALATE:' "$LOG"; then
       REASON=$(grep -m1 '^ESCALATE:' "$LOG" | sed 's/^ESCALATE:[[:space:]]*//')
       if [[ "$ESCALATED_ALREADY" == "0" && "$RUN_MODEL" != "opus" && "${MINSPEC_ESCALATE_RETRY_OFF:-}" != "1" ]]; then

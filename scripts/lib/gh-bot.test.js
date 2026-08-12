@@ -75,7 +75,11 @@ const WRITES = [
   'workflow run ci.yml',
   'release upload v1 ./asset.zip',
   'api repos/o/r/issues -f title=x',
+  // GraphQL is a write by DEFAULT now (#1411): a document in a variable cannot be
+  // classified from argv, so the safe answer is the default and a read declares
+  // itself via gh_bot_graphql_read. Both spellings must classify as writes.
   'api graphql -f query=mutation{addComment}',
+  'api graphql -f query=query{repository{id}} -F c=null',
 ];
 
 const READS = [
@@ -88,10 +92,6 @@ const READS = [
   'api repos/o/r',
   'label list',
   'api -X GET repos/o/r',
-  // The one that matters: `-f query=` is how a paginated READ is issued too, so
-  // this must not be called a write. retriage-unrecorded.sh:58 is exactly this,
-  // and misclassifying it would abort a read-only script wherever no key exists.
-  'api graphql -f query=query{repository{id}} -F c=null',
 ];
 
 for (const argv of WRITES) {
