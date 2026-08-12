@@ -20,14 +20,18 @@
  *   - DETECT-ONLY corruption. Cycles / dangling refs / incoherence are DETECTED
  *     deterministically and surfaced; this core NEVER repairs. (FR-15.)
  *
+ *   - NODE IDENTITY. One artifact may carry SEVERAL pending nodes at once (e.g. an
+ *     unanswered open question AND an implement hole). `RankedNode.artifactId` is
+ *     therefore a ranking/blocker key, NOT a uniqueness key: every pass that walks
+ *     the ranked set must key its bookkeeping on the NODE, never on `artifactId`,
+ *     or the second node is silently dropped — a missing gate, which invariant #2
+ *     forbids. (See `topoFloorBlock`.)
+ *
  * DEFERRED — typed seams, not stubs:
  *   - FR-13 edge PARSING (frontmatter→Edge[]) is BUILT: the fs-adapter
  *     (`packages/minspec/src/lib/artifact-graph.ts` — `edgesFrom` / `buildArtifactGraph`)
  *     parses the `depends_on` / `supersedes` / `relates_to` frontmatter arrays into
  *     a real `Edge[]`; this core only consumes it. Absent edges ⇒ pure tree order.
- *   - 'phase-action' nodes come from SPEC-010's per-feature resolver (FR-4,
- *     deferred); declared in the NodeKind union as a typed seam, never generated
- *     here.
  *   - 'answer-OQ' (#227) IS implemented in this slice — see `hasUnresolvedOpenQuestions`
  *     below. Parsing the Clarify/Open-Questions prose into that boolean (incl. the
  *     tracked-via-issue exemption, mirroring the dangling-park-ref linter in
@@ -82,7 +86,7 @@ export interface SpecNode {
   id: string; // SPEC-NNN
   status: SpecStatus;
   tier?: 'T1' | 'T2' | 'T3' | 'T4';
-  phase?: Phase; // current phase (informational; phase-action deferred to SPEC-010 source)
+  phase?: Phase; // current phase (informational; the implement hole travels on `implementHole`)
   epic?: string; // EPIC-NNN membership
   approvalState: ApprovalState;
   goalRank?: number;
@@ -94,6 +98,33 @@ export interface SpecNode {
    * exemption as the dangling-park-ref linter). Absent/false ⇒ no gate.
    */
   hasUnresolvedOpenQuestions?: boolean;
+  /**
+   * The spec's implement-phase hole, or absent when there is none. Computed by
+   * the fs-adapter (which owns every filesystem read — see INV Tier-0) and only
+   * CONSUMED here, exactly like `hasUnresolvedOpenQuestions`. This is the
+   * `phase-action` node source SPEC-012 FR-4 composes rather than re-derives.
+   */
+  implementHole?: ImplementHole;
+}
+
+/**
+ * Why a spec's implement phase is not finished.
+ *
+ *  - `unchecked-tasks` — a task list exists and still has open items. Real,
+ *    in-progress implementation work.
+ *  - `missing-tasks`   — the spec is being implemented with no task list at all,
+ *    so progress is untracked. Authoring work, and deliberately the WEAKER
+ *    signal: it never outranks an `unchecked-tasks` hole (see the generator).
+ */
+export type ImplementHoleKind = 'unchecked-tasks' | 'missing-tasks';
+export interface ImplementHole {
+  kind: ImplementHoleKind;
+  /** Open item count. Absent for `missing-tasks` — there is no list to count. */
+  remaining?: number;
+  /** Total items in the list, for the "N of M" evidence string. */
+  total?: number;
+  /** Text of the first open item — what the human would actually do next. */
+  nextItem?: string;
 }
 export interface AdrNode {
   id: string; // DR-NNN
@@ -115,9 +146,9 @@ export interface ArtifactGraph {
 
 // ---- Output ----
 export type SeverityClass = 'gate-violation' | 'blocked-ready' | 'promote-parent' | 'pending';
-//  NOTE: 'phase-action' is in the kind UNION (DR-019/FR-8 vocabulary) but NOT
-//  emitted by the core slice — its source is SPEC-010 (FR-4, deferred). Declared
-//  for the typed seam, never produced.
+//  NOTE: 'phase-action' IS produced (#1436) — see the implement-hole generator
+//  below. It is authoring work, never an approval: SPEC-014 FR-13 forbids any
+//  surface rendering it with an Approve control.
 export type NodeKind = 'epic-promote' | 'spec-approve' | 'adr-accept' | 'phase-action' | 'answer-OQ';
 
 export interface Evidence {
@@ -690,13 +721,14 @@ function generateNodes(
           // 1. epicOrder/goalRank/priority encode why this edge is URGENT — which
           //    epic is advancing, at what goal and priority. That is a property of
           //    the advance, not of the blocker sitting still.
-          // 2. `artifactId` is an IDENTITY KEY, not a display value: `topoFloorBlock`
-          //    uses it for its `emitted` set (`:989`, `:991`) and `compareRanked` for
-          //    the final tiebreak. Setting it to `primaryBlocker` would make it
-          //    non-unique whenever two advancing artifacts share one blocker, and the
-          //    emitted-set dedup would silently drop the second violation node — a
-          //    missing gate, which invariant #2 forbids. Only `targetId`, `imperative`
-          //    and `kind` describe where to send the human; only those change.
+          // 2. `artifactId` is a BLOCKER/RANKING KEY, not a display value:
+          //    `topoFloorBlock` resolves `depends_on` satisfaction through it
+          //    (`clearedArtifacts`) and `compareRanked` uses it for the final
+          //    tiebreak. Setting it to `primaryBlocker` would attribute this
+          //    node's dials and blocker identity to the artifact sitting still,
+          //    inverting both. Only `targetId`, `imperative` and `kind` describe
+          //    where to send the human; only those change.
+          //    (Uniqueness is NOT required of it — see INV NODE IDENTITY.)
           epicOrder: resolveEpicOrder(epicOfRef(fromId, index), index),
           goalRank: goalRankOf(fromId, index),
           priority: priorityOf(fromId, index),
@@ -772,6 +804,87 @@ function generateNodes(
             severityClass: cls,
             rule: cls === 'blocked-ready' ? 'gate.answer-oq' : 'pending.answer-oq',
             explanation: `${s.id} is implementing with an unresolved open question`,
+            refs: epic ? [epic.id, s.id] : [s.id],
+          },
+        },
+        cls,
+        {
+          epicOrder: resolveEpicOrder(s.epic, index),
+          goalRank: s.goalRank,
+          priority: s.priority,
+          artifactId: s.id,
+        },
+      ),
+    );
+  }
+
+  // phase-action (#1436): the spec is approved and being implemented, but its
+  // implement phase is not finished. Authoring work, NOT an approval — SPEC-012
+  // FR-4 composes the hole the fs-adapter computed (`implementHole`) rather than
+  // re-deriving coverage here, and SPEC-014 FR-13 forbids ever rendering this as
+  // an approvable. The Two-Queues invariant holds: "author the phase" is the
+  // human's own work, not the agent/dispatch queue.
+  //
+  // ORDER MATTERS, and only a test keeps it honest. This loop runs AFTER the
+  // answer-OQ loop above because a phase-action and an answer-OQ node for the
+  // SAME spec tie on every term of `compareRanked` (same class, same dials, and
+  // `compareIds` returns 0 on equal ids). `Array.sort` is stable, so the loop
+  // that pushes first wins the tie — and answering the open question should come
+  // before implementing against it. Pinned by INV-PA-OQ-ORDER.
+  for (const s of graph.specs) {
+    if (superseded.has(s.id)) continue;
+    if (isSpecTerminal(s)) continue;
+    if (s.status !== 'implementing') continue;
+    // DR-012 / SPEC-012: `spec(approved) ──gates──▶ implement phase-action`. An
+    // unapproved spec already emits a spec-approve node; telling the human to
+    // implement something they have not signed off would invert the gate.
+    if (s.approvalState !== 'approved') continue;
+    // PHASE GATE, and it is load-bearing (#1436 review). `status` alone is too
+    // coarse: the fs-adapter folds the `planning` band (approved, implement not
+    // started) into `implementing` on purpose, so gating on status alone told
+    // the human to "Implement SPEC-X" for specs still being planned — the exact
+    // false signpost DR-069 exists to prevent. A task list is only DUE from the
+    // `tasks` phase onward, so that is where a task hole means anything.
+    if (s.phase !== 'tasks' && s.phase !== 'implement') continue;
+    const hole = s.implementHole;
+    if (!hole) continue;
+
+    const epic = s.epic ? index.epicById.get(s.epic) : undefined;
+    // `missing-tasks` is the WEAKER signal — untracked progress, not started
+    // work — so it is pinned to `pending` and can never outrank an
+    // `unchecked-tasks` hole that `blockedOrPending` lifted to `blocked-ready`.
+    const cls: SeverityClass =
+      hole.kind === 'unchecked-tasks' ? blockedOrPending(epic) : 'pending';
+
+    // Name the phase the spec is ACTUALLY in. "Implement" is only true once the
+    // implement phase is the live one; during `tasks` the work is the list.
+    const inImplement = s.phase === 'implement';
+    const imperative =
+      hole.kind === 'missing-tasks'
+        ? `Break ${s.id} into tasks`
+        : `${inImplement ? 'Implement' : 'Finish the task list for'} ${s.id}${
+            hole.nextItem ? `: ${hole.nextItem}` : ''
+          }`;
+
+    const phaseWord = inImplement ? 'implementing' : 'in the tasks phase';
+    const explanation =
+      hole.kind === 'unchecked-tasks'
+        ? `${s.id} is ${phaseWord} with ${hole.remaining} of ${hole.total} tasks open`
+        : `${s.id} is ${phaseWord} with no task list — progress is untracked`;
+
+    ranked.push(
+      mkRanked(
+        {
+          kind: 'phase-action',
+          // Stays a BARE artifact id. Consumers match /^(SPEC|DR|EPIC)-\d+$/ and
+          // reveal the file behind it; the phase lives in the imperative.
+          targetId: s.id,
+          imperative,
+          severityClass: cls,
+          evidence: {
+            severityClass: cls,
+            rule: `${cls === 'blocked-ready' ? 'gate' : 'pending'}.implement-${hole.kind}`,
+            explanation,
             refs: epic ? [epic.id, s.id] : [s.id],
           },
         },
@@ -975,6 +1088,16 @@ function floorDependsOn(
  * reorders beyond what flooring requires (preserving the Step-4 total order
  * otherwise). A leftover cycle (impossible here — cycles are corruption — but
  * guarded) is appended in block order, so the pass can never infinite-loop.
+ *
+ * TWO DISTINCT KEYS, and keeping them distinct is load-bearing (INV — NODE
+ * IDENTITY, invariant #2). `artifactId` answers "what does this node rank and
+ * block on"; it is NOT unique, because one artifact can carry several pending
+ * nodes (an unanswered open question AND an implement hole, say). "Have I
+ * already emitted this?" must therefore be asked of the NODE (`placed`), while
+ * "is this blocker satisfied?" is asked of the artifact (`clearedArtifacts`).
+ * Keying both on `artifactId` — as this did before #1436 — silently dropped
+ * every node after the first for a given artifact, in the main loop AND in the
+ * leftover sweep, so a real pending task simply vanished from the pipeline.
  */
 function topoFloorBlock(
   block: RankedNode[],
@@ -990,15 +1113,17 @@ function topoFloorBlock(
     );
   }
 
-  const emitted = new Set<string>();
+  const placed = new Set<RankedNode>(); // per-NODE: already in `out`
+  const clearedArtifacts = new Set<string>(); // per-ARTIFACT: blocker satisfied
   const out: RankedNode[] = [];
   let progress = true;
   while (out.length < block.length && progress) {
     progress = false;
     for (const node of block) {
-      if (emitted.has(node.artifactId)) continue;
-      if (blockers.get(node.artifactId)!.every((b) => emitted.has(b))) {
-        emitted.add(node.artifactId);
+      if (placed.has(node)) continue;
+      if (blockers.get(node.artifactId)!.every((b) => clearedArtifacts.has(b))) {
+        placed.add(node);
+        clearedArtifacts.add(node.artifactId);
         out.push(node);
         progress = true;
       }
@@ -1007,7 +1132,7 @@ function topoFloorBlock(
   // Safety: leftover cycle members (already flagged as corruption) in block order.
   if (out.length < block.length) {
     for (const node of block) {
-      if (!emitted.has(node.artifactId)) out.push(node);
+      if (!placed.has(node)) out.push(node);
     }
   }
   return out;
