@@ -300,6 +300,10 @@ else
     exit 0
   fi
   for ISSUE in $ISSUES; do
+    # One LLM call per issue, so a large inbox can outlive the ~1h installation
+    # token. Re-mint when it is near expiry (#1412). No-op with headroom, and a
+    # no-op for a CI-supplied token, so the cost is nil on a short run.
+    gh_bot_refresh
     triage_issue "$ISSUE"
   done
 fi

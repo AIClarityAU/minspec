@@ -161,15 +161,20 @@ _gh_bot_is_write() {
     api)
       # `gh api` defaults to GET; -f/-F/--raw-field/--input imply a POST body.
       #
-      # GraphQL is the exception that needs care. `-f query=...` is how you pass
-      # ANY GraphQL document, read or write, so the -f rule alone would call every
-      # paginated query a write. That is not merely wasteful: a classified write
-      # MINTS, and so a read-only script would abort wherever no key exists.
-      # (retriage-unrecorded.sh is exactly that script — two reads, delegating all
-      # writing to triage-inbox.sh.) So for graphql, decide on the document: a
-      # `mutation` keyword in argv means write, otherwise read.
+      # GraphQL now defaults to WRITE, and that inversion is the point (#1411).
+      #
+      # A GraphQL document says whether it mutates; argv often does not, because
+      # `-f query="$MUT"` hides the document in a variable. The previous rule
+      # keyed on a literal `mutation` token, so a mutation built in a variable
+      # read as a query and would have gone out under the ambient identity — a
+      # silent hole that depended on a future author remembering a comment.
+      #
+      # Unguessable input must not be guessed at, so the default is the safe
+      # answer and a genuine READ has to say so, out loud and greppably, by
+      # calling `gh_bot_graphql_read`. That is one declaration at each of the two
+      # existing read sites, versus a standing invitation to misattribute.
       local -a args=("$@")
-      local i n="${#args[@]}" is_graphql=0 has_mutation=0 has_body=0
+      local i n="${#args[@]}" is_graphql=0 has_body=0
       for ((i = 0; i < n; i++)); do
         case "${args[i]}" in
           graphql) is_graphql=1 ;;
@@ -185,20 +190,9 @@ _gh_bot_is_write() {
             [[ "${args[i]#-X}" =~ ^($GH_BOT_WRITE_METHODS)$ ]] && return 0 ;;
           --input) return 0 ;;
           -f|-F|--field|--raw-field) has_body=1 ;;
-          *mutation*) has_mutation=1 ;;
         esac
       done
-      # KNOWN CONSTRAINT (#1401 security review): the decision reads argv, so a
-      # mutation whose document arrives through a VARIABLE — `-f query="$MUT"` —
-      # looks like a read to both this and the guard, and would go out as the
-      # ambient identity. No current call site does it. If you add a GraphQL
-      # mutation, keep a literal `mutation` token in argv, or call
-      # `_gh_bot_ensure` yourself before the write. Tracked in the follow-up
-      # filed from that review.
-      if (( is_graphql )); then
-        (( has_mutation )) && return 0
-        return 1
-      fi
+      (( is_graphql )) && return 0        # unguessable ⇒ treat as a write
       (( has_body )) && return 0
       return 1 ;;
   esac
@@ -307,6 +301,23 @@ gh_bot_init() {
     command gh "$@"
   }
   _GH_BOT_ARMED=1
+}
+
+# gh_bot_graphql_read — run a GraphQL query that provably does NOT mutate.
+#
+# `gh api graphql` counts as a write by default, because a document passed in a
+# variable cannot be classified from argv and guessing wrong writes as the human
+# (#1411). A read therefore has to declare itself, and this is the declaration:
+# an explicit, greppable call that skips the mint and goes straight to `gh`.
+#
+#     gh_bot_graphql_read -f query="$Q" -F c="$CUR"
+#
+# Use it ONLY for a document you can see is a query. If the document comes from
+# somewhere you do not control, it is not a read — call `gh` normally and let it
+# mint. The guard treats every `gh api graphql` line WITHOUT this call as a
+# write, so the choice is recorded in the source rather than left to memory.
+gh_bot_graphql_read() {
+  command gh api graphql "$@"
 }
 
 # gh_bot_refresh — re-mint if OUR token is near expiry. No-op for an inherited

@@ -745,7 +745,7 @@ function isTestPath(p: string): boolean {
  *   `NOTICE|THIRD-PARTY-NOTICES`    (`packages/*\/README.md` renders on the Marketplace
  *                                   listing exactly like the root one does). The
  *                                   `([.-][^/]*)?$` tail admits `LICENSE`,
- *                                   `LICENSE-CONTENT`, `LICENSE-THIRD-PARTY-MPL-2.0.txt`
+ *                                   `LICENSE-CONTENT`, `THIRD-PARTY-NOTICES.md`
  *                                   and `README.md` while REFUSING `READMEs.md` — the
  *                                   separator is required, so a near-miss basename is
  *                                   not over-blocked.

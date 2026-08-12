@@ -265,11 +265,23 @@ jobs:
       # if every required role passed. CLAUDE_CODE_OAUTH_TOKEN is the INFERENCE
       # credential for `claude -p` here — the agent still has no actionable tool.
       # The App token is intentionally ABSENT from this step.
+      #
+      # ANTHROPIC_API_KEY / AI_REVIEW_FAILOVER are the quota-failover pair that
+      # review-branch.sh reads (`AI_REVIEW_FAILOVER == payg && -n ANTHROPIC_API_KEY`).
+      # Both are the SAME KIND of credential as the OAuth token above — inference
+      # only, no actionable tool — so this does not widen the step's authority. They
+      # are passed together deliberately: the script's condition needs both, so
+      # setting the repo variable without forwarding the secret (or the reverse)
+      # leaves the failover configured-looking but inert, which is the failure this
+      # wiring exists to prevent. With neither set, the expressions render empty and
+      # the default `wait` behaviour is unchanged.
       - name: Independent review → decide combined label
         id: review
         if: steps.guard.outputs.configured == 'true'
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AI_REVIEW_FAILOVER: ${{ vars.AI_REVIEW_FAILOVER }}
           AI_REVIEW_COVERAGE: ${{ vars.AI_REVIEW_COVERAGE }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -294,7 +306,14 @@ jobs:
           # interpolation). If the fetch fails, the diff is empty → fail closed.
           git fetch --no-tags --quiet origin "$HEAD" 2>/dev/null || true
 
-          extract_block() { sed -n '/REVIEW_VERDICT_BEGIN/,/REVIEW_VERDICT_END/p'; }
+          # Marker = the token ALONE ON A LINE, the SAME predicate review-decide.sh
+          # uses to decide the label (#1157). Display and decision must agree: when
+          # this extractor matched a marker the decider did not (or vice versa), the
+          # rendered block could read `verdict: pass` under an `ai-review:changes`
+          # label, and nothing detected the contradiction. Measured on #1209.
+          extract_block() {
+            sed -n '/^[[:space:]]*REVIEW_VERDICT_BEGIN[[:space:]]*$/,/^[[:space:]]*REVIEW_VERDICT_END[[:space:]]*$/p'
+          }
 
           # Scrub any inference-token value or `sk-ant-*` secret to `***` before the
           # reviewer text can reach the PR comment. Defeats a prompt-injected diff
@@ -305,6 +324,16 @@ jobs:
             sed -E 's/sk-ant-[A-Za-z0-9_-]+/***/g' \
               | if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
                   awk -v tok="$CLAUDE_CODE_OAUTH_TOKEN" \
+                    '{ while ((p=index($0,tok))>0) $0=substr($0,1,p-1) "***" substr($0,p+length(tok)); print }'
+                else
+                  cat
+                fi \
+              | if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+                  # The sed above already catches today's `sk-ant-*` shape. This pass
+                  # does not trust that shape: it matches the key's LITERAL value, so
+                  # a future key format stays redacted without anyone remembering to
+                  # update a regex. Same treatment the OAuth token gets, same reason.
+                  awk -v tok="$ANTHROPIC_API_KEY" \
                     '{ while ((p=index($0,tok))>0) $0=substr($0,1,p-1) "***" substr($0,p+length(tok)); print }'
                 else
                   cat
@@ -584,7 +613,7 @@ jobs:
               echo "> 1. **Wait** for the quota window to reset — the retry workflow re-reviews automatically."
               echo "> 2. **Fail over to PAYG API** — set repo variable \`AI_REVIEW_FAILOVER=payg\` + secret \`ANTHROPIC_API_KEY\`; re-runs then use pay-as-you-go instead of the subscription quota."
               echo "> 3. Re-run the \`ai-review\` workflow manually once quota is back."
-              det=$(printf '%s\n' "$REVIEWER_OUT" | sed -n '/REVIEW_UNAVAILABLE_BEGIN/,/REVIEW_UNAVAILABLE_END/p' | redact)
+              det=$(printf '%s\n' "$REVIEWER_OUT" | sed -n '/^[[:space:]]*REVIEW_UNAVAILABLE_BEGIN[[:space:]]*$/,/^[[:space:]]*REVIEW_UNAVAILABLE_END[[:space:]]*$/p' | redact)
               if [ -n "$det" ]; then
                 echo
                 echo "<details><summary>reviewer output (redacted — may include the reset time)</summary>"
