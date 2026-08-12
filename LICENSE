@@ -23,5 +23,5 @@ SOFTWARE.
 ---
 
 Prose under `docs/` and `sites/` (including the whitepaper and site copy) is licensed
-CC-BY-4.0 instead — see `LICENSE-CONTENT`. See DR-082 for why all code is MIT, and
+CC-BY-4.0 instead — see `LICENSE-CONTENT`. See DR-083 for why all code is MIT, and
 DR-018 for the superseded multi-licence scheme it replaced.
