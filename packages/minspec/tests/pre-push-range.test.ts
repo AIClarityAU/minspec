@@ -53,7 +53,15 @@ function runHook(localSha: string, remoteSha: string = ZERO): { code: number; er
     cwd: repo,
     input: `refs/heads/feature ${localSha} refs/heads/feature ${remoteSha}\n`,
     encoding: 'utf8',
-    env: { ...process.env, MINSPEC_FAKE_APP_CRED: '1', MINSPEC_ALLOW_WORKFLOW_PUSH: '0' },
+    // Probe disabled (#1120): these cases are about the RANGE logic, not permissions.
+    // With the probe live and the permission granted the gate steps aside, and every
+    // refusal assertion below would pass for the wrong reason.
+    env: {
+      ...process.env,
+      MINSPEC_FAKE_APP_CRED: '1',
+      MINSPEC_ALLOW_WORKFLOW_PUSH: '0',
+      MINSPEC_WORKFLOW_PERM_PROBE: '0',
+    },
   });
   return { code: r.status ?? -1, err: r.stderr ?? '' };
 }
