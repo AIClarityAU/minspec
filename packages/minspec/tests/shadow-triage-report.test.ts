@@ -280,3 +280,73 @@ describe('formatReport — the human-facing summary states the triggers explicit
     expect(formatReport(aggregate(mix(10, 0)))).toMatch(/pilot target: 50/);
   });
 });
+
+/**
+ * T0 — a pooled figure over MIXED MODELS cannot report PASS (#1338, #1389 review).
+ *
+ * The default model is the `latest` sentinel, resolved per run, so a z.ai release
+ * mid-pilot puts two models in one log. #1338 asked for a pin precisely to stop that.
+ * The pin was dropped on the stated grounds that "the report groups by model, so a
+ * version change splits the sample" — a claim that was FALSE when written: aggregate()
+ * pooled every row and formatReport only printed a warning beside the verdict.
+ *
+ * These cases exist so that justification is now backed by behaviour rather than by a
+ * comment. The warning was never the fix: a reader acts on the automated trigger, and
+ * a trigger computed over blended targets is a verdict about nothing.
+ */
+describe('shadow-triage report — mixed models cannot PASS', () => {
+  const perfect = (model: string, n: number) =>
+    Array.from({ length: n }, () => row({ model }));
+
+  it('a single-model log that clears both thresholds still PASSES', () => {
+    // The control. Without this, a fix that broke PASS entirely would look correct.
+    const r = aggregate(perfect('glm-5.2', 20));
+    expect(r.models).toEqual(['glm-5.2']);
+    expect(r.triggers.agreement.verdict).toBe('PASS');
+    expect(r.triggers.malformed.verdict).toBe('PASS');
+    expect(r.overall).toBe('PASS');
+  });
+
+  it('the SAME rows split across two models are held at INSUFFICIENT', () => {
+    // Every row agrees perfectly, so both thresholds still pass individually — the
+    // only thing that changed is that the sample spans two targets.
+    const r = aggregate([...perfect('glm-5.2', 10), ...perfect('glm-5.3', 10)]);
+    expect(r.models).toEqual(['glm-5.2', 'glm-5.3']);
+    expect(r.triggers.agreement.verdict).toBe('PASS');
+    expect(r.triggers.malformed.verdict).toBe('PASS');
+    expect(r.overall).toBe('INSUFFICIENT'); // ← the guard
+  });
+
+  it('FAIL still dominates a mixed sample — a tripped threshold is real information', () => {
+    // Withholding PASS is about the comparison being meaningless; a breach is not
+    // made meaningless by the mix, so downgrading FAIL to INSUFFICIENT would hide it.
+    const bad = Array.from({ length: 10 }, () =>
+      row({ model: 'glm-5.3' }, { tier: false, all: false }),
+    );
+    const r = aggregate([...perfect('glm-5.2', 10), ...bad]);
+    expect(r.overall).toBe('FAIL');
+  });
+
+  it('byModel splits the sample so each target can be read on its own', () => {
+    const mixed = [
+      ...perfect('glm-5.2', 8),
+      ...Array.from({ length: 4 }, () => row({ model: 'glm-5.3' }, { tier: false, all: false })),
+    ];
+    const r = aggregate(mixed);
+    const by = Object.fromEntries(r.byModel.map((m) => [m.model, m]));
+    expect(by['glm-5.2'].n).toBe(8);
+    expect(by['glm-5.2'].tierTypeAgreementPct).toBe(100);
+    expect(by['glm-5.3'].n).toBe(4);
+    expect(by['glm-5.3'].tierTypeAgreementPct).toBe(0);
+  });
+
+  it('the per-model split is PRINTED, not merely computed', () => {
+    // A breakdown that exists only in the object would leave the human reading the
+    // pooled number — the failure this whole guard is about.
+    const out = formatReport(aggregate([...perfect('glm-5.2', 5), ...perfect('glm-5.3', 5)]));
+    expect(out).toMatch(/per model:/);
+    expect(out).toMatch(/glm-5\.2/);
+    expect(out).toMatch(/glm-5\.3/);
+    expect(out).toMatch(/INSUFFICIENT/);
+  });
+});

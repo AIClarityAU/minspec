@@ -32,7 +32,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
-import { execFileSync } from 'node:child_process';
+import { execFileSync, spawnSync } from 'node:child_process';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
@@ -50,6 +50,9 @@ function findScriptsDir(): string {
 
 const scriptsDir = findScriptsDir();
 const SHADOW = path.join(scriptsDir, 'shadow-triage.sh');
+// The pure seams live in the lib, sourced directly so the selection rule can be
+// driven from fixtures without invoking the runner (or the network).
+const LIB = path.join(scriptsDir, 'lib', 'shadow-triage.sh');
 
 const ZAI_KEY = 'zai-key-for-the-shadow-run';
 
@@ -179,23 +182,130 @@ describe('shadow-triage — no Anthropic credential can reach z.ai (the security
   });
 });
 
-describe('shadow-triage — the model is pinned (an unpinned pilot measures nothing)', () => {
-  // #1338: "z.ai" is not a model. GLM-5.2, GLM-5-Turbo and GLM-4.7 sit behind ONE
-  // endpoint with tier and quota deciding which answers, so an agreement figure
-  // against an unpinned endpoint is a figure about a moving target.
-  it('the pinned id appears on the command line', () => {
-    const a = argv();
+describe('shadow-triage — one resolved model id reaches every surface', () => {
+  // #1338: "z.ai" is not a model, and it publishes no floating alias (verified
+  // against a live key 2026-08-07 — GET /v1/models returns only concrete ids). The
+  // default is now the `latest` SENTINEL, resolved per run; what must not vary is
+  // that whatever id is chosen reaches BOTH the CLI flag and every alias route, and
+  // is the id recorded on the row.
+  //
+  // These cases pass the id explicitly so they stay hermetic: an explicit
+  // MINSPEC_SHADOW_TRIAGE_MODEL short-circuits resolution, so no test touches the
+  // network. Resolution itself is covered by the pure-seam cases below.
+  const PINNED = { MINSPEC_SHADOW_TRIAGE_MODEL: 'glm-5.2' };
+
+  it('the resolved id appears on the command line', () => {
+    const a = argv(PINNED);
     expect(a).toContain('--model');
     expect(a[a.indexOf('--model') + 1]).toBe('glm-5.2');
   });
 
   it('the same id also pins every alias-resolution path', () => {
-    // Pinning only the CLI flag would leave the ANTHROPIC_DEFAULT_*_MODEL route free
+    // Setting only the CLI flag would leave the ANTHROPIC_DEFAULT_*_MODEL route free
     // to resolve elsewhere inside the CLI, and the row would still claim glm-5.2.
-    const env = effectiveEnv();
+    const env = effectiveEnv(PINNED);
     expect(env.ANTHROPIC_DEFAULT_OPUS_MODEL).toBe('glm-5.2');
     expect(env.ANTHROPIC_DEFAULT_SONNET_MODEL).toBe('glm-5.2');
     expect(env.ANTHROPIC_DEFAULT_HAIKU_MODEL).toBe('glm-5.2');
+  });
+
+  // ── "latest" resolution — the pure selection rule ──────────────────────────
+  // `shadow_pick_latest_model` takes a /v1/models body on stdin and prints the id to
+  // use. Driven by fixtures, so the rule is provable without a z.ai account and
+  // without a network call. The runner SKIPS on a non-zero exit rather than falling
+  // back to a guess: a row labelled with the wrong model is worse than no row.
+  function pick(body: string): { out: string; code: number } {
+    const r = spawnSync(
+      'bash',
+      ['-c', `source "${LIB}" >/dev/null 2>&1; shadow_pick_latest_model`],
+      { input: body, encoding: 'utf-8' },
+    );
+    return { out: (r.stdout ?? '').trim(), code: r.status ?? 1 };
+  }
+
+  it('picks the newest by created_at, not by list order or version string', () => {
+    // The REAL listing as returned by z.ai on 2026-08-07, order preserved.
+    const real = JSON.stringify({
+      data: [
+        { id: 'glm-4.5', created_at: '2025-07-28T00:00:00Z' },
+        { id: 'glm-4.6', created_at: '2025-10-01T08:00:00Z' },
+        { id: 'glm-4.7', created_at: '2025-12-22T00:00:00Z' },
+        { id: 'glm-5', created_at: '2026-02-11T00:00:00Z' },
+        { id: 'glm-5.1', created_at: '2026-03-27T22:00:00Z' },
+        { id: 'glm-5.2', created_at: '2026-06-17T00:00:00Z' },
+      ],
+    });
+    expect(pick(real).out).toBe('glm-5.2');
+  });
+
+  it('a two-digit minor still resolves correctly (a lexical sort would not)', () => {
+    // 'glm-5.10' < 'glm-5.9' as TEXT. Reading created_at is what makes this right.
+    expect(
+      pick(
+        JSON.stringify({
+          data: [
+            { id: 'glm-5.9', created_at: '2026-06-17T00:00:00Z' },
+            { id: 'glm-5.10', created_at: '2026-09-01T00:00:00Z' },
+          ],
+        }),
+      ).out,
+    ).toBe('glm-5.10');
+  });
+
+  it('SKIPS a lite sibling even when it is the newest — newer is not better', () => {
+    // The silent-downgrade hazard: a future `-air`/`-turbo` would be newest by date
+    // yet weaker, and the log would still say "latest".
+    for (const lite of ['glm-5.3-air', 'glm-5.3-turbo', 'glm-5.3-flash', 'glm-5.3-mini']) {
+      expect(
+        pick(
+          JSON.stringify({
+            data: [
+              { id: 'glm-5.2', created_at: '2026-06-17T00:00:00Z' },
+              { id: lite, created_at: '2026-09-01T00:00:00Z' },
+            ],
+          }),
+        ).out,
+      ).toBe('glm-5.2');
+    }
+  });
+
+  it('fails rather than guesses on a malformed, empty, or all-lite listing', () => {
+    expect(pick('not json').code).not.toBe(0);
+    expect(pick('{"data":[]}').code).not.toBe(0);
+    expect(pick('{"data":"nope"}').code).not.toBe(0);
+    // every candidate excluded → nothing choosable, so no id is emitted
+    const allLite = JSON.stringify({ data: [{ id: 'glm-5-turbo', created_at: '2026-01-01T00:00:00Z' }] });
+    expect(pick(allLite).code).not.toBe(0);
+    expect(pick(allLite).out).toBe('');
+    // a row missing created_at is skipped, not treated as newest
+    const partial = JSON.stringify({
+      data: [
+        { id: 'glm-5.2', created_at: '2026-06-17T00:00:00Z' },
+        { id: 'glm-9.9' },
+      ],
+    });
+    expect(pick(partial).out).toBe('glm-5.2');
+  });
+
+  it('an explicit model short-circuits resolution entirely (no request)', () => {
+    // Proven by behaviour: with a base URL that could not answer, an explicit id
+    // still resolves, which is only possible if no listing call was attempted.
+    const r = spawnSync(
+      'bash',
+      [SHADOW, '--resolve-model'],
+      {
+        encoding: 'utf-8',
+        env: {
+          PATH: process.env.PATH ?? '/usr/bin:/bin',
+          HOME: process.env.HOME ?? '/tmp',
+          MINSPEC_SHADOW_TRIAGE_KEY: ZAI_KEY,
+          MINSPEC_SHADOW_TRIAGE_MODEL: 'glm-4.7',
+          MINSPEC_SHADOW_TRIAGE_BASE_URL: 'http://127.0.0.1:9/anthropic',
+        },
+      },
+    );
+    expect(r.status).toBe(0);
+    expect((r.stdout ?? '').trim()).toBe('glm-4.7');
   });
 
   it('MINSPEC_SHADOW_TRIAGE_MODEL overrides it consistently across both surfaces', () => {

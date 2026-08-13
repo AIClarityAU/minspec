@@ -13,6 +13,7 @@
 # passes just as happily while inert, which this repo has been bitten by):
 #   shadow-triage.sh --print-effective-env   the environment the shadow call runs under
 #   shadow-triage.sh --print-argv            the exact argv the shadow call uses
+#   shadow-triage.sh --resolve-model         the model id this run would use
 #   shadow-triage.sh --repo-public           gh JSON on stdin; exit 0 iff public
 #   shadow-triage.sh --fields-to-json        `key=value` lines on stdin → JSON
 #   shadow-triage.sh --block-conformant      raw agent text on stdin; exit 0 iff conformant
@@ -72,6 +73,29 @@ SHADOW_LOG="${MINSPEC_SHADOW_TRIAGE_LOG:-${REPO_ROOT}/.minspec/shadow-triage.jso
 
 note() { echo "  shadow-triage: $*" >&2; }
 
+# ── shadow_resolve_model — the NETWORK half ──────────────────────────────────
+# Echoes the model id to actually use. An explicit MINSPEC_SHADOW_TRIAGE_MODEL (or
+# any value other than the `latest` sentinel) is returned untouched — no request.
+#
+# FAIL-SAFE, NOT FAIL-CLOSED, and deliberately so: this is a measurement instrument,
+# not a gate (contrast DR-066, which forbids swallowing a load-bearing GATE signal).
+# If the listing cannot be fetched or parsed, this exits non-zero and the CALLER
+# skips the shadow run recording `model-resolve-failed` — it must never fall back to
+# a guessed id, because a row labelled with the wrong model is worse than no row.
+shadow_resolve_model() {
+  local requested; requested="$(shadow_model)"
+  if [[ "$requested" != "latest" ]]; then printf '%s' "$requested"; return 0; fi
+
+  local key base body
+  key="$(shadow_key)"; base="$(shadow_base_url)"
+  [[ -z "$key" ]] && return 1
+  body="$(timeout 20 curl -sS --fail-with-body \
+      "${base%/}/v1/models" \
+      -H "x-api-key: ${key}" \
+      -H "anthropic-version: 2023-06-01" 2>/dev/null)" || return 1
+  printf '%s' "$body" | shadow_pick_latest_model
+}
+
 # ── Pure seams ────────────────────────────────────────────────────────────────
 case "${1:-}" in
   --print-effective-env)
@@ -85,6 +109,11 @@ case "${1:-}" in
     printf '%s\n' "${SHADOW_ARGV[@]}"
     exit 0
     ;;
+  --resolve-model)
+    # The model id the shadow call would use. A seam rather than an internal detail
+    # because "an explicit id issues no request" is a BEHAVIOUR worth asserting, and
+    # `shadow_resolve_model` lives here (it is network work) rather than in the pure lib.
+    shadow_resolve_model; exit $? ;;
   --repo-public)     shadow_repo_public; exit $? ;;
   --fields-to-json)  shadow_fields_to_json; exit 0 ;;
   --block-conformant) shadow_block_conformant; exit $? ;;
@@ -158,7 +187,16 @@ if ! printf '%s' "$VIS_JSON" | shadow_repo_public; then
   exit 0
 fi
 
-MODEL="$(shadow_model)"
+
+
+# Resolve the model BEFORE anything else costs time. With the default `latest`
+# sentinel this is one GET /v1/models; with an explicit id it is a no-op.
+# On failure we SKIP rather than fall back: a row labelled with a guessed model id
+# would corrupt the very measurement this harness exists to produce (#1338).
+if ! MODEL="$(shadow_resolve_model)" || [[ -z "$MODEL" ]]; then
+  note "could not resolve the latest z.ai model — skipped (no guessed fallback)."
+  exit 0
+fi
 BASE_URL="$(shadow_base_url)"
 TIMEOUT="$(shadow_timeout)"
 PROMPT="$(cat "$PROMPT_FILE")"
