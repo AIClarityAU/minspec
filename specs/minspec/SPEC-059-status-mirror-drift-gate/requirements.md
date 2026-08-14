@@ -1,7 +1,7 @@
 ---
 id: SPEC-059
 type: requirements
-status: implementing
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity
@@ -20,6 +20,12 @@ affects:
   - packages/minspec/src/lib/spec-validator.ts
   - scripts/validate-frontmatter.ts
   - packages/minspec/src/lib/artifact-graph.ts
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # MinSpec — Corpus-wide literal/derived status-mirror gate (Requirements)
