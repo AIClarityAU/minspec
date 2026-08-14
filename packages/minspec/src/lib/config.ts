@@ -56,6 +56,20 @@ export interface MinspecConfig {
    * Absent → treated as `warn`.
    */
   readonly ownershipDeclaration?: 'warn' | 'error';
+  /**
+   * The project's name, as rendered into every generated harness file (#1529).
+   *
+   * Explicit and authoritative: set this to rename the project deliberately.
+   * Absent, the name is derived — root `package.json` name, else the name already
+   * recorded in the harness, else the directory's basename. The basename is a
+   * guess, not a fact: a linked git worktree's directory name is arbitrary, which
+   * is how a refresh run from one used to rename the project in five files at once.
+   *
+   * Written into a NEWLY scaffolded config.json; never back-filled into an
+   * existing one, because the first refresh after upgrading may itself be running
+   * from a worktree and would persist the wrong name.
+   */
+  readonly projectName?: string;
 }
 
 /** 80% statement/branch/function/line coverage — the commonly-cited industry bar. */

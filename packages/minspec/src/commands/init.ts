@@ -1256,6 +1256,22 @@ async function surfaceManagedRegionWarning(folder: string, w: ManagedRegionWarni
     return;
   }
 
+  // A 'project-name-mismatch' reports that the harness's own name beat the
+  // directory's, so nothing is broken and "Re-scaffold" would be nonsense — worse,
+  // it would imply the harness is damaged when it is the thing that was right.
+  // Offer the file where a deliberate rename is declared instead (#1529).
+  if (w.kind === 'project-name-mismatch') {
+    const choice = await vscode.window.showInformationMessage(
+      `[${label}] ${w.message}`,
+      OPEN_FILE_ACTION,
+    );
+    if (choice === OPEN_FILE_ACTION) {
+      const doc = await vscode.workspace.openTextDocument(path.join(folder, w.outputPath));
+      await vscode.window.showTextDocument(doc, { preview: false });
+    }
+    return;
+  }
+
   const choice = await vscode.window.showWarningMessage(
     `[${label}] ${w.message}`,
     RESCAFFOLD_ACTION,

@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { DEFAULT_CONFIG, loadConfig, resolveAndValidate, TIERS, type Tier } from './config';
-import { buildContext, renderTemplate, renderAll } from './template-engine';
+import { buildContext, renderTemplate, renderAll, resolveProjectName } from './template-engine';
 import {
   TEMPLATE_NAMES,
   TEMPLATE_OUTPUT_PATHS,
@@ -300,7 +300,12 @@ export function scaffold(rootDir: string): void {
 
   const configPath = path.join(minspecDir, 'config.json');
   if (!fs.existsSync(configPath)) {
-    fs.writeFileSync(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2) + '\n');
+    // Record the project's name at creation, so it stops being re-derived from the
+    // directory on every later refresh (#1529). Written ONLY here, never back-filled
+    // into an existing config: a back-fill's first run could itself be from a
+    // worktree, which would persist exactly the wrong name this guards against.
+    const seeded = { projectName: resolveProjectName(rootDir).name, ...DEFAULT_CONFIG };
+    fs.writeFileSync(configPath, JSON.stringify(seeded, null, 2) + '\n');
   }
 
   // Pre-create the epic registry directory + empty marker-bounded INDEX so the
@@ -442,11 +447,31 @@ export interface ManagedRegionWarning {
    * `'untracked'` notices must NOT offer "Re-scaffold" — nothing was scaffolded,
    * a file was removed from the git index — which is why this discriminator
    * exists rather than reusing the marker warning verbatim.
+   *
+   * `'project-name-mismatch'` reports that the directory's name disagreed with the
+   * project's, and the project's won (#1529). Nothing is broken and nothing needs
+   * re-scaffolding; its `outputPath` points at `.minspec/config.json`, where a
+   * deliberate rename is declared.
    */
-  readonly kind?: 'missing-markers' | 'untracked';
+  readonly kind?: 'missing-markers' | 'untracked' | 'project-name-mismatch';
 }
 
 /** The notice raised when a declared machine-local path is removed from the index. */
+/**
+ * The notice raised when the directory's name disagreed with the project's (#1529).
+ *
+ * Names BOTH sides deliberately: a warning that says only "mismatch" makes the
+ * reader go and find which name won, which is the same silence in a smaller box.
+ */
+export function projectNameMismatchMessage(recorded: string, basename: string): string {
+  return (
+    `Kept the project name "${recorded}" from the existing harness. This directory ` +
+    `is named "${basename}" — a linked git worktree, or a renamed checkout — and ` +
+    'using it would have renamed the project in every generated file. To rename ' +
+    'deliberately, set "projectName" in .minspec/config.json.'
+  );
+}
+
 export function untrackedNoticeMessage(outputPath: string): string {
   return (
     `${outputPath} was tracked by git but MinSpec declares it machine-local, so it ` +
@@ -1021,6 +1046,22 @@ export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
 
   const config = loadConfig(rootDir);
   const context = buildContext(rootDir, config);
+
+  // #1529: the directory's name is a guess, and the harness on disk is the witness.
+  // When the guess loses, say so — a rename averted with no notice is the same
+  // "no silent gate" failure, just in the safe direction.
+  const projectName = resolveProjectName(rootDir, config);
+  const projectNameWarnings: ManagedRegionWarning[] =
+    projectName.source === 'recorded' && projectName.recorded
+      ? [
+          {
+            outputPath: path.join('.minspec', 'config.json'),
+            message: projectNameMismatchMessage(projectName.recorded, projectName.basename),
+            kind: 'project-name-mismatch' as const,
+          },
+        ]
+      : [];
+
   // Prior manifest — the merge DECISION input only (which body to keep, INV-5).
   // It is NOT the recorded manifest: that is rebuilt LAST from final on-disk bytes.
   const priorHashes: GeneratedHashes = loadHashes(rootDir);
@@ -1099,5 +1140,5 @@ export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
     kind: 'untracked' as const,
   }));
 
-  return [...managedRegionWarnings, ...untrackedNotices];
+  return [...managedRegionWarnings, ...untrackedNotices, ...projectNameWarnings];
 }
