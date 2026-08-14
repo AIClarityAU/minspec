@@ -15,6 +15,7 @@ import { resolveTargetFolder, workspaceFolderLabel } from '../lib/resolve-folder
 import { setCoverageMinimum, DEFAULT_COVERAGE_MINIMUM } from '../lib/config';
 import { evaluateConstitution } from '../lib/constitution-nudge';
 import { getRepoFromRemote } from '../lib/github';
+import { resolveRemotes, renameToOriginCandidate } from '../lib/git-remotes';
 import {
   type CommandRunner,
   RULESET_DOCS_URL,
@@ -669,6 +670,98 @@ const REPO_SLUG_RE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
  */
 const REQUIRED_CHECKS_SETTING = 'minspec.ruleset.requiredChecks';
 
+// ---------------------------------------------------------------------------
+// Misnamed-remote detection + rename offer (#1545)
+// ---------------------------------------------------------------------------
+
+/** Toast action: rename the sole remote to the conventional `origin`. */
+const RENAME_REMOTE_ACTION = 'Rename to origin';
+/** Toast action: leave the remote alone (and stop asking). */
+const KEEP_REMOTE_ACTION = 'Keep as is';
+
+/** workspaceState-free suppression: a git config flag, so it travels with the repo. */
+const RENAME_DECLINED_CONFIG = 'minspec.remoteRenameDeclined';
+
+/** Dependencies for {@link offerRemoteRenameAdvisory}, injectable for tests. */
+export interface RemoteRenameDeps {
+  run?: CommandRunner;
+  isRepo?: (folder: string) => boolean;
+}
+
+/**
+ * Detect a remote that isn't called `origin` and offer to rename it (#1545).
+ *
+ * `origin` is a convention, not a rule — `git clone` picks it, and a user who runs
+ * `git remote add <project-name> <url>` never gets one. Nothing in git cares. But
+ * essentially every tool reading "the remote" hardcodes the name, MinSpec included:
+ * before this, such a repo was told to add a remote it already had, and its
+ * protected-branch guard went silently inert.
+ *
+ * The resolver ({@link resolveRemotes}) fixes MinSpec's own reads. This offer fixes
+ * the REPO, which is strictly more valuable: it repairs every other tool at the same
+ * time, and it reaches the places a TypeScript resolver cannot — the scaffolded shell
+ * hook, `git push` without arguments, and every downstream script that will ever
+ * assume the conventional name.
+ *
+ * Deliberately narrow, and consent-gated:
+ *   - fires ONLY for exactly one remote, pointing at github.com, not already `origin`
+ *     ({@link renameToOriginCandidate}). Several remotes, or a non-GitHub one, is
+ *     left strictly alone — an offer there is a prompt to break something;
+ *   - the rename is the ONLY mutation, and it happens only on an explicit click;
+ *   - "Keep as is" records a per-repo git-config flag so the offer never nags again.
+ *
+ * `git remote rename` is safe and reversible: it rewrites the `remote.<name>.*`
+ * config keys and the tracking refspec, and local branches keep their upstreams.
+ *
+ * Best-effort throughout — any failure is swallowed and never affects init.
+ */
+export async function offerRemoteRenameAdvisory(
+  folder: string,
+  deps: RemoteRenameDeps = {},
+): Promise<void> {
+  const run = deps.run ?? defaultCommandRunner;
+  const isRepo = deps.isRepo ?? ((f: string) => fs.existsSync(path.join(f, '.git')));
+  if (!isRepo(folder)) return;
+
+  try {
+    const declined = await run('git', ['-C', folder, 'config', '--get', RENAME_DECLINED_CONFIG]);
+    if (declined.code === 0 && declined.stdout.trim() === 'true') return;
+
+    const state = await resolveRemotes(run, folder);
+    const candidate = renameToOriginCandidate(state);
+    if (!candidate) return;
+
+    const choice = await vscode.window.showInformationMessage(
+      `MinSpec: this repo's only remote is named '${candidate.name}', not 'origin'. ` +
+        'Most git tooling — including MinSpec\'s protected-branch guard and the branch-ruleset ' +
+        'advisory — looks for a remote called \'origin\', and quietly does nothing without one. ' +
+        'Rename it?',
+      RENAME_REMOTE_ACTION,
+      KEEP_REMOTE_ACTION,
+    );
+
+    if (choice === RENAME_REMOTE_ACTION) {
+      const renamed = await run('git', ['-C', folder, 'remote', 'rename', candidate.name, 'origin']);
+      if (renamed.code === 0) {
+        vscode.window.showInformationMessage(
+          `MinSpec: renamed remote '${candidate.name}' to 'origin'.`,
+        );
+      } else {
+        // Report the real reason rather than a generic failure — the usual cause is
+        // an `origin` that already exists, which the user can act on.
+        vscode.window.showWarningMessage(
+          `MinSpec: could not rename '${candidate.name}' to 'origin' — ` +
+            `${(renamed.stderr || renamed.stdout).trim() || 'git reported no detail'}.`,
+        );
+      }
+    } else if (choice === KEEP_REMOTE_ACTION) {
+      await run('git', ['-C', folder, 'config', RENAME_DECLINED_CONFIG, 'true']);
+    }
+  } catch {
+    // best-effort — advisory only; never let it break init.
+  }
+}
+
 /** Dependencies for {@link offerRulesetAdvisory}, injectable for tests. */
 export interface RulesetAdvisoryDeps {
   /** Command runner used for all `gh` invocations. */
@@ -1150,6 +1243,7 @@ export async function initCommand(
   folderArg?: string,
   deps?: OfferScaffoldCommitDeps & {
     ruleset?: RulesetAdvisoryDeps;
+    remoteRename?: RemoteRenameDeps;
     githubPrExt?: GitHubPrExtAdvisoryDeps;
   },
 ): Promise<void> {
@@ -1207,6 +1301,12 @@ export async function initCommand(
   // (no consent toast) — a ruleset that already exists is silent — and only the
   // MUTATING create is consent-gated behind an explicit "Create ruleset" click.
   // Failures never affect the init result.
+  //
+  // BEFORE the ruleset advisory (#1545): a remote that is not called `origin` is
+  // exactly what stops the ruleset probe identifying the repo, so asking afterwards
+  // would have the user fix the remote and still need to re-run init to get the
+  // offer that the fix unblocks.
+  await offerRemoteRenameAdvisory(folder, deps?.remoteRename);
   await offerRulesetAdvisory(folder, deps?.ruleset);
 }
 
@@ -1279,7 +1379,10 @@ async function surfaceManagedRegionWarning(folder: string, w: ManagedRegionWarni
 
 export async function initRefreshCommand(
   folderArg?: string,
-  deps?: OfferScaffoldCommitDeps & { ruleset?: RulesetAdvisoryDeps },
+  deps?: OfferScaffoldCommitDeps & {
+    ruleset?: RulesetAdvisoryDeps;
+    remoteRename?: RemoteRenameDeps;
+  },
 ): Promise<void> {
   const folder = folderArg ?? (await resolveTargetFolder());
   if (!folder) return;
@@ -1311,6 +1414,8 @@ export async function initRefreshCommand(
   // (#564 / SPEC-033 FR-3). Refresh is where an EXISTING repo whose ruleset
   // predates the ai-review/ready-to-merge checks (the sealbox case) gets offered
   // the missing required checks; without this, only freshly-inited repos would.
+  // Same ordering rationale as init (#1545).
+  await offerRemoteRenameAdvisory(folder, deps?.remoteRename);
   await offerRulesetAdvisory(folder, deps?.ruleset);
 }
 

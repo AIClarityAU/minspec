@@ -820,6 +820,34 @@ repo_root=$(git rev-parse --show-toplevel 2>/dev/null || pwd)
 # in-progress merge / cherry-pick / revert / rebase (those are how a branch
 # legitimately lands), never on a detached HEAD, and never when the default
 # branch cannot be determined — unknown fails OPEN, per the never-wrong rule.
+# Does this repo have ANY remote? (#1545)
+#
+# The question the guard actually needs is "could a branch here be push-protected",
+# and the honest witness for that is "a remote exists" — not "a remote named origin
+# exists". Those were the same test until a repo turned up whose only remote was
+# named after the project, at which point the guard concluded there was nothing to
+# push to and passed silently on a protected branch.
+minspec_has_remote() {
+  [ -n "$(git remote 2>/dev/null)" ]
+}
+
+# The name of THE remote, or empty when there isn't an unambiguous one.
+#
+# origin wins whenever it exists, so every conventional repo behaves exactly as
+# before. Otherwise a SOLE remote is unambiguous by construction, whatever it is
+# called. Several remotes with no origin resolves to empty — we do not guess, and
+# the caller must not read that emptiness as "no remote": see minspec_has_remote.
+minspec_remote_name() {
+  if git config --get remote.origin.url >/dev/null 2>&1; then
+    echo origin
+    return 0
+  fi
+  minspec_rn_all=$(git remote 2>/dev/null)
+  if [ "$(printf '%s\\n' "$minspec_rn_all" | grep -c .)" = "1" ]; then
+    printf '%s\\n' "$minspec_rn_all" | head -1
+  fi
+}
+
 minspec_branch_guard() {
   if [ "\${MINSPEC_ALLOW_MAIN:-0}" = "1" ]; then return 0; fi
   if [ "$(git config --get minspec.allowCommitOnDefaultBranch 2>/dev/null)" = "true" ]; then return 0; fi
@@ -837,7 +865,10 @@ minspec_branch_guard() {
   guard_current=$(git symbolic-ref --quiet --short HEAD 2>/dev/null) || return 0
   if [ -z "\${guard_current:-}" ]; then return 0; fi
 
-  guard_default=$(git symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's|^origin/||')
+  guard_remote=$(minspec_remote_name)
+  if [ -n "\${guard_remote:-}" ]; then
+    guard_default=$(git symbolic-ref --quiet --short "refs/remotes/$guard_remote/HEAD" 2>/dev/null | sed "s|^$guard_remote/||")
+  fi
 
   # origin/HEAD is the precise answer but is NOT always populated — it was absent
   # in both repos this guard was written for, which made the guard silently inert
@@ -848,11 +879,20 @@ minspec_branch_guard() {
   # these names are treated as protected, any other branch is untouched, and the
   # list is configurable per project via minspec.protectedBranches.
   #
-  # Gated on an \`origin\` remote existing. A repo with no remote has nothing to
-  # push to, so no branch in it can be push-protected and committing on \`main\` is
-  # entirely correct — scratch repos, fixtures and local-only projects must never
-  # be blocked.
-  if [ -z "\${guard_default:-}" ] && git config --get remote.origin.url >/dev/null 2>&1; then
+  # Gated on ANY remote existing, not on one named \`origin\` (#1545). A repo with
+  # no remote has nothing to push to, so no branch in it can be push-protected and
+  # committing on \`main\` is entirely correct — scratch repos, fixtures and
+  # local-only projects must never be blocked.
+  #
+  # The distinction matters and used to be lost: this read \`remote.origin.url\`, so
+  # a repo whose remote carried any other name took the same path as a repo with no
+  # remote at all and the guard went SILENTLY INERT on a protected branch. Failing
+  # to resolve a remote is not evidence that none exists, and a merge-gating check
+  # must fail closed on a missing witness rather than pass (constitution invariant
+  # 2). Note this deliberately uses minspec_has_remote, NOT minspec_remote_name:
+  # several remotes with no \`origin\` cannot be resolved, but the branch is still
+  # push-protected and must still be guarded.
+  if [ -z "\${guard_default:-}" ] && minspec_has_remote; then
     guard_candidates=$(git config --get minspec.protectedBranches 2>/dev/null || true)
     if [ -z "\${guard_candidates:-}" ]; then guard_candidates="main master trunk"; fi
     for guard_name in $guard_candidates; do
@@ -877,7 +917,7 @@ minspec_branch_guard() {
   echo "" >&2
   echo "  Already committed on $guard_current? Keep the work, then rewind the branch:" >&2
   echo "      git branch <branch-name>" >&2
-  echo "      git reset --hard origin/$guard_default" >&2
+  echo "      git reset --hard \${guard_remote:-origin}/$guard_default" >&2
   echo "" >&2
   echo "  Allow once:      MINSPEC_ALLOW_MAIN=1 git commit ..." >&2
   echo "  Allow in future: git config minspec.allowCommitOnDefaultBranch true" >&2
