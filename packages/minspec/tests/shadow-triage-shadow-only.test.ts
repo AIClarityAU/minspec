@@ -72,14 +72,21 @@ interface Harness {
   binDir: string;
   ghLog: string;
   claudeCalls: string;
+  curlCalls: string;
   shadowLog: string;
   env: Record<string, string>;
 }
 
 /**
- * A hermetic sandbox: stub `claude` and `gh` on PATH ahead of the real ones, a
+ * A hermetic sandbox: stub `claude`, `curl` and `gh` on PATH ahead of the real ones, a
  * temp JSONL path, and an environment built from scratch so the operator's real
  * ANTHROPIC_* variables cannot influence the run.
+ *
+ * `curl` is stubbed because the shadow half is a direct HTTPS request, not a `claude`
+ * subprocess. Without the stub these cases would reach api.z.ai for real — a network
+ * call the constitution's offline invariant forbids, and one that would fail on the
+ * fixture key and silently turn every assertion below into a vacuous pass against a
+ * shadow step that never ran.
  */
 function makeHarness(opts: { key?: string; disabled?: boolean; private?: boolean } = {}): Harness {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shadow-triage-'));
@@ -88,14 +95,15 @@ function makeHarness(opts: { key?: string; disabled?: boolean; private?: boolean
 
   const ghLog = path.join(dir, 'gh-calls.log');
   const claudeCalls = path.join(dir, 'claude-calls.log');
+  const curlCalls = path.join(dir, 'curl-calls.log');
   const shadowLog = path.join(dir, 'shadow-triage.jsonl');
 
   fs.writeFileSync(path.join(dir, 'live-verdict.txt'), LIVE_VERDICT);
   fs.writeFileSync(path.join(dir, 'shadow-verdict.txt'), SHADOW_VERDICT);
 
-  // The stub branches on ANTHROPIC_BASE_URL, which is exactly how the two calls
-  // differ in reality — so "which agent was this" is decided by the same signal the
-  // production code sets, not by a flag invented for the test.
+  // Only the LIVE agent is a `claude` process now. The stub still branches on
+  // ANTHROPIC_BASE_URL so that a regression which reintroduced a shadow `claude` call
+  // would be VISIBLE here as a 'shadow' line rather than passing unnoticed.
   fs.writeFileSync(
     path.join(binDir, 'claude'),
     `#!/usr/bin/env bash
@@ -106,6 +114,37 @@ else
   echo "live" >> "${claudeCalls}"
   cat "${path.join(dir, 'live-verdict.txt')}"
 fi
+exit 0
+`,
+    { mode: 0o755 },
+  );
+
+  // The shadow transport. Speaks enough of curl's contract for the runner to work:
+  // reads the header config from STDIN, honours `--output FILE`, and writes the HTTP
+  // status to stdout (which is how `shadow_http` reports it). It records the URL it
+  // was asked for so a test can assert the request was actually issued.
+  fs.writeFileSync(
+    path.join(binDir, 'curl'),
+    `#!/usr/bin/env bash
+out=""; url=""
+while [[ $# -gt 0 ]]; do
+  case "\$1" in
+    --output) out="\$2"; shift 2 ;;
+    --max-time|--write-out|--data-binary|--request) shift 2 ;;
+    --disable|--silent|--show-error) shift ;;
+    --config) shift 2 ;;
+    *) url="\$1"; shift ;;
+  esac
+done
+cat > /dev/null   # drain the config on stdin; never echoed, it holds the key
+echo "\$url" >> "${curlCalls}"
+if [[ "\$url" == */v1/models ]]; then
+  printf '{"data":[{"id":"glm-5.2","created_at":"2026-06-17T00:00:00Z"}]}' > "\${out:-/dev/stdout}"
+else
+  jq -c -n --rawfile t "${path.join(dir, 'shadow-verdict.txt')}" \\
+    '{content:[{type:"text",text:\$t}],stop_reason:"end_turn"}' > "\${out:-/dev/stdout}"
+fi
+printf '200'
 exit 0
 `,
     { mode: 0o755 },
@@ -150,7 +189,7 @@ exit 0
   if (opts.key) env.MINSPEC_SHADOW_TRIAGE_KEY = opts.key;
   if (opts.disabled) env.MINSPEC_SHADOW_TRIAGE = '0';
 
-  return { dir, binDir, ghLog, claudeCalls, shadowLog, env };
+  return { dir, binDir, ghLog, claudeCalls, curlCalls, shadowLog, env };
 }
 
 function runTriage(h: Harness, issue = '4242'): { stdout: string; stderr: string; status: number } {
@@ -252,11 +291,22 @@ describe('shadow-triage — a contradicting shadow verdict changes NO outcome (#
   it('BOTH agents actually ran — the test is not green merely because the shadow was skipped', () => {
     // Without this, every assertion above would pass just as well against a shadow
     // step that never executed, which is the vacuous-pass shape this repo watches for.
+    //
+    // The two halves are now observed on DIFFERENT channels, because they use
+    // different transports: the live agent is a `claude` process, the shadow is one
+    // HTTPS request. Both witnesses are required.
     const h = makeHarness({ key: 'zai-test-key' });
     runTriage(h);
-    const calls = fs.readFileSync(h.claudeCalls, 'utf-8').split('\n').filter(Boolean);
-    expect(calls).toContain('live');
-    expect(calls).toContain('shadow');
+    const claude = fs.readFileSync(h.claudeCalls, 'utf-8').split('\n').filter(Boolean);
+    expect(claude).toContain('live');
+
+    const requests = fs.readFileSync(h.curlCalls, 'utf-8').split('\n').filter(Boolean);
+    expect(requests).toHaveLength(1);
+    expect(requests[0]).toMatch(/\/v1\/messages$/);
+
+    // …and the shadow half consumed NO Anthropic quota, which is half the point of
+    // the transport swap (#1234): it never became a `claude` process at all.
+    expect(claude).not.toContain('shadow');
   });
 
   it('the disagreement is RECORDED — both verdicts, per-field, through the same gate', () => {
@@ -317,6 +367,10 @@ describe('shadow-triage — inert without a key, and real triage is untouched (#
 
     const calls = fs.readFileSync(h.claudeCalls, 'utf-8').split('\n').filter(Boolean);
     expect(calls).toEqual(['live']); // exactly one agent ran
+    // The load-bearing witness since the transport swap: the shadow half is an HTTPS
+    // request, so "no claude subprocess" no longer proves it was skipped. NO REQUEST
+    // WAS ISSUED is what proves it.
+    expect(fs.existsSync(h.curlCalls)).toBe(false);
     expectLiveVerdictApplied(h);
   });
 
@@ -331,6 +385,9 @@ describe('shadow-triage — inert without a key, and real triage is untouched (#
     const h = makeHarness({ key: 'zai-test-key', disabled: true });
     runTriage(h);
     expect(fs.readFileSync(h.claudeCalls, 'utf-8').split('\n').filter(Boolean)).toEqual(['live']);
+    // No request left the machine, which is what "hard-disabled" has to mean for an
+    // instrument whose only side effect is now an outbound HTTPS call.
+    expect(fs.existsSync(h.curlCalls)).toBe(false);
     expect(fs.existsSync(h.shadowLog)).toBe(false);
   });
 
@@ -383,6 +440,9 @@ describe('shadow-triage — public repos only (jurisdiction, scrooge DR-021 §5)
     const h = makeHarness({ key: 'zai-test-key', private: true });
     runTriage(h);
     expect(fs.readFileSync(h.claudeCalls, 'utf-8').split('\n').filter(Boolean)).toEqual(['live']);
+    // The jurisdiction constraint is about BYTES LEAVING, so this is the assertion
+    // that actually states it: not one request was issued.
+    expect(fs.existsSync(h.curlCalls)).toBe(false);
     expect(fs.existsSync(h.shadowLog)).toBe(false);
   });
 

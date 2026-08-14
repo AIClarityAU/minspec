@@ -11,12 +11,27 @@
 # Pure seams (exist so the properties below are testable as BEHAVIOUR, not by
 # grepping this file for its own text — a guard asserted only by source-text search
 # passes just as happily while inert, which this repo has been bitten by):
-#   shadow-triage.sh --print-effective-env   the environment the shadow call runs under
-#   shadow-triage.sh --print-argv            the exact argv the shadow call uses
+#   shadow-triage.sh --print-curl-argv       the exact argv the request is issued with
+#   shadow-triage.sh --print-request-body F  the /v1/messages payload for prompt file F
+#   shadow-triage.sh --extract-text          response JSON on stdin → assistant text
+#   shadow-triage.sh --classify-error [S]    response JSON on stdin → typed reason
+#   shadow-triage.sh --pick-latest-model     /v1/models JSON on stdin → the id to use
 #   shadow-triage.sh --resolve-model         the model id this run would use
 #   shadow-triage.sh --repo-public           gh JSON on stdin; exit 0 iff public
 #   shadow-triage.sh --fields-to-json        `key=value` lines on stdin → JSON
 #   shadow-triage.sh --block-conformant      raw agent text on stdin; exit 0 iff conformant
+#
+# There is deliberately NO seam that prints the request headers. They hold the one
+# credential in this system, and a debug flag that emits it is precisely the leak the
+# transport is built to avoid — the header path is proven by observing a stub curl and
+# a live curl's /proc entry instead (see the isolation suite).
+#
+# `--print-effective-env` and `--print-argv` are GONE. They described the `claude -p`
+# child: an environment scrub and a `--bare` flag whose whole job was to stop a CLI
+# resolving Anthropic credentials on its own. A direct HTTPS request resolves no
+# credentials at all, so there is no environment to inspect and no CLI argv to pin.
+# Read their removal as the hazard being designed out, not as a guard being dropped —
+# the reasoning is written out under THE TRANSPORT in scripts/lib/shadow-triage.sh.
 #
 # ══════════════════════════════════════════════════════════════════════════════
 # SHADOW-ONLY, BY CONSTRUCTION
@@ -73,7 +88,27 @@ SHADOW_LOG="${MINSPEC_SHADOW_TRIAGE_LOG:-${REPO_ROOT}/.minspec/shadow-triage.jso
 
 note() { echo "  shadow-triage: $*" >&2; }
 
-# ── shadow_resolve_model — the NETWORK half ──────────────────────────────────
+# ── shadow_http — the ONE place bytes actually leave this machine ─────────────
+# `<url> <out_file> <timeout> [post_body_file]`; echoes the HTTP status and returns
+# the request's exit status. Lives HERE rather than in lib/shadow-triage.sh because
+# that file's contract is "nothing touches the network" — the builders it exports
+# (`shadow_curl_config`, `shadow_curl_argv`) emit bytes; this is what sends them.
+#
+# curl's stderr is discarded so a vendor diagnostic can never carry request detail
+# into a log.
+#
+# Belt AND braces on the clock: curl's own `--max-time` runs INSIDE an external
+# `timeout` of the same bound, because a curl that wedges before its timer is armed
+# would otherwise have no cap at all — and an unbounded instrument becomes a latency
+# dependency of the real triage it is only supposed to watch. Both routes surface as
+# a single `timeout` reason to a reader of the log (124 from timeout, 28 from curl).
+shadow_http() {
+  local url="$1" out_file="$2" timeout_s="$3" post_body_file="${4:-}"
+  shadow_curl_argv "$url" "$out_file" "$timeout_s" "$post_body_file"
+  shadow_curl_config | timeout "$timeout_s" "${SHADOW_CURL_ARGV[@]}" 2>/dev/null
+}
+
+# ── shadow_resolve_model — the NETWORK half of "latest" resolution ───────────
 # Echoes the model id to actually use. An explicit MINSPEC_SHADOW_TRIAGE_MODEL (or
 # any value other than the `latest` sentinel) is returned untouched — no request.
 #
@@ -82,41 +117,50 @@ note() { echo "  shadow-triage: $*" >&2; }
 # If the listing cannot be fetched or parsed, this exits non-zero and the CALLER
 # skips the shadow run recording `model-resolve-failed` — it must never fall back to
 # a guessed id, because a row labelled with the wrong model is worse than no row.
+#
+# Uses the SAME credential-free request path as the verdict call, so the key stays
+# out of `ps` for the listing too — the security reviewer flagged the earlier
+# `-H "x-api-key: $KEY"` form here as a finding, and this is its fix.
 shadow_resolve_model() {
   local requested; requested="$(shadow_model)"
   if [[ "$requested" != "latest" ]]; then printf '%s' "$requested"; return 0; fi
+  [[ -z "$(shadow_key)" ]] && return 1
 
-  local key base body
-  key="$(shadow_key)"; base="$(shadow_base_url)"
-  [[ -z "$key" ]] && return 1
-  body="$(timeout 20 curl -sS --fail-with-body \
-      "${base%/}/v1/models" \
-      -H "x-api-key: ${key}" \
-      -H "anthropic-version: 2023-06-01" 2>/dev/null)" || return 1
-  printf '%s' "$body" | shadow_pick_latest_model
+  local out_file status rc
+  out_file="$(mktemp)" || return 1
+  status="$(shadow_http "$(shadow_endpoint_url /v1/models)" "$out_file" 20)"
+  rc=$?
+  if [[ $rc -ne 0 || ! "$status" =~ ^2[0-9][0-9]$ ]]; then rm -f "$out_file"; return 1; fi
+  shadow_pick_latest_model < "$out_file"
+  rc=$?
+  rm -f "$out_file"
+  return $rc
 }
 
 # ── Pure seams ────────────────────────────────────────────────────────────────
 case "${1:-}" in
-  --print-effective-env)
-    # Run `env` UNDER the constructed prefix, so what is printed is the environment
-    # the shadow agent would actually see — an observation, not a description of one.
-    shadow_build_env "${MINSPEC_SHADOW_TRIAGE_KEY:-<unset>}" "$(shadow_base_url)" "$(shadow_model)"
-    exec "${SHADOW_ENV_ARRAY[@]}" env
-    ;;
-  --print-argv)
-    shadow_build_argv "$(shadow_model)" "${ROLES_DIR}/triage.md" "<prompt>"
-    printf '%s\n' "${SHADOW_ARGV[@]}"
+  --print-curl-argv)
+    # The argv `record` really issues, from the same builder — an observation of the
+    # command line, not a description of it. What matters is what is ABSENT.
+    shadow_curl_argv "$(shadow_endpoint_url /v1/messages)" "/dev/null" "$(shadow_timeout)" "/dev/null"
+    printf '%s\n' "${SHADOW_CURL_ARGV[@]}"
     exit 0
     ;;
+  --print-request-body)
+    # $2 is the prompt file; `system` is always the REAL role file the live call uses.
+    shadow_request_body "$(shadow_model)" "$(shadow_max_tokens)" "${ROLES_DIR}/triage.md" "${2:-/dev/null}"
+    exit 0
+    ;;
+  --extract-text)      shadow_extract_text; exit $? ;;
+  --classify-error)    shadow_classify_error "${2:-}"; exit $? ;;
+  --pick-latest-model) shadow_pick_latest_model; exit $? ;;
   --resolve-model)
-    # The model id the shadow call would use. A seam rather than an internal detail
-    # because "an explicit id issues no request" is a BEHAVIOUR worth asserting, and
-    # `shadow_resolve_model` lives here (it is network work) rather than in the pure lib.
+    # A seam rather than an internal detail because "an explicit id issues no request"
+    # is a BEHAVIOUR worth asserting.
     shadow_resolve_model; exit $? ;;
-  --repo-public)     shadow_repo_public; exit $? ;;
-  --fields-to-json)  shadow_fields_to_json; exit 0 ;;
-  --block-conformant) shadow_block_conformant; exit $? ;;
+  --repo-public)       shadow_repo_public; exit $? ;;
+  --fields-to-json)    shadow_fields_to_json; exit 0 ;;
+  --block-conformant)  shadow_block_conformant; exit $? ;;
 esac
 
 MODE="${1:-}"
@@ -163,8 +207,16 @@ if [[ "${MINSPEC_SHADOW_TRIAGE:-1}" == "0" ]]; then
   exit 0
 fi
 
-KEY="$(shadow_key)"
-if [[ -z "$KEY" ]]; then
+# Presence is tested WITHOUT binding the key to a variable here. `shadow_curl_config`
+# reads it straight from the environment at request time, so this runner never holds
+# it — one fewer place for a future `note`/`echo`/trap to interpolate it into a log.
+if [[ -n "$(shadow_key)" ]] && ! shadow_key_wellformed "$(shadow_key)"; then
+  # Deliberately says nothing about the value beyond its shape — a note that echoed
+  # the key to diagnose it would be the leak this transport exists to avoid.
+  note "the configured z.ai key is not well-formed (quote, newline or control character) — skipped."
+  exit 0
+fi
+if [[ -z "$(shadow_key)" ]]; then
   note "no z.ai key configured (MINSPEC_SHADOW_TRIAGE_KEY) — skipped; real triage is unaffected."
   exit 0
 fi
@@ -187,8 +239,6 @@ if ! printf '%s' "$VIS_JSON" | shadow_repo_public; then
   exit 0
 fi
 
-
-
 # Resolve the model BEFORE anything else costs time. With the default `latest`
 # sentinel this is one GET /v1/models; with an explicit id it is a no-op.
 # On failure we SKIP rather than fall back: a row labelled with a guessed model id
@@ -199,39 +249,67 @@ if ! MODEL="$(shadow_resolve_model)" || [[ -z "$MODEL" ]]; then
 fi
 BASE_URL="$(shadow_base_url)"
 TIMEOUT="$(shadow_timeout)"
-PROMPT="$(cat "$PROMPT_FILE")"
 
-shadow_build_env "$KEY" "$BASE_URL" "$MODEL"
-shadow_build_argv "$MODEL" "${ROLES_DIR}/triage.md" "$PROMPT"
+# The request payload is built into a FILE (mktemp is 0600), never an argument: the
+# issue body can be tens of kilobytes of untrusted text, and putting it on a command
+# line would both hit ARG_MAX and publish it through /proc alongside everything else.
+REQ_FILE="$(mktemp)" || { note "could not stage the request — skipped."; exit 0; }
+RESP_FILE="$(mktemp)" || { rm -f "$REQ_FILE"; note "could not stage the response — skipped."; exit 0; }
+trap 'rm -f "$REQ_FILE" "$RESP_FILE"' EXIT
+
+if ! shadow_request_body "$MODEL" "$(shadow_max_tokens)" "${ROLES_DIR}/triage.md" "$PROMPT_FILE" > "$REQ_FILE"; then
+  note "could not render the request body for #${ISSUE} — skipped."
+  exit 0
+fi
 
 START_MS="$(date +%s%3N)"
 SHADOW_OUT=""
 SHADOW_ERR=""
-# The hard bound. `timeout` guarantees this cannot become a latency dependency of
-# real triage no matter how z.ai behaves — the wall-clock cost of the instrument is
-# capped before any of its output is looked at.
-SHADOW_OUT="$(timeout "$TIMEOUT" "${SHADOW_ENV_ARRAY[@]}" "${SHADOW_ARGV[@]}" 2>/dev/null)"
+# The hard bound lives inside shadow_http (external `timeout` around curl's own
+# `--max-time`), so this cannot become a latency dependency of real triage no matter
+# how z.ai behaves — the wall-clock cost is capped before any output is looked at.
+HTTP_STATUS="$(shadow_http "$(shadow_endpoint_url /v1/messages)" "$RESP_FILE" "$TIMEOUT" "$REQ_FILE")"
 RC=$?
 # `RC=$?` must be its own statement: inside `if ! cmd; then RC=$?`, `$?` is the status
 # of the NEGATION (always 0), not of the command — so the timeout code would be lost.
 if [[ $RC -ne 0 ]]; then
-  if [[ $RC -eq 124 ]]; then SHADOW_ERR="timeout"; else SHADOW_ERR="exit-${RC}"; fi
+  # 124 is GNU timeout's kill; 28 is curl's own --max-time. Both are the same event to
+  # a reader of the log, so they are recorded as one reason rather than two.
+  case $RC in
+    124|28) SHADOW_ERR="timeout" ;;
+    *)      SHADOW_ERR="curl-${RC}" ;;
+  esac
 fi
 END_MS="$(date +%s%3N)"
 LATENCY=$(( END_MS - START_MS ))
 
-# An auth failure exits 0 while printing "Not logged in" / "Invalid API key" (measured),
-# so a zero exit is NOT evidence a verdict was produced. Conformance is judged on the
-# TEXT, and the two failure classes are kept apart in the row: `error` means no usable
-# response came back at all (infrastructure), `conformant:false` means a response came
-# back and did not match the schema (the metric #1338 actually asked for). Collapsing
-# them would let a z.ai outage masquerade as a GLM schema-conformance failure.
+# ── Parse defensively: an error body is NOT a verdict ─────────────────────────
+# z.ai answers failures with an `error` envelope (two different shapes, both observed
+# — see shadow_classify_error). Those must land in `error` with a typed reason, never
+# be handed to the gate: the two failure classes are kept apart in the row because
+# `error` means no usable response came back at all (infrastructure) while
+# `conformant:false` means a response DID come back and did not match the schema —
+# the metric #1338 actually asked for, and the one its 2% rollback trigger reads.
+# Collapsing them would let a z.ai outage masquerade as a GLM schema failure.
 CONFORMANT=false
+if [[ -z "$SHADOW_ERR" ]]; then
+  ERR_REASON="$(shadow_classify_error "$HTTP_STATUS" < "$RESP_FILE")"
+  if [[ -n "$ERR_REASON" ]]; then
+    SHADOW_ERR="$ERR_REASON"
+  else
+    # Only the assistant TEXT reaches the gate — never the response envelope.
+    SHADOW_OUT="$(shadow_extract_text < "$RESP_FILE")" || SHADOW_ERR="no-assistant-text"
+  fi
+fi
+
 if [[ -z "$SHADOW_ERR" ]]; then
   if printf '%s' "$SHADOW_OUT" | shadow_block_conformant; then
     CONFORMANT=true
-  elif [[ -z "${SHADOW_OUT//[[:space:]]/}" ]]; then
-    SHADOW_ERR="empty-response"
+  elif [[ "$(shadow_stop_reason < "$RESP_FILE")" == "max_tokens" ]]; then
+    # The cap cut the block off mid-emission. That is OUR configuration failing, not
+    # GLM's schema discipline, so it is recorded as an endpoint error and kept out of
+    # the malformed rate — see the max_tokens rationale in lib/shadow-triage.sh.
+    SHADOW_ERR="truncated"
   fi
 fi
 
