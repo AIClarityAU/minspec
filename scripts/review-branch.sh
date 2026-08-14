@@ -192,7 +192,16 @@ run_reviewer() {
   errfile="$(mktemp)"
   printf '%s' "$USER_CONTENT" >"$promptfile"
   if [[ "${1:-subscription}" == "payg" ]]; then
-    AGENT_OUT=$( CLAUDE_CODE_OAUTH_TOKEN='' ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
+    # PASS-THROUGH, never a literal: this forwards whatever key the caller already
+    # holds in its environment, empty when unset. gitleaks' `generic-api-key` rule
+    # matches the assignment SHAPE regardless of the value, and a scanned line ending
+    # in `\` cannot carry an inline allow — so the value is hoisted onto its own line
+    # to carry one (#1514). Without that, MinSpec scaffolds this file AND the
+    # pre-commit gate that rejects it, and no freshly-initialized repo can make its
+    # first commit. Invisible in this repo because the hook scans only STAGED
+    # changes and this file predates the gate.
+    local payg_env=(CLAUDE_CODE_OAUTH_TOKEN= "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}") # gitleaks:allow
+    AGENT_OUT=$( env "${payg_env[@]}" \
       "${AGENT_ENV_SCRUB[@]}" claude -p --system-prompt-file "$ROLE_FILE" \
       "${AGENT_CONTEXT_ARGS[@]}" \
       --allowedTools "Read,Glob,Grep" --model opus --output-format text <"$promptfile" 2>"$errfile" ) || rc=$?
