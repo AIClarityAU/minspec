@@ -11,15 +11,38 @@ product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain
 aspects: [provenance, build, packaging, signpost, dogfood, status-bar]
 relates_to: [SPEC-037, SPEC-050, DR-069, DR-003]
-implements: none
+implements: [packages/minspec/src/lib/build-provenance.ts, packages/minspec/tests/build-provenance.test.ts, scripts/build-extension.sh]
 implements_reason: >-
-  Creates no new source file. `out/build-info.json` is a generated BUILD ARTIFACT, not
-  owned source - it is produced by the packaging step, never hand-edited, and is not a
-  valid owned-code path. Everything else this spec touches already exists and is owned
-  elsewhere (package.json, the dispatch script, spec.ts/lifecycle.ts), so the blast
-  radius goes under `affects:`.
+  Updated 2026-08-13: FR-1/FR-3/FR-6 shipped in #1477 and DO create owned source, so the
+  earlier `none` no longer holds. The three paths above are new files this spec owns.
+
+  MECHANISM DIVERGENCE, recorded rather than quietly absorbed: this spec assumed a
+  generated `out/build-info.json` build ARTIFACT. What shipped instead injects the commit
+  with esbuild `--define`, so the stamp is a literal in the bundle and there is NO
+  generated file at all. That is deliberate - a generated provenance file can itself go
+  stale or be regenerated out of step with the bundle it describes, which is precisely the
+  failure class this spec exists to eliminate. A stamp that cannot outlive its build is
+  strictly stronger than one that can.
+
+  Deliberately NOT declared under `affects:`: `extension.ts`, `invariants.test.ts` and
+  `package.json`, all of which #1477 modifies. `affects:` arms the spec-gate exactly as
+  `implements:` does (`scripts/hooks/spec-gate.py:350` loops both keys with
+  `require_exists=False`, so both are creation-blocking), so declaring shared core files
+  here would freeze them for every agent session the moment this approval goes stale - the
+  SPEC-053 blast-radius problem (#1474). The modified files are recorded in #1477 instead,
+  where they cannot gate unrelated work.
+
+  Note this REMOVED `packages/minspec/package.json` from the previously approved `affects:`
+  list rather than merely declining to add it. Leaving it would have contradicted the
+  paragraph above and, while this approval is stale, frozen the one file nearly every
+  feature edits. `spec.ts` and `lifecycle.ts` stay declared: AC-8 asserts this spec must NOT
+  modify `deriveStatus` or `advanceSpecToImplementing`, so for those two the declaration is
+  a guard against change, not a claim of authorship.
+
+  Still unbuilt: FR-2 (surface on demand), FR-4 (version-bump gate), FR-5 (reviewer
+  guidance) - tracked as #1504, not left as prose. This declaration covers the shipped
+  slice only.
 affects:
-  - packages/minspec/package.json
   - packages/minspec/src/lib/spec.ts
   - packages/minspec/src/lib/lifecycle.ts
   - scripts/dispatch-issue.sh
@@ -80,6 +103,17 @@ build-timestamp or SHA into the bundle, and `out/extension.js` (the artifact
 actually installed and run) carries no marker distinguishing one `0.1.22` build
 from another. `simple-git` is already a runtime dependency
 (`packages/minspec/package.json:637`) but is not invoked at build time for this.
+
+> **What shipped (#1477, `45d4212`) diverges from the mechanism assumed above.** The
+> paragraph describes the gap; the fix does not close it with the generated
+> `out/build-info.json` this spec originally proposed. `scripts/build-extension.sh`
+> injects the commit via esbuild `--define`, so the stamp is a string literal inside
+> `out/extension.js` and no generated file exists. Chosen deliberately: a generated
+> provenance file can itself go stale, or be regenerated out of step with the bundle it
+> describes, which is the exact failure class this spec exists to remove. A stamp that
+> cannot outlive its build is strictly stronger than one that can. Recorded here as well
+> as in `implements_reason:` so the accepted design is discoverable from the spec body,
+> not only from frontmatter.
 
 ### Nothing reads or surfaces provenance at runtime
 
