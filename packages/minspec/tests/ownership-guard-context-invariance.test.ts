@@ -1,0 +1,89 @@
+/**
+ * #1446 — T0: `violationsIntroducedByApproval`'s verdict does NOT depend on the optional
+ * validation context.
+ *
+ * WHY THIS EXISTS. `ownership-advance-guard.ts` deliberately passes no `knownEpicRefs` /
+ * `siblingShardFiles`, because importing `epic-manager` / `spec-layout` would re-close the
+ * very cycle that module exists to open (measured: 3 cycles with them, 0 without).
+ *
+ * The justification was an ARGUMENT, not a check: the function runs `validateSpec` twice
+ * with the SAME options and returns only the diff, so anything the options affect appears
+ * identically on both sides and cancels. That reasoning is correct today and invisible
+ * tomorrow — if someone adds a phase-gated rule that also reads the context, the guard
+ * would quietly start returning a different verdict from the one the UI path computes,
+ * with nothing failing.
+ *
+ * So the argument is pinned here as a property: for the same spec and config, the verdict
+ * is identical with and without context. If that ever stops holding, this fails and the
+ * guard's omission has to be revisited rather than silently drifting.
+ *
+ * NOTE ON SCOPE: this pins a property of the DIFF, not of `validateSpec` itself. The
+ * absolute violation sets legitimately differ with and without context — only the
+ * introduced-by-advance diff must not.
+ */
+import { describe, it, expect } from 'vitest';
+import { violationsIntroducedByApproval } from '../src/lib/spec-validator';
+import { parseSpec } from '../src/lib/spec';
+import { DEFAULT_CONFIG } from '../src/lib/config';
+
+/** A spec shaped like the ones that actually hit this path: T3/T4, pre-Plan, with refs. */
+function spec(frontmatter: string) {
+  return parseSpec(`---\n${frontmatter}\n---\n# Thing\n\nBody.\n`);
+}
+
+const CONFIG = { ...DEFAULT_CONFIG, ownershipDeclaration: 'error' as const };
+
+const CASES: Array<{ name: string; fm: string }> = [
+  {
+    name: 'undeclared T4 with an epic ref (the refusal case)',
+    fm: 'id: SPEC-950\ntype: requirements\ntier: T4\nstatus: specifying\nproduct: minspec\nepic: EPIC-003  # SDD Core',
+  },
+  {
+    name: 'declared T4 with an epic ref (the allow case)',
+    fm: 'id: SPEC-951\ntype: requirements\ntier: T4\nstatus: specifying\nproduct: minspec\nepic: EPIC-003\nimplements: [packages/minspec/src/lib/thing.ts]',
+  },
+  {
+    name: 'implements: none escape, with an epic ref',
+    fm: 'id: SPEC-952\ntype: requirements\ntier: T4\nstatus: specifying\nproduct: minspec\nepic: EPIC-003\nimplements: none\nimplements_reason: policy spec',
+  },
+  {
+    name: 'T2 (below the tier gate)',
+    fm: 'id: SPEC-953\ntype: requirements\ntier: T2\nstatus: specifying\nproduct: minspec\nepic: EPIC-003',
+  },
+];
+
+describe('#1446 the advance-diff is invariant to the optional validation context', () => {
+  for (const c of CASES) {
+    it(`${c.name}: same verdict with and without context`, () => {
+      const parsed = spec(c.fm);
+
+      const withoutContext = violationsIntroducedByApproval(parsed, CONFIG);
+      const withContext = violationsIntroducedByApproval(parsed, CONFIG, {
+        // Deliberately NON-empty and deliberately WRONG-ish: an epic set that does not
+        // contain the spec's ref is the shape most likely to add a violation, so if the
+        // context could leak into the diff at all, this is where it would show.
+        knownEpicRefs: new Set(['EPIC-999']),
+        siblingShardFiles: [],
+      });
+
+      const key = (v: { rule: string; message: string }) => `${v.rule}\x00${v.message}`;
+      expect(withContext.map(key).sort()).toEqual(withoutContext.map(key).sort());
+    });
+  }
+
+  it('the guard omitting context is therefore equivalent to the UI path passing it', () => {
+    // The consequence that matters: `ownership-advance-guard` (no context) and
+    // `commands/approve.ts` (full context) cannot disagree about whether to refuse.
+    const undeclared = spec(
+      'id: SPEC-954\ntype: requirements\ntier: T4\nstatus: specifying\nproduct: minspec\nepic: EPIC-003',
+    );
+    const guardVerdict = violationsIntroducedByApproval(undeclared, CONFIG).length > 0;
+    const uiVerdict =
+      violationsIntroducedByApproval(undeclared, CONFIG, {
+        knownEpicRefs: new Set(['EPIC-003']),
+        siblingShardFiles: [],
+      }).length > 0;
+    expect(guardVerdict).toBe(uiVerdict);
+    expect(guardVerdict, 'an undeclared T4 must be refused at all').toBe(true);
+  });
+});
