@@ -126,10 +126,9 @@ shadow_resolve_model() {
   if [[ "$requested" != "latest" ]]; then printf '%s' "$requested"; return 0; fi
   [[ -z "$(shadow_key)" ]] && return 1
 
-  local out_file status rc base
+  local out_file status rc
   out_file="$(mktemp)" || return 1
-  base="$(shadow_base_url)"
-  status="$(shadow_http "${base%/}/v1/models" "$out_file" 20)"
+  status="$(shadow_http "$(shadow_endpoint_url /v1/models)" "$out_file" 20)"
   rc=$?
   if [[ $rc -ne 0 || ! "$status" =~ ^2[0-9][0-9]$ ]]; then rm -f "$out_file"; return 1; fi
   shadow_pick_latest_model < "$out_file"
@@ -143,7 +142,7 @@ case "${1:-}" in
   --print-curl-argv)
     # The argv `record` really issues, from the same builder — an observation of the
     # command line, not a description of it. What matters is what is ABSENT.
-    shadow_curl_argv "$(shadow_base_url | sed 's:/*$::')/v1/messages" "/dev/null" "$(shadow_timeout)" "/dev/null"
+    shadow_curl_argv "$(shadow_endpoint_url /v1/messages)" "/dev/null" "$(shadow_timeout)" "/dev/null"
     printf '%s\n' "${SHADOW_CURL_ARGV[@]}"
     exit 0
     ;;
@@ -211,6 +210,12 @@ fi
 # Presence is tested WITHOUT binding the key to a variable here. `shadow_curl_config`
 # reads it straight from the environment at request time, so this runner never holds
 # it — one fewer place for a future `note`/`echo`/trap to interpolate it into a log.
+if [[ -n "$(shadow_key)" ]] && ! shadow_key_wellformed "$(shadow_key)"; then
+  # Deliberately says nothing about the value beyond its shape — a note that echoed
+  # the key to diagnose it would be the leak this transport exists to avoid.
+  note "the configured z.ai key is not well-formed (quote, newline or control character) — skipped."
+  exit 0
+fi
 if [[ -z "$(shadow_key)" ]]; then
   note "no z.ai key configured (MINSPEC_SHADOW_TRIAGE_KEY) — skipped; real triage is unaffected."
   exit 0
@@ -263,7 +268,7 @@ SHADOW_ERR=""
 # The hard bound lives inside shadow_http (external `timeout` around curl's own
 # `--max-time`), so this cannot become a latency dependency of real triage no matter
 # how z.ai behaves — the wall-clock cost is capped before any output is looked at.
-HTTP_STATUS="$(shadow_http "${BASE_URL%/}/v1/messages" "$RESP_FILE" "$TIMEOUT" "$REQ_FILE")"
+HTTP_STATUS="$(shadow_http "$(shadow_endpoint_url /v1/messages)" "$RESP_FILE" "$TIMEOUT" "$REQ_FILE")"
 RC=$?
 # `RC=$?` must be its own statement: inside `if ! cmd; then RC=$?`, `$?` is the status
 # of the NEGATION (always 0), not of the command — so the timeout code would be lost.

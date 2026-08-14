@@ -2,13 +2,19 @@
 # scripts/lib/shadow-triage.sh — pure seams for the GLM shadow-triage instrument (#1338).
 #
 # This library holds ONLY pure functions: request construction, response parsing,
-# model selection, repo-visibility policy, and field/agreement projection. Nothing
-# here runs a process, writes a file, or touches the network — the request BUILDERS
-# below (`shadow_curl_config`, `shadow_curl_argv`, `shadow_request_body`) emit bytes
-# and never send them, and the one function that wires them to curl (`shadow_http`)
-# lives in `scripts/shadow-triage.sh`, the impure runner that composes them. The split
-# exists so the security property below is testable as BEHAVIOUR rather than asserted
-# by grepping a script for its own text.
+# model selection, repo-visibility policy, and field/agreement projection. Nothing here
+# runs an agent, writes a file, or touches the network — the request BUILDERS below
+# (`shadow_curl_config`, `shadow_curl_argv`, `shadow_request_body`) emit bytes and never
+# send them, and the one function that wires them to curl (`shadow_http`) lives in
+# `scripts/shadow-triage.sh`, the impure runner that composes them. The split exists so
+# the security property below is testable as BEHAVIOUR rather than asserted by grepping
+# a script for its own text.
+#
+# "Pure" here means referentially transparent, NOT process-free: several of these shell
+# out to `jq` and `python3` to parse. That is deliberate — same input, same output, no
+# observable effect — and the wording matters, because an earlier draft of this header
+# claimed "nothing here runs a process", which is simply false and would have made the
+# file's own contract a false signpost.
 #
 # ══════════════════════════════════════════════════════════════════════════════
 # WHY THIS EXISTS
@@ -165,6 +171,40 @@ shadow_max_tokens() { printf '%s' "${MINSPEC_SHADOW_TRIAGE_MAX_TOKENS:-$SHADOW_T
 # ══════════════════════════════════════════════════════════════════════════════
 # TRANSPORT SEAMS
 # ══════════════════════════════════════════════════════════════════════════════
+
+# ── shadow_endpoint_url — the ONE place a URL is assembled ────────────────────
+# `<path>` → the configured base with every trailing slash removed, joined to path.
+#
+# It exists to close a divergence rather than for convenience: the `--print-curl-argv`
+# seam and the `record` path each built this inline, with `sed 's:/*$::'` and
+# `${BASE_URL%/}` respectively. Those agree on one trailing slash and disagree on two,
+# so a base URL ending `//` made the seam observe a DIFFERENT url from the one
+# production issues — quietly voiding the "the seam shows what really goes out"
+# guarantee the isolation suite rests on. A seam that can drift from its subject is
+# worse than no seam, because it is trusted.
+shadow_endpoint_url() {
+  local base; base="$(shadow_base_url)"
+  while [[ "$base" == */ ]]; do base="${base%/}"; done
+  printf '%s/%s' "$base" "${1#/}"
+}
+
+# ── shadow_key_wellformed — a key that cannot smuggle a config directive ──────
+# The key is interpolated into curl's config syntax (`header = "x-api-key: …"`), so a
+# value containing a quote or a newline would not merely produce a broken header — a
+# newline would START A NEW CONFIG LINE, letting the key's own text add `location` or
+# a second header. The key is operator-supplied rather than attacker-supplied, so this
+# is hardening and not a live vulnerability, but the cost of closing it is one test.
+#
+# FAILS CLOSED: a key that is not well-formed makes the caller skip the shadow run
+# with a note. Refusing to send is always safe here — the instrument changes no
+# outcome, so a skipped run costs a log row and nothing else.
+shadow_key_wellformed() {
+  local key="${1-}"
+  [[ -n "$key" ]] || return 1
+  # Printable ASCII, no double quote and no backslash: enough for every key shape z.ai
+  # issues, and structurally incapable of escaping the config line it sits on.
+  [[ "$key" =~ ^[A-Za-z0-9._:@/+=-]+$ ]]
+}
 
 # ── shadow_curl_config — the ONLY place the credential appears ────────────────
 # Emits curl's config-file syntax on stdout, to be piped into `curl --config -`.

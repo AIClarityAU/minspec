@@ -580,4 +580,62 @@ describe('shadow-triage — one resolved model id reaches every surface', () => 
       'https://example.test/anthropic/v1/messages',
     );
   });
+
+  it.each(['https://example.test/anthropic', 'https://example.test/anthropic/', 'https://example.test/anthropic///'])(
+    'the SEAM and the REQUEST agree on the url for base %s',
+    (base) => {
+      // The seam's whole value is that it shows what production really issues. The two
+      // were once built by different expressions (`sed 's:/*$::'` vs `${BASE_URL%/}`)
+      // which agree on ONE trailing slash and diverge on two — so the observation could
+      // silently stop matching its subject. Asserted as EQUALITY between the two, not
+      // as a fixed string, so the guarantee survives any future change to the format.
+      const fromSeam = curlArgv({ MINSPEC_SHADOW_TRIAGE_BASE_URL: base }).pop();
+      const fromRequest = observeRequest({ MINSPEC_SHADOW_TRIAGE_BASE_URL: base }).argv.pop();
+      expect(fromRequest).toBe(fromSeam);
+      expect(fromSeam).toBe('https://example.test/anthropic/v1/messages');
+    },
+  );
+});
+
+describe('shadow-triage — a malformed key is refused rather than sent', () => {
+  // The key is interpolated into curl's config syntax, where a NEWLINE starts a new
+  // config line. A key carrying one could therefore add `location` (re-enabling the
+  // redirect replay this transport deliberately forbids) or a second header. The key
+  // is operator-supplied, not attacker-supplied, so this is hardening — but the check
+  // is one regex and the failure mode it closes is the one the whole file is about.
+  it.each([
+    ['a newline (could append a curl config directive)', 'good-key\nlocation'],
+    ['a double quote (closes the header string)', 'good"key'],
+    ['a backslash', 'good\\key'],
+    ['a space', 'good key'],
+  ])('%s → the run is SKIPPED, and no request is issued', (_label, badKey) => {
+    const o = observeRequest({ MINSPEC_SHADOW_TRIAGE_KEY: badKey });
+    expect(o.argv).toEqual([]);
+    expect(o.config).toBe('');
+  });
+
+  it('a well-formed key is NOT refused (the check is not simply always-false)', () => {
+    // Without this the four cases above would pass just as happily against a check
+    // that rejected every key, and the instrument would be silently dead.
+    expect(observeRequest().argv.length).toBeGreaterThan(0);
+  });
+
+  it('the note about a malformed key never echoes the key itself', () => {
+    // A diagnostic that printed the value to explain the rejection would be exactly
+    // the leak the transport is built to avoid.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'shadow-badkey-'));
+    const prompt = path.join(dir, 'p.txt');
+    const live = path.join(dir, 'l.txt');
+    fs.writeFileSync(prompt, 'x');
+    fs.writeFileSync(live, 'label=needs-review\nrole=architect\nhold=human\ntier=T3\nhuman_only=yes\n');
+    const secret = 'SENTINEL"KEY';
+    const r = spawnSync(
+      'bash',
+      [SHADOW, 'record', '--issue', '5', '--repo', 'AIClarityAU/minspec', '--prompt-file', prompt, '--live-fields', live],
+      { encoding: 'utf-8', cwd: dir, env: baseEnv({ MINSPEC_SHADOW_TRIAGE_KEY: secret }) },
+    );
+    const output = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+    expect(output).toMatch(/not well-formed/);
+    expect(output).not.toContain('SENTINEL');
+  });
 });
