@@ -72,8 +72,17 @@ function git(rootDir: string, args: string[]): string | undefined {
  * not `stale`: claiming "you are behind" without an ancestry proof would be the same
  * unearned confidence this module exists to prevent.
  */
-export function detectBuildSkew(rootDir: string, isMinspecRepo: boolean): SkewVerdict {
-  const sha = buildSha();
+export function detectBuildSkew(
+  rootDir: string,
+  isMinspecRepo: boolean,
+  /**
+   * The build's commit. Defaults to the esbuild-injected stamp; injectable so tests can
+   * exercise the stale/current/unknown branches, which are otherwise unreachable — under
+   * vitest the define is absent, `buildSha()` is `'dev'`, and the function short-circuits
+   * before any git call. Same seam idiom as `approveSpec`'s `now()` parameter.
+   */
+  sha: string = buildSha(),
+): SkewVerdict {
   if (sha === 'dev') {
     return { kind: 'not-applicable', reason: 'development build — compiled from the working tree' };
   }

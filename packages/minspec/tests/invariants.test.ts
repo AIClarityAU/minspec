@@ -112,6 +112,13 @@ describe('Invariant 2: No backend — no network calls', () => {
   //   - epic-backfill → `claude -p` for AI epic proposal (DR-016, opt-in,
   //     degrades to a pure heuristic when `claude` is absent)
   const CHILD_PROCESS_ALLOWLIST = new Set([
+    // #1439 build provenance: `git rev-parse` / `merge-base --is-ancestor` /
+    // `rev-list --count` against the OPEN WORKSPACE, to tell whether the running
+    // extension build predates the checkout being edited. Local git plumbing, read-only,
+    // no network, never mutates the repo — same Tier-0 posture as approval.ts. Exists
+    // because a stale install silently disables shipped gates and a version check cannot
+    // detect it (both builds were 0.1.26 across a five-day, one-gate gap).
+    'lib/build-provenance.ts',
     'lib/github.ts',
     'lib/parking-lot.ts',
     'lib/backlog.ts',
