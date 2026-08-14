@@ -145,6 +145,23 @@ describe('pre-commit validate gate: pre-existing vs introduced (#1471)', () => {
     } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 
+  it('fails CLOSED when the LIVE validator crashes without reporting a result', () => {
+    // #1483 review: the witness existed on the baseline path but not the live one.
+    // A validator that exits non-zero with no FAIL lines and no summary — a crash,
+    // a broken dep, a syntax error introduced by THIS commit — yielded an empty
+    // now_fails, hence an empty `introduced`, hence "nothing introduced, allowed".
+    // That is strictly worse than the behaviour it replaced, which blocked.
+    const dir = makeRepo();
+    try {
+      fs.writeFileSync(path.join(dir, 'fake-validate.js'), 'process.exit(3);\n');
+      fs.appendFileSync(path.join(dir, 'docs', 'decisions', 'DR-001.md'), 'x\n');
+      git(dir, 'add', '.');
+      const { ok, out } = tryCommit(dir, 'docs: while the validator is broken');
+      expect(ok, `a crashed validator must not read as "nothing introduced":\n${out}`).toBe(false);
+      expect(out).toMatch(/exited non-zero without reporting a result/);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
   it('fails CLOSED when the baseline validator cannot run', () => {
     const dir = makeRepo();
     try {

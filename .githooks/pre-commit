@@ -254,6 +254,27 @@ if [ "${DR_INDEX_GATE_OFF:-}" != "1" ] && \
   if ! validate_out="$(npm run --silent validate 2>&1)"; then
     printf '%s\n' "$validate_out" >&2
 
+    # Witness that THIS run's validator actually ran, before reading anything into
+    # its (possibly empty) FAIL set. The baseline path has always done this; the
+    # live path did not, and the asymmetry failed OPEN: a validator that exits
+    # non-zero without emitting FAIL lines — a crash, a broken dep, an unhandled
+    # rejection, or a syntax error introduced by this very commit — produced an
+    # empty `now_fails`, hence an empty `introduced`, hence "nothing introduced,
+    # allowed". Strictly worse than the behaviour this replaced, which blocked.
+    # Caught in review on #1483. Same rule, both paths, no exceptions.
+    case "$validate_out" in
+      *"validation error(s)"*|*"validation passed"*) ;;
+      *)
+        echo "" >&2
+        echo "✖ validate gate: the validator exited non-zero without reporting a result." >&2
+        echo "  No summary line, so its FAIL set cannot be trusted as complete — this is a" >&2
+        echo "  broken validator, not a clean commit. Failing closed (#1483 review)." >&2
+        echo "  Override: DR_INDEX_GATE_OFF=1 git commit ..." >&2
+        fail=1
+        exit $fail
+        ;;
+    esac
+
     now_fails="$(printf '%s\n' "$validate_out" | _validate_fail_lines)"
     if base_fails="$(_validate_head_baseline)"; then
       introduced="$(comm -13 <(printf '%s\n' "$base_fails" | sort -u) <(printf '%s\n' "$now_fails" | sort -u))"
