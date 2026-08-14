@@ -6,8 +6,9 @@
  * writes `scripts/review-branch.sh`, whose PAYG line matched gitleaks'
  * `generic-api-key` rule on the assignment shape alone — the value is
  * `"${ANTHROPIC_API_KEY:-}"`, a pass-through of the caller's environment, never a
- * literal. The same call writes `.githooks/pre-commit`, which runs
- * `gitleaks protect --staged` and fails closed. Nothing scaffolds an allowlist. So
+ * literal. The same call writes `.minspec/hooks/pre-commit` and points git's
+ * `core.hooksPath` at it (DR-037); that hook runs `gitleaks protect --staged` and
+ * fails closed. Nothing scaffolds an allowlist. So
  * MinSpec shipped a file its own gate was guaranteed to reject on the first commit
  * that staged it, which is every adopter's first commit.
  *
