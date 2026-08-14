@@ -698,11 +698,16 @@ const VERDICT_LABELS = [PASS, CHANGES, BLOCKED, PENDING];
 /**
  * Which verdict labels must go, and what the PR must look like afterwards (#1468).
  *
- * The old code added the new label and best-effort-removed the others, discarding
- * both the error and the result. When one removal silently failed, the PR carried
- * `ai-review:pass` AND `ai-review:changes` at once, and `ready-to-merge` read the
- * contradiction as "not passed" — a legitimately-passing PR that could never merge,
- * with nothing on its surface explaining why. Observed on #1430.
+ * NOT YET WIRED — no caller invokes this yet; see verdictLabelFault below for why
+ * the seam has to land before the caller. ai-review.yml's Post-verdict step is
+ * STILL the version described next.
+ *
+ * That step adds the new label and best-effort-removes the others, discarding both
+ * the error and the result. When one removal silently fails, the PR carries
+ * `ai-review:pass` AND `ai-review:changes` at once, and `ready-to-merge` reads the
+ * contradiction as "not passed" — a legitimately-passing PR that can never merge,
+ * with nothing on its surface explaining why. Observed on #1430; still reachable
+ * until step 2 lands.
  *
  * Pure so the rule is testable without a live PR: the caller does the I/O and then
  * checks its own post-state against `expected`.
@@ -727,7 +732,14 @@ function decideVerdictLabels({ current = [], verdict } = {}) {
 
 /**
  * Did the post-state land? Returns null when correct, else a human-readable fault.
- * Used to fail the step LOUDLY rather than leave a wedged PR (invariant 2).
+ *
+ * NOT YET WIRED — no caller invokes this. Step 2 makes ai-review.yml's Post-verdict
+ * step assert `verdictLabelFault(...) === null` and fail the step on non-null; until
+ * that lands, the removal path is unchanged and #1430's wedge is still reachable.
+ * The split is forced: ai-review.yml loads control scripts from the TRUSTED BASE, so
+ * a workflow calling this before it is on main dies with
+ * `TypeError: g.verdictLabelFault is not a function` (observed on this PR's first
+ * attempt). Seam first, caller second.
  */
 function verdictLabelFault({ current = [], verdict } = {}) {
   const got = current.filter((l) => VERDICT_LABELS.includes(l)).sort();
