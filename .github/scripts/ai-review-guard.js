@@ -691,6 +691,66 @@ function isBenignRemovalError(status) {
   return status === 404;
 }
 
+/** Every label this workflow uses to assert a verdict. Exactly one may survive. */
+const PENDING = 'ai-review:pending';
+const VERDICT_LABELS = [PASS, CHANGES, BLOCKED, PENDING];
+
+/**
+ * Which verdict labels must go, and what the PR must look like afterwards (#1468).
+ *
+ * NOT YET WIRED — no caller invokes this yet; see verdictLabelFault below for why
+ * the seam has to land before the caller. ai-review.yml's Post-verdict step is
+ * STILL the version described next.
+ *
+ * That step adds the new label and best-effort-removes the others, discarding both
+ * the error and the result. When one removal silently fails, the PR carries
+ * `ai-review:pass` AND `ai-review:changes` at once, and `ready-to-merge` reads the
+ * contradiction as "not passed" — a legitimately-passing PR that can never merge,
+ * with nothing on its surface explaining why. Observed on #1430; still reachable
+ * until step 2 lands.
+ *
+ * Pure so the rule is testable without a live PR: the caller does the I/O and then
+ * checks its own post-state against `expected`.
+ *
+ * @param {{current?: string[], verdict: string}} o - `current` = labels on the PR now.
+ * @returns {{expected: string[], remove: string[], add: string[]}}
+ *   `expected` is the FULL verdict-label set that must be present when done — always
+ *   exactly the one verdict. Non-verdict labels (docs-lane, needs-human-review, …) are
+ *   never touched and never appear here.
+ */
+function decideVerdictLabels({ current = [], verdict } = {}) {
+  if (!VERDICT_LABELS.includes(verdict)) {
+    throw new Error(`decideVerdictLabels: unknown verdict "${verdict}"`);
+  }
+  const present = new Set(current.filter((l) => VERDICT_LABELS.includes(l)));
+  return {
+    expected: [verdict],
+    remove: VERDICT_LABELS.filter((l) => l !== verdict && present.has(l)),
+    add: present.has(verdict) ? [] : [verdict],
+  };
+}
+
+/**
+ * Did the post-state land? Returns null when correct, else a human-readable fault.
+ *
+ * NOT YET WIRED — no caller invokes this. Step 2 makes ai-review.yml's Post-verdict
+ * step assert `verdictLabelFault(...) === null` and fail the step on non-null; until
+ * that lands, the removal path is unchanged and #1430's wedge is still reachable.
+ * The split is forced: ai-review.yml loads control scripts from the TRUSTED BASE, so
+ * a workflow calling this before it is on main dies with
+ * `TypeError: g.verdictLabelFault is not a function` (observed on this PR's first
+ * attempt). Seam first, caller second.
+ */
+function verdictLabelFault({ current = [], verdict } = {}) {
+  const got = current.filter((l) => VERDICT_LABELS.includes(l)).sort();
+  if (got.length === 1 && got[0] === verdict) return null;
+  if (got.length === 0) return `no verdict label present; expected exactly [${verdict}]`;
+  if (got.length > 1) {
+    return `contradictory verdict labels [${got.join(', ')}]; expected exactly [${verdict}]`;
+  }
+  return `verdict label is [${got[0]}]; expected exactly [${verdict}]`;
+}
+
 // Defensive: GitHub logins are [A-Za-z0-9-] (apps add a `[bot]` suffix), so they
 // can never contain markdown/backtick metacharacters — but strip backticks anyway
 // so a malformed value can never break out of the code span in an audit comment.
@@ -724,4 +784,8 @@ module.exports = {
   decideReviewCheck,
   isBenignRemovalError,
   sanitizeLogin,
+  PENDING,
+  VERDICT_LABELS,
+  decideVerdictLabels,
+  verdictLabelFault,
 };

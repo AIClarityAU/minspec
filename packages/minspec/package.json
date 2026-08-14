@@ -634,7 +634,7 @@
     "prebuild": "npm run build:shared",
     "build": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --minify",
     "prebuild:prod": "npm run build:shared",
-    "build:prod": "esbuild src/extension.ts --bundle --outfile=out/extension.js --external:vscode --format=cjs --platform=node --minify --sourcemap=external",
+    "build:prod": "../../scripts/build-extension.sh",
     "watch": "npm run build -- --watch --sourcemap",
     "supply-chain:check": "../../scripts/check-supply-chain.sh",
     "prepackage": "npm run supply-chain:check",
