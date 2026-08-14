@@ -666,4 +666,12 @@ minspec#995 decided that agent GitHub writes must be bot-attributed. DR-074 deci
 <!-- dr-summary:DR-083 auto=4b2195b31e89 -->
 DR-018 split the repo three ways: **MPL-2.0** for packages/shared, **MIT** for the extensions and tooling, **CC-BY-4.0** for prose. The split existed to protect one thing, and DR-018 says so plainly: packages/shared is *"the project's core IP (the classifier is the differentiator over GitHub Spec Kit)"*, and file-level copyleft was chosen so *"forking the classifier into a proprietary product now requires publishing changes to the shared source files"*.
 <!-- /dr-summary:DR-083 -->
+
+## [DR-084 — The shadow harness talks HTTP, not `claude -p` — a client that resolves no credentials beats a scrub that must enumerate them](DR-084.md)
+
+*Status: proposed · Date: 2026-08-14*
+
+<!-- dr-summary:DR-084 auto=f731dff842d4 -->
+The GLM shadow-triage instrument (#1338) runs a second model alongside the live triage agent on the same issue, pushes both outputs through the same deterministic gate, records the agreement and discards the shadow verdict. It exists because the drain loop and the required ai-review merge gate draw on one Anthropic subscription quota, so the queue jams when that quota runs out (#1234) — and because GLM's fitness for *our* task shape was unmeasured, which per this repo's evidence discipline makes…
+<!-- /dr-summary:DR-084 -->
 <!-- minspec:dr-index:end -->
