@@ -629,7 +629,7 @@ Two accepted decisions pull in opposite directions, and SPEC-050 FR-8 sits exact
 
 ## [DR-079 — The verdict travels out of band - a reviewer's words must not be able to act as its verdict](DR-079.md)
 
-*Status: proposed · Date: 2026-08-05*
+*Status: accepted · Date: 2026-08-05*
 
 <!-- dr-summary:DR-079 auto=ea255338bf34 -->
 The reviewer panel (DR-033 §6) runs four claude -p agents over a diff. Each is told to emit exactly one block: review-decide.sh then parses that block out of the agent's free-text output, and ai-review.yml extracts it again to render the PR comment.
