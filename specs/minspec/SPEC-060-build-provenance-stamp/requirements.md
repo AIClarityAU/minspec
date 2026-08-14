@@ -11,13 +11,28 @@ product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain
 aspects: [provenance, build, packaging, signpost, dogfood, status-bar]
 relates_to: [SPEC-037, SPEC-050, DR-069, DR-003]
-implements: none
+implements: [packages/minspec/src/lib/build-provenance.ts, packages/minspec/tests/build-provenance.test.ts, scripts/build-extension.sh]
 implements_reason: >-
-  Creates no new source file. `out/build-info.json` is a generated BUILD ARTIFACT, not
-  owned source - it is produced by the packaging step, never hand-edited, and is not a
-  valid owned-code path. Everything else this spec touches already exists and is owned
-  elsewhere (package.json, the dispatch script, spec.ts/lifecycle.ts), so the blast
-  radius goes under `affects:`.
+  Updated 2026-08-13: FR-1/FR-3/FR-6 shipped in #1477 and DO create owned source, so the
+  earlier `none` no longer holds. The three paths above are new files this spec owns.
+
+  MECHANISM DIVERGENCE, recorded rather than quietly absorbed: this spec assumed a
+  generated `out/build-info.json` build ARTIFACT. What shipped instead injects the commit
+  with esbuild `--define`, so the stamp is a literal in the bundle and there is NO
+  generated file at all. That is deliberate - a generated provenance file can itself go
+  stale or be regenerated out of step with the bundle it describes, which is precisely the
+  failure class this spec exists to eliminate. A stamp that cannot outlive its build is
+  strictly stronger than one that can.
+
+  Deliberately NOT declared under `affects:`: `extension.ts`, `invariants.test.ts` and
+  `package.json`, all of which #1477 modifies. `affects:` arms the spec-gate exactly as
+  `implements:` does (`scripts/hooks/spec-gate.py:349-351` loops both), so declaring shared
+  core files here would freeze them for every agent session the moment this approval goes
+  stale - the SPEC-053 blast-radius problem (#1474). The modified files are recorded in
+  #1477 instead, where they cannot gate unrelated work.
+
+  Still unbuilt: FR-2 (surface on demand), FR-4 (version-bump gate), FR-5 (reviewer
+  guidance). This declaration covers the shipped slice only.
 affects:
   - packages/minspec/package.json
   - packages/minspec/src/lib/spec.ts
