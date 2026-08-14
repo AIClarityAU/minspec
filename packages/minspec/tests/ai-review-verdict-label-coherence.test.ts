@@ -39,20 +39,25 @@ const wf = fs.readFileSync(WORKFLOW, 'utf-8');
 
 const BEGIN = '# >>> verdict-label-coherence';
 const END = '# <<< verdict-label-coherence';
+const BACKSTOP_BEGIN = '# >>> backstop-verdict-clear';
+const BACKSTOP_END = '# <<< backstop-verdict-clear';
 
-/** The shipped block, lifted verbatim — not a re-implementation of it. */
-function coherenceBlock(): string {
-  const begin = wf.indexOf(BEGIN);
-  const end = wf.indexOf(END);
-  if (begin < 0 || end < begin) {
+/** A shipped block, lifted verbatim — not a re-implementation of it. */
+function block(begin: string, end: string): string {
+  const b = wf.indexOf(begin);
+  const e = wf.indexOf(end);
+  if (b < 0 || e < b) {
     throw new Error(
-      `verdict-label-coherence markers missing from ${WORKFLOW} — the block this test ` +
-        `guards was moved or deleted, so the verdict post-state is unverified.`,
+      `${begin} / ${end} markers missing from ${WORKFLOW} — the block this test guards ` +
+        `was moved or deleted, so its behaviour is unverified.`,
     );
   }
-  const firstLine = wf.indexOf('\n', begin);
-  return wf.slice(firstLine + 1, end);
+  // Start at the line AFTER the marker: the marker line is a bare comment.
+  return wf.slice(wf.indexOf('\n', b) + 1, e);
 }
+
+const coherenceBlock = () => block(BEGIN, END);
+const backstopBlock = () => block(BACKSTOP_BEGIN, BACKSTOP_END);
 
 /** A `gh` that models the ONE failure mode this block exists for: a removal that
  *  reports failure and leaves the label in place. */
@@ -116,8 +121,13 @@ type Opts = {
 
 type Result = { ok: boolean; out: string; labels: string[]; calls: string[] };
 
-/** Run the real block against the stubbed world and report what it did. */
-function run(opts: Opts): Result {
+/** Run a shipped block against the stubbed world and report what it did. */
+function exec(
+  body: string,
+  preamble: string[],
+  opts: Pick<Opts, 'labels' | 'stickyOnce' | 'stickyForever' | 'readFails'>,
+  workspace: string,
+): Result {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'verdict-coherence-'));
   try {
     const bin = path.join(dir, 'bin');
@@ -135,22 +145,13 @@ function run(opts: Opts): Result {
     }
     if (opts.readFails) fs.writeFileSync(path.join(dir, 'read_fails'), '');
 
-    const script = [
-      // The step's own options, so an unset variable fails here too.
-      'set -euo pipefail',
-      `LABEL=${opts.label ?? 'ai-review:pass'}`,
-      'PR_NUMBER=1',
-      'REPO=OWNER/REPO',
-      coherenceBlock(),
-    ].join('\n');
-
-    const r = spawnSync('bash', ['-c', script], {
+    const r = spawnSync('bash', ['-c', [...preamble, body].join('\n')], {
       encoding: 'utf-8',
       env: {
         ...process.env,
         PATH: `${bin}:${process.env.PATH}`,
         GH_STUB_STATE: dir,
-        GITHUB_WORKSPACE: REPO_ROOT,
+        GITHUB_WORKSPACE: workspace,
       },
     });
 
@@ -163,6 +164,34 @@ function run(opts: Opts): Result {
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
+}
+
+/** The Post-verdict coherence block. Preamble mirrors that step's own options. */
+function run(opts: Opts): Result {
+  return exec(
+    coherenceBlock(),
+    ['set -euo pipefail', `LABEL=${opts.label ?? 'ai-review:pass'}`, 'PR_NUMBER=1', 'REPO=OWNER/REPO'],
+    opts,
+    REPO_ROOT,
+  );
+}
+
+/**
+ * The fail-closed backstop's clear loop. Its step runs `set -uo pipefail` — NO `-e`,
+ * deliberately, because nothing there may pre-empt the honest `exit 1` at the end.
+ * The preamble reproduces that exactly; running it under `-e` would test a step that
+ * does not ship.
+ */
+function runBackstop(
+  labels: string[],
+  o: { workspace: string; stickyForever?: string[] },
+): Result {
+  return exec(
+    backstopBlock(),
+    ['set -uo pipefail', 'PR_NUMBER=1', 'REPO=OWNER/REPO'],
+    { labels, stickyForever: o.stickyForever },
+    o.workspace,
+  );
 }
 
 describe('ai-review verdict labels: exactly one survives, or the step fails loudly', () => {
@@ -259,11 +288,58 @@ describe('ai-review verdict labels: still wired into the shipped step', () => {
     expect(guard).not.toContain('NOT YET WIRED');
   });
 
-  it('the fail-closed backstop clears every other verdict label, blocked included', () => {
-    // Same defect, second location: a PR on `ai-review:blocked` when the workflow
-    // errored used to keep it alongside the new `ai-review:changes`.
-    const backstop = wf.slice(wf.indexOf('- name: Fail closed'));
-    expect(backstop).toContain('g.VERDICT_LABELS.filter');
-    expect(backstop).toContain('ai-review:blocked');
+  it('lives inside the fail-closed backstop step', () => {
+    const step = wf.indexOf('- name: Fail closed');
+    const begin = wf.indexOf(BACKSTOP_BEGIN);
+    expect(step).toBeGreaterThan(-1);
+    expect(begin).toBeGreaterThan(step);
+  });
+});
+
+/**
+ * Same defect, SECOND location. The backstop cleared pass + pending but not
+ * `ai-review:blocked`, so a PR sitting on blocked when the workflow errored kept it
+ * alongside the new `ai-review:changes` — the wedge, reintroduced by the path that
+ * exists to escape it.
+ *
+ * #1515's own review flagged the first version of this test: it asserted only that
+ * the source text mentions `VERDICT_LABELS.filter`, which passes against a loop that
+ * computes the list and never removes anything. Its name promised runtime clearing.
+ * Same class of defect as the `NOT YET WIRED` docstring one level up, so it gets the
+ * same treatment — run the block, don't grep it.
+ */
+describe('ai-review fail-closed backstop: clears every other verdict label', () => {
+  it('clears pass, blocked AND pending, and leaves unrelated labels alone', () => {
+    const r = runBackstop(
+      ['ai-review:pass', 'ai-review:blocked', 'ai-review:pending', 'ai-review:changes', 'docs-lane'],
+      { workspace: REPO_ROOT },
+    );
+    expect(r.ok, r.out).toBe(true);
+    expect(r.labels.sort()).toEqual(['ai-review:changes', 'docs-lane']);
+  });
+
+  it('still clears all three when the base checkout is what failed', () => {
+    // The literal fallback. If the checkout step is what errored there is no guard
+    // module to read the list from, and the backstop must still leave one verdict.
+    const r = runBackstop(['ai-review:blocked', 'ai-review:changes'], {
+      workspace: '/nonexistent-workspace',
+    });
+    expect(r.ok, r.out).toBe(true);
+    expect(r.labels).toEqual(['ai-review:changes']);
+  });
+
+  it('never fails the step itself — the honest `exit 1` below is the load-bearing part', () => {
+    // Every call here is best-effort by design: a label API that refuses must not
+    // pre-empt the backstop's own red exit.
+    //
+    // EVERY removal refuses, not just one. With a single sticky label this case was
+    // VACUOUS: the loop's exit status is its LAST iteration's, the sticky label was
+    // not last, and dropping `|| true` from the shipped loop still passed. Caught by
+    // mutation, not by reading it.
+    const r = runBackstop(['ai-review:pass', 'ai-review:blocked', 'ai-review:pending', 'ai-review:changes'], {
+      workspace: REPO_ROOT,
+      stickyForever: ['ai-review:pass', 'ai-review:blocked', 'ai-review:pending'],
+    });
+    expect(r.ok, `a refused removal must not abort the backstop:\n${r.out}`).toBe(true);
   });
 });

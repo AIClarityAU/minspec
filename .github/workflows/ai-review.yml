@@ -1126,12 +1126,14 @@ jobs:
           # fallback covers a run where the base checkout is what failed. Everything
           # here stays best-effort — the honest `exit 1` below is the load-bearing part
           # and must not be pre-empted by a label call.
+          # >>> backstop-verdict-clear
           for other in $(node -e '
             const g = require(process.env.GITHUB_WORKSPACE + "/.github/scripts/ai-review-guard.js");
             process.stdout.write(g.VERDICT_LABELS.filter((l) => l !== g.CHANGES).join(" "));
           ' 2>/dev/null || echo "ai-review:pass ai-review:blocked ai-review:pending"); do
             gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "$other" 2>/dev/null || true
           done
+          # <<< backstop-verdict-clear
 
           # Fail-closed WORKFLOW ERROR → pull a human in. This is DELIBERATELY kept
           # eager (unlike a normal `ai-review:changes`, whose t=0 human-summon #816
