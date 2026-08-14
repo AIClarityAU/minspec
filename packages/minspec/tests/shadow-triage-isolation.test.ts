@@ -162,6 +162,24 @@ exit 0
     { mode: 0o755 },
   );
 
+  // `record` runs the public-repo jurisdiction pre-check before it issues anything, so
+  // `gh` must be stubbed too. Without this the check makes a REAL `gh repo view` call:
+  // it happens to succeed on the operator box (authenticated, and the repo really is
+  // public) and fails in CI, where it correctly fails closed and skips the shadow step
+  // — so the stub curl is never invoked and there is nothing to assert against.
+  // A test that reaches the network is also a breach of the offline invariant in its
+  // own right, independent of the flake.
+  fs.writeFileSync(
+    path.join(binDir, 'gh'),
+    `#!/usr/bin/env bash
+if [[ "\${1:-}" == "repo" && "\${2:-}" == "view" ]]; then
+  echo '{"visibility":"PUBLIC","isPrivate":false}'
+fi
+exit 0
+`,
+    { mode: 0o755 },
+  );
+
   const prompt = path.join(dir, 'prompt.txt');
   const live = path.join(dir, 'live-fields.txt');
   fs.writeFileSync(prompt, 'classify this issue');
