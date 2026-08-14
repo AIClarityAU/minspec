@@ -122,11 +122,13 @@ function launcherScripts(): string[] {
  * auto-discovery outright, so the user-scope subagent roster this gate exists to keep
  * out cannot be assembled at all.
  *
- * It is deliberately NOT the right answer for the other launchers, for the reason this
- * file's header already gives: `--bare` forces ANTHROPIC_API_KEY and would break
- * DR-016/017 subscription-default billing. That is precisely why it fits the shadow
- * launcher — that run is billed to z.ai's own key and MUST NOT reach the subscription
- * credential (see packages/minspec/tests/shadow-triage-isolation.test.ts).
+ * NO LAUNCHER USES IT TODAY. The shadow instrument that motivated it is no longer a
+ * `claude -p` call at all — it is a direct HTTPS request to z.ai, so it never enters
+ * this gate's scan (see scripts/lib/shadow-triage.sh, THE TRANSPORT). The spelling
+ * stays accepted because it remains a correct answer for any future launcher that is
+ * billed to a third party's own key; it is deliberately NOT right for the existing
+ * ones, for the reason this file's header gives — `--bare` forces ANTHROPIC_API_KEY
+ * and would break DR-016/017 subscription-default billing.
  */
 const PINS_SOURCES = /AGENT_CONTEXT_ARGS\[@\]|--setting-sources|--bare/;
 
@@ -192,10 +194,11 @@ describe('T0: headless `claude -p` launchers scrub the inherited autocompact ove
   // NOTE the deliberate asymmetry with PINS_SOURCES above: `--bare` is NOT accepted
   // here. It selects which settings load; like `--setting-sources`, it cannot unset a
   // variable already exported in the process environment. Only a real `env -u` closes
-  // this one, so every launcher — including the #1338 shadow instrument, which builds
-  // its own env array in scripts/lib/shadow-triage.sh — must still carry the unset.
-  // The `env ` prefix is not required because `-u VAR` occurs only in an `env`
-  // invocation, and a multi-line env array puts the two on separate lines.
+  // this one, so every `claude -p` launcher must still carry the unset. (The #1338
+  // shadow instrument no longer appears among them: it is a direct HTTPS request, and
+  // curl does not read CLAUDE_* at all, so there is nothing to scrub.) The `env `
+  // prefix is not required because `-u VAR` occurs only in an `env` invocation, and a
+  // multi-line env array puts the two on separate lines.
   const SCRUBS = /AGENT_ENV_SCRUB\[@\]|-u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE/;
 
   it('the shared lib scrubs the override by default', () => {
@@ -220,8 +223,10 @@ describe('T0: headless `claude -p` launchers scrub the inherited autocompact ove
     expect(SCRUBS.test('claude -p "$P" --setting-sources project,local')).toBe(false);
     expect(SCRUBS.test('claude -p "$P" --bare')).toBe(false);
     expect(SCRUBS.test('env -u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE claude -p "$P"')).toBe(true);
-    // …and the multi-line env-array spelling the shadow instrument uses.
-    expect(SCRUBS.test('SHADOW_ENV_ARRAY=(\n  env\n  -u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE\n)')).toBe(true);
+    // …and the multi-line env-array spelling, where the `env` and the `-u` land on
+    // separate lines. No launcher is written this way today, but the predicate must
+    // keep accepting it or a correct launcher would be failed for its formatting.
+    expect(SCRUBS.test('AGENT_ENV=(\n  env\n  -u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE\n)')).toBe(true);
   });
 
   it('every `claude -p` launcher applies the scrub', () => {
