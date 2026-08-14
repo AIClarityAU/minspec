@@ -1,19 +1,83 @@
 ---
 id: SPEC-056
 type: requirements
-status: specifying
+status: superseded
+superseded-by: SPEC-018
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — the Explain affordance is a rubber-stamp countermeasure on the review surfaces
 aspects: [ux, tier-0, review, approval, honest-degrade]
 depends_on: [SPEC-014, SPEC-018]
 relates_to: [SPEC-014, SPEC-018, SPEC-013, SPEC-016, SPEC-017, DR-004, DR-057, DR-017, DR-012]
-implements: [packages/minspec/src/lib/explain-request.ts, packages/minspec/tests/explain-request.test.ts]
+implements: none
+implements_reason: >-
+  Superseded at Clarify before any code was written. The two files this field previously
+  named (packages/minspec/src/lib/explain-request.ts and its test) were never created —
+  both `ls` calls returned "No such file or directory" — so the declaration pointed at
+  nothing. SPEC-018 AC-19 owns the surviving requirement; see the Supersession record below.
 ---
 
 # MinSpec — Explain (?) affordance: a read-only, one-click "explain this to me" exit on the review surfaces (Requirements)
 
 > Materializes **[#914](https://github.com/AIClarityAU/minspec/issues/914)** (role:architect, Specify phase only). The Explain control was already folded into the two owning host specs as normative FRs — **[SPEC-014](../SPEC-014-review-webview/requirements.md) FR-18** (reviewer action bar, requirements.md:212-230) and **[SPEC-018](../SPEC-018-spec-custom-editor/requirements.md) FR-18** (per-section hover toolbar, requirements.md:257-283). This spec is the **coordinating** home for the *cross-cutting* parts those two FRs share and neither one owns: the Tier-0 routing seam, the queue request contract, and the honest-degrade floor. It deliberately does **not** re-own the host-side interaction requirements — those stay with SPEC-014 / SPEC-018.
+
+## Supersession record (Clarify, 2026-08-14)
+
+**This spec is superseded by [SPEC-018](../SPEC-018-spec-custom-editor/requirements.md) and
+should not be planned or implemented.** Nothing below this section is normative any more; it
+is kept because the Context section's measurements are the evidence the decision rests on,
+and a reader reopening this question should start from them rather than re-derive them.
+
+Withdrawal was free and is reversible: this spec has **no approval sidecar**
+(`.minspec/approvals/specs/minspec/SPEC-056-explain-affordance/` does not exist), and
+`grep -rln SPEC-056` over the corpus returns only this file — nothing referenced it.
+
+### What the three Clarify decisions resolved to
+
+- **DQ-1 → withdraw; SPEC-018 AC-19 already owns the cross-surface guarantee.** The premise
+  that the parity assertion is unowned is false.
+  [SPEC-018 AC-19](../SPEC-018-spec-custom-editor/requirements.md#L406) (requirements.md:406-412)
+  reads: *"The `?` Explain control (section hover toolbar; **and, at document scope, the
+  SPEC-014 action bar**) issues a read-only … request through the **same** channel as FR-12"*,
+  then asserts zero `WorkspaceEdit`, unchanged bytes and canonical hash, no approval void, and
+  a visible "no explainer available" notice. That is a single criterion spanning both surfaces
+  and binding them to one channel — which is what this spec's FR-1/FR-5 and AC-7 restate.
+  Measured against the host FRs line by line, 5 of this spec's 7 FRs are restatements of
+  [SPEC-014:212-230](../SPEC-014-review-webview/requirements.md#L212) and
+  [SPEC-018:257-283](../SPEC-018-spec-custom-editor/requirements.md#L257). Keeping it would
+  make the Explain contract live in three documents with no gate checking they agree — the
+  exact drift this spec's own R1 warns about.
+- **DQ-2 → parked, and not this spec's to answer.** The seam is
+  [SPEC-014 FR-OQ2](../SPEC-014-review-webview/requirements.md#L623) (requirements.md:623-626),
+  still under `## Open questions` and ending *"(Open — plan phase.)"*. Independently confirmed
+  by [SPEC-018 design.md:21-24](../SPEC-018-spec-custom-editor/design.md) ("its FR-OQ2,
+  unresolved"). Note `.minspec/queue` is **not** among FR-OQ2's four candidates, so this spec's
+  DQ-2 Options A and B were sub-choices of a file-based outcome rather than peers of Option C.
+  The park is bounded, not indefinite: `design.md:42` lists "SPEC-014 FR-OQ2 channel built" as
+  a hard dependency of SPEC-018's Slice E, so an in-flight approved T4 spec is waiting on it.
+- **DQ-3 → no new DR.** SPEC-014 already ran the ADR filter on this exact seam and answered:
+  [SPEC-014:598](../SPEC-014-review-webview/requirements.md#L598) — *"No **new** DR is created
+  (Context §: boundary recorded inline), but the decision is DR-bound, not a < 1-day reversible
+  call."* An earlier reading of :595-596 alone suggested the opposite; the sentence completes
+  at :598 and reverses it.
+
+### The one requirement that survives, and where it went
+
+Everything here is duplicated by a host FR **except the request payload's field set and the
+assertion that both surfaces produce it identically** (this spec's FR-4 and AC-4). AC-19 binds
+the two surfaces to one *channel* and one *degrade floor*; it does not pin the *schema*. The
+only other sliver AC-19 omits is "same preset prompt" — [SPEC-018:260](../SPEC-018-spec-custom-editor/requirements.md#L260)
+carries the canonical prompt and SPEC-014 FR-18 does not restate one.
+
+That residue is recorded on **[#914](https://github.com/AIClarityAU/minspec/issues/914)**, to be
+folded into SPEC-018 AC-19 at the moment FR-OQ2 resolves — one edit and one re-approval of an
+already-approved T4 spec, rather than the two it would cost to write the clause now and rewrite
+it when the seam is known.
+
+***Cost of this decision, stated plainly:*** between now and FR-OQ2 resolving, that requirement
+lives in a GitHub issue rather than in an approvable, so it is outside the SDD gate and can be
+forgotten. The mitigation is that #914 stays open and FR-OQ2 blocks SPEC-018 Slice E, so the
+moment anyone picks up that seam both threads are in front of them.
 
 ## One-Sentence Scope
 
@@ -76,7 +140,13 @@ SPEC-014 (`status: implementing`, requirements.md:3) has requirements only — n
 - **INV-4 (one AI seam — SPEC-018 FR-12).** Explain adds no second AI channel; it reuses the single host-resolved seam. Two seams is a boundary regression.
 - **INV-5 (no rubber-stamp-sanctioning UX — constitution).** This feature must remain the *read-only, non-approving* exit. It must never grow into an "approve — not understood" button, a confidence slider, or any control that records an approval qualified by self-reported non-understanding — the patterns the issue and SPEC-014 R6 explicitly reject.
 
-## Decisions needed (Clarify)
+## Decisions needed (Clarify) — ALL RESOLVED 2026-08-14
+
+> Answered in the Supersession record above: DQ-1 → withdraw (SPEC-018 AC-19 already owns the
+> cross-surface guarantee) · DQ-2 → parked, and SPEC-014 FR-OQ2's to answer, not this spec's ·
+> DQ-3 → no new DR, per SPEC-014:598's own ruling on the same seam. The original wording is
+> kept below because two of the forks rest on premises measurement falsified, and a reader
+> reopening the question needs the option *and* why it did not survive.
 
 These are genuine forks a human must settle before Plan. None is guessed here.
 
