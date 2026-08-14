@@ -893,7 +893,19 @@ fi
 # if it is not installed we warn and continue (graceful degradation) rather than
 # block — a missing optional tool must never wedge a commit.
 if command -v gitleaks >/dev/null 2>&1; then
-  if ! gitleaks protect --staged --redact --no-banner >/dev/null 2>&1; then
+  # CAPTURE, never discard (#1538). The refusal below tells the user to "review the
+  # finding above", so the finding has to actually BE above — this previously sent
+  # both streams to /dev/null and then pointed at what it had just thrown away,
+  # leaving the one path a user must act on with nothing to act on.
+  # -v is what makes the output a FINDING rather than a tally: without it gitleaks
+  # prints only "leaks found: 1", which names neither the file nor the rule and so
+  # cannot be reviewed. --redact stays on, so the matched VALUE is masked while the
+  # rule id, file and line come through. Showing the finding diagnoses, it does not
+  # disclose.
+  if ! minspec_leak_out="$(gitleaks protect --staged --redact --no-banner -v 2>&1)"; then
+    if [ -n "$minspec_leak_out" ]; then
+      printf '%s\n' "$minspec_leak_out" >&2
+    fi
     echo "✗ MinSpec gate: gitleaks found a potential secret in the staged changes." >&2
     echo "  Review the finding above; remove the secret or add a gitleaks allowlist entry." >&2
     echo "  Bypass (rare): MINSPEC_GATE_OFF=1 git commit ..." >&2

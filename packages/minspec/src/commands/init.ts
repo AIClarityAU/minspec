@@ -13,7 +13,6 @@ import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS, MANAGED_REGION_TEMPLATES } from 
 import { CLAUDE_SETTINGS_PATH } from '../lib/claude-settings';
 import { resolveTargetFolder, workspaceFolderLabel } from '../lib/resolve-folder';
 import { setCoverageMinimum, DEFAULT_COVERAGE_MINIMUM } from '../lib/config';
-import { evaluateConstitution } from '../lib/constitution-nudge';
 import { getRepoFromRemote } from '../lib/github';
 import {
   type CommandRunner,
@@ -32,21 +31,16 @@ import {
   READY_TO_MERGE_CHECK,
 } from '../lib/ruleset-advisor';
 
-/**
- * SPEC-025 FR-6: soft, NON-MODAL advisory when the constitution has no
- * human-authored rules yet. Advisory only — never modal, never blocks, and a
- * failure here must not affect the init result (best-effort).
- */
-function surfaceConstitutionNudge(folder: string): void {
-  try {
-    const nudge = evaluateConstitution(folder);
-    if (nudge.empty) {
-      vscode.window.showInformationMessage(nudge.message);
-    }
-  } catch {
-    // best-effort — the nudge is advisory; never let it break init.
-  }
-}
+// SPEC-025 FR-6's advisory is NOT emitted from here (#1546). It has exactly one
+// producer, `surfaceConstitutionProposeNudge` in extension.ts, which carries the
+// offer-to-fix actions and honours the per-workspace "Don't ask again" flag.
+//
+// The emitter that used to live here was a bare, actionless toast that could not read
+// that flag — it took only a folder path, never an ExtensionContext — so it reinstated
+// a dismissed nudge on every init and refresh. It was also guaranteed-true noise:
+// init has just written the constitution from a template, so "no human-authored rules
+// yet" cannot be false at that instant, and the message landed in the middle of the
+// other init toasts carrying no information and no way to act.
 
 // ---------------------------------------------------------------------------
 // Post-init "what to commit" hint + offer (#222)
@@ -1191,7 +1185,6 @@ export async function initCommand(
       kind: 'untracked',
     });
   }
-  surfaceConstitutionNudge(folder);
   if (isFirstInit) {
     await offerCoverageThresholdPrompt(folder);
     // Onboarding-only nudge toward the GitHub PR extension (see doc comment on
@@ -1317,7 +1310,6 @@ export async function initRefreshCommand(
   for (const w of warnings) {
     await surfaceManagedRegionWarning(folder, w);
   }
-  surfaceConstitutionNudge(folder);
   // Post-refresh "what to commit" offer — the SAME affordance init gives (#222).
   // Without this, a drift-triggered refresh (e.g. on window reload via
   // auto-bootstrap) rewrites the harness files but leaves them stranded
