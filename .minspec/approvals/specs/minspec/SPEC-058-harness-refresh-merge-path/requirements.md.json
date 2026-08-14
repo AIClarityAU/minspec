@@ -1,9 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-058-harness-refresh-merge-path/requirements.md",
-  "specHash": "4431661327173439d9e35f3d0b2e7ae5c6f3621e56e91b9da4e6894806d8e5ed",
-  "approvedAt": "2026-08-12T22:45:47.409Z",
+  "specHash": "3591eccea416a7426be8a7724e04327d18f37f7a02ad0f142745858015a3ab1b",
+  "approvedAt": "2026-08-14T05:01:12.955Z",
   "approvedBy": "github@harvest316.com",
   "tier": "T4",
   "migrated": false,
-  "baselineBlob": "29824182a6d1ba240a5170a2fd332fdf7ee07f52"
+  "baselineBlob": "b55f917b6b352d02997a85b6a1a4010e54f7ec9b"
 }
