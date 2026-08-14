@@ -32,7 +32,8 @@ implements_reason: >-
   #1477 instead, where they cannot gate unrelated work.
 
   Still unbuilt: FR-2 (surface on demand), FR-4 (version-bump gate), FR-5 (reviewer
-  guidance). This declaration covers the shipped slice only.
+  guidance) - tracked as #1504, not left as prose. This declaration covers the shipped
+  slice only.
 affects:
   - packages/minspec/package.json
   - packages/minspec/src/lib/spec.ts
