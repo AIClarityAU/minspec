@@ -698,16 +698,14 @@ const VERDICT_LABELS = [PASS, CHANGES, BLOCKED, PENDING];
 /**
  * Which verdict labels must go, and what the PR must look like afterwards (#1468).
  *
- * NOT YET WIRED — no caller invokes this yet; see verdictLabelFault below for why
- * the seam has to land before the caller. ai-review.yml's Post-verdict step is
- * STILL the version described next.
+ * WIRED — ai-review.yml's Post-verdict step calls this to decide its removals, inside
+ * the `verdict-label-coherence` block (#1468 step 2).
  *
- * That step adds the new label and best-effort-removes the others, discarding both
- * the error and the result. When one removal silently fails, the PR carries
- * `ai-review:pass` AND `ai-review:changes` at once, and `ready-to-merge` reads the
- * contradiction as "not passed" — a legitimately-passing PR that can never merge,
- * with nothing on its surface explaining why. Observed on #1430; still reachable
- * until step 2 lands.
+ * That step used to add the new label and best-effort-remove the others, discarding
+ * both the error and the result. When one removal silently failed, the PR carried
+ * `ai-review:pass` AND `ai-review:changes` at once, and `ready-to-merge` read the
+ * contradiction as "not passed" — a legitimately-passing PR that could never merge,
+ * with nothing on its surface explaining why. Observed on #1430.
  *
  * Pure so the rule is testable without a live PR: the caller does the I/O and then
  * checks its own post-state against `expected`.
@@ -733,12 +731,15 @@ function decideVerdictLabels({ current = [], verdict } = {}) {
 /**
  * Did the post-state land? Returns null when correct, else a human-readable fault.
  *
- * NOT YET WIRED — no caller invokes this. Step 2 makes ai-review.yml's Post-verdict
- * step assert `verdictLabelFault(...) === null` and fail the step on non-null; until
- * that lands, the removal path is unchanged and #1430's wedge is still reachable.
- * The split is forced: ai-review.yml loads control scripts from the TRUSTED BASE, so
- * a workflow calling this before it is on main dies with
- * `TypeError: g.verdictLabelFault is not a function` (observed on this PR's first
+ * WIRED — ai-review.yml's Post-verdict step re-reads the PR's labels after
+ * reconciling them and fails the step when this returns non-null, so a contradictory
+ * post-state is loud instead of a silent merge wedge (#1468 step 2). The returned
+ * string is surfaced verbatim in the `::error` annotation, which is why it names the
+ * labels it actually saw.
+ *
+ * The two-step split was forced: ai-review.yml loads control scripts from the TRUSTED
+ * BASE, so a workflow calling this before it was on main died with
+ * `TypeError: g.verdictLabelFault is not a function` (observed on #1472's first
  * attempt). Seam first, caller second.
  */
 function verdictLabelFault({ current = [], verdict } = {}) {
