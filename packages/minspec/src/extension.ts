@@ -57,6 +57,7 @@ import { recordApprovableView } from './lib/recent-approvables';
 import { resolveTargetFolderNonInteractive } from './lib/resolve-folder';
 import { registerReferenceDiagnostics } from './lib/diagnostics';
 import { evaluateConstitution } from './lib/constitution-nudge';
+import { listSpecs } from './lib/spec-catalog';
 
 export function activate(context: vscode.ExtensionContext): void {
   trackActiveSpecEditor(context);
@@ -733,6 +734,17 @@ async function surfaceConstitutionProposeNudge(
     // Only offer for an initialized project that actually has a constitution to
     // fill — a missing .minspec/ is the init bootstrap's job, not this nudge.
     if (!fs.existsSync(path.join(folder, '.minspec', 'constitution.md'))) return;
+
+    // DEFERRED until the project has at least one spec (#1546). Immediately after
+    // init this advisory is guaranteed true — the constitution was just written from
+    // a template — so firing it then is noise that cannot be false, arriving in the
+    // middle of the other init toasts. The invariants worth writing are the ones the
+    // work reveals, so the useful moment is once the user is actually specifying.
+    //
+    // A spec is the deterministic, offline witness for "specifying has started".
+    // Cheap, and it degrades safely: if the scan throws, the catch below swallows it
+    // and the nudge simply does not fire this activation.
+    if (listSpecs(folder).length === 0) return;
 
     const nudge = evaluateConstitution(folder);
     if (!nudge.empty) return;

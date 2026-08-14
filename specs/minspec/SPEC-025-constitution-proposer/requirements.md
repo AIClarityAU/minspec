@@ -89,6 +89,15 @@ by the extension.
 - **FR-6 — Empty-constitution nudge.** When the constitution is empty/all-template, a
   **soft** advisory (signpost/validator, never a block) surfaces "author your constitution"
   as a next human task (RCDD phase-4: surface the bad state).
+  **One emitter, deferred until specifying starts (#1546).** The advisory is emitted from
+  exactly one place — the activation-time surface that carries the offer-to-fix actions and
+  the per-workspace "Don't ask again" flag — and never from the `Initialize` / `Refresh`
+  commands. It fires only once the project has **at least one spec**. Straight after init
+  the advisory cannot be false (the constitution was just written from the template), so
+  emitting it there is guaranteed-true noise inside the init toast flood; the invariants
+  worth writing are the ones the work reveals. A second emitter is a lint error, not a
+  convention: it could carry neither the actions nor the skip flag, so it silently
+  overrode a user who had already dismissed the nudge.
 - **FR-7 — Provenance is review-time only.** Each candidate's "proposed because <signal>"
   is shown in the proposal preview so the human can judge it; it need not persist, and any
   DRAFT/provenance markers that land are removed by compaction (FR-8) — so provenance
@@ -127,8 +136,10 @@ by the extension.
   "runs offline" invariant) — still never empty (INV-4/FR-5).
 - `Refresh` on a constitution with human-authored Invariants but empty Constraints adds
   **only** to Constraints (INV-2 additive/non-overwrite).
-- An all-template constitution triggers the soft "author your constitution" advisory (FR-6);
-  a populated one does not.
+- An all-template constitution triggers the soft "author your constitution" advisory (FR-6)
+  **at activation, once the project has at least one spec**; a populated one does not, and
+  neither does a freshly-initialized project with no specs yet (#1546). `Initialize` and
+  `Refresh` emit it never.
 - The offered compaction strips all `DRAFT`/provenance and leaves meaning-equivalent prose;
   never runs silently (FR-8).
 

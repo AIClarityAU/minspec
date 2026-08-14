@@ -287,6 +287,14 @@ vi.mock('../src/lib/spec', async (importOriginal) => ({
     frontmatter: { status: 'new' },
   })),
 }));
+// #1546: the constitution advisory is DEFERRED until the project has at least one
+// spec, so these activation tests must say which side of that line they are on.
+// Default: one spec exists (specifying has started), which is the state the advisory
+// is FOR. The deferral itself is asserted by overriding this to [] in its own test.
+vi.mock('../src/lib/spec-catalog', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/spec-catalog')>()),
+  listSpecs: vi.fn(() => [{ id: 'SPEC-001' }]),
+}));
 vi.mock('fs');
 vi.mock('path', async () => {
   const actual = await vi.importActual('path');
@@ -855,6 +863,23 @@ describe('activate()', () => {
         "Don't ask again",
       );
     });
+  });
+
+  it('DEFERS the #320 propose nudge until the project has a spec (#1546)', async () => {
+    // The user reported this arriving in the init message flood. Straight after init
+    // the advisory cannot be false — the constitution was just written from a
+    // template — so a project with no specs yet must stay silent. The invariants
+    // worth writing are the ones the work reveals.
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const { listSpecs } = await import('../src/lib/spec-catalog');
+    vi.mocked(listSpecs).mockReturnValueOnce([]);
+
+    activate(makeMockContext());
+
+    // Non-vacuity: the sibling test above proves this same setup DOES fire the nudge
+    // when a spec exists, so silence here is the deferral and not a broken fixture.
+    const calls = vi.mocked(vscode.window.showInformationMessage).mock.calls;
+    expect(calls.some((c) => String(c[0]).includes('no human-authored rules yet'))).toBe(false);
   });
 
   it('suppresses the #320 propose nudge once dismissed (workspaceState skip flag)', () => {
