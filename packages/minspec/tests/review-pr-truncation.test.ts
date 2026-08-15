@@ -34,6 +34,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
+import { GH_BOT_STUB_ENV } from './helpers/gh-bot-env';
 
 const REVIEW_PR = path.resolve(__dirname, '../../../scripts/review-pr.sh');
 const REVIEW_PR_SRC = fs.readFileSync(REVIEW_PR, 'utf-8');
@@ -198,6 +199,9 @@ describe('review-pr.sh — end-to-end sanity (untruncated path unaffected)', () 
         PATH: `${binDir}:${process.env.PATH}`,
         HOME: process.env.HOME,
         LANG: process.env.LANG,
+        // review-pr.sh takes a bot identity before posting its verdict (#1355).
+        // This env is hermetic, so it must supply the token source as well.
+        ...GH_BOT_STUB_ENV,
         FAKE_PR_VIEW_JSON_FILE: prViewFile,
         FAKE_DIFF_FILE: diffFile,
         FAKE_CLAUDE_OUTPUT_FILE: claudeOutFile,

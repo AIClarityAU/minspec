@@ -1,0 +1,333 @@
+// Unit tests for scripts/lib/gh-bot.sh (#1355).
+// Plain Node, no deps: `node --test scripts/lib/gh-bot.test.js`.
+//
+// The integration suites cover this only indirectly (PR #1401 review, reviewer
+// finding 3). These pin the two decisions the whole seam rests on:
+//
+//   1. is this `gh` invocation a WRITE? — a false "read" ships the write as the
+//      human, which is the entire bug.
+//   2. what happens to the credential? — mint, fail closed, accept an inherited
+//      installation token, reject an inherited HUMAN token.
+//
+// Also pins the single-source-of-truth property: the CI guard must derive its
+// write vocabulary from this file, not restate it. The two disagreed once
+// already (`ruleset` and add/remove/... were runtime-only), which opened a hole
+// in the gate.
+
+'use strict';
+
+const { test } = require('node:test');
+const assert = require('node:assert/strict');
+const { spawnSync } = require('node:child_process');
+const fs = require('node:fs');
+const os = require('node:os');
+const path = require('node:path');
+
+const LIB = path.join(__dirname, 'gh-bot.sh');
+const GUARD = path.join(__dirname, '..', 'check-gh-bot-attribution.sh');
+
+/** Run a bash snippet with gh-bot.sh sourced. Never inherits real credentials. */
+function sh(snippet, env = {}) {
+  const r = spawnSync('bash', ['-c', `source ${JSON.stringify(LIB)}\n${snippet}`], {
+    encoding: 'utf8',
+    env: {
+      PATH: process.env.PATH,
+      HOME: process.env.HOME,
+      // Explicitly blank so a developer's exported token cannot change the result.
+      GH_TOKEN: '',
+      GITHUB_TOKEN: '',
+      ...env,
+    },
+  });
+  return { status: r.status, out: `${r.stdout || ''}${r.stderr || ''}` };
+}
+
+/** A stub minter that always succeeds. */
+function stubMinter(body = '#!/usr/bin/env bash\necho ghs_unit_stub\n') {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-bot-unit-'));
+  const p = path.join(dir, 'minter.sh');
+  fs.writeFileSync(p, body);
+  fs.chmodSync(p, 0o755);
+  return p;
+}
+
+// ── 1. the write predicate ───────────────────────────────────────────────────
+
+const WRITES = [
+  'issue comment 1 --body x',
+  'issue create --title x',
+  'pr create --title x',
+  'pr merge 1 --squash',
+  'pr edit 1 --add-label y',
+  'label create x',
+  'ruleset create x',            // runtime-only once; now shared with the guard
+  'api -X POST repos/o/r/issues',
+  'api -X DELETE repos/o/r/issues/comments/1',
+  // Lowercase too: the guard matched only uppercase once, so `-X post` passed CI
+  // while the runtime treated it as a write and attributed it to the human.
+  'api -X post repos/o/r/issues',
+  'api --method patch repos/o/r/issues/1',
+  // Equals and attached spellings — valid to gh, and missed by both sides once.
+  'api --method=POST repos/o/r/issues',
+  'api --method=delete repos/o/r/issues/comments/1',
+  'api -XPOST repos/o/r/issues',
+  // Mutating verbs that were absent from the vocabulary.
+  'workflow run ci.yml',
+  'release upload v1 ./asset.zip',
+  'api repos/o/r/issues -f title=x',
+  // GraphQL is a write by DEFAULT now (#1411): a document in a variable cannot be
+  // classified from argv, so the safe answer is the default and a read declares
+  // itself via gh_bot_graphql_read. Both spellings must classify as writes.
+  'api graphql -f query=mutation{addComment}',
+  'api graphql -f query=query{repository{id}} -F c=null',
+];
+
+const READS = [
+  'issue view 1',
+  'issue list',
+  'pr list --json number',
+  'pr view 1',
+  'pr checks 1',
+  'api user',
+  'api repos/o/r',
+  'label list',
+  'api -X GET repos/o/r',
+];
+
+for (const argv of WRITES) {
+  test(`WRITE: gh ${argv}`, () => {
+    const { status } = sh(`_gh_bot_is_write ${argv}`);
+    assert.equal(status, 0, `"gh ${argv}" must be classified as a write`);
+  });
+}
+
+for (const argv of READS) {
+  test(`read: gh ${argv}`, () => {
+    const { status } = sh(`_gh_bot_is_write ${argv}`);
+    assert.notEqual(status, 0, `"gh ${argv}" must NOT be classified as a write`);
+  });
+}
+
+// ── 2. single source of truth ────────────────────────────────────────────────
+
+test('the CI guard derives its write vocabulary from this file, not a copy', () => {
+  const guard = fs.readFileSync(GUARD, 'utf8');
+  assert.match(guard, /source .*gh-bot\.sh/, 'guard must source the helper');
+  assert.match(guard, /\$\{GH_BOT_WRITE_NOUNS\}/, 'guard must use the shared nouns');
+  assert.match(guard, /\$\{GH_BOT_WRITE_VERBS\}/, 'guard must use the shared verbs');
+  // The literal list must appear exactly once in the repo's two consumers.
+  const lib = fs.readFileSync(LIB, 'utf8');
+  assert.match(lib, /^GH_BOT_WRITE_NOUNS=/m);
+  assert.doesNotMatch(guard, /^WRITE_RE='.*issue\|pr\|label/m,
+    'guard must not restate the vocabulary inline');
+});
+
+// ── 3. credential handling ───────────────────────────────────────────────────
+
+test('sourcing and init are offline — no key needed, nothing fails', () => {
+  const { status } = sh('gh_bot_init; echo ok', { MINSPEC_GH_APP_TOKEN_SCRIPT: '/nonexistent' });
+  assert.equal(status, 0, 'source + init must never require a credential');
+});
+
+test('a write with no minter aborts, and says why', () => {
+  const { status, out } = sh('gh_bot_init; _gh_bot_ensure', {
+    MINSPEC_GH_APP_TOKEN_SCRIPT: '/nonexistent',
+  });
+  assert.equal(status, 1, 'must fail closed');
+  assert.match(out, /cannot mint a bot token/);
+  assert.match(out, /Refusing to write to GitHub as the human/);
+});
+
+test('a write mints and exports the token', () => {
+  const { status, out } = sh('gh_bot_init; _gh_bot_ensure; echo "TOKEN=$GH_TOKEN"', {
+    MINSPEC_GH_APP_TOKEN_SCRIPT: stubMinter(),
+  });
+  assert.equal(status, 0, out);
+  assert.match(out, /TOKEN=ghs_unit_stub/);
+});
+
+test('a multi-line minter result is rejected rather than used', () => {
+  const { status, out } = sh('gh_bot_init; _gh_bot_ensure', {
+    MINSPEC_GH_APP_TOKEN_SCRIPT: stubMinter('#!/usr/bin/env bash\necho tok\necho extra\n'),
+  });
+  assert.equal(status, 1, 'a token with prose glued to it must not be used');
+  assert.match(out, /not a single token/);
+});
+
+test('a failing minter surfaces its stderr, and does not fall back', () => {
+  const { status, out } = sh('gh_bot_init; _gh_bot_ensure', {
+    MINSPEC_GH_APP_TOKEN_SCRIPT: stubMinter('#!/usr/bin/env bash\necho "key is bad" >&2\nexit 3\n'),
+  });
+  assert.equal(status, 1);
+  assert.match(out, /exit 3/);
+  assert.match(out, /key is bad/, 'the minter\'s own diagnosis must reach the operator');
+  assert.doesNotMatch(out, /TOKEN=/);
+});
+
+// ── 4. inherited tokens (the CI path) ────────────────────────────────────────
+// A fake `gh` on PATH stands in for the identity probe, so these run offline.
+
+/**
+ * Put a stub `gh` on PATH emitting `raw` verbatim. Callers pass whatever the real
+ * `gh api user` would emit — a JSON user object, a JSON error body, or nothing.
+ */
+function stubGh(raw, exitCode = 0) {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-bot-ghstub-'));
+  const p = path.join(dir, 'gh');
+  fs.writeFileSync(p, `#!/usr/bin/env bash\nprintf '%s' ${JSON.stringify(raw)}\nexit ${exitCode}\n`);
+  fs.chmodSync(p, 0o755);
+  return dir;
+}
+
+/** The real `gh api user` returns a JSON object, not a bare login. */
+function stubGhLogin(login) {
+  return stubGh(JSON.stringify({ login, id: 1, type: login.endsWith('[bot]') ? 'Bot' : 'User' }));
+}
+
+test('an inherited token resolving to a BOT is accepted and left untouched', () => {
+  const { status, out } = sh('gh_bot_init; _gh_bot_ensure; echo "TOKEN=$GH_TOKEN"', {
+    GH_TOKEN: 'inherited_bot_token',
+    PATH: `${stubGhLogin('minspec-sdd[bot]')}:${process.env.PATH}`,
+  });
+  assert.equal(status, 0, out);
+  assert.match(out, /TOKEN=inherited_bot_token/, 'a bot token must not be replaced');
+});
+
+test('an inherited INSTALLATION token (gh api user 403s) is accepted', () => {
+  // The real 403 prints an error BODY to stdout, which once got mistaken for a
+  // login and hard-failed CI. Reproduce that exact shape.
+  const body = '{"message":"Resource not accessible by integration","status":"403"}';
+  const { status, out } = sh('gh_bot_init; _gh_bot_ensure; echo "TOKEN=$GH_TOKEN"', {
+    GH_TOKEN: 'ghs_installation',
+    PATH: `${stubGh(body, 1)}:${process.env.PATH}`,
+  });
+  assert.equal(status, 0, `an error body is not a login; got:\n${out}`);
+  assert.match(out, /TOKEN=ghs_installation/);
+});
+
+test('an EMPTY probe result fails closed — it is not proof of an installation token', () => {
+  // The fail-open found by review on #1401. "Not login-shaped" was read as "must
+  // be an installation token", so a probe that came back empty for ANY reason —
+  // network blip, rate limit, gh crash — waved a human PAT through. An empty
+  // answer is ambiguous, and ambiguity here must refuse.
+  const { status, out } = sh('gh_bot_init; _gh_bot_ensure', {
+    GH_TOKEN: 'maybe_a_human_pat',
+    PATH: `${stubGh('', 1)}:${process.env.PATH}`,
+  });
+  assert.equal(status, 1, 'an unverifiable identity must not be accepted');
+  assert.match(out, /identity could not be established/);
+});
+
+test('a 401 is NOT read as an installation token — that is a rejected credential', () => {
+  // An installation token is authenticated but user-less: 403. A 401 means the
+  // credential was refused, which is what an expired/revoked HUMAN PAT returns.
+  const body = '{"message":"Bad credentials","status":"401"}';
+  const { status, out } = sh('gh_bot_init; _gh_bot_ensure', {
+    GH_TOKEN: 'expired_human_pat',
+    PATH: `${stubGh(body, 1)}:${process.env.PATH}`,
+  });
+  assert.equal(status, 1, '401 must not be accepted as an installation token');
+  assert.match(out, /identity could not be established/);
+});
+
+test('a probe that fails with an unrelated error also fails closed', () => {
+  const { status, out } = sh('gh_bot_init; _gh_bot_ensure', {
+    GH_TOKEN: 'maybe_a_human_pat',
+    PATH: `${stubGh('dial tcp: lookup api.github.com: no such host', 1)}:${process.env.PATH}`,
+  });
+  assert.equal(status, 1, 'a network error is not a 403');
+  assert.match(out, /identity could not be established/);
+});
+
+test('the unverifiable path still honours the explicit human override', () => {
+  const { status, out } = sh('gh_bot_init; _gh_bot_ensure', {
+    GH_TOKEN: 'human_pat',
+    MINSPEC_GH_BOT_ALLOW_HUMAN: '1',
+    PATH: `${stubGh('', 1)}:${process.env.PATH}`,
+  });
+  assert.equal(status, 0, 'the override must remain reachable on this path');
+  assert.match(out, /unverifiable/);
+});
+
+test('an inherited HUMAN token is REJECTED, naming the login', () => {
+  const { status, out } = sh('gh_bot_init; _gh_bot_ensure', {
+    GH_TOKEN: 'human_pat',
+    PATH: `${stubGhLogin('harvest316')}:${process.env.PATH}`,
+  });
+  assert.equal(status, 1, 'a human PAT in GH_TOKEN reintroduces the bug');
+  assert.match(out, /harvest316/, 'must name whose identity it refused');
+  assert.match(out, /not a bot identity/);
+});
+
+test('MINSPEC_GH_BOT_ALLOW_HUMAN=1 permits a human token, loudly', () => {
+  const { status, out } = sh('gh_bot_init; _gh_bot_ensure', {
+    GH_TOKEN: 'human_pat',
+    MINSPEC_GH_BOT_ALLOW_HUMAN: '1',
+    PATH: `${stubGhLogin('harvest316')}:${process.env.PATH}`,
+  });
+  assert.equal(status, 0);
+  assert.match(out, /WARNING: writing as HUMAN 'harvest316'/,
+    'an override must be visible, never silent');
+});
+
+// ── 5. refresh ───────────────────────────────────────────────────────────────
+
+test('gh_bot_refresh re-mints once OUR token is older than the max age', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-bot-refresh-'));
+  const counter = path.join(dir, 'calls');
+  const minter = path.join(dir, 'minter.sh');
+  fs.writeFileSync(minter, `#!/usr/bin/env bash\necho x >> ${JSON.stringify(counter)}\necho ghs_refreshed\n`);
+  fs.chmodSync(minter, 0o755);
+  const { status, out } = sh(
+    // Age the token past the threshold by rewinding the mint timestamp.
+    'gh_bot_init; _gh_bot_ensure; _GH_BOT_MINTED_AT=$(( _GH_BOT_MINTED_AT - 99999 )); gh_bot_refresh; echo "TOKEN=$GH_TOKEN"',
+    { MINSPEC_GH_APP_TOKEN_SCRIPT: minter, MINSPEC_GH_BOT_MAX_AGE: '10' },
+  );
+  assert.equal(status, 0, out);
+  assert.match(out, /re-minting/, 'a re-mint must be visible in the log');
+  assert.equal(fs.readFileSync(counter, 'utf8').trim().split('\n').length, 2,
+    'expected exactly one initial mint plus one refresh');
+});
+
+test('gh_bot_refresh is a no-op while the token still has headroom', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-bot-fresh-'));
+  const counter = path.join(dir, 'calls');
+  const minter = path.join(dir, 'minter.sh');
+  fs.writeFileSync(minter, `#!/usr/bin/env bash\necho x >> ${JSON.stringify(counter)}\necho ghs_fresh\n`);
+  fs.chmodSync(minter, 0o755);
+  const { status } = sh('gh_bot_init; _gh_bot_ensure; gh_bot_refresh; gh_bot_refresh', {
+    MINSPEC_GH_APP_TOKEN_SCRIPT: minter,
+  });
+  assert.equal(status, 0);
+  assert.equal(fs.readFileSync(counter, 'utf8').trim().split('\n').length, 1,
+    'a fresh token must not be re-minted');
+});
+
+test('gh_bot_refresh never replaces an INHERITED token — it is not ours', () => {
+  const { status, out } = sh(
+    'gh_bot_init; _gh_bot_ensure; _GH_BOT_MINTED_AT=0; gh_bot_refresh; echo "TOKEN=$GH_TOKEN"',
+    {
+      GH_TOKEN: 'ci_supplied',
+      MINSPEC_GH_BOT_MAX_AGE: '1',
+      MINSPEC_GH_APP_TOKEN_SCRIPT: stubMinter('#!/usr/bin/env bash\necho ghs_should_not_be_used\n'),
+      PATH: `${stubGhLogin('minspec-sdd[bot]')}:${process.env.PATH}`,
+    },
+  );
+  assert.equal(status, 0, out);
+  assert.match(out, /TOKEN=ci_supplied/, 'a workflow-supplied token must survive refresh');
+});
+
+test('minting happens at most once per process', () => {
+  // A minter that appends on each call; two writes must produce ONE line.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-bot-once-'));
+  const counter = path.join(dir, 'calls');
+  const minter = path.join(dir, 'minter.sh');
+  fs.writeFileSync(minter, `#!/usr/bin/env bash\necho x >> ${JSON.stringify(counter)}\necho ghs_once\n`);
+  fs.chmodSync(minter, 0o755);
+  const { status } = sh('gh_bot_init; _gh_bot_ensure; _gh_bot_ensure; _gh_bot_ensure', {
+    MINSPEC_GH_APP_TOKEN_SCRIPT: minter,
+  });
+  assert.equal(status, 0);
+  assert.equal(fs.readFileSync(counter, 'utf8').trim().split('\n').length, 1,
+    'the token must be minted once and cached, not re-minted per write');
+});

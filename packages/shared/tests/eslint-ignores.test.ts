@@ -1,5 +1,5 @@
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest';
+import { describe, expect, it, afterAll, vi } from 'vitest';
 
 // #1099 — `loadConfig()` below does a cold dynamic `import()` of the full ESLint
 // flat-config module graph (eslint.config.mjs + its plugin/parser deps), not a
@@ -10,9 +10,7 @@ import { describe, expect, it, beforeAll, afterAll, vi } from 'vitest';
 // different suite each time. Raised HERE, per-file, not globally — a genuinely hung
 // test elsewhere still fails fast at the default. 30s is the value #1099 measured
 // all affected suites passing reliably at.
-beforeAll(() => {
-  vi.setConfig({ testTimeout: 30_000 });
-});
+vi.setConfig({ testTimeout: 30_000 });
 afterAll(() => {
   vi.resetConfig();
 });

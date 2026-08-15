@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, afterAll, vi } from 'vitest';
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 
@@ -8,9 +8,7 @@ import path from 'node:path';
 // it is non-deterministic run-to-run (#1099). Raised HERE, per-file, not globally —
 // a genuinely hung test elsewhere still fails fast at the default. 30s is the value
 // #1099 measured all affected suites passing reliably at.
-beforeAll(() => {
-  vi.setConfig({ testTimeout: 30_000 });
-});
+vi.setConfig({ testTimeout: 30_000 });
 afterAll(() => {
   vi.resetConfig();
 });

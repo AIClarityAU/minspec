@@ -70,10 +70,28 @@ const ARTIFACT_RE = /\b(SPEC|DR|EPIC)-(\d{1,})(?:@([A-Za-z][\w-]*))?\b/g;
 // A path is a slash-containing, extension-bearing token so bare words and the
 // artifact ids above are never mistaken for file paths. Restrict the path charset
 // to typical source-path characters.
-const FILE_HASH_RE =
-  /\b([\w./-]+\/[\w.-]+\.[A-Za-z][\w]*)#L(\d+(?:-L?\d+)?)/g;
-const FILE_COLON_RE =
-  /\b([\w./-]+\/[\w.-]+\.[A-Za-z][\w]*):(\d+(?:-\d+)?)\b/g;
+//
+// NOT `\b` at the start (#1451). A word boundary cannot exist between two
+// non-word characters, so `\b` could never match at the leading `.` of a
+// `./` or `../` path: given `](../SPEC-014-x/requirements.md#L4)`, the engine
+// skipped forward to the first word character and captured
+// `SPEC-014-x/requirements.md`, silently DROPPING the `../`. Both callers
+// resolve relative to the citing file first, so the truncated path then failed
+// there too and the citation was reported dangling while being perfectly
+// correct — 28 of the 32 file findings on `main` were this.
+//
+// `(?<![\w./-])` instead: the same "don't start mid-path" guarantee `\b` was
+// providing, but expressed against the path charset itself, so a leading `./`
+// or `../` is captured. Root-relative paths are unaffected.
+const PATH_START = /(?<![\w./-])/.source;
+const FILE_HASH_RE = new RegExp(
+  `${PATH_START}([\\w./-]+/[\\w.-]+\\.[A-Za-z][\\w]*)#L(\\d+(?:-L?\\d+)?)`,
+  'g',
+);
+const FILE_COLON_RE = new RegExp(
+  `${PATH_START}([\\w./-]+/[\\w.-]+\\.[A-Za-z][\\w]*):(\\d+(?:-\\d+)?)\\b`,
+  'g',
+);
 
 const KIND_BY_WORD: Record<string, ReferenceKind> = {
   SPEC: 'spec',

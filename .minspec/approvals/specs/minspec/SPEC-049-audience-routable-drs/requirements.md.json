@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-049-audience-routable-drs/requirements.md",
+  "specHash": "6ecbe5af4436a5dbcb14c22e2666f6e9a41182c98b5b6115289db82f8bf7d28f",
+  "approvedAt": "2026-08-07T02:35:07.478Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "9e711dc3bbdcbab5cb1c6c68ffe6c3fb57bfde0e"
+}

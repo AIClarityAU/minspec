@@ -887,3 +887,72 @@ test('parseBlockedBy: a declaration with NO leading ref yields nothing', () => {
   // "Blocked by the release freeze (see #1225)" is prose, not a declaration.
   assert.deepEqual(parseBlockedBy('Blocked by the release freeze (see #1225).'), []);
 });
+
+// ── verdict-label coherence (#1468) ──────────────────────────────────────────
+// The PR's label set is the merge gate's INPUT, so the property that matters is
+// not "the removal calls were issued" but "the PR now asserts exactly one
+// verdict". #1430 carried ai-review:pass AND ai-review:changes at once and
+// ready-to-merge withheld forever, with nothing on the PR explaining why.
+const guard = require('./ai-review-guard.js');
+
+test('decideVerdictLabels: changes → pass removes the stale opposite verdict', () => {
+  // The exact #1430 shape: round 1 left `changes`, round 2 decided `pass`.
+  const d = guard.decideVerdictLabels({
+    current: ['ai-review:changes', 'docs-lane'],
+    verdict: 'ai-review:pass',
+  });
+  assert.deepEqual(d.remove, ['ai-review:changes']);
+  assert.deepEqual(d.add, ['ai-review:pass']);
+  assert.deepEqual(d.expected, ['ai-review:pass']);
+});
+
+test('decideVerdictLabels: clears pending too, and never touches other labels', () => {
+  const d = guard.decideVerdictLabels({
+    current: ['ai-review:pending', 'ai-review:blocked', 'docs-lane', 'needs-human-review'],
+    verdict: 'ai-review:changes',
+  });
+  assert.deepEqual(d.remove.sort(), ['ai-review:blocked', 'ai-review:pending']);
+  // Non-verdict labels are outside this function's remit entirely.
+  assert.ok(!JSON.stringify(d).includes('docs-lane'));
+  assert.ok(!JSON.stringify(d).includes('needs-human-review'));
+});
+
+test('decideVerdictLabels: re-running on an already-correct PR is a no-op', () => {
+  const d = guard.decideVerdictLabels({ current: ['ai-review:pass'], verdict: 'ai-review:pass' });
+  assert.deepEqual(d.remove, []);
+  assert.deepEqual(d.add, []);
+});
+
+test('decideVerdictLabels: an unknown verdict throws rather than guessing', () => {
+  assert.throws(() => guard.decideVerdictLabels({ current: [], verdict: 'ai-review:maybe' }));
+});
+
+test('verdictLabelFault: contradictory labels are a fault, and it names both', () => {
+  const f = guard.verdictLabelFault({
+    current: ['ai-review:pass', 'ai-review:changes', 'docs-lane'],
+    verdict: 'ai-review:pass',
+  });
+  assert.ok(f, 'two verdicts at once must be reported');
+  assert.match(f, /ai-review:changes/);
+  assert.match(f, /ai-review:pass/);
+});
+
+test('verdictLabelFault: a missing verdict label is a fault', () => {
+  const f = guard.verdictLabelFault({ current: ['docs-lane'], verdict: 'ai-review:pass' });
+  assert.match(f, /no verdict label/);
+});
+
+test('verdictLabelFault: the WRONG single verdict is a fault', () => {
+  const f = guard.verdictLabelFault({ current: ['ai-review:changes'], verdict: 'ai-review:pass' });
+  assert.ok(f);
+});
+
+test('verdictLabelFault: exactly the decided verdict is clean', () => {
+  assert.equal(
+    guard.verdictLabelFault({
+      current: ['ai-review:pass', 'docs-lane', 'needs-human-review'],
+      verdict: 'ai-review:pass',
+    }),
+    null,
+  );
+});

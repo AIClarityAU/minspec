@@ -195,14 +195,108 @@ fi
 # the trigger to every directory the validator scans, so all of its gates fire at
 # commit, not only on a push. Keep the existing DR/INDEX trigger as a subset.
 # Bypass: DR_INDEX_GATE_OFF=1 git commit ...
+#
+# ── Pre-existing vs INTRODUCED (#1471) ────────────────────────────────────────
+# The validator scans the whole corpus, so while main is red for ANY reason every
+# commit here is blocked — including one that touches none of the failing files.
+# Worse, the failure is MISATTRIBUTED: you are told your commit failed validation
+# and handed a filename you never opened. That happened on 2026-08-12: a two-line
+# DR status flip was blocked by SPEC-055/SPEC-057 missing `implements:`, and the
+# gate's own text pointed at DR-index drift, which was not the cause at all.
+#
+# So when the corpus is red, ask the second question before blaming the commit:
+# was this ALREADY broken at HEAD? Only violations the commit INTRODUCES are its
+# fault. CI keeps the corpus-wide view, which is the right scope there.
+#
+# Cost is paid only on the failure path — a passing commit still runs the
+# validator exactly once.
+#
+# The baseline is built with `git archive` into a temp dir rather than a second
+# worktree: the hook runs while git holds the index lock, and this touches no git
+# state at all — it just materialises HEAD's files and reads them.
+_validate_fail_lines() { grep -E '^FAIL ' || true; }
+
+_validate_head_baseline() {
+  # Prints HEAD's FAIL lines. Exits non-zero if the baseline cannot be built —
+  # the caller then FAILS CLOSED rather than assuming "pre-existing".
+  local tmp
+  tmp="$(mktemp -d 2>/dev/null)" || return 1
+  # shellcheck disable=SC2064
+  trap "rm -rf '$tmp'" RETURN
+  git archive HEAD 2>/dev/null | tar -x -C "$tmp" 2>/dev/null || return 1
+  [ -f "$tmp/scripts/validate-frontmatter.ts" ] || return 1
+  # The validator needs deps; reuse this checkout's rather than installing.
+  [ -d node_modules ] && ln -s "$PWD/node_modules" "$tmp/node_modules" 2>/dev/null
+
+  # A RED baseline is the normal case here — the validator exiting non-zero is
+  # the signal, not an error — so swallow its status deliberately. `|| true` on
+  # the capture, NOT on the pipeline: under `set -o pipefail` (line 24) piping a
+  # failing validator into grep propagates its status, so the first version of
+  # this returned non-zero on every red baseline and the whole comparison was
+  # inert, silently falling back to fail-closed. It looked like it worked.
+  local out
+  out="$( cd "$tmp" && npm run --silent validate 2>&1 )" || true
+
+  # Witness that the validator actually RAN. Absent its summary line, an empty
+  # FAIL set means "could not run", not "clean" — and treating that as a clean
+  # baseline would mark every pre-existing failure as introduced.
+  case "$out" in
+    *"validation error(s)"*|*"validation passed"*) ;;
+    *) return 1 ;;
+  esac
+
+  printf '%s\n' "$out" | _validate_fail_lines
+  return 0
+}
+
 if [ "${DR_INDEX_GATE_OFF:-}" != "1" ] && \
    git diff --cached --name-only | grep -qE '^(docs/decisions/(DR-[0-9].*|INDEX)\.md|specs/.*\.md|docs/domain/.*\.md|docs/epics/.*\.md)$'; then
-  if ! npm run --silent validate >&2; then
-    echo "✖ validate gate: frontmatter / dangling-ref / DR-index validation failed." >&2
-    echo "  Fix the reported issue. For DR-index status drift, regenerate the DR INDEX" >&2
-    echo "  (MinSpec: Regenerate DR INDEX) so INDEX.md matches the DR frontmatter." >&2
-    echo "  Override: DR_INDEX_GATE_OFF=1 git commit ..." >&2
-    fail=1
+  if ! validate_out="$(npm run --silent validate 2>&1)"; then
+    printf '%s\n' "$validate_out" >&2
+
+    # Witness that THIS run's validator actually ran, before reading anything into
+    # its (possibly empty) FAIL set. The baseline path has always done this; the
+    # live path did not, and the asymmetry failed OPEN: a validator that exits
+    # non-zero without emitting FAIL lines — a crash, a broken dep, an unhandled
+    # rejection, or a syntax error introduced by this very commit — produced an
+    # empty `now_fails`, hence an empty `introduced`, hence "nothing introduced,
+    # allowed". Strictly worse than the behaviour this replaced, which blocked.
+    # Caught in review on #1483. Same rule, both paths, no exceptions.
+    case "$validate_out" in
+      *"validation error(s)"*|*"validation passed"*) ;;
+      *)
+        echo "" >&2
+        echo "✖ validate gate: the validator exited non-zero without reporting a result." >&2
+        echo "  No summary line, so its FAIL set cannot be trusted as complete — this is a" >&2
+        echo "  broken validator, not a clean commit. Failing closed (#1483 review)." >&2
+        echo "  Override: DR_INDEX_GATE_OFF=1 git commit ..." >&2
+        fail=1
+        exit $fail
+        ;;
+    esac
+
+    now_fails="$(printf '%s\n' "$validate_out" | _validate_fail_lines)"
+    if base_fails="$(_validate_head_baseline)"; then
+      introduced="$(comm -13 <(printf '%s\n' "$base_fails" | sort -u) <(printf '%s\n' "$now_fails" | sort -u))"
+    else
+      introduced="$now_fails"
+      echo "⚠ could not build the HEAD baseline — treating every failure as introduced (fail-closed)." >&2
+    fi
+
+    if [ -z "$(printf '%s' "$introduced" | tr -d '[:space:]')" ]; then
+      echo "" >&2
+      echo "ℹ validate gate: the corpus is red, but NONE of it was introduced by this commit —" >&2
+      echo "  every failure above already exists at HEAD. Allowing the commit (#1471)." >&2
+      echo "  Someone needs to fix main; it is not you, and it is not this change." >&2
+    else
+      echo "" >&2
+      echo "✖ validate gate: this commit INTRODUCES the following:" >&2
+      printf '%s\n' "$introduced" | sed 's/^/    /' >&2
+      echo "  For DR-index status drift, regenerate the DR INDEX" >&2
+      echo "  (MinSpec: Regenerate DR INDEX) so INDEX.md matches the DR frontmatter." >&2
+      echo "  Override: DR_INDEX_GATE_OFF=1 git commit ..." >&2
+      fail=1
+    fi
   fi
 fi
 

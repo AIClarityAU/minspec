@@ -22,6 +22,11 @@ import * as zlib from 'zlib';
 import { execFileSync } from 'child_process';
 import { specHash, getSpecBodyOnly } from '@aiclarity/shared';
 import type { Tier } from './config';
+// SPEC-051 lib-boundary ownership guard. spec-validator imports THIS module type-only
+// (`import type { ApprovalStatus }`), which erases at compile time — so this value import
+// creates no runtime cycle. Verified by scripts/check-import-cycles.ts.
+import { parseSpec } from './spec';
+import { assertOwnershipDeclaredForAdvance } from './ownership-advance-guard';
 import {
   readRecord,
   writeRecord,
@@ -530,6 +535,36 @@ export function approveSpec(
   } catch {
     throw new Error(`Cannot read spec file to approve: ${specFilePath}`);
   }
+
+  // SPEC-051: ownership pre-check, at the LIB boundary for the same reason DR-056's
+  // approver gate is here — approval ADVANCES the phase map, and some rules are gated on
+  // that map, so a spec can be complete now and violate an error the instant it is
+  // advanced. #1317 closed the UI path (`commands/approve.ts`); this closes every other
+  // caller OF THIS FUNCTION — a script, a test, a future command, an agent driving
+  // `approveSpec`. Four red mains came through that gap.
+  //
+  // NOT closed here, stated plainly rather than implied: `advanceSpecToImplementing`
+  // (`spec.ts`) is the function that actually WRITES `phases.plan: in-progress`, and it
+  // remains unguarded. Guarding it needs `spec.ts` to import the validator, but
+  // `spec-validator.ts` value-imports `./spec` (`SPEC_STATUSES`, `SPEC_TYPES`,
+  // `stripInlineComment`) — a real runtime cycle, and dodging the cycle checker with a
+  // lazy `require` would hide it rather than remove it. Its ONLY production caller today
+  // is `commands/approve.ts:315`, which #1317 already refuses before reaching. So the
+  // exposure is a future direct caller, not a live hole. Tracked as tasks.md T4.2.
+  //
+  // Reuses `violationsIntroducedByApproval` rather than a fresh predicate, which buys two
+  // deliberate properties for free:
+  //   • config-respecting — it re-runs `validateSpec` under the caller's own config, so a
+  //     repo on the default `ownershipDeclaration: 'warn'` is not refused (FR-7 ratchet);
+  //   • only NEWLY-introduced errors — a spec already in the build band and already
+  //     undeclared is untouched, so re-approving after an ordinary edit cannot lock a
+  //     human out.
+  // Both are pinned by tests/ownership-guard.test.ts; neither is incidental.
+  //
+  // Placed after the read (not a side effect) and before the hash/mint/write, so a refusal
+  // leaves nothing half-written.
+  assertOwnershipDeclaredForAdvance(specFilePath, parseSpec(raw));
+
   const hash = specHash(raw); // canonical-hash boundary (SPEC-022)
 
   // 1. FR-4 body-only bytes — NOT the canonical-hash boundary. The baseline diff

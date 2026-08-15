@@ -72,6 +72,27 @@ function codeOf(file: string): string {
     .join('\n');
 }
 
+/**
+ * Code of a script PLUS the code of every `scripts/lib/*.sh` it sources.
+ *
+ * A launcher may legitimately build its flags/env in a sourced library — that is what
+ * `scripts/lib/agent-context.sh` exists for, and what `scripts/lib/shadow-triage.sh`
+ * does for the #1338 shadow instrument. Reading the launcher file alone would report
+ * such a launcher as an offender while it is in fact covered, and would equally miss a
+ * future launcher that hides a REAL omission behind a lib. Resolving one level of
+ * `source` keeps the gate about the outcome rather than about which file the text
+ * happens to live in.
+ */
+function codeWithSourcedLibs(file: string): string {
+  const own = codeOf(file);
+  const libs = [...own.matchAll(/source\s+"?\$\{SCRIPT_DIR\}\/(lib\/[A-Za-z0-9._-]+\.sh)"?/g)].map((m) => m[1]);
+  const sourced = libs
+    .map((rel) => path.join(SCRIPTS_DIR, rel))
+    .filter((p) => fs.existsSync(p))
+    .map((p) => codeOf(p));
+  return [own, ...sourced].join('\n');
+}
+
 /** Scripts that launch a headless agent via `claude -p` / `claude --print`. */
 function launcherScripts(): string[] {
   // RECURSIVE on purpose. A non-recursive `scripts/*.sh` scan silently excluded
@@ -90,10 +111,26 @@ function launcherScripts(): string[] {
 
 /**
  * A call-site pins its setting sources if it expands the shared array
- * (`"${AGENT_CONTEXT_ARGS[@]}"`) or passes the literal flag. Accepting both keeps
- * the gate about the OUTCOME (user scope excluded) rather than one spelling.
+ * (`"${AGENT_CONTEXT_ARGS[@]}"`), passes the literal flag, or runs `--bare`.
+ * Accepting all three keeps the gate about the OUTCOME (user scope excluded)
+ * rather than one spelling.
+ *
+ * `--bare` was added to the accepted set for the #1338 shadow-triage launcher, and it
+ * is a STRICTLY STRONGER answer to this gate's hazard, not a loophole: where
+ * `--setting-sources project,local` drops user scope from settings discovery,
+ * `--bare`'s documented contract skips hooks, plugin sync, auto-memory and CLAUDE.md
+ * auto-discovery outright, so the user-scope subagent roster this gate exists to keep
+ * out cannot be assembled at all.
+ *
+ * NO LAUNCHER USES IT TODAY. The shadow instrument that motivated it is no longer a
+ * `claude -p` call at all — it is a direct HTTPS request to z.ai, so it never enters
+ * this gate's scan (see scripts/lib/shadow-triage.sh, THE TRANSPORT). The spelling
+ * stays accepted because it remains a correct answer for any future launcher that is
+ * billed to a third party's own key; it is deliberately NOT right for the existing
+ * ones, for the reason this file's header gives — `--bare` forces ANTHROPIC_API_KEY
+ * and would break DR-016/017 subscription-default billing.
  */
-const PINS_SOURCES = /AGENT_CONTEXT_ARGS\[@\]|--setting-sources/;
+const PINS_SOURCES = /AGENT_CONTEXT_ARGS\[@\]|--setting-sources|--bare/;
 
 describe('T0: headless `claude -p` launchers pin their setting sources (no inherited agent roster)', () => {
   it('finds the launcher scripts to guard (the scan is not vacuous)', () => {
@@ -117,9 +154,19 @@ describe('T0: headless `claude -p` launchers pin their setting sources (no inher
     expect(sources).toContain('project'); // spec-gate + marker-guard must survive
   });
 
+  it('the widened predicate still REJECTS a launcher that pins nothing', () => {
+    // Widening an accepted set is how a gate quietly stops gating. A launcher that
+    // does none of the three accepted things must still be an offender, or the
+    // #912 outage becomes re-committable behind a green suite.
+    expect(PINS_SOURCES.test('claude -p "$PROMPT" --tools "" --output-format text')).toBe(false);
+    expect(PINS_SOURCES.test('claude -p "$P" --setting-sources project,local')).toBe(true);
+    expect(PINS_SOURCES.test('claude -p "$P" --bare')).toBe(true);
+    expect(PINS_SOURCES.test('"${AGENT_CONTEXT_ARGS[@]}" claude -p "$P"')).toBe(true);
+  });
+
   it('every `claude -p` launcher pins its setting sources', () => {
     const offenders = launcherScripts()
-      .filter((f) => !PINS_SOURCES.test(codeOf(f)))
+      .filter((f) => !PINS_SOURCES.test(codeWithSourcedLibs(f)))
       .map((f) => path.basename(f));
 
     expect(
@@ -143,7 +190,16 @@ describe('T0: headless `claude -p` launchers scrub the inherited autocompact ove
   // run compact at 55% of its window. That roughly halves the usable span between
   // compactions and is what turns an ordinary large read into the thrash abort.
   // Verified on a live agent's /proc/<pid>/environ, not inferred.
-  const SCRUBS = /AGENT_ENV_SCRUB\[@\]|env -u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE/;
+  //
+  // NOTE the deliberate asymmetry with PINS_SOURCES above: `--bare` is NOT accepted
+  // here. It selects which settings load; like `--setting-sources`, it cannot unset a
+  // variable already exported in the process environment. Only a real `env -u` closes
+  // this one, so every `claude -p` launcher must still carry the unset. (The #1338
+  // shadow instrument no longer appears among them: it is a direct HTTPS request, and
+  // curl does not read CLAUDE_* at all, so there is nothing to scrub.) The `env `
+  // prefix is not required because `-u VAR` occurs only in an `env` invocation, and a
+  // multi-line env array puts the two on separate lines.
+  const SCRUBS = /AGENT_ENV_SCRUB\[@\]|-u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE/;
 
   it('the shared lib scrubs the override by default', () => {
     const lib = codeOf(LIB);
@@ -161,9 +217,21 @@ describe('T0: headless `claude -p` launchers scrub the inherited autocompact ove
     expect(lib).not.toMatch(/env -u[^\n]*CLAUDE_EFFORT/);
   });
 
+  it('the scrub predicate still REJECTS a launcher that only pins settings', () => {
+    // The asymmetry made concrete: neither flag can unset an inherited env var, so
+    // neither may satisfy this gate.
+    expect(SCRUBS.test('claude -p "$P" --setting-sources project,local')).toBe(false);
+    expect(SCRUBS.test('claude -p "$P" --bare')).toBe(false);
+    expect(SCRUBS.test('env -u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE claude -p "$P"')).toBe(true);
+    // …and the multi-line env-array spelling, where the `env` and the `-u` land on
+    // separate lines. No launcher is written this way today, but the predicate must
+    // keep accepting it or a correct launcher would be failed for its formatting.
+    expect(SCRUBS.test('AGENT_ENV=(\n  env\n  -u CLAUDE_AUTOCOMPACT_PCT_OVERRIDE\n)')).toBe(true);
+  });
+
   it('every `claude -p` launcher applies the scrub', () => {
     const offenders = launcherScripts()
-      .filter((f) => !SCRUBS.test(codeOf(f)))
+      .filter((f) => !SCRUBS.test(codeWithSourcedLibs(f)))
       .map((f) => path.basename(f));
     expect(
       offenders,

@@ -70,9 +70,13 @@ function installMock(scenario: Scenario): { createCalls: string[][]; listCalls: 
       if (typeof opts === 'function') cb = opts as Function;
       const done = cb as Function;
 
-      // git remote get-url origin
-      if (cmd === 'git' && args[0] === 'remote') {
-        return done(null, { stdout: (scenario.remote ?? 'git@github.com:owner/repo.git') + '\n', stderr: '' });
+      // #1545: getRepoFromRemote now reads ALL remotes via
+      // `git config --get-regexp ^remote\..*\.url$` rather than
+      // `git remote get-url origin`, so match the flag and answer in config-line
+      // form. (`args[0]` is now `-C`, not `remote`.)
+      if (cmd === 'git' && args.includes('--get-regexp')) {
+        const url = scenario.remote ?? 'git@github.com:owner/repo.git';
+        return done(null, { stdout: `remote.origin.url ${url}\n`, stderr: '' });
       }
 
       // gh auth status

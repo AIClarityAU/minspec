@@ -95,7 +95,7 @@ describe('getRepoFromRemote()', () => {
     mockExecFile.mockImplementation(
       (_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
         if (typeof _opts === 'function') cb = _opts as Function;
-        cb!(null, { stdout: 'git@github.com:harvest316/MinSpecPro.git\n', stderr: '' });
+        cb!(null, { stdout: 'remote.origin.url git@github.com:harvest316/MinSpecPro.git\n', stderr: '' });
       },
     );
 
@@ -107,7 +107,7 @@ describe('getRepoFromRemote()', () => {
     mockExecFile.mockImplementation(
       (_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
         if (typeof _opts === 'function') cb = _opts as Function;
-        cb!(null, { stdout: 'https://github.com/harvest316/MinSpecPro.git\n', stderr: '' });
+        cb!(null, { stdout: 'remote.origin.url https://github.com/harvest316/MinSpecPro.git\n', stderr: '' });
       },
     );
 
@@ -119,7 +119,7 @@ describe('getRepoFromRemote()', () => {
     mockExecFile.mockImplementation(
       (_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
         if (typeof _opts === 'function') cb = _opts as Function;
-        cb!(null, { stdout: 'https://gitlab.com/owner/repo.git\n', stderr: '' });
+        cb!(null, { stdout: 'remote.origin.url https://gitlab.com/owner/repo.git\n', stderr: '' });
       },
     );
 
@@ -267,7 +267,7 @@ describe('parkTopic()', () => {
           cb!(null, { stdout: 'Logged in', stderr: '' });
         } else if (callIndex === 2) {
           // getRepoFromRemote: git remote get-url origin
-          cb!(null, { stdout: 'git@github.com:owner/repo.git\n', stderr: '' });
+          cb!(null, { stdout: 'remote.origin.url git@github.com:owner/repo.git\n', stderr: '' });
         } else {
           // createGitHubIssue: gh issue create
           cb!(null, { stdout: 'https://github.com/owner/repo/issues/77\n', stderr: '' });
@@ -312,7 +312,7 @@ describe('parkTopic()', () => {
           cb!(null, { stdout: 'Logged in', stderr: '' });
         } else {
           // getRepoFromRemote: non-GitHub remote
-          cb!(null, { stdout: 'https://gitlab.com/owner/repo.git\n', stderr: '' });
+          cb!(null, { stdout: 'remote.origin.url https://gitlab.com/owner/repo.git\n', stderr: '' });
         }
       },
     );
@@ -333,7 +333,7 @@ describe('parkTopic()', () => {
           cb!(null, { stdout: 'Logged in', stderr: '' });
         } else if (callIndex === 2) {
           // getRepoFromRemote succeeds
-          cb!(null, { stdout: 'git@github.com:owner/repo.git\n', stderr: '' });
+          cb!(null, { stdout: 'remote.origin.url git@github.com:owner/repo.git\n', stderr: '' });
         } else {
           // createGitHubIssue fails
           cb!(new Error('API error'), { stdout: '', stderr: '' });
