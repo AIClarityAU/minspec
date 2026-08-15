@@ -91,6 +91,31 @@ function allRequiredDone(phases: PhaseState): boolean {
 export type ExplicitTerminal = 'archived' | 'superseded' | undefined;
 
 /**
+ * The ONE place a literal `status:` is mapped to its explicit terminal (#1520).
+ *
+ * WHY THIS EXISTS. Every caller of `deriveStatus` has to supply `explicitTerminal`,
+ * and each one used to hand-roll the mapping. Three copies drifted the obvious way:
+ * `scripts/facts.ts` handled both terminals, while `artifact-graph.ts` and
+ * `commands/validate.ts` wrote `status === 'archived' ? 'archived' : undefined` and
+ * silently dropped `superseded`. The two that shipped were the wrong ones — a
+ * superseded spec rendered as `new` in the SPECS pane and read as literal/derived
+ * drift in the validator, because `deriveStatus` fell through to the phase checks
+ * and `allPending` won.
+ *
+ * The type above already documented `superseded` as an explicit terminal that
+ * "slots into the same seam". Nothing enforced it, so the contract was prose and the
+ * callers were the truth. This function makes the type's promise executable: add a
+ * terminal to `ExplicitTerminal` and every caller gets it, because there is only one
+ * mapping left to change.
+ *
+ * Deliberately total over `SpecStatus`: a non-terminal status returns `undefined`,
+ * which is the correct "derive from {phases, approval}" signal.
+ */
+export function explicitTerminalOf(status: SpecStatus | string | undefined): ExplicitTerminal {
+  return status === 'archived' || status === 'superseded' ? status : undefined;
+}
+
+/**
  * Derive the overall spec status — the SINGLE source of truth (SPEC-022 FR-4).
  * Encodes the FR-4 rules table exactly:
  *

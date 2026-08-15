@@ -4,6 +4,7 @@ import {
   getCurrentPhase,
   getSpecStatus,
   deriveStatus,
+  explicitTerminalOf,
   advancePhase,
   skipPhase,
   goBackToPhase,
@@ -684,5 +685,87 @@ describe('SPEC-022 getSpecStatus — preview-only shim (regression)', () => {
     const earlyPhase = makePhases({ specify: 'in-progress' });
     expect(getSpecStatus(earlyPhase)).toBe('specifying'); // legacy preview (current-phase signal)
     expect(deriveStatus(earlyPhase, 'approved', undefined)).toBe('planning');
+  });
+});
+
+// ─── #1520 — one shared explicit-terminal resolver ──────────────────────────
+//
+// Three callers of `deriveStatus` each hand-rolled the literal-status →
+// ExplicitTerminal mapping, and two of them dropped `superseded`. A superseded
+// spec therefore rendered as `new` in the SPECS pane and read as literal/derived
+// drift in the validator, because `deriveStatus` fell through to the phase checks
+// and `allPending` won.
+//
+// The behavioural assertions come first on purpose. A source-text guard alone is
+// what let the inert `vi.setConfig` survive for months (#1399): it proved the
+// detector detects, never that the mechanism works. The last test here is the
+// textual backstop, and it is explicitly the WEAKEST of the three.
+describe('explicitTerminalOf — the single mapping (#1520)', () => {
+  const TERMINALS = ['archived', 'superseded'] as const;
+
+  it.each(TERMINALS)('maps %s to itself', (t) => {
+    expect(explicitTerminalOf(t)).toBe(t);
+  });
+
+  it.each(['new', 'specifying', 'planning', 'implementing', 'done'] as const)(
+    'maps the non-terminal %s to undefined, so status derives from {phases, approval}',
+    (s) => {
+      expect(explicitTerminalOf(s)).toBeUndefined();
+    },
+  );
+
+  it('tolerates absent/unknown literals without inventing a terminal', () => {
+    expect(explicitTerminalOf(undefined)).toBeUndefined();
+    expect(explicitTerminalOf('')).toBeUndefined();
+    expect(explicitTerminalOf('implmenting')).toBeUndefined(); // the #115 typo shape
+  });
+
+  // THE regression. Pre-fix, `superseded` resolved to undefined, so an all-pending
+  // spec derived `new` — the SPECS pane showed a superseded spec as brand new.
+  it.each(TERMINALS)(
+    'a %s spec derives that terminal even when every phase is pending (INV-6)',
+    (t) => {
+      const pending = createInitialPhases();
+      expect(deriveStatus(pending, 'approved', explicitTerminalOf(t))).toBe(t);
+      // and regardless of approval — a terminal is a human act, never inferred
+      expect(deriveStatus(pending, 'unapproved', explicitTerminalOf(t))).toBe(t);
+    },
+  );
+
+  it('a terminal outranks phases that would otherwise derive done', () => {
+    const allDone = makePhases({
+      specify: 'done', clarify: 'done', plan: 'done', tasks: 'done', implement: 'done',
+    });
+    expect(deriveStatus(allDone, 'approved', undefined)).toBe('done');
+    expect(deriveStatus(allDone, 'approved', explicitTerminalOf('superseded'))).toBe('superseded');
+  });
+
+  // Weakest of the three, and only meaningful because the behavioural tests above
+  // pin the semantics: catch a NEW hand-rolled copy before it can drift again.
+  it('no caller hand-rolls the mapping (the drift that caused this)', async () => {
+    const fs = await import('fs');
+    const path = await import('path');
+    const roots = ['packages/minspec/src', 'scripts'];
+    const repo = path.resolve(__dirname, '../../..');
+    const offenders: string[] = [];
+    const walk = (d: string): void => {
+      for (const e of fs.readdirSync(d, { withFileTypes: true })) {
+        const f = path.join(d, e.name);
+        if (e.isDirectory()) { if (e.name !== 'node_modules') walk(f); continue; }
+        if (!f.endsWith('.ts')) continue;
+        if (f.endsWith(path.join('lib', 'lifecycle.ts'))) continue; // definition site
+        const src = fs.readFileSync(f, 'utf-8');
+        // A ternary testing a status against a terminal literal — the shape all
+        // three copies had. lifecycle.ts is skipped above because it is the
+        // DEFINITION site: `explicitTerminalOf`'s own `||` chain ends in
+        // `=== 'superseded' ? status : undefined`, which matches this pattern, and
+        // so does the docstring quoting the bug. This guard is about CALLERS.
+        if (/===\s*'(?:archived|superseded)'\s*\?/.test(src)) {
+          offenders.push(path.relative(repo, f));
+        }
+      }
+    };
+    for (const r of roots) walk(path.join(repo, r));
+    expect(offenders, `hand-rolled ExplicitTerminal mapping — call explicitTerminalOf() instead`).toEqual([]);
   });
 });
