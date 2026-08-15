@@ -1,5 +1,5 @@
 ---
-id: SPEC-052
+id: SPEC-063
 type: requirements
 status: specifying
 tier: T3
@@ -104,7 +104,7 @@ invisible from a file tree).
 - **FR-2 — Per-level preview before any destructive action.** Each level, before executing,
   shows the **enumerated list of exactly what it will delete, strip, or change on the
   server**, grouped by the A–I rows, so the user acts on a visible artifact — never a vague
-  "remove MinSpec? [y/N]" ([HITL approval UX](../../../docs/decisions/) — act on an
+  "remove MinSpec? [y/N]" ([HITL approval UX](../../../docs/decisions/DR-062.md) — act on an
   enumerated artifact). Level 3's preview lists every real-work path (approvals/specs/
   decisions) individually.
 - **FR-3 — Server-side removal is HITL + fail-safe + honest.** Ruleset (B) and label (D)
@@ -184,7 +184,7 @@ invisible from a file tree).
   preview lists exactly the artifacts the run will touch (no more, no fewer).
 - **INV-8 — Keyboard-reachable + visible.** The command and its per-level confirmations have
   a keyboard path and show their keybinding; confirmations are non-modal over a visible
-  artifact, never a focus-stealing modal ([HITL approval UX](../../../docs/decisions/)).
+  artifact, never a focus-stealing modal ([HITL approval UX](../../../docs/decisions/DR-062.md)).
 - **INV-9 — Local-only git config.** FR-5's `core.hooksPath` unset operates on the repo-local
   config only; `git config --global` is never invoked (invariant #3 — the global config did
   not opt in).
