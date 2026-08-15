@@ -218,3 +218,73 @@ describe('#1305/#1307 — completion and crash label writes actually execute', (
     expect(call).toContain('needs-human-review');
   });
 });
+
+describe('#1347 (T3) — a re-triage to a dispatchable verdict clears what dispatch countermands', () => {
+  // #1305/#1307 added `agent-done` and `agent-escalated` to dispatch's countermand
+  // set, but triage's SUPERSEDED lists were never mirrored. So a deliberate
+  // re-triage back to `agent-ready` left the completion/escalation stamp in place,
+  // and dispatch refused forever: the issue could never be worked again by any
+  // route. triage-inbox.sh's own comment names this exact class ("a verdict that
+  // the stale hold label then vetoes forever") — the new labels just never joined.
+  //
+  // This drives the REAL round-trip across both scripts rather than asserting on
+  // either one's source: compute what triage would strip, apply it, then ask the
+  // dispatch gate whether the surviving set is dispatchable.
+  const TRIAGE = path.join(SCRIPTS, 'triage-inbox.sh');
+
+  /** Run triage-inbox.sh's own SUPERSEDED case block for a verdict. */
+  function supersededFor(verdict: string): string[] {
+    const src = fs.readFileSync(TRIAGE, 'utf-8');
+    const start = src.indexOf('  case "$LABEL" in');
+    const end = src.indexOf('esac', start);
+    if (start < 0 || end < 0) {
+      throw new Error(
+        'Could not extract the SUPERSEDED case block from triage-inbox.sh — markers ' +
+          'moved. Fix this extractor rather than deleting the test: without it, the ' +
+          'triage/dispatch label coupling has no cross-script check at all.',
+      );
+    }
+    const block = src.slice(start, end + 'esac'.length);
+    const out = execFileSync(
+      'bash',
+      ['-c', `LABEL="${verdict}"\n${block}\nprintf '%s' "$SUPERSEDED"`],
+      { encoding: 'utf-8' },
+    );
+    return out.split(',').filter(Boolean);
+  }
+
+  /** Labels left on the issue after triage stamps `verdict` over `existing`. */
+  function afterTriage(existing: string[], verdict: string): string {
+    const stripped = new Set(supersededFor(verdict));
+    return [...existing.filter((l) => !stripped.has(l)), verdict].join(',');
+  }
+
+  for (const verdict of ['agent-ready', 'agent-ready-specify']) {
+    for (const stamp of ['agent-done', 'agent-escalated']) {
+      it(`re-triage to ${verdict} clears ${stamp}, so dispatch is not vetoed`, () => {
+        expect(supersededFor(verdict)).toContain(stamp);
+        // Pin the refusal CLASS, not the exit code. `readyCheck` deliberately passes
+        // an empty verdict record, so the gate still refuses here — but it must
+        // refuse as `[no-verdict]`, which a real triage run fixes by minting one,
+        // NOT as `[countermanded]`, which nothing can clear and which is the
+        // permanent veto this bug created. Pre-fix this reads `[countermanded]`.
+        const { reason } = readyCheck(afterTriage([stamp, 'role:dev'], verdict));
+        expect(reason).toContain('[no-verdict]');
+        expect(reason).not.toContain('[countermanded]');
+      });
+    }
+  }
+
+  it('does NOT clear agent-quarantined — quarantine is a human act that survives re-triage', () => {
+    // The counterpart property: triage must clear agent-RUN outcomes, never a human
+    // quarantine. Without this, "mirror the countermand set" would be over-applied
+    // and re-triage would silently launder a quarantine.
+    expect(supersededFor('agent-ready')).not.toContain('agent-quarantined');
+    const { ok, reason } = readyCheck(afterTriage(['agent-quarantined', 'role:dev'], 'agent-ready'));
+    expect(ok).toBe(false);
+    // Pin the class here too: refusing as `[no-verdict]` would satisfy `ok === false`
+    // while the quarantine had in fact been laundered away.
+    expect(reason).toContain('[countermanded]');
+    expect(reason).toContain('agent-quarantined');
+  });
+});
