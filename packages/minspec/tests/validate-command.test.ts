@@ -35,6 +35,9 @@ vi.mock('../src/lib/config', async (importOriginal) => ({
 
 vi.mock('../src/lib/spec-validator', () => ({
   validateSpec: vi.fn(),
+  // #1317: approve.ts binds this import at module load, so any suite whose graph
+  // reaches it needs the export present even when it never exercises the gate.
+  violationsIntroducedByApproval: vi.fn(() => []),
 }));
 
 vi.mock('../src/lib/epic-manager', () => ({

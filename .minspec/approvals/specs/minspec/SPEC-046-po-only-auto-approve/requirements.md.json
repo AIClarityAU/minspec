@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-046-po-only-auto-approve/requirements.md",
+  "specHash": "67a67a78c765412d04d35b34ca191e07cbaea0833286f61290c63cd97823c45f",
+  "approvedAt": "2026-08-07T02:20:34.210Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "d1d44741175197b8bc961c8e292c52a8f8b9f923"
+}

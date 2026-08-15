@@ -109,6 +109,13 @@ packages/minspec/test-fixtures/workspace/.minspec/generated-hashes.json
 # Auto-drain opt-in (#239) — personal/machine-local, never inherited by teammates
 .minspec/auto-drain
 
+# Shadow-triage measurement log (#1338) — append-only JSONL written by
+# scripts/shadow-triage.sh, one row per triaged issue. Machine-local instrument
+# output, never committed: it is a per-operator measurement of a third-party model,
+# not a shared artifact, and it carries issue numbers + verdicts that would otherwise
+# turn every drain run into a diff.
+.minspec/shadow-triage.jsonl
+
 # ScroogeLLM content lives in the private scroogellm repo, never in public MinSpec (DR-027).
 # Gate: keep scrooge assets/site out of public history even if dropped into this tree.
 sites/scroogellm.com/

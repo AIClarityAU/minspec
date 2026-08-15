@@ -91,14 +91,15 @@ describe('dispatch-issue.sh — docs-corpus auto-merge exclusion (#833)', () => 
 
   describe('ARMS auto-merge (exit 1) — code / non-corpus paths', () => {
     for (const p of [
-      'scripts/dispatch-issue.sh',
       'packages/minspec/src/lib/classifier.ts',
       'packages/minspec/tests/foo.test.ts',
-      '.github/workflows/ai-review.yml',
       'package.json',
       'tsconfig.json',
       'packages/minspec/README.md', // NESTED *.md is not top-level
       'specifications/foo.md', // not specs/
+      // NB `scripts/dispatch-issue.sh` and `.github/workflows/ai-review.yml` used to
+      // sit here as non-corpus paths; since #1264 they hold via the MACHINERY mandate
+      // — see dispatch-automerge-machinery-exclusion.test.ts.
     ]) {
       it(`arms: ${p}`, () => {
         const r = classify(p + '\n');

@@ -18,6 +18,11 @@ import { describe, it, expect } from 'vitest';
 import * as path from 'path';
 import * as fs from 'fs';
 import { execFileSync } from 'child_process';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #1285: spawns real child processes per assertion — 5s default is a load metric,
+// not a hang signal. Enforced by shell-timeout-coverage.test.ts.
+useShellTimeout();
 
 const SCRIPT = path.resolve(__dirname, '../../../scripts/approve-on-label.sh');
 const ACTOR = 'harvest316';

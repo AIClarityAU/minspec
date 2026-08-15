@@ -155,7 +155,12 @@ export interface DrAmendmentGap {
   readonly source: string;
   /** The DR it claims to change, e.g. `DR-070`. */
   readonly target: string;
-  /** The verb as written: `amends` | `supersedes` | `amendment to`. */
+  /**
+   * How the claim was written, verbatim: either the prose verb (`amends` |
+   * `supersedes` | `amendment to`) or the frontmatter key it came from
+   * (`supersedes` | `supersedes_partial`). It points the reader at the line to
+   * fix, so it is descriptive — never branch on it.
+   */
   readonly relation: string;
   /** Human-readable, single-line explanation with a suggested action. */
   readonly message: string;
@@ -168,6 +173,52 @@ export interface DrAmendmentGap {
  * another DR — and a noisy gate is one that gets switched off.
  */
 const DR_AMENDMENT_RE = /\b(amendment to|amends|supersedes)\s+(DR-\d+)/gi;
+
+/**
+ * Frontmatter keys that state the SAME claim in machine-readable form.
+ *
+ * `DR_AMENDMENT_RE` structurally cannot see these: it requires whitespace after
+ * the verb, and a YAML key is followed by `_partial` or `:`, never a space. So
+ * `supersedes_partial: [DR-076, DR-047]` is a miss, not a mis-parse — and it is a
+ * live one. Three accepted DRs carry such a key today (DR-044 → DR-015, DR-049 →
+ * DR-044, DR-081 → DR-076 + DR-047) and every one was invisible to this gate.
+ *
+ * Matched EXACTLY, never by prefix. `superseded_by:` and `amended_by:` point the
+ * other way — they ARE the acknowledgement, not the claim — so a fuzzy match here
+ * would invert the gate and demand that every amender be acknowledged by the DR it
+ * replaced. `amends:` is deliberately absent: no DR uses it, and an unverified key
+ * in a FATAL gate is how you get the noisy gate the comment above warns about.
+ */
+const DR_AMENDMENT_FRONTMATTER_KEYS = ['supersedes', 'supersedes_partial'] as const;
+
+/**
+ * Read the DR ids out of one raw frontmatter value, as `parseFrontmatterYaml`
+ * hands it over — unparsed, trailing comment and all.
+ *
+ * Same shape as `parseEdgeArray` in `artifact-graph.ts`, on purpose: stopping at
+ * the first `]` is what discards the trailing `# …` note DR-044 and DR-049 both
+ * carry. Those notes NAME OTHER DRs, so mining them would invent a target the
+ * author never claimed — a false FATAL on a real corpus row, blocking every commit.
+ * The bare-scalar form (`supersedes: DR-015`) gets the same treatment via an
+ * explicit comment split.
+ *
+ * Each item yields its FIRST id only. That still accepts `**DR-015**` and
+ * `DR-015 (config only)` — missing those would be the same validator asymmetry
+ * this function exists to close — while never mining `DR-015 (superseded by
+ * DR-020)` for a second target. An item naming no DR at all names no target to
+ * check, so dropping it hides nothing; dangling and malformed refs belong to
+ * Rule 9.
+ */
+function parseAmendmentTargets(raw: string): string[] {
+  const bracket = raw.match(/^\[([^\]]*)\]/);
+  const items = bracket ? bracket[1].split(',') : [raw.split(/\s+#/)[0]];
+  const targets: string[] = [];
+  for (const item of items) {
+    const id = item.match(/\bDR-\d+\b/i);
+    if (id) targets.push(id[0].toUpperCase());
+  }
+  return targets;
+}
 
 /**
  * Report ACCEPTED decisions whose amendment was never carried out.
@@ -194,6 +245,14 @@ const DR_AMENDMENT_RE = /\b(amendment to|amends|supersedes)\s+(DR-\d+)/gi;
  * id anywhere. The rule proves a link was made, never that the prose is correct —
  * it cannot, and pretending otherwise would be the false-signpost defect it exists
  * to prevent.
+ *
+ * Claims are read from TWO places: prose verbs, and the `supersedes` /
+ * `supersedes_partial` frontmatter keys the prose pattern structurally cannot see
+ * (see `DR_AMENDMENT_FRONTMATTER_KEYS`). Both funnel through one `record` closure,
+ * so the existence check, the acknowledgement check, the dedupe key and the message
+ * have a single implementation — a DR stating the same claim in both places reports
+ * ONCE, because the dedupe key deliberately omits the relation. Prose is read first,
+ * so when a pair is claimed both ways the human sentence's verb is what gets shown.
  *
  * Pure, offline, Tier-0 (DR-004): reads files, no network, no AI.
  *
@@ -228,34 +287,31 @@ export function validateDrAmendments(decisionsDir: string): DrAmendmentGap[] {
   for (const [source, body] of [...bodies].sort(([a], [b]) => a.localeCompare(b))) {
     if (!/^status:\s*accepted\s*$/m.test(body)) continue;
 
-    DR_AMENDMENT_RE.lastIndex = 0;
-    let m: RegExpExecArray | null;
-    while ((m = DR_AMENDMENT_RE.exec(body)) !== null) {
-      const relation = m[1].toLowerCase();
-      const target = m[2].toUpperCase();
-      if (target === source) continue;               // self-reference, not an amendment
-
-      // ATTRIBUTION: "X supersedes Y" written inside DR-Z is DR-Z *describing* X, not
-      // DR-Z superseding Y. Real instance — DR-024 contains "DR-022 supersedes DR-020
-      // only on its own acceptance". Without this the gate would demand DR-020
-      // acknowledge DR-024, which is simply not what the sentence says. It is green
-      // today only by coincidence (DR-020 happens to mention DR-024), and a FATAL gate
-      // must not rest on a coincidence.
-      const preceding = body.slice(Math.max(0, m.index - 24), m.index);
-      const subject = preceding.match(/(DR-\d+)[*_\s]*$/i);
-      if (subject && subject[1].toUpperCase() !== source) continue;
+    /**
+     * Record one claim, wherever it was written. Prose and frontmatter both funnel
+     * through here, so the self-reference test, the existence test, the acknowledgement
+     * test, the dedupe key and the message are ONE implementation — a DR stating the
+     * same claim in both places yields one gap, because `${source}->${target}` omits the
+     * relation. Two parallel copies would each dedupe only against themselves.
+     *
+     * Must never `exec` DR_AMENDMENT_RE: that regex is `/g`, its `lastIndex` is shared
+     * module state, and the caller below is mid-iteration over it. A future edit adding
+     * a scan here would silently make the prose loop skip matches.
+     */
+    const record = (target: string, relation: string): void => {
+      if (target === source) return;                 // self-reference, not an amendment
 
       const targetBody = bodies.get(target);
-      if (targetBody === undefined) continue;        // dangling ref — Rule 9 owns that
+      if (targetBody === undefined) return;          // dangling ref — Rule 9 owns that
 
       // Does the target acknowledge the source AT ALL? `source` is `DR-<digits>` by
       // construction above, so it carries no regex metacharacters — escaped anyway so
       // the safety does not depend on a derivation two screens away staying that way.
       const escaped = source.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-      if (new RegExp(`\\b${escaped}\\b`).test(targetBody)) continue;
+      if (new RegExp(`\\b${escaped}\\b`).test(targetBody)) return;
 
       const key = `${source}->${target}`;
-      if (seen.has(key)) continue;
+      if (seen.has(key)) return;
       seen.add(key);
 
       gaps.push({
@@ -269,6 +325,37 @@ export function validateDrAmendments(decisionsDir: string): DrAmendmentGap[] {
           `actually changes — say what changed and what still stands — or reword ${source} ` +
           `if it does not in fact change ${target}.`,
       });
+    };
+
+    DR_AMENDMENT_RE.lastIndex = 0;
+    let m: RegExpExecArray | null;
+    while ((m = DR_AMENDMENT_RE.exec(body)) !== null) {
+      // ATTRIBUTION: "X supersedes Y" written inside DR-Z is DR-Z *describing* X, not
+      // DR-Z superseding Y. Real instance — DR-024 contains "DR-022 supersedes DR-020
+      // only on its own acceptance". Without this the gate would demand DR-020
+      // acknowledge DR-024, which is simply not what the sentence says. It is green
+      // today only by coincidence (DR-020 happens to mention DR-024), and a FATAL gate
+      // must not rest on a coincidence.
+      //
+      // Prose only. A key in DR-X's own frontmatter is DR-X's own claim by construction:
+      // you cannot write another DR's frontmatter from your file, so the third-party form
+      // this guards against has no frontmatter equivalent.
+      const preceding = body.slice(Math.max(0, m.index - 24), m.index);
+      const subject = preceding.match(/(DR-\d+)[*_\s]*$/i);
+      if (subject && subject[1].toUpperCase() !== source) continue;
+
+      record(m[2].toUpperCase(), m[1].toLowerCase());
+    }
+
+    // Frontmatter claims, read SECOND so a pair claimed both ways keeps the prose verb.
+    const fm = body.match(FRONTMATTER_RE);
+    if (fm) {
+      const fields = parseFrontmatterYaml(fm[1]);
+      for (const key of DR_AMENDMENT_FRONTMATTER_KEYS) {
+        const raw = fields[key];
+        if (raw === undefined) continue;
+        for (const target of parseAmendmentTargets(raw)) record(target, key);
+      }
     }
   }
 

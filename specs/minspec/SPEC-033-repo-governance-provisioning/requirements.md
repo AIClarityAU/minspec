@@ -1,7 +1,7 @@
 ---
 id: SPEC-033
 type: requirements
-status: specifying
+status: implementing
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness — guardrails a shared repo must carry
@@ -40,7 +40,7 @@ relates_to: [SPEC-024, SPEC-030, SPEC-034]  # SPEC-024 auto-merge gate consumes 
 > unprotected branch.
 
 **Date:** 2026-07-07 (clarify refinements applied 2026-07-14 — [#703](https://github.com/AIClarityAU/minspec/issues/703))
-**Status:** Specifying (reopened for the #703 clarify refinements; re-approval pending — the prior approval was against pre-refinement bytes)
+**Status:** Implementing (reopened for the #703 clarify refinements; re-approval pending — the prior approval was against pre-refinement bytes)
 **Triggered by:** [#557](https://github.com/AIClarityAU/minspec/issues/557) — "provision repo governance (branch protection + ai-review) on init/refresh — detect & offer to fix."
 **Builds on:** [DR-037](../../../docs/decisions/DR-037.md) — the managed-region template mechanism this rides · the ai-review workflow set ([#342](https://github.com/AIClarityAU/minspec/issues/342) / [#428](https://github.com/AIClarityAU/minspec/issues/428) / [#480](https://github.com/AIClarityAU/minspec/issues/480)), propagated **unchanged**, not rewritten.
 **Relates:** [SPEC-024](../SPEC-024-auto-merge-eligibility/requirements.md) — the auto-merge gate that only becomes meaningful once the `ai-review:pass` label it consumes is actually produced on every repo, which today it is not.
