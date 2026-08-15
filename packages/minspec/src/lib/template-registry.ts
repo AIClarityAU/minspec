@@ -893,9 +893,15 @@ fi
 # if it is not installed we warn and continue (graceful degradation) rather than
 # block — a missing optional tool must never wedge a commit.
 if command -v gitleaks >/dev/null 2>&1; then
-  if ! gitleaks protect --staged --redact --no-banner >/dev/null 2>&1; then
+  # CAPTURE, never discard (#1538). The previous \`>/dev/null 2>&1\` threw the finding
+  # away one line before telling the reader to review it, so the block carried no
+  # evidence and MINSPEC_GATE_OFF=1 was the only visible way forward — a fail-closed
+  # gate that taught bypassing itself. \`--redact\` masks the secret VALUE, so what
+  # surfaces is the rule id, file and line: the actionable part, already safe to show.
+  if ! minspec_gitleaks_out=$(gitleaks protect --staged --redact --no-banner -v 2>&1); then
+    printf '%s\\n' "$minspec_gitleaks_out" >&2
     echo "✗ MinSpec gate: gitleaks found a potential secret in the staged changes." >&2
-    echo "  Review the finding above; remove the secret or add a gitleaks allowlist entry." >&2
+    echo "  The finding is printed above; remove the secret or add a gitleaks allowlist entry." >&2
     echo "  Bypass (rare): MINSPEC_GATE_OFF=1 git commit ..." >&2
     exit 1
   fi
