@@ -45,6 +45,11 @@ Anything waiting on the human — a decision, a credential, a manual step, a mer
 - **Again at the end of every turn.** Close the response with a `**Your turn**` block repeating every still-pending item, one ➡️ line each. Nothing pending → omit the block; an empty one teaches the reader to skip it.
 - **The heading carries no ➡️.** Only action items do, so the number of arrows equals the number of things waiting on the human — countable at a glance, with no off-by-one from the title.
 - **Reserve ➡️ for this.** Never decorate ordinary prose with it, so scanning for ➡️ never returns a false hit.
+- **Cite a pull request by number, not by URL.** Write `#1231 short title`. A bare
+  `https://` link always opens a browser, which throws the reader out of the editor
+  they are working in; a number is resolved in place by the editor's own pull-request
+  integration. Say the state you already observed alongside it, so the reader can
+  decide without opening anything at all.
 - **Give each item a reply key.** One or two characters, restated on the line every turn so the human never scrolls back to find one: `m` merge · `c` close · `d` diff/details · `r` re-review · `s` skip.
 - **Every choice carries a recommendation and its cost.** When an item asks the human to *decide*, name the option you recommend and, in the same breath, the primary downside or risk of the option you are recommending. A menu with no recommendation hands the analysis back to the human; a recommendation with no stated cost is advocacy, not advice. Mark it `(rec)` on the option and follow with one clause naming what it costs. This applies wherever a decision is put to a human — the `**Your turn**` block **and** the body of any issue, PR, or DR that asks them to choose.
 
@@ -52,7 +57,7 @@ The same block lists every pull request this session opened that is still unmerg
 
 ```
 **Your turn**
-➡️ [#1231 dispatch env scrub](https://github.com/OWNER/REPO/pull/1231) — ai-review:pass · needs-review — `m` merge · `c` close · `d` diff
+➡️ #1231 dispatch env scrub — ai-review:pass · needs-review — `m` merge · `c` close · `d` diff
 ➡️ Name the new hook — `a` agent-context **(rec)**, matches the existing `agent-` prefix but reads oddly for session-scoped state · `b` session-context
 ```
 
