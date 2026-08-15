@@ -170,3 +170,48 @@ describe('#1322 — an open agent-done issue is reconciled against its PR', () =
     expect(ghCalls()).not.toContain('issue close');
   });
 });
+
+describe('#1352 (T3) — the liveness witness actually matches a live dispatch', () => {
+  // `pgrep -f` matches with ERE. The pattern shipped here was BRE-escaped, so `\+`,
+  // `\(`, `\|` and `\)` were LITERAL characters in ERE and the pattern could never
+  // match a real command line: `dispatch_alive_for` returned false for every input,
+  // and witness 2 of the reaper was dead. A live dispatch >6h old could be reaped.
+  //
+  // The existing "does NOT reap a claim while a dispatch is alive" test above does
+  // not catch this: with the witness dead it falls through to an unreadable timeline
+  // and declines to reap for a DIFFERENT reason, so it stays green either way. This
+  // drives the witness directly, through the `--dispatch-alive` seam, so it can only
+  // pass when the pattern genuinely matches.
+  function spawnFakeDispatch(issue: string): ChildProcess {
+    const fake = path.join(tmp, 'dispatch-issue.sh');
+    fs.writeFileSync(fake, '#!/usr/bin/env bash\nsleep 30\n', { mode: 0o755 });
+    const kid = spawn('bash', [fake, issue], { stdio: 'ignore' });
+    kids.push(kid);
+    execFileSync('bash', ['-c', 'sleep 0.4']); // let it reach the process table
+    return kid;
+  }
+
+  function dispatchAlive(issue: string): boolean {
+    try {
+      execFileSync('bash', [DRAIN, '--dispatch-alive', issue], { stdio: 'ignore' });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  it('reports ALIVE for an issue whose dispatch is running', () => {
+    spawnFakeDispatch('885');
+    expect(dispatchAlive('885')).toBe(true);
+  });
+
+  it('reports DEAD for an issue with no dispatch running', () => {
+    spawnFakeDispatch('885');
+    expect(dispatchAlive('774')).toBe(false);
+  });
+
+  it('stays anchored — a live 885 is not a live 88 (prefix hazard)', () => {
+    spawnFakeDispatch('885');
+    expect(dispatchAlive('88')).toBe(false);
+  });
+});

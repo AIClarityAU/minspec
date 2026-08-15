@@ -479,7 +479,11 @@ claim_applied_at() {
 # `dispatch-issue.sh 88` cannot match issue 885, and matched against the process
 # table rather than any string this script builds, so it cannot match itself.
 dispatch_alive_for() {
-  pgrep -f "dispatch-issue\.sh[[:space:]]\+$1\([[:space:]]\|\$\)" >/dev/null 2>&1
+  # `pgrep -f` matches with ERE, NOT BRE. In ERE `\+`, `\(`, `\|` and `\)` are the
+  # LITERAL characters +, (, | and ) — a BRE-escaped pattern here matches nothing at
+  # all, which reads exactly like "no dispatch is running" and silently kills this
+  # witness (#1352). Keep these unescaped; `\.` is correct in both dialects.
+  pgrep -f "dispatch-issue\.sh[[:space:]]+$1([[:space:]]|$)" >/dev/null 2>&1
 }
 
 # #1306 — release `agent-running` claims that no dispatch is holding.
@@ -841,6 +845,13 @@ case "${1:-}" in
   --session-alive)
     # Pure seam: is the session (or any pid) still alive?
     if session_alive "${2:?Usage: drain-inbox.sh --session-alive <pid>}"; then exit 0; else exit 1; fi
+    ;;
+  --dispatch-alive)
+    # Pure seam: is a dispatch for <issue> genuinely running? This is witness 2 of
+    # the reaper, so it gets driven against a REAL process rather than asserted on
+    # source text — a pattern that silently never matches is indistinguishable from
+    # "nothing is running", and reads as a dead issue rather than a broken witness.
+    if dispatch_alive_for "${2:?Usage: drain-inbox.sh --dispatch-alive <issue>}"; then exit 0; else exit 1; fi
     ;;
   --should-continue)
     # Pure seam: combined loop guard = session-alive AND before the lifetime cap.
