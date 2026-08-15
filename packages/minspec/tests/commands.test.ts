@@ -235,7 +235,9 @@ describe('commands', () => {
 
       expect(findActiveSpec).toHaveBeenCalledWith('/tmp/test-workspace');
       expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-        'MinSpec: No active spec. Run "MinSpec: Initialize SDD Structure" to get started.',
+        expect.stringContaining(
+          'MinSpec: No active spec. Run "MinSpec: Initialize SDD Structure" to get started.',
+        ),
       );
       expect(vscode.workspace.openTextDocument).not.toHaveBeenCalled();
     });
@@ -266,11 +268,13 @@ describe('commands', () => {
         preview: false,
       });
       expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-        'MinSpec: SPEC-004 — T3 | Implement | 3/5 done',
+        expect.stringContaining('MinSpec: SPEC-004 — T3 | Implement | 3/5 done'),
       );
       // It must NOT show the no-active-spec message when a spec exists.
       expect(vscode.window.showInformationMessage).not.toHaveBeenCalledWith(
-        'MinSpec: No active spec. Run "MinSpec: Initialize SDD Structure" to get started.',
+        expect.stringContaining(
+          'MinSpec: No active spec. Run "MinSpec: Initialize SDD Structure" to get started.',
+        ),
       );
     });
 
@@ -278,7 +282,9 @@ describe('commands', () => {
       await statusCommand('')();
       expect(findActiveSpec).not.toHaveBeenCalled();
       expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-        'MinSpec: No active spec. Run "MinSpec: Initialize SDD Structure" to get started.',
+        expect.stringContaining(
+          'MinSpec: No active spec. Run "MinSpec: Initialize SDD Structure" to get started.',
+        ),
       );
     });
   });

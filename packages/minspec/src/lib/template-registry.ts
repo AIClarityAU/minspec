@@ -1280,6 +1280,30 @@ minspec_shell_gate() {
           gate_fail=1
         fi
         ;;
+      docs/decisions/DR-*.md)
+        # Decision records are approvables too, and were ungated until now: a DR
+        # created by the MinSpec command carried frontmatter, one written by hand
+        # carried none, and nothing noticed. Observed in a real project where
+        # DR-001 (command-created) had it and DR-002/DR-003 (hand-written) had no
+        # frontmatter at all — so the register held three records of which only
+        # one was machine-readable.
+        #
+        # Same asymmetry the spec gate above already closes, one artifact class
+        # over: the tooling validated what it created and never asserted the
+        # class as a whole.
+        #
+        # The path is literal, matching the \\\`specs/\\\` case above — this hook is a
+        # managed region rendered without template context, so a project that has
+        # relocated its decisions directory is not covered. That is a known limit
+        # of both gates, not a new one.
+        if ! git show ":$f" 2>/dev/null | awk '
+          /^---[[:space:]]*$/ { fence++; next }
+          fence==1 && /^id:[[:space:]]*DR-[0-9]+/ { found=1 }
+          END { exit(found?0:1) }'; then
+          echo "✗ MinSpec gate: $f missing \\\`id: DR-NNN\\\` frontmatter." >&2
+          gate_fail=1
+        fi
+        ;;
     esac
   done
   for f in $staged; do
@@ -1404,6 +1428,7 @@ const VALIDATE_PY = `"""MinSpec mid-tier validator (DR-037 / #246).
 
 Language-agnostic twin of the Node validate-frontmatter core FATAL checks:
   - specs/**/*.md must have \`id: SPEC-NNN\` frontmatter
+  - docs/decisions/DR-*.md must have \`id: DR-NNN\` frontmatter
   - docs/domain/*.md must have \`type: domain\` frontmatter
 
 Frontmatter parsing mirrors the Node validator exactly (first --- ... --- block,
@@ -1417,6 +1442,7 @@ import sys
 
 FM_RE = re.compile(r"^---\\n(.*?)\\n---", re.DOTALL)
 SPEC_ID_RE = re.compile(r"^SPEC-\\d+$")
+DR_ID_RE = re.compile(r"^DR-\\d+$")
 
 
 def repo_root():
@@ -1488,7 +1514,11 @@ def main():
         targets = staged_files(root)
         reader = lambda rel: staged_content(root, rel)
     else:
-        targets = all_md(root, "specs") + all_md(root, os.path.join("docs", "domain"))
+        targets = (
+            all_md(root, "specs")
+            + all_md(root, os.path.join("docs", "decisions"))
+            + all_md(root, os.path.join("docs", "domain"))
+        )
         def reader(rel):
             try:
                 with open(os.path.join(root, rel), "r", encoding="utf-8") as fh:
@@ -1502,7 +1532,13 @@ def main():
         norm = rel.replace(os.sep, "/")
         is_spec = norm.startswith("specs/") and norm.endswith(".md")
         is_domain = norm.startswith("docs/domain/") and norm.endswith(".md")
-        if not (is_spec or is_domain):
+        # A decision record, not the register's INDEX.md (a listing with no id).
+        is_dr = (
+            norm.startswith("docs/decisions/")
+            and norm.endswith(".md")
+            and os.path.basename(norm).startswith("DR-")
+        )
+        if not (is_spec or is_dr or is_domain):
             continue
 
         content = reader(rel)
@@ -1517,6 +1553,14 @@ def main():
             if not SPEC_ID_RE.match(spec_id):
                 sys.stderr.write(
                     "FAIL " + norm + ": missing or invalid \`id: SPEC-NNN\` frontmatter\\n"
+                )
+                errors += 1
+
+        if is_dr:
+            dr_id = fm.get("id", "").split("#", 1)[0].strip()
+            if not DR_ID_RE.match(dr_id):
+                sys.stderr.write(
+                    "FAIL " + norm + ": missing or invalid \`id: DR-NNN\` frontmatter\\n"
                 )
                 errors += 1
 
