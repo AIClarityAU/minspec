@@ -37,7 +37,14 @@ const mockReadSpecFile = vi.fn(() => ({
 }));
 const mockWriteSpec = vi.fn(() => '');
 
-vi.mock('../src/lib/spec', () => ({
+// PARTIAL mock via importOriginal, not a hand-listed subset. The subset form breaks the
+// moment ANY module in the graph imports something from './spec' that the list omits —
+// which is what happened when the SPEC-051 guard pulled spec-validator into approval.ts,
+// and the suite failed on `SPEC_STATUSES` rather than on anything this test is about.
+// Spreading the real module keeps the two intentional stubs and leaves every other export
+// genuine, so an unrelated import can no longer knock this file over.
+vi.mock('../src/lib/spec', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/spec')>()),
   readSpecFile: (...args: unknown[]) => mockReadSpecFile(...args),
   writeSpec: (...args: unknown[]) => mockWriteSpec(...args),
 }));

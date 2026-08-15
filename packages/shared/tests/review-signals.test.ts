@@ -214,3 +214,78 @@ describe('renderReviewSignals — honest 3-signal block', () => {
     expect(lines.length).toBeGreaterThanOrEqual(3);
   });
 });
+
+/**
+ * T3 regression (#1304) — a gate check killed at its time bound must not be
+ * rendered as a verdict on the code.
+ *
+ * Before this, `gate_status` in scripts/dispatch-issue.sh mapped every non-zero
+ * exit to `fail`, so a hung `npm test` that was killed surfaced as
+ * "3. Gate green — failing: test" on PR #1302, whose entire diff was one
+ * markdown file. "We did not find out" is not "it failed".
+ */
+describe('gate signal — timeout is not failure (#1304)', () => {
+  const withGate = (gate: ReviewSignalsInput['gate']): string =>
+    renderReviewSignals({ ...allGreen, gate });
+
+  const gateLine = (out: string): string =>
+    out.split('\n').find((l) => l.includes('Gate green')) ?? '';
+
+  it('renders a timed-out check as a warn, never as failing and never as ✅', () => {
+    const line = gateLine(
+      withGate({ test: 'timeout', lint: 'pass', build: 'pass', validate: 'pass' }),
+    );
+    expect(line).toContain('⚠️');
+    expect(line).not.toContain('✅');
+    // The whole point: a timeout must not be reported as a code failure.
+    expect(line).not.toContain('failing:');
+    expect(line).toContain('timed out');
+    expect(line).toContain('test');
+  });
+
+  it('says the code is neither proven nor faulted when a check timed out', () => {
+    const line = gateLine(
+      withGate({ test: 'timeout', lint: 'pass', build: 'pass', validate: 'pass' }),
+    );
+    expect(line).toMatch(/neither proven nor faulted/);
+  });
+
+  it('still reports a REAL failure as failing when another check merely timed out', () => {
+    const line = gateLine(
+      withGate({ test: 'timeout', lint: 'fail', build: 'pass', validate: 'pass' }),
+    );
+    // A genuine fail outranks a timeout — never soften a real red into a warn.
+    expect(line).toContain('❌');
+    expect(line).toContain('failing:');
+    expect(line).toContain('lint');
+  });
+
+  it('distinguishes a timed-out check from a merely unreported one', () => {
+    const line = gateLine(
+      withGate({ test: 'timeout', lint: 'unknown', build: 'pass', validate: 'pass' }),
+    );
+    expect(line).toContain('timed out');
+    expect(line).toContain('not reported');
+    // Each check appears under the right heading, not lumped together.
+    expect(line.indexOf('timed out')).toBeLessThan(line.indexOf('not reported'));
+  });
+
+  it('leaves the all-pass rendering unchanged (no regression)', () => {
+    const line = gateLine(
+      withGate({ test: 'pass', lint: 'pass', build: 'pass', validate: 'pass' }),
+    );
+    expect(line).toContain('✅');
+    expect(line).toContain('all pass');
+    expect(line).not.toContain('timed out');
+  });
+
+  it('stays deterministic with a timeout present', () => {
+    const gate = {
+      test: 'timeout',
+      lint: 'pass',
+      build: 'pass',
+      validate: 'pass',
+    } as ReviewSignalsInput['gate'];
+    expect(withGate(gate)).toBe(withGate(gate));
+  });
+});

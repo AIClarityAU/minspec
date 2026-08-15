@@ -36,6 +36,11 @@ import { execFileSync } from 'child_process';
 
 import { MANAGED_REGION_TEMPLATES, MINSPEC_HOOKS_DIR, renderManagedFile } from '../src/lib/template-registry';
 import { commitApproval, defaultGitRun } from '../src/lib/approve-commit';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #1285: spawns real child processes per assertion — 5s default is a load metric,
+// not a hang signal. Enforced by shell-timeout-coverage.test.ts.
+useShellTimeout();
 
 const PRE_COMMIT = `${MINSPEC_HOOKS_DIR}/pre-commit`;
 const hookText = () => renderManagedFile(MANAGED_REGION_TEMPLATES.find((t) => t.outputPath === PRE_COMMIT)!);
@@ -66,7 +71,7 @@ interface Scenario {
    * where git itself — not the guard — prevents the commit; see the merge and
    * cherry-pick cases.
    */
-  readonly tsOutcome?: 'committed' | 'failed';
+  readonly tsOutcome?: 'committed' | 'failed' | 'merge-in-progress';
   /** Why this case exists — kept in the failure output. */
   readonly because: string;
 }
@@ -223,21 +228,21 @@ const SCENARIOS: readonly Scenario[] = [
     name: 'mid-merge on the default branch',
     gitDirFiles: ['MERGE_HEAD'],
     blocked: false,
-    // The GUARD must not fire here — and it doesn't. The commit still cannot
-    // land, because git refuses a *partial* (pathspec) commit mid-merge:
-    // `fatal: cannot do a partial commit during a merge.` That is git's rule,
-    // not MinSpec's, and commit-on-approve is pathspec-only by invariant 1
-    // (a bare commit would sweep another session's staged files). Asserting
-    // 'committed' here would be asserting something git forbids. Known
-    // limitation, tracked at #1112.
-    tsOutcome: 'failed',
+    // The BRANCH-DESTINATION guard must not fire here — and it doesn't. The
+    // commit still cannot land as a partial commit, because git refuses one
+    // mid-merge: `fatal: cannot do a partial commit during a merge.` That is
+    // git's rule, not MinSpec's, and commit-on-approve is pathspec-only by
+    // invariant 1 (a bare commit would sweep another session's staged files).
+    // #1112 gives this its own typed outcome rather than degrading to a bare
+    // 'failed' the user cannot act on.
+    tsOutcome: 'merge-in-progress',
     because: 'a merge commit is how a branch legitimately LANDS on main — the guard must not claim otherwise',
   },
   {
     name: 'mid-cherry-pick on the default branch',
     gitDirFiles: ['CHERRY_PICK_HEAD'],
     blocked: false,
-    tsOutcome: 'failed', // same git restriction as merge (#1112)
+    tsOutcome: 'merge-in-progress', // same git restriction as merge (#1112)
     because: 'same reasoning as merge',
   },
   {

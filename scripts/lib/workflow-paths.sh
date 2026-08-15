@@ -1,7 +1,26 @@
 #!/usr/bin/env bash
 # workflow-paths.sh — is this push going to be refused for touching CI workflows?
 #
-# THE PROBLEM (#1120). Agent git pushes authenticate as the `minspec-sdd` GitHub
+# NOW CAPABILITY-PROBING, not premise-based (#1120). This gate used to assume the App
+# lacks `workflows: write` and refuse on that basis. The assumption was true when #1120
+# was filed and later stopped being true, at which point the gate began refusing pushes
+# that would have succeeded — a false refusal, the direction that trains the override
+# reflex until the day the gate is right and gets overridden anyway.
+#
+# `workflow_permission_granted` now asks instead of assuming, so the answer stays
+# correct in BOTH directions: it steps aside while the permission is held, and re-blocks
+# if it is revoked. It fails CLOSED — an unanswerable probe refuses, because a probe that
+# cannot answer must never be read as a yes.
+#
+# HONEST LIMIT on "re-blocks if revoked": a positive verdict is cached for
+# MINSPEC_PERM_TTL (24 h default), so a permission revoked mid-window still yields exit 0
+# until the cache expires, and the server rejects that push instead of this hook. That is
+# a deliberate trade — the alternative is a network call on every workflow push — and it
+# is acceptable only because this guard is ADVISORY: it converts a server rejection into
+# a better local message, it is not an access control. Set MINSPEC_PERM_TTL=0 to probe
+# every time.
+#
+# THE ORIGINAL PROBLEM (#1120). Agent git pushes authenticate as the `minspec-sdd` GitHub
 # App. GitHub treats `.github/workflows/**` as a permission of its own
 # (`workflows: write`) precisely so a compromised App cannot rewrite CI — and
 # `contents: write`, which the App does have, is documented as NOT sufficient.
@@ -149,18 +168,25 @@ workflow_push_refusal() {
   printf '%s\n' "$paths" | sed 's/^/      /' >&2
   echo "" >&2
   echo "  GitHub requires a separate 'workflows: write' permission for" >&2
-  echo "  .github/workflows/** — 'contents: write' is not enough — so this push" >&2
-  echo "  would be rejected by the server after the commit was already made." >&2
+  echo "  .github/workflows/** — 'contents: write' is not enough." >&2
   echo "" >&2
-  echo "  Fix it properly (one-time, org owner):" >&2
-  echo "      Org Settings → Developer settings → GitHub Apps → Edit →" >&2
+  echo "  You are seeing this because the capability probe could NOT confirm the" >&2
+  echo "  installation holds 'workflows: write' — it fails closed, so an" >&2
+  echo "  unanswerable probe refuses rather than guesses. Either the permission is" >&2
+  echo "  genuinely absent, or the probe could not run (no token script, offline," >&2
+  echo "  or MINSPEC_WORKFLOW_PERM_PROBE=0)." >&2
+  echo "" >&2
+  echo "  Check which, before assuming the permission is missing:" >&2
+  echo "      ~/.claude/scripts/gh-app-token.sh --permissions | grep workflows" >&2
+  echo "" >&2
+  echo "  → prints 'workflows=write'  : the probe is broken, not the permission." >&2
+  echo "      Report on AIClarityAU/minspec#1120; MINSPEC_ALLOW_WORKFLOW_PUSH=1" >&2
+  echo "      unblocks you meanwhile." >&2
+  echo "  → prints nothing / 'read'   : the permission really is missing. Grant it" >&2
+  echo "      (Org Settings → Developer settings → GitHub Apps → Edit →" >&2
   echo "      Permissions & events → Repository permissions → Workflows →" >&2
-  echo "      'Read and write', then accept the permission update on the" >&2
-  echo "      installation. See AIClarityAU/minspec#1120." >&2
-  echo "" >&2
-  echo "  Push it now instead:" >&2
-  echo "      push with a human credential that carries the 'workflow' scope," >&2
-  echo "      or split the workflow change into its own human-pushed commit." >&2
+  echo "      'Read and write', then accept it on the installation), or push with" >&2
+  echo "      a human credential carrying the 'workflow' scope." >&2
   echo "" >&2
   echo "  Allow once:      MINSPEC_ALLOW_WORKFLOW_PUSH=1 git push ..." >&2
   echo "  Allow in future: git config minspec.allowWorkflowPush true" >&2
@@ -170,6 +196,60 @@ workflow_push_refusal() {
 workflow_push_allowed() {
   [ "${MINSPEC_ALLOW_WORKFLOW_PUSH:-0}" = "1" ] && return 0
   [ "$(git config --get minspec.allowWorkflowPush 2>/dev/null)" = "true" ]
+}
+
+# ── Capability probe (#1120) ─────────────────────────────────────────────────
+# Exit 0 iff the App installation DEMONSTRABLY holds `workflows: write`, i.e. the
+# push this gate is about to refuse would actually succeed.
+#
+# WHY PROBE AT ALL. The gate's premise — "the App lacks this permission, so the
+# server will reject you after the commit is sealed" — was true when #1120 was filed
+# and is false now. A gate whose premise has silently expired refuses correct work,
+# and every needless override trains the reflex that makes the override worthless on
+# the day the gate is right. Probing keeps the answer correct in BOTH directions: it
+# re-blocks by itself if the permission is ever revoked.
+#
+# TIER-0 POSTURE. MinSpec itself makes no network call; this is dev-time tooling in
+# `scripts/`, not shipped extension code, so the constraint does not apply — but the
+# cost is still paid only where it buys something:
+#   • ONLY where it earns its cost: the hook calls this AFTER workflow-path detection,
+#     so an ordinary push never reaches it (verified by the call site, not asserted —
+#     the first version claimed this while sitting before the detection loop).
+#   • CACHED for MINSPEC_PERM_TTL seconds (default 24 h) in the git dir, so repeated
+#     pushes cost nothing.
+#   • FAILS CLOSED. No token script, no network, malformed output, or any error ⇒
+#     non-zero ⇒ the gate blocks exactly as before. A probe that cannot answer must
+#     never be read as a yes.
+# Opt out entirely with MINSPEC_WORKFLOW_PERM_PROBE=0.
+workflow_permission_granted() {
+  [ "${MINSPEC_WORKFLOW_PERM_PROBE:-1}" = "0" ] && return 1
+
+  local ttl cache now stamp val
+  ttl="${MINSPEC_PERM_TTL:-86400}"
+  cache="$(git rev-parse --git-dir 2>/dev/null)/minspec-workflows-perm" || return 1
+  [ -n "$cache" ] || return 1
+
+  now=$(date -u +%s 2>/dev/null) || return 1
+  if [ -r "$cache" ]; then
+    stamp=$(cut -d' ' -f1 <"$cache" 2>/dev/null)
+    val=$(cut -d' ' -f2 <"$cache" 2>/dev/null)
+    if [ -n "$stamp" ] && [ -n "$val" ] && [ $((now - stamp)) -lt "$ttl" ]; then
+      [ "$val" = "write" ] && return 0 || return 1
+    fi
+  fi
+
+  local script perms
+  script="${MINSPEC_APP_TOKEN_SCRIPT:-$HOME/.claude/scripts/gh-app-token.sh}"
+  [ -x "$script" ] || return 1
+  # `--permissions` reads the installation's granted permissions object. Never infer
+  # this from a response header: X-Accepted-Github-Permissions describes what an
+  # ENDPOINT accepts and reports metadata=read here — the opposite of the truth.
+  perms="$("$script" --permissions 2>/dev/null)" || return 1
+  case "$perms" in
+    *workflows=write*) printf '%s write\n' "$now" >"$cache" 2>/dev/null; return 0 ;;
+    "") return 1 ;;                                   # unparseable ⇒ fail closed
+    *) printf '%s none\n' "$now" >"$cache" 2>/dev/null; return 1 ;;
+  esac
 }
 
 # Test seam: `workflow-paths.sh --check` reads paths on stdin and prints

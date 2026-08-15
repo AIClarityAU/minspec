@@ -59,6 +59,29 @@ provably inert (AC-6, AC-7).
 
 ## Modules
 
+> **Superseded by what shipped (2026-08-12).** The names and the outcome union below are
+> the PLAN. The implementation (#1224, AC-11 in #1404) chose a different and better split,
+> and **the code is the authority** — this section is kept as the record of intent, not as a
+> description of the tree:
+>
+> | Planned here | Shipped |
+> |---|---|
+> | `openLanePr(input, run)` | [`openPullRequest(req)`](../../../packages/minspec/src/lib/approval-pr.ts#L496) |
+> | `LanePrOutcome`, 7 members | [`OpenPrOutcome`](../../../packages/minspec/src/lib/approval-pr.ts#L179), 6 members |
+> | `'not-docs-only'` outcome member | [`laneLabelsFor`](../../../packages/minspec/src/lib/approval-pr.ts#L271) decides the label; [`notifyPrOpened`](../../../packages/minspec/src/commands/commit-on-approve.ts#L535) announces its absence |
+>
+> **Why the shipped split is better.** Folding `not-docs-only` into the outcome union
+> conflates two independent questions — *what happened to the PR* (created? adopted? did
+> `gh` fail, and how?) and *was it eligible for the lane*. They vary independently: a PR can
+> be adopted **and** unlabelled. Keeping them separate means the caller answers the
+> eligibility question with `laneLabelsFor` and the seam stays a thin, label-agnostic
+> `gh pr create` wrapper — which is also what keeps INV-2's two witnesses genuinely
+> independent, since the seam never reasons about docs-ness at all.
+>
+> [tasks.md](./tasks.md) carries the corrected, per-box description with `file:line`
+> citations. Recorded here after #1425's review flagged that fixing only tasks.md left this
+> file describing a seam nobody built.
+
 ### `packages/minspec/src/lib/approval-pr.ts` — NEW, owned here
 
 **Tier-0-shaped: no `vscode` import.** It may spawn `git`/`gh` (so it is not offline-pure),
@@ -187,7 +210,7 @@ The `prompt` notification at
 [commit-on-approve.ts:146-155](../../../packages/minspec/src/commands/commit-on-approve.ts#L146)
 gains a third action, **"Always push from now on"**, beside `Push` / `Not now`. On click:
 
-1. `vscode.workspace.getConfiguration('minspec').update('pushOnApprove', 'always', ConfigurationTarget.Global)` — the **user's own** settings, never the workspace file (DR-071's corollary);
+1. ~~`vscode.workspace.getConfiguration('minspec').update('pushOnApprove', 'always', ConfigurationTarget.Global)`~~ — **superseded by [DR-078](../../../docs/decisions/DR-078.md) (accepted 2026-08-05).** Standing push consent is written **per-project** to `.minspec/preferences.json`, alongside the existing `answeredSignatures` one-time-offer memory — explicitly "Not `ConfigurationTarget.Global`. Not `ConfigurationTarget.Workspace`" (DR-078 §1). A `Global` write is machine-wide config in a repo that did not opt in, which **constitution invariant 3 forbids**. *(Corrected 2026-08-07: this line was authored 34 minutes AFTER DR-078 was accepted, so it re-introduced the ruling the DR had just overturned. `requirements.md:75` still carries the same superseded wording but is hash-locked — DR-078's Consequences §1 records that correction as the one genuinely expensive edit.)*
 2. proceed with the push for this approval, so the click is not also a decline.
 
 **Shown once, then never again.** Reuses the #883 model already built in

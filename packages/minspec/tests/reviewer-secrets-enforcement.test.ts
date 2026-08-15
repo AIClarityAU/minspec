@@ -11,17 +11,25 @@
  * yet BINDS that constant to `ai-review.yml`'s actual `secrets.*` guard, so a rename in
  * the workflow (or its shipped copy) would re-open the drift with the probe none the
  * wiser. This test closes that: a mismatch fails CI, not an LLM reviewer.
- *   1. `ai-review.yml` consumes EXACTLY {@link REVIEWER_SECRETS} (both directions).
+ *   1. `ai-review.yml` consumes EXACTLY the declared secrets — {@link REVIEWER_SECRETS}
+ *      (gating) plus {@link REVIEWER_OPTIONAL_SECRETS} (referenced, not gating) — in
+ *      both directions.
  *   2. the shipped (embedded) AI_REVIEW_WORKFLOW copy the vsix scaffolds into other
  *      repos references the same set — so an initialized repo can produce its review.
- *   3. `probeReviewerConfigured` requires the WHOLE set — omitting ANY one → false,
- *      asserted as a property over the constant so it auto-covers a future 4th secret.
+ *   3. `probeReviewerConfigured` requires the WHOLE gating set — omitting ANY one →
+ *      false, asserted as a property over the constant so it auto-covers a future one.
+ *   4. the two sets stay DISJOINT, and the probe ignores the optional one. Promoting an
+ *      optional secret into the gating set would make every repo lacking it read as
+ *      "reviewer not configured", dropping `ai-review` from the required set — merging
+ *      un-reviewed code. That is the inverse of the #559 deadlock and just as bad, so
+ *      the boundary is asserted rather than left to whoever edits the constant next.
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import {
   REVIEWER_SECRETS,
+  REVIEWER_OPTIONAL_SECRETS,
   probeReviewerConfigured,
   type CommandRunner,
 } from '../src/lib/ruleset-advisor';
@@ -55,13 +63,35 @@ function withSecretNames(names: string[]): CommandRunner {
 describe('ENFORCE: reviewer-secret set — probe ⟷ ai-review.yml cannot drift (#796)', () => {
   const root = findRepoRoot();
   const workflow = fs.readFileSync(path.join(root, '.github/workflows/ai-review.yml'), 'utf8');
-  const expected = [...REVIEWER_SECRETS].sort();
+  // The workflow may reference a secret WITHOUT gating on it (the PAYG failover key),
+  // so the binding is against the union. The anti-drift property is unchanged: an
+  // undeclared `secrets.X` still fails here. What changed is that declaring one now
+  // forces an explicit choice between "gating" and "optional".
+  const expected = [...REVIEWER_SECRETS, ...REVIEWER_OPTIONAL_SECRETS].sort();
 
-  it('ai-review.yml consumes EXACTLY REVIEWER_SECRETS (bidirectional — the 2-of-3 guard)', () => {
+  it('ai-review.yml consumes EXACTLY the declared secrets (bidirectional — the 2-of-3 guard)', () => {
     // If the workflow ADDS a gating secret, the probe must gain it (else false-positive
     // "configured" → deadlock). If it REMOVES one, the probe must drop it. Either drift
-    // fails here until REVIEWER_SECRETS is reconciled.
+    // fails here until the constants are reconciled.
     expect(secretsReferenced(workflow)).toEqual(expected);
+  });
+
+  it('the gating and optional sets are DISJOINT, and the probe ignores the optional one', () => {
+    const gating = new Set<string>(REVIEWER_SECRETS);
+    for (const opt of REVIEWER_OPTIONAL_SECRETS) {
+      // Not merely "the current value is absent" — this is the invariant that keeps an
+      // optional secret from silently becoming a producibility precondition.
+      expect(gating.has(opt)).toBe(false);
+    }
+  });
+
+  it('an optional secret is NOT required for producibility (whole gating set, none of the optional)', async () => {
+    // The gating set alone must satisfy the probe. If someone promotes an optional
+    // secret into REVIEWER_SECRETS, this goes red — a repo with a fully working
+    // reviewer and no PAYG key would otherwise be reported unconfigured.
+    expect(await probeReviewerConfigured('o', 'r', withSecretNames([...REVIEWER_SECRETS]))).toBe(
+      true,
+    );
   });
 
   it('the embedded (shipped-to-other-repos) AI_REVIEW_WORKFLOW copy references the same set', () => {

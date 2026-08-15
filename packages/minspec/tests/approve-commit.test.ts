@@ -11,7 +11,7 @@
  * These run real `git` in a temp repo.
  */
 
-import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, afterAll, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -25,9 +25,7 @@ import { commitApproval, isUntrackedAtHead } from '../src/lib/approve-commit';
 // Raised HERE, per-file, not globally — a genuinely hung test elsewhere still fails
 // fast at the default. 30s is the value #1099 measured all affected suites passing
 // reliably at.
-beforeAll(() => {
-  vi.setConfig({ testTimeout: 30_000 });
-});
+vi.setConfig({ testTimeout: 30_000 });
 afterAll(() => {
   vi.resetConfig();
 });
@@ -396,5 +394,102 @@ describe('#1064 — destination guard on the default branch', () => {
     // rule #8 / DR-051 §4a — the shared checkout's HEAD is never moved.
     expect(git(['rev-parse', '--abbrev-ref', 'HEAD'], tmp).trim()).toBe('main');
     expect(git(['branch', '--list'], tmp).trim()).toBe('* main');
+  });
+});
+
+/**
+ * #1112 — approve mid-merge/cherry-pick cannot commit, because git itself
+ * refuses a PARTIAL (pathspec) commit while MERGE_HEAD or CHERRY_PICK_HEAD
+ * exists: `fatal: cannot do a partial commit during a merge/cherry-pick`.
+ * commit-on-approve is pathspec-only (invariant 1), so a bare commit is not an
+ * available workaround — this is a genuine git constraint, not a guard bug.
+ * The fix detects it UP FRONT (before any `git add`) and returns the distinct
+ * `'merge-in-progress'` outcome instead of degrading to an unhelpful
+ * `'failed'`. REVERT_HEAD is deliberately excluded: git allows a partial
+ * commit mid-revert.
+ */
+describe('#1112 — mid-merge/cherry-pick guard (partial commit refusal)', () => {
+  /** Stamp a git-dir marker so the repo LOOKS mid-operation (no real merge needed
+   *  — commitApproval only checks for the marker file's existence). */
+  function markInProgress(dir: string, marker: string): void {
+    const head = git(['rev-parse', 'HEAD'], dir).trim();
+    fs.writeFileSync(path.join(dir, '.git', marker), `${head}\n`);
+  }
+
+  it('MERGE_HEAD present: refuses up front with merge-in-progress, staging nothing', async () => {
+    initRepo(tmp);
+    const doc = write('requirements.md', 'body\n');
+    git(['add', '-A']);
+    git(['commit', '-m', 'init']);
+    const before = git(['rev-parse', 'HEAD']).trim();
+    fs.appendFileSync(doc, 'changed\n');
+    markInProgress(tmp, 'MERGE_HEAD');
+
+    const res = await commitApproval(tmp, [doc], 'chore(approve): x');
+
+    expect(res.outcome).toBe('merge-in-progress');
+    expect(res.operation).toBe('merge');
+    // no commit made, nothing staged — the approval stays on disk, uncommitted
+    expect(git(['rev-parse', 'HEAD']).trim()).toBe(before);
+    expect(git(['diff', '--cached', '--name-only']).trim()).toBe('');
+    expect(fs.readFileSync(doc, 'utf-8')).toContain('changed');
+  });
+
+  it('CHERRY_PICK_HEAD present: refuses with operation "cherry-pick"', async () => {
+    initRepo(tmp);
+    const doc = write('requirements.md', 'body\n');
+    git(['add', '-A']);
+    git(['commit', '-m', 'init']);
+    fs.appendFileSync(doc, 'changed\n');
+    markInProgress(tmp, 'CHERRY_PICK_HEAD');
+
+    const res = await commitApproval(tmp, [doc], 'chore(approve): x');
+
+    expect(res.outcome).toBe('merge-in-progress');
+    expect(res.operation).toBe('cherry-pick');
+    expect(git(['diff', '--cached', '--name-only']).trim()).toBe('');
+  });
+
+  it('REVERT_HEAD present: NOT refused — git allows a partial commit mid-revert', async () => {
+    initRepo(tmp);
+    const doc = write('requirements.md', 'body\n');
+    git(['add', '-A']);
+    git(['commit', '-m', 'init']);
+    fs.appendFileSync(doc, 'changed\n');
+    markInProgress(tmp, 'REVERT_HEAD');
+
+    const res = await commitApproval(tmp, [doc], 'chore(approve): x');
+
+    expect(res.outcome).toBe('committed');
+  });
+
+  it('a REAL merge in progress (git merge --no-commit --no-ff) is refused the same way', async () => {
+    // Belt-and-braces: the tests above stamp the marker file directly (matching
+    // what commitApproval actually reads); this one drives a genuine conflict-
+    // free merge stopped before its own commit, to confirm MERGE_HEAD really is
+    // present at that point and git really does refuse the partial commit this
+    // module is working around (not just an assumption from the issue's table).
+    initRepo(tmp);
+    write('seed.md', 'seed\n');
+    git(['add', '-A']);
+    git(['commit', '-m', 'init']);
+    git(['switch', '-q', '-c', 'feature']);
+    write('feature.md', 'feature\n');
+    git(['add', '-A']);
+    git(['commit', '-m', 'feature']);
+    git(['switch', '-q', 'main']);
+    write('unrelated.md', 'unrelated\n');
+    git(['add', '-A']);
+    git(['commit', '-m', 'unrelated']);
+    git(['merge', '--no-commit', '--no-ff', 'feature']);
+    expect(fs.existsSync(path.join(tmp, '.git', 'MERGE_HEAD'))).toBe(true);
+
+    const doc = write('requirements.md', 'approval\n');
+    const res = await commitApproval(tmp, [doc], 'chore(approve): x');
+
+    expect(res.outcome).toBe('merge-in-progress');
+    expect(res.operation).toBe('merge');
+    // MERGE_HEAD is still there — we never touched the merge itself.
+    expect(fs.existsSync(path.join(tmp, '.git', 'MERGE_HEAD'))).toBe(true);
   });
 });

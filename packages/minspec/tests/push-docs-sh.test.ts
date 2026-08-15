@@ -11,7 +11,7 @@
  * repo (an `origin` bare repo + a `primary` clone), with `gh` stubbed so no network
  * call happens; they assert the pushed branch actually carries the deletion.
  */
-import { describe, it, expect, afterEach, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, afterEach, afterAll, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -23,9 +23,7 @@ import { execFileSync } from 'child_process';
 // and which suite trips it is non-deterministic run-to-run (#1099). Raised HERE,
 // per-file, not globally — a genuinely hung test elsewhere still fails fast at the
 // default. 30s is the value #1099 measured all affected suites passing reliably at.
-beforeAll(() => {
-  vi.setConfig({ testTimeout: 30_000 });
-});
+vi.setConfig({ testTimeout: 30_000 });
 afterAll(() => {
   vi.resetConfig();
 });

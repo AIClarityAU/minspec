@@ -45,6 +45,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROLES_DIR="${SCRIPT_DIR}/roles"
 # shellcheck source=scripts/lib/agent-context.sh
 source "${SCRIPT_DIR}/lib/agent-context.sh"
+# Agent writes carry the BOT's identity, never the human's (#1355). This arms a
+# `gh` wrapper; acquiring the token is LAZY, so reads pass through untouched and
+# only the first WRITE mints — aborting there, loudly, if it cannot.
+# shellcheck source=scripts/lib/gh-bot.sh
+source "${SCRIPT_DIR}/lib/gh-bot.sh"
+gh_bot_init
 
 DECIDE="${SCRIPT_DIR}/review-decide.sh"
 
@@ -177,9 +183,12 @@ if [[ -n "$DIFF_NOTE" ]]; then
 "
 fi
 
-# The verdict block, verbatim, becomes the audit trail behind the label.
+# The verdict block, verbatim, becomes the audit trail behind the label. Marker = the
+# token ALONE ON A LINE, the SAME predicate review-decide.sh uses at line 165 to pick
+# GATE_LABEL (#1157). These two must not drift: when the extractor matched a marker the
+# decider did not, this comment rendered a block the label contradicted.
 VERDICT_BLOCK=$(printf '%s\n' "$AGENT_OUT" \
-  | sed -n '/REVIEW_VERDICT_BEGIN/,/REVIEW_VERDICT_END/p')
+  | sed -n '/^[[:space:]]*REVIEW_VERDICT_BEGIN[[:space:]]*$/,/^[[:space:]]*REVIEW_VERDICT_END[[:space:]]*$/p')
 [[ -z "$VERDICT_BLOCK" ]] && VERDICT_BLOCK="(no verdict block emitted — fail-closed to changes)"
 
 echo "  → #$PR: $LABEL"
