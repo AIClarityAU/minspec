@@ -1,5 +1,5 @@
 ---
-id: SPEC-052
+id: SPEC-062
 type: requirements
 status: specifying
 tier: T4
@@ -335,4 +335,3 @@ spec composes with all three and supersedes none, so no existing DR is updated.
   [DR-015](../../../docs/decisions/DR-015.md) / EPIC-007 (dev-time prototype, productized path is
   `agent-execute`), [DR-046](../../../docs/decisions/DR-046.md) (worktree rule #8),
   [DR-012](../../../docs/decisions/DR-012.md) (approval hash gate).
-</content>
