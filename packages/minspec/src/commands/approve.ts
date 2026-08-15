@@ -3,7 +3,7 @@ import * as vscode from 'vscode';
 import { listSpecs, type SpecSummary } from '../lib/spec-catalog';
 import { readSpecFile, advanceSpecToImplementing } from '../lib/spec';
 import { loadConfig } from '../lib/config';
-import { validateSpec } from '../lib/spec-validator';
+import { validateSpec, violationsIntroducedByApproval } from '../lib/spec-validator';
 import { epicRefSet } from '../lib/epic-manager';
 import { readShardIdFiles } from '../lib/spec-layout';
 import {
@@ -21,6 +21,11 @@ import { resolveActiveSpecId } from '../lib/active-spec';
 import { folderForFile, resolveTargetFolder } from '../lib/resolve-folder';
 import { commitApprovalIfEnabled } from './commit-on-approve';
 import { enqueuePhaseAdvance } from '../lib/phase-advance-queue';
+import {
+  loadPreferences,
+  savePreferences,
+  resolveProjectPreference,
+} from '../lib/preferences';
 
 /** A tree node carrying a SpecSummary (from the spec tree context menu). */
 interface SpecNodeLike {
@@ -101,27 +106,41 @@ const ALWAYS = 'Always';
 
 /**
  * Persisted "always enqueue a phase-advance request on approve" opt-in
- * (DR-057 §3). Written GLOBALLY: it's a personal workflow preference, not
- * project policy, so it follows the user across every project — same pattern
- * as `minspec.autoBackfillUseAi` (backfill-epics.ts).
+ * (DR-057 §3).
+ *
+ * Read order is DR-078 §4: the PROJECT-LOCAL preference first, then the VS Code
+ * setting. A user who sets `minspec.advancePhaseOnApprove` by hand in their own
+ * settings is exercising an ordinary editor setting and still gets what they
+ * asked for; what changed in #1319 is what MinSpec itself WRITES (see
+ * {@link enableAdvancePhaseOnApprove}).
  */
-function advancePhaseOnApproveEnabled(): boolean {
-  return vscode.workspace
+function advancePhaseOnApproveEnabled(rootDir: string): boolean {
+  const setting = vscode.workspace
     .getConfiguration('minspec')
     .get<boolean>('advancePhaseOnApprove', false);
+  return resolveProjectPreference(
+    loadPreferences(rootDir).advancePhaseOnApprove,
+    setting,
+  );
 }
 /**
- * Persist the "Always" choice. Never lets a pref-write failure surface as an
- * approval failure — same non-blocking contract as `enqueuePhaseAdvanceSafely`
- * below, and for the same reason: the approval itself already succeeded by the
- * time this runs, so a config-write error here must not throw into
- * `approveSpecCommand`'s catch and paint a false "Failed to approve" toast.
+ * Persist the "Always" choice to the PROJECT-LOCAL store.
+ *
+ * This used to write `ConfigurationTarget.Global`, which constitution invariant
+ * 3 (DR-074) forbids — `~/.config/**` is out of bounds for a per-project write,
+ * and every other MinSpec project on the machine inherited the value without
+ * having opted in. DR-078 §1 names `.minspec/preferences.json` as the store that
+ * is per-developer (gitignored) and per-project at once. Fixed in #1319.
+ *
+ * Never lets a pref-write failure surface as an approval failure — same
+ * non-blocking contract as `enqueuePhaseAdvanceSafely` below, and for the same
+ * reason: the approval itself already succeeded by the time this runs, so a
+ * write error here must not throw into `approveSpecCommand`'s catch and paint a
+ * false "Failed to approve" toast.
  */
-async function enableAdvancePhaseOnApprove(): Promise<void> {
+function enableAdvancePhaseOnApprove(rootDir: string): void {
   try {
-    await vscode.workspace
-      .getConfiguration('minspec')
-      .update('advancePhaseOnApprove', true, vscode.ConfigurationTarget.Global);
+    savePreferences(rootDir, { advancePhaseOnApprove: true });
   } catch (err) {
     console.warn(`MinSpec: failed to persist advancePhaseOnApprove pref — ${err instanceof Error ? err.message : String(err)}`);
   }
@@ -153,7 +172,7 @@ async function handleAdvancePhaseChoice(
   choice: string | undefined,
 ): Promise<void> {
   if (choice !== ADVANCE_PHASE && choice !== ALWAYS) return;
-  if (choice === ALWAYS) await enableAdvancePhaseOnApprove();
+  if (choice === ALWAYS) enableAdvancePhaseOnApprove(rootDir);
   enqueuePhaseAdvanceSafely(rootDir, specRel);
 }
 
@@ -207,6 +226,37 @@ export async function approveSpecCommand(
     const choice = await vscode.window.showErrorMessage(
       `MinSpec: ${spec.id} is not complete — approval refused.\n\n${summary}`,
       { modal: true, detail: errors.map((e) => `${e.message}\n   ↳ ${e.fixHint}`).join('\n\n') },
+      'Open Spec',
+    );
+    if (choice === 'Open Spec') {
+      const doc = await vscode.workspace.openTextDocument(vscode.Uri.file(spec.filePath));
+      await vscode.window.showTextDocument(doc);
+    }
+    return;
+  }
+
+  // #1317: the spec passed validation in the state it is LEAVING. Approval also
+  // ADVANCES its phase map, and some rules are gated on that map — so a spec can be
+  // complete now and violate an error the instant it is advanced. That gap put main
+  // in the red three times (SPEC-051 #1300, SPEC-048 + SPEC-049 #1348), each failing
+  // on an unrelated PR hours later, because nothing validated the state approval
+  // CREATES. Refuse here, before any write, naming only what the advance introduces.
+  const introduced = violationsIntroducedByApproval(parsed, config, {
+    knownEpicRefs: epicRefSet(rootDir),
+    siblingShardFiles: readShardIdFiles(path.dirname(spec.filePath)),
+  });
+  if (introduced.length > 0) {
+    const summary = introduced.map((v) => `• ${v.message}`).join('\n');
+    const choice = await vscode.window.showErrorMessage(
+      `MinSpec: ${spec.id} is not ready for the status it would be approved into — approval refused.\n\n${summary}`,
+      {
+        modal: true,
+        detail:
+          'Approving advances this spec past Clarify, which arms rules that do not apply to it yet. ' +
+          'Fixing this now costs one edit; approving first means the edit lands on an already-approved ' +
+          'spec, which stales the approval and needs a second human sign-off.\n\n' +
+          introduced.map((v) => `${v.message}\n   ↳ ${v.fixHint}`).join('\n\n'),
+      },
       'Open Spec',
     );
     if (choice === 'Open Spec') {
@@ -293,10 +343,11 @@ export async function approveSpecCommand(
     await vscode.commands.executeCommand('minspec.refreshTree');
 
     // DR-057 §3 follow-up toast: offer to enqueue a phase-advance request (or,
-    // once the global pref is set, do it silently — no re-asking). Enqueue-only,
-    // LLM-free: this never runs `claude -p` itself (Tier-0 air-gap); a downstream
-    // consumer (#732/#734/#735) dequeues and generates.
-    const alwaysAdvance = advancePhaseOnApproveEnabled();
+    // once the preference is set for THIS project, do it silently — no
+    // re-asking). Enqueue-only, LLM-free: this never runs `claude -p` itself
+    // (Tier-0 air-gap); a downstream consumer (#732/#734/#735) dequeues and
+    // generates.
+    const alwaysAdvance = advancePhaseOnApproveEnabled(rootDir);
     if (warnings.length > 0) {
       // Non-modal advisory: approved, but the gaps are surfaced so they are not
       // silently swallowed (never-wrong). Not a modal, not a blocking gate.

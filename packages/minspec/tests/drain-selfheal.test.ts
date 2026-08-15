@@ -16,6 +16,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #1285: spawns real child processes per assertion — 5s default is a load metric,
+// not a hang signal. Enforced by shell-timeout-coverage.test.ts.
+useShellTimeout();
 
 const DRAIN = path.resolve(__dirname, '../../../scripts/drain-inbox.sh');
 const DISPATCH = path.resolve(__dirname, '../../../scripts/dispatch-issue.sh');
@@ -274,6 +279,10 @@ describe('dispatch-issue.sh: native auto-merge deny-by-default (behavioral seam)
       // loudly, because silently dropping the flag restores the roster-thrash
       // outage it exists to prevent (no-silent-gate).
       fs.copyFileSync(path.resolve(__dirname, '../../../scripts/lib/agent-context.sh'), path.join(root, 'scripts', 'lib', 'agent-context.sh'));
+      // dispatch-issue.sh sources lib/gh-bot.sh (#1355 bot attribution) at startup —
+      // same reason once more. Sourcing it is offline and cannot fail; only an actual
+      // GitHub WRITE mints, and this seam performs none.
+      fs.copyFileSync(path.resolve(__dirname, '../../../scripts/lib/gh-bot.sh'), path.join(root, 'scripts', 'lib', 'gh-bot.sh'));
       fs.writeFileSync(path.join(root, '.minspec', 'config.json'), JSON.stringify({ version: 1 })); // no autoMerge
       expect(check({}, root)).toEqual({ code: 1, out: 'off' });
     } finally {

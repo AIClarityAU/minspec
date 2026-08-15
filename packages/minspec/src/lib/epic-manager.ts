@@ -175,19 +175,11 @@ export function epicRefSet(rootDir: string, vscodeOverrides?: { epicsDir?: strin
 
 // ─── Ref parsing / formatting ─────────────────────────────────────────────────
 
-/**
- * Extract the machine ref from an `epic:` frontmatter value, dropping any inline
- * YAML comment. The line may carry a human-facing title comment
- * (`epic: EPIC-001  # Telemetry & Privacy`); the resolvable ref is everything
- * before the first `#`. Refs (EPIC-NNN ids and kebab slugs) never contain `#`,
- * so a first-hash split is safe. Returns undefined for absent/empty.
- */
-export function epicRefValue(raw: string | undefined | null): string | undefined {
-  if (raw == null) return undefined;
-  const hash = raw.indexOf('#');
-  const ref = (hash === -1 ? raw : raw.slice(0, hash)).trim();
-  return ref === '' ? undefined : ref;
-}
+// Moved to ./spec-vocabulary (#1446) to break the spec -> spec-validator ->
+// epic-manager -> ... -> spec cycle. Re-exported so import sites are unchanged.
+export { epicRefValue } from './spec-vocabulary';
+import { epicRefValue } from './spec-vocabulary';
+
 
 /**
  * Format an `epic:` frontmatter value, appending the epic title as an inline

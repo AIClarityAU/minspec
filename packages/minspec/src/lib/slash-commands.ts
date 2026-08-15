@@ -81,7 +81,21 @@ const FRONTMATTER_GUIDANCE =
   `\`status:\` must be one of ${SPEC_STATUSES.map((s) => `\`${s}\``).join(', ')} ` +
   '(an absent or unrecognized value is silently coerced to "new" and flagged at approve), ' +
   'and set an explicit `tier:` (one of `T1`, `T2`, `T3`, `T4`) — a missing tier is flagged too. ' +
-  'Getting these right here is the point: the approve gate is only a backstop, not the place to discover gaps.';
+  'Getting these right here is the point: the approve gate is only a backstop, not the place to discover gaps.\n\n' +
+  '**A T3/T4 spec must also declare its owned code, in Specify — not later.** ' +
+  'Either `implements:` listing the repo-relative paths this spec will own (each must end in a ' +
+  'source extension the matcher recognizes), or the explicit escape `implements: none` plus a ' +
+  'one-line `implements_reason:` when it genuinely owns none ' +
+  '(a spec that only modifies files owned elsewhere puts those under the optional `affects:`). ' +
+  'Do NOT write a comment deferring this to Plan. Approval is what advances `plan` to `in-progress`, ' +
+  'which is the state the `ownership.implements.missing` rule fires on, so the rule is already armed ' +
+  'the moment Plan begins — Plan is not a later chance to add it. Clarify is no fallback either: ' +
+  'once this frontmatter is approved, anything added to it edits hashed bytes and stales that ' +
+  'approval. Until the declaration exists the spec-gate stays un-armed for this spec\'s own files, ' +
+  'in every repo; where `ownershipDeclaration` is set to `error` the approval is refused outright ' +
+  'as well. Three specs in MinSpec\'s own repo shipped that deferral comment. The inference was ' +
+  'wrong in all three: two were caught and backfilled before approval, and the third was approved ' +
+  'without it and turned `main` red.';
 
 /**
  * Shift-left aspect-artifact guidance (AIClarityAU/minspec#104). Built from

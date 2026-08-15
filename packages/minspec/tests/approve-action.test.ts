@@ -19,11 +19,18 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // approveSpecCommand (approverEmail / commitOnApprove / advancePhaseOnApprove)
 // picks it up — unlike per-call `mockReturnValueOnce` chaining, which is
 // brittle to call-order changes in approve.ts.
-const { configState, configUpdate } = vi.hoisted(() => ({
+const { configState, configUpdate, prefsState } = vi.hoisted(() => ({
   configState: {
     commitOnApprove: false as unknown,
     advancePhaseOnApprove: false as unknown,
   },
+  /**
+   * Backing store for the mocked project-local preferences (#1319). Separate
+   * from `configState` on purpose: the whole point of DR-078 is that these are
+   * two DIFFERENT stores with a defined precedence, so a test must be able to
+   * set one without the other.
+   */
+  prefsState: {} as Record<string, unknown>,
   configUpdate: vi.fn((key: string, value: unknown) => {
     (configState as Record<string, unknown>)[key] = value;
     return Promise.resolve();
@@ -62,6 +69,27 @@ vi.mock('vscode', () => ({
 // The DR-057 §3 follow-up toast enqueues via this lib — mocked so these
 // command-level tests never touch real disk (the lib gets its own unit
 // coverage in phase-advance-queue.test.ts).
+/**
+ * The project-local preference store (#1319). MUST be mocked: these tests run
+ * against the shared fake root `/tmp/ws`, and the real `savePreferences` would
+ * write `/tmp/ws/.minspec/preferences.json` for real — a file that then leaks
+ * into every other test file using that same root, and across runs. Stateful,
+ * like `configState` above, so a test that persists "Always" sees it honoured.
+ */
+vi.mock('../src/lib/preferences', () => ({
+  loadPreferences: vi.fn(() => prefsState),
+  savePreferences: vi.fn((_root: string, update: Record<string, unknown>) => {
+    Object.assign(prefsState, update);
+  }),
+  preferencesPath: vi.fn((root: string) => `${root}/.minspec/preferences.json`),
+  // The real resolution rule (DR-078 §4) — project value wins whenever it is
+  // defined, including `false`. Kept faithful rather than stubbed, so these
+  // tests exercise the same precedence production does.
+  resolveProjectPreference: vi.fn((projectValue: unknown, settingValue: unknown) =>
+    projectValue !== undefined ? projectValue : settingValue,
+  ),
+}));
+
 vi.mock('../src/lib/phase-advance-queue', () => ({
   enqueuePhaseAdvance: vi.fn(),
 }));
@@ -100,6 +128,10 @@ vi.mock('../src/lib/config', async (importOriginal) => ({
 
 vi.mock('../src/lib/spec-validator', () => ({
   validateSpec: vi.fn(),
+  // #1317: defaults to "the advance introduces nothing", so every pre-existing
+  // case here keeps approving exactly as before. The refusal path is exercised
+  // explicitly in the dedicated block at the end of this file.
+  violationsIntroducedByApproval: vi.fn(() => []),
 }));
 
 vi.mock('../src/lib/epic-manager', () => ({
@@ -125,9 +157,10 @@ import {
 import type { ApprovalStatus } from '../src/lib/approval';
 import type { SpecSummary } from '../src/lib/spec-manager';
 import { readSpecFile, advanceSpecToImplementing } from '../src/lib/spec';
-import { validateSpec } from '../src/lib/spec-validator';
+import { validateSpec, violationsIntroducedByApproval } from '../src/lib/spec-validator';
 import { readShardIdFiles } from '../src/lib/spec-layout';
 import { enqueuePhaseAdvance } from '../src/lib/phase-advance-queue';
+import { savePreferences } from '../src/lib/preferences';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
 
@@ -221,6 +254,10 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
     // touch it — it's a plain object, not mock call/implementation state).
     configState.commitOnApprove = false;
     configState.advancePhaseOnApprove = false;
+    // Same reason as configState: a plain object, untouched by clearAllMocks.
+    // Without this the "Always" test leaks its persisted pref into every later
+    // test in the file (#1319).
+    for (const k of Object.keys(prefsState)) delete prefsState[k];
   });
 
   // ── no specs in workspace ────────────────────────────────────────────────
@@ -603,7 +640,7 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
       expect(enqueuePhaseAdvance).not.toHaveBeenCalled();
     });
 
-    it('"Always" persists the global pref AND enqueues immediately', async () => {
+    it('"Always" persists the PROJECT-LOCAL pref AND enqueues immediately', async () => {
       pickFirst();
       vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec() as never);
       vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
@@ -611,13 +648,15 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
 
       await approveSpecCommand(undefined);
 
-      // Written globally — a personal preference, not project policy (mirrors
-      // minspec.autoBackfillUseAi / backfill-epics.ts).
-      expect(configUpdate).toHaveBeenCalledWith(
-        'advancePhaseOnApprove',
-        true,
-        vscode.ConfigurationTarget.Global,
-      );
+      // #1319 / DR-078 §1: written to `.minspec/preferences.json`, scoped to
+      // THIS project. It used to go to ConfigurationTarget.Global, which
+      // constitution invariant 3 forbids — every other MinSpec project on the
+      // machine inherited it without opting in.
+      expect(savePreferences).toHaveBeenCalledWith('/tmp/ws', {
+        advancePhaseOnApprove: true,
+      });
+      // The machine-wide surface must be left completely untouched.
+      expect(configUpdate).not.toHaveBeenCalled();
       expect(enqueuePhaseAdvance).toHaveBeenCalledWith(
         '/tmp/ws',
         '/tmp/ws/specs/minspec/SPEC-001/spec.md',
@@ -930,5 +969,61 @@ describe('revokeApprovalCommand — action paths (post-selection)', () => {
     expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
       expect.stringContaining('Revoked approval for SPEC-005'),
     );
+  });
+});
+
+// ─── #1317: refuse to approve INTO a status the spec cannot satisfy ──────────
+//
+// The lib-level proof lives in approve-target-status-1317.test.ts. This block
+// proves the COMMAND is actually wired to it — a passing lib function that no
+// caller consults would leave the door exactly as open as before.
+describe('approveSpecCommand — target-status gate (#1317)', () => {
+  const armedError = {
+    rule: 'ownership.implements.missing',
+    severity: 'error' as const,
+    message: 'T3 spec past Clarify does not declare its owned code (implements:).',
+    fixHint: 'Add an `implements:` frontmatter list …',
+  };
+
+  // The revoke block above sets listSpecs with mockReturnValue (not …Once), so it
+  // persists into this one. Pin the spec under test rather than inheriting theirs.
+  beforeEach(() => {
+    vi.mocked(listSpecs).mockReturnValue([summary('SPEC-001', 'Test')]);
+    setStatuses({ 'SPEC-001': 'unapproved' });
+  });
+
+  it('refuses, writing nothing, when the advance would arm an error', async () => {
+    pickFirst();
+    vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec('specifying') as never);
+    // Complete in the state it is LEAVING — this is the whole point: the old code
+    // saw only this and approved.
+    vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
+    vi.mocked(violationsIntroducedByApproval).mockReturnValueOnce([armedError] as never);
+
+    await approveSpecCommand(undefined);
+
+    // Nothing was written: no status/phase flip, no approval record.
+    expect(advanceSpecToImplementing).not.toHaveBeenCalled();
+    expect(approveSpec).not.toHaveBeenCalled();
+
+    // And the human is told what, specifically, is unsatisfied.
+    const call = vi.mocked(vscode.window.showErrorMessage).mock.calls[0];
+    expect(call[0]).toContain('SPEC-001');
+    expect(call[0]).toContain('implements:');
+    expect((call[1] as { modal?: boolean } | undefined)?.modal).toBe(true);
+  });
+
+  it('approves normally when the advance introduces nothing', async () => {
+    pickFirst();
+    vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec('specifying') as never);
+    vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
+    vi.mocked(violationsIntroducedByApproval).mockReturnValueOnce([] as never);
+    vi.mocked(advanceSpecToImplementing).mockReturnValueOnce('planning' as never);
+
+    await approveSpecCommand(undefined);
+
+    // The gate must not become a blanket refusal — that would be a worse bug than
+    // the one it fixes, since it would block every approval in the repo.
+    expect(approveSpec).toHaveBeenCalled();
   });
 });

@@ -35,6 +35,14 @@
  *      in-progress merge) but this refuses is a false block with no escape.
  *      Unknown destination (detached, no origin/HEAD, no remote) FAILS OPEN —
  *      unchanged behaviour, never a block. See {@link resolveBranchDestination}.
+ *   5. Mid-merge/cherry-pick is a GIT constraint, not a guard bug (#1112). Git
+ *      itself refuses a partial (pathspec) `git commit --` while MERGE_HEAD or
+ *      CHERRY_PICK_HEAD exists — invariant 1 forbids a bare commit as the
+ *      workaround, so this is a real limit we cannot avoid. Detected UP FRONT
+ *      (before any `git add`, same staging discipline as invariant 4) and
+ *      returned as the distinct `'merge-in-progress'` outcome rather than
+ *      degrading to a bare `'failed'` the user cannot act on. REVERT_HEAD is
+ *      excluded — git allows a partial commit mid-revert.
  *
  * ASYNC + bounded: git runs off the extension-host thread (async execFile) with a
  * timeout, so a slow user pre-commit hook can't freeze the UI on every Alt+A.
@@ -66,6 +74,22 @@ const CONVENTIONAL_DEFAULT_BRANCHES = ['main', 'master', 'trunk'] as const;
 const IN_PROGRESS_MARKERS = ['MERGE_HEAD', 'CHERRY_PICK_HEAD', 'REVERT_HEAD'] as const;
 const IN_PROGRESS_DIRS = ['rebase-merge', 'rebase-apply'] as const;
 
+/**
+ * Git-dir markers under which git itself REFUSES a partial (pathspec) commit —
+ * `fatal: cannot do a partial commit during a merge/cherry-pick` — independent
+ * of any MinSpec guard (#1112). Measured on real repos: MERGE_HEAD and
+ * CHERRY_PICK_HEAD both refuse; REVERT_HEAD does NOT (a partial commit
+ * mid-revert is allowed), so it is deliberately excluded here even though it
+ * IS one of the {@link IN_PROGRESS_MARKERS} the branch-destination guard
+ * exempts. These are two different questions — "may this land on the default
+ * branch" vs. "will `git commit --` even succeed right now" — so they get two
+ * different marker lists; do not merge them.
+ */
+const PARTIAL_COMMIT_REFUSED_MARKERS: Readonly<Record<string, 'merge' | 'cherry-pick'>> = {
+  MERGE_HEAD: 'merge',
+  CHERRY_PICK_HEAD: 'cherry-pick',
+};
+
 /** Outcome of a commit-on-approve attempt. Never an exception — always one of these. */
 export type CommitApprovalOutcome =
   | 'committed' //         the paths were committed
@@ -73,6 +97,7 @@ export type CommitApprovalOutcome =
   | 'detached-head' //     HEAD is detached — refused (a commit here would be orphaned/lost)
   | 'nothing-to-commit' // no given path exists, or none differs from HEAD
   | 'protected-branch' //  HEAD is the push-protected default branch — refused BEFORE staging (#1064)
+  | 'merge-in-progress' // MERGE_HEAD/CHERRY_PICK_HEAD present — git refuses a partial commit (#1112)
   | 'failed'; //           git errored (e.g. a pre-commit hook rejected) — files un-staged again
 
 export interface CommitApprovalResult {
@@ -84,6 +109,10 @@ export interface CommitApprovalResult {
   /** Current + default branch names (present on 'protected-branch'), so the
    *  command layer can name the branch it is refusing to commit onto. */
   readonly branch?: { readonly current: string; readonly default: string };
+  /** Which mid-operation was detected (present on 'merge-in-progress'), so the
+   *  command layer can name it precisely rather than saying "merge" for a
+   *  cherry-pick. */
+  readonly operation?: 'merge' | 'cherry-pick';
 }
 
 /**
@@ -213,6 +242,17 @@ export async function commitApproval(
   const branch = await resolveBranchDestination(run);
   if (branch && branch.current === branch.default) {
     return { outcome: 'protected-branch', branch };
+  }
+
+  // 3d. Mid-merge/cherry-pick guard (invariant 5, #1112). Independent of the
+  //     destination question above — git refuses a PARTIAL commit here on ANY
+  //     branch, not just the default one — so this must run even when the
+  //     destination guard just fell through (feature branch, or fail-open on
+  //     an in-progress operation). Detected before any `git add`, so a refusal
+  //     leaves the shared index untouched, same as invariant 4.
+  const midOperation = await detectPartialCommitRefusal(run);
+  if (midOperation) {
+    return { outcome: 'merge-in-progress', operation: midOperation };
   }
 
   // 4. Stage exactly these paths (this is what makes a NEW untracked sidecar
@@ -357,6 +397,34 @@ export async function resolveBranchDestination(
     : [...CONVENTIONAL_DEFAULT_BRANCHES];
   // The current branch's NAME decides — never "the first of these that exists".
   return candidates.includes(current) ? { current, default: current } : null;
+}
+
+/**
+ * Which mid-operation (if any) would make git refuse a partial (pathspec)
+ * `git commit --` right now (invariant 5, #1112) — `MERGE_HEAD` or
+ * `CHERRY_PICK_HEAD` present in the git dir. `null` when neither marker
+ * exists, or the git dir can't be located (fails open, same as the git-dir
+ * lookup in {@link resolveBranchDestination} — an undetectable state must
+ * never itself become a block).
+ *
+ * Deliberately narrower than {@link IN_PROGRESS_MARKERS}: that list answers
+ * "does the hook exempt this from the BRANCH-DESTINATION guard" (yes for
+ * revert too — a revert commit legitimately lands on the default branch).
+ * This answers "will git accept a PARTIAL commit right now" (no for revert —
+ * only merge and cherry-pick actually refuse one). Two different questions,
+ * so two different marker sets; do not fold them together.
+ */
+async function detectPartialCommitRefusal(run: GitRun): Promise<'merge' | 'cherry-pick' | null> {
+  try {
+    const gitDir = (await run(['rev-parse', '--absolute-git-dir'])).trim();
+    if (!gitDir) return null;
+    for (const [marker, kind] of Object.entries(PARTIAL_COMMIT_REFUSED_MARKERS)) {
+      if (fs.existsSync(path.join(gitDir, marker))) return kind;
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 /**

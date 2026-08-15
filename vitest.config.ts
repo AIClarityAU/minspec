@@ -27,6 +27,9 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['packages/*/tests/**/*.test.ts'],
+    // Pins the GitHub credential state so a run does not depend on whether the
+    // machine happens to hold the App key. See vitest.setup.ts (#1355).
+    setupFiles: ['./vitest.setup.ts'],
     coverage: {
       provider: 'v8',
       // Report coverage even when a test fails. Vitest defaults this to FALSE, and

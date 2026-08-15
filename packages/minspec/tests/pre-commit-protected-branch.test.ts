@@ -29,6 +29,11 @@ import * as os from 'os';
 import { execFileSync } from 'child_process';
 
 import { MANAGED_REGION_TEMPLATES, MINSPEC_HOOKS_DIR, renderManagedFile } from '../src/lib/template-registry';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #1285: spawns real child processes per assertion — 5s default is a load metric,
+// not a hang signal. Enforced by shell-timeout-coverage.test.ts.
+useShellTimeout();
 
 const PRE_COMMIT = `${MINSPEC_HOOKS_DIR}/pre-commit`;
 const template = () => MANAGED_REGION_TEMPLATES.find((t) => t.outputPath === PRE_COMMIT)!;
@@ -61,10 +66,20 @@ interface Repo {
  * null leaves origin/HEAD unset, modelling a repo with no remote.
  */
 function makeRepo(
-  opts: { defaultBranch?: string | null; initialBranch?: string; remote?: boolean } = {},
+  opts: {
+    defaultBranch?: string | null;
+    initialBranch?: string;
+    remote?: boolean;
+    remoteName?: string;
+  } = {},
 ): Repo {
   const initialBranch = opts.initialBranch ?? 'main';
   const defaultBranch = opts.defaultBranch === undefined ? initialBranch : opts.defaultBranch;
+  // #1545: the remote NAME is a parameter, not a constant. It was hardcoded to
+  // `origin` here, which is precisely the assumption the guard made — so the
+  // fixture could never catch it. A repo whose remote is called anything else was
+  // an untested shape across the whole extension.
+  const remoteName = opts.remoteName ?? 'origin';
   const dir = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-branch-guard-')));
 
   git(dir, ['init', '-b', initialBranch, '-q']);
@@ -75,7 +90,7 @@ function makeRepo(
   // guard inert: both repos it was written for look exactly like this. Opting
   // out models a purely local repo, where no branch can be push-protected.
   if (opts.remote !== false) {
-    git(dir, ['config', 'remote.origin.url', 'https://example.invalid/repo.git']);
+    git(dir, ['config', `remote.${remoteName}.url`, 'https://example.invalid/repo.git']);
   }
 
   // Seed history without the hook installed, so setup can never be blocked by it.
@@ -85,8 +100,12 @@ function makeRepo(
 
   if (defaultBranch !== null) {
     const head = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: dir, encoding: 'utf8' }).trim();
-    git(dir, ['update-ref', `refs/remotes/origin/${defaultBranch}`, head]);
-    git(dir, ['symbolic-ref', 'refs/remotes/origin/HEAD', `refs/remotes/origin/${defaultBranch}`]);
+    git(dir, ['update-ref', `refs/remotes/${remoteName}/${defaultBranch}`, head]);
+    git(dir, [
+      'symbolic-ref',
+      `refs/remotes/${remoteName}/HEAD`,
+      `refs/remotes/${remoteName}/${defaultBranch}`,
+    ]);
   }
 
   const hookPath = path.join(dir, '.git', 'hooks', 'pre-commit');
@@ -226,6 +245,56 @@ describe('pre-commit protected-branch guard — must not go inert without origin
       });
     },
   );
+
+  // #1545 — the same fail-open, reached by a different route: the guard gated its
+  // conventional-name fallback on `git config --get remote.origin.url`, so a repo
+  // whose remote carries any other name looked identical to a repo with NO remote
+  // and the guard passed silently on a protected branch. Reported live: a project
+  // whose sole remote was `git remote add voip-sms-inbox <github url>`.
+  it.each(['main', 'master', 'trunk'])(
+    'still BLOCKS on %s when the sole remote is not named origin',
+    (branch) => {
+      withRepo(
+        { defaultBranch: null, initialBranch: branch, remoteName: 'voip-sms-inbox' },
+        (repo) => {
+          const r = repo.commit('would have been stranded');
+          expect(r.code).not.toBe(0);
+          expect(r.stderr).toContain(branch);
+        },
+      );
+    },
+  );
+
+  it('leaves the branch tip unmoved when the remote is not named origin', () => {
+    // A hook that PRINTS a refusal but still writes the commit is the failure this
+    // guard exists to prevent, so assert the post-state, not just the exit code.
+    withRepo({ defaultBranch: null, remoteName: 'voip-sms-inbox' }, (repo) => {
+      const before = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo.dir, encoding: 'utf8' }).trim();
+      repo.commit('would have been stranded');
+      const after = execFileSync('git', ['rev-parse', 'HEAD'], { cwd: repo.dir, encoding: 'utf8' }).trim();
+      expect(after).toBe(before);
+    });
+  });
+
+  it('reads the default branch from a non-origin remote HEAD', () => {
+    // Resolution, not just the fallback: with the ref populated under the real
+    // remote name the guard should learn `main` from it directly.
+    withRepo({ defaultBranch: 'main', initialBranch: 'main', remoteName: 'voip-sms-inbox' }, (repo) => {
+      const r = repo.commit('would have been stranded');
+      expect(r.code).not.toBe(0);
+      expect(r.stderr).toContain('main');
+    });
+  });
+
+  it('still allows commits on a purely local repo with NO remote at all', () => {
+    // The other side of the distinction: no remote means nothing can be
+    // push-protected, so this must stay OPEN. If this ever goes red, the fix
+    // above has over-corrected into blocking scratch repos and fixtures.
+    withRepo({ defaultBranch: null, initialBranch: 'main', remote: false }, (repo) => {
+      const r = repo.commit('local-only work');
+      expect(r.code).toBe(0);
+    });
+  });
 
   it('leaves the branch tip unmoved in the no-origin/HEAD case', () => {
     withRepo({ defaultBranch: null }, (repo) => {

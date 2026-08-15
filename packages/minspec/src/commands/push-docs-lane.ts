@@ -27,21 +27,41 @@
  *
  * ASYNC + bounded: git/gh run off the extension-host thread (async execFile) with
  * a per-call timeout, so a slow pre-push hook or a hung network can't freeze the UI.
+ *
+ * SPEC-050 Slice 1 (the seam) moved the bounded git/gh runner, the error
+ * classifiers, the origin-slug parser and the `gh pr create` call itself into
+ * `lib/approval-pr.ts`, so the approval flow and this command share ONE
+ * PR-opening path (FR-4) instead of growing a second one. That extraction is a
+ * pure refactor with no behaviour change here — SPEC-039's own tests gate it
+ * (SPEC-050 AC-10) and pass unedited.
  */
 
-import { execFile } from 'child_process';
-import { promisify } from 'util';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { resolveTargetFolder } from '../lib/resolve-folder';
 import { isDocsCorpusPath } from '../lib/docs-corpus';
+import {
+  DOCS_LANE_LABEL,
+  defaultExecRun,
+  describeError,
+  isEnoent,
+  isNetworkError,
+  openPullRequest,
+  slugFromOriginUrl,
+  type ExecRun,
+} from '../lib/approval-pr';
 
-const execFileAsync = promisify(execFile);
-
-/** Max time (ms) any single git/gh invocation may run — bounds a hung hook/network. */
-const GIT_TIMEOUT_MS = 30_000;
+// Re-exported so this module's PUBLIC SURFACE is unchanged by the extraction:
+// `tests/push-docs-lane.test.ts` imports `slugFromOriginUrl` and `type ExecRun`
+// from here, and AC-10 requires it to pass byte-unedited. `defaultExecRun` rides
+// along for the same reason — the surface must not shrink either.
+// NOTE: `isAuthError` is deliberately NOT imported. Its only call site was the
+// `gh pr create` arm, which now lives in the seam; importing it unused would
+// fail the build under `noUnusedLocals`.
+export { defaultExecRun, slugFromOriginUrl };
+export type { ExecRun };
 
 /** The modal-confirm button that authorizes the (network) push. */
 const CONFIRM_LABEL = 'Open docs-lane PR';
@@ -75,70 +95,10 @@ export interface PushDocsResult {
   readonly error?: string;
 }
 
-/**
- * Minimal git/gh surface, injectable so tests drive a stub instead of spawning a
- * real subprocess. Resolves `{ stdout, stderr }` and REJECTS on a non-zero exit
- * (matching `execFile`), which each step's try/catch classifies. A missing binary
- * rejects with `code: 'ENOENT'`.
- */
-export type ExecRun = (
-  file: 'git' | 'gh',
-  args: readonly string[],
-  opts?: { cwd?: string; env?: Record<string, string> },
-) => Promise<{ stdout: string; stderr: string }>;
-
 /** Dependencies, all optional — production uses the defaults; tests inject stubs. */
 export interface PushDocsDeps {
   /** Injectable git/gh runner (defaults to a real, bounded execFile runner). */
   run?: ExecRun;
-}
-
-/**
- * Default git/gh runner. GIT_LITERAL_PATHSPECS=1 disables glob/magic pathspec
- * interpretation for every git invocation (so a `[`/`*`/`?` in a docs path can
- * never match a foreign sibling), mirroring `approve-commit.ts`. stdout+stderr
- * are captured so a hook/auth/network failure carries its reason into the result.
- */
-export function defaultExecRun(): ExecRun {
-  return async (file, args, opts) => {
-    const { stdout, stderr } = await execFileAsync(file, [...args], {
-      cwd: opts?.cwd,
-      timeout: GIT_TIMEOUT_MS,
-      maxBuffer: 8 * 1024 * 1024,
-      env: { ...process.env, GIT_LITERAL_PATHSPECS: '1', ...opts?.env },
-    });
-    return { stdout: stdout.toString(), stderr: stderr.toString() };
-  };
-}
-
-/** True when the error is a missing-executable ENOENT (the binary is not installed). */
-function isEnoent(err: unknown): boolean {
-  return !!err && typeof err === 'object' && (err as { code?: unknown }).code === 'ENOENT';
-}
-
-/** Human-readable error, preferring the git/gh stderr when present. */
-function describeError(err: unknown): string {
-  if (err && typeof err === 'object') {
-    const e = err as { stderr?: unknown; message?: unknown };
-    const stderr = typeof e.stderr === 'string' ? e.stderr.trim() : '';
-    if (stderr) return stderr;
-    if (typeof e.message === 'string') return e.message;
-  }
-  return String(err);
-}
-
-/** Does an error message look like a network/DNS/connection failure (→ 'offline')? */
-function isNetworkError(message: string): boolean {
-  return /could ?n'?t? resolve host|resolve host|network is unreachable|temporary failure in name resolution|failed to connect|could not connect|connection (refused|reset|timed out)|unable to access|operation timed out|timed out|no route to host|dial tcp|proxy|ssl|tls/i.test(
-    message,
-  );
-}
-
-/** Does a `gh` error look like an authentication failure (→ 'gh-unauthenticated')? */
-function isAuthError(message: string): boolean {
-  return /not logged (in|into)|authentication|auth status|gh auth login|requires? authentication|no such host.*api|401|403|bad credentials|token/i.test(
-    message,
-  );
 }
 
 /** One `git status --porcelain` (v1) line: a repo-relative path plus its raw XY status. */
@@ -181,19 +141,6 @@ export function parsePorcelainPaths(stdout: string): string[] {
  */
 function isDeletionStatus(status: string): boolean {
   return status === ' D' || status === 'D ';
-}
-
-/**
- * Derive `owner/repo` from an `origin` remote URL (ssh or https), stripping a
- * trailing `.git`. Returns undefined when the URL isn't a recognizable GitHub
- * remote — the caller then lets `gh` infer the repo from the worktree's remote.
- */
-export function slugFromOriginUrl(url: string): string | undefined {
-  const u = url.trim().replace(/\.git$/, '');
-  // git@github.com:OWNER/REPO  |  ssh://git@github.com/OWNER/REPO
-  // https://github.com/OWNER/REPO  |  https://x@github.com/OWNER/REPO
-  const m = u.match(/[/:]([^/:]+\/[^/]+)$/);
-  return m ? m[1] : undefined;
 }
 
 /**
@@ -400,33 +347,31 @@ export async function pushDocsLaneCommand(
       const body =
         'Docs-only change via the **docs-lane** (auto-merges once green; ai-review still runs). Files:\n' +
         files.map((f) => `- \`${f}\``).join('\n');
-      const prArgs = [
-        'pr',
-        'create',
-        ...(slug ? ['--repo', slug] : []),
-        '--base',
-        'main',
-        '--head',
-        branch,
-        '--title',
-        message,
-        '--label',
-        'docs-lane',
-        '--body',
+      // The ONE `gh pr create` in the codebase (SPEC-050 FR-4). The argv it
+      // builds for these inputs is byte-identical to the literal array this call
+      // replaced, and its ENOENT → auth → network → failed classification is the
+      // same arm moved verbatim — so this is a pure rewire, not a behaviour
+      // change (AC-10). `adoptExisting` is left at its `false` default on
+      // purpose: this command never probed `gh pr list`, and adding that call
+      // here would BE a behaviour change.
+      const pr = await openPullRequest({
+        run,
+        cwd: wt,
+        slug,
+        base: 'main',
+        head: branch,
+        title: message,
         body,
-      ];
-      let prUrl: string;
-      try {
-        prUrl = (await run('gh', prArgs, { cwd: wt })).stdout.trim();
-      } catch (err) {
-        if (isEnoent(err)) return await surface({ outcome: 'gh-absent' });
-        const msg = describeError(err);
-        if (isAuthError(msg)) return await surface({ outcome: 'gh-unauthenticated', error: msg });
-        if (isNetworkError(msg)) return await surface({ outcome: 'offline', error: msg });
-        return await surface({ outcome: 'failed', error: msg });
+        labels: [DOCS_LANE_LABEL],
+      });
+      // 'adopted' is unreachable with adoptExisting:false, but is handled rather
+      // than assumed away — a success is a success, and an unhandled member of
+      // the union would fall through to the failure surface and report a PR that
+      // does exist as one that does not.
+      if (pr.outcome === 'created' || pr.outcome === 'adopted') {
+        return await surface({ outcome: 'pushed', prUrl: pr.url, files, branch });
       }
-
-      return await surface({ outcome: 'pushed', prUrl, files, branch });
+      return await surface({ outcome: pr.outcome, error: pr.error });
     } finally {
       // Remove the worktree and its temp dir — best-effort, never throws (INV-4).
       try {

@@ -1,8 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-007-epic-grouping/requirements.md",
-  "specHash": "3d54910ce2bbd9c7e79b7b901d87ca0c740e5f87689ec7eca3a47b48af356796",
-  "approvedAt": "2026-06-04T10:25:20.628Z",
+  "specHash": "7fc8fa11583088ff0cb7c5db2aaf181abc9992bb82945e5204359f122fe8dd0d",
+  "approvedAt": "2026-08-07T07:32:39.086Z",
   "approvedBy": "github@harvest316.com",
   "tier": "T4",
-  "migrated": false
+  "migrated": false,
+  "baselineBlob": "37d453c8375bbe9116ab3e92f482c64b584d60a7"
 }

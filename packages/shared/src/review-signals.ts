@@ -26,8 +26,15 @@
  * assembles a PR body / comment.
  */
 
-/** Pass / fail / unknown status for a single gate check. */
-export type GateStatus = 'pass' | 'fail' | 'unknown';
+/**
+ * Status of a single gate check.
+ *
+ * `timeout` is deliberately distinct from `fail` (#1304): a check that was killed
+ * at its time bound never reached a verdict, so reporting it as `fail` asserts
+ * something about the code that was never measured. Both render as a warn — never
+ * a ✅ — but they are different facts and the reader is told which one applies.
+ */
+export type GateStatus = 'pass' | 'fail' | 'timeout' | 'unknown';
 
 /** Status of each gate the project runs before a PR is mergeable. */
 export interface GateResults {
@@ -209,7 +216,27 @@ function gateSignal(input: ReviewSignalsInput): {
     };
   }
 
-  const unknown = checks.filter(([, s]) => s !== 'pass').map(([n]) => n);
+  // #1304 — a check killed at its time bound is reported separately from one that
+  // was never reported at all. Both warn (never ✅, never `failing:`), but the
+  // reader is told which: a timeout means the check did not finish, NOT that the
+  // code is broken. Collapsing the two is how PR #1302 — a one-markdown-file diff —
+  // came to display `failing: test`.
+  const timedOut = checks.filter(([, s]) => s === 'timeout').map(([n]) => n);
+  const unknown = checks
+    .filter(([, s]) => s !== 'pass' && s !== 'timeout')
+    .map(([n]) => n);
+
+  if (timedOut.length > 0) {
+    return {
+      verdict: 'warn',
+      detail:
+        'timed out: ' +
+        timedOut.join(', ') +
+        (unknown.length > 0 ? '; not reported: ' + unknown.join(', ') : '') +
+        ' — did not run to completion, so the code is neither proven nor faulted.',
+    };
+  }
+
   if (unknown.length > 0) {
     return {
       verdict: 'warn',

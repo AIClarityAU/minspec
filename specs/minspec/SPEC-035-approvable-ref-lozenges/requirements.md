@@ -2,17 +2,21 @@
 id: SPEC-035
 type: requirements
 # 🔒 Once approved, hash-locked: approved bytes recorded in .minspec/approvals.json[SPEC-035].specHash. ANY edit voids approval (hash → stale) — re-run "MinSpec: Approve Spec". DR-012.
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity
 aspects: [ux, traceability, render, tier-1, references]
 depends_on: [DR-053]   # the paragraph-addressable reference scheme this feature renders
 relates_to: [SPEC-014, SPEC-018, SPEC-029, DR-038, DR-032, SPEC-021]
+# Ownership declared 2026-08-07: approval flipped `phases.plan` to `in-progress`, arming
+# SPEC-038 FR-3 at `error` and turning `main` red (the #1323 trap, fifth instance).
+implements: none
+implements_reason: specified but not yet built — this feature is explicitly "queued, not now", paused with the SPEC-018 pretty-webview work pending the token economy, so its render-host module paths are undecided. FR1 reuses @aiclarity/shared's existing project-prefix rather than creating a resolver. Declares its owned files on implementation, per the SPEC-034 precedent. Placeholder: replace with real paths when the build resumes.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
@@ -20,7 +24,7 @@ phases:
 # MinSpec — Approvable-Reference Lozenges + Hover Cards (Requirements)
 
 **Date:** 2026-07-12
-**Status:** Specifying
+**Status:** Planning
 **Triggered by:** session request (2026-07-12, founder) — *"in the pretty reviewing
 webview, turn the links to approvables into inline lozenges with hover cards that show
 the title, status and summary of each approvable … then tell the LLM that generates

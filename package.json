@@ -2,7 +2,7 @@
   "name": "minspec-monorepo",
   "version": "0.0.1",
   "private": true,
-  "license": "SEE LICENSE IN LICENSE",
+  "license": "MIT",
   "workspaces": [
     "packages/*"
   ],
@@ -16,6 +16,9 @@
     "package": "npm run package --workspaces --if-present",
     "validate": "npx tsx scripts/validate-frontmatter.ts",
     "check:cycles": "npx tsx scripts/check-import-cycles.ts",
+    "pretypecheck": "npm run build --workspace=@aiclarity/shared",
+    "typecheck": "tsc --noEmit -p packages/shared/tsconfig.json && tsc --noEmit -p packages/minspec/tsconfig.json",
+    "check:gh-bot": "bash scripts/check-gh-bot-attribution.sh",
     "facts": "npx tsx scripts/facts.ts",
     "validate:classifier": "vitest run classifier-validation"
   },

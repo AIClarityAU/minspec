@@ -11,7 +11,7 @@
  * root; `findRepoRoot` in facts.ts walks up looking for it) and spawns the real
  * script with cwd pointed at it.
  */
-import { describe, it, expect, afterEach, beforeAll, afterAll, vi } from 'vitest';
+import { describe, it, expect, afterEach, afterAll, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -25,9 +25,7 @@ import { specHash } from '@aiclarity/shared';
 // non-deterministic run-to-run (#1099). Raised HERE, per-file, not globally — a
 // genuinely hung test elsewhere still fails fast at the default. 30s is the value
 // #1099 measured all affected suites passing reliably at.
-beforeAll(() => {
-  vi.setConfig({ testTimeout: 30_000 });
-});
+vi.setConfig({ testTimeout: 30_000 });
 afterAll(() => {
   vi.resetConfig();
 });

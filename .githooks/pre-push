@@ -87,5 +87,15 @@ done
 
 [ -n "$touched" ] || exit 0
 
+# A workflow file IS touched and the credential IS an App token — the only situation
+# where the probe earns its cost. Placed HERE, after detection, so an ordinary push
+# never makes a network call (the review on #1460 caught the earlier placement, where
+# the comment claimed this and the code did the opposite).
+#
+# The credential mattering depends on whether the installation actually lacks
+# `workflows: write`. It no longer does (#1120), so ask rather than assume. Fails
+# CLOSED: an unanswerable probe leaves the refusal exactly as it was.
+workflow_permission_granted && exit 0
+
 printf '%s' "$touched" | grep -v '^$' | sort -u | workflow_push_refusal
 exit 1

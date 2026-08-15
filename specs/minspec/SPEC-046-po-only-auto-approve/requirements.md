@@ -2,7 +2,7 @@
 id: SPEC-046
 title: PO-only mode — per-audience approval policy (auto-approve)
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 created: 2026-07-21
@@ -15,7 +15,7 @@ phases:
   specify: done
   clarify: done
   plan: done
-  tasks: pending
+  tasks: in-progress
   implement: pending
 ---
 

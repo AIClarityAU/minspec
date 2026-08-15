@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import { detectBuildSkew, skewMessage } from './lib/build-provenance';
 import * as path from 'path';
 import * as fs from 'fs';
 import { initCommand, initRefreshCommand, commitHarnessRefreshCommand, collectDirtyScaffoldPaths } from './commands/init';
@@ -56,6 +57,7 @@ import { recordApprovableView } from './lib/recent-approvables';
 import { resolveTargetFolderNonInteractive } from './lib/resolve-folder';
 import { registerReferenceDiagnostics } from './lib/diagnostics';
 import { evaluateConstitution } from './lib/constitution-nudge';
+import { listSpecs } from './lib/spec-catalog';
 
 export function activate(context: vscode.ExtensionContext): void {
   trackActiveSpecEditor(context);
@@ -662,8 +664,48 @@ export function activate(context: vscode.ExtensionContext): void {
   // only (never blocks), honors a per-workspace "Don't ask again" skip flag.
   for (const folder of vscode.workspace.workspaceFolders ?? []) {
     void surfaceConstitutionProposeNudge(context, folder.uri.fsPath);
+    void surfaceBuildSkewAdvisory(context, folder.uri.fsPath);
   }
 }
+
+/**
+ * #1439 — advise when the RUNNING build predates the checkout being edited.
+ *
+ * A stale install silently disables shipped gates: on 2026-08-12 the installed build
+ * predated #1317's approval guard by five days, so approvals bypassed a gate that was green
+ * on `main`, and nothing said so. A version check cannot detect it — both builds were
+ * `0.1.26`; only the commit distinguishes them.
+ *
+ * Advisory, never a gate: it reports, and the reader decides. Dismissal is keyed to the
+ * BUILD, so rebuilding and drifting again warns afresh rather than staying silent forever.
+ */
+async function surfaceBuildSkewAdvisory(
+  context: vscode.ExtensionContext,
+  folder: string,
+): Promise<void> {
+  try {
+    // Dogfood-only: a normal user's installed build legitimately differs from any repo they
+    // open, so this speaks only inside a MinSpec checkout.
+    const isMinspecRepo = fs.existsSync(path.join(folder, '.minspec', 'constitution.md'));
+    const verdict = detectBuildSkew(folder, isMinspecRepo);
+    if (verdict.kind !== 'stale') return;
+
+    const skipKey = `${BUILD_SKEW_SKIP_PREFIX}${verdict.sha}`;
+    if (context.workspaceState.get<boolean>(skipKey, false)) return;
+
+    const DISMISS = "Don't warn for this build";
+    const choice = await vscode.window.showWarningMessage(skewMessage(verdict), DISMISS);
+    if (choice === DISMISS) {
+      await context.workspaceState.update(skipKey, true);
+    }
+  } catch {
+    // Provenance is a convenience. It must never break activation — and unlike a gate,
+    // staying quiet here loses nothing that was being relied on.
+  }
+}
+
+/** workspaceState key prefix: build-skew advisory dismissed, per build SHA. */
+const BUILD_SKEW_SKIP_PREFIX = 'minspec.buildSkew.skip.';
 
 /** workspaceState key: the constitution-propose nudge was dismissed for good. */
 const CONSTITUTION_PROPOSE_NUDGE_SKIP = 'minspec.constitutionProposeNudge.skip';
@@ -692,6 +734,17 @@ async function surfaceConstitutionProposeNudge(
     // Only offer for an initialized project that actually has a constitution to
     // fill — a missing .minspec/ is the init bootstrap's job, not this nudge.
     if (!fs.existsSync(path.join(folder, '.minspec', 'constitution.md'))) return;
+
+    // DEFERRED until the project has at least one spec (#1546). Immediately after
+    // init this advisory is guaranteed true — the constitution was just written from
+    // a template — so firing it then is noise that cannot be false, arriving in the
+    // middle of the other init toasts. The invariants worth writing are the ones the
+    // work reveals, so the useful moment is once the user is actually specifying.
+    //
+    // A spec is the deterministic, offline witness for "specifying has started".
+    // Cheap, and it degrades safely: if the scan throws, the catch below swallows it
+    // and the nudge simply does not fire this activation.
+    if (listSpecs(folder).length === 0) return;
 
     const nudge = evaluateConstitution(folder);
     if (!nudge.empty) return;
