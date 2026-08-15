@@ -82,6 +82,15 @@ set -euo pipefail
 
 REPO="AIClarityAU/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The reconcilers below write to GitHub (close, remove-label, add-label). Those are
+# AGENT writes, so they must carry the App identity rather than the human's — a write
+# made as the human auto-subscribes them to the thread forever and makes the audit
+# trail record a person as having done what the drain did (minspec#995, #1355). Arming
+# the wrapper once here covers every `gh` call in the process: reads pass through
+# untouched, and the first WRITE mints a bot token or aborts.
+# shellcheck source=scripts/lib/gh-bot.sh
+source "${SCRIPT_DIR}/lib/gh-bot.sh"
+gh_bot_init
 # Env-overridable for the same reason as MINSPEC_DRAIN_PRIMARY_ROOT below: the
 # #1208 concurrency harness points it at a hermetic stub so the fan-out can be
 # proven to actually overlap without launching real build agents.
