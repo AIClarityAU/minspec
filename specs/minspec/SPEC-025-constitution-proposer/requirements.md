@@ -5,6 +5,27 @@ status: implementing
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology
+implements:
+  - packages/minspec/src/lib/constitution-nudge.ts
+  - packages/minspec/src/lib/constitution-context.ts
+  - packages/minspec/src/lib/constitution-prompt.ts
+  - packages/minspec/src/lib/constitution-proposer.ts
+  - packages/minspec/src/lib/constitution-compaction.ts
+  - packages/minspec/src/commands/constitution.ts
+implements_reason: >-
+  Added 2026-08-15 to unblock re-approval. Approval advances this spec past Clarify, which
+  arms `ownership.implements.missing` as an ERROR, so the spec could not be re-approved
+  while it declared no owned code.
+
+  Ownership derived from creation date, not from the prose: every path above was created
+  2026-06-23, the same day as this spec, and each maps onto a row of the Architecture
+  table (nudge, context manifest, prepared prompt, integrate/mark-DRAFT, offer-compact,
+  command surface). No other spec declares any of them.
+
+  DELIBERATELY EXCLUDED: `packages/minspec/src/lib/constitution.ts`. It was created
+  2026-05-26, a month before this spec, and holds the shared parser (`parseConstitution`)
+  that other features read. `implements:` arms the spec-gate on every path it lists, so
+  claiming a pre-existing shared module here would block unrelated work on it.
 ---
 
 # MinSpec — Constitution Proposer (LLM-drafted, MinSpec-orchestrated) — Requirements
