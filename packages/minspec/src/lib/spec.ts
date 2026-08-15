@@ -1,4 +1,7 @@
 import * as fs from 'fs';
+import { SPEC_STATUSES, stripInlineComment } from './spec-vocabulary';
+import { assertOwnershipDeclaredForAdvance } from './ownership-advance-guard';
+import type { SpecStatus } from './spec-vocabulary';
 import type { Tier, Phase } from './config';
 import { PHASES } from './config';
 import { deriveStatus, phasesForApproval } from './lifecycle';
@@ -13,26 +16,16 @@ export type PhaseStatus = 'pending' | 'in-progress' | 'done' | 'skipped';
  * status (e.g. the tree's status lanes, SPEC-015 INV-1) import it so adding a
  * status here forces a decision everywhere it matters.
  */
-export const SPEC_STATUSES = ['new', 'specifying', 'planning', 'implementing', 'done', 'archived', 'superseded'] as const;
-
-/** Lifecycle status of the entire spec */
-export type SpecStatus = typeof SPEC_STATUSES[number];
-
-/**
- * Split-layout phase-file kinds. A spec split across sibling files carries one
- * of these in its `type:` frontmatter (one phase per file); a single-file spec
- * carries no `type` at all. Single source of truth: the split-layout branch in
- * `validateSpec` and the closed-set `type` gate both import this, so the closed
- * set of legitimate `type` values lives in exactly one place.
- *
- * NOTE: `type` is a closed-set field but NOT a required one — single-file specs
- * legitimately omit it (their absence IS the single-file signal). Requiring it
- * would mis-flag every single-file spec.
- */
-export const SPEC_TYPES = ['requirements', 'design', 'tasks'] as const;
-
-/** A split-layout phase-file kind. */
-export type SpecType = typeof SPEC_TYPES[number];
+// Moved to ./spec-vocabulary (#1446) so spec-validator can import them WITHOUT
+// value-importing this module — that edge was the runtime cycle blocking the
+// SPEC-051 ownership guard from reaching advanceSpecToImplementing below.
+// Re-exported here so every existing `from './spec'` import site is unchanged.
+export {
+  SPEC_STATUSES,
+  SPEC_TYPES,
+  stripInlineComment,
+} from './spec-vocabulary';
+export type { SpecStatus, SpecType } from './spec-vocabulary';
 
 /** A single task item within a phase section */
 export interface TaskItem {
@@ -113,39 +106,6 @@ function firstH1Heading(body: string): string {
 }
 
 /** Parse YAML frontmatter — lightweight, no dependency */
-/**
- * Strip a YAML inline comment from a scalar value. A `#` begins a comment only
- * when preceded by whitespace (YAML spec); a `#` glued to preceding text is part
- * of the value. A quoted scalar has NO inline comment stripped (its `#` is
- * literal), but its surrounding quotes ARE removed so the inner value is returned
- * — otherwise a quoted closed-enum value (`status: "done"`) carries its quotes
- * into the STATUSES_SET/TIERS_SET membership check, which fails, silently coercing
- * to the default ('new'/'T2') AND making `validateSpec` (which re-strips the raw
- * line) emit a spurious `frontmatter.*.unknown` (#153.1). An empty quoted scalar
- * (`""` / `''`) returns `''`, so it coerces to the default like any empty value —
- * NOT a spurious enum member.
- *
- * Without this, `status: implementing  # note` parsed as the whole string, which
- * failed the SpecStatus enum check and silently became 'new' — a false status.
- *
- * Exported so `validateSpec` can re-strip the RAW frontmatter line with identical
- * semantics when asserting a present `status`/`tier` is a recognized enum member
- * (#115 follow-up gate): the parsed value is lossy after coercion, so the validator
- * must re-read the raw line, and it must match exactly what the parser accepted.
- */
-export function stripInlineComment(value: string): string {
-  const v = value.trim();
-  // A matched quoted scalar: strip the surrounding quotes (need ≥2 chars so a lone
-  // quote isn't treated as a matched pair). Inner `#` is literal — no comment strip.
-  if (
-    v.length >= 2 &&
-    ((v.startsWith('"') && v.endsWith('"')) || (v.startsWith("'") && v.endsWith("'")))
-  ) {
-    return v.slice(1, -1);
-  }
-  const m = v.match(/\s#/);
-  return m && m.index !== undefined ? v.slice(0, m.index).trim() : v;
-}
 
 const PHASE_STATUSES = ['pending', 'in-progress', 'done', 'skipped'] as const;
 
@@ -571,6 +531,18 @@ export function advanceSpecToImplementing(filePath: string): SpecStatus {
   if (!fmMatch) {
     throw new Error(`No frontmatter block in ${filePath}`);
   }
+
+  // SPEC-051 T4.2 (#1446). THIS is the function that writes `phases.plan: in-progress`
+  // — the state `validateOwnership` keys on — so it is the last place an undeclared
+  // T3/T4 spec can be stopped before the illegal state reaches disk. #1423 guarded
+  // `approveSpec` but could not guard here: `spec-validator` value-imported this module,
+  // and closing that loop would have been a runtime cycle. The extraction to
+  // `./spec-vocabulary` removed the edge, so the guard finally reaches the writer.
+  //
+  // Same shape as the one in `approveSpec`: config-respecting and newly-introduced-only
+  // (both inherited from `violationsIntroducedByApproval`), placed BEFORE any write, and
+  // failing open on its own infrastructure while announcing the degrade.
+  assertOwnershipDeclaredForAdvance(filePath, parseSpec(content));
   // No `phases:` block → the `status:` line is the sole lifecycle representation;
   // a status-only flip has nothing to contradict.
   //

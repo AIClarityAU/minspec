@@ -3,6 +3,11 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #1285: spawns real child processes per assertion — 5s default is a load metric,
+// not a hang signal. Enforced by shell-timeout-coverage.test.ts.
+useShellTimeout();
 
 /**
  * T3 regression (#1120): a push that touches `.github/workflows/**` with a GitHub
@@ -117,7 +122,15 @@ function makeRepo({ credentialIsApp }: { credentialIsApp: boolean }) {
 
   // See the repoEnv doc comment: the local bare remote is not https, so the real
   // probe fails open here by design. Pin the verdict so these cases test the hook.
-  repoEnv.set(work, { MINSPEC_FAKE_APP_CRED: credentialIsApp ? '1' : '0' });
+  // MINSPEC_WORKFLOW_PERM_PROBE=0 (#1120): the gate is now capability-probing, so with a
+  // real token it would step aside and these refusal cases would prove nothing. Disabling
+  // the probe exercises the FAIL-CLOSED path — "the permission could not be confirmed, so
+  // refuse" — which is the half that must never regress. The granted-permission path is
+  // asserted separately below and by scripts/tests/workflow-perm-probe.sh.
+  repoEnv.set(work, {
+    MINSPEC_FAKE_APP_CRED: credentialIsApp ? '1' : '0',
+    MINSPEC_WORKFLOW_PERM_PROBE: '0',
+  });
 
   fs.mkdirSync(path.join(work, '.githooks'), { recursive: true });
   fs.mkdirSync(path.join(work, 'scripts/lib'), { recursive: true });
@@ -211,6 +224,59 @@ describe('pre-push blocks an App-credentialed workflow push', () => {
     });
     expect(res.status, res.stderr).toBe(0);
     expect(git(remote, 'rev-parse', '--verify', 'chore/override').status).toBe(0);
+  });
+
+  // ── #1120: the gate is capability-PROBING, not premise-based ────────────────
+  it('STEPS ASIDE when the installation demonstrably holds workflows: write', () => {
+    // The whole point of #1120. Everything above pins the probe OFF and asserts the
+    // fail-closed refusal; without this case the granted-permission path — the reason
+    // the change exists — would have no CI coverage at all, and the gate could quietly
+    // revert to always-refusing with a fully green suite.
+    const { work, remote } = makeRepo({ credentialIsApp: true });
+    const fake = path.join(work, 'fake-token.sh');
+    fs.writeFileSync(fake, "#!/usr/bin/env bash\necho 'contents=write'\necho 'workflows=write'\n");
+    fs.chmodSync(fake, 0o755);
+
+    mustGit(work, 'checkout', '-q', '-b', 'chore/probe-allows');
+    commitFile(work, '.github/workflows/ci.yml', 'name: ci\n');
+    const res = spawnSync('git', ['push', '-u', 'origin', 'chore/probe-allows'], {
+      cwd: work,
+      encoding: 'utf8',
+      env: {
+        ...ISOLATED_ENV,
+        ...repoEnv.get(work),
+        MINSPEC_WORKFLOW_PERM_PROBE: '1',
+        MINSPEC_PERM_TTL: '0',
+        MINSPEC_APP_TOKEN_SCRIPT: fake,
+      },
+    });
+    expect(res.status, res.stderr).toBe(0);
+    expect(res.stderr).not.toMatch(/refusing to push/);
+    expect(git(remote, 'rev-parse', '--verify', 'chore/probe-allows').status).toBe(0);
+  });
+
+  it('still REFUSES when the probe reports the permission is absent', () => {
+    // The other direction: the probe must re-block by itself if the grant is revoked.
+    const { work } = makeRepo({ credentialIsApp: true });
+    const fake = path.join(work, 'fake-token-noperm.sh');
+    fs.writeFileSync(fake, "#!/usr/bin/env bash\necho 'contents=write'\necho 'metadata=read'\n");
+    fs.chmodSync(fake, 0o755);
+
+    mustGit(work, 'checkout', '-q', '-b', 'chore/probe-blocks');
+    commitFile(work, '.github/workflows/ci.yml', 'name: ci\n');
+    const res = spawnSync('git', ['push', '-u', 'origin', 'chore/probe-blocks'], {
+      cwd: work,
+      encoding: 'utf8',
+      env: {
+        ...ISOLATED_ENV,
+        ...repoEnv.get(work),
+        MINSPEC_WORKFLOW_PERM_PROBE: '1',
+        MINSPEC_PERM_TTL: '0',
+        MINSPEC_APP_TOKEN_SCRIPT: fake,
+      },
+    });
+    expect(res.status, res.stderr).not.toBe(0);
+    expect(res.stderr).toMatch(/refusing to push/);
   });
 
   it('honours the git-config escape hatch', () => {
@@ -449,8 +515,11 @@ describe('the credential probe reads the push credential, not the machine', () =
     const sha = mustGit(work, 'rev-parse', 'HEAD');
     const zero = '0'.repeat(40);
 
-    // No seam — this must exercise the real probe.
-    const env = { ...ISOLATED_ENV };
+    // No CREDENTIAL seam — this must exercise the real credential probe, which is the
+    // subject here (does the hook forward the right remote?). The PERMISSION probe is a
+    // different question and is pinned off (#1120): with it live and workflows=write
+    // granted, the gate steps aside and this case would pass for the wrong reason.
+    const env = { ...ISOLATED_ENV, MINSPEC_WORKFLOW_PERM_PROBE: '0' };
     delete env.MINSPEC_FAKE_APP_CRED;
 
     /** Invoke the hook the way git does: argv = (remote, url), refs on stdin. */

@@ -25,6 +25,11 @@ import {
   GZIP_MARKER,
 } from '../src/lib/approval';
 import type { ApprovalRecord } from '../src/lib/approval';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #1285: spawns real child processes per assertion — 5s default is a load metric,
+// not a hang signal. Enforced by shell-timeout-coverage.test.ts.
+useShellTimeout();
 
 let tmp: string;
 

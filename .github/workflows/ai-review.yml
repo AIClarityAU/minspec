@@ -265,11 +265,23 @@ jobs:
       # if every required role passed. CLAUDE_CODE_OAUTH_TOKEN is the INFERENCE
       # credential for `claude -p` here — the agent still has no actionable tool.
       # The App token is intentionally ABSENT from this step.
+      #
+      # ANTHROPIC_API_KEY / AI_REVIEW_FAILOVER are the quota-failover pair that
+      # review-branch.sh reads (`AI_REVIEW_FAILOVER == payg && -n ANTHROPIC_API_KEY`).
+      # Both are the SAME KIND of credential as the OAuth token above — inference
+      # only, no actionable tool — so this does not widen the step's authority. They
+      # are passed together deliberately: the script's condition needs both, so
+      # setting the repo variable without forwarding the secret (or the reverse)
+      # leaves the failover configured-looking but inert, which is the failure this
+      # wiring exists to prevent. With neither set, the expressions render empty and
+      # the default `wait` behaviour is unchanged.
       - name: Independent review → decide combined label
         id: review
         if: steps.guard.outputs.configured == 'true'
         env:
           CLAUDE_CODE_OAUTH_TOKEN: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          AI_REVIEW_FAILOVER: ${{ vars.AI_REVIEW_FAILOVER }}
           AI_REVIEW_COVERAGE: ${{ vars.AI_REVIEW_COVERAGE }}
           PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
@@ -294,7 +306,14 @@ jobs:
           # interpolation). If the fetch fails, the diff is empty → fail closed.
           git fetch --no-tags --quiet origin "$HEAD" 2>/dev/null || true
 
-          extract_block() { sed -n '/REVIEW_VERDICT_BEGIN/,/REVIEW_VERDICT_END/p'; }
+          # Marker = the token ALONE ON A LINE, the SAME predicate review-decide.sh
+          # uses to decide the label (#1157). Display and decision must agree: when
+          # this extractor matched a marker the decider did not (or vice versa), the
+          # rendered block could read `verdict: pass` under an `ai-review:changes`
+          # label, and nothing detected the contradiction. Measured on #1209.
+          extract_block() {
+            sed -n '/^[[:space:]]*REVIEW_VERDICT_BEGIN[[:space:]]*$/,/^[[:space:]]*REVIEW_VERDICT_END[[:space:]]*$/p'
+          }
 
           # Scrub any inference-token value or `sk-ant-*` secret to `***` before the
           # reviewer text can reach the PR comment. Defeats a prompt-injected diff
@@ -305,6 +324,16 @@ jobs:
             sed -E 's/sk-ant-[A-Za-z0-9_-]+/***/g' \
               | if [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ]; then
                   awk -v tok="$CLAUDE_CODE_OAUTH_TOKEN" \
+                    '{ while ((p=index($0,tok))>0) $0=substr($0,1,p-1) "***" substr($0,p+length(tok)); print }'
+                else
+                  cat
+                fi \
+              | if [ -n "${ANTHROPIC_API_KEY:-}" ]; then
+                  # The sed above already catches today's `sk-ant-*` shape. This pass
+                  # does not trust that shape: it matches the key's LITERAL value, so
+                  # a future key format stays redacted without anyone remembering to
+                  # update a regex. Same treatment the OAuth token gets, same reason.
+                  awk -v tok="$ANTHROPIC_API_KEY" \
                     '{ while ((p=index($0,tok))>0) $0=substr($0,1,p-1) "***" substr($0,p+length(tok)); print }'
                 else
                   cat
@@ -333,7 +362,34 @@ jobs:
           if [ "$CHANGED_OK" != "yes" ]; then
             SELF_EDIT=yes
             SELF_EDIT_KIND=indeterminate
-          elif printf '%s\n' "$CHANGED" | grep -qE '^(\.github/|scripts/)'; then
+          # MACHINERY_PATHS_RE — the machinery path set (#1284). Gate-ness is a property of
+          # what the code DOES, not which directory it lives in: every entry here is code
+          # that decides whether some other change is allowed, so it cannot certify itself.
+          #   .github/   — the review workflows and their scripts
+          #   scripts/   — dispatch, review, remediation, the lease
+          #   .githooks/ — pre-commit (protected-branch #1041, RCDD DR-003), pre-push
+          #                (workflow-file protection #1120), commit-msg. Added #1284 after
+          #                PR #1273 changed the pre-push GATE and was classified "not
+          #                machinery", so the review system certified a change to a gate.
+          #   template-registry.ts — GENERATES the .minspec/hooks/pre-commit gate that every
+          #                MinSpec-initialised project runs. Its blast radius is strictly
+          #                larger than .githooks/ (which is this repo only), so leaving it
+          #                out would have kept the bigger hole open. A single file rather
+          #                than a directory is deliberate: membership is decided by the test
+          #                below, not by where the code happens to live.
+          #   ci-review-templates.ts — holds the VERBATIM ai-review workflow, review-decide.sh
+          #                and ai-review-guard.js shipped to every consuming repo. By the
+          #                membership test it is machinery with the LARGEST blast radius of
+          #                anything here: a PR touching only this file changes the review gate
+          #                for every downstream project. It was omitted in the first pass of
+          #                #1284 — the same inconsistency the PR set out to fix — and added
+          #                after the architect voter caught it.
+          # MEMBERSHIP TEST for anything added here: does this code decide whether some other
+          # change is allowed — directly, or by generating the thing that decides? If yes it
+          # cannot certify itself, and it belongs in this set.
+          # Read by packages/minspec/tests/machinery-paths.test.ts, which parses this line
+          # and runs the pattern against a path table — keep the marker comment above it.
+          elif printf '%s\n' "$CHANGED" | grep -qE '^(\.github/|scripts/|\.githooks/|packages/minspec/src/lib/(template-registry|ci-review-templates)\.ts$)'; then
             SELF_EDIT=yes
             SELF_EDIT_KIND=machinery
           fi
@@ -557,7 +613,7 @@ jobs:
               echo "> 1. **Wait** for the quota window to reset — the retry workflow re-reviews automatically."
               echo "> 2. **Fail over to PAYG API** — set repo variable \`AI_REVIEW_FAILOVER=payg\` + secret \`ANTHROPIC_API_KEY\`; re-runs then use pay-as-you-go instead of the subscription quota."
               echo "> 3. Re-run the \`ai-review\` workflow manually once quota is back."
-              det=$(printf '%s\n' "$REVIEWER_OUT" | sed -n '/REVIEW_UNAVAILABLE_BEGIN/,/REVIEW_UNAVAILABLE_END/p' | redact)
+              det=$(printf '%s\n' "$REVIEWER_OUT" | sed -n '/^[[:space:]]*REVIEW_UNAVAILABLE_BEGIN[[:space:]]*$/,/^[[:space:]]*REVIEW_UNAVAILABLE_END[[:space:]]*$/p' | redact)
               if [ -n "$det" ]; then
                 echo
                 echo "<details><summary>reviewer output (redacted — may include the reset time)</summary>"
@@ -912,14 +968,79 @@ jobs:
             echo "::warning title=ai-review/pass status not posted::Could not post the \`ai-review/pass\` commit status on $PR_HEAD_SHA (usually a missing \`statuses: write\` permission on the minspec-sdd App installation — grant it). The SHA-bound pass witness now falls back to the \`ai-review\` check-run (#810); the gate is not a false green either way."
           fi
 
-          # Apply the decided label FIRST (load-bearing), then clear the other two
-          # verdict labels + the in-progress marker (tolerate their absence).
+          # >>> verdict-label-coherence
+          # #1468 — apply the decided verdict label, clear every OTHER verdict label,
+          # then VERIFY the post-state instead of assuming it.
+          #
+          # Each removal used to be best-effort (`2>/dev/null || true`) with BOTH the
+          # error and the result discarded. One silently-failed removal left the PR
+          # carrying two contradictory verdict labels at once; `ready-to-merge` reads
+          # that as "not passed", so a legitimately-passing PR wedged with nothing on
+          # its surface explaining why (observed on #1430). Constitution invariant 2
+          # forbids exactly that shape: a load-bearing gate signal must not be written
+          # with a swallowed error.
+          #
+          # The rule is the tested pure seam from #1472 (`decideVerdictLabels` /
+          # `verdictLabelFault`), loaded from the trusted base checkout — never
+          # re-implemented in bash, so the two cannot drift. Individual removals stay
+          # tolerant on purpose: the AUTHORITY is the post-state check below, not any
+          # single call. The whole reconcile runs twice so a transient label-API
+          # failure self-heals instead of reddening the run; a post-state that STILL
+          # contradicts fails the step. Loud beats wedged — the backstop then posts
+          # the fail-closed verdict and summons a human.
           gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label "$LABEL"
-          for other in ai-review:pass ai-review:changes ai-review:blocked; do
-            [ "$other" = "$LABEL" ] && continue
-            gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "$other" 2>/dev/null || true
+
+          _verdict_labels_now() {
+            gh api "repos/$REPO/issues/$PR_NUMBER/labels" --paginate --jq '.[].name'
+          }
+          # `$2` picks which of the two seams to evaluate; both read the same module.
+          _verdict_rule() {
+            CURRENT="$1" VERDICT="$LABEL" WANT="$2" node -e '
+              const g = require(process.env.GITHUB_WORKSPACE + "/.github/scripts/ai-review-guard.js");
+              const o = {
+                current: (process.env.CURRENT || "").split("\n").filter(Boolean),
+                verdict: process.env.VERDICT,
+              };
+              process.stdout.write(
+                process.env.WANT === "remove"
+                  ? g.decideVerdictLabels(o).remove.join("\n")
+                  : g.verdictLabelFault(o) || "",
+              );
+            '
+          }
+
+          VERDICT_FAULT=""
+          for _attempt in 1 2; do
+            VERDICT_FAULT=""
+            # An unreadable label list is NOT "no labels" — saying so would
+            # misattribute an API failure as a missing label, which is the same class
+            # of lie the swallowed removals told. Distinct message, same fail-closed
+            # outcome: an unverifiable post-state is a fault.
+            if ! CURRENT_LABELS="$(_verdict_labels_now)"; then
+              VERDICT_FAULT="the PR's labels could not be read (GitHub API error), so the verdict post-state is unverifiable"
+            else
+              REMOVE_LABELS="$(_verdict_rule "$CURRENT_LABELS" remove)" || REMOVE_LABELS=""
+              while IFS= read -r _other; do
+                [ -n "$_other" ] || continue
+                gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "$_other" 2>/dev/null || true
+              done <<< "$REMOVE_LABELS"
+
+              if ! CURRENT_LABELS="$(_verdict_labels_now)"; then
+                VERDICT_FAULT="the PR's labels could not be re-read after reconciling them (GitHub API error), so the verdict post-state is unverifiable"
+              else
+                VERDICT_FAULT="$(_verdict_rule "$CURRENT_LABELS" fault)" \
+                  || VERDICT_FAULT="the verdict-label rule could not be evaluated (ai-review-guard.js errored)"
+              fi
+            fi
+            if [ -z "$VERDICT_FAULT" ]; then break; fi
+            if [ "$_attempt" != 2 ]; then sleep 3; fi
           done
-          gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "ai-review:pending" 2>/dev/null || true
+
+          if [ -n "$VERDICT_FAULT" ]; then
+            echo "::error title=ai-review verdict labels are contradictory::$VERDICT_FAULT. \`ready-to-merge\` reads a contradictory verdict-label set as \"not passed\", so leaving it would silently wedge this PR with nothing on its surface explaining why (#1468, observed on #1430). Failing the step instead; the fail-closed backstop below posts the verdict."
+            exit 1
+          fi
+          # <<< verdict-label-coherence
 
           # Summon a human ONLY when a human is GENUINELY the next actor (#816):
           #   • a MACHINERY PR (touches `.github/`/`scripts/`) — a gate cannot certify
@@ -996,8 +1117,23 @@ jobs:
           fi
           gh pr comment "$PR_NUMBER" --repo "$REPO" --body "$(printf '## 🤖 AI review — `ai-review:changes` (fail-closed)\n\nThe AI review workflow errored before producing a clean verdict, so it is requesting changes. This is a fail-closed default — an error must never yield a green. See the [workflow run](%s).\n\n_Posted by minspec-sdd[bot]._' "$RUN_URL")"
           gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label "ai-review:changes"
-          gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "ai-review:pass" 2>/dev/null || true
-          gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "ai-review:pending" 2>/dev/null || true
+          # #1468 — clear EVERY other verdict label, not just pass + pending. A PR
+          # sitting on `ai-review:blocked` when the workflow errored used to keep that
+          # label alongside the new `ai-review:changes`, and `ready-to-merge` reads the
+          # contradictory pair as "not passed" — the same wedge, reintroduced by the
+          # very path that exists to be the safe way out of it. The list comes from the
+          # tested seam (#1472) so this and the post step cannot drift; the literal
+          # fallback covers a run where the base checkout is what failed. Everything
+          # here stays best-effort — the honest `exit 1` below is the load-bearing part
+          # and must not be pre-empted by a label call.
+          # >>> backstop-verdict-clear
+          for other in $(node -e '
+            const g = require(process.env.GITHUB_WORKSPACE + "/.github/scripts/ai-review-guard.js");
+            process.stdout.write(g.VERDICT_LABELS.filter((l) => l !== g.CHANGES).join(" "));
+          ' 2>/dev/null || echo "ai-review:pass ai-review:blocked ai-review:pending"); do
+            gh pr edit "$PR_NUMBER" --repo "$REPO" --remove-label "$other" 2>/dev/null || true
+          done
+          # <<< backstop-verdict-clear
 
           # Fail-closed WORKFLOW ERROR → pull a human in. This is DELIBERATELY kept
           # eager (unlike a normal `ai-review:changes`, whose t=0 human-summon #816

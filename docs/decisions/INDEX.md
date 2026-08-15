@@ -141,7 +141,7 @@ DR-008 (accepted) makes unattended claude -p dispatch conditional on **Layer 2**
 
 ## [DR-018 — Licensing — MPL-2.0 for the shared core library, MIT for the extensions, CC-BY-4.0 for content](DR-018.md)
 
-*Status: accepted · Date: 2026-06-01*
+*Status: superseded · Date: 2026-06-01*
 
 <!-- dr-summary:DR-018 auto=6600f9fd3661 -->
 The monorepo ships open-source artifacts of three different kinds, and a single repo-wide license is wrong for all of them at once. The packages are not peers: packages/shared (@aiclarity/shared) is a reusable **library** — the T1–T4 complexity classifier engine plus the contract types — and it is the project's core IP (the classifier is the differentiator over GitHub Spec Kit, and its measurement direction is still an open research question, so improvements to it have outsized value). The two VS…
@@ -173,7 +173,7 @@ DR-009 validated the tier classifier against SWE-bench-Verified via out-of-tree 
 
 ## [DR-022 — Ceremony = risk-response — a blast-radius (consequence) profile, screen-gated, replaces diff-size tier as the unit](DR-022.md)
 
-*Status: accepted · Date: 2026-06-01*
+*Status: superseded · Date: 2026-06-01*
 
 <!-- dr-summary:DR-022 auto=12b5e81fd1b0 -->
 "Just Enough Spec" tiers ceremony (T1–T4) by **diff size** — git-analyzer.ts feeds classify() (max tierContribution across signals); the per-tier phase set lives in .minspec/config.json. Two findings forced a rethink this session: 1. **"Just Enough Spec" conflated two dials** — *consideration* (how thoroughly a change is thought through) and *ceremony* (how much the human must read/approve). Tiering tied them because the historical cost was *human authoring*. The LLM authors now: consideration should be thorough on *every* change (nearly free); ceremony should…
@@ -349,7 +349,7 @@ SPEC-017 (Trust Dashboard) needs an **approval baseline** — the exact approved
 
 ## [DR-044 — The "Execute" extension is named SealBox and lives in its own repo (split from the monorepo)](DR-044.md)
 
-*Status: proposed · Date: 2026-06-28*
+*Status: accepted · Date: 2026-06-28*
 
 <!-- dr-summary:DR-044 auto=ac8869d3b81c -->
 DR-015 accepted a **third Tier-1 "Execute" extension** (autonomous agent dispatch) and — via its OQ-3 — placed it **inside** the public AIClarityAU/minspec monorepo as packages/agent-execute, shipped in the Pro pack, sharing @aiclarity/shared. Its name was deferred (OQ-4, #66), with aiclarity.agent-execute / "AgentSystem" as working placeholders. Its load-bearing security substrate is specified in SPEC-019 (credential-free sandbox, host-side broker, attestation) and the reality-check reviewer in SPEC-016.
@@ -373,7 +373,7 @@ SPEC-019's **FR-13** hands the agent's branch out as a diff and has the credenti
 
 ## [DR-047 — Independent AI review across every Approvable surface — generalises DR-033 §6 from PR-only to all Approvable types](DR-047.md)
 
-*Status: proposed · Date: 2026-06-30*
+*Status: accepted · Date: 2026-06-30*
 
 <!-- dr-summary:DR-047 auto=7fdce4e973c0 -->
 Whether an AI-reviewed doc needs a *human* gate depends on its criticality and the dev's coverage setting (Decisions 5–6), not on whether it was AI-reviewed. Every approvable is AI-reviewed; only the critical subset is human-gated. 1. **AI-authored by design.** The architect agent, Specify agent, and Propose-Constitution agent draft Specs, DRs, and constitution invariants. The human approval that follows is the **only check** — there is no independent review before the author hands work to the human. Self-attestation (author → human…
@@ -453,7 +453,7 @@ MinSpec captures the approver of a spec/DR as approvedBy = git config user.email
 
 ## [DR-057 — Generated approvables take the review lane — LLM-generated next-phase docs (tasks.md; design.md opt-in) route worktree→PR for independent AI review; human-authored approvables stay main-direct; the drain actions phase-advance by enqueue, never by running an LLM in the Tier-0 extension](DR-057.md)
 
-*Status: proposed · Date: 2026-07-14*
+*Status: accepted · Date: 2026-07-14*
 
 <!-- dr-summary:DR-057 auto=a02554d56427 -->
 The background piggyback loop (scripts/drain-inbox.sh, fired from the session-start hook) has ONE input source: **GitHub issues** (inbox → triage → agent-ready → dispatch-issue.sh → worktree → PR). It never reads .minspec/approvals/ sidecars or spec status: frontmatter. Meanwhile SDD phase-advance (specify→plan→tasks→implement) lives entirely in the VS Code extension as a human Command-Palette action. So an **approved plan stalled with no tasks.md** just sits there — nothing in the background loop notices or generates the next phase. The founder asked to close…
@@ -627,11 +627,51 @@ One rule — which commits the push-protected default branch may receive — is 
 Two accepted decisions pull in opposite directions, and SPEC-050 FR-8 sits exactly on the seam. The concrete failure (#1225): a developer with MinSpec projects A and B clicks "Always push from now on" while approving in A — a named, deliberate act scoped, in their mind, to A. The write is machine-wide. The next Alt+A in B pushes to B's origin and auto-opens a PR there, with no prompt and no moment at which B was consented to.
 <!-- /dr-summary:DR-078 -->
 
+## [DR-079 — The verdict travels out of band - a reviewer's words must not be able to act as its verdict](DR-079.md)
+
+*Status: accepted · Date: 2026-08-05*
+
+<!-- dr-summary:DR-079 auto=ea255338bf34 -->
+The reviewer panel (DR-033 §6) runs four claude -p agents over a diff. Each is told to emit exactly one block: review-decide.sh then parses that block out of the agent's free-text output, and ai-review.yml extracts it again to render the PR comment.
+<!-- /dr-summary:DR-079 -->
+
 ## [DR-080 — Approval recovery is owned by the refusal that triggers it, not by SPEC-050 — the two axes are complementary, and the duplicated push logic is a dated loan against SPEC-050's seam](DR-080.md)
 
-*Status: proposed · Date: 2026-08-06*
+*Status: accepted · Date: 2026-08-06*
 
 <!-- dr-summary:DR-080 auto=3485bfc12c76 -->
 commitApproval refuses to commit an approval when HEAD is the push-protected default branch (#1064); such a commit could never be pushed, and the #1041 pre-commit hook rejects it. **That refusal is correct and stays.** What was missing is what happens next.
 <!-- /dr-summary:DR-080 -->
+
+## [DR-081 — What ceremony a solo approval carries - SPEC-050 is carved out of DR-076's docs-lane park, and an approval-record PR self-exempts from ai-review behind a deterministic integrity check](DR-081.md)
+
+*Status: accepted · Date: 2026-08-07*
+
+<!-- dr-summary:DR-081 auto=33d8e35e60a7 -->
+Two cuts to ceremony that only ever made sense for a team, with nothing machine-checkable removed. **SPEC-050 is carved out of DR-076's docs-lane park** - it was swept in by a filing error (`epic: EPIC-009`, whose own membership test it fails), not by a decision about solo approval landing. And **an approval-record PR self-exempts from `ai-review`**, returning `neutral` like a machinery PR, because its payload is a generated sidecar plus a `status:` flip with nothing to review; a deterministic `approval-integrity` check takes its place so the PR goes green honestly instead of needing `--admin` every time. The exemption covers the record, never the approvable - DR-047's substance gate is untouched.
+<!-- /dr-summary:DR-081 -->
+
+## [DR-082 — Agent GitHub writes take a bot identity through a lazy `gh` wrapper that fails closed, and a CI guard enforces it — because the rule already existed as prose and nothing obeyed it](DR-082.md)
+
+*Status: accepted · Date: 2026-08-12*
+
+<!-- dr-summary:DR-082 auto=c66ee732edcf -->
+minspec#995 decided that agent GitHub writes must be bot-attributed. DR-074 decided *where* that rule applies (only in repos with .minspec/). Neither recorded *how*, and the how was left to prose in CLAUDE.md. Prose did not hold. At the time #1355 was filed there were 76 write call sites across 11 paths in scripts/, and **not one** used the App token. Every agent-filed issue, comment, label and merge was recorded as the founder. The notification flood was the visible symptom; the…
+<!-- /dr-summary:DR-082 -->
+
+## [DR-083 — MIT for all code, superseding DR-018's MPL-2.0 core — the copyleft protected an IP position the project no longer holds](DR-083.md)
+
+*Status: accepted · Date: 2026-08-12*
+
+<!-- dr-summary:DR-083 auto=4b2195b31e89 -->
+DR-018 split the repo three ways: **MPL-2.0** for packages/shared, **MIT** for the extensions and tooling, **CC-BY-4.0** for prose. The split existed to protect one thing, and DR-018 says so plainly: packages/shared is *"the project's core IP (the classifier is the differentiator over GitHub Spec Kit)"*, and file-level copyleft was chosen so *"forking the classifier into a proprietary product now requires publishing changes to the shared source files"*.
+<!-- /dr-summary:DR-083 -->
+
+## [DR-084 — The shadow harness talks HTTP, not `claude -p` — a client that resolves no credentials beats a scrub that must enumerate them](DR-084.md)
+
+*Status: proposed · Date: 2026-08-14*
+
+<!-- dr-summary:DR-084 auto=f731dff842d4 -->
+The GLM shadow-triage instrument (#1338) runs a second model alongside the live triage agent on the same issue, pushes both outputs through the same deterministic gate, records the agreement and discards the shadow verdict. It exists because the drain loop and the required ai-review merge gate draw on one Anthropic subscription quota, so the queue jams when that quota runs out (#1234) — and because GLM's fitness for *our* task shape was unmeasured, which per this repo's evidence discipline makes…
+<!-- /dr-summary:DR-084 -->
 <!-- minspec:dr-index:end -->

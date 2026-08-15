@@ -10,6 +10,14 @@ import {
   refreshHarnessFiles,
   MINSPEC_GITIGNORE_ENTRIES,
 } from '../src/lib/scaffold';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #1285: drives real git in temp repos, and one case scaffolds a whole harness and
+// commits it through the scaffolded hooks. It was under the 5s default only because
+// that commit died early at the gitleaks gate; #1514 made the scaffold committable,
+// so the case now runs the full hook and needs the shell timeout it always qualified
+// for. Enforced by shell-timeout-coverage.test.ts.
+useShellTimeout();
 
 /**
  * T3 regression: declaring a path machine-local must actually make it machine-local.

@@ -272,7 +272,27 @@ describe('initRefreshCommand() — write-failure surfacing (#153)', () => {
   });
 });
 
-describe('SPEC-025 FR-6 — empty-constitution nudge (non-modal advisory)', () => {
+/**
+ * T3 — REGRESSION (#1546). SPEC-025 FR-6 still holds; what changed is WHO emits it.
+ *
+ * The advisory had two producers. The compliant one lives in `extension.ts` and
+ * carries "Propose draft", "Generate with AI…" and "Don't ask again", honouring the
+ * per-workspace skip flag. The one deleted here fired from the init command as a bare
+ * `showInformationMessage` — no actions, and structurally unable to read the skip flag
+ * (it took only a folder path, never an ExtensionContext), so it silently overrode the
+ * user's "Don't ask again" on every init and refresh.
+ *
+ * It was also guaranteed-true noise: init has just scaffolded the constitution from a
+ * template, so "no human-authored rules yet" cannot be false at that moment. A message
+ * that is always true at the moment it fires carries no information, and it arrived
+ * inside a flood of other init toasts.
+ *
+ * NOTE this REPLACES the previous assertions rather than adding to them: the old block
+ * asserted `toHaveBeenCalledTimes(2)` with a mock descriptor carrying no action fields,
+ * which PINNED the actionless emission as correct. A fixture encoding the defect is why
+ * the defect survived.
+ */
+describe('SPEC-025 FR-6 — the init command does not own the constitution advisory (#1546)', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     vi.mocked(evaluateConstitution).mockReturnValue({
@@ -282,26 +302,32 @@ describe('SPEC-025 FR-6 — empty-constitution nudge (non-modal advisory)', () =
     });
   });
 
-  it('initCommand surfaces a SECOND non-modal info message when constitution is empty', async () => {
+  it('initCommand emits no constitution advisory even when the constitution is empty', async () => {
     vi.mocked(evaluateConstitution).mockReturnValue({
       empty: true,
-      message: 'MinSpec: author your constitution',
+      message: 'MinSpec: your constitution has no human-authored rules yet',
       fixHint: 'edit it',
     });
     await initCommand('/tmp/ws');
-    // Success message + the advisory = two non-modal info toasts, no error.
-    expect(vscode.window.showInformationMessage).toHaveBeenCalledTimes(2);
-    const calls = vi.mocked(vscode.window.showInformationMessage).mock.calls.map((c) => c[0]);
-    expect(calls).toContain('MinSpec: author your constitution');
-    // Advisory must be NON-MODAL: no options object with { modal: true }.
-    for (const call of vi.mocked(vscode.window.showInformationMessage).mock.calls) {
-      const opts = call[1] as { modal?: boolean } | undefined;
-      expect(opts?.modal).not.toBe(true);
-    }
+    const calls = vi.mocked(vscode.window.showInformationMessage).mock.calls.map((c) => String(c[0]));
+    expect(calls.filter((m) => m.includes('no human-authored rules yet'))).toHaveLength(0);
+    // Only the "Initialized" success toast remains.
+    expect(vscode.window.showInformationMessage).toHaveBeenCalledTimes(1);
     expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
   });
 
-  it('does NOT surface the advisory when the constitution is already populated', async () => {
+  it('initRefreshCommand emits no constitution advisory either', async () => {
+    vi.mocked(evaluateConstitution).mockReturnValue({
+      empty: true,
+      message: 'MinSpec: your constitution has no human-authored rules yet',
+      fixHint: 'edit it',
+    });
+    await initRefreshCommand('/tmp/ws');
+    const calls = vi.mocked(vscode.window.showInformationMessage).mock.calls.map((c) => String(c[0]));
+    expect(calls.filter((m) => m.includes('no human-authored rules yet'))).toHaveLength(0);
+  });
+
+  it('emits the same single toast when the constitution is already populated', async () => {
     vi.mocked(evaluateConstitution).mockReturnValue({
       empty: false,
       message: 'unused',
@@ -311,13 +337,16 @@ describe('SPEC-025 FR-6 — empty-constitution nudge (non-modal advisory)', () =
     expect(vscode.window.showInformationMessage).toHaveBeenCalledTimes(1);
   });
 
-  it('a nudge failure never affects the init result (best-effort)', async () => {
-    vi.mocked(evaluateConstitution).mockImplementationOnce(() => {
-      throw new Error('boom');
+  it('init no longer consults the constitution at all', async () => {
+    // Non-vacuity guard for the two assertions above: they would also pass if the
+    // advisory were merely suppressed somewhere downstream. The init path must not
+    // evaluate the constitution in the first place.
+    vi.mocked(evaluateConstitution).mockReturnValue({
+      empty: true,
+      message: 'MinSpec: your constitution has no human-authored rules yet',
+      fixHint: 'edit it',
     });
-    await expect(initCommand('/tmp/ws')).resolves.toBeUndefined();
-    // Success message still fired; the thrown nudge was swallowed.
-    expect(vscode.window.showInformationMessage).toHaveBeenCalledTimes(1);
-    expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+    await initCommand('/tmp/ws');
+    expect(evaluateConstitution).not.toHaveBeenCalled();
   });
 });

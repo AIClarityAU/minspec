@@ -24,6 +24,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROLES_DIR="${SCRIPT_DIR}/roles"
 # shellcheck source=scripts/lib/agent-context.sh
 source "${SCRIPT_DIR}/lib/agent-context.sh"
+# Agent writes carry the BOT's identity, never the human's (#1355). This arms a
+# `gh` wrapper; acquiring the token is LAZY, so reads pass through untouched and
+# only the first WRITE mints — aborting there, loudly, if it cannot.
+# shellcheck source=scripts/lib/gh-bot.sh
+source "${SCRIPT_DIR}/lib/gh-bot.sh"
+gh_bot_init
 
 FORCE_ROLE=""
 
@@ -94,8 +100,10 @@ fi
 #   ^sites/                                — every deployed site directory.
 #   ^\.github/workflows/deploy-sites\.yml$ — the deploy definition is itself a push-path
 #     trigger. DEFENCE-IN-DEPTH, not the primary control: `^\.github/` can never earn a
-#     valid `ai-review:pass` (ai-review.yml's self-edit machinery guard forces `changes`
-#     and posts no SHA-bound pass witness), so this arm is deliberately redundant with
+#     MERGE-ELIGIBLE pass — since #928 the self-edit machinery guard keeps the honest
+#     `ai-review:pass` LABEL but posts NO SHA-bound pass witness (`ai-review/pass`
+#     status forced `failure`, check-run `neutral`, and the verifier rejects `neutral`),
+#     so `ready-to-merge` stays red — and this arm is deliberately redundant with
 #     that guard — do NOT drop it as "already covered", because it is what lets the
 #     lock-step sync test below be TOTAL over the workflow's `paths:` list.
 #
@@ -104,6 +112,20 @@ fi
 # every matrix `dir:` — in deploy-sites.yml, so a newly-deployed directory added to the
 # workflow cannot silently escape the withhold.
 PUBLISH_PATH_RE='^sites/|^\.github/workflows/deploy-sites\.yml$'
+
+# Mandate 4 of the withhold set below (#1264): the machinery SECOND WITNESS. ai-review's
+# self-edit guard already refuses machinery PRs a SHA-bound pass witness, holding
+# `ready-to-merge` red — but that hold had exactly ONE producer. If ai-review.yml's
+# suppression regresses, is skipped (workflow not run, quota outage, permission gap),
+# or its machinery regex is narrowed, dispatch has ALREADY armed `--auto` and nothing
+# else refuses the merge. Constitution invariant 2: no load-bearing gate hinges on a
+# single producer that one permission/config gap can disable — provide an independent
+# second witness. This mandate is that witness: dispatch declines to arm, independently
+# of anything ai-review does. Mirrors ai-review.yml's machinery regex
+# `^(\.github/|scripts/)` plus `^\.githooks/` (missing from the ai-review side too —
+# #1284). Kept a NAMED constant so the planned #509 narrowing (gate-critical vs
+# operational split) changes ONE definition, in lock-step with the ai-review side.
+MACHINERY_PATH_RE='^\.github/|^\.githooks/|^scripts/'
 
 # paths_have_approvable_doc (#833, extended #981): does a set of changed paths
 # (newline-separated on stdin) touch something a HUMAN — not `ai-review:pass` — must own
@@ -115,9 +137,10 @@ PUBLISH_PATH_RE='^sites/|^\.github/workflows/deploy-sites\.yml$'
 # historical — the predicate it answers is the broader "must a human own this merge?";
 # it is the pure seam's stable contract, so it is kept rather than churned.)
 #
-# The withhold set is the UNION of three intentionally-distinct mandates (a documented
+# The withhold set is the UNION of four intentionally-distinct mandates (a documented
 # SUPERSET of the docs-lane push corpus, NOT a divergent copy of it) — two about WHO
-# OWNS THE CONTENT, one about WHAT MERGING THE PATH DOES:
+# OWNS THE CONTENT, one about WHAT MERGING THE PATH DOES, one an INDEPENDENT SECOND
+# WITNESS to a hold that had a single producer:
 #   1. DOCS_CORPUS_RE — the docs-lane / human-owned DOC corpus (specs/**, docs/**,
 #      .minspec/approvals/**, top-level *.md), the SHARED single source of truth that
 #      keeps this the 4th lock-step enforcer alongside push-docs.sh / docs-corpus.ts /
@@ -139,13 +162,16 @@ PUBLISH_PATH_RE='^sites/|^\.github/workflows/deploy-sites\.yml$'
 #      invariant DR-066 (no silent gate) + "enforce via code, don't hope" ⇒ deterministic
 #      withhold here. NB triage.md's filter is issue-level anyway; it can never bind a
 #      diff, since any issue's build may touch sites/**.
+#   4. MACHINERY_PATH_RE (#1264) — SECOND WITNESS, not ownership: paths that define
+#      what merges/reviews/validates (.github/**, .githooks/**, scripts/**). See the
+#      constant's comment above; narrows in lock-step with ai-review's guard per #509.
 # The spec-gate deliberately ALLOWS editing spec docs (doc-before-CODE, so a spec can
 # be fixed toward approval); this is the symmetric MERGE-side guard. Exit 0 (= withhold)
 # if ANY path matches, else 1. Fail-closed on an unknown/unreadable changed-set is NOT
 # this pure classifier's job — it lives at the arm site (the nonzero + empty branches),
 # so "no match" is never conflated with "could not tell".
 paths_have_approvable_doc() {
-  grep -qE "${DOCS_CORPUS_RE}"'|^\.minspec/|^\.cursorrules$'"|${PUBLISH_PATH_RE}"
+  grep -qE "${DOCS_CORPUS_RE}"'|^\.minspec/|^\.cursorrules$'"|${PUBLISH_PATH_RE}|${MACHINERY_PATH_RE}"
 }
 
 # Pure seam: prove the withhold classifier without gh/dispatch. Paths on stdin.
@@ -804,6 +830,12 @@ run_reviewer_stage() {
     rm -f "$rb_scan"
   fi
 
+  # An installation token lives ~1h and an agent build routinely runs longer, so
+  # the token minted at startup may already be dead by the time we reach these
+  # post-build writes. Re-mint if it is near expiry — otherwise every write below
+  # 401s and the run looks like "the agent silently did nothing" (#1355).
+  gh_bot_refresh
+
   # 5. Ensure the ai-review:* labels exist (best-effort; exact vocab reused from
   #    .github/workflows/ready-to-merge.yml — do NOT invent new label names).
   gh label create "ai-review:pass"    --repo "$REPO" --color 0e8a16 --description "Independent AI review passed (advisory)" 2>/dev/null || true
@@ -830,7 +862,8 @@ run_reviewer_stage() {
   #     GitHub merges it the moment the required `ready-to-merge` check (= provenance-
   #     verified ai-review:pass) goes green — no human keystroke, no per-PR babysit.
   #     HITL stays intact: the ai-review panel IS the gate; a machinery PR (self-edit
-  #     guard) can never get ai-review:pass, so it never auto-merges. Best-effort:
+  #     guard) keeps its honest label but gets NO SHA-bound pass witness (#928), so
+  #     ready-to-merge stays red and it never auto-merges. Best-effort:
   #     `--auto` errors on an already-clean/blocked PR are non-fatal.
   #     #833 exclusion: a PR that touches the docs-lane / human-owned corpus (specs/**,
   #     docs/**, .minspec/approvals/**, top-level *.md) must NOT auto-merge — ai-review
@@ -860,6 +893,8 @@ run_reviewer_stage() {
       # stays provably inside the single guarded block. errexit-safe: a non-matching
       # grep is exempt as a non-final command of an `&&` list.
       local hold_why="touches the docs-lane corpus / .minspec governance config (spec/DR/docs/approval-ledger/top-level .md) (#833)"
+      grep -qE "${MACHINERY_PATH_RE}" <<<"$changed_files" \
+        && hold_why="touches machinery (.github/ .githooks/ scripts/) — dispatch is the second witness to the ai-review machinery hold (#1264)"
       grep -qE "${PUBLISH_PATH_RE}" <<<"$changed_files" \
         && hold_why="touches a PUBLISH path (sites/** → public Cloudflare Pages via deploy-sites.yml) — merging IS publishing (#981)"
       echo "  → native auto-merge WITHHELD on PR #$pr_num — ${hold_why}; a human owns this merge. Labeled needs-human-review."
@@ -1407,7 +1442,78 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
       #    This is the real pre-publish gate; its result is authoritative, not
       #    the agent's claim. Each check is independent: a fail in one does not
       #    skip the others, so every status is reported truthfully.
-      gate_status() { ( cd "$WORKTREE" && "$@" >/dev/null 2>&1 ) && echo pass || echo fail; }
+      #
+      #    Each check is TIME-BOUNDED (#1304). Without a bound the `$(...)` blocks
+      #    until the child closes stdout, so ONE hung suite stalls the dispatcher —
+      #    and therefore the whole drain — indefinitely. A wedged vitest held this
+      #    gate for 19h23m on 2026-08-05, defeating BOTH the FR-12 claim lifetime
+      #    and the drain's own MAX_LIFETIME backstop (which is evaluated only
+      #    BETWEEN cycles, so a cycle that never returns can never reach it).
+      #    BUILD_TIMEOUT_ARGS above bounds the `claude -p` leg only, not this one.
+      #
+      #    A timed-out check reports `timeout`, NEVER `fail`. "We did not find out"
+      #    is a different fact from "it failed", and rendering the former as the
+      #    latter puts a verdict on the diff that the diff did not earn — observed
+      #    on PR #1302, whose entire diff was a single markdown file.
+      #
+      #    Budget = whatever is left of the claim lease, so the bound covers the
+      #    whole dispatch rather than just the agent leg. GATE_MAX_SECS caps any
+      #    single check so a slow one cannot eat the whole remaining lease and
+      #    starve the three after it; GATE_FALLBACK_SECS applies when no lease is
+      #    in force. Neither path can ever yield an unbounded run.
+      #    Sizing: these are BOUNDS, not SLAs. The failure being prevented is a
+      #    19-HOUR wedge, so the ceiling only has to be lower than "forever" while
+      #    staying clear of a healthy run. `npm test` was measured at >14 min on
+      #    this repo under normal load (2026-08-06), so a 15-min ceiling would have
+      #    false-timed-out a perfectly good suite; 45 min leaves real headroom.
+      #    Worst case all four checks time out at 45 min = 3 h, still bounded, and
+      #    the claim lease caps it further whenever one is in force.
+      GATE_MAX_SECS="${MINSPEC_GATE_MAX_SECS:-2700}"           # 45 min ceiling per check
+      GATE_FALLBACK_SECS="${MINSPEC_GATE_FALLBACK_SECS:-1800}" # 30 min when no lease
+
+      gate_budget() {
+        local remaining budget
+        if (( BUILD_DEADLINE > 0 )); then
+          remaining=$(( BUILD_DEADLINE - $(date -u +%s) ))
+          # Lease already spent: still bound the check (a floor), never unbounded.
+          (( remaining > 0 )) || remaining=60
+          budget=$remaining
+        else
+          budget=$GATE_FALLBACK_SECS
+        fi
+        if (( budget > GATE_MAX_SECS )); then
+          budget=$GATE_MAX_SECS
+        fi
+        echo "$budget"
+      }
+
+      # Exit 124 = SIGTERM at the ceiling; 137 = SIGKILL from --kill-after. Both mean
+      # "never finished", not "failed". Any other non-zero is a real check failure.
+      # `if ...; then rc=0; else rc=$?; fi` because `set -e` is in force (line 18):
+      # a bare call followed by `rc=$?` would abort the dispatch on the first red check.
+      gate_status() {
+        local budget rc
+        budget=$(gate_budget)
+        if ( cd "$WORKTREE" && timeout --kill-after=30s "${budget}s" "$@" >/dev/null 2>&1 ); then
+          rc=0
+        else
+          rc=$?
+        fi
+        case "$rc" in
+          0)
+            echo pass
+            ;;
+          124|137)
+            # Loud, never silent (constitution invariant 2): the status goes to
+            # stdout for the caller, the explanation to stderr for the log.
+            echo timeout
+            echo "Gate check '$*' TIMED OUT after ${budget}s for #$ISSUE — reporting 'timeout', not 'fail' (#1304)." >&2
+            ;;
+          *)
+            echo fail
+            ;;
+        esac
+      }
       GATE_TEST=$(gate_status npm test)
       GATE_LINT=$(gate_status npm run lint)
       GATE_BUILD=$(gate_status npm run build)
@@ -1447,6 +1553,33 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
         BODY=$(printf '%s\n\n---\n\n%s' "$BODY" "$SIGNALS_BLOCK")
       else
         echo "WARNING: could not render review signals — posting summary without the block"
+      fi
+      # FENCE ONCE, ON THE ASSEMBLED BODY (#1243). This comment is authored by the
+      # parent, so every downstream reader treats it as first-party — but it carries
+      # AGENT-authored text, from an agent whose prompt embedded the untrusted issue
+      # body. Author trust proves who posted the comment, never who wrote what is inside
+      # it (DR-072 §5a).
+      #
+      # The first version of this fenced `.agent-summary.md` alone. That was fixing the
+      # INSTANCE: `SIGNALS_BLOCK` is appended above, rendered from the agent's own
+      # `.review-signals.json` (whose `rootCause` is emitted verbatim), so a forged
+      # record could still reach a trusted comment through a sibling channel at the very
+      # same echo site. Fencing the assembled body is the PROPERTY — any future block
+      # appended to `$BODY` is covered without anyone remembering to fence it.
+      #
+      # Safe to apply wholesale: the parent contributes no `minspec-*` marker of its own
+      # to this body, so nothing first-party is broken by it.
+      # Fail SAFE, not empty. A `sed`/handler failure would otherwise assign an empty
+      # BODY and post a blank comment — losing the agent's whole summary to a tool error.
+      # Keep the fenced text only if something actually came back; the fence is a
+      # hardening, and hardening that can destroy the payload it protects is a worse bug
+      # than the one it fixes.
+      if FENCED_BODY=$(printf '%s' "$BODY" | "${SCRIPT_DIR}/dispatch-ready-check.sh" --fence-agent-text) \
+           && [[ -n "$FENCED_BODY" ]]; then
+        BODY="$FENCED_BODY"
+      else
+        echo "WARNING: could not fence the agent summary — posting a SAFE PLACEHOLDER instead of unfenced text." >&2
+        BODY=$(printf 'Agent completed, but its summary could not be safely fenced for republication (#1243), so it is withheld rather than posted unchecked.\n\n— branch `%s` @ %s (auto-dispatched)' "$BRANCH" "$SHA")
       fi
       gh issue comment "$ISSUE" --repo "$REPO" --body "$BODY" 2>/dev/null || true
 

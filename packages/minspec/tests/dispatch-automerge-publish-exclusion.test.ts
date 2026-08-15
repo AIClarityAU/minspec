@@ -89,15 +89,14 @@ describe('dispatch-issue.sh — publish-path auto-merge exclusion (#981)', () =>
       'packages/minspec/src/lib/foo.ts',
       'packages/minspec/src/lib/classifier.ts',
       'packages/minspec/tests/foo.test.ts',
-      'scripts/dispatch-issue.sh',
       'package.json',
       // prefix precision: `^sites/` is anchored, so these are NOT publish paths
       'mysites/index.html',
       'websites/foo.ts',
       'packages/minspec/src/sites/foo.ts',
-      // a DIFFERENT workflow is not the deploy definition (it is held by
-      // ai-review.yml's separate machinery self-edit guard, not by this one)
-      '.github/workflows/ai-review.yml',
+      // NB `scripts/dispatch-issue.sh` and `.github/workflows/ai-review.yml` used to
+      // sit in this arm-list as non-publish paths; since #1264 they hold via the
+      // MACHINERY mandate — see dispatch-automerge-machinery-exclusion.test.ts.
     ]) {
       it(`arms: ${p}`, () => {
         const r = classify(p + '\n');
@@ -235,11 +234,12 @@ describe('dispatch-issue.sh — publish-path auto-merge exclusion (#981)', () =>
       expect(fn![1]).toMatch(/\$\{PUBLISH_PATH_RE\}/);
     });
 
-    it('the docblock documents THREE mandates, not two', () => {
+    it('the docblock documents FOUR mandates, not two', () => {
       const idx = content.indexOf('paths_have_approvable_doc() {');
       const doc = content.slice(Math.max(0, idx - 4000), idx);
-      expect(doc).toMatch(/UNION of three intentionally-distinct mandates/);
+      expect(doc).toMatch(/UNION of four intentionally-distinct mandates/);
       expect(doc).toMatch(/PUBLISH_PATH_RE \(#981\)/);
+      expect(doc).toMatch(/MACHINERY_PATH_RE \(#1264\)/);
     });
 
     it('the arm site names the publish mandate in the withhold message (never-wrong)', () => {

@@ -16,6 +16,11 @@
 import { describe, it, expect } from 'vitest';
 import { TEMPLATES } from '../src/lib/template-registry';
 import { parseSections } from '../src/lib/merge-refresh';
+import * as fs from 'fs';
+import * as path from 'path';
+
+/** This repo's root, where the harness files the assistants actually read live. */
+const REPO_ROOT = path.resolve(__dirname, '../../..');
 
 /** The three templates that carry agent-facing conventions. */
 const AGENT_TEMPLATES = ['CLAUDE.md', 'AGENTS.md', '.cursorrules'] as const;
@@ -56,6 +61,39 @@ describe('shared agent conventions are identical across all three templates', ()
       // scaffolding it there would put un-editable boilerplate into a document the
       // human is meant to author.
       expect(sectionBody('constitution.md', heading)).toBeUndefined();
+    });
+  }
+
+  // ── THIS repo's own harness files, not just the shipped templates (#1341) ──────
+  // The block above proves the three TEMPLATES agree with each other. It says nothing
+  // about whether this repo's root CLAUDE.md / AGENTS.md / .cursorrules — the files the
+  // assistants working HERE actually read — still match what we ship.
+  //
+  // That gap is not hypothetical: a convention change updated all three templates and the
+  // root CLAUDE.md, leaving root AGENTS.md and .cursorrules on the old rule. Every
+  // assertion above stayed green, because template-to-template parity was intact. Two
+  // review voters caught it; nothing in the suite did.
+  //
+  // Scoped to SHARED_CONVENTIONS only. A root file legitimately diverges from its template
+  // elsewhere (project-specific sections, local additions) — it is these cross-assistant
+  // conventions, and only these, that must be identical everywhere.
+  for (const heading of SHARED_CONVENTIONS) {
+    it(`this repo's own harness files carry the shipped "${heading}"`, () => {
+      const shipped = sectionBody('CLAUDE.md', heading);
+      expect(shipped, `template CLAUDE.md is missing "${heading}"`).toBeTruthy();
+
+      for (const file of AGENT_TEMPLATES) {
+        const onDisk = parseSections(fs.readFileSync(path.resolve(REPO_ROOT, file), 'utf8')).find(
+          (s) => s.heading === heading,
+        )?.body;
+        expect(onDisk, `${file} (this repo's own copy) is missing "${heading}"`).toBeTruthy();
+        // Compare trimmed: trailing-whitespace differences are not drift worth failing on.
+        expect(
+          onDisk!.trim(),
+          `${file} in THIS repo has drifted from the shipped template for "${heading}". ` +
+            `Apply the same edit to every one of ${AGENT_TEMPLATES.join(', ')} and the template.`,
+        ).toBe(sectionBody(file, heading)!.trim());
+      }
     });
   }
 

@@ -113,7 +113,6 @@ describe('#1001 — outward-facing docs never certify low-blast', () => {
     'LICENSE',
     'LICENSE-CONTENT',
     'packages/minspec/LICENSE',
-    'packages/minspec/LICENSE-THIRD-PARTY-MPL-2.0.txt',
     'packages/minspec/THIRD-PARTY-NOTICES.md',
     'NOTICE',
     // VS Code Getting Started walkthrough copy — SHIPS in the .vsix and is rendered to

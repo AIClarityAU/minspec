@@ -192,12 +192,30 @@ run_reviewer() {
   errfile="$(mktemp)"
   printf '%s' "$USER_CONTENT" >"$promptfile"
   if [[ "${1:-subscription}" == "payg" ]]; then
-    AGENT_OUT=$( CLAUDE_CODE_OAUTH_TOKEN='' ANTHROPIC_API_KEY="${ANTHROPIC_API_KEY:-}" \
+    # PASS-THROUGH, never a literal: this forwards whatever key the caller already
+    # holds in its environment, empty when unset. gitleaks' `generic-api-key` rule
+    # matches the assignment SHAPE regardless of the value, and a scanned line ending
+    # in `\` cannot carry an inline allow — so the value is hoisted onto its own line
+    # to carry one (#1514). Without that, MinSpec scaffolds this file AND the
+    # pre-commit gate that rejects it, and no freshly-initialized repo can make its
+    # first commit. Invisible in this repo because the hook scans only STAGED
+    # changes and this file predates the gate.
+    local payg_env=(CLAUDE_CODE_OAUTH_TOKEN= "ANTHROPIC_API_KEY=${ANTHROPIC_API_KEY:-}") # gitleaks:allow
+    AGENT_OUT=$( env "${payg_env[@]}" \
       "${AGENT_ENV_SCRUB[@]}" claude -p --system-prompt-file "$ROLE_FILE" \
       "${AGENT_CONTEXT_ARGS[@]}" \
       --allowedTools "Read,Glob,Grep" --model opus --output-format text <"$promptfile" 2>"$errfile" ) || rc=$?
   else
-    AGENT_OUT=$( "${AGENT_ENV_SCRUB[@]}" claude -p --system-prompt-file "$ROLE_FILE" \
+    # ANTHROPIC_API_KEY is scrubbed here for the SAME reason the payg branch above
+    # scrubs CLAUDE_CODE_OAUTH_TOKEN: `claude -p` picks ONE credential, and an
+    # API key in the environment WINS over the subscription token. Leave it set and
+    # the "subscription" path silently bills (or fails on) PAYG — which is what
+    # happened once ai-review.yml started forwarding the key for the failover: three
+    # of four voters died with `Credit balance is too low` on a run that never
+    # intended to touch PAYG at all. The failover must be reachable ONLY through the
+    # explicit `run_reviewer payg` call, never by ambient environment.
+    AGENT_OUT=$( ANTHROPIC_API_KEY='' \
+      "${AGENT_ENV_SCRUB[@]}" claude -p --system-prompt-file "$ROLE_FILE" \
       "${AGENT_CONTEXT_ARGS[@]}" \
       --allowedTools "Read,Glob,Grep" --model opus --output-format text <"$promptfile" 2>"$errfile" ) || rc=$?
   fi
@@ -210,9 +228,14 @@ run_reviewer() {
 # means the agent died mid-review: forwarding that to the gate as a finished verdict
 # would let a half-written `verdict:` line decide a merge. Completeness — not the exit
 # status — is what makes the output a review.
+# Marker = the token ALONE ON A LINE, matching review-decide.sh (#1157). Substring
+# matching made a reviewer's PROSE MENTION of the token count as a block, so output
+# that carried no verdict at all looked complete: the quota path below never fired
+# and a transient failure was handed downstream as a code verdict instead of the
+# retry-able `blocked` the distinction exists to preserve.
 has_verdict() {
-  printf '%s\n' "${1:-}" | grep -q 'REVIEW_VERDICT_BEGIN' &&
-    printf '%s\n' "${1:-}" | grep -q 'REVIEW_VERDICT_END'
+  printf '%s\n' "${1:-}" | grep -qE '^[[:space:]]*REVIEW_VERDICT_BEGIN[[:space:]]*$' &&
+    printf '%s\n' "${1:-}" | grep -qE '^[[:space:]]*REVIEW_VERDICT_END[[:space:]]*$'
 }
 
 # Quota / rate-limit / transient? Delegate to the tested pure classifier so bash and

@@ -11,6 +11,11 @@ import {
 import { resolveTargetFolder } from '../lib/resolve-folder';
 import { slugify } from '../lib/spec-manager';
 import { listEpics } from '../lib/epic-manager';
+import {
+  loadPreferences,
+  savePreferences,
+  resolveProjectPreference,
+} from '../lib/preferences';
 
 /** Options threaded in from an upstream caller (e.g. the auto-bootstrap offer). */
 export interface BackfillOptions {
@@ -23,19 +28,39 @@ export interface BackfillOptions {
 }
 
 /**
- * Persisted "always use the AI pass for backfill" opt-in. Written GLOBALLY: it's
- * a personal cost/privacy/quota preference, not project policy, so it follows the
- * user across every project (#213). Reads merge global+workspace as usual.
+ * Persisted "always use the AI pass for backfill" opt-in (#213).
+ *
+ * Read order is DR-078 §4: the PROJECT-LOCAL preference first, then the VS Code
+ * setting. It remains a personal cost/privacy/quota choice — it is simply scoped
+ * to the project it was made in, rather than following the user into projects
+ * that never consented to an AI pass.
  */
-function alwaysUseAi(): boolean {
-  return vscode.workspace
+function alwaysUseAi(rootDir: string): boolean {
+  const setting = vscode.workspace
     .getConfiguration('minspec')
     .get<boolean>('autoBackfillUseAi', false);
+  return resolveProjectPreference(
+    loadPreferences(rootDir).autoBackfillUseAi,
+    setting,
+  );
 }
-async function enableAlwaysUseAi(): Promise<void> {
-  await vscode.workspace
-    .getConfiguration('minspec')
-    .update('autoBackfillUseAi', true, vscode.ConfigurationTarget.Global);
+/**
+ * Persist the "Always" choice to the PROJECT-LOCAL store.
+ *
+ * This used to write `ConfigurationTarget.Global`, which constitution invariant
+ * 3 (DR-074) forbids. It mattered more here than anywhere else: a global value
+ * silently enabled an AI/network code path in every OTHER MinSpec project on the
+ * machine — including projects whose maintainers chose MinSpec for its offline
+ * Tier-0 posture (invariant 1) and never consented to `claude -p` running there.
+ * DR-078 §1 names `.minspec/preferences.json` as the correct store. Fixed in
+ * #1319.
+ */
+function enableAlwaysUseAi(rootDir: string): void {
+  try {
+    savePreferences(rootDir, { autoBackfillUseAi: true });
+  } catch (err) {
+    console.warn(`MinSpec: failed to persist autoBackfillUseAi pref — ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 /**
@@ -224,7 +249,7 @@ export async function backfillEpicsCommand(
   // promised it) or persisted ("Always"); otherwise ask once — with an "Always"
   // affordance so direct Command-Palette runs aren't re-asked every time.
   if (await isClaudeAvailable()) {
-    let useAi = opts?.aiConsent === true || alwaysUseAi();
+    let useAi = opts?.aiConsent === true || alwaysUseAi(folder);
     if (!useAi) {
       const USE_AI = 'AI-enhanced';
       const ALWAYS = 'Always';
@@ -237,7 +262,7 @@ export async function backfillEpicsCommand(
       );
       if (choice === undefined) return; // dismissed
       if (choice === ALWAYS) {
-        await enableAlwaysUseAi();
+        enableAlwaysUseAi(folder);
         useAi = true;
       } else if (choice === USE_AI) {
         useAi = true;

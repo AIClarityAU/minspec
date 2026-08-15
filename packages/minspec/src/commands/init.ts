@@ -10,10 +10,11 @@ import {
   type ManagedRegionWarning,
 } from '../lib/scaffold';
 import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS, MANAGED_REGION_TEMPLATES } from '../lib/template-registry';
+import { CLAUDE_SETTINGS_PATH } from '../lib/claude-settings';
 import { resolveTargetFolder, workspaceFolderLabel } from '../lib/resolve-folder';
 import { setCoverageMinimum, DEFAULT_COVERAGE_MINIMUM } from '../lib/config';
-import { evaluateConstitution } from '../lib/constitution-nudge';
 import { getRepoFromRemote } from '../lib/github';
+import { resolveRemotes, renameToOriginCandidate } from '../lib/git-remotes';
 import {
   type CommandRunner,
   RULESET_DOCS_URL,
@@ -31,21 +32,16 @@ import {
   READY_TO_MERGE_CHECK,
 } from '../lib/ruleset-advisor';
 
-/**
- * SPEC-025 FR-6: soft, NON-MODAL advisory when the constitution has no
- * human-authored rules yet. Advisory only — never modal, never blocks, and a
- * failure here must not affect the init result (best-effort).
- */
-function surfaceConstitutionNudge(folder: string): void {
-  try {
-    const nudge = evaluateConstitution(folder);
-    if (nudge.empty) {
-      vscode.window.showInformationMessage(nudge.message);
-    }
-  } catch {
-    // best-effort — the nudge is advisory; never let it break init.
-  }
-}
+// SPEC-025 FR-6's advisory is NOT emitted from here (#1546). It has exactly one
+// producer, `surfaceConstitutionProposeNudge` in extension.ts, which carries the
+// offer-to-fix actions and honours the per-workspace "Don't ask again" flag.
+//
+// The emitter that used to live here was a bare, actionless toast that could not read
+// that flag — it took only a folder path, never an ExtensionContext — so it reinstated
+// a dismissed nudge on every init and refresh. It was also guaranteed-true noise:
+// init has just written the constitution from a template, so "no human-authored rules
+// yet" cannot be false at that instant, and the message landed in the middle of the
+// other init toasts carrying no information and no way to act.
 
 // ---------------------------------------------------------------------------
 // Post-init "what to commit" hint + offer (#222)
@@ -110,6 +106,20 @@ const SCAFFOLD_PATHSPECS: readonly string[] = [
   // directory, so an unrelated file a user placed alongside them (e.g. a
   // hand-written .claude/commands/my-own-command.md) is never swept in.
   ...MANAGED_REGION_TEMPLATES.map((tpl) => tpl.outputPath),
+  // The hook REGISTRATION, not just the hook (#1301). Scaffolding
+  // `.claude/hooks/session-title.{sh,py}` is only half the job — a Claude Code
+  // hook does nothing until it is listed under the event that fires it, and that
+  // listing is the `UserPromptSubmit` entry init/refresh merges into
+  // `.claude/settings.json` (claude-settings.ts, #1093 / DR-073). Omitting it
+  // here shipped a commit containing a present-but-INERT hook and left the
+  // registration dirty with no further prompt.
+  //
+  // "MinSpec does not own this file" is true but is not a reason to exclude it:
+  // CLAUDE.md, AGENTS.md and .cursorrules are equally user-authored and
+  // section-merged, and all three are staged. Ownership is handled by HOW the
+  // file is written (additive, idempotent, never-clobbers — DR-073), not by
+  // declining to commit what MinSpec just wrote into it.
+  CLAUDE_SETTINGS_PATH,
   // DELIBERATELY ABSENT: .minspec/generated-hashes.json and
   // .minspec/template-baseline.json. An earlier revision of this list included
   // them, on the theory that a refresh commit was partial without the manifests
@@ -202,6 +212,22 @@ export interface ScaffoldCommitter {
   branchInfo?(): Promise<{ current: string; default: string } | null>;
   /** Create and switch to `name`, so the commit lands somewhere pushable. */
   createBranch?(name: string): Promise<void>;
+  /**
+   * Whether a local branch called `name` already exists.
+   *
+   * {@link createBranch} is create-only (`git checkout -b`), so handing it a
+   * taken name is a hard error, not a fallback. Refresh is a RECURRING
+   * operation and its branch name was a CONSTANT, so the first refresh in a
+   * repo created the branch, its PR merged, the local ref survived (merged
+   * branches are not auto-deleted; a deleted remote only marks the local ref
+   * `[gone]`), and every later refresh collided — the offer dead-ended with
+   * the tree still dirty and no alternative name (#1298).
+   *
+   * Optional for the same reason `branchInfo` is: a committer that does not
+   * implement it is treated as "cannot tell", and cannot-tell falls through to
+   * the base name, which is exactly the previous behaviour.
+   */
+  branchExists?(name: string): Promise<boolean>;
   /**
    * Of `paths`, which currently show uncommitted changes (staged, unstaged, or
    * untracked) per `git status`. Used to decide whether the recoverable commit
@@ -318,6 +344,23 @@ export async function defaultCommitter(folder: string): Promise<ScaffoldCommitte
     async createBranch(name) {
       await git.checkout(['-b', name]);
     },
+    async branchExists(name) {
+      try {
+        // `--verify --quiet` prints the sha and exits 0 when the ref resolves,
+        // and exits 1 with no output when it does not. simple-git surfaces the
+        // non-zero exit as a throw, so both outcomes are covered.
+        const sha = await git.raw(['rev-parse', '--verify', '--quiet', `refs/heads/${name}`]);
+        return sha.trim().length > 0;
+      } catch {
+        // A ref that cannot be resolved is the ordinary "does not exist" case.
+        // Any other git failure lands here too, and reporting "free" is the
+        // safe read: the caller then tries the base name and, if that really is
+        // taken, `createBranch` fails exactly as it did before this probe
+        // existed. Guessing "taken" would instead push every repo onto a
+        // suffixed branch it never needed.
+        return false;
+      }
+    },
     async dirty(paths) {
       if (paths.length === 0) return [];
       try {
@@ -345,6 +388,11 @@ export interface OfferScaffoldCommitDeps {
    * diverge on WHETHER they offer to commit — only on the label.
    */
   variant?: 'scaffold' | 'refresh';
+  /**
+   * `YYYY-MM-DD` used to disambiguate a taken branch name. Injectable purely so
+   * tests can assert the exact branch created without depending on the clock.
+   */
+  today?: string;
 }
 
 /**
@@ -402,7 +450,14 @@ export async function offerScaffoldCommit(
       COMMIT_ANYWAY_ACTION,
     );
     if (choice === BRANCH_COMMIT_ACTION) {
-      const name = harnessBranchName(refresh);
+      // Resolve to a name that is FREE before creating it. `createBranch` is
+      // create-only, so a taken name is a hard failure with the tree left dirty
+      // and nothing else offered (#1298).
+      const name = await safeUniqueBranchName(
+        committer,
+        harnessBranchName(refresh),
+        deps.today ?? todayStamp(),
+      );
       try {
         if (!committer.createBranch) throw new Error('committer cannot create branches');
         await committer.createBranch(name);
@@ -438,6 +493,78 @@ async function safeBranchInfo(
     return (await committer.branchInfo?.()) ?? null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * How many numbered candidates {@link uniqueBranchName} will try after the
+ * dated one. A bound, not a budget: reaching it means something is wrong with
+ * the repo (or the probe), and looping forever would hang the offer.
+ */
+const MAX_BRANCH_SUFFIX = 50;
+
+/** Today as `YYYY-MM-DD`, the disambiguating suffix's date component. */
+export function todayStamp(now: Date = new Date()): string {
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+}
+
+/**
+ * The first branch name in the `base` family that `exists` reports as free.
+ *
+ * `base` → `base-YYYY-MM-DD` → `base-YYYY-MM-DD-2` … The base name is tried
+ * FIRST so the common case (a repo refreshing for the first time, or one that
+ * pruned its merged branches) still gets the plain, predictable name and no
+ * gratuitous suffix churn. The dated form matches the naming these repos
+ * already use by hand (`chore/harness-refresh-2026-07-16`) and says when the
+ * refresh happened, which the constant name never could.
+ *
+ * Pure apart from the injected `exists` probe, so the walk is unit-testable
+ * without a git repository.
+ *
+ * @throws when every candidate up to {@link MAX_BRANCH_SUFFIX} is taken,
+ * rather than returning a name it knows is unusable. The wrapper turns that
+ * into the base name, whose creation then fails LOUDLY with git's own
+ * "already exists" — a visible failure, never a silent reuse of a taken ref.
+ */
+export async function uniqueBranchName(
+  base: string,
+  exists: (name: string) => Promise<boolean>,
+  today: string,
+): Promise<string> {
+  if (!(await exists(base))) return base;
+  const dated = `${base}-${today}`;
+  if (!(await exists(dated))) return dated;
+  for (let n = 2; n <= MAX_BRANCH_SUFFIX; n += 1) {
+    const candidate = `${dated}-${n}`;
+    if (!(await exists(candidate))) return candidate;
+  }
+  throw new Error(
+    `'${base}' and every candidate through '${dated}-${MAX_BRANCH_SUFFIX}' already exist`,
+  );
+}
+
+/**
+ * {@link uniqueBranchName} against a committer whose `branchExists` is optional
+ * and best-effort.
+ *
+ * A committer that cannot probe (older stub, or a git error) yields the base
+ * name unchanged — the pre-#1298 behaviour exactly. Failing back to the base
+ * name rather than to a suffixed one matters: an unnecessary suffix would
+ * scatter branches across every repo that never had a collision, whereas the
+ * base name at worst reproduces the original error, which is already reported.
+ */
+async function safeUniqueBranchName(
+  committer: ScaffoldCommitter,
+  base: string,
+  today: string,
+): Promise<string> {
+  const probe = committer.branchExists?.bind(committer);
+  if (!probe) return base;
+  try {
+    return await uniqueBranchName(base, probe, today);
+  } catch {
+    return base;
   }
 }
 
@@ -536,6 +663,98 @@ const REPO_SLUG_RE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
  * opt-in `ready-to-merge` here without a code change.
  */
 const REQUIRED_CHECKS_SETTING = 'minspec.ruleset.requiredChecks';
+
+// ---------------------------------------------------------------------------
+// Misnamed-remote detection + rename offer (#1545)
+// ---------------------------------------------------------------------------
+
+/** Toast action: rename the sole remote to the conventional `origin`. */
+const RENAME_REMOTE_ACTION = 'Rename to origin';
+/** Toast action: leave the remote alone (and stop asking). */
+const KEEP_REMOTE_ACTION = 'Keep as is';
+
+/** workspaceState-free suppression: a git config flag, so it travels with the repo. */
+const RENAME_DECLINED_CONFIG = 'minspec.remoteRenameDeclined';
+
+/** Dependencies for {@link offerRemoteRenameAdvisory}, injectable for tests. */
+export interface RemoteRenameDeps {
+  run?: CommandRunner;
+  isRepo?: (folder: string) => boolean;
+}
+
+/**
+ * Detect a remote that isn't called `origin` and offer to rename it (#1545).
+ *
+ * `origin` is a convention, not a rule — `git clone` picks it, and a user who runs
+ * `git remote add <project-name> <url>` never gets one. Nothing in git cares. But
+ * essentially every tool reading "the remote" hardcodes the name, MinSpec included:
+ * before this, such a repo was told to add a remote it already had, and its
+ * protected-branch guard went silently inert.
+ *
+ * The resolver ({@link resolveRemotes}) fixes MinSpec's own reads. This offer fixes
+ * the REPO, which is strictly more valuable: it repairs every other tool at the same
+ * time, and it reaches the places a TypeScript resolver cannot — the scaffolded shell
+ * hook, `git push` without arguments, and every downstream script that will ever
+ * assume the conventional name.
+ *
+ * Deliberately narrow, and consent-gated:
+ *   - fires ONLY for exactly one remote, pointing at github.com, not already `origin`
+ *     ({@link renameToOriginCandidate}). Several remotes, or a non-GitHub one, is
+ *     left strictly alone — an offer there is a prompt to break something;
+ *   - the rename is the ONLY mutation, and it happens only on an explicit click;
+ *   - "Keep as is" records a per-repo git-config flag so the offer never nags again.
+ *
+ * `git remote rename` is safe and reversible: it rewrites the `remote.<name>.*`
+ * config keys and the tracking refspec, and local branches keep their upstreams.
+ *
+ * Best-effort throughout — any failure is swallowed and never affects init.
+ */
+export async function offerRemoteRenameAdvisory(
+  folder: string,
+  deps: RemoteRenameDeps = {},
+): Promise<void> {
+  const run = deps.run ?? defaultCommandRunner;
+  const isRepo = deps.isRepo ?? ((f: string) => fs.existsSync(path.join(f, '.git')));
+  if (!isRepo(folder)) return;
+
+  try {
+    const declined = await run('git', ['-C', folder, 'config', '--get', RENAME_DECLINED_CONFIG]);
+    if (declined.code === 0 && declined.stdout.trim() === 'true') return;
+
+    const state = await resolveRemotes(run, folder);
+    const candidate = renameToOriginCandidate(state);
+    if (!candidate) return;
+
+    const choice = await vscode.window.showInformationMessage(
+      `MinSpec: this repo's only remote is named '${candidate.name}', not 'origin'. ` +
+        'Most git tooling — including MinSpec\'s protected-branch guard and the branch-ruleset ' +
+        'advisory — looks for a remote called \'origin\', and quietly does nothing without one. ' +
+        'Rename it?',
+      RENAME_REMOTE_ACTION,
+      KEEP_REMOTE_ACTION,
+    );
+
+    if (choice === RENAME_REMOTE_ACTION) {
+      const renamed = await run('git', ['-C', folder, 'remote', 'rename', candidate.name, 'origin']);
+      if (renamed.code === 0) {
+        vscode.window.showInformationMessage(
+          `MinSpec: renamed remote '${candidate.name}' to 'origin'.`,
+        );
+      } else {
+        // Report the real reason rather than a generic failure — the usual cause is
+        // an `origin` that already exists, which the user can act on.
+        vscode.window.showWarningMessage(
+          `MinSpec: could not rename '${candidate.name}' to 'origin' — ` +
+            `${(renamed.stderr || renamed.stdout).trim() || 'git reported no detail'}.`,
+        );
+      }
+    } else if (choice === KEEP_REMOTE_ACTION) {
+      await run('git', ['-C', folder, 'config', RENAME_DECLINED_CONFIG, 'true']);
+    }
+  } catch {
+    // best-effort — advisory only; never let it break init.
+  }
+}
 
 /** Dependencies for {@link offerRulesetAdvisory}, injectable for tests. */
 export interface RulesetAdvisoryDeps {
@@ -1018,6 +1237,7 @@ export async function initCommand(
   folderArg?: string,
   deps?: OfferScaffoldCommitDeps & {
     ruleset?: RulesetAdvisoryDeps;
+    remoteRename?: RemoteRenameDeps;
     githubPrExt?: GitHubPrExtAdvisoryDeps;
   },
 ): Promise<void> {
@@ -1059,7 +1279,6 @@ export async function initCommand(
       kind: 'untracked',
     });
   }
-  surfaceConstitutionNudge(folder);
   if (isFirstInit) {
     await offerCoverageThresholdPrompt(folder);
     // Onboarding-only nudge toward the GitHub PR extension (see doc comment on
@@ -1075,6 +1294,12 @@ export async function initCommand(
   // (no consent toast) — a ruleset that already exists is silent — and only the
   // MUTATING create is consent-gated behind an explicit "Create ruleset" click.
   // Failures never affect the init result.
+  //
+  // BEFORE the ruleset advisory (#1545): a remote that is not called `origin` is
+  // exactly what stops the ruleset probe identifying the repo, so asking afterwards
+  // would have the user fix the remote and still need to re-run init to get the
+  // offer that the fix unblocks.
+  await offerRemoteRenameAdvisory(folder, deps?.remoteRename);
   await offerRulesetAdvisory(folder, deps?.ruleset);
 }
 
@@ -1124,6 +1349,22 @@ async function surfaceManagedRegionWarning(folder: string, w: ManagedRegionWarni
     return;
   }
 
+  // A 'project-name-mismatch' reports that the harness's own name beat the
+  // directory's, so nothing is broken and "Re-scaffold" would be nonsense — worse,
+  // it would imply the harness is damaged when it is the thing that was right.
+  // Offer the file where a deliberate rename is declared instead (#1529).
+  if (w.kind === 'project-name-mismatch') {
+    const choice = await vscode.window.showInformationMessage(
+      `[${label}] ${w.message}`,
+      OPEN_FILE_ACTION,
+    );
+    if (choice === OPEN_FILE_ACTION) {
+      const doc = await vscode.workspace.openTextDocument(path.join(folder, w.outputPath));
+      await vscode.window.showTextDocument(doc, { preview: false });
+    }
+    return;
+  }
+
   const choice = await vscode.window.showWarningMessage(
     `[${label}] ${w.message}`,
     RESCAFFOLD_ACTION,
@@ -1147,7 +1388,10 @@ async function surfaceManagedRegionWarning(folder: string, w: ManagedRegionWarni
 
 export async function initRefreshCommand(
   folderArg?: string,
-  deps?: OfferScaffoldCommitDeps & { ruleset?: RulesetAdvisoryDeps },
+  deps?: OfferScaffoldCommitDeps & {
+    ruleset?: RulesetAdvisoryDeps;
+    remoteRename?: RemoteRenameDeps;
+  },
 ): Promise<void> {
   const folder = folderArg ?? (await resolveTargetFolder());
   if (!folder) return;
@@ -1169,7 +1413,6 @@ export async function initRefreshCommand(
   for (const w of warnings) {
     await surfaceManagedRegionWarning(folder, w);
   }
-  surfaceConstitutionNudge(folder);
   // Post-refresh "what to commit" offer — the SAME affordance init gives (#222).
   // Without this, a drift-triggered refresh (e.g. on window reload via
   // auto-bootstrap) rewrites the harness files but leaves them stranded
@@ -1179,6 +1422,8 @@ export async function initRefreshCommand(
   // (#564 / SPEC-033 FR-3). Refresh is where an EXISTING repo whose ruleset
   // predates the ai-review/ready-to-merge checks (the sealbox case) gets offered
   // the missing required checks; without this, only freshly-inited repos would.
+  // Same ordering rationale as init (#1545).
+  await offerRemoteRenameAdvisory(folder, deps?.remoteRename);
   await offerRulesetAdvisory(folder, deps?.ruleset);
 }
 
