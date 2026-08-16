@@ -15,6 +15,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync, spawn, ChildProcess } from 'child_process';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// Module scope, never inside a hook: vitest resolves each test's timeout before
+// `beforeAll` runs, so a raise from within a hook is silently inert (#1399).
+useShellTimeout();
 
 function findScriptsDir(): string {
   let dir = __dirname;
