@@ -252,6 +252,15 @@ function buildRepo(root: string): { primary: string; sibling: string; c1: string
   git(primary, 'fetch', 'origin', 'main');
   fs.mkdirSync(path.join(primary, 'scripts'), { recursive: true });
   fs.copyFileSync(DRAIN, path.join(primary, 'scripts', 'drain-inbox.sh'));
+  // `drain-inbox.sh` sources scripts/lib/gh-bot.sh at load (#1352 — its reconciler
+  // writes must carry the bot identity). A fixture that copies the script without
+  // its lib/ is not a faithful primary checkout: the script dies at line 1 and every
+  // parity case fails for a reason that has nothing to do with presence. Mirror the
+  // real dependency rather than making the source conditional, which would let a
+  // missing helper silently downgrade an agent write to the human's identity.
+  fs.cpSync(path.join(path.dirname(DRAIN), 'lib'), path.join(primary, 'scripts', 'lib'), {
+    recursive: true,
+  });
   return { primary, sibling, c1, c2 };
 }
 
