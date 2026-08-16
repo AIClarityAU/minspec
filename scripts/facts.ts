@@ -54,7 +54,7 @@ import * as path from 'path';
 import { specHash, canonicalizeSpec } from '../packages/shared/src/canonical';
 import { parseSpec, stripInlineComment, SPEC_STATUSES, SPEC_TYPES } from '../packages/minspec/src/lib/spec';
 import { TIERS, loadConfig, resolveAndValidate } from '../packages/minspec/src/lib/config';
-import { deriveStatus, type ExplicitTerminal } from '../packages/minspec/src/lib/lifecycle';
+import { deriveStatus, explicitTerminalOf, type ExplicitTerminal } from '../packages/minspec/src/lib/lifecycle';
 import {
   specRelPath,
   resolveStatus,
@@ -368,8 +368,7 @@ function cmdStatus(specArg: string | undefined): void {
   const parsed = parseSpec(raw);
   const fm = parsed.frontmatter;
   const approvalState = getApprovalStatus(ROOT, specPath);
-  const explicitTerminal: ExplicitTerminal =
-    fm.status === 'archived' ? 'archived' : fm.status === 'superseded' ? 'superseded' : undefined;
+  const explicitTerminal: ExplicitTerminal = explicitTerminalOf(fm.status);
   const derived = deriveStatus(fm.phases, approvalState, explicitTerminal);
   const shown =
     rawStatus === undefined

@@ -43,7 +43,7 @@ import { listEpics, epicRefValue, resolveEpic, type EpicStatus } from './epic-ma
 import { listAdrs, type AdrStatus } from './adr-manager';
 import { parseSpec, type ParsedSpec, type SpecStatus } from './spec';
 import { getCurrentPhase } from './lifecycle';
-import { deriveStatus, type ExplicitTerminal } from './lifecycle';
+import { deriveStatus, explicitTerminalOf, type ExplicitTerminal } from './lifecycle';
 import { getApprovalStatus, type ApprovalStatus } from './approval';
 
 // ───────────────────────────────────────────────────────────────────────────
@@ -531,7 +531,7 @@ export function buildArtifactGraph(rootDir: string): ArtifactGraph {
 
     // CRITICAL (INV-FIDELITY): derive, never read the literal `status:` line.
     const approvalState: ApprovalStatus = getApprovalStatus(rootDir, disc.filePath);
-    const explicitTerminal: ExplicitTerminal = fm.status === 'archived' ? 'archived' : undefined;
+    const explicitTerminal: ExplicitTerminal = explicitTerminalOf(fm.status);
     const derived: SpecStatus = deriveStatus(fm.phases, approvalState, explicitTerminal);
 
     edges.push(...edgesFrom(fmBlock, id));
