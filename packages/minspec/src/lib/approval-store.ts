@@ -26,6 +26,38 @@ import { classifyApprovablePath } from './approvable';
 const APPROVALS_DIR = '.minspec/approvals';
 
 /**
+ * The hash-lock reminder emitted into a NEW spec's frontmatter (#1510).
+ *
+ * WHY IT IS A CONSTANT. Every copy in the corpus was hand-written — 27 specs, at least
+ * three different wordings, no generator and no template. Eleven of them still point at
+ * `.minspec/approvals.json`, the id-keyed map this module replaced (it is gitignored and
+ * was never tracked), which is enough of a false signpost that two independent readers
+ * concluded a genuinely-approved spec was unapproved on PR #1491.
+ *
+ * WHY THE WORDING MATTERS. `serializeFrontmatter` used to emit a DR-012 reminder and it
+ * was deliberately removed, because it said "editing voids approval" — false after
+ * SPEC-022 made the hash canonical. `canonicalizeSpec` strips exactly `status` and
+ * `phases`, so those two are free to change and everything else is not. This text says
+ * that, rather than the absolute the old line got wrong.
+ *
+ * WHY CREATION-ONLY. It is emitted by `createSpec` and nowhere else. Putting it back in
+ * `serializeFrontmatter` would re-add it on every write round-trip, changing hashed bytes
+ * on already-approved specs — which is the exact defect it warns about.
+ *
+ * Existing specs are NOT retrofitted: a full-line `#` comment IS hashed content, so
+ * correcting the eleven wrong ones stales each approval. That half stays open on #1510.
+ */
+export function hashLockReminder(specRelPath: string): string {
+  return [
+    '# 🔒 Approval is recorded in the committed sidecar',
+    `#    ${APPROVALS_DIR}/${toPosixRel(specRelPath)}.json (.specHash).`,
+    '# `status` and `phases` are tool-written lifecycle mirrors — canonical.ts strips BOTH',
+    '# from the hash, so the tool rewrites them freely and you must never hand-write either.',
+    '# Editing anything else here, or the body, voids the approval — re-run "MinSpec: Approve Spec".',
+  ].join('\n');
+}
+
+/**
  * POSIX-normalize a repo-relative spec path so Windows (`\`) and POSIX (`/`)
  * produce the same sidecar key (INV-5: the key is a function of the path alone).
  *
