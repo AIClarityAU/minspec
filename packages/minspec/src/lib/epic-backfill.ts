@@ -36,7 +36,21 @@ export interface ArtifactRef {
   readonly id: string;          // SPEC-NNN / DR-NNN
   readonly kind: ArtifactKind;
   readonly title: string;
+  /**
+   * The artifact's anchor file — `requirements.md` for a split-layout spec.
+   * Use it to READ the artifact's state; use `files` to WRITE to it.
+   */
   readonly filePath: string;
+  /**
+   * Every file carrying this artifact's id, anchor first.
+   *
+   * A split-layout spec is one artifact spread over requirements/design/tasks,
+   * all three declaring the same `id`. Collecting them as three artifacts made
+   * one id ambiguous, and `normalizeAiProposal`'s id→artifact Map silently kept
+   * only the last one, so an AI mapping tagged one file and left its siblings
+   * untagged (#1573). Single-file artifacts have exactly one entry.
+   */
+  readonly files: readonly string[];
   /** Existing epic ref, if already assigned. */
   readonly epic?: string;
   /** Parent directory basename (spec feature folder) — a heuristic signal. */
@@ -56,7 +70,13 @@ export interface ProposedEpic {
 export interface ProposedMapping {
   readonly artifactId: string;
   readonly kind: ArtifactKind;
+  /** Anchor file — what the skip check reads (#1573). */
   readonly filePath: string;
+  /**
+   * Every file to stamp when this mapping applies. Optional so a hand-built
+   * mapping stays valid; absent means "just `filePath`".
+   */
+  readonly filePaths?: readonly string[];
   readonly epicSlug: string;
   /** 0..1 — heuristic similarity, or AI-reported confidence. */
   readonly confidence: number;
@@ -232,6 +252,7 @@ function collectSpecs(rootDir: string): ArtifactRef[] {
           kind: 'spec',
           title: fm.title || fm.id,
           filePath: full,
+          files: [full],
           epic: fm.epic,
           group,
           digest: firstParagraph(content),
@@ -240,6 +261,51 @@ function collectSpecs(rootDir: string): ArtifactRef[] {
     }
   };
   walk(specsDir);
+  return collapseByid(out);
+}
+
+/** Anchor preference: the file a split-layout spec is normally read from. */
+const ANCHOR_ORDER = ['requirements.md', 'spec.md', 'design.md', 'plan.md', 'tasks.md'];
+
+function anchorRank(filePath: string): number {
+  const i = ANCHOR_ORDER.indexOf(path.basename(filePath).toLowerCase());
+  return i === -1 ? ANCHOR_ORDER.length : i;
+}
+
+/**
+ * Collapse per-FILE rows into per-ARTIFACT rows.
+ *
+ * requirements.md / design.md / tasks.md in one spec folder all declare the same
+ * `id`; they are one spec, not three. The anchor is the highest-ranked file by
+ * `ANCHOR_ORDER` (ties broken by path, so the result is deterministic), and its
+ * frontmatter answers "what epic is this spec in?". `files` keeps every sibling
+ * so applying a mapping can stamp all of them (#1573).
+ */
+function collapseByid(rows: ArtifactRef[]): ArtifactRef[] {
+  const byId = new Map<string, ArtifactRef[]>();
+  for (const r of rows) {
+    const bucket = byId.get(r.id);
+    if (bucket) bucket.push(r);
+    else byId.set(r.id, [r]);
+  }
+
+  const out: ArtifactRef[] = [];
+  for (const bucket of byId.values()) {
+    if (bucket.length === 1) { out.push(bucket[0]); continue; }
+    const sorted = [...bucket].sort((a, b) => {
+      const byRank = anchorRank(a.filePath) - anchorRank(b.filePath);
+      return byRank !== 0 ? byRank : a.filePath.localeCompare(b.filePath);
+    });
+    const anchor = sorted[0];
+    out.push({
+      ...anchor,
+      // An epic on ANY file counts as assigned: apply stamps every sibling, so a
+      // split tag can only come from a hand edit, and re-proposing a spec that
+      // is already in an epic would be the no-op mapping #1571 removed.
+      epic: anchor.epic ?? sorted.find(r => r.epic)?.epic,
+      files: sorted.map(r => r.filePath),
+    });
+  }
   return out;
 }
 
@@ -256,6 +322,7 @@ function collectAdrs(rootDir: string): ArtifactRef[] {
       kind: 'adr' as const,
       title: a.title,
       filePath: a.filePath,
+      files: [a.filePath],
       epic: a.epic,
       digest,
     };
@@ -313,7 +380,8 @@ export function proposeHeuristic(rootDir: string): BackfillProposal {
       const slug = slugify(a.group);
       if (epicsBySlug.has(slug)) {
         mappings.push({
-          artifactId: a.id, kind: a.kind, filePath: a.filePath, epicSlug: slug,
+          artifactId: a.id, kind: a.kind, filePath: a.filePath, filePaths: a.files,
+          epicSlug: slug,
           confidence: SUBDIR_CONFIDENCE, rationale: `In feature folder "${a.group}".`,
         });
         continue;
@@ -328,7 +396,8 @@ export function proposeHeuristic(rootDir: string): BackfillProposal {
     }
     if (best && best.score >= TOKEN_THRESHOLD) {
       mappings.push({
-        artifactId: a.id, kind: a.kind, filePath: a.filePath, epicSlug: best.slug,
+        artifactId: a.id, kind: a.kind, filePath: a.filePath, filePaths: a.files,
+        epicSlug: best.slug,
         confidence: Number(best.score.toFixed(2)),
         rationale: `Title overlaps epic "${epicsBySlug.get(best.slug)!.title}".`,
       });
@@ -471,6 +540,11 @@ export function normalizeAiProposal(
   const registeredBySlug = new Map(registered.map(e => [e.slug, e]));
 
   const mappings: ProposedMapping[] = [];
+  // "Map each artifact to exactly one epic" is an instruction in the prompt, and
+  // an LLM reply is free-form input — so it has to be enforced here, where the
+  // rest of the sanitising happens. Unenforced, a second mapping for the same
+  // artifact created an epic that the apply step then refused to populate (#1575).
+  const claimed = new Set<string>();
   for (const m of obj.mappings) {
     if (!m || typeof m !== 'object') continue;
     const r = m as Record<string, unknown>;
@@ -478,6 +552,7 @@ export function normalizeAiProposal(
     const epicSlug = typeof r.epicSlug === 'string' ? slugify(r.epicSlug) : '';
     const art = byId.get(artifactId);
     if (!art) continue; // unknown artifact → drop
+    if (claimed.has(artifactId)) continue; // already assigned → keep the first
     if (!slugs.has(epicSlug)) {
       const known = registeredBySlug.get(epicSlug);
       if (!known) continue; // epic neither declared nor registered → drop
@@ -489,18 +564,26 @@ export function normalizeAiProposal(
         rationale: 'Existing registered epic.',
       });
     }
+    claimed.add(artifactId);
     const confRaw = typeof r.confidence === 'number' ? r.confidence : 0.5;
     mappings.push({
-      artifactId, kind: art.kind, filePath: art.filePath, epicSlug,
+      artifactId, kind: art.kind, filePath: art.filePath, filePaths: art.files,
+      epicSlug,
       confidence: Math.max(0, Math.min(1, confRaw)),
       rationale: typeof r.rationale === 'string' ? r.rationale : '',
     });
   }
 
-  if (epics.length === 0) return null;
-  // Drop epics no mapping references.
+  // Drop epics no mapping references, THEN judge emptiness. Checking before the
+  // filter let a reply that declared epics but produced no surviving mapping
+  // return a non-null, fully empty proposal — which reads as success everywhere
+  // downstream: it never trips `if (!proposal)`, so `unusable` was unreachable,
+  // and the command overwrote its good heuristic proposal with the empty one and
+  // told the user there was nothing to backfill, with no warning (#1576).
   const used = new Set(mappings.map(m => m.epicSlug));
-  return { epics: epics.filter(e => used.has(e.slug)), mappings, source: 'ai' };
+  const kept = epics.filter(e => used.has(e.slug));
+  if (kept.length === 0 || mappings.length === 0) return null;
+  return { epics: kept, mappings, source: 'ai' };
 }
 
 /**
@@ -601,9 +684,17 @@ export function withoutAlreadyTagged(
   proposal: BackfillProposal,
   opts: { override?: boolean } = {},
 ): BackfillProposal {
-  const mappings = opts.override
-    ? [...proposal.mappings]
-    : proposal.mappings.filter(m => !readArtifactEpic(m.filePath));
+  // Dedupe by artifact as well as dropping the already-tagged: a proposal naming
+  // one artifact twice would otherwise quote a tag count larger than the number
+  // of artifacts that exist, which is the same false promise #1571 removed
+  // (#1575). Apply enforces this too; here it keeps the REVIEWED count honest.
+  const claimed = new Set<string>();
+  const mappings = proposal.mappings.filter(m => {
+    if (!opts.override && readArtifactEpic(m.filePath)) return false;
+    if (claimed.has(m.filePath)) return false;
+    claimed.add(m.filePath);
+    return true;
+  });
   const used = new Set(mappings.map(m => m.epicSlug));
   return { epics: proposal.epics.filter(e => used.has(e.slug)), mappings, source: proposal.source };
 }
@@ -631,10 +722,24 @@ export function applyBackfill(
   // creation used to run first, so an epic whose every mapping was about to be
   // skipped was still written to disk and into the INDEX — 54 empty epics in one
   // run (#1571). An epic nothing joins is not a body of work; do not create it.
+  //
+  // This list is the SINGLE source of truth: the gate below and the tagging loop
+  // both read it. They used to be computed separately — the gate from one
+  // pre-write snapshot, the loop re-reading each file after every write — so two
+  // mappings naming the same artifact let the second epic pass the gate and get
+  // created, while the loop then refused to give it a member. An epic was born
+  // empty again, through the very gate meant to stop it (#1575).
   const proposedSlugs = new Set(proposal.epics.map(e => e.slug));
-  const effective = proposal.mappings.filter(
-    m => proposedSlugs.has(m.epicSlug) && (opts.override || !readArtifactEpic(m.filePath)),
-  );
+  const claimed = new Set<string>();
+  const effective = proposal.mappings.filter(m => {
+    if (!proposedSlugs.has(m.epicSlug)) return false;
+    if (!opts.override && readArtifactEpic(m.filePath)) return false;
+    // One artifact joins exactly one epic. The prompt says so; nothing enforced
+    // it, and an LLM reply is free-form input (#1575).
+    if (claimed.has(m.filePath)) return false;
+    claimed.add(m.filePath);
+    return true;
+  });
   const willReceive = new Set(effective.map(m => m.epicSlug));
 
   for (const e of proposal.epics) {
@@ -654,14 +759,18 @@ export function applyBackfill(
   }
 
   let artifactsTagged = 0;
-  let skipped = 0;
-  for (const m of proposal.mappings) {
+  // Everything `effective` rejected is, by definition, skipped.
+  let skipped = proposal.mappings.length - effective.length;
+  for (const m of effective) {
     const ref = refBySlug.get(m.epicSlug);
     if (!ref) { skipped++; continue; }
-    if (!opts.override && readArtifactEpic(m.filePath)) { skipped++; continue; }
     try {
-      setArtifactEpic(m.filePath, ref, titleBySlug.get(m.epicSlug));
-      artifactsTagged++;
+      // One artifact, every file: a split-layout spec's siblings must not be
+      // left carrying a different epic (or none) than its anchor (#1573).
+      for (const fp of m.filePaths ?? [m.filePath]) {
+        setArtifactEpic(fp, ref, titleBySlug.get(m.epicSlug));
+      }
+      artifactsTagged++; // counts ARTIFACTS, not files
     } catch {
       skipped++;
     }

@@ -201,22 +201,23 @@ describe('proposeAI()', () => {
     expect(result).toBeNull();
   });
 
-  it('returns a proposal with empty epics/mappings when all mappings reference unknown artifacts', async () => {
+  it('reports a failure when all mappings reference unknown artifacts (#1576)', async () => {
     writeSpec(tmp, 'minspec/billing', 'SPEC-001', 'Billing Spec');
-    // All mappings reference unknown artifact → mappings dropped → epics filtered to empty.
-    // normalizeAiProposal only returns null when epics[] is empty BEFORE the mapping filter
-    // (line 362 check). After filtering, it returns the proposal with empty arrays.
+    // All mappings reference an unknown artifact → mappings dropped → no epic
+    // survives the `used` filter. This USED to return { epics: [], mappings: [],
+    // source: 'ai' } — a non-null, fully empty proposal that read as SUCCESS
+    // everywhere downstream: it never tripped `if (!proposal)`, so `unusable`
+    // was unreachable, and the command overwrote its good heuristic proposal
+    // with the empty one and reported "nothing to backfill" with no warning.
+    // Emptiness is now judged AFTER the filter, so this is a failure (#1576).
     const aiOutput = JSON.stringify({
       epics: [{ slug: 'billing', title: 'Billing', rationale: 'r' }],
       mappings: [{ artifactId: 'SPEC-999', epicSlug: 'billing', confidence: 0.8, rationale: 'r' }],
     });
     mockExecSuccess(aiOutput);
-    const result = (await proposeAI(tmp)).proposal;
-    // normalizeAiProposal returns { epics: [], mappings: [], source: 'ai' } — not null
-    expect(result).not.toBeNull();
-    expect(result!.epics).toHaveLength(0);
-    expect(result!.mappings).toHaveLength(0);
-    expect(result!.source).toBe('ai');
+    const res = await proposeAI(tmp);
+    expect(res.proposal).toBeNull();
+    expect(res.failure?.reason).toBe('unusable');
   });
 
   it('returns null when execFile fails (non-zero exit / timeout)', async () => {
