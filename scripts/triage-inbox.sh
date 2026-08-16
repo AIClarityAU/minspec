@@ -222,8 +222,15 @@ CONTENT
   # ready label whose class disagrees with the record it is about to read.
   local SUPERSEDED
   case "$LABEL" in
-    agent-ready)          SUPERSEDED="inbox,needs-review,needs-info,needs-human-review,agent-ready-specify" ;;
-    agent-ready-specify)  SUPERSEDED="inbox,needs-review,needs-info,needs-human-review,agent-ready" ;;
+    # `agent-done` / `agent-escalated` joined dispatch's countermand set in
+    # #1305/#1307 and must be mirrored here (#1347). A verdict that puts the issue
+    # back in a DISPATCHABLE state is a deliberate "work this again"; leaving a
+    # prior run's outcome stamp on it means dispatch-ready-check.sh refuses forever
+    # and the issue can never be worked by any route. `agent-quarantined` is
+    # deliberately NOT cleared: quarantine is a human act, and re-triage must not
+    # launder it.
+    agent-ready)          SUPERSEDED="inbox,needs-review,needs-info,needs-human-review,agent-ready-specify,agent-done,agent-escalated" ;;
+    agent-ready-specify)  SUPERSEDED="inbox,needs-review,needs-info,needs-human-review,agent-ready,agent-done,agent-escalated" ;;
     needs-review)         SUPERSEDED="inbox,agent-ready,agent-ready-specify,needs-info" ;;
     needs-info)           SUPERSEDED="inbox,agent-ready,agent-ready-specify,needs-review" ;;
     *)                    SUPERSEDED="inbox" ;;

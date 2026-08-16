@@ -614,7 +614,25 @@ if ! has_label "agent-ready" && ! has_label "agent-ready-specify"; then
 fi
 
 # Any explicit human-gate / quarantine label countermands a lingering agent-ready.
-for gate in needs-review needs-info needs-human-review agent-quarantined; do
+#
+# `agent-done` and `agent-escalated` joined this set in #1305 / #1307. Both are
+# written by the dispatcher itself and both describe a run that must not simply be
+# repeated, yet neither countermanded anything, so a stale `agent-ready` outvoted
+# them and the drain re-ran the work:
+#
+#   * #1068 was RE-CLAIMED at 12:08:56 on 2026-08-05, 44 minutes after it completed
+#     at 11:24:50 — and its PR (#1230) had already MERGED. A paid agent run was
+#     spent rebuilding finished work.
+#   * #1112 crashed at 07:51:24, was silently requeued at 09:54:11, was claimed
+#     again at 22:24:10 and crashed again at 23:06:51 — two full dispatches, zero
+#     commits, and no human ever asked to look.
+#
+# This is a defence-in-depth backstop, not the primary fix. The dispatcher also now
+# drops `agent-ready` when it stamps `agent-done`, and the crash path applies
+# `needs-human-review`. Either alone would close the hole; both together mean a
+# single missed label write cannot reopen it (constitution invariant 2 — no required
+# check hinging on a single producer).
+for gate in needs-review needs-info needs-human-review agent-quarantined agent-done agent-escalated; do
   if has_label "$gate"; then
     refuse countermanded "countermanding label '${gate}' present (re-triaged / quarantined since drain)"
   fi
