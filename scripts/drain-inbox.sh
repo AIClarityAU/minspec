@@ -82,6 +82,15 @@ set -euo pipefail
 
 REPO="AIClarityAU/minspec"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# The reconcilers below write to GitHub (close, remove-label, add-label). Those are
+# AGENT writes, so they must carry the App identity rather than the human's — a write
+# made as the human auto-subscribes them to the thread forever and makes the audit
+# trail record a person as having done what the drain did (minspec#995, #1355). Arming
+# the wrapper once here covers every `gh` call in the process: reads pass through
+# untouched, and the first WRITE mints a bot token or aborts.
+# shellcheck source=scripts/lib/gh-bot.sh
+source "${SCRIPT_DIR}/lib/gh-bot.sh"
+gh_bot_init
 # Env-overridable for the same reason as MINSPEC_DRAIN_PRIMARY_ROOT below: the
 # #1208 concurrency harness points it at a hermetic stub so the fan-out can be
 # proven to actually overlap without launching real build agents.
@@ -446,6 +455,114 @@ ensure_fresh_run_dir() {
 #   1  — a transient error → loop counts it toward MAX_CONSEC_FAIL, keeps going.
 # (There is no longer a terminal "stale" code: #773 self-heals the run dir each
 #  cycle instead of stopping the loop when the checkout falls behind main.)
+# ── Step 0 reconcilers (#1306, #1322) ────────────────────────────────────────
+#
+# Every other label transition in this system is written OPTIMISTICALLY at the moment
+# an action starts or finishes, and nothing ever checks it again. That is why the
+# board drifted so far from reality: on 2026-08-06 it showed EIGHT agents running
+# when exactly one was, two of the claims three weeks old (#663, #627), and two
+# issues (#1067, #1068) sat open and queued with their work already merged.
+#
+# These two functions are the missing second half — they compare the labels against
+# something observable (a live process, a merged PR) and correct the difference. They
+# are reconcilers, not gates: they never block a cycle, and every failure degrades to
+# "leave the label alone", because a reconciler that guesses wrong is worse than one
+# that does nothing.
+
+# How long an `agent-running` claim may sit before it is considered orphaned. Deliberately
+# well above the absolute claim lifetime so a slow-but-live dispatch is never reaped.
+RECONCILE_CLAIM_STALE_SECS="${MINSPEC_RECONCILE_STALE_SECS:-21600}"   # 6 h
+
+# Epoch seconds when `agent-running` was most recently applied to <issue>, or empty.
+# The timeline is the only honest source: `updatedAt` moves on any activity at all.
+claim_applied_at() {
+  local iso
+  iso=$(gh api "repos/${REPO}/issues/$1/timeline" --paginate \
+    --jq '[.[] | select(.event=="labeled" and .label.name=="agent-running") | .created_at] | last // empty' \
+    2>/dev/null | tail -1) || return 1
+  [[ -n "$iso" ]] || return 1
+  date -u -d "$iso" +%s 2>/dev/null || return 1
+}
+
+# Is a dispatch process for <issue> actually running? Anchored on the argument so
+# `dispatch-issue.sh 88` cannot match issue 885, and matched against the process
+# table rather than any string this script builds, so it cannot match itself.
+dispatch_alive_for() {
+  # `pgrep -f` matches with ERE, NOT BRE. In ERE `\+`, `\(`, `\|` and `\)` are the
+  # LITERAL characters +, (, | and ) — a BRE-escaped pattern here matches nothing at
+  # all, which reads exactly like "no dispatch is running" and silently kills this
+  # witness (#1352). Keep these unescaped; `\.` is correct in both dialects.
+  pgrep -f "dispatch-issue\.sh[[:space:]]+$1([[:space:]]|$)" >/dev/null 2>&1
+}
+
+# #1306 — release `agent-running` claims that no dispatch is holding.
+# TWO independent witnesses must agree before anything is touched: the claim is older
+# than the stale threshold AND no live dispatch process exists for it. Either one alone
+# could be wrong (a long build looks old; pgrep cannot see a dispatch on another host),
+# so requiring both means the reaper fails toward leaving the claim in place.
+reconcile_stale_claims() {
+  local running n applied age
+  running=$(gh issue list --repo "$REPO" --state open --label "agent-running" \
+    --json number --jq '.[].number' 2>/dev/null || true)
+  [[ -n "$running" ]] || return 0
+
+  while read -r n; do
+    [[ -n "$n" ]] || continue
+    if dispatch_alive_for "$n"; then continue; fi          # witness 2: genuinely live
+    applied=$(claim_applied_at "$n") || {
+      echo "[drain] reconcile: #$n carries agent-running but its claim time is unreadable — leaving it alone (failing toward no-op)."
+      continue
+    }
+    age=$(( $(date -u +%s) - applied ))
+    (( age >= RECONCILE_CLAIM_STALE_SECS )) || continue    # witness 1: genuinely old
+    echo "[drain] reconcile: releasing orphaned agent-running on #$n (claimed ${age}s ago, no live dispatch) — #1306."
+    gh issue edit "$n" --repo "$REPO" --remove-label "agent-running" 2>/dev/null \
+      || echo "[drain] reconcile: could not release the claim on #$n — it stays as-is."
+  done <<< "$running"
+}
+
+# #1322 — an OPEN issue stamped `agent-done` is a contradiction. Resolve it against
+# the one observable fact that settles it: did the work actually land?
+#
+#   merged PR on agent/issue-<N>  → the work landed; close the issue, citing the PR.
+#   no merged PR                  → `agent-done` is unearned. Strip it and surface,
+#                                   because "we recorded completion but nothing
+#                                   merged" is a real failure a human should see.
+#
+# The second branch is the valuable one: it is the only check anywhere that would
+# catch a FALSE agent-done. Branch naming is deterministic (the dispatcher creates
+# `agent/issue-<N>`), so the join needs no heuristics.
+reconcile_done_issues() {
+  local done_issues n pr
+  done_issues=$(gh issue list --repo "$REPO" --state open --label "agent-done" \
+    --json number --jq '.[].number' 2>/dev/null || true)
+  [[ -n "$done_issues" ]] || return 0
+
+  while read -r n; do
+    [[ -n "$n" ]] || continue
+    pr=$(gh pr list --repo "$REPO" --state merged --head "agent/issue-${n}" \
+      --json number --jq '.[0].number // empty' 2>/dev/null || true)
+    if [[ -n "$pr" ]]; then
+      echo "[drain] reconcile: closing #$n — its work merged in #$pr but nothing ever closed it (#1322)."
+      gh issue close "$n" --repo "$REPO" \
+        --comment "Closed by the drain reconciler: this issue was stamped \`agent-done\` and its branch \`agent/issue-${n}\` merged in #${pr}, but no closing trailer ever linked the two, so it stayed open and queued. See #1322 for the root cause and the deterministic \`Closes #N\` trailer that prevents it going forward." \
+        2>/dev/null || echo "[drain] reconcile: could not close #$n — left open."
+    else
+      echo "[drain] reconcile: #$n is labelled agent-done but NO merged PR exists for agent/issue-${n} — stripping the stamp and surfacing (#1322)."
+      gh issue edit "$n" --repo "$REPO" \
+        --remove-label "agent-done" --add-label "needs-human-review" 2>/dev/null \
+        || echo "[drain] reconcile: could not correct #$n — left as-is."
+    fi
+  done <<< "$done_issues"
+}
+
+# Never fatal: a reconciler exists to reduce drift, and must not become a new way for
+# a cycle to die. Failures are reported, then the cycle proceeds.
+reconcile_labels() {
+  reconcile_stale_claims || echo "[drain] reconcile: stale-claim pass errored — continuing."
+  reconcile_done_issues  || echo "[drain] reconcile: agent-done pass errored — continuing."
+}
+
 run_cycle() {
   local inbox_issues all_ready n out drc cap
   local ac_halt ac_sig
@@ -463,6 +580,10 @@ run_cycle() {
   # sync loop, so neither can observe the other's effect. Never mutates a live
   # session's tree — fail-safe toward fetch-only.
   sync_shared_checkouts
+
+  # Step 0: reconcile the label board against observable reality (#1306, #1322).
+  # Runs BEFORE triage so a cycle never enumerates a queue it already knows is wrong.
+  reconcile_labels
 
   # Step 1: triage inbox issues → labels T1/T2 as agent-ready
   inbox_issues=$(gh issue list --repo "$REPO" --label "inbox" \
@@ -733,6 +854,13 @@ case "${1:-}" in
   --session-alive)
     # Pure seam: is the session (or any pid) still alive?
     if session_alive "${2:?Usage: drain-inbox.sh --session-alive <pid>}"; then exit 0; else exit 1; fi
+    ;;
+  --dispatch-alive)
+    # Pure seam: is a dispatch for <issue> genuinely running? This is witness 2 of
+    # the reaper, so it gets driven against a REAL process rather than asserted on
+    # source text — a pattern that silently never matches is indistinguishable from
+    # "nothing is running", and reads as a dead issue rather than a broken witness.
+    if dispatch_alive_for "${2:?Usage: drain-inbox.sh --dispatch-alive <issue>}"; then exit 0; else exit 1; fi
     ;;
   --should-continue)
     # Pure seam: combined loop guard = session-alive AND before the lifetime cap.

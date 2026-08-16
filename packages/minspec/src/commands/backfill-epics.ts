@@ -5,6 +5,8 @@ import {
   isClaudeAvailable,
   applyBackfill,
   renderProposalMarkdown,
+  withoutAlreadyTagged,
+  backfillScope,
   type BackfillProposal,
   type ProposedEpic,
 } from '../lib/epic-backfill';
@@ -243,6 +245,19 @@ export async function backfillEpicsCommand(
   const folder = folderArg ?? (await resolveTargetFolder());
   if (!folder) return;
 
+  // Nothing without an `epic:` means nothing this command can change. Say so
+  // before the consent prompt and the AI call, rather than asking to spend
+  // minutes producing mappings that apply would skip anyway (#1570, #1571).
+  const scope = backfillScope(folder);
+  if (scope.pending === 0) {
+    vscode.window.showInformationMessage(
+      scope.total === 0
+        ? 'MinSpec: Nothing to backfill — no specs or decisions found yet.'
+        : 'MinSpec: Nothing to backfill — every spec and decision already carries an epic.',
+    );
+    return;
+  }
+
   let proposal: BackfillProposal = proposeHeuristic(folder);
 
   // Tier-1 AI pass. Consent may already be given upstream (the bootstrap offer
@@ -269,17 +284,35 @@ export async function backfillEpicsCommand(
       }
     }
     if (useAi) {
+      // Cancellable: the budget now scales with the corpus (up to 15 minutes on
+      // a large one), and a wait that long must be interruptible (#1570).
       const ai = await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Notification, title: 'MinSpec: asking Claude to propose epics…' },
-        () => proposeAI(folder),
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'MinSpec: asking Claude to propose epics…',
+          cancellable: true,
+        },
+        (_progress, token) => {
+          const ac = new AbortController();
+          token.onCancellationRequested(() => ac.abort());
+          return proposeAI(folder, { signal: ac.signal });
+        },
       );
-      if (ai) {
-        proposal = ai;
-      } else {
-        vscode.window.showWarningMessage('MinSpec: AI pass unavailable — using the heuristic proposal.');
+      if (ai?.proposal) {
+        proposal = ai.proposal;
+      } else if (ai?.failure?.reason !== 'cancelled') {
+        // Name the mode that actually fired. This used to read "AI pass
+        // unavailable" for every failure, which blamed a missing binary for a
+        // call that had in fact answered fine and simply been cut off (#1570).
+        vscode.window.showWarningMessage(
+          `MinSpec: the AI pass ${ai?.failure?.detail ?? 'did not produce a proposal'} — using the heuristic proposal.`,
+        );
       }
     }
   }
+
+  // Only what apply will really write, so the counts below are the truth (#1571).
+  proposal = withoutAlreadyTagged(proposal);
 
   if (proposal.epics.length === 0 || proposal.mappings.length === 0) {
     vscode.window.showInformationMessage('MinSpec: Nothing to backfill — no confident epic mappings found.');

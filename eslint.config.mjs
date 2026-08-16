@@ -262,4 +262,35 @@ export default [
       'tier0/no-restricted-imports': ['warn', { paths: [NO_VSCODE_IN_LIB] }],
     },
   },
+  {
+    // #1546 — the SPEC-025 FR-6 constitution advisory has exactly ONE emitter.
+    //
+    // It had two. `extension.ts` surfaced it with its offer-to-fix actions and the
+    // per-workspace "Don't ask again" flag; `commands/init.ts` surfaced the same
+    // string as a bare, actionless toast that structurally could not read that flag,
+    // so it reinstated a dismissed nudge on every init and refresh. Nothing failed.
+    //
+    // Deleting the second emitter fixes the instance; this fixes the property. The
+    // module is importable only where the actioned surface lives, so a third emitter
+    // is a lint error rather than a thing a reviewer has to notice — the standing
+    // answer of "enforce it, don't trust the model to remember it".
+    //
+    // Scoped to `src/**` so tests may still import the pure evaluator directly.
+    files: ['packages/minspec/src/**/*.ts'],
+    ignores: ['packages/minspec/src/extension.ts'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        {
+          patterns: [
+            {
+              group: ['**/lib/constitution-nudge', './lib/constitution-nudge', '../lib/constitution-nudge'],
+              message:
+                'The SPEC-025 FR-6 advisory has exactly one emitter: surfaceConstitutionProposeNudge in extension.ts (#1546). A second emitter cannot carry the offer actions or honour the "Don\'t ask again" flag, so it silently overrides the user. Surface it from extension.ts, or extend that function.',
+            },
+          ],
+        },
+      ],
+    },
+  },
 ];

@@ -40,6 +40,35 @@ export function buildSha(): string {
   }
 }
 
+/**
+ * A short, human-readable identity for the running bundle — for display anywhere,
+ * in ANY workspace (#1549).
+ *
+ * {@link detectBuildSkew} deliberately answers "are you behind?" and can only do so
+ * inside a MinSpec checkout, because ancestry needs MinSpec's own git history. That
+ * leaves every ADOPTER project unable to answer the weaker but more common question:
+ * *which build am I even running?*
+ *
+ * This is the gap that bit twice in one day. A gate fix shipped, the version string
+ * did not change (the extension is installed from a locally-built vsix), and a stale
+ * install kept reproducing a bug that was already fixed upstream. Nothing anywhere in
+ * the UI could distinguish the two builds, so the contradiction — "the source says
+ * fixed, my repo says broken" — cost a full diagnosis cycle before someone thought to
+ * compare the installed bundle against the repo by hand.
+ *
+ * Note the circularity this breaks: harness-drift detection compares the project's
+ * scaffolded files against the templates carried by the RUNNING build, so a stale
+ * build's templates look perfectly current to it. Staleness is structurally invisible
+ * to every other signal MinSpec has; only the build's own identity escapes it.
+ *
+ * Offline and pure — reads the injected literal, never git, so it is safe on any
+ * activation path and in any workspace.
+ */
+export function buildLabel(): string {
+  const sha = buildSha();
+  return sha === 'dev' ? 'dev build' : `build ${sha.slice(0, 7)}`;
+}
+
 export type SkewVerdict =
   /** Not a MinSpec checkout, not a git repo, or a dev build — nothing to say. */
   | { kind: 'not-applicable'; reason: string }

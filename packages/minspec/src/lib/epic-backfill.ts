@@ -36,7 +36,21 @@ export interface ArtifactRef {
   readonly id: string;          // SPEC-NNN / DR-NNN
   readonly kind: ArtifactKind;
   readonly title: string;
+  /**
+   * The artifact's anchor file — `requirements.md` for a split-layout spec.
+   * Use it to READ the artifact's state; use `files` to WRITE to it.
+   */
   readonly filePath: string;
+  /**
+   * Every file carrying this artifact's id, anchor first.
+   *
+   * A split-layout spec is one artifact spread over requirements/design/tasks,
+   * all three declaring the same `id`. Collecting them as three artifacts made
+   * one id ambiguous, and `normalizeAiProposal`'s id→artifact Map silently kept
+   * only the last one, so an AI mapping tagged one file and left its siblings
+   * untagged (#1573). Single-file artifacts have exactly one entry.
+   */
+  readonly files: readonly string[];
   /** Existing epic ref, if already assigned. */
   readonly epic?: string;
   /** Parent directory basename (spec feature folder) — a heuristic signal. */
@@ -56,7 +70,13 @@ export interface ProposedEpic {
 export interface ProposedMapping {
   readonly artifactId: string;
   readonly kind: ArtifactKind;
+  /** Anchor file — what the skip check reads (#1573). */
   readonly filePath: string;
+  /**
+   * Every file to stamp when this mapping applies. Optional so a hand-built
+   * mapping stays valid; absent means "just `filePath`".
+   */
+  readonly filePaths?: readonly string[];
   readonly epicSlug: string;
   /** 0..1 — heuristic similarity, or AI-reported confidence. */
   readonly confidence: number;
@@ -73,6 +93,64 @@ export interface ApplyResult {
   readonly epicsCreated: number;
   readonly artifactsTagged: number;
   readonly skipped: number;
+}
+
+// ─── Tier-1 budget + failure reporting ────────────────────────────────────────
+
+/**
+ * Why the AI pass produced no proposal. FR-4 makes every one of these a graceful
+ * degrade to the heuristic — but they are NOT the same event, and collapsing them
+ * into a bare `null` is what let a working `claude` be reported as "unavailable"
+ * for as long as this command has shipped (#1570).
+ */
+export type AiFailureReason =
+  | 'nothing-to-assign'
+  | 'claude-absent'
+  | 'timeout'
+  | 'cancelled'
+  | 'exit'
+  | 'non-json'
+  | 'unusable';
+
+export interface AiFailure {
+  readonly reason: AiFailureReason;
+  /** One human-facing clause, e.g. "timed out after 10m". */
+  readonly detail: string;
+}
+
+/** `proposal` is null exactly when `failure` is set. */
+export interface AiResult {
+  readonly proposal: BackfillProposal | null;
+  readonly failure?: AiFailure;
+}
+
+/** Floor — a tiny corpus still gets a usable budget (the historic constant). */
+export const AI_TIMEOUT_FLOOR_MS = 120_000;
+/** Ceiling — a human is watching a progress toast; do not hang forever. */
+export const AI_TIMEOUT_CEILING_MS = 900_000;
+const AI_TIMEOUT_BASE_MS = 90_000;
+const AI_TIMEOUT_PER_ARTIFACT_MS = 3_000;
+
+/**
+ * Budget for one `claude -p` pass, scaled to the size of the ask.
+ *
+ * The old flat 120s was sized for a small project and never revisited. The
+ * prompt emits one line per artifact and asks for one mapping in reply, so the
+ * work scales with the corpus while the budget did not — the pass then failed on
+ * exactly the projects large enough to need it. MEASURED on this repo: a
+ * 179-artifact / 76,937-char prompt returned valid JSON in 313s (exit 0) after
+ * being SIGTERM'd at 120s on every previous run (#1570). ~3s per artifact over a
+ * 90s base leaves roughly 2x headroom over that measurement.
+ */
+export function aiTimeoutMs(artifactCount: number): number {
+  const scaled = AI_TIMEOUT_BASE_MS + Math.max(0, artifactCount) * AI_TIMEOUT_PER_ARTIFACT_MS;
+  return Math.min(AI_TIMEOUT_CEILING_MS, Math.max(AI_TIMEOUT_FLOOR_MS, scaled));
+}
+
+/** Human-readable duration for a failure detail ("2m 30s"). */
+function humanMs(ms: number): string {
+  const s = Math.round(ms / 1000);
+  return s < 60 ? `${s}s` : `${Math.floor(s / 60)}m${s % 60 ? ` ${s % 60}s` : ''}`;
 }
 
 // ─── Tier-1 availability ──────────────────────────────────────────────────────
@@ -161,12 +239,20 @@ function collectSpecs(rootDir: string): ArtifactRef[] {
         // "minspec" is the product, not an epic). Skip when folder == product.
         const folder = path.basename(path.dirname(full));
         const product = (content.match(/^---\n[\s\S]*?\n---/)?.[0].match(/^product\s*:\s*(.+)$/m)?.[1] ?? '').trim();
-        const group = product && slugify(folder) === slugify(product) ? undefined : folder;
+        // A folder NAMED AFTER the spec it holds (specs/minspec/SPEC-019-execution-
+        // substrate/requirements.md) is that spec's own directory, not a feature
+        // grouping. Seeding an epic from it produces one epic per spec — the exact
+        // opposite of grouping a body of work, and how a single run proposed 54
+        // per-spec epics (#1571).
+        const isOwnSpecDir = slugify(folder).startsWith(slugify(fm.id));
+        const isProductRoot = Boolean(product) && slugify(folder) === slugify(product);
+        const group = isProductRoot || isOwnSpecDir ? undefined : folder;
         out.push({
           id: fm.id,
           kind: 'spec',
           title: fm.title || fm.id,
           filePath: full,
+          files: [full],
           epic: fm.epic,
           group,
           digest: firstParagraph(content),
@@ -175,6 +261,51 @@ function collectSpecs(rootDir: string): ArtifactRef[] {
     }
   };
   walk(specsDir);
+  return collapseByid(out);
+}
+
+/** Anchor preference: the file a split-layout spec is normally read from. */
+const ANCHOR_ORDER = ['requirements.md', 'spec.md', 'design.md', 'plan.md', 'tasks.md'];
+
+function anchorRank(filePath: string): number {
+  const i = ANCHOR_ORDER.indexOf(path.basename(filePath).toLowerCase());
+  return i === -1 ? ANCHOR_ORDER.length : i;
+}
+
+/**
+ * Collapse per-FILE rows into per-ARTIFACT rows.
+ *
+ * requirements.md / design.md / tasks.md in one spec folder all declare the same
+ * `id`; they are one spec, not three. The anchor is the highest-ranked file by
+ * `ANCHOR_ORDER` (ties broken by path, so the result is deterministic), and its
+ * frontmatter answers "what epic is this spec in?". `files` keeps every sibling
+ * so applying a mapping can stamp all of them (#1573).
+ */
+function collapseByid(rows: ArtifactRef[]): ArtifactRef[] {
+  const byId = new Map<string, ArtifactRef[]>();
+  for (const r of rows) {
+    const bucket = byId.get(r.id);
+    if (bucket) bucket.push(r);
+    else byId.set(r.id, [r]);
+  }
+
+  const out: ArtifactRef[] = [];
+  for (const bucket of byId.values()) {
+    if (bucket.length === 1) { out.push(bucket[0]); continue; }
+    const sorted = [...bucket].sort((a, b) => {
+      const byRank = anchorRank(a.filePath) - anchorRank(b.filePath);
+      return byRank !== 0 ? byRank : a.filePath.localeCompare(b.filePath);
+    });
+    const anchor = sorted[0];
+    out.push({
+      ...anchor,
+      // An epic on ANY file counts as assigned: apply stamps every sibling, so a
+      // split tag can only come from a hand edit, and re-proposing a spec that
+      // is already in an epic would be the no-op mapping #1571 removed.
+      epic: anchor.epic ?? sorted.find(r => r.epic)?.epic,
+      files: sorted.map(r => r.filePath),
+    });
+  }
   return out;
 }
 
@@ -191,6 +322,7 @@ function collectAdrs(rootDir: string): ArtifactRef[] {
       kind: 'adr' as const,
       title: a.title,
       filePath: a.filePath,
+      files: [a.filePath],
       epic: a.epic,
       digest,
     };
@@ -248,7 +380,8 @@ export function proposeHeuristic(rootDir: string): BackfillProposal {
       const slug = slugify(a.group);
       if (epicsBySlug.has(slug)) {
         mappings.push({
-          artifactId: a.id, kind: a.kind, filePath: a.filePath, epicSlug: slug,
+          artifactId: a.id, kind: a.kind, filePath: a.filePath, filePaths: a.files,
+          epicSlug: slug,
           confidence: SUBDIR_CONFIDENCE, rationale: `In feature folder "${a.group}".`,
         });
         continue;
@@ -263,7 +396,8 @@ export function proposeHeuristic(rootDir: string): BackfillProposal {
     }
     if (best && best.score >= TOKEN_THRESHOLD) {
       mappings.push({
-        artifactId: a.id, kind: a.kind, filePath: a.filePath, epicSlug: best.slug,
+        artifactId: a.id, kind: a.kind, filePath: a.filePath, filePaths: a.files,
+        epicSlug: best.slug,
         confidence: Number(best.score.toFixed(2)),
         rationale: `Title overlaps epic "${epicsBySlug.get(best.slug)!.title}".`,
       });
@@ -279,12 +413,57 @@ export function proposeHeuristic(rootDir: string): BackfillProposal {
 
 // ─── AI engine (Tier 1) ───────────────────────────────────────────────────────
 
-function buildPrompt(artifacts: ArtifactRef[], registered: EpicSummary[]): string {
-  const digest = artifacts.map(a =>
-    `- ${a.id} [${a.kind}] "${a.title}"${a.epic ? ` (epic: ${a.epic})` : ''}${a.digest ? ` — ${a.digest}` : ''}`,
+/**
+ * Artifacts a backfill can actually change: the ones with no `epic:` yet.
+ *
+ * `applyBackfill` skips an already-tagged artifact by default (FR-6), so a
+ * mapping for one is discarded the moment it is applied. Asking the AI to
+ * produce those mappings anyway spent the whole budget generating output that
+ * was contractually guaranteed to be thrown away (#1570), and made the review
+ * surface quote a tag count that could never happen (#1571).
+ */
+export function pendingArtifacts(artifacts: ArtifactRef[]): ArtifactRef[] {
+  return artifacts.filter(a => !a.epic);
+}
+
+/** How much work a backfill actually has, so the command can say which. */
+export interface BackfillScope {
+  readonly total: number;
+  /** Artifacts with no `epic:` — the only ones apply can write. */
+  readonly pending: number;
+}
+
+/**
+ * Answers "is there anything to backfill?" before any consent prompt or AI call.
+ *
+ * Deliberately NOT `hasUnbackfilledEpics` (auto-bootstrap): that carries an
+ * offer threshold of 3 untagged artifacts — the right bar for interrupting
+ * someone unprompted, the wrong bar for a command they just invoked, where one
+ * untagged artifact is still work worth doing.
+ */
+export function backfillScope(rootDir: string): BackfillScope {
+  const artifacts = collectArtifacts(rootDir);
+  return { total: artifacts.length, pending: pendingArtifacts(artifacts).length };
+}
+
+/**
+ * The ask covers `pending` only; already-assigned artifacts appear as taxonomy
+ * context (id + title + epic, no digest) so the model reuses the established
+ * epics instead of inventing a parallel set.
+ */
+function buildPrompt(
+  pending: ArtifactRef[],
+  assigned: ArtifactRef[],
+  registered: EpicSummary[],
+): string {
+  const digest = pending.map(a =>
+    `- ${a.id} [${a.kind}] "${a.title}"${a.digest ? ` — ${a.digest}` : ''}`,
   ).join('\n');
   const existing = registered.length
     ? registered.map(e => `- ${e.id} slug=${e.slug} "${e.title}"`).join('\n')
+    : '(none)';
+  const context = assigned.length
+    ? assigned.map(a => `- ${a.id} [${a.kind}] "${a.title}" → ${a.epic}`).join('\n')
     : '(none)';
   return [
     'You are organizing a software project\'s specs and architecture decisions (ADRs) into "epics" — coherent bodies of work.',
@@ -292,10 +471,13 @@ function buildPrompt(artifacts: ArtifactRef[], registered: EpicSummary[]): strin
     'EXISTING EPICS (reuse these slugs where an artifact fits):',
     existing,
     '',
-    'ARTIFACTS:',
+    'ALREADY ASSIGNED (context only — do NOT map these; they show the taxonomy in use):',
+    context,
+    '',
+    'ARTIFACTS TO ASSIGN (map only these):',
     digest,
     '',
-    'Propose a concise epic taxonomy (prefer 3–8 epics; reuse existing where apt) and map each artifact to exactly one epic where confident. Leave an artifact unmapped rather than force a poor fit.',
+    'Reuse an existing epic wherever an artifact fits one; propose a new epic only when nothing fits (prefer 3–8 epics total across the project). Map each artifact listed under ARTIFACTS TO ASSIGN to exactly one epic where confident. Leave an artifact unmapped rather than force a poor fit.',
     '',
     'Output ONLY a JSON object, no prose, no markdown fences, matching exactly:',
     '{"epics":[{"slug":"kebab-case","title":"Title Case","rationale":"why"}],"mappings":[{"artifactId":"SPEC-001","epicSlug":"kebab-case","confidence":0.0,"rationale":"why"}]}',
@@ -324,8 +506,18 @@ function extractJson(stdout: string): string | null {
  * Validate + normalize a parsed AI object into a BackfillProposal. Drops
  * mappings whose artifactId is unknown or epicSlug has no epic. Returns null on
  * structural failure so the caller falls back to the heuristic.
+ *
+ * `registered` lets a mapping name an epic that ALREADY exists without the model
+ * having to re-declare it under `epics[]`. The prompt asks it to reuse existing
+ * slugs, so on an organized project the correct answer is mappings onto epics it
+ * never declares — which this used to reject wholesale, reporting "no usable
+ * epics" for a perfectly good reply (found verifying #1570 against this repo).
  */
-export function normalizeAiProposal(parsed: unknown, artifacts: ArtifactRef[]): BackfillProposal | null {
+export function normalizeAiProposal(
+  parsed: unknown,
+  artifacts: ArtifactRef[],
+  registered: EpicSummary[] = [],
+): BackfillProposal | null {
   if (!parsed || typeof parsed !== 'object') return null;
   const obj = parsed as Record<string, unknown>;
   if (!Array.isArray(obj.epics) || !Array.isArray(obj.mappings)) return null;
@@ -343,26 +535,55 @@ export function normalizeAiProposal(parsed: unknown, artifacts: ArtifactRef[]): 
     epics.push({ slug, title, rationale: typeof r.rationale === 'string' ? r.rationale : '' });
   }
 
+  // Registered epics are addressable by slug even when undeclared: reusing one
+  // is the outcome the prompt asks for, so it must not read as a bad reply.
+  const registeredBySlug = new Map(registered.map(e => [e.slug, e]));
+
   const mappings: ProposedMapping[] = [];
+  // "Map each artifact to exactly one epic" is an instruction in the prompt, and
+  // an LLM reply is free-form input — so it has to be enforced here, where the
+  // rest of the sanitising happens. Unenforced, a second mapping for the same
+  // artifact created an epic that the apply step then refused to populate (#1575).
+  const claimed = new Set<string>();
   for (const m of obj.mappings) {
     if (!m || typeof m !== 'object') continue;
     const r = m as Record<string, unknown>;
     const artifactId = typeof r.artifactId === 'string' ? r.artifactId : '';
     const epicSlug = typeof r.epicSlug === 'string' ? slugify(r.epicSlug) : '';
     const art = byId.get(artifactId);
-    if (!art || !slugs.has(epicSlug)) continue; // unknown artifact or epic → drop
+    if (!art) continue; // unknown artifact → drop
+    if (claimed.has(artifactId)) continue; // already assigned → keep the first
+    if (!slugs.has(epicSlug)) {
+      const known = registeredBySlug.get(epicSlug);
+      if (!known) continue; // epic neither declared nor registered → drop
+      slugs.add(epicSlug);
+      epics.push({
+        id: known.id,
+        slug: known.slug,
+        title: known.title,
+        rationale: 'Existing registered epic.',
+      });
+    }
+    claimed.add(artifactId);
     const confRaw = typeof r.confidence === 'number' ? r.confidence : 0.5;
     mappings.push({
-      artifactId, kind: art.kind, filePath: art.filePath, epicSlug,
+      artifactId, kind: art.kind, filePath: art.filePath, filePaths: art.files,
+      epicSlug,
       confidence: Math.max(0, Math.min(1, confRaw)),
       rationale: typeof r.rationale === 'string' ? r.rationale : '',
     });
   }
 
-  if (epics.length === 0) return null;
-  // Drop epics no mapping references.
+  // Drop epics no mapping references, THEN judge emptiness. Checking before the
+  // filter let a reply that declared epics but produced no surviving mapping
+  // return a non-null, fully empty proposal — which reads as success everywhere
+  // downstream: it never trips `if (!proposal)`, so `unusable` was unreachable,
+  // and the command overwrote its good heuristic proposal with the empty one and
+  // told the user there was nothing to backfill, with no warning (#1576).
   const used = new Set(mappings.map(m => m.epicSlug));
-  return { epics: epics.filter(e => used.has(e.slug)), mappings, source: 'ai' };
+  const kept = epics.filter(e => used.has(e.slug));
+  if (kept.length === 0 || mappings.length === 0) return null;
+  return { epics: kept, mappings, source: 'ai' };
 }
 
 /**
@@ -375,29 +596,107 @@ export function normalizeAiProposal(parsed: unknown, artifacts: ArtifactRef[]): 
  * the asserted precondition-check mechanism; the surrounding try/catch remains
  * the backstop for failures after a successful probe (timeout, non-JSON). (#141)
  */
-export async function proposeAI(rootDir: string): Promise<BackfillProposal | null> {
+export async function proposeAI(
+  rootDir: string,
+  opts: { signal?: AbortSignal } = {},
+): Promise<AiResult> {
   const artifacts = collectArtifacts(rootDir);
-  if (artifacts.length === 0) return null;
-  if (!(await isClaudeAvailable())) return null;
-  const prompt = buildPrompt(artifacts, listEpics(rootDir));
+  const pending = pendingArtifacts(artifacts);
+  if (pending.length === 0) {
+    return {
+      proposal: null,
+      failure: {
+        reason: 'nothing-to-assign',
+        detail: artifacts.length === 0
+          ? 'found no specs or decisions to organize'
+          : 'found nothing to assign — every spec and decision already carries an epic',
+      },
+    };
+  }
+  if (!(await isClaudeAvailable())) {
+    return { proposal: null, failure: { reason: 'claude-absent', detail: 'could not run `claude` (Claude Code is not on PATH)' } };
+  }
+
+  const assigned = artifacts.filter(a => a.epic);
+  const prompt = buildPrompt(pending, assigned, listEpics(rootDir));
+  const timeout = aiTimeoutMs(pending.length);
   try {
     const { stdout } = await execFileAsync('claude', ['-p', prompt], {
-      timeout: 120_000,
+      timeout,
       maxBuffer: 4 * 1024 * 1024,
       env: { ...process.env },
+      signal: opts.signal,
     });
     const json = extractJson(stdout);
-    if (!json) return null;
+    if (!json) {
+      return { proposal: null, failure: { reason: 'non-json', detail: 'returned output that was not JSON' } };
+    }
     let parsed: unknown;
     try {
       parsed = JSON.parse(json);
     } catch {
-      return null;
+      return { proposal: null, failure: { reason: 'non-json', detail: 'returned malformed JSON' } };
     }
-    return normalizeAiProposal(parsed, artifacts);
-  } catch {
-    return null;
+    // Only `pending` may be mapped — a mapping onto an already-tagged artifact
+    // is discarded at apply, so accepting one would re-inflate the same lie.
+    const proposal = normalizeAiProposal(parsed, pending, listEpics(rootDir));
+    if (!proposal) {
+      return { proposal: null, failure: { reason: 'unusable', detail: 'returned JSON with no usable epics' } };
+    }
+    return { proposal };
+  } catch (err) {
+    return { proposal: null, failure: classifyExecFailure(err, timeout) };
   }
+}
+
+/**
+ * Name the failure mode from execFile's error. The distinction that matters: a
+ * child we KILLED (timeout/cancel) is a defect or a user act, not the absent
+ * binary the old single message blamed (#1570).
+ */
+function classifyExecFailure(err: unknown, timeout: number): AiFailure {
+  const e = (err ?? {}) as { killed?: boolean; signal?: string; code?: unknown; name?: string };
+  if (e.name === 'AbortError' || e.code === 'ABORT_ERR') {
+    return { reason: 'cancelled', detail: 'was cancelled' };
+  }
+  if (e.killed === true || e.signal === 'SIGTERM') {
+    return { reason: 'timeout', detail: `timed out after ${humanMs(timeout)}` };
+  }
+  if (e.code === 'ENOENT') {
+    return { reason: 'claude-absent', detail: 'could not run `claude` (Claude Code is not on PATH)' };
+  }
+  if (typeof e.code === 'number') {
+    return { reason: 'exit', detail: `exited with code ${e.code}` };
+  }
+  return { reason: 'exit', detail: 'failed to run' };
+}
+
+/**
+ * Strip everything the apply step would silently discard, so the counts a human
+ * approves are the counts that actually happen.
+ *
+ * A mapping onto an artifact that already carries `epic:` is skipped by
+ * `applyBackfill` (FR-6), and an epic left with no surviving mapping is a body
+ * of work nothing belongs to. Leaving both in the proposal is how one run asked
+ * to "tag 97 artifact(s)", tagged none, and wrote 54 empty epic files (#1571).
+ */
+export function withoutAlreadyTagged(
+  proposal: BackfillProposal,
+  opts: { override?: boolean } = {},
+): BackfillProposal {
+  // Dedupe by artifact as well as dropping the already-tagged: a proposal naming
+  // one artifact twice would otherwise quote a tag count larger than the number
+  // of artifacts that exist, which is the same false promise #1571 removed
+  // (#1575). Apply enforces this too; here it keeps the REVIEWED count honest.
+  const claimed = new Set<string>();
+  const mappings = proposal.mappings.filter(m => {
+    if (!opts.override && readArtifactEpic(m.filePath)) return false;
+    if (claimed.has(m.filePath)) return false;
+    claimed.add(m.filePath);
+    return true;
+  });
+  const used = new Set(mappings.map(m => m.epicSlug));
+  return { epics: proposal.epics.filter(e => used.has(e.slug)), mappings, source: proposal.source };
 }
 
 // ─── Apply (HITL — only after approval) ───────────────────────────────────────
@@ -419,6 +718,30 @@ export function applyBackfill(
   let epicsCreated = 0;
   const registered = new Map(listEpics(rootDir).map(e => [e.slug, e]));
 
+  // Decide which mappings will actually write BEFORE creating anything. Epic
+  // creation used to run first, so an epic whose every mapping was about to be
+  // skipped was still written to disk and into the INDEX — 54 empty epics in one
+  // run (#1571). An epic nothing joins is not a body of work; do not create it.
+  //
+  // This list is the SINGLE source of truth: the gate below and the tagging loop
+  // both read it. They used to be computed separately — the gate from one
+  // pre-write snapshot, the loop re-reading each file after every write — so two
+  // mappings naming the same artifact let the second epic pass the gate and get
+  // created, while the loop then refused to give it a member. An epic was born
+  // empty again, through the very gate meant to stop it (#1575).
+  const proposedSlugs = new Set(proposal.epics.map(e => e.slug));
+  const claimed = new Set<string>();
+  const effective = proposal.mappings.filter(m => {
+    if (!proposedSlugs.has(m.epicSlug)) return false;
+    if (!opts.override && readArtifactEpic(m.filePath)) return false;
+    // One artifact joins exactly one epic. The prompt says so; nothing enforced
+    // it, and an LLM reply is free-form input (#1575).
+    if (claimed.has(m.filePath)) return false;
+    claimed.add(m.filePath);
+    return true;
+  });
+  const willReceive = new Set(effective.map(m => m.epicSlug));
+
   for (const e of proposal.epics) {
     const existing = e.id ? e.id : registered.get(e.slug)?.id;
     // Prefer the registry's canonical title for existing epics; else the proposal's.
@@ -426,6 +749,7 @@ export function applyBackfill(
     if (existing) {
       refBySlug.set(e.slug, existing);
     } else {
+      if (!willReceive.has(e.slug)) continue; // the gate: no members, no epic
       // Thread the proposal's rationale into the new epic's `## Goal` so a
       // backfilled epic is born complete, not as a bare skeleton (#79).
       const created = createEpic(rootDir, e.title, e.slug, undefined, e.rationale);
@@ -435,14 +759,18 @@ export function applyBackfill(
   }
 
   let artifactsTagged = 0;
-  let skipped = 0;
-  for (const m of proposal.mappings) {
+  // Everything `effective` rejected is, by definition, skipped.
+  let skipped = proposal.mappings.length - effective.length;
+  for (const m of effective) {
     const ref = refBySlug.get(m.epicSlug);
     if (!ref) { skipped++; continue; }
-    if (!opts.override && readArtifactEpic(m.filePath)) { skipped++; continue; }
     try {
-      setArtifactEpic(m.filePath, ref, titleBySlug.get(m.epicSlug));
-      artifactsTagged++;
+      // One artifact, every file: a split-layout spec's siblings must not be
+      // left carrying a different epic (or none) than its anchor (#1573).
+      for (const fp of m.filePaths ?? [m.filePath]) {
+        setArtifactEpic(fp, ref, titleBySlug.get(m.epicSlug));
+      }
+      artifactsTagged++; // counts ARTIFACTS, not files
     } catch {
       skipped++;
     }

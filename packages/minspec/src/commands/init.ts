@@ -13,8 +13,8 @@ import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS, MANAGED_REGION_TEMPLATES } from 
 import { CLAUDE_SETTINGS_PATH } from '../lib/claude-settings';
 import { resolveTargetFolder, workspaceFolderLabel } from '../lib/resolve-folder';
 import { setCoverageMinimum, DEFAULT_COVERAGE_MINIMUM } from '../lib/config';
-import { evaluateConstitution } from '../lib/constitution-nudge';
 import { getRepoFromRemote } from '../lib/github';
+import { resolveRemotes, renameToOriginCandidate } from '../lib/git-remotes';
 import {
   type CommandRunner,
   RULESET_DOCS_URL,
@@ -32,21 +32,16 @@ import {
   READY_TO_MERGE_CHECK,
 } from '../lib/ruleset-advisor';
 
-/**
- * SPEC-025 FR-6: soft, NON-MODAL advisory when the constitution has no
- * human-authored rules yet. Advisory only — never modal, never blocks, and a
- * failure here must not affect the init result (best-effort).
- */
-function surfaceConstitutionNudge(folder: string): void {
-  try {
-    const nudge = evaluateConstitution(folder);
-    if (nudge.empty) {
-      vscode.window.showInformationMessage(nudge.message);
-    }
-  } catch {
-    // best-effort — the nudge is advisory; never let it break init.
-  }
-}
+// SPEC-025 FR-6's advisory is NOT emitted from here (#1546). It has exactly one
+// producer, `surfaceConstitutionProposeNudge` in extension.ts, which carries the
+// offer-to-fix actions and honours the per-workspace "Don't ask again" flag.
+//
+// The emitter that used to live here was a bare, actionless toast that could not read
+// that flag — it took only a folder path, never an ExtensionContext — so it reinstated
+// a dismissed nudge on every init and refresh. It was also guaranteed-true noise:
+// init has just written the constitution from a template, so "no human-authored rules
+// yet" cannot be false at that instant, and the message landed in the middle of the
+// other init toasts carrying no information and no way to act.
 
 // ---------------------------------------------------------------------------
 // Post-init "what to commit" hint + offer (#222)
@@ -669,6 +664,98 @@ const REPO_SLUG_RE = /^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/;
  */
 const REQUIRED_CHECKS_SETTING = 'minspec.ruleset.requiredChecks';
 
+// ---------------------------------------------------------------------------
+// Misnamed-remote detection + rename offer (#1545)
+// ---------------------------------------------------------------------------
+
+/** Toast action: rename the sole remote to the conventional `origin`. */
+const RENAME_REMOTE_ACTION = 'Rename to origin';
+/** Toast action: leave the remote alone (and stop asking). */
+const KEEP_REMOTE_ACTION = 'Keep as is';
+
+/** workspaceState-free suppression: a git config flag, so it travels with the repo. */
+const RENAME_DECLINED_CONFIG = 'minspec.remoteRenameDeclined';
+
+/** Dependencies for {@link offerRemoteRenameAdvisory}, injectable for tests. */
+export interface RemoteRenameDeps {
+  run?: CommandRunner;
+  isRepo?: (folder: string) => boolean;
+}
+
+/**
+ * Detect a remote that isn't called `origin` and offer to rename it (#1545).
+ *
+ * `origin` is a convention, not a rule — `git clone` picks it, and a user who runs
+ * `git remote add <project-name> <url>` never gets one. Nothing in git cares. But
+ * essentially every tool reading "the remote" hardcodes the name, MinSpec included:
+ * before this, such a repo was told to add a remote it already had, and its
+ * protected-branch guard went silently inert.
+ *
+ * The resolver ({@link resolveRemotes}) fixes MinSpec's own reads. This offer fixes
+ * the REPO, which is strictly more valuable: it repairs every other tool at the same
+ * time, and it reaches the places a TypeScript resolver cannot — the scaffolded shell
+ * hook, `git push` without arguments, and every downstream script that will ever
+ * assume the conventional name.
+ *
+ * Deliberately narrow, and consent-gated:
+ *   - fires ONLY for exactly one remote, pointing at github.com, not already `origin`
+ *     ({@link renameToOriginCandidate}). Several remotes, or a non-GitHub one, is
+ *     left strictly alone — an offer there is a prompt to break something;
+ *   - the rename is the ONLY mutation, and it happens only on an explicit click;
+ *   - "Keep as is" records a per-repo git-config flag so the offer never nags again.
+ *
+ * `git remote rename` is safe and reversible: it rewrites the `remote.<name>.*`
+ * config keys and the tracking refspec, and local branches keep their upstreams.
+ *
+ * Best-effort throughout — any failure is swallowed and never affects init.
+ */
+export async function offerRemoteRenameAdvisory(
+  folder: string,
+  deps: RemoteRenameDeps = {},
+): Promise<void> {
+  const run = deps.run ?? defaultCommandRunner;
+  const isRepo = deps.isRepo ?? ((f: string) => fs.existsSync(path.join(f, '.git')));
+  if (!isRepo(folder)) return;
+
+  try {
+    const declined = await run('git', ['-C', folder, 'config', '--get', RENAME_DECLINED_CONFIG]);
+    if (declined.code === 0 && declined.stdout.trim() === 'true') return;
+
+    const state = await resolveRemotes(run, folder);
+    const candidate = renameToOriginCandidate(state);
+    if (!candidate) return;
+
+    const choice = await vscode.window.showInformationMessage(
+      `MinSpec: this repo's only remote is named '${candidate.name}', not 'origin'. ` +
+        'Most git tooling — including MinSpec\'s protected-branch guard and the branch-ruleset ' +
+        'advisory — looks for a remote called \'origin\', and quietly does nothing without one. ' +
+        'Rename it?',
+      RENAME_REMOTE_ACTION,
+      KEEP_REMOTE_ACTION,
+    );
+
+    if (choice === RENAME_REMOTE_ACTION) {
+      const renamed = await run('git', ['-C', folder, 'remote', 'rename', candidate.name, 'origin']);
+      if (renamed.code === 0) {
+        vscode.window.showInformationMessage(
+          `MinSpec: renamed remote '${candidate.name}' to 'origin'.`,
+        );
+      } else {
+        // Report the real reason rather than a generic failure — the usual cause is
+        // an `origin` that already exists, which the user can act on.
+        vscode.window.showWarningMessage(
+          `MinSpec: could not rename '${candidate.name}' to 'origin' — ` +
+            `${(renamed.stderr || renamed.stdout).trim() || 'git reported no detail'}.`,
+        );
+      }
+    } else if (choice === KEEP_REMOTE_ACTION) {
+      await run('git', ['-C', folder, 'config', RENAME_DECLINED_CONFIG, 'true']);
+    }
+  } catch {
+    // best-effort — advisory only; never let it break init.
+  }
+}
+
 /** Dependencies for {@link offerRulesetAdvisory}, injectable for tests. */
 export interface RulesetAdvisoryDeps {
   /** Command runner used for all `gh` invocations. */
@@ -757,6 +844,42 @@ async function resolveWantedChecks(
     codeChecks: detectCodeChecks(scripts),
     userChecks: resolveRequiredChecks(),
   });
+}
+
+/**
+ * Explain a failed ruleset create/update WITHOUT asserting a cause we have not
+ * established.
+ *
+ * This previously rendered every 403 as "your gh token lacks repo-admin scope".
+ * Observed in a real project: a token carrying full `repo` scope, failing because
+ * rulesets are unavailable on a private repository on the free plan —
+ *
+ *     Upgrade to GitHub Pro or make this repository public to enable this feature.
+ *
+ * The message was confidently wrong, and worse than a vague one: it named a remedy
+ * (re-authenticate) that could not possibly work, so acting on it costs time and
+ * teaches the user the tool's diagnoses are unreliable.
+ *
+ * Order matters. The plan limit is checked FIRST because it is a 403 too, and the
+ * permission wording would otherwise swallow it. Beyond that we quote GitHub's own
+ * `message` rather than paraphrase it, and fall back to a deliberately non-committal
+ * phrase when GitHub said nothing quotable — an unexplained failure is an honest
+ * report; an invented explanation is not.
+ */
+function describeRulesetFailure(outcome: {
+  forbidden: boolean;
+  planLimited: boolean;
+  reason: string | null;
+}): string {
+  if (outcome.planLimited) {
+    return (
+      outcome.reason ??
+      'rulesets are not available for this repository — private repositories need a paid plan'
+    );
+  }
+  if (outcome.reason) return `GitHub said: ${outcome.reason}`;
+  if (outcome.forbidden) return 'the request was refused — your gh token may lack repo-admin scope';
+  return 'the request failed';
 }
 
 /** Show an info toast linking the rulesets docs, with a one-click open action. */
@@ -898,7 +1021,7 @@ export async function offerRulesetAdvisory(
           );
           return;
         }
-        const why = outcome.forbidden ? 'your gh token lacks repo-admin scope' : 'the request failed';
+        const why = describeRulesetFailure(outcome);
         await linkRulesetDocs(
           `MinSpec: could not create the ruleset (${why}). Create it manually — see the GitHub docs.`,
           openExternal,
@@ -933,7 +1056,7 @@ export async function offerRulesetAdvisory(
         );
         return;
       }
-      const why = outcome.forbidden ? 'your gh token lacks repo-admin scope' : 'the request failed';
+      const why = describeRulesetFailure(outcome);
       await linkRulesetDocs(
         `MinSpec: could not update the ruleset (${why}). Add the checks manually — see the GitHub docs.`,
         openExternal,
@@ -1150,6 +1273,7 @@ export async function initCommand(
   folderArg?: string,
   deps?: OfferScaffoldCommitDeps & {
     ruleset?: RulesetAdvisoryDeps;
+    remoteRename?: RemoteRenameDeps;
     githubPrExt?: GitHubPrExtAdvisoryDeps;
   },
 ): Promise<void> {
@@ -1191,7 +1315,6 @@ export async function initCommand(
       kind: 'untracked',
     });
   }
-  surfaceConstitutionNudge(folder);
   if (isFirstInit) {
     await offerCoverageThresholdPrompt(folder);
     // Onboarding-only nudge toward the GitHub PR extension (see doc comment on
@@ -1207,6 +1330,12 @@ export async function initCommand(
   // (no consent toast) — a ruleset that already exists is silent — and only the
   // MUTATING create is consent-gated behind an explicit "Create ruleset" click.
   // Failures never affect the init result.
+  //
+  // BEFORE the ruleset advisory (#1545): a remote that is not called `origin` is
+  // exactly what stops the ruleset probe identifying the repo, so asking afterwards
+  // would have the user fix the remote and still need to re-run init to get the
+  // offer that the fix unblocks.
+  await offerRemoteRenameAdvisory(folder, deps?.remoteRename);
   await offerRulesetAdvisory(folder, deps?.ruleset);
 }
 
@@ -1256,6 +1385,22 @@ async function surfaceManagedRegionWarning(folder: string, w: ManagedRegionWarni
     return;
   }
 
+  // A 'project-name-mismatch' reports that the harness's own name beat the
+  // directory's, so nothing is broken and "Re-scaffold" would be nonsense — worse,
+  // it would imply the harness is damaged when it is the thing that was right.
+  // Offer the file where a deliberate rename is declared instead (#1529).
+  if (w.kind === 'project-name-mismatch') {
+    const choice = await vscode.window.showInformationMessage(
+      `[${label}] ${w.message}`,
+      OPEN_FILE_ACTION,
+    );
+    if (choice === OPEN_FILE_ACTION) {
+      const doc = await vscode.workspace.openTextDocument(path.join(folder, w.outputPath));
+      await vscode.window.showTextDocument(doc, { preview: false });
+    }
+    return;
+  }
+
   const choice = await vscode.window.showWarningMessage(
     `[${label}] ${w.message}`,
     RESCAFFOLD_ACTION,
@@ -1279,7 +1424,10 @@ async function surfaceManagedRegionWarning(folder: string, w: ManagedRegionWarni
 
 export async function initRefreshCommand(
   folderArg?: string,
-  deps?: OfferScaffoldCommitDeps & { ruleset?: RulesetAdvisoryDeps },
+  deps?: OfferScaffoldCommitDeps & {
+    ruleset?: RulesetAdvisoryDeps;
+    remoteRename?: RemoteRenameDeps;
+  },
 ): Promise<void> {
   const folder = folderArg ?? (await resolveTargetFolder());
   if (!folder) return;
@@ -1301,7 +1449,6 @@ export async function initRefreshCommand(
   for (const w of warnings) {
     await surfaceManagedRegionWarning(folder, w);
   }
-  surfaceConstitutionNudge(folder);
   // Post-refresh "what to commit" offer — the SAME affordance init gives (#222).
   // Without this, a drift-triggered refresh (e.g. on window reload via
   // auto-bootstrap) rewrites the harness files but leaves them stranded
@@ -1311,6 +1458,8 @@ export async function initRefreshCommand(
   // (#564 / SPEC-033 FR-3). Refresh is where an EXISTING repo whose ruleset
   // predates the ai-review/ready-to-merge checks (the sealbox case) gets offered
   // the missing required checks; without this, only freshly-inited repos would.
+  // Same ordering rationale as init (#1545).
+  await offerRemoteRenameAdvisory(folder, deps?.remoteRename);
   await offerRulesetAdvisory(folder, deps?.ruleset);
 }
 

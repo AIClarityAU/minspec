@@ -252,7 +252,43 @@ review cycle, and a false forgery accusation against a legitimate human approval
 Genuine forks a human must pick before Plan; each changes what ships or how much
 surface this spec touches, so none is guessed here.
 
+> **Two of the four are resolved (2026-08-14); DQ-3 and DQ-4 remain open.** The original
+> option lists are kept verbatim below each decision, because the reasoning that was
+> rejected is part of the record.
+>
+> Read this section against a fact the spec did not know when it was written: **part of
+> FR-1 and FR-3 already shipped**, in `45d4212` (PR [#1477](https://github.com/AIClarityAU/minspec/pull/1477)),
+> filed under [#1439](https://github.com/AIClarityAU/minspec/issues/1439) rather than this
+> spec's #1019. So DQ-2 is no longer a free choice — it is a confirm-or-reverse against
+> code that already exists, and it shipped with a consequence the option list did not
+> foresee.
+
 - **DQ-1 — Which surface(s) carry the provenance display (FR-2)?**
+
+  > **RESOLVED — Option B: a dedicated `MinSpec: About MinSpec` command.**
+  >
+  > Nothing from this decision has shipped. The SHA reaching the screen today is
+  > incidental spill from FR-3's staleness warning (`extension.ts:696`), which is
+  > displayed *only* when the verdict is `stale` (`extension.ts:690`) and can be
+  > permanently silenced per-SHA. There is no way to ask.
+  >
+  > B is chosen because it is the only option that answers *"which commit is this
+  > install"* when the build is **current** or **unknown** — which is most of the time,
+  > and is precisely the state a reviewer is in when deciding whether a status/phases
+  > mismatch is a stale build or a forgery (the #996 incident this spec exists for).
+  > A hover-only tooltip (Option A) under-delivers FR-2's "on demand" bar, as the
+  > original trade-off note already said.
+  >
+  > **Cost of choosing B, stated rather than implied:** a Command Palette entry is only
+  > discoverable to someone who thinks to look for it, so it does nothing for the
+  > agent-dispatch paths (`scripts/dispatch-issue.sh`) where no human opens a palette.
+  > Option C's activation-log line covers those for near-zero extra work, and Plan may
+  > add it; B is the floor, not a ceiling.
+  >
+  > **Blocked on FR-1's missing half.** AC-3 requires the surface to display "the SHA
+  > **and build timestamp**". No timestamp is stamped today — `scripts/build-extension.sh:34`
+  > passes exactly one `--define`, for the SHA — so this command cannot satisfy AC-3 as
+  > written until FR-1's timestamp clause is built. Plan must sequence FR-1 before FR-2.
   - **Option A — status-bar tooltip only.** Cheapest; hover-only, easy to miss.
   - **Option B — dedicated `MinSpec: About MinSpec` command (recommended default).**
     Discoverable via Command Palette like every other MinSpec action in this repo's
@@ -266,6 +302,53 @@ surface this spec touches, so none is guessed here.
     bar.
 
 - **DQ-2 — Dirty-tree packaging: embed a dirty marker, or refuse to package?**
+
+  > **RESOLVED — Option A confirmed (the marker), with a mandatory amendment: the reader
+  > must strip the suffix before the ancestry check.**
+  >
+  > Option A already shipped: `scripts/build-extension.sh:20-22` appends `-dirty` when
+  > `git status --porcelain` over `packages/` and `scripts/` is non-empty. The refusal
+  > alternative did not ship — `prepackage` is still only `supply-chain:check`
+  > (`packages/minspec/package.json:640`). Confirming rather than reversing, for the
+  > reason the original note gives: a marker still answers "is this exactly `HEAD`"
+  > truthfully, and blocking a working packaging flow is the more disruptive trade.
+  >
+  > **The consequence the option list did not foresee.** `<sha>-dirty` is not a
+  > resolvable git object:
+  >
+  > ```
+  > $ H=$(git rev-parse HEAD); git cat-file -e "${H}-dirty^{commit}"
+  > fatal: Not a valid object name 614a569...-dirty^{commit}
+  > exit=128
+  > ```
+  >
+  > So `detectBuildSkew` cannot resolve it, returns `unknown`
+  > (`build-provenance.ts:99-105`), and `surfaceBuildSkewAdvisory` shows nothing for any
+  > verdict other than `stale` (`extension.ts:690`). **FR-3 therefore never warns for a
+  > dirty local build** — by construction the population most likely to be behind its
+  > checkout, since a dirty tree means someone is mid-iteration. The writer emits a
+  > suffix the reader was never taught about.
+  >
+  > That is a silent inert gate, which INV-1 and constitution invariant 2 both forbid, so
+  > it is an amendment to this decision rather than a separate nicety. Tracked as
+  > [#1528](https://github.com/AIClarityAU/minspec/issues/1528).
+  >
+  > **Amendment (normative for Plan):** `detectBuildSkew` MUST strip a trailing `-dirty`
+  > before resolving the commit, and the surfaced message MUST keep the marker visible —
+  > e.g. *"built from `614a569` plus uncommitted changes, 12 commits behind this
+  > checkout"*.
+  >
+  > **Cost of the amendment, stated:** the skew count is then computed against a commit
+  > the bundle does not exactly match, because the bundle contains that commit *plus*
+  > unknown local edits. The number becomes approximate. That is strictly better than
+  > silence, but the wording must not imply exactness — an approximate warning that says
+  > so is honest; one that reads as precise is a new false signpost.
+  >
+  > **Scope note, verified:** the porcelain check is path-limited to `packages/` and
+  > `scripts/` rather than the whole tree. That is sufficient rather than sloppy —
+  > `.vscodeignore` excludes `../**`, so everything that actually ships is under
+  > `packages/`. Recorded so a future reader does not "fix" it into a whole-tree check
+  > and start marking builds dirty for unrelated edits.
   - **Option A — embed `<sha>-dirty` (or `+N` ahead) and proceed.** Matches common
     practice (`git describe --dirty`); never blocks a working packaging flow.
   - **Option B — `prepackage` refuses on a dirty tree, forcing commit-then-package.**

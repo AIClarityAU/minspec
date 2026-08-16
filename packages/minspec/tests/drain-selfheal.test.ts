@@ -64,6 +64,9 @@ describe('drain-inbox.sh: run dir self-heals past a STALE primary (#773 function
       // PRIMARY_ROOT) resolve to this temp checkout, not the real repo.
       fs.mkdirSync(path.join(primary, 'scripts'), { recursive: true });
       fs.copyFileSync(DRAIN, path.join(primary, 'scripts', 'drain-inbox.sh'));
+      // drain-inbox.sh sources scripts/lib/gh-bot.sh at load (#1352) — copy it too,
+      // or the script dies at line 1 and the case fails for an unrelated reason.
+      fs.cpSync(path.join(path.dirname(DRAIN), 'lib'), path.join(primary, 'scripts', 'lib'), { recursive: true });
 
       const out = execFileSync('bash', [path.join(primary, 'scripts', 'drain-inbox.sh'), '--refresh-run-dir'], {
         encoding: 'utf-8',
@@ -185,6 +188,9 @@ describe('drain-inbox.sh: containment guard blocks a run dir that resolves into 
     git(other, 'add', '.'); git(other, 'commit', '-m', 'c2'); git(other, 'push', 'origin', 'main');
     fs.mkdirSync(path.join(primary, 'scripts'), { recursive: true });
     fs.copyFileSync(DRAIN, path.join(primary, 'scripts', 'drain-inbox.sh'));
+      // drain-inbox.sh sources scripts/lib/gh-bot.sh at load (#1352) — copy it too,
+      // or the script dies at line 1 and the case fails for an unrelated reason.
+      fs.cpSync(path.join(path.dirname(DRAIN), 'lib'), path.join(primary, 'scripts', 'lib'), { recursive: true });
     return { primary, c1: git(primary, 'rev-parse', 'HEAD') };
   }
 
