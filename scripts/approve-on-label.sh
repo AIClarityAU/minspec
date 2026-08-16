@@ -60,6 +60,19 @@ READY_CHECK="${SCRIPT_DIR}/dispatch-ready-check.sh"
 # point the tests exercise, so what CI executes is what the suite proves.
 SELF="${SCRIPT_DIR}/$(basename "${BASH_SOURCE[0]}")"
 
+# Agent writes carry the BOT's identity, never the human's (#1355).
+#
+# Safe here, and NOT the same case as approve-issue.sh: the approver this script
+# records is the webhook `sender.login`, verified against GitHub's own timeline
+# (`--verify-label-event`), never the authenticated token. Swapping the token
+# therefore cannot change who is recorded as approving.
+#
+# No-op on the CI path — approve-on-label.yml already hands this script an App
+# token in GH_TOKEN, and gh_bot_init leaves an inherited bot token alone.
+# shellcheck source=scripts/lib/gh-bot.sh
+source "${SCRIPT_DIR}/lib/gh-bot.sh"
+gh_bot_init
+
 APPROVE_LABEL="agent-ready"
 RECORD_BEGIN="MINSPEC_VERDICT_BEGIN"
 RECORD_END="MINSPEC_VERDICT_END"

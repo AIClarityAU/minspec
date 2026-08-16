@@ -82,6 +82,10 @@ vi.mock('../src/lib/spec-validator', () => ({
     declaredAspects: [],
     effectiveAspects: [],
   })),
+  // #1317: this suite exercises multi-root path resolution, not the approval
+  // gate — "the advance introduces nothing" keeps approval reaching the code
+  // under test.
+  violationsIntroducedByApproval: vi.fn(() => []),
 }));
 vi.mock('../src/lib/epic-manager', () => ({
   epicRefSet: vi.fn(() => new Set<string>()),

@@ -345,6 +345,64 @@ if [[ "${1:-}" == "--is-bot-identity" ]]; then
   exit 1
 fi
 
+# ── PURE: neutralise control markers in AGENT-AUTHORED text (#1243) ──────────
+# THE SURFACE THIS CLOSES: `dispatch-issue.sh` posts a build agent's `.agent-summary.md`
+# VERBATIM as an issue comment, under a trusted identity — and that agent's prompt embeds
+# the untrusted issue body. So author trust, which proves who posted the COMMENT, says
+# nothing about who wrote the TEXT inside it (DR-072 §5a). Every downstream reader that
+# parses a sentinel out of comment bodies inherits attacker-influenceable content through
+# a channel it has every reason to trust.
+#
+# `--newest-record` (#1113) defends the readers that have a timestamp to rank by. It does
+# nothing for a marker whose mere PRESENCE is the signal — `<!-- minspec-shipped -->` was
+# exactly that, and a stranger planting it made an issue permanently undispatchable.
+#
+# So the fence is applied at the point of REPUBLICATION, rather than labelling the text and
+# hoping every future reader checks. The markers are broken, not deleted — a reader still
+# sees what the agent wrote, and can see that it was fenced, which matters when the summary
+# legitimately discusses them (this repo's own agents write about verdict records all the
+# time).
+#
+# HONEST SCOPE — what this covers, because an earlier version of this comment claimed it
+# stripped "any control token at all", which was FALSE (PR #1260 review):
+#   ✅ the three `*_BEGIN`/`*_END` sentinel families, as whole tokens;
+#   ✅ `<!-- minspec-* -->` markers, INCLUDING payload-bearing ones such as
+#      `<!-- minspec-claim:{json} -->` — because `lease_read_claims` enumerates claim
+#      markers from EVERY comment with no author filter, so a planted one is a live
+#      denial vector (tracked separately as #1275).
+#
+#      The payload matcher is `([^-]|-[^-]|--[^>])*` — "any run not containing `-->`" —
+#      and NOT `[^>]*`. POSIX ERE has no lazy quantifier, and `[^>]*` stops at the FIRST
+#      `>`, which a payload may legitimately contain: `{"sessionId":"x>"}` sailed straight
+#      through while this comment claimed payload markers were covered. Anchor on the
+#      closing `-->`, never on a character the payload can hold.
+#
+#      SECOND rule, and the one that actually makes the coverage claim true: `sed` is
+#      LINE-based, while `lease_read_claims` matches with jq `capture(...; "s")` — DOTALL.
+#      A marker whose payload spans a newline therefore had no `-->` on its opening line,
+#      survived the first rule intact, and was still reassembled and parsed by the reader.
+#      Rather than reach for slurp mode, the second rule breaks the OPENER itself, so a
+#      marker is neutralised whether or not its terminator is on the same line — the
+#      readers all match on the literal `<!-- minspec-…` prefix, so a broken opener defeats
+#      them regardless of what follows. THE FENCE MUST NOT ASSUME THE READER'S MATCHING
+#      MODE; it now holds under both.
+#   ❌ BARE prefixes (`REVIEW_VERDICT` with no `_BEGIN`) are deliberately left alone: the
+#      readers that match a bare prefix read PR-comment/agent-stdout channels, not this
+#      issue comment, and already treat their input as untrusted. Widening here would
+#      mangle ordinary prose for no gain.
+# If a new marker grammar is added anywhere, it belongs in the regex above.
+fence_agent_text() {
+  sed -E \
+    -e 's/(MINSPEC_VERDICT|REVIEW_VERDICT|REVIEW_UNAVAILABLE)_(BEGIN|END)/\1-\2 (fenced: agent-authored)/g' \
+    -e 's/<!--[[:space:]]*(minspec-[a-z0-9-]+)([^-]|-[^-]|--[^>])*-->/(fenced HTML marker: \1)/g' \
+    -e 's/<!--[[:space:]]*(minspec-[a-z0-9-]+)/(fenced HTML marker: \1) [unterminated on this line]/g'
+}
+
+if [[ "${1:-}" == "--fence-agent-text" ]]; then
+  fence_agent_text
+  exit 0
+fi
+
 # ── PURE: keep only comments whose AUTHOR could legitimately carry a verdict ──
 # THE HOLE THIS CLOSES (found 2026-07-31 while building #1113): this repo is PUBLIC,
 # so ANY GitHub user can comment on an issue — and every reader of a verdict record
@@ -556,7 +614,25 @@ if ! has_label "agent-ready" && ! has_label "agent-ready-specify"; then
 fi
 
 # Any explicit human-gate / quarantine label countermands a lingering agent-ready.
-for gate in needs-review needs-info needs-human-review agent-quarantined; do
+#
+# `agent-done` and `agent-escalated` joined this set in #1305 / #1307. Both are
+# written by the dispatcher itself and both describe a run that must not simply be
+# repeated, yet neither countermanded anything, so a stale `agent-ready` outvoted
+# them and the drain re-ran the work:
+#
+#   * #1068 was RE-CLAIMED at 12:08:56 on 2026-08-05, 44 minutes after it completed
+#     at 11:24:50 — and its PR (#1230) had already MERGED. A paid agent run was
+#     spent rebuilding finished work.
+#   * #1112 crashed at 07:51:24, was silently requeued at 09:54:11, was claimed
+#     again at 22:24:10 and crashed again at 23:06:51 — two full dispatches, zero
+#     commits, and no human ever asked to look.
+#
+# This is a defence-in-depth backstop, not the primary fix. The dispatcher also now
+# drops `agent-ready` when it stamps `agent-done`, and the crash path applies
+# `needs-human-review`. Either alone would close the hole; both together mean a
+# single missed label write cannot reopen it (constitution invariant 2 — no required
+# check hinging on a single producer).
+for gate in needs-review needs-info needs-human-review agent-quarantined agent-done agent-escalated; do
   if has_label "$gate"; then
     refuse countermanded "countermanding label '${gate}' present (re-triaged / quarantined since drain)"
   fi

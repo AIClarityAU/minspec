@@ -454,7 +454,17 @@ describe('createRequiredChecksRuleset()', () => {
       args.includes('POST') ? ok('{"id":1}') : undefined,
     );
     const outcome = await createRequiredChecksRuleset('o', 'r', run);
-    expect(outcome).toEqual({ created: true, forbidden: false, detail: '' });
+    // Deep equality kept deliberately: it pins the FULL outcome shape, so a new
+    // field cannot be added without someone deciding what success means for it.
+    // `planLimited`/`reason` carry the 403 classification (#1567 follow-up) and are
+    // necessarily absent on success.
+    expect(outcome).toEqual({
+      created: true,
+      forbidden: false,
+      planLimited: false,
+      reason: null,
+      detail: '',
+    });
 
     const post = calls.find((c) => c.args.includes('POST'))!;
     expect(post.args).toContain('repos/o/r/rulesets');

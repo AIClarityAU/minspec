@@ -215,7 +215,9 @@ describe('triage-inbox.sh writes the verdict record dispatch requires (#983)', (
     // The production failure, reproduced end-to-end: the triage gate said human-only,
     // someone clicked agent-ready anyway, and the old dispatcher built it.
     const run = runTriage(verdict({ human_only: 'yes', decision: 'agent-ready' }));
-    expect(run.calls.some((c) => c.includes('add=[role:dev,needs-review]'))).toBe(true);
+    // #1002 appends the hold REASON to the same --add-label call: `needs-review` alone
+    // no longer says WHY, which is the whole defect that issue closes.
+    expect(run.calls.some((c) => c.includes('add=[role:dev,needs-review,hold:human]'))).toBe(true);
     const r = gate('agent-ready,role:dev', run.comment, dispatchBody);
     expect(r.ok).toBe(false);
     expect(r.out).toContain('[human-only]');
@@ -232,7 +234,7 @@ describe('triage-inbox.sh writes the verdict record dispatch requires (#983)', (
   it('an auto-buildable T3 is labelled and recorded as SPECIFY-ONLY, never as a full build', () => {
     const run = runTriage(verdict({ tier: 'T3', decision: 'agent-ready', role: 'architect' }));
     // The label the writer actually applied…
-    expect(run.calls.some((c) => c.includes('add=[role:architect,agent-ready-specify]')), run.calls.join('\n')).toBe(
+    expect(run.calls.some((c) => c.includes('add=[role:architect,agent-ready-specify,hold:specify]')), run.calls.join('\n')).toBe(
       true,
     );
     // …and the record it minted, read back by the gate that dispatch consults.
@@ -269,7 +271,7 @@ describe('triage-inbox.sh writes the verdict record dispatch requires (#983)', (
 
   it('a needs-info verdict clears agent-ready rather than leaving a contradiction', () => {
     const run = runTriage(verdict({ decision: 'needs-info' }));
-    expect(run.calls.some((c) => c.includes('add=[role:dev,needs-info]'))).toBe(true);
+    expect(run.calls.some((c) => c.includes('add=[role:dev,needs-info,hold:info]'))).toBe(true);
     expect(run.calls.find((c) => /remove=\[[^\]]+\]/.test(c))).toContain('agent-ready');
   });
 });

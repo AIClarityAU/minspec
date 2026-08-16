@@ -26,8 +26,10 @@ import {
   type ReferenceRegistry,
 } from '../packages/minspec/src/lib/reference-checker';
 import { listOrphanedRecords } from '../packages/minspec/src/lib/approval-store';
-import { checkStatusParity, inspectStatusLine } from '../packages/minspec/src/lib/status-parity';
+import { checkStatusParity, inspectStatusLine, inspectAllStatusClaims } from '../packages/minspec/src/lib/status-parity';
 import { checkManagedRegionMarkers } from '../packages/minspec/src/lib/scaffold';
+import { checkDeclaredDrIds } from './lib/dr-id-collision';
+import { checkDeclaredSpecIds } from './lib/spec-id-collision';
 import { SELF_HOSTED_TEMPLATE_NAMES } from '../packages/minspec/src/lib/template-registry';
 import { detectTools } from '../packages/minspec/src/lib/tool-detector';
 
@@ -266,6 +268,88 @@ try {
   // Decisions dir unreadable / absent — nothing to validate, stay silent.
 }
 
+// Rule 17 (FATAL, #1226): two decision files declaring one `id:`, or a file whose
+// declared `id:` disagrees with its own filename.
+//
+// `nextAdrNumber` hands out `max(existing DR-NNN) + 1` computed against the LOCAL
+// checkout (adr-manager.ts:103) — correct in isolation, and unique only if DR
+// creation is serialised through `main`. Concurrent worktree sessions (#168, the
+// normal mode here) break that by design: two sessions branching from one `main`
+// both compute the same number, each correctly, neither able to see the other.
+//
+// Rule 6 above is NOT this check. It compares FILE NAMES, so `DR-079.md` declaring
+// `id: DR-077` is invisible to it — and it only WARNS, joining ~110 other warnings
+// nobody reads, which is how the gap survived to bite #1180/#1209. A DR id is the
+// register's primary key: two records under one id means one of them cannot be
+// cited, and merging over an already-accepted decision overwrites it silently. So
+// this is fatal, and the corpus was verified clean first so it ships green.
+//
+// The filename-mismatch half is load-bearing, not cosmetic: the CI half of this
+// gate (.github/workflows/dr-id-collision.yml) keys on FILENAMES, because a PR's
+// frontmatter is not cheaply readable across every open PR. A file free to declare
+// an id its name does not carry would walk straight past it.
+//
+// Tier-0 and offline — the decision logic is pure (scripts/lib/dr-id-collision.ts);
+// only the cross-PR half touches the network, and it lives in CI, never in
+// packages/ (constitution invariant 1).
+try {
+  const decisionsRoot = resolveDecisionsDir();
+  const drFiles = safeGlob(decisionsRoot, '.md').map((file) => ({
+    file: relative(ROOT, file),
+    content: readFileSync(file, 'utf-8'),
+  }));
+  for (const defect of checkDeclaredDrIds(drFiles)) {
+    fail(join(ROOT, defect.files[0]), `DR id ${defect.kind} — ${defect.message}`);
+  }
+} catch (err) {
+  // NOT a silent `catch {}`. Constitution invariant 2: a missing or errored witness
+  // fails closed AND VISIBLY, never quietly passes. A swallowed error here means the
+  // rule validated nothing while the build stayed green — indistinguishable, from the
+  // outside, from a register with no duplicates. (Same reasoning as Rule 16.)
+  warn(
+    `DR-id uniqueness check could not run (${err instanceof Error ? err.message : String(err)}) — ` +
+      'Rule 17 validated NOTHING this run; do not read the green as a collision-free register.',
+  );
+}
+
+// Rule 18 (FATAL, #1418): the spec-side twin of Rule 17 — two spec directories
+// declaring one `id:`, or a spec whose declared `id:` disagrees with its directory.
+//
+// DR ids have been collision-checked since #1226; spec ids were not, and on 2026-08-07
+// FIVE specs simultaneously declared `id: SPEC-052`. Same lost-update cause as the DR
+// case: spec creation hands out `max(existing) + 1` against the LOCAL checkout, and
+// concurrent worktree sessions (#168, the normal mode here) each compute the same number
+// correctly without seeing the other.
+//
+// Fatal rather than a warning, for the reason Rule 17 records: an approval sidecar is
+// keyed by PATH but every human-facing lookup is keyed by ID, so a duplicate makes
+// `facts approval SPEC-NNN` answer about whichever directory it walks first — truthfully
+// about that file, while the maintainer's real approval sits on another. It joined ~110
+// warnings nobody reads is exactly how the DR gap survived; this one starts fatal.
+//
+// The corpus was verified clean (50 specs, zero duplicates, zero id/directory mismatches)
+// before this shipped, so it goes green on landing.
+try {
+  const specsRoot = join(ROOT, 'specs');
+  const specFiles = safeGlob(specsRoot, '.md')
+    .filter((file) => file.endsWith('requirements.md'))
+    .map((file) => ({
+      file: relative(ROOT, file),
+      content: readFileSync(file, 'utf-8'),
+    }));
+  for (const defect of checkDeclaredSpecIds(specFiles)) {
+    fail(join(ROOT, defect.files[0]), `Spec id ${defect.kind} — ${defect.message}`);
+  }
+} catch (err) {
+  // Same fail-visibly discipline as Rule 17 (constitution invariant 2): a swallowed error
+  // would mean this rule validated NOTHING while the build stayed green — indistinguishable
+  // from a corpus with no collisions.
+  warn(
+    `Spec-id uniqueness check could not run (${err instanceof Error ? err.message : String(err)}) — ` +
+      'Rule 18 validated NOTHING this run; do not read the green as a collision-free corpus.',
+  );
+}
+
 // Rule 8 (FATAL): INDEX.md status must match each DR's frontmatter status
 // (issue #220). INDEX.md is a DERIVED artifact whose only regeneration paths
 // require the extension to be running; a direct/agent/sed edit to a DR's status
@@ -395,6 +479,24 @@ try {
         `status parity (#626) — frontmatter \`status: ${finding.frontmatter}\` disagrees with the body status line "${finding.body}" (line ${finding.line}). Reconcile the two: advance/correct whichever is stale. A file showing two different statuses is a false signpost.`,
       );
     }
+
+    // #1223: compare EVERY status claim, not just the one `checkStatusParity` picks.
+    // A DR can carry a `## Status` section AND a head blockquote, and they can disagree —
+    // DR-022 had frontmatter `accepted`, section `accepted`, blockquote `proposed`, so the
+    // singular check compared the two that agreed and never saw the third.
+    const fmToken = (fm.status ?? '').trim().split(/\s+/)[0]?.replace(/#.*$/, '').toLowerCase();
+    if (fmToken) {
+      for (const claim of inspectAllStatusClaims(content, kind)) {
+        if (claim.kind !== 'comparable') continue;
+        if (claim.token === fmToken) continue;
+        if (finding && finding.line === claim.line) continue; // already reported above
+        fail(
+          relative(ROOT, file),
+          `status parity (#1223) — frontmatter \`status: ${fmToken}\` disagrees with a SECOND status claim "${claim.token}" (line ${claim.line}). A document asserting its status in two places must say the same thing in both; whichever is stale, reconcile it.`,
+        );
+      }
+    }
+
     const shape = inspectStatusLine(content, kind);
     if (shape.kind === 'unparseable') {
       unreadable.push(`${relative(ROOT, file)}:${shape.line} "${shape.text}"`);

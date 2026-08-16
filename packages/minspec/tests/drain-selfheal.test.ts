@@ -16,6 +16,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #1285: spawns real child processes per assertion — 5s default is a load metric,
+// not a hang signal. Enforced by shell-timeout-coverage.test.ts.
+useShellTimeout();
 
 const DRAIN = path.resolve(__dirname, '../../../scripts/drain-inbox.sh');
 const DISPATCH = path.resolve(__dirname, '../../../scripts/dispatch-issue.sh');
@@ -59,6 +64,9 @@ describe('drain-inbox.sh: run dir self-heals past a STALE primary (#773 function
       // PRIMARY_ROOT) resolve to this temp checkout, not the real repo.
       fs.mkdirSync(path.join(primary, 'scripts'), { recursive: true });
       fs.copyFileSync(DRAIN, path.join(primary, 'scripts', 'drain-inbox.sh'));
+      // drain-inbox.sh sources scripts/lib/gh-bot.sh at load (#1352) — copy it too,
+      // or the script dies at line 1 and the case fails for an unrelated reason.
+      fs.cpSync(path.join(path.dirname(DRAIN), 'lib'), path.join(primary, 'scripts', 'lib'), { recursive: true });
 
       const out = execFileSync('bash', [path.join(primary, 'scripts', 'drain-inbox.sh'), '--refresh-run-dir'], {
         encoding: 'utf-8',
@@ -180,6 +188,9 @@ describe('drain-inbox.sh: containment guard blocks a run dir that resolves into 
     git(other, 'add', '.'); git(other, 'commit', '-m', 'c2'); git(other, 'push', 'origin', 'main');
     fs.mkdirSync(path.join(primary, 'scripts'), { recursive: true });
     fs.copyFileSync(DRAIN, path.join(primary, 'scripts', 'drain-inbox.sh'));
+      // drain-inbox.sh sources scripts/lib/gh-bot.sh at load (#1352) — copy it too,
+      // or the script dies at line 1 and the case fails for an unrelated reason.
+      fs.cpSync(path.join(path.dirname(DRAIN), 'lib'), path.join(primary, 'scripts', 'lib'), { recursive: true });
     return { primary, c1: git(primary, 'rev-parse', 'HEAD') };
   }
 
@@ -274,6 +285,10 @@ describe('dispatch-issue.sh: native auto-merge deny-by-default (behavioral seam)
       // loudly, because silently dropping the flag restores the roster-thrash
       // outage it exists to prevent (no-silent-gate).
       fs.copyFileSync(path.resolve(__dirname, '../../../scripts/lib/agent-context.sh'), path.join(root, 'scripts', 'lib', 'agent-context.sh'));
+      // dispatch-issue.sh sources lib/gh-bot.sh (#1355 bot attribution) at startup —
+      // same reason once more. Sourcing it is offline and cannot fail; only an actual
+      // GitHub WRITE mints, and this seam performs none.
+      fs.copyFileSync(path.resolve(__dirname, '../../../scripts/lib/gh-bot.sh'), path.join(root, 'scripts', 'lib', 'gh-bot.sh'));
       fs.writeFileSync(path.join(root, '.minspec', 'config.json'), JSON.stringify({ version: 1 })); // no autoMerge
       expect(check({}, root)).toEqual({ code: 1, out: 'off' });
     } finally {

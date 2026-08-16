@@ -19,6 +19,38 @@ phases:
 
 # MinSpec — Approval-Staleness Prominence + Diff View (Requirements)
 
+> **Three corrections (2026-08-05, from a drift audit of the sign-off queue).**
+>
+> 1. **Why this reads `unapproved` — it was revoked, not never-reviewed.** This spec *was*
+>    approved on 2026-07-04. Commit `39b62664` ("chore(#714): revoke 22 unverified-provenance
+>    approvals") deleted its sidecar along with 21 others, because those approvals were
+>    minted when this repo's git identity was `claude@harvest316.com` and so "cannot be
+>    proven a human act" (DR-056 Decision 4). Most of the 22 have since been re-approved
+>    under `github@`; this one has not. The frontmatter `status: done` with every phase
+>    `done` is therefore accurate about the *code* and misleading about the *approval* —
+>    `deriveStatus` floors an unapproved spec to `specifying` (INV-1), so the fact oracle
+>    reports DRIFT. **Re-approval is a real human act, not a formality.**
+> 2. **AC-6's precondition is stale — but the invariant it protects still holds.** AC-6
+>    (:228-231) keys "baseline unavailable, open no diff" on `baselineBlob === ''` or a
+>    pruned blob. Since #701 the shipped path is
+>    `recoverBaseline(...) ?? recoverBaselineFromHistory(...)`
+>    (`packages/minspec/src/lib/approval.ts:172` and `:225`), so those two conditions no
+>    longer imply unrecoverable: the fallback walks the spec's own git history and returns a
+>    body **only** when `specHash(content) === record.specHash` (`approval.ts:251-252`) —
+>    the exact bytes the human approved, verified by hash — and returns `undefined`
+>    otherwise (`:255`), degrading to the same "baseline unavailable" message.
+>    **`INV-No-fabricated-diff` is therefore upheld, not violated**: nothing is
+>    reconstructed or approximated, and a non-matching history yields no diff. Reword AC-6
+>    to trigger on *"baseline unrecoverable after both `recoverBaseline` and the history
+>    fallback"* rather than on `baselineBlob === ''`, and add a case for the now-recoverable
+>    legacy/never-travelled-blob records (which #404's `classifyBaseline` already
+>    distinguishes). This is a precondition edit, not a design change.
+> 3. **Every `approval.ts` citation below has rotted.** The file is now 562 lines.
+>    `getApprovalStatus` is at :488 and `resolveStatus` at :478 (cited 228-235);
+>    `getApprovalRecord` at :494 (cited :235); `mintBaseline` at :131 and `recoverBaseline`
+>    at :172 (cited 104-186). The paths still resolve, so the existing reference-checker is
+>    green on all of them — the line-level gap tracked in #1252.
+
 **Date:** 2026-07-03
 **Status:** Done
 **Triggered by:** session — SPEC-026 showed a bare warning icon for "needs
@@ -225,10 +257,20 @@ Two gaps, addressed by two composed pieces:
   introduced.
 - [ ] **AC-5 (FR-7).** Clicking a spec row inside the Needs-Re-Approval group
   opens the diff view directly, without an intermediate step.
-- [ ] **AC-6 (FR-8 / INV-No-fabricated-diff).** With a legacy record
-  (`baselineBlob === ''`) or a pruned blob, the command shows the explicit
-  "baseline unavailable" message and opens no diff view; it never crashes or
-  shows an empty/misleading diff.
+- [ ] **AC-6a (FR-8 / INV-No-fabricated-diff) — unrecoverable ⇒ no diff.** When the
+  baseline is unrecoverable **after both** `recoverBaseline` *and* the
+  `recoverBaselineFromHistory` fallback (no committed version's canonical hash matches
+  `record.specHash` — a shallow/squashed clone, or content approved but never committed),
+  the command shows the explicit "baseline unavailable" message and opens no diff view;
+  it never crashes or shows an empty/misleading diff.
+- [ ] **AC-6b (#701) — recoverable-from-history ⇒ a real diff.** A legacy record
+  (`baselineBlob === ''`) or a blob that never travelled to this clone is **not** by
+  itself an unavailable baseline. When the history fallback finds a committed version
+  whose canonical hash equals `record.specHash`, the command opens a real diff against
+  that hash-matched approved body. *(Re-keyed from the old AC-6, which triggered on
+  `baselineBlob === ''` — a precondition #701 made stale. The invariant is unchanged:
+  content is shown only when hash-verified identical to what was approved
+  (`approval.ts:251-252`), never reconstructed. #1283.)*
 - [ ] **AC-7 (INV-Tier-0).** No networking import added to `packages/minspec`;
   the inherited import-ban T0 test passes.
 

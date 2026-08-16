@@ -11,11 +11,20 @@
  */
 
 import type { ParsedSpec, SpecStatus } from './spec';
-import { SPEC_STATUSES, SPEC_TYPES, stripInlineComment } from './spec';
+// From the LEAF, not from './spec' (#1446). This was the only VALUE import of
+// './spec' here, and it was the runtime cycle that kept the SPEC-051 ownership
+// guard out of advanceSpecToImplementing. Type-only imports above are erased at
+// compile time and close nothing.
+import { SPEC_STATUSES, SPEC_TYPES, stripInlineComment, epicRefValue } from './spec-vocabulary';
 import type { Tier, MinspecConfig, Phase } from './config';
 import { TIERS } from './config';
-import { epicRefValue } from './epic-manager';
-import { deriveStatus, type ExplicitTerminal, type PhaseState } from './lifecycle';
+
+import {
+  deriveStatus,
+  phasesForApproval,
+  type ExplicitTerminal,
+  type PhaseState,
+} from './lifecycle';
 import type { ApprovalStatus } from './approval';
 import { isValidOwnedPath, isEscapingPath } from './ownership-path-rules';
 
@@ -825,6 +834,59 @@ export function validateOwnership(spec: ParsedSpec, config: MinspecConfig): Vali
   }
 
   return out;
+}
+
+/**
+ * Errors that approving this spec would NEWLY introduce (#1317).
+ *
+ * Approval does not merely record a signature — it ADVANCES the spec's phase map
+ * (`phasesForApproval`: specify/clarify → `done`, and the first unfinished
+ * implementing-band phase → `in-progress`). Several rules are gated on that map,
+ * so the set of rules that apply to a spec is different before and after the
+ * advance. Validating only the pre-advance state therefore has a blind spot
+ * exactly the size of "rules that the advance itself arms".
+ *
+ * `validateOwnership` sits squarely in that blind spot: it fires only once
+ * `phases.plan` is `in-progress`/`done`, which is the state approval CREATES. Three
+ * specs were approved through that gap (SPEC-051 #1300, SPEC-048 + SPEC-049 #1348);
+ * each turned `main` red on the next validator run, on a file the failing PR had
+ * never touched.
+ *
+ * Returns only errors the advance INTRODUCES — a pre-existing error is excluded, so
+ * a refusal never names the wrong cause. Empty result = approving is safe.
+ * Config-respecting by construction: it re-runs the same `validateSpec` with the
+ * same config, so a repo on the default `ownershipDeclaration: 'warn'` sees no new
+ * refusals (FR-7 ratchet). Pure — no fs, no mutation of the input.
+ */
+export function violationsIntroducedByApproval(
+  spec: ParsedSpec,
+  config: MinspecConfig,
+  options: ValidateSpecOptions = {},
+): ValidationViolation[] {
+  // Identity includes the message: two instances of the same rule (e.g. two bad
+  // paths) are distinct findings, and collapsing them by rule alone would let a
+  // newly-introduced one hide behind a pre-existing one.
+  const identity = (v: ValidationViolation): string => `${v.rule}\x00${v.message}`;
+  const errorsOf = (s: ParsedSpec): ValidationViolation[] =>
+    validateSpec(s, config, options).violations.filter((v) => v.severity === 'error');
+
+  const before = new Set(errorsOf(spec).map(identity));
+
+  // Only the phase map moves. `raw` is deliberately left untouched: every
+  // raw-reading rule then behaves identically on both sides and cancels out of the
+  // diff, which keeps this focused on precisely the phase-gated rules.
+  const advanced: ParsedSpec = {
+    ...spec,
+    frontmatter: {
+      ...spec.frontmatter,
+      // Spread the original first so every required `Phase` key is present:
+      // `phasesForApproval` returns the open-ended `PhaseState`, while frontmatter
+      // requires the complete `Record<Phase, PhaseStatus>`.
+      phases: { ...spec.frontmatter.phases, ...phasesForApproval(spec.frontmatter.phases) },
+    },
+  };
+
+  return errorsOf(advanced).filter((v) => !before.has(identity(v)));
 }
 
 export function validateSpec(

@@ -2,7 +2,7 @@
 id: SPEC-046
 title: PO-only mode — per-audience approval policy (auto-approve)
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 created: 2026-07-21
@@ -15,7 +15,7 @@ phases:
   specify: done
   clarify: done
   plan: done
-  tasks: pending
+  tasks: in-progress
   implement: pending
 ---
 
@@ -165,7 +165,14 @@ decision or a follow-up task. (Clarify was `done` pre-Plan; these refine it.)
   write-trigger/sweep/bot-writes INV-4 tension). This gates implementation start.
 - **CQ-7 — `audience:` frontmatter validation.** Closed-set against config-declared keys only?
   **Decided:** yes — unknown/absent audience → `human` (never `auto` by accident); an unknown
-  key is a validator error (rule lives in SPEC-047). `CURRENT_POLICY_SCHEMA_VERSION` is bumped
+  key is a validator error (~~rule lives in SPEC-047~~ — **unhomed, corrected 2026-08-05**:
+  SPEC-047's approved body contains no `audience:` frontmatter mechanism at all. Its FR-1..FR-6
+  are a *file-name-based* audience map, a mixed-file warning, a small-spec exemption, a
+  warn-first ratchet and scaffolding — a different partition mechanism entirely. Since
+  SPEC-047 is approved, its content cannot be edited to adopt this rule without voiding that
+  approval, so CQ-7 must either home the rule in **this** spec or open a successor. Do not
+  sign off while CQ-7 delegates to a rule that exists nowhere.).
+  `CURRENT_POLICY_SCHEMA_VERSION` is bumped
   by the extension on any audience-membership/policy-schema change, forcing human re-confirm.
 - **CQ-8 — `CURRENT_POLICY_SCHEMA_VERSION` single source (twin drift).** Where does the version
   live so TS and the Python twin read one value? **Decided:** a single source of truth in

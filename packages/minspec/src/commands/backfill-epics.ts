@@ -5,12 +5,19 @@ import {
   isClaudeAvailable,
   applyBackfill,
   renderProposalMarkdown,
+  withoutAlreadyTagged,
+  backfillScope,
   type BackfillProposal,
   type ProposedEpic,
 } from '../lib/epic-backfill';
 import { resolveTargetFolder } from '../lib/resolve-folder';
 import { slugify } from '../lib/spec-manager';
 import { listEpics } from '../lib/epic-manager';
+import {
+  loadPreferences,
+  savePreferences,
+  resolveProjectPreference,
+} from '../lib/preferences';
 
 /** Options threaded in from an upstream caller (e.g. the auto-bootstrap offer). */
 export interface BackfillOptions {
@@ -23,19 +30,39 @@ export interface BackfillOptions {
 }
 
 /**
- * Persisted "always use the AI pass for backfill" opt-in. Written GLOBALLY: it's
- * a personal cost/privacy/quota preference, not project policy, so it follows the
- * user across every project (#213). Reads merge global+workspace as usual.
+ * Persisted "always use the AI pass for backfill" opt-in (#213).
+ *
+ * Read order is DR-078 §4: the PROJECT-LOCAL preference first, then the VS Code
+ * setting. It remains a personal cost/privacy/quota choice — it is simply scoped
+ * to the project it was made in, rather than following the user into projects
+ * that never consented to an AI pass.
  */
-function alwaysUseAi(): boolean {
-  return vscode.workspace
+function alwaysUseAi(rootDir: string): boolean {
+  const setting = vscode.workspace
     .getConfiguration('minspec')
     .get<boolean>('autoBackfillUseAi', false);
+  return resolveProjectPreference(
+    loadPreferences(rootDir).autoBackfillUseAi,
+    setting,
+  );
 }
-async function enableAlwaysUseAi(): Promise<void> {
-  await vscode.workspace
-    .getConfiguration('minspec')
-    .update('autoBackfillUseAi', true, vscode.ConfigurationTarget.Global);
+/**
+ * Persist the "Always" choice to the PROJECT-LOCAL store.
+ *
+ * This used to write `ConfigurationTarget.Global`, which constitution invariant
+ * 3 (DR-074) forbids. It mattered more here than anywhere else: a global value
+ * silently enabled an AI/network code path in every OTHER MinSpec project on the
+ * machine — including projects whose maintainers chose MinSpec for its offline
+ * Tier-0 posture (invariant 1) and never consented to `claude -p` running there.
+ * DR-078 §1 names `.minspec/preferences.json` as the correct store. Fixed in
+ * #1319.
+ */
+function enableAlwaysUseAi(rootDir: string): void {
+  try {
+    savePreferences(rootDir, { autoBackfillUseAi: true });
+  } catch (err) {
+    console.warn(`MinSpec: failed to persist autoBackfillUseAi pref — ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 /**
@@ -218,13 +245,26 @@ export async function backfillEpicsCommand(
   const folder = folderArg ?? (await resolveTargetFolder());
   if (!folder) return;
 
+  // Nothing without an `epic:` means nothing this command can change. Say so
+  // before the consent prompt and the AI call, rather than asking to spend
+  // minutes producing mappings that apply would skip anyway (#1570, #1571).
+  const scope = backfillScope(folder);
+  if (scope.pending === 0) {
+    vscode.window.showInformationMessage(
+      scope.total === 0
+        ? 'MinSpec: Nothing to backfill — no specs or decisions found yet.'
+        : 'MinSpec: Nothing to backfill — every spec and decision already carries an epic.',
+    );
+    return;
+  }
+
   let proposal: BackfillProposal = proposeHeuristic(folder);
 
   // Tier-1 AI pass. Consent may already be given upstream (the bootstrap offer
   // promised it) or persisted ("Always"); otherwise ask once — with an "Always"
   // affordance so direct Command-Palette runs aren't re-asked every time.
   if (await isClaudeAvailable()) {
-    let useAi = opts?.aiConsent === true || alwaysUseAi();
+    let useAi = opts?.aiConsent === true || alwaysUseAi(folder);
     if (!useAi) {
       const USE_AI = 'AI-enhanced';
       const ALWAYS = 'Always';
@@ -237,24 +277,42 @@ export async function backfillEpicsCommand(
       );
       if (choice === undefined) return; // dismissed
       if (choice === ALWAYS) {
-        await enableAlwaysUseAi();
+        enableAlwaysUseAi(folder);
         useAi = true;
       } else if (choice === USE_AI) {
         useAi = true;
       }
     }
     if (useAi) {
+      // Cancellable: the budget now scales with the corpus (up to 15 minutes on
+      // a large one), and a wait that long must be interruptible (#1570).
       const ai = await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Notification, title: 'MinSpec: asking Claude to propose epics…' },
-        () => proposeAI(folder),
+        {
+          location: vscode.ProgressLocation.Notification,
+          title: 'MinSpec: asking Claude to propose epics…',
+          cancellable: true,
+        },
+        (_progress, token) => {
+          const ac = new AbortController();
+          token.onCancellationRequested(() => ac.abort());
+          return proposeAI(folder, { signal: ac.signal });
+        },
       );
-      if (ai) {
-        proposal = ai;
-      } else {
-        vscode.window.showWarningMessage('MinSpec: AI pass unavailable — using the heuristic proposal.');
+      if (ai?.proposal) {
+        proposal = ai.proposal;
+      } else if (ai?.failure?.reason !== 'cancelled') {
+        // Name the mode that actually fired. This used to read "AI pass
+        // unavailable" for every failure, which blamed a missing binary for a
+        // call that had in fact answered fine and simply been cut off (#1570).
+        vscode.window.showWarningMessage(
+          `MinSpec: the AI pass ${ai?.failure?.detail ?? 'did not produce a proposal'} — using the heuristic proposal.`,
+        );
       }
     }
   }
+
+  // Only what apply will really write, so the counts below are the truth (#1571).
+  proposal = withoutAlreadyTagged(proposal);
 
   if (proposal.epics.length === 0 || proposal.mappings.length === 0) {
     vscode.window.showInformationMessage('MinSpec: Nothing to backfill — no confident epic mappings found.');

@@ -1,9 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-038-spec-code-ownership/requirements.md",
-  "specHash": "75f2ab43fab818bf80fe4c1265feedcd281fc819305c24cd735ec1b46f1488a1",
-  "approvedAt": "2026-07-20T02:03:30.477Z",
+  "specHash": "ac636a0ed6bd8c4c8ffaec1dc5033e497ad9e683cc27dea523aa5571f8fd4d0e",
+  "approvedAt": "2026-08-14T06:52:57.725Z",
   "approvedBy": "github@harvest316.com",
   "tier": "T3",
   "migrated": false,
-  "baselineBlob": "4617bb7fdea96a6b3ea704b22d05cdd20f263459"
+  "baselineBlob": "6a115a60718ab8c3212ad547bb7dfe119648813b"
 }

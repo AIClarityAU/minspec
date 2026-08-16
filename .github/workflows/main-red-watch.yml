@@ -1,0 +1,121 @@
+# Post-merge watch on `main` (#1394).
+#
+# WHY THIS EXISTS. `required_status_checks.strict` is `false`, so a PR's green checks
+# can describe a base that no longer exists. Two PRs that are each green in isolation
+# and conflict only semantically (no textual conflict, so no CONFLICTING state) both
+# merge, and `main` goes red. That happened on 2026-08-07: #1386 asserted a triage
+# label as an exact string, #1291 later widened it, neither PR's CI ever saw the
+# other's change, and `main` broke at `fcce76b`.
+#
+# WHY NOT PREVENTION. `strict = true` deletes the class but serialises the queue: every
+# merge invalidates every other open PR's base. A merge queue was ruled out on #1394 -
+# entry to a queue IS required-status-checks gating, so `ai-review` (which references
+# `github.event.pull_request` and cannot run for a `merge_group`) would either hang
+# every merge group or have to be demoted to advisory. This watch is the accepted
+# trade: it detects rather than prevents, and buys fast, attributable recovery.
+#
+# WHY IT MATTERS THAT IT IS LOUD. `ready-to-merge` keys off `main` being green, so a red
+# `main` blocks every other PR. The expensive part is not the breakage, it is the window
+# where nobody has noticed.
+#
+# NOT A GATE. This never blocks a merge and is never a required check, so constitution
+# invariant 2 does not apply to it as a gate signal. It is still written to fail LOUDLY
+# rather than best-effort: no `|| true` anywhere on the reporting path, and if it cannot
+# file the issue, the workflow itself goes red so the failure is visible rather than
+# swallowed. A detector that fails silently is indistinguishable from a quiet week.
+name: main-red-watch
+
+on:
+  workflow_run:
+    workflows: [CI, MinSpec Validate]
+    types: [completed]
+
+permissions:
+  contents: read
+
+concurrency:
+  # One reporter at a time, so two workflows failing on the same commit cannot race
+  # into two separate issues. Not cancel-in-progress: every failure must be reported.
+  group: main-red-watch
+  cancel-in-progress: false
+
+jobs:
+  report:
+    # Only a FAILED run, only on `main`, and never for a merge-group or PR head.
+    if: >-
+      github.event.workflow_run.conclusion == 'failure' &&
+      github.event.workflow_run.head_branch == 'main' &&
+      github.event.workflow_run.event == 'push'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Mint an App token so the report is bot-attributed
+        id: app-token
+        # SHA-pinned, matching ai-review.yml — a floating tag is a supply-chain hole.
+        uses: actions/create-github-app-token@f2acddfb5195534d487896a656232b016a682f3c # v1.9.0
+        with:
+          app-id: ${{ secrets.MINSPEC_APP_ID }}
+          private-key: ${{ secrets.MINSPEC_APP_PRIVATE_KEY }}
+
+      - name: File or update the red-main report
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+          REPO: ${{ github.repository }}
+          # Untrusted-ish values go through env, never string-interpolated into the
+          # script body, so a commit message cannot inject shell.
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          LABEL: main-red
+        run: |
+          set -euo pipefail
+
+          short="${HEAD_SHA:0:7}"
+
+          # Which jobs actually failed — the single most useful line for triage, and
+          # what tells a reader in one glance whether this is the known flake or new.
+          failed=$(gh api "repos/${REPO}/actions/runs/${RUN_ID}/jobs" \
+                     --jq '[.jobs[] | select(.conclusion == "failure") | .name] | join(", ")')
+          # `if` rather than `[ -z "$failed" ] && failed=...` on purpose. `set -e`
+          # ignores a failing left-hand side of an AND-OR list, so the short form is
+          # safe HERE (verified: it does not abort) — but only because this is not the
+          # script's last line. It becomes a silent `exit 1` the moment someone moves
+          # it to the end. The `if` form is position-independent, and this reporter
+          # aborting on the common path (jobs DID report failure) is exactly the
+          # silent-detector failure the header warns about.
+          if [ -z "$failed" ]; then
+            failed="(no job reported failure — check the run)"
+          fi
+
+          # Ensure the label exists. Created with --force so a re-run is idempotent.
+          gh label create "$LABEL" --repo "$REPO" --color B60205 \
+            --description "main is red — CI failing on the default branch" --force
+
+          # Single-quoted format string: backticks are LITERAL here, so they must NOT be
+          # backslash-escaped (a `\` inside single quotes is itself literal, and would
+          # render as `\`main\`` in the issue). Values arrive as printf ARGS, never
+          # interpolated into the format, so nothing in them can be re-read as markup
+          # or as shell.
+          body=$(printf '## `main` is red at `%s`\n\n| | |\n|---|---|\n| workflow | %s |\n| failing jobs | %s |\n| run | %s |\n\n`ready-to-merge` keys off `main` being green, so every open PR is blocked until this clears.\n\n### Before assuming the code is wrong\n\nTwo causes have each produced a red `main` here with no PR being at fault:\n\n1. **A semantic merge conflict.** `required_status_checks.strict` is `false`, so two individually-green PRs whose CI never ran against each other can both merge and break `main` (#1394). Check what landed just before this commit before diagnosing the test.\n2. **A flake.** Re-run the failed job first. A suite that spawns subprocesses can exceed its timeout under load with nothing actually broken (#1399).\n\nIf a re-run on the same commit goes green with no code change, it was the second one.\n\n---\n*Filed automatically by `main-red-watch` (#1394).*' \
+            "$short" "$WORKFLOW_NAME" "$failed" "$RUN_URL")
+
+          # One open issue per red episode, not one per failing workflow. If a report is
+          # already open, comment on it instead of opening a second.
+          existing=$(gh issue list --repo "$REPO" --state open --label "$LABEL" \
+                       --limit 1 --json number --jq '.[0].number // empty')
+
+          if [ -n "$existing" ]; then
+            printf '%s\n' "$body" | gh issue comment "$existing" --repo "$REPO" --body-file -
+            echo "commented on existing #${existing}"
+          else
+            url=$(printf '%s\n' "$body" | gh issue create --repo "$REPO" \
+                    --title "main is red at ${short} — ${WORKFLOW_NAME}" \
+                    --label "$LABEL" --label bug --body-file -)
+            echo "filed ${url}"
+          fi
+
+      - name: Notify that the watch itself could not report
+        if: failure()
+        run: |
+          echo "::error title=main-red-watch failed::main is red and this watch could not file the report. Check main manually — the absence of an issue does NOT mean main is green."
+          exit 1

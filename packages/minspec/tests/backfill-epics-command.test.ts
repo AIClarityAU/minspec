@@ -1,5 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+/**
+ * Backing store for the mocked project-local preferences (#1319). Hoisted so the
+ * `vi.mock` factory below can close over it. Reset in `beforeEach` — it is a
+ * plain object, so `vi.clearAllMocks()` does not touch it.
+ */
+const { prefsState } = vi.hoisted(() => ({
+  prefsState: {} as Record<string, unknown>,
+}));
+
 // ─── Mock vscode ───────────────────────────────────────────────────────────
 
 vi.mock('vscode', () => ({
@@ -9,7 +18,14 @@ vi.mock('vscode', () => ({
     showWarningMessage: vi.fn(),
     showTextDocument: vi.fn(),
     showQuickPick: vi.fn(),
-    withProgress: vi.fn((_opts: unknown, task: () => unknown) => task()),
+    // The AI pass is now cancellable (#1570), so the task is invoked with a
+    // progress reporter and a CancellationToken — supply both.
+    withProgress: vi.fn((_opts: unknown, task: (p: unknown, t: unknown) => unknown) =>
+      task(
+        { report: vi.fn() },
+        { isCancellationRequested: false, onCancellationRequested: vi.fn() },
+      ),
+    ),
   },
   workspace: {
     openTextDocument: vi.fn(() => Promise.resolve({})),
@@ -26,12 +42,36 @@ vi.mock('vscode', () => ({
 
 // ─── Mock lib deps ─────────────────────────────────────────────────────────
 
+/**
+ * The project-local preference store (#1319). Mocked so these tests never write
+ * a real `.minspec/preferences.json` under the fake FOLDER — a stray file there
+ * would leak the "Always" opt-in into later tests and later runs. Stateful, so a
+ * test that persists the opt-in sees it honoured on a subsequent read.
+ */
+vi.mock('../src/lib/preferences', () => ({
+  loadPreferences: vi.fn(() => prefsState),
+  savePreferences: vi.fn((_root: string, update: Record<string, unknown>) => {
+    Object.assign(prefsState, update);
+  }),
+  preferencesPath: vi.fn((root: string) => `${root}/.minspec/preferences.json`),
+  resolveProjectPreference: vi.fn((projectValue: unknown, settingValue: unknown) =>
+    projectValue !== undefined ? projectValue : settingValue,
+  ),
+}));
+
 vi.mock('../src/lib/epic-backfill', () => ({
   proposeHeuristic: vi.fn(),
   proposeAI: vi.fn(),
   isClaudeAvailable: vi.fn(),
   applyBackfill: vi.fn(),
   renderProposalMarkdown: vi.fn(() => '# Proposal'),
+  // The command short-circuits when nothing is untagged (#1571). These tests
+  // exercise the proposal flow, so the default scope has work to do; the
+  // short-circuit itself is covered by its own cases below.
+  backfillScope: vi.fn(() => ({ total: 3, pending: 3 })),
+  // Identity by default — the filter has its own tests, and here it must not
+  // empty the proposal the case under test just set up.
+  withoutAlreadyTagged: vi.fn((p: unknown) => p),
 }));
 
 vi.mock('../src/lib/resolve-folder', () => ({
@@ -50,6 +90,7 @@ import {
   renderProposalMarkdown,
   type BackfillProposal,
 } from '../src/lib/epic-backfill';
+import { savePreferences } from '../src/lib/preferences';
 import { resolveTargetFolder } from '../src/lib/resolve-folder';
 
 // ─── Helpers ───────────────────────────────────────────────────────────────
@@ -81,6 +122,9 @@ const HEURISTIC_PROPOSAL = makeProposal(2, 3);
 describe('backfillEpicsCommand()', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    // Plain object — untouched by clearAllMocks. Without this the "Always" test
+    // leaks its persisted opt-in into every later test in the file (#1319).
+    for (const k of Object.keys(prefsState)) delete prefsState[k];
     // Sensible defaults — individual tests override as needed
     vi.mocked(resolveTargetFolder).mockResolvedValue(FOLDER);
     vi.mocked(proposeHeuristic).mockReturnValue(HEURISTIC_PROPOSAL);
@@ -153,7 +197,7 @@ describe('backfillEpicsCommand()', () => {
     const aiProposal = makeProposal(3, 4);
     aiProposal.source; // just accessing to confirm shape
     vi.mocked(isClaudeAvailable).mockResolvedValue(true);
-    vi.mocked(proposeAI).mockResolvedValue({ ...aiProposal, source: 'ai' } as BackfillProposal);
+    vi.mocked(proposeAI).mockResolvedValue({ proposal: { ...aiProposal, source: 'ai' } as BackfillProposal });
     // First call: AI/heuristic choice
     vi.mocked(vscode.window.showInformationMessage)
       .mockResolvedValueOnce('AI-enhanced' as never)
@@ -163,15 +207,21 @@ describe('backfillEpicsCommand()', () => {
 
     await backfillEpicsCommand(FOLDER);
 
-    expect(proposeAI).toHaveBeenCalledWith(FOLDER);
+    expect(proposeAI).toHaveBeenCalledWith(FOLDER, expect.objectContaining({ signal: expect.anything() }));
     expect(renderProposalMarkdown).toHaveBeenCalledWith(expect.objectContaining({ source: 'ai' }));
     expect(applyBackfill).toHaveBeenCalledWith(FOLDER, expect.objectContaining({ source: 'ai' }));
   });
 
-  // (5) choice === 'AI-enhanced', proposeAI returns null → warning, falls back to heuristic
-  it('shows warning and falls back to heuristic when proposeAI returns null', async () => {
+  // (5) choice === 'AI-enhanced', the AI pass fails → warning NAMES the mode,
+  // falls back to heuristic. The message used to say "unavailable" for every
+  // failure, which blamed a missing binary for a call that had answered fine and
+  // simply been cut off at the old flat 120s budget (#1570).
+  it('names the actual failure mode when the AI pass times out', async () => {
     vi.mocked(isClaudeAvailable).mockResolvedValue(true);
-    vi.mocked(proposeAI).mockResolvedValue(null);
+    vi.mocked(proposeAI).mockResolvedValue({
+      proposal: null,
+      failure: { reason: 'timeout', detail: 'timed out after 10m' },
+    });
     vi.mocked(vscode.window.showInformationMessage)
       .mockResolvedValueOnce('AI-enhanced' as never)
       .mockResolvedValueOnce('Apply' as never);
@@ -179,17 +229,35 @@ describe('backfillEpicsCommand()', () => {
 
     await backfillEpicsCommand(FOLDER);
 
-    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
-      'MinSpec: AI pass unavailable — using the heuristic proposal.',
-    );
+    const warning = vi.mocked(vscode.window.showWarningMessage).mock.calls[0][0] as string;
+    expect(warning).toContain('timed out after 10m');
+    expect(warning).not.toContain('unavailable');
     // Falls back to heuristic proposal for final apply
+    expect(applyBackfill).toHaveBeenCalledWith(FOLDER, HEURISTIC_PROPOSAL);
+  });
+
+  // (5a) a cancelled pass is the user's own act — no warning, just the fallback.
+  it('stays silent when the user cancels the AI pass', async () => {
+    vi.mocked(isClaudeAvailable).mockResolvedValue(true);
+    vi.mocked(proposeAI).mockResolvedValue({
+      proposal: null,
+      failure: { reason: 'cancelled', detail: 'was cancelled' },
+    });
+    vi.mocked(vscode.window.showInformationMessage)
+      .mockResolvedValueOnce('AI-enhanced' as never)
+      .mockResolvedValueOnce('Apply' as never);
+    vi.mocked(applyBackfill).mockReturnValueOnce({ epicsCreated: 2, artifactsTagged: 3, skipped: 0 });
+
+    await backfillEpicsCommand(FOLDER);
+
+    expect(vscode.window.showWarningMessage).not.toHaveBeenCalled();
     expect(applyBackfill).toHaveBeenCalledWith(FOLDER, HEURISTIC_PROPOSAL);
   });
 
   // (5b) choice === 'AI-enhanced', proposeAI returns undefined → warning, falls back to heuristic
   it('shows warning and falls back to heuristic when proposeAI returns undefined', async () => {
     vi.mocked(isClaudeAvailable).mockResolvedValue(true);
-    vi.mocked(proposeAI).mockResolvedValue(undefined as unknown as null);
+    vi.mocked(proposeAI).mockResolvedValue(undefined as never);
     vi.mocked(vscode.window.showInformationMessage)
       .mockResolvedValueOnce('AI-enhanced' as never)
       .mockResolvedValueOnce('Apply' as never);
@@ -197,9 +265,9 @@ describe('backfillEpicsCommand()', () => {
 
     await backfillEpicsCommand(FOLDER);
 
-    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
-      'MinSpec: AI pass unavailable — using the heuristic proposal.',
-    );
+    // No result shape at all — still warns (with a generic clause) and falls back.
+    const warning = vi.mocked(vscode.window.showWarningMessage).mock.calls[0][0] as string;
+    expect(warning).toContain('did not produce a proposal');
     expect(applyBackfill).toHaveBeenCalledWith(FOLDER, HEURISTIC_PROPOSAL);
   });
 
@@ -323,7 +391,7 @@ describe('backfillEpicsCommand()', () => {
   // withProgress: verifies the progress call wraps proposeAI
   it('calls withProgress with Notification location when invoking AI pass', async () => {
     vi.mocked(isClaudeAvailable).mockResolvedValue(true);
-    vi.mocked(proposeAI).mockResolvedValue(makeProposal(1, 1) as BackfillProposal);
+    vi.mocked(proposeAI).mockResolvedValue({ proposal: makeProposal(1, 1) as BackfillProposal });
     vi.mocked(vscode.window.showInformationMessage)
       .mockResolvedValueOnce('AI-enhanced' as never)
       .mockResolvedValueOnce('Apply' as never);
@@ -365,14 +433,14 @@ describe('backfillEpicsCommand()', () => {
   // aiConsent inherited from the bootstrap offer → no "Use AI?" re-prompt.
   it('runs the AI pass without re-prompting when aiConsent is passed', async () => {
     vi.mocked(isClaudeAvailable).mockResolvedValue(true);
-    vi.mocked(proposeAI).mockResolvedValue({ ...makeProposal(1, 1), source: 'ai' } as BackfillProposal);
+    vi.mocked(proposeAI).mockResolvedValue({ proposal: { ...makeProposal(1, 1), source: 'ai' } as BackfillProposal });
     // Only ONE info message — the final confirm. No AI/heuristic choice.
     vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce('Apply' as never);
     vi.mocked(applyBackfill).mockReturnValueOnce({ epicsCreated: 1, artifactsTagged: 1, skipped: 0 });
 
     await backfillEpicsCommand(FOLDER, { aiConsent: true });
 
-    expect(proposeAI).toHaveBeenCalledWith(FOLDER);
+    expect(proposeAI).toHaveBeenCalledWith(FOLDER, expect.objectContaining({ signal: expect.anything() }));
     const firstMsg = vi.mocked(vscode.window.showInformationMessage).mock.calls[0][0] as string;
     expect(firstMsg).toContain('Apply');
     expect(applyBackfill).toHaveBeenCalledWith(FOLDER, expect.objectContaining({ source: 'ai' }));
@@ -385,13 +453,13 @@ describe('backfillEpicsCommand()', () => {
       get: vi.fn(() => true),
       update: vi.fn(() => Promise.resolve()),
     } as never);
-    vi.mocked(proposeAI).mockResolvedValue({ ...makeProposal(1, 1), source: 'ai' } as BackfillProposal);
+    vi.mocked(proposeAI).mockResolvedValue({ proposal: { ...makeProposal(1, 1), source: 'ai' } as BackfillProposal });
     vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce('Apply' as never);
     vi.mocked(applyBackfill).mockReturnValueOnce({ epicsCreated: 1, artifactsTagged: 1, skipped: 0 });
 
     await backfillEpicsCommand(FOLDER);
 
-    expect(proposeAI).toHaveBeenCalledWith(FOLDER);
+    expect(proposeAI).toHaveBeenCalledWith(FOLDER, expect.objectContaining({ signal: expect.anything() }));
     const firstMsg = vi.mocked(vscode.window.showInformationMessage).mock.calls[0][0] as string;
     expect(firstMsg).toContain('Apply');
   });
@@ -404,7 +472,7 @@ describe('backfillEpicsCommand()', () => {
       update,
     } as never);
     vi.mocked(isClaudeAvailable).mockResolvedValue(true);
-    vi.mocked(proposeAI).mockResolvedValue({ ...makeProposal(1, 1), source: 'ai' } as BackfillProposal);
+    vi.mocked(proposeAI).mockResolvedValue({ proposal: { ...makeProposal(1, 1), source: 'ai' } as BackfillProposal });
     vi.mocked(vscode.window.showInformationMessage)
       .mockResolvedValueOnce('Always' as never)
       .mockResolvedValueOnce('Apply' as never);
@@ -412,13 +480,14 @@ describe('backfillEpicsCommand()', () => {
 
     await backfillEpicsCommand(FOLDER);
 
-    // Written globally — a personal preference, not project policy (#213).
-    expect(update).toHaveBeenCalledWith(
-      'autoBackfillUseAi',
-      true,
-      vscode.ConfigurationTarget.Global,
-    );
-    expect(proposeAI).toHaveBeenCalledWith(FOLDER);
+    // #1319 / DR-078 §1: persisted to `.minspec/preferences.json`, scoped to
+    // THIS project. It used to write ConfigurationTarget.Global, which silently
+    // enabled an AI/network path in every other MinSpec project on the machine
+    // — projects that may have been chosen for the offline Tier-0 posture.
+    expect(savePreferences).toHaveBeenCalledWith(FOLDER, { autoBackfillUseAi: true });
+    // The machine-wide surface must be left completely untouched.
+    expect(update).not.toHaveBeenCalled();
+    expect(proposeAI).toHaveBeenCalledWith(FOLDER, expect.objectContaining({ signal: expect.anything() }));
   });
 
   // The final approval toast is NON-modal (no { modal: true } options object).

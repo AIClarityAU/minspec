@@ -112,6 +112,13 @@ describe('Invariant 2: No backend — no network calls', () => {
   //   - epic-backfill → `claude -p` for AI epic proposal (DR-016, opt-in,
   //     degrades to a pure heuristic when `claude` is absent)
   const CHILD_PROCESS_ALLOWLIST = new Set([
+    // #1439 build provenance: `git rev-parse` / `merge-base --is-ancestor` /
+    // `rev-list --count` against the OPEN WORKSPACE, to tell whether the running
+    // extension build predates the checkout being edited. Local git plumbing, read-only,
+    // no network, never mutates the repo — same Tier-0 posture as approval.ts. Exists
+    // because a stale install silently disables shipped gates and a version check cannot
+    // detect it (both builds were 0.1.26 across a five-day, one-gate gap).
+    'lib/build-provenance.ts',
     'lib/github.ts',
     'lib/parking-lot.ts',
     'lib/backlog.ts',
@@ -137,6 +144,20 @@ describe('Invariant 2: No backend — no network calls', () => {
     // setting IS the consent) or the user clicks Push on the `prompt` default; the
     // shipped default sends nothing. See approve-push.ts pushApproval.
     'lib/approve-push.ts',
+    // #1115 protected-branch recovery: rescues an approval `commitApproval` REFUSED
+    // (HEAD is the push-protected default branch, #1064) by committing it in a
+    // throwaway worktree off `origin/<default>` and pushing. Like approve-push.ts —
+    // and unlike the local-git-only entries above — this DOES make network calls
+    // (`fetch`, `push`), so it is allowlisted on the CONSENT clause of constitution
+    // invariant #1, not on a "local git only" claim.
+    //
+    // It reuses `minspec.pushOnApprove` rather than introducing a second consent
+    // surface for the same act: unreachable unless that setting is `always` (the
+    // setting IS the consent) or the user clicks the named action on the `prompt`
+    // default. The shipped default sends nothing, and `never` reaches this module
+    // zero times — pinned in approval-recover-wiring.test.ts, not merely asserted.
+    // See approval-recover.ts recoverProtectedBranchApproval.
+    'lib/approval-recover.ts',
     // DR-037 / #247: scaffold points the project's git `core.hooksPath` at
     // .minspec/hooks (via `git config --local core.hooksPath`) so the
     // editor-independent SDD hooks run on every commit. Local git config write —
@@ -159,16 +180,30 @@ describe('Invariant 2: No backend — no network calls', () => {
     // same Tier-0 posture as approval.ts. See presence.ts gitOut/writeHeartbeat.
     'lib/presence.ts',
     // SPEC-039 "Push docs via lane": one of exactly TWO push lanes (the other is
-    // approve-push.ts below, added by #1022 and ratified by DR-071 — this comment
+    // approve-push.ts above, added by #1022 and ratified by DR-071 — this comment
     // said "the ONLY command that pushes" until then, and a second lane made it
     // false). It shells the
-    // user's authenticated `git`/`gh` to open a docs-only PR — and ONLY after an
-    // explicit modal confirmation that names the network action (FR-3 / INV-1).
+    // user's authenticated `git`/`gh` to push a docs-only branch — and ONLY after
+    // an explicit modal confirmation that names the network action (FR-3 / INV-1).
     // MinSpec opens no socket itself; the network actor is the user's own CLI,
     // same Tier-1 local-tool-delegation posture (DR-004) as github.ts/ruleset-
     // advisor.ts. Every wire call runs strictly after consent. See
     // commands/push-docs-lane.ts pushDocsLaneCommand.
+    // NOTE (SPEC-050 Slice 1): the `gh pr create` half moved to lib/approval-pr.ts
+    // below; the `git fetch`/`push` half is still spawned from here, so this entry
+    // remains load-bearing rather than vestigial.
     'commands/push-docs-lane.ts',
+    // SPEC-050 FR-4 "the seam": the single `gh pr create` in the codebase, shared
+    // by SPEC-039's command and the approval flow. It had to live in lib/ — the
+    // Tier-0 layer rule forbids lib/** -> commands/**, so a lib seam can never
+    // import the command that used to own the runner. Like approve-push.ts (and
+    // UNLIKE the local-git entries above) this one DOES reach the network, so it
+    // is allowlisted on the CONSENT clause of constitution invariant #1, not on a
+    // "local git only" claim: it opens a PR for a branch that a consented push
+    // already put on the remote (SPEC-050 INV-1), it never pushes or fetches
+    // itself, and with `minspec.pushOnApprove` at its shipped `prompt` default
+    // nothing here runs until the user clicks. See approval-pr.ts openPullRequest.
+    'lib/approval-pr.ts',
   ]);
 
   // Files allowed to *name* HTTP clients as detection data (not call them). They

@@ -94,41 +94,69 @@ describe('isGhAvailable()', () => {
 
 // ─── getRepoFromRemote ───────────────────────────────────────────────────
 
+/**
+ * #1545: `getRepoFromRemote` no longer runs `git remote get-url origin`. It reads
+ * ALL remotes via `git config --get-regexp ^remote\..*\.url$` and resolves through
+ * the shared `lib/git-remotes` primitive, so a repo whose remote is not named
+ * `origin` stops reading as a repo with no remote at all. These fixtures therefore
+ * carry git-config LINES (`remote.<name>.url <url>`) rather than a bare URL.
+ */
 describe('getRepoFromRemote()', () => {
-  it('parses SSH remote URL', async () => {
+  /** Reply to any execFile with `stdout`, honouring both callback signatures. */
+  function replyWith(stdout: string): void {
     mockExecFile.mockImplementation(
       (_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
         if (typeof _opts === 'function') cb = _opts as Function;
-        cb!(null, { stdout: 'git@github.com:harvest316/MinSpecPro.git\n', stderr: '' });
+        cb!(null, { stdout, stderr: '' });
       },
     );
+  }
 
-    const result = await getRepoFromRemote('/fake/root');
-    expect(result).toBe('harvest316/MinSpecPro');
+  it('parses SSH remote URL', async () => {
+    replyWith('remote.origin.url git@github.com:harvest316/MinSpecPro.git\n');
+    expect(await getRepoFromRemote('/fake/root')).toBe('harvest316/MinSpecPro');
   });
 
   it('parses HTTPS remote URL', async () => {
-    mockExecFile.mockImplementation(
-      (_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
-        if (typeof _opts === 'function') cb = _opts as Function;
-        cb!(null, { stdout: 'https://github.com/harvest316/MinSpecPro.git\n', stderr: '' });
-      },
-    );
+    replyWith('remote.origin.url https://github.com/harvest316/MinSpecPro.git\n');
+    expect(await getRepoFromRemote('/fake/root')).toBe('harvest316/MinSpecPro');
+  });
 
-    const result = await getRepoFromRemote('/fake/root');
-    expect(result).toBe('harvest316/MinSpecPro');
+  it('resolves a sole remote that is NOT named origin (#1545)', async () => {
+    // The reported bug: this used to return null, and MinSpec then told the user to
+    // add a GitHub remote they had already added.
+    replyWith('remote.voip-sms-inbox.url https://github.com/harvest316/voip-sms-inbox.git\n');
+    expect(await getRepoFromRemote('/fake/root')).toBe('harvest316/voip-sms-inbox');
+  });
+
+  it('still prefers origin on a fork checkout, where remotes disagree by design', async () => {
+    // origin = your fork, upstream = theirs. Unchanged from the pre-#1545
+    // behaviour, and the case that proves the resolver did not get too clever.
+    replyWith(
+      [
+        'remote.upstream.url https://github.com/up/stream.git',
+        'remote.origin.url https://github.com/harvest316/MinSpecPro.git',
+        '',
+      ].join('\n'),
+    );
+    expect(await getRepoFromRemote('/fake/root')).toBe('harvest316/MinSpecPro');
+  });
+
+  it('returns null when UNRESOLVABLE remotes point at different repos', async () => {
+    // No origin AND no agreement — genuinely no answer, so refuse rather than
+    // target the wrong repository. (With an `origin` present this is NOT null; see
+    // the fork-checkout case above.)
+    replyWith(
+      ['remote.a.url https://github.com/mine/r.git', 'remote.b.url https://github.com/theirs/r.git', ''].join(
+        '\n',
+      ),
+    );
+    expect(await getRepoFromRemote('/fake/root')).toBeNull();
   });
 
   it('returns null for non-GitHub remote', async () => {
-    mockExecFile.mockImplementation(
-      (_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
-        if (typeof _opts === 'function') cb = _opts as Function;
-        cb!(null, { stdout: 'https://gitlab.com/owner/repo.git\n', stderr: '' });
-      },
-    );
-
-    const result = await getRepoFromRemote('/fake/root');
-    expect(result).toBeNull();
+    replyWith('remote.origin.url https://gitlab.com/owner/repo.git\n');
+    expect(await getRepoFromRemote('/fake/root')).toBeNull();
   });
 
   it('returns null when git command fails', async () => {
@@ -138,17 +166,15 @@ describe('getRepoFromRemote()', () => {
         cb!(new Error('not a git repository'), { stdout: '', stderr: '' });
       },
     );
-
-    const result = await getRepoFromRemote('/fake/root');
-    expect(result).toBeNull();
+    expect(await getRepoFromRemote('/fake/root')).toBeNull();
   });
 
-  it('passes rootDir as cwd option', async () => {
+  it('scopes the read to rootDir', async () => {
     await getRepoFromRemote('/my/project');
     expect(mockExecFile).toHaveBeenCalledWith(
       'git',
-      ['remote', 'get-url', 'origin'],
-      expect.objectContaining({ cwd: '/my/project' }),
+      ['-C', '/my/project', 'config', '--get-regexp', '^remote\\..*\\.url$'],
+      expect.anything(),
       expect.any(Function),
     );
   });

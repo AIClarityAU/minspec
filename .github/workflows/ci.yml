@@ -5,6 +5,13 @@ on:
     branches: [main]
   pull_request:
     branches: [main]
+  # #1394 — required checks must also report for a MERGE GROUP, or a merge queue can
+  # never green anything. Inert until a queue is actually enabled on `main`: GitHub only
+  # emits `merge_group` when one exists, so this is a no-op prerequisite, not a behaviour
+  # change. It is here first precisely because enabling the queue BEFORE the triggers land
+  # blocks every merge in the repo.
+  merge_group:
+    branches: [main]
 
 permissions:
   contents: write
@@ -36,12 +43,40 @@ jobs:
       - name: Check import cycles
         run: npm run check:cycles
 
+      # Nothing else typechecks the source (#1424). `build` is esbuild, which STRIPS
+      # types without checking them; `vitest` transpiles per file for the same reason;
+      # and `build:shared`'s tsc covers only packages/shared. So a TypeScript error could
+      # merge past a fully green suite — and did: #1423 carried a TS2339 through 240/240
+      # test files and 4970 passing tests, caught by an AI reviewer rather than any gate.
+      # Measured 0 pre-existing errors in both packages when this was added, so it is
+      # required from day one rather than advisory-then-ratcheted.
+      - name: Typecheck
+        run: npm run typecheck
+
       # Pure decision logic behind the ai-review label-integrity gate
       # (.github/workflows/ready-to-merge.yml). Lives under .github/scripts so it
       # is outside vitest's packages/* include; run it directly on Node so the
       # security-critical revert/strip/green decisions stay enforced in CI.
       - name: Unit-test ai-review label guard
         run: node --test .github/scripts/ai-review-guard.test.js
+
+      # #1355: agent GitHub writes must carry the bot's identity, not the human's.
+      # minspec#995 already required this in CLAUDE.md prose and NOTHING obeyed it
+      # — 76 write call sites, zero App-token use — so the founder was recorded as
+      # the author of every agent issue/comment/label/merge (and auto-subscribed to
+      # each thread forever). This is the gate that replaces the prose.
+      - name: Check agent GitHub writes are bot-attributed
+        run: npm run check:gh-bot
+
+      - name: Unit-test gh-bot attribution guard
+        run: node --test scripts/check-gh-bot-attribution.test.js
+
+      # The write/read predicate and the credential handling behind it. Pins that
+      # the guard DERIVES its write vocabulary from gh-bot.sh rather than keeping a
+      # second copy — the two disagreed once, which left `gh ruleset create` able
+      # to mint at runtime while the guard never required attribution.
+      - name: Unit-test gh-bot write predicate + credential handling
+        run: node --test scripts/lib/gh-bot.test.js
 
   # Workflow-syntax + expression lint (#486 harden). CI validated YAML syntax but
   # NOT the GitHub Actions schema/expression grammar, so an invalid `${{ }}` reached

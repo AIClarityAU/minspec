@@ -113,6 +113,26 @@ function classify(raw: string, line: number, words: ReadonlySet<string>): BodySt
 }
 
 /**
+ * A DR's status assertion written as a head callout — `> **Status: proposed — …**`.
+ *
+ * Deliberately narrow, because a false FATAL blocks legitimate commits: the line must
+ * start a blockquote and its FIRST field must literally be `Status:`. The recognised-word
+ * guard in `classify` is unchanged, so free-form text after the word still reads as
+ * `freeform` and never as a mismatch — widening what can be READ never widens what counts
+ * as a status.
+ */
+function headBlockquoteStatus(
+  lines: readonly string[],
+  words: ReadonlySet<string>,
+): BodyStatusResult | null {
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^>\s*[*_]{0,2}Status:\s*(.+)$/i);
+    if (m) return classify(m[1], i + 1, words);
+  }
+  return null;
+}
+
+/**
  * Inspect the body status line and report which case it is. Never throws.
  *
  * Prefer this over {@link bodyStatusToken} when you care about the DIFFERENCE between
@@ -150,6 +170,26 @@ export function inspectStatusLine(content: string, kind: ArtifactKind): BodyStat
     }
     return { kind: 'absent' };
   }
+
+  // FALLBACK: a blockquote status assertion near the head (#1223).
+  //
+  // Many DRs carry their real status caveat as a callout under the H1 rather than in a
+  // `## Status` section — `> **Status: proposed — scope-split by DR-024.**`. Without this
+  // the inspector returned `absent`, so Rule 11 compared NOTHING and passed in silence.
+  // DR-022 sat that way for two months: frontmatter `accepted`, its own body `proposed`,
+  // on a T4 decision about the ceremony model. One document, but the register's whole
+  // job is to be the thing you can trust without reading the prose.
+  //
+  // Deliberately narrow, because a false FATAL blocks legitimate commits: the line must
+  // start a blockquote and its FIRST field must literally be `Status:`. The recognised-
+  // word guard in `classify` is unchanged, so free-form text after the word still reads
+  // as `freeform` and never as a mismatch — widening what can be READ never widens what
+  // counts as a status.
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(/^>\s*[*_]{0,2}Status:\s*(.+)$/i);
+    if (m) return classify(m[1], i + 1, words);
+  }
+
   return { kind: 'absent' };
 }
 
@@ -202,4 +242,37 @@ export function checkStatusParity(
   if (body.kind !== 'comparable') return null;
   if (body.token === fm) return null;
   return { frontmatter: fm, body: body.token, line: body.line };
+}
+
+/**
+ * EVERY status claim in the body, not just the first.
+ *
+ * WHY THE SINGULAR VERSION IS NOT ENOUGH (#1223 — and this fix's own first attempt got it
+ * wrong): a DR can carry BOTH a `## Status` section and a head blockquote, and they can
+ * DISAGREE. `inspectStatusLine` returns one — the section — so a validator built on it
+ * compares the claim that happens to agree with frontmatter and never sees the other.
+ *
+ * That is exactly how DR-022 hid for two months. Three representations: frontmatter
+ * `accepted`, `## Status` `accepted`, head blockquote `proposed`. Rule 11 compared the two
+ * that agreed. A section-absent-only fallback does NOT help, because the section was
+ * present — verified against the real file, after an earlier "proof" used a fabricated
+ * input with the section stripped.
+ *
+ * So: return them all, and let the caller reject ANY comparable claim that disagrees. A
+ * document showing two different statuses is a false signpost whichever one is read first.
+ */
+export function inspectAllStatusClaims(content: string, kind: ArtifactKind): BodyStatusResult[] {
+  const claims: BodyStatusResult[] = [];
+  const primary = inspectStatusLine(content, kind);
+  if (primary.kind !== 'absent') claims.push(primary);
+
+  if (kind === 'dr') {
+    const bq = headBlockquoteStatus(content.split('\n'), statusWords(kind));
+    // Only add it when it is a DIFFERENT line: when there is no `## Status` section,
+    // inspectStatusLine already returned this very blockquote, and reporting it twice
+    // would double-count for any caller tallying findings.
+    const already = claims.some((c) => 'line' in c && bq !== null && 'line' in bq && c.line === bq.line);
+    if (bq && !already) claims.push(bq);
+  }
+  return claims;
 }

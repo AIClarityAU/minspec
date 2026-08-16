@@ -41,6 +41,11 @@ beforeEach(() => {
   fs.mkdirSync(path.join(ws, 'scripts', 'hooks'), { recursive: true });
   drain = path.join(ws, 'scripts', 'drain-inbox.sh');
   fs.copyFileSync(DRAIN_SRC, drain);
+  // drain-inbox.sh sources scripts/lib/gh-bot.sh at load (#1352), so a fixture that
+  // copies the script without its lib/ is not a runnable checkout.
+  fs.cpSync(path.join(REPO_ROOT, 'scripts', 'lib'), path.join(ws, 'scripts', 'lib'), {
+    recursive: true,
+  });
   fs.copyFileSync(HOOK_SRC, path.join(ws, 'scripts', 'hooks', 'session-start.sh'));
   fs.chmodSync(drain, 0o755);
 });

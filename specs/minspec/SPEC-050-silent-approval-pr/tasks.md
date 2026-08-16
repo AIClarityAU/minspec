@@ -1,0 +1,222 @@
+---
+id: SPEC-050
+type: tasks
+# tier lives on requirements.md (the single tier-carrying approvable, per the spec-gate
+# convention). A tier on a NON-approved sibling doc is treated by spec-gate.py as a second
+# unapproved spec and can shadow the approved requirements.md — so this doc omits it.
+# (SPEC-050 is T2.)
+# Mirrors requirements.md's status. This doc has NO approval record of its own — only
+# requirements.md is signed — so the field is descriptive, never a seal; read the sidecar for
+# the real state. Kept ONLY because spec-validator.ts:525 marks `status` required
+# UNCONDITIONALLY (unlike `tier`:529, which is requiredWhen: isPrimarySpec). Dropping it here
+# is the right end-state (#972) but needs that schema change first — a code fix, not a doc edit.
+status: planning
+product: minspec
+epic: EPIC-009  # Team Readiness — docs-lane push ergonomics (grain b of #575/#781)
+relates_to: [SPEC-039, DR-071, DR-060, DR-061, DR-012]
+phases:
+  specify: done
+  clarify: done
+  plan: done
+  tasks: done
+  implement: done
+---
+
+# MinSpec — Silent approval PR (Tasks)
+
+Tasks map to the FR/INV/AC set in [requirements.md](./requirements.md) and the module plan
+in [design.md](./design.md). Materializes
+[#788](https://github.com/AIClarityAU/minspec/issues/788).
+
+**Two vertical slices; ordering is load-bearing** — Slice 1 extracts the seam with SPEC-039
+as its only caller and **zero behaviour change**, so AC-10 can prove the refactor is inert
+*before* Slice 2 changes anything. Reversing them would make a regression indistinguishable
+from a new feature's bug.
+
+**All boxes are now checked — reconciled against shipped code on 2026-08-12.** They were
+written unchecked and stayed that way while the work landed in **#1224** (both slices) and
+**#1404** (AC-11), so this file spent days claiming 0 of 25 done while nearly all of it was
+on `main`. That is a false signpost pointing the *opposite* way from the usual one, and it
+is the more dangerous direction: it invites someone to rebuild what already exists. It
+nearly did — a session opened a worktree to start Slice 1 before checking `main`.
+
+A checked box is a claim, so each was verified against the code, not against the PR titles
+that landed it: every box below carries a `file:line` citation, and the three suites were
+run green first (`approval-pr.test.ts`, `approval-pr-wiring.test.ts`,
+`push-docs-lane.test.ts` — **114 passed**). Boxes were **not** ticked in bulk.
+
+**Naming note — the shipped design differs from the plan, and the code is right.** This
+file and `design.md` describe `openLanePr` returning a seven-member `LanePrOutcome`
+including `not-docs-only`. What shipped is **`openPullRequest`** returning a six-member
+**`OpenPrOutcome`**, with the label decided separately by `laneLabelsFor` and passed in by
+the caller. That is the better split: the outcome union stays about *what happened to the
+PR*, and "is this docs-only?" stays an orthogonal question the caller answers. The text
+below has been corrected to name what exists; the planning docs are left as the record of
+what was intended.
+
+**Dependency budget: 0 new npm dependencies** (design.md §Dependency budget). Everything is
+`child_process` + `gh`, both already in use. Adding one is a stop-and-discuss, not a task.
+
+**Ownership note (SPEC-038).** `requirements.md` is approved and hash-locked
+(`75ecc600…`, `github@harvest316.com`, 2026-08-05), and its `implements:` names exactly
+`approval-pr.ts`, `commit-on-approve.ts` and `approval-pr.test.ts`. So the pure PR-body
+builder design.md sketched as a separate `approval-pr-body.ts` is **folded into
+`approval-pr.ts`** as an exported pure function instead — a third owned file would require
+editing `implements:`, which would stale a fresh human approval for a file-layout
+preference. It is also cohesive on its own terms: one lib that builds and opens a lane PR.
+
+---
+
+## Slice 1 — the seam — DONE (#1224)
+
+Covers **FR-4**, **AC-10**, and the INV-3/INV-5 groundwork the second slice relies on.
+Thinnest path: SPEC-039's command keeps working, through new code.
+
+### T0 — Invariants (write first, before implementation)
+- [x] `packages/minspec/tests/approval-pr.test.ts` (**new — owned**) — **INV-3 / AC-8**: a
+      stub `ExecRun` records every `(file, args, cwd)` and the suite asserts no
+      `checkout` / `switch` / `merge` / `rebase` / `reset` argv is **ever** recorded, on any
+      path including every failure branch. Asserted on recorded argv, never by inspection.
+- [x] same file — **INV-5**: every outcome resolves; a stub that rejects at each `gh` step in
+      turn produces a typed result and **no** thrown exception escapes `openPullRequest`.
+      *Evidence: [approval-pr.test.ts:20](../../../packages/minspec/tests/approval-pr.test.ts#L20).*
+
+### T1 — Contract
+- [x] same file — the `OpenPrResult` shape holds for every `OpenPrOutcome` value: `url`
+      present exactly on `created` / `adopted`, `error` present on the four failure outcomes.
+      *Shipped as SIX members, not the seven planned — see the naming note above.*
+      *Evidence: [approval-pr.ts:179-235](../../../packages/minspec/src/lib/approval-pr.ts#L179).*
+
+### Implementation
+- [x] `packages/minspec/src/lib/approval-pr.ts` (**new — owned**) — relocate verbatim from
+      `push-docs-lane.ts`, no logic change: `ExecRun` + `defaultExecRun`
+      ([:85-112](../../../packages/minspec/src/commands/push-docs-lane.ts#L85)), `isEnoent` +
+      `describeError` ([:114-128](../../../packages/minspec/src/commands/push-docs-lane.ts#L114)),
+      `isNetworkError` + `isAuthError` ([:130-142](../../../packages/minspec/src/commands/push-docs-lane.ts#L130)),
+      `slugFromOriginUrl` ([:186-192](../../../packages/minspec/src/commands/push-docs-lane.ts#L186)).
+      **No `vscode` import** — that is what makes the argv assertions above possible.
+- [x] same file — `openPullRequest(req)`: `gh auth status` pre-flight → `gh pr create` →
+      adopt on an "already exists" rejection. The **caller** decides the label via
+      `laneLabelsFor` and passes it in, rather than the seam inferring it.
+      *Evidence: [approval-pr.ts:496](../../../packages/minspec/src/lib/approval-pr.ts#L496),
+      [:271](../../../packages/minspec/src/lib/approval-pr.ts#L271),
+      [:237](../../../packages/minspec/src/lib/approval-pr.ts#L237).*
+- [x] `packages/minspec/src/commands/push-docs-lane.ts` (**affects**) — replace its
+      PR-creation block ([:398-429](../../../packages/minspec/src/commands/push-docs-lane.ts#L398))
+      with one `openPullRequest` call; keep folder resolution, the docs scan, the modal
+      consent gate, the temp worktree, copy/`git rm`/commit/push, and `surface()` untouched.
+      `PushDocsOutcome` is unchanged — `created`/`adopted` → `pushed`, the four failure
+      outcomes pass through by name.
+      *Evidence: [push-docs-lane.ts:357](../../../packages/minspec/src/commands/push-docs-lane.ts#L357).*
+
+### Gate — Slice 1 is done only when this holds
+- [x] `packages/minspec/tests/push-docs-lane.test.ts` (**not owned — must not be edited**)
+      passes **unchanged** — **AC-10 / R3**. Editing that file to make it pass would destroy
+      the only evidence the refactor is inert.
+
+---
+
+## Slice 2 — auto-open on approve — DONE (#1224, AC-11 in #1404)
+
+Covers **FR-1, FR-2, FR-3, FR-5, FR-6, FR-7, FR-8**, **INV-1, INV-2, INV-4**, and
+**AC-1 – AC-9, AC-11**. Depends on Slice 1's gate being green.
+
+### T0 — Invariants (write first, before implementation)
+- [x] `packages/minspec/tests/approval-pr.test.ts` — **INV-1 / AC-7**: with
+      `pushOnApprove: never`, and separately with `prompt` + the user declining, the recorded
+      runner logs **zero** calls across the whole path. A call-recording test, so "no network"
+      is observed rather than reasoned about.
+- [x] same file — **INV-4 / AC-9**: on every path, no file under `.minspec/approvals/**` is
+      written and no `status:` line is emitted anywhere. This spec transports a record the
+      approve command already wrote; it must never author one.
+- [x] same file — **INV-2 / AC-2**: a fixture whose changed paths include a non-allowlisted
+      path yields **no** `docs-lane` label in the recorded `gh pr create` argv.
+      *Evidence: `laneLabelsFor` fails closed,
+      [approval-pr.ts:271](../../../packages/minspec/src/lib/approval-pr.ts#L271).*
+
+### T1 — Contract
+- [x] same file — `buildApprovalPrBody()` (pure, exported from `approval-pr.ts`) renders the
+      OQ-2 provenance block from an `ApprovalRecord`
+      ([approval.ts:55-64](../../../packages/minspec/src/lib/approval.ts#L55)): artifact path,
+      tier, approver email, `specHash`, approval commit SHA. Pure-function assertions, no
+      runner. Presentation only — the sidecar stays authoritative.
+
+### Implementation
+- [x] `packages/minspec/package.json` (**affects**) — contribute `minspec.approvalPr`
+      (`auto` | `manual`, default `auto`, `scope: window`) with `enumDescriptions` naming
+      what each value does (**FR-1**, R4).
+- [x] `packages/minspec/src/lib/approval-pr.ts` (**owned**) — add the exported pure
+      `buildApprovalPrBody()` (see the ownership note above).
+- [x] `packages/minspec/src/commands/commit-on-approve.ts` (**owned**) — widen
+      `pushApprovalIfEnabled` to `(rootDir, slug, paths)`; the caller already holds `paths`
+      (`CommitApprovalResult.paths`, declared
+      [approve-commit.ts:81](../../../packages/minspec/src/lib/approve-commit.ts#L81),
+      populated on the `'committed'` return at
+      [:246](../../../packages/minspec/src/lib/approve-commit.ts#L246)). No new state.
+- [x] same file — the `'pushed-branch'` arm
+      ([:171-186](../../../packages/minspec/src/commands/commit-on-approve.ts#L171)) branches
+      on `approvalPr`: `manual` → today's code path byte-for-byte; `auto` → `openPullRequest`,
+      then a **non-blocking** info toast carrying the PR URL (**FR-2, FR-3**).
+      *Evidence: [commit-on-approve.ts:281](../../../packages/minspec/src/commands/commit-on-approve.ts#L281).*
+- [x] same file — every failure outcome (`gh-absent`, `gh-unauthenticated`, `offline`,
+      `failed`) falls back to the identical legacy toast **plus a short reason**
+      (**FR-5 / AC-4**). Never a throw, never a silent nothing.
+- [x] same file — an **empty label set** surfaces a notification stating that auto-merge will
+      **not** run and why (**AC-11**). Without the label the lane never runs, so an
+      unannounced unlabelled PR is silence indistinguishable from success — the stranding
+      class this spec exists to end. Shipped as `notifyPrOpened`, not as a `not-docs-only`
+      outcome member. **Landed later than the rest** (#1404): AC-11 was added to the spec in
+      #1270 *after* the implementation shipped in #1224, so nothing re-checked the code
+      against it. *Evidence:
+      [commit-on-approve.ts:535](../../../packages/minspec/src/commands/commit-on-approve.ts#L535),
+      [:682](../../../packages/minspec/src/commands/commit-on-approve.ts#L682).*
+- [x] same file — **FR-7 / AC-6**: `outcome: 'pushed'` (non-protected branch) runs no `gh` at
+      all; there is no PR to open.
+
+### FR-8 — the one-time standing-consent offer
+- [x] `packages/minspec/src/commands/commit-on-approve.ts` (**owned**) — add a third action,
+      **"Always push from now on"**, to the `prompt` notification
+      ([:146-155](../../../packages/minspec/src/commands/commit-on-approve.ts#L146)), beside
+      `Push` / `Not now`. On click: write the standing consent **per-project** to
+      `.minspec/preferences.json` (the same store as the `answeredSignatures` memory in the
+      next task) — then proceed with this push, so the click is not also a decline.
+      > ⚠️ **Corrected 2026-08-07 — do NOT write `ConfigurationTarget.Global` here.**
+      > This task previously said to, and that is superseded by
+      > [DR-078](../../../docs/decisions/DR-078.md) §1 (accepted 2026-08-05): "Not
+      > `ConfigurationTarget.Global`. Not `ConfigurationTarget.Workspace`." A `Global` write
+      > is machine-wide config in a repo that never opted in, which **constitution invariant
+      > 3 forbids**. This line was authored ~3 hours after DR-078 was accepted, so it
+      > re-introduced the exact ruling the DR had just overturned — and since an implementer
+      > works from this file, it was the copy that would actually have been built.
+      > (`requirements.md:75` still carries the old wording but is hash-locked; correcting it
+      > costs a re-approval, which DR-078 Consequences §1 already records.)
+- [x] same file — show the offer **once**: record it under its own `skipPrefKey` in the #883
+      `answeredSignatures` map via `loadPreferences` / `savePreferences`
+      (`auto-bootstrap.ts:82` / `:101` / `:68`). Never re-nag.
+      ⚠️ That file contains two raw NUL bytes at line 223, so plain `grep` silently skips it
+      and it reads as empty — use `grep -a`. Filed as
+      [#1266](https://github.com/AIClarityAU/minspec/issues/1266); it does not block this task.
+- [x] `packages/minspec/package.json` — verify `pushOnApprove`'s contributed default is
+      **still `prompt`** and remains untouched (DR-071 condition 1). This is a
+      *don't-change-it* task; assert it in a test rather than trusting review.
+
+### Gate — Slice 2 is done only when these hold
+- [x] **AC-3** asserted **structurally**: on the happy path `prUrl` is populated *before* any
+      `showInformationMessage` promise is awaited, so no future edit can make a click
+      load-bearing.
+- [x] **AC-1**: `auto` creates a PR; `manual` runs no `gh pr create` and shows the legacy
+      notification unchanged. Both against the stub runner.
+- [x] **AC-5 / FR-6**: with an existing open PR for the branch, no second PR is created and
+      the existing URL is reported.
+- [x] Full suite green, and `npm run validate` clean.
+
+---
+
+## Out of scope (do not do these here)
+
+- Changing `pushOnApprove`'s contributed default to `always` — deliberately not done
+  (DR-071 condition 1); FR-8 reaches the same outcome by the user's own act.
+- Calling `gh pr merge --auto` — the lane workflow does it on the label; duplicating that
+  would bypass its docs-only re-verification.
+- Fixing [#1266](https://github.com/AIClarityAU/minspec/issues/1266) (the NUL bytes) — noted
+  above only because it obstructs reading `auto-bootstrap.ts`.
