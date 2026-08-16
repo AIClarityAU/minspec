@@ -6,7 +6,7 @@ import { loadConfig } from '../lib/config';
 import { validateSpec } from '../lib/spec-validator';
 import { epicRefSet } from '../lib/epic-manager';
 import { getApprovalStatus } from '../lib/approval';
-import type { ExplicitTerminal } from '../lib/lifecycle';
+import { explicitTerminalOf, type ExplicitTerminal } from '../lib/lifecycle';
 import { folderForFile, resolveTargetFolder } from '../lib/resolve-folder';
 import { readShardIdFiles } from '../lib/spec-layout';
 
@@ -49,11 +49,11 @@ export async function validateSpecCommand(node?: SpecNodeLike): Promise<void> {
     const parsed = readSpecFile(spec.filePath);
     // SPEC-022 (INV-4): feed the validator the approval verdict + explicit
     // terminal so it can assert the literal `status:` mirror == derived status and
-    // warn on drift. `archived` is the explicit-terminal human act read from the
-    // literal status; everything else is derived from {phases, approval}.
+    // warn on drift. The explicit terminals (`archived`, `superseded`) are human
+    // acts read from the literal status via the one shared resolver (#1520);
+    // everything else is derived from {phases, approval}.
     const approvalState = getApprovalStatus(rootDir, spec.filePath);
-    const explicitTerminal: ExplicitTerminal =
-      parsed.frontmatter.status === 'archived' ? 'archived' : undefined;
+    const explicitTerminal: ExplicitTerminal = explicitTerminalOf(parsed.frontmatter.status);
     result = validateSpec(parsed, loadConfig(rootDir), {
       knownEpicRefs: epicRefSet(rootDir),
       approvalState,

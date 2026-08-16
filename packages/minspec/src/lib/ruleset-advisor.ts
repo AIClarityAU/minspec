@@ -496,6 +496,14 @@ export interface CreateRulesetOutcome {
   created: boolean;
   /** True when the failure was an authorization problem (403 / missing admin scope). */
   forbidden: boolean;
+  /**
+   * True when the 403 is GitHub reporting the FEATURE as unavailable on this repo's
+   * plan (private repo on the free plan), not a permission problem. Same status code,
+   * opposite remedy — see {@link isPlanLimited}.
+   */
+  planLimited: boolean;
+  /** GitHub's own explanation, when it returned one. Null rather than a guess. */
+  reason: string | null;
   /** Captured stderr for diagnostics (empty on success). */
   detail: string;
 }
@@ -529,7 +537,7 @@ export async function createRequiredChecksRuleset(
   );
 
   if (result.code === 0) {
-    return { created: true, forbidden: false, detail: '' };
+    return { created: true, forbidden: false, planLimited: false, reason: null, detail: '' };
   }
 
   const haystack = `${result.stdout}\n${result.stderr}`;
@@ -539,7 +547,52 @@ export async function createRequiredChecksRuleset(
     /must have admin/i.test(haystack) ||
     /resource not accessible/i.test(haystack);
 
-  return { created: false, forbidden, detail: result.stderr || result.stdout };
+  return {
+    created: false,
+    forbidden,
+    planLimited: isPlanLimited(haystack),
+    reason: githubReason(haystack),
+    detail: result.stderr || result.stdout,
+  };
+}
+
+/**
+ * Is this 403 GitHub saying the FEATURE is unavailable on this repo's plan, rather
+ * than the caller lacking permission?
+ *
+ * Rulesets are unavailable on a private repository on the free plan. GitHub answers
+ * with a 403 whose body is `Upgrade to GitHub Pro or make this repository public to
+ * enable this feature.` — the same status code as a genuine permission failure, and
+ * the reason the two must be told apart: no amount of re-authenticating fixes a plan
+ * limit, so advising a token fix here sends the user to do something that cannot work.
+ */
+export function isPlanLimited(haystack: string): boolean {
+  return (
+    /upgrade to github/i.test(haystack) || /make this repository public/i.test(haystack)
+  );
+}
+
+/**
+ * GitHub's own one-line explanation, pulled out of the `gh` output.
+ *
+ * MinSpec previously reported a CAUSE it had not established: every 403 was rendered
+ * as "your gh token lacks repo-admin scope". Observed in a real project whose token
+ * carried full `repo` scope and whose actual failure was a plan limit — so the message
+ * was confidently wrong and pointed at a fix that could never work. That is the
+ * evidence-discipline rule violated in shipped product text: a plausible inference
+ * reported as an observation.
+ *
+ * Returns GitHub's `message` field when present, so the user reads the API's reason
+ * rather than our guess at it. Null when nothing quotable was returned, in which case
+ * the caller must stay vague rather than invent a cause.
+ */
+export function githubReason(haystack: string): string | null {
+  // `gh api` prints `{"message":"…"}` on stdout and a `gh: …` line on stderr.
+  const json = /"message"\s*:\s*"([^"]+)"/.exec(haystack);
+  if (json) return json[1];
+  const ghLine = /^gh:\s*(.+?)\s*(?:\(HTTP \d+\))?$/m.exec(haystack);
+  if (ghLine) return ghLine[1];
+  return null;
 }
 
 // ---------------------------------------------------------------------------
@@ -741,6 +794,13 @@ export interface UpdateRulesetOutcome {
   updated: boolean;
   /** True on an authorization failure (403 / missing admin). */
   forbidden: boolean;
+  /**
+   * True when the 403 is a plan limitation rather than a permission problem —
+   * same status code, opposite remedy. See {@link isPlanLimited}.
+   */
+  planLimited: boolean;
+  /** GitHub's own explanation, when it returned one. Null rather than a guess. */
+  reason: string | null;
   /** Captured diagnostics (empty on success). */
   detail: string;
 }
@@ -763,25 +823,38 @@ export async function updateRulesetRequiredChecks(
 ): Promise<UpdateRulesetOutcome> {
   const got = await runSafe(run, 'gh', ['api', `repos/${owner}/${repo}/rulesets/${rulesetId}`]);
   if (got.code !== 0) {
-    return { updated: false, forbidden: isForbidden(got.stdout + got.stderr), detail: got.stderr || got.stdout };
+    const gotAll = got.stdout + got.stderr;
+    return {
+      updated: false,
+      forbidden: isForbidden(gotAll),
+      planLimited: isPlanLimited(gotAll),
+      reason: githubReason(gotAll),
+      detail: got.stderr || got.stdout,
+    };
   }
   let detail: RulesetFull;
   try {
     detail = JSON.parse(got.stdout) as RulesetFull;
   } catch {
-    return { updated: false, forbidden: false, detail: 'could not parse the existing ruleset' };
+    return { updated: false, forbidden: false, planLimited: false,
+    reason: null,
+    detail: 'could not parse the existing ruleset' };
   }
   const rules = Array.isArray(detail.rules) ? detail.rules : [];
   const rule = rules.find((r) => r?.type === 'required_status_checks');
   if (!rule) {
-    return { updated: false, forbidden: false, detail: 'ruleset has no required_status_checks rule' };
+    return { updated: false, forbidden: false, planLimited: false,
+    reason: null,
+    detail: 'ruleset has no required_status_checks rule' };
   }
   const existing = Array.isArray(rule.parameters?.required_status_checks)
     ? rule.parameters!.required_status_checks!
     : [];
   const have = new Set(existing.map((c) => c?.context));
   const missing = addContexts.filter((c) => !have.has(c));
-  if (missing.length === 0) return { updated: true, forbidden: false, detail: 'already satisfied' };
+  if (missing.length === 0) return { updated: true, forbidden: false, planLimited: false,
+    reason: null,
+    detail: 'already satisfied' };
 
   const newRules = rules.map((r) =>
     r?.type === 'required_status_checks'
@@ -808,6 +881,15 @@ export async function updateRulesetRequiredChecks(
     ['api', '-X', 'PUT', `repos/${owner}/${repo}/rulesets/${rulesetId}`, '--input', '-'],
     body,
   );
-  if (put.code === 0) return { updated: true, forbidden: false, detail: '' };
-  return { updated: false, forbidden: isForbidden(put.stdout + put.stderr), detail: put.stderr || put.stdout };
+  if (put.code === 0) return { updated: true, forbidden: false, planLimited: false,
+    reason: null,
+    detail: '' };
+  const putAll = put.stdout + put.stderr;
+  return {
+    updated: false,
+    forbidden: isForbidden(putAll),
+    planLimited: isPlanLimited(putAll),
+    reason: githubReason(putAll),
+    detail: put.stderr || put.stdout,
+  };
 }

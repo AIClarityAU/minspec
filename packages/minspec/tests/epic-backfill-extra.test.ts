@@ -145,7 +145,7 @@ describe('isClaudeAvailable()', () => {
 describe('proposeAI()', () => {
   it('returns null immediately when there are no artifacts', async () => {
     // No specs/ADRs written → collectArtifacts returns []
-    const result = await proposeAI(tmp);
+    const result = (await proposeAI(tmp)).proposal;
     expect(result).toBeNull();
     // execFile should NOT have been called (early return)
     expect(mockExecFile).not.toHaveBeenCalled();
@@ -161,7 +161,7 @@ describe('proposeAI()', () => {
     // stdout may contain prose before/after the JSON object
     mockExecSuccess(`Here is my proposal:\n${aiOutput}\nDone.`);
 
-    const result = await proposeAI(tmp);
+    const result = (await proposeAI(tmp)).proposal;
     expect(result).not.toBeNull();
     expect(result!.source).toBe('ai');
     expect(result!.epics).toHaveLength(1);
@@ -172,7 +172,7 @@ describe('proposeAI()', () => {
   it('returns null when stdout contains no JSON object at all', async () => {
     writeSpec(tmp, 'minspec/billing', 'SPEC-001', 'Billing Spec');
     mockExecSuccess('I cannot help with that.');
-    const result = await proposeAI(tmp);
+    const result = (await proposeAI(tmp)).proposal;
     expect(result).toBeNull();
   });
 
@@ -180,7 +180,7 @@ describe('proposeAI()', () => {
     writeSpec(tmp, 'minspec/billing', 'SPEC-001', 'Billing Spec');
     // Start of a JSON object with no closing brace — extractJson returns null (line 320)
     mockExecSuccess('{ "epics": [ {"slug": "billing"');
-    const result = await proposeAI(tmp);
+    const result = (await proposeAI(tmp)).proposal;
     expect(result).toBeNull();
   });
 
@@ -188,7 +188,7 @@ describe('proposeAI()', () => {
     writeSpec(tmp, 'minspec/billing', 'SPEC-001', 'Billing Spec');
     // Balanced braces but invalid JSON content (control chars etc.)
     mockExecSuccess('{ invalid json }');
-    const result = await proposeAI(tmp);
+    const result = (await proposeAI(tmp)).proposal;
     expect(result).toBeNull();
   });
 
@@ -197,32 +197,33 @@ describe('proposeAI()', () => {
     // Valid JSON structure but empty epics → normalizeAiProposal returns null
     const aiOutput = JSON.stringify({ epics: [], mappings: [] });
     mockExecSuccess(aiOutput);
-    const result = await proposeAI(tmp);
+    const result = (await proposeAI(tmp)).proposal;
     expect(result).toBeNull();
   });
 
-  it('returns a proposal with empty epics/mappings when all mappings reference unknown artifacts', async () => {
+  it('reports a failure when all mappings reference unknown artifacts (#1576)', async () => {
     writeSpec(tmp, 'minspec/billing', 'SPEC-001', 'Billing Spec');
-    // All mappings reference unknown artifact → mappings dropped → epics filtered to empty.
-    // normalizeAiProposal only returns null when epics[] is empty BEFORE the mapping filter
-    // (line 362 check). After filtering, it returns the proposal with empty arrays.
+    // All mappings reference an unknown artifact → mappings dropped → no epic
+    // survives the `used` filter. This USED to return { epics: [], mappings: [],
+    // source: 'ai' } — a non-null, fully empty proposal that read as SUCCESS
+    // everywhere downstream: it never tripped `if (!proposal)`, so `unusable`
+    // was unreachable, and the command overwrote its good heuristic proposal
+    // with the empty one and reported "nothing to backfill" with no warning.
+    // Emptiness is now judged AFTER the filter, so this is a failure (#1576).
     const aiOutput = JSON.stringify({
       epics: [{ slug: 'billing', title: 'Billing', rationale: 'r' }],
       mappings: [{ artifactId: 'SPEC-999', epicSlug: 'billing', confidence: 0.8, rationale: 'r' }],
     });
     mockExecSuccess(aiOutput);
-    const result = await proposeAI(tmp);
-    // normalizeAiProposal returns { epics: [], mappings: [], source: 'ai' } — not null
-    expect(result).not.toBeNull();
-    expect(result!.epics).toHaveLength(0);
-    expect(result!.mappings).toHaveLength(0);
-    expect(result!.source).toBe('ai');
+    const res = await proposeAI(tmp);
+    expect(res.proposal).toBeNull();
+    expect(res.failure?.reason).toBe('unusable');
   });
 
   it('returns null when execFile fails (non-zero exit / timeout)', async () => {
     writeSpec(tmp, 'minspec/billing', 'SPEC-001', 'Billing Spec');
     mockExecFailure('Process exited with non-zero status: 1');
-    const result = await proposeAI(tmp);
+    const result = (await proposeAI(tmp)).proposal;
     expect(result).toBeNull();
   });
 });
@@ -438,9 +439,15 @@ describe('proposeAI() — buildPrompt with registered epics', () => {
 
     await proposeAI(tmp);
 
-    // The prompt must list the registered epic (not "(none)")
+    // The EXISTING EPICS section must list the registered epic, not "(none)".
+    // Scoped to that section: the prompt now also carries an ALREADY ASSIGNED
+    // context block, which legitimately reads "(none)" here (#1570).
     expect(capturedPrompt).toContain('EXISTING EPICS');
-    expect(capturedPrompt).not.toContain('(none)');
+    const existingSection = capturedPrompt.slice(
+      capturedPrompt.indexOf('EXISTING EPICS'),
+      capturedPrompt.indexOf('ALREADY ASSIGNED'),
+    );
+    expect(existingSection).not.toContain('(none)');
     // Registered epic slug appears in the prompt
     expect(capturedPrompt).toContain('slug=core');
   });
