@@ -38,6 +38,11 @@ vi.mock('../src/lib/epic-backfill', () => ({
   isClaudeAvailable: vi.fn(),
   applyBackfill: vi.fn(),
   renderProposalMarkdown: vi.fn(() => '# Proposal'),
+  // The command short-circuits when nothing is untagged (#1571); these cases
+  // exercise the proposal flow, so the default scope has work to do.
+  backfillScope: vi.fn(() => ({ total: 3, pending: 3 })),
+  // Identity by default — the filter has its own tests.
+  withoutAlreadyTagged: vi.fn((p: unknown) => p),
 }));
 
 vi.mock('../src/lib/resolve-folder', () => ({
