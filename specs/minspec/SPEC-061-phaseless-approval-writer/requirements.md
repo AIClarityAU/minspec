@@ -1,7 +1,7 @@
 ---
 id: SPEC-061
 type: requirements
-status: specifying
+status: implementing
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — an approved spec must be able to agree with itself
