@@ -76,7 +76,7 @@ describe('proposeAI() — availability-first guard (#141)', () => {
       return invoke(opts, cb, null, '{}');
     });
 
-    const result = await proposeAI(tmp);
+    const result = (await proposeAI(tmp)).proposal;
 
     expect(result).toBeNull();
     const dispatched = mockExecFile.mock.calls.some((c: unknown[]) => isDispatch(c[1]));
