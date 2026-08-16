@@ -53,7 +53,7 @@ Anything waiting on the human — a decision, a credential, a manual step, a mer
 - **Give each item a reply key.** One or two characters, restated on the line every turn so the human never scrolls back to find one: `m` merge · `c` close · `d` diff/details · `r` re-review · `s` skip.
 - **Every choice carries a recommendation and its cost.** When an item asks the human to *decide*, name the option you recommend and, in the same breath, the primary downside or risk of the option you are recommending. A menu with no recommendation hands the analysis back to the human; a recommendation with no stated cost is advocacy, not advice. Mark it `(rec)` on the option and follow with one clause naming what it costs. This applies wherever a decision is put to a human — the `**Your turn**` block **and** the body of any issue, PR, or DR that asks them to choose.
 
-The same block lists every pull request this session opened that is still unmerged — clickable URL, the gate state already observed this turn, and its keys:
+The same block lists every pull request this session opened that is still unmerged — its number, the gate state already observed this turn, and its keys:
 
 ```
 **Your turn**
