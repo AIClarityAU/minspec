@@ -846,6 +846,42 @@ async function resolveWantedChecks(
   });
 }
 
+/**
+ * Explain a failed ruleset create/update WITHOUT asserting a cause we have not
+ * established.
+ *
+ * This previously rendered every 403 as "your gh token lacks repo-admin scope".
+ * Observed in a real project: a token carrying full `repo` scope, failing because
+ * rulesets are unavailable on a private repository on the free plan —
+ *
+ *     Upgrade to GitHub Pro or make this repository public to enable this feature.
+ *
+ * The message was confidently wrong, and worse than a vague one: it named a remedy
+ * (re-authenticate) that could not possibly work, so acting on it costs time and
+ * teaches the user the tool's diagnoses are unreliable.
+ *
+ * Order matters. The plan limit is checked FIRST because it is a 403 too, and the
+ * permission wording would otherwise swallow it. Beyond that we quote GitHub's own
+ * `message` rather than paraphrase it, and fall back to a deliberately non-committal
+ * phrase when GitHub said nothing quotable — an unexplained failure is an honest
+ * report; an invented explanation is not.
+ */
+function describeRulesetFailure(outcome: {
+  forbidden: boolean;
+  planLimited: boolean;
+  reason: string | null;
+}): string {
+  if (outcome.planLimited) {
+    return (
+      outcome.reason ??
+      'rulesets are not available for this repository — private repositories need a paid plan'
+    );
+  }
+  if (outcome.reason) return `GitHub said: ${outcome.reason}`;
+  if (outcome.forbidden) return 'the request was refused — your gh token may lack repo-admin scope';
+  return 'the request failed';
+}
+
 /** Show an info toast linking the rulesets docs, with a one-click open action. */
 async function linkRulesetDocs(
   message: string,
@@ -985,7 +1021,7 @@ export async function offerRulesetAdvisory(
           );
           return;
         }
-        const why = outcome.forbidden ? 'your gh token lacks repo-admin scope' : 'the request failed';
+        const why = describeRulesetFailure(outcome);
         await linkRulesetDocs(
           `MinSpec: could not create the ruleset (${why}). Create it manually — see the GitHub docs.`,
           openExternal,
@@ -1020,7 +1056,7 @@ export async function offerRulesetAdvisory(
         );
         return;
       }
-      const why = outcome.forbidden ? 'your gh token lacks repo-admin scope' : 'the request failed';
+      const why = describeRulesetFailure(outcome);
       await linkRulesetDocs(
         `MinSpec: could not update the ruleset (${why}). Add the checks manually — see the GitHub docs.`,
         openExternal,
