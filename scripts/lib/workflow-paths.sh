@@ -45,10 +45,11 @@
 # .githooks/pre-commit: "the rejection arrives at `git push`, after the work is
 # already done".
 #
-# CONTRACT. Sourced, never executed. Two pure-ish predicates plus a `--check`
-# seam so tests can exercise the decision without git, network, or a real remote.
-# Offline by construction (constitution invariant 1): the credential probe reads
-# git's own credential helper chain and never contacts a forge.
+# CONTRACT. Sourced, never executed. Two pure-ish predicates, a pure range helper
+# (workflow_diff_range, #1274), plus a `--check` seam so tests can exercise the
+# decision without git, network, or a real remote. Offline by construction
+# (constitution invariant 1): the credential probe reads git's own credential
+# helper chain and never contacts a forge.
 
 # Any path under a `.github/workflows/` directory, at the repo root or nested.
 WORKFLOW_PATH_RE='(^|/)\.github/workflows/'
@@ -57,6 +58,47 @@ WORKFLOW_PATH_RE='(^|/)\.github/workflows/'
 # workflow file. Twin of dispatch-issue.sh's paths_have_approvable_doc().
 paths_touch_workflows() {
   grep -qE "$WORKFLOW_PATH_RE"
+}
+
+# The `git diff` RANGE that answers "what does this push actually introduce" —
+# never "what differs between these two trees right now" (#1274).
+#
+# `git diff A..B` is the two-endpoint TREE diff (`git diff A B`), not a
+# reachability-aware one. Fed a base that has moved ahead of where a branch
+# forked — the ordinary case for ANY stale or rebased branch, since this repo
+# touches `.github/workflows/**` often — it also reports every file the base
+# changed in the meantime, even though the push does not touch them and the
+# commits carrying them are already on the remote.
+#
+# This is the range logic `.githooks/pre-push` arrived at for the same reason
+# (#1263; see that file for the three false-refusal attempts along the way).
+# Extracted here so every caller shares ONE correct answer instead of each
+# re-deriving — and re-breaking — its own copy. dispatch-issue.sh's
+# shepherd_publish had exactly this bug: `origin/main..$BRANCH`, a naive
+# two-dot diff, false-positived on a branch a fix agent had amended without
+# rebasing once origin/main had since touched a workflow file.
+#
+#   prev_sha  — the ref's previously-known/remote tip. Empty ⇒ unknown (new
+#               branch, or the caller could not determine it) — always falls
+#               through to the base_ref arm.
+#   local_sha — the commit about to be pushed.
+#   base_ref  — fallback base when prev_sha is empty or not an ancestor of
+#               local_sha (a diverged history: reset, rebase, force-push onto
+#               a new line). Defaults to origin/main.
+#
+#   prev_sha IS an ancestor of local_sha -> prev_sha..local_sha  (ordinary
+#     fast-forward: two-dot is correct BECAUSE it is an ancestor, and this also
+#     excludes a workflow edit an EARLIER push of this ref already landed).
+#   otherwise                            -> base_ref...local_sha (three-dot:
+#     merge-base against the default branch, so drift the base_ref made since
+#     the fork point is excluded too).
+workflow_diff_range() {
+  local prev_sha="${1:-}" local_sha="$2" base_ref="${3:-origin/main}"
+  if [ -n "$prev_sha" ] && git merge-base --is-ancestor "$prev_sha" "$local_sha" 2>/dev/null; then
+    printf '%s..%s\n' "$prev_sha" "$local_sha"
+  else
+    printf '%s...%s\n' "$base_ref" "$local_sha"
+  fi
 }
 
 # True when the credential git would use for the push is a GitHub App

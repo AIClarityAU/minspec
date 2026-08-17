@@ -1057,7 +1057,7 @@ shepherd_hand_off() {
 # Publish from the WARM worktree. Fails CLOSED on the egress guard, and re-verifies the
 # claim immediately before the push (D3) so a reclaimed owner never publishes.
 shepherd_publish() {
-  local push_mode="${1:-}" matches wf
+  local push_mode="${1:-}" matches wf prev_tip local_sha range
   if ! matches=$(run_egress_guard); then
     quarantine_publish "$matches"
     return 1
@@ -1070,7 +1070,18 @@ shepherd_publish() {
   # Unconditional: this path always pushes with the App installation token, so unlike
   # the hook there is no credential to probe.
   if ! workflow_push_allowed; then
-    wf=$(git -C "$WORKTREE" diff --name-only origin/main.."$BRANCH" 2>/dev/null \
+    # The range must be judged against the branch's ACTUAL remote tip, not a naive
+    # `origin/main..$BRANCH` two-dot diff (#1274) — that is a plain tree diff and
+    # false-positives on any branch origin/main has drifted ahead of, including one
+    # a fix agent amended without rebasing. `ls-remote` asks the forge directly
+    # rather than trusting this worktree's possibly-stale tracking ref; an absent
+    # ref (brand-new branch, not yet pushed) falls through to the empty case, which
+    # workflow_diff_range treats as "unknown" and diffs against origin/main instead.
+    prev_tip=$(git -C "$WORKTREE" ls-remote --exit-code origin "refs/heads/$BRANCH" 2>/dev/null \
+               | cut -f1) || prev_tip=''
+    local_sha=$(git -C "$WORKTREE" rev-parse HEAD 2>/dev/null || echo '')
+    range=$(workflow_diff_range "$prev_tip" "$local_sha" "origin/main")
+    wf=$(git -C "$WORKTREE" diff --name-only "$range" 2>/dev/null \
          | grep -E "$WORKFLOW_PATH_RE" || true)
     if [[ -n "$wf" ]]; then
       echo "  NOT publishing — $BRANCH changes CI workflow files and the App token"
