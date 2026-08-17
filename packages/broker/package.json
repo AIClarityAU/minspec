@@ -1,0 +1,16 @@
+{
+  "name": "@aiclarity/broker",
+  "version": "0.0.1",
+  "private": true,
+  "description": "MinSpec OIDC review-broker (SPEC-034) — vendor Worker; NOT shipped in the vsix",
+  "type": "module",
+  "main": "src/index.ts",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "devDependencies": {
+    "wrangler": "^3.114.14"
+  }
+}

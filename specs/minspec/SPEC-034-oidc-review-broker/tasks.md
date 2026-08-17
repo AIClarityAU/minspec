@@ -17,7 +17,7 @@ scan). **T0 invariant tests (AC-2/5/6/8/9/10) are written before the code they g
 
 ## Slice 0 — scaffold + T0 invariant tests (red first)
 
-- [ ] **0.1 Worker scaffold.** `wrangler` + TS project; `POST /installation-token` route stub returns 501. *Verify:* `wrangler dev` answers 501.
+- [x] **0.1 Worker scaffold.** `wrangler` + TS project; `POST /installation-token` route stub returns 501. *Verify:* `wrangler dev` answers 501.
 - [ ] **0.2 T0 decision-logic tests (failing).** Pure, I/O-free tests for: confused-deputy reject (AC-2), request-shape accepts only `{jwt, repository}` (AC-6), any error ⇒ no token (AC-9), reviewer identity read from config not hardcoded (AC-10). *Verify:* tests exist and are red.
 - [x] **0.3 Key-custody scan test (AC-5).** A test asserts no App private key appears in the vsix, harness output, or CI config — only the public app slug + broker URL. *Verify:* test passes against the repo tree.
 

@@ -1,0 +1,13 @@
+# MinSpec OIDC review-broker (SPEC-034).
+#
+# The App private key is a Worker SECRET, set with `wrangler secret put` — it is never
+# written here, never committed, and never reaches the extension (AC-5).
+#   wrangler secret put MINSPEC_APP_PRIVATE_KEY
+#
+# MINSPEC_APP_ID is a public identifier and is a plain var on purpose.
+name = "minspec-review-broker"
+main = "src/index.ts"
+compatibility_date = "2026-08-16"
+
+[vars]
+MINSPEC_APP_ID = ""
