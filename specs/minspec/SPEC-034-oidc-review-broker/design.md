@@ -91,7 +91,7 @@ sequenceDiagram
 
     CI->>GH: request OIDC token (aud = broker)
     GH-->>CI: signed OIDC JWT (repo, owner, workflow ref…)
-    CI->>BR: POST /installation-token {jwt, repository}
+    CI->>BR: POST /installation-token<br/>Authorization: Bearer «OIDC JWT»<br/>body {repository, permissions_profile}
     BR->>GH: fetch JWKS
     BR->>BR: verify RS256 sig, iss, aud, exp
     BR->>BR: authorise from claims (body repo must match) — else 4xx
@@ -117,6 +117,19 @@ Enterprise override:  ai-review workflow ──► GitHub native create-github-a
 ```
 
 ## API
+
+**This section is normative.** The sequence diagram above is illustrative; where the two
+disagree, this wins. It previously showed the JWT as a body field (`{jwt, repository}`),
+which contradicted the interface below — corrected 2026-08-17 rather than left for the
+implementer to pick, because task 0.2 writes the request-shape contract test and would
+have frozen whichever reading it happened to follow.
+
+The credential travels in `Authorization`, not the body, so it cannot be captured by
+anything that logs or echoes a request body.
+
+Note this required **no change to the requirements**: FR-6 and AC-6 constrain the broker's
+*inputs* ("the OIDC JWT and the repo identifier"), not their transport, so both readings
+satisfied them and the approval is untouched.
 
 `POST /installation-token`
 
