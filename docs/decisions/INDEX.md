@@ -677,7 +677,7 @@ The GLM shadow-triage instrument (#1338) runs a second model alongside the live 
 
 ## [DR-085 — The signpost carries only acts the human can discharge - authoring work moves to a separate agent-queue surface](DR-085.md)
 
-*Status: proposed · Date: 2026-08-19*
+*Status: accepted · Date: 2026-08-19*
 
 <!-- dr-summary:DR-085 auto=6b4ee609d96d -->
 DR-019 established that next-task priority is a deterministic DAG, never an LLM judgement, and SPEC-012 built it. That spec draws from five node kinds, and defines the set by *exclusion* of the agent queue (FR-8, INV - Two Queues): | Kind | SPEC-012's stated meaning | |---|---| | spec-approve | approve before implement (DR-012 gate) | | adr-accept | proposed to accepted | | epic-promote | proposed to active | | answer-OQ | resolve an open question | | phase-action…
