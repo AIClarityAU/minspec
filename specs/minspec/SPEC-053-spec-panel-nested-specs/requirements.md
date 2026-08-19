@@ -1,7 +1,7 @@
 ---
 id: SPEC-053
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — a silently-incomplete signpost is a wrong signpost
@@ -11,7 +11,7 @@ implements_reason: creates no new file. FR-1 repoints two callers and deletes li
 phases:
   specify: done
   clarify: done
-  plan: pending
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
