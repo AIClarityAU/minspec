@@ -669,7 +669,7 @@ DR-018 split the repo three ways: **MPL-2.0** for packages/shared, **MIT** for t
 
 ## [DR-084 — The shadow harness talks HTTP, not `claude -p` — a client that resolves no credentials beats a scrub that must enumerate them](DR-084.md)
 
-*Status: proposed · Date: 2026-08-14*
+*Status: accepted · Date: 2026-08-14*
 
 <!-- dr-summary:DR-084 auto=f731dff842d4 -->
 The GLM shadow-triage instrument (#1338) runs a second model alongside the live triage agent on the same issue, pushes both outputs through the same deterministic gate, records the agreement and discards the shadow verdict. It exists because the drain loop and the required ai-review merge gate draw on one Anthropic subscription quota, so the queue jams when that quota runs out (#1234) — and because GLM's fitness for *our* task shape was unmeasured, which per this repo's evidence discipline makes…
