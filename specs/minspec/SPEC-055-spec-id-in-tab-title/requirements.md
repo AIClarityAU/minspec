@@ -10,8 +10,8 @@ relates_to: [SPEC-012, SPEC-026, SPEC-040, DR-019, DR-075, DR-076]
 implements: none
 implements_reason: creates no new file. The spec adds the spec id to an existing status-bar surface, so it modifies views/status-bar.ts (also edited under SPEC-026/SPEC-040) and extends its existing test. No affects: list is declared: spec-gate.py:350 reads implements: AND affects: into the same block set, so declaring a shared view here would freeze it for other sessions once this spec passes Clarify.
 phases:
-  specify: in-progress
-  clarify: pending
+  specify: done
+  clarify: done
   plan: pending
   tasks: pending
   implement: pending
@@ -31,8 +31,8 @@ Grounded in the code as it stands in this worktree, with `file:line` evidence. *
 
 ### What actually renders `tier | phase | progress` today
 
-- **There is no live persistent per-spec status-bar item.** The only two `createStatusBarItem` calls in the extension are the workspace-wide **next-task signpost** (priority 99, [status-bar.ts:104-135](../../../packages/minspec/src/views/status-bar.ts#L104)) and the **harness-commit recovery** item (priority 98, [status-bar.ts:159-194](../../../packages/minspec/src/views/status-bar.ts#L159)). `extension.ts` wires exactly those two ([extension.ts:223-267,428-429](../../../packages/minspec/src/extension.ts#L223)). *Unverified against the released `.vsix`:* whether a shipped build still paints a priority-100 per-spec item — the source in this tree does not.
-- **A stale reference to the removed item survives.** `status-bar.ts:1-11` still documents the format `$(shield) MinSpec: T2 | Specify -> Plan -> Tasks | · 50%`, and `status-bar.ts:112` positions the next-task item *"just left of the per-spec progress item (priority 100)"* — a comment pointing at an item that no longer exists in source. This is a stale-comment / false-signpost defect in its own right (the sweep-comments-on-change discipline: a comment that outlives its referent teaches the next reader a false shape).
+- **There is no live persistent per-spec status-bar item.** The only two `createStatusBarItem` calls in the extension are the workspace-wide **next-task signpost** (priority 99, [status-bar.ts:104-135](../../../packages/minspec/src/views/status-bar.ts#L104)) and the **harness-commit recovery** item (priority 98, [status-bar.ts:159-194](../../../packages/minspec/src/views/status-bar.ts#L159)). `extension.ts` wires exactly those two ([extension.ts:223-267,428-429](../../../packages/minspec/src/extension.ts#L223)). **Verified against the installed build (DQ-1, 2026-08-14):** `aiclarity.minspec-0.1.26`'s bundle has `createStatusBarItem` ×2, and zero hits for `$(shield) MinSpec`, `Specify -> Plan` or `per-spec progress item`. No shipped build paints it either. *(Probed with user-visible string literals, not symbol names — the bundle is minified, so an identifier grep returns 0 whether the code is there or not.)*
+- **Stale references to the removed item survive — two of them, and the second is wrong in a different way.** `status-bar.ts:1-11` still documents the format `$(shield) MinSpec: T2 | Specify -> Plan -> Tasks | · 50%`; `status-bar.ts:112` positions the next-task item *"just left of the per-spec progress item (priority 100)"*, naming an item that no longer exists **and** reversing the direction; and `status-bar.ts:166` says *"just left of the next-task signpost (priority 99)"* on a priority-98 item, which also reverses it — the `vscode` typings document `priority` as *"Higher values mean the item should be shown more to the left"*. This is a stale-comment / false-signpost defect in its own right (the sweep-comments-on-change discipline: a comment that outlives its referent teaches the next reader a false shape).
 - **The `tier | phase | progress` string that does exist is on-click, not persistent.** `minspec.status`'s handler shows an information message `MinSpec: ${id} — ${tier} | ${phase} | ${progress}` ([status.ts:44-45](../../../packages/minspec/src/commands/status.ts#L44)). Note it **already includes the spec id** (`summary.id`) — so the issue's "missing the spec name" complaint is about the *persistent* surface, not this message.
 - **The active spec is resolved by scanning spec files, not by session.** `findActiveSpec` walks `specs/` and returns the first `implementing`/`planning`/`specifying` spec ([active-spec.ts:16-64](../../../packages/minspec/src/lib/active-spec.ts#L16)); `summarizeActiveSpec` derives the display from its frontmatter ([active-spec.ts:80-100](../../../packages/minspec/src/lib/active-spec.ts#L80)). This resolution is workspace-global — it has **no concept of "the spec *this* session/worktree is on"**, which is the root of the cross-session complaint.
 
@@ -55,7 +55,7 @@ So "auto-configure" is not a free option; any write to `window.title` must be an
 
 ## Functional Requirements
 
-- **FR-1 (retire or repair the lying per-spec surface).** The per-spec `tier | phase | progress` display that names *whichever file is active* MUST NOT persist as a session-level signpost in its current form. The change MUST either (a) remove the surface (and every stale reference to it), or (b) replace it with one that shows a stable, self-identifying `SPEC-NNN · N%` for the surface's actual subject. **Which — remove vs simplify — is a Clarify decision (DQ-2).** In all cases, the stale comments at [status-bar.ts:1-11](../../../packages/minspec/src/views/status-bar.ts#L1) and [:112](../../../packages/minspec/src/views/status-bar.ts#L112) MUST be corrected so no comment points at a non-existent item. *Rationale: a signpost that names the wrong spec is worse than none (EPIC-002; never-wrong invariant).*
+- **FR-1 (retire or repair the lying per-spec surface).** The per-spec `tier | phase | progress` display that names *whichever file is active* MUST NOT persist as a session-level signpost in its current form. The change MUST either (a) remove the surface (and every stale reference to it), or (b) replace it with one that shows a stable, self-identifying `SPEC-NNN · N%` for the surface's actual subject. **RESOLVED (DQ-2): (a) — it is already removed (#902); the remaining work is the comment sweep.** In all cases, the stale comments at [status-bar.ts:1-11](../../../packages/minspec/src/views/status-bar.ts#L1), [:112](../../../packages/minspec/src/views/status-bar.ts#L112) and [:166](../../../packages/minspec/src/views/status-bar.ts#L166) MUST be corrected so that no comment points at a non-existent item **and** no comment states a priority ordering the `vscode` API contradicts. *Rationale: a signpost that names the wrong spec is worse than none (EPIC-002; never-wrong invariant).*
 
 - **FR-2 (spec identity carries its name, not just its metrics).** Any surface this spec keeps or adds that claims to identify the active spec MUST include the **spec id** (`SPEC-NNN`), not tier/phase/progress alone. Progress (`· N%`) MAY be retained as the "only useful part" the issue names; tier and phase MAY be dropped. *Rationale: the issue's core "missing the spec name" complaint; `status.ts:44` already carries the id and is the shape to converge on.*
 
@@ -69,13 +69,48 @@ So "auto-configure" is not a free option; any write to `window.title` must be an
 
 ## Acceptance Criteria
 
-- **AC-1 (FR-1).** After the change, no persistent status-bar surface renders `tier | phase | progress` keyed on the focused file; and a repo-wide grep finds **no comment** referring to a "per-spec progress item (priority 100)" or the `$(shield) MinSpec: T2 | Specify -> …` format that does not correspond to a live item. Asserted on source text + the wired status-bar set in `extension.ts`.
-- **AC-2 (FR-2).** Any retained/added active-spec surface includes the literal `SPEC-NNN` id for the spec it names. Asserted on the rendered string of that surface (unit-level, on `formatXxx`).
-- **AC-3 (FR-3).** Focusing a spec file for SPEC-B while the session's subject is SPEC-A does **not** cause a session-level surface to silently relabel itself SPEC-B; either it stays on SPEC-A (session-scoped) or it is unambiguously labelled "focused spec" (file-scoped). Asserted by driving the focus/active-editor input and checking the surface's subject.
-- **AC-4 (FR-4).** No code path writes `window.title` (or any `configuration.update`) at global/user `Target` without an explicit user action; and no path writes a shared `.vscode/settings.json` silently. Asserted structurally on the `configuration.update` call sites (target + gated-by-user-action).
-- **AC-5 (FR-4, decline path).** When the user declines the title recommendation (if such an affordance ships), the window title is unchanged and no settings file is modified. Asserted on the settings surface after a simulated decline.
-- **AC-6 (FR-6).** New code imports no network/LLM module and reuses `computeProgress`/`fromFrontmatter` for any progress/identity it shows — no second progress computation is introduced. Asserted structurally on imports.
-- **AC-7 (FR-5).** The spec's chosen title-surfacing disposition (defer vs ship-with-caveat) is recorded, and if shipped, its caveat ("reads correctly only when the worktree is named SPEC-NNN") is present in user-facing settings text/docs. Asserted on the shipped copy/docs.
+> **Rewritten 2026-08-14 to assert absence.** DQ-2 resolved to "leave it removed", so the
+> original AC-2, AC-3, AC-5 and AC-7 quantified over a surface that will never exist —
+> criteria that cannot fail, on a spec whose whole subject is signposts that lie. Each is
+> restated below as the negative claim that is actually true and actually checkable. Asserting
+> an absence is harder than asserting a rendered string, so each says explicitly what input
+> would make it fail.
+
+- **AC-1 (FR-1, comment sweep).** No comment anywhere under `packages/minspec/src` describes a
+  status-bar item that is not created, and no comment states a priority ordering that
+  contradicts the `vscode` API's "higher value renders further left". Both known offenders are
+  covered: `status-bar.ts:112` (names the item #902 deleted **and** reverses the direction) and
+  `status-bar.ts:166` (reverses the direction), plus the file header at `:1-11`. **Fails if**
+  either the `$(shield) MinSpec: T2 | Specify -> …` format string or the phrase
+  `per-spec progress item` survives in any comment, or if a `// just left of` comment sits on a
+  priority *lower* than the item it names. *A grep keyed only on the deleted item's text is not
+  sufficient — it passes while `:166` survives.*
+- **AC-2 (FR-1, no resurrection).** The extension creates exactly two status-bar items, and
+  their identities are pinned: priority 99 → `minspec.nextTask`, priority 98 →
+  `minspec.commitHarnessRefresh`. **Fails if** a third `createStatusBarItem` call appears, or
+  either command/priority pairing changes, without this criterion being updated.
+- **AC-3 (FR-3, no focus-keyed subject).** No persistent surface derives its subject from the
+  active editor. **Fails if** any status-bar item's text is recomputed from
+  `window.activeTextEditor` or an `onDidChangeActiveTextEditor` handler. *This is the defect
+  #897 reported; the assertion is that it cannot come back, not that it is fixed.*
+- **AC-4 (FR-4, unchanged).** No code path writes `window.title` (or any
+  `configuration.update`) at global/user `Target` without an explicit user action, and no path
+  writes a shared `.vscode/settings.json` silently. Asserted structurally on the
+  `configuration.update` call sites (target + gated-by-user-action). **Fails if** a new call
+  site appears that is not reachable only from a user choice.
+- **AC-5 (FR-5, the disposition is recorded and tracked).** The deferral is written down and
+  points at a live tracker: this spec records DQ-3 = defer, and
+  [#897](https://github.com/AIClarityAU/minspec/issues/897) is **open** and blocked on
+  [#374](https://github.com/AIClarityAU/minspec/issues/374). **Fails if** #897 is closed while
+  `grep -rn 'window\.title' packages/minspec/src` still returns 0 — the exact false closure
+  that had to be reversed on 2026-08-14.
+- **AC-6 (FR-6, unchanged in force, narrowed in scope).** Any code this spec adds imports no
+  network/LLM module and introduces no second progress or active-spec resolver. Under the
+  resolved decisions this spec adds no runtime code at all, so the criterion is satisfied
+  vacuously **and says so** — it exists to catch a Plan that quietly grows one.
+
+*Deleted: the original AC-7. Its content — "if shipped, the caveat appears in user-facing
+copy" — belongs to the title feature, and moved to #897 with it.*
 
 ## Invariants
 
@@ -85,7 +120,110 @@ So "auto-configure" is not a free option; any write to `window.title` must be an
 - **INV-4 (single source for progress/identity — anti-drift, [#137](https://github.com/AIClarityAU/minspec/issues/137)).** Reuse `spec-progress`/`active-spec`; do not introduce a parallel progress or active-spec resolver that can drift from the one the rest of the extension uses.
 - **INV-5 (no silent gate — constitution #2).** If a title-recommendation action can fail (settings not writable, no workspace folder), it fails **visibly and closed** with an actionable message — never `|| true`'d into a fake success.
 
-## Decisions needed (Clarify)
+## Decisions (Clarify — resolved 2026-08-14)
+
+All five are answered. The original wording is preserved below the answers, because two of
+the forks were mis-shaped by facts nobody had measured when the spec was written.
+
+### DQ-1 → (a). Not a decision; an observation.
+
+The per-spec item was already deleted. Added in `ce1738b8`, removed in `4bf4dc57` (#902).
+`status-bar.ts` creates exactly two items —
+[:110](../../../packages/minspec/src/views/status-bar.ts#L110) (priority 99,
+`minspec.nextTask`) and [:163](../../../packages/minspec/src/views/status-bar.ts#L163)
+(priority 98, `minspec.commitHarnessRefresh`) — and `extension.ts` wires exactly those two.
+The installed `aiclarity.minspec-0.1.26` bundle agrees, probed by user-visible string
+literals rather than symbol names (a minified bundle answers 0 to every identifier grep):
+`createStatusBarItem` ×2, `$(shield) MinSpec` ×0, `Specify -> Plan` ×0,
+`per-spec progress item` ×0. No rival install exists — neither `~/.vscode/extensions` nor
+`~/.vscode-server/extensions` holds an `aiclarity.minspec-*`.
+
+*Residual, and it is the whole cost:* an on-disk bundle is not proof of what the running
+extension host loaded. One **Reload Window** settles it.
+
+### DQ-2 → Option A, reframed: leave it removed, and sweep the comments it left behind.
+
+Option A as written ("remove entirely") **already happened** in #902, so the live fork was
+never remove-vs-simplify — it was *leave removed* versus *add a new persistent surface*.
+That reframing matters, because it moves Option B's cost from "edit an existing renderer"
+to "ship a new persistent surface", which is a different tier of work.
+
+The remaining defect is the stale comments, and there are **two**, not one:
+
+- [status-bar.ts:112](../../../packages/minspec/src/views/status-bar.ts#L112) —
+  `99, // just left of the per-spec progress item (priority 100)`. Wrong on **two** axes: it
+  names an item deleted in #902, *and* it has the direction backwards.
+- [status-bar.ts:166](../../../packages/minspec/src/views/status-bar.ts#L166) —
+  `98, // just left of the next-task signpost (priority 99)`. Wrong on one axis. VS Code's
+  own contract is explicit: *"Higher values mean the item should be shown more to the left"*
+  — documented on `createStatusBarItem`'s `priority` parameter in the vendored `vscode` type
+  declarations, line 11640 and restated at 16313 — so priority 98 renders to the **right**
+  of 99.
+
+The file header at [:1-11](../../../packages/minspec/src/views/status-bar.ts#L1) also still
+describes the deleted item's format.
+
+***Cost of A, stated plainly:*** four of this spec's seven acceptance criteria stop being
+falsifiable, because AC-2, AC-3, AC-5 and AC-7 all quantify over a surface that will not
+exist. A T3 spec whose criteria can never fail is a lying signpost of its own kind — it goes
+green having asserted nothing. The Acceptance Criteria section below has therefore been
+rewritten to assert the **absence**, which is what is actually true and actually checkable.
+Users also lose at-a-glance progress permanently; `minspec.status` still shows it on click.
+
+### DQ-3 → Option A: defer the title feature behind #374.
+
+`grep -rn 'window\.title' packages/minspec/src --include=*.ts` returns **0** — nothing
+exists to caveat. A title can only stably encode spec identity through `${rootName}` /
+`${folderName}`, which is [#374](https://github.com/AIClarityAU/minspec/issues/374)'s
+worktree naming, still open.
+
+The feature is tracked on [#897](https://github.com/AIClarityAU/minspec/issues/897), which
+was **reopened** on 2026-08-14 to carry it. It had been closed COMPLETED by the drain
+reconciler on branch-merge evidence, while `window.title` had zero occurrences in the
+source — the status-bar half shipped and the title half never did.
+
+***Cost of A:*** #897's entire user-visible payload goes behind an issue with no date, so
+this spec delivers a comment sweep and nothing a user can see. The honest alternative is not
+Option B — it is accepting that the visible win is blocked on #374 and saying so.
+
+### DQ-4 → moot under DQ-3=A; and INV-2 needs no amendment.
+
+If a title affordance ever ships, the shape is **show the snippet, let the user apply it** —
+MinSpec never calls `configuration.update` on a VS Code core key.
+
+Recorded because it was nearly got wrong: it is tempting to read INV-2 as contradicting the
+codebase, since every production `configuration.update` writes `ConfigurationTarget.Workspace`.
+It does not. INV-2 and AC-4 forbid only ***silent*** writes, and all three sites are
+explicitly user-chosen and visibly confirmed — `classify.ts:171-181` (inside
+`else if (choice === AUTO_CLASSIFY)` from a QuickPick, then `showInformationMessage`),
+`migrate.ts:31-49` (after a QuickPick guarded by `if (!pick) return;`), and
+`extension.ts:582-591`, reachable only from `auto-bootstrap.ts:709-715` inside
+`if (step.alwaysAction && choice === step.alwaysAction)`. Re-wording INV-2 onto a
+namespace axis would be strictly *weaker*: it would legalise a silent Workspace write of a
+`minspec.*` key, which nothing does today and DR-078 §3 rules out.
+
+### DQ-5 → stay T3, and no DR.
+
+No DR: with DQ-3=A no new settings surface ships, so there is no reusable, hard-to-reverse
+policy to record. Revisit if #897 lands.
+
+Tier stays T3. A downgrade is *permitted* — `applyFloor` returns `max(predicted, userTier)`
+([classifier.ts:92-95](../../../packages/minspec/src/lib/classifier.ts#L92)) and the contract
+at `:75-88` constrains the **tool**, not the human — but it is not wanted.
+`scripts/hooks/spec-gate.py:450` opens its blocking loop with
+`if tier not in ("T3","T4") or not sid: continue`, so at T2 the doc-before-code approval gate
+never fires for this spec at all; combined with DR-075/DR-076 dropping the human spec-read
+below T3, a downgrade would remove the machine gate and the human gate together.
+
+***Cost of T3:*** full ceremony — Plan, Tasks, Implement — for what DQ-2 and DQ-3 have
+reduced to a comment sweep and a tracking issue.
+
+*(One argument for T2 that does not hold: that T3 "freezes" the shared `status-bar.ts` for
+other sessions. It does not. This spec declares `implements: none` and no `affects:`, and
+`spec-gate.py`'s `consider()` drops any token without a `/`, so SPEC-055 contributes zero
+owned files today. The freeze only becomes real once a `tasks.md` backticks that path.)*
+
+### The forks as originally posed
 
 These are genuine forks a human must resolve before Plan. None is guessed here.
 
