@@ -613,6 +613,25 @@ jobs:
               echo "> 1. **Wait** for the quota window to reset — the retry workflow re-reviews automatically."
               echo "> 2. **Fail over to PAYG API** — set repo variable \`AI_REVIEW_FAILOVER=payg\` + secret \`ANTHROPIC_API_KEY\`; re-runs then use pay-as-you-go instead of the subscription quota."
               echo "> 3. Re-run the \`ai-review\` workflow manually once quota is back."
+              # #1204 — PERSIST the stated reset time as a machine-readable marker so the
+              # retry can schedule against it instead of polling blindly. The CLI states
+              # it ("resets 12:50am (Australia/Sydney)") and we previously discarded it,
+              # which on #1602 cost six attempts across 4h21m, five of them futile at the
+              # moment they fired. A parse failure emits NO marker, and the retry then
+              # falls back to its normal cadence — never to "wait forever".
+              RESET_ISO=$(printf '%s' "$REVIEWER_OUT" | node -e '
+                const fs = require("fs");
+                const { parseResetInstant } = require("./.github/scripts/ai-review-guard.js");
+                let t = ""; try { t = fs.readFileSync(0, "utf-8"); } catch {}
+                const iso = parseResetInstant(t, Date.now());
+                if (iso) process.stdout.write(iso);
+              ' 2>/dev/null || true)
+              if [ -n "$RESET_ISO" ]; then
+                echo ">"
+                echo "> ⏱️ Reviewer stated the window resets at **$RESET_ISO**; the retry will not spend a token before then."
+                echo
+                echo "<!-- ai-review-reset: $RESET_ISO -->"
+              fi
               det=$(printf '%s\n' "$REVIEWER_OUT" | sed -n '/^[[:space:]]*REVIEW_UNAVAILABLE_BEGIN[[:space:]]*$/,/^[[:space:]]*REVIEW_UNAVAILABLE_END[[:space:]]*$/p' | redact)
               if [ -n "$det" ]; then
                 echo

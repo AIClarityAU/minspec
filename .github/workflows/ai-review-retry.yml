@@ -61,6 +61,25 @@ jobs:
             num="${row%%$'\t'*}"
             branch="${row#*$'\t'}"
             [ -z "$num" ] && continue
+            # #1204 — honour the stated reset time. The reviewer records it as an
+            # `<!-- ai-review-reset: ISO -->` marker on its blocked comment; if that
+            # instant has not passed, every attempt is guaranteed futile and costs a
+            # paid token. On #1602 five of six attempts fired inside the window.
+            #
+            # A MISSING marker means "not stated" and must fall through to the normal
+            # cadence — never to "skip forever". Failing to parse must not strand a PR,
+            # so the default below is to retry.
+            reset=$(gh pr view "$num" --repo "$REPO" --json comments \
+              --jq '[.comments[].body | capture("<!-- ai-review-reset: (?<t>[^ ]+) -->").t] | last // empty' 2>/dev/null || true)
+            if [ -n "$reset" ]; then
+              now_s=$(date -u +%s)
+              reset_s=$(date -u -d "$reset" +%s 2>/dev/null || echo 0)
+              if [ "$reset_s" -gt "$now_s" ]; then
+                echo "PR #$num: quota window resets at $reset ($(( (reset_s - now_s) / 60 ))m away) — skipping, not spending a token."
+                continue
+              fi
+            fi
+
             # Latest ai-review run for this PR's branch → re-run it (fresh token).
             rid=$(gh run list --repo "$REPO" --workflow ai-review.yml \
               --branch "$branch" --limit 1 --json databaseId --jq '.[0].databaseId // empty' 2>/dev/null || true)

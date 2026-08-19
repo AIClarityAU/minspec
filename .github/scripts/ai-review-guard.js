@@ -269,6 +269,100 @@ function isQuotaExhaustionStrict(text) {
     || /\bresets? (at|in)\b/i.test(s);
 }
 
+// ─── Reset-instant extraction (#1204) ───────────────────────────────────────
+//
+// The quota detectors above only ask WHETHER the text looks like a quota block.
+// The reset time the CLI states — "resets 8:40am (UTC)", "resets 12:50am
+// (Australia/Sydney)" — was matched as a pattern and then thrown away, so the
+// retry had nothing to schedule against and polled blindly. On PR #1602 that cost
+// six attempts across 4h21m, five of which were futile at the moment they fired.
+//
+// Returns an ISO-8601 instant (string) or null. Null means "no reset time stated",
+// which callers MUST treat as "retry on the normal cadence" — never as "never
+// retry". Failing to parse must not strand a PR.
+//
+// `nowMs` is injected rather than read from the clock so this is a pure function
+// and its tests are deterministic across DST boundaries.
+
+/** Offset (ms) of `tz` from UTC at the instant `utcMs`. */
+function tzOffsetMs(utcMs, tz) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, hour12: false,
+    year: 'numeric', month: '2-digit', day: '2-digit',
+    hour: '2-digit', minute: '2-digit', second: '2-digit',
+  });
+  const p = {};
+  for (const part of dtf.formatToParts(new Date(utcMs))) p[part.type] = part.value;
+  const asIfUtc = Date.UTC(+p.year, +p.month - 1, +p.day, (+p.hour) % 24, +p.minute, +p.second);
+  return asIfUtc - utcMs;
+}
+
+/** Wall-clock y/m/d h:m in `tz` → UTC ms. Iterated twice to settle DST shifts. */
+function zonedWallClockToUtc(y, mo, d, h, mi, tz) {
+  let utc = Date.UTC(y, mo - 1, d, h, mi);
+  for (let i = 0; i < 2; i++) utc = Date.UTC(y, mo - 1, d, h, mi) - tzOffsetMs(utc, tz);
+  return utc;
+}
+
+/** The y/m/d currently showing in `tz` at instant `utcMs`. */
+function calendarDateIn(utcMs, tz) {
+  const dtf = new Intl.DateTimeFormat('en-US', {
+    timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit',
+  });
+  const p = {};
+  for (const part of dtf.formatToParts(new Date(utcMs))) p[part.type] = part.value;
+  return { y: +p.year, mo: +p.month, d: +p.day };
+}
+
+function parseResetInstant(text, nowMs) {
+  const s = String(text == null ? '' : text);
+  if (!Number.isFinite(nowMs)) return null;
+
+  // Relative first — "resets in 25 minutes", "try again in 2 hours". Unambiguous,
+  // and needs no timezone reasoning at all.
+  const rel = s.match(/\b(?:resets?|try again)\s+in\s+(\d{1,3})\s*(second|minute|min|hour|hr)s?\b/i);
+  if (rel) {
+    const n = +rel[1];
+    const unit = rel[2].toLowerCase();
+    const mult = unit.startsWith('sec') ? 1e3 : unit.startsWith('h') ? 3.6e6 : 6e4;
+    return new Date(nowMs + n * mult).toISOString();
+  }
+
+  // Absolute wall-clock — "resets 8:40am (UTC)", "resets at 12:50 am (Australia/Sydney)".
+  // The zone is optional; without one there is no defensible instant, so we bail
+  // rather than guess the runner's local zone (which is UTC on Actions but not
+  // necessarily where the quota window is anchored).
+  const abs = s.match(
+    /\bresets?\s+(?:at\s+)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?\s*(?:\(([A-Za-z_]+(?:\/[A-Za-z_+-]+)*)\))?/i,
+  );
+  if (!abs) return null;
+  const tz = abs[4];
+  if (!tz) return null;
+
+  let h = +abs[1];
+  const mi = abs[2] == null ? 0 : +abs[2];
+  const mer = abs[3] ? abs[3].toLowerCase() : null;
+  if (h > 23 || mi > 59) return null;
+  if (mer === 'pm' && h < 12) h += 12;
+  if (mer === 'am' && h === 12) h = 0;
+
+  let cand;
+  try {
+    const today = calendarDateIn(nowMs, tz);
+    cand = zonedWallClockToUtc(today.y, today.mo, today.d, h, mi, tz);
+    // A stated reset is always in the FUTURE — "resets 12:50am" seen at 20:32 means
+    // tomorrow's 12:50am, not one that already passed sixteen hours ago.
+    if (cand <= nowMs) {
+      const t = calendarDateIn(nowMs + 864e5, tz);
+      cand = zonedWallClockToUtc(t.y, t.mo, t.d, h, mi, tz);
+    }
+  } catch {
+    return null; // unknown/invalid IANA zone — treat as "not stated"
+  }
+  if (!Number.isFinite(cand)) return null;
+  return new Date(cand).toISOString();
+}
+
 // GitHub truncates commit-status descriptions at 140 chars; keep ours within it
 // even when a description carries a (potentially long) provenance reason.
 const MAX_DESCRIPTION = 140;
@@ -900,6 +994,7 @@ module.exports = {
   shouldSummonHumanReview,
   isQuotaExhaustion,
   isQuotaExhaustionStrict,
+  parseResetInstant,
   VERDICT_SCHEMA,
   defangProtocolTokens,
   renderVerdictBlock,
