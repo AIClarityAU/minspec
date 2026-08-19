@@ -67,8 +67,9 @@ Report the state you already observed; re-reading it from the git host is ordina
 
 MinSpec is a **VS Code extension, not a CLI.** Every command runs from the Command Palette
 (`Ctrl/Cmd+Shift+P`, type "MinSpec:") — never write, suggest, or attempt a `minspec` shell
-command. The palette lists its own entries; artifact paths are in the table above and in
-`.minspec/config.json`.
+command. The palette lists its own entries. Specs live in `specs/`, decisions in
+`docs/decisions/`, the constitution at `.minspec/constitution.md`, and everything else is
+configured in `.minspec/config.json`.
 
 ## Project Overview
 
