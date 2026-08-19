@@ -11,6 +11,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
+    "@cloudflare/workers-types": "^4.20260702.1",
     "wrangler": "^3.114.14"
   }
 }
