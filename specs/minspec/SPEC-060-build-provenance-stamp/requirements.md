@@ -282,8 +282,18 @@ surface this spec touches, so none is guessed here.
   > **Cost of choosing B, stated rather than implied:** a Command Palette entry is only
   > discoverable to someone who thinks to look for it, so it does nothing for the
   > agent-dispatch paths (`scripts/dispatch-issue.sh`) where no human opens a palette.
-  > Option C's activation-log line covers those for near-zero extra work, and Plan may
-  > add it; B is the floor, not a ceiling.
+  > **Correction (2026-08-14): Option C does not cover them.** An earlier revision of this
+  > paragraph said an activation-log line covers the agent-dispatch paths "for near-zero
+  > extra work". It covers none of them. `scripts/dispatch-issue.sh:1342` states that
+  > *"`claude -p` is the only automatable launch primitive"*, and the script contains zero
+  > references to `code --` or `vscode` — there is no VS Code process in a dispatch run, so
+  > `activate()` never executes and an activation-log line fires in **exactly zero** dispatch
+  > sessions. Option C therefore pays the cost the original note itself named (a line written
+  > on the activation path of every consumer workspace) and buys nothing for the only case
+  > that was offered as its justification. B is the floor **and**, for this purpose, the
+  > ceiling: a headless run needs provenance on a channel that exists without an editor —
+  > stdout from the packaging step, or the `.vsix` filename — which is a separate question
+  > from FR-2 and not this decision's to answer.
   >
   > **Blocked on FR-1's missing half.** AC-3 requires the surface to display "the SHA
   > **and build timestamp**". No timestamp is stamped today — `scripts/build-extension.sh:34`
@@ -361,6 +371,46 @@ surface this spec touches, so none is guessed here.
 
 - **DQ-3 — Where does the FR-4 version-bump gate run: CI check, pre-package script,
   or both?**
+
+  > **RESOLVED — Option A: CI-only, with the second witness deferred and recorded as a
+  > knowing gap rather than passed over.**
+  >
+  > **The measurement that decides it: there is no release path in CI.** The repository has
+  > eleven workflows — `ai-review`, `ai-review-retry`, `approve-on-label`, `ci`,
+  > `deploy-sites` (the marketing site, not the extension), `docs-lane`,
+  > `dr-id-collision`, `main-red-watch`, `minspec-validate`, `ready-to-merge`,
+  > `supply-chain-daily` — and not one of them publishes a `.vsix`. Packaging is a local
+  > act (`npm run package` → `build:prod && vsce package`), and publishing is not
+  > authorized at all yet.
+  >
+  > So Option B's stated purpose — *"catches it at release time"* — is unachievable today.
+  > A `prepackage` hook fires when someone packages a dogfood build on their laptop, which
+  > is not a release, and never fires at the moment a version bump actually matters. A gate
+  > that runs at the wrong moment is worse than no gate, because it reads as coverage.
+  >
+  > **On invariant #2's second witness, stated rather than finessed.** Constitution
+  > invariant 2 requires that no required check hinge on a single producer one
+  > permission or config gap can disable. Option A is a single producer, so **this gate
+  > does not meet that bar**, and that is recorded here as a knowing exception rather
+  > than left for a reader to discover.
+  >
+  > Option C does not fix it either, and this is the part the original trade-off note gets
+  > wrong: the same version-comparison logic running in CI and in `prepackage` is **one
+  > witness with two triggers**, not two independent witnesses. Independence would mean a
+  > second signal derived differently — e.g. a published-artifact check that compares the
+  > version in a released `.vsix` against the tag, which cannot exist until there is a
+  > release path. Adding a bypassable local copy of the same check would let the spec
+  > *claim* the invariant while not satisfying it, which is the worse failure.
+  >
+  > **Normative for Plan:** build the CI check now. When a publish/release workflow lands,
+  > reopen the second-witness question and design a genuinely independent signal then.
+  >
+  > ***Cost of A, stated plainly:*** an unbumped version is caught at PR time and not
+  > before, so a developer packaging locally gets no fast feedback — the one thing Option
+  > B genuinely offered. The CI check also needs commit-range visibility, so it must be
+  > written to survive shallow clones and force-pushes, or it degrades into the silent
+  > no-op class this spec exists to eliminate. And the invariant #2 gap above stays open
+  > until a release path exists; if that never happens, the gap is permanent.
   - **Option A — CI-only** (a GitHub Actions job on PR/push scanning merged `fix:`
     commits since the last version bump). Catches it before merge; needs the repo's
     CI to have commit-range visibility.
