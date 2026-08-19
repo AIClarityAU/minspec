@@ -674,4 +674,12 @@ DR-018 split the repo three ways: **MPL-2.0** for packages/shared, **MIT** for t
 <!-- dr-summary:DR-084 auto=f731dff842d4 -->
 The GLM shadow-triage instrument (#1338) runs a second model alongside the live triage agent on the same issue, pushes both outputs through the same deterministic gate, records the agreement and discards the shadow verdict. It exists because the drain loop and the required ai-review merge gate draw on one Anthropic subscription quota, so the queue jams when that quota runs out (#1234) — and because GLM's fitness for *our* task shape was unmeasured, which per this repo's evidence discipline makes…
 <!-- /dr-summary:DR-084 -->
+
+## [DR-085 — The signpost carries only acts the human can discharge - authoring work moves to a separate agent-queue surface](DR-085.md)
+
+*Status: proposed · Date: 2026-08-19*
+
+<!-- dr-summary:DR-085 auto=6b4ee609d96d -->
+DR-019 established that next-task priority is a deterministic DAG, never an LLM judgement, and SPEC-012 built it. That spec draws from five node kinds, and defines the set by *exclusion* of the agent queue (FR-8, INV - Two Queues): | Kind | SPEC-012's stated meaning | |---|---| | spec-approve | approve before implement (DR-012 gate) | | adr-accept | proposed to accepted | | epic-promote | proposed to active | | answer-OQ | resolve an open question | | phase-action…
+<!-- /dr-summary:DR-085 -->
 <!-- minspec:dr-index:end -->
