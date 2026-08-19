@@ -904,3 +904,69 @@ Approach B.
     expect(result.migrated).toBe(0);
   });
 });
+
+// ─── #1510 — the hash-lock reminder is emitted, not hand-written ──────────────
+//
+// Every copy in the corpus was hand-written: 27 specs, three wordings, no generator
+// and no template. Eleven still point at `.minspec/approvals.json` — the gitignored,
+// never-tracked map that SPEC-022 replaced with committed per-spec sidecars — which
+// misled two independent readers into calling an approved spec unapproved (#1491).
+//
+// The wording matters as much as the presence. `serializeFrontmatter` used to emit a
+// DR-012 reminder and it was REMOVED on purpose because it claimed "editing voids
+// approval", which is false after SPEC-022: canonicalizeSpec strips `status` and
+// `phases`. This asserts the new text does not reintroduce that absolute.
+describe('createSpec — hash-lock reminder (#1510)', () => {
+  let root: string;
+  beforeEach(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), 'lockrem-'));
+    fs.mkdirSync(path.join(root, '.minspec'), { recursive: true });
+    fs.writeFileSync(
+      path.join(root, '.minspec', 'config.json'),
+      JSON.stringify({ specsDir: 'specs' }),
+      'utf-8',
+    );
+  });
+  afterEach(() => fs.rmSync(root, { recursive: true, force: true }));
+
+  const create = (): string => createSpec(root, 'Demo thing', 'T3').filePath;
+
+  it('stamps the reminder into a newly created spec', () => {
+    expect(fs.readFileSync(create(), 'utf-8')).toContain('# 🔒 Approval is recorded');
+  });
+
+  it('names the committed sidecar, never the dead .minspec/approvals.json map', () => {
+    const src = fs.readFileSync(create(), 'utf-8');
+    expect(src).toMatch(/\.minspec\/approvals\/.+\.json/);
+    expect(src).not.toContain('.minspec/approvals.json');
+  });
+
+  it('does not reintroduce the "ANY edit voids approval" claim removed after SPEC-022', () => {
+    const src = fs.readFileSync(create(), 'utf-8');
+    expect(src).not.toMatch(/ANY edit voids/i);
+    // it must instead say the two lifecycle fields are excluded
+    expect(src).toContain('`status` and `phases`');
+  });
+
+  it('sits inside the frontmatter and still parses', async () => {
+    const { parseSpec } = await import('../src/lib/spec');
+    const p = create();
+    const src = fs.readFileSync(p, 'utf-8');
+    expect(src.split('---')[1]).toContain('# 🔒 Approval is recorded');
+    // The property that matters: a comment between frontmatter keys must not break
+    // the parser. Asserted via parseSpec, not getSpec — getSpec returns undefined for
+    // this fixture with OR without the reminder (A/B-verified), so it would have been
+    // a vacuous assertion about an unrelated code path.
+    const fm = parseSpec(src).frontmatter;
+    expect(fm.id).toBe('SPEC-001');
+    expect(fm.tier).toBe('T3');
+    expect(fm.status).toBe('new');
+  });
+
+  it('is idempotent — a spec that already carries it is not double-stamped', () => {
+    const p = create();
+    const once = fs.readFileSync(p, 'utf-8');
+    const count = (s: string) => s.split('# 🔒 Approval is recorded').length - 1;
+    expect(count(once)).toBe(1);
+  });
+});

@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { Tier, Phase, SpecsLayout } from './config';
+import { hashLockReminder } from './approval-store';
 import { loadConfig, PHASES, resolveAndValidate, DEFAULT_CONFIG } from './config';
 import type { SpecFrontmatter, ParsedSpec } from './spec';
 import { writeSpec, readSpecFile, writeSpecFile } from './spec';
@@ -318,6 +319,29 @@ function buildSummary(parsed: ParsedSpec, filePath: string): SpecSummary {
 // --- CRUD operations ---
 
 /**
+ * Insert the #1510 hash-lock reminder directly beneath the `id:` line of a freshly
+ * created spec. Line-level and idempotent: a file that already carries the marker is
+ * left untouched, so this can never stack duplicates. No-op when there is no
+ * frontmatter or no `id:` line — a malformed scaffold is not worth throwing over.
+ */
+function injectHashLockReminder(rootDir: string, specFilePath: string): void {
+  const content = fs.readFileSync(specFilePath, 'utf-8');
+  if (content.includes('# 🔒 Approval is recorded')) return;
+  const fm = content.match(/^---\n([\s\S]*?)\n---\n?/);
+  if (!fm) return;
+  const lines = fm[1].split('\n');
+  const idIdx = lines.findIndex((l) => /^id[ \t]*:/.test(l));
+  if (idIdx === -1) return;
+  const rel = path.relative(rootDir, specFilePath);
+  lines.splice(idIdx + 1, 0, hashLockReminder(rel));
+  fs.writeFileSync(
+    specFilePath,
+    content.replace(/^---\n([\s\S]*?)\n---\n?/, `---\n${lines.join('\n')}\n---\n`),
+    'utf-8',
+  );
+}
+
+/**
  * Create a new spec with auto-generated ID and optional tier.
  * Storage layout (flat file vs. spec-kit directory) follows config.specsLayout.
  *
@@ -382,6 +406,11 @@ export function createSpec(
     fs.writeFileSync(filePath, writeSpec(spec), 'utf-8');
     displayPath = filePath;
   }
+
+  // #1510: stamp the hash-lock reminder into the NEW spec only. Creation-only on
+  // purpose — emitting it from `serializeFrontmatter` would re-add it on every write
+  // round-trip and change hashed bytes on already-approved specs.
+  injectHashLockReminder(rootDir, displayPath);
 
   const progress = phaseProgress(
     initialPhases as Record<Phase, import('./spec').PhaseStatus>,
