@@ -1,7 +1,7 @@
 ---
 id: SPEC-055
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — a surface that names the wrong spec is a lying signpost
@@ -12,7 +12,7 @@ implements_reason: creates no new file. The spec adds the spec id to an existing
 phases:
   specify: done
   clarify: done
-  plan: pending
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
