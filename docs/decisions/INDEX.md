@@ -682,4 +682,12 @@ The GLM shadow-triage instrument (#1338) runs a second model alongside the live 
 <!-- dr-summary:DR-085 auto=6b4ee609d96d -->
 DR-019 established that next-task priority is a deterministic DAG, never an LLM judgement, and SPEC-012 built it. That spec draws from five node kinds, and defines the set by *exclusion* of the agent queue (FR-8, INV - Two Queues): | Kind | SPEC-012's stated meaning | |---|---| | spec-approve | approve before implement (DR-012 gate) | | adr-accept | proposed to accepted | | epic-promote | proposed to active | | answer-OQ | resolve an open question | | phase-action…
 <!-- /dr-summary:DR-085 -->
+
+## [DR-086 — Autonomy is a second axis - the agent may act on its own recommendation, bounded by an enumerated stop list rather than by its own sense of being stuck](DR-086.md)
+
+*Status: proposed · Date: 2026-08-20*
+
+<!-- dr-summary:DR-086 auto=7553eb8ed00f -->
+DR-076 cut the gates that existed for multi-human trust. This is a different cut. The human is still the only human; what is being removed is a **conversational round-trip inside one person's own session**. The round-trip currently carries no information. The agent computes a recommendation with its reasons and costs; the human replies with unconditional assent. Nothing is decided at that step - it is a confirmation of an analysis that already happened, and the founder's own framing is that…
+<!-- /dr-summary:DR-086 -->
 <!-- minspec:dr-index:end -->
