@@ -2,7 +2,7 @@
 id: SPEC-038
 type: requirements
 # 🔒 Once approved, hash-locked: approved bytes recorded in .minspec/approvals.json[SPEC-038].specHash. ANY edit voids approval (hash → stale) — re-run "MinSpec: Approve Spec". DR-012.
-status: implementing
+status: done
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology — the spec→code ownership contract
@@ -14,7 +14,7 @@ phases:
   clarify: done   # OQ-1..5 confirmed by Paul Harvey 2026-07-14 (see Clarify)
   plan: done   # design.md merged #772; PQ-1/PQ-2 both resolved at Tasks 2026-07-14 (see design.md)
   tasks: done   # tasks.md merged PR #774, 2026-07-14
-  implement: in-progress   # Slice 1 (rule ships as warn) built 2026-07-16; backfill + flip pending
+  implement: done   # all 3 slices merged: #801 (warn) 2026-07-16, #828 (backfill) + #829 (flip to error) 2026-07-17
 ---
 
 # MinSpec — Required `implements:`/`affects:` spec→code ownership declaration (Requirements)
