@@ -1000,6 +1000,39 @@ describe('dispatch-ready-check.sh — the author filter is actually WIRED UP (#1
     }
   });
 
+  /**
+   * #1135 — the REVIEW_VERDICT reader is a SECOND grammar in the same file, and the
+   * generic "does dispatch-issue.sh mention --trusted-comment-bodies" assertion above
+   * cannot see it: that passes on the MINSPEC_VERDICT read alone. So this pins the
+   * specific shape that was vulnerable.
+   *
+   * This repo is PUBLIC, so any user can comment on a PR. The old read took the last
+   * comment containing REVIEW_VERDICT_BEGIN from ANY author and fed it to a fix agent as
+   * its "failure signal". The agent is credential-free and the text is prose-fenced as
+   * untrusted — but a prose fence is model-trusted, and the rule here is to enforce.
+   */
+  it('the REVIEW_VERDICT reader selects from TRUSTED comments only', () => {
+    const src = fs.readFileSync(path.join(REPO_ROOT, 'scripts/dispatch-issue.sh'), 'utf-8');
+    const code = src.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n');
+
+    // The exact unfiltered shape that shipped before this fix.
+    expect(code).not.toMatch(/\.comments\[\][?]?\s*\|\s*select\([^)]*REVIEW_VERDICT_BEGIN/);
+
+    // And the read must still exist, so the assertion above cannot pass by deletion.
+    expect(code).toContain('REVIEW_VERDICT_BEGIN');
+
+    // SCOPED to this read's own pipeline. A bare `toContain('--trusted-comment-bodies')`
+    // over the whole file is satisfied by the PRE-EXISTING verdict-record read ~1100
+    // lines earlier, so it proves nothing about THIS one — flagged in the PR #1257
+    // review as a title-overclaim, and it is the same "assertion weaker than its name"
+    // shape that keeps recurring. Anchor on the `feedback=` assignment instead.
+    const feedbackAt = code.indexOf('feedback=$(gh pr view');
+    expect(feedbackAt, 'the REVIEW_VERDICT read must exist').toBeGreaterThan(-1);
+    const readBlock = code.slice(feedbackAt, code.indexOf('fix_prompt=', feedbackAt));
+    expect(readBlock, 'the REVIEW_VERDICT read itself must pipe through the filter')
+      .toContain('--trusted-comment-bodies');
+  });
+
   it('this wiring check is not vacuous — it fails on a file that lacks the call', () => {
     // Guard the guard: prove the assertions above can actually fail.
     const unrelated = fs.readFileSync(path.join(REPO_ROOT, 'scripts/triage-decide.sh'), 'utf-8');
