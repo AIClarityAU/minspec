@@ -956,3 +956,65 @@ test('verdictLabelFault: exactly the decided verdict is clean', () => {
     null,
   );
 });
+
+// ─── #1204: the stated reset time must be extracted, not discarded ───────────
+// The retry polled blindly because nothing parsed "resets <time>". On PR #1602
+// that cost six attempts over 4h21m, five futile. `nowMs` is injected so these
+// are deterministic across DST.
+{
+  const { parseResetInstant } = require('./ai-review-guard.js');
+
+  // 2026-08-19T10:32:32Z — the real instant #1602 was blocked at.
+  const BLOCKED_AT = Date.parse('2026-08-19T10:32:32Z');
+
+  test('parseResetInstant: the real #1602 string resolves to the NEXT 12:50am Sydney', () => {
+    const out = parseResetInstant(
+      "You've hit your session limit · resets 12:50am (Australia/Sydney)",
+      BLOCKED_AT,
+    );
+    // 12:50am Sydney on 2026-08-20 is 14:50Z on 2026-08-19 (UTC+10, no DST in August).
+    assert.equal(out, '2026-08-19T14:50:00.000Z');
+    assert.ok(Date.parse(out) > BLOCKED_AT, 'a stated reset is always in the future');
+  });
+
+  test('parseResetInstant: UTC form from the #1190 evidence', () => {
+    const out = parseResetInstant('quota exhausted, resets 8:40am (UTC)', Date.parse('2026-08-05T08:25:00Z'));
+    assert.equal(out, '2026-08-05T08:40:00.000Z');
+  });
+
+  test('parseResetInstant: a time already past today rolls to tomorrow', () => {
+    // 08:40 UTC seen at 20:00 UTC must mean tomorrow, not 11h ago.
+    const out = parseResetInstant('resets 8:40am (UTC)', Date.parse('2026-08-05T20:00:00Z'));
+    assert.equal(out, '2026-08-06T08:40:00.000Z');
+  });
+
+  test('parseResetInstant: relative form needs no timezone', () => {
+    const out = parseResetInstant('rate limited, try again in 25 minutes', Date.parse('2026-08-05T10:00:00Z'));
+    assert.equal(out, '2026-08-05T10:25:00.000Z');
+  });
+
+  test('parseResetInstant: 12-hour meridiem edges', () => {
+    assert.equal(parseResetInstant('resets 12:00am (UTC)', Date.parse('2026-08-05T10:00:00Z')),
+      '2026-08-06T00:00:00.000Z');
+    assert.equal(parseResetInstant('resets 12:30pm (UTC)', Date.parse('2026-08-05T10:00:00Z')),
+      '2026-08-05T12:30:00.000Z');
+  });
+
+  test('parseResetInstant: no zone stated → null, never a guess', () => {
+    // Guessing the runner's zone would silently anchor the window to the wrong
+    // place; null means "retry on the normal cadence", which is safe.
+    assert.equal(parseResetInstant('resets 8:40am', BLOCKED_AT), null);
+  });
+
+  test('parseResetInstant: unparseable / absent / bad zone → null, never throws', () => {
+    assert.equal(parseResetInstant('some unrelated failure', BLOCKED_AT), null);
+    assert.equal(parseResetInstant('', BLOCKED_AT), null);
+    assert.equal(parseResetInstant(null, BLOCKED_AT), null);
+    assert.equal(parseResetInstant('resets 8:40am (Not/AZone)', BLOCKED_AT), null);
+    assert.equal(parseResetInstant('resets 99:99am (UTC)', BLOCKED_AT), null);
+  });
+
+  test('parseResetInstant: a non-finite now is refused rather than producing garbage', () => {
+    assert.equal(parseResetInstant('resets 8:40am (UTC)', NaN), null);
+  });
+}
