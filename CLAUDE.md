@@ -63,26 +63,13 @@ The same block lists every pull request this session opened that is still unmerg
 
 Report the state you already observed; re-reading it from the git host is ordinary tool use, never a requirement, and MinSpec itself makes no network call.
 
-## File Locations
+## Commands and locations
 
-| Artifact | Location |
-|---|---|
-| Specs | `specs/` |
-| Decisions | `docs/decisions/` |
-| Constitution | `.minspec/constitution.md` |
-| Config | `.minspec/config.json` |
-
-## Commands
-
-MinSpec is a **VS Code extension**, not a CLI — run everything from the Command Palette (`Ctrl/Cmd+Shift+P`), typing "MinSpec:".
-
-| Command Palette | Purpose |
-|---|---|
-| *MinSpec: Initialize SDD Structure* | Scaffold `.minspec/` + harness files. Also offered automatically when you open an un-initialized project. |
-| *MinSpec: Refresh Harness Files* | Re-merge harness templates, preserving your edits. |
-| *MinSpec: Classify Task Complexity* | Classify the current change into a tier (T1–T4). |
-| *MinSpec: Show SDD Status* | Show the current phase and spec status. |
-| *MinSpec: Create Architecture Decision Record* | Create a new `DR-NNN` in `docs/decisions/`. |
+MinSpec is a **VS Code extension, not a CLI.** Every command runs from the Command Palette
+(`Ctrl/Cmd+Shift+P`, type "MinSpec:") — never write, suggest, or attempt a `minspec` shell
+command. The palette lists its own entries. Specs live in `specs/`, decisions in
+`docs/decisions/`, the constitution at `.minspec/constitution.md`, and everything else is
+configured in `.minspec/config.json`.
 
 ## Project Overview
 
@@ -259,26 +246,13 @@ Roles: `scripts/roles/` — triage, dev, architect, security, reviewer.
 Dispatch: `scripts/dispatch-issue.sh <N>` — reads `role:X` label, loads role prompt.
 Triage: `scripts/triage-inbox.sh [N]` — processes inbox issues.
 
-## Deploy Reference
+## Deploy and test
 
-VS Code extensions do not auto-deploy. Manual steps:
-
-```bash
-# Package an extension
-cd packages/minspec && npm run package   # produces .vsix
-
-# Publish (when ready — requires vsce token)
-cd packages/minspec && npx vsce publish
-```
-
-## Test Commands
-
-```bash
-npm test              # all packages
-npm run lint          # all packages
-npm run build         # all packages
-npm run validate      # frontmatter validation
-```
+VS Code extensions **do not auto-deploy** — packaging and publishing are manual, so the
+standing "deploy after every commit" rule does not apply here. Scripts are in `package.json`
+(`npm test` / `lint` / `build` / `validate`; `npm run package` in `packages/minspec` emits
+the .vsix). **Always rebuild the .vsix yourself** rather than handing the command over — a
+stale install silently disables shipped gates.
 
 ## Pre-Commit Checks
 
