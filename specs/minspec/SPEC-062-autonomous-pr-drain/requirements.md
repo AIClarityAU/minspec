@@ -8,6 +8,8 @@ epic: EPIC-007  # Agent Execute — the dev-time autonomous build/merge pipeline
 aspects: [autonomous-pipeline, drain, pull-request, auto-merge, scheduling, github-actions, signpost, hitl, sidecar-hash, git-recovery, tier-0, offline, no-silent-gate, blast-radius]
 depends_on: []  # see "Blocking dependencies" — #810/#811 (ready-to-merge gate) and #880 (docs-lane approvals) gate the fully-autonomous outcome, not this spec's authorship
 relates_to: [SPEC-044, SPEC-024, SPEC-050, SPEC-012, DR-057, DR-061, DR-067, DR-076, DR-015, DR-004]
+implements: [.github/workflows/drain.yml]  # NEW - the session-independent trigger (FR-1). Pinned to D1 Option A (the Action runs only the non-LLM steps). If Clarify picks B (self-hosted runner) or C (piggyback only) this path changes, so D1 MUST close before approval.
+affects: [scripts/drain-inbox.sh, scripts/dispatch-issue.sh, scripts/remediate-pr.sh, scripts/auto-merge-gate.ts]  # drain-inbox/dispatch-issue/remediate-pr are OWNED by SPEC-044 via implements: - this spec modifies them, never owns them (INV: one owner per file). auto-merge-gate.ts is currently unowned; SPEC-024 owns the decideAutoMerge decision this spec only invokes.
 ---
 
 # MinSpec — Autonomous PR review/rework/merge drain (Requirements)
