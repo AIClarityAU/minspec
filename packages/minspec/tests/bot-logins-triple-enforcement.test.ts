@@ -87,7 +87,9 @@ describe('ENFORCE: AI_REVIEW_BOT_LOGINS identifier agreement — ready-to-merge.
     // DR-054: `minspec-sdd[bot]` is a product constant, and the variable is retained
     // only as the enterprise override. Without the fallback an unset variable yields
     // '', parseAllowlist returns an EMPTY allowlist, and the provenance gate affirms
-    // nobody — failing OPEN and QUIETLY, which is the shape a default exists to remove.
+    // nobody — so `ready-to-merge` can never go green. It fails CLOSED, which is safe
+    // but blocks every PR behind an admin override; the default is what makes the gate
+    // satisfiable rather than merely survivable.
     expect(fallback, 'the allowlist binding has no default — an unset var disarms the gate').toBe(
       'minspec-sdd[bot]',
     );

@@ -131,8 +131,9 @@ jobs:
         env:
           # Built-in token; scoped by the permissions block above.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Allowlist of logins permitted to apply ai-review:* labels. Configured
-          # by the owner (see REQUIRED MANUAL STEP 1). Empty ⇒ fail closed.
+          # Allowlist of logins permitted to apply ai-review:* labels. Defaults to
+          # the shipped reviewer identity; see the OPTIONAL override section above.
+          # Empty ⇒ fail closed (the gate stays red, it does not go quiet).
           # DR-054: the reviewer identity is a PRODUCT CONSTANT, not per-deployment
           # config — a public identifier like an OAuth client_id. Shipping it as the
           # default removes the mandatory per-repo setup step (#597) that left a fresh

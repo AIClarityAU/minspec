@@ -9,11 +9,15 @@
  * template still read `${{ vars.AI_REVIEW_BOT_LOGINS }}` bare and instructed every owner
  * to set it as a REQUIRED MANUAL STEP.
  *
- * The cost of leaving it unset is not an error — it is silence. An unset allowlist means
- * no identity is allowlisted, so the provenance check cannot affirm anyone, and the gate
- * that exists to stop a forged `ai-review:pass` is simply not enforcing. A required setup
- * step that fails OPEN and QUIETLY is the worst shape available, which is why the fix is
- * a default rather than better documentation.
+ * The cost of leaving it unset is a gate that can never go green. An unset allowlist
+ * authorizes nobody, so provenance can never be affirmed and `ready-to-merge` stays red
+ * forever — the workflow says so itself: "treated as unverifiable → never green (fail
+ * closed)". It fails CLOSED, not open.
+ *
+ * That is the safe direction and still the wrong outcome: every PR is blocked, and the
+ * only way through is an admin override, which trains people to bypass the gate rather
+ * than satisfy it. A setup step whose omission blocks all merges is not a documentation
+ * problem, which is why the fix is a default.
  *
  * Reported by an adopter whose fresh project asked for the variable — the superseded
  * design, still shipping six weeks after it was superseded.
@@ -33,7 +37,8 @@ describe('DR-054 — AI_REVIEW_BOT_LOGINS ships a default', () => {
 
   it('never reads the variable bare — an unset var must not disarm the gate', () => {
     // The defect in one assertion. A bare read yields '' when unset, which parses to an
-    // EMPTY allowlist, which affirms nobody: the gate goes quiet instead of failing.
+    // EMPTY allowlist, which affirms nobody — so `ready-to-merge` can never go green and
+    // every PR needs an admin override to land.
     expect(READY_TO_MERGE_WORKFLOW).not.toMatch(
       /AI_REVIEW_BOT_LOGINS:\s*\$\{\{\s*vars\.AI_REVIEW_BOT_LOGINS\s*\}\}/,
     );
