@@ -256,7 +256,11 @@ stale install silently disables shipped gates.
 
 ## Pre-Commit Checks
 
-1. No secrets (API keys, tokens, high-entropy strings)
+1. **Secret scan (#1583, gitleaks).** `.githooks/pre-commit` runs `gitleaks protect
+   --staged` and fails closed on a finding, printing the rule, file and line so the
+   block is actionable (#1538). Optional by design, exactly like the copy MinSpec
+   scaffolds into adopters: a missing `gitleaks` warns and continues rather than
+   wedging a commit. Intentional bypass: `SECRET_GATE_OFF=1 git commit ...`
 2. `specs/**/*.md` must have `id: SPEC-NNN` frontmatter
 3. **RCDD root-cause gate (DR-003).** `.githooks/commit-msg` rejects any
    `fix:`/`fix(scope):`/`fix!:` commit whose body lacks a `Root cause:` line.

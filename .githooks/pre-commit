@@ -108,6 +108,35 @@ if ! minspec_branch_guard; then
 fi
 
 fail=0
+
+# ── secret scan (#1583, gitleaks) ─────────────────────────────────────────────
+# MinSpec SCAFFOLDS this gate into every project it initializes, and this repo ran
+# none — not here, not in CI. So the one loop that would have caught #1514 (a
+# scaffolded file MinSpec's own gate was guaranteed to reject, which every adopter
+# hit on their first commit) was off by construction, and the defect shipped
+# instead. Running it here is the dogfood: we now fail on what we sell.
+#
+# OPTIONAL exactly like the scaffolded copy: a missing gitleaks warns and continues.
+# A missing optional tool must never wedge a commit.
+#
+# Output is CAPTURED and printed, never discarded (#1538). `--redact` masks the
+# secret VALUE, so what surfaces is the rule id, file and line — the actionable
+# part. A block with no evidence just sends people to the bypass.
+if [ "${SECRET_GATE_OFF:-}" != "1" ]; then
+  if command -v gitleaks >/dev/null 2>&1; then
+    if ! secret_scan_out=$(gitleaks protect --staged --redact --no-banner -v 2>&1); then
+      printf '%s\n' "$secret_scan_out" >&2
+      echo "✖ secret gate: gitleaks found a potential secret in the staged changes." >&2
+      echo "  The finding is printed above; remove the secret or add a gitleaks allowlist entry." >&2
+      echo "  Override (rare): SECRET_GATE_OFF=1 git commit ..." >&2
+      fail=1
+    fi
+  else
+    echo "⚠ secret gate: gitleaks not installed — secret scan SKIPPED." >&2
+    echo "  Install gitleaks (https://github.com/gitleaks/gitleaks) to gate committed secrets." >&2
+  fi
+fi
+
 if [ "${ADR_BORN_GATE_OFF:-}" != "1" ]; then
   while IFS=$'\t' read -r _status path; do
     case "$path" in
