@@ -282,8 +282,18 @@ surface this spec touches, so none is guessed here.
   > **Cost of choosing B, stated rather than implied:** a Command Palette entry is only
   > discoverable to someone who thinks to look for it, so it does nothing for the
   > agent-dispatch paths (`scripts/dispatch-issue.sh`) where no human opens a palette.
-  > Option C's activation-log line covers those for near-zero extra work, and Plan may
-  > add it; B is the floor, not a ceiling.
+  > **Correction (2026-08-14): Option C does not cover them.** An earlier revision of this
+  > paragraph said an activation-log line covers the agent-dispatch paths "for near-zero
+  > extra work". It covers none of them. `scripts/dispatch-issue.sh:1342` states that
+  > *"`claude -p` is the only automatable launch primitive"*, and the script contains zero
+  > references to `code --` or `vscode` — there is no VS Code process in a dispatch run, so
+  > `activate()` never executes and an activation-log line fires in **exactly zero** dispatch
+  > sessions. Option C therefore pays the cost the original note itself named (a line written
+  > on the activation path of every consumer workspace) and buys nothing for the only case
+  > that was offered as its justification. B is the floor **and**, for this purpose, the
+  > ceiling: a headless run needs provenance on a channel that exists without an editor —
+  > stdout from the packaging step, or the `.vsix` filename — which is a separate question
+  > from FR-2 and not this decision's to answer.
   >
   > **Blocked on FR-1's missing half.** AC-3 requires the surface to display "the SHA
   > **and build timestamp**". No timestamp is stamped today — `scripts/build-extension.sh:34`
@@ -361,6 +371,46 @@ surface this spec touches, so none is guessed here.
 
 - **DQ-3 — Where does the FR-4 version-bump gate run: CI check, pre-package script,
   or both?**
+
+  > **RESOLVED — Option A: CI-only, with the second witness deferred and recorded as a
+  > knowing gap rather than passed over.**
+  >
+  > **The measurement that decides it: there is no release path in CI.** The repository has
+  > eleven workflows — `ai-review`, `ai-review-retry`, `approve-on-label`, `ci`,
+  > `deploy-sites` (the marketing site, not the extension), `docs-lane`,
+  > `dr-id-collision`, `main-red-watch`, `minspec-validate`, `ready-to-merge`,
+  > `supply-chain-daily` — and not one of them publishes a `.vsix`. Packaging is a local
+  > act (`npm run package` → `build:prod && vsce package`), and publishing is not
+  > authorized at all yet.
+  >
+  > So Option B's stated purpose — *"catches it at release time"* — is unachievable today.
+  > A `prepackage` hook fires when someone packages a dogfood build on their laptop, which
+  > is not a release, and never fires at the moment a version bump actually matters. A gate
+  > that runs at the wrong moment is worse than no gate, because it reads as coverage.
+  >
+  > **On invariant #2's second witness, stated rather than finessed.** Constitution
+  > invariant 2 requires that no required check hinge on a single producer one
+  > permission or config gap can disable. Option A is a single producer, so **this gate
+  > does not meet that bar**, and that is recorded here as a knowing exception rather
+  > than left for a reader to discover.
+  >
+  > Option C does not fix it either, and this is the part the original trade-off note gets
+  > wrong: the same version-comparison logic running in CI and in `prepackage` is **one
+  > witness with two triggers**, not two independent witnesses. Independence would mean a
+  > second signal derived differently — e.g. a published-artifact check that compares the
+  > version in a released `.vsix` against the tag, which cannot exist until there is a
+  > release path. Adding a bypassable local copy of the same check would let the spec
+  > *claim* the invariant while not satisfying it, which is the worse failure.
+  >
+  > **Normative for Plan:** build the CI check now. When a publish/release workflow lands,
+  > reopen the second-witness question and design a genuinely independent signal then.
+  >
+  > ***Cost of A, stated plainly:*** an unbumped version is caught at PR time and not
+  > before, so a developer packaging locally gets no fast feedback — the one thing Option
+  > B genuinely offered. The CI check also needs commit-range visibility, so it must be
+  > written to survive shallow clones and force-pushes, or it degrades into the silent
+  > no-op class this spec exists to eliminate. And the invariant #2 gap above stays open
+  > until a release path exists; if that never happens, the gap is permanent.
   - **Option A — CI-only** (a GitHub Actions job on PR/push scanning merged `fix:`
     commits since the last version bump). Catches it before merge; needs the repo's
     CI to have commit-range visibility.
@@ -376,7 +426,56 @@ surface this spec touches, so none is guessed here.
     warns against for a *required* gate. C is the safe default but is more
     implementation surface for Plan to size.
 
-- **DQ-4 — Does FR-3's "dogfood workspace" self-match use `repository.url` string
+- **DQ-4 — RESOLVED: neither option as posed. The predicate matches everyone, and that
+  is the defect.**
+
+  > The fork assumed the self-match is a choice between two ways of comparing. It is not
+  > a comparison at all today. `surfaceBuildSkewAdvisory` derives it as
+  > `fs.existsSync(path.join(folder, '.minspec', 'constitution.md'))`
+  > ([extension.ts:689](../../../packages/minspec/src/extension.ts#L689)) — and
+  > `scaffold.ts:44` writes `constitution.md` into **every** repo that runs Init. So the
+  > predicate named `isMinspecRepo` is true in every consumer workspace, and the comment
+  > directly above it — *"Dogfood-only: a normal user's installed build legitimately
+  > differs from any repo they open, so this speaks only inside a MinSpec checkout"* —
+  > states an intent the expression does not deliver. The name and the comment assert a
+  > check the code does not perform.
+  >
+  > **The cost is paid by consumers, in every session.** Because the pre-filter passes,
+  > `detectBuildSkew` proceeds into up to three synchronous `execFileSync` git subprocesses
+  > on the extension-host thread (`build-provenance.ts:53-65`, `92-112`), once per root
+  > folder, at activation, on every packaged install. In a consumer repo the only possible
+  > verdict is `unknown` — the build SHA cannot belong to their history — and
+  > `extension.ts:691` (`if (verdict.kind !== 'stale') return;`) discards it in silence.
+  > Work on the activation path of every adopter, whose only outcome is discarded.
+  >
+  > That is a constitution invariant 3 concern (blast radius: behaviour added inside repos
+  > that opted into MinSpec, not into MinSpec's own development), and it is why neither
+  > `repository.url` string-compare nor a path-shape check is the answer on its own —
+  > both still run after the git calls have been paid for.
+  >
+  > **Normative for Plan, in order:**
+  > 1. **Short-circuit before any git call.** If the stamped build SHA cannot belong to
+  >    this repository, return `unknown` without spawning a subprocess. This is the change
+  >    that removes the cost; the rest is naming.
+  > 2. **Make the predicate genuinely MinSpec-specific.** `repository.url` compare against
+  >    `git remote get-url origin`, with a path-shape fallback (`packages/minspec/package.json`
+  >    present at the matching relative path) for forks and mirrors — the spec's original
+  >    recommendation, kept, but demoted to step 2 because on its own it does not stop the
+  >    spawns.
+  > 3. **Rename `isMinspecRepo`** to something that describes what it tests. It currently
+  >    reads as an identity assertion while testing for a marker file every adopter has.
+  >
+  > ***Cost of this, stated plainly:*** a stricter predicate can stop the dogfood warning
+  > firing in a legitimate MinSpec checkout that fails to match — a fork, a mirror, a
+  > worktree with an unusual remote. That trades a cost every consumer pays for a risk
+  > **you** bear, in the one place the feature is supposed to work, and the failure is
+  > silent because `unknown` shows nothing. It therefore needs its own test asserting the
+  > dogfood case still fires, and #1517's separate fix (give `unknown` a surface) is what
+  > stops the risk being silent. Sequence them together or the mitigation is prose.
+  >
+  > *(The original question, kept verbatim:)*
+  >
+  > **Does FR-3's "dogfood workspace" self-match use `repository.url` string
   compare (`package.json:16` vs. `git remote get-url origin`), or a more robust
   signal (e.g. presence of `packages/minspec/package.json` at a matching relative
   path)?** A URL-string compare is simplest but breaks under a fork/mirror remote;

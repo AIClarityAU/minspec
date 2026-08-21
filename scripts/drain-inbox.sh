@@ -826,7 +826,17 @@ run_loop() {
   echo "[drain] loop exited."
 }
 
-case "${1:-}" in
+# Parse EVERY argument, not just $1 (#1591). This was a bare `case "${1:-}"` with no
+# loop and no shift, so `--auto --dry-run` matched `--auto` and silently DISCARDED
+# `--dry-run` — a preview command that started a real drain and wrote to GitHub. The
+# unknown-arg arm below was asymmetric in the same way: it rejected a typo in first
+# position while dropping anything after it in silence.
+#
+# The seam cases (--session-alive, --should-continue, --checkout-occupied, ...) read
+# their operands from $2/$3 and `exit` immediately, so they never reach the shift and
+# are unaffected by the loop.
+while [[ $# -gt 0 ]]; do
+case "$1" in
   --concurrency)
     # Pure seam (#1208): print the VALIDATED fan-out width the loop would use, so a
     # test can assert the default and the fail-safe without running a dispatch.
@@ -932,6 +942,8 @@ case "${1:-}" in
   "") ;;
   *) echo "Unknown arg: $1"; exit 1 ;;
 esac
+shift
+done
 
 # Global opt-out (#239): MINSPEC_DRAIN_CONTINUOUS=0 forces pure one-shot even on
 # --auto/--continuous, for anyone who wants the old single-pass behaviour back.

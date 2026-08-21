@@ -669,9 +669,25 @@ DR-018 split the repo three ways: **MPL-2.0** for packages/shared, **MIT** for t
 
 ## [DR-084 — The shadow harness talks HTTP, not `claude -p` — a client that resolves no credentials beats a scrub that must enumerate them](DR-084.md)
 
-*Status: proposed · Date: 2026-08-14*
+*Status: accepted · Date: 2026-08-14*
 
 <!-- dr-summary:DR-084 auto=f731dff842d4 -->
 The GLM shadow-triage instrument (#1338) runs a second model alongside the live triage agent on the same issue, pushes both outputs through the same deterministic gate, records the agreement and discards the shadow verdict. It exists because the drain loop and the required ai-review merge gate draw on one Anthropic subscription quota, so the queue jams when that quota runs out (#1234) — and because GLM's fitness for *our* task shape was unmeasured, which per this repo's evidence discipline makes…
 <!-- /dr-summary:DR-084 -->
+
+## [DR-085 — The signpost carries only acts the human can discharge - authoring work moves to a separate agent-queue surface](DR-085.md)
+
+*Status: accepted · Date: 2026-08-19*
+
+<!-- dr-summary:DR-085 auto=6b4ee609d96d -->
+DR-019 established that next-task priority is a deterministic DAG, never an LLM judgement, and SPEC-012 built it. That spec draws from five node kinds, and defines the set by *exclusion* of the agent queue (FR-8, INV - Two Queues): | Kind | SPEC-012's stated meaning | |---|---| | spec-approve | approve before implement (DR-012 gate) | | adr-accept | proposed to accepted | | epic-promote | proposed to active | | answer-OQ | resolve an open question | | phase-action…
+<!-- /dr-summary:DR-085 -->
+
+## [DR-086 — Autonomy is a second axis - the agent may act on its own recommendation, bounded by an enumerated stop list rather than by its own sense of being stuck](DR-086.md)
+
+*Status: proposed · Date: 2026-08-20*
+
+<!-- dr-summary:DR-086 auto=7553eb8ed00f -->
+DR-076 cut the gates that existed for multi-human trust. This is a different cut. The human is still the only human; what is being removed is a **conversational round-trip inside one person's own session**. The round-trip currently carries no information. The agent computes a recommendation with its reasons and costs; the human replies with unconditional assent. Nothing is decided at that step - it is a confirmation of an analysis that already happened, and the founder's own framing is that…
+<!-- /dr-summary:DR-086 -->
 <!-- minspec:dr-index:end -->

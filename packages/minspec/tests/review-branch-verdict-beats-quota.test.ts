@@ -79,7 +79,14 @@ function runWithStub(opts: { stdout?: string; stderr?: string; code?: number }):
   // and must not care about argv, which carries --system-prompt-file etc.
   fs.writeFileSync(
     path.join(bin, 'claude'),
-    `#!/usr/bin/env bash\ncat >/dev/null\ncat ${JSON.stringify(outFile)}\ncat ${JSON.stringify(errFile)} >&2\nexit ${opts.code ?? 0}\n`,
+    `#!/usr/bin/env bash
+# DR-079 preflight probes \`claude -p --help\` for --json-schema; advertise it.
+for a in "$@"; do [ "$a" = "--help" ] && { echo "  --json-schema <schema>"; exit 0; }; done
+cat >/dev/null
+cat ${JSON.stringify(outFile)}
+cat ${JSON.stringify(errFile)} >&2
+exit ${opts.code ?? 0}
+`,
     { mode: 0o755 },
   );
   const r = spawnSync('bash', [SCRIPT, base, head, '--role', 'reviewer'], {
@@ -91,20 +98,29 @@ function runWithStub(opts: { stdout?: string; stderr?: string; code?: number }):
   return { stdout: r.stdout ?? '', stderr: r.stderr ?? '' };
 }
 
-const COMPLETE_REVIEW_MENTIONING_QUOTA = `Reviewed the diff.
-
-One non-blocking observability nit: the new run_voter adds 2>/dev/null, discarding
-review-branch.sh's stderr diagnostics (quota/non-quota failure messages and the
-$AGENT_OUT dump) that previously reached the Actions log.
-
-REVIEW_VERDICT_BEGIN
-verdict: pass
-blocking: 0
-summary: Sequential to concurrent voter panel is correct, fail-closed preserved.
-findings:
-- nit .github/workflows/ai-review.yml:369 — run_voter discards quota messages from CI logs.
-REVIEW_VERDICT_END
-`;
+/**
+ * DR-079: the reviewer now RETURNS the verdict. The prose still discusses quota —
+ * that is the whole point of #1131 — but it travels in `.result`, where nothing
+ * parses it, while the decision travels in `.structured_output`.
+ */
+const COMPLETE_REVIEW_MENTIONING_QUOTA = JSON.stringify({
+  is_error: false,
+  result:
+    'One non-blocking observability nit: run_voter adds 2>/dev/null, discarding ' +
+    "review-branch.sh's stderr diagnostics (quota/non-quota failure messages).",
+  structured_output: {
+    verdict: 'pass',
+    blocking: 0,
+    summary: 'Sequential to concurrent voter panel is correct, fail-closed preserved.',
+    findings: [
+      {
+        severity: 'nit',
+        location: '.github/workflows/ai-review.yml:369',
+        problem: 'run_voter discards quota messages from CI logs.',
+      },
+    ],
+  },
+});
 
 describe('#1131 review-branch.sh — a complete verdict outranks the quota guess', () => {
   it('emits the review when the CLI exits non-zero but the verdict is complete', () => {
@@ -192,14 +208,16 @@ describe('#1131 review-branch.sh — genuine outages and crashes are unchanged',
     expect(stdout).toContain('REVIEW_UNAVAILABLE_BEGIN');
   });
 
-  it('a TRUNCATED verdict is not treated as a review', () => {
-    // An opening marker alone means the agent died mid-review. That is not a
-    // finished verdict, so it must not be forwarded to the gate as one — this is
-    // why completeness (BEGIN *and* END) is the test, not the mere presence of a
-    // marker. With a quota signal alongside it, it is retry-able.
-    const truncated = 'Reviewing…\n\nREVIEW_VERDICT_BEGIN\nverdict: pass\n';
+  it('a MALFORMED structured verdict is not treated as a review', () => {
+    // Replaces the old truncated-block case: under DR-079 nothing parses prose, so
+    // the equivalent failure is an envelope whose structured_output does not satisfy
+    // the schema. It must not become a verdict, and with a quota signal alongside it
+    // is retry-able.
     const { stdout } = runWithStub({
-      stdout: truncated,
+      stdout: JSON.stringify({
+        is_error: false,
+        structured_output: { verdict: 'maybe', blocking: 0, summary: 'not a valid verdict' },
+      }),
       stderr: 'Claude AI usage limit reached.',
       code: 1,
     });
