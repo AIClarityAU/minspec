@@ -7,6 +7,8 @@ product: minspec
 epic: EPIC-002  # Signpost Integrity — an approved-but-unbuilt spec must not read 'implementing'
 aspects: [lifecycle, status, signpost, never-wrong, tier-0, validator]
 relates_to: [DR-069, DR-034, DR-003, DR-012, DR-031, SPEC-022, SPEC-041, SPEC-038]
+implements: none
+implements_reason: back-fill spec for behaviour already shipped under DR-069 (#886) - it builds nothing, so it owns nothing; the "Implementation status" table cites existing code as evidence, never as a claim of ownership.
 phases:
   specify: in-progress
   clarify: pending
@@ -46,10 +48,19 @@ Per DR-003, the "shipped" claims are cited to code, not to prose:
 | corpus migration of approved-pre-implement specs | [#898](https://github.com/AIClarityAU/minspec/issues/898) → [#1047](https://github.com/AIClarityAU/minspec/pull/1047), [#1072](https://github.com/AIClarityAU/minspec/pull/1072) |
 
 Because this spec is unapproved, its **own** lifecycle status is `specifying` (INV-1); that is a
-fact about *this artifact*, not a claim that the feature is unbuilt. To avoid re-asserting
-ownership of files already owned by SPEC-022 (SPEC-038), this spec deliberately declares no
-`implements:`/`affects:` — ownership is unchanged; the citations above are evidence, not a
-claim.
+fact about *this artifact*, not a claim that the feature is unbuilt. It declares
+`implements: none` (SPEC-038 FR-5) with the reason recorded in frontmatter: a back-fill spec
+builds nothing, so it owns nothing, and the citations above are evidence rather than a claim of
+ownership.
+
+> **Corrected 2026-08-22.** This paragraph previously justified omitting `implements:`/`affects:`
+> as avoiding *"re-asserting ownership of files already owned by SPEC-022"*. That premise is
+> false and was never checked: SPEC-022 declares **no** `implements:`/`affects:` at all, and two
+> of the cited paths — `status-parity.ts` and `active-spec.ts` — have no declared owner in the
+> corpus (`npm run facts owns <path>`). The correct reason is the one now in frontmatter, and it
+> does not depend on any other spec's declaration. Omission was also not a valid way to express
+> the intent: SPEC-038 FR-3 requires the explicit `none` + reason escape, so the spec was
+> un-approvable until this edit.
 
 ## One-Sentence Scope
 
