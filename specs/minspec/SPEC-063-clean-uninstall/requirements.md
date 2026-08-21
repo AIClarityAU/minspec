@@ -6,6 +6,8 @@ tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain — uninstall is the guaranteed exit that makes "opt-in blast radius" (invariant #3) truthful; the reverse of SPEC-033 provisioning
 relates_to: [SPEC-033, SPEC-042]  # SPEC-033 is the provisioning half this must reverse file-for-file · SPEC-042 is the onboarding front door whose init this mirrors
+implements: [packages/minspec/src/commands/uninstall.ts, packages/minspec/src/lib/uninstall-inventory.ts, packages/minspec/tests/uninstall.test.ts]  # all NEW (greenfield ownership, SPEC-038 AC-3). The command/lib split is pre-declared deliberately: adding a path AFTER approval stales the hash and forces a re-sign - the SPEC-051 #1323 trap.
+affects: [packages/minspec/package.json, packages/minspec/src/extension.ts, packages/minspec/src/lib/template-registry.ts, packages/minspec/src/lib/ruleset-advisor.ts]  # command contribution + registration; the marker-region strip (FR-4) and gh-api DELETE (FR-3) reuse the provisioning helpers in reverse - reused, never owned.
 ---
 
 # MinSpec — Clean uninstall (graded disable / remove-harness / full removal) — Requirements
