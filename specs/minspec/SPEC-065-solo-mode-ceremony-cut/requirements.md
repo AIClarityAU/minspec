@@ -184,9 +184,11 @@ validated a tree in which only one SPEC-061 existed (repaired by #1574).
 
 **Measured, 2026-08-21:**
 
-- The ruleset's `required_status_checks.strict` is **`null`** (unset), not `false` as this
-  spec previously stated. Effect is the same — branches need not be up to date — but the
-  earlier wording named a value the API does not report.
+- The ruleset's `strict_required_status_checks_policy` is **`false`** (ruleset `18352261`,
+  read 2026-08-21). An earlier draft of this Clarify pass "corrected" this to `null`; that
+  was wrong. `null` is what the `/rules/branches/main` projection reports because that
+  endpoint exposes a differently-named field — the ruleset itself stores `false`. #1394's
+  original wording was right, and the correction has been withdrawn.
 - Only one rule type is configured on `main`: `required_status_checks`. **No merge queue
   is set up**, so option (b) is new configuration, not a toggle.
 - `allow_update_branch` is **`false`**, so today there is not even a one-click "update
@@ -211,6 +213,11 @@ NOT part of this decision.
 **Follow-up:** #1394 tracks the class and should be closed by the `strict` flip plus a
 note recording the throughput trade. A merge queue (option (b)) remains the better
 long-term answer if the serialisation cost proves painful; it is not foreclosed.
+
+**Not yet applied.** The flip requires repo-admin scope. The `minspec-sdd` App has
+`admin=false` and the API returns `403 Resource not accessible by integration` on
+`PUT /repos/.../rulesets/18352261` — which is the correct boundary: the reviewer App must
+not be able to rewrite the protection that gates it. This is a human act, pending.
 
 ### DQ-2 (machinery witness) — RESOLVED: two-stage trusted/untrusted split
 
