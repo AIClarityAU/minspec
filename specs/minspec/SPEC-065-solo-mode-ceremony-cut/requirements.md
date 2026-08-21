@@ -7,11 +7,14 @@ product: minspec
 epic: EPIC-003  # SDD Core Methodology — ceremony is the methodology, so cutting it belongs here
 aspects: [governance, hitl, auto-merge, branch-protection, ai-review, profile, tier-0]
 relates_to: [DR-075, DR-076, DR-033, DR-047, DR-066, SPEC-024, SPEC-038, SPEC-051]
-# No `implements:` yet — this spec is `specifying`, pre-Clarify, so SPEC-038 FR-3 has not
-# armed. It MUST be declared during Clarify, BEFORE approval mints the hash: SPEC-051
-# records what happens otherwise (approving without it forces a post-approval edit, which
-# stales the signature the human just gave). The Clarify decisions below determine which
-# files this spec owns, so the declaration cannot honestly be written until they close.
+# Declared during Clarify (2026-08-21), in the SAME edit that answered DQ-2 — deliberately
+# BEFORE approval mints the hash. SPEC-051 records what happens otherwise: approving first
+# forces a post-approval edit, which stales the signature the human just gave.
+implements: [packages/minspec/src/lib/profile.ts, packages/minspec/tests/profile.test.ts, packages/minspec/tests/solo-mode-keep-gates.test.ts]
+# `affects:` = modified but owned elsewhere. The machinery-witness split (DQ-2) edits the
+# existing ai-review workflow rather than creating a parallel one; that file is owned by
+# the reviewer specs, so it is affected here, never owned.
+affects: [.github/workflows/ai-review.yml, .github/workflows/ready-to-merge.yml, scripts/auto-merge-gate.ts, scripts/dispatch-issue.sh]
 ---
 
 # SPEC-065: Solo mode — the DR-076 ceremony cut
@@ -168,11 +171,11 @@ to notice it contradicts the artifact beneath it.
 
 ## Decisions needed (Clarify)
 
-*Clarify pass 2026-08-21. Each question below is now either **RESOLVED** with the evidence
-that settles it, or **OPEN** with the founder decision it needs, the measured cost of each
-option, and a follow-up task. No question is left as a vague concern.*
+*Clarify pass 2026-08-21. **All four questions are RESOLVED** — DQ-3 and DQ-4 by evidence,
+DQ-1 and DQ-2 by founder decision on 2026-08-21 after the options were costed from measured
+data. Each records the decision, the rationale, the accepted cost, and its follow-up.*
 
-### DQ-1 (merge freshness) — OPEN, founder decision
+### DQ-1 (merge freshness) — RESOLVED: turn `strict` on
 
 Unattended merging raises the odds of the #1394 class: two individually-green PRs redden
 `main` because a PR's checks run against a base that no longer exists. It already bit —
@@ -192,17 +195,24 @@ validated a tree in which only one SPEC-061 existed (repaired by #1574).
   is the cost basis: `strict` serialises merges, so its pain scales with the *peak*, and a
   23-merge day under `strict` means 23 sequential rebase-and-rerun cycles.
 
-**Options.** (a) turn `strict` on — correct, and costly exactly on the busy days;
-(b) adopt a merge queue — same guarantee without serialising the author's work, but it is
-net-new configuration and interacts with the machinery gate in DQ-2; (c) accept the risk
-and rely on the post-hoc uniqueness gate — cheapest, and the failure mode is a red `main`
-that blocks everyone until repaired, which is what happened.
+**Decision (founder, 2026-08-21): option (a) — turn `strict` on.**
 
-**Follow-up if unresolved:** #1394 already tracks the class. This spec should not ship
-FR-3 (auto-merge as default) without DQ-1 answered, because unattended merging is what
-raises the rate.
+Rationale: under FR-3 no human reads routine PRs, so a red `main` is not noticed by the
+person who caused it. It blocks *everyone* until someone happens to look — which is exactly
+what happened on 2026-08-19, where the duplicate `SPEC-061` sat on `main` and every open PR
+inherited the failure. Serialising merges costs throughput; a red `main` costs the whole
+pipeline, and under solo mode it costs it silently.
 
-### DQ-2 (machinery witness) — OPEN, founder decision; one option eliminated
+**Accepted cost, stated plainly:** on a peak day (23 merges observed) this means 23
+sequential rebase-and-rerun cycles. `allow_update_branch` is `false`, so there is not even
+a one-click update affordance today — enabling it is a sensible companion change and is
+NOT part of this decision.
+
+**Follow-up:** #1394 tracks the class and should be closed by the `strict` flip plus a
+note recording the throughput trade. A merge queue (option (b)) remains the better
+long-term answer if the serialisation cost proves painful; it is not foreclosed.
+
+### DQ-2 (machinery witness) — RESOLVED: two-stage trusted/untrusted split
 
 **Measured:** `ai-review.yml` triggers on `pull_request` (types `opened, synchronize,
 reopened`), so the workflow body is sourced from the **PR head**. That is what makes a PR
@@ -218,9 +228,29 @@ Residual limitation either way: a base-SHA reviewer is blind to defects only the
 machinery would catch, so a PR that changes the witness mechanism itself must still stop
 for a human. That exception is small and enumerable, unlike today's blanket block.
 
+**Decision (founder, 2026-08-21): the two-stage split, not `pull_request_target`.**
+
+`pull_request_target` runs base-trusted workflow code **with repository secrets** in the
+context of untrusted head content. The failure mode is not subtle — one `checkout` of the
+head followed by anything that executes head-controlled code (a script, a build step, a
+dependency install) exfiltrates the App token that is the root of this repo's entire
+provenance story. Getting it right requires never touching head content in that job, which
+is a discipline no gate enforces.
+
+The two-stage split inverts the burden: an **untrusted** stage reads the diff and emits
+only data, and a **trusted** stage consumes that data and posts the witness. The trusted
+stage never executes head-controlled code, so the property is structural rather than
+remembered.
+
+**Accepted cost:** more moving parts, and the untrusted→trusted boundary must treat its
+input strictly as data (the same discipline `review-decide.sh` already applies to reviewer
+output). A PR that changes the witness mechanism itself must still stop for a human — that
+exception is small and enumerable, unlike today's blanket block.
+
 **Blast radius, measured:** 4 of the last 30 merges (13%) were machinery.
 
-**Follow-up:** #509 is the tracking issue and already holds the scoped-merge-path ask.
+**Follow-up:** #509 is the tracking issue and already holds the scoped-merge-path ask; it
+should record this decision so the design is not re-litigated at build time.
 
 ### DQ-3 (bot identity) — RESOLVED: do not retire it under `solo`
 
@@ -239,14 +269,13 @@ DR-076 parks the bot-attribution token path as team-only. The evidence says keep
 nothing at solo scale (the token mint is already automated and free) while giving up a
 property that only matters because the repo is public.
 
-**Proposed decision:** `mode: solo` does **not** retire bot attribution; the row stays
-`team`-parked only for the *coordination* machinery around it, not the identity itself.
+**Decision:** `mode: solo` does **not** retire bot attribution; the row stays `team`-parked
+only for the *coordination* machinery around it, not the identity itself.
 
-This **contradicts an accepted DR**, so it is a recommendation, not a settled fact. DR-076
-is `accepted`, and a spec cannot amend an accepted decision on its own — approving SPEC-065
-with this paragraph is the act that carries the amendment, and the founder should confirm
-they intend that rather than inherit it silently. If instead DR-076's row is to stand, this
-DQ reverts to OPEN and FR-5 must list bot-attribution among the parked machinery again.
+This contradicts a row in accepted DR-076, and a spec cannot amend an accepted decision on
+its own. The founder confirmed the amendment on **2026-08-21**, and it is recorded at the
+source — DR-076's "Cut or park" table now carries an amendment note pointing here, so the
+two records agree and neither has to be read through the other to be correct.
 
 ### DQ-4 (ownership) — RESOLVED for the declaration, deferred only in extent
 
