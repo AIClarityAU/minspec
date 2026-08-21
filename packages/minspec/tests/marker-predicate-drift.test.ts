@@ -37,8 +37,6 @@ const SEARCH_ROOTS = [
  * allowlist entry is a filed debt rather than a silent carve-out. Empty is the goal.
  */
 const ALLOWLIST: Record<string, string> = {
-  'scripts/dispatch-issue.sh':
-    '#1445 — dispatch pipeline, a different surface from ai-review; these two sed calls feed a rendered summary, not a merge-gating label.',
   'scripts/review-decide.sh':
     '#1157 — the AMBIGUITY COUNTER is broad BY DESIGN and must stay so; see the asymmetry test below. Its extractor IS anchored.',
 };
@@ -88,12 +86,22 @@ describe('control-marker predicates are anchored and agree (#1157)', () => {
   });
 
   it('the test can actually see an unanchored predicate (guards against a vacuous pass)', () => {
-    // If IS_PREDICATE ever stops matching real call sites, the check above passes for
-    // the wrong reason. The allowlisted file is a known-unanchored specimen, so it must
-    // still be detected — when #1445 lands, replace this with a synthetic fixture.
-    const all = unanchoredPredicates();
-    expect(all.length).toBeGreaterThan(0);
-    expect(Object.keys(ALLOWLIST)).toContain(all[0].file);
+    // If IS_PREDICATE/IS_ANCHORED ever stop matching real call-site shapes, the check
+    // above passes for the wrong reason. #1445 anchored the last known real specimen
+    // (scripts/dispatch-issue.sh), so this now exercises the detection regexes directly
+    // against synthetic lines shaped like the two call sites #1445 fixed, rather than
+    // depending on a real file staying unanchored.
+    const unanchoredSample = "    \"$(printf '%s\\n' \"$rev_out\" | sed -n '/REVIEW_VERDICT_BEGIN/,/REVIEW_VERDICT_END/p')\")";
+    const anchoredSample =
+      "    \"$(printf '%s\\n' \"$rev_out\" | sed -n '/^[[:space:]]*REVIEW_VERDICT_BEGIN[[:space:]]*$/,/^[[:space:]]*REVIEW_VERDICT_END[[:space:]]*$/p')\")";
+
+    expect(MARKER.test(unanchoredSample)).toBe(true);
+    expect(IS_PREDICATE.test(unanchoredSample)).toBe(true);
+    expect(IS_ANCHORED.test(unanchoredSample)).toBe(false);
+
+    expect(MARKER.test(anchoredSample)).toBe(true);
+    expect(IS_PREDICATE.test(anchoredSample)).toBe(true);
+    expect(IS_ANCHORED.test(anchoredSample)).toBe(true);
   });
 
   it('every allowlist entry names a tracking issue and still exists', () => {
