@@ -50,6 +50,34 @@ trustworthy applier). A broker outage blocks merges, never green-lights them.
 `create-github-app-token` action with the customer's own key — the vendor Worker is never
 called on that path.
 
+## Where the broker lives
+
+`packages/broker/` in this monorepo (decided 2026-08-16; the design had not said, and
+task 0.1 could not start without it).
+
+- **Public source is a feature here, not a leak.** A security-critical broker that
+  mints tokens for other people's repositories should be auditable by the people
+  trusting it. Nothing secret lives in the source — the App private key is a
+  Cloudflare Worker secret and never enters the tree, which is exactly what AC-5's
+  scan asserts.
+- **One tree, one scan.** The AC-5 key-custody test walks `git ls-files` over this
+  repo. Keeping the broker here means the code most likely to mishandle the key is
+  inside the guard's blast radius by default, rather than in a repo the guard cannot
+  see.
+- **Shared CI and conventions** — the same validate/lint/test lane, the same review
+  harness, no second setup to keep in step.
+
+**Cost, accepted deliberately:** the vendor's *operational* service now lives in the
+product repo, so its deploys, incidents and uptime entangle with extension releases —
+a broker hotfix moves the same `main` that ships the vsix. The mitigation is that the
+Worker deploys on its own wrangler command and shares no build artifact with the
+extension; the coupling is repository-level, not release-level. If broker operations
+ever need their own on-call rotation or release cadence, extracting it later is a
+directory move plus a CI split, which is why this is recorded here rather than as a DR.
+
+**Not shipped in the vsix.** `packages/broker/` is vendor infrastructure; the extension
+must never depend on it at build time, and the packaged artifact must never contain it.
+
 ## Architecture
 
 ```mermaid
@@ -63,7 +91,7 @@ sequenceDiagram
 
     CI->>GH: request OIDC token (aud = broker)
     GH-->>CI: signed OIDC JWT (repo, owner, workflow ref…)
-    CI->>BR: POST /installation-token {jwt, repository}
+    CI->>BR: POST /installation-token<br/>Authorization: Bearer «OIDC JWT»<br/>body {repository, permissions_profile}
     BR->>GH: fetch JWKS
     BR->>BR: verify RS256 sig, iss, aud, exp
     BR->>BR: authorise from claims (body repo must match) — else 4xx
@@ -89,6 +117,19 @@ Enterprise override:  ai-review workflow ──► GitHub native create-github-a
 ```
 
 ## API
+
+**This section is normative.** The sequence diagram above is illustrative; where the two
+disagree, this wins. It previously showed the JWT as a body field (`{jwt, repository}`),
+which contradicted the interface below — corrected 2026-08-17 rather than left for the
+implementer to pick, because task 0.2 writes the request-shape contract test and would
+have frozen whichever reading it happened to follow.
+
+The credential travels in `Authorization`, not the body, so it cannot be captured by
+anything that logs or echoes a request body.
+
+Note this required **no change to the requirements**: FR-6 and AC-6 constrain the broker's
+*inputs* ("the OIDC JWT and the repo identifier"), not their transport, so both readings
+satisfied them and the approval is untouched.
 
 `POST /installation-token`
 
