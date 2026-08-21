@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-057-stranded-branch-detection/requirements.md",
+  "specHash": "8dfaf93e85211e677704e0c8810babb66cb1bdb76198943d776ca1f037aa9e6e",
+  "approvedAt": "2026-08-19T21:29:06.024Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "3f8ead56200dc2026b78bc2b581ada29a84c24f4"
+}
