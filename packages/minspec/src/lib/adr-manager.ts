@@ -594,6 +594,46 @@ function synthesizeAdrFrontmatter(filePath: string, content: string, status: Adr
  * frontmatter block from the filename + body rather than throwing.
  * Returns the updated status.
  */
+/**
+ * Reconcile a DR's body `## Status` section with `status`, and return the new content.
+ *
+ * A DR's status lives in THREE places — frontmatter, this body section, and the INDEX
+ * entry. `setAdrStatus` historically wrote only the first and `applyStatus` only the
+ * third, so every acceptance left the file asserting two different statuses at once
+ * (#1624). The #626 parity rule caught it, but only after the accept had already landed
+ * on `main` — which took `main` red on 2026-08-19 and blocked every open PR.
+ *
+ * Deliberately CONSERVATIVE. It rewrites only the first **bold status word** inside the
+ * `## Status` section, and only when that word is one this function recognises. Anything
+ * else is returned untouched for the parity validator to flag, because silently mangling a
+ * hand-authored rationale is a worse failure than a caught parity error. 60 of the repo's
+ * 86 DRs have no `## Status` section at all; for those this is a no-op.
+ */
+export function reconcileBodyStatus(content: string, status: AdrStatus): string {
+  const heading = /^##[ \t]+Status[ \t]*$/m.exec(content);
+  if (!heading) return content;
+
+  const start = heading.index + heading[0].length;
+  const rest = content.slice(start);
+  const nextHeading = /^##[ \t]+/m.exec(rest);
+  const end = nextHeading ? start + nextHeading.index : content.length;
+
+  const section = content.slice(start, end);
+  // Only a RECOGNISED status word anchors the rewrite. `[A-Za-z]+` alone would
+  // happily eat the first bold word of an unrelated sentence.
+  const tokenRe = /\*\*(Proposed|Accepted|Deprecated|Superseded)(\*\*|\.\*\*)/;
+  const m = tokenRe.exec(section);
+  if (!m) return content;
+
+  const capitalised = status.charAt(0).toUpperCase() + status.slice(1);
+  // Preserve whether the period sat inside the bold markers.
+  const replacement = m[2] === '.**' ? `**${capitalised}.**` : `**${capitalised}**`;
+  const newSection =
+    section.slice(0, m.index) + replacement + section.slice(m.index + m[0].length);
+
+  return content.slice(0, start) + newSection + content.slice(end);
+}
+
 export function setAdrStatus(filePath: string, status: AdrStatus): AdrStatus {
   if (!ADR_STATUSES.has(status)) {
     throw new Error(`Invalid ADR status: ${status}`);
@@ -623,7 +663,9 @@ export function setAdrStatus(filePath: string, status: AdrStatus): AdrStatus {
   // frontmatter field can never be interpreted as a replacement pattern (#152).
   const block = `---\n${newYaml}\n---`;
   const updated = content.replace(FRONTMATTER_RE, () => block);
-  fs.writeFileSync(filePath, updated, 'utf-8');
+  // #1624 — the body's `## Status` section is the third place this status lives.
+  // Writing only the frontmatter here is what broke parity on every acceptance.
+  fs.writeFileSync(filePath, reconcileBodyStatus(updated, status), 'utf-8');
   return status;
 }
 
