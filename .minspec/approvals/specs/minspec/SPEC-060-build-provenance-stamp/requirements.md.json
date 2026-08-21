@@ -1,9 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-060-build-provenance-stamp/requirements.md",
-  "specHash": "89fd3c53326f42b4c8529622d78d84d7d013d2bc25ea161d4fc1b73d87c6394d",
-  "approvedAt": "2026-08-19T21:29:25.764Z",
+  "specHash": "c01e2a84ae61c7a17b7e58db0e5f45d10a7d48f7b48cb5fa29101ca706b6251b",
+  "approvedAt": "2026-08-21T08:38:26.685Z",
   "approvedBy": "github@harvest316.com",
   "tier": "T3",
   "migrated": false,
-  "baselineBlob": "66b783f3d995fadd8aede9c1b7963be727051ef6"
+  "baselineBlob": "112ad2815078f5b96e9098e99bd347bed6123184"
 }

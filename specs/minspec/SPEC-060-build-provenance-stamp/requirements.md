@@ -426,7 +426,56 @@ surface this spec touches, so none is guessed here.
     warns against for a *required* gate. C is the safe default but is more
     implementation surface for Plan to size.
 
-- **DQ-4 — Does FR-3's "dogfood workspace" self-match use `repository.url` string
+- **DQ-4 — RESOLVED: neither option as posed. The predicate matches everyone, and that
+  is the defect.**
+
+  > The fork assumed the self-match is a choice between two ways of comparing. It is not
+  > a comparison at all today. `surfaceBuildSkewAdvisory` derives it as
+  > `fs.existsSync(path.join(folder, '.minspec', 'constitution.md'))`
+  > ([extension.ts:689](../../../packages/minspec/src/extension.ts#L689)) — and
+  > `scaffold.ts:44` writes `constitution.md` into **every** repo that runs Init. So the
+  > predicate named `isMinspecRepo` is true in every consumer workspace, and the comment
+  > directly above it — *"Dogfood-only: a normal user's installed build legitimately
+  > differs from any repo they open, so this speaks only inside a MinSpec checkout"* —
+  > states an intent the expression does not deliver. The name and the comment assert a
+  > check the code does not perform.
+  >
+  > **The cost is paid by consumers, in every session.** Because the pre-filter passes,
+  > `detectBuildSkew` proceeds into up to three synchronous `execFileSync` git subprocesses
+  > on the extension-host thread (`build-provenance.ts:53-65`, `92-112`), once per root
+  > folder, at activation, on every packaged install. In a consumer repo the only possible
+  > verdict is `unknown` — the build SHA cannot belong to their history — and
+  > `extension.ts:691` (`if (verdict.kind !== 'stale') return;`) discards it in silence.
+  > Work on the activation path of every adopter, whose only outcome is discarded.
+  >
+  > That is a constitution invariant 3 concern (blast radius: behaviour added inside repos
+  > that opted into MinSpec, not into MinSpec's own development), and it is why neither
+  > `repository.url` string-compare nor a path-shape check is the answer on its own —
+  > both still run after the git calls have been paid for.
+  >
+  > **Normative for Plan, in order:**
+  > 1. **Short-circuit before any git call.** If the stamped build SHA cannot belong to
+  >    this repository, return `unknown` without spawning a subprocess. This is the change
+  >    that removes the cost; the rest is naming.
+  > 2. **Make the predicate genuinely MinSpec-specific.** `repository.url` compare against
+  >    `git remote get-url origin`, with a path-shape fallback (`packages/minspec/package.json`
+  >    present at the matching relative path) for forks and mirrors — the spec's original
+  >    recommendation, kept, but demoted to step 2 because on its own it does not stop the
+  >    spawns.
+  > 3. **Rename `isMinspecRepo`** to something that describes what it tests. It currently
+  >    reads as an identity assertion while testing for a marker file every adopter has.
+  >
+  > ***Cost of this, stated plainly:*** a stricter predicate can stop the dogfood warning
+  > firing in a legitimate MinSpec checkout that fails to match — a fork, a mirror, a
+  > worktree with an unusual remote. That trades a cost every consumer pays for a risk
+  > **you** bear, in the one place the feature is supposed to work, and the failure is
+  > silent because `unknown` shows nothing. It therefore needs its own test asserting the
+  > dogfood case still fires, and #1517's separate fix (give `unknown` a surface) is what
+  > stops the risk being silent. Sequence them together or the mitigation is prose.
+  >
+  > *(The original question, kept verbatim:)*
+  >
+  > **Does FR-3's "dogfood workspace" self-match use `repository.url` string
   compare (`package.json:16` vs. `git remote get-url origin`), or a more robust
   signal (e.g. presence of `packages/minspec/package.json` at a matching relative
   path)?** A URL-string compare is simplest but breaks under a fork/mirror remote;
