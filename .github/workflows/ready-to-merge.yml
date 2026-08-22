@@ -38,8 +38,10 @@
 # NOTE: `ai-review:changes` is not provenance-guarded — a forged `changes` can
 # only make the gate stricter (fail), never falsely green, so it is fail-safe.
 #
-# ── REQUIRED MANUAL STEP 1 — reviewer identity (provenance) ──────────────────
-# Set the repo/org Actions *variable* `AI_REVIEW_BOT_LOGINS` to the login(s) that
+# ── OPTIONAL — reviewer identity override (provenance) ───────────────────────
+# Defaults to `minspec-sdd[bot]`, the shipped reviewer identity (DR-054), so a fresh
+# repo's provenance gate is configured out of the box. Override ONLY if you run your
+# own review App: set the repo/org Actions *variable* `AI_REVIEW_BOT_LOGINS` to the login(s) that
 # are allowed to apply `ai-review:*` labels — Settings → Secrets and variables →
 # Actions → Variables → New repository variable. Value is comma/space separated:
 #   - a bot USER account login, e.g. `minspec-review-bot`
@@ -129,9 +131,16 @@ jobs:
         env:
           # Built-in token; scoped by the permissions block above.
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Allowlist of logins permitted to apply ai-review:* labels. Configured
-          # by the owner (see REQUIRED MANUAL STEP 1). Empty ⇒ fail closed.
-          AI_REVIEW_BOT_LOGINS: ${{ vars.AI_REVIEW_BOT_LOGINS }}
+          # Allowlist of logins permitted to apply ai-review:* labels. Defaults to
+          # the shipped reviewer identity; see the OPTIONAL override section above.
+          # Empty ⇒ fail closed (the gate stays red, it does not go quiet).
+          # DR-054: the reviewer identity is a PRODUCT CONSTANT, not per-deployment
+          # config — a public identifier like an OAuth client_id. Shipping it as the
+          # default removes the mandatory per-repo setup step (#597) that left a fresh
+          # repo's provenance gate unconfigured and silently unenforced. The variable
+          # is retained ONLY as the enterprise override, for a customer running their
+          # own App under their own bot login.
+          AI_REVIEW_BOT_LOGINS: ${{ vars.AI_REVIEW_BOT_LOGINS || 'minspec-sdd[bot]' }}
         with:
           script: |
             const path = require('path');
@@ -472,8 +481,9 @@ jobs:
                   `**\`ai-review:pass\` reverted — provenance check (#397).**\n\n` +
                   `${provenance.reason}. The \`ready-to-merge\` gate is red until an ` +
                   `allowlisted reviewer identity re-applies it after a real review.\n\n` +
-                  `Owner: set the \`AI_REVIEW_BOT_LOGINS\` Actions variable to your ` +
-                  `reviewer identity (see \`.github/workflows/ready-to-merge.yml\`).`,
+                  `Owner: the allowlist defaults to \`minspec-sdd[bot]\`. If you run ` +
+                  `your own review App, set the \`AI_REVIEW_BOT_LOGINS\` Actions variable ` +
+                  `to its login (see \`.github/workflows/ready-to-merge.yml\`).`,
               );
               await removePass();
             } else if (staleness.strip) {
