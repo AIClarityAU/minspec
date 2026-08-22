@@ -1,7 +1,7 @@
 ---
 id: SPEC-061
 type: requirements
-status: implementing
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — an approved spec must be able to agree with itself
@@ -18,6 +18,12 @@ implements_reason: >-
 affects:
   - packages/minspec/src/lib/spec.ts
   - packages/minspec/src/lib/lifecycle.ts
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # MinSpec — A phaseless spec cannot agree with itself: fix the asymmetric approval writer (Requirements)
