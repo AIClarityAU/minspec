@@ -127,17 +127,23 @@ Body stays put.
     expect(after).toContain('  specify: done');
   });
 
-  // CONTRACT CHANGED (SPEC-061 / #957). This used to assert a byte-identical no-op,
-  // which is precisely what pinned the bug: `setSpecStatus` creates its key when
-  // absent while `setSpecPhases` did not, so an approval wrote half the lifecycle
-  // state and the spec derived `new` however it was approved. The block is now
-  // CREATED. Individual lines inside an EXISTING block are still never invented —
-  // that separate contract is asserted below and by the degenerate-block gate.
-  it('creates the block when there is none, defaulting unsupplied phases to pending', () => {
+  // PINNING TEST FOR THE DEFAULT (SPEC-061 DQ-1, resolved 2026-08-22). Creation is
+  // OPT-IN, so this contract survives unchanged — approved FR-6 requires the
+  // shape-preserving behaviour stay reachable, which unconditional widening would have
+  // removed. DQ-1 calls this test out by name as the reason plain Option A was rejected.
+  it('is a no-op when there is no phases block (default: shape-preserving)', () => {
     const noPhases = path.join(tmpDir, 'no-phases.md');
     const src = '---\nid: SPEC-201\nstatus: specifying\ntier: T2\n---\n# X\n';
     fs.writeFileSync(noPhases, src);
     setSpecPhases(noPhases, { specify: 'done' });
+    expect(fs.readFileSync(noPhases, 'utf-8')).toBe(src); // byte-identical
+  });
+
+  it('creates the block ONLY when createIfAbsent is passed', () => {
+    const noPhases = path.join(tmpDir, 'no-phases-optin.md');
+    const src = '---\nid: SPEC-202\nstatus: specifying\ntier: T2\n---\n# X\n';
+    fs.writeFileSync(noPhases, src);
+    setSpecPhases(noPhases, { specify: 'done' }, { createIfAbsent: true });
     const fm = parseSpec(fs.readFileSync(noPhases, 'utf-8')).frontmatter;
     expect(fm.phases.specify).toBe('done');
     expect(fm.phases.clarify).toBe('pending');
@@ -425,6 +431,11 @@ describe('advanceSpecToImplementing — a spec with no phases: block (SPEC-061)'
   // the gate (it advances cleanly to `planning`) — my first draft of this test used
   // that shape and passed vacuously.
   it.each([
+    // AC-6 as AMENDED at Clarify 2026-08-22: a block with NO recognized phase child.
+    ['no recognized child', 'phases:\n  notaphase: pending'],
+    // Also-reaching shapes, established by measurement: the specifying-band lines
+    // phasesForApproval would mark `done` have no line to write to, so the persisted
+    // bytes stay all-pending and derive `new` against a `planning` target.
     ['only implement:', 'phases:\n  implement: pending'],
     ['only tasks:', 'phases:\n  tasks: pending'],
   ])('still throws on a degenerate block (%s) that cannot realize the target', (_n, block) => {
@@ -441,9 +452,9 @@ describe('advanceSpecToImplementing — a spec with no phases: block (SPEC-061)'
   });
 
   // setSpecPhases contract, pinned so docstring and behaviour cannot drift (AC-8)
-  it('setSpecPhases creates the block when absent, defaulting unsupplied phases to pending', () => {
+  it('setSpecPhases creates the block when opted in, defaulting unsupplied phases to pending', () => {
     const p = write();
-    setSpecPhases(p, { plan: 'in-progress' });
+    setSpecPhases(p, { plan: 'in-progress' }, { createIfAbsent: true });
     const fm = fmOf(p);
     expect(fm.phases.plan).toBe('in-progress');
     expect(fm.phases.specify).toBe('pending');

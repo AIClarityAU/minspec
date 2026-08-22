@@ -462,6 +462,22 @@ export function setSpecStatus(filePath: string, status: SpecStatus): SpecStatus 
   return status;
 }
 
+/** Options for {@link setSpecPhases} (SPEC-061 DQ-1). */
+export interface SetSpecPhasesOptions {
+  /**
+   * Create the `phases:` block when the spec has none. **Defaults to `false`** — the
+   * shape-preserving no-op this function has always had, which approved FR-6 requires stay
+   * reachable. Only the approval writer opts in.
+   *
+   * KNOWN HAZARD, recorded rather than hidden (SPEC-061 DQ-1 "Cost, stated plainly"): a
+   * defaulted flag is a quiet failure mode — a future caller who forgets it silently
+   * reproduces the #957 half-write this spec exists to remove, and nothing errors. The spec
+   * defers "required or defaulted" to Plan as its one remaining sub-choice; this implements
+   * the resolution as written (defaulted) rather than pre-empting that decision.
+   */
+  readonly createIfAbsent?: boolean;
+}
+
 /**
  * Surgically rewrite phase-status lines inside a spec's `phases:` frontmatter
  * block, in place. Only lines that ALREADY exist under `phases:` are rewritten —
@@ -470,9 +486,11 @@ export function setSpecStatus(filePath: string, status: SpecStatus): SpecStatus 
  *
  * TWO KINDS OF ABSENCE, and they are treated differently on purpose (SPEC-061 FR-1/FR-2):
  *
- *  - **No `phases:` block at all** → the block IS CREATED, with every phase in `PHASES`
- *    order (any phase the caller does not supply is written `pending`). This used to be a
- *    silent no-op, which is what made an approval write only half the lifecycle state:
+ *  - **No `phases:` block at all** → still a no-op BY DEFAULT (approved FR-6 keeps that
+ *    contract reachable); pass `{ createIfAbsent: true }` and the block is created, with
+ *    every phase in `PHASES` order (any phase the caller does not supply is written
+ *    `pending`). Only `advanceSpecToImplementing` opts in. The unconditional no-op is what
+ *    made an approval write only half the lifecycle state:
  *    `setSpecStatus` creates its key when absent (below), `setSpecPhases` did not, so
  *    `advanceSpecToImplementing` stamped a literal the file provably could not re-derive.
  *    `deriveStatus` tests `allPending` before the approval check (lifecycle.ts), and
@@ -493,7 +511,11 @@ export function setSpecStatus(filePath: string, status: SpecStatus): SpecStatus 
  * full-line `#` comments (the DR-012 lock reminder) and field order survive.
  * Throws when there is no frontmatter block at all.
  */
-export function setSpecPhases(filePath: string, phases: Partial<Record<Phase, PhaseStatus>>): void {
+export function setSpecPhases(
+  filePath: string,
+  phases: Partial<Record<Phase, PhaseStatus>>,
+  opts: SetSpecPhasesOptions = {},
+): void {
   const content = fs.readFileSync(filePath, 'utf-8');
   const fmMatch = content.match(FRONTMATTER_RE);
   if (!fmMatch) {
@@ -502,9 +524,13 @@ export function setSpecPhases(filePath: string, phases: Partial<Record<Phase, Ph
   const lines = fmMatch[1].split('\n');
   const phasesIdx = lines.findIndex((l) => /^phases[ \t]*:/.test(l));
   if (phasesIdx === -1) {
-    // Create the block rather than no-op (SPEC-061 FR-1). Appended at the end of the
-    // frontmatter, matching where every hand-authored spec already puts it. Two-space
-    // indent is the corpus convention and the shape `parseSpec` reads back.
+    // OPT-IN, per SPEC-061 DQ-1 (resolved 2026-08-22). The default stays the
+    // shape-preserving no-op this function has always had, because approved FR-6 requires
+    // that contract to remain available to any future caller — which unconditional widening
+    // would leave no way to obtain. The approval writer is the one caller that opts in.
+    if (!opts.createIfAbsent) return;
+    // Appended at the end of the frontmatter, matching where every hand-authored spec puts
+    // it. Two-space indent is the corpus convention and the shape `parseSpec` reads back.
     const created = ['phases:', ...PHASES.map((p) => `  ${p}: ${phases[p] ?? 'pending'}`)];
     const newYaml = [...lines, ...created].join('\n');
     fs.writeFileSync(filePath, content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---\n`), 'utf-8');
@@ -592,7 +618,7 @@ export function advanceSpecToImplementing(filePath: string): SpecStatus {
   // a spec whose implement phase has started is stamped `implementing`. This caller
   // runs solely at approval, so the 'approved' verdict is correct here.
   const target = deriveStatus(newPhases, 'approved', undefined);
-  setSpecPhases(filePath, newPhases);
+  setSpecPhases(filePath, newPhases, { createIfAbsent: true });
 
   // Derive the status from the PERSISTED bytes (never the in-memory map) so the
   // `status:` line and the derived status are identical by construction.
