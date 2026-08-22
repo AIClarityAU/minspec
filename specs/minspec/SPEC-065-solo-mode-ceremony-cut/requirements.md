@@ -10,10 +10,13 @@ relates_to: [DR-075, DR-076, DR-033, DR-047, DR-066, SPEC-024, SPEC-038, SPEC-05
 # Declared during Clarify (2026-08-21), in the SAME edit that answered DQ-2 — deliberately
 # BEFORE approval mints the hash. SPEC-051 records what happens otherwise: approving first
 # forces a post-approval edit, which stales the signature the human just gave.
-implements: [packages/minspec/src/lib/profile.ts, packages/minspec/tests/profile.test.ts, packages/minspec/tests/solo-mode-keep-gates.test.ts]
-# `affects:` = modified but owned elsewhere. The machinery-witness split (DQ-2) edits the
-# existing ai-review workflow rather than creating a parallel one; that file is owned by
-# the reviewer specs, so it is affected here, never owned.
+# DQ-2 resolved to the TWO-STAGE SPLIT, so per DQ-4's enumeration this spec creates and
+# therefore OWNS a new witness workflow plus its tests. (An earlier draft mistakenly applied
+# the disposition belonging to `pull_request_target` — the outcome DQ-2 rejected — and
+# routed the witness to `affects:`.)
+implements: [.github/workflows/machinery-witness.yml, packages/minspec/tests/machinery-witness.test.ts, packages/minspec/src/lib/profile.ts, packages/minspec/tests/profile.test.ts, packages/minspec/tests/solo-mode-keep-gates.test.ts]
+# `affects:` = modified but owned elsewhere. The two-stage split adds its own workflow
+# (owned above) and only ADJUSTS these to consume its witness.
 affects: [.github/workflows/ai-review.yml, .github/workflows/ready-to-merge.yml, scripts/auto-merge-gate.ts, scripts/dispatch-issue.sh]
 ---
 
