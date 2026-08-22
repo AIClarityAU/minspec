@@ -1,7 +1,7 @@
 ---
 id: SPEC-065
 type: requirements
-status: specifying
+status: implementing
 tier: T4
 product: minspec
 epic: EPIC-003  # SDD Core Methodology — ceremony is the methodology, so cutting it belongs here

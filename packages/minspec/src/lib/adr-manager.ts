@@ -4,6 +4,7 @@ import * as crypto from 'crypto';
 import { loadConfig, applyVSCodeOverrides, resolveAndValidate } from './config';
 import { slugify } from './spec-manager';
 import { epicRefValue } from './epic-manager';
+import { inspectAllStatusClaims } from './status-parity';
 export { slugify };
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -594,6 +595,53 @@ function synthesizeAdrFrontmatter(filePath: string, content: string, status: Adr
  * frontmatter block from the filename + body rather than throwing.
  * Returns the updated status.
  */
+/**
+ * Reconcile every body status claim with `status`, and return the new content.
+ *
+ * A DR's status lives in THREE places — frontmatter, the body, and the INDEX entry.
+ * `setAdrStatus` historically wrote only the first and `applyStatus` only the third, so
+ * every acceptance left the file asserting two different statuses at once (#1624). That
+ * took `main` red on 2026-08-19 and blocked every open PR.
+ *
+ * The claims are located with `inspectAllStatusClaims` — the SAME reader the #626/#1223
+ * parity gate uses — rather than a regex of this module's own. That is deliberate: the
+ * first version of this function matched only a bold `**Proposed.**` token, while the gate
+ * also recognises a plain-text leading word and the head-blockquote form
+ * `> **Status: proposed — …**`. A writer narrower than its reader silently leaves exactly
+ * the claims the gate will fail on. Sharing the locator makes the two impossible to
+ * diverge: whatever the gate can read, this rewrites.
+ *
+ * Still conservative in WHAT it rewrites — only `comparable` claims, i.e. a word already in
+ * the artifact's status vocabulary. `freeform` ("Clarify complete — awaiting Accept") and
+ * `unparseable` lines are returned untouched, because silently rewording a hand-authored
+ * rationale is a worse failure than a caught parity error.
+ */
+export function reconcileBodyStatus(content: string, status: AdrStatus): string {
+  const claims = inspectAllStatusClaims(content, 'dr');
+  const targets = claims.filter((c): c is { kind: 'comparable'; token: string; line: number } =>
+    c.kind === 'comparable',
+  );
+  if (targets.length === 0) return content;
+
+  const lines = content.split('\n');
+  const known = new RegExp(`\\b(${[...ADR_STATUSES].join('|')})\\b`, 'i');
+
+  for (const t of targets) {
+    const idx = t.line - 1;
+    if (idx < 0 || idx >= lines.length) continue;
+    const m = known.exec(lines[idx]);
+    if (!m) continue; // reader saw a token this line no longer carries — leave it alone
+    // Mirror the original capitalisation so `**Proposed.**` and `proposed` each keep shape.
+    const wasCapitalised = m[1][0] === m[1][0].toUpperCase();
+    const replacement = wasCapitalised
+      ? status.charAt(0).toUpperCase() + status.slice(1)
+      : status;
+    lines[idx] =
+      lines[idx].slice(0, m.index) + replacement + lines[idx].slice(m.index + m[1].length);
+  }
+  return lines.join('\n');
+}
+
 export function setAdrStatus(filePath: string, status: AdrStatus): AdrStatus {
   if (!ADR_STATUSES.has(status)) {
     throw new Error(`Invalid ADR status: ${status}`);
@@ -623,7 +671,9 @@ export function setAdrStatus(filePath: string, status: AdrStatus): AdrStatus {
   // frontmatter field can never be interpreted as a replacement pattern (#152).
   const block = `---\n${newYaml}\n---`;
   const updated = content.replace(FRONTMATTER_RE, () => block);
-  fs.writeFileSync(filePath, updated, 'utf-8');
+  // #1624 — the body's `## Status` section is the third place this status lives.
+  // Writing only the frontmatter here is what broke parity on every acceptance.
+  fs.writeFileSync(filePath, reconcileBodyStatus(updated, status), 'utf-8');
   return status;
 }
 

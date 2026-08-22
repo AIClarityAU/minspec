@@ -1,7 +1,7 @@
 ---
 id: SPEC-061
 type: requirements
-status: implementing
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — an approved spec must be able to agree with itself
@@ -18,6 +18,12 @@ implements_reason: >-
 affects:
   - packages/minspec/src/lib/spec.ts
   - packages/minspec/src/lib/lifecycle.ts
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # MinSpec — A phaseless spec cannot agree with itself: fix the asymmetric approval writer (Requirements)
@@ -69,14 +75,14 @@ The inline comment already names this as the DR-069 residual and points at #957.
 
 ### The reader then contradicts the writer
 
-`deriveStatus` tests `allPending` **before** the approval check (`lifecycle.ts:114-115`):
+`deriveStatus` tests `allPending` **before** the approval check (`lifecycle.ts:139-140`):
 
 ```ts
 if (allPending(phases)) return 'new';
 if (approvalState !== 'approved') return 'specifying';
 ```
 
-`parseSpec` materializes every absent phase to `pending` (`spec.ts:113-116`), so a phaseless
+`parseSpec` materializes every absent phase to `pending` (`spec.ts:246-252`, via `phaseStatusOf` at `:113-116`), so a phaseless
 spec is always `allPending`. The writer stamps `implementing`; the reader returns `new`.
 
 **A phaseless spec cannot agree with itself, whatever it was approved as.** Not a data
@@ -84,8 +90,10 @@ accident — a property of the current code.
 
 ### Measured consequence 1 — the status mirror
 
-22 of 51 specs in this corpus are phaseless and drifting (#1513). `npm run validate` passes on
-every one: 128 warnings, none about this.
+22 of 51 specs in this corpus were phaseless and drifting when this was written (#1513).
+**Re-measured 2026-08-22: 27 of 58**, of which 23 are approved. `npm run validate` still passes
+on every one — 140 non-fatal warnings, zero blocking errors, none about status drift. The claim
+was right and the direction got worse.
 
 ### Measured consequence 2 — the ownership rule has never fired
 
@@ -169,9 +177,22 @@ cost.
 - **AC-4 (FR-4).** `specHash(before) === specHash(after)` for the approval write, and the value
   still equals the stored sidecar hash when one exists.
 - **AC-5 (FR-5).** A second approval run on the same file is a byte-for-byte no-op.
-- **AC-6 (FR-2, degenerate block preserved).** A spec with a *partial* phases block that cannot
-  realize the approval target still throws rather than silently under-advancing — the existing
-  `spec.ts:517-521` gate is not weakened by this change.
+- **AC-6 (FR-2, degenerate block preserved) — AMENDED at Clarify 2026-08-22.** *As originally
+  written this criterion could not pass:* it said a spec with a **partial** phases block that
+  cannot realize the approval target still throws, and
+  [approve-phase-sync.test.ts:229-255](../../../packages/minspec/tests/approve-phase-sync.test.ts#L229)
+  feeds exactly that shape (`phases:` with only `specify: in-progress`) and asserts `planning`,
+  green, no throw. After DR-069/#886 the target for a specify-only block **is** `planning`, which
+  the persisted bytes reproduce, so `persistedStatus !== target` is false and the gate correctly
+  stays silent. It also cited `spec.ts:517-521`, which is docstring prose, not the gate.
+  **Amended criterion:** a spec whose `phases:` block contains no recognized phase child persists
+  all-pending, derives `new` against a `planning` target, and therefore still throws at the
+  degenerate-block gate — `spec.ts:591` (condition), `:592-598` (throw). That gate is not
+  weakened by this change. **The test for this MUST also assert that the refused approval left
+  the file byte-identical**, which it does not today: `advanceSpecToImplementing` writes phases
+  (`spec.ts:566`) and the status line (`:575`) *before* the gate throws, with no rollback in
+  `approve.ts` — an INV-1 half-write, tracked as
+  [#1634](https://github.com/AIClarityAU/minspec/issues/1634).
 - **AC-7 (FR-7).** `deriveStatus`'s truth table is unchanged: the existing `lifecycle.test.ts`
   cases pass untouched, including `allPending → new`.
 - **AC-8 (FR-6).** A test asserts the documented behaviour of whichever function creates the
@@ -193,9 +214,20 @@ cost.
 
 ## Out of Scope
 
-- **Backfilling the 22 drifting specs** (#1513) and **the 20 missing ownership declarations**
+- **Backfilling the drifting specs** (#1513) and **the missing ownership declarations**
   (#1543). This spec stops the source; the corpus cleanup is separate work with a separate
-  human cost (20 re-approvals) and must not be smuggled in behind a writer fix.
+  human cost and must not be smuggled in behind a writer fix.
+  **Correction (Clarify 2026-08-22) — the ordering in that sentence is backwards.** The
+  ownership backfill is a **prerequisite** for FR-1 to reach anything, not a follow-on.
+  `assertOwnershipDeclaredForAdvance` runs at `spec.ts:545`, **before** the phaseless
+  short-circuit at `:555`, and it simulates the advance — `parseSpec` materializes absent phases
+  to `pending`, `phasesForApproval` turns that into `plan: in-progress`, and `validateOwnership`
+  fires. So an undeclared phaseless T3/T4 spec cannot be re-approved **today**, and never reaches
+  the new write path. Measured 2026-08-22: of 27 phaseless T3/T4 specs, **4 declare ownership**
+  (SPEC-025, SPEC-056, SPEC-062, SPEC-063) and **23 do not**. FR-1 can only ever fire on those 4
+  plus specs written from here on. This spec is still worth shipping — it fixes the writer for
+  every future spec and removes a live INV-1 defect — but it does not, on its own, resolve the
+  corpus-wide drift its Context describes.
 - **Reordering `deriveStatus`** so an approved phaseless spec derives `planning` instead of
   `new`. That removes the *visible* drift while leaving the ownership rule just as inert — it
   would make the corpus look correct without making it correct, which on a never-wrong posture
@@ -206,7 +238,84 @@ cost.
 - **The `superseded` explicit-terminal resolver** (#1520) — adjacent status-derivation bug, its
   own fix.
 
-## Decisions needed (Clarify)
+## Decisions (Clarify — resolved 2026-08-22)
+
+All three are answered. The original option lists are kept verbatim below, because two of the
+three turned out not to be live forks at all, and a reader needs to see the option beside the
+reason it was not a choice.
+
+### DQ-1 → one function, with an **opt-in** `createIfAbsent` — not the unconditional widening this document recommends
+
+`setSpecPhases(filePath, phases, { createIfAbsent })`, defaulting to today's shape-preserving
+behaviour, with the approval path at `spec.ts:566` passing it.
+
+**Why not plain Option A, which is this document's own recommended default: it contradicts this
+document's own approved FR-6.** FR-6 says *"the shape-preserving contract MUST remain available
+to any future caller that needs it."* Unconditional widening leaves no caller any way to obtain
+it. The spec recommends an option that violates its own requirement, and that self-contradiction
+is a larger finding than the A-versus-B choice — it survived authoring, review and approval.
+
+**Why not Option B.** The duplication argument is measured, not rhetorical: `70d609f`
+(`fix(#1520): one shared explicit-terminal resolver`) landed 2026-08-16 and collapsed three
+hand-rolled copies of one mapping into `explicitTerminalOf`. That is this codebase drifting
+duplicated logic, in this exact file pair, in the same week this spec was approved.
+
+**What the recommendation's own evidence got wrong.** DQ-1 argues A is safe because "there is no
+second caller today", making the risk hypothetical. There is no second *production* caller —
+`spec.ts:566` is the only one, verified. But
+[approve-phase-sync.test.ts:130-136](../../../packages/minspec/tests/approve-phase-sync.test.ts#L130)
+is `it('is a no-op when there is no phases block')`, asserting the file is **byte-identical**
+afterwards. Someone wrote a test specifically to pin the contract A inverts. Under the opt-in
+form that test survives as the pinning test for the default, which is what AC-8 actually asks
+for; under plain A it has to be deleted.
+
+***Cost, stated plainly:*** a defaulted flag is a quiet failure mode. A future caller who forgets
+`{ createIfAbsent: true }` silently reproduces the exact #957 half-write this spec exists to
+remove, and nothing errors. Making the parameter required removes that hazard at the price of a
+wider diff — the one production call site plus all three test call sites — and Plan should treat
+"required or defaulted" as the one remaining sub-choice here.
+
+### DQ-2 → A (create it). Not a live fork: approved FR-1 already mandates it.
+
+FR-1 says the approval writer **MUST** persist a `phases:` block when the spec has none, and Out
+of Scope already records refusing as *"considered and rejected as the default"*. Two approved
+sections settle this, so DQ-2 was posing a question the document had already answered twice.
+
+Creation is hash-free, measured twice: `614a569c` (#1507) added SPEC-059's block with its sidecar
+hash unchanged, and inserting a full block plus `status: planning` into **this** spec reproduced
+its stored hash exactly — which is how SPEC-061's own drift was repaired on 2026-08-22 at no
+approval cost.
+
+***Cost, corrected:*** the cost this document states — that 22 specs acquire machine-written
+phase values a reader may mistake for authored ones — is real but describes a reach the writer
+does not have. Per the Out of Scope correction above, FR-1 can only fire on the **4** phaseless
+T3/T4 specs that declare ownership; the other **23** cannot be re-approved at all until someone
+declares theirs. So the honest cost of A is the opposite of the one written: not too many specs
+silently rewritten, but too few reached to fix the problem the Context describes.
+
+### DQ-3 → delete the branch and its stale #957 comment. Control flow, not preference.
+
+Not a judgement call. `advanceSpecToImplementing` tests the phaseless short-circuit at
+`spec.ts:555` and `return`s at `:556`, so `:559-566` — where `phasesForApproval` runs and
+`setSpecPhases` is called — is **never reached** for a phaseless spec. Whatever DQ-1 does to
+`setSpecPhases`, leaving this branch means the creation code is never invoked on the only input
+shape it exists for: FR-1 unmet, AC-1 and AC-3 fail. "Leave it unreachable" inverts which code
+is unreachable.
+
+Plan must also invert
+[approve-phase-sync.test.ts:183-192](../../../packages/minspec/tests/approve-phase-sync.test.ts#L183),
+which today asserts `implementing` and `not.toContain('phases:')` — the exact inverse of AC-1 and
+AC-3 — and sweep `spec.ts:412`, whose comment documents `bodyStatusToken` as mirroring
+*"`setSpecPhases` never adding"* and becomes false the moment FR-1 lands.
+
+***Cost:*** deleting the branch removes the only path that produces a status-only flip, so
+`advanceSpecToImplementing` gains a hard dependency on block creation succeeding for every input
+shape. For frontmatter the corpus has not yet produced, approval will fail loudly rather than
+half-write. That is the correct trade under constitution invariant 2, but it is a real behaviour
+change: today a malformed spec still gets approved, afterwards it does not.
+
+### The forks as originally posed
+
 
 - **DQ-1 — Where does block creation live: widen `setSpecPhases`, or a new sibling?**
   - **Option A — widen `setSpecPhases` to create when absent (recommended default).** One
@@ -248,7 +357,7 @@ cost.
 | R1 | Fixing the writer arms `validateOwnership` on any spec that gains a block, so future approvals of phaseless specs will start failing the ownership rule. | That is the gate working (#1543). FR-8 forbids auto-resolving it; the failure is loud and the fixHint names the remedy. |
 | R2 | Widening `setSpecPhases` (DQ-1 A) surprises a future caller. | One caller today; FR-6 requires the docstring to state the new behaviour, and AC-8 pins it with a test. |
 | R3 | A created block changes bytes and stales the approval being recorded. | FR-4 + AC-4. `canonical.ts` strips `status`/`phases`, and #1507 already demonstrated the edit is hash-free on a real spec. |
-| R4 | The change silently weakens the degenerate-block throw (`spec.ts:517-521`). | AC-6 pins it explicitly. |
+| R4 | The change silently weakens the degenerate-block throw (`spec.ts:591`, throw body `:592-598`; `:517-521` is the docstring describing it, not the gate). | AC-6 pins it explicitly, as amended. |
 | R5 | Inferred phase values are later read as human-authored intent. | DQ-2's recommendation forbids a comment implying authorship; the values are exactly what approval means. |
 
 ## Traceability
@@ -258,6 +367,6 @@ cost.
 - **Downstream consequence 2:** [#1543](https://github.com/AIClarityAU/minspec/issues/1543) — the ownership rule has never fired on 20 approved specs.
 - **Precedent fix (data half):** [#1507](https://github.com/AIClarityAU/minspec/issues/1507) — SPEC-059's block reconstructed hash-neutrally.
 - **Writer:** `packages/minspec/src/lib/spec.ts:445-463` (`setSpecStatus`), `:475-494` (`setSpecPhases`), `:528-566` (`advanceSpecToImplementing`).
-- **Reader:** `packages/minspec/src/lib/lifecycle.ts:108-121` (`deriveStatus`), `:174-185` (`phasesForApproval`).
+- **Reader:** `packages/minspec/src/lib/lifecycle.ts:133-146` (`deriveStatus`), `:199-210` (`phasesForApproval`).
 - **Hash boundary:** `packages/shared/src/canonical.ts:14-16`.
 - **Method:** RCDD Phase 4 ([DR-003](../../../docs/decisions/DR-003.md)) — mechanism plus the gate that failed.
