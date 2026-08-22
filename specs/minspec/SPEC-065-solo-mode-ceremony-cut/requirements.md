@@ -187,8 +187,11 @@ validated a tree in which only one SPEC-061 existed (repaired by #1574).
 
 **Measured, 2026-08-21:**
 
-- The ruleset's `strict_required_status_checks_policy` is **`false`** (ruleset `18352261`,
-  read 2026-08-21). An earlier draft of this Clarify pass "corrected" this to `null`; that
+- The ruleset's `strict_required_status_checks_policy` was **`false`** when this Clarify
+  pass measured it (ruleset `18352261`, read 2026-08-21). **Superseded 2026-08-22** — see
+  the APPLIED note under the decision below, which carries the witness showing `true`. The
+  measurement is kept rather than overwritten because it is the cost basis the decision was
+  taken on. An earlier draft of this Clarify pass "corrected" this to `null`; that
   was wrong. `null` is what the `/rules/branches/main` projection reports because that
   endpoint exposes a differently-named field — the ruleset itself stores `false`. #1394's
   original wording was right, and the correction has been withdrawn.
@@ -217,10 +220,39 @@ NOT part of this decision.
 note recording the throughput trade. A merge queue (option (b)) remains the better
 long-term answer if the serialisation cost proves painful; it is not foreclosed.
 
-**Not yet applied.** The flip requires repo-admin scope. The `minspec-sdd` App has
+**APPLIED 2026-08-22** by the founder (ruleset `updated_at: 2026-08-22T12:30:44+10:00`).
+
+Witness, so this is checkable rather than asserted — re-runnable by any reader:
+
+```
+$ gh api repos/AIClarityAU/minspec/rulesets/18352261 \
+    --jq '.rules[] | select(.type=="required_status_checks") | .parameters
+          | {strict: .strict_required_status_checks_policy,
+             checks: [.required_status_checks[] | {context, integration_id}]}'
+
+{"strict":true,
+ "checks":[{"context":"lint","integration_id":null},
+           {"context":"test","integration_id":null},
+           {"context":"MinSpec SDD validation","integration_id":null},
+           {"context":"ai-review","integration_id":4212099},
+           {"context":"ready-to-merge","integration_id":15368},
+           {"context":"build","integration_id":null}]}
+```
+
+Both `integration_id` bindings survived the write (`ai-review` → 4212099,
+`ready-to-merge` → 15368) — the bindings `scripts/audit-ruleset-integration-ids.ts` exists
+to protect, and which a `PUT` that rebuilt the rules array could silently have dropped,
+turning two provenance-bound checks into name-matched ones any producer could satisfy.
+
+The flip was a human act by necessity, not preference: the `minspec-sdd` App has
 `admin=false` and the API returns `403 Resource not accessible by integration` on
-`PUT /repos/.../rulesets/18352261` — which is the correct boundary: the reviewer App must
-not be able to rewrite the protection that gates it. This is a human act, pending.
+`PUT /repos/.../rulesets/18352261`. That is the correct boundary — the reviewer App must
+not be able to rewrite the protection that gates it — and it is worth recording, because
+it means this row of the ceremony cut can never be fully automated.
+
+First observed effect, within minutes: PR #1629 flipped to `BEHIND` and required a
+merge-forward before it could proceed. That is the predicted cost arriving on schedule,
+not a fault.
 
 ### DQ-2 (machinery witness) — RESOLVED: two-stage trusted/untrusted split
 
