@@ -16,6 +16,7 @@
  */
 import { describe, it, expect } from 'vitest';
 import { reconcileBodyStatus } from '../src/lib/adr-manager';
+import { inspectAllStatusClaims } from '../src/lib/status-parity';
 
 const doc = (bodyStatus: string) =>
   `---\nid: DR-999\nstatus: proposed\n---\n\n# DR-999: Thing\n\n## Status\n\n${bodyStatus}\n\n## Context\n\nUnrelated **Proposed** word that must not be touched.\n`;
@@ -60,5 +61,52 @@ describe('#1624 — reconcileBodyStatus keeps the body in step with the frontmat
       const cap = s[0].toUpperCase() + s.slice(1);
       expect(reconcileBodyStatus(doc('**Proposed.** x'), s)).toContain(`**${cap}.** x`);
     }
+  });
+});
+
+// ─── The write/read asymmetry the reviewers caught ──────────────────────────
+// The first version matched only a BOLD `**Proposed.**` token, while the parity
+// gate also reads a plain-text leading word and the head-blockquote form. A
+// writer narrower than its reader silently leaves exactly the claims the gate
+// then fails on. These pin the shapes that asymmetry missed.
+describe('#1624 — the writer covers every shape the parity reader recognises', () => {
+  const withBody = (body: string) =>
+    `---\nid: DR-997\nstatus: proposed\n---\n\n# DR-997\n\n## Status\n\n${body}\n\n## Context\n\nc\n`;
+
+  it('plain-text leading word, no emphasis at all', () => {
+    const out = reconcileBodyStatus(withBody('Proposed. Awaiting sign-off.'), 'accepted');
+    expect(out).toContain('Accepted. Awaiting sign-off.');
+  });
+
+  it('single-asterisk emphasis', () => {
+    expect(reconcileBodyStatus(withBody('*Proposed* — pending.'), 'accepted'))
+      .toContain('*Accepted* — pending.');
+  });
+
+  it('head-blockquote form `> **Status: proposed — …**`', () => {
+    const doc = `---\nid: DR-996\nstatus: proposed\n---\n\n# DR-996\n\n> **Status: proposed — born per DR-029**\n\n## Context\n\nc\n`;
+    const out = reconcileBodyStatus(doc, 'accepted');
+    expect(out).toContain('Status: accepted');
+    expect(out).not.toContain('Status: proposed');
+  });
+
+  it('preserves lowercase when the original was lowercase', () => {
+    const doc = `---\nid: DR-995\nstatus: proposed\n---\n\n# DR-995\n\n> **Status: proposed — x**\n\n## Context\n\nc\n`;
+    expect(reconcileBodyStatus(doc, 'accepted')).toContain('Status: accepted');
+  });
+
+  it('leaves a freeform status line alone (not in the vocabulary)', () => {
+    const doc = withBody('Clarify complete — awaiting Accept.');
+    expect(reconcileBodyStatus(doc, 'accepted')).toBe(doc);
+  });
+
+  it('writer and reader agree: after a rewrite the parity gate sees no mismatch', () => {
+    // The property that matters, asserted end-to-end against the REAL reader
+    // rather than against this module's idea of what a claim looks like.
+    const doc = withBody('Proposed. Awaiting sign-off.');
+    const out = reconcileBodyStatus(doc, 'accepted');
+    const claims = inspectAllStatusClaims(out, 'dr').filter((c) => c.kind === 'comparable');
+    expect(claims.length).toBeGreaterThan(0);
+    for (const c of claims) expect((c as { token: string }).token).toBe('accepted');
   });
 });

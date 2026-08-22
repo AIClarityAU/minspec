@@ -4,6 +4,7 @@ import * as crypto from 'crypto';
 import { loadConfig, applyVSCodeOverrides, resolveAndValidate } from './config';
 import { slugify } from './spec-manager';
 import { epicRefValue } from './epic-manager';
+import { inspectAllStatusClaims } from './status-parity';
 export { slugify };
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -595,43 +596,50 @@ function synthesizeAdrFrontmatter(filePath: string, content: string, status: Adr
  * Returns the updated status.
  */
 /**
- * Reconcile a DR's body `## Status` section with `status`, and return the new content.
+ * Reconcile every body status claim with `status`, and return the new content.
  *
- * A DR's status lives in THREE places — frontmatter, this body section, and the INDEX
- * entry. `setAdrStatus` historically wrote only the first and `applyStatus` only the
- * third, so every acceptance left the file asserting two different statuses at once
- * (#1624). The #626 parity rule caught it, but only after the accept had already landed
- * on `main` — which took `main` red on 2026-08-19 and blocked every open PR.
+ * A DR's status lives in THREE places — frontmatter, the body, and the INDEX entry.
+ * `setAdrStatus` historically wrote only the first and `applyStatus` only the third, so
+ * every acceptance left the file asserting two different statuses at once (#1624). That
+ * took `main` red on 2026-08-19 and blocked every open PR.
  *
- * Deliberately CONSERVATIVE. It rewrites only the first **bold status word** inside the
- * `## Status` section, and only when that word is one this function recognises. Anything
- * else is returned untouched for the parity validator to flag, because silently mangling a
- * hand-authored rationale is a worse failure than a caught parity error. 60 of the repo's
- * 86 DRs have no `## Status` section at all; for those this is a no-op.
+ * The claims are located with `inspectAllStatusClaims` — the SAME reader the #626/#1223
+ * parity gate uses — rather than a regex of this module's own. That is deliberate: the
+ * first version of this function matched only a bold `**Proposed.**` token, while the gate
+ * also recognises a plain-text leading word and the head-blockquote form
+ * `> **Status: proposed — …**`. A writer narrower than its reader silently leaves exactly
+ * the claims the gate will fail on. Sharing the locator makes the two impossible to
+ * diverge: whatever the gate can read, this rewrites.
+ *
+ * Still conservative in WHAT it rewrites — only `comparable` claims, i.e. a word already in
+ * the artifact's status vocabulary. `freeform` ("Clarify complete — awaiting Accept") and
+ * `unparseable` lines are returned untouched, because silently rewording a hand-authored
+ * rationale is a worse failure than a caught parity error.
  */
 export function reconcileBodyStatus(content: string, status: AdrStatus): string {
-  const heading = /^##[ \t]+Status[ \t]*$/m.exec(content);
-  if (!heading) return content;
+  const claims = inspectAllStatusClaims(content, 'dr');
+  const targets = claims.filter((c): c is { kind: 'comparable'; token: string; line: number } =>
+    c.kind === 'comparable',
+  );
+  if (targets.length === 0) return content;
 
-  const start = heading.index + heading[0].length;
-  const rest = content.slice(start);
-  const nextHeading = /^##[ \t]+/m.exec(rest);
-  const end = nextHeading ? start + nextHeading.index : content.length;
+  const lines = content.split('\n');
+  const known = new RegExp(`\\b(${[...ADR_STATUSES].join('|')})\\b`, 'i');
 
-  const section = content.slice(start, end);
-  // Only a RECOGNISED status word anchors the rewrite. `[A-Za-z]+` alone would
-  // happily eat the first bold word of an unrelated sentence.
-  const tokenRe = /\*\*(Proposed|Accepted|Deprecated|Superseded)(\*\*|\.\*\*)/;
-  const m = tokenRe.exec(section);
-  if (!m) return content;
-
-  const capitalised = status.charAt(0).toUpperCase() + status.slice(1);
-  // Preserve whether the period sat inside the bold markers.
-  const replacement = m[2] === '.**' ? `**${capitalised}.**` : `**${capitalised}**`;
-  const newSection =
-    section.slice(0, m.index) + replacement + section.slice(m.index + m[0].length);
-
-  return content.slice(0, start) + newSection + content.slice(end);
+  for (const t of targets) {
+    const idx = t.line - 1;
+    if (idx < 0 || idx >= lines.length) continue;
+    const m = known.exec(lines[idx]);
+    if (!m) continue; // reader saw a token this line no longer carries — leave it alone
+    // Mirror the original capitalisation so `**Proposed.**` and `proposed` each keep shape.
+    const wasCapitalised = m[1][0] === m[1][0].toUpperCase();
+    const replacement = wasCapitalised
+      ? status.charAt(0).toUpperCase() + status.slice(1)
+      : status;
+    lines[idx] =
+      lines[idx].slice(0, m.index) + replacement + lines[idx].slice(m.index + m[1].length);
+  }
+  return lines.join('\n');
 }
 
 export function setAdrStatus(filePath: string, status: AdrStatus): AdrStatus {
