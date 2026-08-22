@@ -52,15 +52,22 @@ describe('ENFORCE: AI_REVIEW_BOT_LOGINS identifier agreement — ready-to-merge.
   // agreement is checked at the point of coupling. There must be exactly one such
   // binding — a second would mean an unrelated `vars.*` env crept onto its own line and
   // this assertion no longer proves what it claims.
+  // The binding may carry a `|| 'default'` fallback (DR-054 ships `minspec-sdd[bot]`
+  // so a fresh repo's provenance gate is armed without any manual setup). The fallback
+  // is captured too, so the guard covers it rather than being loosened to ignore it —
+  // an unset variable must resolve to the shipped identity, never to an EMPTY allowlist,
+  // which would affirm nobody and silently disarm the gate.
   const bindings = [
-    ...workflow.matchAll(/([A-Z0-9_]+):\s*\$\{\{\s*vars\.([A-Z0-9_]+)\s*\}\}/g),
+    ...workflow.matchAll(
+      /([A-Z0-9_]+):\s*\$\{\{\s*vars\.([A-Z0-9_]+)\s*(?:\|\|\s*'([^']*)')?\s*\}\}/g,
+    ),
   ];
 
   it('the workflow binds exactly one `env: KEY: ${{ vars.NAME }}` (the allowlist var)', () => {
     expect(bindings).toHaveLength(1);
   });
 
-  const [, envKey, varName] = bindings[0];
+  const [, envKey, varName, fallback] = bindings[0];
 
   it('site 1 (env key) === site 2 (vars.* reference) — the binding is self-consistent', () => {
     // env: AI_REVIEW_BOT_LOGINS: ${{ vars.AI_REVIEW_BOT_LOGINS }}
@@ -74,6 +81,18 @@ describe('ENFORCE: AI_REVIEW_BOT_LOGINS identifier agreement — ready-to-merge.
     // sites agreeing on the WRONG spelling. Update deliberately only alongside the
     // matching Actions-variable + guard rename.
     expect(varName).toBe('AI_REVIEW_BOT_LOGINS');
+  });
+
+  it('the binding falls back to the shipped reviewer identity, never to an empty allowlist', () => {
+    // DR-054: `minspec-sdd[bot]` is a product constant, and the variable is retained
+    // only as the enterprise override. Without the fallback an unset variable yields
+    // '', parseAllowlist returns an EMPTY allowlist, and the provenance gate affirms
+    // nobody — so `ready-to-merge` can never go green. It fails CLOSED, which is safe
+    // but blocks every PR behind an admin override; the default is what makes the gate
+    // satisfiable rather than merely survivable.
+    expect(fallback, 'the allowlist binding has no default — an unset var disarms the gate').toBe(
+      'minspec-sdd[bot]',
+    );
   });
 
   it('site 3 (script read) — parseAllowlist(process.env.<NAME>) reads the SAME identifier', () => {
