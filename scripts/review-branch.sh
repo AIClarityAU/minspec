@@ -304,7 +304,31 @@ is_quota_strict() {
 emit_unavailable() {
   local detail
   detail=$(printf '%s\n' "${1:-}" | tr -d '\r' | grep -iE 'limit|quota|reset|try again|429|overload' | head -3 | sed 's/^/  /' || true)
-  printf 'REVIEW_UNAVAILABLE_BEGIN\nreason: quota\ndetail: |\n%s\nREVIEW_UNAVAILABLE_END\n' "${detail:-  (no detail captured; likely subscription session quota)}"
+
+  # #1630 — when NOTHING was captured, `reason: quota` is an INFERENCE, not an
+  # observation, and the old wording ("likely subscription session quota") admitted as
+  # much in prose while the machine-readable `reason:` still asserted it flatly. Two
+  # costs: the stated reset time #1619 schedules retries against is absent, and a genuine
+  # crash that writes nothing is indistinguishable from a transient outage — so it rides
+  # the retry loop forever presenting as retry-able.
+  #
+  # The evidence is now emitted alongside the claim so the NEXT occurrence is explicable
+  # without re-deriving it from source: which stream carried text, how much, and which
+  # classifier branch fired. Diagnostics only — `reason:` is unchanged, because changing
+  # what the gate concludes is a separate decision (tracked on #1630) and must not ride in
+  # on an observability fix.
+  local err_len out_len branch
+  err_len=${#AGENT_ERR}
+  out_len=$(agent_stdout_text | wc -c | tr -d ' ')
+  if [[ -n "${AGENT_ERR//[[:space:]]/}" ]]; then branch="stderr(loose)"; else branch="stdout(strict)"; fi
+
+  if [[ -n "$detail" ]]; then
+    printf 'REVIEW_UNAVAILABLE_BEGIN\nreason: quota\nevidence: captured\nclassified_via: %s\nstderr_bytes: %s\nstdout_bytes: %s\ndetail: |\n%s\nREVIEW_UNAVAILABLE_END\n' \
+      "$branch" "$err_len" "$out_len" "$detail"
+  else
+    printf 'REVIEW_UNAVAILABLE_BEGIN\nreason: quota\nevidence: NONE (reason is inferred, not observed)\nclassified_via: %s\nstderr_bytes: %s\nstdout_bytes: %s\ndetail: |\n%s\nREVIEW_UNAVAILABLE_END\n' \
+      "$branch" "$err_len" "$out_len" "  (no diagnostic text on either stream — see #1630)"
+  fi
 }
 
 # Is this failure a quota/transient outage? (#1131)
