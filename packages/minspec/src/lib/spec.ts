@@ -466,7 +466,28 @@ export function setSpecStatus(filePath: string, status: SpecStatus): SpecStatus 
  * Surgically rewrite phase-status lines inside a spec's `phases:` frontmatter
  * block, in place. Only lines that ALREADY exist under `phases:` are rewritten —
  * absent phases are NOT added, preserving the file's chosen shape (a spec that
- * tracks no `clarify:` line keeps none). No-op when there is no `phases:` block.
+ * tracks no `clarify:` line keeps none).
+ *
+ * TWO KINDS OF ABSENCE, and they are treated differently on purpose (SPEC-061 FR-1/FR-2):
+ *
+ *  - **No `phases:` block at all** → the block IS CREATED, with every phase in `PHASES`
+ *    order (any phase the caller does not supply is written `pending`). This used to be a
+ *    silent no-op, which is what made an approval write only half the lifecycle state:
+ *    `setSpecStatus` creates its key when absent (below), `setSpecPhases` did not, so
+ *    `advanceSpecToImplementing` stamped a literal the file provably could not re-derive.
+ *    `deriveStatus` tests `allPending` before the approval check (lifecycle.ts), and
+ *    `parseSpec` materializes absent phases to `pending`, so such a spec derived `new`
+ *    however it was approved. One missing block also left `validateOwnership` un-armed
+ *    (its `inBuildPath` reads `plan`), so 22 specs drifted (#1513) and 20 were never
+ *    ownership-gated (#1543). See #957 / SPEC-061.
+ *  - **A block that omits individual phase lines** → unchanged. Lines are still never
+ *    invented, so the degenerate-block gate in `advanceSpecToImplementing` still fires
+ *    rather than silently under-advancing (SPEC-061 AC-6).
+ *
+ * Creating the block is hash-neutral: `canonical.ts` strips `status` and `phases` from
+ * the canonical form, so an approval-time write cannot stale the approval it is recording
+ * (SPEC-061 FR-4). Idempotent — a second call rewrites the same block rather than
+ * appending a second one (FR-5).
  *
  * Mirrors `setSpecStatus`: line-level, never a `writeSpec()` re-serialize, so
  * full-line `#` comments (the DR-012 lock reminder) and field order survive.
@@ -480,7 +501,15 @@ export function setSpecPhases(filePath: string, phases: Partial<Record<Phase, Ph
   }
   const lines = fmMatch[1].split('\n');
   const phasesIdx = lines.findIndex((l) => /^phases[ \t]*:/.test(l));
-  if (phasesIdx === -1) return; // no phases block → nothing to rewrite
+  if (phasesIdx === -1) {
+    // Create the block rather than no-op (SPEC-061 FR-1). Appended at the end of the
+    // frontmatter, matching where every hand-authored spec already puts it. Two-space
+    // indent is the corpus convention and the shape `parseSpec` reads back.
+    const created = ['phases:', ...PHASES.map((p) => `  ${p}: ${phases[p] ?? 'pending'}`)];
+    const newYaml = [...lines, ...created].join('\n');
+    fs.writeFileSync(filePath, content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---\n`), 'utf-8');
+    return;
+  }
   for (let i = phasesIdx + 1; i < lines.length; i++) {
     // The phases block ends at the first line that is not an indented child.
     if (!/^[ \t]/.test(lines[i])) break;
@@ -495,18 +524,21 @@ export function setSpecPhases(filePath: string, phases: Partial<Record<Phase, Ph
 
 /**
  * Advance a spec into the `implementing` band on approval, keeping the literal
- * `status:` line and any `phases:` map in agreement (#148). When the spec carries
- * a `phases:` block, the block is advanced (specifying band → done, implementing
- * band started) and the status line is written as the status the *persisted bytes*
- * derive, so the two representations cannot diverge. When there is no `phases:`
- * block, only the `status:` line is set to `implementing` — the established
- * single-writer path.
+ * `status:` line and the `phases:` map in agreement (#148). The block is advanced
+ * (specifying band → done, implementing band started) and the status line is written
+ * as the status the *persisted bytes* derive, so the two representations cannot
+ * diverge. ONE path, for every input shape: a spec with no `phases:` block gets one
+ * created by `setSpecPhases` (SPEC-061 FR-1), rather than the status-only flip this
+ * function used to fall back on. That fallback was #957 — it stamped `implementing`
+ * on bytes that derive `new`, so the file contradicted itself the moment it was
+ * re-read, and it left `validateOwnership` un-armed for the spec's own files.
  *
  * Degenerate-case gate (#148 MAJOR). `phasesForApproval` computes the target from
  * the in-memory map, where `parseSpec` MATERIALIZED every absent phase to
- * `pending`. But `setSpecPhases` only rewrites phase lines that PHYSICALLY exist —
- * it never invents one (its contract, preserving the file's shape). So a phases
- * block missing every implementing-band line (e.g. just `specify: in-progress`,
+ * `pending`. But within an EXISTING block `setSpecPhases` only rewrites phase lines
+ * that PHYSICALLY exist — it never invents an individual line (creating a whole
+ * missing block is the separate case above). So a phases block missing every
+ * implementing-band line (e.g. just `specify: in-progress`,
  * no plan/tasks/implement) cannot persist an implementing-band `in-progress`
  * marker: a re-read of the bytes derives a different status than the in-memory
  * target. Writing the status from the in-memory map — the shape of the earlier
@@ -543,19 +575,16 @@ export function advanceSpecToImplementing(filePath: string): SpecStatus {
   // (both inherited from `violationsIntroducedByApproval`), placed BEFORE any write, and
   // failing open on its own infrastructure while announcing the degrade.
   assertOwnershipDeclaredForAdvance(filePath, parseSpec(content));
-  // No `phases:` block → the `status:` line is the sole lifecycle representation;
-  // a status-only flip has nothing to contradict.
-  //
-  // DR-069 (#886) RESIDUAL (tracked #957): a phaseless spec has no phase signal to
-  // distinguish planning from implementing, so this branch still hard-stamps
-  // `implementing` at approval — the one shape where the #886 false-signpost fix
-  // (which lives in deriveStatus + the phases-block branch below) cannot apply. An
-  // approved-but-pre-implement phaseless spec therefore reads `implementing` here;
-  // #957 tracks defaulting it to `planning` or requiring a phases block at approval.
-  if (!/^phases[ \t]*:/m.test(fmMatch[1])) {
-    return setSpecStatus(filePath, 'implementing');
-  }
 
+  // NO SPECIAL CASE FOR A PHASELESS SPEC (SPEC-061 / #957 — the DR-069 residual is fixed).
+  // This used to short-circuit to `setSpecStatus(filePath, 'implementing')` when the
+  // frontmatter had no `phases:` block, because `setSpecPhases` could not create one. That
+  // stamped a literal the file provably could not re-derive: `parseSpec` materializes absent
+  // phases to `pending`, and `deriveStatus` tests `allPending` before the approval check, so
+  // the spec derived `new` however it was approved. `setSpecPhases` now creates the block, so
+  // the single path below is correct for every input shape — which is the point: the
+  // post-condition "the persisted bytes re-derive the written literal" is a property, not a
+  // property of specs that happened to arrive with a block (SPEC-061 INV-4).
   const newPhases = phasesForApproval(parseSpec(content).frontmatter.phases);
   // DR-069 (#886): write the APPROVAL-AWARE derived status (deriveStatus), not the
   // phases-only getSpecStatus — so an approved-but-pre-implement spec is stamped
