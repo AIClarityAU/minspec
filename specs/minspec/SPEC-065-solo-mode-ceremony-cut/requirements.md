@@ -217,10 +217,20 @@ NOT part of this decision.
 note recording the throughput trade. A merge queue (option (b)) remains the better
 long-term answer if the serialisation cost proves painful; it is not foreclosed.
 
-**Not yet applied.** The flip requires repo-admin scope. The `minspec-sdd` App has
+**APPLIED 2026-08-22** by the founder. Ruleset `18352261` now reports
+`strict_required_status_checks_policy: true`, with all six required checks and their
+`integration_id` bindings intact (`ai-review` → 4212099, `ready-to-merge` → 15368) — the
+bindings `scripts/audit-ruleset-integration-ids.ts` exists to protect.
+
+The flip was a human act by necessity, not preference: the `minspec-sdd` App has
 `admin=false` and the API returns `403 Resource not accessible by integration` on
-`PUT /repos/.../rulesets/18352261` — which is the correct boundary: the reviewer App must
-not be able to rewrite the protection that gates it. This is a human act, pending.
+`PUT /repos/.../rulesets/18352261`. That is the correct boundary — the reviewer App must
+not be able to rewrite the protection that gates it — and it is worth recording, because
+it means this row of the ceremony cut can never be fully automated.
+
+First observed effect, within minutes: PR #1629 flipped to `BEHIND` and required a
+merge-forward before it could proceed. That is the predicted cost arriving on schedule,
+not a fault.
 
 ### DQ-2 (machinery witness) — RESOLVED: two-stage trusted/untrusted split
 
