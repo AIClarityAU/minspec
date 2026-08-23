@@ -127,12 +127,27 @@ Body stays put.
     expect(after).toContain('  specify: done');
   });
 
-  it('is a no-op when there is no phases block', () => {
+  // PINNING TEST FOR THE DEFAULT (SPEC-061 DQ-1, resolved 2026-08-22). Creation is
+  // OPT-IN, so this contract survives unchanged — approved FR-6 requires the
+  // shape-preserving behaviour stay reachable, which unconditional widening would have
+  // removed. DQ-1 calls this test out by name as the reason plain Option A was rejected.
+  it('is a no-op when there is no phases block (default: shape-preserving)', () => {
     const noPhases = path.join(tmpDir, 'no-phases.md');
     const src = '---\nid: SPEC-201\nstatus: specifying\ntier: T2\n---\n# X\n';
     fs.writeFileSync(noPhases, src);
     setSpecPhases(noPhases, { specify: 'done' });
     expect(fs.readFileSync(noPhases, 'utf-8')).toBe(src); // byte-identical
+  });
+
+  it('creates the block ONLY when createIfAbsent is passed', () => {
+    const noPhases = path.join(tmpDir, 'no-phases-optin.md');
+    const src = '---\nid: SPEC-202\nstatus: specifying\ntier: T2\n---\n# X\n';
+    fs.writeFileSync(noPhases, src);
+    setSpecPhases(noPhases, { specify: 'done' }, { createIfAbsent: true });
+    const fm = parseSpec(fs.readFileSync(noPhases, 'utf-8')).frontmatter;
+    expect(fm.phases.specify).toBe('done');
+    expect(fm.phases.clarify).toBe('pending');
+    expect(fm.phases.implement).toBe('pending');
   });
 });
 
@@ -180,15 +195,23 @@ phases:
     expect(deriveStatus(parsed.frontmatter.phases, 'approved', undefined)).toBe(parsed.frontmatter.status);
   });
 
-  it('falls back to a status-only flip when the spec has no phases block', () => {
+  // CONTRACT CHANGED (SPEC-061 / #957). The status-only fallback is gone. It stamped
+  // `implementing` on bytes that derive `new` — a file that contradicted itself the
+  // moment it was re-read — and left `validateOwnership` un-armed because that rule
+  // keys on `plan`. There is now ONE path: the block is created and the literal is
+  // derived from the persisted bytes, so `planning` is correct for a pre-implement spec.
+  it('creates the phases block and stamps planning when the spec has none', () => {
     const p = write(
       'SPEC-203.md',
       '---\nid: SPEC-203\nstatus: specifying\ntier: T2\n---\n# X\n',
     );
-    expect(advanceSpecToImplementing(p)).toBe('implementing');
+    expect(advanceSpecToImplementing(p)).toBe('planning');
     const after = fs.readFileSync(p, 'utf-8');
-    expect(parseSpec(after).frontmatter.status).toBe('implementing');
-    expect(after).not.toContain('phases:'); // no phases block invented
+    const fm = parseSpec(after).frontmatter;
+    expect(fm.status).toBe('planning');
+    expect(after).toContain('phases:');
+    // the whole point: the persisted bytes reproduce the written literal
+    expect(fm.status).toBe(deriveStatus(fm.phases, 'approved', undefined));
   });
 
   it('preserves a skipped clarify through the advance (status still agrees)', () => {
@@ -286,14 +309,155 @@ phases:
     expect(after).toContain('**Status:** Planning (SDD Specify phase)');
   });
 
-  it('syncs the body **Status:** line for the no-phases-block fallback (#667)', () => {
+  // Still #667's body-token sync; only the expected VALUE changed, because the
+  // phaseless path now derives `planning` rather than hard-stamping `implementing`
+  // (SPEC-061 / #957). The property under test is unchanged: the body prose line and
+  // the frontmatter literal must not disagree.
+  it('syncs the body **Status:** line when the phases block is created (#667)', () => {
     const p = write(
       'SPEC-207.md',
       '---\nid: SPEC-207\nstatus: specifying\ntier: T2\n---\n\n# X\n\n**Status:** Specifying\n',
     );
     advanceSpecToImplementing(p);
     const after = fs.readFileSync(p, 'utf-8');
-    expect(after).toContain('status: implementing');
-    expect(after).toContain('**Status:** Implementing');
+    expect(after).toContain('status: planning');
+    expect(after).toContain('**Status:** Planning');
+  });
+});
+
+// ─── SPEC-061 / #957 — a phaseless spec must be able to agree with itself ─────
+//
+// Before this fix `advanceSpecToImplementing` short-circuited when the frontmatter
+// had no `phases:` block and stamped `status: implementing`. That literal was one
+// the file provably could not re-derive: `parseSpec` materializes absent phases to
+// `pending` and `deriveStatus` tests `allPending` BEFORE the approval check, so the
+// bytes derived `new`. 22 specs drifted this way (#1513), and because
+// `validateOwnership` arms on `plan`, 20 approved T3/T4 specs were never
+// ownership-gated at all (#1543) — one missing block silently disabled three things.
+describe('advanceSpecToImplementing — a spec with no phases: block (SPEC-061)', () => {
+  let dir: string;
+  const FM = [
+    '---',
+    'id: SPEC-999',
+    'type: requirements',
+    'status: specifying',
+    'tier: T2', // T2 so the SPEC-038 ownership guard is out of scope here
+    'product: minspec',
+    '# a full-line comment (the DR-012 lock reminder shape) must survive',
+    '---',
+    '',
+    '# Body',
+    '',
+    '## Requirements',
+    '- [ ] a thing',
+    '',
+  ].join('\n');
+
+  const write = (src = FM): string => {
+    const p = path.join(dir, 'requirements.md');
+    fs.writeFileSync(p, src, 'utf-8');
+    return p;
+  };
+  const fmOf = (p: string) => parseSpec(fs.readFileSync(p, 'utf-8')).frontmatter;
+
+  beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'spec061-')); });
+  afterEach(() => { fs.rmSync(dir, { recursive: true, force: true }); });
+
+  // AC-1
+  it('creates a complete phases block, in PHASES order', () => {
+    const p = write();
+    advanceSpecToImplementing(p);
+    const block = fs.readFileSync(p, 'utf-8').split('---')[1];
+    expect(block).toContain('phases:');
+    const order = ['specify', 'clarify', 'plan', 'tasks', 'implement'];
+    const seen = order.map((k) => block.indexOf(`  ${k}:`));
+    expect(seen.every((i) => i > -1), `missing a phase line: ${block}`).toBe(true);
+    expect(seen).toEqual([...seen].sort((a, b) => a - b)); // in order
+  });
+
+  // AC-2 — asserted on the PERSISTED BYTES, not the in-memory map
+  it('leaves the file agreeing with itself: literal === derived from the bytes', () => {
+    const p = write();
+    advanceSpecToImplementing(p);
+    const fm = fmOf(p);
+    expect(fm.status).toBe(deriveStatus(fm.phases, 'approved', undefined));
+  });
+
+  // AC-3 — THE regression. Pre-fix this was `implementing`.
+  it('stamps planning, not implementing, for an approved pre-implement spec', () => {
+    const p = write();
+    expect(advanceSpecToImplementing(p)).toBe('planning');
+    expect(fmOf(p).status).toBe('planning');
+  });
+
+  it('pre-fix shape is genuinely gone: the bytes no longer derive new', () => {
+    const p = write();
+    advanceSpecToImplementing(p);
+    expect(deriveStatus(fmOf(p).phases, 'approved', undefined)).not.toBe('new');
+  });
+
+  // AC-4 — hash-neutral, so an approval write cannot stale the approval it records
+  it('does not change the canonical hash', async () => {
+    const { specHash } = await import('@aiclarity/shared');
+    const p = write();
+    const before = specHash(fs.readFileSync(p, 'utf-8'));
+    advanceSpecToImplementing(p);
+    expect(specHash(fs.readFileSync(p, 'utf-8'))).toBe(before);
+  });
+
+  // AC-5
+  it('is idempotent — a second advance is a byte-for-byte no-op', () => {
+    const p = write();
+    advanceSpecToImplementing(p);
+    const once = fs.readFileSync(p, 'utf-8');
+    advanceSpecToImplementing(p);
+    expect(fs.readFileSync(p, 'utf-8')).toBe(once);
+  });
+
+  it('preserves full-line frontmatter comments (they are hashed content)', () => {
+    const p = write();
+    advanceSpecToImplementing(p);
+    expect(fs.readFileSync(p, 'utf-8')).toContain('# a full-line comment');
+  });
+
+  // AC-6 — the degenerate-block gate must NOT be weakened by block creation.
+  // A block that EXISTS but omits every implementing-band line still throws;
+  // individual lines are still never invented.
+  // The reachable degenerate shape, established by measurement rather than assumed:
+  // a block whose ONLY lines are implementing-band ones it cannot advance. The
+  // specifying-band lines phasesForApproval would mark `done` have no line to write
+  // to, so the persisted bytes stay all-pending and derive `new` while the target is
+  // `planning`. A block with only `specify:` or `specify:`+`clarify:` does NOT reach
+  // the gate (it advances cleanly to `planning`) — my first draft of this test used
+  // that shape and passed vacuously.
+  it.each([
+    // AC-6 as AMENDED at Clarify 2026-08-22: a block with NO recognized phase child.
+    ['no recognized child', 'phases:\n  notaphase: pending'],
+    // Also-reaching shapes, established by measurement: the specifying-band lines
+    // phasesForApproval would mark `done` have no line to write to, so the persisted
+    // bytes stay all-pending and derive `new` against a `planning` target.
+    ['only implement:', 'phases:\n  implement: pending'],
+    ['only tasks:', 'phases:\n  tasks: pending'],
+  ])('still throws on a degenerate block (%s) that cannot realize the target', (_n, block) => {
+    const p = write(FM.replace('product: minspec', `product: minspec\n${block}`));
+    expect(() => advanceSpecToImplementing(p)).toThrow(/Cannot advance/i);
+  });
+
+  it('does not invent individual phase lines inside an existing block', () => {
+    const p = write(FM.replace('product: minspec', 'product: minspec\nphases:\n  specify: pending\n  plan: pending'));
+    advanceSpecToImplementing(p);
+    const block = fs.readFileSync(p, 'utf-8').split('---')[1];
+    expect(block).not.toContain('clarify:');   // absent line stays absent
+    expect(block).not.toContain('implement:');
+  });
+
+  // setSpecPhases contract, pinned so docstring and behaviour cannot drift (AC-8)
+  it('setSpecPhases creates the block when opted in, defaulting unsupplied phases to pending', () => {
+    const p = write();
+    setSpecPhases(p, { plan: 'in-progress' }, { createIfAbsent: true });
+    const fm = fmOf(p);
+    expect(fm.phases.plan).toBe('in-progress');
+    expect(fm.phases.specify).toBe('pending');
+    expect(fm.phases.implement).toBe('pending');
   });
 });
