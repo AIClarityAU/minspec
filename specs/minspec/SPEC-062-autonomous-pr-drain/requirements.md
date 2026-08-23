@@ -8,7 +8,7 @@ epic: EPIC-007  # Agent Execute — the dev-time autonomous build/merge pipeline
 aspects: [autonomous-pipeline, drain, pull-request, auto-merge, scheduling, github-actions, signpost, hitl, sidecar-hash, git-recovery, tier-0, offline, no-silent-gate, blast-radius]
 depends_on: []  # see "Blocking dependencies" — #810/#811 (ready-to-merge gate) and #880 (docs-lane approvals) gate the fully-autonomous outcome, not this spec's authorship
 relates_to: [SPEC-044, SPEC-024, SPEC-050, SPEC-012, DR-057, DR-061, DR-067, DR-076, DR-015, DR-004]
-implements: [.github/workflows/drain.yml]  # NEW - the session-independent trigger (FR-1). Pinned to D1 Option A (the Action runs only the non-LLM steps). If Clarify picks B (self-hosted runner) or C (piggyback only) this path changes, so D1 MUST close before approval.
+implements: [.github/workflows/drain.yml]  # NEW - the session-independent trigger (FR-1). D1 RESOLVED 2026-08-23 as Option A (the Action runs only the non-LLM steps), so this path is now settled rather than provisional. D2/D3/D4 remain open but none of them changes the owned set.
 affects: [scripts/drain-inbox.sh, scripts/dispatch-issue.sh, scripts/remediate-pr.sh, scripts/auto-merge-gate.ts]  # drain-inbox/dispatch-issue/remediate-pr are OWNED by SPEC-044 via implements: - this spec modifies them, never owns them (INV: one owner per file). auto-merge-gate.ts is currently unowned; SPEC-024 owns the decideAutoMerge decision this spec only invokes.
 ---
 
@@ -119,8 +119,10 @@ defined path into the human's one next-task signpost.
 ## Functional Requirements
 
 - **FR-1 (session-independent trigger).** The drain cycle MUST be runnable with **no live
-  Claude session**. The delivery mechanism is a **[Decision needed — D1](#d1--what-runs-the-loop-when-no-session-is-alive)**;
-  whichever is chosen, the trigger MUST be a GitHub Action (`on: schedule` and/or
+  Claude session**. The delivery mechanism is **[D1](#d1--what-runs-the-loop-when-no-session-is-alive),
+  resolved 2026-08-23 as Option A**: a GitHub Action runs the non-LLM steps (auto-merge eligible
+  PRs, mechanical rebase, stranded-approval landing, git recovery, held → signpost), and LLM
+  rework remains session-piggybacked. The trigger MUST be a GitHub Action (`on: schedule` and/or
   `pull_request`/`push`) or a piggyback on an existing fan-out — **never** a `systemctl --user`
   / host cron timer (founder steer, 2026-07-24: a timer needs a per-machine human install and
   changes machine state; a workflow ships with the repo and installs itself). *Rationale: the
@@ -209,6 +211,19 @@ options and the trade-off; the human's one read resolves them. Resolving them ma
 more into a Decision Record (see [DR note](#dr-note)).
 
 ### D1 — What runs the loop when no session is alive?
+
+> **RESOLVED 2026-08-23 — Option A** (founder). The GitHub Action runs only the **non-LLM**
+> steps; LLM rework stays session-piggybacked. The options below are kept as the record of what
+> was chosen between, not as an open question.
+>
+> **Cost accepted with the choice:** rework still needs a live session, so a PR stuck on
+> `ai-review:changes` waits on a quiet day. R3 already carries the mitigation — the split is
+> explicit and the deferred work is `log()`ged, never silently truncated.
+>
+> Consequence for ownership: `implements: [.github/workflows/drain.yml]` is now settled. Under
+> Option B the owned artifact would have been a runner config, under Option C there would have
+> been no new file at all.
+
 The drain's rework step dispatches **LLM agents** (subscription `claude` CLI on a logged-in
 machine). A vanilla GitHub Action **cannot** run that CLI, and running LLM rework in CI needs a
 PAYG API key as a repo secret — which contradicts the subscription-default billing posture and
@@ -230,7 +245,7 @@ adds an exfil surface. So the trigger and the *worker* may not be the same thing
   *Trade-off:* smallest change, no new CI credential, but does not meet #888's "runs itself
   without a dedicated session" goal on a quiet day.
 
-**Recommendation:** Option A — it delivers the autonomy #888 actually asks for (merge/land the
+**Recommendation at authoring time — accepted, see the RESOLVED block above:** Option A — it delivers the autonomy #888 actually asks for (merge/land the
 ~80%) while keeping the LLM worker on the existing, quota-aware, credential-safe path and adding
 no PAYG secret to CI. Downside named: rework still needs a session, so a PR stuck on
 `ai-review:changes` on a quiet day waits.
@@ -305,17 +320,39 @@ fleet-wide `:00` spike.
 
 ## DR note
 
-This spec does **not** mint a Decision Record. The load-bearing architectural choice — the
-trigger model (D1) — is still **open** and is exactly what the Clarify read resolves; and each
-candidate is reversible in well under a day (delete the workflow / flip the trigger), so the
-DR-359 ADR filter does not yet apply. **On acceptance**, if the founder picks a trigger model
-(especially Option B, a self-hosted runner with a credentialed CLI behind a webhook — a
-security-relevant, less-trivially-reversible posture), a DR SHOULD be minted then to record the
-choice and its rejected alternatives. Checked `docs/decisions/INDEX.md`: the nearest in-force
-decisions are [DR-057](../../../docs/decisions/DR-057.md) (drain enqueues, never runs an LLM in
-Tier-0), [DR-061](../../../docs/decisions/DR-061.md) (native auto-merge), and
+This spec does **not** mint a Decision Record, and **D1's resolution does not change that** —
+but the reasoning has moved, so it is restated here rather than left as written.
+
+**Superseded reasoning.** This note previously said no DR was due because the trigger model
+(D1) was *"still open"*. That is no longer true: D1 was resolved 2026-08-23 as **Option A**.
+Openness was never the operative test anyway — reversibility is.
+
+**The filter, applied to the option actually chosen.** Option A's owned artifact is a single
+GitHub Actions workflow that runs only non-LLM steps. It is reversible in well under a day
+(delete the workflow, or flip the trigger back to session-piggyback), adds no stored credential
+and no PAYG secret to CI, and changes no machine state. The DR-359 ADR filter therefore does
+not fire.
+
+**The conditional stays live, narrowed to what would actually trip it.** A later flip to
+**Option B** — a self-hosted runner with a credentialed CLI behind a webhook — is
+security-relevant and not trivially reversible, and MUST mint a DR at that point. Option C
+(piggyback only) would not. So the obligation is now specific to one named future change rather
+than conditional on a choice that has already been made.
+
+*Recorded because the panel flagged it (#1658 review, three voters, blocking): two reviewers
+read the old wording's "if the founder picks a trigger model … a DR SHOULD be minted then" as
+firing on **any** pick, including A. It is written here as firing on the reversibility test,
+which A passes and B fails. If the founder wants the choice recorded as a DR regardless, that
+is a one-line call and this paragraph is the place it would be noted.*
+
+Checked `docs/decisions/INDEX.md`: the nearest in-force decisions are
+[DR-057](../../../docs/decisions/DR-057.md) (drain enqueues, never runs an LLM in Tier-0),
+[DR-061](../../../docs/decisions/DR-061.md) (native auto-merge), and
 [DR-067](../../../docs/decisions/DR-067.md) (self-completing sessions / orphan-fallback) — this
 spec composes with all three and supersedes none, so no existing DR is updated.
+[DR-086](../../../docs/decisions/DR-086.md) (`proposed`) is adjacent — it governs *whether an
+agent acts on its own recommendation*, not *what triggers the drain* — so it constrains this
+spec's autonomy posture without deciding D1.
 
 ## Traceability
 
