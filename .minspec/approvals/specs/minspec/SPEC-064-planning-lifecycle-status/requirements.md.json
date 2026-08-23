@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-064-planning-lifecycle-status/requirements.md",
+  "specHash": "1d8cc1d43af0ce2c18821eb0fbbdc4774dbde3953974a092ef4d45a0590189f4",
+  "approvedAt": "2026-08-23T08:37:49.463Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "db5323a0a509d2cd64d4f2da37a5bb2926c1888c"
+}

@@ -10,17 +10,20 @@
     ],
     "minspec.autoClassifyOnCommit": true,
 
-    // Offer to push each approval as soon as it is committed, so a sign-off cannot be
-    // stranded on one machine (three duplicate recovery PRs were opened for the same
-    // two records on 2026-07-27 — #1022). `main` is protected here, so a direct push
-    // would be REJECTED: MinSpec instead pushes the same commit on an `approvals/…`
-    // branch and offers the PR link.
+    // minspec.pushOnApprove is DELIBERATELY ABSENT from this file. Do not re-add it.
     //
-    // Deliberately "prompt", not "always", in the COMMITTED workspace file: this is a
-    // shared repo, and committing "always" would opt every contributor into automatic
-    // network egress on Alt+A without their per-action say-so. Standing consent is a
-    // personal choice — set "always" in your own USER settings if you want it (DR-071).
-    "minspec.pushOnApprove": "prompt",
+    // Its declared default is already "prompt" (packages/minspec/package.json
+    // contributes.configuration), so setting "prompt" here changes nothing for a
+    // contributor - but it is NOT harmless. VS Code resolves workspace settings ABOVE
+    // user settings, so this key, at any value, silently overrides the personal
+    // "minspec.pushOnApprove": "always" that DR-071 tells people to put in their own
+    // user settings. The override is invisible: the approval still commits and still
+    // creates the approvals/... branch, the push just never runs, and nothing reports it.
+    //
+    // That is what stranded 9 local approvals/* branches between 2026-08-14 and
+    // 2026-08-19 on a machine whose user settings said "always" (see #1021). Omitting
+    // the key gives contributors the same "prompt" behaviour by default AND lets
+    // standing consent actually take effect for whoever opts into it.
 
     // Surface the stdlib-unittest hook tests (scripts/hooks/test_*.py) in the
     // Testing panel. These run canonical.py / the spec-gate as subprocesses and
