@@ -51,6 +51,34 @@ vi.mock('../src/lib/approval-recover', () => ({
 
 vi.mock('../src/lib/approve-push', () => ({ pushApproval: vi.fn() }));
 
+/**
+ * #1653 — the recovery path now FINISHES into a PR via `openApprovalPr`, so this
+ * file must mock the `gh`/git seam. Without it these unit tests would spawn a real
+ * `gh pr create`: the recovery mock returns a plausible branch name, and `gh` IS
+ * installed and authenticated in CI and in the dev container. A unit test that can
+ * open a real pull request is not a unit test.
+ */
+const openPullRequestMock = vi.fn();
+const branchChangedPathsMock = vi.fn();
+vi.mock('../src/lib/approval-pr', () => ({
+  openPullRequest: (...a: unknown[]) => openPullRequestMock(...a),
+  branchChangedPaths: (...a: unknown[]) => branchChangedPathsMock(...a),
+  // Real behaviour is a pure path predicate (zero I/O), but re-deriving it here
+  // would let this test disagree with the shipped corpus. The lane label is
+  // asserted from what `openPullRequest` was CALLED with, so a fixed answer is
+  // enough and keeps the mock honest about what it is standing in for.
+  laneLabelsFor: (paths: readonly string[] | undefined) =>
+    paths && paths.length > 0 ? ['docs-lane'] : [],
+  buildApprovalPrBody: () => 'body',
+  defaultExecRun: () => vi.fn(),
+  resolveHeadSha: vi.fn(async () => 'deadbeef'),
+}));
+
+vi.mock('../src/lib/approval-store', () => ({
+  readRecord: () => undefined,
+  toPosixRel: (p: string) => p,
+}));
+
 import { commitApprovalIfEnabled } from '../src/commands/commit-on-approve';
 
 /** The refusal this feature exists to rescue. */
@@ -65,6 +93,12 @@ beforeEach(() => {
   warnings.length = 0;
   infos.length = 0;
   commitApprovalMock.mockReset().mockResolvedValue(REFUSED);
+  openPullRequestMock
+    .mockReset()
+    .mockResolvedValue({ outcome: 'created', url: 'https://github.com/O/R/pull/7' });
+  branchChangedPathsMock
+    .mockReset()
+    .mockResolvedValue(['.minspec/approvals/specs/x/requirements.md.json']);
   recoverMock.mockReset().mockResolvedValue({
     outcome: 'recovered',
     branch: 'approvals/spec-099-x',
@@ -144,6 +178,67 @@ describe('protected-branch recovery wiring — #1115', () => {
     const r = await commitApprovalIfEnabled('/root', ['/root/specs/x/requirements.md'], 'msg');
     expect(r.suffix).toContain('NOT committed');
     expect(warnings.join('\n')).toContain('default branch');
+  });
+
+  // ── #1653 — the recovered branch must be FINISHED into a PR ────────────────
+  //
+  // The defect: this path stopped at a toast whose `Open PR` action opened the
+  // compare page, so `openApprovalPr` was never reached from the ONE workflow that
+  // always lands here (approving while on `main`, per DR-051). SPEC-050 shipped and
+  // was unreachable; 12 of 12 recent approval PRs were hand-created, unlabelled, and
+  // needed a manual bypass merge.
+
+  it('T3 #1653: a RECOVERED approval opens the PR — it does not stop at a compare link', async () => {
+    CONFIG.pushOnApprove = 'always';
+    await commitApprovalIfEnabled('/root', ['/root/specs/x/requirements.md'], 'msg');
+    expect(openPullRequestMock).toHaveBeenCalledTimes(1);
+    const arg = openPullRequestMock.mock.calls[0][0] as {
+      head?: string;
+      title?: string;
+      labels?: string[];
+    };
+    // The PR is opened for the branch recovery actually pushed…
+    expect(arg.head).toBe('approvals/spec-099-x');
+    // …titled with the approval commit's subject, not a generated stand-in…
+    expect(arg.title).toBe('msg');
+    // …and labelled for the lane, which is what enables auto-merge. An unlabelled
+    // PR is the pre-fix outcome wearing a PR's clothes: it still needs a human.
+    expect(arg.labels).toEqual(['docs-lane']);
+  });
+
+  it('T3 #1653: the suffix reports the opened PR, and no bare compare toast is shown', async () => {
+    CONFIG.pushOnApprove = 'always';
+    const r = await commitApprovalIfEnabled('/root', ['/root/specs/x/requirements.md'], 'msg');
+    expect(r.suffix).toContain('PR opened');
+    expect(r.suffix).toContain('https://github.com/O/R/pull/7');
+    // The pre-fix wording must be gone — it promised a click that no longer exists.
+    expect(infos.join('\n')).not.toContain('Approval saved on');
+  });
+
+  it('T3 #1653: a FAILED PR-open still reports the pushed branch — never a lost approval', async () => {
+    CONFIG.pushOnApprove = 'always';
+    openPullRequestMock.mockResolvedValue({ outcome: 'gh-absent' });
+    const r = await commitApprovalIfEnabled('/root', ['/root/specs/x/requirements.md'], 'msg');
+    // Degrades to exactly the legacy surface, WITH the reason stated — the approval
+    // is committed and pushed either way, so this must never read as a failure.
+    expect(r.suffix).toContain('approvals/spec-099-x');
+    expect(r.suffix).not.toContain('NOT committed');
+    expect(infos.join('\n')).toContain('the gh CLI is not installed');
+  });
+
+  it('T3 DR-078 §4: a project-local pushOnApprove=always is honoured, so there is no prompt', async () => {
+    // The VS Code setting still says `prompt`; the project-local preference says
+    // `always`. Before the fix this path read the setting DIRECTLY, so the user who
+    // had already answered "always push from now on" was asked again every time.
+    CONFIG.pushOnApprove = 'prompt';
+    vi.doMock('../src/lib/auto-bootstrap.js', () => ({
+      loadPreferences: () => ({ pushOnApprove: 'always' }),
+      savePreferences: vi.fn(),
+    }));
+    await commitApprovalIfEnabled('/root', ['/root/specs/x/requirements.md'], 'msg');
+    expect(warnings).toHaveLength(0);
+    expect(recoverMock).toHaveBeenCalledTimes(1);
+    vi.doUnmock('../src/lib/auto-bootstrap.js');
   });
 
   it('a THROWING seam still degrades to the warning — commitApprovalIfEnabled never rejects', async () => {

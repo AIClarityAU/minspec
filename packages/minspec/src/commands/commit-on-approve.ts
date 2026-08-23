@@ -73,9 +73,10 @@ export function commitOnApproveEnabled(): boolean {
 const SHOW_FILES_ACTION = 'Show me the files';
 /** #1115 — the consent click that authorizes recovery's network step. */
 const RECOVER_ACTION = 'Save it on a branch';
-// OPEN_PR_ACTION is declared once, below, with the SPEC-050 actions — both #1115's
-// recovery toast and FR-1's legacy `manual` surface use the same label, and two
-// declarations of one string is how the two surfaces drift apart.
+// OPEN_PR_ACTION is declared once, below, with the SPEC-050 actions. #1115's recovery
+// path no longer shows a toast of its own — since #1653 it delegates to
+// `openApprovalPr`, so the only surface that still offers `Open PR` is FR-1's legacy
+// `manual` fallback. One declaration, one surface.
 
 /**
  * #1115 — try to rescue an approval the destination guard refused, by committing it
@@ -99,7 +100,14 @@ async function recoverOnProtectedBranch(
   current: string,
   baseBranch: string | undefined,
 ): Promise<{ suffix: string } | 'declined' | undefined> {
-  const mode = pushOnApproveMode();
+  // DR-078 §4 — the SINGLE accessor, not `pushOnApproveMode()`. This path read the
+  // VS Code setting DIRECTLY while its sibling `pushApprovalIfEnabled` read the
+  // project-local preference first, so a user who had answered "always push from now
+  // on" was still prompted on every protected-branch approval: the two consent
+  // surfaces for ONE act disagreed, which is the exact failure DR-078 §4 exists to
+  // prevent. Never rejects — the accessor swallows its own read failures and falls
+  // through to the setting.
+  const mode = await effectivePushOnApproveMode(rootDir);
   if (mode === 'never') return undefined;
   if (mode === 'prompt') {
     // Non-modal (project preference: never steal focus from the artifact being
@@ -143,17 +151,31 @@ async function recoverOnProtectedBranch(
     return undefined;
   }
 
-  // Success. Non-blocking: the operation is COMPLETE, so the notification carries a
-  // convenience action, never one required to finish the job.
-  if (res.compareUrl) {
-    const url = res.compareUrl;
-    void vscode.window
-      .showInformationMessage(`Approval saved on '${res.branch}' and pushed.`, OPEN_PR_ACTION)
-      .then((c) => {
-        if (c === OPEN_PR_ACTION) void vscode.env.openExternal(vscode.Uri.parse(url));
-      });
-  }
-  return { suffix: ` · committed on ${res.branch} and pushed` };
+  // Success — the approval is committed on a branch and pushed. FINISH it into a PR
+  // (#1653), exactly as the non-protected path does.
+  //
+  // This block previously stopped here, at a toast whose `Open PR` action merely
+  // opened the compare page. That made SPEC-050's auto-PR UNREACHABLE for the one
+  // workflow that needs it most: DR-051 has approvables edited directly on `main`,
+  // so `commitApproval` refuses with `protected-branch` and EVERY approval lands
+  // here — never in `pushApprovalIfEnabled`, the only caller of `openApprovalPr`.
+  // Measured before the fix: 12 of 12 recent `approvals/*` PRs were hand-created
+  // from that compare link (empty body, no `docs-lane` label, therefore no
+  // auto-merge). Two sibling paths both mean "the approval reached a side branch";
+  // only one of them finished the job.
+  //
+  // `RecoverResult` is structurally the `pushed-branch` case of `PushApprovalResult`
+  // — same `branch`, same `compareUrl` — so the shared step is REUSED rather than
+  // re-implemented, which is also what keeps the two toast surfaces from drifting.
+  // `openApprovalPr` never rejects and degrades to the old `Open PR` notification
+  // (with the reason stated) on any failure, so the worst case here is exactly the
+  // behaviour this fix replaces.
+  const { suffix } = await openApprovalPr(
+    rootDir,
+    { outcome: 'pushed-branch', branch: res.branch, compareUrl: res.compareUrl },
+    { subject: message, paths: res.paths },
+  );
+  return { suffix };
 }
 
 export async function commitApprovalIfEnabled(
