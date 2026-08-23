@@ -272,8 +272,32 @@ for; under plain A it has to be deleted.
 ***Cost, stated plainly:*** a defaulted flag is a quiet failure mode. A future caller who forgets
 `{ createIfAbsent: true }` silently reproduces the exact #957 half-write this spec exists to
 remove, and nothing errors. Making the parameter required removes that hazard at the price of a
-wider diff — the one production call site plus all three test call sites — and Plan should treat
-"required or defaulted" as the one remaining sub-choice here.
+wider diff — the one production call site plus all three test call sites.
+
+#### Sub-choice → **required**, resolved 2026-08-24 (#1659)
+
+The deferred half of DQ-1 is answered: `createIfAbsent` is **required**, not defaulted. The
+argument is the one this section already makes against itself — a spec whose entire purpose is
+deleting a silent half-write must not ship a new way to cause one. The predicted cost was
+accurate and small: exactly the four call sites named above.
+
+**A finding that strengthens it.** Type-level enforcement does not reach the tests.
+`packages/minspec/tsconfig.json` includes only `src/**/*.ts` and `tsconfig.test.json` only
+`src/test/**/*.ts`; neither covers the vitest tree at `packages/minspec/tests/**`. Verified with
+a control — a blatant type error appended to a test file raises nothing from either project
+(filed as #1660). So `required` alone would have been enforced for `src/` callers only. The
+implementation therefore pairs it with a **runtime guard** that rejects a missing or
+non-boolean option and names both intents, rather than dying on
+`Cannot read properties of undefined`.
+
+***Residual cost, recorded rather than hidden:*** every call site must now state its intent,
+which is slightly more ceremony at the three read-only test sites that only ever wanted the
+default.
+
+*Recorded here rather than only in the function's docstring: a decision that lives in code
+comments while the governing spec says "Plan should decide" is exactly the prose-versus-behaviour
+contradiction FR-6's rationale forbids — and it was an ai-review architect finding on #1659 that
+caught it, not the author.*
 
 ### DQ-2 → A (create it). Not a live fork: approved FR-1 already mandates it.
 
