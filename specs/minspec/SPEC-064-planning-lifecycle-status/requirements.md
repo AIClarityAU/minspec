@@ -1,7 +1,7 @@
 ---
 id: SPEC-064
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — an approved-but-unbuilt spec must not read 'implementing'
@@ -10,9 +10,9 @@ relates_to: [DR-069, DR-034, DR-003, DR-012, DR-031, SPEC-022, SPEC-041, SPEC-03
 implements: none
 implements_reason: back-fill spec for behaviour already shipped under DR-069 (#886) - it builds nothing, so it owns nothing; the "Implementation status" table cites existing code as evidence, never as a claim of ownership.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
