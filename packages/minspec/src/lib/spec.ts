@@ -465,17 +465,21 @@ export function setSpecStatus(filePath: string, status: SpecStatus): SpecStatus 
 /** Options for {@link setSpecPhases} (SPEC-061 DQ-1). */
 export interface SetSpecPhasesOptions {
   /**
-   * Create the `phases:` block when the spec has none. **Defaults to `false`** — the
-   * shape-preserving no-op this function has always had, which approved FR-6 requires stay
-   * reachable. Only the approval writer opts in.
+   * Create the `phases:` block when the spec has none.
    *
-   * KNOWN HAZARD, recorded rather than hidden (SPEC-061 DQ-1 "Cost, stated plainly"): a
-   * defaulted flag is a quiet failure mode — a future caller who forgets it silently
-   * reproduces the #957 half-write this spec exists to remove, and nothing errors. The spec
-   * defers "required or defaulted" to Plan as its one remaining sub-choice; this implements
-   * the resolution as written (defaulted) rather than pre-empting that decision.
+   * **REQUIRED, not defaulted** — SPEC-061 DQ-1's remaining sub-choice, resolved toward
+   * `required`. DQ-1 recorded the hazard of a defaulted flag in its own words: *"a future
+   * caller who forgets `{ createIfAbsent: true }` silently reproduces the exact #957
+   * half-write this spec exists to remove, and nothing errors."* A spec whose entire purpose
+   * is deleting a silent half-write should not ship a new way to cause one, so the compiler
+   * asks every caller instead. `false` keeps the shape-preserving no-op approved FR-6
+   * requires stay reachable; only the approval writer passes `true`.
+   *
+   * Cost of requiring it, stated: every call site must name its intent, which is a wider
+   * diff and slightly more ceremony at the three read-only test sites that only ever wanted
+   * the default.
    */
-  readonly createIfAbsent?: boolean;
+  readonly createIfAbsent: boolean;
 }
 
 /**
@@ -486,8 +490,8 @@ export interface SetSpecPhasesOptions {
  *
  * TWO KINDS OF ABSENCE, and they are treated differently on purpose (SPEC-061 FR-1/FR-2):
  *
- *  - **No `phases:` block at all** → still a no-op BY DEFAULT (approved FR-6 keeps that
- *    contract reachable); pass `{ createIfAbsent: true }` and the block is created, with
+ *  - **No `phases:` block at all** → a no-op when `{ createIfAbsent: false }` (approved FR-6
+ *    keeps that contract reachable); pass `{ createIfAbsent: true }` and the block is created, with
  *    every phase in `PHASES` order (any phase the caller does not supply is written
  *    `pending`). Only `advanceSpecToImplementing` opts in. The unconditional no-op is what
  *    made an approval write only half the lifecycle state:
@@ -514,8 +518,23 @@ export interface SetSpecPhasesOptions {
 export function setSpecPhases(
   filePath: string,
   phases: Partial<Record<Phase, PhaseStatus>>,
-  opts: SetSpecPhasesOptions = {},
+  opts: SetSpecPhasesOptions,
 ): void {
+  // `opts` is REQUIRED (SPEC-061 DQ-1). TypeScript enforces that for `src/` callers, but the
+  // vitest tree under `packages/minspec/tests/` is covered by no tsconfig — `tsconfig.json`
+  // includes only `src/**/*.ts` and `tsconfig.test.json` only `src/test/**/*.ts`, verified
+  // with a control (a blatant type error in a test file raises nothing). So an omitting
+  // caller would otherwise reach `opts.createIfAbsent` and die on an opaque
+  // "Cannot read properties of undefined". Fail closed and SAY WHY instead: this function
+  // exists to delete a silent half-write, so its own failure mode must not be a riddle.
+  if (opts == null || typeof opts.createIfAbsent !== 'boolean') {
+    throw new Error(
+      `setSpecPhases(${filePath}) requires an explicit { createIfAbsent: boolean }. ` +
+        `Pass false for the shape-preserving rewrite (the historical behaviour), or true to ` +
+        `create the block when the spec has none — only the approval writer should pass true ` +
+        `(SPEC-061 DQ-1 / #957).`,
+    );
+  }
   const content = fs.readFileSync(filePath, 'utf-8');
   const fmMatch = content.match(FRONTMATTER_RE);
   if (!fmMatch) {
