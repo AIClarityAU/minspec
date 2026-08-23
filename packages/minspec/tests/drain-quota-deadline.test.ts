@@ -172,3 +172,93 @@ describe('drain-inbox.sh --quota-gate — INV-C: decides offline', () => {
     expect(r.out).not.toMatch(/NETWORK CALL/);
   });
 });
+
+describe('drain-inbox.sh --quota-publish-wall — the reactive producer', () => {
+  // The statusline publisher only runs when a statusline RENDERS, which VS Code and
+  // headless sessions never do — so on this machine it never fires and the gate sits
+  // inert. The wall message is the one reading that is always available, because it
+  // arrives exactly when the window is exhausted. It carries a clock time and a zone
+  // but no date, so the rollover has to be inferred.
+  const at = (text: string, env: Record<string, string> = {}) => {
+    try {
+      const out = execFileSync('bash', [DRAIN, '--quota-publish-wall'], {
+        input: text, encoding: 'utf-8',
+        env: { ...process.env, MINSPEC_QUOTA_FILE: quotaFile, ...env },
+      });
+      return { code: 0, out: out.trim() };
+    } catch (e: any) {
+      return { code: e.status ?? 1, out: (((e.stdout ?? '') as string) + ((e.stderr ?? '') as string)).trim() };
+    }
+  };
+  const read = () => JSON.parse(fs.readFileSync(quotaFile, 'utf-8'));
+
+  it('extracts the reset from the real wall message and publishes a FUTURE epoch', () => {
+    const r = at("You've hit your session limit · resets 10:10pm (Australia/Sydney)");
+    expect(r.code).toBe(0);
+    const q = read();
+    expect(q.resets_at).toBeGreaterThan(nowSec());
+    // At the wall the window is by definition spent; the gate must then defer.
+    expect(q.used_percentage).toBeGreaterThanOrEqual(100);
+  });
+
+  it('rolls over to tomorrow when the named time has already passed today', () => {
+    // 00:01 is in the past for all but one minute of the day, so a naive parse would
+    // publish an epoch behind `now` and the gate would read it as window-reset.
+    const r = at("You've hit your session limit · resets 12:01am (Australia/Sydney)");
+    expect(r.code).toBe(0);
+    expect(read().resets_at).toBeGreaterThan(nowSec());
+  });
+
+  it('honours the timezone in the message rather than the machine zone', () => {
+    at("You've hit your session limit · resets 10:10pm (Australia/Sydney)");
+    const sydney = read().resets_at;
+    fs.rmSync(quotaFile, { force: true });
+    at("You've hit your session limit · resets 10:10pm (America/New_York)");
+    expect(read().resets_at).not.toBe(sydney);
+  });
+
+  it('ignores text that is not a wall message, and writes nothing', () => {
+    const r = at('build failed: TypeError at foo.ts:12');
+    expect(r.code).not.toBe(0);
+    expect(fs.existsSync(quotaFile)).toBe(false);
+  });
+
+  it('never publishes a reset further out than one day (a bad parse cannot park the drain)', () => {
+    at("You've hit your session limit · resets 11:59pm (Australia/Sydney)");
+    expect(read().resets_at - nowSec()).toBeLessThanOrEqual(86400 + 60);
+  });
+
+  it('the published file is immediately readable by the gate, which defers on it', () => {
+    at("You've hit your session limit · resets 11:59pm (Australia/Sydney)");
+    expect(run(['--quota-gate']).code).toBe(42);
+  });
+});
+
+describe('drain-inbox.sh --quota-health — an inert gate must not be silent', () => {
+  // Failing open on a missing reading is correct, but it makes a dead gate and a
+  // healthy one look identical. This is the seam that tells them apart.
+  it('says INERT when there is no reading, naming the fail-open', () => {
+    const r = run(['--quota-health'], { MINSPEC_QUOTA_FILE: '/nonexistent/x.json' });
+    expect(r.code).toBe(0);
+    expect(r.out).toMatch(/^inert:/);
+    expect(r.out).toMatch(/failing open/i);
+  });
+
+  it('says INERT when the reading is stale rather than reporting a stale number as live', () => {
+    write({ used_percentage: 50, resets_at: nowSec() + 3600, observed_at: nowSec() - 86400 });
+    expect(run(['--quota-health']).out).toMatch(/^inert:/);
+  });
+
+  it('says LIVE with the actual numbers when a fresh reading exists', () => {
+    write({ used_percentage: 42, resets_at: nowSec() + 3600 });
+    const r = run(['--quota-health']);
+    expect(r.out).toMatch(/^live:/);
+    expect(r.out).toContain('42%');
+  });
+
+  it('reports but never gates — exit 0 in every state', () => {
+    expect(run(['--quota-health'], { MINSPEC_QUOTA_FILE: '/nonexistent/x.json' }).code).toBe(0);
+    write({ used_percentage: 99, resets_at: nowSec() + 3600 });
+    expect(run(['--quota-health']).code).toBe(0);
+  });
+});

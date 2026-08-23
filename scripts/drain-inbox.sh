@@ -699,7 +699,15 @@ run_cycle() {
   # exits 0 even on a quota-blocked claude run.
   classify_dispatch() {
     local n="$1" drc="$2" out="$3" thrash=0 quota=0
-    is_quota <<<"$out" && quota=1
+    if is_quota <<<"$out"; then
+      quota=1
+      # Publish the deadline the wall message carries. This is the only producer that
+      # fires on a machine whose sessions never render a statusline — without it the
+      # loop falls back to guessing 1800s. Advisory: a parse failure is not an error
+      # here, it just leaves the fallback in place. Safe in this subshell because it
+      # writes a file rather than setting a variable.
+      quota_publish_wall <<<"$out" >/dev/null 2>&1 || true
+    fi
     [[ "$drc" -ne 0 ]] && echo "[drain] WARNING: dispatch failed for #$n (rc=$drc)" >&2
     if [[ "$ac_halt" != "0" ]] && grep -qiF -- "$ac_sig" <<<"$out"; then
       echo "[drain] ⚠️  dispatch #$n crashed with the autocompact context-thrash signature — see #912." >&2
@@ -885,6 +893,69 @@ quota_sleep_secs() {
   printf '%d\n' "$secs"
 }
 
+# quota_health: one line, once per loop, saying whether admission control is actually
+# LIVE. Failing open on a missing reading is correct, but it is also invisible — an
+# inert gate and a healthy one both look like silence, so the drain would report a quiet
+# window either way (constitution invariant 2: no silent gate). This is the difference
+# between installed and adopted: say out loud when the gate cannot see anything.
+quota_health() {
+  local vals p r o now
+  now=$(date +%s)
+  if ! vals=$(_quota_read); then
+    echo "inert: no reading at $QUOTA_FILE — admission control is OFF (failing open). The statusline publisher only runs when a statusline renders, which VS Code and headless sessions never do; the wall-message producer will populate it on the next quota hit."
+    return 0
+  fi
+  read -r p r o <<<"$vals"
+  if (( now - o > QUOTA_STALE_SEC )); then
+    echo "inert: reading is $(( (now - o) / 60 )) min old (limit $(( QUOTA_STALE_SEC / 60 )) min) — admission control is OFF (failing open)."
+    return 0
+  fi
+  echo "live: 5h window ${p}% used, resets in $(( (r - now) / 60 )) min."
+}
+
+# quota_publish_wall: the REACTIVE producer, reading the wall message on stdin.
+#
+# The statusline publisher only runs when a statusline RENDERS. VS Code and headless
+# sessions never render one, so on those machines nothing is ever published and the
+# gate sits permanently inert — failing open forever, which is correct behaviour and
+# therefore invisible. This is the reading that is always available: it arrives at the
+# exact moment the window is exhausted.
+#
+# It is strictly worse than the statusline reading (no percentage, so no PREDICTIVE
+# admission — only the deadline) but it needs no credentials and makes no network call,
+# and it is what turns the backoff from a blind 1800s guess into a real deadline.
+#
+# The message carries a clock time and a zone but NO DATE, so the rollover is inferred:
+# a time already past today means tomorrow.
+quota_publish_wall() {
+  local text clock zone target now
+  text=$(cat)
+  # e.g. "You've hit your session limit · resets 10:10pm (Australia/Sydney)"
+  clock=$(printf '%s' "$text" | grep -oiE 'resets[[:space:]]+(at[[:space:]]+)?[0-9]{1,2}(:[0-9]{2})?[[:space:]]*(am|pm)' | head -1 \
+          | grep -oiE '[0-9]{1,2}(:[0-9]{2})?[[:space:]]*(am|pm)' | head -1)
+  [[ -n "$clock" ]] || { echo "no reset time in text" >&2; return 1; }
+  zone=$(printf '%s' "$text" | grep -oE '\([A-Za-z]+/[A-Za-z_]+\)' | head -1 | tr -d '()')
+
+  now=$(date +%s)
+  if [[ -n "$zone" ]]; then
+    target=$(TZ="$zone" date -d "$clock" +%s 2>/dev/null)
+  else
+    target=$(date -d "$clock" +%s 2>/dev/null)
+  fi
+  [[ -n "$target" ]] || { echo "could not parse '$clock'" >&2; return 1; }
+  # No date in the message: a time already gone means tomorrow.
+  (( target <= now )) && target=$(( target + 86400 ))
+
+  # At the wall the window is spent by definition. 100 makes every consumer defer,
+  # which is exactly right until the deadline passes.
+  local tmp="${QUOTA_FILE}.$$.tmp"
+  mkdir -p "$(dirname "$QUOTA_FILE")" 2>/dev/null
+  printf '{"used_percentage":100,"resets_at":%s,"observed_at":%s,"source":"wall"}\n' \
+    "$target" "$now" > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  mv -f "$tmp" "$QUOTA_FILE" 2>/dev/null || { rm -f "$tmp"; return 1; }
+  echo "published:$target (from the wall message, resets $clock${zone:+ $zone})"
+}
+
 # quota_backoff_sleep: the rc=42 rest. Sleeps to the deadline; wait_interval still
 # bails the moment the session dies, so a multi-hour wait stays interruptible.
 quota_backoff_sleep() {
@@ -914,6 +985,7 @@ run_loop() {
   local deadline consec=0 rc
   deadline=$(( $(date +%s) + MAX_LIFETIME ))
   echo "[drain] continuous loop started (session=$SESSION_PID, interval=${INTERVAL}s, quota_backoff=${QUOTA_BACKOFF}s, max_lifetime=${MAX_LIFETIME}s)."
+  echo "[drain] quota gate — $(quota_health)"
   while :; do
     if ! session_alive "$SESSION_PID"; then
       echo "[drain] session $SESSION_PID ended — stopping loop (drain dies with the session)."; break
@@ -982,6 +1054,15 @@ case "$1" in
     # wrote the correct repo-root .minspec/auto-drain). The hook asks us instead.
     echo "$PREF_FILE"
     exit 0
+    ;;
+  --quota-health)
+    # Pure seam: is admission control live or inert? Always exit 0 — this reports, it
+    # never gates.
+    quota_health; exit 0
+    ;;
+  --quota-publish-wall)
+    # Pure seam: read a wall message on stdin, publish its deadline. Offline.
+    quota_publish_wall; exit $?
     ;;
   --quota-gate)
     # Pure seam: would the drain admit a cycle right now? exit 0 admit / 42 defer,
