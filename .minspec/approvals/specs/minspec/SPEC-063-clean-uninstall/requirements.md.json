@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-063-clean-uninstall/requirements.md",
+  "specHash": "b517532152565ba0bfaa6983c3875f7754a88aece17275953b3de9c29cf41c9b",
+  "approvedAt": "2026-08-23T04:48:09.287Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "259798b8b8cda3016aa30dfb4621114268413b75"
+}

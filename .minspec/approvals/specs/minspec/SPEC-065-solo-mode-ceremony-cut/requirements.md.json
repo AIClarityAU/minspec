@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-065-solo-mode-ceremony-cut/requirements.md",
+  "specHash": "f437887be901205a43345690c42d6e64ae3d2220f33875247cbea0fe6ff71f4b",
+  "approvedAt": "2026-08-22T23:19:39.865Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T4",
+  "migrated": false,
+  "baselineBlob": "4a84d168930550a4346889e24dffd81754daa8f7"
+}
