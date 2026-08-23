@@ -138,6 +138,13 @@ exit 0
     return { dir, bin, log: (w) => path.join(dir, `log.${w}`), flight: path.join(dir, 'flight') };
   }
 
+  // MINSPEC_DRAIN_LOCK must be isolated alongside MINSPEC_DRAIN_LOG. The drain is a
+  // singleton keyed on that lock (drain-inbox.sh:110), so without the override these
+  // tests contend with any real drain running on the machine — including the live
+  // --auto one. The loser exits 0 at the singleton check BEFORE creating its log, and
+  // the test then fails as `ENOENT: log.N`, which reads like a launch-loop bug rather
+  // than a lock collision. Overriding LOG but not LOCK made the suite pass or fail
+  // depending on whether another drain happened to be alive.
   /** Run one real `--once` cycle at the given width and wait for the disowned loop. */
   function runCycle(h: Harness, width: string): { elapsedMs: number; log: string } {
     const t0 = Date.now();
@@ -149,6 +156,7 @@ exit 0
         MINSPEC_DRAIN_REMEDIATE_PRS=0 \
         MINSPEC_DRAIN_PRIMARY_ROOT="${path.join(h.dir, 'root')}" \
         MINSPEC_DRAIN_LOG="${h.log(width)}" \
+        MINSPEC_DRAIN_LOCK="${path.join(h.dir, 'lock')}" \
         bash "${DRAIN}" --once 2>&1 | grep -oP 'PID \\K[0-9]+')
       while kill -0 "$pid" 2>/dev/null; do sleep 0.05; done
     `], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });

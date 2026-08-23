@@ -262,3 +262,61 @@ describe('drain-inbox.sh --quota-health — an inert gate must not be silent', (
     expect(run(['--quota-health']).code).toBe(0);
   });
 });
+
+describe('drain-inbox.sh --quota-gate — the WEEKLY ceiling, which the 5h reading cannot see', () => {
+  // Only some producers can see the 7d window, so the fields are optional and their
+  // absence must never invalidate an otherwise-good 5h reading.
+  const write7 = (q: Record<string, number>) =>
+    fs.writeFileSync(quotaFile, JSON.stringify({ observed_at: nowSec(), ...q }));
+
+  it('admits when both windows have room (real observed state: 5h 30%, 7d 61%)', () => {
+    write7({ used_percentage: 30, resets_at: nowSec() + 11640,
+             seven_day_percentage: 61, seven_day_resets_at: nowSec() + 313800 });
+    expect(run(['--quota-gate']).code).toBe(0);
+  });
+
+  it('defers on the WEEKLY ceiling even when the 5h window is nearly empty', () => {
+    write7({ used_percentage: 10, resets_at: nowSec() + 11640,
+             seven_day_percentage: 97, seven_day_resets_at: nowSec() + 313800 });
+    const r = run(['--quota-gate']);
+    expect(r.code).toBe(42);
+    expect(r.out).toMatch(/WEEKLY/);
+  });
+
+  it('defers to the WEEKLY reset distance, not the 5h one', () => {
+    write7({ used_percentage: 10, resets_at: nowSec() + 600,
+             seven_day_percentage: 97, seven_day_resets_at: nowSec() + 313800 });
+    expect(Number(run(['--quota-gate']).out.replace(/^defer:(\d+).*/s, '$1'))).toBeGreaterThan(100000);
+  });
+
+  it('a missing weekly reading leaves 5h behaviour completely unchanged', () => {
+    write({ used_percentage: 10, resets_at: nowSec() + 3600 });
+    expect(run(['--quota-gate']).code).toBe(0);
+    expect(run(['--quota-health']).out).toMatch(/no weekly reading/);
+    write({ used_percentage: 95, resets_at: nowSec() + 3600 });
+    expect(run(['--quota-gate']).code).toBe(42);
+  });
+
+  it('the weekly bar is separately tunable and defaults looser than the 5h bar', () => {
+    // A 5h window reopens in hours; a weekly one can be days out, so blocking on it
+    // is far more expensive and the default bar is deliberately higher.
+    write7({ used_percentage: 10, resets_at: nowSec() + 3600,
+             seven_day_percentage: 92, seven_day_resets_at: nowSec() + 313800 });
+    expect(run(['--quota-gate']).code).toBe(0);                                    // 92 < 95 default
+    expect(run(['--quota-gate'], { MINSPEC_QUOTA_ADMIT_PCT_7D: '90' }).code).toBe(42);
+  });
+
+  it('a weekly ceiling with no usable reset still defers, bounded by the clamp', () => {
+    write7({ used_percentage: 10, resets_at: nowSec() + 3600,
+             seven_day_percentage: 99, seven_day_resets_at: nowSec() - 10 });
+    const r = run(['--quota-gate']);
+    expect(r.code).toBe(42);
+    expect(r.out).toMatch(/no usable reset time/);
+  });
+
+  it('reports the weekly level in health when it is known', () => {
+    write7({ used_percentage: 30, resets_at: nowSec() + 3600,
+             seven_day_percentage: 61, seven_day_resets_at: nowSec() + 313800 });
+    expect(run(['--quota-health']).out).toMatch(/7d window 61%/);
+  });
+});
