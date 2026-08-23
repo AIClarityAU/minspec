@@ -11,6 +11,15 @@
 #   the HTML of every page view. A site identifier, not a credential.
 # Class 4 — .minspec/generated-hashes.json: content hashes ("Key Components", "Secret
 #   Hygiene" are SECTION NAMES; the value is a sha).
+#
+# Class 1 addendum (#1502, 2026-08-23) — registering review-approvable.sh in
+#   gen-ci-templates.mjs embedded its body here too, so the SAME PAYG line now matches at
+#   a second offset in the generated file. Same triage as Class 1: `ANTHROPIC_API_KEY=`
+#   is a variable REFERENCE (`"${ANTHROPIC_API_KEY:-}"`), never a literal. It cannot take
+#   an inline `# gitleaks:allow` because the source line ends in a bash line-continuation,
+#   so a trailing comment would break the command. Fingerprints here are line-bound and a
+#   generated file reshuffles them on every regeneration — brittle, tracked at
+#   minspec#1663 (replace these line-bound entries with a path-scoped allowlist regex).
 3bae61f64ec84289bd501dbc55b057a377134bbe:sites/minspec.dev/index.html:generic-api-key:1086
 3bae61f64ec84289bd501dbc55b057a377134bbe:sites/minspec.dev/privacy.html:generic-api-key:115
 3dabade156ec34ef0cb51a5402a46de2190bb2fe:packages/minspec/tests/egress-scan.test.ts:generic-api-key:193
@@ -25,3 +34,4 @@ ca49f94c5485b75b069e30fafbf9134d853bdc96:scripts/review-branch.sh:generic-api-ke
 db2a36b5a0d699c8ee698fdd9951e877c6928b4b:packages/minspec/src/lib/ci-review-templates.ts:generic-api-key:1341
 f6a4f3ac737712754c6c18ad41f1cf51c3b9e5a8:sites/minspec.dev/index.html:generic-api-key:1086
 f6a4f3ac737712754c6c18ad41f1cf51c3b9e5a8:sites/minspec.dev/privacy.html:generic-api-key:115
+packages/minspec/src/lib/ci-review-templates.ts:generic-api-key:2292
