@@ -61,6 +61,27 @@ jobs:
             num="${row%%$'\t'*}"
             branch="${row#*$'\t'}"
             [ -z "$num" ] && continue
+            # #1630 — a block with NO EVIDENCE is not known to be transient. `reason: quota`
+            # is a fallback INFERENCE in that case (review-branch.sh emits
+            # `evidence: NONE (reason is inferred, not observed)` when neither stream carried
+            # text), so a genuine crash that writes nothing is indistinguishable from a real
+            # outage — and retrying it forever is how it stays invisible. Retry only what we
+            # have evidence IS retry-able; hand the rest to a human.
+            #
+            # Fail-safe direction: a comment with NO evidence line at all is an OLD-format
+            # block from before #1635, and those DO get retried (the `!= NONE` test below is
+            # false only when the marker is present and says NONE). Silence must never mean
+            # "give up".
+            evidence=$(gh pr view "$num" --repo "$REPO" --json comments \
+              --jq '[.comments[].body | capture("evidence: (?<e>NONE|captured)").e] | last // empty' 2>/dev/null || true)
+            if [ "$evidence" = "NONE" ]; then
+              echo "PR #$num: reviewer produced NO diagnostic on either stream — 'quota' is inferred, not observed."
+              echo "  Not retrying: an unevidenced block may be a genuine crash, and looping it hides that (#1630)."
+              gh pr edit "$num" --repo "$REPO" --add-label "needs-human-review" >/dev/null 2>&1 \
+                || echo "  (could not add needs-human-review — surface it by hand)"
+              continue
+            fi
+
             # #1204 — honour the stated reset time. The reviewer records it as an
             # `<!-- ai-review-reset: ISO -->` marker on its blocked comment; if that
             # instant has not passed, every attempt is guaranteed futile and costs a
