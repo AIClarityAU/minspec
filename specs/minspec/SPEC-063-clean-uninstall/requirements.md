@@ -1,7 +1,7 @@
 ---
 id: SPEC-063
 type: requirements
-status: specifying
+status: implementing
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain — uninstall is the guaranteed exit that makes "opt-in blast radius" (invariant #3) truthful; the reverse of SPEC-033 provisioning
@@ -13,7 +13,7 @@ affects: [packages/minspec/package.json, packages/minspec/src/extension.ts, pack
 # MinSpec — Clean uninstall (graded disable / remove-harness / full removal) — Requirements
 
 **Date:** 2026-08-06
-**Status:** Specifying
+**Status:** Implementing
 **Triggered by:** [#889](https://github.com/AIClarityAU/minspec/issues/889) — "Clean uninstall — let the user disable/remove GH Actions, rulesets, CLAUDE.md, harness, and optionally all MinSpec files."
 **Builds on:** [DR-011](../../../docs/decisions/DR-011.md) — the marker-bounded write contract this must reverse without touching user content outside the markers · [DR-037](../../../docs/decisions/DR-037.md) — the editor-independent git hooks (`core.hooksPath`) this must also unwind · the constitution's **invariant #3** (MinSpec's blast radius is the opt-in repo; `.minspec/` is the opt-in marker) — uninstall is what makes that promise keepable.
 **Inverse of:** [SPEC-033](../SPEC-033-repo-governance-provisioning/requirements.md) — Repo Governance Provisioning. Everything SPEC-033 scaffolds (ai-review workflow set, branch-protection rulesets, dispatch/drain scripts, auto-merge gate) is in this spec's removal surface. Read the two together: the provisioning inventory is the uninstall inventory.
