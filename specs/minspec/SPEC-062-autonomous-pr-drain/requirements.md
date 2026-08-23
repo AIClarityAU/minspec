@@ -8,7 +8,7 @@ epic: EPIC-007  # Agent Execute — the dev-time autonomous build/merge pipeline
 aspects: [autonomous-pipeline, drain, pull-request, auto-merge, scheduling, github-actions, signpost, hitl, sidecar-hash, git-recovery, tier-0, offline, no-silent-gate, blast-radius]
 depends_on: []  # see "Blocking dependencies" — #810/#811 (ready-to-merge gate) and #880 (docs-lane approvals) gate the fully-autonomous outcome, not this spec's authorship
 relates_to: [SPEC-044, SPEC-024, SPEC-050, SPEC-012, DR-057, DR-061, DR-067, DR-076, DR-015, DR-004]
-implements: [.github/workflows/drain.yml]  # NEW - the session-independent trigger (FR-1). Pinned to D1 Option A (the Action runs only the non-LLM steps). If Clarify picks B (self-hosted runner) or C (piggyback only) this path changes, so D1 MUST close before approval.
+implements: [.github/workflows/drain.yml]  # NEW - the session-independent trigger (FR-1). D1 RESOLVED 2026-08-23 as Option A (the Action runs only the non-LLM steps), so this path is now settled rather than provisional. D2/D3/D4 remain open but none of them changes the owned set.
 affects: [scripts/drain-inbox.sh, scripts/dispatch-issue.sh, scripts/remediate-pr.sh, scripts/auto-merge-gate.ts]  # drain-inbox/dispatch-issue/remediate-pr are OWNED by SPEC-044 via implements: - this spec modifies them, never owns them (INV: one owner per file). auto-merge-gate.ts is currently unowned; SPEC-024 owns the decideAutoMerge decision this spec only invokes.
 ---
 
@@ -119,8 +119,10 @@ defined path into the human's one next-task signpost.
 ## Functional Requirements
 
 - **FR-1 (session-independent trigger).** The drain cycle MUST be runnable with **no live
-  Claude session**. The delivery mechanism is a **[Decision needed — D1](#d1--what-runs-the-loop-when-no-session-is-alive)**;
-  whichever is chosen, the trigger MUST be a GitHub Action (`on: schedule` and/or
+  Claude session**. The delivery mechanism is **[D1](#d1--what-runs-the-loop-when-no-session-is-alive),
+  resolved 2026-08-23 as Option A**: a GitHub Action runs the non-LLM steps (auto-merge eligible
+  PRs, mechanical rebase, stranded-approval landing, git recovery, held → signpost), and LLM
+  rework remains session-piggybacked. The trigger MUST be a GitHub Action (`on: schedule` and/or
   `pull_request`/`push`) or a piggyback on an existing fan-out — **never** a `systemctl --user`
   / host cron timer (founder steer, 2026-07-24: a timer needs a per-machine human install and
   changes machine state; a workflow ships with the repo and installs itself). *Rationale: the
@@ -209,6 +211,19 @@ options and the trade-off; the human's one read resolves them. Resolving them ma
 more into a Decision Record (see [DR note](#dr-note)).
 
 ### D1 — What runs the loop when no session is alive?
+
+> **RESOLVED 2026-08-23 — Option A** (founder). The GitHub Action runs only the **non-LLM**
+> steps; LLM rework stays session-piggybacked. The options below are kept as the record of what
+> was chosen between, not as an open question.
+>
+> **Cost accepted with the choice:** rework still needs a live session, so a PR stuck on
+> `ai-review:changes` waits on a quiet day. R3 already carries the mitigation — the split is
+> explicit and the deferred work is `log()`ged, never silently truncated.
+>
+> Consequence for ownership: `implements: [.github/workflows/drain.yml]` is now settled. Under
+> Option B the owned artifact would have been a runner config, under Option C there would have
+> been no new file at all.
+
 The drain's rework step dispatches **LLM agents** (subscription `claude` CLI on a logged-in
 machine). A vanilla GitHub Action **cannot** run that CLI, and running LLM rework in CI needs a
 PAYG API key as a repo secret — which contradicts the subscription-default billing posture and
