@@ -159,10 +159,10 @@ async function recoverOnProtectedBranch(
   // workflow that needs it most: DR-051 has approvables edited directly on `main`,
   // so `commitApproval` refuses with `protected-branch` and EVERY approval lands
   // here — never in `pushApprovalIfEnabled`, the only caller of `openApprovalPr`.
-  // Measured before the fix: 12 of 12 recent `approvals/*` PRs were hand-created
-  // from that compare link (empty body, no `docs-lane` label, therefore no
-  // auto-merge). Two sibling paths both mean "the approval reached a side branch";
-  // only one of them finished the job.
+  // Two sibling paths both mean "the approval reached a side branch"; only one of
+  // them finished the job. (The survey that found this — every recent `approvals/*`
+  // PR hand-created, with an empty body and no `docs-lane` label — is recorded in
+  // #1653, not restated here as an unverifiable number in a comment.)
   //
   // `RecoverResult` is structurally the `pushed-branch` case of `PushApprovalResult`
   // — same `branch`, same `compareUrl` — so the shared step is REUSED rather than
@@ -173,7 +173,9 @@ async function recoverOnProtectedBranch(
   const { suffix } = await openApprovalPr(
     rootDir,
     { outcome: 'pushed-branch', branch: res.branch, compareUrl: res.compareUrl },
-    { subject: message, paths: res.paths },
+    // `sha` is REQUIRED here, not a nicety: recovery commits in a separate
+    // worktree, so `openApprovalPr`'s HEAD fallback would name the base tip.
+    { subject: message, paths: res.paths, sha: res.sha },
   );
   return { suffix };
 }
@@ -505,6 +507,19 @@ export interface ApprovalPushContext {
   readonly subject?: string;
   /** Repo-relative paths the approval commit carried (INV-2's evidence). */
   readonly paths?: readonly string[];
+  /**
+   * The approval commit's SHA, when the caller knows it (#1653 review).
+   *
+   * `openApprovalPr` otherwise falls back to `resolveHeadSha(run, rootDir)`, whose
+   * docstring (`approval-pr.ts:355-366`) states the honest limit: reading `HEAD` in
+   * the primary checkout is the approval commit ONLY for a caller that branched at
+   * HEAD and never moved it. The recovery path is the caller that breaks that
+   * premise — it commits in a SEPARATE worktree, so the primary's HEAD still points
+   * at the base tip and the fallback would stamp the PR body with the base branch's
+   * commit. A wrong SHA in a body line that reads `**Approval commit:**` is a
+   * signpost that lies, which is the one defect class this product cannot ship.
+   */
+  readonly sha?: string;
   /** Injected git/gh runner; production uses {@link defaultExecRun}. Tests pass a stub. */
   readonly run?: ExecRun;
 }
@@ -685,7 +700,9 @@ async function openApprovalPr(
     const changed = await branchChangedPaths(run, rootDir, PR_BASE, `origin/${result.branch}`);
     const labels = laneLabelsFor(changed);
     const record = readRecord(rootDir, approvableRelPath(paths));
-    const sha = await resolveHeadSha(run, rootDir);
+    // Caller-supplied SHA WINS. Only fall back to probing the primary checkout's
+    // HEAD when the caller cannot say — see `ApprovalPushContext.sha`.
+    const sha = ctx.sha ?? (await resolveHeadSha(run, rootDir));
 
     const pr = await openPullRequest({
       run,

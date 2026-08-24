@@ -60,6 +60,8 @@ vi.mock('../src/lib/approve-push', () => ({ pushApproval: vi.fn() }));
  */
 const openPullRequestMock = vi.fn();
 const branchChangedPathsMock = vi.fn();
+const resolveHeadShaMock = vi.fn();
+const bodyArgs: Array<{ sha?: string }> = [];
 vi.mock('../src/lib/approval-pr', () => ({
   openPullRequest: (...a: unknown[]) => openPullRequestMock(...a),
   branchChangedPaths: (...a: unknown[]) => branchChangedPathsMock(...a),
@@ -69,9 +71,14 @@ vi.mock('../src/lib/approval-pr', () => ({
   // enough and keeps the mock honest about what it is standing in for.
   laneLabelsFor: (paths: readonly string[] | undefined) =>
     paths && paths.length > 0 ? ['docs-lane'] : [],
-  buildApprovalPrBody: () => 'body',
+  // Captures what the body builder is handed, so the #1653-review SHA finding is
+  // asserted on the VALUE that reaches the PR body rather than on a call count.
+  buildApprovalPrBody: (a: { sha?: string }) => {
+    bodyArgs.push(a);
+    return 'body';
+  },
   defaultExecRun: () => vi.fn(),
-  resolveHeadSha: vi.fn(async () => 'deadbeef'),
+  resolveHeadSha: (...a: unknown[]) => resolveHeadShaMock(...a),
 }));
 
 vi.mock('../src/lib/approval-store', () => ({
@@ -92,6 +99,7 @@ beforeEach(() => {
   WARN_CHOICE = undefined;
   warnings.length = 0;
   infos.length = 0;
+  bodyArgs.length = 0;
   commitApprovalMock.mockReset().mockResolvedValue(REFUSED);
   openPullRequestMock
     .mockReset()
@@ -99,11 +107,13 @@ beforeEach(() => {
   branchChangedPathsMock
     .mockReset()
     .mockResolvedValue(['.minspec/approvals/specs/x/requirements.md.json']);
+  resolveHeadShaMock.mockReset().mockResolvedValue('BASE_TIP_NOT_THE_APPROVAL');
   recoverMock.mockReset().mockResolvedValue({
     outcome: 'recovered',
     branch: 'approvals/spec-099-x',
     compareUrl: 'https://github.com/O/R/compare/approvals%2Fspec-099-x?expand=1',
     paths: ['specs/x/requirements.md'],
+    sha: 'RECOVERYCOMMIT',
   });
 });
 
@@ -239,6 +249,35 @@ describe('protected-branch recovery wiring — #1115', () => {
     expect(warnings).toHaveLength(0);
     expect(recoverMock).toHaveBeenCalledTimes(1);
     vi.doUnmock('../src/lib/auto-bootstrap.js');
+  });
+
+  it('T3 #1653 review: the PR body names the RECOVERY commit, not the primary checkout HEAD', async () => {
+    // The blocking finding. Recovery commits in a SEPARATE worktree, so the primary
+    // checkout's HEAD never moves and still points at the base tip. `openApprovalPr`
+    // falling back to `resolveHeadSha(run, rootDir)` would therefore stamp the body's
+    // `**Approval commit:**` line with the base branch's commit — a signpost that lies.
+    CONFIG.pushOnApprove = 'always';
+    await commitApprovalIfEnabled('/root', ['/root/specs/x/requirements.md'], 'msg');
+    expect(bodyArgs).toHaveLength(1);
+    expect(bodyArgs[0].sha).toBe('RECOVERYCOMMIT');
+    expect(bodyArgs[0].sha).not.toBe('BASE_TIP_NOT_THE_APPROVAL');
+    // …and the wrong-SHA probe is not even consulted when the caller knows.
+    expect(resolveHeadShaMock).not.toHaveBeenCalled();
+  });
+
+  it('T3 #1653 review: an unreadable recovery SHA degrades to the probe, never to a crash', async () => {
+    // `sha` is undefined when `rev-parse` fails in the ephemeral worktree. One body
+    // line degrades; the approval, the push and the PR all still happen.
+    CONFIG.pushOnApprove = 'always';
+    recoverMock.mockResolvedValue({
+      outcome: 'recovered',
+      branch: 'approvals/spec-099-x',
+      compareUrl: 'https://github.com/O/R/compare/approvals%2Fspec-099-x?expand=1',
+      paths: ['specs/x/requirements.md'],
+    });
+    const r = await commitApprovalIfEnabled('/root', ['/root/specs/x/requirements.md'], 'msg');
+    expect(openPullRequestMock).toHaveBeenCalledTimes(1);
+    expect(r.suffix).toContain('PR opened');
   });
 
   it('a THROWING seam still degrades to the warning — commitApprovalIfEnabled never rejects', async () => {
