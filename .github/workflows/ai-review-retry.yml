@@ -27,7 +27,12 @@ on:
 permissions:
   contents: read
   actions: write
-  pull-requests: read
+  # `write`, not `read` (#1630 review): the unevidenced-block guard applies
+  # `needs-human-review` so an inferred-quota block surfaces as a decision instead of
+  # looping forever. With `read` that call fails and the guard's whole point — summoning
+  # a human — silently does nothing while still reading as implemented. Still least
+  # privilege: labels are the only PR mutation this workflow makes.
+  pull-requests: write
 
 concurrency:
   group: ai-review-retry
