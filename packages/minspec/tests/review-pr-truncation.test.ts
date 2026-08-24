@@ -130,18 +130,24 @@ case "$1 $2" in
 esac
 `;
 
+// The --help arm answers review-pr.sh's DR-079 capability preflight, which probes
+// `claude -p --help` for --json-schema before it will review at all. Without it the
+// script refuses, leaves the PR unlabeled, and every assertion below observes the
+// refusal rather than the review. It returns WITHOUT reading the fixture, so the
+// fixture describes the REVIEWER invocation only.
 const FAKE_CLAUDE = `#!/usr/bin/env bash
+for a in "$@"; do
+  [ "$a" = "--help" ] && { echo "  --json-schema <schema>"; exit 0; }
+done
 cat "$FAKE_CLAUDE_OUTPUT_FILE"
 `;
 
-const CLEAN_PASS_VERDICT = [
-  'REVIEW_VERDICT_BEGIN',
-  'verdict: pass',
-  'blocking: 0',
-  'summary: nothing found',
-  'REVIEW_VERDICT_END',
-  '',
-].join('\n');
+// The reviewer returns the CLI envelope; review-pr.sh renders the block from
+// `structured_output` (DR-079, #1502). The prose in `result` is never parsed.
+const CLEAN_PASS_VERDICT = JSON.stringify({
+  result: 'no issues found',
+  structured_output: { verdict: 'pass', blocking: 0, summary: 'nothing found' },
+});
 
 let scratch: string;
 let binDir: string;

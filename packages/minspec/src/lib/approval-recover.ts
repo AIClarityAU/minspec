@@ -37,12 +37,13 @@
  *     stays vscode-free and unit-testable. The caller contract is stated on
  *     {@link recoverProtectedBranchApproval}.
  *
- * NOT YET WIRED TO SPEC-050's PR SEAM. #1115 requirement 2 asks that PR opening
- * reuse the `approval-pr.ts` seam rather than growing a second `gh pr create`.
- * That seam is still an unmerged draft (#1224), so this slice deliberately stops
- * at "pushed, with a compare URL" — which is what removes the stranding — and
- * opens no PR at all. When #1224 lands, the `recovered` outcome is the natural
- * call site for it. Stated here rather than left for a reader to wonder about.
+ * WIRED TO SPEC-050's PR SEAM (#1653). #1115 requirement 2 asked that PR opening
+ * reuse the `approval-pr.ts` seam rather than grow a second `gh pr create`. That
+ * seam landed in #1224, and the `recovered` outcome is now its call site:
+ * `commands/commit-on-approve.ts` → `recoverOnProtectedBranch` hands this
+ * result's `branch` / `compareUrl` / `paths` / `sha` to `openApprovalPr`. This
+ * module still opens no PR ITSELF — it stays vscode-free and network-minimal,
+ * and the caller owns the `gh` step, exactly as the consent split above does.
  */
 
 import { execFile } from 'child_process';
@@ -71,6 +72,18 @@ export interface RecoverResult {
   readonly branch?: string;
   /** PR-open URL for that branch (present on 'recovered' when origin was parseable). */
   readonly compareUrl?: string;
+  /**
+   * The approval commit this recovery created (present on 'recovered' when it
+   * could be read).
+   *
+   * Load-bearing, not informational. Recovery commits in a SEPARATE worktree, so
+   * the primary checkout's `HEAD` never moves and still points at the base branch
+   * tip. `resolveHeadSha(run, rootDir)` — which `openApprovalPr` falls back to —
+   * would therefore stamp the PR body with the WRONG commit, exactly the caller
+   * class its own docstring warns about (`approval-pr.ts:355-366`). Returning the
+   * real SHA is what lets the shared PR step stay honest for this path.
+   */
+  readonly sha?: string;
   /** Repo-relative paths transported (present on 'recovered'/'nothing-to-commit'). */
   readonly paths?: string[];
   /** Error detail incl. git/hook stderr (present on 'failed'/'offline'). */
@@ -248,6 +261,17 @@ export async function recoverProtectedBranchApproval(
         return { outcome: 'failed', error: describeError(err) };
       }
 
+      // 8b. Read the commit we just made, IN THE WORKTREE. The primary checkout's
+      //     HEAD is untouched by design (INV-1), so this is the only place the
+      //     approval commit's SHA exists. Undefined on failure — one PR body line
+      //     degrades, the recovery does not.
+      let sha: string | undefined;
+      try {
+        sha = (await run(['rev-parse', 'HEAD'], { cwd: wt })).trim() || undefined;
+      } catch {
+        sha = undefined;
+      }
+
       // 9. Push. SECOND (and last) network call.
       try {
         await run(['push', '-q', '-u', 'origin', branch], { cwd: wt });
@@ -261,6 +285,7 @@ export async function recoverProtectedBranchApproval(
         branch,
         compareUrl: compareUrlFor(originUrl, branch),
         paths: rel,
+        sha,
       };
     } finally {
       // Best-effort cleanup — never throws, never changes the result (INV-2).
