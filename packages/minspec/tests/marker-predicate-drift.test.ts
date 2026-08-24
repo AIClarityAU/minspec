@@ -131,14 +131,49 @@ describe('control-marker predicates are anchored and agree (#1157)', () => {
     ).toMatch(/\$BEGIN_RE|\[\[:space:\]\]/);
   });
 
-  it('review-decide.sh and review-pr.sh agree on the predicate', () => {
-    // review-pr.sh picks its label with review-decide.sh but renders the audit-trail
-    // block itself. The two halves drifting is how a comment ends up showing a block
-    // its own label contradicts.
+  it('review-decide.sh keeps its anchored extractor', () => {
     const decide = fs.readFileSync(path.join(REPO, 'scripts/review-decide.sh'), 'utf-8');
-    const pr = fs.readFileSync(path.join(REPO, 'scripts/review-pr.sh'), 'utf-8');
-    const pattern = '[[:space:]]*REVIEW_VERDICT_BEGIN[[:space:]]*$';
-    expect(decide).toContain(pattern);
-    expect(pr).toContain(pattern);
+    expect(decide).toContain('[[:space:]]*REVIEW_VERDICT_BEGIN[[:space:]]*$');
+  });
+
+  it('the migrated scripts carry NO marker predicate at all (#1502)', () => {
+    // This replaces an older "review-pr.sh and review-decide.sh must agree on the
+    // predicate" case. That test defended agreement between two extractors; #1502
+    // removed the second extractor instead, which is strictly stronger — two halves
+    // that cannot disagree beat two halves kept in sync by a test.
+    //
+    // review-pr.sh now renders the block from the reviewer's structured output and
+    // hands that SAME string to review-decide.sh, so the label and the block a human
+    // reads are one object. review-approvable.sh likewise dropped its has_verdict().
+    // Neither may reacquire a predicate: doing so would reopen the forgery channel
+    // (#1165) on a path that applies a merge-gating label.
+    for (const rel of ['scripts/review-pr.sh', 'scripts/review-approvable.sh']) {
+      const src = fs.readFileSync(path.join(REPO, rel), 'utf-8');
+      const offenders = src
+        .split('\n')
+        .map((text, i) => ({ text: text.trim(), line: i + 1 }))
+        .filter(({ text }) => MARKER.test(text) && IS_PREDICATE.test(text));
+      expect(
+        offenders,
+        `${rel} must not match a control marker as a predicate — the verdict is a ` +
+          `value the reviewer returns (DR-079), not text this script parses back out. ` +
+          `Offending line(s): ${JSON.stringify(offenders)}`,
+      ).toEqual([]);
+    }
+  });
+
+  it('the migrated scripts fail closed when the CLI cannot carry a verdict (#1502)', () => {
+    // The migration is only safe because losing the channel refuses rather than
+    // silently reverting to text parsing. Without this, a CLI pin bump that dropped
+    // --json-schema would reinstate #1157 quietly, and the suite would stay green.
+    for (const rel of ['scripts/review-pr.sh', 'scripts/review-approvable.sh']) {
+      const src = fs.readFileSync(path.join(REPO, rel), 'utf-8');
+      expect(src, `${rel} must probe for --json-schema`).toContain("grep -q -- '--json-schema'");
+      expect(src, `${rel} must source the schema from the guard`).toContain('VERDICT_SCHEMA');
+      expect(
+        src,
+        `${rel} must scrub ANTHROPIC_API_KEY on the capability probe (#1402)`,
+      ).toContain("ANTHROPIC_API_KEY='' claude -p --help");
+    }
   });
 });
