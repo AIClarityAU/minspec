@@ -25,6 +25,12 @@ import * as os from 'os';
 
 const REPO_ROOT = process.cwd();
 const SCRIPT_PATH = path.join(REPO_ROOT, 'scripts', 'validate-frontmatter.ts');
+// Resolve the repo-local tsx by absolute path rather than via `npx`. The fixture cwd
+// is a tmpdir outside the repo (so the script's ROOT=process.cwd() sees the fixture),
+// and `npx` resolves binaries by walking up from cwd, so it would miss
+// node_modules/.bin/tsx and could try to FETCH tsx instead. That would break the
+// offline invariant and hang in a sandboxed CI run.
+const TSX_BIN = path.join(REPO_ROOT, 'node_modules', '.bin', 'tsx');
 
 /** A minimal well-formed DR, so any failure is attributable to Rule 19 alone. */
 function writeDoc(tmpDir: string, body: string, relPath = 'docs/probe.md'): void {
@@ -34,7 +40,7 @@ function writeDoc(tmpDir: string, body: string, relPath = 'docs/probe.md'): void
 }
 
 function runValidate(cwd: string): { status: number | null; output: string } {
-  const result = spawnSync('npx', ['tsx', SCRIPT_PATH], { cwd, encoding: 'utf-8' });
+  const result = spawnSync(TSX_BIN, [SCRIPT_PATH], { cwd, encoding: 'utf-8' });
   return { status: result.status, output: `${result.stdout}\n${result.stderr}` };
 }
 

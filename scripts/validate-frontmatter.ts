@@ -2,11 +2,17 @@
 /**
  * validate-frontmatter.ts
  *
- * Enforces:
- * 1. docs/domain/*.md must have `type: domain` frontmatter
- * 2. specs/**\/*.md must have `id: SPEC-NNN` frontmatter
- * 3. Task checklists (- [ ]) not allowed in docs/domain/ files
- * 4. Acceptance criteria patterns not allowed in docs/domain/ files
+ * The corpus gate run by `npm run validate`, by the pre-commit hook, and in CI.
+ *
+ * Rules are numbered and each is documented at its own definition below; grep
+ * `Rule <n>` to find one. This header deliberately does NOT enumerate them: the
+ * list drifted out of date once already (it stopped at 4 while the file enforced
+ * 19), and a partial inventory presented as complete is worse for a maintainer
+ * than no inventory at all.
+ *
+ * Severity convention: `fail()` is FATAL and exits non-zero; `warn()` is
+ * non-blocking. A rule that cannot run says so explicitly rather than passing
+ * quietly, per `.minspec/constitution.md` invariant 2.
  */
 
 import { readdirSync, readFileSync, statSync, existsSync } from 'fs';
@@ -636,6 +642,19 @@ try {
 // deliberately says so with a `claim-ok` marker on the same line. That turns every
 // use into a reviewable act, which is what DR-087 is actually asking for. The marker
 // mirrors the `pii-ok` convention already used by the secret scanner.
+//
+// Known limitation, found by this rule catching itself: the match is plain text, so
+// the word trips inside a FILE PATH or identifier as readily as inside a claim. The
+// research note behind DR-087 was originally named `nonforgeable-log.md` and reddened
+// the generated DR INDEX that quoted its path. Renaming was the right fix there, but
+// where a path genuinely must carry the word, `claim-ok` is the escape. Teaching the
+// rule about code spans was considered and rejected: it adds a parser to a gate whose
+// whole value is being obvious, and a claim can trivially be written inside backticks.
+//
+// Second finding from the same episode: GENERATED artifacts inherit claims from their
+// sources. The INDEX summary is derived from each DR's Context section, so a forbidden
+// word in a DR that is itself exempt still propagates into a file that is not. The fix
+// is upstream, in the source prose, not a wider exemption.
 const FORBIDDEN_CLAIM_WORDS: ReadonlyArray<{ readonly pattern: RegExp; readonly instead: string }> = [
   { pattern: /tamper[-\s]?proof/i, instead: 'tamper-evident (and say what detects the tampering)' },
   { pattern: /(?:non[-\s]?|un)forgeable/i, instead: 'tamper-evident below an independently held mark' },

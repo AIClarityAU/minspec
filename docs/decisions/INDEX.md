@@ -695,7 +695,7 @@ DR-076 cut the gates that existed for multi-human trust. This is a different cut
 
 *Status: proposed · Date: 2026-08-24*
 
-<!-- dr-summary:DR-087 auto=88407f29aa14 -->
-An adversarial analysis of append-only log integrity was run to answer one question: if MinSpec kept a Karpathy-style log.md, could it be made non-forgeable? Three candidate designs were built and each was handed to an independent red team whose findings overrode the designs' own self-assessments. The full working is at docs/research/nonforgeable-log.md.
+<!-- dr-summary:DR-087 auto=42d5d4a00641 -->
+An adversarial analysis of append-only log integrity was run to answer one question: if MinSpec kept a Karpathy-style log.md, how strong an integrity guarantee could it actually carry? Three candidate designs were built and each was handed to an independent red team whose findings overrode the designs' own self-assessments. The full working is at docs/research/log-integrity-2026-08-23.md.
 <!-- /dr-summary:DR-087 -->
 <!-- minspec:dr-index:end -->
