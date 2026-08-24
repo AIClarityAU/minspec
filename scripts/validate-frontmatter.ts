@@ -700,9 +700,22 @@ try {
     }
   }
 
-  // Fail-visibly discipline (constitution invariant 2, and DR-087's own third clause:
-  // a verifier reports its own absence rather than passing quietly). A zero-file scan
-  // means the roots moved, not that the corpus is clean.
+  // A zero-file scan means the roots moved, not that the corpus is clean, so the
+  // rule reports its own absence rather than passing quietly.
+  //
+  // Be precise about what this does and does not satisfy. Constitution invariant 2
+  // has two halves: a missing witness must fail the gate CLOSED and VISIBLY. This
+  // branch delivers the second half only. It warns loudly and exits 0, so it fails
+  // OPEN, which means a genuine fs error or a moved root would let a forbidden claim
+  // through with nothing worse than a warning. Calling that invariant-2 compliance
+  // would be a claim this code does not support, which is the exact defect Rule 19
+  // exists to catch.
+  //
+  // Left as warn() deliberately, to match Rules 16, 17 and 18, which all take the
+  // same warn-not-fail route on an unrunnable check. Making Rule 19 alone fail closed
+  // would be inconsistent and could wedge commits on a branch where specs/ or docs/
+  // legitimately does not exist. Whether all four should instead fail closed is a
+  // cross-cutting decision, tracked separately rather than settled here.
   if (claimFilesScanned === 0) {
     warn(
       'Rule 19 scanned 0 files; do not read the green as a corpus free of forbidden claims.',
