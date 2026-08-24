@@ -23,6 +23,8 @@ const HEAD_MOVING = ['checkout', 'switch', 'merge', 'rebase', 'reset', 'cherry-p
 
 interface Recorder {
   readonly calls: string[][];
+  /** `cwd` for the call at the same index — lets a test assert WHERE a step ran. */
+  readonly cwds: Array<string | undefined>;
   readonly run: GitRun;
 }
 
@@ -32,11 +34,16 @@ interface Recorder {
  */
 function recorder(opts: { fail?: Record<string, unknown>; noDelta?: boolean } = {}): Recorder {
   const calls: string[][] = [];
-  const run: GitRun = async (args) => {
+  const cwds: Array<string | undefined> = [];
+  const run: GitRun = async (args, o) => {
     calls.push([...args]);
+    cwds.push(o?.cwd);
     const key = args[0] ?? '';
     if (opts.fail && key in opts.fail) throw opts.fail[key];
     if (key === 'remote') return 'https://github.com/OWNER/REPO.git\n';
+    // The approval commit's SHA (#1653 review). Distinctive so a test can prove the
+    // value reaching the PR body came from HERE and not from the primary's HEAD.
+    if (key === 'rev-parse') return 'c0ffee1234567890\n';
     // `diff --cached --quiet` REJECTS when there IS a delta — so resolving means
     // "no delta". Default to a delta (reject) unless the test asks otherwise.
     if (key === 'diff') {
@@ -45,7 +52,7 @@ function recorder(opts: { fail?: Record<string, unknown>; noDelta?: boolean } = 
     }
     return '';
   };
-  return { calls, run };
+  return { calls, cwds, run };
 }
 
 /** A temp dir holding the two approval files, plus their absolute paths. */
@@ -97,7 +104,32 @@ describe('recoverProtectedBranchApproval — #1115', () => {
     // The only mutation of the primary is `fetch` (a remote-tracking ref) and
     // `worktree add`/`remove` (a separate worktree with a separate index).
     const primaryOps = new Set(used);
-    expect(primaryOps).toEqual(new Set(['remote', 'fetch', 'worktree', 'add', 'diff', 'commit', 'push']));
+    // `rev-parse` joined this set in #1653: the approval commit's SHA must be read
+    // for the PR body, and it exists ONLY in the ephemeral worktree. It is read-only
+    // by construction — it cannot move any ref — so it does not weaken the invariant.
+    // The next assertion pins the stronger property the exact-set alone cannot: that
+    // it ran in the WORKTREE, never in the primary checkout.
+    expect(primaryOps).toEqual(
+      new Set(['remote', 'fetch', 'worktree', 'add', 'diff', 'commit', 'push', 'rev-parse']),
+    );
+  });
+
+  it('INV-1 (#1653): the SHA probe runs in the WORKTREE, never in the primary checkout', async () => {
+    const r = recorder();
+    const fx = fixture();
+    await recover(r, fx);
+    const i = r.calls.findIndex((c) => c[0] === 'rev-parse');
+    expect(i).toBeGreaterThanOrEqual(0);
+    // Reading HEAD in the primary would return the BASE tip — the exact wrong-SHA
+    // defect the review caught — and would also make the probe meaningless here.
+    expect(r.cwds[i]).not.toBe(fx.root);
+    expect(r.cwds[i]).toContain('recover-wt-');
+  });
+
+  it('#1653: a recovered result carries the approval commit SHA', async () => {
+    const res = await recover(recorder());
+    expect(res.outcome).toBe('recovered');
+    expect(res.sha).toBe('c0ffee1234567890');
   });
 
   it('INV-1: stages ONLY the approval paths — never a blanket add -A', async () => {
