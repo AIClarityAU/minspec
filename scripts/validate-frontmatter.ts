@@ -658,7 +658,11 @@ try {
 const FORBIDDEN_CLAIM_WORDS: ReadonlyArray<{ readonly pattern: RegExp; readonly instead: string }> = [
   { pattern: /tamper[-\s]?proof/i, instead: 'tamper-evident (and say what detects the tampering)' },
   { pattern: /(?:non[-\s]?|un)forgeable/i, instead: 'tamper-evident below an independently held mark' },
-  { pattern: /non[-\s]?repudiab(?:le|ility)/i, instead: 'attributable (and name the identity that attributes it)' },
+  // The noun form is included deliberately. DR-087 names the adjective, but
+  // "the log provides non-repudiation" asserts the identical property, and a gate
+  // that blocks the claim only in its adjectival dress is a gate with a documented
+  // way around it.
+  { pattern: /non[-\s]?repudia(?:ble|bility|tion)/i, instead: 'attributable (and name the identity that attributes it)' },
 ];
 
 // Files that discuss these words rather than assert them. Kept deliberately short

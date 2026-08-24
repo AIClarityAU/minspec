@@ -64,6 +64,7 @@ const FORBIDDEN = [
   'unforgeable',
   'non-repudiable',
   'non-repudiability',
+  'non-repudiation',
 ];
 
 describe('#1683 Rule 19 — forbidden integrity claims', () => {
@@ -94,20 +95,26 @@ describe('#1683 Rule 19 — forbidden integrity claims', () => {
     });
   }, 30000);
 
+  // The green cases below assert on Rule 19's MESSAGE rather than on the script's
+  // exit code. Asserting status === 0 would couple them to every other rule in the
+  // script tolerating a near-empty fixture, so an unrelated rule failing on an absent
+  // directory would turn these red for reasons that have nothing to do with Rule 19.
+  // The one case that does assert the exit code is kept below, so a Rule 19 that
+  // crashed the script outright would still be caught.
   it('passes an otherwise identical document with no forbidden word (control)', () => {
     withTmp(dir => {
       writeDoc(dir, 'The log is tamper-evident below an independently held mark.');
       const { status, output } = runValidate(dir);
-      expect(status).toBe(0);
       expect(output).not.toContain('forbidden integrity claim');
+      // Exit code asserted here, and only here, as the crash canary.
+      expect(status).toBe(0);
     });
   }, 30000);
 
   it('suppresses on a claim-ok marker, so the word can be discussed deliberately', () => {
     withTmp(dir => {
       writeDoc(dir, 'The word non-forgeable is the one DR-087 forbids. claim-ok');
-      const { status, output } = runValidate(dir);
-      expect(status).toBe(0);
+      const { output } = runValidate(dir);
       expect(output).not.toContain('forbidden integrity claim');
     });
   }, 30000);
@@ -131,8 +138,7 @@ describe('#1683 Rule 19 — forbidden integrity claims', () => {
         'This note examines whether a log can be non-forgeable at all.',
         'docs/research/probe.md',
       );
-      const { status, output } = runValidate(dir);
-      expect(status).toBe(0);
+      const { output } = runValidate(dir);
       expect(output).not.toContain('forbidden integrity claim');
     });
   }, 30000);
