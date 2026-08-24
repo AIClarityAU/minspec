@@ -175,7 +175,9 @@ async function recoverOnProtectedBranch(
     { outcome: 'pushed-branch', branch: res.branch, compareUrl: res.compareUrl },
     // `sha` is REQUIRED here, not a nicety: recovery commits in a separate
     // worktree, so `openApprovalPr`'s HEAD fallback would name the base tip.
-    { subject: message, paths: res.paths, sha: res.sha },
+    // `?? null` is load-bearing: if recovery could not read its own commit, the
+    // body omits the line rather than falling back to a SHA we KNOW is wrong.
+    { subject: message, paths: res.paths, sha: res.sha ?? null },
   );
   return { suffix };
 }
@@ -518,8 +520,18 @@ export interface ApprovalPushContext {
    * at the base tip and the fallback would stamp the PR body with the base branch's
    * commit. A wrong SHA in a body line that reads `**Approval commit:**` is a
    * signpost that lies, which is the one defect class this product cannot ship.
+   *
+   * THREE-STATE, deliberately (#1672 review):
+   *   `string`    — the caller knows the SHA; it is used verbatim.
+   *   `null`      — the caller OWNS the SHA and could not read it. The HEAD probe
+   *                 is skipped and the body simply omits the `**Approval commit:**`
+   *                 line. For the recovery caller the probe is not merely
+   *                 unreliable, it is guaranteed wrong (the primary's HEAD is the
+   *                 base tip), so degrading to silence beats degrading to a lie.
+   *   `undefined` — the caller has no opinion; probe `HEAD` as before. This keeps
+   *                 the eleven pre-existing two-argument call sites unchanged.
    */
-  readonly sha?: string;
+  readonly sha?: string | null;
   /** Injected git/gh runner; production uses {@link defaultExecRun}. Tests pass a stub. */
   readonly run?: ExecRun;
 }
@@ -700,9 +712,11 @@ async function openApprovalPr(
     const changed = await branchChangedPaths(run, rootDir, PR_BASE, `origin/${result.branch}`);
     const labels = laneLabelsFor(changed);
     const record = readRecord(rootDir, approvableRelPath(paths));
-    // Caller-supplied SHA WINS. Only fall back to probing the primary checkout's
-    // HEAD when the caller cannot say — see `ApprovalPushContext.sha`.
-    const sha = ctx.sha ?? (await resolveHeadSha(run, rootDir));
+    // Caller-supplied SHA WINS, and an EXPLICIT `null` suppresses the fallback
+    // entirely — see `ApprovalPushContext.sha` for why the three states differ.
+    // `??` would have collapsed `null` into "probe HEAD", which is the one answer
+    // that is certainly wrong for the caller that passes it.
+    const sha = ctx.sha === undefined ? await resolveHeadSha(run, rootDir) : (ctx.sha ?? undefined);
 
     const pr = await openPullRequest({
       run,

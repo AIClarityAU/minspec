@@ -49,7 +49,10 @@ vi.mock('../src/lib/approval-recover', () => ({
   recoverProtectedBranchApproval: (...a: unknown[]) => recoverMock(...a),
 }));
 
-vi.mock('../src/lib/approve-push', () => ({ pushApproval: vi.fn() }));
+const pushApprovalMock = vi.fn();
+vi.mock('../src/lib/approve-push', () => ({
+  pushApproval: (...a: unknown[]) => pushApprovalMock(...a),
+}));
 
 /**
  * #1653 — the recovery path now FINISHES into a PR via `openApprovalPr`, so this
@@ -86,7 +89,7 @@ vi.mock('../src/lib/approval-store', () => ({
   toPosixRel: (p: string) => p,
 }));
 
-import { commitApprovalIfEnabled } from '../src/commands/commit-on-approve';
+import { commitApprovalIfEnabled, pushApprovalIfEnabled } from '../src/commands/commit-on-approve';
 
 /** The refusal this feature exists to rescue. */
 const REFUSED = {
@@ -108,6 +111,11 @@ beforeEach(() => {
     .mockReset()
     .mockResolvedValue(['.minspec/approvals/specs/x/requirements.md.json']);
   resolveHeadShaMock.mockReset().mockResolvedValue('BASE_TIP_NOT_THE_APPROVAL');
+  pushApprovalMock.mockReset().mockResolvedValue({
+    outcome: 'pushed-branch',
+    branch: 'approvals/from-push-seam',
+    compareUrl: 'https://github.com/O/R/compare/approvals%2Ffrom-push-seam?expand=1',
+  });
   recoverMock.mockReset().mockResolvedValue({
     outcome: 'recovered',
     branch: 'approvals/spec-099-x',
@@ -265,9 +273,12 @@ describe('protected-branch recovery wiring — #1115', () => {
     expect(resolveHeadShaMock).not.toHaveBeenCalled();
   });
 
-  it('T3 #1653 review: an unreadable recovery SHA degrades to the probe, never to a crash', async () => {
-    // `sha` is undefined when `rev-parse` fails in the ephemeral worktree. One body
-    // line degrades; the approval, the push and the PR all still happen.
+  it('T3 #1672 review: an unreadable recovery SHA OMITS the line — it never falls back to a lie', async () => {
+    // `sha` is undefined when `rev-parse` fails in the ephemeral worktree. The probe
+    // must NOT run: for this caller the primary's HEAD is guaranteed to be the base
+    // tip, so falling back would stamp the one SHA we know is wrong. `buildApprovalPrBody`
+    // omits the `**Approval commit:**` line entirely when sha is undefined — degrading
+    // to silence, not to a false signpost.
     CONFIG.pushOnApprove = 'always';
     recoverMock.mockResolvedValue({
       outcome: 'recovered',
@@ -276,8 +287,26 @@ describe('protected-branch recovery wiring — #1115', () => {
       paths: ['specs/x/requirements.md'],
     });
     const r = await commitApprovalIfEnabled('/root', ['/root/specs/x/requirements.md'], 'msg');
+    expect(resolveHeadShaMock).not.toHaveBeenCalled();
+    expect(bodyArgs[0].sha).toBeUndefined();
+    // …and the approval, the push and the PR all still happen.
     expect(openPullRequestMock).toHaveBeenCalledTimes(1);
     expect(r.suffix).toContain('PR opened');
+  });
+
+  it('T3 #1672 review: a caller with NO opinion still gets the HEAD probe (no regression)', async () => {
+    // The three-state contract's third arm, exercised through the OTHER caller — the
+    // non-protected push seam, whose eleven call sites pass no `sha` at all. `null`
+    // suppresses the probe; `undefined` must not, or this fix would silently strip the
+    // `**Approval commit:**` line from every ordinary approval PR.
+    CONFIG.pushOnApprove = 'always';
+    await pushApprovalIfEnabled('/root', 'slug', {
+      subject: 'chore(approve): SPEC-099',
+      paths: ['specs/x/requirements.md'],
+    });
+    expect(resolveHeadShaMock).toHaveBeenCalledTimes(1);
+    expect(bodyArgs).toHaveLength(1);
+    expect(bodyArgs[0].sha).toBe('BASE_TIP_NOT_THE_APPROVAL');
   });
 
   it('a THROWING seam still degrades to the warning — commitApprovalIfEnabled never rejects', async () => {
