@@ -320,3 +320,58 @@ describe('drain-inbox.sh --quota-gate — the WEEKLY ceiling, which the 5h readi
     expect(run(['--quota-health']).out).toMatch(/7d window 61%/);
   });
 });
+
+describe('T3 regression — the weekly ceiling must outrank the 5h window-reset', () => {
+  // Found in review of #1676. quota_gate returned open:window-reset as soon as the 5h
+  // resets_at passed, BEFORE consulting the weekly ceiling. The two windows are
+  // independent: the 5h one turning over does not refill the weekly one. So a fresh
+  // reading whose 5h window had reset but whose 7d window was exhausted was admitted,
+  // and the drain walked into exactly the wall this feature exists to prevent.
+  //
+  // Deterministically reachable, not a race: the loop sleeps to the 5h reset, wakes,
+  // the poller has refreshed the reading (so it is not stale), 5h resets_at is now in
+  // the past -> admitted despite 7d at 99%.
+  const write7 = (q: Record<string, number>) =>
+    fs.writeFileSync(quotaFile, JSON.stringify({ observed_at: nowSec(), ...q }));
+
+  it('defers on the weekly ceiling even when the 5h window has already reset', () => {
+    write7({
+      used_percentage: 5, resets_at: nowSec() - 60,          // 5h window turned over
+      seven_day_percentage: 99, seven_day_resets_at: nowSec() + 200000, // weekly spent
+    });
+    const r = run(['--quota-gate']);
+    expect(r.code).toBe(42);
+    expect(r.out).toMatch(/WEEKLY/);
+    expect(r.out).not.toMatch(/window-reset/);
+  });
+
+  it('still reports window-reset when the 5h window reset and the weekly has room', () => {
+    write7({
+      used_percentage: 5, resets_at: nowSec() - 60,
+      seven_day_percentage: 20, seven_day_resets_at: nowSec() + 200000,
+    });
+    const r = run(['--quota-gate']);
+    expect(r.code).toBe(0);
+    expect(r.out).toMatch(/window-reset/);
+  });
+
+  it('with no weekly reading, a passed 5h reset still admits (behaviour unchanged)', () => {
+    write({ used_percentage: 99, resets_at: nowSec() - 60 });
+    expect(run(['--quota-gate']).code).toBe(0);
+  });
+
+  it('sleeps toward the WEEKLY reset when the weekly ceiling is what is deferring', () => {
+    // Non-blocking finding from the same review: quota_sleep_secs read the weekly
+    // fields but never used them, so the loop slept on the 5h reset (or the clamp)
+    // while the gate reported a days-out weekly deferral. Safe, but the message lied.
+    write7({
+      used_percentage: 5, resets_at: nowSec() + 120,
+      seven_day_percentage: 99, seven_day_resets_at: nowSec() + 200000,
+    });
+    const secs = Number(run(['--quota-sleep']).out);
+    // The weekly reset is ~200000s out, so the answer must be the 6h clamp — NOT the
+    // 135s the 5h reset would give. A `> 120` assertion would pass on that 135 and
+    // prove nothing, which is how this test first went green while still broken.
+    expect(secs).toBe(6 * 3600);
+  });
+});

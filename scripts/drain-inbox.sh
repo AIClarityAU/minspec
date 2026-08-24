@@ -838,8 +838,9 @@ run_cycle() {
   return 0
 }
 
-# _quota_read: print "<pct_int> <resets_at> <observed_at>", or fail if there is no
-# usable reading. Every caller treats failure as "unknown" and proceeds.
+# _quota_read: print "<pct_int> <resets_at> <observed_at> <7d_pct> <7d_resets_at>", or
+# fail if there is no usable reading. Every caller treats failure as "unknown" and
+# proceeds. The two weekly fields are -1 when the producer could not see that window.
 _quota_read() {
   [[ -r "$QUOTA_FILE" ]] || return 1
   command -v jq >/dev/null 2>&1 || return 1
@@ -870,12 +871,12 @@ quota_gate() {
     echo "open:stale (reading is $(( now - o ))s old, limit ${QUOTA_STALE_SEC}s — proceeding)"
     return 0
   fi
-  if (( r <= now )); then
-    echo "open:window-reset (resets_at already passed — proceeding)"
-    return 0
-  fi
-  # Weekly ceiling first: it is the one a 5h reading cannot see, and a drain that only
-  # watches the 5h window will walk straight into it.
+  # The WEEKLY ceiling is checked before anything to do with the 5h window, because the
+  # two are INDEPENDENT: the 5h window turning over does not refill the weekly one. This
+  # ordering is load-bearing — when the weekly check sat below the window-reset return,
+  # a fresh reading whose 5h window had just reset was admitted with the weekly window
+  # exhausted, which is precisely the wall this gate exists to prevent. It was reachable
+  # on every single wake: sleep to the 5h reset, wake, get admitted, hit the weekly wall.
   if (( wp >= 0 )) && (( wp >= QUOTA_ADMIT_PCT_7D )); then
     if (( wr > now )); then
       echo "defer:$(( wr - now )) (7d window ${wp}% used — the WEEKLY ceiling, resets in $(( (wr - now + 3599) / 3600 )) h)"
@@ -883,6 +884,10 @@ quota_gate() {
       echo "defer:$QUOTA_SLEEP_MAX (7d window ${wp}% used — the WEEKLY ceiling, no usable reset time)"
     fi
     return 42
+  fi
+  if (( r <= now )); then
+    echo "open:window-reset (resets_at already passed — proceeding)"
+    return 0
   fi
   if (( p >= QUOTA_ADMIT_PCT )); then
     echo "defer:$(( r - now )) (5h window ${p}% used, resets in $(( (r - now + 59) / 60 )) min)"
@@ -901,8 +906,16 @@ quota_sleep_secs() {
   now=$(date +%s)
   if vals=$(_quota_read); then
     read -r p r o wp wr <<<"$vals"
-    if (( now - o <= QUOTA_STALE_SEC )) && (( r > now )); then
-      secs=$(( r - now + QUOTA_SLEEP_MARGIN ))
+    if (( now - o <= QUOTA_STALE_SEC )); then
+      # Sleep toward whichever window is actually BINDING. When the weekly ceiling is
+      # what deferred us, the 5h reset is the wrong deadline — it can be minutes away
+      # while the weekly window is days out, so the loop would wake, re-defer, and
+      # report "sleeping to the published reset" while sleeping to an irrelevant one.
+      if (( wp >= 0 )) && (( wp >= QUOTA_ADMIT_PCT_7D )) && (( wr > now )); then
+        secs=$(( wr - now + QUOTA_SLEEP_MARGIN ))
+      elif (( r > now )); then
+        secs=$(( r - now + QUOTA_SLEEP_MARGIN ))
+      fi
     fi
   fi
   [[ -n "$secs" ]] || secs="$QUOTA_BACKOFF"
