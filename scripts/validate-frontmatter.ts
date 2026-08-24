@@ -10,7 +10,7 @@
  */
 
 import { readdirSync, readFileSync, statSync, existsSync } from 'fs';
-import { join, relative, dirname } from 'path';
+import { join, relative, dirname, sep } from 'path';
 import { validateDrSequence, validateDrIndexStatus, validateDrAmendments } from '../packages/minspec/src/lib/adr-manager';
 import {
   validateSplitLayoutCoverage,
@@ -616,6 +616,80 @@ try {
   }
 } catch {
   // scaffold/tool-detector unavailable — nothing to check, stay silent.
+}
+
+// Rule 19 (FATAL, #1683, DR-087): three integrity words are forbidden claims.
+//
+// DR-087 records that a hash binds content, never authorship, and that the strong
+// integrity properties are structurally unavailable to a local offline tool. In a
+// product whose pitch is that the signpost never lies, a false claim of a property
+// IS the defect, so `tamper-proof`, `non-forgeable` and `non-repudiable` may not be
+// asserted in the corpus.
+//
+// Why this rule exists at all: DR-087 is prose, and prose enforcing prose is the
+// failure mode `.minspec/constitution.md` names. Without this check the decision is
+// a convention nobody can fail.
+//
+// Why it does NOT try to detect negation: "MinSpec is not tamper-proof" is true and
+// useful, but a gate that guesses at negation guesses wrong, and a wrong FATAL is
+// worse than a noisy one. So the word is blocked outright and an author who means it
+// deliberately says so with a `claim-ok` marker on the same line. That turns every
+// use into a reviewable act, which is what DR-087 is actually asking for. The marker
+// mirrors the `pii-ok` convention already used by the secret scanner.
+const FORBIDDEN_CLAIM_WORDS: ReadonlyArray<{ readonly pattern: RegExp; readonly instead: string }> = [
+  { pattern: /tamper[-\s]?proof/i, instead: 'tamper-evident (and say what detects the tampering)' },
+  { pattern: /(?:non[-\s]?|un)forgeable/i, instead: 'tamper-evident below an independently held mark' },
+  { pattern: /non[-\s]?repudiab(?:le|ility)/i, instead: 'attributable (and name the identity that attributes it)' },
+];
+
+// Files that discuss these words rather than assert them. Kept deliberately short
+// and stated with a reason, because every entry is a hole in the gate.
+const CLAIM_WORD_EXEMPT: ReadonlyArray<{ readonly path: string; readonly why: string }> = [
+  { path: 'docs/decisions/DR-087.md', why: 'defines the rule, so it must name the words' },
+  { path: 'docs/research/', why: 'dated analyses of these properties, not product claims' },
+];
+
+try {
+  const claimScanRoots = ['specs', 'docs'];
+  let claimFilesScanned = 0;
+
+  for (const root of claimScanRoots) {
+    for (const file of safeGlob(join(ROOT, root), '.md')) {
+      const rel = relative(ROOT, file).split(sep).join('/');
+      if (CLAIM_WORD_EXEMPT.some(e => rel === e.path || rel.startsWith(e.path))) continue;
+      claimFilesScanned++;
+
+      const lines = readFileSync(file, 'utf-8').split('\n');
+      lines.forEach((line, i) => {
+        if (line.includes('claim-ok')) return;
+        for (const { pattern, instead } of FORBIDDEN_CLAIM_WORDS) {
+          const hit = line.match(pattern);
+          if (hit) {
+            fail(
+              file,
+              `line ${i + 1}: "${hit[0]}" is a forbidden integrity claim (DR-087). ` +
+                `Say ${instead} instead, or add a \`claim-ok\` marker on this line if you ` +
+                `are discussing the word rather than claiming the property.`,
+            );
+          }
+        }
+      });
+    }
+  }
+
+  // Fail-visibly discipline (constitution invariant 2, and DR-087's own third clause:
+  // a verifier reports its own absence rather than passing quietly). A zero-file scan
+  // means the roots moved, not that the corpus is clean.
+  if (claimFilesScanned === 0) {
+    warn(
+      'Rule 19 scanned 0 files; do not read the green as a corpus free of forbidden claims.',
+    );
+  }
+} catch (err) {
+  warn(
+    `claim-word check could not run (${err instanceof Error ? err.message : String(err)}) — ` +
+      'Rule 19 validated NOTHING this run; do not read the green as a clean corpus.',
+  );
 }
 
 checkCiReviewTemplatesFresh().then(() => {
