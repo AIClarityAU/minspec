@@ -138,6 +138,13 @@ exit 0
     return { dir, bin, log: (w) => path.join(dir, `log.${w}`), flight: path.join(dir, 'flight') };
   }
 
+  // MINSPEC_QUOTA_FILE must be isolated too, and pointed at a path that does NOT
+  // exist. The quota gate reads it before dispatching, so without this the suite reads
+  // the machine's REAL ~/.claude/quota.json and its result depends on how much of the
+  // human's 5h window happens to be spent: above the bar the drain correctly defers and
+  // dispatches nothing, and the test fails with `expected +0 to be 1`. Caught exactly
+  // that way at 95% used. A missing file means "no reading", which fails open and
+  // admits - the deterministic state these tests need.
   // MINSPEC_DRAIN_LOCK must be isolated alongside MINSPEC_DRAIN_LOG. The drain is a
   // singleton keyed on that lock (drain-inbox.sh:110), so without the override these
   // tests contend with any real drain running on the machine — including the live
@@ -157,6 +164,7 @@ exit 0
         MINSPEC_DRAIN_PRIMARY_ROOT="${path.join(h.dir, 'root')}" \
         MINSPEC_DRAIN_LOG="${h.log(width)}" \
         MINSPEC_DRAIN_LOCK="${path.join(h.dir, 'lock')}" \
+        MINSPEC_QUOTA_FILE="${path.join(h.dir, 'no-quota.json')}" \
         bash "${DRAIN}" --once 2>&1 | grep -oP 'PID \\K[0-9]+')
       while kill -0 "$pid" 2>/dev/null; do sleep 0.05; done
     `], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
