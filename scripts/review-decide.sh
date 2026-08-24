@@ -29,6 +29,13 @@
 
 set -eu
 
+# Resolve the guard module relative to THIS script, so the quota check below is not
+# silently inert when invoked from another directory (#1204). A missing guard must
+# degrade to the previous behaviour (fail closed to changes), never to a crash —
+# this script is a gate and must stay usable with nothing but bash.
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+GUARD="${GUARD:-${SCRIPT_DIR}/../.github/scripts/ai-review-guard.js}"
+
 INPUT="$(cat)"
 
 # ── what counts as a MARKER (#1157) ───────────────────────────────────────────
@@ -74,6 +81,26 @@ fi
 
 BLOCK="$(printf '%s\n' "$INPUT" | sed -n "/$BEGIN_RE/,/$END_RE/p")"
 if [[ -z "$BLOCK" ]]; then
+  # No verdict block. Before calling this a CODE verdict, ask whether the reviewer
+  # could have produced one at all (#1204).
+  #
+  # The UNAVAILABLE_RE check above only fires when review-branch.sh WRAPPED the
+  # failure in its marker. When the CLI is killed mid-flight the raw limit message
+  # reaches us unwrapped — "You've hit your session limit · resets 12:50am" — and
+  # this branch used to label that `ai-review:changes`: a sentence that literally
+  # says "session limit", reported as though the reviewer had read the code and
+  # wanted changes. It is also why the retry never fired for these: ai-review-retry
+  # selects on `ai-review:blocked`, so an outage wearing a `changes` label is
+  # invisible to it and waits forever.
+  #
+  # STRICT matcher on purpose. The loose one matches a bare `quota` anywhere, which
+  # is correct for harness stderr but wrong here: this text may be the AGENT's own
+  # prose, and a review DISCUSSING quota handling must not be read as an outage. The
+  # strict variant keeps only phrasings that read as the CLI's own sentences.
+  if [[ -f "$GUARD" ]] && GUARD="$GUARD" node -e 'const g=require(process.env.GUARD);let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.exit(g.isQuotaExhaustionStrict(s)?0:1));' <<<"$INPUT" 2>/dev/null; then
+    echo "ai-review:blocked"   # could not RUN — retry-able, not a code verdict
+    exit 0
+  fi
   echo "ai-review:changes"   # fail closed: no parseable verdict → not green
   exit 2
 fi
