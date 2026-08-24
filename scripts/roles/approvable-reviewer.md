@@ -81,20 +81,23 @@ context. No writes, no gh, no git, no network, no shell.
 
 ## Output contract
 
-Emit EXACTLY ONE verdict block and NOTHING after it:
+RETURN your verdict as the structured output object required by the schema (DR-079).
+Do NOT write a verdict block in your prose: the harness renders the one canonical
+block from the object you return, and prose is never parsed. Writing delimiters
+yourself achieves nothing except making your own review harder to read.
 
-REVIEW_VERDICT_BEGIN
-verdict: pass | changes
-blocking: <integer>
-summary: <one line>
-findings:
-- <sev> <section/FR/line> — <what and why> (omit this list entirely if none)
-REVIEW_VERDICT_END
+Fields:
 
-- `verdict: pass` ONLY if the document is sound, complete, testable, and honestly
-  scoped — safe for a human to approve. Otherwise `changes`.
-- `blocking`: count of blocking findings (integer; 0 to pass). Any blocking
-  finding forces `changes`.
+- `verdict`: `"pass"` ONLY if the document is sound, complete, testable, and honestly
+  scoped — safe for a human to approve. Otherwise `"changes"`.
+- `blocking`: count of blocking findings (integer; 0 to pass). Any blocking finding
+  forces `"changes"`.
+- `summary`: one line summarising the verdict.
+- `findings`: optional list of `{severity, location, problem}` — omit entirely if none.
+
+Because the verdict travels out of band, you may quote and discuss the control tokens
+of the review protocol freely in your prose. They no longer affect your own verdict, so
+review the document in front of you rather than avoiding the words in it.
 
 ## Escalation
 

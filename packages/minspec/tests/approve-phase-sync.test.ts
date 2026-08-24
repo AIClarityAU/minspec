@@ -107,7 +107,7 @@ Body stays put.
   afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
 
   it('rewrites only existing phase lines, preserving the lock comment and body', () => {
-    setSpecPhases(filePath, { specify: 'done', plan: 'in-progress' });
+    setSpecPhases(filePath, { specify: 'done', plan: 'in-progress' }, { createIfAbsent: false });
     const after = fs.readFileSync(filePath, 'utf-8');
     expect(after).toContain('  specify: done');
     expect(after).toContain('  plan: in-progress');
@@ -121,7 +121,7 @@ Body stays put.
 
   it('does NOT add a phase line that was absent (preserves file shape)', () => {
     // The fixture has no `clarify:` line — advancing it must not introduce one.
-    setSpecPhases(filePath, { clarify: 'done', specify: 'done' });
+    setSpecPhases(filePath, { clarify: 'done', specify: 'done' }, { createIfAbsent: false });
     const after = fs.readFileSync(filePath, 'utf-8');
     expect(after).not.toContain('clarify:');
     expect(after).toContain('  specify: done');
@@ -135,7 +135,7 @@ Body stays put.
     const noPhases = path.join(tmpDir, 'no-phases.md');
     const src = '---\nid: SPEC-201\nstatus: specifying\ntier: T2\n---\n# X\n';
     fs.writeFileSync(noPhases, src);
-    setSpecPhases(noPhases, { specify: 'done' });
+    setSpecPhases(noPhases, { specify: 'done' }, { createIfAbsent: false });
     expect(fs.readFileSync(noPhases, 'utf-8')).toBe(src); // byte-identical
   });
 
@@ -459,5 +459,52 @@ describe('advanceSpecToImplementing — a spec with no phases: block (SPEC-061)'
     expect(fm.phases.plan).toBe('in-progress');
     expect(fm.phases.specify).toBe('pending');
     expect(fm.phases.implement).toBe('pending');
+  });
+});
+
+// ─── SPEC-061 DQ-1 sub-choice: createIfAbsent is REQUIRED, and says so ────────
+//
+// DQ-1 deferred "required or defaulted" to Plan and recorded the hazard of the
+// defaulted form in its own words: a caller who forgets the flag "silently
+// reproduces the exact #957 half-write this spec exists to remove, and nothing
+// errors". Required closes that.
+//
+// The compiler only closes it for `src/` callers: the vitest tree here is covered
+// by NO tsconfig — `tsconfig.json` includes only `src/**/*.ts`, `tsconfig.test.json`
+// only `src/test/**/*.ts`. Verified with a control: a blatant type error added to
+// this very file raises nothing from either project. So the runtime guard is what
+// actually protects test-side and JS callers, and it is asserted here.
+describe('setSpecPhases — createIfAbsent is required (SPEC-061 DQ-1)', () => {
+  let dir: string;
+  const SRC = '---\nid: SPEC-900\nstatus: specifying\ntier: T2\n---\n# X\n';
+  const write = (): string => {
+    const p = path.join(dir, 'r.md');
+    fs.writeFileSync(p, SRC, 'utf-8');
+    return p;
+  };
+  beforeEach(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dq1-')); });
+  afterEach(() => fs.rmSync(dir, { recursive: true, force: true }));
+
+  it('throws — rather than silently no-opping — when the flag is omitted', () => {
+    const p = write();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(() => (setSpecPhases as any)(p, { specify: 'done' })).toThrow(/requires an explicit/);
+    expect(fs.readFileSync(p, 'utf-8')).toBe(SRC); // and wrote nothing
+  });
+
+  it('throws on an empty options object, not just a missing one', () => {
+    const p = write();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    expect(() => (setSpecPhases as any)(p, { specify: 'done' }, {})).toThrow(/requires an explicit/);
+  });
+
+  it('names both intents in the message, so the fix is obvious from the error', () => {
+    const p = write();
+    let msg = '';
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    try { (setSpecPhases as any)(p, {}); } catch (e) { msg = (e as Error).message; }
+    expect(msg).toMatch(/false/);
+    expect(msg).toMatch(/true/);
+    expect(msg).toContain('#957');
   });
 });

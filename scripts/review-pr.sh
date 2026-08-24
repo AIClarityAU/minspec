@@ -54,6 +54,29 @@ gh_bot_init
 
 DECIDE="${SCRIPT_DIR}/review-decide.sh"
 
+# The verdict travels out of band (DR-079): the reviewer RETURNS a schema-validated
+# object and this script renders the one canonical block from it. The schema is defined
+# ONCE, in the guard, so the shape the CLI enforces and the shape the renderer validates
+# cannot drift. scripts/ is a sibling of .github/scripts/.
+GUARD="${SCRIPT_DIR}/../.github/scripts/ai-review-guard.js"
+VERDICT_SCHEMA_JSON=""
+if [[ -f "$GUARD" ]]; then
+  VERDICT_SCHEMA_JSON="$(GUARD="$GUARD" node -e 'process.stdout.write(JSON.stringify(require(process.env.GUARD).VERDICT_SCHEMA))' 2>/dev/null || true)"
+fi
+
+# Fail CLOSED if this CLI cannot carry a verdict out of band. This script APPLIES a
+# label, so degrading to a text-parsed fallback would not merely lose a review — it
+# would put a merge-gating label on a PR using the very channel #1157/#1165 showed a
+# reviewer's prose can forge. Refusing leaves the PR unlabeled for a human instead.
+#
+# ANTHROPIC_API_KEY is scrubbed for the probe (#1402): the PAYG failover must be
+# reachable only through an explicit decision, never ambient environment, and a
+# capability probe is a child like any other. `--help` makes no API call.
+if [[ -z "$VERDICT_SCHEMA_JSON" ]] || ! ANTHROPIC_API_KEY='' claude -p --help 2>/dev/null | grep -q -- '--json-schema'; then
+  echo "review-pr.sh: CLI lacks --json-schema (or the guard schema is unreadable) — refusing to review; PR left unlabeled for a human (DR-079)" >&2
+  exit 0
+fi
+
 shift || true
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -128,16 +151,21 @@ and conventional-commit hygiene. A failing non-ready-to-merge check → request
 changes. Any stub or unseen (truncated) change → request changes.
 
 You hold NO tools — you cannot run commands, edit files, or apply labels. Do not
-attempt \`gh pr review\`. Your entire output is ONE verdict block and nothing
-after it. \`blocking\` is the count of correctness/blocking findings (0 to pass):
+attempt \`gh pr review\`. RETURN your verdict as the structured output object required
+by the schema (DR-079). Do not write a verdict block in your prose; the harness renders
+it from the object you return.
 
-REVIEW_VERDICT_BEGIN
-verdict: pass | changes
-blocking: <integer>
-summary: <one line>
-findings:
-- <sev> <file:line> — <what and why> (omit this list entirely if none)
-REVIEW_VERDICT_END
+Fields:
+- verdict: "pass" ONLY if the change is correct, complete, and safe to merge;
+  otherwise "changes".
+- blocking: the count of correctness/blocking findings (an integer; 0 to pass). A
+  single blocking finding means verdict must be "changes".
+- summary: one line summarising the verdict.
+- findings: zero or more { severity, location, problem } objects; omit if none.
+
+Because the verdict travels out of band, quoting the protocol's control tokens can no
+longer affect your own verdict, so review the code in front of you rather than avoiding
+the words in it.
 CONTENT
 )
 
@@ -150,19 +178,32 @@ echo "Reviewing #$PR (no-tools reviewer over the diff)..."
 # reachable once the review actually executes. stdin has no such bound; a
 # regular-file redirect keeps the exit status purely claude's.
 REVIEW_PROMPT_FILE=$(mktemp)
+REVIEW_ERR_FILE=$(mktemp)
 printf '%s' "$USER_CONTENT" >"$REVIEW_PROMPT_FILE"
+# stdout and stderr are captured SEPARATELY (#1131). Once stdout must parse as a JSON
+# envelope, the old `2>&1` is actively harmful: one line of CLI chatter on stderr lands
+# inside the JSON and a finished review is discarded as "no verdict".
 AGENT_OUT=$("${AGENT_ENV_SCRUB[@]}" claude -p \
   --system-prompt-file "${ROLES_DIR}/reviewer.md" \
   "${AGENT_CONTEXT_ARGS[@]}" \
   --tools "" \
-  --output-format text <"$REVIEW_PROMPT_FILE" 2>&1) || {
-    rm -f "$REVIEW_PROMPT_FILE"
+  --output-format json --json-schema "$VERDICT_SCHEMA_JSON" \
+  <"$REVIEW_PROMPT_FILE" 2>"$REVIEW_ERR_FILE") || {
     echo "WARNING: reviewer agent failed for #$PR — leaving unlabeled" >&2
+    cat "$REVIEW_ERR_FILE" >&2 || true
+    rm -f "$REVIEW_PROMPT_FILE" "$REVIEW_ERR_FILE"
     exit 0
   }
-rm -f "$REVIEW_PROMPT_FILE"
+rm -f "$REVIEW_PROMPT_FILE" "$REVIEW_ERR_FILE"
 
-GATE_LABEL=$(printf '%s\n' "$AGENT_OUT" | "$DECIDE" || true)
+# The parent renders the ONE canonical block from the returned object (DR-079). The
+# SAME rendered block is what the gate decides on and what the comment shows, so the
+# two halves this script used to run — a `sed` extractor here and review-decide.sh's
+# predicate there — can no longer disagree about what the reviewer said (#1157).
+# Unusable output renders nothing, and review-decide.sh fails that closed to changes.
+VERDICT_BLOCK="$(GUARD="$GUARD" node -e 'const g=require(process.env.GUARD);let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(g.parseCliVerdict(s)));' <<<"$AGENT_OUT" 2>/dev/null || true)"
+
+GATE_LABEL=$(printf '%s\n' "$VERDICT_BLOCK" | "$DECIDE" || true)
 if [[ "$GATE_LABEL" != "ai-review:pass" && "$GATE_LABEL" != "ai-review:changes" ]]; then
   echo "WARNING: no clean verdict parsed for #$PR — fail closed to ai-review:changes" >&2
   GATE_LABEL="ai-review:changes"
@@ -183,12 +224,9 @@ if [[ -n "$DIFF_NOTE" ]]; then
 "
 fi
 
-# The verdict block, verbatim, becomes the audit trail behind the label. Marker = the
-# token ALONE ON A LINE, the SAME predicate review-decide.sh uses at line 165 to pick
-# GATE_LABEL (#1157). These two must not drift: when the extractor matched a marker the
-# decider did not, this comment rendered a block the label contradicted.
-VERDICT_BLOCK=$(printf '%s\n' "$AGENT_OUT" \
-  | sed -n '/^[[:space:]]*REVIEW_VERDICT_BEGIN[[:space:]]*$/,/^[[:space:]]*REVIEW_VERDICT_END[[:space:]]*$/p')
+# The rendered block becomes the audit trail behind the label. It is the SAME string
+# the gate decided on above — not a second extraction of the same text — so the comment
+# and the label cannot contradict each other by construction.
 [[ -z "$VERDICT_BLOCK" ]] && VERDICT_BLOCK="(no verdict block emitted — fail-closed to changes)"
 
 echo "  → #$PR: $LABEL"
