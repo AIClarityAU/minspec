@@ -543,7 +543,24 @@ jobs:
           #    (fail closed). (Machinery PRs are forced to changes by the self-edit
           #    override below regardless, so a blocked voter there yields to it.) ──
           FINAL="ai-review:pass"
+          # #1234 — an ABSENT voter and a voter that OBJECTED are different events and
+          # are no longer collapsed. Previously both fell to the `*)` arm and set
+          # FINAL=changes, and ANY_BLOCKED was then discarded because it was promoted
+          # only `if FINAL = pass`. Two consequences, both measured on #1675:
+          #
+          #   • one flaky voter outvoted three explicit passes, with ZERO findings
+          #     anywhere, and the PR read `ai-review:changes` — "the reviewer read your
+          #     code and wants changes", which nobody had said;
+          #   • because the label was `changes` and not `blocked`, ai-review-retry never
+          #     selected it, so the outage was terminal instead of retry-able. Three
+          #     consecutive runs failed a DIFFERENT voter each time (2026-08-24).
+          #
+          # Precedence now: a real objection still wins (an outage must never HIDE a
+          # finding), but an outage no longer manufactures one.
+          # >>> verdict-combine (executed verbatim by ai-review-verdict-combine.test.ts)
           ANY_BLOCKED=no
+          ANY_CHANGES=no
+          ANY_UNREPORTED=no
           for pair in \
               "yes:${REVIEWER_LABEL}" \
               "${SECURITY_REQUIRED}:${SECURITY_LABEL}" \
@@ -553,14 +570,21 @@ jobs:
             lbl="${pair#*:}"
             [ "$req" = "yes" ] || continue
             case "$lbl" in
-              ai-review:pass) ;;
+              ai-review:pass)    ;;
               ai-review:blocked) ANY_BLOCKED=yes ;;
-              *) FINAL="ai-review:changes" ;;
+              ai-review:changes) ANY_CHANGES=yes ;;
+              # Empty or unrecognised: the voter did not report. NOT an opinion about
+              # the code — it is the same class as `blocked`, and fails closed the same
+              # way (never `pass`), but stays retry-able.
+              *)                 ANY_UNREPORTED=yes ;;
             esac
           done
-          if [ "$FINAL" = "ai-review:pass" ] && [ "$ANY_BLOCKED" = "yes" ]; then
+          if [ "$ANY_CHANGES" = "yes" ]; then
+            FINAL="ai-review:changes"
+          elif [ "$ANY_BLOCKED" = "yes" ] || [ "$ANY_UNREPORTED" = "yes" ]; then
             FINAL="ai-review:blocked"
           fi
+          # <<< verdict-combine
 
           # ── self-edit handling (fail closed on MERGE, #596-disambiguated) ──
           #    A PR touching the review machinery, or one whose changed set could not
