@@ -161,6 +161,11 @@ MAX_CONSEC_FAIL="${MINSPEC_DRAIN_MAX_FAILURES:-3}"   # stop after N straight err
 # invariant 2: no silent gate).
 QUOTA_FILE="${MINSPEC_QUOTA_FILE:-$HOME/.claude/quota.json}"
 QUOTA_ADMIT_PCT="${MINSPEC_QUOTA_ADMIT_PCT:-90}"     # defer at/above this % used
+QUOTA_ADMIT_PCT_7D="${MINSPEC_QUOTA_ADMIT_PCT_7D:-95}"  # same, for the WEEKLY window.
+# Deliberately higher than the 5h bar: a 5h window reopens within hours, so deferring is
+# cheap, but the weekly window can be days out and blocking that long is far worse than
+# spending the tail of it. The 7d ceiling is invisible in the 5h reading and can bind
+# FIRST — 5h at 30% while 7d sits at 61% is a real observed state.
 QUOTA_STALE_SEC="${MINSPEC_QUOTA_STALE_SEC:-900}"    # older reading proves nothing
 QUOTA_SLEEP_MAX="${MINSPEC_QUOTA_SLEEP_MAX:-21600}"  # 6 h clamp vs a corrupt epoch
 QUOTA_SLEEP_MIN="${MINSPEC_QUOTA_SLEEP_MIN:-60}"     # never spin
@@ -833,34 +838,52 @@ run_cycle() {
   return 0
 }
 
-# _quota_read: print "<pct_int> <resets_at> <observed_at>", or fail if there is no
-# usable reading. Every caller treats failure as "unknown" and proceeds.
+# _quota_read: print "<pct_int> <resets_at> <observed_at> <7d_pct> <7d_resets_at>", or
+# fail if there is no usable reading. Every caller treats failure as "unknown" and
+# proceeds. The two weekly fields are -1 when the producer could not see that window.
 _quota_read() {
   [[ -r "$QUOTA_FILE" ]] || return 1
   command -v jq >/dev/null 2>&1 || return 1
-  local raw p r o
-  raw=$(jq -r '[(.used_percentage//empty),(.resets_at//empty),(.observed_at//empty)] | @tsv' \
+  local raw p r o wp wr
+  # 7d fields are OPTIONAL: only some producers can see the weekly window, so their
+  # absence is normal and must not invalidate the 5h reading. Missing → -1 → ignored.
+  raw=$(jq -r '[(.used_percentage//empty),(.resets_at//empty),(.observed_at//empty),
+                (.seven_day_percentage//-1),(.seven_day_resets_at//-1)] | @tsv' \
         "$QUOTA_FILE" 2>/dev/null) || return 1
-  IFS=$'\t' read -r p r o <<<"$raw"
+  IFS=$'\t' read -r p r o wp wr <<<"$raw"
   [[ -n "$p" && -n "$r" && -n "$o" ]] || return 1
   # Truncate any fractional part: these are fed to integer arithmetic below.
-  printf '%s %s %s\n' "${p%%.*}" "${r%%.*}" "${o%%.*}"
+  printf '%s %s %s %s %s\n' "${p%%.*}" "${r%%.*}" "${o%%.*}" "${wp%%.*}" "${wr%%.*}"
 }
 
 # quota_gate: exit 0 = admit, 42 = defer. Prints the verdict AND its reason, so a
 # deferral and a fail-open are never silent. 42 is deliberate: run_loop already
 # treats it as "pause, not a failure", so admission control needs no new branch.
 quota_gate() {
-  local vals p r o now
+  local vals p r o wp wr now
   now=$(date +%s)
   if ! vals=$(_quota_read); then
     echo "open:no-reading (no usable $QUOTA_FILE — proceeding)"
     return 0
   fi
-  read -r p r o <<<"$vals"
+  read -r p r o wp wr <<<"$vals"
   if (( now - o > QUOTA_STALE_SEC )); then
     echo "open:stale (reading is $(( now - o ))s old, limit ${QUOTA_STALE_SEC}s — proceeding)"
     return 0
+  fi
+  # The WEEKLY ceiling is checked before anything to do with the 5h window, because the
+  # two are INDEPENDENT: the 5h window turning over does not refill the weekly one. This
+  # ordering is load-bearing — when the weekly check sat below the window-reset return,
+  # a fresh reading whose 5h window had just reset was admitted with the weekly window
+  # exhausted, which is precisely the wall this gate exists to prevent. It was reachable
+  # on every single wake: sleep to the 5h reset, wake, get admitted, hit the weekly wall.
+  if (( wp >= 0 )) && (( wp >= QUOTA_ADMIT_PCT_7D )); then
+    if (( wr > now )); then
+      echo "defer:$(( wr - now )) (7d window ${wp}% used — the WEEKLY ceiling, resets in $(( (wr - now + 3599) / 3600 )) h)"
+    else
+      echo "defer:$QUOTA_SLEEP_MAX (7d window ${wp}% used — the WEEKLY ceiling, no usable reset time)"
+    fi
+    return 42
   fi
   if (( r <= now )); then
     echo "open:window-reset (resets_at already passed — proceeding)"
@@ -879,12 +902,20 @@ quota_gate() {
 # deadline, and is clamped both ways so a corrupt epoch can neither spin the loop
 # nor park it for a week.
 quota_sleep_secs() {
-  local vals p r o now secs=""
+  local vals p r o wp wr now secs=""
   now=$(date +%s)
   if vals=$(_quota_read); then
-    read -r p r o <<<"$vals"
-    if (( now - o <= QUOTA_STALE_SEC )) && (( r > now )); then
-      secs=$(( r - now + QUOTA_SLEEP_MARGIN ))
+    read -r p r o wp wr <<<"$vals"
+    if (( now - o <= QUOTA_STALE_SEC )); then
+      # Sleep toward whichever window is actually BINDING. When the weekly ceiling is
+      # what deferred us, the 5h reset is the wrong deadline — it can be minutes away
+      # while the weekly window is days out, so the loop would wake, re-defer, and
+      # report "sleeping to the published reset" while sleeping to an irrelevant one.
+      if (( wp >= 0 )) && (( wp >= QUOTA_ADMIT_PCT_7D )) && (( wr > now )); then
+        secs=$(( wr - now + QUOTA_SLEEP_MARGIN ))
+      elif (( r > now )); then
+        secs=$(( r - now + QUOTA_SLEEP_MARGIN ))
+      fi
     fi
   fi
   [[ -n "$secs" ]] || secs="$QUOTA_BACKOFF"
@@ -899,18 +930,22 @@ quota_sleep_secs() {
 # window either way (constitution invariant 2: no silent gate). This is the difference
 # between installed and adopted: say out loud when the gate cannot see anything.
 quota_health() {
-  local vals p r o now
+  local vals p r o wp wr now
   now=$(date +%s)
   if ! vals=$(_quota_read); then
     echo "inert: no reading at $QUOTA_FILE — admission control is OFF (failing open). The statusline publisher only runs when a statusline renders, which VS Code and headless sessions never do; the wall-message producer will populate it on the next quota hit."
     return 0
   fi
-  read -r p r o <<<"$vals"
+  read -r p r o wp wr <<<"$vals"
   if (( now - o > QUOTA_STALE_SEC )); then
     echo "inert: reading is $(( (now - o) / 60 )) min old (limit $(( QUOTA_STALE_SEC / 60 )) min) — admission control is OFF (failing open)."
     return 0
   fi
-  echo "live: 5h window ${p}% used, resets in $(( (r - now) / 60 )) min."
+  if (( wp >= 0 )); then
+    echo "live: 5h window ${p}% used, resets in $(( (r - now) / 60 )) min; 7d window ${wp}% used."
+  else
+    echo "live: 5h window ${p}% used, resets in $(( (r - now) / 60 )) min (no weekly reading)."
+  fi
 }
 
 # quota_publish_wall: the REACTIVE producer, reading the wall message on stdin.
@@ -927,6 +962,17 @@ quota_health() {
 #
 # The message carries a clock time and a zone but NO DATE, so the rollover is inferred:
 # a time already past today means tomorrow.
+#
+# MULTI-PRODUCER NOTE — do not "fix" this into a bug. More than one producer writes
+# QUOTA_FILE (a statusline render, this wall parser, and a poller). Last-writer-wins is
+# correct in BOTH directions here, but by convergence rather than by design:
+#   • at a wall hit this writes 100, which is true and beats any older live reading;
+#   • ~10 min later a poller overwrites it with a real level, which is also true,
+#     because a wall reading is a point measurement that never decays on its own.
+# Making the wall reading STICKY — e.g. suppressing refresh until resets_at — would
+# pin the level at 100 for hours and starve the queue long after the window reopened.
+# The staleness rule, not stickiness, is what keeps a wall reading from being believed
+# forever.
 quota_publish_wall() {
   local text clock zone target now
   text=$(cat)
