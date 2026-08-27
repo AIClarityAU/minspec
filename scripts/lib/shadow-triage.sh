@@ -359,9 +359,11 @@ shadow_classify_error() {
 # nothing (exit 1) if none can be chosen. Pure: no network, no env, no clock, so
 # the selection rule is testable against fixtures without a z.ai account.
 #
-# "Newest" is `created_at`, NOT list order and NOT a version-string sort: a lexical
-# compare ranks 'glm-5.10' BELOW 'glm-5.9', and list order is not a recency guarantee.
-# created_at is the vendor's own statement of recency, so it is what we read.
+# "Newest" is the vendor's own timestamp, NOT list order and NOT a version-string sort:
+# a lexical compare ranks 'glm-5.10' BELOW 'glm-5.9', and list order is not a recency
+# guarantee. The timestamp is the vendor's own statement of recency, so it is what we
+# read - from `created_at` (ISO string) where present, else `created` (epoch seconds),
+# since both listing shapes are in the wild (#1484).
 shadow_pick_latest_model() {
   python3 -c '
 import json, re, sys
@@ -373,17 +375,43 @@ except Exception:
 rows = body.get("data")
 if not isinstance(rows, list):
     sys.exit(1)
+
+# TWO LISTING SHAPES, and the choice is per LISTING, not per row.
+# The Anthropic-style body dates a model with `created_at` (an ISO string); the
+# OpenAI-compatible shape uses `created` (epoch seconds). Reading only the first made
+# an OpenAI-style listing skip EVERY candidate, so resolution failed and the whole
+# shadow run skipped - fail-safe, but permanently inert while still printing a healthy
+# one-line note each cycle (#1484).
+#
+# The family is chosen once for the whole listing and then applied uniformly, because
+# an ordering BETWEEN the two families is meaningless (an ISO string and an epoch int
+# are not comparable, and in py3 the comparison raises). Preferring `created_at` when
+# any row carries it keeps the observed z.ai behaviour exactly as before.
+def iso_of(m):
+    v = m.get("created_at")
+    return v if isinstance(v, str) and v else None
+
+def epoch_of(m):
+    v = m.get("created")
+    # bool is an int subclass in python; `created: true` is not a timestamp.
+    if isinstance(v, bool):
+        return None
+    return v if isinstance(v, (int, float)) else None
+
+usable = [m for m in rows
+          if isinstance(m, dict) and isinstance(m.get("id"), str) and m.get("id")]
+key = iso_of if any(iso_of(m) is not None for m in usable) else epoch_of
+
 best = None
-for m in rows:
-    if not isinstance(m, dict):
-        continue
-    mid, created = m.get("id"), m.get("created_at")
-    if not isinstance(mid, str) or not isinstance(created, str) or not mid:
+for m in usable:
+    mid = m["id"]
+    stamp = key(m)
+    if stamp is None:
         continue          # a malformed row is skipped, never guessed at
     if LITE.search(mid):
         continue          # lite sibling: newer is not better
-    if best is None or created > best[0]:
-        best = (created, mid)
+    if best is None or stamp > best[0]:
+        best = (stamp, mid)
 if best is None:
     sys.exit(1)
 print(best[1])

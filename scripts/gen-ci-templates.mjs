@@ -75,6 +75,35 @@ const SOURCES = [
     stripShebang: true,
   },
   {
+    // Registered for DRIFT GATING, not for shipping (#1502). These three are the last
+    // consumers of the verdict channel outside review-branch.sh, and DR-079 requires all
+    // of them to speak the structured contract. Embedding them here means
+    // `gen-ci-templates.mjs --check` fails the moment a shipped script and its embedded
+    // copy diverge, instead of the divergence being found later by a reader.
+    //
+    // Registration here does NOT scaffold them into adopter repos: what an adopter
+    // receives is the separate explicit list in packages/minspec/src/lib/template-registry.ts,
+    // and these are deliberately absent from it. They are dev-time dispatch for THIS
+    // monorepo (see CLAUDE.md), so shipping them would widen MinSpec's blast radius past
+    // the project it is installed in — constitution invariant 3.
+    constName: 'REVIEW_PR_SH',
+    srcPath: 'scripts/review-pr.sh',
+    doc: 'Verbatim body of `scripts/review-pr.sh` (shebang stripped — supplied via preamble). Drift-gated only; not scaffolded.',
+    stripShebang: true,
+  },
+  {
+    constName: 'REVIEW_APPROVABLE_SH',
+    srcPath: 'scripts/review-approvable.sh',
+    doc: 'Verbatim body of `scripts/review-approvable.sh` (shebang stripped — supplied via preamble). Drift-gated only; not scaffolded.',
+    stripShebang: true,
+  },
+  {
+    constName: 'ROLE_APPROVABLE_REVIEWER_MD',
+    srcPath: 'scripts/roles/approvable-reviewer.md',
+    doc: 'Verbatim body of `scripts/roles/approvable-reviewer.md`. Drift-gated only; not scaffolded.',
+    stripShebang: false,
+  },
+  {
     // review-branch.sh SOURCES this at startup. Same dependency-chain lesson as
     // APPROVAL_PROVENANCE_PY below: shipping the caller without the callee breaks
     // every consuming repo. Here it would be worse than degraded — the source is

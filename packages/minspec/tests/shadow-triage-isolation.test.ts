@@ -522,6 +522,65 @@ describe('shadow-triage — one resolved model id reaches every surface', () => 
     }
   });
 
+  // ── Both listing shapes (#1484) ────────────────────────────────────────────
+  // The Anthropic-style body dates a model with `created_at` (ISO string); the
+  // OpenAI-compatible shape uses `created` (epoch seconds). Reading only the first
+  // made an OpenAI-style listing skip EVERY row, so resolution failed and the shadow
+  // run skipped every cycle — fail-safe, but the instrument would sit permanently
+  // INERT while still printing a healthy one-line note. That is the failure this
+  // harness exists to make impossible, so it is pinned rather than assumed.
+
+  it('resolves an OpenAI-style listing dated with epoch `created`', () => {
+    expect(
+      pick(
+        JSON.stringify({
+          data: [
+            { id: 'glm-5.1', created: 1774650000 },
+            { id: 'glm-5.2', created: 1781654400 },
+          ],
+        }),
+      ).out,
+    ).toBe('glm-5.2');
+  });
+
+  it('excludes a lite sibling on the epoch path too, not just the ISO one', () => {
+    // The silent-downgrade guard has to hold on BOTH shapes; a guard that only covers
+    // the shape we happened to test first is the asymmetry this repo keeps hitting.
+    expect(
+      pick(
+        JSON.stringify({
+          data: [
+            { id: 'glm-5.2', created: 1781654400 },
+            { id: 'glm-5.3-air', created: 1788000000 },
+          ],
+        }),
+      ).out,
+    ).toBe('glm-5.2');
+  });
+
+  it('never compares an ISO string against an epoch — one family per listing', () => {
+    // A mixed listing must not order a string against a number: in python3 that
+    // raises, and an ordering between the two families is meaningless anyway. The
+    // family is chosen once (created_at when any row has it) and applied uniformly,
+    // so the epoch row here is ignored rather than ranked as newest.
+    const r = pick(
+      JSON.stringify({
+        data: [
+          { id: 'glm-5.2', created_at: '2026-06-17T00:00:00Z' },
+          { id: 'glm-9.9', created: 1999999999 },
+        ],
+      }),
+    );
+    expect(r.code).toBe(0);
+    expect(r.out).toBe('glm-5.2');
+  });
+
+  it('a boolean `created` is not treated as a timestamp', () => {
+    // `bool` is an int subclass in python, so an unguarded numeric check would read
+    // `created: true` as epoch 1 and happily return the model.
+    expect(pick(JSON.stringify({ data: [{ id: 'glm-x', created: true }] })).code).not.toBe(0);
+  });
+
   it('fails rather than guesses on a malformed, empty, or all-lite listing', () => {
     expect(pick('not json').code).not.toBe(0);
     expect(pick('{"data":[]}').code).not.toBe(0);

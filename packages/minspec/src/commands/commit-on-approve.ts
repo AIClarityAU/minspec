@@ -73,9 +73,10 @@ export function commitOnApproveEnabled(): boolean {
 const SHOW_FILES_ACTION = 'Show me the files';
 /** #1115 — the consent click that authorizes recovery's network step. */
 const RECOVER_ACTION = 'Save it on a branch';
-// OPEN_PR_ACTION is declared once, below, with the SPEC-050 actions — both #1115's
-// recovery toast and FR-1's legacy `manual` surface use the same label, and two
-// declarations of one string is how the two surfaces drift apart.
+// OPEN_PR_ACTION is declared once, below, with the SPEC-050 actions. #1115's recovery
+// path no longer shows a toast of its own — since #1653 it delegates to
+// `openApprovalPr`, so the only surface that still offers `Open PR` is FR-1's legacy
+// `manual` fallback. One declaration, one surface.
 
 /**
  * #1115 — try to rescue an approval the destination guard refused, by committing it
@@ -99,7 +100,14 @@ async function recoverOnProtectedBranch(
   current: string,
   baseBranch: string | undefined,
 ): Promise<{ suffix: string } | 'declined' | undefined> {
-  const mode = pushOnApproveMode();
+  // DR-078 §4 — the SINGLE accessor, not `pushOnApproveMode()`. This path read the
+  // VS Code setting DIRECTLY while its sibling `pushApprovalIfEnabled` read the
+  // project-local preference first, so a user who had answered "always push from now
+  // on" was still prompted on every protected-branch approval: the two consent
+  // surfaces for ONE act disagreed, which is the exact failure DR-078 §4 exists to
+  // prevent. Never rejects — the accessor swallows its own read failures and falls
+  // through to the setting.
+  const mode = await effectivePushOnApproveMode(rootDir);
   if (mode === 'never') return undefined;
   if (mode === 'prompt') {
     // Non-modal (project preference: never steal focus from the artifact being
@@ -143,17 +151,35 @@ async function recoverOnProtectedBranch(
     return undefined;
   }
 
-  // Success. Non-blocking: the operation is COMPLETE, so the notification carries a
-  // convenience action, never one required to finish the job.
-  if (res.compareUrl) {
-    const url = res.compareUrl;
-    void vscode.window
-      .showInformationMessage(`Approval saved on '${res.branch}' and pushed.`, OPEN_PR_ACTION)
-      .then((c) => {
-        if (c === OPEN_PR_ACTION) void vscode.env.openExternal(vscode.Uri.parse(url));
-      });
-  }
-  return { suffix: ` · committed on ${res.branch} and pushed` };
+  // Success — the approval is committed on a branch and pushed. FINISH it into a PR
+  // (#1653), exactly as the non-protected path does.
+  //
+  // This block previously stopped here, at a toast whose `Open PR` action merely
+  // opened the compare page. That made SPEC-050's auto-PR UNREACHABLE for the one
+  // workflow that needs it most: DR-051 has approvables edited directly on `main`,
+  // so `commitApproval` refuses with `protected-branch` and EVERY approval lands
+  // here — never in `pushApprovalIfEnabled`, the only caller of `openApprovalPr`.
+  // Two sibling paths both mean "the approval reached a side branch"; only one of
+  // them finished the job. (The survey that found this — every recent `approvals/*`
+  // PR hand-created, with an empty body and no `docs-lane` label — is recorded in
+  // #1653, not restated here as an unverifiable number in a comment.)
+  //
+  // `RecoverResult` is structurally the `pushed-branch` case of `PushApprovalResult`
+  // — same `branch`, same `compareUrl` — so the shared step is REUSED rather than
+  // re-implemented, which is also what keeps the two toast surfaces from drifting.
+  // `openApprovalPr` never rejects and degrades to the old `Open PR` notification
+  // (with the reason stated) on any failure, so the worst case here is exactly the
+  // behaviour this fix replaces.
+  const { suffix } = await openApprovalPr(
+    rootDir,
+    { outcome: 'pushed-branch', branch: res.branch, compareUrl: res.compareUrl },
+    // `sha` is REQUIRED here, not a nicety: recovery commits in a separate
+    // worktree, so `openApprovalPr`'s HEAD fallback would name the base tip.
+    // `?? null` is load-bearing: if recovery could not read its own commit, the
+    // body omits the line rather than falling back to a SHA we KNOW is wrong.
+    { subject: message, paths: res.paths, sha: res.sha ?? null },
+  );
+  return { suffix };
 }
 
 export async function commitApprovalIfEnabled(
@@ -483,6 +509,29 @@ export interface ApprovalPushContext {
   readonly subject?: string;
   /** Repo-relative paths the approval commit carried (INV-2's evidence). */
   readonly paths?: readonly string[];
+  /**
+   * The approval commit's SHA, when the caller knows it (#1653 review).
+   *
+   * `openApprovalPr` otherwise falls back to `resolveHeadSha(run, rootDir)`, whose
+   * docstring (`approval-pr.ts:355-366`) states the honest limit: reading `HEAD` in
+   * the primary checkout is the approval commit ONLY for a caller that branched at
+   * HEAD and never moved it. The recovery path is the caller that breaks that
+   * premise — it commits in a SEPARATE worktree, so the primary's HEAD still points
+   * at the base tip and the fallback would stamp the PR body with the base branch's
+   * commit. A wrong SHA in a body line that reads `**Approval commit:**` is a
+   * signpost that lies, which is the one defect class this product cannot ship.
+   *
+   * THREE-STATE, deliberately (#1672 review):
+   *   `string`    — the caller knows the SHA; it is used verbatim.
+   *   `null`      — the caller OWNS the SHA and could not read it. The HEAD probe
+   *                 is skipped and the body simply omits the `**Approval commit:**`
+   *                 line. For the recovery caller the probe is not merely
+   *                 unreliable, it is guaranteed wrong (the primary's HEAD is the
+   *                 base tip), so degrading to silence beats degrading to a lie.
+   *   `undefined` — the caller has no opinion; probe `HEAD` as before. This keeps
+   *                 the eleven pre-existing two-argument call sites unchanged.
+   */
+  readonly sha?: string | null;
   /** Injected git/gh runner; production uses {@link defaultExecRun}. Tests pass a stub. */
   readonly run?: ExecRun;
 }
@@ -533,25 +582,41 @@ function manualPrSurface(result: PushApprovalResult, reason?: string): string {
 }
 
 /**
- * Announce an opened approval PR — and, when it went out WITHOUT the `docs-lane`
- * label, say so in the notification itself (AC-11).
+ * Warn when an approval PR went out WITHOUT the `docs-lane` label (AC-11). On the
+ * labelled happy path this is SILENT — see below.
  *
- * The status suffix already carries `laneNote`, but the suffix is not the surface a
- * developer reads: the toast is. An unlabelled PR never reaches the lane
- * (`docs-lane.yml:30` gates on the label), so it will sit open with no auto-merge
- * until someone merges it by hand. A toast that says only "approval PR opened" is
- * therefore **silence indistinguishable from success** — the stranding class this
- * spec exists to end, re-entered at the last step.
+ * An unlabelled PR never reaches the lane (`docs-lane.yml:30` gates on the label),
+ * so it sits open with no auto-merge until someone merges it by hand. A toast that
+ * says only "approval PR opened" is therefore **silence indistinguishable from
+ * success** — the stranding class SPEC-050 exists to end, re-entered at the last
+ * step. Hence a WARNING naming the consequence and the reason.
  *
- * So the unlabelled case is a WARNING naming the consequence and the reason, not an
- * info toast. Labelled — the happy path — is unchanged: informational, no action, so
- * FR-3's "no click completes the operation" still holds on both branches.
+ * WHY THE LABELLED CASE SHOWS NOTHING (#1700). It used to show an info toast, on the
+ * stated reasoning that "the suffix is not the surface a developer reads: the toast
+ * is." That premise was simply false. All three callers — `approve.ts` (spec),
+ * `adr.ts` (accept), `epic.ts` (activate) — capture the suffix and put it in their
+ * own success toast, so the suffix IS a toast. The result was two notifications per
+ * approval where the second strictly contained the first:
+ *
+ *     MinSpec: approval PR opened — <url>
+ *     MinSpec: ✓ Approved SPEC-061 for implementation. · pushed on <branch> · PR opened (<url>)
+ *
+ * Reported from a live approval (#1689). Two toasts for one event train the reader to
+ * dismiss without reading, which costs exactly the attention the unlabelled WARNING
+ * below needs to keep.
+ *
+ * This depends on every caller surfacing the suffix. That is a real contract, pinned
+ * by the `r.suffix` assertions in approval-recover-wiring.test.ts and
+ * approval-pr-wiring.test.ts — a caller that drops the suffix would make the happy
+ * path silent, which is the failure this function otherwise exists to prevent.
+ *
+ * FR-3's "no click completes the operation" holds on both branches: one shows no
+ * toast, the other a warning with no action.
  */
 async function notifyPrOpened(message: string, labels: readonly string[]): Promise<void> {
-  if (labels.length > 0) {
-    await vscode.window.showInformationMessage(message);
-    return;
-  }
+  // Labelled = the happy path = the caller's own suffix already said it. Silence here,
+  // not a duplicate (#1700).
+  if (labels.length > 0) return;
   await vscode.window.showWarningMessage(
     `${message} — but NOT labelled for the docs-lane, because it is not docs-only. ` +
       `Auto-merge will not run; this PR needs a human merge.`,
@@ -663,7 +728,11 @@ async function openApprovalPr(
     const changed = await branchChangedPaths(run, rootDir, PR_BASE, `origin/${result.branch}`);
     const labels = laneLabelsFor(changed);
     const record = readRecord(rootDir, approvableRelPath(paths));
-    const sha = await resolveHeadSha(run, rootDir);
+    // Caller-supplied SHA WINS, and an EXPLICIT `null` suppresses the fallback
+    // entirely — see `ApprovalPushContext.sha` for why the three states differ.
+    // `??` would have collapsed `null` into "probe HEAD", which is the one answer
+    // that is certainly wrong for the caller that passes it.
+    const sha = ctx.sha === undefined ? await resolveHeadSha(run, rootDir) : (ctx.sha ?? undefined);
 
     const pr = await openPullRequest({
       run,

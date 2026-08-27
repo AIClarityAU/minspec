@@ -555,11 +555,8 @@
           "items": {
             "type": "string"
           },
-          "default": [
-            "lint",
-            "test"
-          ],
-          "description": "Status-check contexts the post-init branch-ruleset advisory requires when it creates a ruleset on your default branch. Defaults to 'lint' + 'test' (the checks the standard CI reports). Add e.g. 'build' or 'ready-to-merge' to require them too. 'ready-to-merge' is intentionally NOT in the default because it would block every merge until MinSpec's reviewer is wired and labelling — enable it here once your reviewer pipeline is live. Read at create time; the create only runs on your explicit 'Create ruleset' click."
+          "default": [],
+          "description": "EXTRA status-check contexts the post-init branch-ruleset advisory requires, on top of the ones MinSpec resolves automatically. Empty by default: MinSpec already requires 'MinSpec SDD validation' (always produced by its own scaffolded CI), and adds 'ai-review'/'ready-to-merge' once their workflows and reviewer secrets are present, and 'lint'/'test'/'build' once package.json has a runnable script for them. Anything listed here is required VERBATIM and is never checked for producibility — a context no CI reports permanently blocks every PR on the default branch (#559)."
         },
         "minspec.coverage.minimumPercentage": {
           "type": "number",
