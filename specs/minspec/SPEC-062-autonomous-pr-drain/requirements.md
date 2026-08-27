@@ -1,7 +1,7 @@
 ---
 id: SPEC-062
 type: requirements
-status: specifying
+status: planning
 tier: T4
 product: minspec
 epic: EPIC-007  # Agent Execute — the dev-time autonomous build/merge pipeline (this is its scheduling + PR-completeness layer)
@@ -10,6 +10,12 @@ depends_on: []  # see "Blocking dependencies" — #810/#811 (ready-to-merge gate
 relates_to: [SPEC-044, SPEC-024, SPEC-050, SPEC-012, DR-057, DR-061, DR-067, DR-076, DR-015, DR-004]
 implements: [.github/workflows/drain.yml]  # NEW - the session-independent trigger (FR-1). D1 RESOLVED 2026-08-23 as Option A (the Action runs only the non-LLM steps), so this path is now settled rather than provisional. D2/D3/D4 remain open but none of them changes the owned set.
 affects: [scripts/drain-inbox.sh, scripts/dispatch-issue.sh, scripts/remediate-pr.sh, scripts/auto-merge-gate.ts]  # drain-inbox/dispatch-issue/remediate-pr are OWNED by SPEC-044 via implements: - this spec modifies them, never owns them (INV: one owner per file). auto-merge-gate.ts is currently unowned; SPEC-024 owns the decideAutoMerge decision this spec only invokes.
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # MinSpec — Autonomous PR review/rework/merge drain (Requirements)
