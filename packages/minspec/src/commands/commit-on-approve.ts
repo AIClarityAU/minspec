@@ -582,25 +582,41 @@ function manualPrSurface(result: PushApprovalResult, reason?: string): string {
 }
 
 /**
- * Announce an opened approval PR — and, when it went out WITHOUT the `docs-lane`
- * label, say so in the notification itself (AC-11).
+ * Warn when an approval PR went out WITHOUT the `docs-lane` label (AC-11). On the
+ * labelled happy path this is SILENT — see below.
  *
- * The status suffix already carries `laneNote`, but the suffix is not the surface a
- * developer reads: the toast is. An unlabelled PR never reaches the lane
- * (`docs-lane.yml:30` gates on the label), so it will sit open with no auto-merge
- * until someone merges it by hand. A toast that says only "approval PR opened" is
- * therefore **silence indistinguishable from success** — the stranding class this
- * spec exists to end, re-entered at the last step.
+ * An unlabelled PR never reaches the lane (`docs-lane.yml:30` gates on the label),
+ * so it sits open with no auto-merge until someone merges it by hand. A toast that
+ * says only "approval PR opened" is therefore **silence indistinguishable from
+ * success** — the stranding class SPEC-050 exists to end, re-entered at the last
+ * step. Hence a WARNING naming the consequence and the reason.
  *
- * So the unlabelled case is a WARNING naming the consequence and the reason, not an
- * info toast. Labelled — the happy path — is unchanged: informational, no action, so
- * FR-3's "no click completes the operation" still holds on both branches.
+ * WHY THE LABELLED CASE SHOWS NOTHING (#1700). It used to show an info toast, on the
+ * stated reasoning that "the suffix is not the surface a developer reads: the toast
+ * is." That premise was simply false. All three callers — `approve.ts` (spec),
+ * `adr.ts` (accept), `epic.ts` (activate) — capture the suffix and put it in their
+ * own success toast, so the suffix IS a toast. The result was two notifications per
+ * approval where the second strictly contained the first:
+ *
+ *     MinSpec: approval PR opened — <url>
+ *     MinSpec: ✓ Approved SPEC-061 for implementation. · pushed on <branch> · PR opened (<url>)
+ *
+ * Reported from a live approval (#1689). Two toasts for one event train the reader to
+ * dismiss without reading, which costs exactly the attention the unlabelled WARNING
+ * below needs to keep.
+ *
+ * This depends on every caller surfacing the suffix. That is a real contract, pinned
+ * by the `r.suffix` assertions in approval-recover-wiring.test.ts and
+ * approval-pr-wiring.test.ts — a caller that drops the suffix would make the happy
+ * path silent, which is the failure this function otherwise exists to prevent.
+ *
+ * FR-3's "no click completes the operation" holds on both branches: one shows no
+ * toast, the other a warning with no action.
  */
 async function notifyPrOpened(message: string, labels: readonly string[]): Promise<void> {
-  if (labels.length > 0) {
-    await vscode.window.showInformationMessage(message);
-    return;
-  }
+  // Labelled = the happy path = the caller's own suffix already said it. Silence here,
+  // not a duplicate (#1700).
+  if (labels.length > 0) return;
   await vscode.window.showWarningMessage(
     `${message} — but NOT labelled for the docs-lane, because it is not docs-only. ` +
       `Auto-merge will not run; this PR needs a human merge.`,
