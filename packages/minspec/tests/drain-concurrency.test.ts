@@ -152,23 +152,74 @@ exit 0
   // the test then fails as `ENOENT: log.N`, which reads like a launch-loop bug rather
   // than a lock collision. Overriding LOG but not LOCK made the suite pass or fail
   // depending on whether another drain happened to be alive.
+  //
+  // MINSPEC_DRAIN_RUN_DIR must ALSO be isolated, and NOT via an empty string (#1666).
+  // `""` looks like "disable it", but drain-inbox.sh reads it as
+  // `${MINSPEC_DRAIN_RUN_DIR:-/tmp/minspec-drain-run}` — bash's `:-` treats an unset
+  // AND an empty value identically, so `""` silently falls through to the real,
+  // machine-shared default. ensure_fresh_run_dir() then hard-resets THAT shared
+  // worktree and, if it lands on origin/main, repoints DISPATCH away from this
+  // harness's stub to the real scripts/dispatch-issue.sh (drain-inbox.sh:477-480) —
+  // which then contends with whatever a live `--auto` drain is doing in that same
+  // worktree/lock namespace, exactly the deadlock this issue reports: LOCK isolation
+  // above doesn't help because the contention moves one level down. Fixed here with
+  // both an isolated real path (belt) and the documented full opt-out (suspenders):
+  // MINSPEC_DRAIN_SELF_REFRESH=0 short-circuits ensure_fresh_run_dir() before it
+  // reads MINSPEC_DRAIN_RUN_DIR at all (drain-inbox.sh:408), so DISPATCH always stays
+  // the injected stub regardless of what a foreign drain is doing on the machine.
+  //
+  // Even with full isolation, the wait below stays BOUNDED (#1666): an unbounded
+  // `kill -0` spin has no deadline, so it can only hang, never fail — and a hang
+  // reads as "the suite is slow" rather than naming the actual problem. On timeout
+  // the spawned drain (and its children) is force-killed and the failure names the
+  // PID and, if one exists, the PID recorded in the real system-wide drain lock —
+  // an independent second witness per the constitution's no-silent-gate rule, not a
+  // substitute for the isolation fix above.
+  const DRAIN_WAIT_TIMEOUT_S = 20;
+  const SYSTEM_DRAIN_LOCK = '/tmp/minspec-drain-inbox.lock';
+
   /** Run one real `--once` cycle at the given width and wait for the disowned loop. */
   function runCycle(h: Harness, width: string): { elapsedMs: number; log: string } {
     const t0 = Date.now();
-    const out = execFileSync('bash', ['-c', `
-      pid=$(PATH="${h.bin}:$PATH" \
-        MINSPEC_DRAIN_DISPATCH="${path.join(h.bin, 'dispatch.sh')}" \
-        MINSPEC_DRAIN_CONCURRENCY="${width}" \
-        MINSPEC_DRAIN_RUN_DIR="" \
-        MINSPEC_DRAIN_REMEDIATE_PRS=0 \
-        MINSPEC_DRAIN_PRIMARY_ROOT="${path.join(h.dir, 'root')}" \
-        MINSPEC_DRAIN_LOG="${h.log(width)}" \
-        MINSPEC_DRAIN_LOCK="${path.join(h.dir, 'lock')}" \
-        MINSPEC_QUOTA_FILE="${path.join(h.dir, 'no-quota.json')}" \
-        bash "${DRAIN}" --once 2>&1 | grep -oP 'PID \\K[0-9]+')
-      while kill -0 "$pid" 2>/dev/null; do sleep 0.05; done
-    `], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
-    void out;
+    try {
+      execFileSync('bash', ['-c', `
+        set -u
+        pid=$(PATH="${h.bin}:$PATH" \
+          MINSPEC_DRAIN_DISPATCH="${path.join(h.bin, 'dispatch.sh')}" \
+          MINSPEC_DRAIN_CONCURRENCY="${width}" \
+          MINSPEC_DRAIN_SELF_REFRESH=0 \
+          MINSPEC_DRAIN_RUN_DIR="${path.join(h.dir, 'no-run-dir')}" \
+          MINSPEC_DRAIN_REMEDIATE_PRS=0 \
+          MINSPEC_DRAIN_PRIMARY_ROOT="${path.join(h.dir, 'root')}" \
+          MINSPEC_DRAIN_LOG="${h.log(width)}" \
+          MINSPEC_DRAIN_LOCK="${path.join(h.dir, 'lock')}" \
+          MINSPEC_QUOTA_FILE="${path.join(h.dir, 'no-quota.json')}" \
+          bash "${DRAIN}" --once 2>&1 | grep -oP 'PID \\K[0-9]+')
+        deadline=$((SECONDS + ${DRAIN_WAIT_TIMEOUT_S}))
+        while kill -0 "$pid" 2>/dev/null; do
+          if (( SECONDS >= deadline )); then
+            echo "TIMEOUT waiting on spawned drain pid=$pid after ${DRAIN_WAIT_TIMEOUT_S}s" >&2
+            if [[ -f "${SYSTEM_DRAIN_LOCK}" ]]; then
+              echo "a live system drain lock exists at ${SYSTEM_DRAIN_LOCK} (holder PID $(cat "${SYSTEM_DRAIN_LOCK}" 2>/dev/null))" >&2
+            fi
+            ps -o pid,ppid,stat,etimes,args --ppid "$pid" >&2 2>/dev/null || true
+            kill -9 "$pid" 2>/dev/null || true
+            pkill -9 -P "$pid" 2>/dev/null || true
+            exit 42
+          fi
+          sleep 0.05
+        done
+      `], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'pipe'] });
+    } catch (err: any) {
+      const stderr = err?.stderr ? String(err.stderr) : String(err?.message ?? err);
+      throw new Error(
+        `drain-concurrency: spawned drain (width=${width}) did not exit within ` +
+        `${DRAIN_WAIT_TIMEOUT_S}s and was force-killed (#1666 — this used to hang forever ` +
+        `instead of failing). This test fully isolates its lock/run-dir/self-refresh, so a ` +
+        `real hang here is either a genuine regression in the fan-out loop or an unrelated ` +
+        `live drain contending for a resource this test does not yet isolate.\n${stderr}`,
+      );
+    }
     return { elapsedMs: Date.now() - t0, log: fs.readFileSync(h.log(width), 'utf-8') };
   }
 
