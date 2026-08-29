@@ -27,7 +27,8 @@
  * (never an automatic background fetch).
  *
  * MUTATION SAFETY: `tidyRedundantPaths` is the ONLY function here that writes
- * anything, and it:
+ * anything, and it MECHANICALLY guarantees three things, each covered by a
+ * real-git test:
  *   - re-classifies every requested path immediately before acting (closes the
  *     classify→act TOCTOU window — a path that stopped being REDUNDANT between
  *     the scan and the click is skipped, never force-discarded);
@@ -38,8 +39,22 @@
  *   - is NOT a second implementation of DR-065's gated fast-forward. Moving a
  *     shared HEAD stays exactly where DR-065 put it
  *     (`sync_shared_checkouts()` in `scripts/drain-inbox.sh`), behind guards
- *     G1-G4. This only ever discards path-scoped, uncommitted, provably-
- *     redundant content — a strictly narrower and independently-safe operation.
+ *     G1-G4.
+ *
+ * OPEN PROVENANCE QUESTION — do not read the three guarantees above as
+ * settled sanction for this operation existing at all. Dropping working-tree
+ * paths is the SAME class of mutation `scripts/check-primaries-clean.sh`
+ * removed from its own `--fix` after an earlier ai-review flagged it BLOCKING
+ * (see that script's `--fix` case for the exact wording): "dropping
+ * working-tree paths is not among the operations DR-065 §5 sanctions" — that
+ * section names `merge --ff-only` and nothing else, explicitly not to be
+ * cited for anything further. That removal deferred the resolution to a DR
+ * amendment, tracked as #1167 — open, and held for a human decision as of
+ * this writing. This module's three guarantees make the discard mechanically
+ * conservative; they do not by themselves make it a SANCTIONED DR-065
+ * operation. Whether MinSpec ships this class of mutation ahead of that
+ * amendment is a founder call, not something this docstring can settle by
+ * asserting it.
  */
 import * as fs from 'fs';
 import * as path from 'path';
