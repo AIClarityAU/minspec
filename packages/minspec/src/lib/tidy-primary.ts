@@ -90,6 +90,30 @@ function gitOut(rootDir: string, args: string[]): string {
   }
 }
 
+/**
+ * Like {@link gitOut}, but returns the RAW output with no `.trim()`. Required
+ * for NUL-delimited / fixed-column machine output — `git status --porcelain
+ * -z` — where a leading space is meaningful data (the staged-status column of
+ * the FIRST entry), not incidental whitespace. `gitOut`'s `.trim()` silently
+ * eats that leading space whenever the first entry's staged-status column is
+ * blank (the common case: any unstaged-only change), which shifts
+ * `parsePorcelainZ`'s fixed `slice(3)` offset and chops the first character
+ * off that entry's path (e.g. 'a.txt' → '.txt'). Every other `gitOut` caller
+ * here reads a single trimmed line (a ref name, a count) where `.trim()` is
+ * correct and desired — only the porcelain -z read needs the untouched bytes.
+ */
+function gitOutRaw(rootDir: string, args: string[]): string {
+  try {
+    return execFileSync('git', args, {
+      cwd: rootDir,
+      encoding: 'utf-8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+  } catch {
+    return '';
+  }
+}
+
 /** True iff the git invocation exits 0. Never throws. */
 function gitOk(rootDir: string, args: string[]): boolean {
   try {
@@ -175,7 +199,7 @@ export function classifyPrimary(rootDir: string): PrimaryClassification | null {
 
   const redundant: TidyClassification[] = [];
   const orphans: TidyClassification[] = [];
-  const raw = gitOut(rootDir, ['status', '--porcelain', '-z']);
+  const raw = gitOutRaw(rootDir, ['status', '--porcelain', '-z']);
   for (const p of parsePorcelainZ(raw)) {
     const existsLocally = fs.existsSync(path.join(rootDir, p));
     const existsUpstream = gitOk(rootDir, ['cat-file', '-e', `${originRef}:${p}`]);
