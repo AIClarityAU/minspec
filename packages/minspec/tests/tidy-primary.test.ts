@@ -7,7 +7,30 @@
  * never prove git answers the way it assumes (same rationale as
  * git-analyzer.test.ts's real-git fixtures).
  */
-import { describe, it, expect, afterEach } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
+
+// Call-through recorder for the Tier-0 no-network test below: every
+// `execFileSync` invocation (from THIS file's own `runGit` fixture helper AND
+// from `lib/tidy-primary.ts` itself) is appended here, then delegated to the
+// real implementation unchanged — real git still runs for every test in this
+// file, preserving the "real git fixtures" design above. `vi.hoisted` is
+// required (not a plain top-level `const`) because `vi.mock` factories are
+// hoisted above ordinary statements; a plain module-scope array read inside
+// the factory would risk a temporal-dead-zone reference depending on
+// transform/ordering.
+const { execFileSyncCalls } = vi.hoisted(() => ({ execFileSyncCalls: [] as unknown[][] }));
+
+vi.mock('child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('child_process')>();
+  return {
+    ...actual,
+    execFileSync: vi.fn((...args: unknown[]) => {
+      execFileSyncCalls.push(args);
+      return (actual.execFileSync as (...a: unknown[]) => unknown)(...args);
+    }),
+  };
+});
+
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -206,16 +229,27 @@ describe('classifyPrimary', () => {
     expect(result.originRef).toBeNull();
   });
 
-  it('never performs a network call (no fetch) — origin/main answers reflect ONLY the pre-built ref', () => {
+  it('never issues a network-shaped git subcommand (Tier-0 offline invariant #1)', () => {
     const { primary } = buildLandedElsewhereFixture();
-    // Simulate MORE work landing upstream AFTER the primary's last fetch —
-    // classifyPrimary must not see it, because it must never fetch on its own
-    // (Tier-0 offline invariant #1).
-    // (No further push/fetch performed here — this test simply documents that
-    // classifyPrimary takes no `--fetch`-shaped argument and issues no network
-    // I/O; behavioural proof is implicit in every other test passing without
-    // network access in this sandboxed test run.)
+    // buildLandedElsewhereFixture's own setup runs a legitimate `git fetch`
+    // (a human/test-harness action, mirroring what a real user would do
+    // before invoking classifyPrimary) — clear the recorder so this
+    // assertion covers ONLY classifyPrimary's own git invocations, not the
+    // fixture's.
+    execFileSyncCalls.length = 0;
+
     const result = classifyPrimary(primary)!;
+
+    const NETWORK_SUBCOMMANDS = new Set(['fetch', 'pull', 'push', 'clone', 'ls-remote', 'remote', 'submodule']);
+    const gitInvocations = execFileSyncCalls.filter(([cmd]) => cmd === 'git') as [string, string[]][];
+    // Sanity: classifyPrimary DID shell out to git — an empty list here would
+    // make the loop below vacuously true (passing because nothing ran, not
+    // because nothing network-shaped ran).
+    expect(gitInvocations.length).toBeGreaterThan(0);
+    for (const [, args] of gitInvocations) {
+      expect(NETWORK_SUBCOMMANDS.has(args[0])).toBe(false);
+    }
+
     expect(result.originRef).toBe('origin/main');
   });
 });
