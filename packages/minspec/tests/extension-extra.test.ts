@@ -30,6 +30,7 @@ const mockAdrTreeProvider = { refresh: vi.fn(), setExpansionMemory: vi.fn(), epi
 const mockBacklogTreeProvider = { refresh: vi.fn(), refreshIfStale: vi.fn(), setExpansionMemory: vi.fn(), epicGrouping: { set: vi.fn(), toggle: vi.fn(() => true) } };
 const mockNextTaskStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockScaffoldCommitStatusBar = { update: vi.fn(), dispose: vi.fn() };
+const mockTidyPrimaryStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockSpecPanel = { show: vi.fn(), refresh: vi.fn(), dispose: vi.fn() };
 const mockCodeLensProvider = { refresh: vi.fn() };
 const mockSpecFileLensProvider = { refresh: vi.fn() };
@@ -198,6 +199,7 @@ vi.mock('../src/views/status-bar', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/views/status-bar')>()),
   MinSpecNextTaskStatusBar: vi.fn(function () { return mockNextTaskStatusBar; }),
   MinSpecScaffoldCommitStatusBar: vi.fn(function () { return mockScaffoldCommitStatusBar; }),
+  MinSpecTidyPrimaryStatusBar: vi.fn(function () { return mockTidyPrimaryStatusBar; }),
 }));
 vi.mock('../src/commands/next-task', () => ({
   nextTaskCommand: vi.fn(() => vi.fn()),
