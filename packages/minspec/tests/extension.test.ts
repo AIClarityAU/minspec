@@ -16,6 +16,7 @@ const mockAdrTreeProvider = { refresh: vi.fn(), setExpansionMemory: vi.fn() };
 const mockBacklogTreeProvider = { refresh: vi.fn(), refreshIfStale: vi.fn(), setExpansionMemory: vi.fn() };
 const mockNextTaskStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockScaffoldCommitStatusBar = { update: vi.fn(), dispose: vi.fn() };
+const mockTidyPrimaryStatusBar = { update: vi.fn(), dispose: vi.fn() };
 const mockSpecPanel = { show: vi.fn(), refresh: vi.fn(), dispose: vi.fn() };
 const mockCodeLensProvider = { refresh: vi.fn() };
 const mockSpecFileLensProvider = { refresh: vi.fn() };
@@ -233,6 +234,7 @@ vi.mock('../src/views/status-bar', async (importOriginal) => ({
   ...(await importOriginal<typeof import('../src/views/status-bar')>()),
   MinSpecNextTaskStatusBar: vi.fn(function () { return mockNextTaskStatusBar; }),
   MinSpecScaffoldCommitStatusBar: vi.fn(function () { return mockScaffoldCommitStatusBar; }),
+  MinSpecTidyPrimaryStatusBar: vi.fn(function () { return mockTidyPrimaryStatusBar; }),
 }));
 // Stub the next-task command factory + cheap computeNextTask so activate's
 // status-bar wiring runs without building a real graph (no fs in this mock).
@@ -330,7 +332,7 @@ import {
 } from '../src/lib/context-injector';
 import { loadSession, saveSession, addToScope, isFileInScope } from '../src/lib/session';
 import { createParkingLotEntry, parkTopic } from '../src/lib/parking-lot';
-import { MinSpecScaffoldCommitStatusBar } from '../src/views/status-bar';
+import { MinSpecScaffoldCommitStatusBar, MinSpecTidyPrimaryStatusBar } from '../src/views/status-bar';
 import { SpecPanel } from '../src/views/spec-panel';
 import { SpecTreeProvider } from '../src/views/spec-tree-provider';
 import { AdrTreeProvider } from '../src/views/adr-tree-provider';
@@ -681,6 +683,18 @@ describe('activate()', () => {
 
     expect(MinSpecScaffoldCommitStatusBar).toHaveBeenCalledWith();
     expect(subscriptions).toContain(mockScaffoldCommitStatusBar);
+  });
+
+  // -------------------------------------------------------------------------
+  // Tidy-primary status bar (#1162)
+  // -------------------------------------------------------------------------
+
+  it('constructs the tidy-primary status bar and pushes it for disposal', () => {
+    const ctx = makeMockContext();
+    activate(ctx);
+
+    expect(MinSpecTidyPrimaryStatusBar).toHaveBeenCalledWith();
+    expect(subscriptions).toContain(mockTidyPrimaryStatusBar);
   });
 
   it('re-invokes minspec.commitHarnessRefresh via the wired command handler', () => {
