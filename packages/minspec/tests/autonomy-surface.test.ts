@@ -17,6 +17,7 @@ import { STOP_CLASSES } from '../../../scripts/lib/autonomy';
 const REPO = path.resolve(__dirname, '../../..');
 const SCRIPT = path.join(REPO, 'scripts', 'autonomy-status.ts');
 const HOOK = path.join(REPO, 'scripts', 'hooks', 'session-start.sh');
+const UNIT = path.join(REPO, 'scripts', 'hooks', 'session-autonomy.sh');
 
 function run(env: Record<string, string> = {}): string {
   return execFileSync('npx', ['tsx', SCRIPT, REPO], {
@@ -26,9 +27,19 @@ function run(env: Record<string, string> = {}): string {
 }
 
 describe('autonomy-status — reflects the resolver', () => {
-  it('reports ask by default, and says the human is consulted', () => {
-    const out = run({ MINSPEC_AUTONOMY: '' });
+  it('reports ask from the CONFIG path, with no override defined at all', () => {
+    // MINSPEC_AUTONOMY:'' is not "unset" — readAutonomy returns early on any
+    // DEFINED override, so an empty string exercised the override branch and the
+    // config-file default was never reached. Only deleting the key tests it.
+    const env = { ...process.env };
+    delete env.MINSPEC_AUTONOMY;
+    const out = execFileSync('npx', ['tsx', SCRIPT, REPO], { encoding: 'utf-8', env });
     expect(out).toMatch(/Autonomy: ask/);
+    expect(out).toMatch(/human/i);
+  });
+
+  it('an empty override is a defined value, and still resolves to ask', () => {
+    expect(run({ MINSPEC_AUTONOMY: '' })).toMatch(/Autonomy: ask/);
   });
 
   it('reports act when the setting resolves to act', () => {
@@ -74,23 +85,36 @@ describe('autonomy-status — the list is DERIVED, not restated', () => {
 describe('session-start hook wiring', () => {
   const hook = fs.readFileSync(HOOK, 'utf-8');
 
-  it('invokes the printer', () => {
-    expect(hook).toContain('autonomy-status.ts');
+  it('the unit invokes the printer', () => {
+    expect(fs.readFileSync(UNIT, 'utf-8')).toContain('autonomy-status.ts');
   });
 
   it('is non-fatal — a broken printer must never wedge a session start', () => {
-    expect(hook).toMatch(/autonomy-status\.ts[^\n]*\|\| true|2>\/dev\/null \|\| true/);
+    expect(fs.readFileSync(UNIT, 'utf-8')).toMatch(/\|\| true/);
+    expect(hook).toMatch(/\|\| true/);
   });
 
   it('derives its root from the script location, so it is right in every worktree', () => {
+    expect(fs.readFileSync(UNIT, 'utf-8')).toContain('BASH_SOURCE');
     // A hardcoded path or an undefined REPO_ROOT would silently no-op — the
     // banner would simply stop appearing, which looks identical to "autonomy is
     // off" rather than to a broken hook.
     expect(hook).toContain('BASH_SOURCE');
   });
 
-  it('actually emits the banner when the hook is run', () => {
-    const out = execFileSync('bash', [HOOK], { encoding: 'utf-8', cwd: REPO });
+  it('the extracted unit actually emits the banner when EXECUTED', () => {
+    // Executed, not grepped: a source-text assertion passes just as happily
+    // against dead wiring. But it runs session-autonomy.sh, NOT session-start.sh
+    // — the full hook writes $GIT_DIR/.claude-last-branch, can launch the
+    // tooling radar (which files GitHub issues) and the inbox drain (which can
+    // dispatch agents). A unit test must not have outward-facing side effects.
+    const out = execFileSync('bash', [UNIT], { encoding: 'utf-8', cwd: REPO });
     expect(out).toMatch(/Autonomy: (ask|act)/);
+  });
+
+  it('session-start delegates to that unit, so the executed path is the wired one', () => {
+    // The one remaining source-text check, and it is narrow: the risky half
+    // (does the printer work?) is proven by execution above.
+    expect(hook).toContain('session-autonomy.sh');
   });
 });

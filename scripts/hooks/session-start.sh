@@ -122,11 +122,7 @@ if [[ -x "$RADAR" ]] \
 fi
 
 # ── Autonomy state (DR-086) ──────────────────────────────────────────────────
-# Printed from the RESOLVER, never restated, so the banner cannot drift from the
-# code. Surfacing, not enforcement: it closes the "the agent remembered the stop
-# list" gap, not the "violating it is impossible" one. Never fatal — a broken
-# printer must not wedge a session start.
-_AUT_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." 2>/dev/null && pwd)
-if [ -n "$_AUT_ROOT" ] && [ -f "$_AUT_ROOT/scripts/autonomy-status.ts" ] && command -v npx >/dev/null 2>&1; then
-  npx tsx "$_AUT_ROOT/scripts/autonomy-status.ts" "$_AUT_ROOT" 2>/dev/null || true
-fi
+# Delegated to its own side-effect-free unit so it can be tested by EXECUTION
+# rather than by grepping this file (see session-autonomy.sh). Never fatal.
+_AUT=$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/session-autonomy.sh
+[ -x "$_AUT" ] && "$_AUT" || true
