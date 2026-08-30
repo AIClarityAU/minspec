@@ -59,7 +59,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
-import { readAllRecords, isRecordLive, type SessionPresenceRecord } from './presence';
+import { readAllRecords, isRecordLive, SESSIONS_DIR, type SessionPresenceRecord } from './presence';
 
 /** One dirty path's verdict. */
 export interface TidyClassification {
@@ -261,17 +261,39 @@ function safeReadFile(absPath: string): Buffer | null {
  * counts a caller's OWN session as occupying its own tree — exactly the wrong
  * answer here, where the caller IS that session and needs to know about
  * everyone ELSE.
+ *
+ * Returns `null` — never `[]` — when the presence witness could not be
+ * positively read: the `.minspec/sessions` directory itself is missing or
+ * unreadable, or ANY record anywhere is corrupt/unreadable/malformed (#1714).
+ * This mirrors `isCheckoutOccupied`'s (DR-065 §1) fail-closed direction: an
+ * unreadable witness must never read as "confirmed zero peers", because that
+ * false negative would silently let `tidyPrimaryCommand` run its destructive
+ * discard on a checkout another session might be using (constitution
+ * invariant 2 — a missing or errored witness fails the gate CLOSED and
+ * visibly). `[]` is reserved for a genuinely confirmed "nobody else is here":
+ * the directory was readable and every record in it resolved cleanly (live
+ * elsewhere, stale, or self).
  */
 export function otherLiveSessionsHere(
   rootDir: string,
   worktreeRoot: string,
   selfSessionId?: string,
   now = Date.now(),
-): SessionPresenceRecord[] {
+): SessionPresenceRecord[] | null {
   const target = path.resolve(worktreeRoot);
+
+  // A sessions dir that can't even be listed (missing, permissions, ...)
+  // can't demonstrate anyone's absence — fail closed rather than treat it
+  // like "confirmed empty" the way readAllRecords' own `[]` return would.
+  try {
+    fs.readdirSync(path.join(rootDir, SESSIONS_DIR));
+  } catch {
+    return null;
+  }
+
   const out: SessionPresenceRecord[] = [];
   for (const { rec } of readAllRecords(rootDir)) {
-    if (!rec) continue;
+    if (!rec) return null; // corrupt/unreadable/malformed ⇒ can't attribute ⇒ can't rule out a peer
     if (selfSessionId && rec.sessionId === selfSessionId) continue;
     if (path.resolve(rec.worktreeRoot) !== target) continue;
     if (!isRecordLive(rec, now)) continue;

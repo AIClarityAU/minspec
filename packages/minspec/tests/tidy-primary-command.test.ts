@@ -139,6 +139,26 @@ describe('tidyPrimaryCommand', () => {
     expect(mockedTidy).not.toHaveBeenCalled();
   });
 
+  it('#1714 refuses without prompting when peer presence is indeterminate (null), not just when peers are found', async () => {
+    mockedClassify.mockReturnValue(
+      baseClassification({ redundant: [{ path: 'a.txt', kind: 'REDUNDANT', existsLocally: true, existsUpstream: true }] }),
+    );
+    // otherLiveSessionsHere returns null when it couldn't positively confirm
+    // zero peers (missing/unreadable sessions dir, or a corrupt record) —
+    // distinct from `[]`, which means it positively confirmed nobody's here.
+    mockedPeers.mockReturnValue(null);
+
+    await tidyPrimaryCommand('/ws', 'self-session');
+
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(expect.stringContaining("couldn't confirm"));
+    expect(vscode.window.showWarningMessage).not.toHaveBeenCalledWith(
+      expect.stringContaining('discard'),
+      expect.anything(),
+      expect.anything(),
+    );
+    expect(mockedTidy).not.toHaveBeenCalled();
+  });
+
   it('cancelling the confirm dialog leaves everything untouched', async () => {
     mockedClassify.mockReturnValue(
       baseClassification({ redundant: [{ path: 'a.txt', kind: 'REDUNDANT', existsLocally: true, existsUpstream: true }] }),
