@@ -15,11 +15,12 @@ import {
  * could be relying on state this pass would discard, even though the
  * classification itself is correct at this instant).
  *
- * CAVEAT (#1714): that peer check currently fails OPEN — a corrupt or
- * unreadable session record, or a missing `.minspec/sessions` dir, reads as
- * "nobody else here" rather than "can't tell", unlike DR-065 §1's
- * `isCheckoutOccupied`. Filed, not yet fixed; do not read "refuses" above as
- * airtight until it is.
+ * FIXED (#1714): that peer check fails CLOSED — a corrupt or unreadable
+ * session record, or a missing `.minspec/sessions` dir, makes
+ * `otherLiveSessionsHere` return `null` (never `[]`), and this command
+ * refuses on `null` exactly like it refuses on a non-empty peer list.
+ * Matches DR-065 §1's `isCheckoutOccupied` fail direction: an unreadable
+ * witness never reads as "confirmed zero peers".
  */
 export async function tidyPrimaryCommand(
   workspaceRoot: string,
