@@ -51,6 +51,15 @@ export async function tidyPrimaryCommand(
   }
 
   const peers = otherLiveSessionsHere(workspaceRoot, workspaceRoot, sessionId);
+  if (peers === null) {
+    // #1714: couldn't positively confirm zero peers (missing/unreadable
+    // sessions dir, or a corrupt record) — fail closed rather than risk a
+    // silent discard on a checkout another session might be using.
+    vscode.window.showWarningMessage(
+      "MinSpec: couldn't confirm nobody else is working in this checkout (a session record is missing or unreadable) — tidy refuses rather than risk it. Try again once it's readable.",
+    );
+    return;
+  }
   if (peers.length > 0) {
     vscode.window.showWarningMessage(
       `MinSpec: ${peers.length} other live session${peers.length === 1 ? ' is' : 's are'} working in this checkout right now — tidy refuses while it's shared. Try again once they've parked.`,
