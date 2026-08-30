@@ -129,7 +129,7 @@ Deploy is handled in three honest tiers, chosen per requirement *at the blueprin
 4. Pipeline runs spec → plan → tasks → generate-template → commit-to-integration-branch, through the **deterministic floor only** (A1–A5, A11) plus Reviewer + PO-Proxy refuters.
 5. **Success = the artifact lands committed-and-green, the approval record carries a verifiable `human`/`blueprint` provenance marker, the prototype digest is inlined in the overview, and the signpost reads "built, merged, no runtime target" — verified by reading the committed `approvals.json` and the diff, not the agents' self-reports.**
 
-If that slice cannot produce a *non-forgeable* "approved → built → honest-signpost" chain, the mode is not ready — and that failure costs one throwaway template, which is the entire point of choosing a playground.
+If that slice cannot produce an *independently checkable* "approved → built → honest-signpost" chain, the mode is not ready — and that failure costs one throwaway template, which is the entire point of choosing a playground.
 
 ---
 
