@@ -364,9 +364,51 @@ describe('otherLiveSessionsHere', () => {
     fs.writeFileSync(path.join(dir, `${rec.sessionId}.session.json`), JSON.stringify(rec), 'utf-8');
   }
 
-  it('is empty with no records at all', () => {
+  it('is empty when the sessions dir exists but holds no records', () => {
     const dir = makeTmpDir('minspec-tidy-presence-');
+    fs.mkdirSync(path.join(dir, SESSIONS_DIR), { recursive: true });
     expect(otherLiveSessionsHere(dir, dir)).toEqual([]);
+  });
+
+  // ── #1714: fail-CLOSED when the witness can't be positively read ──────────
+  // otherLiveSessionsHere used to treat "the sessions dir is missing" and "a
+  // session record is corrupt" as "confirmed zero peers" (returned `[]`), the
+  // opposite fail-direction from presence.ts's isCheckoutOccupied (DR-065 §1),
+  // which treats the same conditions as "can't rule out a peer" and refuses.
+  // Constitution invariant 2: a missing or errored witness fails the gate
+  // CLOSED and visibly — never silently passes.
+
+  it('#1714 cannot confirm when the .minspec/sessions directory does not exist at all', () => {
+    const dir = makeTmpDir('minspec-tidy-presence-');
+    // Deliberately never create `.minspec/sessions` — this is the "nobody
+    // has ever heartbeated here" state, indistinguishable from "the
+    // directory is unreadable": we cannot positively rule out a live peer.
+    expect(otherLiveSessionsHere(dir, dir)).toBeNull();
+  });
+
+  it('#1714 cannot confirm when a session record is corrupt (unparseable JSON)', () => {
+    const dir = makeTmpDir('minspec-tidy-presence-');
+    const sessionsDir = path.join(dir, SESSIONS_DIR);
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    // A live, otherwise-unambiguous peer in the SAME worktree would normally
+    // make this an easy "peers found" case — the corrupt record must still
+    // win and force `null`, exactly like isCheckoutOccupied's "a corrupt
+    // record blocks all ff (cannot attribute)".
+    writeRecord(dir, record({ worktreeRoot: dir }));
+    fs.writeFileSync(path.join(sessionsDir, 'junk.session.json'), '{ not valid json', 'utf-8');
+    expect(otherLiveSessionsHere(dir, dir)).toBeNull();
+  });
+
+  it('#1714 cannot confirm when a session record is malformed (valid JSON, wrong shape)', () => {
+    const dir = makeTmpDir('minspec-tidy-presence-');
+    const sessionsDir = path.join(dir, SESSIONS_DIR);
+    fs.mkdirSync(sessionsDir, { recursive: true });
+    fs.writeFileSync(
+      path.join(sessionsDir, 'malformed.session.json'),
+      JSON.stringify({ sessionId: 'x' }), // missing every other required FR-2 field
+      'utf-8',
+    );
+    expect(otherLiveSessionsHere(dir, dir)).toBeNull();
   });
 
   it('excludes the caller itself by sessionId', () => {
@@ -381,7 +423,8 @@ describe('otherLiveSessionsHere', () => {
     const peer = record({ worktreeRoot: dir });
     writeRecord(dir, peer);
     const others = otherLiveSessionsHere(dir, dir, 'not-the-peer');
-    expect(others.map((r) => r.sessionId)).toEqual([peer.sessionId]);
+    expect(others).not.toBeNull();
+    expect(others!.map((r) => r.sessionId)).toEqual([peer.sessionId]);
   });
 
   it('ignores a live session in a DIFFERENT worktree', () => {
