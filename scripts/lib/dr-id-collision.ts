@@ -342,7 +342,7 @@ export function decideDrIdCollision(input: DrIdCollisionInput): DrIdCollisionVer
   // line twice. The collision is one fact, so report it once.
   const seenFinding = new Set<string>();
   const unique = findings.filter((f) => {
-    const key = `${f.id} ${f.heldBy} ${f.file}`;
+    const key = `${f.id}\x00${f.heldBy}\x00${f.file}`;
     if (seenFinding.has(key)) return false;
     seenFinding.add(key);
     return true;
