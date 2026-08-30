@@ -77,7 +77,16 @@ export type PrimaryClassificationNote =
   | 'not-a-git-repo';
 
 export interface PrimaryClassification {
+  /** The caller-supplied directory, as given to {@link classifyPrimary}. May
+   * be a SUBFOLDER of the repo (a VS Code workspace need not be opened at the
+   * repo root) — every path in `redundant`/`orphans` is resolved against
+   * {@link topLevel}, not this field (#1715). */
   rootDir: string;
+  /** `git rev-parse --show-toplevel` from `rootDir` — the frame every
+   * `redundant`/`orphans` path, and every fs/git operation on it, must use.
+   * `git status --porcelain -z` paths are always relative to THIS, never to
+   * `rootDir` (#1715). */
+  topLevel: string;
   /** e.g. 'origin/main'; null when it couldn't be resolved (see `note`). */
   originRef: string | null;
   defaultBranch: string;
@@ -179,19 +188,29 @@ export function parsePorcelainZ(raw: string): string[] {
  * Classify every dirty path in `rootDir` against `origin/<default>` — the
  * read-only half of `check-primaries-clean.sh`. Never fetches, never mutates.
  * Returns null only when `rootDir` isn't inside a git checkout at all.
+ *
+ * `rootDir` is used ONLY to locate the repo (it can be any directory inside
+ * it, including a subfolder a VS Code workspace opened at). Every git
+ * invocation's `cwd` and every fs path join below uses `topLevel` — git's own
+ * `rev-parse --show-toplevel` — because `git status --porcelain -z` (and
+ * `<ref>:<path>` syntax) always reports paths relative to the repo root, not
+ * to whatever `cwd` git was invoked from (#1715). Mixing the two frames
+ * either doubles the path (`<subfolder>/<repo-root-relative-path>`, which
+ * doesn't exist) or silently misclassifies.
  */
 export function classifyPrimary(rootDir: string): PrimaryClassification | null {
   const topLevel = gitOut(rootDir, ['rev-parse', '--show-toplevel']);
   if (!topLevel) return null; // not a git repo
 
-  const rawDefault = gitOut(rootDir, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']);
+  const rawDefault = gitOut(topLevel, ['symbolic-ref', '--short', 'refs/remotes/origin/HEAD']);
   const defaultBranch = rawDefault.replace(/^origin\//, '') || 'main';
   const originRef = `origin/${defaultBranch}`;
-  const branch = gitOut(rootDir, ['rev-parse', '--abbrev-ref', 'HEAD']);
+  const branch = gitOut(topLevel, ['rev-parse', '--abbrev-ref', 'HEAD']);
   const onDefaultBranch = branch === defaultBranch;
 
   const empty: Omit<PrimaryClassification, 'note'> = {
     rootDir,
+    topLevel,
     originRef: null,
     defaultBranch,
     branch,
@@ -205,27 +224,27 @@ export function classifyPrimary(rootDir: string): PrimaryClassification | null {
   if (!onDefaultBranch) {
     return { ...empty, note: 'off-default-branch' };
   }
-  if (!gitOk(rootDir, ['rev-parse', '--verify', '-q', originRef])) {
+  if (!gitOk(topLevel, ['rev-parse', '--verify', '-q', originRef])) {
     return { ...empty, note: 'missing-origin-ref' };
   }
 
-  const behind = Number(gitOut(rootDir, ['rev-list', '--count', `HEAD..${originRef}`])) || 0;
-  const ahead = Number(gitOut(rootDir, ['rev-list', '--count', `${originRef}..HEAD`])) || 0;
+  const behind = Number(gitOut(topLevel, ['rev-list', '--count', `HEAD..${originRef}`])) || 0;
+  const ahead = Number(gitOut(topLevel, ['rev-list', '--count', `${originRef}..HEAD`])) || 0;
 
   const redundant: TidyClassification[] = [];
   const orphans: TidyClassification[] = [];
-  const raw = gitOutRaw(rootDir, ['status', '--porcelain', '-z']);
+  const raw = gitOutRaw(topLevel, ['status', '--porcelain', '-z']);
   for (const p of parsePorcelainZ(raw)) {
-    const existsLocally = fs.existsSync(path.join(rootDir, p));
-    const existsUpstream = gitOk(rootDir, ['cat-file', '-e', `${originRef}:${p}`]);
+    const existsLocally = fs.existsSync(path.join(topLevel, p));
+    const existsUpstream = gitOk(topLevel, ['cat-file', '-e', `${originRef}:${p}`]);
 
     let kind: 'REDUNDANT' | 'ORPHAN';
     if (existsLocally) {
       if (!existsUpstream) {
         kind = 'ORPHAN'; // content not on origin at all
       } else {
-        const upstreamBytes = gitShowBytes(rootDir, originRef, p);
-        const localBytes = safeReadFile(path.join(rootDir, p));
+        const upstreamBytes = gitShowBytes(topLevel, originRef, p);
+        const localBytes = safeReadFile(path.join(topLevel, p));
         // Any read failure ⇒ can't prove equality ⇒ ORPHAN (fail toward keeping
         // it, mirroring isCheckoutOccupied's "any error ⇒ occupied" direction).
         kind = upstreamBytes !== null && localBytes !== null && upstreamBytes.equals(localBytes)
@@ -330,6 +349,12 @@ export interface TidyResult {
  *
  * Never fetches. Never moves HEAD. Never touches an ORPHAN path, even if the
  * caller (by mistake) asked it to.
+ *
+ * Every fs join and every git invocation's `cwd` below uses `fresh.topLevel`
+ * (git's own top-level, from the fresh re-classification), not `rootDir` —
+ * same reasoning as {@link classifyPrimary} (#1715): the requested paths are
+ * repo-root-relative, so they must be resolved against the repo root, not
+ * whatever subfolder `rootDir` happens to be.
  */
 export function tidyRedundantPaths(rootDir: string, requestedPaths: string[]): TidyResult {
   const fresh = classifyPrimary(rootDir);
@@ -347,6 +372,7 @@ export function tidyRedundantPaths(rootDir: string, requestedPaths: string[]): T
     return { removed, skipped: requestedPaths.map((p) => ({ path: p, reason })) };
   }
 
+  const topLevel = fresh.topLevel;
   const freshRedundant = new Map(fresh.redundant.map((c) => [c.path, c]));
   for (const p of requestedPaths) {
     const c = freshRedundant.get(p);
@@ -358,8 +384,8 @@ export function tidyRedundantPaths(rootDir: string, requestedPaths: string[]): T
       skipped.push({ path: p, reason: 'locally deleted — restore manually if this was unintended' });
       continue;
     }
-    const abs = path.join(rootDir, p);
-    if (!gitOk(rootDir, ['ls-files', '--error-unmatch', '--', p])) {
+    const abs = path.join(topLevel, p);
+    if (!gitOk(topLevel, ['ls-files', '--error-unmatch', '--', p])) {
       // untracked — a plain delete carries no history to lose.
       try {
         fs.unlinkSync(abs);
@@ -369,12 +395,12 @@ export function tidyRedundantPaths(rootDir: string, requestedPaths: string[]): T
       }
       continue;
     }
-    if (!gitOk(rootDir, ['diff', '--cached', '--quiet', '--', p])) {
+    if (!gitOk(topLevel, ['diff', '--cached', '--quiet', '--', p])) {
       // has staged changes — out of scope, resolve manually.
       skipped.push({ path: p, reason: 'has staged changes — tidy only discards unstaged/untracked content' });
       continue;
     }
-    if (gitOk(rootDir, ['checkout', '--', p])) {
+    if (gitOk(topLevel, ['checkout', '--', p])) {
       removed.push(p);
     } else {
       skipped.push({ path: p, reason: 'git checkout failed' });
