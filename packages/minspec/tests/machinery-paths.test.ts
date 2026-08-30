@@ -106,6 +106,11 @@ describe('#1284 machinery path classification', () => {
     // the one every consuming repo actually runs. `npm run validate` enforces that the
     // generated file is not STALE (#678); this asserts the classifier inside it agrees, so
     // a downstream repo can never be running a narrower machinery set than this one.
+    // NOTE (#1486): this checks the EMBEDDED blob. What a consuming repo receives is that
+    // blob with the machinery-path COMMENT rewritten from MinSpec's vantage to its own —
+    // executable content untouched. machinery-comment-localization.test.ts asserts the
+    // pattern survives that rewrite character-for-character, so the chain here still holds
+    // end to end: workflow == blob == scaffolded copy, as far as the classifier goes.
     // Import the module rather than regex-parsing its source: the blob is stored as many
     // concatenated base64 chunks, so a source-level regex captures only the first one and
     // would fail for reasons unrelated to drift.
