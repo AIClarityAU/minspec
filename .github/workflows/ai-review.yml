@@ -547,8 +547,12 @@ jobs:
           #    Machinery PRs are NOT forced to changes: the self-edit override below
           #    fires only for SELF_EDIT_KIND=indeterminate (#596), so a machinery PR
           #    keeps whatever this block decided — `blocked` included — and its merge
-          #    hold is carried separately by the `needs-human-review` label, the
-          #    `machinery-review-required` check, and the absent SHA-bound pass witness. ──
+          #    hold is carried separately by the `machinery-review-required` check and
+          #    the absent SHA-bound pass witness, plus `needs-human-review` when the
+          #    verdict is pass/changes. A `blocked` machinery PR does NOT get that
+          #    label: shouldSummonHumanReview returns on `label === BLOCKED` BEFORE
+          #    the isMachinery arm (ai-review-guard.js:889-890), leaving it to
+          #    `ai-review-retry` first. ──
           FINAL="ai-review:pass"
           # #1234 — an ABSENT voter and a voter that OBJECTED are different events and
           # are no longer collapsed. Previously both fell to the `*)` arm and set
