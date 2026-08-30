@@ -21,9 +21,9 @@ affects: [.github/workflows/ai-review.yml, .github/workflows/ready-to-merge.yml,
 phases:
   specify: done
   clarify: done
-  plan: done
-  tasks: done
-  implement: in-progress
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # SPEC-065: Solo mode — the DR-076 ceremony cut
