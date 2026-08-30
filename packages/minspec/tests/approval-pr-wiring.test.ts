@@ -444,18 +444,30 @@ describe('pushed-branch → approval PR (AC-1, AC-2)', () => {
     expect(H.warn[0].actions).toHaveLength(0);
   });
 
-  it('AC-11 converse: a LABELLED PR gets the quiet info toast, with no scary warning', async () => {
-    // Guards the other direction — if the unlabelled warning leaked onto the happy
-    // path, every ordinary approval would cry wolf and the signal would be worth
-    // nothing. The happy path must stay informational.
+  it('AC-11 converse (#1700): a LABELLED PR shows NO toast — the suffix already says it', async () => {
+    // Two guards in one.
+    //
+    // 1. The unlabelled warning must not leak onto the happy path: if every ordinary
+    //    approval cried wolf, the signal would be worth nothing.
+    // 2. The happy path must not add a toast of its OWN either. It used to, and the
+    //    result was two notifications per approval where the second strictly contained
+    //    the first — reported live on #1689. The caller puts the suffix in its own
+    //    success toast, so announcing here is pure duplication, and duplication is how
+    //    a reader learns to dismiss without reading.
     installRunner({ 'git diff --name-only -z': `${SPEC_REL}\0` });
-    await pushApprovalIfEnabled(tmp, 'spec-050', { subject: SUBJECT, paths: DOCS_PATHS });
+    const r = await pushApprovalIfEnabled(tmp, 'spec-050', {
+      subject: SUBJECT,
+      paths: DOCS_PATHS,
+    });
     await flush();
 
     expect(H.warn).toHaveLength(0);
-    expect(H.info).toHaveLength(1);
-    expect(H.info[0].message).toContain('approval PR opened');
-    expect(H.info[0].message).not.toContain('Auto-merge will not run');
+    expect(H.info).toHaveLength(0);
+    // …and the information is NOT lost: it rides the suffix the caller displays.
+    // Asserted here rather than trusted, because a suffix that stopped carrying the
+    // PR would turn this silence back into the stranding AC-11 exists to prevent.
+    expect(r.suffix).toContain('PR opened');
+    expect(r.suffix).not.toContain('not docs-only');
   });
 
   it('INV-2 (#1224): a docs-only COMMIT on a branch that also changed code is NOT labelled', async () => {
@@ -575,13 +587,23 @@ describe('AC-3: the success notification can never require a click (FR-3)', () =
   });
 
   it('structural: every notification on the auto-success path has ZERO actions', async () => {
-    await pushApprovalIfEnabled(tmp, 'spec-050', { subject: SUBJECT, paths: DOCS_PATHS });
+    const { suffix } = await pushApprovalIfEnabled(tmp, 'spec-050', {
+      subject: SUBJECT,
+      paths: DOCS_PATHS,
+    });
     await flush();
 
-    expect(H.info.length).toBeGreaterThan(0); // anti-vacuity: something WAS shown
+    // ANTI-VACUITY, relocated (#1700). This used to anchor on `H.info.length > 0`, but
+    // the labelled happy path is now deliberately silent — so that anchor would make
+    // the loop below pass over an empty list and prove nothing. The anchor moves to the
+    // surface that still exists: the suffix the caller displays. AC-3's property is
+    // "no success surface requires a click", and it needs a real surface to be about.
+    expect(suffix).toContain(NEW_PR_URL);
     for (const n of H.info) expect(n.actions).toEqual([]);
     expect(H.warn).toEqual([]);
-    expect(H.info.some((n) => n.message.includes(NEW_PR_URL))).toBe(true);
+    // The happy path adds no notification of its own; the URL reaches the user via the
+    // suffix asserted above, not via a second toast.
+    expect(H.info).toEqual([]);
   });
 
   it('AC-3 (#1224): the ADOPTED arm is a success too, and must also have no completing action', async () => {
@@ -596,8 +618,10 @@ describe('AC-3: the success notification can never require a click (FR-3)', () =
     await flush();
 
     expect(pr?.outcome).toBe('adopted'); // anti-vacuity: the arm really ran
-    expect(H.info.length).toBeGreaterThan(0);
+    // Same relocation as above (#1700): the adopted arm is labelled, so it is silent
+    // too. `pr?.outcome` is this test's anti-vacuity anchor and is unaffected.
     for (const n of H.info) expect(n.actions).toEqual([]);
+    expect(H.info).toEqual([]);
     expect(H.opened).toEqual([]);
   });
 

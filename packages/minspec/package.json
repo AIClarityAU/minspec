@@ -77,6 +77,10 @@
         "title": "MinSpec: Commit Harness Refresh"
       },
       {
+        "command": "minspec.tidyPrimary",
+        "title": "MinSpec: Tidy Primary (discard redundant copies)"
+      },
+      {
         "command": "minspec.constitutionShowPrompt",
         "title": "MinSpec: Show Constitution Generation Prompt"
       },
