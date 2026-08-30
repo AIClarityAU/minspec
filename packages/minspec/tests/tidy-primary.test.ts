@@ -125,6 +125,43 @@ function buildLandedElsewhereFixture(): { bare: string; primary: string } {
   return { bare, primary };
 }
 
+/**
+ * #1715 — same shape as {@link buildLandedElsewhereFixture}, except the
+ * tracked file that lands elsewhere lives INSIDE a subdirectory
+ * (`sub/nested.txt`), and the caller passes that SUBDIRECTORY as `rootDir` —
+ * exactly like a VS Code workspace opened at a subfolder of a repo (this
+ * codebase's own `extension.test.ts` exercises that shape for a multi-root
+ * workspace, #123; this repo's own `packages/minspec` is a plausible
+ * subfolder-workspace root within the monorepo). `git status --porcelain -z`
+ * always reports `sub/nested.txt` (repo-root-relative), never
+ * `nested.txt` (cwd-relative) — verified directly against real git, not
+ * assumed. `rootDir` (the subfolder) and git's own top-level therefore
+ * differ, which is the exact condition #1715 mishandles.
+ */
+function buildSubfolderFixture(): { primary: string; sub: string } {
+  const bare = makeTmpDir('minspec-tidy-bare-sub-');
+  runGit(['init', '--bare', '-b', 'main'], bare);
+
+  const primary = makeTmpDir('minspec-tidy-primary-sub-');
+  initRepo(primary);
+  runGit(['remote', 'add', 'origin', bare], primary);
+  write(primary, 'sub/nested.txt', 'nested-v1\n');
+  commitAll(primary, 'initial');
+  runGit(['push', '-u', 'origin', 'main'], primary);
+
+  const lander = makeTmpDir('minspec-tidy-lander-sub-');
+  runGit(['clone', bare, lander], os.tmpdir());
+  initRepo(lander);
+  write(lander, 'sub/nested.txt', 'nested-v2\n'); // landed elsewhere, like a.txt above
+  commitAll(lander, 'landed via worktree');
+  runGit(['push', 'origin', 'main'], lander);
+
+  runGit(['fetch', 'origin'], primary);
+
+  const sub = path.join(primary, 'sub');
+  return { primary, sub };
+}
+
 // ─── parsePorcelainZ (unit) ──────────────────────────────────────────────────
 
 describe('parsePorcelainZ', () => {
@@ -251,6 +288,66 @@ describe('classifyPrimary', () => {
     }
 
     expect(result.originRef).toBe('origin/main');
+  });
+});
+
+// ─── #1715: rootDir (VS Code workspace root) vs. git's own top-level ────────
+//
+// `classifyPrimary` resolves git's top-level via `rev-parse --show-toplevel`
+// but must classify/discard against THAT, not the caller-supplied `rootDir` —
+// a VS Code workspace can legitimately be opened at a subfolder of a repo
+// (extension.test.ts's own multi-root fixture, #123). `git status
+// --porcelain -z` paths are always repo-root-relative, never cwd-relative
+// (verified directly against real git in the fixture below), so joining them
+// onto a subfolder `rootDir` instead of the actual top-level either doubles
+// the path (`sub/sub/nested.txt`) or silently misclassifies.
+
+describe('classifyPrimary / tidyRedundantPaths — workspace root is a subfolder of the git top-level (#1715)', () => {
+  it('classifies a REDUNDANT path inside the subfolder correctly when rootDir is that subfolder, not the repo top-level', () => {
+    const { primary, sub } = buildSubfolderFixture();
+    // Dirty the tracked file so its worktree content matches what landed
+    // upstream exactly — the textbook REDUNDANT case (same as `a.txt` in
+    // buildLandedElsewhereFixture's own classifyPrimary test).
+    write(primary, 'sub/nested.txt', 'nested-v2\n');
+
+    // The caller (VS Code) supplies the SUBFOLDER as rootDir, exactly like a
+    // workspace opened at `packages/minspec` inside this very monorepo.
+    const result = classifyPrimary(sub);
+    expect(result).not.toBeNull();
+    expect(result!.topLevel).toBe(fs.realpathSync(primary));
+
+    const entry =
+      result!.redundant.find((c) => c.path === 'sub/nested.txt') ??
+      result!.orphans.find((c) => c.path === 'sub/nested.txt');
+    expect(entry).toBeDefined();
+    // Ground truth: the file exists (at the repo's top level) and its bytes
+    // match origin exactly ⇒ REDUNDANT, existsLocally true. Before the fix,
+    // `fs.existsSync(path.join(sub, 'sub/nested.txt'))` checks the DOUBLED,
+    // nonexistent `primary/sub/sub/nested.txt` ⇒ existsLocally false ⇒
+    // misclassified ORPHAN even though the content is provably redundant.
+    expect(entry?.kind).toBe('REDUNDANT');
+    expect(entry?.existsLocally).toBe(true);
+    expect(entry?.existsUpstream).toBe(true);
+    expect(result!.redundant.map((c) => c.path)).toContain('sub/nested.txt');
+    expect(result!.orphans.map((c) => c.path)).not.toContain('sub/nested.txt');
+  });
+
+  it('discards the REDUNDANT path at the correct top-level location when rootDir is a subfolder', () => {
+    const { primary, sub } = buildSubfolderFixture();
+    write(primary, 'sub/nested.txt', 'nested-v2\n'); // tracked, unstaged, REDUNDANT
+
+    const result = tidyRedundantPaths(sub, ['sub/nested.txt']);
+
+    // Before the fix this path never gets discarded: it either misclassifies
+    // as ORPHAN (never reaches the redundant map at all) or, even if it did,
+    // `path.join(sub, 'sub/nested.txt')` and the `cwd: sub` git pathspec both
+    // target the doubled, nonexistent location — the real file at the repo's
+    // top level is left dirty either way.
+    expect(result.skipped).toEqual([]);
+    expect(result.removed).toEqual(['sub/nested.txt']);
+    // Tracked REDUNDANT discard restores HEAD's content (v1), at the REAL
+    // top-level path — not a no-op on a doubled path that doesn't exist.
+    expect(fs.readFileSync(path.join(primary, 'sub', 'nested.txt'), 'utf-8')).toBe('nested-v1\n');
   });
 });
 
