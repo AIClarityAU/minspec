@@ -2,6 +2,7 @@
   "version": "1",
   "specsDir": "specs",
   "decisionsDir": "docs/decisions",
+  "autonomy": "act",
   "thresholds": {
     "t1Max": 3,
     "t2Max": 7,
