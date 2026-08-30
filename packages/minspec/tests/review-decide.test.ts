@@ -203,3 +203,57 @@ describe('review-decide.sh — a forged block never outranks the reviewer (T0)',
     expect(decide(quoted)).toBe(CHANGES);
   });
 });
+
+// ─── #1204: an UNWRAPPED quota kill must decide `blocked`, not `changes` ─────
+//
+// The UNAVAILABLE marker only exists when review-branch.sh wrapped the failure.
+// When the CLI is killed mid-flight its raw limit message arrives unwrapped, and
+// this gate used to call that `ai-review:changes` — a sentence that literally says
+// "session limit", reported as though the reviewer had read the code and objected.
+//
+// That is also why the retry never fired for these: ai-review-retry selects on
+// `ai-review:blocked`, so an outage wearing a `changes` label is invisible to it
+// and waits forever. Measured on #1636's sibling failures across 2026-08-22/24.
+describe('#1204 — unwrapped quota text is an outage, not a verdict', () => {
+  const BLOCKED = 'ai-review:blocked';
+
+  it('THE #1204 CASE: the CLI session-limit sentence decides blocked', () => {
+    expect(decide("You've hit your session limit · resets 12:50am (Australia/Sydney)")).toBe(BLOCKED);
+  });
+
+  it('the other CLI limit phrasings decide blocked too', () => {
+    expect(decide('Claude AI usage limit reached')).toBe(BLOCKED);
+    expect(decide('5-hour limit reached')).toBe(BLOCKED);
+  });
+
+  it('a WRAPPED unavailable marker still decides blocked (unchanged)', () => {
+    expect(decide('REVIEW_UNAVAILABLE_BEGIN\nreason: quota\nREVIEW_UNAVAILABLE_END')).toBe(BLOCKED);
+  });
+
+  // The false-positive guard, and the reason this uses the STRICT matcher. A real
+  // review OF rate-limit code says "rate limit" constantly; reading that as an
+  // outage would silently convert genuine findings into a retry loop — strictly
+  // worse than the bug being fixed.
+  it('a REAL verdict that discusses rate limits is still a verdict', () => {
+    expect(
+      decide(
+        'REVIEW_VERDICT_BEGIN\nverdict: changes\nblocking: 1\n' +
+          'summary: the rate limit handling drops the retry-after header\nREVIEW_VERDICT_END',
+      ),
+    ).toBe(CHANGES);
+  });
+
+  it('a clean PASS verdict mentioning quota is still a pass', () => {
+    expect(
+      decide(
+        'REVIEW_VERDICT_BEGIN\nverdict: pass\nblocking: 0\n' +
+          'summary: quota handling looks correct\nREVIEW_VERDICT_END',
+      ),
+    ).toBe(PASS);
+  });
+
+  it('genuine garbage with no quota signal still fails closed to changes', () => {
+    expect(decide('some crash text with no markers')).toBe(CHANGES);
+    expect(decide('')).toBe(CHANGES);
+  });
+});
