@@ -10,10 +10,16 @@ import {
  * `minspec.tidyPrimary` — the one-keystroke half of #1162. Classification
  * (read-only, no network) lives in `lib/tidy-primary.ts`; this command is the
  * confirm-then-mutate surface: it never discards anything without the paths
- * listed and a human confirming, and it refuses outright while another live
- * session shares this exact checkout (a peer mid-edit could be relying on
- * state this pass would discard, even though the classification itself is
- * correct at this instant).
+ * listed and a human confirming, and it refuses while `otherLiveSessionsHere`
+ * reports another live session sharing this exact checkout (a peer mid-edit
+ * could be relying on state this pass would discard, even though the
+ * classification itself is correct at this instant).
+ *
+ * CAVEAT (#1714): that peer check currently fails OPEN — a corrupt or
+ * unreadable session record, or a missing `.minspec/sessions` dir, reads as
+ * "nobody else here" rather than "can't tell", unlike DR-065 §1's
+ * `isCheckoutOccupied`. Filed, not yet fixed; do not read "refuses" above as
+ * airtight until it is.
  */
 export async function tidyPrimaryCommand(
   workspaceRoot: string,
@@ -69,7 +75,7 @@ export async function tidyPrimaryCommand(
 
   const list = before.redundant.map((c) => `  ${c.path}`).join('\n');
   const choice = await vscode.window.showWarningMessage(
-    `MinSpec: discard ${before.redundant.length} redundant path(s)? Their content is already provably on origin/${before.defaultBranch} — nothing is lost, and a future sync reproduces them.\n\n${list}`,
+    `MinSpec: discard ${before.redundant.length} redundant path(s)? Their content is already provably on origin/${before.defaultBranch} — nothing is lost; a later sync outside this extension can bring those exact bytes back.\n\n${list}`,
     { modal: true },
     'Tidy',
   );
