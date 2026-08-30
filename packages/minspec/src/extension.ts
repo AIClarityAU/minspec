@@ -30,8 +30,11 @@ import { TreeExpansionMemory } from './views/tree-expansion-memory';
 import {
   MinSpecNextTaskStatusBar,
   MinSpecScaffoldCommitStatusBar,
+  MinSpecTidyPrimaryStatusBar,
   resolveNextTaskKeybinding,
 } from './views/status-bar';
+import { classifyPrimary } from './lib/tidy-primary';
+import { tidyPrimaryCommand } from './commands/tidy-primary';
 import { fromFrontmatter } from './lib/spec-progress';
 import { nextTaskCommand, computeNextTask } from './commands/next-task';
 import { SpecPanel } from './views/spec-panel';
@@ -204,6 +207,10 @@ export function activate(context: vscode.ExtensionContext): void {
       specTreeProvider.refresh();
       adrTreeProvider.refresh();
       backlogTreeProvider.refreshIfStale();
+      // #1162: re-classify the primary's dirty paths on regain-focus, so a
+      // PR that merged while the window was unfocused clears its badge
+      // promptly instead of waiting on the next unrelated file event.
+      refreshTidyPrimaryStatusBar();
     }),
     // Re-scan when the set of workspace folders changes (#549). The Specs/DRs
     // providers read the LIVE folder list on every getChildren, so a plain
@@ -268,6 +275,31 @@ export function activate(context: vscode.ExtensionContext): void {
   };
   refreshScaffoldCommitStatusBar();
 
+  // Tidy-primary classification status bar (#1162 — SPEC-026 gap). Same
+  // debounce discipline as the harness-commit item above. `classifyPrimary`
+  // shells out to git (status/rev-list/cat-file/show) but NEVER fetches — it
+  // reads whatever `origin/<default>` ref is already resolvable locally
+  // (invariant #1: no network call without explicit user consent), so a stale
+  // fetch just means a stale-but-safe classification, never a network hit.
+  const tidyPrimaryStatusBar = new MinSpecTidyPrimaryStatusBar();
+  let tidyPrimaryTimer: ReturnType<typeof setTimeout> | undefined;
+  const refreshTidyPrimaryStatusBar = () => {
+    if (!workspaceRoot) {
+      tidyPrimaryStatusBar.update([], 0);
+      return;
+    }
+    if (tidyPrimaryTimer) clearTimeout(tidyPrimaryTimer);
+    tidyPrimaryTimer = setTimeout(() => {
+      try {
+        const c = classifyPrimary(workspaceRoot);
+        tidyPrimaryStatusBar.update(c?.redundant.map((r) => r.path) ?? [], c?.orphans.length ?? 0);
+      } catch {
+        tidyPrimaryStatusBar.update([], 0);
+      }
+    }, 300);
+  };
+  refreshTidyPrimaryStatusBar();
+
   // CodeLens providers (Phase 7)
   const codeLensProvider = new MinSpecCodeLensProvider(workspaceRoot);
   const specFileLensProvider = new MinSpecSpecFileLensProvider(workspaceRoot);
@@ -322,6 +354,10 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('minspec.commitHarnessRefresh', async (folderArg?: string) => {
       await commitHarnessRefreshCommand(folderArg);
       refreshScaffoldCommitStatusBar();
+    }),
+    vscode.commands.registerCommand('minspec.tidyPrimary', async () => {
+      await tidyPrimaryCommand(workspaceRoot, presence.sessionId);
+      refreshTidyPrimaryStatusBar();
     }),
     vscode.commands.registerCommand('minspec.constitutionShowPrompt', constitutionShowPromptCommand),
     vscode.commands.registerCommand('minspec.constitutionCompact', constitutionCompactCommand),
@@ -429,6 +465,7 @@ export function activate(context: vscode.ExtensionContext): void {
     { dispose: () => specPanel.dispose() },
     nextTaskStatusBar,
     scaffoldCommitStatusBar,
+    tidyPrimaryStatusBar,
   );
 
   // Watch spec files — refresh tree + status bar on changes
