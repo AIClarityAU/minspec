@@ -195,11 +195,46 @@ describe('Invariant 2: No backend — no network calls', () => {
     // editor-independent SDD hooks run on every commit. Local git config write —
     // no network, Tier-0. See scaffold.ts ensureHooksPath.
     'lib/scaffold.ts',
-    // #356: ruleset advisor's single sanctioned spawn point shells the USER's
-    // authenticated `gh` to detect/create a branch ruleset — and ONLY behind
-    // explicit, opt-in post-init consent (the always-on path is the zero-network
-    // docs link). MinSpec opens no socket itself; same posture as it already
-    // shells `git`. Tier-0 boundary interpretation to be ratified by a DR.
+    // #356 / #1694: the post-init advisor's single sanctioned spawn point
+    // (defaultCommandRunner) shells the USER's authenticated `gh`. MinSpec opens
+    // no socket itself; same posture as it already shells `git`.
+    //
+    // WHAT IS RATIFIED, AND WHAT IS NOT — the two are not the same, and this
+    // entry must not blur them. DR-050's BODY is `accepted`, so the base Tier-0
+    // reading (a consented shell-out through the user's own CLI is the user's
+    // network call) is no longer "to be ratified", and this entry is the
+    // mechanical mitigation its Risks table names for condition 2 (per-action
+    // consent). Its 2026-08-25 AMENDMENT is a different question and a different
+    // status: `proposed`, not accepted (docs/decisions/DR-050.md — the amendment
+    // records itself as "NOT a status-unchanged refinement" because it moves the
+    // boundary from the repo's config to the user's ACCOUNT). Everything below
+    // that rests on that amendment — the `user/memberships/orgs` read and the
+    // `gh repo create` — is therefore listed as SHIPPED CODE AWAITING A HUMAN
+    // ACCEPTANCE of its carve-out, never as sanctioned-by-a-ratified-DR. Calling
+    // a proposed carve-out ratified is the unmarked-inference defect this project
+    // keeps re-finding; a T0 test in tests/repo-create-advisory.test.ts reads the
+    // DR and fails this comment if the two ever disagree.
+    //
+    // So the entry keeps enumerating what the file actually does. Today that is
+    // four things, in two gating classes:
+    //   AUTONOMOUS READ-ONLY PROBES (no toast; they read config/membership and
+    //   egress nothing) — `gh --version`/`gh auth status`; `gh api
+    //   repos/{o}/{r}/rulesets` GET (Amendment 2026-07-01, status unchanged);
+    //   `gh api repos/{o}/{r}/actions/secrets` NAMES GET (Amendment 2026-07-16,
+    //   status unchanged); and `gh api user/memberships/orgs` GET (Amendment
+    //   2026-08-25 — PROPOSED, #1694) — the ONLY probe whose subject is the
+    //   user's ACCOUNT rather than a repo, and therefore bounded to the one
+    //   branch where no git remote exists at all, with nothing persisted. That
+    //   amendment enumerates that ONE endpoint: no further account endpoint
+    //   (`gh api user` included) may be added here without its own amendment,
+    //   per-endpoint enumeration being how this DR has always been widened.
+    //   CONSENT-GATED MUTATIONS (each fires only on an explicit click, which IS
+    //   the consent; a global "allow network" toggle is barred by DR-050) —
+    //   `gh api -X POST .../rulesets`, `gh api -X PUT .../rulesets/{id}`, and
+    //   `gh repo create` (#1694, under the same PROPOSED 2026-08-25 amendment),
+    //   which also wires the new `origin`.
+    // The always-on fallback is still the zero-network docs link, and `gh`
+    // missing/unauthed reaches it having issued zero `gh api` calls.
     // See ruleset-advisor.ts defaultCommandRunner.
     'lib/ruleset-advisor.ts',
     // SPEC-026 FR-2/FR-3: the presence heartbeat stamps each record with the

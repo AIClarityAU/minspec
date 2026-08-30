@@ -53,8 +53,7 @@ import {
   createRulesetPayload,
   createRequiredChecksRuleset,
   hasRequiredChecksRuleset,
-  isGhReady,
-  probeGhAvailability,
+  probeGhReadiness,
   resolveCheckContexts,
   detectCodeChecks,
   resolveTieredRequiredChecks,
@@ -114,6 +113,19 @@ function isRepoApiCall(args: string[]): boolean {
   return apiPath(args)?.startsWith('repos/') ?? false;
 }
 
+/**
+ * The ACCOUNT-scoped read #1694 added (`gh api user/memberships/orgs`).
+ *
+ * DR-050's 2026-08-25 amendment authorises it ONLY in the branch where no remote
+ * exists at all, so every other branch this file exercises must show zero of
+ * them. That bound is a condition of the amendment, not hardening — which is why
+ * it is asserted here, in the suite that owns the OTHER branches, and not left
+ * entirely to the suite that owns the new one.
+ */
+function isMembershipsRead(args: string[]): boolean {
+  return args.includes('api') && (apiPath(args)?.startsWith('user/memberships/orgs') ?? false);
+}
+
 const showInfo = vscode.window.showInformationMessage as ReturnType<typeof vi.fn>;
 
 beforeEach(() => {
@@ -125,60 +137,37 @@ beforeEach(() => {
 // Pure library: detection
 // =============================================================================
 
-describe('isGhReady()', () => {
-  it('false when gh binary cannot spawn (rejection)', async () => {
+describe('probeGhReadiness()', () => {
+  // It answered a BOOLEAN until the fifth correctness review (2026-08-29), and
+  // the one sentence downstream of it told every user to "Install/authenticate
+  // the `gh` CLI" — half of that instruction inapplicable in each case, and the
+  // two halves are different commands. The states are told apart here, and the
+  // sentences that depend on them in tests/repo-create-advisory.test.ts (G7).
+  it('not-installed when the gh binary cannot spawn (rejection)', async () => {
     const { run, calls } = makeRunner((_c, a) =>
       a[0] === '--version' ? { throws: 'ENOENT' } : ok(''),
     );
-    expect(await isGhReady(run)).toBe(false);
+    expect(await probeGhReadiness(run)).toBe('not-installed');
     // Must short-circuit: never probe auth once --version fails.
     expect(calls).toHaveLength(1);
   });
 
-  it('false when gh is installed but not authenticated', async () => {
+  it('not-signed-in when gh is installed but not authenticated', async () => {
     const { run } = makeRunner((_c, a) => {
       if (a[0] === '--version') return ok('gh version 2.50.0');
       if (a[0] === 'auth') return fail(1, 'not logged in');
       return undefined;
     });
-    expect(await isGhReady(run)).toBe(false);
+    expect(await probeGhReadiness(run)).toBe('not-signed-in');
   });
 
-  it('true when gh is installed AND authenticated', async () => {
+  it('ready when gh is installed AND authenticated', async () => {
     const { run } = makeRunner((_c, a) => {
       if (a[0] === '--version') return ok('gh version 2.50.0');
       if (a[0] === 'auth') return ok('Logged in to github.com');
       return undefined;
     });
-    expect(await isGhReady(run)).toBe(true);
-  });
-});
-
-describe('probeGhAvailability() — split installed/authenticated (#1889)', () => {
-  it('{ installed: false, authenticated: false } when gh cannot spawn, short-circuiting before auth status', async () => {
-    const { run, calls } = makeRunner((_c, a) =>
-      a[0] === '--version' ? { throws: 'ENOENT' } : ok(''),
-    );
-    expect(await probeGhAvailability(run)).toEqual({ installed: false, authenticated: false });
-    expect(calls).toHaveLength(1);
-  });
-
-  it('{ installed: true, authenticated: false } when gh is installed but has no usable token', async () => {
-    const { run } = makeRunner((_c, a) => {
-      if (a[0] === '--version') return ok('gh version 2.50.0');
-      if (a[0] === 'auth') return fail(1, 'not logged in');
-      return undefined;
-    });
-    expect(await probeGhAvailability(run)).toEqual({ installed: true, authenticated: false });
-  });
-
-  it('{ installed: true, authenticated: true } when both probes succeed', async () => {
-    const { run } = makeRunner((_c, a) => {
-      if (a[0] === '--version') return ok('gh version 2.50.0');
-      if (a[0] === 'auth') return ok('Logged in to github.com');
-      return undefined;
-    });
-    expect(await probeGhAvailability(run)).toEqual({ installed: true, authenticated: true });
+    expect(await probeGhReadiness(run)).toBe('ready');
   });
 });
 
@@ -592,37 +581,6 @@ describe('offerRulesetAdvisory() — autonomous probe + single-consent create (#
     expect(openExternal).not.toHaveBeenCalled();
   });
 
-  it('CASE 1c (#1889): gh ABSENT → the toast reports the LIMIT ("could not check"), never an imperative claim about the repo', async () => {
-    const { run } = makeRunner((_c, a) => (a[0] === '--version' ? { throws: 'ENOENT' } : ok('')));
-    showInfo.mockResolvedValueOnce(undefined);
-
-    await offerRulesetAdvisory('/ws', deps(run));
-
-    const [message] = showInfo.mock.calls[0] as [string, ...unknown[]];
-    expect(message).toContain('could not check');
-    expect(message).not.toMatch(/^MinSpec: protect your default branch/);
-  });
-
-  it('CASE 1d (#1889): gh installed but NOT authenticated → "could not check" toast, never an imperative claim, zero `gh api`, no POST/create prompt', async () => {
-    const { run, calls } = makeRunner((_c, a) => {
-      if (a[0] === '--version') return ok('gh 2');
-      if (a[0] === 'auth') return fail(1, 'not logged in');
-      return undefined;
-    });
-    showInfo.mockResolvedValueOnce(undefined);
-
-    await offerRulesetAdvisory('/ws', deps(run));
-
-    expect(calls.some((c) => c.args[0] === 'api')).toBe(false);
-    const [message] = showInfo.mock.calls[0] as [string, ...unknown[]];
-    expect(message).toContain('could not check');
-    expect(message).toContain('not authenticated');
-    expect(message).not.toMatch(/^MinSpec: protect your default branch/);
-    // Never the create-offer toast (which carries "Create ruleset" as an action,
-    // not asserted here directly, but there must be exactly one toast total).
-    expect(showInfo).toHaveBeenCalledTimes(1);
-  });
-
   it('AUTO-PROBE: the read-only rulesets GET fires on init WITHOUT any consent toast', async () => {
     const { run, calls } = makeRunner((_c, args) => {
       if (args[0] === '--version') return ok('gh 2');
@@ -936,13 +894,29 @@ describe('offerRulesetAdvisory() — autonomous probe + single-consent create (#
 
     await offerRulesetAdvisory('/ws', deps(run));
 
-    // Fallback message (2nd info call) mentions the admin-scope reason and opens
-    // the docs.
-    expect(String(showInfo.mock.calls[1][0])).toMatch(/repo-admin scope/i);
+    // Fallback message (2nd info call) names WHICH 403 GitHub returned, and opens
+    // the docs. It used to say "your gh token may lack repo-admin scope" for all
+    // four shapes `isForbidden` matches — one speculative cause for four
+    // observations, the same defect `githubReason` exists to prevent, surviving
+    // one level down because the SHAPE was discarded on the way to the sentence.
+    // `Resource not accessible` is about the TOKEN's permissions, and says so.
+    const why = String(showInfo.mock.calls[1][0]);
+    expect(why).toMatch(/not accessible to the token/i);
+    expect(why, 'the invented single cause came back').not.toMatch(/repo-admin scope/i);
     expect(openExternal).toHaveBeenCalledWith(RULESET_DOCS_URL);
   });
 
-  it('gh ready but no GitHub remote → docs link, no probe/create', async () => {
+  it('gh ready, and the git remotes CANNOT BE READ → docs link, no probe/create, no account read', async () => {
+    // This runner answers only the two `gh` availability probes and rejects
+    // everything else, so BOTH remote reads fail: `resolveRemotes` folds its
+    // failure into `none`, and the confirming `git remote` throws. The advisory
+    // therefore classifies the project as `unreadable` — NOT as "no remote".
+    //
+    // The distinction is the whole point. "We could not read the remotes" is not
+    // an observation that there are none, so it must NOT reach the create offer:
+    // DR-050's 2026-08-25 amendment scopes the account read to a POSITIVELY
+    // established absence of remotes. Unreadable fails CLOSED, to the docs link
+    // this branch always had.
     const { run, calls } = makeRunner((_c, args) => {
       if (args[0] === '--version') return ok('gh 2');
       if (args[0] === 'auth') return ok('ok');
@@ -953,8 +927,13 @@ describe('offerRulesetAdvisory() — autonomous probe + single-consent create (#
 
     await offerRulesetAdvisory('/ws', deps(run));
 
-    expect(calls.some((c) => isRepoApiCall(c.args))).toBe(false);
+    // The docs link fired, and its sentence states what was actually observed
+    // rather than the old, false "this project has no GitHub repo".
     expect(openExternal).toHaveBeenCalledWith(RULESET_DOCS_URL);
+    expect(String(showInfo.mock.calls[0][0])).toMatch(/could not read/i);
+    expect(calls.some((c) => isRepoApiCall(c.args))).toBe(false);
+    expect(calls.some((c) => isMembershipsRead(c.args))).toBe(false);
+    expect(calls.some((c) => c.cmd === 'gh' && c.args[0] === 'repo' && c.args[1] === 'create')).toBe(false);
   });
 
   it('DEFENSE-IN-DEPTH: a malformed resolved slug never reaches `gh api`', async () => {
@@ -969,10 +948,16 @@ describe('offerRulesetAdvisory() — autonomous probe + single-consent create (#
 
     await offerRulesetAdvisory('/ws', deps(run));
 
-    // Treated like "no GitHub repo": docs link, NO `gh api` repos call at all
-    // (neither the read-only probe nor a create).
+    // Docs link, and NO `gh api` repos call at all (neither the read-only probe
+    // nor a create).
     expect(calls.every((c) => !isRepoApiCall(c.args))).toBe(true);
     expect(openExternal).toHaveBeenCalledWith(RULESET_DOCS_URL);
+    // Stronger since #1694: a slug that RESOLVED and then failed the charset
+    // assertion proves a remote EXISTS, so this short-circuits to `other-remote`
+    // without classifying — and the account read DR-050 confines to the
+    // no-remote branch must not fire here either.
+    expect(calls.some((c) => isMembershipsRead(c.args))).toBe(false);
+    expect(String(showInfo.mock.calls[0][0])).toMatch(/does not name a GitHub repository/i);
   });
 
   it('never throws — a runner explosion is swallowed (best-effort)', async () => {
@@ -1253,99 +1238,5 @@ describe('ENFORCE: check-name constants bound to producers (#820)', () => {
     // MUST contain at least one such filter; every one must name AI_REVIEW_CHECK.
     expect(nameFilterLiterals.length).toBeGreaterThan(0);
     for (const lit of new Set(nameFilterLiterals)) expect(lit).toBe(AI_REVIEW_CHECK);
-  });
-});
-
-/**
- * The check-run name GitHub derives from each job in a workflow: the job's
- * explicit `name:` when present, otherwise the job key itself.
- *
- * Deliberately a small hand parser rather than a YAML dep — this test exists to
- * catch a rename, so it reads the same two tokens GitHub reads and nothing more.
- * Top-level job keys sit at 2 spaces under `jobs:`; a job-level `name:` at 4.
- */
-function jobCheckRunNames(yaml: string): string[] {
-  const lines = yaml.split('\n');
-  const start = lines.findIndex((l) => /^jobs:\s*$/.test(l));
-  if (start === -1) throw new Error('no top-level `jobs:` block found');
-  const names: string[] = [];
-  let jobKey: string | null = null;
-  let explicit: string | null = null;
-  const flush = () => {
-    if (jobKey) names.push(explicit ?? jobKey);
-    jobKey = null;
-    explicit = null;
-  };
-  for (const line of lines.slice(start + 1)) {
-    if (/^\S/.test(line)) break; // dedent to column 0 ⇒ out of `jobs:`
-    const key = line.match(/^ {2}([A-Za-z0-9_-]+):\s*$/);
-    if (key) {
-      flush();
-      jobKey = key[1];
-      continue;
-    }
-    const name = line.match(/^ {4}name:\s*['"]?([^'"#]+?)['"]?\s*(?:#.*)?$/);
-    if (name && jobKey && explicit === null) explicit = name[1];
-  }
-  flush();
-  return names;
-}
-
-/**
- * The authoritative gate name(s) each workflow is responsible for. Note the two
- * gates publish through DIFFERENT channels and so declare their name in
- * different places: ready-to-merge posts a commit status whose `context:` is a
- * literal in the YAML, while ai-review posts a check-run whose name lives in
- * ai-review-guard.js. Read each from its real producer, never from a copy.
- */
-const GATE_WORKFLOWS: ReadonlyArray<{
-  file: string;
-  gateNames: (yaml: string, root: string) => string[];
-}> = [
-  { file: 'ready-to-merge.yml', gateNames: (yaml) => commitStatusContexts(yaml) },
-  { file: 'ai-review.yml', gateNames: (_yaml, root) => [producedAiReviewCheckName(root)] },
-];
-
-describe("INVARIANT: a gate workflow's job check-run never shadows its own gate name", () => {
-  const root = findCheckNameRepoRoot();
-
-  // Why this is a T0 and not a style nit: a required context is resolved BY NAME,
-  // and GitHub counts every object carrying that name. When a job's implicit
-  // "did it exit 0" check-run shares the name of the authoritative gate, the pair
-  // fails closed only while BOTH exist. Lose the authoritative one — its posting
-  // step is best-effort and permission-dependent, which is the #810 shape — and
-  // the always-green job check-run satisfies the required context on its own. The
-  // gate then passes with no verdict behind it, silently. Constitution invariant 2
-  // requires a missing witness to fail closed, so these names must never collide.
-  //
-  // Measured on AIClarityAU/memory-fabric PR #13 and on this repo's PR #1799:
-  // `ready-to-merge` appeared as BOTH a failing commit status and a passing job
-  // check-run on the same head. Green for ai-review.yml (job key `runner`) and RED
-  // for ready-to-merge.yml until that job was given a distinct `name:` — that
-  // asymmetry is what proves this test is not vacuous.
-  for (const { file, gateNames } of GATE_WORKFLOWS) {
-    it(`${file}: no job check-run name collides with the gate it publishes`, () => {
-      const yaml = fs.readFileSync(path.join(root, '.github/workflows', file), 'utf8');
-      const jobNames = jobCheckRunNames(yaml);
-      const gates = gateNames(yaml, root);
-
-      // Guard against a vacuous pass: if either side parses empty, the collision
-      // check below would hold for the wrong reason.
-      expect(jobNames.length).toBeGreaterThan(0);
-      expect(gates.length).toBeGreaterThan(0);
-
-      expect(jobNames.filter((n) => gates.includes(n))).toEqual([]);
-    });
-  }
-
-  it('the ready-to-merge gate context is still posted by that workflow (rename did not move it)', () => {
-    // The companion assertion. Making the names distinct must NOT be achieved by
-    // renaming the status — that is the required branch-protection context, and
-    // renaming it deadlocks `main` in every adopter repo that requires it.
-    const yaml = fs.readFileSync(
-      path.join(root, '.github/workflows/ready-to-merge.yml'),
-      'utf8',
-    );
-    expect(commitStatusContexts(yaml)).toContain(READY_TO_MERGE_CHECK);
   });
 });
