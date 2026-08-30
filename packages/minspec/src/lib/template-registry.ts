@@ -1794,13 +1794,145 @@ const CLAUDE_HOOK_TEMPLATES: readonly ManagedRegionTemplate[] = [
   },
 ];
 
+// ---------------------------------------------------------------------------
+// Vantage localization of the machinery-path comment (#1486)
+//
+// Everything else in the CI-review stack ships BYTE-IDENTICAL to the file this
+// repo itself runs, and that is the point (see the portability note above). One
+// comment block cannot: `ai-review.yml`'s MACHINERY_PATHS_RE explainer is written
+// from MinSpec's own vantage. It says the pattern below it is "Read by
+// packages/minspec/tests/machinery-paths.test.ts" and lists MinSpec's own gate
+// files as though they were present wherever the workflow lands. In MinSpec that
+// is true; in every consuming repo the test does not exist, so the copied line
+// asserts a guarantee that is not there — the exact defect class MinSpec exists to
+// prevent. It was caught downstream by AIClarityAU/scroogellm's own skeptic voter,
+// and could not be corrected there: the file is parity-held byte-for-byte against
+// what MinSpec emits, so a hand-edit drifts it and the next harness refresh
+// overwrites it. A synced artifact is only correctable at its source, and the
+// source of the SHIPPED copy is here.
+//
+// Scope discipline — this rewrites COMMENT LINES ONLY. The `grep -qE '<pattern>'`
+// line that does the classifying is untouched, so a consuming repo runs the exact
+// same machinery test MinSpec does; `machinery-comment-localization.test.ts` pins
+// both halves of that (every differing line is a `#` comment, and the extracted
+// pattern is character-identical).
+//
+// MinSpec's own `.github/workflows/ai-review.yml` is NOT scaffolded from this
+// template — the CI-review stack is in `SELF_HOSTED_TEMPLATE_NAMES`, so this repo
+// authors that file directly and keeps its true, MinSpec-vantage wording.
+// ---------------------------------------------------------------------------
+
+/** Opening marker of the machinery-path comment block in `ai-review.yml`. */
+const MACHINERY_COMMENT_MARKER = '# MACHINERY_PATHS_RE';
+
+/**
+ * The claim that is true in MinSpec's repo and false in every other — the sentence
+ * this localization exists to remove. Also the tripwire: if the upstream block stops
+ * containing it, the block has been rewritten and the replacement below must be
+ * re-read against it rather than applied blind.
+ */
+const MINSPEC_ONLY_TEST_PATH = 'packages/minspec/tests/machinery-paths.test.ts';
+
+/**
+ * The consuming-repo wording, unindented (the caller re-applies the source block's
+ * own indentation, since the block sits inside a `run: |` scalar).
+ *
+ * Three things it must do, none of which the upstream text does: say nothing that is
+ * false in a repo other than MinSpec, separate the alternations that exist anywhere
+ * from the ones inherited from MinSpec and inert here, and state plainly that no
+ * local test guards the pattern so the line is never read as covered.
+ */
+const LOCALIZED_MACHINERY_COMMENT: readonly string[] = [
+  '# MACHINERY_PATHS_RE — the machinery path set (MinSpec #1284). Gate-ness is a property',
+  '# of what the code DOES, not which directory it lives in: every entry here is code that',
+  '# decides whether some other change is allowed, so it cannot certify itself.',
+  '#',
+  '# UNIVERSAL — present in any repo that scaffolds this stack:',
+  '#   .github/   — the review workflows and their scripts',
+  '#   scripts/   — dispatch, review, remediation, the lease',
+  '#',
+  "# INHERITED FROM MINSPEC — the remaining alternations name files in MinSpec's own",
+  '# repo. Unless this repo happens to have files at those exact paths they never match,',
+  '# and they are carried only so the pattern stays identical to the one MinSpec ships:',
+  "#   .githooks/             — MinSpec's own pre-commit / pre-push / commit-msg gates",
+  '#   template-registry.ts   — generates the .minspec/hooks/pre-commit gate',
+  '#   ci-review-templates.ts — holds the verbatim copies of this workflow and its',
+  '#                            scripts that MinSpec ships downstream',
+  '#',
+  '# MEMBERSHIP TEST for anything added here: does this code decide whether some other',
+  '# change is allowed — directly, or by generating the thing that decides? If yes it',
+  '# cannot certify itself, and it belongs in this set.',
+  '#',
+  "# NO LOCAL TEST GUARDS THIS PATTERN. MinSpec's own repo has a test that parses the",
+  '# line below out and executes it against a path table, but that test is not part of',
+  '# the scaffolded stack, so here the line is unverified — change it and nothing in',
+  '# this repo will tell you it stopped classifying correctly.',
+];
+
+/**
+ * Rewrite the machinery-path comment block for a repo that is NOT MinSpec.
+ *
+ * Fails closed and loudly rather than degrading: a silent no-op would re-ship the
+ * false coverage claim to every consuming repo, which is the failure being fixed.
+ * The throw is reachable only by restructuring `ai-review.yml`'s comment block, and
+ * `machinery-comment-localization.test.ts` runs this against the real workflow on
+ * every PR, so the restructure is caught before it can reach an adopter.
+ *
+ * Exported for that test.
+ */
+export function localizeMachineryPathsComment(workflow: string): string {
+  const fixHint =
+    'Re-read that block against LOCALIZED_MACHINERY_COMMENT in template-registry.ts ' +
+    'and update the replacement before shipping the workflow downstream (#1486).';
+  const lines = workflow.split('\n');
+
+  const start = lines.findIndex((l) => l.trimStart().startsWith(MACHINERY_COMMENT_MARKER));
+  if (start === -1) {
+    throw new Error(
+      `template-registry: cannot localize ai-review.yml — no "${MACHINERY_COMMENT_MARKER}" ` +
+        `line found. ${fixHint}`,
+    );
+  }
+
+  // The block runs from the marker to the first non-comment line (the `elif … grep -qE`
+  // guard), which is left exactly as it is.
+  let end = start;
+  while (end < lines.length && lines[end].trimStart().startsWith('#')) end++;
+
+  if (!lines.slice(start, end).some((l) => l.includes(MINSPEC_ONLY_TEST_PATH))) {
+    throw new Error(
+      `template-registry: cannot localize ai-review.yml — the ${MACHINERY_COMMENT_MARKER} ` +
+        `block no longer mentions ${MINSPEC_ONLY_TEST_PATH}. ${fixHint}`,
+    );
+  }
+
+  const marker = lines[start];
+  const indent = marker.slice(0, marker.length - marker.trimStart().length);
+  const localized = [
+    ...lines.slice(0, start),
+    ...LOCALIZED_MACHINERY_COMMENT.map((l) => `${indent}${l}`),
+    ...lines.slice(end),
+  ].join('\n');
+
+  // Belt-and-braces: the point of the exercise is that this string leaves the repo.
+  if (localized.includes(MINSPEC_ONLY_TEST_PATH)) {
+    throw new Error(
+      `template-registry: ai-review.yml still references ${MINSPEC_ONLY_TEST_PATH} after ` +
+        `localization — the claim appears outside the ${MACHINERY_COMMENT_MARKER} block. ${fixHint}`,
+    );
+  }
+
+  return localized;
+}
+
 /** The three GitHub Actions workflows of the AI-review required-check stack (#564). */
 const CI_REVIEW_STACK_TEMPLATES: readonly ManagedRegionTemplate[] = [
   {
     name: 'ai-review-workflow',
     outputPath: '.github/workflows/ai-review.yml',
     commentStyle: 'hash',
-    content: AI_REVIEW_WORKFLOW,
+    // Comment-only rewrite — see the vantage-localization note above.
+    content: localizeMachineryPathsComment(AI_REVIEW_WORKFLOW),
   },
   {
     name: 'ready-to-merge-workflow',
