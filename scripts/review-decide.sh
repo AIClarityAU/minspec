@@ -34,7 +34,16 @@ set -eu
 # degrade to the previous behaviour (fail closed to changes), never to a crash —
 # this script is a gate and must stay usable with nothing but bash.
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-GUARD="${GUARD:-${SCRIPT_DIR}/../.github/scripts/ai-review-guard.js}"
+# The default is built on its OWN line rather than inlined into the parameter
+# expansion below. managed-script-dependencies.test.ts reads sibling references
+# statically, scanning up to the closing quote; inlining put a brace inside that
+# span, so the path it resolved was one no template scaffolds and the check
+# failed. Bash parsed the inlined form correctly — the STATIC reader could not,
+# and that reader is what stops an adopter receiving this script without its
+# callee. (This comment deliberately avoids writing the reference pattern out,
+# since the same scanner reads comments too.)
+GUARD_DEFAULT="${SCRIPT_DIR}/../.github/scripts/ai-review-guard.js"
+GUARD="${GUARD:-$GUARD_DEFAULT}"
 
 INPUT="$(cat)"
 
