@@ -22,7 +22,9 @@ import * as vscode from 'vscode';
 import {
   MinSpecScaffoldCommitStatusBar,
   MinSpecNextTaskStatusBar,
+  MinSpecTidyPrimaryStatusBar,
   formatScaffoldCommitText,
+  formatTidyPrimaryText,
   formatKeybindingForDisplay,
   resolveNextTaskKeybinding,
 } from '../src/views/status-bar';
@@ -102,6 +104,75 @@ describe('MinSpecScaffoldCommitStatusBar class', () => {
 
   it('dispose calls dispose on the underlying item', () => {
     const bar = new MinSpecScaffoldCommitStatusBar();
+    bar.dispose();
+    expect(mockStatusBarItem.dispose).toHaveBeenCalled();
+  });
+});
+
+// =============================================================================
+// Tidy-primary status bar (#1162)
+// =============================================================================
+
+describe('formatTidyPrimaryText()', () => {
+  it('includes the redundant-path count', () => {
+    expect(formatTidyPrimaryText(2)).toBe('$(trash) MinSpec: 2 redundant');
+  });
+
+  it('renders singular count the same way as plural (count is data, not grammar)', () => {
+    expect(formatTidyPrimaryText(1)).toBe('$(trash) MinSpec: 1 redundant');
+  });
+});
+
+describe('MinSpecTidyPrimaryStatusBar class', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockStatusBarItem.text = '';
+    mockStatusBarItem.tooltip = '';
+    mockStatusBarItem.command = '';
+  });
+
+  it('creates a status bar item on construction, bound to minspec.tidyPrimary', () => {
+    new MinSpecTidyPrimaryStatusBar();
+    expect(vscode.window.createStatusBarItem).toHaveBeenCalledWith(1, 97); // Left=1, priority=97
+    expect(mockStatusBarItem.command).toBe('minspec.tidyPrimary');
+  });
+
+  it('update([], 0) hides the item — nothing redundant', () => {
+    const bar = new MinSpecTidyPrimaryStatusBar();
+    bar.update([], 0);
+    expect(mockStatusBarItem.hide).toHaveBeenCalled();
+    expect(mockStatusBarItem.show).not.toHaveBeenCalled();
+  });
+
+  it('update([], N) with orphans-but-no-redundant still hides the badge (orphans are never counted in it)', () => {
+    const bar = new MinSpecTidyPrimaryStatusBar();
+    bar.update([], 3);
+    expect(mockStatusBarItem.hide).toHaveBeenCalled();
+    expect(mockStatusBarItem.show).not.toHaveBeenCalled();
+  });
+
+  it('update([...redundant], 0) shows the item with a count and a listing tooltip', () => {
+    const bar = new MinSpecTidyPrimaryStatusBar();
+    bar.update(['a.txt', 'b.txt'], 0);
+
+    expect(mockStatusBarItem.text).toBe('$(trash) MinSpec: 2 redundant');
+    expect(mockStatusBarItem.tooltip).toContain('a.txt');
+    expect(mockStatusBarItem.tooltip).toContain('b.txt');
+    expect(mockStatusBarItem.tooltip).not.toContain('unlanded');
+    expect(mockStatusBarItem.show).toHaveBeenCalled();
+    expect(mockStatusBarItem.hide).not.toHaveBeenCalled();
+  });
+
+  it('folds a non-zero orphan count into the tooltip, never the badge text', () => {
+    const bar = new MinSpecTidyPrimaryStatusBar();
+    bar.update(['a.txt'], 2);
+
+    expect(mockStatusBarItem.text).toBe('$(trash) MinSpec: 1 redundant');
+    expect(mockStatusBarItem.tooltip).toContain('2 unlanded paths');
+  });
+
+  it('dispose calls dispose on the underlying item', () => {
+    const bar = new MinSpecTidyPrimaryStatusBar();
     bar.dispose();
     expect(mockStatusBarItem.dispose).toHaveBeenCalled();
   });

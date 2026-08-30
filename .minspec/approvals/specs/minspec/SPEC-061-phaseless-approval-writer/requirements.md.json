@@ -1,9 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-061-phaseless-approval-writer/requirements.md",
-  "specHash": "8252388b59b0495869bf2f840ddc7d47cfad845f4c56e7b236f806cf978ab822",
-  "approvedAt": "2026-08-22T02:52:31.730Z",
+  "specHash": "7087b8593db33f8a92daceb9f1c9c53ffd1898b58e68632373ac81f661103675",
+  "approvedAt": "2026-08-24T20:26:54.230Z",
   "approvedBy": "github@harvest316.com",
   "tier": "T3",
   "migrated": false,
-  "baselineBlob": "2c7626e064d0b650f745cf6e9433fdac506c741f"
+  "baselineBlob": "db4298fe1df12f7c2ff6207aba532a4d624732ec"
 }

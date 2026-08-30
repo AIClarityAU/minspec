@@ -2,15 +2,21 @@
 /**
  * validate-frontmatter.ts
  *
- * Enforces:
- * 1. docs/domain/*.md must have `type: domain` frontmatter
- * 2. specs/**\/*.md must have `id: SPEC-NNN` frontmatter
- * 3. Task checklists (- [ ]) not allowed in docs/domain/ files
- * 4. Acceptance criteria patterns not allowed in docs/domain/ files
+ * The corpus gate run by `npm run validate`, by the pre-commit hook, and in CI.
+ *
+ * Rules are numbered and each is documented at its own definition below; grep
+ * `Rule <n>` to find one. This header deliberately does NOT enumerate them: the
+ * list drifted out of date once already (it stopped at 4 while the file enforced
+ * 19), and a partial inventory presented as complete is worse for a maintainer
+ * than no inventory at all.
+ *
+ * Severity convention: `fail()` is FATAL and exits non-zero; `warn()` is
+ * non-blocking. A rule that cannot run says so explicitly rather than passing
+ * quietly, per `.minspec/constitution.md` invariant 2.
  */
 
 import { readdirSync, readFileSync, statSync, existsSync } from 'fs';
-import { join, relative, dirname } from 'path';
+import { join, relative, dirname, sep } from 'path';
 import { validateDrSequence, validateDrIndexStatus, validateDrAmendments } from '../packages/minspec/src/lib/adr-manager';
 import {
   validateSplitLayoutCoverage,
@@ -616,6 +622,110 @@ try {
   }
 } catch {
   // scaffold/tool-detector unavailable — nothing to check, stay silent.
+}
+
+// Rule 19 (FATAL, #1683, DR-087): three integrity words are forbidden claims.
+//
+// DR-087 records that a hash binds content, never authorship, and that the strong
+// integrity properties are structurally unavailable to a local offline tool. In a
+// product whose pitch is that the signpost never lies, a false claim of a property
+// IS the defect, so `tamper-proof`, `non-forgeable` and `non-repudiable` may not be
+// asserted in the corpus.
+//
+// Why this rule exists at all: DR-087 is prose, and prose enforcing prose is the
+// failure mode `.minspec/constitution.md` names. Without this check the decision is
+// a convention nobody can fail.
+//
+// Why it does NOT try to detect negation: "MinSpec is not tamper-proof" is true and
+// useful, but a gate that guesses at negation guesses wrong, and a wrong FATAL is
+// worse than a noisy one. So the word is blocked outright and an author who means it
+// deliberately says so with a `claim-ok` marker on the same line. That turns every
+// use into a reviewable act, which is what DR-087 is actually asking for. The marker
+// mirrors the `pii-ok` convention already used by the secret scanner.
+//
+// Known limitation, found by this rule catching itself: the match is plain text, so
+// the word trips inside a FILE PATH or identifier as readily as inside a claim. The
+// research note behind DR-087 was originally named `nonforgeable-log.md` and reddened
+// the generated DR INDEX that quoted its path. Renaming was the right fix there, but
+// where a path genuinely must carry the word, `claim-ok` is the escape. Teaching the
+// rule about code spans was considered and rejected: it adds a parser to a gate whose
+// whole value is being obvious, and a claim can trivially be written inside backticks.
+//
+// Second finding from the same episode: GENERATED artifacts inherit claims from their
+// sources. The INDEX summary is derived from each DR's Context section, so a forbidden
+// word in a DR that is itself exempt still propagates into a file that is not. The fix
+// is upstream, in the source prose, not a wider exemption.
+const FORBIDDEN_CLAIM_WORDS: ReadonlyArray<{ readonly pattern: RegExp; readonly instead: string }> = [
+  { pattern: /tamper[-\s]?proof/i, instead: 'tamper-evident (and say what detects the tampering)' },
+  { pattern: /(?:non[-\s]?|un)forgeable/i, instead: 'tamper-evident below an independently held mark' },
+  // The noun form is included deliberately. DR-087 names the adjective, but
+  // "the log provides non-repudiation" asserts the identical property, and a gate
+  // that blocks the claim only in its adjectival dress is a gate with a documented
+  // way around it.
+  { pattern: /non[-\s]?repudia(?:ble|bility|tion)/i, instead: 'attributable (and name the identity that attributes it)' },
+];
+
+// Files that discuss these words rather than assert them. Kept deliberately short
+// and stated with a reason, because every entry is a hole in the gate.
+const CLAIM_WORD_EXEMPT: ReadonlyArray<{ readonly path: string; readonly why: string }> = [
+  { path: 'docs/decisions/DR-087.md', why: 'defines the rule, so it must name the words' },
+  { path: 'docs/research/', why: 'dated analyses of these properties, not product claims' },
+];
+
+try {
+  const claimScanRoots = ['specs', 'docs'];
+  let claimFilesScanned = 0;
+
+  for (const root of claimScanRoots) {
+    for (const file of safeGlob(join(ROOT, root), '.md')) {
+      const rel = relative(ROOT, file).split(sep).join('/');
+      if (CLAIM_WORD_EXEMPT.some(e => rel === e.path || rel.startsWith(e.path))) continue;
+      claimFilesScanned++;
+
+      const lines = readFileSync(file, 'utf-8').split('\n');
+      lines.forEach((line, i) => {
+        if (line.includes('claim-ok')) return;
+        for (const { pattern, instead } of FORBIDDEN_CLAIM_WORDS) {
+          const hit = line.match(pattern);
+          if (hit) {
+            fail(
+              file,
+              `line ${i + 1}: "${hit[0]}" is a forbidden integrity claim (DR-087). ` +
+                `Say ${instead} instead, or add a \`claim-ok\` marker on this line if you ` +
+                `are discussing the word rather than claiming the property.`,
+            );
+          }
+        }
+      });
+    }
+  }
+
+  // A zero-file scan means the roots moved, not that the corpus is clean, so the
+  // rule reports its own absence rather than passing quietly.
+  //
+  // Be precise about what this does and does not satisfy. Constitution invariant 2
+  // has two halves: a missing witness must fail the gate CLOSED and VISIBLY. This
+  // branch delivers the second half only. It warns loudly and exits 0, so it fails
+  // OPEN, which means a genuine fs error or a moved root would let a forbidden claim
+  // through with nothing worse than a warning. Calling that invariant-2 compliance
+  // would be a claim this code does not support, which is the exact defect Rule 19
+  // exists to catch.
+  //
+  // Left as warn() deliberately, to match Rules 16, 17 and 18, which all take the
+  // same warn-not-fail route on an unrunnable check. Making Rule 19 alone fail closed
+  // would be inconsistent and could wedge commits on a branch where specs/ or docs/
+  // legitimately does not exist. Whether all four should instead fail closed is a
+  // cross-cutting decision, tracked separately rather than settled here.
+  if (claimFilesScanned === 0) {
+    warn(
+      'Rule 19 scanned 0 files; do not read the green as a corpus free of forbidden claims.',
+    );
+  }
+} catch (err) {
+  warn(
+    `claim-word check could not run (${err instanceof Error ? err.message : String(err)}) — ` +
+      'Rule 19 validated NOTHING this run; do not read the green as a clean corpus.',
+  );
 }
 
 checkCiReviewTemplatesFresh().then(() => {
