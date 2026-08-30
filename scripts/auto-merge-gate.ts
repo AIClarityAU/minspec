@@ -586,6 +586,29 @@ const BOUNDARY_ROOT_BASENAMES: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * Governance files matched by EXACT repo-relative path.
+ *
+ * `.minspec/config.json` carries the autonomy setting (DR-086). Flipping
+ * `autonomy: ask -> act` widens what every agent in this repo may do without
+ * asking, and item 6 of that DR's own stop list is "anything that would edit
+ * this list, or the autonomy setting itself" — so it must never land unseen.
+ *
+ * It was reachable: `.minspec/` is NOT in the machinery regexes
+ * (`^\.github/|^\.githooks/|^scripts/`, mirrored in ai-review.yml and
+ * dispatch-issue.sh), and `config.json` matched no basename rule, so a
+ * setting-only PR classified low-blast and could auto-merge with nobody reading
+ * it. Verified by probing `isBoundaryPath('.minspec/config.json') === false`
+ * before this fix.
+ *
+ * EXACT paths, not a `.minspec/` prefix and not a `config.json` basename: the
+ * prefix would sweep 61 approval sidecars and classify every routine approval
+ * HIGH, and the basename would match any `config.json` anywhere in the tree.
+ * Precision here is what keeps the signal meaningful — a boundary rule that
+ * fires constantly gets routed around.
+ */
+const BOUNDARY_EXACT_PATHS: ReadonlySet<string> = new Set(['.minspec/config.json']);
+
+/**
  * Package-manager / build-tool config matched by basename. `tsconfig*.json`
  * (paths / emit / strictness) is matched via prefix+suffix rather than an exact
  * set, since project references add arbitrarily-named variants
@@ -614,6 +637,7 @@ export function isBoundaryPath(rawPath: string): boolean {
   for (const prefix of BOUNDARY_DIR_PREFIXES) {
     if (p === prefix.slice(0, -1) || p.startsWith(prefix) || p.includes('/' + prefix)) return true;
   }
+  if (BOUNDARY_EXACT_PATHS.has(p)) return true;
   const base = path.basename(p);
   if (BOUNDARY_ROOT_BASENAMES.has(base)) return true;
   if (BOUNDARY_CONFIG_BASENAMES.has(base)) return true;
