@@ -18,17 +18,17 @@ scan). **T0 invariant tests (AC-2/5/6/8/9/10) are written before the code they g
 ## Slice 0 — scaffold + T0 invariant tests (red first)
 
 - [x] **0.1 Worker scaffold.** `wrangler` + TS project; `POST /installation-token` route stub returns 501. *Verify:* `wrangler dev` answers 501.
-- [ ] **0.2 T0 decision-logic tests (failing).** Pure, I/O-free tests for: confused-deputy reject (AC-2), request shape — the OIDC JWT arrives in `Authorization: Bearer …` and the body accepts only `{repository, permissions_profile}` (AC-6), any error ⇒ no token (AC-9), reviewer identity read from config not hardcoded (AC-10). *Verify:* tests exist and are red.
+- [x] **0.2 T0 decision-logic tests (failing).** Pure, I/O-free tests for: confused-deputy reject (AC-2), request shape — the OIDC JWT arrives in `Authorization: Bearer …` and the body accepts only `{repository, permissions_profile}` (AC-6), any error ⇒ no token (AC-9), reviewer identity read from config not hardcoded (AC-10). *Verify:* tests exist and are red.
   <br>*(Was `{jwt, repository}` until 2026-08-20. design.md §API is normative and had already moved the credential out of the body so it cannot be captured by anything that logs a request body; this line still froze the superseded shape — exactly the outcome that section warned a contract test would cause. AC-6 constrains the broker's inputs, not their transport, so `requirements.md` and its approval are untouched.)*
 - [x] **0.3 Key-custody scan test (AC-5).** A test asserts no App private key appears in the vsix, harness output, or CI config — only the public app slug + broker URL. *Verify:* test passes against the repo tree.
 
 ## Slice 1 — happy-path seam
 
 - [ ] **1.1 OIDC verify (`jose`).** Verify sig/`iss`/`aud`/`exp` against GitHub JWKS; invalid ⇒ 401 (AC-1, partial). *Verify:* unit test with a bad/expired/wrong-aud JWT → 401.
-- [ ] **1.2 Claim-scoped authorisation.** Mint only for the OIDC `repository` claim; body `repository` must match, else 403 (turns AC-2 green). *Verify:* T0 test 0.2 confused-deputy passes.
+- [x] **1.2 Claim-scoped authorisation.** Mint only for the OIDC `repository` claim; body `repository` must match, else 403 (turns AC-2 green). *Verify:* T0 test 0.2 confused-deputy passes.
 - [ ] **1.3 Mint scoped token (`@octokit/auth-app`).** One repo, `review` profile, TTL ≤10 min (AC-3). *Verify:* response `repositories`/`permissions`/`expires_at` asserted in an integration test.
 - [ ] **1.4 ai-review workflow → apply label as bot (e2e).** Workflow requests OIDC (`id-token: write`), calls broker, applies `ai-review:pass` on a fixture PR (AC-7). *Verify:* fixture PR label event shows `sender = minspec-sdd[bot]`.
-- [ ] **1.5 No-artifact-egress contract (AC-6).** Broker ignores/rejects any field beyond `{jwt, repository}`; no code path stores/forwards content. *Verify:* T0 test 0.2 request-shape passes.
+- [x] **1.5 No-artifact-egress contract (AC-6).** Broker ignores/rejects any field beyond `{jwt, repository}`; no code path stores/forwards content. *Verify:* T0 test 0.2 request-shape passes.
 
 ## Slice 2 — fail-closed + provenance
 

@@ -204,6 +204,14 @@ describe('Invariant 2: No backend — no network calls', () => {
     // itself, and with `minspec.pushOnApprove` at its shipped `prompt` default
     // nothing here runs until the user clicks. See approval-pr.ts openPullRequest.
     'lib/approval-pr.ts',
+    // #1162: tidy-primary's `classifyPrimary` shells local `git status` /
+    // `rev-parse` / `rev-list` / `cat-file` / `show` (read-only), and
+    // `tidyRedundantPaths` shells local `git checkout -- <path>` to discard a
+    // path already proven byte-identical to `origin/<default>`. Never fetches,
+    // never pushes — same Tier-0 posture as presence.ts/approval.ts. See the
+    // module's own MUTATION SAFETY / TIER-0 doc comment. See
+    // lib/tidy-primary.ts gitOut/gitOutRaw.
+    'lib/tidy-primary.ts',
   ]);
 
   // Files allowed to *name* HTTP clients as detection data (not call them). They

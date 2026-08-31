@@ -36,6 +36,7 @@ import {
   managedRegionStartMarker,
   managedRegionEndMarker,
   renderManagedBlock,
+  localizeMachineryPathsComment,
 } from '../src/lib/template-registry';
 import { splitManagedRegion, spliceManagedRegion } from '../src/lib/merge-refresh';
 
@@ -320,8 +321,18 @@ const CI_STACK: ReadonlyArray<{
   style: 'hash' | 'html' | 'slash';
   executable: boolean;
   shebang: boolean;
+  /**
+   * #1486: the one template whose shipped copy is NOT byte-identical to this repo's
+   * working file. Its machinery-path COMMENT is written from MinSpec's vantage and is
+   * false anywhere else, so the registry rewrites those comment lines on the way out.
+   * The comparison below therefore applies the same rewrite to the on-disk source —
+   * still proving zero drift or escaping corruption, just against the localized form.
+   * `machinery-comment-localization.test.ts` pins that the rewrite touches comment
+   * lines ONLY and preserves the classifier pattern character-for-character.
+   */
+  localize?: (src: string) => string;
 }> = [
-  { name: 'ai-review-workflow', outputPath: '.github/workflows/ai-review.yml', style: 'hash', executable: false, shebang: false },
+  { name: 'ai-review-workflow', outputPath: '.github/workflows/ai-review.yml', style: 'hash', executable: false, shebang: false, localize: localizeMachineryPathsComment },
   { name: 'ready-to-merge-workflow', outputPath: '.github/workflows/ready-to-merge.yml', style: 'hash', executable: false, shebang: false },
   { name: 'ai-review-retry-workflow', outputPath: '.github/workflows/ai-review-retry.yml', style: 'hash', executable: false, shebang: false },
   { name: 'docs-lane-workflow', outputPath: '.github/workflows/docs-lane.yml', style: 'hash', executable: false, shebang: false },
@@ -369,12 +380,22 @@ describe('#564 CI-review stack — portability (embedded copy == the repo’s ow
   // the embedded template MUST be byte-identical to the file the minspec repo
   // itself runs in CI. Decodes each template and compares to the on-disk source —
   // catches any drift and proves zero transcription/escaping corruption.
+  //
+  // #1486 carves out exactly ONE, comment-only exception (`localize` above): the
+  // machinery-path explainer in ai-review.yml is written from MinSpec's vantage and
+  // is FALSE in a consuming repo, so it is rewritten on the way out. Applying the
+  // same rewrite to the on-disk source here keeps this a real drift gate rather than
+  // downgrading it to a loose comparison.
   const repoRoot = findRepoRoot();
 
   for (const t of CI_STACK) {
-    it(`${t.outputPath} is byte-identical to the on-disk source`, () => {
+    const what = t.localize
+      ? `${t.outputPath} is byte-identical to the on-disk source, modulo the #1486 comment localization`
+      : `${t.outputPath} is byte-identical to the on-disk source`;
+    it(what, () => {
       const tpl = tplByName(t.name)!;
-      const real = fs.readFileSync(path.join(repoRoot, t.outputPath), 'utf-8');
+      const onDisk = fs.readFileSync(path.join(repoRoot, t.outputPath), 'utf-8');
+      const real = t.localize ? t.localize(onDisk) : onDisk;
       if (t.shebang) {
         const nl = real.indexOf('\n');
         // Shebang lives in the preamble (line 1); the body is the managed content.

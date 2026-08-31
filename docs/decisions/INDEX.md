@@ -685,7 +685,7 @@ DR-019 established that next-task priority is a deterministic DAG, never an LLM 
 
 ## [DR-086 — Autonomy is a second axis - the agent may act on its own recommendation, bounded by an enumerated stop list rather than by its own sense of being stuck](DR-086.md)
 
-*Status: proposed · Date: 2026-08-20*
+*Status: accepted · Date: 2026-08-20*
 
 <!-- dr-summary:DR-086 auto=7553eb8ed00f -->
 DR-076 cut the gates that existed for multi-human trust. This is a different cut. The human is still the only human; what is being removed is a **conversational round-trip inside one person's own session**. The round-trip currently carries no information. The agent computes a recommendation with its reasons and costs; the human replies with unconditional assent. Nothing is decided at that step - it is a confirmation of an analysis that already happened, and the founder's own framing is that…
@@ -693,9 +693,17 @@ DR-076 cut the gates that existed for multi-human trust. This is a different cut
 
 ## [DR-087 — A hash binds content, never authorship - integrity words are load-bearing claims and three of them are forbidden](DR-087.md)
 
-*Status: proposed · Date: 2026-08-24*
+*Status: accepted · Date: 2026-08-24*
 
 <!-- dr-summary:DR-087 auto=42d5d4a00641 -->
 An adversarial analysis of append-only log integrity was run to answer one question: if MinSpec kept a Karpathy-style log.md, how strong an integrity guarantee could it actually carry? Three candidate designs were built and each was handed to an independent red team whose findings overrode the designs' own self-assessments. The full working is at docs/research/log-integrity-2026-08-23.md.
 <!-- /dr-summary:DR-087 -->
+
+## [DR-088 — Ownership declarations leave the canonical approval hash - the decision, the migration, and the unsolved half](DR-088.md)
+
+*Status: proposed · Date: 2026-08-24*
+
+<!-- dr-summary:DR-088 auto=a3444f8d8257 -->
+The founder decided on 2026-08-23, answering #1481 (should implements: be part of the canonicalized spec hash?), that implements: comes out of the canonical approval hash. This record does not relitigate that. It answers what exactly leaves, how the existing approvals migrate, and - honestly - fails to answer what replaces the lost alarm.
+<!-- /dr-summary:DR-088 -->
 <!-- minspec:dr-index:end -->
