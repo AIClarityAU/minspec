@@ -30,7 +30,7 @@ function findScriptsDir(): string {
   let dir = __dirname;
   for (let i = 0; i < 8; i++) {
     const candidate = path.join(dir, 'scripts');
-    if (fs.existsSync(candidate) && fs.existsSync(path.join(dir, 'package.json'))) {
+    if (fs.existsSync(candidate) && fs.existsSync(path.join(dir, '.git'))) {
       return candidate;
     }
     const parent = path.dirname(dir);
