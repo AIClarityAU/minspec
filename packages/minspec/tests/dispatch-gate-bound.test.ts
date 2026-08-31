@@ -30,12 +30,16 @@ import * as path from 'path';
 import { execFileSync } from 'child_process';
 
 // Locate scripts/ from the repo (or worktree) root — same helper the sibling
-// dispatch-issue.sh tests use.
+// dispatch-issue.sh tests use. Anchored on `.git`, not `package.json`: in an
+// npm-workspaces layout ANY workspace package can grow its own `package.json`
+// + `scripts/` pair (e.g. packages/minspec/scripts/, added for #1509), which
+// used to make this stop one level too early and misidentify a workspace
+// package as the repo root. `.git` is unique to the true root.
 function findScriptsDir(): string {
   let dir = __dirname;
   for (let i = 0; i < 8; i++) {
     const candidate = path.join(dir, 'scripts');
-    if (fs.existsSync(candidate) && fs.existsSync(path.join(dir, 'package.json'))) {
+    if (fs.existsSync(candidate) && fs.existsSync(path.join(dir, '.git'))) {
       return candidate;
     }
     const parent = path.dirname(dir);
