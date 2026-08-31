@@ -1347,6 +1347,8 @@ export async function initCommand(
 const RESCAFFOLD_ACTION = 'Re-scaffold (overwrite)';
 /** Warning action: open the affected file so the user can inspect/fix it by hand. */
 const OPEN_FILE_ACTION = 'Open file';
+/** Plural of {@link OPEN_FILE_ACTION}, for a notice that covers several paths. */
+const OPEN_FILES_ACTION = 'Open files';
 /** Untracked-notice action: the index changed, so show where to review and commit it. */
 const SHOW_SCM_ACTION = 'Show Source Control';
 
@@ -1362,8 +1364,19 @@ const SHOW_SCM_ACTION = 'Show Source Control';
  *     rewrite) and `Open file`;
  * Best-effort: a re-scaffold failure is surfaced as an error but never throws out
  * of the refresh flow.
+ *
+ * EXPORTED for the #1697 NEW-4 guarantee. Every current producer of a
+ * 'missing-markers' notice iterates MANAGED_REGION_TEMPLATES, so no real refresh
+ * can reach the re-scaffold branch with a path `rescaffoldManagedRegionFile`
+ * rejects — which is exactly why the false success toast survived review twice: it
+ * was held off by a coincidence in another module rather than by anything asserted
+ * here. Driving this function directly is the only way to pin the branch, so the
+ * claim rests on a test instead of on that coincidence.
  */
-async function surfaceManagedRegionWarning(folder: string, w: ManagedRegionWarning): Promise<void> {
+export async function surfaceManagedRegionWarning(
+  folder: string,
+  w: ManagedRegionWarning,
+): Promise<void> {
   const label = workspaceFolderLabel(folder);
 
   // An 'untracked' notice reports a `git rm --cached`, not a scaffolding problem.
@@ -1401,6 +1414,36 @@ async function surfaceManagedRegionWarning(folder: string, w: ManagedRegionWarni
     return;
   }
 
+  // A 'preserved-without-baseline' reports that the section merge KEPT your
+  // content because it had no baseline to judge it against (#1697). Like the
+  // project-name mismatch, nothing is broken — the file is intact, which is the
+  // whole point — so it is informational and offers no overwrite.
+  //
+  // Falling through to the default branch below was a defect in its own right
+  // (#1697 F2), not merely the wrong tone: that branch's first action is
+  // "Re-scaffold (overwrite)", and `rescaffoldManagedRegionFile` resolves a path
+  // through MANAGED_REGION_TEMPLATES, which shares NO path with the section-merge
+  // outputs this notice names. The click was therefore guaranteed to write
+  // nothing and return `false` — and the caller discarded that `false` and
+  // announced "MinSpec: re-scaffolded <path>." A success message that can never
+  // be true is the never-wrong failure, and it was being offered as the remedy
+  // for the one notice that must not be dismissed by clicking the obvious button.
+  if (w.kind === 'preserved-without-baseline') {
+    const paths = w.outputPaths && w.outputPaths.length > 0 ? w.outputPaths : [w.outputPath];
+    const openAction = paths.length > 1 ? OPEN_FILES_ACTION : OPEN_FILE_ACTION;
+    const choice = await vscode.window.showInformationMessage(
+      `[${label}] ${w.message}`,
+      openAction,
+    );
+    if (choice === openAction) {
+      for (const p of paths) {
+        const doc = await vscode.workspace.openTextDocument(path.join(folder, p));
+        await vscode.window.showTextDocument(doc, { preview: false });
+      }
+    }
+    return;
+  }
+
   const choice = await vscode.window.showWarningMessage(
     `[${label}] ${w.message}`,
     RESCAFFOLD_ACTION,
@@ -1409,8 +1452,25 @@ async function surfaceManagedRegionWarning(folder: string, w: ManagedRegionWarni
 
   if (choice === RESCAFFOLD_ACTION) {
     try {
-      rescaffoldManagedRegionFile(folder, w.outputPath);
-      vscode.window.showInformationMessage(`MinSpec: re-scaffolded ${w.outputPath}.`);
+      // The return value is the answer to "was anything actually written", and
+      // discarding it made the success toast unconditional: `rescaffoldManagedRegionFile`
+      // returns `false` WITHOUT writing for any path outside MANAGED_REGION_TEMPLATES,
+      // and MinSpec announced "re-scaffolded <path>" anyway (#1697 NEW-4).
+      //
+      // #1697 F2 fixed the one notice kind that could reach here with such a path by
+      // routing it away from this branch. It did not fix this branch. Every current
+      // producer of a 'missing-markers' notice iterates MANAGED_REGION_TEMPLATES, so
+      // the false claim is unreachable TODAY — by coincidence of who calls it, not by
+      // anything asserted here. A never-wrong product does not rest a claim on a
+      // coincidence in another module, and one `if` retires the whole class.
+      if (rescaffoldManagedRegionFile(folder, w.outputPath)) {
+        vscode.window.showInformationMessage(`MinSpec: re-scaffolded ${w.outputPath}.`);
+      } else {
+        vscode.window.showWarningMessage(
+          `MinSpec: ${w.outputPath} is not a MinSpec-managed region file — nothing was ` +
+            're-scaffolded and the file is unchanged.',
+        );
+      }
     } catch (err) {
       vscode.window.showErrorMessage(
         `MinSpec: could not re-scaffold ${w.outputPath} — ${describeError(err)}.`,
@@ -1420,6 +1480,45 @@ async function surfaceManagedRegionWarning(folder: string, w: ManagedRegionWarni
     const doc = await vscode.workspace.openTextDocument(path.join(folder, w.outputPath));
     await vscode.window.showTextDocument(doc, { preview: false });
   }
+}
+
+/**
+ * The toast {@link initRefreshCommand} shows, conditioned on what the refresh
+ * actually did (#1697 NEW-A1).
+ *
+ * It lives here rather than beside the other message composers in `scaffold.ts`
+ * because it is the COMMAND's own line. Those composers each write the text of ONE
+ * notice; this reads the whole notice LIST — which `refreshHarnessFiles` builds and
+ * hands back — and decides the single toast shown for the run. `scaffold.ts` raises
+ * no toast (it does not import `vscode`), so a summary of what the command is about
+ * to display has nothing to attach to there.
+ *
+ * It replaces an UNCONDITIONAL "MinSpec: Refreshed harness files (user edits
+ * preserved)." — a sentence the command had no evidence for and which is
+ * demonstrably false on a reproduced run: each of the four edit shapes enumerated by
+ * `merge-refresh.test.ts` AC-64 is invisible to `mergeFile`'s content test, is
+ * recorded as MinSpec's own output, and is replaced without notice by the next
+ * template whose content for that section changes (see `sectionContentDiffers`). A
+ * refresh that has just done that must not close by announcing the opposite; in a
+ * never-wrong product a confident false status line is the defect, not the phrasing.
+ *
+ * So the claim is dropped and the notices speak instead. A refresh that held
+ * sections says so and points at the detail notice that follows; a refresh with
+ * nothing to report says only that it ran. Neither asserts a preservation guarantee
+ * MinSpec cannot make.
+ *
+ * MinSpec does NOT currently report the edits it preserved with proof — the
+ * baseline-backed user-modified branch keeps them and returns nothing — so there is
+ * no truthful positive form of the old sentence to fall back to. Tracked as #1753
+ * (report the preserved edits, so the toast can state them); saying less is the
+ * correct interim, because the alternative is saying something false.
+ */
+export function refreshSummaryMessage(warnings: readonly ManagedRegionWarning[]): string {
+  const held = warnings.filter((w) => w.kind === 'preserved-without-baseline').length;
+  return held > 0
+    ? 'MinSpec: Refreshed harness files — some sections were kept as-is and their ' +
+        'template updates withheld. Details follow.'
+    : 'MinSpec: Refreshed harness files.';
 }
 
 export async function initRefreshCommand(
@@ -1443,9 +1542,12 @@ export async function initRefreshCommand(
     );
     return;
   }
-  vscode.window.showInformationMessage(
-    'MinSpec: Refreshed harness files (user edits preserved).',
-  );
+  // Conditional on what the refresh actually did (#1697 NEW-A1). The unconditional
+  // "(user edits preserved)" that stood here was false on a reproduced run — each of
+  // the four edit shapes AC-64 enumerates is recorded as MinSpec's own and
+  // overwritten by the next template content change, with no notice — and a
+  // confident false status line is worse than a quiet true one.
+  vscode.window.showInformationMessage(refreshSummaryMessage(warnings));
   for (const w of warnings) {
     await surfaceManagedRegionWarning(folder, w);
   }
