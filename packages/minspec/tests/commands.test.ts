@@ -330,8 +330,11 @@ describe('commands', () => {
       expect(refreshHarnessFiles).toHaveBeenCalledWith(
         '/tmp/test-workspace',
       );
+      // No notices from this run → no claim beyond the fact that it ran (#1697
+      // NEW-A1). The "(user edits preserved)" this asserted was unconditional and
+      // false on a reproduced run; see `refreshSummaryMessage`.
       expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-        'MinSpec: Refreshed harness files (user edits preserved).',
+        'MinSpec: Refreshed harness files.',
       );
     });
   });
