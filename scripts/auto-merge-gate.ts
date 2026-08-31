@@ -591,20 +591,34 @@ const BOUNDARY_ROOT_BASENAMES: ReadonlySet<string> = new Set([
  * `.minspec/config.json` carries the autonomy setting (DR-086). Flipping
  * `autonomy: ask -> act` widens what every agent in this repo may do without
  * asking, and item 6 of that DR's own stop list is "anything that would edit
- * this list, or the autonomy setting itself" — so it must never land unseen.
+ * this list, or the autonomy setting itself".
  *
- * It was reachable: `.minspec/` is NOT in the machinery regexes
- * (`^\.github/|^\.githooks/|^scripts/`, mirrored in ai-review.yml and
- * dispatch-issue.sh), and `config.json` matched no basename rule, so a
- * setting-only PR classified low-blast and could auto-merge with nobody reading
- * it. Verified by probing `isBoundaryPath('.minspec/config.json') === false`
- * before this fix.
+ * WHAT THIS IS: a SECOND, INDEPENDENT WITNESS — not a closed hole.
+ *
+ * A setting-only diff is ALREADY ineligible without this rule. `classifyBlast`
+ * is deny-by-default since #490 (absence of an affirmative low signal means
+ * high), and `.minspec/config.json` is neither docs nor test, so it can never
+ * earn `low_blast_docs_test_only` from {@link detectLowBlastDocsTest}. The
+ * counterfactual is asserted, not assumed, in
+ * packages/minspec/tests/autonomy-setting-boundary.test.ts ("is a SECOND
+ * witness: the diff is already held without it, and still held with it").
+ *
+ * An earlier version of this comment claimed the setting "could auto-merge with
+ * nobody reading it", citing only `isBoundaryPath(...) === false`. That proxy
+ * shows the detector returned false; it does not show auto-merge was reachable.
+ * The claim was wrong and is recorded here so it is not re-derived.
+ *
+ * It earns its place because the hold otherwise rests on a SINGLE producer
+ * (constitution invariant 2), and one widening of the docs/test classifier would
+ * remove it silently. {@link detectLowBlastDocsTest} excludes `isBoundaryPath`
+ * files, so this rule is exactly the hook that keeps the setting out of any
+ * future low-blast certification.
  *
  * EXACT paths, not a `.minspec/` prefix and not a `config.json` basename: the
  * prefix would sweep 61 approval sidecars and classify every routine approval
- * HIGH, and the basename would match any `config.json` anywhere in the tree.
- * Precision here is what keeps the signal meaningful — a boundary rule that
- * fires constantly gets routed around.
+ * HIGH, and the basename would match any `config.json` anywhere in the tree. A
+ * gate that fires constantly gets routed around, and one people route around is
+ * worse than none, because it still reads as protection.
  */
 const BOUNDARY_EXACT_PATHS: ReadonlySet<string> = new Set(['.minspec/config.json']);
 
