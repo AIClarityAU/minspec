@@ -26,6 +26,12 @@ implements_reason: >-
   2026-05-26, a month before this spec, and holds the shared parser (`parseConstitution`)
   that other features read. `implements:` arms the spec-gate on every path it lists, so
   claiming a pre-existing shared module here would block unrelated work on it.
+phases:
+  specify: done
+  clarify: done
+  plan: done
+  tasks: done
+  implement: in-progress
 ---
 
 # MinSpec — Constitution Proposer (LLM-drafted, MinSpec-orchestrated) — Requirements
