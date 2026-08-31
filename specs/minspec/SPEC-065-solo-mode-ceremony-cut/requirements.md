@@ -1,7 +1,7 @@
 ---
 id: SPEC-065
 type: requirements
-status: implementing
+status: planning
 tier: T4
 product: minspec
 epic: EPIC-003  # SDD Core Methodology — ceremony is the methodology, so cutting it belongs here
@@ -18,6 +18,12 @@ implements: [.github/workflows/machinery-witness.yml, packages/minspec/tests/mac
 # `affects:` = modified but owned elsewhere. The two-stage split adds its own workflow
 # (owned above) and only ADJUSTS these to consume its witness.
 affects: [.github/workflows/ai-review.yml, .github/workflows/ready-to-merge.yml, scripts/auto-merge-gate.ts, scripts/dispatch-issue.sh]
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # SPEC-065: Solo mode — the DR-076 ceremony cut

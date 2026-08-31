@@ -7,18 +7,15 @@
  * claims is decidable here — so the security-critical half is testable without a
  * running Worker.
  *
- * WHY THEY ARE `it.fails`. Task 0.2 requires the tests to exist and be red; slice 1
- * turns them green. `it.fails` is this repo's idiom for "SHOULD do X — today it does
- * Y" (see git-analyzer.test.ts), and it keeps main honest in both directions: the
- * suite stays green so nobody learns to ignore a red CI, AND the moment slice 1
- * implements a rule its `it.fails` starts FAILING for passing — which forces the
- * marker to be removed rather than silently left behind. A skipped test would have
- * neither property.
+ * HISTORY. These were written in slice 0 as `it.fails` — red on purpose, per task 0.2,
+ * while the decision module denied everything. Slice 1 implemented the rules and every
+ * marker began FAILING FOR PASSING, which is precisely why `it.fails` was chosen over
+ * `skip`: it forced its own removal instead of lingering as a stale marker over
+ * behaviour that had quietly started working. The markers are gone; the assertions are
+ * unchanged.
  *
- * The module under test currently denies everything. That is the correct slice-0
- * state for a fail-closed service — an unimplemented broker must refuse, never
- * accidentally permit — so each assertion below is red because the ALLOW path does
- * not exist yet, not because the code is absent.
+ * The module remains pure and I/O-free: signature verification and minting stay at the
+ * edges, so these rules are exercised without a network, a key, or a running Worker.
  */
 import { describe, it, expect } from 'vitest';
 import {
@@ -49,7 +46,7 @@ describe('AC-2 — confused deputy: the claim authorises, never the body', () =>
     expect(d.allow).toBe(false);
   });
 
-  it.fails('SHOULD deny with repo_claim_mismatch/403 — today it is a blanket not_implemented', () => {
+  it('denies a mismatched repo with repo_claim_mismatch/403', () => {
     // The specificity is what slice 1 adds. A caller cannot tell a confused-deputy
     // rejection from an unbuilt broker today, and those need different reactions:
     // one is "you asked for the wrong repo", the other is "come back later".
@@ -58,12 +55,12 @@ describe('AC-2 — confused deputy: the claim authorises, never the body', () =>
     expect(d.allow === false && d.status).toBe(403);
   });
 
-  it.fails('SHOULD allow a matching request — today everything is denied (slice 0)', () => {
+  it('allows a request whose body repo matches the claim', () => {
     const d = decide(CLAIMS, BODY);
     expect(d.allow).toBe(true);
   });
 
-  it.fails('SHOULD mint for the CLAIM repository, never a body-supplied one', () => {
+  it('mints for the CLAIM repository, never a body-supplied one', () => {
     // Even on the happy path the minted repo must come from the claim, so a body that
     // agrees today cannot become the source of truth tomorrow.
     const d = decide(CLAIMS, BODY);
@@ -79,7 +76,7 @@ describe('AC-6 — request shape: only the two fields, nothing forwarded', () =>
     expect(ALLOWED_BODY_FIELDS).not.toContain('jwt');
   });
 
-  it.fails('SHOULD reject an unexpected field rather than ignore it', () => {
+  it('rejects an unexpected field rather than ignoring it', () => {
     // Ignoring is the dangerous choice: it lets a caller smuggle content the broker
     // has promised never to receive (FR-6 — no code, diff, spec or prompt ever
     // reaches it), and a silently-dropped field is invisible in an audit.
@@ -88,7 +85,7 @@ describe('AC-6 — request shape: only the two fields, nothing forwarded', () =>
     expect(d.allow === false && d.denial).toBe('unexpected_field');
   });
 
-  it.fails('SHOULD reject an unsupported permissions profile', () => {
+  it('rejects an unsupported permissions profile', () => {
     const d = decide(CLAIMS, { ...BODY, permissions_profile: 'admin' });
     expect(d.allow === false && d.denial).toBe('unsupported_profile');
   });
@@ -116,7 +113,7 @@ describe('AC-9 — fail closed: any error yields no token', () => {
 });
 
 describe('AC-10 — reviewer identity comes from config, never hardcoded', () => {
-  it.fails('SHOULD return the configured bot login', () => {
+  it('returns the configured bot login', () => {
     // An enterprise on its own App must post as its own bot without patching MinSpec.
     expect(resolveReviewerIdentity({ botLogins: 'acme-review[bot]' })).toBe('acme-review[bot]');
   });
@@ -126,5 +123,54 @@ describe('AC-10 — reviewer identity comes from config, never hardcoded', () =>
     // into the broker: baked in here, an enterprise override could not take effect.
     expect(resolveReviewerIdentity({ botLogins: 'acme-review[bot]' })).not.toBe('minspec-sdd[bot]');
     expect(resolveReviewerIdentity({})).not.toBe('minspec-sdd[bot]');
+  });
+});
+
+describe('slice 1 — hardening the rules the T0 tests named', () => {
+  it('refuses a body carrying the JWT, even alongside valid fields', () => {
+    // The shape the superseded mermaid implied. Accepting it would put a bearer
+    // credential in a request body, where any proxy or access log can capture it —
+    // the reason the normative API block moved it to Authorization.
+    const d = decide(CLAIMS, { ...BODY, jwt: 'eyJhbGciOi...' });
+    expect(d.allow).toBe(false);
+    expect(d.allow === false && d.denial).toBe('unexpected_field');
+  });
+
+  it('checks body SHAPE before comparing repos', () => {
+    // Order matters: a hostile type must be refused before it reaches the comparison,
+    // so no field is ever read off an object whose shape was never established.
+    const d = decide(CLAIMS, { repository: { toString: () => CLAIMS.repository } });
+    expect(d.allow).toBe(false);
+  });
+
+  it('treats an EMPTY claim repository as unauthorised, never a wildcard', () => {
+    // An absent claim must authorise nothing. The dangerous reading is "no constraint",
+    // which would mint for whatever the body asked for.
+    const d = decide({ repository: '', repository_owner: '' }, BODY);
+    expect(d.allow).toBe(false);
+    expect(d.allow === false && d.denial).toBe('oidc_invalid');
+  });
+
+  it('is case-sensitive on the repo comparison', () => {
+    // GitHub treats owner/repo case-insensitively for routing but the claim is the
+    // authority here; loosening the match invites a near-miss to authorise.
+    const d = decide(CLAIMS, { ...BODY, repository: CLAIMS.repository.toUpperCase() });
+    expect(d.allow).toBe(false);
+  });
+
+  it('never throws, whatever it is handed', () => {
+    // A thrown error becomes a 500, and a 500 is a shape callers retry. Denial is
+    // terminal and honest.
+    const hostile: unknown[] = [undefined, null, 0, '', [], Symbol('x'), () => {}, new Date()];
+    for (const body of hostile) {
+      expect(() => decide(CLAIMS, body)).not.toThrow();
+      expect(decide(CLAIMS, body).allow).toBe(false);
+    }
+  });
+
+  it('resolveReviewerIdentity takes the first of a comma/space list', () => {
+    expect(resolveReviewerIdentity({ botLogins: 'acme[bot], other[bot]' })).toBe('acme[bot]');
+    expect(resolveReviewerIdentity({ botLogins: '  spaced[bot]  ' })).toBe('spaced[bot]');
+    expect(resolveReviewerIdentity({ botLogins: '' })).toBeNull();
   });
 });
