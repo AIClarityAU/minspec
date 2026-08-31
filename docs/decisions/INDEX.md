@@ -706,4 +706,12 @@ An adversarial analysis of append-only log integrity was run to answer one quest
 <!-- dr-summary:DR-088 auto=a3444f8d8257 -->
 The founder decided on 2026-08-23, answering #1481 (should implements: be part of the canonicalized spec hash?), that implements: comes out of the canonical approval hash. This record does not relitigate that. It answers what exactly leaves, how the existing approvals migrate, and - honestly - fails to answer what replaces the lost alarm.
 <!-- /dr-summary:DR-088 -->
+
+## [DR-089 — The harness manifest records authorship, not disk - and carries a format version, because a poisoned manifest cannot be detected from its contents](DR-089.md)
+
+*Status: proposed · Date: 2026-08-31*
+
+<!-- dr-summary:DR-089 auto=e73452b46dc0 -->
+.minspec/generated-hashes.json decides, on every *Refresh Harness Files*, whether a section of a managed file is MinSpec's own output (safe to update from the template) or the project's content (must be preserved). #1697 established that it was answering that question wrongly in two independent ways, and that the wrong answer deleted a Principle's standing exception - a paragraph that authorised shipped code - from a live project.
+<!-- /dr-summary:DR-089 -->
 <!-- minspec:dr-index:end -->
