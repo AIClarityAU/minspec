@@ -33,6 +33,15 @@ permissions:
   # a human — silently does nothing while still reading as implemented. Still least
   # privilege: labels are the only PR mutation this workflow makes.
   pull-requests: write
+  # #1675 review (Skeptic, blocking): the guard's self-heal calls `gh label create`
+  # before `--add-label`, and label CREATION is a repo-level Issues-API operation —
+  # ai-review.yml:106-107 documents this repo's own working permission split
+  # ("pull-requests: write + issues: write (labels/comments use the issues API)").
+  # `pull-requests: write` alone lets `--add-label` attach an EXISTING label (that
+  # is how this workflow already worked pre-#1675), but `gh label create` 403s
+  # without `issues: write` — the failure is swallowed by `|| true`, so omitting
+  # this scope would silently no-op the exact self-heal this guard adds.
+  issues: write
 
 concurrency:
   group: ai-review-retry
