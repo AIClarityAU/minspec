@@ -8,11 +8,19 @@
  *
  * These assert derivation, not wording.
  */
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import * as path from 'path';
 import * as fs from 'fs';
 import { execFileSync } from 'child_process';
 import { STOP_CLASSES } from '../../../scripts/lib/autonomy';
+
+// Every test here spawns `npx tsx`, which can queue well past vitest's 5s default
+// under container contention — the flake tracked as #1099, which also wipes the
+// coverage report when it fires. Same 30s budget every other subprocess suite uses.
+//
+// Deliberately at MODULE level, not inside beforeAll: vi.setConfig() in a hook is
+// inert, so a suite can carry the line and still run on the 5s default.
+vi.setConfig({ testTimeout: 30_000 });
 
 const REPO = path.resolve(__dirname, '../../..');
 const SCRIPT = path.join(REPO, 'scripts', 'autonomy-status.ts');

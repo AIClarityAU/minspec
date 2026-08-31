@@ -1,4 +1,3 @@
-#!/usr/bin/env npx tsx
 /**
  * Print the resolved autonomy state and its stop list, for the session banner.
  *
