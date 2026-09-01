@@ -15,6 +15,7 @@ import { resolveTargetFolder, workspaceFolderLabel } from '../lib/resolve-folder
 import { setCoverageMinimum, DEFAULT_COVERAGE_MINIMUM } from '../lib/config';
 import { getRepoFromRemote } from '../lib/github';
 import { resolveRemotes, renameToOriginCandidate } from '../lib/git-remotes';
+import { resolveBranchDestination, defaultGitRun } from '../lib/approve-commit';
 import {
   type CommandRunner,
   RULESET_DOCS_URL,
@@ -238,35 +239,6 @@ export interface ScaffoldCommitter {
 }
 
 /**
- * Branch names treated as "probably the default" when `origin/HEAD` is absent.
- *
- * Reads the SAME `minspec.protectedBranches` setting commit-on-approve consumes, so
- * a user who renames their default branch configures it once and every guard agrees.
- * The generated pre-commit hook reads the git-config twin of that key
- * (template-registry.ts, `guard_candidates`) and falls back to the same three names.
- *
- * All three now agree on `['main','master','trunk']`. They did not before: the
- * package.json default was `['main','master']` while the hook's fallback carried
- * `trunk`, so in a VS Code host `get()` returned the package.json default and `trunk`
- * protection existed ONLY in the hook — a repo defaulting to `trunk` was guarded at
- * commit time but never warned by this offer. Aligned in package.json rather than by
- * dropping `trunk` here: a false negative silently reinstates the stranding bug,
- * while a false positive only offers a branch the user can decline.
- *
- * Outside a VS Code host (tests, Tier-0 callers) `getConfiguration` is unavailable,
- * so fall back to the same literal list.
- */
-function conventionalDefaultBranches(): string[] {
-  try {
-    return vscode.workspace
-      .getConfiguration('minspec')
-      .get<string[]>('protectedBranches', ['main', 'master', 'trunk']);
-  } catch {
-    return ['main', 'master', 'trunk'];
-  }
-}
-
-/**
  * Default committer — wraps simple-git, lazily imported to keep init lean.
  *
  * Exported for tests: every other test in this area injects a stub, which meant the
@@ -304,42 +276,21 @@ export async function defaultCommitter(folder: string): Promise<ScaffoldCommitte
       await git.commit(message);
     },
     async branchInfo() {
-      try {
-        const current = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim();
-        if (!current || current === 'HEAD') return null; // detached — no branch to strand
-        // origin/HEAD is a LOCAL ref written by clone / remote set-head, so this
-        // stays offline and never contacts the forge (Tier-0).
-        let def = '';
-        try {
-          const ref = (await git.revparse(['--abbrev-ref', 'origin/HEAD'])).trim();
-          const parsed = ref.replace(/^origin\//, '');
-          if (parsed && parsed !== 'origin') def = parsed;
-        } catch {
-          // Not populated in every clone — fall through to the name fallback.
-        }
-
-        // origin/HEAD is absent more often than it looks: it was missing in both
-        // repos this guard was built for, which made the equivalent hook-side
-        // check inert. Fall back to conventional names, but only when an origin
-        // remote exists — a repo with nothing to push to cannot have a
-        // push-protected branch, so a local-only project is never flagged.
-        if (!def) {
-          let hasOrigin = false;
-          try {
-            hasOrigin = Boolean((await git.getConfig('remote.origin.url')).value);
-          } catch {
-            hasOrigin = false;
-          }
-          if (!hasOrigin) return null;
-          if (!conventionalDefaultBranches().includes(current)) return null;
-          def = current;
-        }
-        return { current, default: def };
-      } catch {
-        // Unknown destination fails OPEN: the offer behaves exactly as it did
-        // before rather than blocking a repo we cannot reason about.
-        return null;
-      }
+      // Delegate to the SAME destination-resolution `approve-commit.ts` uses
+      // (#1132) rather than hand-rolling a third copy. `branchInfo()` used to
+      // resolve `origin/HEAD` correctly but never checked MINSPEC_ALLOW_MAIN,
+      // MINSPEC_GATE_OFF, `minspec.allowCommitOnDefaultBranch`, or an
+      // in-progress merge/cherry-pick/revert/rebase — every documented escape
+      // hatch from the #1041 hook's guard. A user who legitimately opted out
+      // via one of those still got diverted onto a branch by this offer,
+      // because the offer runs BEFORE the hook and the hook was never asked.
+      // `resolveBranchDestination` already mirrors the hook's full contract
+      // (bypasses + in-progress markers + origin/HEAD + name-fallback) and is
+      // pinned to it by `approve-commit-hook-parity.test.ts`, so reusing it
+      // here collapses this to two implementations (hook + TS) instead of
+      // three, and any future divergence fails that shared test rather than
+      // silently reintroducing this bug. Tier-0, so no vscode dependency.
+      return resolveBranchDestination(defaultGitRun(folder));
     },
     async createBranch(name) {
       await git.checkout(['-b', name]);
