@@ -327,6 +327,26 @@ describe('#1064 — destination guard on the default branch', () => {
     expect(git(['diff', '--cached', '--name-only'], tmp).trim()).toBe('');
   });
 
+  it('#1133: names what it refused to commit — paths carries the resolved, repo-relative list', async () => {
+    initRepo(tmp);
+    fs.writeFileSync(path.join(tmp, 'seed.md'), 'seed\n');
+    git(['add', '.'], tmp);
+    git(['commit', '-m', 'seed'], tmp);
+    setDefaultBranch(tmp, 'main');
+
+    const doc = path.join(tmp, 'decision.md');
+    const index = path.join(tmp, 'INDEX.md');
+    fs.writeFileSync(doc, 'status: accepted\n');
+    fs.writeFileSync(index, '# index\n');
+
+    const res = await commitApproval(tmp, [doc, index], 'chore(accept): DR-071');
+
+    expect(res.outcome).toBe('protected-branch');
+    // Repo-relative, matching what a successful commit would have used —
+    // NOT the absolute paths the caller passed in.
+    expect(res.paths).toEqual(['decision.md', 'INDEX.md']);
+  });
+
   it('commits normally on a feature branch (unchanged behaviour)', async () => {
     initRepo(tmp);
     fs.writeFileSync(path.join(tmp, 'seed.md'), 'seed\n');

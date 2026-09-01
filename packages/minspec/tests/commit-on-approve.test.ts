@@ -141,3 +141,45 @@ describe('DR-029 gate soundness — accepting a never-committed DR (#577)', () =
     expect(() => git(['rev-parse', 'HEAD'])).toThrow(); // nothing landed
   });
 });
+
+/**
+ * #1133 — the born-commit leg used to swallow `'protected-branch'` entirely:
+ * no console line, no toast, no trace. `commitApprovalIfEnabled`'s sibling arm
+ * for the SAME outcome already warned; this leg did not, even though it is the
+ * step #577 exists for (turning an accept commit into a Modify instead of a
+ * DR-029-violating Add). On the default branch it must never be silent.
+ */
+describe('#1133 — commitBornIfUntracked on the default branch is never silent', () => {
+  function setDefaultBranch(dir: string, branch: string): void {
+    // origin/HEAD is a LOCAL ref — this stays offline (Tier-0), same helper
+    // as approve-commit.test.ts's #1064 suite.
+    git(['remote', 'add', 'origin', dir], dir);
+    git(['update-ref', `refs/remotes/origin/${branch}`, 'HEAD'], dir);
+    git(['symbolic-ref', 'refs/remotes/origin/HEAD', `refs/remotes/origin/${branch}`], dir);
+  }
+
+  it('reports protected-branch (not undefined, not failed) and console.warns', async () => {
+    initRepoWithRealHook(tmp);
+    write('seed.md', 'seed\n');
+    git(['add', '-A']);
+    git(['commit', '-m', 'seed']);
+    setDefaultBranch(tmp, 'main');
+
+    const dr = write('docs/decisions/DR-904.md', proposedBody('DR-904'));
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    const born = await commitBornIfUntracked(tmp, dr, 'chore(adr): add DR-904');
+
+    expect(born?.outcome).toBe('protected-branch');
+    expect(born?.paths).toEqual(['docs/decisions/DR-904.md']);
+    // Never silent: this is the exact signal that was missing before #1133.
+    expect(
+      warnSpy.mock.calls.some((c) => String(c[0]).includes('born commit skipped')),
+    ).toBe(true);
+    // Refused BEFORE staging — the DR is still untracked, HEAD unmoved.
+    expect(git(['log', '--oneline']).trim().split('\n')).toHaveLength(1);
+    expect(git(['diff', '--cached', '--name-only']).trim()).toBe('');
+
+    warnSpy.mockRestore();
+  });
+});

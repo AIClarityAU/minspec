@@ -229,9 +229,19 @@ async function applyStatus(
     // lands as a legitimate Modify — see commitBornIfUntracked for the full
     // rationale. No-op when the file is already tracked or commit-on-approve
     // is off.
-    if (opts.commit && folder) {
-      await commitBornIfUntracked(folder, filePath, `chore(adr): add ${id}`);
-    }
+    // #1133 — capture (not discard) the outcome. Before this fix the call below
+    // was a bare `await` with no assignment, so a `protected-branch` refusal
+    // vanished with no trace at this call site. `commitBornIfUntracked` now
+    // `console.warn`s that outcome for itself (see its docstring), and the
+    // funnel commit-on-approve call further down — same branch, same
+    // invocation — shows the full user-facing warning naming every stranded
+    // file, so there is nothing further to branch on here. `void` (rather than
+    // a re-thrown-away bare `await`) makes that a deliberate, visible choice
+    // instead of an oversight.
+    const bornResult = opts.commit && folder
+      ? await commitBornIfUntracked(folder, filePath, `chore(adr): add ${id}`)
+      : undefined;
+    void bornResult;
 
     setAdrStatus(filePath, status);
 

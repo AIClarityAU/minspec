@@ -315,4 +315,76 @@ describe('protected-branch recovery wiring — #1115', () => {
     const r = await commitApprovalIfEnabled('/root', ['/root/specs/x/requirements.md'], 'msg');
     expect(r.suffix).toContain('NOT committed');
   });
+
+  // ── #1133 — the refusal names the stranded files ───────────────────────────
+  //
+  // Before this fix the warning said only "Your files are saved in the working
+  // tree" — never which files. `commitApproval` now carries the resolved,
+  // repo-relative `paths` on the `'protected-branch'` result; these tests pin
+  // that `commitApprovalIfEnabled` actually uses it.
+
+  describe('#1133 — naming the stranded files', () => {
+    it('names both files in the fallback warning and the suffix when pushOnApprove=never', async () => {
+      CONFIG.pushOnApprove = 'never';
+      commitApprovalMock.mockResolvedValue({
+        outcome: 'protected-branch',
+        branch: { current: 'main', default: 'main' },
+        paths: ['docs/decisions/DR-064.md', 'docs/decisions/INDEX.md'],
+      });
+      const r = await commitApprovalIfEnabled('/root', ['/root/docs/decisions/DR-064.md'], 'msg');
+
+      expect(warnings[0]).toContain('DR-064.md and INDEX.md');
+      expect(r.suffix).toContain('DR-064.md and INDEX.md');
+    });
+
+    it('names the single file when only one is stranded', async () => {
+      CONFIG.pushOnApprove = 'never';
+      commitApprovalMock.mockResolvedValue({
+        outcome: 'protected-branch',
+        branch: { current: 'main', default: 'main' },
+        paths: ['specs/x/requirements.md'],
+      });
+      const r = await commitApprovalIfEnabled('/root', ['/root/specs/x/requirements.md'], 'msg');
+
+      expect(warnings[0]).toContain('requirements.md');
+      // Singular grammar: "is", not "are".
+      expect(warnings[0]).toMatch(/requirements\.md is in your working tree/);
+      expect(r.suffix).toContain('requirements.md');
+    });
+
+    it('truncates past 3 paths rather than listing every one', async () => {
+      CONFIG.pushOnApprove = 'never';
+      commitApprovalMock.mockResolvedValue({
+        outcome: 'protected-branch',
+        branch: { current: 'main', default: 'main' },
+        paths: ['a.md', 'b.md', 'c.md', 'd.md', 'e.md'],
+      });
+      const r = await commitApprovalIfEnabled('/root', ['/root/a.md'], 'msg');
+
+      expect(warnings[0]).toContain('a.md, b.md, c.md and 2 more');
+      expect(r.suffix).toContain('a.md, b.md, c.md and 2 more');
+    });
+
+    it('a declined recovery prompt also names the files in the suffix', async () => {
+      CONFIG.pushOnApprove = 'prompt';
+      WARN_CHOICE = 'Not now';
+      commitApprovalMock.mockResolvedValue({
+        outcome: 'protected-branch',
+        branch: { current: 'main', default: 'main' },
+        paths: ['docs/decisions/DR-064.md', 'docs/decisions/INDEX.md'],
+      });
+      const r = await commitApprovalIfEnabled('/root', ['/root/docs/decisions/DR-064.md'], 'msg');
+
+      expect(r.suffix).toContain('DR-064.md and INDEX.md');
+    });
+
+    it('falls back to the old generic wording when the refusal carries no paths (e.g. a pre-#1133 mock)', async () => {
+      CONFIG.pushOnApprove = 'never';
+      commitApprovalMock.mockResolvedValue(REFUSED); // no `paths` field
+      const r = await commitApprovalIfEnabled('/root', ['/root/specs/x/requirements.md'], 'msg');
+
+      expect(warnings[0]).toContain('Your files are saved in the working tree');
+      expect(r.suffix).toContain('files left in your working tree');
+    });
+  });
 });

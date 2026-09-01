@@ -102,7 +102,15 @@ export type CommitApprovalOutcome =
 
 export interface CommitApprovalResult {
   readonly outcome: CommitApprovalOutcome;
-  /** Repo-relative paths that were staged/committed (present on 'committed'). */
+  /**
+   * Repo-relative paths that were staged/committed (present on 'committed').
+   *
+   * ALSO present on 'protected-branch' and 'nothing-to-commit' (#1133) — the
+   * same filtered, repo-relative list computed just above the destination
+   * guard (step 3), so a refusal can name EXACTLY the files it is refusing to
+   * commit rather than leaving the command layer to guess from its own raw
+   * (unfiltered, absolute) argument list.
+   */
   readonly paths?: string[];
   /** Error detail incl. git/hook stderr (present on 'failed'). */
   readonly error?: string;
@@ -241,7 +249,10 @@ export async function commitApproval(
   //     default branch cannot be determined we proceed exactly as before.
   const branch = await resolveBranchDestination(run);
   if (branch && branch.current === branch.default) {
-    return { outcome: 'protected-branch', branch };
+    // #1133 — carry `rel` (already computed above, before this guard) so the
+    // command layer can name exactly what is stranded, instead of only the
+    // branch name.
+    return { outcome: 'protected-branch', branch, paths: rel };
   }
 
   // 3d. Mid-merge/cherry-pick guard (invariant 5, #1112). Independent of the

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import { commitApproval, isUntrackedAtHead, type CommitApprovalResult } from '../lib/approve-commit';
 import { pushApproval, type PushApprovalResult } from '../lib/approve-push';
 import { recoverProtectedBranchApproval, type RecoverResult } from '../lib/approval-recover';
@@ -73,6 +74,31 @@ export function commitOnApproveEnabled(): boolean {
 const SHOW_FILES_ACTION = 'Show me the files';
 /** #1115 — the consent click that authorizes recovery's network step. */
 const RECOVER_ACTION = 'Save it on a branch';
+
+/** Past this many paths, name the first few and count the rest (#1133). */
+const MAX_NAMED_FILES = 3;
+
+/**
+ * Human-readable, comma-joined list of stranded file BASENAMES, for the
+ * protected-branch refusal (#1133). Basenames rather than full repo-relative
+ * paths: the warning is about recognising which open files are affected, not
+ * about disambiguating a collision, and a full path (e.g.
+ * `docs/decisions/DR-064.md`) adds width without adding clarity there.
+ *
+ * `undefined` paths/empty list degrades to `undefined` — the caller falls
+ * back to a generic "your files" phrasing rather than naming nothing.
+ */
+function describeStrandedFiles(paths: readonly string[] | undefined): string | undefined {
+  if (!paths || paths.length === 0) return undefined;
+  const names = paths.map((p) => path.basename(p));
+  if (names.length <= MAX_NAMED_FILES) {
+    return names.length === 1
+      ? names[0]
+      : `${names.slice(0, -1).join(', ')} and ${names[names.length - 1]}`;
+  }
+  const shown = names.slice(0, MAX_NAMED_FILES).join(', ');
+  return `${shown} and ${names.length - MAX_NAMED_FILES} more`;
+}
 // OPEN_PR_ACTION is declared once, below, with the SPEC-050 actions. #1115's recovery
 // path no longer shows a toast of its own — since #1653 it delegates to
 // `openApprovalPr`, so the only surface that still offers `Open PR` is FR-1's legacy
@@ -228,6 +254,16 @@ export async function commitApprovalIfEnabled(
       // §4a) — approval-recover.ts copies into a separate worktree with a separate
       // index, and this arm still stages nothing in the primary.
       const current = result.branch?.current ?? 'the default branch';
+      // #1133 — name WHICH files are stranded. `result.paths` is the resolved,
+      // repo-relative list `commitApproval` computed before refusing (the same
+      // list a successful commit would have used) — more trustworthy than
+      // re-deriving names from `absPaths`, which may include a path that
+      // doesn't exist on disk. `undefined` (a caller/mock that predates #1133,
+      // or truly nothing resolved) degrades to the old generic wording.
+      const fileList = describeStrandedFiles(result.paths);
+      const filesClause = fileList
+        ? `${fileList} left in your working tree`
+        : 'files left in your working tree';
       const recovery = await recoverOnProtectedBranch(
         rootDir,
         absPaths,
@@ -239,7 +275,7 @@ export async function commitApprovalIfEnabled(
         // The user was asked and said no. Report the state honestly in the suffix,
         // but do NOT re-show the warning they just dismissed.
         return {
-          suffix: ` · NOT committed (on ${current} — files left in your working tree)`,
+          suffix: ` · NOT committed (on ${current} — ${filesClause})`,
           result,
         };
       }
@@ -247,16 +283,21 @@ export async function commitApprovalIfEnabled(
 
       // Fallback — unchanged: consent withheld, or recovery failed. Say plainly what
       // happened and what state the files are in; never a bare console.warn.
+      const strandedCount = result.paths?.length ?? 0;
+      const strandedSentence = fileList
+        ? `${fileList} ${strandedCount > 1 ? 'are' : 'is'} in your working tree, ` +
+          `uncommitted — commit ${strandedCount > 1 ? 'them' : 'it'} on a branch to keep ` +
+          `${strandedCount > 1 ? 'them' : 'it'}.`
+        : 'Your files are saved in the working tree — commit them on a branch to keep them.';
       void vscode.window.showWarningMessage(
         `Approval written but NOT committed: '${current}' is the default branch, ` +
-          `so a commit there could not be pushed. Your files are saved in the working ` +
-          `tree — commit them on a branch to keep them.`,
+          `so a commit there could not be pushed. ${strandedSentence}`,
         SHOW_FILES_ACTION,
       ).then((choice) => {
         if (choice === SHOW_FILES_ACTION) void vscode.commands.executeCommand('workbench.view.scm');
       });
       return {
-        suffix: ` · NOT committed (on ${current} — files left in your working tree)`,
+        suffix: ` · NOT committed (on ${current} — ${filesClause})`,
         result,
       };
     }
@@ -938,6 +979,20 @@ export async function pushApprovalIfEnabled(
  *
  * No-op (returns undefined, no git call) when the setting is off or the file
  * already has a HEAD version.
+ *
+ * #1133 — a `'protected-branch'` outcome here used to vanish with NO signal at
+ * all (unlike `'failed'`, which was already `console.warn`ed): on the default
+ * branch this step stages nothing and silently declines to do the ADD→Modify
+ * split #577 exists for. In today's only caller (`adr.ts`) that is masked
+ * because the very next statement makes its OWN commit-on-approve call against
+ * the SAME branch and shows the full warning — but that is accidental coverage
+ * from one specific call sequence, not a property of this function, and it
+ * disappears the moment either half is refactored on its own. So this leg logs
+ * for itself rather than trusting a caller to. It does not also raise a toast:
+ * unlike `commitApprovalIfEnabled`'s 'protected-branch' arm, this is a narrow
+ * pre-step with no UI surface of its own, and a caller that also warns (as
+ * `adr.ts` does, via the funnel commit right after) would otherwise show the
+ * user two near-identical warnings for one event.
  */
 export async function commitBornIfUntracked(
   rootDir: string,
@@ -949,6 +1004,12 @@ export async function commitBornIfUntracked(
   const result = await commitApproval(rootDir, [filePath], message);
   if (result.outcome === 'failed') {
     console.warn(`MinSpec: born commit failed — ${result.error ?? 'git error'}`);
+  } else if (result.outcome === 'protected-branch') {
+    const current = result.branch?.current ?? 'the default branch';
+    console.warn(
+      `MinSpec: born commit skipped — '${current}' is the default branch, so a commit ` +
+        `there could not be pushed. Nothing was staged for ${path.basename(filePath)}.`,
+    );
   }
   return result;
 }
