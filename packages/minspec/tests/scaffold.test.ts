@@ -13,7 +13,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 
-import { generateHarnessFiles, refreshHarnessFiles } from '../src/lib/scaffold';
+import {
+  applyAuthorshipCorrections,
+  generateHarnessFiles,
+  refreshHarnessFiles,
+} from '../src/lib/scaffold';
 import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS } from '../src/lib/template-registry';
 import { loadHashes } from '../src/lib/merge-refresh';
 
@@ -262,5 +266,85 @@ describe('#206 — DESIGN.md is not a harness template', () => {
     generateHarnessFiles(tmpDir);
     const hashes = loadHashes(tmpDir);
     expect(hashes['DESIGN.md']).toBeUndefined();
+  });
+});
+
+
+// ── #1697 NEW-A3: the manifest composition rule, on its own ──────────────────
+//
+// `applyAuthorshipCorrections` was extracted out of `recordVerifyAndSaveManifest`
+// so that the CORRECTION half of "what baseline will the next refresh read?" has one
+// implementation. (The other half is the disk argument, which a real refresh hashes
+// AFTER the post-merge writers have run — sharing this half does not compose that
+// one.) `mergeFile` used to offer a second, unread answer (`newHashes`) that could
+// disagree with it, and a tier of merge tests steered by that instead. The rule now
+// has a name, an export and its own tests, so a caller that needs it takes it rather
+// than rebuilding it.
+describe('applyAuthorshipCorrections() — #1697 NEW-A3', () => {
+  const DISK = { __preamble__: 'p0', Invariants: 'd1', Goals: 'd2', 'Ops runbook': 'd3' };
+
+  it('returns the disk map unchanged when there is nothing to correct', () => {
+    expect(applyAuthorshipCorrections(DISK)).toEqual(DISK);
+    expect(applyAuthorshipCorrections(DISK, {}, [])).toEqual(DISK);
+  });
+
+  it('records the WITHHELD template body for a heading whose body was kept', () => {
+    // The #1697 F1 correction: disk holds the user's bytes, so filing disk would
+    // claim MinSpec authored them and license the next refresh to overwrite.
+    expect(applyAuthorshipCorrections(DISK, { Invariants: 'withheld-template' })).toEqual({
+      ...DISK,
+      Invariants: 'withheld-template',
+    });
+  });
+
+  it('invents no entry for an ordinary withheld heading that is not on disk', () => {
+    // A manifest entry for a section that does not exist is the class of lie this
+    // module exists to prevent, so the override applies only where disk already has
+    // the heading.
+    expect(applyAuthorshipCorrections(DISK, { Nonexistent: 'x' })).toEqual(DISK);
+  });
+
+  it('DOES invent one for an `Object.prototype` heading — #1752, latent, pinned', () => {
+    // Not a `never`: the guard is `heading in corrected`, and `in` walks the
+    // prototype chain, so the eight `Object.prototype` names pass it on a map that
+    // does not carry them. Asserted as the CURRENT behaviour rather than described in
+    // a comment, so #1752's fix (`Object.create(null)` for every heading-keyed map)
+    // turns this red and is noticed.
+    //
+    // Latent, not live: a withheld hash exists only for a heading the TEMPLATE also
+    // carries, and MinSpec ships no template heading with a prototype name.
+    const out = applyAuthorshipCorrections(DISK, { constructor: 'INVENTED' });
+    expect(Object.prototype.hasOwnProperty.call(out, 'constructor')).toBe(true);
+    expect(Object.keys(out)).toContain('constructor');
+  });
+
+  it('deletes an unauthored heading outright rather than correcting it', () => {
+    // #1697 NEW-2/NEW-3: MinSpec rendered no body for this heading, so there is no
+    // hash it may honestly file. Absence is what routes it to the fail-closed branch
+    // next time, loudly.
+    const out = applyAuthorshipCorrections(DISK, undefined, ['Ops runbook']);
+    expect(out).not.toHaveProperty('Ops runbook');
+    expect(out).toEqual({ __preamble__: 'p0', Invariants: 'd1', Goals: 'd2' });
+  });
+
+  it('applies deletions AFTER overrides, so the two orders cannot disagree', () => {
+    // The two sets are disjoint by construction in `mergeFile`; this makes the
+    // outcome independent of that, so a future producer that overlaps them cannot
+    // leave a withheld hash on a heading MinSpec disclaims.
+    const out = applyAuthorshipCorrections(DISK, { Goals: 'withheld' }, ['Goals']);
+    expect(out).not.toHaveProperty('Goals');
+  });
+
+  it('preserves disk key order, so the serialized manifest stays byte-stable', () => {
+    // SPEC-043 INV-4: two identical runs must produce identical bytes, and JSON key
+    // order is part of the bytes.
+    const out = applyAuthorshipCorrections(DISK, { Invariants: 'withheld' }, ['Goals']);
+    expect(Object.keys(out)).toEqual(['__preamble__', 'Invariants', 'Ops runbook']);
+  });
+
+  it('does not mutate the disk map it was given', () => {
+    const disk = { ...DISK };
+    applyAuthorshipCorrections(disk, { Invariants: 'withheld' }, ['Goals']);
+    expect(disk).toEqual(DISK);
   });
 });
