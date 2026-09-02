@@ -46,6 +46,13 @@ source "${SCRIPT_DIR}/lib/agent-egress.sh"
 # shellcheck source=scripts/lib/docs-corpus.sh
 source "${SCRIPT_DIR}/lib/docs-corpus.sh"
 
+# DR-086 autonomy gate (#1614). `mayProceed` is the ONE authority for "may I act
+# without asking?"; this seam is how bash asks it. Sourced (not executed); defines
+# autonomy_may_proceed / autonomy_verdict_detail. Offline and credential-free at
+# source time — it spawns nothing until a caller actually asks.
+# shellcheck source=scripts/lib/autonomy.sh
+source "${SCRIPT_DIR}/lib/autonomy.sh"
+
 # SPEC-044 / DR-067 work-item claim lease. Sourced (not executed) so the per-item
 # flock (lease_flock) is held in THIS parent process for the whole build — a
 # subprocess would release it on exit. Provides lease_flock / lease_gate_open_unshipped
@@ -185,6 +192,129 @@ paths_have_approvable_doc() {
 # Pure seam: prove the withhold classifier without gh/dispatch. Paths on stdin.
 if [[ "${ISSUE:-}" == "--paths-have-approvable-doc" ]]; then
   if paths_have_approvable_doc; then echo "hold"; exit 0; else echo "arm"; exit 1; fi
+fi
+
+# autonomy_stop_classes_for_paths <newline-separated changed paths> (#1614)
+#
+# Derive the DR-086 stop classes that apply to MERGING this change set, as a
+# comma-separated list on stdout.
+#
+# This is what demotes `paths_have_approvable_doc` from DECIDER to POPULATOR. It
+# still answers the same question — "must a human own this merge?" — but its
+# answer is now an INPUT to `mayProceed`, which is the single decision point. The
+# withhold set and the autonomy setting stopped being two unrelated gates that
+# each half-answer "may this merge unattended".
+#
+# FAIL-CLOSED ON AN UNKNOWN CHANGE SET. An empty or whitespace-only argument is
+# NOT "no stop classes apply" — it is "we could not tell what this PR changes",
+# and an empty list would read to `mayProceed` as a clean action and ADMIT. So it
+# yields the strongest class instead. This is the one branch where the difference
+# between "no" and "don't know" decides whether an unreviewed merge happens.
+#
+# THE MAPPING, mandate by mandate (the classes are DR-086 §2's, not new ones):
+#   ^scripts/lib/autonomy\.  |  ^\.minspec/config\.json$
+#       → edits-the-autonomy-rules (§2.6, exact). Stated as its OWN arm rather
+#         than left to `^scripts/` below, so it survives #509's planned narrowing
+#         of MACHINERY_PATH_RE: a PR that would relax the autonomy machinery can
+#         never merge through the machinery it is relaxing.
+#   PUBLISH_PATH_RE  →  irreversible-or-outward-facing (§2.1, exact: merging
+#         sites/** IS a public Cloudflare Pages deploy — the act leaves the machine).
+#   MACHINERY_PATH_RE  →  irreversible-or-outward-facing, on §2.1's explicit
+#         "includes ... bypassing a failing check": merging machinery unattended
+#         can retire the very witness that would have caught the next bad merge.
+#         A conservative read of a class, deliberately: it can only ever stop
+#         MORE, never less.
+#   whatever the classifier holds that is NEITHER of those  →  approval-or-acceptance
+#         (§2.2). Derived by SUBTRACTION from `paths_have_approvable_doc` rather
+#         than by a second copy of its docs/governance regex, so the two cannot
+#         drift — the classifier stays the sole authority for its own mandate.
+#
+# The list is a WITNESS that a stop applies, not an exhaustive audit: `mayProceed`
+# denies on any non-empty list, so a class this omits cannot change the verdict.
+autonomy_stop_classes_for_paths() {
+  local changed_files="${1-}"
+  local -a classes=()
+
+  if [[ -z "${changed_files//[$'\n\r\t ']/}" ]]; then
+    printf '%s\n' 'irreversible-or-outward-facing'
+    return 0
+  fi
+
+  # §2.6 — the autonomy machinery itself.
+  grep -qE '^scripts/lib/autonomy\.|^\.minspec/config\.json$' <<<"$changed_files" \
+    && classes+=('edits-the-autonomy-rules')
+
+  # §2.1 — publish paths and machinery, one class between them (no duplicate row).
+  local outward=0
+  grep -qE "${PUBLISH_PATH_RE}" <<<"$changed_files" && outward=1
+  grep -qE "${MACHINERY_PATH_RE}" <<<"$changed_files" && outward=1
+  (( outward == 1 )) && classes+=('irreversible-or-outward-facing')
+
+  # §2.2 — human-owned CONTENT. Ask the classifier itself, never a second copy of
+  # its docs/governance regex: it stays the sole authority for its own mandate and
+  # the two cannot drift. The outer call is a short-circuit (nothing can hold on a
+  # SUBSET if it does not hold on the whole set); the inner one subtracts the two
+  # mandates already classed above, PER PATH, so a sites/**-only PR is not also
+  # reported as human-owned content it never touched.
+  if paths_have_approvable_doc <<<"$changed_files"; then
+    local residual=""
+    residual=$(grep -vE "${PUBLISH_PATH_RE}|${MACHINERY_PATH_RE}" <<<"$changed_files" || true)
+    if [[ -n "${residual//[$'\n\r\t ']/}" ]] && paths_have_approvable_doc <<<"$residual"; then
+      classes+=('approval-or-acceptance')
+    fi
+  fi
+
+  # Report a rendering failure as a FAILURE. The last command used to be the
+  # `printf`, which returns 0 — so a broken pipeline here (a missing awk, a
+  # `pipefail` trip) printed nothing and exited 0, and empty stdout reads to
+  # mayProceed as "no stop classes apply". The one thing this whole function
+  # exists to never say by accident.
+  local out=""
+  if ! out=$(printf '%s\n' ${classes[@]+"${classes[@]}"} | awk 'NF && !seen[$0]++' | tr '\n' ',' | sed 's/,$//'); then
+    return 1
+  fi
+  printf '%s\n' "$out"
+}
+
+# autonomy_may_merge <what> <newline-separated changed paths> (#1614)
+#
+#   stdout: the verdict JSON.  exit: 0 = merge may proceed, 1 = it may not.
+#
+# The SINGLE expression of "may this merge happen unattended?", called by BOTH
+# merge actors (the DR-061 native `--auto` arm and the SPEC-024 consequence-hybrid
+# merge) and by the pure seam below. One function, so the two arms cannot drift
+# and the seam cannot test something the arms do not do.
+#
+# The rejected alternative is REQUIRED by `mayProceed` (DR-086 §4): under `act`
+# the human is not watching, so the record of what was turned down is the only way
+# the decision can be reviewed afterwards. Stated here because it is the same
+# alternative every time — hold the PR and let a human press merge.
+autonomy_may_merge() {
+  local what="${1-}" changed="${2-}" classes=""
+  # Capture the populator's EXIT STATUS, never just its stdout. Inlining it as
+  # `$(...)` in the argument list swallows a non-zero exit, so a derivation that
+  # failed while printing nothing would hand `mayProceed` an EMPTY list — "no
+  # stop classes apply" — and PROCEED under `act`. That is the exact confusion
+  # between "nothing applies" and "could not tell" this gate is built to refuse,
+  # so it must not be reintroduced one layer up by a command substitution.
+  if ! classes=$(autonomy_stop_classes_for_paths "$changed"); then
+    printf '%s\n' '{"proceed":false,"reason":"stop-class-derivation-failed","detail":"the stop-class derivation exited non-zero — failing closed; an empty list is NOT the same as no stop classes","autonomy":"ask"}'
+    return 1
+  fi
+  autonomy_may_proceed \
+    "$what" \
+    "$classes" \
+    "hold the PR for a human merge keystroke — strictly safer, at the cost of the review queue backing up and unattended drain stalling"
+}
+
+# Pure seams: prove the derivation AND the whole merge decision without gh or a
+# dispatch. Paths on stdin.
+if [[ "${ISSUE:-}" == "--autonomy-stop-classes" ]]; then
+  autonomy_stop_classes_for_paths "$(cat)"
+  exit 0
+fi
+if [[ "${ISSUE:-}" == "--may-merge" ]]; then
+  if autonomy_may_merge "merge this PR (seam)" "$(cat)"; then exit 0; else exit 1; fi
 fi
 
 # SPECIFY_SCOPE_RE (#1169) — the ONLY paths a SPECIFY-ONLY dispatch may touch.
@@ -882,30 +1012,41 @@ run_reviewer_stage() {
   #     cannot positively prove it is code-only, so withhold rather than risk
   #     auto-landing an approvable-doc change.
   if native_automerge_enabled; then
-    local changed_files
+    local changed_files autonomy_verdict
     if ! changed_files=$(gh pr diff "$pr_num" --repo "$REPO" --name-only 2>/dev/null); then
       gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
-      echo "  → native auto-merge WITHHELD on PR #$pr_num — could not enumerate changed files; failing closed (#833). Labeled needs-human-review."
+      echo "  → native auto-merge WITHHELD on PR #$pr_num — could not enumerate changed files; failing closed (#833; derived stop class irreversible-or-outward-facing, #1614). Labeled needs-human-review."
     elif [[ -z "${changed_files//[$'\n\r\t ']/}" ]]; then
       gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
-      echo "  → native auto-merge WITHHELD on PR #$pr_num — empty changed-file enumeration; failing closed (#833). Labeled needs-human-review."
-    elif paths_have_approvable_doc <<<"$changed_files"; then
+      echo "  → native auto-merge WITHHELD on PR #$pr_num — empty changed-file enumeration; failing closed (#833; derived stop class irreversible-or-outward-facing, #1614). Labeled needs-human-review."
+    elif ! autonomy_verdict=$(autonomy_may_merge "arm GitHub-native auto-merge (DR-061) on PR #$pr_num" "$changed_files"); then
+      # THE decision (#1614). `paths_have_approvable_doc` used to sit here and decide
+      # on its own; it is now the POPULATOR (see autonomy_stop_classes_for_paths) and
+      # `mayProceed` is the decider, so this arm can no longer merge without first
+      # being asked whether the project is even in `autonomy: act`. With no `autonomy`
+      # key in .minspec/config.json — today's state — `readAutonomy` resolves to `ask`
+      # and this arm simply stops firing. That is the intended landing state; turning
+      # it on is a separate human act (#1743).
       gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
-      # Name the mandate that ACTUALLY matched. The withhold DECISION above is the sole
-      # authority; this only DESCRIBES it, so the two can never disagree about whether
-      # to hold. Reporting "docs-lane corpus" for a sites/** publish PR would be a false
-      # signpost (never-wrong), which is why this is not one fixed string.
+      # Name the ACTUAL blocker, from the verdict itself — never a fixed string. The
+      # verdict is the sole authority for WHETHER to hold; these lines only DESCRIBE
+      # it, so the two can never disagree. Reporting "docs-lane corpus" for a sites/**
+      # publish PR (or for a plain `autonomy is ask` hold) would be a false signpost,
+      # which is why the mandate notes are APPENDED only when a mandate matched.
       # Shape note: a default + `&&` override, NOT an if/else/fi block — a `fi` between
       # the `native_automerge_enabled` guard and the `--auto` arm below is how
       # drain-selfheal.test.ts detects the policy gate being closed early, so the arm
       # stays provably inside the single guarded block. errexit-safe: a non-matching
       # grep is exempt as a non-final command of an `&&` list.
-      local hold_why="touches the docs-lane corpus / .minspec governance config (spec/DR/docs/approval-ledger/top-level .md) (#833)"
+      local hold_why
+      hold_why="$(autonomy_verdict_detail "$autonomy_verdict")"
+      grep -qE "${DOCS_CORPUS_RE}"'|^\.minspec/|^\.cursorrules$' <<<"$changed_files" \
+        && hold_why="${hold_why} It touches the docs-lane corpus / .minspec governance config (spec/DR/docs/approval-ledger/top-level .md) (#833)."
       grep -qE "${MACHINERY_PATH_RE}" <<<"$changed_files" \
-        && hold_why="touches machinery (.github/ .githooks/ scripts/) — dispatch is the second witness to the ai-review machinery hold (#1264)"
+        && hold_why="${hold_why} It touches machinery (.github/ .githooks/ scripts/) — dispatch is the second witness to the ai-review machinery hold (#1264)."
       grep -qE "${PUBLISH_PATH_RE}" <<<"$changed_files" \
-        && hold_why="touches a PUBLISH path (sites/** → public Cloudflare Pages via deploy-sites.yml) — merging IS publishing (#981)"
-      echo "  → native auto-merge WITHHELD on PR #$pr_num — ${hold_why}; a human owns this merge. Labeled needs-human-review."
+        && hold_why="${hold_why} It touches a PUBLISH path (sites/** → public Cloudflare Pages via deploy-sites.yml) — merging IS publishing (#981)."
+      echo "  → native auto-merge WITHHELD on PR #$pr_num — ${hold_why} A human owns this merge. Labeled needs-human-review."
     elif gh pr merge "$pr_num" --repo "$REPO" --squash --auto 2>/dev/null; then
       echo "  → native auto-merge armed on PR #$pr_num (merges on ai-review:pass)"
     else
@@ -1700,9 +1841,36 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
         fi
       fi
 
+      # DR-086 AUTONOMY CONJUNCT (#1614). This arm never called
+      # `paths_have_approvable_doc` at all, so the machinery hold that
+      # MACHINERY_PATH_RE was added to double-witness (#1264) had its second
+      # witness on the NATIVE arm only: a machinery PR that reached this gate
+      # eligible, opted-in and ready-to-merge=success merged with no path-based
+      # hold anywhere in the path. Both merge actors now ask ONE authority
+      # (autonomy_may_merge), which closes that asymmetry as well as adding the
+      # autonomy check itself.
+      #
+      # Fail-closed at every edge: no PR number, a diff that cannot be enumerated
+      # (empty string ⇒ the strongest stop class), a gate that cannot RUN (no
+      # node_modules / no tsx / non-zero exit / unparseable stdout) — every one
+      # leaves AUTONOMY_PROCEED at "no". Only a verdict that positively says
+      # proceed sets it to "yes".
+      AUTONOMY_VERDICT=""
+      AUTONOMY_PROCEED="no"
+      SPEC024_CHANGED=""
+      if [[ -n "$PR_NUM" ]]; then
+        SPEC024_CHANGED=$(gh pr diff "$PR_NUM" --repo "$REPO" --name-only 2>/dev/null || true)
+      fi
+      if AUTONOMY_VERDICT=$(autonomy_may_merge \
+            "merge PR #${PR_NUM:-none} via the SPEC-024 consequence-hybrid gate" \
+            "$SPEC024_CHANGED"); then
+        AUTONOMY_PROCEED="yes"
+      fi
+
       if [[ "$ELIGIBLE" == "true" && -n "$PR_NUM" \
             && "$AUTOMERGE_MODE" == "consequence-hybrid" \
-            && "$READY_STATE" == "success" ]]; then
+            && "$READY_STATE" == "success" \
+            && "$AUTONOMY_PROCEED" == "yes" ]]; then
         # FR-6: low-blast, all signals green, opted-in, AND the independent
         # reviewer greenlit (ready-to-merge=success) → merge with no human eyes.
         echo "Auto-merge ELIGIBLE for PR #$PR_NUM ($BLAST-blast, ready-to-merge=success): $GATE_REASON"
@@ -1725,8 +1893,16 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
           HOLD_WHY="auto-merge off (mode=$AUTOMERGE_MODE; opt in with MINSPEC_AUTOMERGE_MODE=consequence-hybrid)"
         elif [[ "$ELIGIBLE" != "true" ]]; then
           HOLD_WHY="gate ineligible — $GATE_REASON"
-        else
+        elif [[ "$READY_STATE" != "success" ]]; then
           HOLD_WHY="independent review not green (ready-to-merge=$READY_STATE; needs ai-review:pass from #342)"
+        else
+          # Reached only when mode, eligibility AND the independent reviewer are all
+          # green — so the autonomy gate is the ONLY thing left that can have held
+          # this, and naming it here is precise rather than merely true. Ordered
+          # last deliberately: while autonomy resolves to `ask` it denies EVERY PR,
+          # so reporting it ahead of the reviewer conjunct would mask the reason a
+          # human actually needs (#1614 review).
+          HOLD_WHY="autonomy gate (DR-086) denied — $(autonomy_verdict_detail "$AUTONOMY_VERDICT")"
         fi
         # If native auto-merge (DR-061) is armed on this PR, the consequence-hybrid
         # gate is OFF and the PR WILL merge on ai-review:pass — so a "held — human
