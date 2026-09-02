@@ -416,6 +416,35 @@ describe('E — both merge actors are wired to the gate', () => {
     expect(block).not.toMatch(/^\s*fi\s*$/m);
   });
 
+  it('SITE A still reaches the withhold classifier — through the chain, not by adjacency', () => {
+    // The classifier no longer sits IN the arm; it sits one call away, because it
+    // is now the populator rather than the decider. That is the intended design,
+    // but "the arm consults the classifier" has to stay PROVEN rather than assumed,
+    // so pin the whole chain: arm → autonomy_may_merge → autonomy_stop_classes_for_paths
+    // → paths_have_approvable_doc.
+    //
+    // Worth stating why this assertion exists separately from the two older
+    // exclusion suites, which appear to cover it: their `armBlock` is
+    // `content.slice(content.indexOf('if native_automerge_enabled; then'))`, and
+    // that FIRST occurrence is the `--check-native-automerge` pure seam near the
+    // top of the file — not the arm's guard. Their slice is therefore almost the
+    // whole file, and would still pass with the classifier called from anywhere at
+    // all. This one names the actual edges (#1781).
+    const armIdx = DISPATCH_SRC.indexOf('--squash --auto');
+    const guardIdx = DISPATCH_SRC.lastIndexOf('if native_automerge_enabled; then', armIdx);
+    expect(DISPATCH_SRC.slice(guardIdx, armIdx)).toMatch(/autonomy_may_merge /);
+
+    const mayMergeBody = DISPATCH_SRC.match(/^autonomy_may_merge\(\) \{\n([\s\S]*?)\n\}/m);
+    expect(mayMergeBody, 'autonomy_may_merge() not found').not.toBeNull();
+    expect(mayMergeBody![1]).toMatch(/autonomy_stop_classes_for_paths /);
+
+    const populatorBody = DISPATCH_SRC.match(/^autonomy_stop_classes_for_paths\(\) \{\n([\s\S]*?)\n\}/m);
+    expect(populatorBody, 'autonomy_stop_classes_for_paths() not found').not.toBeNull();
+    expect(populatorBody![1]).toMatch(/paths_have_approvable_doc <<<"\$changed_files"/);
+    // never through a pipe: pipefail + SIGPIPE fail OPEN on a large path list
+    expect(populatorBody![1]).not.toMatch(/\|\s*paths_have_approvable_doc/);
+  });
+
   it('SITE B: the SPEC-024 consequence-hybrid merge requires the verdict in its conjunction', () => {
     const mergeIdx = DISPATCH_SRC.indexOf('gh pr merge "$PR_NUM" --repo "$REPO" --squash 2>>"$LOG"');
     expect(mergeIdx).toBeGreaterThan(-1);
