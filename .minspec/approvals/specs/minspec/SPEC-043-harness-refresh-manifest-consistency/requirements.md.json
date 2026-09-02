@@ -1,9 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-043-harness-refresh-manifest-consistency/requirements.md",
-  "specHash": "ee245978fa4bb2f2323f1649d6aab29512fd3d7a0d75bfd78f39fabe7600d5ba",
-  "approvedAt": "2026-07-25T10:06:26.945Z",
+  "specHash": "f746e67234d6a51ee608df8b9b8f88eaadea10348ba3b63c842ad25108708401",
+  "approvedAt": "2026-09-02T11:20:17.663Z",
   "approvedBy": "github@harvest316.com",
   "tier": "T3",
   "migrated": false,
-  "baselineBlob": "3a0c02b71d2ae623ac7a3bc25832fcfbf09ba566"
+  "baselineBlob": "3fe0e4d4668f87b6d6322272da4ffe8a3c6e36cd"
 }
