@@ -65,6 +65,26 @@ wrong, and in which direction.
 > **Correcting an input** = telling the gate what the work *is*. The gate then decides.
 > **Overriding an output** = telling the gate what to *conclude*. The gate has not decided.
 
+**A consequence of `affects:`, disclosed rather than left implicit.** This spec's
+frontmatter declares `scripts/dispatch-ready-check.sh` and `scripts/triage-inbox.sh`
+under `affects:`. That declaration is what arms `scripts/hooks/spec-gate.py`'s freeze on
+those two files (`spec-gate.py:349-350` folds `implements:` and `affects:` into one
+owned set with **no existence filter**, and `.sh` is a gated extension per
+`_SRC_EXT_RE`, `spec-gate.py:285`) — and the gate arms by **phase position, not
+approval**: the moment this spec's current phase moves past `clarify` into `plan`
+(`spec-gate.py:487-488`), both files are frozen for **any** `Edit`/`Write`/`MultiEdit`,
+by anyone, anywhere in the repo — not only edits made "for" this spec — for as long as
+SPEC-066 remains unapproved. This is the intended shape of the gate: its own docstring
+names the principle "DOC-BEFORE-*CODE*, NOT doc-before-doc" and attributes it to DR-047
+§3's doc-before-code precedent (`spec-gate.py:368`, echoed at `:11,15,32,34,431`). But
+because both files are shared, actively-maintained scripts, the practical effect is a
+repo-wide freeze on them while this spec sits unapproved past Clarify. The freeze lifts
+on approval, or if `clarify:` itself is rolled back off `done` (rolling `plan:` alone
+back to `pending` does **not** un-arm it — `_current_phase` still returns `plan` as the
+first non-done phase, which is in the gated range regardless of `plan:`'s own state).
+Named here so it is read before it is hit, not discovered at the next unrelated edit to
+either file.
+
 ## Contract
 
 ### C-1 — The dispute record schema (`minspec-triage-dispute/1`)
@@ -145,12 +165,25 @@ never guessed.
 | `--render-dispute <declaredType> <disputedHold> <disputedVerdictAt> <disputedBy> [verdictAt]` | issue body | the comment-embeddable dispute block | `0` rendered · `1` refused (bad type, bot `disputedBy`, unhashable body, non-disputable hold) |
 | `--newest-dispute` | trusted comment bodies | the dispute block with the newest well-formed `verdictAt` | `0` always (empty output = none) |
 | `--may-dispute <hold> <human_only> <direction>` | — | `disputable` · `not-disputable [<code>]: <reason>` | `0` · `1` |
-| `--fresh-dispute <bodyHash>` | trusted comment bodies | the newest dispute whose `bodyHash` equals the argument | `0` found · `1` none |
+| `--dispute-exists <bodyHash> <direction>` | trusted comment bodies | (none — existence only) | `0` a trusted, well-formed dispute with this `bodyHash` and `direction` exists **anywhere** in the stream, however old, regardless of whether it has since been consumed (see `--fresh-dispute` below) or is now hidden behind a more recent dispute of the *other* direction · `1` none |
+| `--fresh-dispute <bodyHash>` | trusted comment bodies | the newest dispute whose `bodyHash` equals the argument **and** whose `disputedVerdictAt` equals the `verdictAt` of the current newest verdict record in the same stream — i.e. not yet consumed by a later re-triage (FR-4) | `0` found and fresh · `1` none, or consumed |
 
 `--newest-dispute` and the existing `--newest-record` MUST share one
 sentinel-parameterised implementation (DR-090 §5). Two selectors carrying their own
 "take the newest one" is exactly how two of three readers kept the quoted-record defect
 after the third was fixed (DR-072 §5a).
+
+`--dispute-exists` and `--fresh-dispute` answer two different questions and exist as
+**separate** entry points for that reason: `--dispute-exists` answers *has a dispute of
+this direction ever been recorded at this bodyHash* — the full-history question FR-5's
+mint-time bound (INV-4) needs — while `--fresh-dispute` answers *is there a dispute to
+act on right now* — the single-newest-and-unconsumed question FR-7's injection needs.
+Building the mint-time check on "the newest dispute at this hash" (i.e. on
+`--fresh-dispute` alone) is the defect this split closes: a tightening dispute minted
+after a loosening one at the same hash would become "the newest," and a check that only
+ever asks for the newest would then report no loosening dispute exists, silently
+admitting a second one. `--dispute-exists` MUST NOT be implemented in terms of
+`--fresh-dispute` or `--newest-dispute` — doing so would reintroduce exactly that hole.
 
 ### C-4 — `scripts/dispute-triage.sh` (credentialed front end)
 
@@ -203,6 +236,17 @@ dispatchability until a **new verdict record** is minted. (DR-090 §3.3)
 | `none` | `loosening` | refused `[already-ready]` — nothing to loosen |
 | anything unrecognised | any | refused `[bad-hold]` — refuse rather than guess |
 
+`human_only` — the predicate's third input — is checked **first**, independently of
+`hold` and `direction`, mirroring `--may-approve` (`dispatch-ready-check.sh:468-472`): a
+`hold: human` verdict is disputable only when its own `human_only` field reads `yes`,
+and a `hold: none` verdict only when its own `human_only` field reads `no`. Any other
+pairing — `hold: human` with `human_only: no`, or `hold: none` with `human_only: yes` —
+is a garbled or self-contradictory verdict record and is refused outright as
+`[garbled-record]`, before the table above is even consulted. This is deny-by-default
+for the same reason `--may-approve` refuses on anything but a definitive `no`: whether
+an issue is human-only is never inferred from a sibling field a garbled record could
+disagree with.
+
 The predicate lives in `dispatch-ready-check.sh` beside `--may-approve`, is pure, and is
 unit-testable without `gh`.
 
@@ -213,13 +257,36 @@ App login, or `OWNER`/`MEMBER`/`COLLABORATOR`), and selected by its own `verdict
 through the shared selector — never by position. A dispute whose `verdictAt` is absent,
 malformed, or future-dated is not selectable. (DR-072 §5, §5a)
 
+**A dispute is additionally "fresh" — selectable by `--fresh-dispute` for injection
+(FR-7) — only while no verdict has been minted since it was filed.** Concretely: fresh
+means its `disputedVerdictAt` still equals the `verdictAt` of the current newest verdict
+record on the issue. The moment a new verdict lands — whether from the re-triage the
+dispute itself triggered (FR-6) or from any later, unrelated re-triage — the dispute is
+**consumed**: `--fresh-dispute` stops returning it, even though its `bodyHash` still
+matches the issue's current, unedited body. This is the once-only consumption rule
+(DR-090 §4): it is what stops a bare re-invocation of `scripts/triage-inbox.sh <N>`
+against an unchanged body from re-injecting a declaration that already had its one
+guaranteed roll (FR-6) — without this rule, the mint-time bound in FR-5 stops a second
+dispute from being *recorded* but does nothing to stop the *same* dispute being read
+and re-injected on every subsequent invocation, reopening unbounded re-rolling of the
+classifier through a route that never touches minting at all. A failed re-triage
+attempt that writes no verdict does **not** consume the dispute — the human may retry.
+
 ### FR-5 — One loosening dispute per `(issue, bodyHash)`; tightening is unbounded
 
-`dispute-triage.sh` refuses to mint a **loosening** dispute when a trusted dispute with
-`direction: loosening` and the **same** `bodyHash` already exists — regardless of its
-`declaredType`. The bound is on the body, not on the declaration, because cycling
-`chore → docs → test → ci` is the same slot machine at a slower crank. **Tightening**
-disputes are unbounded. The refusal names, in order: accept the outcome; edit the issue
+Before minting a **loosening** dispute, `dispute-triage.sh` calls
+`--dispute-exists <bodyHash> loosening` (C-3) and refuses if it reports found —
+regardless of the existing dispute's `declaredType`, regardless of whether that dispute
+has since been consumed (FR-4), and regardless of any tightening dispute minted at the
+same `bodyHash` in between. The check is existence **across the full trusted history**
+of the `(issue, bodyHash)` pair, not "the newest dispute so far" — a check built on
+recency alone is exactly what lets an intervening tightening dispute at the same hash
+mask an earlier loosening one, which is the reachable gap this predicate closes: a
+loosening dispute upheld, followed by a tightening dispute at the same unchanged hash,
+must still leave a third, loosening dispute at that hash refused. The bound is on the
+body, not on the declaration, because cycling `chore → docs → test → ci` is the same
+slot machine at a slower crank. **Tightening** disputes are unbounded and never call
+`--dispute-exists`. The refusal names, in order: accept the outcome; edit the issue
 body so its intent is unambiguous (a genuinely different input, and a new hash); or, if
 the re-triage landed `hold:tier`/`hold:specify`, use `scripts/approve-issue.sh`.
 (DR-090 §4)
@@ -232,12 +299,17 @@ signpost: the human believes they have acted and nothing has. A failure of the r
 is reported **loudly and non-zero**; it is never swallowed. (Constitution invariant 2;
 DR-066)
 
-### FR-7 — Only the validated enum reaches the classifier
+### FR-7 — Only the validated enum reaches the classifier, and only once per verdict
 
-On finding a **fresh** dispute (matching `bodyHash`, trusted author, selected per FR-4),
+On finding a **fresh** dispute — matching `bodyHash`, trusted author, selected per FR-4,
+**and not yet consumed by a later verdict** (FR-4's once-only consumption rule) —
 `triage-inbox.sh` adds to the agent prompt — **outside** the `<untrusted_issue_body>`
 fence — the validated `declaredType` token and the fixed instruction of FR-8. The
-human's free-text `reason` is **never** passed to the agent. (DR-090 §6)
+human's free-text `reason` is **never** passed to the agent. A re-invocation of
+`triage-inbox.sh <N>` against an unchanged body, made after the verdict the dispute
+produced has already landed, finds no fresh dispute (FR-4) and composes the prompt
+exactly as it would with none present — this is the route that closes DR-090 §4's bound
+against re-rolls that never mint a second dispute. (DR-090 §4, §6)
 
 ### FR-8 — The declared type settles the TYPE leg only; intent stays with the classifier
 
@@ -276,7 +348,11 @@ a label is never a permission boundary.)
 verdict minted after it (by `verdictAt`), and classifies each as `upheld` / `rejected` /
 `tightened` / `pending` per DR-090 §7. `pending` is listed separately with its issues
 named, never folded into the upheld rate, and the rate is always printed with its `n`.
-(DR-090 §7)
+"The first verdict minted after it" is the **same** boundary FR-4 uses to decide when a
+dispute stops being fresh: a dispute the report can join to a later verdict is, by
+construction, one `--fresh-dispute` would no longer return. The two must never diverge —
+a future change to either the join or the consumption rule is a change to both.
+(DR-090 §4, §7)
 
 ### FR-12 — `triage-decide.sh` is not modified
 
@@ -296,8 +372,16 @@ present on the issue. (DR-090 §3.1 — the load-bearing negative.)
 - **INV-3 — A dispute can fail.** The classifier retains the authority to return
   `human_only: yes` over a declared auto-buildable type, and doing so is a **correct**
   outcome (FR-8).
-- **INV-4 — Bounded retry.** At most one loosening dispute exists per
-  `(issue, bodyHash)` (FR-5).
+- **INV-4 — Bounded retry, on two separate axes.** *Minting* is bounded: at most one
+  loosening dispute is ever recorded per `(issue, bodyHash)`, enforced at mint time by
+  `--dispute-exists` checking the full trusted history rather than only the newest
+  dispute, so an intervening tightening dispute at the same hash cannot mask an earlier
+  loosening one (FR-5). *Injection* is bounded separately: a dispute stops being
+  selected by `--fresh-dispute` the moment a newer verdict has been minted, so
+  re-invoking `scripts/triage-inbox.sh <N>` against an unchanged body cannot re-roll the
+  classifier off the same dispute a second time (FR-4, FR-7). Both bounds are required —
+  one closes re-minting, the other closes re-injection — and each names the predicate
+  that enforces it.
 - **INV-5 — Untrusted text never becomes a declaration.** Only the enum crosses into the
   prompt, and only from outside the untrusted fence (FR-7, FR-8, FR-9).
 - **INV-6 — Repo invariant 1 (offline core) is untouched.** Every path added here lives
@@ -319,7 +403,11 @@ present on the issue. (DR-090 §3.1 — the load-bearing negative.)
       as a decision re-triages to `human_only: yes`, and that is recorded as `rejected`,
       not as an error. (FR-8, INV-3)
 - [ ] **No slot machine** — a second loosening dispute against an unchanged body is
-      refused, and the refusal names the three honest remedies. (FR-5, INV-4)
+      refused (via `--dispute-exists`, surviving an intervening tightening dispute at
+      the same hash), and the refusal names the three honest remedies; separately, a
+      bare re-invocation of `triage-inbox.sh` against an unchanged body, after its
+      verdict has already landed, re-injects nothing (via `--fresh-dispute`'s
+      consumption rule). (FR-4, FR-5, FR-7, INV-4)
 - [ ] **Lanes do not overlap** — a dispute against `hold:tier` is refused with a pointer
       to `approve-issue.sh`; an approval against `hold:human` is refused as it is today.
       (FR-3)
@@ -362,26 +450,39 @@ present on the issue. (DR-090 §3.1 — the load-bearing negative.)
 
 ## Sub-issues
 
-Each is a `role:dev`, `agent-ready`-shaped task. **None is filed yet** — the authoring
-agent runs without network or `gh` access by dispatch policy (DR-008), so these are
-written to be transcribed, not designed. Each must carry `role:dev` + `agent-ready` and
-the line `See DR-090 for design rationale`.
+Each is a `role:dev`, `agent-ready`-shaped task. **Filed as #1789 (A), #1790 (B), #1791
+(C), #1792 (D)**, by a later PR-review follow-up — the authoring agent ran without
+network or `gh` access by dispatch policy (DR-008), so these were written to be
+transcribed, not designed, and filing was deferred. Each carries `role:dev` and the
+line `See DR-090 for design rationale`; each is labelled `needs-review` rather than
+`agent-ready` for now, because this spec and DR-090 are both still unapproved as of
+filing — swap to `agent-ready` once this spec is approved (*MinSpec: Approve Spec*) and
+DR-090 is accepted (*MinSpec: Accept ADR*).
 
 ### (A) The pure half — dispute grammar, selector and predicate
 
 - **Contract:** C-1, C-2, C-3 (`--render-dispute`, `--newest-dispute`, `--may-dispute`,
-  `--fresh-dispute`), plus the `fence_agent_text` extension of FR-9.
+  `--dispute-exists`, `--fresh-dispute`), plus the `fence_agent_text` extension of FR-9.
 - **File allowlist:** `scripts/dispatch-ready-check.sh`,
   `packages/minspec/tests/triage-dispute.test.ts`.
-- **Invariants:** INV-2, INV-5. Repo invariants 1 and 2.
+- **Invariants:** INV-2, INV-4, INV-5. Repo invariants 1 and 2.
 - **Tests to pass:** round-trip render→select→parse; a dispute block is invisible to
   `--newest-record` and to the dispatch reader; a dispute carrying injected
   `hold: none` / `human_only: no` lines still yields `not-ready` at dispatch; the full
-  FR-3 refusal table, one case per row; `--render-dispute` refused for a bot
-  `disputedBy` and for an out-of-vocabulary type; the shared selector is proven shared
-  by driving both sentinel families through it; `fence_agent_text` breaks the new pair.
+  FR-3 refusal table, one case per row, including the `[garbled-record]` pre-check
+  (`hold: human` + `human_only: no`, and `hold: none` + `human_only: yes`, both refused
+  before `direction` is inspected); `--render-dispute` refused for a bot `disputedBy`
+  and for an out-of-vocabulary type; the shared selector is proven shared by driving
+  both sentinel families through it; `fence_agent_text` breaks the new pair;
+  `--dispute-exists` finds a loosening dispute at a given `bodyHash` even after a
+  tightening dispute at the same hash is minted afterward and becomes the newest (the
+  case a newest-only check would miss); `--fresh-dispute` stops returning a dispute once
+  a verdict newer than its `disputedVerdictAt` exists, even at an unchanged `bodyHash`.
 - **Note:** `--newest-dispute` MUST be implemented by parameterising the existing
-  `_newest_record_impl`, not by copying it.
+  `_newest_record_impl`, not by copying it. `--dispute-exists` is a full-history
+  existence scan and MUST NOT be implemented in terms of `--fresh-dispute` or
+  `--newest-dispute` — either would silently reintroduce the newest-only defect FR-5
+  exists to close.
 
 ### (B) The credentialed front end
 
@@ -390,26 +491,35 @@ the line `See DR-090 for design rationale`.
   `packages/minspec/tests/triage-dispute.test.ts`.
 - **Invariants:** INV-4, INV-7.
 - **Tests to pass:** refuses without a TTY; refuses a bot `gh api user` identity;
-  refuses a second loosening dispute against an unchanged `bodyHash` and prints all
-  three remedies; refuses on a stale verdict (`bodyHash` mismatch) before doing anything
-  else; posts the record **before** the label; exits non-zero and prints the reason when
-  the FR-6 re-triage fails.
+  refuses a second loosening dispute against an unchanged `bodyHash` (via
+  `--dispute-exists`) and prints all three remedies; refuses on a stale verdict
+  (`bodyHash` mismatch) before doing anything else; posts the record **before** the
+  label; exits non-zero and prints the reason when the FR-6 re-triage fails; **the
+  reachable sequence named against INV-4** — a loosening dispute at hash H is upheld,
+  then a tightening dispute at the same H is minted and re-triages back to a hold —
+  still leaves a third, loosening dispute at hash H refused.
 - **Note:** the dispute record is written under the **human's** identity while the
   re-triage it invokes writes under the **bot's** (`scripts/lib/gh-bot.sh`). Both are
   trusted authors; the separation is deliberate and must not be collapsed.
 
 ### (C) The consumption half — prompt injection and the role instruction
 
-- **Contract:** FR-7, FR-8, FR-9 (the `triage-inbox.sh` half).
+- **Contract:** FR-4 (freshness/consumption), FR-7, FR-8, FR-9 (the `triage-inbox.sh`
+  half).
 - **File allowlist:** `scripts/triage-inbox.sh`, `scripts/roles/triage.md`,
   `packages/minspec/tests/triage-dispute.test.ts`.
-- **Invariants:** INV-3, INV-5, and FR-12's negative.
+- **Invariants:** INV-3, INV-4, INV-5, and FR-12's negative.
 - **Tests to pass:** with a fresh dispute present, the composed prompt contains the
   declared-type line outside the untrusted fence and does **not** contain the reason
-  text; with a stale or untrusted dispute, the prompt is byte-identical to today's; an
-  issue body containing a `declared_type:` line is fenced and does not alter the prompt's
-  declaration section; driving the real `triage-inbox.sh` with a stub agent that returns
-  `human_only: yes` over a `chore` declaration still yields `hold:human` (INV-3).
+  text; with a stale or untrusted dispute, the prompt is byte-identical to today's; a
+  dispute whose `bodyHash` still matches but whose `disputedVerdictAt` no longer equals
+  the current newest verdict's `verdictAt` (i.e. **consumed** — a verdict already landed
+  since it was filed) composes a prompt byte-identical to today's, proving a bare
+  re-invocation of `triage-inbox.sh` cannot re-roll the classifier off one dispute
+  twice; an issue body containing a `declared_type:` line is fenced and does not alter
+  the prompt's declaration section; driving the real `triage-inbox.sh` with a stub
+  agent that returns `human_only: yes` over a `chore` declaration still yields
+  `hold:human` (INV-3).
 
 ### (D) The corpus report and the kill-criterion review
 
