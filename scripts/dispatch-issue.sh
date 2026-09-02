@@ -1868,10 +1868,16 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
           HOLD_WHY="auto-merge off (mode=$AUTOMERGE_MODE; opt in with MINSPEC_AUTOMERGE_MODE=consequence-hybrid)"
         elif [[ "$ELIGIBLE" != "true" ]]; then
           HOLD_WHY="gate ineligible — $GATE_REASON"
-        elif [[ "$AUTONOMY_PROCEED" != "yes" ]]; then
-          HOLD_WHY="autonomy gate (DR-086) denied — $(autonomy_verdict_detail "$AUTONOMY_VERDICT")"
-        else
+        elif [[ "$READY_STATE" != "success" ]]; then
           HOLD_WHY="independent review not green (ready-to-merge=$READY_STATE; needs ai-review:pass from #342)"
+        else
+          # Reached only when mode, eligibility AND the independent reviewer are all
+          # green — so the autonomy gate is the ONLY thing left that can have held
+          # this, and naming it here is precise rather than merely true. Ordered
+          # last deliberately: while autonomy resolves to `ask` it denies EVERY PR,
+          # so reporting it ahead of the reviewer conjunct would mask the reason a
+          # human actually needs (#1614 review).
+          HOLD_WHY="autonomy gate (DR-086) denied — $(autonomy_verdict_detail "$AUTONOMY_VERDICT")"
         fi
         # If native auto-merge (DR-061) is armed on this PR, the consequence-hybrid
         # gate is OFF and the PR WILL merge on ai-review:pass — so a "held — human

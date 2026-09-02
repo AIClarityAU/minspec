@@ -166,6 +166,34 @@ describe('B — the bash seam fails closed when the gate cannot RUN', () => {
   );
 
   it(
+    'DENIES rather than FETCHING a runner when no pinned tsx exists',
+    () => {
+      // `npx tsx` with no local install downloads the package. Downloading the
+      // judge is not a fallback worth having: it is an unconsented network call
+      // (invariant 1) to obtain the binary that decides an unattended merge. A
+      // missing pinned runner IS "the gate cannot run", and that denies.
+      const bare = fs.mkdtempSync(path.join(os.tmpdir(), 'autonomy-nonode-'));
+      try {
+        const r = mayMerge('packages/minspec/src/lib/config.ts', {
+          MINSPEC_AUTONOMY: 'act',
+          MINSPEC_AUTONOMY_REPO_ROOT: bare, // no node_modules/.bin/tsx here
+          MINSPEC_AUTONOMY_TSX_BIN: undefined,
+        });
+        expect(r.code, r.out).toBe(1);
+        expect(JSON.parse(r.out).reason).toBe('gate-invocation-failed');
+        expect(JSON.parse(r.out).detail).toContain('refusing to fetch one over the network');
+      } finally {
+        fs.rmSync(bare, { recursive: true, force: true });
+      }
+    },
+    SPAWN_TIMEOUT,
+  );
+
+  it('never shells `npx`, which would fetch the gate it is about to trust', () => {
+    expect(AUTONOMY_SH_SRC.split('\n').filter((l) => !/^\s*#/.test(l)).join('\n')).not.toMatch(/\bnpx\b/);
+  });
+
+  it(
     'DENIES when the gate prints something that is not a verdict',
     () => {
       // A runner that exits 0 and prints prose. Exit code alone would ADMIT here —

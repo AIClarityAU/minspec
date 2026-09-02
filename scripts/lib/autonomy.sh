@@ -15,8 +15,9 @@
 #
 # ── Failure policy: closed, at every edge ─────────────────────────────────────
 # The gate can fail to RUN for reasons that have nothing to do with the decision:
-# no `node_modules`, no `tsx`, offline, a crash, a non-zero exit, stdout that is
-# not a verdict. Every one of those DENIES. A gate that cannot run must not
+# no `node_modules`, no pinned `tsx`, a crash, a non-zero exit, stdout that is not
+# a verdict. Every one of those DENIES — including the missing runner, which is
+# NOT quietly replaced by an `npx` fetch. A gate that cannot run must not
 # admit — constitution invariant 2 (a missing or errored witness fails the gate
 # closed and visibly, never silently passes). The shape is the one already at
 # dispatch-issue.sh's auto-merge-gate call: substitute a fail-safe hold and carry
@@ -77,12 +78,15 @@ autonomy_may_proceed() {
   if [[ -n "$_AUTONOMY_TSX_BIN" ]]; then
     runner=("$_AUTONOMY_TSX_BIN")
   elif [[ -x "${AUTONOMY_REPO_ROOT}/node_modules/.bin/tsx" ]]; then
-    # Prefer the pinned local binary over `npx tsx`: npx would try to FETCH tsx
-    # when node_modules is absent, which is both slow and a network call this
-    # repo's first invariant does not want made on its behalf.
     runner=("${AUTONOMY_REPO_ROOT}/node_modules/.bin/tsx")
   else
-    runner=(npx tsx)
+    # NO `npx tsx` FALLBACK. `npx` with no local install FETCHES the package over
+    # the network — an unconsented network call made on the repo's behalf (first
+    # invariant), to obtain the binary that decides whether an unattended merge may
+    # happen. Downloading the judge is not a fallback worth having: a missing pinned
+    # runner is exactly the "the gate cannot run" case, and that DENIES.
+    _autonomy_gate_error "no pinned tsx runner at ${AUTONOMY_REPO_ROOT}/node_modules/.bin/tsx — refusing to fetch one over the network; failing closed"
+    return 1
   fi
 
   out=$("${runner[@]}" "$_AUTONOMY_TS" --may-proceed \
