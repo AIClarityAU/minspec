@@ -11,8 +11,15 @@
  * resets_at locally, at the moment it matters.
  *
  * The load-bearing invariants, in priority order:
- *   INV-A  a missing / stale / unparseable reading FAILS OPEN (never wedges work)
- *   INV-B  failing open is AUDIBLE — it always names why (no silent throttle)
+ *   INV-A  a missing / stale / unparseable reading FAILS CLOSED (defers) — an
+ *          unknown budget must never read as permission to spend it (#1775;
+ *          constitution invariant 2). This inverted the ORIGINAL INV-A, which
+ *          read "FAILS OPEN (never wedges work)" — that was the bug: run_loop
+ *          already treats a 42 defer as a pause, not a wedge, so failing open
+ *          bought nothing but a silently-overspent quota.
+ *   INV-B  a defer is AUDIBLE — it always names why, and a fail-closed defer
+ *          also names the quota file, so a chronically-missing reading is
+ *          diagnosable from one log line (no silent throttle)
  *   INV-C  the gate needs no network: no gh, no curl, no claude
  *   INV-D  the sleep is derived from resets_at, never a fixed guess, never negative
  */
@@ -50,33 +57,62 @@ function write(q: Partial<{ used_percentage: number; resets_at: number; observed
   fs.writeFileSync(quotaFile, JSON.stringify({ observed_at: nowSec(), ...q }));
 }
 
-describe('drain-inbox.sh --quota-gate — INV-A/INV-B: unknown state fails OPEN, audibly', () => {
-  it('no file at all → open, and says why', () => {
+describe('drain-inbox.sh --quota-gate — INV-A/INV-B: unknown state fails CLOSED, audibly', () => {
+  it('no file at all → DEFER (exit 42), says why, and names the quota file', () => {
     const r = run(['--quota-gate']);
-    expect(r.code).toBe(0);
-    expect(r.out).toMatch(/^open:/);
+    expect(r.code).toBe(42);
+    expect(r.out).toMatch(/^defer:/);
     expect(r.out).toMatch(/no-reading/);
+    expect(r.out).toContain(quotaFile);
   });
 
-  it('unparseable garbage → open, not a crash and not a silent throttle', () => {
+  it('an unreadable file (permission denied) → DEFER, same as missing', () => {
+    write({ used_percentage: 1, resets_at: nowSec() + 3600 });
+    fs.chmodSync(quotaFile, 0o000);
+    let readable = true;
+    try { fs.accessSync(quotaFile, fs.constants.R_OK); } catch { readable = false; }
+    try {
+      // Root (common in containers) ignores file permissions, so chmod cannot make
+      // the file unreadable to this process there — skip rather than assert nothing.
+      if (!readable) {
+        const r = run(['--quota-gate']);
+        expect(r.code).toBe(42);
+        expect(r.out).toMatch(/^defer:/);
+        expect(r.out).toMatch(/no-reading/);
+      }
+    } finally {
+      fs.chmodSync(quotaFile, 0o644);
+    }
+  });
+
+  it('unparseable garbage → DEFER, not a crash and not a silent admit', () => {
     fs.writeFileSync(quotaFile, 'not json at all {{{');
     const r = run(['--quota-gate']);
-    expect(r.code).toBe(0);
-    expect(r.out).toMatch(/^open:/);
+    expect(r.code).toBe(42);
+    expect(r.out).toMatch(/^defer:/);
     expect(r.out).toMatch(/no-reading/);
   });
 
-  it('a reading with fields missing → open', () => {
+  it('a reading with fields missing → DEFER', () => {
     fs.writeFileSync(quotaFile, JSON.stringify({ observed_at: nowSec() }));
-    expect(run(['--quota-gate']).code).toBe(0);
+    expect(run(['--quota-gate']).code).toBe(42);
   });
 
-  it('STALE reading → open even though the percentage is way over the bar', () => {
+  it('STALE reading → DEFER even though the percentage is way over the bar (the staleness, not the level, is what deferred it — see the control below)', () => {
     // 99% used, but observed hours ago: nobody has looked since, so it proves nothing.
     write({ used_percentage: 99, resets_at: nowSec() + 3600, observed_at: nowSec() - 86400 });
     const r = run(['--quota-gate']);
-    expect(r.code).toBe(0);
+    expect(r.code).toBe(42);
+    expect(r.out).toMatch(/^defer:/);
     expect(r.out).toMatch(/stale/);
+    expect(r.out).toContain(quotaFile);
+  });
+
+  it('CONTROL: a fresh reading well under the bar still ADMITS — the gate is not simply denying everything', () => {
+    write({ used_percentage: 5, resets_at: nowSec() + 3600 });
+    const r = run(['--quota-gate']);
+    expect(r.code).toBe(0);
+    expect(r.out).toMatch(/^open:/);
   });
 
   it('resets_at already in the past → open (the window reset itself)', () => {
@@ -235,13 +271,15 @@ describe('drain-inbox.sh --quota-publish-wall — the reactive producer', () => 
 });
 
 describe('drain-inbox.sh --quota-health — an inert gate must not be silent', () => {
-  // Failing open on a missing reading is correct, but it makes a dead gate and a
-  // healthy one look identical. This is the seam that tells them apart.
-  it('says INERT when there is no reading, naming the fail-open', () => {
+  // The gate now HOLDS (fails closed) on a missing reading rather than admitting
+  // blind (#1775), but that hold is still uninformed — it isn't weighing a real
+  // usage number. A blind-and-holding gate and a healthy one still look identical
+  // from the outside; this is the seam that tells them apart.
+  it('says INERT when there is no reading, naming that it now fails CLOSED', () => {
     const r = run(['--quota-health'], { MINSPEC_QUOTA_FILE: '/nonexistent/x.json' });
     expect(r.code).toBe(0);
     expect(r.out).toMatch(/^inert:/);
-    expect(r.out).toMatch(/failing open/i);
+    expect(r.out).toMatch(/failing closed/i);
   });
 
   it('says INERT when the reading is stale rather than reporting a stale number as live', () => {

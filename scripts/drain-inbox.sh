@@ -47,7 +47,7 @@
 #                  reset time, the loop sleeps to that instead of guessing.
 #   MINSPEC_QUOTA_FILE=~/.claude/quota.json — the published 5h window deadline.
 #   MINSPEC_QUOTA_ADMIT_PCT=90     — defer a cycle at/above this %% of the window.
-#   MINSPEC_QUOTA_STALE_SEC=900    — ignore a reading older than this (fails open).
+#   MINSPEC_QUOTA_STALE_SEC=900    — ignore a reading older than this (fails CLOSED — defers).
 #   MINSPEC_DRAIN_POLL=30          — session-liveness poll granularity while waiting.
 #   MINSPEC_DRAIN_MAX_LIFETIME=28800 — hard wall-clock cap on a loop (8 h backstop).
 #   MINSPEC_DRAIN_MAX_FAILURES=3   — stop after N consecutive non-quota cycle errors.
@@ -857,19 +857,23 @@ _quota_read() {
 }
 
 # quota_gate: exit 0 = admit, 42 = defer. Prints the verdict AND its reason, so a
-# deferral and a fail-open are never silent. 42 is deliberate: run_loop already
-# treats it as "pause, not a failure", so admission control needs no new branch.
+# deferral is never silent. An UNKNOWN budget (no reading, or a stale one) DEFERS
+# rather than admits — a missing or expired witness must read as "hold", never as
+# permission to spend a build agent's quota (constitution invariant 2; #1775). 42
+# is deliberate: run_loop already treats it as "pause, not a failure", so admission
+# control needs no new branch — a denied cycle here is a sleep-and-retry, not an
+# outage.
 quota_gate() {
   local vals p r o wp wr now
   now=$(date +%s)
   if ! vals=$(_quota_read); then
-    echo "open:no-reading (no usable $QUOTA_FILE — proceeding)"
-    return 0
+    echo "defer:no-reading (no usable $QUOTA_FILE — holding admission until a reading appears)"
+    return 42
   fi
   read -r p r o wp wr <<<"$vals"
   if (( now - o > QUOTA_STALE_SEC )); then
-    echo "open:stale (reading is $(( now - o ))s old, limit ${QUOTA_STALE_SEC}s — proceeding)"
-    return 0
+    echo "defer:stale (reading is $(( now - o ))s old, limit ${QUOTA_STALE_SEC}s, $QUOTA_FILE — holding until refreshed)"
+    return 42
   fi
   # The WEEKLY ceiling is checked before anything to do with the 5h window, because the
   # two are INDEPENDENT: the 5h window turning over does not refill the weekly one. This
@@ -925,20 +929,22 @@ quota_sleep_secs() {
 }
 
 # quota_health: one line, once per loop, saying whether admission control is actually
-# LIVE. Failing open on a missing reading is correct, but it is also invisible — an
-# inert gate and a healthy one both look like silence, so the drain would report a quiet
-# window either way (constitution invariant 2: no silent gate). This is the difference
-# between installed and adopted: say out loud when the gate cannot see anything.
+# SEEING DATA. A missing or stale reading now correctly HOLDS the gate shut (defers
+# every cycle, #1775) rather than admitting blind, but that hold is still uninformed —
+# it is not weighing a real usage number, just refusing on principle until one exists.
+# An inert gate and a healthy one still look identical from the outside otherwise
+# (constitution invariant 2: no silent gate). This is the difference between installed
+# and adopted: say out loud when the gate cannot see anything.
 quota_health() {
   local vals p r o wp wr now
   now=$(date +%s)
   if ! vals=$(_quota_read); then
-    echo "inert: no reading at $QUOTA_FILE — admission control is OFF (failing open). The statusline publisher only runs when a statusline renders, which VS Code and headless sessions never do; the wall-message producer will populate it on the next quota hit."
+    echo "inert: no reading at $QUOTA_FILE — admission control is BLIND and HOLDING (failing closed: every cycle defers until a reading appears). The statusline publisher only runs when a statusline renders, which VS Code and headless sessions never do; the wall-message producer will populate it on the next quota hit."
     return 0
   fi
   read -r p r o wp wr <<<"$vals"
   if (( now - o > QUOTA_STALE_SEC )); then
-    echo "inert: reading is $(( (now - o) / 60 )) min old (limit $(( QUOTA_STALE_SEC / 60 )) min) — admission control is OFF (failing open)."
+    echo "inert: reading is $(( (now - o) / 60 )) min old (limit $(( QUOTA_STALE_SEC / 60 )) min) — admission control is BLIND and HOLDING (failing closed) at $QUOTA_FILE."
     return 0
   fi
   if (( wp >= 0 )); then
@@ -952,9 +958,10 @@ quota_health() {
 #
 # The statusline publisher only runs when a statusline RENDERS. VS Code and headless
 # sessions never render one, so on those machines nothing is ever published and the
-# gate sits permanently inert — failing open forever, which is correct behaviour and
-# therefore invisible. This is the reading that is always available: it arrives at the
-# exact moment the window is exhausted.
+# gate sits permanently inert — HOLDING every cycle closed (#1775) until this producer
+# (or any other) writes a reading. That hold is loud, not invisible: quota_gate prints
+# why on every deferred cycle. This is the reading that is always available: it arrives
+# at the exact moment the window is exhausted.
 #
 # It is strictly worse than the statusline reading (no percentage, so no PREDICTIVE
 # admission — only the deadline) but it needs no credentials and makes no network call,
