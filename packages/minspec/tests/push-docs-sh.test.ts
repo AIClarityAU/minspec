@@ -143,6 +143,44 @@ describe('push-docs.sh — delete-only lane push (#798)', () => {
   });
 });
 
+describe('push-docs.sh — untracked directory expansion (#1119)', () => {
+  it('an untracked approval sidecar directory (first approval for a spec) is expanded to its files, not cp -r aborted', () => {
+    const { root, origin, primary } = setupRepo({
+      'docs/decisions/DR-100.md': 'seed\n',
+      // `.minspec/approvals/specs/minspec/` is already tracked (as it is in a
+      // real checkout, via sibling specs' sidecars) so the untracked entry git
+      // reports is the new SPEC's sidecar directory specifically, not some
+      // shallower ancestor.
+      '.minspec/approvals/specs/minspec/.gitkeep': '',
+    });
+    const callsLog = path.join(root, 'gh-calls.log');
+
+    // First approval for a spec: the sidecar directory did not exist before,
+    // so `git status --porcelain` reports it as an untracked DIRECTORY entry
+    // (`?? .minspec/approvals/.../`), not the file inside it.
+    const sidecarDir = path.join(primary, '.minspec/approvals/specs/minspec/SPEC-047-audience-file-separation');
+    fs.mkdirSync(sidecarDir, { recursive: true });
+    fs.writeFileSync(path.join(sidecarDir, 'requirements.md.json'), '{"hash":"abc"}\n');
+
+    // Sanity: confirm git reports the directory itself, matching the repro.
+    const porcelain = git(primary, 'status', '--porcelain');
+    expect(porcelain).toMatch(/^\?\? \.minspec\/approvals\/specs\/minspec\/SPEC-047-audience-file-separation\/$/m);
+
+    const out = runPushDocs(primary, root, ['-m', 'docs: approve SPEC-047 requirements']);
+    expect(out).not.toMatch(/cp: -r not specified/);
+    expect(out).toMatch(/push-docs: opened/);
+
+    const branch = branchFromGhLog(callsLog);
+    expect(
+      git(
+        origin,
+        'show',
+        `${branch}:.minspec/approvals/specs/minspec/SPEC-047-audience-file-separation/requirements.md.json`,
+      ),
+    ).toBe('{"hash":"abc"}');
+  });
+});
+
 describe('push-docs.sh — mixed add+delete lane push (#798)', () => {
   it('one file is copied/modified, another is git rm-ed, in the same push', () => {
     const { root, origin, primary } = setupRepo({

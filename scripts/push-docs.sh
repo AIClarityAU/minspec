@@ -60,12 +60,22 @@ while IFS= read -r line; do
 done < <(git -C "$root" status --porcelain)
 
 # Default file set: changed working-tree paths that are inside the docs corpus,
-# in git's own listing order.
+# in git's own listing order. `git status --porcelain` reports an UNTRACKED
+# directory as the directory itself (`?? path/to/dir/`), not the files inside
+# it — expand any such trailing-slash entry to its individual untracked files
+# first, so the copy loop below never receives a directory (#1119).
 if [ "${#files[@]}" -eq 0 ]; then
   for line in "${status_lines[@]}"; do
     p="${line:3}"
     p="${p##*-> }"
-    [[ "$p" =~ $CORPUS ]] && files+=("$p")
+    if [[ "$p" == */ ]]; then
+      while IFS= read -r sub; do
+        [ -n "$sub" ] || continue
+        [[ "$sub" =~ $CORPUS ]] && files+=("$sub")
+      done < <(git -C "$root" ls-files --others --exclude-standard -- "$p")
+    else
+      [[ "$p" =~ $CORPUS ]] && files+=("$p")
+    fi
   done
   [ "${#files[@]}" -gt 0 ] || { echo "push-docs: no changed docs-corpus files found" >&2; exit 1; }
 fi
