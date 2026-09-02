@@ -256,8 +256,15 @@ autonomy_stop_classes_for_paths() {
     fi
   fi
 
+  # Report a rendering failure as a FAILURE. The last command used to be the
+  # `printf`, which returns 0 — so a broken pipeline here (a missing awk, a
+  # `pipefail` trip) printed nothing and exited 0, and empty stdout reads to
+  # mayProceed as "no stop classes apply". The one thing this whole function
+  # exists to never say by accident.
   local out=""
-  out=$(printf '%s\n' ${classes[@]+"${classes[@]}"} | awk 'NF && !seen[$0]++' | tr '\n' ',' | sed 's/,$//')
+  if ! out=$(printf '%s\n' ${classes[@]+"${classes[@]}"} | awk 'NF && !seen[$0]++' | tr '\n' ',' | sed 's/,$//'); then
+    return 1
+  fi
   printf '%s\n' "$out"
 }
 
@@ -275,10 +282,20 @@ autonomy_stop_classes_for_paths() {
 # the decision can be reviewed afterwards. Stated here because it is the same
 # alternative every time — hold the PR and let a human press merge.
 autonomy_may_merge() {
-  local what="${1-}" changed="${2-}"
+  local what="${1-}" changed="${2-}" classes=""
+  # Capture the populator's EXIT STATUS, never just its stdout. Inlining it as
+  # `$(...)` in the argument list swallows a non-zero exit, so a derivation that
+  # failed while printing nothing would hand `mayProceed` an EMPTY list — "no
+  # stop classes apply" — and PROCEED under `act`. That is the exact confusion
+  # between "nothing applies" and "could not tell" this gate is built to refuse,
+  # so it must not be reintroduced one layer up by a command substitution.
+  if ! classes=$(autonomy_stop_classes_for_paths "$changed"); then
+    printf '%s\n' '{"proceed":false,"reason":"stop-class-derivation-failed","detail":"the stop-class derivation exited non-zero — failing closed; an empty list is NOT the same as no stop classes","autonomy":"ask"}'
+    return 1
+  fi
   autonomy_may_proceed \
     "$what" \
-    "$(autonomy_stop_classes_for_paths "$changed")" \
+    "$classes" \
     "hold the PR for a human merge keystroke — strictly safer, at the cost of the review queue backing up and unattended drain stalling"
 }
 

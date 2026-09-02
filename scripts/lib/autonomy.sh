@@ -50,8 +50,17 @@ _AUTONOMY_TSX_BIN="${MINSPEC_AUTONOMY_TSX_BIN:-}"
 
 # The fail-safe verdict, printed whenever the gate could not be RUN at all. Shaped
 # exactly like a real verdict so every caller parses one thing.
+#
+# Built with `jq --arg`, not `printf '%s'`: the detail interpolates
+# AUTONOMY_REPO_ROOT, and a path holding a quote or a backslash would emit
+# malformed JSON — the caller still DENIES (an unparseable verdict is not a
+# verdict), but the log line a human reads to find out why would be garbled, and
+# a hold whose reason is unreadable is a hold nobody can act on. The printf form
+# survives as the fallback for the one case jq cannot cover: jq itself missing.
 _autonomy_gate_error() {
-  printf '{"proceed":false,"reason":"gate-invocation-failed","detail":"%s","autonomy":"ask"}\n' "$1"
+  jq -cn --arg d "$1" \
+    '{proceed:false, reason:"gate-invocation-failed", detail:$d, autonomy:"ask"}' 2>/dev/null \
+    || printf '{"proceed":false,"reason":"gate-invocation-failed","detail":"the autonomy gate could not be run, and jq is unavailable to report why","autonomy":"ask"}\n'
 }
 
 # autonomy_verdict_detail <verdict-json> — the human-readable half, for a log line.

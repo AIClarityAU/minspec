@@ -304,6 +304,32 @@ describe('C — the stop-class derivation is never empty when the change set is 
     expect(classesFor('\n \t\n')).toEqual(['irreversible-or-outward-facing']);
   });
 
+  it(
+    'DENIES when the derivation itself breaks — an empty list is not "nothing applies"',
+    () => {
+      // The subtle one. Before this, the derivation's last command was a `printf`,
+      // which returns 0 — so a broken pipeline printed nothing and exited SUCCESS,
+      // and empty stdout reads to mayProceed as "no stop classes apply" ⇒ PROCEED.
+      // The failure is injected by shadowing `awk`, which the derivation pipes
+      // through, so the whole chain is exercised for real rather than asserted.
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'autonomy-noawk-'));
+      const fake = path.join(dir, 'awk');
+      fs.writeFileSync(fake, '#!/usr/bin/env bash\nexit 1\n');
+      fs.chmodSync(fake, 0o755);
+      try {
+        const r = mayMerge('packages/minspec/src/lib/config.ts', {
+          MINSPEC_AUTONOMY: 'act',
+          PATH: `${dir}${path.delimiter}${process.env.PATH ?? ''}`,
+        });
+        expect(r.code, r.out).toBe(1);
+        expect(JSON.parse(r.out).reason).toBe('stop-class-derivation-failed');
+      } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+      }
+    },
+    SPAWN_TIMEOUT,
+  );
+
   it('a genuinely clean, code-only change set derives NO classes', () => {
     // The control. Without this, "always non-empty" would pass vacuously and the
     // gate would be an unconditional hold rather than a gate.
