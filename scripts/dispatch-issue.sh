@@ -121,11 +121,19 @@ PUBLISH_PATH_RE='^sites/|^\.github/workflows/deploy-sites\.yml$'
 # else refuses the merge. Constitution invariant 2: no load-bearing gate hinges on a
 # single producer that one permission/config gap can disable — provide an independent
 # second witness. This mandate is that witness: dispatch declines to arm, independently
-# of anything ai-review does. Mirrors ai-review.yml's machinery regex
-# `^(\.github/|scripts/)` plus `^\.githooks/` (missing from the ai-review side too —
-# #1284). Kept a NAMED constant so the planned #509 narrowing (gate-critical vs
-# operational split) changes ONE definition, in lock-step with the ai-review side.
-MACHINERY_PATH_RE='^\.github/|^\.githooks/|^scripts/'
+# of anything ai-review does.
+#
+# CANONICAL SOURCE (#1758): packages/minspec/src/lib/machinery-paths.ts — a HAND-COPY of
+# its buildMachineryRegexSource() (a bash var can't import a TS module), pinned
+# character-for-character by packages/minspec/tests/machinery-paths.test.ts. `.githooks/`
+# is present on BOTH sides here, same as ai-review.yml — a prior version of this comment
+# claimed it was missing from ai-review's side "too — #1284"; that was stale (fixed once
+# on the ai-review side, never here) and is corrected by #1758, which found this regex's
+# REAL drift: it omitted the two `packages/minspec/src/lib/*.ts` generator paths
+# ai-review.yml covers, so this second witness was inert for them. #1758 also folded in
+# `.circleci/`/`.buildkite/`/`.husky/` (unused here, zero-cost) so all three definitions
+# — this one, ai-review.yml, and auto-merge-gate.ts's BOUNDARY_DIR_PREFIXES — agree.
+MACHINERY_PATH_RE='^\.github/|^scripts/|^\.githooks/|^\.circleci/|^\.buildkite/|^\.husky/|^packages/minspec/src/lib/(template-registry|ci-review-templates)\.ts$'
 
 # paths_have_approvable_doc (#833, extended #981): does a set of changed paths
 # (newline-separated on stdin) touch something a HUMAN — not `ai-review:pass` — must own
