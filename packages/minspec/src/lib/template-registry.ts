@@ -1820,6 +1820,14 @@ const CLAUDE_HOOK_TEMPLATES: readonly ManagedRegionTemplate[] = [
 // MinSpec's own `.github/workflows/ai-review.yml` is NOT scaffolded from this
 // template — the CI-review stack is in `SELF_HOSTED_TEMPLATE_NAMES`, so this repo
 // authors that file directly and keeps its true, MinSpec-vantage wording.
+//
+// #1497 re-reported the same finding (AIClarityAU/scroogellm#135, same panel run)
+// against a scroogellm copy that predated this rewrite landing there — it is not a
+// second defect. `machinery-comment-localization.test.ts` pins the three specific
+// claims #1497 quoted (the `machinery-paths.test.ts` coverage sentence, the
+// "LARGEST blast radius" framing of `ci-review-templates.ts`, and `.githooks/`
+// described as a live gate via #1041/#1120/#1273) so none can silently reappear in
+// the shipped copy.
 // ---------------------------------------------------------------------------
 
 /** Opening marker of the machinery-path comment block in `ai-review.yml`. */

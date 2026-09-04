@@ -117,6 +117,33 @@ describe('#1486 machinery comment — the shipped copy claims no coverage it lac
   });
 });
 
+describe('#1497 machinery comment — the specific quoted claims never reappear', () => {
+  // #1497 re-reported this exact defect class (same provenance: AIClarityAU/scroogellm#135's
+  // panel) against a scroogellm copy that predated the #1486 rewrite landing there. These
+  // tests pin the three phrases #1497 quoted verbatim, so a future reword of the upstream
+  // block cannot silently reintroduce one of them into the shipped copy without a test
+  // failing here — the broader assertions above check the block's shape, not this wording.
+
+  it('never claims the "LARGEST blast radius" of ci-review-templates.ts downstream', () => {
+    // #1497 med finding: the upstream prose calls `ci-review-templates.ts` "the LARGEST
+    // blast radius of anything here" — true only because the CI-review stack IS authored
+    // here; asserting it in a consuming repo is unsubstantiated.
+    expect(shipped()).not.toContain('LARGEST blast radius');
+  });
+
+  it('never cites the .githooks/ gate-history issue numbers downstream', () => {
+    // #1497 low finding: the upstream `.githooks/` line cites the specific issues that made
+    // it a certifying gate in MinSpec (#1041 protected-branch, #1120 workflow-file
+    // protection, #1273 the PR that slipped through) — none of that history exists in a repo
+    // whose hooks live elsewhere (scroogellm's are under scripts/hooks/).
+    const shippedText = shipped();
+    for (const issueRef of ['#1041', '#1120', '#1273']) {
+      expect(shippedText, `${issueRef} present in shipped copy`).not.toContain(issueRef);
+    }
+    expect(shippedText).not.toContain('the review system certified a change to a gate');
+  });
+});
+
 describe('#1486 machinery comment — the rewrite is comment-only', () => {
   it('leaves every non-comment line of the workflow untouched', () => {
     // The real invariant behind #564's byte-identity gate is that a consuming repo runs the
