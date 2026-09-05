@@ -168,8 +168,12 @@ defined path into the human's one next-task signpost.
   labelled entry in a **hold queue** that the existing **[SPEC-012](../SPEC-012-next-task-resolver/requirements.md)**
   next-task resolver reads, so the signpost picks the single next human action. The drain MUST
   NOT auto-decide these and MUST NOT invent a second surfacing mechanism (founder steer). The
-  precise queue representation the resolver consumes is a
-  **[Decision needed — D3](#d3--how-held-items-reach-the-spec-012-resolver)**.
+  precise queue representation the resolver consumes is
+  **[D3](#d3--how-held-items-reach-the-spec-012-resolver), resolved 2026-09-05**: held items
+  split by who can discharge them — human-held to the SPEC-012 signpost, agent-held to the
+  agent-queue surface ([DR-085](../../../docs/decisions/DR-085.md) §1) — with the queue
+  representation itself deferred to #1608, which owns that split. "No second surfacing
+  mechanism" is unchanged: the two surfaces are DR-085's mandated split, not a parallel signpost.
 - **FR-6 (machinery / governance hold).** The drain MUST **hold** (never auto-merge) any PR
   that touches machinery (`.github/`, `scripts/`, hooks, CI, branch-protection config) or that
   is a governance act (DR/spec/epic acceptance, constitution/invariant change). Held ⇒ FR-5.
@@ -216,6 +220,14 @@ These are the choices this spec deliberately does **not** make for the founder. 
 options and the trade-off; the human's one read resolves them. Resolving them may promote one or
 more into a Decision Record (see [DR note](#dr-note)).
 
+> **Clarify status: all four resolved** — D1 on 2026-08-23, D2/D3/D4 on 2026-09-05. Each keeps
+> its options below as the record of what was chosen between, per [DR-086](../../../docs/decisions/DR-086.md)
+> §4 (the rejected alternatives are the only review path once they are no longer seen live).
+>
+> **One residual:** D3's *mechanism* is deferred to #1608, so the Clarify pass is decided but
+> not fully discharged. That is a deliberate deferral, not an open question — the routing rule
+> is settled; only its representation waits on the surface split.
+
 ### D1 — What runs the loop when no session is alive?
 
 > **RESOLVED 2026-08-23 — Option A** (founder). The GitHub Action runs only the **non-LLM**
@@ -257,6 +269,19 @@ no PAYG secret to CI. Downside named: rework still needs a session, so a PR stuc
 `ai-review:changes` on a quiet day waits.
 
 ### D2 — Which identity/token merges, and how is INV-2 guaranteed?
+
+> **RESOLVED 2026-09-05 — default `GITHUB_TOKEN`** (founder). Paired with a test asserting it
+> cannot merge past a required check, so INV-2 is structural rather than promised.
+>
+> **Rejected:** a fine-grained PAT and a GitHub App installation token. Both buy a distinct
+> merger identity in the audit trail, and both are stored secrets that can be over-scoped. The
+> deciding factor is R1 — *"a scheduled unattended merger becomes a way to bypass review"*:
+> `GITHUB_TOKEN` cannot approve its own required checks, so it is the option that cannot bypass
+> the gate even if misconfigured. Least-privilege and self-installing beat a nicer audit line.
+>
+> **Cost accepted:** no distinct merger identity — every drain merge reads as GitHub itself.
+> Mitigated by the merge-reason comment named below.
+
 The scheduled Action needs a token that can merge. Options: the default `GITHUB_TOKEN`
 (cannot approve its own required checks; merges only if protection admits — good), a fine-grained
 PAT, or a GitHub App installation token. *Trade-off:* `GITHUB_TOKEN` is the least-privilege,
@@ -267,6 +292,27 @@ required check. Downside: no distinct merger identity in the audit trail — mit
 merge-reason comment.
 
 ### D3 — How do held items reach the SPEC-012 resolver?
+
+> **RESOLVED 2026-09-05 — the question splits first; the mechanism is deferred** (founder).
+>
+> [DR-085](../../../docs/decisions/DR-085.md) landed after this section was written and changes
+> its premise. The signpost now carries **only acts the human can discharge**. So "held items
+> feed the signpost" is no longer one routing rule but two:
+>
+> - a PR held for a **human decision** is dischargeable → it belongs on the SPEC-012 signpost;
+> - a PR held **waiting on an agent** is not → it belongs on the agent-queue surface (DR-085 §1).
+>
+> FR-5's "no parallel surface" requirement still holds — the two surfaces are the split DR-085
+> mandates, not a second signpost.
+>
+> **Mechanism (label vs hold-queue file vs extending SPEC-012's pending-item model) is deferred
+> to #1608**, which owns the surface split. Picking one now would route both kinds to one
+> surface and re-create exactly what DR-085 §1 removed.
+>
+> **Rejected:** choosing the label mechanism immediately. It is the cheapest and is visible on
+> GitHub, but it answers the pre-DR-085 question. **Cost accepted:** D3 is blocked behind #1608,
+> so this spec cannot fully close its Clarify pass until that lands.
+
 FR-5 requires held items to feed the existing signpost, not a parallel surface. Options:
 (a) a GitHub label (`needs-human-review` / a new `held:*`) the resolver already or newly reads;
 (b) a hold-queue file the resolver ingests; (c) extend SPEC-012's pending-item model with a
@@ -276,6 +322,18 @@ but is new state to keep in sync. **This is genuinely a SPEC-012 question** — 
 source lands here or in SPEC-012 is itself part of the decision.
 
 ### D4 — Cadence / cost of the scheduled cycle.
+
+> **RESOLVED 2026-09-05 — both** (founder). Event-driven (`pull_request`/`push`) for promptness,
+> plus a slow cron as the liveness floor, on a non-round minute to avoid the fleet-wide `:00`
+> spike. Cron interval matches the existing `MINSPEC_DRAIN_INTERVAL=1200` default.
+>
+> **Rejected:** event-driven only — near-zero idle cost, but misses time-based staleness, which
+> is the case the loop exists for (a PR that goes stale while nothing pushes). Cron only —
+> a liveness floor with no responsiveness.
+>
+> **Cost accepted:** Actions minutes burn on a quiet repo even when there is nothing to do. R6
+> carries it; the non-round minute and the 20-minute floor are the mitigation.
+
 `on: schedule` cadence trades responsiveness against Actions minutes and API rate limits.
 Options: event-driven only (`pull_request`/`push`, near-zero idle cost, misses time-based
 staleness), a slow cron (e.g. every ~20 min, matching the existing
