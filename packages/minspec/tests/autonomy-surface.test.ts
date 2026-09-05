@@ -11,6 +11,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { execFileSync } from 'child_process';
 import { STOP_CLASSES } from '../../../scripts/lib/autonomy';
 
@@ -36,14 +37,27 @@ function run(env: Record<string, string> = {}): string {
 
 describe('autonomy-status — reflects the resolver', () => {
   it('reports ask from the CONFIG path, with no override defined at all', () => {
+    // Own fixture .minspec/config.json with no `autonomy` key — this pins the
+    // resolver's no-key-present path itself, not this repo's live config value
+    // (which is governance state that changes independently of this suite, e.g.
+    // #1799 setting it to `act`). Passed as the script's `repoRoot` arg instead
+    // of REPO so the CONFIG path under test is the fixture's, not the repo's own.
+    //
     // MINSPEC_AUTONOMY:'' is not "unset" — readAutonomy returns early on any
     // DEFINED override, so an empty string exercised the override branch and the
     // config-file default was never reached. Only deleting the key tests it.
-    const env = { ...process.env };
-    delete env.MINSPEC_AUTONOMY;
-    const out = execFileSync('npx', ['tsx', SCRIPT, REPO], { encoding: 'utf-8', env });
-    expect(out).toMatch(/Autonomy: ask/);
-    expect(out).toMatch(/human/i);
+    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'autonomy-status-nokey-'));
+    fs.mkdirSync(path.join(fixture, '.minspec'));
+    try {
+      fs.writeFileSync(path.join(fixture, '.minspec', 'config.json'), JSON.stringify({}));
+      const env = { ...process.env };
+      delete env.MINSPEC_AUTONOMY;
+      const out = execFileSync('npx', ['tsx', SCRIPT, fixture], { encoding: 'utf-8', env });
+      expect(out).toMatch(/Autonomy: ask/);
+      expect(out).toMatch(/human/i);
+    } finally {
+      fs.rmSync(fixture, { recursive: true, force: true });
+    }
   });
 
   it('an empty override is a defined value, and still resolves to ask', () => {
