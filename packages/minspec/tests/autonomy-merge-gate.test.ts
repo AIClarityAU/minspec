@@ -112,9 +112,22 @@ describe('A — the CLI seam is fail-closed on argv (pure, no spawn)', () => {
   });
 
   it('denies with no autonomy setting at all — the DEFAULT is ask', () => {
-    const r = runAutonomyCli(ok, {});
-    expect(r.exitCode).toBe(1);
-    expect(JSON.parse(r.line).reason).toBe('autonomy-is-ask');
+    // Own fixture repo root with a .minspec/config.json that has no `autonomy`
+    // key. The shared `ok` array's ROOT is THIS repo's real root, and reading
+    // its live config.json would pin whatever this repo's governance currently
+    // says (e.g. `act`, #1799) rather than the resolver's no-key-present
+    // default — so this one test gets its own argv rather than reusing `ok`.
+    const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'autonomy-cli-nokey-'));
+    fs.mkdirSync(path.join(fixture, '.minspec'));
+    try {
+      fs.writeFileSync(path.join(fixture, '.minspec', 'config.json'), JSON.stringify({}));
+      const argv = ['--may-proceed', '--repo-root', fixture, '--summary', 'do a thing', '--rejected-alternatives', 'do nothing'];
+      const r = runAutonomyCli(argv, {});
+      expect(r.exitCode).toBe(1);
+      expect(JSON.parse(r.line).reason).toBe('autonomy-is-ask');
+    } finally {
+      fs.rmSync(fixture, { recursive: true, force: true });
+    }
   });
 
   it.each([
@@ -376,12 +389,28 @@ describe('D — the merge decision both arms make (real bash, real gate)', () =>
   it(
     'with NO autonomy key present, a perfectly clean PR still does not merge',
     () => {
-      // Reads the REAL .minspec/config.json, which has no `autonomy` key. This is
-      // the landing state of this change: the arms stop firing until a human sets
-      // the key (#1743). It is intended, not a regression.
-      const r = mayMerge('packages/minspec/src/lib/config.ts');
-      expect(r.code, r.out).toBe(1);
-      expect(JSON.parse(r.out).reason).toBe('autonomy-is-ask');
+      // Own fixture .minspec/config.json with no `autonomy` key — this pins the
+      // resolver's no-key-present path itself, not this repo's live config value
+      // (which is governance state that changes independently of this suite, e.g.
+      // #1799 setting it to `act`). Same fixture idiom as the
+      // "reads the setting from .minspec/config.json" test above.
+      expect(fs.existsSync(TSX), 'node_modules/.bin/tsx is missing — run npm ci').toBe(true);
+      const fixture = fs.mkdtempSync(path.join(os.tmpdir(), 'autonomy-nokey-'));
+      fs.mkdirSync(path.join(fixture, '.minspec'));
+      try {
+        fs.writeFileSync(path.join(fixture, '.minspec', 'config.json'), JSON.stringify({}));
+        const r = mayMerge('packages/minspec/src/lib/config.ts', {
+          MINSPEC_AUTONOMY_REPO_ROOT: fixture,
+          MINSPEC_AUTONOMY_TSX_BIN: TSX,
+          // UNSET, not ''. See seam() — '' is a defined override meaning ask, and
+          // would make this pass without ever reading the fixture file.
+          MINSPEC_AUTONOMY: undefined,
+        });
+        expect(r.code, r.out).toBe(1);
+        expect(JSON.parse(r.out).reason).toBe('autonomy-is-ask');
+      } finally {
+        fs.rmSync(fixture, { recursive: true, force: true });
+      }
     },
     SPAWN_TIMEOUT,
   );
