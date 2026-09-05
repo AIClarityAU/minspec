@@ -234,6 +234,44 @@ specified against.
 - **FR-6 (adjusted).** The drain stops being the only fallback for an expired creator, since
   under FR-4b there is no gap to fall back from. It remains the reaper for expired *leases*.
 
+### The mechanism - capability REMOVED, not merely reassigned
+
+Saying "the driver owns ordering" changes nothing on its own. `shepherd_decide` can emit
+`do-rebase` today (`scripts/lib/shepherd-pr.sh:72-73`), so on any merge to `main` every live
+shepherd independently observes `BEHIND` and each one updates its own branch - N branch
+pushes, N CI runs, N full review panels, for a state that the next merge invalidates
+anyway. A rule telling shepherds to refrain is the exact "trust the model" shape the
+constitution names as the failure mode.
+
+So the amendment **removes the capability**: `do-rebase` leaves the shepherd's vocabulary
+and is replaced by a wait token. A shepherd that finds itself `BEHIND` does nothing and
+waits, because updating a branch is no longer something it can express. Only the driver
+can update, because only the driver *can*. This is checkable by a test over
+`shepherd_decide`'s output set, in the same shape as the existing
+`packages/minspec/tests/shepherd-decide.test.ts` priority-gate sweep.
+
+Note this is independent of who approves. A human keystroke on one PR puts every other PR
+`BEHIND` exactly as an unattended merge does, so the stampede is a property of `strict`
+plus N independent updaters, not of automation.
+
+### The driver may already exist - GitHub's native merge queue
+
+[SPEC-065](../SPEC-065-solo-mode-ceremony-cut/requirements.md) recorded both halves of this
+before the pain arrived: line 204 notes that `main` has **no merge queue** configured, and
+line 226 that "a merge queue (option (b)) remains the better" answer, deferred against a
+throughput trade. A merge queue does natively what FR-4b describes: it serialises, updates
+one branch at a time, and owns the order.
+
+Building a custom driver when a native one was already identified as the better answer
+needs a reason. The Clarify pass should compare them explicitly rather than assume the
+custom path.
+
+**UNVERIFIED and load-bearing for that comparison:** whether a machinery PR can enter a
+merge queue at all. A queue requires the PR to satisfy required checks, and
+`machinery-review-required` is `ACTION_REQUIRED` by design, so machinery may be
+unqueueable - which would leave exactly the PR class this spec most needs to move outside
+the native mechanism. Settle this before choosing.
+
 ### What this does not change
 
 `INV-5` is untouched: the fix agent stays credential-free and the parent performs every
