@@ -701,7 +701,7 @@ An adversarial analysis of append-only log integrity was run to answer one quest
 
 ## [DR-088 — Ownership declarations leave the canonical approval hash - the decision, the migration, and the unsolved half](DR-088.md)
 
-*Status: proposed · Date: 2026-08-24*
+*Status: accepted · Date: 2026-08-24*
 
 <!-- dr-summary:DR-088 auto=a3444f8d8257 -->
 The founder decided on 2026-08-23, answering #1481 (should implements: be part of the canonicalized spec hash?), that implements: comes out of the canonical approval hash. This record does not relitigate that. It answers what exactly leaves, how the existing approvals migrate, and - honestly - fails to answer what replaces the lost alarm.
