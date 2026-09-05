@@ -19,8 +19,10 @@ import {
 import { execFileSync } from 'child_process';
 import {
   mergeFile,
-  loadHashes,
+  loadProvenHashes,
+  type ManifestBaselineState,
   saveHashes,
+  PREAMBLE_HEADING,
   saveTemplateBaseline,
   sectionHashesFromMarkdown,
   verifyGeneratedHashesConsistent,
@@ -440,6 +442,17 @@ export interface ManagedRegionWarning {
   /** Human-readable, actionable message. */
   readonly message: string;
   /**
+   * Every path this ONE notice covers, when it covers more than one — the
+   * `'preserved-without-baseline'` notice is emitted once per refresh rather than
+   * once per file (#1697 F3), because the surfacing layer awaits each notice in
+   * turn and a run of modal-ish toasts is read as noise and dismissed unread.
+   *
+   * Optional and defaulting to `[outputPath]`, so every existing producer and
+   * consumer is unaffected; `outputPath` always names the first path, so a caller
+   * that only understands the single-path field still points somewhere true.
+   */
+  readonly outputPaths?: readonly string[];
+  /**
    * What KIND of notice this is, so the surfacing layer can offer the right
    * actions. Optional and defaulting to `'missing-markers'` so every existing
    * producer and consumer is unaffected.
@@ -452,8 +465,30 @@ export interface ManagedRegionWarning {
    * project's, and the project's won (#1529). Nothing is broken and nothing needs
    * re-scaffolding; its `outputPath` points at `.minspec/config.json`, where a
    * deliberate rename is declared.
+   *
+   * `'preserved-without-baseline'` reports that the section merge kept existing
+   * content because no baseline hash was recorded for it, so a template update was
+   * withheld (#1697). Nothing is broken and nothing needs re-scaffolding — the
+   * files are INTACT, which is the point; the human is told so they can decide
+   * whether they still want the template's version. It fires ONCE, on the refresh
+   * that has no baseline, while the hold it announces lasts until the section's
+   * content converges or its body is emptied — so the message has to carry that
+   * standing consequence itself (#1697 NEW-1), or the reader takes "your files are
+   * intact" for "and everything still updates". It MUST therefore be surfaced
+   * informationally, with no overwrite action: routing it to the default
+   * missing-markers branch offers "Re-scaffold (overwrite)", which for a
+   * section-merged path is not in `MANAGED_REGION_TEMPLATES`, silently does
+   * nothing, and then reports success (#1697 F2).
+   *
+   * Emitted ONCE per refresh, covering every affected file through
+   * {@link ManagedRegionWarning.outputPaths} — the one notice kind here that is not
+   * per-path.
    */
-  readonly kind?: 'missing-markers' | 'untracked' | 'project-name-mismatch';
+  readonly kind?:
+    | 'missing-markers'
+    | 'untracked'
+    | 'project-name-mismatch'
+    | 'preserved-without-baseline';
 }
 
 /** The notice raised when a declared machine-local path is removed from the index. */
@@ -479,6 +514,154 @@ export function untrackedNoticeMessage(outputPath: string): string {
     'rewritten on every refresh and showed as a permanent change; a .gitignore ' +
     'entry alone could not stop that, because git does not ignore an already-' +
     'tracked path. Commit this removal to make it stick. Reverse with `git add`.'
+  );
+}
+
+/**
+ * Render a section heading for a human. `mergeFile` reports the pre-heading
+ * content under the {@link PREAMBLE_HEADING} sentinel, which is a parser token,
+ * not something to show a user.
+ */
+function displayHeading(heading: string): string {
+  return heading === PREAMBLE_HEADING ? 'the text above the first heading' : `"${heading}"`;
+}
+
+/** One file's baseline-less holds, as reported by a single refresh. */
+export interface PreservedWithoutBaselineFile {
+  /** Output path, relative to the project root. */
+  readonly outputPath: string;
+  /** The headings whose bodies were kept, in template-pass order. */
+  readonly headings: readonly string[];
+}
+
+/**
+ * Why a refresh had no baseline to read for the sections it held.
+ *
+ * The hold is identical in all three cases; the sentence a human is given for it is
+ * not. The first version of this notice said only "machine-local and gitignored, so
+ * it is absent in a fresh clone", which is flatly false when the file is sitting
+ * right there (#1697 NEW-A2). The second added the pre-#1718 case — and then
+ * asserted THAT for a manifest MinSpec merely could not READ, which is false of one
+ * a newer MinSpec wrote. Three states, three sentences.
+ *
+ * Derived from {@link ManifestBaselineState} rather than restated, minus the one
+ * state that raises no notice (`'proven'` — nothing was distrusted), so the merge's
+ * classification and the user's sentence cannot drift apart: a fourth refused shape
+ * added there is a compile error in {@link preservedWithoutBaselineMessage} until it
+ * gets a sentence. That is a `never` default on a switch, not a promise — measured
+ * both ways: with the fourth state added, the switch fails the build at exactly one
+ * site, and the ternary chain it replaced accepted it with no error at all.
+ */
+export type PreservedWithoutBaselineReason = Exclude<ManifestBaselineState, 'proven'>;
+
+/**
+ * The notice raised when the section merge kept existing content because no
+ * baseline hash was recorded for it, so a template update was withheld (#1697).
+ *
+ * This report IS part of the fix, not polish. Preserving silently is better than
+ * overwriting silently, but it is still silent, and constitution invariant 2
+ * requires a governance-editing command to act visibly. It is also what would have
+ * caught the three `voip-sms-inbox` losses the moment they happened: the merge
+ * reflowed the whole constitution to template wording, so the one section that lost
+ * a ratified standing exception read as part of a reformat in review.
+ *
+ * ONE message for the whole refresh, not one per file (#1697 F3). The surfacing
+ * layer awaits each notice before showing the next, so a per-file notice turned a
+ * multi-file refresh into a queue of toasts to click through — and a queue is read
+ * as noise and dismissed, which is how a report meant to be un-missable becomes
+ * invisible.
+ *
+ * Names the sections outright rather than only counting them — a count sends the
+ * reader to diff the file to find out which ones, which is the same silence in a
+ * smaller box (cf. {@link projectNameMismatchMessage}).
+ *
+ * It does NOT tell the reader the held sections are theirs (#1697 NEW-A2). MinSpec
+ * does not know that; what it knows is that it cannot prove they are its own, and
+ * its OWN older wording is held on exactly the same footing — that is the standing
+ * cost of dropping an entry it cannot vouch for, and the sharpest case is a heading
+ * an older template shipped and a newer one dropped, whose stale body is then
+ * protected as if it were the user's. Naming that is what makes the release
+ * ("empty it") an instruction the reader can follow rather than one they would only
+ * risk on content they wrote.
+ */
+export function preservedWithoutBaselineMessage(
+  files: readonly PreservedWithoutBaselineFile[],
+  reason: PreservedWithoutBaselineReason = 'absent',
+): string {
+  const sectionCount = files.reduce((n, f) => n + f.headings.length, 0);
+  const manySections = sectionCount !== 1;
+  const detail = files
+    .map((f) => `${f.outputPath} (${f.headings.map(displayHeading).join(', ')})`)
+    .join('; ');
+  const scope = files.length === 1 ? files[0].outputPath : `${files.length} files`;
+  // One sentence per reason, and each must be true of ITS state alone (#1697
+  // NEW-A2, #1718 pre-fix manifest migration gap). `===` on the manifest stamp
+  // sends three different files down one hold, and the version of this notice that
+  // named only the middle one was false for the other two.
+  //
+  // A SWITCH with a `never` default, not a ternary chain. The chain that stood here
+  // ended in a catch-all arm, so a fourth `ManifestBaselineState` would have
+  // compiled and silently collected the `'absent'` sentence — a true hold with a
+  // false reason, which is the exact defect AC-70 pins for the other three. The
+  // docstring above claimed the compile error; this is what makes the claim true.
+  const why = ((): string => {
+    switch (reason) {
+      case 'pre-authorship':
+        return (
+          'The baseline in .minspec/generated-hashes.json was written by an older version ' +
+          'of MinSpec, which recorded whatever was on disk at the time — your own edits ' +
+          'included — so it says nothing about who wrote what and MinSpec would not act ' +
+          'on it. This refresh has replaced it with one MinSpec can stand behind, so ' +
+          'later refreshes go back to being quiet.'
+        );
+      case 'unrecognised-version':
+        // A NEWER MinSpec wrote it, or the stamp was hand-edited. Saying "older"
+        // here would point the reader at a downgrade that never happened, and
+        // promising permanent quiet would be false while two versions take turns
+        // on the one project — each distrusts the other's manifest every time.
+        return (
+          'The baseline in .minspec/generated-hashes.json carries a format version this ' +
+          'MinSpec cannot read — a newer MinSpec wrote it, or the stamp has been edited ' +
+          'by hand — so there is no reading of it this version can act on. This refresh ' +
+          'has replaced it with one this version can stand behind; if a newer MinSpec is ' +
+          'what you meant to be running, upgrade and refresh with that one rather than ' +
+          'alternating, because each version distrusts the other’s baseline and will ' +
+          'hold again.'
+        );
+      case 'absent':
+        return (
+          'MinSpec has no entry there for ' +
+          `${manySections ? 'them' : 'it'}: the baseline lives in ` +
+          '.minspec/generated-hashes.json, which is machine-local and gitignored, so it ' +
+          'is absent in a fresh clone or a new worktree — and a section MinSpec has ' +
+          'never been able to vouch for carries no entry in it even where the file is ' +
+          'present.'
+        );
+      default: {
+        // Unreachable by TYPE. A fourth refused state widens
+        // `PreservedWithoutBaselineReason`, and this assignment stops compiling
+        // until that state is given its own sentence above.
+        const unhandled: never = reason;
+        throw new Error(`Unhandled no-baseline reason: ${String(unhandled)}`);
+      }
+    }
+  })();
+  return (
+    `Kept ${sectionCount} existing section${manySections ? 's' : ''} as-is in ${scope} — ` +
+    `MinSpec has no recorded baseline for ${manySections ? 'them' : 'it'}, so it cannot tell ` +
+    'your content from an untouched template and withheld the template update rather than ' +
+    `overwrite you: ${detail}. ${why} ` +
+    'Nothing is broken and nothing needs re-scaffolding — your files are intact. This ' +
+    `is the only notice you will get about ${manySections ? 'them' : 'it'}, and the hold ` +
+    `STANDS: MinSpec goes on keeping ${manySections ? 'these sections' : 'this section'} ` +
+    `and goes on withholding template updates to ${manySections ? 'them' : 'it'} on every ` +
+    'refresh, so later changes to the constitution will not reach ' +
+    `${manySections ? 'them' : 'it'} either. MinSpec is not claiming ` +
+    `${manySections ? 'these sections are' : 'this section is'} yours — it is saying it ` +
+    `cannot prove ${manySections ? 'they are' : 'it is'} its own, and MinSpec's own older ` +
+    'wording is held on exactly the same footing. Review and re-apply anything you want ' +
+    'from the current template by hand; if you do not recognise a section as yours, ' +
+    'emptying it ends the hold and takes the current template back on the next refresh.'
   );
 }
 
@@ -885,6 +1068,127 @@ export function checkManagedRegionMarkers(
 }
 
 /**
+ * What MinSpec did NOT author during this run, so the manifest does not claim it
+ * did (#1697 F1).
+ *
+ * `generated-hashes.json` is read back as the merge's authorship baseline: a
+ * recorded hash that equals the on-disk body is taken as proof MinSpec wrote that
+ * body, which licenses replacing it with the current template. Recording a hash
+ * for content MinSpec never wrote is therefore not a harmless inaccuracy — it is a
+ * forged permission slip, and the next refresh cashes it.
+ */
+export interface ManifestAuthorship {
+  /**
+   * relPath → heading → hash of the TEMPLATE body MinSpec rendered for that
+   * heading and then declined to write, from
+   * {@link MergeResult.withheldTemplateHashes}. Recorded INSTEAD of the on-disk
+   * hash for those headings, so the next refresh sees the divergence as evidence
+   * the body is the user's rather than re-deciding it from absence.
+   */
+  readonly withheld?: { readonly [relPath: string]: SectionHashes };
+  /**
+   * relPaths whose bytes MinSpec did not RENDER this run — the files the template
+   * loop skipped because they already existed (`seedConstitution` and
+   * `generateSlashCommandShims` run after that loop and may still write to one). MinSpec rendered a template, found a file
+   * already there, and wrote none of it, so it has no NEW claim to make about any
+   * section: the run must not hash those bytes and call them its own output. A
+   * project with no prior manifest therefore gets no entry, and its first refresh
+   * reaches the fail-closed branch honestly instead of reading the user's own bytes
+   * back as its own handiwork.
+   *
+   * Making no new claim is NOT the same as retracting the old one. Any entry the
+   * previous run recorded for such a file is CARRIED FORWARD verbatim: it is
+   * MinSpec's own record of what it last wrote there, it is still the correct merge
+   * baseline, and dropping it would silently demote a project that has a valid
+   * baseline to the fail-closed path — freezing its harness — every time Initialize
+   * is re-run. Initialize is explicitly re-runnable, so that is the common path.
+   */
+  readonly unauthored?: readonly string[];
+  /**
+   * relPath → headings MinSpec has NO hash it may honestly record, from
+   * {@link MergeResult.unauthoredHeadings}. DELETED from the disk-derived
+   * recording rather than corrected (#1697 NEW-2/NEW-3).
+   *
+   * `unauthored` is this rule at whole-file granularity; this is the same rule one
+   * level down, for a file MinSpec did write but whose individual sections it did
+   * not. The recorder hashes final disk, so every user-added section in a managed
+   * file — the documented, supported thing to do with these files — was being
+   * hashed and filed as MinSpec's own output. There is no correction available for
+   * those headings, because MinSpec rendered no body to record in their place: the
+   * only true record is none.
+   *
+   * The absence is load-bearing, not cosmetic. `mergeFile` reads a missing baseline
+   * as "no evidence" and fails closed, so an omitted heading is precisely what makes
+   * a future template carrying that same heading HOLD the user's body and report it,
+   * instead of spending a claim MinSpec never had the right to make.
+   */
+  readonly unauthoredSections?: { readonly [relPath: string]: readonly string[] };
+}
+
+/**
+ * Compose ONE file's persisted manifest entry: the disk-derived hashes, corrected
+ * for the two things disk cannot tell you (#1697 F1 / NEW-2 / NEW-3).
+ *
+ * This is the CORRECTION half of "what baseline will the next refresh read?", and
+ * it is exported so that half has exactly one implementation (#1697 NEW-A3). The
+ * other half is the argument: `sectionHashesFromMarkdown` over the bytes actually on
+ * disk, which a real refresh reads AFTER the post-merge writers (`seedConstitution`,
+ * the AGENTS.md slash injection) have run. A caller who wants the whole answer owes
+ * both halves; sharing this one does not compose the other for them.
+ *
+ * `mergeFile` used to return a per-branch hash map that looked like the whole answer
+ * and was not — it hashed template bodies before `sectionsToMarkdown` normalized
+ * them and before the post-merge writers ran, so a caller who fed it back pinned
+ * sections the real manifest kept tracking (measured: `3d74d181…` at the branch
+ * against `2741b60e…` on disk). The map is gone; the product and its tests now call
+ * THIS rather than each composing their own, so a change to the correction rule
+ * reaches both at once. `merge-refresh.test.ts` AC-63 pins the pair against a real
+ * refresh.
+ *
+ * @param diskHashes         `sectionHashesFromMarkdown` over the bytes actually written
+ * @param withheld           headings whose template body MinSpec rendered but declined
+ *                           to write → the hash of that unwritten body
+ * @param unauthoredSections headings MinSpec rendered no body for at all
+ */
+export function applyAuthorshipCorrections(
+  diskHashes: SectionHashes,
+  withheld?: SectionHashes,
+  unauthoredSections?: readonly string[],
+): SectionHashes {
+  // Rebuilt by spreading the disk map first, so section key order stays
+  // `parseSections` document order and the serialization stays byte-stable
+  // across identical runs (SPEC-043 INV-4).
+  const corrected: Record<string, string> = { ...diskHashes };
+  if (withheld) {
+    for (const heading of Object.keys(withheld)) {
+      // A heading the recorder did not hash is not corrected — a withheld heading
+      // no longer on disk would otherwise add a manifest entry for a section that
+      // does not exist, which is the class of lie this module exists to prevent.
+      //
+      // With ONE documented exception, and it is #1752's class again: `in` walks the
+      // prototype chain, so for the eight `Object.prototype` names (`constructor`,
+      // `toString`, `valueOf`, …) this test passes on a heading disk does NOT carry,
+      // and the entry is invented. Measured: `{Invariants}` plus a withheld
+      // `constructor` yields a `constructor` key. Latent rather than live — a
+      // withheld hash exists only for a heading the TEMPLATE also carries, and
+      // MinSpec ships no template heading with a prototype name (checked: zero) — so
+      // it is filed with #1752 rather than patched here, and the fix is the same one:
+      // `Object.create(null)` for every heading-keyed map.
+      if (heading in corrected) corrected[heading] = withheld[heading];
+    }
+  }
+  // Deleted, not corrected: MinSpec rendered no body for these headings, so there
+  // is no hash it may honestly file for them (#1697 NEW-2/NEW-3). Applied AFTER
+  // the withheld overrides so a heading that legitimately has a withheld template
+  // hash keeps it — the two sets are disjoint by construction in `mergeFile`, and
+  // this ordering makes that independent of it.
+  if (unauthoredSections) {
+    for (const heading of unauthoredSections) delete corrected[heading];
+  }
+  return corrected;
+}
+
+/**
  * Record the hash manifest from the FINAL on-disk bytes, run the fail-closed
  * self-check, and persist it LAST (SPEC-043 D1/D2/D7 + Slice 2 gate).
  *
@@ -907,11 +1211,75 @@ export function checkManagedRegionMarkers(
  * source, or before a later mutator) that makes the recorded set diverge from final
  * disk. The predicate is exported and reusable for that guarantee and for an
  * independent commit/CI-time consistency check (#760); it does not defend #890 alone.
+ *
+ * ── The `authorship` argument, and what it narrows (#1697 F1) ────────────────
+ *
+ * "Record the final bytes on disk" is the right rule for every byte MinSpec WROTE,
+ * and the wrong rule for the bytes it merely found there. `mergeFile` keeps the
+ * user's body whenever the evidence says the section is theirs (or says nothing at
+ * all), and `generateHarnessFiles` writes nothing to a file that already exists in
+ * the template loop (`seedConstitution` and `generateSlashCommandShims` run after it
+ * and can write to one) — so a straight disk recording ends up asserting MinSpec
+ * authored a paragraph it has just gone out of its way not to touch. Because that
+ * manifest is exactly what the NEXT merge consults, the assertion is
+ * self-fulfilling: `oldHash ===
+ * existingHash` reads as "pristine template" and the template overwrites the
+ * paragraph, unreported. That is bug #1697, one refresh later.
+ *
+ * So the recording is disk-derived by default and corrected in three places only:
+ * headings in `authorship.withheld` record the template body MinSpec generated but
+ * did not write, headings in `authorship.unauthoredSections` are recorded not at
+ * all, and files in `authorship.unauthored` are recorded not at all.
+ *
+ * The self-check runs against the DISK-DERIVED map, before the corrections are
+ * applied, and therefore keeps exactly the strength it had: every hash it can
+ * check is still checked against the same final disk, and a record-before-write
+ * regression still fails closed. The corrections are deliberately outside its
+ * remit because they are not claims about disk — verifying them against disk would
+ * be a category error, and would abort every refresh that preserved user content.
+ *
+ * This narrows SPEC-043's INV-1 from "every recorded hash equals disk" to "every
+ * hash MinSpec RECORDS FOR ITS OWN OUTPUT equals disk", which is the property the
+ * manifest's only consumer actually needs. `verifyGeneratedHashesConsistent` read
+ * back over a persisted manifest can now legitimately report a withheld heading, so
+ * an offline commit/CI-time check built on it (#760) must be given the same
+ * authorship information rather than assuming a pure disk mirror.
  */
-export function recordVerifyAndSaveManifest(rootDir: string): void {
+export function recordVerifyAndSaveManifest(
+  rootDir: string,
+  authorship: ManifestAuthorship = {},
+): void {
+  const unauthored = new Set(authorship.unauthored ?? []);
+  // PROVEN entries only (#1697 NEW-A2, closing #1718 pre-fix manifest migration
+  // gap — Initialize is the second door into the same drawer). The carry-forward
+  // re-persists whatever it
+  // reads, and `saveHashes` stamps everything it writes — so reading the raw
+  // manifest here would take a pre-#1697 file whose entries were copied off disk,
+  // stamp them, and hand them the authority the stamp confers. Initialize is
+  // explicitly re-runnable, so that is a one-command laundering path, and the
+  // refresh gate would never see the entries again to catch it. An upgraded project
+  // therefore drops its old baseline on the first Initialize as well as on the first
+  // Refresh, and reaches the fail-closed path honestly on the next merge.
+  const priorHashes: GeneratedHashes =
+    unauthored.size > 0 ? loadProvenHashes(rootDir).proven : {};
+
+  // Disk-derived and therefore self-checkable: the files MinSpec wrote this run.
   const allHashes: Record<string, SectionHashes> = {};
+  // Prior claims about files MinSpec did NOT write this run, preserved as-is. Not
+  // re-verified against disk on purpose — the file may well have diverged since it
+  // was recorded, and detecting exactly that divergence is what the baseline is for.
+  const carriedForward: Record<string, SectionHashes> = {};
+
   for (const name of TEMPLATE_NAMES) {
     const relativePath = TEMPLATE_OUTPUT_PATHS[name];
+    // MinSpec wrote nothing to this file this run → it has no NEW hash to record
+    // for any section of it, so its bytes are never hashed as MinSpec's output
+    // (#1697 F1). Whatever the previous run recorded still stands.
+    if (unauthored.has(relativePath)) {
+      const prior = priorHashes[relativePath];
+      if (prior) carriedForward[relativePath] = prior;
+      continue;
+    }
     const fullPath = path.join(rootDir, relativePath);
     if (!fs.existsSync(fullPath)) continue; // absent tracked file → skip (FR-3a)
     const disk = fs.readFileSync(fullPath, 'utf-8');
@@ -934,12 +1302,53 @@ export function recordVerifyAndSaveManifest(rootDir: string): void {
     );
   }
 
-  saveHashes(rootDir, allHashes);
+  // Apply the authorship corrections AFTER the self-check (#1697 F1). These are
+  // not claims about disk, so they are not the self-check's business; see the
+  // docstring, and {@link applyAuthorshipCorrections} for the correction rule
+  // itself — which tests read from here rather than reimplementing, so a change to
+  // that rule reaches the product and its tests together (#1697 NEW-A3). It does not
+  // make the two manifests identical by construction: each side still composes its
+  // own disk argument. `merge-refresh.test.ts` AC-63 is what pins the pair against a
+  // real refresh.
+  //
+  // Assembled in TEMPLATE_NAMES order so the file-key order — and therefore the
+  // serialized bytes — is the same whether an entry came from disk or was carried
+  // forward (SPEC-043 INV-4 byte-stability). Only tracked names are visited, which
+  // is also what prunes stale keys (FR-3a).
+  const persisted: Record<string, SectionHashes> = {};
+  for (const name of TEMPLATE_NAMES) {
+    const relativePath = TEMPLATE_OUTPUT_PATHS[name];
+    const carried = carriedForward[relativePath];
+    if (carried) {
+      persisted[relativePath] = carried;
+      continue;
+    }
+    const diskHashes = allHashes[relativePath];
+    if (!diskHashes) continue;
+    const withheld = authorship.withheld?.[relativePath];
+    const unauthoredSections = authorship.unauthoredSections?.[relativePath];
+    // Nothing to correct → the disk map IS the entry. Kept as a distinct path only
+    // to avoid re-allocating an identical object; `applyAuthorshipCorrections`
+    // returns the same content for these arguments.
+    if (!withheld && (!unauthoredSections || unauthoredSections.length === 0)) {
+      persisted[relativePath] = diskHashes;
+      continue;
+    }
+    persisted[relativePath] = applyAuthorshipCorrections(
+      diskHashes,
+      withheld,
+      unauthoredSections,
+    );
+  }
+
+  saveHashes(rootDir, persisted);
 }
 
 /**
  * Generate all harness files from templates.
- * Only writes files that do not already exist (first-time init).
+ * The template loop only writes files that do not already exist (first-time init);
+ * `seedConstitution` and `generateSlashCommandShims` run after it and can write to a
+ * file that was already there.
  * Stores initial section hashes for future merge-on-refresh.
  */
 export function generateHarnessFiles(rootDir: string): string[] {
@@ -956,6 +1365,15 @@ export function generateHarnessFiles(rootDir: string): string[] {
   const context = buildContext(rootDir, config);
   const rendered = renderAll(context);
 
+  // Files that were already there, so MinSpec wrote none of their bytes. Tracked
+  // because the manifest must NOT be recorded for them (#1697 F1): recording the
+  // user's own file as MinSpec's output is what makes the very next Refresh call a
+  // hand-written paragraph an untouched template and delete it. `initCommand` is
+  // explicitly re-runnable, so this is the ordinary path, not an edge case — and
+  // it is the one the fail-closed merge branch never even reaches, because by then
+  // a matching baseline already exists.
+  const skippedExisting: string[] = [];
+
   for (const name of TEMPLATE_NAMES) {
     const relativePath = TEMPLATE_OUTPUT_PATHS[name];
     const fullPath = path.join(rootDir, relativePath);
@@ -966,6 +1384,8 @@ export function generateHarnessFiles(rootDir: string): string[] {
     if (!fs.existsSync(fullPath)) {
       fs.mkdirSync(path.dirname(fullPath), { recursive: true });
       fs.writeFileSync(fullPath, content);
+    } else {
+      skippedExisting.push(relativePath);
     }
   }
 
@@ -1015,7 +1435,11 @@ export function generateHarnessFiles(rootDir: string): string[] {
   // AGENTS.md slash injection) and persist LAST — the active #890 fix. The embedded
   // self-check is a fail-closed tripwire (green by construction here; guards a future
   // record-before-write regression, INV-3 / D4), not standalone #890 protection.
-  recordVerifyAndSaveManifest(rootDir);
+  //
+  // …except for the files above that already existed, which are recorded not at all
+  // (#1697 F1): "record the final bytes on disk" is only truthful about bytes
+  // MinSpec put there.
+  recordVerifyAndSaveManifest(rootDir, { unauthored: skippedExisting });
 
   return untracked;
 }
@@ -1025,14 +1449,27 @@ export function generateHarnessFiles(rootDir: string): string[] {
  * Uses section-level hashing to preserve user modifications.
  *
  * For each generated file:
- *   - User-modified sections → preserved
- *   - Unmodified sections → updated from latest template
+ *   - User-modified sections (hash differs from the recorded baseline) → preserved
+ *   - Sections PROVEN unmodified (hash equals the recorded baseline) → updated
+ *     from latest template
+ *   - Sections with NO recorded baseline → preserved, and REPORTED when the
+ *     template carried content the kept body did not (#1697): a missing baseline
+ *     is no evidence, and `generated-hashes.json` is gitignored machine-local
+ *     state, so it is absent in every fresh clone and worktree. The report
+ *     compares normalized CONTENT, not bytes — MinSpec's own post-merge writers
+ *     leave `renderTemplate` output permanently byte-different from disk, so a
+ *     byte test warned about a project nobody had edited (F3)
  *   - New template sections → appended
- *   - User-added sections (not in template) → preserved
+ *   - User-added sections (not in template) → preserved, and recorded in the
+ *     manifest NOT AT ALL: MinSpec rendered no body for that heading, so hashing
+ *     the bytes it found there would file the user's own prose as its own output
+ *     and license the next template that ships the heading to overwrite it
+ *     (#1697 NEW-2)
  *
- * Returns any managed-region warnings (files left untouched because their MinSpec
- * markers were deleted) so the vscode-aware caller can surface them; an empty array
- * means a fully clean refresh.
+ * Returns the notices the vscode-aware caller should surface: sections held for
+ * lack of a baseline, files left untouched because their MinSpec markers were
+ * deleted, paths removed from the git index, and a project-name mismatch. An empty
+ * array means a fully clean refresh.
  */
 export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
   // Ensure .minspec/ exists
@@ -1064,7 +1501,45 @@ export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
 
   // Prior manifest — the merge DECISION input only (which body to keep, INV-5).
   // It is NOT the recorded manifest: that is rebuilt LAST from final on-disk bytes.
-  const priorHashes: GeneratedHashes = loadHashes(rootDir);
+  //
+  // Read as EVIDENCE, so it is loaded through the gate that decides what may be
+  // spent (#1697 NEW-A2, closing #1718 pre-fix manifest migration gap: the fix
+  // stopped MinSpec MINTING a false authorship claim, and this is what stops it
+  // CASHING one an older build already wrote). A manifest written before the
+  // authorship rules existed was
+  // built by hashing final disk, user paragraphs included; every entry in it is
+  // shaped exactly like a true one and none of them is. `proven` is empty for such a
+  // file, which drops this refresh onto the fail-closed path for every section — the
+  // same path a fresh clone takes, with the same one-time notice, after which the
+  // manifest has been rewritten under the current rules and refreshes are quiet
+  // again.
+  const baseline = loadProvenHashes(rootDir);
+  const priorHashes: GeneratedHashes = baseline.proven;
+
+  // Sections the merge held for lack of a baseline (#1697), collected per file and
+  // surfaced as ONE notice for the whole refresh (F3). REPORTED at the end of this
+  // function, never discarded: a withheld update the user is not told about is the
+  // same "no silent gate" failure as the silent overwrite this fix removed, just in
+  // the safe direction (invariant 2).
+  const preservedByFile: PreservedWithoutBaselineFile[] = [];
+
+  // Per file, the headings whose body the merge KEPT while withholding the
+  // template it had rendered → the hash of that unwritten template body. Fed to
+  // the recorder so the manifest records what MinSpec GENERATED for those
+  // headings, never the user bytes it declined to replace (#1697 F1). Without
+  // this the recording below launders every hold into a matching baseline and the
+  // next refresh overwrites the content this one just protected — silently, since
+  // the fail-closed report only fires while the baseline is absent.
+  const withheldByFile: Record<string, SectionHashes> = {};
+
+  // Per file, the headings the merge kept but has NO honest hash for — sections the
+  // template does not contain (every user-added section) and INV-2 guard holds it
+  // cannot prove are its own. Fed to the recorder so those headings are OMITTED
+  // rather than hashed from disk (#1697 NEW-2/NEW-3). Without this the recording
+  // below files the user's own prose as MinSpec's output, and the next template to
+  // ship the same heading reads that as permission to overwrite it — #1697's
+  // mechanism, in the one path the manifest correction did not reach.
+  const unauthoredByFile: Record<string, readonly string[]> = {};
 
   for (const name of TEMPLATE_NAMES) {
     const relativePath = TEMPLATE_OUTPUT_PATHS[name];
@@ -1079,8 +1554,18 @@ export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
       // File exists — merge (decision logic + oldHashes reads unchanged, INV-5).
       const existing = fs.readFileSync(fullPath, 'utf-8');
       const oldHashes = priorHashes[relativePath] ?? {};
-      const { merged } = mergeFile(existing, generated, oldHashes);
+      const { merged, preservedWithoutBaseline, withheldTemplateHashes, unauthoredHeadings } =
+        mergeFile(existing, generated, oldHashes);
       fs.writeFileSync(fullPath, merged);
+      if (Object.keys(withheldTemplateHashes).length > 0) {
+        withheldByFile[relativePath] = withheldTemplateHashes;
+      }
+      if (unauthoredHeadings.length > 0) {
+        unauthoredByFile[relativePath] = unauthoredHeadings;
+      }
+      if (preservedWithoutBaseline.length > 0) {
+        preservedByFile.push({ outputPath: relativePath, headings: preservedWithoutBaseline });
+      }
     }
   }
 
@@ -1129,7 +1614,15 @@ export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
   // AGENTS.md slash injection) and persist LAST — the active #890 fix. The embedded
   // self-check is a fail-closed tripwire (green by construction here; guards a future
   // record-before-write regression, INV-3 / D4), not standalone #890 protection.
-  recordVerifyAndSaveManifest(rootDir);
+  //
+  // …corrected for the sections the merge held (#1697 F1). Final disk is the right
+  // source for every byte MinSpec wrote and the wrong one for the bodies it kept:
+  // recording those makes the manifest claim authorship of the user's content, and
+  // the next refresh spends that claim.
+  recordVerifyAndSaveManifest(rootDir, {
+    withheld: withheldByFile,
+    unauthoredSections: unauthoredByFile,
+  });
 
   // Report the index change. A `git rm --cached` is invisible in the editor
   // otherwise, and an unreported one is the exact G-8 / never-wrong failure this
@@ -1140,5 +1633,47 @@ export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
     kind: 'untracked' as const,
   }));
 
-  return [...managedRegionWarnings, ...untrackedNotices, ...projectNameWarnings];
+  // One notice for every baseline-less hold this refresh made, across every file
+  // (#1697 F3) — see {@link preservedWithoutBaselineMessage} for why it is not one
+  // per file. `outputPath` names the first affected file so a consumer that reads
+  // only that field still points at something real.
+  const preservedNotices: ManagedRegionWarning[] =
+    preservedByFile.length > 0
+      ? [
+          {
+            outputPath: preservedByFile[0].outputPath,
+            outputPaths: preservedByFile.map((f) => f.outputPath),
+            // Why there was nothing to read, so the explanation matches what
+            // actually happened (#1697 NEW-A2, #1718 pre-fix manifest migration
+            // gap). A manifest MinSpec declined to spend is present on disk; telling
+            // the reader it is "absent in a fresh clone" would send them looking for
+            // a missing file that is right there, and a true hold explained by a
+            // false reason is still a false statement. The merge's own classification
+            // is FORWARDED rather than re-derived — through the single mapping named
+            // just below, and no other — so the notice cannot disagree with the gate
+            // about why the baseline was refused.
+            //
+            // `'proven'` maps to `'absent'`: the manifest was spendable and simply
+            // carried no entry for these headings — a user-added section, or one an
+            // earlier run recorded nothing for. That is the `'absent'` sentence's
+            // second half, which is why it names the missing ENTRY as well as the
+            // missing file.
+            message: preservedWithoutBaselineMessage(
+              preservedByFile,
+              baseline.state === 'proven' ? 'absent' : baseline.state,
+            ),
+            kind: 'preserved-without-baseline' as const,
+          },
+        ]
+      : [];
+
+  // Content notices first: everything else here reports scaffolding or index
+  // state, while these report that YOUR words were about to be replaced and were
+  // not. That is the one a human must not miss (#1697).
+  return [
+    ...preservedNotices,
+    ...managedRegionWarnings,
+    ...untrackedNotices,
+    ...projectNameWarnings,
+  ];
 }
