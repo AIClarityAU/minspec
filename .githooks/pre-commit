@@ -186,9 +186,28 @@ if [ "${LOCK_GATE_OFF:-}" != "1" ]; then
           echo "  Fix: npm install --package-lock-only && git add package-lock.json" >&2
           echo "  Override (rare): LOCK_GATE_OFF=1 git commit ..." >&2
           fail=1
+        elif printf '%s' "$lock_out" | grep -qE 'ENOTCACHED|ETARGET|EAI_AGAIN|ENOTFOUND|ECONNREFUSED|No match found|request to .* failed|in offline mode'; then
+          # EXPECTED skip: `--offline` cannot resolve something the local npm cache has
+          # never seen (a fresh machine, a new dependency). Quiet, because this is common
+          # and self-corrects the moment the cache warms.
+          echo "⚠ lockfile gate: npm cache cannot answer offline — check SKIPPED (warm it with \`npm install\`)." >&2
         else
-          echo "⚠ lockfile gate: npm failed for a reason other than lock drift — check SKIPPED." >&2
-          printf '%s\n' "$lock_out" | head -3 | sed 's/^/    /' >&2
+          # UNRECOGNISED failure. LOUD by design (#1749): the gate did not run, and the
+          # only thing worse than a missing gate is one that is silently missing. A single
+          # ⚠ line scrolls past in commit output, so this is a banner. If npm ever rewords
+          # the sync error, the drift branch above stops matching and EVERY drifted commit
+          # lands here — a banner turns that from an invisible disarm into an obvious one.
+          # The wording itself is pinned by a contract test, so an npm upgrade that changes
+          # it fails CI rather than quietly widening this branch.
+          echo "" >&2
+          echo "  ╔════════════════════════════════════════════════════════════════════╗" >&2
+          echo "  ║  LOCKFILE GATE DID NOT RUN — npm failed in a way it does not know  ║" >&2
+          echo "  ╚════════════════════════════════════════════════════════════════════╝" >&2
+          echo "  Your lock was NOT checked. It may be out of sync, and CI would then fail" >&2
+          echo "  every job at the install step (#1589). npm said:" >&2
+          printf '%s\n' "$lock_out" | head -5 | sed 's/^/      /' >&2
+          echo "  If npm reworded its sync error, the gate needs updating — please report it." >&2
+          echo "" >&2
         fi
       fi
     else

@@ -146,6 +146,17 @@ function stubNpmRecording(marker: string): string {
   return `${dir}${path.delimiter}${process.env.PATH ?? ''}`;
 }
 
+
+/** An `npm` that fails with chosen output, to drive the gate's two skip branches. */
+function stubNpmFailing(output: string): string {
+  const dir = path.join(tmp, '.stub-npm-fail');
+  fs.mkdirSync(dir, { recursive: true });
+  const stub = path.join(dir, 'npm');
+  fs.writeFileSync(stub, `#!/bin/sh\ncat <<'MINSPEC_STUB_EOF' >&2\n${output}\nMINSPEC_STUB_EOF\nexit 1\n`);
+  fs.chmodSync(stub, 0o755);
+  return `${dir}${path.delimiter}${process.env.PATH ?? ''}`;
+}
+
 /** A failing `gitleaks`, to prove one gate's bypass does not disable another. */
 function stubFailingGitleaks(): string {
   const dir = path.join(tmp, '.stub-bin2');
@@ -232,5 +243,52 @@ describe('.githooks/pre-commit lockfile-sync gate (#1600)', () => {
     // ...but the unrelated secret gate still fires.
     expect(r.out).toContain('secret gate');
     expect(r.code).not.toBe(0);
+  });
+
+  it('stays QUIET when npm merely cannot resolve offline (cold cache is common and self-correcting)', () => {
+    initWorkspaceRepo();
+    addUnlockedWorkspace();
+    stage('package.json', 'package-lock.json', 'packages');
+
+    const r = commit({ PATH: stubNpmFailing('npm error code ENOTCACHED\nnpm error request to https://registry.npmjs.org/x failed') });
+
+    expect(r.out).toContain('cache cannot answer offline');
+    expect(r.out).not.toContain('LOCKFILE GATE DID NOT RUN');
+    expect(r.code).toBe(0);
+  });
+
+  it('is LOUD when npm fails in a way the gate does not recognise (#1749)', () => {
+    initWorkspaceRepo();
+    addUnlockedWorkspace();
+    stage('package.json', 'package-lock.json', 'packages');
+
+    const r = commit({ PATH: stubNpmFailing('npm error code EUNKNOWN\nnpm error something nobody has seen before') });
+
+    // A single warning line scrolls past; an unrun gate must be impossible to miss.
+    expect(r.out).toContain('LOCKFILE GATE DID NOT RUN');
+    expect(r.out).toContain('Your lock was NOT checked');
+    // Still fails OPEN — loud, but it must not wedge the commit.
+    expect(r.code).toBe(0);
+  });
+
+  it("CONTRACT: npm still emits the sync-error wording the gate matches (#1749)", () => {
+    // The gate decides drift-vs-other by matching npm's prose. If an npm upgrade
+    // reworded it, the drift branch would stop matching and every drifted commit
+    // would fall into the loud branch — the gate silently disarmed. Pin it here so
+    // that shows up as one honest test failure naming the cause.
+    initWorkspaceRepo();
+    addUnlockedWorkspace();
+
+    const r = spawnSync('npm', ['ci', '--dry-run', '--offline', '--ignore-scripts'], {
+      cwd: tmp,
+      encoding: 'utf8',
+    });
+    const out = `${r.stderr ?? ''}${r.stdout ?? ''}`;
+
+    expect(r.status, `npm should reject a drifted lock; got ${r.status}`).not.toBe(0);
+    expect(
+      out,
+      'npm reworded its lock-sync error — update the grep in .githooks/pre-commit to match',
+    ).toContain('can only install packages when your package.json and package-lock.json');
   });
 });
