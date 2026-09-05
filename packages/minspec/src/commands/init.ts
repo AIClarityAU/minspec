@@ -15,6 +15,7 @@ import { resolveTargetFolder, workspaceFolderLabel } from '../lib/resolve-folder
 import { setCoverageMinimum, DEFAULT_COVERAGE_MINIMUM } from '../lib/config';
 import { getRepoFromRemote } from '../lib/github';
 import { resolveRemotes, renameToOriginCandidate } from '../lib/git-remotes';
+import { resolveBranchDestination, defaultGitRun } from '../lib/approve-commit';
 import {
   type CommandRunner,
   RULESET_DOCS_URL,
@@ -238,35 +239,6 @@ export interface ScaffoldCommitter {
 }
 
 /**
- * Branch names treated as "probably the default" when `origin/HEAD` is absent.
- *
- * Reads the SAME `minspec.protectedBranches` setting commit-on-approve consumes, so
- * a user who renames their default branch configures it once and every guard agrees.
- * The generated pre-commit hook reads the git-config twin of that key
- * (template-registry.ts, `guard_candidates`) and falls back to the same three names.
- *
- * All three now agree on `['main','master','trunk']`. They did not before: the
- * package.json default was `['main','master']` while the hook's fallback carried
- * `trunk`, so in a VS Code host `get()` returned the package.json default and `trunk`
- * protection existed ONLY in the hook — a repo defaulting to `trunk` was guarded at
- * commit time but never warned by this offer. Aligned in package.json rather than by
- * dropping `trunk` here: a false negative silently reinstates the stranding bug,
- * while a false positive only offers a branch the user can decline.
- *
- * Outside a VS Code host (tests, Tier-0 callers) `getConfiguration` is unavailable,
- * so fall back to the same literal list.
- */
-function conventionalDefaultBranches(): string[] {
-  try {
-    return vscode.workspace
-      .getConfiguration('minspec')
-      .get<string[]>('protectedBranches', ['main', 'master', 'trunk']);
-  } catch {
-    return ['main', 'master', 'trunk'];
-  }
-}
-
-/**
  * Default committer — wraps simple-git, lazily imported to keep init lean.
  *
  * Exported for tests: every other test in this area injects a stub, which meant the
@@ -304,42 +276,21 @@ export async function defaultCommitter(folder: string): Promise<ScaffoldCommitte
       await git.commit(message);
     },
     async branchInfo() {
-      try {
-        const current = (await git.revparse(['--abbrev-ref', 'HEAD'])).trim();
-        if (!current || current === 'HEAD') return null; // detached — no branch to strand
-        // origin/HEAD is a LOCAL ref written by clone / remote set-head, so this
-        // stays offline and never contacts the forge (Tier-0).
-        let def = '';
-        try {
-          const ref = (await git.revparse(['--abbrev-ref', 'origin/HEAD'])).trim();
-          const parsed = ref.replace(/^origin\//, '');
-          if (parsed && parsed !== 'origin') def = parsed;
-        } catch {
-          // Not populated in every clone — fall through to the name fallback.
-        }
-
-        // origin/HEAD is absent more often than it looks: it was missing in both
-        // repos this guard was built for, which made the equivalent hook-side
-        // check inert. Fall back to conventional names, but only when an origin
-        // remote exists — a repo with nothing to push to cannot have a
-        // push-protected branch, so a local-only project is never flagged.
-        if (!def) {
-          let hasOrigin = false;
-          try {
-            hasOrigin = Boolean((await git.getConfig('remote.origin.url')).value);
-          } catch {
-            hasOrigin = false;
-          }
-          if (!hasOrigin) return null;
-          if (!conventionalDefaultBranches().includes(current)) return null;
-          def = current;
-        }
-        return { current, default: def };
-      } catch {
-        // Unknown destination fails OPEN: the offer behaves exactly as it did
-        // before rather than blocking a repo we cannot reason about.
-        return null;
-      }
+      // Delegate to the SAME destination-resolution `approve-commit.ts` uses
+      // (#1132) rather than hand-rolling a third copy. `branchInfo()` used to
+      // resolve `origin/HEAD` correctly but never checked MINSPEC_ALLOW_MAIN,
+      // MINSPEC_GATE_OFF, `minspec.allowCommitOnDefaultBranch`, or an
+      // in-progress merge/cherry-pick/revert/rebase — every documented escape
+      // hatch from the #1041 hook's guard. A user who legitimately opted out
+      // via one of those still got diverted onto a branch by this offer,
+      // because the offer runs BEFORE the hook and the hook was never asked.
+      // `resolveBranchDestination` already mirrors the hook's full contract
+      // (bypasses + in-progress markers + origin/HEAD + name-fallback) and is
+      // pinned to it by `approve-commit-hook-parity.test.ts`, so reusing it
+      // here collapses this to two implementations (hook + TS) instead of
+      // three, and any future divergence fails that shared test rather than
+      // silently reintroducing this bug. Tier-0, so no vscode dependency.
+      return resolveBranchDestination(defaultGitRun(folder));
     },
     async createBranch(name) {
       await git.checkout(['-b', name]);
@@ -1347,6 +1298,8 @@ export async function initCommand(
 const RESCAFFOLD_ACTION = 'Re-scaffold (overwrite)';
 /** Warning action: open the affected file so the user can inspect/fix it by hand. */
 const OPEN_FILE_ACTION = 'Open file';
+/** Plural of {@link OPEN_FILE_ACTION}, for a notice that covers several paths. */
+const OPEN_FILES_ACTION = 'Open files';
 /** Untracked-notice action: the index changed, so show where to review and commit it. */
 const SHOW_SCM_ACTION = 'Show Source Control';
 
@@ -1362,8 +1315,19 @@ const SHOW_SCM_ACTION = 'Show Source Control';
  *     rewrite) and `Open file`;
  * Best-effort: a re-scaffold failure is surfaced as an error but never throws out
  * of the refresh flow.
+ *
+ * EXPORTED for the #1697 NEW-4 guarantee. Every current producer of a
+ * 'missing-markers' notice iterates MANAGED_REGION_TEMPLATES, so no real refresh
+ * can reach the re-scaffold branch with a path `rescaffoldManagedRegionFile`
+ * rejects — which is exactly why the false success toast survived review twice: it
+ * was held off by a coincidence in another module rather than by anything asserted
+ * here. Driving this function directly is the only way to pin the branch, so the
+ * claim rests on a test instead of on that coincidence.
  */
-async function surfaceManagedRegionWarning(folder: string, w: ManagedRegionWarning): Promise<void> {
+export async function surfaceManagedRegionWarning(
+  folder: string,
+  w: ManagedRegionWarning,
+): Promise<void> {
   const label = workspaceFolderLabel(folder);
 
   // An 'untracked' notice reports a `git rm --cached`, not a scaffolding problem.
@@ -1401,6 +1365,36 @@ async function surfaceManagedRegionWarning(folder: string, w: ManagedRegionWarni
     return;
   }
 
+  // A 'preserved-without-baseline' reports that the section merge KEPT your
+  // content because it had no baseline to judge it against (#1697). Like the
+  // project-name mismatch, nothing is broken — the file is intact, which is the
+  // whole point — so it is informational and offers no overwrite.
+  //
+  // Falling through to the default branch below was a defect in its own right
+  // (#1697 F2), not merely the wrong tone: that branch's first action is
+  // "Re-scaffold (overwrite)", and `rescaffoldManagedRegionFile` resolves a path
+  // through MANAGED_REGION_TEMPLATES, which shares NO path with the section-merge
+  // outputs this notice names. The click was therefore guaranteed to write
+  // nothing and return `false` — and the caller discarded that `false` and
+  // announced "MinSpec: re-scaffolded <path>." A success message that can never
+  // be true is the never-wrong failure, and it was being offered as the remedy
+  // for the one notice that must not be dismissed by clicking the obvious button.
+  if (w.kind === 'preserved-without-baseline') {
+    const paths = w.outputPaths && w.outputPaths.length > 0 ? w.outputPaths : [w.outputPath];
+    const openAction = paths.length > 1 ? OPEN_FILES_ACTION : OPEN_FILE_ACTION;
+    const choice = await vscode.window.showInformationMessage(
+      `[${label}] ${w.message}`,
+      openAction,
+    );
+    if (choice === openAction) {
+      for (const p of paths) {
+        const doc = await vscode.workspace.openTextDocument(path.join(folder, p));
+        await vscode.window.showTextDocument(doc, { preview: false });
+      }
+    }
+    return;
+  }
+
   const choice = await vscode.window.showWarningMessage(
     `[${label}] ${w.message}`,
     RESCAFFOLD_ACTION,
@@ -1409,8 +1403,25 @@ async function surfaceManagedRegionWarning(folder: string, w: ManagedRegionWarni
 
   if (choice === RESCAFFOLD_ACTION) {
     try {
-      rescaffoldManagedRegionFile(folder, w.outputPath);
-      vscode.window.showInformationMessage(`MinSpec: re-scaffolded ${w.outputPath}.`);
+      // The return value is the answer to "was anything actually written", and
+      // discarding it made the success toast unconditional: `rescaffoldManagedRegionFile`
+      // returns `false` WITHOUT writing for any path outside MANAGED_REGION_TEMPLATES,
+      // and MinSpec announced "re-scaffolded <path>" anyway (#1697 NEW-4).
+      //
+      // #1697 F2 fixed the one notice kind that could reach here with such a path by
+      // routing it away from this branch. It did not fix this branch. Every current
+      // producer of a 'missing-markers' notice iterates MANAGED_REGION_TEMPLATES, so
+      // the false claim is unreachable TODAY — by coincidence of who calls it, not by
+      // anything asserted here. A never-wrong product does not rest a claim on a
+      // coincidence in another module, and one `if` retires the whole class.
+      if (rescaffoldManagedRegionFile(folder, w.outputPath)) {
+        vscode.window.showInformationMessage(`MinSpec: re-scaffolded ${w.outputPath}.`);
+      } else {
+        vscode.window.showWarningMessage(
+          `MinSpec: ${w.outputPath} is not a MinSpec-managed region file — nothing was ` +
+            're-scaffolded and the file is unchanged.',
+        );
+      }
     } catch (err) {
       vscode.window.showErrorMessage(
         `MinSpec: could not re-scaffold ${w.outputPath} — ${describeError(err)}.`,
@@ -1420,6 +1431,45 @@ async function surfaceManagedRegionWarning(folder: string, w: ManagedRegionWarni
     const doc = await vscode.workspace.openTextDocument(path.join(folder, w.outputPath));
     await vscode.window.showTextDocument(doc, { preview: false });
   }
+}
+
+/**
+ * The toast {@link initRefreshCommand} shows, conditioned on what the refresh
+ * actually did (#1697 NEW-A1).
+ *
+ * It lives here rather than beside the other message composers in `scaffold.ts`
+ * because it is the COMMAND's own line. Those composers each write the text of ONE
+ * notice; this reads the whole notice LIST — which `refreshHarnessFiles` builds and
+ * hands back — and decides the single toast shown for the run. `scaffold.ts` raises
+ * no toast (it does not import `vscode`), so a summary of what the command is about
+ * to display has nothing to attach to there.
+ *
+ * It replaces an UNCONDITIONAL "MinSpec: Refreshed harness files (user edits
+ * preserved)." — a sentence the command had no evidence for and which is
+ * demonstrably false on a reproduced run: each of the four edit shapes enumerated by
+ * `merge-refresh.test.ts` AC-64 is invisible to `mergeFile`'s content test, is
+ * recorded as MinSpec's own output, and is replaced without notice by the next
+ * template whose content for that section changes (see `sectionContentDiffers`). A
+ * refresh that has just done that must not close by announcing the opposite; in a
+ * never-wrong product a confident false status line is the defect, not the phrasing.
+ *
+ * So the claim is dropped and the notices speak instead. A refresh that held
+ * sections says so and points at the detail notice that follows; a refresh with
+ * nothing to report says only that it ran. Neither asserts a preservation guarantee
+ * MinSpec cannot make.
+ *
+ * MinSpec does NOT currently report the edits it preserved with proof — the
+ * baseline-backed user-modified branch keeps them and returns nothing — so there is
+ * no truthful positive form of the old sentence to fall back to. Tracked as #1753
+ * (report the preserved edits, so the toast can state them); saying less is the
+ * correct interim, because the alternative is saying something false.
+ */
+export function refreshSummaryMessage(warnings: readonly ManagedRegionWarning[]): string {
+  const held = warnings.filter((w) => w.kind === 'preserved-without-baseline').length;
+  return held > 0
+    ? 'MinSpec: Refreshed harness files — some sections were kept as-is and their ' +
+        'template updates withheld. Details follow.'
+    : 'MinSpec: Refreshed harness files.';
 }
 
 export async function initRefreshCommand(
@@ -1443,9 +1493,12 @@ export async function initRefreshCommand(
     );
     return;
   }
-  vscode.window.showInformationMessage(
-    'MinSpec: Refreshed harness files (user edits preserved).',
-  );
+  // Conditional on what the refresh actually did (#1697 NEW-A1). The unconditional
+  // "(user edits preserved)" that stood here was false on a reproduced run — each of
+  // the four edit shapes AC-64 enumerates is recorded as MinSpec's own and
+  // overwritten by the next template content change, with no notice — and a
+  // confident false status line is worse than a quiet true one.
+  vscode.window.showInformationMessage(refreshSummaryMessage(warnings));
   for (const w of warnings) {
     await surfaceManagedRegionWarning(folder, w);
   }

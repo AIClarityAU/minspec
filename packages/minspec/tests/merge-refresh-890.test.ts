@@ -353,10 +353,47 @@ describe('SPEC-043 regressions (T3)', () => {
   it('AC-1 / sealbox #21: internal `\\n\\n\\n` — final-disk recording is honest; the pre-normalization recording lies', () => {
     // A template section body that acquires an INTERNAL blank-line run which
     // sectionsToMarkdown collapses on the way to disk (the one delta the two
-    // transforms disagree on). No oldHash → the template body is taken.
+    // transforms disagree on).
+    //
+    // The baseline is REAL and MATCHES the existing body, which is what puts the
+    // template body on disk. It used to be `{}`, relying on an empty baseline
+    // falling through to "unmodified → take the template" — the #1697 defect
+    // itself. With that gone, `{}` sends this fixture down the fail-closed branch,
+    // where the body on disk is the USER's and the collapse never runs, so the
+    // test would pass without exercising the normalization delta it is named for.
+    // The property under test — a recording taken before normalization disagrees
+    // with disk, a recording taken from disk cannot — is unchanged either way.
     const existing = '# P\n\n## S\n\nalpha\n\nbeta\n';
     const generated = '# P\n\n## S\n\nalpha\n\n\nbeta\n'; // internal \n\n\n
-    const { merged, newHashes } = mergeFile(existing, generated, {});
+    const existingBody = parseSections(existing).find((s) => s.heading === 'S')!.body;
+    const generatedBody = parseSections(generated).find((s) => s.heading === 'S')!.body;
+    const result = mergeFile(existing, generated, {
+      S: hashSection(existingBody),
+    });
+    const merged = result.merged;
+
+    // The pre-normalization template body — what a recording taken at the merge's
+    // decision point would have hashed. `mergeFile` used to hand this back as
+    // `newHashes` and this test read it from there; the field is gone (#1697
+    // NEW-A3, no production consumer), so the same value is taken from the same
+    // source the merge took it from. The property under test is unchanged.
+    const preNormalization = hashSection(generatedBody);
+
+    // …and the template body really is the one that landed: this is the collapse
+    // path, not a preserved-body path that would collapse nothing.
+    //
+    // Stated as a property of the FIXTURE rather than read off a branch-decision
+    // probe, which is what the deleted field was being used for here. There are three
+    // holds, not two: the INV-2 guard cannot fire (neither body carries authored list
+    // items), and the two baseline holds are ruled out by the assertions below. The
+    // re-render branch is ruled out because its third clause asks whether the bytes on
+    // disk would really change, and here the collapsed template body IS the existing
+    // body — so the proven-unmodified path is the only one left, and it writes the
+    // template.
+    expect(merged).toContain('alpha');
+    expect(hashSection(generatedBody.replace(/\n{3,}/g, '\n\n'))).toBe(hashSection(existingBody));
+    expect(result.preservedWithoutBaseline).toEqual([]);
+    expect(result.unauthoredHeadings).toEqual([]);
 
     // The write path collapses the internal run — disk is byte-different from the
     // pre-normalization template body.
@@ -364,8 +401,8 @@ describe('SPEC-043 regressions (T3)', () => {
     expect(merged).not.toContain('alpha\n\n\nbeta');
 
     const onDiskBody = parseSections(merged).find((s) => s.heading === 'S')!.body;
-    // PRE-FIX recording (mergeFile.newHashes, from the pre-normalization body) LIES:
-    expect(newHashes['S']).not.toBe(hashSection(onDiskBody)); // red-before-green
+    // PRE-FIX recording (from the pre-normalization body) LIES:
+    expect(preNormalization).not.toBe(hashSection(onDiskBody)); // red-before-green
     // FINAL-DISK recording (the fix) is honest by construction:
     expect(sectionHashesFromMarkdown(merged)['S']).toBe(hashSection(onDiskBody)); // green
   });
