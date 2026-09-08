@@ -720,6 +720,35 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
       expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
     });
 
+    it('a failing enqueue leaves the approval successful AND shows a user-visible warning (#1512)', async () => {
+      pickFirst();
+      vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec() as never);
+      vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
+      vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce(
+        'Advance to next phase' as never,
+      );
+      vi.mocked(enqueuePhaseAdvance).mockImplementationOnce(() => {
+        throw new Error('disk full');
+      });
+
+      await expect(approveSpecCommand(undefined)).resolves.toBeUndefined();
+
+      // The approval itself must still report success — a queue failure is
+      // never allowed to surface as an approval failure.
+      expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+      const successCall = vi
+        .mocked(vscode.window.showInformationMessage)
+        .mock.calls.find((c) => String(c[0]).includes('✓ Approved SPEC-001'));
+      expect(successCall).toBeTruthy();
+
+      // But the human must be told the follow-on did NOT happen — asserted on
+      // the notification API, not on console.warn, which an Alt+A toast user
+      // never sees (issue #1512).
+      expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+        expect.stringContaining('disk full'),
+      );
+    });
+
     it('a rejected "Always" pref write is swallowed — approval still reports success', async () => {
       pickFirst();
       vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec() as never);

@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "scripts": {
-    "prepare": "git config core.hooksPath .githooks || true",
+    "prepare": "git config core.hooksPath .githooks || true && npm run build --workspace=@aiclarity/shared",
     "pretest": "node scripts/check-node-modules-integrity.mjs && npm run build --workspace=@aiclarity/shared",
     "test": "vitest run",
     "test:watch": "vitest",

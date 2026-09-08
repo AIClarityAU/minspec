@@ -42,13 +42,18 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 
-/** Walk up to the repo (or linked-worktree) root that holds scripts/ + package.json. */
+/**
+ * Walk up to the repo (or linked-worktree) root that holds scripts/ + .git.
+ * Anchored on `.git`, not `package.json` (#1509): in an npm-workspaces layout
+ * any workspace package can grow its own package.json + scripts/ pair, which
+ * would otherwise stop this one level too early.
+ */
 function findRepoRoot(): string {
   let dir = __dirname;
   for (let i = 0; i < 8; i++) {
     if (
       fs.existsSync(path.join(dir, 'scripts')) &&
-      fs.existsSync(path.join(dir, 'package.json'))
+      fs.existsSync(path.join(dir, '.git'))
     ) {
       return dir;
     }
