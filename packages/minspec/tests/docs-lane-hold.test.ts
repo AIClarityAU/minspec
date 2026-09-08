@@ -83,7 +83,7 @@ interface Fixture {
   /** Make `gh pr merge --disable-auto` fail, to prove the failure is not swallowed. */
   disarmFails?: boolean;
   /** Make one of the gate's own witness fetches fail, to prove it fails CLOSED. */
-  failApi?: 'labels' | 'filenames' | 'patches';
+  failApi?: 'labels' | 'filenames' | 'patches' | 'armed';
 }
 
 interface Result {
@@ -121,7 +121,7 @@ case "$*" in
   *"@tsv"*)                ${fx.failApi === 'patches' ? 'exit 1' : 'cat "$FIXDIR/files.tsv"'} ;;
   *"/files"*)              ${fx.failApi === 'filenames' ? 'exit 1' : 'cat "$FIXDIR/filenames.txt"'} ;;
   *".labels[].name"*)      ${fx.failApi === 'labels' ? 'exit 1' : 'cat "$FIXDIR/labels.txt"'} ;;
-  *autoMergeRequest*)      cat "$FIXDIR/armed.txt" ;;
+  *autoMergeRequest*)      ${fx.failApi === 'armed' ? 'exit 1' : 'cat "$FIXDIR/armed.txt"'} ;;
   *"--disable-auto"*)      ${fx.disarmFails ? 'exit 1' : 'exit 0'} ;;
   *) exit 0 ;;
 esac
@@ -349,5 +349,18 @@ describe('#1847 — an errored gate witness must fail CLOSED (constitution invar
     const r = runLane({ files: [{ filename: 'docs/epics/EP-1.md', patch: '' }], labels: ['docs-lane'] });
     expect(armed(r), 'the unknown-patch refusal is scoped to the governance corpus').toBe(true);
     expect(r.status).toBe(0);
+  });
+
+  it('attempts a disarm when the auto-merge state itself cannot be read', () => {
+    // The last witness that was not capture-then-checked. Exiting before the disarm
+    // would leave a previously-armed hold armed, so unknown must mean "try anyway".
+    const r = runLane({
+      files: [{ filename: 'docs/epics/EP-1.md', patch: DR_TYPO_PATCH }],
+      labels: ['docs-lane', 'hold:human'],
+      failApi: 'armed',
+    });
+    expect(armed(r), 'must never arm a held PR').toBe(false);
+    expect(disarmed(r), 'unknown state must trigger a precautionary disarm').toBe(true);
+    expect(r.status).toBe(1);
   });
 });

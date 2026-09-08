@@ -168,11 +168,23 @@ jobs:
             # not reported as a failure; and NEVER swallowed with `|| true`, because a
             # disarm that silently fails leaves a held PR armed (constitution
             # invariant 2 — no silent gate).
-            armed="$(gh pr view "$PR" --repo "$REPO" --json autoMergeRequest -q '.autoMergeRequest.enabledAt // ""')"
+            # This read is a witness too. If it fails we must not conclude "not armed" —
+            # that is the same fail-open the rest of this step was hardened against — and
+            # we must not simply exit either, because exiting BEFORE the disarm leaves a
+            # previously-armed hold armed. Unknown ⇒ attempt the disarm anyway and say so.
+            if ! armed="$(gh pr view "$PR" --repo "$REPO" --json autoMergeRequest -q '.autoMergeRequest.enabledAt // ""')"; then
+              echo "::error::docs-lane: could not read PR #$PR's auto-merge state — attempting a disarm regardless"
+              armed="unknown"
+            fi
             disarm_note=""
             if [ -n "$armed" ]; then
               if gh pr merge --disable-auto --repo "$REPO" "$PR"; then
                 disarm_note=" Auto-merge was already enabled and has been **disarmed**."
+              elif [ "$armed" = "unknown" ]; then
+                # Indistinguishable here from "there was nothing to disarm", so report the
+                # uncertainty rather than either reassuring or crying wolf.
+                echo "::error::docs-lane: auto-merge state unreadable and the disarm did not succeed — verify by hand that PR #$PR is not armed"
+                disarm_note=" ⚠️ Auto-merge state could **not** be read and a precautionary disarm did not succeed — check by hand that this PR is not armed."
               else
                 echo "::error::docs-lane: could not disarm auto-merge on a held PR — it is STILL ARMED"
                 disarm_note=" ⚠️ Auto-merge was already enabled and could **not** be disarmed — disarm it by hand."
