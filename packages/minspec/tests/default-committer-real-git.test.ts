@@ -4,9 +4,11 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 import { spawnSync } from 'node:child_process';
 
-// init.ts is a command module, so it imports vscode at load. Only the config
-// surface matters here — `conventionalDefaultBranches()` reads
-// `minspec.protectedBranches`, the same setting commit-on-approve consumes.
+// init.ts is a command module, so it imports vscode at load. `branchInfo()`
+// itself is now vscode-free (#1132 — it delegates to `resolveBranchDestination`
+// from approve-commit.ts, which reads the git-config twin of
+// `minspec.protectedBranches`, not this vscode setting), but the mock is still
+// needed for the module to import at all.
 const getConfiguration = vi.fn(() => ({
   get: (_key: string, fallback: string[]) => fallback,
 }));
@@ -132,20 +134,61 @@ describe('defaultCommitter.branchInfo() — real git', () => {
     expect(await (await defaultCommitter(dir)).branchInfo!()).toBeNull();
   });
 
-  it('honours a renamed default branch via minspec.protectedBranches', async () => {
-    // The reviewer's consistency point: this must read the SAME setting
-    // commit-on-approve does, not a private literal list. A user whose default is
-    // `develop` configures it once.
+  it('honours a renamed default branch via git config minspec.protectedBranches', async () => {
+    // #1132: branchInfo() now delegates to `resolveBranchDestination`, which
+    // reads the GIT-CONFIG twin of this key (the one the #1041 hook and
+    // `commitApproval` both read), not the vscode setting — so a user whose
+    // default is `develop` configures it via `git config`, not settings.json.
     const dir = makeRepo({ branch: 'develop', origin: true });
-    getConfiguration.mockReturnValueOnce({ get: () => ['develop'] } as never);
+    git(dir, 'config', 'minspec.protectedBranches', 'develop');
     const info = await (await defaultCommitter(dir)).branchInfo!();
-    expect(getConfiguration).toHaveBeenCalledWith('minspec');
     expect(info).toEqual({ current: 'develop', default: 'develop' });
   });
 
   it('returns null on a detached HEAD (no branch to strand work on)', async () => {
     const dir = makeRepo({ branch: 'main', origin: true, originHead: 'main' });
     git(dir, 'checkout', '-q', '--detach');
+    expect(await (await defaultCommitter(dir)).branchInfo!()).toBeNull();
+  });
+
+  // ── #1132: the escape hatches branchInfo() never checked ──────────────────
+  //
+  // Root cause: branchInfo() (from #1054) resolved the destination correctly
+  // but hand-rolled the decision instead of reusing `resolveBranchDestination`
+  // (from #1089's parity fix), so it never grew the bypass checks that landed
+  // there afterwards. A user who opted out via any of these still got
+  // diverted onto a branch by the harness commit offer, because the offer
+  // runs BEFORE the #1041 hook and the hook never got asked.
+
+  it('MINSPEC_ALLOW_MAIN=1 opts out, even on the default branch', async () => {
+    const dir = makeRepo({ branch: 'main', origin: true, originHead: 'main' });
+    vi.stubEnv('MINSPEC_ALLOW_MAIN', '1');
+    try {
+      expect(await (await defaultCommitter(dir)).branchInfo!()).toBeNull();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('MINSPEC_GATE_OFF=1 opts out, even on the default branch', async () => {
+    const dir = makeRepo({ branch: 'main', origin: true, originHead: 'main' });
+    vi.stubEnv('MINSPEC_GATE_OFF', '1');
+    try {
+      expect(await (await defaultCommitter(dir)).branchInfo!()).toBeNull();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
+  it('git config minspec.allowCommitOnDefaultBranch=true opts out', async () => {
+    const dir = makeRepo({ branch: 'main', origin: true, originHead: 'main' });
+    git(dir, 'config', 'minspec.allowCommitOnDefaultBranch', 'true');
+    expect(await (await defaultCommitter(dir)).branchInfo!()).toBeNull();
+  });
+
+  it('a mid-merge default branch is not flagged — that is how a branch legitimately lands', async () => {
+    const dir = makeRepo({ branch: 'main', origin: true, originHead: 'main' });
+    fs.writeFileSync(path.join(dir, '.git', 'MERGE_HEAD'), `${git(dir, 'rev-parse', 'HEAD')}\n`);
     expect(await (await defaultCommitter(dir)).branchInfo!()).toBeNull();
   });
 });
