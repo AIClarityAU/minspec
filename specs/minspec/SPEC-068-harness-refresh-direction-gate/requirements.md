@@ -1,5 +1,5 @@
 ---
-id: SPEC-066
+id: SPEC-068
 type: requirements
 status: specifying
 tier: T4
@@ -23,7 +23,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-066: The harness refresh direction gate
+# SPEC-068: The harness refresh direction gate
 
 ## One-Sentence Scope
 
