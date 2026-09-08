@@ -1,8 +1,8 @@
 ---
-id: SPEC-066
+id: SPEC-069
 type: requirements
 # 🔒 Once approved, hash-locked: the approved bytes are recorded in the per-file sidecar
-# .minspec/approvals/specs/minspec/SPEC-066-approval-record-deterministic-witness/requirements.md.json
+# .minspec/approvals/specs/minspec/SPEC-069-approval-record-deterministic-witness/requirements.md.json
 # (.specHash). `status`/`phases` are tool-written lifecycle mirrors (canonical.ts:60-83 strips
 # exactly those two from the hash); never hand-write either. Every OTHER frontmatter field —
 # including `implements:`/`affects:` below — IS hashed, so adding one after approval voids the
