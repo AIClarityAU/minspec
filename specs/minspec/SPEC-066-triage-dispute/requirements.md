@@ -7,7 +7,7 @@ product: minspec
 epic: EPIC-003  # SDD Core Methodology — triage classification is the methodology's admission gate
 aspects: [triage, dispatch, gates, hitl, record-schema, provenance, measurement, prompt-injection, no-silent-gate]
 depends_on: [SPEC-022]  # nothing here re-derives approval state; the verdict-record grammar it extends is DR-072's
-relates_to: [DR-090, DR-072, DR-070, DR-076, DR-062, DR-066, DR-003, SPEC-046]
+relates_to: [DR-091, DR-072, DR-070, DR-076, DR-062, DR-066, DR-003, SPEC-046]
 implements:
   - scripts/dispute-triage.sh
   - scripts/dispute-report.sh
@@ -33,10 +33,10 @@ phases:
 # MinSpec — the triage dispute lane: correct the classifier's INPUT, never override its output (Requirements)
 
 > Materializes **[#1106](https://github.com/AIClarityAU/minspec/issues/1106)**
-> (`role:architect`, Specify phase only) and implements **[DR-090](../../../docs/decisions/DR-090.md)**.
-> DR-090 holds the *why* and the policy; this spec holds the *what*, the contracts, and
-> the file allowlists. Read DR-090 §1–§8 first — every FR below traces to one of its
-> numbered sections, and an FR that appears to contradict DR-090 is a defect in this
+> (`role:architect`, Specify phase only) and implements **[DR-091](../../../docs/decisions/DR-091.md)**.
+> DR-091 holds the *why* and the policy; this spec holds the *what*, the contracts, and
+> the file allowlists. Read DR-091 §1–§8 first — every FR below traces to one of its
+> numbered sections, and an FR that appears to contradict DR-091 is a defect in this
 > spec, not a decision.
 
 ## One-Sentence Scope
@@ -60,7 +60,7 @@ prompt-gaming against a non-deterministic classifier, and destroys the human/cla
 disagreement — the only corpus that could ever say how often the human-only filter is
 wrong, and in which direction.
 
-**The distinction this spec is built on** (DR-090 §Context):
+**The distinction this spec is built on** (DR-091 §Context):
 
 > **Correcting an input** = telling the gate what the work *is*. The gate then decides.
 > **Overriding an output** = telling the gate what to *conclude*. The gate has not decided.
@@ -133,7 +133,7 @@ verdictAt: 2026-09-02T09:20:00Z
 MINSPEC_DISPUTE_END
 ```
 
-`reason` is **not** a field (DR-090 §5): `record_scrub` restricts field values to
+`reason` is **not** a field (DR-091 §5): `record_scrub` restricts field values to
 `[A-Za-z0-9:._/[]-]` so a value cannot forge a sibling field, and that charset cannot
 carry a sentence. The reason goes in the comment prose above the fenced block.
 
@@ -169,7 +169,7 @@ never guessed.
 | `--fresh-dispute <bodyHash>` | trusted comment bodies | the newest dispute whose `bodyHash` equals the argument **and** whose `disputedVerdictAt` equals the `verdictAt` of the current newest verdict record in the same stream — i.e. not yet consumed by a later re-triage (FR-4) | `0` found and fresh · `1` none, or consumed |
 
 `--newest-dispute` and the existing `--newest-record` MUST share one
-sentinel-parameterised implementation (DR-090 §5). Two selectors carrying their own
+sentinel-parameterised implementation (DR-091 §5). Two selectors carrying their own
 "take the newest one" is exactly how two of three readers kept the quoted-record defect
 after the third was fixed (DR-072 §5a).
 
@@ -215,14 +215,14 @@ folded into the rate (FR-11).
 `MINSPEC_DISPUTE_BEGIN` / `MINSPEC_DISPUTE_END`. Every field value passes through the
 existing `record_scrub`. `bodyHash` is computed from stdin by the existing `body_hash`
 and the render **fails closed** if no digest can be computed — an unfalsifiable record
-is worse than none. (DR-090 §5)
+is worse than none. (DR-091 §5)
 
 ### FR-2 — The dispute schema cannot express an authorisation
 
 `--render-dispute` MUST NOT emit `decision`, `hold`, `human_only`, `role` or `tier`, and
 `dispatch-ready-check.sh`'s dispatch reader MUST NOT read the dispute sentinel family at
 all. A dispute record placed on an issue changes nothing about that issue's
-dispatchability until a **new verdict record** is minted. (DR-090 §3.3)
+dispatchability until a **new verdict record** is minted. (DR-091 §3.3)
 
 ### FR-3 — `--may-dispute` is deny-by-default and refuses the overlapping lanes
 
@@ -230,7 +230,7 @@ dispatchability until a **new verdict record** is minted. (DR-090 §3.3)
 |---|---|---|
 | `human` | `loosening` | **disputable** — the primary case |
 | `none` | `tightening` | **disputable** — the classifier may have been wrong permissively |
-| `tier`, `specify` | any | refused `[use-approval]`, naming `scripts/approve-issue.sh` (DR-090 §3.4) |
+| `tier`, `specify` | any | refused `[use-approval]`, naming `scripts/approve-issue.sh` (DR-091 §3.4) |
 | `info`, `unknown` | any | refused `[no-type-to-correct]` — a type declaration does not supply missing information, and the gate reached no conclusion to correct |
 | `human` | `tightening` | refused `[already-held]` — the issue is already held on exactly this ground |
 | `none` | `loosening` | refused `[already-ready]` — nothing to loosen |
@@ -264,7 +264,7 @@ record on the issue. The moment a new verdict lands — whether from the re-tria
 dispute itself triggered (FR-6) or from any later, unrelated re-triage — the dispute is
 **consumed**: `--fresh-dispute` stops returning it, even though its `bodyHash` still
 matches the issue's current, unedited body. This is the once-only consumption rule
-(DR-090 §4): it is what stops a bare re-invocation of `scripts/triage-inbox.sh <N>`
+(DR-091 §4): it is what stops a bare re-invocation of `scripts/triage-inbox.sh <N>`
 against an unchanged body from re-injecting a declaration that already had its one
 guaranteed roll (FR-6) — without this rule, the mint-time bound in FR-5 stops a second
 dispute from being *recorded* but does nothing to stop the *same* dispute being read
@@ -289,7 +289,7 @@ slot machine at a slower crank. **Tightening** disputes are unbounded and never 
 `--dispute-exists`. The refusal names, in order: accept the outcome; edit the issue
 body so its intent is unambiguous (a genuinely different input, and a new hash); or, if
 the re-triage landed `hold:tier`/`hold:specify`, use `scripts/approve-issue.sh`.
-(DR-090 §4)
+(DR-091 §4)
 
 ### FR-6 — A dispute is never left as a recorded intention
 
@@ -308,8 +308,8 @@ fence — the validated `declaredType` token and the fixed instruction of FR-8. 
 human's free-text `reason` is **never** passed to the agent. A re-invocation of
 `triage-inbox.sh <N>` against an unchanged body, made after the verdict the dispute
 produced has already landed, finds no fresh dispute (FR-4) and composes the prompt
-exactly as it would with none present — this is the route that closes DR-090 §4's bound
-against re-rolls that never mint a second dispute. (DR-090 §4, §6)
+exactly as it would with none present — this is the route that closes DR-091 §4's bound
+against re-rolls that never mint a second dispute. (DR-091 §4, §6)
 
 ### FR-8 — The declared type settles the TYPE leg only; intent stays with the classifier
 
@@ -323,7 +323,7 @@ against re-rolls that never mint a second dispute. (DR-090 §4, §6)
    `human_only: yes` when the body's actual intent is human-only — *whatever* type was
    declared — and say so in its `rationale`.
 
-(DR-090 §2. This is the property that makes a dispute able to FAIL.)
+(DR-091 §2. This is the property that makes a dispute able to FAIL.)
 
 ### FR-9 — The new sentinel family is fenced at every republication point
 
@@ -331,7 +331,7 @@ against re-rolls that never mint a second dispute. (DR-090 §4, §6)
 as whole tokens, alongside the three families it already covers, and
 `triage-inbox.sh` fences the untrusted issue body against the declaration marker before
 embedding it. A new marker grammar that is not added to the fence is a live planting
-vector — the file's own header says so. (DR-090 §6; #1243)
+vector — the file's own header says so. (DR-091 §6; #1243)
 
 ### FR-10 — `triage-disputed` is a query label that no gate reads
 
@@ -346,20 +346,20 @@ a label is never a permission boundary.)
 
 `dispute-report.sh` joins, per issue, the disputed verdict, the dispute, and the first
 verdict minted after it (by `verdictAt`), and classifies each as `upheld` / `rejected` /
-`tightened` / `pending` per DR-090 §7. `pending` is listed separately with its issues
+`tightened` / `pending` per DR-091 §7. `pending` is listed separately with its issues
 named, never folded into the upheld rate, and the rate is always printed with its `n`.
 "The first verdict minted after it" is the **same** boundary FR-4 uses to decide when a
 dispute stops being fresh: a dispute the report can join to a later verdict is, by
 construction, one `--fresh-dispute` would no longer return. The two must never diverge —
 a future change to either the join or the consumption rule is a change to both.
-(DR-090 §4, §7)
+(DR-091 §4, §7)
 
 ### FR-12 — `triage-decide.sh` is not modified
 
 The deterministic gate's inputs remain the agent's five verdict fields. There is no
 dispute-shaped argument, environment variable or file it reads. Asserted by a test that
 compares the gate's behaviour on a fixed verdict block with and without a dispute record
-present on the issue. (DR-090 §3.1 — the load-bearing negative.)
+present on the issue. (DR-091 §3.1 — the load-bearing negative.)
 
 ## Invariants
 
@@ -422,7 +422,7 @@ present on the issue. (DR-090 §3.1 — the load-bearing negative.)
       with its `n`, lists `pending` disputes separately by issue number, and distinguishes
       `rejected` from `tightened`. (FR-11)
 - [ ] **The kill criterion is checkable** — the report's output is sufficient, with no
-      further tooling, to evaluate DR-090 §8 at `n ≥ 20`. (FR-11)
+      further tooling, to evaluate DR-091 §8 at `n ≥ 20`. (FR-11)
 
 ## Open Questions (Clarify)
 
@@ -441,7 +441,7 @@ present on the issue. (DR-090 §3.1 — the load-bearing negative.)
 - **DQ-3 — Should a `rejected` dispute be re-openable after the human edits the body?**
   FR-5 already permits it (a new `bodyHash` is a new pair). The question is whether the
   report should link the chain across body revisions. **Recommendation: link it (rec)**,
-  because DR-090 §4's residual is only *visible* if the chain is; **its cost** is that
+  because DR-091 §4's residual is only *visible* if the chain is; **its cost** is that
   the join needs the issue's edit history, which `gh` exposes awkwardly and may push this
   to a follow-up.
 - **DQ-4 — Is `gate-repair` a real type token or prose?** `triage.md` lists
@@ -454,10 +454,10 @@ Each is a `role:dev`, `agent-ready`-shaped task. **Filed as #1789 (A), #1790 (B)
 (C), #1792 (D)**, by a later PR-review follow-up — the authoring agent ran without
 network or `gh` access by dispatch policy (DR-008), so these were written to be
 transcribed, not designed, and filing was deferred. Each carries `role:dev` and the
-line `See DR-090 for design rationale`; each is labelled `needs-review` rather than
-`agent-ready` for now, because this spec and DR-090 are both still unapproved as of
+line `See DR-091 for design rationale`; each is labelled `needs-review` rather than
+`agent-ready` for now, because this spec and DR-091 are both still unapproved as of
 filing — swap to `agent-ready` once this spec is approved (*MinSpec: Approve Spec*) and
-DR-090 is accepted (*MinSpec: Accept ADR*).
+DR-091 is accepted (*MinSpec: Accept ADR*).
 
 ### (A) The pure half — dispute grammar, selector and predicate
 
@@ -534,12 +534,12 @@ DR-090 is accepted (*MinSpec: Accept ADR*).
 
 ## Non-goals
 
-- Disputing **tier** or **role** (DR-090 §3.4). `hold:tier` already has DR-072's
+- Disputing **tier** or **role** (DR-091 §3.4). `hold:tier` already has DR-072's
   approval path.
 - Any change to `triage-decide.sh` (FR-12).
 - Any widening of DR-072 §3's liftable-hold table (INV-1).
 - Deterministic type inference from GitHub type labels — blocked on #1134, recorded as a
-  DR-090 follow-up rather than assumed here.
+  DR-091 follow-up rather than assumed here.
 - Backfilling disputes over the existing `needs-review` corpus. DR-072's "deliberately
   NOT a `--backfill`" reasoning applies unchanged: minting a record no human authored is
   the hole itself.
