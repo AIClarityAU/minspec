@@ -19,7 +19,7 @@ name: docs-lane
 
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled, ready_for_review]
+    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
     branches: [main]
 
 permissions:
@@ -59,7 +59,18 @@ jobs:
           # lock-step-pinned to docs-corpus.ts/.sh, which is why this is a SEPARATE denylist
           # rather than an edit to the shared corpus.
           outward='^sites/|(^|/)(README|CHANGELOG|LICEN[CS]E|NOTICE|THIRD-PARTY-NOTICES)([.-][^/]*)?$|^packages/[^/]+/[^/]+[.](md|mdx|markdown|txt|rst|adoc)$|^packages/[^/]+/media/'
-          mapfile -t files < <(gh api --paginate "repos/$REPO/pulls/$PR/files" -q '.[].filename')
+          # Every `gh api` below is a GATE WITNESS, so its failure must fail the gate
+          # CLOSED and visibly (constitution invariant 2). A `< <(...)` process
+          # substitution does NOT do that: under `set -euo pipefail` a failure inside
+          # it is not caught, `mapfile`/`while` still return 0, and the gate reads an
+          # empty result as "nothing to object to". Capture-then-check instead, so a
+          # transient or rate-limited API call refuses rather than arms.
+          if ! files_raw="$(gh api --paginate "repos/$REPO/pulls/$PR/files" -q '.[].filename')"; then
+            echo "::error::docs-lane: could not list PR #$PR's files — refusing to arm"
+            exit 1
+          fi
+          files=()
+          [ -n "$files_raw" ] && mapfile -t files <<<"$files_raw"
           if [ "${#files[@]}" -eq 0 ]; then
             echo "::error::docs-lane: PR #$PR has no files"
             exit 1
@@ -95,7 +106,12 @@ jobs:
           # already been disarmed by hand once. Only an unrelated `ai-review:changes`
           # kept it from landing a DR ratification with no human act (#1816).
           hold_pattern='^hold:'
-          mapfile -t labels < <(gh api "repos/$REPO/pulls/$PR" -q '.labels[].name')
+          if ! labels_raw="$(gh api "repos/$REPO/pulls/$PR" -q '.labels[].name')"; then
+            echo "::error::docs-lane: could not read PR #$PR's labels — refusing to arm rather than assuming it is unheld"
+            exit 1
+          fi
+          labels=()
+          [ -n "$labels_raw" ] && mapfile -t labels <<<"$labels_raw"
           held=()
           for l in "${labels[@]}"; do
             if grep -qE "$hold_pattern" <<<"$l"; then held+=("$l"); fi
@@ -116,16 +132,33 @@ jobs:
           # on any edit to a governance file. A typo fix in a DR body still rides the
           # lane, which is the whole point of the lane. Matching the file rather than
           # the line is the coarse-discriminant mistake (#1754) this is avoiding.
+          # A brand-new DR or spec (an all-`+` patch containing `+status: proposed`) also
+          # matches, so it is refused from the lane too. That is intended and fail-closed:
+          # a substantive new DR/spec has never ridden this lane (see the header note), and
+          # the alternative — parsing the transition's direction — would be a second place
+          # to be wrong about which transitions are human acts.
           govern='^(docs/decisions/|specs/)'
+          if ! files_tsv="$(gh api --paginate "repos/$REPO/pulls/$PR/files" \
+                              -q '.[] | [.filename, (.patch // "" | @base64)] | @tsv')"; then
+            echo "::error::docs-lane: could not read PR #$PR's patches — refusing to arm rather than assuming no status transition"
+            exit 1
+          fi
           status_changed=()
-          while IFS=$'\t' read -r fname patch_b64; do
-            [[ "$fname" =~ $govern ]] || continue
-            [ -n "$patch_b64" ] || continue
-            if printf '%s' "$patch_b64" | base64 -d 2>/dev/null | grep -qE '^[+-]status:'; then
-              status_changed+=("$fname")
-            fi
-          done < <(gh api --paginate "repos/$REPO/pulls/$PR/files" \
-                     -q '.[] | [.filename, (.patch // "" | @base64)] | @tsv')
+          if [ -n "$files_tsv" ]; then
+            while IFS=$'\t' read -r fname patch_b64; do
+              [[ "$fname" =~ $govern ]] || continue
+              if [ -z "$patch_b64" ]; then
+                # GitHub omits `.patch` for very large diffs. An ABSENT witness is an
+                # unknown, not a "no" — the one reading that would let a status
+                # transition buried in an oversized governance diff reach the lane.
+                status_changed+=("$fname (no patch returned — treated as a transition)")
+                continue
+              fi
+              if printf '%s' "$patch_b64" | base64 -d 2>/dev/null | grep -qE '^[+-]status:'; then
+                status_changed+=("$fname")
+              fi
+            done <<<"$files_tsv"
+          fi
 
           if [ "${#held[@]}" -gt 0 ] || [ "${#status_changed[@]}" -gt 0 ]; then
             # Arming is STICKY: a previous run of this lane may already have enabled

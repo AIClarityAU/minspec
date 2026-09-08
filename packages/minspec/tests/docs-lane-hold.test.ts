@@ -82,6 +82,8 @@ interface Fixture {
   armed?: string;
   /** Make `gh pr merge --disable-auto` fail, to prove the failure is not swallowed. */
   disarmFails?: boolean;
+  /** Make one of the gate's own witness fetches fail, to prove it fails CLOSED. */
+  failApi?: 'labels' | 'filenames' | 'patches';
 }
 
 interface Result {
@@ -97,10 +99,16 @@ function runLane(fx: Fixture): Result {
   const bin = path.join(dir, 'bin');
   fs.mkdirSync(bin);
 
+  // The workflow makes TWO different `.../files` calls: one for filenames only, one
+  // for filename+patch as TSV. The stub must answer them SEPARATELY — serving the TSV
+  // to both made `README.md\t<base64>` fail the corpus regex and trip the non-docs
+  // branch, so the outward-facing regression test passed through the wrong gate.
   const rows = fx.files
     .map((f) => `${f.filename}\t${Buffer.from(f.patch ?? '').toString('base64')}`)
     .join('\n');
   fs.writeFileSync(path.join(dir, 'files.tsv'), rows + (rows ? '\n' : ''));
+  const names = fx.files.map((f) => f.filename).join('\n');
+  fs.writeFileSync(path.join(dir, 'filenames.txt'), names + (names ? '\n' : ''));
   fs.writeFileSync(path.join(dir, 'labels.txt'), fx.labels.join('\n') + (fx.labels.length ? '\n' : ''));
   fs.writeFileSync(path.join(dir, 'armed.txt'), fx.armed ?? '');
 
@@ -110,10 +118,11 @@ function runLane(fx: Fixture): Result {
     `#!/usr/bin/env bash
 printf '%s\\n' "$*" >> "$FIXDIR/calls.log"
 case "$*" in
-  *"/files"*)              cat "$FIXDIR/files.tsv" ;;
-  *".labels[].name"*)      cat "$FIXDIR/labels.txt" ;;
+  *"@tsv"*)                ${fx.failApi === 'patches' ? 'exit 1' : 'cat "$FIXDIR/files.tsv"'} ;;
+  *"/files"*)              ${fx.failApi === 'filenames' ? 'exit 1' : 'cat "$FIXDIR/filenames.txt"'} ;;
+  *".labels[].name"*)      ${fx.failApi === 'labels' ? 'exit 1' : 'cat "$FIXDIR/labels.txt"'} ;;
   *autoMergeRequest*)      cat "$FIXDIR/armed.txt" ;;
-  *"merge --disable-auto"*|*"--disable-auto"*) ${fx.disarmFails ? 'exit 1' : 'exit 0'} ;;
+  *"--disable-auto"*)      ${fx.disarmFails ? 'exit 1' : 'exit 0'} ;;
   *) exit 0 ;;
 esac
 `,
@@ -283,6 +292,62 @@ describe('#1847 — no regression in the pre-existing refusals', () => {
       labels: ['docs-lane'],
     });
     expect(armed(r)).toBe(true);
+    expect(r.status).toBe(0);
+  });
+});
+
+describe('#1847 — an errored gate witness must fail CLOSED (constitution invariant 2)', () => {
+  /**
+   * The blocking review finding on the first round of this PR: the gates originally read
+   * their witnesses through `mapfile -t x < <(gh api ...)`. Under `set -euo pipefail` a
+   * failure INSIDE a process substitution is not caught — `mapfile`/`while` still return
+   * 0 — so a transient or rate-limited `gh api` produced an empty array, the hold was
+   * silently not detected, and the lane armed a held PR. That is the #1741 failure
+   * reintroduced by its own fix, which is why these tests exist rather than a comment.
+   */
+  it('refuses when the labels call fails, instead of assuming the PR is unheld', () => {
+    const r = runLane({
+      files: [{ filename: 'docs/epics/EP-1.md', patch: DR_TYPO_PATCH }],
+      labels: ['docs-lane', 'hold:human'],
+      failApi: 'labels',
+    });
+    expect(armed(r), 'an unreadable label witness must never read as "not held"').toBe(false);
+    expect(r.status).toBe(1);
+  });
+
+  it('refuses when the patch call fails, instead of assuming no status transition', () => {
+    const r = runLane({
+      files: [{ filename: 'docs/decisions/DR-050.md', patch: DR_STATUS_PATCH }],
+      labels: ['docs-lane'],
+      failApi: 'patches',
+    });
+    expect(armed(r)).toBe(false);
+    expect(r.status).toBe(1);
+  });
+
+  it('refuses when the filenames call fails', () => {
+    const r = runLane({
+      files: [{ filename: 'docs/epics/EP-1.md', patch: DR_TYPO_PATCH }],
+      labels: ['docs-lane'],
+      failApi: 'filenames',
+    });
+    expect(armed(r)).toBe(false);
+    expect(r.status).toBe(1);
+  });
+
+  it('treats a governance file with NO patch as a transition, not as a clean file', () => {
+    // GitHub omits `.patch` for very large diffs. Absent is UNKNOWN, not "no".
+    const r = runLane({
+      files: [{ filename: 'docs/decisions/DR-050.md', patch: '' }],
+      labels: ['docs-lane'],
+    });
+    expect(armed(r), 'a status change buried in an oversized diff must not reach the lane').toBe(false);
+    expect(r.status).toBe(1);
+  });
+
+  it('a NON-governance file with no patch still rides the lane', () => {
+    const r = runLane({ files: [{ filename: 'docs/epics/EP-1.md', patch: '' }], labels: ['docs-lane'] });
+    expect(armed(r), 'the unknown-patch refusal is scoped to the governance corpus').toBe(true);
     expect(r.status).toBe(0);
   });
 });
