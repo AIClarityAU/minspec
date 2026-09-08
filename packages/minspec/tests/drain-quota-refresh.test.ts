@@ -202,21 +202,73 @@ describe('INV-R4 — a fresh reading is not re-observed', () => {
 });
 
 describe('the cadence relationship that caused #1859', () => {
-  it('the refresh window is shorter than the drain cadence, so a wake cannot age out', () => {
-    // The bug was structural: INTERVAL (1200s) and QUOTA_BACKOFF (1800s) both exceed
-    // QUOTA_STALE_SEC (900s), so a reading refreshed once per cycle was ALWAYS stale
-    // by the next one. Pin the relationship so a future interval bump cannot silently
-    // re-break autonomy. Read from the script itself rather than restated here.
-    const src = fs.readFileSync(DRAIN, 'utf-8');
-    const num = (re: RegExp): number => {
-      const m = src.match(re);
-      expect(m, `could not read ${re} from drain-inbox.sh`).toBeTruthy();
-      return Number(m![1]);
-    };
-    const stale = num(/QUOTA_STALE_SEC="\$\{MINSPEC_QUOTA_STALE_SEC:-(\d+)\}"/);
-    const minAge = num(/QUOTA_REFRESH_MIN_AGE="\$\{MINSPEC_QUOTA_REFRESH_MIN_AGE:-\$\(\( QUOTA_STALE_SEC \/ (\d+) \)\)\}"/);
-    // The refresh triggers at stale/minAge, strictly before the reading ages out.
-    expect(stale / minAge).toBeLessThan(stale);
-    expect(minAge).toBeGreaterThan(1);
+  // The FIRST version of this block was a tautology, and the review panel was right
+  // to block on it: it captured the DIVISOR (`2`) out of `QUOTA_STALE_SEC / 2` and
+  // then asserted `450 < 900` and `2 > 1`, which hold for any divisor. It never read
+  // INTERVAL or QUOTA_BACKOFF — the constants the comment named as the cause. A test
+  // that claims to pin an invariant and asserts nothing about it is a false signpost
+  // on an autonomy-critical path, so it is replaced here with a BEHAVIOURAL pair that
+  // exercises the real cadence through the real gate.
+  const src = fs.readFileSync(DRAIN, 'utf-8');
+  // The shell variable and its env override do NOT share a name (INTERVAL is set from
+  // MINSPEC_DRAIN_INTERVAL), so both are named explicitly rather than derived.
+  const constant = (shellVar: string, envVar: string): number => {
+    const m = src.match(new RegExp(`${shellVar}="\\$\\{${envVar}:-(\\d+)\\}"`));
+    expect(m, `could not read ${shellVar} (via ${envVar}) from drain-inbox.sh`).toBeTruthy();
+    return Number(m![1]);
+  };
+  const INTERVAL = constant('INTERVAL', 'MINSPEC_DRAIN_INTERVAL');
+  const BACKOFF = constant('QUOTA_BACKOFF', 'MINSPEC_DRAIN_QUOTA_BACKOFF');
+  const STALE = constant('QUOTA_STALE_SEC', 'MINSPEC_QUOTA_STALE_SEC');
+
+  it('the drain cadence really does outrun the staleness limit — this is the bug', () => {
+    // Not decoration: if this ever stops holding, the seam below is no longer load
+    // bearing and someone should know. Read from the script, never restated here.
+    expect(Math.max(INTERVAL, BACKOFF)).toBeGreaterThan(STALE);
+  });
+
+  it('RED: with the seam OFF, a reading aged by one cycle interval DEFERS', () => {
+    // This is exactly the state every headless wake found: the reading was written
+    // last cycle, INTERVAL seconds ago, and INTERVAL > STALE.
+    write({ used_percentage: 1, resets_at: nowSec() + 3600, observed_at: nowSec() - INTERVAL });
+    const r = run({ MINSPEC_QUOTA_REFRESH: '0', MINSPEC_QUOTA_REFRESH_CMD: producerWritesFresh() });
+    expect(fs.existsSync(sentinel)).toBe(false);
+    expect(r.code).toBe(42);
+    expect(r.out).toMatch(/^defer:stale/);
+  });
+
+  it('GREEN: with the seam ON, the same reading is refreshed and ADMITS', () => {
+    write({ used_percentage: 1, resets_at: nowSec() + 3600, observed_at: nowSec() - INTERVAL });
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: producerWritesFresh() });
+    expect(fs.existsSync(sentinel)).toBe(true);
+    expect(r.code).toBe(0);
+    expect(r.out).toMatch(/^open:/);
+  });
+
+  it('RED: the longest sleep (quota backoff) also outruns the limit, and also recovers', () => {
+    // The backoff path is worse than the interval path: a stale reading cannot yield a
+    // real reset time, so the sleep falls back to QUOTA_BACKOFF — the longest of the
+    // three — and each hold produced a staler reading than the last.
+    write({ used_percentage: 1, resets_at: nowSec() + 3600, observed_at: nowSec() - BACKOFF });
+    expect(run({ MINSPEC_QUOTA_REFRESH: '0' }).code).toBe(42);
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: producerWritesFresh() });
+    expect(r.code).toBe(0);
+    expect(r.out).toMatch(/^open:/);
+  });
+
+  it('the refresh fires strictly BEFORE the reading ages out, or it buys nothing', () => {
+    // The real relationship between the two thresholds, asserted on the computed
+    // value rather than on the divisor literal: a refresh triggered at or after the
+    // staleness limit would leave the gate deferring anyway.
+    const m = src.match(/QUOTA_REFRESH_MIN_AGE="\$\{MINSPEC_QUOTA_REFRESH_MIN_AGE:-\$\(\( QUOTA_STALE_SEC \/ (\d+) \)\)\}"/);
+    expect(m, 'could not read QUOTA_REFRESH_MIN_AGE from drain-inbox.sh').toBeTruthy();
+    const minAge = STALE / Number(m![1]);
+    expect(minAge).toBeLessThan(STALE);
+    // And a reading just past the trigger is genuinely refreshed, proving the computed
+    // threshold is the one the script uses.
+    write({ used_percentage: 1, resets_at: nowSec() + 3600, observed_at: nowSec() - (minAge + 30) });
+    const r = run({ MINSPEC_QUOTA_REFRESH_CMD: producerWritesFresh() });
+    expect(fs.existsSync(sentinel)).toBe(true);
+    expect(r.code).toBe(0);
   });
 });
