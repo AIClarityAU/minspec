@@ -364,3 +364,48 @@ describe('#1847 — an errored gate witness must fail CLOSED (constitution invar
     expect(r.status).toBe(1);
   });
 });
+
+describe('#1847 — every refusal path revokes an arming an earlier run already made', () => {
+  /**
+   * Round-3 review finding: the two PRE-EXISTING refusals (non-docs path, outward-facing
+   * doc) exited without disarming, while the two new ones disarmed. Same asymmetry one
+   * layer down — a PR armed while docs-only can acquire a non-docs path on a later
+   * `synchronize`, hit those branches, and keep its arming. "Arming is sticky" has to
+   * hold for every refusal or it holds for none.
+   */
+  it('disarms when a non-docs path appears after an earlier arming', () => {
+    const r = runLane({
+      files: [{ filename: 'packages/minspec/src/lib/foo.ts', patch: DR_TYPO_PATCH }],
+      labels: ['docs-lane'],
+      armed: '2026-09-05T22:09:34Z',
+    });
+    expect(disarmed(r), 'the non-docs refusal must revoke a prior arming').toBe(true);
+    expect(armed(r)).toBe(false);
+    expect(r.status).toBe(1);
+  });
+
+  it('disarms when an outward-facing doc appears after an earlier arming', () => {
+    const r = runLane({
+      files: [{ filename: 'README.md', patch: DR_TYPO_PATCH }],
+      labels: ['docs-lane'],
+      armed: '2026-09-05T22:09:34Z',
+    });
+    expect(disarmed(r), 'the outward-facing refusal must revoke a prior arming').toBe(true);
+    expect(armed(r)).toBe(false);
+    expect(r.status).toBe(1);
+  });
+
+  it('does not claim something was disarmed when the state was never readable', () => {
+    // "never wrong": an unknown state plus a successful precautionary disarm must not be
+    // reported as "auto-merge was already enabled and has been disarmed" — it may not
+    // have been enabled at all.
+    const r = runLane({
+      files: [{ filename: 'docs/epics/EP-1.md', patch: DR_TYPO_PATCH }],
+      labels: ['docs-lane', 'hold:human'],
+      failApi: 'armed',
+    });
+    const comment = r.calls.find((c) => c.startsWith('pr comment')) ?? '';
+    expect(comment).not.toMatch(/was already enabled and has been/);
+    expect(comment, 'the note must say the state could not be read').toMatch(/could not be read/);
+  });
+});
