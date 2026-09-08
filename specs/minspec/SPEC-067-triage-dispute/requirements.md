@@ -1,5 +1,5 @@
 ---
-id: SPEC-066
+id: SPEC-067
 type: requirements
 status: specifying
 tier: T3
@@ -74,7 +74,7 @@ owned set with **no existence filter**, and `.sh` is a gated extension per
 approval**: the moment this spec's current phase moves past `clarify` into `plan`
 (`spec-gate.py:487-488`), both files are frozen for **any** `Edit`/`Write`/`MultiEdit`,
 by anyone, anywhere in the repo — not only edits made "for" this spec — for as long as
-SPEC-066 remains unapproved. This is the intended shape of the gate: its own docstring
+SPEC-067 remains unapproved. This is the intended shape of the gate: its own docstring
 names the principle "DOC-BEFORE-*CODE*, NOT doc-before-doc" and attributes it to DR-047
 §3's doc-before-code precedent (`spec-gate.py:368`, echoed at `:11,15,32,34,431`). But
 because both files are shared, actively-maintained scripts, the practical effect is a
