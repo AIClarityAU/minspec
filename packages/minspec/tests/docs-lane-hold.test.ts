@@ -409,3 +409,43 @@ describe('#1847 — every refusal path revokes an arming an earlier run already 
     expect(comment, 'the note must say the state could not be read').toMatch(/could not be read/);
   });
 });
+
+describe('#1847 — the status detector must not fail open on a large patch', () => {
+  /**
+   * Round-4 blocking review finding. `base64 -d | grep -qE` under `set -o pipefail`:
+   * grep exits 0 at the first match and closes the pipe, base64 is still writing so it
+   * takes SIGPIPE (141), and pipefail reports the pipeline as FAILED even though grep
+   * matched. The transition is dropped and the PR arms — a fail-open reachable only
+   * once the decoded patch exceeds the pipe buffer, which is why every earlier round's
+   * small fixtures passed straight over it.
+   */
+  const BIG_STATUS_PATCH =
+    '@@ -1,5 +1,5 @@\n-status: proposed\n+status: accepted\n' +
+    Array.from({ length: 4000 }, (_, i) => ` context line ${i} ${'x'.repeat(40)}`).join('\n') +
+    '\n';
+
+  it('detects a status transition in a patch far larger than the pipe buffer', () => {
+    expect(BIG_STATUS_PATCH.length, 'fixture must exceed the ~64KiB pipe buffer').toBeGreaterThan(
+      64 * 1024,
+    );
+    const r = runLane({
+      files: [{ filename: 'docs/decisions/DR-050.md', patch: BIG_STATUS_PATCH }],
+      labels: ['docs-lane'],
+    });
+    expect(armed(r), 'a transition buried in a large patch must not reach the lane').toBe(false);
+    expect(r.status).toBe(1);
+  });
+
+  it('still arms on a large governance patch with no status transition', () => {
+    const bigNoStatus = BIG_STATUS_PATCH.replace(
+      '-status: proposed\n+status: accepted\n',
+      '-a speling mistake\n+a spelling mistake\n',
+    );
+    const r = runLane({
+      files: [{ filename: 'docs/decisions/DR-050.md', patch: bigNoStatus }],
+      labels: ['docs-lane'],
+    });
+    expect(armed(r), 'size alone must not trip the gate').toBe(true);
+    expect(r.status).toBe(0);
+  });
+});

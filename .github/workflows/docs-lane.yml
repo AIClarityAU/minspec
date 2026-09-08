@@ -192,7 +192,20 @@ jobs:
                 status_changed+=("$fname (no patch returned — treated as a transition)")
                 continue
               fi
-              if printf '%s' "$patch_b64" | base64 -d 2>/dev/null | grep -qE '^[+-]status:'; then
+              # Decode into a variable, then match — NEVER `base64 -d | grep -q`. Under
+              # `set -o pipefail` that pipeline fails OPEN on a large patch: `grep -q`
+              # exits 0 at the first match and closes the pipe, `base64 -d` is still
+              # writing so it takes SIGPIPE and exits 141, and pipefail then reports the
+              # whole pipeline as failed even though grep MATCHED. The `if` goes false,
+              # the transition is dropped, and the PR arms. The bug only appears once the
+              # decoded patch exceeds the pipe buffer (~64KiB), which is exactly the case
+              # the absent-`.patch` branch above already had to reason about.
+              if ! decoded="$(printf '%s' "$patch_b64" | base64 -d 2>/dev/null)"; then
+                # An undecodable patch is another unknown witness, not a clean file.
+                status_changed+=("$fname (patch could not be decoded — treated as a transition)")
+                continue
+              fi
+              if grep -qE '^[+-]status:' <<<"$decoded"; then
                 status_changed+=("$fname")
               fi
             done <<<"$files_tsv"
