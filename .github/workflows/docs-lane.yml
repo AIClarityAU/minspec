@@ -13,9 +13,9 @@ name: docs-lane
 #
 # Two further refusals, both added by #1847 after this lane armed auto-merge on a PR
 # that was explicitly held: a `hold:*` label stops the lane (and REVOKES an arming an
-# earlier run already made), and so does a change to a `status:` frontmatter line in
-# docs/decisions/** or specs/**, because DR acceptance and spec approval are human acts
-# that happen to be docs-only.
+# earlier run already made), and so does a changed `status:` line in docs/decisions/**
+# or specs/**, because DR acceptance and spec approval are human acts that happen to be
+# docs-only.
 
 on:
   pull_request:
@@ -167,10 +167,19 @@ jobs:
           # acceptance and T3/T4 spec approval always stop and ask) both reserve this
           # transition for a human.
           #
-          # Deliberately narrow: it fires on a changed `status:` FRONTMATTER LINE, not
-          # on any edit to a governance file. A typo fix in a DR body still rides the
-          # lane, which is the whole point of the lane. Matching the file rather than
-          # the line is the coarse-discriminant mistake (#1754) this is avoiding.
+          # Deliberately narrow: it fires on a changed `status:` LINE, not on any edit to
+          # a governance file. A typo fix in a DR body still rides the lane, which is the
+          # whole point of the lane. Matching the file rather than the line is the
+          # coarse-discriminant mistake (#1754) this is avoiding.
+          #
+          # It is `^[+-]status:` against the diff, so it also matches a `status:` line
+          # that is NOT frontmatter — one quoted inside a fenced block or in body prose.
+          # That is deliberate and the safe direction: the gate over-refuses rather than
+          # under-refuses, and telling frontmatter from body text would mean tracking
+          # position within each hunk, i.e. a second predicate to be wrong about. Said
+          # plainly here because "frontmatter line" would be a claim narrower than the
+          # code, and a comment that overstates its own precision is the same false
+          # signpost as one that understates it.
           # A brand-new DR or spec (an all-`+` patch containing `+status: proposed`) also
           # matches, so it is refused from the lane too. That is intended and fail-closed:
           # a substantive new DR/spec has never ridden this lane (see the header note), and
@@ -229,7 +238,7 @@ jobs:
             if [ "${#status_changed[@]}" -gt 0 ]; then
               printf '::error::docs-lane: governance status transition in: %s\n' "${status_changed[*]}"
               gh pr comment "$PR" --repo "$REPO" --body \
-                "🚫 **docs-lane: governance status transition** — this PR changes a \`status:\` frontmatter line in \`${status_changed[*]}\`. Accepting a DR or approving a spec is a **human act** (DR-029, DR-086 §2), and it is docs-only by construction, so the docs corpus check above cannot see it. Auto-merge NOT enabled (#1847).${disarm_note} This needs a human merge keystroke. Split any unrelated docs into their own PR if you want those on the lane." || true
+                "🚫 **docs-lane: governance status transition** — this PR changes a \`status:\` line in \`${status_changed[*]}\`. Accepting a DR or approving a spec is a **human act** (DR-029, DR-086 §2), and it is docs-only by construction, so the docs corpus check above cannot see it. Auto-merge NOT enabled (#1847).${disarm_note} This needs a human merge keystroke. Split any unrelated docs into their own PR if you want those on the lane." || true
             fi
             exit 1
           fi

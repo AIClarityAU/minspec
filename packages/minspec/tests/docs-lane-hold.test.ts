@@ -221,7 +221,7 @@ describe('#1847 — docs-lane must not arm auto-merge on a held PR', () => {
 });
 
 describe('#1847 — docs-lane must not arm auto-merge on a governance status transition', () => {
-  it('refuses when a DR frontmatter status: line changes', () => {
+  it('refuses when a DR status: line changes', () => {
     const r = runLane({
       files: [{ filename: 'docs/decisions/DR-050.md', patch: DR_STATUS_PATCH }],
       labels: ['docs-lane'],
@@ -230,7 +230,7 @@ describe('#1847 — docs-lane must not arm auto-merge on a governance status tra
     expect(r.status).toBe(1);
   });
 
-  it('refuses when a spec frontmatter status: line changes', () => {
+  it('refuses when a spec status: line changes', () => {
     const r = runLane({
       files: [{ filename: 'specs/minspec/SPEC-044-x/requirements.md', patch: DR_STATUS_PATCH }],
       labels: ['docs-lane'],
@@ -446,6 +446,37 @@ describe('#1847 — the status detector must not fail open on a large patch', ()
       labels: ['docs-lane'],
     });
     expect(armed(r), 'size alone must not trip the gate').toBe(true);
+    expect(r.status).toBe(0);
+  });
+});
+
+describe('#1847 — the status gate matches any status: line, not only frontmatter', () => {
+  /**
+   * `^[+-]status:` runs against the diff, so a `status:` line quoted inside a fenced
+   * block or in body prose also refuses. That is deliberate — the gate over-refuses
+   * rather than under-refuses, and distinguishing frontmatter from body text would mean
+   * tracking position within each hunk, a second predicate to be wrong about. Pinned
+   * here so the behaviour is documented by a test rather than only by a comment.
+   */
+  it('refuses a status: line changed inside a fenced code block', () => {
+    const fenced =
+      '@@ -10,7 +10,7 @@\n context\n ```yaml\n-status: proposed\n+status: accepted\n ```\n context\n';
+    const r = runLane({
+      files: [{ filename: 'docs/decisions/DR-050.md', patch: fenced }],
+      labels: ['docs-lane'],
+    });
+    expect(armed(r), 'over-refusing is the safe direction for this gate').toBe(false);
+    expect(r.status).toBe(1);
+  });
+
+  it('does not refuse a line merely CONTAINING status:', () => {
+    const inline =
+      '@@ -1,3 +1,3 @@\n-the status: field is explained below\n+the status: field is described below\n';
+    const r = runLane({
+      files: [{ filename: 'docs/decisions/DR-050.md', patch: inline }],
+      labels: ['docs-lane'],
+    });
+    expect(armed(r), 'the pattern is anchored — mid-line matches must not trip it').toBe(true);
     expect(r.status).toBe(0);
   });
 });
