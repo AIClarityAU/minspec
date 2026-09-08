@@ -48,9 +48,10 @@ jobs:
           # not merely decline to arm. Arming is sticky, and a PR that was clean when it
           # was armed can later acquire a non-docs path, an outward-facing doc, a hold
           # label, or a status transition on a `synchronize` — declining to re-arm leaves
-          # the original arming standing in all four cases. #1847 fixed that for the two
-          # new gates and left the two pre-existing ones exiting without a disarm, which
-          # is the same asymmetry one layer down.
+          # the original arming standing in all four cases. ALL FOUR refusals call this
+          # helper. They did not always: the two pre-existing ones (non-docs path,
+          # outward-facing doc) exited without disarming until #1847 brought them in
+          # line with the two it added.
           #
           # Sets `disarm_note` for the refusal comment, and never claims more than it
           # knows: when the auto-merge state could not be READ, a precautionary disarm is
