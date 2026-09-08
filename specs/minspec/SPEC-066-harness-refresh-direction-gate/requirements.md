@@ -6,7 +6,7 @@ tier: T4
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain — "marker-bounded updates that never surprise-write"
 aspects: [data, tier-0, fail-closed, harness-refresh, supply-chain]
-relates_to: [DR-090, DR-089, DR-073, DR-011, DR-003, SPEC-043, SPEC-058, SPEC-060, SPEC-063]
+relates_to: [DR-092, DR-089, DR-073, DR-011, DR-003, SPEC-043, SPEC-058, SPEC-060, SPEC-063]
 # Declared during Specify, deliberately BEFORE approval mints the hash (the SPEC-051
 # lesson: declaring after approval forces a post-approval edit that stales the signature).
 # `implements:` = created and owned here. The epoch/digest constants, the provenance
@@ -34,7 +34,7 @@ content.
 
 ## Context
 
-Read DR-090 for the decision and the rejected alternatives; this file specifies what must
+Read DR-092 for the decision and the rejected alternatives; this file specifies what must
 be built and how it will be judged. The one-paragraph version:
 
 `refreshHarnessFiles` writes the templates baked into the **running bundle**, with no
@@ -203,7 +203,7 @@ Each carries a recommendation and the cost of taking it, per the project's decis
 
 ## Out of Scope
 
-- **An opt-in "newer templates exist" check** that reaches the network. Named in DR-090's
+- **An opt-in "newer templates exist" check** that reaches the network. Named in DR-092's
   Alternatives; it needs its own consent surface and its own record.
 - **Widening SPEC-060** to consumer workspaces. Its `INV-3` scopes it to the dogfood
   workspace deliberately; this spec introduces a separate identity that needs no git,
@@ -211,7 +211,7 @@ Each carries a recommendation and the cost of taking it, per the project's decis
 - **Correcting the downstream `minspec-ci-parity` remedy text.** That job lives in a
   consuming repo, not here (see Context).
 - **Protecting a repo from bundles built before this feature.** An older bundle ignores a
-  record it predates; nothing in this spec can change that, and DR-090's Consequences say
+  record it predates; nothing in this spec can change that, and DR-092's Consequences say
   so rather than implying otherwise.
 
 ## Risks
@@ -219,7 +219,7 @@ Each carries a recommendation and the cost of taking it, per the project's decis
 | Risk | Mechanism | Mitigation |
 |---|---|---|
 | Every existing adopter's next refresh holds | `unknown` fails closed by design (INV-2) | One confirmed override per repo, with the changed-file list in front of the human (FR-6); DQ-5 records that no softer migration was taken and why |
-| A bundle packaged from an unmerged branch bumps the epoch past main's and is ordered ahead | The epoch is a source constant, so a branch can set it to anything | A duplicate-epoch check at merge, modelled on `.github/workflows/dr-id-collision.yml`; accepted as residual in DR-090 — packaging an unmerged branch is a visible act, not staleness |
+| A bundle packaged from an unmerged branch bumps the epoch past main's and is ordered ahead | The epoch is a source constant, so a branch can set it to anything | A duplicate-epoch check at merge, modelled on `.github/workflows/dr-id-collision.yml`; accepted as residual in DR-092 — packaging an unmerged branch is a visible act, not staleness |
 | The epoch gate is added but one surface is inert | A hook-only gate is disabled by a `core.hooksPath` gap — the exact shape constitution invariant 2 forbids | Two witnesses, one implementation (FR-2, INV-4), each proven red by its own test (AC) |
-| A tracked file in `.minspec/` conflicts on branches | Two branches both refresh and both stamp | The record changes only when the epoch changes — at most once per template release, not once per refresh (DR-090 §3) |
+| A tracked file in `.minspec/` conflicts on branches | Two branches both refresh and both stamp | The record changes only when the epoch changes — at most once per template release, not once per refresh (DR-092 §3) |
 | The direction gate is bolted in front of the authorship gate and quietly weakens it | Two gates over one write path invite an "either/or" refactor | INV-3 states the conjunction explicitly, and the DR-089 preservation cases stay in the acceptance set |
