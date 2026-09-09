@@ -27,7 +27,21 @@ on:
 permissions:
   contents: read
   actions: write
-  pull-requests: read
+  # `write`, not `read` (#1630 review): the unevidenced-block guard applies
+  # `needs-human-review` so an inferred-quota block surfaces as a decision instead of
+  # looping forever. With `read` that call fails and the guard's whole point — summoning
+  # a human — silently does nothing while still reading as implemented. Still least
+  # privilege: labels are the only PR mutation this workflow makes.
+  pull-requests: write
+  # #1675 review (Skeptic, blocking): the guard's self-heal calls `gh label create`
+  # before `--add-label`, and label CREATION is a repo-level Issues-API operation —
+  # ai-review.yml:106-107 documents this repo's own working permission split
+  # ("pull-requests: write + issues: write (labels/comments use the issues API)").
+  # `pull-requests: write` alone lets `--add-label` attach an EXISTING label (that
+  # is how this workflow already worked pre-#1675), but `gh label create` 403s
+  # without `issues: write` — the failure is swallowed by `|| true`, so omitting
+  # this scope would silently no-op the exact self-heal this guard adds.
+  issues: write
 
 concurrency:
   group: ai-review-retry
@@ -61,6 +75,38 @@ jobs:
             num="${row%%$'\t'*}"
             branch="${row#*$'\t'}"
             [ -z "$num" ] && continue
+            # #1630 — a block with NO EVIDENCE is not known to be transient. `reason: quota`
+            # is a fallback INFERENCE in that case (review-branch.sh emits
+            # `evidence: NONE (reason is inferred, not observed)` when neither stream carried
+            # text), so a genuine crash that writes nothing is indistinguishable from a real
+            # outage — and retrying it forever is how it stays invisible. Retry only what we
+            # have evidence IS retry-able; hand the rest to a human.
+            #
+            # Fail-safe direction: a comment with NO evidence line at all is an OLD-format
+            # block from before #1635, and those DO get retried (the `!= NONE` test below is
+            # false only when the marker is present and says NONE). Silence must never mean
+            # "give up".
+            evidence=$(gh pr view "$num" --repo "$REPO" --json comments \
+              --jq '[.comments[].body | capture("evidence: (?<e>NONE|captured)").e] | last // empty' 2>/dev/null || true)
+            if [ "$evidence" = "NONE" ]; then
+              echo "PR #$num: reviewer produced NO diagnostic on either stream — 'quota' is inferred, not observed."
+              echo "  Not retrying: an unevidenced block may be a genuine crash, and looping it hides that (#1630)."
+              # Self-heal first (matches ai-review.yml:1146/1200): this workflow is
+              # scaffolded byte-identically into adopter repos, and a quota-blocked PR
+              # can reach this guard on a FRESH repo where `needs-human-review` was
+              # never created (ai-review.yml only creates it on the summon-human /
+              # fail-closed paths, never the quota-blocked path). Without the create
+              # first, `--add-label` on a nonexistent label fails and the `|| echo`
+              # below silently swallows it — the exact "reads as implemented but does
+              # nothing" failure this guard exists to fix (#1675 review).
+              gh label create "needs-human-review" --repo "$REPO" \
+                --color FBCA04 --description "A human is the next actor — auto-merge withheld" \
+                >/dev/null 2>&1 || true
+              gh pr edit "$num" --repo "$REPO" --add-label "needs-human-review" >/dev/null 2>&1 \
+                || echo "  (could not add needs-human-review — surface it by hand)"
+              continue
+            fi
+
             # #1204 — honour the stated reset time. The reviewer records it as an
             # `<!-- ai-review-reset: ISO -->` marker on its blocked comment; if that
             # instant has not passed, every attempt is guaranteed futile and costs a

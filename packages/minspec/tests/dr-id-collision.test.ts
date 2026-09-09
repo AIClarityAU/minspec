@@ -48,6 +48,15 @@ import {
   type DrFile,
   type PrFileEntry,
 } from '../../../scripts/lib/dr-id-collision';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #1586: block B runs `npx tsx <cli>` per case (npx, then tsx, then node, then a
+// TypeScript compile) — the heaviest child process in this suite, on vitest's 5s
+// default. Under container scheduling contention that queues past 5s with nothing
+// hung (#1285's failure shape); observed flaking here even though this file sits
+// below shell-timeout-coverage.test.ts's call-site threshold, because the cost is in
+// what block B spawns, not how many times.
+useShellTimeout();
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 const CLI = path.join(REPO_ROOT, 'scripts', 'check-dr-id-collision.ts');
@@ -452,6 +461,22 @@ describe('B — decideDrIdCollision: fails closed on a taken id and names the ne
     });
     expect(v.ok).toBe(true);
     expect(v.nextFreeId).toBe('DR-001');
+  });
+
+  it('reports one collision once, even when the subject claims it under two filenames', () => {
+    // Both of the subject's files hit the same base holder. The collision is ONE
+    // fact; printing the holder line twice makes the message look like two problems.
+    const v = decideDrIdCollision({
+      decisionsDir: DIR,
+      baseRef: 'main',
+      basePaths: [`${DIR}/DR-077.md`],
+      subject: { pr: 1209, paths: [`${DIR}/DR-077.md`, `${DIR}/DR-077-take-two.md`] },
+      otherPrs: [],
+    });
+    expect(v.ok).toBe(false);
+    expect(v.findings).toHaveLength(1);
+    expect(v.findings[0]).toEqual({ id: 'DR-077', heldBy: 'main', file: `${DIR}/DR-077.md` });
+    expect(v.message.match(/DR-077 is already claimed/g)).toHaveLength(1);
   });
 
   it('reports every colliding id, deterministically ordered', () => {
