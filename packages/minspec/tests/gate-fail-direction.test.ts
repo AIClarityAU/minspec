@@ -111,9 +111,8 @@ describe('scaffolded gates fail closed on their own internal errors', () => {
   it('REFUSES when the shell gate hits an unset variable under `set -u`', () => {
     const p = path.join(repo, PRE_COMMIT);
     const src = fs.readFileSync(p, 'utf-8');
-    // Python is the tier that runs here, so break it first to reach the shell gate,
-    // then inject an unset-variable reference into the hook body itself.
-    fs.rmSync(path.join(repo, VALIDATE_PY));
+    // Injected immediately after `set -u`, so it aborts before any validator tier is
+    // selected — this is the shell body's own failure, not a validator's.
     const anchor = 'set -u\n';
     expect(src).toContain(anchor);
     fs.writeFileSync(p, src.replace(anchor, `${anchor}echo "$minspec_injected_unset_variable"\n`));
@@ -140,5 +139,22 @@ describe('the CLAUDE.md template describes that direction truthfully', () => {
 
   it('states the fail-closed direction the hooks actually implement', () => {
     expect(bypassing()).toMatch(/fail \*\*closed\*\* on their own internal errors/);
+  });
+
+  /**
+   * The first draft of this fix replaced one false claim with another: it called the
+   * commit-msg missing-message-file case "the one deliberate fail-open". The same hooks
+   * carry at least two more — the branch guard stands aside when the default branch cannot
+   * be determined, and gitleaks is skipped when absent — so the absolute was false and a
+   * reviewer caught it. The distinction that IS true is by condition, not by count, and the
+   * prose has to keep both halves or it collapses back into the original error.
+   */
+  it('keeps the fail-open direction too, and scopes it to a missing prerequisite', () => {
+    const body = bypassing();
+    expect(body).toMatch(/fail open/);
+    expect(body).toMatch(/prerequisite/i);
+    // No absolute: the count of deliberate fail-opens is not one, and claiming a count
+    // is what made the first draft wrong.
+    expect(body).not.toMatch(/[Tt]he one deliberate fail-open/);
   });
 });
