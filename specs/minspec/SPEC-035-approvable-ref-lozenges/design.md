@@ -76,9 +76,13 @@ the vocabulary constants (which move to named exports in `project-prefix.ts`, so
 one grammar in two files, never two grammars). This honours the requirements'
 `implements_reason` - "FR1 reuses `@aiclarity/shared`'s existing `project-prefix` rather
 than creating a resolver": no second resolver is created.
-*Rejected: put the scanner inside `project-prefix.ts`.* Cost: #679 is about to rewrite that
-file's grammar wholesale; two workstreams editing one file guarantees a conflict, and the
-DR-053 module grows a responsibility (text scanning) its own docstring disclaims.
+*Rejected: put the scanner inside `project-prefix.ts`.* This design does still touch that
+file - the named-export move above is a real edit - so the conflict this rejects is not
+"any edit" but the *size* of one: a few mechanical named-export lines are the kind of change
+#679's wholesale grammar rewrite can trivially rebase over, where landing an entire scanning
+subsystem's logic (regexes, skip-range handling, the resolver loop) inside the same file
+guarantees a real merge conflict between the two workstreams, and grows the DR-053 module a
+responsibility (text scanning) its own docstring disclaims.
 
 **D2 - the card model is derived on every render; nothing is cached or indexed.**
 `buildRefCard()` is a pure function of (resolved ref, approvable facts); the Tier-1 adapter
@@ -106,7 +110,7 @@ replace.
 
 **D4 - detection runs over the renderer's prose text nodes, not over raw markdown.**
 Measured on this repo's corpus (the 208 markdown files tracked at `origin/main`,
-`a33d6d57`, under `specs/` + `docs/`): 106 of the 107 `[[…]]` occurrences repo-wide are
+`a33d6d57`, under `specs/` + `docs/`): 556 of the 557 `[[…]]` occurrences repo-wide are
 bash test brackets, JS array literals and regex character classes living in fenced code or
 `.ts` files, and **26.6% of the 6,931 v1 references sit inside a markdown link** - 13.4% in
 the link text and 13.2% inside the href
@@ -162,6 +166,17 @@ no character offsets, so it cannot tell a renderer *where* to splice a lozenge, 
 mean widening a live merge-gate's parser to serve a view - the wrong direction. Both remain
 single-purpose; a T1 test asserts they agree on the ids they both find, so the grammars
 cannot silently diverge.
+
+**Undisclosed-conflict flag, not resolved here (see PQ7).** SPEC-018's design
+(`specs/minspec/SPEC-018-spec-custom-editor/design.md:65-67`, `status: implementing`,
+approved requirements sidecar) already commits the opposite answer for the same webview
+surface and the same token class: FR-10's cross-ref hotlinks reuse
+`reference-checker.ts`'s `extractReferences` and state plainly "No forked parser." The
+"carries no character offsets" cost above is real and is exactly why this design forks a
+second parser anyway - but that makes this a considered contradiction of an approved
+sibling design, not an independent decision, and it is not safe to leave implicit. PQ7
+below routes it to a founder decision rather than silently shipping two parsers for one
+grammar.
 
 ## Contracts
 
@@ -266,8 +281,10 @@ export function lookupApprovable(rootDir: string, ref: DetectedRef): ApprovableF
 </span>
 ```
 
-Webview to extension message, Slice B: `ref:open { ref: string, toSide: boolean }` - the
-same shape SPEC-018's design already reserves for its FR-10 cross-ref hotlinks, so the two
+Webview to extension message, Slice B: `ref:open { id: string, toSide: boolean }` - the
+same shape SPEC-018's design already reserves for its FR-10 cross-ref hotlinks
+(`ref:open{id, toSide}` at `specs/minspec/SPEC-018-spec-custom-editor/design.md:130`, also
+listed among its contracted messages at `:242`), field name matched deliberately so the two
 features share one channel rather than opening a second.
 
 ## Detection contract, measured (AC1's plan-phase pin)
@@ -276,7 +293,11 @@ AC1 requires the false-positive rate to be "pinned at plan" against a real prose
 corpus. **Corpus:** the 208 markdown files tracked at `origin/main` (`a33d6d57`) under
 `specs/` and `docs/` (`git ls-tree -r --name-only origin/main -- specs docs`), 2,902,591
 bytes of prose after fenced code blocks and inline code spans are removed. Every figure
-below is reproducible from that command plus the pattern in its row.
+below is reproducible from that command plus the pattern in its row, except the
+`[[…]]` repo-wide row, which is deliberately wider - all 930 files tracked at `a33d6d57`
+repo-wide, no fenced-code or inline-code stripping (`git grep -oE '\[\[[^]]{1,40}\]\]'
+a33d6d57 -- . | wc -l`) - because its whole point is to show what the corpus-scoped rows
+above it exclude.
 
 | Token class | Pattern | Hits | Distinct | Auto-lozenge? |
 |---|---|---|---|---|
@@ -286,7 +307,7 @@ below is reproducible from that command plus the pattern in its row.
 | `#N` rejected by that guard | naive `#\d+` minus the row above | 265 | - | **no**: 157 preceded by `/` (`AIClarityAU/minspec#460`), 101 by a word character (`scroogellm#121`, `OQ#1`), 7 right-boundary only (`#1e1e2e`) - see PQ4 |
 | bare paragraph code | `\b(?:FR\|R\|M\|G\|AC)-?\d+\b` | 6,238 | 86 | **no** (DR-053 §4) |
 | `[[…]]` sigil, in prose | `\[\[[^\]\n]{1,40}\]\]` | 1 | 1 | interior must match the paragraph grammar |
-| `[[…]]` repo-wide, incl. `.ts` + fenced code | - | 107 | - | 106 of them never reach the scanner (D4) |
+| `[[…]]` repo-wide, incl. `.ts` + fenced code | - | 557 | - | 556 of them never reach the scanner (D4) |
 
 Five things this measurement settles, that prose alone would not have:
 
@@ -393,6 +414,21 @@ plan by the time anyone noticed.
   suppressed inside one is unspecified, and it changes the navigation target: the author's
   href and the resolver's target can differ, and silently preferring one over the other is
   the never-wrong hazard in miniature.
+- **PQ7 - this design contradicts SPEC-018's approved design on which parser owns cross-ref
+  tokens, and that conflict is not resolved here.** SPEC-018's design (`status: implementing`,
+  approved requirements sidecar) commits FR-10's cross-ref hotlinks to
+  `reference-checker.ts`'s `extractReferences` and states "No forked parser"
+  (`specs/minspec/SPEC-018-spec-custom-editor/design.md:65-67`). D1 above rejects that same
+  module for SPEC-035's scanner and builds a second one (`ref-detect.ts`) for a real reason -
+  `extractReferences` carries no character offsets, so it cannot tell a renderer where to
+  splice a lozenge - but the two designs now disagree, in writing, about the same webview
+  surface and the same token class. Options, neither chosen here: (a) reconcile by adding
+  offset-tracking to `reference-checker.ts` so SPEC-018 and SPEC-035 share one parser,
+  paying a merge-gate-parser change to serve a view; or (b) keep the two-parser split this
+  design proposes, amend SPEC-018's design to acknowledge and accept it, and rely on the T1
+  cross-check test (see the "Two parsers, one grammar" risk below) to keep the grammars from
+  drifting apart. This needs a founder decision before Slice A's `ref-detect.ts` and Slice
+  B's renderer wiring are both built against an unreconciled sibling commitment.
 - **OQ1 (from requirements) - one fact that narrows it, no answer.** **Zero** approvables in
   the corpus carry a `summary:` frontmatter field today, and there are 61 live approval
   sidecars. So adding `summary` to `stripLifecycle` in
@@ -449,7 +485,14 @@ Inherits requirements R1-R4. Added at Plan:
   #1 contract - but a merged, tested, entirely invisible module is easy to mistake for a
   shipped feature. `implements_reason` and the spec's `status: planning` must not be
   advanced when Slice A lands; only Slice B makes any of this visible to a human.
-- **Two parsers, one grammar.** `ref-detect.ts` and `reference-checker.ts` will both claim
-  to find `SPEC-NNN`. The T1 cross-check test is what stops them drifting; if that test is
-  ever weakened, the dangling-reference gate and the lozenge renderer start disagreeing
-  about what a reference is, and only one of them is a merge gate.
+- **Two parsers, one grammar - and this contradicts SPEC-018's design, unreconciled (PQ7).**
+  `ref-detect.ts` and `reference-checker.ts` will both claim to find `SPEC-NNN`. This is not
+  a hypothetical future risk: SPEC-018's approved design already commits FR-10's cross-ref
+  hotlinks to `reference-checker.ts` and states "No forked parser"
+  (`specs/minspec/SPEC-018-spec-custom-editor/design.md:65-67`), so building `ref-detect.ts`
+  as SPEC-035 proposes ships the second parser SPEC-018 explicitly ruled out, on the same
+  webview surface. The T1 cross-check test is what stops the two grammars drifting once both
+  exist; if that test is ever weakened, the dangling-reference gate and the lozenge renderer
+  start disagreeing about what a reference is, and only one of them is a merge gate. PQ7
+  routes the underlying reconcile-or-accept choice to a founder decision; this risk assumes
+  "accept" until that decision is made.
