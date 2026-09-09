@@ -5,6 +5,15 @@
 #   wrangler secret put MINSPEC_APP_PRIVATE_KEY
 #
 # MINSPEC_APP_ID is a public identifier and is a plain var on purpose.
+# DEPLOY TARGET IS PINNED ON PURPOSE (#1869). Without `account_id`, wrangler resolves the
+# account from whatever credential happens to be present. A credential that can see more
+# than one account then picks one silently: no prompt, no error, and a deploy to the wrong
+# account is indistinguishable from a correct one. That is exactly what happened — this
+# Worker, and a `wrangler secret put` carrying the App private key, both landed in an
+# unintended account and were caught only because a human did not recognise a workers.dev
+# subdomain. An ambient destination is a silent-failure surface; pin it.
+account_id = "23f1dc885a85e77e0b3969b247bbf65f"
+
 name = "minspec-review-broker"
 main = "src/index.ts"
 compatibility_date = "2026-08-16"
