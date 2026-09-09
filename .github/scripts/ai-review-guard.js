@@ -365,30 +365,41 @@ function parseResetInstant(text, nowMs) {
 
 // ─── Patch-fingerprint re-attestation (#1728) ────────────────────────────────
 //
-// Under `strict` branch protection every merge puts every other open PR BEHIND, and
-// the branch update re-triggers a full four-voter review — of a patch that did not
-// change. The reviewer reads the THREE-DOT patch (`base...head`), and a forward-merge
-// leaves that patch byte-identical, so the previous verdict is still a true statement
-// about exactly this content.
+// WHAT IS LIVE TODAY: recording only. The ai-review workflow embeds a
+// `patch-fingerprint:` marker in the verdict check-run's output. NOTHING reads that
+// marker back to skip a review. `findReattestableVerdict` below is implemented,
+// tested and exported, but has no production caller, and the gate that consumes
+// witnesses (`ready-to-merge.yml` → verifyHeadPassWitness / verifyHeadPassCheckRun)
+// is unchanged — so every branch update still re-runs the full four-voter panel.
+// Wiring the consumer is #1840. Recording lands first by necessity: a marker can
+// only be consumed on PRs old enough to already carry one.
 //
-// What this does NOT do is reuse an old witness. The SHA-binding in
-// verifyHeadPassCheckRun (#466/#810) is load-bearing: a witness must correspond to the
-// CURRENT head. So a re-attestation posts a FRESH check-run on the new SHA, carrying
-// the same verdict and the same fingerprint. The claim changes from "four voters
-// reviewed this SHA" to "four voters reviewed this patch, and this SHA has that patch"
-// — still true, and stated rather than implied.
+// WHY THE MARKER IS RECORDED. Under `strict` branch protection every merge puts every
+// other open PR BEHIND, and the branch update re-triggers a full four-voter review —
+// of a patch that did not change. The reviewer reads the THREE-DOT patch
+// (`base...head`), and a forward-merge leaves that patch byte-identical, so the
+// previous verdict is still a true statement about exactly this content.
 //
-// HONEST LIMIT, and the reason this is opt-in: an identical patch can produce a
-// DIFFERENT merge result, because the base moved. That is the #1394 semantic-conflict
-// class. `strict` narrows it (the branch must be current) but does not remove it, so
-// re-attestation trades back a little of what `strict` buys.
+// WHAT THE CONSUMER MUST NOT DO, when it is built: reuse an old witness. The
+// SHA-binding in verifyHeadPassCheckRun (#466/#810) is load-bearing — a witness must
+// correspond to the CURRENT head. A re-attestation is therefore to post a FRESH
+// check-run on the new SHA, carrying the same verdict and the same fingerprint. The
+// claim changes from "four voters reviewed this SHA" to "four voters reviewed this
+// patch, and this SHA has that patch" — still true, and stated rather than implied.
+//
+// HONEST LIMIT, and the reason the consumer is to be opt-in: an identical patch can
+// produce a DIFFERENT merge result, because the base moved. That is the #1394
+// semantic-conflict class. `strict` narrows it (the branch must be current) but does
+// not remove it, so re-attestation trades back a little of what `strict` buys.
 
 const PATCH_FINGERPRINT_PREFIX = 'patch-fingerprint:';
 
 /**
- * Stable fingerprint of a three-dot patch. Normalises line endings and trailing
- * whitespace-only difference so a cosmetic re-render is not read as a new patch,
- * but nothing else — any real content change must produce a different digest.
+ * Stable fingerprint of a three-dot patch. Normalises line endings, and strips the
+ * whitespace run at the very END of the patch — the whole string, no `/m` flag, so
+ * interior lines keep their own trailing whitespace — meaning a cosmetic re-render
+ * that differs only in a final newline is not read as a new patch. Nothing else is
+ * normalised: any real content change must produce a different digest.
  */
 function patchFingerprint(diffText) {
   const norm = String(diffText == null ? '' : diffText).replace(/\r\n?/g, '\n').replace(/\s+$/, '');
