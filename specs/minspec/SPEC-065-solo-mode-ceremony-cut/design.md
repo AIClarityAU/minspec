@@ -12,6 +12,13 @@ aspects: [governance, hitl, auto-merge, branch-protection, ai-review, profile, t
 relates_to: [DR-075, DR-076, DR-086, DR-033, DR-047, DR-066, DR-061, SPEC-024, SPEC-031, SPEC-038, SPEC-051]
 implements: none
 implements_reason: Plan document. Ownership is already declared in the APPROVED requirements.md (implements:/affects:); a second copy here could drift from the hash-locked one. This Plan finds that declaration narrower than the design needs - see OQ-2, a founder decision, not a Plan edit.
+# phases: kept, not the majority pattern (2 of 21 other design.md files on main carry one:
+# SPEC-044, SPEC-051) but the precedent this doc follows deliberately - SPEC-051 is the
+# same shape (status: planning, implements: none, a Plan document mid-SDD-cycle) and
+# carries the identical block for the same reason: status: alone is one value and cannot
+# say specify/clarify are done while plan is in-progress and tasks/implement are still
+# pending, which is real state a T4 Plan-phase doc needs to expose. Not used to gate
+# anything here - requirements.md's `tier` is what spec-gate.py reads.
 phases:
   specify: done
   clarify: done
@@ -58,7 +65,7 @@ Every claim below was read out of the tree at `origin/main` on 2026-09-09.
 
 ## Approach
 
-Four seams, deliberately kept independent so they can land, fail and be reverted separately.
+Five seams, deliberately kept independent so they can land, fail and be reverted separately.
 
 1. **One resolver, no second reader.** A net-new Tier-0 module `packages/minspec/src/lib/profile.ts`
    exports the profile type and exactly two functions. Every consumer — TypeScript, bash and
@@ -86,11 +93,26 @@ Four seams, deliberately kept independent so they can land, fail and be reverted
    verdict is an outage and belongs on the retry lane; a protocol-parsing anomaly is
    deterministic in the diff and must never enter it.
 
-FR-3 and FR-5 need almost no new code. FR-3 is already true for non-machinery PRs (native
-auto-merge is on and config-backed; the requirements say so under *What is already true*),
-so its design work is to re-source the switch from the profile without changing the
-behaviour. FR-5 is satisfied by construction: this Plan **deletes nothing**, and every
-profile-keyed branch has `team` as the default arm.
+5. **The native auto-merge arm is gated on the profile, at its single source.**
+   `native_automerge_enabled` (`scripts/dispatch-issue.sh:75-88`) is amended to check the
+   profile *before* it consults `MINSPEC_AUTOMERGE_NATIVE` / `autoMerge.native` at all: under
+   `team` it returns false unconditionally, whatever the env or config says. Both of its call
+   sites change behaviour as a result — the arm at `scripts/dispatch-issue.sh:1048` never
+   marks the PR `--auto`, and the HOLD/silence branch at `scripts/dispatch-issue.sh:1959`
+   takes the `else` arm it already has, posting the existing "Auto-merge HELD" comment and
+   `needs-human-skim` label. Neither branch is new; only the boolean feeding them is. This is
+   FR-3's second clause discharged at the same seam as its first: one function, one profile
+   check, both halves of the acceptance criterion. The profile reaches this bash function
+   through a new `scripts/lib/profile.sh`, the same wrapper shape `scripts/lib/autonomy.sh`
+   already established for the autonomy axis — it shells `profile.ts` via the pinned `tsx`
+   runner and fails closed to `team` (never `solo`) on any runner error, exactly as
+   `autonomy_may_proceed` fails closed to denial. See the component table and OQ-2.
+
+FR-5 needs almost no new code: it is satisfied by construction, because this Plan **deletes
+nothing**, and every profile-keyed branch has `team` as the default arm. FR-3's non-machinery
+half is seam 5 above, and it is a real behaviour change under `team` — not a re-source of an
+unconditional switch, because the switch was unconditional before this Plan and is
+profile-conditional after it. FR-3's machinery half is the arm slice below (OQ-1).
 
 ---
 
@@ -211,7 +233,9 @@ profile-keyed branch has `team` as the default arm.
 | `.github/scripts/ai-review-guard.js` | **UNDECLARED — OQ-2** | `MACHINERY_WITNESS_CHECK_NAME`; `verifyHeadMachineryWitness()`; a third channel in `verifyHeadPassWitness()`; an `ai-review:unreadable` arm in `decideReviewCheck()`; the label added to `VERDICT_LABELS` | Pure functions, unit-tested, mirroring `verifyHeadPassCheckRun` |
 | `scripts/review-decide.sh` | **UNDECLARED — OQ-2** | Two `echo` lines: the no-parseable-verdict fall-through and the `BEGIN_COUNT != 1` refusal | stdout is the label contract; nothing else changes |
 | `.github/workflows/ai-review.yml` | `affects:` | `gh label create "ai-review:unreadable"` alongside the other three; one case arm in the `# >>> verdict-combine` block | The combine block is executed verbatim by its test, so the arm is covered the moment it is written |
-| `scripts/dispatch-issue.sh` | `affects:` | Under `solo`, allow the machinery-only stop class to be discharged by the witness — **blocked on OQ-1** | Reaches the profile through the same TypeScript authority, in the shape `scripts/lib/autonomy.sh` established |
+| `scripts/dispatch-issue.sh` (FR-2, machinery arm) | `affects:` | Under `solo`, allow the machinery-only stop class to be discharged by the witness — **blocked on OQ-1** | Reaches the profile through the same TypeScript authority, in the shape `scripts/lib/autonomy.sh` established |
+| `scripts/dispatch-issue.sh` (FR-3, seam 5) | `affects:` | `native_automerge_enabled` (lines 75-88) gains a profile check before its existing env/config checks — **not blocked on OQ-1**, independent of the witness and the machinery arm above | Both call sites (line 1048's `--auto` arm, line 1959's HOLD/silence branch) are unchanged code reading one new boolean |
+| `scripts/lib/profile.sh` | **UNDECLARED — OQ-2** | Whole file, new | Bash wrapper onto `readProfileMode`, same shape as `scripts/lib/autonomy.sh`'s `autonomy_may_proceed`: shells the pinned `tsx` runner, parses its stdout, and fails closed to `team` (never `solo`) on a missing runner, non-zero exit, or unparseable output |
 | `scripts/auto-merge-gate.ts` | `affects:` | **No change this Plan can justify** — see OQ-5 | — |
 
 **Untouched, and that is the FR-5 design.** `docs-lane.yml`, `scripts/push-docs.sh`, DR-065's
@@ -245,10 +269,17 @@ export function resolveProfileMode(raw: string | undefined): Profile;
 
 /**
  * Resolve from `<repoRoot>/.minspec/config.json` — the SOURCE, per FR-1 and #183.
- * `MINSPEC_MODE`, when present, is read THROUGH resolveProfileMode, so an env var can
- * never express a policy the config grammar cannot. Every failure — missing file,
- * unreadable, malformed JSON, absent key, wrong type — resolves to `team`.
- * A repo with no `.minspec/` therefore resolves to `team`: INV-4 by construction.
+ * Precedence, byte-for-byte `readAutonomy`'s (`scripts/lib/autonomy.ts:201-212`):
+ * `env.MINSPEC_MODE`, WHEN DEFINED, wins and is read THROUGH resolveProfileMode — so
+ * an env var can express `team` or fail closed to it, but can never express a policy
+ * the config grammar cannot. Only when the env var is undefined does config get read.
+ * Every failure at either stage — missing file, unreadable, malformed JSON, absent
+ * key, wrong type — resolves to `team`. A repo with no `.minspec/` therefore resolves
+ * to `team`: INV-4 by construction. The env path does not violate FR-1's "MUST NOT be
+ * inferable only from an environment variable": config remains the persisted source,
+ * so a fresh session with no export still reads the config value — only a session
+ * that explicitly sets `MINSPEC_MODE` sees a per-session override, and AC-2 adds the
+ * case that proves it.
  */
 export function readProfileMode(repoRoot: string, env?: NodeJS.ProcessEnv): Profile;
 ```
@@ -375,9 +406,9 @@ having as a T1 drift guard, but it is **explicitly not** how AC-6 is discharged 
 | AC | Tier | How |
 |---|---|---|
 | AC-1 (FR-1) | T0 | `profile.test.ts`: with `env` emptied, drive **each** consumer's resolution path — `readProfileMode` directly, and the bash seam — against one fixture repo, and assert they return the same value. Asserted by driving consumers, not by reading the file |
-| AC-2 (FR-1, negative) | T0 | `profile.test.ts`: a table of `undefined`, `''`, `'Solo'`, `' solo '` (accepted, trimmed), `'sol o'`, `'true'`, `'team '`, `{}`, `42`, malformed JSON, missing file → every one resolves `team` except the exact token |
+| AC-2 (FR-1, negative) | T0 | `profile.test.ts`: a table of `undefined`, `''`, `'Solo'`, `' solo '` (accepted, trimmed), `'sol o'`, `'true'`, `'team '`, `{}`, `42`, malformed JSON, missing file → every one resolves `team` except the exact token. Plus the env-vs-config precedence table: `MINSPEC_MODE=solo` over `config mode: team` → `solo` (env wins); `MINSPEC_MODE=garbage` over `config mode: solo` → `team` (env fails closed even though config says solo); `MINSPEC_MODE` unset, `config mode: solo` → `solo` (config alone still resolves) |
 | AC-3 (FR-2) | T0 + T2 | `machinery-witness.test.ts`: the decision block, executed verbatim from the YAML, returns `success` for a machinery PR with a verified pass and no self-set touch, and `action_required` for one that touches a self-set path. Both halves, as AC-3 requires. The end-to-end merge is a T2 observation on the first real machinery PR after landing |
-| AC-4 (FR-3) | T0 | `machinery-witness.test.ts` + `profile.test.ts`: with `mode: team` the witness stage posts nothing, so `ready-to-merge` holds exactly as today |
+| AC-4 (FR-3) | T0 | `drain-selfheal.test.ts`'s existing `--check-native-automerge` behavioral seam (it already drives `dispatch-issue.sh --check-native-automerge` against a fixture repo to prove `MINSPEC_AUTOMERGE_NATIVE`/config deny-by-default), extended with a `mode` fixture dimension: `mode: solo` + `autoMerge.native: true` → `on`; `mode: team` + the identical `autoMerge.native: true` → `off`. This is the one test in this Plan that exercises a non-machinery PR's actual merge arm, so it is the one AC-4 needs — a machinery-witness/profile.test.ts pairing cannot discharge AC-4 because the witness never posts for a non-machinery PR under either profile (condition 4 above), so it cannot distinguish them |
 | AC-5 (FR-4) | T3, red-then-green | `review-decide.test.ts` extension, using **reproductions** of #1234 and #1157: a voter output with no verdict block and no quota phrasing → `ai-review:blocked`; a voter output that names `REVIEW_VERDICT_BEGIN` in prose with a single real block → `ai-review:unreadable`. Both must be red against today's script before the fix |
 | AC-6 (FR-6) | T0 | The keep-list table above |
 | AC-7 (FR-5) | T0 | `solo-mode-keep-gates.test.ts`: with `mode: team`, the docs-lane / presence-ff / `awaiting-approval` seams behave as they do today — driven through `shouldAwaitApproval` and the presence predicates, plus an assertion that the profile is not an input to any of them |
@@ -403,8 +434,12 @@ constrains it.
   it makes solo mode safer rather than depending on it. Blocked only by OQ-2/OQ-3.
 - **The witness slice (FR-2).** `machinery-witness.yml`, the guard channel,
   `ready-to-merge.yml`'s extra read, and `machinery-witness.test.ts`. Blocked on OQ-3.
-- **The arm slice (FR-2/FR-3, dispatch).** Blocked on OQ-1. Until it lands, a machinery PR
-  under `solo` reaches a **green** `ready-to-merge` and then waits for a merge keystroke —
+- **The auto-merge gate slice (FR-3, dispatch).** The profile check in
+  `native_automerge_enabled` and `scripts/lib/profile.sh` (seam 5). **Not blocked** — it
+  does not touch the machinery stop class OQ-1 disputes, and can land with the resolver
+  slice. This is the slice AC-4 actually exercises.
+- **The machinery arm slice (FR-2, dispatch).** Blocked on OQ-1. Until it lands, a machinery
+  PR under `solo` reaches a **green** `ready-to-merge` and then waits for a merge keystroke —
   which is already a strictly better position than today's total block, and is a safe
   intermediate state to sit in.
 
@@ -466,8 +501,9 @@ Each of these is genuinely undecidable from the approved requirements. None is r
   `dispatch-issue.sh`. The design needs three files that appear in neither `implements:` nor
   `affects:`: `scripts/review-decide.sh` (owned by SPEC-031 — FR-4's only call site),
   `.github/scripts/ai-review-guard.js` (unowned by any spec — FR-2's witness channel and
-  FR-4's check arm), and a bash seam for the profile (a new `scripts/lib/profile.sh`, or an
-  extension of `scripts/lib/autonomy.sh`). This does not mechanically block anything —
+  FR-4's check arm), and `scripts/lib/profile.sh`, the bash seam FR-3's `native_automerge_enabled`
+  gate reads the profile through (seam 5 above) — no longer a hypothetical, since AC-4 cannot
+  pass without it. This does not mechanically block anything —
   `validateOwnership` checks presence and path validity, not completeness, and the spec-gate
   only blocks a file an *unapproved* spec declares — but it leaves SPEC-038's map wrong for
   the files the work actually touches. Fixing the declaration means editing hash-locked
@@ -509,16 +545,23 @@ Each of these is genuinely undecidable from the approved requirements. None is r
   the *broad* machinery set the self set for a first release — i.e. certify nothing, which is
   today's behaviour — and narrow it only once the enumeration has a maintainer.
 
-- **OQ-5 — `scripts/auto-merge-gate.ts` is declared in `affects:` and this design finds
-  nothing it needs.** The consequence-hybrid gate is mutually exclusive with native
-  auto-merge (`native_automerge_enabled` returns 1 when `MINSPEC_AUTOMERGE_MODE ==
-  consequence-hybrid`), and FR-3's unattended path is the native one, so the SPEC-024 gate is
-  not on it. AC-2 cites `resolveMode` as a *pattern to mirror*, not a thing to change. Either
-  the declaration anticipates a change this Plan has not found — most likely keeping
+- **OQ-5 — `scripts/auto-merge-gate.ts` is declared in `affects:`; this design still finds
+  nothing IN THAT FILE for FR-3 to need.** FR-3's second clause — "the `pr-gate`
+  deny-by-default behaviour is retained as the `team` profile's setting" — is discharged at
+  seam 5, not here: `native_automerge_enabled` (`scripts/dispatch-issue.sh:75-88`) now denies
+  under `team` regardless of config, which drops a non-machinery PR straight into the
+  existing HOLD/`needs-human-skim` branch (`scripts/dispatch-issue.sh:1959`) — the same shape
+  `pr-gate` (HOLD) already names, without `auto-merge-gate.ts` ever being invoked. That file's
+  own `AutoMergeMode` axis (`consequence-hybrid` vs `pr-gate`) is mutually exclusive with
+  native auto-merge and orthogonal to `mode` — FR-3 does not ask it to become profile-aware,
+  and AC-2 cites `resolveMode` only as a *pattern to mirror*, not a thing to change. So the
+  earlier draft's "precautionary listing" was reading FR-3's first clause and missing that
+  its second clause is fully answered elsewhere in this design, not left open. Either the
+  `affects:` declaration anticipates a change this Plan has not found — most likely keeping
   `BOUNDARY_DIR_PREFIXES` in lock-step with the machinery set, which this design does not
-  narrow — or it is a precautionary listing.
-  ➡️ Confirm the intent before Tasks, so the slice is not padded with a change nobody asked
-  for.
+  narrow — or it is an ownership-declaration mismatch, the same shape as OQ-2's three files.
+  ➡️ Confirm the intent before Tasks: either fold this file out of `affects:` at the next
+  approved revision (alongside OQ-2), or name the change this Plan has not found.
 
 - **OQ-6 — DR-086's own follow-up asked SPEC-065's Clarify a question it did not answer.**
   DR-086's *Follow-ups (tracked)* says: *"`autonomy` joins `mode` as a second axis on FR-1's
