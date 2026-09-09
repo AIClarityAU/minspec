@@ -660,6 +660,8 @@ const BOUNDARY_CONFIG_BASENAMES: ReadonlySet<string> = new Set(['.npmrc', '.yarn
  *   - anything under a {@link BOUNDARY_DIR_PREFIXES} directory (CI pipelines,
  *     plus `.githooks/`/`.husky/` — git hooks run arbitrary shell on commit/push);
  *   - one of the {@link BOUNDARY_SINGLE_FILES} machinery generators;
+ *   - one of the {@link BOUNDARY_GOVERNANCE_PATHS} settings that govern how this
+ *     repo gates itself (exact paths, not a prefix);
  *   - a root CI-provider config by basename ({@link BOUNDARY_ROOT_BASENAMES});
  *   - package-manager config: `.npmrc`, `.yarnrc`, `.yarnrc.yml` (registry / auth
  *     / scripts → supply-chain surface);

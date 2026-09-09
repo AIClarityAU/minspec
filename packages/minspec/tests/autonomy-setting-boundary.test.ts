@@ -1,11 +1,30 @@
 /**
- * T0 — the autonomy SETTING cannot be flipped unseen.
+ * T0 — the autonomy SETTING cannot be flipped unseen, and that hold does not
+ * rest on a single producer.
  *
  * DR-086 §2.6 makes "anything that would edit this list, or the autonomy setting
- * itself" an always-stop class. That was prose with nothing behind it for the
- * setting: `.minspec/` is not in the machinery regexes and `config.json` matched
- * no basename rule, so a PR flipping `autonomy: ask -> act` classified low-blast
- * and could auto-merge with nobody reading it.
+ * itself" an always-stop class. For the setting, that was prose with only ONE
+ * mechanism behind it.
+ *
+ * NOT a closed hole. A setting-only diff is ALREADY ineligible for auto-merge
+ * without the boundary rule this file tests: `classifyBlast` is deny-by-default
+ * since #490 (absence of an affirmative low signal means high), and
+ * `.minspec/config.json` is neither docs nor test, so it can never earn
+ * `low_blast_docs_test_only`. That counterfactual is asserted below, not
+ * assumed ("is a SECOND witness: the diff is already held without it").
+ *
+ * An earlier version of this header claimed the setting "classified low-blast
+ * and could auto-merge with nobody reading it", citing only
+ * `isBoundaryPath(...) === false`. That proxy shows the detector returned false;
+ * it does not show auto-merge was reachable. The claim was wrong, and is
+ * recorded here so it is not re-derived from the same proxy.
+ *
+ * WHAT IS ASSERTED: a SECOND, INDEPENDENT WITNESS (constitution invariant 2 — no
+ * load-bearing gate hinging on one producer). Today the hold rests solely on
+ * deny-by-default, and one widening of the docs/test classifier would remove it
+ * silently. `detectLowBlastDocsTest` excludes `isBoundaryPath` files, so the
+ * boundary rule is exactly the hook that keeps the setting out of any future
+ * low-blast certification.
  *
  * The self-amending shape is the one a bounded grant must never have, so this is
  * asserted rather than remembered.
