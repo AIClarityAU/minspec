@@ -93,6 +93,11 @@ describe('scaffolded gates fail closed on their own internal errors', () => {
   it('REFUSES the same change once the validator itself raises', () => {
     const p = path.join(repo, VALIDATE_PY);
     const src = fs.readFileSync(p, 'utf-8');
+    // Depends on the python3 tier being the one that fires: the temp repo sits in
+    // os.tmpdir() with no node_modules ancestry, so `npx --no-install` cannot resolve the
+    // Node validator and the hook falls through to python. If that ever changes, the
+    // stderr assertion below fails loudly rather than passing for the wrong reason — the
+    // failure mode is a false red, not a false green.
     const marker = 'def main():\n';
     expect(src).toContain(marker);
     fs.writeFileSync(

@@ -546,8 +546,8 @@ gate is wrong about *this* commit, not to defer work the gate correctly identifi
 
 The hooks fail **closed** on their own internal errors. A crash in the tooling refuses the
 commit rather than waving it through, because a check that could not run has certified
-nothing. Both are \`set -u\` and propagate the validator's exit status, and the Python
-validator wraps no top-level handler around \`main()\`. So a refusal you cannot account for
+nothing. Both are \`set -u\`; \`pre-commit\` additionally propagates its validator's exit
+status, and that validator wraps no top-level handler around \`main()\`. So a refusal you cannot account for
 from the message may be a bug in the gate rather than a violation in your change — read the
 error, and reach for the bypass above only once you have decided the gate is the broken part.
 The gates DO fail open, deliberately, on a missing PREREQUISITE — an absent tool, an
