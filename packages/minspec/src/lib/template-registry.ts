@@ -544,10 +544,19 @@ buy.
 a single commit, and each refusal also prints its own narrower escape. Use a bypass when the
 gate is wrong about *this* commit, not to defer work the gate correctly identified.
 
-The hooks fail open on their own internal errors, so a bug in the tooling never blocks a
-legitimate commit. The price is that silence does not prove a check ran. If a gate has never
-fired, confirm it is wired — \`git config --local core.hooksPath\` should print
-\`.minspec/hooks\` — before concluding you are clean.
+The hooks fail **closed** on their own internal errors. A crash in the tooling refuses the
+commit rather than waving it through, because a check that could not run has certified
+nothing. Both are \`set -u\` and propagate the validator's exit status, and the Python
+validator wraps no top-level handler around \`main()\`. So a refusal you cannot account for
+from the message may be a bug in the gate rather than a violation in your change — read the
+error, and reach for the bypass above only once you have decided the gate is the broken part.
+(The one deliberate fail-open is narrower and about missing INPUT, not internal failure:
+\`commit-msg\` exits 0 when handed no readable message file.)
+
+What silence does not prove is that a check ran. An unwired hook says nothing at all, and
+nothing at all reads exactly like a pass — which is the failure this paragraph used to invite
+by promising the opposite. If a gate has never fired, confirm it is wired — \`git config
+--local core.hooksPath\` should print \`.minspec/hooks\` — before concluding you are clean.
 
 `;
 
