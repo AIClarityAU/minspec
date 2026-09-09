@@ -505,7 +505,15 @@ describe('managed workflow templates SHA-pin every action (#1144)', () => {
   // Every `uses:` value in a GitHub Actions workflow that refers to a
   // marketplace/registry action or reusable workflow (never a local
   // `./path/to/action` — those have no tag/SHA distinction to pin).
-  const USES_LINE_RE = /^\s*uses:\s*(\S+)\s*(?:#.*)?$/gm;
+  //
+  // The optional `-\s+` matters and is not cosmetic: a step may be written as
+  // either the block form (`        uses: x`, where the `-` sits on an earlier
+  // key) or the list-item form (`      - uses: x`). Anchoring on `^\s*uses:`
+  // alone silently skips every list-item step, which is a false GREEN in a gate
+  // — exactly the silent-gate failure invariant #2 forbids. Measured against
+  // this repo's own templates: without the `-` branch this regex sees 1 of the 2
+  // `uses:` refs in ready-to-merge.yml, missing `- uses: actions/checkout@v5`.
+  const USES_LINE_RE = /^\s*(?:-\s+)?uses:\s*(\S+)\s*(?:#.*)?$/gm;
   // A real commit SHA (not `main`/`v4`/`latest`/…): 40 lowercase hex chars.
   const SHA_PIN_RE = /@[0-9a-f]{40}$/;
 
@@ -522,14 +530,50 @@ describe('managed workflow templates SHA-pin every action (#1144)', () => {
   // #1, no network calls). Left as `it.fails` rather than silently excluded: it
   // documents the gap, keeps the failure visible in test output, and flips to a
   // hard failure (an unexpected pass) the moment someone fixes the pins without
-  // updating this carve-out — forcing this line to be revisited. Track fixing it
-  // as a follow-up issue (out of scope for #1144, which is minspec-validate.yml
-  // vs ai-review.yml specifically).
+  // updating this carve-out — forcing this line to be revisited. Tracked as
+  // #1886 (out of scope for #1144, which is minspec-validate.yml vs ai-review.yml
+  // specifically).
+  //
+  // Both pins named above are genuinely observed by the check. That is worth
+  // stating because it was NOT true when this carve-out was written: USES_LINE_RE
+  // then anchored on `^\s*uses:` and never matched the list-item form, so
+  // `- uses: actions/checkout@v5` was invisible and the comment described one
+  // more pin than the gate could see. See the matcher control case below.
   const KNOWN_DEBT = new Set(['ready-to-merge-workflow']);
 
   it('sanity: the workflow-template set is non-empty and includes validate-workflow', () => {
     expect(workflowTemplates.length).toBeGreaterThan(0);
     expect(workflowTemplates.map((t) => t.name)).toContain('validate-workflow');
+  });
+
+  // CONTROL for the matcher itself. Everything below asserts a property of the
+  // templates *through* USES_LINE_RE, so a regex that quietly matches nothing
+  // makes every one of those assertions pass vacuously — a gate reporting green
+  // because it looked at zero things (invariant #2). This case pins the matcher
+  // against a fixture holding both YAML step forms, so narrowing it again fails
+  // HERE, loudly and by name, instead of silently widening the hole downstream.
+  it('control: the uses: matcher sees both the block and list-item step forms', () => {
+    const fixture = [
+      'jobs:',
+      '  demo:',
+      '    steps:',
+      '      - uses: actions/checkout@v5',
+      '      - name: Set up Node.js',
+      '        uses: actions/setup-node@v4',
+      '      - uses: ./.github/actions/local',
+      '      - run: echo "not a uses: line"',
+    ].join('\n');
+
+    const seen: string[] = [];
+    let m: RegExpExecArray | null;
+    USES_LINE_RE.lastIndex = 0;
+    while ((m = USES_LINE_RE.exec(fixture)) !== null) seen.push(m[1]);
+
+    expect(seen).toEqual([
+      'actions/checkout@v5',
+      'actions/setup-node@v4',
+      './.github/actions/local',
+    ]);
   });
 
   for (const tpl of workflowTemplates) {
