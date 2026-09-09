@@ -1,9 +1,7 @@
 ---
 id: SPEC-040
 type: design
-status: done  # SPEC-040 shipped in #1009 (19a6e08). Status mirrors requirements.md; design.md is not
-              # separately approvable (#630/#951) and carries no hash of its own. Sibling `status:` is a
-              # hand-maintained field with no gate — #972 tracks removing it corpus-wide.
+status: done
 tier: T4
 product: minspec
 epic: EPIC-003  # SDD Core Methodology — code-change safety
@@ -11,6 +9,16 @@ depends_on: [DR-064, DR-014, DR-003, SPEC-038]
 ---
 
 # SPEC-040 — Plan (Design)
+
+> **Status note.** `status: done` mirrors `requirements.md` - SPEC-040 shipped in #1009
+> (19a6e08). This file is not separately approvable (#630/#951) and carries no hash of its
+> own, so its `status:` is a hand-maintained field with no gate behind it; #972 tracks
+> removing that sibling field corpus-wide.
+>
+> This note sits in the body rather than on the `status:` line because the status writer
+> rewrites that whole line (#1879 - the approve/accept writer falsifies prose around the
+> value it changes), which drops an inline comment and strands any continuation lines under
+> a value they no longer describe.
 
 Turns the layer-import contract from convention into machine-enforced gates. The three
 load-bearing choices are already fixed by **[DR-064](../../../docs/decisions/DR-064.md)**
