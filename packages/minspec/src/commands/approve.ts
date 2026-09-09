@@ -151,14 +151,26 @@ function enableAdvancePhaseOnApprove(rootDir: string): void {
  * a request file to `.minspec/queue/`; MUST NOT run `claude -p` (Tier-0
  * air-gap) and must not block on generation. A downstream consumer
  * (#732/#734/#735, not built here) dequeues it. Never lets a queue-write
- * failure surface as an approval failure — the approval itself already
- * succeeded by the time this runs.
+ * failure surface as an APPROVAL failure — the approval itself already
+ * succeeded by the time this runs, so this never throws back into
+ * `approveSpecCommand`'s catch.
+ *
+ * That said, the failure still has to reach the human SOMEWHERE (constitution
+ * invariant 2, "no silent gate"): `console.warn` alone lands in the Debug
+ * Console / extension output channel, which a user approving via the Alt+A
+ * toast never opens. A non-modal warning toast surfaces it without blocking
+ * or contradicting the approval's own success toast (#1512). Fire-and-forget,
+ * same as the other advisory toasts in this file — nothing here awaits it.
  */
 function enqueuePhaseAdvanceSafely(rootDir: string, specRel: string): void {
   try {
     enqueuePhaseAdvance(rootDir, specRel, 'alt-a-toast');
   } catch (err) {
-    console.warn(`MinSpec: phase-advance enqueue failed — ${err instanceof Error ? err.message : String(err)}`);
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`MinSpec: phase-advance enqueue failed — ${message}`);
+    void vscode.window.showWarningMessage(
+      `MinSpec: Approved, but the phase-advance request could not be queued — ${message}`,
+    );
   }
 }
 
