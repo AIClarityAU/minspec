@@ -33,8 +33,15 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { isBoundaryPath, detectBoundaryChange } from '../../../scripts/auto-merge-gate';
-import type { ChangedFile } from '../../../scripts/auto-merge-gate';
-import type { ClassificationSignal } from '../src/lib/auto-merge';
+// Types come from the modules that DECLARE them, not from the consumers that
+// re-import them: `auto-merge-gate` and `auto-merge` both take these as
+// type-only imports and re-export neither, so importing from there is TS2305
+// ("has no exported member"). It runs green regardless -- esbuild erases
+// `import type` and this file is outside every tsconfig `include` -- which is
+// exactly why it has to be pinned to the declaring module rather than trusted
+// to a passing test run.
+import type { ChangedFile } from '../src/lib/consequence-analyzers';
+import type { ClassificationSignal } from '../src/lib/classifier';
 import { decideAutoMerge } from '../src/lib/auto-merge';
 
 const cf = (path: string): ChangedFile => ({ insertions: 1, deletions: 0, status: 'modified', path });
