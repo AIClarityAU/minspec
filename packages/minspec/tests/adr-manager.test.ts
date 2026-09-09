@@ -131,12 +131,13 @@ describe('adr-manager', () => {
       expect(content).toContain('date: 2026-05-26');
     });
 
-    it('includes Context, Decision, Costly to Refactor, and Consequences sections', () => {
+    it('includes Context, Decision, Costly to Refactor, In plain terms, and Consequences sections', () => {
       const content = generateAdrContent('DR-042', 'Switch to Vitest', '2026-01-01');
 
       expect(content).toContain('## Context');
       expect(content).toContain('## Decision');
       expect(content).toContain('## Costly to Refactor');
+      expect(content).toContain('## In plain terms — what this changes for you');
       expect(content).toContain('## Consequences');
     });
 
@@ -146,6 +147,28 @@ describe('adr-manager', () => {
         .toBeLessThan(content.indexOf('## Costly to Refactor'));
       expect(content.indexOf('## Costly to Refactor'))
         .toBeLessThan(content.indexOf('## Consequences'));
+    });
+
+    it('places In plain terms after the Decision and before Consequences', () => {
+      const content = generateAdrContent('DR-042', 'X', '2026-01-01');
+      expect(content.indexOf('## Decision'))
+        .toBeLessThan(content.indexOf('## In plain terms — what this changes for you'));
+      expect(content.indexOf('## In plain terms — what this changes for you'))
+        .toBeLessThan(content.indexOf('## Consequences'));
+    });
+
+    // Pins the total section order. Without this the Costly-vs-In-plain-terms
+    // pair is unconstrained, so a reshuffle could drop the reader-facing section
+    // into the middle of the read-first block and still pass every other test.
+    it('places In plain terms after Costly to Refactor', () => {
+      const content = generateAdrContent('DR-042', 'X', '2026-01-01');
+      expect(content.indexOf('## Costly to Refactor'))
+        .toBeLessThan(content.indexOf('## In plain terms — what this changes for you'));
+    });
+
+    it('prompts an empty In plain terms section so it reads as unfinished', () => {
+      const content = generateAdrContent('DR-042', 'X', '2026-01-01');
+      expect(content).toContain('One short paragraph, no jargon, addressed to the person affected');
     });
 
     it('includes the heading with id and title', () => {

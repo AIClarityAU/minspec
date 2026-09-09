@@ -50,14 +50,12 @@ import {
 } from '../../../scripts/lib/dr-id-collision';
 import { useShellTimeout } from './helpers/shell-timeout';
 
-// #1584: only 2 source-level execFileSync call sites (runValidator, runCli below), so
-// shell-timeout-coverage.test.ts's static call-site count (threshold 5) does not catch
-// this file automatically — but those two helpers are each invoked from many `it()`
-// blocks below, so a full run of this suite spawns well over a dozen real subprocesses.
-// Under a loaded full-suite run that total, not the 2 source call sites, is what determines
-// wall-clock time, so it flakes past vitest's 5s default the same way the six suites in
-// #1099 did. Raise it explicitly rather than let a real DR-id collision get dismissed as
-// flake because the gate that guards it is noisy under load.
+// #1586: block B runs `npx tsx <cli>` per case (npx, then tsx, then node, then a
+// TypeScript compile) — the heaviest child process in this suite, on vitest's 5s
+// default. Under container scheduling contention that queues past 5s with nothing
+// hung (#1285's failure shape); observed flaking here even though this file sits
+// below shell-timeout-coverage.test.ts's call-site threshold, because the cost is in
+// what block B spawns, not how many times.
 useShellTimeout();
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
@@ -463,6 +461,22 @@ describe('B — decideDrIdCollision: fails closed on a taken id and names the ne
     });
     expect(v.ok).toBe(true);
     expect(v.nextFreeId).toBe('DR-001');
+  });
+
+  it('reports one collision once, even when the subject claims it under two filenames', () => {
+    // Both of the subject's files hit the same base holder. The collision is ONE
+    // fact; printing the holder line twice makes the message look like two problems.
+    const v = decideDrIdCollision({
+      decisionsDir: DIR,
+      baseRef: 'main',
+      basePaths: [`${DIR}/DR-077.md`],
+      subject: { pr: 1209, paths: [`${DIR}/DR-077.md`, `${DIR}/DR-077-take-two.md`] },
+      otherPrs: [],
+    });
+    expect(v.ok).toBe(false);
+    expect(v.findings).toHaveLength(1);
+    expect(v.findings[0]).toEqual({ id: 'DR-077', heldBy: 'main', file: `${DIR}/DR-077.md` });
+    expect(v.message.match(/DR-077 is already claimed/g)).toHaveLength(1);
   });
 
   it('reports every colliding id, deterministically ordered', () => {
