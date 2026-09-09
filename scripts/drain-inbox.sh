@@ -184,6 +184,23 @@ QUOTA_SLEEP_MAX="${MINSPEC_QUOTA_SLEEP_MAX:-21600}"  # 6 h clamp vs a corrupt ep
 QUOTA_SLEEP_MIN="${MINSPEC_QUOTA_SLEEP_MIN:-60}"     # never spin
 QUOTA_SLEEP_MARGIN="${MINSPEC_QUOTA_SLEEP_MARGIN:-15}"  # settle past the boundary
 
+# ── Refreshing the witness, not just reading it (#1859) ─────────────────────
+# The reading's only producers are INTERACTIVE surfaces (a rendering statusline), so
+# a headless drain could never satisfy QUOTA_STALE_SEC on its own: INTERVAL (1200s)
+# and QUOTA_BACKOFF (1800s) both EXCEED that 900s limit, so every wake read a value
+# that had aged out during the sleep. The gate then failed closed, correctly, and
+# held forever — autonomy gated on a witness that only exists while a human watches.
+# Measured 2026-09-09: the file was 49h stale while holding "3% used".
+#
+# So the drain refreshes before it consults. Freshness becomes a property of the
+# CHECK rather than of who happened to be looking.
+QUOTA_REFRESH="${MINSPEC_QUOTA_REFRESH:-1}"          # 0 disables (e.g. in tests)
+QUOTA_REFRESH_CMD="${MINSPEC_QUOTA_REFRESH_CMD:-python3 $HOME/.claude/scripts/cos.py quota --refresh}"
+QUOTA_REFRESH_TIMEOUT="${MINSPEC_QUOTA_REFRESH_TIMEOUT:-60}"
+# Don't re-observe a reading that is still comfortably fresh. Half the staleness
+# limit keeps every wake inside the window without hammering the producer.
+QUOTA_REFRESH_MIN_AGE="${MINSPEC_QUOTA_REFRESH_MIN_AGE:-$(( QUOTA_STALE_SEC / 2 ))}"
+
 # The bootstrap allowance (see quota_gate's "no reading" arm, below). Default 3
 # matches this file's other small-and-bounded defaults (MAX_CONSEC_FAIL, the
 # autocompact ac_halt) — not a magic number, a reused convention. Sidecar
@@ -957,8 +974,36 @@ _quota_read() {
 # `qv=$(quota_gate)` call in run_cycle's parallel path), so the allowance caps at
 # exactly QUOTA_BOOTSTRAP_ADMITS concurrent launches before the rest of the queue
 # holds for the window.
+# Best-effort refresh of the reading, called by quota_gate before it consults.
+#
+# THIS FUNCTION MUST NEVER WRITE TO STDOUT. quota_gate's stdout IS the verdict
+# channel its callers capture (`quota_verdict=$(quota_gate)`), so a stray line here
+# would be parsed as an admission verdict. The producer's stdout goes to /dev/null
+# and every diagnostic to stderr.
+#
+# It cannot admit anything. On any failure the reading is left exactly as it was and
+# the stale / no-reading arms below still fail closed — this only ever makes a
+# reading fresher, never a verdict weaker.
+_quota_try_refresh() {
+  [[ "$QUOTA_REFRESH" == "1" ]] || return 0
+  local now vals o
+  now=$(date +%s)
+  # ONLY a reading that EXISTS and has aged out is refreshed. A missing reading is
+  # deliberately left alone: that arm carries the bounded bootstrap allowance (INV-E)
+  # and its own producer guidance, and refreshing into it would let this function
+  # manufacture the very first reading — turning a documented, bounded blind-admit
+  # into an unbounded one. #1859 is about a reading going stale, not a missing one.
+  vals=$(_quota_read 2>/dev/null) || return 0
+  read -r _ _ o _ _ <<<"$vals"
+  (( now - o <= QUOTA_REFRESH_MIN_AGE )) && return 0
+  if ! timeout "$QUOTA_REFRESH_TIMEOUT" bash -c "$QUOTA_REFRESH_CMD" >/dev/null 2>&1; then
+    echo "[drain] quota refresh failed (\`$QUOTA_REFRESH_CMD\`) — the reading stands as-is and the gate still fails closed on it." >&2
+  fi
+}
+
 quota_gate() {
   local vals p r o wp wr now
+  _quota_try_refresh
   now=$(date +%s)
   if ! vals=$(_quota_read); then
     local bc="$(_quota_bootstrap_count)"
