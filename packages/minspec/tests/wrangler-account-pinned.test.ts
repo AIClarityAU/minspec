@@ -2,11 +2,13 @@
  * #1869 — T0: every Worker config pins its deploy account.
  *
  * WHY THIS IS A GATE AND NOT A CONVENTION. `packages/broker/wrangler.toml` declared a name
- * and an entrypoint but no `account_id`. Wrangler then resolves the account from whatever
- * credential is present, and a credential that can see more than one account picks one
- * without prompting. The Worker — and a `wrangler secret put` carrying the GitHub App
- * private key — deployed to an account nobody chose. Every command reported success. It was
- * found only because a human read a `workers.dev` URL and did not recognise the subdomain.
+ * and an entrypoint but no `account_id`. Wrangler then falls back to $CLOUDFLARE_ACCOUNT_ID
+ * and, failing that, to a gitignored machine-local cache under `node_modules/.cache/wrangler`.
+ * Its "more than one account available" error fires only when all three miss, so it does not
+ * protect an unpinned config whose cache is warm. The Worker — and a `wrangler secret put`
+ * carrying the GitHub App private key — deployed to an account nobody chose. Every command
+ * reported success. It was found only because a human read a `workers.dev` URL and did not
+ * recognise the subdomain.
  *
  * The absence of a field is invisible: there is no error to notice, no log line to grep, and
  * the wrong outcome looks exactly like the right one. Constitution invariant 2 says a missing
