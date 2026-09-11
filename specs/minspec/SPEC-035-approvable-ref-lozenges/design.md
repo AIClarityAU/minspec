@@ -12,7 +12,7 @@ implements_reason: Plan document. requirements.md declares `implements: none` wh
 
 # MinSpec - Approvable-Reference Lozenges + Hover Cards (Plan)
 
-**Date:** 2026-09-09, revised 2026-09-11 (twice)
+**Date:** 2026-09-09, revised 2026-09-11 (three times)
 **Status:** Plan (SDD Plan phase). This document does not change the spec's `status:`.
 **Reads:** [requirements.md](requirements.md) - FR1..FR9, AC1..AC6, the four invariants and
 OQ1..OQ5 are settled there and are not re-litigated. This is HOW, not WHAT/WHY.
@@ -63,7 +63,7 @@ Four slices, ordered by real dependencies, not preference:
 
 | Slice | FRs | What | Blocked on |
 |---|---|---|---|
-| **A - detect + resolve + card model (local v1 refs)** | FR1 (v1, local: `SPEC-014`, `DR-053`, `EPIC-002`, `#500`), FR4 model, FR5 (local targets), FR7 target, FR8 | `ref-detect.ts` (Tier-0 scanner), `ref-cards.ts` (fs adapter), the AC1 corpus harness, and the host-independent T0 tests (INV-keyboard's belongs to Slice B). `#N` is detected but has no card source, so it renders as plain text until PQ3 is answered. | The build resuming (requirements.md:37-39, :219-220). No technical predecessor; building it ahead of the resume is PQ9, not decided. |
+| **A - detect + resolve + card model (local v1 refs)** | FR1 (v1, local: `SPEC-014`, `DR-053`, `EPIC-002`, `#500`), FR4 model, FR5 (local targets), FR7 target, FR8 | `ref-detect.ts` (Tier-0 scanner), `ref-cards.ts` (fs adapter), the AC1 corpus harness, and the host-independent T0 tests (INV-keyboard's belongs to Slice B). `#N` is detected but has no card source, so it renders as plain text until PQ3 is answered. | The build resuming (requirements.md:37-39, :219-220). No technical predecessor; building it ahead of the resume is PQ9, not decided. `buildRefCard`'s `label` also waits on PQ11, because the label's form is not decided. |
 | **B - lozenge + card render** | FR2, FR3, FR7 nav, FR8 render | `ref-lozenge-html.ts` + the webview message/keyboard wiring. | SPEC-014's extracted prose renderer. Issue lozenges also need PQ3; how a DR or epic card shows an unrecorded status needs PQ10. |
 | **C - v2 grammar + cross-project** | FR1 (`MIN/SP19`, `SP19/FR3`, `SCR#204`), FR9, AC1b sigil, FR5's cross-project degrade | Widen the scanner to the DR-053 v2 token, paragraph segments, `INV-<slug>` / `G-<n>` and the `[[…]]` sigil, against #679's resolver; wire `.minspec/project-prefixes.md` into the lookup. **Not specified by this design:** it gives no span shapes for v2, the sigil, `INV-<slug>` or `G-<n>`, and no resolver contract. Tasks must not treat Slice C as specified; it is planned against #679's resolver once that exists. | [#679](https://github.com/AIClarityAU/minspec/issues/679) (the `project-prefix` v2 grammar update, which is also the table's wiring predecessor); OQ2 for the degraded card's title source |
 | **D - authoring guidance** | FR6 | Tell the authoring LLM to stop restating another approvable's status. | Slice B shipped (R4), and OQ4 |
@@ -269,7 +269,11 @@ export type Grammar = 'v1' | 'v2' | 'sigil';
 
 /** One reference token located in a span of rendered prose. */
 export interface DetectedRef {
-  /** Verbatim source text, e.g. "SPEC-014", "#500". Becomes the lozenge label. */
+  /**
+   * Verbatim source text, e.g. "SPEC-014", "SPEC-19", "#500". NOT the lozenge label: the
+   * label's form is PQ11, which is NOT decided. buildRefCard carries raw to RefCard.token,
+   * the value navigation re-resolves.
+   */
   readonly raw: string;
   /** Half-open offsets into the text passed to detectRefs. */
   readonly start: number;
@@ -366,7 +370,20 @@ export type ApprovableLookup =
 export type RefCard =
   | {
       readonly variant: 'full';
+      /**
+       * FR2's "canonical short form". Set by buildRefCard. A v1 token has two candidate
+       * canonical forms, `SPEC-019` and `SP19`, and which one applies is PQ11 - NOT decided.
+       * FR2's "canonical", as approved, settles one thing: every ref to one target gets one
+       * label, so `SPEC-19` and `SPEC-019` never render differently. Only PQ11's option (c),
+       * which needs a requirements amendment, would undo that.
+       */
       readonly label: string;
+      /**
+       * DetectedRef.raw, verbatim. Never displayed. It is the lozenge's `data-ref` and the `id`
+       * its `ref:open` posts, because the handler re-resolves that id with resolveRef, and a
+       * label in a form resolveRef does not read (`SP19`, before #679) would open nothing.
+       */
+      readonly token: string;
       readonly title: string;
       readonly status: CardStatus;
       readonly summary?: string;
@@ -380,14 +397,19 @@ export type RefCard =
        */
       readonly variant: 'degraded';
       readonly reason: 'repo-unavailable';
+      /** As on 'full': the form is PQ11. */
       readonly label: string;
+      /** As on 'full'. */
+      readonly token: string;
       readonly title: string;
     };
 
 /**
  * Pure. 'found' -> 'full'; 'repo-unavailable' -> 'degraded'; 'not-found' -> null, and the
  * caller renders the token as PLAIN TEXT - never a dead lozenge, never an error
- * (FR8, INV-graceful-degrade).
+ * (FR8, INV-graceful-degrade). `token` is ref.raw. `label` is PQ11's to define. Every input
+ * any PQ11 option needs (ref.resolution's kind and num, the lookup's id, ref.raw) is already
+ * an argument, so the answer changes this function's body, not its signature.
  */
 export function buildRefCard(ref: DetectedRef, lookup: ApprovableLookup): RefCard | null;
 ```
@@ -437,10 +459,12 @@ export function lookupApprovable(
      One instance per rendered document. The instance owns the occurrence counter (0, 1, 2, ...
      in the order render is called), so ids are unique across everything one instance renders,
      whatever the caller does, and no id contains a character of the ref itself. The host's only
-     obligation is one instance per document render. Shown: the third card rendered by one
+     obligation is one instance per document render. data-ref is card.token. The button's text
+     is card.label, whose form is PQ11 (NOT decided): for this token it would read SPEC-014
+     under PQ11 option (a) or (c), and SP14 under (b). Shown: the third card rendered by one
      instance, a 'full' card whose status source is 'derived'. -->
 <button type="button" class="ms-lozenge" data-ref="SPEC-014"
-        aria-describedby="ms-card-2">SPEC-014</button>
+        aria-describedby="ms-card-2"><!-- card.label, per PQ11 --></button>
 <span role="tooltip" id="ms-card-2" class="ms-card" hidden>
   <span class="ms-card-title">Prettified Spec-Review Webview</span>
   <span class="ms-card-status" data-status="implementing">implementing</span>
@@ -458,8 +482,10 @@ its contracted-messages list at `:242`), so the two features can share one chann
 SPEC-035 only ever sends `toSide: false` and builds no open-to-the-side behaviour: FR7 asks
 for navigation (requirements.md:116-121), and `toSide: true` (SPEC-018's
 `ViewColumn.Beside`) belongs to SPEC-018 FR-10. `ref:open` exists nowhere in
-`packages/*/src` yet. If Slice B lands first, the handler it builds accepts only
-`toSide: false`: it resolves `id` itself with `resolveRef` and `lookupApprovable`, and
+`packages/*/src` yet. The `id` a lozenge posts is its `data-ref`, which is `card.token`: the
+verbatim detected token, which `resolveRef` accepts by D1. It is never `card.label`, whose
+form is PQ11 and may be one the v1 resolver does not read. If Slice B lands first, the
+handler it builds accepts only `toSide: false`: it resolves `id` itself with `resolveRef` and `lookupApprovable`, and
 opens a `found` target's `filePath` in the active editor column. Any other outcome opens
 nothing, and a path supplied by the webview is never opened. Widening the literal to
 `boolean` is SPEC-018's change to make.
@@ -619,8 +645,11 @@ Test tiers beyond T0: **T1** - `detectRefs` truth table over each grammar and ea
 edge (token abutting a skip boundary, token spanning one, overlapping candidates resolving
 longest-first); a property test that every `DetectedRef` satisfies
 `resolveRef(raw, opts.prefixes) !== null` (D1: the scanner cannot admit what the resolver
-rejects); the `ref-detect` / `reference-checker` cross-check defined below; and (Slice B) that
-the lozenge wiring posts `ref:open` with `toSide: false` only. **T2** - AC2 (hover and focus
+rejects); the `ref-detect` / `reference-checker` cross-check defined below; that
+`buildRefCard` gives one `label` to every ref with the same kind, number and lookup (`SPEC-19`
+and `SPEC-019` in the fixture set - FR2's "canonical"), with the label string itself pinned
+in the change that answers PQ11; and (Slice B) that the lozenge wiring posts `ref:open` with
+`toSide: false` only and with `id` equal to the card's `token`. **T2** - AC2 (hover and focus
 open the card, `Escape` closes it, and the host's rendered document has unique card ids), AC3
 (change a target's status, re-render, card reflects it), AC4 (unknown code renders as plain
 text with no error), AC5 (activate navigates). **T3** - one per bug found at Implement.
@@ -823,6 +852,43 @@ plan by the time anyone noticed.
   (c) read FR5 strictly: only spec cards carry a status; DR and epic cards show title and
   summary only. Cost: FR3 asks every card for a current status, and this drops it for about
   63% of lozenges.
+- **PQ11 - what a lozenge's label is. NOT decided. It needs the founder via Clarify.** FR2
+  gives each lozenge "the canonical short form as its label" (requirements.md:90-92), and no
+  approved text says what that is for a v1 token. DR-053 v2 makes the approvable segment a
+  two-letter code plus an unpadded number (`SP19`, not `SP019`; DR-053.md:85-86), rendered
+  uppercase (DR-053.md:79, :196), with the project segment elided for an intra-project ref
+  (DR-053.md:64-72). But the corpus is v1 (6,931 v1 tokens to 4 v2, D5), old and new forms
+  coexist until the corpus migration (DR-053.md:219-220), the resolver reads only v1 forms
+  until #679 (project-prefix.ts:86-90), and the requirements say the approvable-level subset
+  "can render against the v1 resolver today" (requirements.md:217-218) without saying in what
+  form. So `SPEC-019` has two candidate canonical forms: itself, and `SP19`. The previous
+  revision of this design settled it by contracting the verbatim source text as the label,
+  which is neither: `SPEC-19` and `SPEC-019` would have shown two labels for what
+  `lookupApprovable` matches as one target. The contract now leaves `RefCard.label` to this
+  question. Navigation does not wait on the answer, because a lozenge posts `card.token`,
+  never its label. Case is not in question for Slices A-B: `SDD_SPAN` and the resolver's
+  regexes admit uppercase only, so DR-053 §8's case rule first applies in Slice C. Issues are
+  outside the question until PQ3 gives them a card, and DR-053 keeps `#N` in both grammars
+  (DR-053.md:87-91). Options:
+  (a) **(rec)** the target's id as its catalog reports it, which is the id `lookupApprovable`
+  matched on: a spec's frontmatter `id:` (spec-catalog.ts:93); a DR's or an epic's
+  frontmatter `id:`, else the id at the head of its file name (adr-manager.ts:1316,
+  epic-manager.ts:143). One label per target, no grammar vocabulary in `ref-detect.ts` (D1),
+  no new predecessor, and the same form as the register's own ids and file names
+  (`DR-053.md`, `EPIC-003-sdd-core.md`). Cost: it is the v1 form, which DR-053 v2 replaces as
+  the reference form, and FR2's "short form" echoes DR-053's own "short, typeable id"
+  (DR-053.md:4), which reads toward (b). So the lozenge does not show the grammar this spec
+  says it consumes, and moving to the v2 form later is a second change to `buildRefCard`,
+  after #679.
+  (b) the DR-053 v2 intra-project form (`SP19`, `DR53`, `EP2`). Cost: mapping `SPEC` to `SP`
+  and `EPIC` to `EP` is grammar vocabulary D1 keeps out of `ref-detect.ts`, and #679's body
+  lists reading both forms during migration but no function that renders a v1 token in its
+  v2 form, so this option either widens #679's scope or forks the grammar here. And while the
+  corpus stays v1, a reader who sees `SP19` on a lozenge and searches the document for it
+  finds nothing.
+  (c) the verbatim source text, as the previous revision contracted. Cost: it is not a
+  canonical form, so it contradicts FR2 as approved and needs a requirements amendment and
+  re-approval, and one target shows as many labels as the corpus has spellings of it.
 - **OQ1 (from requirements) - one fact that narrows it, no answer.** **Zero** approvables in
   the corpus carry a `summary:` frontmatter field today, and there are 61 live approval
   sidecars. So adding `summary` to `stripLifecycle` in
