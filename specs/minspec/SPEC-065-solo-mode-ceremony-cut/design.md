@@ -35,9 +35,11 @@ Plan) · **Decisions:** [DR-075](../../../docs/decisions/DR-075.md),
 **Umbrella:** [#1169](https://github.com/AIClarityAU/minspec/issues/1169)
 
 > **Scope discipline.** This Plan designs FR-1..FR-6 and nothing else. Three capabilities
-> the requirements do not ask for were considered and are recorded as open questions rather
-> than designed: a merge queue (DQ-1 explicitly leaves it open, not foreclosed), an
-> `ai-review-retry` attempt cap, and `mode` becoming a typed field of `MinspecConfig`.
+> the requirements do not ask for were considered and deliberately not designed: a merge
+> queue and an `ai-review-retry` attempt cap are tracked follow-ups (#1394, #1204 – see
+> *Follow-ups*), and `mode` becoming a typed field of `MinspecConfig` is OQ-7. A fourth, an
+> environment-variable override of `mode` that an earlier draft of this Plan designed, has
+> been **removed**: no FR or AC asks for one, and it could loosen policy (see *Contracts*).
 > Where the requirements are genuinely undecidable, the gap is flagged in **Open
 > questions** — an invented requirement gets built and never re-examined; a flagged one
 > gets answered.
@@ -46,7 +48,9 @@ Plan) · **Decisions:** [DR-075](../../../docs/decisions/DR-075.md),
 
 ## What this Plan is designing against (measured, not assumed)
 
-Every claim below was read out of the tree at `origin/main` on 2026-09-09.
+Every claim below was read out of the tree at `origin/main` on 2026-09-09, and re-checked on
+2026-09-11 against this PR's merge of `origin/main` at `267c1f2c`. Line numbers throughout are
+from that merged tree.
 
 | Fact | Where | Consequence for this design |
 |---|---|---|
@@ -60,6 +64,13 @@ Every claim below was read out of the tree at `origin/main` on 2026-09-09.
 | FR-4's class 2 is live and **documented as open in the code itself** | `review-decide.sh`, above `BEGIN_COUNT`: *"The asymmetry costs a false `ai-review:changes` when a reviewer names the token in prose without a second block present (the reviewer half of #1157, still open)"* | FR-4 has a named, cited call site |
 | `packages/minspec/src/lib/**` is bundled by tree-shaking from one entry point | `scripts/build-extension.sh`: `exec npx esbuild src/extension.ts --bundle …` | A `profile.ts` with no importer reachable from `src/extension.ts` never enters the shipped `.vsix` — the INV-4 argument, checkable |
 | `ai-review.yml`, `ready-to-merge.yml`, `review-decide.sh` and `ai-review-guard.js` are **verbatim SOURCES** of the templates shipped to adopters | `scripts/gen-ci-templates.mjs` `SOURCES[]`; pinned byte-for-byte by `packages/minspec/tests/ci-review-templates-gen.test.ts` | Every file FR-2 and FR-4 must edit is an adopter-facing artifact — see **OQ-3**, the sharpest conflict this Plan found |
+| `ready-to-merge.yml` subscribes **only** to `pull_request` (`opened, synchronize, reopened, labeled, unlabeled`), and reads the PR's labels from the event payload | `.github/workflows/ready-to-merge.yml:82-90`, `:176` | Its `labeled` run fires when `ai-review-runner` applies `ai-review:pass`, i.e. **before** that run completes, so before any `workflow_run` witness can exist, and nothing re-runs it afterwards. The witness has to drive the re-evaluation itself (D10) |
+| This repo already re-runs a `pull_request` workflow from another workflow, using `GITHUB_TOKEN` with `actions: write` | `.github/workflows/ai-review-retry.yml:27-29` (permission), `:129-135` (`gh run rerun`) | The re-evaluation seam D10 uses is already in production here, not new |
+| Two more machinery-only signals say "a human must review" | `ai-review.yml:936-986` posts `machinery-review-required` = `action_required`, titled *"Machinery PR — human review required"* (`:956`); `shouldSummonHumanReview` returns true for any machinery PR (`ai-review-guard.js:975-977`), and `ai-review.yml:1184-1201` then applies `needs-human-review` | Neither gates a merge: neither is among the six required checks (`requirements.md:58-60`), and `needs-human-review` is read as a countermand only on **issues** (`scripts/dispatch-ready-check.sh:635`). But both would be false on a machinery PR that merges unattended – see **OQ-8** |
+| The broad machinery set is six directory prefixes plus two generator files | `packages/minspec/src/lib/machinery-paths.ts:52-78`; hand-copied at `ai-review.yml:404` and `scripts/dispatch-issue.sh:143` | `profile.ts`, `machinery-paths.ts` and `.minspec/config.json` are **not** machinery. That constrains the witness self set (see *Contracts*) and raises **OQ-9** |
+| The native auto-merge arm is decided when dispatch opens the PR, before any review has completed | `scripts/dispatch-issue.sh:1048-1089` (`gh pr merge --auto` at `:1084`) | Nothing that needs a witness to exist can be evaluated at that seam – see **OQ-1** |
+| `tsx` is pinned, and `scripts/lib/autonomy.sh` refuses to fetch a runner over the network | `package.json:36` (`tsx` 4.23.1); `autonomy.sh:87-99`; `.github/workflows/dr-id-collision.yml:55-73` runs TypeScript in CI after `npm ci` | How bash and YAML execute `profile.ts` (see *Contracts*): the pinned runner from `node_modules/.bin`, never `npx` |
+| #1839 (patch-fingerprint re-attestation) records a fingerprint, and nothing consumes it yet | `ai-review-guard.js:366-376` (*"has no production caller"*); the consumer is #1840 | The witness reads neither the fingerprint nor `findReattestableVerdict`. It depends only on `ai-review:pass` label provenance and on `ai-review-runner` completing |
 
 ---
 
@@ -68,17 +79,24 @@ Every claim below was read out of the tree at `origin/main` on 2026-09-09.
 Five seams, deliberately kept independent so they can land, fail and be reverted separately.
 
 1. **One resolver, no second reader.** A net-new Tier-0 module `packages/minspec/src/lib/profile.ts`
-   exports the profile type and exactly two functions. Every consumer — TypeScript, bash and
-   YAML — reaches the setting through it. It mirrors `scripts/lib/autonomy.ts`'s
-   exact-token, deny-by-default discipline byte for byte, because two settings that disagree
-   about what "on" means is the drift shape this repo has already paid for twice
-   (`gh-bot.sh`'s write vocabulary #1401, the machinery regex #1758).
+   exports the profile type, two resolver functions and one CLI entry. TypeScript consumers
+   import it. Bash (`scripts/dispatch-issue.sh`) and YAML (`machinery-witness.yml`) *execute*
+   it through the pinned `tsx` runner and read one token from its stdout, under a single
+   consumer rule (grammar in *Contracts*). Nothing else reads the `mode` key. Its value grammar
+   mirrors `scripts/lib/autonomy.ts`'s exact-token, deny-by-default `resolveAutonomy` byte for
+   byte, because two settings that disagree about what "on" means is the drift shape this repo
+   has already paid for twice (`gh-bot.sh`'s write vocabulary #1401, the machinery regex #1758).
+   It deliberately does **not** copy `readAutonomy`'s environment-variable override
+   (`autonomy.ts:201-203`): the config file is its only input.
 
 2. **The machinery witness is a `workflow_run` job, and its trust root is GitHub's own
    default-branch sourcing.** A new `.github/workflows/machinery-witness.yml` runs after
    `ai-review-runner` completes. Because GitHub always takes a `workflow_run` workflow from
    the default branch, a PR cannot edit the file that judges it — the property is structural,
-   not remembered, which is exactly what DQ-2 asked for.
+   not remembered, which is exactly what DQ-2 asked for. By then `ready-to-merge.yml` has
+   already run, and nothing would run it again, so the witness finishes by re-running the PR's
+   latest `ready-to-merge` run (D10). That is the same `gh run rerun` shape `ai-review-retry.yml`
+   already uses, and it makes the gate re-evaluate with the witness present.
 
 3. **The witness does not re-review; it certifies that stage 1 ran base-equal code.** The
    trusted stage refuses to certify any PR that touches the *witness self set* — the
@@ -103,13 +121,16 @@ Five seams, deliberately kept independent so they can land, fail and be reverted
    `needs-human-skim` label. Neither branch is new; only the boolean feeding them is. This is
    FR-3's second clause discharged at the same seam as its first: one function, one profile
    check, both halves of the acceptance criterion. The profile reaches this bash function
-   through a new `scripts/lib/profile.sh`, the same wrapper shape `scripts/lib/autonomy.sh`
-   already established for the autonomy axis — it shells `profile.ts` via the pinned `tsx`
-   runner and fails closed to `team` (never `solo`) on any runner error, exactly as
-   `autonomy_may_proceed` fails closed to denial. See the component table and OQ-2.
+   through a new `profile_mode` function **inside `scripts/dispatch-issue.sh`** (declared
+   `affects:`). It executes `profile.ts`'s CLI with the pinned `tsx` runner and fails closed to
+   `team` (never `solo`) on any runner error, under the same failure policy
+   `autonomy_may_proceed` applies (`scripts/lib/autonomy.sh:87-122`). It is not a separate
+   `scripts/lib/profile.sh` (D11). See the component table and *Contracts*.
 
 FR-5 needs almost no new code: it is satisfied by construction, because this Plan **deletes
-nothing**, and every profile-keyed branch has `team` as the default arm. FR-3's non-machinery
+nothing**, and every profile-keyed branch has `team` as the default arm. That treats FR-5's two
+MUSTs (retained in source, reachable under `team`) as the whole requirement. Whether its title,
+"parked behind the profile", also means *off* under `solo` is OQ-10. FR-3's non-machinery
 half is seam 5 above, and it is a real behaviour change under `team` — not a re-source of an
 unconditional switch, because the switch was unconditional before this Plan and is
 profile-conditional after it. FR-3's machinery half is the arm slice below (OQ-1).
@@ -187,8 +208,9 @@ profile-conditional after it. FR-3's machinery half is the arm slice below (OQ-1
   carries its own cost.
 
 - **D7 — The profile is read from the **base** tree, never the head, and only in one place.**
-  The witness stage checks out `pull_request.base.sha` and resolves the profile from that
-  checkout's `.minspec/config.json`. `ready-to-merge.yml` stays profile-agnostic: it accepts
+  The witness stage checks out the PR's `base.sha`, read from `GET /pulls/{n}` (trusted
+  GitHub data), and only when `base.ref` is the default branch. It resolves the profile from
+  that checkout's `.minspec/config.json`. `ready-to-merge.yml` stays profile-agnostic: it accepts
   a provenance-verified `machinery-witness` check-run, and that check-run only ever exists
   under `solo`, so the profile is enforced once, at the producer.
   *Rejected: having `ready-to-merge.yml` read the profile too.* It reads more explicitly.
@@ -218,38 +240,79 @@ profile-conditional after it. FR-3's machinery half is the arm slice below (OQ-1
   on a producer that is silent in the common case, which is the exact single-producer failure
   constitution invariant 2 names.
 
+- **D10 – The witness drives `ready-to-merge`'s re-evaluation by re-running its latest run.**
+  `ready-to-merge.yml` subscribes only to `pull_request` events (`:82-90`). Its `labeled` run
+  fires while `ai-review-runner` is still going, so it can never see a `workflow_run`
+  witness, and nothing runs it again. So after posting the check-run, the witness's `post`
+  job waits for the newest `ready-to-merge` run on the head SHA to complete and re-runs it
+  (`POST /actions/runs/{id}/rerun`, with `GITHUB_TOKEN` and `actions: write`). That is the
+  shape `ai-review-retry.yml:129-135` already uses in production. A re-run replays the
+  original `pull_request` payload, so `pull_request.base.sha` is present and the self-forge
+  pin (`ready-to-merge.yml:111-127`) is untouched. `ready-to-merge.yml`'s trigger set,
+  permissions and single-writer rule (`:13-15`) all stay unchanged.
+  *Rejected: add a `check_run` or `workflow_run` trigger to `ready-to-merge.yml`.* The most
+  direct fix. Cost: neither event carries `pull_request.base.sha`, and the job refuses to run
+  without it (`:111-118`), so the self-forge defence would have to be redesigned inside a
+  required gate.
+  *Rejected: have the witness apply a label with the App token, which fires a fresh
+  `labeled` event.* That gives a fresh payload and needs no new permission. Cost: a label
+  whose only purpose is to be an event, and it races any in-flight `ready-to-merge` run,
+  because that workflow has no `concurrency` group.
+  *Rejected: have the witness post `ready-to-merge` itself.* That makes a second writer of
+  the gate status, which `ready-to-merge.yml:13-15` forbids.
+  Cost of the chosen seam: `actions: write` on the `post` job's token. Also, a re-run reads
+  labels from the replayed payload (`ready-to-merge.yml:176`), so it does not see a label
+  change that lands between the newest run's event and the re-run. Two racing
+  `ready-to-merge` runs already have that stale-payload problem today, so it is not new. It is
+  recorded under *Risks*.
+
+- **D11 – The bash reader is a function inside `scripts/dispatch-issue.sh`, not a new
+  `scripts/lib/profile.sh`.** There is exactly one bash consumer (`native_automerge_enabled`),
+  and `dispatch-issue.sh` is declared in `affects:`.
+  *Rejected: `scripts/lib/profile.sh`, the shape `scripts/lib/autonomy.sh` established.* It
+  would be reusable by a future second bash consumer. Cost: a third file outside the approved
+  ownership declaration (OQ-2), for a single caller. That is what made the FR-3 slice depend
+  on OQ-2 in the earlier draft.
+
 ---
 
 ## Components, by path, and the seam at each
 
 | Path | Ownership | Change | Seam |
 |---|---|---|---|
-| `packages/minspec/src/lib/profile.ts` | **new, `implements:`** | Whole file | Pure: `fs.readFileSync` + `JSON.parse` only. No `vscode`, no network, no `child_process`. Consumers import the function; nobody re-reads the file. |
-| `packages/minspec/tests/profile.test.ts` | **new, `implements:`** | Whole file | T0 for FR-1/AC-1/AC-2 |
-| `packages/minspec/tests/solo-mode-keep-gates.test.ts` | **new, `implements:`** | Whole file | T0 for FR-6/AC-6 |
-| `.github/workflows/machinery-witness.yml` | **new, `implements:`** | Whole file | `on: workflow_run: workflows: [ai-review-runner], types: [completed]`. Own token `contents: read`; every write via the App token, SHA-pinned `create-github-app-token` exactly as `main-red-watch.yml` does. |
-| `packages/minspec/tests/machinery-witness.test.ts` | **new, `implements:`** | Whole file | Parses the witness self set and the decision block back out of the YAML between `# >>> witness-self-set` / `# <<<` markers and executes them, so the test cannot drift from what CI runs |
-| `.github/workflows/ready-to-merge.yml` | `affects:` | Read the head's `machinery-witness` check-runs and pass them into the guard | One extra `github.paginate(checks.listForRef, { check_name })` call and one extra argument. The decision stays in the guard. |
-| `.github/scripts/ai-review-guard.js` | **UNDECLARED — OQ-2** | `MACHINERY_WITNESS_CHECK_NAME`; `verifyHeadMachineryWitness()`; a third channel in `verifyHeadPassWitness()`; an `ai-review:unreadable` arm in `decideReviewCheck()`; the label added to `VERDICT_LABELS` | Pure functions, unit-tested, mirroring `verifyHeadPassCheckRun` |
-| `scripts/review-decide.sh` | **UNDECLARED — OQ-2** | Two `echo` lines: the no-parseable-verdict fall-through and the `BEGIN_COUNT != 1` refusal | stdout is the label contract; nothing else changes |
+| `packages/minspec/src/lib/profile.ts` | **new, `implements:`** | Whole file | Resolution is pure: `fs.readFileSync` + `JSON.parse` only. A CLI entry (`runProfileCli`) plus an argv-keyed main guard (the `autonomy.ts:338-350` shape) let bash and YAML execute it. No `vscode`, no network, no `child_process`, no environment read. |
+| `packages/minspec/tests/profile.test.ts` | **new, `implements:`** | Whole file | T0 for FR-1/AC-1/AC-2, the CLI grammar, and AC-4's hermetic dispatch cases |
+| `packages/minspec/tests/solo-mode-keep-gates.test.ts` | **new, `implements:`** | Whole file | T0 for FR-6/AC-6 and FR-5/AC-7 |
+| `.github/workflows/machinery-witness.yml` | **new, `implements:`** | Whole file | `on: workflow_run: workflows: [ai-review-runner], types: [completed]`. Two jobs, specified under *Contracts*. `evaluate` has a read-only `GITHUB_TOKEN` and **no App token**; it checks out the base, runs `npm ci`, and executes `profile.ts` and `isMachineryPath` through `tsx`. `post` mints the App token only after evaluation, posts the check-run, and re-runs `ready-to-merge` (D10). |
+| `packages/minspec/tests/machinery-witness.test.ts` | **new, `implements:`** | Whole file | Parses the two self-set lists and the `witness-classify`, `witness-decide` and `witness-reevaluate` blocks back out of the YAML between their `# >>> name` / `# <<< name` markers and executes them, so the test cannot drift from what CI runs |
+| `.github/workflows/ready-to-merge.yml` | `affects:` | Read the head's `machinery-witness` check-runs and pass them into the guard | One extra `github.paginate(checks.listForRef, { check_name: 'machinery-witness' })` call and one extra argument. The decision stays in the guard. The trigger set, permissions and base pin are **unchanged**, because re-evaluation is driven from the witness side (D10). |
+| `.github/scripts/ai-review-guard.js` | **UNDECLARED — OQ-2** | `MACHINERY_WITNESS_CHECK_NAME`; `verifyHeadMachineryWitness()`; a third channel in `verifyHeadPassWitness()`; an `ai-review:unreadable` arm in `decideReviewCheck()`; the label added to `VERDICT_LABELS`. `shouldSummonHumanReview` (`:975-977`) may also change under **OQ-8** | Pure functions, unit-tested, mirroring `verifyHeadPassCheckRun` |
+| `scripts/review-decide.sh` | **UNDECLARED — OQ-2** | Two `echo` lines: the no-parseable-verdict fall-through (`:113`) and the `BEGIN_COUNT != 1` refusal (the branch at `:155-156`) | stdout is the label contract; nothing else changes |
 | `.github/workflows/ai-review.yml` | `affects:` | `gh label create "ai-review:unreadable"` alongside the other three; one case arm in the `# >>> verdict-combine` block | The combine block is executed verbatim by its test, so the arm is covered the moment it is written |
-| `scripts/dispatch-issue.sh` (FR-2, machinery arm) | `affects:` | Under `solo`, allow the machinery-only stop class to be discharged by the witness — **blocked on OQ-1** | Reaches the profile through the same TypeScript authority, in the shape `scripts/lib/autonomy.sh` established |
-| `scripts/dispatch-issue.sh` (FR-3, seam 5) | `affects:` | `native_automerge_enabled` (lines 75-88) gains a profile check before its existing env/config checks — **not blocked on OQ-1**, independent of the witness and the machinery arm above | Both call sites (line 1048's `--auto` arm, line 1959's HOLD/silence branch) are unchanged code reading one new boolean |
-| `scripts/lib/profile.sh` | **UNDECLARED — OQ-2** | Whole file, new | Bash wrapper onto `readProfileMode`, same shape as `scripts/lib/autonomy.sh`'s `autonomy_may_proceed`: shells the pinned `tsx` runner, parses its stdout, and fails closed to `team` (never `solo`) on a missing runner, non-zero exit, or unparseable output |
+| `.github/workflows/ai-review.yml`: the `machinery-review-required` step (`:936-986`) and the summon step (`:1184-1201`) | `affects:` | **Blocked on OQ-8.** Both say a human must review every machinery PR. That is true until the machinery arm slice lands and false after it, so whatever OQ-8 decides lands in that slice | None designed until OQ-8 is answered |
+| `scripts/dispatch-issue.sh` (FR-2, machinery arm) | `affects:` | Under `solo`, let a witnessed machinery PR merge without a keystroke. **Blocked on OQ-1**, which also has to settle *where* the arm runs | Not designed |
+| `scripts/dispatch-issue.sh` (FR-3, seam 5) | `affects:` | A new `profile_mode` function; a `--check-profile` pure seam beside `--check-native-automerge` (`:93-95`); and, as the first check in `native_automerge_enabled` (`:75-88`), ahead of its env/config checks at `:81-87`, a line that returns false unless `profile_mode` prints `solo`. Not blocked on OQ-1 or OQ-2. **Sequenced after the config flip** (*Build order*) | Both call sites (`:1048`'s `--auto` arm, `:1959`'s HOLD/silence branch) are unchanged code reading one new boolean |
+| `.minspec/config.json` | not declared – see OQ-2 | `"mode": "solo"`, added by a **human** PR (the config flip) | Withheld from native auto-merge by `paths_have_approvable_doc` mandate 2 (`dispatch-issue.sh:188-190`) and stop-classed `edits-the-autonomy-rules` (`:244`), so it reaches a human by construction |
 | `scripts/auto-merge-gate.ts` | `affects:` | **No change this Plan can justify** — see OQ-5 | — |
 
-**Untouched, and that is the FR-5 design.** `docs-lane.yml`, `scripts/push-docs.sh`, DR-065's
-presence-gated fast-forward (`packages/minspec/src/lib/presence.ts`, `merge-refresh.ts`),
-`shouldAwaitApproval` in the guard, and the drain's HITL escalations are not edited at all.
-"Parked means retained" is strongest when it is enforced by the absence of a diff; AC-7 then
-asserts the absence rather than trusting it.
+**Untouched, and that is the FR-5 design.** The following are not edited at all:
+`docs-lane.yml`; `scripts/push-docs.sh`; DR-065's presence-gated fast-forward
+(`checkout_occupied` / `sync_shared_checkouts` in `scripts/drain-inbox.sh:311` and `:373`,
+which mirror `isCheckoutOccupied` in `packages/minspec/src/lib/presence.ts:301`);
+`shouldAwaitApproval` in the guard (`:811-815`); and the drain's HITL escalation
+(`reconcile_done_issues`, `scripts/drain-inbox.sh:614-636`). None of them reads
+`.minspec/config.json` today: a grep of `docs-lane.yml`, `push-docs.sh` and `drain-inbox.sh`
+for `config.json` returns nothing. "Parked means retained" is strongest when it is enforced by
+the absence of a diff. AC-7 then asserts it by execution, entry point by entry point (table
+below).
 
 ---
 
 ## Contracts
 
 ```ts
-// packages/minspec/src/lib/profile.ts — Tier-0: no vscode, no network, no exec.
+// packages/minspec/src/lib/profile.ts — Tier-0: no vscode, no network, no exec, no env.
+// Imports: exactly `node:fs` and `node:path`.
 
 /**
  * The consent axis (DR-075/DR-076): whose consent a merge requires.
@@ -268,21 +331,64 @@ export type Profile = 'solo' | 'team';
 export function resolveProfileMode(raw: string | undefined): Profile;
 
 /**
- * Resolve from `<repoRoot>/.minspec/config.json` — the SOURCE, per FR-1 and #183.
- * Precedence, byte-for-byte `readAutonomy`'s (`scripts/lib/autonomy.ts:201-212`):
- * `env.MINSPEC_MODE`, WHEN DEFINED, wins and is read THROUGH resolveProfileMode — so
- * an env var can express `team` or fail closed to it, but can never express a policy
- * the config grammar cannot. Only when the env var is undefined does config get read.
- * Every failure at either stage — missing file, unreadable, malformed JSON, absent
- * key, wrong type — resolves to `team`. A repo with no `.minspec/` therefore resolves
- * to `team`: INV-4 by construction. The env path does not violate FR-1's "MUST NOT be
- * inferable only from an environment variable": config remains the persisted source,
- * so a fresh session with no export still reads the config value — only a session
- * that explicitly sets `MINSPEC_MODE` sees a per-session override, and AC-2 adds the
- * case that proves it.
+ * Resolve from `<repoRoot>/.minspec/config.json` — the SOURCE, per FR-1 and #183, and
+ * the ONLY input. No environment variable is consulted.
+ * Every failure — missing file, unreadable, malformed JSON, absent key, non-string
+ * value — resolves to `team`, the shape of `readAutonomy`'s config half
+ * (scripts/lib/autonomy.ts:205-212). A repo with no `.minspec/` therefore resolves to
+ * `team` because the read fails, and no earlier stage exists that could pre-empt it:
+ * INV-4 by construction.
  */
-export function readProfileMode(repoRoot: string, env?: NodeJS.ProcessEnv): Profile;
+export function readProfileMode(repoRoot: string): Profile;
+
+/**
+ * The CLI seam, mirroring runAutonomyCli (scripts/lib/autonomy.ts:260). It prints
+ * nothing itself; the main guard prints `line` and exits with `exitCode`.
+ *   argv exactly ['--repo-root', <non-empty dir>] → { exitCode: 0, line: 'solo' | 'team' }  (to stdout)
+ *   anything else                                  → { exitCode: 2, line: <usage> }         (to stderr; stdout empty)
+ */
+export function runProfileCli(argv: readonly string[]): { exitCode: 0 | 2; line: string };
+
+// Main guard, keyed on argv[1] for the reason autonomy.ts:338-345 gives (vitest imports
+// the module as ESM, tsx runs it as CJS):
+//   if (/(^|[\\/])profile\.ts$/.test(process.argv[1] ?? '')) { … }
+// Checked 2026-09-11: under tsx 4.23.1, process.argv[1] is the script path.
 ```
+
+**The CLI grammar, and the one rule every non-TypeScript consumer applies.**
+
+```
+<root>/node_modules/.bin/tsx <root>/packages/minspec/src/lib/profile.ts --repo-root <root>
+  exit 0, stdout exactly "solo\n" or "team\n"     resolved (every config failure is team, per D3)
+  exit 2, stdout empty, one usage line on stderr   usage error
+```
+
+A consumer treats the profile as `solo` **only if** the runner exited 0 **and** its stdout,
+with one trailing newline removed, is exactly `solo`. Anything else resolves to `team`: no
+runner at that path, a non-zero exit, empty stdout, or any other stdout. In that case the
+consumer says why in one visible line (`::warning` in YAML, stderr in bash), so a dead
+resolver is never mistaken for a `team` config. There is no `npx` fallback, for the reason
+`autonomy.sh:92-98` gives: `npx` fetches a missing package over the network, which would be
+an unconsented call made to obtain the thing that decides.
+
+- **bash**: `profile_mode` in `scripts/dispatch-issue.sh` prints `solo` or `team` and always
+  exits 0. `<root>` is `$(cd "${SCRIPT_DIR}/.." && pwd)`, the same root
+  `native_automerge_enabled` already reads its config from (`dispatch-issue.sh:86`). **No
+  environment variable redirects it.** That differs from `autonomy.sh`'s
+  `MINSPEC_AUTONOMY_REPO_ROOT` test seam (`:39-45`) on purpose: pointing the reader at a
+  fixture that says `solo` would arm unattended merge in a repo whose committed config says
+  `team`, the same loosening the removed `MINSPEC_MODE` override had. Tests use a hermetic
+  copy of the script instead (`drain-selfheal.test.ts:263-301` is the existing pattern).
+- **YAML**: the `witness-classify` step of `machinery-witness.yml` (below), with `<root>` set
+  to the base checkout.
+
+**No environment override exists.** FR-1 says the mode MUST NOT be inferable *only* from an
+environment variable, and AC-1 tests the no-environment case; neither asks for an override. An
+earlier draft of this Plan copied `readAutonomy`'s `MINSPEC_AUTONOMY` precedence
+(`autonomy.ts:201-203`) as `MINSPEC_MODE`. Under that draft an exported `MINSPEC_MODE=solo`
+would have won over a committed `mode: team` and, through seam 5, armed unattended native
+auto-merge. It was a new interface, not a requirement, and it is removed. Adding an override
+later is a Clarify question, not a Plan choice.
 
 ```jsonc
 // .minspec/config.json — the new key. Sibling of the existing `autonomy` and
@@ -306,20 +412,83 @@ interface MachineryWitnessCheckRun {
 `conclusion` is `success` only when **all** of these hold, and the stage fails closed on any
 one it cannot establish:
 
-1. `readProfileMode(<base checkout>) === 'solo'`;
+1. the profile is `solo`, as reported by the `witness-classify` step (the CLI run against the
+   base checkout under the consumer rule above);
 2. the PR resolved unambiguously from `workflow_run.pull_requests`, cross-checked against
    `GET /repos/{o}/{r}/commits/{head_sha}/pulls` — a disagreement, an empty list (a fork
-   PR), or more than one match posts nothing;
+   PR), or more than one match posts nothing. `GET /repos/{o}/{r}/pulls/{n}` must also show
+   it open, with `head.sha` equal to `workflow_run.head_sha` (otherwise the run is stale and
+   posts nothing) and `base.ref` equal to the repository's default branch. The last check
+   matters because a check-run is bound to a SHA, not a PR, so a witness posted for a PR into
+   any other branch could be read by a PR into `main` with the same head;
 3. the changed-file set was enumerated **completely** from
    `GET /repos/{o}/{r}/pulls/{n}/files` (trusted GitHub data, never stage 1's output) — a
    short page or an API error posts nothing;
-4. the set **is** machinery per the base tree's `isMachineryPath` — if not, this witness has
-   no opinion and posts nothing, because the ordinary `ai-review` witness already covers it;
-5. the set touches **no** member of the witness self set — otherwise `action_required`, with
-   the offending path named;
+4. at least one changed path is machinery per `isMachineryPath`, executed from the base
+   checkout by `witness-classify`. If none is, this witness has no opinion and posts nothing,
+   because the ordinary `ai-review` witness already covers the PR;
+5. the set touches **no** entry of either self-set list below — otherwise `action_required`,
+   with the offending path named;
 6. a provenance-verified `ai-review:pass` is bound to this head, verified through the base
    guard's `verifyPassProvenance` against the same `AI_REVIEW_BOT_LOGINS` allowlist
-   `ready-to-merge.yml` uses.
+   `ready-to-merge.yml` uses, from the same inputs `ready-to-merge.yml:198-250` gathers.
+
+**The witness workflow, job by job.** This is the seam that carries YAML to the TypeScript
+authorities. The resolver and the classifier are *executed* from the base checkout; they are
+never re-implemented and never read with `jq`.
+
+```yaml
+# .github/workflows/machinery-witness.yml (shape; every `uses:` SHA-pinned)
+on:
+  workflow_run: { workflows: [ai-review-runner], types: [completed] }
+permissions: {}                     # nothing at the top; each job grants its own
+concurrency: { group: "machinery-witness-${{ github.event.workflow_run.head_sha }}", cancel-in-progress: false }
+
+jobs:
+  evaluate:                         # NO App token exists in this job
+    if: github.event.workflow_run.event == 'pull_request'
+    permissions: { contents: read, pull-requests: read, issues: read }
+    outputs: { post: …, conclusion: …, title: …, summary: …, head_sha: … }
+    steps:
+      - resolve   # github-script, GITHUB_TOKEN: conditions 2-3. Writes the file list as JSON
+                  # to $RUNNER_TEMP/files.json; outputs pr, base_sha, head_sha
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd    # v5.0.1, as ai-review.yml:244
+        with: { ref: <base_sha from resolve>, persist-credentials: false }
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0, as ai-review.yml:251
+        with: { node-version: '22' }
+      - run: npm ci                 # the BASE lockfile, which pins tsx 4.23.1 (package.json:36)
+      - classify  # run:, between `# >>> witness-classify` / `# <<< witness-classify`:
+                  #   PROFILE   <- node_modules/.bin/tsx packages/minspec/src/lib/profile.ts
+                  #                  --repo-root "$GITHUB_WORKSPACE"   (consumer rule above)
+                  #   MACHINERY <- node_modules/.bin/tsx -e '<require("./packages/minspec/src/lib/
+                  #                  machinery-paths.ts").isMachineryPath over the JSON list at
+                  #                  $FILES_JSON>'; prints exactly `true` or `false`, and anything
+                  #                  else fails the job (visible, posts nothing)
+      - decide    # github-script, between `# >>> witness-decide` / `# <<< witness-decide`:
+                  # requires the BASE guard and fails closed if it is absent, exactly as
+                  # ready-to-merge.yml:154-173 does; conditions 1, 4, 5, 6 -> outputs
+  post:
+    needs: evaluate
+    if: needs.evaluate.outputs.post == 'true'
+    permissions: { actions: write } # the GITHUB_TOKEN is used for the re-run only
+    steps:
+      - uses: actions/create-github-app-token@f2acddfb5195534d487896a656232b016a682f3c # v1.9.0, as ai-review.yml:192
+      - post      # POST /repos/{o}/{r}/check-runs as the App: the MachineryWitnessCheckRun below
+      - reevaluate  # github-script, between `# >>> witness-reevaluate` / `# <<< witness-reevaluate`
+                    # (D10): take the newest ready-to-merge.yml run with head_sha = <head_sha> and
+                    # event pull_request; poll until completed (10 x 30 s); POST .../actions/runs/{id}/rerun.
+                    # No run, a timeout, or an API error -> core.setFailed. The check-run exists,
+                    # but ready-to-merge stays red until the next pull_request event: closed AND visible
+```
+
+There are two jobs so that the App token never shares a job with the packages `npm ci`
+installed, and a compromised dependency cannot read it. File names are PR-controlled strings,
+so the list only ever travels as a JSON file whose path is in `env`. It is never interpolated
+into a shell or script body, the discipline `ready-to-merge.yml:73-78` states. Two facts were
+checked on 2026-09-11. First, `tsx -e` can `require()` a `.ts` module (tsx 4.23.1,
+node 22.23.2). Second, the runs API filters by `head_sha`:
+`GET /actions/workflows/ready-to-merge.yml/runs?head_sha=…` returned only that head's runs,
+each with `event: pull_request`.
 
 ```js
 // .github/scripts/ai-review-guard.js — the third head-witness channel.
@@ -339,9 +508,10 @@ be greened by this channel, because condition (4) above means no such witness is
 for one.
 
 ```
-# The witness self set, carried verbatim in .github/workflows/machinery-witness.yml
-# between `# >>> witness-self-set` and `# <<< witness-self-set`, and pinned by
-# packages/minspec/tests/machinery-witness.test.ts.
+# The witness self set: two lists, carried verbatim in .github/workflows/machinery-witness.yml
+# and pinned by packages/minspec/tests/machinery-witness.test.ts.
+
+# >>> witness-self-set                      (every entry MUST be broad-set machinery)
 .github/workflows/ai-review.yml            # stage 1
 .github/workflows/machinery-witness.yml    # stage 2 — this file
 .github/workflows/ready-to-merge.yml       # the consumer gate
@@ -350,10 +520,34 @@ scripts/review-branch.sh                   # the reviewer control plane
 scripts/review-decide.sh                   # the deterministic verdict gate
 scripts/roles/**                           # the voter prompts
 scripts/lib/agent-context.sh               # sourced unguarded by review-branch.sh
-packages/minspec/src/lib/machinery-paths.ts# the classifier the witness keys on
-packages/minspec/src/lib/profile.ts        # the profile resolver the witness reads
-.minspec/config.json                       # the profile value itself
+# <<< witness-self-set
+
+# >>> witness-self-set-nonmachinery         (each entry names the gate that holds it alone)
+.minspec/config.json                       # the profile value; alone, held by paths_have_approvable_doc mandate 2
+# <<< witness-self-set-nonmachinery
 ```
+
+**Why two lists, and what the test asserts.** Condition 4 means the witness only ever judges
+a PR that touches at least one broad-set path. A self-set entry that is *not* broad-set
+machinery can therefore only bite on a mixed PR. A PR that touches such a file alone takes the
+ordinary non-machinery path, and the witness never sees it. The earlier draft put three such
+files in one list and said the test asserted each one was machinery. That test was red by
+construction, since `machinery-paths.ts:52-78` contains none of them, and the protection was
+silently partial. The contract is now:
+
+- every entry matches at least one tracked path (`git ls-files`, with `**` expanded);
+- every path matched by `witness-self-set` satisfies `isMachineryPath`;
+- no entry in `witness-self-set-nonmachinery` satisfies `isMachineryPath`, and each is admitted
+  only because an executed gate holds a PR that touches it alone. The test pipes the path into
+  `bash scripts/dispatch-issue.sh --paths-have-approvable-doc` (the pure seam at
+  `dispatch-issue.sh:193-195`) and requires `hold`. That is by execution, not by source text;
+- the `witness-decide` block returns `action_required` for a PR that touches any entry of
+  either list together with a machinery path.
+
+`profile.ts` and `machinery-paths.ts` are in **neither** list, pending **OQ-9**. The witness
+reads both from the base checkout, so a PR cannot influence its own certification through
+them. Whether a change to either must still stop for a human is DQ-2's residual, which this
+Plan cannot settle, and the witness slice does not ship until OQ-9 is answered.
 
 ```ts
 // FR-4 — the label vocabulary after this spec.
@@ -374,12 +568,12 @@ T0 first: every row below is written and red before the behaviour it constrains 
 
 | Invariant | What must hold | T0 test, by execution |
 |---|---|---|
-| **INV-1** / constitution 2 — no silent gate | No new load-bearing signal is written with a swallowed error; a missing or errored witness fails closed **and visibly** | `machinery-witness.test.ts`: drive the decision block with each failure input (no PR, PR disagreement, short files page, API error, base checkout missing, guard unloadable) and assert the outcome is "post nothing or `action_required`", never `success`; and assert every such path emits a `::warning` — the #810 lesson, where a silently swallowed 403 made a required gate unsatisfiable repo-wide |
+| **INV-1** / constitution 2 — no silent gate | No new load-bearing signal is written with a swallowed error; a missing or errored witness fails closed **and visibly** | `machinery-witness.test.ts`: drive the `witness-decide` block with each failure input (no PR, PR disagreement, stale head, non-default base branch, short files page, API error, base checkout missing, guard unloadable, a resolver that exits non-zero or prints anything but `solo`/`team`) and assert the outcome is "post nothing or `action_required`", never `success`; drive the `witness-reevaluate` block with no run, a run that never completes, and a rerun API error, and assert each fails the job; and assert every such path emits a `::warning` or `::error` — the #810 lesson, where a silently swallowed 403 made a required gate unsatisfiable repo-wide |
 | **INV-1**, second witness | `ready-to-merge` must not come to hinge on the machinery witness alone | `machinery-witness.test.ts`: with the witness absent, a non-machinery PR still greens through the existing `ai-review/pass` **or** `ai-review` channels; `verifyHeadPassWitness` tries the two existing channels before the new one |
 | **INV-2** — approval stays human under both profiles | `checkApprover` / `assertHumanApprover` (`packages/minspec/src/lib/approval.ts`) deny an agent identity regardless of `mode` | `solo-mode-keep-gates.test.ts`: run against a fixture repo with `mode: solo` and again with `mode: team`; assert identical denial |
 | **INV-3** — irreversible/outward-facing stays human under both profiles | `mayProceed` denies `irreversible-or-outward-facing` and `approval-or-acceptance` whatever the profile says | `solo-mode-keep-gates.test.ts`: call `mayProceed('act', …)` and also drive the whole bash seam (`dispatch-issue.sh --autonomy-stop-classes` and the `autonomy_may_merge` path) with a `mode: solo` fixture config; assert `proceed: false` under both profiles |
 | **INV-4** / constitution 3 — blast radius | The profile is per-project and changes nothing in a repo without `.minspec/` | `profile.test.ts`: `readProfileMode(<tmpdir with no .minspec>)` is `team`; and an import-shape assertion that `src/extension.ts` has no path to `profile.ts`, so `scripts/build-extension.sh`'s `esbuild src/extension.ts --bundle` tree-shakes it out of the shipped `.vsix` (the shape `auto-merge.test.ts` already uses to pin `auto-merge.ts`'s purity) |
-| Constitution 1 — offline | `profile.ts` makes no network call | Same import-shape assertion: the module's import list is exactly `node:fs` and `node:path` |
+| Constitution 1 — offline | `profile.ts` makes no network call, and no consumer fetches a runner | Same import-shape assertion: the module's import list is exactly `node:fs` and `node:path`. And `profile.test.ts` runs `dispatch-issue.sh --check-profile` in a hermetic copy with no `node_modules/.bin/tsx`, with a `PATH` stub for `npx` that fails the test if invoked, and asserts `team` (the `autonomy.sh:92-98` rule) |
 
 ### FR-6's keep list, asserted by execution (AC-6)
 
@@ -405,56 +599,97 @@ having as a T1 drift guard, but it is **explicitly not** how AC-6 is discharged 
 
 | AC | Tier | How |
 |---|---|---|
-| AC-1 (FR-1) | T0 | `profile.test.ts`: with `env` emptied, drive **each** consumer's resolution path — `readProfileMode` directly, and the bash seam — against one fixture repo, and assert they return the same value. Asserted by driving consumers, not by reading the file |
-| AC-2 (FR-1, negative) | T0 | `profile.test.ts`: a table of `undefined`, `''`, `'Solo'`, `' solo '` (accepted, trimmed), `'sol o'`, `'true'`, `'team '`, `{}`, `42`, malformed JSON, missing file → every one resolves `team` except the exact token. Plus the env-vs-config precedence table: `MINSPEC_MODE=solo` over `config mode: team` → `solo` (env wins); `MINSPEC_MODE=garbage` over `config mode: solo` → `team` (env fails closed even though config says solo); `MINSPEC_MODE` unset, `config mode: solo` → `solo` (config alone still resolves) |
-| AC-3 (FR-2) | T0 + T2 | `machinery-witness.test.ts`: the decision block, executed verbatim from the YAML, returns `success` for a machinery PR with a verified pass and no self-set touch, and `action_required` for one that touches a self-set path. Both halves, as AC-3 requires. The end-to-end merge is a T2 observation on the first real machinery PR after landing |
-| AC-4 (FR-3) | T0 | `drain-selfheal.test.ts`'s existing `--check-native-automerge` behavioral seam (it already drives `dispatch-issue.sh --check-native-automerge` against a fixture repo to prove `MINSPEC_AUTOMERGE_NATIVE`/config deny-by-default), extended with a `mode` fixture dimension: `mode: solo` + `autoMerge.native: true` → `on`; `mode: team` + the identical `autoMerge.native: true` → `off`. This is the one test in this Plan that exercises a non-machinery PR's actual merge arm, so it is the one AC-4 needs — a machinery-witness/profile.test.ts pairing cannot discharge AC-4 because the witness never posts for a non-machinery PR under either profile (condition 4 above), so it cannot distinguish them |
+| AC-1 (FR-1) | T0 | `profile.test.ts`: with the environment emptied, drive **each** consumer's resolution path against one fixture repo, and assert all three return the same value, for a `solo` fixture and for a `team` fixture. The three are: `readProfileMode` directly; the bash consumer through `dispatch-issue.sh --check-profile` in a hermetic copy (the `drain-selfheal.test.ts:263-301` pattern, plus `profile.ts` and a `node_modules` symlink so the pinned runner resolves); and the YAML consumer, by executing the `witness-classify` block verbatim under bash. Asserted by driving consumers, not by reading the file |
+| AC-2 (FR-1, negative) | T0 | `profile.test.ts`: a table of `undefined`, `''`, `'Solo'`, `' solo '` (accepted, trimmed), `'sol o'`, `'true'`, `'team '`, `{}`, `42`, malformed JSON, missing file → every one resolves `team` except the exact token. The CLI grammar: `--repo-root` missing or empty, or any extra argument, gives exit 2 with empty stdout. The consumer rule, through the bash seam: no runner → `team`; a runner that exits 0 printing `Solo` or `solo ` → `team`; a runner that exits non-zero printing `solo` → `team`. And because no environment override exists, `MINSPEC_MODE=solo` exported over a `mode: team` config still resolves `team`, which guards that the removed interface stays removed |
+| AC-3 (FR-2) | T0 + T2 | `machinery-witness.test.ts`: the decision block, executed verbatim from the YAML, returns `success` for a machinery PR with a verified pass and no self-set touch, and `action_required` for one that touches a self-set path. Both halves, as AC-3 requires. The re-evaluation seam is T0 too: the `witness-reevaluate` block, executed against stubbed run lists, re-runs the newest completed `ready-to-merge` run for the head, waits for an in-progress one, and fails the job when there is none. What remains T2 is only the platform chain (`workflow_run` fires, the re-run replays the `pull_request` payload, `ready-to-merge` greens), observed on the first real machinery PR after landing. The seam that chain exercises is specified above; the T2 run checks it rather than discovering it |
+| AC-4 (FR-3) | T0 | `profile.test.ts` drives the existing `--check-native-automerge` behavioral seam (`dispatch-issue.sh:93-95`) in hermetic copies. It reuses the technique `drain-selfheal.test.ts:263-301` uses, carried into a declared test file rather than by editing that one, and adds a `mode` fixture dimension: `mode: solo` + `autoMerge.native: true` → `on`; `mode: team` + the identical `autoMerge.native: true` → `off`; `mode: solo` + no `autoMerge.native` key → `off`. The last case keeps the existing default pinned, because once the profile arm exists, `drain-selfheal.test.ts:263-301`'s own hermetic case (no `profile.ts` in its copy, so `team`) passes for the wrong reason. This is the one test in this Plan that exercises a non-machinery PR's actual merge arm, so it is the one AC-4 needs — a machinery-witness/profile.test.ts pairing cannot discharge AC-4 because the witness never posts for a non-machinery PR under either profile (condition 4 above), so it cannot distinguish them. Note: `drain-selfheal.test.ts:255-257` (`MINSPEC_AUTOMERGE_NATIVE=1` forces ON) runs against the REAL config. After seam 5 it passes only while the committed config says `solo`, which is one reason seam 5 lands after the config flip |
 | AC-5 (FR-4) | T3, red-then-green | `review-decide.test.ts` extension, using **reproductions** of #1234 and #1157: a voter output with no verdict block and no quota phrasing → `ai-review:blocked`; a voter output that names `REVIEW_VERDICT_BEGIN` in prose with a single real block → `ai-review:unreadable`. Both must be red against today's script before the fix |
 | AC-6 (FR-6) | T0 | The keep-list table above |
-| AC-7 (FR-5) | T0 | `solo-mode-keep-gates.test.ts`: with `mode: team`, the docs-lane / presence-ff / `awaiting-approval` seams behave as they do today — driven through `shouldAwaitApproval` and the presence predicates, plus an assertion that the profile is not an input to any of them |
+| AC-7 (FR-5) | T0 | `solo-mode-keep-gates.test.ts`, one entry point per FR-5 subsystem: the table below |
+
+#### AC-7's entry points (FR-5)
+
+Each row runs against a `mode: team` fixture, which is AC-7's condition, and again against
+`mode: solo`. It asserts the same outcome both times, which is the executed form of "the
+profile is not an input to any of them". Every harness already exists; this suite reuses the
+technique and does not edit the file it comes from.
+
+| FR-5 subsystem | Executed entry point | Harness it reuses | Assertion |
+|---|---|---|---|
+| Docs-lane | the `run:` block of `.github/workflows/docs-lane.yml`, run under bash with a stubbed `gh` | `extractRunBlock` in `docs-lane-hold.test.ts` | a docs-only PR labelled `docs-lane` arms auto-merge; the same PR with a `hold:*` label does not |
+| `scripts/push-docs.sh` | `bash scripts/push-docs.sh …` against a fixture origin | `push-docs-sh.test.ts` (fixture repo at `:87-116`) | a docs-only change is pushed on the lane branch |
+| Presence-gated fast-forward (DR-065) | `drain-inbox.sh --checkout-occupied <root>` and `--sync-checkouts` (`:1319-1329`), and TS `isCheckoutOccupied` (`presence.ts:301`) | `presence-sync-parity.test.ts` (`:72`, `:283`) | a dormant, clean, on-`main` checkout fast-forwards; an occupied one stays fetch-only |
+| `awaiting-approval` labelling | `shouldAwaitApproval` (`ai-review-guard.js:811-815`) | direct call | green + auto-merge unarmed + no open blockers + not draft → `true`; every other combination → `false` |
+| Team-scale drain HITL | `reconcile_done_issues` (`drain-inbox.sh:614-636`) | `runReconciler` in `drain-reconcile.test.ts` (`:93`, cases at `:153-177`) | an `agent-done` issue with no merged PR loses `agent-done` and gains `needs-human-review` |
+
+DR-076 names the last class, "drain-inbox HITL escalations sized for team throughput"
+(`DR-076.md:95`), without listing its members. `reconcile_done_issues` is the drain's own
+escalation with an executable harness today. If FR-5 means more members than that, the
+question belongs to OQ-10.
 
 ---
 
 ## Build order
 
 Named, not numbered, and ordered so that nothing behavioural lands before the T0 that
-constrains it.
+constrains it, and nothing lands before the config state it depends on.
 
 - **The keep-list slice (FR-6).** `solo-mode-keep-gates.test.ts` alone. Depends on nothing,
   changes nothing, and must be green *before* any profile-keyed branch exists — otherwise
   the keep list is prose again.
-- **The resolver slice (FR-1).** `profile.ts` + `profile.test.ts`. Lands with **no `mode`
-  key in `.minspec/config.json`**, so it resolves `team` and nothing changes. Turning the
-  profile on is a separate human act — `.minspec/` paths are withheld from native auto-merge
-  by `paths_have_approvable_doc`'s second mandate, so the config PR reaches a human by
-  construction. This is the same landing posture `scripts/lib/autonomy.sh` states for its own
-  key, and for the same reason.
+- **The resolver slice (FR-1).** `profile.ts` (resolver and CLI) + `profile.test.ts`. Nothing
+  consumes the resolver yet, so landing it changes nothing, whatever the config says.
+- **The config flip.** A human PR adding `"mode": "solo"` to `.minspec/config.json`. It is
+  withheld from native auto-merge by `paths_have_approvable_doc` mandate 2
+  (`dispatch-issue.sh:188-190`) and stop-classed `edits-the-autonomy-rules` (`:244`), so it
+  reaches a human by construction. It changes nothing on its own, because nothing reads `mode`
+  yet. **It must land before the auto-merge gate slice.** That is a deliberate contrast with
+  the `autonomy` rollout, which accepted its arms going dark until the key was set
+  (`scripts/lib/autonomy.sh:26-30`). Here the arm that would go dark is this repo's live merge
+  path.
+- **The auto-merge gate slice (FR-3, dispatch).** `profile_mode`, `--check-profile`, and the
+  profile check in `native_automerge_enabled` (seam 5), with AC-4's cases in `profile.test.ts`.
+  Not blocked on OQ-1 or OQ-2, since every file it touches is declared. **Blocked on the config
+  flip.** `.minspec/config.json` today has `autoMerge.native: true` and no `mode` key, so
+  landing seam 5 first would resolve `team` and switch off this repo's live native auto-merge.
+  Every dispatched PR would then take the HOLD branch (`dispatch-issue.sh:1959-1966`: the
+  "Auto-merge held" comment and `needs-human-skim`). This is the slice AC-4 actually exercises.
 - **The false-red slice (FR-4).** `review-decide.sh`, the `decideReviewCheck` arm, the label
   creation and the combine arm. Independent of the profile entirely, useful on its own, and
-  it makes solo mode safer rather than depending on it. Blocked only by OQ-2/OQ-3.
+  it makes solo mode safer rather than depending on it. Blocked on OQ-2 (two of its files are
+  undeclared) and OQ-3 (all of its files are template sources).
 - **The witness slice (FR-2).** `machinery-witness.yml`, the guard channel,
-  `ready-to-merge.yml`'s extra read, and `machinery-witness.test.ts`. Blocked on OQ-3.
-- **The auto-merge gate slice (FR-3, dispatch).** The profile check in
-  `native_automerge_enabled` and `scripts/lib/profile.sh` (seam 5). **Not blocked** — it
-  does not touch the machinery stop class OQ-1 disputes, and can land with the resolver
-  slice. This is the slice AC-4 actually exercises.
-- **The machinery arm slice (FR-2, dispatch).** Blocked on OQ-1. Until it lands, a machinery
-  PR under `solo` reaches a **green** `ready-to-merge` and then waits for a merge keystroke —
-  which is already a strictly better position than today's total block, and is a safe
-  intermediate state to sit in.
+  `ready-to-merge.yml`'s extra read, and `machinery-witness.test.ts`. Blocked on OQ-2, OQ-3,
+  OQ-4 and OQ-9.
+- **The machinery arm slice (FR-2, dispatch).** Blocked on OQ-1, and it carries OQ-8's answer
+  with it. Until it lands, a machinery PR under `solo` reaches a **green** `ready-to-merge` and
+  then waits for a merge keystroke. That is already a strictly better position than today's
+  total block, and a safe intermediate state to sit in. In that state `machinery-review-required`
+  and `needs-human-review` are still true, because a human does press merge.
 
 ## Dependency budget
 
-Zero new dependencies. Everything uses what is already here: `node:fs`/`node:path`, `jq`,
-`actions/github-script`, the SHA-pinned `create-github-app-token`, and vitest.
+Zero new dependencies. Everything uses what is already here: `node:fs`/`node:path`; the
+pinned `tsx` 4.23.1 (`package.json:36`), run from `node_modules/.bin` after `npm ci` and never
+through `npx`; `jq`; `actions/github-script`; `actions/checkout`, `actions/setup-node` and
+`create-github-app-token` at the SHAs `ai-review.yml` already pins (`:244`, `:251`, `:192`);
+and vitest.
 
 ## Risks
 
 - **The witness self set is a human-maintained list (D5/D6).** If a file that determines
   stage 1's behaviour is added and not added to the list, a PR touching it could be certified
-  by a stage it had influenced. Mitigations: the list is checked from the base copy, it
-  contains itself, and `machinery-witness.test.ts` asserts each named path exists on disk and
-  is a member of the broad machinery set. Residual: OQ-4.
+  by a stage it had influenced. Mitigations: the list is checked from the base copy and
+  contains itself. `machinery-witness.test.ts` asserts that every entry matches a tracked
+  path, that every `witness-self-set` path is broad-set machinery, and that every
+  non-machinery entry is held alone by an executed gate (*Contracts*). Residual: OQ-4, plus
+  OQ-9 for the two files the witness reads from base.
+- **A re-run replays a stale payload (D10).** The re-run reads labels from the replayed event
+  (`ready-to-merge.yml:176`), so it does not see a label changed between that event and the
+  re-run. The next label event re-runs the gate with a fresh payload. The verdict labels
+  themselves are settled before the witness starts, because the `ai-review-runner` run whose
+  completion triggers it is what writes them. Two racing `ready-to-merge` runs already have
+  this problem today (the workflow has no `concurrency` group), so it is not a new one.
 - **Concentration, as the requirements already record.** Under `solo` the AI review is the
   only reader of most changes, so a false green matters more. Nothing in this design widens
   what counts as a green: the witness supplies only the head-binding half of a decision that
@@ -467,7 +702,8 @@ Zero new dependencies. Everything uses what is already here: `node:fs`/`node:pat
   which `ai-review-retry.yml` re-runs hourly. A voter that never emits a verdict block for a
   non-quota reason would loop. Existing mitigation: the retry's reset-marker guard. An
   attempt cap would close it properly, but `ai-review-retry.yml` is neither declared here nor
-  asked for by any FR — recorded as a follow-up, not designed.
+  asked for by any FR. It is tracked as #1204 (ai-review:blocked has no bounded retry) and not
+  designed here.
 
 ---
 
@@ -486,24 +722,41 @@ Each of these is genuinely undecidable from the approved requirements. None is r
   Two resolutions exist and both are amendments, not implementations. **(a) The witness
   discharges the class**: dispatch stops emitting `irreversible-or-outward-facing` for a
   machinery path when the profile is `solo` *and* a verified `machinery-witness` exists,
-  which keeps the frozen list intact and confines the change to `dispatch-issue.sh`
-  (declared) — **(rec)**, because it is the smallest change and leaves DR-086's list
-  untouched; its cost is that "the stop class was discharged by a witness" is a new concept
-  that DR-086 §2 does not currently contain, so the list stops being purely enumerable.
-  **(b) Amend DR-086 §2.1** to scope the machinery clause by profile — honest and explicit,
-  but it edits an accepted DR and `scripts/lib/autonomy.ts` is out of this spec's declared
-  ownership *and* is itself a §2.6 stop class ("anything that would edit this list").
+  which keeps the frozen list intact — **(rec)**, because it leaves DR-086's list untouched;
+  its cost is that "the stop class was discharged by a witness" is a new concept that DR-086
+  §2 does not currently contain, so the list stops being purely enumerable.
+  **(b) Scope the machinery mapping by profile.** The stop class's text, "Includes --admin
+  and bypassing a failing check", is the `irreversible-or-outward-facing` summary in
+  `STOP_CLASSES` (`scripts/lib/autonomy.ts:62-65`, sourced to DR-086 §2.1). Machinery reaches
+  that class only through dispatch's mapping, which calls itself "a conservative read of a
+  class" (`scripts/dispatch-issue.sh:222-226`, applied at `:250-251`). So (b) edits that
+  mapping (declared), and arguably DR-086 §2.1's reading. If it touches `STOP_CLASSES` it also
+  edits `scripts/lib/autonomy.ts`, which is out of this spec's declared ownership *and* is
+  itself a §2.6 stop class ("anything that would edit this list"). An earlier draft of this
+  OQ put the clause in DR-086 §2.1's text; it is in the code cited here.
+  **Either option must also settle *where* the arm runs.** Dispatch decides the arm when it
+  opens the PR (`dispatch-issue.sh:1048-1089`, `gh pr merge --auto` at `:1084`), before
+  `ai-review` or the witness has run, so "a verified `machinery-witness` exists" cannot be
+  evaluated at that seam. Either the arm moves to an actor that runs after the witness (for
+  example the witness's `post` job arming auto-merge as the App), or dispatch arms
+  unconditionally under `solo` and leaves `ready-to-merge` as the only hold. The second
+  option retires mandate 4, the independent second witness (`dispatch-issue.sh:123-131`), which
+  exists so that a machinery PR never hinges on one producer (constitution invariant 2). So
+  (a) is not "confined to `dispatch-issue.sh`", as an earlier draft said.
   ➡️ This is a founder decision. Until it is answered, the arm slice cannot be designed, and
   designing it either way would be inventing a requirement.
 
 - **OQ-2 — the approved ownership declaration is narrower than any correct implementation.**
   `affects:` lists `ai-review.yml`, `ready-to-merge.yml`, `auto-merge-gate.ts`,
-  `dispatch-issue.sh`. The design needs three files that appear in neither `implements:` nor
-  `affects:`: `scripts/review-decide.sh` (owned by SPEC-031 — FR-4's only call site),
+  `dispatch-issue.sh`. The design needs two code files that appear in neither `implements:`
+  nor `affects:`: `scripts/review-decide.sh` (owned by SPEC-031 — FR-4's only call site) and
   `.github/scripts/ai-review-guard.js` (unowned by any spec — FR-2's witness channel and
-  FR-4's check arm), and `scripts/lib/profile.sh`, the bash seam FR-3's `native_automerge_enabled`
-  gate reads the profile through (seam 5 above) — no longer a hypothetical, since AC-4 cannot
-  pass without it. This does not mechanically block anything —
+  FR-4's check arm). Two more are conditional or human-authored. `machinery-paths.ts` joins
+  them only if OQ-9 is answered (a). `.minspec/config.json` is edited by the config flip, which
+  is a human act, but the ownership map is what a reader consults to find what this spec
+  changed. An earlier draft also listed a new `scripts/lib/profile.sh`; D11 moves that reader
+  into `dispatch-issue.sh`, which is declared, so the FR-3 slice no longer depends on this
+  question. This does not mechanically block anything —
   `validateOwnership` checks presence and path validity, not completeness, and the spec-gate
   only blocks a file an *unapproved* spec declares — but it leaves SPEC-038's map wrong for
   the files the work actually touches. Fixing the declaration means editing hash-locked
@@ -532,11 +785,12 @@ Each of these is genuinely undecidable from the approved requirements. None is r
   somebody else's repository.
   ➡️ Founder decision, because it turns on how Out of Scope was meant.
   **Note:** the new `machinery-witness.yml` is *not* in `SOURCES[]`, so the new file itself
-  ships nowhere. Only the edits to the four existing files are affected.
+  ships nowhere. Only the edits to the four existing files are affected, including whatever
+  OQ-8 decides for `ai-review.yml`'s two human-review signals.
 
 - **OQ-4 — how complete must the witness self set be, and who keeps it complete?**
-  D5's correctness reduces to that list. This Plan proposes the eleven entries above and a
-  test that each exists and is machinery, but nothing derives the list from the actual
+  D5's correctness reduces to that list. This Plan proposes the entries above and a test that
+  pins each entry's existence and classification, but nothing derives the list from the actual
   determinants of stage 1's behaviour, and a derivation is not obviously possible (a workflow
   file's transitive dependencies are not statically enumerable across YAML, bash and Node).
   The requirements say the exception must be "small and enumerable" but do not say who
@@ -583,12 +837,80 @@ Each of these is genuinely undecidable from the approved requirements. None is r
   scope creep here and would duplicate #1795's work.
   ➡️ Recorded so the decision is deliberate rather than inherited.
 
-## Follow-ups (not designed here)
+- **OQ-8 – what should the two existing machinery signals say on a machinery PR that merges
+  unattended? NOT decided; needs the founder via Clarify.** On every machinery PR,
+  `ai-review.yml` posts `machinery-review-required` as `action_required`, titled "Machinery
+  PR — human review required" (`:936-986`, title at `:956`). It also applies
+  `needs-human-review`, because `shouldSummonHumanReview` returns true for any machinery PR
+  (`ai-review-guard.js:975-977`, applied at `ai-review.yml:1184-1201`). Neither gates a merge,
+  so FR-2 is buildable without touching them. But once the machinery arm slice lands, both
+  would tell a reader that a human must review a PR that merged without one, which is the
+  lying signpost D4 rejects. Before that slice they are true, so whatever is decided lands in
+  that slice.
+  **(a)** On `success`, the witness's `post` job removes `needs-human-review`, and its
+  check-run summary says it discharges `machinery-review-required`. `ai-review.yml`'s summary
+  text for that check is reworded to state the discharge condition – **(rec)**, because it keeps
+  the only profile read at the trusted end (D7), and stage 1 needs to know nothing about the
+  profile. Its cost: a merged `solo` machinery PR still shows an `action_required`
+  `machinery-review-required` beside a green witness, so a reader has to read both. The
+  witness also becomes one more writer of `needs-human-review`, which five scripts and
+  workflows already write.
+  **(b)** The witness updates the `machinery-review-required` check-run itself (the same App
+  posted it) to `success`. That gives one signal, and a true one. Cost: two writers of one
+  check-run, the norm D4 uses to reject overloading `ai-review/pass`.
+  **(c)** Stage 1 reads the profile and posts neither signal under `solo`. Cost: a second
+  profile reader, in a workflow whose body comes from the PR head, which is what D7 rejects.
+  Every option edits `ai-review.yml`, which is a template source (OQ-3).
+  ➡️ Founder decision.
 
-- An attempt cap for `ai-review-retry.yml`, so a persistently non-conforming voter cannot
-  loop forever (the D8 risk). Not asked for by any FR; `ai-review-retry.yml` is undeclared.
-- A merge queue as the eventual answer to `strict`'s serialisation cost. DQ-1 explicitly
-  leaves it open and not foreclosed; it is not this spec's work.
-- `allow_update_branch` is `false`, so there is no one-click affordance to soften `strict`.
-  DQ-1 names enabling it as "a sensible companion change" and says it is **NOT** part of that
-  decision — so it is not part of this Plan either.
+- **OQ-9 – do the resolver and the classifier the witness reads count as machinery? NOT
+  decided; needs the founder via Clarify.** The witness reads `profile.ts` and
+  `machinery-paths.ts` from the base checkout, so no PR can influence its own certification
+  through them. But neither is in the broad set (`machinery-paths.ts:52-78`), so a PR that
+  touches only one of them is not machinery. The witness never runs for it (condition 4), it
+  takes the ordinary `ai-review` path, and under `solo` it merges with no human. A
+  `machinery-paths.ts`-only PR can already do that today, because neither `dispatch-issue.sh:143`
+  nor `:188-190` matches it. DQ-2's residual says a PR that changes the witness mechanism
+  itself must still stop for a human. Whether these two files count as "the witness
+  mechanism" is not stated. Putting them in the self set cannot answer that either, because
+  condition 4 makes a non-machinery self-set entry bite only on mixed PRs (see *Contracts*).
+  **(a)** Add both to `MACHINERY_SINGLE_FILES`, and so to `witness-self-set` – **(rec)**,
+  because `machinery-paths.ts`'s own membership test ("does this code decide whether some
+  other change is allowed", `:30-32`) already describes both, and it makes DQ-2's residual
+  hold for them. Its cost: it edits `machinery-paths.ts` (undeclared, OQ-2) and its two pinned
+  hand-copies (`ai-review.yml:404`, which then regenerates a template, OQ-3; and
+  `dispatch-issue.sh:143`). It also changes behaviour under **both** profiles: under `team`, an
+  edit to either file then needs `--admin`, as every machinery PR does today.
+  **(b)** Leave the broad set alone and keep both out of the self set. Cost: under `solo`, the
+  classifier and the resolver the witness keys on can change on an ordinary AI pass with no
+  human, which reads DQ-2's residual as not covering them.
+  ➡️ Founder decision. The witness slice does not ship until it is answered.
+
+- **OQ-10 – does FR-5's "parked behind the profile" require the four subsystems to be OFF
+  under `solo`? NOT decided; needs the founder via Clarify.** FR-5's two MUSTs are that they
+  remain in source and remain reachable under `team`. This Plan satisfies both by editing none
+  of them, so all four behave identically under both profiles, and AC-7 asserts exactly that.
+  DR-076 says to PARK docs-lane and presence-ff behind the team profile (`DR-076.md:94`) and to
+  SIMPLIFY `awaiting-approval` and drain HITL to solo scale (`:95`); DR-081 later amended the
+  docs-lane row (`:19-27`). Turning any of them off under `solo` is behaviour FR-5 does not
+  state.
+  **(a)** As designed: no profile branch in any of them – **(rec)**, because it is everything
+  the MUSTs ask for and adds no surface. Its cost: under `solo`, `awaiting-approval` and the
+  drain's escalations keep firing at today's scale, so this spec does not deliver DR-076's
+  "simplify".
+  **(b)** Give each one a `solo` arm. Cost: four new consumers of the profile, spread across
+  four subsystems, each a behaviour change that needs its own acceptance criteria.
+  ➡️ Founder decision.
+
+## Follow-ups (tracked)
+
+- **#1204** (ai-review:blocked has no bounded retry, open): the attempt cap the D8 risk needs,
+  so a persistently non-conforming voter cannot loop forever. No FR asks for it, and
+  `ai-review-retry.yml` is undeclared here.
+- **#1394** (strict=true serialises the merge queue, open): a merge queue as the eventual
+  answer to `strict`'s serialisation cost. DQ-1 leaves it open and not foreclosed; it is not
+  this spec's work.
+
+Considered and **not** a follow-up: `allow_update_branch` (currently `false`). DQ-1 calls
+enabling it "a sensible companion change" and says it is **NOT** part of that decision, so
+this Plan neither designs nor tracks it.
