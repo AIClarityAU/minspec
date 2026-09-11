@@ -129,6 +129,13 @@ describe('session-identity — where the session runs', () => {
     expect(out).toContain('relaunch this panel inside the');
   });
 
+  it('control characters in the location never reach the terminal', () => {
+    stub({ locRc: 1, locLine: 'IDENTITY-LOCATION [HOST (k7[31m)]' });
+    const { out } = run();
+    expect(out).toContain('running on the HOST (k7[31m)');
+    expect(out).not.toContain('');
+  });
+
   it('an undetermined location is treated as the host', () => {
     stub({ locRc: 2, locLine: 'IDENTITY-LOCATION [UNDETERMINED (x)]' });
     expect(run().out).toContain('treat it as the HOST');
@@ -184,6 +191,23 @@ describe('session-identity — the last full check, with its age', () => {
     stub({ locRc: 0 });
     seedLast(PASS, 3 * 86_400);
     expect(run().out).toContain('STALE: the background check has not completed for 3d');
+    expect(await waitFor(() => fullRuns() === 1)).toBe(true);
+  });
+
+  it('the age reads in days from the moment it is stale', () => {
+    stub({ locRc: 0 });
+    seedLast(PASS, 86_400 + 60);
+    expect(run().out).toContain('has not completed for 1d');
+  });
+
+  it('a record with no verdict is unknown — neither PASS nor FAILED — and is re-run', async () => {
+    stub({ locRc: 0 });
+    fs.mkdirSync(path.dirname(lastFile()), { recursive: true });
+    fs.writeFileSync(lastFile(), '[clean]   a record that lost its verdict line\n');
+    const { out } = run();
+    expect(out).toContain('has no verdict');
+    expect(out).not.toContain('FAILED');
+    expect(out).not.toContain('PASS');
     expect(await waitFor(() => fullRuns() === 1)).toBe(true);
   });
 

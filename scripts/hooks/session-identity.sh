@@ -36,13 +36,14 @@ fi
 
 human_age() {
   local s=$1
-  if   [ "$s" -lt 3600 ];   then echo "$((s / 60))m"
-  elif [ "$s" -lt 172800 ]; then echo "$((s / 3600))h"
-  else                           echo "$((s / 86400))d"; fi
+  if   [ "$s" -lt 3600 ];  then echo "$((s / 60))m"
+  elif [ "$s" -lt 86400 ]; then echo "$((s / 3600))h"
+  else                          echo "$((s / 86400))d"; fi
 }
 
 loc=$(timeout 5 "$IBC" --location 2>/dev/null); lrc=$?
 where="${loc#IDENTITY-LOCATION [}"; where="${where%]}"     # e.g. "HOST (k7, pid1=systemd)"
+where=$(printf '%s' "$where" | tr -d '[:cntrl:]')          # display-only, but never a terminal escape
 case "$lrc" in
   0) ;;
   1) cat <<EOF
@@ -63,11 +64,16 @@ now=$(date +%s)
 age_s=""
 [ -s "$last" ] && age_s=$(( now - $(stat -c %Y "$last" 2>/dev/null || echo "$now") ))
 
+verdict=""
+[ -n "$age_s" ] && { verdict=$(grep '^IDENTITY-BOUNDARY ' "$last" 2>/dev/null | tail -1); verdict="${verdict#*]: }"; }
 if [ -z "$age_s" ]; then
   echo "🔑 Identity: no full check has completed here yet — one is running in the background."
+elif [ -z "$verdict" ]; then
+  # The writer only ever moves a file with a verdict into place, so this is a damaged
+  # record. Unknown is the honest reading — not a PASS, and not a FAIL either.
+  echo "⚠️  IDENTITY: the last full-check record has no verdict ($last) — treat the result as unknown; a new check is running (#1816)."
+  age_s=$FRESH_S
 else
-  verdict=$(grep '^IDENTITY-BOUNDARY ' "$last" 2>/dev/null | tail -1); verdict="${verdict#*]: }"
-  [ -n "$verdict" ] || verdict="(no verdict line in $last)"
   stale=""
   [ "$age_s" -ge "$STALE_S" ] && stale=" — STALE: the background check has not completed for $(human_age "$age_s")"
   case "$lrc/$verdict" in
