@@ -40,10 +40,14 @@ Plan) · **Decisions:** [DR-075](../../../docs/decisions/DR-075.md),
 > *Follow-ups*), and `mode` becoming a typed field of `MinspecConfig` is OQ-7. A fourth, an
 > environment-variable override of `mode` that an earlier draft of this Plan designed, has
 > been **removed**: no FR or AC asks for one, and it could loosen policy (see *Contracts*).
-> Three gaps that earlier drafts filled by assumption are now flagged instead of settled:
+> Five gaps that earlier drafts filled by assumption are now flagged instead of settled:
 > whether `autoMerge.native` is still a second switch under `solo` (OQ-11; a T0 had pinned
 > the guess), whether an exported `MINSPEC_AUTOMERGE_MODE` may still merge a PR under `team`
-> (OQ-5), and what acts on an `ai-review:unreadable` PR (OQ-12).
+> (OQ-5), what acts on an `ai-review:unreadable` PR (OQ-12), whether docs-lane, a third
+> unattended merge actor, may still merge under `team` (OQ-13), and how far FR-4's
+> "protocol-parsing anomaly" reaches (OQ-14). OQ-3's earlier recommendation rested on a false
+> description of what happens in an adopter repo. FR-4's edits are **not** inert there, and
+> the question is rewritten with the real consequences.
 > Where the requirements are genuinely undecidable, the gap is flagged in **Open
 > questions** — an invented requirement gets built and never re-examined; a flagged one
 > gets answered.
@@ -76,9 +80,10 @@ from that merged tree.
 | `tsx` is pinned, and `scripts/lib/autonomy.sh` refuses to fetch a runner over the network | `package.json:36` (`tsx` 4.23.1); `autonomy.sh:87-99`; `.github/workflows/dr-id-collision.yml:55-73` runs TypeScript in CI after `npm ci` | How bash and YAML execute `profile.ts` (see *Contracts*): the pinned runner from `node_modules/.bin`, never `npx` |
 | #1839 (patch-fingerprint re-attestation) records a fingerprint, and nothing consumes it yet | `ai-review-guard.js:366-376` (*"has no production caller"*); the consumer is #1840 | The witness reads neither the fingerprint nor `findReattestableVerdict`. It depends only on `ai-review:pass` label provenance and on `ai-review-runner` completing |
 | `dispatch-issue.sh` has a **second** actor that merges a green PR with no human: SPEC-024's consequence-hybrid gate | `scripts/dispatch-issue.sh:1841-1846` (mode from `MINSPEC_AUTOMERGE_MODE` alone), `:1859` (runs `auto-merge-gate.ts`), `:1915-1922` (the conjuncts, then `gh pr merge --squash`) | It never passes through `native_automerge_enabled`, so seam 5 does not reach it – see **OQ-5** |
+| A **third** unattended merge actor sits outside dispatch: docs-lane | `.github/workflows/docs-lane.yml:247` (`gh pr merge --auto --squash`, on any docs-only PR whose labels include `docs-lane`, gated at `:36`); the label is applied by `scripts/push-docs.sh:157-158` itself when an agent opens the PR. A grep of `.github`, `scripts`, `packages/minspec/src` and `packages/shared/src` for `gh pr merge`, `pulls/…/merge` and the GraphQL auto-merge mutation finds these three actors and nothing else, apart from `docs-lane.yml:69`'s `--disable-auto`, which only revokes | Under **either** profile an agent's docs-only PR merges once green with no human act. Seam 5 does not reach it, and AC-4 and AC-7 disagree about whether it should – see **OQ-13** |
 | `ai-review.yml`'s post step re-normalises the verdict before it applies it | `.github/workflows/ai-review.yml:1013-1019`: only `pass` and `blocked` survive; every other value becomes `ai-review:changes` | A new verdict label must be admitted there, or it lands as `changes` (the FR-4 contract) |
 | Each downstream consumer selects only the labels or conclusions it names | retry: `ai-review-retry.yml:65` (`ai-review:blocked`); remediation: `remediate-pr.sh:124` and `:402-407` (the `changes` label, or an `ai-review` check concluding `FAILURE`/`ERROR`); summon: `shouldSummonHumanReview`, `ai-review-guard.js:975-994` | A new label that no consumer names is stranded – see **OQ-12** |
-| No test in this repo executes a github-script body | a grep of `packages/minspec/tests` for `AsyncFunction` or `new Function` finds nothing; `ai-review-verdict-combine.test.ts:54` runs its extracted block with `execFileSync('bash', …)` | The witness's two JS blocks need a new harness, specified under *Contracts* |
+| No test in this repo executes a github-script body | a grep of `packages/minspec/tests` for `AsyncFunction` or `new Function` finds nothing; `ai-review-verdict-combine.test.ts:54` runs its extracted block with `execFileSync('bash', …)` | The witness's three JS blocks need a new harness, specified under *Contracts* |
 
 ---
 
@@ -119,7 +124,9 @@ Five seams, deliberately kept independent so they can land, fail and be reverted
    verdict is an outage and belongs on the retry lane; a protocol-parsing anomaly is
    deterministic in the diff and must never enter it.
 
-5. **The native auto-merge arm is denied under `team`, at its single source.**
+5. **Dispatch's native auto-merge arm is denied under `team`, at that arm's single source.**
+   It is the single source of *that* arm only. The repo has three unattended merge actors
+   (fact table), and seam 5 reaches one of them.
    `native_automerge_enabled` (`scripts/dispatch-issue.sh:75-88`) is amended to check the
    profile *before* it consults `MINSPEC_AUTOMERGE_NATIVE` / `autoMerge.native` at all: under
    `team` it returns false unconditionally, whatever the env or config says. Both of its call
@@ -127,13 +134,15 @@ Five seams, deliberately kept independent so they can land, fail and be reverted
    marks the PR `--auto`, and the HOLD/silence branch at `scripts/dispatch-issue.sh:1959`
    takes the `else` arm it already has, posting the existing "Auto-merge HELD" comment and
    `needs-human-skim` label. Neither branch is new; only the boolean feeding them is.
-   Two things this seam does **not** settle, and it says so rather than implying it does.
+   Three things this seam does **not** settle, and it says so rather than implying it does.
    (i) What the function returns under `solo`: whether `autoMerge.native` is still the second
    switch that FR-3's "not an opt-in" rules out is **OQ-11**, and until it is answered the
    `solo` path is left exactly as it is today. (ii) The second unattended merge actor in the
    same script, SPEC-024's consequence-hybrid `gh pr merge --squash` (`:1915-1922`). Its mode
    comes from `MINSPEC_AUTOMERGE_MODE` alone (`:1841-1846`) and never passes through this
    function, so an exported env var can still merge a PR under a committed `team` – **OQ-5**.
+   (iii) The third actor, outside dispatch altogether: `docs-lane.yml:247` arms `--auto` on an
+   agent's docs-only PR under either profile – **OQ-13**.
    Seam 5 therefore discharges AC-4's `team` half for the native actor only. The profile reaches this bash function
    through a new `profile_mode` function **inside `scripts/dispatch-issue.sh`** (declared
    `affects:`). It executes `profile.ts`'s CLI with the pinned `tsx` runner and fails closed to
@@ -148,8 +157,8 @@ MUSTs (retained in source, reachable under `team`) as the whole requirement. Whe
 half is seam 5 above for the native actor's `team` deny, and it is a real behaviour change
 under `team` — not a re-source of an unconditional switch, because the switch was
 unconditional before this Plan and is profile-conditional after it. Its `solo` arm is OQ-11,
-the second merge actor is OQ-5, and FR-3's machinery half is the arm slice below (OQ-1). None
-of the three is designed here.
+the second merge actor is OQ-5, the third (docs-lane) is OQ-13, and FR-3's machinery half is
+the arm slice below (OQ-1). None of the four is designed here.
 
 ---
 
@@ -166,7 +175,8 @@ of the three is designed here.
   Cost of rejecting it: `profile.ts` sits inside the shipped package, so INV-4 has to be
   argued rather than being true by location. The argument is checkable — the bundle is
   tree-shaken from `src/extension.ts` — and the INV-4 row of the *Invariants* table turns it
-  into a test (an import-shape assertion that `src/extension.ts` has no path to `profile.ts`).
+  into a test (a reachability assertion over esbuild's metafile for `src/extension.ts`, specified
+  in that row).
 
 - **D2 — The exported names are `Profile`, `resolveProfileMode`, `readProfileMode`; the
   config key stays `mode`.** `resolveMode` already exists in `scripts/auto-merge-gate.ts`
@@ -325,12 +335,12 @@ of the three is designed here.
 | `packages/minspec/tests/profile.test.ts` | **new, `implements:`** | Whole file | T0 for FR-1/AC-1/AC-2, the CLI grammar, and AC-4's hermetic dispatch cases |
 | `packages/minspec/tests/solo-mode-keep-gates.test.ts` | **new, `implements:`** | Whole file | T0 for FR-6/AC-6 under both profiles, and for FR-5/AC-7 under `team` only (AC-7's condition). The FR-5 rows' `solo` arm waits for OQ-10 |
 | `.github/workflows/machinery-witness.yml` | **new, `implements:`** | Whole file | `on: workflow_run: workflows: [ai-review-runner], types: [completed]`. Two jobs, specified under *Contracts*. `evaluate` has a read-only `GITHUB_TOKEN` and **no App token**; it checks out the base, runs `npm ci`, and executes `profile.ts` and `isMachineryPath` through `tsx`. `post` mints the App token only after evaluation, posts the check-run, and re-runs `ready-to-merge` (D10). |
-| `packages/minspec/tests/machinery-witness.test.ts` | **new, `implements:`** | Whole file | Executes the `witness-classify` bash block with the existing `# >>> name` / `# <<< name` technique, and the `witness-decide` / `witness-reevaluate` github-script bodies and the self-set lists with a **new** JS-marker harness (*Contracts*), so the test cannot drift from what CI runs |
-| `.github/workflows/ready-to-merge.yml` | `affects:` | Read the head's `machinery-witness` check-runs and pass them into the guard | One extra `github.paginate(checks.listForRef, { check_name: 'machinery-witness' })` call and one extra argument. The decision stays in the guard. The trigger set, permissions and base pin are **unchanged**, because re-evaluation is driven from the witness side (D10). |
+| `packages/minspec/tests/machinery-witness.test.ts` | **new, `implements:`** | Whole file | Executes the `witness-classify` bash block with the existing `# >>> name` / `# <<< name` technique, and the `witness-decide` / `witness-post` / `witness-reevaluate` github-script bodies and the self-set lists with a **new** JS-marker harness (*Contracts*), so the test cannot drift from what CI runs. Also pins the no-interpolation rule for PR-controlled strings (*Contracts*) |
+| `.github/workflows/ready-to-merge.yml` | `affects:` | Read the head's `machinery-witness` check-runs and pass them into the guard | One extra `github.paginate(checks.listForRef, { check_name: 'machinery-witness' })` call and one extra argument. It sits inside the existing head-witness block (`:279-315`), after the `ai-review` check-run read (`:289-295`), in its **own** `try`. On an error it emits `core.warning` and passes `machineryCheckRuns: undefined`, so a failed read can lose only the third channel, never the two existing ones. Placed in the shared `try` instead, an API error on the new read would flip a verified non-machinery PR to unverified through the shared `catch` (`:306-315`). That would be a behaviour change in an adopter repo, which has no producer (OQ-3). No test executes this script body. The guard half is tested: `ai-review-guard.test.js` asserts that `verifyHeadPassWitness` with `machineryCheckRuns: undefined` returns exactly what today's two-channel call returns. The decision stays in the guard. The trigger set, permissions (`checks: read` is already granted, `:96`) and base pin are **unchanged**, because re-evaluation is driven from the witness side (D10). |
 | `.github/scripts/ai-review-guard.js` | **UNDECLARED — OQ-2** | FR-2: `MACHINERY_WITNESS_CHECK_NAME`; `verifyHeadMachineryWitness()`; a third channel in `verifyHeadPassWitness()`. FR-4: an `UNREADABLE` constant and export, an `UNREADABLE` arm in `decideReviewCheck()` (D12), and `UNREADABLE` in `VERDICT_LABELS` (`:1006`). `shouldSummonHumanReview` (`:975-994`) may also change, under **OQ-8** and **OQ-12** | Pure functions, unit-tested in `.github/scripts/ai-review-guard.test.js` (run by `ci.yml:113`), mirroring `verifyHeadPassCheckRun` |
 | `scripts/review-decide.sh` | **UNDECLARED — OQ-2** | Two `echo` lines, per the FR-4 contract: the no-parseable-verdict fall-through (`:113`) and the `BEGIN_COUNT != 1` refusal (`:189`, inside the branch at `:156`) | stdout is the label contract. The change reaches **every** caller of the script, not only `ai-review.yml` (see *Contracts*, FR-4) |
 | `.github/workflows/ai-review.yml` | `affects:` | FR-4, every stage in the *Contracts* table: a fifth `gh label create` beside the four at `:224-231` and beside `:1023-1026`; the combine arm and D12's precedence in `# >>> verdict-combine` (`:583-610`); the PR-comment notice (`:651`); the post-step normaliser (`:1013-1019`), bracketed by new `# >>> verdict-normalise` markers; and the backstop's literal fallback (`:1238`) | The combine and normaliser blocks are executed verbatim by `ai-review-verdict-combine.test.ts`, which needs new cases. No existing case feeds the new label, so the arm is **not** covered merely by being written |
-| `packages/minspec/src/lib/ci-review-templates.ts` | **UNDECLARED — OQ-2**; itself machinery (`MACHINERY_SINGLE_FILES`, `machinery-paths.ts:75-77`) | Regenerated by `scripts/gen-ci-templates.mjs` in every FR-2 and FR-4 PR, under OQ-3's recommended reading | Pinned byte-for-byte by `ci-review-templates-gen.test.ts`, which needs no edit |
+| `packages/minspec/src/lib/ci-review-templates.ts` | **UNDECLARED — OQ-2**; itself machinery (`MACHINERY_SINGLE_FILES`, `machinery-paths.ts:75-77`) | Regenerated by `scripts/gen-ci-templates.mjs` in every FR-2 and FR-4 PR under OQ-3 (b) or (c). Under OQ-3 (a) it stays at today's bytes, and the generator changes instead | Pinned byte-for-byte by `ci-review-templates-gen.test.ts`, which needs no edit under (b) or (c) |
 | FR-4's existing tests: `review-decide.test.ts`, `verdict-channel.test.ts`, `review-approvable.test.ts`, `ai-review-verdict-combine.test.ts`, `verdict-label-enforcement.test.ts`, `ai-review-verdict-label-coherence.test.ts` (all in `packages/minspec/tests/`), and `.github/scripts/ai-review-guard.test.js` | **UNDECLARED — OQ-2** | New cases, plus changed expectations wherever today's assertion *is* the collapse FR-4 removes; each is listed, with its lines, under OQ-2 | — |
 | `packages/minspec/tests/drain-selfheal.test.ts` | **UNDECLARED — OQ-2** | A `mode` fixture dimension for its native auto-merge cases (`:255-257`, `:263-301`), which seam 5 makes config-dependent or right for the wrong reason | Exact edits depend on OQ-11 |
 | `.github/workflows/ai-review.yml`: the `machinery-review-required` step (`:936-986`) and the summon step (`:1184-1201`) | `affects:` | **Blocked on OQ-8.** Both say a human must review every machinery PR. That is true until the machinery arm slice lands and false after it, so whatever OQ-8 decides lands in that slice | None designed until OQ-8 is answered |
@@ -349,7 +359,9 @@ which mirror `isCheckoutOccupied` in `packages/minspec/src/lib/presence.ts:301`)
 `.minspec/config.json` today: a grep of `docs-lane.yml`, `push-docs.sh` and `drain-inbox.sh`
 for `config.json` returns nothing. "Parked means retained" is strongest when it is enforced by
 the absence of a diff. AC-7 then asserts it by execution, entry point by entry point (table
-below).
+below). Leaving `docs-lane.yml` untouched also leaves its unattended merge arm (`:247`) live
+under `team`, which AC-4's plain wording contradicts. This absence of a diff does not settle
+that. It is OQ-13.
 
 ---
 
@@ -520,9 +532,14 @@ jobs:
     permissions: { actions: write } # the GITHUB_TOKEN is used for the re-run only
     steps:
       - uses: actions/create-github-app-token@f2acddfb5195534d487896a656232b016a682f3c # v1.9.0, as ai-review.yml:192
-      - post      # POST /repos/{o}/{r}/check-runs as the App: the MachineryWitnessCheckRun below
+      - post      # github-script, App token; body carries `// >>> witness-post` / `// <<< witness-post`.
+                  # Its inputs come from `evaluate` ONLY through env:
+                  #   W_CONCLUSION / W_TITLE / W_SUMMARY / W_HEAD_SHA: ${{ needs.evaluate.outputs.<same> }}
+                  # read as process.env.W_*, validated (below), then POST /repos/{o}/{r}/check-runs
+                  # as the App: the MachineryWitnessCheckRun below
       - reevaluate  # github-script; body carries `// >>> witness-reevaluate` / `// <<< witness-reevaluate`
-                    # (D10): take the newest ready-to-merge.yml run with head_sha = <head_sha> and
+                    # (D10): take the newest ready-to-merge.yml run with head_sha = process.env.W_HEAD_SHA
+                    # (env:, exactly as for `post`) and
                     # event pull_request; poll until completed (POLL_ATTEMPTS = 10, POLL_DELAY_MS =
                     # 30_000, through an injectable `sleep`); POST .../actions/runs/{id}/rerun.
                     # No run, a timeout, or an API error -> core.setFailed. The check-run exists,
@@ -532,22 +549,41 @@ jobs:
 There are two jobs so that the App token never shares a job with the packages `npm ci`
 installed, and a compromised dependency cannot read it. File names are PR-controlled strings,
 so the list only ever travels as a JSON file whose path is in `env`. It is never interpolated
-into a shell or script body, the discipline `ready-to-merge.yml:73-78` states. Two facts were
+into a shell or script body, the discipline `ready-to-merge.yml:73-78` states.
+
+**The same rule holds across the job boundary, which is where the App token is.** Condition 5's
+summary names the offending path, so `evaluate`'s `summary` output carries a PR-controlled
+string into `post`. Every `needs.evaluate.outputs.*` value therefore enters a `post` step only
+as an `env:` value, read as `process.env.W_*`. No `${{ … }}` expression appears inside any
+`run:` or `script:` body in either job. `witness-post` validates before it writes. `W_CONCLUSION`
+must be exactly `success` or `action_required`, and `W_HEAD_SHA` must match `^[0-9a-f]{40}$`;
+anything else is `core.setFailed`, and nothing is posted. `W_TITLE` and `W_SUMMARY` reach the
+REST call only as JSON string fields, which are data, never code. `machinery-witness.test.ts`
+pins both halves. (1) Textually, because the repo has no YAML-parser dependency: it tracks each
+`run: |` and `script: |` block scalar by indentation (a block ends at the first non-blank line
+indented at or left of its key) and asserts that no `${{` occurs inside one. (2) By execution:
+the `witness-post` region, run under the harness below with a `W_SUMMARY` whose path holds a
+backtick, `$(id)` and `${{ secrets.X }}`, reaches the stubbed `checks.create` call
+byte-identical; a `W_CONCLUSION` of `failure`, or a 39-character `W_HEAD_SHA`, fails the job with
+no call made.
+
+Two facts were
 checked on 2026-09-11. First, `tsx -e` can `require()` a `.ts` module (tsx 4.23.1,
 node 22.23.2). Second, the runs API filters by `head_sha`:
 `GET /actions/workflows/ready-to-merge.yml/runs?head_sha=…` returned only that head's runs,
 each with `event: pull_request`.
 
-**How `machinery-witness.test.ts` executes the two github-script bodies. This is new harness
+**How `machinery-witness.test.ts` executes the three github-script bodies. This is new harness
 work, not an existing technique.** `witness-classify` is a bash `run:` block, so the
 `# >>> … # <<<` extraction `ai-review-verdict-combine.test.ts` already uses applies to it
-unchanged. `witness-decide` and `witness-reevaluate` are JavaScript inside `script: |`, where
+unchanged. `witness-decide`, `witness-post` and `witness-reevaluate` are JavaScript inside `script: |`, where
 a `#` line is not valid code, and no test in this repo executes a github-script body today.
 The contract:
 
 - **Markers.** Each JS region is bracketed by line comments inside the script body:
-  `// >>> witness-decide` / `// <<< witness-decide` and `// >>> witness-reevaluate` /
-  `// <<< witness-reevaluate`, with `// >>> witness-self-set` / `// <<< witness-self-set` nested
+  `// >>> witness-decide` / `// <<< witness-decide`, `// >>> witness-post` / `// <<< witness-post`
+  and `// >>> witness-reevaluate` / `// <<< witness-reevaluate`, with
+  `// >>> witness-self-set` / `// <<< witness-self-set` nested
   at the top of the decide region. The test fails loudly if any marker is missing, the way
   `ai-review-verdict-combine.test.ts:29-40` does.
 - **Execution.** The test strips the block scalar's indentation from the extracted region and
@@ -640,7 +676,10 @@ Plan cannot settle, and the witness slice does not ship until OQ-9 is answered.
 // FR-4 — the label vocabulary after this spec.
 type ReviewLabel =
   | 'ai-review:pass'        // unchanged
-  | 'ai-review:changes'     // the reviewer READ the code and objects. Nothing else.
+  | 'ai-review:changes'     // the reviewer READ the code and objects. Until OQ-14 is answered it
+                            // also still carries the refusals this contract does not reroute:
+                            // ESCALATE and a garbled `verdict:` / `blocking:`
+                            // (review-decide.sh:87-89, :208-210, :217).
   | 'ai-review:blocked'     // the reviewer could not RUN. Retry-able; ai-review-retry owns it.
   | 'ai-review:unreadable'  // NEW. The reviewer ran, but its output could not be read as a
                             // verdict. Deterministic in the diff, so NOT retry-able.
@@ -649,17 +688,19 @@ type ReviewLabel =
 
 **FR-4, stage by stage.** A label is only as distinct as the last stage that handles it. An
 earlier draft named two of these stages, and the post-step normaliser alone would have
-rewritten the new label to `changes` before it was applied. Every stage from the voter's
-output to the applied label:
+rewritten the new label to `changes` before it was applied. A later revision still missed the
+four per-voter comment placeholders and two lines of the script's own contract text; both are
+rows now. Every stage from the voter's output to the applied label:
 
 | Stage | Where | Change |
 |---|---|---|
-| Per-voter decision | `scripts/review-decide.sh:113` (no parseable verdict, not quota-shaped) and `:189` (`BEGIN_COUNT != 1`) | `:113` prints `ai-review:blocked` and exits 0, matching the existing `blocked` exits (`:83`, `:111`). `:189` prints `ai-review:unreadable` (it already exits 0). The stdout-contract comments (`:5`, `:27`, `:171`) and `ai-review.yml`'s header (`:20`) name the labels. The field-level fail-closed paths inside a single block (a garbled `verdict:` or `blocking:`) keep `changes`: FR-4 names two classes, and neither is this |
-| Panel combine | `ai-review.yml:583-610` (`# >>> verdict-combine`) | A fourth flag and arm, and one more `elif`, in full below (D12) |
+| Per-voter decision | `scripts/review-decide.sh:113` (no parseable verdict, not quota-shaped) and `:189` (`BEGIN_COUNT != 1`) | `:113` prints `ai-review:blocked` and exits 0, matching the existing `blocked` exits (`:83`, `:111`). `:189` prints `ai-review:unreadable` (it already exits 0). Every line of the script's own contract text that names the label set or the exit codes is rewritten to match: the header (`:4-5`, and `:8-10`, which lists "more than one verdict block" among the `changes` causes), the stdout and exit lines (`:27-28`), and the diagnostic's stdout note (`:171`); so is `ai-review.yml`'s header (`:19-22`). `:28` claims exit 2 on every non-clean path, which is already false at `:83`, `:111`, `:190` and `:217`. It becomes a statement of the exits as they stand after this slice. With OQ-14 unanswered, that is: stdout is the contract, exit 2 marks only the `changes` refusals at `:88` and `:209`, and exit 0 means everything else. No automated caller reads the exit status; every one discards it with `\|\| true` (`ai-review.yml:512`, `:520`, `:529`, `:538`; `dispatch-issue.sh:950`, `:958`; `review-pr.sh:206`). **Not rerouted, pending OQ-14:** the field-level refusals (`:208-210`, `:217`) and ESCALATE (`:87-89`) still print `changes`. An earlier draft kept them there as settled design ("FR-4 names two classes, and neither is this"); that was a Plan narrowing a MUST, and it is now a question |
+| Per-voter comment placeholder | `ai-review.yml:514`, `:522`, `:531`, `:540` | Each reads "(… emitted no verdict block — fail-closed to changes)". The block is empty only when `review-decide.sh`'s `BLOCK` is too, because the display-side `extract_block` (`:314`) carries the same anchors (`review-decide.sh:66-67`). After this slice that outcome is `blocked` (the marker, quota, or class 1). It is `changes` only through ESCALATE, so the old text would contradict the label above it. Each becomes "(… emitted no verdict block — no code verdict was read)". No test pins these strings (a grep of `packages/minspec/tests` for "fail-closed to changes" finds nothing). `review-pr.sh:230`'s copy stays, because that script still collapses every non-`pass` label to `changes` (`:207-210`) |
+| Panel combine | `ai-review.yml:583-610` (`# >>> verdict-combine`) | A fourth flag and arm, and one more `elif`, in full below (D12). The precedence comment above it (`:545-567`, "Precedence is changes > blocked > pass") is rewritten to D12's order |
 | Self-edit override | `:628-630` | Unchanged: an indeterminate changed set still forces `changes` |
 | PR comment | the branch at `:651` | One `if [ "$FINAL" = "ai-review:unreadable" ]` notice at the top of the non-`blocked` branch: the reviewer ran but its output could not be read as a verdict (#1157), this is not a code verdict, and it does not auto-retry |
 | `ai-review` check-run | `decideReviewCheck` (`ai-review-guard.js:887`), called at `ai-review.yml:877` | A new arm after `BLOCKED` (`:910`): conclusion `action_required` (D12), title *"AI review output could not be read as a verdict — not a code verdict, does not auto-retry"*. A machinery PR still takes the `neutral` arm first, as it does for `blocked` (`ai-review-guard.test.js:389`) |
-| Post-step normaliser | `ai-review.yml:1013-1019` | The keep-list becomes `ai-review:pass\|ai-review:blocked\|ai-review:unreadable) ;;`. The block is bracketed by new `# >>> verdict-normalise` / `# <<< verdict-normalise` markers so a test executes it. Without this arm the new label is applied as `changes` |
+| Post-step normaliser | `ai-review.yml:1013-1019` | The keep-list becomes `ai-review:pass\|ai-review:blocked\|ai-review:unreadable) ;;`. The block is bracketed by new `# >>> verdict-normalise` / `# <<< verdict-normalise` markers so a test executes it. Its comment (`:1013-1015`), which calls `pass` and `blocked` "the only non-changes states", is rewritten with it. Without this arm the new label is applied as `changes` |
 | Label object | the four up-front creates (`:224-231`) and the create-before-add (`:1023-1026`) | A fifth `gh label create "ai-review:unreadable"` in each place |
 | SHA-bound pass witness | the `PASS_STATE` branch (`:1059`) | Unchanged: anything but a non-machinery `pass` posts `failure` |
 | Label coherence | `decideVerdictLabels` (`ai-review-guard.js:1029`) over `VERDICT_LABELS` (`:1006`) | `UNREADABLE` joins `VERDICT_LABELS` and the exports. Without it `decideVerdictLabels` throws `unknown verdict` (`:1031`), the step fails, and the backstop labels the PR `changes` |
@@ -731,9 +772,62 @@ T0 first: every row below is written and red before the behaviour it constrains 
 | **INV-1** / constitution 2 — no silent gate | No new load-bearing signal is written with a swallowed error; a missing or errored witness fails closed **and visibly** | `machinery-witness.test.ts`: drive the `witness-decide` block with each failure input (no PR, PR disagreement, stale head, non-default base branch, short files page, API error, base checkout missing, guard unloadable, a resolver that exits non-zero or prints anything but `solo`/`team`) and assert the outcome is "post nothing or `action_required`", never `success`; drive the `witness-reevaluate` block with no run, a run that never completes, and a rerun API error, and assert each fails the job; and assert every such path emits a `::warning` or `::error` — the #810 lesson, where a silently swallowed 403 made a required gate unsatisfiable repo-wide |
 | **INV-1**, second witness | `ready-to-merge` must not come to hinge on the machinery witness alone | `machinery-witness.test.ts`: with the witness absent, a non-machinery PR still greens through the existing `ai-review/pass` **or** `ai-review` channels; `verifyHeadPassWitness` tries the two existing channels before the new one |
 | **INV-2** — approval stays human under both profiles | `checkApprover` / `assertHumanApprover` (`packages/minspec/src/lib/approval.ts`) deny an agent identity regardless of `mode` | `solo-mode-keep-gates.test.ts`: `approveSpec(fixtureRoot, specPath, 'T4', <agent identity>)` (`approval.ts:517`), which takes the repo root and calls `assertHumanApprover` before any write (`:524-528`), against a `mode: solo` and a `mode: team` fixture; assert it throws `ApproverDeniedError` and writes no sidecar under both. A direct `checkApprover` call takes no root, so it cannot see the fixture and is not the invariance proof (see the FR-6 table) |
-| **INV-3** — irreversible/outward-facing stays human under both profiles | `mayProceed` denies `irreversible-or-outward-facing` and `approval-or-acceptance` whatever the profile says | `solo-mode-keep-gates.test.ts`: drive the bash seam (`dispatch-issue.sh --autonomy-stop-classes`, `:312`, and the `autonomy_may_merge` function, `:292`) with `MINSPEC_AUTONOMY_REPO_ROOT` (`scripts/lib/autonomy.sh:41-45`) pointed at a fixture whose config sets `autonomy: act` and `mode: solo`, then `mode: team`; assert `proceed: false` under both. A direct `mayProceed('act', …)` call is kept as a behaviour check, but it takes no config, so it is not the invariance proof |
-| **INV-4** / constitution 3 — blast radius | The profile is per-project and changes nothing in a repo without `.minspec/` | `profile.test.ts`: `readProfileMode(<tmpdir with no .minspec>)` is `team`; and an import-shape assertion that `src/extension.ts` has no path to `profile.ts`, so `scripts/build-extension.sh`'s `esbuild src/extension.ts --bundle` tree-shakes it out of the shipped `.vsix` (the shape `auto-merge.test.ts` already uses to pin `auto-merge.ts`'s purity) |
-| Constitution 1 — offline | `profile.ts` makes no network call, and no consumer fetches a runner | Same import-shape assertion: the module's import list is exactly `node:fs` and `node:path`. And `profile.test.ts` runs `dispatch-issue.sh --check-profile` in a hermetic copy with no `node_modules/.bin/tsx`, with a `PATH` stub for `npx` that fails the test if invoked, and asserts `team` (the `autonomy.sh:92-98` rule) |
+| **INV-3** — irreversible/outward-facing stays human under both profiles | `mayProceed` denies `irreversible-or-outward-facing` and `approval-or-acceptance` whatever the profile says | `solo-mode-keep-gates.test.ts`, through `--may-merge` (`dispatch-issue.sh:316-318`) in a **hermetic copy** of the script tree whose own config carries the profile, never through `MINSPEC_AUTONOMY_REPO_ROOT`. The copy, its cases, the reason it asserts, and its profile-reachability witness are specified in *The INV-3 harness* below. A direct `mayProceed('act', …)` call is kept as a behaviour check, but it takes no config, so it is not the invariance proof |
+| **INV-4** / constitution 3 — blast radius | The profile is per-project and changes nothing in a repo without `.minspec/` | `profile.test.ts`: `readProfileMode(<tmpdir with no .minspec>)` is `team`; and a **reachability** assertion over esbuild's metafile, so the claim is about the shipped bundle, not about one file's imports. The test calls esbuild's JS API (`esbuild` is already a devDependency, root `package.json:32`) with the entry point and bundle flags of `scripts/build-extension.sh` (`src/extension.ts` at `:73`/`:76`; `--bundle --external:vscode --format=cjs --platform=node` at `:52-55`), plus `metafile: true`, `write: false` and `absWorkingDir` set to `packages/minspec`. It asserts that no key of `metafile.inputs` ends in `src/lib/profile.ts`. `inputs` lists every file the bundler loaded, so this is stricter than tree-shaking: it forbids any import path at all. As a liveness control, `src/extension.ts` and `src/lib/config.ts` must both be keys, so a build that loaded nothing cannot pass. Checked 2026-09-11 against this tree: 163 inputs, both controls present, `auto-merge.ts` and `machinery-paths.ts` absent. `auto-merge.test.ts:454-470` is **not** the precedent: it regex-checks one module's direct imports and cannot see reachability |
+| Constitution 1 — offline | `profile.ts` makes no network call, and no consumer fetches a runner | A direct-import assertion over `profile.ts`'s own source, the regex shape `auto-merge.test.ts:454-470` uses for `auto-merge.ts`: its import list is exactly `node:fs` and `node:path`. And `profile.test.ts` runs `dispatch-issue.sh --check-profile` in a hermetic copy with no `node_modules/.bin/tsx`, with a `PATH` stub for `npx` that fails the test if invoked, and asserts `team` (the `autonomy.sh:92-98` rule) |
+
+### The INV-3 harness
+
+The earlier form of this test pointed `MINSPEC_AUTONOMY_REPO_ROOT` at a fixture and varied
+`mode` there. It could not fail, for three reasons. First, that variable moves only
+`autonomy.sh`'s root (`scripts/lib/autonomy.sh:45`), never `profile_mode`'s, which derives its
+root from `SCRIPT_DIR` and has no redirect (*Contracts*), so both arms read the same real-repo
+profile. Second, it also moves the runner lookup (`:89`). A fixture with no `node_modules`
+therefore denies at `:97` with `gate-invocation-failed` under both profiles, before `mayProceed`
+runs. `autonomy-merge-gate.test.ts:188-198` shows a bare root denying that way, and `:281-282`
+shows that a fixture root also needs `MINSPEC_AUTONOMY_TSX_BIN`. Third, the seam it named,
+`--autonomy-stop-classes` (`dispatch-issue.sh:312-315`), only derives the class list and never
+reads config. The deciding seam is `--may-merge` (`:316-318`), which runs `autonomy_may_merge`
+(`:292`).
+
+- **Copy.** A temporary root holding:
+  - `scripts/dispatch-issue.sh`;
+  - the seven `scripts/lib/*.sh` it sources at startup (`:26-67`: `agent-context`, `gh-bot`,
+    `agent-egress`, `docs-corpus`, `autonomy`, `issue-lease`, `workflow-paths`), the list
+    `drain-selfheal.test.ts:263-301` already copies;
+  - `scripts/lib/autonomy.ts`, and `packages/minspec/src/lib/profile.ts` once the resolver slice
+    has landed it;
+  - a `node_modules` symlink to the real one;
+  - `.minspec/config.json` = `{"autonomy":"act","mode":"solo"}`, then the same with `"team"`.
+- **Environment.** `MINSPEC_AUTONOMY`, `MINSPEC_AUTONOMY_REPO_ROOT` and `MINSPEC_AUTONOMY_TSX_BIN`
+  are **deleted** from the child env, not set to `''`, for the reason `seam()` records
+  (`autonomy-merge-gate.test.ts:70-78`). With none of them set, `autonomy.sh` derives its root and
+  its runner from the copy's own location (`:36`, `:45`, `:89`) and hands that root to the
+  TypeScript as `--repo-root` (`:102`). `profile_mode` derives its root from the copy's
+  `SCRIPT_DIR`. So **both readers see the fixture**.
+- **Cases.** Each runs under both profiles and expects an identical outcome. Invocation:
+  `bash <copy>/scripts/dispatch-issue.sh --may-merge`, with paths on stdin. The test parses the
+  one line of JSON on stdout, and the exit code.
+  1. Control, `packages/minspec/src/lib/config.ts`: exit 0, `reason: "proceed"`. This proves the
+     copy's runner and its `autonomy: act` are live, so a dead harness fails the test rather than
+     denying its way to green.
+  2. `sites/index.html` (`PUBLISH_PATH_RE`, `dispatch-issue.sh:121`): exit 1,
+     `reason: "stop-class-applies"`, with `detail` naming `irreversible-or-outward-facing`.
+  3. An empty change set (`:238-240`): the same.
+  4. `specs/<any>/requirements.md`: exit 1, `reason: "stop-class-applies"`, with `detail` naming
+     `approval-or-acceptance`.
+  Checked 2026-09-11 against this tree, with tsx 4.23.1 from `node_modules` and both configs, the
+  outcomes were exactly these. The redirect-only form above returned `gate-invocation-failed`.
+- **Reachability witness.** The auto-merge gate slice, which introduces `profile_mode`, adds one
+  assertion to this harness: `--check-profile` in the same copy prints the fixture's mode. From
+  then on, a `solo` branch added anywhere on the `--may-merge` path sees `solo` and turns the
+  `solo` arm red. That holds for a branch in bash, and for one in `autonomy.ts`, which receives
+  the copy root. Before that slice no profile reader exists, so there is nothing to reach.
+- **Deliberately not a case: a machinery path.** `.github/**` and `scripts/**` reach
+  `irreversible-or-outward-facing` only through dispatch's conservative mapping
+  (`dispatch-issue.sh:222-226`, applied at `:250-251`). Both of OQ-1's options change that mapping
+  under `solo`, so pinning the machinery outcome here would decide OQ-1 in a T0. It is added with
+  OQ-1's answer.
 
 ### FR-6's keep list, asserted by execution (AC-6)
 
@@ -761,7 +855,7 @@ that a config-taking gate receives.
 | Frontmatter / validator gates | `validateOwnership(spec, loadConfig(fixtureRoot))` (`spec-validator.ts:784`) on a T4 fixture with no `implements:`, the fixture config setting `ownershipDeclaration: "error"` (read at `:813`) | the same `ownership.implements.missing` violation (`:812`) at `error` severity under both |
 | RCDD `Root cause:` hook | spawn `.githooks/commit-msg <tmpfile>` with its working directory set to the fixture repo, a `fix:` subject and no `Root cause:` line | non-zero exit under both |
 | T3/T4 approval stays human | `approveSpec(fixtureRoot, …)` — INV-2 row above | throws, and no sidecar, under both |
-| Irreversible / outward-facing stays human | the bash seam with `MINSPEC_AUTONOMY_REPO_ROOT` at the fixture — INV-3 row above | `proceed: false` under both |
+| Irreversible / outward-facing stays human | `--may-merge` in a hermetic copy whose root **is** the fixture, so the autonomy reader and the profile reader both see it; see *The INV-3 harness* above | `stop-class-applies`, naming the class, for the publish, empty-set and spec cases, identically under both. The control's `proceed` is the harness's liveness check, not a keep-gate outcome, so it is the one case here that is not "the rejecting one" |
 
 **What this suite still cannot catch, stated rather than claimed.** `applyFloor`'s only
 production caller is `packages/minspec/src/commands/classify.ts:86`
@@ -781,7 +875,7 @@ says "by execution, not by source text", and the table above is the execution.
 | AC-1 (FR-1) | T0 | `profile.test.ts`: with the environment emptied, drive **each** consumer's resolution path against one fixture repo, and assert all three return the same value, for a `solo` fixture and for a `team` fixture. The three are: `readProfileMode` directly; the bash consumer through `dispatch-issue.sh --check-profile` in a hermetic copy (the `drain-selfheal.test.ts:263-301` pattern, plus `profile.ts` and a `node_modules` symlink so the pinned runner resolves); and the YAML consumer, by executing the `witness-classify` block verbatim under bash. Asserted by driving consumers, not by reading the file |
 | AC-2 (FR-1, negative) | T0 | `profile.test.ts`: a table of `undefined`, `''`, `'Solo'`, `' solo '` (accepted, trimmed), `'sol o'`, `'true'`, `'team '`, `{}`, `42`, malformed JSON, missing file → every one resolves `team` except the exact token. The CLI grammar: `--repo-root` missing or empty, or any extra argument, gives exit 2 with empty stdout. The consumer rule, through the bash seam: no runner → `team`; a runner that exits 0 printing `Solo` or `solo ` → `team`; a runner that exits non-zero printing `solo` → `team`. And because no environment override exists, `MINSPEC_MODE=solo` exported over a `mode: team` config still resolves `team`, which guards that the removed interface stays removed |
 | AC-3 (FR-2) | T0 + T2, **partial — not discharged by this Plan** | `machinery-witness.test.ts`: the decision block, executed verbatim with the new harness (*Contracts*), returns `success` for a machinery PR with a verified pass and no self-set touch, and `action_required` for one that touches a self-set path. The `witness-reevaluate` block, executed against stubbed run lists, re-runs the newest completed `ready-to-merge` run for the head, waits for an in-progress one, and fails the job when there is none. That covers AC-3's second half (a PR that changes the witness cannot self-certify) and the decision behind its first. The first half's two outcomes are not T0. `ready-to-merge` reaching success is observed only at T2, on the first real machinery PR after landing (the platform chain: `workflow_run` fires, the re-run replays the `pull_request` payload, the gate greens). And **merging with no keystroke has no seam in this Plan**: it is the machinery arm slice, blocked on OQ-1. OQ-1 discloses that gap; this row no longer claims both halves |
-| AC-4 (FR-3) | T0, **`team` half of the native actor only** | `profile.test.ts` drives the existing `--check-native-automerge` seam (`dispatch-issue.sh:93-95`) in hermetic copies. It reuses the `drain-selfheal.test.ts:263-301` technique inside a declared test file, adding a `mode` fixture dimension: `mode: team` + `autoMerge.native: true` → `off`; `mode: team` + `MINSPEC_AUTOMERGE_NATIVE=1` → `off` (an exported env var cannot loosen a committed `team`); `mode: solo` + `autoMerge.native: true` → `on`. What an **absent** key means under `solo` is not pinned: that is OQ-11, and an earlier draft's `mode: solo` + no key → `off` case, which hard-coded one answer, is removed. The case is written once OQ-11 is answered. This test exercises a non-machinery PR's actual merge arm, which is why AC-4 needs it: the witness never posts for a non-machinery PR under either profile (condition 4), so it cannot tell the two apart. It cannot see the second merge actor (`dispatch-issue.sh:1915-1922`), so AC-4's `team` half is discharged for the native actor only, until OQ-5 is answered. The existing `drain-selfheal.test.ts` cases that seam 5 changes are listed under OQ-2 |
+| AC-4 (FR-3) | T0, **`team` half of the native actor only** | `profile.test.ts` drives the existing `--check-native-automerge` seam (`dispatch-issue.sh:93-95`) in hermetic copies. It reuses the `drain-selfheal.test.ts:263-301` technique inside a declared test file, adding a `mode` fixture dimension: `mode: team` + `autoMerge.native: true` → `off`; `mode: team` + `MINSPEC_AUTOMERGE_NATIVE=1` → `off` (an exported env var cannot loosen a committed `team`); `mode: solo` + `autoMerge.native: true` → `on`. What an **absent** key means under `solo` is not pinned: that is OQ-11, and an earlier draft's `mode: solo` + no key → `off` case, which hard-coded one answer, is removed. The case is written once OQ-11 is answered. This test exercises a non-machinery PR's actual merge arm, which is why AC-4 needs it: the witness never posts for a non-machinery PR under either profile (condition 4), so it cannot tell the two apart. It cannot see the second merge actor (`dispatch-issue.sh:1915-1922`) or the third (`docs-lane.yml:247`), so AC-4's `team` half is discharged for the native actor only, until OQ-5 and OQ-13 are answered. The existing `drain-selfheal.test.ts` cases that seam 5 changes are listed under OQ-2 |
 | AC-5 (FR-4) | T3, red-then-green, **at the applied label, not only the voter's** | Two layers, both using **reproductions** of #1234 (a voter output with no verdict block and no quota phrasing) and #1157 (a voter output that names `REVIEW_VERDICT_BEGIN` in prose beside one real block). (1) `review-decide.test.ts`: the voter's label is `ai-review:blocked` and `ai-review:unreadable` respectively. (2) `ai-review-verdict-combine.test.ts`: each reproduction goes through the real `review-decide.sh`, then with three passing voters through the verbatim `verdict-combine` block, then through the verbatim `verdict-normalise` block. The assertion is on the label that would be applied. Layer 2 is what catches a missing combine arm (the label would fall through `*)` to `blocked`) or a missing normaliser arm (it would be applied as `changes`), which layer 1 alone cannot, because it stays green while the PR still receives `ai-review:changes`. Layer 2 also carries D12's precedence cases, including `[pass, unreadable, pass, pass]` → `unreadable`, never `pass`. For "neither is auto-merged", `ai-review-guard.test.js` asserts `decideReviewCheck(UNREADABLE, false).conclusion === 'action_required'` with a title distinct from `changes`', and that `decideStatus` over `['ai-review:unreadable']` is `failure`. All of these are red against today's code |
 | AC-6 (FR-6) | T0 | The keep-list table above |
 | AC-7 (FR-5) | T0, **`team` arm only** | `solo-mode-keep-gates.test.ts`, one entry point per FR-5 subsystem, against a `mode: team` fixture: the table below. The `solo` arm is not written until OQ-10 is answered |
@@ -799,7 +893,7 @@ comes from.
 
 | FR-5 subsystem | Executed entry point | Harness it reuses | Assertion |
 |---|---|---|---|
-| Docs-lane | the `run:` block of `.github/workflows/docs-lane.yml`, run under bash with a stubbed `gh` | `extractRunBlock` in `docs-lane-hold.test.ts` | a docs-only PR labelled `docs-lane` arms auto-merge; the same PR with a `hold:*` label does not |
+| Docs-lane | the `run:` block of `.github/workflows/docs-lane.yml`, run under bash with a stubbed `gh` | `extractRunBlock` in `docs-lane-hold.test.ts` | a docs-only PR labelled `docs-lane` arms auto-merge; the same PR with a `hold:*` label does not. This asserts AC-7 as approved. For this PR AC-4 reads the other way under `team`; that is OQ-13, and under its option (b) AC-7 and this row both change |
 | `scripts/push-docs.sh` | `bash scripts/push-docs.sh …` against a fixture origin | `push-docs-sh.test.ts` (fixture repo at `:87-116`) | a docs-only change is pushed on the lane branch |
 | Presence-gated fast-forward (DR-065) | `drain-inbox.sh --checkout-occupied <root>` and `--sync-checkouts` (`:1319-1329`), and TS `isCheckoutOccupied` (`presence.ts:301`) | `presence-sync-parity.test.ts` (`:72`, `:283`) | a dormant, clean, on-`main` checkout fast-forwards; an occupied one stays fetch-only |
 | `awaiting-approval` labelling | `shouldAwaitApproval` (`ai-review-guard.js:811-815`) | direct call | green + auto-merge unarmed + no open blockers + not draft → `true`; every other combination → `false` |
@@ -834,7 +928,9 @@ constrains it, and nothing lands before the config state it depends on.
   path.
 - **The auto-merge gate slice (FR-3, dispatch — the `team` deny only).** `profile_mode`,
   `--check-profile`, and the `team` deny in `native_automerge_enabled` (seam 5), with AC-4's
-  three cases in `profile.test.ts`. The deny is common to every option of OQ-11, which is why it
+  three cases in `profile.test.ts`. It also adds the INV-3 harness's reachability witness
+  (`--check-profile` inside that copy), because this slice creates the first profile reader
+  that witness can reach. The deny is common to every option of OQ-11, which is why it
   can land before OQ-11 is answered. The `solo` arm (OQ-11) and the second merge actor (OQ-5)
   are **not** in this slice. Not blocked on OQ-1. It reddens nothing, but it leaves two
   `drain-selfheal.test.ts` cases passing for the wrong reason (`:255-257`, `:263-301`, see
@@ -846,10 +942,13 @@ constrains it, and nothing lands before the config state it depends on.
   This is the slice AC-4's `team` half exercises.
 - **The false-red slice (FR-4).** `review-decide.sh`, the guard's `UNREADABLE` constant,
   `decideReviewCheck` arm and `VERDICT_LABELS` entry, and every `ai-review.yml` stage in the
-  FR-4 contract table, with the tests listed under OQ-2. Independent of the profile entirely,
-  useful on its own, and it makes solo mode safer rather than depending on it. Blocked on
-  OQ-2 (two code files, the generated templates and seven test files are undeclared), OQ-3
-  (every file it edits is a template source), and **OQ-12**. Without a consumer an
+  FR-4 contract table, with the tests listed under OQ-2. Independent of the profile entirely.
+  That makes it useful on its own, and it makes solo mode safer rather than depending on it.
+  It also means nothing keys it on `mode`, so it changes review behaviour in every adopter repo
+  that runs the scaffolded stack; OQ-3 lists what changes. Blocked on OQ-2 (two code files,
+  the generated templates and seven test files are undeclared), OQ-3 (every file it edits is a
+  template source, and its edits are not inert there), **OQ-12**, and **OQ-14** (under its
+  (b) or (c) the slice edits more lines of `review-decide.sh`). Without a consumer an
   `unreadable` PR is stranded, which is a liveness regression against today: class 2 currently
   reads `changes`, which remediation picks up and escalates to `needs-human-review` when its
   attempts are exhausted (`ai-review-guard.js:956-957`).
@@ -895,7 +994,8 @@ and vitest.
   unattended machinery merges raise the merge rate, which raises the rebase rate.
 - **A persistently non-conforming voter under D8.** Class 1 routes to `ai-review:blocked`,
   which `ai-review-retry.yml` re-runs hourly. A voter that never emits a verdict block for a
-  non-quota reason would loop. Existing mitigation: the retry's reset-marker guard. An
+  non-quota reason would loop, here and, under OQ-3 (c), in every adopter repo that runs the
+  scaffolded stack. Existing mitigation: the retry's reset-marker guard. An
   attempt cap would close it properly, but `ai-review-retry.yml` is neither declared here nor
   asked for by any FR. It is tracked as #1204 (ai-review:blocked has no bounded retry) and not
   designed here.
@@ -951,7 +1051,7 @@ Each of these is genuinely undecidable from the approved requirements. None is r
     `.github/scripts/ai-review-guard.js` (unowned by any spec — FR-2's witness channel, and
     FR-4's check arm, label and coherence set).
   - **Generated machinery.** `packages/minspec/src/lib/ci-review-templates.ts`, regenerated by
-    every FR-2 and FR-4 PR under OQ-3's recommended reading. It is itself in
+    every FR-2 and FR-4 PR under OQ-3 (b) or (c). It is itself in
     `MACHINERY_SINGLE_FILES` (`machinery-paths.ts:75-77`), where it is called the largest blast
     radius of anything in the set.
   - **Tests, FR-4.** Each needs new cases. Some also need changed expectations, wherever
@@ -983,6 +1083,10 @@ Each of these is genuinely undecidable from the approved requirements. None is r
   - **Conditional or human-authored.** `machinery-paths.ts`, only if OQ-9 is answered (a). Its
     test derives from the source (`machinery-paths.test.ts:40`), so it follows the edit.
     `ai-review-retry.yml` or `remediate-pr.sh`, only if OQ-12 is answered (b) or (c).
+    `scripts/gen-ci-templates.mjs`, `ci-review-templates-gen.test.ts` and the template-freshness
+    gate (`checkCiReviewTemplatesFresh`, `scripts/validate-frontmatter.ts:537`), only if OQ-3 is
+    answered (a).
+    `docs-lane.yml`, only if OQ-13 is answered (b).
     `.minspec/config.json`, edited by the config flip, which is a human act, but the ownership
     map is what a reader consults to find what this spec changed.
 
@@ -997,29 +1101,73 @@ Each of these is genuinely undecidable from the approved requirements. None is r
   above, or accept the widened set as a Plan-level record. This Plan does not edit
   `requirements.md`.
 
-- **OQ-3 — every file FR-2 and FR-4 must edit is shipped to adopters, and Out of Scope
-  forbids that.** `scripts/gen-ci-templates.mjs`'s `SOURCES[]` embeds `ai-review.yml`,
-  `ready-to-merge.yml`, `review-decide.sh` and `ai-review-guard.js` **verbatim** into
-  `packages/minspec/src/lib/ci-review-templates.ts`, and
-  `packages/minspec/tests/ci-review-templates-gen.test.ts` pins the regeneration
-  byte-for-byte. So an FR-2 or FR-4 PR either reddens that test or regenerates the templates —
-  and regenerating is a change to what MinSpec installs in an adopter's repo, which the
-  requirements' *Out of Scope* rules out. `ci-review-templates.ts` is also, by
-  `machinery-paths.ts`'s own reckoning, the machinery with the largest blast radius in the
-  repo, so the PR that regenerates it is the hardest PR here to merge — the exact block FR-2
-  exists to lift, encountered on the way to lifting it.
-  A narrow reading is available and may well be the intent: the profile-keyed branches are
-  **inert** in an adopter repo, because a repo with no `mode` key resolves to `team` and
-  behaves byte-for-byte as today, so *behaviour* in a non-opting repo is unchanged and
-  constitution invariant 3 is satisfied even though bytes move. **(rec)** — it is the only
-  reading under which FR-2 and FR-4 are buildable at all; its cost is that adopters receive a
-  `ready-to-merge.yml` that reads a `machinery-witness` check no producer in their repo will
-  ever post, and an `ai-review:unreadable` label they never see, which is dead surface in
-  somebody else's repository.
-  ➡️ Founder decision, because it turns on how Out of Scope was meant.
+- **OQ-3 – FR-2 and FR-4 edit files MinSpec installs in adopter repos, and Out of Scope forbids
+  any change to those. NOT decided; needs the founder via Clarify.**
+  `scripts/gen-ci-templates.mjs`'s `SOURCES[]` embeds `ai-review.yml` (`:43`),
+  `ready-to-merge.yml` (`:49`), `ai-review-retry.yml` (`:55`), `review-decide.sh` (`:73`) and
+  `ai-review-guard.js` (`:161`) **verbatim** into `packages/minspec/src/lib/ci-review-templates.ts`.
+  `CI_REVIEW_STACK_TEMPLATES` (`packages/minspec/src/lib/template-registry.ts:2111`) writes them
+  into an adopter repo at `:2117`, `:2123`, `:2129`, `:2154` and `:2225`.
+  `packages/minspec/tests/ci-review-templates-gen.test.ts` pins the regeneration byte-for-byte,
+  so an FR-2 or FR-4 PR either reddens that test or changes what adopters receive. The
+  requirements rule that out: "Any change to what MinSpec installs in an adopter's repo"
+  (`requirements.md:359-360`). `ci-review-templates.ts` is also, by `machinery-paths.ts`'s own
+  reckoning, the machinery with the largest blast radius in the repo, so the PR that regenerates
+  it is the hardest PR here to merge. That is the exact block FR-2 exists to lift, met on the way
+  to lifting it.
+  **An earlier version of this question recommended a reading on a false premise.** It said the
+  changes are inert in an adopter because "a repo with no `mode` key resolves to `team` and
+  behaves byte-for-byte as today", and that adopters would get "an `ai-review:unreadable` label
+  they never see". That holds for FR-2 and is false for FR-4. The false-red slice is independent
+  of the profile (*Build order*), and nothing in it reads `mode`. What each edit actually does in
+  an adopter repo, which has `.minspec/` but no `mode` key, and so resolves `team`:
+  - **FR-2: the bytes move, the behaviour does not.** Nothing an adopter receives posts a
+    `machinery-witness` check-run, because `machinery-witness.yml` is not in `SOURCES[]`. So the
+    guard's third channel never verifies anything, and `decideStatus` is unchanged. The one way
+    the new read could still change an outcome is an API error on it, and that is closed by
+    giving the read its own `try` (component table, `ready-to-merge.yml` row).
+  - **FR-4: the bytes and the behaviour both move.**
+    - *Class 1* (no verdict block, not quota-shaped) is labelled `ai-review:blocked`, not
+      `changes`. The scaffolded `ai-review-retry.yml` selects that label hourly (`:65`) and has
+      no attempt cap (#1204). So a voter that persistently emits no block loops there, spending
+      the adopter's quota. In an adopter with no remediation lane, the PR also loses the summon
+      it gets today: `shouldSummonHumanReview` returns true for `changes` there
+      (`ai-review-guard.js:990`), but returns false for `blocked` before that line is reached
+      (`:976`). Its `ai-review` check-run becomes `action_required`, titled "AI review could
+      not run — quota/transient (auto-retries)" (`:917`).
+    - *Class 2* (`BEGIN_COUNT != 1`) is labelled `ai-review:unreadable`. The adopter's own
+      `ai-review.yml` creates that label in their repo and posts an `action_required`
+      `ai-review` check-run under the new title. What acts on it next is whatever OQ-12 decides,
+      and that change ships too.
+  - Every option of OQ-8, OQ-9 (a) and OQ-14 (b) or (c) also edits `ai-review.yml` or
+    `review-decide.sh`, so each lands in the same place.
+  **(a) Literal: no byte an adopter receives changes.** This repo's copies change, and the
+  shipped templates stay at today's bytes. That means decoupling the generator for these
+  sources: `scripts/gen-ci-templates.mjs`, its byte-for-byte pin test, and
+  `checkCiReviewTemplatesFresh` (`scripts/validate-frontmatter.ts:537`). None of them is
+  declared (OQ-2). Cost: this repo's review stack and the one it ships diverge, which is the
+  drift class the generator exists to prevent (#678, the freshness gate). Adopters also keep
+  both false-red classes.
+  **(b) Behaviour frozen, bytes may move.** FR-2 lands as designed. FR-4 is keyed on the
+  profile, so a `team` repo keeps today's labels. Cost: FR-4's decision then needs the profile
+  inside the review stage, which is a second profile reader. It would sit either in
+  `review-decide.sh`, whose own header says it must stay usable with nothing but bash
+  (`review-decide.sh:32-35`), or in stage 1's workflow body, which comes from the PR head.
+  Adopters keep the false reds as well.
+  **(c) FR-2 and FR-4 are corrections to the shared review stack, not solo-only behaviour. They
+  ship to adopters, and the Out of Scope line is amended at the next approved revision, which
+  OQ-2 already needs – (rec).** Why: FR-4's MUST is not conditioned on `solo` in its text
+  (`requirements.md:123-126`). The false reds it removes are defects in the shared stack:
+  `review-decide.sh:165-168` records the class-2 contradiction on
+  `AIClarityAU/voip-sms-inbox#28`, a repo running this stack. And a fork or a second profile
+  reader each costs more than it saves. Its cost: adopter review behaviour changes, as listed
+  above, by a founder amendment rather than by an adopter's opt-in. The sharpest part is the
+  uncapped hourly retry of class 1 in someone else's repository. #1204's attempt cap would close
+  it, but no FR asks for that cap and this Plan does not design it.
+  ➡️ Founder decision, because it turns on how Out of Scope was meant. The witness slice and the
+  false-red slice both wait for it.
   **Note:** the new `machinery-witness.yml` is *not* in `SOURCES[]`, so the new file itself
-  ships nowhere. Only the edits to the four existing files are affected, including whatever
-  OQ-8 decides for `ai-review.yml`'s two human-review signals.
+  ships nowhere. Only edits to the existing sources are affected.
 
 - **OQ-4 — how complete must the witness self set be, and who keeps it complete?**
   D5's correctness reduces to that list. This Plan proposes the entries above and a test that
@@ -1035,7 +1183,8 @@ Each of these is genuinely undecidable from the approved requirements. None is r
 - **OQ-5 – may the second unattended merge actor still merge a PR under `team`, and what is
   `scripts/auto-merge-gate.ts`'s `affects:` entry for? NOT decided; needs the founder via
   Clarify.** `scripts/dispatch-issue.sh` has two actors that can merge a green PR with no
-  human. Seam 5 gates the first, native `--auto` (`:1048-1089`). The second is SPEC-024's
+  human (a third actor sits outside dispatch, in `docs-lane.yml`: OQ-13). Seam 5 gates the
+  first, native `--auto` (`:1048-1089`). The second is SPEC-024's
   consequence-hybrid gate. `auto-merge-gate.ts` **is** invoked on that path (`:1859`, for every
   dispatched PR whose branch pushed). A direct `gh pr merge --squash` (`:1922`) follows when
   all of these hold (`:1915-1919`): the gate says eligible, a PR exists,
@@ -1224,7 +1373,8 @@ Each of these is genuinely undecidable from the approved requirements. None is r
   a code change can move it. A human is genuinely the next actor, which is the one meaning
   #816 reserves the label for. Its cost: under `solo`, every class-2 event reaches the founder
   as `needs-human-review`. There is no automatic recovery even when the anomaly was a one-off;
-  recovery is a manual re-run.
+  recovery is a manual re-run. The change is not keyed on `mode`, so under OQ-3 (c) it reaches
+  every adopter repo as well.
   **(b)** One retry, then summon. `ai-review-retry.yml` also selects `unreadable`, capped at
   one attempt. Cost: it edits an undeclared workflow and needs the attempt cap #1204 tracks.
   It also spends one review per event on an outcome that D8 argues will usually recur.
@@ -1233,6 +1383,78 @@ Each of these is genuinely undecidable from the approved requirements. None is r
   output, and it edits an undeclared script.
   **(d)** No consumer. Cost: the stranding above.
   ➡️ Founder decision. The false-red slice does not ship until it is answered.
+
+- **OQ-13 – docs-lane, a third unattended merge actor, merges under `team`, and AC-4 and AC-7
+  disagree about whether it may. NOT decided; needs the founder via Clarify.**
+  `.github/workflows/docs-lane.yml:247` runs `gh pr merge --auto --squash` on any docs-only PR
+  whose labels include `docs-lane` (`:36`), under either profile. GitHub then merges it once the
+  required checks are green, and those include a provenance-verified `ai-review:pass`. The label
+  is not a human act: `scripts/push-docs.sh:157-158` applies it itself when an agent opens the PR.
+  So under a committed `mode: team`, a green, AI-passed, non-machinery PR merges with no human.
+  AC-4's plain wording says it must not: "the same PR under `mode: team` holds for a human"
+  (`requirements.md:158-159`). FR-5 and AC-7 say the opposite for this lane. It MUST "remain
+  reachable under `mode: team`" and "behave as [it does] today" (`requirements.md:132-134`,
+  `:166-167`), and today it does exactly this.
+  An earlier draft settled the tension without saying so. Its actor census named only
+  dispatch's two actors, seam 5 claimed to deny native auto-merge "at its single source", and the
+  AC-7 docs-lane row pins the arming as a T0. Together that reads AC-4 as covering dispatched
+  PRs only, which is a decision the requirements do not make.
+  **(a) AC-4 covers the PRs whose merge FR-3's actors decide (dispatch's native arm and the
+  consequence-hybrid merge). Docs-lane is FR-5's retained machinery and keeps today's
+  behaviour under `team` – (rec).** Why: it is the only reading under which AC-4 and AC-7 both
+  hold as written. It also matches DR-076's disposition, which parks docs-lane behind the team
+  profile (`DR-076.md:94`), and FR-5 reads parked as reachable under `team`. Its cost: under a
+  committed `team`, "holds for a human" is false for the docs corpus. An agent's docs-only PR
+  still merges unattended, and that includes content edits to specs and DRs short of a
+  `status:` transition, which #1847 refuses (`docs-lane.yml:14-18`). AC-4's text also reads
+  wider than what is built, until an approved revision narrows it.
+  **(b) AC-4 covers every unattended merge actor, so docs-lane gains a `team` deny.** Cost: it
+  contradicts FR-5 and AC-7 as approved, so the requirements need amending either way. It adds
+  a profile reader to a `pull_request` workflow whose body comes from the PR head, which is
+  D7's objection. `docs-lane.yml` is itself a template source (`gen-ci-templates.mjs:61`), so
+  OQ-3 applies. And it switches the lane off in exactly the profile DR-076 parks it behind.
+  The AC-7 docs-lane row asserts AC-7 as approved, so it lands unchanged under (a). Under (b),
+  AC-7 and that row both change.
+  ➡️ Founder decision. Until it is answered, AC-4's `team` half is discharged for dispatch's
+  native actor only (see also OQ-5).
+
+- **OQ-14 – how far does FR-4's "protocol-parsing anomaly" reach? NOT decided; needs the founder
+  via Clarify.** FR-4's MUST covers "a fail-closed refusal caused by reviewer *unavailability* or
+  by protocol-parsing anomaly" (`requirements.md:123-126`). Its Context (`:86-94`) and AC-5 name
+  two classes, and the FR-4 contract above reroutes exactly those. `review-decide.sh` has three
+  more fail-closed refusals that still print `ai-review:changes`, so they still read as "the
+  reviewer wants changes":
+  - a missing or non-integer `blocking:` inside the single block (`:208-210`);
+  - a `verdict:` that is absent, or is neither `pass` nor `changes`, with `blocking: 0`. That
+    reaches the final `changes` at `:217`, the same line a genuine `verdict: changes` reaches;
+  - an `ESCALATE:` line (`:87-89`), the reviewer's explicit refusal to finish, which is checked
+    before any block is read.
+  An earlier draft kept the first two at `changes` as settled design ("FR-4 names two classes,
+  and neither is this") and did not mention ESCALATE at all. That was a Plan narrowing a MUST
+  without flagging it.
+  **(a) Only the two observed classes.** This is what the contract reroutes today. Cost: two
+  refusals that are plainly protocol-parsing anomalies on FR-4's text still wear `changes`, and
+  under `solo` remediation then asks an agent to change code for a review that never objected.
+  That is the collapse FR-4 exists to end.
+  **(b) The field-level anomalies too, while ESCALATE stays `changes` – (rec).** A missing or
+  non-integer `blocking:`, and an absent or unrecognised `verdict:`, leave `changes`. `:217`
+  splits so that only a well-formed `verdict: changes`, or a positive `blocking:`, prints
+  `changes`. Why: both are protocol-parsing anomalies on FR-4's plain text, while ESCALATE is a
+  well-formed, deliberate refusal, not a parse failure. Its cost: ESCALATE still reads "the
+  reviewer wants changes" when the reviewer said it could not finish, a residual false red that
+  FR-4's rationale arguably covers. The label the field-level cases take then follows D8's
+  retry-ability test, and the Plan designs it once this is answered. The candidate is
+  `blocked`: this is class 1's failure one step later, and most likely transient model output
+  rather than deterministic in the diff. That widens the uncapped-retry exposure (#1204, and
+  OQ-3 for adopters).
+  **(c) (b), plus ESCALATE.** Cost: ESCALATE fits neither existing refusal label. A retry by the
+  same reviewer on the same diff will likely escalate again, looping in the uncapped lane, so
+  `blocked` is wrong. The output was readable, so `unreadable` is wrong too. This option
+  probably needs a fifth verdict label, with every stage of the FR-4 table repeated for it.
+  Every option edits `review-decide.sh`, a template source (OQ-3), and `review-decide.test.ts`
+  (OQ-2).
+  ➡️ Founder decision. The false-red slice waits for it alongside OQ-3 and OQ-12, because
+  under (b) or (c) it edits more lines of the same script.
 
 ## Follow-ups (tracked)
 
