@@ -5,9 +5,23 @@
 #   wrangler secret put MINSPEC_APP_PRIVATE_KEY
 #
 # MINSPEC_APP_ID is a public identifier and is a plain var on purpose.
+# DEPLOY TARGET IS PINNED ON PURPOSE (#1869). Wrangler resolves the account in this order:
+# `account_id` here, then $CLOUDFLARE_ACCOUNT_ID, then a machine-local cache under
+# node_modules/.cache/wrangler. Only when ALL THREE miss does it raise "more than one
+# account available" — so that error is not the safety net it appears to be. Remove this
+# line and a cached account wins silently: no prompt, no error, and a deploy to the wrong
+# account looks exactly like a correct one. That is what happened — this Worker, and a
+# `wrangler secret put` carrying the App private key, both landed in an unintended account,
+# caught only because a human did not recognise a workers.dev subdomain.
+#
+# The cache is gitignored and per-machine, so CI, a fresh clone and a developer laptop can
+# each resolve a DIFFERENT target from identical source. That is why the pin belongs in
+# version control rather than in anyone's environment.
+account_id = "23f1dc885a85e77e0b3969b247bbf65f"
+
 name = "minspec-review-broker"
 main = "src/index.ts"
 compatibility_date = "2026-08-16"
 
 [vars]
-MINSPEC_APP_ID = ""
+MINSPEC_APP_ID = "4212099"
