@@ -12,7 +12,7 @@ implements_reason: Plan document. requirements.md declares `implements: none` wh
 
 # MinSpec - Approvable-Reference Lozenges + Hover Cards (Plan)
 
-**Date:** 2026-09-09, revised 2026-09-11 (three times)
+**Date:** 2026-09-09, revised 2026-09-11 (four times)
 **Status:** Plan (SDD Plan phase). This document does not change the spec's `status:`.
 **Reads:** [requirements.md](requirements.md) - FR1..FR9, AC1..AC6, the four invariants and
 OQ1..OQ5 are settled there and are not re-litigated. This is HOW, not WHAT/WHY.
@@ -229,11 +229,10 @@ path.
 | `packages/shared/src/project-prefix.ts` | **unchanged** | Imported, never edited. `resolveRef` (:144) is the scanner's sole acceptor (D1); `PrefixMap`, `EMPTY_PREFIX_MAP`, `RefResolution` and `ApprovableKind` are its types. Its update is out of scope (requirements.md:165-166). |
 | `packages/shared/src/ref-detect.ts` | **new (Tier-0)** | `detectRefs()` scanner + `buildRefCard()`. Pure: no `fs`, no `vscode`, no network, no LLM. Holds span shapes, never grammar vocabulary (D1). |
 | `packages/shared/src/index.ts` | **changed** | One `export * from './ref-detect'` line on the barrel. |
-| `packages/minspec/src/lib/ref-cards.ts` | **new (Tier-1 adapter)** | `lookupApprovable()` - a resolved ref to an `ApprovableLookup`. SPEC: `listSpecs()` (spec-catalog.ts:59) for id to path and title, then `parseSpec` + `getApprovalStatus` + `deriveStatus` for its status (D3). DR: `listAdrs()` (adr-manager.ts:1277) and EPIC: `listEpics()` (epic-manager.ts:104) for id to path and title only; status is read from the file's own `status:` line (D3, contract below). Matches a ref to an artifact by kind and number, so `SPEC-19` finds `SPEC-019`. Each catalog resolves its directory through `resolveAndValidate` (spec-catalog.ts:61, adr-manager.ts:95, epic-manager.ts:95). Reads no prefix table in Slices A-B (see "What this design does NOT do"). |
+| `packages/minspec/src/lib/ref-cards.ts` | **new (Tier-1 adapter)** | `lookupApprovable()` - a resolved ref to an `ApprovableLookup`. SPEC: `listSpecs()` (spec-catalog.ts:59) for id to path and title, then `parseSpec` + `getApprovalStatus` + `deriveStatus` for its status (D3). DR: `listAdrs()` (adr-manager.ts:1277) and EPIC: `listEpics()` (epic-manager.ts:104) for id to path and title only; status is read from the file's own `status:` line (D3, contract below). Matches a ref to an artifact by kind and number, so `SPEC-19` finds `SPEC-019`. Each catalog resolves its directory through `resolveAndValidate` (spec-catalog.ts:61, adr-manager.ts:95, epic-manager.ts:95); `listAdrs` and `listEpics` first apply the caller's directory overrides (contract below). Reads no prefix table in Slices A-B (see "What this design does NOT do"). |
 | `packages/minspec/src/views/ref-lozenge-html.ts` | **new, Slice B** | `createLozengeRenderer()`: one instance per rendered document; its `render(card)` turns a card model into markup and allocates the card's id itself. Reuses `escapeHtml` (spec-panel-html.ts:286, which escapes both quote characters, so it is safe inside the `data-ref` attribute); adds no second sanitiser. |
 | SPEC-014's extracted prose renderer | **caller, Slice B** | Supplies the prose text plus the `skip` ranges (D4; whether they include frontmatter is PQ5), creates one `LozengeRenderer` per document render, and splices the lozenge markup back in. Path unknown until SPEC-014 extracts it - that is why `requirements.md` says the render-host module paths are undecided, and why Slice B declares no path here. |
 | `packages/minspec/tests/tier0-import-ban.test.ts` | **already covers it** | Scans the `minspec` and `shared` packages' `src/` trees since #1511, so `ref-detect.ts` is inside the ban automatically. |
-| `.github/workflows/ci.yml` | **changed, Slice A** | One line: `fetch-depth: 0` on the `test` job's checkout (:158, a default shallow checkout today), as the `paths` job already has (:40-42), so the AC1 harness can read its pinned commit. |
 
 Not used, deliberately: `packages/minspec/src/lib/reference-checker.ts`. Its
 `extractReferences` (reference-checker.ts:117) tokenises `SPEC-/DR-/EPIC-` and `path:line`
@@ -444,11 +443,18 @@ export function buildRefCard(ref: DetectedRef, lookup: ApprovableLookup): RefCar
  *                \s* so an empty value cannot capture the next line; restated because scripts/
  *                is outside the package and listAdrs' own parser (adr-manager.ts:68) is private.
  *
+ * Directories: vscodeOverrides carries the decisionsDir / epicsDir values the Tier-1 caller
+ * reads from the `minspec` configuration, as approve-active.ts:84-92 does. They are passed
+ * unchanged to listAdrs (adr-manager.ts:1277) and listEpics (epic-manager.ts:104), which apply
+ * them before resolveAndValidate (adr-manager.ts:91-95, epic-manager.ts:91-95). ref-cards.ts
+ * reads no setting itself (AC6). listSpecs takes no override (spec-catalog.ts:59).
+ *
  * Never throws: an fs or config error is 'not-found' (INV-graceful-degrade). Writes nothing.
  */
 export function lookupApprovable(
   rootDir: string,
   resolution: NonNullable<RefResolution>,
+  vscodeOverrides?: { decisionsDir?: string; epicsDir?: string },
 ): ApprovableLookup;
 ```
 
@@ -563,17 +569,15 @@ that goes flaky and then gets weakened rather than investigated - and an enumera
 `file:line` list cannot follow lines that move.
 *Rejected: commit the snapshot as a test fixture.* Cost: about 3 MB of copied prose in the
 repo, which the pinned commit already holds.
-*Chosen: read the pinned commit from the clone.* Cost: the `test` job has to clone full
-history (the one-line `ci.yml` change in the component map), as the `paths` job already does.
+*Chosen: read the pinned commit from the clone.* Cost: `a33d6d57` must stay reachable from
+`main` and be present where the harness runs, so where it runs is PQ12, NOT decided.
 
-**Harness.** `packages/minspec/tests/ref-ac1-corpus.test.ts` (new). It extracts
-`git archive a33d6d57 specs docs .minspec` into an `fs.mkdtempSync` directory, so
+**Harness** (new; its path, and whether the default suite collects it, are PQ12's). It
+extracts `git archive a33d6d57 specs docs .minspec` into an `fs.mkdtempSync` directory, so
 `lookupApprovable` resolves against the artifacts that existed at that commit (59 specs,
-89 DRs, 10 epics), and scans the 208 files named above. The commit must be in the clone. That
-is the reason for the one-line `ci.yml` change in the component map, and the harness FAILS,
-naming `git fetch --unshallow`, when `git cat-file -e a33d6d57` fails; it never skips. Until
-Slice B's renderer supplies skip ranges from its token stream, the harness computes them
-itself, over the code-removed text: inline-link destinations (`](` through the matching `)`,
+89 DRs, 10 epics), and scans the 208 files named above. When `git cat-file -e a33d6d57`
+fails, it fails rather than skipping. Until Slice B's renderer supplies skip ranges from its
+token stream, the harness computes them itself, over the code-removed text: inline-link destinations (`](` through the matching `)`,
 allowing one level of nested parentheses), reference definitions (a line
 `[label]: destination`), angle-bracket autolinks (`<https://…>`), and bare `http://`,
 `https://` or `www.` URLs; plus, on the frontmatter-skipped branch only, the leading `---`
@@ -638,7 +642,7 @@ Five things this measurement settles, that prose alone would not have:
 | **INV-graceful-degrade** | Run `detectRefs` + `buildRefCard` over the whole `specs/` + `docs/` corpus and a fuzz set of truncated/garbage tokens (shared test), and `lookupApprovable` over every detected ref (minspec test); assert zero throws, and that every `not-found` lookup yields `null` so the caller emits plain text. The `degraded` variant has no status field, so "a blank status passed off as current" is a type error rather than a test case. | `packages/shared/tests/ref-detect.test.ts` (new), `packages/minspec/tests/ref-cards.test.ts` (new) |
 | **INV-tier0-detection** | Already enforced for the tree by `packages/minspec/tests/tier0-import-ban.test.ts` (scans the `minspec` and `shared` `src/` trees since #1511). Add a **direction** assertion: `ref-detect.ts` imports nothing from `packages/minspec`, no `vscode`, no `fs`. Add a file-scoped assertion that `ref-cards.ts` imports no `vscode`: AC6 covers resolution modules too, and `lib/`'s vscode rule is only `warn` until #830 (eslint.config.mjs:250-262), so the lint alone would not fail it. | `packages/minspec/tests/import-boundaries.test.ts` (existing), `packages/minspec/tests/ref-cards.test.ts` (new) |
 | **INV-keyboard** | One `createLozengeRenderer()` instance renders a `full` DR-053 card three times and a `degraded` card once. The test supplies no counter. It asserts that every emitted id is distinct (`ms-card-0` to `ms-card-3`), every lozenge is `<button type="button">` with no `tabindex="-1"`, and every `aria-describedby` names exactly one element in the concatenated output. The host-level property - one instance per document render - has no seam until SPEC-014 extracts the renderer; it is asserted by the T2 host test below (AC2) over a rendered fixture document that cites DR-053 three times, written in Slice B once that path exists. | `packages/minspec/tests/ref-lozenge-html.test.ts` (new, Slice B) |
-| **AC1 false-positive budget** | Two parts. (1) *Deny-list*, at `detectRefs` level: `src/foo/bar`; `https://example.com/specs/SPEC-014-x/requirements.md` with its URL range passed as a skip range; `M1`, `R1`, `G7`, `IS500`, a lone `SEA`, `[[just-enough-human]]`, `AIClarityAU/minspec#460`, `scroogellm#121`, `SPEC-100@scroogellm` - none yields a `DetectedRef`. The collision classes whose treatment is still open - `invariant #2` and `Costly to Refactor #1` (PQ1), `Windows SP1` (PQ2), `their DR-021` (the wrong-register class) - go in a separate *counted* fixture: the test records their current outcome and fails when it changes, so the PQ answers update the pin deliberately instead of a deny-list assertion answering them first. (2) *Corpus pin*: the harness and exact assertions in the pin above. | (1) `packages/shared/tests/ref-detect.test.ts`; (2) `packages/minspec/tests/ref-ac1-corpus.test.ts` (new), in minspec because `L` needs `lookupApprovable` |
+| **AC1 false-positive budget** | Two parts. (1) *Deny-list*, at `detectRefs` level: `src/foo/bar`; `https://example.com/specs/SPEC-014-x/requirements.md` with its URL range passed as a skip range; `M1`, `R1`, `G7`, `IS500`, a lone `SEA`, `[[just-enough-human]]`, `AIClarityAU/minspec#460`, `scroogellm#121`, `SPEC-100@scroogellm` - none yields a `DetectedRef`. The collision classes whose treatment is still open - `invariant #2` and `Costly to Refactor #1` (PQ1), `Windows SP1` (PQ2), `their DR-021` (the wrong-register class) - go in a separate *counted* fixture: the test records their current outcome and fails when it changes, so the PQ answers update the pin deliberately instead of a deny-list assertion answering them first. (2) *Corpus pin*: the harness and exact assertions in the pin above. | (1) `packages/shared/tests/ref-detect.test.ts`; (2) the AC1 harness (new; its path and where it runs are PQ12), in minspec because `L` needs `lookupApprovable` |
 | **Zero writes** (D2, and "What this design does NOT do") | Copy a fixture root - a spec with an approval sidecar, a DR, an epic, and a doc citing all three plus an unknown id - into `fs.mkdtempSync`. Record every file under it as relative path to sha256 of content, size and `mtimeMs`, plus the full path list. Run `detectRefs`, `lookupApprovable` and `buildRefCard` over every ref in every fixture doc (Slice B adds `createLozengeRenderer().render` on each card). Re-walk and assert the record is identical, with no path added or removed. It is behavioural on purpose: `vi.spyOn(fs, …)` cannot redefine the ESM `fs` namespace (packages/minspec/tests/merge-refresh-890.test.ts:40), and a tree comparison catches a write through any API. | `packages/minspec/tests/ref-cards.test.ts` (new) |
 
 Test tiers beyond T0: **T1** - `detectRefs` truth table over each grammar and each skip-range
@@ -889,6 +893,20 @@ plan by the time anyone noticed.
   (c) the verbatim source text, as the previous revision contracted. Cost: it is not a
   canonical form, so it contradicts FR2 as approved and needs a requirements amendment and
   re-approval, and one target shows as many labels as the corpus has spellings of it.
+- **PQ12 - where the AC1 corpus harness runs. NOT decided. It needs the founder via
+  Clarify.** AC1 asks only that the rate be "pinned at plan" (requirements.md:148-149), which
+  the pin table does; the harness re-checks it on later changes, and fails when `a33d6d57`
+  is absent. vitest collects every `packages/*/tests/**/*.test.ts` (vitest.config.ts:29), and
+  the required `test` check runs it on a shallow checkout (ci.yml:158, :184), so a harness
+  placed there fails that check on every run. Options:
+  (a) **(rec)** run it locally, on demand, outside the default suite. Cost: nothing re-runs
+  the pin, so a change to the detector, the skip ranges or the oracle can move AC1's rate
+  with every required check green; re-pinning in the same diff becomes a manual step.
+  (b) a separate, non-required CI job with a full-history checkout. Cost: CI machinery the
+  requirements do not name, and its red result blocks nothing.
+  (c) `fetch-depth: 0` on the required `test` job, as the `paths` job has (ci.yml:40-42).
+  Cost: it changes a required merge check for every PR and push, and any shallow clone then
+  fails the whole suite.
 - **OQ1 (from requirements) - one fact that narrows it, no answer.** **Zero** approvables in
   the corpus carry a `summary:` frontmatter field today, and there are 61 live approval
   sidecars. So adding `summary` to `stripLifecycle` in
