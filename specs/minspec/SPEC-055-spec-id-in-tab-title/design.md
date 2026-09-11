@@ -97,7 +97,7 @@ No new file. Paths under `packages/minspec/`.
 | `src/test/views.test.ts` | Comments `:8`, `:59-61`, `:68-72`: the test checks that `minspec.status` is registered, nothing more. | FR-1, AC-1 |
 | `tests/status-bar.test.ts` | New `describe` blocks: AC-1 scan, AC-2 count pin, AC-3 static scan. | AC-1, AC-2, AC-3 |
 | `tests/extension.test.ts` | One new `it` in `describe('activate()')` (:407). | AC-3 |
-| `tests/invariant3-project-local-prefs.test.ts` | Two new `it`s and one meta `it` in `describe('INVARIANT 3 …')` (:36). No existing assertion changes. | AC-4 |
+| `tests/invariant3-project-local-prefs.test.ts` | One new `it` and one meta `it` in `describe('INVARIANT 3 …')` (:36). No existing assertion changes. | AC-4 |
 | Only if PQ2 is answered (a), which is NOT decided: `packages/minspec/README.md:121-125`, `packages/minspec/package.json:613`, `packages/minspec/media/walkthrough/explore-sidebar.md:17-24`, `packages/minspec/src/commands/example.ts:197-198`, `packages/minspec/src/test/views.test.ts:58`, `:65` | See PQ2. | FR-1 |
 
 requirements.md's `implements_reason` names only `status-bar.ts` and its test; AC-1's
@@ -109,12 +109,21 @@ there is a comment or a test.
 ```ts
 // tests/status-bar.test.ts - added, local helpers (same walk as invariant3-project-local-prefs.test.ts:27-34)
 function tsFiles(dir: string): string[];              // every *.ts under dir, recursive
-function commentText(src: string): string;            // `//` tails and `/* ... */` bodies only
-function codeText(src: string): string;               // src with those comments removed
+function commentText(src: string): string;            // text of every comment range the TS compiler reports
+function codeText(src: string): string;               // src with those ranges removed
 function badPriorityComments(src: string): string[];  // each line matching
 //   /\b(\d+)\s*,\s*\/\/\s*just (left|right) of\b[^(]*\(priority (\d+)\)/
-// where `left` has N <= M, or `right` has N >= M
+// where `left` has N < M, or `right` has N > M
 ```
+
+- **Helpers.** Comment ranges come from the `typescript` compiler already in the tree (root
+  `package.json:37`; imported at `src/lib/import-cycle-check.ts:49`):
+  `ts.getLeadingCommentRanges`/`getTrailingCommentRanges` at each token of
+  `ts.createSourceFile(…)` (JSDoc nodes not descended). Not a regex: a `/*` inside a `//`
+  comment (`extension.ts:551`, `:636`) or a string opens no block. **Meta:** for
+  `const g = '/* in a string */'; // watches refs/heads/*` then a line
+  `vscode.window.createStatusBarItem(`, `commentText` holds `refs/heads/*` and not
+  `in a string`, and `codeText` holds `/* in a string */` and `createStatusBarItem(`.
 
 - **AC-1**, over `tsFiles(src/)`: `commentText` contains neither `$(shield) MinSpec` nor
   `per-spec progress item`, and `badPriorityComments` is empty for every file. **Meta:**
@@ -122,7 +131,7 @@ function badPriorityComments(src: string): string[];  // each line matching
   and `98, // just left of the next-task signpost (priority 99)`, and passes
   `98, // just right of the next-task signpost (priority 99)`.
 - **AC-2**, over `tsFiles(src/)`: the `createStatusBarItem(` occurrences in `codeText` number
-  exactly `AC2_PINNED.length`, all in `views/status-bar.ts`; the pairings are the existing
+  exactly `AC2_PINNED.length`; the pairings are the existing
   per-class tests (:81-85, :258-262, and :134-138 for the tidy-primary item). **`AC2_PINNED`
   is PQ1's answer.** Under AC-2 as approved it has two entries and the test is red on
   `d43f235a` (three sites).
@@ -140,19 +149,14 @@ function badPriorityComments(src: string): string[];  // each line matching
   `scripts/build-extension.sh:73`, `:76`, and no production file imports from `src/test/`),
   comments stripped as `:55` does. `configWriteSites(text): number` counts (i)
   `getConfiguration(…)` followed across whitespace by `.update(`, and (ii) `X.update(` where `X`
-  is bound in the same file by `const|let|var X = …getConfiguration(`. The per-file site list,
-  sorted, equals `['commands/classify.ts', 'commands/migrate.ts', 'extension.ts']`, each entry
-  carrying a comment naming its gate (classify.ts:171, migrate.ts:31, auto-bootstrap.ts:711).
-  A new site fails the pin whatever its target; adding one is a reviewed diff that must name
-  its gate. Second `it`: no string literal in the same file set holds `.vscode` as a path
-  segment, i.e. no match for ``/(['"`])(?:[^'"`\n]*[\/\\])?\.vscode(?=[\/\\'"`])/``; the
-  near-misses `init.ts:1028` and `:1035` (`GitHub.vscode-pull-request-github`) and
-  `constitution-context.ts:270` (`engines.vscode.`) do not match. **Meta:** `configWriteSites`
-  counts a chained sample, a variable-bound sample, and
-  `cfg.update('window.title', '${rootName}', true)`; the path regex matches `'.vscode'` and
-  `'.vscode/settings.json'` and not `'GitHub.vscode-pull-request-github'`. The existing Global
-  scan (:48-67) is
-  unchanged; its blindness to a boolean `true` target is #1944, not this spec.
+  is bound in the same file by `const|let|var X = …getConfiguration(`. The map of relative path
+  to count, over files with a non-zero count, equals `AC4_PINNED` =
+  `{ 'commands/classify.ts': 1, 'commands/migrate.ts': 1, 'extension.ts': 1 }` (item 6's three
+  sites), so a second site in a pinned file changes the map too. **The pin is PQ3's answer.**
+  **Meta:** `configWriteSites` counts 1 for a chained sample, 1 for
+  `const cfg = vscode.workspace.getConfiguration(); cfg.update('window.title', '${rootName}', true)`,
+  and 2 for the two joined. The existing Global scan (:48-67) is unchanged; its blindness to a
+  boolean `true` target is #1944, not this spec.
 
 **AC-5 is an Implement step, not a suite test**, because it needs the network. As the bot, add
 #374 (worktree/session naming) as a "blocked by" dependency of #897; then read back
@@ -171,7 +175,8 @@ Implement PR body.
 ## Build order
 
 1. T0 tests first. AC-1 is red on `d43f235a` (four sites). AC-3 and AC-4 assert absences that
-   already hold, so their meta tests are what show each scan can fire. AC-2 waits on PQ1.
+   already hold, so their meta tests are what show each scan can fire. AC-2 waits on PQ1, the
+   AC-4 pin on PQ3.
 2. Comment sweep; AC-1 goes green.
 3. PQ2 edits, only if answered (a).
 4. AC-5 tracker write and read-back.
@@ -206,6 +211,14 @@ Implement PR body.
   unreferenced asset. **(b)** Comments only. *Cost:* the README, the walkthrough and every
   generated example keep describing an item that does not exist - a lying signpost to users,
   the defect EPIC-002 exists to prevent. **NOT decided - needs the founder via Clarify.**
+- **PQ3 - AC-4's pin is stricter than AC-4's fail clause.** AC-4 fails only on a new site "not
+  reachable only from a user choice", and DQ-4 records user-gated Workspace writes as
+  legitimate. Reachability cannot be read from source text, so a count pin fails on every new
+  site, gated or not. **(a) (rec)** Pin per-file counts (`AC4_PINNED`): a new site fails until a
+  reviewed diff updates the pin, the pattern AC-2 uses. *Cost:* a correctly user-gated site also
+  goes red and needs a pin edit, which AC-4's narrower wording does not ask for. **(b)** No pin;
+  keep only the existing Global scan. *Cost:* a silent Workspace write passes every test, so
+  AC-4's fail clause goes unenforced. **NOT decided - needs the founder via Clarify.**
 
 ## What this design does NOT do
 
