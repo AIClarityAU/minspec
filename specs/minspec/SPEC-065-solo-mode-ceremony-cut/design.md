@@ -75,7 +75,7 @@ from that merged tree.
 | `ready-to-merge.yml` subscribes **only** to `pull_request` (`opened, synchronize, reopened, labeled, unlabeled`), and reads the PR's labels from the event payload | `.github/workflows/ready-to-merge.yml:82-90`, `:176` | Its `labeled` run fires when `ai-review-runner` applies `ai-review:pass`, i.e. **before** that run completes, so before any `workflow_run` witness can exist, and nothing re-runs it afterwards. The witness has to drive the re-evaluation itself (D10) |
 | This repo already re-runs a `pull_request` workflow from another workflow, using `GITHUB_TOKEN` with `actions: write` | `.github/workflows/ai-review-retry.yml:27-29` (permission), `:129-135` (`gh run rerun`) | The re-evaluation seam D10 uses is already in production here, not new |
 | Two more machinery-only signals say "a human must review" | `ai-review.yml:936-986` posts `machinery-review-required` = `action_required`, titled *"Machinery PR — human review required"* (`:956`); `shouldSummonHumanReview` returns true for any machinery PR (`ai-review-guard.js:975-977`), and `ai-review.yml:1184-1201` then applies `needs-human-review` | Neither gates a merge: neither is among the six required checks (`requirements.md:58-60`), and `needs-human-review` is read as a countermand only on **issues** (`scripts/dispatch-ready-check.sh:635`). But both would be false on a machinery PR that merges unattended – see **OQ-8** |
-| The broad machinery set is six directory prefixes plus two generator files | `packages/minspec/src/lib/machinery-paths.ts:52-78`; hand-copied at `ai-review.yml:404` and `scripts/dispatch-issue.sh:143` | `profile.ts`, `machinery-paths.ts` and `.minspec/config.json` are **not** machinery. That constrains the witness self set (see *Contracts*) and raises **OQ-9** |
+| The broad machinery set is six directory prefixes plus two generator files | `packages/minspec/src/lib/machinery-paths.ts:52-78`; hand-copied at `ai-review.yml:404` and `scripts/dispatch-issue.sh:143` | `profile.ts`, `machinery-paths.ts` and `.minspec/config.json` are **not** machinery. That constrains the witness self set (see *Contracts*) and raises **OQ-9**. The set is also wider than FR-2's `.github/**` and `scripts/**`, which raises **OQ-15** |
 | The native auto-merge arm is decided when dispatch opens the PR, before any review has completed | `scripts/dispatch-issue.sh:1048-1089` (`gh pr merge --auto` at `:1084`) | Nothing that needs a witness to exist can be evaluated at that seam – see **OQ-1** |
 | `tsx` is pinned, and `scripts/lib/autonomy.sh` refuses to fetch a runner over the network | `package.json:36` (`tsx` 4.23.1); `autonomy.sh:87-99`; `.github/workflows/dr-id-collision.yml:55-73` runs TypeScript in CI after `npm ci` | How bash and YAML execute `profile.ts` (see *Contracts*): the pinned runner from `node_modules/.bin`, never `npx` |
 | #1839 (patch-fingerprint re-attestation) records a fingerprint, and nothing consumes it yet | `ai-review-guard.js:366-376` (*"has no production caller"*); the consumer is #1840 | The witness reads neither the fingerprint nor `findReattestableVerdict`. It depends only on `ai-review:pass` label provenance and on `ai-review-runner` completing |
@@ -83,7 +83,7 @@ from that merged tree.
 | A **third** unattended merge actor sits outside dispatch: docs-lane | `.github/workflows/docs-lane.yml:247` (`gh pr merge --auto --squash`, on any docs-only PR whose labels include `docs-lane`, gated at `:36`); the label is applied by `scripts/push-docs.sh:157-158` itself when an agent opens the PR. A grep of `.github`, `scripts`, `packages/minspec/src` and `packages/shared/src` for `gh pr merge`, `pulls/…/merge` and the GraphQL auto-merge mutation finds these three actors and nothing else, apart from `docs-lane.yml:69`'s `--disable-auto`, which only revokes | Under **either** profile an agent's docs-only PR merges once green with no human act. Seam 5 does not reach it, and AC-4 and AC-7 disagree about whether it should – see **OQ-13** |
 | `ai-review.yml`'s post step re-normalises the verdict before it applies it | `.github/workflows/ai-review.yml:1013-1019`: only `pass` and `blocked` survive; every other value becomes `ai-review:changes` | A new verdict label must be admitted there, or it lands as `changes` (the FR-4 contract) |
 | Each downstream consumer selects only the labels or conclusions it names | retry: `ai-review-retry.yml:65` (`ai-review:blocked`); remediation: `remediate-pr.sh:124` and `:402-407` (the `changes` label, or an `ai-review` check concluding `FAILURE`/`ERROR`); summon: `shouldSummonHumanReview`, `ai-review-guard.js:975-994` | A new label that no consumer names is stranded – see **OQ-12** |
-| No test in this repo executes a github-script body | a grep of `packages/minspec/tests` for `AsyncFunction` or `new Function` finds nothing; `ai-review-verdict-combine.test.ts:54` runs its extracted block with `execFileSync('bash', …)` | The witness's three JS blocks need a new harness, specified under *Contracts* |
+| No test in this repo executes a github-script body | a grep of `packages/minspec/tests` for `AsyncFunction` or `new Function` finds nothing; `ai-review-verdict-combine.test.ts:54` runs its extracted block with `execFileSync('bash', …)` | The witness's four JS blocks need a new harness, specified under *Contracts* |
 
 ---
 
@@ -335,7 +335,7 @@ the arm slice below (OQ-1). None of the four is designed here.
 | `packages/minspec/tests/profile.test.ts` | **new, `implements:`** | Whole file | T0 for FR-1/AC-1/AC-2, the CLI grammar, and AC-4's hermetic dispatch cases |
 | `packages/minspec/tests/solo-mode-keep-gates.test.ts` | **new, `implements:`** | Whole file | T0 for FR-6/AC-6 under both profiles, and for FR-5/AC-7 under `team` only (AC-7's condition). The FR-5 rows' `solo` arm waits for OQ-10 |
 | `.github/workflows/machinery-witness.yml` | **new, `implements:`** | Whole file | `on: workflow_run: workflows: [ai-review-runner], types: [completed]`. Two jobs, specified under *Contracts*. `evaluate` has a read-only `GITHUB_TOKEN` and **no App token**; it checks out the base, runs `npm ci`, and executes `profile.ts` and `isMachineryPath` through `tsx`. `post` mints the App token only after evaluation, posts the check-run, and re-runs `ready-to-merge` (D10). |
-| `packages/minspec/tests/machinery-witness.test.ts` | **new, `implements:`** | Whole file | Executes the `witness-classify` bash block with the existing `# >>> name` / `# <<< name` technique, and the `witness-decide` / `witness-post` / `witness-reevaluate` github-script bodies and the self-set lists with a **new** JS-marker harness (*Contracts*), so the test cannot drift from what CI runs. Also pins the no-interpolation rule for PR-controlled strings (*Contracts*) |
+| `packages/minspec/tests/machinery-witness.test.ts` | **new, `implements:`** | Whole file | Executes the `witness-classify` bash block with the existing `# >>> name` / `# <<< name` technique, and the `witness-resolve` / `witness-decide` / `witness-post` / `witness-reevaluate` github-script bodies and the self-set lists with a **new** JS-marker harness (*Contracts*), so the test cannot drift from what CI runs. Also pins the no-interpolation rule for PR-controlled strings (*Contracts*) |
 | `.github/workflows/ready-to-merge.yml` | `affects:` | Read the head's `machinery-witness` check-runs and pass them into the guard | One extra `github.paginate(checks.listForRef, { check_name: 'machinery-witness' })` call and one extra argument. It sits inside the existing head-witness block (`:279-315`), after the `ai-review` check-run read (`:289-295`), in its **own** `try`. On an error it emits `core.warning` and passes `machineryCheckRuns: undefined`, so a failed read can lose only the third channel, never the two existing ones. Placed in the shared `try` instead, an API error on the new read would flip a verified non-machinery PR to unverified through the shared `catch` (`:306-315`). That would be a behaviour change in an adopter repo, which has no producer (OQ-3). No test executes this script body. The guard half is tested: `ai-review-guard.test.js` asserts that `verifyHeadPassWitness` with `machineryCheckRuns: undefined` returns exactly what today's two-channel call returns. The decision stays in the guard. The trigger set, permissions (`checks: read` is already granted, `:96`) and base pin are **unchanged**, because re-evaluation is driven from the witness side (D10). |
 | `.github/scripts/ai-review-guard.js` | **UNDECLARED — OQ-2** | FR-2: `MACHINERY_WITNESS_CHECK_NAME`; `verifyHeadMachineryWitness()`; a third channel in `verifyHeadPassWitness()`. FR-4: an `UNREADABLE` constant and export, an `UNREADABLE` arm in `decideReviewCheck()` (D12), and `UNREADABLE` in `VERDICT_LABELS` (`:1006`). `shouldSummonHumanReview` (`:975-994`) may also change, under **OQ-8** and **OQ-12** | Pure functions, unit-tested in `.github/scripts/ai-review-guard.test.js` (run by `ci.yml:113`), mirroring `verifyHeadPassCheckRun` |
 | `scripts/review-decide.sh` | **UNDECLARED — OQ-2** | Two `echo` lines, per the FR-4 contract: the no-parseable-verdict fall-through (`:113`) and the `BEGIN_COUNT != 1` refusal (`:189`, inside the branch at `:156`) | stdout is the label contract. The change reaches **every** caller of the script, not only `ai-review.yml` (see *Contracts*, FR-4) |
@@ -483,7 +483,9 @@ one it cannot establish:
    short page or an API error posts nothing;
 4. at least one changed path is machinery per `isMachineryPath`, executed from the base
    checkout by `witness-classify`. If none is, this witness has no opinion and posts nothing,
-   because the ordinary `ai-review` witness already covers the PR;
+   because the ordinary `ai-review` witness already covers the PR. That set is wider than the
+   `.github/**` and `scripts/**` FR-2 names, and how much of it the witness may certify is
+   **OQ-15**, not decided here;
 5. the set touches **no** entry of either self-set list below — otherwise `action_required`,
    with the offending path named;
 6. a provenance-verified `ai-review:pass` is bound to this head, verified through the base
@@ -507,13 +509,16 @@ jobs:
     permissions: { contents: read, pull-requests: read, issues: read }
     outputs: { post: …, conclusion: …, title: …, summary: …, head_sha: … }
     steps:
-      - resolve   # github-script, GITHUB_TOKEN: conditions 2-3. Writes the file list as JSON
-                  # to $RUNNER_TEMP/files.json; outputs pr, base_sha, head_sha
+      - resolve   # github-script, GITHUB_TOKEN: conditions 2-3. Its body carries
+                  # `// >>> witness-resolve` / `// <<< witness-resolve`. Writes the file list as
+                  # JSON to $RUNNER_TEMP/files.json; outputs pr, base_sha, head_sha. A failed
+                  # condition fails the job (visible, posts nothing)
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd    # v5.0.1, as ai-review.yml:244
         with: { ref: <base_sha from resolve>, persist-credentials: false }
       - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4.4.0, as ai-review.yml:251
         with: { node-version: '22' }
-      - run: npm ci                 # the BASE lockfile, which pins tsx 4.23.1 (package.json:36)
+      - run: |                      # a `|` block, as the textual guard below requires of every body
+          npm ci                    # the BASE lockfile, which pins tsx 4.23.1 (package.json:36)
       - classify  # run:, between `# >>> witness-classify` / `# <<< witness-classify`:
                   #   PROFILE   <- node_modules/.bin/tsx packages/minspec/src/lib/profile.ts
                   #                  --repo-root "$GITHUB_WORKSPACE"   (consumer rule above)
@@ -559,9 +564,11 @@ as an `env:` value, read as `process.env.W_*`. No `${{ … }}` expression appear
 must be exactly `success` or `action_required`, and `W_HEAD_SHA` must match `^[0-9a-f]{40}$`;
 anything else is `core.setFailed`, and nothing is posted. `W_TITLE` and `W_SUMMARY` reach the
 REST call only as JSON string fields, which are data, never code. `machinery-witness.test.ts`
-pins both halves. (1) Textually, because the repo has no YAML-parser dependency: it tracks each
-`run: |` and `script: |` block scalar by indentation (a block ends at the first non-blank line
-indented at or left of its key) and asserts that no `${{` occurs inside one. (2) By execution:
+pins both halves. (1) Textually, because the repo has no YAML-parser dependency. Every `run:`
+and `script:` value in the file must be a bare `|` block scalar, and the test fails on any other
+form (single-line, folded `>`, a chomping indicator, quoted), so no body sits outside the scan.
+It tracks each block by indentation (a block ends at the first non-blank line indented at or
+left of its key) and asserts that no `${{` occurs inside one. (2) By execution:
 the `witness-post` region, run under the harness below with a `W_SUMMARY` whose path holds a
 backtick, `$(id)` and `${{ secrets.X }}`, reaches the stubbed `checks.create` call
 byte-identical; a `W_CONCLUSION` of `failure`, or a 39-character `W_HEAD_SHA`, fails the job with
@@ -573,14 +580,15 @@ node 22.23.2). Second, the runs API filters by `head_sha`:
 `GET /actions/workflows/ready-to-merge.yml/runs?head_sha=…` returned only that head's runs,
 each with `event: pull_request`.
 
-**How `machinery-witness.test.ts` executes the three github-script bodies. This is new harness
+**How `machinery-witness.test.ts` executes the four github-script bodies. This is new harness
 work, not an existing technique.** `witness-classify` is a bash `run:` block, so the
 `# >>> … # <<<` extraction `ai-review-verdict-combine.test.ts` already uses applies to it
-unchanged. `witness-decide`, `witness-post` and `witness-reevaluate` are JavaScript inside `script: |`, where
+unchanged. `witness-resolve`, `witness-decide`, `witness-post` and `witness-reevaluate` are JavaScript inside `script: |`, where
 a `#` line is not valid code, and no test in this repo executes a github-script body today.
 The contract:
 
 - **Markers.** Each JS region is bracketed by line comments inside the script body:
+  `// >>> witness-resolve` / `// <<< witness-resolve`,
   `// >>> witness-decide` / `// <<< witness-decide`, `// >>> witness-post` / `// <<< witness-post`
   and `// >>> witness-reevaluate` / `// <<< witness-reevaluate`, with
   `// >>> witness-self-set` / `// <<< witness-self-set` nested
@@ -599,7 +607,8 @@ The contract:
   inside the region, `POLL_ATTEMPTS = 10` and `POLL_DELAY_MS = 30_000`. The test asserts the
   attempt count and the delays through the recorded calls, never against wall-clock time.
 - **Outputs.** A region reports only through `core.setOutput` and `core.setFailed`, which is
-  what the INV-1 assertions read.
+  what the INV-1 assertions read. The one exception is the `files.json` that `witness-resolve`
+  writes under `process.env.RUNNER_TEMP`; the test points that at a temp dir and reads it.
 
 ```js
 // .github/scripts/ai-review-guard.js — the third head-witness channel.
@@ -769,7 +778,7 @@ T0 first: every row below is written and red before the behaviour it constrains 
 
 | Invariant | What must hold | T0 test, by execution |
 |---|---|---|
-| **INV-1** / constitution 2 — no silent gate | No new load-bearing signal is written with a swallowed error; a missing or errored witness fails closed **and visibly** | `machinery-witness.test.ts`: drive the `witness-decide` block with each failure input (no PR, PR disagreement, stale head, non-default base branch, short files page, API error, base checkout missing, guard unloadable, a resolver that exits non-zero or prints anything but `solo`/`team`) and assert the outcome is "post nothing or `action_required`", never `success`; drive the `witness-reevaluate` block with no run, a run that never completes, and a rerun API error, and assert each fails the job; and assert every such path emits a `::warning` or `::error` — the #810 lesson, where a silently swallowed 403 made a required gate unsatisfiable repo-wide |
+| **INV-1** / constitution 2 — no silent gate | No new load-bearing signal is written with a swallowed error; a missing or errored witness fails closed **and visibly** | `machinery-witness.test.ts`: drive the `witness-resolve` block with each input of conditions 2-3 (no PR, PR disagreement, stale head, non-default base branch, short files page, API error) and assert it fails the job with no `pr` output and no `files.json`; drive the `witness-decide` block with each remaining failure input (API error, base checkout missing, guard unloadable, a resolver that exits non-zero or prints anything but `solo`/`team`) and assert the outcome is "post nothing or `action_required`", never `success`; drive the `witness-reevaluate` block with no run, a run that never completes, and a rerun API error, and assert each fails the job; and assert every such path emits a `::warning` or `::error` — the #810 lesson, where a silently swallowed 403 made a required gate unsatisfiable repo-wide |
 | **INV-1**, second witness | `ready-to-merge` must not come to hinge on the machinery witness alone | `machinery-witness.test.ts`: with the witness absent, a non-machinery PR still greens through the existing `ai-review/pass` **or** `ai-review` channels; `verifyHeadPassWitness` tries the two existing channels before the new one |
 | **INV-2** — approval stays human under both profiles | `checkApprover` / `assertHumanApprover` (`packages/minspec/src/lib/approval.ts`) deny an agent identity regardless of `mode` | `solo-mode-keep-gates.test.ts`: `approveSpec(fixtureRoot, specPath, 'T4', <agent identity>)` (`approval.ts:517`), which takes the repo root and calls `assertHumanApprover` before any write (`:524-528`), against a `mode: solo` and a `mode: team` fixture; assert it throws `ApproverDeniedError` and writes no sidecar under both. A direct `checkApprover` call takes no root, so it cannot see the fixture and is not the invariance proof (see the FR-6 table) |
 | **INV-3** — irreversible/outward-facing stays human under both profiles | `mayProceed` denies `irreversible-or-outward-facing` and `approval-or-acceptance` whatever the profile says | `solo-mode-keep-gates.test.ts`, through `--may-merge` (`dispatch-issue.sh:316-318`) in a **hermetic copy** of the script tree whose own config carries the profile, never through `MINSPEC_AUTONOMY_REPO_ROOT`. The copy, its cases, the reason it asserts, and its profile-reachability witness are specified in *The INV-3 harness* below. A direct `mayProceed('act', …)` call is kept as a behaviour check, but it takes no config, so it is not the invariance proof |
@@ -859,14 +868,13 @@ that a config-taking gate receives.
 
 **What this suite still cannot catch, stated rather than claimed.** `applyFloor`'s only
 production caller is `packages/minspec/src/commands/classify.ts:86`
-(`applyFloor(result.tier)`), inside the VS Code extension host, and no executable entry reaches
-it from outside. A `solo` branch added at that call site would pass this suite. The
-mitigation is seam 1's one-reader rule plus the T1 drift guard below. That guard is source
-text, so it is **not** how AC-6 is discharged, and this residual is not claimed as covered.
-
-A source-text check that the profile is imported only by its declared consumers is worth
-having as that T1 drift guard, but it is **explicitly not** how AC-6 is discharged — AC-6
-says "by execution, not by source text", and the table above is the execution.
+(`applyFloor(result.tier)`), inside the VS Code extension host. The two tests that execute it,
+`classify-command.test.ts` and `commands.test.ts`, both mock `vscode` and `loadConfig` (`:14`,
+`:66-68`; `:5`, `:72-74`), so neither can see a fixture's `mode`, and a `solo` branch at that
+call site would pass this suite. An import of `profile.ts` there would turn INV-4's metafile test red (`classify.ts`
+is in the bundle through `extension.ts:7`; checked 2026-09-11), but a read of `mode` off
+`loadConfig`'s result would not. The "T1 drift guard" an earlier draft leaned on here named no
+file, seam or consumer list, and is removed. Whether AC-6 accepts the residual is **OQ-16**.
 
 ### The rest of the acceptance criteria
 
@@ -954,7 +962,7 @@ constrains it, and nothing lands before the config state it depends on.
   attempts are exhausted (`ai-review-guard.js:956-957`).
 - **The witness slice (FR-2).** `machinery-witness.yml`, the guard channel,
   `ready-to-merge.yml`'s extra read, and `machinery-witness.test.ts`. Blocked on OQ-2, OQ-3,
-  OQ-4 and OQ-9.
+  OQ-4, OQ-9 and OQ-15.
 - **The machinery arm slice (FR-2, dispatch).** Blocked on OQ-1, and it carries OQ-8's answer
   with it. Until it lands, a machinery PR under `solo` reaches a **green** `ready-to-merge` and
   then waits for a merge keystroke. That is already a strictly better position than today's
@@ -1455,6 +1463,33 @@ Each of these is genuinely undecidable from the approved requirements. None is r
   (OQ-2).
   ➡️ Founder decision. The false-red slice waits for it alongside OQ-3 and OQ-12, because
   under (b) or (c) it edits more lines of the same script.
+
+- **OQ-15 – may the witness certify machinery outside `.github/**` and `scripts/**`? NOT
+  decided; needs the founder via Clarify.** FR-2 names only those two (`requirements.md:109-111`).
+  Condition 4 keys on `isMachineryPath`, whose set also holds `.githooks/` (the RCDD hook FR-6
+  keeps), `.circleci/`, `.buildkite/`, `.husky/` and the two template generators
+  (`machinery-paths.ts:52-78`). So an agent PR touching only `.githooks/commit-msg` or
+  `ci-review-templates.ts` would be witnessed, and would merge with no human once the machinery
+  arm slice lands. Today it needs `--admin`.
+  **(a)** No: the witness posts nothing for a PR with any such path, which keeps today's
+  `--admin` path – **(rec)**, because it certifies nothing FR-2 does not name. Its cost: a PR
+  touching such a path beside a `.github/` or `scripts/` one stays on `--admin` too, which reads
+  FR-2 narrower than its words. That includes any PR that regenerates `ci-review-templates.ts`,
+  as every FR-2 and FR-4 PR does under OQ-3 (b) or (c).
+  **(b)** Yes, the whole broad set, as drafted. Cost: the RCDD hook and the templates shipped to
+  every adopter can change on AI signals alone.
+  ➡️ Founder decision. The witness slice does not ship until it is answered.
+
+- **OQ-16 – must AC-6's floor clause reach `applyFloor`'s call site? NOT decided; needs the
+  founder via Clarify.** The floor row executes `classify` and `applyFloor`, not
+  `classify.ts:86` (*What this suite still cannot catch*).
+  **(a)** The floor row is enough, and the residual stays recorded – **(rec)**, because it adds
+  no surface. Its cost: a `solo` branch at that call site that reads `mode` off `loadConfig`
+  passes every test in this Plan.
+  **(b)** Add a row that runs `classifyCommand(fixtureRoot)` with the real `loadConfig` and
+  classifier. Cost: a new variant of `classify-command.test.ts`'s harness, which mocks both
+  today, and the row belongs in the keep-list slice, before any profile reader exists.
+  ➡️ Founder decision.
 
 ## Follow-ups (tracked)
 
