@@ -18,6 +18,12 @@ Topic drift → GitHub issue (AIClarityAU/minspec), not inline work.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SCOPE
 
+# --- Identity boundary (#1816) ---
+# Where this session runs decides whose GitHub account a bare `gh` or `git push` uses:
+# on the host it is the founder's. First, so it is read before any write. Delegated to
+# its own unit so it is tested by EXECUTION (see session-identity.sh). Never fatal.
+"$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/session-identity.sh" || true
+
 # --- Concurrent-session branch guardrail (issue #168) ---
 # One checkout has one HEAD. If a parallel session ran `git checkout`/`merge` in
 # THIS folder, the branch moved under you and uncommitted work may be stranded on
