@@ -470,7 +470,8 @@ interface MachineryWitnessCheckRun {
 one it cannot establish:
 
 1. the profile is `solo`, as reported by the `witness-classify` step (the CLI run against the
-   base checkout under the consumer rule above);
+   base checkout under the consumer rule above) and received by `witness-decide` as
+   `W_PROFILE` (*The classify-to-decide handoff*, below);
 2. the PR resolved unambiguously from `workflow_run.pull_requests`, cross-checked against
    `GET /repos/{o}/{r}/commits/{head_sha}/pulls` — a disagreement, an empty list (a fork
    PR), or more than one match posts nothing. `GET /repos/{o}/{r}/pulls/{n}` must also show
@@ -482,7 +483,7 @@ one it cannot establish:
    `GET /repos/{o}/{r}/pulls/{n}/files` (trusted GitHub data, never stage 1's output) — a
    short page or an API error posts nothing;
 4. at least one changed path is machinery per `isMachineryPath`, executed from the base
-   checkout by `witness-classify`. If none is, this witness has no opinion and posts nothing,
+   checkout by `witness-classify` and received as `W_MACHINERY`. If none is, this witness has no opinion and posts nothing,
    because the ordinary `ai-review` witness already covers the PR. That set is wider than the
    `.github/**` and `scripts/**` FR-2 names, and how much of it the witness may certify is
    **OQ-15**, not decided here;
@@ -519,14 +520,16 @@ jobs:
         with: { node-version: '22' }
       - run: |                      # a `|` block, as the textual guard below requires of every body
           npm ci                    # the BASE lockfile, which pins tsx 4.23.1 (package.json:36)
-      - classify  # run:, between `# >>> witness-classify` / `# <<< witness-classify`:
+      - classify  # id: classify. run:, between `# >>> witness-classify` / `# <<< witness-classify`:
                   #   PROFILE   <- node_modules/.bin/tsx packages/minspec/src/lib/profile.ts
                   #                  --repo-root "$GITHUB_WORKSPACE"   (consumer rule above)
                   #   MACHINERY <- node_modules/.bin/tsx -e '<require("./packages/minspec/src/lib/
                   #                  machinery-paths.ts").isMachineryPath over the JSON list at
                   #                  $FILES_JSON>'; prints exactly `true` or `false`, and anything
                   #                  else fails the job (visible, posts nothing)
-      - decide    # github-script. Its script body carries JS line-comment markers
+                  #   last: profile=$PROFILE, machinery=$MACHINERY >> "$GITHUB_OUTPUT" (handoff below)
+      - decide    # github-script, env: W_PROFILE / W_MACHINERY: ${{ steps.classify.outputs.<profile|machinery> }}
+                  # (handoff below). Its script body carries JS line-comment markers
                   # `// >>> witness-decide` / `// <<< witness-decide`, with the self-set
                   # region nested at the top (harness below). Requires the BASE guard and
                   # fails closed if it is absent, exactly as ready-to-merge.yml:154-173 does;
@@ -573,6 +576,49 @@ the `witness-post` region, run under the harness below with a `W_SUMMARY` whose 
 backtick, `$(id)` and `${{ secrets.X }}`, reaches the stubbed `checks.create` call
 byte-identical; a `W_CONCLUSION` of `failure`, or a 39-character `W_HEAD_SHA`, fails the job with
 no call made.
+
+**The classify-to-decide handoff.** `witness-classify` hands its two results to `witness-decide`
+as **step outputs**, the carrier the sketch already uses for `witness-resolve`'s scalars (`pr`,
+`base_sha` and `head_sha`, set through `core.setOutput`; the checkout reads `base_sha` as its
+`ref:`). `ai-review.yml` already uses the same carrier between two of its steps: its review step
+appends `label=` and `is_machinery=` to `$GITHUB_OUTPUT` (`:632`, `:642`), and a later step
+receives them through `env:` (`:835`, `:840`) and reads them as `process.env.*` (`:877`). The
+sketch's other carrier, the `$RUNNER_TEMP/files.json` that `witness-resolve` hands
+`witness-classify`, exists because file names are PR-controlled. Classify's two values are not:
+each comes from a two-token vocabulary.
+
+- **Writer.** The step has `id: classify`. The last two commands of the `witness-classify`
+  block, which run only after both values are established, are
+  `echo "profile=$PROFILE" >> "$GITHUB_OUTPUT"` and
+  `echo "machinery=$MACHINERY" >> "$GITHUB_OUTPUT"`. `$PROFILE` holds the value after the
+  consumer rule has been applied, so the block can write only `profile=solo` or `profile=team`,
+  and only `machinery=true` or `machinery=false`. A block that exits non-zero has written
+  neither line. `machinery-witness.test.ts` asserts textually that `GITHUB_OUTPUT` appears
+  nowhere in `machinery-witness.yml` outside the `witness-classify` region, so no line the test
+  does not execute can append a second `profile=`.
+- **Reader.** The `witness-decide` step receives the two values only through `env:`, under the
+  no-interpolation rule above: `W_PROFILE: ${{ steps.classify.outputs.profile }}` and
+  `W_MACHINERY: ${{ steps.classify.outputs.machinery }}`. It reads them as
+  `process.env.W_PROFILE` and `process.env.W_MACHINERY`. In the harness, `process` is an object
+  whose `env` holds the case's two values.
+- **Missing or malformed fails closed, visibly.** Straight after the nested self-set region,
+  before any API call, the decide region requires `W_PROFILE` to be exactly `solo` or `team`
+  and `W_MACHINERY` to be exactly `true` or `false`. Anything else, including an unset or empty
+  value (an output the step never wrote reaches `env:` empty, as `ai-review.yml:833-834`
+  notes), gets `core.setFailed` naming the variable and its value, then `return`. No `post`
+  output is set and nothing is posted, the treatment `witness-post` gives `W_CONCLUSION` and
+  `W_HEAD_SHA`. This is deliberately stricter than `ai-review.yml:877`, which reads a missing
+  `IS_MACHINERY` as `false`. There, `false` only withholds an exemption. Here, a missing value
+  means the handoff broke, and reading it as an answer would hide that.
+- **A valid `team` or `false` is an answer, not a fault.** Under `W_PROFILE=team` (D7, D9: the
+  witness does not exist under `team`) or `W_MACHINERY=false` (condition 4), decide sets `post`
+  to `false` and sets no conclusion. Neither case warns. A `team` that came from a resolver
+  fault has already warned in `witness-classify` under the consumer rule, so a genuine `team`
+  config stays quiet.
+- **Tested at the carrier, not inside either step.** Every test that executes the
+  `witness-classify` block, AC-1's YAML consumer included, reads its result from the
+  `$GITHUB_OUTPUT` file, never from a shell variable. Every test of `witness-decide` supplies
+  the two values only through `process.env`. The cases are in the INV-1 and AC-3 rows.
 
 Two facts were
 checked on 2026-09-11. First, `tsx -e` can `require()` a `.ts` module (tsx 4.23.1,
@@ -778,7 +824,7 @@ T0 first: every row below is written and red before the behaviour it constrains 
 
 | Invariant | What must hold | T0 test, by execution |
 |---|---|---|
-| **INV-1** / constitution 2 — no silent gate | No new load-bearing signal is written with a swallowed error; a missing or errored witness fails closed **and visibly** | `machinery-witness.test.ts`: drive the `witness-resolve` block with each input of conditions 2-3 (no PR, PR disagreement, stale head, non-default base branch, short files page, API error) and assert it fails the job with no `pr` output and no `files.json`; drive the `witness-classify` block under bash from a fixture root holding a stub `node_modules/.bin/tsx` that answers the `profile.ts` call and the `-e` call separately, each faulted alone (the two-call stub of `docs-lane-hold.test.ts:102-127`): a resolver that exits non-zero (even printing `solo`) or prints anything but `solo`/`team` leaves `$PROFILE` `team` (printed after the block, as `ai-review-verdict-combine.test.ts:52` prints `$FINAL`), and a classifier that prints anything but `true`/`false` exits non-zero; drive the `witness-decide` block with each remaining failure input (API error, base checkout missing, guard unloadable) and assert the outcome is "post nothing or `action_required`", never `success`; drive the `witness-reevaluate` block with no run, a run that never completes, and a rerun API error, and assert each fails the job; and assert every such path emits a `::warning` or `::error` — the #810 lesson, where a silently swallowed 403 made a required gate unsatisfiable repo-wide |
+| **INV-1** / constitution 2 — no silent gate | No new load-bearing signal is written with a swallowed error; a missing or errored witness fails closed **and visibly** | `machinery-witness.test.ts`: drive the `witness-resolve` block with each input of conditions 2-3 (no PR, PR disagreement, stale head, non-default base branch, short files page, API error) and assert it fails the job with no `pr` output and no `files.json`; drive the `witness-classify` block under `bash -e`, the shell its step gets in CI: `machinery-witness.yml`, like every workflow in this repo today, sets no `shell:` or `defaults:`, and this branch's CI run 34583008580 logs `shell: /usr/bin/bash -e {0}`. So an unguarded `PROFILE=$(…)` fails here as it would in CI. Point `GITHUB_OUTPUT` at an empty temp file, and run from a fixture root holding a stub `node_modules/.bin/tsx` that answers the `profile.ts` call and the `-e` call separately, each faulted alone (the two-call stub of `docs-lane-hold.test.ts:102-127`). The assertion reads that file, which is what decide receives, never `$PROFILE`. A resolver that exits non-zero (even printing `solo`) or prints anything but `solo`/`team` leaves exactly `profile=team` plus the healthy classifier's `machinery=` line. A classifier that prints anything but `true`/`false` exits non-zero and leaves the file empty. Drive the `witness-decide` block with each remaining failure input (API error, base checkout missing, guard unloadable) and assert the outcome is "post nothing or `action_required`", never `success`. With `W_PROFILE` or `W_MACHINERY` unset, empty, or outside its two tokens (`Solo`, `solo `, `yes` among them), assert `core.setFailed`, no `post` output and no API call (*The classify-to-decide handoff*); drive the `witness-reevaluate` block with no run, a run that never completes, and a rerun API error, and assert each fails the job; and assert every such path emits a `::warning` or `::error` — the #810 lesson, where a silently swallowed 403 made a required gate unsatisfiable repo-wide |
 | **INV-1**, second witness | `ready-to-merge` must not come to hinge on the machinery witness alone | `machinery-witness.test.ts`: with the witness absent, a non-machinery PR still greens through the existing `ai-review/pass` **or** `ai-review` channels; `verifyHeadPassWitness` tries the two existing channels before the new one |
 | **INV-2** — approval stays human under both profiles | `checkApprover` / `assertHumanApprover` (`packages/minspec/src/lib/approval.ts`) deny an agent identity regardless of `mode` | `solo-mode-keep-gates.test.ts`: `approveSpec(fixtureRoot, specPath, 'T4', <agent identity>)` (`approval.ts:517`), which takes the repo root and calls `assertHumanApprover` before any write (`:524-528`), against a `mode: solo` and a `mode: team` fixture; assert it throws `ApproverDeniedError` and writes no sidecar under both. A direct `checkApprover` call takes no root, so it cannot see the fixture and is not the invariance proof (see the FR-6 table) |
 | **INV-3** — irreversible/outward-facing stays human under both profiles | `mayProceed` denies `irreversible-or-outward-facing` and `approval-or-acceptance` whatever the profile says | `solo-mode-keep-gates.test.ts`, through `--may-merge` (`dispatch-issue.sh:316-318`) in a **hermetic copy** of the script tree whose own config carries the profile, never through `MINSPEC_AUTONOMY_REPO_ROOT`. The copy, its cases, the reason it asserts, and its profile-reachability witness are specified in *The INV-3 harness* below. A direct `mayProceed('act', …)` call is kept as a behaviour check, but it takes no config, so it is not the invariance proof |
@@ -882,7 +928,7 @@ file, seam or consumer list, and is removed. Whether AC-6 accepts the residual i
 |---|---|---|
 | AC-1 (FR-1) | T0 | `profile.test.ts`: with the environment emptied, drive **each** consumer's resolution path against one fixture repo, and assert all three return the same value, for a `solo` fixture and for a `team` fixture. The three are: `readProfileMode` directly; the bash consumer through `dispatch-issue.sh --check-profile` in a hermetic copy (the `drain-selfheal.test.ts:263-301` pattern, plus `profile.ts` and a `node_modules` symlink so the pinned runner resolves); and the YAML consumer, by executing the `witness-classify` block verbatim under bash. Asserted by driving consumers, not by reading the file |
 | AC-2 (FR-1, negative) | T0 | `profile.test.ts`: a table of `undefined`, `''`, `'Solo'`, `' solo '` (accepted, trimmed), `'sol o'`, `'true'`, `'team '`, `{}`, `42`, malformed JSON, missing file → every one resolves `team` except the exact token. The CLI grammar: `--repo-root` missing or empty, or any extra argument, gives exit 2 with empty stdout. The consumer rule, through the bash seam: no runner → `team`; a runner that exits 0 printing `Solo` or `solo ` → `team`; a runner that exits non-zero printing `solo` → `team`. And because no environment override exists, `MINSPEC_MODE=solo` exported over a `mode: team` config still resolves `team`, which guards that the removed interface stays removed |
-| AC-3 (FR-2) | T0 + T2, **partial — not discharged by this Plan** | `machinery-witness.test.ts`: the decision block, executed verbatim with the new harness (*Contracts*), returns `success` for a machinery PR with a verified pass and no self-set touch, and `action_required` for one that touches a self-set path. The `witness-reevaluate` block, executed against stubbed run lists, re-runs the newest completed `ready-to-merge` run for the head, waits for an in-progress one, and fails the job when there is none. That covers AC-3's second half (a PR that changes the witness cannot self-certify) and the decision behind its first. The first half's two outcomes are not T0. `ready-to-merge` reaching success is observed only at T2, on the first real machinery PR after landing (the platform chain: `workflow_run` fires, the re-run replays the `pull_request` payload, the gate greens). And **merging with no keystroke has no seam in this Plan**: it is the machinery arm slice, blocked on OQ-1. OQ-1 discloses that gap; this row no longer claims both halves |
+| AC-3 (FR-2) | T0 + T2, **partial — not discharged by this Plan** | `machinery-witness.test.ts`: the decision block, executed verbatim with the new harness (*Contracts*), returns `success` for a machinery PR (`W_PROFILE=solo`, `W_MACHINERY=true`) with a verified pass and no self-set touch, and `action_required` for one that touches a self-set path. With every other input of that `success` case unchanged, `W_PROFILE=team` sets no `post=true` and no `success` conclusion, and neither does `W_MACHINERY=false`. These are conditions 1 and 4 as decide receives them through the handoff (*Contracts*). Neither is a fault, so neither is in INV-1's must-warn list. The `witness-reevaluate` block, executed against stubbed run lists, re-runs the newest completed `ready-to-merge` run for the head, waits for an in-progress one, and fails the job when there is none. That covers AC-3's second half (a PR that changes the witness cannot self-certify) and the decision behind its first. The first half's two outcomes are not T0. `ready-to-merge` reaching success is observed only at T2, on the first real machinery PR after landing (the platform chain: `workflow_run` fires, the re-run replays the `pull_request` payload, the gate greens). And **merging with no keystroke has no seam in this Plan**: it is the machinery arm slice, blocked on OQ-1. OQ-1 discloses that gap; this row no longer claims both halves |
 | AC-4 (FR-3) | T0, **`team` half of the native actor only** | `profile.test.ts` drives the existing `--check-native-automerge` seam (`dispatch-issue.sh:93-95`) in hermetic copies. It reuses the `drain-selfheal.test.ts:263-301` technique inside a declared test file, adding a `mode` fixture dimension: `mode: team` + `autoMerge.native: true` → `off`; `mode: team` + `MINSPEC_AUTOMERGE_NATIVE=1` → `off` (an exported env var cannot loosen a committed `team`); `mode: solo` + `autoMerge.native: true` → `on`. What an **absent** key means under `solo` is not pinned: that is OQ-11, and an earlier draft's `mode: solo` + no key → `off` case, which hard-coded one answer, is removed. The case is written once OQ-11 is answered. This test exercises a non-machinery PR's actual merge arm, which is why AC-4 needs it: the witness never posts for a non-machinery PR under either profile (condition 4), so it cannot tell the two apart. It cannot see the second merge actor (`dispatch-issue.sh:1915-1922`) or the third (`docs-lane.yml:247`), so AC-4's `team` half is discharged for the native actor only, until OQ-5 and OQ-13 are answered. The existing `drain-selfheal.test.ts` cases that seam 5 changes are listed under OQ-2 |
 | AC-5 (FR-4) | T3, red-then-green, **at the applied label, not only the voter's** | Two layers, both using **reproductions** of #1234 (a voter output with no verdict block and no quota phrasing) and #1157 (a voter output that names `REVIEW_VERDICT_BEGIN` in prose beside one real block). (1) `review-decide.test.ts`: the voter's label is `ai-review:blocked` and `ai-review:unreadable` respectively. (2) `ai-review-verdict-combine.test.ts`: each reproduction goes through the real `review-decide.sh`, then with three passing voters through the verbatim `verdict-combine` block, then through the verbatim `verdict-normalise` block. The assertion is on the label that would be applied. Layer 2 is what catches a missing combine arm (the label would fall through `*)` to `blocked`) or a missing normaliser arm (it would be applied as `changes`), which layer 1 alone cannot, because it stays green while the PR still receives `ai-review:changes`. Layer 2 also carries D12's precedence cases, including `[pass, unreadable, pass, pass]` → `unreadable`, never `pass`. For "neither is auto-merged", `ai-review-guard.test.js` asserts `decideReviewCheck(UNREADABLE, false).conclusion === 'action_required'` with a title distinct from `changes`', and that `decideStatus` over `['ai-review:unreadable']` is `failure`. All of these are red against today's code |
 | AC-6 (FR-6) | T0 | The keep-list table above |
