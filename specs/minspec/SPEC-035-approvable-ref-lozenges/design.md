@@ -12,9 +12,8 @@ implements_reason: Plan document. requirements.md declares `implements: none` wh
 
 # MinSpec - Approvable-Reference Lozenges + Hover Cards (Plan)
 
-**Date:** 2026-09-09, revised 2026-09-11
-**Status:** Plan (SDD Plan phase). The spec's own status stays `planning`; this document
-does not advance it.
+**Date:** 2026-09-09, revised 2026-09-11 (twice)
+**Status:** Plan (SDD Plan phase). This document does not change the spec's `status:`.
 **Reads:** [requirements.md](requirements.md) - FR1..FR9, AC1..AC6, the four invariants and
 OQ1..OQ5 are settled there and are not re-litigated. This is HOW, not WHAT/WHY.
 **Governed by:** [DR-053](../../../docs/decisions/DR-053.md) v2 (the reference grammar) and
@@ -44,11 +43,16 @@ existing webview CSP/nonce.
 ## Approach
 
 Split the feature at the Tier-0 / Tier-1 line the requirements already draw
-(INV-tier0-detection, FR1, AC6), and make the Tier-0 half **host-independent** so it can be
-built, tested and merged before the paused webview work resumes.
+(INV-tier0-detection, FR1, AC6), and make the Tier-0 half **host-independent**, so it can be
+built and tested without a renderer. That is a statement about dependencies, not about
+timing. The requirements record the build as "queued, not now", paused with the SPEC-018
+webview work pending the token economy (requirements.md:37-39, and the `implements_reason`
+at :15), and say this spec ships when that work resumes (requirements.md:219-220). This
+design keeps that sequencing. Whether Slice A may be built ahead of the resume is PQ9, and it
+is not decided here.
 
 - **Tier-0 (pure, no host):** detect reference tokens in a span of prose, resolve each one,
-  and assemble the card *model* - label, title, derived status, summary, navigation target.
+  and assemble the card *model* - label, title, status, summary, navigation target.
   All of FR1, and the decision content of FR4, FR5, FR7 and FR8.
 - **Tier-1 (host):** turn a card model into DOM, and wire hover/focus/activate. FR2, FR3,
   the rendering half of FR7/FR8.
@@ -59,15 +63,15 @@ Four slices, ordered by real dependencies, not preference:
 
 | Slice | FRs | What | Blocked on |
 |---|---|---|---|
-| **A - detect + resolve + card model (local v1 refs)** | FR1 (v1, local: `SPEC-014`, `DR-053`, `EPIC-002`, `#500`), FR4 model, FR5 (local targets), FR7 target, FR8 | `ref-detect.ts` (Tier-0 scanner), `ref-cards.ts` (fs adapter), the corpus false-positive harness, and the three host-independent T0 invariant tests (INV-keyboard's belongs to Slice B). `#N` is detected but has no card source, so it renders as plain text until PQ3 is answered. | nothing - ships today |
-| **B - lozenge + card render** | FR2, FR3, FR7 nav, FR8 render | `ref-lozenge-html.ts` + the webview message/keyboard wiring. | SPEC-014's extracted prose renderer. Issue lozenges also need PQ3. |
-| **C - v2 grammar + cross-project** | FR1 (`MIN/SP19`, `SP19/FR3`, `SCR#204`), FR9, AC1b sigil, FR5's cross-project degrade | Widen the scanner to the DR-053 v2 token, paragraph segments, `INV-<slug>` / `G-<n>` and the `[[…]]` sigil, against #679's resolver; wire `.minspec/project-prefixes.md` into the lookup. | [#679](https://github.com/AIClarityAU/minspec/issues/679) (the `project-prefix` v2 grammar update, which is also the table's wiring predecessor); OQ2 for the degraded card's title source |
+| **A - detect + resolve + card model (local v1 refs)** | FR1 (v1, local: `SPEC-014`, `DR-053`, `EPIC-002`, `#500`), FR4 model, FR5 (local targets), FR7 target, FR8 | `ref-detect.ts` (Tier-0 scanner), `ref-cards.ts` (fs adapter), the AC1 corpus harness, and the host-independent T0 tests (INV-keyboard's belongs to Slice B). `#N` is detected but has no card source, so it renders as plain text until PQ3 is answered. | The build resuming (requirements.md:37-39, :219-220). No technical predecessor; building it ahead of the resume is PQ9, not decided. |
+| **B - lozenge + card render** | FR2, FR3, FR7 nav, FR8 render | `ref-lozenge-html.ts` + the webview message/keyboard wiring. | SPEC-014's extracted prose renderer. Issue lozenges also need PQ3; how a DR or epic card shows an unrecorded status needs PQ10. |
+| **C - v2 grammar + cross-project** | FR1 (`MIN/SP19`, `SP19/FR3`, `SCR#204`), FR9, AC1b sigil, FR5's cross-project degrade | Widen the scanner to the DR-053 v2 token, paragraph segments, `INV-<slug>` / `G-<n>` and the `[[…]]` sigil, against #679's resolver; wire `.minspec/project-prefixes.md` into the lookup. **Not specified by this design:** it gives no span shapes for v2, the sigil, `INV-<slug>` or `G-<n>`, and no resolver contract. Tasks must not treat Slice C as specified; it is planned against #679's resolver once that exists. | [#679](https://github.com/AIClarityAU/minspec/issues/679) (the `project-prefix` v2 grammar update, which is also the table's wiring predecessor); OQ2 for the degraded card's title source |
 | **D - authoring guidance** | FR6 | Tell the authoring LLM to stop restating another approvable's status. | Slice B shipped (R4), and OQ4 |
 
 Slice A is the load-bearing floor and is also the part the requirements flag as
 Costly-to-Refactor #1 (the detection regex and resolver contract, shared with #679 and the
-future trace graph). Building it first pins that contract with tests while the cheap-to-
-reverse half (lozenge styling, hover-vs-focus tuning) waits for its host.
+future trace graph). Within the resumed build it goes first, so tests pin that contract
+before the cheap-to-reverse half (lozenge styling, hover-vs-focus tuning) is built on it.
 
 ## Key decisions
 
@@ -81,9 +85,9 @@ proposes candidate spans of three generic shapes and admits a span only when
 
 ```ts
 // Boundaries only. Acceptance is resolveRef's; none of these lists SPEC|DR|EPIC.
-const SDD_SPAN     = /\b(?:[A-Z]{2,5}-)?[A-Z]{2,5}-\d+\b/g;  // SPEC-014, MS-SPEC-019. UTF-8, SHA-256: proposed, rejected.
+const SDD_SPAN     = /\b(?:[A-Z]{2,5}-)?[A-Z]{2,5}-\d+\b(?!@[A-Za-z])/g; // SPEC-014, MS-SPEC-019. UTF-8, SHA-256: proposed, rejected. SPEC-100@scroogellm: not proposed.
 const PREFIX_ISSUE = /\b[A-Z]{2,5}#\d{1,6}(?![\w-])/g;       // SCR#204, MS#500. OQ#1 resolves 'unknown-prefix'.
-const LOCAL_ISSUE  = /(?<![\w#])#\d{1,6}(?![\w-])/g;         // #500 - the guard measured in the AC1 pin below.
+const LOCAL_ISSUE  = /(?<![\w#])#\d{1,6}(?![\w-])/g;         // #500 - the guard measured in the grammar survey below.
 ```
 
 Spans from the three shapes are merged in source order; where two overlap, the longer wins.
@@ -95,12 +99,20 @@ asserts this). This honours the requirements' `implements_reason` - "FR1 reuses
 Out-of-Scope line that makes the `project-prefix` module update a DR-053 follow-up
 (requirements.md:165-166).
 
-Two consequences, stated rather than smoothed over:
+Three consequences, stated rather than smoothed over:
 
 - **The measured v1 count and the scanner differ by two tokens.** `MS-SPEC-019` and
-  `SC-DR-007` carry a v1 cross-project prefix. The AC1 pin's pattern counts their inner
+  `SC-DR-007` carry a v1 cross-project prefix. The survey's pattern counts their inner
   `SPEC-019` / `DR-007`; `SDD_SPAN` proposes the whole prefixed token, which resolves
   `unknown-prefix` against Slice A's empty prefix map and renders as plain text.
+- **`SPEC-100@scroogellm` is not proposed.** The `(?!@[A-Za-z])` guard follows the
+  convention the dangling-reference gate already enforces: an `@namespace` suffix marks an
+  id from another repo's register (`ARTIFACT_RE`, reference-checker.ts:65; flagged
+  `external` at :141 and exempted from resolution at :166). Without the guard the scanner
+  would propose `SPEC-100`, and if a local SPEC-100 existed it would show a card for the
+  wrong target. The corpus holds none today, code included, so the guard changes no measured
+  number. Whether such a form should ever lozenge as a cross-project ref is PQ4's question,
+  the same one it asks about `scroogellm#121`.
 - **Slice C's paragraph vocabulary is #679's, not SPEC-035's.** `ref-detect.ts` defines no
   paragraph type codes. Slice C applies the same boundaries-only rule against whatever
   single-token resolver #679 ships; if #679 ships none for paragraph refs, Slice C is blocked
@@ -130,32 +142,59 @@ and DR-003 exist to prevent, and it would need its own staleness machinery (SPEC
 whole problem) to be trustworthy. At corpus scale (99 spec files, 89 DRs, 10 epics) the
 per-render read is a directory walk we already do for the SPECS pane.
 
-**D3 - the card's status is `deriveStatus(...)`, never `frontmatter.status`, and never
-`SpecSummary.status`.** This is the sharp edge. `listSpecs()` in
-`packages/minspec/src/lib/spec-catalog.ts` populates `SpecSummary.status` from the raw
-frontmatter field (`status: fm.status` in its `consider()` builder, spec-catalog.ts:89-96);
-`deriveStatus` in `packages/minspec/src/lib/lifecycle.ts:133` computes the authoritative value
-from `(phases, approvalState, explicitTerminal)` and, per its INV-1, returns `specifying` for
-a spec whose approval is `unapproved` or `stale` **regardless** of what the frontmatter says
-(lifecycle.ts:140). The two disagree in practice: `scripts/facts.ts` ships a
-`facts status <spec>` subcommand whose stated purpose is exposing that drift (the #886
-drift). So the adapter uses `listSpecs()` for **id to file path only**, and computes status
-itself.
-*Rejected: reuse `SpecSummary` wholesale for card data.* Cost: one cheap call, and every
+**D3 - a card's status is never a restated or defaulted value. A SPEC's is
+`deriveStatus(...)`; a DR's or an epic's is what its own `status:` line records; none comes
+from a catalog summary's `status` field.** This is the sharp edge, and it differs by kind.
+
+*Specs.* `listSpecs()` in `packages/minspec/src/lib/spec-catalog.ts` populates
+`SpecSummary.status` from the raw frontmatter field (`status: fm.status` in its `consider()`
+builder, spec-catalog.ts:89-96); `deriveStatus` in `packages/minspec/src/lib/lifecycle.ts:133`
+computes the authoritative value from `(phases, approvalState, explicitTerminal)` and, per
+its INV-1, returns `specifying` for a spec whose approval is `unapproved` or `stale`
+**regardless** of what the frontmatter says (lifecycle.ts:140). The two disagree in
+practice: `scripts/facts.ts` ships a `facts status <spec>` subcommand whose stated purpose
+is exposing that drift (the #886 drift). So the adapter uses `listSpecs()` for **id to file
+path and title only**, and computes status itself.
+
+*DRs and epics.* They have no `phases:` and no approval sidecar: `.minspec/approvals/` holds
+a `specs/` subtree only (61 sidecars at this revision). `deriveStatus` therefore has no
+inputs for them, and running it anyway is the #1067 bug: `parseSpec` coerces every DR status
+to `new` and the derivation then agrees with that invented default (scripts/facts.ts:327-339).
+The repo's per-kind precedent is `artifact-graph.ts`, which derives specs (:533-535) and
+takes epics and DRs from their own status field (:519, :566). The adapter follows that
+precedent with one change. `listAdrs` and `listEpics` substitute `proposed` for a missing or
+unrecognised status (adr-manager.ts:1306, :1318; epic-manager.ts:134, :149), which is a
+guessed status FR5 forbids, so the adapter uses them for id to file path and title only and
+reads `status:` from the file itself (contract below). The requirements name the status
+source as the sidecar plus frontmatter, "i.e. `deriveStatus`'s inputs" (FR5,
+requirements.md:106-108), which DRs and epics do not have; INV-live-status-deterministic
+names "the `.minspec/approvals/` sidecar / frontmatter" (requirements.md:191-192), which
+admits frontmatter alone. Whether that reading is what FR5 means for these kinds, and what a
+card shows when a DR or epic records no recognised status, is PQ10. The contract records
+what the file says, including that it says nothing usable, and leaves to PQ10 what a card
+shows.
+
+*Rejected: reuse `SpecSummary` wholesale for spec card data.* Cost: one cheap call, and every
 card on a stale-approval spec shows the frontmatter's optimistic status. That is a status
 lie rendered live, which is worse than the hand-written prose this feature exists to
 replace.
+*Rejected: take DR and epic status from `listAdrs` / `listEpics`, as `artifact-graph.ts`
+does.* Cost: a DR with no `status:` line, or a misspelt one, shows `proposed` - a guessed
+status on a live card.
 
 **D4 - detection runs over the renderer's prose text nodes, not over raw markdown.**
 Measured on this repo's corpus (the 208 markdown files tracked at `a33d6d57` under `specs/`
 + `docs/`): 556 of the 557 `[[…]]` occurrences repo-wide are bash test brackets, JS array
-literals and regex character classes living in fenced code or `.ts` files, and **26.6% of
-the 6,931 v1 references sit inside a markdown link** - 13.4% in the link text and 13.2%
-inside the href (`../SPEC-014-review-webview/requirements.md`). Stripping fences and inline
-code is not enough; a raw-markdown scan lozenges path fragments inside hrefs. So the scanner
-takes an explicit `skip` range list and the renderer supplies it from its token stream.
-*Rejected: run the detector over raw markdown with a code-fence stripper.* Cost: the 915
-href-embedded refs become lozenges over a URL, which AC1 explicitly forbids
+literals and regex character classes living in fenced code or `.ts` files, and **27.0% of
+the 6,931 v1 references sit inside a markdown link** - 929 (13.4%) in the link text and 943
+(13.6%) inside the link destination (`../SPEC-014-review-webview/requirements.md`), counting
+inline-link destinations and reference definitions by the rule stated with the AC1 pin.
+Stripping fences and inline code is not enough; a raw-markdown scan lozenges path fragments
+inside hrefs. So the scanner takes an explicit `skip` range list and the caller supplies it
+- Slice B's renderer from its token stream, the AC1 harness from the stated regexes until
+then.
+*Rejected: run the detector over raw markdown with a code-fence stripper.* Cost: the 943
+destination-embedded refs become lozenges over a URL, which AC1 explicitly forbids
 (`src/foo/bar`, a URL, must not lozenge).
 
 **D5 - dual grammar: v1 now, v2 when #679 lands.** The corpus is not migrated and migrating
@@ -190,10 +229,11 @@ path.
 | `packages/shared/src/project-prefix.ts` | **unchanged** | Imported, never edited. `resolveRef` (:144) is the scanner's sole acceptor (D1); `PrefixMap`, `EMPTY_PREFIX_MAP`, `RefResolution` and `ApprovableKind` are its types. Its update is out of scope (requirements.md:165-166). |
 | `packages/shared/src/ref-detect.ts` | **new (Tier-0)** | `detectRefs()` scanner + `buildRefCard()`. Pure: no `fs`, no `vscode`, no network, no LLM. Holds span shapes, never grammar vocabulary (D1). |
 | `packages/shared/src/index.ts` | **changed** | One `export * from './ref-detect'` line on the barrel. |
-| `packages/minspec/src/lib/ref-cards.ts` | **new (Tier-1 adapter)** | `lookupApprovable()` - a resolved ref to an `ApprovableLookup`. SPEC: `listSpecs()` (spec-catalog.ts:59) for id to path only, then `parseSpec` + `getApprovalStatus` + `deriveStatus` for its status (D3). DR: `listAdrs()` (adr-manager.ts:1277). EPIC: `listEpics()` (epic-manager.ts:104). Each resolves its directory through `resolveAndValidate` (spec-catalog.ts:61, adr-manager.ts:95, epic-manager.ts:95). Reads no prefix table in Slices A-B (see "What this design does NOT do"). |
-| `packages/minspec/src/views/ref-lozenge-html.ts` | **new, Slice B** | `renderRefLozenge(card, occurrence)`: card model to DOM. Reuses `escapeHtml` (spec-panel-html.ts:286, which escapes both quote characters, so it is safe inside the `data-ref` attribute); adds no second sanitiser. |
-| SPEC-014's extracted prose renderer | **caller, Slice B** | Supplies the prose text plus the `skip` ranges (D4), passes the per-document `occurrence` counter, and splices the lozenge markup back in. Path unknown until SPEC-014 extracts it - that is why `requirements.md` says the render-host module paths are undecided, and why Slice B declares no path here. |
+| `packages/minspec/src/lib/ref-cards.ts` | **new (Tier-1 adapter)** | `lookupApprovable()` - a resolved ref to an `ApprovableLookup`. SPEC: `listSpecs()` (spec-catalog.ts:59) for id to path and title, then `parseSpec` + `getApprovalStatus` + `deriveStatus` for its status (D3). DR: `listAdrs()` (adr-manager.ts:1277) and EPIC: `listEpics()` (epic-manager.ts:104) for id to path and title only; status is read from the file's own `status:` line (D3, contract below). Matches a ref to an artifact by kind and number, so `SPEC-19` finds `SPEC-019`. Each catalog resolves its directory through `resolveAndValidate` (spec-catalog.ts:61, adr-manager.ts:95, epic-manager.ts:95). Reads no prefix table in Slices A-B (see "What this design does NOT do"). |
+| `packages/minspec/src/views/ref-lozenge-html.ts` | **new, Slice B** | `createLozengeRenderer()`: one instance per rendered document; its `render(card)` turns a card model into markup and allocates the card's id itself. Reuses `escapeHtml` (spec-panel-html.ts:286, which escapes both quote characters, so it is safe inside the `data-ref` attribute); adds no second sanitiser. |
+| SPEC-014's extracted prose renderer | **caller, Slice B** | Supplies the prose text plus the `skip` ranges (D4; whether they include frontmatter is PQ5), creates one `LozengeRenderer` per document render, and splices the lozenge markup back in. Path unknown until SPEC-014 extracts it - that is why `requirements.md` says the render-host module paths are undecided, and why Slice B declares no path here. |
 | `packages/minspec/tests/tier0-import-ban.test.ts` | **already covers it** | Scans the `minspec` and `shared` packages' `src/` trees since #1511, so `ref-detect.ts` is inside the ban automatically. |
+| `.github/workflows/ci.yml` | **changed, Slice A** | One line: `fetch-depth: 0` on the `test` job's checkout (:158, a default shallow checkout today), as the `paths` job already has (:40-42), so the AC1 harness can read its pinned commit. |
 
 Not used, deliberately: `packages/minspec/src/lib/reference-checker.ts`. Its
 `extractReferences` (reference-checker.ts:117) tokenises `SPEC-/DR-/EPIC-` and `path:line`
@@ -203,8 +243,8 @@ scrubbing `id:` / `epic:` frontmatter lines. Its output shape
 offsets, so it cannot tell a renderer *where* to splice a lozenge, and its `@namespace`
 external convention is a different grammar from DR-053's. Reusing it would mean widening a
 live merge-gate's parser to serve a view - the wrong direction. Both remain single-purpose;
-a T1 test asserts they agree on the ids they both find, so the grammars cannot silently
-diverge.
+a T1 cross-check, defined exactly under the test tiers below, asserts they agree after a
+stated normalisation, so the grammars cannot silently diverge.
 
 **Undisclosed-conflict flag, not resolved here (see PQ7).** SPEC-018's design
 (`specs/minspec/SPEC-018-spec-custom-editor/design.md:65-67`, `status: implementing`,
@@ -248,7 +288,12 @@ export interface DetectedRef {
 export interface SkipRange { readonly start: number; readonly end: number }
 
 export interface DetectOptions {
-  /** Code spans, fenced blocks, link hrefs, frontmatter. Sorted, non-overlapping. */
+  /**
+   * Ranges the caller has decided are not prose (D4). Sorted, non-overlapping. Slice B's
+   * renderer supplies code spans, fenced blocks, link destinations and autolinked URLs.
+   * Whether it also supplies a frontmatter range is PQ5, which is NOT decided; the scanner
+   * takes no side, because the list is the caller's.
+   */
   readonly skip: readonly SkipRange[];
   /** Which span shapes to propose. Slice A: ['v1']. Slice C: ['v1','v2','sigil']. */
   readonly grammars: readonly Grammar[];
@@ -268,17 +313,31 @@ export interface DetectOptions {
  */
 export function detectRefs(text: string, opts: DetectOptions): DetectedRef[];
 
+/**
+ * Where a card's status came from (D3). No variant can hold a value that the target's own
+ * file or approval record does not hold - there is no default.
+ */
+export type CardStatus =
+  /**
+   * SPEC only: deriveStatus(fm.phases, getApprovalStatus(root, filePath),
+   * explicitTerminalOf(fm.status)). Never fm.status, never SpecSummary.status.
+   */
+  | { readonly source: 'derived'; readonly value: string }
+  /** DR, EPIC: the file's own `status:` value, and it is a member of that kind's vocabulary. */
+  | { readonly source: 'frontmatter'; readonly value: string }
+  /**
+   * DR, EPIC: no `status:` line, or a value outside the kind's vocabulary (`raw` keeps what
+   * the file says, for the message). How a card shows this, and whether a 'frontmatter'
+   * status is shown at all, is PQ10 - NOT decided.
+   */
+  | { readonly source: 'none'; readonly raw?: string };
+
 /** Everything a full card needs. Supplied by the Tier-1 adapter, so the core stays pure. */
 export interface ApprovableFacts {
   readonly kind: ApprovableKind;
   readonly id: string;
   readonly title: string;
-  /**
-   * The DERIVED status (D3). For a SPEC this MUST be
-   * deriveStatus(fm.phases, getApprovalStatus(root, path), explicitTerminalOf(fm.status)) -
-   * never fm.status, never SpecSummary.status.
-   */
-  readonly status: string;
+  readonly status: CardStatus;
   readonly filePath: string;
   /** FR4. Undefined until OQ1 settles the source; the card omits the line rather than faking it. */
   readonly summary?: string;
@@ -309,7 +368,7 @@ export type RefCard =
       readonly variant: 'full';
       readonly label: string;
       readonly title: string;
-      readonly status: string;
+      readonly status: CardStatus;
       readonly summary?: string;
       /** FR7. `anchor` stays undefined until DR-053 §3.1 handles are migrated (OQ3). */
       readonly target: { readonly filePath: string; readonly anchor?: string };
@@ -338,11 +397,32 @@ export function buildRefCard(ref: DetectedRef, lookup: ApprovableLookup): RefCar
 
 /**
  * Slices A-B, by resolution:
- *   'local', kind SPEC | DR | EPIC  -> 'found' when the file exists, else 'not-found'
+ *   'local', kind SPEC | DR | EPIC  -> 'found' when exactly one artifact matches, else 'not-found'
  *   'local', kind ISSUE             -> 'not-found' (no offline issue source - PQ3)
  *   'unknown-prefix'                -> 'not-found' (FR8; every prefixed ref, the map being empty)
  *   'cross-project'                 -> unreachable until Slice C wires the table; then per OQ2
- * Never throws: an fs or config error is 'not-found' (INV-graceful-degrade).
+ *
+ * Matching: an artifact matches when its id, read from listSpecs / listAdrs / listEpics, has
+ * the form KIND-<digits> with KIND === resolution.kind and Number(<digits>) === resolution.num.
+ * So SPEC-19 and SPEC-019 are one target. Zero matches, or more than one, is 'not-found':
+ * picking one of several would be a guess.
+ *
+ * Status (D3):
+ *   SPEC      -> { source: 'derived', value: deriveStatus(fm.phases,
+ *                  getApprovalStatus(rootDir, filePath), explicitTerminalOf(fm.status)) },
+ *                where filePath is listSpecs' representative file for the id and
+ *                fm = parseSpec(readFileSync(filePath)).frontmatter.
+ *   DR, EPIC  -> read filePath; take the leading frontmatter block (the shape of
+ *                adr-manager.ts:63's FRONTMATTER_RE); take its first line matching
+ *                /^status[ \t]*:[ \t]*(.*)$/m; apply stripInlineComment (spec-vocabulary.ts:61).
+ *                A member of ADR_STATUS_VALUES (adr-manager.ts:536) or EPIC_STATUS_VALUES
+ *                (epic-manager.ts:37) -> { source: 'frontmatter', value }; anything else,
+ *                including no block or no line -> { source: 'none', raw }. This is the reading
+ *                scripts/facts.ts's rawField (:220) does for #1067, with [ \t]* in place of its
+ *                \s* so an empty value cannot capture the next line; restated because scripts/
+ *                is outside the package and listAdrs' own parser (adr-manager.ts:68) is private.
+ *
+ * Never throws: an fs or config error is 'not-found' (INV-graceful-degrade). Writes nothing.
  */
 export function lookupApprovable(
   rootDir: string,
@@ -352,10 +432,13 @@ export function lookupApprovable(
 
 ```html
 <!-- packages/minspec/src/views/ref-lozenge-html.ts (Slice B):
-       renderRefLozenge(card: RefCard, occurrence: number): string
-     `occurrence` is a per-document counter the caller passes (0, 1, 2, ... in source order),
-     so every id is unique within the document by construction and contains no character of
-     the ref itself. Shown: the third lozenge in a document, a 'full' card. -->
+       interface LozengeRenderer { render(card: RefCard): string }
+       function createLozengeRenderer(): LozengeRenderer
+     One instance per rendered document. The instance owns the occurrence counter (0, 1, 2, ...
+     in the order render is called), so ids are unique across everything one instance renders,
+     whatever the caller does, and no id contains a character of the ref itself. The host's only
+     obligation is one instance per document render. Shown: the third card rendered by one
+     instance, a 'full' card whose status source is 'derived'. -->
 <button type="button" class="ms-lozenge" data-ref="SPEC-014"
         aria-describedby="ms-card-2">SPEC-014</button>
 <span role="tooltip" id="ms-card-2" class="ms-card" hidden>
@@ -364,7 +447,8 @@ export function lookupApprovable(
   <span class="ms-card-summary">…</span>
 </span>
 <!-- A 'degraded' card has the same shape with no ms-card-status element, because it has no
-     status. ms-card-summary is omitted whenever summary is undefined (OQ1). -->
+     status. ms-card-summary is omitted whenever summary is undefined (OQ1). The markup for a
+     status whose source is 'none', and whether a 'frontmatter' status is shown, wait on PQ10. -->
 ```
 
 Webview to extension message, Slice B: `ref:open { id: string, toSide: false }`. The name
@@ -380,23 +464,30 @@ opens a `found` target's `filePath` in the active editor column. Any other outco
 nothing, and a path supplied by the webview is never opened. Widening the literal to
 `boolean` is SPEC-018's change to make.
 
-## Detection contract, measured (AC1's plan-phase pin)
+## Detection contract, measured
 
 AC1 requires the false-positive rate to be "pinned at plan" against a real prose-plus-code
-corpus. **Corpus:** the 208 markdown files tracked at `a33d6d57` under `specs/` and `docs/`
+corpus. This section does that in two steps: a grammar survey, which measures what each
+token class would admit, and the pin itself, which measures the detector this design builds.
+
+**Corpus:** the 208 markdown files tracked at `a33d6d57` under `specs/` and `docs/`
 (`git ls-tree -r --name-only a33d6d57 -- specs docs`, keeping `*.md`). Code is removed by two
 substitutions, in order: every fenced block (a line opening with three backticks or three
 tildes, through the next line opening with the same fence), then every single-line inline
 code span (a backtick, a run of characters that are neither backtick nor newline, a
-backtick). That leaves 2,926,455 bytes of prose. Every figure below is reproducible from
-that plus the pattern in its row, except the `[[…]]` repo-wide row, which is deliberately
-wider - all 930 files tracked at `a33d6d57` repo-wide, no fenced-code or inline-code
-stripping (`git grep -oE '\[\[[^]]{1,40}\]\]' a33d6d57 -- . | wc -l`) - because its whole
-point is to show what the corpus-scoped rows above it exclude.
+backtick).
+
+### Grammar survey (code removed; no link, URL or frontmatter skip)
+
+Every figure is reproducible from the corpus rule above plus the pattern in its row, except
+the `[[…]]` repo-wide row, which is deliberately wider - all 930 files tracked at `a33d6d57`
+repo-wide, no fenced-code or inline-code stripping
+(`git grep -oE '\[\[[^]]{1,40}\]\]' a33d6d57 -- . | wc -l`) - because its whole point is to
+show what the corpus-scoped rows above it exclude.
 
 | Token class | Pattern | Hits | Distinct | Auto-lozenge? |
 |---|---|---|---|---|
-| v1 approvable | `\b(?:SPEC\|DR\|EPIC)-\d+\b` | 6,931 | 172 | yes for local targets (resolution-gated); the 2 carrying a v1 cross prefix render plain text until Slice C (D1) |
+| v1 approvable | `\b(?:SPEC\|DR\|EPIC)-\d+\b` | 6,931 | 172 | yes for local targets that exist (resolution-gated); the 2 carrying a v1 cross prefix render plain text until Slice C (D1) |
 | v2 approvable | `\b(?:SP\|DR\|EP)\d+\b` | 4 | 2 | yes, Slice C |
 | local issue, left+right guarded | `(?<![\w#])#\d{1,6}(?![\w-])` | 2,777 | 519 | detected; lozenges only once PQ3 gives an issue a card, then see PQ1 |
 | `#N` rejected by that guard | naive `#\d+` minus the row above | 109 | - | **no**: 101 preceded by a word character - 83 repo-qualified (`AIClarityAU/minspec#460`, `scroogellm#121`; see PQ4), 6 `PR#N`, 2 v1 cross-project (`MS#500`, `SC#26`) and 10 that are not references (`OQ#1` x5, `Costly#1` x5) - plus 8 whose digit run continues into a hyphen or letter (`#91-gated`, `#344-349`) |
@@ -412,36 +503,95 @@ The guard deliberately does **not** exclude a preceding `/`. Measured, a `/` exc
 rejects 157 more tokens, and none of them is a cross-repo reference - an `owner/repo#N` has a
 word character before `#`, not a slash. 154, all with N > 12, are issue numbers in
 slash-joined lists (`#489/#490` x13, `SPEC-038/#460` and `DR-063/#854` among the most
-frequent contexts); 2 are the `#2` of `invariant-#1/#2`, counted as false positives below;
-and 1 (`DR-047/#344-349`) fails the right-hand guard anyway.
+frequent contexts); 2 are the `#2` of `invariant-#1/#2`, which the numbered-item oracle below
+counts as false positives; and 1 (`DR-047/#344-349`) fails the right-hand guard anyway.
+
+### AC1's plan-phase pin (the detector as built)
+
+**One metric.** AC1's false-positive rate is `W / L`. `L` is the number of tokens that become
+lozenges: `detectRefs` admits the span, and `buildRefCard(ref, lookupApprovable(root,
+ref.resolution))` is non-null. `W` is the number of those whose card is for a different
+artifact than the one the author cited. `W` is counted by a fixed oracle, never by judgement
+at test time:
+
+1. every guarded `#N` inside a match of
+   `(?i)\b(?:invariant|invariants|inv|rule|rules|costly|refactor|constitution|question|principle|goal|methodology|step|option|item|criterion)[ -](?:#\d+/)*#\d+`
+   (`invariant #2`, `rule #8`, `Costly to Refactor #1`, ...);
+2. an enumerated list of known wrong-register v1 tokens, as `file:line:token` at the pinned
+   commit. Today it has two entries: `docs/decisions/DR-075.md:59` ("its own register's
+   DR-021") and `:105` ("their DR-021"). Both cite scrooge's DR-021 and resolve to this repo's
+   DR-021. They were found by a targeted search of every lozenged v1 token for a preceding
+   "their", "scrooge", "sealbox", "mmo-platform", "global" or "parent register", or a
+   following `@` or "(scrooge"; the search's only other hit ("DR-019 (global order)" in
+   SPEC-010) is a correct local ref;
+3. `SP1` preceded by `Windows ` (Slice C only; v2 is not scanned before it).
+
+The oracle is a lower bound: a wrong-target class it does not know goes uncounted, and
+item 2 comes from one targeted search, not a reading of every token. Every `W` below is the
+oracle's count, so every rate is a floor on the true rate; the test holds the oracle's count
+exactly.
+
+*Rejected: run the harness over the live corpus with a rate ceiling.* Cost: every commit
+moves `L` and `W`, so the ceiling is re-derived or loosened on unrelated doc changes - a test
+that goes flaky and then gets weakened rather than investigated - and an enumerated
+`file:line` list cannot follow lines that move.
+*Rejected: commit the snapshot as a test fixture.* Cost: about 3 MB of copied prose in the
+repo, which the pinned commit already holds.
+*Chosen: read the pinned commit from the clone.* Cost: the `test` job has to clone full
+history (the one-line `ci.yml` change in the component map), as the `paths` job already does.
+
+**Harness.** `packages/minspec/tests/ref-ac1-corpus.test.ts` (new). It extracts
+`git archive a33d6d57 specs docs .minspec` into an `fs.mkdtempSync` directory, so
+`lookupApprovable` resolves against the artifacts that existed at that commit (59 specs,
+89 DRs, 10 epics), and scans the 208 files named above. The commit must be in the clone. That
+is the reason for the one-line `ci.yml` change in the component map, and the harness FAILS,
+naming `git fetch --unshallow`, when `git cat-file -e a33d6d57` fails; it never skips. Until
+Slice B's renderer supplies skip ranges from its token stream, the harness computes them
+itself, over the code-removed text: inline-link destinations (`](` through the matching `)`,
+allowing one level of nested parentheses), reference definitions (a line
+`[label]: destination`), angle-bracket autolinks (`<https://…>`), and bare `http://`,
+`https://` or `www.` URLs; plus, on the frontmatter-skipped branch only, the leading `---`
+block. When Slice B lands, the harness switches to the renderer's ranges and re-derives the
+pin in that change.
+
+Measured. The prefix map is empty, so the 2 v1 cross-prefixed tokens render as plain text.
+Local v1 tokens whose target does not exist (55 with frontmatter skipped, 59 with it
+scanned) render as plain text by FR8 and are not in `L`.
+
+| What lozenges | Frontmatter (PQ5) | L | W (oracle) | W / L |
+|---|---|---|---|---|
+| Slice A-B contract: local SPEC/DR/EPIC that exist; no issue card (PQ3 unanswered) | skipped | 4,632 | 2 | 0.043% |
+| same | scanned | 5,927 | 2 | 0.034% |
+| the above plus every guarded `#N` (PQ3 gives issues a card, PQ1 adds no filter) | skipped | 7,252 | at least 343 | at least 4.73% |
+| same | scanned | 8,682 | at least 351 | at least 4.04% |
+
+The last two rows take every guarded `#N` as resolving, because issue existence cannot be
+checked offline (PQ3); that overstates `L`, so those rates are floors. PQ6's "suppress inside
+a link" option would remove 929 v1 lozenges and 572 `#N`, all in link text, from these rows
+and change no `W`.
+
+**What the T0 test asserts.** For each PQ5 branch, `L` and `W` equal the row for the
+contract in force. Today that is the first two rows, so the pinned AC1 rate is `2 / 4,632`
+(0.043%) with frontmatter skipped and `2 / 5,927` (0.034%) with it scanned, as measured by
+the oracle above. The test holds that value as both ceiling and floor: the comparison is
+exact equality, not "at most", so a change to the detector, the skip producer or the oracle
+moves a number and must re-pin it in the same diff, and an empty match set fails because `L`
+is pinned in thousands. When the PQ1 and PQ3 answers make `#N` lozenge, the
+harness moves to the row those answers select, in that change. AC1 still cannot go green
+until PQ3 is answered, because AC1 names `#500` as a lozenge.
 
 Five things this measurement settles, that prose alone would not have:
 
-1. **Excluding bare paragraph codes is worth 6,238 suppressed candidates against 9,712
-   admitted ones** (6,931 v1 + 4 v2 + 2,777 guarded `#N`). DR-053 §4 asserted the flood; on
-   this corpus it is a 64% inflation.
-2. **AC1's pin is conditional, because two open questions decide what can lozenge.**
-   - *Under the Slice A contract as written:* no issue has a card source (PQ3), so
-     `lookupApprovable` returns `not-found` for every `#N` and each renders as plain text.
-     The rendered set is the 6,929 local v1 tokens, and neither measured collision class
-     can occur in it: `#N` never lozenges, and `SP1` is a v2 token Slice A does not scan.
-     That is **not** AC1 passing. AC1 names `#500` as a lozenge, so it cannot go green
-     until PQ3 is answered with an option that gives an issue a lozenge.
-   - *If issues lozenge and bare `#N` auto-lozenges exactly as FR1 writes it (PQ1):* **at
-     least 350 false positives in 9,712 candidates = 3.60%.** 349 are guarded `#N` preceded
-     by a numbered-item noun - every guarded `#N` inside a match of
-     `(?i)\b(?:invariant|invariants|inv|rule|rules|costly|refactor|constitution|question|principle|goal|methodology|step|option|item|criterion)[ -](?:#\d+/)*#\d+`
-     (`invariant #2` x60, `invariant #1` x55, `rule #8` x47, `invariant #3` x32,
-     `inv #5` x23, `costly #1` x16, and so on) - plus one `SP1` (PQ2) once Slice C scans v2.
-     "At least", because the noun list is a lower bound: 408 of the 2,777 guarded `#N` carry
-     N <= 12, and the 60 of those that no listed noun precedes were not individually
-     classified.
-   - *If `#N` is withheld from auto-lozenging* (a PQ1 option, and also PQ3's "drop"
-     option): **1 in 6,935 = 0.014%**.
-
-   So PQ1 is not a tidy-up: it is worth a factor of roughly 250 on this acceptance
-   criterion. The ceiling test is written against whichever number the PQ1 and PQ3 answers
-   select.
+1. **Excluding bare paragraph codes keeps the lozenge count under half of what it would
+   be.** They are 6,144 candidates with frontmatter skipped (6,238 scanned), against the
+   4,632 (5,927) v1 lozenges the Slice A-B contract renders. DR-053 §4 asserted the flood; on
+   this corpus admitting them would more than double the number of lozenges.
+2. **AC1's pin is conditional, because open questions decide what can lozenge.** Under the
+   Slice A-B contract as written, no issue has a card source (PQ3), so every `#N` renders as
+   plain text and the rate is the first two rows. That is **not** AC1 passing: AC1 names
+   `#500` as a lozenge. If issues lozenge and bare `#N` auto-lozenges exactly as FR1 writes it
+   (PQ1), the rate rises by a factor of roughly 110 (0.043% to at least 4.73%, frontmatter
+   skipped). So PQ1 is not a tidy-up.
 3. **The word-character half of the left guard is load-bearing, and its cost is visible.**
    Without `(?<!\w)`, the `#121` in `scroogellm#121` is proposed as *local* issue #121 -
    once issues have cards (PQ3), a real card for the wrong target, which is a silent lie,
@@ -449,49 +599,79 @@ Five things this measurement settles, that prose alone would not have:
    including the 59 that name this repo and would have resolved correctly (PQ4).
 4. **The `[[…]]` sigil is nearly free in prose and catastrophic in code**, which is what
    forces D4 rather than making it a preference.
-5. **Resolution-gating is not a false-positive filter.** Both residual collision classes
-   resolve to artifacts that exist (issues #1, #2 and #3 exist in this repo; SPEC-001
-   exists), so once they have a card source, FR8 never fires on them.
+5. **Resolution-gating is not a false-positive filter.** Every counted wrong target resolves
+   to an artifact that exists: issues #1, #2 and #3 exist in this repo; SPEC-001 exists; and
+   this repo has its own DR-021, so scrooge's DR-021 cited bare lozenges as ours. Once they
+   have a card source, FR8 never fires on them.
 
 ## Invariants and how each is tested (T0 before implementation)
 
 | Invariant | T0 test | Where |
 |---|---|---|
-| **INV-live-status-deterministic** | Fixture spec with `status: implementing` in frontmatter and a **stale** approval sidecar; assert the card reads `specifying` (deriveStatus INV-1), not `implementing`. Plus a corpus property test: for every approvable, `card.status === deriveStatus(...)`, and a source assertion that `ref-cards.ts` never reads `SpecSummary.status`. | `packages/minspec/tests/ref-cards.test.ts` (new) |
+| **INV-live-status-deterministic** | Fixtures: (a) a spec with `status: implementing` and a **stale** sidecar reads `{derived, specifying}` (lifecycle.ts:140); (b) a spec with a current sidecar, `implement: in-progress` and `status: planning` reads `{derived, implementing}` (lifecycle.ts:144), so the value is derived in both directions; (c) a DR with `status: accepted` reads `{frontmatter, accepted}` and never `new` (the #1067 regression, scripts/facts.ts:327-339); (d) a DR with no frontmatter and a DR with `status: bogus` read `{none}` and `{none, raw: 'bogus'}`, never `proposed` (the default `listAdrs` would supply, adr-manager.ts:1306, :1318); (e) the same pair for an epic (epic-manager.ts:134, :149). Corpus property over this repo's `specs/` and `docs/`: for every SPEC card, `status` deep-equals `{derived, deriveStatus(...)}` computed by the test from `parseSpec` on the same file; for every DR and epic card, it deep-equals what the test reads with its own regex from the file's leading `---` block, mapped to `frontmatter` for a member of `ADR_STATUS_VALUES` / `EPIC_STATUS_VALUES` and to `none` otherwise. Plus a source assertion that `ref-cards.ts` reads none of `SpecSummary.status`, `AdrSummary.status`, `EpicSummary.status`. | `packages/minspec/tests/ref-cards.test.ts` (new) |
 | **INV-graceful-degrade** | Run `detectRefs` + `buildRefCard` over the whole `specs/` + `docs/` corpus and a fuzz set of truncated/garbage tokens (shared test), and `lookupApprovable` over every detected ref (minspec test); assert zero throws, and that every `not-found` lookup yields `null` so the caller emits plain text. The `degraded` variant has no status field, so "a blank status passed off as current" is a type error rather than a test case. | `packages/shared/tests/ref-detect.test.ts` (new), `packages/minspec/tests/ref-cards.test.ts` (new) |
 | **INV-tier0-detection** | Already enforced for the tree by `packages/minspec/tests/tier0-import-ban.test.ts` (scans the `minspec` and `shared` `src/` trees since #1511). Add a **direction** assertion: `ref-detect.ts` imports nothing from `packages/minspec`, no `vscode`, no `fs`. Add a file-scoped assertion that `ref-cards.ts` imports no `vscode`: AC6 covers resolution modules too, and `lib/`'s vscode rule is only `warn` until #830 (eslint.config.mjs:250-262), so the lint alone would not fail it. | `packages/minspec/tests/import-boundaries.test.ts` (existing), `packages/minspec/tests/ref-cards.test.ts` (new) |
-| **INV-keyboard** | Assert emitted markup uses `<button type="button">` with no `tabindex="-1"`; that ids are unique per document (a fixture citing DR-053 three times yields `ms-card-0`, `ms-card-1`, `ms-card-2`); and that every lozenge's `aria-describedby` names exactly one element. A T2 test drives focus to open the card and `Escape` to close it (AC2). | `packages/minspec/tests/ref-lozenge-html.test.ts` (new, Slice B) |
-| **AC1 false-positive budget** | The corpus harness above. A deny-list fixture of tokens that AC1 or the approved grammar rules out: `src/foo/bar`, a bare `https://` URL, `M1`, `R1`, `G7`, `IS500`, a lone `SEA`, `[[just-enough-human]]`, `AIClarityAU/minspec#460`, `scroogellm#121`. None may lozenge. The measured collision classes whose treatment is still open - `invariant #2` and `Costly to Refactor #1` (PQ1), `Windows SP1` (PQ2) - go in a separate *counted* fixture: the test records their current outcome and fails when it changes, so the PQ1 and PQ2 answers update the pin deliberately instead of a deny-list assertion answering them first. Total lozenge count is asserted against a pinned ceiling so a grammar widening that floods cannot land quietly. | `packages/shared/tests/ref-detect.test.ts` |
+| **INV-keyboard** | One `createLozengeRenderer()` instance renders a `full` DR-053 card three times and a `degraded` card once. The test supplies no counter. It asserts that every emitted id is distinct (`ms-card-0` to `ms-card-3`), every lozenge is `<button type="button">` with no `tabindex="-1"`, and every `aria-describedby` names exactly one element in the concatenated output. The host-level property - one instance per document render - has no seam until SPEC-014 extracts the renderer; it is asserted by the T2 host test below (AC2) over a rendered fixture document that cites DR-053 three times, written in Slice B once that path exists. | `packages/minspec/tests/ref-lozenge-html.test.ts` (new, Slice B) |
+| **AC1 false-positive budget** | Two parts. (1) *Deny-list*, at `detectRefs` level: `src/foo/bar`; `https://example.com/specs/SPEC-014-x/requirements.md` with its URL range passed as a skip range; `M1`, `R1`, `G7`, `IS500`, a lone `SEA`, `[[just-enough-human]]`, `AIClarityAU/minspec#460`, `scroogellm#121`, `SPEC-100@scroogellm` - none yields a `DetectedRef`. The collision classes whose treatment is still open - `invariant #2` and `Costly to Refactor #1` (PQ1), `Windows SP1` (PQ2), `their DR-021` (the wrong-register class) - go in a separate *counted* fixture: the test records their current outcome and fails when it changes, so the PQ answers update the pin deliberately instead of a deny-list assertion answering them first. (2) *Corpus pin*: the harness and exact assertions in the pin above. | (1) `packages/shared/tests/ref-detect.test.ts`; (2) `packages/minspec/tests/ref-ac1-corpus.test.ts` (new), in minspec because `L` needs `lookupApprovable` |
+| **Zero writes** (D2, and "What this design does NOT do") | Copy a fixture root - a spec with an approval sidecar, a DR, an epic, and a doc citing all three plus an unknown id - into `fs.mkdtempSync`. Record every file under it as relative path to sha256 of content, size and `mtimeMs`, plus the full path list. Run `detectRefs`, `lookupApprovable` and `buildRefCard` over every ref in every fixture doc (Slice B adds `createLozengeRenderer().render` on each card). Re-walk and assert the record is identical, with no path added or removed. It is behavioural on purpose: `vi.spyOn(fs, …)` cannot redefine the ESM `fs` namespace (packages/minspec/tests/merge-refresh-890.test.ts:40), and a tree comparison catches a write through any API. | `packages/minspec/tests/ref-cards.test.ts` (new) |
 
 Test tiers beyond T0: **T1** - `detectRefs` truth table over each grammar and each skip-range
 edge (token abutting a skip boundary, token spanning one, overlapping candidates resolving
 longest-first); a property test that every `DetectedRef` satisfies
 `resolveRef(raw, opts.prefixes) !== null` (D1: the scanner cannot admit what the resolver
-rejects); a cross-check that `ref-detect` and `reference-checker.extractReferences` agree on
-the id set they both claim to find; and (Slice B) that the lozenge wiring posts `ref:open`
-with `toSide: false` only. **T2** - AC2 (hover and focus open the card), AC3 (change a
-target's status, re-render, card reflects it), AC4 (unknown code renders as plain text with
-no error), AC5 (activate navigates). **T3** - one per bug found at Implement.
+rejects); the `ref-detect` / `reference-checker` cross-check defined below; and (Slice B) that
+the lozenge wiring posts `ref:open` with `toSide: false` only. **T2** - AC2 (hover and focus
+open the card, `Escape` closes it, and the host's rendered document has unique card ids), AC3
+(change a target's status, re-render, card reflects it), AC4 (unknown code renders as plain
+text with no error), AC5 (activate navigates). **T3** - one per bug found at Implement.
+
+**The T1 cross-check, exactly.** `packages/minspec/tests/ref-cards.test.ts`, over every
+corpus file and a fixture set. For a text T:
+
+- S is T with every line matching `^\s*(id|epic):\s` removed - reference-checker.ts:122's own
+  filter, applied to both sides so neither sees a frontmatter line the other does not.
+- A is the set of (kind, number) pairs from `extractReferences(T)` entries whose kind is
+  `spec`, `decision` or `epic` and whose `external` is not true. Kinds map to `SPEC`, `DR`,
+  `EPIC`; the number is `Number()` of the id's digits, which removes reference-checker's
+  zero-padding (`canonicalId`, reference-checker.ts:103-107).
+- B is the set of `(resolution.kind, resolution.num)` from
+  `detectRefs(S, { skip: [], grammars: ['v1'], prefixes: EMPTY_PREFIX_MAP })` entries whose
+  `resolution.status` is `local` and whose kind is not `ISSUE`. `resolution.num` is already a
+  number (project-prefix.ts:162), so `SPEC-19` and `SPEC-019` compare equal.
+- P is the set of pairs in A every one of whose non-external `ARTIFACT_RE` matches in S is
+  immediately preceded by `\b[A-Z]{2,5}-`. That is the one known grammar difference:
+  `ARTIFACT_RE` (reference-checker.ts:65) finds `SPEC-019` inside `MS-SPEC-019`, while
+  `SDD_SPAN` proposes the whole token and `resolveRef` reads it as prefixed.
+
+The test asserts that B equals A with P removed, exactly, in both directions, file by file.
+`@namespace` needs no exception, because `extractReferences` marks it external and
+`SDD_SPAN`'s guard does not propose it. The fixture set carries one case per difference -
+unpadded `SPEC-19`, `MS-SPEC-019`, `SC-DR-007`, `SPEC-100@scroogellm`, `SPEC-014@ ` (an `@`
+not followed by a letter, which both sides treat as local), `ABCDEF-SPEC-014` (a six-letter
+run, which is not a prefix on either side), and an `id:` line - so the test cannot pass just
+because the corpus happens to lack them.
 
 ## Constitution invariants
 
 1. **Offline (invariant 1).** Slice A touches the filesystem only; Slice B adds no origin to
    a CSP that is already `default-src 'none'` (D7). The one place a network call could
    creep in is an issue card - see PQ3, which is why it is a flagged gap and not a design.
+   The AC1 harness reads a commit from the local clone and never fetches.
 2. **No silent gate (invariant 2).** This feature ships no merge-gating check, so the
    invariant binds it only in spirit: nothing in the card path may swallow an error into a
    plausible-looking value. `buildRefCard` returns `null` for a `not-found` lookup and the
-   caller emits plain text - a *visible* degrade the reader can see - and the only degraded
-   card shape has no status field at all, so a blank status cannot be passed off as current.
-   The AC1 harness is a test, not a gate, and is asserted with a pinned ceiling precisely so
-   it cannot pass vacuously on an empty match set.
+   caller emits plain text - a *visible* degrade the reader can see - the only degraded
+   card shape has no status field at all, so a blank status cannot be passed off as current,
+   and `CardStatus` has no default variant. The AC1 harness is a test, not a gate. It asserts
+   exact counts on a pinned snapshot, so an empty match set fails it, and a missing snapshot
+   commit fails it rather than skipping.
 3. **Blast radius (invariant 3).** Invariant 3 bounds what MinSpec *changes* in a repo that
    did not opt in (constitution.md:9). SPEC-035 changes nothing anywhere: it writes to no
-   file (the zero-writes T0 assertion under "What this design does NOT do"). Its reads stay
-   inside the workspace, because `listSpecs`, `listAdrs` and `listEpics` resolve their
-   directories through `resolveAndValidate`, which throws for any path outside `rootDir`
-   (config.ts:140-147). A sibling-repo read, one of OQ2's options, could not reuse that check
-   unchanged, so how such a read would be bounded is raised as PQ8, not decided here.
+   file (the zero-writes T0 row above). Its reads stay inside the workspace, because
+   `listSpecs`, `listAdrs` and `listEpics` resolve their directories through
+   `resolveAndValidate`, which throws for any path outside `rootDir` (config.ts:140-147). A
+   sibling-repo read, one of OQ2's options, could not reuse that check unchanged, so how
+   such a read would be bounded is raised as PQ8, not decided here.
 
 ## Open questions raised at Plan
 
@@ -500,26 +680,27 @@ real corpus. **None is resolved here.** An invented answer would look like it wa
 plan by the time anyone noticed.
 
 - **PQ1 - `#N` collides with numbered prose items, at 12.6% of guarded `#N`, and that is a
-  floor.** 349 of the 2,777 guarded `#N` hits are preceded by a numbered-item noun (the regex
-  in the AC1 pin) - `invariant #2`, `constitution #1`, `Costly to Refactor #1`,
-  `Open Question #1`, `rule #8`, `§Methodology #5` - and 408 carry N <= 12, so 349 is a lower
-  bound, not a total. Issues #1, #2 and #3 all exist in this repo, so under any PQ3 answer
-  that gives `#N` a lozenge, each of these becomes a lozenge for the **wrong target**: FR8
-  never fires, because the ref resolves. (Under the Slice A contract they render as plain
-  text, only because no issue has a card source yet.) FR1 admits bare `#500` with no
-  qualifier and gives no rule that separates the two. This is the single largest term in
-  AC1's measured rate (see the pin above): it is the difference between 3.60% and 0.014%.
-  Option space, not a choice: require the `[[…]]` sigil for `#N`; require a preceding
-  boundary that is not a numbered-item noun; a minimum N; or drop `#N` from auto-lozenging
-  and leave it to GitHub's own autolinking. The sigil and drop options both stop a bare
-  `#500` lozenging, which FR1 and AC1 as approved require, so either one needs a requirements
-  amendment and re-approval.
+  floor.** 349 of the 2,777 guarded `#N` in the grammar survey are preceded by a
+  numbered-item noun (the oracle's regex in the AC1 pin) - `invariant #2`,
+  `constitution #1`, `Costly to Refactor #1`, `Open Question #1`, `rule #8`,
+  `§Methodology #5` - and 408 carry N <= 12, of which the 60 that no listed noun precedes were
+  not individually classified, so 349 is a lower bound, not a total. Issues #1, #2 and #3 all
+  exist in this repo, so under any PQ3 answer that gives `#N` a lozenge, each of these
+  becomes a lozenge for the **wrong target**: FR8 never fires, because the ref resolves.
+  (Under the Slice A contract they render as plain text, only because no issue has a card
+  source yet.) FR1 admits bare `#500` with no qualifier and gives no rule that separates the
+  two. This is the single largest term in AC1's measured rate: it is the difference between
+  0.043% and at least 4.73% (frontmatter skipped). Option space, not a choice: require the
+  `[[…]]` sigil for `#N`; require a preceding boundary that is not a numbered-item noun; a
+  minimum N; or drop `#N` from auto-lozenging and leave it to GitHub's own autolinking. The
+  sigil and drop options both stop a bare `#500` lozenging, which FR1 and AC1 as approved
+  require, so either one needs a requirements amendment and re-approval.
 - **PQ2 - `SP1` matches "Windows SP1", and DR-053 §4's fix does not cover it.** §4's central
   rule (auto-lozenge only a ref carrying at least an APPROVABLE segment) was aimed at bare
   *paragraph* codes. `SP1` **is** an approvable segment, and SPEC-001 exists, so it
   resolves. One live instance in the corpus, in DR-053's own prose at the line that lists
-  "Windows SP1" as a collision example (DR-053.md:160). It is the sole residual false
-  positive once PQ1 is resolved, and the reason AC1's floor is 0.014% rather than zero.
+  "Windows SP1" as a collision example (DR-053.md:160). It enters AC1's rate only once Slice C
+  scans v2 tokens, so it is not in the Slice A-B pin.
 - **PQ3 - a GitHub issue has no offline card source.** FR1 admits `#500` and `SCR#204`; FR3
   requires title, status and summary. `packages/minspec/src/lib/backlog.ts` obtains issues
   by shelling out to the `gh` CLI at call time (`execFile`, backlog.ts:211) and writes no
@@ -537,26 +718,41 @@ plan by the time anyone noticed.
   cached source carries FR3's fields, but a cached status is a restatement that can go stale,
   which INV-live-status-deterministic forbids, and it adds a network path that invariant 1
   allows only with explicit consent. AC1 cannot go green until this is answered.
-- **PQ4 - repo-qualified `#N` is 83 corpus references the grammar does not admit.** DR-053
+- **PQ4 - repo-qualified refs are 83 corpus references the grammar does not admit.** DR-053
   §2 defines the cross-project issue form as `SCR#204`; the corpus writes
   `AIClarityAU/minspec#460` (35 with an `owner/`) and `scroogellm#121` (48 without). 59 of
   the 83 name this repo, so they are local references in a longer spelling; 24 name another
   repo (`scroogellm` 13, `sealbox` 4, `mmo-platform` 3, `scrooge` 2, and one each of
   `kirodotdev/Kiro` and `Fission-AI/OpenSpec`). The word-character guard that stops
-  `scroogellm#121` becoming a wrong local lozenge also makes all 83 inert. Whether to admit
-  `owner/repo#N` is a DR-053 grammar amendment, not a SPEC-035 call.
-- **PQ5 - which prose the detector sees.** FR1 says "over a rendered approvable's text". D4
-  settles code and hrefs on measured evidence, but the requirements do not say whether
-  headings, table cells and **frontmatter** are in scope. Frontmatter matters most:
-  `epic: EPIC-002` and `relates_to: [SPEC-014, …]` are declarations, not citations -
-  `reference-checker.ts` scrubs `id:` and `epic:` lines for exactly that reason. Lozenging a
-  declaration is arguably right and arguably a category error; the requirements do not say.
-- **PQ6 - what a lozenge does to an existing markdown link.** 26.6% of v1 refs already sit
-  inside a link: 927 in the link text and 915 inside the href. FR2 says the ref renders as a
-  lozenge and FR7 says activating navigates. Whether the lozenge wraps the link, replaces it,
-  or is suppressed inside one is unspecified, and it changes the navigation target: the
-  author's href and the resolver's target can differ, and silently preferring one over the
-  other is the never-wrong hazard in miniature.
+  `scroogellm#121` becoming a wrong local lozenge also makes all 83 inert, and `SDD_SPAN`'s
+  `@` guard does the same for reference-checker's `SPEC-100@scroogellm` spelling (none in the
+  corpus today). Whether to admit either form is a DR-053 grammar amendment,
+  not a SPEC-035 call.
+- **PQ5 - does the detector see frontmatter? NOT decided. It needs the founder via
+  Clarify.** FR1 says "over a rendered approvable's text" (requirements.md:75-76). Headings
+  and table cells are rendered text, so the measurements here scan them. Frontmatter is the
+  open case. `epic: EPIC-002` and `relates_to: [SPEC-014, …]` are declarations, not
+  citations - `reference-checker.ts` scrubs `id:` and `epic:` lines for exactly that reason
+  (reference-checker.ts:122) - and whether SPEC-014's renderer shows frontmatter at all is
+  undecided along with that renderer. It is not a small case: 1,295 of the 5,927 v1 lozenges
+  measured with frontmatter scanned sit in it. The contract takes no side: `DetectOptions.skip`
+  is the caller's, and the AC1 harness pins both branches. Options:
+  (a) **(rec)** skip the whole frontmatter block. Cost: the `depends_on` and `relates_to`
+  lists, the densest cross-references in the corpus, stay inert text, so a reader cannot
+  hover a related artifact from the header. Reversing it later is a change to the caller's
+  skip list, not to the contract.
+  (b) scan all of it. Cost: `id: SPEC-035` lozenges the document's own id, and `epic:`
+  declarations lozenge - the category error reference-checker already avoids.
+  (c) scan it except the `id:` and `epic:` lines, as reference-checker does. Cost: key-aware
+  skip logic in the renderer that must follow the frontmatter schema, for a block the
+  renderer may not display.
+- **PQ6 - what a lozenge does to an existing markdown link.** 27.0% of v1 refs already sit
+  inside a link: 929 in the link text and 943 inside the destination. FR2 says the ref
+  renders as a lozenge and FR7 says activating navigates. Whether the lozenge wraps the link,
+  replaces it, or is suppressed inside one is unspecified, and it changes the navigation
+  target: the author's href and the resolver's target can differ, and silently preferring
+  one over the other is the never-wrong hazard in miniature. Suppression would also remove
+  929 v1 lozenges from the AC1 pin's `L`.
 - **PQ7 - this design contradicts SPEC-018's approved design on which parser owns cross-ref
   tokens, and that conflict is not resolved here.** SPEC-018's design (`status: implementing`,
   approved requirements sidecar) commits FR-10's cross-ref hotlinks to
@@ -590,6 +786,43 @@ plan by the time anyone noticed.
   (c) read only folders open in the current VS Code multi-root workspace. Cost: the same
   document renders different cards in different windows, because the lookup then depends on
   window state.
+- **PQ9 - may Slice A be built before the paused webview work resumes? NOT decided. It needs
+  the founder via Clarify.** The requirements record the build as "queued, not now", paused
+  with SPEC-018's webview work pending the token economy (requirements.md:37-39, and the
+  `implements_reason` at :15), and say this spec ships when that work resumes
+  (requirements.md:219-220). Slice A has no technical predecessor, which is the only reason
+  the question arises; this design does not schedule it ahead of the resume. Options:
+  (a) **(rec)** keep the recorded sequencing: no slice is built until the webview work
+  resumes, and Slice A then goes first within it. Cost: the Costly-to-Refactor #1 contract
+  stays pinned on paper only until then, the `a33d6d57` measurements age, and #679 may land
+  in the meantime and change what Slice A should consume.
+  (b) build Slice A ahead of the resume, as a de-risking step. Cost: it reverses a timing
+  decision the founder recorded, spends build effort the pause was meant to save, and leaves
+  a merged, tested module no human can see (the second risk below).
+- **PQ10 - FR5 names a status source that DRs and epics do not have. NOT decided. It needs the
+  founder via Clarify.** FR5 defines the card's status source as "the per-approvable sidecar
+  under `.minspec/approvals/` + frontmatter `status`/phase - i.e. `deriveStatus`'s inputs"
+  (requirements.md:106-108). That source exists only for specs. `.minspec/approvals/` holds a
+  `specs/` subtree only, DR and epic files carry no `phases:`, and running the spec derivation
+  on a DR is the #1067 bug (scripts/facts.ts:327-339). INV-live-status-deterministic names
+  "the `.minspec/approvals/` sidecar / frontmatter" (requirements.md:191-192), which admits
+  frontmatter alone, and the contract records a DR's or epic's own `status:` value on that
+  reading (D3). What neither text settles is whether that reading is what FR5 means for these
+  kinds, and what a card shows when a DR or epic records no recognised status. It is most of
+  the cards: DRs and epics are 2,910 of the 4,632 v1 lozenges in the AC1 pin (frontmatter
+  skipped), about 63%. Options:
+  (a) **(rec)** show the file's own `status:` value for DRs and epics; when it is absent or
+  outside the kind's vocabulary, the card says the file records no recognised status instead
+  of showing a value. Cost: a DR's or epic's status is a hand-edited line that no approval
+  hash backs, so its card is only as trustworthy as the last edit to that line (the
+  INDEX-drift class that #220's gate watches). That is weaker than a spec card's derived
+  status, but shown in the same card slot.
+  (b) the same source, but an absent or unrecognised status turns the whole reference into
+  plain text, as FR8 treats an unresolvable ref. Cost: a real, navigable DR stops being a
+  lozenge because of a metadata typo.
+  (c) read FR5 strictly: only spec cards carry a status; DR and epic cards show title and
+  summary only. Cost: FR3 asks every card for a current status, and this drops it for about
+  63% of lozenges.
 - **OQ1 (from requirements) - one fact that narrows it, no answer.** **Zero** approvables in
   the corpus carry a `summary:` frontmatter field today, and there are 61 live approval
   sidecars. So adding `summary` to `stripLifecycle` in
@@ -644,22 +877,25 @@ changes; none is load-bearing on the rest of this design.
 - **Does not build open-to-the-side navigation.** `ref:open` carries `toSide: false` only;
   the `Beside` behaviour is SPEC-018 FR-10's.
 - **Does not write to any approvable.** No `WorkspaceEdit`, no frontmatter write, no summary
-  generation in Slices A-C. A T0 assertion of zero writes is the cheapest guard against the
+  generation in Slices A-C. The zero-writes T0 row is the cheapest guard against the
   rejected alternative in D2 and against FR4 quietly acquiring a writer.
+- **Does not schedule any slice ahead of the paused build** (PQ9).
 
 ## Risks
 
 Inherits requirements R1-R4. Added at Plan:
 
-- **The corpus false-positive pin is a snapshot.** 9,712 lozenge candidates measured at
-  `a33d6d57`; the ceiling assertion must be re-derived when the corpus grows, or it turns
-  into a flaky test that gets weakened rather than investigated. Pin it as a ratio against
-  total prose bytes (2,926,455 under the stripping rule stated with the pin), not an
-  absolute, and state the commit in the fixture.
-- **Slice A can ship and then sit unrendered.** That is the point - it de-risks the Costly
-  #1 contract - but a merged, tested, entirely invisible module is easy to mistake for a
-  shipped feature. `implements_reason` and the spec's `status: planning` must not be
-  advanced when Slice A lands; only Slice B makes any of this visible to a human.
+- **The AC1 pin is a snapshot, by design.** It is exact because the corpus is fixed at
+  `a33d6d57`, so it cannot go flaky as the corpus grows. But it never sees prose written
+  after that commit, so a wrong-target class that appears later goes unmeasured until someone
+  re-pins against a newer commit. Re-pinning is a deliberate diff to the commit and the
+  numbers, never a loosened comparison.
+- **Slice A can merge and then sit unrendered,** if PQ9 is answered (b). A merged, tested,
+  invisible module is easy to mistake for a shipped feature. This design sets no rule about
+  the spec's `status:` for that case: status is derived by `deriveStatus` from phases and
+  approval (lifecycle.ts:133-145) and reads `implementing` once the implement phase starts
+  (lifecycle.ts:144). The Evidence-Discipline rule in CLAUDE.md governs any prose claim that
+  the feature works.
 - **Two parsers, one grammar - and this contradicts SPEC-018's design, unreconciled (PQ7).**
   `ref-detect.ts` and `reference-checker.ts` will both claim to find `SPEC-NNN`. This is not
   a hypothetical future risk: SPEC-018's approved design already commits FR-10's cross-ref
