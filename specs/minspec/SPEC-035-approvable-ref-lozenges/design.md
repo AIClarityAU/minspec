@@ -12,7 +12,7 @@ implements_reason: Plan document. requirements.md declares `implements: none` wh
 
 # MinSpec - Approvable-Reference Lozenges + Hover Cards (Plan)
 
-**Date:** 2026-09-09, revised 2026-09-11 (four times)
+**Date:** 2026-09-09, revised 2026-09-11 (five times)
 **Status:** Plan (SDD Plan phase). This document does not change the spec's `status:`.
 **Reads:** [requirements.md](requirements.md) - FR1..FR9, AC1..AC6, the four invariants and
 OQ1..OQ5 are settled there and are not re-litigated. This is HOW, not WHAT/WHY.
@@ -63,8 +63,8 @@ Four slices, ordered by real dependencies, not preference:
 
 | Slice | FRs | What | Blocked on |
 |---|---|---|---|
-| **A - detect + resolve + card model (local v1 refs)** | FR1 (v1, local: `SPEC-014`, `DR-053`, `EPIC-002`, `#500`), FR4 model, FR5 (local targets), FR7 target, FR8 | `ref-detect.ts` (Tier-0 scanner), `ref-cards.ts` (fs adapter), the AC1 corpus harness, and the host-independent T0 tests (INV-keyboard's belongs to Slice B). `#N` is detected but has no card source, so it renders as plain text until PQ3 is answered. | The build resuming (requirements.md:37-39, :219-220). No technical predecessor; building it ahead of the resume is PQ9, not decided. `buildRefCard`'s `label` also waits on PQ11, because the label's form is not decided. |
-| **B - lozenge + card render** | FR2, FR3, FR7 nav, FR8 render | `ref-lozenge-html.ts` + the webview message/keyboard wiring. | SPEC-014's extracted prose renderer. Issue lozenges also need PQ3; how a DR or epic card shows an unrecorded status needs PQ10. |
+| **A - detect + resolve + card model (local v1 refs)** | FR1 (v1, local: `SPEC-014`, `DR-053`, `EPIC-002`, `#500`), FR4 model, FR5 (local targets), FR7 target, FR8 | `ref-detect.ts` (Tier-0 scanner), `ref-cards.ts` (fs adapter), the AC1 corpus harness, and the host-independent T0 tests (INV-keyboard's belongs to Slice B). `#N` is detected but has no card source, so it renders as plain text until PQ3 is answered. | The build resuming (requirements.md:37-39, :219-220), and PQ7: `ref-detect.ts` as D1 specifies it is PQ7's option (b), NOT decided. No technical predecessor; building it ahead of the resume is PQ9, not decided. `buildRefCard`'s `label` also waits on PQ11, because the label's form is not decided. |
+| **B - lozenge + card render** | FR2, FR3, FR7 nav, FR8 render | `ref-lozenge-html.ts` + the webview message/keyboard wiring. | SPEC-014's extracted prose renderer. Issue lozenges also need PQ3; how a DR or epic card shows an unrecorded status needs PQ10. In SPEC-018's editor, how a lozenge and FR-10's hotlink share a token needs PQ13. |
 | **C - v2 grammar + cross-project** | FR1 (`MIN/SP19`, `SP19/FR3`, `SCR#204`), FR9, AC1b sigil, FR5's cross-project degrade | Widen the scanner to the DR-053 v2 token, paragraph segments, `INV-<slug>` / `G-<n>` and the `[[…]]` sigil, against #679's resolver; wire `.minspec/project-prefixes.md` into the lookup. **Not specified by this design:** it gives no span shapes for v2, the sigil, `INV-<slug>` or `G-<n>`, and no resolver contract. Tasks must not treat Slice C as specified; it is planned against #679's resolver once that exists. | [#679](https://github.com/AIClarityAU/minspec/issues/679) (the `project-prefix` v2 grammar update, which is also the table's wiring predecessor); OQ2 for the degraded card's title source |
 | **D - authoring guidance** | FR6 | Tell the authoring LLM to stop restating another approvable's status. | Slice B shipped (R4), and OQ4 |
 
@@ -77,6 +77,8 @@ before the cheap-to-reverse half (lozenge styling, hover-vs-focus tuning) is bui
 
 **D1 - the detector is a new Tier-0 sibling of `project-prefix.ts` that holds no copy of the
 grammar; SPEC-035 does not edit `project-prefix.ts`.**
+*Conditional on PQ7, NOT decided.* D1 follows SPEC-035's FR1 (requirements.md:88-89) and is
+PQ7's option (b): a second parser, which SPEC-018's approved FR-10 may forbid in its editor.
 `packages/shared/src/project-prefix.ts` resolves **one token** (`resolveRef`,
 project-prefix.ts:144); it has no scanner, so FR1 needs one somewhere. It goes in a new
 `packages/shared/src/ref-detect.ts`, and the scanner owns only **token boundaries**. It
@@ -210,7 +212,7 @@ hand-rolled key handler.** A `<button type="button">` is natively focusable, in 
 activated by Enter and Space, and carries the right role for a screen reader. Next/prev is
 then plain Tab/Shift-Tab and needs no new keybinding; the card is `role="tooltip"` bound by
 `aria-describedby`, opened on `mouseenter` **and** `focus`, closed on `mouseleave`, `blur`
-and `Escape`.
+and `Escape`. In SPEC-018's editor the element is PQ13's, NOT decided.
 *Rejected: `<span tabindex="0">` plus a keydown handler.* Cost: hand-rolled activation
 semantics, a wrong implicit role, and one more place for the RSI-standing-constraint to
 regress silently.
@@ -230,7 +232,7 @@ path.
 | `packages/shared/src/ref-detect.ts` | **new (Tier-0)** | `detectRefs()` scanner + `buildRefCard()`. Pure: no `fs`, no `vscode`, no network, no LLM. Holds span shapes, never grammar vocabulary (D1). |
 | `packages/shared/src/index.ts` | **changed** | One `export * from './ref-detect'` line on the barrel. |
 | `packages/minspec/src/lib/ref-cards.ts` | **new (Tier-1 adapter)** | `lookupApprovable()` - a resolved ref to an `ApprovableLookup`. SPEC: `listSpecs()` (spec-catalog.ts:59) for id to path and title, then `parseSpec` + `getApprovalStatus` + `deriveStatus` for its status (D3). DR: `listAdrs()` (adr-manager.ts:1277) and EPIC: `listEpics()` (epic-manager.ts:104) for id to path and title only; status is read from the file's own `status:` line (D3, contract below). Matches a ref to an artifact by kind and number, so `SPEC-19` finds `SPEC-019`. Each catalog resolves its directory through `resolveAndValidate` (spec-catalog.ts:61, adr-manager.ts:95, epic-manager.ts:95); `listAdrs` and `listEpics` first apply the caller's directory overrides (contract below). Reads no prefix table in Slices A-B (see "What this design does NOT do"). |
-| `packages/minspec/src/views/ref-lozenge-html.ts` | **new, Slice B** | `createLozengeRenderer()`: one instance per rendered document; its `render(card)` turns a card model into markup and allocates the card's id itself. Reuses `escapeHtml` (spec-panel-html.ts:286, which escapes both quote characters, so it is safe inside the `data-ref` attribute); adds no second sanitiser. |
+| `packages/minspec/src/views/ref-lozenge-html.ts` | **new, Slice B** | `createLozengeRenderer()`: one instance per rendered document; its `render(card)` turns a card model into markup and allocates the card's id itself. Reuses `escapeHtml` (spec-panel-html.ts:286, which escapes both quote characters, so it is safe inside the `data-ref` attribute); adds no second sanitiser. In SPEC-018's editor, its markup's relation to FR-10's hotlink on the same token is PQ13. |
 | SPEC-014's extracted prose renderer | **caller, Slice B** | Supplies the prose text plus the `skip` ranges (D4; whether they include frontmatter is PQ5), creates one `LozengeRenderer` per document render, and splices the lozenge markup back in. Path unknown until SPEC-014 extracts it - that is why `requirements.md` says the render-host module paths are undecided, and why Slice B declares no path here. |
 | `packages/minspec/tests/tier0-import-ban.test.ts` | **already covers it** | Scans the `minspec` and `shared` packages' `src/` trees since #1511, so `ref-detect.ts` is inside the ban automatically. |
 
@@ -245,21 +247,15 @@ live merge-gate's parser to serve a view - the wrong direction. Both remain sing
 a T1 cross-check, defined exactly under the test tiers below, asserts they agree after a
 stated normalisation, so the grammars cannot silently diverge.
 
-**Undisclosed-conflict flag, not resolved here (see PQ7).** SPEC-018's design
-(`specs/minspec/SPEC-018-spec-custom-editor/design.md:65-67`, `status: implementing`,
-approved requirements sidecar) already commits the opposite answer for the same webview
-surface and the same token class: FR-10's cross-ref hotlinks reuse
-`reference-checker.ts`'s `extractReferences` and state plainly "No forked parser." The
-"carries no character offsets" cost above is real and is exactly why this design forks a
-second parser anyway - but that makes this a considered contradiction of an approved
-sibling design, not an independent decision, and it is not safe to leave implicit. PQ7
-below routes it to a founder decision rather than silently shipping two parsers for one
-grammar.
+**Conflict with SPEC-018's approved requirements, not resolved here.** The paragraph above
+and D1 build a second parser, which SPEC-018's approved FR-10 may forbid in the same editor;
+both hold only if PQ7 answers (b).
 
 ## Contracts
 
 ```ts
 // packages/shared/src/ref-detect.ts - Tier-0. No fs, no vscode, no network, no LLM.
+// Holds only under PQ7 option (b), which is NOT decided.
 
 import type { ApprovableKind, PrefixMap, RefResolution } from './project-prefix';
 
@@ -484,7 +480,7 @@ export function lookupApprovable(
 Webview to extension message, Slice B: `ref:open { id: string, toSide: false }`. The name
 and shape match what SPEC-018's design reserves for its FR-10 cross-ref hotlinks
 (`ref:open{id, toSide}` at `specs/minspec/SPEC-018-spec-custom-editor/design.md:130`, and in
-its contracted-messages list at `:242`), so the two features can share one channel.
+its contracted-messages list at `:242`), so the two can share one channel (not markup: PQ13).
 SPEC-035 only ever sends `toSide: false` and builds no open-to-the-side behaviour: FR7 asks
 for navigation (requirements.md:116-121), and `toSide: true` (SPEC-018's
 `ViewColumn.Beside`) belongs to SPEC-018 FR-10. `ref:open` exists nowhere in
@@ -786,21 +782,25 @@ plan by the time anyone noticed.
   target: the author's href and the resolver's target can differ, and silently preferring
   one over the other is the never-wrong hazard in miniature. Suppression would also remove
   929 v1 lozenges from the AC1 pin's `L`.
-- **PQ7 - this design contradicts SPEC-018's approved design on which parser owns cross-ref
-  tokens, and that conflict is not resolved here.** SPEC-018's design (`status: implementing`,
-  approved requirements sidecar) commits FR-10's cross-ref hotlinks to
-  `reference-checker.ts`'s `extractReferences` and states "No forked parser"
-  (`specs/minspec/SPEC-018-spec-custom-editor/design.md:65-67`). D1 above rejects that same
-  module for SPEC-035's scanner and builds a second one (`ref-detect.ts`) for a real reason -
-  `extractReferences` carries no character offsets, so it cannot tell a renderer where to
-  splice a lozenge - but the two designs now disagree, in writing, about the same webview
-  surface and the same token class. Options, neither chosen here: (a) reconcile by adding
-  offset-tracking to `reference-checker.ts` so SPEC-018 and SPEC-035 share one parser,
-  paying a merge-gate-parser change to serve a view; or (b) keep the two-parser split this
-  design proposes, amend SPEC-018's design to acknowledge and accept it, and rely on the T1
-  cross-check test (see the "Two parsers, one grammar" risk below) to keep the grammars from
-  drifting apart. This needs a founder decision before Slice A's `ref-detect.ts` and Slice
-  B's renderer wiring are both built against an unreconciled sibling commitment.
+- **PQ7 - which parser detects the tokens: two approved requirements disagree. NOT decided.
+  It needs the founder via Clarify.** SPEC-035's FR1 has detection and resolution reuse
+  `project-prefix` (requirements.md:88-89); D1 follows it. SPEC-018's requirements, whose
+  approval is current (`facts approval` reads `APPROVED`), make FR-10's cross-ref rendering
+  in the same editor reuse `reference-checker.ts` and fork no second parser: FR-10 (SPEC-018
+  requirements.md:170, naming the parser at :468), INV One renderer (:322-324), AC-6
+  (:360-362) and AC-10 (:372-374, "no forked parser symbol"). `extractReferences` returns
+  no character offsets (reference-checker.ts:29), which is why D1 does not use it. Options:
+  (a) one parser: add offsets to `reference-checker.ts` and detect with it. Cost: detection
+  then no longer reuses `project-prefix`, against SPEC-035's approved FR1, so it too needs a
+  founder ruling or an amendment and re-approval; and it edits the dangling-reference merge
+  gate's parser to serve a view.
+  (b) **(rec)** two parsers, as D1 specifies. Cost: where FR-10 binds a lozenge (PQ13), it
+  is the fork SPEC-018's approved text forbids, so it needs the founder's ruling that FR-10
+  does not bind it, or an amendment to SPEC-018's requirements and their re-approval - not
+  a design edit. The grammars are then kept in step only by the T1 cross-check; if it is
+  weakened, the dangling-reference gate and the lozenge renderer disagree about what a
+  reference is.
+  D1, the `ref-detect.ts` contract and Slice A hold only under (b); Slice A is blocked on it.
 - **PQ8 - if OQ2 chooses a sibling-repo read, what bounds it? NOT decided here. It needs the
   founder via Clarify, and it only arises if OQ2 picks that option.** Constitution invariant
   3 bounds what MinSpec *changes* in a repo that did not opt in (constitution.md:9); it says
@@ -907,6 +907,19 @@ plan by the time anyone noticed.
   (c) `fetch-depth: 0` on the required `test` job, as the `paths` job has (ci.yml:40-42).
   Cost: it changes a required merge check for every PR and push, and any shallow clone then
   fails the whole suite.
+- **PQ13 - how a lozenge and SPEC-018's FR-10 hotlink share one token. NOT decided. It needs
+  the founder via Clarify.** SPEC-018's editor is one of SPEC-035's named hosts
+  (requirements.md:61-63). There, SPEC-018's approved FR-10 makes every `SPEC-`/`DR-`/`EPIC-`
+  ref a hotlink offering open to the side (SPEC-018 requirements.md:166-172, AC-10 at
+  :372-374), designed as `<a data-ref>` posting `ref:open{id, toSide}` (SPEC-018
+  design.md:130-131). D6 makes the same token a `<button>` posting `toSide: false` only.
+  Nesting is out: HTML allows no interactive element inside `<a>` or `<button>`. Options:
+  (a) **(rec)** one element doing both jobs. Cost: neither design has chosen its element
+  type, the `toSide: false`-only rule stops holding in that editor, and the spec built
+  second edits the other's markup.
+  (b) the lozenge replaces the hotlink. Cost: the token loses FR-10's open-to-the-side, so
+  SPEC-018's FR-10 and AC-10 need an amendment and re-approval.
+  (c) the lozenge gives way in SPEC-018's editor. Cost: that editor shows no lozenge or card.
 - **OQ1 (from requirements) - one fact that narrows it, no answer.** **Zero** approvables in
   the corpus carry a `summary:` frontmatter field today, and there are 61 live approval
   sidecars. So adding `summary` to `stripLifecycle` in
@@ -959,7 +972,7 @@ changes; none is load-bearing on the rest of this design.
 - **Does not build the render host.** Slice B names no file path inside SPEC-014's renderer
   because that renderer does not exist yet; naming one now would be a guess dressed as a plan.
 - **Does not build open-to-the-side navigation.** `ref:open` carries `toSide: false` only;
-  the `Beside` behaviour is SPEC-018 FR-10's.
+  the `Beside` behaviour is SPEC-018 FR-10's (whether a lozenge there carries it is PQ13).
 - **Does not write to any approvable.** No `WorkspaceEdit`, no frontmatter write, no summary
   generation in Slices A-C. The zero-writes T0 row is the cheapest guard against the
   rejected alternative in D2 and against FR4 quietly acquiring a writer.
@@ -980,14 +993,3 @@ Inherits requirements R1-R4. Added at Plan:
   approval (lifecycle.ts:133-145) and reads `implementing` once the implement phase starts
   (lifecycle.ts:144). The Evidence-Discipline rule in CLAUDE.md governs any prose claim that
   the feature works.
-- **Two parsers, one grammar - and this contradicts SPEC-018's design, unreconciled (PQ7).**
-  `ref-detect.ts` and `reference-checker.ts` will both claim to find `SPEC-NNN`. This is not
-  a hypothetical future risk: SPEC-018's approved design already commits FR-10's cross-ref
-  hotlinks to `reference-checker.ts` and states "No forked parser"
-  (`specs/minspec/SPEC-018-spec-custom-editor/design.md:65-67`), so building `ref-detect.ts`
-  as SPEC-035 proposes ships the second parser SPEC-018 explicitly ruled out, on the same
-  webview surface. The T1 cross-check test is what stops the two grammars drifting once both
-  exist; if that test is ever weakened, the dangling-reference gate and the lozenge renderer
-  start disagreeing about what a reference is, and only one of them is a merge gate. PQ7
-  routes the underlying reconcile-or-accept choice to a founder decision; this risk assumes
-  "accept" until that decision is made.
