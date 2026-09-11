@@ -446,6 +446,7 @@ Two notes about clones, because an inert gate is worse than no gate — it looks
 | Gate | Hook | Refuses |
 |---|---|---|
 | Protected-branch guard | \`pre-commit\` | An authored commit on the default branch |
+| Author identity gate (opt-in) | \`pre-commit\` | A commit author email not in a configured allowlist |
 | Secret scan | \`pre-commit\` | Staged changes containing a detected secret |
 | Spec frontmatter | \`pre-commit\` | A staged spec missing \`id: SPEC-NNN\` |
 | Deferred-work gate | \`commit-msg\` | A message that defers work without saying where it went |
@@ -479,6 +480,38 @@ That last row is a **fallback only**. The guard first asks git for the remote's 
 branch by reading \`refs/remotes/<remote>/HEAD\` — a local ref, so no network call. When that
 ref is populated, exactly that one branch is guarded and the name list is ignored. The list
 applies only when the ref is missing, and defaults to \`main master trunk\`.
+
+### Author identity gate
+
+GitHub links a commit to an account by matching the commit's **author email** against the
+verified emails on that account. An email that isn't verified anywhere can never be linked —
+GitHub instead renders **"ghost mentioned this"** for every cross-reference the commit makes
+(a PR, an issue comment, a closing keyword). That looks like a display bug; it is actually an
+unnoticed identity misconfiguration, and nothing else in the harness would catch it — a wrong
+\`user.email\` still produces a perfectly valid commit.
+
+**Off by default.** This gate has no built-in list, because this template scaffolds into
+projects whose author emails MinSpec cannot know in advance — asserting one unconditionally
+would be exactly the blast-radius violation the harness must never commit. It activates only
+once you configure an allowlist:
+
+| Want | Do |
+|---|---|
+| Restrict commits to known-linked addresses | \`git config minspec.allowedCommitEmails "you@example.com bot@example.com"\` (space-separated, or one address per \`git config --add\`) |
+| Allow this one commit anyway | \`EMAIL_GATE_OFF=1 git commit ...\` |
+
+The address checked is the one git will actually **record** as the author, not just
+\`user.email\`: git's own precedence applies, so \`GIT_AUTHOR_EMAIL\`, \`git commit --author\`,
+\`author.email\`, the \`EMAIL\` fallback, and an \`--amend\` that keeps an earlier commit's
+author are all seen. Entries are compared literally: \`*@example.com\` is an address, not a
+pattern. Once an allowlist is set the gate fails closed: an allowlist git cannot read, or an
+author git cannot name, refuses the commit.
+
+\`git config\` is repository-local, so setting the allowlist once covers every worktree of the
+repository — not just the checkout you set it from. If you see "ghost" attributions in your
+own issue timelines, the fix for the *history* already made is to add the unlinked address as
+a verified email on the GitHub account: GitHub re-links past commits automatically, with no
+history rewrite required.
 
 ### Secret scan
 
@@ -1086,7 +1119,7 @@ export const MINSPEC_HOOKS_DIR = '.minspec/hooks';
 // ---------------------------------------------------------------------------
 
 /**
- * Shell `pre-commit` hook (DR-037 / #247, #244). Three stages over the staged tree:
+ * Shell `pre-commit` hook (DR-037 / #247, #244). Four stages over the staged tree:
  *
  *  0. Protected-branch guard: refuse an authored commit on the default branch,
  *     which is push-protected and so can never receive a direct commit — the
@@ -1096,10 +1129,29 @@ export const MINSPEC_HOOKS_DIR = '.minspec/hooks';
  *     cannot determine. Opt out with MINSPEC_ALLOW_MAIN=1 or
  *     `git config minspec.allowCommitOnDefaultBranch true`.
  *
- *  1. Secret scan (#244): if `gitleaks` is on PATH, run it on the staged changes and
+ *  1. Author identity gate (#1114, opt-in): refuse a commit whose AUTHOR email is
+ *     not in a configured allowlist. That is the email git will actually record,
+ *     read with `git var GIT_AUTHOR_IDENT` so git's own precedence applies
+ *     (GIT_AUTHOR_EMAIL, which `--author` and `--amend` set; then author.email,
+ *     user.email, EMAIL), not the `user.email` config those all override. GitHub
+ *     links a commit to an account by matching the author email against that
+ *     account's verified addresses; an unrecognized email can never be linked,
+ *     and every cross-reference the commit makes then renders as "ghost
+ *     mentioned this" in issue timelines — a display symptom of an identity
+ *     misconfiguration nothing else catches.
+ *     OFF by default (empty allowlist): this template scaffolds into projects
+ *     whose author emails MinSpec cannot know in advance, so asserting one
+ *     unconditionally would violate the harness's own blast-radius invariant.
+ *     Once opted in it fails CLOSED on an unreadable allowlist or an author git
+ *     cannot name. Entries compare literally (no glob matching).
+ *     Opt in with `git config minspec.allowedCommitEmails "a@x.com b@x.com"`
+ *     (or one address per `git config --add`).
+ *     Bypass (rare): EMAIL_GATE_OFF=1 git commit ...
+ *
+ *  2. Secret scan (#244): if `gitleaks` is on PATH, run it on the staged changes and
  *     BLOCK on a finding. If gitleaks is absent, emit a one-line advisory and
  *     CONTINUE — graceful degradation, never a hard fail for a missing optional tool.
- *  2. SDD validation (DR-037 detection chain): run the highest-fidelity validator
+ *  3. SDD validation (DR-037 detection chain): run the highest-fidelity validator
  *     that is ACTUALLY available — every tier is opportunistic and falls through if
  *     it cannot run, so an unreachable tier never bricks a commit (never-wrong):
  *       - Node — `npx --no-install @aiclarity/minspec-validator` ONLY if already
@@ -1254,7 +1306,113 @@ if ! minspec_branch_guard; then
   exit 1
 fi
 
-# ── Stage 1: secret scan (#244, gitleaks) ────────────────────────────────────
+# ── Stage 1: author identity gate (opt-in, #1114) ────────────────────────────
+# GitHub links a commit to an account by matching the AUTHOR EMAIL against the
+# verified addresses on that account. An author email that isn't one of them
+# can never be linked — GitHub instead renders "ghost mentioned this" for every
+# cross-reference that commit makes, which reads as a display quirk but is
+# really an unnoticed identity misconfiguration (a container session's ambient
+# email shadowing the real one is the case this was written for).
+#
+# OFF by default: this template scaffolds into projects whose author emails
+# MinSpec cannot know in advance, so asserting an identity here without an
+# explicit opt-in would be the exact blast-radius violation the harness must
+# not commit (constitution invariant 3). Configure it per project with:
+#     git config minspec.allowedCommitEmails "you@example.com bot@example.com"
+# (space-separated, or one address per \`git config --add\`; git config is
+# repository-local, so it covers every worktree of the repository, not just
+# this checkout.)
+#
+# WHICH email: the one git will RECORD as the author, read with
+# \`git var GIT_AUTHOR_IDENT\`. That applies git's own precedence
+# (GIT_AUTHOR_EMAIL, then author.email, then user.email, then EMAIL), and
+# \`git commit\` exports the author it resolved (including a \`--author\` flag, or
+# the earlier author an \`--amend\` / \`-C\` keeps) to this hook as
+# GIT_AUTHOR_EMAIL, so git var reports exactly that. Reading \`user.email\`
+# checked a proxy that every one of those overrides walked past (#1778 review).
+#
+# Fails CLOSED once opted in (constitution invariant 2): an allowlist git
+# cannot read, or an author git cannot name, refuses; neither is evidence
+# that the commit is fine.
+#
+# Bypass (rare): EMAIL_GATE_OFF=1 git commit ...
+if [ "\${EMAIL_GATE_OFF:-0}" != "1" ]; then
+  # --get-all, not --get: --get returns only the LAST value of a multi-valued
+  # key. Exit 1 is git's "key not set", which leaves the gate off; any other
+  # failure is a real read error and must not be mistaken for "not configured".
+  minspec_allowed_emails=$(git config --get-all minspec.allowedCommitEmails)
+  minspec_allowed_rc=$?
+  if [ "$minspec_allowed_rc" -ne 0 ] && [ "$minspec_allowed_rc" -ne 1 ]; then
+    echo "✗ MinSpec gate: could not read minspec.allowedCommitEmails (git config exited $minspec_allowed_rc)." >&2
+    echo "  An allowlist that cannot be read is refused, never treated as unset." >&2
+    echo "  Bypass (rare): EMAIL_GATE_OFF=1 git commit ..." >&2
+    exit 1
+  fi
+  if [ -n "\${minspec_allowed_emails:-}" ]; then
+    if ! minspec_author_ident=$(git var GIT_AUTHOR_IDENT); then
+      echo "✗ MinSpec gate: cannot determine the author identity git will record (git var GIT_AUTHOR_IDENT failed)." >&2
+      echo "  minspec.allowedCommitEmails is set, so an author that cannot be named is refused." >&2
+      echo "  Fix:  git config user.email <an address from minspec.allowedCommitEmails>" >&2
+      echo "  Bypass (rare): EMAIL_GATE_OFF=1 git commit ..." >&2
+      exit 1
+    fi
+    # "Name <email> <timestamp> <tz>". git strips < and > out of both the name
+    # and the email, so the first <...> pair IS the email. A line without one
+    # names no author; the empty result is then refused like any unlisted one.
+    minspec_author_email=
+    case "$minspec_author_ident" in
+      *"<"*">"*)
+        minspec_author_email=\${minspec_author_ident#*"<"}
+        minspec_author_email=\${minspec_author_email%%">"*}
+        ;;
+    esac
+    # Entries are compared LITERALLY. set -f stops the unquoted expansion from
+    # also pathname-expanding them against the repository root (the hook's cwd),
+    # where "*@example.com" would otherwise become the name of any matching file.
+    minspec_email_ok=0
+    minspec_allowed_list=
+    set -f
+    for minspec_allowed in $minspec_allowed_emails; do
+      minspec_allowed_list="\${minspec_allowed_list:+$minspec_allowed_list }$minspec_allowed"
+      if [ "$minspec_author_email" = "$minspec_allowed" ]; then
+        minspec_email_ok=1
+        break
+      fi
+    done
+    set +f
+    if [ "$minspec_email_ok" -ne 1 ]; then
+      # Say where the rejected address came from, so the Fix line names the
+      # thing to change. Advisory only: the verdict above never reads these.
+      minspec_cfg_key=author.email
+      minspec_cfg_email=$(git config --get author.email 2>/dev/null)
+      if [ -z "\${minspec_cfg_email:-}" ]; then
+        minspec_cfg_key=user.email
+        minspec_cfg_email=$(git config --get user.email 2>/dev/null)
+      fi
+      echo "✗ MinSpec gate: author email '\${minspec_author_email:-<none>}' is not in the configured allowlist." >&2
+      echo "  That is the address git would record for this commit (git var GIT_AUTHOR_IDENT)." >&2
+      echo "  An email GitHub cannot link to an account renders every commit and" >&2
+      echo "  cross-reference it makes as 'ghost' in issue timelines." >&2
+      echo "  Allowed: $minspec_allowed_list" >&2
+      echo "" >&2
+      minspec_fix="git config $minspec_cfg_key <one of the allowed addresses above>"
+      if [ -z "\${minspec_cfg_email:-}" ]; then
+        echo "  No author.email or user.email is configured, so git fell back to the" >&2
+        echo "  EMAIL environment variable (or <user>@<hostname>)." >&2
+      elif [ "$minspec_cfg_email" != "$minspec_author_email" ]; then
+        echo "  git config $minspec_cfg_key is '$minspec_cfg_email', but this commit's author overrides it:" >&2
+        echo "  GIT_AUTHOR_EMAIL in the environment, git commit --author, or an --amend / -C" >&2
+        echo "  that keeps an earlier commit's author." >&2
+        minspec_fix="unset GIT_AUTHOR_EMAIL, drop --author, or add --reset-author"
+      fi
+      echo "  Fix:  $minspec_fix" >&2
+      echo "  Bypass (rare): EMAIL_GATE_OFF=1 git commit ..." >&2
+      exit 1
+    fi
+  fi
+fi
+
+# ── Stage 2: secret scan (#244, gitleaks) ────────────────────────────────────
 # gitleaks is the recommended static, offline, read-only scanner. It is OPTIONAL:
 # if it is not installed we warn and continue (graceful degradation) rather than
 # block — a missing optional tool must never wedge a commit.
@@ -1282,7 +1440,7 @@ else
   echo "  Install gitleaks (https://github.com/gitleaks/gitleaks) to gate committed secrets." >&2
 fi
 
-# ── Stage 2: SDD validation (DR-037 detection chain) ─────────────────────────
+# ── Stage 3: SDD validation (DR-037 detection chain) ─────────────────────────
 # Highest-fidelity validator AVAILABLE wins, but every tier is OPPORTUNISTIC: a
 # tier is used only when it can actually run, otherwise the chain falls through to
 # the next. This is the never-wrong rule — a tier that cannot be reached (the npm
