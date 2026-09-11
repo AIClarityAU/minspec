@@ -28,6 +28,7 @@ import {
   READY_TO_MERGE_WORKFLOW,
   AI_REVIEW_RETRY_WORKFLOW,
   DOCS_LANE_WORKFLOW,
+  SECRET_SCAN_WORKFLOW,
   REVIEW_BRANCH_SH,
   REVIEW_DECIDE_SH,
   AGENT_CONTEXT_SH,
@@ -2138,6 +2139,18 @@ const CI_REVIEW_STACK_TEMPLATES: readonly ManagedRegionTemplate[] = [
     outputPath: '.github/workflows/docs-lane.yml',
     commentStyle: 'hash',
     content: DOCS_LANE_WORKFLOW,
+  },
+  {
+    // #1186: the independent CI witness for the client-side gitleaks gate. MinSpec
+    // shipped the hook to every adopter but kept this workflow to itself, so an
+    // adopter's only secret witness was a local, optional binary — exactly the
+    // single-producer shape invariant 2 forbids. Portable by construction: it reads
+    // only GitHub-assigned SHAs and pins its own gitleaks, so it needs no repo
+    // secret, no org, and no MinSpec-specific path.
+    name: 'secret-scan-workflow',
+    outputPath: '.github/workflows/secret-scan.yml',
+    commentStyle: 'hash',
+    content: SECRET_SCAN_WORKFLOW,
   },
   {
     name: 'review-branch-script',
