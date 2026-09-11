@@ -570,10 +570,21 @@ buy.
 a single commit, and each refusal also prints its own narrower escape. Use a bypass when the
 gate is wrong about *this* commit, not to defer work the gate correctly identified.
 
-The hooks fail open on their own internal errors, so a bug in the tooling never blocks a
-legitimate commit. The price is that silence does not prove a check ran. If a gate has never
-fired, confirm it is wired — \`git config --local core.hooksPath\` should print
-\`.minspec/hooks\` — before concluding you are clean.
+The hooks fail **closed** on their own internal errors. A crash in the tooling refuses the
+commit rather than waving it through, because a check that could not run has certified
+nothing. Both are \`set -u\`; \`pre-commit\` additionally propagates its validator's exit
+status, and that validator wraps no top-level handler around \`main()\`. So a refusal you cannot account for
+from the message may be a bug in the gate rather than a violation in your change — read the
+error, and reach for the bypass above only once you have decided the gate is the broken part.
+The gates DO fail open, deliberately, on a missing PREREQUISITE — an absent tool, an
+undeterminable default branch, an unreadable message file. That is a different condition from
+an internal failure, and the two directions are the point: a check that has nothing to run
+against stands aside, a check that broke while running refuses.
+
+What silence does not prove is that a check ran. An unwired hook says nothing at all, and
+nothing at all reads exactly like a pass — which is the failure this paragraph used to invite
+by promising the opposite. If a gate has never fired, confirm it is wired — \`git config
+--local core.hooksPath\` should print \`.minspec/hooks\` — before concluding you are clean.
 
 `;
 
@@ -1038,10 +1049,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '20'
 
@@ -1138,7 +1149,13 @@ export const MINSPEC_HOOKS_DIR = '.minspec/hooks';
  *         per DR-032).
  *
  * Bypass (rare, explicit): MINSPEC_GATE_OFF=1 git commit ...
- * Fail-open on hook-internal errors so a tooling bug never blocks a commit wrongly.
+ * Fail direction, and it differs by CONDITION. A missing prerequisite fails OPEN — an
+ * unreachable validator tier falls through (above), gitleaks is skipped when not installed,
+ * the branch guard stands aside when the default branch cannot be determined. A hook-internal
+ * ERROR fails CLOSED: \`set -u\` plus the propagated \`exit $?\` below, and no top-level
+ * handler around validate.py's \`main()\`, so a tooling bug refuses the commit rather than
+ * waving it through. Do not collapse the two — a gate that certifies while broken is the
+ * invariant-2 violation, and this comment claimed exactly that until #1905.
  */
 const PRE_COMMIT_HOOK = `# MinSpec pre-commit gate (DR-037) — editor-independent SDD + secret gates.
 # Runs on EVERY commit (terminal, other editor, AI agent), not just the VS Code path.
@@ -1937,6 +1954,13 @@ const LOCALIZED_MACHINERY_COMMENT: readonly string[] = [
   '#   template-registry.ts   — generates the .minspec/hooks/pre-commit gate',
   '#   ci-review-templates.ts — holds the verbatim copies of this workflow and its',
   '#                            scripts that MinSpec ships downstream',
+  '#',
+  '# ALSO CARRIED, NOT MINSPEC-SPECIFIC — generic CI-provider / git-hook directories that',
+  '# may or may not exist here; kept so this pattern cannot silently narrow relative to',
+  '# the one MinSpec ships:',
+  '#   .circleci/  — CircleCI pipeline config',
+  '#   .buildkite/ — Buildkite pipeline config',
+  '#   .husky/     — husky-managed git hooks (same arbitrary-shell-on-commit surface as .githooks/)',
   '#',
   '# MEMBERSHIP TEST for anything added here: does this code decide whether some other',
   '# change is allowed — directly, or by generating the thing that decides? If yes it',
