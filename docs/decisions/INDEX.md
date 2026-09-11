@@ -715,6 +715,14 @@ The founder decided on 2026-08-23, answering #1481 (should implements: be part o
 .minspec/generated-hashes.json decides, on every *Refresh Harness Files*, whether a section of a managed file is MinSpec's own output (safe to update from the template) or the project's content (must be preserved). #1697 established that it was answering that question wrongly in two independent ways, and that the wrong answer deleted a Principle's standing exception - a paragraph that authorised shipped code - from a live project.
 <!-- /dr-summary:DR-089 -->
 
+## [DR-090 — Prose inside a managed file is shipped code — it must hold in the repo that receives it, or name the minspec repo as its subject](DR-090.md)
+
+*Status: proposed · Date: 2026-09-02*
+
+<!-- dr-summary:DR-090 auto=02a7aa5f3877 -->
+MANAGED_REGION_TEMPLATES (packages/minspec/src/lib/template-registry.ts:2076) is the set of files MinSpec scaffolds byte-for-byte into every repo that inits it. The bytes are held identical by construction: the CI-review stack is generated from this repo's own working files (scripts/gen-ci-templates.mjs), and the portability suite in packages/minspec/tests/managed-region-templates.test.ts:378 asserts the embedded copy equals the on-disk source exactly.
+<!-- /dr-summary:DR-090 -->
+
 ## [DR-091 — A wrong triage classification is a corrected INPUT, never an overridden output - the dispute lane declares the work TYPE the classifier misread, re-runs the same gate over it, and keeps the disagreement as a labelled corpus](DR-091.md)
 
 *Status: proposed · Date: 2026-09-02*
