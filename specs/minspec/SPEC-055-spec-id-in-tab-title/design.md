@@ -95,7 +95,7 @@ No new file. Paths under `packages/minspec/`.
 | `src/lib/spec-progress.ts` | Comments `:8-10`, `:21`: drop the status-bar consumer claim. The `StatusBarSpec` name stays; its header `:12-14` records why. | FR-1, AC-1 |
 | `src/extension.ts` | Comment `:903-905`: "the shared `fromFrontmatter` (`packages/minspec/src/lib/spec-progress.ts:34`)" in place of "the same way the status bar does". | FR-1, AC-1 |
 | `src/test/views.test.ts` | Comments `:8`, `:59-61`, `:68-72`: the test checks that `minspec.status` is registered, nothing more. | FR-1, AC-1 |
-| `tests/status-bar.test.ts` | New `describe` blocks: AC-1 scan, AC-2 count pin, AC-3 static scan. | AC-1, AC-2, AC-3 |
+| `tests/status-bar.test.ts` | New `describe` blocks: AC-1 scan, AC-2 count pin. An AC-3 static scan only if PQ4 is answered (a), which is NOT decided. | AC-1, AC-2 |
 | `tests/extension.test.ts` | One new `it` in `describe('activate()')` (:407). | AC-3 |
 | `tests/invariant3-project-local-prefs.test.ts` | One new `it` and one meta `it` in `describe('INVARIANT 3 …')` (:36). No existing assertion changes. | AC-4 |
 | Only if PQ2 is answered (a), which is NOT decided: `packages/minspec/README.md:121-125`, `packages/minspec/package.json:613`, `packages/minspec/media/walkthrough/explore-sidebar.md:17-24`, `packages/minspec/src/commands/example.ts:197-198`, `packages/minspec/src/test/views.test.ts:58`, `:65` | See PQ2. | FR-1 |
@@ -135,8 +135,7 @@ function badPriorityComments(src: string): string[];  // each line matching
   per-class tests (:81-85, :258-262, and :134-138 for the tidy-primary item). **`AC2_PINNED`
   is PQ1's answer.** Under AC-2 as approved it has two entries and the test is red on
   `d43f235a` (three sites).
-- **AC-3, static:** `codeText` of `src/views/status-bar.ts` contains neither `activeTextEditor`
-  nor `onDidChangeActiveTextEditor`.
+- **AC-3, static:** none unless PQ4 is answered (a), which is NOT decided.
 - **AC-3, behavioural** (`tests/extension.test.ts`): fake timers; `activate(makeMockContext())`;
   `await vi.advanceTimersByTimeAsync(1000)` to flush the initial debounced paints; clear
   `update` on `mockNextTaskStatusBar`, `mockScaffoldCommitStatusBar`, `mockTidyPrimaryStatusBar`
@@ -176,7 +175,7 @@ Implement PR body.
 
 1. T0 tests first. AC-1 is red on `d43f235a` (four sites). AC-3 and AC-4 assert absences that
    already hold, so their meta tests are what show each scan can fire. AC-2 waits on PQ1, the
-   AC-4 pin on PQ3.
+   AC-3 static scan on PQ4, the AC-4 pin on PQ3.
 2. Comment sweep; AC-1 goes green.
 3. PQ2 edits, only if answered (a).
 4. AC-5 tracker write and read-back.
@@ -219,6 +218,17 @@ Implement PR body.
   goes red and needs a pin edit, which AC-4's narrower wording does not ask for. **(b)** No pin;
   keep only the existing Global scan. *Cost:* a silent Workspace write passes every test, so
   AC-4's fail clause goes unenforced. **NOT decided - needs the founder via Clarify.**
+- **PQ4 - A static AC-3 scan is stricter than AC-3's fail clause.** AC-3 fails only when a
+  status-bar item's text is recomputed from `window.activeTextEditor` or inside an
+  `onDidChangeActiveTextEditor` handler (requirements.md:92-95). A scan for either identifier
+  also fails on uses that set no text, e.g. `if (!vscode.window.activeTextEditor) item.hide()`,
+  which AC-3 permits; as in PQ3, source text cannot show what a value is derived from.
+  **(a) (rec)** Scan: `codeText` of `src/views/status-bar.ts` contains neither identifier (it
+  has none on `d43f235a`), so any use fails until a reviewed diff updates the test. *Cost:* a
+  permitted non-text use also goes red, which AC-3's wording does not ask for. **(b)** No scan;
+  the behavioural test alone. *Cost:* that test cannot see inside the status-bar classes,
+  because `tests/extension.test.ts:233-238` mocks all three, so a focus-keyed `text` set inside
+  a class passes it. **NOT decided - needs the founder via Clarify.**
 
 ## What this design does NOT do
 
@@ -235,7 +245,7 @@ Implement PR body.
 
 - **A source scan can pass vacuously.** Every scan has a meta test fed the text it must reject.
 - **The behavioural AC-3 test covers only handlers registered during `activate()`.** A handler
-  registered later is not exercised; the static half covers `status-bar.ts` alone.
+  registered later is not exercised, and `status-bar.ts` is scanned only under PQ4 (a).
 - **AC-5 is point-in-time.** The drain reconciler can re-close #897 afterwards; that mechanism
   is #1628 (reconciler re-closes reopened issues).
 
