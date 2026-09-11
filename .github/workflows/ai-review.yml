@@ -856,8 +856,14 @@ jobs:
           # inside this shell comment — an empty one fails workflow load; #486.)
           # #1728 — the patch this verdict is ABOUT. Written to a file, not an env var:
           # a diff can exceed the environment size limit, and a truncated patch would
-          # fingerprint as a different one. Failure here just yields no marker, which
-          # degrades to today's behaviour (always re-review) rather than a wrong match.
+          # fingerprint as a different one. A failed diff leaves the file empty, and an
+          # empty patch is never fingerprinted. The fingerprint itself is computed only
+          # when the guard exports both helpers, inside its own try/catch (#1925): this
+          # step runs from the PR head but loads the guard from the BASE checkout (the
+          # head/base skew, #1834), so an older base lacks them, and an unguarded call
+          # threw and lost the whole check-run. Every fingerprint fault now yields only a missing marker, which
+          # degrades to today's behaviour (always re-review), never to a missing
+          # check-run and never to a wrong match.
           PATCH_FILE="$RUNNER_TEMP/ai-review-patch.txt"
           git diff "$PR_BASE_SHA...$PR_HEAD_SHA" > "$PATCH_FILE" 2>/dev/null || : > "$PATCH_FILE"
           export PATCH_FILE
@@ -875,10 +881,23 @@ jobs:
             // forward-merge under `strict` changes the former and not the latter.
             // Recorded here, in App-authored output, for the same reason the witness
             // lives here: it is server-attested provenance, not a mutable comment (#397).
-            const fp = g.patchFingerprint(
-              (() => { try { return fs.readFileSync(process.env.PATCH_FILE, "utf8"); } catch { return ""; } })(),
-            );
-            const marker = fp ? "\n\n" + g.renderPatchFingerprint(fp) : "";
+            // FEATURE-DETECTED (#1925): the guard comes from the BASE checkout, which
+            // may predate #1728. The marker is optional and the check-run is not, so a
+            // missing helper or a throw yields no marker and the body is still written.
+            let marker = "";
+            if (typeof g.patchFingerprint === "function" && typeof g.renderPatchFingerprint === "function") {
+              try {
+                const fp = g.patchFingerprint(
+                  (() => { try { return fs.readFileSync(process.env.PATCH_FILE, "utf8"); } catch { return ""; } })(),
+                );
+                marker = fp ? "\n\n" + g.renderPatchFingerprint(fp) : "";
+              } catch (e) {
+                marker = "";
+                process.stderr.write("ai-review patch fingerprint not recorded (" + ((e && e.name) || "Error") + "); posting the check-run without it\n");
+              }
+            } else {
+              process.stderr.write("ai-review patch fingerprint not recorded: the base guard does not export both fingerprint helpers (it predates #1728); posting the check-run without it\n");
+            }
             fs.writeFileSync(process.env.BODY, JSON.stringify({
               name: c.name,
               head_sha: process.env.HEAD_SHA,
