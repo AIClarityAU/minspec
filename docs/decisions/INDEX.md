@@ -719,7 +719,15 @@ The founder decided on 2026-08-23, answering #1481 (should implements: be part o
 
 *Status: proposed · Date: 2026-09-02*
 
-<!-- dr-summary:DR-090 auto=24731184e6a8 -->
-`MANAGED_REGION_TEMPLATES` is the set of files MinSpec scaffolds byte-for-byte into every repo that inits it. The bytes are held identical by construction, which has a consequence nobody wrote down: a false sentence in a managed file cannot be corrected downstream. #1108 was filed after the skeptic voter on AIClarityAU/sealbox#32 read one such sentence.
+<!-- dr-summary:DR-090 auto=02a7aa5f3877 -->
+MANAGED_REGION_TEMPLATES (packages/minspec/src/lib/template-registry.ts:2076) is the set of files MinSpec scaffolds byte-for-byte into every repo that inits it. The bytes are held identical by construction: the CI-review stack is generated from this repo's own working files (scripts/gen-ci-templates.mjs), and the portability suite in packages/minspec/tests/managed-region-templates.test.ts:378 asserts the embedded copy equals the on-disk source exactly.
 <!-- /dr-summary:DR-090 -->
+
+## [DR-091 — A wrong triage classification is a corrected INPUT, never an overridden output - the dispute lane declares the work TYPE the classifier misread, re-runs the same gate over it, and keeps the disagreement as a labelled corpus](DR-091.md)
+
+*Status: proposed · Date: 2026-09-02*
+
+<!-- dr-summary:DR-091 auto=c5ac0ec77f33 -->
+DR-072 gave a triage-held issue a human exit, but only for the tier hold: human_only is a content class, so no keystroke transfers authorship and the hold is absolute. That boundary is right. What it leaves open is the case where the classification itself is wrong — for which the only documented remedy today is to reword the issue body until the classifier changes its mind.
+<!-- /dr-summary:DR-091 -->
 <!-- minspec:dr-index:end -->
