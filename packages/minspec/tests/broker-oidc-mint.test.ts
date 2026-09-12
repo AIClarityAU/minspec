@@ -194,15 +194,34 @@ describe('AC-3 — scoped minting', () => {
     });
   });
 
-  it('REFUSES a token whose TTL exceeds the ceiling', async () => {
-    // GitHub's default is an hour. Minting it anyway would silently turn a 10-minute
-    // credential into a 60-minute one — invisible until a leaked token still works.
-    const longLived: InstallationTokenFactory = async ({ permissions }) => ({
+  it('ACCEPTS the one-hour token GitHub actually returns', async () => {
+    // Regression for the bound that made the live path impossible. This asserted
+    // REFUSAL of a 60-minute token, which is the only thing
+    // `POST /app/installations/{id}/access_tokens` ever issues - its body takes
+    // `repositories`, `repository_ids` and `permissions`, and no lifetime field. With
+    // MAX_TTL_SECONDS at 600 the broker rejected every real mint and answered "auth
+    // returned an unusable expiry" forever. A ceiling below the platform's floor is not
+    // a strict gate, it is an off switch.
+    const real: InstallationTokenFactory = async ({ permissions }) => ({
       token: 'ghs_test',
       expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(),
       permissions,
     });
-    expect((await mintScopedToken({ repository: REPO, repository_owner: '' }, longLived)).ok).toBe(false);
+    const r = await mintScopedToken({ repository: REPO, repository_owner: '' }, real);
+    expect(r.ok).toBe(true);
+  });
+
+  it('REFUSES a TTL beyond what the platform documents', async () => {
+    // The ceiling still has a job: anything longer than GitHub's documented hour means a
+    // factory or API change we have not reasoned about, so fail closed.
+    const tooLong: InstallationTokenFactory = async ({ permissions }) => ({
+      token: 'ghs_test',
+      expiresAt: new Date(Date.now() + 2 * 60 * 60_000).toISOString(),
+      permissions,
+    });
+    const r = await mintScopedToken({ repository: REPO, repository_owner: '' }, tooLong);
+    expect(r.ok).toBe(false);
+    expect(JSON.stringify(r)).not.toContain('ghs_');
   });
 
   it('never returns a token when the factory throws (AC-9)', async () => {

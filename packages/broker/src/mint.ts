@@ -24,8 +24,27 @@ export const REVIEW_PERMISSIONS = {
   statuses: 'write',
 } as const;
 
-/** Ceiling on token lifetime. GitHub caps at 60 min; SPEC-034 requires ≤10 (AC-3). */
-export const MAX_TTL_SECONDS = 600;
+/**
+ * Ceiling on token lifetime: GitHub's fixed installation-token lifetime, one hour.
+ *
+ * FR-3 asks for "a TTL no longer than needed (target ≤10 min; GitHub's ceiling is 1h)".
+ * The ≤10 min half is NOT ACHIEVABLE and never was. `POST /app/installations/{id}/
+ * access_tokens` accepts exactly three body parameters - `repositories`,
+ * `repository_ids`, `permissions` - and no lifetime field; the docs state installation
+ * tokens "expire one hour from the time you create them". There is no shorter token to
+ * ask for.
+ *
+ * This was 600, which made the broker refuse EVERY real mint: GitHub returns 3600s,
+ * `clampExpiry` rejected anything above 600s, and so the live path could only ever
+ * answer "auth returned an unusable expiry". The bound was written as though a
+ * ten-minute credential existed to protect.
+ *
+ * The ceiling still earns its place at 3600: it fails closed if a future API change or a
+ * misconfigured factory hands back something longer than the documented maximum. What it
+ * cannot do is manufacture a shorter credential, so exposure is limited by using the
+ * token immediately and never storing it - not by this number.
+ */
+export const MAX_TTL_SECONDS = 3600;
 
 export interface MintedToken {
   token: string;
@@ -137,10 +156,11 @@ export async function mintScopedToken(
 /**
  * Reject an expiry beyond the ceiling rather than trusting the provider.
  *
- * GitHub's default installation-token lifetime is an hour. If a future API change (or a
- * misconfigured factory) hands back a long-lived token, minting it anyway would quietly
- * turn a ten-minute credential into a sixty-minute one — the kind of drift that is
- * invisible until a leaked token is still valid an hour later.
+ * One hour is GitHub's documented, fixed lifetime, so the normal case sits exactly at the
+ * ceiling rather than under it. This guards the case the platform does not promise: a
+ * factory or API change returning something longer still. Minting that anyway would
+ * silently extend the credential's life past anything the design reasoned about, and the
+ * drift is invisible until a leaked token is still valid long after the run that used it.
  */
 export function clampExpiry(expiresAt: unknown, now: number = Date.now()): string | null {
   if (typeof expiresAt !== 'string' || expiresAt.length === 0) return null;
