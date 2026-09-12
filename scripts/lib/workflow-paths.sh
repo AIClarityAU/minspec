@@ -176,12 +176,16 @@ workflow_push_refusal() {
   echo "  genuinely absent, or the probe could not run (no token script, offline," >&2
   echo "  or MINSPEC_WORKFLOW_PERM_PROBE=0)." >&2
   echo "" >&2
-  echo "  The container CANNOT read the installation's permission set: the" >&2
-  echo "  credential is brokered host-side, and an installation token cannot" >&2
-  echo "  enumerate its own grants. \`gh-app-token.sh --permissions\` reports a" >&2
-  echo "  repository COUNT, so piping it through \`grep workflows\` always prints" >&2
-  echo "  nothing — that is the probe being unable to answer, NEVER evidence the" >&2
-  echo "  permission is absent. Do not read an empty result as a diagnosis." >&2
+  echo "  Check what the probe actually got — the output may not be a permissions" >&2
+  echo "  object at all:" >&2
+  echo "      ~/.claude/scripts/gh-app-token.sh --permissions" >&2
+  echo "" >&2
+  echo "  → 'name=level' lines (e.g. contents=write) : a real answer. If 'workflows'" >&2
+  echo "      is absent from it, the grant genuinely is not held." >&2
+  echo "  → anything else (or empty)                 : the probe could NOT answer," >&2
+  echo "      which is NOT evidence the permission is absent. Where the token script" >&2
+  echo "      is host-brokered, an installation token cannot enumerate its own" >&2
+  echo "      grants and this flag reports a different quantity entirely." >&2
   echo "" >&2
   echo "  Check authoritatively, on GitHub:" >&2
   echo "      Org Settings → Developer settings → GitHub Apps → (MinSpec app) →" >&2
@@ -247,14 +251,25 @@ workflow_permission_granted() {
   local script perms
   script="${MINSPEC_APP_TOKEN_SCRIPT:-$HOME/.claude/scripts/gh-app-token.sh}"
   [ -x "$script" ] || return 1
-  # `--permissions` reads the installation's granted permissions object. Never infer
-  # this from a response header: X-Accepted-Github-Permissions describes what an
-  # ENDPOINT accepts and reports metadata=read here — the opposite of the truth.
+  # `--permissions` is EXPECTED to emit the installation's granted permissions as
+  # `name=level` lines. Never infer this from a response header:
+  # X-Accepted-Github-Permissions describes what an ENDPOINT accepts and reports
+  # metadata=read here — the opposite of the truth.
+  #
+  # It may also emit something that is NOT a permissions object at all: the script
+  # is host-brokered in some environments, where an installation token cannot
+  # enumerate its own grants and the flag reports a different quantity entirely.
+  # That is the probe being UNABLE TO ANSWER, which is not the same fact as
+  # "the grant is absent" — and the difference is load-bearing, because a
+  # determinate answer is CACHED for the TTL while an indeterminate one must not
+  # be. Caching "cannot answer" as "none" would make a repaired flag take up to
+  # MINSPEC_PERM_TTL to be believed, and would report a measurement never taken.
+  # Discriminate on shape: a permissions object contains `name=level` pairs.
   perms="$("$script" --permissions 2>/dev/null)" || return 1
   case "$perms" in
     *workflows=write*) printf '%s write\n' "$now" >"$cache" 2>/dev/null; return 0 ;;
-    "") return 1 ;;                                   # unparseable ⇒ fail closed
-    *) printf '%s none\n' "$now" >"$cache" 2>/dev/null; return 1 ;;
+    *=*) printf '%s none\n' "$now" >"$cache" 2>/dev/null; return 1 ;;  # answered: absent
+    *) return 1 ;;   # not a permissions object (or empty) ⇒ cannot answer; fail closed, DO NOT cache
   esac
 }
 
