@@ -2,7 +2,10 @@
 id: SPEC-043
 type: tasks
 # 🔒 Editing voids approval (hash in .minspec/approvals.json → stale); re-run "MinSpec: Approve Spec". DR-012
-status: implementing  # Tasks phase complete; Implement phase done (PR open)
+
+> **Status note.** Tasks phase complete; Implement phase done (PR open)
+> *(Moved off the `status:` line, which the status writer owns and rebuilds from the value alone — #1912 / #1900.)*
+status: implementing
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — derived-state truthfulness (harness-refresh hash manifest)
