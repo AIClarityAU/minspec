@@ -6,13 +6,18 @@
  * handler instead: same code path, no daemon, and it runs in CI where `wrangler dev`
  * cannot.
  *
- * What matters at Slice 0 is not that the route works — it is that it **cannot succeed**.
- * A broker whose verification path is unbuilt must refuse every request, so that a
- * half-finished deploy can never issue a credential. These tests pin that property now,
- * while it is trivially true, because it is the property Slice 1 is most likely to
- * weaken: the moment minting is added, "returns 501" becomes "returns a token", and the
- * only thing standing between those two states is whether the OIDC verification in
- * between is complete.
+ * What matters is not that the route works — it is that an UNCONFIGURED deploy **cannot
+ * succeed**. These tests originally pinned that as "answers 501", which was the whole
+ * truth while minting was unbuilt.
+ *
+ * Task 1.4 wired the path, so the 501 is gone and its guarantee had to move rather than
+ * be deleted. The property that survives is the one that mattered: a Worker with no
+ * bindings refuses every request and mints nothing. That is now what is asserted here,
+ * and the step-by-step refusals of the live path live in `broker-handler.test.ts`.
+ *
+ * This file's docstring predicted this moment - "the moment minting is added, 'returns
+ * 501' becomes 'returns a token'". It did. The status codes below changed; not one of the
+ * no-credential assertions did.
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
@@ -21,27 +26,32 @@ import worker, { TOKEN_PATH, type TokenError } from '../../broker/src/index';
 
 const BASE = 'https://broker.example.invalid';
 
+/**
+ * Deliberately called with NO env, which is the configuration a fresh or half-finished
+ * deploy has. Every assertion below is therefore about the unconfigured Worker.
+ */
 async function call(path: string, init?: RequestInit): Promise<Response> {
   return worker.fetch(new Request(`${BASE}${path}`, init));
 }
 
-describe('SPEC-034 slice 0 — broker scaffold', () => {
-  it('answers 501 on the token route', async () => {
+describe('SPEC-034 — an unconfigured broker refuses everything', () => {
+  it('refuses the token route when no audience is bound', async () => {
     const res = await call(TOKEN_PATH, { method: 'POST' });
-    expect(res.status).toBe(501);
+    expect(res.status).toBe(500);
   });
 
   it('never returns a token, whatever is posted at it', async () => {
-    // The load-bearing assertion of this slice. Anything resembling a credential in the
-    // response would mean the unbuilt path can already succeed.
+    // The load-bearing assertion, unchanged in substance since slice 0: anything
+    // resembling a credential from an unconfigured Worker would mean configuration is
+    // not actually load-bearing.
     const res = await call(TOKEN_PATH, {
       method: 'POST',
       body: JSON.stringify({ repository: 'o/r', permissions_profile: 'review' }),
     });
     const body = (await res.json()) as TokenError & { token?: string };
-    expect(res.status).toBe(501);
+    expect(res.status).toBe(500);
     expect(body.token).toBeUndefined();
-    expect(body.error).toBe('not_implemented');
+    expect(body.error).toBe('broker_misconfigured');
   });
 
   it('refuses a non-POST before any request handling', async () => {
