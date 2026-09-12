@@ -176,17 +176,23 @@ workflow_push_refusal() {
   echo "  genuinely absent, or the probe could not run (no token script, offline," >&2
   echo "  or MINSPEC_WORKFLOW_PERM_PROBE=0)." >&2
   echo "" >&2
-  echo "  Check which, before assuming the permission is missing:" >&2
-  echo "      ~/.claude/scripts/gh-app-token.sh --permissions | grep workflows" >&2
+  echo "  The container CANNOT read the installation's permission set: the" >&2
+  echo "  credential is brokered host-side, and an installation token cannot" >&2
+  echo "  enumerate its own grants. \`gh-app-token.sh --permissions\` reports a" >&2
+  echo "  repository COUNT, so piping it through \`grep workflows\` always prints" >&2
+  echo "  nothing — that is the probe being unable to answer, NEVER evidence the" >&2
+  echo "  permission is absent. Do not read an empty result as a diagnosis." >&2
   echo "" >&2
-  echo "  → prints 'workflows=write'  : the probe is broken, not the permission." >&2
+  echo "  Check authoritatively, on GitHub:" >&2
+  echo "      Org Settings → Developer settings → GitHub Apps → (MinSpec app) →" >&2
+  echo "      Install App → ⚙ → Permissions — look for 'Workflows'" >&2
+  echo "" >&2
+  echo "  → 'Read and write' : the permission is present; the probe is the problem." >&2
   echo "      Report on AIClarityAU/minspec#1120; MINSPEC_ALLOW_WORKFLOW_PUSH=1" >&2
   echo "      unblocks you meanwhile." >&2
-  echo "  → prints nothing / 'read'   : the permission really is missing. Grant it" >&2
-  echo "      (Org Settings → Developer settings → GitHub Apps → Edit →" >&2
-  echo "      Permissions & events → Repository permissions → Workflows →" >&2
-  echo "      'Read and write', then accept it on the installation), or push with" >&2
-  echo "      a human credential carrying the 'workflow' scope." >&2
+  echo "  → absent / 'Read'  : this credential genuinely cannot push workflow files." >&2
+  echo "      Whether to grant it is a FOUNDER decision, not an automatic remedy." >&2
+  echo "      Push with a human credential carrying the 'workflow' scope, or ask." >&2
   echo "" >&2
   echo "  Allow once:      MINSPEC_ALLOW_WORKFLOW_PUSH=1 git push ..." >&2
   echo "  Allow in future: git config minspec.allowWorkflowPush true" >&2
