@@ -2,9 +2,12 @@
 id: SPEC-040
 type: tasks
 # tasks.md is NOT separately approvable (#630/#951) and is not hash-locked — only requirements.md is,
+
+> **Status note.** All task groups complete; shipped in #1009 (19a6e08)
+> *(Moved off the `status:` line, which the status writer owns and rebuilds from the value alone — #1912 / #1900.)*
 # and its record is the per-file sidecar .minspec/approvals/**/requirements.md.json, NOT the legacy
 # .minspec/approvals.json (gitignored, absent from every checkout — #974). Editing this file voids nothing.
-status: done  # all task groups complete; shipped in #1009 (19a6e08)
+status: done
 tier: T4
 product: minspec
 epic: EPIC-003  # SDD Core Methodology — code-change safety
