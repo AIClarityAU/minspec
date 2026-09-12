@@ -781,6 +781,75 @@ function fmListField(raw: string, key: string): string[] {
  * Path validity mirrors the spec-gate via `isValidOwnedPath` (parity-pinned). This
  * only PRODUCES + VALIDATES the signal the gate already consumes — no gate change (FR-8).
  */
+/**
+ * #1912 — the `status:` frontmatter line carries a value and nothing else.
+ *
+ * WHY THIS MUST READ THE RAW TEXT. No parsed-model rule can see this:
+ * `parseFrontmatterYaml` discards comments before the model exists, and
+ * `checkStatusParity` strips `\s*#.*$` on purpose so an annotated-but-AGREEING
+ * status never false-positives (`status-parity.ts:230-237`). The annotation is only
+ * visible in the raw block, which is why the rule lives here and scans it directly.
+ *
+ * Two shapes, both annotations the writer cannot keep honest:
+ *  - `status.inline-comment` — an inline `#` on the status line. The three status
+ *    writers (`spec.ts`, `epic-manager.ts`, `adr-manager.ts`) rebuild the line as
+ *    indent + key + value via `/^([ \t]*)status[ \t]*:[ \t]*.*$/m`, so the comment
+ *    is DESTROYED on the next status write — a silent loss.
+ *  - `status.orphan-comment` — indented `#` lines directly after it. Those SURVIVE
+ *    that rewrite and go on describing a value that no longer holds. SPEC-062 was the
+ *    live case (#1879): six lines explaining why the status was `specifying`, sitting
+ *    under `status: planning`.
+ *
+ * Severity from `config.statusLineAnnotation` (default `warn`, FR-7 ratchet). Scoped
+ * to the TOP-LEVEL `status:` key only — an inline comment on any other key
+ * (`epic: EPIC-007  # Agent Execute …`) is legitimate and common, and flagging those
+ * would be worse than the defect this closes.
+ */
+export function validateStatusAnnotation(
+  spec: ParsedSpec,
+  config: MinspecConfig,
+): ValidationViolation[] {
+  const block = spec.raw.match(FRONTMATTER_BLOCK_RE);
+  if (!block) return [];
+  const severity: Severity = config.statusLineAnnotation === 'error' ? 'error' : 'warning';
+  const lines = block[1].split('\n');
+  // Top-level (column-0) `status:` only — a nested `status:` inside `phases:` or any
+  // indented block is a different key and is not the writers' target.
+  const idx = lines.findIndex((l) => /^status[ \t]*:/.test(l));
+  if (idx === -1) return [];
+
+  const out: ValidationViolation[] = [];
+  const value = lines[idx].replace(/^status[ \t]*:/, '');
+  // A `#` inside a quoted value is part of the value, not a comment. Strip balanced
+  // quotes first so `status: "planning # x"` is not read as annotated.
+  const unquoted = value.replace(/"[^"]*"|'[^']*'/g, '');
+  if (/(^|[ \t])#/.test(unquoted)) {
+    out.push({
+      rule: 'status.inline-comment',
+      severity,
+      message: 'The `status:` frontmatter line carries an inline `#` comment.',
+      fixHint:
+        'Move the rationale into body prose and leave `status:` carrying only its value. The status writers rebuild this line from the value alone, so the comment is destroyed on the next status write (#1912 / #1900).',
+    });
+  }
+
+  // Indented `#` lines DIRECTLY after the status line are its continuation: they
+  // survive the rewrite and become orphans. One finding regardless of how many.
+  let n = idx + 1;
+  while (n < lines.length && /^[ \t]+#/.test(lines[n])) n++;
+  if (n > idx + 1) {
+    out.push({
+      rule: 'status.orphan-comment',
+      severity,
+      message: `The \`status:\` line is followed by ${n - idx - 1} indented comment line(s).`,
+      fixHint:
+        'Move the rationale into body prose. The status writers replace only the `status:` line itself, so these continuation lines survive and go on describing a value that no longer holds — the SPEC-062 case (#1879 / #1912).',
+    });
+  }
+
+  return out;
+}
+
 export function validateOwnership(spec: ParsedSpec, config: MinspecConfig): ValidationViolation[] {
   const specType = (spec.frontmatter.type ?? '').toLowerCase();
   const tier = spec.frontmatter.tier;
@@ -908,6 +977,8 @@ export function validateSpec(
 
   // Spec→code ownership declaration (SPEC-038 / #460).
   violations.push(...validateOwnership(spec, config));
+  // #1912 — the status line carries a value and nothing else (raw-text rule).
+  violations.push(...validateStatusAnnotation(spec, config));
 
   // 0. Epic reference (soft — warnings only, DR-013 FR-9). Two failure modes,
   //    both leave the spec stranded under "(no epic)":

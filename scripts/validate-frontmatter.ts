@@ -22,6 +22,7 @@ import {
   validateSplitLayoutCoverage,
   checkAcceptanceCriteria,
   validateOwnership,
+  validateStatusAnnotation,
   type SplitLayoutFile,
 } from '../packages/minspec/src/lib/spec-validator';
 import { parseSpec } from '../packages/minspec/src/lib/spec';
@@ -595,6 +596,37 @@ try {
   }
 } catch {
   // specs/ unreadable / absent — nothing to validate, stay silent.
+}
+
+// Rule 16 (#1912): the `status:` frontmatter line carries a value and nothing
+// else (the #1900 convention). `validateStatusAnnotation` is the SAME function the
+// in-extension approve gate (`validateSpec`) calls — enforced identically on the
+// commit/CI surface, never a reimplementation that could drift (the #654 lesson).
+//
+// WHY CI AND NOT ONLY THE APPROVE GATE. The approve path runs the status WRITER, so
+// a rule that fires only there reports the annotation at the moment it is being
+// destroyed or orphaned. CI is what keeps the bad state out of the corpus in the
+// first place, which is the Phase-4 gate #1879 was closed without.
+//
+// Ships as `warn` per `statusLineAnnotation` (the SPEC-038 FR-7 ratchet) — inert
+// until the corpus is clean AND the writers consume continuation lines, then a
+// one-line flip to `error` makes it FATAL here too.
+//
+// SCOPE: `specs/` only, matching Rule 15's wiring. The DR and epic writers carry the
+// same defect (#1912 names all three), but every file the issue measured is a spec,
+// and `parseSpec` is the spec reader — widening to `docs/decisions/` and `docs/epics/`
+// belongs with the writer half, which is where those artifact kinds get their reader.
+try {
+  const annCfg = loadConfig(ROOT);
+  for (const file of glob(specsDir, '.md')) {
+    const content = readFileSync(file, 'utf-8');
+    for (const v of validateStatusAnnotation(parseSpec(content), annCfg)) {
+      if (v.severity === 'error') fail(file, `${v.message} ${v.fixHint}`);
+      else warn(`status-annotation ${relative(ROOT, file)}: ${v.message}`);
+    }
+  }
+} catch {
+  // corpus dirs unreadable / absent — nothing to validate, stay silent.
 }
 
 // Rule 14 (harden, #760): every MANAGED_REGION_TEMPLATES output path present on
