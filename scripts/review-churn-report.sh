@@ -58,12 +58,13 @@ gh_retry() {
   until gh "$@"; do
     n=$((n + 1))
     (( n >= 3 )) && return 1
-    # Long backoff on purpose. These failures are GitHub SECONDARY rate limits, which
-    # key on burst RATE, not on quota - the primary budget was measured at 4280/5000
-    # remaining while calls were failing. A short retry makes it strictly worse by
-    # adding load while throttled: measured 12 failures with no retry, 36 with a 2s/4s
-    # retry. Back off far enough to actually leave the burst window.
-    sleep $(( n * 15 ))
+    # These are GitHub SECONDARY rate limits: the primary budget was measured at
+    # 4280/5000 remaining while calls were failing, so it is burst rate, not quota.
+    # They are genuinely transient and depend on what ran BEFORE this script: the same
+    # 2-day window produced 36 failures right after two heavy sweeps and 0 failures
+    # from a quiet start. Retry absorbs the small case; the refusal below catches the
+    # large one rather than reporting a rate off a partial dataset.
+    sleep $(( n * 5 ))
   done
 }
 
@@ -144,7 +145,11 @@ while IFS=$'\t' read -r pr title; do
   fi
 done <<< "$prs"
 
-apifails="$(grep -c APIFAIL "$ERRS" 2>/dev/null || echo 0)"
+# grep -c PRINTS "0" and EXITS 1 when it matches nothing, so `|| echo 0` appends a
+# second line and the arithmetic below dies on "0\n0". Let the `||` supply only the
+# exit status, never more output.
+apifails="$(grep -c APIFAIL "$ERRS" 2>/dev/null || true)"
+apifails="${apifails:-0}"
 
 echo "ai-review runs seen:               $tot   across $prs_seen PRs"
 echo "  success:                         $c_success"
