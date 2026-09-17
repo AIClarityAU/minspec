@@ -63,7 +63,12 @@ export function makeInstallationTokenFactory(env: BrokerEnv): InstallationTokenF
     // an installation. It is never returned to the caller.
     const appJwt = await auth({ type: 'app' });
 
-    const lookup = await fetch(`${GITHUB_API}/repos/${owner}/${repo}/installation`, {
+    // Encoded even though both segments come from a GitHub-signed OIDC claim and so
+    // cannot currently contain anything hostile. The property should not depend on where
+    // the value came from, because that is the part a future change is free to alter.
+    const lookupUrl =
+      `${GITHUB_API}/repos/${encodeURIComponent(owner)}/${encodeURIComponent(repo)}/installation`;
+    const lookup = await fetch(lookupUrl, {
       headers: {
         authorization: `Bearer ${appJwt.token}`,
         accept: 'application/vnd.github+json',

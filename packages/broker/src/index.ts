@@ -73,8 +73,8 @@ function json(body: unknown, status: number): Response {
     status,
     headers: {
       'content-type': 'application/json; charset=utf-8',
-      // A minted token is a bearer credential with a ~10 minute life. Nothing may
-      // cache it, at any layer, ever.
+      // A minted token is a bearer credential that GitHub keeps valid for an hour.
+      // Nothing may cache it, at any layer, ever.
       'cache-control': 'no-store',
     },
   });
@@ -121,19 +121,25 @@ export function createFetchHandler(deps: HandlerDeps = {}) {
       );
     }
 
+    // Bearer check FIRST, so an unauthenticated caller learns nothing about this
+    // deployment. Answering 500-for-unconfigured before 401-for-no-credential let anyone
+    // distinguish a configured broker from an unconfigured one without presenting
+    // anything. Config presence is not secret, but there is no reason to answer any
+    // question at all before authentication.
+    const jwt = bearerToken(request.headers.get('authorization'));
+    if (!jwt) {
+      return json({ error: 'oidc_invalid', reason: 'invalid token' } satisfies TokenError, 401);
+    }
+
     // The audience is required and never defaulted. An unconstrained audience accepts a
-    // token GitHub minted for a different service entirely.
+    // token GitHub minted for a different service entirely. Verification cannot proceed
+    // without it, so this is a deployment fault, not a bad request.
     const audience = env.BROKER_AUDIENCE;
     if (!audience) {
       return json(
         { error: 'broker_misconfigured', reason: 'broker audience not configured' } satisfies TokenError,
         500,
       );
-    }
-
-    const jwt = bearerToken(request.headers.get('authorization'));
-    if (!jwt) {
-      return json({ error: 'oidc_invalid', reason: 'invalid token' } satisfies TokenError, 401);
     }
 
     // Constant reason on every verification failure. jose distinguishes signature,

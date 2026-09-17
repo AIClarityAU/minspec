@@ -1,10 +1,15 @@
 /**
  * Scoped installation-token minting (SPEC-034 task 1.3, AC-3).
  *
- * Mints a GitHub App installation token scoped to EXACTLY ONE repository, carrying only
- * the `review` permission set, with a TTL of ten minutes or less. This is the only place
- * the App private key is used, and it runs solely inside the Worker — never in the
- * extension, never in an adopter's CI (AC-5).
+ * Decides whether a scoped installation token may be issued, and validates what came
+ * back: exactly ONE repository, only the `review` permission set, and an expiry no longer
+ * than GitHub's fixed one-hour installation-token lifetime (see MAX_TTL_SECONDS — the
+ * `≤10 min` this once claimed is not obtainable from the API).
+ *
+ * The App private key is NOT used here. It reaches `app-auth.ts`, which builds the
+ * factory this module takes as an argument; that separation is what lets these checks be
+ * unit-tested with no key and no network. Either way the key lives only inside the
+ * Worker — never in the extension, never in an adopter's CI (AC-5).
  *
  * The auth factory is INJECTED so the whole decision path is testable without a private
  * key or a network. That matters more here than elsewhere: a test that needs real
@@ -45,6 +50,22 @@ export const REVIEW_PERMISSIONS = {
  * token immediately and never storing it - not by this number.
  */
 export const MAX_TTL_SECONDS = 3600;
+
+/**
+ * Slack above the ceiling, so a clock disagreement cannot re-create the off switch.
+ *
+ * GitHub computes `expires_at` on GitHub's clock; this Worker compares it against
+ * Cloudflare's. If Cloudflare's clock sits behind GitHub's by more than the mint
+ * round-trip, `expiresAt - now` exceeds exactly 3600s and a perfectly legitimate token is
+ * refused as "an unusable expiry". That is the same failure this constant was just raised
+ * to fix, returning intermittently and only under clock drift - which is far worse than
+ * the original, because it would be unreproducible.
+ *
+ * Five minutes is far beyond any plausible NTP skew between two managed platforms while
+ * still nowhere near a second issuance period, so the guard keeps its teeth: a two-hour
+ * token is still refused.
+ */
+export const CLOCK_SKEW_GRACE_SECONDS = 300;
 
 export interface MintedToken {
   token: string;
@@ -167,6 +188,6 @@ export function clampExpiry(expiresAt: unknown, now: number = Date.now()): strin
   const t = Date.parse(expiresAt);
   if (Number.isNaN(t)) return null;
   if (t <= now) return null; // already expired — useless and a sign something is wrong
-  if (t - now > MAX_TTL_SECONDS * 1000) return null;
+  if (t - now > (MAX_TTL_SECONDS + CLOCK_SKEW_GRACE_SECONDS) * 1000) return null;
   return new Date(t).toISOString();
 }

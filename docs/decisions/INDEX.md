@@ -730,4 +730,12 @@ MANAGED_REGION_TEMPLATES (packages/minspec/src/lib/template-registry.ts:2076) is
 <!-- dr-summary:DR-091 auto=c5ac0ec77f33 -->
 DR-072 gave a triage-held issue a human exit, but only for the tier hold: human_only is a content class, so no keystroke transfers authorship and the hold is absolute. That boundary is right. What it leaves open is the case where the classification itself is wrong — for which the only documented remedy today is to reword the issue body until the classifier changes its mind.
 <!-- /dr-summary:DR-091 -->
+
+## [DR-092 — The review broker's tokens live one hour because GitHub issues no shorter credential - exposure is bounded by immediate use and non-storage, not by a TTL the API will not honour](DR-092.md)
+
+*Status: proposed · Date: 2026-09-18*
+
+<!-- dr-summary:DR-092 auto=f02b7feacc1d -->
+SPEC-034's broker exchanges a GitHub Actions OIDC token for a GitHub App installation token, so an adopter's CI can post as minspec-sdd[bot] without holding the App private key. DR-054's reasoning is that one leaked App key mints tokens for every repository that ever installed the App, so the blast radius of the key dwarfs the blast radius of any one token. Short token lifetime was the compensating control.
+<!-- /dr-summary:DR-092 -->
 <!-- minspec:dr-index:end -->

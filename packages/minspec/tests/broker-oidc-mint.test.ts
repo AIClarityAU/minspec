@@ -18,6 +18,7 @@ import {
   clampExpiry,
   REVIEW_PERMISSIONS,
   MAX_TTL_SECONDS,
+  CLOCK_SKEW_GRACE_SECONDS,
   type InstallationTokenFactory,
 } from '../../broker/src/mint';
 
@@ -252,8 +253,34 @@ describe('AC-3 — scoped minting', () => {
     it('accepts a TTL inside the ceiling', () => {
       expect(clampExpiry(new Date(now + 9 * 60_000).toISOString(), now)).toBeTruthy();
     });
-    it('rejects exactly over the ceiling', () => {
-      expect(clampExpiry(new Date(now + (MAX_TTL_SECONDS + 1) * 1000).toISOString(), now)).toBeNull();
+    it('accepts a 1h token even when our clock reads behind GitHub\'s', () => {
+      // The intermittent form of the off switch. GitHub stamps expires_at on GitHub's
+      // clock; we compare against ours. A ceiling of exactly 3600 refuses a legitimate
+      // token whenever we are behind by more than the round trip - unreproducibly, and
+      // only under drift.
+      const weAreBehindBy = 90_000;
+      const githubStamp = new Date(now + 3600_000 + weAreBehindBy).toISOString();
+      expect(clampExpiry(githubStamp, now)).toBeTruthy();
+    });
+
+    it('still refuses a token far beyond the documented lifetime', () => {
+      // The grace must not become a hole: the guard's job is catching an API change or a
+      // misconfigured factory handing back something much longer.
+      expect(clampExpiry(new Date(now + 2 * 3600_000).toISOString(), now)).toBeNull();
+    });
+
+    it('the grace is a margin, not a second issuance period', () => {
+      expect(CLOCK_SKEW_GRACE_SECONDS).toBeGreaterThan(0);
+      expect(CLOCK_SKEW_GRACE_SECONDS).toBeLessThan(MAX_TTL_SECONDS / 2);
+    });
+
+    it('rejects beyond the ceiling plus its grace', () => {
+      expect(
+        clampExpiry(
+          new Date(now + (MAX_TTL_SECONDS + CLOCK_SKEW_GRACE_SECONDS + 1) * 1000).toISOString(),
+          now,
+        ),
+      ).toBeNull();
     });
     it('rejects an already-expired or unparseable expiry', () => {
       expect(clampExpiry(new Date(now - 1000).toISOString(), now)).toBeNull();

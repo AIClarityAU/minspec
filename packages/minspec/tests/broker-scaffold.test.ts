@@ -35,9 +35,13 @@ async function call(path: string, init?: RequestInit): Promise<Response> {
 }
 
 describe('SPEC-034 — an unconfigured broker refuses everything', () => {
-  it('refuses the token route when no audience is bound', async () => {
+  it('refuses the token route, answering nothing before authentication', async () => {
+    // 401 rather than 500-for-unconfigured: the bearer check deliberately precedes the
+    // deployment check, so an unauthenticated caller cannot tell a configured broker
+    // from an unconfigured one. `broker-handler.test.ts` covers the 500 that a
+    // CREDENTIALLED caller gets when the audience is missing.
     const res = await call(TOKEN_PATH, { method: 'POST' });
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(401);
   });
 
   it('never returns a token, whatever is posted at it', async () => {
@@ -49,9 +53,9 @@ describe('SPEC-034 — an unconfigured broker refuses everything', () => {
       body: JSON.stringify({ repository: 'o/r', permissions_profile: 'review' }),
     });
     const body = (await res.json()) as TokenError & { token?: string };
-    expect(res.status).toBe(500);
+    expect(res.status).toBe(401);
     expect(body.token).toBeUndefined();
-    expect(body.error).toBe('broker_misconfigured');
+    expect(body.error).toBe('oidc_invalid');
   });
 
   it('refuses a non-POST before any request handling', async () => {
@@ -96,7 +100,7 @@ describe('SPEC-034 — an unconfigured broker refuses everything', () => {
   });
 
   it('marks every response no-store', async () => {
-    // A minted token is a ~10-minute bearer credential; nothing may cache it at any
+    // A minted token is a bearer credential GitHub keeps valid for an hour; nothing may cache it at any
     // layer. Asserted from the first commit so the header cannot be forgotten later,
     // when responses actually carry one.
     const res = await call(TOKEN_PATH, { method: 'POST' });
