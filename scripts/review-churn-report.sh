@@ -85,35 +85,50 @@ report=""
 
 while IFS=$'\t' read -r pr title; do
   [[ -z "$pr" ]] && continue
+  # The commits fetch records APIFAIL too. It previously did not: a failure here
+  # emitted no SHAs, `rows` came back empty, and the PR was dropped by the `continue`
+  # below with apifails still 0, so the refusal guard never fired and the rate was
+  # biased DOWN. That is precisely the fail-quietly defect this script exists to
+  # refuse, left live in half the code by the claim that it had been fixed.
+  if ! shas="$(gh_retry api --paginate "repos/$REPO/pulls/$pr/commits" --jq '.[].sha' 2>>"$ERRS")"; then
+    echo "APIFAIL" >>"$ERRS"
+    continue
+  fi
   rows="$(
-    gh_retry api --paginate "repos/$REPO/pulls/$pr/commits" --jq '.[].sha' 2>>"$ERRS" |
+    printf '%s\n' "$shas" |
     while read -r sha; do
       [[ -z "$sha" ]] && continue
-      # Cache hit. Only SUCCESSFUL fetches are ever cached (see below) - caching a
-      # failed one would turn "the call failed" into "this SHA had no runs" for every
-      # later PR sharing the SHA, which is the exact false-green this script exists
-      # to refuse.
+      # ONE emit path for both cache-hit and fresh, so the two cannot disagree about
+      # trailing newlines. They previously did: the cache was written with `printf
+      # '%s'` and read with `cat`, so on a hit the next commit's rows were appended to
+      # the last cached row, `sort -u` merged them, and the parser read the wrong
+      # fields - dropping one run and corrupting another's fingerprint.
+      # Only SUCCESSFUL fetches are cached; caching a failure would replay it as
+      # "this SHA had no runs" for every later PR sharing the SHA.
       cached="$SHACACHE/$sha"
-      if [[ -f "$cached" ]]; then cat "$cached"; continue; fi
-      if out="$(gh_retry api --paginate "repos/$REPO/commits/$sha/check-runs?per_page=100&filter=all&check_name=ai-review" \
-        --jq '.check_runs[]
-              | select(.name == "ai-review" and .status == "completed")
-              | [ (.started_at // .completed_at // "0"),
-                  (.conclusion // "?"),
-                  (.app.slug // "?"),
-                  ( [ (.output.title // ""), (.output.summary // ""), (.output.text // "") ]
-                    | join("\n") | capture("patch-fingerprint:(?<fp>[0-9a-f]{64})").fp? // "-" )
-                ] | @tsv' 2>>"$ERRS")"; then
-        printf '%s' "$out" > "$cached"
-        [[ -n "$out" ]] && printf '%s\n' "$out"
-      else
-        echo "APIFAIL" >>"$ERRS"
+      if [[ ! -f "$cached" ]]; then
+        if out="$(gh_retry api --paginate "repos/$REPO/commits/$sha/check-runs?per_page=100&filter=all&check_name=ai-review" \
+          --jq '.check_runs[]
+                | select(.name == "ai-review" and .status == "completed")
+                | [ (.started_at // .completed_at // "0"),
+                    (.conclusion // "?"),
+                    (.app.slug // "?"),
+                    ( [ (.output.title // ""), (.output.summary // ""), (.output.text // "") ]
+                      | join("\n") | capture("patch-fingerprint:(?<fp>[0-9a-f]{64})").fp? // "-" )
+                  ] | @tsv' 2>>"$ERRS")"; then
+          if [[ -n "$out" ]]; then printf '%s\n' "$out" > "$cached"; else : > "$cached"; fi
+        else
+          echo "APIFAIL" >>"$ERRS"
+          continue
+        fi
       fi
+      cat "$cached"
     done | sort -u
   )"
   [[ -z "$rows" ]] && continue
   prs_seen=$((prs_seen + 1))
 
+  # >>> churn-count (executed verbatim by review-churn-count.test.ts)
   declare -A passed=()   # fingerprints a PRIOR passing run already covered
   pr_skip=0; pr_fp=0
   while IFS=$'\t' read -r _ts concl slug fp; do
@@ -137,6 +152,7 @@ while IFS=$'\t' read -r pr title; do
     # ELIGIBILITY BELONGS HERE: only a passing, allowlisted run can be re-attested FROM.
     if [[ "$concl" == "success" && "$slug" == "$REVIEWER_SLUG" ]]; then passed[$fp]=1; fi
   done <<< "$rows"
+  # <<< churn-count
   unset passed
 
   if (( pr_skip > 0 )); then
