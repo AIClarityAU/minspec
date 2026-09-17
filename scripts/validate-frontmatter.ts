@@ -23,6 +23,7 @@ import {
   checkAcceptanceCriteria,
   validateOwnership,
   validateStatusAnnotation,
+  validateFrontmatterProse,
   type SplitLayoutFile,
 } from '../packages/minspec/src/lib/spec-validator';
 import { parseSpec } from '../packages/minspec/src/lib/spec';
@@ -620,7 +621,10 @@ try {
   const annCfg = loadConfig(ROOT);
   for (const file of glob(specsDir, '.md')) {
     const content = readFileSync(file, 'utf-8');
-    for (const v of validateStatusAnnotation(parseSpec(content), annCfg)) {
+    for (const v of [
+      ...validateStatusAnnotation(parseSpec(content), annCfg),
+      ...validateFrontmatterProse(parseSpec(content), annCfg),
+    ]) {
       if (v.severity === 'error') fail(file, `${v.message} ${v.fixHint}`);
       else warn(`status-annotation ${relative(ROOT, file)}: ${v.message}`);
     }

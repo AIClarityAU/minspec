@@ -2,9 +2,6 @@
 id: SPEC-043
 type: tasks
 # 🔒 Editing voids approval (hash in .minspec/approvals.json → stale); re-run "MinSpec: Approve Spec". DR-012
-
-> **Status note.** Tasks phase complete; Implement phase done (PR open)
-> *(Moved off the `status:` line, which the status writer owns and rebuilds from the value alone — #1912 / #1900.)*
 status: implementing
 tier: T3
 product: minspec
@@ -13,6 +10,9 @@ depends_on: [SPEC-043]  # this spec's own requirements + Plan
 ---
 
 # SPEC-043 — Task Breakdown
+
+> **Status note.** Tasks phase complete; Implement phase done (PR open)
+> *(Moved off the `status:` line, which the status writer owns and rebuilds from the value alone — #1912 / #1900.)*
 
 Ordered per [design.md](./design.md) §Slice plan. **Order is load-bearing: Slice 1 before
 Slice 2** (requirements R2 — the gate must not land before the fix that makes it green). Each
