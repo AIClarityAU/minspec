@@ -738,6 +738,19 @@ function verifyHeadPassWitness({ statuses, checkRuns, allowlist, headSha } = {})
 //
 // Bare label presence is never trusted: a present `ai-review:pass` with absent
 // or unverified `passProvenance` yields a red status (deny-by-default).
+// #1870 — a `hold:*` label is the maintainer's explicit "no automation lands this"
+// (DR-072 §3: "no approval lifts it"). docs-lane already refuses to ARM auto-merge on
+// one, but that made docs-lane the SOLE witness: if that job does not run — a
+// permissions gap, a triggering change, a cancelled run, or simply removing the
+// `docs-lane` label, which makes its own `if:` guard false — an arming a previous run
+// already made still stands and the PR lands held. Constitution invariant 2 asks for an
+// independent second witness for exactly this shape, and `ready-to-merge` is it: a
+// different workflow, required by branch protection, evaluated on every PR event.
+//
+// Anchored, like docs-lane's `^hold:`, so a label merely CONTAINING "hold"
+// (`household-docs`) does not gate.
+const HOLD_RE = /^hold:/;  // exported — pinned lock-step to docs-lane.yml's `hold_pattern`
+
 function decideStatus({ labels, provenanceRevert, stalenessStrip, passProvenance, headStatus } = {}) {
   const eff = new Set(Array.isArray(labels) ? labels : []);
   if (provenanceRevert || stalenessStrip) eff.delete(PASS);
@@ -751,10 +764,30 @@ function decideStatus({ labels, provenanceRevert, stalenessStrip, passProvenance
   // gates: an unverified head status blocks green even with a provenance-verified
   // label (that is exactly the stale-pass-on-a-new-head case #466 closes).
   const headVerified = headStatus === undefined ? true : !!(headStatus && headStatus.verified);
-  const isGreen = passVerified && headVerified && !eff.has(CHANGES);
+  // A hold is decisive and independent of the review: it is red no matter how green
+  // the review is, and no amount of re-reviewing clears it.
+  const held = [...eff].filter((l) => HOLD_RE.test(l));
+  const isGreen = passVerified && headVerified && !eff.has(CHANGES) && held.length === 0;
 
   let description;
-  if (stalenessStrip) {
+  // Hold is reported FIRST, ahead of the staleness/provenance outcomes, even though
+  // those describe actions actually taken. The reader of a red `ready-to-merge` needs
+  // the fact that CANNOT be cleared by acting: told "stale pass stripped — re-review
+  // required" on a held PR, they would re-review and still be red, with no hint why.
+  // The strip/revert remain visible in the job log and the audit comment, so naming
+  // the hold here costs no audit trail.
+  if (held.length) {
+    // Deliberately says nothing about whether the hold can be LIFTED. DR-072 §3's
+    // table is per-value — `tier` is liftable ("human review is the designed remedy"),
+    // `human` is not ("no keystroke transfers authorship") — so one universal sentence
+    // would miscite the very section it points at. This states only what this gate
+    // does, which is true for every hold value, and defers the rest to the DR.
+    // Reason first, labels last: truncate() cuts the TAIL, so an unbounded pile of
+    // hold labels can only cost label names, never the reason.
+    description = truncate(
+      `held — this gate stays red while a hold:* label is present (DR-072 §3): ${held.join(', ')}`,
+    );
+  } else if (stalenessStrip) {
     description = 'stale ai-review:pass stripped on new commits — re-review required';
   } else if (provenanceRevert) {
     description = 'ai-review:pass reverted — not from an allowlisted reviewer';
@@ -1101,6 +1134,7 @@ module.exports = {
   verifyHeadPassWitness,
   PASS_STATUS_CONTEXT,
   CHECK_NAME,
+  HOLD_RE,
   decideStatus,
   decideReviewCheck,
   isBenignRemovalError,
