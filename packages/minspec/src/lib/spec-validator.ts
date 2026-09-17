@@ -782,6 +782,46 @@ function fmListField(raw: string, key: string): string[] {
  * only PRODUCES + VALIDATES the signal the gate already consumes — no gate change (FR-8).
  */
 /**
+ * #1955 review — prose parked INSIDE the frontmatter block.
+ *
+ * RCDD Phase 4 for a defect this change itself introduced. Moving a status annotation
+ * "off the status line" is only a fix if it lands in the BODY. The first attempt here
+ * inserted the blockquote after the first `^# ` line, which in three files was a YAML
+ * *comment* inside the frontmatter, not the H1 — so the note moved from one frontmatter
+ * position to another and stayed exactly as orphan-able, in a shape
+ * `validateStatusAnnotation` cannot see. Three reviewers caught it; nothing else would.
+ *
+ * `parseFrontmatterYaml` (`spec.ts:124-162`) silently discards any line that is not
+ * `key: value`, so the text is invisible to every parsed-model consumer AND survives every
+ * status write. Silent discard is why this needs a gate rather than care.
+ *
+ * DELIBERATELY NARROW: a column-0 `>` only. That is unambiguous — `>` at column 0 inside a
+ * mapping is invalid YAML, so there is no false positive to trade against. An indented `>`
+ * is a legitimate block scalar (`key: >`) and is never flagged. Unmarked prose is also
+ * silently dropped by the parser, but cannot be told from a malformed value, so it is left
+ * to the YAML parse rather than guessed at here.
+ */
+export function validateFrontmatterProse(
+  spec: ParsedSpec,
+  config: MinspecConfig,
+): ValidationViolation[] {
+  const block = spec.raw.match(FRONTMATTER_BLOCK_RE);
+  if (!block) return [];
+  const severity: Severity = config.statusLineAnnotation === 'error' ? 'error' : 'warning';
+  const n = block[1].split('\n').filter((l) => /^>/.test(l)).length;
+  if (n === 0) return [];
+  return [
+    {
+      rule: 'frontmatter.prose-line',
+      severity,
+      message: `Frontmatter contains ${n} blockquote line(s) — prose parked inside the YAML block.`,
+      fixHint:
+        'Move the prose into the body, after the H1. A `>` at column 0 is not valid YAML: `parseFrontmatterYaml` silently discards it, so it is invisible to every consumer and survives every status write — the orphan it was meant to escape (#1955 / #1912).',
+    },
+  ];
+}
+
+/**
  * #1912 — the `status:` frontmatter line carries a value and nothing else.
  *
  * WHY THIS MUST READ THE RAW TEXT. No parsed-model rule can see this:
@@ -979,6 +1019,7 @@ export function validateSpec(
   violations.push(...validateOwnership(spec, config));
   // #1912 — the status line carries a value and nothing else (raw-text rule).
   violations.push(...validateStatusAnnotation(spec, config));
+  violations.push(...validateFrontmatterProse(spec, config));
 
   // 0. Epic reference (soft — warnings only, DR-013 FR-9). Two failure modes,
   //    both leave the spec stranded under "(no epic)":

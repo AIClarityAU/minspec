@@ -2,9 +2,6 @@
 id: SPEC-040
 type: tasks
 # tasks.md is NOT separately approvable (#630/#951) and is not hash-locked — only requirements.md is,
-
-> **Status note.** All task groups complete; shipped in #1009 (19a6e08)
-> *(Moved off the `status:` line, which the status writer owns and rebuilds from the value alone — #1912 / #1900.)*
 # and its record is the per-file sidecar .minspec/approvals/**/requirements.md.json, NOT the legacy
 # .minspec/approvals.json (gitignored, absent from every checkout — #974). Editing this file voids nothing.
 status: done
@@ -15,6 +12,9 @@ depends_on: [SPEC-040, DR-064]  # this spec's own requirements + Plan
 ---
 
 # SPEC-040 — Task Breakdown
+
+> **Status note.** All task groups complete; shipped in #1009 (19a6e08)
+> *(Moved off the `status:` line, which the status writer owns and rebuilds from the value alone — #1912 / #1900.)*
 
 Ordered per [design.md](./design.md) §Sequencing. **Each group ends suite-green (INV-2 / AC-7)
 before the next starts**, and the `error`-level rules (FR-1) are physically added **last** so

@@ -28,6 +28,7 @@ import { DEFAULT_CONFIG } from '../src/lib/config';
 
 const INLINE = 'status.inline-comment';
 const ORPHAN = 'status.orphan-comment';
+const PROSE = 'frontmatter.prose-line';
 
 /** Build a raw spec whose frontmatter is assembled verbatim, so raw shape is under test. */
 function spec(fmLines: string[]): string {
@@ -137,6 +138,39 @@ describe('#1912 status-line annotation', () => {
 
   it('a `#` inside a quoted status value is not a comment', () => {
     expect(rules(spec(['status: "planning # not a comment"']))).not.toContain(INLINE);
+  });
+
+  // ── frontmatter.prose-line (#1955 review) ────────────────────────────────
+  //
+  // The gate for the defect this change itself made: a note moved OFF the status line
+  // but landed inside the frontmatter, where the parser silently drops it and every
+  // status write leaves it standing.
+  it('a column-0 blockquote inside frontmatter is flagged', () => {
+    expect(rules(spec(['status: planning', '> **Status note.** moved here by mistake']))).toContain(
+      PROSE,
+    );
+  });
+
+  it('several blockquote lines report once', () => {
+    const found = rules(spec(['status: planning', '> one', '> two'])).filter((r) => r === PROSE);
+    expect(found).toHaveLength(1);
+  });
+
+  it('an INDENTED `>` is a YAML block scalar and is never flagged', () => {
+    // `key: >` + indented text is valid YAML. Flagging it would be a false positive on
+    // a legitimate multi-line value.
+    expect(rules(spec(['status: planning', 'note: >', '  some folded text']))).not.toContain(PROSE);
+  });
+
+  it('a blockquote in the BODY is never flagged', () => {
+    const raw =
+      ['---', 'id: SPEC-999', 'tier: T2', 'status: planning', '---', ''].join('\n') +
+      '\n# Heading\n\n> **Status note.** this is where it belongs\n';
+    expect(rules(raw)).not.toContain(PROSE);
+  });
+
+  it('clean frontmatter produces no prose finding', () => {
+    expect(rules(spec(['status: planning']))).not.toContain(PROSE);
   });
 
   // ── Ratchet (SPEC-038 FR-7 pattern) ──────────────────────────────────────
