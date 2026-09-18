@@ -42,6 +42,17 @@ describe('INV-1: the motivating defect is caught in the real tree', () => {
     expect(readySet!.knownIssue).toBe(1855);
   });
 
+  // ── THIS TEST IS THE ENFORCEMENT POINT IN CI ──────────────────────────────
+  // Not `pretest`. CI's test job runs `npx vitest run --coverage` directly
+  // (.github/workflows/ci.yml), which never fires npm's pretest hook — so the
+  // package.json wiring is a local-developer convenience only, and a claim that it
+  // gates CI would be false. What actually blocks a merge is this test: it shells
+  // out to the checker, and execFileSync throws on a non-zero exit.
+  //
+  // Caught by a security review of the commit that claimed otherwise. Verified by
+  // appending a violation to a real script and running `npx vitest run` with no npm
+  // script in the path: this test fails. If the enforcement is ever moved to a
+  // dedicated CI step, delete this note along with the indirection.
   it('leaves no unannotated finding anywhere under scripts/', () => {
     const out = execFileSync(
       'npx',

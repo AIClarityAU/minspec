@@ -20,6 +20,15 @@
  * run" is the #811 always-green bug, and a lint about silent gates failing silently
  * would be the joke writing itself.
  *
+ * ── WHERE THIS IS ENFORCED ───────────────────────────────────────────────────
+ * `npm run check:swallowed-gate`, and via `pretest` for anyone running `npm test`
+ * locally. NOT via pretest in CI: the test job runs `npx vitest run --coverage`
+ * directly, which never fires npm's pretest hook. The merge-blocking enforcement is
+ * a T0 test (packages/minspec/tests/swallowed-gate-signal.test.ts) that shells out to
+ * this file and fails on a non-zero exit. Wiring a named CI step instead would be
+ * more discoverable, but the App installation holds no `workflows` permission by
+ * design (host DR-079), so an agent cannot add one.
+ *
  * All decision logic lives in the pure, unit-tested lib/swallowed-gate-signal.ts; this
  * file is IO only: walk, read, hand the text over, print, set the exit code.
  */
