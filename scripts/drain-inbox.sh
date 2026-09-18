@@ -375,7 +375,7 @@ sync_shared_checkouts() {
   local db origin_ref root head_sha origin_sha base
   # `|| true` inside the substitution: under `set -euo pipefail` an unset origin/HEAD
   # makes symbolic-ref exit 128, which would otherwise abort the whole drain.
-  db="$(git -C "$PRIMARY_ROOT" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)"
+  db="$(git -C "$PRIMARY_ROOT" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)"  # swallow-ok: an empty default-branch name skips the repo via continue, which is the conservative direction
   db="${db:-main}"                                   # origin/HEAD often unset locally → main
   origin_ref="origin/${db}"
   # GIT_TERMINAL_PROMPT=0: this loop is disowned/background — a checkout without
@@ -415,8 +415,8 @@ resolve_session_pid() {
   fi
   local pid="$PPID" guard=0 comm args
   while [[ -n "$pid" && "$pid" != "0" && "$pid" != "1" && "$guard" -lt 20 ]]; do
-    comm="$(ps -o comm= -p "$pid" 2>/dev/null | tr -d ' \t' || true)"
-    args="$(ps -o args= -p "$pid" 2>/dev/null || true)"
+    comm="$(ps -o comm= -p "$pid" 2>/dev/null | tr -d ' \t' || true)"  # swallow-ok: ps exits non-zero precisely when the pid is gone, which is the same conclusion the test below draws
+    args="$(ps -o args= -p "$pid" 2>/dev/null || true)"  # swallow-ok: ps exits non-zero precisely when the pid is gone, which is the same conclusion the test below draws
     if [[ "$comm" == *claude* || "$args" == *claude-code* || "$args" == *anthropic.claude* ]]; then
       printf '%s' "$pid"; return 0
     fi

@@ -159,7 +159,7 @@ if ! MAY="$("$READY_CHECK" --may-approve "$V_HOLD" "$V_HUMAN")"; then
 fi
 
 # ── Control 3: identity from the API, never from a flag ──────────────────────
-APPROVER="$(gh api user -q .login 2>/dev/null || true)"
+APPROVER="$(gh api user -q .login 2>/dev/null || true)"  # swallow-ok: the next line rejects empty and exits, so an unidentifiable approver fails closed
 if [[ -z "$APPROVER" ]]; then
   echo "ERROR: could not resolve the authenticated GitHub identity (\`gh api user\`) — refusing to mint an unattributed approval." >&2
   exit 1

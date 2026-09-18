@@ -352,12 +352,12 @@ SPECIFY_SCOPE_RE='^specs/|^docs/decisions/'
 # a never-wrong product is worse than the refusal.
 specify_scope_stray() {
   local changed stray
-  changed="$(grep -v '^[[:space:]]*$' || true)"
+  changed="$(grep -v '^[[:space:]]*$' || true)"  # swallow-ok: grep -v exits 1 when every line was blank, which is the answer (nothing changed); the next line branches on empty
   if [[ -z "$changed" ]]; then
     echo "(no changed files at all — a specify-only dispatch must produce a spec)"
     return 0
   fi
-  stray="$(printf '%s\n' "$changed" | grep -vE "$SPECIFY_SCOPE_RE" || true)"
+  stray="$(printf '%s\n' "$changed" | grep -vE "$SPECIFY_SCOPE_RE" || true)"  # swallow-ok: grep -v exits 1 when nothing falls outside the allowed scope, which is the answer
   [[ -z "$stray" ]] && return 1
   printf '%s\n' "$stray"
   return 0
@@ -1904,7 +1904,7 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
       AUTONOMY_PROCEED="no"
       SPEC024_CHANGED=""
       if [[ -n "$PR_NUM" ]]; then
-        SPEC024_CHANGED=$(gh pr diff "$PR_NUM" --repo "$REPO" --name-only 2>/dev/null || true)
+        SPEC024_CHANGED=$(gh pr diff "$PR_NUM" --repo "$REPO" --name-only 2>/dev/null || true)  # swallow-known: #1978 an API failure reads as no SPEC-024 files changed, feeding the autonomy merge decision below
       fi
       if AUTONOMY_VERDICT=$(autonomy_may_merge \
             "merge PR #${PR_NUM:-none} via the SPEC-024 consequence-hybrid gate" \

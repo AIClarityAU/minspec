@@ -52,6 +52,69 @@ describe('INV-1: the motivating defect is caught in the real tree', () => {
   });
 });
 
+describe('INV-5: the quoted capture idiom is seen', () => {
+  // The blind spot that shipped in the first version of this lint. ASSIGN required an
+  // UNQUOTED `$(` after `=`, so `VAR="$(cmd || true)"` — 257 captures under scripts/ —
+  // was invisible while the check printed "clause 1: clean". Caught by review on #1980,
+  // not by this file. A lint that reports clean over the dominant idiom is worse than no
+  // lint: it converts an unknown into a false assurance.
+  it('flags the quoted form exactly as it flags the bare form', () => {
+    const quoted = find('n="$(gh pr list || true)"\nif [[ -z "$n" ]]; then :; fi');
+    const bare = find('n=$(gh pr list || true)\nif [[ -z "$n" ]]; then :; fi');
+    expect(quoted).toHaveLength(1);
+    expect(quoted[0].variable).toBe('n');
+    expect(bare).toHaveLength(1);
+  });
+
+  it('sees review-decide.sh BEGIN_COUNT, which decides the merge gate', () => {
+    // That site is annotated `swallow-ok` (it fails closed both ways), and an annotation
+    // suppresses the finding entirely — so the markers are stripped first. This asserts
+    // the MATCHER sees the quoted idiom, which is the property that regressed; asserting
+    // on the annotated file would pass even with the blind spot fully reopened.
+    const source = readFileSync(join(REPO, 'scripts/review-decide.sh'), 'utf8').replace(
+      /#\s*swallow-(ok|known):.*$/gm,
+      '',
+    );
+    const found = findSwallowedGateSignals('scripts/review-decide.sh', source).find(
+      (f) => f.variable === 'BEGIN_COUNT',
+    );
+    expect(found, 'the quoted-capture blind spot has reopened').toBeDefined();
+    expect(found!.text).toContain('"$(');
+  });
+});
+
+describe('INV-6: a conditional spanning lines still counts as deciding', () => {
+  // `if VERDICT=$(check \n "$CAPTURED")` puts the keyword and the variable read on
+  // different physical lines. Scanning one line at a time missed it.
+  it('flags a capture read by a multi-line conditional', () => {
+    const findings = find(
+      ['changed=$(gh pr diff --name-only || true)', 'if VERDICT=$(may_merge \\', '  "$changed"); then', '  :', 'fi'].join('\n'),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].variable).toBe('changed');
+  });
+
+  it('joins a backslash continuation whose parens are already balanced', () => {
+    // Paren depth alone does not cover this: `x=$(cmd)` closes on line 1, and the swallow
+    // sits on line 2. Only the backslash continuation joins them. Found by mutation —
+    // removing the continuation check left every other test in this file green.
+    const findings = find(
+      ['n=$(gh pr list) \\', '  || true', 'if [[ -z "$n" ]]; then :; fi'].join('\n'),
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].variable).toBe('n');
+  });
+
+  it('sees dispatch-issue.sh SPEC024_CHANGED, whose conditional spans three lines', () => {
+    const source = readFileSync(join(REPO, 'scripts/dispatch-issue.sh'), 'utf8');
+    const found = findSwallowedGateSignals('scripts/dispatch-issue.sh', source).find(
+      (f) => f.variable === 'SPEC024_CHANGED',
+    );
+    expect(found, 'the multi-line conditional blind spot has reopened').toBeDefined();
+    expect(found!.knownIssue).toBe(1978);
+  });
+});
+
 describe('INV-2: a swallow is only a finding when it decides something', () => {
   it('ignores a bare statement whose result nothing captures', () => {
     expect(find('rm -f "$tmp" || true\nif [[ -n "$x" ]]; then :; fi')).toHaveLength(0);

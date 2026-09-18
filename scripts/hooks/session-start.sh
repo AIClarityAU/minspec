@@ -73,12 +73,12 @@ DRAIN="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/drain-inbox.sh"
 # --enable-auto wrote the repo-root .minspec/auto-drain), leaving auto-drain
 # permanently OFF and the banner lying "OFF" while the pref said "on". Delegating
 # to `--pref-path` keeps a single source of truth (regression: #415).
-PREF="$("$DRAIN" --pref-path 2>/dev/null || true)"
+PREF="$("$DRAIN" --pref-path 2>/dev/null || true)"  # swallow-ok: an advisory session banner, not a gate; empty simply omits it
 if [[ -x "$DRAIN" ]]; then
   if [[ -n "$PREF" && "$(cat "$PREF" 2>/dev/null || echo off)" == "on" ]]; then
     "$DRAIN" --auto 2>/dev/null || true
   else
-    pending="$("$DRAIN" --dry-run 2>/dev/null || true)"
+    pending="$("$DRAIN" --dry-run 2>/dev/null || true)"  # swallow-ok: an advisory session banner, not a gate; empty simply omits it
     if [[ -n "$pending" ]]; then
       printf '%s\n' "$pending"
       # nudge only when there is real pending work

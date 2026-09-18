@@ -80,12 +80,20 @@ export interface SwallowedSignal {
 
 /**
  * An assignment capturing a command substitution. Covers the plain form, the
- * declaration keywords (`local`/`declare`/`readonly`/`export`), and both swallow
- * positions — inside the substitution (`x=$(cmd || true)`) and outside it
- * (`x=$(cmd) || true`).
+ * declaration keywords (`local`/`declare`/`readonly`/`export`), both swallow positions —
+ * inside the substitution (`x=$(cmd || true)`) and outside it (`x=$(cmd) || true`) — and,
+ * critically, the QUOTED idiom `x="$(cmd || true)"`.
+ *
+ * The quote is not cosmetic. The first version of this regex required an unquoted `$(`
+ * immediately after `=`, which made 257 quoted captures under `scripts/` invisible while
+ * the check cheerfully printed "clause 1: clean". One of them was
+ * `review-decide.sh`'s BEGIN_COUNT, which decides the merge gate. A lint that reports
+ * clean over the dominant idiom is worse than no lint, because it converts an unknown
+ * into a false assurance. Caught by review on #1980, not by this file's own tests, which
+ * is why INV-5 now asserts the quoted form directly.
  */
 const ASSIGN =
-  /^\s*(?:local\s+|declare\s+(?:-\w+\s+)?|readonly\s+|export\s+)?([A-Za-z_][A-Za-z0-9_]*)=\$\(/;
+  /^\s*(?:local\s+|declare\s+(?:-\w+\s+)?|readonly\s+|export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(?:"\s*)?\$\(/;
 
 /** `|| true` / `|| :` — the swallow itself. `: ` is bash's no-op builtin. */
 const SWALLOW = /\|\|\s*(?:true|:)(?:\s|$|\))/;
@@ -109,17 +117,37 @@ const readsVariable = (line: string, variable: string): boolean =>
  * @param file   repo-relative path, echoed back on each finding
  * @param source full text of the script
  */
-export function findSwallowedGateSignals(file: string, source: string): SwallowedSignal[] {
-  const lines = source.split('\n');
-  const findings: SwallowedSignal[] = [];
+/**
+ * One shell statement, which may span several physical lines.
+ *
+ * Both halves of this lint need the same joining. An assignment's substitution can span
+ * lines (`x=$(cmd \n --flag || true)`), and so can the conditional that consumes it
+ * (`if VERDICT=$(check \n "$CAPTURED")`). Scanning physical lines missed the first and
+ * then missed the second, so joining happens once, here, and both passes read the result.
+ */
+interface Statement {
+  text: string;
+  /** 1-indexed first physical line. */
+  start: number;
+  /** 1-indexed last physical line. */
+  end: number;
+  /** The physical lines, so a marker on any of them applies to the whole statement. */
+  lines: string[];
+}
 
-  for (let index = 0; index < lines.length; index += 1) {
-    const assignment = ASSIGN.exec(lines[index]);
-    if (!assignment) continue;
+/**
+ * Group physical lines into statements, joining while parentheses are unbalanced or the
+ * line ends in a backslash continuation.
+ *
+ * Depth counting is quote-blind: a `)` inside a quoted string closes the span early. That
+ * under-reports (the swallow past it goes unseen) rather than over-reports, which is the
+ * safe direction for a lint people have to live with.
+ */
+function statements(lines: string[]): Statement[] {
+  const out: Statement[] = [];
+  let index = 0;
 
-    // Join the assignment's continuation lines. `$(` opens a depth this walks back
-    // down, so `x=$(cmd \n  --flag 2>/dev/null || true)` is one statement, not two.
-    // #1855 is exactly that shape, and a line-at-a-time matcher does not see it.
+  while (index < lines.length) {
     let depth = 0;
     let end = index;
     for (; end < lines.length; end += 1) {
@@ -127,38 +155,60 @@ export function findSwallowedGateSignals(file: string, source: string): Swallowe
         if (ch === '(') depth += 1;
         else if (ch === ')') depth -= 1;
       }
-      if (depth <= 0) break;
+      if (depth <= 0 && !lines[end].trimEnd().endsWith('\\')) break;
     }
     if (end >= lines.length) end = lines.length - 1;
 
     const span = lines.slice(index, end + 1);
-    const statement = span.join(' ');
-    if (!SWALLOW.test(statement)) continue;
+    out.push({ text: span.join(' '), start: index + 1, end: end + 1, lines: span });
+    index = end + 1;
+  }
+
+  return out;
+}
+
+/**
+ * Report every swallowed capture in one script whose value later drives control flow.
+ *
+ * @param file   repo-relative path, echoed back on each finding
+ * @param source full text of the script
+ */
+export function findSwallowedGateSignals(file: string, source: string): SwallowedSignal[] {
+  const stmts = statements(source.split('\n'));
+  const findings: SwallowedSignal[] = [];
+
+  stmts.forEach((stmt, position) => {
+    const assignment = ASSIGN.exec(stmt.lines[0]);
+    if (!assignment) return;
+    if (!SWALLOW.test(stmt.text)) return;
     // A marker anywhere in the statement applies to it, so the reason can sit on
     // whichever of its lines reads best.
-    if (span.some((line) => OK.test(line))) continue;
-    const known = span.map((line) => KNOWN.exec(line)).find(Boolean);
+    if (stmt.lines.some((line) => OK.test(line))) return;
+    const known = stmt.lines.map((line) => KNOWN.exec(line)).find(Boolean);
 
     const variable = assignment[1];
 
-    // Only lines AFTER the statement can be reading this capture. A read above it
-    // belongs to whatever the variable held before, which is not this finding.
+    // Only statements AFTER this one can be reading the capture. A read above it belongs
+    // to whatever the variable held before, which is not this finding.
     const decidesAt: number[] = [];
-    for (let i = end + 1; i < lines.length; i += 1) {
-      if (CONTROL_FLOW.test(lines[i]) && readsVariable(lines[i], variable)) decidesAt.push(i + 1);
+    for (let i = position + 1; i < stmts.length; i += 1) {
+      const later = stmts[i];
+      if (CONTROL_FLOW.test(later.text) && readsVariable(later.text, variable)) {
+        decidesAt.push(later.start);
+      }
     }
 
     if (decidesAt.length > 0) {
       findings.push({
         file,
-        line: index + 1,
+        line: stmt.start,
         variable,
-        text: span.join(' ').trim(),
+        text: stmt.text.trim(),
         decidesAt,
         ...(known ? { knownIssue: Number(known[1]) } : {}),
       });
     }
-  }
+  });
 
   return findings;
 }

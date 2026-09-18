@@ -124,7 +124,7 @@ resolve_go_bin() {
 if [ ! -x "$BUMBLEBEE_BIN" ]; then
   # Not `if ! GO_RESOLVED=$(...)` — under `set -e` that form is fine, but keeping the
   # assignment separate makes the failure branch explicit and the exit code readable.
-  GO_RESOLVED="$(resolve_go_bin || true)"
+  GO_RESOLVED="$(resolve_go_bin || true)"  # swallow-ok: the next line branches on empty explicitly and takes the unresolved path
   if [ -z "$GO_RESOLVED" ]; then
     echo "check-supply-chain: no Go toolchain found. Tried, in order:" >&2
     echo "    1. \$GO_BIN                       ${GO_BIN:-(unset)}" >&2

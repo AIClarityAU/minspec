@@ -147,7 +147,7 @@ GUARD="${SCRIPT_DIR}/../.github/scripts/ai-review-guard.js"
 # the shape the renderer validates can never drift (DR-079).
 VERDICT_SCHEMA_JSON=""
 if [[ -f "$GUARD" ]]; then
-  VERDICT_SCHEMA_JSON="$(GUARD="$GUARD" node -e 'process.stdout.write(JSON.stringify(require(process.env.GUARD).VERDICT_SCHEMA))' 2>/dev/null || true)"
+  VERDICT_SCHEMA_JSON="$(GUARD="$GUARD" node -e 'process.stdout.write(JSON.stringify(require(process.env.GUARD).VERDICT_SCHEMA))' 2>/dev/null || true)"  # swallow-ok: empty is one of the two conditions that trigger the fallback branch on the same line
 fi
 
 # Fail CLOSED if this CLI cannot carry a verdict out of band. Emitting no verdict reads
@@ -234,7 +234,7 @@ run_reviewer() {
 render_verdict() {
   [[ -f "$GUARD" ]] || return 1
   local block
-  block="$(GUARD="$GUARD" node -e 'const g=require(process.env.GUARD);let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(g.parseCliVerdict(s)));' <<<"${1:-}" 2>/dev/null || true)"
+  block="$(GUARD="$GUARD" node -e 'const g=require(process.env.GUARD);let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(g.parseCliVerdict(s)));' <<<"${1:-}" 2>/dev/null || true)"  # swallow-ok: the next line returns 1 on empty, so a missing verdict block fails closed
   [[ -n "$block" ]] || return 1
   printf '%s' "$block"
 }

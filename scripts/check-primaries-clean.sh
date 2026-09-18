@@ -96,7 +96,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # does not exist — and all three repos report SKIP while the actual primaries go
 # uninspected. Observed in testing. `--git-common-dir` is the primary's .git
 # even from a linked worktree.
-COMMON_DIR="$(git -C "$HERE" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+COMMON_DIR="$(git -C "$HERE" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"  # swallow-ok: the next line branches on empty explicitly; not a git repo is a legitimate answer here
 if [ -z "$COMMON_DIR" ]; then
   echo "check-primaries-clean: $HERE is not inside a git checkout." >&2
   echo "  This script must be run from inside the repo it is committed to," >&2
@@ -139,7 +139,7 @@ for repo in "${REPOS[@]}"; do
     continue
   fi
 
-  db="$(git -C "$repo" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)"
+  db="$(git -C "$repo" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)"  # swallow-ok: an empty default-branch name makes every branch compare unequal, which over-reports rather than under-reports
   db="${db:-main}"
   origin_ref="origin/$db"
 
