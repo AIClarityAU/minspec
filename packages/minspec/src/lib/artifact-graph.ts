@@ -112,7 +112,7 @@ function frontmatterBlock(content: string): string {
  * which is dropped (the regex stops at the first `]`). Empty/absent ⇒ no edges.
  */
 function parseEdgeArray(fmBlock: string, kind: EdgeKind, fromId: string): Edge[] {
-  const re = new RegExp(`^${kind}:\\s*\\[([^\\]]*)\\]`, 'm');
+  const re = new RegExp(`^${kind}:[ \\t]*\\[([^\\]]*)\\]`, 'm');
   const m = fmBlock.match(re);
   if (!m) return [];
   return m[1]
@@ -131,7 +131,7 @@ function edgesFrom(fmBlock: string, fromId: string): Edge[] {
 
 /** The raw `goal:` ref (e.g. `G-2`) from a frontmatter block, inline-comment-stripped, or null. */
 function goalRefOf(fmBlock: string): string | null {
-  const m = fmBlock.match(/^goal:\s*([^\s#]+)/m);
+  const m = fmBlock.match(/^goal:[ \t]*([^\s#]+)/m);
   return m ? m[1].trim() : null;
 }
 
@@ -416,7 +416,7 @@ function readImplementHole(disc: DiscoveredSpecFile): ImplementHole | undefined 
       // as its own. Claim the file only when its `id:` says so; a tasks.md with
       // no id at all is still accepted, since the scaffolder's output and older
       // hand-written lists predate the convention.
-      const owner = /^id:\s*(\S+)/m.exec(frontmatterBlock(raw))?.[1];
+      const owner = /^id:[ \t]*(\S+)/m.exec(frontmatterBlock(raw))?.[1];
       if (owner === undefined || owner === disc.parsed.frontmatter.id) splitBody = raw;
     }
   } catch {
