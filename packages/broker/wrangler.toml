@@ -25,3 +25,14 @@ compatibility_date = "2026-08-16"
 
 [vars]
 MINSPEC_APP_ID = "4212099"
+
+# The `aud` every incoming OIDC token must carry. A plain var, not a secret: it is an
+# opaque identifier, not a credential, and its whole job is to be agreed in advance by
+# both sides. `verify.ts` refuses an empty audience rather than defaulting it, because an
+# unconstrained `aud` accepts a token GitHub minted for some other service entirely.
+#
+# This value MUST match the `audience:` the workflow requests. A mismatch 401s every
+# request with "invalid token", which reads as a signature problem and sends the reader
+# looking at keys instead of at this line - so `broker-audience-parity.test.ts` pins the
+# two together.
+BROKER_AUDIENCE = "https://broker.minspec.dev"

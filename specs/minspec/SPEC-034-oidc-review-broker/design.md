@@ -30,7 +30,7 @@ repo-scoped GitHub App installation token:
    agree (confused-deputy defence, FR-2). Resolve the `minspec-sdd` App's installation on that
    repo; absent ⇒ 403 "install the App."
 3. **Mint** an installation token scoped to that **one** repository and the **least-privilege**
-   `review` permission set, TTL ≤10 min — by signing the App JWT with the private key held
+   `review` permission set, TTL = GitHub's fixed 1h — by signing the App JWT with the private key held
    **only** in a Worker secret, then calling the GitHub App API.
 
 The Worker is **credential-free toward the customer and content-free** — it receives only the
@@ -95,7 +95,7 @@ sequenceDiagram
     BR->>GH: fetch JWKS
     BR->>BR: verify RS256 sig, iss, aud, exp
     BR->>BR: authorise from claims (body repo must match) — else 4xx
-    BR->>API: App JWT (signed w/ Worker-secret key) →<br/>create installation token (1 repo, review perms, ≤10m)
+    BR->>API: App JWT (signed w/ Worker-secret key) →<br/>create installation token (1 repo, review perms, 1h fixed)
     API-->>BR: short-lived installation token
     BR-->>CI: {token, expires_at, permissions, repositories:[repo]}
     CI->>PR: apply ai-review:* + post "Approved" review AS minspec-sdd[bot]
@@ -143,7 +143,7 @@ interface TokenRequest {
 // 200 — success
 interface TokenResponse {
   token: string;                 // ghs_… installation token
-  expires_at: string;            // ISO-8601, ≤10 min out
+  expires_at: string;            // ISO-8601; GitHub's fixed 1h (no shorter TTL exists)
   permissions: {                 // least-privilege 'review' profile
     issues: 'write';             // apply ai-review:* labels
     pull_requests: 'write';      // post the review comment + GH-native Approved review
@@ -160,8 +160,19 @@ type ErrorCode =
   | 'repo_claim_mismatch'   // 403 body repo ≠ OIDC claim                   (FR-2, AC-2)
   | 'app_not_installed'     // 403 minspec-sdd not installed on the repo    (FR-4, AC-4)
   | 'rate_limited'          // 429 per-repo/org limit                       (NFR-2)
-  | 'mint_failed';          // 502 GitHub App API error (no token returned) (FR-9, AC-9)
+  | 'mint_failed'           // 502 GitHub App API error (no token returned) (FR-9, AC-9)
+  | 'unexpected_field'      // 400 body carried a field beyond the contract (FR-6, AC-6)
+  | 'unsupported_profile'   // 400 permissions_profile is not 'review'      (FR-3)
+  | 'broker_misconfigured'; // 500 no audience / no App credentials bound
 ```
+
+**Added 2026-09-12 (task 1.4).** The union above listed only five codes and had no 400
+member at all, while `decide()` (task 1.2) already emitted `unexpected_field` and
+`unsupported_profile` as 400s with both names pinned by `broker-decision-logic.test.ts`.
+The contract was the incomplete side, not the code. `broker_misconfigured` is new: a Worker
+deployed with no audience or no App credentials is broken, and reporting that as
+`oidc_invalid` blames the caller for our deployment and sends an adopter hunting a token
+problem that does not exist.
 
 The `review` profile is the exact set the reviewer needs and no more — no `contents`, no
 admin, no org scope (FR-3). GH-native *Approved* review (OQ-1 / AC-12) is covered by the
