@@ -190,6 +190,18 @@ if (( fp_runs < 20 )) || (( prs_seen < 10 )); then
   echo "Repeats cluster inside a PR, so runs are not independent observations."
   exit 0
 fi
+# CONCENTRATION, not just size. A measured 13.6% (3 of 22) once came entirely from a
+# single PR: drop that one PR and the rate was 0%. Sample-size thresholds do not catch
+# that, because the run count was fine and the PR count was fine - the SIGNAL was what
+# came from one place. A rate sourced from fewer than 3 PRs describes those PRs, not
+# the repo, so report the concentration instead of a number that reads as general.
+if (( skippable > 0 )) && (( prs_with_skip < 3 )); then
+  echo "TOO CONCENTRATED: all $skippable repeat(s) come from $prs_with_skip PR(s)."
+  echo "That is a fact about those PRs, not a churn rate for the repo. Widen the window."
+  echo
+  printf '%s' "$report"
+  exit 0
+fi
 
 pct="$(awk -v d="$skippable" -v p="$fp_runs" 'BEGIN{printf "%.1f", (100*d)/p}')"
 mach="$(awk -v n="$c_neutral" -v t="$tot" 'BEGIN{printf "%.1f", t?(100*n)/t:0}')"
