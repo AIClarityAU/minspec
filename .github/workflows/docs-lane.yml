@@ -44,14 +44,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Every refusal path below must REVOKE an arming an earlier run already made,
-          # not merely decline to arm. Arming is sticky, and a PR that was clean when it
-          # was armed can later acquire a non-docs path, an outward-facing doc, a hold
-          # label, or a status transition on a `synchronize` — declining to re-arm leaves
-          # the original arming standing in all four cases. ALL FOUR refusals call this
-          # helper. They did not always: the two pre-existing ones (non-docs path,
-          # outward-facing doc) exited without disarming until #1847 brought them in
-          # line with the two it added.
+          # Every non-zero exit from this step must REVOKE an arming an earlier run
+          # already made, not merely decline to arm. Arming is sticky, and a PR that was
+          # clean when it was armed can later acquire a non-docs path, an outward-facing
+          # doc, a hold label, or a status transition on a `synchronize` — declining to
+          # re-arm leaves the original arming standing in every one of those cases.
+          #
+          # That guarantee is held by the EXIT trap installed below, not by counting
+          # call sites. This comment used to assert that all four refusals called the
+          # helper; three witness-failure exits did not, and the assertion is what made
+          # that invisible — it reads as a completed audit, so a reader stops counting
+          # (#1968). An enumeration is a claim that has to be re-verified by hand on
+          # every edit; a trap is a property that holds for refusals not yet written.
           #
           # Sets `disarm_note` for the refusal comment, and never claims more than it
           # knows: when the auto-merge state could not be READ, a precautionary disarm is
@@ -61,6 +65,7 @@ jobs:
           revoke_any_arming() {
             local armed
             disarm_note=""
+            revoke_done=1
             if ! armed="$(gh pr view "$PR" --repo "$REPO" --json autoMergeRequest -q '.autoMergeRequest.enabledAt // ""')"; then
               echo "::error::docs-lane: could not read PR #$PR's auto-merge state — attempting a disarm regardless"
               armed="unknown"
@@ -80,6 +85,17 @@ jobs:
               disarm_note=" ⚠️ Auto-merge was already enabled and could **not** be disarmed — disarm it by hand."
             fi
           }
+          # Arming is sticky, so EVERY non-zero exit from this step must revoke an arming
+          # an earlier run already made — not only the refusals enumerated below. Calling
+          # the helper per refusal fixes the paths that exist today; it does not fix the
+          # property, and three witness-failure exits (#1968) shipped without the call
+          # under a comment asserting all of them had it. A trap holds by construction:
+          # it covers a refusal added later, and a `set -euo pipefail` abort, neither of
+          # which any per-site call reaches. `revoke_done` keeps an explicit revoke from
+          # being repeated here — the helper is idempotent, but a second run would clobber
+          # the `disarm_note` already embedded in the refusal comment.
+          revoke_done=0
+          trap 'rc=$?; if [ "$rc" -ne 0 ] && [ "$revoke_done" -eq 0 ]; then revoke_any_arming || true; fi; exit $rc' EXIT
           # Allowed corpus: specs, docs, skills markdown (.md ONLY), approval records, top-level markdown.
           allowed='^(specs/|docs/|skills/.*\.md$|\.minspec/approvals/|[^/]+\.md$)'
           # OUTWARD-FACING DENYLIST (#1001), applied ON TOP of the corpus above.
