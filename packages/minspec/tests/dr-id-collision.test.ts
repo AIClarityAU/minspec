@@ -45,6 +45,9 @@ import {
   checkDeclaredDrIds,
   claimedPathsFromPrFiles,
   decideDrIdCollision,
+  frontmatterField,
+  modifiedDecisionPaths,
+  decideDrRepurposing,
   type DrFile,
   type PrFileEntry,
 } from '../../../scripts/lib/dr-id-collision';
@@ -624,5 +627,246 @@ describe('the cross-PR half is wired into CI', () => {
     // on such a PR instead, which is why it must run unconditionally.
     const onBlock = yaml.slice(yaml.indexOf('on:'), yaml.indexOf('permissions:'));
     expect(onBlock).not.toMatch(/^\s*paths(-ignore)?:/m);
+  });
+});
+
+// ─── C. In-place repurposing (#1757) ─────────────────────────────────────────
+
+/**
+ * The shape half B structurally cannot see. PR #1756 wrote an entirely different
+ * decision over the existing `docs/decisions/DR-088.md` — `title:`, `triggered_by:`
+ * and the heading all swapped — while the original DR-088 was merged an hour earlier
+ * and `status: proposed`, i.e. in force. Both this gate and the required `DR id
+ * uniqueness` check passed it; the ai-review panel caught it.
+ *
+ * Half B filters on the paths a PR INTRODUCES, and `modified` is excluded there for
+ * a good reason: a file that exists on both sides claims no number. The exclusion is
+ * right for collisions and blind to replacement, so this is a separate decision over
+ * a separate input, not a loosening of the first.
+ *
+ * Consequences differ, which is why both must exist: a claim collision yields a
+ * DUPLICATE (noisy, fixed by renumbering); repurposing yields a DELETION (silent,
+ * recoverable only from history).
+ */
+
+/** A decision file with an explicit provenance line, as the register writes them. */
+function drWith(id: string, title: string, triggeredBy: string, body = 'A decision.'): string {
+  return `---\nid: ${id}\nstatus: proposed\ndate: 2026-08-05\ntitle: ${title}\ntriggered_by: ${triggeredBy}\n---\n\n# ${id}: ${title}\n\n${body}\n`;
+}
+
+describe('C — frontmatterField: only the leading block, only a real declaration', () => {
+  it('reads a field from the leading frontmatter block', () => {
+    expect(frontmatterField(drWith('DR-088', 'Ownership leaves the hash', '#1481'), 'title')).toBe(
+      'Ownership leaves the hash',
+    );
+    expect(frontmatterField(drWith('DR-088', 'T', '#1481'), 'triggered_by')).toBe('#1481');
+  });
+
+  it('ignores a body line that merely looks like a declaration', () => {
+    // The reason this reads the leading block rather than grepping: a DR whose prose
+    // quotes `title: something else` must not be read as declaring it.
+    const content = `---\nid: DR-088\ntitle: Real\n---\n\ntitle: Not a declaration\n`;
+    expect(frontmatterField(content, 'title')).toBe('Real');
+  });
+
+  it('treats an empty value and an absent field alike — both are "not declared"', () => {
+    expect(frontmatterField(`---\nid: DR-088\ntitle:\n---\n`, 'title')).toBeUndefined();
+    expect(frontmatterField(`---\nid: DR-088\n---\n`, 'title')).toBeUndefined();
+  });
+
+  it('returns undefined when there is no frontmatter at all (pre-MinSpec records)', () => {
+    expect(frontmatterField('# DR-001\n\nAn old decision.\n', 'title')).toBeUndefined();
+  });
+});
+
+describe('C — modifiedDecisionPaths: the exact complement of what half B claims', () => {
+  const entries: PrFileEntry[] = [
+    { filename: 'docs/decisions/DR-088.md', status: 'modified' },
+    { filename: 'docs/decisions/DR-090.md', status: 'added' },
+    { filename: 'docs/decisions/INDEX.md', status: 'modified' },
+    { filename: 'docs/decisions/DR-091.md', status: 'removed' },
+    { filename: 'scripts/foo.ts', status: 'modified' },
+    { filename: 'specs/minspec/SPEC-001/spec.md', status: 'modified' },
+  ];
+
+  it('takes modified decision records and nothing else', () => {
+    expect(modifiedDecisionPaths(entries, DIR)).toEqual(['docs/decisions/DR-088.md']);
+  });
+
+  it('never overlaps with the paths half B treats as claims', () => {
+    // The two halves must partition the decision files a PR touches. An overlap would
+    // double-report one fact; a gap is how #1757 happened in the first place.
+    const claimed = claimedPathsFromPrFiles(entries, DIR);
+    const modified = modifiedDecisionPaths(entries, DIR);
+    expect(claimed.filter((p) => modified.includes(p))).toEqual([]);
+  });
+
+  it('ignores a removed record — deleting a DR is visible in the diff, not silent', () => {
+    expect(modifiedDecisionPaths(entries, DIR)).not.toContain('docs/decisions/DR-091.md');
+  });
+});
+
+describe('C — decideDrRepurposing: an amendment may change what a record SAYS, not what it IS', () => {
+  const base = drWith('DR-088', 'Ownership leaves the hash', '#1481');
+
+  it('passes a body-only edit — that is what an amendment is', () => {
+    const head = drWith('DR-088', 'Ownership leaves the hash', '#1481', 'Amended 2026-09-18.');
+    const v = decideDrRepurposing([{ file: 'docs/decisions/DR-088.md', base, head }]);
+    expect(v.ok).toBe(true);
+    expect(v.findings).toEqual([]);
+  });
+
+  it('passes a status change — a decision moving proposed → accepted is the point', () => {
+    const head = base.replace('status: proposed', 'status: accepted');
+    expect(decideDrRepurposing([{ file: 'docs/decisions/DR-088.md', base, head }]).ok).toBe(true);
+  });
+
+  it('FAILS the #1756 shape and quotes both sides of every swapped field', () => {
+    const head = drWith('DR-088', 'The harness manifest records authorship, not disk', '#1697');
+    const v = decideDrRepurposing([{ file: 'docs/decisions/DR-088.md', base, head }]);
+    expect(v.ok).toBe(false);
+    expect(v.findings.map((f) => f.field)).toEqual(['title', 'triggered_by']);
+    // Quoting both sides IS the diagnostic: the reviewer's question is "is the record
+    // under this number still the same decision?", and only before-and-after answers it.
+    expect(v.message).toContain('Ownership leaves the hash');
+    expect(v.message).toContain('The harness manifest records authorship, not disk');
+    expect(v.message).toContain('#1481');
+    expect(v.message).toContain('#1697');
+  });
+
+  it('FAILS when an identity field is REMOVED, not merely changed', () => {
+    const head = `---\nid: DR-088\nstatus: proposed\n---\n\n# Something else\n`;
+    const v = decideDrRepurposing([{ file: 'docs/decisions/DR-088.md', base, head }]);
+    expect(v.ok).toBe(false);
+    expect(v.findings.map((f) => f.field)).toEqual(['title', 'triggered_by']);
+    expect(v.message).toContain('(removed)');
+  });
+
+  it('PASSES adding a field that was absent on base — a pre-MinSpec record being upgraded', () => {
+    // The register holds decisions written before frontmatter existed. Adding `title:`
+    // to one is a migration, not a replacement; blocking it would gate the very
+    // cleanup the register wants.
+    const old = '# DR-001\n\nAn old decision, no frontmatter.\n';
+    const head = drWith('DR-001', 'An old decision', '#3');
+    expect(decideDrRepurposing([{ file: 'docs/decisions/DR-001.md', base: old, head }]).ok).toBe(true);
+  });
+
+  it('passes an empty input, and says so rather than staying silent', () => {
+    const v = decideDrRepurposing([]);
+    expect(v.ok).toBe(true);
+    expect(v.message).toMatch(/no existing decision record/i);
+  });
+
+  it('is deterministic: findings sort by file, then by identity-field order', () => {
+    const revisions = [
+      { file: 'docs/decisions/DR-090.md', base: drWith('DR-090', 'B', '#2'), head: drWith('DR-090', 'B2', '#22') },
+      { file: 'docs/decisions/DR-088.md', base, head: drWith('DR-088', 'A2', '#11') },
+    ];
+    const once = decideDrRepurposing(revisions);
+    const twice = decideDrRepurposing([...revisions].reverse());
+    expect(once.findings).toEqual(twice.findings);
+    expect(once.findings.map((f) => `${f.file}:${f.field}`)).toEqual([
+      'docs/decisions/DR-088.md:title',
+      'docs/decisions/DR-088.md:triggered_by',
+      'docs/decisions/DR-090.md:title',
+      'docs/decisions/DR-090.md:triggered_by',
+    ]);
+  });
+});
+
+describe('C — check-dr-id-collision.ts reports repurposing end-to-end (stub gh)', () => {
+  /** Same seam as block B: `DR_ID_GH_BIN` pins a stub, so no test reaches GitHub. */
+  function runCli(args: string[], script: string): { status: number; out: string } {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dr-rep-cli-'));
+    const bin = path.join(tmp, 'gh');
+    fs.writeFileSync(bin, script, { mode: 0o755 });
+    try {
+      const out = execFileSync('npx', ['tsx', CLI, ...args], {
+        cwd: REPO_ROOT,
+        encoding: 'utf-8',
+        env: { ...process.env, DR_ID_GH_BIN: bin, GITHUB_ACTIONS: '' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      return { status: 0, out };
+    } catch (e) {
+      const err = e as { status?: number; stdout?: string; stderr?: string };
+      return { status: err.status ?? 1, out: `${err.stdout ?? ''}${err.stderr ?? ''}` };
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  }
+
+  const ARGS = ['--repo', 'AIClarityAU/minspec', '--pr', '1756', '--base', 'main'];
+  const HEAD_SHA = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
+
+  /** GitHub wraps `content` at 60 chars; the reader must tolerate that AND a flat string. */
+  const b64 = (text: string, wrap = false): string => {
+    const raw = Buffer.from(text, 'utf-8').toString('base64');
+    return wrap ? (raw.match(/.{1,60}/g) ?? []).join('\n') : raw;
+  };
+
+  const stub = (baseContent: string | null, headContent: string | null): string => `#!/bin/sh
+argv="$*"
+case "$argv" in
+  *".head.sha"*)                     echo '${HEAD_SHA}' ;;
+  *"DR-088.md?ref=main"*)            ${baseContent === null ? "echo 'null'" : `printf '%s\\n' '${b64(baseContent, true)}'`} ;;
+  *"DR-088.md?ref=${HEAD_SHA}"*)     ${headContent === null ? "echo 'null'" : `printf '%s\\n' '${b64(headContent)}'`} ;;
+  *"pulls/1756/files"*)              echo '[[{"filename":"docs/decisions/DR-088.md","status":"modified"}]]' ;;
+  *"contents/docs/decisions?ref="*)  echo '[[{"path":"docs/decisions/DR-088.md","type":"file"}]]' ;;
+  *"pr list"*)                       echo '[{"number":1756}]' ;;
+  *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
+esac
+`;
+
+  it('FAILS the #1756 shape: a different decision written over an in-force record', () => {
+    const r = runCli(
+      ARGS,
+      stub(
+        drWith('DR-088', 'Ownership leaves the hash', '#1481'),
+        drWith('DR-088', 'The harness manifest records authorship, not disk', '#1697'),
+      ),
+    );
+    expect(r.status).not.toBe(0);
+    expect(r.out).toContain('Ownership leaves the hash');
+    expect(r.out).toContain('The harness manifest records authorship, not disk');
+    // The id half must still PASS here — the PR claims no number. If this ever reads
+    // as a collision, the two halves have started answering the same question.
+    expect(r.out).toMatch(/adds no decision record|is free|are free/);
+  });
+
+  it('PASSES a body-only amendment to the same record', () => {
+    const r = runCli(
+      ARGS,
+      stub(
+        drWith('DR-088', 'Ownership leaves the hash', '#1481'),
+        drWith('DR-088', 'Ownership leaves the hash', '#1481', 'Amended 2026-09-18: still in force.'),
+      ),
+    );
+    expect(r.status).toBe(0);
+    expect(r.out).toMatch(/no existing decision record has its identity changed/i);
+  });
+
+  it('fails closed when a record comes back with no readable content', () => {
+    // GitHub returns an empty/absent `content` for a file it declines to inline. That
+    // is indistinguishable from an empty record, and reading either as "declares no
+    // identity" would turn the check green over the exact state it rejects (DR-066).
+    const r = runCli(ARGS, stub(null, drWith('DR-088', 'Anything', '#1')));
+    expect(r.status).not.toBe(0);
+    expect(r.out).toMatch(/FAILED CLOSED/);
+  });
+
+  it('makes no content call at all on a PR that modifies no decision record', () => {
+    // The cost guard. The stub exits 1 on any unanticipated call, so if the CLI
+    // reached for a head sha or a file body here, this would go red.
+    const script = `#!/bin/sh
+argv="$*"
+case "$argv" in
+  *"pulls/1756/files"*)              echo '[[{"filename":"scripts/foo.ts","status":"modified"},{"filename":"docs/decisions/INDEX.md","status":"modified"}]]' ;;
+  *"contents/docs/decisions?ref="*)  echo '[[{"path":"docs/decisions/DR-088.md","type":"file"}]]' ;;
+  *"pr list"*)                       echo '[{"number":1756}]' ;;
+  *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
+esac
+`;
+    expect(runCli(ARGS, script).status).toBe(0);
   });
 });
