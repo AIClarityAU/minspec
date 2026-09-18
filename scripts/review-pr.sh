@@ -203,7 +203,7 @@ rm -f "$REVIEW_PROMPT_FILE" "$REVIEW_ERR_FILE"
 # Unusable output renders nothing, and review-decide.sh fails that closed to changes.
 VERDICT_BLOCK="$(GUARD="$GUARD" node -e 'const g=require(process.env.GUARD);let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(g.parseCliVerdict(s)));' <<<"$AGENT_OUT" 2>/dev/null || true)"
 
-GATE_LABEL=$(printf '%s\n' "$VERDICT_BLOCK" | "$DECIDE" || true)
+GATE_LABEL=$(printf '%s\n' "$VERDICT_BLOCK" | "$DECIDE" || true)  # swallow-ok: the next line rejects anything that is not one of the two known labels and fails closed to ai-review:changes, with a warning
 if [[ "$GATE_LABEL" != "ai-review:pass" && "$GATE_LABEL" != "ai-review:changes" ]]; then
   echo "WARNING: no clean verdict parsed for #$PR — fail closed to ai-review:changes" >&2
   GATE_LABEL="ai-review:changes"

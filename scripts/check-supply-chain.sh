@@ -184,7 +184,7 @@ prune_keep_latest "$SUPPLY_CHAIN_KEEP" "$OUT_DIR"/*.ndjson || true
 prune_bumblebee_cache "$BUMBLEBEE_CACHE" "$SUPPLY_CHAIN_KEEP" || true
 
 if [ -n "$CATALOG_FLAG" ]; then
-  FINDINGS=$(grep -c '"record_type":"finding"' "$OUT_FILE" 2>/dev/null || true)
+  FINDINGS=$(grep -c '"record_type":"finding"' "$OUT_FILE" 2>/dev/null || true)  # swallow-known: #1978 a missing scan output reads as zero findings
   FINDINGS=${FINDINGS:-0}
   if [ "$FINDINGS" -gt 0 ] 2>/dev/null; then
     echo "" >&2

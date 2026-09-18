@@ -85,7 +85,7 @@ detect_type() {
   t=$(printf '%s\n' "$CONTENT" | sed -n '/^---[[:space:]]*$/,/^---[[:space:]]*$/p' \
         | grep -iE '^type:[[:space:]]*' | head -1 \
         | sed -E 's/^[Tt][Yy][Pp][Ee]:[[:space:]]*//' | tr -d '\r' \
-        | tr '[:upper:]' '[:lower:]' | sed -E 's/[[:space:]]+$//' || true)
+        | tr '[:upper:]' '[:lower:]' | sed -E 's/[[:space:]]+$//' || true)  # swallow-ok: grep exits 1 when the frontmatter declares no type:, a legitimate empty; the case below has a default arm
   case "$t" in
     requirements) echo "Spec (requirements)"; return ;;
     plan)         echo "Plan"; return ;;

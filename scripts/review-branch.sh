@@ -303,7 +303,7 @@ is_quota_strict() {
 # trimmed claude limit/reset lines for the PR comment.
 emit_unavailable() {
   local detail
-  detail=$(printf '%s\n' "${1:-}" | tr -d '\r' | grep -iE 'limit|quota|reset|try again|429|overload' | head -3 | sed 's/^/  /' || true)
+  detail=$(printf '%s\n' "${1:-}" | tr -d '\r' | grep -iE 'limit|quota|reset|try again|429|overload' | head -3 | sed 's/^/  /' || true)  # swallow-ok: grep exits 1 when the output contains no quota keywords, which is the answer this asks for
 
   # #1630 — when NOTHING was captured, `reason: quota` is an INFERENCE, not an
   # observation, and the old wording ("likely subscription session quota") admitted as

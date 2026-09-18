@@ -582,7 +582,7 @@ dispatch_alive_for() {
 reconcile_stale_claims() {
   local running n applied age
   running=$(gh issue list --repo "$REPO" --state open --label "agent-running" \
-    --json number --jq '.[].number' 2>/dev/null || true)
+    --json number --jq '.[].number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no agent-running issues
   [[ -n "$running" ]] || return 0
 
   while read -r n; do
@@ -614,13 +614,13 @@ reconcile_stale_claims() {
 reconcile_done_issues() {
   local done_issues n pr
   done_issues=$(gh issue list --repo "$REPO" --state open --label "agent-done" \
-    --json number --jq '.[].number' 2>/dev/null || true)
+    --json number --jq '.[].number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no agent-done issues
   [[ -n "$done_issues" ]] || return 0
 
   while read -r n; do
     [[ -n "$n" ]] || continue
     pr=$(gh pr list --repo "$REPO" --state merged --head "agent/issue-${n}" \
-      --json number --jq '.[0].number // empty' 2>/dev/null || true)
+      --json number --jq '.[0].number // empty' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no merged PR for this issue
     if [[ -n "$pr" ]]; then
       echo "[drain] reconcile: closing #$n — its work merged in #$pr but nothing ever closed it (#1322)."
       gh issue close "$n" --repo "$REPO" \
@@ -676,7 +676,7 @@ run_cycle() {
 
   # Step 1: triage inbox issues → labels T1/T2 as agent-ready
   inbox_issues=$(gh issue list --repo "$REPO" --label "inbox" \
-    --json number --jq '.[].number' 2>/dev/null || true)
+    --json number --jq '.[].number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as an empty inbox
   if [[ -n "$inbox_issues" ]]; then
     echo "[drain] triaging $(echo "$inbox_issues" | wc -l | tr -d ' ') inbox issue(s)..."
     for n in $inbox_issues; do
@@ -701,7 +701,7 @@ run_cycle() {
       gh issue list --repo "$REPO" --label "agent-ready-specify" \
         --json number --jq '.[].number' 2>/dev/null || true
     } | sort -un
-  )
+  )  # swallow-known: #1855 a failed query reads as cycle done, the #1855 defect itself
   if [[ -z "$all_ready" ]]; then
     echo "[drain] no agent-ready / agent-ready-specify issues after triage — cycle done."
     return 0
@@ -855,7 +855,7 @@ run_cycle() {
   if [[ "${MINSPEC_DRAIN_REMEDIATE_PRS:-1}" != "0" ]]; then
     local open_prs pr rcap rout
     open_prs=$(gh pr list --repo "$REPO" --state open --json number,isDraft \
-      --jq '.[] | select(.isDraft==false) | .number' 2>/dev/null || true)
+      --jq '.[] | select(.isDraft==false) | .number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no open PRs to remediate
     if [[ -n "$open_prs" ]]; then
       echo "[drain] sweeping $(echo "$open_prs" | wc -l | tr -d ' ') open PR(s) for fixable problems..."
       for pr in $open_prs; do
@@ -864,7 +864,7 @@ run_cycle() {
         # + classify; a quota hit pauses the whole cycle (loop backs off).
         rcap=$(mktemp)
         "$REMEDIATE" "$pr" 2>&1 | tee "$rcap" || true
-        rout=$(cat "$rcap" 2>/dev/null || true); rm -f "$rcap"
+        rout=$(cat "$rcap" 2>/dev/null || true); rm -f "$rcap"  # swallow-ok: the capture file is written by this script moments earlier and removed on the same line; absent means the launch produced no output
         if is_quota <<<"$rout"; then
           echo "[drain] Claude usage-limit signal while remediating PR #$pr — pausing this cycle (will back off, not fail)."
           return 42
@@ -884,7 +884,7 @@ run_cycle() {
 # QUOTA_BOOTSTRAP_FILE itself is later lost — re-derived from empty by design.
 _quota_bootstrap_count() {
   local n
-  n=$(cat "$QUOTA_BOOTSTRAP_FILE" 2>/dev/null || true)
+  n=$(cat "$QUOTA_BOOTSTRAP_FILE" 2>/dev/null || true)  # swallow-ok: a missing bootstrap counter is the expected first-run state, and the regex below rejects anything that is not a number
   [[ "$n" =~ ^[0-9]+$ ]] && printf '%s\n' "$n" || printf '0\n'
 }
 
@@ -1378,7 +1378,7 @@ done
 # Count pending work across both stages
 INBOX_COUNT=0
 INBOX_ISSUES=$(gh issue list --repo "$REPO" --label "inbox" \
-  --json number --jq '.[].number' 2>/dev/null || true)
+  --json number --jq '.[].number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as an empty inbox in the status line
 [[ -n "$INBOX_ISSUES" ]] && INBOX_COUNT=$(echo "$INBOX_ISSUES" | wc -l | tr -d ' ')
 
 # Both ready classes (#1169) — same OR-not-AND reason as run_cycle's Step 2. This
@@ -1391,7 +1391,7 @@ READY_ISSUES=$(
     gh issue list --repo "$REPO" --label "agent-ready-specify" \
       --json number --jq '.[].number' 2>/dev/null || true
   } | sort -un
-)
+)  # swallow-known: #1855 a failed query reads as nothing ready in the status line
 READY_COUNT=0
 [[ -n "$READY_ISSUES" ]] && READY_COUNT=$(echo "$READY_ISSUES" | wc -l | tr -d ' ')
 
