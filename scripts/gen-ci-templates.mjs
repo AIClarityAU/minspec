@@ -57,6 +57,12 @@ const SOURCES = [
     stripShebang: false,
   },
   {
+    constName: 'SECRET_SCAN_WORKFLOW',
+    srcPath: '.github/workflows/secret-scan.yml',
+    doc: 'Verbatim body of `.github/workflows/secret-scan.yml`.',
+    stripShebang: false,
+  },
+  {
     constName: 'DOCS_LANE_WORKFLOW',
     srcPath: '.github/workflows/docs-lane.yml',
     doc: 'Verbatim body of `.github/workflows/docs-lane.yml`.',
