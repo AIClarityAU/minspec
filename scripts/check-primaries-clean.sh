@@ -139,7 +139,7 @@ for repo in "${REPOS[@]}"; do
     continue
   fi
 
-  db="$(git -C "$repo" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)"  # swallow-ok: an empty default-branch name makes every branch compare unequal, which over-reports rather than under-reports
+  db="$(git -C "$repo" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)"  # swallow-ok: the next line defaults empty to main via ${db:-main}, so a failed lookup and an unset origin/HEAD land on the same correct default
   db="${db:-main}"
   origin_ref="origin/$db"
 

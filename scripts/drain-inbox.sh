@@ -375,7 +375,7 @@ sync_shared_checkouts() {
   local db origin_ref root head_sha origin_sha base
   # `|| true` inside the substitution: under `set -euo pipefail` an unset origin/HEAD
   # makes symbolic-ref exit 128, which would otherwise abort the whole drain.
-  db="$(git -C "$PRIMARY_ROOT" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)"  # swallow-ok: an empty default-branch name skips the repo via continue, which is the conservative direction
+  db="$(git -C "$PRIMARY_ROOT" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)"  # swallow-ok: the next line defaults empty to main via ${db:-main}, so a failed lookup and an unset origin/HEAD land on the same correct default
   db="${db:-main}"                                   # origin/HEAD often unset locally → main
   origin_ref="origin/${db}"
   # GIT_TERMINAL_PROMPT=0: this loop is disowned/background — a checkout without

@@ -95,8 +95,18 @@ export interface SwallowedSignal {
 const ASSIGN =
   /^\s*(?:local\s+|declare\s+(?:-\w+\s+)?|readonly\s+|export\s+)?([A-Za-z_][A-Za-z0-9_]*)=(?:"\s*)?\$\(/;
 
-/** `|| true` / `|| :` — the swallow itself. `: ` is bash's no-op builtin. */
-const SWALLOW = /\|\|\s*(?:true|:)(?:\s|$|\))/;
+/**
+ * `|| true` / `|| :` — the swallow itself. `:` is bash's no-op builtin.
+ *
+ * The trailing boundary must admit `;` and `&` as well as whitespace, end-of-line and
+ * `)`. `{ cmd || true; }` inside a capture is a common idiom — 12 occurrences under
+ * `scripts/` — and requiring whitespace-or-paren made every one invisible. That is the
+ * THIRD boundary bug of this exact shape on this lint: first the unquoted-only `=$(`,
+ * then physical-line scanning, now this. Each one reported "clause 1: clean" over a
+ * whole idiom, which is the failure mode that makes a lint worse than none. Pinned by
+ * INV-7 on the real gh-bot.sh.
+ */
+const SWALLOW = /\|\|\s*(?:true|:)(?:[\s;&)]|$)/;
 
 /** Reviewed and correct. The reason after the colon is required. */
 const OK = /#\s*swallow-ok:\s*\S/;

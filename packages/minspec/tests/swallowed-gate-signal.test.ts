@@ -94,6 +94,31 @@ describe('INV-5: the quoted capture idiom is seen', () => {
   });
 });
 
+describe('INV-7: the command-separator form is seen', () => {
+  // Third boundary bug of the same shape on this lint. SWALLOW required whitespace,
+  // end-of-line or `)` after `true`, so `{ cmd || true; }` — 12 occurrences under
+  // scripts/ — was invisible. Each of these reported "clause 1: clean" over a whole
+  // idiom, which is what makes a blind spot worse than no lint at all.
+  it.each([';', '&'])('flags a swallow terminated by %s', (sep) => {
+    const findings = find(
+      `n="$(printf x | { grep y || true${sep} } | head -1)"\nif [[ -z "$n" ]]; then :; fi`,
+    );
+    expect(findings).toHaveLength(1);
+    expect(findings[0].variable).toBe('n');
+  });
+
+  it('sees gh-bot.sh login, whose swallow is terminated by a semicolon', () => {
+    const source = readFileSync(join(REPO, 'scripts/lib/gh-bot.sh'), 'utf8').replace(
+      /#\s*swallow-(ok|known):.*$/gm,
+      '',
+    );
+    const found = findSwallowedGateSignals('scripts/lib/gh-bot.sh', source).find(
+      (f) => f.variable === 'login',
+    );
+    expect(found, 'the command-separator blind spot has reopened').toBeDefined();
+  });
+});
+
 describe('INV-6: a conditional spanning lines still counts as deciding', () => {
   // `if VERDICT=$(check \n "$CAPTURED")` puts the keyword and the variable read on
   // different physical lines. Scanning one line at a time missed it.
