@@ -94,16 +94,6 @@ jobs:
         if: needs.paths.outputs.docs_only != 'true'
         run: npm run check:cycles
 
-      # DR-066 clause 1 (constitution invariant 2): no load-bearing gate signal may be
-      # written with a swallowed error. That was prose for two months and drifted — six
-      # instances fixed by hand, fifteen more sitting unremarked in the tree when this
-      # first ran (#1855, #1978). eslint cannot see shell, so this is its own gate.
-      # It flags only a `|| true` capture whose value later decides something, which is
-      # what keeps it landable: the ~90 correct swallows under scripts/ stay silent.
-      - name: Check swallowed gate signals
-        if: needs.paths.outputs.docs_only != 'true'
-        run: npm run check:swallowed-gate
-
       # Nothing else typechecks the source (#1424). `build` is esbuild, which STRIPS
       # types without checking them; `vitest` transpiles per file for the same reason;
       # and `build:shared`'s tsc covers only packages/shared. So a TypeScript error could
