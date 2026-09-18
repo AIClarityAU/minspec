@@ -286,7 +286,7 @@ export function validateDrAmendments(decisionsDir: string): DrAmendmentGap[] {
   const seen = new Set<string>();
 
   for (const [source, body] of [...bodies].sort(([a], [b]) => a.localeCompare(b))) {
-    if (!/^status:\s*accepted\s*$/m.test(body)) continue;
+    if (!/^status:[ \t]*accepted[ \t]*$/m.test(body)) continue;
 
     /**
      * Record one claim, wherever it was written. Prose and frontmatter both funnel

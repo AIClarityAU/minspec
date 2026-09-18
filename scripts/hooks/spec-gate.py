@@ -110,7 +110,27 @@ def deny(reason):
 
 
 def fm_value(text, key):
-    m = re.search(r'^' + re.escape(key) + r':\s*(.+?)\s*$', text, re.M)
+    """Inline scalar value of a frontmatter `key:`, or None when it has none.
+
+    The horizontal-whitespace classes are LOAD-BEARING and must not be relaxed back
+    to `\\s`. `\\s` matches newlines, so on a BLOCK-form key -
+
+        implements:
+          - packages/a.ts
+
+    - `\\s*(.+?)` consumed the line break plus the indentation and returned the first
+    LIST ITEM (`- packages/a.ts`) as if it were an inline value. `fm_list` tests this
+    result first, so it took the inline branch, tokenized `['-', 'packages/a.ts']`,
+    and its correct block-form branch below was unreachable dead code. Every path
+    after the first was silently dropped from the owned set - the gate freeze, and
+    the same for `affects:` (#1961).
+
+    `[ \\t]*` keeps the match on one line, so a block-form key returns None here and
+    falls through to the block branch. The other callers (`id`, `tier`, `status`) read
+    genuine inline scalars and were latently exposed to the same newline-crossing read
+    whenever their value was empty.
+    """
+    m = re.search(r'^' + re.escape(key) + r':[ \t]*(.+?)[ \t]*$', text, re.M)
     return m.group(1).strip() if m else None
 
 
