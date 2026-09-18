@@ -11,7 +11,8 @@
  *     against wiring;
  *   - a per-SHA cache written without a trailing newline let one commit's rows be
  *     appended to the previous commit's last row, so `sort -u` merged two records
- *     and the parser read the wrong fields;
+ *     and the parser read the wrong fields (that path is outside this block's
+ *     markers: see review-churn-cache.test.ts, which is the test that catches it);
  *   - the per-PR commits fetch recorded no APIFAIL sentinel, so a failed fetch
  *     dropped a whole PR while the "refusing to report a partial dataset" guard
  *     stayed silent.
@@ -144,10 +145,13 @@ describe('churn counting loop', () => {
     expect(c.skippable).toBe(0);
   });
 
-  it('does not merge two records when rows arrive back to back', () => {
-    // The cache-newline defect: a missing trailing newline let one commit's rows be
-    // appended to the previous row, so two records became one and the parser read the
-    // wrong fields. Three distinct records must stay three.
+  it('keeps three distinct records distinct', () => {
+    // NOT a guard against the cache-newline defect, despite an earlier comment here
+    // claiming so. That defect lives in the fetch/cache emit path, OUTSIDE the
+    // `# >>> churn-count` block this test executes, and reverting the cache fix leaves
+    // every case in this file green - measured. review-churn-cache.test.ts covers it,
+    // and goes red on that same mutant. What this case actually asserts is narrower:
+    // the counting loop attributes each field of each row to the right counter.
     const c = count([
       row('success', FP_A, '2026-09-12T01:00:00Z'),
       row('neutral', FP_B, '2026-09-12T02:00:00Z'),

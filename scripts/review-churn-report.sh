@@ -29,7 +29,12 @@
 #  5. Effective sample is PRs, not runs. Repeats cluster hard inside one PR, so N runs
 #     are not N independent observations. Both are printed.
 #
-# KNOWN REMAINING BIAS, unfixable from this endpoint: history comes from
+# KNOWN REMAINING BIAS 2: rows are de-duplicated with `sort -u` on the full
+# (timestamp, conclusion, slug, fingerprint) tuple, so two genuinely distinct runs that
+# coincide on all four fields collapse into one. That deletes a repeat, so it biases
+# DOWN, consistent with the floor-not-ceiling framing above.
+#
+# KNOWN REMAINING BIAS 1, unfixable from this endpoint: history comes from
 # pulls/{n}/commits, which lists only CURRENTLY REACHABLE commits, so a force-push
 # erases the check-runs that preceded it. That deletes repeats: it biases DOWN.
 #
@@ -97,6 +102,7 @@ while IFS=$'\t' read -r pr title; do
   rows="$(
     printf '%s\n' "$shas" |
     while read -r sha; do
+      # >>> sha-emit (executed verbatim by review-churn-cache.test.ts)
       [[ -z "$sha" ]] && continue
       # ONE emit path for both cache-hit and fresh, so the two cannot disagree about
       # trailing newlines. They previously did: the cache was written with `printf
@@ -123,6 +129,7 @@ while IFS=$'\t' read -r pr title; do
         fi
       fi
       cat "$cached"
+      # <<< sha-emit
     done | sort -u
   )"
   [[ -z "$rows" ]] && continue
@@ -164,7 +171,17 @@ done <<< "$prs"
 # grep -c PRINTS "0" and EXITS 1 when it matches nothing, so `|| echo 0` appends a
 # second line and the arithmetic below dies on "0\n0". Let the `||` supply only the
 # exit status, never more output.
-apifails="$(grep -c APIFAIL "$ERRS" 2>/dev/null || true)"
+# grep -c PRINTS "0" and EXITS 1 when it matches nothing, so `|| echo 0` would append
+# a second line and the arithmetic below would die on "0\n0". But `|| true` alone
+# would also swallow a REAL grep failure (exit >= 2, e.g. unreadable file) on a count
+# that gates the refusal, so separate the two: exit 1 is the legitimate no-match case,
+# anything above it is an error and must not be read as zero failures.
+apifails="$(grep -c APIFAIL "$ERRS" 2>/dev/null)"; grc=$?
+if (( grc > 1 )); then
+  echo "ERROR: could not read the failure log ($ERRS, grep exit $grc)." >&2
+  echo "Refusing to report: the partial-dataset guard cannot be evaluated." >&2
+  exit 1
+fi
 apifails="${apifails:-0}"
 
 echo "ai-review runs seen:               $tot   across $prs_seen PRs"
