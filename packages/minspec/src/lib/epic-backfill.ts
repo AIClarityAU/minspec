@@ -238,7 +238,10 @@ function collectSpecs(rootDir: string): ArtifactRef[] {
         // product container itself (e.g. specs/minspec/ holds the core specs but
         // "minspec" is the product, not an epic). Skip when folder == product.
         const folder = path.basename(path.dirname(full));
-        const product = (content.match(/^---\n[\s\S]*?\n---/)?.[0].match(/^product\s*:\s*(.+)$/m)?.[1] ?? '').trim();
+        // `[ \t]*`, NOT `\s*` — the fifth copy of the #1961 idiom. `\s` matches
+        // newlines, so a valueless `product:` captured the NEXT line ("epic: EPIC-002")
+        // and this spec was attributed to the wrong product.
+        const product = (content.match(/^---\n[\s\S]*?\n---/)?.[0].match(/^product[ \t]*:[ \t]*(.+)$/m)?.[1] ?? '').trim();
         // A folder NAMED AFTER the spec it holds (specs/minspec/SPEC-019-execution-
         // substrate/requirements.md) is that spec's own directory, not a feature
         // grouping. Seeding an epic from it produces one epic per spec — the exact

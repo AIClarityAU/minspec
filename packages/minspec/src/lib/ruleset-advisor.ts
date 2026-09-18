@@ -590,7 +590,9 @@ export function githubReason(haystack: string): string | null {
   // `gh api` prints `{"message":"…"}` on stdout and a `gh: …` line on stderr.
   const json = /"message"\s*:\s*"([^"]+)"/.exec(haystack);
   if (json) return json[1];
-  const ghLine = /^gh:\s*(.+?)\s*(?:\(HTTP \d+\))?$/m.exec(haystack);
+  // `[ \t]*` not `\s*` — #1961. Not frontmatter, same intent: THIS line. With `\s*`
+  // a bare `gh:` line spliced the following line into the quoted error.
+  const ghLine = /^gh:[ \t]*(.+?)\s*(?:\(HTTP \d+\))?$/m.exec(haystack);
   if (ghLine) return ghLine[1];
   return null;
 }

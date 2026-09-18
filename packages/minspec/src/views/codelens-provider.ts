@@ -133,7 +133,7 @@ export class MinSpecSpecFileLensProvider implements vscode.CodeLensProvider {
 
     // Extract spec ID from frontmatter
     const text = document.getText();
-    const idMatch = text.match(/^id:\s*(SPEC-\d+)/m);
+    const idMatch = text.match(/^id:[ \t]*(SPEC-\d+)/m);
     if (!idMatch) return [];
     const specId = idMatch[1];
 
