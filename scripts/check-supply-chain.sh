@@ -124,7 +124,7 @@ resolve_go_bin() {
 if [ ! -x "$BUMBLEBEE_BIN" ]; then
   # Not `if ! GO_RESOLVED=$(...)` — under `set -e` that form is fine, but keeping the
   # assignment separate makes the failure branch explicit and the exit code readable.
-  GO_RESOLVED="$(resolve_go_bin || true)"
+  GO_RESOLVED="$(resolve_go_bin || true)"  # swallow-ok: the next line branches on empty explicitly and takes the unresolved path
   if [ -z "$GO_RESOLVED" ]; then
     echo "check-supply-chain: no Go toolchain found. Tried, in order:" >&2
     echo "    1. \$GO_BIN                       ${GO_BIN:-(unset)}" >&2
@@ -184,7 +184,7 @@ prune_keep_latest "$SUPPLY_CHAIN_KEEP" "$OUT_DIR"/*.ndjson || true
 prune_bumblebee_cache "$BUMBLEBEE_CACHE" "$SUPPLY_CHAIN_KEEP" || true
 
 if [ -n "$CATALOG_FLAG" ]; then
-  FINDINGS=$(grep -c '"record_type":"finding"' "$OUT_FILE" 2>/dev/null || true)
+  FINDINGS=$(grep -c '"record_type":"finding"' "$OUT_FILE" 2>/dev/null || true)  # swallow-known: #1978 a missing scan output reads as zero findings
   FINDINGS=${FINDINGS:-0}
   if [ "$FINDINGS" -gt 0 ] 2>/dev/null; then
     echo "" >&2

@@ -233,7 +233,7 @@ _gh_bot_ensure() {
     local probe rc login
     probe="$(command gh api user 2>&1)" && rc=0 || rc=$?
     login="$(printf '%s' "$probe" | { command grep -oE '"login"[[:space:]]*:[[:space:]]*"[^"]+"' || true; } \
-             | head -1 | sed -E 's/.*"([^"]+)"$/\1/')"
+             | head -1 | sed -E 's/.*"([^"]+)"$/\1/')"  # swallow-ok: grep exits 1 when the answer carries no login field, which is the case this probe is looking for; the branch below accepts it only alongside a 403
 
     if [[ -z "$login" ]]; then
       # No login in the answer. Only a recognisable "this token has no user"
