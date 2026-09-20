@@ -153,7 +153,7 @@ CONTENT
   RATIONALE=$(printf '%s\n' "$AGENT_OUT" \
     | sed -n '/TRIAGE_VERDICT_BEGIN/,/TRIAGE_VERDICT_END/p' \
     | { grep -iE '^[[:space:]]*rationale[[:space:]]*:' || true; } \
-    | head -1 | sed -E 's/^[^:]*:[[:space:]]*//')
+    | head -1 | sed -E 's/^[^:]*:[[:space:]]*//')  # swallow-ok: grep exits 1 when the agent emitted no rationale line, and the next line substitutes an explicit placeholder
   [[ -z "$RATIONALE" ]] && RATIONALE="(no rationale emitted)"
 
   # Mint the machine-readable verdict record, keyed to the body we just triaged.

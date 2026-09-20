@@ -1,31 +1,39 @@
 /**
- * T0 parity — the TS commit-destination guard and the #1041 pre-commit hook must
- * decide EVERY commit the same way.
+ * T0 parity — the TS commit-destination guard, the #1041 pre-commit hook, AND
+ * the harness-commit-offer guard in `init.ts` must decide EVERY commit the
+ * same way.
  *
- * They are two halves of one rule (#1064). The TS guard runs FIRST, before any
- * `git add`, so the two failure modes are not symmetric:
+ * They are three sides of one rule (#1064, widened by #1132). The two TS
+ * guards run FIRST, before any `git add`, so the failure modes are not
+ * symmetric:
  *
- *   • TS refuses where the hook would allow → a FALSE BLOCK. The user set a
- *     documented opt-out (`MINSPEC_ALLOW_MAIN`, `minspec.allowCommitOnDefaultBranch`)
- *     or is mid-merge, and their approval is refused anyway with no escape —
- *     the hook never gets to say yes. This is the regression the first two
- *     revisions of #1089 shipped.
- *   • TS allows where the hook refuses → the guard is INERT: the commit proceeds,
- *     the hook rejects it, and the result degrades to `'failed'` with files left
- *     staged — the exact stranding #1064 exists to end.
+ *   • a TS guard refuses where the hook would allow → a FALSE BLOCK. The user
+ *     set a documented opt-out (`MINSPEC_ALLOW_MAIN`, `MINSPEC_GATE_OFF`,
+ *     `minspec.allowCommitOnDefaultBranch`) or is mid-merge, and their
+ *     approval/commit is refused anyway with no escape — the hook never gets
+ *     to say yes. This is the regression the first two revisions of #1089
+ *     shipped for `commitApproval`, and exactly what #1132 found `init.ts`'s
+ *     `branchInfo()` still did (it checked none of the four bypasses).
+ *   • `commitApproval`'s guard allows where the hook refuses → the guard is
+ *     INERT: the commit proceeds, the hook rejects it, and the result degrades
+ *     to `'failed'` with files left staged — the exact stranding #1064 exists
+ *     to end.
  *
  * A source-text assertion ("both files contain the string X") cannot catch
  * either: it passes against a guard whose conditions are right and whose LOGIC
- * is wrong. So this drives one scenario table through BOTH implementations
+ * is wrong. So this drives one scenario table through ALL THREE implementations
  * against real temp repositories, and asserts the outcomes agree:
  *
- *     hook blocks  ⟺  commitApproval returns 'protected-branch'
- *     hook allows  ⟺  commitApproval returns 'committed'
+ *     hook blocks  ⟺  commitApproval returns 'protected-branch'  ⟺  init.ts branchInfo() flags current===default
+ *     hook allows  ⟺  commitApproval returns 'committed'         ⟺  init.ts branchInfo() does NOT flag it
  *
- * The second half is what makes the test strong. When the TS guard wrongly
- * allows, the real hook fires during `commitApproval`'s own `git commit` and the
- * outcome is `'failed'`, not `'committed'` — so the divergence is observable
- * without this test needing to know WHICH side is wrong.
+ * The middle column is what makes the test strong for `commitApproval`. When
+ * that guard wrongly allows, the real hook fires during `commitApproval`'s own
+ * `git commit` and the outcome is `'failed'`, not `'committed'` — so the
+ * divergence is observable without this test needing to know WHICH side is
+ * wrong. `branchInfo()` never commits (it is advisory, read before the offer
+ * writes anything), so its column is checked directly against `s.blocked`
+ * rather than through a git-side side effect — see #1132.
  */
 
 import { describe, it, expect, afterEach, vi } from 'vitest';
@@ -37,6 +45,27 @@ import { execFileSync } from 'child_process';
 import { MANAGED_REGION_TEMPLATES, MINSPEC_HOOKS_DIR, renderManagedFile } from '../src/lib/template-registry';
 import { commitApproval, defaultGitRun } from '../src/lib/approve-commit';
 import { useShellTimeout } from './helpers/shell-timeout';
+
+// init.ts is a command module, so it imports vscode at load — mocked the same
+// minimal way `default-committer-real-git.test.ts` does. Only `defaultCommitter`
+// is exercised here, so neither mock needs to do more than let the import
+// resolve; `branchInfo()` itself no longer touches vscode config at all
+// (#1132 — it delegates to `resolveBranchDestination`, which is Tier-0).
+vi.mock('vscode', () => ({
+  window: {
+    showInformationMessage: vi.fn(),
+    showWarningMessage: vi.fn(),
+    showErrorMessage: vi.fn(),
+  },
+  workspace: {
+    getConfiguration: () => ({ get: (_key: string, fallback: unknown) => fallback }),
+  },
+}));
+vi.mock('../src/lib/constitution-nudge', () => ({
+  evaluateConstitution: vi.fn(() => ({ empty: false, message: 'm', fixHint: 'f' })),
+}));
+
+import { defaultCommitter } from '../src/commands/init';
 
 // #1285: spawns real child processes per assertion — 5s default is a load metric,
 // not a hang signal. Enforced by shell-timeout-coverage.test.ts.
@@ -297,6 +326,13 @@ describe('commit-destination guard — parity with the #1041 pre-commit hook', (
     vi.stubEnv('MINSPEC_ALLOW_MAIN', s.env?.MINSPEC_ALLOW_MAIN ?? '');
     applyInProgressState(dir, s);
 
+    // 2b. What does init.ts's `defaultCommitter(...).branchInfo()` say, given
+    //     the identical repo + env state? (#1132 — the third, previously
+    //     unmirrored, copy of this decision). Read-only, so this can run
+    //     before `commitApproval` mutates the tree without disturbing either
+    //     half's own state.
+    const info = await (await defaultCommitter(dir)).branchInfo!();
+
     const approval = path.join(dir, 'approval.txt');
     fs.writeFileSync(approval, 'approved\n');
     const result = await commitApproval(dir, [approval], 'chore(test): approval', defaultGitRun(dir));
@@ -306,12 +342,22 @@ describe('commit-destination guard — parity with the #1041 pre-commit hook', (
       // and let the hook reject it (the stranding this fix ends).
       expect(result.outcome, `TS guard should refuse: ${s.because}`).toBe('protected-branch');
       expect(result.branch?.current).toBeTruthy();
+
+      // init.ts must flag the same destination — a null or current!==default
+      // here is exactly the false-block-with-no-escape #1132 reported: the
+      // harness commit offer diverts to a branch the hook would have allowed.
+      expect(info, `init.ts branchInfo() should also flag: ${s.because}`).not.toBeNull();
+      expect(info!.current, `init.ts branchInfo() should also flag: ${s.because}`).toBe(info!.default);
     } else {
       // The hook allowed it, so the guard must not refuse. Normally that means
       // the commit lands ('committed'); the only sanctioned exception is a case
       // where GIT itself forbids the pathspec commit, declared per-scenario.
       expect(result.outcome, `TS guard should allow: ${s.because}`).toBe(s.tsOutcome ?? 'committed');
       expect(result.outcome, 'a false block — the hook allowed this commit').not.toBe('protected-branch');
+
+      // init.ts must not flag it either — same false-block shape as above.
+      const initFlagged = info !== null && info.current === info.default;
+      expect(initFlagged, `init.ts branchInfo() should NOT flag (false block): ${s.because}`).toBe(false);
     }
   });
 

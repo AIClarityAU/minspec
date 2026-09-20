@@ -5,7 +5,7 @@ status: planning
 tier: T4
 product: minspec
 epic: EPIC-003  # SDD Core Methodology — the spec→code ownership contract (SPEC-038's sibling)
-relates_to: [SPEC-038, SPEC-022, DR-012, DR-034, DR-069, DR-078, DR-051, DR-003]
+relates_to: [SPEC-038, SPEC-022, DR-012, DR-034, DR-069, DR-077, DR-078, DR-088, DR-051, DR-003]
 implements: none
 implements_reason: Plan document. Ownership for the implementation is declared in requirements.md (currently `none` pending this Plan); this file replaces that placeholder with the concrete paths below at Tasks.
 phases:
@@ -27,12 +27,69 @@ phases:
 
 ## Resolved decisions (Clarify)
 
+> **Two of these four were overtaken and are corrected below the table (checked 2026-09-12).**
+> The 2026-08-07 answers are kept verbatim because they were correct when given; what changed
+> is the world, not the reasoning. DQ-1 and DQ-4 both turned on "ownership stays inside the
+> hash", and the founder reversed that on 2026-08-23.
+
 | # | Decision | Chosen |
 |---|---|---|
 | **DQ-1** | What enforces "ownership before approval" | **A + C** — the template solicits `implements:` at Specify/Clarify (C), *and* the approve path refuses a T3/T4 primary spec that still has not declared it (A). Ownership stays **content**, so the hash keeps its re-review property (INV-2). |
 | **DQ-2** | Where the Plan-crossing pre-check lives | **Shared guard.** Every actor that writes `plan → in-progress` calls one function. Fixes the class, not today's actor. |
 | **DQ-3** | Specs already caught in the trap | **(a) + non-blocking surfacing.** Normal human re-approval; never an auto re-approve (FR-5). Plus a detector so trap-staled specs are visible rather than silently stranded. |
 | **DQ-4** | Tier / DR needed | **No new DR.** A+C leaves `canonical.ts` untouched, so DR-034's hash contract is unchanged; only Option B would have required a DR amending it, and it was rejected. *The spec stays **T4*** (as `requirements.md` declares) — DQ-4 asked whether the *hash contract* forced T4 ceremony, and it does not; it did not propose re-tiering the spec. |
+
+### DQ-1 — SUPERSEDED 2026-08-23. Ownership leaves the hash after all.
+
+The table above says ownership stays **content**, and that Option B "was rejected". The founder
+reversed that on 2026-08-23 answering
+[#1481](https://github.com/AIClarityAU/minspec/issues/1481): `implements:`, `affects:` and
+`implements_reason:` come **out** of the canonical approval hash. That is Option B, on exactly
+DQ-1's question. It is recorded and ratified as
+[DR-088](../../../docs/decisions/DR-088.md) — **`status: accepted`**, verified 2026-09-12.
+
+Nothing here relitigates that. What it changes for this design:
+
+- **The A-half survives, the reason for it does not.** The approve-path refusal is still
+  wanted, but it is no longer justified by "the hash keeps its re-review property", because
+  the hash no longer carries ownership. It has to stand on its own: an undeclared spec cannot
+  arm the spec-gate, so the refusal is what makes the declaration happen at all.
+- **§1 is not built.** `grep -c 'implements\|affects' packages/shared/src/canonical.ts` returns
+  **0** (2026-09-12) — the strip is designed, not shipped.
+- **And it must not ship first.** DR-088 rates "§1 lands before §2 is built" **High/High** and
+  records a binding precondition: the `ownedAtApproval` snapshot must be **written and read**
+  before ownership leaves the hash. Otherwise git history can no longer resolve what was
+  approved, because every commit differing only in `implements:` hash-matches. §2 was itself
+  open until **2026-09-05**, when it was decided as: snapshot the owned **set** at approve
+  time and freeze on the **union** of the approved and current sets. That control is tracked
+  as [#1800](https://github.com/AIClarityAU/minspec/issues/1800) and is **unbuilt**.
+
+### DQ-4 — half superseded. The DR exists, and the chain worked.
+
+"No new DR" was right on 2026-08-07 and stopped being right on 2026-08-23: choosing Option B
+crossed the hash contract, approved INV-2 fired exactly as designed, and DR-088 was minted.
+That is the invariant working, not a gap in it.
+
+The tier half is unchanged and was never a live fork — `requirements.md` declares `tier: T4` in
+frontmatter and separately declines to re-tier, on the grounds that re-tiering is itself a
+re-stamp.
+
+## Citation correction — `resolveBranchDestination` is DR-077, not DR-078
+
+`requirements.md` attributes the `resolveBranchDestination` strand-refusal to **DR-078** in
+four places, including INV-3 and Traceability. Measured 2026-09-12:
+`grep -ln resolveBranchDestination docs/decisions/DR-0*.md` returns **only `DR-077.md`**.
+
+- **DR-077** — *"The commit-destination rule has two implementations (a shell pre-commit hook
+  and a TS guard) bound by a behavioral parity test"*. This is the record that owns the
+  mechanism.
+- **DR-078** — *"Standing push consent lives in the project's own gitignored preferences
+  file"*. A different subject entirely.
+
+The **claim** in `requirements.md` is true; only the record number is wrong. It is not
+corrected there because doing so would change the approved bytes and stale a live human
+sign-off for a citation fix — the same asymmetry this file exists to route around. Corrected
+here, and in this file's `relates_to`, so the trail resolves.
 
 ## The ordering constraint that drives the design
 
@@ -112,6 +169,30 @@ enter the build band"**, not on already being in it.
 Both, not either: `approveSpec` gives the early, friendly refusal; `advanceSpecToImplementing`
 makes the *class* safe. A future actor that flips the band without going through approval
 still cannot strand a spec.
+
+> **What actually shipped differs from this design, and one half of it is inert.**
+> Measured 2026-09-12; tracked as
+> [#1806](https://github.com/AIClarityAU/minspec/issues/1806).
+>
+> - **The primary call site was never wired.** `commands/approve.ts` does **not** call the
+>   shared guard. It inlines `violationsIntroducedByApproval` itself, so the actor a human
+>   drives runs a second, independent copy of the refusal rather than the single function
+>   DQ-2 chose. `grep -rn assertOwnershipDeclaredForAdvance packages/minspec/src` returns
+>   exactly two production callers, `lib/approval.ts` and `lib/spec.ts` — neither is the
+>   command.
+> - **The `approveSpec` backstop is inert by ordering.** In `commands/approve.ts`,
+>   `advanceSpecToImplementing` runs **before** `recordApproval`, and it writes
+>   `phases.plan: in-progress` to disk. `violationsIntroducedByApproval` returns the *diff*
+>   an approval would introduce, and `phasesForApproval` is idempotent on an already-advanced
+>   map — so by the time the guard runs the diff is empty. It is reached, it runs, and it
+>   passes. That is worse than not being called, because it emits a green signal.
+> - **The `advanceSpecToImplementing` site is correctly placed** (before any write in that
+>   function), which is why the defect is invisible from the guard's own tests: they exercise
+>   it directly, with pre-advance bytes. Both halves pass; the composition does not.
+>
+> The row above argues this guard "adds no coverage *now*" and is justified by future actors.
+> That was true of the design. As shipped it is the opposite: it is the only correctly-ordered
+> call site, and the one the design called **Primary** is the copy.
 
 ### 3. Template prompt (Option C)
 

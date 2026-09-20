@@ -504,7 +504,7 @@ if [[ "$ACTION" == agent-* ]]; then
   # Budget counters must only ever degrade toward OVER-counting (cap sooner: annoying but
   # safe). UNDER-counting un-bounds the loop, so an unresolved identity falls all the way
   # back to any-author rather than trusting an operator string we cannot corroborate.
-  SELF_LOGIN=$(gh api user --jq '.login' 2>/dev/null || true)
+  SELF_LOGIN=$(gh api user --jq '.login' 2>/dev/null || true)  # swallow-ok: authors_provable is false for empty, which routes to always-post; the unprovable case is already the safe direction and is documented above
   if authors_provable "$SELF_LOGIN"; then
     AUTHOR_ALLOW="${SELF_LOGIN}${MINSPEC_REMEDIATE_AUTHOR_LOGINS:+,${MINSPEC_REMEDIATE_AUTHOR_LOGINS}}"
   else
@@ -595,7 +595,7 @@ if [[ "$ACTION" == "agent-remediate-review" ]]; then
   # Untrusted data (a prompt-injected diff could have steered the reviewer's echo),
   # so it is fenced as data, never instructions.
   FINDINGS=$(gh pr view "$PR" --repo "$REPO" --json comments \
-    --jq '[.comments[] | select(.body | test("ai-review|AI review|REVIEW_VERDICT"))] | last | .body // ""' 2>/dev/null || true)
+    --jq '[.comments[] | select(.body | test("ai-review|AI review|REVIEW_VERDICT"))] | last | .body // ""' 2>/dev/null || true)  # swallow-ok: the next line substitutes an explicit placeholder for empty, so no branch reads the ambiguity
   [[ -z "$FINDINGS" ]] && FINDINGS="(no findings comment found — re-read the diff for correctness/security/simplification issues and address anything the independent reviewer would flag.)"
   CONTEXT=$(printf 'The independent AI reviewer requested changes on this PR. Address the findings below, then ensure the full local gate is green.\n\n<untrusted_review_findings>\n%s\n</untrusted_review_findings>' "$FINDINGS")
 else
