@@ -76,11 +76,25 @@ import { useShellTimeout } from './helpers/shell-timeout';
 //     Adding a spawning case costs ~2s of wall clock; adding a pure one costs ~3ms.
 //
 // The `SHELL_CALL_THRESHOLD = 5` in shell-timeout-coverage.test.ts counts
-// `execFileSync`/`spawnSync` CALL SITES IN SOURCE TEXT, statically — not invocations
-// and not runtime. This file now has exactly 5 (block C's `runCli` added the fifth),
-// so it sits AT the threshold rather than below it, and the coverage test requires the
-// call below rather than merely permitting it. Removing a call site would drop it back
-// under and silently make that requirement inert, which is the shape #1399 already hit.
+// `execFileSync`/`spawnSync`/`execSync` CALL SITES IN SOURCE TEXT, statically — not
+// invocations and not runtime.
+//
+// Counted with that test's OWN regex, `/\b(execFileSync|spawnSync|execSync)\s*\(/g`,
+// this file has 3 — the two pre-existing `execFileSync` calls plus block C's `runCli`.
+// (Line numbers are deliberately not cited: they move with every edit to this comment.)
+// That is
+// BELOW the threshold, so `shell-timeout-coverage.test.ts` SKIPS this file: the
+// `useShellTimeout()` call below is VOLUNTARY, and nothing goes red if someone deletes
+// it. That is precisely why the measurement above is written down rather than assumed —
+// the only thing keeping the raised timeout here is a reader understanding why it is
+// needed, and a 3,689ms case against a 5,000ms default leaves no margin for the
+// scheduling contention that #1285 was filed about.
+//
+// COUNT CALL SITES, NOT LINES MENTIONING THEM. `grep -c 'execFileSync\|spawnSync'`
+// answers 5 on this file, because it also matches the `import` on line 38 and a prose
+// mention in a comment. An earlier revision of this very comment asserted "exactly 5,
+// so it sits AT the threshold" on that basis and was refuted by two reviewers; the trap
+// is using a metric adjacent to the gate's instead of the gate's own.
 useShellTimeout();
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
