@@ -766,21 +766,6 @@ function fmListField(raw: string, key: string): string[] {
   }
   return toks;
 }
-
-/**
- * SPEC-038 / #460 — required `implements:`/`affects:` spec→code ownership.
- *
- * The symmetric rule pair (INV-2 / #137), fired only for a **primary requirements
- * spec that is T3/T4 and past Clarify** (FR-3 / FR-6):
- *  - `ownership.implements.missing` — declares neither a non-empty `implements:`
- *    nor the `implements: none` + `implements_reason:` escape. Severity from
- *    `config.ownershipDeclaration` (default `warn`, FR-7 ratchet).
- *  - `ownership.implements.invalid` — a present `implements:`/`affects:` token is
- *    not a valid owned-code path (always `error`).
- *
- * Path validity mirrors the spec-gate via `isValidOwnedPath` (parity-pinned). This
- * only PRODUCES + VALIDATES the signal the gate already consumes — no gate change (FR-8).
- */
 /**
  * #1955 review — prose parked INSIDE the frontmatter block.
  *
@@ -890,6 +875,20 @@ export function validateStatusAnnotation(
   return out;
 }
 
+/**
+ * SPEC-038 / #460 — required `implements:`/`affects:` spec→code ownership.
+ *
+ * The symmetric rule pair (INV-2 / #137), fired only for a **primary requirements
+ * spec that is T3/T4 and past Clarify** (FR-3 / FR-6):
+ *  - `ownership.implements.missing` — declares neither a non-empty `implements:`
+ *    nor the `implements: none` + `implements_reason:` escape. Severity from
+ *    `config.ownershipDeclaration` (default `warn`, FR-7 ratchet).
+ *  - `ownership.implements.invalid` — a present `implements:`/`affects:` token is
+ *    not a valid owned-code path (always `error`).
+ *
+ * Path validity mirrors the spec-gate via `isValidOwnedPath` (parity-pinned). This
+ * only PRODUCES + VALIDATES the signal the gate already consumes — no gate change (FR-8).
+ */
 export function validateOwnership(spec: ParsedSpec, config: MinspecConfig): ValidationViolation[] {
   const specType = (spec.frontmatter.type ?? '').toLowerCase();
   const tier = spec.frontmatter.tier;

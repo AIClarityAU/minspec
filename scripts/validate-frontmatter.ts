@@ -624,16 +624,18 @@ try {
 // `statusLineAnnotation` ratchets to `error` that is a merge-gating check going quiet,
 // which is precisely what the invariant forbids. So: directory absence is the only
 // silence, and a file the rule could not run on is REPORTED at the configured severity.
-// AUDIT THE FEEDER, NOT JUST THIS RULE'S OWN CATCH (#1999). The per-file catch below
-// is unreachable for an error that happens while BUILDING the file list: `safeGlob`
-// converts any failure in the recursive walk into an empty list, so one unreadable
-// directory under `specs/` hands this loop zero files and the catch never fires.
-// Measured here: 2 findings on a clean tree, 0 with a single unreadable subdirectory,
-// and `Frontmatter validation passed.` printed both times.
+// DELIBERATELY NOT `safeGlob` — audit the feeder, not just a rule's own catch (#1999).
+// This rule USED TO call `safeGlob`, and that made the per-file catch below unreachable
+// for any error raised while BUILDING the list: `safeGlob` converts a failure anywhere
+// in its recursive walk into an empty list, so one unreadable directory under `specs/`
+// handed this loop zero files and the catch never fired. Measured before the change:
+// 2 findings on a clean tree, 0 with a single unreadable subdirectory, and
+// `Frontmatter validation passed.` printed both times.
 //
-// `safeGlob`'s own fix is in flight (#1999, PR #2005) and belongs to that PR, not this
-// one, so Rule 20 does not depend on its silence either way: absence of `specs/` is the
-// only silence, and a walk that fails is reported at the configured severity.
+// So the throwing `glob` is used directly and the two cases are separated by hand:
+// an absent `specs/` is the only silence, and a walk that throws is REPORTED. Fixing
+// `safeGlob` itself belongs to #1999 / PR #2005, not here; written this way, Rule 20 is
+// correct under either version of it and needs no rebase when that lands.
 // No try here on purpose: `loadConfig` is total (config.ts catches its own read/parse
 // and returns DEFAULT_CONFIG), so a guard would be an unreachable branch pretending to
 // cover something. That totality hides a separate, PRE-EXISTING downgrade — a corrupt
