@@ -48,8 +48,21 @@ ERRS="$(mktemp)"; SHACACHE="$(mktemp -d)"
 trap 'rm -rf "$ERRS" "$SHACACHE"' EXIT
 
 if [[ -z "${GH_TOKEN:-}" ]]; then
-  GH_TOKEN="$("$HOME/.claude/scripts/gh-app-token.sh" 2>/dev/null || true)"
-  [[ -z "$GH_TOKEN" ]] && { echo "ERROR: could not mint an App token. Not falling back to the human account." >&2; exit 1; }
+  # Keep the exit status rather than swallowing it (DR-066 clause 1). "The minter
+  # failed" and "the minter returned nothing" are different faults and get different
+  # messages, because the silent version of this has already cost us once: an empty
+  # GH_TOKEN does not error, it falls back to the container's own `gh` auth, which is
+  # the FOUNDER's account - so a swallowed failure here posts agent work under a human
+  # identity. Both paths fail closed; neither continues unauthenticated.
+  if ! GH_TOKEN="$("$HOME/.claude/scripts/gh-app-token.sh")"; then
+    echo "ERROR: gh-app-token.sh failed. Not falling back to the human account." >&2
+    exit 1
+  fi
+  if [[ -z "$GH_TOKEN" ]]; then
+    echo "ERROR: gh-app-token.sh succeeded but minted an empty token." >&2
+    echo "Refusing to continue: an empty GH_TOKEN silently uses the human's gh auth." >&2
+    exit 1
+  fi
   export GH_TOKEN
 fi
 
