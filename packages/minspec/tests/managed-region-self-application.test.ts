@@ -52,6 +52,13 @@ import {
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 
 /**
+ * Number of managed templates this repo APPLIES to itself (i.e. excluding the
+ * self-hosted sources it authors directly, #767). The single pinned bucket size —
+ * every other count in this file is derived from it.
+ */
+const APPLIED_PATH_COUNT = 13;
+
+/**
  * Paths whose managed region is known to differ from the registry, each with the
  * reason it is not simply fixed. Asserted to still drift — see the header.
  */
@@ -140,12 +147,13 @@ describe('managed-region self-application (T0, #1888)', () => {
     const matching = applied.filter((e) => !drifts(e));
     const drifting = applied.filter(drifts);
 
-    expect(selfHostedCount).toBe(17);
-    expect(applied.length).toBe(13);
-    expect(matching.length).toBe(8);
-    expect(drifting.length).toBe(5);
+    // ONE pinned number; every other bucket is derived from it and from the partition
+    // below. Five coupled magic numbers would make a single template addition demand
+    // five edits — raised as a maintainability finding on this PR.
+    expect(applied.length).toBe(APPLIED_PATH_COUNT);
 
     // Partition: nothing unclassified, and no self-hosted source counted as applied.
+    // With `applied` pinned, this fixes the self-hosted count without restating it.
     expect(selfHostedCount + applied.length).toBe(MANAGED_REGION_TEMPLATES.length);
     expect(matching.length + drifting.length).toBe(applied.length);
 
@@ -175,7 +183,7 @@ describe('managed-region self-application (T0, #1888)', () => {
       expect(rendered.close, `${tpl.name} rendered closing markers`).toBe(1);
       checked += 1;
     }
-    expect(checked).toBe(13);
+    expect(checked).toBe(APPLIED_PATH_COUNT);
   });
 
   it('every applied managed region matches the registry, except the waived ones', () => {
