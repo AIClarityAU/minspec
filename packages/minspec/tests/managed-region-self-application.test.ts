@@ -77,6 +77,15 @@ function innerRegion(text: string): string | null {
   return lines.slice(start + 1, end).join('\n');
 }
 
+/** Count of opening and closing managed markers in a file. */
+function markerCounts(text: string): { open: number; close: number } {
+  const lines = text.split('\n');
+  return {
+    open: lines.filter((l) => l.includes('>>> minspec:managed:')).length,
+    close: lines.filter((l) => l.includes('<<< minspec:managed:')).length,
+  };
+}
+
 const normalize = (s: string): string =>
   s
     .split('\n')
@@ -118,6 +127,55 @@ describe('managed-region self-application (T0, #1888)', () => {
       expect(e.disk.length, `disk region for ${e.tpl.outputPath}`).toBeGreaterThan(0);
       expect(e.rendered.length, `rendered region for ${e.tpl.outputPath}`).toBeGreaterThan(0);
     }
+  });
+
+  it('pins the bucket sizes the header states, as a partition of the enumeration', () => {
+    // The header's counts were prose until this assertion existed, so they could go
+    // stale silently as the registry grew — the exact failure mode #1987 was filed
+    // about, one level up. Stated as a partition so the buckets cannot drift apart:
+    // every managed template is either self-hosted here or applied here.
+    const selfHosted = new Set(SELF_HOSTED_TEMPLATE_NAMES);
+    const selfHostedCount = MANAGED_REGION_TEMPLATES.filter((t) => selfHosted.has(t.name)).length;
+    const applied = appliedTemplates();
+    const matching = applied.filter((e) => !drifts(e));
+    const drifting = applied.filter(drifts);
+
+    expect(selfHostedCount).toBe(17);
+    expect(applied.length).toBe(13);
+    expect(matching.length).toBe(8);
+    expect(drifting.length).toBe(5);
+
+    // Partition: nothing unclassified, and no self-hosted source counted as applied.
+    expect(selfHostedCount + applied.length).toBe(MANAGED_REGION_TEMPLATES.length);
+    expect(matching.length + drifting.length).toBe(applied.length);
+
+    // The drifting set IS the waived set — the substantive invariant, restated here
+    // so this test fails rather than the counts quietly disagreeing with the waiver.
+    expect(drifting.map((e) => e.tpl.outputPath).sort()).toEqual(Object.keys(KNOWN_DRIFT).sort());
+  });
+
+  it('every applied file carries exactly one managed region', () => {
+    // `innerRegion` reads the FIRST region only. That is correct for every current
+    // path (one region each) but would silently compare a prefix if a managed file
+    // ever gained a second region, so the assumption is asserted rather than relied
+    // on. Raised as a non-blocking review finding on the PR that added this file.
+    const selfHosted = new Set(SELF_HOSTED_TEMPLATE_NAMES);
+    let checked = 0;
+    for (const tpl of MANAGED_REGION_TEMPLATES) {
+      if (selfHosted.has(tpl.name)) continue;
+      const abs = path.join(REPO_ROOT, tpl.outputPath);
+      if (!fs.existsSync(abs)) continue;
+      const onDisk = markerCounts(fs.readFileSync(abs, 'utf8'));
+      if (onDisk.open === 0 && onDisk.close === 0) continue;
+      expect(onDisk.open, `${tpl.outputPath} opening markers`).toBe(1);
+      expect(onDisk.close, `${tpl.outputPath} closing markers`).toBe(1);
+
+      const rendered = markerCounts(renderManagedFile(tpl));
+      expect(rendered.open, `${tpl.name} rendered opening markers`).toBe(1);
+      expect(rendered.close, `${tpl.name} rendered closing markers`).toBe(1);
+      checked += 1;
+    }
+    expect(checked).toBe(13);
   });
 
   it('every applied managed region matches the registry, except the waived ones', () => {
