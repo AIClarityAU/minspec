@@ -53,12 +53,34 @@ import {
 } from '../../../scripts/lib/dr-id-collision';
 import { useShellTimeout } from './helpers/shell-timeout';
 
-// #1586: block B runs `npx tsx <cli>` per case (npx, then tsx, then node, then a
-// TypeScript compile) — the heaviest child process in this suite, on vitest's 5s
-// default. Under container scheduling contention that queues past 5s with nothing
-// hung (#1285's failure shape); observed flaking here even though this file sits
-// below shell-timeout-coverage.test.ts's call-site threshold, because the cost is in
-// what block B spawns, not how many times.
+// Blocks B and C run `npx tsx <cli>` per case (npx, then tsx, then node, then a
+// TypeScript compile) — the heaviest child process in this suite, against vitest's 5s
+// default. Under container scheduling contention that queues past 5s with nothing hung
+// (#1285's failure shape).
+//
+// MEASURED on this file, 2026-09-21, `vitest run --reporter=verbose` (#1899, which was
+// filed because two PRs committed contradictory explanations and neither cited a number):
+//
+//   13 tests that spawn a subprocess   28,178ms total   mean 2,167ms   max 3,689ms
+//   40 tests that do not                   131ms total
+//   → 99% of this file's runtime is subprocess spawns.
+//
+// The two earlier explanations were not rival accounts of one variable; they answered
+// different questions, and saying either alone is what made them look contradictory:
+//
+//   • PER-TEST TIMEOUT is governed by the cost of ONE invocation. At a 3,689ms max
+//     against a 5,000ms default, a single spawning case can trip the default on its
+//     own — so this file needs the raised timeout no matter how few cases it has.
+//     That is why the count is NOT what licenses `useShellTimeout()` here.
+//   • FILE DURATION is governed by how MANY cases spawn, near-linearly at ~2.2s each.
+//     Adding a spawning case costs ~2s of wall clock; adding a pure one costs ~3ms.
+//
+// The `SHELL_CALL_THRESHOLD = 5` in shell-timeout-coverage.test.ts counts
+// `execFileSync`/`spawnSync` CALL SITES IN SOURCE TEXT, statically — not invocations
+// and not runtime. This file now has exactly 5 (block C's `runCli` added the fifth),
+// so it sits AT the threshold rather than below it, and the coverage test requires the
+// call below rather than merely permitting it. Removing a call site would drop it back
+// under and silently make that requirement inert, which is the shape #1399 already hit.
 useShellTimeout();
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
