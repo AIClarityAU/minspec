@@ -603,29 +603,70 @@ reconcile_stale_claims() {
 # #1628 — was <issue>'s most recent `reopened` event LATER than its most recent
 # `closed` event? A reopen after an automated close is the strongest signal
 # available that the close's inference was wrong: a human or agent looked at the
-# conclusion and rejected it. Reuses the exact `gh api .../timeline --paginate`
-# shape `claim_applied_at` above already relies on — REST timeline events carry
-# `.event` ("closed"/"reopened"/…) and `.created_at`, both proven-working here
-# already, rather than guessing at `gh issue view --json timelineItems`'s GraphQL
+# conclusion and rejected it. REST timeline events carry `.event`
+# ("closed"/"reopened"/…) and `.created_at`, both proven-working here already,
+# rather than guessing at `gh issue view --json timelineItems`'s GraphQL
 # field/type-discriminator shape untested elsewhere in this script. `.created_at`
 # is ISO-8601 zero-padded UTC, so it sorts correctly as a plain string — no date
-# parsing needed. Fails toward "no veto" (never blocks a close) so an API hiccup
-# degrades to #1322's pre-#1628 behavior rather than wedging every candidate open
-# forever.
+# parsing needed.
+#
+# From PR #1772's review (the timeline-pagination finding) — the reduction runs ONCE
+# over the WHOLE history, which is why the timeline is fetched RAW and flattened
+# locally instead of through `gh --jq`:
+#
+#   * `gh api --paginate --jq F` applies F to EACH PAGE separately and prints one
+#     result per page (measured against api.github.com: a 19-event timeline requested
+#     at `per_page=2` printed 10 lines, not 1).
+#   * This question cannot be answered per page. The last `reopened` and the `closed`
+#     it vetoes can straddle a page boundary, and neither page sees both halves — the
+#     close page says "no", the reopen page says "yes", and the caller compares a
+#     TWO-LINE string against "yes" and silently re-closes an issue a human reopened.
+#     The sibling `claim_applied_at` can guard its per-page reduction with `| tail -1`
+#     because the last page holding a match carries the answer; here no single page
+#     does, so no such guard exists.
+#   * `--slurp` is not a way out: `gh` rejects `--slurp` together with `--jq`.
+#
+# So: raw `--paginate`, then `jq -s 'add // []'` to flatten the per-page arrays into
+# one — the same shape `approve-on-label.sh` already relies on against this very
+# endpoint — and reduce exactly once. The issue-timeline endpoint pages at 30 events
+# and `labeled`/`commented`/`cross-referenced`/`committed` all count toward it, so the
+# long, argued issues most likely to carry a human's reopen are exactly the ones that
+# span pages.
+#
+# THREE outcomes, not two — an UNKNOWN verdict is not a "no" (constitution invariant 2:
+# a gate fails visibly, never best-effort; a witness that could not be read is not
+# evidence that there is nothing to see):
+#   0  veto     — a reopen is more recent than the last close. Do not close.
+#   1  no veto  — the history was read and records no such reopen. Closing is allowed.
+#   2  unknown  — the timeline could not be read, or did not reduce to a verdict.
+#                 The caller must NOT close, and must say so; a `continue` skips that
+#                 issue only, never the rest of the board.
+# A readable-but-EMPTY history (`[]`, an issue with no events) is a normal state and
+# yields 1, not 2: failing closed on the genuinely unknown must not swallow the
+# ordinary case, or the reconciler stops reconciling anything.
 reopened_after_close() {
-  local n="$1" verdict
+  local n="$1" raw verdict
+  raw=$(gh api "repos/${REPO}/issues/${n}/timeline" --paginate 2>/dev/null) || return 2
+  [[ -n "$raw" ]] || return 2
   # NOTE: the `// ""` fallbacks are deliberately an empty STRING, not jq's `empty`
   # generator — `last` on a filtered-to-nothing array is `null`, and `null // empty`
   # produces ZERO output values, which makes the `as $r`/`as $c` bindings run zero
   # times and the whole filter print nothing at all (silently, for the exact "never
   # reopened" case this function exists to rule out as a veto). `// ""` keeps the
   # binding real so the trailing `if` always runs and always prints yes/no.
-  verdict=$(gh api "repos/${REPO}/issues/$1/timeline" --paginate \
-    --jq '([.[] | select(.event=="reopened") | .created_at] | last // "") as $r
-          | ([.[] | select(.event=="closed") | .created_at] | last // "") as $c
-          | if ($r != "" and ($c == "" or $r > $c)) then "yes" else "no" end' \
-    2>/dev/null) || return 1
-  [[ "$verdict" == "yes" ]]
+  verdict=$(printf '%s' "$raw" | jq -r -s '
+      (add // []) as $events
+      | if ($events | type) != "array" then "unknown"
+        else
+          ([$events[] | select(.event=="reopened") | .created_at] | last // "") as $r
+          | ([$events[] | select(.event=="closed") | .created_at] | last // "") as $c
+          | if ($r != "" and ($c == "" or $r > $c)) then "yes" else "no" end
+        end' 2>/dev/null) || return 2
+  case "$verdict" in
+    yes) return 0 ;;
+    no)  return 1 ;;
+    *)   return 2 ;;   # empty, multi-line, or anything this function does not recognise
+  esac
 }
 
 # #1322 — an OPEN issue stamped `agent-done` is a contradiction. Resolve it against
@@ -652,7 +693,7 @@ reopened_after_close() {
 # is a standing human veto on the merged-branch inference, and re-deriving the same
 # conclusion from the same branch state on every cycle cannot see it otherwise.
 reconcile_done_issues() {
-  local done_issues n pr
+  local done_issues n pr veto
   done_issues=$(gh issue list --repo "$REPO" --state open --label "agent-done" \
     --json number --jq '.[].number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no agent-done issues
   [[ -n "$done_issues" ]] || return 0
@@ -662,10 +703,15 @@ reconcile_done_issues() {
     pr=$(gh pr list --repo "$REPO" --state merged --head "agent/issue-${n}" \
       --json number --jq '.[0].number // empty' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no merged PR for this issue
     if [[ -n "$pr" ]]; then
-      if reopened_after_close "$n"; then
-        echo "[drain] reconcile: skipping #$n — it was reopened after a prior automated close, which vetoes the merged-branch inference; a human or agent rejected this exact conclusion once already (#1628). Leaving agent-done in place for a human to clear."
-        continue
-      fi
+      veto=0; reopened_after_close "$n" || veto=$?
+      case "$veto" in
+        0)
+          echo "[drain] reconcile: skipping #$n — it was reopened after a prior automated close, which vetoes the merged-branch inference; a human or agent rejected this exact conclusion once already (#1628). Leaving agent-done in place for a human to clear."
+          continue ;;
+        2)
+          echo "[drain] reconcile: skipping #$n — its timeline could not be read, so the reopen veto (#1628) cannot be evaluated; refusing to close an issue on an unreadable witness (PR #1772 review). The rest of the board is still reconciled."
+          continue ;;
+      esac
       echo "[drain] reconcile: closing #$n — a branch named for it, agent/issue-${n}, merged in #$pr and nothing ever closed it (#1322)."
       if gh issue close "$n" --repo "$REPO" \
         --comment "Closed by the drain reconciler: a branch named for this issue, \`agent/issue-${n}\`, merged in #${pr}. That is an observation, not a verification that the issue's full scope is covered — a branch can merge having done only part of the work. If this doesn't fully cover the issue, reopen it; a reopen is treated as a veto and this reconciler will not re-close it (#1628). See #1322 for the root cause and the deterministic \`Closes #N\` trailer that prevents the guess going forward." \
