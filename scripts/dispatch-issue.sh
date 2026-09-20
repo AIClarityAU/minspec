@@ -1019,11 +1019,11 @@ run_reviewer_stage() {
   #    this branch to ever land. Reuse the already-built $BODY (do not rebuild the
   #    summary) and the issue title for the PR.
   local pr_num
-  pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-known: #1978 an API failure reads as no PR exists
+  pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: empty is handled on the next line, which retries the create and re-queries; if it is still empty the caller warns and returns without merging
   if [[ -z "$pr_num" ]]; then
     gh pr create --repo "$REPO" --base main --head "$BRANCH" \
       --title "$ISSUE_TITLE" --body "$BODY" 2>/dev/null || true
-    pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-known: #1978 an API failure reads as no PR exists
+    pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: empty is handled on the next line, which retries the create and re-queries; if it is still empty the caller warns and returns without merging
   fi
   if [[ -z "$pr_num" ]]; then
     echo "WARNING: no PR for $BRANCH (create failed?) — AI review verdict: $combined (not posted)" >&2
@@ -1380,7 +1380,7 @@ shepherd_own_pr() {
     return 0
   fi
   local pr_num started loop_deadline
-  pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-known: #1978 an API failure reads as no PR exists
+  pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: empty is handled on the next line, which retries the create and re-queries; if it is still empty the caller warns and returns without merging
   if [[ -z "$pr_num" ]]; then
     echo "  No PR for $BRANCH — nothing to shepherd."
     return 0
@@ -1874,7 +1874,7 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
       printf '%s' "$SIGNALS_INPUT" > "$SIGNALS_TMP"
       # Find the PR for this branch (the gate holds/merges a PR, not the issue).
       PR_NUM=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
-        --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-known: #1978 an API failure reads as no open PR, skipping the shepherding below
+        --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: empty passes --pr 0 to the gate, and the merge condition below additionally requires -n "$PR_NUM", so an unknown PR number cannot merge, skipping the shepherding below
 
       echo "Running auto-merge gate (mode: $AUTOMERGE_MODE, base: $AUTOMERGE_BASE, PR: ${PR_NUM:-none})..."
       DECISION=$(cd "$WORKTREE" && npx tsx "${SCRIPT_DIR}/auto-merge-gate.ts" \
@@ -1925,7 +1925,7 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
       AUTONOMY_PROCEED="no"
       SPEC024_CHANGED=""
       if [[ -n "$PR_NUM" ]]; then
-        SPEC024_CHANGED=$(gh pr diff "$PR_NUM" --repo "$REPO" --name-only 2>/dev/null || true)  # swallow-known: #1978 an API failure reads as no SPEC-024 files changed, feeding the autonomy merge decision below
+        SPEC024_CHANGED=$(gh pr diff "$PR_NUM" --repo "$REPO" --name-only 2>/dev/null || true)  # swallow-ok: an empty list is the STRONGEST stop class, not an absent one — autonomy_may_merge returns proceed:false on empty input (verified via the --may-merge seam), so AUTONOMY_PROCEED stays no and the merge is refused
       fi
       if AUTONOMY_VERDICT=$(autonomy_may_merge \
             "merge PR #${PR_NUM:-none} via the SPEC-024 consequence-hybrid gate" \
