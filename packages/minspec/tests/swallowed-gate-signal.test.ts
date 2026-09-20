@@ -30,10 +30,23 @@ const find = (source: string) => findSwallowedGateSignals('t.sh', source);
 describe('INV-1: the motivating defect is caught in the real tree', () => {
   // Keyed on the variable, not a line number — line numbers rot between writing a test
   // and pushing it, and a rotted assertion that still passes is worse than none.
+  //
+  // MOVED 2026-09-21, from `all_ready` to `READY_ISSUES`. The original fixture was the
+  // dispatch path's ready-set capture, and it has been FIXED: that query now returns a
+  // status the caller checks, so it is no longer a swallowed capture and the lint
+  // correctly no longer finds it. Pinning a live defect as a test fixture means the
+  // test breaks when someone repairs the defect — which is the good outcome arriving
+  // as a red build. Repointing is therefore the expected maintenance, not a workaround.
+  //
+  // `READY_ISSUES` is the same two-line brace-group shape in the `--status` display
+  // path, still annotated `swallow-known: #1855`. When that one is fixed too, this
+  // assertion must be repointed again or deliberately retired — it must never be
+  // softened into "find any, skip if none", because a lint about fail-open signals
+  // cannot have a fail-open test.
   it('flags drain-inbox.sh ready-set query, which spans two lines', () => {
     const source = readFileSync(join(REPO, 'scripts/drain-inbox.sh'), 'utf8');
     const readySet = findSwallowedGateSignals('scripts/drain-inbox.sh', source).find(
-      (f) => f.variable === 'all_ready',
+      (f) => f.variable === 'READY_ISSUES',
     );
 
     expect(readySet, 'the #1855 ready-set capture is no longer detected').toBeDefined();

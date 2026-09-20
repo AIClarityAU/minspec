@@ -281,12 +281,68 @@ _gh_bot_ensure() {
   _GH_BOT_VERIFIED=1
 }
 
+# _gh_bot_read_auth — give READS a credential when the ambient one does not exist.
+#
+# The original contract was "reads pass straight through on whatever credential is
+# ambient; only a WRITE forces a bot identity first", and it was correct when it was
+# written: this container's `gh` was authenticated as the founder, so reads worked and
+# only attribution needed fixing. The identity-boundary work then removed that
+# credential by design, and nothing in the read path noticed — `gh` began answering
+# every read with "To get started with GitHub CLI, please run: gh auth login" on
+# stderr, which callers were already routing to /dev/null.
+#
+# Measured 2026-09-21: `drain-inbox.sh` logged
+# "no agent-ready / agent-ready-specify issues after triage — cycle done" 47 times
+# while the repo actually held 119 `agent-ready` + 326 `agent-ready-specify` open
+# issues. Both probes a reader reaches for came back green — the log was current to
+# the second, and the loop was alive — because the failure was an authentication
+# error being read as an empty queue. That is #1855's shape, and this is its cause:
+# the swallow made it silent, the missing read credential made it wrong.
+#
+# BEST-EFFORT, NEVER FATAL, and that asymmetry is the whole design:
+#
+#   * A WRITE with no bot identity must abort (`_gh_bot_ensure` → `gh_bot_die`),
+#     because writing as the human is the bug this file exists to close (#1355).
+#   * A READ with no bot identity must proceed exactly as it did before this
+#     function existed. CI has no App key, `check-gh-bot-attribution.sh` sources
+#     this file offline, and `issue-lease.sh` is sourced as a LIBRARY — the header
+#     above is explicit that "a script that only reads must run fine with no
+#     credential at all", and an eager export already broke 30+ CI cases once.
+#
+# So every failure path here returns 0 and leaves GH_TOKEN untouched. It cannot make
+# a read worse than it is today; it can only make an unauthenticated one work.
+#
+# It does NOT make a failed read quiet. Callers must still distinguish "the query
+# failed" from "the answer is empty" — this only removes the most common cause of the
+# first. `drain-inbox.sh` holds loudly on a non-zero status for exactly that reason.
+_gh_bot_read_auth() {
+  [[ "${_GH_BOT_READ_AUTH_TRIED:-0}" == "1" ]] && return 0
+  _GH_BOT_READ_AUTH_TRIED=1
+
+  # Something is already ambient. Never replace it: it may be the caller's (a
+  # workflow's GITHUB_TOKEN), and a read has no business re-identifying it.
+  [[ -n "${GH_TOKEN:-}" || -n "${GITHUB_TOKEN:-}" ]] && return 0
+  [[ -f "$_GH_BOT_TOKEN_SCRIPT" ]] || return 0
+
+  local tok
+  tok="$("$_GH_BOT_TOKEN_SCRIPT" 2>/dev/null)" || return 0  # swallow-ok: this is the fallback path itself, not a gate verdict — no key (CI) must leave the read exactly as unauthenticated as it was before, which is the documented contract for read-only entry points
+  [[ -n "$tok" && "$tok" != *$'\n'* ]] || return 0
+
+  export GH_TOKEN="$tok"
+  _GH_BOT_OWNED=1
+  _GH_BOT_MINTED_AT="$(date +%s)"
+  # We minted it, so there is nothing to verify — skip the `gh api user` probe that
+  # `_gh_bot_ensure` would otherwise run against our own token on the first write.
+  _GH_BOT_VERIFIED=1
+}
+
 # gh_bot_init — call once, near the top of any script that writes to GitHub.
 #
 # Defines a shell function named `gh`, which shadows the binary for the rest of
-# the process. Reads pass straight through on whatever credential is ambient;
-# only a WRITE forces a bot identity first. That is what lets a read-only entry
-# point run with no credential at all, which the test suites depend on.
+# the process. A WRITE forces a bot identity first and aborts without one. A READ
+# takes a bot token when one can be minted and otherwise proceeds unauthenticated,
+# which is what lets a read-only entry point run with no credential at all — the
+# property the test suites and CI depend on.
 #
 # Cheap, offline, and safe to call more than once: it does NOT mint, contact
 # GitHub, or fail. All of that is deferred to the first write.
@@ -297,6 +353,10 @@ gh_bot_init() {
   gh() {
     if _gh_bot_is_write "$@"; then
       _gh_bot_ensure
+    else
+      # A read still needs SOME credential. Best-effort and never fatal — see
+      # _gh_bot_read_auth for why the two directions fail differently.
+      _gh_bot_read_auth
     fi
     command gh "$@"
   }

@@ -670,13 +670,54 @@ run_cycle() {
   # session's tree — fail-safe toward fetch-only.
   sync_shared_checkouts
 
+  # _ready_numbers <label> — open issue numbers for one label, or a LOUD failure.
+  #
+  # #1855's mechanism, in one line: `gh issue list ... 2>/dev/null || true` collapses
+  # "the query failed" into "the queue is empty", and every caller below reports empty
+  # as a finished cycle. Measured 2026-09-21: this loop logged
+  # "no agent-ready / agent-ready-specify issues after triage — cycle done" 47 times
+  # while the repo held 119 `agent-ready` + 326 `agent-ready-specify` open issues. The
+  # log was current to the second and the loop was alive, so both of the obvious
+  # health probes came back green; the only probe that catches it is comparing this
+  # count against an independently obtained one.
+  #
+  # Failure and emptiness are different answers and must not share a representation.
+  # This prints numbers on stdout and returns gh's own status, so an empty queue is a
+  # SUCCESS with no output and a broken query is a non-zero the caller must handle.
+  # gh's stderr is deliberately NOT redirected — the message that would have named the
+  # cause ("please run: gh auth login") was being discarded.
+  #
+  # The limit is EXPLICIT and announced. `gh issue list` caps at 30 by default and
+  # says nothing, so the queue this loop has always enumerated was the first 30 per
+  # label — a silent cap that reads as the whole queue. Pinning it here changes no
+  # behaviour (30 is what it already was) while making the number a decision someone
+  # made rather than a default nobody saw, and the caller warns when a result lands
+  # exactly on the cap. Raising it is tracked separately: it is a dispatch-VOLUME
+  # decision, not a correctness one, and does not belong in the same change as a
+  # fail-loud fix.
+  _ready_limit="${MINSPEC_DRAIN_QUEUE_LIMIT:-30}"
+  _ready_numbers() {
+    gh issue list --repo "$REPO" --label "$1" --limit "$_ready_limit" \
+      --json number --jq '.[].number'
+  }
+
   # Step 0: reconcile the label board against observable reality (#1306, #1322).
   # Runs BEFORE triage so a cycle never enumerates a queue it already knows is wrong.
   reconcile_labels
 
   # Step 1: triage inbox issues → labels T1/T2 as agent-ready
-  inbox_issues=$(gh issue list --repo "$REPO" --label "inbox" \
-    --json number --jq '.[].number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as an empty inbox
+  # A failed inbox query must not read as an empty inbox (#1855). Triage is not
+  # load-bearing for the cycle the way Step 2 is — nothing downstream depends on it
+  # having run — so this warns and carries on to the dispatch queue rather than
+  # aborting the whole cycle. It is loud either way; what it must never do is print
+  # nothing and look like a quiet inbox.
+  inbox_rc=0
+  inbox_issues="$(_ready_numbers "inbox")" || inbox_rc=$?
+  if (( inbox_rc != 0 )); then
+    echo "[drain] WARNING: the inbox query FAILED (gh exit ${inbox_rc}) — this cycle triaged nothing." >&2
+    echo "[drain]          That is NOT an empty inbox. See the gh error above for the cause." >&2
+    inbox_issues=""
+  fi
   if [[ -n "$inbox_issues" ]]; then
     echo "[drain] triaging $(echo "$inbox_issues" | wc -l | tr -d ' ') inbox issue(s)..."
     for n in $inbox_issues; do
@@ -694,14 +735,31 @@ run_cycle() {
   # a verdict nothing dispatches is just a differently-shaped backlog. Which mode each
   # issue runs in is decided by dispatch-issue.sh from the VERDICT RECORD, never from
   # the label that put it in this list (#983).
-  all_ready=$(
-    {
-      gh issue list --repo "$REPO" --label "agent-ready" \
-        --json number --jq '.[].number' 2>/dev/null || true
-      gh issue list --repo "$REPO" --label "agent-ready-specify" \
-        --json number --jq '.[].number' 2>/dev/null || true
-    } | sort -un
-  )  # swallow-known: #1855 a failed query reads as cycle done, the #1855 defect itself
+  # Captured one label at a time, with each status checked. A pipeline into `sort`
+  # cannot be used to carry the status even under `pipefail`, because `sort` succeeds
+  # on empty input and would mask a failed producer — the same collapse in a new shape.
+  ready_rc=0
+  ready_full="$(_ready_numbers "agent-ready")" || ready_rc=$?
+  ready_spec=""
+  if (( ready_rc == 0 )); then
+    ready_spec="$(_ready_numbers "agent-ready-specify")" || ready_rc=$?
+  fi
+  if (( ready_rc != 0 )); then
+    echo "[drain] HOLDING: the agent-ready query FAILED (gh exit ${ready_rc})." >&2
+    echo "[drain]          This is NOT an empty queue, and reporting it as one is #1855." >&2
+    echo "[drain]          Nothing was dispatched this cycle. See the gh error above." >&2
+    return 1
+  fi
+  # No silent caps: a label that came back exactly at the limit is almost certainly
+  # truncated, and the difference between "30 ready" and "30 of 119 ready" changes
+  # what a reader does about it.
+  for _lbl in "agent-ready:$ready_full" "agent-ready-specify:$ready_spec"; do
+    if [[ "$(printf '%s' "${_lbl#*:}" | grep -c . || true)" == "$_ready_limit" ]]; then  # swallow-ok: grep -c exits 1 on zero matches, which cannot equal a positive limit — the comparison below is the decision, not this status
+      echo "[drain] NOTE: '${_lbl%%:*}' returned exactly ${_ready_limit} issue(s) — the query cap." >&2
+      echo "[drain]       The real queue is probably longer. Raise MINSPEC_DRAIN_QUEUE_LIMIT to see it." >&2
+    fi
+  done
+  all_ready="$(printf '%s\n%s\n' "$ready_full" "$ready_spec" | sed '/^$/d' | sort -un)"
   if [[ -z "$all_ready" ]]; then
     echo "[drain] no agent-ready / agent-ready-specify issues after triage — cycle done."
     return 0
