@@ -139,7 +139,7 @@ while IFS= read -r file; do
   # Checked FIRST and independently of everything below: a write spawned in a new
   # shell process escapes the wrapper even in a fully compliant file, so sourcing
   # and arming do not cure it (#1413). Reported separately for that reason.
-  sub_hits="$(grep -nE "$SUBSHELL_WRITE_RE" "$file" 2>/dev/null | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
+  sub_hits="$(grep -nE "$SUBSHELL_WRITE_RE" "$file" 2>/dev/null | grep -vE '^[0-9]+:[[:space:]]*#' || true)"  # swallow-known: #1978 grep exit 2 on an unreadable file reads as no attribution violation
   if [[ -n "$sub_hits" ]] && ! allowlist_reason "$rel" >/dev/null; then
     fail=1
     echo "FAIL: ${rel} issues a GitHub write from a NEW shell process — the \`gh\` wrapper is a shell function and does not survive exec, so this writes as the human" >&2
@@ -152,16 +152,16 @@ while IFS= read -r file; do
   # explanation never trips the guard. NOTE the anchor: `grep -n` on a SINGLE
   # file emits "16:# ..." with no filename prefix, so a pattern expecting ":16:"
   # silently filters nothing.
-  hits="$(grep -nE "$WRITE_RE" "$file" 2>/dev/null | grep -vE '^[0-9]+:[[:space:]]*#' || true)"
+  hits="$(grep -nE "$WRITE_RE" "$file" 2>/dev/null | grep -vE '^[0-9]+:[[:space:]]*#' || true)"  # swallow-known: #1978 grep exit 2 on an unreadable file reads as no attribution violation
 
   # Every `gh api graphql` line is a write UNLESS it declares itself a read.
   # Two steps, because the main regex reaches graphql lines only when they carry
   # a body flag: first drop the DECLARED reads, then add back any graphql line
   # the main regex missed (e.g. a document supplied via --input or stdin).
-  hits="$(printf '%s' "$hits" | awk -v r="$GRAPHQL_READ_DECL_RE" 'NF && $0 !~ r' || true)"
+  hits="$(printf '%s' "$hits" | awk -v r="$GRAPHQL_READ_DECL_RE" 'NF && $0 !~ r' || true)"  # swallow-known: #1978 an awk failure reads as no remaining violations
   extra="$(grep -nE "$GRAPHQL_LINE_RE" "$file" 2>/dev/null \
              | grep -vE '^[0-9]+:[[:space:]]*#' \
-             | grep -vE "$GRAPHQL_READ_DECL_RE" || true)"
+             | grep -vE "$GRAPHQL_READ_DECL_RE" || true)"  # swallow-known: #1978 grep exit 2 on an unreadable file reads as no extra graphql violation
   if [[ -n "$extra" ]]; then
     hits="$(printf '%s\n%s' "$hits" "$extra" | awk 'NF' | sort -t: -k1,1n -u)"
   fi

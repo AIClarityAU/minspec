@@ -38,6 +38,19 @@ vi.mock('vscode', () => ({
 }));
 
 import { commitBornIfUntracked, commitApprovalIfEnabled } from '../src/commands/commit-on-approve';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// This suite drives real `git` through the local `git()` helper below - 11 invocations,
+// each a genuine child process. Measured in isolation on an idle machine it runs 4.4-5.8s
+// against vitest's 5s default, so it has no headroom at all and times out under ordinary
+// full-suite parallelism (observed twice at load averages 20.9 AND 3.1 - it is the margin,
+// not the load).
+//
+// It slipped past shell-timeout-coverage.test.ts because that guard counts LITERAL
+// `execFileSync|spawnSync|execSync` call sites: funnelling every spawn through one wrapper
+// scores 1 against a threshold of 5. The better-factored the suite, the more invisible it
+// is to the guard. Class fix tracked at #1385; this is the instance that was reddening PRs.
+useShellTimeout();
 
 const REAL_HOOKS_DIR = path.resolve(__dirname, '../../../.githooks');
 

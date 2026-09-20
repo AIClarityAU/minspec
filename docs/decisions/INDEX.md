@@ -699,19 +699,35 @@ DR-076 cut the gates that existed for multi-human trust. This is a different cut
 An adversarial analysis of append-only log integrity was run to answer one question: if MinSpec kept a Karpathy-style log.md, how strong an integrity guarantee could it actually carry? Three candidate designs were built and each was handed to an independent red team whose findings overrode the designs' own self-assessments. The full working is at docs/research/log-integrity-2026-08-23.md.
 <!-- /dr-summary:DR-087 -->
 
-## [DR-088 — Ownership declarations leave the canonical approval hash - the decision, the migration, and the unsolved half](DR-088.md)
+## [DR-088 — Ownership declarations leave the canonical approval hash, and the freeze that replaces the alarm draws on the owned set as it stood at approval](DR-088.md)
 
-*Status: proposed · Date: 2026-08-24*
+*Status: accepted · Date: 2026-08-24*
 
-<!-- dr-summary:DR-088 auto=a3444f8d8257 -->
-The founder decided on 2026-08-23, answering #1481 (should implements: be part of the canonicalized spec hash?), that implements: comes out of the canonical approval hash. This record does not relitigate that. It answers what exactly leaves, how the existing approvals migrate, and - honestly - fails to answer what replaces the lost alarm.
+<!-- dr-summary:DR-088 auto=3be0338915c8 -->
+The founder decided on 2026-08-23, answering #1481 (should implements: be part of the canonicalized spec hash?), that implements: comes out of the canonical approval hash. This record does not relitigate that. It answers what exactly leaves, what replaces the lost alarm, and how the existing approvals migrate.
 <!-- /dr-summary:DR-088 -->
 
 ## [DR-089 — The harness manifest records authorship, not disk - and carries a format version, because a poisoned manifest cannot be detected from its contents](DR-089.md)
 
-*Status: proposed · Date: 2026-08-31*
+*Status: accepted · Date: 2026-08-31*
 
 <!-- dr-summary:DR-089 auto=e73452b46dc0 -->
 .minspec/generated-hashes.json decides, on every *Refresh Harness Files*, whether a section of a managed file is MinSpec's own output (safe to update from the template) or the project's content (must be preserved). #1697 established that it was answering that question wrongly in two independent ways, and that the wrong answer deleted a Principle's standing exception - a paragraph that authorised shipped code - from a live project.
 <!-- /dr-summary:DR-089 -->
+
+## [DR-090 — Prose inside a managed file is shipped code — it must hold in the repo that receives it, or name the minspec repo as its subject](DR-090.md)
+
+*Status: proposed · Date: 2026-09-02*
+
+<!-- dr-summary:DR-090 auto=02a7aa5f3877 -->
+MANAGED_REGION_TEMPLATES (packages/minspec/src/lib/template-registry.ts:2076) is the set of files MinSpec scaffolds byte-for-byte into every repo that inits it. The bytes are held identical by construction: the CI-review stack is generated from this repo's own working files (scripts/gen-ci-templates.mjs), and the portability suite in packages/minspec/tests/managed-region-templates.test.ts:378 asserts the embedded copy equals the on-disk source exactly.
+<!-- /dr-summary:DR-090 -->
+
+## [DR-091 — A wrong triage classification is a corrected INPUT, never an overridden output - the dispute lane declares the work TYPE the classifier misread, re-runs the same gate over it, and keeps the disagreement as a labelled corpus](DR-091.md)
+
+*Status: proposed · Date: 2026-09-02*
+
+<!-- dr-summary:DR-091 auto=c5ac0ec77f33 -->
+DR-072 gave a triage-held issue a human exit, but only for the tier hold: human_only is a content class, so no keystroke transfers authorship and the hold is absolute. That boundary is right. What it leaves open is the case where the classification itself is wrong — for which the only documented remedy today is to reword the issue body until the classifier changes its mind.
+<!-- /dr-summary:DR-091 -->
 <!-- minspec:dr-index:end -->

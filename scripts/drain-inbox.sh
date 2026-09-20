@@ -184,6 +184,23 @@ QUOTA_SLEEP_MAX="${MINSPEC_QUOTA_SLEEP_MAX:-21600}"  # 6 h clamp vs a corrupt ep
 QUOTA_SLEEP_MIN="${MINSPEC_QUOTA_SLEEP_MIN:-60}"     # never spin
 QUOTA_SLEEP_MARGIN="${MINSPEC_QUOTA_SLEEP_MARGIN:-15}"  # settle past the boundary
 
+# ── Refreshing the witness, not just reading it (#1859) ─────────────────────
+# The reading's only producers are INTERACTIVE surfaces (a rendering statusline), so
+# a headless drain could never satisfy QUOTA_STALE_SEC on its own: INTERVAL (1200s)
+# and QUOTA_BACKOFF (1800s) both EXCEED that 900s limit, so every wake read a value
+# that had aged out during the sleep. The gate then failed closed, correctly, and
+# held forever — autonomy gated on a witness that only exists while a human watches.
+# Measured 2026-09-09: the file was 49h stale while holding "3% used".
+#
+# So the drain refreshes before it consults. Freshness becomes a property of the
+# CHECK rather than of who happened to be looking.
+QUOTA_REFRESH="${MINSPEC_QUOTA_REFRESH:-1}"          # 0 disables (e.g. in tests)
+QUOTA_REFRESH_CMD="${MINSPEC_QUOTA_REFRESH_CMD:-python3 $HOME/.claude/scripts/cos.py quota --refresh}"
+QUOTA_REFRESH_TIMEOUT="${MINSPEC_QUOTA_REFRESH_TIMEOUT:-60}"
+# Don't re-observe a reading that is still comfortably fresh. Half the staleness
+# limit keeps every wake inside the window without hammering the producer.
+QUOTA_REFRESH_MIN_AGE="${MINSPEC_QUOTA_REFRESH_MIN_AGE:-$(( QUOTA_STALE_SEC / 2 ))}"
+
 # The bootstrap allowance (see quota_gate's "no reading" arm, below). Default 3
 # matches this file's other small-and-bounded defaults (MAX_CONSEC_FAIL, the
 # autocompact ac_halt) — not a magic number, a reused convention. Sidecar
@@ -358,7 +375,7 @@ sync_shared_checkouts() {
   local db origin_ref root head_sha origin_sha base
   # `|| true` inside the substitution: under `set -euo pipefail` an unset origin/HEAD
   # makes symbolic-ref exit 128, which would otherwise abort the whole drain.
-  db="$(git -C "$PRIMARY_ROOT" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)"
+  db="$(git -C "$PRIMARY_ROOT" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)"  # swallow-ok: the next line defaults empty to main via ${db:-main}, so a failed lookup and an unset origin/HEAD land on the same correct default
   db="${db:-main}"                                   # origin/HEAD often unset locally → main
   origin_ref="origin/${db}"
   # GIT_TERMINAL_PROMPT=0: this loop is disowned/background — a checkout without
@@ -398,8 +415,8 @@ resolve_session_pid() {
   fi
   local pid="$PPID" guard=0 comm args
   while [[ -n "$pid" && "$pid" != "0" && "$pid" != "1" && "$guard" -lt 20 ]]; do
-    comm="$(ps -o comm= -p "$pid" 2>/dev/null | tr -d ' \t' || true)"
-    args="$(ps -o args= -p "$pid" 2>/dev/null || true)"
+    comm="$(ps -o comm= -p "$pid" 2>/dev/null | tr -d ' \t' || true)"  # swallow-ok: ps exits non-zero precisely when the pid is gone, which is the same conclusion the test below draws
+    args="$(ps -o args= -p "$pid" 2>/dev/null || true)"  # swallow-ok: ps exits non-zero precisely when the pid is gone, which is the same conclusion the test below draws
     if [[ "$comm" == *claude* || "$args" == *claude-code* || "$args" == *anthropic.claude* ]]; then
       printf '%s' "$pid"; return 0
     fi
@@ -565,7 +582,7 @@ dispatch_alive_for() {
 reconcile_stale_claims() {
   local running n applied age
   running=$(gh issue list --repo "$REPO" --state open --label "agent-running" \
-    --json number --jq '.[].number' 2>/dev/null || true)
+    --json number --jq '.[].number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no agent-running issues
   [[ -n "$running" ]] || return 0
 
   while read -r n; do
@@ -597,13 +614,13 @@ reconcile_stale_claims() {
 reconcile_done_issues() {
   local done_issues n pr
   done_issues=$(gh issue list --repo "$REPO" --state open --label "agent-done" \
-    --json number --jq '.[].number' 2>/dev/null || true)
+    --json number --jq '.[].number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no agent-done issues
   [[ -n "$done_issues" ]] || return 0
 
   while read -r n; do
     [[ -n "$n" ]] || continue
     pr=$(gh pr list --repo "$REPO" --state merged --head "agent/issue-${n}" \
-      --json number --jq '.[0].number // empty' 2>/dev/null || true)
+      --json number --jq '.[0].number // empty' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no merged PR for this issue
     if [[ -n "$pr" ]]; then
       echo "[drain] reconcile: closing #$n — its work merged in #$pr but nothing ever closed it (#1322)."
       gh issue close "$n" --repo "$REPO" \
@@ -659,7 +676,7 @@ run_cycle() {
 
   # Step 1: triage inbox issues → labels T1/T2 as agent-ready
   inbox_issues=$(gh issue list --repo "$REPO" --label "inbox" \
-    --json number --jq '.[].number' 2>/dev/null || true)
+    --json number --jq '.[].number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as an empty inbox
   if [[ -n "$inbox_issues" ]]; then
     echo "[drain] triaging $(echo "$inbox_issues" | wc -l | tr -d ' ') inbox issue(s)..."
     for n in $inbox_issues; do
@@ -684,7 +701,7 @@ run_cycle() {
       gh issue list --repo "$REPO" --label "agent-ready-specify" \
         --json number --jq '.[].number' 2>/dev/null || true
     } | sort -un
-  )
+  )  # swallow-known: #1855 a failed query reads as cycle done, the #1855 defect itself
   if [[ -z "$all_ready" ]]; then
     echo "[drain] no agent-ready / agent-ready-specify issues after triage — cycle done."
     return 0
@@ -838,7 +855,7 @@ run_cycle() {
   if [[ "${MINSPEC_DRAIN_REMEDIATE_PRS:-1}" != "0" ]]; then
     local open_prs pr rcap rout
     open_prs=$(gh pr list --repo "$REPO" --state open --json number,isDraft \
-      --jq '.[] | select(.isDraft==false) | .number' 2>/dev/null || true)
+      --jq '.[] | select(.isDraft==false) | .number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no open PRs to remediate
     if [[ -n "$open_prs" ]]; then
       echo "[drain] sweeping $(echo "$open_prs" | wc -l | tr -d ' ') open PR(s) for fixable problems..."
       for pr in $open_prs; do
@@ -847,7 +864,7 @@ run_cycle() {
         # + classify; a quota hit pauses the whole cycle (loop backs off).
         rcap=$(mktemp)
         "$REMEDIATE" "$pr" 2>&1 | tee "$rcap" || true
-        rout=$(cat "$rcap" 2>/dev/null || true); rm -f "$rcap"
+        rout=$(cat "$rcap" 2>/dev/null || true); rm -f "$rcap"  # swallow-ok: the capture file is written by this script moments earlier and removed on the same line; absent means the launch produced no output
         if is_quota <<<"$rout"; then
           echo "[drain] Claude usage-limit signal while remediating PR #$pr — pausing this cycle (will back off, not fail)."
           return 42
@@ -867,7 +884,7 @@ run_cycle() {
 # QUOTA_BOOTSTRAP_FILE itself is later lost — re-derived from empty by design.
 _quota_bootstrap_count() {
   local n
-  n=$(cat "$QUOTA_BOOTSTRAP_FILE" 2>/dev/null || true)
+  n=$(cat "$QUOTA_BOOTSTRAP_FILE" 2>/dev/null || true)  # swallow-ok: a missing bootstrap counter is the expected first-run state, and the regex below rejects anything that is not a number
   [[ "$n" =~ ^[0-9]+$ ]] && printf '%s\n' "$n" || printf '0\n'
 }
 
@@ -957,8 +974,36 @@ _quota_read() {
 # `qv=$(quota_gate)` call in run_cycle's parallel path), so the allowance caps at
 # exactly QUOTA_BOOTSTRAP_ADMITS concurrent launches before the rest of the queue
 # holds for the window.
+# Best-effort refresh of the reading, called by quota_gate before it consults.
+#
+# THIS FUNCTION MUST NEVER WRITE TO STDOUT. quota_gate's stdout IS the verdict
+# channel its callers capture (`quota_verdict=$(quota_gate)`), so a stray line here
+# would be parsed as an admission verdict. The producer's stdout goes to /dev/null
+# and every diagnostic to stderr.
+#
+# It cannot admit anything. On any failure the reading is left exactly as it was and
+# the stale / no-reading arms below still fail closed — this only ever makes a
+# reading fresher, never a verdict weaker.
+_quota_try_refresh() {
+  [[ "$QUOTA_REFRESH" == "1" ]] || return 0
+  local now vals o
+  now=$(date +%s)
+  # ONLY a reading that EXISTS and has aged out is refreshed. A missing reading is
+  # deliberately left alone: that arm carries the bounded bootstrap allowance (INV-E)
+  # and its own producer guidance, and refreshing into it would let this function
+  # manufacture the very first reading — turning a documented, bounded blind-admit
+  # into an unbounded one. #1859 is about a reading going stale, not a missing one.
+  vals=$(_quota_read 2>/dev/null) || return 0
+  read -r _ _ o _ _ <<<"$vals"
+  (( now - o <= QUOTA_REFRESH_MIN_AGE )) && return 0
+  if ! timeout "$QUOTA_REFRESH_TIMEOUT" bash -c "$QUOTA_REFRESH_CMD" >/dev/null 2>&1; then
+    echo "[drain] quota refresh failed (\`$QUOTA_REFRESH_CMD\`) — the reading stands as-is and the gate still fails closed on it." >&2
+  fi
+}
+
 quota_gate() {
   local vals p r o wp wr now
+  _quota_try_refresh
   now=$(date +%s)
   if ! vals=$(_quota_read); then
     local bc="$(_quota_bootstrap_count)"
@@ -1333,7 +1378,7 @@ done
 # Count pending work across both stages
 INBOX_COUNT=0
 INBOX_ISSUES=$(gh issue list --repo "$REPO" --label "inbox" \
-  --json number --jq '.[].number' 2>/dev/null || true)
+  --json number --jq '.[].number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as an empty inbox in the status line
 [[ -n "$INBOX_ISSUES" ]] && INBOX_COUNT=$(echo "$INBOX_ISSUES" | wc -l | tr -d ' ')
 
 # Both ready classes (#1169) — same OR-not-AND reason as run_cycle's Step 2. This
@@ -1346,7 +1391,7 @@ READY_ISSUES=$(
     gh issue list --repo "$REPO" --label "agent-ready-specify" \
       --json number --jq '.[].number' 2>/dev/null || true
   } | sort -un
-)
+)  # swallow-known: #1855 a failed query reads as nothing ready in the status line
 READY_COUNT=0
 [[ -n "$READY_ISSUES" ]] && READY_COUNT=$(echo "$READY_ISSUES" | wc -l | tr -d ' ')
 

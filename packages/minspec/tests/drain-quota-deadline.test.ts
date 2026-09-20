@@ -59,7 +59,16 @@ function run(args: string[], env: Record<string, string> = {}): { code: number; 
   try {
     const out = execFileSync('bash', [DRAIN, ...args], {
       encoding: 'utf-8',
-      env: { ...process.env, MINSPEC_QUOTA_FILE: quotaFile, ...env },
+      env: { ...process.env, MINSPEC_QUOTA_FILE: quotaFile,
+        // Refreshing the reading before consulting it (#1859) is the PRODUCER's
+        // job; this file tests the GATE. Left on, it would break INV-C above
+        // ("the gate needs no network") and the stale-reading tests would never
+        // SEE a stale reading, because the refresh replaces it first — observed:
+        // 3 failures, then 1, from the same tree, because the outcome tracked
+        // whether the real producer happened to succeed. Pinned off for the same
+        // reason MINSPEC_QUOTA_BOOTSTRAP_ADMITS is pinned to 0: one behaviour per
+        // file. The refresh seam is tested in drain-quota-refresh.test.ts.
+        MINSPEC_QUOTA_REFRESH: '0', ...env },
     });
     return { code: 0, out: out.trim() };
   } catch (e: any) {
@@ -241,7 +250,16 @@ describe('drain-inbox.sh --quota-publish-wall — the reactive producer', () => 
     try {
       const out = execFileSync('bash', [DRAIN, '--quota-publish-wall'], {
         input: text, encoding: 'utf-8',
-        env: { ...process.env, MINSPEC_QUOTA_FILE: quotaFile, ...env },
+        env: { ...process.env, MINSPEC_QUOTA_FILE: quotaFile,
+        // Refreshing the reading before consulting it (#1859) is the PRODUCER's
+        // job; this file tests the GATE. Left on, it would break INV-C above
+        // ("the gate needs no network") and the stale-reading tests would never
+        // SEE a stale reading, because the refresh replaces it first — observed:
+        // 3 failures, then 1, from the same tree, because the outcome tracked
+        // whether the real producer happened to succeed. Pinned off for the same
+        // reason MINSPEC_QUOTA_BOOTSTRAP_ADMITS is pinned to 0: one behaviour per
+        // file. The refresh seam is tested in drain-quota-refresh.test.ts.
+        MINSPEC_QUOTA_REFRESH: '0', ...env },
       });
       return { code: 0, out: out.trim() };
     } catch (e: any) {

@@ -258,7 +258,7 @@ autonomy_stop_classes_for_paths() {
   # reported as human-owned content it never touched.
   if paths_have_approvable_doc <<<"$changed_files"; then
     local residual=""
-    residual=$(grep -vE "${PUBLISH_PATH_RE}|${MACHINERY_PATH_RE}" <<<"$changed_files" || true)
+    residual=$(grep -vE "${PUBLISH_PATH_RE}|${MACHINERY_PATH_RE}" <<<"$changed_files" || true)  # swallow-ok: grep -v exits 1 when it filters everything out, which is the answer (no residual paths), not a failure; the input is a here-string and cannot fail
     if [[ -n "${residual//[$'\n\r\t ']/}" ]] && paths_have_approvable_doc <<<"$residual"; then
       classes+=('approval-or-acceptance')
     fi
@@ -352,12 +352,12 @@ SPECIFY_SCOPE_RE='^specs/|^docs/decisions/'
 # a never-wrong product is worse than the refusal.
 specify_scope_stray() {
   local changed stray
-  changed="$(grep -v '^[[:space:]]*$' || true)"
+  changed="$(grep -v '^[[:space:]]*$' || true)"  # swallow-ok: grep -v exits 1 when every line was blank, which is the answer (nothing changed); the next line branches on empty
   if [[ -z "$changed" ]]; then
     echo "(no changed files at all — a specify-only dispatch must produce a spec)"
     return 0
   fi
-  stray="$(printf '%s\n' "$changed" | grep -vE "$SPECIFY_SCOPE_RE" || true)"
+  stray="$(printf '%s\n' "$changed" | grep -vE "$SPECIFY_SCOPE_RE" || true)"  # swallow-ok: grep -v exits 1 when nothing falls outside the allowed scope, which is the answer
   [[ -z "$stray" ]] && return 1
   printf '%s\n' "$stray"
   return 0
@@ -556,7 +556,7 @@ if [[ -n "$FORCE_ROLE" ]]; then
 else
   # `|| true`: grep exits 1 when no role: label exists, which would abort the
   # whole script under `set -euo pipefail` before the dev fallback could apply.
-  ROLE=$(echo "$ISSUE_LABELS" | grep -oP '^role:\K.*' | head -1 || true)
+  ROLE=$(echo "$ISSUE_LABELS" | grep -oP '^role:\K.*' | head -1 || true)  # swallow-ok: grep -oP exits 1 when the issue carries no role: label, which is a legitimate empty; the case below has a default arm
   ROLE="${ROLE:-dev}"
 fi
 
@@ -896,14 +896,48 @@ ALLOWED_TOOLS="Read,Edit,Write,Glob,Grep,Bash(npm test),Bash(npm run validate),B
 #     a reviewer ai-review:pass (combine = fail toward the safe outcome).
 #   • never-throw: any failure degrades to ai-review:changes + a stderr WARNING
 #     and NEVER blocks the agent-done labelling / issue-comment behaviour below.
-#   • no local `ai-review:*` label mutation (#600): this stage runs under the
-#     operator's human `gh` credential, which can never satisfy the provenance
-#     guard's bot allowlist — see the long comment in step 7 below. The
+#   • no local `ai-review:*` label mutation (#600): this stage's writes carry a
+#     bot-attributed App token (`gh_bot_init`, #1355) same as everything else in
+#     this script, but the label is left to CI regardless — see the long
+#     comment in step 7 below for why identity alone doesn't settle it. The
 #     `ai-review:*` label is applied ONLY by CI (ai-review.yml), authenticated
 #     as the reviewer bot.
 # Reuses the shared, trigger-agnostic unit (review-branch.sh + review-decide.sh)
 # so a future PR-open Action (Track B, #74) can post the same verdict via its own
 # token — only this poster differs. Called ONLY on the successful-push path.
+
+# post_advisory_review VERB BODY — post the advisory PR review via `gh pr
+# review $VERB`, falling back to a plain `gh pr comment` when that fails (the
+# expected path on a self-authored PR: PRs here are opened by the bot, and GitHub
+# refuses a review from the PR's own author). Both calls already run under the
+# bot-attributed token this whole script arms via `gh_bot_init` (#1355) — this
+# helper is about the WRITE succeeding, not who it is attributed to.
+#
+# #1802: the previous inline `2>/dev/null || ... 2>/dev/null || true` chain
+# swallowed a failure of BOTH calls with no trace — "the review was posted" was
+# never verified. This keeps that same non-fatal shape (advisory must never
+# abort dispatch — the caller gets no signal to react to either way) but prints
+# a loud stderr warning naming the PR and both `gh` errors when neither post
+# succeeds, instead of going silent.
+# >>> post-advisory-review
+post_advisory_review() {
+  local verb="$1" body="$2" out review_err
+  if out="$(gh pr review "$pr_num" --repo "$REPO" "$verb" --body "$body" 2>&1)"; then
+    [[ -n "$out" ]] && echo "$out"
+    return 0
+  fi
+  review_err="$out"
+  if out="$(gh pr comment "$pr_num" --repo "$REPO" --body "$body" 2>&1)"; then
+    [[ -n "$out" ]] && echo "$out"
+    return 0
+  fi
+  echo "  ⚠ advisory review NOT posted on PR #${pr_num} — both \`gh pr review\` and the \`gh pr comment\` fallback failed (non-fatal, dispatch continues):" >&2
+  echo "      gh pr review:  ${review_err}" >&2
+  echo "      gh pr comment: ${out}" >&2
+  return 0
+}
+# <<< post-advisory-review
+
 run_reviewer_stage() {
   local base="origin/main"   # the pre-push fetch point this branch forked from
   local decide="${SCRIPT_DIR}/review-decide.sh"
@@ -913,7 +947,7 @@ run_reviewer_stage() {
   #    The gate emits the FINAL label directly (ai-review:pass|ai-review:changes).
   local rev_out reviewer_verdict
   rev_out=$( cd "$WORKTREE" && "$reviewer" "$base" HEAD --role reviewer 2>>"$LOG" ) || true
-  reviewer_verdict=$( printf '%s\n' "$rev_out" | "$decide" | tr -d '[:space:]' ) || true
+  reviewer_verdict=$( printf '%s\n' "$rev_out" | "$decide" | tr -d '[:space:]' ) || true  # swallow-ok: the very next line converts empty to ai-review:changes, so a failed decider fails CLOSED to the strict verdict
   [[ -z "$reviewer_verdict" ]] && reviewer_verdict="ai-review:changes"
 
   # 2. Security reviewer — ONLY when the diff touches packages/ source.
@@ -921,7 +955,7 @@ run_reviewer_stage() {
   if git -C "$WORKTREE" diff --name-only "${base}...HEAD" | grep -q '^packages/'; then
     touches_pkg="yes"
     sec_out=$( cd "$WORKTREE" && "$reviewer" "$base" HEAD --role security 2>>"$LOG" ) || true
-    sec_verdict=$( printf '%s\n' "$sec_out" | "$decide" | tr -d '[:space:]' ) || true
+    sec_verdict=$( printf '%s\n' "$sec_out" | "$decide" | tr -d '[:space:]' ) || true  # swallow-ok: same as the reviewer verdict above: empty is converted to ai-review:changes on the next line
     [[ -z "$sec_verdict" ]] && sec_verdict="ai-review:changes"
   else
     touches_pkg="no"
@@ -985,11 +1019,11 @@ run_reviewer_stage() {
   #    this branch to ever land. Reuse the already-built $BODY (do not rebuild the
   #    summary) and the issue title for the PR.
   local pr_num
-  pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)
+  pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-known: #1978 an API failure reads as no PR exists
   if [[ -z "$pr_num" ]]; then
     gh pr create --repo "$REPO" --base main --head "$BRANCH" \
       --title "$ISSUE_TITLE" --body "$BODY" 2>/dev/null || true
-    pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)
+    pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-known: #1978 an API failure reads as no PR exists
   fi
   if [[ -z "$pr_num" ]]; then
     echo "WARNING: no PR for $BRANCH (create failed?) — AI review verdict: $combined (not posted)" >&2
@@ -1057,28 +1091,39 @@ run_reviewer_stage() {
   # 7. Post the advisory review ONLY — never mutate the `ai-review:*` label here.
   #    Credentialed ops — parent-side, after the agent exited. `gh pr
   #    review --approve/--request-changes` fails on a self-authored PR, so fall
-  #    back to a plain comment.
+  #    back to a plain comment (post_advisory_review, defined above).
   #
-  #    #600 root cause: this dispatcher runs under the OPERATOR's ambient `gh`
-  #    credential (a human PAT) — it mints no GitHub App token, unlike
-  #    ai-review.yml ([:166-172]), which is the ONLY caller that authenticates as
-  #    the allowlisted reviewer bot (AI_REVIEW_BOT_LOGINS). A human-applied
-  #    `ai-review:pass` is therefore unauthorized self-approval and is
-  #    guaranteed-reverted by the provenance guard (#397,
-  #    .github/scripts/ai-review-guard.js::decideProvenanceRevert) — dead work
-  #    that raced the CI bot's real label and produced a confusing
-  #    pass→revert→re-pass churn on every dispatched PR (confirmed on #583/#587/
-  #    #589/#590). The missing gate: nothing previously stopped local dispatch
-  #    from writing to a merge-gating label under an identity that can never
-  #    satisfy its own provenance check. Fix: leave ALL `ai-review:*` labelling
-  #    to CI-as-bot; this stage posts the advisory comment/review only.
+  #    Identity (#1355, #995 — corrected here per #1802): every `gh` call in
+  #    this script, this one included, already carries a bot-attributed App
+  #    token, minted lazily by `gh_bot_init` (sourced near the top of this
+  #    file, armed long before this function runs) on the first write. This
+  #    comment used to claim the opposite — "this dispatcher runs under the
+  #    OPERATOR's ambient `gh` credential ... mints no GitHub App token" — which
+  #    was true before #1355 landed (2026-08-07) and went stale when nobody
+  #    revisited this paragraph after that fix shipped.
+  #
+  #    #600 (still the reason the LABEL stays CI-only): a bot-attributed token
+  #    does not by itself authorize applying `ai-review:pass` — the provenance
+  #    guard (#397, .github/scripts/ai-review-guard.js::decideProvenanceRevert)
+  #    keys on `senderLogin` against the `AI_REVIEW_BOT_LOGINS` allowlist, and
+  #    even a matching identity would still leave TWO writers racing to set one
+  #    gating label. That produced a confirmed pass→revert→re-pass churn on
+  #    #583/#587/#589/#590 back when this ran as the human. Fix, unchanged:
+  #    leave ALL `ai-review:*` labelling to CI (ai-review.yml); this stage
+  #    posts the advisory comment/review only.
+  #
+  #    Failure handling (#1802): `--approve`/`--request-changes` routinely
+  #    fails on a self-authored PR (every PR here is opened by the bot), so
+  #    falling back to a comment is the expected common path, not an error.
+  #    Both calls failing together used to be swallowed by a bare `|| true` —
+  #    "the review was posted" was never actually verified. post_advisory_review
+  #    stays non-fatal (advisory must never abort dispatch) but now prints a
+  #    loud stderr warning naming the PR and both gh errors on a total failure.
   if [[ "$combined" == "ai-review:pass" ]]; then
-    gh pr review "$pr_num" --repo "$REPO" --approve --body "$review_body" 2>/dev/null \
-      || gh pr comment "$pr_num" --repo "$REPO" --body "$review_body" 2>/dev/null || true
+    post_advisory_review --approve "$review_body"
     echo "  → AI review: ai-review:pass (advisory only — CI applies the label as the reviewer bot) on PR #$pr_num"
   else
-    gh pr review "$pr_num" --repo "$REPO" --request-changes --body "$review_body" 2>/dev/null \
-      || gh pr comment "$pr_num" --repo "$REPO" --body "$review_body" 2>/dev/null || true
+    post_advisory_review --request-changes "$review_body"
     echo "  → AI review: ai-review:changes (advisory only — CI applies the label as the reviewer bot) on PR #$pr_num"
   fi
 }
@@ -1220,7 +1265,7 @@ shepherd_publish() {
   # the hook there is no credential to probe.
   if ! workflow_push_allowed; then
     wf=$(git -C "$WORKTREE" diff --name-only origin/main.."$BRANCH" 2>/dev/null \
-         | grep -E "$WORKFLOW_PATH_RE" || true)
+         | grep -E "$WORKFLOW_PATH_RE" || true)  # swallow-ok: pre-flight advisory only; the real gate is server-side, which rejects a workflow push regardless of what this sees
     if [[ -n "$wf" ]]; then
       echo "  NOT publishing — $BRANCH changes CI workflow files and the App token"
       echo "  has no 'workflows' permission, so the push would be rejected server-side:"
@@ -1335,7 +1380,7 @@ shepherd_own_pr() {
     return 0
   fi
   local pr_num started loop_deadline
-  pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)
+  pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-known: #1978 an API failure reads as no PR exists
   if [[ -z "$pr_num" ]]; then
     echo "  No PR for $BRANCH — nothing to shepherd."
     return 0
@@ -1826,7 +1871,7 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
       printf '%s' "$SIGNALS_INPUT" > "$SIGNALS_TMP"
       # Find the PR for this branch (the gate holds/merges a PR, not the issue).
       PR_NUM=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
-        --json number --jq '.[0].number' 2>/dev/null || true)
+        --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-known: #1978 an API failure reads as no open PR, skipping the shepherding below
 
       echo "Running auto-merge gate (mode: $AUTOMERGE_MODE, base: $AUTOMERGE_BASE, PR: ${PR_NUM:-none})..."
       DECISION=$(cd "$WORKTREE" && npx tsx "${SCRIPT_DIR}/auto-merge-gate.ts" \
@@ -1877,7 +1922,7 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
       AUTONOMY_PROCEED="no"
       SPEC024_CHANGED=""
       if [[ -n "$PR_NUM" ]]; then
-        SPEC024_CHANGED=$(gh pr diff "$PR_NUM" --repo "$REPO" --name-only 2>/dev/null || true)
+        SPEC024_CHANGED=$(gh pr diff "$PR_NUM" --repo "$REPO" --name-only 2>/dev/null || true)  # swallow-known: #1978 an API failure reads as no SPEC-024 files changed, feeding the autonomy merge decision below
       fi
       if AUTONOMY_VERDICT=$(autonomy_may_merge \
             "merge PR #${PR_NUM:-none} via the SPEC-024 consequence-hybrid gate" \
