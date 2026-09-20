@@ -58,7 +58,12 @@ function findScriptsDir(): string {
 const DRAIN = path.join(findScriptsDir(), 'drain-inbox.sh');
 const content = fs.readFileSync(DRAIN, 'utf-8');
 
-const START = '  # _ready_numbers <label> — open issue numbers for one label, or a LOUD failure.';
+// `_ready_numbers` lives at MODULE scope (one definition, two consumers: run_cycle's
+// dispatch queue and the one-shot early-exit gate), so the harness below stitches the
+// helper and the run_cycle body back together rather than extracting one span.
+const HELPER_START = '# ── The queue read — ONE definition, two consumers';
+const HELPER_END = '\nrun_cycle() {';
+const START = '  # Step 1: triage inbox issues → labels T1/T2 as agent-ready';
 const END = '  # Freshness is guaranteed by ensure_fresh_run_dir at the top of this cycle';
 
 /**
@@ -70,8 +75,16 @@ const END = '  # Freshness is guaranteed by ensure_fresh_run_dir at the top of t
  * the file exists to catch.
  */
 function queueBlock(): string {
+  const hs = content.indexOf(HELPER_START);
+  const he = content.indexOf(HELPER_END);
   const start = content.indexOf(START);
   const end = content.indexOf(END);
+  if (hs < 0 || he < 0 || he <= hs) {
+    throw new Error(
+      'Could not extract _ready_numbers from drain-inbox.sh — markers moved. Fix this ' +
+        'extractor rather than deleting the test.',
+    );
+  }
   if (start < 0 || end < 0 || end <= start) {
     throw new Error(
       'Could not extract the queue-reading block from drain-inbox.sh — markers moved. ' +
@@ -80,7 +93,7 @@ function queueBlock(): string {
         'full backlog (#1855).',
     );
   }
-  return content.slice(start, end);
+  return `${content.slice(hs, he)}\n${content.slice(start, end)}`;
 }
 
 let tmp: string;
@@ -187,5 +200,63 @@ describe('drain queue read: a failed query is not an empty queue (#1855)', () =>
 
     expect(out).toContain('the inbox query FAILED');
     expect(out).toContain('NOT an empty inbox');
+  });
+});
+
+/**
+ * Drive the REAL `drain-inbox.sh --dry-run`, which is the default one-shot shape a
+ * human or a session-start hook invokes. No extraction: this exercises the module-
+ * scope early-exit gate end to end, including argv dispatch and the warm call.
+ *
+ * `MINSPEC_GH_APP_TOKEN_SCRIPT` is pointed at a path that does not exist so the read
+ * path cannot mint - otherwise the stub would be bypassed by a real token and the
+ * test would measure the network instead of the branch.
+ */
+function runDryRun(mode: 'fail' | 'empty'): { out: string; status: number } {
+  const bin = stubGh(mode);
+  const r = spawnSync('bash', [DRAIN, '--dry-run'], {
+    encoding: 'utf-8',
+    timeout: 60_000,
+    env: {
+      ...process.env,
+      PATH: `${bin}:${process.env.PATH}`,
+      GH_TOKEN: '',
+      GITHUB_TOKEN: '',
+      MINSPEC_GH_APP_TOKEN_SCRIPT: path.join(tmp, 'no-such-token-script'),
+    },
+  });
+  return { out: `${r.stdout ?? ''}${r.stderr ?? ''}`, status: r.status ?? -1 };
+}
+
+describe('drain one-shot early exit: TOTAL is a gate, not a display (#1855, #2003 review)', () => {
+  // The blocking finding on #2003. The first pass fixed run_cycle and left this
+  // sibling, because the block sits next to the status line and READS like display.
+  // It is not: `TOTAL` decides whether a one-shot invocation exits early, and a
+  // one-shot is the DEFAULT. A failed query gave READY_COUNT=0, TOTAL=0, and a
+  // silent `exit 0` over a full backlog - the same defect the PR was fixing, in the
+  // same file, twelve hundred lines down.
+  it('exits NON-ZERO and says HOLDING when the queue cannot be read', () => {
+    const { out, status } = runDryRun('fail');
+
+    expect(status).not.toBe(0);
+    expect(out).toContain('HOLDING');
+    expect(out).toContain('NOT an empty queue');
+    expect(out).toContain('#1855');
+    expect(out).toContain('gh auth login');
+
+    // The old behaviour was a bare `exit 0` with no output at all, so nothing that
+    // reads as a normal finish may appear. Deliberately NOT asserting on the string
+    // "nothing to do": the HOLDING message quotes that phrase to name what it is
+    // refusing to say, so the assertion would have been satisfied by the message
+    // rather than by the behaviour.
+    expect(out).not.toMatch(/dry-run — run scripts/);
+    expect(out).not.toContain('📬');
+  });
+
+  it('CONTROL: a genuinely empty queue still exits 0 and stays quiet', () => {
+    const { out, status } = runDryRun('empty');
+
+    expect(status).toBe(0);
+    expect(out).not.toContain('HOLDING');
   });
 });

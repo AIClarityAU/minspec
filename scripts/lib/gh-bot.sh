@@ -315,6 +315,12 @@ _gh_bot_ensure() {
 # It does NOT make a failed read quiet. Callers must still distinguish "the query
 # failed" from "the answer is empty" — this only removes the most common cause of the
 # first. `drain-inbox.sh` holds loudly on a non-zero status for exactly that reason.
+# The once-only guard is per-SHELL, not per-process, and that distinction is load
+# bearing. A caller that reads inside `$(...)` runs in a subshell, so neither the
+# guard nor the `export GH_TOKEN` below propagates back to the parent — such a caller
+# re-mints on every read. That is correct but wasteful, and on a many-read loop it is
+# a rate-limit concern. `gh_bot_warm_read` exists so those callers can pay once, in
+# the parent, before the first read (#2003 review).
 _gh_bot_read_auth() {
   [[ "${_GH_BOT_READ_AUTH_TRIED:-0}" == "1" ]] && return 0
   _GH_BOT_READ_AUTH_TRIED=1
@@ -378,6 +384,21 @@ gh_bot_init() {
 # write, so the choice is recorded in the source rather than left to memory.
 gh_bot_graphql_read() {
   command gh api graphql "$@"
+}
+
+# gh_bot_warm_read — mint the read token ONCE, here, in the caller's own shell.
+#
+# For a script that does many reads inside `$(...)`. Each of those is a subshell, so
+# `_gh_bot_read_auth` runs there, exports into a shell that is about to vanish, and
+# the next read mints all over again. Calling this in the parent puts GH_TOKEN in the
+# environment the subshells inherit, so the whole run pays for one token.
+#
+# Same best-effort, never-fatal contract as the read path it wraps: no key means no
+# change, and the reads proceed exactly as they would have. Call it AFTER argv
+# dispatch, never at source time — the offline seams and the test suites must not be
+# made to touch the network.
+gh_bot_warm_read() {
+  _gh_bot_read_auth
 }
 
 # gh_bot_refresh — re-mint if OUR token is near expiry. No-op for an inherited

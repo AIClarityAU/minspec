@@ -642,8 +642,42 @@ reconcile_labels() {
   reconcile_done_issues  || echo "[drain] reconcile: agent-done pass errored — continuing."
 }
 
+# ── The queue read — ONE definition, two consumers ────────────────────────────
+#
+# _ready_numbers <label> — open issue numbers for one label, or a LOUD failure.
+#
+# #1855's mechanism, in one line: `gh issue list ... 2>/dev/null || true` collapses
+# "the query failed" into "the queue is empty", and every caller below reports empty
+# as a finished cycle. Measured 2026-09-21: this loop logged
+# "no agent-ready / agent-ready-specify issues after triage — cycle done" 47 times
+# while the repo held 119 `agent-ready` + 326 `agent-ready-specify` open issues. The
+# log was current to the second and the loop was alive, so both of the obvious
+# health probes came back green; the only probe that catches it is comparing this
+# count against an independently obtained one.
+#
+# Failure and emptiness are different answers and must not share a representation.
+# This prints numbers on stdout and returns gh's own status, so an empty queue is a
+# SUCCESS with no output and a broken query is a non-zero the caller must handle.
+# gh's stderr is deliberately NOT redirected — the message that would have named the
+# cause ("please run: gh auth login") was being discarded.
+#
+# The limit is EXPLICIT and announced. `gh issue list` caps at 30 by default and
+# says nothing, so the queue this loop has always enumerated was the first 30 per
+# label — a silent cap that reads as the whole queue. Pinning it here changes no
+# behaviour (30 is what it already was) while making the number a decision someone
+# made rather than a default nobody saw, and the caller warns when a result lands
+# exactly on the cap. Raising it is tracked separately: it is a dispatch-VOLUME
+# decision, not a correctness one, and does not belong in the same change as a
+# fail-loud fix.
+_ready_limit="${MINSPEC_DRAIN_QUEUE_LIMIT:-30}"
+_ready_numbers() {
+  gh issue list --repo "$REPO" --label "$1" --limit "$_ready_limit" \
+    --json number --jq '.[].number'
+}
+
 run_cycle() {
   local inbox_issues all_ready n out drc cap
+  local inbox_rc ready_rc ready_full ready_spec _lbl
   local ac_halt ac_sig
   local quota_verdict
 
@@ -669,37 +703,6 @@ run_cycle() {
   # sync loop, so neither can observe the other's effect. Never mutates a live
   # session's tree — fail-safe toward fetch-only.
   sync_shared_checkouts
-
-  # _ready_numbers <label> — open issue numbers for one label, or a LOUD failure.
-  #
-  # #1855's mechanism, in one line: `gh issue list ... 2>/dev/null || true` collapses
-  # "the query failed" into "the queue is empty", and every caller below reports empty
-  # as a finished cycle. Measured 2026-09-21: this loop logged
-  # "no agent-ready / agent-ready-specify issues after triage — cycle done" 47 times
-  # while the repo held 119 `agent-ready` + 326 `agent-ready-specify` open issues. The
-  # log was current to the second and the loop was alive, so both of the obvious
-  # health probes came back green; the only probe that catches it is comparing this
-  # count against an independently obtained one.
-  #
-  # Failure and emptiness are different answers and must not share a representation.
-  # This prints numbers on stdout and returns gh's own status, so an empty queue is a
-  # SUCCESS with no output and a broken query is a non-zero the caller must handle.
-  # gh's stderr is deliberately NOT redirected — the message that would have named the
-  # cause ("please run: gh auth login") was being discarded.
-  #
-  # The limit is EXPLICIT and announced. `gh issue list` caps at 30 by default and
-  # says nothing, so the queue this loop has always enumerated was the first 30 per
-  # label — a silent cap that reads as the whole queue. Pinning it here changes no
-  # behaviour (30 is what it already was) while making the number a decision someone
-  # made rather than a default nobody saw, and the caller warns when a result lands
-  # exactly on the cap. Raising it is tracked separately: it is a dispatch-VOLUME
-  # decision, not a correctness one, and does not belong in the same change as a
-  # fail-loud fix.
-  _ready_limit="${MINSPEC_DRAIN_QUEUE_LIMIT:-30}"
-  _ready_numbers() {
-    gh issue list --repo "$REPO" --label "$1" --limit "$_ready_limit" \
-      --json number --jq '.[].number'
-  }
 
   # Step 0: reconcile the label board against observable reality (#1306, #1322).
   # Runs BEFORE triage so a cycle never enumerates a queue it already knows is wrong.
@@ -1433,23 +1436,47 @@ done
 # --auto/--continuous, for anyone who wants the old single-pass behaviour back.
 [[ "${MINSPEC_DRAIN_CONTINUOUS:-1}" == "0" ]] && CONTINUOUS=false
 
-# Count pending work across both stages
-INBOX_COUNT=0
-INBOX_ISSUES=$(gh issue list --repo "$REPO" --label "inbox" \
-  --json number --jq '.[].number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as an empty inbox in the status line
-[[ -n "$INBOX_ISSUES" ]] && INBOX_COUNT=$(echo "$INBOX_ISSUES" | wc -l | tr -d ' ')
+# One token for the whole run. Every read below and inside run_cycle happens in a
+# `$(...)` subshell, so without this each one mints its own App token and throws it
+# away (#2003 review). Placed HERE, after argv dispatch, so the pure offline seams
+# above still run with no network at all. Never fatal: no key means no change.
+gh_bot_warm_read
 
-# Both ready classes (#1169) — same OR-not-AND reason as run_cycle's Step 2. This
-# count decides whether a one-shot run exits early, so undercounting here would make
-# the drain report "nothing to do" while specify work sat queued.
-READY_ISSUES=$(
-  {
-    gh issue list --repo "$REPO" --label "agent-ready" \
-      --json number --jq '.[].number' 2>/dev/null || true
-    gh issue list --repo "$REPO" --label "agent-ready-specify" \
-      --json number --jq '.[].number' 2>/dev/null || true
-  } | sort -un
-)  # swallow-known: #1855 a failed query reads as nothing ready in the status line
+# Count pending work across both stages.
+#
+# This is NOT a display path, and reading it as one is how it survived the first
+# pass of this fix (#2003 review, blocking finding). `TOTAL` decides whether a
+# one-shot invocation exits early — and a one-shot is the DEFAULT, so a failed query
+# here collapsed to READY_COUNT=0, TOTAL=0, and a silent `exit 0` over a full
+# backlog. The comment two paragraphs down already said so in words: "this count
+# decides whether a one-shot run exits early, so undercounting here would make the
+# drain report 'nothing to do' while specify work sat queued." It was right, and the
+# `|| true` above it made exactly that happen.
+#
+# Same `_ready_numbers` as run_cycle uses, for the same reason the write vocabulary
+# in lib/gh-bot.sh lives in one place: two copies half-knowing one predicate is how
+# they drift, and this pair already drifted once.
+INBOX_COUNT=0
+_status_rc=0
+INBOX_ISSUES="$(_ready_numbers "inbox")" || _status_rc=$?
+READY_ISSUES=""
+if (( _status_rc == 0 )); then
+  # Both ready classes (#1169) — same OR-not-AND reason as run_cycle's Step 2.
+  _ready_a="$(_ready_numbers "agent-ready")" || _status_rc=$?
+  _ready_b=""
+  (( _status_rc == 0 )) && { _ready_b="$(_ready_numbers "agent-ready-specify")" || _status_rc=$?; }
+  READY_ISSUES="$(printf '%s\n%s\n' "$_ready_a" "$_ready_b" | sed '/^$/d' | sort -un)"
+fi
+
+if (( _status_rc != 0 )); then
+  echo "[drain] HOLDING: could not read the work queue (gh exit ${_status_rc})." >&2
+  echo "[drain]          This is NOT an empty queue. Exiting 1 rather than reporting" >&2
+  echo "[drain]          'nothing to do' over work that may be waiting (#1855)." >&2
+  echo "[drain]          See the gh error above for the cause." >&2
+  exit 1
+fi
+
+[[ -n "$INBOX_ISSUES" ]] && INBOX_COUNT=$(echo "$INBOX_ISSUES" | wc -l | tr -d ' ')
 READY_COUNT=0
 [[ -n "$READY_ISSUES" ]] && READY_COUNT=$(echo "$READY_ISSUES" | wc -l | tr -d ' ')
 
