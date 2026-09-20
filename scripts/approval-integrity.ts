@@ -312,13 +312,18 @@ function main(): void {
 // A broken guard here would silently turn the gate into a no-op that exits 0, which is
 // the fail-open this whole file exists to prevent — so the guard is not trusted on its
 // own: the suite's git-wiring test runs the real CLI and asserts it still exits 1.
+//
+// Deliberately NOT wrapped in try/catch. A swallow here would return `false`, `main()`
+// would never run, and the process would exit 0 — the gate silently passing, which is
+// the fail-open DR-066 clause 1 exists to forbid and the exact failure this whole file
+// is built to prevent. If the entrypoint cannot be determined that is an infrastructure
+// failure: let it throw, so the CLI exits non-zero and a test shows a visible error.
+//
+// (`scripts/check-swallowed-gate-signal.ts` would have flagged this, but it scans
+// `path.endsWith('.sh')` only, so no TypeScript is covered — see the follow-up issue.)
 const invokedDirectly = (() => {
-  try {
-    const entry = process.argv[1];
-    return Boolean(entry) && path.resolve(entry) === fileURLToPath(import.meta.url);
-  } catch {
-    return false;
-  }
+  const entry = process.argv[1];
+  return Boolean(entry) && path.resolve(entry) === fileURLToPath(import.meta.url);
 })();
 
 if (invokedDirectly) {
