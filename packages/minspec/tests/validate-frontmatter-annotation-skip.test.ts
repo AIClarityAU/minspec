@@ -54,6 +54,27 @@ function plantUnreadable(dir: string, name: string): void {
   fs.symlinkSync('/nonexistent/nowhere.md', path.join(dir, 'specs', name));
 }
 
+/**
+ * Make a directory unreadable, and PROVE the injection took, because `chmod` is inert
+ * for a root user and a fixture that cannot fail is worse than no fixture at all
+ * ([[f-fixt-can-enco]]). Throwing here turns a vacuous pass into a visible failure.
+ */
+function makeUnreadable(dir: string): void {
+  fs.chmodSync(dir, 0o000);
+  let threw = false;
+  try {
+    fs.readdirSync(dir);
+  } catch {
+    threw = true;
+  }
+  if (!threw) {
+    throw new Error(
+      `fixture inert: chmod 000 on ${dir} did not make it unreadable (running as root?). ` +
+        'This case cannot pass honestly here; it must not be reported as green.',
+    );
+  }
+}
+
 function runValidate(cwd: string): { status: number | null; output: string } {
   const r = spawnSync(TSX_BIN, [SCRIPT_PATH], { cwd, encoding: 'utf-8' });
   return { status: r.status, output: `${r.stdout}\n${r.stderr}` };
@@ -120,6 +141,45 @@ describe('#1912 Rule 20 — no silent skip (constitution invariant 2)', () => {
       const { status, output } = runValidate(dir);
       expect(output).toContain(COULD_NOT_RUN);
       expect(status).not.toBe(0);
+    });
+  });
+  // The per-file catch above is unreachable for a failure that happens while BUILDING
+  // the file list. `safeGlob` turns any error in the recursive walk into an empty list,
+  // so one unreadable directory used to hand the loop zero files and nothing was said.
+  // Measured before the fix: 2 findings clean, 0 with one unreadable subdirectory,
+  // "Frontmatter validation passed." both times (#1999).
+  it('announces a corpus it could not even list, rather than scanning zero files quietly', () => {
+    withTmp((dir) => {
+      writeSpec(dir, 'good', 'status: draft # annotated');
+      writeSpec(dir, 'locked', 'status: draft # annotated');
+      makeUnreadable(path.join(dir, 'specs', 'locked'));
+      try {
+        const { output } = runValidate(dir);
+        expect(output).toContain('Rule 20 validated NOTHING this run');
+      } finally {
+        fs.chmodSync(path.join(dir, 'specs', 'locked'), 0o755);
+      }
+    });
+  });
+
+  it('fails closed when the corpus cannot be listed and the rule is ratcheted to error', () => {
+    withTmp((dir) => {
+      fs.mkdirSync(path.join(dir, '.minspec'), { recursive: true });
+      fs.writeFileSync(
+        path.join(dir, '.minspec', 'config.json'),
+        JSON.stringify({ statusLineAnnotation: 'error' }),
+        'utf-8',
+      );
+      writeSpec(dir, 'good', 'status: draft');
+      writeSpec(dir, 'locked', 'status: draft');
+      makeUnreadable(path.join(dir, 'specs', 'locked'));
+      try {
+        const { status, output } = runValidate(dir);
+        expect(output).toContain('Rule 20 validated NOTHING this run');
+        expect(status).not.toBe(0);
+      } finally {
+        fs.chmodSync(path.join(dir, 'specs', 'locked'), 0o755);
+      }
     });
   });
 });

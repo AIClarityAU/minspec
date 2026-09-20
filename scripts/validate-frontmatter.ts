@@ -624,9 +624,16 @@ try {
 // `statusLineAnnotation` ratchets to `error` that is a merge-gating check going quiet,
 // which is precisely what the invariant forbids. So: directory absence is the only
 // silence, and a file the rule could not run on is REPORTED at the configured severity.
-// `safeGlob` (not a hand-rolled try) supplies the one legitimate silence: a repo with
-// no `specs/` at all has nothing to check. Every OTHER failure is reported below.
-const annFiles = safeGlob(specsDir, '.md');
+// AUDIT THE FEEDER, NOT JUST THIS RULE'S OWN CATCH (#1999). The per-file catch below
+// is unreachable for an error that happens while BUILDING the file list: `safeGlob`
+// converts any failure in the recursive walk into an empty list, so one unreadable
+// directory under `specs/` hands this loop zero files and the catch never fires.
+// Measured here: 2 findings on a clean tree, 0 with a single unreadable subdirectory,
+// and `Frontmatter validation passed.` printed both times.
+//
+// `safeGlob`'s own fix is in flight (#1999, PR #2005) and belongs to that PR, not this
+// one, so Rule 20 does not depend on its silence either way: absence of `specs/` is the
+// only silence, and a walk that fails is reported at the configured severity.
 // No try here on purpose: `loadConfig` is total (config.ts catches its own read/parse
 // and returns DEFAULT_CONFIG), so a guard would be an unreachable branch pretending to
 // cover something. That totality hides a separate, PRE-EXISTING downgrade — a corrupt
@@ -634,6 +641,16 @@ const annFiles = safeGlob(specsDir, '.md');
 // That lives in shared config, not in this rule, and is filed rather than patched here.
 const annCfg = loadConfig(ROOT);
 const annFailsClosed = annCfg.statusLineAnnotation === 'error';
+let annFiles: string[] = [];
+if (existsSync(specsDir)) {
+  try {
+    annFiles = glob(specsDir, '.md');
+  } catch (error) {
+    const why = `the specs corpus could not be listed (${(error as Error).message}) — Rule 20 validated NOTHING this run; do not read the green as a clean corpus.`;
+    if (annFailsClosed) fail(specsDir, why);
+    else warn(`status-annotation: ${why}`);
+  }
+}
 for (const file of annFiles) {
   let findings: ReturnType<typeof validateStatusAnnotation>;
   try {
