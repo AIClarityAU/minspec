@@ -599,7 +599,7 @@ try {
   // specs/ unreadable / absent — nothing to validate, stay silent.
 }
 
-// Rule 16 (#1912): the `status:` frontmatter line carries a value and nothing
+// Rule 20 (#1912): the `status:` frontmatter line carries a value and nothing
 // else (the #1900 convention). `validateStatusAnnotation` is the SAME function the
 // in-extension approve gate (`validateSpec`) calls — enforced identically on the
 // commit/CI surface, never a reimplementation that could drift (the #654 lesson).
@@ -617,20 +617,41 @@ try {
 // same defect (#1912 names all three), but every file the issue measured is a spec,
 // and `parseSpec` is the spec reader — widening to `docs/decisions/` and `docs/epics/`
 // belongs with the writer half, which is where those artifact kinds get their reader.
-try {
-  const annCfg = loadConfig(ROOT);
-  for (const file of glob(specsDir, '.md')) {
-    const content = readFileSync(file, 'utf-8');
-    for (const v of [
-      ...validateStatusAnnotation(parseSpec(content), annCfg),
-      ...validateFrontmatterProse(parseSpec(content), annCfg),
-    ]) {
-      if (v.severity === 'error') fail(file, `${v.message} ${v.fixHint}`);
-      else warn(`status-annotation ${relative(ROOT, file)}: ${v.message}`);
-    }
+//
+// NO SILENT SKIP (invariant #2). A single `try` around the whole loop would let one
+// unreadable or unparseable file abort the sweep and leave every REMAINING file
+// unchecked, with nothing said — best-effort enforcement wearing a green tick. Once
+// `statusLineAnnotation` ratchets to `error` that is a merge-gating check going quiet,
+// which is precisely what the invariant forbids. So: directory absence is the only
+// silence, and a file the rule could not run on is REPORTED at the configured severity.
+// `safeGlob` (not a hand-rolled try) supplies the one legitimate silence: a repo with
+// no `specs/` at all has nothing to check. Every OTHER failure is reported below.
+const annFiles = safeGlob(specsDir, '.md');
+// No try here on purpose: `loadConfig` is total (config.ts catches its own read/parse
+// and returns DEFAULT_CONFIG), so a guard would be an unreachable branch pretending to
+// cover something. That totality hides a separate, PRE-EXISTING downgrade — a corrupt
+// `.minspec/config.json` silently drops a repo that configured `error` back to `warn`.
+// That lives in shared config, not in this rule, and is filed rather than patched here.
+const annCfg = loadConfig(ROOT);
+const annFailsClosed = annCfg.statusLineAnnotation === 'error';
+for (const file of annFiles) {
+  let findings: ReturnType<typeof validateStatusAnnotation>;
+  try {
+    const parsed = parseSpec(readFileSync(file, 'utf-8'));
+    findings = [
+      ...validateStatusAnnotation(parsed, annCfg),
+      ...validateFrontmatterProse(parsed, annCfg),
+    ];
+  } catch (error) {
+    const why = `the status-annotation rules could not run on this file (${(error as Error).message})`;
+    if (annFailsClosed) fail(file, why);
+    else warn(`status-annotation ${relative(ROOT, file)}: ${why}`);
+    continue;
   }
-} catch {
-  // corpus dirs unreadable / absent — nothing to validate, stay silent.
+  for (const v of findings) {
+    if (v.severity === 'error') fail(file, `${v.message} ${v.fixHint}`);
+    else warn(`status-annotation ${relative(ROOT, file)}: ${v.message}`);
+  }
 }
 
 // Rule 14 (harden, #760): every MANAGED_REGION_TEMPLATES output path present on
