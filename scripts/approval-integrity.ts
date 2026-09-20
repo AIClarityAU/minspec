@@ -90,24 +90,37 @@ function changedFiles(baseRef: string): string[] {
  * "anyone", and it must not silently pass (invariant 2).
  */
 function permittedApprovers(rootDir: string): string[] {
-  const configPath = path.join(rootDir, '.minspec', 'config.json');
-  const raw = fs.readFileSync(configPath, 'utf-8');
-  const parsed = JSON.parse(raw) as { approvers?: unknown };
-  const list = parsed.approvers;
-  if (!Array.isArray(list)) return [];
-  return list.filter((e): e is string => typeof e === 'string').map((e) => e.trim().toLowerCase()).filter(Boolean);
+  // Never throws. `evaluateApprovalIntegrity` is documented to return a structured
+  // Failure[] rather than raise for a POLICY problem, and a missing or unreadable
+  // config is a policy problem: it means no allowlist is configured, which must
+  // deny-by-default through the normal path. Raising here would still fail closed via
+  // the CLI's outer catch, but a library caller would get an exception instead of the
+  // deny it asked for — two different behaviours for one condition.
+  try {
+    const raw = fs.readFileSync(path.join(rootDir, '.minspec', 'config.json'), 'utf-8');
+    const parsed = JSON.parse(raw) as { approvers?: unknown };
+    if (!Array.isArray(parsed.approvers)) return [];
+    return parsed.approvers
+      .filter((e): e is string => typeof e === 'string')
+      .map((e) => e.trim().toLowerCase())
+      .filter(Boolean);
+  } catch {
+    return [];
+  }
 }
 
 /**
- * The whole decision, as a pure input-to-output mapping over (repo root, changed files).
- * Exported so the security-critical logic is exhaustively unit-testable without spawning
- * a process or building a git history — the same discipline `checkApprover` follows, and
- * the reason this file's T0 suite can afford to enumerate every refusal.
- *
- * Returns [] to mean PASS. Never throws for a *policy* failure; a thrown error means the
- * check itself broke, and the CLI shell below turns that into a refusal (invariant 2).
+ * Read a path as it exists on the MERGE BASE, or null when it is not there.
+ * Injected rather than called directly so the decision stays a pure function of its
+ * inputs and the T0 suite can drive the base side without building git history.
  */
-export function evaluateApprovalIntegrity(rootDir: string, changed: readonly string[]): Failure[] {
+export type ReadBase = (relPath: string) => string | null;
+
+export function evaluateApprovalIntegrity(
+  rootDir: string,
+  changed: readonly string[],
+  readBase: ReadBase,
+): Failure[] {
   if (changed.length === 0) return [];
 
   const sidecars = changed.filter((f) => f.startsWith(APPROVALS_PREFIX) && f.endsWith('.json'));
@@ -135,6 +148,19 @@ export function evaluateApprovalIntegrity(rootDir: string, changed: readonly str
   // from the path rather than trusting the record's own `specPath` is what stops a record
   // being filed under one approvable while claiming another.
   const derivedSpecPath = sidecarPath.slice(APPROVALS_PREFIX.length).replace(/\.json$/, '');
+
+  // Shape guard on the derived path. Not exploitable from the CLI, because
+  // `git diff --name-only` emits repo-normalized paths with no `..` segments and every
+  // operation here is a read — but this function is exported, and a future caller that
+  // feeds it a non-git-sourced list should not be able to walk out of the repo.
+  if (derivedSpecPath.split('/').includes('..') || path.isAbsolute(derivedSpecPath)) {
+    return [
+      {
+        check: 'path-shape',
+        detail: `refusing a sidecar whose derived approvable path escapes the repo: "${derivedSpecPath}"`,
+      },
+    ];
+  }
 
   let record: { specHash?: unknown; approvedBy?: unknown; specPath?: unknown };
   try {
@@ -188,6 +214,46 @@ export function evaluateApprovalIntegrity(rootDir: string, changed: readonly str
     }
   }
 
+  // 3b. THE SCOPE BOUNDARY, ENFORCED (DR-081 §5). Everything above is self-referential:
+  //     the record and the approvable both arrive in the same PR, so "the hash matches"
+  //     only proves the pusher was consistent with themselves. It does NOT prove the
+  //     content was ever reviewed.
+  //
+  //     The attack it leaves open, which a panel reviewer caught on this PR before it
+  //     merged: rewrite a spec's body to anything you like, mint a sidecar whose
+  //     specHash matches the NEW bytes, and every check above passes. Once §3's
+  //     `ai-review` exemption ships, that content merges unreviewed — which is exactly
+  //     the boundary DR-081 §5 calls load-bearing, previously asserted only in prose.
+  //
+  //     The rule that closes it: the approvable's CANONICAL hash must be identical on
+  //     the merge base and at head. A `status:`/`phases:` mirror flip is stripped by
+  //     canonicalization, so the legitimate approve flow still passes; any substantive
+  //     edit changes the hash and is refused. A brand-new approvable has no reviewed
+  //     base version at all, so approving it in the same PR is refused too.
+  if (changed.includes(derivedSpecPath)) {
+    const baseContent = readBase(derivedSpecPath);
+    if (baseContent === null) {
+      failures.push({
+        check: 'approvable-unreviewed',
+        detail:
+          `${derivedSpecPath} does not exist on the merge base, so this PR both introduces the ` +
+          `approvable and approves it. The content must land and be reviewed on its own PR first (DR-081 §5).`,
+      });
+    } else if (fs.existsSync(path.join(rootDir, derivedSpecPath))) {
+      const baseHash = specHash(baseContent);
+      const headHash = specHash(fs.readFileSync(path.join(rootDir, derivedSpecPath), 'utf-8'));
+      if (baseHash !== headHash) {
+        failures.push({
+          check: 'approvable-unreviewed',
+          detail:
+            `${derivedSpecPath} canonicalizes to ${baseHash} on the merge base but ${headHash} here, so this PR ` +
+            `changes the approvable's substance, not just its approval record. An approval PR may flip ` +
+            `status:/phases: (hash-neutral) and nothing else — the content itself is reviewed on its own PR (DR-081 §5).`,
+        });
+      }
+    }
+  }
+
   // 4. The approver is a permitted human, re-checked here because a local
   //    `assertHumanApprover` proves nothing about a pushed branch (DR-081 section 4).
   const approvedBy = typeof record.approvedBy === 'string' ? record.approvedBy : '';
@@ -223,7 +289,14 @@ function main(): void {
   const rootDir = process.cwd();
 
   const changed = changedFiles(baseRef);
-  const failures = evaluateApprovalIntegrity(rootDir, changed);
+  const readBase: ReadBase = (relPath) => {
+    try {
+      return execFileSync('git', ['show', `${baseRef}:${relPath}`], { encoding: 'utf-8' });
+    } catch {
+      return null; // absent on the base
+    }
+  };
+  const failures = evaluateApprovalIntegrity(rootDir, changed, readBase);
 
   if (failures.length > 0) fail(failures);
   if (changed.length === 0) pass('no files changed against the base');

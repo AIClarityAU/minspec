@@ -20,7 +20,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { specHash } from '../../shared/src/canonical';
-import { evaluateApprovalIntegrity } from '../../../scripts/approval-integrity';
+import { evaluateApprovalIntegrity, type ReadBase } from '../../../scripts/approval-integrity';
 
 const SPEC_REL = 'specs/minspec/SPEC-900-fixture/requirements.md';
 const SIDECAR_REL = `.minspec/approvals/${SPEC_REL}.json`;
@@ -76,9 +76,12 @@ function fixture(opts: { approvers?: unknown; record?: Record<string, unknown>; 
 /** The changed-file set a well-formed approval PR produces. */
 const PAIR = [SIDECAR_REL, SPEC_REL];
 
+/** The merge-base view: by default the approvable is unchanged, which is the normal case. */
+const BASE_UNCHANGED: ReadBase = (rel) => (rel === SPEC_REL ? SPEC_BODY : null);
+
 /** Names of the checks that refused, for assertion. */
-function checks(root: string, changed: readonly string[]): string[] {
-  return evaluateApprovalIntegrity(root, changed).map((f) => f.check);
+function checks(root: string, changed: readonly string[], readBase: ReadBase = BASE_UNCHANGED): string[] {
+  return evaluateApprovalIntegrity(root, changed, readBase).map((f) => f.check);
 }
 
 describe('approval-integrity — the decision', () => {
@@ -114,7 +117,7 @@ describe('approval-integrity — the decision', () => {
     // two apart — and the unconfigured case is the one where the reader needs to be told
     // what to add. Mutation-checked: without this, deleting the unconfigured branch
     // entirely leaves the suite green.
-    const failures = evaluateApprovalIntegrity(fixture({}), PAIR);
+    const failures = evaluateApprovalIntegrity(fixture({}), PAIR, BASE_UNCHANGED);
     const allowlistFailure = failures.find((f) => f.check === 'approver-allowlist');
     expect(allowlistFailure?.detail).toContain('.minspec/config.json');
     expect(allowlistFailure?.detail).toContain('approvers');
@@ -163,7 +166,74 @@ describe('approval-integrity — the decision', () => {
   // passing one in has to delete this test to do it.
   it('judges only the file set — an ordinary PR is out of scope, whatever it is called', () => {
     expect(checks(fixture({ approvers: [HUMAN] }), ['src/thing.ts'])).toEqual([]);
-    expect(evaluateApprovalIntegrity.length).toBe(2); // (rootDir, changed) — no title parameter
+  });
+});
+
+describe('approval-integrity — the scope boundary (DR-081 §5)', () => {
+  // The defect a panel reviewer caught on PR #1985 before it merged. Every check in the
+  // suite above is self-referential: the record and the approvable arrive in the same PR,
+  // so a matching hash proves only that the pusher was consistent with themselves. These
+  // tests are what turn "exempts the RECORD, never the APPROVABLE" from prose into a gate.
+
+  /** The attack: rewrite the spec body, then mint a record that matches the NEW bytes. */
+  function tamperedFixture(): string {
+    const rewritten = SPEC_BODY.replace('A fixture body with enough content to hash.', 'Arbitrary unreviewed content.');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apint-attack-'));
+    write(root, '.minspec/config.json', JSON.stringify({ version: '1', approvers: [HUMAN] }, null, 2));
+    write(root, SPEC_REL, rewritten);
+    write(
+      root,
+      SIDECAR_REL,
+      JSON.stringify({ specPath: SPEC_REL, specHash: specHash(rewritten), approvedBy: HUMAN, tier: 'T3' }, null, 2),
+    );
+    return root;
+  }
+
+  it('REFUSES substantive approvable content that differs from the merge base', () => {
+    // Without the base comparison this passes every other check — which is precisely
+    // why it is the blocking case.
+    expect(checks(tamperedFixture(), PAIR)).toContain('approvable-unreviewed');
+  });
+
+  it('and that tampered PR passes every self-referential check — so the base comparison is the only thing stopping it', () => {
+    // Proves the fix is load-bearing rather than redundant with an existing assertion.
+    const failures = evaluateApprovalIntegrity(tamperedFixture(), PAIR, BASE_UNCHANGED);
+    expect(failures.map((f) => f.check)).toEqual(['approvable-unreviewed']);
+  });
+
+  it('PASSES a hash-neutral status flip — the legitimate approve flow still works', () => {
+    // canonicalizeSpec strips `status:` and `phases:`, so the approve flow's own mirror
+    // write must not be mistaken for a content change. If this reddens, the gate has
+    // blocked the very thing it exists to let through.
+    const flipped = SPEC_BODY.replace('status: planning', 'status: implementing');
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), 'apint-flip-'));
+    write(root, '.minspec/config.json', JSON.stringify({ version: '1', approvers: [HUMAN] }, null, 2));
+    write(root, SPEC_REL, flipped);
+    write(
+      root,
+      SIDECAR_REL,
+      JSON.stringify({ specPath: SPEC_REL, specHash: specHash(flipped), approvedBy: HUMAN, tier: 'T3' }, null, 2),
+    );
+    expect(checks(root, PAIR)).toEqual([]);
+  });
+
+  it('REFUSES a PR that introduces the approvable and approves it in one go', () => {
+    // No reviewed base version exists, so there is nothing the approval can attest to.
+    expect(checks(fixture({ approvers: [HUMAN] }), PAIR, () => null)).toContain('approvable-unreviewed');
+  });
+
+  it('does NOT run the base comparison when the approvable is untouched', () => {
+    // The sidecar alone cannot smuggle content, so a base read is neither needed nor
+    // performed — asserted by handing it a reader that throws if called.
+    const exploding: ReadBase = () => {
+      throw new Error('base read must not happen when the approvable is unchanged');
+    };
+    expect(checks(fixture({ approvers: [HUMAN] }), [SIDECAR_REL], exploding)).toEqual([]);
+  });
+
+  it('REFUSES a derived path that escapes the repo', () => {
+    const root = fixture({ approvers: [HUMAN] });
+    expect(checks(root, ['.minspec/approvals/../../etc/passwd.json'])).toContain('path-shape');
   });
 });
 
