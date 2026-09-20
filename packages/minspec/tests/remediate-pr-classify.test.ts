@@ -78,6 +78,7 @@ describe('remediate-pr.sh --classify: problem priority', () => {
 
   it('clean automation PR → skip-clean', () => {
     expect(classify('fix/x', 'MERGEABLE', 'CLEAN', '', 'no', 'no')).toBe('skip-clean');
+    expect(classify('fix/x', 'MERGEABLE', 'BLOCKED', 'needs-human-review', 'no', 'no')).toBe('skip-clean');
   });
 });
 
@@ -123,12 +124,57 @@ describe('remediate-pr.sh --classify: an UNKNOWN merge state never asserts healt
     expect(result).toBe('skip-unhandled-state');
   });
 
-  it('BLOCKED with no fixable problem is the SAME fallthrough bug, not a special case — also not skip-clean', () => {
-    // This is the exact input the pre-fix suite asserted skip-clean for (see the
-    // "clean automation PR" test above, before this fix). BLOCKED means the merge is
-    // blocked — it was never actually clean; it only ever reached skip-clean by
-    // falling through the same unguarded default this issue fixes for UNKNOWN.
-    expect(classify('fix/x', 'MERGEABLE', 'BLOCKED', 'needs-human-review', 'no', 'no')).toBe('skip-unhandled-state');
+  it('a KNOWN-but-gated state is not "unrecognised" — BLOCKED keeps its skip-clean routing', () => {
+    // BLOCKED is GitHub's NORMAL mergeStateStatus while a merge-gating required check
+    // (ai-review) is still running: the merge is blocked precisely because the gate has
+    // not finished. Capturing it here would be a different bug from the one #1803 fixed
+    // — the guard is for states this classifier has never SEEN, not for states it knows
+    // are transient. See the FR-4 regression block below for the consequence.
+    expect(classify('fix/x', 'MERGEABLE', 'BLOCKED', 'needs-human-review', 'no', 'no')).toBe('skip-clean');
+  });
+});
+
+// PR #1813 blocking review finding — the #1803 guard OVER-REACHED. Making skip-clean
+// exclusive to CLEAN swept BLOCKED and UNSTABLE into skip-unhandled-state, but neither
+// is an unrecognised state: BLOCKED is what GitHub reports while a merge-gating
+// required check (ai-review) is still running, and UNSTABLE is what it reports while a
+// non-required one is. Both are routine on a freshly-pushed, perfectly healthy PR.
+// Routing them to skip-unhandled-state made the creator-shepherd stop polling its own
+// PR instead of waiting for ai-review to finish (SPEC-044 FR-4).
+//
+// The distinction #1803 actually turns on is UNKNOWN-or-never-seen vs known-transient,
+// so the guard must be an ALLOW-LIST of the documented mergeStateStatus values, not
+// "CLEAN or bust".
+describe('remediate-pr.sh --classify: known transient merge states are not "unhandled" (#1813)', () => {
+  it('BLOCKED while a merge-gating required check runs → skip-clean, so the shepherd keeps waiting', () => {
+    expect(classify('agent/issue-1813', 'MERGEABLE', 'BLOCKED', '', 'no', 'no')).toBe('skip-clean');
+  });
+
+  it('UNSTABLE (a non-required check in flight) → skip-clean, same reason', () => {
+    expect(classify('agent/issue-1813', 'MERGEABLE', 'UNSTABLE', '', 'no', 'no')).toBe('skip-clean');
+  });
+
+  it('HAS_HOOKS is a documented, mergeable state — also not "unhandled"', () => {
+    expect(classify('agent/issue-1813', 'MERGEABLE', 'HAS_HOOKS', '', 'no', 'no')).toBe('skip-clean');
+  });
+
+  it('DRAFT is documented too — nothing for this classifier to fix, but it is recognised', () => {
+    expect(classify('agent/issue-1813', 'MERGEABLE', 'DRAFT', '', 'no', 'no')).toBe('skip-clean');
+  });
+
+  it('a state GitHub has not documented yet is STILL not asserted healthy (#1803 preserved)', () => {
+    expect(classify('fix/x', 'MERGEABLE', 'SOME_FUTURE_GITHUB_VALUE', '', 'no', 'no')).toBe('skip-unhandled-state');
+    expect(classify('fix/x', 'MERGEABLE', '', '', 'no', 'no')).toBe('skip-unhandled-state');
+  });
+
+  it('UNKNOWN is STILL its own non-terminal retry, never skip-clean (#1803 preserved)', () => {
+    expect(classify('fix/x', 'MERGEABLE', 'UNKNOWN', '', 'no', 'no')).toBe('retry-unknown');
+  });
+
+  it('a real problem still outranks a known-transient state (priority unchanged)', () => {
+    expect(classify('fix/x', 'MERGEABLE', 'BLOCKED', '', 'yes', 'no')).toBe('agent-remediate-checks');
+    expect(classify('fix/x', 'MERGEABLE', 'UNSTABLE', '', 'no', 'yes')).toBe('agent-remediate-review');
+    expect(classify('fix/x', 'CONFLICTING', 'BLOCKED', '', 'no', 'no')).toBe('skip-conflict');
   });
 });
 

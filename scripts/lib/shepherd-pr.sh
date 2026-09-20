@@ -33,8 +33,9 @@
 #       | stop-conflict | stop-capped | stop-awaiting-human | do-rebase | do-fix | wait
 #       | wait-unknown | stop-unhandled-state
 #     wait-unknown and stop-unhandled-state route classify_pr's two #1803 tokens
-#     (retry-unknown, skip-unhandled-state — an UNKNOWN or unrecognised
-#     mergeStateStatus). Each gets its OWN arm rather than falling through the `*)`
+#     (retry-unknown, skip-unhandled-state — an UNKNOWN or never-seen
+#     mergeStateStatus; the documented-but-gated states BLOCKED/UNSTABLE/HAS_HOOKS
+#     are NOT in that set — they arrive as skip-clean and keep polling). Each gets its OWN arm rather than falling through the `*)`
 #     default: retry-unknown is transient (GitHub just hasn't finished computing the
 #     state) and must not be reported as "outside automation scope", so it is a WAIT,
 #     not a stop. skip-unhandled-state must not collapse into skip-clean's branch
@@ -112,8 +113,11 @@ shepherd_decide() {
       # there is no separate cap to add here.
       echo "wait-unknown" ;;
     skip-unhandled-state)
-      # #1803/#1813: classify_pr saw a mergeStateStatus it doesn't recognise (BLOCKED,
-      # UNSTABLE, HAS_HOOKS, or a future GitHub value). This must be its OWN arm:
+      # #1803/#1813: classify_pr saw a mergeStateStatus it has never seen — a future
+      # GitHub value, an empty read, or garbage. (NOT BLOCKED/UNSTABLE/HAS_HOOKS:
+      # those are documented, known-transient states and arrive here as skip-clean, so
+      # a PR merely waiting on a merge-gating check keeps being polled — SPEC-044
+      # FR-4.) This must be its OWN arm:
       #   • NOT skip-clean's branch — that would silently claim "green, just waiting
       #     on checks/a human", re-introducing one layer up the exact "unrecognised
       #     state treated as fine" bug #1803 fixed in classify_pr itself.

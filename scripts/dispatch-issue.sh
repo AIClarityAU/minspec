@@ -1481,8 +1481,11 @@ shepherd_own_pr() {
         echo "  PR #$pr_num is green with no automated gate left — awaiting a human. Not polling further."
         return 0 ;;
       stop-unhandled-state)
-        # #1803/#1813: classify_pr saw a mergeStateStatus it doesn't recognise
-        # (BLOCKED, UNSTABLE, HAS_HOOKS, or a future GitHub value). Deliberately NOT a
+        # #1803/#1813: classify_pr saw a mergeStateStatus it has never seen — a
+        # future GitHub value, an empty read, or garbage. (NOT BLOCKED/UNSTABLE/
+        # HAS_HOOKS: those are documented, known-transient states that arrive as
+        # skip-clean, so a PR waiting on a merge-gating check keeps being polled —
+        # SPEC-044 FR-4.) Deliberately NOT a
         # shepherd_hand_off: that asserts "an automated gate failed closed, a human
         # must resolve" — a claim this classifier isn't confident enough to make about
         # a state it doesn't recognise (same restraint remediate-pr.sh's drain path
