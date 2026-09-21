@@ -1480,8 +1480,29 @@ shepherd_own_pr() {
         # "handed off" here would be a false signpost on a green PR.
         echo "  PR #$pr_num is green with no automated gate left — awaiting a human. Not polling further."
         return 0 ;;
+      stop-unhandled-state)
+        # #1803/#1813: classify_pr saw a mergeStateStatus it has never seen — a
+        # future GitHub value, an empty read, or garbage. (NOT BLOCKED/UNSTABLE/
+        # HAS_HOOKS: those are documented, known-transient states that arrive as
+        # skip-clean, so a PR waiting on a merge-gating check keeps being polled —
+        # SPEC-044 FR-4.) Deliberately NOT a
+        # shepherd_hand_off: that asserts "an automated gate failed closed, a human
+        # must resolve" — a claim this classifier isn't confident enough to make about
+        # a state it doesn't recognise (same restraint remediate-pr.sh's drain path
+        # takes for the identical token). Log it honestly and RETURN — the name
+        # "stop-*" must actually stop here, or it silently falls through to `sleep`
+        # below and polls the full hour ceiling under a name that says it wouldn't.
+        echo "  PR #$pr_num has mergeStateStatus '$merge_state', which this classifier does not recognise — leaving it alone rather than assuming it is clean or out of automation scope. Not polling further."
+        return 0 ;;
       wait)
         : ;;  # green but unmerged: waiting on checks, native auto-merge, or a human
+      wait-unknown)
+        # #1803/#1813: mergeStateStatus is (still) UNKNOWN — GitHub computes it
+        # lazily, so this is routine right after a push, not a problem to fix or a
+        # reason to abandon the PR as "outside automation scope" (the blocking review
+        # finding on PR #1813). Same shape as `wait`: no side effect, just poll again.
+        echo "  PR #$pr_num: mergeStateStatus is still UNKNOWN — waiting for GitHub to finish computing it, not treating this as fixable or out of scope."
+        ;;
       do-rebase)
         shepherd_rebase || { shepherd_hand_off "$pr_num" "an automated rebase onto \`main\` did not apply cleanly"; return 0; } ;;
       do-fix)
