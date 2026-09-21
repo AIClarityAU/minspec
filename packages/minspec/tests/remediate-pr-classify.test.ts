@@ -82,6 +82,102 @@ describe('remediate-pr.sh --classify: problem priority', () => {
   });
 });
 
+// #1803: classify_pr's terminal fallthrough used to assert `skip-clean` — a POSITIVE
+// health claim — for ANY mergeStateStatus it didn't recognise, not just the genuinely
+// clean one. GitHub computes mergeStateStatus LAZILY, so a cold `gh pr view` routinely
+// returns UNKNOWN; with no arm for it, that fell through the same "everything else is
+// fine" default as BLOCKED/UNSTABLE/HAS_HOOKS/garbage. Constitution invariant 2
+// forbids exactly this: an unreadable or unrecognised witness must fail closed and
+// VISIBLY, never pass quietly as healthy. The fix makes CLEAN the only value that
+// still returns skip-clean, gives UNKNOWN its own non-terminal `retry-unknown` (the
+// call site re-polls once before trusting it — never a network call from --classify
+// itself), and turns the terminal default into an honest, explicitly-named
+// `skip-unhandled-state` rather than a silent health claim.
+describe('remediate-pr.sh --classify: an UNKNOWN merge state never asserts health (#1803)', () => {
+  it('reproduces the exact filed repro: UNKNOWN must NOT return skip-clean', () => {
+    expect(classify('agent/issue-1511', 'MERGEABLE', 'UNKNOWN', '', 'no', 'no')).not.toBe('skip-clean');
+  });
+
+  it('UNKNOWN with no other fixable problem → retry-unknown (non-terminal, not a health claim)', () => {
+    expect(classify('agent/issue-1511', 'MERGEABLE', 'UNKNOWN', '', 'no', 'no')).toBe('retry-unknown');
+  });
+
+  it('BEHIND is unaffected by the UNKNOWN fix (no regression)', () => {
+    expect(classify('agent/issue-1511', 'MERGEABLE', 'BEHIND', '', 'no', 'no')).toBe('rebase-only');
+  });
+
+  it('a genuinely clean PR still returns skip-clean (no regression)', () => {
+    expect(classify('fix/x', 'MERGEABLE', 'CLEAN', '', 'no', 'no')).toBe('skip-clean');
+  });
+
+  it('real check failures still outrank an UNKNOWN merge state (fix the code first)', () => {
+    expect(classify('fix/x', 'MERGEABLE', 'UNKNOWN', '', 'yes', 'no')).toBe('agent-remediate-checks');
+  });
+
+  it('a pending re-review still outranks an UNKNOWN merge state', () => {
+    expect(classify('fix/x', 'MERGEABLE', 'UNKNOWN', 'ai-review:changes', 'no', 'no')).toBe('agent-remediate-review');
+  });
+
+  it('an unrecognised/garbage merge state does not return skip-clean either', () => {
+    const result = classify('fix/x', 'MERGEABLE', 'SOME_FUTURE_GITHUB_VALUE', '', 'no', 'no');
+    expect(result).not.toBe('skip-clean');
+    expect(result).toBe('skip-unhandled-state');
+  });
+
+  it('a KNOWN-but-gated state is not "unrecognised" — BLOCKED keeps its skip-clean routing', () => {
+    // BLOCKED is GitHub's NORMAL mergeStateStatus while a merge-gating required check
+    // (ai-review) is still running: the merge is blocked precisely because the gate has
+    // not finished. Capturing it here would be a different bug from the one #1803 fixed
+    // — the guard is for states this classifier has never SEEN, not for states it knows
+    // are transient. See the FR-4 regression block below for the consequence.
+    expect(classify('fix/x', 'MERGEABLE', 'BLOCKED', 'needs-human-review', 'no', 'no')).toBe('skip-clean');
+  });
+});
+
+// PR #1813 blocking review finding — the #1803 guard OVER-REACHED. Making skip-clean
+// exclusive to CLEAN swept BLOCKED and UNSTABLE into skip-unhandled-state, but neither
+// is an unrecognised state: BLOCKED is what GitHub reports while a merge-gating
+// required check (ai-review) is still running, and UNSTABLE is what it reports while a
+// non-required one is. Both are routine on a freshly-pushed, perfectly healthy PR.
+// Routing them to skip-unhandled-state made the creator-shepherd stop polling its own
+// PR instead of waiting for ai-review to finish (SPEC-044 FR-4).
+//
+// The distinction #1803 actually turns on is UNKNOWN-or-never-seen vs known-transient,
+// so the guard must be an ALLOW-LIST of the documented mergeStateStatus values, not
+// "CLEAN or bust".
+describe('remediate-pr.sh --classify: known transient merge states are not "unhandled" (#1813)', () => {
+  it('BLOCKED while a merge-gating required check runs → skip-clean, so the shepherd keeps waiting', () => {
+    expect(classify('agent/issue-1813', 'MERGEABLE', 'BLOCKED', '', 'no', 'no')).toBe('skip-clean');
+  });
+
+  it('UNSTABLE (a non-required check in flight) → skip-clean, same reason', () => {
+    expect(classify('agent/issue-1813', 'MERGEABLE', 'UNSTABLE', '', 'no', 'no')).toBe('skip-clean');
+  });
+
+  it('HAS_HOOKS is a documented, mergeable state — also not "unhandled"', () => {
+    expect(classify('agent/issue-1813', 'MERGEABLE', 'HAS_HOOKS', '', 'no', 'no')).toBe('skip-clean');
+  });
+
+  it('DRAFT is documented too — nothing for this classifier to fix, but it is recognised', () => {
+    expect(classify('agent/issue-1813', 'MERGEABLE', 'DRAFT', '', 'no', 'no')).toBe('skip-clean');
+  });
+
+  it('a state GitHub has not documented yet is STILL not asserted healthy (#1803 preserved)', () => {
+    expect(classify('fix/x', 'MERGEABLE', 'SOME_FUTURE_GITHUB_VALUE', '', 'no', 'no')).toBe('skip-unhandled-state');
+    expect(classify('fix/x', 'MERGEABLE', '', '', 'no', 'no')).toBe('skip-unhandled-state');
+  });
+
+  it('UNKNOWN is STILL its own non-terminal retry, never skip-clean (#1803 preserved)', () => {
+    expect(classify('fix/x', 'MERGEABLE', 'UNKNOWN', '', 'no', 'no')).toBe('retry-unknown');
+  });
+
+  it('a real problem still outranks a known-transient state (priority unchanged)', () => {
+    expect(classify('fix/x', 'MERGEABLE', 'BLOCKED', '', 'yes', 'no')).toBe('agent-remediate-checks');
+    expect(classify('fix/x', 'MERGEABLE', 'UNSTABLE', '', 'no', 'yes')).toBe('agent-remediate-review');
+    expect(classify('fix/x', 'CONFLICTING', 'BLOCKED', '', 'no', 'no')).toBe('skip-conflict');
+  });
+});
+
 describe('remediate-pr.sh --classify: input hygiene', () => {
   it('tolerates an empty labels_csv without erroring', () => {
     // Regression: `${4:?}` used to reject an empty label CSV (colon errors on empty

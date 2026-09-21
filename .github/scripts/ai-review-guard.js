@@ -3,7 +3,8 @@
 // This module is deliberately I/O-free: no network, no `github`/octokit, no
 // `fs`, no process access. Every function is a pure input→output mapping so the
 // security-critical decisions (revert-or-not, strip-or-not, verified-or-not,
-// green-or-not) can be unit-tested exhaustively (see ai-review-guard.test.js)
+// green-or-not) can be unit-tested exhaustively (see ai-review-guard.test.js in
+// the MinSpec repo - this file ships to adopters, its test suite does not)
 // and the workflow that requires it stays a thin, auditable I/O shell.
 //
 // Threats this closes (see the header of ready-to-merge.yml for the full note):
