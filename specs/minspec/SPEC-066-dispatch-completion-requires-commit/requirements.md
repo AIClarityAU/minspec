@@ -21,8 +21,9 @@ phases:
 > *"an agent that commits nothing is reported as completed — empty branch pushed, PR
 > impossible, review verdict discarded."* Sibling of **#1652** and **#1656**, named in
 > #1674's own footer as "three ways an issue leaves the pipeline in a state its labels
-> misdescribe." No DR underlies this design and none is minted by it: per the DR-359 ADR
-> filter, every choice below is a same-day-reversible change to one script
+> misdescribe." No DR underlies this design and none is minted by it: per the DR-359
+> (parent register, mmo-platform) ADR filter, every choice below is a same-day-reversible change
+> to one script
 > (`scripts/dispatch-issue.sh`), not an irreversible architectural commitment.
 
 ## One-Sentence Scope
@@ -42,7 +43,7 @@ pipeline can never call a no-op "done" nor drop a computed gate signal on the fl
   ([`:703`](../../../scripts/dispatch-issue.sh#L703)) — the branch's base is `origin/main` at
   creation time. After the agent process exits, the parent runs the egress guard and (in
   specify-only mode) the scope guard, then unconditionally pushes:
-  `git -C "$WORKTREE" push -u origin "$BRANCH"` ([`:1607`](../../../scripts/dispatch-issue.sh#L1607)).
+  `git -C "$WORKTREE" push -u origin "$BRANCH"` ([`:1614`](../../../scripts/dispatch-issue.sh#L1614)).
   Nothing between the agent exiting and this push asks `git rev-list --count
   origin/main..HEAD`. The one `rev-list --count` call in the file
   ([`:406`](../../../scripts/dispatch-issue.sh#L406)) measures how far the *checkout* is
@@ -64,7 +65,7 @@ pipeline can never call a no-op "done" nor drop a computed gate signal on the fl
 - **The independent reviewer's verdict is computed and then dropped.** `run_reviewer_stage`
   computes `combined` (`ai-review:pass` / `ai-review:changes`, DR-033 §6) and builds
   `review_body` to post as a PR review — but only reaches that post if `pr_num` is non-empty
-  ([`:1007-1030`](../../../scripts/dispatch-issue.sh#L1007)). When `pr_num` is empty, the
+  ([`:1021-1031`](../../../scripts/dispatch-issue.sh#L1021)). When `pr_num` is empty, the
   function logs the WARNING above and `return 0`s — `combined` and `review_body` are never
   written anywhere else. A verdict that says `ai-review:changes` (the correct read on #1506,
   per #1674's own report) reaches nobody. That is exactly the shape constitution invariant #2
@@ -79,12 +80,12 @@ pipeline can never call a no-op "done" nor drop a computed gate signal on the fl
 - **A structurally identical guard already exists for a different publish-blocking
   condition and is the template this spec follows.** The egress guard
   (`run_egress_guard` / `quarantine_publish`,
-  [`:1147-1172`](../../../scripts/dispatch-issue.sh#L1147)) and the specify-only scope guard
+  [`:1147-1176`](../../../scripts/dispatch-issue.sh#L1147)) and the specify-only scope guard
   (`specify_scope_report` / `hold_specify_scope`,
   [`:1189-1213`](../../../scripts/dispatch-issue.sh#L1189)) are both `elif` siblings in the
-  **same** `if` chain that gates the push at `:1607` — "impossible to reach the push without
+  **same** `if` chain that gates the push at `:1614` — "impossible to reach the push without
   having passed both," per the comment at
-  [`:1155-1157`](../../../scripts/dispatch-issue.sh#L1155). Neither publishes anything on
+  [`:1606-1608`](../../../scripts/dispatch-issue.sh#L1606). Neither publishes anything on
   trip; both label `needs-human-review`, comment the reason, and leave the worktree intact
   for inspection. This spec's zero-commit guard is a third sibling in that same chain, not a
   new mechanism.
@@ -103,7 +104,7 @@ pipeline can never call a no-op "done" nor drop a computed gate signal on the fl
   `git -C "$WORKTREE" rev-list --count origin/main.."$BRANCH"` (the same `origin/main` base the
   worktree was cut from, `:703`). A count of **zero is a hard failure**, checked as a sibling
   `elif` in the existing egress-guard / specify-only-scope-guard chain (`:1147-1213`) — so it
-  is structurally impossible to reach the push at `:1607` with zero commits, the same guarantee
+  is structurally impossible to reach the push at `:1614` with zero commits, the same guarantee
   that chain already gives the other two guards.
 - **FR-2 (no publish on zero commits).** On the FR-1 trip: no `git push`, no `gh pr create`,
   no `agent-done` label, and no "Agent completed" line. The worktree is left intact (matching
@@ -130,7 +131,7 @@ pipeline can never call a no-op "done" nor drop a computed gate signal on the fl
 - **FR-6 (a computed verdict is never discarded — invariant #2).** When `run_reviewer_stage`
   computes `combined` and `review_body` but `pr_num` is empty, post that verdict as an issue
   comment (through the same egress-scan gate `review_body` already passes at
-  [`:1954-1968`](../../../scripts/dispatch-issue.sh#L1954), so an injected-diff-steered
+  [`:983-1003`](../../../scripts/dispatch-issue.sh#L983), so an injected-diff-steered
   verdict is withheld the same way there too) instead of only logging the WARNING and
   returning. This is a distinct residual case from FR-1 through FR-4: it fires only when
   commits exist (the branch pushed, `run_reviewer_stage` was reached) and `gh pr create`
@@ -144,7 +145,7 @@ pipeline can never call a no-op "done" nor drop a computed gate signal on the fl
   (FR-6).
 - **INV-2 (structural, not best-effort, gating).** FR-1's check lives in the same `if`/`elif`
   chain as the egress guard and the specify-only scope guard — a chain already documented as
-  "impossible to reach the push below without having passed both" (`:1155-1157`). The new
+  "impossible to reach the push below without having passed both" (`:1606-1608`). The new
   guard must preserve that property for all three siblings, not add a separate `|| true`-style
   check that could be skipped.
 - **INV-3 (independent second witness, not a rewrite of the first).** This spec does not
@@ -249,7 +250,7 @@ pipeline can never call a no-op "done" nor drop a computed gate signal on the fl
 |---|------|-----------|
 | R1 | `git rev-list --count origin/main.."$BRANCH"` misreports if the worktree's `origin/main` ref is stale (fetched before the agent ran, further commits landed on main meanwhile) | Reuse the SAME `origin/main` ref the rest of the file already measures against (`:1191`, `:1849`) rather than a fresh fetch — consistent with how every other three-dot comparison in this script already works; a genuinely stale `origin/main` is the pre-existing staleness class SPEC-057/`:406` covers, not new risk this spec introduces |
 | R2 | D1 resolving to "hold" (Option A) leaves a transient one-off agent flake stuck for a human that a retry would have silently fixed | Named explicitly in D1; the recommendation accepts this cost pending real base-rate evidence |
-| R3 | FR-6's issue-comment path could itself be steered by a prompt-injected diff into echoing something sensitive from the (read-only) reviewer's context | FR-6 explicitly routes through the SAME egress-scan gate `review_body` already passes before a PR-review post (`:1954-1968`) — no new unscanned publish channel is created |
+| R3 | FR-6's issue-comment path could itself be steered by a prompt-injected diff into echoing something sensitive from the (read-only) reviewer's context | FR-6 explicitly routes through the SAME egress-scan gate `review_body` already passes before a PR-review post (`:983-1003`) — no new unscanned publish channel is created |
 
 ## Traceability
 
@@ -259,7 +260,7 @@ pipeline can never call a no-op "done" nor drop a computed gate signal on the fl
   [#1656](https://github.com/AIClarityAU/minspec/issues/1656) — "three ways an issue leaves
   the pipeline in a state its labels misdescribe." Not covered here; each is its own dispatch.
 - **Template guards this spec extends (same file, same chain):** `run_egress_guard` /
-  `quarantine_publish` (`:1147-1172`), `specify_scope_report` / `hold_specify_scope`
+  `quarantine_publish` (`:1147-1176`), `specify_scope_report` / `hold_specify_scope`
   (`:1189-1213`).
 - **Countermand mechanism this spec's labelling must respect:**
   [`scripts/dispatch-ready-check.sh:635`](../../../scripts/dispatch-ready-check.sh#L635).
@@ -269,6 +270,6 @@ pipeline can never call a no-op "done" nor drop a computed gate signal on the fl
   [SPEC-062](../SPEC-062-autonomous-pr-drain/requirements.md).
 - **Constitution:** invariant #2 (no silent gate) is this spec's core rationale, cited
   directly in Context and FR-6.
-- **No DR filed.** Per the DR-359 ADR filter, D1/D2 are same-day-reversible script-behaviour
-  choices, not irreversible architecture — if either later needs revisiting, a normal PR
-  suffices.
+- **No DR filed.** Per the DR-359 (parent register, mmo-platform) ADR filter, D1/D2 are
+  same-day-reversible script-behaviour choices, not irreversible architecture — if either
+  later needs revisiting, a normal PR suffices.
