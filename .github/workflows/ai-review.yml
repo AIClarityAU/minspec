@@ -357,9 +357,51 @@ jobs:
             CHANGED_OK=yes
           fi
 
+          # ── BEGIN machinery self-edit classification ──────────────────────────
+          # Everything between this marker and the END marker below is EXTRACTED
+          # VERBATIM and executed in a scratch tree by MinSpec's carve-out test suite,
+          # which runs it with the guard file present and absent to prove both branches
+          # below behave. Keep both markers.
+          #
+          # MACHINERY_CARVE_OUT_RE (MinSpec #2018) — EXEMPTIONS from the machinery
+          # pattern further down: exact paths that sit under a machinery prefix but
+          # decide nothing, and that nothing which decides reads. `scripts/` is a
+          # directory prefix, so it admits read-only oracles and report generators;
+          # classifying those as machinery spends a human keystroke on a file that gates
+          # nothing. Every entry is a standing promise that the named file never grows a
+          # gating role, and MinSpec's own suite fails if one ever does.
+          #
+          # A SEPARATE FILTER STAGE, NOT A NARROWER PATTERN: POSIX ERE has no negative
+          # lookahead and the guard below is `grep -qE`, so "under ^scripts/ EXCEPT these"
+          # cannot be written as one pattern. Carved paths are dropped BEFORE the
+          # machinery test instead.
+          #
+          # REPO-SCOPED ON PURPOSE. This workflow is scaffolded verbatim into every
+          # consuming repo, and the list below names files in MINSPEC'S tree, not theirs.
+          # An inherited exemption would NARROW a consuming repo's gate for a path its own
+          # authors own — MinSpec's blast radius is the project it is installed in. So the
+          # list is armed only where the canonical module that generates it exists. Absent
+          # that file the pattern stays empty, the filter is a pass-through, and
+          # classification is identical to a build with no carve-outs at all.
+          MACHINERY_CARVE_OUT_RE=''
+          if [ -f packages/minspec/src/lib/machinery-paths.ts ]; then
+            MACHINERY_CARVE_OUT_RE='^scripts/facts\.ts$|^scripts/review-churn-report\.sh$'
+          fi
+
+          # Drop the carved paths, then classify what is left. `grep -v` exits 1 when it
+          # filters EVERYTHING out — that is the answer (nothing left to classify), not a
+          # failure — so only exit >= 2, a real grep error, is treated as a failure, and
+          # it joins the indeterminate branch rather than being swallowed: a guard that
+          # cannot read its own exemption list must fail closed, never report clean.
+          MACHINERY_CANDIDATES="$CHANGED"
+          CARVE_STATUS=0
+          if [ -n "$MACHINERY_CARVE_OUT_RE" ]; then
+            MACHINERY_CANDIDATES="$(printf '%s\n' "$CHANGED" | grep -vE "$MACHINERY_CARVE_OUT_RE")" || CARVE_STATUS=$?
+          fi
+
           SELF_EDIT=no
           SELF_EDIT_KIND=""
-          if [ "$CHANGED_OK" != "yes" ]; then
+          if [ "$CHANGED_OK" != "yes" ] || [ "$CARVE_STATUS" -gt 1 ]; then
             SELF_EDIT=yes
             SELF_EDIT_KIND=indeterminate
           # MACHINERY_PATHS_RE — the machinery path set (#1284, reconciled #1758). Gate-ness
@@ -389,9 +431,19 @@ jobs:
           #                for every downstream project. It was omitted in the first pass of
           #                #1284 — the same inconsistency the PR set out to fix — and added
           #                after the architect voter caught it.
+          #   machinery-paths.ts — the canonical set itself (#2018). It decides WHAT COUNTS
+          #                as a gate, so it decides-by-generating exactly as the two above do
+          #                and is upstream of both. While it was exempt, a PR NARROWING the
+          #                machinery set was certifiable by the machinery it narrows — the
+          #                #596 self-certification hole in its purest form. The accepted cost
+          #                is that every future narrowing is human-merge-only.
           # MEMBERSHIP TEST for anything added here: does this code decide whether some other
           # change is allowed — directly, or by generating the thing that decides? If yes it
           # cannot certify itself, and it belongs in this set.
+          # THE INVERSE (#2018): MACHINERY_CARVE_OUT_RE above lists exact paths that FAIL
+          # that test despite living under a prefix here. They are filtered out before this
+          # guard runs, so this pattern stays deny-by-default and the exemptions stay
+          # individually readable and individually testable.
           # CANONICAL SOURCE: packages/minspec/src/lib/machinery-paths.ts. This line and
           # scripts/dispatch-issue.sh's MACHINERY_PATH_RE are both hand-copies of that
           # module's buildMachineryRegexSource() output — a shell string embedded in YAML
@@ -401,10 +453,11 @@ jobs:
           # a prior reconciliation, 01369b6b, updated only this file and a test that only
           # read this file, leaving dispatch-issue.sh's copy narrower and its invariant-2
           # second-witness inert for two paths). Keep the marker comment above it.
-          elif printf '%s\n' "$CHANGED" | grep -qE '^\.github/|^scripts/|^\.githooks/|^\.circleci/|^\.buildkite/|^\.husky/|^packages/minspec/src/lib/(template-registry|ci-review-templates)\.ts$'; then
+          elif printf '%s\n' "$MACHINERY_CANDIDATES" | grep -qE '^\.github/|^scripts/|^\.githooks/|^\.circleci/|^\.buildkite/|^\.husky/|^packages/minspec/src/lib/(template-registry|ci-review-templates|machinery-paths)\.ts$'; then
             SELF_EDIT=yes
             SELF_EDIT_KIND=machinery
           fi
+          # ── END machinery self-edit classification ────────────────────────────
 
           # ── which voters are REQUIRED (decided before any of them runs) ──
           # Separating "who runs" from "run them" is what lets the panel run CONCURRENTLY
