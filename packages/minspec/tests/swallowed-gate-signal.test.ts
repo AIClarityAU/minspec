@@ -30,14 +30,33 @@ const find = (source: string) => findSwallowedGateSignals('t.sh', source);
 describe('INV-1: the motivating defect is caught in the real tree', () => {
   // Keyed on the variable, not a line number — line numbers rot between writing a test
   // and pushing it, and a rotted assertion that still passes is worse than none.
+  //
+  // MOVED 2026-09-21, from `all_ready` to `READY_ISSUES`. The original fixture was the
+  // dispatch path's ready-set capture, and it has been FIXED: that query now returns a
+  // status the caller checks, so it is no longer a swallowed capture and the lint
+  // correctly no longer finds it. Pinning a live defect as a test fixture means the
+  // test breaks when someone repairs the defect — which is the good outcome arriving
+  // as a red build. Repointing is therefore the expected maintenance, not a workaround.
+  //
+  // REPOINTED TWICE in one change, which is the lesson rather than an inconvenience.
+  // It first moved to `READY_ISSUES`, and review then showed that capture was not a
+  // display path at all but the one-shot early-exit gate, so it was fixed too. Every
+  // repoint here is a defect leaving the tree.
+  //
+  // Now on `open_prs` (the PR sweep), the same two-line brace-group shape, still
+  // annotated `swallow-known: #1855`. When that one is fixed, repoint again or retire
+  // the assertion deliberately — never soften it into "find any, skip if none",
+  // because a lint about fail-open signals cannot have a fail-open test. The day the
+  // last #1855 capture is gone, this assertion has no honest form and should be
+  // replaced by a synthetic two-line fixture, which is a different test.
   it('flags drain-inbox.sh ready-set query, which spans two lines', () => {
     const source = readFileSync(join(REPO, 'scripts/drain-inbox.sh'), 'utf8');
     const readySet = findSwallowedGateSignals('scripts/drain-inbox.sh', source).find(
-      (f) => f.variable === 'all_ready',
+      (f) => f.variable === 'open_prs',
     );
 
     expect(readySet, 'the #1855 ready-set capture is no longer detected').toBeDefined();
-    expect(readySet!.text).toContain('agent-ready');
+    expect(readySet!.text).toContain('gh pr list');
     expect(readySet!.decidesAt.length).toBeGreaterThan(0);
     expect(readySet!.knownIssue).toBe(1855);
   });
