@@ -276,13 +276,28 @@ NOT share the global `~/code/mmo-platform/docs/decisions.md` register (currently
 ~DR-360). The global CLAUDE.md rule "next sequential number, all projects" does
 **not** apply here — it is overridden by this project-local register.
 
-- Next number = `max(existing DR-NNN in docs/decisions/) + 1`. Use the MinSpec
-  ext (**MinSpec: Create Architecture Decision Record**), which computes this
-  correctly and writes the standard template. Do not hand-pick a number from the
-  global register.
-- A DR created with an out-of-sequence number (e.g. a global-register number
-  like `DR-012` in this repo) is a convention error — renumber to the next local
-  number and update all references.
+- **Next number: do not compute it from the files on disk.** `max(existing DR-NNN in
+  docs/decisions/) + 1` counts only decisions that have already merged, so two records
+  authored while the other is in flight both pick the same id and collide (#1226 –
+  DR-077 claimed twice by two open PRs; #754 – concurrent creation collides). The
+  MinSpec ext (**MinSpec: Create Architecture Decision Record**) writes the standard
+  template and picks that same highest-on-disk-plus-one: it is Tier 0 and makes no
+  network call (invariant 1), so its number is a starting draft, not the answer.
+- **Take the number from the collision gate.** `scripts/check-dr-id-collision.ts`
+  reports `Next free id` as the max across the base branch **and every open pull
+  request**, plus one (`scripts/lib/dr-id-collision.ts:355`), and prints the renumber
+  steps when the id it finds is already taken. It runs on every pull request, with no
+  `paths:` filter. It is **advisory, not gating** – `dr-id-collision` is not in `main`'s
+  required-check set, so it reports a collision without stopping the merge. Read its
+  output.
+- **For reviewers: an id ABOVE the highest `DR-NNN` on disk is EXPECTED** whenever
+  another decision is in flight, and is never on its own a defect. Open pull requests
+  are invisible from a base checkout, which is all a network-less review sees, so a gap
+  is evidence about what has merged, not about whether the id is right. The fatal case
+  is a DUPLICATE id, which *is* checkable from the diff.
+- A DR carrying a number from the GLOBAL register (e.g. `DR-012`, from
+  `~/code/mmo-platform/docs/decisions.md`) is a convention error – renumber it to the id
+  the collision gate reports and update all references.
 
 ## Repo Mapping (Parking Lot)
 
