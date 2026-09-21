@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-070-ownership-hash-exit/requirements.md",
+  "specHash": "d9aab74f8d3a047140bbcc956b0daa4fd24e50bca5fe3070d5aa05feb1f0aa02",
+  "approvedAt": "2026-09-21T09:59:08.846Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T4",
+  "migrated": false,
+  "baselineBlob": "f5b5cd3e4119135129145d9cf5d0fc285bc14a9f"
+}
