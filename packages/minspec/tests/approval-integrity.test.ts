@@ -137,11 +137,48 @@ describe('approval-integrity — the decision', () => {
     expect(checks(fixture({ approvers: [HUMAN] }), [...PAIR, '.minspec/config.json'])).toContain('file-set');
   });
 
-  it('REFUSES two approval records in one PR', () => {
+  it('PASSES a legitimate BATCH of several sign-offs landed together', () => {
+    // Real data drove this: an earlier cut refused any PR with more than one record,
+    // reasoning that several human acts could not be attributed per record. The founder's
+    // own flow signs off several specs in one sitting and lands them atomically (f38c83ec
+    // carried SPEC-066/067/070, six files, every record valid), and attribution IS
+    // per-record — each sidecar has its own approvedBy/approvedAt/specHash. The rule
+    // blocked a correct workflow and protected nothing.
     const root = fixture({ approvers: [HUMAN] });
-    const second = '.minspec/approvals/specs/minspec/SPEC-901-other/requirements.md.json';
-    write(root, second, '{}');
-    expect(checks(root, [SIDECAR_REL, second])).toContain('one-record');
+    const spec2 = 'specs/minspec/SPEC-901-other/requirements.md';
+    const side2 = `.minspec/approvals/${spec2}.json`;
+    const body2 = SPEC_BODY.replace('SPEC-900', 'SPEC-901');
+    write(root, spec2, body2);
+    write(root, side2, JSON.stringify({ specPath: spec2, specHash: specHash(body2), approvedBy: HUMAN, tier: 'T3' }, null, 2));
+    const base: ReadBase = (rel) => (rel === SPEC_REL ? SPEC_BODY : rel === spec2 ? body2 : null);
+    expect(checks(root, [...PAIR, side2, spec2], base)).toEqual([]);
+  });
+
+  it('fails the WHOLE batch when any single record is bad, and names which spec', () => {
+    // The property that replaces one-record: every record passes on its own, or the batch
+    // fails. Without this, a valid record could carry an invalid sibling through.
+    const root = fixture({ approvers: [HUMAN] });
+    const spec2 = 'specs/minspec/SPEC-901-other/requirements.md';
+    const side2 = `.minspec/approvals/${spec2}.json`;
+    const body2 = SPEC_BODY.replace('SPEC-900', 'SPEC-901');
+    write(root, spec2, body2);
+    write(root, side2, JSON.stringify({ specPath: spec2, specHash: 'de'.repeat(32), approvedBy: HUMAN, tier: 'T3' }, null, 2));
+    const base: ReadBase = (rel) => (rel === SPEC_REL ? SPEC_BODY : rel === spec2 ? body2 : null);
+    const failures = evaluateApprovalIntegrity(root, [...PAIR, side2, spec2], base);
+    expect(failures.map((f) => f.check)).toContain('hash-binding');
+    // Attributable: the message says WHICH spec failed, not just that something did.
+    expect(failures.find((f) => f.check === 'hash-binding')?.detail).toContain('SPEC-901');
+  });
+
+  it('REFUSES a stray file inside a multi-record batch', () => {
+    const root = fixture({ approvers: [HUMAN] });
+    const spec2 = 'specs/minspec/SPEC-901-other/requirements.md';
+    const side2 = `.minspec/approvals/${spec2}.json`;
+    const body2 = SPEC_BODY.replace('SPEC-900', 'SPEC-901');
+    write(root, spec2, body2);
+    write(root, side2, JSON.stringify({ specPath: spec2, specHash: specHash(body2), approvedBy: HUMAN, tier: 'T3' }, null, 2));
+    const base: ReadBase = (rel) => (rel === SPEC_REL ? SPEC_BODY : rel === spec2 ? body2 : null);
+    expect(checks(root, [...PAIR, side2, spec2, 'src/evil.ts'], base)).toContain('file-set');
   });
 
   it('REFUSES a record whose approvable is absent at this commit', () => {

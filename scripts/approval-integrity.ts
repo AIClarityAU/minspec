@@ -116,6 +116,124 @@ function permittedApprovers(rootDir: string): string[] {
  */
 export type ReadBase = (relPath: string) => string | null;
 
+/** The approvable a sidecar is the record FOR, derived from its path (never its contents). */
+function approvableFor(sidecarPath: string): string {
+  return sidecarPath.slice(APPROVALS_PREFIX.length).replace(/\.json$/, '');
+}
+
+/**
+ * Every check that is scoped to ONE approval record. Returns [] to mean this record is
+ * sound. Split out so a batch carrying several sign-offs is judged record-by-record, with
+ * each failure naming the spec it belongs to.
+ */
+function checkOneRecord(
+  rootDir: string,
+  sidecarPath: string,
+  changed: readonly string[],
+  readBase: ReadBase,
+): Failure[] {
+  const derivedSpecPath = approvableFor(sidecarPath);
+  const at = (d: string): string => `${derivedSpecPath}: ${d}`;
+
+  // Shape guard on the derived path. Not exploitable from the CLI, because
+  // `git diff --name-only` emits repo-normalized paths and every operation here is a read
+  // — but this function is exported, and a caller feeding it a non-git-sourced list must
+  // not be able to walk out of the repo.
+  if (derivedSpecPath.split('/').includes('..') || path.isAbsolute(derivedSpecPath)) {
+    return [{ check: 'path-shape', detail: at('derived approvable path escapes the repo') }];
+  }
+
+  let record: { specHash?: unknown; approvedBy?: unknown; specPath?: unknown };
+  try {
+    record = JSON.parse(fs.readFileSync(path.join(rootDir, sidecarPath), 'utf-8'));
+  } catch (err) {
+    return [{ check: 'record-readable', detail: at(`${sidecarPath} is not readable JSON: ${String(err)}`) }];
+  }
+
+  const failures: Failure[] = [];
+
+  // The record's self-declared path must agree with where it is filed.
+  if (typeof record.specPath === 'string' && record.specPath !== derivedSpecPath) {
+    failures.push({
+      check: 'path-agreement',
+      detail: at(`record says specPath="${record.specPath}" but it is filed as the record for "${derivedSpecPath}"`),
+    });
+  }
+
+  // The hash binds the record to the content AT THIS COMMIT.
+  const approvableAbs = path.join(rootDir, derivedSpecPath);
+  if (!fs.existsSync(approvableAbs)) {
+    failures.push({ check: 'hash-binding', detail: at('the approvable does not exist at this commit') });
+  } else if (typeof record.specHash !== 'string') {
+    failures.push({ check: 'hash-binding', detail: at('record has no string specHash') });
+  } else {
+    const computed = specHash(fs.readFileSync(approvableAbs, 'utf-8'));
+    if (computed !== record.specHash) {
+      failures.push({
+        check: 'hash-binding',
+        detail: at(`record specHash=${record.specHash} but the file canonicalizes to ${computed} here — the approval was given to different bytes than the ones landing`),
+      });
+    }
+  }
+
+  // THE SCOPE BOUNDARY, ENFORCED (DR-081 §5). Everything above is self-referential: the
+  // record and the approvable both arrive in the same PR, so a matching hash proves only
+  // that the pusher was consistent with themselves, not that the content was reviewed.
+  // The approvable's CANONICAL hash must be identical on the merge base and at head —
+  // a status:/phases: flip is stripped by canonicalization and passes; a substantive edit
+  // does not. An approvable absent from the base has no reviewed version to attest to.
+  if (changed.includes(derivedSpecPath)) {
+    const baseContent = readBase(derivedSpecPath);
+    if (baseContent === null) {
+      failures.push({
+        check: 'approvable-unreviewed',
+        detail: at('does not exist on the merge base, so this PR both introduces the approvable and approves it (DR-081 §5)'),
+      });
+    } else if (fs.existsSync(approvableAbs)) {
+      const baseHash = specHash(baseContent);
+      const headHash = specHash(fs.readFileSync(approvableAbs, 'utf-8'));
+      if (baseHash !== headHash) {
+        failures.push({
+          check: 'approvable-unreviewed',
+          detail: at(`canonicalizes to ${baseHash} on the merge base but ${headHash} here — an approval PR may flip status:/phases: (hash-neutral) and nothing else (DR-081 §5)`),
+        });
+      }
+    }
+  }
+
+  // The approver is a permitted human, re-checked here because a local
+  // `assertHumanApprover` proves nothing about a pushed branch (DR-081 §4). Per-record,
+  // because `approvedBy` is per-record: a batch does not get to inherit one identity.
+  const approvedBy = typeof record.approvedBy === 'string' ? record.approvedBy : '';
+  const allowlist = permittedApprovers(rootDir);
+  if (allowlist.length === 0) {
+    failures.push({
+      check: 'approver-allowlist',
+      detail: at('no permitted-approver allowlist is configured. Add `"approvers": ["you@example.com"]` to .minspec/config.json. Refusing rather than defaulting to "anyone"'),
+    });
+  } else if (!allowlist.includes(approvedBy.trim().toLowerCase())) {
+    failures.push({
+      check: 'approver-allowlist',
+      detail: at(`approvedBy="${approvedBy}" is not in the permitted-approver allowlist`),
+    });
+  }
+
+  // The agent denylist still applies on top, so an identity that is somehow both
+  // allowlisted and a known agent identity is still refused (DR-056).
+  const agentCheck = checkApprover(approvedBy, parseAgentIdentities(process.env.MINSPEC_AGENT_IDENTITIES));
+  if (!agentCheck.ok) failures.push({ check: 'approver-not-agent', detail: at(agentCheck.reason) });
+
+  return failures;
+}
+
+/**
+ * The whole decision, as a pure input-to-output mapping over (repo root, changed files).
+ * Exported so the security-critical logic is exhaustively unit-testable without spawning a
+ * process or building a git history — the discipline `checkApprover` already follows.
+ *
+ * Returns [] to mean PASS. Never throws for a POLICY failure; a thrown error means the
+ * check itself broke, and the CLI shell turns that into a refusal (invariant 2).
+ */
 export function evaluateApprovalIntegrity(
   rootDir: string,
   changed: readonly string[],
@@ -130,156 +248,38 @@ export function evaluateApprovalIntegrity(
   // check safe to mark REQUIRED on every PR later.
   if (sidecars.length === 0) return [];
 
-  // Exactly one sidecar. Two approvals in one PR means one `ai-review`-exempt PR carrying
-  // two distinct human acts, which cannot be attributed per record.
-  if (sidecars.length > 1) {
-    return [
-      {
-        check: 'one-record',
-        detail: `a PR may carry exactly one approval record; this one changes ${sidecars.length}: ${sidecars.join(', ')}`,
-      },
-    ];
+  // A BATCH IS LEGITIMATE. An earlier cut refused any PR carrying more than one record,
+  // reasoning that several human acts in one exempt PR could not be attributed per record.
+  // That reasoning was wrong, and real data disproved it: the founder's own flow signs off
+  // several specs in one sitting and lands them atomically (f38c83ec carried SPEC-066,
+  // SPEC-067 and SPEC-070, six files, every record independently valid). Attribution is
+  // per-record by construction — each sidecar carries its own `approvedBy`, `approvedAt`
+  // and `specHash` — so the rule blocked a correct workflow while protecting nothing.
+  //
+  // The property that actually matters survives unchanged, and is enforced below: every
+  // changed file belongs to some (sidecar, approvable) pair, and EVERY record passes every
+  // check on its own. One bad record fails the batch.
+  const allowed = new Set<string>();
+  for (const sidecarPath of sidecars) {
+    allowed.add(sidecarPath);
+    allowed.add(approvableFor(sidecarPath));
   }
 
   const failures: Failure[] = [];
-  const sidecarPath = sidecars[0];
 
-  // The sidecar's LOCATION encodes which approvable it is for. Deriving the approvable
-  // from the path rather than trusting the record's own `specPath` is what stops a record
-  // being filed under one approvable while claiming another.
-  const derivedSpecPath = sidecarPath.slice(APPROVALS_PREFIX.length).replace(/\.json$/, '');
-
-  // Shape guard on the derived path. Not exploitable from the CLI, because
-  // `git diff --name-only` emits repo-normalized paths with no `..` segments and every
-  // operation here is a read — but this function is exported, and a future caller that
-  // feeds it a non-git-sourced list should not be able to walk out of the repo.
-  if (derivedSpecPath.split('/').includes('..') || path.isAbsolute(derivedSpecPath)) {
-    return [
-      {
-        check: 'path-shape',
-        detail: `refusing a sidecar whose derived approvable path escapes the repo: "${derivedSpecPath}"`,
-      },
-    ];
-  }
-
-  let record: { specHash?: unknown; approvedBy?: unknown; specPath?: unknown };
-  try {
-    record = JSON.parse(fs.readFileSync(path.join(rootDir, sidecarPath), 'utf-8'));
-  } catch (err) {
-    return [{ check: 'record-readable', detail: `${sidecarPath} is not readable JSON: ${String(err)}` }];
-  }
-
-  // 1. The file set is exactly the approval pair — nothing rides along inside a PR that is
-  //    exempt from review. The sidecar is required; the approvable is optional because the
-  //    `status:` mirror flip is hash-neutral and may land separately.
-  const allowed = new Set([sidecarPath, derivedSpecPath]);
   const strays = changed.filter((f) => !allowed.has(f));
   if (strays.length > 0) {
     failures.push({
       check: 'file-set',
       detail:
-        `an approval-record PR may change only the sidecar and the approvable it points at ` +
-        `(${sidecarPath}, ${derivedSpecPath}). Also changed: ${strays.join(', ')}`,
+        `an approval-record PR may change only approval sidecars and the approvables they point at. ` +
+        `Also changed: ${strays.join(', ')}`,
     });
   }
 
-  // 2. The record's self-declared path must agree with where it is filed.
-  if (typeof record.specPath === 'string' && record.specPath !== derivedSpecPath) {
-    failures.push({
-      check: 'path-agreement',
-      detail: `record says specPath="${record.specPath}" but it is filed at ${sidecarPath}, which is the record for "${derivedSpecPath}"`,
-    });
+  for (const sidecarPath of sidecars) {
+    failures.push(...checkOneRecord(rootDir, sidecarPath, changed, readBase));
   }
-
-  // 3. The hash binds the record to the content AT THIS COMMIT. CI checks out the merge
-  //    ref, so the working tree is what would land — which is the thing that must be
-  //    approved, not whatever the branch looked like when the record was minted.
-  const approvableAbs = path.join(rootDir, derivedSpecPath);
-  if (!fs.existsSync(approvableAbs)) {
-    failures.push({
-      check: 'hash-binding',
-      detail: `the approvable ${derivedSpecPath} does not exist at this commit, so the record points at content that is not here`,
-    });
-  } else if (typeof record.specHash !== 'string') {
-    failures.push({ check: 'hash-binding', detail: 'record has no string specHash' });
-  } else {
-    const computed = specHash(fs.readFileSync(approvableAbs, 'utf-8'));
-    if (computed !== record.specHash) {
-      failures.push({
-        check: 'hash-binding',
-        detail:
-          `record specHash=${record.specHash} but ${derivedSpecPath} canonicalizes to ${computed} at this commit. ` +
-          `The approval was given to different bytes than the ones landing.`,
-      });
-    }
-  }
-
-  // 3b. THE SCOPE BOUNDARY, ENFORCED (DR-081 §5). Everything above is self-referential:
-  //     the record and the approvable both arrive in the same PR, so "the hash matches"
-  //     only proves the pusher was consistent with themselves. It does NOT prove the
-  //     content was ever reviewed.
-  //
-  //     The attack it leaves open, which a panel reviewer caught on this PR before it
-  //     merged: rewrite a spec's body to anything you like, mint a sidecar whose
-  //     specHash matches the NEW bytes, and every check above passes. Once §3's
-  //     `ai-review` exemption ships, that content merges unreviewed — which is exactly
-  //     the boundary DR-081 §5 calls load-bearing, previously asserted only in prose.
-  //
-  //     The rule that closes it: the approvable's CANONICAL hash must be identical on
-  //     the merge base and at head. A `status:`/`phases:` mirror flip is stripped by
-  //     canonicalization, so the legitimate approve flow still passes; any substantive
-  //     edit changes the hash and is refused. A brand-new approvable has no reviewed
-  //     base version at all, so approving it in the same PR is refused too.
-  if (changed.includes(derivedSpecPath)) {
-    const baseContent = readBase(derivedSpecPath);
-    if (baseContent === null) {
-      failures.push({
-        check: 'approvable-unreviewed',
-        detail:
-          `${derivedSpecPath} does not exist on the merge base, so this PR both introduces the ` +
-          `approvable and approves it. The content must land and be reviewed on its own PR first (DR-081 §5).`,
-      });
-    } else if (fs.existsSync(path.join(rootDir, derivedSpecPath))) {
-      const baseHash = specHash(baseContent);
-      const headHash = specHash(fs.readFileSync(path.join(rootDir, derivedSpecPath), 'utf-8'));
-      if (baseHash !== headHash) {
-        failures.push({
-          check: 'approvable-unreviewed',
-          detail:
-            `${derivedSpecPath} canonicalizes to ${baseHash} on the merge base but ${headHash} here, so this PR ` +
-            `changes the approvable's substance, not just its approval record. An approval PR may flip ` +
-            `status:/phases: (hash-neutral) and nothing else — the content itself is reviewed on its own PR (DR-081 §5).`,
-        });
-      }
-    }
-  }
-
-  // 4. The approver is a permitted human, re-checked here because a local
-  //    `assertHumanApprover` proves nothing about a pushed branch (DR-081 section 4).
-  const approvedBy = typeof record.approvedBy === 'string' ? record.approvedBy : '';
-  const allowlist = permittedApprovers(rootDir);
-  if (allowlist.length === 0) {
-    failures.push({
-      check: 'approver-allowlist',
-      detail:
-        'no permitted-approver allowlist is configured. Add `"approvers": ["you@example.com"]` to ' +
-        '.minspec/config.json. Refusing rather than defaulting to "anyone" — an unconfigured ' +
-        'allowlist must not mean an open one.',
-    });
-  } else if (!allowlist.includes(approvedBy.trim().toLowerCase())) {
-    failures.push({
-      check: 'approver-allowlist',
-      detail: `approvedBy="${approvedBy}" is not in the permitted-approver allowlist in .minspec/config.json`,
-    });
-  }
-
-  // 5. The agent denylist still applies on top, so an identity that is somehow both
-  //    allowlisted and a known agent identity is still refused. The two lists answer
-  //    different questions ("is this a permitted person?" / "is this an automation
-  //    identity?"), and an allowlist edit must not be able to re-open DR-056's
-  //    agent-self-approval hole.
-  const agentCheck = checkApprover(approvedBy, parseAgentIdentities(process.env.MINSPEC_AGENT_IDENTITIES));
-  if (!agentCheck.ok) failures.push({ check: 'approver-not-agent', detail: agentCheck.reason });
 
   return failures;
 }
