@@ -29,6 +29,12 @@
  * character-for-character equal to the canonical module's generated source. Divergence in
  * ANY of the three now fails this suite; it does not depend on anyone remembering to keep
  * three files in lock-step.
+ *
+ * SCOPE, since #2018 added exemptions. This suite covers the MACHINERY PATTERN only. The
+ * carve-outs are a separate `grep -vE` stage that runs BEFORE this pattern (POSIX ERE has
+ * no negative lookahead), so a carved path still matches the pattern asserted here and is
+ * dropped earlier. The exemptions, their rot guards and the end-to-end effect at each
+ * consumer live in `machinery-carve-outs.test.ts`.
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
@@ -108,6 +114,9 @@ describe('#1284 machinery path classification (ai-review.yml)', () => {
     // exact path is what dispatch-issue.sh's MACHINERY_PATH_RE omitted, leaving the
     // invariant-2 second witness inert for it.
     'packages/minspec/src/lib/ci-review-templates.ts',
+    // #2018: the canonical set itself. It decides WHAT COUNTS as a gate, so while it was
+    // exempt a PR narrowing the machinery set was certifiable by the machinery it narrows.
+    'packages/minspec/src/lib/machinery-paths.ts',
     // #1758: unused by this repo today, but folded into the canonical set so all three
     // definitions genuinely agree rather than disagreeing on an untested corner.
     '.circleci/config.yml',
@@ -216,6 +225,9 @@ describe('#1758 all three machinery definitions classify one path table identica
     // machinery to dispatch-issue.sh's old MACHINERY_PATH_RE.
     'packages/minspec/src/lib/template-registry.ts',
     'packages/minspec/src/lib/ci-review-templates.ts',
+    // #2018: the canonical module, added to MACHINERY_SINGLE_FILES so a PR narrowing the
+    // machinery set cannot be certified by the machinery it narrows.
+    'packages/minspec/src/lib/machinery-paths.ts',
   ];
 
   // Ordinary, non-machinery code and docs — all three must agree these are NOT machinery,

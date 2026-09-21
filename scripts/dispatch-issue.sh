@@ -140,7 +140,53 @@ PUBLISH_PATH_RE='^sites/|^\.github/workflows/deploy-sites\.yml$'
 # ai-review.yml covers, so this second witness was inert for them. #1758 also folded in
 # `.circleci/`/`.buildkite/`/`.husky/` (unused here, zero-cost) so all three definitions
 # — this one, ai-review.yml, and auto-merge-gate.ts's BOUNDARY_DIR_PREFIXES — agree.
-MACHINERY_PATH_RE='^\.github/|^scripts/|^\.githooks/|^\.circleci/|^\.buildkite/|^\.husky/|^packages/minspec/src/lib/(template-registry|ci-review-templates)\.ts$'
+MACHINERY_PATH_RE='^\.github/|^scripts/|^\.githooks/|^\.circleci/|^\.buildkite/|^\.husky/|^packages/minspec/src/lib/(template-registry|ci-review-templates|machinery-paths)\.ts$'
+
+# MACHINERY_CARVE_OUT_RE (#2018) — the EXEMPTIONS from the line above: exact paths that
+# sit under a machinery prefix but decide nothing, and that nothing which decides reads.
+# `scripts/` is a directory prefix, so it admits a read-only oracle and a report
+# generator; classifying those as machinery costs a human keystroke that decides nothing.
+#
+# WHY A SECOND PATTERN RATHER THAN A NARROWER FIRST ONE: POSIX ERE has no negative
+# lookahead and both shell consumers of MACHINERY_PATH_RE are `grep -E`, so "under
+# ^scripts/ EXCEPT these two" is not expressible as a pattern tweak. It is a separate
+# `grep -vE` stage applied BEFORE the machinery test (machinery_carve_out_filter below).
+#
+# CANONICAL SOURCE (#1758, extended #2018): packages/minspec/src/lib/machinery-paths.ts —
+# a HAND-COPY of its buildMachineryCarveOutRegexSource(), pinned character-for-character
+# by packages/minspec/tests/machinery-carve-outs.test.ts, which also fails if a carved
+# path stops existing or is ever referenced from a workflow, a hook or another script.
+# Unlike ai-review.yml's copy this one needs no repo-scope guard: dispatch-issue.sh is
+# not a managed region and is never scaffolded into a consuming repo.
+MACHINERY_CARVE_OUT_RE='^scripts/facts\.ts$|^scripts/review-churn-report\.sh$'
+
+# Read newline-separated paths on stdin, write them back with the #2018 carve-outs
+# removed. Interposed before every MACHINERY_PATH_RE test so there is ONE carve-out
+# stage rather than one per call site.
+#
+# FAILS CLOSED IN BOTH DEGENERATE CASES — it emits the list UNFILTERED, so the caller
+# sees exactly what it saw before carve-outs existed and HOLDS rather than arms:
+#   • MACHINERY_CARVE_OUT_RE empty/unset. `grep -vE ''` matches every line and would
+#     delete the entire change set, silently disarming this second witness (constitution
+#     invariant 2 — a gate that cannot read its own exemption list must hold).
+#   • grep exits >= 2, a real error. Exit 1 is NOT an error: it means every line was
+#     filtered out, which is the answer, not a failure — so it is classified, never
+#     swallowed.
+machinery_carve_out_filter() {
+  local paths out status=0
+  paths="$(cat)"
+  if [[ -z "${MACHINERY_CARVE_OUT_RE:-}" ]]; then
+    printf '%s\n' "$paths"
+    return 0
+  fi
+  out="$(grep -vE "${MACHINERY_CARVE_OUT_RE}" <<<"$paths")" || status=$?
+  if (( status > 1 )); then
+    printf '%s\n' "$paths"
+    return 0
+  fi
+  printf '%s\n' "$out"
+  return 0
+}
 
 # paths_have_approvable_doc (#833, extended #981): does a set of changed paths
 # (newline-separated on stdin) touch something a HUMAN — not `ai-review:pass` — must own
@@ -185,8 +231,18 @@ MACHINERY_PATH_RE='^\.github/|^scripts/|^\.githooks/|^\.circleci/|^\.buildkite/|
 # if ANY path matches, else 1. Fail-closed on an unknown/unreadable changed-set is NOT
 # this pure classifier's job — it lives at the arm site (the nonzero + empty branches),
 # so "no match" is never conflated with "could not tell".
+# #2018 — the input is piped through machinery_carve_out_filter, so a carved-out path is
+# invisible to EVERY alternation here, not just the machinery one. That is safe because a
+# carve-out is required to be disjoint from the other three mandates (it must lie under a
+# MACHINERY_DIR_PREFIXES prefix, and it must match none of DOCS_CORPUS_RE, `^\.minspec/`,
+# `^\.cursorrules$` or PUBLISH_PATH_RE) — asserted in
+# packages/minspec/tests/machinery-carve-outs.test.ts rather than left as an assumption,
+# because `.github/workflows/deploy-sites.yml` is proof the sets CAN overlap in principle.
+# Filtering once, before the combined grep, keeps this a single expression: a per-mandate
+# filter would need the machinery alternation split out into its own copy, and a second
+# copy of that regex is exactly the #1758 drift.
 paths_have_approvable_doc() {
-  grep -qE "${DOCS_CORPUS_RE}"'|^\.minspec/|^\.cursorrules$'"|${PUBLISH_PATH_RE}|${MACHINERY_PATH_RE}"
+  grep -qE "${DOCS_CORPUS_RE}"'|^\.minspec/|^\.cursorrules$'"|${PUBLISH_PATH_RE}|${MACHINERY_PATH_RE}" < <(machinery_carve_out_filter)
 }
 
 # Pure seam: prove the withhold classifier without gh/dispatch. Paths on stdin.
@@ -247,7 +303,9 @@ autonomy_stop_classes_for_paths() {
   # §2.1 — publish paths and machinery, one class between them (no duplicate row).
   local outward=0
   grep -qE "${PUBLISH_PATH_RE}" <<<"$changed_files" && outward=1
-  grep -qE "${MACHINERY_PATH_RE}" <<<"$changed_files" && outward=1
+  # #2018 — carve-outs removed first; a path that decides nothing cannot make a merge
+  # irreversible-or-outward-facing.
+  grep -qE "${MACHINERY_PATH_RE}" < <(machinery_carve_out_filter <<<"$changed_files") && outward=1
   (( outward == 1 )) && classes+=('irreversible-or-outward-facing')
 
   # §2.2 — human-owned CONTENT. Ask the classifier itself, never a second copy of
@@ -258,6 +316,13 @@ autonomy_stop_classes_for_paths() {
   # reported as human-owned content it never touched.
   if paths_have_approvable_doc <<<"$changed_files"; then
     local residual=""
+    # #2018 — this subtraction still uses the RAW MACHINERY_PATH_RE, so a carved-out path
+    # is removed from the residual even though it was not classed as machinery above.
+    # That cannot change the verdict: a carve-out is required to match none of the other
+    # mandates, so `paths_have_approvable_doc` declines it anyway and its presence in the
+    # residual could never add 'approval-or-acceptance'. Left un-carved deliberately — the
+    # carve-out's purpose is to stop a path HOLDING a merge, and adding paths back into a
+    # subtraction whose only consumer already rejects them would be motion, not effect.
     residual=$(grep -vE "${PUBLISH_PATH_RE}|${MACHINERY_PATH_RE}" <<<"$changed_files" || true)  # swallow-ok: grep -v exits 1 when it filters everything out, which is the answer (no residual paths), not a failure; the input is a here-string and cannot fail
     if [[ -n "${residual//[$'\n\r\t ']/}" ]] && paths_have_approvable_doc <<<"$residual"; then
       classes+=('approval-or-acceptance')
@@ -1076,7 +1141,7 @@ run_reviewer_stage() {
       hold_why="$(autonomy_verdict_detail "$autonomy_verdict")"
       grep -qE "${DOCS_CORPUS_RE}"'|^\.minspec/|^\.cursorrules$' <<<"$changed_files" \
         && hold_why="${hold_why} It touches the docs-lane corpus / .minspec governance config (spec/DR/docs/approval-ledger/top-level .md) (#833)."
-      grep -qE "${MACHINERY_PATH_RE}" <<<"$changed_files" \
+      grep -qE "${MACHINERY_PATH_RE}" < <(machinery_carve_out_filter <<<"$changed_files") \
         && hold_why="${hold_why} It touches machinery (.github/ .githooks/ scripts/) — dispatch is the second witness to the ai-review machinery hold (#1264)."
       grep -qE "${PUBLISH_PATH_RE}" <<<"$changed_files" \
         && hold_why="${hold_why} It touches a PUBLISH path (sites/** → public Cloudflare Pages via deploy-sites.yml) — merging IS publishing (#981)."
