@@ -717,7 +717,7 @@ The founder decided on 2026-08-23, answering #1481 (should implements: be part o
 
 ## [DR-090 — Prose inside a managed file is shipped code — it must hold in the repo that receives it, or name the minspec repo as its subject](DR-090.md)
 
-*Status: accepted · Date: 2026-09-02*
+*Status: proposed · Date: 2026-09-02*
 
 <!-- dr-summary:DR-090 auto=02a7aa5f3877 -->
 MANAGED_REGION_TEMPLATES (packages/minspec/src/lib/template-registry.ts:2076) is the set of files MinSpec scaffolds byte-for-byte into every repo that inits it. The bytes are held identical by construction: the CI-review stack is generated from this repo's own working files (scripts/gen-ci-templates.mjs), and the portability suite in packages/minspec/tests/managed-region-templates.test.ts:378 asserts the embedded copy equals the on-disk source exactly.
