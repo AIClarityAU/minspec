@@ -37,6 +37,7 @@ import {
   ROLE_ARCHITECT_MD,
   ROLE_SKEPTIC_MD,
   AI_REVIEW_GUARD_JS,
+  AI_REVIEW_GUARD_TEST_JS,
   APPROVAL_PROVENANCE_PY,
   CANONICAL_PY,
   REVIEW_SCRIPT_SHEBANG,
@@ -2236,6 +2237,30 @@ const CI_REVIEW_STACK_TEMPLATES: readonly ManagedRegionTemplate[] = [
     outputPath: '.github/scripts/ai-review-guard.js',
     commentStyle: 'slash',
     content: AI_REVIEW_GUARD_JS,
+  },
+  {
+    // The guard's unit suite, shipped WITH the guard (#871).
+    //
+    // Same class of defect as #1486, approached from the other side. There, a comment
+    // in ai-review.yml claimed a coverage that existed only in MinSpec's repo, and the
+    // fix was to rewrite the claim on the way out. Here the guard's own header points a
+    // reader at this suite, and the honest fix is the opposite one: ship the suite, so
+    // the claim becomes true everywhere instead of being localized away. The guard is
+    // the most security-critical file in the stack (revert-or-not, strip-or-not,
+    // verified-or-not, green-or-not) and it was the one arriving unverifiable.
+    //
+    // Shipping the caller without its test was not hypothetical: scroogellm's hand-ported
+    // copy went stale the moment the guard's reducer advanced (scrooge#82) and sealbox
+    // had no copy at all (sealbox#18). Registering it here makes the pair byte-synced by
+    // the same machinery that syncs the guard, so they cannot drift apart again.
+    //
+    // Its own runtime dependencies — ai-review.yml and docs-lane.yml, which it reads to
+    // pin the shipped `run:` block and the hold pattern — are already managed templates,
+    // so the scaffolded set stays dependency-closed (managed-script-dependencies.test.ts).
+    name: 'ai-review-guard-test',
+    outputPath: '.github/scripts/ai-review-guard.test.js',
+    commentStyle: 'slash',
+    content: AI_REVIEW_GUARD_TEST_JS,
   },
 ] as const;
 
