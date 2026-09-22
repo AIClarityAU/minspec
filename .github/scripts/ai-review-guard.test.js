@@ -1,6 +1,12 @@
 // Unit tests for the ai-review label-integrity decision logic.
 // Runs on plain Node (no deps): `node --test .github/scripts/ai-review-guard.test.js`.
-// Wired into CI's lint job so the security-critical decisions stay enforced.
+//
+// This suite is a PARITY-MANAGED file (AIClarityAU/minspec#871): it ships alongside
+// ai-review-guard.js and is byte-synced to it by the same machinery, so the guard's
+// own "see ai-review-guard.test.js" resolves wherever the guard lands. In MinSpec's
+// own repo CI's lint job runs it on every PR; in a repo that scaffolded this stack
+// nothing runs it automatically yet (AIClarityAU/minspec#2059) - until that lands,
+// run the command above by hand.
 
 'use strict';
 
@@ -21,6 +27,7 @@ const {
   verifyHeadPassCheckRun,
   verifyHeadPassWitness,
   PASS_STATUS_CONTEXT,
+  HOLD_RE,
   decideStatus,
   shouldAwaitApproval,
   BLOCKED_BY,
@@ -310,6 +317,12 @@ test('status: description never exceeds the 140-char commit-status limit', () =>
     { labels: [] },
     { labels: [PASS], provenanceRevert: true },
     { labels: [PASS], stalenessStrip: true },
+    { labels: [PASS, 'hold:human'], passProvenance: VERIFIED },
+    // A pathological pile of long hold labels must still fit the 140-char limit.
+    {
+      labels: [PASS, ...Array.from({ length: 12 }, (_, i) => `hold:${'x'.repeat(20)}${i}`)],
+      passProvenance: VERIFIED,
+    },
   ];
   for (const c of cases) {
     assert.ok(decideStatus(c).description.length <= 140);
@@ -1326,3 +1339,119 @@ exit 0
     assert.equal(res.posted.output.summary, c.summary);
   });
 }
+
+// ── #1870 — a `hold:*` label is an INDEPENDENT second witness for the human hold ──
+// docs-lane refuses to arm auto-merge on a hold, but it was the only thing doing so:
+// if that job does not run (permissions gap, cancelled run, or the `docs-lane` label
+// removed, which makes its own `if:` guard false) an earlier arming still stands.
+// `ready-to-merge` is a different workflow, required by branch protection, evaluated
+// on every PR event — constitution invariant 2's "independent second witness".
+
+test('decideStatus: hold:human turns an otherwise-green gate RED', () => {
+  const green = decideStatus({ labels: [PASS, 'feat'], passProvenance: VERIFIED });
+  assert.equal(green.state, 'success', 'control: same PR without a hold is green');
+
+  const s = decideStatus({ labels: [PASS, 'feat', 'hold:human'], passProvenance: VERIFIED });
+  assert.equal(s.state, 'failure');
+  assert.match(s.description, /hold:human/);
+});
+
+test('decideStatus: ANY hold:* holds, not just hold:human', () => {
+  const s = decideStatus({ labels: [PASS, 'hold:legal'], passProvenance: VERIFIED });
+  assert.equal(s.state, 'failure');
+  assert.match(s.description, /hold:legal/);
+});
+
+test('decideStatus: the hold predicate is ANCHORED — a label containing "hold:" mid-string does not gate', () => {
+  // `household-docs` alone does NOT bind the anchor: it has no `hold:` substring, so an
+  // unanchored /hold:/ would pass that test too and the mutation would survive. These
+  // labels DO contain `hold:` and must still be ignored, which only an anchored
+  // pattern achieves.
+  for (const label of ['not-hold:human', 'xhold:legal', 'was-hold:tier', 'household-docs']) {
+    const s = decideStatus({ labels: [PASS, label], passProvenance: VERIFIED });
+    assert.equal(s.state, 'success', `${label} must not gate`);
+  }
+});
+
+test('HOLD_RE stays lock-step with docs-lane.yml\'s hold_pattern (two gates, one predicate)', () => {
+  // #1870 deliberately puts the same predicate in a SECOND gate — that is the point
+  // (an independent witness). Two copies drift, so pin them to each other, the way
+  // OUTWARD_DOC_PATTERN is pinned between the lane and auto-merge-gate.ts.
+  const fs = require('node:fs');
+  const path = require('node:path');
+  const lane = fs.readFileSync(path.join(__dirname, '..', 'workflows', 'docs-lane.yml'), 'utf8');
+  const m = lane.match(/hold_pattern='([^']+)'/);
+  assert.ok(m, 'docs-lane.yml must still define hold_pattern');
+  assert.equal(
+    HOLD_RE.source,
+    m[1],
+    'ready-to-merge and docs-lane must agree on what counts as a hold',
+  );
+});
+
+test('decideStatus: a held PR leaves the awaiting-approval "your turn" queue', () => {
+  // A hold drives statusState to 'failure', and shouldAwaitApproval keys off that, so
+  // the held PR drops out of the human merge queue. That is correct and matches the
+  // existing isDraft case — a PR nobody may merge is not anyone's turn to merge — but
+  // it is an interaction between two functions, so pin it rather than infer it.
+  const held = decideStatus({ labels: [PASS, 'hold:human'], passProvenance: VERIFIED });
+  assert.equal(held.state, 'failure');
+  assert.equal(
+    shouldAwaitApproval({ statusState: held.state, autoMergeArmed: false, openBlockers: [], isDraft: false }),
+    false,
+  );
+
+  const free = decideStatus({ labels: [PASS], passProvenance: VERIFIED });
+  assert.equal(free.state, 'success', 'control: without the hold it IS the human\'s turn');
+  assert.equal(
+    shouldAwaitApproval({ statusState: free.state, autoMergeArmed: false, openBlockers: [], isDraft: false }),
+    true,
+  );
+});
+
+test('decideStatus: hold is reported ahead of a staleness strip (the unactionable-description case)', () => {
+  // Both make it red. The strip says "re-review required", which a held PR can never
+  // satisfy — so the hold, which is what actually blocks, must be the reported reason.
+  const s = decideStatus({ labels: [PASS, 'hold:human'], stalenessStrip: true });
+  assert.equal(s.state, 'failure');
+  assert.match(s.description, /hold:human/);
+  assert.doesNotMatch(s.description, /re-review required/);
+});
+
+test('decideStatus: hold reported ahead of a provenance revert too', () => {
+  const s = decideStatus({ labels: [PASS, 'hold:human'], provenanceRevert: true });
+  assert.equal(s.state, 'failure');
+  assert.match(s.description, /hold:human/);
+});
+
+test('decideStatus: a hold holds even with NO pass at all (it is not a pass-modifier)', () => {
+  const s = decideStatus({ labels: ['hold:human'] });
+  assert.equal(s.state, 'failure');
+  assert.match(s.description, /hold:human/);
+});
+
+test('decideStatus: multiple holds are all named', () => {
+  const s = decideStatus({ labels: [PASS, 'hold:human', 'hold:legal'], passProvenance: VERIFIED });
+  assert.equal(s.state, 'failure');
+  assert.match(s.description, /hold:human/);
+  assert.match(s.description, /hold:legal/);
+});
+
+test('decideStatus: hold does not alter effectiveLabels (it gates, it does not strip)', () => {
+  const s = decideStatus({ labels: [PASS, 'hold:human'], passProvenance: VERIFIED });
+  assert.ok(s.effectiveLabels.includes('hold:human'));
+  assert.ok(s.effectiveLabels.includes(PASS), 'a hold must not strip the pass label');
+});
+
+test('decideStatus: no hold present → behaviour is byte-identical to before #1870', () => {
+  for (const c of [
+    { labels: [PASS, 'feat'], passProvenance: VERIFIED },
+    { labels: [PASS, CHANGES], passProvenance: VERIFIED },
+    { labels: ['feat'] },
+    { labels: [PASS], stalenessStrip: true },
+    { labels: [PASS], provenanceRevert: true },
+  ]) {
+    const s = decideStatus(c);
+    assert.doesNotMatch(s.description, /hold/, 'no hold label ⇒ no hold wording');
+  }
+});
