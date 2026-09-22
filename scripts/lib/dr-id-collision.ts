@@ -447,9 +447,31 @@ export interface DrRepurposeFinding {
 export interface DrRepurposeVerdict {
   ok: boolean;
   findings: DrRepurposeFinding[];
+  /**
+   * The label that turned a block into a recorded act, when one was present AND there
+   * was something to acknowledge. `undefined` on a clean PR, so "nothing changed" and
+   * "a change was waved through" never read the same in a log.
+   */
+  acknowledgedBy?: string;
   /** Ready to print. Quotes both sides of every changed field. */
   message: string;
 }
+
+/**
+ * The PR label that converts a repurposing BLOCK into a recorded, reviewable act (#1982).
+ *
+ * The gate exists so a decision record cannot be replaced SILENTLY - not so it can never
+ * be replaced. A DR created with a typo in its title, or the wrong `triggered_by:`, had
+ * no in-band path at all: the check is required and had no bypass, so the only routes
+ * were an admin merge or superseding the record with a new one.
+ *
+ * **This is an audit trail plus a speed bump, not a control, and it must not be sold as
+ * one.** Whoever opens the PR can add the label, including an agent. What it buys is that
+ * the act is named on the PR, appears in the check output, and is visible to the reviewers
+ * — which is the property that was actually missing. Preventing it outright was never the
+ * goal; #1756 was caught by review, and review is what this keeps in the loop.
+ */
+export const DR_IDENTITY_ACK_LABEL = 'dr-identity-change';
 
 /**
  * Decide whether a PR is AMENDING existing decision records or REPURPOSING them.
@@ -481,7 +503,10 @@ export interface DrRepurposeVerdict {
  * Total and deterministic: findings sort by file, then by the order in
  * `DR_IDENTITY_FIELDS`.
  */
-export function decideDrRepurposing(revisions: DrRevision[]): DrRepurposeVerdict {
+export function decideDrRepurposing(
+  revisions: DrRevision[],
+  opts: { labels?: readonly string[] } = {},
+): DrRepurposeVerdict {
   const findings: DrRepurposeFinding[] = [];
 
   for (const { file, base, head } of [...revisions].sort((a, b) => a.file.localeCompare(b.file))) {
@@ -493,8 +518,18 @@ export function decideDrRepurposing(revisions: DrRevision[]): DrRepurposeVerdict
     }
   }
 
-  const ok = findings.length === 0;
-  return { ok, findings, message: renderRepurposeMessage(findings) };
+  // The findings are computed and REPORTED either way. Acknowledging changes the verdict,
+  // never the visibility — a label that suppressed the detail would leave the reviewer
+  // with less than before, which is the opposite of what it is for.
+  const acknowledged = findings.length > 0 && (opts.labels ?? []).includes(DR_IDENTITY_ACK_LABEL);
+  const ok = findings.length === 0 || acknowledged;
+
+  return {
+    ok,
+    findings,
+    ...(acknowledged ? { acknowledgedBy: DR_IDENTITY_ACK_LABEL } : {}),
+    message: renderRepurposeMessage(findings, acknowledged),
+  };
 }
 
 /**
@@ -505,7 +540,7 @@ export function decideDrRepurposing(revisions: DrRevision[]): DrRepurposeVerdict
  * it — naming the field alone would send them to the diff to find out what a gate
  * already knew.
  */
-function renderRepurposeMessage(findings: DrRepurposeFinding[]): string {
+function renderRepurposeMessage(findings: DrRepurposeFinding[], acknowledged = false): string {
   if (findings.length === 0) {
     return 'DR repurposing check: no existing decision record has its identity changed.';
   }
@@ -522,6 +557,23 @@ function renderRepurposeMessage(findings: DrRepurposeFinding[]): string {
     }
   }
 
+  if (acknowledged) {
+    lines.push(
+      '',
+      `ACKNOWLEDGED by the \`${DR_IDENTITY_ACK_LABEL}\` label — passing, and recorded above.`,
+      '',
+      'This is deliberately a speed bump plus an audit trail, NOT a control: whoever',
+      'opened this pull request could add that label, including an agent. What it buys',
+      'is that the change is named on the PR and printed here, so the reviewers see it.',
+      'Preventing the edit outright was never the point — #1756 was caught by review,',
+      'and keeping review in the loop is what this preserves.',
+      '',
+      'If that is not what you meant, remove the label: the fields above are the ones',
+      'that decide WHICH decision each record is.',
+    );
+    return lines.join('\n');
+  }
+
   lines.push(
     '',
     'These records already exist on the base branch, so this is not a new decision',
@@ -533,6 +585,11 @@ function renderRepurposeMessage(findings: DrRepurposeFinding[]): string {
     '(MinSpec: Create Architecture Decision Record computes it).',
     'If this is a genuine amendment, restore the identity fields and record the change',
     'as a dated amendment section in the body — that is what keeps the record citable.',
+    '',
+    `If the change IS intended and the record should keep its id — a typo in \`title:\`,`,
+    `a wrong \`triggered_by:\` recorded at creation — add the \`${DR_IDENTITY_ACK_LABEL}\``,
+    'label to this pull request. The check then passes and says so, leaving the change',
+    'named on the PR rather than blocked with no in-band path (#1982).',
   );
   return lines.join('\n');
 }
