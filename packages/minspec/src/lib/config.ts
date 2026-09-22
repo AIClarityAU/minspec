@@ -71,6 +71,25 @@ export interface MinspecConfig {
    */
   readonly statusLineAnnotation?: 'warn' | 'error';
   /**
+   * Permitted approver identities for the `approval-integrity` gate (DR-081 §4, #1376).
+   *
+   * An ALLOWLIST, unlike `approval.ts`'s `BUILTIN_AGENT_IDENTITIES` denylist, and the two
+   * are not interchangeable. The denylist is correct where it runs, because `approveSpec`
+   * CAPTURES the identity from local git config — the approver cannot choose it. The gate
+   * re-checks server-side, where `approvedBy` is a field in a sidecar on a pushed branch,
+   * i.e. attacker-controlled: a denylist there would pass every identity it has not heard
+   * of. Both are applied; an allowlisted identity that is also a known agent identity is
+   * still refused, so editing this list cannot reopen DR-056's self-approval hole.
+   *
+   * Compared case-insensitively after trimming. Absent or empty means REFUSE, never
+   * "anyone" — an unconfigured allowlist must not be an open one.
+   *
+   * Declared here so the field is part of the typed contract rather than known only to
+   * `scripts/approval-integrity.ts`, which reads config.json directly (it runs in CI
+   * without the extension's loader). Two readers, one documented shape.
+   */
+  readonly approvers?: readonly string[];
+  /**
    * The project's name, as rendered into every generated harness file (#1529).
    *
    * Explicit and authoritative: set this to rename the project deliberately.
