@@ -375,7 +375,7 @@ sync_shared_checkouts() {
   local db origin_ref root head_sha origin_sha base
   # `|| true` inside the substitution: under `set -euo pipefail` an unset origin/HEAD
   # makes symbolic-ref exit 128, which would otherwise abort the whole drain.
-  db="$(git -C "$PRIMARY_ROOT" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)"
+  db="$(git -C "$PRIMARY_ROOT" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)"  # swallow-ok: the next line defaults empty to main via ${db:-main}, so a failed lookup and an unset origin/HEAD land on the same correct default
   db="${db:-main}"                                   # origin/HEAD often unset locally → main
   origin_ref="origin/${db}"
   # GIT_TERMINAL_PROMPT=0: this loop is disowned/background — a checkout without
@@ -415,8 +415,8 @@ resolve_session_pid() {
   fi
   local pid="$PPID" guard=0 comm args
   while [[ -n "$pid" && "$pid" != "0" && "$pid" != "1" && "$guard" -lt 20 ]]; do
-    comm="$(ps -o comm= -p "$pid" 2>/dev/null | tr -d ' \t' || true)"
-    args="$(ps -o args= -p "$pid" 2>/dev/null || true)"
+    comm="$(ps -o comm= -p "$pid" 2>/dev/null | tr -d ' \t' || true)"  # swallow-ok: ps exits non-zero precisely when the pid is gone, which is the same conclusion the test below draws
+    args="$(ps -o args= -p "$pid" 2>/dev/null || true)"  # swallow-ok: ps exits non-zero precisely when the pid is gone, which is the same conclusion the test below draws
     if [[ "$comm" == *claude* || "$args" == *claude-code* || "$args" == *anthropic.claude* ]]; then
       printf '%s' "$pid"; return 0
     fi
@@ -582,7 +582,7 @@ dispatch_alive_for() {
 reconcile_stale_claims() {
   local running n applied age
   running=$(gh issue list --repo "$REPO" --state open --label "agent-running" \
-    --json number --jq '.[].number' 2>/dev/null || true)
+    --json number --jq '.[].number' 2>/dev/null || true)  # swallow-ok: the next line returns 0 on empty, before the loop holding this function's only label edit — a failed query skips this cycle's reaping and the next retries; nothing is reaped on bad data
   [[ -n "$running" ]] || return 0
 
   while read -r n; do
@@ -612,15 +612,26 @@ reconcile_stale_claims() {
 # catch a FALSE agent-done. Branch naming is deterministic (the dispatcher creates
 # `agent/issue-<N>`), so the join needs no heuristics.
 reconcile_done_issues() {
-  local done_issues n pr
+  local done_issues n pr rc
   done_issues=$(gh issue list --repo "$REPO" --state open --label "agent-done" \
-    --json number --jq '.[].number' 2>/dev/null || true)
+    --json number --jq '.[].number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no agent-done issues
   [[ -n "$done_issues" ]] || return 0
 
   while read -r n; do
     [[ -n "$n" ]] || continue
+    # Keep the EXIT STATUS, not just the output (#1855). An empty $pr is consumed as a
+    # BRANCH below, and the else arm is the MUTATING one: it strips `agent-done`, adds
+    # `needs-human-review`, and prints "NO merged PR exists". With the status swallowed,
+    # "the query failed" and "nothing merged" were the same empty string — so a transient
+    # API blip demoted a healthy, genuinely-finished issue and told a human it had failed.
+    # An absence claim must rest on a lookup that actually ran.
+    rc=0
     pr=$(gh pr list --repo "$REPO" --state merged --head "agent/issue-${n}" \
-      --json number --jq '.[0].number // empty' 2>/dev/null || true)
+      --json number --jq '.[0].number // empty' 2>/dev/null) || rc=$?
+    if (( rc != 0 )); then
+      echo "[drain] reconcile: could not check agent/issue-${n} for a merged PR (gh exit ${rc}) — leaving #$n exactly as it is. This is NOT evidence that nothing merged (#1855)."
+      continue
+    fi
     if [[ -n "$pr" ]]; then
       echo "[drain] reconcile: closing #$n — its work merged in #$pr but nothing ever closed it (#1322)."
       gh issue close "$n" --repo "$REPO" \
@@ -642,8 +653,42 @@ reconcile_labels() {
   reconcile_done_issues  || echo "[drain] reconcile: agent-done pass errored — continuing."
 }
 
+# ── The queue read — ONE definition, two consumers ────────────────────────────
+#
+# _ready_numbers <label> — open issue numbers for one label, or a LOUD failure.
+#
+# #1855's mechanism, in one line: `gh issue list ... 2>/dev/null || true` collapses
+# "the query failed" into "the queue is empty", and every caller below reports empty
+# as a finished cycle. Measured 2026-09-21: this loop logged
+# "no agent-ready / agent-ready-specify issues after triage — cycle done" 47 times
+# while the repo held 119 `agent-ready` + 326 `agent-ready-specify` open issues. The
+# log was current to the second and the loop was alive, so both of the obvious
+# health probes came back green; the only probe that catches it is comparing this
+# count against an independently obtained one.
+#
+# Failure and emptiness are different answers and must not share a representation.
+# This prints numbers on stdout and returns gh's own status, so an empty queue is a
+# SUCCESS with no output and a broken query is a non-zero the caller must handle.
+# gh's stderr is deliberately NOT redirected — the message that would have named the
+# cause ("please run: gh auth login") was being discarded.
+#
+# The limit is EXPLICIT and announced. `gh issue list` caps at 30 by default and
+# says nothing, so the queue this loop has always enumerated was the first 30 per
+# label — a silent cap that reads as the whole queue. Pinning it here changes no
+# behaviour (30 is what it already was) while making the number a decision someone
+# made rather than a default nobody saw, and the caller warns when a result lands
+# exactly on the cap. Raising it is tracked separately: it is a dispatch-VOLUME
+# decision, not a correctness one, and does not belong in the same change as a
+# fail-loud fix.
+_ready_limit="${MINSPEC_DRAIN_QUEUE_LIMIT:-30}"
+_ready_numbers() {
+  gh issue list --repo "$REPO" --label "$1" --limit "$_ready_limit" \
+    --json number --jq '.[].number'
+}
+
 run_cycle() {
   local inbox_issues all_ready n out drc cap
+  local inbox_rc ready_rc ready_full ready_spec _lbl
   local ac_halt ac_sig
   local quota_verdict
 
@@ -675,8 +720,18 @@ run_cycle() {
   reconcile_labels
 
   # Step 1: triage inbox issues → labels T1/T2 as agent-ready
-  inbox_issues=$(gh issue list --repo "$REPO" --label "inbox" \
-    --json number --jq '.[].number' 2>/dev/null || true)
+  # A failed inbox query must not read as an empty inbox (#1855). Triage is not
+  # load-bearing for the cycle the way Step 2 is — nothing downstream depends on it
+  # having run — so this warns and carries on to the dispatch queue rather than
+  # aborting the whole cycle. It is loud either way; what it must never do is print
+  # nothing and look like a quiet inbox.
+  inbox_rc=0
+  inbox_issues="$(_ready_numbers "inbox")" || inbox_rc=$?
+  if (( inbox_rc != 0 )); then
+    echo "[drain] WARNING: the inbox query FAILED (gh exit ${inbox_rc}) — this cycle triaged nothing." >&2
+    echo "[drain]          That is NOT an empty inbox. See the gh error above for the cause." >&2
+    inbox_issues=""
+  fi
   if [[ -n "$inbox_issues" ]]; then
     echo "[drain] triaging $(echo "$inbox_issues" | wc -l | tr -d ' ') inbox issue(s)..."
     for n in $inbox_issues; do
@@ -694,14 +749,31 @@ run_cycle() {
   # a verdict nothing dispatches is just a differently-shaped backlog. Which mode each
   # issue runs in is decided by dispatch-issue.sh from the VERDICT RECORD, never from
   # the label that put it in this list (#983).
-  all_ready=$(
-    {
-      gh issue list --repo "$REPO" --label "agent-ready" \
-        --json number --jq '.[].number' 2>/dev/null || true
-      gh issue list --repo "$REPO" --label "agent-ready-specify" \
-        --json number --jq '.[].number' 2>/dev/null || true
-    } | sort -un
-  )
+  # Captured one label at a time, with each status checked. A pipeline into `sort`
+  # cannot be used to carry the status even under `pipefail`, because `sort` succeeds
+  # on empty input and would mask a failed producer — the same collapse in a new shape.
+  ready_rc=0
+  ready_full="$(_ready_numbers "agent-ready")" || ready_rc=$?
+  ready_spec=""
+  if (( ready_rc == 0 )); then
+    ready_spec="$(_ready_numbers "agent-ready-specify")" || ready_rc=$?
+  fi
+  if (( ready_rc != 0 )); then
+    echo "[drain] HOLDING: the agent-ready query FAILED (gh exit ${ready_rc})." >&2
+    echo "[drain]          This is NOT an empty queue, and reporting it as one is #1855." >&2
+    echo "[drain]          Nothing was dispatched this cycle. See the gh error above." >&2
+    return 1
+  fi
+  # No silent caps: a label that came back exactly at the limit is almost certainly
+  # truncated, and the difference between "30 ready" and "30 of 119 ready" changes
+  # what a reader does about it.
+  for _lbl in "agent-ready:$ready_full" "agent-ready-specify:$ready_spec"; do
+    if [[ "$(printf '%s' "${_lbl#*:}" | grep -c . || true)" == "$_ready_limit" ]]; then  # swallow-ok: grep -c exits 1 on zero matches, which cannot equal a positive limit — the comparison below is the decision, not this status
+      echo "[drain] NOTE: '${_lbl%%:*}' returned exactly ${_ready_limit} issue(s) — the query cap." >&2
+      echo "[drain]       The real queue is probably longer. Raise MINSPEC_DRAIN_QUEUE_LIMIT to see it." >&2
+    fi
+  done
+  all_ready="$(printf '%s\n%s\n' "$ready_full" "$ready_spec" | sed '/^$/d' | sort -un)"
   if [[ -z "$all_ready" ]]; then
     echo "[drain] no agent-ready / agent-ready-specify issues after triage — cycle done."
     return 0
@@ -855,7 +927,7 @@ run_cycle() {
   if [[ "${MINSPEC_DRAIN_REMEDIATE_PRS:-1}" != "0" ]]; then
     local open_prs pr rcap rout
     open_prs=$(gh pr list --repo "$REPO" --state open --json number,isDraft \
-      --jq '.[] | select(.isDraft==false) | .number' 2>/dev/null || true)
+      --jq '.[] | select(.isDraft==false) | .number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no open PRs to remediate
     if [[ -n "$open_prs" ]]; then
       echo "[drain] sweeping $(echo "$open_prs" | wc -l | tr -d ' ') open PR(s) for fixable problems..."
       for pr in $open_prs; do
@@ -864,7 +936,7 @@ run_cycle() {
         # + classify; a quota hit pauses the whole cycle (loop backs off).
         rcap=$(mktemp)
         "$REMEDIATE" "$pr" 2>&1 | tee "$rcap" || true
-        rout=$(cat "$rcap" 2>/dev/null || true); rm -f "$rcap"
+        rout=$(cat "$rcap" 2>/dev/null || true); rm -f "$rcap"  # swallow-ok: the capture file is written by this script moments earlier and removed on the same line; absent means the launch produced no output
         if is_quota <<<"$rout"; then
           echo "[drain] Claude usage-limit signal while remediating PR #$pr — pausing this cycle (will back off, not fail)."
           return 42
@@ -884,7 +956,7 @@ run_cycle() {
 # QUOTA_BOOTSTRAP_FILE itself is later lost — re-derived from empty by design.
 _quota_bootstrap_count() {
   local n
-  n=$(cat "$QUOTA_BOOTSTRAP_FILE" 2>/dev/null || true)
+  n=$(cat "$QUOTA_BOOTSTRAP_FILE" 2>/dev/null || true)  # swallow-ok: a missing bootstrap counter is the expected first-run state, and the regex below rejects anything that is not a number
   [[ "$n" =~ ^[0-9]+$ ]] && printf '%s\n' "$n" || printf '0\n'
 }
 
@@ -1375,23 +1447,47 @@ done
 # --auto/--continuous, for anyone who wants the old single-pass behaviour back.
 [[ "${MINSPEC_DRAIN_CONTINUOUS:-1}" == "0" ]] && CONTINUOUS=false
 
-# Count pending work across both stages
-INBOX_COUNT=0
-INBOX_ISSUES=$(gh issue list --repo "$REPO" --label "inbox" \
-  --json number --jq '.[].number' 2>/dev/null || true)
-[[ -n "$INBOX_ISSUES" ]] && INBOX_COUNT=$(echo "$INBOX_ISSUES" | wc -l | tr -d ' ')
+# One token for the whole run. Every read below and inside run_cycle happens in a
+# `$(...)` subshell, so without this each one mints its own App token and throws it
+# away (#2003 review). Placed HERE, after argv dispatch, so the pure offline seams
+# above still run with no network at all. Never fatal: no key means no change.
+gh_bot_warm_read
 
-# Both ready classes (#1169) — same OR-not-AND reason as run_cycle's Step 2. This
-# count decides whether a one-shot run exits early, so undercounting here would make
-# the drain report "nothing to do" while specify work sat queued.
-READY_ISSUES=$(
-  {
-    gh issue list --repo "$REPO" --label "agent-ready" \
-      --json number --jq '.[].number' 2>/dev/null || true
-    gh issue list --repo "$REPO" --label "agent-ready-specify" \
-      --json number --jq '.[].number' 2>/dev/null || true
-  } | sort -un
-)
+# Count pending work across both stages.
+#
+# This is NOT a display path, and reading it as one is how it survived the first
+# pass of this fix (#2003 review, blocking finding). `TOTAL` decides whether a
+# one-shot invocation exits early — and a one-shot is the DEFAULT, so a failed query
+# here collapsed to READY_COUNT=0, TOTAL=0, and a silent `exit 0` over a full
+# backlog. The comment two paragraphs down already said so in words: "this count
+# decides whether a one-shot run exits early, so undercounting here would make the
+# drain report 'nothing to do' while specify work sat queued." It was right, and the
+# `|| true` above it made exactly that happen.
+#
+# Same `_ready_numbers` as run_cycle uses, for the same reason the write vocabulary
+# in lib/gh-bot.sh lives in one place: two copies half-knowing one predicate is how
+# they drift, and this pair already drifted once.
+INBOX_COUNT=0
+_status_rc=0
+INBOX_ISSUES="$(_ready_numbers "inbox")" || _status_rc=$?
+READY_ISSUES=""
+if (( _status_rc == 0 )); then
+  # Both ready classes (#1169) — same OR-not-AND reason as run_cycle's Step 2.
+  _ready_a="$(_ready_numbers "agent-ready")" || _status_rc=$?
+  _ready_b=""
+  (( _status_rc == 0 )) && { _ready_b="$(_ready_numbers "agent-ready-specify")" || _status_rc=$?; }
+  READY_ISSUES="$(printf '%s\n%s\n' "$_ready_a" "$_ready_b" | sed '/^$/d' | sort -un)"
+fi
+
+if (( _status_rc != 0 )); then
+  echo "[drain] HOLDING: could not read the work queue (gh exit ${_status_rc})." >&2
+  echo "[drain]          This is NOT an empty queue. Exiting 1 rather than reporting" >&2
+  echo "[drain]          'nothing to do' over work that may be waiting (#1855)." >&2
+  echo "[drain]          See the gh error above for the cause." >&2
+  exit 1
+fi
+
+[[ -n "$INBOX_ISSUES" ]] && INBOX_COUNT=$(echo "$INBOX_ISSUES" | wc -l | tr -d ' ')
 READY_COUNT=0
 [[ -n "$READY_ISSUES" ]] && READY_COUNT=$(echo "$READY_ISSUES" | wc -l | tr -d ' ')
 

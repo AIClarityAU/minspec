@@ -165,12 +165,12 @@ scan_file() {
   # `-----BEGIN…` header), which grep would otherwise parse as options before it
   # ever reached the `--`. `-e` marks it unambiguously as the pattern.
   for pat in "${CS_PATTERNS[@]}"; do
-    out=$(grep -nE -e "$pat" -- "$f" 2>/dev/null || true)
+    out=$(grep -nE -e "$pat" -- "$f" 2>/dev/null || true)  # swallow-ok: grep exits 1 when the file holds no match, which is the answer; the unreadable case is blocked by the -f/-r guard at the top of scan_file
     if [[ -n "$out" ]]; then printf '%s\n' "$out" | emit shape "$f"; found=1; fi
   done
 
   for pat in "${CI_PATTERNS[@]}"; do
-    out=$(grep -niE -e "$pat" -- "$f" 2>/dev/null || true)
+    out=$(grep -niE -e "$pat" -- "$f" 2>/dev/null || true)  # swallow-ok: grep exits 1 when the file holds no match, which is the answer; the unreadable case is blocked by the -f/-r guard at the top of scan_file
     if [[ -n "$out" ]]; then printf '%s\n' "$out" | emit cred "$f"; found=1; fi
   done
 
