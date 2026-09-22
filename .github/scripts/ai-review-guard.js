@@ -3,7 +3,8 @@
 // This module is deliberately I/O-free: no network, no `github`/octokit, no
 // `fs`, no process access. Every function is a pure input→output mapping so the
 // security-critical decisions (revert-or-not, strip-or-not, verified-or-not,
-// green-or-not) can be unit-tested exhaustively (see ai-review-guard.test.js)
+// green-or-not) can be unit-tested exhaustively (see ai-review-guard.test.js in
+// the MinSpec repo - this file ships to adopters, its test suite does not)
 // and the workflow that requires it stays a thin, auditable I/O shell.
 //
 // Threats this closes (see the header of ready-to-merge.yml for the full note):
@@ -363,6 +364,93 @@ function parseResetInstant(text, nowMs) {
   return new Date(cand).toISOString();
 }
 
+// ─── Patch-fingerprint re-attestation (#1728) ────────────────────────────────
+//
+// WHAT IS LIVE TODAY: recording only. The ai-review workflow embeds a
+// `patch-fingerprint:` marker in the verdict check-run's output. NOTHING reads that
+// marker back to skip a review. `findReattestableVerdict` below is implemented,
+// tested and exported, but has no production caller, and the gate that consumes
+// witnesses (`ready-to-merge.yml` → verifyHeadPassWitness / verifyHeadPassCheckRun)
+// is unchanged — so every branch update still re-runs the full four-voter panel.
+// Wiring the consumer is #1840. Recording lands first by necessity: a marker can
+// only be consumed on PRs old enough to already carry one.
+//
+// WHY THE MARKER IS RECORDED. Under `strict` branch protection every merge puts every
+// other open PR BEHIND, and the branch update re-triggers a full four-voter review —
+// of a patch that did not change. The reviewer reads the THREE-DOT patch
+// (`base...head`), and a forward-merge leaves that patch byte-identical, so the
+// previous verdict is still a true statement about exactly this content.
+//
+// WHAT THE CONSUMER MUST NOT DO, when it is built: reuse an old witness. The
+// SHA-binding in verifyHeadPassCheckRun (#466/#810) is load-bearing — a witness must
+// correspond to the CURRENT head. A re-attestation is therefore to post a FRESH
+// check-run on the new SHA, carrying the same verdict and the same fingerprint. The
+// claim changes from "four voters reviewed this SHA" to "four voters reviewed this
+// patch, and this SHA has that patch" — still true, and stated rather than implied.
+//
+// HONEST LIMIT, and the reason the consumer is to be opt-in: an identical patch can
+// produce a DIFFERENT merge result, because the base moved. That is the #1394
+// semantic-conflict class. `strict` narrows it (the branch must be current) but does
+// not remove it, so re-attestation trades back a little of what `strict` buys.
+
+const PATCH_FINGERPRINT_PREFIX = 'patch-fingerprint:';
+
+/**
+ * Stable fingerprint of a three-dot patch. Normalises line endings, and strips the
+ * whitespace run at the very END of the patch — the whole string, no `/m` flag, so
+ * interior lines keep their own trailing whitespace — meaning a cosmetic re-render
+ * that differs only in a final newline is not read as a new patch. Nothing else is
+ * normalised: any real content change must produce a different digest.
+ */
+function patchFingerprint(diffText) {
+  const norm = String(diffText == null ? '' : diffText).replace(/\r\n?/g, '\n').replace(/\s+$/, '');
+  if (norm === '') return null; // an empty patch is never re-attestable (see #1680)
+  return require('crypto').createHash('sha256').update(norm, 'utf8').digest('hex');
+}
+
+/** Render the marker embedded in a check-run's output so a later run can read it. */
+function renderPatchFingerprint(fp) {
+  return fp ? `${PATCH_FINGERPRINT_PREFIX}${fp}` : '';
+}
+
+/** Read the fingerprint back out of a check-run's output text. */
+function parsePatchFingerprint(text) {
+  const m = String(text == null ? '' : text).match(/patch-fingerprint:([0-9a-f]{64})\b/);
+  return m ? m[1] : null;
+}
+
+/**
+ * Is there a prior, provenance-verified PASS for this exact patch?
+ *
+ * Deliberately reuses the SAME strictness as verifyHeadPassCheckRun — completed +
+ * success + an allowlisted App slug — because a weaker check here would be a second,
+ * softer door into the same gate. The only thing it does NOT require is head_sha
+ * equality, which is precisely what makes it a re-attestation rather than a witness.
+ */
+function findReattestableVerdict({ checkRuns, patchHash, allowlist } = {}) {
+  if (!patchHash) return { ok: false, reason: 'no patch fingerprint (empty or unreadable diff)' };
+  if (!Array.isArray(checkRuns) || checkRuns.length === 0) {
+    return { ok: false, reason: 'no prior check-runs to re-attest from' };
+  }
+  const allowed = Array.isArray(allowlist) ? allowlist : [];
+  if (allowed.length === 0) return { ok: false, reason: 'empty reviewer allowlist — refusing to re-attest' };
+
+  for (const c of checkRuns) {
+    if (!c || c.name !== CHECK_NAME) continue;
+    if (c.status !== 'completed' || c.conclusion !== 'success') continue;
+    const slug = c.app && c.app.slug;
+    const identities = [slug, slug ? `${slug}[bot]` : null].filter(Boolean);
+    if (!identities.some((i) => allowed.includes(i))) continue;
+    const text = [c.output && c.output.title, c.output && c.output.summary, c.output && c.output.text]
+      .filter(Boolean)
+      .join('\n');
+    if (parsePatchFingerprint(text) === patchHash) {
+      return { ok: true, sourceSha: c.head_sha, reason: `patch unchanged since ${String(c.head_sha).slice(0, 8)}` };
+    }
+  }
+  return { ok: false, reason: 'no prior passing review of this exact patch' };
+}
+
 // GitHub truncates commit-status descriptions at 140 chars; keep ours within it
 // even when a description carries a (potentially long) provenance reason.
 const MAX_DESCRIPTION = 140;
@@ -651,6 +739,19 @@ function verifyHeadPassWitness({ statuses, checkRuns, allowlist, headSha } = {})
 //
 // Bare label presence is never trusted: a present `ai-review:pass` with absent
 // or unverified `passProvenance` yields a red status (deny-by-default).
+// #1870 — a `hold:*` label is the maintainer's explicit "no automation lands this"
+// (DR-072 §3: "no approval lifts it"). docs-lane already refuses to ARM auto-merge on
+// one, but that made docs-lane the SOLE witness: if that job does not run — a
+// permissions gap, a triggering change, a cancelled run, or simply removing the
+// `docs-lane` label, which makes its own `if:` guard false — an arming a previous run
+// already made still stands and the PR lands held. Constitution invariant 2 asks for an
+// independent second witness for exactly this shape, and `ready-to-merge` is it: a
+// different workflow, required by branch protection, evaluated on every PR event.
+//
+// Anchored, like docs-lane's `^hold:`, so a label merely CONTAINING "hold"
+// (`household-docs`) does not gate.
+const HOLD_RE = /^hold:/;  // exported — pinned lock-step to docs-lane.yml's `hold_pattern`
+
 function decideStatus({ labels, provenanceRevert, stalenessStrip, passProvenance, headStatus } = {}) {
   const eff = new Set(Array.isArray(labels) ? labels : []);
   if (provenanceRevert || stalenessStrip) eff.delete(PASS);
@@ -664,10 +765,30 @@ function decideStatus({ labels, provenanceRevert, stalenessStrip, passProvenance
   // gates: an unverified head status blocks green even with a provenance-verified
   // label (that is exactly the stale-pass-on-a-new-head case #466 closes).
   const headVerified = headStatus === undefined ? true : !!(headStatus && headStatus.verified);
-  const isGreen = passVerified && headVerified && !eff.has(CHANGES);
+  // A hold is decisive and independent of the review: it is red no matter how green
+  // the review is, and no amount of re-reviewing clears it.
+  const held = [...eff].filter((l) => HOLD_RE.test(l));
+  const isGreen = passVerified && headVerified && !eff.has(CHANGES) && held.length === 0;
 
   let description;
-  if (stalenessStrip) {
+  // Hold is reported FIRST, ahead of the staleness/provenance outcomes, even though
+  // those describe actions actually taken. The reader of a red `ready-to-merge` needs
+  // the fact that CANNOT be cleared by acting: told "stale pass stripped — re-review
+  // required" on a held PR, they would re-review and still be red, with no hint why.
+  // The strip/revert remain visible in the job log and the audit comment, so naming
+  // the hold here costs no audit trail.
+  if (held.length) {
+    // Deliberately says nothing about whether the hold can be LIFTED. DR-072 §3's
+    // table is per-value — `tier` is liftable ("human review is the designed remedy"),
+    // `human` is not ("no keystroke transfers authorship") — so one universal sentence
+    // would miscite the very section it points at. This states only what this gate
+    // does, which is true for every hold value, and defers the rest to the DR.
+    // Reason first, labels last: truncate() cuts the TAIL, so an unbounded pile of
+    // hold labels can only cost label names, never the reason.
+    description = truncate(
+      `held — this gate stays red while a hold:* label is present (DR-072 §3): ${held.join(', ')}`,
+    );
+  } else if (stalenessStrip) {
     description = 'stale ai-review:pass stripped on new commits — re-review required';
   } else if (provenanceRevert) {
     description = 'ai-review:pass reverted — not from an allowlisted reviewer';
@@ -994,6 +1115,11 @@ module.exports = {
   shouldSummonHumanReview,
   isQuotaExhaustion,
   isQuotaExhaustionStrict,
+  patchFingerprint,
+  renderPatchFingerprint,
+  parsePatchFingerprint,
+  findReattestableVerdict,
+  PATCH_FINGERPRINT_PREFIX,
   parseResetInstant,
   VERDICT_SCHEMA,
   defangProtocolTokens,
@@ -1009,6 +1135,7 @@ module.exports = {
   verifyHeadPassWitness,
   PASS_STATUS_CONTEXT,
   CHECK_NAME,
+  HOLD_RE,
   decideStatus,
   decideReviewCheck,
   isBenignRemovalError,

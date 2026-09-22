@@ -1,13 +1,7 @@
 ---
 id: SPEC-062
 type: requirements
-status: specifying   # DERIVED, not a regression. `deriveStatus` (lifecycle.ts:140) returns
-  # 'specifying' whenever approvalState !== 'approved' — INV-1, and that guard fires BEFORE
-  # the phases are consulted. The 2026-09-05 approval was staled by the #1811 review fixes,
-  # so 'planning' here would be DRIFT (`facts status SPEC-062` confirms: MATCH on
-  # 'specifying'). Reading `plan: in-progress` below and concluding 'planning' applies
-  # `getSpecStatus` (lifecycle.ts:172), the phases-ONLY twin that DR-069 §3 says must NOT be
-  # aligned to deriveStatus. Re-approval flips this back to 'planning' automatically.
+status: planning
 tier: T4
 product: minspec
 epic: EPIC-007  # Agent Execute — the dev-time autonomous build/merge pipeline (this is its scheduling + PR-completeness layer)

@@ -105,7 +105,7 @@ DIFF="$(printf '%s\n' "$DIFF" | sed -E \
 # common path is unaffected. Never fatal: facts degrade, the review still runs.
 PROVENANCE=""
 if [[ -x "${SCRIPT_DIR}/approval-provenance.py" || -f "${SCRIPT_DIR}/approval-provenance.py" ]]; then
-  PROVENANCE="$(python3 "${SCRIPT_DIR}/approval-provenance.py" "$BASE" "$HEAD_REF" 2>/dev/null || true)"
+  PROVENANCE="$(python3 "${SCRIPT_DIR}/approval-provenance.py" "$BASE" "$HEAD_REF" 2>/dev/null || true)"  # swallow-ok: an optional provenance note; empty omits it and changes no verdict
 fi
 PROVENANCE_BLOCK=""
 if [[ -n "$PROVENANCE" ]]; then
@@ -168,7 +168,7 @@ GUARD="${SCRIPT_DIR}/../.github/scripts/ai-review-guard.js"
 # and the shape the renderer validates can never drift (DR-079).
 VERDICT_SCHEMA_JSON=""
 if [[ -f "$GUARD" ]]; then
-  VERDICT_SCHEMA_JSON="$(GUARD="$GUARD" node -e 'process.stdout.write(JSON.stringify(require(process.env.GUARD).VERDICT_SCHEMA))' 2>/dev/null || true)"
+  VERDICT_SCHEMA_JSON="$(GUARD="$GUARD" node -e 'process.stdout.write(JSON.stringify(require(process.env.GUARD).VERDICT_SCHEMA))' 2>/dev/null || true)"  # swallow-ok: empty is one of the two conditions that trigger the fallback branch on the same line
 fi
 
 # Fail CLOSED if this CLI cannot carry a verdict out of band. Emitting no verdict
@@ -276,7 +276,7 @@ run_reviewer() {
 render_verdict() {
   [[ -f "$GUARD" ]] || return 1
   local block
-  block="$(GUARD="$GUARD" node -e 'const g=require(process.env.GUARD);let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(g.parseCliVerdict(s)));' <<<"${1:-}" 2>/dev/null || true)"
+  block="$(GUARD="$GUARD" node -e 'const g=require(process.env.GUARD);let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(g.parseCliVerdict(s)));' <<<"${1:-}" 2>/dev/null || true)"  # swallow-ok: the next line returns 1 on empty, so a missing verdict block fails closed
   [[ -n "$block" ]] || return 1
   printf '%s' "$block"
 }
@@ -303,7 +303,7 @@ is_quota_strict() {
 # trimmed claude limit/reset lines for the PR comment.
 emit_unavailable() {
   local detail
-  detail=$(printf '%s\n' "${1:-}" | tr -d '\r' | grep -iE 'limit|quota|reset|try again|429|overload' | head -3 | sed 's/^/  /' || true)
+  detail=$(printf '%s\n' "${1:-}" | tr -d '\r' | grep -iE 'limit|quota|reset|try again|429|overload' | head -3 | sed 's/^/  /' || true)  # swallow-ok: grep exits 1 when the output contains no quota keywords, which is the answer this asks for
 
   # #1630 — when NOTHING was captured, `reason: quota` is an INFERENCE, not an
   # observation, and the old wording ("likely subscription session quota") admitted as

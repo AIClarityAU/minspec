@@ -29,7 +29,8 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import { execFileSync } from 'child_process';
+import * as os from 'os';
+import { execFileSync, spawnSync } from 'child_process';
 
 function findScriptsDir(): string {
   let dir = __dirname;
@@ -187,12 +188,64 @@ describe('triage-inbox.sh — the new label is minted and supersedes cleanly (#1
 });
 
 describe('drain-inbox.sh — specify-ready work is actually enumerated (#1169)', () => {
-  it('lists agent-ready-specify issues as well as agent-ready', () => {
-    // `gh issue list --label A --label B` is an AND, so the two sets must be
-    // enumerated separately. A verdict nothing dispatches is a queue, not a gate.
-    expect(drainCode).toContain('agent-ready-specify');
-    const listCalls = drainCode.match(/--label "agent-ready-specify"/g) ?? [];
-    expect(listCalls.length).toBeGreaterThanOrEqual(1);
+  // WAS a source-text assertion counting `--label "agent-ready-specify"` literals,
+  // and it broke the moment the two queries were factored into one `_ready_numbers`
+  // helper - a refactor that PRESERVED the property it was guarding. A regex that
+  // reddens on a correct change and would stay green on a combined
+  // `--label A --label B` written a different way was pinning the spelling, not the
+  // behaviour. Rewritten to drive the real script and read what gh was actually
+  // asked.
+  it('queries the two ready labels SEPARATELY, never as one AND-ed call', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'specify-enum-'));
+    try {
+      const bin = path.join(tmp, 'bin');
+      fs.mkdirSync(bin, { recursive: true });
+      const log = path.join(tmp, 'gh-calls.log');
+      fs.writeFileSync(
+        path.join(bin, 'gh'),
+        '#!/usr/bin/env bash\n' +
+          `printf '%s\\n' "$*" >> ${JSON.stringify(log)}\n` +
+          'case "$*" in\n' +
+          '  *"--label agent-ready-specify"*) printf "%s\\n" 77 ;;\n' +
+          '  *"--label agent-ready"*)         printf "%s\\n" 42 ;;\n' +
+          'esac\nexit 0\n',
+        { mode: 0o755 },
+      );
+
+      const r = spawnSync('bash', [path.join(findScriptsDir(), 'drain-inbox.sh'), '--dry-run'], {
+        encoding: 'utf-8',
+        timeout: 60_000,
+        env: {
+          ...process.env,
+          PATH: `${bin}:${process.env.PATH}`,
+          GH_TOKEN: '',
+          GITHUB_TOKEN: '',
+          // No mintable token, so the stub cannot be bypassed by a real credential.
+          MINSPEC_GH_APP_TOKEN_SCRIPT: path.join(tmp, 'no-such-token-script'),
+        },
+      });
+
+      const calls = fs.readFileSync(log, 'utf-8').split('\n').filter(Boolean);
+      const specify = calls.filter((c) => c.includes('--label agent-ready-specify'));
+      const plain = calls.filter(
+        (c) => c.includes('--label agent-ready') && !c.includes('agent-ready-specify'),
+      );
+
+      // Each label gets its OWN call. `gh issue list --label A --label B` is an AND,
+      // so a single combined call returns the empty intersection and the specify
+      // queue never drains - a verdict nothing dispatches is just a differently
+      // shaped backlog (#983, #1169).
+      expect(specify.length).toBeGreaterThanOrEqual(1);
+      expect(plain.length).toBeGreaterThanOrEqual(1);
+      expect(
+        calls.filter((c) => c.includes('--label agent-ready') && c.split('--label').length > 2),
+      ).toEqual([]);
+
+      // And both results actually reach the count, rather than one being discarded.
+      expect(`${r.stdout ?? ''}${r.stderr ?? ''}`).toContain('2 ready issue(s)');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
   });
 });
 
