@@ -40,7 +40,7 @@ print("AUDIT_TARGET=" + shlex.quote(str(ti.get("file_path") or ti.get("path") or
   fi
   [ -n "$AUDIT_CWD" ] || AUDIT_CWD="$PWD"
   CANON_DIR=""
-  COMMON="$(git -C "$AUDIT_CWD" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+  COMMON="$(git -C "$AUDIT_CWD" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"  # swallow-ok: guarded by -n on the next line, which falls through to the non-worktree path
   if [ -n "$COMMON" ]; then
     CANON_DIR="$(dirname "$COMMON")/.minspec"
   fi
