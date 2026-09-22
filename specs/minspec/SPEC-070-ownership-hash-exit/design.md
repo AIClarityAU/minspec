@@ -10,7 +10,7 @@ epic: EPIC-002  # Signpost Integrity - a shipped file asserting a false fact is 
 
 > Plan artifact for [SPEC-070](./requirements.md), following the `design.md` convention (SPEC-004, SPEC-022, SPEC-038).
 >
-> **Judges disagreed on the winning draft**: the sequencing-safety lens picked the sequencing draft, the AC-coverage and honesty lenses both picked the invariant draft. The spine below is the **sequencing draft's order** - which the AC-coverage judge endorsed while voting against it ("take Draft 1's slice order and graft Draft 2's harnesses into it") - because only that order never leaves a written snapshot unenforced, with the invariant draft's test harnesses grafted in and the migration-risk draft's early blank-line fix, per-record idempotency marker and new-basis-liveness abort taken wholesale. Every fatal flaw the three judges named is repaired below rather than restated, and the repairs are called out inline as **[fix]**. The adversarial holes are NOT all repaired: two verification rounds ran, the first found 24 uncovered criteria and 17 false `file:line` citations and those were repaired, the second left seven criteria still refuted. They are listed in section 9 under "Still refuted after the second adversarial pass", including one in this document's own central FR-1 latch.
+> **Judges disagreed on the winning draft**: the sequencing-safety lens picked the sequencing draft, the AC-coverage and honesty lenses both picked the invariant draft. The spine below is the **sequencing draft's order** - which the AC-coverage judge endorsed while voting against it ("take Draft 1's slice order and graft Draft 2's harnesses into it") - because only that order never leaves a written snapshot unenforced, with the invariant draft's test harnesses grafted in and the migration-risk draft's early blank-line fix, per-record idempotency marker and new-basis-liveness abort taken wholesale. Every fatal flaw the three judges named is repaired below rather than restated, and the repairs are called out inline as **[fix]**. The adversarial holes are NOT all repaired: two verification rounds ran, the first found 24 uncovered criteria and 17 false `file:line` citations and those were repaired, the second left seven criteria still refuted. They are listed in section 9 under "Still refuted after the second adversarial pass". The one that was in this document's own central FR-1 latch has since been closed: a third round produced three independent corrections, refuted all three, and composed the surviving clauses into the latch in section 6.
 >
 > **Provenance of every number and every citation here.** All counts were measured by me at HEAD `03a9c570`, first-hand, not quoted forward from the spec (which requires exactly that at requirements.md:866-867) and not inherited from a sibling draft. Every `file:line` was opened at that HEAD before it was written; an earlier round of this document shipped 17 citations that did not survive that check, and the ranges below are the corrected ones. Where a claim is inferred rather than executed, it says so in the same sentence. Note that `origin/main` has since advanced to `77aae68a`; the implementation re-measures at its own commit.
 
@@ -291,32 +291,191 @@ Mitigation is a stack, not a step:
 
 **Validator Rule 21 (FATAL), two clauses, both over the tracked sidecar tree read raw** - never through `listRecords`, because `readRecord` drops a record that fails `isValidRecord` (`approval-store.ts:153`) and a rule built on it is structurally blind to exactly the sidecars it exists to catch. The earlier formulation - "no tracked approved record is fresh under `preStripSpecHash` and stale under the shipped hasher" - is **[fix]**ed here: it detects a record left on the old basis and is silent on a record the re-stamp wrote with a wrong digest, which is stale under *both* hashers, satisfies the old predicate, and merges green while being precisely the newly-stale sidecar AC-1's closing sentence forbids (requirements.md:721).
 
-- **21a - basis, stated as a list of permitted states rather than one forbidden shape.** For every tracked approved record `R` over spec bytes `S` at head, exactly one of two states is legal:
-  1. `R.specHash === specHash(S)` - fresh under the shipped hasher; or
-  2. `R.specHash !== specHash(S) && R.specHash !== preStripSpecHash(S)` - stale under **both** bases: ordinary human-edit staleness, which exists in the tree today (measured: exactly 3 such records at HEAD) and must stay legal, or the rule is permanently red.
+**The latch below replaces the refuted 21a/21b pair.** The earlier version did not fire on a wrong-digest
+re-stamp, which two reviewers correctly called the silent-gate shape constitution invariant 2 forbids. Three
+corrected designs were produced independently and all three were refuted (15, 9 and 17 escapes); what follows
+is composed from the clauses that survived, and the residual that no byte-local rule can close is named at the
+end with the separate witness that closes it.
 
-  Anything else - `R.specHash === preStripSpecHash(S)` while `R.specHash !== specHash(S)` - is FATAL: a record left on the old basis.
-- **21b - re-stamp integrity. REFUTED as written; see section 9 for the correction this needs.** For every record carrying `rehashedFrom`: if the record is in state 1, `R.rehashedFrom` MUST equal `preStripSpecHash(S)`. In the merged state AC-1 actually polices this is **total**, and the reason is a property of slice 8 rather than an assumption: FR-9 is data-only and slice 8's file list contains no path under `specs/`, so every re-stamped record is fresh at head at that commit by construction. A record the migration wrote with a wrong digest is then stale at head - it fails 21a state 1 and 21b together - even though it is stale under both hashers and therefore invisible to the old one-sided predicate. Slice 8's PR asserts the no-`specs/`-change property directly, so 21b's totality is checked, not asserted.
+**Taken: none of the three survives intact. 21a is composed from the raw-parse/forbidden-shape formulation the second and third candidates share (corrected to key on the sidecar's location, not the record's own `specPath`), and 21b keeps only the first candidate's polarity inversion (`rehashedFrom` as antecedent, `specHash` as consequent) while dropping every new record field, because a raw-byte pin is disarmed by the same wrong-read that disarms the anchor and buys nothing the anchor does not already give.**
 
-  **[refuted]** The second adversarial pass showed this does not fire on the case it names. 21a declares two
-  legal states: fresh under the shipped hasher, or stale under BOTH bases. State 2 has to stay legal - there
-  are exactly three such records at this HEAD (`specs/minspec/tasks.md`, `specs/minspec/design.md`,
-  `specs/minspec/SPEC-007-epic-grouping/requirements.md`) - and a record the re-stamp writes with a WRONG
-  digest is also stale under both, so it satisfies state 2 and merges green. The proposed correction is to
-  drop 21b's state guard entirely: for EVERY record carrying `rehashedFrom`, require
-  `R.rehashedFrom == preStripSpecHash(S)`, with no state precondition. That closes the hole, at the cost of
-  the decaying property section 9 already names (a later legitimate edit to the spec bytes moves
-  `preStripSpecHash(S)` and the rule goes red for that record). This correction is stated, not verified -
-  it has not been through a verification pass, and slice 8 owes it a test that fails on a wrong-digest
-  re-stamp before the rule is relied on.
+---
 
-**Why this is not the run's own artifact.** Both clauses recompute both digests from the **spec file**, which FR-9 never touches, using the two committed hashers. `rehashedFrom` is not evidence here; it is the claim being checked against them.
+### 6.1 Rule 21a (FATAL) - approval-record basis
 
-**Anti-vacuity**, following the Rule 17/18/19 shape (Rule 17 at `scripts/validate-frontmatter.ts:317`, Rule 18 at `:355`, Rule 19 at `:727`, plus Rule 19's count-shaped second instance at `:721`, "Rule 19 scanned 0 files"): the rule reports how many records it evaluated and fails when that is zero while the sidecar tree is non-empty. It does not wrap its body in a bare `try { } catch { }` - the Rule 12 shape at `:553-556`, which the DR-066 lint cannot see because `scripts/check-swallowed-gate-signal.ts` walks `.sh` files only (`:56`, `:67`). The file currently runs to Rule 19 (742 lines; no rule numbered 20 or above exists), so the two new rules are 20 and 21.
+**Domain.** Rule 21a (the old-basis latch) walks `<ROOT>/.minspec/approvals/` recursively for `*.json` and `JSON.parse`s each file. Three exclusions are forbidden, each for a verified reason:
+
+- **No freshness filter.** `resolveStatus` decides `approved` by hash equality alone (`packages/minspec/src/lib/approval.ts:483-489`, the comparison at `:489`), so a record left on the old basis is `stale` by construction. Defining the domain over approved records makes 21a's own FATAL state unreachable from its own iteration set. That, not the wrong-digest hole, is the defect in `design.md:294`.
+- **No store reader.** `readRecord` returns `undefined` for anything failing `isValidRecord` (`approval-store.ts:148-153`), `listRecords` drops it the same way (`:195`), and `normalizeRecord` is a whitelist constructor with no spread (`:121-136`) that would erase `rehashedAt`/`rehashedFrom` one function after a successful read. A rule built on any of the three is structurally blind to its own quarry.
+- **No git.** `lint:` checks out with no `fetch-depth` (`.github/workflows/ci.yml:68`, `:72`); only the `paths:` job sets `fetch-depth: 0` (`:40-42`). A filesystem walk also lets the fixture-corpus harness work, since its tmpdir is not a repo. In CI the on-disk set is the tracked set; measured at HEAD `43d010bf`, `find` and `git ls-files` both return 64.
+
+**Subject selection.** The spec under test is the file named by the sidecar's **location** (`.minspec/approvals/<rel>.json` implies `<rel>`), never by the record's internal `specPath`. Both consumers key on location and never read that field: `sidecarPath` composes it from the caller's path (`approval-store.ts:79-82`, used at `:148-149`) and `read_record` joins `approvals/<rel_spec_path>.json` and shape-checks only `specHash` (`scripts/hooks/spec-gate.py:262-278`). A rule that classified against `R.specPath` would judge a different file from the one the gate approves.
+
+**Admission, four outcomes.** For each file at `.minspec/approvals/<rel>.json`:
+
+1. Unparseable, not an object, or no string `specHash` and no string `quarantinedHash`: **FATAL**, `unreadable approval sidecar (Rule 21a reads raw JSON; a sidecar it cannot read is a defect, not a skip)`. Measured 0 of 64.
+2. `R.specPath` present and not equal to `<rel>`: **FATAL**, `sidecar location and record specPath disagree`. Measured 0 of 64. This is what makes reading either field safe afterwards, and nothing checks it today (`isValidRecord` tests `typeof` only, `approval-store.ts:96-112`; `listOrphanedRecords` tests `classifyApprovablePath(rec.specPath)` only, `:239-242`).
+3. `<rel>` does not resolve to an existing file: counted and named as `orphaned`, **warn**, not fatal. Rule 10 is deliberately non-fatal for already-committed drift (`scripts/validate-frontmatter.ts:437-451`) and escalating it would red a correct state: a spec directory renumbered with its sidecar git-moved alongside keeps a live, hash-matching approval that only Rule 21a would reject.
+4. Otherwise classify, below.
+
+**Classification.** Let `S` be the spec file's raw bytes, `H_new = specHash` (shipped, `packages/shared/src/canonical.ts:126-128`) and `H_old = preStripSpecHash` (the slice-1 frozen copy). Let `D` be `R.specHash`, or `R.quarantinedHash` when FR-9.4 has moved the digest out (`requirements.md:504-505` permits `specHash` **absent**; a rule that FATALs on a non-string `specHash` is a permanent red on every quarantined record).
+
+Exactly one shape is forbidden:
+
+```
+D === H_old(S) && D !== H_new(S)     ->  FATAL
+```
+
+message: `approval sidecar still carries an old-basis hash: it verifies under the frozen pre-ownership-strip hasher and not under the shipped one, which is the state FR-1 exists to prevent`.
+
+Everything else is legal, including `D === H_new(S)` (live) and `D` matching neither (stale under both bases). Stating this as one forbidden shape rather than as a list of permitted states is what removes the iteration-set escape: there is no admission predicate for a defect to fall out of.
+
+**Anti-vacuity.** One line every run: `Rule 21a: N sidecars - F live, S stale under both bases, O old-basis, X orphaned`. FATAL with `Rule 21a validated NOTHING this run` when `N === 0` while the approvals tree holds at least one `.json`, following Rule 17 (`scripts/validate-frontmatter.ts:317`), Rule 18 (`:355`) and Rule 19 (`:721`, `:727`).
+
+**No swallowed catch.** 21a's exception arm calls `fail()`, not `warn()`. Rules 16-19 all warn on an unrunnable check and the file says outright that this fails OPEN (`:705-718`). ➡️ **Recommended (rec): fail closed here**, because Rule 21 is one of AC-1's two witnesses and constitution invariant 2 requires an errored witness to fail the gate closed (`.minspec/constitution.md:8`). **Cost of that recommendation:** an unreadable `.minspec/approvals/` wedges every commit instead of warning, and Rule 21 becomes the only rule in a 742-line file behaving that way. Nothing lints the alternative: `scripts/check-swallowed-gate-signal.ts` walks `.sh` only (`:56`, `:67`), which is why Rule 12's own swallow-block (`validate-frontmatter.ts:553-556`) is invisible to it.
+
+---
+
+### 6.2 Rule 21b (FATAL) - re-stamp integrity
+
+Rule 21b (the wrong-digest clause) applies to every record in 21a's domain that carries any of `rehashedAt`, `rehashedFrom`, **regardless of which 21a class it is in**. No new record field is introduced; FR-9.5's two fields (`requirements.md:516`, interface at `:655-659`) are sufficient.
+
+- **21b.1 (completeness and shape; decay-free; trusts no digest).** Presence of **either** field requires **both**: `rehashedFrom` matching `/^[0-9a-f]{64}$/` and `rehashedAt` parsing as ISO-8601. FATAL otherwise, `incomplete re-stamp provenance`. Keying on presence-of-**any** is load-bearing: a rule keyed on `rehashedFrom` alone is disarmed by dropping that one field, and `rehashedAt` is also FR-9.4's improve-exemption key (`requirements.md:509-515`), so a half-written pair silently re-arms quarantine on the next run. `isValidRecord` checks `typeof === 'string'` only (`approval-store.ts:96-112`) and `spec-gate.py:277` does the same, so `""`, `"undefined"` and a truncated digest are schema-valid on both sides today.
+
+- **21b.2 (the integrity clause; total at the re-stamp merged state; decays to silence).**
+
+  ```
+  IF  R.rehashedFrom === H_old(S)          // the anchor: S is, to collision resistance,
+                                           // the bytes this record was re-stamped from
+  THEN D === H_new(S)                      // MUST hold
+  ```
+
+  FATAL otherwise, message naming the sidecar, `expected <H_new(S)>`, `found <D>`, and the sentence `rehashedFrom matches preStripSpecHash of the spec at head, so the spec has not moved since the re-stamp and the correct specHash is computable`.
+
+  The antecedent is `rehashedFrom`; the consequent is `D`. That inversion is the whole clause. `D` is the only field either reader consumes (`approval.ts:489`; `spec-gate.py:277`, verdict at `:478-483`), so a rule that validates `rehashedFrom` and skips `D` has the polarity backwards.
+
+- **21b.3 (census; the anti-silence half).** `Rule 21b: D records carry re-stamp provenance, A of them still anchored to head bytes, A-K verified`. **Warn**, not fatal, when `D > 0 && A === 0`: `A` decays legitimately as specs are edited, so a fatal there is a guaranteed future red. The hard equality `A === D` is asserted once, in slice 8's corpus test, where it is checkable rather than asserted (below).
+
+**Deleted, not relaxed: the reverse direction.** The design's current clause (`design.md:299`, "if the record is in state 1, `R.rehashedFrom` MUST equal `preStripSpecHash(S)`") and the correction it proposes at `:305-307` (the same equality with no state guard) are both **permanently red on the workflow AC-9 requires** (`requirements.md:761`). Measured on a fixture carrying `implements:`, with the real `specHash` as `H_old` and a faithful five-key widened canonicalizer as `H_new`:
+
+| fixture | `H_old` | `H_new` |
+|---|---|---|
+| base | `53a1c33a6cc4` | `1da76ab91efe` |
+| add a second path to `implements:` | `2600a9b3e410` | `1da76ab91efe` **unchanged** |
+| edit one body word | `d11c277f464c` | `b2d585a548e8` |
+
+Post-strip, an ownership-only edit leaves `H_new` fixed (the record stays live and approved, which is the entire point of FR-6's drift machinery) and moves `H_old`. Both the current clause and the proposed correction then FATAL forever on a record nobody has done anything wrong to. That also falsifies the design's own residual paragraph (`design.md:319`, "once the bytes move, the record drops into 21a state 2"): after an ownership-only edit the bytes have moved and the record is still in state 1.
+
+**Also deleted: non-degeneracy (`rehashedFrom !== specHash`).** FR-9.3's licence is old-freshness (`requirements.md:492-494`), and measured at HEAD, 22 of the 61 old-fresh records sit on specs the widened strip does not move, so a correct re-stamp of those writes `rehashedFrom === specHash`. The clause would red 22 correct records at the exact merge slice 8 must land. Their anchors still work (`H_old(S) === H_new(S) === D`), so nothing is lost by dropping it.
+
+---
+
+### 6.3 The five cases, and what the latch reports for each
+
+| # | Case | What the rule reports | Correct? |
+|---|---|---|---|
+| 1 | Wrong-digest re-stamp, `rehashedFrom` correct, spec bytes unmoved | 21b.2 FATAL. Anchor matches so the clause is armed; consequent fails. 21a is silent, correctly: the garbage digest matches neither basis and is indistinguishable from the three legitimately stale records | **Yes** |
+| 2 | The three stale-under-both records at HEAD | Silent. 21a's forbidden shape needs `D === H_old(S)`, false for all three. 21b's domain is empty for them permanently: measured, the key union across all 64 sidecars is exactly `approvedAt, approvedBy, baselineBlob, migrated, specHash, specPath, tier`, and FR-9.3 re-stamps only old-fresh records, so a stale record never acquires provenance | **Yes** |
+| 3 | 21a's iteration set | Domain is every `*.json` under `.minspec/approvals/`, raw-parsed, keyed on location. Freshness is the rule's output, never its input. A record left on the old basis is FATAL; the count is reported and a zero count is FATAL | **Yes** |
+| 4 | The trap: `rehashedFrom` correct, `specHash` garbage | FATAL, by 21b.2, because `rehashedFrom` is the antecedent and `D` the consequent. The trap's own rule (the bare equality) is not present, so its false red on the ownership-only edit is not inherited either | **Yes**, both halves |
+| 5 | Re-stamped spec legitimately edited afterwards | Silence, per record. The anchor `rehashedFrom === H_old(S)` goes false the instant the bytes move, so 21b.2 stops applying rather than failing. 21a puts the record in stale-under-both, legal. 21b.1 keeps running forever. The census reports `A` shrinking | **Yes.** Silence is safe: when `D !== H_new(S)` the record resolves `stale` (`approval.ts:489`) and contributes to `blocking` (`spec-gate.py:512-513`), so the only state in which 21b.2 is silent is a state in which the record approves nothing |
+| R | **Residual: correlated error.** The migration reads the wrong bytes `S_wrong` (wrong file, wrong revision, a normalized buffer) and computes **both** digests from them in one pass, as FR-9.3/FR-9.5 specify | **Green, and wrong.** `rehashedFrom = H_old(S_wrong) !== H_old(S)`, so 21b.2 is silent; `D = H_new(S_wrong)` matches neither basis, so 21a is silent; 21b.1 passes because both values are well-formed | **No.** See below |
+
+**The residual, stated plainly.** Any arming condition for a wrong-digest check is a value the buggy producer wrote, so the dominant migration defect disarms its own detector. This is not specific to the anchor: a `sha256`-of-raw-bytes pin fails identically under a pairing bug, and it additionally decays on edits neither hasher sees (measured: a trailing-whitespace edit and a `status:`-value edit each move the raw digest while leaving both canonical digests fixed). No byte-local, git-free standing rule can close it, because after the bytes move a wrong digest and an ordinarily-stale record are the same object.
+
+**Where it is closed instead, and this must be in the Plan rather than implied by Rule 21.** At the re-stamp merged state the check is available with **no trusted field at all**, because `S` is unmoved: slice 8 changes no path under `specs/`, a property slice 8's PR already asserts directly (`design.md:299`). So slice 8's corpus test (vitest, `test:` job at `.github/workflows/ci.yml:154`, `:183-184`, a different job from Rule 21's `lint:` at `:68`, `:85-86`, which is invariant 2's second-witness clause) asserts over the live corpus:
+
+- zero records classify `old-basis`;
+- every record carrying provenance is live under the shipped hasher, i.e. `A === D`;
+- the set of stale-under-both records is **exactly** `specs/minspec/SPEC-007-epic-grouping/requirements.md`, `specs/minspec/design.md`, `specs/minspec/tasks.md`, named.
+
+That triple is total at that commit and catches the correlated-error case outright. It cannot be a standing rule: the stale-both set grows with ordinary spec editing, and a standing enumeration would have to be amended by whoever edits a spec, which taxes the exact workflow the repo runs on. One operational consequence worth naming: the assertion is evaluated on the PR **merge result** (`pull_request`, `ci.yml:3-5`), so a spec edited on `main` after the migration ran makes it red. That red is correct under AC-1's closing sentence (`requirements.md:721`, a re-stamped record whose spec then moved **is** newly stale in the merged state) and its fix is to re-run the migration on the merge result. The re-stamp commit is not rebasable.
+
+**Partial independent coverage of the pairing sub-case, hedged.** If the migration mis-pairs record and file, FR-9.10 seeds `ownedAtApproval` from the same wrong read (`requirements.md:543-555`, value at `:548`), so FR-6's drift comparison denies at the gate and Rule 20 sees a witness that does not match the declaration. That is a genuine second subsystem catching it, but it depends on the two specs' owned sets differing and on the seeding pass reading the same bytes as the re-stamp pass. I have not verified either property against an implementation that does not yet exist; treat it as a likely mitigation, not a gate.
+
+---
+
+### 6.4 The failing test
+
+**File:** `packages/minspec/tests/validate-frontmatter-restamp-integrity.test.ts`, assigned to slice 8, because before it `preStripSpecHash` is a verbatim copy pinned equal to the shipped hasher and no fixture built from real bytes can make the two bases disagree.
+
+**Harness.** Drive the real CLI as a subprocess; the script has top-level side effects including `process.exit(1)`. Precedent: `packages/minspec/tests/validate-frontmatter-claim-words.test.ts:26-27` (`REPO_ROOT`/`SCRIPT_PATH`), `:33` (`TSX_BIN` resolved absolutely, with the comment explaining that `npx` would try to fetch `tsx` and break the offline invariant), `:42-45` (`spawnSync(TSX_BIN, [SCRIPT_PATH], { cwd, encoding: 'utf-8' })`), `:47-54` (`withTmp`). Works because `scripts/validate-frontmatter.ts:42` is `const ROOT = process.cwd()`.
+
+**Fixture shape.** Copy `packages/minspec/tests/validate-frontmatter-acceptance-criteria.test.ts:24-47` verbatim and add one frontmatter key. That `writeFixture` is a live, currently-green fixture whose sibling case asserts `expect(status).toBe(0)` at `:76`, so the exit-code polarity is established by a passing test rather than by my reasoning. It already clears every unrelated rule: `## Acceptance Criteria` satisfies Rule 13 (`validate-frontmatter.ts:559-577` via `checkAcceptanceCriteria`, `spec-validator.ts:671-685`, triggered by `requiresAcceptanceCriteria` at `:387-389`); `phases.plan: pending` makes `validateOwnership` return `[]` at `spec-validator.ts:792-796` so Rule 15 is inert; no `docs/epics/` keeps the epic arm inert (`validate-frontmatter.ts:218`); `id: SPEC-001` satisfies `:214`; a `status:` value with no body status line keeps Rule 11 quiet.
+
+The one addition:
+
+```
+implements: packages/x/src/a.ts
+```
+
+This is not decoration. It is what makes the two bases disagree at all; a fixture carrying only `status:`/`phases:` is stripped identically by both hashers and every clause below is unfalsifiable on it.
+
+Sidecar at `<tmp>/.minspec/approvals/specs/demo/requirements.md.json`, carrying the seven-key shape measured across all 64 live records plus FR-9.5's two. **Every digest is computed in the test from the fixture's own bytes**, never a committed literal.
+
+**A. The failing test.**
+
+```ts
+rehashedFrom = preStripSpecHash(raw)                      // correct anchor
+specHash     = specHash(raw.replace('prose here', 'x'))   // a real 64-hex digest of a
+                                                          // real perturbation: neither
+                                                          // H_new(raw) nor H_old(raw)
+```
+
+```ts
+expect(record.specHash).toMatch(/^[0-9a-f]{64}$/);          // well-formed, so this
+expect(record.specHash).not.toBe(specHash(raw));            // discriminates a WRONG
+expect(preStripSpecHash(raw)).not.toBe(specHash(raw));      // digest, not a malformed one
+const { status, output } = runValidate(dir);
+expect(status).not.toBe(0);
+expect(output).toContain('Rule 21b');
+expect(output).toContain('specs/demo/requirements.md.json');
+expect(output).toContain('rehashedFrom matches preStripSpecHash');
+expect(output).toContain(specHash(raw));                    // expected digest printed
+expect(output).toContain(record.specHash);                  // found digest printed
+expect(output).not.toContain('Rule 21a');                   // specificity control
+```
+
+**What it reports before the fix exists.** `rehashedAt`, `rehashedFrom` and `preStripSpecHash` appear nowhere under `packages/`, `scripts/` or `.minspec/`; `isValidRecord` does not reject unknown keys (`approval-store.ts:96-112`); the only approval-touching validator rule is Rule 10, warn-only (`validate-frontmatter.ts:437-451`). So today the fixture exits 0 with `Frontmatter validation passed` and both the status and the message assertions fail. It also exits 0 under the design's current 21b (the record is not live, so the state guard skips it) and under the proposed correction (`rehashedFrom` is correct, so the bare equality passes). Three-way red, green only against 21b.2.
+
+**Companions.** Per the precedent's own warning at `validate-frontmatter-claim-words.test.ts:98-103`, the green cases assert on Rule 21's message and census line, not bare exit codes, so an unrelated rule cannot turn them red for a reason that has nothing to do with Rule 21. One case keeps `expect(status).toBe(0)` as the crash canary.
+
+- **B. Correct re-stamp, bytes unmoved.** `specHash = H_new(raw)`, `rehashedFrom = H_old(raw)`. `expect(output).not.toContain('Rule 21')`, plus `expect(output).toMatch(/1 records carry re-stamp provenance, 1 of them still anchored/)`. This is the crash canary and the one case that also asserts `status === 0`.
+- **C. Decay.** Fixture B, then append a line to the body. `not.toContain('Rule 21')` and `toMatch(/0 of them still anchored/)`. **Red against the design's proposed correction**; this is the assertion that discriminates the two.
+- **D. Ownership-only edit.** Fixture B, then rewrite `implements:` to name two paths. Assert first that `specHash(after) === specHash(before)` (the edit really is hash-neutral, which doubles as a live reading that the strip has landed), then `not.toContain('Rule 21')`. **Red against the design's current 21b and against the proposed correction.** Highest-value fixture in the set.
+- **E. Old-basis record.** `specHash = preStripSpecHash(raw)`, no provenance fields. `status !== 0`, `toContain('Rule 21a')`, `toContain('old-basis hash')`. Red against any shipped-fresh iteration set, which skips it.
+- **F. Stale under both stays legal.** `specHash = '0'.repeat(64)`, no provenance. `not.toContain('Rule 21')`.
+- **G. 21b.1 shapes.** Four one-line variants of B: `rehashedFrom: ""`, `rehashedFrom: "undefined"`, `rehashedAt` removed with `rehashedFrom` kept, `rehashedFrom` removed with `rehashedAt` kept. Each asserts `status !== 0` plus `incomplete re-stamp provenance`.
+- **H. Location/`specPath` disagreement and orphan.** A sidecar at `specs/demo/requirements.md.json` whose internal `specPath` names a different file: `status !== 0`, `toContain('sidecar location and record specPath disagree')`. A sidecar whose spec file is absent: `not.toContain('Rule 21a')` in the fatal sense, and `toMatch(/1 orphaned/)`.
+- **I. Anti-vacuity controls.** Empty `.minspec/approvals/`: `toMatch(/Rule 21a: 0 sidecars/)` with no fatal. A tree of two records whose reported count is 0: `status !== 0`, `Rule 21a validated NOTHING this run`.
+
+**Slice-1 companion, so no clause ships unfalsifiable while the two bases are still identical.** `classifyRecord(rec, raw, { old, shipped })` is a pure function returning a discriminated union (`live | stale-both | old-basis | restamp-inconsistent | incomplete-provenance | path-mismatch | orphaned | unreadable`), unit-tested against a deliberately disagreeing injected hasher pair across all four `(D === H_new, rehashedFrom === H_old)` rows plus the four shape variants, then wired to `(preStripSpecHash, specHash)` in the validator. The injected pair is never exported and never mints a record. This does not substitute for fixture A: an injected pair proves the predicate, never the wiring.
+
+**Slice-8 merged-state assertion**, in `packages/minspec/tests/ownership-witness-corpus.test.ts`, run with `cwd: REPO_ROOT`: zero `old-basis`, zero `restamp-inconsistent`, `A === D`, and the `stale-both` set exactly the three named paths. This is the witness that covers the residual, and it belongs to slice 8's PR, not to the standing rule.
+
+---
+
+### 6.5 Cost of the latch
+
+1. **The residual is real and Rule 21 does not close it.** A migration that reads the wrong bytes and derives both digests from them merges green past every clause. Rule 21's standing coverage is: the old-basis case, totally and forever (21a); malformed and half-written provenance, totally and forever (21b.1); and a wrong digest **only while the anchor still matches head bytes** (21b.2). The report must print `A of D still anchored` so a reader sees coverage shrinking rather than reading a bare green as total. Nothing here discharges AC-1's closing sentence on its own; the slice-8 corpus assertion does, at one commit.
+
+2. **21b.2's decay is forensic, not protective, and it terminates cleanly.** After the spec moves, the validator cannot distinguish a wrong-digest record from an ordinarily stale one. Both resolve `stale`, both freeze their owned files at the gate, and the human clears both by re-approving. Re-approval **erases** the provenance rather than reporting it: `approveSpec` builds a fresh record literal (`approval.ts:581-589`) from `specHash(raw)` at `:568`, never reading the prior sidecar, and `writeRecord` is a whole-file overwrite (`approval-store.ts:160-164`). FR-9.5 pins the same from the other side (`requirements.md:655-656`, written only by the migration). So each record's 21b window opens at the re-stamp and closes permanently at its next approval; the domain shrinks monotonically to empty. What is lost is the audit trail: nothing records that a migration wrote a bad digest six months ago. If that matters, the place for it is the migration's run report (FR-9.8 already requires a signal a check can read), not a standing rule.
+
+3. **The `specPath`/location FATAL is a new red surface.** Measured 0 of 64 at HEAD so it lands green, but a sidecar copied along with a spec directory, or a partial rename, now reds the build until the JSON is hand-corrected. I took the red rather than a skip-and-report, because skip-and-report reintroduces exactly the iterate-past defect 21a exists to remove. The orphan case went the other way, to warn, because there the fatal would red a **correct** state.
+
+4. **Zero new record fields.** Both raw-byte-pin candidates cost a new field across FR-4's six sites (interface, `isValidRecord`, `normalizeRecord`, `approveSpec` which must not write it, both literals in `scripts/migrate-approvals.ts`, and `scripts/approval-provenance.py`) and buy only an arming condition that the same wrong read disarms. Rejecting them is the single largest cost saving here and costs nothing the anchor does not already give.
+
+5. **21b.1's hex clause binds anything that mints a sidecar.** Any test or script writing a placeholder digest must use a real 64-lowercase-hex string. Measured 64 of 64 live records conform; fixtures elsewhere in the suite may not and will red on the slice that lands this.
+
+6. **Runtime.** One spec read plus two digests per record, on every `npm run validate`: the pre-commit hook and `.github/workflows/ci.yml:85-86`. Rule 20 needs the same read and one of the same digests, so the two must share one pass over the tree; specifying them as independent walks doubles the cost for no gain. Note that the pre-commit gate is baseline-differential (`.githooks/pre-commit:386-388` diffs current FAIL lines against the HEAD baseline and blocks only what the commit introduces, `:401`), so a new FATAL from Rule 21 blocks the commit that introduces it. That is why no clause here may red on an ordinary spec edit, and why the enumerated stale-both set is a slice-8 assertion rather than a standing rule.
+
+7. **Follow-ups this surfaces.** `design.md:319`'s residual paragraph is false for the ownership-only-edit case and needs correcting whether or not this pair is adopted. `scripts/check-swallowed-gate-signal.ts` walks `.sh` only (`:56`, `:67`), so a swallowed catch inside a TypeScript validator rule is visible to a prose paragraph and to nothing else. Both want issues; this was a read-only run and neither is filed.
 
 **Rule 21's own falsifiability, because a dead predicate one job over is the same defect as a dead latch.** Before slice 8 the two hashers are byte-identical on every input, so 21a's fatal state is unsatisfiable and the rule iterates records while being incapable of firing - and its "validated NOTHING" arm would not notice, because it *is* validating. So the predicate is extracted as a pure function taking its hasher pair, `classifyBasis(rec, raw, { old, shipped })`, unit-tested red in slice 1 against a deliberately-disagreeing pair and wired to `(preStripSpecHash, specHash)` in the validator. Its end-to-end red through the real `npm run validate` arrives with slice 8 and is asserted there against a fixture corpus with `spawnSync(TSX_BIN, [SCRIPT_PATH], { cwd: fixtureDir })` - the AC-14 mechanism, which works because `scripts/validate-frontmatter.ts:42` is `const ROOT = process.cwd()`.
 
-**Residual, stated rather than hidden.** 21b relaxes for any record whose spec file is legitimately edited after the re-stamp: once the bytes move, nothing without git can reconstruct the pre-edit form, and the record drops into 21a state 2. That is correct - AC-1 is a statement about *the merged state*, and 21b is total in it. Outside it, 21b is a per-record property that decays as specs are edited, by design.
+**Residual, stated rather than hidden.** 21b relaxes for any record whose spec file is legitimately edited after the re-stamp: the anchor stops matching, so the clause stops applying rather than failing. AC-1 is a statement about *the merged state* and the latch is total in it; outside it, it is a per-record property that decays as specs are edited, by design.
+
+**[corrected]** An earlier version of this paragraph said "once the bytes move ... the record drops into 21a state 2". That is FALSE for the one edit this spec exists to make cheap. Post-strip the ownership keys are outside the canonical form, so an ownership-only edit does not move `specHash` at all: the record stays fresh under the shipped hasher and stays in state 1, while `preStripSpecHash(S)` moves. Measured on a fixture: the ownership-only edit left the new-basis digest fixed at `1da76ab91efe` while the old-basis digest moved from `53a1c33a6cc4` to `2600a9b3e410`. Both the refuted 21b and the "obvious fix" of dropping its state guard go permanently RED on exactly the AC-9 workflow (requirements.md:784-786, adding a path to `implements:` on an approved spec). The latch above avoids it because the anchor is `rehashedFrom`, not the freshness state.
 
 *(A merge-base-aware variant was rejected, verified rather than assumed: the `lint:` and `test:` jobs check out with `actions/checkout@v5` and no `fetch-depth` (`.github/workflows/ci.yml:72`, `:158`), so neither has a base to compare against; only the `paths:` job sets `fetch-depth: 0` (`:40-42`). Putting the check in `approval-provenance.py` was rejected for a stronger reason: `scripts/review-branch.sh:108` invokes it as `python3 ... 2>/dev/null || true`, marked `swallow-ok` as an optional note that changes no verdict - a load-bearing gate signal written with a swallowed error is the state constitution invariant 2 forbids.)*
 
@@ -691,7 +850,7 @@ Listed so the next reader does not re-derive any of it.
 
 **Residuals inside decisions already taken:**
 
-- **Rule 21b's totality is a property of the re-stamp merged state only.** Once a re-stamped spec's bytes are legitimately edited, nothing without git can reconstruct the pre-edit form and the record drops into 21a state 2 (stale under both). That is correct against AC-1, which is a statement about the merged state, but it is a decaying per-record property afterwards.
+- **Rule 21b's totality is a property of the re-stamp merged state only.** After a legitimate edit the anchor stops matching and the clause goes silent rather than red. Correct against AC-1, which speaks about the merged state, but a decaying per-record property afterwards. Note the correction in section 6: an ownership-only edit does NOT move `specHash` post-strip, so the record stays in state 1 - the earlier claim that it "drops into state 2" was false for precisely the AC-9 workflow.
 - **AC-12's genuinely uncoverable case.** A spec with an empty *full* owned set and no witness cannot be denied by any write-gate. Routed to FR-8.3 (clause 3) and asserted there; the write-gate half of clause 2 is uncoverable for that shape by construction, and the design says so rather than asserting something that cannot fail.
 - **AC-11's dedup probe depends on a readdir order the test can steer but not guarantee.** It fails outright rather than passing when it cannot materialise the hazardous order; it does not make the order deterministic, for the reason in section 7.
 - **The FR-1 controls are one-directional.** They prove no predicate is stuck-true; a stuck-false predicate is caught by the slice-8 arming as a loud false red, never a false green.
@@ -702,10 +861,15 @@ could not accept. Written out here rather than summarised, because the first att
 pasted truncated verifier output and had to be removed:
 
 - **AC-1's closing clause** ("the merged state must contain zero newly-stale approved sidecars",
-  requirements.md:721). Rule 21b is guarded on the wrong antecedent and does not fire on a wrong-digest
-  re-stamp; Rule 21a's iteration set is defined as tracked APPROVED records under the shipped hasher,
-  which excludes the old-basis record 21a exists to catch. The correction for 21b is proposed in
-  section 6 and is itself unverified. 21a's iteration set still needs one.
+  requirements.md:721). **Now closed** - section 6 carries a replacement latch, composed from the clauses that
+  survived three independent corrections being adversarially refuted. The wrong-digest re-stamp is FATAL by
+  21b.2 (`rehashedFrom` is the antecedent, the digest the consequent), 21a's domain is every sidecar raw-parsed
+  and keyed on location so freshness is the output and never the input, and the three legitimately
+  stale-under-both records stay silent. One residual is named there and is NOT closed by Rule 21: a correlated
+  pairing bug, where the migration reads one spec and writes another record, produces a self-consistent pair no
+  byte-local git-free standing rule can refute. It is closed instead by slice 8's corpus assertion in the `test:`
+  job, a different job from Rule 21's `lint:`, which is invariant 2's second-witness clause rather than a
+  coincidence of scheduling.
 - **AC-6's discrimination requirement.** AC-6 names three failure modes the assertion must tell apart -
   a constant `[]`, the raw untokenised `implements:` strings, and a set resolved before the FR-3 parser
   fix. The design asserts set equality against the FR-5 function, which fails all three, but it does not
