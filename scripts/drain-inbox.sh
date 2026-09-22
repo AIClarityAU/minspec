@@ -582,7 +582,7 @@ dispatch_alive_for() {
 reconcile_stale_claims() {
   local running n applied age
   running=$(gh issue list --repo "$REPO" --state open --label "agent-running" \
-    --json number --jq '.[].number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no agent-running issues
+    --json number --jq '.[].number' 2>/dev/null || true)  # swallow-ok: the next line returns 0 on empty, before the loop holding this function's only label edit — a failed query skips this cycle's reaping and the next retries; nothing is reaped on bad data
   [[ -n "$running" ]] || return 0
 
   while read -r n; do
@@ -612,15 +612,26 @@ reconcile_stale_claims() {
 # catch a FALSE agent-done. Branch naming is deterministic (the dispatcher creates
 # `agent/issue-<N>`), so the join needs no heuristics.
 reconcile_done_issues() {
-  local done_issues n pr
+  local done_issues n pr rc
   done_issues=$(gh issue list --repo "$REPO" --state open --label "agent-done" \
     --json number --jq '.[].number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no agent-done issues
   [[ -n "$done_issues" ]] || return 0
 
   while read -r n; do
     [[ -n "$n" ]] || continue
+    # Keep the EXIT STATUS, not just the output (#1855). An empty $pr is consumed as a
+    # BRANCH below, and the else arm is the MUTATING one: it strips `agent-done`, adds
+    # `needs-human-review`, and prints "NO merged PR exists". With the status swallowed,
+    # "the query failed" and "nothing merged" were the same empty string — so a transient
+    # API blip demoted a healthy, genuinely-finished issue and told a human it had failed.
+    # An absence claim must rest on a lookup that actually ran.
+    rc=0
     pr=$(gh pr list --repo "$REPO" --state merged --head "agent/issue-${n}" \
-      --json number --jq '.[0].number // empty' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no merged PR for this issue
+      --json number --jq '.[0].number // empty' 2>/dev/null) || rc=$?
+    if (( rc != 0 )); then
+      echo "[drain] reconcile: could not check agent/issue-${n} for a merged PR (gh exit ${rc}) — leaving #$n exactly as it is. This is NOT evidence that nothing merged (#1855)."
+      continue
+    fi
     if [[ -n "$pr" ]]; then
       echo "[drain] reconcile: closing #$n — its work merged in #$pr but nothing ever closed it (#1322)."
       gh issue close "$n" --repo "$REPO" \
