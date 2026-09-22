@@ -1,7 +1,7 @@
 ---
 id: SPEC-067
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core Methodology — triage classification is the methodology's admission gate
@@ -24,8 +24,8 @@ affects:
   - scripts/roles/triage.md
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
