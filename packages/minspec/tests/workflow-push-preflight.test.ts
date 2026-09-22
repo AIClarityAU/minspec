@@ -571,10 +571,77 @@ describe('the credential probe reads the push credential, not the machine', () =
   });
 
   /**
+   * T3 regression (#1926): GIT_TERMINAL_PROMPT=0 silences only the terminal
+   * fallback. git's prompt path tries an askpass program FIRST — GIT_ASKPASS,
+   * then core.askPass, then SSH_ASKPASS — and only reaches the terminal if none
+   * of those answer. So with no credential helper able to answer and an ambient
+   * askpass set (KDE sets SSH_ASKPASS to ksshaskpass by default), the OLD probe
+   * launched that program instead of failing — a GUI dialog, or a hang where
+   * there is no display. Reproduced identically in a detached worktree at an
+   * untouched head with `SSH_ASKPASS` set: 15s spawn timeout, `env -u
+   * SSH_ASKPASS` alone made it pass.
+   *
+   * Provable without a real GUI or an ambient askpass on the test machine: point
+   * the variable at a stub that records its own invocation, independent of
+   * whatever this box happens to have configured. `probe()` merges this env in
+   * ON TOP of ISOLATED_ENV, so it is deterministic either way — a fixed probe
+   * must never run the stub, whether or not the CI runner has one set already.
+   *
+   * GIT_ASKPASS and SSH_ASKPASS are asserted SEPARATELY, one channel per test,
+   * because they are two independent things the fix must neutralise — a fix
+   * that only touched one would leave this file's own vacuity trap: a single
+   * combined test could pass by luck of git's resolution order rather than by
+   * both channels actually being closed.
+   */
+  it('never invokes an askpass helper via SSH_ASKPASS — not just the terminal', () => {
+    const dir = probeRepo({}); // chain reset, no helper — nothing can answer
+    const marker = path.join(dir, 'askpass-invoked.log');
+    const stub = path.join(dir, 'stub-ssh-askpass.sh');
+    fs.writeFileSync(
+      stub,
+      '#!/usr/bin/env bash\n' + `echo "invoked: $*" >> "${marker}"\n` + 'echo stub-value\n',
+    );
+    fs.chmodSync(stub, 0o755);
+
+    const r = probe(dir, { SSH_ASKPASS: stub });
+    expect(r.stdout.trim(), r.stderr).toBe('not-app');
+    expect(
+      fs.existsSync(marker),
+      'SSH_ASKPASS stub was invoked — the probe did not neutralise this channel',
+    ).toBe(false);
+  });
+
+  it('never invokes an askpass helper via GIT_ASKPASS — the channel git tries first', () => {
+    const dir = probeRepo({});
+    const marker = path.join(dir, 'askpass-invoked.log');
+    const stub = path.join(dir, 'stub-git-askpass.sh');
+    fs.writeFileSync(
+      stub,
+      '#!/usr/bin/env bash\n' + `echo "invoked: $*" >> "${marker}"\n` + 'echo stub-value\n',
+    );
+    fs.chmodSync(stub, 0o755);
+
+    const r = probe(dir, { GIT_ASKPASS: stub });
+    expect(r.stdout.trim(), r.stderr).toBe('not-app');
+    expect(
+      fs.existsSync(marker),
+      'GIT_ASKPASS stub was invoked — the probe did not neutralise this channel',
+    ).toBe(false);
+  });
+
+  /**
    * Verified under a real PTY rather than asserted against the source text.
    * Without GIT_TERMINAL_PROMPT=0, git writes `Username for 'https://…': ` to
    * /dev/tty — which the probe's `2>/dev/null` cannot suppress, because it is not
    * stderr. Where git can read from the tty it blocks there instead.
+   *
+   * #1926: this only ever exercised the TERMINAL channel — it inherits
+   * `process.env` directly (no `env:` override below), so an ambient
+   * GIT_ASKPASS/SSH_ASKPASS on the machine running the suite was never part of
+   * what this test controlled. That is exactly how the bug went unnoticed here:
+   * the askpass regression above is what actually pins the new channels: this
+   * one is pinned too so it cannot flip silently based on whatever the runner's
+   * desktop happens to export.
    */
   it('never writes a credential prompt to the terminal when no helper can answer', (ctx) => {
     // `script -qec CMD FILE` is util-linux syntax. macOS/BSD ship a different
@@ -613,6 +680,13 @@ describe('the credential probe reads the push credential, not the machine', () =
     const r = spawnSync('script', ['-qec', `bash ${snippet}`, '/dev/null'], {
       cwd: dir,
       encoding: 'utf8',
+      // #1926: explicit, not inherited. This test's subject is the TERMINAL
+      // fallback specifically (see the class doc above) — the askpass channels
+      // are covered by their own regression tests just above. Pinning both here
+      // to empty means THIS test's pass/fail can never be decided by whatever
+      // GIT_ASKPASS/SSH_ASKPASS the machine running the suite happens to export,
+      // the way it silently was before.
+      env: { ...process.env, GIT_ASKPASS: '', SSH_ASKPASS: '' },
       timeout: 15_000,
     });
     const seen = `${r.stdout ?? ''}${r.stderr ?? ''}`;

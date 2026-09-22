@@ -101,18 +101,35 @@ paths_touch_workflows() {
 #          advisory — it converts a server-side rejection into a better local
 #          message; it is not an access control.
 #
-#   2. IT PROMPTED ON THE TERMINAL. With no helper able to answer and a TTY
-#      attached, `git credential fill` does not fail quietly — it asks:
-#      `Username for 'https://github.com': `. The `2>/dev/null` on the old call
-#      could not suppress that, because git writes the prompt to /dev/tty, not to
-#      stderr. Verified under a real PTY: the old form emits the prompt, the new
-#      form prints `terminal prompts disabled` and emits nothing to the terminal.
-#      Where git can actually READ from the tty it blocks there waiting for input;
-#      where stdin is a pipe (as here) it fails immediately but still writes the
-#      prompt. Either way a contributor without a credential helper got mysterious
-#      output or a stall from a `git push` — and `npm install` sets
-#      core.hooksPath=.githooks, so that reaches everyone. GIT_TERMINAL_PROMPT=0
-#      makes it fail instead of asking.
+#   2. IT PROMPTED — ON EVERY CHANNEL, NOT JUST THE TERMINAL. With no helper
+#      able to answer, git's prompt path tries an askpass program FIRST
+#      (GIT_ASKPASS, then core.askPass, then SSH_ASKPASS) and only falls back to
+#      the terminal (`Username for 'https://github.com': `, written to /dev/tty,
+#      not stderr, so the old `2>/dev/null` could not suppress it) if no askpass
+#      answers. GIT_TERMINAL_PROMPT=0 only closes that last fallback. #1926:
+#      suppressing the terminal alone still leaves an ambient askpass live — a
+#      desktop that sets SSH_ASKPASS (KDE's ksshaskpass by default) or
+#      GIT_ASKPASS launches that program instead, which pops a GUI dialog or
+#      blocks where there is no display to draw on, for a probe that runs on
+#      every `git push`. All three channels are neutralised the same way here:
+#      GIT_ASKPASS= and SSH_ASKPASS= (an askpass variable that is set but empty
+#      is documented as disabling that channel — see git-credential(1) and the
+#      long-standing `GIT_ASKPASS=` / `core.askpass=` idiom for non-interactive
+#      scripts) plus `-c core.askPass=` for the config form, alongside
+#      GIT_TERMINAL_PROMPT=0 for the terminal itself. The two askpass
+#      env vars are each proven independently, not inferred: the regression
+#      test below points GIT_ASKPASS (separately, SSH_ASKPASS) at a stub that
+#      records its own invocation and asserts the stub is never called — that
+#      is a positive control (an unpatched probe DOES invoke it) verified by
+#      running the test against this repo's actual installed git, not a read of
+#      git's C source. Verified under a real PTY: the old form emits the prompt, the new
+#      form prints `terminal prompts disabled` and emits nothing to the
+#      terminal. Where git can actually READ from the tty it blocks there
+#      waiting for input; where stdin is a pipe (as here) it fails immediately
+#      but still writes the prompt. Any of these ways, a contributor without a
+#      credential helper got mysterious output or a stall from a `git push` —
+#      and `npm install` sets core.hooksPath=.githooks, so that reaches
+#      everyone.
 #
 #   3. NON-HTTPS REMOTES. An App installation token only ever travels over
 #      https. An ssh or filesystem remote cannot carry one, so it fails open
@@ -150,8 +167,13 @@ push_credential_is_app_token() {
     *) return 1 ;;
   esac
 
+  # #1926 — every prompt channel neutralised, not only the terminal one:
+  #   GIT_TERMINAL_PROMPT=0   the terminal fallback (see point 2 above)
+  #   GIT_ASKPASS=            the env-var askpass channel git tries first
+  #   SSH_ASKPASS=            the env-var askpass channel git tries last
+  #   -c core.askPass=        the config-file askpass channel, tried between them
   user=$(printf 'url=%s\n\n' "$url" \
-         | GIT_TERMINAL_PROMPT=0 git credential fill 2>/dev/null \
+         | GIT_TERMINAL_PROMPT=0 GIT_ASKPASS= SSH_ASKPASS= git -c core.askPass= credential fill 2>/dev/null \
          | sed -n 's/^username=//p' \
          | head -1) || return 1
   [ "$user" = "x-access-token" ]
