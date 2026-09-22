@@ -293,6 +293,64 @@ describe('commit-msg follow-up gate (DR-023) — executed behavior', () => {
       ).toBe(0);
     });
   });
+
+  // PR #2067 review (Architect: blocking, Security: independently converged) —
+  // the structured `Follow-ups:` escape parsed trailers from the RAW `$msg_file`
+  // via `git interpret-trailers --parse "$msg_file"`, instead of the already
+  // scissors/comment-stripped `$body` every OTHER check in this hook uses
+  // (DR-059 §3). git's own trailer parser has its own internal cut-line
+  // detection for the `-v` scissors marker, and that detection is stricter and
+  // more format-sensitive than this hook's deliberately lenient
+  // `sed '/^#.*>8/,$ d'` — verified empirically: `git interpret-trailers` only
+  // recognizes the scissors line as a cut point when it matches byte-for-byte,
+  // while a single trailing space (or a non-canonical dash count) is enough to
+  // defeat it, at which point it silently returns NO trailer at all even
+  // though one is genuinely present above the diff. That is the "git-version-
+  // specific patch/comment handling" risk the review named: a scissors line
+  // that this git's OWN parser fails to recognize (a different git version's
+  // output, or a message that has passed through a whitespace-touching editor)
+  // falsely blocks a `-v` commit whose `Follow-ups:` trailer is entirely valid.
+  describe('#2067 regression — raw $msg_file trailer parse must not bypass the scissors strip', () => {
+    it('does NOT falsely block a real Follow-ups: trailer under a `git commit -v` shape whose scissors line has trailing whitespace', () => {
+      // Trailer sits ABOVE the scissors line (git commit -v shape); the diff,
+      // including deferral-sounding text, sits below it. Trailing whitespace
+      // on the scissors line is a mundane, realistic way a message can diverge
+      // from git's own strict internal cut-line pattern.
+      const msg =
+        'feat(#79): add X\n\n' +
+        'CI files held back for a separate PR.\n\n' +
+        'Follow-ups: #12\n' +
+        '# ------------------------ >8 ------------------------   \n' +
+        '# Do not modify or remove the line above.\n' +
+        '# Everything below it will be ignored.\n' +
+        'diff --git a/notes.md b/notes.md\n' +
+        'index 1111111..2222222 100644\n' +
+        '--- a/notes.md\n' +
+        '+++ b/notes.md\n' +
+        '@@ -1 +1,2 @@\n' +
+        ' hello\n' +
+        '+a follow-up idea, out of scope, deferred for later\n';
+      const r = runHook(msg);
+      expect(r.code, `expected the real Follow-ups: #12 trailer to escape the gate; stderr: ${r.stderr}`).toBe(0);
+    });
+
+    it('still BLOCKS the same shape when there is genuinely no Follow-ups: trailer', () => {
+      const msg =
+        'feat(#79): add X\n\n' +
+        'CI files held back for a separate PR.\n\n' +
+        '# ------------------------ >8 ------------------------   \n' +
+        '# Do not modify or remove the line above.\n' +
+        '# Everything below it will be ignored.\n' +
+        'diff --git a/notes.md b/notes.md\n' +
+        'index 1111111..2222222 100644\n' +
+        '--- a/notes.md\n' +
+        '+++ b/notes.md\n' +
+        '@@ -1 +1,2 @@\n' +
+        ' hello\n' +
+        '+world\n';
+      expect(runHook(msg).code).toBe(1);
+    });
+  });
 });
 
 describe('hook scaffolds: markers, shebang, execute bit (#247)', () => {

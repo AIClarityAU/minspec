@@ -1583,17 +1583,24 @@ body_after_subject=$(printf '%s\\n' "$body" | awk '
 
 # --- Follow-up materialization gate (DR-023 / DR-059) — runs on EVERY commit ---
 # A commit that DEFERS work in prose must cite a tracked follow-up — a
-# \\\`Follow-ups:\\\` trailer (\\\`#NNN\\\`, comma-separated, or \\\`none\\\`), say the
-# deferral is handled here, or explicitly negate it. Prose-only "held back /
-# separate PR / follow-up / out of scope" with no ref is a leak (the discipline that
-# would have caught the CI-scope deferral). DR-059 records why this blocks where
-# DR-040 kept DR-document materialization non-blocking (different surface).
+# structured \\\`Follow-ups:\\\` trailer citing \\\`#NNN\\\` (comma-separated for more
+# than one), the separate prose escapes below spelling "handled here", or an
+# explicit "Follow-ups: none" / "nothing deferred" negation. Prose-only "held
+# back / separate PR / follow-up / out of scope" with no ref is a leak (the
+# discipline that would have caught the CI-scope deferral). DR-059 records why
+# this blocks where DR-040 kept DR-document materialization non-blocking
+# (different surface).
 if printf '%s\\n' "$body_after_subject" | grep -Eiq 'held back|separate (pr|commit|review)|follow-?up|out of scope|deferred|not in this (pr|commit)'; then
   # Structured escape (#1918): a \\\`Follow-ups:\\\` trailer, read via
   # \\\`git interpret-trailers\\\` so a stray inline \\\`#NNN\\\` mention — the subject's
   # own issue ref included — can no longer double as the escape; only a
-  # deliberate trailer line can.
-  followups_trailer=$(git interpret-trailers --parse "$msg_file" 2>/dev/null | grep -im1 '^follow-ups:' || true)
+  # deliberate trailer line can. Parsed from \\\`$body\\\` (already scissors/comment-
+  # stripped above), never from \\\`$msg_file\\\` directly (#2067 review): git's own
+  # trailer parser has its own, stricter, version-sensitive cut-line detection
+  # for the \\\`-v\\\` scissors marker, so handing it the raw file could miss a
+  # legitimate trailer whenever that detection didn't fire — falsely blocking
+  # a good commit. \\\`$body\\\` is already safe, so parse that instead.
+  followups_trailer=$(printf '%s\\n' "$body" | git interpret-trailers --parse 2>/dev/null | grep -im1 '^follow-ups:' || true)
   has_followups_ref=0
   printf '%s\\n' "$followups_trailer" | grep -Eiq ':[[:space:]]*#[0-9]+' && has_followups_ref=1
 
