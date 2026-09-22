@@ -50,33 +50,52 @@ Anything waiting on the human — a decision, a credential, a manual step, a mer
   they are working in; a number is resolved in place by the editor's own pull-request
   integration. Say the state you already observed alongside it, so the reader can
   decide without opening anything at all.
-- **Give each item a reply key.** One or two characters, restated on the line every turn so the human never scrolls back to find one: `c` close · `d` diff/details · `r` re-review · `s` skip. **No `m` merge key.** The merge keystroke is requested by the Chief of Staff loop alone (see below), so a session never offers one.
+- **Give each item a reply key.** One or two characters, restated on the line every turn so the human never scrolls back to find one: `m` merge · `c` close · `d` diff/details · `r` re-review · `s` skip.
 - **Every choice carries a recommendation and its cost.** When an item asks the human to *decide*, name the option you recommend and, in the same breath, the primary downside or risk of the option you are recommending. A menu with no recommendation hands the analysis back to the human; a recommendation with no stated cost is advocacy, not advice. Mark it `(rec)` on the option and follow with one clause naming what it costs. This applies wherever a decision is put to a human — the `**Your turn**` block **and** the body of any issue, PR, or DR that asks them to choose.
 
-The same block lists every pull request this session opened that is still unmerged — its
-number and the gate state already observed this turn. **Report the state; never ask for the
-merge.** Founder instruction, 2026-09-12, ratified 2026-09-21:
-
-> update the CoS skill to tell each session not to ask me to merge any PRs when you're
-> shepherding the merges.
-
-Every merge command that reaches the human comes from a single Chief of Staff funnel, which
-is the only place the whole set of in-flight pull requests is visible and the only place
-path-disjointness across that set is proven before a batch is handed over. A command block
-is pasted whole, so two independently-reasonable merge asks arrive as one action with nobody
-having checked whether the two pull requests touch the same file.
-
-Your job on your own pull request is unchanged: update the branch, fix the red checks,
-resolve the conflicts, drive it to greenlit — then stop and say so. Greenlit-for-human is
-where it ends.
+The same block lists every pull request this session opened that is still unmerged — its number, the gate state already observed this turn, and its keys:
 
 ```
 **Your turn**
-➡️ #1231 dispatch env scrub — ai-review:pass · needs-review — greenlit, waiting on the merge queue — `c` close · `d` diff
+➡️ #1231 dispatch env scrub — ai-review:pass · needs-review — `m` merge · `c` close · `d` diff
 ➡️ Name the new hook — `a` agent-context **(rec)**, matches the existing `agent-` prefix but reads oddly for session-scoped state · `b` session-context
 ```
 
 Report the state you already observed; re-reading it from the git host is ordinary tool use, never a requirement, and MinSpec itself makes no network call.
+
+## Merge asks in THIS repo - a single funnel (minspec-monorepo only)
+
+**Project-specific. This section overrides one line of the shared convention above, and it
+applies to this repo only - it is deliberately absent from the shipped templates, because an
+adopter running MinSpec solo has no funnel to route through and should keep the `m` merge key
+the shared convention gives them (constitution invariant 3: nothing MinSpec ships may change
+behaviour in a repo that did not opt in).**
+
+Here, a session never offers `m` merge on its own pull request. Report the state you observed
+and stop. Founder instruction, 2026-09-12:
+
+> update the CoS skill to tell each session not to ask me to merge any PRs when you're
+> shepherding the merges.
+
+**Where the funnel is actually defined.** The chief-of-staff skill, which lives OUTSIDE this
+repository in the operator's own Claude configuration, not in any file here. That is why this
+section states the rule rather than linking it: a link from a repo file to a machine-local
+skill is a pointer that resolves to nothing for everyone except the operator. Around fifteen
+sessions run concurrently on this repo; the funnel is the only place the whole set of
+in-flight pull requests is visible, and the only place path-disjointness across a batch is
+checked before it is handed over. A command block is pasted whole, so two independently
+reasonable merge asks arrive as one action with nobody having checked whether the two pull
+requests touch the same file.
+
+**Your job on your own pull request is unchanged:** fix the red checks, resolve the
+conflicts, drive it to greenlit, then stop and say so. Greenlit-for-human is where it ends.
+Branch updates are the funnel's call, not yours (SPEC-044 FR-4b gives it branch updates and
+merge confirmation): a machinery pull request merges by human `--admin`, which bypasses the
+up-to-date requirement, so updating a BEHIND machinery branch spends a full CI cycle for
+nothing.
+
+So the reply keys on a pull request line here are `c` close, `d` diff, `r` re-review - the
+shared convention's `m` is the one key this repo does not use.
 
 ## Commands and locations
 
