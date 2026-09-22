@@ -210,8 +210,35 @@ describe('SPEC-034 task 1.4 — broker live path', () => {
       // Ordering matters beyond tidiness: an unauthorised caller must not be able to
       // make the broker deserialise arbitrary input, and no artifact content may reach
       // a code path that could store or forward it (AC-6).
-      const res = await callWith({ raw: JSON.stringify({ blob: 'x'.repeat(100_000) }) });
+      //
+      // Asserting only the 401 would NOT establish that: a handler that deserialised the
+      // body first and rejected afterwards returns the same status. So the request owns
+      // its own body readers here and records whether any was entered - the name of this
+      // test is a claim about what was NOT called, and only a spy can witness that.
+      const handler = createFetchHandler({
+        jwks: async () => createLocalJWKSet({ keys: [] }),
+        factory: () => goodFactory,
+      });
+      const request = new Request(`${BASE}${TOKEN_PATH}`, {
+        method: 'POST',
+        body: JSON.stringify({ blob: 'x'.repeat(100_000) }),
+      });
+      const readersEntered: string[] = [];
+      for (const reader of ['json', 'text', 'arrayBuffer', 'blob', 'formData'] as const) {
+        const original = (request as unknown as Record<string, unknown>)[reader];
+        Object.defineProperty(request, reader, {
+          configurable: true,
+          value: function (this: Request, ...args: unknown[]) {
+            readersEntered.push(reader);
+            return (original as (...a: unknown[]) => unknown).apply(this, args);
+          },
+        });
+      }
+
+      const res = await handler(request);
+
       expect(res.status).toBe(401);
+      expect(readersEntered).toEqual([]);
     });
   });
 });
