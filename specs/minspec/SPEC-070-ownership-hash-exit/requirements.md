@@ -1,7 +1,7 @@
 ---
 id: SPEC-070
 type: requirements
-status: specifying
+status: planning
 tier: T4
 product: minspec
 epic: EPIC-002  # Signpost Integrity - an approval that cannot say what it covered is a false signpost
@@ -26,8 +26,8 @@ implements: [packages/minspec/src/lib/owned-set.ts, packages/minspec/tests/owned
 affects: [packages/shared/src/canonical.ts, scripts/hooks/canonical.py, scripts/hooks/spec-gate.py, packages/minspec/src/lib/approval.ts, packages/minspec/src/lib/approval-store.ts, scripts/approval-provenance.py]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

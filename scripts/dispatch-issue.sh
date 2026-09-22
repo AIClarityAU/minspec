@@ -1019,11 +1019,11 @@ run_reviewer_stage() {
   #    this branch to ever land. Reuse the already-built $BODY (do not rebuild the
   #    summary) and the issue title for the PR.
   local pr_num
-  pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-known: #1978 an API failure reads as no PR exists
+  pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: empty is handled on the next line, which retries the create and re-queries; if it is still empty the caller warns and returns without merging
   if [[ -z "$pr_num" ]]; then
     gh pr create --repo "$REPO" --base main --head "$BRANCH" \
       --title "$ISSUE_TITLE" --body "$BODY" 2>/dev/null || true
-    pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-known: #1978 an API failure reads as no PR exists
+    pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: this IS the re-query after the create; if it is still empty the check below warns and returns 0 without posting a verdict or merging
   fi
   if [[ -z "$pr_num" ]]; then
     echo "WARNING: no PR for $BRANCH (create failed?) — AI review verdict: $combined (not posted)" >&2
@@ -1380,7 +1380,7 @@ shepherd_own_pr() {
     return 0
   fi
   local pr_num started loop_deadline
-  pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-known: #1978 an API failure reads as no PR exists
+  pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: the next line prints "nothing to shepherd" and returns 0 — this function never creates, comments or merges, so an unknown PR number only skips shepherding for this run and the next cycle retries
   if [[ -z "$pr_num" ]]; then
     echo "  No PR for $BRANCH — nothing to shepherd."
     return 0
@@ -1480,8 +1480,29 @@ shepherd_own_pr() {
         # "handed off" here would be a false signpost on a green PR.
         echo "  PR #$pr_num is green with no automated gate left — awaiting a human. Not polling further."
         return 0 ;;
+      stop-unhandled-state)
+        # #1803/#1813: classify_pr saw a mergeStateStatus it has never seen — a
+        # future GitHub value, an empty read, or garbage. (NOT BLOCKED/UNSTABLE/
+        # HAS_HOOKS: those are documented, known-transient states that arrive as
+        # skip-clean, so a PR waiting on a merge-gating check keeps being polled —
+        # SPEC-044 FR-4.) Deliberately NOT a
+        # shepherd_hand_off: that asserts "an automated gate failed closed, a human
+        # must resolve" — a claim this classifier isn't confident enough to make about
+        # a state it doesn't recognise (same restraint remediate-pr.sh's drain path
+        # takes for the identical token). Log it honestly and RETURN — the name
+        # "stop-*" must actually stop here, or it silently falls through to `sleep`
+        # below and polls the full hour ceiling under a name that says it wouldn't.
+        echo "  PR #$pr_num has mergeStateStatus '$merge_state', which this classifier does not recognise — leaving it alone rather than assuming it is clean or out of automation scope. Not polling further."
+        return 0 ;;
       wait)
         : ;;  # green but unmerged: waiting on checks, native auto-merge, or a human
+      wait-unknown)
+        # #1803/#1813: mergeStateStatus is (still) UNKNOWN — GitHub computes it
+        # lazily, so this is routine right after a push, not a problem to fix or a
+        # reason to abandon the PR as "outside automation scope" (the blocking review
+        # finding on PR #1813). Same shape as `wait`: no side effect, just poll again.
+        echo "  PR #$pr_num: mergeStateStatus is still UNKNOWN — waiting for GitHub to finish computing it, not treating this as fixable or out of scope."
+        ;;
       do-rebase)
         shepherd_rebase || { shepherd_hand_off "$pr_num" "an automated rebase onto \`main\` did not apply cleanly"; return 0; } ;;
       do-fix)
@@ -1853,7 +1874,7 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
       printf '%s' "$SIGNALS_INPUT" > "$SIGNALS_TMP"
       # Find the PR for this branch (the gate holds/merges a PR, not the issue).
       PR_NUM=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
-        --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-known: #1978 an API failure reads as no open PR, skipping the shepherding below
+        --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: empty passes --pr 0 to the gate, and the merge condition below additionally requires -n "$PR_NUM", so an unknown PR number cannot merge, skipping the shepherding below
 
       echo "Running auto-merge gate (mode: $AUTOMERGE_MODE, base: $AUTOMERGE_BASE, PR: ${PR_NUM:-none})..."
       DECISION=$(cd "$WORKTREE" && npx tsx "${SCRIPT_DIR}/auto-merge-gate.ts" \
@@ -1904,7 +1925,7 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
       AUTONOMY_PROCEED="no"
       SPEC024_CHANGED=""
       if [[ -n "$PR_NUM" ]]; then
-        SPEC024_CHANGED=$(gh pr diff "$PR_NUM" --repo "$REPO" --name-only 2>/dev/null || true)  # swallow-known: #1978 an API failure reads as no SPEC-024 files changed, feeding the autonomy merge decision below
+        SPEC024_CHANGED=$(gh pr diff "$PR_NUM" --repo "$REPO" --name-only 2>/dev/null || true)  # swallow-ok: an empty list is the STRONGEST stop class, not an absent one — autonomy_may_merge returns proceed:false on empty input (verified via the --may-merge seam), so AUTONOMY_PROCEED stays no and the merge is refused
       fi
       if AUTONOMY_VERDICT=$(autonomy_may_merge \
             "merge PR #${PR_NUM:-none} via the SPEC-024 consequence-hybrid gate" \
