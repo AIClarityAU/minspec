@@ -254,6 +254,45 @@ describe('commit-msg follow-up gate (DR-023) — executed behavior', () => {
     expect(runHook('fix: thing\n\nno diagnosis here.\n').code).toBe(1);
     expect(runHook('fix: thing\n\nRoot cause: the widget was null.\n').code).toBe(0);
   });
+
+  // #1918 — the escape used to scan the WHOLE message, subject included. This
+  // repo's own convention puts the issue number in the subject
+  // (`feat(#N): ...`), so that number alone satisfied the escape on nearly
+  // every conventional commit and the gate almost never fired.
+  describe('#1918 regression — the subject line must not satisfy the escape', () => {
+    it('BLOCKS a deferral whose only issue reference is the subject\'s (#N)', () => {
+      const r = runHook('feat(#79): add X\n\nCI files held back for a separate PR.\n');
+      expect(r.code).toBe(1);
+      expect(r.stderr).toContain('follow-up gate');
+    });
+
+    it('BLOCKS a fix(#N): subject the same way', () => {
+      expect(
+        runHook('fix(#79): add X\n\nRoot cause: n/a.\n\nCI files held back for a separate PR.\n').code
+      ).toBe(1);
+    });
+
+    it('a bare inline #NNN mention in the BODY (not a trailer, no escape phrase) no longer escapes', () => {
+      // Previously the bare `#[0-9]+` escape passed on ANY mention. Now only a
+      // structured `Follow-ups:` trailer, or one of the surviving prose escapes
+      // ("tracked in", "Follow-ups: none", "handled here", ...), satisfies it.
+      const r = runHook('feat: add X\n\nCI files held back for a separate PR, see #12.\n');
+      expect(r.code).toBe(1);
+      expect(r.stderr).toContain('follow-up gate');
+    });
+
+    it('ALLOWS the same deferral once a `Follow-ups: #NNN` trailer is added', () => {
+      expect(
+        runHook('feat(#79): add X\n\nCI files held back for a separate PR.\n\nFollow-ups: #12\n').code
+      ).toBe(0);
+    });
+
+    it('ALLOWS a multi-issue `Follow-ups: #NNN, #NNN` trailer', () => {
+      expect(
+        runHook('feat: add X\n\nCI files held back for a separate PR.\n\nFollow-ups: #12, #34\n').code
+      ).toBe(0);
+    });
+  });
 });
 
 describe('hook scaffolds: markers, shebang, execute bit (#247)', () => {
