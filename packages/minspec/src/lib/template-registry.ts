@@ -28,6 +28,7 @@ import {
   READY_TO_MERGE_WORKFLOW,
   AI_REVIEW_RETRY_WORKFLOW,
   DOCS_LANE_WORKFLOW,
+  SECRET_SCAN_WORKFLOW,
   REVIEW_BRANCH_SH,
   REVIEW_DECIDE_SH,
   AGENT_CONTEXT_SH,
@@ -36,6 +37,7 @@ import {
   ROLE_ARCHITECT_MD,
   ROLE_SKEPTIC_MD,
   AI_REVIEW_GUARD_JS,
+  AI_REVIEW_GUARD_TEST_JS,
   APPROVAL_PROVENANCE_PY,
   CANONICAL_PY,
   REVIEW_SCRIPT_SHEBANG,
@@ -446,6 +448,7 @@ Two notes about clones, because an inert gate is worse than no gate — it looks
 | Gate | Hook | Refuses |
 |---|---|---|
 | Protected-branch guard | \`pre-commit\` | An authored commit on the default branch |
+| Author identity gate (opt-in) | \`pre-commit\` | A commit author email not in a configured allowlist |
 | Secret scan | \`pre-commit\` | Staged changes containing a detected secret |
 | Spec frontmatter | \`pre-commit\` | A staged spec missing \`id: SPEC-NNN\` |
 | Deferred-work gate | \`commit-msg\` | A message that defers work without saying where it went |
@@ -479,6 +482,38 @@ That last row is a **fallback only**. The guard first asks git for the remote's 
 branch by reading \`refs/remotes/<remote>/HEAD\` — a local ref, so no network call. When that
 ref is populated, exactly that one branch is guarded and the name list is ignored. The list
 applies only when the ref is missing, and defaults to \`main master trunk\`.
+
+### Author identity gate
+
+GitHub links a commit to an account by matching the commit's **author email** against the
+verified emails on that account. An email that isn't verified anywhere can never be linked —
+GitHub instead renders **"ghost mentioned this"** for every cross-reference the commit makes
+(a PR, an issue comment, a closing keyword). That looks like a display bug; it is actually an
+unnoticed identity misconfiguration, and nothing else in the harness would catch it — a wrong
+\`user.email\` still produces a perfectly valid commit.
+
+**Off by default.** This gate has no built-in list, because this template scaffolds into
+projects whose author emails MinSpec cannot know in advance — asserting one unconditionally
+would be exactly the blast-radius violation the harness must never commit. It activates only
+once you configure an allowlist:
+
+| Want | Do |
+|---|---|
+| Restrict commits to known-linked addresses | \`git config minspec.allowedCommitEmails "you@example.com bot@example.com"\` (space-separated, or one address per \`git config --add\`) |
+| Allow this one commit anyway | \`EMAIL_GATE_OFF=1 git commit ...\` |
+
+The address checked is the one git will actually **record** as the author, not just
+\`user.email\`: git's own precedence applies, so \`GIT_AUTHOR_EMAIL\`, \`git commit --author\`,
+\`author.email\`, the \`EMAIL\` fallback, and an \`--amend\` that keeps an earlier commit's
+author are all seen. Entries are compared literally: \`*@example.com\` is an address, not a
+pattern. Once an allowlist is set the gate fails closed: an allowlist git cannot read, or an
+author git cannot name, refuses the commit.
+
+\`git config\` is repository-local, so setting the allowlist once covers every worktree of the
+repository — not just the checkout you set it from. If you see "ghost" attributions in your
+own issue timelines, the fix for the *history* already made is to add the unlinked address as
+a verified email on the GitHub account: GitHub re-links past commits automatically, with no
+history rewrite required.
 
 ### Secret scan
 
@@ -544,10 +579,21 @@ buy.
 a single commit, and each refusal also prints its own narrower escape. Use a bypass when the
 gate is wrong about *this* commit, not to defer work the gate correctly identified.
 
-The hooks fail open on their own internal errors, so a bug in the tooling never blocks a
-legitimate commit. The price is that silence does not prove a check ran. If a gate has never
-fired, confirm it is wired — \`git config --local core.hooksPath\` should print
-\`.minspec/hooks\` — before concluding you are clean.
+The hooks fail **closed** on their own internal errors. A crash in the tooling refuses the
+commit rather than waving it through, because a check that could not run has certified
+nothing. Both are \`set -u\`; \`pre-commit\` additionally propagates its validator's exit
+status, and that validator wraps no top-level handler around \`main()\`. So a refusal you cannot account for
+from the message may be a bug in the gate rather than a violation in your change — read the
+error, and reach for the bypass above only once you have decided the gate is the broken part.
+The gates DO fail open, deliberately, on a missing PREREQUISITE — an absent tool, an
+undeterminable default branch, an unreadable message file. That is a different condition from
+an internal failure, and the two directions are the point: a check that has nothing to run
+against stands aside, a check that broke while running refuses.
+
+What silence does not prove is that a check ran. An unwired hook says nothing at all, and
+nothing at all reads exactly like a pass — which is the failure this paragraph used to invite
+by promising the opposite. If a gate has never fired, confirm it is wired — \`git config
+--local core.hooksPath\` should print \`.minspec/hooks\` — before concluding you are clean.
 
 `;
 
@@ -1012,10 +1058,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5.0.1
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
           node-version: '20'
 
@@ -1075,7 +1121,7 @@ export const MINSPEC_HOOKS_DIR = '.minspec/hooks';
 // ---------------------------------------------------------------------------
 
 /**
- * Shell `pre-commit` hook (DR-037 / #247, #244). Three stages over the staged tree:
+ * Shell `pre-commit` hook (DR-037 / #247, #244). Four stages over the staged tree:
  *
  *  0. Protected-branch guard: refuse an authored commit on the default branch,
  *     which is push-protected and so can never receive a direct commit — the
@@ -1085,10 +1131,29 @@ export const MINSPEC_HOOKS_DIR = '.minspec/hooks';
  *     cannot determine. Opt out with MINSPEC_ALLOW_MAIN=1 or
  *     `git config minspec.allowCommitOnDefaultBranch true`.
  *
- *  1. Secret scan (#244): if `gitleaks` is on PATH, run it on the staged changes and
+ *  1. Author identity gate (#1114, opt-in): refuse a commit whose AUTHOR email is
+ *     not in a configured allowlist. That is the email git will actually record,
+ *     read with `git var GIT_AUTHOR_IDENT` so git's own precedence applies
+ *     (GIT_AUTHOR_EMAIL, which `--author` and `--amend` set; then author.email,
+ *     user.email, EMAIL), not the `user.email` config those all override. GitHub
+ *     links a commit to an account by matching the author email against that
+ *     account's verified addresses; an unrecognized email can never be linked,
+ *     and every cross-reference the commit makes then renders as "ghost
+ *     mentioned this" in issue timelines — a display symptom of an identity
+ *     misconfiguration nothing else catches.
+ *     OFF by default (empty allowlist): this template scaffolds into projects
+ *     whose author emails MinSpec cannot know in advance, so asserting one
+ *     unconditionally would violate the harness's own blast-radius invariant.
+ *     Once opted in it fails CLOSED on an unreadable allowlist or an author git
+ *     cannot name. Entries compare literally (no glob matching).
+ *     Opt in with `git config minspec.allowedCommitEmails "a@x.com b@x.com"`
+ *     (or one address per `git config --add`).
+ *     Bypass (rare): EMAIL_GATE_OFF=1 git commit ...
+ *
+ *  2. Secret scan (#244): if `gitleaks` is on PATH, run it on the staged changes and
  *     BLOCK on a finding. If gitleaks is absent, emit a one-line advisory and
  *     CONTINUE — graceful degradation, never a hard fail for a missing optional tool.
- *  2. SDD validation (DR-037 detection chain): run the highest-fidelity validator
+ *  3. SDD validation (DR-037 detection chain): run the highest-fidelity validator
  *     that is ACTUALLY available — every tier is opportunistic and falls through if
  *     it cannot run, so an unreachable tier never bricks a commit (never-wrong):
  *       - Node — `npx --no-install @aiclarity/minspec-validator` ONLY if already
@@ -1100,7 +1165,13 @@ export const MINSPEC_HOOKS_DIR = '.minspec/hooks';
  *         per DR-032).
  *
  * Bypass (rare, explicit): MINSPEC_GATE_OFF=1 git commit ...
- * Fail-open on hook-internal errors so a tooling bug never blocks a commit wrongly.
+ * Fail direction, and it differs by CONDITION. A missing prerequisite fails OPEN — an
+ * unreachable validator tier falls through (above), gitleaks is skipped when not installed,
+ * the branch guard stands aside when the default branch cannot be determined. A hook-internal
+ * ERROR fails CLOSED: \`set -u\` plus the propagated \`exit $?\` below, and no top-level
+ * handler around validate.py's \`main()\`, so a tooling bug refuses the commit rather than
+ * waving it through. Do not collapse the two — a gate that certifies while broken is the
+ * invariant-2 violation, and this comment claimed exactly that until #1905.
  */
 const PRE_COMMIT_HOOK = `# MinSpec pre-commit gate (DR-037) — editor-independent SDD + secret gates.
 # Runs on EVERY commit (terminal, other editor, AI agent), not just the VS Code path.
@@ -1237,7 +1308,113 @@ if ! minspec_branch_guard; then
   exit 1
 fi
 
-# ── Stage 1: secret scan (#244, gitleaks) ────────────────────────────────────
+# ── Stage 1: author identity gate (opt-in, #1114) ────────────────────────────
+# GitHub links a commit to an account by matching the AUTHOR EMAIL against the
+# verified addresses on that account. An author email that isn't one of them
+# can never be linked — GitHub instead renders "ghost mentioned this" for every
+# cross-reference that commit makes, which reads as a display quirk but is
+# really an unnoticed identity misconfiguration (a container session's ambient
+# email shadowing the real one is the case this was written for).
+#
+# OFF by default: this template scaffolds into projects whose author emails
+# MinSpec cannot know in advance, so asserting an identity here without an
+# explicit opt-in would be the exact blast-radius violation the harness must
+# not commit (constitution invariant 3). Configure it per project with:
+#     git config minspec.allowedCommitEmails "you@example.com bot@example.com"
+# (space-separated, or one address per \`git config --add\`; git config is
+# repository-local, so it covers every worktree of the repository, not just
+# this checkout.)
+#
+# WHICH email: the one git will RECORD as the author, read with
+# \`git var GIT_AUTHOR_IDENT\`. That applies git's own precedence
+# (GIT_AUTHOR_EMAIL, then author.email, then user.email, then EMAIL), and
+# \`git commit\` exports the author it resolved (including a \`--author\` flag, or
+# the earlier author an \`--amend\` / \`-C\` keeps) to this hook as
+# GIT_AUTHOR_EMAIL, so git var reports exactly that. Reading \`user.email\`
+# checked a proxy that every one of those overrides walked past (#1778 review).
+#
+# Fails CLOSED once opted in (constitution invariant 2): an allowlist git
+# cannot read, or an author git cannot name, refuses; neither is evidence
+# that the commit is fine.
+#
+# Bypass (rare): EMAIL_GATE_OFF=1 git commit ...
+if [ "\${EMAIL_GATE_OFF:-0}" != "1" ]; then
+  # --get-all, not --get: --get returns only the LAST value of a multi-valued
+  # key. Exit 1 is git's "key not set", which leaves the gate off; any other
+  # failure is a real read error and must not be mistaken for "not configured".
+  minspec_allowed_emails=$(git config --get-all minspec.allowedCommitEmails)
+  minspec_allowed_rc=$?
+  if [ "$minspec_allowed_rc" -ne 0 ] && [ "$minspec_allowed_rc" -ne 1 ]; then
+    echo "✗ MinSpec gate: could not read minspec.allowedCommitEmails (git config exited $minspec_allowed_rc)." >&2
+    echo "  An allowlist that cannot be read is refused, never treated as unset." >&2
+    echo "  Bypass (rare): EMAIL_GATE_OFF=1 git commit ..." >&2
+    exit 1
+  fi
+  if [ -n "\${minspec_allowed_emails:-}" ]; then
+    if ! minspec_author_ident=$(git var GIT_AUTHOR_IDENT); then
+      echo "✗ MinSpec gate: cannot determine the author identity git will record (git var GIT_AUTHOR_IDENT failed)." >&2
+      echo "  minspec.allowedCommitEmails is set, so an author that cannot be named is refused." >&2
+      echo "  Fix:  git config user.email <an address from minspec.allowedCommitEmails>" >&2
+      echo "  Bypass (rare): EMAIL_GATE_OFF=1 git commit ..." >&2
+      exit 1
+    fi
+    # "Name <email> <timestamp> <tz>". git strips < and > out of both the name
+    # and the email, so the first <...> pair IS the email. A line without one
+    # names no author; the empty result is then refused like any unlisted one.
+    minspec_author_email=
+    case "$minspec_author_ident" in
+      *"<"*">"*)
+        minspec_author_email=\${minspec_author_ident#*"<"}
+        minspec_author_email=\${minspec_author_email%%">"*}
+        ;;
+    esac
+    # Entries are compared LITERALLY. set -f stops the unquoted expansion from
+    # also pathname-expanding them against the repository root (the hook's cwd),
+    # where "*@example.com" would otherwise become the name of any matching file.
+    minspec_email_ok=0
+    minspec_allowed_list=
+    set -f
+    for minspec_allowed in $minspec_allowed_emails; do
+      minspec_allowed_list="\${minspec_allowed_list:+$minspec_allowed_list }$minspec_allowed"
+      if [ "$minspec_author_email" = "$minspec_allowed" ]; then
+        minspec_email_ok=1
+        break
+      fi
+    done
+    set +f
+    if [ "$minspec_email_ok" -ne 1 ]; then
+      # Say where the rejected address came from, so the Fix line names the
+      # thing to change. Advisory only: the verdict above never reads these.
+      minspec_cfg_key=author.email
+      minspec_cfg_email=$(git config --get author.email 2>/dev/null)
+      if [ -z "\${minspec_cfg_email:-}" ]; then
+        minspec_cfg_key=user.email
+        minspec_cfg_email=$(git config --get user.email 2>/dev/null)
+      fi
+      echo "✗ MinSpec gate: author email '\${minspec_author_email:-<none>}' is not in the configured allowlist." >&2
+      echo "  That is the address git would record for this commit (git var GIT_AUTHOR_IDENT)." >&2
+      echo "  An email GitHub cannot link to an account renders every commit and" >&2
+      echo "  cross-reference it makes as 'ghost' in issue timelines." >&2
+      echo "  Allowed: $minspec_allowed_list" >&2
+      echo "" >&2
+      minspec_fix="git config $minspec_cfg_key <one of the allowed addresses above>"
+      if [ -z "\${minspec_cfg_email:-}" ]; then
+        echo "  No author.email or user.email is configured, so git fell back to the" >&2
+        echo "  EMAIL environment variable (or <user>@<hostname>)." >&2
+      elif [ "$minspec_cfg_email" != "$minspec_author_email" ]; then
+        echo "  git config $minspec_cfg_key is '$minspec_cfg_email', but this commit's author overrides it:" >&2
+        echo "  GIT_AUTHOR_EMAIL in the environment, git commit --author, or an --amend / -C" >&2
+        echo "  that keeps an earlier commit's author." >&2
+        minspec_fix="unset GIT_AUTHOR_EMAIL, drop --author, or add --reset-author"
+      fi
+      echo "  Fix:  $minspec_fix" >&2
+      echo "  Bypass (rare): EMAIL_GATE_OFF=1 git commit ..." >&2
+      exit 1
+    fi
+  fi
+fi
+
+# ── Stage 2: secret scan (#244, gitleaks) ────────────────────────────────────
 # gitleaks is the recommended static, offline, read-only scanner. It is OPTIONAL:
 # if it is not installed we warn and continue (graceful degradation) rather than
 # block — a missing optional tool must never wedge a commit.
@@ -1265,7 +1442,7 @@ else
   echo "  Install gitleaks (https://github.com/gitleaks/gitleaks) to gate committed secrets." >&2
 fi
 
-# ── Stage 2: SDD validation (DR-037 detection chain) ─────────────────────────
+# ── Stage 3: SDD validation (DR-037 detection chain) ─────────────────────────
 # Highest-fidelity validator AVAILABLE wins, but every tier is OPPORTUNISTIC: a
 # tier is used only when it can actually run, otherwise the chain falls through to
 # the next. This is the never-wrong rule — a tier that cannot be reached (the npm
@@ -1364,6 +1541,14 @@ exit $?`;
  * heredoc, editor, or agent commits alike). Mirrors the monorepo's own gate.
  *
  * Bypass: MINSPEC_GATE_OFF=1 git commit ...   Fail-open on a missing message file.
+ *
+ * #1918: the follow-up escape used to search the WHOLE message, subject
+ * included. This repo's own convention puts the issue number in the subject
+ * (\`feat(#N): ...\`), so a bare \`#[0-9]+\` escape was satisfied by the parent
+ * issue on nearly every conventional commit — the gate almost never fired. The
+ * subject is now stripped before both the trigger and escape checks, and the
+ * issue-number escape is now a structured \`Follow-ups:\` trailer (read via
+ * \`git interpret-trailers\`) instead of a bare in-body \`#NNN\` mention.
  */
 const COMMIT_MSG_HOOK = `# MinSpec commit-msg gate (DR-037) — RCDD root-cause (DR-003) + follow-up
 # materialization (DR-023, blocking-for-commit-prose per DR-059). A \\\`fix:\\\` commit
@@ -1385,18 +1570,47 @@ body=$(sed '/^#.*>8/,$ d' "$msg_file" | grep -v '^#' || true)
 # Subject = first non-empty body line.
 subject=$(printf '%s\\n' "$body" | grep -m1 . 2>/dev/null || true)
 
+# Body minus the subject line — the follow-up trigger and its escape must scan
+# only prose the human wrote BELOW the subject. This repo's own convention puts
+# the issue number in the subject (\\\`feat(#N): ...\\\`), so leaving the subject
+# in-scope let that number satisfy the escape on nearly every commit (#1918).
+# Drops the FIRST NON-BLANK line (not just line 1), so a leading blank line
+# ahead of the subject cannot defeat the strip.
+body_after_subject=$(printf '%s\\n' "$body" | awk '
+  !skipped && /[^[:space:]]/ { skipped=1; next }
+  { print }
+')
+
 # --- Follow-up materialization gate (DR-023 / DR-059) — runs on EVERY commit ---
-# A commit that DEFERS work in prose must cite a tracked issue (#NNN), say
-# "Follow-ups: none", or assert nothing was deferred. Prose-only "held back /
-# separate PR / follow-up / out of scope" with no ref is a leak (the discipline that
-# would have caught the CI-scope deferral). DR-059 records why this blocks where
-# DR-040 kept DR-document materialization non-blocking (different surface).
-if printf '%s\\n' "$body" | grep -Eiq 'held back|separate (pr|commit|review)|follow-?up|out of scope|deferred|not in this (pr|commit)'; then
-  if ! printf '%s\\n' "$body" | grep -Eiq '#[0-9]+|follow-?ups?:? *none|tracked in|no(thing|ne)? *(deferred|follow-?ups?)|nothing (held|deferred)|(handled|done|fixed|addressed) (here|in this (pr|commit|change))'; then
+# A commit that DEFERS work in prose must cite a tracked follow-up — a
+# structured \\\`Follow-ups:\\\` trailer citing \\\`#NNN\\\` (comma-separated for more
+# than one), the separate prose escapes below spelling "handled here", or an
+# explicit "Follow-ups: none" / "nothing deferred" negation. Prose-only "held
+# back / separate PR / follow-up / out of scope" with no ref is a leak (the
+# discipline that would have caught the CI-scope deferral). DR-059 records why
+# this blocks where DR-040 kept DR-document materialization non-blocking
+# (different surface).
+if printf '%s\\n' "$body_after_subject" | grep -Eiq 'held back|separate (pr|commit|review)|follow-?up|out of scope|deferred|not in this (pr|commit)'; then
+  # Structured escape (#1918): a \\\`Follow-ups:\\\` trailer, read via
+  # \\\`git interpret-trailers\\\` so a stray inline \\\`#NNN\\\` mention — the subject's
+  # own issue ref included — can no longer double as the escape; only a
+  # deliberate trailer line can. Parsed from \\\`$body\\\` (already scissors/comment-
+  # stripped above), never from \\\`$msg_file\\\` directly (#2067 review): git's own
+  # trailer parser has its own, stricter, version-sensitive cut-line detection
+  # for the \\\`-v\\\` scissors marker, so handing it the raw file could miss a
+  # legitimate trailer whenever that detection didn't fire — falsely blocking
+  # a good commit. \\\`$body\\\` is already safe, so parse that instead.
+  followups_trailer=$(printf '%s\\n' "$body" | git interpret-trailers --parse 2>/dev/null | grep -im1 '^follow-ups:' || true)
+  has_followups_ref=0
+  printf '%s\\n' "$followups_trailer" | grep -Eiq ':[[:space:]]*#[0-9]+' && has_followups_ref=1
+
+  if [ "$has_followups_ref" -ne 1 ] && ! printf '%s\\n' "$body_after_subject" | grep -Eiq 'follow-?ups?:? *none|tracked in|no(thing|ne)? *(deferred|follow-?ups?)|nothing (held|deferred)|(handled|done|fixed|addressed) (here|in this (pr|commit|change))'; then
     echo "✗ MinSpec follow-up gate (DR-023/DR-059): this commit defers work but files no follow-up." >&2
     echo "" >&2
     echo "  A commit that says 'held back / separate PR / follow-up / out of scope' must" >&2
-    echo "  cite a tracked issue (#NNN), state 'Follow-ups: none', or note 'nothing deferred'." >&2
+    echo "  cite a tracked issue via a \\\`Follow-ups: #NNN\\\` trailer, state 'Follow-ups: none'," >&2
+    echo "  or note 'nothing deferred'. A bare #NNN mention in the subject or prose no longer" >&2
+    echo "  counts — it must be a dedicated trailer line (#1918)." >&2
     echo "  Bypass (rare): MINSPEC_GATE_OFF=1 git commit ..." >&2
     exit 1
   fi
@@ -1965,6 +2179,18 @@ const CI_REVIEW_STACK_TEMPLATES: readonly ManagedRegionTemplate[] = [
     content: DOCS_LANE_WORKFLOW,
   },
   {
+    // #1186: the independent CI witness for the client-side gitleaks gate. MinSpec
+    // shipped the hook to every adopter but kept this workflow to itself, so an
+    // adopter's only secret witness was a local, optional binary — exactly the
+    // single-producer shape invariant 2 forbids. Portable by construction: it reads
+    // only GitHub-assigned SHAs and pins its own gitleaks, so it needs no repo
+    // secret, no org, and no MinSpec-specific path.
+    name: 'secret-scan-workflow',
+    outputPath: '.github/workflows/secret-scan.yml',
+    commentStyle: 'hash',
+    content: SECRET_SCAN_WORKFLOW,
+  },
+  {
     name: 'review-branch-script',
     outputPath: 'scripts/review-branch.sh',
     commentStyle: 'hash',
@@ -2048,6 +2274,30 @@ const CI_REVIEW_STACK_TEMPLATES: readonly ManagedRegionTemplate[] = [
     outputPath: '.github/scripts/ai-review-guard.js',
     commentStyle: 'slash',
     content: AI_REVIEW_GUARD_JS,
+  },
+  {
+    // The guard's unit suite, shipped WITH the guard (#871).
+    //
+    // Same class of defect as #1486, approached from the other side. There, a comment
+    // in ai-review.yml claimed a coverage that existed only in MinSpec's repo, and the
+    // fix was to rewrite the claim on the way out. Here the guard's own header points a
+    // reader at this suite, and the honest fix is the opposite one: ship the suite, so
+    // the claim becomes true everywhere instead of being localized away. The guard is
+    // the most security-critical file in the stack (revert-or-not, strip-or-not,
+    // verified-or-not, green-or-not) and it was the one arriving unverifiable.
+    //
+    // Shipping the caller without its test was not hypothetical: scroogellm's hand-ported
+    // copy went stale the moment the guard's reducer advanced (scrooge#82) and sealbox
+    // had no copy at all (sealbox#18). Registering it here makes the pair byte-synced by
+    // the same machinery that syncs the guard, so they cannot drift apart again.
+    //
+    // Its own runtime dependencies — ai-review.yml and docs-lane.yml, which it reads to
+    // pin the shipped `run:` block and the hold pattern — are already managed templates,
+    // so the scaffolded set stays dependency-closed (managed-script-dependencies.test.ts).
+    name: 'ai-review-guard-test',
+    outputPath: '.github/scripts/ai-review-guard.test.js',
+    commentStyle: 'slash',
+    content: AI_REVIEW_GUARD_TEST_JS,
   },
 ] as const;
 

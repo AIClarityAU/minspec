@@ -107,6 +107,18 @@ describe('the scaffolded hook scripts actually enforce the SDD gates', () => {
     expect(c).toContain('follow-up gate');
   });
 
+  it('pre-commit gates author identity ONLY when an allowlist is configured (#1114)', () => {
+    const c = byPath(PRE_COMMIT).content;
+    // Opt-in config key + the documented bypass.
+    expect(c).toContain('minspec.allowedCommitEmails');
+    expect(c).toContain('EMAIL_GATE_OFF');
+    // Reads the live identity, not a cached/assumed one.
+    expect(c).toContain('git config --get user.email');
+    // Names the actual symptom this gate exists to prevent, so the refusal is
+    // self-explanatory rather than a bare "not allowed".
+    expect(c).toMatch(/ghost/i);
+  });
+
   it('pre-commit runs gitleaks but degrades to a WARNING when absent (#244)', () => {
     const c = byPath(PRE_COMMIT).content;
     expect(c).toContain('command -v gitleaks');
@@ -241,6 +253,103 @@ describe('commit-msg follow-up gate (DR-023) — executed behavior', () => {
   it('still enforces the RCDD root-cause gate on fix: commits (no regression)', () => {
     expect(runHook('fix: thing\n\nno diagnosis here.\n').code).toBe(1);
     expect(runHook('fix: thing\n\nRoot cause: the widget was null.\n').code).toBe(0);
+  });
+
+  // #1918 — the escape used to scan the WHOLE message, subject included. This
+  // repo's own convention puts the issue number in the subject
+  // (`feat(#N): ...`), so that number alone satisfied the escape on nearly
+  // every conventional commit and the gate almost never fired.
+  describe('#1918 regression — the subject line must not satisfy the escape', () => {
+    it('BLOCKS a deferral whose only issue reference is the subject\'s (#N)', () => {
+      const r = runHook('feat(#79): add X\n\nCI files held back for a separate PR.\n');
+      expect(r.code).toBe(1);
+      expect(r.stderr).toContain('follow-up gate');
+    });
+
+    it('BLOCKS a fix(#N): subject the same way', () => {
+      expect(
+        runHook('fix(#79): add X\n\nRoot cause: n/a.\n\nCI files held back for a separate PR.\n').code
+      ).toBe(1);
+    });
+
+    it('a bare inline #NNN mention in the BODY (not a trailer, no escape phrase) no longer escapes', () => {
+      // Previously the bare `#[0-9]+` escape passed on ANY mention. Now only a
+      // structured `Follow-ups:` trailer, or one of the surviving prose escapes
+      // ("tracked in", "Follow-ups: none", "handled here", ...), satisfies it.
+      const r = runHook('feat: add X\n\nCI files held back for a separate PR, see #12.\n');
+      expect(r.code).toBe(1);
+      expect(r.stderr).toContain('follow-up gate');
+    });
+
+    it('ALLOWS the same deferral once a `Follow-ups: #NNN` trailer is added', () => {
+      expect(
+        runHook('feat(#79): add X\n\nCI files held back for a separate PR.\n\nFollow-ups: #12\n').code
+      ).toBe(0);
+    });
+
+    it('ALLOWS a multi-issue `Follow-ups: #NNN, #NNN` trailer', () => {
+      expect(
+        runHook('feat: add X\n\nCI files held back for a separate PR.\n\nFollow-ups: #12, #34\n').code
+      ).toBe(0);
+    });
+  });
+
+  // PR #2067 review (Architect: blocking, Security: independently converged) —
+  // the structured `Follow-ups:` escape parsed trailers from the RAW `$msg_file`
+  // via `git interpret-trailers --parse "$msg_file"`, instead of the already
+  // scissors/comment-stripped `$body` every OTHER check in this hook uses
+  // (DR-059 §3). git's own trailer parser has its own internal cut-line
+  // detection for the `-v` scissors marker, and that detection is stricter and
+  // more format-sensitive than this hook's deliberately lenient
+  // `sed '/^#.*>8/,$ d'` — verified empirically: `git interpret-trailers` only
+  // recognizes the scissors line as a cut point when it matches byte-for-byte,
+  // while a single trailing space (or a non-canonical dash count) is enough to
+  // defeat it, at which point it silently returns NO trailer at all even
+  // though one is genuinely present above the diff. That is the "git-version-
+  // specific patch/comment handling" risk the review named: a scissors line
+  // that this git's OWN parser fails to recognize (a different git version's
+  // output, or a message that has passed through a whitespace-touching editor)
+  // falsely blocks a `-v` commit whose `Follow-ups:` trailer is entirely valid.
+  describe('#2067 regression — raw $msg_file trailer parse must not bypass the scissors strip', () => {
+    it('does NOT falsely block a real Follow-ups: trailer under a `git commit -v` shape whose scissors line has trailing whitespace', () => {
+      // Trailer sits ABOVE the scissors line (git commit -v shape); the diff,
+      // including deferral-sounding text, sits below it. Trailing whitespace
+      // on the scissors line is a mundane, realistic way a message can diverge
+      // from git's own strict internal cut-line pattern.
+      const msg =
+        'feat(#79): add X\n\n' +
+        'CI files held back for a separate PR.\n\n' +
+        'Follow-ups: #12\n' +
+        '# ------------------------ >8 ------------------------   \n' +
+        '# Do not modify or remove the line above.\n' +
+        '# Everything below it will be ignored.\n' +
+        'diff --git a/notes.md b/notes.md\n' +
+        'index 1111111..2222222 100644\n' +
+        '--- a/notes.md\n' +
+        '+++ b/notes.md\n' +
+        '@@ -1 +1,2 @@\n' +
+        ' hello\n' +
+        '+a follow-up idea, out of scope, deferred for later\n';
+      const r = runHook(msg);
+      expect(r.code, `expected the real Follow-ups: #12 trailer to escape the gate; stderr: ${r.stderr}`).toBe(0);
+    });
+
+    it('still BLOCKS the same shape when there is genuinely no Follow-ups: trailer', () => {
+      const msg =
+        'feat(#79): add X\n\n' +
+        'CI files held back for a separate PR.\n\n' +
+        '# ------------------------ >8 ------------------------   \n' +
+        '# Do not modify or remove the line above.\n' +
+        '# Everything below it will be ignored.\n' +
+        'diff --git a/notes.md b/notes.md\n' +
+        'index 1111111..2222222 100644\n' +
+        '--- a/notes.md\n' +
+        '+++ b/notes.md\n' +
+        '@@ -1 +1,2 @@\n' +
+        ' hello\n' +
+        '+world\n';
+      expect(runHook(msg).code).toBe(1);
+    });
   });
 });
 

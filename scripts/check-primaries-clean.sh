@@ -93,10 +93,10 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # This script is about the PRIMARY checkouts and will routinely be run from a
 # worktree. Using the script's own directory would make SELF_ROOT
 # .worktrees/<repo>/<name>, so the siblings resolve under .worktrees/ — which
-# does not exist — and all three repos report SKIP while the actual primaries go
+# does not exist — and every listed repo reports SKIP while the actual primaries go
 # uninspected. Observed in testing. `--git-common-dir` is the primary's .git
 # even from a linked worktree.
-COMMON_DIR="$(git -C "$HERE" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"
+COMMON_DIR="$(git -C "$HERE" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"  # swallow-ok: the next line branches on empty explicitly; not a git repo is a legitimate answer here
 if [ -z "$COMMON_DIR" ]; then
   echo "check-primaries-clean: $HERE is not inside a git checkout." >&2
   echo "  This script must be run from inside the repo it is committed to," >&2
@@ -105,7 +105,12 @@ if [ -z "$COMMON_DIR" ]; then
 fi
 SELF_ROOT="$(dirname "$COMMON_DIR")"
 CODE_ROOT="$(dirname "$SELF_ROOT")"
-REPOS=("$SELF_ROOT" "$CODE_ROOT/scroogellm" "$CODE_ROOT/sealbox")
+# `$CODE_ROOT/scroogellm` was dropped on 2026-09-22: the founder stopped work on that
+# repo, and this script's whole output is a staleness report a human is meant to act on.
+# Reporting on a checkout nobody touches adds a permanently-unactioned row, which is how
+# a report teaches its reader to skim it. This is DIAGNOSTIC ONLY — no gate reads it — so
+# removing an entry narrows what is inspected and cannot weaken a check.
+REPOS=("$SELF_ROOT" "$CODE_ROOT/sealbox")
 
 DRAIN="$SELF_ROOT/scripts/drain-inbox.sh"
 
@@ -139,7 +144,7 @@ for repo in "${REPOS[@]}"; do
     continue
   fi
 
-  db="$(git -C "$repo" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)"
+  db="$(git -C "$repo" symbolic-ref --short refs/remotes/origin/HEAD 2>/dev/null | sed 's#^origin/##' || true)"  # swallow-ok: the next line defaults empty to main via ${db:-main}, so a failed lookup and an unset origin/HEAD land on the same correct default
   db="${db:-main}"
   origin_ref="origin/$db"
 

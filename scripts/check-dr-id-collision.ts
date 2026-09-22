@@ -11,8 +11,21 @@
  *
  *   npx tsx scripts/check-dr-id-collision.ts --repo OWNER/NAME --pr 1209 --base main
  *
- * Exit 0 = every DR id this PR adds is free. Exit 1 = a collision, OR the check
- * could not establish that there wasn't one.
+ * Exit 0 = every DR id this PR adds is free AND no decision record it edits has had
+ * its identity swapped. Exit 1 = either defect, OR the check could not establish that
+ * there wasn't one.
+ *
+ * ── Two failure shapes, not one (#1757) ──────────────────────────────────────
+ * The id half asks "is this number already taken?". It keys on the paths a PR
+ * INTRODUCES, because a claim on a number is what it was built to catch.
+ *
+ * That left in-place REPURPOSING invisible: PR #1756 wrote a different decision over
+ * an existing `DR-088.md` while the original was merged and in force, and every gate
+ * passed it. A `modified` file claims nothing, so it was filtered out before any
+ * content was read. The consequences differ — a claim collision makes a DUPLICATE,
+ * which is noisy and recoverable; repurposing makes a DELETION, which is silent and
+ * recoverable only from history — so the second half compares the identity-bearing
+ * frontmatter of every modified decision record across base and head.
  *
  * ── FAIL CLOSED (DR-066, constitution invariant 2) ───────────────────────────
  * Every failure path here is a RED, never a green:
@@ -42,9 +55,12 @@ import { join } from 'node:path';
 import {
   claimedPathsFromPrFiles,
   decideDrIdCollision,
+  decideDrRepurposing,
   drNumberFromPath,
   formatDrId,
+  modifiedDecisionPaths,
   type DrIdCollisionInput,
+  type DrRevision,
   type PrClaims,
   type PrFileEntry,
 } from './lib/dr-id-collision';
@@ -182,19 +198,80 @@ function resolveDecisionsDirRel(): string {
   return 'docs/decisions';
 }
 
-/** The decision paths a pull request ADDS (added / renamed / copied), repo-relative. */
-function prClaims(repo: string, pr: number, decisionsDir: string): PrClaims {
+/** Every file a pull request touches, with its status. One API call. */
+function prFileEntries(repo: string, pr: number): PrFileEntry[] {
   const out = ghOrFail(
     ['api', `repos/${repo}/pulls/${pr}/files`, '--paginate', '--slurp'],
     `list the files changed by PR #${pr}`,
   );
-  const rows = parseJsonRows(out, `PR #${pr} file list`);
-  const entries: PrFileEntry[] = rows.map((r) => ({
+  return parseJsonRows(out, `PR #${pr} file list`).map((r) => ({
     filename: String(r.filename ?? ''),
     status: String(r.status ?? ''),
     ...(typeof r.previous_filename === 'string' ? { previous_filename: r.previous_filename } : {}),
   }));
-  return { pr, paths: claimedPathsFromPrFiles(entries, decisionsDir) };
+}
+
+/** The decision paths a pull request ADDS (added / renamed / copied), repo-relative. */
+function prClaims(repo: string, pr: number, decisionsDir: string): PrClaims {
+  return { pr, paths: claimedPathsFromPrFiles(prFileEntries(repo, pr), decisionsDir) };
+}
+
+/** The PR head commit, so the repurposing half reads what the PR PROPOSES. */
+function prHeadSha(repo: string, pr: number): string {
+  const sha = ghOrFail(
+    ['api', `repos/${repo}/pulls/${pr}`, '--jq', '.head.sha'],
+    `read the head commit of PR #${pr}`,
+  ).trim();
+  if (!/^[0-9a-f]{7,40}$/i.test(sha)) {
+    throw new GateError(`the head commit of PR #${pr} did not look like a sha (got "${sha.slice(0, 40)}").`);
+  }
+  return sha;
+}
+
+/**
+ * One file's full text at a ref.
+ *
+ * Fails closed on an unreadable or empty body rather than treating it as "no
+ * frontmatter, therefore nothing to protect". GitHub's contents API returns an EMPTY
+ * `content` for a file it declines to inline (over 1 MB, `encoding: "none"`), which
+ * is indistinguishable from a genuinely empty record — and reading either as "this
+ * DR declares no identity" would turn the check green over exactly the state it
+ * exists to reject (DR-066).
+ */
+function fileAtRef(repo: string, filePath: string, ref: string, what: string): string {
+  const endpoint = `repos/${repo}/contents/${encodeURI(filePath)}?ref=${encodeURIComponent(ref)}`;
+  const raw = ghOrFail(['api', endpoint, '--jq', '.content'], `read ${filePath} at ${what}`).trim();
+  if (raw.length === 0 || raw === 'null') {
+    throw new GateError(
+      `${filePath} at ${what} came back with no readable content. The decisions API ` +
+        'returns an empty body for a file it will not inline, which is indistinguishable ' +
+        'from an empty record — failing closed rather than reading it as "declares nothing".',
+    );
+  }
+  return Buffer.from(raw.replace(/\s+/g, ''), 'base64').toString('utf-8');
+}
+
+/**
+ * Base-and-head pairs for every decision record this PR modifies IN PLACE.
+ *
+ * Costs two content reads per modified decision file and nothing at all on a PR that
+ * modifies none — which is almost every PR, so the common path is unchanged.
+ */
+function modifiedDrRevisions(
+  repo: string,
+  pr: number,
+  base: string,
+  entries: PrFileEntry[],
+  decisionsDir: string,
+): DrRevision[] {
+  const paths = modifiedDecisionPaths(entries, decisionsDir);
+  if (paths.length === 0) return [];
+  const head = prHeadSha(repo, pr);
+  return paths.map((file) => ({
+    file,
+    base: fileAtRef(repo, file, base, base),
+    head: fileAtRef(repo, file, head, `PR #${pr} head`),
+  }));
 }
 
 /**
@@ -264,7 +341,12 @@ function assertBaseListingPlausible(
   subject: PrClaims,
 ): void {
   if (found.length > 0) return;
-  const claimed = new Set(subject.paths.map((p) => formatDrId(drNumberFromPath(p) as number)));
+  const claimed = new Set(
+    subject.paths
+      .map((p) => drNumberFromPath(p))
+      .filter((n): n is number => n !== undefined)
+      .map(formatDrId),
+  );
   const unexplained = localDrIds(decisionsDir).filter((id) => !claimed.has(id));
   if (unexplained.length === 0) return;
   throw new GateError(
@@ -283,7 +365,10 @@ function main(): void {
   const args = parseArgs(process.argv.slice(2));
   const decisionsDir = resolveDecisionsDirRel();
 
-  const subject = prClaims(args.repo, args.pr, decisionsDir);
+  // One file listing for the subject, read by BOTH halves: the paths it claims and
+  // the records it edits in place are two views of the same payload.
+  const entries = prFileEntries(args.repo, args.pr);
+  const subject: PrClaims = { pr: args.pr, paths: claimedPathsFromPrFiles(entries, decisionsDir) };
   const base = basePaths(args.repo, args.base, decisionsDir);
   assertBaseListingPlausible(args.base, decisionsDir, base, subject);
 
@@ -300,19 +385,39 @@ function main(): void {
   };
   const verdict = decideDrIdCollision(input);
 
+  // Both halves always run and both always report. Returning early on the first
+  // failure would hide the second defect until the first was fixed and the run
+  // repeated — the drip-feed that makes a gate feel like an obstacle course.
+  const repurposing = decideDrRepurposing(
+    modifiedDrRevisions(args.repo, args.pr, args.base, entries, decisionsDir),
+  );
+
   if (verdict.ok) {
     console.log(verdict.message);
-    return;
+  } else {
+    console.error(verdict.message);
+    if (process.env.GITHUB_ACTIONS) {
+      const ids = verdict.findings.map((f) => f.id).join(', ');
+      console.error(
+        `::error title=DR id collision::${ids} already claimed — renumber to ${verdict.nextFreeId}`,
+      );
+    }
   }
 
-  console.error(verdict.message);
-  if (process.env.GITHUB_ACTIONS) {
-    const ids = verdict.findings.map((f) => f.id).join(', ');
-    console.error(
-      `::error title=DR id collision::${ids} already claimed — renumber to ${verdict.nextFreeId}`,
-    );
+  if (repurposing.ok) {
+    console.log(repurposing.message);
+  } else {
+    console.error(repurposing.message);
+    if (process.env.GITHUB_ACTIONS) {
+      const files = [...new Set(repurposing.findings.map((f) => f.file))].join(', ');
+      console.error(
+        `::error title=DR repurposing::${files} rewrites an in-force decision record — ` +
+          'give the new decision its own id',
+      );
+    }
   }
-  process.exitCode = 1;
+
+  if (!verdict.ok || !repurposing.ok) process.exitCode = 1;
 }
 
 try {

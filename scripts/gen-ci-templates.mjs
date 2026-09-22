@@ -57,6 +57,12 @@ const SOURCES = [
     stripShebang: false,
   },
   {
+    constName: 'SECRET_SCAN_WORKFLOW',
+    srcPath: '.github/workflows/secret-scan.yml',
+    doc: 'Verbatim body of `.github/workflows/secret-scan.yml`.',
+    stripShebang: false,
+  },
+  {
     constName: 'DOCS_LANE_WORKFLOW',
     srcPath: '.github/workflows/docs-lane.yml',
     doc: 'Verbatim body of `.github/workflows/docs-lane.yml`.',
@@ -162,6 +168,21 @@ const SOURCES = [
     doc: 'Verbatim body of `.github/scripts/ai-review-guard.js`.',
     stripShebang: false,
   },
+  {
+    // SHIPPED with the guard above, not merely drift-gated (#871). The guard is
+    // security-critical decision logic and its own header points a reader at this
+    // suite — a claim that was false in every repo but this one, because the guard
+    // shipped alone. An enumeration with no entry for a file holds no predicate over
+    // it, so a guard change could not red any gate on a stale or absent downstream
+    // test. Measured twice: scroogellm carried a 568-line copy that went stale the
+    // moment the guard's most-recent-by-`created_at` reducer advanced (scrooge#82),
+    // and sealbox merged the guard with NO test file at all (sealbox#18) — both green.
+    // Registering it here byte-syncs the pair, so guard and test can no longer drift.
+    constName: 'AI_REVIEW_GUARD_TEST_JS',
+    srcPath: '.github/scripts/ai-review-guard.test.js',
+    doc: 'Verbatim body of `.github/scripts/ai-review-guard.test.js`.',
+    stripShebang: false,
+  },
 ];
 
 const HEADER_LINES = [
@@ -258,8 +279,30 @@ function wrapBase64(b64) {
   return lines;
 }
 
+/**
+ * Read one registered managed source — FAIL CLOSED (constitution invariant 2).
+ *
+ * Every staleness gate over the embedded copies runs through here, so an unreadable
+ * source means the freshness of that copy is UNKNOWN. "Unknown" must not be spelt the
+ * same as "fresh": a bare ENOENT propagating out of `readFileSync` says nothing about
+ * why the file was wanted, which is how a swallowed read turns into a silent pass
+ * upstream. The message names the file, the reason, and both legitimate fixes.
+ */
+function readRegisteredSource(srcPath, repoRoot) {
+  try {
+    return readFileSync(join(repoRoot, srcPath), 'utf8');
+  } catch (error) {
+    throw new Error(
+      `gen-ci-templates: registered managed source ${srcPath} could not be read ` +
+        `(${error.message}). Its embedded copy therefore cannot be verified or ` +
+        `regenerated. Restore the file, or remove its entry from SOURCES/HOOK_SOURCES ` +
+        `and from MANAGED_REGION_TEMPLATES if it is no longer shipped.`,
+    );
+  }
+}
+
 function encodeConst({ constName, srcPath, doc, stripShebang }, repoRoot) {
-  let content = readFileSync(join(repoRoot, srcPath), 'utf8');
+  let content = readRegisteredSource(srcPath, repoRoot);
   if (stripShebang) {
     const nl = content.indexOf('\n');
     content = content.slice(nl + 1);
@@ -291,6 +334,31 @@ const GENERATED_FILES = [
   { outputPath: OUTPUT_PATH, header: HEADER_LINES, sources: SOURCES },
   { outputPath: HOOK_OUTPUT_PATH, header: HOOK_HEADER_LINES, sources: HOOK_SOURCES },
 ];
+
+/**
+ * Every repo-relative path this generator reads, across all generated files, in
+ * registration order.
+ *
+ * Exported so a gate can walk EXACTLY the set the embedded copies are generated from
+ * rather than re-typing it (#871 — the defect being closed was precisely a hand-kept
+ * enumeration that omitted a file, and nothing noticed because nothing else knew the
+ * set). Derived from `GENERATED_FILES`, so it can never drift from what is generated.
+ */
+export const CI_TEMPLATE_SOURCE_PATHS = Object.freeze(
+  GENERATED_FILES.flatMap((file) => file.sources.map((source) => source.srcPath)),
+);
+
+/**
+ * Every repo-relative path this generator WRITES. Exported as the applicability test
+ * for the staleness gate: the presence of a generated file is what makes the rule apply
+ * to a tree at all, and once it applies an unreadable source is a failure rather than a
+ * reason to go quiet. Reading the outputs (not `process.cwd()`'s name, and not whether
+ * the sources happen to exist) keeps "this is not that repo" and "this repo is broken"
+ * as two different answers.
+ */
+export const CI_TEMPLATE_OUTPUT_PATHS = Object.freeze(
+  GENERATED_FILES.map((file) => file.outputPath),
+);
 
 /** Pure: read the repo's working CI-review stack and render the embedded-copy file. */
 export function generateCiReviewTemplates(repoRoot) {
