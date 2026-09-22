@@ -63,6 +63,55 @@ The same block lists every pull request this session opened that is still unmerg
 
 Report the state you already observed; re-reading it from the git host is ordinary tool use, never a requirement, and MinSpec itself makes no network call.
 
+## Merge asks in THIS repo - a single funnel (minspec-monorepo only)
+
+**Project-specific. This section overrides one line of the shared convention above, and it
+applies to this repo only - it is deliberately absent from the shipped templates, because an
+adopter running MinSpec solo has no funnel to route through and should keep the `m` merge key
+the shared convention gives them (constitution invariant 3: nothing MinSpec ships may change
+behaviour in a repo that did not opt in).**
+
+Here, a session never offers `m` merge on its own pull request. Report the state you observed
+and stop. Founder instruction, 2026-09-12:
+
+> update the CoS skill to tell each session not to ask me to merge any PRs when you're
+> shepherding the merges.
+
+**Where the funnel is defined.** Half of it is in this repo: SPEC-044 FR-4b
+(`specs/minspec/SPEC-044-coordinated-self-completing-sessions/requirements.md:229`) - "A single
+driver holds the queue view and owns branch updates and merge confirmation. It picks the next PR
+to update, waits for it to land, then picks the next." That is the driver, and it is where the
+branch-update rule below comes from. The other half - that no session OTHER than the driver may
+put a merge or approval keystroke in front of the founder - is a founder instruction of
+2026-09-12 that currently lives only in the chief-of-staff skill, outside this repository in the
+operator's own Claude configuration. It is stated here rather than linked, because a link from a
+repo file to a machine-local skill resolves to nothing for every reader except the operator.
+Giving that half a citable in-repo home is tracked as #2056. Around fifteen
+sessions run concurrently on this repo; the funnel is the only place the whole set of
+in-flight pull requests is visible, and the only place path-disjointness across a batch is
+checked before it is handed over. A command block is pasted whole, so two independently
+reasonable merge asks arrive as one action with nobody having checked whether the two pull
+requests touch the same file.
+
+**Your job on your own pull request is unchanged:** fix the red checks, resolve the
+conflicts, drive it to greenlit, then stop and say so. Greenlit-for-human is where it ends.
+Branch updates are the funnel's call, not yours (SPEC-044 FR-4b gives it branch updates and
+merge confirmation): a machinery pull request merges by human `--admin`, which bypasses the
+up-to-date requirement, so updating a BEHIND machinery branch spends a full CI cycle for
+nothing.
+
+So the reply keys on a pull request line here are `c` close, `d` diff, `r` re-review - the
+shared convention's `m` is the one key this repo does not use.
+
+**This paragraph is a stopgap, and the spec says so.** SPEC-044's own "The mechanism - capability
+REMOVED, not merely reassigned" section writes, about the sibling capability: "A rule telling
+shepherds to refrain is the exact 'trust the model' shape the constitution names as the failure
+mode." It is right, and it applies here unchanged - a sentence asking sessions not to offer a
+merge key is prose where a gate belongs. The answer there was to remove the capability rather
+than ask for restraint. Until the equivalent exists for the ask side (#2056), this rule holds
+only as far as each session reads and remembers it, which is exactly the property the
+constitution tells us not to rely on.
+
 ## Commands and locations
 
 MinSpec is a **VS Code extension, not a CLI.** Every command runs from the Command Palette
