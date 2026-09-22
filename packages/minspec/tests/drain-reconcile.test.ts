@@ -63,7 +63,12 @@ afterEach(() => {
 });
 
 /** Write a stub `gh` that logs its argv and answers from a canned table. */
-function stubGh(responses: Record<string, string>): string {
+/**
+ * Keys listed here make the stub exit non-zero INSTEAD of answering. Without this the
+ * stub could only ever succeed, so no test could distinguish "the query ran and found
+ * nothing" from "the query failed" — which is the entire #1855 defect class.
+ */
+function stubGh(responses: Record<string, string>, failKeys: string[] = []): string {
   const bin = path.join(tmp, 'bin');
   fs.mkdirSync(bin, { recursive: true });
   const table = path.join(tmp, 'responses.json');
@@ -80,6 +85,9 @@ function stubGh(responses: Record<string, string>): string {
       `  *timeline*)                key=timeline ;;\n` +
       `  "pr list"*)                key=pr ;;\n` +
       `esac\n` +
+      `for f in ${JSON.stringify(failKeys.join(' '))}; do\n` +
+      `  [[ "$key" == "$f" ]] && exit 4\n` +   // 4 = what real gh returns unauthenticated
+      `done\n` +
       `[[ -n "$key" ]] && node -e 'const t=require(process.argv[1]);process.stdout.write(t[process.argv[2]]??"")' ${JSON.stringify(table)} "$key"\n` +
       `exit 0\n`,
     { mode: 0o755 },
@@ -87,8 +95,13 @@ function stubGh(responses: Record<string, string>): string {
   return bin;
 }
 
-function runReconciler(fn: string, responses: Record<string, string>, env: Record<string, string> = {}): string {
-  const bin = stubGh(responses);
+function runReconciler(
+  fn: string,
+  responses: Record<string, string>,
+  env: Record<string, string> = {},
+  failKeys: string[] = [],
+): string {
+  const bin = stubGh(responses, failKeys);
   const script = ['set -uo pipefail', 'REPO=owner/repo', reconcilerBlock(), fn].join('\n');
   return execFileSync('bash', ['-c', script], {
     encoding: 'utf-8',
@@ -218,5 +231,45 @@ describe('#1352 (T3) — the liveness witness actually matches a live dispatch',
   it('stays anchored — a live 885 is not a live 88 (prefix hazard)', () => {
     spawnFakeDispatch('885');
     expect(dispatchAlive('88')).toBe(false);
+  });
+});
+
+describe('#1855 — a failed lookup is never read as proof of absence', () => {
+  // The defect this pins: `pr=$(gh pr list ... || true)` made "the query failed" and
+  // "no merged PR exists" the same empty string. The consumer is a BRANCH, and the
+  // else arm is the mutating one — it strips a correct `agent-done`, adds
+  // `needs-human-review`, and prints an absence claim. So a transient API blip
+  // demoted a healthy, genuinely-finished issue and told a human it had failed.
+  //
+  // Found by tracing the consumer, not the assignment. An earlier triage of this very
+  // line called it "already fails closed" after reading only the `if` arm.
+  it('does NOT strip agent-done when the merged-PR lookup errors', () => {
+    const out = runReconciler(
+      'reconcile_done_issues',
+      { done: '4242\n', pr: '' },
+      {},
+      ['pr'], // the merged-PR lookup fails; the agent-done listing still succeeds
+    );
+
+    // The absence claim must not be made on evidence that was never obtained.
+    expect(out).not.toContain('NO merged PR exists');
+    expect(ghCalls()).not.toContain('--remove-label agent-done');
+    expect(ghCalls()).not.toContain('--add-label needs-human-review');
+    // ...and it must say so, rather than skipping in silence (invariant 2).
+    expect(out).toMatch(/could not check|NOT evidence/i);
+  });
+
+  it('still strips agent-done when the lookup SUCCEEDS and finds nothing', () => {
+    // The control. Without this, the fix above could be "never strip anything",
+    // which would disable the only check that catches a false agent-done.
+    const out = runReconciler('reconcile_done_issues', { done: '4242\n', pr: '' });
+    expect(out).toContain('NO merged PR exists');
+    expect(ghCalls()).toContain('--remove-label agent-done');
+  });
+
+  it('still closes the issue when a merged PR is found', () => {
+    const out = runReconciler('reconcile_done_issues', { done: '4242\n', pr: '77\n' });
+    expect(out).toContain('closing #4242');
+    expect(ghCalls()).toContain('issue close 4242');
   });
 });

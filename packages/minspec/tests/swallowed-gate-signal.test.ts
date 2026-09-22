@@ -30,14 +30,33 @@ const find = (source: string) => findSwallowedGateSignals('t.sh', source);
 describe('INV-1: the motivating defect is caught in the real tree', () => {
   // Keyed on the variable, not a line number — line numbers rot between writing a test
   // and pushing it, and a rotted assertion that still passes is worse than none.
+  //
+  // MOVED 2026-09-21, from `all_ready` to `READY_ISSUES`. The original fixture was the
+  // dispatch path's ready-set capture, and it has been FIXED: that query now returns a
+  // status the caller checks, so it is no longer a swallowed capture and the lint
+  // correctly no longer finds it. Pinning a live defect as a test fixture means the
+  // test breaks when someone repairs the defect — which is the good outcome arriving
+  // as a red build. Repointing is therefore the expected maintenance, not a workaround.
+  //
+  // REPOINTED TWICE in one change, which is the lesson rather than an inconvenience.
+  // It first moved to `READY_ISSUES`, and review then showed that capture was not a
+  // display path at all but the one-shot early-exit gate, so it was fixed too. Every
+  // repoint here is a defect leaving the tree.
+  //
+  // Now on `open_prs` (the PR sweep), the same two-line brace-group shape, still
+  // annotated `swallow-known: #1855`. When that one is fixed, repoint again or retire
+  // the assertion deliberately — never soften it into "find any, skip if none",
+  // because a lint about fail-open signals cannot have a fail-open test. The day the
+  // last #1855 capture is gone, this assertion has no honest form and should be
+  // replaced by a synthetic two-line fixture, which is a different test.
   it('flags drain-inbox.sh ready-set query, which spans two lines', () => {
     const source = readFileSync(join(REPO, 'scripts/drain-inbox.sh'), 'utf8');
     const readySet = findSwallowedGateSignals('scripts/drain-inbox.sh', source).find(
-      (f) => f.variable === 'all_ready',
+      (f) => f.variable === 'open_prs',
     );
 
     expect(readySet, 'the #1855 ready-set capture is no longer detected').toBeDefined();
-    expect(readySet!.text).toContain('agent-ready');
+    expect(readySet!.text).toContain('gh pr list');
     expect(readySet!.decidesAt.length).toBeGreaterThan(0);
     expect(readySet!.knownIssue).toBe(1855);
   });
@@ -60,7 +79,11 @@ describe('INV-1: the motivating defect is caught in the real tree', () => {
       { cwd: REPO, encoding: 'utf8' },
     );
     expect(out).toMatch(/0 unannotated/);
-  });
+    // 30s, not the 5s default: this shells out through `npx tsx`, whose cold start was
+    // MEASURED at 5107ms on an otherwise-idle machine — i.e. a coin-flip against the
+    // default. A timeout here reads as "the gate is broken" when it means "node was
+    // slow", which is the worst kind of red.
+  }, 30_000);
 });
 
 describe('INV-5: the quoted capture idiom is seen', () => {
@@ -142,12 +165,24 @@ describe('INV-6: a conditional spanning lines still counts as deciding', () => {
   });
 
   it('sees dispatch-issue.sh SPEC024_CHANGED, whose conditional spans three lines', () => {
-    const source = readFileSync(join(REPO, 'scripts/dispatch-issue.sh'), 'utf8');
+    // Markers are stripped first: that site is annotated `swallow-ok` (an empty list is
+    // the strongest stop class there, so it fails closed), and an annotation suppresses
+    // the finding entirely. This asserts the MATCHER sees a multi-line conditional as a
+    // read, which is the property that regressed.
+    //
+    // The first version of this test asserted `knownIssue === 1978` instead, which
+    // pinned an ANNOTATION rather than a behaviour — so correcting that site's triage
+    // broke the test, correctly. Same error INV-5 already had; asserting on annotated
+    // source would also pass with the blind spot fully reopened.
+    const source = readFileSync(join(REPO, 'scripts/dispatch-issue.sh'), 'utf8').replace(
+      /#\s*swallow-(ok|known):.*$/gm,
+      '',
+    );
     const found = findSwallowedGateSignals('scripts/dispatch-issue.sh', source).find(
       (f) => f.variable === 'SPEC024_CHANGED',
     );
     expect(found, 'the multi-line conditional blind spot has reopened').toBeDefined();
-    expect(found!.knownIssue).toBe(1978);
+    expect(found!.decidesAt.length).toBeGreaterThan(0);
   });
 });
 
@@ -214,7 +249,7 @@ describe('INV-4: the check itself fails closed', () => {
         stdio: 'pipe',
       }),
     ).toThrow();
-  });
+  }, 30_000);
 
   it('exits non-zero on an unannotated finding', () => {
     expect(

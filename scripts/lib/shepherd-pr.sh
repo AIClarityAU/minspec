@@ -31,6 +31,16 @@
 #       <checks_pending:yes|no> <automerge_armed:yes|no>
 #     → prints ONE token: stop-merged | stand-down | stop-timeout | stop-not-automation
 #       | stop-conflict | stop-capped | stop-awaiting-human | do-rebase | do-fix | wait
+#       | wait-unknown | stop-unhandled-state
+#     wait-unknown and stop-unhandled-state route classify_pr's two #1803 tokens
+#     (retry-unknown, skip-unhandled-state — an UNKNOWN or never-seen
+#     mergeStateStatus; the documented-but-gated states BLOCKED/UNSTABLE/HAS_HOOKS
+#     are NOT in that set — they arrive as skip-clean and keep polling). Each gets its OWN arm rather than falling through the `*)`
+#     default: retry-unknown is transient (GitHub just hasn't finished computing the
+#     state) and must not be reported as "outside automation scope", so it is a WAIT,
+#     not a stop. skip-unhandled-state must not collapse into skip-clean's branch
+#     either — that would silently re-introduce, one layer up, the exact
+#     "unrecognised state treated as fine" shape #1803 closed in classify_pr.
 
 set -euo pipefail
 
@@ -93,6 +103,29 @@ shepherd_decide() {
       else
         echo "stop-awaiting-human"
       fi ;;
+    retry-unknown)
+      # #1803/#1813: mergeStateStatus is (still) UNKNOWN — GitHub computes it lazily,
+      # so this is routine right after a push, not evidence of a problem. It is NOT a
+      # fixable problem (there is nothing for do-fix/do-rebase to act on) and it is
+      # NOT "outside automation scope" (this IS an automation branch — the *)  default
+      # below would say so falsely, which was the exact blocking review finding on
+      # PR #1813). Keep polling; the wall-clock ceiling above already bounds this, so
+      # there is no separate cap to add here.
+      echo "wait-unknown" ;;
+    skip-unhandled-state)
+      # #1803/#1813: classify_pr saw a mergeStateStatus it has never seen — a future
+      # GitHub value, an empty read, or garbage. (NOT BLOCKED/UNSTABLE/HAS_HOOKS:
+      # those are documented, known-transient states and arrive here as skip-clean, so
+      # a PR merely waiting on a merge-gating check keeps being polled — SPEC-044
+      # FR-4.) This must be its OWN arm:
+      #   • NOT skip-clean's branch — that would silently claim "green, just waiting
+      #     on checks/a human", re-introducing one layer up the exact "unrecognised
+      #     state treated as fine" bug #1803 fixed in classify_pr itself.
+      #   • NOT the *) default (stop-not-automation) — this PR IS in automation scope;
+      #     the merge state is what's unfamiliar, not the branch.
+      # Named honestly instead: this classifier does not know what this state means,
+      # so it says so and stops polling rather than guessing either way.
+      echo "stop-unhandled-state" ;;
     *)
       # Unknown token ⇒ fail closed: stop and leave it for a human rather than guess.
       echo "stop-not-automation" ;;
