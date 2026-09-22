@@ -61,7 +61,7 @@ DECIDE="${SCRIPT_DIR}/review-decide.sh"
 GUARD="${SCRIPT_DIR}/../.github/scripts/ai-review-guard.js"
 VERDICT_SCHEMA_JSON=""
 if [[ -f "$GUARD" ]]; then
-  VERDICT_SCHEMA_JSON="$(GUARD="$GUARD" node -e 'process.stdout.write(JSON.stringify(require(process.env.GUARD).VERDICT_SCHEMA))' 2>/dev/null || true)"
+  VERDICT_SCHEMA_JSON="$(GUARD="$GUARD" node -e 'process.stdout.write(JSON.stringify(require(process.env.GUARD).VERDICT_SCHEMA))' 2>/dev/null || true)"  # swallow-ok: empty is one of the two conditions that trigger the fallback branch on the same line
 fi
 
 # Fail CLOSED if this CLI cannot carry a verdict out of band. This script APPLIES a
@@ -201,9 +201,9 @@ rm -f "$REVIEW_PROMPT_FILE" "$REVIEW_ERR_FILE"
 # two halves this script used to run — a `sed` extractor here and review-decide.sh's
 # predicate there — can no longer disagree about what the reviewer said (#1157).
 # Unusable output renders nothing, and review-decide.sh fails that closed to changes.
-VERDICT_BLOCK="$(GUARD="$GUARD" node -e 'const g=require(process.env.GUARD);let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(g.parseCliVerdict(s)));' <<<"$AGENT_OUT" 2>/dev/null || true)"
+VERDICT_BLOCK="$(GUARD="$GUARD" node -e 'const g=require(process.env.GUARD);let s="";process.stdin.on("data",d=>s+=d).on("end",()=>process.stdout.write(g.parseCliVerdict(s)));' <<<"$AGENT_OUT" 2>/dev/null || true)"  # swallow-ok: the next line substitutes an explicit fail-closed placeholder for empty
 
-GATE_LABEL=$(printf '%s\n' "$VERDICT_BLOCK" | "$DECIDE" || true)
+GATE_LABEL=$(printf '%s\n' "$VERDICT_BLOCK" | "$DECIDE" || true)  # swallow-ok: the next line rejects anything that is not one of the two known labels and fails closed to ai-review:changes, with a warning
 if [[ "$GATE_LABEL" != "ai-review:pass" && "$GATE_LABEL" != "ai-review:changes" ]]; then
   echo "WARNING: no clean verdict parsed for #$PR — fail closed to ai-review:changes" >&2
   GATE_LABEL="ai-review:changes"

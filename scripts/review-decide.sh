@@ -152,7 +152,7 @@ fi
 # gate. Never trade the second for the first. The real fix is to defang markers in the
 # untrusted diff before the agent ever reads them, so an honest reviewer has no live
 # marker to echo — see the pattern at dispatch-ready-check.sh:396.
-BEGIN_COUNT="$(printf '%s\n' "$INPUT" | grep -c 'REVIEW_VERDICT_BEGIN' || true)"
+BEGIN_COUNT="$(printf '%s\n' "$INPUT" | grep -c 'REVIEW_VERDICT_BEGIN' || true)"  # swallow-ok: grep -c prints 0 and exits 1 when it finds none, and bash reads empty as 0 in the arithmetic test below, so both the no-match and the grep-failed paths fail closed to changes
 if [[ "$BEGIN_COUNT" -ne 1 ]]; then
   # Show the evidence this decision was made on (#1157).
   #
