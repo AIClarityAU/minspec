@@ -1023,7 +1023,7 @@ run_reviewer_stage() {
   if [[ -z "$pr_num" ]]; then
     gh pr create --repo "$REPO" --base main --head "$BRANCH" \
       --title "$ISSUE_TITLE" --body "$BODY" 2>/dev/null || true
-    pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: empty is handled on the next line, which retries the create and re-queries; if it is still empty the caller warns and returns without merging
+    pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: this IS the re-query after the create; if it is still empty the check below warns and returns 0 without posting a verdict or merging
   fi
   if [[ -z "$pr_num" ]]; then
     echo "WARNING: no PR for $BRANCH (create failed?) — AI review verdict: $combined (not posted)" >&2
@@ -1380,7 +1380,7 @@ shepherd_own_pr() {
     return 0
   fi
   local pr_num started loop_deadline
-  pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: empty is handled on the next line, which retries the create and re-queries; if it is still empty the caller warns and returns without merging
+  pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: the next line prints "nothing to shepherd" and returns 0 — this function never creates, comments or merges, so an unknown PR number only skips shepherding for this run and the next cycle retries
   if [[ -z "$pr_num" ]]; then
     echo "  No PR for $BRANCH — nothing to shepherd."
     return 0
