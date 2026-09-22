@@ -125,3 +125,14 @@ sites/scroogellm.com/
 
 # Weekly tooling-radar output (briefings, raw transcripts, health record)
 .radar/
+
+# DR-043 per-machine baseline snapshots (#1376).
+# The blob-pinning path already never travels: the pin is a LOCAL
+# refs/minspec/snapshots/* ref and DR-043's default is "do not push snapshot refs"
+# (approval.ts:126-133). Its gzip FALLBACK writes .minspec/snapshots/<refKey>.json.gz
+# into the working tree, and nothing ignored it — so the two halves of one per-machine
+# mechanism had different travel semantics, and only by accident. Committing a snapshot
+# would publish an approval's body bytes to every clone, which DR-043 deliberately does
+# not do. Cross-clone recovery is already handled without it (classifyBaseline surfaces
+# 'unrecoverable', and #701 walks the spec's own history).
+.minspec/snapshots/

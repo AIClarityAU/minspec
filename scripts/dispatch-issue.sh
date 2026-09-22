@@ -258,7 +258,7 @@ autonomy_stop_classes_for_paths() {
   # reported as human-owned content it never touched.
   if paths_have_approvable_doc <<<"$changed_files"; then
     local residual=""
-    residual=$(grep -vE "${PUBLISH_PATH_RE}|${MACHINERY_PATH_RE}" <<<"$changed_files" || true)
+    residual=$(grep -vE "${PUBLISH_PATH_RE}|${MACHINERY_PATH_RE}" <<<"$changed_files" || true)  # swallow-ok: grep -v exits 1 when it filters everything out, which is the answer (no residual paths), not a failure; the input is a here-string and cannot fail
     if [[ -n "${residual//[$'\n\r\t ']/}" ]] && paths_have_approvable_doc <<<"$residual"; then
       classes+=('approval-or-acceptance')
     fi
@@ -352,12 +352,12 @@ SPECIFY_SCOPE_RE='^specs/|^docs/decisions/'
 # a never-wrong product is worse than the refusal.
 specify_scope_stray() {
   local changed stray
-  changed="$(grep -v '^[[:space:]]*$' || true)"
+  changed="$(grep -v '^[[:space:]]*$' || true)"  # swallow-ok: grep -v exits 1 when every line was blank, which is the answer (nothing changed); the next line branches on empty
   if [[ -z "$changed" ]]; then
     echo "(no changed files at all — a specify-only dispatch must produce a spec)"
     return 0
   fi
-  stray="$(printf '%s\n' "$changed" | grep -vE "$SPECIFY_SCOPE_RE" || true)"
+  stray="$(printf '%s\n' "$changed" | grep -vE "$SPECIFY_SCOPE_RE" || true)"  # swallow-ok: grep -v exits 1 when nothing falls outside the allowed scope, which is the answer
   [[ -z "$stray" ]] && return 1
   printf '%s\n' "$stray"
   return 0
@@ -556,7 +556,7 @@ if [[ -n "$FORCE_ROLE" ]]; then
 else
   # `|| true`: grep exits 1 when no role: label exists, which would abort the
   # whole script under `set -euo pipefail` before the dev fallback could apply.
-  ROLE=$(echo "$ISSUE_LABELS" | grep -oP '^role:\K.*' | head -1 || true)
+  ROLE=$(echo "$ISSUE_LABELS" | grep -oP '^role:\K.*' | head -1 || true)  # swallow-ok: grep -oP exits 1 when the issue carries no role: label, which is a legitimate empty; the case below has a default arm
   ROLE="${ROLE:-dev}"
 fi
 
@@ -947,7 +947,7 @@ run_reviewer_stage() {
   #    The gate emits the FINAL label directly (ai-review:pass|ai-review:changes).
   local rev_out reviewer_verdict
   rev_out=$( cd "$WORKTREE" && "$reviewer" "$base" HEAD --role reviewer 2>>"$LOG" ) || true
-  reviewer_verdict=$( printf '%s\n' "$rev_out" | "$decide" | tr -d '[:space:]' ) || true
+  reviewer_verdict=$( printf '%s\n' "$rev_out" | "$decide" | tr -d '[:space:]' ) || true  # swallow-ok: the very next line converts empty to ai-review:changes, so a failed decider fails CLOSED to the strict verdict
   [[ -z "$reviewer_verdict" ]] && reviewer_verdict="ai-review:changes"
 
   # 2. Security reviewer — ONLY when the diff touches packages/ source.
@@ -955,7 +955,7 @@ run_reviewer_stage() {
   if git -C "$WORKTREE" diff --name-only "${base}...HEAD" | grep -q '^packages/'; then
     touches_pkg="yes"
     sec_out=$( cd "$WORKTREE" && "$reviewer" "$base" HEAD --role security 2>>"$LOG" ) || true
-    sec_verdict=$( printf '%s\n' "$sec_out" | "$decide" | tr -d '[:space:]' ) || true
+    sec_verdict=$( printf '%s\n' "$sec_out" | "$decide" | tr -d '[:space:]' ) || true  # swallow-ok: same as the reviewer verdict above: empty is converted to ai-review:changes on the next line
     [[ -z "$sec_verdict" ]] && sec_verdict="ai-review:changes"
   else
     touches_pkg="no"
@@ -1019,11 +1019,11 @@ run_reviewer_stage() {
   #    this branch to ever land. Reuse the already-built $BODY (do not rebuild the
   #    summary) and the issue title for the PR.
   local pr_num
-  pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)
+  pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: empty is handled on the next line, which retries the create and re-queries; if it is still empty the caller warns and returns without merging
   if [[ -z "$pr_num" ]]; then
     gh pr create --repo "$REPO" --base main --head "$BRANCH" \
       --title "$ISSUE_TITLE" --body "$BODY" 2>/dev/null || true
-    pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)
+    pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: this IS the re-query after the create; if it is still empty the check below warns and returns 0 without posting a verdict or merging
   fi
   if [[ -z "$pr_num" ]]; then
     echo "WARNING: no PR for $BRANCH (create failed?) — AI review verdict: $combined (not posted)" >&2
@@ -1265,7 +1265,7 @@ shepherd_publish() {
   # the hook there is no credential to probe.
   if ! workflow_push_allowed; then
     wf=$(git -C "$WORKTREE" diff --name-only origin/main.."$BRANCH" 2>/dev/null \
-         | grep -E "$WORKFLOW_PATH_RE" || true)
+         | grep -E "$WORKFLOW_PATH_RE" || true)  # swallow-ok: pre-flight advisory only; the real gate is server-side, which rejects a workflow push regardless of what this sees
     if [[ -n "$wf" ]]; then
       echo "  NOT publishing — $BRANCH changes CI workflow files and the App token"
       echo "  has no 'workflows' permission, so the push would be rejected server-side:"
@@ -1380,7 +1380,7 @@ shepherd_own_pr() {
     return 0
   fi
   local pr_num started loop_deadline
-  pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)
+  pr_num=$(gh pr list --repo "$REPO" --head "$BRANCH" --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: the next line prints "nothing to shepherd" and returns 0 — this function never creates, comments or merges, so an unknown PR number only skips shepherding for this run and the next cycle retries
   if [[ -z "$pr_num" ]]; then
     echo "  No PR for $BRANCH — nothing to shepherd."
     return 0
@@ -1480,8 +1480,29 @@ shepherd_own_pr() {
         # "handed off" here would be a false signpost on a green PR.
         echo "  PR #$pr_num is green with no automated gate left — awaiting a human. Not polling further."
         return 0 ;;
+      stop-unhandled-state)
+        # #1803/#1813: classify_pr saw a mergeStateStatus it has never seen — a
+        # future GitHub value, an empty read, or garbage. (NOT BLOCKED/UNSTABLE/
+        # HAS_HOOKS: those are documented, known-transient states that arrive as
+        # skip-clean, so a PR waiting on a merge-gating check keeps being polled —
+        # SPEC-044 FR-4.) Deliberately NOT a
+        # shepherd_hand_off: that asserts "an automated gate failed closed, a human
+        # must resolve" — a claim this classifier isn't confident enough to make about
+        # a state it doesn't recognise (same restraint remediate-pr.sh's drain path
+        # takes for the identical token). Log it honestly and RETURN — the name
+        # "stop-*" must actually stop here, or it silently falls through to `sleep`
+        # below and polls the full hour ceiling under a name that says it wouldn't.
+        echo "  PR #$pr_num has mergeStateStatus '$merge_state', which this classifier does not recognise — leaving it alone rather than assuming it is clean or out of automation scope. Not polling further."
+        return 0 ;;
       wait)
         : ;;  # green but unmerged: waiting on checks, native auto-merge, or a human
+      wait-unknown)
+        # #1803/#1813: mergeStateStatus is (still) UNKNOWN — GitHub computes it
+        # lazily, so this is routine right after a push, not a problem to fix or a
+        # reason to abandon the PR as "outside automation scope" (the blocking review
+        # finding on PR #1813). Same shape as `wait`: no side effect, just poll again.
+        echo "  PR #$pr_num: mergeStateStatus is still UNKNOWN — waiting for GitHub to finish computing it, not treating this as fixable or out of scope."
+        ;;
       do-rebase)
         shepherd_rebase || { shepherd_hand_off "$pr_num" "an automated rebase onto \`main\` did not apply cleanly"; return 0; } ;;
       do-fix)
@@ -1853,7 +1874,7 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
       printf '%s' "$SIGNALS_INPUT" > "$SIGNALS_TMP"
       # Find the PR for this branch (the gate holds/merges a PR, not the issue).
       PR_NUM=$(gh pr list --repo "$REPO" --head "$BRANCH" --state open \
-        --json number --jq '.[0].number' 2>/dev/null || true)
+        --json number --jq '.[0].number' 2>/dev/null || true)  # swallow-ok: empty passes --pr 0 to the gate, and the merge condition below additionally requires -n "$PR_NUM", so an unknown PR number cannot merge, skipping the shepherding below
 
       echo "Running auto-merge gate (mode: $AUTOMERGE_MODE, base: $AUTOMERGE_BASE, PR: ${PR_NUM:-none})..."
       DECISION=$(cd "$WORKTREE" && npx tsx "${SCRIPT_DIR}/auto-merge-gate.ts" \
@@ -1904,7 +1925,7 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
       AUTONOMY_PROCEED="no"
       SPEC024_CHANGED=""
       if [[ -n "$PR_NUM" ]]; then
-        SPEC024_CHANGED=$(gh pr diff "$PR_NUM" --repo "$REPO" --name-only 2>/dev/null || true)
+        SPEC024_CHANGED=$(gh pr diff "$PR_NUM" --repo "$REPO" --name-only 2>/dev/null || true)  # swallow-ok: an empty list is the STRONGEST stop class, not an absent one — autonomy_may_merge returns proceed:false on empty input (verified via the --may-merge seam), so AUTONOMY_PROCEED stays no and the merge is refused
       fi
       if AUTONOMY_VERDICT=$(autonomy_may_merge \
             "merge PR #${PR_NUM:-none} via the SPEC-024 consequence-hybrid gate" \
