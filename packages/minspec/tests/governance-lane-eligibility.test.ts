@@ -182,11 +182,13 @@ describe('#2078 engine agreement — bash ERE vs JS RegExp over one fixture set'
   }
 
   it('an unreadable patch on a governance path is a transition, as the lane records it', () => {
-    // The lane pushes `"$fname (no patch returned — treated as a transition)"` when
-    // GitHub omits `.patch` or the base64 will not decode. An absent witness is an
-    // unknown, not a "no" (constitution invariant 2).
-    // The annotation is the workflow's own, carried over verbatim so the reason a
-    // reader sees is the reason the lane would have printed.
+    // The lane pushes `"$fname (no patch returned — treated as a transition)"` (or
+    // "(patch could not be decoded — treated as a transition)" when the base64 itself
+    // will not decode) when GitHub omits `.patch`. An absent witness is an unknown, not
+    // a "no" (constitution invariant 2).
+    // The TS annotation below paraphrases the workflow's reason rather than quoting it
+    // verbatim — the wording is not parity-checked, only the boolean transition/not
+    // decision below it is.
     expect(governanceStatusTransitions([{ path: 'docs/decisions/DR-092.md' }])).toEqual([
       'docs/decisions/DR-092.md (no patch available — treated as a transition)',
     ]);

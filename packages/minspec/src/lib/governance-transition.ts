@@ -22,7 +22,7 @@
  * exactly the drift this repo keeps getting bitten by. The mitigation is the same one
  * `ownership-path-rules.ts` and `auto-merge-gate.ts`'s `OUTWARD_DOC_PATTERN` use:
  * the two pattern STRINGS below are lock-step-pinned to the literals in the workflow
- * by `tests/docs-lane-eligibility-parity.test.ts`, which reads them out of
+ * by `tests/governance-lane-eligibility.test.ts`, which reads them out of
  * `docs-lane.yml` itself and additionally runs the workflow's own EREs through real
  * `grep -E` / bash `[[ =~ ]]` over a shared fixture matrix, asserting the two engines
  * agree case by case. A text assertion alone would go green on an inverted `if`;
