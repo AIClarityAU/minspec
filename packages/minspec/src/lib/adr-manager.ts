@@ -128,7 +128,7 @@ export function formatAdrId(num: number): string {
 // ─── DR Sequence Validation (issue #41) ──────────────────────────────────────
 
 /** Kind of local-sequence anomaly a DR file can exhibit. */
-export type DrSequenceWarningKind = 'gap' | 'duplicate' | 'padding';
+export type DrSequenceWarningKind = 'duplicate' | 'padding';
 
 /**
  * A non-fatal warning about the local DR-NNN numbering sequence.
@@ -139,8 +139,8 @@ export interface DrSequenceWarning {
   /** The DR number this warning concerns. */
   readonly number: number;
   /**
-   * The DR file name(s) implicated. Empty for `gap` (no file exists for a
-   * missing number); one entry for `padding`; two-plus for `duplicate`.
+   * The DR file name(s) implicated: one entry for `padding`, two-plus for
+   * `duplicate`. Never empty — every kind names a file that exists.
    */
   readonly files: readonly string[];
   /** Human-readable, single-line explanation with a suggested action. */
@@ -370,23 +370,24 @@ const ADR_MIN_PAD_WIDTH = 3;
  * Scan the decisions directory and report local DR-NNN sequence anomalies.
  *
  * Pure, offline, Tier-0 (DR-004): only reads file names — no frontmatter, no
- * network, no AI. Catches the DR-362 class of error (a global-register number
- * minted into a project-local register) after the fact, which `nextAdrNumber`
- * — correct by construction — cannot.
+ * network, no AI. It therefore asserts ONLY about ids in front of it: a number
+ * absent from the run is not reported, because under worktree-per-session
+ * (#168) that number is usually held by an open pull request this scan cannot
+ * see. Dropping that `gap` rule (#2051) gave up detecting the DR-362 class (a
+ * global-register number minted into a project-local register) offline; it was
+ * firing on correct work far more often than it caught a leak.
  *
  * Reuses `ADR_FILE_RE` so it sees exactly the files `listAdrs` treats as DRs.
  *
  * Warning kinds:
- *  - `gap`       — a number in `1..max` with no DR file (e.g. DR-010 → DR-362
- *                  leaves 11..361 as gaps).
  *  - `duplicate` — two or more files sharing one DR number.
  *  - `padding`   — an id not zero-padded to at least 3 digits (e.g. `DR-1`).
  *
- * A clean, contiguous, properly-padded run (and the empty/single/non-DR-only
- * cases) returns `[]`.
+ * A properly-padded run with no repeated number returns `[]`, whether or not it
+ * is contiguous (as do the empty/single/non-DR-only cases).
  *
  * Determinism: warnings are sorted by `number`, then by kind in a fixed order
- * (gap, duplicate, padding) so identical inputs yield identical output.
+ * (duplicate, padding) so identical inputs yield identical output.
  *
  * @param decisionsDir Absolute path to the resolved decisions directory.
  */
@@ -439,28 +440,19 @@ export function validateDrSequence(decisionsDir: string): DrSequenceWarning[] {
     }
   }
 
-  // Gaps: every number in 1..max with no DR file. `max` is the highest number
-  // present (including any out-of-sequence jump), so a DR-010 → DR-362 leak
-  // surfaces 11..361 as gaps, flagging the leaked number itself.
-  const max = Math.max(...byNumber.keys());
-  for (let n = 1; n < max; n++) {
-    if (!byNumber.has(n)) {
-      warnings.push({
-        kind: 'gap',
-        number: n,
-        files: [],
-        message:
-          `${formatAdrId(n)} is missing — the sequence jumps over it. ` +
-          `Renumber the out-of-sequence DR to close the gap.`,
-      });
-    }
-  }
+  // NO gap rule (#2051). A number absent from `1..max` was reported here as
+  // "the sequence jumps over it. Renumber the out-of-sequence DR to close the
+  // gap." That instruction is wrong whenever the id is claimed by an open pull
+  // request — the normal state under worktree-per-session (#168) — and this
+  // scan cannot see open PRs, so it could not tell the two apart. Cross-PR id
+  // truth lives in `scripts/check-dr-id-collision.ts`, which does see them.
+  // Do not reinstate a gap check here: no input available to a Tier-0 offline
+  // directory walk can distinguish a leaked number from an id in flight.
 
-  // Deterministic order: by number, then gap < duplicate < padding.
+  // Deterministic order: by number, then duplicate < padding.
   const kindOrder: Record<DrSequenceWarningKind, number> = {
-    gap: 0,
-    duplicate: 1,
-    padding: 2,
+    duplicate: 0,
+    padding: 1,
   };
   warnings.sort((a, b) =>
     a.number !== b.number ? a.number - b.number : kindOrder[a.kind] - kindOrder[b.kind],

@@ -262,9 +262,14 @@ try {
 }
 
 // Rule 6 (non-fatal): local DR-NNN sequence health (issue #41). WARNS — never
-// fails the build — on a gap (a number skipped, e.g. DR-010 → DR-362), a
-// duplicate number, or an under-padded id. Would have caught DR-362 (a global-
-// register number minted into this project-local register). Tier-0, offline.
+// fails the build — on a duplicate number or an under-padded id. Tier-0, offline.
+//
+// It does NOT warn on a skipped number any more (#2051). That rule read every
+// id absent from the run as an error and said "renumber the out-of-sequence DR",
+// which is wrong whenever the id is held by an open pull request — the normal
+// state under worktree-per-session (#168), and invisible to an offline scan. It
+// caught the DR-362 leak once; it fired on correct work continuously. Cross-PR
+// id truth is Rule 17 below and .github/workflows/dr-id-collision.yml.
 try {
   const drWarnings = validateDrSequence(resolveDecisionsDir());
   for (const w of drWarnings) {
