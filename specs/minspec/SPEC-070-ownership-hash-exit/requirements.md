@@ -627,6 +627,13 @@ reading it means.
   merge-gating review input**, with no gate, no snapshot and no migration shipped: after the
   strip, an adopter's review panel recomputes approval hashes on the new basis against
   records minted on the old one, and reports `MISMATCH - a real finding` on valid records.
+  **Amended 2026-09-25, OQ-2 resolved in favour of the third verdict:** the shipped tool
+  reports `PRE-STRIP BASIS` instead. That resolution is not free, and the cost is recorded
+  here because the OQ-2 decision text must state it - deciding whether a record is valid
+  under the pre-strip basis requires a pre-strip hasher INSIDE the adopter-shipped Python,
+  which means a new managed template, a move of the membership pin at
+  `packages/minspec/tests/managed-region-enumeration.test.ts:94` (currently asserting 31),
+  and a fourth artifact under INV-5's twin-parity obligation.
   `scripts/validate-frontmatter.ts` is not scaffolded either, so Rule 12 does not travel,
   and neither does the `ownedAtApproval` producer, which lives in the extension; an adopter
   on a stale installed build hashes differently from one that refreshed (#1492). This spec
@@ -837,11 +844,19 @@ move.
   frontmatter-site and body-site lists are both empty of two-key strip-set claims on
   approved files that the Plan elected to correct (OQ-4 decides which).
 - **AC-23 (FR-11).** A scaffolded adopter fixture receives the widened `canonical.py` **and**
-  `approval-provenance.py`, and the provenance tool's documented behaviour on an
-  old-basis record matches what FR-11 says adopters get. Asserted against the
+  `approval-provenance.py`. "Widened" is asserted by EXECUTING the scaffolded hasher
+  (`canonical.py --hash`) and requiring it to agree with the shipped TypeScript `specHash` and
+  to differ from the frozen pre-strip basis on an ownership-bearing fixture - never by file
+  existence alone. The provenance tool's behaviour on an old-basis record, run from the
+  SCAFFOLDED copy against a temporary git repository, MUST match the verdict FR-11 documents
+  as amended by the OQ-2 decision recorded in this spec: `PRE-STRIP BASIS - matches under the
+  pre-ownership-strip hash; re-approve to move it forward`. Asserted against the
   managed-template scaffold harness at
-  `packages/minspec/tests/managed-script-dependencies.test.ts:118-149`. The fixture MUST NOT
-  assert a scaffolded spec-gate, because there is none.
+  `packages/minspec/tests/managed-script-dependencies.test.ts:118-149` for the hasher half, and
+  `packages/minspec/tests/approval-provenance.test.ts` for the behavioural half. The fixture
+  MUST NOT assert a scaffolded spec-gate, because there is none. *(Amended 2026-09-25: the
+  original pinned the tool to FR-11's `MISMATCH` verdict, which the OQ-2 third-verdict
+  resolution changes; it was also satisfiable by file existence alone.)*
 
 ## Tests to Pass
 
