@@ -744,4 +744,11 @@ MinSpec: Refresh Harness Files writes the templates baked into the running bundl
 <!-- dr-summary:DR-093 auto=732512d00014 -->
 The drain's admission control gates on a quota reading at ~/.claude/quota.json. The reading's only producers were **interactive** surfaces - a rendering statusline - while the drain that consumes it runs **unattended**. Measured 2026-09-09 (#1859): the file was **49 hours stale** while holding "used_percentage": 3.0. Over 100 issues carried agent-ready / agent-ready-specify and none dispatched. The pipeline had been dead for days and presented as a quiet week.
 <!-- /dr-summary:DR-093 -->
+## [DR-095 - A host-produced socket reaches the container as a DIRECTORY mount, because a file mount pins one inode and the producer replaces it on every restart - severing every agent's GitHub identity until the container restarts](DR-095.md)
+
+*Status: proposed · Date: 2026-09-25*
+
+<!-- dr-summary:DR-095 auto=000000000000 -->
+`/tmp/gh-app-token.sock` is bind-mounted into the agent container as a **file** (`/etc/nixos/home.nix:95`), and a file mount attaches to one inode. The broker is a socket-activated systemd unit that unlinks and recreates its socket on restart, so a restart strands the container on a dead inode - `/proc/self/mountinfo` marks it `//deleted`. Both gates answer "present": the launcher preflight checks the host side at start time, and the client's `[ -S ]` test passes on the orphaned inode. Socket present is not socket live. No host-side action repairs it; only a container restart re-binds the path, and the intuitive remedy - restarting the broker - severs it again. Measured 2026-09-23: one broker restart cost **47 hours** of lost GitHub write access across roughly fifteen sessions, a dead autonomous drain, and two finished fixes stranded unpushed. The decision mounts a dedicated directory containing only this socket, never `$XDG_RUNTIME_DIR` itself, whose session D-Bus socket host DR-079 (agent-only container runtime) measured as yielding 50 unlocked secrets.
+<!-- /dr-summary:DR-095 -->
 <!-- minspec:dr-index:end -->
