@@ -225,11 +225,11 @@ reading it means.
   three, and the change MUST land simultaneously in:
   1. `packages/shared/src/canonical.ts` (`stripLifecycle`, `:60-83`);
   2. `scripts/hooks/canonical.py` (`_strip_lifecycle`, `:37-53`);
-  3. the base64 `CANONICAL_PY` in `packages/minspec/src/lib/ci-review-templates.ts:3072`,
+  3. the base64 `CANONICAL_PY` in `packages/minspec/src/lib/ci-review-templates.ts`,
      regenerated with `node scripts/gen-ci-templates.mjs` and **never hand-edited**. Rule 12
      (FATAL) at `scripts/validate-frontmatter.ts:522-557` fails `npm run validate` in CI's
      lint job on a stale embed; it iterates `gen.generateAll(ROOT)`, so it covers every
-     generated file including `APPROVAL_PROVENANCE_PY` (`ci-review-templates.ts:2899`).
+     generated file including `APPROVAL_PROVENANCE_PY` (same file, named export).
 
   **A fourth artifact consumes this basis and is not a canonicalizer:
   `scripts/approval-provenance.py`.** It imports `spec_hash` from the scaffolded
@@ -408,7 +408,7 @@ reading it means.
   human's signature with neither the hash nor the drift check able to notice. Measured: **13
   of the 34 in-band T3/T4 spec files declare `implements: none`**. DR-088 selected
   `implements_reason` for the strip on its own separate argument, which this spec does not
-  re-litigate; whether the sidecar also records the reason so drift can see it is OQ-10.
+  re-litigate; whether the sidecar also records the reason so drift can see it is OQ-9.
 
 - **FR-7 (evaluated above the phase band, per record).** Drift MUST be evaluated before the
   phase-intent `continue` at `spec-gate.py:501`. DR-088 says `rec` and the approval verdict
@@ -615,12 +615,13 @@ reading it means.
   is not a managed template.** `grep -n "spec-gate" packages/minspec/src/lib/template-registry.ts`
   returns nothing; the registry's machinery block holds 15 `outputPath:` entries
   (`:2114`-`:2261`) and the gate is not among them. What adopters receive is:
-  - `scripts/hooks/canonical.py` (`template-registry.ts:2186-2196`, `name:
-    'canonical-hasher-python'`), scaffolded because **`scripts/approval-provenance.py`
-    imports it at load time** (`approval-provenance.py:50`; the registry says so at
-    `:2187-2189`);
-  - `scripts/approval-provenance.py` itself (`:2172-2185`), the AI-review panel's provenance
-    tool, invoked on every review by the scaffolded `scripts/review-branch.sh:107-108`.
+  - `scripts/hooks/canonical.py` (the `name: 'canonical-hasher-python'` entry in
+    `template-registry.ts`), scaffolded because **`scripts/approval-provenance.py`
+    imports it at load time** (`approval-provenance.py:50`; that entry's own comment
+    says so);
+  - `scripts/approval-provenance.py` itself (the `name: 'approval-provenance-script'`
+    entry), the AI-review panel's provenance tool, invoked on every review by the
+    scaffolded `scripts/review-branch.sh:107-108`.
 
   So the real adopter consequence of FR-2 is **a silent hash-basis change under a
   merge-gating review input**, with no gate, no snapshot and no migration shipped: after the
@@ -785,10 +786,21 @@ move.
 - **AC-14 (FR-8.3, the corpus gate).** `npm run validate` fails with an **error** on a
   corpus containing an approved record without a well-formed `ownedAtApproval`, and passes
   on the post-migration corpus. Asserted against a fixture corpus, not the live one.
-- **AC-15 (FR-9, pre-flight).** The migration's pre-flight proves it is computing on **two
-  bases**: it asserts that at least one known record classifies differently under each, and
-  aborts if not. A pre-flight that cannot demonstrate two bases fails the run rather than
-  reporting success.
+- **AC-15 (FR-9, pre-flight).** The migration's pre-flight proves **it is not comparing an
+  artifact to itself**, and aborts if it cannot. Each mode discharges that differently,
+  because the two bases are not always distinguishable:
+  - **Rehash mode** asserts that at least one known record classifies differently under each
+    basis, and aborts if not.
+  - **Seed mode** runs pre-strip, where `preStripSpecHash` is a verbatim copy of the live
+    hasher and the two bases therefore agree on every possible input. A literal two-bases
+    assertion there aborts and seeds nothing, which contradicts FR-9.10. Seed mode instead
+    proves the inverse - that the two bases agree on a known record - **plus** an
+    anti-vacuity assertion that the pre-flight classified a non-zero population.
+
+  A pre-flight that cannot discharge its mode's form fails the run rather than reporting
+  success. *(Amended 2026-09-25: the original text required two-bases divergence in both
+  modes, which seed mode cannot satisfy by construction. Found by planning against this
+  criterion; see the Plan's section 8.)*
 - **AC-16 (FR-9, refusal).** A spec whose ownership lines were added **after** approval
   (stale under the old basis, fresh under the new) is quarantined to a non-approving state
   with `approvedBy`/`approvedAt` preserved, and the run reports it distinctly from "already
