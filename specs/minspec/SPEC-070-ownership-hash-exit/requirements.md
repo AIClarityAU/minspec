@@ -242,7 +242,10 @@ reading it means.
   stale at base. That is the false forged-sign-off block the script was written to prevent
   (its own docstring cites PR #1017). FR-1 closes this window **in this repo** by requiring
   the strip and the migration in one merged state; it does **not** close it for adopters,
-  who receive the widened `canonical.py` and no migration - see FR-11 and OQ-2.
+  who receive the widened `canonical.py` and no migration - see FR-11 and OQ-2. The
+  behaviour described in this paragraph is the tool as it stands **before** OQ-2's
+  resolution. Under option (d) an adopter sees `PRE-STRIP BASIS` rather than `MISMATCH` on
+  such a record; the window is still open, but it is no longer reported as a finding.
 
   Two implementation traps are normative, not advisory:
   - **Use the `phases:` branch, not the `status:` branch.** `PHASES_LINE_RE` sets
@@ -560,7 +563,8 @@ reading it means.
       - *Day-one drift population.* Zero by construction: every seeded record's snapshot
         equals its current structured set at the migration commit. The drift population
         thereafter is created by real declaration edits - principally the #1649 backfill,
-        which is exactly the batched ack DR-088 intends (OQ-9).
+        which is exactly the batched ack DR-088 intends (OQ-8; corrected 2026-09-25 from a
+        dangling OQ-9, which is the `implements_reason` question).
 
 - **FR-10 (the prose the change makes false).** Every claim in the repo that the hash
   strips *exactly* `status` and `phases` MUST be corrected in the same body of work. The
@@ -626,9 +630,14 @@ reading it means.
   So the real adopter consequence of FR-2 is **a silent hash-basis change under a
   merge-gating review input**, with no gate, no snapshot and no migration shipped: after the
   strip, an adopter's review panel recomputes approval hashes on the new basis against
-  records minted on the old one, and reports `MISMATCH - a real finding` on valid records.
-  **Amended 2026-09-25, OQ-2 resolved in favour of the third verdict:** the shipped tool
-  reports `PRE-STRIP BASIS` instead. That resolution is not free, and the cost is recorded
+  records minted on the old one. **Amended 2026-09-25 (AEST; 2026-09-24 UTC), under OQ-2's
+  resolution, option (d):** on such a record the shipped tool reports `PRE-STRIP BASIS -
+  matches under the pre-ownership-strip hash; re-approve to move it forward`, a verdict
+  distinct from both `MATCHES` and `MISMATCH` and never green. *Before that resolution this
+  paragraph read "reports `MISMATCH - a real finding` on valid records". Option (d) exists
+  precisely to keep that verdict away from an adopter's reviewers, and no requirement in
+  this spec documents the `MISMATCH` behaviour on a valid old-basis record any longer.*
+  That resolution is not free, and the cost is recorded
   here because the OQ-2 decision text must state it - deciding whether a record is valid
   under the pre-strip basis requires a pre-strip hasher INSIDE the adopter-shipped Python,
   which means a new managed template, a move of the membership pin at
@@ -805,9 +814,10 @@ move.
     anti-vacuity assertion that the pre-flight classified a non-zero population.
 
   A pre-flight that cannot discharge its mode's form fails the run rather than reporting
-  success. *(Amended 2026-09-25: the original text required two-bases divergence in both
+  success. *(Amended 2026-09-25 (AEST; 2026-09-24 UTC): the original text required two-bases divergence in both
   modes, which seed mode cannot satisfy by construction. Found by planning against this
-  criterion; see the Plan's section 8.)*
+  criterion; see section 8 of `specs/minspec/SPEC-070-ownership-hash-exit/design.md`, which
+  lands via #2058.)*
 - **AC-16 (FR-9, refusal).** A spec whose ownership lines were added **after** approval
   (stale under the old basis, fresh under the new) is quarantined to a non-approving state
   with `approvedBy`/`approvedAt` preserved, and the run reports it distinctly from "already
@@ -848,14 +858,14 @@ move.
   (`canonical.py --hash`) and requiring it to agree with the shipped TypeScript `specHash` and
   to differ from the frozen pre-strip basis on an ownership-bearing fixture - never by file
   existence alone. The provenance tool's behaviour on an old-basis record, run from the
-  SCAFFOLDED copy against a temporary git repository, MUST match the verdict FR-11 documents
-  as amended by the OQ-2 decision recorded in this spec: `PRE-STRIP BASIS - matches under the
+  SCAFFOLDED copy against a temporary git repository, MUST be exactly the verdict FR-11
+  documents under OQ-2's resolution (d): `PRE-STRIP BASIS - matches under the
   pre-ownership-strip hash; re-approve to move it forward`. Asserted against the
   managed-template scaffold harness at
   `packages/minspec/tests/managed-script-dependencies.test.ts:118-149` for the hasher half, and
   `packages/minspec/tests/approval-provenance.test.ts` for the behavioural half. The fixture
-  MUST NOT assert a scaffolded spec-gate, because there is none. *(Amended 2026-09-25: the
-  original pinned the tool to FR-11's `MISMATCH` verdict, which the OQ-2 third-verdict
+  MUST NOT assert a scaffolded spec-gate, because there is none. *(Amended 2026-09-25 (AEST;
+  2026-09-24 UTC): the original pinned the tool to FR-11's `MISMATCH` verdict, which the OQ-2 third-verdict
   resolution changes; it was also satisfiable by file existence alone.)*
 
 ## Tests to Pass
@@ -1101,6 +1111,39 @@ script into repos MinSpec cannot test against, and (c) puts a `MISMATCH - a real
 verdict in front of adopters' reviewers on valid records, which teaches them to distrust the
 one block that is never supposed to be noise.
 
+A fourth option was raised while planning, and is the one taken:
+(d) ship the widened hasher to everyone immediately, with **no** flag and **no** migration,
+and additionally scaffold a **frozen, diagnosis-only** copy of the pre-strip basis, so the
+provenance tool can tell "valid under the old basis" apart from "wrong" and report a third
+verdict - `PRE-STRIP BASIS - matches under the pre-ownership-strip hash; re-approve to move
+it forward` - distinct from `MATCHES`, never green, and never a minting basis.
+
+**RESOLVED: (d). Founder, 2026-09-25 (AEST; 2026-09-24 UTC).** Recorded as a decision in
+DR-094, because SPEC-051 INV-2 (quoted at the head of this spec) requires a change to the
+DR-034 hashing contract to carry its own DR and explicit human sign-off; DR-088 covers the
+strip itself, and this resolves DR-088's own "Still open" item 2, which is why it needs a
+second record rather than riding the first. The normative statements live in FR-11 and
+AC-23; this entry is the register, not a second source of truth.
+
+**Why (d) and not the other three.** (a) ships a corpus-rewriting script into repos MinSpec
+cannot test against. (b) defaults the strip off, so #1649's equivalent stays blocked in
+adopter repos until someone flips a flag they have no reason to know exists. (c) puts
+`MISMATCH - a real finding` on valid records in front of the one block that is never
+supposed to be noise. **The distinction that keeps (d) out of the state DR-012 forbids:**
+DR-012 refuses *two minting bases*, because a signature loses its meaning when two different
+forms can both produce one. The frozen copy can never mint. It is read-only, versioned once,
+and answers exactly one question - "was this record valid before the strip?" **The cost that
+remains, stated because a recommendation without one is advocacy:** it is still a second
+canonical implementation that must be kept alive and tested, so it is a fourth artifact under
+INV-5's twin-parity obligation, a new managed template, and a move of the membership pin at
+`packages/minspec/tests/managed-region-enumeration.test.ts:94`. It is also adopter-facing,
+so unlike a local change it cannot be un-shipped by reverting a commit.
+
+*Terminology, because two numbering schemes collide here.* "The third verdict" in this spec
+and in its Plan means a third **provenance verdict string** alongside `MATCHES` and
+`MISMATCH`. It is **not** option (c) of this register, which is its opposite: (c) accepts the
+`MISMATCH` and documents it.
+
 **OQ-3 - Fix the block-form parser here, or mandate inline form and gate on it?** FR-3.
 Option (a) fixes `fm_value`/`rawFrontmatterField` in both twins; option (b) rejects block
 form at write time. *Recommendation: (a), fix the parser, in this spec's first slice and
@@ -1215,7 +1258,7 @@ question and not a default. Re-litigating whether `implements_reason` is strippe
 | A canonicalizer twin divergence lands with the strip and goes unnoticed | Med · **High** | INV-5. Two divergences are filed and latent, both invisible to the corpus-witnessed parity test: #1668 (trailing codepoints, which itself undercounts at 4 where 6 diverge) and #1960 (the step-5 link regex, where Python's `re.I` case-folds U+212A and U+017F into `[a-z]` and JavaScript's `/i` does not - measured here). Any new fixture must go into a suite CI runs; `scripts/hooks/test_canonical.py` is not one (#1669). |
 | The embedded `CANONICAL_PY` goes stale and its only witness stays silent | Low · **High** | #1959. Rule 12 is the sole witness and it sits in a bare `catch {}` at `validate-frontmatter.ts:553-556` that swallows a missing source file. `CI_STACK` (`managed-region-templates.test.ts:318,:335-345`) lists 11 of the registry's 15 machinery templates, omitting `canonical.py` and three siblings (`agent-context.sh`, `approval-provenance.py`, `minspec-validate.yml`) - which means the second-order witness misses both Python artifacts FR-2 touches. Out of scope here; filed so it is not a prose-only leak. |
 | The prose correction is skipped and a false claim ships in an approved spec | **High** · Med | FR-10 plus AC-22, with the ordering forced to a human decision at OQ-4 rather than defaulted. Re-derived: 23 files, 19 approved, split into 17 frontmatter sites and 9 body sites. |
-| Adopters receive the strip and none of the replacement | **High** · Med | FR-11 plus OQ-2, both rewritten around what is actually scaffolded: `approval-provenance.py` and `canonical.py`, not the spec-gate. The adopter-visible symptom is a merge-gating `MISMATCH - a real finding` on valid records. |
+| Adopters receive the strip and none of the replacement | **High** · Med | FR-11 plus OQ-2, both rewritten around what is actually scaffolded: `approval-provenance.py` and `canonical.py`, not the spec-gate. Untreated, the adopter-visible symptom is a merge-gating `MISMATCH - a real finding` on valid records; OQ-2 resolves (d), which replaces that symptom with the `PRE-STRIP BASIS` verdict and makes the frozen basis the thing that must actually ship (#2116). |
 | Wider gate reach blocks specs that never met the gate before | **Med** · Med | Expected and numbered: 12 spec ids with no in-band file resolve a non-empty owned set, covering 50 distinct files. Under FR-9.10's seeding their day-one drift is zero; they become blockable only on a real later declaration edit. Every freeze stays scoped to one spec's own files by `owned_match` (`spec-gate.py:391-401`). |
 
 ## Out of Scope
