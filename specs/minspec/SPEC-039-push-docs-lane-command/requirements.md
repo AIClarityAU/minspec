@@ -4,6 +4,12 @@ title: "Push docs via lane" — an editor command that opens a docs-lane PR
 status: implementing
 tier: T2
 epic: EPIC-009  # Team Readiness — docs-lane push ergonomics (grain a of #575/#781)
+phases:
+  specify: done
+  clarify: done
+  plan: done
+  tasks: done
+  implement: in-progress
 ---
 
 # SPEC-039 — "Push docs via lane" command

@@ -14,6 +14,12 @@ implements:
 # earlier or deleted module, so nothing was moved in. Consumers (`auto-merge.ts:41`,
 # `scripts/auto-merge-gate.ts:48`) are untouched by that commit, hence no `affects:`.
 # FR-2..FR-5 remain unbuilt (zero `stubGate`/`scanStubs`/`minspec-stub-ok` hits).
+phases:
+  specify: done
+  clarify: done
+  plan: done
+  tasks: done
+  implement: in-progress
 ---
 
 # MinSpec — Code-Completeness (Stub) Gate (Requirements)

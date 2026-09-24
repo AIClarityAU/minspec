@@ -30,6 +30,12 @@ implements_reason: >-
 # two of the repo's hottest shared files to its own approval state. (2) The slash-commands.ts
 # attribution is inference, not record: that commit never names SPEC-013, and the link rests on
 # the sibling commit's prose plus a four-minute gap. Thin evidence is excluded, not rounded up.
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # MinSpec — Self-Audit Section Enforcement — Deterministic Floor (Slice 1)

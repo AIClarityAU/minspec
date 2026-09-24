@@ -22,6 +22,12 @@ implements:
 # multi-tenant hub files touched by every command-adding spec; the gate treats `affects:` exactly
 # like `implements:` (spec-gate.py:350-352), so listing them would freeze them corpus-wide. This
 # is an explicit exclusion criterion, NOT a claim that nothing else was touched.
+phases:
+  specify: done
+  clarify: done
+  plan: done
+  tasks: done
+  implement: in-progress
 ---
 
 # MinSpec — AI-assisted Epic Backfill (Requirements)

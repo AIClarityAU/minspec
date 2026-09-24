@@ -20,6 +20,12 @@ implements_reason: >-
 affects:
   - packages/minspec/src/lib/auto-bootstrap.ts
   - packages/minspec/tests/auto-bootstrap.test.ts
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # MinSpec — Auto-Structure-Repair (Requirements)

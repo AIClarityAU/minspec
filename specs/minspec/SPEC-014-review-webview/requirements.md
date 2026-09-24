@@ -25,6 +25,12 @@ implements_reason: >-
 # with zero code — the case CLAUDE.md's evidence-discipline section is written from.
 # The frontmatter `status: implementing` above is the pre-#1651 writer's default stamp and is not
 # evidence of anything.
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # MinSpec — Prettified Spec-Review Webview (Requirements)

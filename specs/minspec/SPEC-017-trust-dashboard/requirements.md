@@ -34,6 +34,12 @@ implements:
 # one spec's approval state. Explicit exclusion criterion, NOT a claim nothing else was touched.
 # NOT `approval.ts` (SPEC-041 declares it) or `approval-diff.ts` (SPEC-029 declares it), though
 # SPEC-017 added `baselineBlob`/`reviewStart` and the Slice-3 blob mint to the former.
+phases:
+  specify: done
+  clarify: done
+  plan: done
+  tasks: done
+  implement: in-progress
 ---
 
 # MinSpec — Trust Dashboard (Requirements)

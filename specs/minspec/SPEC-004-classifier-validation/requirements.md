@@ -17,6 +17,12 @@ implements:
 # `affects:` is empty on purpose — the only other files that commit touched are root
 # `.gitignore` and root `package.json`, and `isValidOwnedPath` rejects both (no `/`), so
 # listing them would be inert noise the gate silently drops.
+phases:
+  specify: done
+  clarify: done
+  plan: done
+  tasks: done
+  implement: in-progress
 ---
 
 # MinSpec — Classifier Validation Harness (Requirements)

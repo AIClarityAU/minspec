@@ -16,6 +16,12 @@ implements_reason: >-
   read `SPEC-012 / DR-019`, i.e. a sibling spec owns them. Declares its owned files at
   implementation, per the SPEC-034 precedent.
 affects: []
+phases:
+  specify: done
+  clarify: done
+  plan: in-progress
+  tasks: pending
+  implement: pending
 ---
 
 # MinSpec — Signpost Correctness (Requirements)

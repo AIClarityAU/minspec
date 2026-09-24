@@ -30,6 +30,12 @@ implements:
 # not an assertion that nothing else was touched. SPEC-040/041/046/059 already list next-task.ts
 # and/or artifact-graph.ts under their own `affects:`, which is the correct shape: they touch what
 # this spec owns.
+phases:
+  specify: done
+  clarify: done
+  plan: done
+  tasks: done
+  implement: in-progress
 ---
 
 # MinSpec — Next-Task Resolver (Requirements)
