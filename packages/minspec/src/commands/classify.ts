@@ -6,6 +6,7 @@ import { runConsequenceAnalyzers } from '../lib/consequence-analyzers';
 import { loadConfig, applyVSCodeOverrides, TIERS } from '../lib/config';
 import type { Tier } from '../lib/config';
 import { resolveTargetFolder } from '../lib/resolve-folder';
+import { savePreferences } from '../lib/preferences';
 
 /** Tier the next-higher one above `tier`, or `tier` itself if already T4. */
 function nextTierUp(tier: Tier): Tier {
@@ -176,6 +177,11 @@ export async function classifyCommand(
     await vscode.workspace
       .getConfiguration('minspec')
       .update('autoClassifyOnCommit', true, vscode.ConfigurationTarget.Workspace);
+    // #2079: record the same standing choice in MinSpec's own project-local
+    // store, which is where the auto-bootstrap prompt's guard reads it. Both
+    // "always classify" affordances (this toast and the bootstrap prompt's
+    // "Always") must silence the prompt, or one of them is a label that lies.
+    savePreferences(workspaceRoot, { autoClassifyOnCommit: true });
     vscode.window.showInformationMessage(
       'MinSpec: Auto-classify on commit enabled for this workspace.',
     );
