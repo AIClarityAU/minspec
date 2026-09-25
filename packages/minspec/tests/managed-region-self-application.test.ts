@@ -70,7 +70,7 @@ const APPLIED_PATH_COUNT = 13;
  */
 const KNOWN_DRIFT: Readonly<Record<string, string>> = {
   '.github/workflows/minspec-validate.yml':
-    'COMMENT WORDING ONLY: both now carry merge_group: (#1394), so Refresh no longer strips the trigger. The live comment cites ci.yml and a bare #1394, which are false downstream, so the template ships adopter-true prose (DR-090). Closing it needs a workflow write, which no agent has (DR-079)',
+    'COMMENT WORDING ONLY: both now carry merge_group: (#1394), so Refresh no longer strips the trigger. The live comment cites ci.yml and a bare #1394, which are false downstream, so the template ships adopter-true prose (DR-090). Closing it needs a workflow write, which no agent has (DR-079) - tracked as #2105',
   '.minspec/hooks/validate.py':
     'bidirectional: live targets docs/domain, template adds DR-frontmatter checks — reconciliation is the #1698 design question',
   '.minspec/hooks/pre-commit':
