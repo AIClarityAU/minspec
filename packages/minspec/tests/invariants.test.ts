@@ -22,6 +22,7 @@ import { classify, overrideClassification, recordOverride, loadCalibration } fro
 import type { ClassificationSignal } from '../src/lib/classifier';
 import { DEFAULT_CONFIG } from '../src/lib/config';
 import { mergeFile, parseSections, hashSection, buildSectionHashes } from '../src/lib/merge-refresh';
+import { BOOTSTRAP_STEPS } from '../src/lib/auto-bootstrap';
 
 // ─── Invariant 1: No AI Dependency ─────────────────────────────────────────
 
@@ -1021,4 +1022,49 @@ describe('Invariant 8: no tracked symlink points outside the repository (#913 / 
       expect(violations).toEqual([]);
     },
   );
+});
+
+// ---------------------------------------------------------------------------
+// Invariant 9: a prompt that offers "Always" must say where "Always" is kept
+// ---------------------------------------------------------------------------
+
+describe('Invariant 9: every "Always" affordance declares a durable store (#2079)', () => {
+  it('T0: no bootstrap step offers "Always" without an alwaysPrefKey', () => {
+    // The ASYMMETRY this gate exists to close: the previous check-shaped code in
+    // this area validated the values a step DID declare and never asserted that a
+    // step offering "Always" declares anywhere to remember it. The classify step
+    // shipped for months with the label and no store, so the button ran once and
+    // the prompt returned on the next window — the affordance's label lied.
+    const unbacked = BOOTSTRAP_STEPS.filter(
+      (step) => step.alwaysAction && !step.alwaysPrefKey,
+    ).map((step) => `${step.kind}/${step.skipPrefKey} offers "${step.alwaysAction}"`);
+
+    // Empty-array equality so a failure NAMES the offending step. If this turns
+    // red: add an `alwaysPrefKey` (a boolean key on BootstrapPreferences) to that
+    // step, or remove the "Always" label. Do not weaken the test — a promise of
+    // "from now on" that is not persisted is a false signpost.
+    expect(unbacked).toEqual([]);
+  });
+
+  it('T0: an alwaysSettingKey, where present, matches a contributed setting', () => {
+    const pkg = JSON.parse(
+      fs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'),
+    );
+    const contributed: Record<string, unknown> =
+      pkg.contributes?.configuration?.properties ?? {};
+
+    // A fallback that names a setting nobody contributes reads `false` forever and
+    // is silently inert — the read half being present is not the same as the read
+    // half resolving to anything.
+    const dangling = BOOTSTRAP_STEPS.filter(
+      (step) =>
+        step.alwaysSettingKey &&
+        !Object.prototype.hasOwnProperty.call(
+          contributed,
+          `minspec.${step.alwaysSettingKey}`,
+        ),
+    ).map((step) => `${step.kind} → minspec.${step.alwaysSettingKey}`);
+
+    expect(dangling).toEqual([]);
+  });
 });
