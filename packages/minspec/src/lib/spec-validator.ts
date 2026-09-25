@@ -202,7 +202,7 @@ function detectAspects(rawLower: string): Aspect[] {
 
 /** Parse frontmatter `aspects:` — accepts "ux, api" or "[ux, api]" forms. */
 function parseDeclaredAspects(raw: string): Aspect[] {
-  const m = raw.match(/^aspects:\s*(.+)$/m);
+  const m = raw.match(/^aspects:[ \t]*(.+)$/m);
   if (!m) return [];
   const list = m[1]
     .replace(/[[\]]/g, '')
@@ -429,7 +429,14 @@ function rawFrontmatterField(raw: string, key: string): string | undefined {
   const block = raw.match(FRONTMATTER_BLOCK_RE);
   if (!block) return undefined;
   // Top-level (column-0) key line only — skip indented (nested) and body lines.
-  const lineRe = new RegExp(`^${key}\\s*:\\s*(.*)$`, 'm');
+  // `[ \t]*`, NOT `\s*` — load-bearing (#1961). JS `\s` matches newlines, so `:\s*`
+  // consumed the line break plus the item indentation of a BLOCK-form key and returned
+  // its FIRST LIST ITEM (`- packages/a.ts`) as if it were an inline value. `fmListField`
+  // tests this result first, so it took the inline branch, tokenized `['-', 'a.ts']`,
+  // and its correct block branch below became dead code — every path after the first
+  // silently left `validateOwnership`'s view. Same defect, same idiom, as the gate's
+  // `fm_value` twin; keep all three on horizontal-whitespace classes.
+  const lineRe = new RegExp(`^${key}[ \t]*:[ \t]*(.*)$`, 'm');
   const m = block[1].match(lineRe);
   if (!m) return undefined;
   const stripped = stripInlineComment(m[1]);
