@@ -6,7 +6,7 @@ tier: T4
 product: minspec
 epic: EPIC-002  # Signpost Integrity - an approval that cannot say what it covered is a false signpost
 aspects: [approval, hash, canonicalization, ownership, spec-gate, migration, no-silent-gate, tier-0]
-relates_to: [DR-088, DR-012, DR-034, DR-031, SPEC-022, SPEC-038, SPEC-051, SPEC-017]
+relates_to: [DR-088, DR-096, DR-012, DR-034, DR-031, SPEC-022, SPEC-038, SPEC-051, SPEC-017]
 # Ownership declared during Specify, deliberately BEFORE any approval mints a hash.
 # SPEC-051 records what happens otherwise: declaring after approval stales the signature
 # the human just gave. That trap is the subject of this spec, so hitting it here would be
@@ -1119,11 +1119,18 @@ verdict - `PRE-STRIP BASIS - matches under the pre-ownership-strip hash; re-appr
 it forward` - distinct from `MATCHES`, never green, and never a minting basis.
 
 **RESOLVED: (d). Founder, 2026-09-25 (AEST; 2026-09-24 UTC).** Recorded as a decision in
-DR-094, because SPEC-051 INV-2 (quoted at the head of this spec) requires a change to the
+DR-096, because SPEC-051 INV-2 (quoted at the head of this spec) requires a change to the
 DR-034 hashing contract to carry its own DR and explicit human sign-off; DR-088 covers the
 strip itself, and this resolves DR-088's own "Still open" item 2, which is why it needs a
 second record rather than riding the first. The normative statements live in FR-11 and
 AC-23; this entry is the register, not a second source of truth.
+
+*Two events, deliberately not the same one.* The **decision** was put to the founder with its
+price attached and accepted in session on the date above, which is what licenses FR-11, AC-23
+and this entry. The **record** DR-096 is `status: proposed`, because DR-029's gate reserves
+acceptance for a separate human act (**MinSpec: Accept ADR**) and a record that arrives
+pre-accepted has helped itself to the keystroke. Neither is the INV-2 sign-off: that is the
+SPEC-070 re-approval, which these amendments staled by design and which no agent may mint.
 
 **Why (d) and not the other three.** (a) ships a corpus-rewriting script into repos MinSpec
 cannot test against. (b) defaults the strip off, so #1649's equivalent stays blocked in
