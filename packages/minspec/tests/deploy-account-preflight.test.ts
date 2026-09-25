@@ -12,6 +12,8 @@
  * credential exist. These tests cover that decision, kept pure so they need no credential.
  */
 import { describe, it, expect } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
 import {
   readPinnedAccount,
   parseAccessibleAccounts,
@@ -100,17 +102,31 @@ describe('#1869 pre-deploy account assertion', () => {
     });
   });
 
-  it('the shipped broker config passes its own assertion for the intended account', () => {
-    // Ties the pure logic to the real file, so a future edit of the pin is caught here
-    // and not only at deploy time.
-    const fs = require('fs') as typeof import('fs');
-    const path = require('path') as typeof import('path');
+  it('the shipped broker config pins the intended account, not merely a well-formed one', () => {
+    // Ties the pure logic to the real file. This must check the pin against MAIN — the
+    // account this repo intends, known independently of the file under test — and not
+    // merely against itself.
+    //
+    // A prior version of this test called `decideDeploy(pinned, [pinned as string])`,
+    // feeding the value read from the file back in as the sole accessible account. That
+    // is `ok: true` for ANY well-formed 32-hex pin, so swapping the pin for a different
+    // but still-valid account (see `OTHER` above) would have stayed green — the exact
+    // shape-vs-value asymmetry this file's header, and #1869, exist to close. Comparing
+    // a value only to itself can never fail, no matter which value it is.
     const toml = fs.readFileSync(
       path.resolve(__dirname, '../../broker/wrangler.toml'),
       'utf-8',
     );
     const pinned = readPinnedAccount(toml);
-    expect(pinned).not.toBeNull();
-    expect(decideDeploy(pinned, [pinned as string]).ok).toBe(true);
+    expect(pinned).toBe(MAIN);
+    expect(decideDeploy(pinned, [MAIN]).ok).toBe(true);
+  });
+
+  it('regression: a self-referential check cannot catch a swapped pin', () => {
+    // Demonstrates the flaw the test above fixes, without touching the real config: any
+    // well-formed account id "passes its own assertion" when checked only against
+    // itself, so that shape alone never proves it is the INTENDED account.
+    expect(decideDeploy(OTHER, [OTHER])).toEqual({ ok: true, account: OTHER });
+    expect(OTHER).not.toBe(MAIN);
   });
 });
