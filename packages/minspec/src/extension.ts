@@ -627,6 +627,14 @@ export function activate(context: vscode.ExtensionContext): void {
             vscode.ConfigurationTarget.Workspace,
           ),
       ).then(() => undefined),
+    // #2079: the READ counterpart. Without it the bootstrap could write the
+    // "Always" choice and never see it again, so the prompt re-asked on every
+    // activation. Reading here also means a workspace that set
+    // minspec.autoClassifyOnCommit by hand is honoured without a fresh click.
+    getBooleanSetting: (key) =>
+      vscode.workspace
+        .getConfiguration('minspec')
+        .get<boolean>(key, false) === true,
   };
   for (const folder of vscode.workspace.workspaceFolders ?? []) {
     void runBootstrap(folder.uri.fsPath, bootstrapVsCode);

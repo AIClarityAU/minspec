@@ -1,6 +1,12 @@
 // Unit tests for the ai-review label-integrity decision logic.
 // Runs on plain Node (no deps): `node --test .github/scripts/ai-review-guard.test.js`.
-// Wired into CI's lint job so the security-critical decisions stay enforced.
+//
+// This suite is a PARITY-MANAGED file (AIClarityAU/minspec#871): it ships alongside
+// ai-review-guard.js and is byte-synced to it by the same machinery, so the guard's
+// own "see ai-review-guard.test.js" resolves wherever the guard lands. In MinSpec's
+// own repo CI's lint job runs it on every PR; in a repo that scaffolded this stack
+// nothing runs it automatically yet (AIClarityAU/minspec#2059) - until that lands,
+// run the command above by hand.
 
 'use strict';
 
