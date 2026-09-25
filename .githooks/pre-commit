@@ -216,6 +216,74 @@ if [ "${LOCK_GATE_OFF:-}" != "1" ]; then
   fi
 fi
 
+# ── template-version gate (#1989) ────────────────────────────────────────────
+# `template-registry.ts` (plus the base64-embedded modules
+# `scripts/gen-ci-templates.mjs` generates from it: `ci-review-templates.ts`,
+# `hook-templates.ts`) is the source of EVERY artifact MinSpec scaffolds into an
+# adopter's repo. `packages/minspec/package.json`'s "version" is the only thing
+# that tells two installed builds apart — VS Code keys an install on
+# `publisher.name@version`, so reinstalling a build that kept the same version
+# string over an older one is not reliably an upgrade. It silently no-ops,
+# leaving the OLD templates resident with nothing in the UI to say so.
+#
+# That happened for real: 0222fdd9 (#1778, 2026-09-11) changed the scaffolded
+# CLAUDE.md's Author-identity-gate section without touching the version, so a
+# build from before that commit and one from after both call themselves
+# "0.1.26" — two different payloads, one version string (#1989).
+#
+# So: any commit touching the template source or its generated modules must
+# also change packages/minspec/package.json's "version". Mirrors the RCDD
+# `Root cause:` commit-msg gate's shape — a mechanical property a commit either
+# carries or doesn't, checked at commit time rather than trusted to be
+# remembered at release time (constitution: "enforce, don't trust the model").
+#
+# Compares the STAGED (index) version against HEAD's committed version, not
+# just "did package.json change" — a package.json edit that touches something
+# other than "version" (e.g. a dependency bump) must not satisfy this gate.
+#
+# Known, accepted cost (named in #1989): noisy on batches. Several
+# template-touching commits landing in one session each ask for a bump, and a
+# PR that touches templates twice only needed one — the gate cannot tell "was
+# a bump already staged upstream in this branch" from "no bump yet", because it
+# only ever compares against the immediate parent. Bypass exists for exactly
+# that case.
+#
+# Fails OPEN (warns, does not block) when it cannot read a "version" field on
+# either side — a missing/malformed package.json is a different, pre-existing
+# problem this gate does not own, and a parsing gap must never wedge an
+# otherwise-unrelated commit.
+#
+# Bypass: TEMPLATE_VERSION_GATE_OFF=1 git commit ...
+if [ "${TEMPLATE_VERSION_GATE_OFF:-}" != "1" ]; then
+  if git diff --cached --name-only --diff-filter=ACMR \
+       | grep -qE '^packages/minspec/src/lib/(template-registry|ci-review-templates|hook-templates)\.ts$'; then
+    _template_gate_extract_version() {
+      grep -m1 -E '"version"[[:space:]]*:' | sed -E 's/.*"version"[[:space:]]*:[[:space:]]*"([^"]*)".*/\1/'
+    }
+    tv_staged="$(git show :packages/minspec/package.json 2>/dev/null | _template_gate_extract_version || true)"
+    tv_head="$(git show HEAD:packages/minspec/package.json 2>/dev/null | _template_gate_extract_version || true)"
+
+    if [ -z "$tv_staged" ] || [ -z "$tv_head" ]; then
+      echo "⚠ template-version gate: could not read packages/minspec/package.json's \"version\" — check SKIPPED." >&2
+    elif [ "$tv_staged" = "$tv_head" ]; then
+      echo "" >&2
+      echo "✖ template-version gate (#1989): scaffolded-template content changed without a version bump." >&2
+      echo "  This commit touches template-registry.ts and/or its generated modules" >&2
+      echo "  (ci-review-templates.ts, hook-templates.ts), but packages/minspec/package.json's" >&2
+      echo "  \"version\" is still $tv_head — same as HEAD." >&2
+      echo "" >&2
+      echo "  VS Code keys an install on publisher.name@version. Two builds sharing a version" >&2
+      echo "  string can collide on install and silently no-op, leaving stale (or missing)" >&2
+      echo "  template content resident with no error anywhere (#1989)." >&2
+      echo "" >&2
+      echo "  Bump \"version\" in packages/minspec/package.json and stage it in this commit." >&2
+      echo "  Override (rare — e.g. an earlier commit in this branch already bumped it):" >&2
+      echo "      TEMPLATE_VERSION_GATE_OFF=1 git commit ..." >&2
+      fail=1
+    fi
+  fi
+fi
+
 if [ "${ADR_BORN_GATE_OFF:-}" != "1" ]; then
   while IFS=$'\t' read -r _status path; do
     case "$path" in
