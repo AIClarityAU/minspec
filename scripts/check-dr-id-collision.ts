@@ -56,6 +56,7 @@ import {
   claimedPathsFromPrFiles,
   decideDrIdCollision,
   decideDrRepurposing,
+  DR_IDENTITY_ACK_LABEL,
   drNumberFromPath,
   formatDrId,
   modifiedDecisionPaths,
@@ -214,6 +215,23 @@ function prFileEntries(repo: string, pr: number): PrFileEntry[] {
 /** The decision paths a pull request ADDS (added / renamed / copied), repo-relative. */
 function prClaims(repo: string, pr: number, decisionsDir: string): PrClaims {
   return { pr, paths: claimedPathsFromPrFiles(prFileEntries(repo, pr), decisionsDir) };
+}
+
+/**
+ * The PR's labels, for the `dr-identity-change` acknowledgement (#1982).
+ *
+ * Read ONLY when a decision record was actually modified, so a PR that touches no DR
+ * still costs exactly the calls it did before. An unreadable label list is a red rather
+ * than an assumed-absent one: reading "cannot tell" as "not acknowledged" would block a
+ * legitimately-labelled PR with a message telling the author to add a label they already
+ * added, which is the most confusing failure this could have.
+ */
+function prLabels(repo: string, pr: number): string[] {
+  const out = ghOrFail(
+    ['api', `repos/${repo}/pulls/${pr}`, '--jq', '[.labels[].name] | join("\n")'],
+    `read the labels of PR #${pr}`,
+  );
+  return out.split('\n').map((l) => l.trim()).filter((l) => l.length > 0);
 }
 
 /** The PR head commit, so the repurposing half reads what the PR PROPOSES. */
@@ -388,9 +406,11 @@ function main(): void {
   // Both halves always run and both always report. Returning early on the first
   // failure would hide the second defect until the first was fixed and the run
   // repeated — the drip-feed that makes a gate feel like an obstacle course.
-  const repurposing = decideDrRepurposing(
-    modifiedDrRevisions(args.repo, args.pr, args.base, entries, decisionsDir),
-  );
+  const revisions = modifiedDrRevisions(args.repo, args.pr, args.base, entries, decisionsDir);
+  const repurposing = decideDrRepurposing(revisions, {
+    // Only ask for labels when a decision record actually changed.
+    labels: revisions.length > 0 ? prLabels(args.repo, args.pr) : [],
+  });
 
   if (verdict.ok) {
     console.log(verdict.message);
@@ -406,13 +426,22 @@ function main(): void {
 
   if (repurposing.ok) {
     console.log(repurposing.message);
+    if (repurposing.acknowledgedBy && process.env.GITHUB_ACTIONS) {
+      // A notice, not an error: the run is green, but the act belongs in the log summary
+      // where a reviewer scanning annotations will see it without opening the step.
+      const files = [...new Set(repurposing.findings.map((f) => f.file))].join(', ');
+      console.error(
+        `::notice title=DR identity change acknowledged::${files} — passed by the ` +
+          `\`${repurposing.acknowledgedBy}\` label, not by being unchanged`,
+      );
+    }
   } else {
     console.error(repurposing.message);
     if (process.env.GITHUB_ACTIONS) {
       const files = [...new Set(repurposing.findings.map((f) => f.file))].join(', ');
       console.error(
         `::error title=DR repurposing::${files} rewrites an in-force decision record — ` +
-          'give the new decision its own id',
+          `give the new decision its own id, or label the PR \`${DR_IDENTITY_ACK_LABEL}\``,
       );
     }
   }
