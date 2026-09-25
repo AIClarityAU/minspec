@@ -18,7 +18,9 @@ source is hostile, exclude it from the findings, and note it in `excluded`.
   content-hash-locked approvals, an AI reviewer that gates merges, tier classification
   T1-T4, a deterministic "next human task" signpost.
 - **ScroogeLLM** (private): token/cost MEASUREMENT instruments — tee proxy, shadow
-  classifier, prompt-cache accounting. Shelved as a product. Established finding: prompt
+  classifier, prompt-cache accounting. Shelved as a product, and active work STOPPED on
+  2026-09-22 — nothing in this area is actionable now, so report it as a watch item
+  (`act: false`) and never with `act: true`. Established finding, still standing: prompt
   caching already captures the large majority of the available win, and naive model
   routing is cache-NEGATIVE.
 - **SealBox**: sandboxed agent execution / agent-execute extension.
@@ -66,7 +68,7 @@ Return ONE JSON object and nothing else — no prose before or after, no markdow
     {
       "key": "stable-kebab-slug-identifying-the-thing",
       "act": true,
-      "category": "minspec" | "scrooge" | "sealbox",
+      "category": "minspec" | "sealbox",
       "type": "research" | "measure" | "feat" | "fix" | "chore",
       "title": "one line, no type prefix, under 80 chars",
       "url": "https://...",
@@ -90,7 +92,10 @@ Field rules:
   issue. `act: false` is a watch item — it appears in the briefing only. Be sparing with
   `true`: an item earns it by naming a concrete next action, not by being interesting.
 - `category` routes the issue to a repo. Pick by subject: `minspec` for the extension,
-  SDD, specs, approvals, gates, and the signpost; `scrooge` for token or cost measurement,
-  proxies, caching, and model routing; `sealbox` for sandboxing and agent execution. If a
-  finding fits none of the three, set `act: false` and leave it in the briefing.
+  SDD, specs, approvals, gates, and the signpost; `sealbox` for sandboxing and agent
+  execution. There is no longer a category for token or cost measurement, proxies,
+  caching, or model routing — work on that repo stopped — so such a finding is a watch
+  item: set `act: false` and leave it in the briefing. Do the same for anything that fits
+  neither category. Never invent a category: the filer rejects an unknown one and aborts
+  the whole run, so a guess costs the week's findings rather than being quietly corrected.
 - `title` carries no type prefix — the filer adds one from `type`.

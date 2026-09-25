@@ -79,6 +79,11 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { isDocsCorpusPath } from './docs-corpus';
+import {
+  governanceStatusTransitions,
+  isGovernancePath,
+  type DiffEntry,
+} from './governance-transition';
 import type { ApprovalRecord } from './approval';
 
 const execFileAsync = promisify(execFile);
@@ -256,25 +261,205 @@ export function buildPrCreateArgs(
  * INV-2 predicate: decides `docs-lane` from evidence. (NOT the only place the label
  * is minted — `push-docs-lane.ts` passes a literal; see the header's INV-2 note.)
  *
- * Returns `[DOCS_LANE_LABEL]` iff `paths` is non-empty AND every entry is in the
- * docs corpus; `[]` otherwise — including for `undefined`, which means the caller
- * could not determine the PR's real changed set. The non-empty requirement is not a formality — an
- * empty list would make `every` vacuously true, which is precisely the
- * unproven-absolute / silent-gate class constitution invariant #2 forbids. A
- * caller that cannot enumerate what it committed has not PROVEN the change is
- * docs-only, so it does not get the label that skips a human merge keystroke.
+ * TWO questions, both of which must answer yes:
  *
- * `.github/workflows/docs-lane.yml:33/:52-54` independently re-verifies the paths
- * server-side and refuses loudly on a mismatch — two witnesses, so a bug here
- * cannot land code on an auto-merge lane.
+ *   1. MEMBERSHIP. `paths` is non-empty AND every entry is in the docs corpus.
+ *      `undefined` — the caller could not determine the PR's real changed set — and
+ *      the empty list both answer NO. The non-empty requirement is not a formality:
+ *      an empty list would make `every` vacuously true, which is precisely the
+ *      unproven-absolute / silent-gate class constitution invariant #2 forbids. A
+ *      caller that cannot enumerate what it committed has not PROVEN the change is
+ *      docs-only, so it does not get the label that skips a human merge keystroke.
+ *
+ *   2. ELIGIBILITY (#2078). No path carries a GOVERNANCE STATUS TRANSITION — a
+ *      changed `status:` line under `docs/decisions/` or `specs/`. Membership alone
+ *      was the whole test until now, and since #1847 that is the wrong question for
+ *      the only PR class this code actually produces: a DR acceptance or a spec
+ *      approval is docs-only BY CONSTRUCTION, so it passed (1), earned the label,
+ *      and was then refused by the lane with `exit 1` — a permanent manufactured red
+ *      on the maintainer's own approval artefacts (measured: run 35783197257 on
+ *      #2073, repeated on #2071 and #2072). `docs-lane` is not a required check, so
+ *      nothing was mechanically blocked; the cost is a red that can never be cleared,
+ *      which trains every reader to ignore a gate.
+ *
+ * `diffs` supplies (2)'s evidence: the unified diff of each changed GOVERNANCE file,
+ * normally {@link branchDiffEntries}' output. It is optional ONLY because a PR with no
+ * governance path needs none — if `paths` contains one and `diffs` is absent, or does
+ * not COVER every governance path in `paths`, the answer is no label. A partial witness
+ * is the silent-gate shape: the covered file is clean and the uncovered one is simply
+ * never asked about.
+ *
+ * This is a SECOND definition of the lane's rule, and that is a real cost — the two can
+ * drift. The refusal is bash inside a GitHub Actions `run:` block and this is TypeScript
+ * in the extension host, so no artefact can execute both and one shared implementation
+ * is not available. The containment is `tests/governance-lane-eligibility.test.ts`, which
+ * reads `govern='…'` and the `grep -qE '…'` pattern out of the workflow's own text,
+ * asserts they are byte-identical to `governance-transition.ts`'s constants, and runs
+ * both engines over a shared fixture set.
+ *
+ * Both refusals only ever WITHHOLD a label; nothing here can stop the lane evaluating a
+ * PR that carries one. `.github/workflows/docs-lane.yml:33/:52-54/:225` re-verifies paths,
+ * holds and status transitions server-side and refuses loudly on a mismatch — two
+ * witnesses, so a bug here cannot land code on an auto-merge lane.
  */
-export function laneLabelsFor(paths: readonly string[] | undefined): string[] {
+export function laneLabelsFor(
+  paths: readonly string[] | undefined,
+  diffs?: readonly DiffEntry[],
+): string[] {
+  return laneRefusal(paths, diffs).kind === 'eligible' ? [DOCS_LANE_LABEL] : [];
+}
+
+/**
+ * Why the lane label was withheld — or `eligible` when it was not.
+ *
+ * Exists so the surfaces a human reads can name the ACTUAL reason. Before #2078 there
+ * was only one, so the toast and the PR body both hard-coded "because it is not
+ * docs-only". That sentence is now FALSE for the commonest case by far: a spec approval
+ * or a DR acceptance IS docs-only, and is withheld because ratifying it is a human act
+ * (DR-029, DR-086 §2). A signpost that states a false reason is the never-wrong defect
+ * this repo exists to avoid, so the reason travels with the decision rather than being
+ * re-guessed at each surface.
+ */
+export type LaneRefusal =
+  | { readonly kind: 'eligible' }
+  /** The caller could not enumerate what the PR changes (`undefined`/empty paths). */
+  | { readonly kind: 'unproven' }
+  /** At least one changed path is outside the docs corpus. */
+  | { readonly kind: 'not-docs-only'; readonly paths: readonly string[] }
+  /** A governance path changed but its diff was not supplied — an absent witness. */
+  | { readonly kind: 'unproven-governance'; readonly paths: readonly string[] }
+  /** A `status:` line changed under `docs/decisions/` or `specs/` (#1847, #2078). */
+  | { readonly kind: 'governance-status-transition'; readonly paths: readonly string[] };
+
+/**
+ * The ONE lane decision. {@link laneLabelsFor} is the label-shaped view of it, so the
+ * label and the reason can never disagree — the shape that would otherwise let a toast
+ * explain a refusal that did not happen.
+ */
+export function laneRefusal(
+  paths: readonly string[] | undefined,
+  diffs?: readonly DiffEntry[],
+): LaneRefusal {
   // `undefined` means the caller COULD NOT DETERMINE the PR's real changed paths
   // (see branchChangedPaths). Unproven is not the same as docs-only, and the
   // fail-closed answer is no label — mirroring the constitution's "unmeasured
   // blast = high blast" and invariant #2's refusal to let a missing witness pass.
-  if (!Array.isArray(paths) || paths.length === 0) return [];
-  return paths.every((p) => isDocsCorpusPath(p)) ? [DOCS_LANE_LABEL] : [];
+  if (!Array.isArray(paths) || paths.length === 0) return { kind: 'unproven' };
+  const nonDocs = paths.filter((p) => !isDocsCorpusPath(p));
+  if (nonDocs.length > 0) return { kind: 'not-docs-only', paths: nonDocs };
+
+  // (2) ELIGIBILITY. Only governance paths need diff evidence, so an ordinary
+  // docs-only PR — CLAUDE.md, a skill, an approval sidecar on its own — still earns
+  // the label with no extra work and no extra git call.
+  const governance = paths.map(toPosix).filter((p) => isGovernancePath(p));
+  if (governance.length === 0) return { kind: 'eligible' };
+  if (!Array.isArray(diffs)) return { kind: 'unproven-governance', paths: governance };
+  const covered = new Set(diffs.map((d) => toPosix(d.path)));
+  const uncovered = governance.filter((p) => !covered.has(p));
+  if (uncovered.length > 0) return { kind: 'unproven-governance', paths: uncovered };
+  const transitions = governanceStatusTransitions(diffs);
+  if (transitions.length > 0) {
+    return { kind: 'governance-status-transition', paths: transitions };
+  }
+  return { kind: 'eligible' };
+}
+
+/**
+ * One sentence naming why the lane was refused, for the PR body and the toast.
+ * `undefined` for `eligible` — there is nothing to explain on the happy path.
+ */
+export function laneRefusalSentence(refusal: LaneRefusal): string | undefined {
+  switch (refusal.kind) {
+    case 'eligible':
+      return undefined;
+    case 'not-docs-only':
+      return (
+        'NOT labelled for the docs-lane — these paths are not docs-only, so this PR ' +
+        'needs a human merge.'
+      );
+    case 'governance-status-transition':
+      return (
+        'NOT labelled for the docs-lane — it changes a `status:` line in a decision ' +
+        'record or spec. Accepting a DR and approving a spec are human acts (DR-029, ' +
+        'DR-086 §2), so the lane refuses them by design (#1847) and this PR needs a ' +
+        'human merge keystroke. This is the intended outcome, not a fault.'
+      );
+    case 'unproven-governance':
+      return (
+        'NOT labelled for the docs-lane — MinSpec could not read the diff of every ' +
+        'decision record or spec this PR changes, so it cannot show the change is not ' +
+        'a ratification. This PR needs a human merge.'
+      );
+    case 'unproven':
+      return (
+        'NOT labelled for the docs-lane — MinSpec could not determine what this PR ' +
+        'changes, so this PR needs a human merge.'
+      );
+  }
+}
+
+/** Normalize to the forward-slash form git and the lane both use (Windows callers). */
+function toPosix(rel: string): string {
+  return rel.replace(/\\/g, '/');
+}
+
+/**
+ * Upper bound on the number of `git diff` invocations {@link branchDiffEntries} will
+ * make. A docs PR touching more than this many GOVERNANCE files is not a shape MinSpec
+ * produces, and spawning hundreds of subprocesses from the extension host to decide one
+ * label is the wrong trade. Over the cap the answer is `undefined` → no label → a human
+ * merges: one keystroke, which is the cheap direction.
+ */
+const MAX_GOVERNANCE_DIFFS = 200;
+
+/**
+ * ELIGIBILITY EVIDENCE (#2078) — the unified diff of every GOVERNANCE file the PR
+ * changes, in the shape `.github/workflows/docs-lane.yml`'s status gate reads from the
+ * GitHub API (`filename` + `patch`).
+ *
+ * Only governance paths are diffed. The lane's own loop `continue`s past everything
+ * else before it ever looks at a patch, so diffing the rest would be work whose result
+ * is discarded — and the label decision for a PR with no governance path needs no git
+ * call at all.
+ *
+ * One `git diff` per file rather than one call split on `diff --git` boundaries:
+ * attribution then holds BY CONSTRUCTION, including across renames and paths containing
+ * spaces, instead of resting on a header parser that a rename makes ambiguous. The cap
+ * above bounds the cost.
+ *
+ * FAILS CLOSED, and that direction is load-bearing: any failure — git absent, unknown
+ * base, unreadable output, too many files — returns `undefined`, which
+ * {@link laneLabelsFor} treats as "cannot prove eligibility" → NO label → no auto-merge
+ * → a human merges. An EMPTY array is a different answer and means something definite:
+ * this PR has no governance path, so there is nothing for the status gate to object to.
+ *
+ * A governance file whose diff comes back EMPTY is kept as an entry with an empty
+ * `patch`, which {@link governanceStatusTransitions} counts as a transition — the same
+ * arm the lane uses when GitHub omits `.patch`. An absent witness is an unknown, not a
+ * clean file.
+ */
+export async function branchDiffEntries(
+  run: ExecRun,
+  cwd: string,
+  base: string,
+  head: string,
+  paths: readonly string[],
+): Promise<DiffEntry[] | undefined> {
+  const governance = paths.map(toPosix).filter((p) => isGovernancePath(p));
+  if (governance.length === 0) return [];
+  // Checked BEFORE the first spawn: a cap enforced after the fact has already paid
+  // the cost it exists to avoid.
+  if (governance.length > MAX_GOVERNANCE_DIFFS) return undefined;
+  const entries: DiffEntry[] = [];
+  for (const path of governance) {
+    try {
+      const { stdout } = await run('git', ['diff', `${base}...${head}`, '--', path], { cwd });
+      entries.push({ path, patch: stdout });
+    } catch {
+      return undefined;
+    }
+  }
+  return entries;
 }
 
 /** Inputs for {@link buildApprovalPrBody}. Every field but `paths` may be absent. */
@@ -301,6 +486,13 @@ export interface ApprovalPrBodyInput {
    * and is not one (#1025). The body must describe the PR that exists.
    */
   readonly labels?: readonly string[];
+  /**
+   * The lane decision behind `labels`, so an unlabelled body states the REAL reason
+   * (#2078). Omitted → the body says the label was withheld without claiming why,
+   * which is honest; the old hard-coded "these paths are not docs-only" was not, for
+   * an approval PR that is docs-only and withheld because ratifying is a human act.
+   */
+  readonly refusal?: LaneRefusal;
 }
 
 /**
@@ -320,14 +512,16 @@ export interface ApprovalPrBodyInput {
  *     (DR-012); nothing here writes it.
  */
 export function buildApprovalPrBody(input: ApprovalPrBodyInput): string {
-  const { record, sha, labels } = input;
+  const { record, sha, labels, refusal } = input;
+  const withheld =
+    (refusal && laneRefusalSentence(refusal)) ??
+    'NOT labelled for the docs-lane, so this PR needs a human merge.';
   const lane =
     labels === undefined
       ? 'MinSpec approval record.'
       : labels.includes(DOCS_LANE_LABEL)
         ? 'MinSpec approval record, labelled for the **docs-lane**.'
-        : 'MinSpec approval record. NOT labelled for the docs-lane — these paths are ' +
-          'not docs-only, so this PR needs a human merge.';
+        : `MinSpec approval record. ${withheld}`;
   const lines: string[] = [lane, ''];
 
   const artifact = record?.specPath ?? input.paths[0];

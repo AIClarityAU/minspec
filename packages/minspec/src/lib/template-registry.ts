@@ -37,6 +37,7 @@ import {
   ROLE_ARCHITECT_MD,
   ROLE_SKEPTIC_MD,
   AI_REVIEW_GUARD_JS,
+  AI_REVIEW_GUARD_TEST_JS,
   APPROVAL_PROVENANCE_PY,
   CANONICAL_PY,
   REVIEW_SCRIPT_SHEBANG,
@@ -1540,6 +1541,14 @@ exit $?`;
  * heredoc, editor, or agent commits alike). Mirrors the monorepo's own gate.
  *
  * Bypass: MINSPEC_GATE_OFF=1 git commit ...   Fail-open on a missing message file.
+ *
+ * #1918: the follow-up escape used to search the WHOLE message, subject
+ * included. This repo's own convention puts the issue number in the subject
+ * (\`feat(#N): ...\`), so a bare \`#[0-9]+\` escape was satisfied by the parent
+ * issue on nearly every conventional commit — the gate almost never fired. The
+ * subject is now stripped before both the trigger and escape checks, and the
+ * issue-number escape is now a structured \`Follow-ups:\` trailer (read via
+ * \`git interpret-trailers\`) instead of a bare in-body \`#NNN\` mention.
  */
 const COMMIT_MSG_HOOK = `# MinSpec commit-msg gate (DR-037) — RCDD root-cause (DR-003) + follow-up
 # materialization (DR-023, blocking-for-commit-prose per DR-059). A \\\`fix:\\\` commit
@@ -1561,18 +1570,47 @@ body=$(sed '/^#.*>8/,$ d' "$msg_file" | grep -v '^#' || true)
 # Subject = first non-empty body line.
 subject=$(printf '%s\\n' "$body" | grep -m1 . 2>/dev/null || true)
 
+# Body minus the subject line — the follow-up trigger and its escape must scan
+# only prose the human wrote BELOW the subject. This repo's own convention puts
+# the issue number in the subject (\\\`feat(#N): ...\\\`), so leaving the subject
+# in-scope let that number satisfy the escape on nearly every commit (#1918).
+# Drops the FIRST NON-BLANK line (not just line 1), so a leading blank line
+# ahead of the subject cannot defeat the strip.
+body_after_subject=$(printf '%s\\n' "$body" | awk '
+  !skipped && /[^[:space:]]/ { skipped=1; next }
+  { print }
+')
+
 # --- Follow-up materialization gate (DR-023 / DR-059) — runs on EVERY commit ---
-# A commit that DEFERS work in prose must cite a tracked issue (#NNN), say
-# "Follow-ups: none", or assert nothing was deferred. Prose-only "held back /
-# separate PR / follow-up / out of scope" with no ref is a leak (the discipline that
-# would have caught the CI-scope deferral). DR-059 records why this blocks where
-# DR-040 kept DR-document materialization non-blocking (different surface).
-if printf '%s\\n' "$body" | grep -Eiq 'held back|separate (pr|commit|review)|follow-?up|out of scope|deferred|not in this (pr|commit)'; then
-  if ! printf '%s\\n' "$body" | grep -Eiq '#[0-9]+|follow-?ups?:? *none|tracked in|no(thing|ne)? *(deferred|follow-?ups?)|nothing (held|deferred)|(handled|done|fixed|addressed) (here|in this (pr|commit|change))'; then
+# A commit that DEFERS work in prose must cite a tracked follow-up — a
+# structured \\\`Follow-ups:\\\` trailer citing \\\`#NNN\\\` (comma-separated for more
+# than one), the separate prose escapes below spelling "handled here", or an
+# explicit "Follow-ups: none" / "nothing deferred" negation. Prose-only "held
+# back / separate PR / follow-up / out of scope" with no ref is a leak (the
+# discipline that would have caught the CI-scope deferral). DR-059 records why
+# this blocks where DR-040 kept DR-document materialization non-blocking
+# (different surface).
+if printf '%s\\n' "$body_after_subject" | grep -Eiq 'held back|separate (pr|commit|review)|follow-?up|out of scope|deferred|not in this (pr|commit)'; then
+  # Structured escape (#1918): a \\\`Follow-ups:\\\` trailer, read via
+  # \\\`git interpret-trailers\\\` so a stray inline \\\`#NNN\\\` mention — the subject's
+  # own issue ref included — can no longer double as the escape; only a
+  # deliberate trailer line can. Parsed from \\\`$body\\\` (already scissors/comment-
+  # stripped above), never from \\\`$msg_file\\\` directly (#2067 review): git's own
+  # trailer parser has its own, stricter, version-sensitive cut-line detection
+  # for the \\\`-v\\\` scissors marker, so handing it the raw file could miss a
+  # legitimate trailer whenever that detection didn't fire — falsely blocking
+  # a good commit. \\\`$body\\\` is already safe, so parse that instead.
+  followups_trailer=$(printf '%s\\n' "$body" | git interpret-trailers --parse 2>/dev/null | grep -im1 '^follow-ups:' || true)
+  has_followups_ref=0
+  printf '%s\\n' "$followups_trailer" | grep -Eiq ':[[:space:]]*#[0-9]+' && has_followups_ref=1
+
+  if [ "$has_followups_ref" -ne 1 ] && ! printf '%s\\n' "$body_after_subject" | grep -Eiq 'follow-?ups?:? *none|tracked in|no(thing|ne)? *(deferred|follow-?ups?)|nothing (held|deferred)|(handled|done|fixed|addressed) (here|in this (pr|commit|change))'; then
     echo "✗ MinSpec follow-up gate (DR-023/DR-059): this commit defers work but files no follow-up." >&2
     echo "" >&2
     echo "  A commit that says 'held back / separate PR / follow-up / out of scope' must" >&2
-    echo "  cite a tracked issue (#NNN), state 'Follow-ups: none', or note 'nothing deferred'." >&2
+    echo "  cite a tracked issue via a \\\`Follow-ups: #NNN\\\` trailer, state 'Follow-ups: none'," >&2
+    echo "  or note 'nothing deferred'. A bare #NNN mention in the subject or prose no longer" >&2
+    echo "  counts — it must be a dedicated trailer line (#1918)." >&2
     echo "  Bypass (rare): MINSPEC_GATE_OFF=1 git commit ..." >&2
     exit 1
   fi
@@ -2236,6 +2274,30 @@ const CI_REVIEW_STACK_TEMPLATES: readonly ManagedRegionTemplate[] = [
     outputPath: '.github/scripts/ai-review-guard.js',
     commentStyle: 'slash',
     content: AI_REVIEW_GUARD_JS,
+  },
+  {
+    // The guard's unit suite, shipped WITH the guard (#871).
+    //
+    // Same class of defect as #1486, approached from the other side. There, a comment
+    // in ai-review.yml claimed a coverage that existed only in MinSpec's repo, and the
+    // fix was to rewrite the claim on the way out. Here the guard's own header points a
+    // reader at this suite, and the honest fix is the opposite one: ship the suite, so
+    // the claim becomes true everywhere instead of being localized away. The guard is
+    // the most security-critical file in the stack (revert-or-not, strip-or-not,
+    // verified-or-not, green-or-not) and it was the one arriving unverifiable.
+    //
+    // Shipping the caller without its test was not hypothetical: scroogellm's hand-ported
+    // copy went stale the moment the guard's reducer advanced (scrooge#82) and sealbox
+    // had no copy at all (sealbox#18). Registering it here makes the pair byte-synced by
+    // the same machinery that syncs the guard, so they cannot drift apart again.
+    //
+    // Its own runtime dependencies — ai-review.yml and docs-lane.yml, which it reads to
+    // pin the shipped `run:` block and the hold pattern — are already managed templates,
+    // so the scaffolded set stays dependency-closed (managed-script-dependencies.test.ts).
+    name: 'ai-review-guard-test',
+    outputPath: '.github/scripts/ai-review-guard.test.js',
+    commentStyle: 'slash',
+    content: AI_REVIEW_GUARD_TEST_JS,
   },
 ] as const;
 

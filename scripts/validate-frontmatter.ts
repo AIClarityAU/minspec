@@ -536,25 +536,66 @@ try {
 // changed, turning a silent main-breakage into a commit/PR-time error with the
 // exact fix command. Dynamic `import()` (not a top-level await) keeps this file
 // runnable under either CJS or ESM compilation of this script.
+//
+// FAIL CLOSED (#871, constitution invariant 2). This rule used to wrap its WHOLE body
+// in `try { … } catch { /* stay silent */ }`, which made it the one gate guaranteed not
+// to notice the thing it exists to notice: a registered managed source that is absent or
+// unreadable throws inside `generateAll`, and the catch turned that into a quiet pass —
+// while also abandoning every generated file after the first error. "Could not check" is
+// not "checked and fine", and the corpus-optional rules this was copied from are not an
+// analogy: those scan directories that legitimately may not exist, whereas every path
+// here is REGISTERED in the generator, so its absence is a defect by construction.
 async function checkCiReviewTemplatesFresh(): Promise<void> {
+  type GeneratedFile = { outputPath: string; content: string };
+  const GEN = join(ROOT, 'scripts/gen-ci-templates.mjs');
+  let gen: {
+    generateAll: (repoRoot: string) => GeneratedFile[];
+    CI_TEMPLATE_OUTPUT_PATHS?: readonly string[];
+  };
   try {
-    const gen = await import('./gen-ci-templates.mjs');
-    // Iterate EVERY generated file the generator owns (the CI-review stack and the
-    // Claude Code hook stack, #1093) rather than naming one — a file added to the
-    // generator is gated here without anyone remembering to widen this rule.
-    for (const { outputPath, content } of gen.generateAll(ROOT)) {
-      const outFile = join(ROOT, outputPath);
-      const onDisk = readFileSync(outFile, 'utf-8');
-      if (onDisk !== content) {
-        fail(
-          outFile,
-          'stale — drifted from its on-disk sources (#678). Run: node scripts/gen-ci-templates.mjs',
-        );
-      }
+    gen = await import('./gen-ci-templates.mjs');
+  } catch (error) {
+    fail(GEN, `cannot be loaded (${(error as Error).message}) — template staleness is UNVERIFIED, not clean.`);
+    return;
+  }
+
+  // APPLICABILITY, decided BEFORE anything can throw, and decided on the generated
+  // OUTPUTS rather than on the sources. `ROOT` is `process.cwd()`, so this script is
+  // also run against scratch trees that were never meant to hold an embedded-template
+  // stack; "this is not that repo" is a real answer and must stay distinguishable from
+  // "this repo is broken". Keying on a SOURCE would collapse the two — a deleted
+  // managed source would read as "not that repo" and go quiet, which is the #871 hole.
+  const outputs = gen.CI_TEMPLATE_OUTPUT_PATHS ?? [];
+  if (!outputs.some((p) => existsSync(join(ROOT, p)))) return;
+
+  // Iterate EVERY generated file the generator owns (the CI-review stack and the
+  // Claude Code hook stack, #1093) rather than naming one — a file added to the
+  // generator is gated here without anyone remembering to widen this rule.
+  let generated: GeneratedFile[];
+  try {
+    generated = gen.generateAll(ROOT);
+  } catch (error) {
+    fail(GEN, `${(error as Error).message}`);
+    return;
+  }
+
+  for (const { outputPath, content } of generated) {
+    const outFile = join(ROOT, outputPath);
+    let onDisk: string;
+    try {
+      onDisk = readFileSync(outFile, 'utf-8');
+    } catch (error) {
+      // Keep going: one missing generated file must not stop the remaining ones being
+      // checked ("never … stops evaluating", invariant 2).
+      fail(outFile, `generated file is missing or unreadable (${(error as Error).message}). Run: node scripts/gen-ci-templates.mjs`);
+      continue;
     }
-  } catch {
-    // Generator or one of its source files unreadable/absent — nothing to check,
-    // stay silent (mirrors the other corpus-optional rules above).
+    if (onDisk !== content) {
+      fail(
+        outFile,
+        'stale — drifted from its on-disk sources (#678). Run: node scripts/gen-ci-templates.mjs',
+      );
+    }
   }
 }
 

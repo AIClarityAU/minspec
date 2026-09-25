@@ -73,7 +73,31 @@ export interface BootstrapPreferences {
    * offline Tier-0 posture (invariant 1).
    */
   readonly autoBackfillUseAi?: boolean;
+  /**
+   * "Always classify — stop asking" (#2079). The durable half of the classify
+   * prompt's `Always` affordance.
+   *
+   * It exists because the choice used to be written ONLY to the
+   * `minspec.autoClassifyOnCommit` VS Code setting, which the prompt's own
+   * eligibility guard never read — so the answer and the question lived in two
+   * stores that never met and the prompt returned on the next activation. The
+   * guard reads THIS key first (see `resolveProjectPreference` below for the
+   * order), so the affordance now does what its label says.
+   *
+   * Project-local for the same reasons as {@link advancePhaseOnApprove}, plus
+   * one specific to this key: a `ConfigurationTarget.Workspace` write lands in
+   * a settings FILE that other tooling rewrites, while this store is MinSpec's
+   * own (DR-078 §1).
+   */
+  readonly autoClassifyOnCommit?: boolean;
 }
+
+/**
+ * Preference keys that may back a prompt's "Always" affordance. Boolean-valued
+ * by construction: an "Always" answer is a yes/no, and the guard reads it
+ * through {@link resolveProjectPreference} against the contributed setting.
+ */
+export type AlwaysPrefKey = 'autoClassifyOnCommit';
 
 /**
  * DR-078 §4 read order: a project-local preference is a narrower, more recently

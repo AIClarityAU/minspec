@@ -731,6 +731,12 @@ MANAGED_REGION_TEMPLATES (packages/minspec/src/lib/template-registry.ts:2076) is
 DR-072 gave a triage-held issue a human exit, but only for the tier hold: human_only is a content class, so no keystroke transfers authorship and the hold is absolute. That boundary is right. What it leaves open is the case where the classification itself is wrong — for which the only documented remedy today is to reword the issue body until the classifier changes its mind.
 <!-- /dr-summary:DR-091 -->
 
+## [DR-092 — A harness refresh may only move a project forward — the build must carry an ordered template identity, and an unordered one holds the write](DR-092.md)
+*Status: proposed · Date: 2026-09-06*
+<!-- dr-summary:DR-092 auto=000000000000 -->
+MinSpec: Refresh Harness Files writes the templates baked into the running bundle, with no notion of newer or older. A refresh from a stale build rewrote three of a consuming repo's managed files backwards, deleting a no-silent-gate block, while the extension version string stayed identical across the three merges it was missing. Direction is a question the refresh has never asked.
+<!-- /dr-summary:DR-092 -->
+
 ## [DR-093 — A fail-closed gate may refresh its own witness, because a witness only an absent human can produce turns "fail closed" into "never run"](DR-093.md)
 
 *Status: proposed · Date: 2026-09-09*
