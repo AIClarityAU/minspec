@@ -3,7 +3,12 @@ id: SPEC-070
 type: design
 status: planning
 product: minspec
-relates_to: [DR-088, DR-096, DR-012, DR-034, DR-031, DR-090, SPEC-022, SPEC-038, SPEC-051, SPEC-017, SPEC-066]
+# DR-096 is deliberately NOT in this list, and must not be added here. It carries the
+# accepted OQ-2(ii) decision, it lives on `docs/spec-070-amendments`, and in THIS tree it
+# resolves to no decision record - `npm run validate`'s ref-check says so as a warning, and
+# a merge-gating reviewer reads it as a dangling reference and blocks. Add it in the same
+# change that lands DR-096, not before. Section 8's opening notice explains where it is.
+relates_to: [DR-088, DR-012, DR-034, DR-031, DR-090, SPEC-022, SPEC-038, SPEC-051, SPEC-017, SPEC-066]
 epic: EPIC-002  # Signpost Integrity - a shipped file asserting a false fact is a false signpost
 ---
 
@@ -814,7 +819,24 @@ Recorded because under DR-086 section 4 this list is the only review path for de
 > `MISMATCH - a real finding`, the string `PRE-STRIP BASIS` appears nowhere in it, and
 > `docs/decisions/DR-096.md` does not exist here - the highest decision record on this branch
 > is DR-093. Every "applied" below means applied on `docs/spec-070-amendments`, and a reader
-> checking this tree will correctly find none of it. The two branches are merged
+> checking this tree will correctly find none of it. **That is also why `relates_to` in this
+> file's frontmatter omits DR-096** - a ref that resolves to nothing is a dangling reference
+> under the Traceability Convention, and it is a merge blocker rather than a cosmetic gap; it
+> goes in the change that lands DR-096.
+>
+> **This document cannot pass review before the amendment branch lands, and that is an
+> ordering constraint rather than a defect in the text.** The reference checker's pattern is
+> `\b(SPEC|DR|EPIC)-(\d+)\b` applied to the whole file (`packages/minspec/src/lib/reference-checker.ts:65`,
+> which scrubs only `id:` and `epic:` lines at `:120-123`), so every one of this document's
+> seven prose mentions of DR-096 resolves to nothing until that record exists here. Removing
+> them is not an option: the design's job is to say where the accepted OQ-2(ii) decision is
+> recorded, and a plan that hides its own authority is the false signpost this project exists
+> to avoid. Writing the number without its `DR-` prefix would satisfy the checker - it is the
+> trick DR-096's own numbering note uses for the ids open pull requests have reserved - but
+> doing it seven times, to the central decision record of this plan, buys a transient gate at
+> a permanent cost in readability and grep-ability. **So: `docs/spec-070-amendments` merges
+> first, then this.** The dependency is one-directional; that branch carries no hard reference
+> back to this document. The two branches are merged
 > independently; until the amendment branch lands, this document describes a state the
 > repository has not reached. *(Added 2026-09-25 after the review panel's skeptic blocked this
 > PR for exactly that conflation - three findings, all correct: a design must not report
