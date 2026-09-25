@@ -21,8 +21,9 @@ The split means a hostile page can shape the **text** of an issue, because text 
 stage 1 produces. It cannot reach a shell, choose a repository, or promote a watch item
 into a filed one. Every dangerous decision lives in stage 2, in a fixed table:
 
-- repo comes from a closed category enum (`minspec` / `scrooge` / `sealbox`), never from
-  model output;
+- repo comes from a closed category enum (`minspec` / `sealbox`), never from
+  model output — `scrooge` was removed on 2026-09-22 when work on `AIClarityAU/scroogellm`
+  stopped, and a stale scan that still emits it fails the run rather than filing there;
 - `gh` is invoked with an argv array, never a shell string;
 - the body arrives on stdin, not on the command line;
 - labels are constants; every field is clamped and stripped of control characters.
@@ -66,8 +67,8 @@ constitution's no-silent-gate invariant exists to prevent.
 | `.radar/raw-YYYY-MM-DD.json` | raw CLI transcript, kept for diagnosis |
 | `.radar/health.json` | last-run status, read by `--status` |
 
-Filed issues land on `AIClarityAU/minspec`, `AIClarityAU/scroogellm`, or
-`AIClarityAU/sealbox` with `idea,inbox`, authored by `minspec-sdd[bot]`, and each one
+Filed issues land on `AIClarityAU/minspec` or `AIClarityAU/sealbox` with `idea,inbox`,
+authored by `minspec-sdd[bot]`, and each one
 carries an adoption checklist: an install that was never configured, triggered, or
 monitored is dead weight that still looks like coverage, so those issues do not close on
 "installed".
