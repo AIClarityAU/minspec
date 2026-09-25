@@ -80,6 +80,54 @@ describe('#1912 status-line annotation', () => {
     expect(rules(spec(['status: planning', '  # about status', 'tier2: x']))).toContain(ORPHAN);
   });
 
+  // ── A2 widened (#1955 re-review): indent is not the signal ───────────────
+  //
+  // Every frontmatter comment survives the status write. Indentation only hints at what
+  // the comment is ABOUT, so the run is read at any indent with one measured asymmetry.
+  it('A2 — a column-0 run that NAMES the status is flagged (the steering hole)', () => {
+    // `status.inline-comment` tells the author to move the rationale off the status line.
+    // The nearest compliant-looking move is the same text one line down at column 0 — which
+    // survives the rewrite identically and, before this widening, was green.
+    const r = rules(
+      spec(['status: planning', '# the status is planning because the approval is stale']),
+    );
+    expect(r).toContain(ORPHAN);
+  });
+
+  it('A2 — a column-0 run about ANOTHER key is not flagged (SPEC-044 shape)', () => {
+    // Verbatim shape of both corpus instances: a note about the deliberately absent
+    // `tier:`, sitting under `status:` because that is where the key order puts it.
+    // Flagging these would be 2 false positives and 0 true positives.
+    const r = rules(
+      spec([
+        'status: implementing',
+        '# tier lives on requirements.md (the single tier-carrying approvable). A T3/T4 tier',
+        '# on a NON-approved sibling doc can shadow the approved requirements.md.',
+        'product: minspec',
+      ]),
+    );
+    expect(r).not.toContain(ORPHAN);
+  });
+
+  it('A2 — an indented run is flagged even when it names nothing', () => {
+    // The wrapped-continuation arm is unconditional: indentation under `status:` already
+    // says the comment belongs to it, so no content test applies.
+    expect(rules(spec(['status: planning', '  # see the decision record']))).toContain(ORPHAN);
+  });
+
+  it('A2 — a BLANK line ends the run (rejected widening, 0 corpus instances)', () => {
+    // Deliberate: a comment past a blank line is as likely to annotate the next key.
+    const r = rules(spec(['status: planning', '', '# the status here is provisional']));
+    expect(r).not.toContain(ORPHAN);
+  });
+
+  it('A2 — a mixed run counts every line, once', () => {
+    const r = rules(spec(['status: planning', '# about status', '  # wrapped', '# more'])).filter(
+      (x) => x === ORPHAN,
+    );
+    expect(r).toHaveLength(1);
+  });
+
   // ── Clean ────────────────────────────────────────────────────────────────
   it('a bare status line produces neither finding', () => {
     const r = rules(spec(['status: planning']));
@@ -104,8 +152,13 @@ describe('#1912 status-line annotation', () => {
 
   it('an INDENTED status: key is never the one under test, even when it sorts first', () => {
     // Kills the unanchored-findIndex mutant: without the `^` anchor the nested
-    // `status:` matches first and its inline comment is reported against the spec,
-    // even though no writer ever touches a nested key.
+    // `status:` matches first and its inline comment is reported against the spec.
+    //
+    // The rule is scoped to the top-level key because that is the key it is ABOUT — NOT
+    // because "no writer ever touches a nested key", which this comment used to claim and
+    // which is false (the writers' `/^([ \t]*)status[ \t]*:.*$/m` is non-global and hits
+    // the first `status:` at any indent). See the validator docblock; 0 corpus files order
+    // their keys that way, so the divergence is latent.
     const r = rules(
       spec(['rollout:', '  status: draft  # nested, not the frontmatter status', 'status: planning']),
     );
@@ -156,10 +209,61 @@ describe('#1912 status-line annotation', () => {
     expect(found).toHaveLength(1);
   });
 
-  it('an INDENTED `>` is a YAML block scalar and is never flagged', () => {
+  it('indented text inside a REAL block scalar is never flagged', () => {
     // `key: >` + indented text is valid YAML. Flagging it would be a false positive on
-    // a legitimate multi-line value.
+    // a legitimate multi-line value. The exemption is the OPEN SCALAR, not the indent —
+    // see the indented-under-a-value case below.
     expect(rules(spec(['status: planning', 'note: >', '  some folded text']))).not.toContain(PROSE);
+  });
+
+  it('every chomping/indent indicator opens a scalar (`>-`, `|`, `>2`)', () => {
+    for (const opener of ['note: >-', 'note: >+', 'note: |', 'note: |-', 'note: >2']) {
+      expect(rules(spec(['status: planning', opener, '  folded text']))).not.toContain(PROSE);
+    }
+  });
+
+  it('the real corpus block scalar (`implements_reason: >-`) stays exempt', () => {
+    // 9 files use exactly this shape; a regression here is a corpus-wide false positive.
+    const r = rules(
+      spec([
+        'status: planning',
+        'implements: none',
+        'implements_reason: >-',
+        '  This spec ships no code of its own; it is a convention change that',
+        '  the validator enforces.',
+      ]),
+    );
+    expect(r).not.toContain(PROSE);
+  });
+
+  it('a `>` line INSIDE an open scalar region is content, not prose', () => {
+    const r = rules(
+      spec(['status: planning', 'note: >-', '  intro line', '  > quoted inside the value']),
+    );
+    expect(r).not.toContain(PROSE);
+  });
+
+  // The escape hatch the #1955 re-review found: an indented `>` under a key that already
+  // CARRIES a value cannot be a block scalar, and it escaped both rules —
+  // `validateStatusAnnotation` only scans for `#`, so `validateSpec` returned [] and
+  // `setSpecStatus` left the blockquote standing under a status it no longer described.
+  it('an indented `>` under a VALUE-CARRYING key is flagged', () => {
+    expect(
+      rules(spec(['status: implementing', '  > **Status note.** why it is implementing'])),
+    ).toContain(PROSE);
+  });
+
+  it('an indented `>` after a plain key elsewhere in the block is flagged', () => {
+    expect(rules(spec(['status: planning', 'product: minspec', '  > parked prose']))).toContain(
+      PROSE,
+    );
+  });
+
+  it('a scalar region ENDS at the next key, so prose after it is still flagged', () => {
+    const r = rules(
+      spec(['status: planning', 'note: >-', '  folded text', 'product: minspec', '  > parked']),
+    );
+    expect(r).toContain(PROSE);
   });
 
   it('a blockquote in the BODY is never flagged', () => {
