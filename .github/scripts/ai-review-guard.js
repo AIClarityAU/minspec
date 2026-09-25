@@ -215,7 +215,17 @@ const BLOCKED_BY = 'blocked-by';
 // loosely all the time ("depends on the seam landing first" as narrative), while
 // "Blocked by" reads as a declaration in every corpus I checked. One unambiguous
 // form beats two fuzzy ones — a second form can be added if a real body wants it.
-const BLOCKED_BY_LINE_RE = /^[\s>*_-]*\**\s*blocked\s+by\b\**\s*:?\s*(.+)$/gim;
+//
+// `*` deliberately does NOT appear in the leading-decoration class below (minspec#2134):
+// it used to live in BOTH `[\s>*_-]*` and the adjacent `\**`, two greedy quantifiers
+// ranging over an overlapping alphabet. A crafted PR body — untrusted input, this repo
+// is public — with a long run of leading `*` gave the backtracking engine O(n^2) work to
+// discover the line does not match (measured: ~4s at 40K asterisks, well inside GitHub's
+// ~65KB body cap, vs <1ms fixed). Splitting the alphabets removes the ambiguity without
+// narrowing what matches: a leading run of `*` (bullet or bold marker) is still consumed,
+// now entirely by `\**` rather than split across both classes — see
+// ai-review-guard.test.js's ReDoS regression test for the input shape and timing budget.
+const BLOCKED_BY_LINE_RE = /^[\s>_-]*\**\s*blocked\s+by\b\**\s*:?\s*(.+)$/gim;
 
 // Only the LEADING run of refs on a declaring line counts: `#N`, separated by
 // commas/`and`/whitespace. Scanning stops at the first token that is not one of

@@ -832,6 +832,41 @@ test('parseBlockedBy: a ref on a LATER line is not swept into an earlier declara
   assert.deepEqual(parseBlockedBy('Blocked by #1225\n\nAlso relates to #4242.'), [1225]);
 });
 
+// minspec#2134 — BLOCKED_BY_LINE_RE put `*` in BOTH the leading-decoration class
+// `[\s>*_-]*` and the adjacent `\**`, two greedy quantifiers ranging over an
+// overlapping alphabet. A crafted line of leading asterisks gives the backtracking
+// engine O(n^2) work to discover the line does not match `blocked by` — a
+// catastrophic-backtracking (ReDoS) hazard on the PR body, which is untrusted,
+// attacker-controlled input on this public repo.
+//
+// A correctness-only assertion is NOT enough here: `parseBlockedBy` returns the
+// exact same (correct) answer under the vulnerable pattern and the fixed one —
+// the bug is purely a wall-clock hazard, not a wrong-answer one. So this test
+// also asserts a time budget. The budget is chosen with a wide margin on BOTH
+// sides so a loaded CI runner cannot make it flaky: the fixed pattern measures
+// well under 1ms regardless of runner load, while the vulnerable pattern measured
+// ~4 SECONDS on this exact input — over an order of magnitude past the budget,
+// not a coin-flip 2x that noise could erase.
+test('parseBlockedBy: a pathological run of leading asterisks does not cause catastrophic backtracking (ReDoS, minspec#2134)', () => {
+  const n = 40000; // ~40KB — comfortably inside GitHub's ~65KB PR body cap
+  const body = `Normal preamble line.\n${'*'.repeat(n)}`;
+  const budgetMs = 300; // fixed pattern: <1ms measured. Vulnerable pattern: ~4000ms measured.
+
+  const start = process.hrtime.bigint();
+  const result = parseBlockedBy(body);
+  const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
+
+  // No declaration in this body, so the correct answer is the empty array either way —
+  // it is the TIMING assertion below that actually distinguishes fixed from vulnerable.
+  assert.deepEqual(result, []);
+  assert.ok(
+    elapsedMs < budgetMs,
+    `parseBlockedBy took ${elapsedMs.toFixed(1)}ms on a crafted input (budget ${budgetMs}ms) — ` +
+      'this is the catastrophic-backtracking signature of BLOCKED_BY_LINE_RE regressing to ' +
+      'minspec#2134 (overlapping quantifier alphabets), not a slow CI runner',
+  );
+});
+
 test('shouldMarkBlockedBy: true only when a blocker is still open', () => {
   assert.equal(shouldMarkBlockedBy({ openBlockers: [1225] }), true);
   assert.equal(shouldMarkBlockedBy({ openBlockers: [] }), false);
