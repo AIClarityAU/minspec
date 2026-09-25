@@ -1,6 +1,7 @@
 import * as path from 'path';
 import * as vscode from 'vscode';
 import { listSpecs, type SpecSummary } from '../lib/spec-catalog';
+import { isTerminalSpecStatus } from '../lib/spec-vocabulary';
 import { readSpecFile, advanceSpecToImplementing } from '../lib/spec';
 import { loadConfig } from '../lib/config';
 import { validateSpec, violationsIntroducedByApproval } from '../lib/spec-validator';
@@ -33,8 +34,14 @@ interface SpecNodeLike {
 }
 
 interface PickOptions {
-  /** Keep a spec in the list only when its approval status passes this. */
-  include: (status: ApprovalStatus) => boolean;
+  /**
+   * Keep a spec in the list only when this passes. Receives the spec as well as its
+   * approval status because "still awaiting approval" is a question about BOTH axes
+   * (#440): an unapproved spec whose lifecycle is already terminal is past the gate,
+   * not pending. Approve filters on both; Revoke deliberately filters on the approval
+   * axis alone, so an approval recorded against a terminal spec stays undoable.
+   */
+  include: (status: ApprovalStatus, spec: SpecSummary) => boolean;
   /** Shown when specs exist but none survive the `include` filter. */
   emptyMessage: string;
 }
@@ -63,7 +70,7 @@ async function pickSpec(
   const openId = resolveActiveSpecId();
   const items = specs
     .map((s) => ({ spec: s, status: getApprovalStatus(rootDir, s.filePath) }))
-    .filter((x) => opts.include(x.status))
+    .filter((x) => opts.include(x.status, x.spec))
     .map(({ spec, status }) => ({
       label: `${spec.id}: ${spec.title}`,
       description: `${spec.tier} · ${status}${spec.id === openId ? ' · open' : ''}`,
@@ -207,8 +214,19 @@ export async function approveSpecCommand(
   const spec = await pickSpec(rootDir, node, 'Select a spec to approve for implementation', {
     // Already-approved specs have nothing to do here; stale ones (edited since
     // approval) still need re-approval, so keep them.
-    include: (status) => status !== 'approved',
-    emptyMessage: 'MinSpec: No specs awaiting approval — all are already approved.',
+    //
+    // #440: terminal-lifecycle specs (done/archived/superseded) are past the
+    // DR-012 approve-before-implement gate and are dropped too. Filtering on the
+    // approval axis ALONE offered every terminal spec that simply had no approval
+    // record — which is how SPEC-007 (`status: done`) came to be approved, and why
+    // SPEC-056 (`status: superseded`, a spec whose own body says it "should not be
+    // planned or implemented") was still on offer. The Specs tree already refused
+    // to expose an approve action on those rows, so the two surfaces disagreed.
+    // A tree node passed in bypasses this filter, which keeps the deliberate
+    // per-artifact path open for the rare legitimate case.
+    include: (status, s) => status !== 'approved' && !isTerminalSpecStatus(s.status),
+    emptyMessage:
+      'MinSpec: No specs awaiting approval — all are already approved or past the gate (done/archived/superseded).',
   });
   if (!spec) return;
 
