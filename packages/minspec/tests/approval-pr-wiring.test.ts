@@ -161,6 +161,13 @@ const SUBJECT = 'chore(approve): SPEC-050 approved for implementation';
 const SPEC_REL = 'specs/minspec/SPEC-050-silent-approval-pr/requirements.md';
 const SIDECAR_REL = `.minspec/approvals/${SPEC_REL}.json`;
 const DOCS_PATHS = [SPEC_REL, SIDECAR_REL];
+/**
+ * A governance-path patch with NO `status:` line (#2078) — an ordinary prose edit,
+ * which the docs-lane accepts. The label decision reads this through
+ * `branchDiffEntries`; a fixture carrying a `status:` line would be an approval and
+ * would be refused the lane on purpose.
+ */
+const ORDINARY_DOCS_PATCH = '@@ -12,3 +12,3 @@\n-a speling mistake\n+a spelling mistake\n';
 const HEAD_SHA = 'abc1234def5678901234567890abcdef12345678';
 const NEW_PR_URL = 'https://github.com/o/r/pull/7';
 const EXISTING_PR_URL = 'https://github.com/o/r/pull/42';
@@ -188,6 +195,14 @@ const DEFAULT_RESPONSES: Record<string, Resp> = {
   // the happy path labels docs-lane. Tests that need a non-docs or unresolvable
   // range override this key.
   'git diff --name-only -z': `${DOCS_PATHS.join('\0')}\0`,
+  // #2078 ELIGIBILITY evidence. Since the lane refuses a governance `status:`
+  // transition (#1847), `laneLabelsFor` also needs the PATCH of each changed
+  // `specs/**` / `docs/decisions/**` file — `git diff <base>...<head> -- <path>`.
+  // The default answer is an ordinary prose edit, so the happy path still labels
+  // docs-lane. The key cannot collide with the `--name-only` entry above: that
+  // command's argv starts `git diff --name-only`, never `git diff origin/`.
+  // Tests that need a refusal override this key with a `status:` patch.
+  'git diff origin/': ORDINARY_DOCS_PATCH,
   'gh pr create': `${NEW_PR_URL}\n`,
   // Unmapped `gh pr list` falls through to the empty-stdout default below, which
   // `findOpenPrForHead` reads as "no open PR" — the create path then runs.
@@ -1099,6 +1114,16 @@ describe('INV-2 (#1224 review): the diff ref must outlive pushApproval', () => {
           throw new Error(`fatal: bad revision '${range}'`);
         }
         return { stdout: `${DOCS_PATHS.join('\0')}\0`, stderr: '' };
+      }
+      // #2078: the eligibility diff is subject to the SAME ref constraint — model it
+      // here too, or this fixture would prove the label survives on a ref git rejects.
+      if (key.startsWith('git diff origin/')) {
+        // argv is ['diff', '<base>...<head>', '--', '<path>'].
+        const range = args[1];
+        if (!range.includes(`origin/${BRANCH}`)) {
+          throw new Error(`fatal: bad revision '${range}'`);
+        }
+        return { stdout: ORDINARY_DOCS_PATCH, stderr: '' };
       }
       if (key.startsWith('git rev-parse HEAD')) return { stdout: `${HEAD_SHA}\n`, stderr: '' };
       if (key.startsWith('gh pr create')) return { stdout: `${NEW_PR_URL}\n`, stderr: '' };
