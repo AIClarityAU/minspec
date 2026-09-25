@@ -2,13 +2,14 @@
   "name": "@aiclarity/broker",
   "version": "0.0.1",
   "private": true,
-  "description": "MinSpec OIDC review-broker (SPEC-034) — vendor Worker; NOT shipped in the vsix",
+  "description": "MinSpec OIDC review-broker (SPEC-034) \u2014 vendor Worker; NOT shipped in the vsix",
   "type": "module",
   "main": "src/index.ts",
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "predeploy": "npx tsx ../../scripts/assert-deploy-account.ts ."
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^4.20260702.1",
