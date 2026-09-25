@@ -74,6 +74,16 @@ vi.mock('../src/lib/approval-pr', () => ({
   // enough and keeps the mock honest about what it is standing in for.
   laneLabelsFor: (paths: readonly string[] | undefined) =>
     paths && paths.length > 0 ? ['docs-lane'] : [],
+  // #2078: the label decision now also needs the PATCH of each changed governance
+  // file, because the lane refuses a `status:` transition under `specs/**` or
+  // `docs/decisions/**` (#1847). This suite is about RECOVERY wiring, not about the
+  // lane predicate, so the stub returns a fixed empty-evidence list and the fixed
+  // `laneLabelsFor` above still answers `['docs-lane']` — keeping every assertion
+  // below aimed at what it was written to test. The real pairing is exercised in
+  // `governance-lane-eligibility.test.ts` and `approval-pr.test.ts`.
+  branchDiffEntries: () => Promise.resolve([]),
+  laneRefusal: () => ({ kind: 'eligible' }),
+  laneRefusalSentence: () => undefined,
   // Captures what the body builder is handed, so the #1653-review SHA finding is
   // asserted on the VALUE that reaches the PR body rather than on a call count.
   buildApprovalPrBody: (a: { sha?: string }) => {

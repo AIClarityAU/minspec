@@ -3,8 +3,11 @@
 // This module is deliberately I/O-free: no network, no `github`/octokit, no
 // `fs`, no process access. Every function is a pure input→output mapping so the
 // security-critical decisions (revert-or-not, strip-or-not, verified-or-not,
-// green-or-not) can be unit-tested exhaustively (see ai-review-guard.test.js in
-// the MinSpec repo - this file ships to adopters, its test suite does not)
+// green-or-not) can be unit-tested exhaustively (see ai-review-guard.test.js beside
+// this file - AIClarityAU/minspec#871 made that suite a parity-managed file, so it
+// ships with this guard and is byte-synced to it; `node --test
+// .github/scripts/ai-review-guard.test.js` works wherever this file lives, though
+// only MinSpec's own CI runs it automatically so far - AIClarityAU/minspec#2059)
 // and the workflow that requires it stays a thin, auditable I/O shell.
 //
 // Threats this closes (see the header of ready-to-merge.yml for the full note):
