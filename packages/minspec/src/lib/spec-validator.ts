@@ -767,6 +767,34 @@ function fmListField(raw: string, key: string): string[] {
   return toks;
 }
 /**
+ * `>` prose lines in a frontmatter block, exempting genuine block scalars.
+ *
+ * A key line ending in `>`/`|` (optional chomping/indent indicator) opens a scalar region
+ * that runs to the first non-blank line indented no further than that key; lines inside the
+ * region are content, however they start. Every other line beginning with `>` — column 0 or
+ * indented — is prose parked in the YAML block (#1955).
+ */
+function countFrontmatterProseLines(yaml: string): number {
+  const OPENS_SCALAR = /^([ \t]*)[\w.-]+[ \t]*:[ \t]*[>|][-+]?\d*[ \t]*$/;
+  let scalarIndent: number | null = null;
+  let n = 0;
+  for (const line of yaml.split('\n')) {
+    if (scalarIndent !== null) {
+      const indent = /^[ \t]*/.exec(line)![0].length;
+      if (line.trim() === '' || indent > scalarIndent) continue; // still inside the scalar
+      scalarIndent = null; // de-indented → region closed; fall through and judge this line
+    }
+    const opener = OPENS_SCALAR.exec(line);
+    if (opener) {
+      scalarIndent = opener[1].length;
+      continue;
+    }
+    if (/^[ \t]*>/.test(line)) n++;
+  }
+  return n;
+}
+
+/**
  * #1955 review — prose parked INSIDE the frontmatter block.
  *
  * RCDD Phase 4 for a defect this change itself introduced. Moving a status annotation
@@ -797,34 +825,6 @@ function fmListField(raw: string, key: string): string[] {
  * Unmarked prose is also silently dropped by the parser, but cannot be told from a malformed
  * value, so it is left to the YAML parse rather than guessed at here.
  */
-/**
- * `>` prose lines in a frontmatter block, exempting genuine block scalars.
- *
- * A key line ending in `>`/`|` (optional chomping/indent indicator) opens a scalar region
- * that runs to the first non-blank line indented no further than that key; lines inside the
- * region are content, however they start. Every other line beginning with `>` — column 0 or
- * indented — is prose parked in the YAML block (#1955).
- */
-function countFrontmatterProseLines(yaml: string): number {
-  const OPENS_SCALAR = /^([ \t]*)[\w.-]+[ \t]*:[ \t]*[>|][-+]?\d*[ \t]*$/;
-  let scalarIndent: number | null = null;
-  let n = 0;
-  for (const line of yaml.split('\n')) {
-    if (scalarIndent !== null) {
-      const indent = /^[ \t]*/.exec(line)![0].length;
-      if (line.trim() === '' || indent > scalarIndent) continue; // still inside the scalar
-      scalarIndent = null; // de-indented → region closed; fall through and judge this line
-    }
-    const opener = OPENS_SCALAR.exec(line);
-    if (opener) {
-      scalarIndent = opener[1].length;
-      continue;
-    }
-    if (/^[ \t]*>/.test(line)) n++;
-  }
-  return n;
-}
-
 export function validateFrontmatterProse(
   spec: ParsedSpec,
   config: MinspecConfig,
