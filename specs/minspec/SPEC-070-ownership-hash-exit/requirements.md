@@ -1102,7 +1102,8 @@ no migration. Three real options:
 (b) gate the strip behind a hasher-version or `.minspec/config.json` flag, so an adopter's
 provenance tool keeps computing the old basis until they opt in;
 (c) accept the break and document it.
-*Recommendation: (b), a hasher-version flag.* **Cost:** a versioned hasher is a second basis
+*Recommendation as first written: (b), a hasher-version flag. **Superseded - see the
+resolution below, which takes (d).*** **Cost of (b):** a versioned hasher is a second basis
 that must be kept alive and tested in both twins for as long as any adopter has not migrated,
 which is exactly the "two canonical forms" state DR-012 exists to avoid; and a flag defaulting
 to "old" means the strip does not reach adopters at all until someone flips it, so #1649's
