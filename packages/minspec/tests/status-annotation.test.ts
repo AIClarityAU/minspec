@@ -156,7 +156,7 @@ describe('#1912 status-line annotation', () => {
     //
     // The rule is scoped to the top-level key because that is the key it is ABOUT — NOT
     // because "no writer ever touches a nested key", which this comment used to claim and
-    // which is false (the writers' `/^([ \t]*)status[ \t]*:.*$/m` is non-global and hits
+    // which is false (the writers' `/^([ \t]*)status[ \t]*:[ \t]*.*$/m` is non-global and hits
     // the first `status:` at any indent). See the validator docblock; 0 corpus files order
     // their keys that way, so the divergence is latent.
     const r = rules(
@@ -223,7 +223,11 @@ describe('#1912 status-line annotation', () => {
   });
 
   it('the real corpus block scalar (`implements_reason: >-`) stays exempt', () => {
-    // 9 files use exactly this shape; a regression here is a corpus-wide false positive.
+    // 9 files use exactly this shape. NOTE what this does NOT buy: the corpus contains 0
+    // indented `>` lines, so breaking the exemption changes the corpus result by nothing -
+    // `npm run validate` still reports the same 3 findings. The corpus cannot witness a
+    // regression here; only these tests can, which is why the cases below drive content that
+    // actually STARTS with `>`.
     const r = rules(
       spec([
         'status: planning',
@@ -234,6 +238,52 @@ describe('#1912 status-line annotation', () => {
       ]),
     );
     expect(r).not.toContain(PROSE);
+  });
+
+  // NON-VACUOUS PINS. Every case below puts a line that STARTS with `>` inside the scalar,
+  // which is the only shape that can tell a recognised opener from an unrecognised one. The
+  // three tests above cannot: their content never starts with `>`, so the count is 0 either
+  // way and they pass with the whole exemption deleted (#1955 re-review).
+  it('the `|` literal-block opener is recognised, not just `>`', () => {
+    // Mutating `[>|]` to `[>]` leaves the rest of the suite green; this is its only witness.
+    expect(
+      rules(spec(['status: planning', 'note: |', '  intro', '  > quoted inside the literal'])),
+    ).not.toContain(PROSE);
+  });
+
+  it('an underscore in the key still opens a scalar (`implements_reason`)', () => {
+    // Pins the `_` in OPENS_SCALAR's `[\w.-]+` AND the blank-line term: a multi-paragraph
+    // folded value is how the corpus's own `implements_reason:` is written, and a paragraph
+    // may open with `>`. Narrowing the charset, or letting a blank line CLOSE the region,
+    // turns this legitimate value into a false `frontmatter.prose-line`.
+    expect(
+      rules(
+        spec([
+          'status: planning',
+          'implements: none',
+          'implements_reason: >-',
+          '  This spec ships no code of its own.',
+          '',
+          '  > and this paragraph opens with a quote character',
+        ]),
+      ),
+    ).not.toContain(PROSE);
+  });
+
+  it('a NESTED opener remembers its own indent, not column 0', () => {
+    // Pins `scalarIndent = opener[1].length`. With it hardcoded to 0 the region never closes
+    // for anything indented, so the parked `>` below is silently swallowed as scalar content.
+    expect(
+      rules(
+        spec([
+          'status: planning',
+          'phases:',
+          '  note: >-',
+          '    folded text',
+          '  > parked prose at the opener\'s own indent',
+        ]),
+      ),
+    ).toContain(PROSE);
   });
 
   it('a `>` line INSIDE an open scalar region is content, not prose', () => {
@@ -284,5 +334,26 @@ describe('#1912 status-line annotation', () => {
     expect(
       severityOf(annotated, INLINE, { ...DEFAULT_CONFIG, statusLineAnnotation: 'error' as const }),
     ).toBe('error');
+  });
+
+  it('the ratchet covers ALL THREE rules, not just the inline one', () => {
+    // Asymmetry guard (#137) on the ratchet itself: the two rules this change widened had
+    // their severity asserted nowhere, so either could have been pinned to a literal.
+    const ERROR = { ...DEFAULT_CONFIG, statusLineAnnotation: 'error' as const };
+    const orphaned = spec(['status: planning', '  # rationale']);
+    const parked = spec(['status: planning', '> parked prose']);
+    expect(severityOf(orphaned, ORPHAN)).toBe('warning');
+    expect(severityOf(orphaned, ORPHAN, ERROR)).toBe('error');
+    expect(severityOf(parked, PROSE)).toBe('warning');
+    expect(severityOf(parked, PROSE, ERROR)).toBe('error');
+  });
+
+  it('the column-0 content test is case-insensitive and reads the WHOLE run', () => {
+    // Two pins in one: the `i` flag (no fixture capitalised Status), and that the predicate
+    // joins the whole run rather than testing only its first line.
+    expect(rules(spec(['status: planning', '# Status is provisional']))).toContain(ORPHAN);
+    expect(
+      rules(spec(['status: planning', '# first line names nothing', '# the status is stale'])),
+    ).toContain(ORPHAN);
   });
 });
