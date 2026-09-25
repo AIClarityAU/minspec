@@ -373,9 +373,14 @@ const ADR_MIN_PAD_WIDTH = 3;
  * network, no AI. It therefore asserts ONLY about ids in front of it: a number
  * absent from the run is not reported, because under worktree-per-session
  * (#168) that number is usually held by an open pull request this scan cannot
- * see. Dropping that `gap` rule (#2051) gave up detecting the DR-362 class (a
- * global-register number minted into a project-local register) offline; it was
- * firing on correct work far more often than it caught a leak.
+ * see. Dropping that `gap` rule (#2051) gave up REPORTING the DR-362 class here
+ * (a global-register number minted into a project-local register); it was firing
+ * on correct work far more often than it caught a leak. The class is not
+ * undetected: `parent-register-refs.test.ts` fails fatally on a DR-100+ token
+ * that carries no parent-register attribution, which a leaked record's own
+ * heading line supplies. That witness is incidental rather than designed — it
+ * matches line text, so an attributing word in the title slips past it, and its
+ * floor is DR-100, which this register will reach.
  *
  * Reuses `ADR_FILE_RE` so it sees exactly the files `listAdrs` treats as DRs.
  *

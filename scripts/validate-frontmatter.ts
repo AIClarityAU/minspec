@@ -268,8 +268,11 @@ try {
 // id absent from the run as an error and said "renumber the out-of-sequence DR",
 // which is wrong whenever the id is held by an open pull request — the normal
 // state under worktree-per-session (#168), and invisible to an offline scan. It
-// caught the DR-362 leak once; it fired on correct work continuously. Cross-PR
-// id truth is Rule 17 below and .github/workflows/dr-id-collision.yml.
+// caught the DR-362 leak once; it fired on correct work continuously.
+//
+// Cross-PR id truth is .github/workflows/dr-id-collision.yml ALONE — Rule 17
+// below is the offline half and, as its own comment says, cannot see any pull
+// request. Do not read the two as interchangeable.
 try {
   const drWarnings = validateDrSequence(resolveDecisionsDir());
   for (const w of drWarnings) {

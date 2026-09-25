@@ -90,10 +90,19 @@ describe('validateDrSequence()', () => {
   });
 
   it('the real #1956 shape — an id above the highest on disk — is silent', () => {
-    // Measured on the SPEC-034 broker branch: DR-091 on main, DR-094 added,
-    // DR-092 held by #1835 and DR-093 by #1866. The old rule emitted two false
-    // "Renumber the out-of-sequence DR" warnings here. Both ids were correct.
-    dr('DR-091-ninety-one.md');
+    // Measured on the SPEC-034 broker branch: main carried DR-001..DR-091,
+    // DR-094 was added, DR-092 was held by #1835 and DR-093 by #1866. The old
+    // rule emitted exactly two false "Renumber the out-of-sequence DR"
+    // warnings, for 92 and 93. Both ids were correct.
+    //
+    // The full 1..91 run matters and is not padding: with only DR-091 and
+    // DR-094 on disk the old rule emitted 92 warnings, because 1..90 are
+    // absent too. That fixture would still go red against the old code, but
+    // its dominant property would be a sparse register rather than the named
+    // case — so it could not tell #1956 apart from any other discontiguity.
+    for (let n = 1; n <= 91; n++) {
+      dr(`DR-${String(n).padStart(3, '0')}-real.md`);
+    }
     dr('DR-094-ninety-four.md');
     expect(validateDrSequence(dir)).toEqual([]);
   });
@@ -113,12 +122,31 @@ describe('validateDrSequence()', () => {
     expect(new Set(kinds(warnings))).toEqual(new Set(['duplicate', 'padding']));
   });
 
-  it('ACCEPTED COST (#2051): a leaked global-register number is no longer detected', () => {
-    // DR-362 minted into a register running to DR-010 is exactly the #41 defect
-    // this validator was written for, and dropping `gap` gives up catching it
-    // offline. Recorded as a test rather than a comment so the loss is visible
-    // if anyone later assumes Rule 6 still covers it. The remaining detector is
-    // the id-collision gate at PR time, which sees duplicates, not leaks.
+  it('ACCEPTED COST (#2051): Rule 6 no longer reports a leaked global-register number', () => {
+    // DR-362 minted into a register running to DR-010 is the #41 defect this
+    // validator was written for, and dropping `gap` gives up reporting it here.
+    // Recorded as a test rather than a comment so the change is visible if
+    // anyone later assumes Rule 6 still covers it.
+    //
+    // WHERE THE COVERAGE ACTUALLY WENT — do not repeat the earlier claim that
+    // the id-collision gate carries it. It does not: run against a leaked
+    // DR-362 on a clean register, `decideDrIdCollision` returns ok:true with no
+    // findings and simply recommends DR-363, because a leaked number is free
+    // rather than duplicated. What does react is a DIFFERENT and fatal gate,
+    // `parent-register-refs.test.ts` (#160/#179), whose predicate
+    // /DR-([1-9]\d{2,})/ treats any DR-100+ token as a parent-register ref and
+    // fails unless the line carries attribution. A leaked DR-362's own heading
+    // line trips it.
+    //
+    // That witness is INCIDENTAL, and has two measured limits a reader must not
+    // assume away. (1) It matches on line TEXT: a title containing "global",
+    // "parent register" or "mmo-platform" satisfies the attribution pattern, so
+    // `# DR-362: Some leaked global-register number` is NOT an offender while
+    // `# DR-362: Some leaked decision` is. (2) Its floor is DR-100 while main
+    // tops out at DR-093, so the first legitimate local DR-100 turns it red on
+    // correct work — the same failure mode this change removes. Tracked in the
+    // issue named in the #2051 pull request; whoever fixes that boundary is
+    // also deciding the fate of the last thing that reacts to a leak.
     for (let n = 1; n <= 10; n++) {
       dr(`DR-${String(n).padStart(3, '0')}-real.md`);
     }
