@@ -57,6 +57,20 @@ export interface MinspecConfig {
    */
   readonly ownershipDeclaration?: 'warn' | 'error';
   /**
+   * Severity of the #1912 `status.inline-comment` / `status.orphan-comment` rules.
+   *
+   * The `status:` frontmatter line carries a value and nothing else (#1900). The three
+   * status writers rebuild that line as indent + key + value, so an inline comment is
+   * DESTROYED on write, and indented `#` lines after it SURVIVE and go on describing a
+   * value that no longer holds (#1879). Both are annotations the writer cannot keep
+   * honest, so the convention is to put rationale in body prose instead.
+   *
+   * `warn` (default) surfaces them without blocking; flip to `error` once the corpus is
+   * clean and the writers consume continuations (the SPEC-038 FR-7 ratchet). Absent →
+   * treated as `warn`.
+   */
+  readonly statusLineAnnotation?: 'warn' | 'error';
+  /**
    * Permitted approver identities for the `approval-integrity` gate (DR-081 §4, #1376).
    *
    * An ALLOWLIST, unlike `approval.ts`'s `BUILTIN_AGENT_IDENTITIES` denylist, and the two
@@ -113,6 +127,7 @@ export const DEFAULT_CONFIG: MinspecConfig = {
   },
   coverage: { minimumPercentage: DEFAULT_COVERAGE_MINIMUM },
   ownershipDeclaration: 'warn',
+  statusLineAnnotation: 'warn',
 };
 
 /** Deep merge user config over defaults. User values win. */
