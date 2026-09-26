@@ -744,4 +744,11 @@ MinSpec: Refresh Harness Files writes the templates baked into the running bundl
 <!-- dr-summary:DR-093 auto=732512d00014 -->
 The drain's admission control gates on a quota reading at ~/.claude/quota.json. The reading's only producers were **interactive** surfaces - a rendering statusline - while the drain that consumes it runs **unattended**. Measured 2026-09-09 (#1859): the file was **49 hours stale** while holding "used_percentage": 3.0. Over 100 issues carried agent-ready / agent-ready-specify and none dispatched. The pipeline had been dead for days and presented as a quiet week.
 <!-- /dr-summary:DR-093 -->
+
+## [DR-094 — The review broker's tokens live one hour because GitHub issues no shorter credential - exposure is bounded by immediate use and non-storage, not by a TTL the API will not honour](DR-094.md)
+*Status: proposed · Date: 2026-09-18*
+<!-- dr-summary:DR-094 auto=f02b7feacc1d -->
+SPEC-034's broker exchanges a GitHub Actions OIDC token for a GitHub App installation token, so an adopter's CI can post as minspec-sdd[bot] without holding the App private key. DR-054's reasoning is that one leaked App key mints tokens for every repository that ever installed the App, so the blast radius of the key dwarfs the blast radius of any one token. Short token lifetime was the compensating control.
+<!-- /dr-summary:DR-094 -->
+
 <!-- minspec:dr-index:end -->
