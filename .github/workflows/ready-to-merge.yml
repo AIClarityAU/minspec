@@ -4,7 +4,8 @@
 # iff the PR carries a *trustworthy* AI greenlight, so branch protection can
 # require it and a downstream merge-gate / signpost can read it.
 #
-#   SUCCESS  when the PR has a *verified* `ai-review:pass` AND NOT `ai-review:changes`
+#   SUCCESS  when the PR has a *verified* `ai-review:pass`, NOT `ai-review:changes`,
+#            and NO `hold:*` label (#1870)
 #   FAILURE  otherwise (description names the reason)
 #
 # An independent AI reviewer posts verdicts and applies the `ai-review:pass` /
