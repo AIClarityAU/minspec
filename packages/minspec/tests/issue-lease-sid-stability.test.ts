@@ -35,8 +35,9 @@ function sh(snippet: string, env: Record<string, string> = {}): string {
 
 describe('lease_self_sid stability (#2132)', () => {
   it('returns the same id across two command substitutions in one invocation', () => {
-    // The exact shape of the real callers: issue-lease.sh:240 (lease_claim) and :283
-    // (lease_verify_holds) both do sid="$(lease_self_sid)".
+    // The exact shape of EVERY real caller: lease_acquire, lease_renew,
+    // lease_verify_holds, lease_release, lease_release_all, lease_reclaim_q and
+    // lease_worktree_path all do sid="$(lease_self_sid)". There is no `lease_claim`.
     const out = sh('a="$(lease_self_sid)"; b="$(lease_self_sid)"; printf "%s\\n%s" "$a" "$b"');
     const [a, b] = out.split('\n');
     expect(a).toBeTruthy();
@@ -51,18 +52,38 @@ describe('lease_self_sid stability (#2132)', () => {
     expect(ids.size).toBe(1);
   });
 
-  it('is what lease_verify_holds compares, so a self-written claim resolves to own', () => {
-    // End-to-end on the pure seam: build a claim carrying the sid this session produces,
-    // then classify it. Before the fix the sid on the right-hand side was a different
-    // UUID and the decision was never `own`.
-    const out = sh(
-      'sid="$(lease_self_sid)"; ' +
-        'claims="$(jq -n -c --arg s "$sid" \'[{sessionId:$s, host:"h", pid:1, ' +
-        'claimedAt:"2026-01-01T00:00:00.000Z", lastRenewed:"2026-01-01T00:00:00.000Z", serverOrder:1}]\')"; ' +
-        'later="$(lease_self_sid)"; ' +
-        'printf "%s" "$(if [ "$sid" = "$later" ]; then echo same; else echo different; fi)"',
+  /**
+   * Builds a LIVE claim owned by this very process and returns classify_claim's token.
+   *
+   * Both halves matter. `pid=$$` makes the claim's owner a live process and the NOW
+   * timestamps put it inside TTL, so the decision turns on IDENTITY rather than on
+   * expiry - a stale fixture would classify as reclaimable no matter whose it was, and
+   * the test would then pass without exercising the property at all.
+   */
+  function classifySelfWrittenClaim(probeSid) {
+    return sh(
+      [
+        'now="$(date -u +%s)"',
+        'iso="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"',
+        'claims="$(jq -n -c --arg s "$(lease_self_sid)" --arg h "$(lease_self_host)" ' +
+          '--argjson p $$ --arg t "$iso" ' +
+          '\'[{sessionId:$s, host:$h, worktreeRoot:"/tmp/wt", pid:$p, claimedAt:$t, ' +
+          'lastRenewed:$t, serverOrder:1}]\')"',
+        `classify_claim "$claims" "${probeSid}" "$now" 1 | head -n1`,
+      ].join('; '),
     );
-    expect(out).toBe('same');
+  }
+
+  it('classifies a claim this session wrote as `own`, through classify_claim', () => {
+    // THE property the fix exists for, driven end-to-end on the pure seam rather than
+    // asserted about the id in isolation. Measured before the fix: `stand-down`.
+    expect(classifySelfWrittenClaim('$(lease_self_sid)')).toBe('own');
+  });
+
+  it('still says `stand-down` for a genuinely foreign id, so `own` is not a constant', () => {
+    // The control. Without this, an implementation that returned `own` unconditionally
+    // would satisfy the test above, and the assertion would gate nothing.
+    expect(classifySelfWrittenClaim('a-different-session')).toBe('stand-down');
   });
 
   it('still gives two concurrent invocations different ids (INV-1 exactly-one-owner)', () => {

@@ -94,7 +94,7 @@ lease_self_sid() {
     #
     # If /proc is unreadable the id stays stable and merely loses the pid-reuse guard.
     local start
-    start="$(awk '{ sub(/^[^)]*\) /, ""); print $20 }' "/proc/$$/stat" 2>/dev/null || true)"
+    start="$(awk '{ sub(/^.*\) /, ""); print $20 }' "/proc/$$/stat" 2>/dev/null || true)"
     sid="sid-$$-${start:-0}"
   fi
   # No longer load-bearing - kept so a caller that DOES invoke this in its own scope
