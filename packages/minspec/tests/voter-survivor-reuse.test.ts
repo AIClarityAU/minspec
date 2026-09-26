@@ -7,6 +7,13 @@
  * different claim: the head SHA is IDENTICAL, so "four voters reviewed this SHA" stays
  * literally true. Nothing about the gate's assertion weakens.
  *
+ * THAT IS NOW ENFORCED, AND WAS NOT WHEN THIS HEADER WAS FIRST WRITTEN. The code matched
+ * only the patch fingerprint, so it reused across commits and the sentence above was a
+ * false mechanism claim on a merge-gate justification - the precise failure this repo has
+ * an Evidence Discipline section about. Three of four voters caught it, and the test that
+ * used to sit here reused across two SHAs and proved it. `headSha` is now required; see
+ * selectVotersToRun's docblock.
+ *
  * WHY THE STRICTNESS DIFFERS FROM findReattestableVerdict. That function requires the
  * prior check-run to be `completed` + `success`, because it reuses a whole PASS. Here
  * the prior run FAILED overall - that is the case we are in, one voter silent and the
@@ -38,7 +45,7 @@ const block = (verdict: string) =>
 /** A check-run as the API returns it, carrying records for the given roles. */
 function priorRun(
   roleBlocks: Record<string, string>,
-  opts: { fp?: string; slug?: string; sha?: string } = {},
+  opts: { fp?: string; slug?: string; sha?: string; at?: string } = {},
 ) {
   const fp = opts.fp ?? FP_A;
   const lines = [`patch-fingerprint:${fp}`];
@@ -47,14 +54,17 @@ function priorRun(
     name: 'ai-review',
     status: 'completed',
     conclusion: 'failure', // the panel failed; that is the point
-    head_sha: opts.sha ?? 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef',
+    head_sha: opts.sha ?? HEAD,
     app: { slug: opts.slug ?? 'minspec-sdd' },
+    started_at: opts.at ?? '2026-01-01T00:00:00Z',
+    completed_at: opts.at ?? '2026-01-01T00:00:00Z',
     output: { title: 'AI review', summary: lines.join('\n\n'), text: '' },
   };
 }
 
+const HEAD = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
 const select = (checkRuns: any[], patchHash: string | null = FP_A) =>
-  selectVotersToRun({ roles: ROLES, checkRuns, patchHash, allowlist: ALLOW });
+  selectVotersToRun({ roles: ROLES, checkRuns, patchHash, allowlist: ALLOW, headSha: HEAD });
 
 describe('renderVoterRecord / parseVoterRecords round-trip', () => {
   it('round-trips a verdict block verbatim', () => {
@@ -139,6 +149,7 @@ describe('selectVotersToRun', () => {
       checkRuns: [priorRun({ reviewer: block('pass') })],
       patchHash: FP_A,
       allowlist: [],
+      headSha: HEAD,
     });
     expect(r.run).toEqual(ROLES);
     expect(r.notes.join(' ')).toMatch(/allowlist/i);
@@ -151,13 +162,49 @@ describe('selectVotersToRun', () => {
     expect(select([foreign]).run).toEqual(ROLES);
   });
 
-  it('prefers the most recent record when two prior runs both carry one', () => {
-    const older = priorRun({ reviewer: block('blocked') }, { sha: 'a'.repeat(40) });
-    const newer = priorRun({ reviewer: block('pass') }, { sha: 'b'.repeat(40) });
-    const r = selectVotersToRun({
-      roles: ROLES, checkRuns: [newer, older], patchHash: FP_A, allowlist: ALLOW,
-    });
+  it('refuses to reuse a record from a DIFFERENT head SHA, same patch or not', () => {
+    // THE DEFECT THREE VOTERS CAUGHT. This test previously fed two runs on DIFFERENT
+    // SHAs and asserted reuse across them - while the docblock claimed reuse happened
+    // "within ONE head SHA" and that there was therefore "no base-moved semantics to
+    // trade away". The code compared only the fingerprint, so the claim was false and
+    // this test was the proof. An identical diff on a different commit is a different
+    // merge result (#1394), which is exactly what #1840 was closed over.
+    const elsewhere = priorRun({ reviewer: block('pass') }, { sha: 'a'.repeat(40) });
+    const r = select([elsewhere]);
+    expect(r.reuse).toEqual({});
+    expect(r.run).toEqual(ROLES);
+  });
+
+  it('reuses the MOST RECENT record on this head, by timestamp not array order', () => {
+    // Two check-runs on the SAME head - what a re-run actually produces. Recency must
+    // come from the timestamps, so the fixture is deliberately ordered OLDEST FIRST:
+    // under the previous first-in-array behaviour this test would reuse `changes`.
+    const older = priorRun({ reviewer: block('changes') }, { at: '2026-01-01T00:00:00Z' });
+    const newer = priorRun({ reviewer: block('pass') }, { at: '2026-01-02T00:00:00Z' });
+    const r = select([older, newer]);
     expect(r.reuse.reviewer).toContain('verdict: pass');
+  });
+
+  it('is order-independent: the same inputs reversed give the same answer', () => {
+    // The property, not one arrangement of it. A recency test that passes for only one
+    // input order is testing the fixture (f-muta-tests-axis).
+    const older = priorRun({ reviewer: block('changes') }, { at: '2026-01-01T00:00:00Z' });
+    const newer = priorRun({ reviewer: block('pass') }, { at: '2026-01-02T00:00:00Z' });
+    expect(select([older, newer]).reuse).toEqual(select([newer, older]).reuse);
+  });
+
+  it('reuses nothing when the caller names no head SHA', () => {
+    const r = selectVotersToRun({
+      roles: ROLES,
+      checkRuns: [priorRun({ reviewer: block('pass') })],
+      patchHash: FP_A,
+      allowlist: ALLOW,
+      // headSha deliberately omitted - the SHA binding IS the safety property, so an
+      // unbound call must reuse nothing rather than fall back to fingerprint-only.
+    });
+    expect(r.reuse).toEqual({});
+    expect(r.run).toEqual(ROLES);
+    expect(r.notes.join(' ')).toMatch(/head SHA/i);
   });
 
   it('names every reuse so the run is auditable, never silent', () => {

@@ -539,11 +539,33 @@ function parseVoterRecords(text) {
  * re-combines; a reused `changes` stays `changes`. And a voter with no usable record is
  * never a survivor, so silence always costs a re-run rather than being inherited.
  *
- * Note this reuses within ONE head SHA. The gate's claim - that these voters reviewed
- * this SHA - stays literally true, so unlike #1840 there is no base-moved semantics to
- * trade away.
+ * SHA-BOUND, and `headSha` is REQUIRED. Without it nothing is reused at all.
+ *
+ * This was WRONG when first written, and the wrongness is worth keeping on the record
+ * because it is the exact failure this repo keeps paying for. The comment here claimed
+ * reuse happened "within ONE head SHA" while the code compared only the patch
+ * fingerprint and never looked at `head_sha` - so it reused across commits whenever the
+ * diff matched, which IS the base-moved case #1840 was closed over, justified by a
+ * sentence saying it was not. Three voters caught it; the diff's own test reused across
+ * two SHAs and proved it.
+ *
+ * The fix narrows the CODE to the claim rather than widening the claim to the code,
+ * because the claim is what makes the feature safe and the narrowing costs nothing:
+ * #2142's case is a voter dying and the SAME head being re-reviewed, so same-SHA reuse
+ * keeps the whole benefit. Cross-SHA reuse would buy the repeats #1840 measured - every
+ * one of which was a base move - and buy the #1394 semantic-conflict risk with them.
+ *
+ * WHY `headSha` IS REQUIRED HERE AND OPTIONAL IN verifyHeadPassCheckRun. There it is
+ * belt-and-braces: the workflow already queries BY the head ref, so the SHA match
+ * re-checks something upstream established. Here it IS the safety property, so leaving
+ * it optional would make the docblock above false again in the default path.
+ *
+ * Among candidates on that SHA, the MOST RECENT wins, by `checkRunTime` - the same
+ * ordering verifyHeadPassCheckRun uses, so a re-run's fresher record supersedes an
+ * earlier one. Caller array order is deliberately NOT load-bearing: it was, and the
+ * test asserting recency passed only because the fixture happened to be ordered.
  */
-function selectVotersToRun({ roles, checkRuns, patchHash, allowlist } = {}) {
+function selectVotersToRun({ roles, checkRuns, patchHash, allowlist, headSha } = {}) {
   const wanted = Array.isArray(roles) ? roles.slice() : [];
   const notes = [];
   const reuse = {};
@@ -552,15 +574,31 @@ function selectVotersToRun({ roles, checkRuns, patchHash, allowlist } = {}) {
     notes.push('no patch fingerprint for this head, so every voter runs');
     return { run: wanted, reuse, notes };
   }
+  // The SHA binding is the safety property, not a nicety - see the docblock. A caller
+  // that does not say which head it is reviewing gets no reuse.
+  if (!headSha) {
+    notes.push('no head SHA to bind reuse to, so every voter runs');
+    return { run: wanted, reuse, notes };
+  }
   const allowed = Array.isArray(allowlist) ? allowlist.filter(Boolean) : [];
   if (allowed.length === 0) {
     notes.push('empty reviewer allowlist, so nothing is reused');
     return { run: wanted, reuse, notes };
   }
-  const runs = Array.isArray(checkRuns) ? checkRuns : [];
+  // MOST RECENT FIRST, so the newest record for a role wins the first-wins loop below.
+  // Sorted here rather than trusted from the caller: the recency guarantee has to come
+  // from this function, or the note it prints ("verdict recorded on X") is the only
+  // thing tying a reused verdict to a run, and it would name whichever one the caller
+  // happened to list first.
+  const runs = (Array.isArray(checkRuns) ? checkRuns : [])
+    .slice()
+    .sort((a, b) => checkRunTime(b) - checkRunTime(a));
 
   for (const c of runs) {
     if (!c || c.name !== CHECK_NAME) continue;
+    // Same SHA only. A prior run on a DIFFERENT commit reviewed a different merge
+    // result even when the diff text is byte-identical (#1394).
+    if (c.head_sha !== headSha) continue;
     const slug = c.app && c.app.slug;
     const identities = [slug, slug ? `${slug}[bot]` : null].filter(Boolean);
     if (!identities.some((i) => allowed.includes(i))) continue;
@@ -574,7 +612,7 @@ function selectVotersToRun({ roles, checkRuns, patchHash, allowlist } = {}) {
       if (!Object.prototype.hasOwnProperty.call(records, role)) continue;
       reuse[role] = records[role];
       notes.push(
-        `reusing ${role}: same patch, verdict recorded on ${String(c.head_sha).slice(0, 8)}`,
+        `reusing ${role}: same patch and same head ${String(c.head_sha).slice(0, 8)}`,
       );
     }
   }
