@@ -422,6 +422,126 @@ function parsePatchFingerprint(text) {
   return m ? m[1] : null;
 }
 
+const VOTER_RECORD_PREFIX = 'voter-record:';
+
+/**
+ * Render one voter's verdict block for storage on the ai-review check-run output.
+ *
+ * Shape: `voter-record:<role>:<sha256 of block>:<base64 of block>`. The digest is not
+ * security - provenance comes from the check-run's `app.slug` - it is a TRUNCATION
+ * detector. Check-run output has a hard size limit, four voter blocks can approach it,
+ * and a half-written record must be unusable rather than silently short. Base64 keeps
+ * newlines and markdown fences out of the surrounding markdown, and contains no `:`,
+ * so the field separator stays unambiguous.
+ */
+function renderVoterRecord(role, block) {
+  const r = String(role == null ? '' : role);
+  if (!/^[a-z][a-z0-9-]*$/.test(r)) return '';
+  const body = String(block == null ? '' : block);
+  if (body.trim() === '') return ''; // a silent voter is never a survivor
+  const crypto = require('crypto');
+  const digest = crypto.createHash('sha256').update(body, 'utf8').digest('hex');
+  return `${VOTER_RECORD_PREFIX}${r}:${digest}:${Buffer.from(body, 'utf8').toString('base64')}`;
+}
+
+/**
+ * Read voter records back out of check-run output text.
+ *
+ * A record whose payload does not hash to its own digest is DROPPED, not repaired: that
+ * is the truncated-output case, and a partially-recovered verdict block is exactly the
+ * kind of plausible-but-wrong artifact this repo keeps getting bitten by. First record
+ * for a role wins, so callers pass check-runs newest-first.
+ */
+function parseVoterRecords(text) {
+  const out = {};
+  const re = new RegExp(`${VOTER_RECORD_PREFIX}([a-z][a-z0-9-]*):([0-9a-f]{64}):([A-Za-z0-9+/=]+)`, 'g');
+  const src = String(text == null ? '' : text);
+  const crypto = require('crypto');
+  let m;
+  while ((m = re.exec(src)) !== null) {
+    const [, role, digest, b64] = m;
+    if (Object.prototype.hasOwnProperty.call(out, role)) continue;
+    let decoded;
+    try {
+      decoded = Buffer.from(b64, 'base64').toString('utf8');
+    } catch (_) {
+      continue;
+    }
+    if (decoded.trim() === '') continue;
+    if (crypto.createHash('sha256').update(decoded, 'utf8').digest('hex') !== digest) continue;
+    out[role] = decoded;
+  }
+  return out;
+}
+
+/**
+ * Which voters must run, and which may reuse a verdict already produced for this exact
+ * patch (#2142).
+ *
+ * DELIBERATELY DOES NOT require the prior check-run to be `completed` + `success`, which
+ * is where this parts company with findReattestableVerdict below. That function reuses a
+ * whole PASS, so success is the point. Here the prior run FAILED overall - one voter went
+ * silent and the panel fail-closed to `changes` - and that is precisely the run whose
+ * survivors are worth keeping. Requiring success would disable reuse exactly when it is
+ * needed.
+ *
+ * What it does require, and why each one:
+ *   - an allowlisted `app.slug`: a verdict record in a PUBLIC repo is forgeable, so the
+ *     server-attested producer identity is the only thing making it trustworthy;
+ *   - the SAME patch fingerprint: the voter must have been looking at this input;
+ *   - a record that round-trips its digest: see parseVoterRecords.
+ *
+ * It CANNOT upgrade a verdict, because it copies the block verbatim and the caller
+ * re-combines; a reused `changes` stays `changes`. And a voter with no usable record is
+ * never a survivor, so silence always costs a re-run rather than being inherited.
+ *
+ * Note this reuses within ONE head SHA. The gate's claim - that these voters reviewed
+ * this SHA - stays literally true, so unlike #1840 there is no base-moved semantics to
+ * trade away.
+ */
+function selectVotersToRun({ roles, checkRuns, patchHash, allowlist } = {}) {
+  const wanted = Array.isArray(roles) ? roles.slice() : [];
+  const notes = [];
+  const reuse = {};
+
+  if (!patchHash) {
+    notes.push('no patch fingerprint for this head, so every voter runs');
+    return { run: wanted, reuse, notes };
+  }
+  const allowed = Array.isArray(allowlist) ? allowlist.filter(Boolean) : [];
+  if (allowed.length === 0) {
+    notes.push('empty reviewer allowlist, so nothing is reused');
+    return { run: wanted, reuse, notes };
+  }
+  const runs = Array.isArray(checkRuns) ? checkRuns : [];
+
+  for (const c of runs) {
+    if (!c || c.name !== CHECK_NAME) continue;
+    const slug = c.app && c.app.slug;
+    const identities = [slug, slug ? `${slug}[bot]` : null].filter(Boolean);
+    if (!identities.some((i) => allowed.includes(i))) continue;
+    const text = [c.output && c.output.title, c.output && c.output.summary, c.output && c.output.text]
+      .filter(Boolean)
+      .join('\n');
+    if (parsePatchFingerprint(text) !== patchHash) continue;
+    const records = parseVoterRecords(text);
+    for (const role of wanted) {
+      if (Object.prototype.hasOwnProperty.call(reuse, role)) continue;
+      if (!Object.prototype.hasOwnProperty.call(records, role)) continue;
+      reuse[role] = records[role];
+      notes.push(
+        `reusing ${role}: same patch, verdict recorded on ${String(c.head_sha).slice(0, 8)}`,
+      );
+    }
+  }
+
+  const run = wanted.filter((r) => !Object.prototype.hasOwnProperty.call(reuse, r));
+  for (const role of run) {
+    notes.push(`running ${role}: no usable prior verdict for this patch`);
+  }
+  return { run, reuse, notes };
+}
+
 /**
  * Is there a prior, provenance-verified PASS for this exact patch?
  *
@@ -1123,6 +1243,10 @@ module.exports = {
   parsePatchFingerprint,
   findReattestableVerdict,
   PATCH_FINGERPRINT_PREFIX,
+  VOTER_RECORD_PREFIX,
+  renderVoterRecord,
+  parseVoterRecords,
+  selectVotersToRun,
   parseResetInstant,
   VERDICT_SCHEMA,
   defangProtocolTokens,
