@@ -735,8 +735,8 @@ DR-072 gave a triage-held issue a human exit, but only for the tier hold: human_
 
 *Status: accepted · Date: 2026-09-06*
 
-<!-- dr-summary:DR-092 auto=000000000000 -->
-MinSpec: Refresh Harness Files writes the templates baked into the running bundle, with no notion of newer or older. A refresh from a stale build rewrote three of a consuming repo's managed files backwards, deleting a no-silent-gate block, while the extension version string stayed identical across the three merges it was missing. Direction is a question the refresh has never asked.
+<!-- dr-summary:DR-092 auto=80e5aba9e2d1 -->
+Four properties of the current code turn "stale" into "destructive". Each is cited because the fix has to change a specific one: 1. **A stale build does not skip; it writes.** For a Markdown harness section the merge ends at merge-refresh.ts:953-957 — a section "proven unmodified against the recorded baseline" takes *whatever the running bundle renders*. For a managed region there is no baseline consulted at all: scaffold.ts:952-957 splices the running bundle's block in whenever the bytes differ. Both branches…
 <!-- /dr-summary:DR-092 -->
 
 ## [DR-093 — A fail-closed gate may refresh its own witness, because a witness only an absent human can produce turns "fail closed" into "never run"](DR-093.md)
