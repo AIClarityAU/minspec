@@ -63,6 +63,7 @@ import {
 } from '../packages/minspec/src/lib/approval';
 import { sidecarPath } from '../packages/minspec/src/lib/approval-store';
 import { isValidOwnedPath } from '../packages/minspec/src/lib/ownership-path-rules';
+import { walkOptionalRoot } from './lib/corpus-walk';
 import { type ArtifactKind } from '../packages/minspec/src/lib/status-parity';
 import { ADR_STATUS_VALUES } from '../packages/minspec/src/lib/adr-manager';
 import { listSpecs, type SpecSummary } from '../packages/minspec/src/lib/spec-catalog';
@@ -278,21 +279,15 @@ function detectArtifactKind(rel: string, id: string | undefined): ArtifactKind {
   return 'spec';
 }
 
-/** Recursively collect every `.md` file under `dir` (specsDir walk). */
+/**
+ * Recursively collect every `.md` file under `dir` (specsDir walk).
+ *
+ * An absent `dir` yields `[]`; every other read failure propagates. Swallowing them made
+ * `facts owns` answer "no owner" for a corpus it never managed to read (#1999), in the
+ * tool CLAUDE.md points at for authoritative answers.
+ */
 function walkMarkdownFiles(dir: string): string[] {
-  const out: string[] = [];
-  let entries: fs.Dirent[];
-  try {
-    entries = fs.readdirSync(dir, { withFileTypes: true });
-  } catch {
-    return out;
-  }
-  for (const e of entries) {
-    const full = path.join(dir, e.name);
-    if (e.isDirectory()) out.push(...walkMarkdownFiles(full));
-    else if (e.name.endsWith('.md')) out.push(full);
-  }
-  return out;
+  return walkOptionalRoot(dir, '.md');
 }
 
 // ─── facts hash <spec> ────────────────────────────────────────────────────────
