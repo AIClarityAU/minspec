@@ -832,6 +832,90 @@ test('parseBlockedBy: a ref on a LATER line is not swept into an earlier declara
   assert.deepEqual(parseBlockedBy('Blocked by #1225\n\nAlso relates to #4242.'), [1225]);
 });
 
+// minspec#2134 — BLOCKED_BY_LINE_RE catastrophic backtracking. THREE distinct
+// mechanisms were found across two rounds of hardening (see the full writeup on
+// BLOCKED_BY_LINE_RE's definition in ai-review-guard.js — this comment only
+// carries the input shapes and budgets):
+//   1. `*` overlapped BOTH the leading class `[\s>*_-]*` and the adjacent `\**`.
+//   2. Round 1's fix left `\s` overlapping the leading class and the `\s*` right
+//      after `\**` — found in review of round 1, NOT by round 1's own test, which
+//      exercised only the asterisk alphabet and could not have told "closed" apart
+//      from "one of two vectors closed".
+//   3. Found while fixing #2: `\s` matches line terminators, and the `m` flag
+//      makes `^` succeed after every one — so an all-newline body gives the engine
+//      O(n) valid anchor points, each doing unbounded work.
+//
+// All three get their own test below for exactly the reason #2 exists at all:
+// `parseBlockedBy` returns the identical CORRECT answer ([]) under every
+// vulnerable variant and the final fix — the bug is purely a wall-clock hazard,
+// so a correctness-only assertion is not evidence of anything. Each budget is set
+// with a wide margin on both sides so a loaded CI runner cannot make it flaky: the
+// fixed pattern measures well under 1ms on every one of these inputs, while the
+// pattern committed for the PREVIOUS round of this fix (mutation-tested by
+// temporarily restoring it) measured multiple SECONDS on every one of them —
+// orders of magnitude past the budget, not a coin-flip 2x that noise could erase.
+function timeParseBlockedBy(body) {
+  const start = process.hrtime.bigint();
+  const result = parseBlockedBy(body);
+  const elapsedMs = Number(process.hrtime.bigint() - start) / 1e6;
+  return { result, elapsedMs };
+}
+
+test('parseBlockedBy: a pathological run of leading asterisks does not cause catastrophic backtracking (ReDoS, minspec#2134, mechanism 1)', () => {
+  const n = 40000; // ~40KB — comfortably inside GitHub's ~65KB PR body cap
+  const body = `Normal preamble line.\n${'*'.repeat(n)}`;
+  const budgetMs = 300; // fixed: <1ms measured. Previous-round pattern: ~4000ms measured.
+
+  const { result, elapsedMs } = timeParseBlockedBy(body);
+  // No declaration in this body, so the correct answer is the empty array either
+  // way — it is the TIMING assertion below that distinguishes fixed from vulnerable.
+  assert.deepEqual(result, []);
+  assert.ok(
+    elapsedMs < budgetMs,
+    `parseBlockedBy took ${elapsedMs.toFixed(1)}ms on a crafted input (budget ${budgetMs}ms) — ` +
+      'this is the catastrophic-backtracking signature of BLOCKED_BY_LINE_RE regressing to ' +
+      'minspec#2134 mechanism 1 (`*` overlapping the leading class and `\\**`), not a slow CI runner',
+  );
+});
+
+test('parseBlockedBy: a pathological run of leading whitespace does not cause catastrophic backtracking (ReDoS, minspec#2134, mechanism 2)', () => {
+  const n = 60000; // ~60KB — comfortably inside GitHub's ~65KB PR body cap
+  // Mixed spaces/tabs, not a single repeated character, so the fixture can't be
+  // read as accidentally exercising mechanism 1 instead.
+  const whitespace = Array.from({ length: n }, (_, i) => (i % 2 === 0 ? ' ' : '\t')).join('');
+  const body = `Normal preamble line.\n${whitespace}`;
+  const budgetMs = 300; // fixed: <1ms measured. Round-1 pattern: ~4050ms measured.
+
+  const { result, elapsedMs } = timeParseBlockedBy(body);
+  assert.deepEqual(result, []);
+  assert.ok(
+    elapsedMs < budgetMs,
+    `parseBlockedBy took ${elapsedMs.toFixed(1)}ms on a crafted input (budget ${budgetMs}ms) — ` +
+      'this is the catastrophic-backtracking signature of BLOCKED_BY_LINE_RE regressing to ' +
+      'minspec#2134 mechanism 2 (`\\s` overlapping the leading class and the `\\s*` after `\\**`), ' +
+      'not a slow CI runner',
+  );
+});
+
+test('parseBlockedBy: a pathological run of leading newlines does not cause catastrophic backtracking (ReDoS, minspec#2134, mechanism 3)', () => {
+  // Far fewer repeats needed here: every repeat is BOTH a matchable character
+  // AND a fresh `^` anchor point under the `m` flag, so the round-1 pattern's
+  // blowup compounds much faster per byte than mechanisms 1 or 2 did.
+  const n = 2000;
+  const body = `Normal preamble line.\n${'\n'.repeat(n)}`;
+  const budgetMs = 300; // fixed: <1ms measured. Round-1 pattern: ~3000ms measured at this SAME n.
+
+  const { result, elapsedMs } = timeParseBlockedBy(body);
+  assert.deepEqual(result, []);
+  assert.ok(
+    elapsedMs < budgetMs,
+    `parseBlockedBy took ${elapsedMs.toFixed(1)}ms on a crafted input (budget ${budgetMs}ms) — ` +
+      'this is the catastrophic-backtracking signature of BLOCKED_BY_LINE_RE regressing to ' +
+      'minspec#2134 mechanism 3 (an unbounded quantifier re-attempted at every multiline anchor), ' +
+      'not a slow CI runner',
+  );
+});
+
 test('shouldMarkBlockedBy: true only when a blocker is still open', () => {
   assert.equal(shouldMarkBlockedBy({ openBlockers: [1225] }), true);
   assert.equal(shouldMarkBlockedBy({ openBlockers: [] }), false);
