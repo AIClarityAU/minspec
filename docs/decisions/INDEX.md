@@ -732,14 +732,16 @@ DR-072 gave a triage-held issue a human exit, but only for the tier hold: human_
 <!-- /dr-summary:DR-091 -->
 
 ## [DR-092 — A harness refresh may only move a project forward — the build must carry an ordered template identity, and an unordered one holds the write](DR-092.md)
+
 *Status: proposed · Date: 2026-09-06*
+
 <!-- dr-summary:DR-092 auto=000000000000 -->
 MinSpec: Refresh Harness Files writes the templates baked into the running bundle, with no notion of newer or older. A refresh from a stale build rewrote three of a consuming repo's managed files backwards, deleting a no-silent-gate block, while the extension version string stayed identical across the three merges it was missing. Direction is a question the refresh has never asked.
 <!-- /dr-summary:DR-092 -->
 
 ## [DR-093 — A fail-closed gate may refresh its own witness, because a witness only an absent human can produce turns "fail closed" into "never run"](DR-093.md)
 
-*Status: proposed · Date: 2026-09-09*
+*Status: accepted · Date: 2026-09-09*
 
 <!-- dr-summary:DR-093 auto=732512d00014 -->
 The drain's admission control gates on a quota reading at ~/.claude/quota.json. The reading's only producers were **interactive** surfaces - a rendering statusline - while the drain that consumes it runs **unattended**. Measured 2026-09-09 (#1859): the file was **49 hours stale** while holding "used_percentage": 3.0. Over 100 issues carried agent-ready / agent-ready-specify and none dispatched. The pipeline had been dead for days and presented as a quiet week.
