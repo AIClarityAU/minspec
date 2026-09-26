@@ -1356,6 +1356,21 @@ if [ "\${EMAIL_GATE_OFF:-0}" != "1" ]; then
     echo "  Bypass (rare): EMAIL_GATE_OFF=1 git commit ..." >&2
     exit 1
   fi
+  # rc 0 means the key IS set, even when \`git config minspec.allowedCommitEmails ""\`
+  # (a bootstrap script that forgot to fill in its \$EMAILS var produces exactly this
+  # shape) left it empty. That must not fold back into rc 1's "never configured" —
+  # it is opted in with a witness that can admit nothing, so like the unreadable
+  # config above it refuses visibly rather than silently no-op'ing (constitution
+  # invariant 2: no silent gate).
+  if [ "$minspec_allowed_rc" -eq 0 ] && [ -z "\${minspec_allowed_emails:-}" ]; then
+    echo "✗ MinSpec gate: minspec.allowedCommitEmails is set but names no address." >&2
+    echo "  An allowlist that admits nothing would refuse every commit, so this is" >&2
+    echo "  treated as a misconfiguration rather than opted out." >&2
+    echo "  Fix:  git config minspec.allowedCommitEmails <address> [<address> ...]" >&2
+    echo "        or turn this gate off: git config --unset-all minspec.allowedCommitEmails" >&2
+    echo "  Bypass (rare): EMAIL_GATE_OFF=1 git commit ..." >&2
+    exit 1
+  fi
   if [ -n "\${minspec_allowed_emails:-}" ]; then
     if ! minspec_author_ident=$(git var GIT_AUTHOR_IDENT); then
       echo "✗ MinSpec gate: cannot determine the author identity git will record (git var GIT_AUTHOR_IDENT failed)." >&2
@@ -1405,8 +1420,23 @@ if [ "\${EMAIL_GATE_OFF:-0}" != "1" ]; then
       echo "" >&2
       minspec_fix="git config $minspec_cfg_key <one of the allowed addresses above>"
       if [ -z "\${minspec_cfg_email:-}" ]; then
-        echo "  No author.email or user.email is configured, so git fell back to the" >&2
-        echo "  EMAIL environment variable (or <user>@<hostname>)." >&2
+        # Neither author.email nor user.email is set, so there is nothing here to
+        # compare the recorded author against — unlike the elif below. That does NOT
+        # mean the EMAIL fallback is the cause: git exports whichever source it used
+        # (GIT_AUTHOR_EMAIL, --author, an --amend / -C that kept an earlier commit's
+        # author) into THIS hook's environment as GIT_AUTHOR_EMAIL before running it
+        # (determine_author_info()), so \`git var GIT_AUTHOR_IDENT\` reports the same
+        # value regardless of which source produced it and this hook cannot tell them
+        # apart by reading its own environment. Those overrides outrank the EMAIL
+        # fallback and <user>@<hostname>, so they are the likelier explanation — and
+        # are the exact "ambient email shadowing the real one" case from the header
+        # above — not just a possible one, so the Fix leads with undoing them.
+        echo "  Neither author.email nor user.email is configured. The recorded address" >&2
+        echo "  most likely came from GIT_AUTHOR_EMAIL in the environment, git commit" >&2
+        echo "  --author, or an --amend / -C that kept an earlier commit's author —" >&2
+        echo "  those all outrank the EMAIL environment variable and <user>@<hostname>," >&2
+        echo "  which apply only if none of them do." >&2
+        minspec_fix="unset GIT_AUTHOR_EMAIL, drop --author, or add --reset-author; if none of those apply: git config $minspec_cfg_key <one of the allowed addresses above>"
       elif [ "$minspec_cfg_email" != "$minspec_author_email" ]; then
         echo "  git config $minspec_cfg_key is '$minspec_cfg_email', but this commit's author overrides it:" >&2
         echo "  GIT_AUTHOR_EMAIL in the environment, git commit --author, or an --amend / -C" >&2
