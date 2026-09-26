@@ -70,8 +70,35 @@ lease_self_sid() {
   if [[ -n "${MINSPEC_LEASE_SID:-}" ]]; then printf '%s' "$MINSPEC_LEASE_SID"; return 0; fi
   local sid="${MINSPEC_SESSION_ID:-}"
   if [[ -z "$sid" ]]; then
-    sid="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "sid-$$-$(date -u +%s 2>/dev/null || echo 0)")"
+    # DERIVED, not minted (#2132). An earlier cut minted a fresh UUID and memoised it
+    # with `export`, but every caller reaches this through command substitution
+    # (`sid="$(lease_self_sid)"`), so the export died with that subshell and the NEXT
+    # call returned a different id. EVERY consumer reaches it that way - all seven of
+    # lease_worktree_path, lease_acquire, lease_renew, lease_verify_holds,
+    # lease_release, lease_release_all and lease_reclaim_q - so the whole lease
+    # machinery was inert, in three distinct ways:
+    #   • lease_verify_holds compared a brand-new sid against the claim it had just
+    #     written, never reached `own`, and shepherd_decide therefore returned
+    #     `stand-down` for every PR the session opened itself.
+    #   • lease_renew wrote its renewal under a different sid than the claim it meant
+    #     to renew, so no claim was ever actually renewed and every one self-expired.
+    #   • lease_release and lease_release_all could not find their own claim to retract.
+    #
+    # Deriving instead of minting removes the need for a memo at all. `$$` is the
+    # INVOKING shell's pid and is stable across command substitution (unlike
+    # `$BASHPID`), so it survives the very subshell that broke the export. Process
+    # start time disambiguates a recycled pid, so a stale claim left by a dead process
+    # whose pid has since been reused is never mistaken for our own (INV-1
+    # exactly-one-owner). Two LIVE racers cannot collide because pids are unique among
+    # live processes.
+    #
+    # If /proc is unreadable the id stays stable and merely loses the pid-reuse guard.
+    local start
+    start="$(awk '{ sub(/^.*\) /, ""); print $20 }' "/proc/$$/stat" 2>/dev/null || true)"
+    sid="sid-$$-${start:-0}"
   fi
+  # No longer load-bearing - kept so a caller that DOES invoke this in its own scope
+  # passes the id down to children rather than re-deriving it.
   export MINSPEC_LEASE_SID="$sid"
   printf '%s' "$sid"
 }
