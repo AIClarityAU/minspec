@@ -50,6 +50,7 @@ import type { ClassificationSignal } from '../packages/minspec/src/lib/classifie
 import { renderReviewSignals } from '../packages/shared/src/review-signals';
 import type { ReviewSignalsInput } from '../packages/shared/src/review-signals';
 import {
+  MACHINERY_CARVE_OUTS,
   MACHINERY_DIR_PREFIXES,
   MACHINERY_SINGLE_FILES,
 } from '../packages/minspec/src/lib/machinery-paths';
@@ -576,6 +577,30 @@ const BOUNDARY_DIR_PREFIXES: readonly string[] = [...MACHINERY_DIR_PREFIXES];
 const BOUNDARY_SINGLE_FILES: ReadonlySet<string> = new Set(MACHINERY_SINGLE_FILES);
 
 /**
+ * The {@link MACHINERY_CARVE_OUTS} exemptions (#2018), wired in HERE and not only in
+ * `isMachineryPath()`.
+ *
+ * This is the reason the carve-out is not a one-file change. `BOUNDARY_DIR_PREFIXES` and
+ * `BOUNDARY_SINGLE_FILES` spread the canonical ARRAYS, not the canonical PREDICATE, so a
+ * third array added to `machinery-paths.ts` is invisible to this gate unless it is
+ * imported by name — the same "it compiles, it passes, it changes nothing" shape that
+ * makes a carve-out added only to the canonical module inert.
+ *
+ * SCOPE OF THE EXEMPTION HERE, stated because this set is a deliberate SUPERSET of the
+ * machinery set. Carving a path out of the boundary set means a diff touching only that
+ * path no longer gets the gate-injected `manifest_changed` high-blast signal. That is the
+ * intended effect and it is narrow: #422's concern is code that DEFINES the CI/build
+ * pipeline, not code a test happens to execute — by the latter reading every source file
+ * with a test would be boundary. A carved path is still boundary at any NESTED occurrence
+ * under a vendored tree, because the exemption is an exact repo-relative literal.
+ *
+ * Deliberately not naming an example path here: the rot guard fails on ANY occurrence of
+ * a carved path under `scripts/`, prose included, and it is right to — a comment is where
+ * a reference starts before it becomes a call.
+ */
+const BOUNDARY_CARVE_OUTS: ReadonlySet<string> = new Set(MACHINERY_CARVE_OUTS);
+
+/**
  * Root CI-provider configs matched by basename (not tied to a directory prefix).
  */
 const BOUNDARY_ROOT_BASENAMES: ReadonlySet<string> = new Set([
@@ -667,6 +692,10 @@ const BOUNDARY_CONFIG_BASENAMES: ReadonlySet<string> = new Set(['.npmrc', '.yarn
  *     / scripts → supply-chain surface);
  *   - TypeScript compiler config: `tsconfig*.json` (build & type-safety boundary).
  *
+ * …EXCEPT an exact {@link BOUNDARY_CARVE_OUTS} path (#2018) — the one place this
+ * predicate says NO to something a prefix said yes to. It is checked first and it is the
+ * only subtractive rule here; everything else below is additive.
+ *
  * Deny-by-default (#422): match HIGH on any doubt for CI/build config — erring
  * high costs a 30s human skim; erring low costs arbitrary CI code (or a silent
  * build/registry pivot) on `main`. Does NOT rely on SENSITIVE_TERMS (`curl` trips
@@ -674,6 +703,8 @@ const BOUNDARY_CONFIG_BASENAMES: ReadonlySet<string> = new Set(['.npmrc', '.yarn
  */
 export function isBoundaryPath(rawPath: string): boolean {
   const p = rawPath.replace(/\\/g, '/').replace(/^\.\//, '');
+  // #2018 — exemptions first, by exact path, for the reasons in BOUNDARY_CARVE_OUTS.
+  if (BOUNDARY_CARVE_OUTS.has(p)) return false;
   for (const prefix of BOUNDARY_DIR_PREFIXES) {
     if (p === prefix.slice(0, -1) || p.startsWith(prefix) || p.includes('/' + prefix)) return true;
   }
