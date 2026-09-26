@@ -18,6 +18,7 @@ import { EpicGroupingState, EpicGroupNode, buildEpicGroups } from './epic-groupi
 import type { ListEpicsFn } from './epic-grouping';
 import { TreeExpansionMemory } from './tree-expansion-memory';
 import { listSpecs } from '../lib/spec-catalog';
+import { isTerminalSpecStatus } from '../lib/spec-vocabulary';
 
 // --- Status grouping ---
 
@@ -167,11 +168,15 @@ export class SpecNode extends vscode.TreeItem {
     const phaseLabel = spec.currentPhase ?? 'complete';
     const pct = spec.phasesTotal > 0 ? Math.round((spec.phasesDone / spec.phasesTotal) * 100) : 100;
     const meter = progressMeter(spec.phasesDone, spec.phasesTotal);
-    const terminal = spec.status === 'done' || spec.status === 'archived';
+    // #440: ONE shared definition of terminal, not a literal that can drift from
+    // STATUS_GROUPS above (which already calls `superseded` "an explicit terminal
+    // like `archived`") or from the approve pickers, which used to disagree with it.
+    const terminal = isTerminalSpecStatus(spec.status);
 
     // Approval state shows on the ALWAYS-VISIBLE left icon, not the description.
     // The description is dimmed + truncated-first, so a trailing badge vanished
-    // at normal pane widths. Terminal specs (done/archived) are past the gate, so
+    // at normal pane widths. Terminal specs (done/archived/superseded) are past the
+    // gate, so
     // they keep their status icon and show no approval marker.
     //   approved \u2192 \ud83d\udd12 (lock = content sealed; editing voids it). NOT \u2714 \u2014 a check
     //   misreads as "done" on a spec that is only approved-to-build (signpost-lie).
@@ -209,7 +214,7 @@ export class SpecNode extends vscode.TreeItem {
           arguments: [vscode.Uri.file(spec.filePath), { preview: true, preserveFocus: false }],
         };
 
-    // Context value drives menu visibility. Terminal specs (done/archived) are
+    // Context value drives menu visibility. Terminal specs (done/archived/superseded) are
     // past the DR-012 approve-before-implement gate, so they expose no approval
     // action at all. Otherwise the suffix encodes approval state so Revoke shows
     // only on approved specs, and (SPEC-029) 'specNode.stale' scopes the
@@ -450,7 +455,7 @@ export class SpecTreeProvider implements vscode.TreeDataProvider<SpecTreeNode> {
    * to STATUS_GROUPS (INV — Orthogonal axes — no SpecStatus value is added,
    * STATUS_GROUPS is untouched). Live-derived on every call (FR-2 — no
    * persisted state). The terminal guard is load-bearing: getApprovalStatus is
-   * purely hash-based and would otherwise resolve 'stale' for a done/archived
+   * purely hash-based and would otherwise resolve 'stale' for a terminal
    * spec whose sidecar hash drifted post-terminal — mirrors SpecNode's own
    * `terminal` predicate so such a spec never enters this group (matching
    * requirements.md's Failure-Modes: "a terminal spec never enters the
@@ -458,7 +463,7 @@ export class SpecTreeProvider implements vscode.TreeDataProvider<SpecTreeNode> {
    */
   private getNeedsReapprovalGroup(root: string, allSpecs: SpecSummary[]): SpecGroupNode | null {
     const stale = allSpecs.filter(
-      s => s.status !== 'done' && s.status !== 'archived' && this.safeApproval(root, s) === 'stale',
+      s => !isTerminalSpecStatus(s.status) && this.safeApproval(root, s) === 'stale',
     );
     if (stale.length === 0) return null; // FR-4: non-empty-only
     return new SpecGroupNode(

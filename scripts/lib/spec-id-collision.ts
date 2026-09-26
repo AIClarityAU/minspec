@@ -60,7 +60,7 @@ export function canonicalSpecId(num: string): string {
 export function declaredSpecId(content: string): string | undefined {
   const block = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!block) return undefined;
-  const m = block[1].match(/^id:\s*(\S+)\s*$/m);
+  const m = block[1].match(/^id:[ \t]*(\S+)\s*$/m);
   return m ? m[1] : undefined;
 }
 

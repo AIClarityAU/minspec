@@ -480,3 +480,56 @@ describe('#1847 — the status gate matches any status: line, not only frontmatt
     expect(r.status).toBe(0);
   });
 });
+
+describe('#1968 — a witness-failure refusal also revokes a prior arming', () => {
+  /**
+   * The block above pinned the two CONTENT refusals (non-docs path, outward-facing doc).
+   * It left the three WITNESS-failure exits unpinned, and they were the ones that
+   * regressed: each prints "refusing to arm" and exits, which is correct only for a PR
+   * that was never armed. On an armed PR it is a no-op, so the arming survives a refusal
+   * — the same stickiness the #1741 note at the top of this file is about.
+   *
+   * The existing witness-failure tests asserted the WEAKER half of the property: they
+   * set no prior arming and checked only that the lane did not arm. The fixture already
+   * supported `armed`; nothing asked for it. That is how the hole shipped — not an
+   * unexercised path, an under-asserted one.
+   *
+   * Pinned behaviourally rather than by asserting a trap is present in the source: a
+   * textual assertion passes whenever the trap survives, including after someone moves
+   * it below the first refusal, where it no longer covers anything.
+   */
+  const ARMED = '2026-09-05T22:09:34Z';
+
+  it('disarms when the filenames witness fails on an armed PR', () => {
+    const r = runLane({
+      files: [{ filename: 'docs/epics/EP-1.md', patch: DR_TYPO_PATCH }],
+      labels: ['docs-lane'],
+      armed: ARMED,
+      failApi: 'filenames',
+    });
+    expect(disarmed(r), 'an unreadable file list must not leave an arming standing').toBe(true);
+    expect(r.status).toBe(1);
+  });
+
+  it('disarms when the labels witness fails on an armed PR', () => {
+    const r = runLane({
+      files: [{ filename: 'docs/epics/EP-1.md', patch: DR_TYPO_PATCH }],
+      labels: ['docs-lane'],
+      armed: ARMED,
+      failApi: 'labels',
+    });
+    expect(disarmed(r), 'an unreadable hold witness must not leave an arming standing').toBe(true);
+    expect(r.status).toBe(1);
+  });
+
+  it('disarms when the patch witness fails on an armed PR', () => {
+    const r = runLane({
+      files: [{ filename: 'docs/decisions/DR-050.md', patch: DR_STATUS_PATCH }],
+      labels: ['docs-lane'],
+      armed: ARMED,
+      failApi: 'patches',
+    });
+    expect(disarmed(r), 'an unreadable patch witness must not leave an arming standing').toBe(true);
+    expect(r.status).toBe(1);
+  });
+});

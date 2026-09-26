@@ -101,4 +101,32 @@ describe('#811 — MinSpec SDD validation is a fail-closed required check (DR-06
     // every PR on a context that no longer reports.
     expect(WORKFLOW).toContain('name: MinSpec SDD validation');
   });
+
+  it('fires on merge_group, so a merge queue can green the required check (#1394)', () => {
+    // A required context that never reports on the merge-group event does not FAIL a merge
+    // queue - it stalls it, because the queue evaluates a synthetic merge commit that
+    // neither `push` nor `pull_request` fires for. This trigger was present in this repo's
+    // own workflow and absent from the shipped template, so a Refresh would have stripped
+    // it from any adopter that had added it (#1888).
+    const onStart = WORKFLOW.indexOf('\non:');
+    const onEnd = WORKFLOW.indexOf('\npermissions:');
+    expect(onStart).toBeGreaterThan(-1);
+    expect(onEnd).toBeGreaterThan(onStart);
+    const onBlock = WORKFLOW.slice(onStart, onEnd);
+    expect(onBlock).toContain('push:');
+    expect(onBlock).toContain('pull_request:');
+    expect(onBlock).toContain('merge_group:');
+  });
+
+  it('keeps its managed prose adopter-true: cross-repo refs qualified, no minspec-only file (DR-090)', () => {
+    // DR-090: prose inside a managed file is shipped code and must hold in the repo that
+    // RECEIVES it. A bare `#1394` resolves to the ADOPTER's issue 1394, and the live
+    // workflow's "see ci.yml" names a file that exists only here.
+    const refPrefixes = [...WORKFLOW.matchAll(/(\S*)#1394/g)].map((m) => m[1]);
+    expect(refPrefixes.length).toBeGreaterThan(0); // non-vacuous: the ref must be present
+    for (const prefix of refPrefixes) {
+      expect(prefix, `bare cross-repo ref "#1394" must be qualified`).toContain('minspec');
+    }
+    expect(WORKFLOW).not.toContain('ci.yml');
+  });
 });

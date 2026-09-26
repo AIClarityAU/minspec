@@ -215,7 +215,7 @@ describe('approve command — filter by approval status', () => {
 
     expect(vscode.window.showQuickPick).not.toHaveBeenCalled();
     expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-      'MinSpec: No specs awaiting approval — all are already approved.',
+      'MinSpec: No specs awaiting approval — all are already approved or past the gate (done/archived/superseded).',
     );
   });
 
