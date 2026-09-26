@@ -217,11 +217,41 @@ if [ "${LOCK_GATE_OFF:-}" != "1" ]; then
 fi
 
 if [ "${ADR_BORN_GATE_OFF:-}" != "1" ]; then
+  # `--diff-filter=A` is computed against HEAD alone, so during a merge every DR
+  # the OTHER parent already carries is absent from HEAD and reads as newly
+  # added — then judged on a `status:` the founder accepted weeks ago (#2057).
+  # The false positive is systematic, not incidental: it fires on every
+  # merge-from-main into a branch older than the most recent DR acceptance, and
+  # the only documented escape is ADR_BORN_GATE_OFF — so the gate was training
+  # the reflexive override-setting that #1043 was filed to stop.
+  #
+  # A file this commit did not author is byte-identical to one of the parents.
+  # Only a DR whose content differs from BOTH parents was written here. Absence
+  # from HEAD is already implied by `--diff-filter=A`, so only the incoming
+  # parents need checking. A conflicted path has no stage-0 blob, so it matches
+  # nothing and stays judged — the unknown case fails toward checking, not past it.
+  born_git_dir=$(git rev-parse --git-dir 2>/dev/null || true)
+  born_parents=""
+  if [ -n "${born_git_dir:-}" ] && [ -e "$born_git_dir/MERGE_HEAD" ]; then
+    born_parents=$(cat "$born_git_dir/MERGE_HEAD" 2>/dev/null || true)
+  fi
   while IFS=$'\t' read -r _status path; do
     case "$path" in
       docs/decisions/DR-*.md) ;;
       *) continue ;;
     esac
+    if [ -n "${born_parents:-}" ]; then
+      born_staged=$(git rev-parse ":$path" 2>/dev/null || true)
+      born_inherited=0
+      for born_parent in $born_parents; do
+        born_parent_blob=$(git rev-parse "$born_parent:$path" 2>/dev/null || true)
+        if [ -n "${born_staged:-}" ] && [ "$born_staged" = "${born_parent_blob:-}" ]; then
+          born_inherited=1
+          break
+        fi
+      done
+      if [ "$born_inherited" = "1" ]; then continue; fi
+    fi
     born=$(git show ":$path" | grep -m1 -E '^status:' | sed -E 's/^status:[[:space:]]*//; s/[[:space:]]*#.*//; s/[[:space:]]*$//')
     if [ "$born" != "proposed" ] && [ "$born" != "draft" ]; then
       echo "✖ DR-029 gate: new DR '$path' is born 'status: ${born:-<none>}' — must be 'proposed'." >&2
