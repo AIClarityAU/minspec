@@ -422,18 +422,17 @@ function parsePatchFingerprint(text) {
   return m ? m[1] : null;
 }
 
+// The review protocol's control tokens. Named here so this module has ONE definition
+// instead of two, and so a cross-file test can pin them against the other sites that
+// hardcode the same literals - scripts/review-decide.sh, scripts/review-branch.sh and
+// .github/workflows/ai-review.yml. They cannot be IMPORTED there (two of the three are
+// bash), so a shared constant cannot be the mechanism; the test is (#2163 review).
+const VERDICT_BEGIN_TOKEN = 'REVIEW_VERDICT_BEGIN';
+const VERDICT_END_TOKEN = 'REVIEW_VERDICT_END';
+const UNAVAILABLE_TOKEN = 'REVIEW_UNAVAILABLE';
+
 const VOTER_RECORD_PREFIX = 'voter-record:';
 
-/**
- * Render one voter's verdict block for storage on the ai-review check-run output.
- *
- * Shape: `voter-record:<role>:<sha256 of block>:<base64 of block>`. The digest is not
- * security - provenance comes from the check-run's `app.slug` - it is a TRUNCATION
- * detector. Check-run output has a hard size limit, four voter blocks can approach it,
- * and a half-written record must be unusable rather than silently short. Base64 keeps
- * newlines and markdown fences out of the surrounding markdown, and contains no `:`,
- * so the field separator stays unambiguous.
- */
 /**
  * Is `text` STRUCTURALLY a single unambiguous verdict block?
  *
@@ -460,20 +459,30 @@ const VOTER_RECORD_PREFIX = 'voter-record:';
 function isStructuralVerdictBlock(text) {
   const s = String(text == null ? '' : text).replace(/\r/g, '');
   const count = (needle) => s.split(needle).length - 1;
-  if (count('REVIEW_VERDICT_BEGIN') !== 1) return false;
-  if (count('REVIEW_VERDICT_END') !== 1) return false;
+  if (count(VERDICT_BEGIN_TOKEN) !== 1) return false;
+  if (count(VERDICT_END_TOKEN) !== 1) return false;
   // A could-not-run marker is not a verdict, however well-formed.
-  if (s.includes('REVIEW_UNAVAILABLE')) return false;
+  if (s.includes(UNAVAILABLE_TOKEN)) return false;
   // ORDER, over line-anchored markers — a prose mention is not a delimiter, and the
   // closing marker cannot precede the opening one. Leading indentation is allowed,
   // as it is everywhere else in this protocol (review-decide.sh's `^[[:space:]]*`).
   const lines = s.split('\n');
-  const begin = lines.findIndex((ln) => ln.trim() === 'REVIEW_VERDICT_BEGIN');
-  const end = lines.findIndex((ln) => ln.trim() === 'REVIEW_VERDICT_END');
+  const begin = lines.findIndex((ln) => ln.trim() === VERDICT_BEGIN_TOKEN);
+  const end = lines.findIndex((ln) => ln.trim() === VERDICT_END_TOKEN);
   if (begin < 0 || end < 0) return false;
   return begin < end;
 }
 
+/**
+ * Render one voter's verdict block for storage on the ai-review check-run output.
+ *
+ * Shape: `voter-record:<role>:<sha256 of block>:<base64 of block>`. The digest is not
+ * security - provenance comes from the check-run's `app.slug` - it is a TRUNCATION
+ * detector. Check-run output has a hard size limit, four voter blocks can approach it,
+ * and a half-written record must be unusable rather than silently short. Base64 keeps
+ * newlines and markdown fences out of the surrounding markdown, and contains no `:`,
+ * so the field separator stays unambiguous.
+ */
 function renderVoterRecord(role, block) {
   const r = String(role == null ? '' : role);
   if (!/^[a-z][a-z0-9-]*$/.test(r)) return '';
@@ -601,7 +610,11 @@ function selectVotersToRun({ roles, checkRuns, patchHash, allowlist, headSha } =
     if (c.head_sha !== headSha) continue;
     const slug = c.app && c.app.slug;
     const identities = [slug, slug ? `${slug}[bot]` : null].filter(Boolean);
-    if (!identities.some((i) => allowed.includes(i))) continue;
+    // isAuthorizedReviewer, not a raw `includes` - it lower-cases the login, so this
+    // cannot become a SECOND, stricter door than the one verifyHeadPassCheckRun uses.
+    // Harmless today because every caller passes parseAllowlist output, which is already
+    // lower-cased; the divergence is the defect, not a present miss (#2163 review).
+    if (!identities.some((i) => isAuthorizedReviewer(i, allowed))) continue;
     const text = [c.output && c.output.title, c.output && c.output.summary, c.output && c.output.text]
       .filter(Boolean)
       .join('\n');
@@ -1328,6 +1341,9 @@ module.exports = {
   VOTER_RECORD_PREFIX,
   renderVoterRecord,
   isStructuralVerdictBlock,
+  VERDICT_BEGIN_TOKEN,
+  VERDICT_END_TOKEN,
+  UNAVAILABLE_TOKEN,
   parseVoterRecords,
   selectVotersToRun,
   parseResetInstant,

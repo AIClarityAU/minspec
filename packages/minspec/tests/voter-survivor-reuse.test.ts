@@ -193,6 +193,27 @@ describe('selectVotersToRun', () => {
     expect(select([older, newer]).reuse).toEqual(select([newer, older]).reuse);
   });
 
+  it('lower-cases the check-run app slug before matching, like isAuthorizedReviewer', () => {
+    // Makes the shared-predicate fix observable, and the direction matters. My first
+    // attempt at this test had it BACKWARDS and failed: isAuthorizedReviewer lower-cases
+    // the LOGIN, not the allowlist - it expects an already-lower-cased allowlist, which
+    // is what parseAllowlist produces. So the discriminating case is a mixed-case SLUG
+    // against a lower-case allowlist. A raw `allowed.includes(i)` misses it.
+    //
+    // Harmless with today's inputs, since GitHub emits the slug lower-cased. The defect
+    // is the DIVERGENCE from the predicate verifyHeadPassCheckRun uses: a second door
+    // into the same gate that is stricter than the first is exactly what that function's
+    // docstring warns against (#2163 review).
+    const r = selectVotersToRun({
+      roles: ROLES,
+      checkRuns: [priorRun({ reviewer: block('pass') }, { slug: 'MinSpec-SDD' })],
+      patchHash: FP_A,
+      allowlist: ['minspec-sdd'],
+      headSha: HEAD,
+    });
+    expect(r.reuse.reviewer).toContain('verdict: pass');
+  });
+
   it('reuses nothing when the caller names no head SHA', () => {
     const r = selectVotersToRun({
       roles: ROLES,
