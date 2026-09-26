@@ -96,9 +96,46 @@ describe('#1816 — a HOST session is refused', () => {
     expect(run('FOO=1 BAR=2 gh issue close 1', 'host').permissionDecision).toBe('deny');
   });
 
-  it('ALLOWS the documented remedy — minting the bot token', () => {
+  it('ALLOWS the documented remedy — an explicit GH_TOKEN on that command', () => {
     const c = 'GH_TOKEN="$(~/.claude/scripts/gh-app-token.sh)" gh issue comment 1816 --body x';
     expect(run(c, 'host').permissionDecision).toBe('allow');
+  });
+
+  it('ALLOWS the two-step form this repo actually uses', () => {
+    // `T="$(...)"; GH_TOKEN="$T" gh ...` — the token's value is not knowable from the
+    // text, so the discriminant is that an identity was named at all, not where it came
+    // from. The threat is the AMBIENT credential.
+    const c = 'T="$(~/.claude/scripts/gh-app-token.sh)"; GH_TOKEN="$T" gh pr view 1';
+    expect(run(c, 'host').permissionDecision).toBe('allow');
+  });
+
+  /**
+   * Regression — the first version of this gate searched for `gh-app-token.sh` anywhere in
+   * the whole command, so a bare MENTION of it allowed an ambient-credential write. Found
+   * by the security reviewer on #2172. A substring is not a position: each simple command
+   * is now judged on its own.
+   */
+  it('denies a mention of the token script that is not an assignment on that command', () => {
+    for (const c of [
+      'gh issue comment 1816 --body "see gh-app-token.sh"',
+      'echo gh-app-token.sh; gh pr merge 1816',
+      'echo gh-app-token.sh && gh issue create --title x',
+      'cat gh-app-token.sh | gh pr comment 1 --body-file -',
+    ]) {
+      expect(run(c, 'host').permissionDecision, c).toBe('deny');
+    }
+  });
+
+  it('denies `git -C <path> push` — a bare arg between git and push', () => {
+    expect(run('git -C /tmp/x push origin main', 'host').permissionDecision).toBe('deny');
+  });
+
+  it('does not offer the GH_TOKEN remedy when denying git push', () => {
+    // Minting GH_TOKEN does not re-route git: it authenticates through the credential
+    // helper or SSH. Suggesting it would send the reader down a path that cannot work.
+    const r = run('git push origin main', 'host');
+    expect(r.permissionDecisionReason).toMatch(/credential helper|no in-command remedy/);
+    expect(r.permissionDecisionReason).not.toMatch(/GH_TOKEN="\$\(/);
   });
 
   it('leaves non-GitHub commands alone', () => {

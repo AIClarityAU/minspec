@@ -33,8 +33,8 @@ the host. Written down because a control whose limit is not stated gets read as 
 than it is - the same failure `approve-issue.sh:49-52` names about its own TTY check.
 
 Location comes from ~/.claude/scripts/identity-boundary-check.sh --location, which is two
-/proc reads: measured 14-16ms over five runs, so it is called LIVE per invocation rather
-than read from session-identity.sh's 30-minute cache. A cached verdict attests to a past
+/proc reads, so it is called LIVE per invocation rather than read from
+session-identity.sh's 30-minute cache. A cached verdict attests to a past
 measurement, never to the act being gated.
 """
 
@@ -47,16 +47,37 @@ import sys
 
 IBC = os.path.expanduser("~/.claude/scripts/identity-boundary-check.sh")
 
-# The remedy the session-identity warning already tells the agent to use. A command that
-# mints the bot token is acting as `minspec-sdd[bot]`, not as the founder, so it is allowed
-# even on the host - refusing it would leave a host session with no legitimate path at all.
-MINTS_BOT_TOKEN = re.compile(r"gh-app-token\.sh")
+# The detector's CONTRACT, written down because it lives outside this repo and is not
+# version-controlled here: `--location` exits 0 in the container, 1 on the host, anything
+# else means it could not establish where it is. Any other exit, a timeout, a missing file
+# or a non-executable file are all "unknown", and unknown denies. If that contract ever
+# changes, this gate fails closed rather than open, which is the direction it must fail.
 
-# `gh` as a command word (start, or after a pipe/;/&&/||/backtick/$(), optionally with
-# env assignments in front), and `git push` in any form. Anchored on a word boundary so
-# `github`, `light`, `gh-app-token.sh` and `regh` do not match.
-GH_INVOCATION = re.compile(r"(?:^|[;&|(`\n]|\$\()\s*(?:\w+=\S*\s+)*gh\b")
-GIT_PUSH = re.compile(r"\bgit\b(?:\s+-\S+|\s+--\S+|\s+\S+=\S+)*\s+push\b")
+# A command is split into SIMPLE COMMANDS on the shell operators that separate them, and
+# each is judged on its own. Whole-string matching is what the first version of this gate
+# got wrong: it searched for `gh-app-token.sh` anywhere in the command, so
+# `gh issue comment N --body "see gh-app-token.sh"` and `echo gh-app-token.sh; gh pr merge N`
+# both read as "mints the bot token" and were ALLOWED - writing under the founder's account,
+# which is the exact incident class this exists to stop. A substring is not a position.
+# `$(` and a backtick open a NEW command context, so they separate segments too: without
+# them `x=$(gh pr view 1)` reads as one segment beginning `x=` and never matches.
+SEGMENT_SPLIT = re.compile(r"(?:\|\||&&|\$\(|[;&|`\n])")
+
+# `gh` as the command word of a segment: optional env assignments, then `gh`. Anchored at
+# the segment start and on a word boundary, so `github`, `lighthouse`, `regh` and a bare
+# mention inside an argument do not match.
+GH_COMMAND = re.compile(r"^\s*(?:\w+=\S+\s+)*gh(?=\s|$)")
+
+# An EXPLICIT identity was chosen for this segment. The threat is the AMBIENT credential:
+# on the host, `gh` with no GH_TOKEN is the founder. Setting GH_TOKEN is the caller naming
+# an identity, which is the documented remedy. Deliberately does NOT require the value to
+# come from the broker - `T="$(gh-app-token.sh)"; GH_TOKEN="$T" gh ...` is the established
+# two-step form in this repo, and the token's own value is not knowable from the text.
+GH_TOKEN_SET = re.compile(r"^\s*(?:\w+=\S+\s+)*GH_TOKEN=")
+
+# `git push` in the forms that actually occur, including `git -C <path> push`. A bare
+# non-flag argument between `git` and `push` is why the first version missed that one.
+GIT_PUSH = re.compile(r"\bgit\b(?:\s+-C\s+\S+|\s+-\S+|\s+--\S+|\s+\S+=\S+)*\s+push\b")
 
 
 def emit(decision, reason=None):
@@ -93,12 +114,17 @@ def location():
 
 
 def writes_to_github(command):
-    if MINTS_BOT_TOKEN.search(command):
-        return None
-    if GIT_PUSH.search(command):
-        return "git push"
-    if GH_INVOCATION.search(command):
-        return "gh"
+    """Return the verb this command would use an ambient credential for, or None.
+
+    Judged per simple-command, never over the whole string.
+    """
+    for seg in SEGMENT_SPLIT.split(command):
+        if GIT_PUSH.search(seg):
+            # Minting GH_TOKEN does NOT re-route this: git authenticates through the
+            # credential helper or SSH, so there is no in-command remedy on the host.
+            return "git push"
+        if GH_COMMAND.search(seg) and not GH_TOKEN_SET.search(seg):
+            return "gh"
     return None
 
 
@@ -131,15 +157,25 @@ def main():
             "HOST (fail-closed, constitution invariant 2)."
         )
 
+    if verb == "git push":
+        remedy = (
+            "There is no in-command remedy: `git` authenticates through the credential "
+            "helper or SSH, so minting GH_TOKEN does not re-route this push. Ask the human "
+            "to relaunch this panel inside the container."
+        )
+    else:
+        remedy = (
+            'Name an identity and the call is allowed: '
+            'GH_TOKEN="$(~/.claude/scripts/gh-app-token.sh)" gh ...\n'
+            "Better: ask the human to relaunch this panel inside the container."
+        )
+
     emit(
         "deny",
         f"{lead} Refusing this `{verb}` call (#1816: two agent writes were recorded "
         f"under the founder's account this way, and one fabricated founder decision kept "
         f"a security issue closed for ten days).\n\n"
-        f"Location check: {detail}\n\n"
-        f'Mint the bot token and the call is allowed: GH_TOKEN="$(~/.claude/scripts/'
-        f'gh-app-token.sh)" gh ...\n'
-        f"Better: ask the human to relaunch this panel inside the container.",
+        f"Location check: {detail}\n\n{remedy}",
     )
 
 
