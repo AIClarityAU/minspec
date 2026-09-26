@@ -744,4 +744,10 @@ MinSpec: Refresh Harness Files writes the templates baked into the running bundl
 <!-- dr-summary:DR-093 auto=732512d00014 -->
 The drain's admission control gates on a quota reading at ~/.claude/quota.json. The reading's only producers were **interactive** surfaces - a rendering statusline - while the drain that consumes it runs **unattended**. Measured 2026-09-09 (#1859): the file was **49 hours stale** while holding "used_percentage": 3.0. Over 100 issues carried agent-ready / agent-ready-specify and none dispatched. The pipeline had been dead for days and presented as a quiet week.
 <!-- /dr-summary:DR-093 -->
+## [DR-096 — Adopters get a frozen, diagnosis-only pre-strip basis and a third provenance verdict - not a flag, and not a migration](DR-096.md)
+*Status: proposed · Date: 2026-09-25*
+<!-- dr-summary:DR-096 auto=000000000000 -->
+Ownership declarations leave the canonical approval hash, so every record minted before the change stops matching. Locally that is a one-off migration; in an adopter's repo the thing recomputing those hashes is a merge-gating review input that MinSpec ships with no gate, no snapshot and no migration, so their reviewers would read MISMATCH against valid approvals. Adopters get a frozen, diagnosis-only copy of the old basis and a third verdict that names it, rather than a flag that defaults the change off or a corpus-rewriting script MinSpec cannot test.
+<!-- /dr-summary:DR-096 -->
+
 <!-- minspec:dr-index:end -->
