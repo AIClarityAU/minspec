@@ -1438,7 +1438,7 @@ whose claim is that its signposts do not lie.
 prose warning to a future implementer is the "trust the model" shape the constitution names as
 the failure mode, so the hand-off belongs in the artifacts rather than in memory: ➡️ SPEC-066's
 `affects:` entry for `scripts/hooks/canonical.py` needs a note that `:14` is discharged by this
-spec. Registered in Follow-ups below rather than left as prose.
+spec. Filed as **#2145** and registered in Follow-ups below, rather than left as prose.
 
 *Corrected 2026-09-25, after an adversarial review of this very paragraph; each was a real
 error, not a wording preference.*
@@ -1602,12 +1602,13 @@ only inside a spec.
   amendment, because a spec does not correct a DR.
 - **The two Out-of-Scope items** are now **#2129** (orphaned-sidecar release path) and
   **#2130** (readdir-order-dependent blocking set).
-- ➡️ **UNFILED - the SPEC-066 hand-off note (OQ-10).** SPEC-066's `affects:` entry for
+- **#2145 - the SPEC-066 hand-off note (OQ-10).** SPEC-066's `affects:` entry for
   `scripts/hooks/canonical.py` needs a note that `:14` is discharged by this spec, so a
-  SPEC-066 sweep does not re-touch it. Not filed, and not claimed as filed: the session that
-  resolved OQ-10 had no GitHub write path - the app-token broker was up as a socket and dead
-  as a service. The issue body is written and staged; it needs a number and this line needs to
-  carry it. Cheapest after FR-2 ships, per the third correction under OQ-10.
+  SPEC-066 sweep does not re-touch it. Filed 2026-09-26, one day after the resolution, because
+  the resolving session had no GitHub write path - the app-token broker was up as a socket and
+  dead as a service. It is cheapest to act on **after** FR-2 ships, per the third correction
+  under OQ-10: `affects:` is hashed today, so the note stales SPEC-066's signature now and
+  costs nothing once ownership leaves the hash.
 
 ## Traceability
 
