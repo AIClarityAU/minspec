@@ -434,11 +434,55 @@ const VOTER_RECORD_PREFIX = 'voter-record:';
  * newlines and markdown fences out of the surrounding markdown, and contains no `:`,
  * so the field separator stays unambiguous.
  */
+/**
+ * Is `text` STRUCTURALLY a single unambiguous verdict block?
+ *
+ * Structure only, on purpose. review-decide.sh is the single definition of what a
+ * verdict MEANS (pass vs changes); re-deciding that here would create a second copy
+ * free to drift from it. This answers the narrower question the record layer needs:
+ * "is this a verdict at all, or is it prose?"
+ *
+ * WHY IT IS NEEDED. ai-review.yml substitutes a human sentence when a voter emits
+ * nothing — `(reviewer emitted no verdict block — fail-closed to changes)`. That is
+ * non-empty, so the empty-block rail passes it, and reuse would then pin a
+ * placeholder as a verdict for as long as the patch is unchanged: the voter that
+ * never ran would never run again. Same for a REVIEW_UNAVAILABLE marker, which says
+ * the review could not RUN.
+ *
+ * The AMBIGUITY count is a BARE SUBSTRING count, matching review-decide.sh:157
+ * rather than the anchored extractor. That asymmetry is deliberate and must stay:
+ * a decorated marker (`**REVIEW_VERDICT_BEGIN**`, a trailing word) is invisible to an
+ * anchored count but visible to that gate, so an anchored count here could record
+ * something the gate will later distrust. Anything review-decide.sh would refuse must
+ * never become a survivor. Being broader than needed costs a re-run; being narrower
+ * costs a placeholder pinned in place of a review.
+ */
+function isStructuralVerdictBlock(text) {
+  const s = String(text == null ? '' : text).replace(/\r/g, '');
+  const count = (needle) => s.split(needle).length - 1;
+  if (count('REVIEW_VERDICT_BEGIN') !== 1) return false;
+  if (count('REVIEW_VERDICT_END') !== 1) return false;
+  // A could-not-run marker is not a verdict, however well-formed.
+  if (s.includes('REVIEW_UNAVAILABLE')) return false;
+  // ORDER, over line-anchored markers — a prose mention is not a delimiter, and the
+  // closing marker cannot precede the opening one. Leading indentation is allowed,
+  // as it is everywhere else in this protocol (review-decide.sh's `^[[:space:]]*`).
+  const lines = s.split('\n');
+  const begin = lines.findIndex((ln) => ln.trim() === 'REVIEW_VERDICT_BEGIN');
+  const end = lines.findIndex((ln) => ln.trim() === 'REVIEW_VERDICT_END');
+  if (begin < 0 || end < 0) return false;
+  return begin < end;
+}
+
 function renderVoterRecord(role, block) {
   const r = String(role == null ? '' : role);
   if (!/^[a-z][a-z0-9-]*$/.test(r)) return '';
   const body = String(block == null ? '' : block);
   if (body.trim() === '') return ''; // a silent voter is never a survivor
+  // ...and neither is a voter whose "block" is the fail-closed placeholder, an
+  // unavailable marker, or prose. See isStructuralVerdictBlock for why non-empty
+  // is not enough.
+  if (!isStructuralVerdictBlock(body)) return '';
   const crypto = require('crypto');
   const digest = crypto.createHash('sha256').update(body, 'utf8').digest('hex');
   return `${VOTER_RECORD_PREFIX}${r}:${digest}:${Buffer.from(body, 'utf8').toString('base64')}`;
@@ -1245,6 +1289,7 @@ module.exports = {
   PATCH_FINGERPRINT_PREFIX,
   VOTER_RECORD_PREFIX,
   renderVoterRecord,
+  isStructuralVerdictBlock,
   parseVoterRecords,
   selectVotersToRun,
   parseResetInstant,
