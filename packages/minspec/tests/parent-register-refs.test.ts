@@ -56,6 +56,8 @@ const EXCLUDE = new Set(['docs/decisions/INDEX.md']);
  * DR-093, so the first legitimate local DR-100 turns this gate RED on correct
  * work. Raising the floor or dropping the rule is therefore also a decision
  * about the leak class — make it deliberately, not as a way to clear a red.
+ * That boundary is tracked as #2148 (the DR-100 red on the parent-register
+ * gate), which lays out the options and what each one costs.
  */
 const PARENT_DR = /DR-([1-9]\d{2,})/g;
 

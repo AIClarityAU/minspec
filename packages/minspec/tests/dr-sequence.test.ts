@@ -144,9 +144,10 @@ describe('validateDrSequence()', () => {
     // `# DR-362: Some leaked global-register number` is NOT an offender while
     // `# DR-362: Some leaked decision` is. (2) Its floor is DR-100 while main
     // tops out at DR-093, so the first legitimate local DR-100 turns it red on
-    // correct work — the same failure mode this change removes. Tracked in the
-    // issue named in the #2051 pull request; whoever fixes that boundary is
-    // also deciding the fate of the last thing that reacts to a leak.
+    // correct work — the same failure mode this change removes. Tracked as
+    // #2148 (the DR-100 boundary on the parent-register gate); whoever fixes
+    // that boundary is also deciding the fate of the last thing that reacts to
+    // a leak.
     for (let n = 1; n <= 10; n++) {
       dr(`DR-${String(n).padStart(3, '0')}-real.md`);
     }
