@@ -451,6 +451,31 @@ export async function isUntrackedAtHead(
   }
 }
 
+/**
+ * Read `absPath`'s content as committed at HEAD (`git show HEAD:<relpath>`), or
+ * `null` when it cannot be resolved — not a repo, no HEAD commit yet, the path
+ * is untracked at HEAD, or `absPath` resolves outside `rootDir`. Never rejects.
+ *
+ * Used by the #2021 fix: the accept commit's actual git parent — not the
+ * working tree's on-disk state — is the only base another approvable's row can
+ * safely be diffed against before an INDEX regen is folded into a pathspec
+ * commit (see `adr-manager.ts` `regenerateDrIndexEntry`). Mirrors
+ * `isUntrackedAtHead`'s path handling above.
+ */
+export async function readFileAtHead(
+  rootDir: string,
+  absPath: string,
+  run: GitRun = defaultGitRun(rootDir),
+): Promise<string | null> {
+  const rel = path.relative(rootDir, absPath);
+  if (rel.length === 0 || rel.startsWith('..' + path.sep) || rel === '..') return null;
+  try {
+    return await run(['show', `HEAD:${rel}`]);
+  } catch {
+    return null;
+  }
+}
+
 /** Best-effort unstage of exactly `rel` (never throws — index-clean is advisory). */
 async function unstage(run: GitRun, rel: readonly string[]): Promise<void> {
   try {

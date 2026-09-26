@@ -1070,6 +1070,122 @@ export function regenerateDrIndex(
   return { filePath: indexPath, count };
 }
 
+/** A single `## [DR-NNN …]` entry heading, used to split the auto block into per-id chunks. */
+const ENTRY_HEADING_RE = /^##\s+\[(DR-\d+)\b/;
+
+/** The auto-managed block's raw text (between the markers), or null when absent/unmarked. */
+function extractAutoBlock(indexContent: string): string | null {
+  const markerRe = new RegExp(
+    `${escapeRegex(INDEX_MARKER_START)}([\\s\\S]*?)${escapeRegex(INDEX_MARKER_END)}`,
+  );
+  const m = indexContent.match(markerRe);
+  return m ? m[1] : null;
+}
+
+/**
+ * Split an auto-managed INDEX block into its per-entry chunks, keyed by id, in
+ * file order. Text before the first `## [DR-NNN …]` heading (the `# Decision
+ * Register` header + blurb) is discarded — callers supply their own header.
+ */
+function splitDrEntryBlocks(autoBlock: string): Map<string, string> {
+  const map = new Map<string, string>();
+  let currentId: string | null = null;
+  let currentLines: string[] = [];
+  const flush = () => {
+    if (currentId !== null) map.set(currentId, currentLines.join('\n').trim());
+  };
+  for (const line of autoBlock.split('\n')) {
+    const heading = ENTRY_HEADING_RE.exec(line);
+    if (heading) {
+      flush();
+      currentId = heading[1];
+      currentLines = [line];
+    } else if (currentId !== null) {
+      currentLines.push(line);
+    }
+  }
+  flush();
+  return map;
+}
+
+/**
+ * Regenerate ONLY `id`'s own entry in the DR INDEX, leaving every other id's
+ * entry byte-identical to the supplied base (or to what's already on disk).
+ *
+ * {@link regenerateDrIndex} rebuilds EVERY entry from the current on-disk state
+ * of every DR file — correct for the standalone "Regenerate DR INDEX" command,
+ * but wrong for an accept commit (#2021): PR #1998 (`chore(accept): DR-091 →
+ * accepted`) flipped DR-090's INDEX row to `accepted` while DR-090.md itself
+ * still read `proposed` on the branch it landed on, because DR-090 had been
+ * accepted moments earlier from the SAME working tree and its accept commit
+ * went out via the protected-branch recovery path — onto its OWN branch cut
+ * from origin/HEAD, never touching the primary checkout's HEAD. The primary's
+ * on-disk `DR-090.md` and `INDEX.md` were left holding that in-flight
+ * `accepted` state, so the next accept's FULL regeneration innocently baked
+ * DR-090's still-uncommitted status into DR-091's commit.
+ *
+ * `baseIndexContent` is the fix: the caller supplies the actual content the
+ * commit's own git parent already has for this file (typically `git show
+ * HEAD:<path>`, via `readFileAtHead` in `lib/approve-commit.ts`) — the one
+ * thing every OTHER row may safely be diffed against. Every id except `id`
+ * is copied from THAT verbatim; the working tree's disk state is consulted
+ * only for `id`'s own entry (which is precisely what this accept is allowed to
+ * change) and for curated-summary lookups (a local, not-yet-committed human
+ * edit to a summary is still worth preserving).
+ *
+ * `baseIndexContent === undefined` (the caller has no git base to offer, e.g.
+ * a non-git rootDir) falls back to the on-disk file for that role too — no
+ * worse than the pre-#2021 behaviour, since without a git parent there is no
+ * "other branch's committed truth" to protect. `null` means "the base has no
+ * INDEX.md yet" (a brand-new register), distinct from "unknown".
+ *
+ * Falls back to a full {@link regenerateDrIndex} when the base has no
+ * recognizable per-entry structure to scope against (no INDEX.md yet, or a
+ * legacy/hand-authored one predating the marker format) — there is nothing to
+ * preserve differently in that case, so a full rebuild is not a widened scope.
+ */
+export function regenerateDrIndexEntry(
+  rootDir: string,
+  id: string,
+  vscodeOverrides?: { decisionsDir?: string },
+  options: DrIndexOptions = {},
+  baseIndexContent?: string | null,
+): DrIndexResult {
+  const decisionsDir = resolveDecisionsDir(rootDir, vscodeOverrides);
+  fs.mkdirSync(decisionsDir, { recursive: true });
+
+  const indexPath = path.join(decisionsDir, 'INDEX.md');
+  const onDisk = fs.existsSync(indexPath) ? fs.readFileSync(indexPath, 'utf-8') : null;
+  const base = baseIndexContent !== undefined ? baseIndexContent : onDisk;
+
+  const priorAutoBlock = base ? extractAutoBlock(base) : null;
+  const priorEntries = priorAutoBlock ? splitDrEntryBlocks(priorAutoBlock) : null;
+
+  if (!priorEntries) {
+    return regenerateDrIndex(rootDir, vscodeOverrides, options);
+  }
+
+  const adrs = listAdrs(rootDir, vscodeOverrides);
+  const target = adrs.find(a => a.id === id);
+  const orderedIds = priorEntries.has(id) ? [...priorEntries.keys()] : [...priorEntries.keys(), id];
+
+  const header =
+    '# Decision Register\n\n_Architecture decisions for this project. One entry per accepted/proposed DR._\n';
+  const blocks = orderedIds
+    .map(entryId =>
+      entryId === id
+        ? (target ? renderDrEntry(target, options, onDisk ?? undefined) : null)
+        : (priorEntries.get(entryId) ?? null),
+    )
+    .filter((b): b is string => typeof b === 'string');
+
+  const content = `${header}\n${blocks.join('\n\n')}\n`;
+  const merged = mergeDrIndex(onDisk, content);
+  fs.writeFileSync(indexPath, merged, 'utf-8');
+
+  return { filePath: indexPath, count: blocks.length };
+}
+
 // ─── INDEX Status-Drift Validation (issue #220) ───────────────────────────────
 
 /** Kind of INDEX↔frontmatter status drift a DR can exhibit. */

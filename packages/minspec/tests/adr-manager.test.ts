@@ -27,6 +27,7 @@ import {
   ADR_SIMILARITY_THRESHOLD,
   ADR_STATUS_VALUES,
   regenerateDrIndex,
+  regenerateDrIndexEntry,
   validateDrIndexStatus,
 } from '../src/lib/adr-manager';
 import { DEFAULT_CONFIG } from '../src/lib/config';
@@ -639,6 +640,108 @@ describe('adr-manager', () => {
       const after = fs.readFileSync(indexPath(), 'utf-8');
       expect(after).toContain('A brand new rationale paragraph after editing the DR body.');
       expect(after).not.toContain('The raw first body paragraph that the auto-summarizer extracts.');
+    });
+  });
+
+  // ─── #2021: entry-scoped INDEX write for the accept-commit path ────────
+  describe('regenerateDrIndexEntry() — scoped write (#2021)', () => {
+    const decisionsDir = () => path.join(tmpDir, 'docs', 'decisions');
+    const indexPath = () => path.join(decisionsDir(), 'INDEX.md');
+
+    function seedDr(id: string, status: 'proposed' | 'accepted'): void {
+      fs.mkdirSync(decisionsDir(), { recursive: true });
+      fs.writeFileSync(
+        path.join(decisionsDir(), `${id}-title.md`),
+        `---\nid: ${id}\ntitle: Title ${id}\nstatus: ${status}\ndate: 2026-01-01\n---\n\n` +
+          `## Context\n\nBody for ${id}.\n`,
+        'utf-8',
+      );
+    }
+
+    /** The `*Status: …*` line recorded for `id` in raw INDEX.md text. */
+    function statusFor(indexContent: string, id: string): string | undefined {
+      const headingRe = new RegExp(`^##\\s+\\[${id}\\b[^\\n]*$`, 'm');
+      const m = headingRe.exec(indexContent);
+      if (!m) return undefined;
+      const after = indexContent.slice(m.index + m[0].length);
+      const nextHeading = after.search(/^##\s+\[DR-\d+/m);
+      const block = nextHeading === -1 ? after : after.slice(0, nextHeading);
+      return block.match(/\*\s*Status:\s*([A-Za-z]+)/)?.[1];
+    }
+
+    // The exact #2021 scenario: DR-090's accept landed on its OWN branch (never
+    // reaching this checkout's HEAD), but the primary working tree still holds
+    // its flipped file + regenerated INDEX row. DR-091's accept must not carry
+    // that row along — only DR-091's own entry may move relative to the base
+    // this new commit will actually land on.
+    it('preserves an unrelated DR row from the supplied base even when disk has already drifted past it', () => {
+      seedDr('DR-090', 'proposed');
+      seedDr('DR-091', 'proposed');
+      regenerateDrIndex(tmpDir);
+      // This is the true git HEAD content — captured BEFORE any drift.
+      const base = fs.readFileSync(indexPath(), 'utf-8');
+      expect(statusFor(base, 'DR-090')).toBe('proposed');
+
+      // Simulate DR-090's accept: flipped on disk and INDEX regenerated, but
+      // (per the bug) never committed to THIS checkout's HEAD — `base` above
+      // is what's actually there.
+      setAdrStatus(path.join(decisionsDir(), 'DR-090-title.md'), 'accepted');
+      regenerateDrIndex(tmpDir);
+      expect(statusFor(fs.readFileSync(indexPath(), 'utf-8'), 'DR-090')).toBe('accepted');
+
+      // Now DR-091 is accepted, scoped against the CAPTURED base (its real
+      // commit parent) rather than the drifted on-disk file.
+      setAdrStatus(path.join(decisionsDir(), 'DR-091-title.md'), 'accepted');
+      regenerateDrIndexEntry(tmpDir, 'DR-091', undefined, {}, base);
+
+      const after = fs.readFileSync(indexPath(), 'utf-8');
+      // DR-091's own row may change...
+      expect(statusFor(after, 'DR-091')).toBe('accepted');
+      // ...but DR-090's row must come back exactly as the base had it, NOT the
+      // drifted "accepted" that was sitting on disk a moment ago. A regression
+      // here reproduces #2021: DR-090's row riding along into DR-091's commit.
+      expect(statusFor(after, 'DR-090')).toBe('proposed');
+    });
+
+    it('scopes correctly when the base has no drift (ordinary sequential accepts)', () => {
+      seedDr('DR-001', 'proposed');
+      seedDr('DR-002', 'proposed');
+      regenerateDrIndex(tmpDir);
+      const base = fs.readFileSync(indexPath(), 'utf-8');
+
+      setAdrStatus(path.join(decisionsDir(), 'DR-001-title.md'), 'accepted');
+      regenerateDrIndexEntry(tmpDir, 'DR-001', undefined, {}, base);
+
+      const after = fs.readFileSync(indexPath(), 'utf-8');
+      expect(statusFor(after, 'DR-001')).toBe('accepted');
+      expect(statusFor(after, 'DR-002')).toBe('proposed');
+    });
+
+    it('falls back to a full regeneration when there is no established base to scope against', () => {
+      seedDr('DR-001', 'proposed');
+      seedDr('DR-002', 'accepted');
+      // No prior INDEX.md at all — nothing to preserve differently.
+      expect(fs.existsSync(indexPath())).toBe(false);
+
+      const result = regenerateDrIndexEntry(tmpDir, 'DR-001', undefined, {}, null);
+
+      expect(result.count).toBe(2);
+      const after = fs.readFileSync(indexPath(), 'utf-8');
+      expect(statusFor(after, 'DR-001')).toBe('proposed');
+      expect(statusFor(after, 'DR-002')).toBe('accepted');
+    });
+
+    it('defaults to reading the on-disk file as its base when none is supplied', () => {
+      seedDr('DR-001', 'proposed');
+      seedDr('DR-002', 'proposed');
+      regenerateDrIndex(tmpDir);
+
+      setAdrStatus(path.join(decisionsDir(), 'DR-002-title.md'), 'accepted');
+      regenerateDrIndexEntry(tmpDir, 'DR-002'); // no baseIndexContent argument
+
+      const after = fs.readFileSync(indexPath(), 'utf-8');
+      expect(statusFor(after, 'DR-002')).toBe('accepted');
+      expect(statusFor(after, 'DR-001')).toBe('proposed');
     });
   });
 

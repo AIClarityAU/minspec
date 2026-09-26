@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
-import { commitApproval, isUntrackedAtHead } from '../src/lib/approve-commit';
+import { commitApproval, isUntrackedAtHead, readFileAtHead } from '../src/lib/approve-commit';
 
 // #1099 — this suite drives real `git` child processes per assertion (commitApproval
 // itself, plus the `git()` test helper). Under container scheduling contention a
@@ -279,6 +279,46 @@ describe('isUntrackedAtHead — detects a create that was never committed (#577)
     const drPath = write('docs/decisions/DR-001.md', '---\nstatus: proposed\n---\n');
 
     expect(await isUntrackedAtHead(tmp, drPath)).toBe(true);
+  });
+});
+
+/**
+ * #2021 — `readFileAtHead` supplies the actual git parent an accept commit will
+ * land on, so `adr-manager.ts`'s `regenerateDrIndexEntry` can scope its INDEX
+ * write to only the DR being accepted instead of laundering another DR's
+ * still-uncommitted, in-flight status (working-tree disk state) into the commit.
+ */
+describe('readFileAtHead — the accept commit\'s actual git parent (#2021)', () => {
+  it('returns the committed content at HEAD, ignoring an uncommitted edit', async () => {
+    initRepo(tmp);
+    const p = write('docs/decisions/INDEX.md', 'committed content\n');
+    git(['add', '-A']);
+    git(['commit', '-m', 'init']);
+    fs.writeFileSync(p, 'uncommitted drift\n');
+
+    expect(await readFileAtHead(tmp, p)).toBe('committed content\n');
+  });
+
+  it('is null when the path is untracked at HEAD', async () => {
+    initRepo(tmp);
+    write('seed.md', 'x\n');
+    git(['add', '-A']);
+    git(['commit', '-m', 'init']);
+    const p = write('docs/decisions/INDEX.md', 'brand new\n');
+
+    expect(await readFileAtHead(tmp, p)).toBeNull();
+  });
+
+  it('is null when there is no HEAD commit at all (unborn branch)', async () => {
+    initRepo(tmp); // no commits made
+    const p = write('docs/decisions/INDEX.md', 'x\n');
+
+    expect(await readFileAtHead(tmp, p)).toBeNull();
+  });
+
+  it('is null for a path that resolves outside rootDir', async () => {
+    initRepo(tmp);
+    expect(await readFileAtHead(tmp, path.join(tmp, '..', 'outside.md'))).toBeNull();
   });
 });
 

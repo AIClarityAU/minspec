@@ -49,6 +49,7 @@ vi.mock('../src/lib/adr-manager', () => ({
   // Default true → existing applyStatus tests (frontmatter files) skip the modal.
   adrHasFrontmatter: vi.fn(() => true),
   regenerateDrIndex: vi.fn(),
+  regenerateDrIndexEntry: vi.fn(),
   ADR_STATUS_VALUES: ['proposed', 'accepted', 'deprecated', 'superseded'],
 }));
 
@@ -69,6 +70,7 @@ import {
   setAdrStatus,
   adrHasFrontmatter,
   regenerateDrIndex,
+  regenerateDrIndexEntry,
 } from '../src/lib/adr-manager';
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
@@ -767,6 +769,71 @@ describe('applyStatus — decisionsDir configured triggers overrides in regen', 
     expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
       'MinSpec: DR-001 → accepted',
     );
+  });
+});
+
+// =============================================================================
+// applyStatus — commit-on-approve ON routes to the entry-scoped regen (#2021)
+// =============================================================================
+
+describe('applyStatus — commitOnApprove routes the INDEX write (#2021)', () => {
+  it('uses the entry-scoped regen when commitOnApprove is on (the accept-commit path)', async () => {
+    setActiveEditor(DR1);
+    vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+      get: vi.fn((key: string, def?: unknown) =>
+        key === 'commitOnApprove' ? true : def,
+      ),
+    } as unknown as vscode.WorkspaceConfiguration);
+    vi.mocked(listAdrs).mockReturnValueOnce([
+      {
+        id: 'DR-001',
+        title: 'Use PG',
+        status: 'proposed',
+        date: '2026-05-27',
+        filePath: DR1,
+      },
+    ]);
+    vi.mocked(regenerateDrIndexEntry).mockReturnValueOnce(undefined as never);
+
+    await acceptAdrCommand(undefined);
+
+    expect(setAdrStatus).toHaveBeenCalledWith(DR1, 'accepted');
+    // Scoped write used, not the full rebuild — WS is not a real git repo here,
+    // so `readFileAtHead` resolves to null (no base to preserve against, which
+    // `regenerateDrIndexEntry` itself falls back on safely).
+    expect(regenerateDrIndexEntry).toHaveBeenCalledWith(WS, 'DR-001', undefined, {}, null);
+    expect(regenerateDrIndex).not.toHaveBeenCalled();
+    expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
+      'MinSpec: DR-001 → accepted',
+    );
+  });
+
+  it('still uses the full regen for a manual Set Status even with commitOnApprove on (no auto-commit to scope for)', async () => {
+    setActiveEditor(DR1);
+    vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+      get: vi.fn((key: string, def?: unknown) =>
+        key === 'commitOnApprove' ? true : def,
+      ),
+    } as unknown as vscode.WorkspaceConfiguration);
+    vi.mocked(listAdrs).mockReturnValueOnce([
+      {
+        id: 'DR-001',
+        title: 'Use PG',
+        status: 'proposed',
+        date: '2026-05-27',
+        filePath: DR1,
+      },
+    ]);
+    vi.mocked(vscode.window.showQuickPick).mockResolvedValueOnce({
+      value: 'accepted',
+    } as never);
+    vi.mocked(regenerateDrIndex).mockReturnValueOnce(undefined as never);
+
+    await setAdrStatusCommand(undefined);
+
+    expect(setAdrStatus).toHaveBeenCalledWith(DR1, 'accepted');
+    expect(regenerateDrIndex).toHaveBeenCalledWith(WS, undefined);
+    expect(regenerateDrIndexEntry).not.toHaveBeenCalled();
   });
 });
 

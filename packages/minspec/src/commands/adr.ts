@@ -4,6 +4,7 @@ import {
   createAdr,
   findSimilarAdrs,
   regenerateDrIndex,
+  regenerateDrIndexEntry,
   setAdrStatus,
   adrHasFrontmatter,
   listAdrs,
@@ -13,7 +14,8 @@ import {
 import type { AdrNode } from '../views/adr-tree-provider';
 import { resolveTargetFolder, folderForFile } from '../lib/resolve-folder';
 import { resolveActiveAdrPath } from '../lib/active-adr';
-import { commitApprovalIfEnabled, commitBornIfUntracked } from './commit-on-approve';
+import { readFileAtHead } from '../lib/approve-commit';
+import { commitApprovalIfEnabled, commitBornIfUntracked, commitOnApproveEnabled } from './commit-on-approve';
 
 function decisionsDirOverride(): { decisionsDir: string } | undefined {
   const decisionsDir = vscode.workspace
@@ -237,12 +239,28 @@ async function applyStatus(
 
     // Keep the Decision Register index in sync with the new status (the
     // register of the folder that contains the changed ADR).
+    const indexPath = folder ? path.join(path.dirname(filePath), 'INDEX.md') : undefined;
     if (folder) {
       const decisionsDir = vscode.workspace
         .getConfiguration('minspec')
         .get<string>('decisionsDir');
+      const overrides = decisionsDir ? { decisionsDir } : undefined;
       try {
-        regenerateDrIndex(folder, decisionsDir ? { decisionsDir } : undefined);
+        if (opts.commit && commitOnApproveEnabled()) {
+          // #2021 — this write is about to be folded into an auto-commit, so
+          // scope it to `id`'s own entry rather than rebuilding every DR's row
+          // from the working tree's disk state. `readFileAtHead` supplies the
+          // actual git parent the commit will land on; every OTHER entry is
+          // preserved from THAT, never from disk, so an earlier accept's
+          // still-uncommitted status on a DIFFERENT DR (e.g. stranded on its
+          // own protected-branch recovery branch) can never ride along into
+          // this one's commit. A manual Set Status (no auto-commit) still gets
+          // the full rebuild below — nothing there is committed sight-unseen.
+          const baseIndexContent = await readFileAtHead(folder, indexPath!);
+          regenerateDrIndexEntry(folder, id, overrides, {}, baseIndexContent);
+        } else {
+          regenerateDrIndex(folder, overrides);
+        }
       } catch {
         // Index regen is best-effort; status write already succeeded.
       }
@@ -254,11 +272,10 @@ async function applyStatus(
     // it leaves the change staged for the user to commit.
     let suffix = '';
     if (opts.commit && folder) {
-      const indexPath = path.join(path.dirname(filePath), 'INDEX.md');
       suffix = (
         await commitApprovalIfEnabled(
           folder,
-          [filePath, indexPath],
+          [filePath, indexPath!],
           `chore(accept): ${id} → ${status}`,
         )
       ).suffix;
