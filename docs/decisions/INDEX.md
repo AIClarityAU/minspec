@@ -744,4 +744,11 @@ MinSpec: Refresh Harness Files writes the templates baked into the running bundl
 <!-- dr-summary:DR-093 auto=732512d00014 -->
 The drain's admission control gates on a quota reading at ~/.claude/quota.json. The reading's only producers were **interactive** surfaces - a rendering statusline - while the drain that consumes it runs **unattended**. Measured 2026-09-09 (#1859): the file was **49 hours stale** while holding "used_percentage": 3.0. Over 100 issues carried agent-ready / agent-ready-specify and none dispatched. The pipeline had been dead for days and presented as a quiet week.
 <!-- /dr-summary:DR-093 -->
+## [DR-097 — A single voter's verdict may be reused across an ai-review re-run, bound to one head SHA — where reusing the whole panel was rejected](DR-097.md)
+
+*Status: proposed · Date: 2026-09-26*
+
+<!-- dr-summary:DR-097 auto=000000000000 -->
+When one of the four ai-review voters dies on a session limit, the panel fails closed and the re-run re-pays for the three that answered. This keeps the survivors, bound to the same head SHA - which is the whole distinction from #1840, where whole-panel reuse across a moved base was measured and refused. The safety property lived only in a comment at first, and the comment was false: three of four voters on #2163 caught the code reusing across commits while its docblock denied it.
+<!-- /dr-summary:DR-097 -->
 <!-- minspec:dr-index:end -->
