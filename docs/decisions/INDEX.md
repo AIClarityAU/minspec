@@ -732,7 +732,9 @@ DR-072 gave a triage-held issue a human exit, but only for the tier hold: human_
 <!-- /dr-summary:DR-091 -->
 
 ## [DR-092 — A harness refresh may only move a project forward — the build must carry an ordered template identity, and an unordered one holds the write](DR-092.md)
-*Status: proposed · Date: 2026-09-06*
+
+*Status: accepted · Date: 2026-09-06*
+
 <!-- dr-summary:DR-092 auto=000000000000 -->
 MinSpec: Refresh Harness Files writes the templates baked into the running bundle, with no notion of newer or older. A refresh from a stale build rewrote three of a consuming repo's managed files backwards, deleting a no-silent-gate block, while the extension version string stayed identical across the three merges it was missing. Direction is a question the refresh has never asked.
 <!-- /dr-summary:DR-092 -->
