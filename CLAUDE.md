@@ -108,8 +108,8 @@ constitution tells us not to rely on.
 ## Commands and locations
 
 MinSpec is a **VS Code extension, not a CLI.** Every command runs from the Command Palette
-(`Ctrl/Cmd+Shift+P`, type "MinSpec:") — never write, suggest, or attempt a shell command named
-for it. The palette lists its own entries. Specs live in `specs/`, decisions in
+(`Ctrl/Cmd+Shift+P`, type "MinSpec:") — never write, suggest, or attempt a `minspec` shell
+command. The palette lists its own entries. Specs live in `specs/`, decisions in
 `docs/decisions/`, the constitution at `.minspec/constitution.md`, everything else is configured
 in `.minspec/config.json`.
 
@@ -232,13 +232,13 @@ artifact (spec, DR, README, comment), verify the **authoritative** signals, not 
 
 If unverified, write the honest state ("specified, not built" / "planned, #NN"). In a
 *never-wrong* product a false "implemented" is the worst defect — it makes the signpost lie.
-(Earned when SPEC-002 called SPEC-014's review webview "implemented" while it was
-`specifying`, zero code; deterministic backstop tracked as an issue, sibling to #47.)
+(Earned 2026-06-01, when SPEC-002 called SPEC-014's review webview "implemented" while it
+was `specifying`, zero code; deterministic backstop tracked as an issue, sibling to #47.)
 
 **Sibling rule — root cause ≠ bad-state restatement (RCDD, DR-003 addendum).** A *description
 of a bad state* ≠ its *root cause*. "Frontmatter field is missing" is a symptom; the cause is the mechanism that produced it **plus**
 the gate that should have rejected it. A pure data/config fix is a tell that the gate is missing
-— fix the gate too (see DR-003 Phase 4 asymmetry check). Earned on SPEC-004's missing `epic:`,
+— fix the gate too (see DR-003 Phase 4 asymmetry check). Earned 2026-06-01 on SPEC-004's missing `epic:`,
 first "fixed" by a data edit alone when the real defect was `validateSpec` flagging dangling
 refs but not missing ones.
 
