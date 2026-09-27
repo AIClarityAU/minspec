@@ -741,7 +741,7 @@ Four properties of the current code turn "stale" into "destructive". Each is cit
 
 ## [DR-093 — A fail-closed gate may refresh its own witness, because a witness only an absent human can produce turns "fail closed" into "never run"](DR-093.md)
 
-*Status: proposed · Date: 2026-09-09*
+*Status: accepted · Date: 2026-09-09*
 
 <!-- dr-summary:DR-093 auto=732512d00014 -->
 The drain's admission control gates on a quota reading at ~/.claude/quota.json. The reading's only producers were **interactive** surfaces - a rendering statusline - while the drain that consumes it runs **unattended**. Measured 2026-09-09 (#1859): the file was **49 hours stale** while holding "used_percentage": 3.0. Over 100 issues carried agent-ready / agent-ready-specify and none dispatched. The pipeline had been dead for days and presented as a quiet week.
