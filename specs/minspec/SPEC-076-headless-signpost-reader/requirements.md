@@ -290,3 +290,8 @@ T0 invariant tests, written before the implementation:
 6. AC-6 — two runs are byte-identical (FR-7).
 7. AC-8 — the script's answer equals the in-process resolver's answer for the same root.
 8. INV-5 — the reader's import closure contains no `vscode`.
+9. FR-5 regression (T3) — a document larger than the 64KB pipe buffer is not truncated.
+   Added after the first implementation was found to end with `process.exit(main(...))`,
+   which discards a still-buffered stdout write: a 200-root run emitted exactly 65536 bytes
+   of unparseable JSON. Case 5 above did not catch it because it asserted the right property
+   on the wrong axis - it varied the code but never the OUTPUT SIZE the defect lived on.

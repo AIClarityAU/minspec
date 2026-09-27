@@ -141,6 +141,25 @@ describe('SPEC-076 headless signpost reader', () => {
     }
   }, 120_000);
 
+  // T3 regression (FR-5). The first version of this reader ended with
+  // `process.exit(main(...))`, which discards a stdout write that is still buffered:
+  // once the document exceeds the 64KB pipe buffer, `process.stdout.write` to a pipe
+  // completes ASYNCHRONOUSLY and `process.exit` does not drain it. Measured: a 200-root
+  // run produced exactly 65536 bytes of truncated, unparseable JSON.
+  //
+  // AC-5 above did not catch it, and the reason is worth stating: it asserted the RIGHT
+  // property on the WRONG axis. It only ever ran a two-root document of a few KB, so it
+  // varied the code under test but never the OUTPUT SIZE. This test varies size, which is
+  // the axis the defect lived on.
+  it('FR-5 regression: a document larger than the pipe buffer is not truncated', () => {
+    const manyRoots = Array.from({ length: 200 }, () => REPO_ROOT);
+    const r = run(manyRoots);
+    expect(r.stdout.length).toBeGreaterThan(65_536);
+    const report = JSON.parse(r.stdout);
+    expect(report.results).toHaveLength(200);
+    expect(r.status).toBe(0);
+  }, 300_000);
+
   it('AC-4 (INV-4): the reader delegates ranking and holds no second implementation', () => {
     const src = fs.readFileSync(SCRIPT, 'utf-8');
     // It must get its answer from the canonical pair.

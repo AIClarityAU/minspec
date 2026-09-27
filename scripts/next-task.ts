@@ -238,4 +238,11 @@ function main(argv: string[]): number {
   return failures.length > 0 ? EXIT_ROOT_FAILED : EXIT_OK;
 }
 
-process.exit(main(process.argv.slice(2)));
+// `process.exitCode` rather than `process.exit()`. `process.exit` does NOT drain a stdout
+// write that is still buffered, and a write to a PIPE completes asynchronously once it
+// exceeds the 64KB pipe buffer - so `process.exit(main(...))` silently truncated any
+// document larger than that, which a caller sees as unparseable JSON (measured: a 200-root
+// run emitted exactly 65536 bytes). Setting the code and returning lets Node flush and then
+// exit on its own, which is the only form that keeps FR-5's "stdout is a single JSON
+// document" true at every size. Regression test: packages/minspec/tests/headless-signpost.test.ts.
+process.exitCode = main(process.argv.slice(2));
