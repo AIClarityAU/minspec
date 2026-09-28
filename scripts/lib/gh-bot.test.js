@@ -331,3 +331,226 @@ test('minting happens at most once per process', () => {
   assert.equal(fs.readFileSync(counter, 'utf8').trim().split('\n').length, 1,
     'the token must be minted once and cached, not re-minted per write');
 });
+
+// ── 6. the READ credential, across a token's lifetime (#2066) ────────────────
+// T3 regression. The read path (`_gh_bot_read_auth` / `gh_bot_warm_read`, #2003)
+// shipped with NO tests: it appeared in zero test files, so nothing asserted what
+// happens to a read once the token it minted for itself ages out. Measured
+// 2026-09-27: the drain minted one token before an 8-hour loop and presented it for
+// the whole run, so from ~1h in every read answered `HTTP 401: Bad credentials` and
+// the loop held fail-closed for seven hours over a 60-issue queue.
+//
+// These pin the LIFETIME behaviour, which is a separate question from the identity
+// behaviour above: a token can be unambiguously ours and still be dead.
+
+/** A minter that emits a DIFFERENT token per call, so a re-mint is observable. */
+function rotatingMinter() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-bot-rotate-'));
+  const counter = path.join(dir, 'n');
+  const p = path.join(dir, 'minter.sh');
+  fs.writeFileSync(p, `#!/usr/bin/env bash
+n=$(( $(cat ${JSON.stringify(counter)} 2>/dev/null || echo 0) + 1 ))
+echo "$n" > ${JSON.stringify(counter)}
+echo "ghs_mint_$n"
+`);
+  fs.chmodSync(p, 0o755);
+  // Absent counter = never invoked. Must not THROW: "the minter was never called" is a
+  // result several of these tests assert, not an error.
+  return {
+    path: p,
+    calls: () => (fs.existsSync(counter) ? Number(fs.readFileSync(counter, 'utf8').trim() || '0') : 0),
+  };
+}
+
+/** A minter that always emits the SAME token — the host broker's cache (#2114). */
+function cachedMinter() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-bot-cached-'));
+  const counter = path.join(dir, 'n');
+  const p = path.join(dir, 'minter.sh');
+  fs.writeFileSync(p, `#!/usr/bin/env bash
+echo x >> ${JSON.stringify(counter)}
+echo ghs_one_cached_token
+`);
+  fs.chmodSync(p, 0o755);
+  return {
+    path: p,
+    calls: () => (fs.existsSync(counter) ? fs.readFileSync(counter, 'utf8').trim().split('\n').length : 0),
+  };
+}
+
+/** A `gh` stub that reports which credential the invocation actually carried. */
+function stubGhEchoToken() {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-bot-seen-'));
+  const p = path.join(dir, 'gh');
+  fs.writeFileSync(p, '#!/usr/bin/env bash\nprintf \'TOKEN_SEEN=%s\\n\' "${GH_TOKEN:-<none>}"\n');
+  fs.chmodSync(p, 0o755);
+  return dir;
+}
+
+test('a READ re-authenticates once OUR OWN token has aged out (#2066)', () => {
+  // The drain's exact shape: gh_bot_warm_read in the parent, then reads for hours.
+  // Before this fix the read path was pinned twice over — a once-per-shell guard and
+  // "GH_TOKEN is set, never replace it" — so the aged-out token was presented for the
+  // rest of the process and every read 401'd.
+  const m = rotatingMinter();
+  const { status, out } = sh(
+    'gh_bot_init; gh_bot_warm_read; _GH_BOT_MINTED_AT=$(( _GH_BOT_MINTED_AT - 99999 )); gh issue list',
+    {
+      MINSPEC_GH_APP_TOKEN_SCRIPT: m.path,
+      MINSPEC_GH_BOT_MAX_AGE: '10',
+      MINSPEC_GH_BOT_REMINT_COOLDOWN: '0',
+      PATH: `${stubGhEchoToken()}:${process.env.PATH}`,
+    },
+  );
+  assert.equal(status, 0, out);
+  assert.match(out, /TOKEN_SEEN=ghs_mint_2/,
+    'a read must carry a FRESH token once ours has aged out, not the dead one');
+  assert.equal(m.calls(), 2, 'exactly one initial mint plus one age-triggered re-mint');
+});
+
+test('a READ does not re-authenticate while our token still has headroom', () => {
+  // The other half: the whole point of caching is that a hot read loop pays once.
+  const m = rotatingMinter();
+  const { status, out } = sh('gh_bot_init; gh_bot_warm_read; gh issue list; gh issue list; gh pr list', {
+    MINSPEC_GH_APP_TOKEN_SCRIPT: m.path,
+    PATH: `${stubGhEchoToken()}:${process.env.PATH}`,
+  });
+  assert.equal(status, 0, out);
+  assert.equal(m.calls(), 1, 'a fresh token must serve every read in the shell');
+  assert.doesNotMatch(out, /TOKEN_SEEN=ghs_mint_2/);
+});
+
+test('a token inherited from a gh-bot PARENT stays refreshable in the child (#2066)', () => {
+  // dispatch-issue.sh / triage-inbox.sh / remediate-pr.sh are children of the drain and
+  // source this file afresh. They already call gh_bot_refresh — but an inherited token
+  // was classified "not ours to replace", so those calls were no-ops and each child
+  // presented the drain's dead token for its whole run. Measured in the 2026-09-27 log:
+  // `Fetching issue #2023... HTTP 401: Bad credentials`, once per dispatch, for hours.
+  //
+  // Deliberately end-to-end (parent shell → real child bash → read) so it pins the
+  // BEHAVIOUR and not the name of whatever marker carries ownership across the fork.
+  const m = rotatingMinter();
+  // The child ages the clock the same way the refresh tests above do. That it CAN is
+  // half the assertion: before this fix the child read `_GH_BOT_MINTED_AT` as 0 and
+  // `_GH_BOT_OWNED` as 0, so no arithmetic on it could make refresh do anything.
+  const child = `source ${JSON.stringify(LIB)}; gh_bot_init; `
+    + '_GH_BOT_MINTED_AT=$(( _GH_BOT_MINTED_AT - 99999 )); gh_bot_refresh 2>/dev/null; gh issue list';
+  const { status, out } = sh(
+    `gh_bot_init; gh_bot_warm_read; bash -c ${JSON.stringify(child)}`,
+    {
+      MINSPEC_GH_APP_TOKEN_SCRIPT: m.path,
+      MINSPEC_GH_BOT_MAX_AGE: '10',
+      MINSPEC_GH_BOT_REMINT_COOLDOWN: '0',
+      PATH: `${stubGhEchoToken()}:${process.env.PATH}`,
+    },
+  );
+  assert.equal(status, 0, out);
+  assert.match(out, /TOKEN_SEEN=ghs_mint_2/,
+    'a child must be able to replace a token its gh-bot parent minted');
+});
+
+test('a re-mint that returns the SAME token does not reset the age clock (#2114)', () => {
+  // The host broker serves ONE cached token fleet-wide and keeps serving it after it
+  // dies (#2114), so "we asked for a token just now" says nothing about how old the
+  // token IS. Resetting the clock on a cache hit would buy a full max-age of false
+  // confidence in a credential that is already dead. The clock must track the token,
+  // not the request — so while the broker keeps handing back the same value, the
+  // holder stays stale and keeps trying.
+  const m = cachedMinter();
+  const { status, out } = sh(
+    'gh_bot_init; gh_bot_warm_read; _GH_BOT_MINTED_AT=$(( _GH_BOT_MINTED_AT - 99999 )); '
+    + 'gh_bot_warm_read; gh_bot_warm_read',
+    {
+      MINSPEC_GH_APP_TOKEN_SCRIPT: m.path,
+      MINSPEC_GH_BOT_MAX_AGE: '10',
+      MINSPEC_GH_BOT_REMINT_COOLDOWN: '0',
+    },
+  );
+  assert.equal(status, 0, out);
+  assert.equal(m.calls(), 3,
+    'a cache hit must leave the holder stale, so the next attempt still runs');
+});
+
+test('a READ never replaces a FOREIGN token, however old ours would be by now', () => {
+  // The CI path: approve-on-label.yml and ai-review.yml hand these scripts a token.
+  // Nothing in the read path may re-identify it — that is the caller's credential.
+  const m = rotatingMinter();
+  const { status, out } = sh('gh_bot_init; gh_bot_warm_read; gh issue list', {
+    GH_TOKEN: 'ci_supplied',
+    MINSPEC_GH_APP_TOKEN_SCRIPT: m.path,
+    MINSPEC_GH_BOT_MAX_AGE: '0',
+    MINSPEC_GH_BOT_REMINT_COOLDOWN: '0',
+    PATH: `${stubGhEchoToken()}:${process.env.PATH}`,
+  });
+  assert.equal(status, 0, out);
+  assert.match(out, /TOKEN_SEEN=ci_supplied/, 'a workflow-supplied token must survive');
+  assert.equal(m.calls(), 0, 'and no token may be minted over the top of it');
+});
+
+test('a READ with NO minter available still runs, unauthenticated and non-fatal', () => {
+  // The documented contract, and the one an eager export broke 30+ times in one CI run:
+  // "a script that only reads must run fine with no credential at all."
+  const { status, out } = sh('gh_bot_init; gh_bot_warm_read; gh issue list', {
+    MINSPEC_GH_APP_TOKEN_SCRIPT: '/nonexistent/minter.sh',
+    PATH: `${stubGhEchoToken()}:${process.env.PATH}`,
+  });
+  assert.equal(status, 0, `a read with no key must not abort:\n${out}`);
+  assert.match(out, /TOKEN_SEEN=<none>/);
+});
+
+test('gh_bot_reauth_read reports whether a retry is worth making', () => {
+  // For a caller that has just SEEN a read fail: age is irrelevant, the token it holds
+  // is proven bad. It returns 0 only when a DIFFERENT credential is now in place, so a
+  // caller can retry once instead of re-running a query that must fail again — and so
+  // the broker's cached-dead-token case (#2114) stays a loud hold rather than a
+  // silent retry loop.
+  const rot = rotatingMinter();
+  const fresh = sh('gh_bot_init; gh_bot_warm_read; gh_bot_reauth_read && echo RETRY_WORTH_IT', {
+    MINSPEC_GH_APP_TOKEN_SCRIPT: rot.path,
+  });
+  assert.equal(fresh.status, 0, fresh.out);
+  assert.match(fresh.out, /RETRY_WORTH_IT/, 'a different token means the retry can succeed');
+
+  const cached = cachedMinter();
+  const same = sh('gh_bot_init; gh_bot_warm_read; gh_bot_reauth_read || echo NO_POINT_RETRYING', {
+    MINSPEC_GH_APP_TOKEN_SCRIPT: cached.path,
+  });
+  assert.equal(same.status, 0, same.out);
+  assert.match(same.out, /NO_POINT_RETRYING/,
+    'the same token back is not a new credential — the caller must hold, not retry');
+});
+
+test('a failed re-mint is LOUD and leaves the read exactly as it was', () => {
+  // Constitution invariant 2: a missing witness fails visibly. The read path may not
+  // abort — that is its documented contract — but it must not swallow the reason
+  // either. A silent re-mint failure followed by a 401 is the diagnosis-hostile shape
+  // that cost seven hours on 2026-09-27.
+  // The minter here succeeds once and then fails: the broker going down mid-loop.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-bot-deadbroker-'));
+  const counter = path.join(dir, 'n');
+  const minter = path.join(dir, 'minter.sh');
+  fs.writeFileSync(minter, `#!/usr/bin/env bash
+if [[ -f ${JSON.stringify(counter)} ]]; then
+  echo "broker socket is not listening" >&2
+  exit 1
+fi
+touch ${JSON.stringify(counter)}
+echo ghs_first
+`);
+  fs.chmodSync(minter, 0o755);
+  const { status, out } = sh(
+    'gh_bot_init; gh_bot_warm_read; _GH_BOT_MINTED_AT=$(( _GH_BOT_MINTED_AT - 99999 )); gh issue list',
+    {
+      MINSPEC_GH_APP_TOKEN_SCRIPT: minter,
+      MINSPEC_GH_BOT_MAX_AGE: '10',
+      MINSPEC_GH_BOT_REMINT_COOLDOWN: '0',
+      PATH: `${stubGhEchoToken()}:${process.env.PATH}`,
+    },
+  );
+  assert.equal(status, 0, `a read must not abort when the broker is down:\n${out}`);
+  assert.match(out, /could not re-mint a read token/, 'the failure must be visible');
+  assert.match(out, /broker socket is not listening/,
+    "the broker's own diagnosis must reach the operator");
+  assert.match(out, /TOKEN_SEEN=ghs_first/,
+    'and the read still goes out on what we had, rather than being wiped');
+});
