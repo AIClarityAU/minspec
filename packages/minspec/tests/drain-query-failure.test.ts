@@ -260,3 +260,167 @@ describe('drain one-shot early exit: TOTAL is a gate, not a display (#1855, #200
     expect(out).not.toContain('HOLDING');
   });
 });
+
+/**
+ * T3 — the drain's queue read must SURVIVE its own token expiring. (#2066)
+ *
+ * The sibling failure to the one above, measured 2026-09-27. The read path added by
+ * #2003 gave reads a bot token, which fixed the "no credential at all" case — and then
+ * pinned that one token for the life of the process. An installation token lives ~1h;
+ * `run_loop`'s lifetime cap is 28800s. So the drain dispatched normally for an hour
+ * (#1898 … #2021), and from #2023 on every read answered `HTTP 401: Bad credentials`
+ * for the remaining seven hours, over a 60-issue queue, until the backstop cap stopped
+ * the loop.
+ *
+ * Why the test has to live HERE and not only in `scripts/lib/gh-bot.test.js`:
+ * `gh_bot_refresh` was already built, already unit-tested, and stayed green throughout
+ * the outage — because nothing called it from the one long loop it was written for.
+ * A test of the function could not see that; only a test of the drain's own read can.
+ *
+ * The fail-closed control is the load-bearing one. The broker serves a single cached
+ * token machine-wide and keeps serving it after it dies (#2114), so "re-mint and retry"
+ * must NOT become "retry until something works": when the broker hands back the same
+ * token, this must hold exactly as loudly as it does above.
+ */
+
+/** A minter whose first answer differs from its later ones — a token rotating. */
+function rotatingMinter(first: string, rest: string): string {
+  const p = path.join(tmp, 'minter-rotating.sh');
+  const flag = path.join(tmp, 'minted-once');
+  fs.writeFileSync(
+    p,
+    `#!/usr/bin/env bash\nif [[ -f ${JSON.stringify(flag)} ]]; then echo ${rest}; else touch ${JSON.stringify(flag)}; echo ${first}; fi\n`,
+    { mode: 0o755 },
+  );
+  return p;
+}
+
+/** A minter that always answers the same value — the host broker's cache (#2114). */
+function cachedMinter(tok: string): string {
+  const p = path.join(tmp, 'minter-cached.sh');
+  fs.writeFileSync(p, `#!/usr/bin/env bash\necho ${tok}\n`, { mode: 0o755 });
+  return p;
+}
+
+/**
+ * A `gh` that authenticates: it answers the queue only for `live`, and 401s on anything
+ * else exactly as the real one does — message on stderr, nothing on stdout, exit 1.
+ * Every invocation is counted, so a test can prove the retry happens ONCE.
+ */
+function stubGhAuthenticating(live: string): { bin: string; calls: () => number } {
+  const bin = path.join(tmp, 'bin-auth');
+  fs.mkdirSync(bin, { recursive: true });
+  const counter = path.join(tmp, 'gh-calls');
+  fs.writeFileSync(
+    path.join(bin, 'gh'),
+    '#!/usr/bin/env bash\n' +
+      `echo x >> ${JSON.stringify(counter)}\n` +
+      `if [[ "\${GH_TOKEN:-}" != ${JSON.stringify(live)} ]]; then\n` +
+      '  echo "HTTP 401: Bad credentials (https://api.github.com/graphql)" >&2\n' +
+      '  echo "Try authenticating with:  gh auth login -h github.com" >&2\n' +
+      '  exit 1\n' +
+      'fi\n' +
+      'case "$*" in\n' +
+      '  *"--label agent-ready-specify"*) printf "%s\\n" 77 ;;\n' +
+      '  *"--label agent-ready"*)         printf "%s\\n" 42 ;;\n' +
+      '  *"--label inbox"*)               : ;;\n' +
+      'esac\nexit 0\n',
+    { mode: 0o755 },
+  );
+  return {
+    bin,
+    calls: () =>
+      fs.existsSync(counter) ? fs.readFileSync(counter, 'utf-8').trim().split('\n').length : 0,
+  };
+}
+
+/**
+ * Drive the same extracted queue block, but with the REAL `lib/gh-bot.sh` sourced and
+ * warmed the way `drain-inbox.sh` does it, so the credential lifecycle is the live one
+ * rather than a re-description of it.
+ */
+function runWithCredential(minter: string, live: string): {
+  out: string;
+  status: number;
+  ghCalls: number;
+} {
+  const gh = stubGhAuthenticating(live);
+  const lib = path.join(findScriptsDir(), 'lib', 'gh-bot.sh');
+  const script = [
+    'set -euo pipefail',
+    `source ${JSON.stringify(lib)}`,
+    'gh_bot_init',
+    // Exactly what drain-inbox.sh does before its first read.
+    'gh_bot_warm_read',
+    'REPO="AIClarityAU/minspec"',
+    'reconcile_labels() { :; }',
+    'TRIAGE=/bin/true',
+    'run_cycle() {',
+    queueBlock(),
+    '  echo "[drain] REACHED-DISPATCH ${all_ready//$\'\\n\'/,}"',
+    '  return 0',
+    '}',
+    'run_cycle',
+  ].join('\n');
+  const file = path.join(tmp, 'cred-block.sh');
+  fs.writeFileSync(file, script, 'utf-8');
+  const r = spawnSync('bash', [file], {
+    encoding: 'utf-8',
+    env: {
+      ...process.env,
+      PATH: `${gh.bin}:${process.env.PATH}`,
+      GH_TOKEN: '',
+      GITHUB_TOKEN: '',
+      MINSPEC_GH_APP_TOKEN_SCRIPT: minter,
+      MINSPEC_GH_BOT_REMINT_COOLDOWN: '0',
+    },
+  });
+  return { out: `${r.stdout ?? ''}${r.stderr ?? ''}`, status: r.status ?? -1, ghCalls: gh.calls() };
+}
+
+describe('drain queue read: an expired credential recovers, a dead broker still HOLDS (#2066)', () => {
+  it('re-authenticates and retries ONCE when the held token has died', () => {
+    const { out, status, ghCalls } = runWithCredential(
+      rotatingMinter('ghs_expired', 'ghs_live'),
+      'ghs_live',
+    );
+
+    // The recovery, stated as an assertion: the queue is read, so work can dispatch.
+    expect(out).toContain('REACHED-DISPATCH 42,77');
+    expect(out).toContain('retrying once');
+    expect(out).not.toContain('HOLDING');
+    expect(status).toBe(0);
+
+    // ONE retry, not a loop: the failed inbox query, its retry, then the two ready
+    // queries on the fresh token. A retry-per-query would be 6.
+    expect(ghCalls).toBe(4);
+  });
+
+  it('CONTROL: a broker serving the same dead token still HOLDS loudly (#2114, #1855)', () => {
+    const { out, status, ghCalls } = runWithCredential(cachedMinter('ghs_expired'), 'ghs_live');
+
+    expect(out).toContain('HOLDING');
+    expect(out).toContain('NOT an empty queue');
+    expect(out).toContain('#1855');
+    expect(out).not.toContain('cycle done');
+    expect(out).not.toContain('REACHED-DISPATCH');
+    expect(status).not.toBe(0);
+
+    // gh's own 401 must survive to the log. Reading that message is how the cause was
+    // found at all; a swallowed one is what #1855 is about.
+    expect(out).toContain('Bad credentials');
+
+    // And no retry was attempted on a credential known not to have changed: the inbox
+    // query and the agent-ready query, then the hold.
+    expect(ghCalls).toBe(2);
+  });
+
+  it('CONTROL: a healthy token reads the queue without minting twice', () => {
+    const { out, status, ghCalls } = runWithCredential(cachedMinter('ghs_live'), 'ghs_live');
+
+    expect(out).toContain('REACHED-DISPATCH 42,77');
+    expect(out).not.toContain('retrying once');
+    expect(status).toBe(0);
+    expect(ghCalls).toBe(3);
+  });
+});
