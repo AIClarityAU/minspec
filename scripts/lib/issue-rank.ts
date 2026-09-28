@@ -25,7 +25,9 @@
  * no declaration unblocks 0 and FALLS THROUGH to term 2 — it is not ranked as
  * unimportant. The accepted forms are documented on `parseDeclaredBlockers`. The
  * second edge source is GitHub's native issue dependency (Issue.blockedBy), which the
- * shell fetches in the same paged query.
+ * shell fetches in the same paged query and keeps only for blockers in the SAME
+ * repository. The same rule governs the spec link: only a declaring position in the
+ * title counts (`explicitLinks`), never an id merely mentioned there.
  *
  * ── Status-blind ─────────────────────────────────────────────────────────────
  * The spec term never reads a spec's `status:`. SPEC-021, SPEC-033 and SPEC-063 all
@@ -189,15 +191,25 @@ function leadingRefs(s: string): number[] {
  *          Depends on #1002 (hold reason must be machine-readable first)
  *
  *   2. A declaring HEADING — `## Blocked by` / `## Depends on` (any level, any trailing
- *      text), then list items up to the next heading or thematic break (`---`):
+ *      text), then the list directly under it:
  *          ## Blocked by (all must close)
  *          - #489 — Signal-1 root cause is agent-self-reported
  *          - #490 — ...
+ *      The section is that ONE list. It ends at the first line that is not blank, not a
+ *      list item and not an indented continuation of one — so a later `**Related**`
+ *      list, or a list after "Steps to reproduce:", is never swept in — and at any
+ *      heading or thematic break (`---`). No lead-in prose between the heading and its
+ *      list: every heading-form body in the open corpus (#27, #55, #499, #532) puts the
+ *      list first, so allowing prose there would only widen what one heading can claim.
  *
  * In both forms only the LEADING ref run counts (see `leadingRefs`), so prose never
  * mints an edge: "blocked by a stale cache; see #1225", "#1225 was blocked by design",
  * "Depends on the seam landing first (#12)", "Depends on / extends #448" all yield
  * nothing. Cross-repo refs (`owner/repo#N`) are not local edges and yield nothing.
+ * Nothing inside a fenced code block (``` or ~~~) counts, in either form: a fence
+ * quotes text (a PR-body example, a log line such as #1097's "BLOCKED by primary-
+ * checkout guard") rather than declaring anything. Indented code blocks are not
+ * recognised; a declaration there would still need to lead with a ref.
  *
  * Differences from the PR-body guard, each measured on the open corpus (#2196):
  *   - `Depends on` is accepted. The guard rejects it because PR bodies say "depends
@@ -213,7 +225,20 @@ function leadingRefs(s: string): number[] {
 export function parseDeclaredBlockers(body: string | null | undefined): number[] {
   const found = new Set<number>();
   let inSection = false;
+  let fence: { char: string; len: number } | null = null;
   for (const line of String(body ?? '').split(LINE_END_RE)) {
+    if (fence) {
+      if (closesFence(line, fence)) fence = null;
+      continue;
+    }
+    const open = openingFence(line);
+    if (open) {
+      fence = open;
+      // An unindented fence is a new block, so it ends a heading section like any
+      // other non-list line; one indented under a list item does not.
+      if (!isSpace(line[0] ?? '')) inSection = false;
+      continue;
+    }
     if (ANY_HEADING_RE.test(line)) {
       inSection = DECL_HEADING_RE.test(line);
       continue;
@@ -225,14 +250,49 @@ export function parseDeclaredBlockers(body: string | null | undefined): number[]
     const decl = DECL_LINE_RE.exec(line);
     if (decl) {
       for (const n of leadingRefs(afterDeclaration(line.slice(decl[0].length)))) found.add(n);
-      continue;
     }
-    if (inSection) {
-      const item = LIST_ITEM_RE.exec(line);
-      if (item) for (const n of leadingRefs(line.slice(item[0].length))) found.add(n);
+    if (!inSection) continue;
+    const item = LIST_ITEM_RE.exec(line);
+    if (item) {
+      // A declaring list item ("- Blocked by #5") leads with a word, so this adds nothing
+      // for it; the line form above already read its refs.
+      for (const n of leadingRefs(line.slice(item[0].length))) found.add(n);
+    } else if (line.trim() !== '' && !isSpace(line[0])) {
+      // Neither blank, a list item, nor an indented continuation: the list is over.
+      inSection = false;
     }
   }
   return [...found].sort((a, b) => a - b);
+}
+
+/** Length of the run of `c` starting at `i`. Linear. */
+function runOf(line: string, i: number, c: string): number {
+  let j = i;
+  while (line[j] === c) j++;
+  return j - i;
+}
+
+/** Up to three leading spaces, as CommonMark allows before a fence. */
+function fenceIndent(line: string): number {
+  let i = 0;
+  while (i < 3 && line[i] === ' ') i++;
+  return i;
+}
+
+/** A fence opener — three or more backticks or tildes — or null. Hand-scanned, linear. */
+function openingFence(line: string): { char: string; len: number } | null {
+  const i = fenceIndent(line);
+  const c = line[i];
+  if (c !== '`' && c !== '~') return null;
+  const len = runOf(line, i, c);
+  return len >= 3 ? { char: c, len } : null;
+}
+
+/** A closer: the same character, at least as long as the opener, then only spaces/tabs. */
+function closesFence(line: string, fence: { char: string; len: number }): boolean {
+  const i = fenceIndent(line);
+  const len = runOf(line, i, fence.char);
+  return len >= fence.len && line.slice(i + len).trim() === '';
 }
 
 /** `---`, `***`, `___` (spaces allowed between). Linear: no regex over the line. */
@@ -256,18 +316,41 @@ export function normaliseSpecId(id: string): string | null {
   return m ? `SPEC-${String(Number(m[1])).padStart(3, '0')}` : null;
 }
 
+// `type(scope)!: ` — a conventional-commit prefix. Titles are attacker-writable, so the
+// quantifiers are bounded and each is followed by a character it cannot match.
+const CC_PREFIX_RE = /^[A-Za-z][A-Za-z0-9_-]{0,31}(?:\(([^()\r\n]{0,200})\))?!?:[ \t]*/;
+const HEAD_SPEC_RE = /^\[?(SPEC-\d{1,6})\b/i;
+
 /**
- * The spec/epic links an issue DECLARES: every SPEC id in the TITLE (the repo's
- * convention is `feat(SPEC-063): ...`), and every `epic:<id-or-slug>` label. A SPEC id
- * in the BODY is a citation, not a link, and is never read. Triage verdict records and
- * the issue templates carry no spec field, so these are the only explicit forms.
+ * The spec/epic links an issue DECLARES, and only from the positions that declare:
+ *
+ *   - every SPEC id in a conventional-commit SCOPE: `feat(SPEC-063): ...`,
+ *     `refactor(SPEC-040 FR-6): ...`, `fix(SPEC-012, SPEC-013): ...`;
+ *   - a SPEC id that LEADS the title (`SPEC-046: ...`, `[SPEC-046] ...`) or leads the
+ *     subject after a prefix (`feat: SPEC-012 — ...`, `feat(#912): SPEC-044 Slice 3b`);
+ *   - every `epic:<id-or-slug>` label.
+ *
+ * A SPEC id anywhere else in the title is a citation, exactly as one in the body is:
+ * "amend DR-088: three statements SPEC-070 refutes" is about DR-088, and "fix: attribute
+ * bare DR-355 refs inside specs/ (SPEC-010 x5)" serves no spec. Reading every title id
+ * gave both a spec rank they did not earn (#2196 review). A missed link only drops an
+ * issue to the spec-less group; a false one promotes it over every spec-less issue, so
+ * the grammar errs toward missing. Triage verdict records and the issue templates carry
+ * no spec field, so these are the only explicit forms.
  */
 export function explicitLinks(issue: Pick<IssueRecord, 'title' | 'labels'>): { specs: string[]; epics: string[] } {
   const specs: string[] = [];
-  for (const m of issue.title.matchAll(SPEC_ID_RE)) {
-    const id = normaliseSpecId(m[0]);
+  const add = (raw: string) => {
+    const id = normaliseSpecId(raw);
     if (id && !specs.includes(id)) specs.push(id);
-  }
+  };
+  const title = issue.title.trimStart();
+  const prefix = CC_PREFIX_RE.exec(title);
+  if (prefix?.[1] !== undefined) for (const m of prefix[1].matchAll(SPEC_ID_RE)) add(m[0]);
+  const head = HEAD_SPEC_RE.exec(title);
+  if (head) add(head[1]);
+  const subjectHead = prefix ? HEAD_SPEC_RE.exec(title.slice(prefix[0].length)) : null;
+  if (subjectHead) add(subjectHead[1]);
   const epics: string[] = [];
   for (const label of issue.labels) {
     const m = EPIC_LABEL_RE.exec(label);
@@ -537,7 +620,7 @@ export function rankIssues(candidates: readonly number[], ctx: RankContext): Ran
       } else if (unknown.length > 0) {
         specReason = `none — ${unknown.join(', ')} not in the structural order`;
       } else {
-        specReason = 'none — no SPEC-NNN in the title, no epic: label';
+        specReason = "none — no SPEC-NNN in the title's scope or head, no epic: label";
       }
     }
 

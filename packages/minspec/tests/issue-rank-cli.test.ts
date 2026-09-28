@@ -16,7 +16,9 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
-import { runCli, parseIssuePages, type CliDeps } from '../../../scripts/rank-issues';
+import { runCli, parseIssuePages, loadOrder, type CliDeps } from '../../../scripts/rank-issues';
+import { buildArtifactGraph } from '../src/lib/artifact-graph';
+import { approveSpec } from '../src/lib/approval';
 import type { IssueRecord, StructuralOrder } from '../../../scripts/lib/issue-rank';
 import { useShellTimeout } from './helpers/shell-timeout';
 
@@ -158,6 +160,8 @@ describe('rank-issues CLI --explain', () => {
 });
 
 describe('parseIssuePages: the gh --paginate --slurp shape, validated', () => {
+  const REPO = 'AIClarityAU/minspec';
+  const here = (number: number) => ({ number, repository: { nameWithOwner: REPO } });
   const page = (nodes: unknown[], totalCount = nodes.length) => ({
     data: { repository: { issues: { totalCount, pageInfo: { hasNextPage: false, endCursor: null }, nodes } } },
   });
@@ -166,12 +170,12 @@ describe('parseIssuePages: the gh --paginate --slurp shape, validated', () => {
     title: `t${number}`,
     body: 'Blocked by #1',
     labels: { totalCount: 1, nodes: [{ name: 'agent-ready' }] },
-    blockedBy: { totalCount: 1, nodes: [{ number: 2 }] },
+    blockedBy: { totalCount: 1, nodes: [here(2)] },
     ...over,
   });
 
   it('flattens pages into records, including native blocked-by numbers', () => {
-    const got = parseIssuePages(JSON.stringify([page([node(5)], 2), page([node(6, { body: null })], 2)]));
+    const got = parseIssuePages(JSON.stringify([page([node(5)], 2), page([node(6, { body: null })], 2)]), REPO);
     expect(got.totalCount).toBe(2);
     expect(got.issues).toEqual([
       { number: 5, title: 't5', body: 'Blocked by #1', labels: ['agent-ready'], blockedBy: [2] },
@@ -182,20 +186,157 @@ describe('parseIssuePages: the gh --paginate --slurp shape, validated', () => {
 
   it('notes nested truncation instead of hiding it', () => {
     const got = parseIssuePages(
-      JSON.stringify([page([node(5, { blockedBy: { totalCount: 150, nodes: [{ number: 2 }] } })])]),
+      JSON.stringify([page([node(5, { blockedBy: { totalCount: 150, nodes: [here(2)] } })])]),
+      REPO,
     );
     expect(got.notes.join('\n')).toMatch(/#5.*1 of 150/);
+  });
+
+  it('a native blocker in ANOTHER repository is not an edge from the local issue sharing its number', () => {
+    // Broken implementation this catches: reading blockedBy by number alone, so
+    // sealbox#55 blocking minspec#100 becomes minspec#55 -> #100 and minspec#55 jumps
+    // the queue on term 1 for a relation it has no part in.
+    const blockedBy = {
+      totalCount: 2,
+      nodes: [here(7), { number: 55, repository: { nameWithOwner: 'AIClarityAU/sealbox' } }],
+    };
+    const got = parseIssuePages(JSON.stringify([page([node(100, { blockedBy })])]), 'aiclarityau/MINSPEC');
+    expect(got.issues[0].blockedBy).toEqual([7]); // same repo matches case-insensitively
+    expect(got.notes.join('\n')).toMatch(/#100 blockedBy: AIClarityAU\/sealbox#55 .*not a local edge/);
   });
 
   it.each([
     ['not JSON', 'nope'],
     ['not an array', JSON.stringify(page([]))],
     ['an empty array', '[]'],
-    ['a GraphQL error', JSON.stringify([{ errors: [{ message: 'Field blockedBy does not exist' }] }])],
+    // `data` is present and valid alongside `errors` (a field-level error nulls one
+    // field, not the page), so only the errors check can make this throw.
+    ['a GraphQL error beside valid data', JSON.stringify([{ ...page([node(5)]), errors: [{ message: 'Field blockedBy does not exist' }] }])],
+    ['a blocker with no repository', JSON.stringify([page([node(5, { blockedBy: { totalCount: 1, nodes: [{ number: 2 }] } })])])],
     ['a missing repository', JSON.stringify([{ data: { repository: null } }])],
     ['a malformed node', JSON.stringify([page([{ number: 'five' }])])],
   ])('throws on %s', (_name, raw) => {
-    expect(() => parseIssuePages(raw)).toThrow();
+    expect(() => parseIssuePages(raw, REPO)).toThrow();
+  });
+});
+
+// ─── The structural-order loader on a real workspace ─────────────────────────
+
+type Kind = 'new' | 'specifying' | 'implementing' | 'done' | 'archived' | 'superseded';
+
+/**
+ * A MinSpec workspace whose specs reach the graph with the given DERIVED statuses.
+ * buildArtifactGraph derives status from phases and the approval store and reads the
+ * frontmatter `status:` line only for the human-set terminals, so each kind is built
+ * the way it really arises: phases for new/specifying, a real approval for
+ * implementing/done, the status line for archived/superseded.
+ */
+function statusWorkspace(root: string, kinds: Record<string, Kind>): void {
+  const write = (rel: string, text: string): string => {
+    const full = path.join(root, rel);
+    fs.mkdirSync(path.dirname(full), { recursive: true });
+    fs.writeFileSync(full, text);
+    return full;
+  };
+  const epic = (id: string, order: number) =>
+    `---\nid: ${id}\nslug: ${id.toLowerCase()}\ntitle: ${id}\nstatus: active\norder: ${order}\n---\n\n# ${id}\n`;
+  write('docs/epics/EPIC-001-a.md', epic('EPIC-001', 2));
+  write('docs/epics/EPIC-002-b.md', epic('EPIC-002', 1));
+  const EPIC: Record<string, string | undefined> = {
+    'SPEC-001': 'EPIC-001',
+    'SPEC-002': 'EPIC-002',
+    'SPEC-003': 'EPIC-001',
+    'SPEC-004': 'EPIC-002',
+    'SPEC-005': undefined,
+    'SPEC-006': 'EPIC-001',
+  };
+  const PHASES: Record<Kind, string> = {
+    new: 'pending pending pending pending pending',
+    specifying: 'in-progress pending pending pending pending',
+    implementing: 'done done done done in-progress',
+    done: 'done done done done done',
+    archived: 'done done pending pending pending',
+    superseded: 'done done pending pending pending',
+  };
+  for (const [id, kind] of Object.entries(kinds)) {
+    const [specify, clarify, plan, tasks, implement] = PHASES[kind].split(' ');
+    const status = kind === 'archived' || kind === 'superseded' ? kind : 'specifying';
+    const file = write(
+      `specs/p/${id}-x/requirements.md`,
+      [
+        '---',
+        `id: ${id}`,
+        'type: requirements',
+        `status: ${status}`,
+        'tier: T2',
+        ...(EPIC[id] ? [`epic: ${EPIC[id]}`] : []),
+        'phases:',
+        `  specify: ${specify}`,
+        `  clarify: ${clarify}`,
+        `  plan: ${plan}`,
+        `  tasks: ${tasks}`,
+        `  implement: ${implement}`,
+        '---',
+        '',
+        `# ${id}`,
+        '',
+      ].join('\n'),
+    );
+    if (kind === 'implementing' || kind === 'done') {
+      approveSpec(root, file, 'T2', 'tester@example.com', () => new Date('2026-09-29T00:00:00.000Z'));
+    }
+  }
+}
+
+describe('loadOrder: the loader the drain ranks with is status-blind (INV-3)', () => {
+  let tmp: string;
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'rank-issues-order-'));
+  });
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const IDS = ['SPEC-001', 'SPEC-002', 'SPEC-003', 'SPEC-004', 'SPEC-005', 'SPEC-006'];
+  const KINDS: Kind[] = ['done', 'archived', 'implementing', 'superseded', 'specifying', 'new'];
+  const assign = (kinds: readonly Kind[]) => Object.fromEntries(IDS.map((id, i) => [id, kinds[i]]));
+  const workspace = (name: string, kinds: Record<string, Kind>): string => {
+    const root = path.join(tmp, name);
+    statusWorkspace(root, kinds);
+    return root;
+  };
+
+  it('identical order whatever the specs\' derived statuses', () => {
+    // Broken implementations this catches, each measured to survive the earlier suite:
+    // dropping `done` specs, putting unfinished specs first, and dropping
+    // archived/superseded ones — any filter or key on status placed in loadOrder.
+    const reference = workspace('all-new', assign(IDS.map(() => 'new')));
+    const mixed = workspace('mixed', assign(KINDS));
+    const rotated = workspace('rotated', assign([...KINDS.slice(3), ...KINDS.slice(0, 3)]));
+
+    // CONTROL: the fixture really reaches the graph with six distinct statuses. Without
+    // this, a fixture whose status lines never reach the graph (the e2e one did exactly
+    // that) passes against a status-keyed loader.
+    const derived = Object.fromEntries(buildArtifactGraph(mixed).specs.map((sp) => [sp.id, sp.status]));
+    expect(new Set(Object.values(derived)).size).toBeGreaterThanOrEqual(5);
+    expect(derived).toMatchObject({ 'SPEC-001': 'done', 'SPEC-002': 'archived', 'SPEC-004': 'superseded' });
+
+    const ref = loadOrder(reference);
+    const bySlot = [...ref.spec.entries()].sort((a, b) => a[1] - b[1]).map(([id]) => id);
+    expect(bySlot).toEqual(['SPEC-002', 'SPEC-004', 'SPEC-001', 'SPEC-003', 'SPEC-006', 'SPEC-005']);
+    for (const root of [mixed, rotated]) {
+      const o = loadOrder(root);
+      expect(o.size).toBe(ref.size);
+      expect([...o.spec.entries()].sort()).toEqual([...ref.spec.entries()].sort());
+      expect([...o.epic.entries()].sort()).toEqual([...ref.epic.entries()].sort());
+    }
+  });
+
+  it('refuses a root with no specs rather than ranking with the spec term silently off', () => {
+    // buildArtifactGraph degrades to an empty graph on a misconfigured root; ranked on
+    // that, every candidate loses term 2 and the ranker still exits 0.
+    fs.mkdirSync(path.join(tmp, 'empty'));
+    expect(() => loadOrder(path.join(tmp, 'empty'))).toThrow(/no specs found/);
   });
 });
 
@@ -231,12 +372,15 @@ describe('rank-issues.ts end to end (tsx, stub gh on PATH)', () => {
     fs.writeFileSync(path.join(root, 'docs', 'epics', 'EPIC-002-beta.md'), epic('EPIC-002', 'beta', 1));
     const spec = (id: string, epicId: string, status: string) =>
       `---\nid: ${id}\ntype: requirements\nstatus: ${status}\ntier: T2\nepic: ${epicId}\n---\n\n# ${id}\n`;
-    // SPEC-001 claims `done`, SPEC-002 claims `implementing`: status must not matter,
-    // only that SPEC-002's epic is ordered first.
-    fs.writeFileSync(path.join(root, 'specs', 'p', 'SPEC-001-a', 'requirements.md'), spec('SPEC-001', 'EPIC-001', 'done'));
+    // SPEC-002 is ARCHIVED — a status line the graph does read (the human-set terminals
+    // are the only ones it takes from frontmatter) — and still ranks first, because its
+    // epic is ordered first. A `done`/`implementing` line would prove nothing here: the
+    // graph derives those from phases and approvals, so both specs would reach it as
+    // `new`. The loadOrder block above covers every derived status.
+    fs.writeFileSync(path.join(root, 'specs', 'p', 'SPEC-001-a', 'requirements.md'), spec('SPEC-001', 'EPIC-001', 'specifying'));
     fs.writeFileSync(
       path.join(root, 'specs', 'p', 'SPEC-002-b', 'requirements.md'),
-      spec('SPEC-002', 'EPIC-002', 'implementing'),
+      spec('SPEC-002', 'EPIC-002', 'archived'),
     );
     return root;
   }

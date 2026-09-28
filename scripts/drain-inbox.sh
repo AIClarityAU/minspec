@@ -932,7 +932,20 @@ run_cycle() {
   rank_dir="$(dirname -- "$TRIAGE")"
   ranker=("${rank_dir}/../node_modules/.bin/tsx" "${rank_dir}/rank-issues.ts")
   [[ -n "${MINSPEC_ISSUE_RANKER:-}" ]] && ranker=("$MINSPEC_ISSUE_RANKER")
+  # The ranker runs the gh BINARY, not the gh-bot wrapper, so nothing refreshes the
+  # credential for it but this. By now triage may have run for many minutes, and the
+  # queue reads above re-minted only inside their own `$(...)` subshells — the parent
+  # still holds the cycle's first token (#2066). Refresh here, in the parent, as the
+  # dispatch loop does per item; and, like _read_queue, retry once on failure if a
+  # genuinely different credential is then in hand (the broker can serve a dead one,
+  # #2114). A second failure still falls back, loudly, below.
+  gh_bot_warm_read
   rank_out="$(printf '%s\n' "$all_ready" | timeout "${MINSPEC_ISSUE_RANK_TIMEOUT:-180}" "${ranker[@]}" --repo "$REPO")" || rank_rc=$?
+  if (( rank_rc != 0 )) && gh_bot_reauth_read; then
+    echo "[drain] the issue ranker failed (exit ${rank_rc}) and the credential was stale — re-minted, retrying once." >&2
+    rank_rc=0
+    rank_out="$(printf '%s\n' "$all_ready" | timeout "${MINSPEC_ISSUE_RANK_TIMEOUT:-180}" "${ranker[@]}" --repo "$REPO")" || rank_rc=$?
+  fi
   if (( rank_rc != 0 )); then
     echo "[drain] WARNING: the issue ranker FAILED (exit ${rank_rc}) — dispatching in NUMERIC order this cycle (#2196)." >&2
     echo "[drain]          The queue is complete; only its order is degraded. See the ranker's error above." >&2

@@ -19,6 +19,7 @@
  */
 
 import { describe, it, expect } from 'vitest';
+import { resolvePipeline, type ArtifactGraph } from '@aiclarity/shared';
 import {
   rankIssues,
   parseDeclaredBlockers,
@@ -146,6 +147,9 @@ describe('INV-2: citing #N without a declaration creates no edge', () => {
     'This blocks #10 too.',
     'Blocked by AIClarityAU/sealbox#10',
     'Blocked by SPEC-010 shipping, tracked in #10',
+    // A declaration must LEAD its line: mid-sentence it is narrative.
+    'We were blocked by #10 for a week.',
+    'This depends on #10 landing',
   ].join('\n');
 
   it('the parser returns no blockers for citation-only prose', () => {
@@ -241,6 +245,67 @@ describe('INV-3: spec status never influences rank', () => {
     for (let k = 0; k < 50; k++) {
       const order = structuralOrder(graph(shuffle(STATUSES, rand)));
       expect(numbers(ctxOf(issues, { order }), [1, 2, 3, 4])).toEqual(reference);
+    }
+  });
+});
+
+// The spec term is a COPY of next-task.ts `compareRanked` minus its status-derived
+// classRank (that comparator is not exported, and its lead key is exactly what INV-3
+// forbids). A copy drifts silently, so these pin it to the original.
+describe('structuralOrder mirrors the signpost comparator, minus status', () => {
+  const order = (specs: StructuralGraphSpec[]) =>
+    [...structuralOrder({ epics: [{ id: 'EPIC-001', order: 1 }], specs }).spec.entries()]
+      .sort((a, b) => a[1] - b[1])
+      .map(([id]) => id);
+  type StructuralGraphSpec = { id: string; epic?: string; goalRank?: number; priority?: number };
+
+  it('goalRank orders specs within one epic order; a present goalRank precedes an absent one', () => {
+    expect(
+      order([
+        { id: 'SPEC-001', epic: 'EPIC-001', goalRank: 2 },
+        { id: 'SPEC-002', epic: 'EPIC-001', goalRank: 1 },
+        { id: 'SPEC-003', epic: 'EPIC-001' },
+      ]),
+    ).toEqual(['SPEC-002', 'SPEC-001', 'SPEC-003']);
+  });
+
+  it('priority orders specs sharing an epic order and goal rank', () => {
+    expect(
+      order([
+        { id: 'SPEC-001', epic: 'EPIC-001', priority: 2 },
+        { id: 'SPEC-002', epic: 'EPIC-001', priority: 1 },
+        { id: 'SPEC-003', epic: 'EPIC-001' },
+      ]),
+    ).toEqual(['SPEC-002', 'SPEC-001', 'SPEC-003']);
+  });
+
+  it("matches resolvePipeline's spec order whenever every spec shares one severity class (property)", () => {
+    // Every spec is unapproved under an ACTIVE epic, so each yields one blocked-ready
+    // spec-approve task and classRank ties: the signpost then orders by exactly the
+    // dials structuralOrder copies. Any dial added, dropped or reordered on either side
+    // shows up here.
+    const rand = prng(2196);
+    const pick = <T>(xs: readonly T[]): T => xs[Math.floor(rand() * xs.length)];
+    for (let k = 0; k < 200; k++) {
+      const epics = ['EPIC-001', 'EPIC-002', 'EPIC-003'].map((id) => ({
+        id,
+        status: 'active' as const,
+        order: pick([1, 2, 3, undefined]),
+      }));
+      const specs = Array.from({ length: 8 }, (_, i) => ({
+        id: `SPEC-${String(i + 1).padStart(3, '0')}`,
+        status: 'specifying' as const,
+        approvalState: 'unapproved' as const,
+        epic: pick(epics).id,
+        goalRank: pick([1, 2, undefined]),
+        priority: pick([1, 2, undefined]),
+      }));
+      const g: ArtifactGraph = { epics, specs, adrs: [] };
+      const signpost = resolvePipeline(g)
+        .filter((t) => t.kind === 'spec-approve')
+        .map((t) => t.targetId);
+      const mine = [...structuralOrder(g).spec.entries()].sort((a, b) => a[1] - b[1]).map(([id]) => id);
+      expect(mine, `case ${k}`).toEqual(signpost);
     }
   });
 });
@@ -469,6 +534,38 @@ describe('parseDeclaredBlockers: explicit declarations only', () => {
     expect(parseDeclaredBlockers('### Depends on\n- #1\n---\n- #2')).toEqual([1]);
   });
 
+  it('heading form is ONE list: a later list after a pseudo-heading or prose is not swept in', () => {
+    // Broken implementation this catches: a section that runs to the next real heading,
+    // so any later list item leading with #N — under **Related**, "Steps to reproduce:",
+    // or "Related, not blocking:" — becomes a blocker edge. That is a citation promoted
+    // to an edge, the INV-2 failure through the heading form.
+    expect(parseDeclaredBlockers('## Blocked by\n- #489 root cause first\n\n**Related**\n- #500 similar symptom\n')).toEqual([489]);
+    expect(parseDeclaredBlockers('## Depends on\n- #10 first\n\nSteps to reproduce:\n- #20 is an example issue\n')).toEqual([10]);
+    expect(
+      parseDeclaredBlockers('## Blocked by\n- #489 root cause\n\nRelated, not blocking:\n- #700 background\n\n## Plan\n- #800'),
+    ).toEqual([489]);
+  });
+
+  it('heading form: blank lines and indented continuations keep the list open', () => {
+    // Contrast arm: without it, a parser that closed the section on ANY non-item line
+    // would pass the test above while losing real blockers.
+    expect(parseDeclaredBlockers('## Blocked by\n\n- #1 a long reason that\n  continues here\n\n- #2\n')).toEqual([1, 2]);
+  });
+
+  it('nothing inside a fenced code block counts, in either form', () => {
+    // Broken implementation this catches: parsing quoted text — a PR-body example, a
+    // pasted log line like #1097's "BLOCKED by primary-checkout guard" — as a declaration.
+    expect(parseDeclaredBlockers('```\nBlocked by #77\n```')).toEqual([]);
+    expect(parseDeclaredBlockers('~~~md\n## Blocked by\n- #5\n~~~')).toEqual([]);
+    expect(parseDeclaredBlockers('```\nBlocked by #9')).toEqual([]); // unclosed: runs to the end
+    // A shorter run does not close a longer fence.
+    expect(parseDeclaredBlockers('````\n```\nBlocked by #9\n````\nBlocked by #4')).toEqual([4]);
+    // After the fence closes, declarations count again (contrast arm).
+    expect(parseDeclaredBlockers('```\nx\n```\nBlocked by #3')).toEqual([3]);
+    // An unindented fence ends a heading section.
+    expect(parseDeclaredBlockers('## Blocked by\n- #1\n```\ncode\n```\n- #2')).toEqual([1]);
+  });
+
   it('heading form ignores list items that do not LEAD with a ref', () => {
     expect(parseDeclaredBlockers('## Depends on\n\n- SPEC-018 shipping (#12). Do not action before then.')).toEqual([]);
     expect(parseDeclaredBlockers('## Depends on\n- White paper authored, see #27')).toEqual([]);
@@ -516,6 +613,9 @@ describe('parseDeclaredBlockers: linear time on crafted bodies (ReDoS, #2134 les
     ['declaration, whitespace, then an embedded carriage return', `Blocked by${' '.repeat(40_000)}a\rb`],
     ['declaration, whitespace, then an embedded U+2028', `Blocked by :${' '.repeat(40_000)}a b`],
     ['list item, whitespace, then an embedded U+2028', `## Blocked by\n-${' '.repeat(40_000)}a b`],
+    ['many fence lines', '```\n'.repeat(30_000)],
+    ['an open fence, then a long near-closer', `\`\`\`\n${'`'.repeat(40_000)}${' '.repeat(40_000)}x`],
+    ['heading, then alternating items and indented continuations', `## Blocked by\n${'- x\n  y\n'.repeat(15_000)}`],
   ])('%s', (_name, body) => {
     const start = process.hrtime.bigint();
     parseDeclaredBlockers(body);
@@ -527,12 +627,40 @@ describe('parseDeclaredBlockers: linear time on crafted bodies (ReDoS, #2134 les
 // ─── Explicit links and tier proxy ───────────────────────────────────────────
 
 describe('explicitLinks: the title and epic labels, never the body', () => {
-  it('reads every SPEC id in the title, normalised', () => {
-    expect(explicitLinks(issue(1, { title: 'feat(SPEC-63): x vs SPEC-0012 and spec-1' })).specs).toEqual([
-      'SPEC-063',
-      'SPEC-012',
-      'SPEC-001',
+  it.each([
+    ['feat(SPEC-63): x', ['SPEC-063']],
+    ['refactor(SPEC-040 FR-6): dissolve the import cycles', ['SPEC-040']],
+    ['fix(SPEC-012, spec-0013): x', ['SPEC-012', 'SPEC-013']],
+    ['SPEC-046: per-item auto-approval audit artifact', ['SPEC-046']],
+    ['[SPEC-046] per-item', ['SPEC-046']],
+    ['SPEC-070 OQ-2(d): the adopter-side basis', ['SPEC-070']],
+    ['feat: SPEC-012 — add issue-triage node kind', ['SPEC-012']],
+    ['feat(#912): SPEC-044 Slice 3b — grace reaper', ['SPEC-044']],
+  ])('a SPEC id in a declaring position links: %j', (title, want) => {
+    expect(explicitLinks(issue(1, { title })).specs).toEqual(want);
+  });
+
+  it.each([
+    ['amend DR-088: three statements SPEC-070 refutes', []],
+    ['fix: attribute bare DR-355 refs inside specs/ (SPEC-010 x5, SPEC-012 x1)', []],
+    ['docs(DR-053): record commit-on-approve decision (realizes SPEC-022 FR-1)', []],
+    ['feat(SPEC-63): x vs SPEC-0012 and spec-1', ['SPEC-063']],
+  ])('a SPEC id elsewhere in the title is a citation, not a link: %j', (title, want) => {
+    // Broken implementation this catches: reading every SPEC id in the title. Both
+    // titles above ranked as serving the spec they merely mention, ahead of every
+    // spec-less issue on term 2 (#2196 review, live --explain run).
+    expect(explicitLinks(issue(1, { title })).specs).toEqual(want);
+  });
+
+  it('a title that only mentions a spec ranks as spec-less', () => {
+    const ctx = ctxOf([
+      issue(1, { title: 'amend DR-088: three statements SPEC-001 refutes', labels: ['agent-ready-specify'] }),
+      issue(2, { title: 'chore: y', labels: ['agent-ready'] }),
     ]);
+    const out = rankIssues([1, 2], ctx);
+    expect(out.find((r) => r.number === 1)!.specRank).toBeNull();
+    // Spec-less both, so tier decides: #2 (T1-T2) before #1 (T3-T4).
+    expect(out.map((r) => r.number)).toEqual([2, 1]);
   });
 
   it('reads epic:<ref> labels', () => {
@@ -548,7 +676,7 @@ describe('explicitLinks: the title and epic labels, never the body', () => {
       ]),
       epic: new Map([['team', { position: 1, id: 'EPIC-001' }]]),
     };
-    const ctx = ctxOf([issue(1, { title: 'fix(SPEC-002): a, SPEC-001', labels: ['epic:team'] })], { order });
+    const ctx = ctxOf([issue(1, { title: 'fix(SPEC-002, SPEC-001): a', labels: ['epic:team'] })], { order });
     const r = rankIssues([1], ctx)[0];
     expect(r.specRank).toBe(0);
     expect(r.link).toBe('SPEC-001');

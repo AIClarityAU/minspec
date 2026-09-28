@@ -80,7 +80,7 @@ export const OPEN_ISSUES_QUERY = `query($owner: String!, $name: String!, $endCur
         title
         body
         labels(first: ${NESTED}) { totalCount nodes { name } }
-        blockedBy(first: ${NESTED}) { totalCount nodes { number } }
+        blockedBy(first: ${NESTED}) { totalCount nodes { number repository { nameWithOwner } } }
       }
     }
   }
@@ -125,8 +125,14 @@ function connection<T>(
  * Parse `gh api graphql --paginate --slurp` output (a JSON array, one element per
  * page) into issue records. Throws on anything malformed or on a GraphQL error — a
  * half-understood response must not become a confidently wrong ranking.
+ *
+ * `repo` is the repository that was queried. GitHub's blocked-by relation can point
+ * at an issue in ANOTHER repository, and an issue number means nothing without its
+ * repository: sealbox#55 is not minspec#55. So a native blocker from elsewhere is
+ * noted and dropped, never turned into an edge from the local issue that happens to
+ * share its number — the same rule the body grammar applies to `owner/repo#N`.
  */
-export function parseIssuePages(raw: string): OpenIssueFetch {
+export function parseIssuePages(raw: string, repo: string): OpenIssueFetch {
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
@@ -146,8 +152,8 @@ export function parseIssuePages(raw: string): OpenIssueFetch {
       fail(`GraphQL error: ${msgs.join('; ')}`);
     }
     const data = asObject(page.data, `page ${pi} data`);
-    const repo = asObject(data.repository, `page ${pi} repository`);
-    const issues = asObject(repo.issues, `page ${pi} issues`);
+    const repository = asObject(data.repository, `page ${pi} repository`);
+    const issues = asObject(repository.issues, `page ${pi} issues`);
     if (typeof issues.totalCount === 'number') totalCount = issues.totalCount;
     for (const [ni, n] of asArray(issues.nodes, `page ${pi} nodes`).entries()) {
       const node = asObject(n, `page ${pi} node ${ni}`);
@@ -161,12 +167,26 @@ export function parseIssuePages(raw: string): OpenIssueFetch {
         if (typeof name !== 'string') fail(`malformed response: #${number} label ${i} has no name`);
         return name;
       }, notes);
-      const blockedBy = connection(
+      const blockedBy: number[] = [];
+      const foreign: string[] = [];
+      const blockers = connection(
         node.blockedBy,
         `#${number} blockedBy`,
-        (b, i) => asIssueNumber(asObject(b, `#${number} blockedBy ${i}`).number, `#${number} blockedBy ${i}`),
+        (b, i) => {
+          const o = asObject(b, `#${number} blockedBy ${i}`);
+          const owner = asObject(o.repository, `#${number} blockedBy ${i}.repository`).nameWithOwner;
+          if (typeof owner !== 'string') fail(`malformed response: #${number} blockedBy ${i} has no repository`);
+          return { n: asIssueNumber(o.number, `#${number} blockedBy ${i}`), owner };
+        },
         notes,
       );
+      for (const { n, owner } of blockers) {
+        if (owner.toLowerCase() === repo.toLowerCase()) blockedBy.push(n);
+        else foreign.push(`${owner}#${n}`);
+      }
+      if (foreign.length > 0) {
+        notes.push(`#${number} blockedBy: ${foreign.join(', ')} — in another repository, not a local edge`);
+      }
       // A page boundary that shifts while paging can repeat an issue; keep the first.
       if (!byNumber.has(number)) {
         byNumber.set(number, { number, title: node.title, body: (node.body as string | null) ?? '', labels, blockedBy });
@@ -191,12 +211,17 @@ function ghFetchOpenIssues(repo: string): OpenIssueFetch {
     const how = x.code === 'ENOENT' ? 'gh not found on PATH' : x.status != null ? `exit ${x.status}` : `signal ${x.signal}`;
     fail(`gh api graphql failed (${how}) — gh's own error, if any, is above`);
   }
-  return parseIssuePages(raw);
+  return parseIssuePages(raw, repo);
 }
 
 // ─── The structural order ────────────────────────────────────────────────────
 
-function loadOrder(root: string): StructuralOrder {
+/**
+ * The structural order of the workspace at `root`. Exported so the tests can pin, on a
+ * real workspace, that no spec status reaches it (INV-3): the pure `structuralOrder`
+ * is status-blind by type, but this is where a filter on status would go.
+ */
+export function loadOrder(root: string): StructuralOrder {
   // The signpost's own fs adapter — the same reader the Next Task command uses — so the
   // epic `order:` and spec membership come from one parser. It DEGRADES to an empty
   // graph on a misconfigured root (INV-DEGRADE there), which here would silently turn
@@ -246,7 +271,7 @@ export function renderExplain(
   lines.push('');
   const specless = ranked.filter((r) => r.specRank === null).length;
   lines.push(
-    `${specless} of ${ranked.length} candidate(s) serve no spec or epic (no SPEC-NNN in the title, ` +
+    `${specless} of ${ranked.length} candidate(s) serve no spec or epic (no SPEC-NNN in the title's scope or head, ` +
       'no epic: label, or one not in the structural order) — they sort after linked issues on the spec term.',
   );
   const noData = ranked.filter((r) => !r.hasData).length;
