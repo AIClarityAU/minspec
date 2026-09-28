@@ -781,6 +781,43 @@ _ready_numbers() {
     --json number --jq '.[].number'
 }
 
+# _read_queue <varname> <label> — read one label's queue INTO a named variable, and
+# recover from a DEAD CREDENTIAL once before giving up.
+#
+# Why it assigns into a variable instead of printing, which is the whole reason this
+# function exists (#2066): the credential lives in the shell's environment, so a re-mint
+# is only worth anything in the shell that goes on to use it. Every previous caller read
+# the queue as `x="$(_ready_numbers ...)"`, and a command substitution is a SUBSHELL —
+# a token minted in there dies with it, the parent keeps the dead one, and the next read
+# and every dispatched child inherit the corpse. Called as `_read_queue x label`, this
+# runs in the caller's own shell, so one re-mint fixes the rest of the cycle.
+#
+# Why re-mint at all when gh_bot_warm_read already refreshes on AGE: because age is a
+# guess. The host broker serves ONE cached installation token machine-wide and keeps
+# serving it after it dies (#2114), so this loop can be handed a token that is already
+# old and has no way to know. A read that has actually FAILED is the only authoritative
+# signal available, and 2026-09-27 is what ignoring it costs: normal dispatch for an
+# hour, then `HTTP 401: Bad credentials` on every read for seven more.
+#
+# It must not soften the failure, and it does not. gh_bot_reauth_read returns non-zero
+# unless a genuinely DIFFERENT credential is now in hand, so a broker serving the same
+# dead token means no retry at all; and if the retry fails too, the non-zero status
+# propagates and the caller holds loudly. A failed query is never an empty queue
+# (#1855, constitution invariant 2).
+_read_queue() {
+  local __rq_var="$1" __rq_label="$2" __rq_rc=0 __rq_out=""
+  __rq_out="$(_ready_numbers "$__rq_label")" || __rq_rc=$?
+
+  if (( __rq_rc != 0 )) && gh_bot_reauth_read; then
+    echo "[drain] the '$__rq_label' query failed and the credential was stale — re-minted, retrying once." >&2
+    __rq_rc=0
+    __rq_out="$(_ready_numbers "$__rq_label")" || __rq_rc=$?
+  fi
+
+  printf -v "$__rq_var" '%s' "$__rq_out"
+  return "$__rq_rc"
+}
+
 run_cycle() {
   local inbox_issues all_ready n out drc cap
   local inbox_rc ready_rc ready_full ready_spec _lbl
@@ -795,6 +832,15 @@ run_cycle() {
     echo "[drain] $quota_verdict"
     return 42
   fi
+
+  # Keep the credential inside its headroom, in the PARENT shell, before the cycle's
+  # first read (#2066). Every read below happens in a `$(...)` subshell and every
+  # dispatch in a child process, and both inherit GH_TOKEN from here — so this is the
+  # only place a re-mint can benefit more than the one command that paid for it.
+  # Deliberately after the quota gate, so a deferred cycle still costs nothing at all.
+  # A no-op while the token has headroom, and never fatal: with no key (CI) the reads
+  # proceed exactly as they would have, and a broker failure is reported, not raised.
+  gh_bot_warm_read
 
   # #773: refresh the run dir FIRST, so triage/dispatch/remediate all execute the
   # CURRENT orchestration (self-heal, not die-on-stale). Never fatal — on failure it
@@ -821,7 +867,7 @@ run_cycle() {
   # aborting the whole cycle. It is loud either way; what it must never do is print
   # nothing and look like a quiet inbox.
   inbox_rc=0
-  inbox_issues="$(_ready_numbers "inbox")" || inbox_rc=$?
+  _read_queue inbox_issues "inbox" || inbox_rc=$?
   if (( inbox_rc != 0 )); then
     echo "[drain] WARNING: the inbox query FAILED (gh exit ${inbox_rc}) — this cycle triaged nothing." >&2
     echo "[drain]          That is NOT an empty inbox. See the gh error above for the cause." >&2
@@ -848,10 +894,10 @@ run_cycle() {
   # cannot be used to carry the status even under `pipefail`, because `sort` succeeds
   # on empty input and would mask a failed producer — the same collapse in a new shape.
   ready_rc=0
-  ready_full="$(_ready_numbers "agent-ready")" || ready_rc=$?
+  _read_queue ready_full "agent-ready" || ready_rc=$?
   ready_spec=""
   if (( ready_rc == 0 )); then
-    ready_spec="$(_ready_numbers "agent-ready-specify")" || ready_rc=$?
+    _read_queue ready_spec "agent-ready-specify" || ready_rc=$?
   fi
   if (( ready_rc != 0 )); then
     echo "[drain] HOLDING: the agent-ready query FAILED (gh exit ${ready_rc})." >&2
@@ -940,6 +986,13 @@ run_cycle() {
     # LIVE through `tee`, which matters for a multi-minute build: a captured-then-
     # dumped block would leave the log silent while work is happening.
     for n in $all_ready; do
+      # Per ITEM, not just per cycle. One cycle over a 60-issue queue runs for hours, so
+      # the token minted at the top of it dies partway down the list — measured on
+      # 2026-09-27, where dispatch #1898 through #2021 succeeded and every dispatch from
+      # #2023 on answered `Fetching issue #2023... HTTP 401: Bad credentials` (#2066).
+      # The child inherits GH_TOKEN from here, so refreshing here fixes it for the child
+      # too.
+      gh_bot_warm_read
       echo "[drain] dispatching #$n..."
       cap=$(mktemp)
       if "$DISPATCH" "$n" 2>&1 | tee "$cap"; then drc=0; else drc=$?; fi
@@ -962,6 +1015,10 @@ run_cycle() {
     local qi=0 stop_launching=0 p rc n out qv
 
     launch_next() {
+      # Same per-item refresh as the serial path. This runs in the PARENT — only the
+      # `( ... ) &` below is a subshell — so the fresh token reaches every job launched
+      # after it.
+      gh_bot_warm_read
       local n="${queue[$qi]}"; qi=$(( qi + 1 ))
       local cap; cap=$(mktemp)
       echo "[drain] dispatching #$n... (in flight: $(( ${#pid_issue[@]} + 1 ))/${DISPATCH_CONCURRENCY})"
@@ -1020,6 +1077,10 @@ run_cycle() {
   # non-draft PRs and hand each to it; a clean/out-of-scope PR self-skips cheaply
   # (one gh fetch, no agent). Disable with MINSPEC_DRAIN_REMEDIATE_PRS=0.
   if [[ "${MINSPEC_DRAIN_REMEDIATE_PRS:-1}" != "0" ]]; then
+    # The dispatch loop above may have run for hours. Same reason as the per-item
+    # refresh: the sweep's own enumeration is a read, and remediate-pr.sh is a child
+    # that inherits this token.
+    gh_bot_warm_read
     local open_prs pr rcap rout
     open_prs=$(gh pr list --repo "$REPO" --state open --json number,isDraft \
       --jq '.[] | select(.isDraft==false) | .number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no open PRs to remediate
@@ -1559,18 +1620,18 @@ gh_bot_warm_read
 # drain report 'nothing to do' while specify work sat queued." It was right, and the
 # `|| true` above it made exactly that happen.
 #
-# Same `_ready_numbers` as run_cycle uses, for the same reason the write vocabulary
+# Same `_read_queue` as run_cycle uses, for the same reason the write vocabulary
 # in lib/gh-bot.sh lives in one place: two copies half-knowing one predicate is how
 # they drift, and this pair already drifted once.
 INBOX_COUNT=0
 _status_rc=0
-INBOX_ISSUES="$(_ready_numbers "inbox")" || _status_rc=$?
+_read_queue INBOX_ISSUES "inbox" || _status_rc=$?
 READY_ISSUES=""
 if (( _status_rc == 0 )); then
   # Both ready classes (#1169) — same OR-not-AND reason as run_cycle's Step 2.
-  _ready_a="$(_ready_numbers "agent-ready")" || _status_rc=$?
+  _read_queue _ready_a "agent-ready" || _status_rc=$?
   _ready_b=""
-  (( _status_rc == 0 )) && { _ready_b="$(_ready_numbers "agent-ready-specify")" || _status_rc=$?; }
+  (( _status_rc == 0 )) && { _read_queue _ready_b "agent-ready-specify" || _status_rc=$?; }
   READY_ISSUES="$(printf '%s\n%s\n' "$_ready_a" "$_ready_b" | sed '/^$/d' | sort -un)"
 fi
 

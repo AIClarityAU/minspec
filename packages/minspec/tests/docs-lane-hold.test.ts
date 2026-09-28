@@ -450,14 +450,144 @@ describe('#1847 — the status detector must not fail open on a large patch', ()
   });
 });
 
-describe('#1847 — the status gate matches any status: line, not only frontmatter', () => {
+/**
+ * #2124 — the predicate is checked against a scan DELIBERATELY BROADER than itself.
+ *
+ * This block used to be titled "matches any status: line, not only frontmatter" and had
+ * two fixtures: `status:` inside a fenced block, and a line merely containing `status:`.
+ * Both preserved the two properties that actually defeated the old `^[+-]status:` anchor
+ * — column-0 position and lowercase — so it asserted the general claim while exercising
+ * only the variant that was never at risk.
+ *
+ * The first replacement for it was no better: its corpus scan filtered on the
+ * predicate's OWN prefix class, so it structurally could not enumerate a form the
+ * predicate could not match. A guard whose discovery filter is the thing under test
+ * proves nothing.
+ *
+ * So the scan below accepts ANY non-alphanumeric run before the word `Status`. That is
+ * wider than the gate on purpose: the gap between what the scan finds and what the
+ * predicate matches is where the next #2124 lives, and this test makes that gap explicit
+ * instead of invisible. A form that is neither matched nor listed in KNOWN_UNCOVERED
+ * fails the suite and names itself.
+ */
+describe('#2124 — the status predicate vs a deliberately broader corpus scan', () => {
   /**
-   * `^[+-]status:` runs against the diff, so a `status:` line quoted inside a fenced
-   * block or in body prose also refuses. That is deliberate — the gate over-refuses
-   * rather than under-refuses, and distinguishing frontmatter from body text would mean
-   * tracking position within each hunk, a second predicate to be wrong about. Pinned
-   * here so the behaviour is documented by a test rather than only by a comment.
+   * Shapes the scan finds that the predicate does NOT match, each with why. These are
+   * real and tracked on #2124; they are listed rather than silently skipped so that
+   * widening the gate to cover one produces a failure telling you to update this list.
+   *
+   * Neither can be caught by ANY line-wise predicate: in both, the line that changes
+   * when the disposition changes contains no status token at all.
    */
+  const KNOWN_UNCOVERED: { shape: RegExp; why: string }[] = [
+    { shape: /^#{1,6} +Status/, why: '`## Status` SECTION heading — the ruling lives in the body beneath it (#2124)' },
+  ];
+
+  /** The gate's literal predicate, read from the workflow so the two cannot drift. */
+  function statusPredicate(): RegExp {
+    const yml = fs.readFileSync(path.join(root, '.github/workflows/docs-lane.yml'), 'utf8');
+    // Anchored on `<<<"$decoded"` (unique in the workflow) and NOT on the pattern's own
+    // text — an extractor that assumes the value it extracts is the #2124 bug again.
+    const m = yml.match(/grep -qE '([^']*)' <<<"\$decoded"/);
+    if (!m) throw new Error('could not read the status predicate out of docs-lane.yml');
+    return new RegExp(m[1]);
+  }
+
+  /**
+   * Every distinct shape of line that mentions `Status` at the START of a line, under
+   * any non-alphanumeric decoration. Deliberately broader than the predicate.
+   */
+  function corpusStatusShapes(): { shape: string; line: string; indented: boolean }[] {
+    const out = new Map<string, { shape: string; line: string; indented: boolean }>();
+    const walk = (dir: string) => {
+      for (const e of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, e.name);
+        if (e.isDirectory()) walk(full);
+        else if (e.name.endsWith('.md')) {
+          for (const raw of fs.readFileSync(full, 'utf8').split('\n')) {
+            // A DECLARATION, not a mention: `Status` at line start under any
+            // non-alphanumeric decoration, immediately followed by `:` or end of line.
+            // Backtick is excluded from the prefix so prose like `` `status:` `` and
+            // table cells like `| Status |` do not flood the scan. Still strictly wider
+            // than the predicate on the PREFIX axis, which is where #2124 lived.
+            if (!/^[^A-Za-z0-9`]{0,8}[Ss]tatus(:|$)/.test(raw)) continue;
+            const shape = raw.replace(/^([^A-Za-z0-9`]{0,8}[Ss]tatus:?).*$/, '$1');
+            if (!out.has(shape)) out.set(shape, { shape, line: raw, indented: /^[ \t]/.test(raw) });
+          }
+        }
+      }
+    };
+    for (const d of ['docs/decisions', 'specs']) {
+      const full = path.join(root, d);
+      // Fail CLOSED: a corpus root that has moved must break this test loudly, not
+      // quietly shrink what it covers (constitution invariant 2).
+      if (!fs.existsSync(full)) throw new Error(`corpus root is missing: ${d} — this test cannot certify coverage`);
+      walk(full);
+    }
+    return [...out.values()];
+  }
+
+  it('every non-indented corpus shape is either matched or a NAMED known gap', () => {
+    const re = statusPredicate();
+    const shapes = corpusStatusShapes().filter((f) => !f.indented);
+    expect(shapes.length, 'the corpus scan found almost nothing — the walk is broken').toBeGreaterThan(3);
+
+    const unexplained = shapes.filter(
+      (f) => !re.test('+' + f.line) && !KNOWN_UNCOVERED.some((k) => k.shape.test(f.line)),
+    );
+    expect(
+      unexplained.map((f) => f.shape),
+      'a status notation exists that the gate neither matches nor names as a known gap (#2124)',
+    ).toEqual([]);
+  });
+
+  it('the known gaps are still gaps — widening the gate must update the list', () => {
+    const re = statusPredicate();
+    const shapes = corpusStatusShapes();
+    for (const k of KNOWN_UNCOVERED) {
+      const hits = shapes.filter((f) => k.shape.test(f.line));
+      expect(hits.length, `KNOWN_UNCOVERED entry matches nothing in the corpus: ${k.why}`).toBeGreaterThan(0);
+      for (const h of hits) {
+        expect(re.test('+' + h.line), `now covered — remove from KNOWN_UNCOVERED: ${k.why}`).toBe(false);
+      }
+    }
+  });
+
+  it('INDENTED corpus lines are rejected — those are code inside fenced blocks', () => {
+    const re = statusPredicate();
+    const indented = corpusStatusShapes().filter((f) => f.indented);
+    expect(indented.length, 'expected the fenced-block literals to still exist').toBeGreaterThan(0);
+    for (const f of indented) {
+      expect(re.test('+' + f.line), `indented literal must not trip the gate: ${f.line.trim()}`).toBe(false);
+    }
+  });
+
+  it('refuses the DR-050 amendment form end-to-end — an amendment has no frontmatter', () => {
+    // The pre-#2124 predicate could not see this at all. Counterfactually it is what
+    // let #1741's shape through; the gate itself postdates that PR (see docs-lane.yml).
+    const amendment =
+      '@@ -263,7 +263,7 @@\n context\n-**Status: `proposed`.** Unlike the two preceding amendments\n' +
+      '+**Status: `accepted` 2026-08-30.** Unlike the two preceding amendments\n context\n';
+    const r = runLane({
+      files: [{ filename: 'docs/decisions/DR-050.md', patch: amendment }],
+      labels: ['docs-lane'],
+    });
+    expect(armed(r), 'an amendment status flip must NOT ride the lane').toBe(false);
+    expect(r.status).toBe(1);
+  });
+
+  it('refuses the blockquoted supersession banner — DR-018 and DR-022 use it', () => {
+    const banner =
+      '@@ -11,5 +11,5 @@\n context\n-> **Status: superseded for code licensing by [DR-083](DR-083.md), 2026-08-12.**\n' +
+      '+> **Status: accepted 2026-09-25, supersession reversed.**\n context\n';
+    const r = runLane({
+      files: [{ filename: 'docs/decisions/DR-018.md', patch: banner }],
+      labels: ['docs-lane'],
+    });
+    expect(armed(r), 'a blockquoted status flip must NOT ride the lane').toBe(false);
+    expect(r.status).toBe(1);
+  });
+
   it('refuses a status: line changed inside a fenced code block', () => {
     const fenced =
       '@@ -10,7 +10,7 @@\n context\n ```yaml\n-status: proposed\n+status: accepted\n ```\n context\n';
