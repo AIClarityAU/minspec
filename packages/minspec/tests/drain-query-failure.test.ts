@@ -137,8 +137,12 @@ function runBlock(mode: 'fail' | 'empty' | 'full'): { out: string; status: numbe
   const script = [
     'set -euo pipefail',
     'REPO="AIClarityAU/minspec"',
-    // The block calls these; none of them are what is under test here.
+    // The block calls these; none of them are what is under test here. The credential
+    // pair is the gh-bot.sh API the queue reads and the ranker call use; the live
+    // lifecycle is driven by runWithCredential below.
     'reconcile_labels() { :; }',
+    'gh_bot_warm_read() { :; }',
+    'gh_bot_reauth_read() { return 1; }',
     'TRIAGE=/bin/true',
     'run_cycle() {',
     queueBlock(),
