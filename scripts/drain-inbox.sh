@@ -920,6 +920,30 @@ run_cycle() {
     return 0
   fi
 
+  # Dispatch ORDER (#2196): what each issue unblocks, then the spec it serves, then
+  # tier, then number — scripts/rank-issues.ts, run from the same scripts dir as TRIAGE
+  # (the hard-synced run dir once ensure_fresh_run_dir has verified it). `sort -un`
+  # above fixes the SET; ordering is not a gate, so a ranker that fails, or returns
+  # anything but exactly that set, is overruled LOUDLY and numeric order stands —
+  # never an empty or shortened queue. MINSPEC_ISSUE_RANKER overrides the command
+  # (an executable taking `--repo`), for tests.
+  local rank_dir rank_out rank_rc=0
+  local -a ranker
+  rank_dir="$(dirname -- "$TRIAGE")"
+  ranker=("${rank_dir}/../node_modules/.bin/tsx" "${rank_dir}/rank-issues.ts")
+  [[ -n "${MINSPEC_ISSUE_RANKER:-}" ]] && ranker=("$MINSPEC_ISSUE_RANKER")
+  rank_out="$(printf '%s\n' "$all_ready" | timeout "${MINSPEC_ISSUE_RANK_TIMEOUT:-180}" "${ranker[@]}" --repo "$REPO")" || rank_rc=$?
+  if (( rank_rc != 0 )); then
+    echo "[drain] WARNING: the issue ranker FAILED (exit ${rank_rc}) — dispatching in NUMERIC order this cycle (#2196)." >&2
+    echo "[drain]          The queue is complete; only its order is degraded. See the ranker's error above." >&2
+  elif [[ "$(printf '%s\n' "$rank_out" | sort -n)" != "$(printf '%s\n' "$all_ready" | sort -n)" ]]; then
+    echo "[drain] WARNING: the issue ranker returned a different set than it was given — dispatching in NUMERIC order this cycle (#2196)." >&2
+    echo "[drain]          The queue is complete; only its order is degraded. Ranker output was: $(printf '%s' "$rank_out" | tr '\n' ' ')" >&2
+  else
+    all_ready="$rank_out"
+    echo "[drain] dispatch order ranked by value (#2196): $(printf '%s' "$all_ready" | tr '\n' ' ')"
+  fi
+
   # Freshness is guaranteed by ensure_fresh_run_dir at the top of this cycle (#773):
   # the pipeline scripts run from a worktree hard-synced to origin/main, and
   # MINSPEC_FRESHNESS_CHECKED is exported so the children trust it. No terminal
