@@ -78,7 +78,7 @@ numerator and denominator, because the rows do not all measure the same quantity
 | M5 | 5.1% carry 86.6% | Events over 30k tokens are 5.1% of cache-creation events and carry 86.6% of **cache-creation tokens** (the comment says "of spend"; the underlying table measures tokens) | 2026-09-28 | Shape reproduced on the sample (3.3% carry 80.2%) |
 | M6 | 81.3%; 85.5%; 9.4%; 3.8% | Shares of interactive cache-creation tokens: the top 15 session files; the MinSpecPro project; voip-sms-inbox; memory-fabric | 2026-09-28 | Not re-derived |
 | M7 | 330k tokens, about $3.30 | Median rewrite window, priced at the Opus 5 one-hour write rate (estimated; about $2.64 on Opus 5.5) | 2026-09-11 (#1922 says ~$3.33); the 2026-09-28 median rewrite event is 301,619 tokens | Estimate |
-| M8 | 23-26% (87-98 of 383) | Share of idle rewrites woken by an automated message | 2026-09-11 only | Conflicts with a 2026-09-29 sample: 57% of 154 idle rewrites automated, or 36% if cross-session socket deliveries (some of which relay the founder's own instructions) are excluded. One sample |
+| M8 | 23-26% (87-98 of 383) | Share of idle rewrites woken by an automated message | 2026-09-11 only | Conflicts with a 2026-09-29 sample: 57% of 154 idle rewrites automated, or 36% if cross-session socket deliveries (some of which relay the founder's own instructions) are excluded. One sample; re-measuring is #2208 |
 | M9 | see right | Cold wakes (gap over 3600s since the last main-chain response; rewrite = cache creation over 50% of input and over 20k) over 577 main-session transcripts: cross-session message 199 events / 63.8M tokens (median 302,677); task notification 51 / 21.2M (median 400,008); scheduled fire (2.1.278+) 49 / 16.3M; older cron 37 / 11.1M; human 449 / 149.2M. Since 2026-09-15: automated 156 events / 48.8M, human 105 / 32.6M | 2026-09-29 harness research | Measured, scratch analysis |
 | M10 | 0 of 2,408 | Headless-dispatch cache-creation events that were expiry rewrites | 2026-09-28 | Not re-run |
 | M11 | median 37,952 | First-turn context (the boot prelude) across 475 top-level interactive files; the headless boot median is 38,734. The "~70k prelude" in #1922 is roughly the 75th percentile of VS Code sessions, not the median | 2026-09-29 | Measured |
@@ -159,8 +159,10 @@ Each item is verified (docs, a live probe, or a transcript count) unless it says
 - Blocking (exit 2, or `decision: "block"`) erases the prompt and stops the model request.
   Verified for a task notification in `-p` mode only: no assistant record, no cache write,
   no user record, and the last assistant `message.id` unchanged; the harness records the
-  block as a `system` record ("UserPromptSubmit operation blocked by hook"). In `-p` mode the
-  block text replaces the run's final result. Exit 1 does not block.
+  block as a `system` record ("UserPromptSubmit operation blocked by hook") whose content
+  repeats the blocked prompt after `Original prompt:` and which carries no `turnOrigin`,
+  `origin` or `promptId`. In `-p` mode the block text replaces the run's final result.
+  Exit 1 does not block.
 - The default `UserPromptSubmit` timeout is 30s. A hook that reaches it is cancelled and its
   output, including any block decision or `additionalContext`, is discarded; the prompt
   proceeds, and the transcript shows a notice naming the hook and the timeout (hooks docs).
@@ -232,7 +234,7 @@ below that depends on one of these is gated on a named probe (AC-27).
 
 This spec cannot bind the out-of-repo senders (constitution invariant 3, blast radius). It
 names them, conflicts with the founder's instruction openly (DQ-1), and carries their change
-as a follow-up, not a requirement.
+as a follow-up (#2211, the chief-of-staff wake policy), not a requirement.
 
 ### Prior art in this repository
 
@@ -259,8 +261,8 @@ as a follow-up, not a requirement.
 - **SPEC-027 (inter-session mailbox).** Specified, not built. Its recipient checks the inbox
   once at turn start with *"no new timer, no continuous polling"* (its FR-3), so by
   construction it cannot wake an idle session, and it already conforms to Part A. Keeping it
-  that way is a constraint for SPEC-027 to adopt (Follow-up 2), not an invariant of this
-  spec, because nothing this spec builds can enforce it.
+  that way is a constraint for SPEC-027 to adopt (Follow-up 2, #2209), not an invariant of
+  this spec, because nothing this spec builds can enforce it.
 - **SPEC-044 (coordinated self-completing sessions).** Its PR shepherd never messages or
   wakes another session: it polls in shell, and its fixes run as fresh headless `claude -p`
   runs (`scripts/dispatch-issue.sh`, the `do-fix` step). Its proposed Amendment A adds a
@@ -277,8 +279,8 @@ as a follow-up, not a requirement.
   `MINSPEC_HEADLESS_AGENT=1` exported from `scripts/lib/agent-context.sh`, exists only on an
   unpushed local branch (`agent/issue-1914`, commit ff5f6031) with no PR. This spec does not
   need it to skip fresh headless runs (FR-15), but it is the only way to close the
-  `claude -p --resume` gap (INV-4), so Part B `block` waits on it or on a recorded absence of
-  such launchers (FR-10).
+  `claude -p --resume` gap (INV-4), so Part A `enforce` and Part B `block` wait on it or on a
+  recorded absence of such launchers (FR-7, FR-10).
 
 ## Functional Requirements
 
@@ -336,27 +338,54 @@ to FR-20, which are stated once at the end.
     and a sibling `UserPromptSubmit` hook (the enabled security-guidance plugin registers
     one) may block the same prompt. So delivered messages move from the parking store to a
     delivered state rather than being deleted.
-  - A later hook run in that session confirms a delivery when the transcript holds a
-    main-chain `hook_additional_context` attachment carrying its delivery id, followed by a
-    main-chain assistant record. Until confirmed, the messages are injected again at the
-    next turn that runs; a duplicate is the accepted failure (INV-2). The attachment format
-    is observed, not documented; Plan pins it by a fixture copied from a real record.
+  - A delivery is confirmed when the transcript it was injected into holds a main-chain
+    `hook_additional_context` attachment carrying its delivery id, followed by a real
+    (FR-13) main-chain assistant record with no other prompt's user record between them. A
+    synthetic record does not confirm it, because it makes no model request. A later hook
+    run in that session applies this test, and so does the FR-6 sweep from any
+    proven-interactive session, reading the transcript path stored with the delivery,
+    because a session's last delivery has no later run of its own to confirm it. Until
+    confirmed, the messages are injected again at the next turn that runs in their session;
+    a duplicate is the accepted failure (INV-2). The attachment format is observed, not
+    documented; Plan pins it by a fixture copied from a real record.
   - Once confirmed, a message delivered in full has its file removed. A message whose body
     was truncated keeps its file, which only a human deletes, because the model was pointed
     at it.
   - While Part B blocks a prompt (FR-9), parked messages stay parked until a prompt passes.
 
-- **FR-6 (no stranded message).** The hook never deletes an undelivered message, and it does
-  not rely on `SessionEnd`, which cannot run when a process is killed outright and whose
-  output is discarded. Two paths keep an undelivered message in view:
-  1. **Report once.** At each `UserPromptSubmit` in a proven-interactive session (FR-15),
-     the hook reports every parked message, in any session's store, that has waited longer
-     than 24 hours (Plan may change the default) and has not been reported before: one line
-     each (class, sender, arrival time, owning `session_id`, file path) and a count, as a
-     `systemMessage` and as `additionalContext`. It then marks each one reported. The message
-     stays parked and is still delivered if its own session runs another turn. The report
-     never goes to a session not proven interactive, so a headless run neither sees nor
-     consumes it, and it is never repeated.
+- **FR-6 (no stranded message).** A message is **unconfirmed** from its arrival until FR-5
+  confirms its delivery, whether it is still parked or has been injected and moved to the
+  delivered state. The hook never deletes an unconfirmed message, and it does not rely on
+  `SessionEnd`, which cannot run when a process is killed outright and whose output is
+  discarded. A session's last delivery has no later run of its own to confirm it, and a
+  delivery whose output the harness discarded is never confirmed, so both states are
+  covered. Two paths keep an unconfirmed message in view:
+  1. **Report until a human turn has seen it.** At each presumed-human prompt (FR-14) that
+     the hook lets through to a model turn in a proven-interactive session (FR-15):
+     - The hook first applies FR-5's confirmation test to each delivered message, in any
+       session's store, that is still unconfirmed 24 hours after its arrival (Plan may
+       change the default), reading the transcript stored with it. A message that passes is
+       released as FR-5 releases it. Plan bounds how many transcripts one run reads, so the
+       sweep stays inside the FR-18 budget; a delivered message left unswept is neither
+       released nor reported in that run, and waits for a later one.
+     - It then reports every message, in any session's store, that is still unconfirmed 24
+       hours after its arrival and is not covered by a report that is confirmed or less than
+       an hour old (Plan may change the default): one line each (class, sender, arrival
+       time, state, which is parked, or delivered but unconfirmed with the time of its last
+       injection, owning `session_id`, file path) and a count, as a `systemMessage` and as
+       `additionalContext` headed by a report id.
+     - A report is confirmed by FR-5's test applied to its report id, and only when the user
+       record of the prompt that carried it (matched by `prompt_id` as FR-10 matches a
+       fire's own record) carries `turnOrigin: "human"` or `origin.kind: "human"`. An
+       unconfirmed report is repeated once it is an hour old; a message covered by a
+       confirmed report is not reported again.
+     - The message stays where it is: a parked message is still delivered, and a delivered
+       one still re-injected, if its own session runs another turn.
+     - The report never goes to a session not proven interactive, so a fresh headless run
+       neither sees nor consumes it. A `claude -p --resume` run of a proven session (the
+       FR-15 known gap) can see it but never confirms it, because that turn's own user
+       record carries no human origin (a `-p` prompt's is `turnOrigin: "sdk"`), so the
+       report is repeated to a human turn.
   2. **Carry over a `/clear`.** `/clear` starts a new session (with a new `session_id`,
      inferred; P4 confirms), and the FR-8 warning recommends `/clear`, so parked messages
      would otherwise strand under the old id. On `SessionEnd` with reason `clear`, the hook records the old `session_id` with a
@@ -386,7 +415,9 @@ to FR-20, which are stated once at the end.
   3. the founder has reviewed a would-defer audit whose verdict is complete (FR-20) over at
      least 7 consecutive days, and every would-defer message marked "needed before I
      returned" either carried the urgent marker or came from a sender that has since
-     adopted it.
+     adopted it;
+  4. the `claude -p --resume` gap (FR-15) is closed on FR-10's terms, because a deferral is
+     a block, and a block in `-p` mode replaces the run's result (INV-4).
 
 ### Part B - warn the human before a cold resume (the smaller half)
 
@@ -412,15 +443,18 @@ to FR-20, which are stated once at the end.
   `suppressOriginalPrompt` is not set, so the block message shows the original text for
   copying. Block mode never blocks a machine-injected prompt (FR-14 classes 1 to 5), a
   prompt in a session not proven interactive, a prompt while the #1914 marker is set
-  (FR-15), or any prompt when the hook itself errors. It also stays off in any session whose
+  (FR-15), any prompt while no current audit verdict allows block mode (FR-10), or any
+  prompt when the hook itself errors. It also stays off in any session whose
   transcript tail shows a tool or command whose fires the classifier cannot yet identify
   (the AC-27 fallbacks for P3).
 
-- **FR-10 (the cold-fire audit decides whether block mode turns on).** Definitions, fixed
-  here so the 2%-35% false-positive spread in #1922 (which came from varying the rewrite
-  definition) cannot recur:
+- **FR-10 (the cold-fire audit decides whether block mode turns on and stays on).**
+  Definitions, fixed here so the 2%-35% false-positive spread in #1922 (which came from
+  varying the rewrite definition) cannot recur:
   - A **fire** is a prompt that met FR-8's condition, logged with its episode key, context
-    size, gap, model and `prompt_id`.
+    size, gap, model, `prompt_id` and a hash of its text. Each later presumed-human prompt in
+    the same episode is logged with its `prompt_id` and text hash too, so a resend can be
+    found.
   - A fire is **determinable** when the transcript later holds a new, deduplicated, real
     main-chain assistant record after it.
   - A **true positive** is a determinable fire whose first such record is a full-prefix
@@ -436,6 +470,19 @@ to FR-20, which are stated once at the end.
     "human"`, and a record with `isMeta: true` always counts as machine. A record with no
     origin label at all (for example the harness continuation) is therefore misclassified,
     and so is a fire whose own record cannot be found: the gate fails closed.
+  - A **blocked fire** (Part B `block`, FR-9) has no user record of its own. The harness
+    writes only a `system` record whose content repeats the prompt text after `Original
+    prompt:` and which carries no origin label (observed in the 2026-09-28 task-notification
+    probe; P2 records the shape for a human prompt in VS Code). So for a blocked fire, the
+    record read above is that of its **resend**, the first later prompt in the same episode
+    with the same text hash, matched by the resend's `prompt_id`: the blocked fire is
+    misclassified exactly when that record is. The first-later-record fallback never applies
+    to a blocked fire, so a later prompt with other text never vouches for it. A blocked
+    fire with no resend in its episode is **unattributed**: nothing on disk records its
+    origin, so it counts as misclassified unless the founder marks it human in the audit,
+    which lists each one with the first 300 characters of its text (read from the harness's
+    block record). Keeping block mode on therefore costs a founder review of every block
+    that was not resent.
   - **Precision** is true positives divided by determinable fires.
 
   Block mode may be switched on (a reviewed commit, FR-19) only when every condition holds:
@@ -446,11 +493,22 @@ to FR-20, which are stated once at the end.
   the switching commit records a grep showing that no launcher in this repository or in the
   chief-of-staff helper runs `claude -p --resume`. If fewer than 30 determinable fires accrue
   within 28 days, block mode does not turn on, and this spec is amended to record that the
-  lever is below noise here. After block mode is on, the audit keeps reporting misclassified
-  machine prompts, and any non-zero count makes its verdict "revert to warn". It also reports
-  how many blocks were followed by a resend of the same text (hash equal) in the same
-  episode; if at least 90% of at least 30 blocks were resends, block mode reverts to warn,
-  because it adds friction without changing a decision.
+  lever is below noise here.
+
+  After block mode is on, each audit's window runs from the end of the previous audit's
+  window (or from the switch), so no stretch goes unaudited. Its verdict is "revert to warn"
+  when misclassified machine prompts, unattributed blocks included, are not 0; when the
+  window's evidence is incomplete in any way FR-20 names, which before the switch would
+  read "not enough data"; or when at least 90% of at least 30 blocks were followed by a
+  resend in the same episode, because block mode then adds friction without changing a
+  decision. Otherwise it is "block may stay on". The audit writes each verdict to the state
+  store (FR-17), and the hook enforces the revert itself rather than waiting for a commit:
+  it blocks only while that store holds a "block may turn on" or "block may stay on"
+  verdict less than 7 days old (Plan may change the default). With none, including when no
+  audit has been run, it behaves as in `warn`, and its FR-8 warning adds one line saying
+  block mode is suspended and why. A "revert to warn" verdict is sticky: every later audit
+  returns it too, until one returns "block may turn on" under every switch-on condition
+  above. A reviewed commit then sets the committed mode back to `warn` (FR-19).
 
 ### Part C - recycling guidance
 
@@ -486,8 +544,8 @@ to FR-20, which are stated once at the end.
   must not be cited: it used the five-minute write weight (1.25x) where this corpus writes
   at the one-hour tier (2x), it counted transcript lines (about 2.15 per API call) rather
   than API calls, and it assumed warm reads. This spec builds no warm-session nudge (DQ-8);
-  FR-12 is guidance for the warning text, for the chief-of-staff follow-up, and for any later
-  spec.
+  FR-12 is guidance for the warning text, for the chief-of-staff follow-up (#2211), and for
+  any later spec.
 
 ### Shared mechanics (used by Parts A, B and C)
 
@@ -572,8 +630,19 @@ to FR-20, which are stated once at the end.
   - **Known gap.** `claude -p --resume <session-id>` of an interactive session runs headless
     inside a transcript that is already proven, and at hook time the current prompt's own
     record, which would carry `turnOrigin: "sdk"`, is not yet on disk. The hook cannot tell
-    that run apart. No launcher does this today (Context). INV-4 names the gap, and Part B
-    `block` waits on it (FR-10).
+    that run apart, so it treats it as the proven session it resumes. No launcher does this
+    today (Context). What such a run can receive, and what holds each:
+    - a Part A deferral or a Part B block, either of which would replace the `-p` result:
+      neither mode can be switched on until the gap is closed (FR-7, FR-10);
+    - an FR-6 report: seen, but never confirmed by that run, because confirmation needs a
+      human-origin user record, so the report is repeated to a human turn (AC-14);
+    - an FR-5 delivery of that session's parked messages: counted as delivered, because the
+      messages enter that session's conversation;
+    - an FR-8 warning or an FR-18 error line: not held. Each adds at most a `systemMessage`
+      and, until P2 settles DQ-3, a one-line `additionalContext` instruction.
+
+    When the #1914 marker is set, the hook skips such a run entirely (below, AC-6). INV-4
+    names the gap.
   - **The #1914 marker.** The hook treats `MINSPEC_HEADLESS_AGENT=1` in its environment (the
     name on #1914's unpushed branch) as a skip in every mode, whenever it is set. If #1914
     lands under another name, this spec is amended to match.
@@ -599,11 +668,14 @@ to FR-20, which are stated once at the end.
     resolved, that is an error under FR-18.
   - **Contents.** Everything lives in one subdirectory for this hook, which survives removal
     of a linked worktree, is never tracked, and is never under `~/.claude`. It holds: per
-    `session_id`, the parking store, the delivered state and the report marks, with each
-    message's transcript path; the `/clear` carry-over records (FR-6); episode keys; the
-    cached interactive flag; the cron prompts recorded by the `Stop` hook; the observe/warn
-    log, which is size-bounded and rotated; and a per-day counter of hook runs and failed log
-    writes (FR-20).
+    `session_id`, the parking store and the delivered state, with each message's arrival
+    time and transcript path, and for a delivered message its delivery id, the time of its
+    last injection and the transcript path it was injected into; the FR-6 report records
+    (report id, time emitted, the carrying prompt's `prompt_id` and transcript path, and the
+    messages each covers); the `/clear` carry-over records (FR-6); episode keys; the cached
+    interactive flag; the cron prompts recorded by the `Stop` hook; the observe/warn log,
+    which is size-bounded and rotated; a per-day counter of hook runs and failed log writes
+    (FR-20); and the latest Part B audit verdict with its date (FR-10).
   - **No per-checkout or cwd dependence.** Every path is absolute. Nothing is keyed per
     checkout, and nothing depends on the shell's or the envelope's `cwd` (the two #1914
     defects).
@@ -612,9 +684,11 @@ to FR-20, which are stated once at the end.
   internal time budget (default 5s), well under the harness's 30s `UserPromptSubmit` timeout.
   That timeout is not silent (the transcript shows a notice naming the hook), but it discards
   the hook's output, including a block, a custody decision or a delivery; the internal budget
-  exists so that no decision is lost that way. Custody precedes any block (FR-2) and
-  delivered messages are released only after confirmation (FR-5), so a discarded output
-  leaves a duplicate, never a loss.
+  exists so that no decision is lost that way. Custody precedes any block (FR-2), delivered
+  messages are released only after confirmation (FR-5), and a message still unconfirmed a
+  day after its arrival is reported until a human turn has seen the report (FR-6). So a
+  discarded output leaves a duplicate or a late delivery, and the message stays on disk
+  until its delivery is confirmed or a human deletes it.
   - On any internal error, or when the budget runs out, the hook exits 0, blocks nothing,
     defers nothing (a message is delivered), and appends the error to the log; if that log
     write itself fails, it counts the failure in the FR-17 counter.
@@ -628,8 +702,8 @@ to FR-20, which are stated once at the end.
     test. That output adds nothing to the model's context (inferred for `-p` runs; AC-22
     pins its shape).
   - `MINSPEC_COLD_RESUME_OFF=1` stops the hook from classifying, deferring, warning,
-    reporting or blocking in that session. It still delivers messages already parked for
-    that session (FR-5), so switching the hook off never strands one.
+    reporting or blocking in that session. It still delivers and confirms messages already
+    parked for that session (FR-5), so switching the hook off never strands one.
 
 - **FR-19 (registration and modes).** The hook is registered in this repository's
   committed `.claude/settings.json`, each command path built from `$CLAUDE_PROJECT_DIR`:
@@ -641,12 +715,17 @@ to FR-20, which are stated once at the end.
     budget. It emits nothing, since the harness discards `SessionEnd` output. Other
     `SessionEnd` hooks, such as `session-end.sh`, keep their own default.
 
-  There is no `SessionStart` registration: the FR-6 report goes through `UserPromptSubmit`,
-  so it never reaches a headless run. Part A's mode is `off`, `observe` or `enforce` (default
-  `observe`); Part B's is `off`, `warn` or `block` (default `warn`). Both mode values are
-  committed in this repository (Plan picks the carrier), so every switch is a reviewed
-  commit. Nothing is added to the template registry, the generated hook templates or
-  `claude-settings.ts`.
+  There is no `SessionStart` registration: the FR-6 report goes through `UserPromptSubmit`
+  and only to a proven-interactive session, so it never reaches a fresh headless run; a
+  `claude -p --resume` run can receive it but never confirms it (FR-6, the FR-15 known gap).
+  Part A's mode is `off`, `observe` or `enforce` (default `observe`); Part B's is `off`,
+  `warn` or `block` (default `warn`). Both mode values are committed in this repository
+  (Plan picks the carrier), so every change of a mode value is a reviewed commit. FR-10's
+  suspension never changes the value; it only makes a committed `block` behave as `warn`. A
+  mode governs only what is newly deferred, warned about or blocked: in every mode, `off`
+  included, the hook still delivers and confirms parked messages (FR-5) and runs both FR-6
+  paths, so no mode switch strands a message. Nothing is added to the template registry,
+  the generated hook templates or `claude-settings.ts`.
 
 - **FR-20 (audit completeness: a missing witness fails closed).** Every audit mode (FR-7,
   FR-10) reports the time span its log actually covers, the number of rotations inside the
@@ -657,7 +736,8 @@ to FR-20, which are stated once at the end.
   covered span is shorter than the window, a rotation dropped entries inside it, the counter
   shows a failed write, the counter is missing for a day on which those transcripts show a
   prompt, or the transcripts show an event the log lacks. An audit never returns a
-  switch-on verdict on missing evidence (constitution invariant 2).
+  switch-on verdict on missing evidence, and once Part B is in `block`, missing evidence
+  returns "revert to warn" instead (FR-10) (constitution invariant 2).
 
 ## Acceptance Criteria
 
@@ -699,9 +779,9 @@ and an `agent-name` record.
 - **AC-6 (FR-15, INV-4, headless).** In a cold session whose user records all carry
   `turnOrigin: "sdk"`, no mode of either part produces a block, a deferral, a
   `systemMessage` or `additionalContext`, for any prompt class. That holds even when another
-  session's store holds a message old enough to report, and that message is not marked
-  reported. With `MINSPEC_HEADLESS_AGENT=1` in the environment, a cold, proven-interactive
-  session gets the same nothing.
+  session's store holds a message old enough to report, and no report covers it. With
+  `MINSPEC_HEADLESS_AGENT=1` in the environment, a cold, proven-interactive session gets the
+  same nothing.
 - **AC-7 (FR-1, FR-2, custody).** Part A `enforce`, cold interactive session, peer message
   without the marker: the output is a block, and a parked file already holds the prompt
   text byte-identical to the input. A second peer message in the same cold episode, with the
@@ -720,21 +800,33 @@ and an `agent-name` record.
   presumed-human prompt (Part B in `warn`) receives `additionalContext` with both bodies in
   arrival order under a header that begins with its delivery id, and the messages leave the
   parking store. If the transcript then holds no attachment for that delivery id, the next
-  turn that runs re-delivers them. Once the transcript holds a main-chain
-  `hook_additional_context` attachment carrying the delivery id followed by an assistant
-  record, the next prompt receives no re-delivery and the files are gone. With Part B in
-  `block`, the blocked prompt receives nothing and the messages stay parked until the resend
-  passes.
+  turn that runs re-delivers them; the same holds when the only assistant record after the
+  attachment is synthetic. Once the transcript holds a main-chain `hook_additional_context`
+  attachment carrying the delivery id followed by a real assistant record, the next prompt
+  receives no re-delivery and the files are gone. With Part B in `block`, the blocked prompt
+  receives nothing and the messages stay parked until the resend passes.
 - **AC-13 (FR-5, truncation).** A parked body that would push the injection past 10,000
   characters is truncated in the injection, which names its absolute file path, and the
   whole injection stays under the cap. After the delivery is confirmed, that path still
   exists.
-- **AC-14 (FR-6, report).** A message has been parked for 25 hours in session S1's store, and
-  no `SessionEnd` ever ran for S1. A prompt in proven-interactive session S2 receives one
-  report line naming its class, sender, arrival time, S1's `session_id` and file path, plus a
-  count, as a `systemMessage` and as `additionalContext`. The file still exists and is still
-  in S1's store. A second prompt in S2, and a prompt in another proven session S3, get no
-  report of it. A message parked for 23 hours is not reported.
+- **AC-14 (FR-5, FR-6, INV-2, INV-4, report).**
+  - A message has been parked for 25 hours in session S1's store, and no `SessionEnd` ever
+    ran for S1. A presumed-human prompt in proven-interactive session S2 receives one report
+    line naming its class, sender, arrival time, state, S1's `session_id` and file path,
+    plus a count, as a `systemMessage` and as `additionalContext` headed by a report id. The
+    file still exists and is still in S1's store. A message parked for 23 hours is not
+    reported, and a task notification arriving in S2 carries no report.
+  - A presumed-human prompt in another proven session S3 less than an hour later gets no
+    report of it. Once S2's transcript holds the report's attachment followed by a real
+    assistant record, and the carrying prompt's user record has `origin.kind: "human"`, no
+    later prompt anywhere reports the message. If that user record instead carries
+    `turnOrigin: "sdk"` (the `claude -p --resume` shape), or no assistant record follows the
+    attachment, a presumed-human prompt in S3 more than an hour later reports it again.
+  - A message that arrived 25 hours ago was delivered into S1, and S1 never ran again. With
+    no attachment for its delivery id in S1's transcript, the prompt in S2 reports it as
+    delivered but unconfirmed, with the time of its injection. With that attachment followed
+    by a real assistant record, the prompt in S2 releases it as FR-5 does and reports
+    nothing.
 - **AC-15 (FR-6, carry-over).** `SessionEnd` with reason `clear` for S1, which holds a parked
   message, emits no output. The first prompt of the replacement session S1', which shares
   S1's link key, receives the message through FR-5. A first prompt in S3, with a different
@@ -750,11 +842,15 @@ and an `agent-name` record.
   the dollar estimate with its "estimated list-price equivalent" label, `/clear`, a fresh
   session and that `/compact` is not cheaper, and not suggesting that the session be asked
   for a handoff note. A second prompt in the same episode gets no warning.
-- **AC-18 (FR-9, INV-1, block).** Part B `block`: the first presumed-human prompt of an
-  episode is blocked, with the FR-8 content in the reason and `suppressOriginalPrompt`
-  absent from the output; the second passes. A peer message, a cross-session notice, a task
+- **AC-18 (FR-9, INV-1, block).** Part B `block`, with a "block may stay on" verdict less
+  than 7 days old in the state store: the first presumed-human prompt of an episode is
+  blocked, with the FR-8 content in the reason and `suppressOriginalPrompt` absent from the
+  output; the second passes. A peer message, a cross-session notice, a task
   notification, a harness continuation and a possibly-scheduled prompt in the same cold
   state are never blocked by Part B. With `MINSPEC_HEADLESS_AGENT=1` set, nothing is blocked.
+  With the verdict missing, older than 7 days, or "revert to warn", the first presumed-human
+  prompt of a cold episode is not blocked; it gets the FR-8 warning with a line saying block
+  mode is suspended and why.
 - **AC-19 (FR-10, INV-1, audit).** Given a fixture log of fires and transcripts with known
   next records, the audit reports determinable fires, true and false positives,
   misclassified machine prompts and precision exactly as defined, and a verdict of "block
@@ -762,7 +858,16 @@ and an `agent-name` record.
   determinable fires yields "not enough data". A fire whose own record is `isMeta` with no
   `turnOrigin` and no `origin` (the continuation shape), and a fire whose own record cannot
   be found, each count as misclassified. With block mode on, one misclassified fire makes the
-  verdict "revert to warn".
+  verdict "revert to warn". With block mode on, and each blocked fire represented by a copy
+  of the harness's block record from the 2026-09-28 probe: a blocked fire whose resend in
+  the same episode has `origin.kind: "human"` counts as human; one whose resend lacks human
+  evidence counts as misclassified; one with no resend, followed by a human prompt with
+  other text, is listed as unattributed and counts as misclassified until marked human. Any
+  AC-20 fixture run with block mode on yields "revert to warn", not "not enough data", and
+  so does a window in which 27 of 30 blocks were resent by a human and the other 3 are
+  marked human. After a "revert to warn", an audit over a clean post-switch window still
+  returns "revert to warn"; only one that meets every switch-on condition returns "block may
+  turn on".
 - **AC-20 (FR-20, INV-7, completeness).** Each of these yields "not enough data" even when
   the remaining entries would pass: a log whose covered span is shorter than the window; a
   log whose rotation dropped entries inside the window; a counter showing a failed write; a
@@ -781,7 +886,8 @@ and an `agent-name` record.
   not proven interactive print nothing and are logged. The `Stop` entry, fed a malformed
   envelope, exits 0 with no `decision` field. With `MINSPEC_COLD_RESUME_OFF=1` and nothing
   parked, the hook prints nothing; with a message parked, it delivers it and does nothing
-  else. With `python3` absent from `PATH`, the wrapper exits 0 and its output has no
+  else. With Part A's committed mode `off` and a message parked, the next prompt that runs
+  delivers it. With `python3` absent from `PATH`, the wrapper exits 0 and its output has no
   `additionalContext` and no decision.
 - **AC-23 (FR-13, FR-18, bounded read).** A transcript larger than 8 MiB whose last record
   is cold completes inside the time budget and returns the same verdict as its tail alone.
@@ -811,8 +917,10 @@ and an `agent-name` record.
     re-deliver, that the last `message.id` is unchanged, and the notice's prompt prefix as
     the hook receives it.
   - **P2.** In a VS Code-hosted session, record whether a block reason and a `systemMessage`
-    are visible, whether the blocked text is restored to the input box, and whether the
-    episode key stays the same across a human-prompt block.
+    are visible, whether the blocked text is restored to the input box, whether the episode
+    key stays the same across a human-prompt block, and whether the harness's block record
+    for a human prompt repeats its text and carries no origin label, as it does for a task
+    notification (FR-10).
   - **P3.** Confirm that `/loop`, `CronCreate` and `ScheduleWakeup` prompts appear in the
     `Stop` hook's `session_crons`, and record the prompt text and `turnOrigin` of a
     self-paced `ScheduleWakeup` fire and of a `/goal` idle check-in.
@@ -832,30 +940,44 @@ and an `agent-name` record.
   with custody (FR-1, FR-2) is the only way this spec holds a machine-injected prompt, and it
   is not a block in #1922's sense: the text is stored first and delivered later. Part B
   never blocks a prompt in FR-14 classes 1 to 5. A machine prompt that carries no
-  identifying text lands in presumed human, where Part B could block it; that is why FR-10
-  measures misclassification with positive human evidence, keeps block mode off unless the
-  count is 0, and reverts it on any later instance. This is the strongest form of #1922's
+  identifying text lands in presumed human, where Part B could block it. That is why FR-10
+  measures misclassification with positive human evidence and keeps block mode off unless
+  the count is 0. Once block mode is on, a blocked prompt leaves no user record, so FR-10
+  attributes it only through a resend of the same text in the same episode, and counts an
+  unresent one as misclassified unless the founder marks it human. Any misclassified block,
+  or an audit whose evidence is incomplete, makes the verdict "revert to warn", which only a
+  fresh switch-on verdict undoes. The hook itself suspends block mode whenever no audit less
+  than 7 days old allows it, so the revert does not depend on anyone remembering to run the
+  audit or commit it. This is the strongest form of #1922's
   rule *"never block a machine-injected prompt"* the classifier can guarantee, not the rule
-  itself (AC-18, AC-19).
+  itself: a misclassified prompt can still be blocked before the next audit finds it
+  (AC-18, AC-19).
 - **INV-2 (at-least-once delivery; a lost message is worse than a paid rewrite).** A parked
   message is delivered at the next turn that runs in its session (or, after a `/clear`, in
   the session that replaced it, where FR-6 carry-over is built), and its file is released
-  only after the transcript confirms the delivery (FR-5). A message undelivered after 24
-  hours is reported once, visibly, in a proven-interactive session, and stays on disk
-  (FR-6). Whenever the hook is unsure, it delivers now. The accepted failure mode is a
-  duplicate, never a loss (AC-7, AC-8, AC-9, AC-12, AC-13, AC-14, AC-15).
+  only after the transcript confirms the delivery (FR-5). A message whose delivery is still
+  unconfirmed 24 hours after its arrival, whether it is parked or was delivered without
+  confirmation, is reported visibly at a human turn in a proven-interactive session; the
+  report is repeated until a human turn has seen it, and the message stays on disk (FR-6).
+  Delivery, confirmation and the report run in every mode (FR-19). Whenever the hook is
+  unsure, it delivers now. The accepted failures are a duplicate and a late delivery: no
+  message is deleted before its delivery is confirmed, and every message still unconfirmed
+  a day after its arrival is reported at a later human turn in a proven-interactive session
+  (AC-7, AC-8, AC-9, AC-12, AC-13, AC-14, AC-15, AC-22).
 - **INV-3 (the urgent path is explicit).** A message carrying the marker is never deferred,
   and the hook never guesses urgency (AC-10).
-- **INV-4 (headless runs are untouched).** No block, deferral, warning or report in a
+- **INV-4 (fresh headless runs are untouched).** No block, deferral, warning or report in a
   session not proven interactive, or while the #1914 marker is set. A block in `-p` mode
   would replace the run's result, which dispatch scripts parse. Two outputs are exempt:
   FR-5 delivery of parked messages, which a fresh headless run never holds because only a
   proven-interactive session parks (directly, or before an FR-6 carry-over); and FR-18's
   `python3`-missing line, a `systemMessage` that adds no model context and no decision. The
-  one headless shape the
-  hook cannot detect is `claude -p --resume` of an interactive session (FR-15); no launcher
-  uses it today, and Part B `block` stays off until the gap is closed or its absence is
-  recorded (FR-10) (AC-6, AC-18).
+  one headless shape the hook cannot detect is `claude -p --resume` of an interactive
+  session (the FR-15 known gap): such a run can receive a warning, a report, an error line
+  or its own session's delivery, and it never confirms a report (FR-6). No launcher uses it
+  today, and the two outputs that would replace its result, a Part A deferral and a Part B
+  block, stay off until the gap is closed or its absence is recorded (FR-7, FR-10) (AC-6,
+  AC-14, AC-18).
 - **INV-5 (offline, constitution invariant 1).** The hook reads only the local transcript,
   its local state and its local price table. It makes no network call, its Python module
   starts no subprocess, its shell wrapper runs nothing but `python3`, and nothing it logs
@@ -865,14 +987,15 @@ and an `agent-name` record.
   `.claude/settings.json`, is absent from the template registry, writes nothing under
   `~/.claude`, writes nothing outside this repository's git common directory (found from
   `$CLAUDE_PROJECT_DIR`, never the envelope's `cwd`), and does nothing where `.minspec/` is
-  absent. Shipping it to adopter repositories is a separate spec that would need a
+  absent. Shipping it to adopter repositories is a separate spec (#2210) that would need a
   `.minspec/`-presence gate and a persistent per-project opt-out, because under DR-073's
   2026-08-05 correction deleting a shipped hook is undone by the next Refresh (AC-25).
 - **INV-7 (no silent gate, constitution invariant 2).** The guard is advisory. It is not a
   merge gate or a required check, so failing open on its own error is correct, and it never
   blocks or defers because of its own error. Its errors are logged and, in a
   proven-interactive session, shown on two surfaces until P2 proves one is enough (FR-18).
-  The audits that decide every mode switch fail closed on missing evidence (FR-20). The
+  The audits that decide every mode switch fail closed on missing evidence (FR-20), and
+  once Part B is in `block`, a missing, stale or incomplete audit suspends it (FR-10). The
   harness's own 30s timeout discards the hook's output but shows a notice; FR-18's internal
   budget keeps decisions out of its reach (AC-20, AC-22).
 - **INV-8 (never a wrong number).** Every cost shown is labelled as an estimate, an unknown
@@ -894,19 +1017,20 @@ and an `agent-name` record.
   1.24% of spend (2026-09-11). Lifetime is the lever, not count.
 - **Binding senders outside this repository.** The chief-of-staff skill, `cos.py` and the
   queue-proxy skill live in the operator's configuration. Constitution invariant 3 forbids
-  this spec from changing them; their change is a follow-up.
+  this spec from changing them; their change is tracked as #2211 (the chief-of-staff wake
+  policy).
 - **Enforcing anything inside SPEC-027 (the inter-session mailbox).** It is specified, not
   built, and already pull-only. That it must never gain a transport that starts a turn in an
   idle session, and that any urgency it needs should be a message field mirroring FR-3
   (adding fields is allowed by its own costly-to-refactor note), is a constraint for
-  SPEC-027 to adopt (Follow-up 2). Nothing this spec builds can check it, so it is not an
-  invariant here.
-- **Shipping to adopter repositories** (INV-6, DQ-7).
+  SPEC-027 to adopt (Follow-up 2, #2209). Nothing this spec builds can check it, so it is not
+  an invariant here.
+- **Shipping to adopter repositories** (INV-6, DQ-7, #2210).
 - **A status-line warning.** The status line never runs in VS Code panel sessions (PR
   #1670), which is where this fleet runs.
 - **Rewrites that expiry does not explain.** About 10.8% of rewrite tokens on the sample
   followed a gap of an hour or less (M13), cause unknown. The gap trigger cannot catch them;
-  diagnosing them is a follow-up.
+  diagnosing them is tracked as #2207 (the short-gap rewrites).
 - **Changing the harness,** including asking for a native "skip this wake if the cache is
   cold" option.
 
@@ -921,11 +1045,11 @@ notices to a cold session until its next running turn. Both cannot hold at once 
 sessions.
 
 - **Option A (rec).** Adopt Part A for non-urgent peer messages and cross-session notices,
-  observe first (FR-7), and file the chief-of-staff change (cache-aware cadence, and
-  `[urgent]` on relayed founder instructions). *Cost:* until the chief-of-staff adopts the
-  marker, a founder instruction it relays to a cold session waits for that session's next
-  running turn; an idle notice to a cold chief-of-staff waits for its next loop tick (within
-  60 minutes on the current ladder, while the loop is running).
+  observe first (FR-7), and make the chief-of-staff change (cache-aware cadence, and
+  `[urgent]` on relayed founder instructions), tracked as #2211. *Cost:* until the
+  chief-of-staff adopts the marker, a founder instruction it relays to a cold session waits
+  for that session's next running turn; an idle notice to a cold chief-of-staff waits for
+  its next loop tick (within 60 minutes on the current ladder, while the loop is running).
 - **Option B.** Always deliver peer messages; defer only harness notices. *Cost:* forgoes
   the largest measured class (cross-session messages, 63.8M of about 112M automated
   cold-rewrite tokens in M9, older cron fires included).
@@ -972,7 +1096,7 @@ surfaces regardless of this choice.
   *Cost:* Part B is single-session economics and fits EPIC-009's "more than one actor" test
   loosely.
 - **Option B.** EPIC-007 (Agent Execute, the dev-time pipeline). *Cost:* separates Part A
-  from the SPEC-027 mailbox whose constraint it hands over (Follow-up 2).
+  from the SPEC-027 mailbox whose constraint it hands over (Follow-up 2, #2209).
 
 ### DQ-6 - does this spec's delivery policy need a decision record?
 
@@ -993,8 +1117,9 @@ The hook covers sessions in this repository only (M6: the MinSpecPro project's s
 carried 85.5% of measured cache-creation tokens). voip-sms-inbox (9.4%) and memory-fabric
 (3.8%) are not covered.
 
-- **Option A (rec).** Stay dev-time here; ship later as its own spec if the audits show the
-  saving. *Cost:* about 14% of measured cache-creation tokens stay uncovered meanwhile.
+- **Option A (rec).** Stay dev-time here; ship later as its own spec (#2210) if the audits
+  show the saving. *Cost:* about 14% of measured cache-creation tokens stay uncovered
+  meanwhile.
 - **Option B.** The operator installs the hook in their own global configuration by hand.
   *Cost:* outside MinSpec, so MinSpec cannot own or test it, and invariant 3 forbids MinSpec
   doing it for them.
@@ -1011,14 +1136,14 @@ carried 85.5% of measured cache-creation tokens). voip-sms-inbox (9.4%) and memo
 
 | # | Risk | Mitigation |
 |---|------|-----------|
-| R1 | A harness update changes a prompt prefix or a transcript label, or adds an unlabelled machine prompt, so a machine prompt reads as presumed human | Classification is fixture-pinned (AC-4, AC-5); the audit counts any fire whose own record lacks positive human evidence as misclassified (FR-10); any non-zero count keeps or reverts Part B to `warn` |
+| R1 | A harness update changes a prompt prefix or a transcript label, or adds an unlabelled machine prompt, so a machine prompt reads as presumed human | Classification is fixture-pinned (AC-4, AC-5); the audit counts any fire whose own record lacks positive human evidence as misclassified (FR-10); any non-zero count keeps or reverts Part B to `warn`, and block mode is suspended whenever no audit less than 7 days old allows it (FR-10) |
 | R2 | On the five-minute tier (usage credits), every pause over 5 minutes is cold, so fires become frequent | Once per episode (FR-8); the audit reports fires by tier |
-| R3 | A founder instruction relayed by the chief-of-staff to a cold session waits | DQ-1; observe first; the urgent marker; the follow-up to the chief-of-staff |
+| R3 | A founder instruction relayed by the chief-of-staff to a cold session waits | DQ-1; observe first; the urgent marker; the chief-of-staff follow-up (#2211) |
 | R4 | A sender that expects a reply gets none while its message is parked, and may not learn why; or the recipient's harness re-delivers a blocked message | P1 on both sides before `enforce`; the block reason is recorded in the recipient's transcript; the post-`enforce` audit lists failed deferrals (FR-7) |
 | R5 | A long session whose human records have left the 8 MiB tail is never proven interactive | The flag is cached once seen (FR-15); a miss is the safe direction (the rewrite is paid) |
 | R6 | The estimate is a list-price equivalent, while a subscription draws plan usage whose weighting of cache writes is not published | Labelled estimated (FR-16, INV-8) |
 | R7 | The chief-of-staff session runs in this repository, so Part B could fire on its scheduled ticks | FR-14 class 5 matches both the `Stop` hook's cron list and the real `<command-name>` shape of earlier scheduled records; P3; Part B never blocks that class |
-| R8 | A future launcher runs `claude -p --resume` into an interactive session, which the hook treats as interactive | INV-4 names the gap; the #1914 marker is honoured whenever set; Part B `block` waits on the gap (FR-10) |
+| R8 | A future launcher runs `claude -p --resume` into an interactive session, which the hook treats as interactive | INV-4 names the gap; the #1914 marker is honoured whenever set; Part A `enforce` and Part B `block` wait on the gap (FR-7, FR-10); a report such a run receives is never confirmed by it (FR-6) |
 | R9 | The transcript record shapes this spec reads (the non-message records FR-13 ignores, the synthetic model marker, the `hook_additional_context` attachment) are undocumented and may change | FR-13 is an allowlist, so an unknown record type is ignored rather than switching the guard off; each shape is pinned by a fixture copied from a real record; every misreading errs toward not cold or toward re-delivery |
 | R10 | A `/clear` in a session holding parked messages strands them under the old `session_id` | FR-6 carry-over where P4 finds a key; otherwise the 24-hour report names them |
 
@@ -1032,33 +1157,35 @@ envelopes are synthetic: they copy the key shapes and record sequences of real r
 including the trailing non-message records after a turn ends, never real content. The
 probes in AC-27 are manual and recorded at Plan.
 
-## Follow-ups (to file before approval)
+## Follow-ups (tracked)
 
-Listed for the caller to file. This revision was made without GitHub write access, so none
-is filed yet. Each item is to be replaced by its issue number before the spec goes to
-approval (DR-023: a DR's or spec's follow-ups are materialized, never prose only).
+Each item carries the issue that tracks it (DR-023: a DR's or spec's follow-ups are
+materialized, never prose only).
 
-1. **Chief-of-staff cadence and wake policy** (AIClarityAU/minspec, for tracking; the change
-   lands in the operator's own configuration, not in this repository). Before messaging a
-   peer, read the recipient transcript's last assistant timestamp and hold or mark
+1. **Chief-of-staff cadence and wake policy** - #2211 (AIClarityAU/minspec, for tracking;
+   the change lands in the operator's own configuration, not in this repository). Before
+   messaging a peer, read the recipient transcript's last assistant timestamp and hold or mark
    `[urgent]` when it is cold; prefix relayed founder instructions with `[urgent]`; check
    whether the 60-minute rung straddles the one-hour cache lifetime (inferred, not
    measured); reconcile the "wake everything" instruction with the DQ-1 outcome. Relates to
    SPEC-044 Amendment A's open question on where the central driver lives.
-2. **Record the pull-only constraint in SPEC-027** (the inter-session mailbox): no transport
-   that starts a turn in an idle session, and an optional urgency field that mirrors FR-3.
-3. **Re-measure the automated-wake share** on the full corpus with `origin.kind` and
-   `origin.from`, resolving the M8 conflict (23-26% vs 57%), with a stated rule on whether a
-   relayed founder instruction counts as automated.
-4. **Diagnose the short-gap rewrites** (M13: 10.8% of rewrite tokens after a gap of an hour
-   or less).
-5. **Ship the guard to adopter repositories as its own spec,** only if DQ-7 chooses it:
-   template registry, generated hook templates, validator Rule 12 (generated-template
+2. **Record the pull-only constraint in SPEC-027** (the inter-session mailbox) - #2209: no
+   transport that starts a turn in an idle session, and an optional urgency field that
+   mirrors FR-3.
+3. **Re-measure the automated-wake share** - #2208: on the full corpus with `origin.kind`
+   and `origin.from`, resolving the M8 conflict (23-26% vs 57%), with a stated rule on
+   whether a relayed founder instruction counts as automated.
+4. **Diagnose the short-gap rewrites** - #2207 (M13: 10.8% of rewrite tokens after a gap of
+   an hour or less).
+5. **Ship the guard to adopter repositories as its own spec** - #2210, only if DQ-7 chooses
+   it: template registry, generated hook templates, validator Rule 12 (generated-template
    staleness), the enumeration pin, generalising `claude-settings.ts` beyond one hook, a
    `.minspec/` gate, and a persistent opt-out.
-6. **A comment on #1914** noting that this spec honours its launcher marker as a skip, that
-   the marker is the only way to close the `claude -p --resume` gap, and that Part B `block`
-   waits on it or on a recorded absence of such launchers.
+6. **A comment on #1914** (the headless-marker issue) - posted there, noting that this spec
+   honours its launcher marker as a skip, that the marker is the only way to close the
+   `claude -p --resume` gap, and that Part B `block` waits on it or on a recorded absence of
+   such launchers. A second comment there adds that Part A `enforce` now waits on the same
+   condition (FR-7).
 
 ## Traceability
 
@@ -1068,8 +1195,8 @@ approval (DR-023: a DR's or spec's follow-ups are materialized, never prose only
   own open DR question concerns its Parts 1 and 2 and is not answered here; DQ-6 is this
   spec's own DR question.
 - **Related specs:** SPEC-026 (session presence, not reused), SPEC-027 (inter-session
-  mailbox; conforms, with its constraint handed over as Follow-up 2), SPEC-044 (coordinated
-  self-completing sessions; its Amendment A central driver).
+  mailbox; conforms, with its constraint handed over as Follow-up 2, #2209), SPEC-044
+  (coordinated self-completing sessions; its Amendment A central driver).
 - **Decisions:** DR-073 (the shipped-hook write contract; only relevant if shipped),
   DR-086 (autonomy as a second axis), DR-057 (owns `.minspec/queue/`).
 - **Constitution:** invariant 1 (INV-5), invariant 2 (INV-7, FR-20), invariant 3 (INV-6);
