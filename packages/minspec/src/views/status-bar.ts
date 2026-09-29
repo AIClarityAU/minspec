@@ -13,9 +13,10 @@
 import * as vscode from 'vscode';
 import { formatImperativeForSignpost, formatNextTaskLabel, type NextTask } from '@aiclarity/shared';
 
-// SPEC-040 FR-5: `StatusBarSpec`, `fromFrontmatter`, and `computeProgress` moved
-// to `lib/spec-progress.ts`. They are pure frontmatter derivations with Tier-0
-// consumers (`lib/active-spec.ts`), and keeping them here forced a lib→views
+// SPEC-040 FR-5: `SpecProgressView` (né `StatusBarSpec`, renamed per #994),
+// `fromFrontmatter`, and `computeProgress` moved to `lib/spec-progress.ts`.
+// They are pure frontmatter derivations with Tier-0 consumers
+// (`lib/active-spec.ts`), and keeping them here forced a lib→views
 // import — the layering inversion FR-1 bans. Import them from `../lib/spec-progress`.
 
 // ─── Next-Task signpost status bar (SPEC-012 / DR-019) ──────────────────────
