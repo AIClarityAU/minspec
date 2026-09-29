@@ -62,31 +62,88 @@ afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
 });
 
-/** Write a stub `gh` that logs its argv and answers from a canned table. */
 /**
- * Keys listed here make the stub exit non-zero INSTEAD of answering. Without this the
- * stub could only ever succeed, so no test could distinguish "the query ran and found
- * nothing" from "the query failed" — which is the entire #1855 defect class.
+ * A GitHub issue-timeline event, trimmed to the fields the reconcilers actually read.
+ * Fixtures must be real events, not the REDUCED verdict: a fixture that hands back
+ * "yes"/"no" pre-computed fakes the very jq reduction under test, which is how the
+ * per-page pagination defect (found in PR #1772's review) survived a green suite.
  */
-function stubGh(responses: Record<string, string>, failKeys: string[] = []): string {
+function ev(event: string, createdAt: string, extra: Record<string, unknown> = {}): Record<string, unknown> {
+  return { event, created_at: createdAt, ...extra };
+}
+/** The `labeled` event `claim_applied_at` scans for. */
+function claimEvent(createdAt: string): Record<string, unknown> {
+  return ev('labeled', createdAt, { label: { name: 'agent-running' } });
+}
+
+/**
+ * Timeline fixture shapes:
+ *   `undefined`     — `gh` produces NO output: the witness is unreadable.
+ *   `Event[][]`     — one inner array per PAGE, emulated the way `gh` really behaves.
+ *   `{ raw: string}`— bytes emitted verbatim, for malformed-response cases.
+ */
+type TimelineFixture = Record<string, unknown>[][] | { raw: string } | undefined;
+
+/**
+ * Write a stub `gh` that logs its argv and answers from a canned table.
+ *
+ * The timeline branch emulates the REAL `gh api --paginate` faithfully, because the
+ * defect this file guards lives in that behaviour: with `--jq`, gh applies the filter
+ * to EACH PAGE separately and prints one result per page (measured against
+ * api.github.com: a 19-event timeline at `per_page=2` printed 10 lines); without
+ * `--jq`, it prints each page's array one after another for the caller to flatten.
+ *
+ * `failKeys` lists non-timeline query keys (`running`/`done`/`pr`) that make the stub
+ * exit non-zero INSTEAD of answering. Without this the stub could only ever succeed,
+ * so no test could distinguish "the query ran and found nothing" from "the query
+ * failed" — the entire #1855 defect class.
+ */
+function stubGh(
+  responses: Record<string, string>,
+  timeline: TimelineFixture,
+  failKeys: string[] = [],
+): string {
   const bin = path.join(tmp, 'bin');
   fs.mkdirSync(bin, { recursive: true });
   const table = path.join(tmp, 'responses.json');
   fs.writeFileSync(table, JSON.stringify(responses), 'utf-8');
+  const pages = path.join(tmp, 'timeline-pages.json');
+  const raw = path.join(tmp, 'timeline-raw.txt');
+  if (Array.isArray(timeline)) fs.writeFileSync(pages, JSON.stringify(timeline), 'utf-8');
+  else if (timeline) fs.writeFileSync(raw, timeline.raw, 'utf-8');
   const gh = path.join(bin, 'gh');
   fs.writeFileSync(
     gh,
     `#!/usr/bin/env bash\n` +
       `printf '%s\\n' "$*" >> ${JSON.stringify(path.join(tmp, 'gh-calls.log'))}\n` +
+      `if [[ "$*" == *timeline* ]]; then\n` +
+      `  raw=${JSON.stringify(raw)}\n` +
+      `  pages=${JSON.stringify(pages)}\n` +
+      `  if [[ -f "$raw" ]]; then cat "$raw"; exit 0; fi\n` +
+      `  [[ -f "$pages" ]] || exit 0\n` +   // no fixture at all = unreadable witness
+      `  filter=""; prev=""\n` +
+      `  for a in "$@"; do [[ "$prev" == "--jq" ]] && filter="$a"; prev="$a"; done\n` +
+      `  n=$(jq 'length' "$pages"); i=0\n` +
+      `  while [[ $i -lt $n ]]; do\n` +
+      `    if [[ -n "$filter" ]]; then jq -c ".[$i]" "$pages" | jq -r "$filter"\n` +
+      `    else jq -c ".[$i]" "$pages"; fi\n` +
+      `    i=$((i+1))\n` +
+      `  done\n` +
+      `  exit 0\n` +
+      `fi\n` +
       `key=""\n` +
       `case "$*" in\n` +
       `  *"--label agent-running"*) key=running ;;\n` +
       `  *"--label agent-done"*)    key=done ;;\n` +
-      `  *timeline*)                key=timeline ;;\n` +
       `  "pr list"*)                key=pr ;;\n` +
       `esac\n` +
       `for f in ${JSON.stringify(failKeys.join(' '))}; do\n` +
-      `  [[ "$key" == "$f" ]] && exit 4\n` +   // 4 = what real gh returns unauthenticated
+      // `-n "$f"` guards the degenerate case: with failKeys=[] (the default), the
+      // word list is the empty string, and `for f in ""` still iterates ONCE with
+      // f="" — matching an UNMATCHED key (also "") and spuriously failing every
+      // call the case statement above doesn't recognise (e.g. `issue close`,
+      // `issue edit --remove-label`), not just the ones a test actually meant to fail.
+      `  [[ -n "$f" && "$key" == "$f" ]] && exit 4\n` +   // 4 = what real gh returns unauthenticated
       `done\n` +
       `[[ -n "$key" ]] && node -e 'const t=require(process.argv[1]);process.stdout.write(t[process.argv[2]]??"")' ${JSON.stringify(table)} "$key"\n` +
       `exit 0\n`,
@@ -98,10 +155,11 @@ function stubGh(responses: Record<string, string>, failKeys: string[] = []): str
 function runReconciler(
   fn: string,
   responses: Record<string, string>,
+  timeline: TimelineFixture = undefined,
   env: Record<string, string> = {},
   failKeys: string[] = [],
 ): string {
-  const bin = stubGh(responses, failKeys);
+  const bin = stubGh(responses, timeline, failKeys);
   const script = ['set -uo pipefail', 'REPO=owner/repo', reconcilerBlock(), fn].join('\n');
   return execFileSync('bash', ['-c', script], {
     encoding: 'utf-8',
@@ -123,10 +181,9 @@ describe('#1306 — orphaned agent-running claims are released', () => {
     kids.push(kid);
     execFileSync('bash', ['-c', 'sleep 0.4']); // let it appear in the process table
 
-    const out = runReconciler('reconcile_stale_claims', {
-      running: '885\n',
-      timeline: '', // unreadable — but liveness should short-circuit before this
-    });
+    // No timeline fixture: the witness is unreadable — but liveness should
+    // short-circuit before the claim time is ever consulted.
+    const out = runReconciler('reconcile_stale_claims', { running: '885\n' });
     expect(out).not.toContain('releasing orphaned');
     expect(ghCalls()).not.toContain('--remove-label agent-running');
   });
@@ -140,24 +197,22 @@ describe('#1306 — orphaned agent-running claims are released', () => {
     kids.push(kid);
     execFileSync('bash', ['-c', 'sleep 0.4']);
 
-    const out = runReconciler('reconcile_stale_claims', {
-      running: '88\n',
-      timeline: '2020-01-01T00:00:00Z', // ancient → stale
-    });
+    const out = runReconciler('reconcile_stale_claims', { running: '88\n' }, [
+      [claimEvent('2020-01-01T00:00:00Z')], // ancient → stale
+    ]);
     expect(out).toContain('releasing orphaned agent-running on #88');
   });
 
   it('leaves a RECENT claim alone even with no live process (age witness)', () => {
     const nowIso = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
-    const out = runReconciler('reconcile_stale_claims', {
-      running: '4242\n',
-      timeline: nowIso,
-    });
+    const out = runReconciler('reconcile_stale_claims', { running: '4242\n' }, [
+      [claimEvent(nowIso)],
+    ]);
     expect(out).not.toContain('releasing orphaned');
   });
 
   it('fails toward no-op when the claim time is unreadable', () => {
-    const out = runReconciler('reconcile_stale_claims', { running: '4242\n', timeline: '' });
+    const out = runReconciler('reconcile_stale_claims', { running: '4242\n' });
     expect(out).toContain('leaving it alone');
     expect(ghCalls()).not.toContain('--remove-label agent-running');
   });
@@ -165,7 +220,9 @@ describe('#1306 — orphaned agent-running claims are released', () => {
 
 describe('#1322 — an open agent-done issue is reconciled against its PR', () => {
   it('closes the issue when its branch actually merged', () => {
-    const out = runReconciler('reconcile_done_issues', { done: '1068\n', pr: '1230\n' });
+    const out = runReconciler('reconcile_done_issues', { done: '1068\n', pr: '1230\n' }, [
+      [ev('closed', '2026-01-01T00:00:00Z')],
+    ]);
     expect(out).toContain('closing #1068');
     expect(out).toContain('#1230');
     expect(ghCalls()).toContain('issue close 1068');
@@ -186,6 +243,129 @@ describe('#1322 — an open agent-done issue is reconciled against its PR', () =
     const out = runReconciler('reconcile_done_issues', { done: '', pr: '1230\n' });
     expect(out.trim()).toBe('');
     expect(ghCalls()).not.toContain('issue close');
+  });
+});
+
+describe('#1628 — the close path is symmetric about label hygiene', () => {
+  it('strips agent-done after closing a merged issue, same as the no-PR branch does', () => {
+    const out = runReconciler('reconcile_done_issues', { done: '1068\n', pr: '1230\n' }, [
+      [ev('closed', '2026-01-01T00:00:00Z')],
+    ]);
+    expect(out).toContain('closing #1068');
+    const calls = ghCalls();
+    expect(calls).toContain('issue close 1068');
+    expect(calls).toContain('issue edit 1068 --repo owner/repo --remove-label agent-done');
+  });
+});
+
+describe('#1628 — a reopen after an automated close vetoes re-closing', () => {
+  it('does NOT re-close an issue whose most recent reopen is after its most recent close', () => {
+    // Reproduces #897: closed by the reconciler, then reopened with evidence the
+    // inferred completion was wrong. The branch is still (the same) merged PR — the
+    // reconciler must not re-derive "closed" from that alone once history shows a
+    // human rejected it.
+    const out = runReconciler('reconcile_done_issues', { done: '897\n', pr: '900\n' }, [
+      [ev('closed', '2026-01-01T00:00:00Z'), ev('reopened', '2026-02-01T00:00:00Z')],
+    ]);
+    expect(out).toContain('skipping #897');
+    expect(out).toContain('reopened after a prior automated close');
+    const calls = ghCalls();
+    expect(calls).not.toContain('issue close 897');
+    expect(calls).not.toContain('issue edit 897');
+  });
+
+  it('DOES close when the issue was never reopened (no veto signal)', () => {
+    const out = runReconciler('reconcile_done_issues', { done: '1068\n', pr: '1230\n' }, [
+      [ev('closed', '2026-01-01T00:00:00Z')],
+    ]);
+    expect(out).toContain('closing #1068');
+    expect(ghCalls()).toContain('issue close 1068');
+  });
+
+  it('the close comment states an observation, not a completion claim', () => {
+    const out = runReconciler('reconcile_done_issues', { done: '1068\n', pr: '1230\n' }, [
+      [ev('closed', '2026-01-01T00:00:00Z')],
+    ]);
+    const calls = ghCalls();
+    expect(calls).toContain('a branch named for this issue');
+    expect(calls).toContain('not a verification that the');
+    expect(calls).not.toContain('this issue was stamped');
+  });
+});
+
+describe("PR #1772 review — the reopen veto is reduced ONCE over the whole timeline, not per page", () => {
+  // `gh api --paginate --jq` applies the filter to EACH PAGE separately and prints one
+  // result per page (measured against api.github.com: a 19-event timeline requested at
+  // `per_page=2` printed 10 lines). This comparison — the last `reopened` against the
+  // last `closed` across the WHOLE history — cannot be reduced per page: the pair that
+  // decides it can straddle a page boundary, and neither page sees both halves. The
+  // sibling `claim_applied_at` guards its own per-page reduction with `| tail -1`; no
+  // such guard can work here, because the answer is not any one page's answer.
+  //
+  // The issue-timeline endpoint pages at 30 events; `labeled`, `commented`,
+  // `cross-referenced` and `committed` all count, so the issues most likely to carry a
+  // human's reopen — the long, argued ones — are exactly the ones that span pages.
+
+  it('sees a reopen recorded on a LATER page than the close it vetoes', () => {
+    const out = runReconciler('reconcile_done_issues', { done: '897\n', pr: '900\n' }, [
+      [ev('labeled', '2025-12-01T00:00:00Z'), ev('closed', '2026-01-01T00:00:00Z')],
+      [ev('reopened', '2026-02-01T00:00:00Z'), ev('commented', '2026-02-01T00:05:00Z')],
+    ]);
+    expect(out).toContain('skipping #897');
+    expect(out).toContain('reopened after a prior automated close');
+    const calls = ghCalls();
+    expect(calls).not.toContain('issue close 897');
+    expect(calls).not.toContain('issue edit 897');
+  });
+
+  it('does NOT become a blanket veto — a close on a later page than the reopen still closes', () => {
+    // Direction check. Reducing once must preserve the ORDER comparison, not just
+    // detect that a `reopened` exists somewhere in the history.
+    const out = runReconciler('reconcile_done_issues', { done: '1068\n', pr: '1230\n' }, [
+      [ev('reopened', '2026-01-01T00:00:00Z')],
+      [ev('closed', '2026-02-01T00:00:00Z')],
+    ]);
+    expect(out).toContain('closing #1068');
+    expect(ghCalls()).toContain('issue close 1068');
+  });
+});
+
+describe("PR #1772 review — an unreadable verdict fails CLOSED, and is not confused with a normal one", () => {
+  // Constitution invariant 2: a witness that cannot be read is not evidence that there
+  // is nothing to see. The old shape returned "not yes" for an errored fetch exactly as
+  // it did for a genuine "never reopened", so an API hiccup SILENTLY re-closed an issue
+  // a human had reopened — the precise failure #1628 exists to prevent.
+
+  it('refuses to close when the timeline cannot be read at all', () => {
+    const out = runReconciler('reconcile_done_issues', { done: '1068\n', pr: '1230\n' }); // no fixture → no output
+    expect(out).toContain('skipping #1068');
+    expect(out).toContain('could not be read');
+    expect(ghCalls()).not.toContain('issue close 1068');
+  });
+
+  it('refuses to close on a response that does not reduce to a verdict', () => {
+    const out = runReconciler('reconcile_done_issues', { done: '1068\n', pr: '1230\n' }, {
+      raw: 'not json at all\n',
+    });
+    expect(out).toContain('skipping #1068');
+    expect(ghCalls()).not.toContain('issue close 1068');
+  });
+
+  it('an EMPTY history is a NORMAL state, not an unknown one — the close still proceeds', () => {
+    // The distinction that matters: `[]` is a readable history that simply records no
+    // reopen. Failing closed on genuinely-unknown must not swallow this ordinary case,
+    // or the reconciler stops reconciling anything.
+    const out = runReconciler('reconcile_done_issues', { done: '1068\n', pr: '1230\n' }, [[]]);
+    expect(out).toContain('closing #1068');
+    expect(ghCalls()).toContain('issue close 1068');
+  });
+
+  it('keeps evaluating the REST of the board after an unreadable witness', () => {
+    // "Never stop evaluating": an unreadable witness skips THAT issue and nothing
+    // more — the loop must still reach every later issue on the board.
+    const out = runReconciler('reconcile_done_issues', { done: '1068\n1069\n', pr: '1230\n' });
+    expect(out).toContain('skipping #1068');
+    expect(out).toContain('skipping #1069');
   });
 });
 
@@ -247,6 +427,7 @@ describe('#1855 — a failed lookup is never read as proof of absence', () => {
     const out = runReconciler(
       'reconcile_done_issues',
       { done: '4242\n', pr: '' },
+      undefined, // never reached: the failed lookup short-circuits before the timeline check
       {},
       ['pr'], // the merged-PR lookup fails; the agent-done listing still succeeds
     );
@@ -268,7 +449,11 @@ describe('#1855 — a failed lookup is never read as proof of absence', () => {
   });
 
   it('still closes the issue when a merged PR is found', () => {
-    const out = runReconciler('reconcile_done_issues', { done: '4242\n', pr: '77\n' });
+    // A merged PR routes through the #1628 reopen veto (`reopened_after_close`), which
+    // needs its own readable witness — a readable-but-empty history is the normal
+    // "never reopened" case and must not be confused with the unreadable one this
+    // describe block is about.
+    const out = runReconciler('reconcile_done_issues', { done: '4242\n', pr: '77\n' }, [[]]);
     expect(out).toContain('closing #4242');
     expect(ghCalls()).toContain('issue close 4242');
   });
