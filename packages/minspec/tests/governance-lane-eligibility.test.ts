@@ -72,7 +72,12 @@ function laneGovernPattern(): string {
 
 /** The `grep -qE '…'` pattern the lane's status gate runs over each decoded patch. */
 function laneStatusPattern(): string {
-  const m = docsLaneYml.match(/grep -qE '(\^\[[^']*status:[^']*)' <<<"\$decoded"/);
+  // Anchored on `<<<"$decoded"` (unique in the workflow) and NOT on the pattern's own
+  // text. The previous extractor required a literal lowercase `status:` inside the
+  // pattern, so widening the gate to cover prose forms made this throw instead of
+  // comparing — an extractor that assumes the value it is extracting is the same class
+  // of bug as #2124 itself.
+  const m = docsLaneYml.match(/grep -qE '([^']*)' <<<"\$decoded"/);
   if (!m) throw new Error("could not locate the status-transition `grep -qE '…'` in docs-lane.yml");
   return m[1];
 }
