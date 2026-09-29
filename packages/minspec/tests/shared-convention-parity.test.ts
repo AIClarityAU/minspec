@@ -176,6 +176,10 @@ describe('a reply key names what the agent does, not a human-only step (#2204)',
         onDisk,
         `${file} (this repo's own copy) missing the "tell me x once you have ..." done-signal form`,
       ).toMatch(/tell me x once you have/);
+      expect(
+        onDisk,
+        `${file} (this repo's own copy) done-signal example is missing its stated consequence`,
+      ).toContain('A done-signal must state the consequence');
     }
   });
 });
