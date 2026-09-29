@@ -28,7 +28,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 
 const REAL_HOOKS_DIR = path.resolve(__dirname, '../../../.githooks');
 
@@ -47,6 +47,25 @@ function git(args: string[], env?: NodeJS.ProcessEnv): string {
     stdio: ['ignore', 'pipe', 'pipe'],
     env: env ? { ...process.env, ...env } : process.env,
   }).toString();
+}
+
+/**
+ * Attempt a commit under test and return the hook's captured output directly,
+ * rather than asserting via a thrown Error's `.message` (which, for a sync
+ * exec, happens to interpolate the command line ahead of stderr — matching
+ * `/DR-NNN/` against that combined string can pass because the commit
+ * MESSAGE argument names the DR, not because the gate rejected it). Same
+ * pattern as `precommit-validate-scope.test.ts`'s `tryCommit`: `ok` is the
+ * exit status, `out` is stdout+stderr from the hook alone, with no command
+ * echo mixed in.
+ */
+function attemptCommit(message: string, env?: NodeJS.ProcessEnv): { ok: boolean; out: string } {
+  const r = spawnSync('git', ['commit', '-m', message], {
+    cwd: tmp,
+    encoding: 'utf-8',
+    env: env ? { ...process.env, ...env } : process.env,
+  });
+  return { ok: r.status === 0, out: `${r.stdout || ''}${r.stderr || ''}` };
 }
 
 function initRepoWithRealHook(): void {
@@ -117,7 +136,8 @@ describe('DR-029 born gate on merge commits (#2057)', () => {
     expect(added).toContain('docs/decisions/DR-090.md');
 
     // The commit under test runs the real hook, with no override set.
-    expect(() => git(['commit', '-m', 'merge main into feature'], COMMIT_ENV)).not.toThrow();
+    const { ok, out } = attemptCommit('merge main into feature', COMMIT_ENV);
+    expect(ok, out).toBe(true);
     expect(git(['log', '-1', '--format=%P']).trim().split(/\s+/)).toHaveLength(2);
   });
 
@@ -132,7 +152,11 @@ describe('DR-029 born gate on merge commits (#2057)', () => {
     );
     git(['add', 'docs/decisions/DR-091.md']);
 
-    expect(() => git(['commit', '-m', 'merge main into feature'], COMMIT_ENV)).toThrow(/DR-091/);
+    // The commit message deliberately does NOT mention DR-091, so a match
+    // here can only come from the hook's own rejection text in `out`.
+    const { ok, out } = attemptCommit('merge main into feature', COMMIT_ENV);
+    expect(ok, out).toBe(false);
+    expect(out).toMatch(/DR-091/);
   });
 
   it('still rejects a DR born accepted in an ordinary non-merge commit', () => {
@@ -143,6 +167,11 @@ describe('DR-029 born gate on merge commits (#2057)', () => {
     writeFile('docs/decisions/DR-092.md', ACCEPTED_DR.replace('DR-090', 'DR-092'));
     git(['add', 'docs/decisions/DR-092.md']);
 
-    expect(() => git(['commit', '-m', 'docs: add DR-092'], COMMIT_ENV)).toThrow(/DR-092/);
+    // `out` is stdout+stderr from the hook process only — the commit
+    // message argument is not part of it, so this cannot pass on an echoed
+    // command line the way a `.toThrow()` match against `error.message` could.
+    const { ok, out } = attemptCommit('docs: add DR-092', COMMIT_ENV);
+    expect(ok, out).toBe(false);
+    expect(out).toMatch(/DR-092/);
   });
 });
