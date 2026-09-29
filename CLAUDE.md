@@ -2,10 +2,7 @@
 
 ## Overview
 
-minspec-monorepo project managed with MinSpec SDD methodology.
-
-- **Specs directory:** `specs/`
-- **Decisions directory:** `docs/decisions/`
+minspec-monorepo, managed with MinSpec SDD methodology.
 
 ## Invariants
 
@@ -19,7 +16,9 @@ These rules must never be violated. All changes must preserve them.
 
 ## SDD Methodology
 
-This project uses Specification-Driven Development. Tasks are classified by **mechanical scope** (blast radius — files, lines, boundaries touched), not by how hard they are to reason about. The predicted tier is an upward-only floor: it never lowers ceremony on its own, and you can always raise it.
+Tasks are classified by **mechanical scope** (blast radius — files, lines, boundaries
+touched), not by how hard they are to reason about. The predicted tier is an upward-only
+floor: it never lowers ceremony on its own, and you can always raise it.
 
 | Tier | Ceremony | Phases Required |
 |------|----------|-----------------|
@@ -63,13 +62,56 @@ The same block lists every pull request this session opened that is still unmerg
 
 Report the state you already observed; re-reading it from the git host is ordinary tool use, never a requirement, and MinSpec itself makes no network call.
 
+## Merge asks in THIS repo - a single funnel (minspec-monorepo only)
+
+**Project-specific, and this repo only.** It overrides one line of the shared convention above
+and is deliberately absent from the shipped templates: an adopter running MinSpec solo has no
+funnel to route through and keeps the `m` merge key the shared convention gives them
+(constitution invariant 3 - nothing MinSpec ships may change behaviour in a repo that did not
+opt in).
+
+Here, a session never offers `m` merge on its own pull request. Report the state you observed
+and stop. The reply keys on a pull request line are `c` close, `d` diff, `r` re-review - `m` is
+the one key this repo does not use. Founder instruction, 2026-09-12:
+
+> update the CoS skill to tell each session not to ask me to merge any PRs when you're
+> shepherding the merges.
+
+**Where the funnel is defined.** Half is in this repo - SPEC-044 FR-4b
+(`specs/minspec/SPEC-044-coordinated-self-completing-sessions/requirements.md:229`): "A single
+driver holds the queue view and owns branch updates and merge confirmation. It picks the next PR
+to update, waits for it to land, then picks the next." The other half - that no session OTHER than the driver may put a merge or
+approval keystroke in front of the founder - is the founder instruction above, which lives only
+in the chief-of-staff skill, outside this repository in the operator's own Claude configuration;
+restated here because a link there resolves to nothing for any reader but the operator. A
+citable in-repo home for it is tracked as #2056. Why a single
+funnel: around fifteen sessions run concurrently on this repo, and it is the only place the whole
+set of in-flight pull requests is visible, and the only place path-disjointness across a batch is
+checked before it is handed over - a command block is pasted whole, so two independently
+reasonable merge asks arrive as one action with nobody having checked whether the two pull
+requests touch the same file.
+
+**Your job on your own pull request is unchanged:** fix the red checks, resolve the conflicts,
+drive it to greenlit, then stop and say so. Branch updates
+are the funnel's call, not yours (SPEC-044 FR-4b gives it branch updates and merge
+confirmation): a machinery pull request merges by human `--admin`, which bypasses the up-to-date
+requirement, so updating a BEHIND machinery branch spends a full CI cycle for nothing.
+
+**This rule is a stopgap, and the spec says so.** SPEC-044's "The mechanism - capability
+REMOVED, not merely reassigned" says of the sibling capability: "A rule telling shepherds to
+refrain is the exact 'trust the model' shape the constitution names as the failure mode." That
+applies here unchanged - asking sessions not to offer a merge key is prose where a gate belongs,
+and there the answer was to remove the capability, not ask for restraint. Until the equivalent exists for the ask side (#2056), this rule
+holds only as far as each session reads and remembers it, which is exactly the property the
+constitution tells us not to rely on.
+
 ## Commands and locations
 
 MinSpec is a **VS Code extension, not a CLI.** Every command runs from the Command Palette
 (`Ctrl/Cmd+Shift+P`, type "MinSpec:") — never write, suggest, or attempt a `minspec` shell
 command. The palette lists its own entries. Specs live in `specs/`, decisions in
-`docs/decisions/`, the constitution at `.minspec/constitution.md`, and everything else is
-configured in `.minspec/config.json`.
+`docs/decisions/`, the constitution at `.minspec/constitution.md`, everything else is configured
+in `.minspec/config.json`.
 
 ## Project Overview
 
@@ -78,34 +120,30 @@ Monorepo for two VS Code extensions + extension pack:
 | Package | ID | Domain | Status |
 |---|---|---|---|
 | `packages/minspec` | `aiclarity.minspec` | minspec.dev | SDD Implement phase |
-| ↪ split out → **`AIClarityAU/scroogellm`** (private) | `aiclarity.scroogellm` | scroogellm.com | Moved to its own repo per DR-027. **Shelved as a product** (scrooge DR-021, 2026-08-01); tee-proxy + shadow classifier + safe-cut live on as dogfood measurement instruments only. No billing/GTM work. |
+| ↪ split out → **`AIClarityAU/scroogellm`** (private) | `aiclarity.scroogellm` | scroogellm.com | Own repo per DR-027; shelved as a product — see SDD Phases below |
 | `packages/shared` | `@aiclarity/shared` | — | Tier-0 shared: contract types (no vscode/network). Classifier engine still lives in `packages/minspec/src/lib/classifier.ts` — DR-014's move to here is `status: proposed`, not executed (tracked: #54) |
 | `packages/extension-pack` | `aiclarity.minspec-pro` | — | References both |
 
 ## Scrooge Model-Fit Advisory
 
-Watch whether the session's active **model / effort / thinking** matches what the
-current task actually needs. When they diverge — in **either** direction, over- or
-under-powered — append a **single-line advisory** at the end of the response. This is
-an ongoing nag, not a gate: never pause the thread, never ask, just surface it and
-continue.
+Watch whether the session's active **model / effort / thinking** matches what the current task
+needs. When they diverge in **either** direction, append a **single-line advisory** at the end of
+the response. An ongoing nag, not a gate: never pause the thread, never ask - surface and continue.
 
-- **Format — emit in *italic*** so it sets apart and reads low-weight. Wrap the whole
-  line in `*…*`:
+- **Format — one *italic* line** (wrap it all in `*…*`) so it sets apart and reads low-weight:
   `*💲 Scrooge: this <task> suits <model> · <effort> effort · <thinking> — you're on <current>. Switch: /model*`
-  e.g. *💲 Scrooge: this task suits Sonnet · medium effort · no thinking — you're on Opus · high. Switch: /model*
-  (Font size is fixed by the terminal — italic is the only emphasis available here.
-  A genuinely smaller font belongs to the statusline/webview surface, not this nag.)
-- **Surface only on a genuine mismatch.** Already well-matched → say nothing. One line,
-  never a paragraph; if unsure, stay silent rather than cry wolf.
-- **Direction-neutral.** Recommend *down* (cheaper — the common case) or *up* (a hard
-  task on a weak model) with equal willingness. Frugality is the default lean, not a floor.
-- **Advisory only — never silent auto-switch.** The model cannot change its own
-  session, and a silently-swapped model makes the UI's model label lie (never-wrong
-  invariant). Name the keyboard path (`/model`); the human decides and acts.
-- **Heuristic, not authority.** This is a cheap task-shape read, not a guarantee — a
-  soft advisory layer. The deterministic, always-visible version is a Scrooge statusline
-  (tracked in `AIClarityAU/scroogellm`); this CLAUDE.md nag does not replace it.
+  Font size is fixed by the terminal, so italic is the only emphasis available here; a genuinely
+  smaller font belongs to the statusline/webview surface, not this nag.
+- **Only on a genuine mismatch.** Already well-matched → say nothing. One line, never a
+  paragraph; if unsure, stay silent rather than cry wolf.
+- **Direction-neutral.** Recommend *down* (cheaper — the common case) or *up* (a hard task on a
+  weak model) with equal willingness. Frugality is the default lean, not a floor.
+- **Advisory only — never a silent auto-switch.** The model cannot change its own session, and a
+  silently-swapped model makes the UI's model label lie (never-wrong invariant). Name the
+  keyboard path (`/model`); the human decides and acts.
+- **Heuristic, not authority.** A cheap task-shape read, not a guarantee — a soft advisory
+  layer. The deterministic, always-visible version is a Scrooge statusline (tracked in
+  `AIClarityAU/scroogellm`); this CLAUDE.md nag does not replace it.
 
 ## Session Scope Protocol
 
@@ -133,38 +171,35 @@ Type: bug / feat / explore / plan
 
 MinSpec is at **Implement** phase. Work from `specs/minspec/tasks.md`.
 
-ScroogeLLM was split into its own **private** repo (`AIClarityAU/scroogellm`, `~/code/scroogellm`) per DR-027, and is now **shelved as a product** (scrooge DR-021, accepted 2026-08-01) — only the measurement instruments (tee-proxy, shadow classifier, safe-cut, scrooge-delegate) stay live; no Specify-phase product work. Do any scrooge work in that repo, not here. Note: scroogellm keeps its OWN local DR register (independent of this repo's); DR-007/010 were imported there with their original numbers.
+ScroogeLLM was split into its own **private** repo (`AIClarityAU/scroogellm`, `~/code/scroogellm`) per DR-027, and is now **shelved as a product** (scrooge DR-021, accepted 2026-08-01) — only the measurement instruments (tee-proxy, shadow classifier, safe-cut, scrooge-delegate) stay live; no Specify-phase product work, no billing/GTM. Do any scrooge work in that repo, not here. Note: scroogellm keeps its OWN local DR register (independent of this repo's); DR-007/010 were imported there with their original numbers.
 
 **Solo mode (DR-075/DR-076, accepted 2026-08-01):** MinSpec is a solo-first personal tool; open-source as a gift (no publish deadline); team mode parked behind a future `mode: solo | team` profile. Ceremony: keep model-defending gates (hashes, validators, RCDD hook, ai-review gating merge, T0-first); HITL only for T3/T4 spec reading + irreversible acts. Implementation: #1169.
 
 ## Traceability Convention
 
-Commits, issues, and DRs form a linked chain:
+Issues = what needs doing. DRs = why we chose this approach. Commits = what changed. Don't
+consolidate — link, bidirectionally: issue→DR (rationale) and DR→issue/spec (materialization).
 
 - **Commits** reference issue: `feat(#N): description` or `fix(#N): description`
 - **DRs** reference triggering issue: `Triggered by: #N` in body
 - **Issues** reference DR if one exists: link in issue body
 - **Sub-issues** reference parent DR: `See DR-NNN for design rationale`
-- **DRs materialize their follow-ups (DR-023):** every DR carries a `## Follow-ups
-  (tracked)` section; each actionable item it surfaces links a `SPEC-NNN` or a
-  GitHub issue `#`. Forward rule — when writing a DR, **file the issues for any
-  follow-up not covered by a spec** (especially cross-repo / non-code work like
-  site/marketplace copy, which never enters the SDD flow). Prose-only consequences
-  are a leak. `None` is a valid, explicit answer.
-
-Purpose: Issues = what needs doing. DRs = why we chose this approach. Commits = what changed. Don't consolidate — link. Chain is bidirectional: issue→DR (rationale) and DR→issue/spec (materialization).
+- **DRs materialize their follow-ups (DR-023):** every DR carries a `## Follow-ups (tracked)`
+  section; each actionable item it surfaces links a `SPEC-NNN` or a GitHub issue `#`. Forward
+  rule — when writing a DR, **file the issues for any follow-up not covered by a spec**
+  (especially cross-repo / non-code work like site/marketplace copy, which never enters the SDD
+  flow). Prose-only consequences are a leak. `None` is a valid, explicit answer.
 
 ### Cross-project & paragraph references — carry the code (DR-053)
 
-Per-repo-local ids stay **unprefixed** (DR-027 separate registers): inside a
-repo, a bare `SP1` / `DR53` / `EP10` / `#500` always means *this* repo's. A
-reference that **spans projects** — a minspec DR citing a scrooge spec, a commit
-or issue body pointing at another repo's item — carries the target project's code
-from `.minspec/project-prefixes.md`, so the ref is unambiguous out of context.
+Per-repo-local ids stay **unprefixed** (DR-027 separate registers): inside a repo, a bare `SP1`
+/ `DR53` / `EP10` / `#500` always means *this* repo's. A reference that **spans projects** — a minspec DR
+citing a scrooge spec, say — carries the target project's code from
+`.minspec/project-prefixes.md`, so the ref is unambiguous out of context.
 
 **DR-053 v2 (accepted 2026-07-14) — paragraph-addressable, slash-joined, no-pad.** Every
-referenceable item (approvable *and* the typed paragraphs/rows inside it) has an id
-of up to three segments that **elide** left-to-right when context implies them:
+referenceable item (approvable *and* its typed paragraphs/rows) has an id of up to three
+segments that **elide** left-to-right when context implies them:
 
 - `PROJECT / APPROVABLE / PARAGRAPH` — `MIN/SP19/FR3` (cross-project),
   `SP19/FR3` (intra-project), `FR3` (intra-document), `MIN/SP19` (the approvable itself).
@@ -173,23 +208,22 @@ of up to three segments that **elide** left-to-right when context implies them:
   (`FR OQ R AC INV AL CR CQ FU M G RD DV`) + number (see DR-053 §3 for the table).
 - Store the **fullest unambiguous form for the scope**; elision is display-only.
 
-> **Transition.** v2 is **accepted** (2026-07-14) but **not yet shipped** — accepted is a
-> decision, not an implementation. The corpus is **not migrated yet** (record now, reformat
-> later) and the `project-prefix` module still emits the **v1** dash grammar
-> (`MS-SPEC-019` → now `MIN-SPEC-019` with the 3-letter code) until #679 lands the
-> `/`-joined paragraph grammar and #681 migrates the corpus. Until then, write refs in
-> whichever form is clearest and don't mass-rewrite.
+> **Transition.** v2 is **accepted** but **not yet shipped** — accepted is a decision, not an
+> implementation. The corpus is **not migrated yet** (record now, reformat later) and the
+> `project-prefix` module still emits the **v1** dash grammar (`MS-SPEC-019` → now
+> `MIN-SPEC-019` with the 3-letter code) until #679 lands the `/`-joined paragraph grammar and
+> #681 migrates the corpus. Until then, write refs in whichever form is clearest and don't
+> mass-rewrite.
 
-An **unknown** code is advisory — the assistant suggests one (`suggestPrefixDeterministic`
-is the offline Tier-0 default) and offers to add a row; **never** a hard failure. The
-deterministic reader/resolver is `@aiclarity/shared`'s `project-prefix` module
-(`parsePrefixTable` / `resolveRef` / `formatCrossRef`).
+An **unknown** code is advisory — the assistant suggests one (`suggestPrefixDeterministic` is
+the offline Tier-0 default) and offers to add a row; **never** a hard failure. The deterministic
+reader/resolver is `@aiclarity/shared`'s `project-prefix` module (`parsePrefixTable` /
+`resolveRef` / `formatCrossRef`).
 
 ## Evidence Discipline — status claims (RCDD / DR-003)
 
-Before writing **"implemented / done / built / works / shipped"** about a feature into
-any artifact (spec, DR, README, comment), verify the **authoritative** signals, not
-proxies:
+Before writing **"implemented / done / built / works / shipped"** about a feature into any
+artifact (spec, DR, README, comment), verify the **authoritative** signals, not proxies:
 
 - ✅ the feature's **code** — grep/read the actual implementation; cite `file:line`.
 - ✅ the owning spec's **`status`** field — `done`/`implementing`, not `specifying`.
@@ -197,48 +231,41 @@ proxies:
   issue is *closed*. **Artifact-existence ≠ feature-existence.**
 
 If unverified, write the honest state ("specified, not built" / "planned, #NN"). In a
-*never-wrong* product a false "implemented" is the worst defect — it makes the signpost
-lie. (Root-caused 2026-06-01: SPEC-002 falsely called SPEC-014's review webview
-"implemented" — it was `specifying`, zero code. Deterministic backstop tracked as an
-issue, sibling to #47.)
+*never-wrong* product a false "implemented" is the worst defect — it makes the signpost lie.
+(Earned 2026-06-01, when SPEC-002 called SPEC-014's review webview "implemented" while it
+was `specifying`, zero code; deterministic backstop tracked as an issue, sibling to #47.)
 
-**Sibling rule — root cause ≠ bad-state restatement (RCDD, DR-003 addendum).** Just
-as *artifact-existence ≠ feature-existence*, a *description of a bad state* ≠ its *root
-cause*. "Frontmatter field is missing" is a symptom; the cause is the mechanism that
-produced it **plus** the gate that should have rejected it. A pure data/config fix is a
-tell that the gate is missing — fix the gate too (see DR-003 Phase 4 asymmetry check).
-Root-caused 2026-06-01: SPEC-004's missing `epic:` was first "fixed" with a data edit
-alone; the real defect was `validateSpec` flagging dangling refs but not missing ones.
+**Sibling rule — root cause ≠ bad-state restatement (RCDD, DR-003 addendum).** A *description
+of a bad state* ≠ its *root cause*. "Frontmatter field is missing" is a symptom; the cause is the mechanism that produced it **plus**
+the gate that should have rejected it. A pure data/config fix is a tell that the gate is missing
+— fix the gate too (see DR-003 Phase 4 asymmetry check). Earned 2026-06-01 on SPEC-004's missing `epic:`,
+first "fixed" by a data edit alone when the real defect was `validateSpec` flagging dangling
+refs but not missing ones.
 
-**Mechanism claims need the same bar (widened 2026-07-29, #1051).** Everything above
-covers one claim family — *"is this feature built?"*. It does not cover *"how does the
-system behave?"* A statement about behavior — "editing `status:` stales the approval",
-"the validator requires Z", "only #N tracks this", "this is N specs", "a hash cannot
-change without a content change" — is not licensed by a plausible inference from a true
-adjacent premise, even when every one of those examples was. Cite the code (`file:line`)
-or the computed value. `npm run facts` (#1050) answers the common ones in seconds; the
-artifact prose is not a citation, because prose can be wrong (#1049).
-
-The generalisation of *artifact-existence ≠ feature-existence* is **plausible-inference
-≠ observation** — both accept a proxy for the authoritative signal. Each example above
-was an actual failure this week, refuted in seconds by the code or a single grep/PR
-(editing `status:` does not stale the approval — canonicalization strips it; "only #N"
-was refuted by one open PR, #960; "6 specs" was refuted by one grep, #898; the hash claim
-was the ai-review false block, #1029).
+**Mechanism claims need the same bar (widened 2026-07-29, #1051).** The above covers one claim
+family — *"is this feature built?"* — not *"how does the system behave?"* A statement about
+behavior — "editing `status:` stales the approval", "the validator requires Z", "only #N tracks
+this", "this is N specs", "a hash cannot change without a content change" — is not licensed by a
+plausible inference from a true adjacent premise, even when every one of those examples was.
+Cite the code (`file:line`) or the computed value. `npm run facts` (#1050) answers the common
+ones in seconds; artifact prose is not a citation, because prose can be wrong (#1049). The
+generalisation of *artifact-existence ≠ feature-existence* is **plausible-inference ≠
+observation**. Every example above was a real failure refuted in seconds: editing `status:` does
+**not** stale the approval (canonicalization strips it); "only #N" was refuted by one open PR,
+#960; "6 specs" by one grep, #898; the hash claim was the ai-review false block, #1029.
 
 When a claim is inferred rather than checked, say so in the same sentence ("I believe X,
-unverified") so a reader knows which claims to spot-check — an unmarked declarative reads
-as verified. Note: this rule is itself prose, so it is model-trusted and will drift
-(constitution's *"enforce, don't trust the model"*) — #1049 removes the false premise
-this class reads from and #1050 makes checking cheap enough that guessing has no upside;
-this paragraph only names the standard.
+unverified") so a reader knows which claims to spot-check — an unmarked declarative reads as
+verified. This rule is itself prose, so it is model-trusted and will drift (constitution's
+*"enforce, don't trust the model"*); #1049 removes the false premise this class reads from and
+#1050 makes checking cheap enough that guessing has no upside.
 
 ## Agent Dispatch (Tier-Gated HITL)
 
-The `scripts/` dispatch below is the **dev-time** path for building this monorepo.
-Productized, agent dispatch does NOT ship inside MinSpec (Tier 0 / air-gapped) — it
-ships as a separate third "Execute" extension (`aiclarity.agent-execute`, Tier 1).
-See DR-015 for packaging, DR-004 for the tier model, DR-008 for dispatch security.
+The `scripts/` dispatch below is the **dev-time** path for building this monorepo. Productized,
+agent dispatch does NOT ship inside MinSpec (Tier 0 / air-gapped) — it ships as a separate third
+"Execute" extension (`aiclarity.agent-execute`, Tier 1). DR-015 packaging, DR-004 tier model,
+DR-008 dispatch security.
 
 Triage agent auto-dispatches T1-T2 issues (`agent-ready`). T3-T4 get `needs-review` — human approves spec/plan before agent starts. Per SDD FR-2: Clarify phase required for T3-T4.
 
@@ -248,33 +275,33 @@ Triage: `scripts/triage-inbox.sh [N]` — processes inbox issues.
 
 ## Deploy and test
 
-VS Code extensions **do not auto-deploy** — packaging and publishing are manual, so the
-standing "deploy after every commit" rule does not apply here. Scripts are in `package.json`
-(`npm test` / `lint` / `build` / `validate`; `npm run package` in `packages/minspec` emits
-the .vsix). **Always rebuild the .vsix yourself** rather than handing the command over — a
-stale install silently disables shipped gates.
+VS Code extensions **do not auto-deploy** — packaging and publishing are manual, so the standing
+"deploy after every commit" rule does not apply here. Scripts are in `package.json` (`npm test`
+/ `lint` / `build` / `validate`; `npm run package` in `packages/minspec` emits the .vsix).
+**Always rebuild the .vsix yourself** rather than handing the command over — a stale install
+silently disables shipped gates.
 
 ## Pre-Commit Checks
 
-1. **Secret scan (#1583, gitleaks).** `.githooks/pre-commit` runs `gitleaks protect
-   --staged` and fails closed on a finding, printing the rule, file and line so the
-   block is actionable (#1538). Optional by design, exactly like the copy MinSpec
-   scaffolds into adopters: a missing `gitleaks` warns and continues rather than
-   wedging a commit. Intentional bypass: `SECRET_GATE_OFF=1 git commit ...`
+1. **Secret scan (#1583, gitleaks).** `.githooks/pre-commit` runs `gitleaks protect --staged`
+   and fails closed on a finding, printing the rule, file and line so the block is actionable
+   (#1538). Optional by design, exactly like the copy MinSpec scaffolds into adopters: a missing
+   `gitleaks` warns and continues rather than wedging a commit. Intentional bypass:
+   `SECRET_GATE_OFF=1 git commit ...`
 2. `specs/**/*.md` must have `id: SPEC-NNN` frontmatter
 3. **RCDD root-cause gate (DR-003).** `.githooks/commit-msg` rejects any
-   `fix:`/`fix(scope):`/`fix!:` commit whose body lacks a `Root cause:` line.
-   Installed via `core.hooksPath=.githooks` (set by `npm install` → `prepare`).
-   Intentional bypass: `RCDD_GATE_OFF=1 git commit ...`
+   `fix:`/`fix(scope):`/`fix!:` commit whose body lacks a `Root cause:` line. Installed via
+   `core.hooksPath=.githooks` (set by `npm install` → `prepare`). Intentional bypass:
+   `RCDD_GATE_OFF=1 git commit ...`
 
 ## Decision Register
 
 All architectural decisions → `docs/decisions/DR-NNN.md`. See `docs/decisions/INDEX.md`.
 
-**This project keeps its OWN local register, sequential from `DR-001`.** It does
-NOT share the global `~/code/mmo-platform/docs/decisions.md` register (currently
-~DR-360). The global CLAUDE.md rule "next sequential number, all projects" does
-**not** apply here — it is overridden by this project-local register.
+**This project keeps its OWN local register, sequential from `DR-001`.** It does NOT share the
+global parent register at `~/code/mmo-platform/docs/decisions.md` (currently ~DR-360). That
+parent "next sequential number, all projects" rule does **not** apply here — it is overridden by
+this project-local register.
 
 - **Next number: do not compute it from the files on disk.** `max(existing DR-NNN in
   docs/decisions/) + 1` counts only decisions that have already merged, so two records
@@ -285,7 +312,7 @@ NOT share the global `~/code/mmo-platform/docs/decisions.md` register (currently
   network call (invariant 1), so its number is a starting draft, not the answer.
 - **Take the number from the collision gate.** `scripts/check-dr-id-collision.ts`
   reports `Next free id` as the max across the base branch **and every open pull
-  request**, plus one (`scripts/lib/dr-id-collision.ts:355`), and prints the renumber
+  request**, plus one (`scripts/lib/dr-id-collision.ts:369`), and prints the renumber
   steps when the id it finds is already taken. It runs on every pull request, with no
   `paths:` filter. It is **advisory, not gating** – `dr-id-collision` is not in `main`'s
   required-check set, so it reports a collision without stopping the merge. Read its
@@ -295,7 +322,7 @@ NOT share the global `~/code/mmo-platform/docs/decisions.md` register (currently
   are invisible from a base checkout, which is all a network-less review sees, so a gap
   is evidence about what has merged, not about whether the id is right. The fatal case
   is a DUPLICATE id, which *is* checkable from the diff.
-- A DR carrying a number from the GLOBAL register (e.g. `DR-012`, from
+- A DR carrying a parent-register number (e.g. `DR-012`, from
   `~/code/mmo-platform/docs/decisions.md`) is a convention error – renumber it to the id
   the collision gate reports and update all references.
 

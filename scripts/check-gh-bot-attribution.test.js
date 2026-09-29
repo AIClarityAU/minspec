@@ -48,6 +48,48 @@ const BARE = `#!/usr/bin/env bash
 gh issue comment 1 --repo o/r --body hi
 `;
 
+test('RED: an UNREADABLE file fails closed — never a silent pass (#1978)', () => {
+  // T3 regression. Every grep in the scan loop swallows its exit status with
+  // `|| true`, so before the `-r` guard an unreadable file produced an empty hit
+  // list indistinguishable from a clean one, and the file passed the attribution
+  // gate silently. `find -type f` proves existence, not readability.
+  //
+  // This case was written to FAIL against the pre-fix script and does.
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'gh-bot-unreadable-'));
+  try {
+    fs.mkdirSync(path.join(root, 'scripts'), { recursive: true });
+    const victim = path.join(root, 'scripts', 'offender.sh');
+    fs.writeFileSync(victim, BARE);
+    fs.chmodSync(victim, 0o000);
+
+    // Running as root defeats permission bits entirely, so the premise would be
+    // false and the assertion vacuous. Skip loudly rather than pass emptily.
+    let stillReadable = true;
+    try {
+      fs.readFileSync(victim);
+    } catch {
+      stillReadable = false;
+    }
+    if (stillReadable) {
+      console.log('SKIP: cannot make a file unreadable here (running as root?)');
+      return;
+    }
+
+    const r = spawnSync('bash', [GUARD, root], { encoding: 'utf8' });
+    const out = `${r.stdout || ''}${r.stderr || ''}`;
+    assert.equal(r.status, 1, `unreadable input must fail closed; got:\n${out}`);
+    assert.match(out, /cannot read scripts\/offender\.sh/);
+    assert.match(out, /failing closed/);
+  } finally {
+    try {
+      fs.chmodSync(path.join(root, 'scripts', 'offender.sh'), 0o644);
+    } catch {
+      /* already gone */
+    }
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test('RED: a bare write with no gh-bot.sh fails, and names the file', () => {
   const { status, out } = runGuard({ 'offender.sh': BARE });
   assert.equal(status, 1, 'guard must exit non-zero on an unattributed write');

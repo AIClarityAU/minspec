@@ -1,5 +1,8 @@
 {
   "version": "1",
+  "approvers": [
+    "github@harvest316.com"
+  ],
   "specsDir": "specs",
   "decisionsDir": "docs/decisions",
   "thresholds": {

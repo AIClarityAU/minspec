@@ -98,10 +98,24 @@ export function drNumberFromPath(filePath: string): number | undefined {
  * never mistaken for a declaration.
  */
 export function declaredIdFromContent(content: string): string | undefined {
+  return frontmatterField(content, 'id');
+}
+
+/**
+ * The verbatim value of one field in a document's leading frontmatter block, or
+ * `undefined` when there is no frontmatter, no such field, or the field is empty.
+ *
+ * Reads ONLY the leading block and only a line that STARTS with the field name, so
+ * neither a body line that looks like `id: DR-077` nor a nested key under some other
+ * mapping is ever mistaken for a declaration. An empty value reads as absent: a
+ * record that says `title:` and nothing else has not declared a title.
+ */
+export function frontmatterField(content: string, field: string): string | undefined {
   const fm = content.match(FRONTMATTER_RE);
   if (!fm) return undefined;
+  const re = new RegExp(`^${field.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}:\\s*(.*)$`);
   for (const line of fm[1].split('\n')) {
-    const match = line.match(/^id:\s*(.*)$/);
+    const match = line.match(re);
     if (match) {
       const value = match[1].trim();
       return value.length > 0 ? value : undefined;
@@ -395,4 +409,210 @@ function renderMessage(
     'Two records under one id means one of them cannot be cited, and merging over an',
     'already-accepted decision overwrites it silently (#1226).',
   ].join('\n');
+}
+
+// ─── C. In-place repurposing ─────────────────────────────────────────────────
+
+/**
+ * Frontmatter fields that say WHICH decision a record IS, as opposed to what it
+ * currently says. An amendment edits the body, `status:` and dated amendment
+ * sections; it does not change the record's identity.
+ *
+ * Order is the report order, so a wholesale swap reads id, then title, then
+ * provenance — narrowest to widest.
+ */
+export const DR_IDENTITY_FIELDS = ['id', 'title', 'triggered_by'] as const;
+
+export type DrIdentityField = (typeof DR_IDENTITY_FIELDS)[number];
+
+/** One modified decision file, as it stands on the base ref and on the PR head. */
+export interface DrRevision {
+  /** Repo-relative path, identical on both sides (a rename is a CLAIM, handled by half B). */
+  file: string;
+  /** Full text on the base branch's tip. */
+  base: string;
+  /** Full text on the PR head. */
+  head: string;
+}
+
+export interface DrRepurposeFinding {
+  file: string;
+  field: DrIdentityField;
+  /** The value on base. Always defined — an absent base value is not a finding. */
+  base: string;
+  /** The value on head, or `undefined` when the field was REMOVED. */
+  head: string | undefined;
+}
+
+export interface DrRepurposeVerdict {
+  ok: boolean;
+  findings: DrRepurposeFinding[];
+  /**
+   * The label that turned a block into a recorded act, when one was present AND there
+   * was something to acknowledge. `undefined` on a clean PR, so "nothing changed" and
+   * "a change was waved through" never read the same in a log.
+   */
+  acknowledgedBy?: string;
+  /** Ready to print. Quotes both sides of every changed field. */
+  message: string;
+}
+
+/**
+ * The PR label that converts a repurposing BLOCK into a recorded, reviewable act (#1982).
+ *
+ * The gate exists so a decision record cannot be replaced SILENTLY - not so it can never
+ * be replaced. A DR created with a typo in its title, or the wrong `triggered_by:`, had
+ * no in-band path at all: the check is required and had no bypass, so the only routes
+ * were an admin merge or superseding the record with a new one.
+ *
+ * **This is an audit trail plus a speed bump, not a control, and it must not be sold as
+ * one.** Whoever opens the PR can add the label, including an agent. What it buys is that
+ * the act is named on the PR, appears in the check output, and is visible to the reviewers
+ * — which is the property that was actually missing. Preventing it outright was never the
+ * goal; #1756 was caught by review, and review is what this keeps in the loop.
+ */
+export const DR_IDENTITY_ACK_LABEL = 'dr-identity-change';
+
+/**
+ * Decide whether a PR is AMENDING existing decision records or REPURPOSING them.
+ *
+ * ## The failure this closes (#1757)
+ *
+ * Half B keys on the paths a PR INTRODUCES, because a claim on a number is what it
+ * was built to catch. `modified` is excluded there and correctly so — a file that
+ * already exists on both sides is not claiming anything. But that exclusion made an
+ * entire second failure shape invisible: PR #1756 wrote a completely different
+ * decision over the existing `DR-088.md` (`title:`, `triggered_by:` and the heading
+ * all swapped) while DR-088 was merged and `status: proposed`, i.e. in force. Both
+ * this gate and the required `DR id uniqueness` check passed it.
+ *
+ * The two shapes differ in consequence, which is why one gate could not serve both.
+ * A claim collision produces a DUPLICATE — noisy, and recoverable by renumbering.
+ * Repurposing produces a DELETION — silent, and recoverable only from history.
+ *
+ * ## The rule
+ *
+ * For each identity field: a value present on base and different on head is a
+ * finding. That covers a swap AND a removal.
+ *
+ * An absent base value is deliberately NOT a finding. Pre-MinSpec decision records
+ * carry no frontmatter at all, and adding `id:`/`title:` to one is an upgrade rather
+ * than a replacement — treating it as a defect would block the very migration the
+ * register wants.
+ *
+ * Total and deterministic: findings sort by file, then by the order in
+ * `DR_IDENTITY_FIELDS`.
+ */
+export function decideDrRepurposing(
+  revisions: DrRevision[],
+  opts: { labels?: readonly string[] } = {},
+): DrRepurposeVerdict {
+  const findings: DrRepurposeFinding[] = [];
+
+  for (const { file, base, head } of [...revisions].sort((a, b) => a.file.localeCompare(b.file))) {
+    for (const field of DR_IDENTITY_FIELDS) {
+      const before = frontmatterField(base, field);
+      if (before === undefined) continue; // nothing to lose; adding a field is an upgrade
+      const after = frontmatterField(head, field);
+      if (after !== before) findings.push({ file, field, base: before, head: after });
+    }
+  }
+
+  // The findings are computed and REPORTED either way. Acknowledging changes the verdict,
+  // never the visibility — a label that suppressed the detail would leave the reviewer
+  // with less than before, which is the opposite of what it is for.
+  const acknowledged = findings.length > 0 && (opts.labels ?? []).includes(DR_IDENTITY_ACK_LABEL);
+  const ok = findings.length === 0 || acknowledged;
+
+  return {
+    ok,
+    findings,
+    ...(acknowledged ? { acknowledgedBy: DR_IDENTITY_ACK_LABEL } : {}),
+    message: renderRepurposeMessage(findings, acknowledged),
+  };
+}
+
+/**
+ * Render the repurposing verdict, quoting BOTH sides of every changed field.
+ *
+ * Quoting both is the whole diagnostic. The reviewer's question is "is the record
+ * under this number still the same decision?", and only the before-and-after answers
+ * it — naming the field alone would send them to the diff to find out what a gate
+ * already knew.
+ */
+function renderRepurposeMessage(findings: DrRepurposeFinding[], acknowledged = false): string {
+  if (findings.length === 0) {
+    return 'DR repurposing check: no existing decision record has its identity changed.';
+  }
+
+  const files = [...new Set(findings.map((f) => f.file))];
+  const lines: string[] = [
+    `DR repurposing — ${findings.length} identity field(s) changed on ${files.length} ` +
+      `existing decision record(s):`,
+  ];
+  for (const file of files) {
+    lines.push(`  ${file}`);
+    for (const f of findings.filter((x) => x.file === file)) {
+      lines.push(`    • ${f.field}: ${quote(f.base)}  →  ${f.head === undefined ? '(removed)' : quote(f.head)}`);
+    }
+  }
+
+  if (acknowledged) {
+    lines.push(
+      '',
+      `ACKNOWLEDGED by the \`${DR_IDENTITY_ACK_LABEL}\` label — passing, and recorded above.`,
+      '',
+      'This is deliberately a speed bump plus an audit trail, NOT a control: whoever',
+      'opened this pull request could add that label, including an agent. What it buys',
+      'is that the change is named on the PR and printed here, so the reviewers see it.',
+      'Preventing the edit outright was never the point — #1756 was caught by review,',
+      'and keeping review in the loop is what this preserves.',
+      '',
+      'If that is not what you meant, remove the label: the fields above are the ones',
+      'that decide WHICH decision each record is.',
+    );
+    return lines.join('\n');
+  }
+
+  lines.push(
+    '',
+    'These records already exist on the base branch, so this is not a new decision',
+    'racing for a number — it is a different decision being written OVER one that is',
+    'already in force. Merging it would destroy the original silently: unlike a',
+    'duplicate id, nothing afterwards shows that a record used to say something else.',
+    '',
+    'If this is a NEW decision, give it the next free id instead of reusing this file',
+    '(MinSpec: Create Architecture Decision Record computes it).',
+    'If this is a genuine amendment, restore the identity fields and record the change',
+    'as a dated amendment section in the body — that is what keeps the record citable.',
+    '',
+    `If the change IS intended and the record should keep its id — a typo in \`title:\`,`,
+    `a wrong \`triggered_by:\` recorded at creation — add the \`${DR_IDENTITY_ACK_LABEL}\``,
+    'label to this pull request. The check then passes and says so, leaving the change',
+    'named on the PR rather than blocked with no in-band path (#1982).',
+  );
+  return lines.join('\n');
+}
+
+/** Single-line, quoted, with any newline made visible — an identity value is one line. */
+function quote(value: string): string {
+  return `"${value.replace(/\n/g, '\\n')}"`;
+}
+
+/**
+ * The decision-dir paths a PR MODIFIES in place, sorted.
+ *
+ * The exact complement of `claimedPathsFromPrFiles` over decision files: that one
+ * takes the statuses which INTRODUCE a path, this one takes `modified`, where the
+ * path exists on both sides and only the content can have changed. `removed` is not
+ * included — deleting a decision record is a visible, reviewable act in the diff,
+ * not a silent swap under a number that still resolves.
+ */
+export function modifiedDecisionPaths(entries: PrFileEntry[], decisionsDir: string): string[] {
+  const prefix = decisionsDir.replace(/\/+$/, '') + '/';
+  return entries
+    .filter((e) => e.status === 'modified')
+    .map((e) => e.filename)
+    .filter((f) => f.startsWith(prefix) && drNumberFromPath(f) !== undefined)
+    .sort();
 }

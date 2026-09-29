@@ -1,7 +1,7 @@
 ---
 id: SPEC-066
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — a shipped file asserting a false fact is a false signpost
@@ -16,8 +16,8 @@ implements: [packages/minspec/src/lib/prose-vantage.ts, packages/minspec/tests/m
 affects: [packages/minspec/src/lib/template-registry.ts, packages/minspec/src/lib/ci-review-templates.ts, packages/minspec/tests/managed-region-templates.test.ts, scripts/hooks/canonical.py, scripts/lib/agent-context.sh, scripts/roles/reviewer.md, scripts/roles/security.md, scripts/roles/architect.md, scripts/roles/skeptic.md, .github/workflows/docs-lane.yml]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

@@ -136,10 +136,26 @@ skipped=""
 while IFS= read -r file; do
   rel="${file#"$ROOT"/}"
 
+  # FAIL CLOSED (#1978, DR-066 clause 1): a file we were asked to scan but cannot
+  # read must never read as "no violation". Every grep below swallows its exit
+  # status, so without this guard an unreadable file yields an empty hit list that
+  # is indistinguishable from a clean one — and the file passes the attribution
+  # gate silently. `find -type f` proves existence, not readability, and says
+  # nothing about the window between listing and reading.
+  #
+  # This is a BLOCK, not a skip: `skipped` is for files waived with a stated
+  # reason, and "I could not look" is not a reason to waive. Mirrors
+  # egress-scan.sh's scan_file guard, which is this repo's existing idiom.
+  if [[ ! -r "$file" ]]; then
+    echo "✗ check-gh-bot-attribution: cannot read ${rel} — failing closed" >&2
+    fail=1
+    continue
+  fi
+
   # Checked FIRST and independently of everything below: a write spawned in a new
   # shell process escapes the wrapper even in a fully compliant file, so sourcing
   # and arming do not cure it (#1413). Reported separately for that reason.
-  sub_hits="$(grep -nE "$SUBSHELL_WRITE_RE" "$file" 2>/dev/null | grep -vE '^[0-9]+:[[:space:]]*#' || true)"  # swallow-known: #1978 grep exit 2 on an unreadable file reads as no attribution violation
+  sub_hits="$(grep -nE "$SUBSHELL_WRITE_RE" "$file" 2>/dev/null | grep -vE '^[0-9]+:[[:space:]]*#' || true)"  # swallow-ok: grep exits 1 when the file holds no match, which is the answer; the unreadable case is blocked by the -r guard at the top of this loop
   if [[ -n "$sub_hits" ]] && ! allowlist_reason "$rel" >/dev/null; then
     fail=1
     echo "FAIL: ${rel} issues a GitHub write from a NEW shell process — the \`gh\` wrapper is a shell function and does not survive exec, so this writes as the human" >&2
@@ -152,16 +168,16 @@ while IFS= read -r file; do
   # explanation never trips the guard. NOTE the anchor: `grep -n` on a SINGLE
   # file emits "16:# ..." with no filename prefix, so a pattern expecting ":16:"
   # silently filters nothing.
-  hits="$(grep -nE "$WRITE_RE" "$file" 2>/dev/null | grep -vE '^[0-9]+:[[:space:]]*#' || true)"  # swallow-known: #1978 grep exit 2 on an unreadable file reads as no attribution violation
+  hits="$(grep -nE "$WRITE_RE" "$file" 2>/dev/null | grep -vE '^[0-9]+:[[:space:]]*#' || true)"  # swallow-ok: grep exits 1 when the file holds no match, which is the answer; the unreadable case is blocked by the -r guard at the top of this loop
 
   # Every `gh api graphql` line is a write UNLESS it declares itself a read.
   # Two steps, because the main regex reaches graphql lines only when they carry
   # a body flag: first drop the DECLARED reads, then add back any graphql line
   # the main regex missed (e.g. a document supplied via --input or stdin).
-  hits="$(printf '%s' "$hits" | awk -v r="$GRAPHQL_READ_DECL_RE" 'NF && $0 !~ r' || true)"  # swallow-known: #1978 an awk failure reads as no remaining violations
+  hits="$(printf '%s' "$hits" | awk -v r="$GRAPHQL_READ_DECL_RE" 'NF && $0 !~ r' || true)"  # swallow-ok: awk prints nothing when every hit was filtered out, which is the answer; the unreadable case is blocked by the -r guard at the top of this loop
   extra="$(grep -nE "$GRAPHQL_LINE_RE" "$file" 2>/dev/null \
              | grep -vE '^[0-9]+:[[:space:]]*#' \
-             | grep -vE "$GRAPHQL_READ_DECL_RE" || true)"  # swallow-known: #1978 grep exit 2 on an unreadable file reads as no extra graphql violation
+             | grep -vE "$GRAPHQL_READ_DECL_RE" || true)"  # swallow-ok: grep exits 1 when the file holds no extra graphql line, which is the answer; the unreadable case is blocked by the -r guard at the top of this loop
   if [[ -n "$extra" ]]; then
     hits="$(printf '%s\n%s' "$hits" "$extra" | awk 'NF' | sort -t: -k1,1n -u)"
   fi
