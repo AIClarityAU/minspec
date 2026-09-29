@@ -134,3 +134,48 @@ describe('the action-item marker is unambiguous', () => {
     }
   });
 });
+
+// ── A reply key names what the AGENT does, not a step only the human can take (#2204) ──
+//
+// The parity checks above prove the three shipped templates and this repo's own root
+// copies AGREE with each other. Agreement is not correctness: all copies could agree on
+// a key whose verb the agent cannot perform (the trigger for #2204 was exactly this - a
+// session offered `x close it now` for closing a chat session, which no agent can do).
+// These tests assert the rule's CONTENT is present, in both the shipped templates and
+// this repo's own on-disk copies, not merely that the copies match each other.
+describe('a reply key names what the agent does, not a human-only step (#2204)', () => {
+  it('the shipped template for every agent states the done-signal rule', () => {
+    for (const template of AGENT_TEMPLATES) {
+      const body = sectionBody(template, 'Human action items — mark them, then repeat them')!;
+      expect(
+        body,
+        `${template} template missing "names what the agent does" rule`,
+      ).toContain('A key names what the agent does on receipt');
+      expect(
+        body,
+        `${template} template missing the "tell me x once you have ..." done-signal form`,
+      ).toMatch(/tell me x once you have/);
+      expect(
+        body,
+        `${template} template's done-signal example is missing its stated consequence`,
+      ).toContain('A done-signal must state the consequence');
+    }
+  });
+
+  it("this repo's own root CLAUDE.md, AGENTS.md and .cursorrules state the done-signal rule", () => {
+    for (const file of AGENT_TEMPLATES) {
+      const onDisk = parseSections(fs.readFileSync(path.resolve(REPO_ROOT, file), 'utf8')).find(
+        (s) => s.heading === 'Human action items — mark them, then repeat them',
+      )?.body;
+      expect(onDisk, `${file} (this repo's own copy) missing the "Human action items" section`).toBeTruthy();
+      expect(
+        onDisk,
+        `${file} (this repo's own copy) missing "names what the agent does" rule`,
+      ).toContain('A key names what the agent does on receipt');
+      expect(
+        onDisk,
+        `${file} (this repo's own copy) missing the "tell me x once you have ..." done-signal form`,
+      ).toMatch(/tell me x once you have/);
+    }
+  });
+});
