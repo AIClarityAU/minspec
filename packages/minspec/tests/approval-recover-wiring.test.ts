@@ -10,12 +10,19 @@
  * explicit user consent. `pushOnApprove: never`, and a declined `prompt`, must both
  * reach the seam ZERO times.
  */
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 
 let CONFIG: Record<string, unknown> = {};
 let WARN_CHOICE: string | undefined;
 const warnings: string[] = [];
 const infos: string[] = [];
+/** Action lists offered on each call — #2258's FR-8-parity suite checks the
+ *  OFFER ITSELF (two-action vs three-action form), not just the message text. */
+const warningActions: string[][] = [];
+const infoActions: string[][] = [];
 
 vi.mock('vscode', () => ({
   workspace: {
@@ -24,12 +31,14 @@ vi.mock('vscode', () => ({
     }),
   },
   window: {
-    showWarningMessage: vi.fn(async (msg: string) => {
+    showWarningMessage: vi.fn(async (msg: string, ...actions: string[]) => {
       warnings.push(msg);
+      warningActions.push(actions);
       return WARN_CHOICE;
     }),
-    showInformationMessage: vi.fn(async (msg: string) => {
+    showInformationMessage: vi.fn(async (msg: string, ...actions: string[]) => {
       infos.push(msg);
+      infoActions.push(actions);
       return undefined;
     }),
   },
@@ -100,6 +109,11 @@ vi.mock('../src/lib/approval-store', () => ({
 }));
 
 import { commitApprovalIfEnabled, pushApprovalIfEnabled } from '../src/commands/commit-on-approve';
+// NOT mocked in this file (the one exception, `vi.doMock`'d locally, is scoped to
+// its own test) — so this is the REAL module, matching `approval-pr-wiring.test.ts`'s
+// FR-8 suite, which is what lets the #2258 tests below assert the actual
+// read-after-write round trip through `.minspec/preferences.json`.
+import { loadPreferences } from '../src/lib/auto-bootstrap';
 
 /** The refusal this feature exists to rescue. */
 const REFUSED = {
@@ -112,6 +126,8 @@ beforeEach(() => {
   WARN_CHOICE = undefined;
   warnings.length = 0;
   infos.length = 0;
+  warningActions.length = 0;
+  infoActions.length = 0;
   bodyArgs.length = 0;
   commitApprovalMock.mockReset().mockResolvedValue(REFUSED);
   openPullRequestMock
@@ -324,5 +340,102 @@ describe('protected-branch recovery wiring — #1115', () => {
     recoverMock.mockRejectedValue(new Error('boom'));
     const r = await commitApprovalIfEnabled('/root', ['/root/specs/x/requirements.md'], 'msg');
     expect(r.suffix).toContain('NOT committed');
+  });
+});
+
+// =============================================================================
+// FR-8 parity on the recovery prompt (#2258)
+// =============================================================================
+//
+// SPEC-050 FR-8's standing-consent offer lives on the COMMITTED arm
+// (`pushApprovalIfEnabled`), which a maintainer who approves on the default
+// branch (the DR-051 norm — every approval in this repo, and the observed
+// shape in voip-sms-inbox) never reaches: `commitApproval` refuses with
+// `protected-branch` and lands here instead. Before this fix the recovery
+// prompt had only two actions and such a maintainer could never grant standing
+// consent from a prompt — only by hand-editing `.minspec/preferences.json`.
+//
+// These tests use a REAL temp `.minspec/preferences.json` (not mocked — the
+// one exception elsewhere in this file is scoped to its own test) so the
+// read-after-write round trip through `effectivePushOnApproveMode` is actually
+// exercised, matching `approval-pr-wiring.test.ts`'s FR-8 suite.
+describe('FR-8 parity on the recovery prompt — #2258', () => {
+  let tmp: string;
+
+  beforeEach(() => {
+    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-approval-recover-'));
+    CONFIG = { commitOnApprove: true, pushOnApprove: 'prompt' };
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  });
+
+  it('offers Save/Always/Not-now the FIRST time, with Save (the recovery action) leading', async () => {
+    WARN_CHOICE = 'Not now';
+    await commitApprovalIfEnabled(tmp, [path.join(tmp, 'specs/x/requirements.md')], 'msg');
+    expect(warningActions).toHaveLength(1);
+    expect(warningActions[0]).toEqual([
+      'Save it on a branch',
+      'Always push from now on',
+      'Not now',
+    ]);
+  });
+
+  it('choosing "Always push from now on" records pushOnApprove=always PROJECT-LOCALLY (DR-078) and still recovers this approval', async () => {
+    WARN_CHOICE = 'Always push from now on';
+    const r = await commitApprovalIfEnabled(tmp, [path.join(tmp, 'specs/x/requirements.md')], 'msg');
+    expect(loadPreferences(tmp).pushOnApprove).toBe('always');
+    // Falling through and recovering is load-bearing: returning here would drop
+    // the very approval whose prompt the user just answered yes to — the same
+    // reasoning pinned for the push prompt's own ALWAYS_PUSH_ACTION arm.
+    expect(recoverMock).toHaveBeenCalledTimes(1);
+    expect(r.suffix).not.toContain('NOT committed');
+  });
+
+  it('the offer is shown only once — a later recovery prompt is the two-action form (never re-nags)', async () => {
+    WARN_CHOICE = 'Not now';
+    await commitApprovalIfEnabled(tmp, [path.join(tmp, 'specs/x/requirements.md')], 'msg');
+    expect(loadPreferences(tmp).answeredSignatures?.pushAlwaysOffer).toBe('offered');
+
+    warningActions.length = 0;
+    await commitApprovalIfEnabled(tmp, [path.join(tmp, 'specs/x/requirements.md')], 'msg');
+    expect(warningActions[0]).toEqual(['Save it on a branch', 'Not now']);
+  });
+
+  it('standing consent granted HERE is honoured on the very next approval, with no prompt at all', async () => {
+    WARN_CHOICE = 'Always push from now on';
+    await commitApprovalIfEnabled(tmp, [path.join(tmp, 'specs/x/requirements.md')], 'msg');
+
+    warnings.length = 0;
+    warningActions.length = 0;
+    await commitApprovalIfEnabled(tmp, [path.join(tmp, 'specs/x/requirements.md')], 'msg');
+    expect(warnings).toHaveLength(0);
+    expect(recoverMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('answering the offer HERE retires it on the push prompt too — ONE shared memory, not two', async () => {
+    // If the recovery prompt kept its own memory instead of reusing
+    // `PUSH_ALWAYS_OFFER_KEY`, this would still show the three-action form below.
+    WARN_CHOICE = 'Not now';
+    await commitApprovalIfEnabled(tmp, [path.join(tmp, 'specs/x/requirements.md')], 'msg');
+    expect(loadPreferences(tmp).answeredSignatures?.pushAlwaysOffer).toBe('offered');
+
+    // Exercise the OTHER caller — the committed/push arm — for a different
+    // approval in the same project.
+    infoActions.length = 0;
+    commitApprovalMock.mockResolvedValueOnce({
+      outcome: 'committed',
+      paths: ['specs/y/requirements.md'],
+    });
+    await commitApprovalIfEnabled(tmp, [path.join(tmp, 'specs/y/requirements.md')], 'msg2');
+    expect(infoActions[0]).toEqual(['Push', 'Not now']);
+  });
+
+  it('declining still recovers the approval (RECOVER_ACTION is unaffected) — no regression on the #1115 happy path', async () => {
+    WARN_CHOICE = 'Save it on a branch';
+    const r = await commitApprovalIfEnabled(tmp, [path.join(tmp, 'specs/x/requirements.md')], 'msg');
+    expect(recoverMock).toHaveBeenCalledTimes(1);
+    expect(r.suffix).toContain('approvals/spec-099-x');
   });
 });

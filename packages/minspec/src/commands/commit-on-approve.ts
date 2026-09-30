@@ -116,18 +116,46 @@ async function recoverOnProtectedBranch(
   if (mode === 'prompt') {
     // Non-modal (project preference: never steal focus from the artifact being
     // approved). Names the destination, so the click is informed consent.
+    //
+    // FR-8 parity (#2258): a maintainer who approves on the default branch
+    // (the DR-051 norm) reaches ONLY this prompt — `pushApprovalIfEnabled`'s own
+    // FR-8 offer lives on the COMMITTED arm, which this call never reaches (see
+    // this function's docstring). Without an offer here, that maintainer could
+    // never grant standing consent from a prompt and would be asked on every
+    // single approval. This reuses the SAME show-once memory
+    // (`PUSH_ALWAYS_OFFER_KEY`/`pushAlwaysOfferAlreadyMade`/
+    // `recordPushAlwaysOfferMade`) and the SAME preference write
+    // (`enableAlwaysPush` → `pushOnApprove: always` in
+    // `.minspec/preferences.json`, DR-078) as the push prompt: it is ONE offer
+    // for ONE underlying question ("stop asking me this"), so answering it from
+    // either surface must retire it on both, not just its own.
+    const alreadyOffered = await pushAlwaysOfferAlreadyMade(rootDir);
+    const actions = alreadyOffered
+      ? [RECOVER_ACTION, NOT_NOW_ACTION]
+      : [RECOVER_ACTION, ALWAYS_PUSH_ACTION, NOT_NOW_ACTION];
     const choice = await vscode.window.showWarningMessage(
       `Approval written but NOT committed: '${current}' is the default branch. ` +
         `Save it on a branch and push, so the sign-off is not stranded here?`,
-      RECOVER_ACTION,
-      'Not now',
+      ...actions,
     );
-    // 'declined', NOT undefined: the caller must not then show its own
-    // near-identical "NOT committed / default branch" warning. The user has just
-    // read that sentence and answered it — repeating it is the nagging the
-    // constitution warns about, and it makes a deliberate choice look like an
-    // error. The suffix still reports the honest state (#1255 review nit).
-    if (choice !== RECOVER_ACTION) return 'declined';
+    // Record on EVERY resolution, dismiss included (#883) — same reasoning as
+    // the push prompt: that is what makes it show-once rather than
+    // show-until-answered-a-particular-way.
+    if (!alreadyOffered) await recordPushAlwaysOfferMade(rootDir);
+
+    if (choice === ALWAYS_PUSH_ACTION) {
+      // Write the standing consent, then FALL THROUGH and recover. Returning
+      // here would drop the very approval whose prompt the user just answered
+      // `yes` to — same reasoning as pushApprovalIfEnabled's ALWAYS_PUSH_ACTION arm.
+      await enableAlwaysPush(rootDir);
+    } else if (choice !== RECOVER_ACTION) {
+      // 'declined', NOT undefined: the caller must not then show its own
+      // near-identical "NOT committed / default branch" warning. The user has just
+      // read that sentence and answered it — repeating it is the nagging the
+      // constitution warns about, and it makes a deliberate choice look like an
+      // error. The suffix still reports the honest state (#1255 review nit).
+      return 'declined';
+    }
   }
 
   const slug = (absPaths[0] ?? message).split(/[\\/]/).slice(-2).join('-').replace(/\.[a-z]+$/i, '');
