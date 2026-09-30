@@ -1,7 +1,7 @@
 ---
 id: SPEC-076
 type: requirements
-status: specifying
+status: planning
 tier: T2
 product: minspec
 epic: EPIC-002  # Signpost Integrity — the never-wrong next-action promise this reader must not weaken
