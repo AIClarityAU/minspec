@@ -181,6 +181,23 @@ describe('#1833 — a status line whose prose negates a status word', () => {
   // citation rather than making it live (a live re-scan would cost I/O over the
   // whole corpus on a path a user is waiting on) — so assert no future edit
   // re-introduces a DR-id citation into this message.
+  // #2180 — the guard tested only lines[c.line - 1], the SINGLE physical source line a
+  // claim starts on. This repo hard-wraps prose at ~90 columns, so a negation clause that
+  // lands on the wrapped CONTINUATION line (rather than the line carrying the status word
+  // itself) was invisible to the NEGATED regex — a false clear caused by where the wrap
+  // broke, not by what the sentence said. Empirically verified before this fix: the exact
+  // sentence below, written as one physical line, was DETECTED; hard-wrapped after "is"
+  // (matching this repo's real wrap width), it returned null.
+  it('#2180 — a negation on a WRAPPED CONTINUATION line is still detected', () => {
+    const wrapped =
+      '---\nid: DR-094\nstatus: proposed\n---\n\n# DR-094\n\n## Status\n\n' +
+      '**Proposed** 2026-09-09, pending the founder review this record is\n' +
+      'not accepted yet and must not be treated as in force.\n\n## Context\n\nc\n';
+    const r = statusProseWouldInvert(wrapped, 'accepted');
+    expect(r).not.toBeNull();
+    expect(r!.text).toContain('not accepted yet');
+  });
+
   it('#2074 — the refusal message never names a specific DR as its example', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'dr1833-msg-'));
     const f = path.join(dir, 'DR-999.md');
