@@ -415,6 +415,26 @@ is_quota() {
 # gone. `kill -0` sends no signal — it only probes existence/permission.
 session_alive() { kill -0 "${1:?session_alive needs a pid}" 2>/dev/null; }
 
+# lock_still_ours <lock_file> <pid>: exit 0 iff <lock_file> still names <pid>.
+# Defense-in-depth, not the correctness mechanism — the flock this process holds
+# on $LOCK_FD (see the singleton-lock block near the bottom of this file) already
+# guarantees exclusivity for the file descriptor's whole lifetime, kernel-
+# enforced, and survives even a crash with no exit trap running at all. This
+# check exists for the scenario #2241 actually hit: the lock PATH gets removed
+# out from under a live holder (an old build's unconditional `rm -f "$LOCK"`
+# exit trap, or a human). flock locks the INODE, not the path, so deleting the
+# path does not free OUR lock — but it does let a brand-new launch open a
+# fresh, lock-free inode at the same name and start a SECOND loop believing it
+# is the sole holder. Each cycle checks the visible file still names us; if it
+# does not, the guarantee a human or another launch reads off that path is
+# already broken, so the loop stops loudly rather than keep dispatching behind
+# a lock nobody else can see.
+lock_still_ours() {
+  local lock_file="${1:?lock_still_ours needs a lock file}" want="${2:?lock_still_ours needs a pid}" content
+  content="$(cat "$lock_file" 2>/dev/null || echo "")"
+  [[ "$content" == "$want" ]]
+}
+
 # ── Session-presence reader (SPEC-026 FR-4 / the sync gate) ────────────────────
 # These shell constants MUST equal presence.ts HEARTBEAT_SECS / STALE_SECS
 # (SPEC-026 FR-3/FR-14). threshold = 4 × heartbeat. Change BOTH or neither — the
@@ -1708,6 +1728,10 @@ run_loop() {
     if ! session_alive "$SESSION_PID"; then
       echo "[drain] session $SESSION_PID ended — stopping loop (drain dies with the session)."; break
     fi
+    if ! lock_still_ours "$LOCK" "$BASHPID"; then
+      echo "[drain] singleton lock at $LOCK no longer names this process ($BASHPID) — removed or overwritten out from under us. Stopping rather than keep dispatching behind a lock nobody else can see (#2241)." >&2
+      break
+    fi
     if (( $(date +%s) >= deadline )); then
       echo "[drain] max lifetime (${MAX_LIFETIME}s) reached — stopping loop (backstop cap)."; break
     fi
@@ -1974,29 +1998,67 @@ if $CONTINUOUS; then
   SESSION_PID="$(resolve_session_pid)"
 fi
 
-# Only one drain process at a time. The lock holds the background driver's PID; if
-# a previous driver died WITHOUT its EXIT trap firing (e.g. SIGKILL), the PID is
-# dead and we reclaim the stale lock rather than blocking every future session.
-if [[ -f "$LOCK" ]]; then
-  LOCK_PID=$(cat "$LOCK" 2>/dev/null || echo "")
-  if [[ -n "$LOCK_PID" ]] && kill -0 "$LOCK_PID" 2>/dev/null; then
-    echo "⚠️   Drain already running (PID $LOCK_PID, log: $LOG) — skipping."
-    exit 0
-  fi
-  echo "ℹ️   Reclaiming stale drain lock (holder PID ${LOCK_PID:-?} no longer running)."
-  rm -f "$LOCK"
+# Only one drain process at a time, enforced by an ATOMIC flock on a dedicated
+# fd — not the old check-then-write PID file (#2241 root cause). The PID-file
+# approach read $LOCK, decided nobody live held it, and only THEN wrote its own
+# PID: two `--auto` launches racing inside that read-then-write window could
+# both pass the "not held" check and each write clobbered the other, so BOTH
+# proceeded while the file on disk named only one. Worse, the exit trap removed
+# $LOCK UNCONDITIONALLY (`rm -f "$LOCK"`) with no check that it still named the
+# exiting process — so a THIRD, unrelated driver's shutdown could delete a
+# SECOND driver's still-live lock file, and a fourth launch would then find no
+# lock at all. That is the observed #2241 sequence: 1664343's exit trap deleted
+# 1997633's lock, and 2900358 then started believing it was the sole holder.
+#
+# flock closes both holes structurally, not by convention:
+#   * acquisition (`flock -n`) is one atomic kernel call — there is no
+#     read-then-write window for a second launch to race into.
+#   * the lock lives on the FILE DESCRIPTOR opened below, inherited by the
+#     forked/disowned loop (fork, not exec, keeps it open) and held for that
+#     loop's whole lifetime. A holder that dies ANY way — clean exit, an exit
+#     trap that never runs, or SIGKILL — has its fd closed by the kernel, which
+#     releases the flock automatically. The old "is the PID in the file still
+#     alive?" staleness probe is now unnecessary: the kernel IS the staleness
+#     check, and it cannot be fooled by a stale-but-plausible-looking PID number.
+#   * $LOCK is NEVER unlinked (see below) — flock locks the file's INODE, not
+#     its path, so leaving the path in place means every future
+#     `exec {fd}>"$LOCK"` reopens the SAME inode and keeps contending
+#     correctly. Unlinking it is exactly what let #2241 happen: removing the
+#     path lets a brand-new process open a fresh, lock-free inode at the same
+#     name and "acquire" a lock that never contended with the still-live
+#     holder's fd at all.
+exec {LOCK_FD}>"$LOCK" || { echo "[drain] ERROR: cannot open lock file $LOCK" >&2; exit 1; }
+if ! flock -n "$LOCK_FD"; then
+  LOCK_PID=$(cat "$LOCK" 2>/dev/null || echo "?")
+  echo "⚠️   Drain already running (PID $LOCK_PID, log: $LOG) — skipping."
+  exit 0
 fi
+# The PID diagnostic is written ONLY by the subshell below, and ONLY once. A fork
+# shares the parent's file OFFSET on an inherited fd (same open file description,
+# not just the same file) — a second write here in the foreground, before the
+# fork, would land at offset 0, and the subshell's later write would then land
+# AFTER it (the offset carried across the fork) rather than overwrite it,
+# concatenating both PIDs into the file instead of recording the one that
+# matters. `exec {LOCK_FD}>"$LOCK"` above already truncated the file at open
+# time, so a single write from the long-lived holder is sufficient and correct.
 
 (
   # $BASHPID, NOT $$: inside a subshell `$$` is still the PARENT script's PID
   # (POSIX keeps it constant across subshells), and the parent exits right after
-  # `disown` below — so writing $$ would record a PID that is dead within
-  # milliseconds, and the stale-lock reclaim above would then fire on EVERY later
-  # session and spawn a second concurrent loop (double-dispatch / quota abuse).
-  # $BASHPID is this subshell's own PID (== $DRAIN_PID), i.e. the long-lived loop
-  # the reclaim's `kill -0` must actually probe. (ai-review #676: BLOCKING/HIGH.)
-  echo "$BASHPID" > "$LOCK"
-  trap 'rm -f "$LOCK"' EXIT
+  # `disown` below — so a $LOCK reader would see a PID that is dead within
+  # milliseconds. $BASHPID is this subshell's own PID (== $DRAIN_PID), i.e. the
+  # long-lived loop the flock (and lock_still_ours's defense-in-depth check,
+  # below) actually protects. (ai-review #676: BLOCKING/HIGH, on the equivalent
+  # PID-file line this replaces.)
+  #
+  # Written through $LOCK_FD (inherited from the foreground, still open on the
+  # SAME inode the flock above is held on) rather than via a fresh `> "$LOCK"`
+  # redirect, so this can never accidentally target a different inode.
+  printf '%s\n' "$BASHPID" >&"$LOCK_FD"
+  # No exit trap removes $LOCK. See the block comment above this fork: unlinking
+  # it is the #2241 bug, not a cleanup — the flock releases itself when this
+  # fd's last reference closes (normal exit, error, or SIGKILL alike), which is
+  # the whole lifetime this lock needs to track.
 
   if $CONTINUOUS; then
     run_loop

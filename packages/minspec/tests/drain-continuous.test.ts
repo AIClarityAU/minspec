@@ -255,12 +255,27 @@ describe('T3 regression (#2233): content that MENTIONS a limit is not a usage-li
 });
 
 describe('drain-inbox.sh — single-instance lock records the LOOP pid, not the dead parent (#676)', () => {
+  // #2241 replaced the check-then-write PID file with an flock held on a dedicated fd
+  // (LOCK_FD), written to via `>&"$LOCK_FD"` rather than a fresh `> "$LOCK"` redirect —
+  // so the #676 property (the long-lived SUBSHELL's own pid is what ends up recorded,
+  // never the parent's dead-on-arrival $$) is now asserted against the subshell BLOCK
+  // specifically, not a single literal line: the foreground writes a diagnostic "$$"
+  // via the same fd BEFORE forking (fine — it is immediately superseded once the
+  // subshell starts and nothing downstream trusts that transient value), and only the
+  // subshell's own write is what the running loop's identity ultimately rests on.
+  const subshellMatch = DRAIN_SRC.match(/\n\(\n[\s\S]*?\n\) >>"\$LOG" 2>&1 &\n/);
+
+  it('the forked loop subshell exists and is the one holding the lock fd', () => {
+    expect(subshellMatch, 'could not locate the backgrounded drain subshell in drain-inbox.sh').not.toBeNull();
+  });
+
   it('writes $BASHPID (the loop subshell) to the lock, never the parent $$', () => {
     // In `( … ) &`, $$ stays the PARENT pid — which exits right after `disown`, so a
     // $$-lock is dead-on-arrival and the stale-lock reclaim spawns duplicate loops
     // (double-dispatch / quota abuse). ai-review #676 BLOCKING/HIGH.
-    expect(DRAIN_SRC, 'lock must be written from $BASHPID').toMatch(/echo\s+"\$BASHPID"\s*>\s*"\$LOCK"/);
-    expect(DRAIN_SRC, 'lock must NOT be written from $$').not.toMatch(/echo\s+"\$\$"\s*>\s*"\$LOCK"/);
+    const subshell = subshellMatch![0];
+    expect(subshell, 'lock must be written from $BASHPID').toMatch(/"\$BASHPID"\s*>&"\$LOCK_FD"/);
+    expect(subshell, 'the subshell must NOT (re)write the lock from $$').not.toMatch(/"\$\$"\s*>&?"?\$LOCK/);
   });
 
   it('bash semantics: $BASHPID differs from $$ inside a backgrounded subshell (why the fix is needed)', () => {
