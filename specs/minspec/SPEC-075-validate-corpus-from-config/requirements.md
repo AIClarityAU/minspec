@@ -64,27 +64,38 @@ project already has**, which is why this is a repair rather than a new feature s
 #1698 filed this as a silent-gate fault and that reading is correct. The failure is not
 "a project cannot customise the validator". It is:
 
-1. A project extends the validator (this repo did: it added `docs/domain`, a corpus config
-   does not declare at all).
-2. *Refresh Harness Files* rewrites the managed region from the template.
-3. The added corpus stops being validated. **The hook still exits 0.** Nothing reports that
-   a gate got narrower, because a validator that checks fewer files passes more often.
+1. Nothing ties the hard-coded corpus list to `.minspec/config.json`'s `specsDir`/
+   `decisionsDir` — measured above as zero `config.json`/`import json`/`specsDir`
+   occurrences in either copy. The two can drift from each other, silently, in either
+   direction.
+2. *Refresh Harness Files* rewrites the managed region from the template, overwriting
+   whatever corpus list the live file currently carries with the template's — whichever one
+   that happens to be.
+3. **The hook still exits 0** whichever list wins. Nothing reports the difference, because a
+   validator that never reads config has no way to notice it disagrees with config, and a
+   validator that checks fewer files passes more often either way.
 
-That is the shape invariant 2 names: a gate whose coverage shrinks silently. A red check is a
-working gate; a gate that quietly stops looking is the defect.
+That is the shape invariant 2 names: a gate whose coverage can silently diverge from what the
+project's own config declares. A red check is a working gate; a gate that quietly stops
+looking — or never looked at the declared truth in the first place — is the defect.
 
 ### The drift this repo currently carries proves the point
 
-The live file and its own template diverge on corpora *in both directions*, measured at
-`e8dcaacb`:
+The live file and its own template diverge on corpora today, measured at `ee8ea97c`
+(`.minspec/hooks/validate.py:92` vs. `template-registry.ts:1753-1757`):
 
-- live validates `specs` + `docs/domain`; the template also carries DR-frontmatter checks
-  (`DR_ID_RE`, `docs/decisions`) that the live file lacks
-- so a refresh here would **remove** `docs/domain` coverage and **add** DR coverage
+- live validates `specs` + `docs/domain`
+- the template validates `specs` + `docs/decisions` + `docs/domain` — a strict superset,
+  including the DR-frontmatter check (`DR_ID_RE`, `template-registry.ts:1681`) the live file
+  lacks entirely
 
-Neither direction is a project choice today; both are an artefact of which copy was edited
-last. That drift is waived (not fixed) by the #1888 self-application gate, whose waiver for
-this path names this spec's design question as the reason it is waived rather than reconciled.
+So today's drift runs one way: a refresh here would **add** `docs/decisions` coverage and
+remove nothing, since `docs/domain` is already in both copies. That the direction happens to
+be benign today is not a property of the mechanism, only of which copy was edited last — the
+same config-blind, hand-edited, uncompared pair could just as easily drift the other way on a
+future edit, and nothing would catch that either. That drift is waived (not fixed) by the
+#1888 self-application gate, whose waiver for this path names this spec's design question as
+the reason it is waived rather than reconciled.
 
 ### Prior art this spec must reuse, not duplicate
 
