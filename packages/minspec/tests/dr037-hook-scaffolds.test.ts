@@ -37,8 +37,9 @@ import {
   managedRegionEndMarker,
   renderManagedFile,
   renderManagedBlock,
+  TEMPLATES,
 } from '../src/lib/template-registry';
-import { splitManagedRegion } from '../src/lib/merge-refresh';
+import { splitManagedRegion, parseSections } from '../src/lib/merge-refresh';
 
 const PRE_COMMIT = `${MINSPEC_HOOKS_DIR}/pre-commit`;
 const COMMIT_MSG = `${MINSPEC_HOOKS_DIR}/commit-msg`;
@@ -349,6 +350,61 @@ describe('commit-msg follow-up gate (DR-023) — executed behavior', () => {
         ' hello\n' +
         '+world\n';
       expect(runHook(msg).code).toBe(1);
+    });
+  });
+
+  // #2131 — the CLAUDE.md "Deferred-work gate" prose still documented the pre-#1918
+  // accept contract (a bare tracked `#123` reference satisfies it) after #1918 removed
+  // that escape from the hook itself. Same shape as gate-fail-direction.test.ts: pin
+  // BOTH the prose and the behavior it describes, or a future hook edit can drift from
+  // the prose again with nothing catching it.
+  describe('CLAUDE.md "Deferred-work gate" prose matches the hook it describes (#2131)', () => {
+    const deferredWorkProse = (): string => {
+      const section = parseSections(TEMPLATES['CLAUDE.md']).find(
+        (s) => s.heading === 'Pre-Commit Checks',
+      );
+      expect(section, 'CLAUDE.md template must still carry a Pre-Commit Checks section').toBeTruthy();
+      const body = section!.body;
+      const start = body.indexOf('### Deferred-work gate');
+      expect(
+        start,
+        'Pre-Commit Checks section must still carry a Deferred-work gate subsection',
+      ).toBeGreaterThanOrEqual(0);
+      const rest = body.slice(start);
+      const nextHeading = rest.indexOf('\n### ', 1);
+      return nextHeading === -1 ? rest : rest.slice(0, nextHeading);
+    };
+
+    it('names the dedicated `Follow-ups: #NNN` trailer as an accepted form', () => {
+      expect(deferredWorkProse()).toMatch(/Follow-ups:\s*#NNN`?\s*trailer/i);
+    });
+
+    it('names `Follow-ups: none` as an accepted form', () => {
+      expect(deferredWorkProse()).toMatch(/Follow-ups: none/);
+    });
+
+    it('names a "nothing deferred" note as an accepted form', () => {
+      expect(deferredWorkProse()).toMatch(/nothing (was )?deferred/i);
+    });
+
+    it('does NOT claim a bare tracked reference like `#123` alone satisfies the gate', () => {
+      // The bug: the prose used to read '"Any of a tracked reference (`#123`)... satisfies
+      // it" — exactly the escape #1918 removed from the hook.
+      const prose = deferredWorkProse();
+      expect(prose).not.toMatch(/tracked reference\s*\(`#123`\)/i);
+      expect(prose).not.toMatch(/[Aa]ny of a tracked reference/);
+    });
+
+    it('the bare-#123 shape the prose used to sanction is actually BLOCKED by the hook (control)', () => {
+      // The exact shape measured in #2131: subject with no ref, body prose mentioning
+      // `#123` with no dedicated Follow-ups: trailer and no surviving escape phrase.
+      // Ties the prose assertions above to real hook behavior — a prose fix with no
+      // matching hook behavior (or vice versa) fails this.
+      const r = runHook(
+        'chore: tidy the runner\n\nThe log-rotation piece is out of scope here; tracked as #123.\n',
+      );
+      expect(r.code).toBe(1);
+      expect(r.stderr).toContain('follow-up gate');
     });
   });
 });

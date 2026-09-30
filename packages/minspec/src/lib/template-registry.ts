@@ -546,10 +546,14 @@ valid.
 ### Deferred-work gate
 
 A commit message that defers work — "follow-up", "out of scope", "held back", "separate
-PR", "deferred" — must say where the deferred work went. Any of a tracked reference
-(\`#123\`), a \`Follow-ups: none\` line, or a note that nothing was deferred satisfies it. The
-check reads only the message text, so it needs no tracker and no network; \`Follow-ups: none\`
-is a complete answer for a project that keeps no issues at all.
+PR", "deferred" — must say where the deferred work went. Three forms satisfy it: a
+dedicated \`Follow-ups: #NNN\` trailer (read structurally via \`git interpret-trailers\`, not
+by scanning for the digits), an explicit \`Follow-ups: none\` line, or prose noting that
+nothing was deferred (e.g. "nothing deferred", "tracked in ..."). A bare \`#123\` mention in
+the subject or loose prose no longer satisfies it by itself — it must sit in a dedicated
+\`Follow-ups:\` trailer line (#1918). The check reads only the message text, so it needs no
+tracker and no network; \`Follow-ups: none\` is a complete answer for a project that keeps no
+issues at all.
 
 Work named in prose and nowhere else is lost the moment the commit scrolls out of view. The
 gate costs one line and turns a vanishing intention into either a tracked item or an
