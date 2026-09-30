@@ -11,13 +11,25 @@
  * nothing ever fast-forwards a primary (see `scripts/check-primaries-clean.sh`
  * for the full mechanism writeup and the G2-deadlock analysis).
  *
- * CLASSIFICATION (mirrors `check-primaries-clean.sh` byte-for-byte):
+ * CLASSIFICATION (mirrored `check-primaries-clean.sh`'s two-outcome shape as of
+ * #1162; the bash script gained a THIRD outcome, LANDED-ON-BRANCH, in #2068 —
+ * a dirty path byte-identical to some OTHER remote-tracking ref, not just
+ * `origin/<default>`, is landed work sitting in a feature branch/open PR, not
+ * unlanded. This module has NOT been widened to match yet (`ORPHAN` below still
+ * covers that case here), so the two are no longer byte-for-byte in parity —
+ * tracked as a follow-up. `tidyRedundantPaths` only ever discards `REDUNDANT`
+ * paths, so this drift cannot itself cause a wrong discard; it can only
+ * over-report `ORPHAN` in the extension's UI the same way the bash script did
+ * before #2068):
  *   REDUNDANT  the dirty path's content is byte-identical to `origin/<default>`'s
  *              version, or is locally deleted and absent there too. Carries no
  *              information — safe to discard, because the eventual sanctioned
  *              fast-forward (`sync_shared_checkouts()`, DR-065) reproduces it.
  *   ORPHAN     content differs (or exists only on one side in a way that isn't
- *              a matching absence). Real unlanded work. NEVER touched here.
+ *              a matching absence). Real unlanded work in a plain `git status`
+ *              sense, but see the #2068 note above — some of what lands here
+ *              may actually be landed on a branch this classifier doesn't check.
+ *              NEVER touched here regardless.
  *
  * TIER-0 / OFFLINE (invariant #1): this module makes NO network call, including
  * no `git fetch`. It classifies against whatever `origin/<default>` ref is
