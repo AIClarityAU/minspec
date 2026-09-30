@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-073-dispatch-completion-requires-commit/requirements.md",
+  "specHash": "2f1dd6b421aad62fbc425de1e5710afd1c4db1d9b80ed7c3249806acb92e6421",
+  "approvedAt": "2026-09-22T21:02:27.002Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "dc011d2e5b32b973c9c0c355ff140caa377c3325"
+}
