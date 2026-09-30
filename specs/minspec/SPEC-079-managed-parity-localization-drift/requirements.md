@@ -1,5 +1,5 @@
 ---
-id: SPEC-075
+id: SPEC-079
 type: requirements
 status: specifying
 tier: T4
@@ -25,7 +25,7 @@ phases:
   implement: pending
 ---
 
-# SPEC-075: The region a refresh writes must not fail the adopter's own parity check
+# SPEC-079: The region a refresh writes must not fail the adopter's own parity check
 
 > **This is a SPECIFICATION ONLY.** No code, script, or test is created by the dispatch
 > that produced it. A human reads this spec, resolves
