@@ -770,4 +770,12 @@ SPEC-034's broker exchanges a GitHub Actions OIDC token for a GitHub App install
 <!-- dr-summary:DR-096 auto=68c7f9167e09 -->
 Ownership declarations leave the canonical approval hash, so every record minted before the change stops matching. Locally that is a one-off migration; in an adopter's repo the thing recomputing those hashes is a merge-gating review input that MinSpec ships with no gate, no snapshot and no migration, so their reviewers would read MISMATCH against valid approvals. Adopters get a frozen, diagnosis-only copy of the old basis and a third verdict that names it, rather than a flag that defaults the change off or a corpus-rewriting script MinSpec cannot test.
 <!-- /dr-summary:DR-096 -->
+
+## [DR-097 — The pre-commit harness gets a non-blocking outcome for the first time - correctness checks block, metric checks warn, not tool-present-or-absent](DR-097.md)
+
+*Status: proposed · Date: 2026-10-01*
+
+<!-- dr-summary:DR-097 auto=45005f5a1366 -->
+Every DR-037 pre-commit stage today is block-or-skip: a present tool always blocks on a real finding, and the only non-blocking path is the tool being absent. #1555 asks for a code-quality stage whose metric checks are expected to be noisy, so this record accepts a new outcome — correctness checks (shellcheck, actionlint, typecheck) keep blocking, metric checks (duplication, complexity, circular deps, dead code) warn by default until a project opts a check into blocking.
+<!-- /dr-summary:DR-097 -->
 <!-- minspec:dr-index:end -->
