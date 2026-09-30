@@ -182,8 +182,68 @@ interface GhIssueJson {
 }
 
 /**
+ * Classify a `gh` CLI failure into a short, human-readable reason.
+ *
+ * fetchIssues() used to swallow every failure here — not installed, logged
+ * out, offline, rate-limited, a timeout, even malformed JSON — into the SAME
+ * empty array used for "zero open issues" (#2247). Every caller then rendered
+ * something like "No open issues found": an unreadable source read as a
+ * meaningful empty one, the absent-witness-read-as-meaningful shape the
+ * constitution's invariant 2 warns against for gates, and just as misleading
+ * here even though this isn't a merge gate. Classifying and re-throwing lets
+ * callers show "unavailable (reason)" instead of a false zero.
+ */
+function describeGhFailure(err: unknown): string {
+  if (err instanceof SyntaxError) {
+    return 'gh returned output that could not be parsed as JSON';
+  }
+
+  const message = err instanceof Error ? err.message : String(err);
+  const lower = message.toLowerCase();
+  const code = (err as { code?: string | number } | undefined)?.code;
+  const killed = (err as { killed?: boolean } | undefined)?.killed;
+
+  if (
+    code === 'ENOENT' ||
+    lower.includes('command not found') ||
+    lower.includes('not recognized as an internal')
+  ) {
+    return 'GitHub CLI (gh) is not installed';
+  }
+  if (
+    lower.includes('not logged in') ||
+    lower.includes('auth') ||
+    lower.includes('unauthorized') ||
+    lower.includes('401')
+  ) {
+    return 'GitHub CLI (gh) is not authenticated — run `gh auth login`';
+  }
+  if (lower.includes('rate limit') || lower.includes('403')) {
+    return 'GitHub API rate limit exceeded — try again later';
+  }
+  if (killed || lower.includes('timed out') || lower.includes('timeout')) {
+    return 'gh command timed out — check network connectivity';
+  }
+  if (
+    lower.includes('enotfound') ||
+    lower.includes('econnrefused') ||
+    lower.includes('getaddrinfo') ||
+    lower.includes('network')
+  ) {
+    return 'network unreachable — check internet connectivity';
+  }
+  return `gh issue list failed: ${message}`;
+}
+
+/**
  * Fetch issues from GitHub using `gh` CLI.
  * Filters to open issues by default.
+ *
+ * Rejects (never resolves with `[]`) when `gh` fails for any reason — not
+ * installed, logged out, offline, rate-limited, timed out, or unparsable
+ * output — so callers can distinguish "couldn't check" from "checked, found
+ * none" (#2247). The rejection's message is a short, user-facing reason from
+ * {@link describeGhFailure}.
  */
 export async function fetchIssues(
   rootDir: string,
@@ -216,8 +276,8 @@ export async function fetchIssues(
 
     const issues: GhIssueJson[] = JSON.parse(stdout);
     return issues.map(mapGhIssue);
-  } catch {
-    return [];
+  } catch (err) {
+    throw new Error(describeGhFailure(err));
   }
 }
 
