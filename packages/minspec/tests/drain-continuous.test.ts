@@ -125,9 +125,10 @@ describe('T3 regression (#2233): content that MENTIONS a limit is not a usage-li
   });
 
   it('a wall line QUOTED inside a fenced code block is content, not the CLI', () => {
-    // The single model-authored match in 112,112 lines of assistant prose across 3,541
-    // session transcripts (scanned 2026-09-30), verbatim. Its reset time had already
-    // passed, so publishing it as a deadline would have parked the drain for 6 hours.
+    // Verbatim from a real session: when this was written (2026-09-30), a scan of this
+    // machine's session transcripts found exactly one model-authored line in the CLI's
+    // wall forms, and it was this fenced quote. Its reset time had already passed, so
+    // publishing it as a deadline would have parked the drain for 6 hours.
     const prose = [
       '**The most actionable finding yet.** Eight sessions are not "stalled" — they all hit the same wall:',
       '',
@@ -211,6 +212,41 @@ describe('T3 regression (#2233): content that MENTIONS a limit is not a usage-li
     ]) {
       expect(run(['--is-quota'], line).code, line).toBe(0);
     }
+  });
+
+  it("pins the forms to the CLI's OWN message lists (Claude Code 2.1.283), prefix by prefix", () => {
+    // The CLI classifies its own usage messages with prefix lists, extracted verbatim
+    // from the 2.1.283 binary: `BBr` (walls), `UNo` (a Fable-credits regex) and `jBr`
+    // (org disabled) block the run; `WBr` (warnings) and `GBr` (switch-over notices) do
+    // not. Each prefix appears here with a representative completion. When the CLI's
+    // wording changes, update this table from the new binary first; it is the contract.
+    const blocking = [
+      "You've hit your session limit · resets 3pm (Australia/Sydney)",
+      "You've reached your Fable limit.",
+      "You're out of usage credits. Run /usage-credits to buy more.",
+      'Your org is out of usage · add funds to continue',
+      'Your org is out of usage · contact your admin',
+      "Your seat type doesn't include usage credits",
+      "Your seat type doesn't include usage",
+      'Your usage allocation has been disabled by your admin',
+      "Your group's usage limit is set to $0 · ask your admin for a higher limit",
+      'Fable 5 requires usage credits.',
+      "You're out of extra usage",
+      "Your seat type doesn't include extra usage",
+      'This service is disabled for your org',
+    ];
+    const carriesOn = [
+      "You've used 90% of your session limit · resets 3pm",
+      "You're close to your weekly limit",
+      "You're now using usage credits · Your session limit resets 3pm",
+      "You're now using your usage allocation",
+      'Now using your usage allocation',
+      'Now using usage credits',
+      "You're now using extra usage",
+      'Now using extra usage',
+    ];
+    for (const line of blocking) expect(run(['--is-quota'], line).code, `blocking: ${line}`).toBe(0);
+    for (const line of carriesOn) expect(run(['--is-quota'], line).code, `carries on: ${line}`).toBe(1);
   });
 
   it('a CRLF line ending does not hide the wall', () => {

@@ -332,8 +332,13 @@ DISPATCH_CONCURRENCY="$(_validated_concurrency "${MINSPEC_DRAIN_CONCURRENCY:-1}"
 #     classifies its OWN messages by that prefix (Claude Code 2.1.283's wall-prefix
 #     list). #1785's .agent.log, the one genuine wall on 2026-09-30, is exactly
 #       You've hit your session limit · resets 11:20am (Australia/Sydney)
-#   * `You're out of usage credits|extra usage`, `Your org is out of usage`: the same
-#     list's walls for the overage and org pools.
+#   * The rest of that list, the CLI's refusals on usage or entitlement grounds: `You're
+#     out of usage credits|extra usage`, `Your org is out of usage`, `Your seat type
+#     doesn't include …`, `Your usage allocation has been disabled …`, `Your group's usage
+#     limit is set to $0`, `Fable … requires usage credits.`, `This service is disabled
+#     for your org`. Some never reset on their own, and they pause the drain anyway: a
+#     drain that keeps launching into a refusal strands one issue per launch, while a
+#     paused one probes once per sleep (see the bounded veto below).
 #   * `Claude AI usage limit reached|<epoch>`, `Claude usage limit reached. Your limit
 #     will reset at 3pm.`, `5-hour limit reached ∙ resets 3pm`: older CLIs.
 #   * `API Error: 429 …` / `API Error: 529 Overloaded…` / `API Error: Request rejected
@@ -341,11 +346,23 @@ DISPATCH_CONCURRENCY="$(_validated_concurrency "${MINSPEC_DRAIN_CONCURRENCY:-1}"
 #     load…`: the CLI's rate-limit and overload lines. Transient, NOT-your-code, so
 #     they pause too, as they always have.
 # Deliberately absent: the CLI's WARNINGS (`You've used 90% of your …`, `You're close
-# to …`, `Approaching …`). The run carries on past those, so they are not a wall.
+# to …`, `Approaching …`) and its switch-over notices (`You're now using usage credits
+# …`). The run carries on past those, so they are not a wall. New launches in that
+# state are quota_gate's job, and it defers them from the meter reading.
+#
+# This departs, deliberately, from SPEC-074 (dispatch quota classification, approved).
+# Its FR-1 and AC-6 assume the dispatch log and this drain's input are harness-only
+# text, to be classified by ai-review-guard.js's isQuotaExhaustion, and they pin the
+# dispatch check to "the SAME function" as this drain's is_quota. #2233 refuted that
+# premise, because both carry agent prose. Do not "fix" this back to isQuotaExhaustion:
+# that restores the false pauses above. Amending SPEC-074 is a founder decision, tracked
+# in #2237. When SPEC-074 is built, dispatch can share this one matcher through the pure
+# seam `drain-inbox.sh --is-quota`.
 #
 # Two exclusions that the anchor alone would miss. A line inside a markdown code
-# fence is quoted content: the CLI never fences its notice, and the one model-authored
-# match in 112,112 lines of transcript prose (scanned 2026-09-30) was a fenced quote.
+# fence is quoted content: the CLI never fences its notice, and when this was written
+# (2026-09-30) a scan of this machine's session transcripts found exactly one
+# model-authored line in these forms, which was a fenced quote.
 # Fences are PAIRED in order, and only a closed pair fences anything. An unclosed
 # fence (a first run's prose cut off mid-block, say) must not hide the retry's genuine
 # wall printed after it, which toggling on every fence line would do. A CR ends a
@@ -357,6 +374,11 @@ _quota_notice_forms=(
   "You've (hit|reached) your ([^ ]+ ){0,4}(limit|budget)([^a-z]|\$)"
   "You're out of (usage credits|extra usage)"
   "Your org is out of usage"
+  "Your seat type doesn't include (usage|extra usage)"
+  "Your usage allocation has been disabled by your admin"
+  "Your group's usage limit is set to \\\$0"
+  "Fable( [A-Za-z0-9.]+){0,4} requires usage credits"
+  "This service is disabled for your org"
   "Claude (AI )?usage limit reached"
   "([0-9]+-hour|session|weekly|daily|opus|sonnet|opus weekly|sonnet weekly) limit reached"
   "API Error: (429|529)([^0-9]|\$)"
