@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-074-dispatch-quota-classification/requirements.md",
+  "specHash": "bdd311a0ad9755909bed4eda5d703d4ff2608376490a0c31fa5541223ac44a7c",
+  "approvedAt": "2026-09-22T21:04:17.988Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "ef7e93e6e71a8ceff1591a0498a38fe4e2d432b2"
+}
