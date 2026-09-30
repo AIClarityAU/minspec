@@ -832,8 +832,8 @@ test('parseBlockedBy: a ref on a LATER line is not swept into an earlier declara
   assert.deepEqual(parseBlockedBy('Blocked by #1225\n\nAlso relates to #4242.'), [1225]);
 });
 
-// minspec#2134 — BLOCKED_BY_LINE_RE catastrophic backtracking. THREE distinct
-// mechanisms were found across two rounds of hardening (see the full writeup on
+// minspec#2134 — BLOCKED_BY_LINE_RE catastrophic backtracking. FOUR distinct
+// mechanisms were found across three rounds of hardening (see the full writeup on
 // BLOCKED_BY_LINE_RE's definition in ai-review-guard.js — this comment only
 // carries the input shapes and budgets):
 //   1. `*` overlapped BOTH the leading class `[\s>*_-]*` and the adjacent `\**`.
@@ -844,8 +844,13 @@ test('parseBlockedBy: a ref on a LATER line is not swept into an earlier declara
 //   3. Found while fixing #2: `\s` matches line terminators, and the `m` flag
 //      makes `^` succeed after every one — so an all-newline body gives the engine
 //      O(n) valid anchor points, each doing unbounded work.
+//   4. Found in review of round 2 (by the ai-review panel's security voter, not by
+//      rounds 1-2's own tests, which varied the alphabet before "blocked by" but
+//      not after it): the SAME shape as mechanism 2, one region over — `\s*:?\s*`
+//      right after "blocked by" has two `\s`-matching quantifiers with only the
+//      nullable `:?` between them.
 //
-// All three get their own test below for exactly the reason #2 exists at all:
+// All four get their own test below for exactly the reason #2 exists at all:
 // `parseBlockedBy` returns the identical CORRECT answer ([]) under every
 // vulnerable variant and the final fix — the bug is purely a wall-clock hazard,
 // so a correctness-only assertion is not evidence of anything. Each budget is set
@@ -913,6 +918,28 @@ test('parseBlockedBy: a pathological run of leading newlines does not cause cata
       'this is the catastrophic-backtracking signature of BLOCKED_BY_LINE_RE regressing to ' +
       'minspec#2134 mechanism 3 (an unbounded quantifier re-attempted at every multiline anchor), ' +
       'not a slow CI runner',
+  );
+});
+
+test('parseBlockedBy: a pathological run of newlines AFTER "blocked by" does not cause catastrophic backtracking (ReDoS, minspec#2134, mechanism 4)', () => {
+  // Unlike mechanisms 1-3, the vulnerable region here is only reachable once the
+  // engine is PAST a literal "blocked by" match, so the fixture must contain that
+  // literal text — decoration alone (as mechanisms 1-3 used) cannot reach it.
+  const n = 40000; // ~40KB — comfortably inside GitHub's ~65KB PR body cap
+  const body = `Normal preamble line.\nblocked by${'\n'.repeat(n)}`;
+  const budgetMs = 300; // fixed: ~15ms measured. Round-2 pattern: ~2000ms measured.
+
+  const { result, elapsedMs } = timeParseBlockedBy(body);
+  // No ref follows the newline run, so the correct answer is the empty array
+  // either way — the TIMING assertion below is what distinguishes fixed from
+  // vulnerable, exactly as for mechanisms 1-3.
+  assert.deepEqual(result, []);
+  assert.ok(
+    elapsedMs < budgetMs,
+    `parseBlockedBy took ${elapsedMs.toFixed(1)}ms on a crafted input (budget ${budgetMs}ms) — ` +
+      'this is the catastrophic-backtracking signature of BLOCKED_BY_LINE_RE regressing to ' +
+      'minspec#2134 mechanism 4 (`\\s` overlapping across the nullable `:?` right after ' +
+      '"blocked by"), not a slow CI runner',
   );
 });
 
