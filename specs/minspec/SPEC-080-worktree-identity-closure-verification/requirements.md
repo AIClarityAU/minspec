@@ -161,9 +161,10 @@ No functional gap is introduced by the different choice of fallback source.
   this spec.
 - **INV-3 — Evidence Discipline (RCDD/DR-003).** This spec's own central claim — "already
   fixed" — is written with its verification method stated inline (file:line reads, a git
-  ancestry check, and an explicit note that the regression suite was read but not run) so
-  a reviewer can tell exactly which parts are checked code and which part (FR-2) still
-  needs a live run.
+  ancestry check, and the live regression-suite run recorded under FR-2/Context — 12/12
+  passed against this worktree's `HEAD`, not merely read) so a reviewer can tell exactly
+  which parts are checked code and which part (the live run) is independently
+  reproducible via the exact command given in Context.
 
 ## Acceptance Criteria
 
