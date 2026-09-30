@@ -1,5 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { parseSpec, writeSpec, updateSpecFrontmatter, readSpecFile, writeSpecFile, setSpecStatus } from '../src/lib/spec';
+import {
+  parseSpec,
+  writeSpec,
+  updateSpecFrontmatter,
+  readSpecFile,
+  writeSpecFile,
+  setSpecStatus,
+  specStatusProseWouldInvert,
+} from '../src/lib/spec';
 import type { ParsedSpec } from '../src/lib/spec';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -683,5 +691,54 @@ tier: T3
     // ...and the nested key is untouched, not clobbered.
     expect(after).toContain('  status: needs-changes');
     expect(parseSpec(after).frontmatter.status).toBe('implementing');
+  });
+
+  // #2180 — specs share the DR guard's vulnerable shape (#1833: a status line whose
+  // prose negates a status word inverts under a blind token swap) but had NO equivalent
+  // guard at all: `setBodyStatusToken` rewrote the leading `**Status:**` word
+  // unconditionally. `specStatusProseWouldInvert` closes that gap, and — like the DR
+  // guard — tests the claim's whole paragraph, not just the physical line the token
+  // sits on, so a negation on a wrapped continuation line is still caught.
+  describe('#2180 — a spec Status line whose prose negates a status word', () => {
+    const specWith = (statusLine: string) =>
+      `---\nid: SPEC-200\nstatus: specifying\ntier: T2\n---\n\n# Title\n\n${statusLine}\n\n## Context\n\nc\n`;
+
+    it('is detected on a single physical line', () => {
+      const doc = specWith(
+        '**Status:** Specifying, pending founder review this record is not yet implementing and must not be treated as in force.',
+      );
+      const r = specStatusProseWouldInvert(doc);
+      expect(r).not.toBeNull();
+      expect(r!.text).toContain('not yet implementing');
+    });
+
+    it('is detected when the negation lands on a WRAPPED CONTINUATION line', () => {
+      const doc = specWith(
+        '**Status:** Specifying, pending founder review this record is\nnot yet implementing and must not be treated as in force.',
+      );
+      const r = specStatusProseWouldInvert(doc);
+      expect(r).not.toBeNull();
+      expect(r!.text).toContain('not yet implementing');
+    });
+
+    it('benign history is not flagged — negation, not mere mention', () => {
+      const doc = specWith('**Status:** Implementing (Specifying complete 2026-06-23).');
+      expect(specStatusProseWouldInvert(doc)).toBeNull();
+    });
+
+    it('setSpecStatus REFUSES, and writes nothing at all', () => {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'spec2180-'));
+      const f = path.join(dir, 'SPEC-200.md');
+      const doc = specWith(
+        '**Status:** Specifying, pending founder review this record is\nnot yet implementing and must not be treated as in force.',
+      );
+      fs.writeFileSync(f, doc);
+      const before = fs.readFileSync(f, 'utf-8');
+      expect(() => setSpecStatus(f, 'implementing')).toThrow(/negates a status word/);
+      // The load-bearing half: refusing AFTER writing frontmatter would leave the file
+      // asserting two statuses — the very state this mechanism exists to prevent.
+      expect(fs.readFileSync(f, 'utf-8')).toBe(before);
+      fs.rmSync(dir, { recursive: true, force: true });
+    });
   });
 });
