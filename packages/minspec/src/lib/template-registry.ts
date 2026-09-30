@@ -1074,10 +1074,11 @@ jobs:
       - name: Run MinSpec validation (fail-closed — DR-066)
         run: |
           # A required check must have a reachable red path and must NEVER conclude
-          # success without validating (DR-066 "No silent gate", clause 2 / #811).
+          # success without validating (DR-066 "No silent gate", clause 2 /
+          # AIClarityAU/minspec#811).
           # Run the highest-fidelity validator that is actually present and let its
           # exit code gate the job. Do NOT add a branch that exits 0 without a
-          # validator having run — that was the #811 always-green bug.
+          # validator having run — that was the AIClarityAU/minspec#811 always-green bug.
           if [ -f package.json ] && node -e "process.exit((require('./package.json').scripts||{}).validate?0:1)" 2>/dev/null; then
             echo "MinSpec SDD validation: running 'npm run validate' (Node validator)."
             npm ci
