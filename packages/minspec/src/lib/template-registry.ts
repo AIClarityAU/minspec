@@ -1470,16 +1470,21 @@ minspec_shell_gate() {
   for f in $staged; do
     case "$f" in
       specs/*.md)
-        # Frontmatter is the block between the first two \`---\` fences.
+        # Frontmatter is the block between the first two \`---\` fences. The
+        # optional \\042/\\047 (octal for " and ') before the id lets a quoted
+        # value through — \`id: "SPEC-001"\` is well-formed YAML for the string
+        # \`SPEC-001\`, and the bare pattern used to refuse it (#1908). Octal, not a
+        # literal quote char, because this awk program is itself inside a
+        # single-quoted shell string, where a literal ' would end it early.
         if ! git show ":$f" 2>/dev/null | awk '
           /^---[[:space:]]*$/ { fence++; next }
-          fence==1 && /^id:[[:space:]]*SPEC-[0-9]+/ { found=1 }
+          fence==1 && /^id:[[:space:]]*[\\042\\047]?SPEC-[0-9]+/ { found=1 }
           END { exit(found?0:1) }'; then
           echo "✗ MinSpec gate: $f missing \\\`id: SPEC-NNN\\\` frontmatter." >&2
           gate_fail=1
         fi
         ;;
-      docs/decisions/DR-*.md)
+      docs/decisions/*.md)
         # Decision records are approvables too, and were ungated until now: a DR
         # created by the MinSpec command carried frontmatter, one written by hand
         # carried none, and nothing noticed. Observed in a real project where
@@ -1491,17 +1496,29 @@ minspec_shell_gate() {
         # over: the tooling validated what it created and never asserted the
         # class as a whole.
         #
+        # Keyed on the DIRECTORY, not a \\\`DR-*.md\\\` filename match: a record kept
+        # under any other name (docs/decisions/0024-some-name.md, say) used to be
+        # skipped, silently, by this same asymmetry one level up (#1908). INDEX.md
+        # (the register listing) and README.md (prose) are the only exemptions,
+        # since neither carries an id of its own.
+        #
         # The path is literal, matching the \\\`specs/\\\` case above — this hook is a
         # managed region rendered without template context, so a project that has
         # relocated its decisions directory is not covered. That is a known limit
         # of both gates, not a new one.
-        if ! git show ":$f" 2>/dev/null | awk '
-          /^---[[:space:]]*$/ { fence++; next }
-          fence==1 && /^id:[[:space:]]*DR-[0-9]+/ { found=1 }
-          END { exit(found?0:1) }'; then
-          echo "✗ MinSpec gate: $f missing \\\`id: DR-NNN\\\` frontmatter." >&2
-          gate_fail=1
-        fi
+        case "$(basename -- "$f")" in
+          INDEX.md|README.md) ;;
+          *)
+            # Same optional-quote allowance as the SPEC- case above (#1908).
+            if ! git show ":$f" 2>/dev/null | awk '
+              /^---[[:space:]]*$/ { fence++; next }
+              fence==1 && /^id:[[:space:]]*[\\042\\047]?DR-[0-9]+/ { found=1 }
+              END { exit(found?0:1) }'; then
+              echo "✗ MinSpec gate: $f missing \\\`id: DR-NNN\\\` frontmatter." >&2
+              gate_fail=1
+            fi
+            ;;
+        esac
         ;;
     esac
   done
@@ -1653,7 +1670,10 @@ exit 1`;
  *
  * Frontmatter is parsed with the SAME lightweight \`key: value\` split the Node
  * \`validate-frontmatter.ts\` uses (first \`---\` … \`---\` block, split on the first
- * colon, trim) — no PyYAML dependency, so it runs on a stock python3. Scopes to the
+ * colon, trim) — no PyYAML dependency, so it runs on a stock python3. It is not an
+ * exact re-implementation, though: since #1908 the checked values are unquoted and
+ * comment-stripped first (\`clean_frontmatter_value\`), and it gates DR \`id:\`
+ * frontmatter. The Node validator does neither yet (#2297). Scopes to the
  * STAGED tree (\`git diff --cached\`) when invoked as a pre-commit hook, else scans
  * the whole repo. Tier-0: deterministic, offline, no network, no third-party deps.
  *
@@ -1662,14 +1682,19 @@ exit 1`;
  */
 const VALIDATE_PY = `"""MinSpec mid-tier validator (DR-037 / #246).
 
-Language-agnostic twin of the Node validate-frontmatter core FATAL checks:
+FATAL checks, modelled on MinSpec's Node validate-frontmatter:
   - specs/**/*.md must have \`id: SPEC-NNN\` frontmatter
-  - docs/decisions/DR-*.md must have \`id: DR-NNN\` frontmatter
+  - every docs/decisions/*.md (except INDEX.md / README.md) must have
+    \`id: DR-NNN\` frontmatter — keyed on the DIRECTORY, not the filename, so a
+    record not named DR-NNN.md is still checked, never silently skipped (#1908)
   - docs/domain/*.md must have \`type: domain\` frontmatter
 
-Frontmatter parsing mirrors the Node validator exactly (first --- ... --- block,
-split each line on the first colon, trim) — no PyYAML, so it runs on a stock
-python3. Deterministic + offline (Tier-0, DR-004)."""
+Frontmatter is split the same way as the Node validator (first --- ... ---
+block, split each line on the first colon, trim), with no PyYAML, so it runs on
+a stock python3. The two are not exact twins: values checked here go through
+clean_frontmatter_value (one layer of quotes, a trailing comment), which the
+Node side does not do yet, and the Node side has no DR id rule. #2297 tracks
+bringing them level. Deterministic + offline (Tier-0, DR-004)."""
 
 import os
 import re
@@ -1679,6 +1704,25 @@ import sys
 FM_RE = re.compile(r"^---\\n(.*?)\\n---", re.DOTALL)
 SPEC_ID_RE = re.compile(r"^SPEC-\\d+$")
 DR_ID_RE = re.compile(r"^DR-\\d+$")
+# A DR is any .md under the decisions dir except the register's own listing
+# (no id: of its own) and a conventional README (prose, not a record) — #1908.
+DR_EXEMPT_FILENAMES = {"INDEX.md", "README.md"}
+
+
+def clean_frontmatter_value(raw):
+    """Strip a trailing inline comment, then one layer of matching quotes.
+
+    \`id: "DR-024"  # note\` is well-formed YAML for the string \`DR-024\`, but the
+    naive key:value split above leaves the quotes and comment in \`raw\` verbatim.
+    Comment-stripping runs FIRST so the quoted value's closing quote is still the
+    last character when the quote check runs — a quote-then-comment strip order
+    would leave the trailing comment sitting where the closing quote is expected
+    and the quotes would never come off (#1908).
+    """
+    value = raw.split("#", 1)[0].strip()
+    if len(value) >= 2 and value[0] == value[-1] and value[0] in ('"', "'"):
+        value = value[1:-1]
+    return value
 
 
 def repo_root():
@@ -1768,11 +1812,15 @@ def main():
         norm = rel.replace(os.sep, "/")
         is_spec = norm.startswith("specs/") and norm.endswith(".md")
         is_domain = norm.startswith("docs/domain/") and norm.endswith(".md")
-        # A decision record, not the register's INDEX.md (a listing with no id).
+        # ANY decision record, not just one named DR-NNN.md — a record kept under a
+        # different name (docs/decisions/0024-some-name.md, say) was previously
+        # unchecked and unreported as skipped (#1908). The register's own INDEX.md
+        # and a conventional README are the only exemptions, since neither carries
+        # an id of its own.
         is_dr = (
             norm.startswith("docs/decisions/")
             and norm.endswith(".md")
-            and os.path.basename(norm).startswith("DR-")
+            and os.path.basename(norm) not in DR_EXEMPT_FILENAMES
         )
         if not (is_spec or is_dr or is_domain):
             continue
@@ -1783,25 +1831,33 @@ def main():
         fm = parse_frontmatter(content)
 
         if is_spec:
-            spec_id = fm.get("id", "")
-            # Strip an inline comment (\`id: SPEC-001  # note\`) before matching.
-            spec_id = spec_id.split("#", 1)[0].strip()
-            if not SPEC_ID_RE.match(spec_id):
+            spec_id = clean_frontmatter_value(fm.get("id", ""))
+            if not spec_id:
                 sys.stderr.write(
-                    "FAIL " + norm + ": missing or invalid \`id: SPEC-NNN\` frontmatter\\n"
+                    "FAIL " + norm + ": missing \`id: SPEC-NNN\` frontmatter\\n"
+                )
+                errors += 1
+            elif not SPEC_ID_RE.match(spec_id):
+                sys.stderr.write(
+                    "FAIL " + norm + ": invalid \`id: SPEC-NNN\` frontmatter (got \`" + spec_id + "\`)\\n"
                 )
                 errors += 1
 
         if is_dr:
-            dr_id = fm.get("id", "").split("#", 1)[0].strip()
-            if not DR_ID_RE.match(dr_id):
+            dr_id = clean_frontmatter_value(fm.get("id", ""))
+            if not dr_id:
                 sys.stderr.write(
-                    "FAIL " + norm + ": missing or invalid \`id: DR-NNN\` frontmatter\\n"
+                    "FAIL " + norm + ": missing \`id: DR-NNN\` frontmatter\\n"
+                )
+                errors += 1
+            elif not DR_ID_RE.match(dr_id):
+                sys.stderr.write(
+                    "FAIL " + norm + ": invalid \`id: DR-NNN\` frontmatter (got \`" + dr_id + "\`)\\n"
                 )
                 errors += 1
 
         if is_domain:
-            if fm.get("type", "").split("#", 1)[0].strip() != "domain":
+            if clean_frontmatter_value(fm.get("type", "")) != "domain":
                 sys.stderr.write(
                     "FAIL " + norm + ": missing \`type: domain\` frontmatter\\n"
                 )
