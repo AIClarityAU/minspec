@@ -1,0 +1,10 @@
+Fetching PR #2226 (AIClarityAU/minspec)...
+PR #2226 [agent/issue-2178] mergeable=MERGEABLE state=BEHIND failing_checks=no ai_review_bad=no item=2178 live_owned=no → rebase-only
+HEAD is now at 9c52fee0 docs(#2178): SPEC-078 - ai-review-retry must see the quota evidence the reviewer observed
+  Merging origin/main into agent/issue-2178 (mechanical, no agent)...
+Merge made by the 'ort' strategy.
+ packages/minspec/src/lib/scaffold.ts | 5 +++++
+ 1 file changed, 5 insertions(+)
+To https://github.com/AIClarityAU/minspec.git
+   9c52fee0..b7e6453c  HEAD -> agent/issue-2178
+  Pushed merge of main into agent/issue-2178 (PR #2226 refreshed).
