@@ -303,6 +303,24 @@ describe('#2233: a genuine wall is still a pause, and the meter decides how long
     expect(found[1]).toContain('"source":"wall"');
   });
 
+  it('once overruled, the veto stays spent across the long sleep: only a clean cycle re-arms it', async () => {
+    // Review of #2233: resetting the streak when the drain fails closed let a meter-blind
+    // cap oscillate contradicted, overruled, contradicted, overruled. That costs one extra
+    // stranded issue per long sleep, where the pre-#2233 drain cost none. The long sleep
+    // is clamped to 1s here so several episodes fit in the test.
+    const l = startLoop({
+      dispatch: WALL_DISPATCH(),
+      reading: { pct: 0, resetIn: 3000 },
+      meter: { pct: 0, resetIn: 3000 },
+      env: {
+        MINSPEC_QUOTA_CONTRADICTED_BACKOFF: '1', MINSPEC_QUOTA_SLEEP_MIN: '1', MINSPEC_QUOTA_SLEEP_MAX: '1',
+      },
+    });
+    const log = await runUntil(l, (s) => s.split('contradicted by the meter again').length - 1 >= 2);
+    expect(log.split('CONTRADICTED by the meter').length - 1).toBe(1);
+    expect(log.indexOf('CONTRADICTED by the meter')).toBeLessThan(log.indexOf('contradicted by the meter again'));
+  });
+
   it('a CLEAN cycle between two contradicted signals resets the streak: the second is contradicted too, not overruled', async () => {
     // The veto's bound is "in a row". A cycle that finishes without a wall is evidence
     // the last signal was not a standing cap, so the next one starts a fresh count.

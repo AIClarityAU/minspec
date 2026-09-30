@@ -60,7 +60,8 @@
 #                                    place of the sleep to the published reset.
 #   MINSPEC_QUOTA_CONTRADICT_MAX=1 — how many signals IN A ROW the meter may contradict
 #                                    before the drain stops believing it and fails closed
-#                                    (a cap the meter cannot see). 0 disables the veto.
+#                                    (a cap the meter cannot see), until a cycle completes
+#                                    cleanly. 0 disables the veto.
 #   MINSPEC_DRAIN_POLL=30          — session-liveness poll granularity while waiting.
 #   MINSPEC_DRAIN_MAX_LIFETIME=28800 — hard wall-clock cap on a loop (8 h backstop).
 #   MINSPEC_DRAIN_MAX_FAILURES=3   — stop after N consecutive non-quota cycle errors.
@@ -230,14 +231,17 @@ QUOTA_BOOTSTRAP_FILE="${MINSPEC_QUOTA_BOOTSTRAP_FILE:-${QUOTA_FILE}.bootstrap}"
 #
 # The veto is BOUNDED. A cap the meter does not report (a per-model limit, say) walls
 # every launch while the meter keeps reading low, and each such launch strands an
-# issue. So after QUOTA_CONTRADICT_MAX contradicted signals in a row, with no clean
-# cycle between them, the drain stops believing the meter and fails closed to the
-# published reset. That costs at most QUOTA_CONTRADICT_MAX extra launches per episode.
+# issue. So after QUOTA_CONTRADICT_MAX contradicted signals in a row, the drain stops
+# believing the meter and fails closed to the published reset, and it stays that way
+# until a cycle completes cleanly. A meter-blind cap therefore costs QUOTA_CONTRADICT_MAX
+# extra launches in all, not per long sleep: after that the drain probes it exactly as
+# it did before #2233, once per sleep.
 QUOTA_CONTRADICTED_BACKOFF="${MINSPEC_QUOTA_CONTRADICTED_BACKOFF:-$QUOTA_SLEEP_MIN}"
 QUOTA_CONTRADICT_MAX="${MINSPEC_QUOTA_CONTRADICT_MAX:-1}"
 # Loop state, not configuration. QUOTA_PAUSE_CAUSE says what made run_cycle return 42:
 # `gate` (quota_gate itself deferred, so the meter already said hold) or `signal` (a
-# child's text alone). QUOTA_CONTRADICTED_STREAK counts contradicted signals in a row.
+# child's text alone). QUOTA_CONTRADICTED_STREAK counts contradicted signals since the
+# last clean cycle.
 QUOTA_PAUSE_CAUSE=""
 QUOTA_CONTRADICTED_STREAK=0
 
@@ -313,9 +317,10 @@ DISPATCH_CONCURRENCY="$(_validated_concurrency "${MINSPEC_DRAIN_CONCURRENCY:-1}"
 # this stream it paused the drain three times on 2026-09-30 (an issue title, a commit
 # subject, an agent quoting `too many requests`) while the meter read 5h 0%.
 #
-# review-branch.sh solved the same bug (#1131, #1155) by splitting stderr from stdout.
-# The drain cannot: dispatch-issue.sh and remediate-pr.sh already merge the CLI's two
-# streams into their own output before the drain sees it. What survives the merge is
+# review-branch.sh solved the same bug (#1131, #1155) in its quota_failure, which
+# judges the reviewer's stderr loosely and its stdout only with the strict variant.
+# The drain cannot split streams that way: dispatch-issue.sh and remediate-pr.sh have
+# already merged the CLI's two streams into their own output before the drain sees it. What survives the merge is
 # the SHAPE of the CLI's notice. The CLI prints it as a line of its own, starting at
 # column 0, in a small closed set of forms. The drain's own echoes always put a prefix
 # in front of any text they carry. So this matches the CLI's lines, anchored, and
@@ -341,7 +346,10 @@ DISPATCH_CONCURRENCY="$(_validated_concurrency "${MINSPEC_DRAIN_CONCURRENCY:-1}"
 # Two exclusions that the anchor alone would miss. A line inside a markdown code
 # fence is quoted content: the CLI never fences its notice, and the one model-authored
 # match in 112,112 lines of transcript prose (scanned 2026-09-30) was a fenced quote.
-# A CR ends a line, as it does on a terminal, so a CRLF stream still matches.
+# Fences are PAIRED in order, and only a closed pair fences anything. An unclosed
+# fence (a first run's prose cut off mid-block, say) must not hide the retry's genuine
+# wall printed after it, which toggling on every fence line would do. A CR ends a
+# line, as it does on a terminal, so a CRLF stream still matches.
 #
 # Honest limit: an UNFENCED column-0 copy of a CLI line in model prose still matches.
 # That residue is what the meter check (quota_signal_sleep_decision) is for.
@@ -365,7 +373,12 @@ unset _quota_notice_forms
 # a capture can never turn the answer into "Binary file matches".
 quota_notice_lines() {
   LC_ALL=C tr '\r' '\n' \
-    | LC_ALL=C awk '/^ ? ? ?(```|~~~)/ { fenced = !fenced; next } !fenced' \
+    | LC_ALL=C awk '
+        { line[NR] = $0; if ($0 ~ /^ ? ? ?(```|~~~)/) fence[++nf] = NR }
+        END {
+          for (i = 1; i + 1 <= nf; i += 2) for (j = fence[i]; j <= fence[i + 1]; j++) quoted[j] = 1
+          for (k = 1; k <= NR; k++) if (!(k in quoted)) print line[k]
+        }' \
     | LC_ALL=C grep -aiE -- "$QUOTA_NOTICE_RE"
 }
 
@@ -1516,6 +1529,11 @@ quota_publish_notice() {
 # quota_signal_backoff_sleep: the rc=42 rest when a child's TEXT was the only witness.
 # Refreshes the meter first (forced: see _quota_try_refresh), then rests per
 # quota_signal_sleep_decision, saying out loud which way the meter voted and why.
+#
+# Only a CLEAN cycle resets QUOTA_CONTRADICTED_STREAK (run_loop's rc=0 arm), never a
+# fail-closed rest here. Resetting it after the long sleep would re-arm the veto for a
+# cap the meter has already shown it cannot see, and every re-armed veto buys one more
+# launch into that cap: contradicted, overruled, contradicted, overruled.
 quota_signal_backoff_sleep() {
   local decision secs verdict meter
   _quota_try_refresh force
@@ -1528,13 +1546,11 @@ quota_signal_backoff_sleep() {
       wait_interval "$secs"
       ;;
     overruled)
-      echo "[drain] usage-limit signal contradicted by the meter again (${meter}) after ${QUOTA_CONTRADICTED_STREAK} in a row — the meter is not seeing the cap that binds, so failing closed (#2233)."
-      QUOTA_CONTRADICTED_STREAK=0
+      echo "[drain] usage-limit signal contradicted by the meter again (${meter}) after ${QUOTA_CONTRADICTED_STREAK} in a row — the meter is not seeing the cap that binds, so failing closed until a cycle completes cleanly (#2233)."
       quota_backoff_sleep
       ;;
     *)
       echo "[drain] usage-limit signal not contradicted by the meter (${meter}) — failing closed."
-      QUOTA_CONTRADICTED_STREAK=0
       quota_backoff_sleep
       ;;
   esac
@@ -1679,6 +1695,7 @@ run_loop() {
       0)
         consec=0
         # A clean cycle ends a run of contradicted signals: nothing walled this time.
+        # This is the ONLY place the streak resets (see quota_signal_backoff_sleep).
         QUOTA_CONTRADICTED_STREAK=0
         wait_interval "$INTERVAL"
         ;;

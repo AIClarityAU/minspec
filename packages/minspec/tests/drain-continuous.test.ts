@@ -142,6 +142,33 @@ describe('T3 regression (#2233): content that MENTIONS a limit is not a usage-li
     expect(run(['--is-quota'], "You've hit your session limit · resets 6:10pm (Australia/Sydney)").code).toBe(0);
   });
 
+  it('an UNCLOSED fence earlier in a capture cannot hide a genuine wall after it', () => {
+    // A first run's prose that ends inside an open fence, then the retry's real wall. A
+    // fence only fences when it is closed: toggling on every fence line would treat
+    // everything after the stray one as quoted and miss the wall (review of #2233).
+    const capture = [
+      'Model: sonnet (role: dev)',
+      'ESCALATE: cannot finish; the draft so far:',
+      '```ts',
+      'const partial = 1;',
+      "Agent ESCALATED #901 on 'sonnet' — retrying once on opus (DR-355).",
+      'Model: opus (role: dev)',
+      fixture('1785-agent-log.txt').trimEnd(),
+    ].join('\n');
+    expect(run(['--is-quota'], capture).code).toBe(0);
+    // CONTROL: a CLOSED block before the unclosed fence still hides the wall quoted inside
+    // it, so the pairing is by order, not "ignore fences once any is unbalanced".
+    const quotedThenStray = [
+      '```',
+      "You've hit your session limit · resets 6:10pm (Australia/Sydney)",
+      '```',
+      'and then an unclosed one:',
+      '```',
+      'const partial = 1;',
+    ].join('\n');
+    expect(run(['--is-quota'], quotedThenStray).code).toBe(1);
+  });
+
   it('an indented, quoted or prefixed copy of the wall is content: the CLI prints it at column 0', () => {
     for (const line of [
       "  You've hit your session limit · resets 11:20am (Australia/Sydney)",
