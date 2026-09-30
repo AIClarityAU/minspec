@@ -9,16 +9,18 @@
  *
  * Each case builds a throwaway repo-shaped tree (a `.minspec/config.json` marks the
  * root; `findRepoRoot` in facts.ts walks up looking for it) and spawns the real
- * script with cwd pointed at it.
+ * script with cwd pointed at it. Spawned via `runTsxCli` (#1032) rather than `npx tsx`
+ * directly: cwd is outside the repo, and `npx` cannot resolve this repo's
+ * locally-installed `tsx` from there — see `helpers/run-tsx-cli.ts`.
  */
 import { describe, it, expect, afterEach, afterAll, vi } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { spawnSync } from 'child_process';
 import { specHash } from '@aiclarity/shared';
+import { runTsxCli, type CliResult } from './helpers/run-tsx-cli';
 
-// #1099 — this suite spawns `npx tsx <facts.ts>` as a real child process per
+// #1099 — this suite spawns `tsx <facts.ts>` as a real child process per
 // assertion (Node module resolution + tsx compile overhead each call). Under
 // container scheduling contention a single invocation can queue past the 5s
 // default testTimeout even though nothing hung, and which suite trips it is
@@ -55,15 +57,8 @@ function writeSpecFile(root: string, relPath: string, content: string): string {
   return full;
 }
 
-interface RunResult {
-  status: number | null;
-  output: string;
-}
-
-function run(cwd: string, args: string[]): RunResult {
-  const result = spawnSync('npx', ['tsx', SCRIPT, ...args], { cwd, encoding: 'utf-8' });
-  if (result.error) throw result.error;
-  return { status: result.status, output: `${result.stdout ?? ''}\n${result.stderr ?? ''}` };
+function run(cwd: string, args: string[]): CliResult {
+  return runTsxCli(SCRIPT, args, { cwd });
 }
 
 const SPEC_100 = [
