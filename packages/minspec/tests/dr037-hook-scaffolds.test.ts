@@ -595,7 +595,8 @@ describe('python validate.py mirrors the Node validator core checks (#246)', () 
   // rest.strip()` with no quote handling, so SPEC_ID_RE (anchored, no quote in
   // its class) never matched and a quoted-but-valid id read as "missing or
   // invalid" — a message that named two possibilities and the file was
-  // neither. ──
+  // neither. This is where python deliberately stops mirroring the Node
+  // validator, which still refuses a quoted id (#2297 tracks the Node side). ──
   describe('#1908 — a quoted id is not refused', () => {
     it.skipIf(!hasPy)('accepts a double-quoted SPEC id (id: "SPEC-001")', () => {
       writeSpec('specs/spec-001/spec.md', '---\nid: "SPEC-001"\nstatus: specifying\n---\n# ok\n');
@@ -645,7 +646,8 @@ describe('python validate.py mirrors the Node validator core checks (#246)', () 
   // DR-NNN.md filename — a decision record kept under any other name used to
   // be skipped by is_dr entirely, silently: a skipped file and a passing file
   // looked identical. INDEX.md (the register listing) and README.md (prose)
-  // are the two named exemptions, since neither carries an id of its own. ──
+  // are the two named exemptions, since neither carries an id of its own. The
+  // Node validator has no DR id rule to mirror yet (#2297). ──
   describe('#1908 — the DR gate validates every docs/decisions/*.md, not just DR-NNN.md', () => {
     it.skipIf(!hasPy)('flags a misnamed decision record with no frontmatter', () => {
       writeSpec('docs/decisions/0024-thread-identity.md', '# thread identity\n\nno frontmatter\n');

@@ -1670,7 +1670,10 @@ exit 1`;
  *
  * Frontmatter is parsed with the SAME lightweight \`key: value\` split the Node
  * \`validate-frontmatter.ts\` uses (first \`---\` … \`---\` block, split on the first
- * colon, trim) — no PyYAML dependency, so it runs on a stock python3. Scopes to the
+ * colon, trim) — no PyYAML dependency, so it runs on a stock python3. It is not an
+ * exact re-implementation, though: since #1908 the checked values are unquoted and
+ * comment-stripped first (\`clean_frontmatter_value\`), and it gates DR \`id:\`
+ * frontmatter. The Node validator does neither yet (#2297). Scopes to the
  * STAGED tree (\`git diff --cached\`) when invoked as a pre-commit hook, else scans
  * the whole repo. Tier-0: deterministic, offline, no network, no third-party deps.
  *
@@ -1679,16 +1682,19 @@ exit 1`;
  */
 const VALIDATE_PY = `"""MinSpec mid-tier validator (DR-037 / #246).
 
-Language-agnostic twin of the Node validate-frontmatter core FATAL checks:
+FATAL checks, modelled on MinSpec's Node validate-frontmatter:
   - specs/**/*.md must have \`id: SPEC-NNN\` frontmatter
   - every docs/decisions/*.md (except INDEX.md / README.md) must have
     \`id: DR-NNN\` frontmatter — keyed on the DIRECTORY, not the filename, so a
     record not named DR-NNN.md is still checked, never silently skipped (#1908)
   - docs/domain/*.md must have \`type: domain\` frontmatter
 
-Frontmatter parsing mirrors the Node validator exactly (first --- ... --- block,
-split each line on the first colon, trim) — no PyYAML, so it runs on a stock
-python3. Deterministic + offline (Tier-0, DR-004)."""
+Frontmatter is split the same way as the Node validator (first --- ... ---
+block, split each line on the first colon, trim), with no PyYAML, so it runs on
+a stock python3. The two are not exact twins: values checked here go through
+clean_frontmatter_value (one layer of quotes, a trailing comment), which the
+Node side does not do yet, and the Node side has no DR id rule. #2297 tracks
+bringing them level. Deterministic + offline (Tier-0, DR-004)."""
 
 import os
 import re
