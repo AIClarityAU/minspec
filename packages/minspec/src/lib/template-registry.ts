@@ -1048,6 +1048,12 @@ const MINSPEC_VALIDATE_WORKFLOW = `name: MinSpec Validate
 on:
   push:
   pull_request:
+  # A required status check must also report on the MERGE GROUP event, or a merge queue can
+  # never go green: the queue evaluates a synthetic merge commit that neither \`push\` nor
+  # \`pull_request\` fires for, so the required context never reports and the queue stalls
+  # instead of failing. Inert until a merge queue is enabled on the default branch.
+  # Background: AIClarityAU/minspec#1394.
+  merge_group:
 
 permissions:
   contents: read

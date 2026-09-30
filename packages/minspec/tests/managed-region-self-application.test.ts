@@ -16,9 +16,15 @@
  * The 5 are waived below rather than fixed, because the direction of loss differs per
  * path and two of them are open design questions, not mechanical edits:
  *
- *   - `minspec-validate.yml` — the LIVE file carries `merge_group:` (#1394) that the
- *     template lacks, so a Refresh STRIPS a required-check trigger. This is the case
- *     in #1888's title.
+ *   - `minspec-validate.yml` — the dangerous half is FIXED: the template now carries
+ *     `merge_group:` too, so a Refresh can no longer strip the trigger and stall a merge
+ *     queue (#1394, the case in #1888's title). What remains is the surrounding COMMENT,
+ *     and it differs deliberately: the live file says "see ci.yml" and cites a bare
+ *     `#1394`, neither of which holds downstream — `ci.yml` exists only here and a bare
+ *     `#N` resolves to the ADOPTER's issue N — so the template ships adopter-true prose
+ *     per DR-090. Closing the remaining gap means editing the live workflow to match, and
+ *     no agent can push workflow content (host DR-079 removed `workflows=write`), so that
+ *     edit belongs to the founder.
  *   - `.minspec/hooks/validate.py` — drifts in BOTH directions: the live file targets
  *     `docs/domain` (which a Refresh would remove) while the template adds
  *     DR-frontmatter validation the live file lacks. Reconciling it is the #1698
@@ -64,7 +70,7 @@ const APPLIED_PATH_COUNT = 13;
  */
 const KNOWN_DRIFT: Readonly<Record<string, string>> = {
   '.github/workflows/minspec-validate.yml':
-    'live carries merge_group: (#1394) that the template lacks — a Refresh would strip it (#1888)',
+    'COMMENT WORDING ONLY: both now carry merge_group: (#1394), so Refresh no longer strips the trigger. The live comment cites ci.yml and a bare #1394, which are false downstream, so the template ships adopter-true prose (DR-090). Closing it needs a workflow write, which no agent has (DR-079)',
   '.minspec/hooks/validate.py':
     'bidirectional: live targets docs/domain, template adds DR-frontmatter checks — reconciliation is the #1698 design question',
   '.minspec/hooks/pre-commit':
