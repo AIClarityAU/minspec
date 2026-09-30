@@ -58,6 +58,20 @@ describe('the autonomy setting is a boundary file', () => {
     expect(sig!.explain).toContain('.minspec/config.json');
   });
 
+  it('#1874 — the explain text does not misdescribe a governance-only diff as CI/build config', () => {
+    // detectBoundaryChange shares one `explain` string across every
+    // isBoundaryPath category (#1874). Before the fix, the string opened
+    // with "CI/build-config boundary file(s) changed" and cited a
+    // `curl … | sh` CI-workflow risk as if it applied to every match,
+    // including this repo-governance setting. The signal's DECISION was
+    // always correct (high-blast, hold) — only the stated reason was wrong
+    // for this input — so the assertion is on wording, not on eligibility
+    // (that end-to-end path is covered separately below).
+    const sig = detectBoundaryChange([{ path: '.minspec/config.json', status: 'modified' } as never]);
+    expect(sig!.explain).not.toMatch(/^CI\/build-config boundary file/);
+    expect(sig!.explain.toLowerCase()).toContain('governance');
+  });
+
   it('matches regardless of path spelling', () => {
     for (const p of ['./.minspec/config.json', '.minspec\\config.json']) {
       expect(isBoundaryPath(p)).toBe(true);
