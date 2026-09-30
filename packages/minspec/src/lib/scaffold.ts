@@ -39,6 +39,7 @@ import {
 import { detectTools, type DetectedTools } from './tool-detector';
 import { registerSessionTitleHook } from './claude-settings';
 import { writeEpicIndex } from './epic-manager';
+import { initialOwnershipDeclaration } from './ownership-ratchet';
 import { assembleContext } from './constitution-context';
 import { seedProvider, integrateProposal, CONSTITUTION_SECTION_SCHEMA } from './constitution-proposer';
 
@@ -317,7 +318,15 @@ export function scaffold(rootDir: string): void {
     // directory on every later refresh (#1529). Written ONLY here, never back-filled
     // into an existing config: a back-fill's first run could itself be from a
     // worktree, which would persist exactly the wrong name this guards against.
-    const seeded = { projectName: resolveProjectName(rootDir).name, ...DEFAULT_CONFIG };
+    //
+    // `ownershipDeclaration` starts where SPEC-038's FR-7 ratchet says this repo is,
+    // not at its first position: `error` when no spec here would fail the ownership
+    // rule, `warn` (grandfathered) otherwise (#2250, ownership-ratchet.ts).
+    const seeded = {
+      projectName: resolveProjectName(rootDir).name,
+      ...DEFAULT_CONFIG,
+      ownershipDeclaration: initialOwnershipDeclaration(rootDir),
+    };
     fs.writeFileSync(configPath, JSON.stringify(seeded, null, 2) + '\n');
   }
 
@@ -1166,25 +1175,28 @@ export function applyAuthorshipCorrections(
   withheld?: SectionHashes,
   unauthoredSections?: readonly string[],
 ): SectionHashes {
-  // Rebuilt by spreading the disk map first, so section key order stays
+  // Rebuilt by copying the disk map first, so section key order stays
   // `parseSections` document order and the serialization stays byte-stable
-  // across identical runs (SPEC-043 INV-4).
-  const corrected: Record<string, string> = { ...diskHashes };
+  // across identical runs (SPEC-043 INV-4). `Object.assign(Object.create(null), …)`
+  // rather than `{ ...diskHashes }` — object-spread syntax always allocates a
+  // fresh object with the ordinary `Object.prototype`, even when the source has
+  // none, so spreading would silently reintroduce the prototype chain this
+  // function's own `in` check below depends on being absent (#1752).
+  const corrected: Record<string, string> = Object.assign(Object.create(null), diskHashes);
   if (withheld) {
     for (const heading of Object.keys(withheld)) {
       // A heading the recorder did not hash is not corrected — a withheld heading
       // no longer on disk would otherwise add a manifest entry for a section that
       // does not exist, which is the class of lie this module exists to prevent.
       //
-      // With ONE documented exception, and it is #1752's class again: `in` walks the
-      // prototype chain, so for the eight `Object.prototype` names (`constructor`,
-      // `toString`, `valueOf`, …) this test passes on a heading disk does NOT carry,
-      // and the entry is invented. Measured: `{Invariants}` plus a withheld
-      // `constructor` yields a `constructor` key. Latent rather than live — a
-      // withheld hash exists only for a heading the TEMPLATE also carries, and
-      // MinSpec ships no template heading with a prototype name (checked: zero) — so
-      // it is filed with #1752 rather than patched here, and the fix is the same one:
-      // `Object.create(null)` for every heading-keyed map.
+      // #1752 (fixed): `in` walks the prototype chain, so over an ordinary object
+      // literal this test would pass for the seven `Object.prototype` names
+      // (`constructor`, `toString`, `valueOf`, `hasOwnProperty`, `isPrototypeOf`,
+      // `propertyIsEnumerable`, `toLocaleString`) even on a heading disk does NOT
+      // carry, inventing an entry (measured: `{Invariants}` plus a withheld
+      // `constructor` used to yield a `constructor` key). `corrected` is built
+      // null-prototype above, so `in` here means "disk actually has this heading"
+      // and nothing else.
       if (heading in corrected) corrected[heading] = withheld[heading];
     }
   }

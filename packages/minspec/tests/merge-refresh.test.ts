@@ -181,6 +181,73 @@ Content here
       expect(hashes).toHaveProperty('A');
       expect(hashes).toHaveProperty('B');
     });
+
+    it('AC-95 (#1752): a `## constructor` section is recorded, not swallowed by Object.prototype', () => {
+      // Before the fix, `hashes` was an object literal, so `hashes.constructor`
+      // already read as the inherited `Object` function before this ran. That is
+      // not what this test would have caught — this function never tested
+      // membership — but the map it hands back must still carry an OWN
+      // `constructor` key once one is recorded, or a caller that does test
+      // membership (`sectionHashesFromMarkdown`, `mergeFile`) inherits the bug.
+      const sections = parseSections('## constructor\n\nAuthored prose.\n');
+      const hashes = buildSectionHashes(sections);
+      expect(Object.prototype.hasOwnProperty.call(hashes, 'constructor')).toBe(true);
+      expect(hashes.constructor).toBe(hashSection('Authored prose.'));
+    });
+  });
+
+  describe('sectionHashesFromMarkdown() — T1 #1752: heading-keyed map is not a plain object', () => {
+    it('AC-96: a `## constructor` section is recorded (first-occurrence-wins survives it)', () => {
+      // Before the fix: `!(section.heading in hashes)` tested the WHOLE prototype
+      // chain, and a plain object literal's chain already carries `constructor` as
+      // an inherited, truthy value — so the loop's very first check for this
+      // heading read "already recorded" and skipped it. Measured: the manifest
+      // this function feeds never gained a `constructor` entry no matter how many
+      // times the section was written.
+      const content = '## constructor\n\nAuthored prose about the constructor pattern.\n';
+      const hashes = sectionHashesFromMarkdown(content);
+      expect(Object.prototype.hasOwnProperty.call(hashes, 'constructor')).toBe(true);
+      expect(hashes.constructor).toBe(hashSection('Authored prose about the constructor pattern.'));
+    });
+
+    it('AC-97: every other Object.prototype-named heading is recorded too', () => {
+      const names = [
+        'toString',
+        'valueOf',
+        'hasOwnProperty',
+        'isPrototypeOf',
+        'propertyIsEnumerable',
+        'toLocaleString',
+      ];
+      const content = names.map((n) => `## ${n}\n\nBody for ${n}.\n`).join('\n');
+      const hashes = sectionHashesFromMarkdown(content);
+      for (const name of names) {
+        expect(Object.prototype.hasOwnProperty.call(hashes, name)).toBe(true);
+      }
+    });
+  });
+
+  describe('mergeFile() — T1 #1752: a `## constructor` section is never silent', () => {
+    it('AC-98: fails closed AND reports the hold for a `## constructor` section with no baseline', () => {
+      // `{}` is the exact shape `oldHashes` takes in production once it is parsed
+      // off disk (an ordinary object, not a null-prototype one) and the shape
+      // every existing test in this file already passes as "no baseline". Before
+      // the fix, `oldHashes['constructor']` walked the prototype chain to the
+      // inherited `Object` constructor function — truthy — so `!oldHash` read
+      // false and this heading fell straight past the fail-closed branch into
+      // the "user modified" branch below it. The MERGED bytes came out identical
+      // either way (both branches keep the existing body), which is exactly what
+      // made the bug hide: only `preservedWithoutBaseline` — the thing the user
+      // is actually told — differed.
+      const existing =
+        '## constructor\n\nRatified prose about the constructor pattern, 2026-09-30.\n';
+      const generated =
+        '## constructor\n\nA differently-worded template rendering with no shared content.\n';
+      const result = mergeFile(existing, generated, {});
+      expect(result.merged).toContain('Ratified prose about the constructor pattern');
+      expect(result.merged).not.toContain('differently-worded template rendering');
+      expect(result.preservedWithoutBaseline).toEqual(['constructor']);
+    });
   });
 
   // ───────────────────────────────────────────────────────────────────────────
