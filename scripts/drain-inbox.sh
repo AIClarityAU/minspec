@@ -682,11 +682,31 @@ RECONCILE_CLAIM_STALE_SECS="${MINSPEC_RECONCILE_STALE_SECS:-21600}"   # 6 h
 
 # Epoch seconds when `agent-running` was most recently applied to <issue>, or empty.
 # The timeline is the only honest source: `updatedAt` moves on any activity at all.
+#
+# #2002 (found while fixing PR #1772's review on the sibling `reopened_after_close`):
+# `gh api --paginate --jq F` applies F to EACH PAGE separately and prints one result
+# per page (measured against api.github.com: a 19-event timeline at `per_page=2`
+# printed 10 lines, not 1). The old shape's `| tail -1` guard took the LAST PAGE's
+# output, not the last MATCH — so whenever the `agent-running` label event fell on an
+# earlier page (any issue with 30+ timeline events since being claimed), the last page
+# contributed `empty`, `iso` came back blank, and this function returned 1. The caller
+# (`reconcile_stale_claims`) reads that as "claim time is unreadable — leaving it
+# alone", so the #1306 orphan-claim reaper went silently inert on exactly the
+# long-lived issues most likely to be carrying a stale claim.
+#
+# Same fix shape as the reopen veto: fetch raw with `--paginate` (no `--jq`, so gh
+# prints each page's array one after another instead of a filtered result per page),
+# flatten with `jq -s 'add // []'`, and reduce exactly once over the whole history.
+# `--slurp` is not a way out here either: `gh` rejects `--slurp` together with `--jq`.
 claim_applied_at() {
-  local iso
-  iso=$(gh api "repos/${REPO}/issues/$1/timeline" --paginate \
-    --jq '[.[] | select(.event=="labeled" and .label.name=="agent-running") | .created_at] | last // empty' \
-    2>/dev/null | tail -1) || return 1
+  local raw iso
+  raw=$(gh api "repos/${REPO}/issues/$1/timeline" --paginate 2>/dev/null) || return 1
+  [[ -n "$raw" ]] || return 1
+  iso=$(printf '%s' "$raw" | jq -r -s '
+      (add // []) as $events
+      | if ($events | type) != "array" then ""
+        else ([$events[] | select(.event=="labeled" and .label.name=="agent-running") | .created_at] | last // "")
+        end' 2>/dev/null) || return 1
   [[ -n "$iso" ]] || return 1
   date -u -d "$iso" +%s 2>/dev/null || return 1
 }
@@ -749,9 +769,12 @@ reconcile_stale_claims() {
 #     it vetoes can straddle a page boundary, and neither page sees both halves — the
 #     close page says "no", the reopen page says "yes", and the caller compares a
 #     TWO-LINE string against "yes" and silently re-closes an issue a human reopened.
-#     The sibling `claim_applied_at` can guard its per-page reduction with `| tail -1`
-#     because the last page holding a match carries the answer; here no single page
-#     does, so no such guard exists.
+#     The sibling `claim_applied_at` used to guard its per-page reduction with a
+#     `| tail -1` on the theory that the last page holding a match carries the answer
+#     — but the *last page of the timeline* is not the same thing as *the page holding
+#     the last match*, and on any issue where the `agent-running` label event wasn't on
+#     the final page, that guard threw the real answer away (#2002). It now uses this
+#     same raw-fetch-and-flatten shape instead of a page-position guard.
 #   * `--slurp` is not a way out: `gh` rejects `--slurp` together with `--jq`.
 #
 # So: raw `--paginate`, then `jq -s 'add // []'` to flatten the per-page arrays into
