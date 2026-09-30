@@ -89,8 +89,8 @@ const SPEC_ID_RE = /^SPEC-(\d+)/;
 const FLAT_DIR_NUM_RE = /^(\d{3,})-/;
 const SPEC_FILE_RE = /^SPEC-\d{3,}.*\.md$/;
 /** Match an `id: SPEC-NNN` / `product: slug` frontmatter line (value may carry an inline `# comment`). */
-const FM_ID_LINE_RE = /^id:\s*(SPEC-\d+)/m;
-const FM_PRODUCT_LINE_RE = /^product:\s*([^\s#]+)/m;
+const FM_ID_LINE_RE = /^id:[ \t]*(SPEC-\d+)/m;
+const FM_PRODUCT_LINE_RE = /^product:[ \t]*([^\s#]+)/m;
 
 /** One discovered spec id and the product that owns it (if known). */
 interface DiscoveredSpec {

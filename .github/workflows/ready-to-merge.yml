@@ -4,7 +4,8 @@
 # iff the PR carries a *trustworthy* AI greenlight, so branch protection can
 # require it and a downstream merge-gate / signpost can read it.
 #
-#   SUCCESS  when the PR has a *verified* `ai-review:pass` AND NOT `ai-review:changes`
+#   SUCCESS  when the PR has a *verified* `ai-review:pass`, NOT `ai-review:changes`,
+#            and NO `hold:*` label (#1870)
 #   FAILURE  otherwise (description names the reason)
 #
 # An independent AI reviewer posts verdicts and applies the `ai-review:pass` /
@@ -88,6 +89,23 @@ on:
     # Every `pull_request` event carries `pull_request.base.sha`, which the
     # self-forge defence pins the checkout to (see SECURITY above).
     types: [opened, synchronize, reopened, labeled, unlabeled]
+
+# ── CONCURRENCY (#1973) ──────────────────────────────────────────────────────
+# This workflow is the SINGLE writer of the `ready-to-merge` status (see above),
+# but nothing stopped two of its own runs overlapping on one PR: a `labeled`
+# event and a `synchronize` a second apart both post to the same (sha, context),
+# and the later-finishing run wins regardless of which read fresher state.
+#
+# `cancel-in-progress` is deliberately FALSE, unlike docs-lane's. Cancelling a
+# run that has not yet posted leaves the required `ready-to-merge` status never
+# posted at all — which branch protection reads as PENDING FOREVER, not as red.
+# A permanently-pending required check is strictly worse than a queued one: it
+# blocks the PR with no verdict and no failure to act on, and no later event is
+# guaranteed to re-trigger. Queueing costs latency on a busy PR; cancelling can
+# strand it. Fail-closed means the status must always get written.
+concurrency:
+  group: ready-to-merge-${{ github.event.pull_request.number }}
+  cancel-in-progress: false
 
 permissions:
   statuses: write        # post the `ready-to-merge` commit status on the PR head SHA

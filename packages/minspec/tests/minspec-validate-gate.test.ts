@@ -101,4 +101,37 @@ describe('#811 — MinSpec SDD validation is a fail-closed required check (DR-06
     // every PR on a context that no longer reports.
     expect(WORKFLOW).toContain('name: MinSpec SDD validation');
   });
+
+  it('fires on merge_group, so a merge queue can green the required check (#1394)', () => {
+    // A required context that never reports on the merge-group event does not FAIL a merge
+    // queue - it stalls it, because the queue evaluates a synthetic merge commit that
+    // neither `push` nor `pull_request` fires for. This trigger was present in this repo's
+    // own workflow and absent from the shipped template, so a Refresh would have stripped
+    // it from any adopter that had added it (#1888).
+    const onStart = WORKFLOW.indexOf('\non:');
+    const onEnd = WORKFLOW.indexOf('\npermissions:');
+    expect(onStart).toBeGreaterThan(-1);
+    expect(onEnd).toBeGreaterThan(onStart);
+    const onBlock = WORKFLOW.slice(onStart, onEnd);
+    expect(onBlock).toContain('push:');
+    expect(onBlock).toContain('pull_request:');
+    expect(onBlock).toContain('merge_group:');
+  });
+
+  it('keeps its managed prose adopter-true: cross-repo refs qualified, no minspec-only file (DR-090)', () => {
+    // DR-090: prose inside a managed file is shipped code and must hold in the repo that
+    // RECEIVES it. A bare `#1394` resolves to the ADOPTER's issue 1394, and the live
+    // workflow's "see ci.yml" names a file that exists only here.
+    // Asserted as a PROPERTY over every issue reference, not against the literal `#1394`:
+    // a guard coupled to one issue number goes vacuous the moment the reference is
+    // renumbered, and a new unqualified ref added later would not be checked at all.
+    const issueRefs = [...WORKFLOW.matchAll(/(\S*?)#(\d+)/g)];
+    expect(issueRefs.length).toBeGreaterThan(0); // non-vacuous: some ref must be present
+    for (const [, prefix, num] of issueRefs) {
+      expect(prefix, `"#${num}" must carry owner/repo — a bare ref resolves to the ADOPTER's issue ${num}`)
+        .toMatch(/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/);
+    }
+    // `ci.yml` exists only in this repo, so naming it is false downstream.
+    expect(WORKFLOW).not.toContain('ci.yml');
+  });
 });
