@@ -78,9 +78,15 @@ export const TEMPLATE_OUTPUT_PATHS: Record<TemplateName, string> = {
 const LABELS_MD_TEMPLATE = `# Issue label vocabulary — {{projectName}}
 
 The labels MinSpec's triage step classifies against. **This file is documentation and a
-copy-paste script — MinSpec never creates, edits, or reads a label on any forge.** Core
-functionality works offline and makes no network call without your explicit consent, so
-applying these is always a command *you* run.
+copy-paste script — MinSpec never creates, edits, or reads any of these labels on a
+forge.** Core functionality works offline and makes no network call without your explicit
+consent, so applying these is always a command *you* run.
+
+One label is not in this vocabulary, and it is the single exception: \`docs-lane\`, the
+label MinSpec's docs-lane workflow auto-merges on. When an approval you consented to push
+is eligible for that lane, MinSpec opens its pull request with the label, and creates the
+label first if this repository carries the docs-lane workflow but does not have the label
+yet. It never edits a \`docs-lane\` label that already exists.
 
 Triage reads an issue's **type label** as one of its inputs. A type it is told to
 recognise but that does not exist as a label is an input that is always absent — the

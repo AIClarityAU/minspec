@@ -8,9 +8,12 @@
  * `gh issue create --label chore` failed.
  *
  * The template ships the vocabulary as documentation plus a copy-paste script. The
- * load-bearing property is the LAST test here: **MinSpec must never apply these itself.**
+ * load-bearing property is the LAST block here: **MinSpec must never apply these itself.**
  * Constitution invariant 1 — core functionality works offline, no network call without
- * explicit consent — so creating a label on a forge is always a command the human runs.
+ * explicit consent — so creating a vocabulary label on a forge is always a command the
+ * human runs. The single exception (#2243) is not a vocabulary label: the approval flow
+ * may create `docs-lane`, inside a push the human already consented to, and that block
+ * pins it to exactly one call site.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -128,30 +131,89 @@ describe('labels.md template', () => {
   });
 
   // ── The invariant this whole template rests on ───────────────────────────
-  it('MinSpec never creates or reads a label itself — the file says so, and the code obeys', () => {
-    expect(rendered()).toMatch(/never creates, edits, or reads a label/i);
+  //
+  // #2243 narrowed it by exactly ONE call, and the tests below are what keep it at one.
+  // Approvals in voip-sms-inbox needed an `Open PR` click and a manual merge because that
+  // repository had no `docs-lane` label, and gh will not open a PR that names a missing
+  // label. The fix lets the approval flow create THAT label, inside the push the user has
+  // already consented to: the rationale above is constitution invariant 1, which is about
+  // consent, and this write happens only inside a consented act. Nothing else moved. No
+  // other label is created, edited or read, and no other file may make such a call.
 
-    // Assert the extension source contains no label-mutating forge call. The template
-    // string itself is documentation, so exclude the registry that holds it.
-    const libDir = path.resolve(__dirname, '../src');
-    const offenders: string[] = [];
+  /** Every way extension source can reach a forge label OBJECT. */
+  const LABEL_CALL_PATTERNS: ReadonlyArray<readonly [string, RegExp]> = [
+    // A shell-string invocation: `run("gh label create foo")`.
+    ['gh label (shell string)', /gh\s+label\b/],
+    // A forge REST path ending in /labels: `api('repos/o/r/labels')`.
+    ['REST /labels path', /["'`][^"'`]*\/labels(\/|["'`?])/],
+    // An argv array handed to execFile: `run('gh', ['label', 'create', …])`. This is the
+    // form every gh call in this codebase actually uses, and the scan before #2243 could
+    // not see it at all — a label call written the normal way passed it untouched.
+    ['gh label (argv array)', /\[\s*["'`]label["'`]\s*,\s*["'`](create|edit|delete|list|view|clone)["'`]/],
+  ];
+  const ARGV_LABEL_CALL = /\[\s*["'`]label["'`]\s*,\s*["'`](create|edit|delete|list|view|clone)["'`]/g;
+
+  const labelCalls = (src: string): string[] =>
+    LABEL_CALL_PATTERNS.filter(([, re]) => re.test(src)).map(([name]) => name);
+
+  /** The ONE sanctioned site (#2243): the lane-label create in the PR seam. */
+  const SANCTIONED = path.join('lib', 'approval-pr.ts');
+  /** The only caller allowed to switch it on: the approval flow (SPEC-050). */
+  const OPT_IN_CALLER = path.join('commands', 'commit-on-approve.ts');
+
+  const SRC_DIR = path.resolve(__dirname, '../src');
+  /** Every extension source file, repo-relative to src/. The registry holds the documented script, so it is exempt. */
+  function srcFiles(): Array<{ rel: string; src: string }> {
+    const out: Array<{ rel: string; src: string }> = [];
     const walk = (dir: string): void => {
       for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
         const full = path.join(dir, entry.name);
         if (entry.isDirectory()) { walk(full); continue; }
         if (!entry.name.endsWith('.ts')) continue;
         if (entry.name === 'template-registry.ts') continue; // holds the documented script
-        const src = fs.readFileSync(full, 'utf-8');
-        // Matches the STATED invariant, not a subset of it: ANY `gh label` subcommand
-        // (including the reads `list` / `view` / `clone`) and any forge REST path ending
-        // in `/labels`. The first version checked only create|edit|delete, so its name
-        // promised more than it verified.
-        if (/gh\s+label\b/.test(src) || /["'`][^"'`]*\/labels(\/|["'`?])/.test(src)) offenders.push(full);
+        out.push({ rel: path.relative(SRC_DIR, full), src: fs.readFileSync(full, 'utf-8') });
       }
     };
-    walk(libDir);
-    expect(offenders, `extension source must not mutate labels: ${offenders.join(', ')}`).toEqual([]);
+    walk(SRC_DIR);
+    return out;
+  }
+
+  it('the file states the invariant AND its one exception', () => {
+    const out = rendered();
+    expect(out).toMatch(/never creates, edits, or reads any of these labels/i);
+    // The exception is named in the artifact a maintainer reads, not only in code.
+    expect(out).toMatch(/single exception: `docs-lane`/);
+    expect(out).toMatch(/never edits a `docs-lane` label that already exists/i);
   });
+
+  it('no extension source reaches a label object, except the one sanctioned site', () => {
+    const files = srcFiles();
+    // Guard the guard: an empty walk would pass vacuously.
+    expect(files.length).toBeGreaterThan(50);
+    expect(files.map((f) => f.rel)).toContain(SANCTIONED);
+    const offenders = files
+      .filter((f) => f.rel !== SANCTIONED && labelCalls(f.src).length > 0)
+      .map((f) => `${f.rel} (${labelCalls(f.src).join(', ')})`);
+    expect(offenders, `extension source must not reach forge labels: ${offenders.join('; ')}`).toEqual([]);
+  });
+
+  it('the sanctioned site makes exactly one label call: a create of DOCS_LANE_LABEL', () => {
+    const src = fs.readFileSync(path.join(SRC_DIR, SANCTIONED), 'utf-8');
+    // No shell-string or REST form at all, and exactly one argv-form call…
+    expect(labelCalls(src)).toEqual(['gh label (argv array)']);
+    expect(src.match(ARGV_LABEL_CALL) ?? []).toHaveLength(1);
+    // …which is a CREATE of MinSpec's own constant, never a name taken from input.
+    expect(src).toMatch(/\[\s*'label',\s*'create',\s*DOCS_LANE_LABEL,/);
+  });
+
+  it('only the approval flow opts in to that create — SPEC-039 and every other caller do not', () => {
+    const optIns = srcFiles()
+      .filter((f) => f.rel !== SANCTIONED && /\bprovisionLaneLabel\b/.test(f.src))
+      .map((f) => f.rel);
+    expect(optIns).toEqual([OPT_IN_CALLER]);
+  });
+
+  const scanHits = (sample: string): boolean => LABEL_CALL_PATTERNS.some(([, re]) => re.test(sample));
 
   it.each([
     'await run("gh label create foo")',
@@ -159,15 +221,21 @@ describe('labels.md template', () => {
     'await run("gh label list")',            // a READ — the stated invariant covers it
     'await api("repos/o/r/labels")',         // forge REST, no gh CLI involved
     "await api('repos/o/r/labels/bug')",
+    "await run('gh', ['label', 'create', 'foo'])",          // argv form (#2243)
+    'await execFileAsync("gh", [\n  "label",\n  "list",\n])', // argv form, one element per line
   ])('the offender scan is not vacuous — it catches %s', (sample) => {
-    const hit = /gh\s+label\b/.test(sample) || /["'`][^"'`]*\/labels(\/|["'`?])/.test(sample);
-    expect(hit).toBe(true);
+    expect(scanHits(sample)).toBe(true);
   });
 
   it('…and does not fire on unrelated code', () => {
-    for (const benign of ['const labels = node.labels;', 'issue.labels.map(l => l.name)', '"/label-maker"']) {
-      const hit = /gh\s+label\b/.test(benign) || /["'`][^"'`]*\/labels(\/|["'`?])/.test(benign);
-      expect(hit, benign).toBe(false);
+    for (const benign of [
+      'const labels = node.labels;',
+      'issue.labels.map(l => l.name)',
+      '"/label-maker"',
+      "const cols = ['label', 'value'];",
+      "run('gh', ['issue', 'edit', '1', '--add-label', 'x'])", // applies a label; creates none
+    ]) {
+      expect(scanHits(benign), benign).toBe(false);
     }
   });
 });

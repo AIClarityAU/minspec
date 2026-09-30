@@ -40,6 +40,9 @@
  *     authenticated CLI, and it is unreachable unless a consented push already
  *     succeeded (SPEC-050 INV-1). MinSpec opens no socket itself — the same
  *     Tier-1 local-tool-delegation posture (DR-004) as `lib/approve-push.ts`.
+ *     The same holds for the one other forge write here, #2243's creation of the
+ *     missing `docs-lane` label: it happens only inside that same consented
+ *     PR-opening step, and only when the caller opts in.
  *   - The only in-repo dependency is `./docs-corpus`, a pure predicate that does
  *     zero I/O, so {@link laneLabelsFor} is decidable offline.
  *
@@ -96,6 +99,15 @@ const GIT_TIMEOUT_MS = 30_000;
  * place ({@link laneLabelsFor}) so INV-2 is a property of the code, not a habit.
  */
 export const DOCS_LANE_LABEL = 'docs-lane';
+
+/**
+ * How {@link DOCS_LANE_LABEL} looks when MinSpec has to create it (#2243): the colour
+ * and description the label in AIClarityAU/minspec has carried since the lane shipped
+ * (#575), so an adopter's copy is indistinguishable from the original.
+ */
+export const DOCS_LANE_LABEL_COLOR = '0e8a16';
+export const DOCS_LANE_LABEL_DESCRIPTION =
+  'Docs-only PR — docs-lane workflow auto-merges once checks pass';
 
 /**
  * Minimal git/gh surface, injectable so tests drive a stub instead of spawning a
@@ -219,6 +231,34 @@ export interface OpenPrRequest {
    * Slice 1 is a pure refactor (R3/AC-10). Only SPEC-050's approval path opts in.
    */
   readonly adoptExisting?: boolean;
+  /**
+   * #2243. When the create is refused because {@link DOCS_LANE_LABEL} does not exist
+   * in the target repository, create that one label and retry the create once.
+   *
+   * WHY. `gh` resolves every `--label` to an id BEFORE it creates the pull request,
+   * and refuses outright when one is missing: nothing is created. MinSpec scaffolds
+   * the docs-lane workflow into adopter repositories, but nothing ever provisioned
+   * the label that workflow gates on. The ai-review workflow provisions the labels IT applies;
+   * the lane workflow cannot, because it only runs on a PR that already carries its
+   * label. So in a repository that never had the label (voip-sms-inbox) every approval
+   * fell to the manual `Open PR` surface, and the PR made by hand could not ride the
+   * lane, so it needed a manual merge as well.
+   *
+   * THE BOUNDARY, stated because this is a forge write:
+   *   - Only {@link DOCS_LANE_LABEL}, never whatever name gh reports. A maintainer's
+   *     own missing label is theirs to create.
+   *   - Only inside the PR-opening step, which is reachable only after a consented
+   *     push (SPEC-050 INV-1), so the consent that covers opening the PR covers
+   *     creating the label it needs (constitution invariant 1).
+   *   - Only in the repository the PR targets: same `cwd`, same `slug`, so gh resolves
+   *     the base repository the same way for both writes (constitution invariant 3).
+   *     The approval caller also requires the checkout to carry the lane workflow.
+   *   - At most once per call, and never `--force`: an existing label is never edited.
+   *
+   * DEFAULT false: SPEC-039's command keeps its pinned behaviour (R3/AC-10) and gains
+   * no call. Only SPEC-050's approval path opts in.
+   */
+  readonly provisionLaneLabel?: boolean;
 }
 
 export interface OpenPrResult {
@@ -227,6 +267,18 @@ export interface OpenPrResult {
   readonly url?: string;
   /** Error detail incl. gh stderr (present on 'offline'/'failed'/'gh-unauthenticated'). */
   readonly error?: string;
+  /**
+   * #2243. The requested label gh refused because the repository does not have it
+   * (present on 'failed' when that was the cause), so a caller can state the real
+   * reason instead of "opening the PR failed".
+   */
+  readonly missingLabel?: string;
+  /**
+   * #2243. True when THIS call created {@link DOCS_LANE_LABEL}. Set whatever the
+   * retry's outcome, because the write happened either way and a caller must never
+   * leave a forge write unmentioned.
+   */
+  readonly labelProvisioned?: boolean;
 }
 
 /**
@@ -254,6 +306,42 @@ export function buildPrCreateArgs(
     ...req.labels.flatMap((label) => ['--label', label]),
     '--body',
     req.body,
+  ];
+}
+
+/**
+ * gh's refusal when a `--label` names a label the repository does not have. gh maps
+ * every label name to an id before it creates anything, and reports the first miss as
+ * `could not add label: '<name>' not found` (captured verbatim from gh 2.100.0 against
+ * voip-sms-inbox, 2026-09-30).
+ */
+const MISSING_LABEL_PATTERN = /could not add label: '([^']+)' not found/i;
+
+/** The label named in gh's missing-label refusal, or undefined for any other message (#2243). */
+export function missingLabelFrom(message: string): string | undefined {
+  const m = MISSING_LABEL_PATTERN.exec(message);
+  return m ? m[1] : undefined;
+}
+
+/**
+ * The argv that creates {@link DOCS_LANE_LABEL} (#2243). PURE, like
+ * {@link buildPrCreateArgs}, so the exact forge write is assertable without a
+ * subprocess.
+ *
+ * `--repo` only when the PR request names one, so the label and the PR resolve the
+ * same base repository. Never `--force`: that turns create into create-or-UPDATE and
+ * would rewrite a label a maintainer had customised.
+ */
+export function buildLaneLabelCreateArgs(slug?: string): string[] {
+  return [
+    'label',
+    'create',
+    DOCS_LANE_LABEL,
+    ...(slug ? ['--repo', slug] : []),
+    '--color',
+    DOCS_LANE_LABEL_COLOR,
+    '--description',
+    DOCS_LANE_LABEL_DESCRIPTION,
   ];
 }
 
@@ -675,7 +763,8 @@ function urlFromAlreadyExists(message: string): string | undefined {
  * NEVER rejects (INV-5). The classification order below — ENOENT, then auth,
  * then network, then everything else — is byte-identical to SPEC-039's original
  * create-path arm, and must stay so: `push-docs-lane.test.ts` pins it and AC-10
- * forbids editing that test.
+ * forbids editing that test. #2243 adds no arm to that order: a missing label still
+ * classifies `failed`, and only gains the informational `missingLabel` field.
  *
  * Deliberately NOT folded in: SPEC-039's `gh auth status` PREFLIGHT. It runs far
  * earlier in that command — before the fetch, the worktree and the commit —
@@ -686,6 +775,10 @@ function urlFromAlreadyExists(message: string): string | undefined {
  * else-arm is `failed`. The two must not be unified.
  * Callers that skip the preflight lose nothing: the create path still yields
  * `gh-absent` / `gh-unauthenticated` / `offline` on its own.
+ *
+ * #2243: with `provisionLaneLabel`, the one refusal MinSpec can repair itself (its own
+ * lane label missing from the repository) is repaired once and the create retried
+ * once. See {@link OpenPrRequest.provisionLaneLabel} for the boundary.
  */
 export async function openPullRequest(req: OpenPrRequest): Promise<OpenPrResult> {
   const { run, cwd, adoptExisting = false } = req;
@@ -695,28 +788,82 @@ export async function openPullRequest(req: OpenPrRequest): Promise<OpenPrResult>
       if (existing) return { outcome: 'adopted', url: existing };
     }
 
-    try {
-      const { stdout } = await run('gh', buildPrCreateArgs(req), { cwd });
-      return { outcome: 'created', url: stdout.trim() };
-    } catch (err) {
-      if (isEnoent(err)) return { outcome: 'gh-absent' };
-      const msg = describeError(err);
-      // Checked BEFORE the auth/network arms so an "already exists" reply can
-      // never be misread as one of them — but only when the caller asked for
-      // idempotency, so SPEC-039's classification is untouched (R3/AC-10).
-      if (adoptExisting) {
-        const adopted = urlFromAlreadyExists(msg);
-        if (adopted) return { outcome: 'adopted', url: adopted };
-      }
-      if (isAuthError(msg)) return { outcome: 'gh-unauthenticated', error: msg };
-      if (isNetworkError(msg)) return { outcome: 'offline', error: msg };
-      return { outcome: 'failed', error: msg };
+    const first = await attemptCreate(req);
+    // `missingLabel` is only ever set to a label the request CARRIED, so this is also
+    // the guard that a request without the lane label can never provision it.
+    if (!req.provisionLaneLabel || first.missingLabel !== DOCS_LANE_LABEL) return first;
+
+    const label = await createLaneLabel(run, cwd, req.slug);
+    if (label.error !== undefined) {
+      // Not retried: the create would fail identically. The approval is already
+      // pushed, so this is a PR-opening failure with its real cause named.
+      return {
+        outcome: 'failed',
+        error: `${first.error ?? ''} — creating the '${DOCS_LANE_LABEL}' label also failed: ${label.error}`,
+        missingLabel: DOCS_LANE_LABEL,
+      };
     }
+    // Exactly one retry. A second identical refusal is reported as it stands, never
+    // looped on.
+    const retry = await attemptCreate(req);
+    return label.created ? { ...retry, labelProvisioned: true } : retry;
   } catch (err) {
     // INV-5 backstop. Reached when the runner throws a NON-Error (`throw 'boom'`),
     // or synchronously before returning a promise — cases the inner catch's
     // classification would still handle, but which must not escape even if a
     // future edit moves work outside it. An approval is never lost to this.
     return { outcome: 'failed', error: describeError(err) };
+  }
+}
+
+/**
+ * One `gh pr create`, classified. Extracted unchanged from {@link openPullRequest} so
+ * the #2243 retry is classified by the SAME code as the first attempt, never a copy.
+ */
+async function attemptCreate(req: OpenPrRequest): Promise<OpenPrResult> {
+  const { run, cwd, adoptExisting = false } = req;
+  try {
+    const { stdout } = await run('gh', buildPrCreateArgs(req), { cwd });
+    return { outcome: 'created', url: stdout.trim() };
+  } catch (err) {
+    if (isEnoent(err)) return { outcome: 'gh-absent' };
+    const msg = describeError(err);
+    // Checked BEFORE the auth/network arms so an "already exists" reply can
+    // never be misread as one of them — but only when the caller asked for
+    // idempotency, so SPEC-039's classification is untouched (R3/AC-10).
+    if (adoptExisting) {
+      const adopted = urlFromAlreadyExists(msg);
+      if (adopted) return { outcome: 'adopted', url: adopted };
+    }
+    if (isAuthError(msg)) return { outcome: 'gh-unauthenticated', error: msg };
+    if (isNetworkError(msg)) return { outcome: 'offline', error: msg };
+    // #2243: still `failed`, but name the label when that is the cause, and only a
+    // label this request actually asked for.
+    const missing = missingLabelFrom(msg);
+    return missing !== undefined && req.labels.includes(missing)
+      ? { outcome: 'failed', error: msg, missingLabel: missing }
+      : { outcome: 'failed', error: msg };
+  }
+}
+
+/**
+ * Create {@link DOCS_LANE_LABEL} in the repository `cwd`/`slug` resolves to (#2243).
+ *
+ * `created: false` with no `error` means another writer created it first: gh says it
+ * "already exists", which is all the retry needs. Three approvals made seconds apart
+ * race on exactly this. Never throws: a non-`Error` throw is described like any other.
+ */
+async function createLaneLabel(
+  run: ExecRun,
+  cwd: string,
+  slug?: string,
+): Promise<{ created: boolean; error?: string }> {
+  try {
+    await run('gh', buildLaneLabelCreateArgs(slug), { cwd });
+    return { created: true };
+  } catch (err) {
+    const msg = describeError(err);
+    if (/already exists/i.test(msg)) return { created: false };
+    return { created: false, error: msg };
   }
 }
