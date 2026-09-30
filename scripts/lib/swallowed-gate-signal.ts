@@ -122,12 +122,6 @@ const readsVariable = (line: string, variable: string): boolean =>
   new RegExp(`\\$\\{?${variable}\\b`).test(line);
 
 /**
- * Report every swallowed capture in one script whose value later drives control flow.
- *
- * @param file   repo-relative path, echoed back on each finding
- * @param source full text of the script
- */
-/**
  * One shell statement, which may span several physical lines.
  *
  * Both halves of this lint need the same joining. An assignment's substitution can span
