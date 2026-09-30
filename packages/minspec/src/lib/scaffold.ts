@@ -39,6 +39,7 @@ import {
 import { detectTools, type DetectedTools } from './tool-detector';
 import { registerSessionTitleHook } from './claude-settings';
 import { writeEpicIndex } from './epic-manager';
+import { initialOwnershipDeclaration } from './ownership-ratchet';
 import { assembleContext } from './constitution-context';
 import { seedProvider, integrateProposal, CONSTITUTION_SECTION_SCHEMA } from './constitution-proposer';
 
@@ -317,7 +318,15 @@ export function scaffold(rootDir: string): void {
     // directory on every later refresh (#1529). Written ONLY here, never back-filled
     // into an existing config: a back-fill's first run could itself be from a
     // worktree, which would persist exactly the wrong name this guards against.
-    const seeded = { projectName: resolveProjectName(rootDir).name, ...DEFAULT_CONFIG };
+    //
+    // `ownershipDeclaration` starts where SPEC-038's FR-7 ratchet says this repo is,
+    // not at its first position: `error` when no spec here would fail the ownership
+    // rule, `warn` (grandfathered) otherwise (#2250, ownership-ratchet.ts).
+    const seeded = {
+      projectName: resolveProjectName(rootDir).name,
+      ...DEFAULT_CONFIG,
+      ownershipDeclaration: initialOwnershipDeclaration(rootDir),
+    };
     fs.writeFileSync(configPath, JSON.stringify(seeded, null, 2) + '\n');
   }
 
