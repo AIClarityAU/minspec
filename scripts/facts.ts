@@ -220,7 +220,9 @@ function frontmatterBlock(raw: string): string {
 function rawField(raw: string, key: string): string | undefined {
   const block = frontmatterBlock(raw);
   if (!block) return undefined;
-  const m = block.match(new RegExp(`^${key}\\s*:\\s*(.*)$`, 'm'));
+  // `[ \t]*`, NOT `\s*` — see spec-validator.ts `rawFrontmatterField` (#1961). `\s`
+  // matches newlines, which made a block-form key report its first list item.
+  const m = block.match(new RegExp(`^${key}[ \t]*:[ \t]*(.*)$`, 'm'));
   if (!m) return undefined;
   const stripped = stripInlineComment(m[1]);
   return stripped === '' ? undefined : stripped;

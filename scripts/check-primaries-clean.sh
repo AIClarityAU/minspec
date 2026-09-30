@@ -39,9 +39,20 @@
 #   a DR amendment — see the follow-up issue linked at the bottom of the output.
 #
 # CLASSIFICATION
-#   REDUNDANT  worktree content is byte-identical to origin/<default>'s version,
-#              or locally deleted and absent there. Carries no information.
-#   ORPHAN     content differs. Real unlanded work. Someone must land it.
+#   REDUNDANT         worktree content is byte-identical to origin/<default>'s
+#                     version, or locally deleted and absent there. Carries no
+#                     information.
+#   LANDED-ON-BRANCH  content differs from origin/<default> but is
+#                     byte-identical to SOME OTHER remote-tracking ref (a
+#                     feature branch, typically already in an open pull
+#                     request). Already landed there — NOT unlanded work, and
+#                     re-landing it duplicates a branch/PR that already exists.
+#                     Reported with the branch name so a reader can go look,
+#                     not act. Fragile in a way REDUNDANT is not: it is safe to
+#                     discard only while that branch survives (#2068).
+#   ORPHAN            content matches neither origin/<default> nor any other
+#                     remote-tracking ref. Real unlanded work. Someone must
+#                     land it.
 #
 #   The classification is advisory. It is NOT a dormancy signal and must never
 #   be used as one: DR-065 §1 is explicit that clean/empty is indistinguishable
@@ -93,7 +104,7 @@ HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 # This script is about the PRIMARY checkouts and will routinely be run from a
 # worktree. Using the script's own directory would make SELF_ROOT
 # .worktrees/<repo>/<name>, so the siblings resolve under .worktrees/ — which
-# does not exist — and all three repos report SKIP while the actual primaries go
+# does not exist — and every listed repo reports SKIP while the actual primaries go
 # uninspected. Observed in testing. `--git-common-dir` is the primary's .git
 # even from a linked worktree.
 COMMON_DIR="$(git -C "$HERE" rev-parse --path-format=absolute --git-common-dir 2>/dev/null || true)"  # swallow-ok: the next line branches on empty explicitly; not a git repo is a legitimate answer here
@@ -105,7 +116,12 @@ if [ -z "$COMMON_DIR" ]; then
 fi
 SELF_ROOT="$(dirname "$COMMON_DIR")"
 CODE_ROOT="$(dirname "$SELF_ROOT")"
-REPOS=("$SELF_ROOT" "$CODE_ROOT/scroogellm" "$CODE_ROOT/sealbox")
+# `$CODE_ROOT/scroogellm` was dropped on 2026-09-22: the founder stopped work on that
+# repo, and this script's whole output is a staleness report a human is meant to act on.
+# Reporting on a checkout nobody touches adds a permanently-unactioned row, which is how
+# a report teaches its reader to skim it. This is DIAGNOSTIC ONLY — no gate reads it — so
+# removing an entry narrows what is inspected and cannot weaken a check.
+REPOS=("$SELF_ROOT" "$CODE_ROOT/sealbox")
 
 DRAIN="$SELF_ROOT/scripts/drain-inbox.sh"
 
@@ -126,6 +142,28 @@ occupancy() {
     occupied|dormant) echo "$out" ;;
     *) echo "unknown" ;;
   esac
+}
+
+# Scan every OTHER remote-tracking ref (excluding origin/<default>, already
+# checked by the caller, and the symbolic origin/HEAD, which just aliases
+# whichever branch it points at) for a byte-identical copy of $repo's
+# working-tree path $p. Prints the first matching ref's short name (e.g.
+# "origin/docs/spec-070-design") and returns 0, or prints nothing and returns 1
+# when no other ref carries it. Read-only: `for-each-ref`/`cat-file`/`show`
+# only, same as the rest of this script — never a fetch, so it only sees
+# whatever the last drain fetch left in refs/remotes/origin (#2068).
+find_landed_ref() {
+  local repo="$1" origin_ref="$2" p="$3" ref
+  while IFS= read -r ref; do
+    [ "$ref" = "refs/remotes/$origin_ref" ] && continue
+    [ "$ref" = "refs/remotes/origin/HEAD" ] && continue
+    if git -C "$repo" cat-file -e "$ref:$p" 2>/dev/null \
+       && git -C "$repo" show "$ref:$p" 2>/dev/null | cmp -s - "$repo/$p"; then
+      echo "${ref#refs/remotes/}"
+      return 0
+    fi
+  done < <(git -C "$repo" for-each-ref --format='%(refname)' refs/remotes)
+  return 1
 }
 
 overall=0
@@ -166,7 +204,7 @@ for repo in "${REPOS[@]}"; do
   behind="$(git -C "$repo" rev-list --count "HEAD..$origin_ref" 2>/dev/null || echo 0)"
   ahead="$(git -C "$repo" rev-list --count "$origin_ref..HEAD" 2>/dev/null || echo 0)"
 
-  redundant=(); orphans=()
+  redundant=(); orphans=(); landed_paths=(); landed_refs=()
   while IFS= read -r -d '' entry; do
     code="${entry:0:2}"; p="${entry:3}"
     case "$code" in R*|C*) IFS= read -r -d '' _src ;; esac
@@ -176,7 +214,13 @@ for repo in "${REPOS[@]}"; do
          && git -C "$repo" show "$origin_ref:$p" 2>/dev/null | cmp -s - "$repo/$p"; then
         redundant+=("$p")
       else
-        orphans+=("$p")
+        match_ref="$(find_landed_ref "$repo" "$origin_ref" "$p")"
+        if [ -n "$match_ref" ]; then
+          landed_paths+=("$p")
+          landed_refs+=("$match_ref")
+        else
+          orphans+=("$p")
+        fi
       fi
     else
       if git -C "$repo" cat-file -e "$origin_ref:$p" 2>/dev/null; then
@@ -187,7 +231,7 @@ for repo in "${REPOS[@]}"; do
     fi
   done < <(git -C "$repo" status --porcelain -z 2>/dev/null)
 
-  if [ "${#orphans[@]}" -eq 0 ] && [ "${#redundant[@]}" -eq 0 ] \
+  if [ "${#orphans[@]}" -eq 0 ] && [ "${#redundant[@]}" -eq 0 ] && [ "${#landed_paths[@]}" -eq 0 ] \
      && [ "$behind" = "0" ] && [ "$ahead" = "0" ]; then
     say "OK    $name — clean, current with $origin_ref"
     continue
@@ -198,6 +242,9 @@ for repo in "${REPOS[@]}"; do
   [ "$ahead" != "0" ] && say "      AHEAD of $origin_ref by $ahead commit(s) — unpushed local commits"
   for p in "${redundant[@]}"; do
     say "      REDUNDANT  $p"
+  done
+  for i in "${!landed_paths[@]}"; do
+    say "      LANDED-ON-BRANCH  ${landed_paths[$i]}  (on ${landed_refs[$i]} — already landed there, not unlanded work)"
   done
   for p in "${orphans[@]}"; do
     mt="$(date -r "$repo/$p" '+%Y-%m-%d %H:%M' 2>/dev/null || echo 'deleted')"
@@ -210,7 +257,13 @@ for repo in "${REPOS[@]}"; do
     say "         scripts/push-docs.sh if it is an approvable. Do not discard it."
   fi
 
-  if [ "${#orphans[@]}" -eq 0 ] && [ "${#redundant[@]}" -gt 0 ] && [ "$behind" != "0" ]; then
+  if [ "${#landed_paths[@]}" -gt 0 ]; then
+    say "      -> already landed on the branch(es) named above, typically in an open"
+    say "         pull request. Do NOT re-land it — check whether that branch/PR is"
+    say "         still open before discarding the local copy."
+  fi
+
+  if [ "${#orphans[@]}" -eq 0 ] && [ "${#landed_paths[@]}" -eq 0 ] && [ "${#redundant[@]}" -gt 0 ] && [ "$behind" != "0" ]; then
     deadlocked=1
     say "      -> G2 DEADLOCK: every dirty path here is REDUNDANT, so this checkout"
     say "         carries no unlanded work — but DR-065 G2 (content-clean) still fails,"

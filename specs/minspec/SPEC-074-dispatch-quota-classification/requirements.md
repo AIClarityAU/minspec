@@ -1,7 +1,7 @@
 ---
 id: SPEC-074
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute — the dev-time autonomous build/merge pipeline (dispatch-issue.sh's own crash-classification lives here)
@@ -10,9 +10,9 @@ relates_to: [SPEC-044, SPEC-062, DR-063, DR-084, DR-076]
 implements: [packages/minspec/tests/dispatch-quota-classification.test.ts]  # NEW — the T3 regression test this spec owns
 affects: [scripts/dispatch-issue.sh, scripts/dispatch-ready-check.sh]  # dispatch-issue.sh is OWNED by SPEC-044 via implements: — this spec modifies its crash branch, never owns the file (INV: one owner per file). dispatch-ready-check.sh is currently unowned by any spec; this spec adds one line (the countermand list) without claiming ownership of the file.
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

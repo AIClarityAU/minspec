@@ -41,6 +41,7 @@ import {
   openPullRequest,
   resolveHeadSha,
   slugFromOriginUrl,
+  splitCommitMessage,
   type ExecRun,
 } from '../src/lib/approval-pr';
 import type { ApprovalRecord } from '../src/lib/approval';
@@ -197,20 +198,91 @@ describe('buildPrCreateArgs', () => {
 });
 
 // =============================================================================
+// splitCommitMessage — the TS twin of push-docs.sh's pr_title/pr_rest split
+// (#1606 in the bash copy, #1883 here). Pure — no I/O.
+// =============================================================================
+
+describe('splitCommitMessage (#1883)', () => {
+  it('a subject + blank line + body splits into just the subject as title, rest as body', () => {
+    const longBody = 'x'.repeat(300);
+    const message = `docs(DR-102): wire note\n\nRoot cause: ${longBody}`;
+    const { title, body } = splitCommitMessage(message);
+    expect(title).toBe('docs(DR-102): wire note');
+    expect(title.length).toBeLessThanOrEqual(256);
+    expect(body).toBe(`Root cause: ${longBody}`);
+  });
+
+  it('a single-line message over 256 chars is truncated to a title on a word boundary', () => {
+    const message = 'docs(DR-103): ' + Array.from({ length: 40 }, (_, i) => `word${i}word`).join(' ');
+    expect(message.length).toBeGreaterThan(256);
+    const { title, body } = splitCommitMessage(message);
+    expect(title.length).toBeLessThanOrEqual(256);
+    // Truncated on a word boundary: title is a clean prefix of the message up
+    // to some space, never a mid-word cut.
+    expect(message.startsWith(title)).toBe(true);
+    expect(message[title.length]).toBe(' ');
+    expect(body).toBe('');
+  });
+
+  it('a message with no newline is the title verbatim (when within the cap), empty body', () => {
+    const { title, body } = splitCommitMessage('docs: short subject');
+    expect(title).toBe('docs: short subject');
+    expect(body).toBe('');
+  });
+
+  it('a subject immediately followed by body text (no blank separator line) keeps the body intact', () => {
+    const { title, body } = splitCommitMessage('subject\nbody line 1\nbody line 2');
+    expect(title).toBe('subject');
+    expect(body).toBe('body line 1\nbody line 2');
+  });
+
+  it('an exactly-256-char subject is not truncated', () => {
+    const subject = 'a'.repeat(256);
+    const { title } = splitCommitMessage(subject);
+    expect(title).toBe(subject);
+    expect(title.length).toBe(256);
+  });
+});
+
+// =============================================================================
 // laneLabelsFor — INV-2, the single docs-lane minter
 // =============================================================================
 
 describe('laneLabelsFor (INV-2)', () => {
   it('labels an approval commit whose paths are all corpus (doc + sidecar)', () => {
+    // `specs/**` is a governance path (#2078), so the patch is part of the evidence.
+    // This fixture is an ordinary edit to an already-approved spec, NOT an approval:
+    // the same two paths carrying a `status:` transition are refused the lane, which
+    // the #2078 block below asserts directly.
     expect(
-      laneLabelsFor([
-        'specs/minspec/SPEC-050-silent-approval-pr/requirements.md',
-        '.minspec/approvals/specs/minspec/SPEC-050-silent-approval-pr/requirements.md.json',
-      ]),
+      laneLabelsFor(
+        [
+          'specs/minspec/SPEC-050-silent-approval-pr/requirements.md',
+          '.minspec/approvals/specs/minspec/SPEC-050-silent-approval-pr/requirements.md.json',
+        ],
+        [
+          {
+            path: 'specs/minspec/SPEC-050-silent-approval-pr/requirements.md',
+            patch: '@@ -40,3 +40,3 @@\n-FR-4 (draft)\n+FR-4 (revised)\n',
+          },
+        ],
+      ),
     ).toEqual([DOCS_LANE_LABEL]);
-    expect(laneLabelsFor(['docs/decisions/DR-071.md', 'docs/decisions/INDEX.md'])).toEqual([
-      DOCS_LANE_LABEL,
-    ]);
+    // #2078: `docs/decisions/**` is a GOVERNANCE path, so the corpus answer alone no
+    // longer settles it — the lane also refuses a changed `status:` line there. The
+    // patch evidence is therefore required, and an ordinary prose edit still earns the
+    // label. Pre-#2078 this call passed ONE argument and was granted the label on
+    // corpus membership alone, which is exactly how every DR acceptance came to be
+    // labelled for a lane guaranteed to refuse it.
+    expect(
+      laneLabelsFor(
+        ['docs/decisions/DR-071.md', 'docs/decisions/INDEX.md'],
+        [
+          { path: 'docs/decisions/DR-071.md', patch: '@@ -4,3 +4,3 @@\n-teh\n+the\n' },
+          { path: 'docs/decisions/INDEX.md', patch: '@@ -9,3 +9,3 @@\n-| a |\n+| b |\n' },
+        ],
+      ),
+    ).toEqual([DOCS_LANE_LABEL]);
     // CLAUDE.md, not README.md, on purpose: both are top-level `.md` and so both
     // ARE corpus, but `docs-lane.yml`'s separate `outward` denylist rejects
     // README/CHANGELOG/LICENCE/NOTICE. Asserting README here would bake a
@@ -240,6 +312,52 @@ describe('laneLabelsFor (INV-2)', () => {
     // is docs-only. Failing closed here is the whole reason this is a function
     // and not an inline `.every(...)` at each call site.
     expect(laneLabelsFor([])).toEqual([]);
+  });
+});
+
+// =============================================================================
+// laneLabelsFor — #2078: the lane's GOVERNANCE STATUS-TRANSITION eligibility rule
+// =============================================================================
+
+/**
+ * T3 regression — #2078 (producer labels approval PRs onto a refusing lane).
+ *
+ * `.github/workflows/docs-lane.yml`'s governance gate (#1847) refuses, with `exit 1`,
+ * any `docs-lane` PR whose diff changes a `status:` line under `docs/decisions/` or
+ * `specs/`. An approval or acceptance PR is exactly that patch plus its sidecar, so
+ * labelling one manufactured a permanent red on the maintainer's own approval
+ * artefacts (#2071 DR-092 acceptance, #2072 SPEC-068 harness-refresh direction gate,
+ * #2073 SPEC-069 approval-record witness; run 35783197257).
+ *
+ * The CONTRACT — every refusal arm, the coverage rule, and the byte-level parity with
+ * the workflow's own `govern=` / `grep -qE` literals — lives in
+ * `tests/governance-lane-eligibility.test.ts`, which also runs both regex engines over
+ * one shared fixture set. Only the two cases that file does not reach THROUGH
+ * `laneLabelsFor` are kept here, so the contract has one home rather than two copies
+ * free to drift.
+ */
+describe('laneLabelsFor — governance status-transition eligibility (#2078)', () => {
+  it('refuses when a governance path\'s patch is the EMPTY STRING — an unknown, not a no', () => {
+    // `branchChangedPaths` just reported this file as changed, so an empty diff for it
+    // means the diff was not really obtained. The sibling case (`patch` absent
+    // entirely) is the workflow's own `[ -z "$patch_b64" ]` arm; both must refuse, and
+    // a truthiness check that only caught `undefined` would let this one through.
+    expect(
+      laneLabelsFor(['docs/decisions/DR-071.md'], [{ path: 'docs/decisions/DR-071.md', patch: '' }]),
+    ).toEqual([]);
+  });
+
+  it('does NOT over-refuse: a status: line in a non-governance corpus file keeps the label', () => {
+    // The over-correction guard. `govern` is `^(docs/decisions/|specs/)`, so a
+    // `status:` line in top-level markdown is not a ratification — the lane arms on it,
+    // and a producer that refused here would strip the lane from ordinary docs PRs,
+    // which is this fix's own failure mode rather than the bug it is fixing.
+    expect(
+      laneLabelsFor(
+        ['CLAUDE.md'],
+        [{ path: 'CLAUDE.md', patch: '@@ -1,2 +1,2 @@\n-status: draft\n+status: final\n' }],
+      ),
+    ).toEqual([DOCS_LANE_LABEL]);
   });
 });
 
