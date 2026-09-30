@@ -408,6 +408,39 @@ def owned_file_set(cwd, sp, fm):
     return declared_impl_files(cwd, fm, os.path.dirname(sp))
 
 
+_APPROVAL_STRENGTH = {"approved": 0, "stale": 1, "unapproved": 2}
+
+
+def select_verdict(entries):
+    """Deterministically resolve ONE spec id's verdict from every gated doc
+    that shares it (#958).
+
+    `entries` is a list of dicts — one per doc sharing a spec id, in ANY
+    order — each with `spec_rel` (str), `approval` ('approved'/'stale'/
+    'unapproved'), `rec` (the approval sidecar dict or None), and `files`
+    (the set of impl paths THAT doc declares). Deliberately pure / order-
+    independent: given the same entries in a different order it returns the
+    IDENTICAL result, which is what a caller can unit-test directly without
+    depending on real filesystem/glob ordering (glob.glob() is unsorted, and
+    #958 was exactly a bug in relying on that order).
+
+    Picks the doc with the STRONGEST approval verdict (approved beats stale
+    beats unapproved) as primary — i.e. the verdict comes from the approved
+    record when one exists, never from "whichever doc came first". Ties
+    (multiple docs with the same verdict) break on sorted `spec_rel`, which
+    is stable across filesystems. Declared impl files are UNIONED across
+    every doc sharing the id, so a declaration on any sibling doc still gates
+    its code regardless of which doc was primary.
+
+    Returns (approval, rec, files) for the id.
+    """
+    primary = min(entries, key=lambda e: (_APPROVAL_STRENGTH[e["approval"]], e["spec_rel"]))
+    files = set()
+    for e in entries:
+        files |= e["files"]
+    return primary["approval"], primary["rec"], files
+
+
 def owned_match(rel, files):
     """True if `rel` (POSIX, cwd-relative) is in a spec's owned (declared-impl) set.
 
@@ -463,10 +496,23 @@ def main():
     # ONLY if it falls inside one of these owned sets (#426 / DR-047 §3 — the
     # doc-before-code gate applies to the code implementing THAT doc, never a
     # repo-wide freeze).
+    #
+    # #958: a spec id can appear on more than one doc in its dir (e.g. a stray
+    # `tier:`/`phases:` copy-paste onto design.md, against the documented
+    # convention that only requirements.md carries them). glob.glob() order is
+    # FILESYSTEM order, not sorted or content-derived, so picking "whichever
+    # doc we saw first" per id made the verdict non-deterministic — on some
+    # filesystems/runs the unapproved stray doc was recorded first and the
+    # id's real, approved requirements.md was silently dropped by the old
+    # `if sid in seen_ids: continue` dedup, freezing already-approved work.
+    # Fixed by a two-pass collect-then-select: gather EVERY gated doc per id
+    # first (this loop), then hand each id's docs to `select_verdict`
+    # (order-independent by construction — see its docstring) instead of
+    # keying off traversal order.
     gated = 0
     blocking = []      # (sid, verdict, files)
     migrated = []      # (sid, files)
-    seen_ids = set()
+    by_id = {}         # sid -> list of per-doc candidate dicts
     for sp in glob.glob(os.path.join(cwd, "specs", "**", "*.md"), recursive=True):
         try:
             with open(sp, "r", encoding="utf-8") as fh:
@@ -520,14 +566,14 @@ def main():
         if intended not in ("implementing", "done"):
             continue  # phases don't put it in implementation — nothing to gate
 
-        # One entry per spec identity. In practice only requirements.md carries
-        # the tier, but dedup defensively so a spec is never double-listed.
-        if sid in seen_ids:
-            continue
-        seen_ids.add(sid)
-        gated += 1
+        by_id.setdefault(sid, []).append({
+            "spec_rel": spec_rel, "approval": approval, "rec": rec,
+            "files": owned_file_set(cwd, sp, fm),
+        })
 
-        files = owned_file_set(cwd, sp, fm)
+    for sid, entries in by_id.items():
+        gated += 1
+        approval, rec, files = select_verdict(entries)
 
         if approval in ("unapproved", "stale"):
             blocking.append((sid, approval, files))
