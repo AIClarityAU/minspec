@@ -754,6 +754,7 @@ The drain's admission control gates on a quota reading at ~/.claude/quota.json. 
 <!-- dr-summary:DR-095 auto=e43c8c7ab700 -->
 /etc/nixos/home.nix:95 declares it: The host side is **$XDG_RUNTIME_DIR**, which for a user manager is /run/user/1000. It is not /tmp; /tmp/gh-app-token.sock is only the path the socket is presented at *inside* the container. This matters for the proposal below, because "mount the directory" means mounting the systemd user runtime directory, which is a very different object from a purpose-built socket directory.
 <!-- /dr-summary:DR-095 -->
+
 ## [DR-096 — Adopters get a frozen, diagnosis-only pre-strip basis and a third provenance verdict - not a flag, and not a migration](DR-096.md)
 
 *Status: proposed · Date: 2026-09-25*
