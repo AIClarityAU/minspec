@@ -57,6 +57,15 @@ export interface MinspecConfig {
    */
   readonly ownershipDeclaration?: 'warn' | 'error';
   /**
+   * Severity of the `implement.claimed-without-evidence` rule (#1751). `warn`
+   * (default, pre-backfill) surfaces a spec whose `phases.implement` is
+   * `in-progress`/`done` while a declared `implements:` path is absent from
+   * disk, without blocking; flip to `error` once the corpus is backfilled
+   * (same FR-7 ratchet SPEC-038's `ownershipDeclaration` used). Absent →
+   * treated as `warn`.
+   */
+  readonly implementEvidence?: 'warn' | 'error';
+  /**
    * Permitted approver identities for the `approval-integrity` gate (DR-081 §4, #1376).
    *
    * An ALLOWLIST, unlike `approval.ts`'s `BUILTIN_AGENT_IDENTITIES` denylist, and the two
@@ -113,6 +122,7 @@ export const DEFAULT_CONFIG: MinspecConfig = {
   },
   coverage: { minimumPercentage: DEFAULT_COVERAGE_MINIMUM },
   ownershipDeclaration: 'warn',
+  implementEvidence: 'warn',
 };
 
 /** Deep merge user config over defaults. User values win. */

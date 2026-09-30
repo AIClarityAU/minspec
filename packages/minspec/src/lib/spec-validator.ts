@@ -730,6 +730,16 @@ export interface ValidateSpecOptions {
    * access gets no false violation).
    */
   readonly siblingShardFiles?: readonly ShardIdFile[];
+  /**
+   * Repo-relative-path existence check, for `implement.claimed-without-evidence`
+   * (#1751). When supplied, a spec's declared `implements:` paths are checked
+   * against it once `phases.implement` claims active/finished work; omit it to
+   * skip the check entirely (this file is filesystem-free by design — see the
+   * header comment — so the fs lookup itself lives in the caller, same as
+   * `siblingShardFiles`/`knownEpicRefs` push their fs work up a layer). No
+   * false positive from a caller without filesystem access.
+   */
+  readonly pathExists?: (repoRelativePath: string) => boolean;
 }
 
 // ─── Spec→code ownership (SPEC-038 / #460) ───────────────────────────────────
@@ -844,6 +854,68 @@ export function validateOwnership(spec: ParsedSpec, config: MinspecConfig): Vali
 }
 
 /**
+ * `implement.claimed-without-evidence` (#1751) — the direction `validateOwnership`
+ * does not check. `validateOwnership` asserts a declared `implements:` path is
+ * well-shaped, existing-or-not-yet — a not-yet-created path is valid GREENFIELD
+ * ownership by design (FR-4/AC-3). But nothing previously cross-checked the other
+ * way: when `phases.implement` is `in-progress`/`done` — i.e. the spec is actively
+ * claiming implementation progress or completion — nothing asserted that the paths
+ * it names actually exist. SPEC-065's backfill claimed `implement: in-progress`
+ * while none of its five declared `implements:` files existed on disk; only an LLM
+ * review panel caught it (PR #1661), because no deterministic rule did.
+ *
+ * Fires (severity from `config.implementEvidence`, `warn` by default — same FR-7
+ * ratchet SPEC-038's `ownershipDeclaration` used) when ALL of:
+ *  - `phases.implement` is `in-progress` or `done`, and
+ *  - the spec declares one or more owned-code `implements:` paths (the `none`
+ *    escape is exempt — it declares no paths to check), and
+ *  - at least one declared path does not exist on disk.
+ *
+ * `pathExists` is a caller-supplied resolver, not a direct fs read: this module is
+ * filesystem-free by design (see header comment), so the existence LOOKUP lives in
+ * the caller and only the DECISION lives here — mirroring how `knownEpicRefs` /
+ * `knownArtifactRefs` / `siblingShardFiles` push their own I/O up a layer. Omitting
+ * the resolver skips the check entirely (no false positive from a caller without
+ * filesystem access, the same no-false-positive contract every other optional
+ * resolver in `ValidateSpecOptions` keeps).
+ *
+ * Only tokens `isValidOwnedPath` accepts are checked — a malformed token is already
+ * flagged by `ownership.implements.invalid`, and checking a token that owns nothing
+ * would just be noise on top of that finding.
+ */
+export function validateImplementEvidence(
+  spec: ParsedSpec,
+  config: MinspecConfig,
+  pathExists?: (repoRelativePath: string) => boolean,
+): ValidationViolation[] {
+  if (!pathExists) return [];
+
+  const specType = (spec.frontmatter.type ?? '').toLowerCase();
+  if (!isPrimarySpec(specType)) return []; // implements: belongs to the primary/requirements artifact
+
+  const implementPhase = spec.frontmatter.phases.implement;
+  if (implementPhase !== 'in-progress' && implementPhase !== 'done') return [];
+
+  const raw = spec.raw;
+  const implTokens = fmListField(raw, 'implements');
+  const isNoneEscape = implTokens.length === 1 && implTokens[0].toLowerCase() === 'none';
+  if (isNoneEscape) return []; // declares no code — nothing to have evidence for
+
+  const codeTokens = implTokens.filter(isValidOwnedPath);
+  if (codeTokens.length === 0) return []; // no well-shaped path declared — ownership.implements.missing/invalid already cover this
+
+  const missing = codeTokens.filter((t) => !pathExists(t));
+  if (missing.length === 0) return [];
+
+  return [{
+    rule: 'implement.claimed-without-evidence',
+    severity: config.implementEvidence === 'error' ? 'error' : 'warning',
+    message: `Spec claims phases.implement: ${implementPhase} but declared implements: path(s) do not exist on disk: ${missing.join(', ')}.`,
+    fixHint: 'Either create the missing file(s), correct the implements: path(s) to what actually landed, or move phases.implement back to a state that matches reality (e.g. "pending") until the code exists. A spec claiming active/finished implementation work while owning zero real files is a false signpost (#1751).',
+  }];
+}
+
+/**
  * Errors that approving this spec would NEWLY introduce (#1317).
  *
  * Approval does not merely record a signature — it ADVANCES the spec's phase map
@@ -915,6 +987,10 @@ export function validateSpec(
 
   // Spec→code ownership declaration (SPEC-038 / #460).
   violations.push(...validateOwnership(spec, config));
+
+  // Implement-phase evidence (#1751) — the opposite direction from ownership:
+  // does a spec CLAIMING implement progress/completion actually own real files?
+  violations.push(...validateImplementEvidence(spec, config, options.pathExists));
 
   // 0. Epic reference (soft — warnings only, DR-013 FR-9). Two failure modes,
   //    both leave the spec stranded under "(no epic)":
