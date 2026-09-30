@@ -238,7 +238,7 @@ describe('fetchIssues()', () => {
     expect(issues[1].wsjfScore).toBeNull();
   });
 
-  it('returns empty array when gh command fails', async () => {
+  it('rejects with the auth reason when gh command fails on auth (#2247)', async () => {
     mockExecFile.mockImplementation(
       (_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
         if (typeof _opts === 'function') cb = _opts as Function;
@@ -246,11 +246,61 @@ describe('fetchIssues()', () => {
       },
     );
 
-    const issues = await fetchIssues('/fake/root');
-    expect(issues).toEqual([]);
+    // Must reject, not resolve to [] — an unreadable source (auth failure)
+    // is not the same as a readable, empty one (#2247).
+    await expect(fetchIssues('/fake/root')).rejects.toThrow(
+      'GitHub CLI (gh) is not authenticated',
+    );
+  });
+
+  it('rejects with a not-installed reason on ENOENT (#2247)', async () => {
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
+        if (typeof _opts === 'function') cb = _opts as Function;
+        const err = Object.assign(new Error('spawn gh ENOENT'), { code: 'ENOENT' });
+        cb!(err, { stdout: '', stderr: '' });
+      },
+    );
+
+    await expect(fetchIssues('/fake/root')).rejects.toThrow(
+      'GitHub CLI (gh) is not installed',
+    );
+  });
+
+  it('rejects with a network reason on ENOTFOUND (offline) (#2247)', async () => {
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
+        if (typeof _opts === 'function') cb = _opts as Function;
+        cb!(new Error('getaddrinfo ENOTFOUND api.github.com'), { stdout: '', stderr: '' });
+      },
+    );
+
+    await expect(fetchIssues('/fake/root')).rejects.toThrow(
+      'network unreachable',
+    );
+  });
+
+  it('rejects with a rate-limit reason on rate limiting (#2247)', async () => {
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
+        if (typeof _opts === 'function') cb = _opts as Function;
+        cb!(new Error('API rate limit exceeded for user'), { stdout: '', stderr: '' });
+      },
+    );
+
+    await expect(fetchIssues('/fake/root')).rejects.toThrow(
+      'GitHub API rate limit exceeded',
+    );
   });
 
   it('passes default options (open, limit 100)', async () => {
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
+        if (typeof _opts === 'function') cb = _opts as Function;
+        cb!(null, { stdout: '[]', stderr: '' });
+      },
+    );
+
     await fetchIssues('/fake/root');
     expect(mockExecFile).toHaveBeenCalledWith(
       'gh',
@@ -261,6 +311,13 @@ describe('fetchIssues()', () => {
   });
 
   it('passes custom options', async () => {
+    mockExecFile.mockImplementation(
+      (_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
+        if (typeof _opts === 'function') cb = _opts as Function;
+        cb!(null, { stdout: '[]', stderr: '' });
+      },
+    );
+
     await fetchIssues('/fake/root', { state: 'closed', limit: 50, label: 'bug' });
     expect(mockExecFile).toHaveBeenCalledWith(
       'gh',
@@ -270,7 +327,7 @@ describe('fetchIssues()', () => {
     );
   });
 
-  it('returns empty array on invalid JSON', async () => {
+  it('rejects with a parse-failure reason on invalid JSON (#2247)', async () => {
     mockExecFile.mockImplementation(
       (_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
         if (typeof _opts === 'function') cb = _opts as Function;
@@ -278,8 +335,9 @@ describe('fetchIssues()', () => {
       },
     );
 
-    const issues = await fetchIssues('/fake/root');
-    expect(issues).toEqual([]);
+    await expect(fetchIssues('/fake/root')).rejects.toThrow(
+      'could not be parsed as JSON',
+    );
   });
 });
 

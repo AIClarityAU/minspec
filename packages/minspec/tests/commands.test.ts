@@ -1412,6 +1412,22 @@ describe('commands', () => {
       );
     });
 
+    it('shows the failure reason (not "no open issues found") when fetchIssues rejects (#2247)', async () => {
+      vi.mocked(isGhAvailable).mockResolvedValueOnce(true);
+      vi.mocked(fetchIssues).mockRejectedValueOnce(
+        new Error('network unreachable — check internet connectivity'),
+      );
+
+      await scoreWsjfCommand();
+
+      expect(vscode.window.showInformationMessage).not.toHaveBeenCalledWith(
+        'MinSpec: No open issues found.',
+      );
+      expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+        'MinSpec: Could not fetch issues — network unreachable — check internet connectivity',
+      );
+    });
+
     it('returns early when user cancels issue selection', async () => {
       vi.mocked(isGhAvailable).mockResolvedValueOnce(true);
       vi.mocked(fetchIssues).mockResolvedValueOnce([
@@ -1624,6 +1640,22 @@ describe('commands', () => {
 
       expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
         'MinSpec: No inbox issues to triage.',
+      );
+    });
+
+    it('shows the failure reason (not "no inbox issues") when fetchIssues rejects (#2247)', async () => {
+      vi.mocked(isGhAvailable).mockResolvedValueOnce(true);
+      vi.mocked(fetchIssues).mockRejectedValueOnce(
+        new Error('GitHub API rate limit exceeded — try again later'),
+      );
+
+      await triageIssueCommand();
+
+      expect(vscode.window.showInformationMessage).not.toHaveBeenCalledWith(
+        'MinSpec: No inbox issues to triage.',
+      );
+      expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
+        'MinSpec: Could not fetch issues — GitHub API rate limit exceeded — try again later',
       );
     });
 
