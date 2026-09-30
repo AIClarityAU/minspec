@@ -7,6 +7,7 @@
     "packages/*"
   ],
   "scripts": {
+    "preinstall": "node scripts/check-npm-toolchain.mjs",
     "prepare": "git config core.hooksPath .githooks || true && npm run build --workspace=@aiclarity/shared",
     "pretest": "node scripts/check-node-modules-integrity.mjs && npm run check:swallowed-gate && npm run build --workspace=@aiclarity/shared",
     "test": "vitest run",
@@ -41,6 +42,6 @@
   },
   "engines": {
     "node": ">=22.0.0",
-    "npm": ">=10.0.0"
+    "npm": ">=11.0.0"
   }
 }
