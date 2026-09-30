@@ -310,4 +310,4 @@ it is scoped to unblock *faster*, not to decide *who wins* (FR-13 already decide
     SPEC-026's liveness helper and atomic-write pattern)
   - `packages/minspec/src/lib/scaffold.ts` (add `.minspec/sessions/mailbox/` gitignore entry)
   - CLAUDE.md template (extend Concurrent-Session Etiquette with the per-turn inbox check)
-  - `packages/minspec/tests/mailbox.test.ts` (new — INV-1..6 T0 tests)
+  - `packages/minspec/tests/mailbox.test.ts` (new — INV-1..7 T0 tests)
