@@ -731,12 +731,17 @@ export function setAdrStatus(filePath: string, status: AdrStatus): AdrStatus {
   }
 
   const yaml = fmMatch[1];
-  const statusLineRe = /^([ \t]*)status[ \t]*:[ \t]*.*$/m;
+  // Anchored to column 0 (#2149) — a non-anchored, non-global match on ANY
+  // indent would rewrite the FIRST `status:` line regardless of nesting,
+  // silently leaving a top-level key untouched if a nested `status:`
+  // preceded it. Anchoring makes writer and validator target the same line
+  // by construction, rather than relying on house key order.
+  const statusLineRe = /^status[ \t]*:[ \t]*.*$/m;
   let newYaml: string;
   if (statusLineRe.test(yaml)) {
-    // `$1` keeps the captured indent; the value is escaped so a literal `$`
-    // in it is never read as a replacement pattern (#152).
-    newYaml = yaml.replace(statusLineRe, `$1status: ${escapeReplacement(status)}`);
+    // The value is escaped so a literal `$` in it is never read as a
+    // replacement pattern (#152).
+    newYaml = yaml.replace(statusLineRe, `status: ${escapeReplacement(status)}`);
   } else {
     newYaml = `${yaml}\nstatus: ${status}`;
   }
