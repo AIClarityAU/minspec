@@ -4,12 +4,16 @@ import { pushApproval, type PushApprovalResult } from '../lib/approve-push';
 import { recoverProtectedBranchApproval, type RecoverResult } from '../lib/approval-recover';
 import {
   branchChangedPaths,
+  branchDiffEntries,
   buildApprovalPrBody,
   defaultExecRun,
   laneLabelsFor,
+  laneRefusal,
+  laneRefusalSentence,
   openPullRequest,
   resolveHeadSha,
   type ExecRun,
+  type LaneRefusal,
   type OpenPrResult,
 } from '../lib/approval-pr';
 import { readRecord, toPosixRel } from '../lib/approval-store';
@@ -613,14 +617,50 @@ function manualPrSurface(result: PushApprovalResult, reason?: string): string {
  * FR-3's "no click completes the operation" holds on both branches: one shows no
  * toast, the other a warning with no action.
  */
-async function notifyPrOpened(message: string, labels: readonly string[]): Promise<void> {
+async function notifyPrOpened(
+  message: string,
+  labels: readonly string[],
+  refusal?: LaneRefusal,
+): Promise<void> {
   // Labelled = the happy path = the caller's own suffix already said it. Silence here,
   // not a duplicate (#1700).
   if (labels.length > 0) return;
+  // #2078: a governance status transition is the DESIGNED outcome for every approval
+  // and acceptance PR — the lane refuses them on purpose (#1847). Warning on it would
+  // fire on literally every approval, which is the cry-wolf shape that costs the
+  // warning below the attention it needs. The reason is not lost: `laneSuffixNote`
+  // puts it in the suffix, which all three callers surface in their own success toast
+  // (the #1700 contract, pinned by the `r.suffix` assertions in the wiring tests).
+  if (refusal?.kind === 'governance-status-transition') return;
+  const why =
+    (refusal && laneRefusalSentence(refusal)) ??
+    'NOT labelled for the docs-lane, so this PR needs a human merge.';
   await vscode.window.showWarningMessage(
-    `${message} — but NOT labelled for the docs-lane, because it is not docs-only. ` +
-      `Auto-merge will not run; this PR needs a human merge.`,
+    `${message} — but ${why} Auto-merge will not run.`,
   );
+}
+
+/**
+ * The lane note the status suffix carries, per refusal reason (#2078).
+ *
+ * Short by necessity — it is appended to a one-line toast — and it must never state a
+ * reason that is not the real one. The old text said "not docs-only" unconditionally,
+ * which is false for an approval PR: those ARE docs-only and are withheld because
+ * ratifying is a human act.
+ */
+function laneSuffixNote(refusal: LaneRefusal): string {
+  switch (refusal.kind) {
+    case 'eligible':
+      return '';
+    case 'not-docs-only':
+      return ' — not docs-only, so no docs-lane label';
+    case 'governance-status-transition':
+      return ' — a status: transition is a human act, so no docs-lane label (#1847)';
+    case 'unproven-governance':
+      return ' — governance diff unreadable, so no docs-lane label';
+    case 'unproven':
+      return ' — changed paths unprovable, so no docs-lane label';
+  }
 }
 
 /** Short, fixed reason per failed {@link openPullRequest} outcome (FR-5). */
@@ -726,7 +766,19 @@ async function openApprovalPr(
     // literally what the PR was opened from. Fails closed exactly as before if it
     // cannot be resolved.
     const changed = await branchChangedPaths(run, rootDir, PR_BASE, `origin/${result.branch}`);
-    const labels = laneLabelsFor(changed);
+    // ELIGIBILITY evidence (#2078). Corpus membership was the whole label test until
+    // now, and since #1847 it is the wrong question for the only PR class this code
+    // produces: an approval or acceptance is a `status:` transition plus its sidecar,
+    // so it IS docs-only, earned the label, and was then refused by the lane with
+    // `exit 1` — a permanent manufactured red on the maintainer's own artefacts.
+    // Diffing only the governance files costs nothing on an ordinary docs PR (there
+    // are none, so no git call is made), and `undefined` fails closed exactly as an
+    // unresolvable path range does.
+    const diffs = changed
+      ? await branchDiffEntries(run, rootDir, PR_BASE, `origin/${result.branch}`, changed)
+      : undefined;
+    const refusal = laneRefusal(changed, diffs);
+    const labels = laneLabelsFor(changed, diffs);
     const record = readRecord(rootDir, approvableRelPath(paths));
     // Caller-supplied SHA WINS, and an EXPLICIT `null` suppresses the fallback
     // entirely — see `ApprovalPushContext.sha` for why the three states differ.
@@ -739,7 +791,7 @@ async function openApprovalPr(
       cwd: rootDir,
       head: result.branch,
       title: ctx.subject,
-      body: buildApprovalPrBody({ paths, record, sha, labels }),
+      body: buildApprovalPrBody({ paths, record, sha, labels, refusal }),
       labels,
       // FR-6: if an open PR already exists for this head, adopt it rather than
       // fanning out a second one.
@@ -763,14 +815,14 @@ async function openApprovalPr(
     // pushed, and leaving the developer without a PR would be the worse failure —
     // but it goes UNLABELLED and the suffix says so, so "no auto-merge" is never
     // a silent surprise.
-    const laneNote = labels.length === 0 ? ' — not docs-only, so no docs-lane label' : '';
+    const laneNote = laneSuffixNote(refusal);
 
     switch (pr.outcome) {
       case 'created':
-        void notifyPrOpened(`MinSpec: approval PR opened — ${pr.url}`, labels);
+        void notifyPrOpened(`MinSpec: approval PR opened — ${pr.url}`, labels, refusal);
         return { suffix: ` · pushed on ${result.branch} · PR opened${laneNote} (${pr.url})`, pr };
       case 'adopted':
-        void notifyPrOpened(`MinSpec: approval PR already open — ${pr.url}`, labels);
+        void notifyPrOpened(`MinSpec: approval PR already open — ${pr.url}`, labels, refusal);
         return {
           suffix: ` · pushed on ${result.branch} · PR already open (${pr.url})`,
           pr,

@@ -217,11 +217,43 @@ if [ "${LOCK_GATE_OFF:-}" != "1" ]; then
 fi
 
 if [ "${ADR_BORN_GATE_OFF:-}" != "1" ]; then
+  # #2057: `--diff-filter=A` only knows about ONE parent — HEAD. On a merge
+  # commit, every DR that MERGE_HEAD already has and this branch's tip does
+  # not looks "newly added" here, even though nobody authored it in this
+  # commit; it arrived via the merge. That makes the false positive
+  # systematic: it fires on every merge-from-main into a branch older than
+  # the most recent DR acceptance.
+  #
+  # Fix (issue #2057 rec option): on a merge commit, skip a file from this
+  # check when its staged content is byte-identical to what MERGE_HEAD
+  # already has — that content was not authored in this commit, so there is
+  # nothing to judge. Only a file whose content differs from BOTH parents
+  # (genuinely new, or rewritten while resolving the merge) is evaluated.
+  # Non-merge commits are unaffected: no MERGE_HEAD, so every added file is
+  # still checked exactly as before.
+  #
+  # A DR truly authored INSIDE a merge resolution, with content matching
+  # neither parent, still gets checked below. A DR authored inside a merge
+  # resolution that happens to reintroduce a parent's exact bytes is the
+  # accepted residual (named in the issue): rare, and CI's own DR-029 check
+  # still sees the merge result on the PR — this hook is not the only gate.
+  born_gate_git_dir=$(git rev-parse --git-dir 2>/dev/null) || born_gate_git_dir=""
+  born_gate_merge_head=""
+  if [ -n "$born_gate_git_dir" ] && [ -e "$born_gate_git_dir/MERGE_HEAD" ]; then
+    born_gate_merge_head=$(cat "$born_gate_git_dir/MERGE_HEAD")
+  fi
   while IFS=$'\t' read -r _status path; do
     case "$path" in
       docs/decisions/DR-*.md) ;;
       *) continue ;;
     esac
+    if [ -n "$born_gate_merge_head" ]; then
+      born_gate_staged_blob=$(git rev-parse ":$path" 2>/dev/null || true)
+      born_gate_parent_blob=$(git rev-parse "$born_gate_merge_head:$path" 2>/dev/null || true)
+      if [ -n "$born_gate_parent_blob" ] && [ "$born_gate_staged_blob" = "$born_gate_parent_blob" ]; then
+        continue
+      fi
+    fi
     born=$(git show ":$path" | grep -m1 -E '^status:' | sed -E 's/^status:[[:space:]]*//; s/[[:space:]]*#.*//; s/[[:space:]]*$//')
     if [ "$born" != "proposed" ] && [ "$born" != "draft" ]; then
       echo "✖ DR-029 gate: new DR '$path' is born 'status: ${born:-<none>}' — must be 'proposed'." >&2

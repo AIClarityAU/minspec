@@ -54,9 +54,14 @@ import path from 'node:path';
  */
 export const CATEGORY_REPO = {
   minspec: 'AIClarityAU/minspec',
-  scrooge: 'AIClarityAU/scroogellm',
   sealbox: 'AIClarityAU/sealbox',
 };
+// `scrooge` -> AIClarityAU/scroogellm was removed on 2026-09-22: the founder stopped
+// work on that repo, so filing there would manufacture a backlog nobody reads. The
+// radar prompt no longer offers the category either, and a cost/measurement finding
+// now lands as a watch item (`act: false`) in the briefing instead. Re-adding the key
+// is a decision to restart that work, not a repair — a stale scan that still emits
+// `scrooge` fails the run loudly by design, and the fix is the scan, not this table.
 
 const ALLOWED_TYPES = new Set(['research', 'measure', 'feat', 'fix', 'chore']);
 const LABELS = 'idea,inbox';

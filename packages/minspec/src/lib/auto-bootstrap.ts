@@ -40,11 +40,14 @@ import { findSpecDirsMissingTasksMd, scaffoldTasksMd } from './scaffold';
  * here so every existing importer of `auto-bootstrap` keeps working unchanged.
  */
 import {
+  type AlwaysPrefKey,
   type BootstrapPreferences,
   loadPreferences,
   savePreferences,
+  resolveProjectPreference,
 } from './preferences';
 export {
+  type AlwaysPrefKey,
   type BootstrapPreferences,
   preferencesPath,
   loadPreferences,
@@ -268,6 +271,16 @@ export interface BootstrapVsCode {
    * "Always" action falls back to a one-shot run.
    */
   enableAutoClassify?(folder: string): Promise<void> | void;
+  /**
+   * Read a contributed boolean setting under the `minspec.` section (#2079).
+   *
+   * The READ counterpart to `enableAutoClassify`. Its absence was the defect:
+   * this interface declared a way to WRITE the "Always" choice and no way to
+   * read it back, so no call site could consult it and the prompt re-asked
+   * forever. Optional so existing test stubs need not implement it; absent →
+   * only the project-local preference is consulted.
+   */
+  getBooleanSetting?(key: string): boolean;
 }
 
 /** Identifiers used by the per-prompt skip flags */
@@ -442,6 +455,29 @@ export interface BootstrapStep {
    */
   readonly alwaysAction?: string;
   /**
+   * Where a taken "Always" is REMEMBERED (#2079). Without it the affordance is
+   * a one-shot: the label promises "from now on" and the next activation asks
+   * again. Set it and `runBootstrap` both persists the choice here and reads it
+   * back before offering, so the step runs itself unattended instead.
+   */
+  readonly alwaysPrefKey?: AlwaysPrefKey;
+  /**
+   * Optional contributed VS Code setting carrying the same "Always" meaning
+   * (#2079). Consulted as the FALLBACK when the project-local preference is
+   * absent, per DR-078 §4's read order — which is what lets a workspace that
+   * already set `minspec.autoClassifyOnCommit` by hand be honoured without the
+   * user having to click "Always" again.
+   */
+  readonly alwaysSettingKey?: string;
+  /**
+   * Argument used when the step runs itself unattended under a standing
+   * "Always" (#2079). The classify step passes `{ auto: true }` so the
+   * machine-triggered run surfaces the passive status-bar line and never the
+   * interactive toast — a buttoned verdict nobody asked for is the nag #216
+   * removed. Falls back to `commandArg` when unset.
+   */
+  readonly alwaysRunArg?: unknown;
+  /**
    * Optional extra argument forwarded to the command after the folder. The
    * backfill step uses it to pass AI consent ({ aiConsent: true }) — the offer's
    * toast already promised the AI pass, so the command must not re-ask (#213).
@@ -507,6 +543,12 @@ export const BOOTSTRAP_STEPS: readonly BootstrapStep[] = [
     commandId: 'minspec.classify',
     skipPrefKey: 'skipClassifyPrompt',
     alwaysAction: 'Always',
+    // #2079: where "Always" is remembered, and the setting that means the same
+    // thing. Both are needed — the preference is what the click writes, the
+    // setting is what a hand-configured workspace already has.
+    alwaysPrefKey: 'autoClassifyOnCommit',
+    alwaysSettingKey: 'autoClassifyOnCommit',
+    alwaysRunArg: { auto: true },
     // The `.git/index` mtime is exactly the signal `hasUnclassifiedChanges` keys
     // on: unchanged since the last answer → same staging state → don't re-ask;
     // new staging activity bumps the mtime → new signature → re-ask (#883).
@@ -671,6 +713,53 @@ function recordAnsweredSignature(rootDir: string, step: BootstrapStep): void {
   });
 }
 
+/**
+ * Has this step's "Always" already been taken (#2079)?
+ *
+ * Read order is DR-078 §4: the project-local preference is the narrower, more
+ * recently expressed intent and wins wherever present; absent one, the
+ * contributed VS Code setting applies. Deliberately routed through
+ * `resolveProjectPreference` rather than `||` so a project preference of
+ * `false` overrides a setting of `true` — opting a single project back into the
+ * prompt must stay possible.
+ *
+ * A step with no `alwaysPrefKey` always returns false: a prompt is never
+ * suppressed by a preference it never declared it reads.
+ */
+function alwaysChosen(
+  step: BootstrapStep,
+  prefs: BootstrapPreferences,
+  vscode: BootstrapVsCode,
+): boolean {
+  if (!step.alwaysPrefKey) return false;
+  const projectValue = prefs[step.alwaysPrefKey];
+  const settingValue =
+    step.alwaysSettingKey && vscode.getBooleanSetting
+      ? vscode.getBooleanSetting(step.alwaysSettingKey) === true
+      : false;
+  return resolveProjectPreference(projectValue, settingValue) === true;
+}
+
+/**
+ * Run a step's effect with no prompt, under a standing "Always" (#2079).
+ * Mirrors the primary-action path, minus the question.
+ */
+async function runStepUnattended(
+  rootDir: string,
+  step: BootstrapStep,
+  vscode: BootstrapVsCode,
+): Promise<void> {
+  if (step.action) {
+    await step.action(rootDir);
+    return;
+  }
+  await vscode.executeCommand(
+    step.commandId,
+    rootDir,
+    step.alwaysRunArg ?? step.commandArg,
+  );
+}
+
 export async function runBootstrap(
   rootDir: string,
   vscode: BootstrapVsCode,
@@ -687,6 +776,16 @@ export async function runBootstrap(
 
   for (const step of steps) {
     if (!step.shouldRun(rootDir, prefs)) continue;
+
+    // #2079: an "Always" already taken is a standing answer, so the question is
+    // never put again — the step runs itself instead. Checked BEFORE the #883
+    // per-state memory because "Always" outranks it: that memory keys the
+    // classify step on `.git/index` mtime, which every `git add` bumps, which is
+    // exactly why the prompt kept coming back after the user had answered it.
+    if (alwaysChosen(step, prefs, vscode)) {
+      await runStepUnattended(rootDir, step, vscode);
+      continue;
+    }
 
     // #883: suppress a step that was ALREADY answered for its current state
     // signature — an already-answered prompt is not re-offered until the
@@ -709,6 +808,13 @@ export async function runBootstrap(
     const choice = await vscode.showPrompt(step.message, actions);
 
     if (step.alwaysAction && choice === step.alwaysAction) {
+      // #2079: persist the choice FIRST, in MinSpec's own store — this is the
+      // half the guard reads back, and it must not depend on the host being
+      // able to write a settings file. The `enableAutoClassify` call below is
+      // still made, because it is what starts the on-commit watcher live (#203).
+      if (step.alwaysPrefKey) {
+        savePreferences(rootDir, { [step.alwaysPrefKey]: true });
+      }
       // Opt into auto-run going forward, then run once now. If the host can't
       // persist the setting, fall back to a plain one-shot run.
       if (vscode.enableAutoClassify) {

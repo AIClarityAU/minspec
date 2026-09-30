@@ -6,7 +6,7 @@ tier: T4
 product: minspec
 epic: EPIC-002  # Signpost Integrity - an approval that cannot say what it covered is a false signpost
 aspects: [approval, hash, canonicalization, ownership, spec-gate, migration, no-silent-gate, tier-0]
-relates_to: [DR-088, DR-012, DR-034, DR-031, SPEC-022, SPEC-038, SPEC-051, SPEC-017]
+relates_to: [DR-088, DR-096, DR-012, DR-034, DR-031, DR-090, SPEC-022, SPEC-038, SPEC-051, SPEC-017, SPEC-066]
 # Ownership declared during Specify, deliberately BEFORE any approval mints a hash.
 # SPEC-051 records what happens otherwise: declaring after approval stales the signature
 # the human just gave. That trap is the subject of this spec, so hitting it here would be
@@ -40,6 +40,24 @@ phases:
 > the build. Tier **T4 (complete ceremony)** because the change is a content contract
 > embedded in 61 committed records, mirrored across two language implementations, one of
 > which MinSpec scaffolds into other people's repositories.
+
+> **Carries a refresh written at commit `03a9c570` on 2026-09-22 that never reached `main`,
+> grafted here 2026-09-25 (AEST; 2026-09-24 UTC).** The refresh was committed to
+> `agent/issue-1800` an hour and twenty-two minutes before the founder approved the
+> then-current body, so it was never in front of them and the branch was never merged; the
+> branch as a whole must not be, because it predates six specs and would delete them. What
+> it contributes, and what is grafted: **(a)** a re-verification of the measurement basis at
+> `03a9c570`, which proves the sidecar census unmoved structurally rather than by re-running
+> it and names what it did *not* re-check; **(b)** FR-10 grows a **non-spec** site list,
+> because its original census predicate ran over `specs/**/*.md` only and was therefore
+> blind to the same false claim in `canonical.py`, `canonical.ts`, `spec.ts`, `facts.ts` and
+> **DR-034**, the hashing-contract record itself; **(c)** DR-090 (managed prose is judged
+> from the consumer's vantage) binds FR-2, because `scripts/hooks/canonical.py` is a managed
+> template; **(d)** AC-24 and an unconditional half for AC-22; **(e)** OQ-10, the SPEC-066
+> co-ownership of `canonical.py`. Two parts of the refresh are deliberately NOT grafted: its
+> lifecycle reversion to `clarify: pending`, which would undo the approval of 2026-09-22, and
+> its re-anchored line numbers into the generated embed, which this spec's 2026-09-25
+> amendments replaced with symbol names precisely because those cites rot.
 
 ## One-Sentence Scope
 
@@ -182,6 +200,56 @@ cannot be costed cannot be acceptance-tested:
   section 2 (the replacement alarm) signs the *resolved* owned set into the sidecar: done
   against today's parser, the truncation is baked into a signed record.
 
+### Re-verified at commit `03a9c570` (2026-09-22)
+
+The table above was measured at `719878d6`. This section says which of its numbers are
+**proven still exact**, which **have moved**, and which were **not re-checked** - because
+"the numbers move under you" is only useful if someone periodically says by how much.
+
+**The sidecar census is unmoved, and the proof is structural rather than re-run.** Those
+counts are a pure function of exactly three inputs: the sidecar bytes, the bytes of the spec
+files they key, and the canonicalizer. All three were byte-identical to the basis at
+`03a9c570`:
+
+- `git diff --name-only 719878d6..HEAD -- .minspec/` was **empty**;
+- `git diff --name-only 719878d6..HEAD -- specs/` returned **four** files, every one either
+  a `design.md` or new: `SPEC-051/design.md`, `SPEC-055/design.md`, `SPEC-064/design.md`, and
+  this spec. **None has a sidecar** - `.minspec/approvals/…/` holds `requirements.md.json`
+  only;
+- the same diff over `canonical.ts`, `canonical.py`, `spec-gate.py`, `approval.ts`,
+  `approval-store.ts`, `approval-provenance.py`, `spec-validator.ts`, `migrate-approvals.ts`,
+  `ownership-path-rules.ts`, `spec-catalog.ts`, `docs-lane.yml` and
+  `validate-frontmatter.ts` was **empty**.
+
+So 61 / 58 old-fresh / 3 stale / 22 fresh-under-both / 36 needing a re-stamp / 0
+would-improve / 37 moving hashes all still held, as did the **27 non-empty + 31 empty**
+seeding split - which is additionally tree-independent, because the structured arm resolves
+with `require_exists=False` (`spec-gate.py:362-364` feeding `consider` at `:341`, whose
+existence filter at `:355-357` applies to the fuzzy arm only), so files created or deleted
+since the basis cannot move it. Three field counts were re-run directly: `ownedAtApproval`
+**0 of 61**, `reviewStart` **0 of 61** (the FR-4 precedent still unrepaired), `baselineBlob`
+**57 of 61**.
+
+**Two corpus-dependent populations had moved, by a known amount.** The in-band T3/T4 file
+count went **34 to 35** and the `implements: none` cohort **13 to 14**:
+`specs/minspec/SPEC-064-planning-lifecycle-status/design.md` was new, carries `tier: T3` and
+`plan: in-progress` so `phase_intent_status` returns `implementing`
+(`spec-gate.py:228-230`), and declares `implements: none`. It has no sidecar, so no
+*approved*-side count moved. `SPEC-055/design.md` carries **no** `tier:` and is dropped at
+`spec-gate.py:462`, the shape already recorded for `SPEC-043/design.md`. The body-prose site
+count (FR-10) went **at least 9 to 10**, because this spec's own Context quotes the two-key
+strip set.
+
+**What was NOT re-checked, stated rather than implied.** The fuzzy-arm populations (18 files
+/ 47 paths) and the transitional-freeze numbers (22 in-band specs / 88 files) depend on the
+whole working tree through the existence-filtered `tasks.md` arm, and the tree had gained
+files. They are the numbers most likely to have drifted and they are unverified. The
+dispatch that produced this refresh also had no `python3` and no `node` execution, so none of
+the census commands under "Tests to Pass" was run - everything above rests on `git`, `grep`
+and reading the code. The standing instruction is unchanged and now doubly earned: **the Plan
+and the migration recompute at their own commit; nothing in this document may be quoted
+forward.**
+
 ### Ambiguity that must be resolved before any count is used
 
 "Declares no `implements:`" has two readings and they differ by thirteen specs.
@@ -225,11 +293,25 @@ reading it means.
   three, and the change MUST land simultaneously in:
   1. `packages/shared/src/canonical.ts` (`stripLifecycle`, `:60-83`);
   2. `scripts/hooks/canonical.py` (`_strip_lifecycle`, `:37-53`);
-  3. the base64 `CANONICAL_PY` in `packages/minspec/src/lib/ci-review-templates.ts:3072`,
+  3. the base64 `CANONICAL_PY` in `packages/minspec/src/lib/ci-review-templates.ts`,
      regenerated with `node scripts/gen-ci-templates.mjs` and **never hand-edited**. Rule 12
      (FATAL) at `scripts/validate-frontmatter.ts:522-557` fails `npm run validate` in CI's
      lint job on a stale embed; it iterates `gen.generateAll(ROOT)`, so it covers every
-     generated file including `APPROVAL_PROVENANCE_PY` (`ci-review-templates.ts:2899`).
+     generated file including `APPROVAL_PROVENANCE_PY` (same file, named export).
+
+  **DR-090 binds this requirement, and names the exact file.** `scripts/hooks/canonical.py`
+  is a managed template, so its docstring is *shipped prose* judged from the consumer's
+  vantage (DR-090 §1, `status: accepted`), and DR-090's own measurement table cites
+  `canonical.py:4-7` as one of seven upstream-only claims. `:14` of that same docstring states
+  the two-key strip set, and FR-2 makes it **false in every repo that has the file**, upstream
+  included. The correction is therefore not optional tidying: under DR-090 §2 it is
+  attribution-or-repair on shipped bytes, and under FR-2 rule 3 it regenerates the embed.
+  DR-090's `managed-prose-vantage` gate is specified by **SPEC-066 (managed prose is true in
+  the repo that receives it)**, whose `implements:` files
+  (`packages/minspec/src/lib/prose-vantage.ts`,
+  `packages/minspec/tests/managed-prose-vantage.test.ts`) are both **absent from
+  `origin/main`**, re-verified 2026-09-25 - so nothing mechanically checks this yet. It is a
+  Plan-time obligation, not a gate, and the ownership question it raises is OQ-10.
 
   **A fourth artifact consumes this basis and is not a canonicalizer:
   `scripts/approval-provenance.py`.** It imports `spec_hash` from the scaffolded
@@ -242,7 +324,10 @@ reading it means.
   stale at base. That is the false forged-sign-off block the script was written to prevent
   (its own docstring cites PR #1017). FR-1 closes this window **in this repo** by requiring
   the strip and the migration in one merged state; it does **not** close it for adopters,
-  who receive the widened `canonical.py` and no migration - see FR-11 and OQ-2.
+  who receive the widened `canonical.py` and no migration - see FR-11 and OQ-2. The
+  behaviour described in this paragraph is the tool as it stands **before** OQ-2's
+  resolution. Under option (d) an adopter sees `PRE-STRIP BASIS` rather than `MISMATCH` on
+  such a record; the window is still open, but it is no longer reported as a finding.
 
   Two implementation traps are normative, not advisory:
   - **Use the `phases:` branch, not the `status:` branch.** `PHASES_LINE_RE` sets
@@ -321,8 +406,10 @@ reading it means.
      diff. The report MUST therefore diff `ownedAtApproval` between base and head and state
      whether the spec's resolved ownership changed, and the `:196` line MUST branch so a
      genuinely metadata-only change reads differently from an ownership-snapshot change.
-     The file is a managed template (`template-registry.ts:2179-2185`, `content:
-     APPROVAL_PROVENANCE_PY`), so the change also regenerates its embed (FR-2 rule 3).
+     The file is a managed template (the `name: 'approval-provenance-script'` entry in
+     `template-registry.ts`, `content: APPROVAL_PROVENANCE_PY`), so the change also
+     regenerates its embed (FR-2 rule 3) and any comment it adds is shipped prose under
+     DR-090 (FR-2).
 
   `approveSpec` never reads the prior sidecar and `writeRecord` is a whole-file overwrite
   (`approval-store.ts:160-164`), so a value present on disk but absent from the literal is
@@ -408,7 +495,7 @@ reading it means.
   human's signature with neither the hash nor the drift check able to notice. Measured: **13
   of the 34 in-band T3/T4 spec files declare `implements: none`**. DR-088 selected
   `implements_reason` for the strip on its own separate argument, which this spec does not
-  re-litigate; whether the sidecar also records the reason so drift can see it is OQ-10.
+  re-litigate; whether the sidecar also records the reason so drift can see it is OQ-9.
 
 - **FR-7 (evaluated above the phase band, per record).** Drift MUST be evaluated before the
   phase-intent `continue` at `spec-gate.py:501`. DR-088 says `rec` and the approval verdict
@@ -560,7 +647,8 @@ reading it means.
       - *Day-one drift population.* Zero by construction: every seeded record's snapshot
         equals its current structured set at the migration commit. The drift population
         thereafter is created by real declaration edits - principally the #1649 backfill,
-        which is exactly the batched ack DR-088 intends (OQ-9).
+        which is exactly the batched ack DR-088 intends (OQ-8; corrected 2026-09-25 from a
+        dangling OQ-9, which is the `implements_reason` question).
 
 - **FR-10 (the prose the change makes false).** Every claim in the repo that the hash
   strips *exactly* `status` and `phases` MUST be corrected in the same body of work. The
@@ -599,15 +687,47 @@ reading it means.
     which is not a claim about the strip set. `SPEC-052` and `SPEC-060` are **frontmatter**
     sites, not body sites. `specs/minspec/SPEC-041-cross-artifact-staleness/design.md:26` and `specs/minspec/SPEC-017-trust-dashboard/design.md` are body sites
     the first draft missed.
+  - **Non-spec sites: 5 code sites and 1 decision record, none of which the original census
+    could see.** Both predicates above are scoped to `specs/**/*.md`, so the same false claim
+    living in code, in a shipped template and in the hashing-contract DR went uncounted.
+    Re-derived at `03a9c570` by grepping the tree outside `specs/`, and every line
+    re-verified against `origin/main` on 2026-09-25:
+    - `scripts/hooks/canonical.py:14` (*"Remove exactly the lifecycle keys `status` and
+      `phases`"*) - **a managed template**, so this correction is governed by DR-090 and
+      regenerates `CANONICAL_PY` (FR-2). The highest-priority site on either list: it is the
+      only one that ships into a repo that cannot correct it.
+    - `packages/shared/src/canonical.ts:14` and `:51` - the TypeScript twin's module
+      docstring and `stripLifecycle`'s own docstring. Becomes false, not merely incomplete.
+    - `packages/minspec/src/lib/spec.ts:509` (*"Creating the block is hash-neutral:
+      `canonical.ts` strips `status` and `phases` from …"*) - the hash-neutrality claim
+      survives FR-2; the enumeration in it does not.
+    - `scripts/facts.ts:13`, and the user-visible string at `:318` (*"(none — no
+      status:/phases: block present)"*). `npm run facts` is the tool this repo's own CLAUDE.md
+      points people at to answer hash questions in seconds, so a stale strip-set description
+      there is wrong at exactly the moment someone is checking.
+    - `docs/decisions/DR-034.md:110` (*"From frontmatter, **remove exactly the lifecycle keys
+      `status` and `phases`**"*) - the **hashing contract itself**. DR-088 changes that
+      contract, so DR-034 needs an amendment or a superseded-on-this-point note; a contract
+      record still stating the old rule is the most load-bearing false claim in the set. A DR
+      amendment is not a spec edit, so it is tracked as its own follow-up.
+    - Checked and excluded: `docs/decisions/DR-088.md:55` (describes the **pre-change**
+      behaviour as context and stays true), `docs/research/llm-wiki-pattern-2026-08-22.md` (a
+      dated research note), `packages/shared/tests/rework.test.ts:43` and
+      `packages/minspec/tests/facts-cli.test.ts:135` (comments about body-only hashing and
+      about lifecycle lines being stripped, both still true after FR-2).
   - **While amending SPEC-022**, FR-3's step order should be corrected too: it lists EOL
     normalization last, and the code does it **first** (`canonical.ts:91`), which matters
     because `FRONTMATTER_RE` at `:41` only matches `\n`-normalized input - the spec's stated
     order would fail on CRLF.
 
-  The union of the two site lists is **23 files, 19 approved**; each correction to an
-  approved file stales that approval and costs a human re-approval, and a correction landed
-  *before* the migration makes that record stale under the old basis, which FR-9.3 will
-  refuse to re-stamp. The ordering is OQ-4.
+  The union of the two **spec-corpus** site lists is **23 files, 19 approved**; each
+  correction to an approved file stales that approval and costs a human re-approval, and a
+  correction landed *before* the migration makes that record stale under the old basis, which
+  FR-9.3 will refuse to re-stamp. The ordering is OQ-4. The six **non-spec** sites above are
+  outside that economy entirely - none is an approvable, so none costs a sign-off - which is
+  the reason to correct all six unconditionally rather than let OQ-4's ordering decision reach
+  them. `canonical.py:14` and `DR-034:110` are the two that MUST be corrected in the same body
+  of work as FR-2 whatever OQ-4 decides: the first ships, and the second is the contract.
 
 - **FR-11 (state what adopters actually receive, in terms of what is actually scaffolded).**
   The first draft asserted that the strip "reaches every adopter repo's spec-gate". It does
@@ -615,17 +735,38 @@ reading it means.
   is not a managed template.** `grep -n "spec-gate" packages/minspec/src/lib/template-registry.ts`
   returns nothing; the registry's machinery block holds 15 `outputPath:` entries
   (`:2114`-`:2261`) and the gate is not among them. What adopters receive is:
-  - `scripts/hooks/canonical.py` (`template-registry.ts:2186-2196`, `name:
-    'canonical-hasher-python'`), scaffolded because **`scripts/approval-provenance.py`
-    imports it at load time** (`approval-provenance.py:50`; the registry says so at
-    `:2187-2189`);
-  - `scripts/approval-provenance.py` itself (`:2172-2185`), the AI-review panel's provenance
-    tool, invoked on every review by the scaffolded `scripts/review-branch.sh:107-108`.
+  - `scripts/hooks/canonical.py` (the `name: 'canonical-hasher-python'` entry in
+    `template-registry.ts`), scaffolded because **`scripts/approval-provenance.py`
+    imports it at load time** (`approval-provenance.py:50`; that entry's own comment
+    says so);
+  - `scripts/approval-provenance.py` itself (the `name: 'approval-provenance-script'`
+    entry), the AI-review panel's provenance tool, invoked on every review by the
+    scaffolded `scripts/review-branch.sh:107-108`.
+
+  Both entries sit inside `CI_REVIEW_STACK_TEMPLATES`, which feeds
+  `SELF_HOSTED_TEMPLATE_NAMES` (`template-registry.ts:2320-2323`) - and the #1888
+  self-application gate skips exactly those names
+  (`packages/minspec/tests/managed-region-self-application.test.ts:109-112`,
+  `if (selfHosted.has(tpl.name)) continue;`, read at `origin/main` 2026-09-25). So that gate
+  **excludes both FR-2 artifacts by construction**, and the FR-2 change gains no witness from
+  it. See Risks.
 
   So the real adopter consequence of FR-2 is **a silent hash-basis change under a
   merge-gating review input**, with no gate, no snapshot and no migration shipped: after the
   strip, an adopter's review panel recomputes approval hashes on the new basis against
-  records minted on the old one, and reports `MISMATCH - a real finding` on valid records.
+  records minted on the old one. **Amended 2026-09-25 (AEST; 2026-09-24 UTC), under OQ-2's
+  resolution, option (d):** on such a record the shipped tool reports `PRE-STRIP BASIS -
+  matches under the pre-ownership-strip hash; re-approve to move it forward`, a verdict
+  distinct from both `MATCHES` and `MISMATCH` and never green. *Before that resolution this
+  paragraph read "reports `MISMATCH - a real finding` on valid records". Option (d) exists
+  precisely to keep that verdict away from an adopter's reviewers, and no requirement in
+  this spec documents the `MISMATCH` behaviour on a valid old-basis record any longer.*
+  That resolution is not free, and the cost is recorded
+  here because the OQ-2 decision text must state it - deciding whether a record is valid
+  under the pre-strip basis requires a pre-strip hasher INSIDE the adopter-shipped Python,
+  which means a new managed template, a move of the membership pin at
+  `packages/minspec/tests/managed-region-enumeration.test.ts:94` (currently asserting 31),
+  and a fourth artifact under INV-5's twin-parity obligation.
   `scripts/validate-frontmatter.ts` is not scaffolded either, so Rule 12 does not travel,
   and neither does the `ownedAtApproval` producer, which lives in the extension; an adopter
   on a stale installed build hashes differently from one that refreshed (#1492). This spec
@@ -785,10 +926,22 @@ move.
 - **AC-14 (FR-8.3, the corpus gate).** `npm run validate` fails with an **error** on a
   corpus containing an approved record without a well-formed `ownedAtApproval`, and passes
   on the post-migration corpus. Asserted against a fixture corpus, not the live one.
-- **AC-15 (FR-9, pre-flight).** The migration's pre-flight proves it is computing on **two
-  bases**: it asserts that at least one known record classifies differently under each, and
-  aborts if not. A pre-flight that cannot demonstrate two bases fails the run rather than
-  reporting success.
+- **AC-15 (FR-9, pre-flight).** The migration's pre-flight proves **it is not comparing an
+  artifact to itself**, and aborts if it cannot. Each mode discharges that differently,
+  because the two bases are not always distinguishable:
+  - **Rehash mode** asserts that at least one known record classifies differently under each
+    basis, and aborts if not.
+  - **Seed mode** runs pre-strip, where `preStripSpecHash` is a verbatim copy of the live
+    hasher and the two bases therefore agree on every possible input. A literal two-bases
+    assertion there aborts and seeds nothing, which contradicts FR-9.10. Seed mode instead
+    proves the inverse - that the two bases agree on a known record - **plus** an
+    anti-vacuity assertion that the pre-flight classified a non-zero population.
+
+  A pre-flight that cannot discharge its mode's form fails the run rather than reporting
+  success. *(Amended 2026-09-25 (AEST; 2026-09-24 UTC): the original text required two-bases divergence in both
+  modes, which seed mode cannot satisfy by construction. Found by planning against this
+  criterion; see section 8 of `specs/minspec/SPEC-070-ownership-hash-exit/design.md`, which
+  lands via #2058.)*
 - **AC-16 (FR-9, refusal).** A spec whose ownership lines were added **after** approval
   (stale under the old basis, fresh under the new) is quarantined to a non-approving state
   with `approvedBy`/`approvedAt` preserved, and the run reports it distinctly from "already
@@ -823,13 +976,34 @@ move.
   other than `status`/`phases` voids the approval, its pins at `spec-manager.test.ts:946`
   and `:948` are updated in the same change, and the mechanically re-derived
   frontmatter-site and body-site lists are both empty of two-key strip-set claims on
-  approved files that the Plan elected to correct (OQ-4 decides which).
+  approved files that the Plan elected to correct (OQ-4 decides which). **Separately and
+  unconditionally**, the whole-tree grep outside `specs/` returns no surviving two-key
+  strip-set claim at the six non-spec sites - `canonical.py:14`, `canonical.ts:14` and `:51`,
+  `spec.ts:509`, `facts.ts:13` and `:318`, `DR-034:110` - with the `DR-034` half satisfied by
+  an amendment to that record rather than an edit to this one.
 - **AC-23 (FR-11).** A scaffolded adopter fixture receives the widened `canonical.py` **and**
-  `approval-provenance.py`, and the provenance tool's documented behaviour on an
-  old-basis record matches what FR-11 says adopters get. Asserted against the
+  `approval-provenance.py`. "Widened" is asserted by EXECUTING the scaffolded hasher
+  (`canonical.py --hash`) and requiring it to agree with the shipped TypeScript `specHash` and
+  to differ from the frozen pre-strip basis on an ownership-bearing fixture - never by file
+  existence alone. The provenance tool's behaviour on an old-basis record, run from the
+  SCAFFOLDED copy against a temporary git repository, MUST be exactly the verdict FR-11
+  documents under OQ-2's resolution (d): `PRE-STRIP BASIS - matches under the
+  pre-ownership-strip hash; re-approve to move it forward`. Asserted against the
   managed-template scaffold harness at
-  `packages/minspec/tests/managed-script-dependencies.test.ts:118-149`. The fixture MUST NOT
-  assert a scaffolded spec-gate, because there is none.
+  `packages/minspec/tests/managed-script-dependencies.test.ts:118-149` for the hasher half, and
+  `packages/minspec/tests/approval-provenance.test.ts` for the behavioural half. The fixture
+  MUST NOT assert a scaffolded spec-gate, because there is none. *(Amended 2026-09-25 (AEST;
+  2026-09-24 UTC): the original pinned the tool to FR-11's `MISMATCH` verdict, which the OQ-2 third-verdict
+  resolution changes; it was also satisfiable by file existence alone.)*
+- **AC-24 (FR-2, DR-090 vantage on the shipped bytes).** The corrected
+  `scripts/hooks/canonical.py` docstring, read as `renderManagedFile` emits it, states the
+  new five-key strip set and makes **no** claim that is false in a repo holding only the
+  scaffolded files - or attributes it, in DR-090 §2's form, to the minspec repo. Asserted by
+  reading the **rendered** bytes, not the working file, because those are what an adopter
+  receives. SPEC-066's `managed-prose-vantage` gate does not exist yet
+  (`packages/minspec/src/lib/prose-vantage.ts` and
+  `packages/minspec/tests/managed-prose-vantage.test.ts` both absent from `origin/main`,
+  verified 2026-09-25), so this criterion is asserted by a check written here, not inherited.
 
 ## Tests to Pass
 
@@ -946,6 +1120,16 @@ for name, lst in [('frontmatter reminder', fm_sites), ('  ...old ANY-edit wordin
 PY
 ```
 
+Non-spec prose sites (FR-10's second list and AC-22's unconditional half). Deliberately a
+plain grep over everything **outside** `specs/`, because that is the scope the two census
+scripts above cannot reach:
+
+```bash
+grep -rn --exclude-dir=node_modules --exclude-dir=.git \
+  -E "lifecycle keys|status:/phases:|\`status\` and \`phases\`" \
+  packages/ scripts/ docs/ .github/ .minspec/
+```
+
 Migration classification (the re-stamp, quarantine and seeding populations):
 
 ```bash
@@ -1040,6 +1224,12 @@ this spec is approved, not from now: with `clarify: pending`, `phase_intent_stat
   declaring shared core in `affects:` freezes it for every other session until this spec is
   approved.
 - `scripts/migrate-approvals.ts` (FR-4.5) - same reason.
+- `packages/minspec/src/lib/spec.ts` and `scripts/facts.ts` (FR-10's non-spec sites) - the
+  edits there are **comment-only** corrections of a claim FR-2 falsifies, one line each.
+  Declaring either would freeze a high-traffic core module and the facts CLI for every
+  concurrent session, for a one-line comment. Named in FR-10 and asserted by AC-22 instead.
+  `packages/shared/src/canonical.ts` and `scripts/hooks/canonical.py` carry the same kind of
+  correction and **are** already in `affects:`, because FR-2 changes their behaviour too.
 - The existing test suites named under "Tests to Pass" - declaring test files owned by other
   specs would freeze them for every concurrent session.
 
@@ -1065,7 +1255,8 @@ no migration. Three real options:
 (b) gate the strip behind a hasher-version or `.minspec/config.json` flag, so an adopter's
 provenance tool keeps computing the old basis until they opt in;
 (c) accept the break and document it.
-*Recommendation: (b), a hasher-version flag.* **Cost:** a versioned hasher is a second basis
+*Recommendation as first written: (b), a hasher-version flag. **Superseded - see the
+resolution below, which takes (d).*** **Cost of (b):** a versioned hasher is a second basis
 that must be kept alive and tested in both twins for as long as any adopter has not migrated,
 which is exactly the "two canonical forms" state DR-012 exists to avoid; and a flag defaulting
 to "old" means the strip does not reach adopters at all until someone flips it, so #1649's
@@ -1073,6 +1264,46 @@ equivalent stays blocked in their repos. Option (a) is cleaner but ships a corpu
 script into repos MinSpec cannot test against, and (c) puts a `MISMATCH - a real finding`
 verdict in front of adopters' reviewers on valid records, which teaches them to distrust the
 one block that is never supposed to be noise.
+
+A fourth option was raised while planning, and is the one taken:
+(d) ship the widened hasher to everyone immediately, with **no** flag and **no** migration,
+and additionally scaffold a **frozen, diagnosis-only** copy of the pre-strip basis, so the
+provenance tool can tell "valid under the old basis" apart from "wrong" and report a third
+verdict - `PRE-STRIP BASIS - matches under the pre-ownership-strip hash; re-approve to move
+it forward` - distinct from `MATCHES`, never green, and never a minting basis.
+
+**RESOLVED: (d). Founder, 2026-09-25 (AEST; 2026-09-24 UTC).** Recorded as a decision in
+DR-096, because SPEC-051 INV-2 (quoted at the head of this spec) requires a change to the
+DR-034 hashing contract to carry its own DR and explicit human sign-off; DR-088 covers the
+strip itself, and this resolves DR-088's own "Still open" item 2, which is why it needs a
+second record rather than riding the first. The normative statements live in FR-11 and
+AC-23; this entry is the register, not a second source of truth.
+
+*Two events, deliberately not the same one.* The **decision** was put to the founder with its
+price attached and accepted in session on the date above, which is what licenses FR-11, AC-23
+and this entry. The **record** DR-096 is `status: proposed`, because DR-029's gate reserves
+acceptance for a separate human act (**MinSpec: Accept ADR**) and a record that arrives
+pre-accepted has helped itself to the keystroke. Neither is the INV-2 sign-off: that is the
+SPEC-070 re-approval, which these amendments staled by design and which no agent may mint.
+
+**Why (d) and not the other three.** (a) ships a corpus-rewriting script into repos MinSpec
+cannot test against. (b) defaults the strip off, so #1649's equivalent stays blocked in
+adopter repos until someone flips a flag they have no reason to know exists. (c) puts
+`MISMATCH - a real finding` on valid records in front of the one block that is never
+supposed to be noise. **The distinction that keeps (d) out of the state DR-012 forbids:**
+DR-012 refuses *two minting bases*, because a signature loses its meaning when two different
+forms can both produce one. The frozen copy can never mint. It is read-only, versioned once,
+and answers exactly one question - "was this record valid before the strip?" **The cost that
+remains, stated because a recommendation without one is advocacy:** it is still a second
+canonical implementation that must be kept alive and tested, so it is a fourth artifact under
+INV-5's twin-parity obligation, a new managed template, and a move of the membership pin at
+`packages/minspec/tests/managed-region-enumeration.test.ts:94`. It is also adopter-facing,
+so unlike a local change it cannot be un-shipped by reverting a commit.
+
+*Terminology, because two numbering schemes collide here.* "The third verdict" in this spec
+and in its Plan means a third **provenance verdict string** alongside `MATCHES` and
+`MISMATCH`. It is **not** option (c) of this register, which is its opposite: (c) accepts the
+`MISMATCH` and documents it.
 
 **OQ-3 - Fix the block-form parser here, or mandate inline form and gate on it?** FR-3.
 Option (a) fixes `fm_value`/`rawFrontmatterField` in both twins; option (b) rejects block
@@ -1162,6 +1393,85 @@ accept it - leaves a documented hole in 13 of 34 in-band specs, which is why it 
 question and not a default. Re-litigating whether `implements_reason` is stripped at all is
 **out of scope**: DR-088 decided it on its own argument.
 
+**OQ-10 - Who corrects `scripts/hooks/canonical.py`, this spec or SPEC-066? RESOLVED:
+this spec corrects it alongside FR-2. Founder, 2026-09-25.** Surfaced by
+the 2026-09-22 refresh grafted here. It is an ownership collision, not a wording question.
+**SPEC-066 (managed prose is true in the repo that receives it)** declares
+`scripts/hooks/canonical.py` in its own `affects:` list
+(`specs/minspec/SPEC-066-managed-prose-vantage/requirements.md:16`), because DR-090's
+measurement names that file's docstring as one of seven upstream-only claims - and this spec
+declares the same file, because FR-2 changes what it does.
+
+**The refresh's reading of "nothing is frozen today" no longer holds, and the corrected
+mechanism is worse in one direction and better in another.** Re-measured at `origin/main` on
+2026-09-25: SPEC-066 is `clarify: done` / `plan: in-progress`, so `_current_phase` returns
+`plan` and `phase_intent_status` returns `implementing` - it is **inside** the gate range, not
+skipped at `spec-gate.py:500-501`. It does not block only because `facts approval SPEC-066`
+reports `APPROVED`, and `spec-gate.py:512-513` admits a set to `blocking` on `unapproved` or
+`stale` alone. So the collision is disarmed by SPEC-066's valid signature, not by either spec
+being pre-Clarify.
+
+**The live direction is this spec, not SPEC-066.** SPEC-070 is also `plan: in-progress` and
+therefore also inside the gate range, and the 2026-09-25 amendment batch staled its approval
+by design. The moment that batch lands on `main`, SPEC-070's own owned set enters `blocking`
+with `scripts/hooks/canonical.py`, `packages/shared/src/canonical.ts`,
+`scripts/hooks/spec-gate.py`, `approval.ts`, `approval-store.ts` and
+`scripts/approval-provenance.py` in it - shared core, frozen for every concurrent session
+until the founder re-approves. ➡️ That makes the re-approval keystroke an unblocking act, not
+housekeeping.
+
+**The resolution, as accepted:** this spec corrects `canonical.py:14` in the same merged
+state as FR-2, and SPEC-066 later generalises over its seven DR-090 sites without re-touching
+that line. (The grafted draft said "the remaining six", which assumed `:14` was one of DR-090's
+rows and subtracted it. It is not - DR-090's table cites `canonical.py:4-7` at
+`docs/decisions/DR-090.md:51`. SPEC-066's count is unchanged by this resolution.) The reason is the never-wrong standard rather than convenience: FR-2 is what makes the
+sentence false, so any window in which the strip has shipped and the docstring has not been
+corrected is a window where MinSpec publishes a false statement into repositories that cannot
+correct it themselves. **The cost, accepted rather than avoided:** it puts a SPEC-066-owned line under
+this spec's change, so whoever implements SPEC-066 must be told that one of its seven sites is
+already done, and a careless SPEC-066 implementation could re-touch and re-break it. The
+alternative - leave `canonical.py:14` to SPEC-066 - costs nothing here and ships a known-false
+docstring to adopters for however long SPEC-066 takes, which is the worse trade for a project
+whose claim is that its signposts do not lie.
+
+**What the resolution obliges, and three corrections to how it was first written here.** A
+prose warning to a future implementer is the "trust the model" shape the constitution names as
+the failure mode, so the hand-off belongs in the artifacts rather than in memory: ➡️ SPEC-066's
+`affects:` entry for `scripts/hooks/canonical.py` needs a note that `:14` is discharged by this
+spec. Filed as **#2145** and registered in Follow-ups below, rather than left as prose.
+
+*Corrected 2026-09-25, after an adversarial review of this very paragraph; each was a real
+error, not a wording preference.*
+
+- **`:14` is not one of DR-090's sites, so SPEC-066 is left with seven, not six.** DR-090's
+  measurement table cites `scripts/hooks/canonical.py:4-7` (`docs/decisions/DR-090.md:51`), and
+  `:14` is a different line carrying a different claim. The two specs therefore collide on the
+  **file**, not on any line: this spec corrects `:14` because FR-2 falsifies it, and SPEC-066's
+  seven DR-090 rows are untouched by that. The collision is smaller than the question assumed,
+  which strengthens the resolution rather than weakening it.
+- **AC-24 is not the guard this passage first claimed.** `renderManagedFile` renders
+  `tpl.content`, and for `name: 'canonical-hasher-python'` that is `CANONICAL_PY`
+  (`packages/minspec/src/lib/template-registry.ts:2244`) - the base64 embed, not the working
+  file. So AC-24 catches a re-broken docstring only *after* `node scripts/gen-ci-templates.mjs`
+  regenerates the embed. A SPEC-066 sweep that edited the working file and did not regenerate
+  is caught by **Rule 12** (stale embed, `scripts/validate-frontmatter.ts`), which is a
+  different gate with a different message. Neither is implemented-and-passing today: this spec
+  is `plan: in-progress`, and AC-24's own text says it is "asserted by a check written here",
+  meaning still to be written.
+- **The re-approval cost is real today and expires with FR-2.** Editing SPEC-066's `affects:`
+  stales its signature **now**, because `affects:` is still hashed. Once FR-2 ships, ownership
+  keys leave the canonical hash and the same edit costs no sign-off at all. So the cheapest
+  order is to make the note *after* the strip lands, not before - which is why this is a
+  follow-up rather than something to squeeze into this batch. Until that lands, AC-24 is the only mechanical guard: it reads the **rendered**
+bytes, so a SPEC-066 sweep that re-broke the docstring would fail it here.
+
+*A note on the number, because this spec renumbered a reference away from it.* The
+2026-09-25 amendment batch corrected a dangling "is OQ-10" at FR-6 to **OQ-9**, on the
+evidence that no OQ-10 existed and that OQ-9's subject - whether the sidecar records
+`implements_reason` - is exactly what that sentence describes. Both halves still hold: this
+OQ-10 is a different question entirely, about who owns a file. The renumber was not pointing
+here.
+
 ## Risks
 
 | Risk | Likelihood · Impact | Mitigation |
@@ -1186,9 +1496,12 @@ question and not a default. Re-litigating whether `implements_reason` is strippe
 | The replacement alarm is structurally inert for the `implements: none` cohort | **Med** · Med | Stated, not solved: 13 of 34 in-band T3/T4 spec files declare `implements: none`, so both sets are permanently empty while `implements_reason` - a validator input at `spec-validator.ts:807`, not prose - leaves the hash. OQ-9 puts the remedy to the human. |
 | Deleting the spec file releases the whole frozen union with no ack | Low · Med | Acknowledged rather than closed: the gate enumerates only files on disk (`spec-gate.py:450`) and `rm` is not an `Edit`/`Write`/`MultiEdit` (`:412`), so the cheapest removal defeats FR-6. FR-6.2 scopes its claim accordingly and Out of Scope records the gap; `listOrphanedRecords` (`approval-store.ts:223`) is the existing hook for a later fix. |
 | A canonicalizer twin divergence lands with the strip and goes unnoticed | Med · **High** | INV-5. Two divergences are filed and latent, both invisible to the corpus-witnessed parity test: #1668 (trailing codepoints, which itself undercounts at 4 where 6 diverge) and #1960 (the step-5 link regex, where Python's `re.I` case-folds U+212A and U+017F into `[a-z]` and JavaScript's `/i` does not - measured here). Any new fixture must go into a suite CI runs; `scripts/hooks/test_canonical.py` is not one (#1669). |
-| The embedded `CANONICAL_PY` goes stale and its only witness stays silent | Low · **High** | #1959. Rule 12 is the sole witness and it sits in a bare `catch {}` at `validate-frontmatter.ts:553-556` that swallows a missing source file. `CI_STACK` (`managed-region-templates.test.ts:318,:335-345`) lists 11 of the registry's 15 machinery templates, omitting `canonical.py` and three siblings (`agent-context.sh`, `approval-provenance.py`, `minspec-validate.yml`) - which means the second-order witness misses both Python artifacts FR-2 touches. Out of scope here; filed so it is not a prose-only leak. |
-| The prose correction is skipped and a false claim ships in an approved spec | **High** · Med | FR-10 plus AC-22, with the ordering forced to a human decision at OQ-4 rather than defaulted. Re-derived: 23 files, 19 approved, split into 17 frontmatter sites and 9 body sites. |
-| Adopters receive the strip and none of the replacement | **High** · Med | FR-11 plus OQ-2, both rewritten around what is actually scaffolded: `approval-provenance.py` and `canonical.py`, not the spec-gate. The adopter-visible symptom is a merge-gating `MISMATCH - a real finding` on valid records. |
+| The embedded `CANONICAL_PY` goes stale and its only witness stays silent | Low · **High** | #1959. Rule 12 is the sole witness and it sits in a bare `catch {}` at `validate-frontmatter.ts:553-556` that swallows a missing source file. `CI_STACK` (`managed-region-templates.test.ts:318,:335-345`) lists 11 of the registry's 15 machinery templates, omitting `canonical.py` and three siblings (`agent-context.sh`, `approval-provenance.py`, `minspec-validate.yml`) - which means the second-order witness misses both Python artifacts FR-2 touches. **Re-checked 2026-09-25 and narrowed, not closed:** two gates have landed since the measurement basis and neither covers the gap. `managed-region-enumeration.test.ts` (#1987) pins registry **membership and count**, not embed freshness. `managed-region-self-application.test.ts` (#1888) compares this repo's own files against the registry but **skips** every self-hosted name (`if (selfHosted.has(tpl.name)) continue;`, `:109-112`), and `SELF_HOSTED_TEMPLATE_NAMES` spreads `CI_REVIEW_STACK_TEMPLATES` (`template-registry.ts:2320-2323`) - which is exactly where both Python artifacts FR-2 touches live. Out of scope here; filed so it is not a prose-only leak. |
+| `scripts/hooks/canonical.py` is declared by SPEC-066 as well as by this spec, and one of them freezes the other | **Med** · Med | OQ-10, **resolved 2026-09-25**: this spec corrects `:14` alongside FR-2 and SPEC-066 generalises over its seven DR-090 sites without re-touching it - the two collide on the file, not on any line, since DR-090's table cites `canonical.py:4-7` rather than `:14`. The sequencing went to a human rather than being left for two specs to discover at the hook. **Disarmed today for a different reason than first recorded** (re-measured at `origin/main`, 2026-09-25): both specs are `plan: in-progress`, so `phase_intent_status` returns `implementing` and neither is skipped at `spec-gate.py:500-501`. SPEC-066 simply does not block, because its approval is valid and `:512-513` admits a set on `unapproved` or `stale` only. The live direction is **this** spec: the 2026-09-25 amendment batch staled its approval, so once that batch lands its own owned set - shared core included - enters `blocking` until the founder re-approves. |
+| FR-2 ships a strip that makes a **managed** docstring false in every adopter repo | **Med** · **High** | DR-090 §1 (accepted): managed prose is judged from the consumer's vantage and cannot be corrected downstream, because the next Refresh overwrites an adopter's fix. `canonical.py:14` states the two-key strip set and DR-090's own table already cites `canonical.py:4-7` as an upstream-only claim. FR-2 carries the obligation and AC-24 asserts it on the **rendered** bytes; SPEC-066's gate (`prose-vantage.ts`) does not exist yet, so nothing mechanical catches a miss. |
+| The prose correction is skipped and a false claim ships in an approved spec | **High** · Med | FR-10 plus AC-22, with the ordering forced to a human decision at OQ-4 rather than defaulted. Re-derived: 23 **spec** files, 19 approved, split into 17 frontmatter sites and 9 body sites. |
+| The correction reaches the spec corpus and misses the code, because the census only looked at specs | **High** · Med | This already happened. Both FR-10 predicates are scoped to `specs/**/*.md`, so the first draft's list omitted `canonical.py:14`, `canonical.ts:14` and `:51`, `spec.ts:509`, `facts.ts:13` and `:318`, and **`DR-034:110`** - the hashing-contract record. FR-10 now carries a non-spec list, AC-22 asserts it with a whole-tree grep, and the DR-034 amendment is #2128 because a spec does not correct a DR. |
+| Adopters receive the strip and none of the replacement | **High** · Med | FR-11 plus OQ-2, both rewritten around what is actually scaffolded: `approval-provenance.py` and `canonical.py`, not the spec-gate. Untreated, the adopter-visible symptom is a merge-gating `MISMATCH - a real finding` on valid records; OQ-2 resolves (d), which replaces that symptom with the `PRE-STRIP BASIS` verdict and makes the frozen basis the thing that must actually ship (#2116). |
 | Wider gate reach blocks specs that never met the gate before | **Med** · Med | Expected and numbered: 12 spec ids with no in-band file resolve a non-empty owned set, covering 50 distinct files. Under FR-9.10's seeding their day-one drift is zero; they become blockable only on a real later declaration edit. Every freeze stays scoped to one spec's own files by `owned_match` (`spec-gate.py:391-401`). |
 
 ## Out of Scope
@@ -1250,11 +1563,19 @@ question and not a default. Re-litigating whether `implements_reason` is strippe
 - **#1668** and **#1669** - pre-existing, cited by DR-088 section 4 (blast radius), not
   solved here.
 
-**Unfiled, and named here rather than left as prose.** This session has no GitHub
-authentication (`gh` reports "please run gh auth login"), so the four items below could not
-be filed from here. They are not deferred silently; each needs a number before this spec
-leaves Clarify, and the first three are corrections to an **accepted** DR, which DR-023's
-materialisation rule does not allow to live only inside a `specifying` spec.
+**Filed 2026-09-25, after surviving two drafting sessions as prose.** Neither earlier
+session had GitHub access - the first had no credential, the second was a spec-only dispatch
+forbidden from every network command - so these carried a ➡️ and no number through two
+revisions, which is the prose-only leak DR-023's materialisation rule exists to prevent. Each
+is a correction to an **accepted** decision record, which that rule does not allow to live
+only inside a spec.
+
+- **#2127** - the three DR-088 statements below, plus the nine `spec-gate.py` citations stale
+  by a known +8/+12, as one edit to one file.
+- **#2128** - the `DR-034:110` amendment, surfaced by the grafted refresh and listed at
+  FR-10.
+- **#2129** - the delete-the-spec-file release path (first Out of Scope item).
+- **#2130** - the readdir-order dependence of the BLOCKING set (second Out of Scope item).
 
 - ➡️ **Amend DR-088 §2 constraint 4, "No new twin-parity obligation".** FR-5 refutes it: the
   claim is correct about *hashing* and incorrect about *set computation*, because the gate
@@ -1274,22 +1595,37 @@ materialisation rule does not allow to live only inside a `specifying` spec.
   `:488-489` → `:500-501`, `:500-501` → `:512-513`). The two offsets come from two separate
   docstring insertions between `2e9287d3` and `719878d6` (22 insertions, 10 deletions, all
   prose): +1 and +7 in the module docstring, then +4 more inside `declared_impl_files`.
-- ➡️ **File the two Out-of-Scope items above** (the orphaned-sidecar release path, and
-  SPEC-051's readdir-order-dependent blocking set).
+- **Amend `docs/decisions/DR-034.md:110`** (**#2128**), which states the hashing contract as
+  *"remove exactly the lifecycle keys `status` and `phases`"*. DR-088 changes that contract,
+  so DR-034 is left asserting the superseded rule in the one record a reader consults to learn
+  what the hash covers. FR-10 lists it and AC-22 asserts its absence; neither can carry out the
+  amendment, because a spec does not correct a DR.
+- **The two Out-of-Scope items** are now **#2129** (orphaned-sidecar release path) and
+  **#2130** (readdir-order-dependent blocking set).
+- **#2145 - the SPEC-066 hand-off note (OQ-10).** SPEC-066's `affects:` entry for
+  `scripts/hooks/canonical.py` needs a note that `:14` is discharged by this spec, so a
+  SPEC-066 sweep does not re-touch it. Filed 2026-09-26, one day after the resolution, because
+  the resolving session had no GitHub write path - the app-token broker was up as a socket and
+  dead as a service. It is cheapest to act on **after** FR-2 ships, per the third correction
+  under OQ-10: `affects:` is hashed today, so the note stales SPEC-066's signature now and
+  costs nothing once ownership leaves the hash.
 
 ## Traceability
 
 - **Decisions:** DR-088 (the record this materializes; three amendments owed, above),
   DR-012 (a hash-basis change must be migrated, not edited), DR-034 (the hashing contract
-  and the warn-to-error ratchet), DR-031 (the common-dir sidecar fallback the gate resolves
-  through), DR-086 §4 (the review path this spec's Review dispositions section satisfies).
+  and the warn-to-error ratchet - **and an amendment owed at `:110`**, #2128), DR-031 (the
+  common-dir sidecar fallback the gate resolves through), DR-090 (managed prose is judged from
+  the consumer's vantage - binds FR-2's edit to `canonical.py`, AC-24), DR-096 (what adopters
+  receive: a frozen diagnosis-only basis and a third verdict, OQ-2 (d)), DR-086 §4 (the review path this spec's Review dispositions section satisfies).
 - **Specs:** SPEC-022 (the approval foundation and FR-3's canonical form - amended by
   FR-10), SPEC-038 (the `implements:`/`affects:` ownership contract), SPEC-051 (INV-2, which
   refused this change without a DR and named it Option B), SPEC-017 (the `reviewStart`
-  precedent, `baselineBlob`, and the corpus's most extreme fuzzy-arm owned set).
+  precedent, `baselineBlob`, and the corpus's most extreme fuzzy-arm owned set), SPEC-066
+  (DR-090's gate; declares `scripts/hooks/canonical.py` in its own `affects:` - OQ-10).
 - **Issues:** #1800 (implementing), #1481 (the founder's decision), #1649 (the blocked
   backfill), #1642 (sibling snapshot architecture), #1510, #1492, #1959, #1960, #1961,
-  #1668, #1669, plus four unfiled items named in Follow-ups.
+  #1668, #1669, and the follow-ups now filed as #2127, #2128, #2129 and #2130.
 - **Measurement basis:** commit `719878d6`, 2026-09-12, worktree
   `/home/jason/code/.worktrees/MinSpecPro/spec070`. Every number in this document is
   reproducible with the commands under "Tests to Pass" and MUST be recomputed rather than

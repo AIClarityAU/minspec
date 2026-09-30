@@ -367,7 +367,13 @@ function sectionsToMarkdown(sections: readonly MergedSection[]): string {
  * disagree (SPEC-043 D2/D8).
  */
 export function buildSectionHashes(sections: Section[]): SectionHashes {
-  const hashes: Record<string, string> = {};
+  // #1752: a plain object literal already has every `Object.prototype` member
+  // name (`constructor`, `toString`, `valueOf`, …) as an inherited key, so a
+  // section headed `## constructor` would read back truthy from a bracket
+  // access even though this loop never wrote it. `Object.create(null)` has no
+  // prototype chain, so the class is impossible here rather than relying on
+  // every reader to guard itself.
+  const hashes: Record<string, string> = Object.create(null);
   for (const section of sections) {
     hashes[section.heading] = hashSection(section.body);
   }
@@ -387,7 +393,17 @@ export function buildSectionHashes(sections: Section[]): SectionHashes {
  * no matter which mechanism last touched the file. Pure, deterministic, offline.
  */
 export function sectionHashesFromMarkdown(content: string): SectionHashes {
-  const hashes: Record<string, string> = {};
+  // #1752: `section.heading in hashes` over a plain object literal tests the
+  // whole prototype chain, so every `Object.prototype` member name —
+  // `constructor`, `toString`, `valueOf`, `hasOwnProperty`, `isPrototypeOf`,
+  // `propertyIsEnumerable`, `toLocaleString` — already reads "present" before
+  // the loop runs a single iteration. A section headed `## constructor` was
+  // therefore silently skipped: first-occurrence-wins degenerated into
+  // never-occurrence-wins for exactly those seven names. `Object.create(null)`
+  // has no prototype chain, so `in` (and every bracket read below it, in
+  // `mergeFile` and `applyAuthorshipCorrections`) means "was this heading
+  // actually recorded" and nothing else.
+  const hashes: Record<string, string> = Object.create(null);
   for (const section of parseSections(content)) {
     // First-occurrence-wins: a later duplicate heading never overwrites the hash
     // of the first occurrence (matches mergeFile's preserve pass).
@@ -626,6 +642,20 @@ export function mergeFile(
   generated: string,
   oldHashes: SectionHashes,
 ): MergeResult {
+  // #1752: `oldHashes` is EVIDENCE — every branch below reads a bracket access
+  // on it as proof MinSpec wrote those bytes — and in production it always
+  // originates from `JSON.parse` (via `loadProvenHashes`/`splitManifest`), which
+  // hands back an ordinary object whose prototype chain carries `constructor`,
+  // `toString`, `valueOf`, `hasOwnProperty`, `isPrototypeOf`,
+  // `propertyIsEnumerable` and `toLocaleString` as already-truthy inherited
+  // values. A heading of one of those names would read as a PROVEN baseline it
+  // never had: `!oldHash` would be false, so the fail-closed branch and the
+  // INV-2 guard's report would both skip it — a silent hold, which constitution
+  // invariant 2 forbids. Copying into a null-prototype map once, up front,
+  // means every `provenHashes[heading]` read below really is "did the last run
+  // record this exact heading" and nothing else, regardless of what shape the
+  // caller's object arrived in (a `{}` test literal included).
+  const provenHashes: SectionHashes = Object.assign(Object.create(null), oldHashes);
   const existingSections = parseSections(existing);
   const generatedSections = parseSections(generated);
 
@@ -657,15 +687,16 @@ export function mergeFile(
   // Holding the values as well would recreate the divergent second answer the
   // deleted per-branch hash map was — see {@link MergeResult}.
   //
-  // The Set also fixes HALF of #1752 (heading-keyed maps are plain objects), by
-  // accident rather than by design, and only half — so do not read this line as
-  // closing it. The filter below used to be `heading in newHashes` over a plain
-  // object literal, where every `Object.prototype` key is present before the loop
-  // starts: a user's `## constructor` section was filtered out of
-  // `unauthoredHeadings` and its entry was then hashed off disk as MinSpec's own.
-  // A Set has no prototype keys, so measured on a `## constructor` section this run
-  // reports `["constructor"]` where the previous one reported `[]`.
-  // STILL OPEN in #1752: `preservedWithoutBaseline`. See `oldHashes[heading]` below.
+  // The Set also fixed HALF of #1752 (heading-keyed maps are plain objects), by
+  // accident rather than by design, before the rest of it was fixed properly —
+  // see `provenHashes` and `withheldTemplateHashes` below and
+  // `applyAuthorshipCorrections` in scaffold.ts for the other half. The filter
+  // below used to be `heading in newHashes` over a plain object literal, where
+  // every `Object.prototype` key is present before the loop starts: a user's
+  // `## constructor` section was filtered out of `unauthoredHeadings` and its
+  // entry was then hashed off disk as MinSpec's own. A Set has no prototype
+  // keys, so measured on a `## constructor` section this run reports
+  // `["constructor"]` where the previous one reported `[]`.
   const hashedThisRun = new Set<string>();
   // Headings held with NO baseline — by the fail-closed path OR by the INV-2
   // guard (#1697 F7) — whose template body carried content the kept body did not,
@@ -681,7 +712,10 @@ export function mergeFile(
   };
   // Headings kept while their rendered template body was withheld → the hash of
   // that unwritten template body (#1697 F1). See MergeResult.withheldTemplateHashes.
-  const withheldTemplateHashes: Record<string, string> = {};
+  // Null-prototype for the same reason as `provenHashes` above (#1752): this map
+  // is handed to `applyAuthorshipCorrections`, which spends it as a heading-keyed
+  // evidence map too.
+  const withheldTemplateHashes: Record<string, string> = Object.create(null);
   // Headings this run may record NOTHING for (#1697 NEW-2/NEW-3). See
   // MergeResult.unauthoredHeadings. First decision wins, so a heading is never
   // demoted by a later duplicate occurrence.
@@ -711,18 +745,11 @@ export function mergeFile(
       consumed.add(existSection);
       const existingBody = existSection.body;
       const existingHash = hashSection(existingBody);
-      // #1752, the half NOT fixed: `oldHashes` is a plain object straight out of
-      // `JSON.parse`, so for a heading that names an `Object.prototype` member —
-      // `## constructor`, `## toString`, `## valueOf` and four more — this reads the
-      // inherited function, which is TRUTHY. Every `!oldHash` below is therefore
-      // false for such a section: the fail-closed branch is skipped and the INV-2
-      // guard's `if (!oldHash) reportHold(...)` never fires, so a hold on it is
-      // SILENT — the shape constitution invariant 2 forbids. Today's net outcome is
-      // still safe (no entry is filed, and MinSpec ships no template heading with a
-      // prototype name), which is why #1752 is filed as latent rather than fixed
-      // here; the fix is `Object.create(null)` for every heading-keyed map, so the
-      // class becomes impossible instead of each site having to remember.
-      const oldHash = oldHashes[heading];
+      // #1752 (fixed): reads `provenHashes`, the null-prototype copy of
+      // `oldHashes` made above, so a heading named `## constructor` (or any other
+      // `Object.prototype` member) reads `undefined` here exactly like any other
+      // heading with no recorded baseline — never the inherited function.
+      const oldHash = provenHashes[heading];
 
       if (hasAuthoredListItems(existingBody) && !hasAuthoredListItems(genSection.body)) {
         // INV-2 guard (#706): never replace populated human content with an
@@ -1021,7 +1048,7 @@ export function mergeFile(
     // keystroke; a silent deletion is recoverable only from a backup the user does
     // not know they need.
     const existingHash = hashSection(existSection.body);
-    if (oldHashes[heading] === existingHash) {
+    if (provenHashes[heading] === existingHash) {
       // Marking the DECISION matters even though the hash itself goes nowhere: a
       // heading that occurs twice as a leftover is skipped at the top of this loop
       // on its second occurrence, so it cannot reach `recordNothing` and delete the
