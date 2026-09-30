@@ -1057,10 +1057,11 @@ run_reviewer_stage() {
       # THE decision (#1614). `paths_have_approvable_doc` used to sit here and decide
       # on its own; it is now the POPULATOR (see autonomy_stop_classes_for_paths) and
       # `mayProceed` is the decider, so this arm can no longer merge without first
-      # being asked whether the project is even in `autonomy: act`. With no `autonomy`
-      # key in .minspec/config.json — today's state — `readAutonomy` resolves to `ask`
-      # and this arm simply stops firing. That is the intended landing state; turning
-      # it on is a separate human act (#1743).
+      # being asked whether the project is even in `autonomy: act`. `readAutonomy`
+      # resolves the setting from .minspec/config.json and fails closed to `ask` on
+      # any missing, unreadable, or invalid value; whether this arm fires depends on
+      # that setting, which is a human decision (#1743) — do not read this comment
+      # for today's config value, read .minspec/config.json itself.
       gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
       # Name the ACTUAL blocker, from the verdict itself — never a fixed string. The
       # verdict is the sole authority for WHETHER to hold; these lines only DESCRIBE

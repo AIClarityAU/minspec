@@ -122,11 +122,16 @@ describe('#811 — MinSpec SDD validation is a fail-closed required check (DR-06
     // DR-090: prose inside a managed file is shipped code and must hold in the repo that
     // RECEIVES it. A bare `#1394` resolves to the ADOPTER's issue 1394, and the live
     // workflow's "see ci.yml" names a file that exists only here.
-    const refPrefixes = [...WORKFLOW.matchAll(/(\S*)#1394/g)].map((m) => m[1]);
-    expect(refPrefixes.length).toBeGreaterThan(0); // non-vacuous: the ref must be present
-    for (const prefix of refPrefixes) {
-      expect(prefix, `bare cross-repo ref "#1394" must be qualified`).toContain('minspec');
+    // Asserted as a PROPERTY over every issue reference, not against the literal `#1394`:
+    // a guard coupled to one issue number goes vacuous the moment the reference is
+    // renumbered, and a new unqualified ref added later would not be checked at all.
+    const issueRefs = [...WORKFLOW.matchAll(/(\S*?)#(\d+)/g)];
+    expect(issueRefs.length).toBeGreaterThan(0); // non-vacuous: some ref must be present
+    for (const [, prefix, num] of issueRefs) {
+      expect(prefix, `"#${num}" must carry owner/repo — a bare ref resolves to the ADOPTER's issue ${num}`)
+        .toMatch(/^[A-Za-z0-9._-]+\/[A-Za-z0-9._-]+$/);
     }
+    // `ci.yml` exists only in this repo, so naming it is false downstream.
     expect(WORKFLOW).not.toContain('ci.yml');
   });
 });
