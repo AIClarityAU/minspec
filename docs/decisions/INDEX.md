@@ -746,13 +746,6 @@ Four properties of the current code turn "stale" into "destructive". Each is cit
 <!-- dr-summary:DR-093 auto=732512d00014 -->
 The drain's admission control gates on a quota reading at ~/.claude/quota.json. The reading's only producers were **interactive** surfaces - a rendering statusline - while the drain that consumes it runs **unattended**. Measured 2026-09-09 (#1859): the file was **49 hours stale** while holding "used_percentage": 3.0. Over 100 issues carried agent-ready / agent-ready-specify and none dispatched. The pipeline had been dead for days and presented as a quiet week.
 <!-- /dr-summary:DR-093 -->
-## [DR-097 — A single voter's verdict may be reused across an ai-review re-run, bound to one head SHA — where reusing the whole panel was rejected](DR-097.md)
-
-*Status: proposed · Date: 2026-09-26*
-
-<!-- dr-summary:DR-097 auto=000000000000 -->
-When one of the four ai-review voters dies on a session limit, the panel fails closed and the re-run re-pays for the three that answered. This keeps the survivors, bound to the same head SHA - which is the whole distinction from #1840, where whole-panel reuse across a moved base was measured and refused. The safety property lived only in a comment at first, and the comment was false: three of four voters on #2163 caught the code reusing across commits while its docblock denied it.
-<!-- /dr-summary:DR-097 -->
 
 ## [DR-096 — Adopters get a frozen, diagnosis-only pre-strip basis and a third provenance verdict - not a flag, and not a migration](DR-096.md)
 
@@ -761,4 +754,12 @@ When one of the four ai-review voters dies on a session limit, the panel fails c
 <!-- dr-summary:DR-096 auto=68c7f9167e09 -->
 Ownership declarations leave the canonical approval hash, so every record minted before the change stops matching. Locally that is a one-off migration; in an adopter's repo the thing recomputing those hashes is a merge-gating review input that MinSpec ships with no gate, no snapshot and no migration, so their reviewers would read MISMATCH against valid approvals. Adopters get a frozen, diagnosis-only copy of the old basis and a third verdict that names it, rather than a flag that defaults the change off or a corpus-rewriting script MinSpec cannot test.
 <!-- /dr-summary:DR-096 -->
+
+## [DR-097 — A single voter's verdict may be reused across an ai-review re-run, bound to one head SHA — where reusing the whole panel was rejected](DR-097.md)
+
+*Status: proposed · Date: 2026-09-26*
+
+<!-- dr-summary:DR-097 auto=85c9e4fc299d -->
+When one of the four ai-review voters dies on a session limit, the panel fails closed and the re-run re-pays for the three that answered. This keeps the survivors, bound to the same head SHA - which is the whole distinction from #1840, where whole-panel reuse across a moved base was measured and refused. The safety property lived only in a comment at first, and the comment was false: three of four voters on #2163 caught the code reusing across commits while its docblock denied it.
+<!-- /dr-summary:DR-097 -->
 <!-- minspec:dr-index:end -->
