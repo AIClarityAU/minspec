@@ -749,7 +749,7 @@ The drain's admission control gates on a quota reading at ~/.claude/quota.json. 
 
 ## [DR-094 — The review broker's tokens live one hour because GitHub issues no shorter credential - exposure is bounded by immediate use and non-storage, not by a TTL the API will not honour](DR-094.md)
 
-*Status: accepted · Date: 2026-09-18*
+*Status: proposed · Date: 2026-09-18*
 
 <!-- dr-summary:DR-094 auto=f02b7feacc1d -->
 SPEC-034's broker exchanges a GitHub Actions OIDC token for a GitHub App installation token, so an adopter's CI can post as minspec-sdd[bot] without holding the App private key. DR-054's reasoning is that one leaked App key mints tokens for every repository that ever installed the App, so the blast radius of the key dwarfs the blast radius of any one token. Short token lifetime was the compensating control.
