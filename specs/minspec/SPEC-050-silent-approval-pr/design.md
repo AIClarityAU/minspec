@@ -1,7 +1,7 @@
 ---
 id: SPEC-050
 title: "Silent approval PR" — design
-status: planning
+status: done
 tier: T2
 epic: EPIC-009  # Team Readiness — docs-lane push ergonomics (grain b of #575/#781, sibling of SPEC-039's grain a)
 ---
