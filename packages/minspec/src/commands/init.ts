@@ -1201,6 +1201,13 @@ export async function offerCoverageThresholdPrompt(folder: string): Promise<void
         prompt: 'Minimum coverage percentage (whole number, 0-100)',
         value: String(recommended),
         validateInput: (v) => {
+          // `Number(v)` is a coercion, not a parse: it accepts the empty
+          // string, whitespace-only, hex (`0x10`), and exponent (`1e2`)
+          // forms, all of which land in range as integers. Reject the TEXT
+          // shape first — only `\d{1,3}` — before range-checking the coerced
+          // number, so a cleared box can never silently reach setCoverageMinimum
+          // with pct=0 (#1723).
+          if (!/^\d{1,3}$/.test(v)) return 'Enter a whole number 0-100';
           const n = Number(v);
           return Number.isInteger(n) && n >= 0 && n <= 100 ? undefined : 'Enter a whole number 0-100';
         },

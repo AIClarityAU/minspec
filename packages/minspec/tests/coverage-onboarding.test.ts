@@ -130,6 +130,74 @@ describe('offerCoverageThresholdPrompt()', () => {
   });
 });
 
+describe('offerCoverageThresholdPrompt() — Custom… validateInput text-shape gate (#1723)', () => {
+  // Bug: `Number(v)` is a COERCION, not a parse — `Number('')` and
+  // `Number('  ')` are both `0`, `Number('0x10')` is `16`, `Number('1e2')`
+  // is `100`, and the old predicate only ever asked about the coerced
+  // number. Clearing the pre-filled box and pressing Enter silently set the
+  // coverage gate to 0% (CI then enforces nothing). The fix rejects the TEXT
+  // shape (`/^\d{1,3}$/`) before range-checking the coerced number.
+  let tmpDir: string;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    getConfigurationGet.mockReturnValue(undefined);
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-coverage-validate-'));
+    fs.mkdirSync(path.join(tmpDir, '.minspec'), { recursive: true });
+    fs.writeFileSync(
+      path.join(tmpDir, '.minspec', 'config.json'),
+      JSON.stringify(DEFAULT_CONFIG, null, 2) + '\n',
+    );
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  /** Drives the Custom… path far enough to capture the validateInput callback VS Code would call per keystroke. */
+  async function captureValidator(): Promise<(v: string) => string | undefined> {
+    let captured: ((v: string) => string | undefined) | undefined;
+    showQuickPick.mockResolvedValueOnce({ label: 'Custom…', value: 'Custom…' });
+    showInputBox.mockImplementationOnce(async (opts: { validateInput?: (v: string) => string | undefined }) => {
+      captured = opts.validateInput;
+      return undefined; // dismissed — this test only needs the validator, not a write
+    });
+    await offerCoverageThresholdPrompt(tmpDir);
+    if (!captured) throw new Error('validateInput was not captured');
+    return captured;
+  }
+
+  it.each([
+    ['', false],
+    ['  ', false],
+    ['50', true],
+    ['50.5', false],
+    ['-1', false],
+    ['101', false],
+    ['abc', false],
+    ['0x10', false],
+    ['1e2', false],
+    ['0', true],
+    ['100', true],
+  ])('validateInput(%j) accepted=%s', async (input, accepted) => {
+    const validate = await captureValidator();
+    const result = validate(input);
+    if (accepted) {
+      expect(result).toBeUndefined();
+    } else {
+      expect(result).toBe('Enter a whole number 0-100');
+    }
+  });
+
+  it('rejects the empty string, so clearing the box can never reach setCoverageMinimum with pct=0 (regression for #1723)', async () => {
+    const validate = await captureValidator();
+    expect(validate('')).toBe('Enter a whole number 0-100');
+    // The dismissed InputBox above never resolved with a value, so the 80%
+    // scaffold default must still be in place — nothing silently wrote 0%.
+    expect(loadConfig(tmpDir).coverage.minimumPercentage).toBe(80);
+  });
+});
+
 describe('initCommand() — coverage prompt fires only on first init', () => {
   let tmpDir: string;
 
