@@ -951,6 +951,7 @@ run_cycle() {
   local inbox_rc ready_rc ready_full ready_spec _lbl
   local ac_halt ac_sig
   local quota_verdict
+  local triage_out triage_rc just_labeled_ready
 
   # Admission control: never START a cycle the quota window cannot finish. This
   # runs before ensure_fresh_run_dir so a deferred cycle costs nothing at all —
@@ -1006,11 +1007,26 @@ run_cycle() {
     echo "[drain]          That is NOT an empty inbox. See the gh error above for the cause." >&2
     inbox_issues=""
   fi
+  # #1855 item 4 — a sanity floor: if triage stamps an issue agent-ready /
+  # agent-ready-specify and the ready-set query two steps down comes back empty,
+  # those two disagree with each other IN THE SAME CYCLE, which is a stronger
+  # signal than either read alone (a stale credential could still make both wrong
+  # together, but a read-after-write lag on just the second query cannot). Detected
+  # from triage's own success line ("  → #<n>: agent-ready[-specify] ..."), not by
+  # re-querying — a second query is exactly the kind of read this bug is about.
+  just_labeled_ready=0
   if [[ -n "$inbox_issues" ]]; then
     echo "[drain] triaging $(echo "$inbox_issues" | wc -l | tr -d ' ') inbox issue(s)..."
     for n in $inbox_issues; do
       echo "[drain] triaging #$n..."
-      "$TRIAGE" "$n" || echo "[drain] WARNING: triage failed for #$n"
+      triage_rc=0
+      triage_out="$("$TRIAGE" "$n" 2>&1)" || triage_rc=$?
+      printf '%s\n' "$triage_out"
+      if (( triage_rc != 0 )); then
+        echo "[drain] WARNING: triage failed for #$n"
+      elif [[ "$triage_out" == *"→ #${n}: agent-ready"* ]]; then
+        just_labeled_ready=1
+      fi
     done
   fi
 
@@ -1049,6 +1065,14 @@ run_cycle() {
   done
   all_ready="$(printf '%s\n%s\n' "$ready_full" "$ready_spec" | sed '/^$/d' | sort -un)"
   if [[ -z "$all_ready" ]]; then
+    # The contradiction is reported ALONGSIDE "cycle done", not instead of it: the
+    # query itself succeeded (ready_rc==0, checked above), so this is not the #1855
+    # failed-query case and must not return non-zero for it — that would turn a
+    # possible read-after-write lag into a false backoff. It is still loud, on its
+    # own distinguishable line, independent of the exit status this cycle ends with.
+    if (( just_labeled_ready )); then
+      echo "[drain] CONTRADICTION: triage just labelled at least one issue agent-ready / agent-ready-specify this cycle, but the ready-set query below came back empty (#1855 sanity floor) — treat the 'cycle done' line with suspicion." >&2
+    fi
     echo "[drain] no agent-ready / agent-ready-specify issues after triage — cycle done."
     return 0
   fi

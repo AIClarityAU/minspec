@@ -281,6 +281,50 @@ export interface OpenPrResult {
   readonly labelProvisioned?: boolean;
 }
 
+/** GitHub's hard cap on a PR title (`Title is too long (maximum is 256 characters)`). */
+const PR_TITLE_MAX_LEN = 256;
+
+/** {@link splitCommitMessage}'s result: a title GitHub will accept, plus the rest. */
+export interface SplitCommitMessage {
+  /** The commit subject, capped to {@link PR_TITLE_MAX_LEN} on a word boundary. */
+  readonly title: string;
+  /** Everything after the subject's blank-line separator, or `''` when there is none. */
+  readonly body: string;
+}
+
+/**
+ * Split a full commit message into a PR-safe title and the remaining body — the
+ * TypeScript twin of `scripts/push-docs.sh`'s `pr_title`/`pr_rest` split (#1606,
+ * `bde62b84`). `push-docs-lane.ts` (#1883) is the only current caller; it lives
+ * here rather than in that command so a future second TS caller shares this
+ * exact behaviour instead of re-deriving (and re-diverging from) it.
+ *
+ * Passing a whole multi-line commit message straight through as `--title` both
+ * loses the body (the RCDD gate requires one on every `fix:` commit) and, past
+ * {@link PR_TITLE_MAX_LEN} chars, fails `gh pr create` outright — *after* the
+ * branch is already pushed, stranding it with no PR pointing at it.
+ *
+ * Mirrors the bash algorithm exactly:
+ *   1. `title` = the first line; `body` = whatever follows the first `\n`, with
+ *      one leading blank separator line (a second `\n`) stripped if present.
+ *   2. If `title` alone exceeds {@link PR_TITLE_MAX_LEN}, truncate it to that
+ *      many characters, then back up to the last space so the cut lands on a
+ *      word boundary rather than mid-word (`${truncated% *}` in bash).
+ */
+export function splitCommitMessage(message: string): SplitCommitMessage {
+  const newline = message.indexOf('\n');
+  let title = newline === -1 ? message : message.slice(0, newline);
+  let body = newline === -1 ? '' : message.slice(newline + 1);
+  if (body.startsWith('\n')) body = body.slice(1); // drop the single blank separator line
+
+  if (title.length > PR_TITLE_MAX_LEN) {
+    const truncated = title.slice(0, PR_TITLE_MAX_LEN);
+    const lastSpace = truncated.lastIndexOf(' ');
+    title = lastSpace !== -1 ? truncated.slice(0, lastSpace) : truncated;
+  }
+  return { title, body };
+}
+
 /**
  * Build the `gh pr create` argv. PURE — no I/O, no spawning — so the exact flags
  * MinSpec would send are assertable without a subprocess (AC-2/AC-10).
