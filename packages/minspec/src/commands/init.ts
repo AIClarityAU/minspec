@@ -813,14 +813,20 @@ async function resolveWantedChecks(
  *
  * Order matters. The plan limit is checked FIRST because it is a 403 too, and the
  * permission wording would otherwise swallow it. Beyond that we quote GitHub's own
- * `message` rather than paraphrase it, and fall back to a deliberately non-committal
- * phrase when GitHub said nothing quotable — an unexplained failure is an honest
- * report; an invented explanation is not.
+ * `message` rather than paraphrase it. Below that, `detail` is quoted verbatim: it
+ * covers cases that are NOT a request failure at all (a local parse of the re-read
+ * ruleset failed, or the ruleset has no `required_status_checks` rule) as well as
+ * a non-403 failure with no quotable `message` — in every one of those `detail` is
+ * the only evidence there is, and it is never invented, only ever what the outcome
+ * itself captured. Only when `detail` is also empty (a non-zero exit with no output
+ * at all) do we fall back to the deliberately non-committal 'the request failed' —
+ * an unexplained failure is an honest report; an invented explanation is not.
  */
-function describeRulesetFailure(outcome: {
+export function describeRulesetFailure(outcome: {
   forbidden: boolean;
   planLimited: boolean;
   reason: string | null;
+  detail: string;
 }): string {
   if (outcome.planLimited) {
     return (
@@ -830,6 +836,7 @@ function describeRulesetFailure(outcome: {
   }
   if (outcome.reason) return `GitHub said: ${outcome.reason}`;
   if (outcome.forbidden) return 'the request was refused — your gh token may lack repo-admin scope';
+  if (outcome.detail) return outcome.detail;
   return 'the request failed';
 }
 

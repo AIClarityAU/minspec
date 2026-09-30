@@ -23,12 +23,32 @@
  * shipped product text.
  */
 import { describe, it, expect, vi } from 'vitest';
+
+// describeRulesetFailure lives in init.ts, which imports the `vscode` module
+// at the top level (used elsewhere in that file, not by describeRulesetFailure
+// itself) — mock it so the import resolves under plain Node/vitest.
+vi.mock('vscode', () => ({
+  window: {
+    showErrorMessage: vi.fn(),
+    showInformationMessage: vi.fn(),
+    showWarningMessage: vi.fn(),
+    showQuickPick: vi.fn(),
+    showInputBox: vi.fn(),
+    showTextDocument: vi.fn(),
+  },
+  workspace: {
+    getConfiguration: vi.fn(() => ({ get: vi.fn() })),
+    openTextDocument: vi.fn(),
+  },
+}));
+
 import {
   isPlanLimited,
   githubReason,
   createRequiredChecksRuleset,
   type CommandRunner,
 } from '../src/lib/ruleset-advisor';
+import { describeRulesetFailure } from '../src/commands/init';
 
 /** The verbatim body GitHub returns for a private repo on the free plan. */
 const PLAN_403 =
@@ -101,5 +121,57 @@ describe('createRequiredChecksRuleset() classifies the failure it saw', () => {
     const ok: CommandRunner = vi.fn(async () => ({ code: 0, stdout: '{}', stderr: '' }));
     const out = await createRequiredChecksRuleset('o', 'r', ok);
     expect(out).toMatchObject({ created: true, forbidden: false, planLimited: false, reason: null });
+  });
+});
+
+/**
+ * T3 — REGRESSION (#1725): `describeRulesetFailure`'s final arm discarded the
+ * outcome's `detail` and answered with the literal 'the request failed' for
+ * every non-plan-limited, non-quotable, non-forbidden outcome — even the two
+ * cases where no request had failed at all (a local JSON parse of the re-read
+ * ruleset, or a re-read ruleset with no `required_status_checks` rule).
+ */
+describe('describeRulesetFailure() quotes detail instead of discarding it', () => {
+  it('quotes a local parse failure rather than blaming "the request"', () => {
+    const why = describeRulesetFailure({
+      forbidden: false,
+      planLimited: false,
+      reason: null,
+      detail: 'could not parse the existing ruleset',
+    });
+    expect(why).toBe('could not parse the existing ruleset');
+    expect(why).not.toBe('the request failed');
+  });
+
+  it('quotes a missing-rule detail rather than blaming "the request"', () => {
+    const why = describeRulesetFailure({
+      forbidden: false,
+      planLimited: false,
+      reason: null,
+      detail: 'ruleset has no required_status_checks rule',
+    });
+    expect(why).toBe('ruleset has no required_status_checks rule');
+    expect(why).not.toBe('the request failed');
+  });
+
+  it('quotes a raw non-quotable HTTP body rather than discarding it', () => {
+    const rawBody = '{"message":null,"status":"422"}';
+    const why = describeRulesetFailure({
+      forbidden: false,
+      planLimited: false,
+      reason: null,
+      detail: rawBody,
+    });
+    expect(why).toBe(rawBody);
+  });
+
+  it('still falls back to "the request failed" when detail is also empty', () => {
+    const why = describeRulesetFailure({
+      forbidden: false,
+      planLimited: false,
+      reason: null,
+      detail: '',
+    });
+    expect(why).toBe('the request failed');
   });
 });
