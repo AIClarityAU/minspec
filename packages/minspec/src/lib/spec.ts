@@ -1,11 +1,12 @@
 import * as fs from 'fs';
+import * as path from 'path';
 import { SPEC_STATUSES, stripInlineComment } from './spec-vocabulary';
 import { assertOwnershipDeclaredForAdvance } from './ownership-advance-guard';
 import type { SpecStatus } from './spec-vocabulary';
 import type { Tier, Phase } from './config';
 import { PHASES } from './config';
 import { deriveStatus, phasesForApproval } from './lifecycle';
-import { bodyStatusToken } from './status-parity';
+import { bodyStatusToken, claimParagraphText } from './status-parity';
 
 /** Status of an individual phase */
 export type PhaseStatus = 'pending' | 'in-progress' | 'done' | 'skipped';
@@ -405,6 +406,38 @@ export function writeSpecFile(filePath: string, spec: ParsedSpec): void {
 }
 
 /**
+ * A spec's `**Status:**` line whose PROSE negates a status word — the same failure shape
+ * `statusProseWouldInvert` (adr-manager.ts) guards against for DRs (#1833), extended to
+ * specs (#2180). Specs share the vulnerable shape: a single leading status word followed
+ * by free prose that may explain the OLD value ("**Proposed** … not yet accepted, and must
+ * not be treated as in force."). Swapping only the leading token there produces a line
+ * asserting both the new status and its own negation. Before #2180 nothing checked this —
+ * `setBodyStatusToken` rewrote the leading word unconditionally.
+ *
+ * Tests the claim's whole paragraph (the `**Status:**` line plus any wrapped continuation
+ * lines — see `claimParagraphText`), not just the physical line the token sits on, for the
+ * same reason the DR guard does: this repo hard-wraps prose, so a trailing negation can
+ * land on a later physical line of the same sentence.
+ *
+ * Deliberately the SAME narrowness as the DR guard: negation, not mere mention — a blanket
+ * block on any second status word would wedge legitimate history prose. Returns the
+ * offending line (1-based) and the paragraph text, or null when safe to rewrite.
+ */
+export function specStatusProseWouldInvert(content: string): { line: number; text: string } | null {
+  const NEGATED = new RegExp(
+    `\\b(not|never|no longer|neither|isn't|is not)\\s+(yet\\s+)?(${SPEC_STATUSES.join('|')})\\b`,
+    'i',
+  );
+  const claim = bodyStatusToken(content, 'spec');
+  if (!claim) return null;
+  const paragraph = claimParagraphText(content, claim.line);
+  const stripped = paragraph.replace(/^\*\*Status:\*\*\s*/i, '');
+  const m = stripped.match(/^([A-Za-z]+)/);
+  const rest = m ? stripped.slice(m[0].length) : stripped;
+  return NEGATED.test(rest) ? { line: claim.line, text: paragraph.trim() } : null;
+}
+
+/**
  * Surgically rewrite the leading status word of a spec's body `**Status:**` line
  * in place, preserving whatever free-form prose follows it (e.g. `(SDD Implement
  * phase)` or a hand-written note). No-op — never invents a line — when the body
@@ -451,10 +484,29 @@ export function setSpecStatus(filePath: string, status: SpecStatus): SpecStatus 
   if (!fmMatch) {
     throw new Error(`No frontmatter block in ${filePath}`);
   }
+
+  // #2180 — check BEFORE writing anything, mirroring setAdrStatus (#1833). Refusing
+  // after the frontmatter write would leave the file asserting the new frontmatter
+  // status while its own body prose negates it.
+  const inverts = specStatusProseWouldInvert(content);
+  if (inverts) {
+    throw new Error(
+      `Refusing to set ${path.basename(filePath)} to "${status}": its body status line ` +
+        `negates a status word, so rewriting the token would invert the sentence.\n\n` +
+        `  line ${inverts.line}: ${inverts.text}\n\n` +
+        `Reword that line so it reads correctly under the new status, then retry.`,
+    );
+  }
+
   const yaml = fmMatch[1];
-  const statusLineRe = /^([ \t]*)status[ \t]*:[ \t]*.*$/m;
+  // Anchored to column 0 (#2149) — a non-anchored, non-global match on ANY
+  // indent would rewrite the FIRST `status:` line regardless of nesting,
+  // silently leaving a top-level key untouched if a nested `status:`
+  // preceded it. Anchoring makes writer and validator target the same line
+  // by construction, rather than relying on house key order.
+  const statusLineRe = /^status[ \t]*:[ \t]*.*$/m;
   const newYaml = statusLineRe.test(yaml)
-    ? yaml.replace(statusLineRe, `$1status: ${status}`)
+    ? yaml.replace(statusLineRe, `status: ${status}`)
     : `${yaml}\nstatus: ${status}`;
   const newContent = content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---\n`);
   fs.writeFileSync(filePath, newContent, 'utf-8');
