@@ -272,22 +272,54 @@ lease_acquire() {
 
 # renew: refresh this session's claim heartbeat (lastRenewed). Parent-side ticker (D10).
 # Edits the session's own claim comment in place (keeps serverOrder = winner key stable).
+#
+# Each failure branch prints ITS OWN reason on stderr before returning (#2299 gap 2).
+# The renew ticker used to see only an exit code (`FAILED (exit 1)` for all three of
+# these, indistinguishable from each other and from gh_bot_die's own `exit 1` when no
+# bot token can be minted): every internal `gh`/jq call had its stderr sent to
+# /dev/null, so a reader of the drain log had to reproduce the failure by hand to learn
+# which of "can't read claims", "claim is gone" or "PATCH refused" it was. The fourth
+# reason (no bot token) already prints via gh_bot_die's own `echo ... >&2; exit 1`
+# inside gh_bot_init above — nothing extra needed here for that one, only a caller that
+# does not discard it (see lease_start_renew_ticker).
 lease_renew() {
   gh_bot_init   # arm bot attribution before this function's GitHub write (#1355)
   local item="${1:?lease_renew needs an item}" sid host now
   sid="$(lease_self_sid)"; host="$(lease_self_host)"; now="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+
+  # Find our claim through lease_read_claims — the SAME parse lease_verify_holds and
+  # lease_acquire already use — so "the read itself failed" (network/auth; gh/jq
+  # returned nonzero) is distinguishable from "the read succeeded and our claim just
+  # is not in it" (deleted, or never posted). A private duplicate parse here could not
+  # make that distinction cleanly, since both cases could not be told apart.
+  local claims
+  if ! claims="$(lease_read_claims "$item")"; then
+    echo "lease: renewal of the claim on #${item} FAILED — could not read claims (gh api error; network or auth)." >&2
+    return 1
+  fi
+
   local cid claimed
-  # Find our claim comment id + its original claimedAt (preserve it; only bump lastRenewed).
-  read -r cid claimed < <(gh api --paginate "repos/${MINSPEC_LEASE_REPO}/issues/${item}/comments" 2>/dev/null \
-    | jq -r --arg m "<!-- ${CLAIM_MARKER}:" --arg sid "$sid" '
-        [ .[][] | select(.body|contains($m))
-          | { id:.id, p:(.body|capture("<!-- '"${CLAIM_MARKER}"':(?<j>\\{.*?\\}) -->";"s").j|fromjson) }
-          | select(.p.sessionId==$sid) ] | (.[-1] // empty) | "\(.id)\t\(.p.claimedAt)"' 2>/dev/null \
-    | tr '\t' ' ') || return 1
-  [[ -n "$cid" ]] || return 1
-  local wt pid; wt="$(lease_worktree_path "$item")"; pid=$$
-  gh api -X PATCH "repos/${MINSPEC_LEASE_REPO}/issues/comments/${cid}" \
-     -f body="$(lease_claim_body "$sid" "$host" "$wt" "$pid" "$claimed" "$now")" >/dev/null 2>&1 || return 1
+  # Our claim comment id (its serverOrder) + its original claimedAt (preserve it; only
+  # bump lastRenewed).
+  IFS=$'\t' read -r cid claimed < <(printf '%s' "$claims" | jq -r --arg sid "$sid" '
+      [ .[] | select(.sessionId == $sid) ] | (.[-1] // empty)
+      | "\(.serverOrder)\t\(.claimedAt)"' 2>/dev/null)
+  if [[ -z "$cid" ]]; then
+    echo "lease: renewal of the claim on #${item} FAILED — no claim by this session was found (deleted, or never posted)." >&2
+    return 1
+  fi
+
+  local wt pid patch_err
+  wt="$(lease_worktree_path "$item")"; pid=$$
+  # Capture ONLY stderr (`2>&1 >/dev/null`: dup stderr onto the capture pipe first,
+  # then send stdout — the PATCHed comment body gh would otherwise print — to
+  # /dev/null), so a refused PATCH (404/403) reports gh's own reason instead of a
+  # bare exit code.
+  if ! patch_err="$(gh api -X PATCH "repos/${MINSPEC_LEASE_REPO}/issues/comments/${cid}" \
+       -f body="$(lease_claim_body "$sid" "$host" "$wt" "$pid" "$claimed" "$now")" 2>&1 >/dev/null)"; then
+    echo "lease: renewal of the claim on #${item} FAILED — the PATCH was refused: ${patch_err:-no detail from gh}" >&2
+    return 1
+  fi
   return 0
 }
 
@@ -353,7 +385,32 @@ _LEASE_TICKER_PID=""
 lease_start_renew_ticker() {
   local item="${1:?lease_start_renew_ticker needs an item}"
   [[ -z "$_LEASE_TICKER_PID" ]] || return 0    # idempotent — exactly one ticker per dispatch
-  ( while sleep "$LEASE_RENEW_SECS"; do lease_renew "$item" >/dev/null 2>&1 || true; done ) &
+  (
+    # fd 3 keeps the REAL stderr reachable after the next redirect silences fd 2 on
+    # THIS subshell. The only thing fd 2 would otherwise carry from here is bash's own
+    # job-status notice — a bare "Terminated" — for `sleep`, this subshell's foreground
+    # child, the moment lease_stop_renew_ticker signals it at teardown (#2299 gap 1):
+    # `pkill -P` kills `sleep` (almost always what is in flight), and THIS subshell's
+    # own bash prints that notice for a foreground child a signal killed. The drain
+    # runs every dispatch `2>&1`, so it used to land in the log right after the
+    # dispatch's last line, reading as "the dispatch was killed" when nothing of the
+    # kind happened — it is routine per-dispatch teardown, at most once per build.
+    #
+    # Everything this loop actually wants seen — lease_renew's own failure report, and
+    # any genuine error `sleep` itself prints (e.g. a rejected interval) — is routed to
+    # fd 3 explicitly at its own call site below, which overrides this blanket silence
+    # for exactly those two writers and nothing else.
+    exec 3>&2 2>/dev/null
+    while sleep "$LEASE_RENEW_SECS" 2>&3; do
+      # Each renewal runs in ITS OWN subshell: gh_bot_die (inside lease_renew's
+      # gh_bot_init) is `exit 1`, not `return 1`, when no bot token can be minted —
+      # run un-wrapped, that exit would end THIS while loop, silencing every later
+      # renewal for the rest of the build over one un-mintable token. Subshelled, it
+      # costs one tick, its reason (gh_bot_die's own message) still reaches fd 3, and
+      # the loop ticks again next interval.
+      ( lease_renew "$item" ) 2>&3 >/dev/null || true
+    done
+  ) &
   _LEASE_TICKER_PID=$!
   return 0
 }
