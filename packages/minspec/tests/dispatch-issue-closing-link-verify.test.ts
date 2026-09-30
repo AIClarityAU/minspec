@@ -26,8 +26,9 @@
  * does not.
  */
 import { describe, it, expect } from 'vitest';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 
 function findRepoRoot(): string {
@@ -134,5 +135,117 @@ describe('dispatch-issue.sh — the closing-link verification is actually wired 
     expect(verifyIdx).toBeGreaterThan(-1);
     expect(automergeIdx).toBeGreaterThan(-1);
     expect(verifyIdx).toBeLessThan(automergeIdx);
+  });
+});
+
+/**
+ * T3 regression (#2228 review): an unconfirmed closing link must WITHHOLD the
+ * native auto-merge arm, not only label the PR.
+ *
+ * The first cut of 6a applied `needs-human-review` and a comment, then fell
+ * through to 6b, which armed `gh pr merge --auto` regardless: neither 6b nor
+ * ready-to-merge reads that label, so the #2228-shaped PR still merged itself
+ * and left its issue open. The textual "6a precedes 6b" test above passed
+ * throughout, because ordering without a data dependency blocks nothing.
+ *
+ * This drives the REAL 6a..6b span of run_reviewer_stage, sliced out of
+ * dispatch-issue.sh (the extraction drain-queue-cap.test.ts uses), against a
+ * stub `gh` that records every call, so it asserts what the script DOES. The
+ * CONTROL proves the harness can observe an arm at all, so a withheld result
+ * is never a harness that simply never reaches the arm.
+ */
+describe('dispatch-issue.sh — an unconfirmed closing link withholds native auto-merge (#2228)', () => {
+  const content = fs.readFileSync(scriptPath, 'utf-8');
+  const SPAN_START = '  # 6a. VERIFY the `Closes #$ISSUE` trailer';
+  const SPAN_END = '  # 7. Post the advisory review ONLY';
+
+  function span(): string {
+    const s = content.indexOf(SPAN_START);
+    const e = content.indexOf(SPAN_END);
+    if (s < 0 || e <= s) {
+      throw new Error(
+        'The 6a..6b span markers moved in dispatch-issue.sh. Fix this extractor rather ' +
+          'than deleting the test (#2228).',
+      );
+    }
+    return content.slice(s, e);
+  }
+
+  /** The real classifier, lifted verbatim so the harness follows any change to it. */
+  function classifierFn(): string {
+    const m = content.match(/^issue_linked_in_closing_refs\(\) \{\n[\s\S]*?^\}\n/m);
+    if (!m) throw new Error('issue_linked_in_closing_refs() not found in dispatch-issue.sh');
+    return m[0];
+  }
+
+  function run(closingRefs: string): { out: string; ghCalls: string[] } {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'closing-link-withhold-'));
+    try {
+      const bin = path.join(tmp, 'bin');
+      fs.mkdirSync(bin);
+      const log = path.join(tmp, 'gh.log');
+      const refsFile = path.join(tmp, 'refs');
+      fs.writeFileSync(refsFile, closingRefs);
+      // Records every call; answers the two reads the span makes. A code-only diff,
+      // so no path-based hold can be the reason an arm is withheld.
+      fs.writeFileSync(
+        path.join(bin, 'gh'),
+        '#!/usr/bin/env bash\n' +
+          `printf '%s\\n' "$*" >> ${JSON.stringify(log)}\n` +
+          'case "$*" in\n' +
+          `  *closingIssuesReferences*) cat ${JSON.stringify(refsFile)} ;;\n` +
+          "  *'pr diff'*) printf 'packages/minspec/src/lib/foo.ts\\n' ;;\n" +
+          'esac\nexit 0\n',
+        { mode: 0o755 },
+      );
+      const script = [
+        'set -euo pipefail',
+        'REPO="AIClarityAU/minspec"',
+        'ISSUE="2228"',
+        classifierFn(),
+        // Native auto-merge on, and autonomy permits the merge: every OTHER reason to
+        // withhold is switched off, so the closing link is the only variable.
+        'native_automerge_enabled() { return 0; }',
+        'autonomy_may_merge() { echo "may-proceed"; return 0; }',
+        'stage() {',
+        '  local pr_num=4242',
+        span(),
+        '}',
+        'stage',
+      ].join('\n');
+      const file = path.join(tmp, 'span.sh');
+      fs.writeFileSync(file, script);
+      const r = spawnSync('bash', [file], {
+        encoding: 'utf-8',
+        env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+      });
+      const out = `${r.stdout ?? ''}${r.stderr ?? ''}`;
+      expect(r.status, out).toBe(0);
+      const ghCalls = fs.existsSync(log) ? fs.readFileSync(log, 'utf-8').trim().split('\n') : [];
+      return { out, ghCalls };
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  }
+
+  const armed = (calls: string[]) => calls.some((c) => /^pr merge 4242 .*--auto/.test(c));
+
+  it('does NOT arm `gh pr merge --auto` when closingIssuesReferences is empty (the #2228 shape)', () => {
+    const { out, ghCalls } = run('');
+    expect(armed(ghCalls), ghCalls.join('\n')).toBe(false);
+    expect(out).toMatch(/native auto-merge WITHHELD on PR #4242 .*not confirmed linked/);
+    expect(ghCalls.some((c) => c.includes('--add-label needs-human-review'))).toBe(true);
+  });
+
+  it('does NOT arm when the refs name only OTHER issues', () => {
+    const { ghCalls } = run('900\n2229\n');
+    expect(armed(ghCalls), ghCalls.join('\n')).toBe(false);
+  });
+
+  it('CONTROL: DOES arm when the link is confirmed, so the harness can observe an arm at all', () => {
+    const { out, ghCalls } = run('2228\n');
+    expect(armed(ghCalls), ghCalls.join('\n')).toBe(true);
+    expect(out).toContain('native auto-merge armed on PR #4242');
+    expect(out).not.toContain('WITHHELD');
   });
 });

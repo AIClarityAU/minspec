@@ -1066,14 +1066,19 @@ run_reviewer_stage() {
   #     on it; nothing previously read that parse back, so a silent link
   #     failure had no witness anywhere in this pipeline. Fail closed exactly
   #     like the diff enumeration below (6b): an API/read error is treated the
-  #     same as "not confirmed linked", never as "assume it worked".
-  local closing_refs
+  #     same as "not confirmed linked", never as "assume it worked". The result
+  #     feeds 6b through closing_link_confirmed, which starts at 0 and turns 1
+  #     only on a positive match: the needs-human-review label alone holds no
+  #     merge, so an unconfirmed link has to withhold the --auto arm itself.
+  local closing_refs closing_link_confirmed=0
   closing_refs=$(gh pr view "$pr_num" --repo "$REPO" --json closingIssuesReferences \
     --jq '.closingIssuesReferences[].number' 2>/dev/null || true)  # swallow-ok: an API error and a genuinely empty list both fall through to the "not linked" branch below — a read failure is never treated as confirmation
   if ! issue_linked_in_closing_refs "$ISSUE" <<<"$closing_refs"; then
     gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
-    gh pr comment "$pr_num" --repo "$REPO" --body "$(printf '## Closing-issue link not confirmed (#2228)\n\nThis PR carries a `Closes #%s` trailer, but GitHub currently reports `closingIssuesReferences` WITHOUT #%s in it — merging this PR may NOT auto-close the issue. Labeled `needs-human-review` rather than silently trusting the text match: a human should confirm the link (re-saving the PR body with no text change sometimes re-triggers the parse) or close #%s manually once this merges.' "$ISSUE" "$ISSUE" "$ISSUE")" 2>/dev/null || true
-    echo "WARNING: PR #$pr_num does not show #$ISSUE in closingIssuesReferences — the Closes trailer did not link (#2228). Labeled needs-human-review." >&2
+    gh pr comment "$pr_num" --repo "$REPO" --body "$(printf '## Closing-issue link not confirmed (#2228)\n\nThis PR carries a `Closes #%s` trailer, but GitHub currently reports `closingIssuesReferences` WITHOUT #%s in it — merging this PR may NOT auto-close the issue. Labeled `needs-human-review` and native auto-merge withheld: a human should confirm the link (re-saving the PR body with no text change sometimes re-triggers the parse) before merging, or close #%s manually once this merges.' "$ISSUE" "$ISSUE" "$ISSUE")" 2>/dev/null || true
+    echo "WARNING: PR #$pr_num does not show #$ISSUE in closingIssuesReferences — the Closes trailer did not link (#2228). Labeled needs-human-review; native auto-merge withheld." >&2
+  else
+    closing_link_confirmed=1
   fi
 
   # 6b. Native auto-merge (DR-061): if the project opted in, mark the PR --auto so
@@ -1128,6 +1133,15 @@ run_reviewer_stage() {
       grep -qE "${PUBLISH_PATH_RE}" <<<"$changed_files" \
         && hold_why="${hold_why} It touches a PUBLISH path (sites/** → public Cloudflare Pages via deploy-sites.yml) — merging IS publishing (#981)."
       echo "  → native auto-merge WITHHELD on PR #$pr_num — ${hold_why} A human owns this merge. Labeled needs-human-review."
+    elif [[ "$closing_link_confirmed" != "1" ]]; then
+      # #2228: 6a could not confirm that the `Closes #$ISSUE` trailer linked. Its
+      # needs-human-review label holds nothing by itself: ready-to-merge holds only on
+      # hold:* / changes / an unverified pass, and the --auto arm below reads no label.
+      # Arming here would let GitHub merge the moment ready-to-merge goes green and
+      # leave the issue open, with the only witness a label beside an already-armed
+      # merge (constitution invariant 2). So an unconfirmed link withholds the arm.
+      gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+      echo "  → native auto-merge WITHHELD on PR #$pr_num — its Closes #$ISSUE trailer is not confirmed linked (closingIssuesReferences lacks #$ISSUE), so merging could leave the issue open (#2228). A human owns this merge. Labeled needs-human-review."
     elif gh pr merge "$pr_num" --repo "$REPO" --squash --auto 2>/dev/null; then
       echo "  → native auto-merge armed on PR #$pr_num (merges on ai-review:pass)"
     else
