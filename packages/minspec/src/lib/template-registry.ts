@@ -1025,18 +1025,32 @@ export function renderManagedFile(tpl: ManagedRegionTemplate): string {
  * FAIL-CLOSED (DR-066 "No silent gate", #811). `MinSpec SDD validation` is a
  * REQUIRED status check (ruleset-advisor DEFAULT_REQUIRED_CHECK_CONTEXTS), so it
  * must have a reachable red path and must NEVER conclude success without actually
- * validating. The step runs the highest-fidelity validator that is genuinely
- * present, letting its exit code gate the job:
- *   1. `npm run validate` — the full Node validator, when the repo defines it
- *      (minspec's own tree, and any JS repo that wires it up);
- *   2. `python3 .minspec/hooks/validate.py` — the portable DR-037 validator,
- *      scaffolded into every MinSpec-inited repo (stock python3, no install);
- *   3. `@aiclarity/minspec-validator` — the published portable validator, once it
- *      exists and is resolvable (`--no-install` NEVER network-fetches, so an
- *      unclaimed scope can't be dependency-confusion-hijacked into CI).
- * If NONE is present the job FAILS — the one thing a required check may never do
- * is pass without validating. There is deliberately no branch that exits 0
- * without a validator having run (that was the #811 always-green bug).
+ * validating.
+ *
+ * #2263: an npm `validate` script is NOT a reliable MinSpec signal — any repo can
+ * define its own unrelated `validate` script (observed in the fleet: a leads
+ * validator), and the old Node-first ordering would run THAT and call the required
+ * check green without MinSpec validation ever running. `.minspec/hooks/validate.py`
+ * is scaffolded by MinSpec itself, so its presence IS the MinSpec signal. The step
+ * therefore runs:
+ *   1. `python3 .minspec/hooks/validate.py` — the portable DR-037 validator,
+ *      scaffolded into every MinSpec-inited repo (stock python3, no install). Run
+ *      FIRST and unconditionally whenever present — never displaced by anything
+ *      else the repo happens to define.
+ *   2. `npm run validate`, IN ADDITION when the repo defines it (minspec's own
+ *      tree, and any JS repo that wires a real Node validator into that script
+ *      name) — never as a substitute for (1). A repo whose own `validate` does
+ *      something unrelated now also runs harmlessly alongside the real check
+ *      instead of silently replacing it; if that unrelated script fails, the
+ *      required check fails too, same as it always could.
+ *   3. `@aiclarity/minspec-validator`, only when NEITHER (1) nor (2) ran — the
+ *      published portable validator, once it exists and is resolvable
+ *      (`--no-install` NEVER network-fetches, so an unclaimed scope can't be
+ *      dependency-confusion-hijacked into CI).
+ * If NONE ran the job FAILS — the one thing a required check may never do is pass
+ * without validating. There is deliberately no branch that exits 0 without a
+ * validator having run (that was the #811 always-green bug; #2263 was the same
+ * shape reached through a name collision instead of a missing validator).
  *
  * Pinned to a literal YAML string (no Handlebars): it is project-independent and
  * must remain byte-stable so the refreshed region matches exactly. The job
@@ -1076,22 +1090,35 @@ jobs:
           # A required check must have a reachable red path and must NEVER conclude
           # success without validating (DR-066 "No silent gate", clause 2 /
           # AIClarityAU/minspec#811).
-          # Run the highest-fidelity validator that is actually present and let its
-          # exit code gate the job. Do NOT add a branch that exits 0 without a
-          # validator having run — that was the AIClarityAU/minspec#811 always-green bug.
-          if [ -f package.json ] && node -e "process.exit((require('./package.json').scripts||{}).validate?0:1)" 2>/dev/null; then
-            echo "MinSpec SDD validation: running 'npm run validate' (Node validator)."
-            npm ci
-            npm run validate
-          elif [ -f .minspec/hooks/validate.py ] && command -v python3 >/dev/null 2>&1; then
+          #
+          # AIClarityAU/minspec#2263: an npm 'validate' script is not necessarily
+          # MinSpec's — any repo can define its OWN unrelated 'validate' script, and
+          # picking it FIRST let that satisfy this required check without MinSpec
+          # validation ever running (the AIClarityAU/minspec#811 shape again, reached
+          # through a name collision instead of a missing validator). The portable
+          # .minspec/hooks/validate.py is scaffolded by MinSpec itself, so its
+          # presence IS the MinSpec signal: run it first whenever present, and run a
+          # repo's own npm 'validate' script IN ADDITION — never as a substitute.
+          ran_validator=false
+          if [ -f .minspec/hooks/validate.py ] && command -v python3 >/dev/null 2>&1; then
             echo "MinSpec SDD validation: running 'python3 .minspec/hooks/validate.py' (portable validator)."
             python3 .minspec/hooks/validate.py
-          elif npx --no-install @aiclarity/minspec-validator --version >/dev/null 2>&1; then
+            ran_validator=true
+          fi
+          if [ -f package.json ] && node -e "process.exit((require('./package.json').scripts||{}).validate?0:1)" 2>/dev/null; then
+            echo "MinSpec SDD validation: also running 'npm run validate' (repo-defined Node validator)."
+            npm ci
+            npm run validate
+            ran_validator=true
+          fi
+          if [ "$ran_validator" = false ] && npx --no-install @aiclarity/minspec-validator --version >/dev/null 2>&1; then
             echo "MinSpec SDD validation: running '@aiclarity/minspec-validator'."
             npx --no-install @aiclarity/minspec-validator
-          else
+            ran_validator=true
+          fi
+          if [ "$ran_validator" = false ]; then
             echo "MinSpec SDD validation: no validator found." >&2
-            echo "Looked for an npm 'validate' script, .minspec/hooks/validate.py, or @aiclarity/minspec-validator." >&2
+            echo "Looked for .minspec/hooks/validate.py, an npm 'validate' script, or @aiclarity/minspec-validator." >&2
             echo "A required check must fail closed (DR-066); it may never pass without validating." >&2
             exit 1
           fi`;

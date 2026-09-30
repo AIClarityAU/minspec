@@ -118,6 +118,34 @@ describe('#811 — MinSpec SDD validation is a fail-closed required check (DR-06
     expect(onBlock).toContain('merge_group:');
   });
 
+  it('runs the portable validate.py unconditionally, never displaced by an unrelated npm "validate" script (#2263)', () => {
+    // #2263: a repo can define its OWN "validate" npm script unrelated to MinSpec
+    // (fleet evidence: a leads validator). The old ordering picked npm FIRST, so
+    // that script alone would satisfy the required check with MinSpec validation
+    // never running. validate.py is scaffolded by MinSpec itself, so it must be
+    // the first thing checked, and unconditionally — not inside an `elif` that an
+    // npm script could shadow.
+    const pyIdx = WORKFLOW.indexOf('.minspec/hooks/validate.py');
+    const npmIdx = WORKFLOW.indexOf("(require('./package.json').scripts||{}).validate");
+    expect(pyIdx).toBeGreaterThan(-1);
+    expect(npmIdx).toBeGreaterThan(-1);
+    expect(pyIdx).toBeLessThan(npmIdx);
+    // The python branch must not be gated behind the npm branch failing/absent —
+    // i.e. it must not be an `elif` off the npm check.
+    const pyLine = WORKFLOW.split('\n').find((l) => l.includes('.minspec/hooks/validate.py') && l.includes('['));
+    expect(pyLine).toBeDefined();
+    expect(pyLine).not.toMatch(/^\s*elif/);
+  });
+
+  it('runs an npm "validate" script IN ADDITION to validate.py, never as a substitute (#2263)', () => {
+    // Both must be able to run in the SAME invocation (a repo that has both a real
+    // MinSpec validate.py and its own npm validate script must run both), so the
+    // npm branch must not be an `elif`/`else` tied to whether validate.py ran.
+    const npmLine = WORKFLOW.split('\n').find((l) => l.includes("scripts||{}).validate") && l.includes('['));
+    expect(npmLine).toBeDefined();
+    expect(npmLine).not.toMatch(/^\s*elif/);
+  });
+
   it('keeps its managed prose adopter-true: cross-repo refs qualified, no minspec-only file (DR-090)', () => {
     // DR-090: prose inside a managed file is shipped code and must hold in the repo that
     // RECEIVES it. A bare `#1394` resolves to the ADOPTER's issue 1394, and the live

@@ -70,7 +70,7 @@ const APPLIED_PATH_COUNT = 13;
  */
 const KNOWN_DRIFT: Readonly<Record<string, string>> = {
   '.github/workflows/minspec-validate.yml':
-    'COMMENT WORDING ONLY: both now carry merge_group: (#1394), so Refresh no longer strips the trigger. The live comment cites ci.yml and a bare #1394, which are false downstream, so the template ships adopter-true prose (DR-090). Closing it needs a workflow write, which no agent has (DR-079) - tracked as #2105',
+    'both carry merge_group: (#1394), so Refresh no longer strips the trigger. Beyond comment wording (live cites ci.yml and a bare #1394, false downstream, DR-090), #2263 reordered the template run step so validate.py runs unconditionally and npm validate runs in addition rather than first; the live file still has the pre-#2263 npm-first ordering. Closing either needs a workflow write, which no agent has (DR-079) - tracked as #2105',
   '.minspec/hooks/validate.py':
     'bidirectional: live targets docs/domain, template adds DR-frontmatter checks — reconciliation is the #1698 design question',
   '.minspec/hooks/pre-commit':
