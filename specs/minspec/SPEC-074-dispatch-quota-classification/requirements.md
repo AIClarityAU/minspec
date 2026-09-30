@@ -1,7 +1,7 @@
 ---
 id: SPEC-074
 type: requirements
-status: specifying   # DERIVED, not a regression: the 2026-09-30 amendment (#2237) stales the approval that landed in #2077, and deriveStatus returns 'specifying' whenever approvalState !== 'approved' (INV-1). Re-approval flips this back to 'planning'.
+status: specifying   # DERIVED, not a regression: the 2026-09-30 amendment (#2237) stales the approval that landed in #2077, and deriveStatus returns 'specifying' whenever approvalState !== 'approved' (SPEC-022 INV-1, not this spec's INV-1). Re-approval flips this back to 'planning'.
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute — the dev-time autonomous build/merge pipeline (dispatch-issue.sh's own crash-classification lives here)
