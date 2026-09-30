@@ -33,7 +33,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 import { parseSpec } from '../src/lib/spec';
 import {
@@ -418,6 +418,19 @@ describe('#2250 C — a fresh scaffold starts at "error" when there is nothing t
     fs.writeFileSync(path.join(tmp, 'specs', 'nested', 'SPEC-003-x.md'), specText({}));
     scaffold(tmp);
     expect(readSeeded(tmp)).toBe('warn');
+  });
+
+  it('an unreadable specs tree seeds the pre-#2250 "warn", and says so', () => {
+    // `specs` as a FILE: it exists, but cannot be listed.
+    fs.writeFileSync(path.join(tmp, 'specs'), 'not a directory');
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    try {
+      scaffold(tmp);
+      expect(readSeeded(tmp)).toBe('warn');
+      expect(warn.mock.calls.flat().join(' ')).toContain('ownershipDeclaration');
+    } finally {
+      warn.mockRestore();
+    }
   });
 
   it('never rewrites an existing config (the ratchet is the adopter\'s once it exists)', () => {

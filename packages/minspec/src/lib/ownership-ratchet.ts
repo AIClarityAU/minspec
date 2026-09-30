@@ -15,16 +15,19 @@
  * SPEC-003 reached main at T3 with no declaration (#2250).
  *
  * This computes the position FR-7 defines instead of hard-coding the first one: the
- * repo is post-backfill exactly when none of its specs would fail the rule at `error`.
- * An existing config is never touched (`scaffold()` writes this only when it creates
- * the file), so no repo that already chose a value is moved, and the `loadConfig`
- * default for a config without the key stays `warn`.
+ * repo is post-backfill exactly when none of its specs has an undeclared owner at
+ * `error` (`ownership.implements.missing`), the only finding this dial decides. Its
+ * sibling, `ownership.implements.invalid`, is an error at either setting, so the seed
+ * cannot change its outcome and it is not consulted. An existing config is never
+ * touched (`scaffold()` writes this only when it creates the file), so no repo that
+ * already chose a value is moved, and the `loadConfig` default for a config without
+ * the key stays `warn`.
  *
  * The specs scanned are every `.md` under the default specs directory, the same set
  * the shipped CI validator (`.minspec/hooks/validate.py`) scans, so "would fail at
- * error" means "CI would go red". A read failure answers `warn`: that is the value
- * every repo got before this change, so being unable to prove the corpus clean can
- * cost the stricter default but never a flag day.
+ * error" means "CI would go red". A read failure answers `warn`, and says so on the
+ * console: `warn` is the value every repo got before this change, so being unable to
+ * prove the corpus clean can cost the stricter default but never a flag day.
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -52,7 +55,7 @@ function markdownFiles(dir: string): string[] {
 
 /**
  * The `ownershipDeclaration` a new config should carry for the repo at `rootDir`:
- * `error` when no spec there would fail SPEC-038 at `error`, else `warn`.
+ * `error` when no spec there lacks its ownership declaration at `error`, else `warn`.
  */
 export function initialOwnershipDeclaration(rootDir: string): OwnershipDeclaration {
   const specsDir = path.join(rootDir, DEFAULT_CONFIG.specsDir);
@@ -62,8 +65,13 @@ export function initialOwnershipDeclaration(rootDir: string): OwnershipDeclarati
       const violations = validateOwnership(parseSpec(fs.readFileSync(file, 'utf-8')), STRICT);
       if (violations.some((v) => v.rule === 'ownership.implements.missing')) return 'warn';
     }
-  } catch {
-    // Unreadable corpus: keep the pre-#2250 default rather than guess (see header).
+  } catch (err) {
+    // Unreadable corpus: keep the pre-#2250 default rather than guess (see header), and
+    // announce it, so a recurring degrade is discoverable rather than invisible.
+    console.warn(
+      `[minspec] could not read ${specsDir} to choose ownershipDeclaration ` +
+        `(${err instanceof Error ? err.message : String(err)}); seeding "warn".`,
+    );
     return 'warn';
   }
   return 'error';
