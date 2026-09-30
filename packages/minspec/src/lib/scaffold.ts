@@ -108,7 +108,13 @@ const TASKS_MD_INHERITED_FIELDS = ['id', 'status', 'product', 'epic'] as const;
 function rawFrontmatterLine(raw: string, key: string): string | undefined {
   const block = raw.match(/^---\n([\s\S]*?)\n---/);
   if (!block) return undefined;
-  const lineRe = new RegExp(`^(${key}\\s*:\\s*.*)$`, 'm');
+  // `[ \t]*`, NOT `\s*` — the fourth copy of the #1961 idiom. JS `\s` matches
+  // newlines, so on a valueless key (`status:`) the `:\s*` crossed the line break and
+  // `.*` then matched the NEXT line, capturing `status:\nproduct: minspec` — two lines
+  // copied verbatim into the scaffolded frontmatter, duplicating a key and malforming
+  // the file. Different blast radius from the ownership readers (a corrupt scaffold,
+  // not a blind gate), same mistake. Pinned by ownership-list-parity.test.ts.
+  const lineRe = new RegExp(`^(${key}[ \t]*:[ \t]*.*)$`, 'm');
   const m = block[1].match(lineRe);
   return m ? m[1].trimEnd() : undefined;
 }
@@ -290,6 +296,11 @@ export const MINSPEC_GITIGNORE_ENTRIES = [
   // keep the primary checkout clean). Not under .claude/commands/, so unaffected by
   // the slash-command-shim carve-out some repos keep in their own .gitignore.
   '.claude/worktrees/',
+  // SPEC-044 Slice 1 (DR-067): per-item flock lockfiles + the per-session
+  // claimed-items registry for the dispatch claim-lease. Machine-local and
+  // ephemeral — must never be tracked, or a newly-scaffolded project commits
+  // lock noise the moment it uses the dispatch machinery (#959).
+  '.minspec/locks/',
 ];
 
 /**
@@ -1155,25 +1166,28 @@ export function applyAuthorshipCorrections(
   withheld?: SectionHashes,
   unauthoredSections?: readonly string[],
 ): SectionHashes {
-  // Rebuilt by spreading the disk map first, so section key order stays
+  // Rebuilt by copying the disk map first, so section key order stays
   // `parseSections` document order and the serialization stays byte-stable
-  // across identical runs (SPEC-043 INV-4).
-  const corrected: Record<string, string> = { ...diskHashes };
+  // across identical runs (SPEC-043 INV-4). `Object.assign(Object.create(null), …)`
+  // rather than `{ ...diskHashes }` — object-spread syntax always allocates a
+  // fresh object with the ordinary `Object.prototype`, even when the source has
+  // none, so spreading would silently reintroduce the prototype chain this
+  // function's own `in` check below depends on being absent (#1752).
+  const corrected: Record<string, string> = Object.assign(Object.create(null), diskHashes);
   if (withheld) {
     for (const heading of Object.keys(withheld)) {
       // A heading the recorder did not hash is not corrected — a withheld heading
       // no longer on disk would otherwise add a manifest entry for a section that
       // does not exist, which is the class of lie this module exists to prevent.
       //
-      // With ONE documented exception, and it is #1752's class again: `in` walks the
-      // prototype chain, so for the eight `Object.prototype` names (`constructor`,
-      // `toString`, `valueOf`, …) this test passes on a heading disk does NOT carry,
-      // and the entry is invented. Measured: `{Invariants}` plus a withheld
-      // `constructor` yields a `constructor` key. Latent rather than live — a
-      // withheld hash exists only for a heading the TEMPLATE also carries, and
-      // MinSpec ships no template heading with a prototype name (checked: zero) — so
-      // it is filed with #1752 rather than patched here, and the fix is the same one:
-      // `Object.create(null)` for every heading-keyed map.
+      // #1752 (fixed): `in` walks the prototype chain, so over an ordinary object
+      // literal this test would pass for the seven `Object.prototype` names
+      // (`constructor`, `toString`, `valueOf`, `hasOwnProperty`, `isPrototypeOf`,
+      // `propertyIsEnumerable`, `toLocaleString`) even on a heading disk does NOT
+      // carry, inventing an entry (measured: `{Invariants}` plus a withheld
+      // `constructor` used to yield a `constructor` key). `corrected` is built
+      // null-prototype above, so `in` here means "disk actually has this heading"
+      // and nothing else.
       if (heading in corrected) corrected[heading] = withheld[heading];
     }
   }
