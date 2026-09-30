@@ -55,6 +55,34 @@ async function confirmNoDuplicate(
 }
 
 /**
+ * ADR filter gate (#296): the CDD playbook's "undo it in <1 day?" heuristic —
+ * the cheap filter that keeps a decision register the ~80-100 entries that
+ * actually matter rather than a 355+-entry journal (the global mmo-platform
+ * register's measured failure mode; see the CDD playbook's "ADR filter" /
+ * "The Problem We Solved" sections). MinSpec authors already apply this by
+ * hand — nearly every existing DR carries an "ADR-filter: yes/no, undoable in
+ * <1 day" line in its reasoning (see `generateAdrContent`'s Costly to
+ * Refactor prompt) — this surfaces it as a step instead of relying on the
+ * author remembering it.
+ *
+ * Advisory only, never a hard block: "No — create the DR" always proceeds,
+ * mirroring `confirmNoDuplicate`'s "Create anyway". Non-modal (no
+ * `{ modal: true }`) per the project's HITL convention — a toast over the
+ * visible Create-DR flow, never a focus-stealing modal — so a dismiss reads
+ * as "didn't answer" and is treated the same as declining to skip.
+ */
+async function confirmAdrFilter(): Promise<'proceed' | 'cancel'> {
+  const SKIP = 'Yes — skip, no DR needed';
+  const CREATE = 'No — create the DR';
+  const choice = await vscode.window.showWarningMessage(
+    "MinSpec: Can this decision be undone in under a day? If yes, you probably don't need a DR — just do it.",
+    SKIP,
+    CREATE,
+  );
+  return choice === CREATE ? 'proceed' : 'cancel';
+}
+
+/**
  * Command: Create a new Architecture Decision Record.
  * Prompts for title, creates DR-NNN.md with sequential numbering,
  * and opens the file for editing.
@@ -89,6 +117,11 @@ export async function createAdrCommand(): Promise<void> {
   // Dedup gate: warn if an existing, in-force ADR covers the same decision.
   const gate = await confirmNoDuplicate(folder, title.trim(), overrides);
   if (gate === 'cancel') return;
+
+  // ADR filter (#296): advisory "undo it in <1 day?" nudge, keeps the
+  // register a reference rather than a journal. Never blocks.
+  const filterGate = await confirmAdrFilter();
+  if (filterGate === 'cancel') return;
 
   try {
     const adr = createAdr(folder, title.trim(), overrides);

@@ -495,7 +495,7 @@ export function generateAdrContent(id: string, title: string, date: string): str
     '',
     '## Costly to Refactor',
     '',
-    '<!-- After the Decision is stable: the expensive-to-reverse commitments (contracts, cross-package boundaries, data-model/API changes), ranked, each with a one-line "why costly" + what to check. "Low — <reason>" is valid if nothing here is hard to undo. -->',
+    '<!-- ADR-filter answer: you already answered "can this be undone in under a day?" to reach this file (issue #296) — record the answer and why in one line, e.g. "ADR-filter: not undoable in <1 day — <reason>." Then list the expensive-to-reverse commitments (contracts, cross-package boundaries, data-model/API changes), ranked, each with a one-line "why costly" + what to check. "Low — <reason>" is valid if nothing here is hard to undo. -->',
     '',
     '## In plain terms — what this changes for you',
     '',
