@@ -26,6 +26,8 @@ import * as path from 'path';
 const PKG_DIR = path.resolve(__dirname, '..');
 const REPO_ROOT = path.resolve(PKG_DIR, '../..');
 const WORKFLOW_DIR = path.join(REPO_ROOT, '.github', 'workflows');
+const SHARED_OUT_DIR = path.resolve(REPO_ROOT, 'packages/shared/out');
+const SHARED_OUT_FILES = ['index.js', 'canonical.js'];
 
 /** Give the real bundler room on a cold CI runner — this shells out to esbuild + tsc. */
 const BUILD_TIMEOUT_MS = 300_000;
@@ -46,6 +48,24 @@ const STAMP_RE = new RegExp(`"${HEAD_SHA}(-dirty)?"`);
 let tmpDir: string;
 let build: { status: number | null; output: string };
 let bundleText = '';
+let sharedOutBefore: Record<string, { mtimeMs: number; content: Buffer } | null> = {};
+let sharedOutAfter: Record<string, { mtimeMs: number; content: Buffer } | null> = {};
+
+/**
+ * Snapshot mtime + content of shared's built output, not just mtime alone — a rewrite that
+ * happens to land the same bytes at a new mtime would still prove the isolation claim wrong
+ * (the file was touched), so both signals are checked independently in the assertion.
+ */
+function snapshotSharedOut(): typeof sharedOutBefore {
+  const snapshot: typeof sharedOutBefore = {};
+  for (const name of SHARED_OUT_FILES) {
+    const file = path.join(SHARED_OUT_DIR, name);
+    snapshot[name] = fs.existsSync(file)
+      ? { mtimeMs: fs.statSync(file).mtimeMs, content: fs.readFileSync(file) }
+      : null;
+  }
+  return snapshot;
+}
 
 /**
  * Run the extension build the way CI's `package` job does — `npm run build`, the DEFAULT
@@ -56,9 +76,22 @@ let bundleText = '';
  * Output goes to a temp file rather than `out/extension.js` so a parallel test file reading
  * the real bundle (no-app-private-key-shipped.test.ts) cannot observe a half-written one.
  * The stamp does not depend on the output path.
+ *
+ * `--ignore-scripts` (#2244): without it, npm also runs `build`'s `prebuild` hook
+ * (`build:shared`, `tsc -p ../shared/tsconfig.json`), which rewrites the live
+ * `packages/shared/out/*.js` in place — `openSync(file, 'w')` then `writeSync`, so each
+ * output is briefly empty — while vitest runs OTHER test files in parallel. A spawned tsx
+ * child in one of those files that resolves `@aiclarity/shared` (through its `main` field,
+ * `out/index.js` — the `src` alias in vitest.config.ts only applies inside vitest itself)
+ * during that window gets `{}` back, and any shared export it calls is `undefined`.
+ * `--ignore-scripts` skips `prebuild` while still running the named `build` script (verified
+ * on npm 10.9.8), so this test never touches `packages/shared/out`. Nothing this file asserts
+ * depends on `prebuild` having run: CI and `pretest` already build shared before vitest
+ * starts, so `out/` is current by the time this test runs, and the build-stamp property it
+ * guards lives entirely in `build-extension.sh`.
  */
 function runBuild(extraArgs: string[]): { status: number | null; output: string } {
-  const res = spawnSync('npm', ['run', 'build', '--', ...extraArgs], {
+  const res = spawnSync('npm', ['run', 'build', '--ignore-scripts', '--', ...extraArgs], {
     cwd: PKG_DIR,
     encoding: 'utf-8',
     timeout: BUILD_TIMEOUT_MS,
@@ -71,7 +104,9 @@ beforeAll(() => {
   // skipped, which hides WHICH property broke. Capture, then assert in the tests.
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-build-stamp-'));
   const outfile = path.join(tmpDir, 'extension.js');
+  sharedOutBefore = snapshotSharedOut();
   build = runBuild([`--outfile=${outfile}`]);
+  sharedOutAfter = snapshotSharedOut();
   if (fs.existsSync(outfile)) bundleText = fs.readFileSync(outfile, 'utf-8');
 }, BUILD_TIMEOUT_MS);
 
@@ -117,6 +152,22 @@ describe('the default build emits a stamped bundle (#1527)', () => {
     },
     BUILD_TIMEOUT_MS,
   );
+});
+
+describe("the build doesn't rewrite shared's live output mid-suite (#2244)", () => {
+  it('leaves packages/shared/out/index.js and canonical.js untouched', () => {
+    for (const name of SHARED_OUT_FILES) {
+      const before = sharedOutBefore[name];
+      const after = sharedOutAfter[name];
+      expect(before, `${name} must already be built before this test runs`).not.toBeNull();
+      expect(after, `${name} vanished during the build`).not.toBeNull();
+      expect(after!.mtimeMs, `${name} was rewritten (mtime changed)`).toBe(before!.mtimeMs);
+      expect(
+        after!.content.equals(before!.content),
+        `${name} was rewritten (content changed)`,
+      ).toBe(true);
+    }
+  });
 });
 
 describe('one bundling path — nothing can produce an unstamped bundle (#1527)', () => {
