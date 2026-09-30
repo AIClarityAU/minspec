@@ -1,0 +1,15 @@
+Fetching issue #1785...
+Role: dev (loaded from /tmp/minspec-drain-run/scripts/roles/dev.md)
+Context-slim: role via --system-prompt-file — ambient CLAUDE.md/memory not auto-loaded (#912)
+Claimed #1785 (session baef8c95-ad3d-41d0-8feb-1d6c9d119459) — proceeding to build.
+https://github.com/AIClarityAU/minspec/issues/1785
+Preparing worktree (new branch 'agent/issue-1785')
+branch 'agent/issue-1785' set up to track 'origin/main'.
+HEAD is now at 6ec7feb8 feat(#2196): rank dispatchable issues by what they unblock, then spec, then tier (#2201)
+Launching dev agent for: test(SPEC-043 AC-9): the withheld-template half is not pinned end-to-end through the persisted manifest
+Running headless agent (log: /tmp/minspec-agent/issue-1785-4896b365-034e-4741-bd54-81227e50835d/.agent.log)...
+Model: sonnet (role: dev)
+You've hit your session limit · resets 11:20am (Australia/Sydney)
+https://github.com/AIClarityAU/minspec/issues/1785
+Agent CRASHED on issue #1785 (role: dev) — held for a human (needs-human-review). Review: /tmp/minspec-agent/issue-1785-4896b365-034e-4741-bd54-81227e50835d/.agent.log
+Terminated

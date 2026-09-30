@@ -64,16 +64,31 @@ CLAIM_MARKER='minspec-claim'
 SHIPPED_MARKER='<!-- minspec-shipped -->'
 
 # ── Self identity ────────────────────────────────────────────────────────────
-# One session id per process, cached. Prefers the presence sessionId (MINSPEC_SESSION_ID)
-# so a claim and the presence heartbeat agree; else a fresh uuid.
+# One session id per process. Prefers an explicit override (MINSPEC_LEASE_SID, e.g.
+# tests), then the presence sessionId (MINSPEC_SESSION_ID) so a claim and the presence
+# heartbeat agree; else derives one DETERMINISTICALLY (#2132).
+#
+# Deliberately NOT memoized via `export` (the previous approach): every caller invokes
+# this through `$(...)` command substitution, which forks a SUBSHELL — an export written
+# there dies with that subshell and is invisible to the parent, so the memo never stuck
+# and each call fell through to mint a FRESH /proc/sys/kernel/random/uuid. A session
+# could therefore never recognise its own claim (lease_verify_holds always false),
+# which is fatal to D3's re-verify-before-credentialed-op check: `holds != yes` makes
+# shepherd_decide return stand-down unconditionally (scripts/lib/shepherd-pr.sh),
+# 100% of the time, for every session, even the one that JUST wrote the claim.
+#
+# Fixed by deriving from state that IS already stable across those subshells: bash's
+# `$$` is inherited unchanged into command-substitution subshells (unlike `$BASHPID`,
+# which is that subshell's OWN pid), so it names the same value on every call within
+# one process. Mixing in that pid's start time means a later, unrelated process that
+# the kernel happens to reuse the same pid for can never collide with a stale sid
+# computed earlier in the same boot.
 lease_self_sid() {
   if [[ -n "${MINSPEC_LEASE_SID:-}" ]]; then printf '%s' "$MINSPEC_LEASE_SID"; return 0; fi
-  local sid="${MINSPEC_SESSION_ID:-}"
-  if [[ -z "$sid" ]]; then
-    sid="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "sid-$$-$(date -u +%s 2>/dev/null || echo 0)")"
-  fi
-  export MINSPEC_LEASE_SID="$sid"
-  printf '%s' "$sid"
+  if [[ -n "${MINSPEC_SESSION_ID:-}" ]]; then printf '%s' "$MINSPEC_SESSION_ID"; return 0; fi
+  local pid="$$" starttime
+  starttime="$(stat -c '%Y' "/proc/$pid" 2>/dev/null)" || starttime=""
+  printf 'sid-%s-%s' "$pid" "${starttime:-0}"
 }
 
 lease_self_host() { hostname 2>/dev/null || echo "unknown-host"; }
