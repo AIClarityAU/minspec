@@ -1,5 +1,6 @@
 /**
- * T3 #2243 — the approval flow lands the same way in EVERY adopter repository.
+ * T3 regression test (the test tier, not the SDD ceremony tier) — #2243: the approval flow
+ * lands the same way in EVERY adopter repository. Decision: DR-098 (lane-label provisioning).
  *
  * THE REPORT. Approving SPEC-003/004/005 in voip-sms-inbox ended in an `Open PR`
  * toast, a hand-made pull request with an empty body, and a manual merge

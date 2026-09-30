@@ -1,5 +1,6 @@
 /**
- * T1 #2243 — the PR seam provisions MinSpec's OWN lane label, and nothing else.
+ * T1 contract test (the test tier, not the SDD ceremony tier) — #2243: the PR seam provisions
+ * MinSpec's OWN lane label, and nothing else. Decision: DR-098 (lane-label provisioning).
  *
  * `gh pr create --label docs-lane` fails outright in a repository that has no
  * `docs-lane` label (`could not add label: 'docs-lane' not found`, nothing created).

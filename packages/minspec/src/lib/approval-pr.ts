@@ -244,7 +244,10 @@ export interface OpenPrRequest {
    * fell to the manual `Open PR` surface, and the PR made by hand could not ride the
    * lane, so it needed a manual merge as well.
    *
-   * THE BOUNDARY, stated because this is a forge write:
+   * THE BOUNDARY, stated because this is a forge write. The decision, its consent
+   * reasoning and the alternatives rejected are recorded in DR-098 (lane-label
+   * provisioning); SPEC-050's design.md carries the design. Widening any line below
+   * is a new decision, not an edit:
    *   - Only {@link DOCS_LANE_LABEL}, never whatever name gh reports. A maintainer's
    *     own missing label is theirs to create.
    *   - Only inside the PR-opening step, which is reachable only after a consented

@@ -213,6 +213,36 @@ describe('labels.md template', () => {
     expect(optIns).toEqual([OPT_IN_CALLER]);
   });
 
+  // The narrowing is a DECISION, and the ai-review Architect blocked #2259 for shipping it
+  // with none on record (constitution principle 6: record hard-to-reverse decisions before
+  // implementing). The scan above pins WHERE the write may happen; this pins WHY it may,
+  // so the sanctioned site can never again exist without its record. Every read fails
+  // closed: a missing file throws, and a throw fails the test.
+  const LANE_LABEL_DR = 'DR-098';
+  const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
+
+  it(`the sanctioned site is recorded: ${LANE_LABEL_DR} is in force and names it, and SPEC-050's design covers it`, () => {
+    const cites = new RegExp(`\\b${LANE_LABEL_DR}\\b`);
+    // The code points at its decision…
+    expect(fs.readFileSync(path.join(SRC_DIR, SANCTIONED), 'utf-8')).toMatch(cites);
+    // …the decision exists, is in force, and is about THIS write, not just any record
+    // that happens to carry the number…
+    const dr = fs.readFileSync(path.join(REPO_ROOT, 'docs', 'decisions', `${LANE_LABEL_DR}.md`), 'utf-8');
+    expect(dr).toMatch(new RegExp(`^id:\\s*${LANE_LABEL_DR}\\s*$`, 'm'));
+    expect(dr).toMatch(/^status:\s*(proposed|accepted)\s*$/m);
+    for (const symbol of ['DOCS_LANE_LABEL', 'buildLaneLabelCreateArgs', 'laneWorkflowPresent']) {
+      expect(dr, `${LANE_LABEL_DR} must name ${symbol}`).toContain(symbol);
+    }
+    // …and the owning spec's design carries it. SPEC-050's approved requirements predate
+    // the capability and are hash-locked (#2330 tracks their wording).
+    const design = fs.readFileSync(
+      path.join(REPO_ROOT, 'specs', 'minspec', 'SPEC-050-silent-approval-pr', 'design.md'),
+      'utf-8',
+    );
+    expect(design).toMatch(cites);
+    expect(design).toContain('provisionLaneLabel');
+  });
+
   const scanHits = (sample: string): boolean => LABEL_CALL_PATTERNS.some(([, re]) => re.test(sample));
 
   it.each([

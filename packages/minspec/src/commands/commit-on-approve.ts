@@ -366,7 +366,8 @@ export const LANE_WORKFLOW_REL = '.github/workflows/docs-lane.yml';
  * and this is the gate on doing so. The label's only purpose is to trigger that
  * workflow, so in a repository that never installed it the write would buy nothing:
  * no auto-merge, just an unexplained label. It is read locally (no network), and any
- * error answers "no", the direction that writes nothing.
+ * error answers "no", the direction that writes nothing. This gate is condition 3 of
+ * DR-098 (lane-label provisioning), which records the decision to make the write.
  */
 function laneWorkflowPresent(rootDir: string): boolean {
   try {
