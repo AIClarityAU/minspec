@@ -1,9 +1,9 @@
 {
   "specPath": "specs/minspec/SPEC-034-oidc-review-broker/requirements.md",
-  "specHash": "645a89d78475e787f5e8850ebb53f19f527e82a19256ef3c10ea9827d7a20e90",
-  "approvedAt": "2026-07-20T02:03:32.727Z",
+  "specHash": "77e8b9b6e7c7d8e313e00cafc4e7403986f5b7f0f493ca850bea898ced1ee892",
+  "approvedAt": "2026-09-30T22:07:33.882Z",
   "approvedBy": "github@harvest316.com",
   "tier": "T4",
   "migrated": false,
-  "baselineBlob": "7f503b3308e1631fe2a1253f04e8a46b117f1123"
+  "baselineBlob": "fe929f1e1b26873b8b65487ae71c50eee0610703"
 }
