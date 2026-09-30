@@ -69,9 +69,103 @@ _GH_BOT_MINTED_AT=0
 # gh_bot_refresh; re-mint with headroom rather than at the cliff.
 _GH_BOT_MAX_AGE="${MINSPEC_GH_BOT_MAX_AGE:-2700}"   # 45 min
 
+# How long before RETRYING a re-mint that failed, or that came back with the token we
+# already hold. Both leave the holder stale, so without a cooldown every read in a long
+# loop would spawn its own broker round trip while the broker is down or has not
+# rotated its cache (#2114).
+_GH_BOT_REMINT_COOLDOWN="${MINSPEC_GH_BOT_REMINT_COOLDOWN:-30}"
+_GH_BOT_REMINT_TRIED_AT=0
+
+# Fingerprint of the token we hold — see _gh_bot_adopt for why the VALUE matters and
+# not just the moment we asked for it.
+_GH_BOT_TOKEN_FP=""
+
 gh_bot_die() {
   echo "gh-bot: $*" >&2
   exit 1
+}
+
+# A short, non-reversible fingerprint of a token. Never the token itself: this ends up
+# in an exported environment variable, which is visible to every child and to anything
+# that dumps the environment.
+# Empty when no hasher is available, and every caller treats empty as "cannot vouch for
+# this token" rather than as a match — a missing tool must not manufacture ownership.
+# Every consumer of this file runs under `set -euo pipefail`, so nothing here may fail
+# as a bare statement: an unguarded non-zero would abort the CALLER, and the caller is
+# the drain. Hence the explicit `|| h=""` rather than a bare pipeline.
+_gh_bot_fingerprint() {
+  local h=""
+  h="$(printf '%s' "${1-}" | command sha256sum 2>/dev/null)" || h=""  # swallow-ok: a missing hasher yields an empty fingerprint, which every caller reads as "cannot vouch for this token" and refuses to match — the absence IS the answer here, not a lost verdict
+  printf '%s' "${h:0:16}"
+}
+
+# _gh_bot_adopt <token> — install a token as OURS, dated by the TOKEN and not by the
+# moment we asked for it.
+#
+# The host broker hands the whole machine ONE cached installation token and keeps
+# handing it out after it dies, with no in-container way to force a re-mint (#2114). So
+# "we minted a second ago" is not evidence that the credential is young: a mint that
+# returns the value we already hold has told us nothing except that the cache has not
+# rotated. Resetting the age clock there would buy a full max-age of confidence in a
+# token that may already be dead, which is how a headroom scheme becomes a headroom
+# fiction. The clock therefore moves only when the VALUE changes.
+#
+# Returns 0 when a genuinely different credential is now in place, 1 when the broker
+# handed back the same one. Callers use that to tell "worth retrying" from "hold".
+_gh_bot_adopt() {
+  local tok="${1-}" changed=0
+  [[ "$tok" != "${GH_TOKEN:-}" ]] && changed=1
+  export GH_TOKEN="$tok"
+  _GH_BOT_OWNED=1
+  # We minted it, so there is no third-party identity to probe — skip the `gh api user`
+  # check `_gh_bot_ensure` would otherwise run against our own token on the first write.
+  _GH_BOT_VERIFIED=1
+  _GH_BOT_TOKEN_FP="$(_gh_bot_fingerprint "$tok")"
+  (( changed )) && _GH_BOT_MINTED_AT="$(date +%s)"
+  # Carry ownership across a fork, so a child can refresh what its parent minted.
+  [[ -n "$_GH_BOT_TOKEN_FP" ]] \
+    && export MINSPEC_GH_BOT_TOKEN_STAMP="${_GH_BOT_MINTED_AT}:${_GH_BOT_TOKEN_FP}"
+  (( changed ))
+}
+
+# ── Ownership across a fork ───────────────────────────────────────────────────
+# drain-inbox.sh exports its minted GH_TOKEN and then spawns triage-inbox.sh,
+# dispatch-issue.sh and remediate-pr.sh, each of which sources this file afresh. Without
+# the stamp they see only "GH_TOKEN is set" and classify it as INHERITED — "not ours to
+# replace" — so the gh_bot_refresh calls those three already make are no-ops, and each
+# child presents its parent's token for its whole run, dead or not. Measured in the
+# 2026-09-27 drain log: `Fetching issue #2023... HTTP 401: Bad credentials`, once per
+# dispatch, for hours (#2066).
+#
+# The stamp is fingerprint-VERIFIED, not merely present, because a marker outlives the
+# token it describes: scripts/review-churn-report.sh assigns GH_TOKEN from the broker
+# itself, and an unverified stamp inherited from an ancestor would then claim ownership
+# of a credential this file never minted.
+#
+# Offline by construction (one hash, no network), so sourcing stays safe — and it
+# deliberately does NOT set _GH_BOT_VERIFIED: an inherited token still earns its
+# identity check on the first WRITE, exactly as it did before.
+if [[ -n "${GH_TOKEN:-}" && -n "${MINSPEC_GH_BOT_TOKEN_STAMP:-}" ]]; then
+  _gh_bot_stamp_at="${MINSPEC_GH_BOT_TOKEN_STAMP%%:*}"
+  _gh_bot_stamp_fp="${MINSPEC_GH_BOT_TOKEN_STAMP#*:}"
+  if [[ "$_gh_bot_stamp_at" =~ ^[0-9]+$ && -n "$_gh_bot_stamp_fp" \
+        && "$_gh_bot_stamp_fp" == "$(_gh_bot_fingerprint "$GH_TOKEN")" ]]; then
+    _GH_BOT_OWNED=1
+    _GH_BOT_MINTED_AT="$_gh_bot_stamp_at"
+    _GH_BOT_TOKEN_FP="$_gh_bot_stamp_fp"
+  fi
+  unset _gh_bot_stamp_at _gh_bot_stamp_fp
+fi
+
+# _gh_bot_token_is_stale — is the token we HOLD one of ours, and old enough that it may
+# already have expired? One predicate for the read path, the write path and
+# gh_bot_refresh: three copies of "is it time to re-mint" is how they drift apart, and
+# the read path drifting is what produced #2066.
+_gh_bot_token_is_stale() {
+  [[ "$_GH_BOT_OWNED" == "1" ]] || return 1      # inherited: not ours to replace
+  [[ -n "${GH_TOKEN:-}" ]] || return 1           # nothing held yet
+  (( _GH_BOT_MINTED_AT > 0 )) || return 1
+  (( $(date +%s) - _GH_BOT_MINTED_AT >= _GH_BOT_MAX_AGE ))
 }
 
 # Is this login a bot? Delegates to dispatch-ready-check.sh rather than carrying
@@ -119,9 +213,12 @@ _gh_bot_mint() {
   ${err_txt}
   Refusing to proceed with an unverified credential."
 
-  export GH_TOKEN="$tok"
-  _GH_BOT_OWNED=1
-  _GH_BOT_MINTED_AT="$(date +%s)"
+  if ! _gh_bot_adopt "$tok"; then
+    # The same token back. Not an error — the caller asked for a credential and there is
+    # one — but the age clock deliberately did not move (#2114), so the next refresh
+    # tries again instead of assuming a fresh 45 minutes.
+    return 0
+  fi
 }
 
 # ── THE write vocabulary — one definition, two consumers ──────────────────────
@@ -203,6 +300,17 @@ _gh_bot_is_write() {
 
 # Mint/validate at most once per process. Called by the `gh` wrapper on a write.
 _gh_bot_ensure() {
+  # IDENTITY and VALIDITY are different questions, and _GH_BOT_VERIFIED only answers the
+  # first. A token of OURS that has aged out must be replaced before it is used, however
+  # thoroughly it was verified an hour ago — otherwise the first write after the cliff
+  # goes out on a dead credential and comes back as a 401 that reads like a permissions
+  # problem (#2066). Fatal on failure, unlike the read path: a write with no bot
+  # identity must abort rather than fall back (#1355).
+  if _gh_bot_token_is_stale; then
+    _gh_bot_mint
+    return 0
+  fi
+
   [[ "${_GH_BOT_VERIFIED:-0}" == "1" ]] && return 0
 
   if [[ -n "${GH_TOKEN:-}" ]]; then
@@ -322,24 +430,66 @@ _gh_bot_ensure() {
 # a rate-limit concern. `gh_bot_warm_read` exists so those callers can pay once, in
 # the parent, before the first read (#2003 review).
 _gh_bot_read_auth() {
+  # Staleness is asked BEFORE the once-only guard, and that ORDER is the fix for #2066.
+  # The guard exists to stop a hot read loop re-minting a HEALTHY token; it must not pin
+  # a DEAD one for the life of the process. An aged-out token is worse than no token at
+  # all: `gh` presents it and GitHub answers `401 Bad credentials`, so the read fails
+  # where an unauthenticated one would at least have tried. Measured 2026-09-27:
+  # drain-inbox.sh minted once before an 8-hour loop, and from ~1h in every read 401'd
+  # for the remaining seven hours over a 60-issue queue.
+  if _gh_bot_token_is_stale; then
+    # `|| return 0` is not decoration: a failed re-mint is not a failed read, and every
+    # consumer runs under `set -e`, where a bare non-zero here would abort the drain.
+    _gh_bot_remint_read || return 0
+    return 0
+  fi
+
   [[ "${_GH_BOT_READ_AUTH_TRIED:-0}" == "1" ]] && return 0
   _GH_BOT_READ_AUTH_TRIED=1
 
   # Something is already ambient. Never replace it: it may be the caller's (a
-  # workflow's GITHUB_TOKEN), and a read has no business re-identifying it.
+  # workflow's GITHUB_TOKEN), and a read has no business re-identifying it. Note this
+  # is reachable only when the token is NOT ours — an aged-out token of our own was
+  # already handled above.
   [[ -n "${GH_TOKEN:-}" || -n "${GITHUB_TOKEN:-}" ]] && return 0
-  [[ -f "$_GH_BOT_TOKEN_SCRIPT" ]] || return 0
 
-  local tok
-  tok="$("$_GH_BOT_TOKEN_SCRIPT" 2>/dev/null)" || return 0  # swallow-ok: this is the fallback path itself, not a gate verdict — no key (CI) must leave the read exactly as unauthenticated as it was before, which is the documented contract for read-only entry points
-  [[ -n "$tok" && "$tok" != *$'\n'* ]] || return 0
+  _gh_bot_remint_read || return 0
+  return 0
+}
 
-  export GH_TOKEN="$tok"
-  _GH_BOT_OWNED=1
-  _GH_BOT_MINTED_AT="$(date +%s)"
-  # We minted it, so there is nothing to verify — skip the `gh api user` probe that
-  # `_gh_bot_ensure` would otherwise run against our own token on the first write.
-  _GH_BOT_VERIFIED=1
+# _gh_bot_remint_read — mint for the READ path: best-effort, never fatal, never SILENT.
+#
+# Same asymmetry as above — a read may not abort — but "may not abort" was read as "may
+# say nothing", and a quiet re-mint failure followed by a 401 is the diagnosis-hostile
+# shape that cost seven hours on 2026-09-27. Constitution invariant 2 wants the missing
+# witness visible, so this prints the broker's own diagnosis and carries on.
+#
+# Returns 0 only when a DIFFERENT credential is now installed.
+_gh_bot_remint_read() {
+  # No key at all is the documented CI case, not a failure: "a script that only reads
+  # must run fine with no credential at all." Silent on purpose, and only here.
+  [[ -f "$_GH_BOT_TOKEN_SCRIPT" ]] || return 1
+
+  local now; now="$(date +%s)"
+  if (( _GH_BOT_REMINT_TRIED_AT > 0
+        && now - _GH_BOT_REMINT_TRIED_AT < _GH_BOT_REMINT_COOLDOWN )); then
+    return 1
+  fi
+  _GH_BOT_REMINT_TRIED_AT="$now"
+
+  local tok errfile err_txt rc=0
+  errfile="$(mktemp)"
+  tok="$("$_GH_BOT_TOKEN_SCRIPT" 2>"$errfile")" || rc=$?
+  err_txt="$(cat "$errfile" 2>/dev/null)"  # swallow-ok: this reads the diagnosis to PRINT it; an unreadable scratch file must not turn a reported failure into an abort, and rc above is the verdict
+  rm -f "$errfile"
+
+  if (( rc != 0 )) || [[ -z "$tok" || "$tok" == *$'\n'* ]]; then
+    echo "gh-bot: could not re-mint a read token (App token script exited ${rc}) — the read goes out on whatever credential is present, and will fail if that one is dead." >&2
+    [[ -n "$err_txt" ]] && printf 'gh-bot:   %s\n' "$err_txt" >&2
+    return 1
+  fi
+
+  _gh_bot_adopt "$tok"
 }
 
 # gh_bot_init — call once, near the top of any script that writes to GitHub.
@@ -405,9 +555,33 @@ gh_bot_warm_read() {
 # token (not ours to replace) and no-op while the current one has headroom.
 # Call at the top of long per-item loops.
 gh_bot_refresh() {
-  [[ "$_GH_BOT_OWNED" == "1" ]] || return 0
-  local age=$(( $(date +%s) - _GH_BOT_MINTED_AT ))
-  (( age >= _GH_BOT_MAX_AGE )) || return 0
-  echo "gh-bot: token is ${age}s old — re-minting." >&2
+  _gh_bot_token_is_stale || return 0
+  echo "gh-bot: token is $(( $(date +%s) - _GH_BOT_MINTED_AT ))s old — re-minting." >&2
   _gh_bot_mint
+}
+
+# gh_bot_reauth_read — force ONE re-mint attempt, ignoring headroom, for a caller that
+# has just SEEN a read fail.
+#
+# Age is a GUESS about validity; a failed read is an OBSERVATION of it. The broker hands
+# the whole machine one cached token and keeps handing it out after it dies (#2114), so a
+# holder can sit well inside its headroom and still hold a dead credential — nothing the
+# age check above can see, and exactly what the failure just proved.
+#
+# Returns 0 only when a DIFFERENT credential is now in place, i.e. when re-running the
+# read could plausibly succeed. Non-zero means the broker gave back the same value (or
+# nothing), so the caller must report the failure rather than re-run a query guaranteed
+# to fail again: a failed query is never an empty queue (#1855), and this must not soften
+# that into a silent retry loop.
+gh_bot_reauth_read() {
+  # OUR token, or none at all. A caller's credential (a workflow's GITHUB_TOKEN) stays
+  # the caller's even when a read fails on it: "whose identity is this" is a different
+  # question from "is this token alive", and the read path has no business answering the
+  # first. In CI, where a workflow supplies the token, this is therefore a no-op — and a
+  # failed read there stays the loud hold it already was.
+  if [[ -n "${GH_TOKEN:-}" || -n "${GITHUB_TOKEN:-}" ]] && [[ "$_GH_BOT_OWNED" != "1" ]]; then
+    return 1
+  fi
+  _GH_BOT_REMINT_TRIED_AT=0   # a proven-bad token outranks the cooldown
+  _gh_bot_remint_read
 }

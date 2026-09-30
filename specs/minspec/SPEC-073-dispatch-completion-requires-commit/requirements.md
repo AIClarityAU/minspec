@@ -1,16 +1,16 @@
 ---
 id: SPEC-073
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-002  # Signpost Integrity — "agent completed" over a repo the agent never changed is the pipeline's own signpost lying
 relates_to: [DR-003, DR-033, DR-076, SPEC-044, SPEC-062, SPEC-057]
 implements: [scripts/dispatch-issue.sh]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

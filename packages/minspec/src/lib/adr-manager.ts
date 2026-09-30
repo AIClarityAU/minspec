@@ -286,7 +286,7 @@ export function validateDrAmendments(decisionsDir: string): DrAmendmentGap[] {
   const seen = new Set<string>();
 
   for (const [source, body] of [...bodies].sort(([a], [b]) => a.localeCompare(b))) {
-    if (!/^status:\s*accepted\s*$/m.test(body)) continue;
+    if (!/^status:[ \t]*accepted\s*$/m.test(body)) continue;
 
     /**
      * Record one claim, wherever it was written. Prose and frontmatter both funnel
@@ -721,8 +721,12 @@ export function setAdrStatus(filePath: string, status: AdrStatus): AdrStatus {
         `negates a status word, so rewriting the token would invert the sentence.\n\n` +
         `  line ${inverts.line}: ${inverts.text}\n\n` +
         `Reword that line so it reads correctly under the new status, then retry. ` +
-        `(Accepting DR-088 produced "**Accepted** … Not accepted …" this way — validation ` +
-        `passes on it, because the parity rule reads only the token.)`,
+        `(This is the failure shape #1833 exists to catch: a status line whose prose ` +
+        `negates the token beside it — e.g. "**Accepted** … Not accepted …" — passes ` +
+        `validation anyway, because the parity rule reads only the token, never the ` +
+        `clause after it. No specific DR is cited here because that citation drifts: ` +
+        `the corpus DR that first triggered this rule has since been corrected and no ` +
+        `longer illustrates it — see #2074.)`,
     );
   }
 

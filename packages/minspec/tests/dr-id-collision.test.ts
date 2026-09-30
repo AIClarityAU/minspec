@@ -48,6 +48,7 @@ import {
   frontmatterField,
   modifiedDecisionPaths,
   decideDrRepurposing,
+  DR_IDENTITY_ACK_LABEL,
   type DrFile,
   type PrFileEntry,
 } from '../../../scripts/lib/dr-id-collision';
@@ -841,9 +842,14 @@ describe('C — check-dr-id-collision.ts reports repurposing end-to-end (stub gh
     return wrap ? (raw.match(/.{1,60}/g) ?? []).join('\n') : raw;
   };
 
-  const stub = (baseContent: string | null, headContent: string | null): string => `#!/bin/sh
+  const stub = (
+    baseContent: string | null,
+    headContent: string | null,
+    labels: string[] = [],
+  ): string => `#!/bin/sh
 argv="$*"
 case "$argv" in
+  *"labels"*)                        printf '%s' '${labels.join('\n')}' ;;
   *".head.sha"*)                     echo '${HEAD_SHA}' ;;
   *"DR-088.md?ref=main"*)            ${baseContent === null ? "echo 'null'" : `printf '%s\\n' '${b64(baseContent, true)}'`} ;;
   *"DR-088.md?ref=${HEAD_SHA}"*)     ${headContent === null ? "echo 'null'" : `printf '%s\\n' '${b64(headContent)}'`} ;;
@@ -904,5 +910,146 @@ case "$argv" in
 esac
 `;
     expect(runCli(ARGS, script).status).toBe(0);
+  });
+});
+
+// ─── D. The acknowledgement label (#1982) ────────────────────────────────────
+
+/**
+ * The repurposing gate exists so a decision record cannot be replaced SILENTLY, not so
+ * it can never be replaced. As merged it had no in-band path at all: a typo in `title:`
+ * or a wrong `triggered_by:` recorded at creation was unfixable except by an admin merge
+ * or by superseding the record.
+ *
+ * The label is a speed bump plus an audit trail, NOT a control — whoever opens the PR can
+ * add it, including an agent. These tests pin the properties that make it worth having:
+ * the findings are still reported, an acknowledged pass is distinguishable from a clean
+ * one, and the block names the path out.
+ */
+describe('D — decideDrRepurposing honours the acknowledgement label', () => {
+  const base = drWith('DR-088', 'Ownership leaves the hash', '#1481');
+  const head = drWith('DR-088', 'Ownership leaves the hashh', '#1481'); // a typo fix
+  const rev = [{ file: 'docs/decisions/DR-088.md', base, head }];
+
+  it('blocks without the label, and NAMES the label as the way through', () => {
+    const v = decideDrRepurposing(rev);
+    expect(v.ok).toBe(false);
+    expect(v.acknowledgedBy).toBeUndefined();
+    expect(v.message).toContain(DR_IDENTITY_ACK_LABEL);
+  });
+
+  it('passes with the label, and still reports every finding', () => {
+    const v = decideDrRepurposing(rev, { labels: ['P2', DR_IDENTITY_ACK_LABEL] });
+    expect(v.ok).toBe(true);
+    expect(v.acknowledgedBy).toBe(DR_IDENTITY_ACK_LABEL);
+    // Visibility must not drop when the verdict flips — a label that hid the detail
+    // would leave the reviewer with LESS than the block gave them.
+    expect(v.findings).toHaveLength(1);
+    expect(v.message).toContain('Ownership leaves the hash');
+    expect(v.message).toContain('ACKNOWLEDGED');
+  });
+
+  it('says plainly that it is not a control', () => {
+    const v = decideDrRepurposing(rev, { labels: [DR_IDENTITY_ACK_LABEL] });
+    expect(v.message).toMatch(/NOT a control/);
+  });
+
+  it('a clean PR is NOT reported as acknowledged, even carrying the label', () => {
+    // "nothing changed" and "a change was waved through" must never read the same. If
+    // acknowledgedBy were set here, every labelled PR would look like it had used the
+    // bypass, and the audit trail the label exists for would be worthless.
+    const clean = [{ file: 'docs/decisions/DR-088.md', base, head: base }];
+    const v = decideDrRepurposing(clean, { labels: [DR_IDENTITY_ACK_LABEL] });
+    expect(v.ok).toBe(true);
+    expect(v.acknowledgedBy).toBeUndefined();
+    expect(v.findings).toEqual([]);
+  });
+
+  it('some other label does not acknowledge', () => {
+    const v = decideDrRepurposing(rev, { labels: ['needs-human-review', 'dr-identity'] });
+    expect(v.ok).toBe(false);
+    expect(v.acknowledgedBy).toBeUndefined();
+  });
+
+  it('no labels at all behaves exactly like the unlabelled call', () => {
+    expect(decideDrRepurposing(rev, {}).ok).toBe(decideDrRepurposing(rev).ok);
+  });
+});
+
+describe('D — the label works end-to-end through the CLI (stub gh)', () => {
+  function runCli(args: string[], script: string): { status: number; out: string } {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'dr-lbl-cli-'));
+    const bin = path.join(tmp, 'gh');
+    fs.writeFileSync(bin, script, { mode: 0o755 });
+    try {
+      const out = execFileSync('npx', ['tsx', CLI, ...args], {
+        cwd: REPO_ROOT,
+        encoding: 'utf-8',
+        env: { ...process.env, DR_ID_GH_BIN: bin, GITHUB_ACTIONS: '' },
+        stdio: ['ignore', 'pipe', 'pipe'],
+      });
+      return { status: 0, out };
+    } catch (e) {
+      const err = e as { status?: number; stdout?: string; stderr?: string };
+      return { status: err.status ?? 1, out: `${err.stdout ?? ''}${err.stderr ?? ''}` };
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  }
+
+  const ARGS = ['--repo', 'AIClarityAU/minspec', '--pr', '1756', '--base', 'main'];
+  const SHA = 'deadbeefdeadbeefdeadbeefdeadbeefdeadbeef';
+  const b64 = (t: string) => Buffer.from(t, 'utf-8').toString('base64');
+
+  const stub = (labels: string[]) => `#!/bin/sh
+argv="$*"
+case "$argv" in
+  *"labels"*)                        printf '%s' '${labels.join('\n')}' ;;
+  *".head.sha"*)                     echo '${SHA}' ;;
+  *"DR-088.md?ref=main"*)            printf '%s\\n' '${b64(drWith('DR-088', 'Ownership leaves the hash', '#1481'))}' ;;
+  *"DR-088.md?ref=${SHA}"*)          printf '%s\\n' '${b64(drWith('DR-088', 'Ownership leaves the hashh', '#1481'))}' ;;
+  *"pulls/1756/files"*)              echo '[[{"filename":"docs/decisions/DR-088.md","status":"modified"}]]' ;;
+  *"contents/docs/decisions?ref="*)  echo '[[{"path":"docs/decisions/DR-088.md","type":"file"}]]' ;;
+  *"pr list"*)                       echo '[{"number":1756}]' ;;
+  *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
+esac
+`;
+
+  it('without the label: exits non-zero and names the label', () => {
+    const r = runCli(ARGS, stub([]));
+    expect(r.status).not.toBe(0);
+    expect(r.out).toContain(DR_IDENTITY_ACK_LABEL);
+  });
+
+  it('with the label: exits 0, and still prints what changed', () => {
+    const r = runCli(ARGS, stub(['P2', DR_IDENTITY_ACK_LABEL]));
+    expect(r.status).toBe(0);
+    expect(r.out).toContain('ACKNOWLEDGED');
+    expect(r.out).toContain('Ownership leaves the hash');
+  });
+
+  it('fetches NO labels on a PR that modifies no decision record', () => {
+    // Cost guard. The stub exits 1 on any unanticipated call and has no labels arm, so
+    // if the CLI reached for them here this would go red.
+    const script = `#!/bin/sh
+argv="$*"
+case "$argv" in
+  *"pulls/1756/files"*)              echo '[[{"filename":"scripts/foo.ts","status":"modified"}]]' ;;
+  *"contents/docs/decisions?ref="*)  echo '[[{"path":"docs/decisions/DR-088.md","type":"file"}]]' ;;
+  *"pr list"*)                       echo '[{"number":1756}]' ;;
+  *) echo "unexpected gh call: $argv" >&2 ; exit 1 ;;
+esac
+`;
+    expect(runCli(ARGS, script).status).toBe(0);
+  });
+
+  it('an UNREADABLE label list fails closed, not assumed-absent', () => {
+    // Reading "cannot tell" as "not acknowledged" would block a correctly-labelled PR
+    // with a message telling the author to add a label they already added.
+    const script = stub([]).replace(`*"labels"*)                        printf '%s' '' ;;`,
+                                    `*"labels"*)                        echo "boom" >&2; exit 1 ;;`);
+    const r = runCli(ARGS, script);
+    expect(r.status).not.toBe(0);
+    expect(r.out).toMatch(/FAILED CLOSED/);
   });
 });

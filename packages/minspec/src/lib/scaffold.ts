@@ -108,7 +108,13 @@ const TASKS_MD_INHERITED_FIELDS = ['id', 'status', 'product', 'epic'] as const;
 function rawFrontmatterLine(raw: string, key: string): string | undefined {
   const block = raw.match(/^---\n([\s\S]*?)\n---/);
   if (!block) return undefined;
-  const lineRe = new RegExp(`^(${key}\\s*:\\s*.*)$`, 'm');
+  // `[ \t]*`, NOT `\s*` — the fourth copy of the #1961 idiom. JS `\s` matches
+  // newlines, so on a valueless key (`status:`) the `:\s*` crossed the line break and
+  // `.*` then matched the NEXT line, capturing `status:\nproduct: minspec` — two lines
+  // copied verbatim into the scaffolded frontmatter, duplicating a key and malforming
+  // the file. Different blast radius from the ownership readers (a corrupt scaffold,
+  // not a blind gate), same mistake. Pinned by ownership-list-parity.test.ts.
+  const lineRe = new RegExp(`^(${key}[ \t]*:[ \t]*.*)$`, 'm');
   const m = block[1].match(lineRe);
   return m ? m[1].trimEnd() : undefined;
 }
@@ -290,6 +296,11 @@ export const MINSPEC_GITIGNORE_ENTRIES = [
   // keep the primary checkout clean). Not under .claude/commands/, so unaffected by
   // the slash-command-shim carve-out some repos keep in their own .gitignore.
   '.claude/worktrees/',
+  // SPEC-044 Slice 1 (DR-067): per-item flock lockfiles + the per-session
+  // claimed-items registry for the dispatch claim-lease. Machine-local and
+  // ephemeral — must never be tracked, or a newly-scaffolded project commits
+  // lock noise the moment it uses the dispatch machinery (#959).
+  '.minspec/locks/',
 ];
 
 /**
