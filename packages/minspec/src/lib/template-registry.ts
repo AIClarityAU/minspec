@@ -451,6 +451,7 @@ Two notes about clones, because an inert gate is worse than no gate — it looks
 | Author identity gate (opt-in) | \`pre-commit\` | A commit author email not in a configured allowlist |
 | Secret scan | \`pre-commit\` | Staged changes containing a detected secret |
 | Spec frontmatter | \`pre-commit\` | A staged spec missing \`id: SPEC-NNN\` |
+| Decision frontmatter | \`pre-commit\` | A staged \`DR-NNN.md\` missing \`id: DR-NNN\` |
 | Deferred-work gate | \`commit-msg\` | A message that defers work without saying where it went |
 | Root-cause gate | \`commit-msg\` | A \`fix:\` commit whose body has no \`Root cause:\` line |
 
@@ -542,6 +543,20 @@ check instead of bricking the commit. Know the limit of the lower tiers: the \`p
 shell tiers match paths under \`specs/\` literally, so if \`{{specsDir}}/\` differs from that,
 only the Node tier sees your specs and a clean commit is not evidence the frontmatter is
 valid.
+
+### Decision frontmatter
+
+Every staged \`docs/decisions/DR-NNN.md\` must carry an \`id: DR-NNN\` frontmatter line, mirroring
+the spec-frontmatter gate above one artifact class over. A DR created through
+*MinSpec: Create Architecture Decision Record* always has one; a hand-written DR can silently
+lack it, and without this gate nothing notices — the register then holds records of which only
+some are machine-readable, and every cross-reference into that DR from a commit, spec, or
+another DR resolves against an id that was never there to begin with.
+
+Enforced by the same shell case inside the pre-commit hook's SDD-validation stage that checks
+spec frontmatter, and by \`validate.py\`'s \`DR_ID_RE\` tier. The path is matched literally
+against \`docs/decisions/\`, so a project that has relocated \`{{decisionsDir}}/\` is not covered
+by the lower tiers — the same known limit the spec-frontmatter gate carries.
 
 ### Deferred-work gate
 
