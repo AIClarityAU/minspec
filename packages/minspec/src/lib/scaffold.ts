@@ -296,6 +296,11 @@ export const MINSPEC_GITIGNORE_ENTRIES = [
   // keep the primary checkout clean). Not under .claude/commands/, so unaffected by
   // the slash-command-shim carve-out some repos keep in their own .gitignore.
   '.claude/worktrees/',
+  // SPEC-044 Slice 1 (DR-067): per-item flock lockfiles + the per-session
+  // claimed-items registry for the dispatch claim-lease. Machine-local and
+  // ephemeral — must never be tracked, or a newly-scaffolded project commits
+  // lock noise the moment it uses the dispatch machinery (#959).
+  '.minspec/locks/',
 ];
 
 /**
