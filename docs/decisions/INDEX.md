@@ -747,6 +747,22 @@ Four properties of the current code turn "stale" into "destructive". Each is cit
 The drain's admission control gates on a quota reading at ~/.claude/quota.json. The reading's only producers were **interactive** surfaces - a rendering statusline - while the drain that consumes it runs **unattended**. Measured 2026-09-09 (#1859): the file was **49 hours stale** while holding "used_percentage": 3.0. Over 100 issues carried agent-ready / agent-ready-specify and none dispatched. The pipeline had been dead for days and presented as a quiet week.
 <!-- /dr-summary:DR-093 -->
 
+## [DR-094 — The review broker's tokens live one hour because GitHub issues no shorter credential - exposure is bounded by immediate use and non-storage, not by a TTL the API will not honour](DR-094.md)
+
+*Status: proposed · Date: 2026-09-18*
+
+<!-- dr-summary:DR-094 auto=f02b7feacc1d -->
+SPEC-034's broker exchanges a GitHub Actions OIDC token for a GitHub App installation token, so an adopter's CI can post as minspec-sdd[bot] without holding the App private key. DR-054's reasoning is that one leaked App key mints tokens for every repository that ever installed the App, so the blast radius of the key dwarfs the blast radius of any one token. Short token lifetime was the compensating control.
+<!-- /dr-summary:DR-094 -->
+
+## [DR-095 — A socket bind-mounted as a file pins one inode, so restarting the broker is the act that severs it - mount a dedicated directory, read-only](DR-095.md)
+
+*Status: proposed · Date: 2026-09-25*
+
+<!-- dr-summary:DR-095 auto=e43c8c7ab700 -->
+/etc/nixos/home.nix:95 declares it: The host side is **$XDG_RUNTIME_DIR**, which for a user manager is /run/user/1000. It is not /tmp; /tmp/gh-app-token.sock is only the path the socket is presented at *inside* the container. This matters for the proposal below, because "mount the directory" means mounting the systemd user runtime directory, which is a very different object from a purpose-built socket directory.
+<!-- /dr-summary:DR-095 -->
+
 ## [DR-096 — Adopters get a frozen, diagnosis-only pre-strip basis and a third provenance verdict - not a flag, and not a migration](DR-096.md)
 
 *Status: proposed · Date: 2026-09-25*
