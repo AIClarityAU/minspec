@@ -4,6 +4,8 @@ import {
   sortBacklog,
   isGhAvailable,
   extractEpicSlug,
+  isPossiblyTruncated,
+  MAX_BACKLOG_ISSUES,
 } from '../lib/backlog';
 import type { BacklogIssue, IssueLifecycleLabel } from '../lib/backlog';
 import { EpicGroupingState, EpicGroupNode, buildEpicGroups } from './epic-grouping';
@@ -126,6 +128,8 @@ export class BacklogTreeProvider implements vscode.TreeDataProvider<BacklogNode>
   private lastError: string | null = null;
   private loading = false;
   private lastRefreshAt = 0;
+  /** Set when the last fetch hit MAX_BACKLOG_ISSUES — see isPossiblyTruncated (#2246). */
+  private truncated = false;
   private readonly _listEpics?: ListEpicsFn;
   /** Per-panel "group by epic" toggle (FR-7), default on. */
   public readonly epicGrouping = new EpicGroupingState(true);
@@ -142,6 +146,7 @@ export class BacklogTreeProvider implements vscode.TreeDataProvider<BacklogNode>
   refresh(): void {
     this.cachedIssues = [];
     this.lastError = null;
+    this.truncated = false;
     this.lastRefreshAt = Date.now();
     this._onDidChangeTreeData.fire(undefined);
   }
@@ -183,7 +188,7 @@ export class BacklogTreeProvider implements vscode.TreeDataProvider<BacklogNode>
   private async getRootNodes(): Promise<BacklogNode[]> {
     // Return cached data if available
     if (this.cachedIssues.length > 0) {
-      return this.buildGroups(this.cachedIssues);
+      return this.renderIssues();
     }
 
     if (this.lastError) {
@@ -206,6 +211,10 @@ export class BacklogTreeProvider implements vscode.TreeDataProvider<BacklogNode>
     this.loading = true;
     try {
       const issues = await fetchIssues(this.workspaceRoot, { state: 'open' });
+      // Fetched with fetchIssues' own default limit (MAX_BACKLOG_ISSUES) — flag
+      // when the result may have been cut off there so the pane never presents
+      // a partial backlog as if it were the whole thing (#2246).
+      this.truncated = isPossiblyTruncated(issues, MAX_BACKLOG_ISSUES);
       this.cachedIssues = sortBacklog(issues);
       this.loading = false;
 
@@ -213,12 +222,26 @@ export class BacklogTreeProvider implements vscode.TreeDataProvider<BacklogNode>
         return [new MessageNode('No open issues found')];
       }
 
-      return this.buildGroups(this.cachedIssues);
+      return this.renderIssues();
     } catch {
       this.loading = false;
       this.lastError = 'Failed to fetch issues from GitHub';
       return [new MessageNode(this.lastError)];
     }
+  }
+
+  /** Build the group nodes for the cached issues, prefixed with a truncation notice if needed. */
+  private renderIssues(): BacklogNode[] {
+    const groups = this.buildGroups(this.cachedIssues);
+    if (!this.truncated) return groups;
+
+    return [
+      new MessageNode(
+        `⚠ Showing first ${MAX_BACKLOG_ISSUES} open issues — there may be more. ` +
+        'View the full list on GitHub.',
+      ),
+      ...groups,
+    ];
   }
 
   private buildGroups(issues: BacklogIssue[]): (BacklogGroupNode | EpicGroupNode<BacklogIssue>)[] {

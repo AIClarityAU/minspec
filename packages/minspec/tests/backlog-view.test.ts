@@ -40,9 +40,15 @@ vi.mock('../src/lib/backlog', () => ({
   fetchIssues: (...args: unknown[]) => mockFetchIssues(...args),
   sortBacklog: (...args: unknown[]) => mockSortBacklog(...args),
   isGhAvailable: (...args: unknown[]) => mockIsGhAvailable(...args),
+  isPossiblyTruncated: (issues: unknown[], limit: number) => issues.length >= limit,
+  // Inlined rather than referencing an outer const: vi.mock factories are hoisted
+  // above regular top-level declarations, and only identifiers starting with
+  // "mock" survive that hoist (see mockFetchIssues et al. above).
+  MAX_BACKLOG_ISSUES: 2000,
 }));
 
 import { BacklogGroupNode, BacklogIssueNode, BacklogTreeProvider } from '../src/views/backlog-view';
+import { MAX_BACKLOG_ISSUES } from '../src/lib/backlog';
 import type { BacklogIssue, IssueLifecycleLabel, PriorityLabel } from '../src/lib/backlog';
 
 // --- Helpers ---
@@ -407,6 +413,34 @@ describe('BacklogTreeProvider', () => {
     // Only WIP group should appear
     expect(children).toHaveLength(1);
     expect((children[0] as { label: string }).label).toBe('Work in Progress');
+  });
+
+  it('getChildren root: prepends a truncation notice when fetch hits MAX_BACKLOG_ISSUES (#2246)', async () => {
+    const issues = Array.from({ length: MAX_BACKLOG_ISSUES }, (_, i) =>
+      makeIssue({ number: i + 1, lifecycleLabel: 'inbox' }),
+    );
+    mockIsGhAvailable.mockResolvedValue(true);
+    mockFetchIssues.mockResolvedValue(issues);
+    mockSortBacklog.mockReturnValue(issues);
+
+    const children = await provider.getChildren();
+
+    expect((children[0] as { label: string }).label).toContain(String(MAX_BACKLOG_ISSUES));
+    expect((children[0] as { label: string }).label).toContain('more');
+    // Groups still render after the notice.
+    expect(children.length).toBeGreaterThan(1);
+  });
+
+  it('getChildren root: no truncation notice when fetch is under MAX_BACKLOG_ISSUES', async () => {
+    const issues = [makeIssue({ number: 1, lifecycleLabel: 'inbox' })];
+    mockIsGhAvailable.mockResolvedValue(true);
+    mockFetchIssues.mockResolvedValue(issues);
+    mockSortBacklog.mockReturnValue(issues);
+
+    const children = await provider.getChildren();
+
+    expect(children).toHaveLength(1);
+    expect((children[0] as { label: string }).label).not.toContain('more');
   });
 
   it('getChildren root: shows error message when fetch fails', async () => {

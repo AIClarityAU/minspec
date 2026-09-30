@@ -182,6 +182,18 @@ interface GhIssueJson {
 }
 
 /**
+ * Default cap for {@link fetchIssues} when the caller does not pass an explicit
+ * `limit`. `gh issue list --limit N` pages internally (fetching in batches of up
+ * to 100 until N results are collected or the repo runs out), so raising this
+ * default is enough to page through the whole backlog instead of stopping after
+ * one page — minspec alone had 893 open issues against the old default of 100
+ * (AIClarityAU/minspec#2246). 2000 leaves headroom above that; a repo that grows
+ * past it hits the truncation check in {@link fetchIssues}'s callers instead of
+ * silently dropping issues off the end.
+ */
+export const MAX_BACKLOG_ISSUES = 2000;
+
+/**
  * Fetch issues from GitHub using `gh` CLI.
  * Filters to open issues by default.
  */
@@ -194,7 +206,7 @@ export async function fetchIssues(
   },
 ): Promise<BacklogIssue[]> {
   const state = options?.state ?? 'open';
-  const limit = options?.limit ?? 100;
+  const limit = options?.limit ?? MAX_BACKLOG_ISSUES;
 
   const args = [
     'issue', 'list',
@@ -210,7 +222,9 @@ export async function fetchIssues(
   try {
     const { stdout } = await execFileAsync('gh', args, {
       cwd: rootDir,
-      timeout: 15000,
+      // Paging through a large backlog (see MAX_BACKLOG_ISSUES) takes more than
+      // one `gh` page fetch; 15s was tuned for a single 100-issue page.
+      timeout: 30000,
       env: { ...process.env },
     });
 
@@ -219,6 +233,18 @@ export async function fetchIssues(
   } catch {
     return [];
   }
+}
+
+/**
+ * Whether a `fetchIssues` result may have been truncated by its `limit` — i.e.
+ * the CLI returned exactly as many issues as were asked for, which is
+ * indistinguishable from "there are more beyond the cap" without a second API
+ * call. Callers that render the result (e.g. the Backlog pane) use this to
+ * surface the truncation instead of silently presenting a partial list as
+ * complete (#2246).
+ */
+export function isPossiblyTruncated(issues: BacklogIssue[], limit: number): boolean {
+  return issues.length >= limit;
 }
 
 /**

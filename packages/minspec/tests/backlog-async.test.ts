@@ -36,6 +36,7 @@ import {
   transitionIssue,
   setPriority,
   calculateWsjf,
+  MAX_BACKLOG_ISSUES,
   type WsjfScore,
 } from '../src/lib/backlog';
 
@@ -250,11 +251,11 @@ describe('fetchIssues()', () => {
     expect(issues).toEqual([]);
   });
 
-  it('passes default options (open, limit 100)', async () => {
+  it('passes default options (open, limit MAX_BACKLOG_ISSUES)', async () => {
     await fetchIssues('/fake/root');
     expect(mockExecFile).toHaveBeenCalledWith(
       'gh',
-      expect.arrayContaining(['issue', 'list', '--state', 'open', '--limit', '100']),
+      expect.arrayContaining(['issue', 'list', '--state', 'open', '--limit', String(MAX_BACKLOG_ISSUES)]),
       expect.any(Object),
       expect.any(Function),
     );

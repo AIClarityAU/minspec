@@ -25,6 +25,7 @@ import {
   extractWsjfFromLabels,
   extractEpicSlug,
   sortBacklog,
+  isPossiblyTruncated,
   type WsjfDimensions,
   type BacklogIssue,
   type IssueLifecycleLabel,
@@ -361,5 +362,39 @@ describe('sortBacklog()', () => {
   it('handles single issue', () => {
     const issues = [makeIssue({ number: 1 })];
     expect(sortBacklog(issues)).toHaveLength(1);
+  });
+});
+
+// ─── Truncation detection ───────────────────────────────────────────────
+
+describe('isPossiblyTruncated()', () => {
+  function makeIssue(overrides: Partial<BacklogIssue> = {}): BacklogIssue {
+    return {
+      number: 1,
+      title: 'Test',
+      url: 'https://github.com/test/1',
+      labels: [],
+      state: 'OPEN',
+      createdAt: '2026-01-01T00:00:00Z',
+      updatedAt: '2026-01-01T00:00:00Z',
+      lifecycleLabel: null,
+      priorityLabel: null,
+      wsjfScore: null,
+      ...overrides,
+    };
+  }
+
+  it('is false when fewer issues were returned than the limit', () => {
+    const issues = [makeIssue({ number: 1 }), makeIssue({ number: 2 })];
+    expect(isPossiblyTruncated(issues, 100)).toBe(false);
+  });
+
+  it('is true when exactly the limit was returned (#2246)', () => {
+    const issues = Array.from({ length: 100 }, (_, i) => makeIssue({ number: i + 1 }));
+    expect(isPossiblyTruncated(issues, 100)).toBe(true);
+  });
+
+  it('is false for an empty result', () => {
+    expect(isPossiblyTruncated([], 100)).toBe(false);
   });
 });
