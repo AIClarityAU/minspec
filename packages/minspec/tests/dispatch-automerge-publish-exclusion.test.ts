@@ -243,11 +243,21 @@ describe('dispatch-issue.sh — publish-path auto-merge exclusion (#981)', () =>
     });
 
     it('the arm site names the publish mandate in the withhold message (never-wrong)', () => {
-      const guardIdx = content.indexOf('if native_automerge_enabled; then');
-      const armBlock = content.slice(guardIdx);
+      // Anchored from the ARM itself (`--squash --auto`), not the first occurrence
+      // of the guard string in the file — `indexOf('if native_automerge_enabled;
+      // then')` alone finds the `--check-native-automerge` pure seam near the top
+      // of the file (line ~94), making `armBlock` ~95% of a 1900-line file and
+      // this assertion unable to fail for the reason it names (#1781).
+      const armIdx = content.indexOf('--squash --auto');
+      const guardIdx = content.lastIndexOf('if native_automerge_enabled; then', armIdx);
+      const armBlock = content.slice(guardIdx, armIdx);
       expect(armBlock).toMatch(/merging IS publishing \(#981\)/);
-      // the classifier — not a second, driftable predicate — remains the decision
-      expect(armBlock).toMatch(/paths_have_approvable_doc <<<"\$changed_files"/);
+      // The decision itself is the autonomy gate (DR-086), reached via
+      // `autonomy_may_merge` — which chains to `autonomy_stop_classes_for_paths` ->
+      // `paths_have_approvable_doc` (pinned end-to-end by autonomy-merge-gate.test.ts,
+      // "SITE A still reaches the withhold classifier") — not a second, driftable
+      // predicate re-decided here.
+      expect(armBlock).toMatch(/autonomy_may_merge /);
     });
 
     it('still fails CLOSED on an unknown/unreadable changed-set (unchanged, re-pinned)', () => {

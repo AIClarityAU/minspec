@@ -189,11 +189,24 @@ describe('dispatch-issue.sh — docs-corpus auto-merge exclusion (#833)', () => 
       expect(content).toMatch(/grep -qE "\$\{DOCS_CORPUS_RE\}"'\|\^\\\.minspec\/\|\^\\\.cursorrules\$'/);
     });
 
-    it('the arm block consults the classifier before arming, via a here-string (no SIGPIPE)', () => {
-      const guardIdx = content.indexOf('if native_automerge_enabled; then');
-      const armBlock = content.slice(guardIdx);
-      expect(armBlock).toMatch(/paths_have_approvable_doc <<<"\$changed_files"/);
-      // must NOT feed grep via a pipe (pipefail + SIGPIPE fail-open on large lists)
+    it('the arm block consults the autonomy gate (which chains to the classifier) before arming, never via a piped grep (no SIGPIPE)', () => {
+      // Anchored from the ARM itself (`--squash --auto`), not the first occurrence
+      // of the guard string in the file — `indexOf('if native_automerge_enabled;
+      // then')` alone finds the `--check-native-automerge` pure seam near the top
+      // of the file (line ~94), making `armBlock` ~95% of a 1900-line file and
+      // this assertion unable to fail for the reason it names (#1781).
+      const armIdx = content.indexOf('--squash --auto');
+      const guardIdx = content.lastIndexOf('if native_automerge_enabled; then', armIdx);
+      const armBlock = content.slice(guardIdx, armIdx);
+      // The classifier no longer sits directly in the arm — #1614 demoted
+      // `paths_have_approvable_doc` from decider to populator. The arm's own entry
+      // point into that decision is `autonomy_may_merge`, which chains to
+      // `autonomy_stop_classes_for_paths` -> `paths_have_approvable_doc <<<"$changed_files"`;
+      // that whole chain (including the here-string, no-SIGPIPE property) is pinned
+      // end-to-end by autonomy-merge-gate.test.ts ("SITE A still reaches the
+      // withhold classifier").
+      expect(armBlock).toMatch(/autonomy_may_merge /);
+      // must NOT feed grep via a pipe anywhere in the arm block (pipefail + SIGPIPE fail-open on large lists)
       expect(armBlock).not.toMatch(/\|\s*paths_have_approvable_doc/);
     });
 
