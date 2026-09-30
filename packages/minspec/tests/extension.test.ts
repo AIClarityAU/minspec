@@ -310,6 +310,7 @@ vi.mock('path', async () => {
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import { activate, deactivate } from '../src/extension';
+import { computeNextTask } from '../src/commands/next-task';
 import { initCommand, initRefreshCommand, commitHarnessRefreshCommand } from '../src/commands/init';
 import { classifyCommand } from '../src/commands/classify';
 import { statusCommand } from '../src/commands/status';
@@ -432,9 +433,50 @@ describe('activate()', () => {
       'minspec.removeContext',
       'minspec.generateExample',
       'minspec.showSpecPanel',
+      // The Alt+A dispatch chain (#303/#377): approveActive never re-implements
+      // approve/accept logic, it only routes to these three plus itself. All
+      // four registering is exactly the invariant the alt-a-dead-key
+      // investigation (2026-09-25) needed and this list didn't cover — an
+      // activation throw between here and approveActive's own registerCommand
+      // call would silently kill the keybinding with nothing in this suite
+      // going red.
+      'minspec.approveActive',
+      'minspec.approveSpec',
+      'minspec.acceptAdr',
+      'minspec.acceptEpic',
     ];
 
     for (const cmd of expectedCommands) {
+      expect(registeredCommands.has(cmd), `missing command: ${cmd}`).toBe(true);
+    }
+  });
+
+  // Regression test for the alt-a-dead-key investigation (2026-09-25). The
+  // founder reported Alt+A ("minspec.approveActive") firing dead. The leading
+  // hypothesis was that some throwable call earlier in activate() throws and
+  // kills every registerCommand() that lexically follows it, since
+  // approveActive registers roughly two-thirds of the way through the
+  // function body. That hypothesis was REFUTED by code review (every risky
+  // call already visible in activate() is individually try/catch-guarded) —
+  // this test asserts the specific guard around the next-task status bar
+  // paint holds: computeNextTask throwing must not prevent approveActive (or
+  // its sibling approve/accept commands) from registering. Asserts the
+  // registration LIST, not the happy path, per RCDD Phase 3 (a happy-path
+  // assertion would pass even if the guard were deleted, as long as nothing
+  // actually throws in the mocked run).
+  it('registers minspec.approveActive even when computeNextTask throws', () => {
+    vi.mocked(computeNextTask).mockImplementation(() => {
+      throw new Error('simulated: malformed workspace graph');
+    });
+
+    expect(() => activate(makeMockContext())).not.toThrow();
+
+    for (const cmd of [
+      'minspec.approveActive',
+      'minspec.approveSpec',
+      'minspec.acceptAdr',
+      'minspec.acceptEpic',
+    ]) {
       expect(registeredCommands.has(cmd), `missing command: ${cmd}`).toBe(true);
     }
   });
