@@ -43,7 +43,7 @@ vi.mock('../src/lib/backlog', () => ({
 }));
 
 import { BacklogGroupNode, BacklogIssueNode, BacklogTreeProvider } from '../src/views/backlog-view';
-import type { BacklogIssue, IssueLifecycleLabel, PriorityLabel } from '../src/lib/backlog';
+import type { BacklogIssue, IssueLifecycleLabel } from '../src/lib/backlog';
 
 // --- Helpers ---
 

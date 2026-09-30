@@ -1109,7 +1109,6 @@ describe('injectContext command', () => {
   // A full T4/implementing spec on disk. The walk reads its file content via
   // fs.readFileSync; parseSpec (mocked) turns it into frontmatter. The id must
   // match what the user typed so the finder selects this file.
-  const T4_SPEC_FILE = '/tmp/test-workspace/specs/SPEC-007-thing.md';
   const T4_FRONTMATTER = {
     id: 'SPEC-007',
     title: 'Real Feature Title',

@@ -162,9 +162,7 @@ describe('refreshHarnessFiles()', () => {
     // Generate files
     generateHarnessFiles(tmpDir);
 
-    // Read original content to compare
     const claudePath = path.join(tmpDir, 'CLAUDE.md');
-    const originalContent = fs.readFileSync(claudePath, 'utf-8');
 
     // Refresh without modifying anything — should re-render templates
     refreshHarnessFiles(tmpDir);
@@ -179,7 +177,6 @@ describe('refreshHarnessFiles()', () => {
 
   it('stores updated hashes after refresh', () => {
     generateHarnessFiles(tmpDir);
-    const hashesBeforeRefresh = loadHashes(tmpDir);
 
     refreshHarnessFiles(tmpDir);
     const hashesAfterRefresh = loadHashes(tmpDir);

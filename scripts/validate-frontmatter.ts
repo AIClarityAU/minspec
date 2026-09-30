@@ -15,7 +15,7 @@
  * quietly, per `.minspec/constitution.md` invariant 2.
  */
 
-import { readdirSync, readFileSync, statSync, existsSync } from 'fs';
+import { readdirSync, readFileSync, existsSync } from 'fs';
 import { join, relative, dirname, sep } from 'path';
 import { validateDrSequence, validateDrIndexStatus, validateDrAmendments } from '../packages/minspec/src/lib/adr-manager';
 import {

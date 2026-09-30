@@ -2,7 +2,6 @@ import { describe, it, expect } from 'vitest';
 import { getHtml, getErrorHtml, toggleTask } from '../src/views/spec-panel-html';
 import type { ClassificationSummary } from '../src/views/spec-panel-html';
 import { parseSpec, writeSpec } from '../src/lib/spec';
-import type { ParsedSpec } from '../src/lib/spec';
 
 // --- Test fixtures ---
 
