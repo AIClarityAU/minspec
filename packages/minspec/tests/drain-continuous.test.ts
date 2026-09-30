@@ -76,8 +76,16 @@ describe('drain-inbox.sh — session-lifetime seam (#239: loop dies with the ses
  * the OS-level comm and args for that process are exactly what the issue
  * measured on the real machine, not a mock of `ps`. It stays alive (bash -c
  * with a trailing command forces a real fork rather than an exec tail-call) as
- * the PARENT of a child `bash drain-inbox.sh --resolve-session-pid`, so the
- * resolver's walk must climb one level and match it.
+ * the GRANDPARENT of `bash drain-inbox.sh --resolve-session-pid`, with a plain
+ * `bash` shell in between, so the resolver's walk must climb one level past its
+ * $PPID and match it.
+ *
+ * The intermediate shell is what makes this test able to fail. With the drain
+ * as a DIRECT child of the fake, its $PPID IS the fake, so the no-match fallback
+ * (resolve_session_anchor returns $PPID) printed the very pid the assertion
+ * expects, and the test passed against the unfixed script too. Now the fallback
+ * prints the intermediate shell's pid, which the test captures (`$$`) and
+ * asserts differs from the fake's.
  */
 describe('T3 regression (#2215): resolve_session_pid matches the versioned claude binary', () => {
   it('walks up to a "2.1.283"-named ancestor invoked from a /claude/versions/ path', () => {
@@ -99,14 +107,23 @@ describe('T3 regression (#2215): resolve_session_pid matches the versioned claud
       // and resolve_session_pid checks it FIRST — an inherited value would short-circuit
       // the walk entirely and the test would pass for the wrong reason (matching the
       // REAL session, not the fake tree built here).
+      //
+      // The inner `bash -c` is the intermediate shell: it prints its own pid ($$),
+      // then forks the drain (again `; true`, so it forks rather than execs).
+      const intermediate = `echo "$$"; bash "${DRAIN}" --resolve-session-pid; true`;
       const r = spawnSync(
         fakeBin,
-        ['-c', `bash "${DRAIN}" --resolve-session-pid; true`, '--output-format', 'stream-json'],
+        ['-c', `bash -c '${intermediate}'; true`, '--output-format', 'stream-json'],
         { encoding: 'utf-8', env: { ...process.env, MINSPEC_SESSION_PID: '' } }
       );
       expect(r.status, r.stderr).toBe(0);
       expect(r.pid, 'the fake "2.1.283" process must itself have a pid to match against').toBeGreaterThan(0);
-      expect(r.stdout.trim()).toBe(String(r.pid));
+      const [intermediatePid, resolvedPid] = r.stdout.trim().split('\n');
+      // The fallback answer. It must differ from the fake's pid, or this test cannot
+      // tell a matched walk from a fallback, which is how it once passed unfixed.
+      expect(intermediatePid).toMatch(/^\d+$/);
+      expect(intermediatePid, 'the drain must NOT be a direct child of the fake').not.toBe(String(r.pid));
+      expect(resolvedPid).toBe(String(r.pid));
     } finally {
       fs.rmSync(fakeRoot, { recursive: true, force: true });
     }
