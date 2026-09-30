@@ -53,7 +53,9 @@ import {
   createRulesetPayload,
   createRequiredChecksRuleset,
   hasRequiredChecksRuleset,
+  hasRequiredChecksRuleAnonymous,
   isGhReady,
+  probeGhAvailability,
   resolveCheckContexts,
   detectCodeChecks,
   resolveTieredRequiredChecks,
@@ -153,6 +155,34 @@ describe('isGhReady()', () => {
   });
 });
 
+describe('probeGhAvailability() — split installed/authenticated (#1889)', () => {
+  it('{ installed: false, authenticated: false } when gh cannot spawn, short-circuiting before auth status', async () => {
+    const { run, calls } = makeRunner((_c, a) =>
+      a[0] === '--version' ? { throws: 'ENOENT' } : ok(''),
+    );
+    expect(await probeGhAvailability(run)).toEqual({ installed: false, authenticated: false });
+    expect(calls).toHaveLength(1);
+  });
+
+  it('{ installed: true, authenticated: false } when gh is installed but has no usable token', async () => {
+    const { run } = makeRunner((_c, a) => {
+      if (a[0] === '--version') return ok('gh version 2.50.0');
+      if (a[0] === 'auth') return fail(1, 'not logged in');
+      return undefined;
+    });
+    expect(await probeGhAvailability(run)).toEqual({ installed: true, authenticated: false });
+  });
+
+  it('{ installed: true, authenticated: true } when both probes succeed', async () => {
+    const { run } = makeRunner((_c, a) => {
+      if (a[0] === '--version') return ok('gh version 2.50.0');
+      if (a[0] === 'auth') return ok('Logged in to github.com');
+      return undefined;
+    });
+    expect(await probeGhAvailability(run)).toEqual({ installed: true, authenticated: true });
+  });
+});
+
 // =============================================================================
 // Pure library: ruleset detection
 // =============================================================================
@@ -224,6 +254,83 @@ describe('hasRequiredChecksRuleset()', () => {
       return undefined; // detail must never be fetched for a disabled ruleset
     });
     expect(await hasRequiredChecksRuleset('o', 'r', run)).toBe(false);
+  });
+});
+
+describe('hasRequiredChecksRuleAnonymous() — anonymous probe for gh-installed-but-unauthenticated (#1889)', () => {
+  it('true when the repo GET resolves default_branch and the rules read includes required_status_checks', async () => {
+    const { run, calls } = makeRunner((_c, a) => {
+      const p = apiPath(a);
+      if (p === 'repos/o/r') return ok(JSON.stringify({ default_branch: 'main' }));
+      if (p === 'repos/o/r/rules/branches/main') {
+        return ok(JSON.stringify([{ type: 'required_status_checks', parameters: {} }]));
+      }
+      return undefined;
+    });
+    expect(await hasRequiredChecksRuleAnonymous('o', 'r', run)).toBe(true);
+    // Exactly the two anonymous GETs — repo metadata, then effective rules.
+    expect(calls).toHaveLength(2);
+  });
+
+  it("resolves the ACTUAL default branch, not a guessed 'main'", async () => {
+    const { run } = makeRunner((_c, a) => {
+      const p = apiPath(a);
+      if (p === 'repos/o/r') return ok(JSON.stringify({ default_branch: 'trunk' }));
+      if (p === 'repos/o/r/rules/branches/trunk') {
+        return ok(JSON.stringify([{ type: 'required_status_checks', parameters: {} }]));
+      }
+      return undefined;
+    });
+    expect(await hasRequiredChecksRuleAnonymous('o', 'r', run)).toBe(true);
+  });
+
+  it('false when the rules read succeeds but carries no required_status_checks entry (genuinely unprotected)', async () => {
+    const { run } = makeRunner((_c, a) => {
+      const p = apiPath(a);
+      if (p === 'repos/o/r') return ok(JSON.stringify({ default_branch: 'main' }));
+      if (p === 'repos/o/r/rules/branches/main') return ok(JSON.stringify([]));
+      return undefined;
+    });
+    expect(await hasRequiredChecksRuleAnonymous('o', 'r', run)).toBe(false);
+  });
+
+  it('false (never a positive claim) when the repo GET itself fails — e.g. a private repo refusing anonymous reads', async () => {
+    const { run, calls } = makeRunner((_c, a) => {
+      const p = apiPath(a);
+      if (p === 'repos/o/r') return fail(1, 'HTTP 404: Not Found');
+      return undefined;
+    });
+    expect(await hasRequiredChecksRuleAnonymous('o', 'r', run)).toBe(false);
+    // Never reaches the rules-read call once the repo GET fails.
+    expect(calls).toHaveLength(1);
+  });
+
+  it('false when the repo GET succeeds but the rules read fails (gh refuses the anonymous call outright)', async () => {
+    const { run } = makeRunner((_c, a) => {
+      const p = apiPath(a);
+      if (p === 'repos/o/r') return ok(JSON.stringify({ default_branch: 'main' }));
+      if (p === 'repos/o/r/rules/branches/main') return fail(1, 'HTTP 401: Unauthorized');
+      return undefined;
+    });
+    expect(await hasRequiredChecksRuleAnonymous('o', 'r', run)).toBe(false);
+  });
+
+  it('false on malformed JSON from either read (never throws)', async () => {
+    const { run } = makeRunner((_c, a) => {
+      const p = apiPath(a);
+      if (p === 'repos/o/r') return ok('not json');
+      return undefined;
+    });
+    await expect(hasRequiredChecksRuleAnonymous('o', 'r', run)).resolves.toBe(false);
+  });
+
+  it("false when default_branch is missing/blank from the repo GET response", async () => {
+    const { run } = makeRunner((_c, a) => {
+      const p = apiPath(a);
+      if (p === 'repos/o/r') return ok(JSON.stringify({}));
+      return undefined;
+    });
+    expect(await hasRequiredChecksRuleAnonymous('o', 'r', run)).toBe(false);
   });
 });
 
@@ -561,6 +668,60 @@ describe('offerRulesetAdvisory() — autonomous probe + single-consent create (#
 
     expect(calls).toHaveLength(1);
     expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it('CASE 1c (#1889): gh ABSENT → the toast reports the LIMIT ("could not check"), never an imperative claim about the repo', async () => {
+    const { run } = makeRunner((_c, a) => (a[0] === '--version' ? { throws: 'ENOENT' } : ok('')));
+    showInfo.mockResolvedValueOnce(undefined);
+
+    await offerRulesetAdvisory('/ws', deps(run));
+
+    const [message] = showInfo.mock.calls[0] as [string, ...unknown[]];
+    expect(message).toContain('could not check');
+    expect(message).not.toMatch(/^MinSpec: protect your default branch/);
+  });
+
+  it('CASE 1d (#1889): gh installed but NOT authenticated + anonymous probe inconclusive → "could not check" toast, never an imperative claim, and no POST/create prompt', async () => {
+    const { run, calls } = makeRunner((_c, a) => {
+      if (a[0] === '--version') return ok('gh 2');
+      if (a[0] === 'auth') return fail(1, 'not logged in');
+      const p = apiPath(a);
+      // Anonymous probe runs but cannot confirm anything (private repo / rate
+      // limited / gh refuses the unauthenticated call outright).
+      if (p === 'repos/o/r') return fail(1, 'HTTP 404: Not Found');
+      return undefined;
+    });
+    showInfo.mockResolvedValueOnce(undefined);
+
+    await offerRulesetAdvisory('/ws', deps(run));
+
+    expect(resolveRepo).toHaveBeenCalled();
+    const [message] = showInfo.mock.calls[0] as [string, ...unknown[]];
+    expect(message).toContain('could not check');
+    expect(message).toContain('not authenticated');
+    expect(message).not.toMatch(/^MinSpec: protect your default branch/);
+    // Never the create-offer toast (which carries "Create ruleset" as an action,
+    // not asserted here directly, but there must be exactly one toast total).
+    expect(showInfo).toHaveBeenCalledTimes(1);
+  });
+
+  it('CASE 1e (#1889): gh installed but NOT authenticated + anonymous probe CONFIRMS an existing required_status_checks rule → SILENT, no toast at all', async () => {
+    const { run } = makeRunner((_c, a) => {
+      if (a[0] === '--version') return ok('gh 2');
+      if (a[0] === 'auth') return fail(1, 'not logged in');
+      const p = apiPath(a);
+      if (p === 'repos/o/r') return ok(JSON.stringify({ default_branch: 'main' }));
+      if (p === 'repos/o/r/rules/branches/main') {
+        return ok(JSON.stringify([{ type: 'required_status_checks', parameters: {} }]));
+      }
+      return undefined;
+    });
+
+    await offerRulesetAdvisory('/ws', deps(run));
+
+    // The exact false-nag this issue reports: an already-protected repo (e.g.
+    // AIClarityAU/scroogellm) must get ZERO toast when gh has no token.
+    expect(showInfo).not.toHaveBeenCalled();
   });
 
   it('AUTO-PROBE: the read-only rulesets GET fires on init WITHOUT any consent toast', async () => {

@@ -11,14 +11,21 @@
  * ──────────────────────────────────────────────────────────────────────────
  * MinSpec core "makes zero network calls in its core path." Every function in
  * this module that touches the network does so ONLY by shelling out to the
- * *user's own* authenticated `gh` CLI. MinSpec opens no socket itself — the same
- * posture by which it already shells `git`.
+ * user's own `gh` CLI — MinSpec opens no socket itself — the same posture by
+ * which it already shells `git`. Most of these reads run over the user's own
+ * *authenticated* `gh`; {@link hasRequiredChecksRuleAnonymous} is the one
+ * exception (#1889) — it still shells `gh`, but deliberately for the case `gh`
+ * has NO token, relying on GitHub granting that one endpoint to anonymous
+ * requests for a public repo. DR-050 condition 1 (no socket in the extension)
+ * is unaffected either way: the transport is always `gh`'s, never a direct
+ * `http`/`https`/`fetch`/`net` import here.
  *
- * Two distinct classes of network action live here, gated differently per
+ * Three distinct classes of network action live here, gated differently per
  * DR-050 (Amendments 2026-07-01 and 2026-07-16):
  *
- *   - READ-ONLY CONFIG PROBE (autonomous) — {@link isGhReady} (probe the *local*
- *     `gh`), {@link hasRequiredChecksRuleset} / {@link listRequiredCheckContexts}
+ *   - READ-ONLY CONFIG PROBE (autonomous) — {@link isGhReady} /
+ *     {@link probeGhAvailability} (probe the *local* `gh`),
+ *     {@link hasRequiredChecksRuleset} / {@link listRequiredCheckContexts}
  *     (a `gh api .../rulesets` GET of the repo's OWN settings), and
  *     {@link probeReviewerConfigured} (a `gh api .../actions/secrets` GET of the
  *     repo's OWN secret NAMES — never values). These egress NO user artifacts,
@@ -29,6 +36,16 @@
  *     2026-07-01; the `actions/secrets` NAMES read by Amendment 2026-07-16
  *     (materialising the founder's decision on #796) — on the SAME basis: it
  *     reads the repo's OWN config and egresses nothing.
+ *
+ *   - READ-ONLY CONFIG PROBE, ANONYMOUS (autonomous) — {@link
+ *     hasRequiredChecksRuleAnonymous} (`gh api repos/{o}/{r}` then
+ *     `.../rules/branches/{branch}`, both GETs of the repo's OWN public
+ *     settings). Same egress profile as the authenticated probes above — reads
+ *     nothing but the repo's own config — so it runs autonomously on the SAME
+ *     basis, specifically as the one thing {@link offerRulesetAdvisory} can
+ *     still check when `gh` has no token. Any failure (private repo, rate
+ *     limit, `gh` refusing outright) is treated as "cannot tell", never as a
+ *     positive claim — see its own doc comment.
  *
  *   - MUTATING / EGRESSING ACTION (consent-gated) — {@link
  *     createRequiredChecksRuleset} (the `gh api -X POST .../rulesets` that WRITES
@@ -169,24 +186,45 @@ async function runSafe(
   }
 }
 
+/** Whether the local `gh` binary exists at all, and whether it is authenticated. */
+export interface GhAvailability {
+  /** `gh --version` succeeded — the binary is on PATH and runnable. */
+  readonly installed: boolean;
+  /** `gh auth status` succeeded — there is a usable token. Always `false` when `!installed`. */
+  readonly authenticated: boolean;
+}
+
+/**
+ * Probe the local `gh` CLI's readiness: is the binary installed, and is it
+ * authenticated? Split into two booleans (rather than {@link isGhReady}'s single
+ * collapsed bool) so a caller can distinguish "no `gh` at all" — nothing to try —
+ * from "`gh` is here but has no token" — a state `hasRequiredChecksRuleAnonymous`
+ * can still attempt one read-only anonymous probe against (#1889).
+ *
+ * `gh --version` proves the binary exists; `gh auth status` proves there is a
+ * usable token. This runs the user's own local `gh` to PROBE the local CLI's
+ * readiness — a read-only capability probe in the same class as MinSpec
+ * shelling `git`. It egresses no user data and needs no consent toast; it runs
+ * autonomously as the first step of the post-init advisory.
+ */
+export async function probeGhAvailability(run: CommandRunner): Promise<GhAvailability> {
+  const version = await runSafe(run, 'gh', ['--version']);
+  if (version.code !== 0) return { installed: false, authenticated: false };
+  const auth = await runSafe(run, 'gh', ['auth', 'status']);
+  return { installed: true, authenticated: auth.code === 0 };
+}
+
 /**
  * Detect whether the `gh` CLI is BOTH installed AND authenticated.
  *
- * `gh --version` proves the binary exists; `gh auth status` proves there is a
- * usable token. Both must pass — an installed-but-unauthed `gh` cannot read or
- * write rulesets, so for our purposes it is "unavailable" and we fall back to
- * the zero-network docs link.
- *
- * This runs the user's own local `gh` (`gh --version`, then `gh auth status`) to
- * PROBE the local CLI's readiness — a read-only capability probe in the same
- * class as MinSpec shelling `git`. It egresses no user data and needs no consent
- * toast; it runs autonomously as the first step of the post-init advisory.
+ * An installed-but-unauthed `gh` cannot read or write rulesets via the
+ * AUTHENTICATED path, so for that purpose it is "unavailable". Thin wrapper
+ * over {@link probeGhAvailability} kept for callers (and existing tests) that
+ * only need the collapsed bool.
  */
 export async function isGhReady(run: CommandRunner): Promise<boolean> {
-  const version = await runSafe(run, 'gh', ['--version']);
-  if (version.code !== 0) return false;
-  const auth = await runSafe(run, 'gh', ['auth', 'status']);
-  return auth.code === 0;
+  const { installed, authenticated } = await probeGhAvailability(run);
+  return installed && authenticated;
 }
 
 /**
@@ -254,6 +292,70 @@ export async function hasRequiredChecksRuleset(
   }
 
   return false;
+}
+
+/**
+ * ANONYMOUS best-effort probe of the default branch's EFFECTIVE rules, for use
+ * only when `gh` is installed but NOT authenticated ({@link probeGhAvailability}
+ * reports `installed: true, authenticated: false`) — the state
+ * {@link offerRulesetAdvisory} previously could read nothing for at all (#1889).
+ *
+ * `GET repos/{owner}/{repo}/rules/branches/{branch}` is the "rules currently in
+ * effect" endpoint. Unlike the classic `/branches/{branch}/protection` endpoint
+ * it does not require admin on the repo — GitHub grants it to anyone with READ
+ * access, which for a PUBLIC repo includes an anonymous, unauthenticated
+ * request. `gh api` still owns the HTTP transport (DR-050 condition 1: MinSpec
+ * opens no socket itself); this function only decides which path to call and
+ * how to read the result — it never imports `http`/`https`/`fetch`/`net`.
+ *
+ * The default branch name is read from the SAME anonymous-readable
+ * `GET repos/{owner}/{repo}` (its `default_branch` field) rather than guessed,
+ * so a repo whose default branch is not `main`/`master` is still probed
+ * correctly.
+ *
+ * Returns `true` ONLY when both reads succeed AND the effective rules already
+ * include a `required_status_checks` entry — the one case
+ * {@link offerRulesetAdvisory} suppresses its advisory for. Returns `false` on
+ * ANY failure (private repo needing auth, rate limit, `gh` refusing an
+ * unauthenticated call outright, malformed JSON, a repo with no rules yet) —
+ * `false` here means "cannot confirm already-protected", never "confirmed
+ * unprotected"; the caller must not read it as a positive claim either way.
+ */
+export async function hasRequiredChecksRuleAnonymous(
+  owner: string,
+  repo: string,
+  run: CommandRunner,
+): Promise<boolean> {
+  const repoInfo = await runSafe(run, 'gh', ['api', `repos/${owner}/${repo}`]);
+  if (repoInfo.code !== 0) return false;
+
+  let defaultBranch: string;
+  try {
+    const parsed = JSON.parse(repoInfo.stdout);
+    const branch =
+      parsed && typeof parsed === 'object' ? (parsed as { default_branch?: unknown }).default_branch : undefined;
+    if (typeof branch !== 'string' || !branch) return false;
+    defaultBranch = branch;
+  } catch {
+    return false;
+  }
+
+  const rulesRead = await runSafe(run, 'gh', [
+    'api',
+    `repos/${owner}/${repo}/rules/branches/${defaultBranch}`,
+  ]);
+  if (rulesRead.code !== 0) return false;
+
+  let rules: Array<{ type?: string }>;
+  try {
+    const parsed = JSON.parse(rulesRead.stdout);
+    if (!Array.isArray(parsed)) return false;
+    rules = parsed;
+  } catch {
+    return false;
+  }
+
+  return rules.some((r) => r?.type === 'required_status_checks');
 }
 
 /** Shape of the bits of a ruleset detail we inspect. */

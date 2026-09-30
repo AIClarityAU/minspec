@@ -22,7 +22,8 @@ import {
   DEFAULT_REQUIRED_CHECK_CONTEXTS,
   createRequiredChecksRuleset,
   defaultCommandRunner,
-  isGhReady,
+  probeGhAvailability,
+  hasRequiredChecksRuleAnonymous,
   resolveCheckContexts,
   listRequiredCheckContexts,
   probeReviewerConfigured,
@@ -852,9 +853,19 @@ async function linkRulesetDocs(
  * READ-ONLY CONFIG PROBE runs AUTONOMOUSLY; only the MUTATING create is
  * consent-gated.
  *   - not a git repo → return (zero process, zero toast).
- *   - `gh` missing/unauthed → info toast linking the docs. Zero `gh api`. Done.
- *   - `gh` ready + no GitHub remote (or a malformed slug) → docs link. Zero
- *     `gh api`. Done.
+ *   - `gh` not installed → info toast reporting that MinSpec could not check
+ *     (never an imperative about repo state it never read). Zero `gh api`. Done.
+ *   - `gh` installed but NOT authenticated → try ONE anonymous, read-only probe
+ *     ({@link hasRequiredChecksRuleAnonymous}: works for PUBLIC repos only)
+ *     before concluding nothing is knowable (#1889):
+ *       - probe confirms a `required_status_checks` rule already guards the
+ *         default branch → SILENT, exactly like the authenticated auto-probe.
+ *       - probe inconclusive (private repo, rate limit, `gh` refusing an
+ *         unauthenticated call, no GitHub remote) → info toast reporting the
+ *         limit ("could not check... not authenticated"), never a claim about
+ *         what the repo needs.
+ *   - `gh` ready (installed + authenticated) + no GitHub remote (or a malformed
+ *     slug) → docs link. Zero `gh api`. Done.
  *   - `gh` ready + repo resolves → AUTO-PROBE (read-only `gh api .../rulesets`
  *     GET of the repo's OWN settings, no consent toast):
  *       - a qualifying ruleset ALREADY EXISTS → SILENT. No toast at all.
@@ -865,16 +876,18 @@ async function linkRulesetDocs(
  *           - "Not now"/dismiss → nothing.
  *           - "Learn more"     → open the rulesets docs.
  *
- * Why the probe is autonomous: `isGhReady`, `hasRequiredChecksRuleset` /
- * `listRequiredCheckContexts`, and the reviewer-secret-NAMES probe
- * ({@link probeReviewerConfigured}, via {@link resolveWantedChecks}) are a
- * read-only capability probe + GETs of the repo's OWN configuration — they
- * egress no user artifacts, spec content, secret VALUES, or telemetry (the same
- * class as MinSpec shelling `git fetch`). Per DR-050 they need no prior consent
- * toast: the rulesets read under Amendment 2026-07-01, and the `actions/secrets`
- * NAMES read under Amendment 2026-07-16 (materialising the founder's decision on
- * #796). Only the CREATE/ADD mutates the repo, so it is the one action gated on
- * an explicit click.
+ * Why the probes are autonomous: `probeGhAvailability`, `hasRequiredChecksRuleset`
+ * / `listRequiredCheckContexts` / `hasRequiredChecksRuleAnonymous`, and the
+ * reviewer-secret-NAMES probe ({@link probeReviewerConfigured}, via
+ * {@link resolveWantedChecks}) are all read-only capability probes + GETs of the
+ * repo's OWN configuration — they egress no user artifacts, spec content, secret
+ * VALUES, or telemetry (the same class as MinSpec shelling `git fetch`). Per
+ * DR-050 they need no prior consent toast: the rulesets read under Amendment
+ * 2026-07-01, the `actions/secrets` NAMES read under Amendment 2026-07-16
+ * (materialising the founder's decision on #796), and the anonymous rules read
+ * on the SAME read-only-config-probe basis (#1889 — see
+ * {@link hasRequiredChecksRuleAnonymous}'s own doc comment). Only the CREATE/ADD
+ * mutates the repo, so it is the one action gated on an explicit click.
  *
  * The created ruleset's required checks come from
  * {@link resolveRequiredChecks} (the `minspec.ruleset.requiredChecks` setting,
@@ -899,12 +912,44 @@ export async function offerRulesetAdvisory(
   if (!isRepo(folder)) return;
 
   try {
-    // gh unavailable/unauthed → zero-network docs link. Done.
-    if (!(await isGhReady(run))) {
+    const availability = await probeGhAvailability(run);
+    if (!availability.authenticated) {
+      if (!availability.installed) {
+        // No `gh` binary at all → nothing left to try. Report the LIMIT, not a
+        // claim about the repo (#1889): this branch has read nothing about the
+        // default branch's rules, so it must never assert the branch needs
+        // protecting — that reads as observed fact when it is unverified.
+        await linkRulesetDocs(
+          "MinSpec could not check whether your default branch's rules already " +
+            `require CI (${DEFAULT_REQUIRED_CHECK_CONTEXTS.join(', ')}) status checks — ` +
+            'the `gh` CLI is not installed. Install/authenticate `gh` to let MinSpec check ' +
+            'and offer to create a ruleset, or see the GitHub docs.',
+          openExternal,
+        );
+        return;
+      }
+
+      // `gh` is installed but has no usable token. Try ONE anonymous read — the
+      // effective-rules endpoint grants read access without admin, which for a
+      // PUBLIC repo includes an unauthenticated request — before concluding
+      // nothing is knowable (#1889). Any failure (private repo, no remote, rate
+      // limit, `gh` refusing outright) falls through to the same honest "could
+      // not check" toast; only a CONFIRMED existing rule suppresses it.
+      const repo = await resolveRepo(folder);
+      if (repo && REPO_SLUG_RE.test(repo)) {
+        const [owner, name] = repo.split('/');
+        if (await hasRequiredChecksRuleAnonymous(owner, name, run)) {
+          // Already protected — SILENT, exactly like the authenticated
+          // auto-probe below.
+          return;
+        }
+      }
+
       await linkRulesetDocs(
-        'MinSpec: protect your default branch with a ruleset that requires CI ' +
-          `(${DEFAULT_REQUIRED_CHECK_CONTEXTS.join(', ')}) status checks. ` +
-          'Install/authenticate the `gh` CLI to let MinSpec offer to create one, or see the GitHub docs.',
+        "MinSpec could not check whether your default branch's rules already " +
+          `require CI (${DEFAULT_REQUIRED_CHECK_CONTEXTS.join(', ')}) status checks — ` +
+          'the `gh` CLI is not authenticated. Authenticate `gh` to let MinSpec check ' +
+          'and offer to create a ruleset, or see the GitHub docs.',
         openExternal,
       );
       return;
