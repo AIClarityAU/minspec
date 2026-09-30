@@ -19,14 +19,18 @@
  * are exactly the code that never runs in the happy case, so nothing but a test
  * keeps them working.
  *
- * Each case spawns `npx tsx`, which costs a couple of seconds; the per-test timeouts
- * are sized for that, not for the work itself.
+ * Each case spawns `tsx`, which costs a couple of seconds; the per-test timeouts are
+ * sized for that, not for the work itself. Spawned via `runTsxCli` (#1032) rather than
+ * `npx tsx` directly: `cwd` below is a throwaway fixture tree outside the repo, and
+ * `npx` cannot resolve this repo's locally-installed `tsx` from there — see
+ * `helpers/run-tsx-cli.ts` for the failure mode that produced (main red at ce7d24a,
+ * exit 127 — the CLI under test never ran).
  */
 import { describe, it, expect, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { spawnSync } from 'child_process';
+import { runTsxCli, type CliResult } from './helpers/run-tsx-cli';
 
 const SCRIPT = path.resolve(__dirname, '..', '..', '..', 'scripts', 'check-import-cycles.ts');
 
@@ -83,18 +87,8 @@ function filler(): Record<string, string> {
   return out;
 }
 
-interface GateResult {
-  status: number | null;
-  /** stdout and stderr together — the runner writes passes to one and failures to the other. */
-  output: string;
-}
-
-function runGate(cwd: string): GateResult {
-  const result = spawnSync('npx', ['tsx', SCRIPT], { cwd, encoding: 'utf-8' });
-  // A spawn that never started is not a gate verdict. Rethrow rather than let it
-  // read as a null exit code the assertions might squint at.
-  if (result.error) throw result.error;
-  return { status: result.status, output: `${result.stdout ?? ''}\n${result.stderr ?? ''}` };
+function runGate(cwd: string): CliResult {
+  return runTsxCli(SCRIPT, [], { cwd });
 }
 
 describe('scripts/check-import-cycles.ts — the gate CI runs (AC-4)', () => {
