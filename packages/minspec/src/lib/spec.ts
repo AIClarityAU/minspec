@@ -452,9 +452,14 @@ export function setSpecStatus(filePath: string, status: SpecStatus): SpecStatus 
     throw new Error(`No frontmatter block in ${filePath}`);
   }
   const yaml = fmMatch[1];
-  const statusLineRe = /^([ \t]*)status[ \t]*:[ \t]*.*$/m;
+  // Anchored to column 0 (#2149) — a non-anchored, non-global match on ANY
+  // indent would rewrite the FIRST `status:` line regardless of nesting,
+  // silently leaving a top-level key untouched if a nested `status:`
+  // preceded it. Anchoring makes writer and validator target the same line
+  // by construction, rather than relying on house key order.
+  const statusLineRe = /^status[ \t]*:[ \t]*.*$/m;
   const newYaml = statusLineRe.test(yaml)
-    ? yaml.replace(statusLineRe, `$1status: ${status}`)
+    ? yaml.replace(statusLineRe, `status: ${status}`)
     : `${yaml}\nstatus: ${status}`;
   const newContent = content.replace(FRONTMATTER_RE, `---\n${newYaml}\n---\n`);
   fs.writeFileSync(filePath, newContent, 'utf-8');

@@ -654,4 +654,34 @@ tier: T3
     // never-false-positive contract.
     expect(after).toContain('**Status:** Clarify complete — awaiting human *Approve Spec* before Plan');
   });
+
+  // #2149 — the writer's status-line regex captured indent (`[ \t]*`) instead
+  // of anchoring to column 0, and was non-global, so it matched the FIRST
+  // `status:` line at ANY indent. A nested `status:` key placed before the
+  // top-level one was rewritten instead, leaving the real status untouched —
+  // a silent double failure (write doesn't take effect + unrelated key
+  // clobbered). Anchoring to `^status:` fixes this regardless of key order.
+  it('rewrites the top-level status: line, not a nested status: key that sorts first (#2149)', () => {
+    const nested = path.join(tmpDir, 'SPEC-102.md');
+    fs.writeFileSync(
+      nested,
+      `---
+id: SPEC-102
+review:
+  status: needs-changes
+status: specifying
+tier: T3
+---
+
+# Title
+`,
+    );
+    setSpecStatus(nested, 'implementing');
+    const after = fs.readFileSync(nested, 'utf-8');
+    // The top-level key flips...
+    expect(after).toContain('\nstatus: implementing');
+    // ...and the nested key is untouched, not clobbered.
+    expect(after).toContain('  status: needs-changes');
+    expect(parseSpec(after).frontmatter.status).toBe('implementing');
+  });
 });
