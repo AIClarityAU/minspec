@@ -589,4 +589,91 @@ describe('python validate.py mirrors the Node validator core checks (#246)', () 
     const py = runValidatePy();
     expect(py.code).toBe(0);
   });
+
+  // ── #1908: a quoted id: "SPEC-NNN" / id: 'SPEC-NNN' is well-formed YAML for
+  // the bare string and must not be refused. The old parser did `fm[key] =
+  // rest.strip()` with no quote handling, so SPEC_ID_RE (anchored, no quote in
+  // its class) never matched and a quoted-but-valid id read as "missing or
+  // invalid" — a message that named two possibilities and the file was
+  // neither. ──
+  describe('#1908 — a quoted id is not refused', () => {
+    it.skipIf(!hasPy)('accepts a double-quoted SPEC id (id: "SPEC-001")', () => {
+      writeSpec('specs/spec-001/spec.md', '---\nid: "SPEC-001"\nstatus: specifying\n---\n# ok\n');
+      const py = runValidatePy();
+      expect(py.code, py.stderr).toBe(0);
+    });
+
+    it.skipIf(!hasPy)("accepts a single-quoted SPEC id (id: 'SPEC-001')", () => {
+      writeSpec('specs/spec-001/spec.md', "---\nid: 'SPEC-001'\nstatus: specifying\n---\n# ok\n");
+      const py = runValidatePy();
+      expect(py.code, py.stderr).toBe(0);
+    });
+
+    it.skipIf(!hasPy)('accepts a quoted id with a trailing inline comment (id: "SPEC-001"  # primary)', () => {
+      writeSpec('specs/spec-001/spec.md', '---\nid: "SPEC-001"  # primary\nstatus: specifying\n---\n# ok\n');
+      const py = runValidatePy();
+      expect(py.code, py.stderr).toBe(0);
+    });
+
+    it.skipIf(!hasPy)('accepts a double-quoted DR id (id: "DR-024")', () => {
+      writeSpec('docs/decisions/DR-024.md', '---\nid: "DR-024"\ntitle: x\nstatus: accepted\n---\n# ok\n');
+      const py = runValidatePy();
+      expect(py.code, py.stderr).toBe(0);
+    });
+
+    it.skipIf(!hasPy)('still rejects a genuinely malformed id, quoted or not, distinctly from "missing"', () => {
+      // "invalid" (present, wrong shape) must read differently from "missing"
+      // (absent) — the compound "missing or invalid" message named two
+      // possibilities and the reader could not tell which was true.
+      writeSpec('specs/spec-x/spec.md', '---\nid: "SPEC-abc"\n---\n# bad id\n');
+      const py = runValidatePy();
+      expect(py.code).toBe(1);
+      expect(py.stderr).toContain('invalid');
+      expect(py.stderr).not.toContain('missing `id: SPEC-NNN`');
+    });
+
+    it.skipIf(!hasPy)('reports "missing", not "invalid", when the id key is absent entirely', () => {
+      writeSpec('specs/spec-y/spec.md', '---\nstatus: specifying\n---\n# no id\n');
+      const py = runValidatePy();
+      expect(py.code).toBe(1);
+      expect(py.stderr).toContain('missing `id: SPEC-NNN`');
+      expect(py.stderr).not.toContain('invalid');
+    });
+  });
+
+  // ── #1908: the DR gate is keyed on the DIRECTORY (docs/decisions/), not on a
+  // DR-NNN.md filename — a decision record kept under any other name used to
+  // be skipped by is_dr entirely, silently: a skipped file and a passing file
+  // looked identical. INDEX.md (the register listing) and README.md (prose)
+  // are the two named exemptions, since neither carries an id of its own. ──
+  describe('#1908 — the DR gate validates every docs/decisions/*.md, not just DR-NNN.md', () => {
+    it.skipIf(!hasPy)('flags a misnamed decision record with no frontmatter', () => {
+      writeSpec('docs/decisions/0024-thread-identity.md', '# thread identity\n\nno frontmatter\n');
+      const py = runValidatePy();
+      expect(py.code).toBe(1);
+      expect(py.stderr).toContain('docs/decisions/0024-thread-identity.md');
+      expect(py.stderr).toContain('id: DR-NNN');
+    });
+
+    it.skipIf(!hasPy)('accepts the same misnamed record once it carries id: DR-NNN frontmatter', () => {
+      writeSpec(
+        'docs/decisions/0024-thread-identity.md',
+        '---\nid: DR-024\ntitle: Thread identity\nstatus: accepted\n---\n# ok\n'
+      );
+      const py = runValidatePy();
+      expect(py.code, py.stderr).toBe(0);
+    });
+
+    it.skipIf(!hasPy)('still ignores INDEX.md, the register listing with no id of its own', () => {
+      writeSpec('docs/decisions/INDEX.md', '# Decision Register\n\n- DR-001\n');
+      const py = runValidatePy();
+      expect(py.code, py.stderr).toBe(0);
+    });
+
+    it.skipIf(!hasPy)('still ignores README.md, prose with no id of its own', () => {
+      writeSpec('docs/decisions/README.md', '# How this directory works\n');
+      const py = runValidatePy();
+      expect(py.code, py.stderr).toBe(0);
+    });
+  });
 });
