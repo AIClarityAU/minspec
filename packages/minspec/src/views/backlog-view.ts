@@ -214,9 +214,15 @@ export class BacklogTreeProvider implements vscode.TreeDataProvider<BacklogNode>
       }
 
       return this.buildGroups(this.cachedIssues);
-    } catch {
+    } catch (err) {
       this.loading = false;
-      this.lastError = 'Failed to fetch issues from GitHub';
+      // fetchIssues() rejects (rather than resolving []) on any gh failure —
+      // not installed, offline, rate-limited, timed out — specifically so
+      // this branch can show the reason instead of falling into the
+      // zero-issues branch above and rendering a false "No open issues
+      // found" (#2247).
+      const reason = err instanceof Error ? err.message : String(err);
+      this.lastError = `Unavailable: ${reason}`;
       return [new MessageNode(this.lastError)];
     }
   }
