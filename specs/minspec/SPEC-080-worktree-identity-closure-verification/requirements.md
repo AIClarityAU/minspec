@@ -93,7 +93,12 @@ The suite's own header names the defect by number and describes it in the same w
 `npx vitest run packages/minspec/tests/project-name-1529.test.ts` against this worktree's
 `HEAD` — **12/12 tests passed**. This is a first-hand run, not a read of the test source;
 the claims above are grounded in both the implementation reads (file:line citations) and
-this live-green result, per this project's Evidence Discipline rule.
+this live-green result, per this project's Evidence Discipline rule. That said, the run's
+only record is this paragraph — this dispatch's shell output is transient and is not
+captured anywhere in the diff, so a reader cannot cite it as proof, only reproduce it. The
+exact command is given above precisely so a reviewer (or whoever closes #1496) can
+independently re-run it rather than take this prose on trust; the Acceptance Criteria
+checkbox for this run is left unchecked for that reason.
 
 ### Where the fix landed, and why #1496 was filed after it already existed
 
@@ -134,13 +139,16 @@ No functional gap is introduced by the different choice of fallback source.
   fix for an already-fixed defect is itself a form of the "plausible-inference vs.
   observation" failure this project's Evidence Discipline rule exists to prevent — in this
   case inverted: assuming a report is current without checking the code first.
-- **FR-2 — Confirm reproduction status with a live run before closing.** Satisfied by this
-  spec itself: `project-name-1529.test.ts` was run against this worktree's `HEAD` (which
-  carries `c25c9961`) and passed 12/12 (see Context). Recorded here so the result travels
-  with the spec rather than living only in this dispatch's transient shell output — see
-  Evidence Discipline: "artifact-existence ≠ feature-existence" applies to "test text
-  exists" too, not just to source code, which is why a read-only citation alone would not
-  have been enough.
+- **FR-2 — Confirm reproduction status with a live run before closing.** This dispatch ran
+  `project-name-1529.test.ts` against this worktree's `HEAD` (which carries `c25c9961`)
+  and observed 12/12 passing (see Context) — a stronger check than a read-only citation,
+  per Evidence Discipline's "artifact-existence ≠ feature-existence." But the run's only
+  evidence is this prose recording the result, not a citable artifact in the diff (no log
+  file, no CI link) — a read-only reviewer cannot verify from the diff alone that the run
+  happened or that it passed. The requirement is satisfied for *this dispatch's own*
+  closing recommendation (DQ-1), not for an independent reader; the AC item below stays
+  unchecked until whoever closes #1496 reproduces it themselves with the exact command
+  given in Context.
 - **FR-3 — Close the loop on the stale-build signal, not just this one report.** #1492 (the
   stale-build problem) is what let #1496 get filed as new against already-fixed code.
   This spec does not re-specify #1492 (out of #1496's scope, CLAUDE.md's
@@ -171,8 +179,14 @@ No functional gap is introduced by the different choice of fallback source.
 - [ ] **The ancestry claim is independently reproducible.** `git merge-base --is-ancestor
       c25c9961 <candidate-HEAD>` returns true, and `git show -s --format=%ci d1a285b`
       predates `git show -s --format=%ci c25c9961`, for whoever re-checks this. (Context)
-- [x] **The regression suite has been run green on current `main`**, not merely read, before
-      #1496 is closed — done: 12/12 passed against this worktree's `HEAD` (Context, FR-2).
+- [ ] **The regression suite has been run green on current `main`**, not merely read,
+      before #1496 is closed. This dispatch already ran it against this worktree's `HEAD`
+      and observed 12/12 passing (Context, FR-2) — but that result lives only in this
+      dispatch's transient shell output, not as a citable artifact in the diff, so it does
+      not satisfy this item for an independent reader. Left unchecked until whoever closes
+      #1496 re-runs `npx vitest run packages/minspec/tests/project-name-1529.test.ts`
+      against `origin/main` themselves and confirms green — the same close-time spirit as
+      DQ-1's ancestry sanity check.
 - [ ] **#1496's closing comment names both the fixing commit/PR (`#1529` / `#1536` /
       `c25c9961`) and the stale-build cross-link (`#1492`)** rather than a bare "closed as
       duplicate." (FR-3)
@@ -186,12 +200,16 @@ No functional gap is introduced by the different choice of fallback source.
   *Recommendation:* **yes, close #1496 as already fixed**, citing `c25c9961`
   (`fix(#1529)`/PR #1536), the regression suite name, and this spec's 12/12 live result —
   the one thing this spec's Context section was careful to flag as an unproven gap (a live
-  test run, not just a source read) is now proven, in-repo, for this dispatch's own `HEAD`.
+  test run, not just a source read) was run, in-repo, for this dispatch's own `HEAD`. That
+  result is this dispatch's own observation, not yet an independently-verified one (the AC
+  item for it is intentionally left unchecked — see Acceptance Criteria).
   *Cost:* the worktree this ran in is this dispatch's own checkout of `main`, not a
-  freshly re-pulled `origin/main` — a human closing the issue should do one cheap
-  `git fetch && git log origin/main | grep c25c9961` (or equivalent) sanity check that
-  `origin/main` actually carries the fix commit before closing, rather than trusting this
-  worktree's ancestry unconditionally.
+  freshly re-pulled `origin/main` — a human closing the issue should do two cheap
+  close-time checks rather than trusting this dispatch unconditionally: `git fetch && git
+  log origin/main | grep c25c9961` (or equivalent) to confirm `origin/main` actually
+  carries the fix commit, and a re-run of `npx vitest run
+  packages/minspec/tests/project-name-1529.test.ts` against that same `origin/main` to
+  independently confirm the 12/12 result this spec reports.
 
 - **DQ-2 — Does #1496's closing comment need anything beyond citing the fix?**
   *Recommendation:* **no** — FR-3 already covers what the closing comment must contain
