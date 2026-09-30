@@ -29,6 +29,49 @@
     "aiclarity.minspec",
     "aiclarity.scroogellm"
   ],
+  "contributes": {
+    "walkthroughs": [
+      {
+        "id": "minspecPro.orientation",
+        "title": "Start Here — Orient Yourself",
+        "description": "Which extension does what, and where to go next.",
+        "steps": [
+          {
+            "id": "minspecPro.walkthrough.welcome",
+            "title": "Welcome to MinSpec Pro",
+            "description": "This pack bundles MinSpec and ScroogeLLM. This walkthrough orients you across them — it doesn't repeat what each one already teaches.",
+            "media": {
+              "markdown": "media/walkthrough/welcome.md"
+            }
+          },
+          {
+            "id": "minspecPro.walkthrough.minspec",
+            "title": "MinSpec — Specification-Driven Development",
+            "description": "Classify tasks by tier, write just enough spec, and track phases through to implementation.\n\n[Open MinSpec's Get Started walkthrough](command:workbench.action.openWalkthrough?%22aiclarity.minspec%23minspec.gettingStarted%22)",
+            "media": {
+              "markdown": "media/walkthrough/minspec.md"
+            }
+          },
+          {
+            "id": "minspecPro.walkthrough.scroogellm",
+            "title": "ScroogeLLM — cost measurement instruments",
+            "description": "Shelved as a product — the tee-proxy, shadow classifier, safe-cut, and scrooge-delegate instruments stay live. Search the Command Palette for \"ScroogeLLM\" for what's installed.",
+            "media": {
+              "markdown": "media/walkthrough/scroogellm.md"
+            }
+          },
+          {
+            "id": "minspecPro.walkthrough.whatsNext",
+            "title": "What's next in the pack",
+            "description": "A future agent-execute extension is planned but not part of this pack yet.",
+            "media": {
+              "markdown": "media/walkthrough/whats-next.md"
+            }
+          }
+        ]
+      }
+    ]
+  },
   "scripts": {
     "package": "node -e \"console.error('MinSpec Pro extension pack is blocked from packaging until ScroogeLLM ships. Pack would reference an unpublished extension. Remove this guard once aiclarity.scroogellm is live on both marketplaces.'); process.exit(1)\""
   },
