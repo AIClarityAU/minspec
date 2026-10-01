@@ -6,7 +6,7 @@ tier: T4
 product: minspec
 epic: EPIC-003  # SDD Core Methodology — DR-037, the pre-commit gate harness this adds a stage to, is itself epic: EPIC-003 (docs/decisions/DR-037.md:2)
 aspects: [harness, gate, pre-commit, code-quality, tier-0, no-silent-gate, opportunistic-tool, config, offline, dry, complexity]
-relates_to: [DR-037, DR-066, DR-097, SPEC-054, SPEC-066, SPEC-075]
+relates_to: [DR-037, DR-066, DR-099, SPEC-054, SPEC-066, SPEC-075]
 implements: [packages/minspec/tests/pre-commit-code-quality-stage.test.ts]  # NEW — the T0 this spec owns
 affects: [packages/minspec/src/lib/template-registry.ts, .minspec/hooks/pre-commit, .minspec/config.json]  # template-registry.ts is claimed by no spec's implements:; follows SPEC-066/SPEC-075/SPEC-063 precedent of affects:-only for this shared file
 phases:
@@ -127,9 +127,9 @@ had: a check **runs, finds a real, tool-confirmed violation, and does not block 
 (the metric-check warn path). That is a new enforcement policy for this harness, not an
 application of the existing one to a new file — the same distinction SPEC-075 draws when it
 argues "applying an existing posture to one file" does *not* need a new DR, and the mirror
-case here is that inventing a **new** class of outcome *does*. [DR-097](../../../docs/decisions/DR-097.md)
+case here is that inventing a **new** class of outcome *does*. [DR-099](../../../docs/decisions/DR-099.md)
 (accompanying this spec, status `proposed`) records that decision and its rejected alternatives;
-this spec is the normative requirements text, DR-097 is the rationale and price.
+this spec is the normative requirements text, DR-099 is the rationale and price.
 
 ## Functional Requirements
 
