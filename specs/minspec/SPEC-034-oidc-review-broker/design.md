@@ -1,7 +1,7 @@
 ---
 id: SPEC-034
 type: design
-status: implementing  # plan authored 2026-07-12; tracks requirements.md (approved for implementation)
+status: implementing
 tier: T4
 product: minspec
 epic: EPIC-009  # Team Readiness
@@ -9,6 +9,9 @@ depends_on: [DR-054, DR-017, DR-033, DR-004]
 ---
 
 # OIDC Review Token-Broker — Plan
+
+> **Status note.** Plan authored 2026-07-12; tracks requirements.md (approved for implementation)
+> *(Moved off the `status:` line, which the status writer owns and rebuilds from the value alone — #1912 / #1900.)*
 
 Plan phase for [SPEC-034](./requirements.md). Realises the reviewer-identity seam decided in
 [DR-054](../../../docs/decisions/DR-054.md) §4: a vendor-operated broker that lets a reviewer

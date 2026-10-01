@@ -22,6 +22,8 @@ import {
   validateSplitLayoutCoverage,
   checkAcceptanceCriteria,
   validateOwnership,
+  validateStatusAnnotation,
+  validateFrontmatterProse,
   type SplitLayoutFile,
 } from '../packages/minspec/src/lib/spec-validator';
 import { parseSpec } from '../packages/minspec/src/lib/spec';
@@ -636,6 +638,80 @@ try {
   }
 } catch {
   // specs/ unreadable / absent — nothing to validate, stay silent.
+}
+
+// Rule 20 (#1912): the `status:` frontmatter line carries a value and nothing
+// else (the #1900 convention). `validateStatusAnnotation` is the SAME function the
+// in-extension approve gate (`validateSpec`) calls — enforced identically on the
+// commit/CI surface, never a reimplementation that could drift (the #654 lesson).
+//
+// WHY CI AND NOT ONLY THE APPROVE GATE. The approve path runs the status WRITER, so
+// a rule that fires only there reports the annotation at the moment it is being
+// destroyed or orphaned. CI is what keeps the bad state out of the corpus in the
+// first place, which is the Phase-4 gate #1879 was closed without.
+//
+// Ships as `warn` per `statusLineAnnotation` (the SPEC-038 FR-7 ratchet) — inert
+// until the corpus is clean AND the writers consume continuation lines, then a
+// one-line flip to `error` makes it FATAL here too.
+//
+// SCOPE: `specs/` only, matching Rule 15's wiring. The DR and epic writers carry the
+// same defect (#1912 names all three), but every file the issue measured is a spec,
+// and `parseSpec` is the spec reader — widening to `docs/decisions/` and `docs/epics/`
+// belongs with the writer half, which is where those artifact kinds get their reader.
+//
+// NO SILENT SKIP (invariant #2). A single `try` around the whole loop would let one
+// unreadable or unparseable file abort the sweep and leave every REMAINING file
+// unchecked, with nothing said — best-effort enforcement wearing a green tick. Once
+// `statusLineAnnotation` ratchets to `error` that is a merge-gating check going quiet,
+// which is precisely what the invariant forbids. So: directory absence is the only
+// silence, and a file the rule could not run on is REPORTED at the configured severity.
+// DELIBERATELY NOT `safeGlob` — audit the feeder, not just a rule's own catch (#1999).
+// This rule USED TO call `safeGlob`, and that made the per-file catch below unreachable
+// for any error raised while BUILDING the list: `safeGlob` converts a failure anywhere
+// in its recursive walk into an empty list, so one unreadable directory under `specs/`
+// handed this loop zero files and the catch never fired. Measured before the change:
+// 2 findings on a clean tree, 0 with a single unreadable subdirectory, and
+// `Frontmatter validation passed.` printed both times.
+//
+// So the throwing `glob` is used directly and the two cases are separated by hand:
+// an absent `specs/` is the only silence, and a walk that throws is REPORTED. Fixing
+// `safeGlob` itself belongs to #1999 / PR #2005, not here; written this way, Rule 20 is
+// correct under either version of it and needs no rebase when that lands.
+// No try here on purpose: `loadConfig` is total (config.ts catches its own read/parse
+// and returns DEFAULT_CONFIG), so a guard would be an unreachable branch pretending to
+// cover something. That totality hides a separate, PRE-EXISTING downgrade — a corrupt
+// `.minspec/config.json` silently drops a repo that configured `error` back to `warn`.
+// That lives in shared config, not in this rule, and is filed rather than patched here.
+const annCfg = loadConfig(ROOT);
+const annFailsClosed = annCfg.statusLineAnnotation === 'error';
+let annFiles: string[] = [];
+if (existsSync(specsDir)) {
+  try {
+    annFiles = glob(specsDir, '.md');
+  } catch (error) {
+    const why = `the specs corpus could not be listed (${(error as Error).message}) — Rule 20 validated NOTHING this run; do not read the green as a clean corpus.`;
+    if (annFailsClosed) fail(specsDir, why);
+    else warn(`status-annotation: ${why}`);
+  }
+}
+for (const file of annFiles) {
+  let findings: ReturnType<typeof validateStatusAnnotation>;
+  try {
+    const parsed = parseSpec(readFileSync(file, 'utf-8'));
+    findings = [
+      ...validateStatusAnnotation(parsed, annCfg),
+      ...validateFrontmatterProse(parsed, annCfg),
+    ];
+  } catch (error) {
+    const why = `the status-annotation rules could not run on this file (${(error as Error).message})`;
+    if (annFailsClosed) fail(file, why);
+    else warn(`status-annotation ${relative(ROOT, file)}: ${why}`);
+    continue;
+  }
+  for (const v of findings) {
+    if (v.severity === 'error') fail(file, `${v.message} ${v.fixHint}`);
+    else warn(`status-annotation ${relative(ROOT, file)}: ${v.message}`);
+  }
 }
 
 // Rule 14 (harden, #760): every MANAGED_REGION_TEMPLATES output path present on
