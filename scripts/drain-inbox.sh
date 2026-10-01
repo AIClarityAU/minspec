@@ -660,6 +660,10 @@ ensure_fresh_run_dir() {
 #   0  — cycle completed (work done or nothing ready).
 #   42 — a Claude quota/limit signal was seen mid-dispatch → loop should back off.
 #   1  — a transient error → loop counts it toward MAX_CONSEC_FAIL, keeps going.
+#        Also returned when EVERY dispatch attempted this cycle failed (#2140) —
+#        deliberately the same code as any other transient error, so a persistent
+#        credential/config fault still trips MAX_CONSEC_FAIL and stops the loop
+#        loudly instead of grinding through the whole ready queue on a dead token.
 # (There is no longer a terminal "stale" code: #773 self-heals the run dir each
 #  cycle instead of stopping the loop when the checkout falls behind main.)
 # ── Step 0 reconcilers (#1306, #1322) ────────────────────────────────────────
@@ -1203,6 +1207,18 @@ run_cycle() {
   }
 
   local saw_quota=0 verdict=""
+  # Dispatch attempts/failures, rolled up across BOTH the serial and parallel paths
+  # below (#2140, constitution invariant 2: no silent gate). `classify_dispatch`
+  # already warns on EACH failed dispatch, but nothing aggregated those warnings —
+  # so a cycle in which every single dispatch 401'd still fell through to the
+  # cheerful "cycle done." at the bottom of this function, indistinguishable in the
+  # log from a cycle that actually worked. Measured 2026-09-25: five dispatches,
+  # five `HTTP 401: Bad credentials`, then "cycle done." — the token minted at
+  # `gh_bot_init` had expired mid-loop and nothing re-minted for THIS process (see
+  # #2066 above for the read-refresh fix; this is the separate, more important
+  # half — making an all-failed cycle say so, regardless of WHY every dispatch
+  # failed).
+  local dispatch_attempts=0 dispatch_failures=0
 
   if (( DISPATCH_CONCURRENCY <= 1 )); then
     # ── Serial path — the historical behaviour, unchanged. Output still streams
@@ -1222,6 +1238,8 @@ run_cycle() {
       out=$(cat "$cap" 2>/dev/null || true); rm -f "$cap"
       verdict="$(classify_dispatch "$n" "$drc" "$out")"
       ac_outcomes="${ac_outcomes:+$ac_outcomes,}${verdict:0:1}"
+      dispatch_attempts=$(( dispatch_attempts + 1 ))
+      [[ "$drc" -ne 0 ]] && dispatch_failures=$(( dispatch_failures + 1 ))
       [[ "${verdict:1:1}" == "1" ]] && saw_quota=1
       if (( saw_quota )); then
         echo "[drain] Claude usage-limit signal while dispatching #$n — pausing this cycle (will back off, not fail)."
@@ -1279,6 +1297,8 @@ run_cycle() {
 
       verdict="$(classify_dispatch "$n" "$rc" "$out")"
       ac_outcomes="${ac_outcomes:+$ac_outcomes,}${verdict:0:1}"
+      dispatch_attempts=$(( dispatch_attempts + 1 ))
+      [[ "$rc" -ne 0 ]] && dispatch_failures=$(( dispatch_failures + 1 ))
       if [[ "${verdict:1:1}" == "1" ]]; then
         saw_quota=1
         QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"
@@ -1331,6 +1351,26 @@ run_cycle() {
         fi
       done
     fi
+  fi
+
+  # #2140 — a cycle in which EVERY attempted dispatch failed is not a completed
+  # cycle, and must never read as one. Per-dispatch WARNINGs (classify_dispatch,
+  # above) are easy to miss in a long log; this is the roll-up that makes N-of-N
+  # failures impossible to mistake for a healthy "cycle done." Deliberately scoped
+  # to ALL failing, not SOME: a partial failure already has a WARNING per issue and
+  # the issue stays in the ready queue for the next cycle, which is the existing,
+  # correct degrade-gracefully behaviour (see the issue body's own "blast radius"
+  # note — nothing is lost when only some dispatches fail).
+  #
+  # Returns 1, the existing "transient error" code (see this function's docstring
+  # above) — run_loop already counts consecutive 1s toward MAX_CONSEC_FAIL and
+  # stops the loop with a loud message after enough of them, which is exactly the
+  # right response to "every dispatch is failing": likely a persistent credential
+  # or config fault, not a one-off worth quietly retrying forever.
+  if (( dispatch_attempts > 0 && dispatch_failures == dispatch_attempts )); then
+    echo "[drain] CYCLE FAILED: all ${dispatch_attempts} dispatch(es) attempted this cycle failed (see the WARNING(s) above for each) — this is NOT a healthy cycle (#2140)." >&2
+    echo "[drain]              Likely cause: an expired/invalid credential or a broken dispatch path — not an empty backlog. The failed issue(s) remain in the ready queue for the next cycle." >&2
+    return 1
   fi
 
   echo "[drain] cycle done."
