@@ -217,6 +217,8 @@ function success(name: string, issues: RawIssue[]): Fixture {
 const LIST_COMMAND =
   'gh issue list --state open --limit 100 --json number,title,url,labels,state,createdAt,updatedAt';
 
+const SIGNED_OUT_STDERR = 'To get started with GitHub CLI, please run:  gh auth login\n';
+
 const SUCCESS_FIXTURES: readonly Fixture[] = [
   success('zero open issues', []),
   success('one open issue', [rawIssue(1, ['inbox'])]),
@@ -239,13 +241,14 @@ const FAILURE_FIXTURES: readonly Fixture[] = [
   },
   {
     name: 'gh exits non-zero (not signed in)',
+    // Shaped like a real execFile failure: the message is the command line followed by
+    // what gh printed, and the same text is on `stderr`, which is what the classifier reads.
     list: {
-      error: Object.assign(
-        new Error(
-          `Command failed: ${LIST_COMMAND}\nTo get started with GitHub CLI, please run:  gh auth login\n`,
-        ),
-        { code: 4, killed: false },
-      ),
+      error: Object.assign(new Error(`Command failed: ${LIST_COMMAND}\n${SIGNED_OUT_STDERR}`), {
+        code: 4,
+        killed: false,
+        stderr: SIGNED_OUT_STDERR,
+      }),
     },
     reason: /not authenticated/,
   },
