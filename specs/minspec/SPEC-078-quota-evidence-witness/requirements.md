@@ -31,8 +31,9 @@ phases:
 # MinSpec — `ai-review-retry` must see the quota evidence the reviewer actually observed (Requirements)
 
 > **SPECIFICATION ONLY.** Nothing is built by the dispatch that produced this. A human
-> reads it, answers **Decisions needed (Clarify)**, and approves it through the normal
-> spec-approval gate before any code changes.
+> reads it and approves it through the normal spec-approval gate before any code changes.
+> Its Clarify questions are recorded as decided under **Decisions (Clarify)** below, and that
+> approval is the sign-off on them.
 
 Materializes **#2178** — *"ai-review-retry declines to retry a quota-blocked PR whose run
 log contains the quota diagnostic."* It does not dispute **#1630** (the no-evidence guard:
@@ -226,9 +227,18 @@ though the second failure (PAYG) was never shown to be quota. A PAYG misconfigur
 - **INV-6 (constitution 1, offline).** No new network call is introduced in MinSpec's
   extension; all changes are in CI scripts that already call the git host.
 
-## Decisions needed (Clarify)
+## Decisions (Clarify – resolved 2026-10-01)
 
-### DQ-1 — Decline notice: once per block, or every hourly tick?
+All four questions in this document are answered with its recommended option. The selections
+were written down by an agent session under DR-086 autonomy (`"autonomy": "act"` in
+`.minspec/config.json`), not put to the founder one at a time, so no human chose them when
+they were recorded. The options stay below each decision, because DR-086 §4 requires the
+rejected alternatives to be kept in the durable artifact when nobody saw them live.
+
+### DQ-1 — Decline notice: once per block, or every hourly tick? (resolved: Option A)
+
+**Decision:** Option A, once, on transition (recommended option taken under DR-086 autonomy;
+the founder's approval of this spec is the sign-off).
 
 - **Option A — once, on transition (rec).** Post the explanatory comment only when the PR
   does not already carry `needs-human-review` (or an idempotency marker such as
@@ -238,7 +248,14 @@ though the second failure (PAYG) was never shown to be quota. A PAYG misconfigur
 - **Option B — every tick.** Maximally visible. *Cost:* an hourly comment for days on one
   PR trains readers to ignore the bot, which defeats FR-6.
 
-### DQ-2 — Retry decision when voters disagree on evidence
+### DQ-2 — Retry decision when voters disagree on evidence (resolved: Option A, carried by Option C)
+
+**Decision:** Option A as the rule, carried by Option C as the mechanism (recommended option
+taken under DR-086 autonomy; the founder's approval of this spec is the sign-off). Both are
+marked recommended below and they do not compete: A and B are the two candidate rules, and C
+is how either rule is carried. So the workflow emits one aggregated marker line computed
+under rule A, retry only when every blocked voter is `captured`, and the retry keeps its
+last-match extraction.
 
 With FR-4, one comment can carry several `evidence:` lines. Today the retry takes the
 *last* match.
@@ -255,7 +272,11 @@ With FR-4, one comment can carry several `evidence:` lines. Today the retry take
   as the mechanism, since it keeps the retry's parsing untouched. *Cost:* the aggregation
   rule lives in `ai-review.yml`, one more place to keep aligned with the retry.
 
-### DQ-3 — What the marker says when subscription hit quota and PAYG failed for a non-quota reason
+### DQ-3 — What the marker says when subscription hit quota and PAYG failed for a non-quota reason (resolved: Option A)
+
+**Decision:** Option A, `reason: quota` and `evidence: captured`, with the PAYG failure shown
+in the detail (recommended option taken under DR-086 autonomy; the founder's approval of this
+spec is the sign-off). Option B was not taken, so no new marker value is introduced.
 
 - **Option A — `reason: quota`, `evidence: captured`, PAYG failure shown in detail (rec).**
   The subscription window will reset; the retry is useful. *Cost:* a broken PAYG setup
@@ -269,7 +290,10 @@ With FR-4, one comment can carry several `evidence:` lines. Today the retry take
   dev's code for an infrastructure outage, which DR-063's `blocked`/`changes` split exists
   to prevent.
 
-### DQ-4 — Should the retry also read the blocked run's log as a second witness?
+### DQ-4 — Should the retry also read the blocked run's log as a second witness? (resolved: Option A)
+
+**Decision:** Option A, no second witness; fix the producer (recommended option taken under
+DR-086 autonomy; the founder's approval of this spec is the sign-off).
 
 - **Option A — no; fix the producer (rec).** Comment is durable, already fetched, and
   FR-1–FR-3 make it correct. *Cost:* if the producer regresses again, only FR-8's tests
@@ -287,7 +311,8 @@ is a revertable diff to two CI scripts and one workflow, reusing the existing cl
 the existing comment marker. DR-063 (`blocked` vs `changes`) and DR-079 (verdict out of
 band) are the governing precedents and are applied, not changed. `docs/decisions/INDEX.md`
 has no entry for evidence-marker construction. If Clarify picks DQ-3 Option B (a new marker
-value that three consumers must learn), revisit this.
+value that three consumers must learn), revisit this. Clarify recorded Option A for DQ-3, so
+this stands.
 
 ## Out of scope
 
