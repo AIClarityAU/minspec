@@ -1,7 +1,7 @@
 ---
 id: SPEC-085
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - DR-004/DR-050/DR-071 (the network-consent model) live here; this is an invariant-1 defect in a shipped panel
@@ -18,8 +18,8 @@ implements: [packages/minspec/tests/backlog-consent.test.ts, packages/minspec/te
 affects: [packages/minspec/src/views/backlog-view.ts, packages/minspec/src/lib/backlog.ts, packages/minspec/src/extension.ts, packages/minspec/package.json, packages/minspec/tests/backlog-view.test.ts, packages/minspec/tests/invariants.test.ts]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
