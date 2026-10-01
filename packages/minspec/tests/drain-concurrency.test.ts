@@ -38,9 +38,19 @@ function findRepoRoot(): string {
 const DRAIN = path.join(findRepoRoot(), 'scripts', 'drain-inbox.sh');
 
 function sh(args: string[], env: NodeJS.ProcessEnv = {}): string {
+  const base = { ...process.env };
+  // Strip any ambient MINSPEC_DRAIN_CONCURRENCY before layering the per-call
+  // override on top. Without this, a caller that already has the var exported
+  // in its OWN environment (e.g. an orchestrator dispatching this very test run
+  // at some concurrency) leaks it through `{ ...process.env }` unchanged, and
+  // the "defaults to 1" case below silently asserts the CALLER's width instead
+  // of the script's actual default — passing or failing depending on who ran
+  // the suite rather than on drain-inbox.sh's own behaviour (the #1208 default-
+  // path guarantee this describe block exists to pin down).
+  delete base.MINSPEC_DRAIN_CONCURRENCY;
   return execFileSync('bash', [DRAIN, ...args], {
     encoding: 'utf-8',
-    env: { ...process.env, ...env },
+    env: { ...base, ...env },
     stdio: ['ignore', 'pipe', 'ignore'],
   }).trim();
 }
