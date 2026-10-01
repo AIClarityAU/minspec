@@ -27,11 +27,13 @@ phases:
 # SPEC-085: The Backlog panel contacts GitHub only when the user asks it to
 
 > **SPECIFICATION ONLY.** Nothing is built by the dispatch that produced this. A human
-> reads it, checks **[Decisions needed (Clarify)](#decisions-needed-clarify)**, and approves
-> it through the normal spec-approval gate before any code changes. Every requirement below
-> is written under each decision's recommended option, so approving the spec as it stands
-> accepts those recommendations and leaves no question open. Choosing a different option
-> changes only the requirements that decision names.
+> reads it, checks its Clarify questions, and approves it through the normal spec-approval
+> gate before any code changes. Each question carries an agent-recorded selection under
+> **[Clarify selections](#clarify-selections-recorded-by-an-agent-2026-10-01-ratified-only-by-approval-of-this-spec)**;
+> the human answers by approving this spec with those in place, or by changing them first.
+> Every requirement below is written under each decision's recommended option, so approving
+> the spec as it stands accepts those recommendations and leaves no question open. Choosing
+> a different option changes only the requirements that decision names.
 
 Materializes **[#2329](https://github.com/AIClarityAU/minspec/issues/2329)** - *"the
 Backlog panel runs gh against GitHub without consent, and the README says it doesn't."* It
@@ -282,12 +284,30 @@ leaves out (`packages/minspec/src/commands/backlog.ts:24-48`).
 - **INV-5 - Activation stays cheap (constitution constraint 3).** Activation does strictly
   less work than today: two fewer process spawns.
 
-## Decisions needed (Clarify)
+## Clarify selections (recorded by an agent 2026-10-01; ratified only by approval of this spec)
 
 Each decision carries a recommendation and its cost. The requirements above assume the
 recommended option in every case.
 
+DQ-1 to DQ-5 each carry a **Recorded selection** line naming the option this document
+already recommended. An agent session wrote those lines on 2026-10-01, and no human chose
+them. This repository runs with `"autonomy": "act"` (`.minspec/config.json:58`), under which
+an agent proceeds on a stated recommendation and leaves the options it did not take on
+record (DR-086 §2 and §4), which is why the options stay below with their costs. Approving a
+T3 spec is the second class on that section's stop list (`scripts/lib/autonomy.ts:68-70`),
+so nothing here stands in for that approval: the lines propose, and approving this spec is
+what ratifies them. An approval records a canonical hash that covers this body
+(`packages/minspec/src/lib/approval.ts:4-8`) and reads as stale once the hash stops matching
+(`resolveStatus`, `:483-490`), so an approval of this text covers these selections and
+changing one afterwards voids it. When the lines were written no approval of this spec had
+landed on `main` (`status: specifying`, `clarify: pending`). A question in this section with
+no **Recorded selection** line is still open.
+
 ### DQ-1 - What happens to automatic refresh?
+
+**Recorded selection: Option A,** gesture only, nothing remembered. Option B is not taken,
+so the decision record that would widen DR-071 condition 4 is not written: "Why no new DR"
+below makes one necessary only under that option.
 
 - **Option A - gesture only, nothing remembered (rec).** The panel fetches only on Refresh
   Backlog or the not-loaded row. No setting, no stored answer, no new decision record.
@@ -306,6 +326,9 @@ recommended option in every case.
 
 ### DQ-2 - Is `gh auth status` allowed before the gesture?
 
+**Recorded selection: Option A,** no `gh auth status` and no other child process before the
+gesture.
+
 - **Option A - no; zero processes before the gesture (rec).** One property, trivially
   testable ("no child process"), and the README can say it in one sentence. *Cost:* a user
   whose `gh` is missing or logged out finds out only after clicking, from the
@@ -316,6 +339,10 @@ recommended option in every case.
   an exception for a panel the user never asked to load.
 
 ### DQ-3 - How far does the wording correction reach?
+
+**Recorded selection: Option A,** all five locations, including the site source. The
+selection covers the edit to `sites/minspec.dev/index.html` in this repository and not its
+deployment, which stays the separate human act listed under "Out of Scope".
 
 - **Option A - all five locations, including the site source (rec).** One false claim in
   five copies is fixed once. *Cost:* `sites/minspec.dev/index.html` changes in the repo
@@ -332,6 +359,8 @@ section is edited twice.
 
 ### DQ-4 - How is the README kept true afterwards?
 
+**Recorded selection: Option A,** the inventory test tied to the spawn allowlist (FR-9).
+
 - **Option A - an inventory test tied to the spawn allowlist (rec).** FR-9. Adding a
   network-reaching module without updating the README fails the suite. *Cost:* it is a
   text-presence check, so it proves each feature is named, not that the surrounding
@@ -341,6 +370,9 @@ section is edited twice.
   as "accurate"); constitution principle 8 says to enforce rather than trust.
 
 ### DQ-5 - Sequencing against the in-flight #2247 and #2246 fixes
+
+**Recorded selection: Option A,** build this after #2247 merges and consume its result.
+Option B is not taken, so the failure handling is not re-specified here.
 
 Both touch `backlog.ts` and `backlog-view.ts`; both have a pushed branch and no open pull
 request (`agent/issue-2247` at `460166a8`, `agent/issue-2246` at `93f967a7`).
