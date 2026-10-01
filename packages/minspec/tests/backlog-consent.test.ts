@@ -226,6 +226,8 @@ const SUCCESS_FIXTURES: readonly Fixture[] = [
     rawIssue(3),
     rawIssue(4, ['wip']),
     rawIssue(5, ['agent-ready', 'P3']),
+    // Open and labelled done. The pane used to leave this one out without a word (#2460).
+    rawIssue(6, ['done']),
   ]),
 ];
 

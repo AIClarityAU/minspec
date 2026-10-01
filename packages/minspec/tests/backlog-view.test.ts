@@ -217,6 +217,13 @@ describe('BacklogIssueNode', () => {
     expect((node.iconPath as { id: string }).id).toBe('issue-opened');
   });
 
+  it('uses check icon for done lifecycle', () => {
+    const issue = makeIssue({ lifecycleLabel: 'done' });
+    const node = new BacklogIssueNode(issue);
+
+    expect((node.iconPath as { id: string }).id).toBe('check');
+  });
+
   it('lifecycle label takes precedence over priority for icon (wip > P1)', () => {
     const issue = makeIssue({ lifecycleLabel: 'wip', priorityLabel: 'P1' });
     const node = new BacklogIssueNode(issue);
@@ -529,6 +536,27 @@ describe('BacklogTreeProvider', () => {
       const groups = children.slice(1) as BacklogGroupNode[];
       expect(groups.map(g => g.label)).toEqual(['Inbox', 'Triaged', 'Unlabeled']);
       expect(groups.map(g => g.issues.length)).toEqual([2, 1, 1]);
+    });
+
+    it('loaded: an open issue labelled done lands in "Done, still open", not dropped (#2460)', async () => {
+      const issues = [
+        makeIssue({ number: 1, lifecycleLabel: 'inbox' }),
+        makeIssue({ number: 2, lifecycleLabel: 'done', state: 'OPEN' }),
+      ];
+      mockFetchIssues.mockResolvedValue(issues);
+
+      await gesture();
+      const children = await provider.getChildren();
+
+      // Before #2460's fix the done-labelled issue matched no group, and the pane showed
+      // Inbox alone with issue 2 dropped. The loaded-at row comes first; the groups follow.
+      const groups = children.slice(1) as BacklogGroupNode[];
+      expect(groups.map(g => g.label)).toEqual(['Inbox', 'Done, still open']);
+
+      const doneGroup = groups.find(g => g.label === 'Done, still open');
+      expect(doneGroup?.issues.map(i => i.number)).toEqual([2]);
+      // Collapsed by default: a rare state that should not compete with the active groups.
+      expect(doneGroup?.collapsibleState).toBe(1); // Collapsed
     });
 
     it('loaded: issues are sorted with sortBacklog before they are grouped', async () => {

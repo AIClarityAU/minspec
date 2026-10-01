@@ -242,7 +242,10 @@ describe('fetchIssues()', () => {
     mockExecFile.mockImplementation(
       (_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
         if (typeof _opts === 'function') cb = _opts as Function;
-        cb!(new Error('gh not authenticated'), { stdout: '', stderr: '' });
+        cb!(
+          new Error('You are not logged into any GitHub hosts. Run gh auth login to authenticate.'),
+          { stdout: '', stderr: '' },
+        );
       },
     );
 
@@ -251,6 +254,153 @@ describe('fetchIssues()', () => {
     await expect(fetchIssues('/fake/root')).rejects.toThrow(
       'GitHub CLI (gh) is not authenticated',
     );
+  });
+
+  // #2459 — the reason is chosen by matching gh's text, and the signed-out arm
+  // used to match the bare substring `auth`. A repository, owner or label that
+  // merely CONTAINS those letters then turned every failure naming it into
+  // "run `gh auth login`": advice to fix something that is not broken.
+  describe('reason classification matches what gh says, not a stray substring (#2459)', () => {
+    const SIGNED_OUT = 'GitHub CLI (gh) is not authenticated';
+    const RATE_LIMITED = 'GitHub API rate limit exceeded';
+    const TIMED_OUT = 'gh command timed out';
+    const NETWORK = 'network unreachable';
+    const GENERIC = 'gh issue list failed: ';
+
+    /** Make the mocked `gh` fail with `err`, and return the reason fetchIssues rejects with. */
+    async function reasonFor(err: Error, label?: string): Promise<string> {
+      mockExecFile.mockImplementation(
+        (_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
+          if (typeof _opts === 'function') cb = _opts as Function;
+          cb!(err, { stdout: '', stderr: '' });
+        },
+      );
+      try {
+        await fetchIssues('/fake/root', label ? { label } : undefined);
+      } catch (thrown) {
+        return (thrown as Error).message;
+      }
+      throw new Error('fetchIssues resolved — it must reject when gh fails (#2247)');
+    }
+
+    /** An error shaped like the one Node's execFile produces for a non-zero exit. */
+    function execFailure(commandLine: string, stderr: string): Error {
+      return Object.assign(new Error(`Command failed: ${commandLine}\n${stderr}`), {
+        code: 1,
+        killed: false,
+        stdout: '',
+        stderr,
+      });
+    }
+
+    // The four wordings below are the ones this repo already holds as gh
+    // output: tests/approval-pr.test.ts, tests/drain-query-failure.test.ts and
+    // tests/fixtures/drain-quota-signal/1060-dispatch-capture-1903.txt.
+    it.each([
+      ['signed out of every host', 'You are not logged into any GitHub hosts. Run gh auth login to authenticate.'],
+      ['never signed in', 'To get started with GitHub CLI, please run:  gh auth login'],
+      ['a rejected token', 'HTTP 401: Bad credentials (https://api.github.com/graphql)\nTry authenticating with:  gh auth login -h github.com'],
+      ['a bare HTTP 401', 'HTTP 401: Unauthorized (https://api.github.com/graphql)'],
+      ['an older "not logged in" wording', 'error: not logged in to github.com'],
+    ])('still reports signed-out for %s', async (_name, message) => {
+      expect(await reasonFor(new Error(message))).toContain(SIGNED_OUT);
+    });
+
+    it('does not call a missing repository whose NAME contains "auth" a sign-in problem', async () => {
+      const message =
+        "GraphQL: Could not resolve to a Repository with the name 'acme/auth-service'. (repository)";
+      const reason = await reasonFor(new Error(message));
+
+      expect(reason).not.toContain(SIGNED_OUT);
+      // The generic arm carries gh's own text, so the user sees what failed.
+      expect(reason).toBe(`${GENERIC}${message}`);
+    });
+
+    it('does not call a repository named "authentication" a sign-in problem either', async () => {
+      const message =
+        "GraphQL: Could not resolve to a Repository with the name 'acme/authentication'. (repository)";
+
+      expect(await reasonFor(new Error(message))).toBe(`${GENERIC}${message}`);
+    });
+
+    it('reports a SAML-protected organisation as neither signed-out nor rate-limited', async () => {
+      // Mentions "OAuth" AND "403": the old classifier answered "run `gh auth
+      // login`", and with only the auth arm narrowed it would have answered
+      // "rate limit exceeded" instead. Neither is what went wrong.
+      const message =
+        'HTTP 403: Resource protected by organization SAML enforcement. ' +
+        'You must grant your OAuth token access to this organization.';
+      const reason = await reasonFor(new Error(message));
+
+      expect(reason).not.toContain(SIGNED_OUT);
+      expect(reason).not.toContain(RATE_LIMITED);
+      expect(reason).toBe(`${GENERIC}${message}`);
+    });
+
+    it('does not read a number that merely contains 401 or 403 as an HTTP status', async () => {
+      expect(await reasonFor(new Error('GraphQL: Could not resolve to an Issue with the number of 1401.')))
+        .toContain(GENERIC);
+      expect(await reasonFor(new Error('GraphQL: Could not resolve to an Issue with the number of 4035.')))
+        .toContain(GENERIC);
+    });
+
+    it.each([
+      ['the primary limit', 'GraphQL: API rate limit exceeded for user ID 1.'],
+      ['the secondary limit, which arrives as a 403', 'HTTP 403: You have exceeded a secondary rate limit. Please wait a few minutes before you try again.'],
+    ])('still reports rate limiting for %s', async (_name, message) => {
+      expect(await reasonFor(new Error(message))).toContain(RATE_LIMITED);
+    });
+
+    it('does not call a repository named "timeout" or "network" a connectivity problem', async () => {
+      const timeoutRepo =
+        "GraphQL: Could not resolve to a Repository with the name 'acme/timeout-lib'. (repository)";
+      const networkRepo =
+        "GraphQL: Could not resolve to a Repository with the name 'acme/network-tools'. (repository)";
+
+      expect(await reasonFor(new Error(timeoutRepo))).toBe(`${GENERIC}${timeoutRepo}`);
+      expect(await reasonFor(new Error(networkRepo))).toBe(`${GENERIC}${networkRepo}`);
+    });
+
+    it.each([
+      ['a killed child (execFile timeout)', Object.assign(new Error('Command failed: gh issue list'), { killed: true }), TIMED_OUT],
+      ['a Go i/o timeout', new Error('Post "https://api.github.com/graphql": dial tcp 140.82.112.6:443: i/o timeout'), TIMED_OUT],
+      ['a Go client timeout', new Error('Post "https://api.github.com/graphql": net/http: request canceled (Client.Timeout exceeded while awaiting headers)'), TIMED_OUT],
+      ['an operation that timed out', new Error('connect: operation timed out'), TIMED_OUT],
+      ['an unreachable network', new Error('dial tcp 140.82.112.6:443: connect: network is unreachable'), NETWORK],
+      ['a refused connection', new Error('connect ECONNREFUSED 127.0.0.1:443'), NETWORK],
+    ])('still reports %s', async (_name, err, expected) => {
+      expect(await reasonFor(err)).toContain(expected);
+    });
+
+    it('classifies on gh\'s stderr, not on the command line Node echoes into the message', async () => {
+      // execFile's message is "Command failed: <full command line>\n<stderr>",
+      // so a `--label` the CALLER passed is in the text even when gh never
+      // mentioned it. A label spelling a sign-out phrase must not decide the reason.
+      const stderr = 'GraphQL: Something went wrong while executing your query. (issues)';
+      const err = execFailure('gh issue list --state open --label gh auth login', stderr);
+      const reason = await reasonFor(err, 'gh auth login');
+
+      expect(reason).not.toContain(SIGNED_OUT);
+      expect(reason).toContain(GENERIC);
+      expect(reason).toContain(stderr);
+    });
+
+    it('reads a real sign-out from stderr when the error carries one', async () => {
+      const err = execFailure(
+        'gh issue list --state open --limit 100',
+        'To get started with GitHub CLI, please run:  gh auth login',
+      );
+
+      expect(await reasonFor(err)).toContain(SIGNED_OUT);
+    });
+
+    it('falls back to the message when stderr is empty', async () => {
+      const err = Object.assign(new Error('GraphQL: API rate limit exceeded for user ID 1.'), {
+        stderr: '',
+      });
+
+      expect(await reasonFor(err)).toContain(RATE_LIMITED);
+    });
   });
 
   it('rejects with a not-installed reason on ENOENT (#2247)', async () => {
