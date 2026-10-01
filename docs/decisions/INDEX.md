@@ -757,7 +757,7 @@ SPEC-034's broker exchanges a GitHub Actions OIDC token for a GitHub App install
 
 ## [DR-095 — A socket bind-mounted as a file pins one inode, so restarting the broker is the act that severs it - mount a dedicated directory, read-only](DR-095.md)
 
-*Status: proposed · Date: 2026-09-25*
+*Status: accepted · Date: 2026-09-25*
 
 <!-- dr-summary:DR-095 auto=e43c8c7ab700 -->
 /etc/nixos/home.nix:95 declares it: The host side is **$XDG_RUNTIME_DIR**, which for a user manager is /run/user/1000. It is not /tmp; /tmp/gh-app-token.sock is only the path the socket is presented at *inside* the container. This matters for the proposal below, because "mount the directory" means mounting the systemd user runtime directory, which is a very different object from a purpose-built socket directory.
@@ -778,4 +778,12 @@ Ownership declarations leave the canonical approval hash, so every record minted
 <!-- dr-summary:DR-097 auto=85c9e4fc299d -->
 When one of the four ai-review voters dies on a session limit, the panel fails closed and the re-run re-pays for the three that answered. This keeps the survivors, bound to the same head SHA - which is the whole distinction from #1840, where whole-panel reuse across a moved base was measured and refused. The safety property lived only in a comment at first, and the comment was false: three of four voters on #2163 caught the code reusing across commits while its docblock denied it.
 <!-- /dr-summary:DR-097 -->
+
+## [DR-098 — The approval flow may create MinSpec's own missing docs-lane label - consent to push an approval covers the one label its pull request needs, and nothing wider](DR-098.md)
+
+*Status: proposed · Date: 2026-10-01*
+
+<!-- dr-summary:DR-098 auto=88bcb5af582d -->
+MinSpec scaffolds a workflow into adopters that auto-merges a docs-only pull request carrying the docs-lane label, but never created the label, and gh pr create refuses to open a pull request naming a label the repository lacks. So where the label was missing, every approval fell to a manual Open PR step and a manual merge (#2243). Creating the label is a new kind of forge write, and it narrows a statement MinSpec ships to every adopter.
+<!-- /dr-summary:DR-098 -->
 <!-- minspec:dr-index:end -->

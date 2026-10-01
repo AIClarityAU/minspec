@@ -1,3 +1,5 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { commitApproval, isUntrackedAtHead, type CommitApprovalResult } from '../lib/approve-commit';
 import { pushApproval, type PushApprovalResult } from '../lib/approve-push';
@@ -347,6 +349,33 @@ const OPEN_PR_ACTION = 'Open PR';
  * returns undefined, and the PR is opened UNLABELLED — the fail-closed direction.
  */
 const PR_BASE = 'origin/HEAD';
+
+/**
+ * The lane workflow, where the `docs-lane-workflow` template scaffolds it
+ * (`template-registry.ts`; the two are pinned equal by
+ * `tests/approval-lane-label-parity.test.ts`). Hardcoded rather than imported for the
+ * same reason as {@link preferencesApi}: the registry's module graph is enormous, and
+ * this module commits every approval.
+ */
+export const LANE_WORKFLOW_REL = '.github/workflows/docs-lane.yml';
+
+/**
+ * #2243 — does this checkout carry the workflow that consumes the `docs-lane` label?
+ *
+ * The approval flow may create that label on the forge when the repository lacks it,
+ * and this is the gate on doing so. The label's only purpose is to trigger that
+ * workflow, so in a repository that never installed it the write would buy nothing:
+ * no auto-merge, just an unexplained label. It is read locally (no network), and any
+ * error answers "no", the direction that writes nothing. This gate is condition 3 of
+ * DR-098 (lane-label provisioning), which records the decision to make the write.
+ */
+function laneWorkflowPresent(rootDir: string): boolean {
+  try {
+    return fs.existsSync(path.join(rootDir, ...LANE_WORKFLOW_REL.split('/')));
+  } catch {
+    return false;
+  }
+}
 
 /**
  * `answeredSignatures` key for the FR-8 standing-consent offer (#883 model).
@@ -786,6 +815,15 @@ async function openApprovalPr(
     // that is certainly wrong for the caller that passes it.
     const sha = ctx.sha === undefined ? await resolveHeadSha(run, rootDir) : (ctx.sha ?? undefined);
 
+    // #2243 — the one input that made voip-sms-inbox differ from this repository: it
+    // had no `docs-lane` LABEL, and gh refuses to open a PR that names a missing one.
+    // So every approval there fell to the `Open PR` surface below, and the PR made by
+    // hand carried no label, so the lane never saw it and it needed a manual merge.
+    // When the PR is being opened with the lane label AND this checkout carries the
+    // lane workflow that consumes it, let the seam create the label once. `labels` is
+    // `laneLabelsFor`'s output, so non-empty means exactly `[docs-lane]`.
+    const provisionLaneLabel = labels.length > 0 && laneWorkflowPresent(rootDir);
+
     const pr = await openPullRequest({
       run,
       cwd: rootDir,
@@ -809,6 +847,7 @@ async function openApprovalPr(
       // — which is why it stays. R2 itself is unmitigated and belongs in a
       // follow-up, not in a comment that quietly implies otherwise.
       adoptExisting: true,
+      provisionLaneLabel,
     });
 
     // A PR whose paths are NOT all docs is still opened — the branch is already
@@ -816,21 +855,33 @@ async function openApprovalPr(
     // but it goes UNLABELLED and the suffix says so, so "no auto-merge" is never
     // a silent surprise.
     const laneNote = laneSuffixNote(refusal);
+    // #2243 — creating a label is a write to the maintainer's repository. It happens
+    // once per repository, and it is said once, on the approval that did it.
+    const labelNote = pr.labelProvisioned ? ' · created the missing docs-lane label' : '';
 
     switch (pr.outcome) {
       case 'created':
         void notifyPrOpened(`MinSpec: approval PR opened — ${pr.url}`, labels, refusal);
-        return { suffix: ` · pushed on ${result.branch} · PR opened${laneNote} (${pr.url})`, pr };
+        return {
+          suffix: ` · pushed on ${result.branch} · PR opened${laneNote} (${pr.url})${labelNote}`,
+          pr,
+        };
       case 'adopted':
         void notifyPrOpened(`MinSpec: approval PR already open — ${pr.url}`, labels, refusal);
         return {
-          suffix: ` · pushed on ${result.branch} · PR already open (${pr.url})`,
+          suffix: ` · pushed on ${result.branch} · PR already open (${pr.url})${labelNote}`,
           pr,
         };
       default: {
         if (pr.error) console.warn(`MinSpec: approval PR not opened — ${pr.error}`);
-        const reason = PR_FAILURE_REASON[pr.outcome] ?? 'the PR could not be opened';
-        return { suffix: manualPrSurface(result, reason), pr };
+        // #2243: a missing label is named, not folded into "opening the PR failed",
+        // which is all the founder was told in voip-sms-inbox. "could not be created"
+        // only when creating it was actually attempted and did not happen.
+        const reason = pr.missingLabel
+          ? `the '${pr.missingLabel}' label does not exist in this repository` +
+            (provisionLaneLabel && !pr.labelProvisioned ? ' and could not be created' : '')
+          : PR_FAILURE_REASON[pr.outcome] ?? 'the PR could not be opened';
+        return { suffix: manualPrSurface(result, reason) + labelNote, pr };
       }
     }
   } catch (err) {
