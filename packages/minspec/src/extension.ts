@@ -209,9 +209,18 @@ export function activate(context: vscode.ExtensionContext): void {
     t.provider.refresh();
   };
 
-  // Async refresh triggers: when a pane becomes visible, refetch its data.
+  // Async refresh triggers: when a pane becomes visible, re-read its data.
   // File watchers below catch in-VSCode edits; these hooks catch external
-  // changes (CLI edits, git checkout, GitHub issue updates).
+  // changes to the LOCAL files the Specs and Decisions panes read (CLI edits,
+  // git checkout).
+  //
+  // The Backlog is different, and deliberately so (SPEC-085, constitution
+  // invariant 1): none of these triggers contacts GitHub. `refreshIfStale()`
+  // and the no-argument `refresh()` only re-draw the Backlog from what it
+  // already holds - the not-loaded row, or the list and its loaded-at time.
+  // The one route to `gh issue list` is the `minspec.refreshBacklog`
+  // registration below. An issue changed on GitHub therefore shows up when the
+  // user refreshes, not when the window regains focus.
   context.subscriptions.push(
     specTreeView.onDidChangeVisibility(e => {
       if (e.visible) specTreeProvider.refresh();
@@ -223,7 +232,7 @@ export function activate(context: vscode.ExtensionContext): void {
       if (e.visible) backlogTreeProvider.refreshIfStale();
     }),
     // When VS Code window regains focus, refresh all three. Backlog uses the
-    // stale-only variant so we don't hammer `gh` on every alt-tab.
+    // rate-limited variant: a re-draw from memory, at most once per 30 seconds.
     vscode.window.onDidChangeWindowState(state => {
       if (!state.focused) return;
       specTreeProvider.refresh();
@@ -238,9 +247,9 @@ export function activate(context: vscode.ExtensionContext): void {
     // providers read the LIVE folder list on every getChildren, so a plain
     // refresh rebuilds each tree against the new set — a folder added to the
     // combined workspace surfaces its specs/DRs immediately, a removed one drops
-    // out. Backlog stays single-root (out of #549 scope) but still refreshes its
-    // own root; the stale-only variant avoids a `gh` storm when several folders
-    // are added at once.
+    // out. Backlog stays single-root (out of #549 scope) and only re-draws what
+    // it holds; the rate-limited variant draws it once when several folders are
+    // added at once. It starts no `gh` (SPEC-085).
     vscode.workspace.onDidChangeWorkspaceFolders(() => {
       specTreeProvider.refresh();
       adrTreeProvider.refresh();
@@ -395,6 +404,10 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('minspec.createAdr', createAdrCommand),
     vscode.commands.registerCommand('minspec.regenerateDrIndex', regenerateDrIndexCommand),
+    // The three epic commands below re-draw all three panes, because epic
+    // grouping is read from local files they may have changed. For the Backlog
+    // that is a re-draw from memory: `refresh()` with no argument never
+    // contacts GitHub (SPEC-085 FR-4).
     vscode.commands.registerCommand('minspec.createEpic', async () => {
       await createEpicCommand();
       specTreeProvider.refresh();
@@ -427,7 +440,15 @@ export function activate(context: vscode.ExtensionContext): void {
     }),
     vscode.commands.registerCommand('minspec.scoreWsjf', scoreWsjfCommand),
     vscode.commands.registerCommand('minspec.triageIssue', triageIssueCommand),
-    vscode.commands.registerCommand('minspec.refreshBacklog', () => backlogTreeProvider.refresh()),
+    // The Backlog gesture (SPEC-085 FR-2), and the ONLY call that may contact
+    // GitHub for the Backlog pane: the palette entry, the view-title button and
+    // the pane's own not-loaded row all run this command. It starts one
+    // `gh issue list` and returns at once; the pane updates when that settles.
+    // Not awaited on purpose, so the command does not take as long as `gh`
+    // does. The promise never rejects (a failed fetch becomes a row).
+    vscode.commands.registerCommand('minspec.refreshBacklog', () => {
+      void backlogTreeProvider.refresh({ contactGitHub: true });
+    }),
     vscode.commands.registerCommand('minspec.goToSpec', (specId?: string, reqKey?: string) =>
       goToSpecCommand(workspaceRoot, specId, reqKey)),
     vscode.commands.registerCommand('minspec.goToCode', (specId?: string, reqKey?: string) =>

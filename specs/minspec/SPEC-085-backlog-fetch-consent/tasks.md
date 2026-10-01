@@ -53,7 +53,7 @@ wide as the change.
 
 ## 3 - Adopt the #2247 fix (DQ-5)
 
-- [ ] **3.1** Cherry-pick commit 460166a8 from the `agent/issue-2247` branch, unmodified, as
+- [x] **3.1** Cherry-pick commit 460166a8 from the `agent/issue-2247` branch, unmodified, as
   its own commit. It changes `packages/minspec/src/lib/backlog.ts`,
   `packages/minspec/src/commands/backlog.ts`, `packages/minspec/src/views/backlog-view.ts`,
   `packages/minspec/tests/backlog-view.test.ts`,
@@ -65,20 +65,20 @@ wide as the change.
 
 ## 4 - The consent gate
 
-- [ ] **4.1** `packages/minspec/src/views/backlog-view.ts` - hold one of four states, make
+- [x] **4.1** `packages/minspec/src/views/backlog-view.ts` - hold one of four states, make
   `getChildren` draw the held state and nothing else, run the fetch only from
   `refresh({ contactGitHub: true })`, add the not-loaded, loaded-at, zero and could-not-load
   rows, and drop the `gh auth status` probe (FR-1 to FR-5, DQ-1, DQ-2).
   *Done when:* every provider-level group of the consent test is green.
-- [ ] **4.2** `packages/minspec/src/extension.ts` - pass the gesture argument at the
+- [x] **4.2** `packages/minspec/src/extension.ts` - pass the gesture argument at the
   `minspec.refreshBacklog` registration and nowhere else, and correct the comments that
   describe a fetch on visibility, focus and folder change (FR-1, FR-2, FR-4).
   *Done when:* the syntax-tree pin in the consent test is green, and the two activation
   suites (the extension and extension-extra tests) pass without being edited.
-- [ ] **4.3** `packages/minspec/package.json` - the Refresh Backlog title says it contacts
+- [x] **4.3** `packages/minspec/package.json` - the Refresh Backlog title says it contacts
   GitHub through the user's `gh` CLI (FR-2).
   *Done when:* the title pin in the consent test is green.
-- [ ] **4.4** `packages/minspec/tests/backlog-view.test.ts` - rewrite the root-rendering
+- [x] **4.4** `packages/minspec/tests/backlog-view.test.ts` - rewrite the root-rendering
   tests, which assumed a render fetches, around the four states (T2).
   *Done when:* the file is green and no test in it expects a render to call `fetchIssues`.
 

@@ -281,6 +281,7 @@ interface Row {
   readonly description: string | undefined;
   readonly contextValue: string | undefined;
   readonly commandId: string | undefined;
+  readonly tooltip: string | undefined;
   /** Label plus description: the words the row puts on screen. */
   readonly text: string;
 }
@@ -290,6 +291,7 @@ function toRow(node: unknown): Row {
     label?: unknown;
     description?: unknown;
     contextValue?: unknown;
+    tooltip?: unknown;
     command?: { command?: unknown };
   };
   const label = typeof item.label === 'string' ? item.label : '';
@@ -299,6 +301,7 @@ function toRow(node: unknown): Row {
     description,
     contextValue: typeof item.contextValue === 'string' ? item.contextValue : undefined,
     commandId: typeof item.command?.command === 'string' ? item.command.command : undefined,
+    tooltip: typeof item.tooltip === 'string' ? item.tooltip : undefined,
     text: [label, description].filter(Boolean).join(' '),
   };
 }
@@ -718,16 +721,44 @@ describe('the only route to the Backlog fetch is the named gesture (SPEC-085 FR-
 
   const rel = (file: string): string => path.relative(SRC_ROOT, file).split(path.sep).join('/');
 
-  it('the Refresh Backlog command title says it contacts GitHub through the gh CLI', () => {
+  function refreshBacklogTitle(): string {
     const manifest = JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, 'package.json'), 'utf-8')) as {
       contributes: { commands: Array<{ command: string; title: string }> };
     };
     const refresh = manifest.contributes.commands.filter(c => c.command === 'minspec.refreshBacklog');
-
     expect(refresh).toHaveLength(1);
+    return refresh[0].title;
+  }
+
+  it('the Refresh Backlog command title says it contacts GitHub through the gh CLI', () => {
     // The title is also the tooltip of the view-title button, so one string covers both.
-    expect(refresh[0].title).toMatch(/\bGitHub\b/);
-    expect(refresh[0].title).toMatch(/\bgh\b/);
+    expect(refreshBacklogTitle()).toMatch(/\bGitHub\b/);
+    expect(refreshBacklogTitle()).toMatch(/\bgh\b/);
+  });
+
+  it('the view-title button for the Backlog pane is that same command', () => {
+    const manifest = JSON.parse(fs.readFileSync(path.join(PACKAGE_ROOT, 'package.json'), 'utf-8')) as {
+      contributes: { menus: Record<string, Array<{ command?: string; when?: string }>> };
+    };
+    const buttons = manifest.contributes.menus['view/title'].filter(item => item.when === 'view == minspecBacklog');
+
+    expect(buttons.map(item => item.command)).toContain('minspec.refreshBacklog');
+  });
+
+  it('the status rows name the command by the title the manifest gives it', async () => {
+    // The rows carry the palette title so the keyboard route is discoverable from the
+    // view. The source holds its own copy of the string; this is what keeps it honest.
+    const title = refreshBacklogTitle();
+
+    expect((await render(provider))[0].tooltip).toContain(title);
+
+    ghAnswers(SEVERAL);
+    await gesture(provider);
+    expect((await render(provider))[0].tooltip).toContain(title);
+
+    ghAnswers(FAILURE_FIXTURES[0]);
+    await gesture(provider);
+    expect((await render(provider))[0].tooltip).toContain(title);
   });
 
   it('extension.ts raises the gesture exactly once, from the minspec.refreshBacklog registration', () => {
