@@ -8,6 +8,6 @@
   "types": "out/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "cd ../.. && vitest run packages/shared/tests"
   }
 }
