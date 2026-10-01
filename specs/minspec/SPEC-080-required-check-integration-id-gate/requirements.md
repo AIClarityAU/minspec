@@ -102,15 +102,17 @@ the unsatisfiable case this is meant to catch. Per invariant 2, a missing witnes
 closed."* Both framings are internally consistent; they disagree because they are answering
 different questions (audit vs. gate). This spec does not resolve that disagreement by edit —
 see **DQ-2**, because flipping the shipped, tested `unobserved` semantics is itself a
-behavior change to code with eight passing tests pinning the current meaning, not a free
-clarification.
+behavior change to code covered by the `auditRequiredCheckPins` suite's 7 tests
+(`ruleset-integration-audit.test.ts:102-179`), 3 of which exercise the `unobserved` status
+and one of which (`:136-141`) directly pins `hasIntegrationIdMismatch` to `false` for it —
+not a free clarification.
 
 ### Where #1525's recommended location collides with blast radius (DR-074 / invariant 3)
 
 #1525's Decision names **Option A: "a CI job in `minspec-validate.yml`"** as recommended.
 Read literally, that collides with this repo's own blast-radius rule: `minspec-validate.yml`
 is a **managed template region**
-(`# >>> minspec:managed:validate-workflow >>>` … `<<<`, `.github/workflows/minspec-validate.yml:1,45`),
+(`# >>> minspec:managed:validate-workflow >>>` … `<<<`, `.github/workflows/minspec-validate.yml:1,50`),
 the file *Refresh Harness Files* rewrites byte-for-byte in every `.minspec/`-opted-in repo it
 scaffolds into. Landing a repo-specific, App-JWT-dependent, ruleset-reading job inside that
 shared region would ship a new, credential-dependent requirement into **every adopter repo's
@@ -126,7 +128,7 @@ repo-local workflow file instead, with scaffolding to other repos deferred to **
 #1525's Option A names its cost as *"it needs an App JWT to read ruleset config, so the job
 depends on the App credential being present."* That mechanism **already exists and already
 runs in this repo**: `.github/workflows/ai-review.yml` mints a minspec-sdd[bot] installation
-token today via `actions/create-github-app-token` (`:187-199`) from the `MINSPEC_APP_PRIVATE_KEY`
+token today via `actions/create-github-app-token` (`:192`) from the `MINSPEC_APP_PRIVATE_KEY`
 secret, specifically so a job can act with more than the default `GITHUB_TOKEN`'s permissions.
 Reusing that step is not new infrastructure. What is **unverified** is whether the existing
 App installation's permission grant already includes repository `administration: read` — the
@@ -246,18 +248,19 @@ possibly-contradictory investigations of the same App-permission gap.
 
 - **DQ-2 — Does "zero observed runs fails" change the shipped `ruleset-integration-audit.ts`
   core, or only the CI wiring around it?**
-  - **(A) Wiring-only (recommended).** The pure core's `unobserved` status and its eight
-    pinned tests stay exactly as shipped (correct for the human-invoked one-off audit use
-    case they were built for); the CI wrapper treats `unobserved` as a failing exit code for
-    *its own* purposes, the same way `hasIntegrationIdMismatch` is already a thin policy
-    function on top of the pure classification. *Cost:* two call sites now disagree about
-    whether `unobserved` is "a failure" — correct per audience, but a future reader must
-    understand the core is intentionally more lenient than the gate built on top of it, which
-    this spec's FR-5 and the core's own docblock both need to say explicitly.
+  - **(A) Wiring-only (recommended).** The pure core's `unobserved` status and the 7 tests in
+    the `auditRequiredCheckPins` suite (`ruleset-integration-audit.test.ts:102-179`) stay
+    exactly as shipped (correct for the human-invoked one-off audit use case they were built
+    for); the CI wrapper treats `unobserved` as a failing exit code for *its own* purposes, the
+    same way `hasIntegrationIdMismatch` is already a thin policy function on top of the pure
+    classification. *Cost:* two call sites now disagree about whether `unobserved` is "a
+    failure" — correct per audience, but a future reader must understand the core is
+    intentionally more lenient than the gate built on top of it, which this spec's FR-5 and the
+    core's own docblock both need to say explicitly.
   - **(B) Change the core.** Flip `hasIntegrationIdMismatch` (or add a stricter sibling) to
-    also return true on `unobserved`. *Cost:* breaks the shipped semantics and the eight tests
-    that pin `unobserved` as non-failing for the one-off audit CLI's own exit code, for a
-    use case (unattended gate) the core was not written against.
+    also return true on `unobserved`. *Cost:* breaks the shipped semantics and the suite's test
+    at `:136-141` that pins `unobserved` as non-failing for the one-off audit CLI's own exit
+    code, for a use case (unattended gate) the core was not written against.
   - *Recorded recommendation:* **(A)** — the gate's stricter read is a property of being a
     *gate*, not a correction to the audit's own honest "I don't know yet" state.
 
@@ -313,8 +316,9 @@ Recorded per DR-086 §4 (autonomy `act` — nobody sees rejected options live).
   and its pure core already exist, are tested, and do the comparison correctly; the actual gap
   is wiring plus the enumeration and never-observed semantics named in FR-2/FR-3.
 - **Change the pure core's `unobserved` semantics directly (DQ-2 option B).** Rejected as the
-  default — it would silently invert the meaning of eight already-passing, intentionally-
-  scoped tests for a use case (a one-off human audit) the core was correctly built against.
+  default — it would silently invert the meaning of the `auditRequiredCheckPins` suite's 7
+  already-passing, intentionally-scoped tests for a use case (a one-off human audit) the core
+  was correctly built against.
 - **Resolve the App-permission question independently of SPEC-071 right now.** Rejected —
   both specs need the same fact about the same App installation; investigating it twice risks
   recording two different answers to one question.
