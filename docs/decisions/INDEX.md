@@ -749,7 +749,7 @@ The drain's admission control gates on a quota reading at ~/.claude/quota.json. 
 
 ## [DR-094 — The review broker's tokens live one hour because GitHub issues no shorter credential - exposure is bounded by immediate use and non-storage, not by a TTL the API will not honour](DR-094.md)
 
-*Status: proposed · Date: 2026-09-18*
+*Status: accepted · Date: 2026-09-18*
 
 <!-- dr-summary:DR-094 auto=f02b7feacc1d -->
 SPEC-034's broker exchanges a GitHub Actions OIDC token for a GitHub App installation token, so an adopter's CI can post as minspec-sdd[bot] without holding the App private key. DR-054's reasoning is that one leaked App key mints tokens for every repository that ever installed the App, so the blast radius of the key dwarfs the blast radius of any one token. Short token lifetime was the compensating control.
@@ -757,7 +757,7 @@ SPEC-034's broker exchanges a GitHub Actions OIDC token for a GitHub App install
 
 ## [DR-095 — A socket bind-mounted as a file pins one inode, so restarting the broker is the act that severs it - mount a dedicated directory, read-only](DR-095.md)
 
-*Status: proposed · Date: 2026-09-25*
+*Status: accepted · Date: 2026-09-25*
 
 <!-- dr-summary:DR-095 auto=e43c8c7ab700 -->
 /etc/nixos/home.nix:95 declares it: The host side is **$XDG_RUNTIME_DIR**, which for a user manager is /run/user/1000. It is not /tmp; /tmp/gh-app-token.sock is only the path the socket is presented at *inside* the container. This matters for the proposal below, because "mount the directory" means mounting the systemd user runtime directory, which is a very different object from a purpose-built socket directory.
@@ -765,7 +765,7 @@ SPEC-034's broker exchanges a GitHub Actions OIDC token for a GitHub App install
 
 ## [DR-096 — Adopters get a frozen, diagnosis-only pre-strip basis and a third provenance verdict - not a flag, and not a migration](DR-096.md)
 
-*Status: proposed · Date: 2026-09-25*
+*Status: accepted · Date: 2026-09-25*
 
 <!-- dr-summary:DR-096 auto=68c7f9167e09 -->
 Ownership declarations leave the canonical approval hash, so every record minted before the change stops matching. Locally that is a one-off migration; in an adopter's repo the thing recomputing those hashes is a merge-gating review input that MinSpec ships with no gate, no snapshot and no migration, so their reviewers would read MISMATCH against valid approvals. Adopters get a frozen, diagnosis-only copy of the old basis and a third verdict that names it, rather than a flag that defaults the change off or a corpus-rewriting script MinSpec cannot test.
@@ -773,7 +773,7 @@ Ownership declarations leave the canonical approval hash, so every record minted
 
 ## [DR-097 — A single voter's verdict may be reused across an ai-review re-run, bound to one head SHA — where reusing the whole panel was rejected](DR-097.md)
 
-*Status: proposed · Date: 2026-09-26*
+*Status: accepted · Date: 2026-09-26*
 
 <!-- dr-summary:DR-097 auto=85c9e4fc299d -->
 When one of the four ai-review voters dies on a session limit, the panel fails closed and the re-run re-pays for the three that answered. This keeps the survivors, bound to the same head SHA - which is the whole distinction from #1840, where whole-panel reuse across a moved base was measured and refused. The safety property lived only in a comment at first, and the comment was false: three of four voters on #2163 caught the code reusing across commits while its docblock denied it.
@@ -781,7 +781,7 @@ When one of the four ai-review voters dies on a session limit, the panel fails c
 
 ## [DR-098 — The approval flow may create MinSpec's own missing docs-lane label - consent to push an approval covers the one label its pull request needs, and nothing wider](DR-098.md)
 
-*Status: proposed · Date: 2026-10-01*
+*Status: accepted · Date: 2026-10-01*
 
 <!-- dr-summary:DR-098 auto=88bcb5af582d -->
 MinSpec scaffolds a workflow into adopters that auto-merges a docs-only pull request carrying the docs-lane label, but never created the label, and gh pr create refuses to open a pull request naming a label the repository lacks. So where the label was missing, every approval fell to a manual Open PR step and a manual merge (#2243). Creating the label is a new kind of forge write, and it narrows a statement MinSpec ships to every adopter.
