@@ -765,7 +765,7 @@ SPEC-034's broker exchanges a GitHub Actions OIDC token for a GitHub App install
 
 ## [DR-096 — Adopters get a frozen, diagnosis-only pre-strip basis and a third provenance verdict - not a flag, and not a migration](DR-096.md)
 
-*Status: proposed · Date: 2026-09-25*
+*Status: accepted · Date: 2026-09-25*
 
 <!-- dr-summary:DR-096 auto=68c7f9167e09 -->
 Ownership declarations leave the canonical approval hash, so every record minted before the change stops matching. Locally that is a one-off migration; in an adopter's repo the thing recomputing those hashes is a merge-gating review input that MinSpec ships with no gate, no snapshot and no migration, so their reviewers would read MISMATCH against valid approvals. Adopters get a frozen, diagnosis-only copy of the old basis and a third verdict that names it, rather than a flag that defaults the change off or a corpus-rewriting script MinSpec cannot test.
