@@ -10,7 +10,7 @@ type: tasks
 # the real state. Kept ONLY because spec-validator.ts:525 marks `status` required
 # UNCONDITIONALLY (unlike `tier`:529, which is requiredWhen: isPrimarySpec). Dropping it here
 # is the right end-state (#972) but needs that schema change first — a code fix, not a doc edit.
-status: planning
+status: done
 product: minspec
 epic: EPIC-009  # Team Readiness — docs-lane push ergonomics (grain b of #575/#781)
 relates_to: [SPEC-039, DR-071, DR-060, DR-061, DR-012]
