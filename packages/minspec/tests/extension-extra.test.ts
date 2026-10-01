@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ===========================================================================
 // extension-extra.test.ts
@@ -8,14 +8,17 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // that base test leaves uncovered (reported by `vitest --coverage`):
 //
 //   • lines 379-399 — the `autoClassifyOnCommit` git watcher block
-//   • lines 401-407 — the conformance auto-export watcher block
-//   • lines 418-434 — exportTraceabilityCommand (success / error / no-root)
 //   • lines 447-481 — resolveSpecFrontmatter recursive walk (via injectContext)
 //   • lines 550-551 — removeContextCommand early-return when no workspace
 //
 // It uses its OWN isolated module mocks (Vitest scopes vi.mock per file), so
-// it can stub bridge + auto-bootstrap — which the base harness leaves real —
-// and drive each branch deterministically.
+// it can stub auto-bootstrap, which the base harness leaves real, and drive
+// each branch deterministically.
+//
+// It also holds the activation cases for SPEC-086, which removed the
+// ScroogeLLM bridge this file used to mock: an installation that still has the
+// bridge's stored state and settings, and the manifest-to-registration parity
+// that shows a command was removed from both sides.
 // ===========================================================================
 
 // ---------------------------------------------------------------------------
@@ -51,8 +54,9 @@ let createdWatchers: ReturnType<typeof makeWatcher>[] = [];
 // activate() to flip autoClassifyOnCommit etc.
 let configValues: Record<string, any> = {};
 
-// Conformance watcher disposable returned by the (mocked) bridge helper.
-let conformanceWatcherDisposable: { dispose: () => void } | undefined;
+// Every settings key activation asked for, in order. A test can then say that a
+// key was NOT read, which the value returned for it cannot show.
+let configKeysRead: string[] = [];
 
 // The onDidChangeConfiguration listener activate() registers, captured so the
 // live-toggle regression test (#203) can fire it without a window reload.
@@ -82,11 +86,12 @@ vi.mock('vscode', () => ({
   workspace: {
     workspaceFolders: [{ uri: { fsPath: '/tmp/test-workspace' } }],
     getConfiguration: vi.fn(() => ({
-      get: vi.fn((key: string, def: any) =>
-        Object.prototype.hasOwnProperty.call(configValues, key)
+      get: vi.fn((key: string, def: any) => {
+        configKeysRead.push(key);
+        return Object.prototype.hasOwnProperty.call(configValues, key)
           ? configValues[key]
-          : def,
-      ),
+          : def;
+      }),
     })),
     createFileSystemWatcher: vi.fn(() => {
       const w = makeWatcher();
@@ -249,13 +254,6 @@ vi.mock('../src/lib/active-adr', () => ({
 vi.mock('../src/lib/resolve-folder', () => ({
   resolveTargetFolderNonInteractive: vi.fn(() => '/tmp/test-workspace'),
 }));
-// Bridge is fully stubbed so the conformance/nudge/export sites are driveable.
-vi.mock('../src/lib/bridge', () => ({
-  maybeShowNudge: vi.fn(() => Promise.resolve(false)),
-  recordInstallTimestamp: vi.fn(),
-  exportTraceability: vi.fn(() => ({ filePath: '/tmp/test-workspace/.minspec/traceability-export.json', specCount: 3 })),
-  setupConformanceWatcher: vi.fn(() => conformanceWatcherDisposable),
-}));
 // Auto-bootstrap stubbed: runBootstrap is a no-op promise; isWatchedGitPath
 // uses the real predicate so the git-watcher filter is exercised honestly.
 vi.mock('../src/lib/auto-bootstrap', async (importOriginal) => ({
@@ -279,13 +277,8 @@ vi.mock('path', async () => {
 
 import * as vscode from 'vscode';
 import * as fs from 'fs';
+import * as path from 'path';
 import { activate } from '../src/extension';
-import {
-  setupConformanceWatcher,
-  exportTraceability,
-  recordInstallTimestamp,
-  maybeShowNudge,
-} from '../src/lib/bridge';
 import { detectTools, getToolFilePath } from '../src/lib/tool-detector';
 import { injectContextToFile, removeContextFromFile } from '../src/lib/context-injector';
 import { parseSpec } from '../src/lib/spec';
@@ -327,8 +320,8 @@ beforeEach(() => {
   subscriptions = [];
   createdWatchers = [];
   configValues = {};
+  configKeysRead = [];
   configChangeHandler = undefined;
-  conformanceWatcherDisposable = undefined;
 
   vi.mocked(fs.existsSync).mockReturnValue(true);
   vi.mocked(fs.readdirSync as any).mockReturnValue([]);
@@ -442,94 +435,116 @@ describe('auto-classify git watcher', () => {
 });
 
 // ===========================================================================
-// Conformance auto-export watcher (lines 401-407)
+// SPEC-086: an installation that ran the ScroogeLLM bridge
+//
+// The bridge is gone, but a machine that ran an earlier build can still hold
+// the three global-state keys it wrote and the two settings it read. DQ-4
+// leaves that state where it is, so activation has to work with all of it
+// present and read none of it. These cases put every condition the bridge
+// waited for in place. Run against a tree that still has the bridge, each fails.
 // ===========================================================================
 
-describe('conformance auto-export watcher', () => {
-  it('pushes the conformance watcher into subscriptions when one is returned', () => {
-    const disposable = { dispose: vi.fn() };
-    conformanceWatcherDisposable = disposable;
+describe('an installation that ran the ScroogeLLM bridge (SPEC-086 FR-1, FR-2, FR-3, FR-5, DQ-4)', () => {
+  const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
+  const RETIRED = /scroogellmNudge|installedAt|conformance/;
 
-    activate(makeMockContext());
+  /** Global state as an earlier build left it: installed a month ago, prompt shown once, never dismissed. */
+  function stateAnEarlierBuildLeft() {
+    const stored: Record<string, unknown> = {
+      'minspec.installedAt': Date.now() - THIRTY_DAYS,
+      'minspec.scroogellmNudge.lastShownAt': Date.now() - THIRTY_DAYS,
+      'minspec.scroogellmNudge.dismissed': false,
+    };
+    return {
+      get: vi.fn((key: string, fallback?: unknown) => (key in stored ? stored[key] : fallback)),
+      update: vi.fn(() => Promise.resolve()),
+    };
+  }
 
-    expect(setupConformanceWatcher).toHaveBeenCalledWith('/tmp/test-workspace');
-    expect(subscriptions).toContain(disposable);
+  /**
+   * Activate with everything the prompt waited for in place: old enough, cooled
+   * down, never dismissed, its setting stored as on, and the product not
+   * installed. Then let whatever activation left pending finish, because the
+   * prompt was shown after an await.
+   */
+  async function activateWhereThePromptWouldHaveShown() {
+    configValues = { 'scroogellmNudge.enabled': true, 'conformance.enabled': true };
+    const globalState = stateAnEarlierBuildLeft();
+    expect(() => activate(makeMockContext({ globalState }))).not.toThrow();
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    return globalState;
+  }
+
+  afterEach(() => {
+    // clearAllMocks keeps implementations, so the "installed" answer below would leak.
+    vi.mocked(vscode.extensions.getExtension).mockImplementation(() => undefined);
   });
 
-  it('does not push anything when setupConformanceWatcher returns undefined', () => {
-    conformanceWatcherDisposable = undefined;
+  it('shows no message that names ScroogeLLM', async () => {
+    await activateWhereThePromptWouldHaveShown();
 
-    activate(makeMockContext());
-
-    expect(setupConformanceWatcher).toHaveBeenCalledWith('/tmp/test-workspace');
-    // No watcher disposable means no extra (undefined) subscription entry.
-    expect(subscriptions).not.toContain(undefined);
+    const shown = vi.mocked(vscode.window.showInformationMessage).mock.calls.map((call) => String(call[0]));
+    expect(shown.filter((message) => /scrooge/i.test(message))).toEqual([]);
   });
 
-  it('records install timestamp and attempts the nudge on activation', () => {
+  it('does not ask whether any other extension is installed', async () => {
+    await activateWhereThePromptWouldHaveShown();
+
+    expect(vi.mocked(vscode.extensions.getExtension).mock.calls.map((call) => call[0])).toEqual([]);
+  });
+
+  it('reads and writes none of the state the earlier build stored', async () => {
+    const globalState = await activateWhereThePromptWouldHaveShown();
+
+    expect(globalState.get.mock.calls.map((call) => call[0]).filter((key) => RETIRED.test(key))).toEqual([]);
+    expect(globalState.update.mock.calls).toEqual([]);
+  });
+
+  it('reads neither retired setting', async () => {
+    await activateWhereThePromptWouldHaveShown();
+
+    // The recorder saw activation read settings at all, so "none retired" is a finding.
+    expect(configKeysRead.length).toBeGreaterThan(0);
+    expect(configKeysRead.filter((key) => RETIRED.test(key))).toEqual([]);
+  });
+
+  it('creates no conformance watcher, even with the old setting stored as on and ScroogeLLM installed', () => {
+    // Everything the watcher waited for.
+    configValues = { 'conformance.enabled': true };
+    vi.mocked(vscode.extensions.getExtension).mockImplementation(
+      () => ({ id: 'aiclarity.scroogellm' }) as unknown as vscode.Extension<unknown>,
+    );
+
     activate(makeMockContext());
-    expect(recordInstallTimestamp).toHaveBeenCalled();
-    expect(maybeShowNudge).toHaveBeenCalled();
+
+    // The five standing watchers (specs, adrs, traceability, approvals, epics) and no sixth.
+    expect(vscode.workspace.createFileSystemWatcher).toHaveBeenCalledTimes(5);
   });
 });
 
 // ===========================================================================
-// exportTraceabilityCommand (lines 418-434)
+// SPEC-086 FR-4 / FR-7: what activation registers is what the manifest contributes
+//
+// The base test names 23 commands in a list. This derives the list from the
+// manifest and compares both ways, so removing a command from one side only
+// fails here: a contribution with no registration is a palette entry that
+// errors, and a registration with no contribution is a command nobody can see.
 // ===========================================================================
 
-describe('exportTraceability command', () => {
-  it('exports and reports the spec count + filename on success', () => {
-    vi.mocked(exportTraceability).mockReturnValueOnce({
-      filePath: '/tmp/test-workspace/.minspec/traceability-export.json',
-      specCount: 7,
-    });
+describe('activation registers exactly the commands the manifest contributes (SPEC-086 FR-4, FR-7)', () => {
+  it('every contributed command is registered, and nothing else is', async () => {
+    // `fs` is mocked in this file, so the manifest is read through the real module.
+    const realFs = await vi.importActual<typeof import('fs')>('fs');
+    const manifest = JSON.parse(
+      realFs.readFileSync(path.join(__dirname, '..', 'package.json'), 'utf-8'),
+    ) as { contributes: { commands: Array<{ command: string }> } };
+    const contributed = manifest.contributes.commands.map((entry) => entry.command).sort();
 
     activate(makeMockContext());
-    invokeCommand('minspec.exportTraceability');
 
-    expect(exportTraceability).toHaveBeenCalledWith('/tmp/test-workspace');
-    expect(vscode.window.showInformationMessage).toHaveBeenCalledWith(
-      'MinSpec: Exported traceability for 7 spec(s) to traceability-export.json.',
-    );
-  });
-
-  it('surfaces an error message when exportTraceability throws an Error', () => {
-    vi.mocked(exportTraceability).mockImplementationOnce(() => {
-      throw new Error('disk full');
-    });
-
-    activate(makeMockContext());
-    invokeCommand('minspec.exportTraceability');
-
-    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-      'MinSpec: Failed to export traceability — disk full',
-    );
-  });
-
-  it('surfaces a stringified error when exportTraceability throws a non-Error', () => {
-    vi.mocked(exportTraceability).mockImplementationOnce(() => {
-      throw 'boom'; // eslint-disable-line no-throw-literal
-    });
-
-    activate(makeMockContext());
-    invokeCommand('minspec.exportTraceability');
-
-    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-      'MinSpec: Failed to export traceability — boom',
-    );
-  });
-
-  it('shows the no-workspace error when workspaceRoot is empty', async () => {
-    const { resolveTargetFolderNonInteractive } = await import('../src/lib/resolve-folder');
-    vi.mocked(resolveTargetFolderNonInteractive).mockReturnValueOnce('');
-
-    activate(makeMockContext());
-    invokeCommand('minspec.exportTraceability');
-
-    expect(vscode.window.showErrorMessage).toHaveBeenCalledWith(
-      'MinSpec: No workspace folder open.',
-    );
-    expect(exportTraceability).not.toHaveBeenCalled();
+    // An empty list would equal an empty registry, so check the list is real first.
+    expect(contributed.length).toBeGreaterThan(20);
+    expect([...registeredCommands.keys()].sort()).toEqual(contributed);
   });
 });
 

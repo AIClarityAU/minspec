@@ -236,10 +236,6 @@
         "title": "MinSpec: Link Code to Spec Requirement"
       },
       {
-        "command": "minspec.exportTraceability",
-        "title": "MinSpec: Export Traceability for ScroogeLLM"
-      },
-      {
         "command": "minspec.approveSpec",
         "title": "MinSpec: Approve Spec for Implementation",
         "shortTitle": "Approve",
@@ -466,16 +462,6 @@
           "type": "boolean",
           "default": true,
           "description": "Enable/disable CodeLens annotations showing spec requirement mappings"
-        },
-        "minspec.conformance.enabled": {
-          "type": "boolean",
-          "default": false,
-          "description": "Auto-export traceability when ScroogeLLM is detected (for conformance checking)"
-        },
-        "minspec.scroogellmNudge.enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "Show ScroogeLLM installation suggestion when not installed"
         },
         "minspec.autoBootstrap.enabled": {
           "type": "boolean",

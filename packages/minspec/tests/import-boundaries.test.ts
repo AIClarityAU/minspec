@@ -11,9 +11,10 @@
  *      forbidden edge errors AND the allowed edge does not. A one-sided gate
  *      that reports everything, or nothing, is the classic silent gate (DR-066).
  *   2. A real-tree lint (`lintFiles` over `packages/minspec/src/lib/**`) pins the
- *      SHIPPED state: zero direction errors, and exactly the seven known
+ *      SHIPPED state: zero direction errors, and exactly the five known
  *      vscode-coupled files at `warn` (AC-3/AC-5). That count is what makes the
- *      `warn` -> `error` flip at #830 a one-line, test-verified change.
+ *      `warn` -> `error` flip at #830 a one-line, test-verified change. It was
+ *      seven until SPEC-086 deleted two of the files (see the list below).
  *
  * `lintText` is given the path of a REAL file under `src/lib/`. That is required,
  * not incidental: `parserOptions.projectService` resolves each linted path inside
@@ -58,16 +59,17 @@ const TEST_TREE_HOST = 'packages/minspec/src/test/views.test.ts';
 const BENCH_TREE_HOST = 'packages/minspec/src/__benchmarks__/perf.bench.ts';
 
 /**
- * The seven `lib/` files that import `vscode` by VALUE today (DR-064 Context).
- * `lib/presence.ts` imports it TYPE-ONLY and is deliberately absent — that
- * carve-out is why this list is 7 and not 8.
+ * The five `lib/` files that import `vscode` by VALUE today. DR-064's Context
+ * and SPEC-040 AC-3 counted seven. SPEC-086 deleted two of them,
+ * `lib/ai-usage-detector.ts` and `lib/bridge.ts` (the ScroogeLLM prompt's tool
+ * probe and the bridge itself), so the list shrank without a file being
+ * relocated. `lib/presence.ts` imports it TYPE-ONLY and is deliberately absent:
+ * that carve-out is why this list is 5 and not 6.
  */
 const EXPECTED_VSCODE_WARN_FILES = [
   'packages/minspec/src/lib/active-adr.ts',
   'packages/minspec/src/lib/active-spec.ts',
-  'packages/minspec/src/lib/ai-usage-detector.ts',
   'packages/minspec/src/lib/approval-diff.ts',
-  'packages/minspec/src/lib/bridge.ts',
   'packages/minspec/src/lib/diagnostics.ts',
   'packages/minspec/src/lib/resolve-folder.ts',
 ];
@@ -512,7 +514,7 @@ describe('SPEC-040 — the shipped tree (AC-3, AC-5)', () => {
     ).toEqual([]);
   });
 
-  it('warns on EXACTLY the seven known vscode-coupled lib files (AC-3)', () => {
+  it('warns on EXACTLY the five known vscode-coupled lib files (AC-3)', () => {
     const warned = libResults
       .filter((result) => warningsOf(result.messages, VSCODE_RULE).length > 0)
       .map((result) => rel(result.filePath))
