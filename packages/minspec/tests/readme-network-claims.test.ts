@@ -9,19 +9,21 @@
  * WHAT THIS PINS
  *   1. One declared inventory, {@link NETWORK_FEATURES} plus {@link LOCAL_ONLY}, classifies
  *      EVERY module in `CHILD_PROCESS_ALLOWLIST` (tests/invariants.test.ts) as either
- *      network-reaching or local-only. A module added to the allowlist without being
- *      classified here fails; so does a classification for a module that is no longer
- *      allowlisted.
+ *      network-reaching or local-only, and every source file that loads `child_process`
+ *      or `simple-git` as well. A module that can start a process and is not classified
+ *      here fails; so does a classification for a module that can no longer start one.
  *   2. Every network-reaching feature name appears in the README's "What MinSpec Does on
  *      Your Network" section, under the heading that matches how it is triggered, and is
  *      a real command title, setting or button in the code.
  *   3. The retired sentences are gone from every location that carried them: the README,
  *      the walkthrough page and the site.
+ *   4. The allowlist entry for `lib/backlog.ts` says it reaches the network and why that
+ *      is allowed (SPEC-085 FR-10).
  *
  * WHAT THIS CANNOT PROVE (SPEC-085 DQ-4). It is a text-presence check. It proves each
  * feature is NAMED in the right part of the section; it cannot prove the sentence around
  * the name is accurate, and "local-only" is checked only against a list of literal
- * network verbs. A human still reads the section at review.
+ * network verbs passed as arguments. A human still reads the section at review.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -113,15 +115,23 @@ const NETWORK_FEATURES: readonly NetworkFeature[] = [
   { module: 'lib/ruleset-advisor.ts', feature: 'Add checks', kind: 'button', consent: 'gesture', trigger: 'the user clicks the button on the ruleset offer' },
 ];
 
-/** Allowlisted modules that start only local processes, with what they run. */
+/**
+ * Modules that start only local processes, with what they run.
+ *
+ * `commands/init.ts` is here although it is not in `CHILD_PROCESS_ALLOWLIST`: it starts
+ * `git` through the `simple-git` library, which the allowlist test cannot see because it
+ * looks for a `child_process` import. Its GitHub probes are a different matter - they
+ * run through `lib/ruleset-advisor.ts`, which is classified above.
+ */
 const LOCAL_ONLY: Readonly<Record<string, string>> = {
   'lib/build-provenance.ts': 'git rev-parse, cat-file, merge-base, rev-list against the open workspace',
-  'lib/git-analyzer.ts': 'local git diff and status through the simple-git library',
+  'lib/git-analyzer.ts': 'local git diff, status and show through the simple-git library',
   'lib/approval.ts': 'git hash-object, update-ref, cat-file, log, show, config user.email',
   'lib/approve-commit.ts': 'git add and git commit of the approval, and local ref reads; never pushes',
   'lib/scaffold.ts': 'git ls-files, git rm --cached, git config --local core.hooksPath',
   'lib/presence.ts': 'git worktree list, branch --show-current, rev-parse --show-toplevel',
   'lib/tidy-primary.ts': 'git status, rev-parse, rev-list, cat-file, show, checkout -- <path>; never fetches',
+  'commands/init.ts': 'git rev-parse, check-ignore, add, commit, checkout -b, status through simple-git; never pushes',
 };
 
 /** The README sub-heading each kind of consent is listed under. */
@@ -137,10 +147,17 @@ const NETWORK_SECTION_HEADING = 'What MinSpec Does on Your Network';
 
 const read = (file: string): string => fs.readFileSync(file, 'utf-8');
 
-/** The entries of `CHILD_PROCESS_ALLOWLIST`, read from the invariants test's AST. */
-function childProcessAllowlist(): string[] {
-  const sf = ts.createSourceFile(INVARIANTS_TEST, read(INVARIANTS_TEST), ts.ScriptTarget.ES2022, true);
-  const entries: string[] = [];
+interface AllowlistEntry {
+  readonly module: string;
+  /** The comment written directly above the entry, as one line of prose. '' when there is none. */
+  readonly comment: string;
+}
+
+/** The entries of `CHILD_PROCESS_ALLOWLIST`, with their comments, read from the invariants test's AST. */
+function childProcessAllowlistEntries(): AllowlistEntry[] {
+  const text = read(INVARIANTS_TEST);
+  const sf = ts.createSourceFile(INVARIANTS_TEST, text, ts.ScriptTarget.ES2022, true);
+  const entries: AllowlistEntry[] = [];
   let declarations = 0;
   const visit = (node: ts.Node): void => {
     if (
@@ -153,7 +170,17 @@ function childProcessAllowlist(): string[] {
       const list = init && ts.isNewExpression(init) ? init.arguments?.[0] : undefined;
       if (list && ts.isArrayLiteralExpression(list)) {
         for (const element of list.elements) {
-          if (ts.isStringLiteralLike(element)) entries.push(element.text);
+          if (!ts.isStringLiteralLike(element)) continue;
+          const ranges = ts.getLeadingCommentRanges(text, element.getFullStart()) ?? [];
+          entries.push({
+            module: element.text,
+            // Comment markers dropped and whitespace collapsed, so a phrase that wraps
+            // across two `//` lines still reads as one phrase.
+            comment: ranges
+              .map(range => text.slice(range.pos, range.end).replace(/^\s*\/\/ ?/, ''))
+              .join(' ')
+              .replace(/\s+/g, ' '),
+          });
         }
       }
     }
@@ -167,6 +194,8 @@ function childProcessAllowlist(): string[] {
   }
   return entries;
 }
+
+const childProcessAllowlist = (): string[] => childProcessAllowlistEntries().map(entry => entry.module);
 
 function sourceFiles(dir: string): string[] {
   const out: string[] = [];
@@ -219,6 +248,18 @@ describe('every module that may start a process is classified (SPEC-085 FR-9)', 
   const allowlist = childProcessAllowlist();
   const networkModules = [...new Set(NETWORK_FEATURES.map(row => row.module))].sort();
   const localModules = Object.keys(LOCAL_ONLY).sort();
+  const classified = new Set([...networkModules, ...localModules]);
+
+  /**
+   * Source files that load a library able to start a process: `child_process`, or
+   * `simple-git`, which starts `git` on the caller's behalf. Static import, `require`
+   * and dynamic `import()` all count, with or without the `node:` prefix.
+   */
+  const SPAWN_LIBRARY = /(?:from\s+|require\(\s*|import\(\s*)['"](?:node:)?(?:child_process|simple-git)['"]/;
+  const importers = sourceFiles(SRC_ROOT)
+    .filter(file => SPAWN_LIBRARY.test(read(file)))
+    .map(relSrc)
+    .sort();
 
   it('reads the allowlist rather than an empty list', () => {
     // If the reader ever returned nothing, every "is classified" check would pass vacuously.
@@ -228,8 +269,13 @@ describe('every module that may start a process is classified (SPEC-085 FR-9)', 
     expect(new Set(allowlist).size).toBe(allowlist.length);
   });
 
+  it('finds the modules that load a spawning library rather than an empty list', () => {
+    expect(importers.length).toBeGreaterThanOrEqual(12);
+    expect(importers).toContain('lib/backlog.ts');
+    expect(importers).toContain('commands/init.ts');
+  });
+
   it('every CHILD_PROCESS_ALLOWLIST entry is classified as network-reaching or local-only', () => {
-    const classified = new Set([...networkModules, ...localModules]);
     const unclassified = allowlist.filter(entry => !classified.has(entry));
     expect(
       unclassified,
@@ -237,33 +283,37 @@ describe('every module that may start a process is classified (SPEC-085 FR-9)', 
     ).toEqual([]);
   });
 
-  it('no classification outlives its allowlist entry', () => {
-    const allowed = new Set(allowlist);
-    expect([...networkModules, ...localModules].filter(module => !allowed.has(module))).toEqual([]);
+  it('every source file that loads child_process or simple-git is classified', () => {
+    // The allowlist is the declared inventory; this asks the same question of the code
+    // itself, so a module cannot dodge classification by also dodging the allowlist.
+    expect(
+      importers.filter(file => !classified.has(file)),
+      'classify each of these in NETWORK_FEATURES (and name it in the README) or in LOCAL_ONLY',
+    ).toEqual([]);
+  });
+
+  it('nothing is classified that cannot start a process', () => {
+    // A row left behind after its module stopped spawning would keep a feature in the
+    // README that no longer exists.
+    const spawners = new Set([...allowlist, ...importers]);
+    expect([...classified].filter(module => !spawners.has(module))).toEqual([]);
+  });
+
+  it('every classified module exists', () => {
+    expect([...classified].filter(module => !fs.existsSync(path.join(SRC_ROOT, module)))).toEqual([]);
   });
 
   it('no module is classified both ways', () => {
     expect(networkModules.filter(module => module in LOCAL_ONLY)).toEqual([]);
   });
 
-  it('every source file that imports child_process is classified', () => {
-    // The allowlist is the declared inventory; this is the same question asked of the
-    // code itself, so a module cannot dodge classification by also dodging the allowlist.
-    const importers = sourceFiles(SRC_ROOT)
-      .filter(file => /(?:from\s+|require\(\s*|import\(\s*)['"](?:node:)?child_process['"]/.test(read(file)))
-      .map(relSrc);
-    const classified = new Set([...networkModules, ...localModules]);
-
-    expect(importers.length).toBeGreaterThanOrEqual(10);
-    expect(importers.filter(file => !classified.has(file))).toEqual([]);
-  });
-
-  it('a module classified local-only names no network verb', () => {
-    // A literal-token check, and only that: it catches `git push` or a `gh` call being
-    // added to a module this file calls local, which is the edit that must also move the
-    // module into NETWORK_FEATURES and into the README.
-    const NETWORK_TOKENS = /['"`](?:push|fetch|pull|clone|ls-remote|gh|claude|curl|wget)['"`]/;
-    const offenders = localModules.filter(module => NETWORK_TOKENS.test(read(path.join(SRC_ROOT, module))));
+  it('a module classified local-only passes no network verb as an argument', () => {
+    // A literal-token check, and only that: it catches a quoted `push`, `fetch` or `gh`
+    // argument being added to a module this file calls local, which is the edit that must
+    // also move the module into NETWORK_FEATURES and into the README. It cannot see a
+    // simple-git method call such as `git.push()`.
+    const NETWORK_ARGUMENT = /['"](?:push|fetch|pull|clone|ls-remote|gh|claude|curl|wget)['"]/;
+    const offenders = localModules.filter(module => NETWORK_ARGUMENT.test(read(path.join(SRC_ROOT, module))));
     expect(offenders).toEqual([]);
   });
 });
@@ -380,5 +430,31 @@ describe('the retired network claims are gone from every location (SPEC-085 FR-8
   it('the README heading the anchor points at still exists', () => {
     // Renaming the heading would silently break every link above.
     expect(read(README).split('\n')).toContain(`## ${NETWORK_SECTION_HEADING}`);
+  });
+});
+
+// ─── 4. The allowlist says why the Backlog entry is allowed ─────────────────
+
+describe('the lib/backlog.ts allowlist entry carries a consent-clause comment (SPEC-085 FR-10)', () => {
+  const entries = childProcessAllowlistEntries();
+  const backlog = entries.filter(entry => entry.module === 'lib/backlog.ts');
+
+  it('is listed exactly once', () => {
+    expect(backlog).toHaveLength(1);
+  });
+
+  it('says the module reaches the network, on the consent clause, and only from a gesture', () => {
+    const comment = backlog[0]?.comment ?? '';
+    expect(comment).toMatch(/SPEC-085/);
+    expect(comment).toMatch(/reach(?:es)? the network/i);
+    expect(comment).toMatch(/CONSENT clause/);
+    expect(comment).toMatch(/gesture/i);
+  });
+
+  it('reads comments at all: the entries the spec cites as the model form carry theirs', () => {
+    // Guards the reader, not the wording. If leading comments stopped being found, the
+    // assertion above would fail for the wrong reason and this one says which.
+    const withConsentClause = entries.filter(entry => /CONSENT clause/.test(entry.comment)).map(entry => entry.module);
+    expect(withConsentClause).toContain('lib/approve-push.ts');
   });
 });
