@@ -60,14 +60,17 @@ never emits an interim form that belongs to neither.
   moment any caller reads the table and calls `formatCrossRef`.
 - **No production consumer exists yet.** `grep -rl` across `packages/` for
   `project-prefix|formatCrossRef|resolveRef|parsePrefixTable|suggestPrefixDeterministic|isCrossProjectRef`
-  returns only `project-prefix.ts`/`.test.ts` themselves, `packages/shared/src/index.ts`'s
-  barrel re-export, and one unrelated string-literal hit in
-  `dispatch-automerge-doc-exclusion.test.ts` (a doc-exclusion list citing the **file path**
-  `.minspec/project-prefixes.md`, not the API). The intended consumer, SPEC-035
-  (lozenges/hover cards), is `plan: in-progress` and explicitly **queued, not now** — so
-  this change has **no production call site to break**, which lowers the bar for
-  reshaping the API surface (new params, new return variants) relative to a module with
-  live callers.
+  returns five source hits (build output under `out/` excluded): `project-prefix.ts`/
+  `.test.ts` themselves, `packages/shared/src/index.ts`'s barrel re-export, one unrelated
+  string-literal hit in `dispatch-automerge-doc-exclusion.test.ts` (a doc-exclusion list
+  citing the **file path** `.minspec/project-prefixes.md`, not the API), and one more
+  coincidental hit in `managed-script-dependencies.test.ts` — that file declares its own
+  local `resolveRef(outputPath, ref)` helper for resolving script-dependency paths, same
+  name, unrelated module, not an import of `project-prefix.ts`. None of the five is a real
+  caller. The intended consumer, SPEC-035 (lozenges/hover cards), is `plan: in-progress`
+  and explicitly **queued, not now** — so this change has **no production call site to
+  break**, which lowers the bar for reshaping the API surface (new params, new return
+  variants) relative to a module with live callers.
 - **v1-form refs already exist in the corpus**, so dual-read is not theoretical:
   `specs/minspec/SPEC-035-approvable-ref-lozenges/design.md` measures and cites
   `MS-SPEC-019`, `SC-DR-007`, `MS#500`, `SC#26` as real tokens its own future detector must
