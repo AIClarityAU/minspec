@@ -889,6 +889,63 @@ Approach B.
     }
   });
 
+  // #2324: `MinSpec: Migrate Layout` writes via writeSpec()/writeShard() in both
+  // directions, and serializeFrontmatter only ever emitted the fixed field set
+  // SpecFrontmatter models — so a spec's SPEC-038 ownership fields
+  // (implements:/affects:/implements_reason:) and FR-13 edge fields
+  // (depends_on:/relates_to:) were silently dropped on migration, voiding the
+  // ownership declaration the #2250 gate requires and staling its approval.
+  it('preserves implements:/affects:/relates_to: through flat → spec-kit → flat', () => {
+    rootDir = makeTmpProject('flat');
+    const summary = createSpec(rootDir, 'Owns code', 'T3');
+    const filePath = summary.filePath;
+    const seed = `---
+id: SPEC-001
+title: Owns code
+tier: T3
+status: implementing
+depends_on: [SPEC-999]
+relates_to: [DR-001, DR-002]
+implements:
+  - packages/minspec/src/lib/owned.ts
+implements_reason: >-
+  Folded scalar continuation.
+affects:
+  - packages/minspec/src/lib/other.ts
+created: 2026-05-29
+phases:
+  specify: done
+  clarify: skipped
+  plan: in-progress
+  tasks: pending
+  implement: pending
+---
+
+## Specify
+
+Requirement A.
+`;
+    fs.writeFileSync(filePath, seed, 'utf-8');
+
+    expect(migrateLayout(rootDir, 'spec-kit').success).toBe(true);
+    const specsDir = path.join(rootDir, DEFAULT_CONFIG.specsDir);
+    const kitSpecMd = fs.readFileSync(path.join(specsDir, '001-owns-code', 'spec.md'), 'utf-8');
+    expect(kitSpecMd).toContain('implements:');
+    expect(kitSpecMd).toContain('  - packages/minspec/src/lib/owned.ts');
+    expect(kitSpecMd).toContain('affects:');
+    expect(kitSpecMd).toContain('relates_to: [DR-001, DR-002]');
+
+    expect(migrateLayout(rootDir, 'flat').success).toBe(true);
+    const finalPath = path.join(specsDir, 'SPEC-001-owns-code.md');
+    const finalContent = fs.readFileSync(finalPath, 'utf-8');
+    expect(finalContent).toContain('implements:');
+    expect(finalContent).toContain('  - packages/minspec/src/lib/owned.ts');
+    expect(finalContent).toContain('affects:');
+    expect(finalContent).toContain('  - packages/minspec/src/lib/other.ts');
+    expect(finalContent).toContain('relates_to: [DR-001, DR-002]');
+    expect(finalContent).toContain('depends_on: [SPEC-999]');
+  });
+
   it('reports success with zero migrations if already in target layout', () => {
     rootDir = makeTmpProject('spec-kit');
     createSpec(rootDir, 'Already kit');

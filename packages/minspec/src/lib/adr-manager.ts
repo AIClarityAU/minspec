@@ -4,7 +4,7 @@ import * as crypto from 'crypto';
 import { loadConfig, applyVSCodeOverrides, resolveAndValidate } from './config';
 import { slugify } from './spec-manager';
 import { epicRefValue } from './epic-manager';
-import { inspectAllStatusClaims } from './status-parity';
+import { inspectAllStatusClaims, claimParagraphText } from './status-parity';
 export { slugify };
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -642,6 +642,12 @@ function synthesizeAdrFrontmatter(filePath: string, content: string, status: Adr
  * on a third of the corpus to catch one case.
  *
  * Returns the offending line (1-based) and its text, or null when safe to rewrite.
+ *
+ * #2180: tests the claim's whole PARAGRAPH (the claim line plus its wrapped continuation
+ * lines — see `claimParagraphText`), not just the single physical source line the claim
+ * happens to start on. This repo hard-wraps prose at ~90 columns, so a negation clause
+ * that lands on the SECOND physical line of a wrapped sentence was previously invisible to
+ * this check — a false clear caused by where the wrap broke, not by what the sentence said.
  */
 export function statusProseWouldInvert(
   content: string,
@@ -649,19 +655,18 @@ export function statusProseWouldInvert(
 ): { line: number; text: string } | null {
   const NEGATED =
     /\b(not|never|no longer|neither|isn't|is not)\s+(yet\s+)?(proposed|accepted|deprecated|superseded)\b/i;
-  const lines = content.split('\n');
   for (const c of inspectAllStatusClaims(content, 'dr')) {
     if (c.kind !== 'comparable') continue;
-    const raw = lines[c.line - 1] ?? '';
+    const paragraph = claimParagraphText(content, c.line);
     // Strip the way the READER identifies the token: blockquote / `Status:` prefix,
     // leading emphasis, then the first word. What remains is the prose.
-    const stripped = raw
+    const stripped = paragraph
       .replace(/^>\s*/, '')
       .replace(/^[*_]{0,2}Status:\s*/i, '')
       .replace(/^[*_]+/, '');
     const m = stripped.match(/^([A-Za-z]+)/);
     const rest = m ? stripped.slice(m[0].length) : stripped;
-    if (NEGATED.test(rest)) return { line: c.line, text: raw.trim() };
+    if (NEGATED.test(rest)) return { line: c.line, text: paragraph.trim() };
   }
   return null;
 }
@@ -721,18 +726,27 @@ export function setAdrStatus(filePath: string, status: AdrStatus): AdrStatus {
         `negates a status word, so rewriting the token would invert the sentence.\n\n` +
         `  line ${inverts.line}: ${inverts.text}\n\n` +
         `Reword that line so it reads correctly under the new status, then retry. ` +
-        `(Accepting DR-088 produced "**Accepted** … Not accepted …" this way — validation ` +
-        `passes on it, because the parity rule reads only the token.)`,
+        `(This is the failure shape #1833 exists to catch: a status line whose prose ` +
+        `negates the token beside it — e.g. "**Accepted** … Not accepted …" — passes ` +
+        `validation anyway, because the parity rule reads only the token, never the ` +
+        `clause after it. No specific DR is cited here because that citation drifts: ` +
+        `the corpus DR that first triggered this rule has since been corrected and no ` +
+        `longer illustrates it — see #2074.)`,
     );
   }
 
   const yaml = fmMatch[1];
-  const statusLineRe = /^([ \t]*)status[ \t]*:[ \t]*.*$/m;
+  // Anchored to column 0 (#2149) — a non-anchored, non-global match on ANY
+  // indent would rewrite the FIRST `status:` line regardless of nesting,
+  // silently leaving a top-level key untouched if a nested `status:`
+  // preceded it. Anchoring makes writer and validator target the same line
+  // by construction, rather than relying on house key order.
+  const statusLineRe = /^status[ \t]*:[ \t]*.*$/m;
   let newYaml: string;
   if (statusLineRe.test(yaml)) {
-    // `$1` keeps the captured indent; the value is escaped so a literal `$`
-    // in it is never read as a replacement pattern (#152).
-    newYaml = yaml.replace(statusLineRe, `$1status: ${escapeReplacement(status)}`);
+    // The value is escaped so a literal `$` in it is never read as a
+    // replacement pattern (#152).
+    newYaml = yaml.replace(statusLineRe, `status: ${escapeReplacement(status)}`);
   } else {
     newYaml = `${yaml}\nstatus: ${status}`;
   }

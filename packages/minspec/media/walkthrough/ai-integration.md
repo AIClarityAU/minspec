@@ -1,6 +1,9 @@
 # Integrate with AI Tools
 
-MinSpec works seamlessly with AI coding assistants by injecting your active spec context into their configuration files.
+MinSpec works seamlessly with AI coding assistants by injecting your active spec context into
+their configuration files. This is where the verify-signal-not-content reversal from earlier
+steps meets your actual toolchain: the AI can draft code and prose freely, but the spec stays
+the thing you check it against.
 
 ## Supported tools
 
@@ -21,12 +24,17 @@ The injected context tells your AI assistant:
 - The current tier and phase
 - Session scope boundaries
 
-This keeps AI suggestions aligned with your specification — no more AI-generated code that drifts from the plan.
+This keeps AI suggestions aligned with your specification — no more AI-generated code that
+drifts from the plan. The AI still writes the content; the spec is what you verify its output
+against, day to day.
 
 ## Removing context
 
-When you finish a task, run **MinSpec: Remove Active Spec Context** to clean up the injected sections. MinSpec only touches its own fenced blocks — your other config content is preserved.
+When you finish a task, run **MinSpec: Remove Active Spec Context** to clean up the injected
+sections. MinSpec only touches its own fenced blocks — your other config content is
+preserved.
 
 ## No AI required
 
-MinSpec itself never calls any AI service. Context injection is a convenience for developers who use AI tools — but MinSpec works perfectly without any AI tooling installed.
+MinSpec itself never calls any AI service. Context injection is a convenience for developers
+who use AI tools — but MinSpec works perfectly without any AI tooling installed.

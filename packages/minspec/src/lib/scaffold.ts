@@ -39,6 +39,7 @@ import {
 import { detectTools, type DetectedTools } from './tool-detector';
 import { registerSessionTitleHook } from './claude-settings';
 import { writeEpicIndex } from './epic-manager';
+import { initialOwnershipDeclaration } from './ownership-ratchet';
 import { assembleContext } from './constitution-context';
 import { seedProvider, integrateProposal, CONSTITUTION_SECTION_SCHEMA } from './constitution-proposer';
 
@@ -47,9 +48,16 @@ const CONSTITUTION_REL_PATH = TEMPLATE_OUTPUT_PATHS['constitution.md'];
 
 /**
  * SPEC-025 FR-4/FR-5: seed the constitution with deterministic DRAFT entries so
- * it is never empty (INV-4). Reads the current constitution, runs the offline
+ * it is not left BARE (INV-4). Reads the current constitution, runs the offline
  * seed provider over the assembled context manifest, integrates additively
  * (never overwriting human content, idempotent), and writes the result back.
+ *
+ * BARE, not empty: where INV-4/FR-5 say "never empty", "empty" means left as
+ * template placeholders only. The FR-6 nudge's `empty` (`isAllTemplate` in
+ * constitution-nudge.ts) is a different predicate: a DRAFT-only constitution
+ * still reads as all-template there, until it holds a non-DRAFT list item (a
+ * rule a human wrote or accepted). Both are correct by design; do not merge
+ * them (#1546).
  *
  * SPEC-043 D8: `seedConstitution` NO LONGER feeds the hash manifest. It writes
  * `constitution.md` and returns; the manifest is recorded once, LAST, from the
@@ -296,7 +304,79 @@ export const MINSPEC_GITIGNORE_ENTRIES = [
   // keep the primary checkout clean). Not under .claude/commands/, so unaffected by
   // the slash-command-shim carve-out some repos keep in their own .gitignore.
   '.claude/worktrees/',
+  // SPEC-044 Slice 1 (DR-067): per-item flock lockfiles + the per-session
+  // claimed-items registry for the dispatch claim-lease. Machine-local and
+  // ephemeral — must never be tracked, or a newly-scaffolded project commits
+  // lock noise the moment it uses the dispatch machinery (#959).
+  '.minspec/locks/',
 ];
+
+/**
+ * Marker-bounded `.gitattributes` block, mirroring MINSPEC_GITIGNORE_MARKER /
+ * MINSPEC_GITIGNORE_ENTRIES above.
+ *
+ * WHY THIS EXISTS (#2398). Every one of these paths is a shell/Python script a shell
+ * executes by shebang, or a hook git invokes directly — never through an interpreter
+ * that tolerates a line ending. Initialize writes them LF, but line endings are a
+ * property git re-applies on every checkout that touches the file, not a property of
+ * what was written once. On Windows, `core.autocrlf=true` is git's own default, and
+ * the next checkout (a fresh clone, a branch switch, a stash pop) turns these files
+ * CRLF. A POSIX shell cannot run a CRLF script (`/usr/bin/env: 'sh\r': No such file or
+ * directory`), so the scaffolded pre-commit hook then fails shut and blocks every
+ * commit — with an error that names neither MinSpec nor line endings.
+ *
+ * `text eol=lf` is git's own fix for exactly this: it marks the path as text (so
+ * autocrlf's conversion applies at all) and pins the checked-out line ending to LF
+ * regardless of `core.autocrlf`, on every platform. Scoped to what MinSpec writes
+ * and something later executes or git invokes directly — hooks, Claude Code hooks,
+ * scripts, and the workflows that shell out to them — not the generated Markdown
+ * (specs, DRs, CLAUDE.md), which a parser reads rather than a shell executes; CRLF
+ * tolerance in those parsers is tracked separately (#2398 "Suggested fix").
+ */
+export const MINSPEC_GITATTRIBUTES_MARKER = '# MinSpec: LF-pin executed files (#2398)';
+export const MINSPEC_GITATTRIBUTES_ENTRIES = [
+  '.minspec/hooks/**      text eol=lf',
+  '.claude/hooks/**       text eol=lf',
+  'scripts/**/*.sh        text eol=lf',
+  'scripts/**/*.py        text eol=lf',
+  '.github/workflows/*.yml text eol=lf',
+];
+
+/**
+ * Ensure the `.gitattributes` LF pin (MINSPEC_GITATTRIBUTES_ENTRIES) is present, so a
+ * later checkout under `core.autocrlf=true` cannot turn a scaffolded hook or script
+ * CRLF (#2398). Idempotent — skips any entry already listed (exact match, ignoring
+ * leading whitespace) and preserves existing content, exactly like
+ * {@link ensureGitignoreEntries}. Deliberately does NOT rewrite files already checked
+ * out with the wrong line ending — git only re-normalizes a path's line endings on a
+ * checkout that writes it, so this alone fixes every checkout from here forward, not
+ * bytes already on disk (same caveat the issue names for `.gitattributes` in general).
+ */
+export function ensureGitattributesEntries(rootDir: string): void {
+  const gitattributesPath = path.join(rootDir, '.gitattributes');
+  const existing = fs.existsSync(gitattributesPath)
+    ? fs.readFileSync(gitattributesPath, 'utf-8')
+    : '';
+
+  const existingLines = new Set(
+    existing.split('\n').map((line) => line.trim()).filter((line) => line.length > 0),
+  );
+
+  const missing = MINSPEC_GITATTRIBUTES_ENTRIES.filter(
+    (entry) => !existingLines.has(entry.trim()),
+  );
+  if (missing.length === 0) {
+    return;
+  }
+
+  const hasMarker = existing.includes(MINSPEC_GITATTRIBUTES_MARKER);
+  const prefix = existing.length === 0 || existing.endsWith('\n') ? '' : '\n';
+  const block =
+    (hasMarker ? '' : MINSPEC_GITATTRIBUTES_MARKER + '\n') + missing.join('\n') + '\n';
+  const separator = existing.length > 0 && !existing.endsWith('\n\n') ? '\n' : '';
+
+  fs.writeFileSync(gitattributesPath, existing + prefix + separator + block);
+}
 
 /**
  * Creates the .minspec/ directory structure in rootDir.
@@ -312,7 +392,15 @@ export function scaffold(rootDir: string): void {
     // directory on every later refresh (#1529). Written ONLY here, never back-filled
     // into an existing config: a back-fill's first run could itself be from a
     // worktree, which would persist exactly the wrong name this guards against.
-    const seeded = { projectName: resolveProjectName(rootDir).name, ...DEFAULT_CONFIG };
+    //
+    // `ownershipDeclaration` starts where SPEC-038's FR-7 ratchet says this repo is,
+    // not at its first position: `error` when no spec here would fail the ownership
+    // rule, `warn` (grandfathered) otherwise (#2250, ownership-ratchet.ts).
+    const seeded = {
+      projectName: resolveProjectName(rootDir).name,
+      ...DEFAULT_CONFIG,
+      ownershipDeclaration: initialOwnershipDeclaration(rootDir),
+    };
     fs.writeFileSync(configPath, JSON.stringify(seeded, null, 2) + '\n');
   }
 
@@ -1161,25 +1249,28 @@ export function applyAuthorshipCorrections(
   withheld?: SectionHashes,
   unauthoredSections?: readonly string[],
 ): SectionHashes {
-  // Rebuilt by spreading the disk map first, so section key order stays
+  // Rebuilt by copying the disk map first, so section key order stays
   // `parseSections` document order and the serialization stays byte-stable
-  // across identical runs (SPEC-043 INV-4).
-  const corrected: Record<string, string> = { ...diskHashes };
+  // across identical runs (SPEC-043 INV-4). `Object.assign(Object.create(null), …)`
+  // rather than `{ ...diskHashes }` — object-spread syntax always allocates a
+  // fresh object with the ordinary `Object.prototype`, even when the source has
+  // none, so spreading would silently reintroduce the prototype chain this
+  // function's own `in` check below depends on being absent (#1752).
+  const corrected: Record<string, string> = Object.assign(Object.create(null), diskHashes);
   if (withheld) {
     for (const heading of Object.keys(withheld)) {
       // A heading the recorder did not hash is not corrected — a withheld heading
       // no longer on disk would otherwise add a manifest entry for a section that
       // does not exist, which is the class of lie this module exists to prevent.
       //
-      // With ONE documented exception, and it is #1752's class again: `in` walks the
-      // prototype chain, so for the eight `Object.prototype` names (`constructor`,
-      // `toString`, `valueOf`, …) this test passes on a heading disk does NOT carry,
-      // and the entry is invented. Measured: `{Invariants}` plus a withheld
-      // `constructor` yields a `constructor` key. Latent rather than live — a
-      // withheld hash exists only for a heading the TEMPLATE also carries, and
-      // MinSpec ships no template heading with a prototype name (checked: zero) — so
-      // it is filed with #1752 rather than patched here, and the fix is the same one:
-      // `Object.create(null)` for every heading-keyed map.
+      // #1752 (fixed): `in` walks the prototype chain, so over an ordinary object
+      // literal this test would pass for the seven `Object.prototype` names
+      // (`constructor`, `toString`, `valueOf`, `hasOwnProperty`, `isPrototypeOf`,
+      // `propertyIsEnumerable`, `toLocaleString`) even on a heading disk does NOT
+      // carry, inventing an entry (measured: `{Invariants}` plus a withheld
+      // `constructor` used to yield a `constructor` key). `corrected` is built
+      // null-prototype above, so `in` here means "disk actually has this heading"
+      // and nothing else.
       if (heading in corrected) corrected[heading] = withheld[heading];
     }
   }
@@ -1367,6 +1458,11 @@ export function generateHarnessFiles(rootDir: string): string[] {
   // refresh path reports it: the same G-8 defect, one caller over (#1146 review).
   const untracked = ensureGitignoreEntries(rootDir);
 
+  // Pin LF for the hooks/scripts/workflows this init is about to write (#2398) —
+  // BEFORE they're written, so the very first checkout of this commit (not just a
+  // later one) is already covered on a machine with `core.autocrlf=true`.
+  ensureGitattributesEntries(rootDir);
+
   const config = loadConfig(rootDir);
   const context = buildContext(rootDir, config);
   const rendered = renderAll(context);
@@ -1396,8 +1492,9 @@ export function generateHarnessFiles(rootDir: string): string[] {
   }
 
   // SPEC-025 FR-4/FR-5: seed the freshly written constitution so first-init is
-  // never empty. Best-effort — a proposer failure must never break init. Writes
-  // the file only; no longer a manifest source (SPEC-043 D8).
+  // not left bare (bare, not the FR-6 nudge's `empty`: see `seedConstitution`).
+  // Best-effort — a proposer failure must never break init. Writes the file
+  // only; no longer a manifest source (SPEC-043 D8).
   try {
     seedConstitution(rootDir);
   } catch {
@@ -1486,6 +1583,10 @@ export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
   // Its return is the set of paths removed from the git index; it is REPORTED at
   // the end of this function, never discarded (#1146 review).
   const untrackedOnRefresh = ensureGitignoreEntries(rootDir);
+
+  // Backfill the LF pin too, for a project scaffolded before #2398 (same rationale
+  // as the gitignore backfill immediately above).
+  ensureGitattributesEntries(rootDir);
 
   const config = loadConfig(rootDir);
   const context = buildContext(rootDir, config);

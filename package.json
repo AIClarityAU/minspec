@@ -22,6 +22,7 @@
     "typecheck": "tsc --noEmit -p packages/shared/tsconfig.json && tsc --noEmit -p packages/minspec/tsconfig.json",
     "check:gh-bot": "bash scripts/check-gh-bot-attribution.sh",
     "facts": "npx tsx scripts/facts.ts",
+    "next-task": "npx tsx scripts/next-task.ts",
     "validate:classifier": "vitest run classifier-validation"
   },
   "devDependencies": {
