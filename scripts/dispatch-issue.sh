@@ -1438,13 +1438,31 @@ shepherd_own_pr() {
     [[ "$(jq -r '.autoMergeRequest // "null"' <<<"$pr_json")" != "null" ]] && automerge_armed=yes
 
     local action holds attempts decision
+    local classify_rc=0 classify_errfile classify_err
     # The 7th argument is the SPEC-044 D5 owner-gate, and the creator passes "no"
     # DELIBERATELY: the live claim on this item is our own, so `skip-live-owned` must
     # never fire here. That token exists to keep the DRAIN off a PR whose creator is
     # still shepherding it — the owner ignores it and drives its own PR (FR-6/INV-4).
+    #
+    # #1729 (invariant 2): this used to be `|| echo "skip-clean"`, which substituted
+    # a POSITIVE "PR is clean" assertion for ANY failure of the ONLY producer of this
+    # token — a bad argument, a `set -u` trip, a missing file, a syntax error from an
+    # edit — both the exit code AND stderr (the only diagnostic for why it died) were
+    # discarded. `skip-clean` reads as healthy downstream; a crashed classifier is not
+    # healthy. The sibling call below already gets this right
+    # (`|| echo "stop-not-automation"`) — this now matches it: capture the exit code
+    # and stderr, and on failure emit a token that says "could not classify" rather
+    # than asserting the PR is fine.
+    classify_errfile="$(mktemp)"
     action=$("${SCRIPT_DIR}/remediate-pr.sh" --classify \
                "$BRANCH" "$mergeable" "$merge_state" "$labels_csv" \
-               "$failing_non_review" "$ai_review_bad" "no" 2>/dev/null || echo "skip-clean")
+               "$failing_non_review" "$ai_review_bad" "no" 2>"$classify_errfile") || classify_rc=$?
+    classify_err="$(cat "$classify_errfile" 2>/dev/null || true)"
+    rm -f "$classify_errfile"
+    if [[ $classify_rc -ne 0 ]]; then
+      action="skip-unclassified"
+      echo "  PR #$pr_num: remediate-pr.sh --classify FAILED (exit $classify_rc) — could NOT classify this PR, NOT treating it as clean.${classify_err:+ stderr: $classify_err}" >&2
+    fi
 
     # D3 — re-verify ownership BEFORE electing any credentialed step.
     holds=no
@@ -1494,6 +1512,14 @@ shepherd_own_pr() {
         # "stop-*" must actually stop here, or it silently falls through to `sleep`
         # below and polls the full hour ceiling under a name that says it wouldn't.
         echo "  PR #$pr_num has mergeStateStatus '$merge_state', which this classifier does not recognise — leaving it alone rather than assuming it is clean or out of automation scope. Not polling further."
+        return 0 ;;
+      stop-unclassified)
+        # #1729: remediate-pr.sh --classify itself errored (see the classify_rc
+        # check above, which already logged its stderr). Say so visibly rather
+        # than falling silent, and do NOT hand off as needs-human-review — the
+        # failure may be transient, so leave the PR retry-able: the next dispatch
+        # re-runs --classify fresh instead of this loop guessing either way.
+        echo "  PR #$pr_num could not be classified — leaving it alone rather than assuming it is clean. Not polling further; will retry classification next dispatch."
         return 0 ;;
       wait)
         : ;;  # green but unmerged: waiting on checks, native auto-merge, or a human
