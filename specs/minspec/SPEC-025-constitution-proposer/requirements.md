@@ -39,7 +39,7 @@ phases:
 **Date:** 2026-06-23
 **Status:** Implementing (SDD Implement phase)
 **Triggered by:** [#269](https://github.com/harvest316/minspec/issues/269) — "shouldn't MinSpec propose Invariants/Principles/Constraints alongside Goals at init, instead of empty placeholders?"
-**Related:** [#270](https://github.com/harvest316/minspec/issues/270) (enforce invariants as gates — the sequel), [#242](https://github.com/harvest316/minspec/issues/242) (init tech-debt scan), [#1546](https://github.com/harvest316/minspec/issues/1546) (FR-6: one emitter, comment-wording gap), DR-039 (Goals), DR-004/DR-015 (Tier-0 boundary), DR-017 (agent-execute model access)
+**Related:** [#270](https://github.com/harvest316/minspec/issues/270) (enforce invariants as gates — the sequel), [#242](https://github.com/harvest316/minspec/issues/242) (init tech-debt scan), DR-039 (Goals), DR-004/DR-015 (Tier-0 boundary), DR-017 (agent-execute model access)
 
 ## Problem
 
@@ -125,21 +125,6 @@ by the extension.
   worth writing are the ones the work reveals. A second emitter is a lint error, not a
   convention: it could carry neither the actions nor the skip flag, so it silently
   overrode a user who had already dismissed the nudge.
-
-  **Status (verified against code, 2026-10-01): parts 1 and 2 of #1546 are merged**
-  (`a9f75c94`) — `surfaceConstitutionProposeNudge` in `extension.ts` is the sole
-  emitter (`init.ts`'s old emitter and both call sites are deleted, with a comment at
-  `init.ts:36-44` explaining why), and `eslint.config.mjs:276-293` restricts
-  importing `lib/constitution-nudge` to `extension.ts` via `no-restricted-imports`,
-  verified by the updated `tests/init-command.test.ts:295-327` (the old
-  pins-the-defect assertion is gone). **One item from #1546 remains unmerged:**
-  `scaffold.ts`'s `seedConstitution` docstring (currently ~line 50, "so it is never
-  empty (INV-4)") still reads as if INV-4/FR-5 ("never bare") and this FR-6 nudge's
-  distinct predicate ("no human-authored rule") were the same test. Reword to:
-  "never BARE (INV-4/FR-5); a DRAFT-only constitution still reads as all-template
-  for the FR-6 nudge until a human authors a rule." Pure comment edit, no behavior
-  change — T1 scope, no new spec needed; tracked here so the gap has one home
-  instead of two.
 - **FR-7 — Provenance is review-time only.** Each candidate's "proposed because <signal>"
   is shown in the proposal preview so the human can judge it; it need not persist, and any
   DRAFT/provenance markers that land are removed by compaction (FR-8) — so provenance
@@ -184,12 +169,7 @@ by the extension.
   `Refresh` emit it never.
 - The offered compaction strips all `DRAFT`/provenance and leaves meaning-equivalent prose;
   never runs silently (FR-8).
-- The `seedConstitution` docstring in `scaffold.ts` distinguishes INV-4/FR-5 ("never bare")
-  from FR-6's "no human-authored rule yet" predicate, so a reader does not conflate the two
-  (#1546, not yet landed — see FR-6 status note).
 
 ## Traceability
 
 Materializes #269. Enforcement sequel: #270. Consumes the Tier-1 LLM path (DR-017 / agent-execute).
-FR-6 one-emitter fix: #1546 (parts 1-2 merged in `a9f75c94`; part 3, the `scaffold.ts`
-comment reword, is the one open item — see FR-6 status note above).
