@@ -73,7 +73,9 @@
 #                                    neither the dormant-checkout fast-forward NOR the
 #                                    read-only origin fetch runs.
 #   MINSPEC_DRAIN_RUN_DIR=<path>   — where the self-synced run-dir worktree lives
-#                                    (default /tmp/minspec-drain-run).
+#                                    (default /tmp/minspec-drain-run). Set to "" (not
+#                                    just unset) to explicitly disable self-refresh —
+#                                    an empty value is honoured, not defaulted.
 #
 # Opt-in is the once-off permission gate (#239): set it once with --enable-auto,
 # then the session-start hook drains automatically thereafter. The pref lives in
@@ -136,7 +138,15 @@ LOG="${MINSPEC_DRAIN_LOG:-/tmp/minspec-drain-inbox.log}"
 # scripts from a DEDICATED worktree hard-synced to origin/main: fresh by
 # construction, self-healing, and NEVER touching the primary's HEAD/working tree
 # (rule #8). Overridable for tests; opt out with MINSPEC_DRAIN_SELF_REFRESH=0.
-DRAIN_RUN_DIR="${MINSPEC_DRAIN_RUN_DIR:-/tmp/minspec-drain-run}"
+# NOTE the unset-only default (`-`, not `:-`): an explicitly EMPTY
+# MINSPEC_DRAIN_RUN_DIR="" must stay empty so the `[[ -z "$DRAIN_RUN_DIR" ]]` guard
+# in ensure_fresh_run_dir below can actually fire and disable self-refresh (#2238).
+# With `:-` an empty value was indistinguishable from unset, so it silently fell
+# back to /tmp/minspec-drain-run — the LIVE drain's run dir — and a test setting
+# it to "" without also passing MINSPEC_DRAIN_SELF_REFRESH=0 would hard-reset that
+# live tree instead of getting the "self-refresh disabled" behaviour its warning
+# text claimed.
+DRAIN_RUN_DIR="${MINSPEC_DRAIN_RUN_DIR-/tmp/minspec-drain-run}"
 # The shared checkout the drain runs from — the root whose .minspec/sessions/ the
 # presence gate reads. Env-overridable so the FR-14 parity harness (and unit tests)
 # can point it at a hermetic fixture without a full git clone.
