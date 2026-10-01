@@ -53,7 +53,9 @@ export interface MinspecConfig {
    * (default, pre-backfill) surfaces undeclared T3/T4 specs without blocking;
    * flip to `error` once the corpus is backfilled (FR-7 ratchet). The companion
    * `ownership.implements.invalid` is always an error regardless of this dial.
-   * Absent → treated as `warn`.
+   * Absent → treated as `warn`. A config that `scaffold()` CREATES starts at
+   * `error` instead when no spec in the repo would fail the rule, since there is
+   * nothing to backfill (`ownership-ratchet.ts`, #2250).
    */
   readonly ownershipDeclaration?: 'warn' | 'error';
   /**
