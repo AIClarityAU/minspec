@@ -9,7 +9,7 @@ status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain
-aspects: [provenance, build, packaging, signpost, dogfood, status-bar]
+aspects: [provenance, build, packaging, signpost, dogfood, status-bar, output-channel]
 relates_to: [SPEC-037, SPEC-050, DR-069, DR-003]
 implements: [packages/minspec/src/lib/build-provenance.ts, packages/minspec/tests/build-provenance.test.ts, scripts/build-extension.sh]
 implements_reason: >-
@@ -42,6 +42,22 @@ implements_reason: >-
   Still unbuilt: FR-2 (surface on demand), FR-4 (version-bump gate), FR-5 (reviewer
   guidance) - tracked as #1504, not left as prose. This declaration covers the shipped
   slice only.
+
+  Updated 2026-10-01 (#1549): FR-2 is now PARTIALLY shipped, and diverged from DQ-1's
+  resolution. `buildLabel()` (`packages/minspec/src/lib/build-provenance.ts:67`) and its
+  wiring into `statusCommand` (`packages/minspec/src/commands/status.ts:27`) ship the SHA
+  on every *MinSpec: Show SDD Status* toast — not through the DQ-1-resolved dedicated
+  `MinSpec: About MinSpec` command, which does not exist. Recorded as a mechanism
+  divergence rather than silently absorbed, same discipline as the `out/build-info.json`
+  note above. What #1549 reports as still missing, confirmed against current `HEAD`:
+  the build TIMESTAMP half of FR-1 (only the SHA is `--define`-injected,
+  `scripts/build-extension.sh:48`), an output-channel-header surface (no general-purpose
+  MinSpec output channel exists at all — `grep -rn "createOutputChannel"` finds only
+  `classify.ts`'s unrelated one), and FR-4's CI gate (still no workflow references
+  `template-registry.ts`/`ci-review-templates.ts`/`scaffold.ts` for a version-bump check;
+  `packages/minspec/package.json` version is still `0.1.26`, unmoved since this spec was
+  written). New FR-7 and DQ-5 below formalize the two gaps #1549 adds that DQ-1 never
+  covered (the output channel; FR-4's trigger scope).
 affects:
   - packages/minspec/src/lib/spec.ts
   - packages/minspec/src/lib/lifecycle.ts
@@ -147,6 +163,36 @@ predating the `1e8f204` fix by ~9 hours of wall-clock landing time while carryin
 an unchanged version string. This is the concrete cost of the missing gate: a full
 review cycle, and a false forgery accusation against a legitimate human approval.
 
+### A second, independent incident hit the same gap from the template/gate side (#1549)
+
+Filed 2026-10-01, after a live user init on `aiclarity.minspec-0.1.26` reproduced
+[#1533](https://github.com/AIClarityAU/minspec/issues/1533) — a fresh scaffold
+un-committable because the gitleaks pre-commit gate MinSpec itself writes rejects a file
+MinSpec itself wrote — on a build that already contained the fix: `bd8a7eb`
+(*"fix(#1514): make the scaffolded harness pass the gates it scaffolds"*, #1539) had
+already landed on `main`, same `0.1.26`. Diagnosing it cost a full cycle: source read
+against `origin/main` said fixed, the live repo said broken, and only comparing
+`ls ~/.vscode-oss/extensions/aiclarity.minspec-*` against the repo's `package.json` by
+hand resolved the contradiction — exactly the manual comparison FR-1/FR-2 exist to make
+unnecessary, and exactly the version-string blindness FR-4 exists to close.
+
+This is the same mechanism as the #1019 incident above (a behaviour-changing fix landing
+without a version bump, on a build the extension itself cannot distinguish from its
+predecessor), reached through a different symptom family: not a reviewer misreading a
+spec's `status`/`phases`, but an adopter unable to tell "is my install current" at all —
+the general case FR-1/FR-2 were always meant to cover, of which the #1019 reviewer
+scenario is one instance. #1549 also names a sibling, [#1538](https://github.com/AIClarityAU/minspec/issues/1538)
+(a gate-hygiene bug in the same scaffolded pre-commit hook, since fixed in `a3e63968`),
+as further evidence that the shipped-template-corpus class is undercounted while FR-4
+stays unbuilt.
+
+Two gaps #1549 surfaces that the existing FRs below do not yet close, each resolved by a
+new FR/DQ in this update: an output-channel surface for the build stamp, so a
+headless/non-interactive reader (not only someone who runs *Show SDD Status*) can see it
+(**FR-7**, below); and a concrete scope for FR-4's trigger, since "any `fix:` touching
+`packages/*/src/**`" (Risk R3's open question) is wider than the actual failure class —
+see **DQ-5**.
+
 ## Functional Requirements
 
 - **FR-1 (embed commit provenance at package time).** The `package` script
@@ -188,6 +234,17 @@ review cycle, and a false forgery accusation against a legitimate human approval
   lifecycle semantics — this spec is about *knowing which build wrote a signpost*,
   never about changing what a signpost says. *Rationale: constitution invariant #1;
   keep this spec's blast radius separate from DR-069's.*
+- **FR-7 (output-channel header, #1549).** MinSpec MUST write the build label (FR-1's
+  SHA, and timestamp once that half of FR-1 ships) as the first line of a dedicated,
+  general-purpose output channel (e.g. `MinSpec`), written once at activation — not only
+  on demand from *Show SDD Status* (FR-2). *Rationale: #1549 fix (1) — a reader who
+  opens Output > MinSpec (including a screen-sharing or bug-report workflow where
+  running a command is one extra step nobody takes) gets the same answer as a reader who
+  runs the command, instead of a surface that only speaks when asked.* Numbered against
+  this file's current HEAD; a concurrent SPEC-060 edit already in flight (`8db92454`,
+  not yet merged, formalizing DQ-2's dirty-build amendment) also claims FR-7/AC-10/AC-11
+  for an unrelated clause - expect a renumber on whichever PR lands second, per this
+  repo's accepted DR-id-collision pattern (caught at merge, not avoided up front).
 
 ## Acceptance Criteria
 
@@ -223,6 +280,13 @@ review cycle, and a false forgery accusation against a legitimate human approval
   Plan will locate the exact file) are updated to reference the FR-2 provenance
   surface as a required check before a status/phases mismatch is called forgery;
   asserted by a grep/text fixture over the prompt content, not by an LLM run.
+- **AC-10 (FR-7).** Activating the extension in any workspace writes a line naming
+  the build label to a `MinSpec` output channel, verifiable in the Extension
+  Development Host by opening Output > MinSpec without running any command.
+- **AC-11 (FR-7, stale-build echo).** When FR-3's dogfood staleness check (above)
+  returns `stale`, the same output channel also carries `skewMessage`'s text — so a
+  headless reader of the channel gets the same warning FR-3's toast gives an
+  interactive one, not a strict subset of it.
 
 ## Invariants
 
@@ -482,14 +546,44 @@ surface this spec touches, so none is guessed here.
   a path-shape check is more robust but slightly fuzzier. *Recommendation to
   confirm:* URL compare with a path-shape fallback; Plan to size the exact logic.
 
+- **DQ-5 — FR-4's trigger: any touch to the listed source files, or only a change in
+  what they render (#1549)?** Risk R3 (below) already names this as unresolved
+  ("Clarify/Plan to define what counts as behaviour-changing precisely"); #1549 adds a
+  concrete fork and a recommendation rather than leaving it open-ended.
+  - **Option A — source-path trigger.** Fire whenever a PR touches
+    `lib/template-registry.ts`, `lib/ci-review-templates.ts`, `lib/scaffold.ts`, or the
+    hook templates, full stop. Cheapest to implement (a `git diff --name-only` path
+    check, no rendering step in CI) but fires on every edit to those files, including a
+    comment-only or refactor-only diff that changes nothing an adopter would ever
+    receive.
+  - **Option B — rendered-output trigger (#1549's recommendation).** Render the
+    scaffold/template corpus both before and after the PR's change (the same
+    `renderManagedBlock` / scaffold-generation path SPEC-079 already exercises for its
+    own parity check) and fire only when the rendered bytes differ. Precise — never
+    fires on a change that cannot reach an adopter — but costs a render step in CI and
+    a second producer to keep in sync with whatever SPEC-079 lands for managed-region
+    rendering, so the two should share one rendering call rather than grow two.
+  - *Trade-off, stated by #1549's own issue body:* "every template-touching PR gains a
+    required bump, including pure-comment edits... inflates the version stream to the
+    point where the number stops meaning anything" under A; B avoids that at the cost of
+    a render step Plan must size, and a dependency on whichever rendering entry point
+    SPEC-079 settles on.
+  - *Recommendation to confirm:* B (rendered-output trigger) — it is the only option
+    that keeps every version bump meaningful (this spec's own FR-4 rationale), and the
+    rendering path it needs is being built anyway for SPEC-079's parity check; Plan to
+    confirm the two can share one call before committing to it, and to fall back to A
+    scoped tightly (e.g. excluding comment-only diffs via a diff heuristic) if they
+    cannot.
+
 ## Risks
 
 | # | Risk | Mitigation |
 |---|------|-----------|
 | R1 | Embedding a build-time `--define` into `out/extension.js` could leak build-machine paths or env if done carelessly. | Only SHA + ISO timestamp + dirty flag are embedded; no absolute paths, env vars, or usernames (constitution invariant #1's offline/no-exfiltration spirit). |
 | R2 | FR-3's staleness nudge, if mis-scoped, could fire in a consumer's normal workspace and read as a confusing, irrelevant warning. | INV-3 + DQ-4 scope the self-match check tightly to this repo; AC-5 is a required negative test. |
-| R3 | FR-4's version-bump gate could false-positive on non-behaviour-changing `fix:` commits (e.g. a comment-only RCDD fix) and become a nuisance a developer routes around. | Clarify/Plan to define what counts as "behaviour-changing" precisely (likely: any `fix:` touching `packages/*/src/**`, excluding `*.md`/comments-only diffs) so the gate doesn't over-fire and invite bypass. |
-| R4 | A CI-only gate (DQ-3 Option A) can be skipped if CI permissions lapse, recreating exactly the single-witness hole constitution invariant #2 warns against. | DQ-3's recommended default is CI **and** local, giving the required-gate an independent second witness. |
+| R3 | FR-4's version-bump gate could false-positive on non-behaviour-changing `fix:` commits (e.g. a comment-only RCDD fix) and become a nuisance a developer routes around. | **Resolved by DQ-5 (#1549):** scope the trigger to a diff in what the templates RENDER, not a touch to the source files that happen to contain them — the earlier "likely: any `fix:` touching `packages/*/src/**`" guess is superseded by DQ-5's Option B. |
+| R4 | A CI-only gate (DQ-3 Option A) can be skipped if CI permissions lapse, recreating exactly the single-witness hole constitution invariant #2 warns against. | **Correction (2026-10-01):** this mitigation is stale — DQ-3 RESOLVED to Option A (CI-only), explicitly recording that it does NOT meet invariant #2's independent-second-witness bar (see DQ-3's "stated rather than finessed" paragraph) rather than closing R4 via Option C as this row originally implied. R4 stays open and permanent until a release/publish path exists for a genuinely independent second witness to check against (DQ-3's own normative note). |
+| R5 | FR-7's output channel (#1549) could become another surface a stale build silently fails to update, if its write happens anywhere other than the FR-1 stamp read already used by FR-2/FR-3. | AC-10/AC-11 require the channel to read the same `buildLabel()`/`skewMessage()` functions FR-2/FR-3 already call — one producer, three readers, not three independent producers that can drift apart. |
 
 ## Out of Scope
 
@@ -523,6 +617,17 @@ surface this spec touches, so none is guessed here.
 - **Adjacent, not blocking, per SPEC-050:**
   [SPEC-050 §Traceability](../SPEC-050-silent-approval-pr/requirements.md) already
   notes #1019 as adjacent to its own docs-lane commit-on-approve work.
+- **Second, independent incident (same mechanism, template/gate symptom family):**
+  [#1549](https://github.com/AIClarityAU/minspec/issues/1549) — this update's trigger;
+  adds FR-7 (output-channel surface) and DQ-5 (FR-4's trigger scope). Names
+  [#1533](https://github.com/AIClarityAU/minspec/issues/1533) (closed; fix `bd8a7eb` /
+  #1539 verified present on `main` but absent from the running `0.1.26` install) as the
+  reproduction, and [#1538](https://github.com/AIClarityAU/minspec/issues/1538) (sibling
+  gate-hygiene bug in the same scaffolded hook, since fixed in `a3e63968`) as further
+  evidence for FR-4's scope.
+- **Still unbuilt after this update:** FR-1's timestamp clause, FR-4's CI gate (tracked
+  #1504), FR-7 (new, this update) — none has shipped code as of this spec revision;
+  see `implements_reason:` for what HAS shipped.
 - **Build pipeline referenced:** `packages/minspec/package.json:618-633`
   (`build:prod`, `package`, `supply-chain:check`).
 - **Activation entry point referenced:** `packages/minspec/src/extension.ts:60,224`.
