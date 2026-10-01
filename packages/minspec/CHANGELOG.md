@@ -13,7 +13,7 @@ Numbers in parentheses, here and below, are pull requests or issues at github.co
 
 ### Added
 
-- **MinSpec: Tidy Primary (discard redundant copies)** - lists changed files whose content is byte-identical to the remote's default branch, and discards them once you confirm. A file that differs is never touched (#1712, #1721, #1727).
+- **MinSpec: Tidy Checkout (discard redundant copies)** - lists changed files whose content is byte-identical to the remote's default branch, and discards them once you confirm. A file that differs is never touched (#1712, #1721, #1727).
 - **`minspec.approvalPr`** (`auto` or `manual`) - after an approval is pushed to a side branch, MinSpec can open the pull request for you through your own `gh` (#1224, #1672). It creates the `docs-lane` label the first time one is needed (#2259).
 - An approval that the protected-branch guard refused is recovered, not left stranded (#1255).
 - The running build shows which commit it was built from, and warns when it is older than the checkout it is running against (#1477, #1568, #1763).

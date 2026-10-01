@@ -1,10 +1,13 @@
 # Welcome to MinSpec
 
-MinSpec brings **Specification-Driven Development (SDD)** to VS Code — just enough spec, never too much.
+MinSpec isn't a feature tour — it's a change in **how you work**. The next five steps set
+expectations for that change before you touch a single command.
 
-## What is SDD?
+## The shift: spec before code, always
 
-SDD means you write a lightweight specification *before* you code. Not a 50-page design doc — just enough structure to match the complexity of your task.
+Every task — even a one-line typo fix — starts with a spec, not code. Not a 50-page design
+doc: just enough structure to match the complexity of what you're doing. The size of "just
+enough" is the whole idea.
 
 MinSpec classifies every task into one of four tiers:
 
@@ -15,13 +18,41 @@ MinSpec classifies every task into one of four tiers:
 | **T3** | Medium (new feature, refactor) | Full spec with tasks |
 | **T4** | Large (new subsystem, migration) | All phases including clarification |
 
-The key insight: **ceremony is proportional to complexity.** A one-line fix doesn't need a design doc. A new subsystem does.
+**Ceremony is proportional to complexity** — this is not "click Classify and move on." It's
+the rule that decides how much you write for *every* task from here on: a one-line fix gets
+one sentence, a new subsystem gets the full cycle. You'll feel the difference on day one —
+a two-minute fix stays a two-minute fix.
+
+## What you do vs. what the tool does
+
+Content and verification swap roles from what you're used to. The classifier, the spec
+scaffolding, AI-assisted drafts — that's content, and a tool (or an AI tool you bring) can
+produce a first draft of it. Your job shifts to **verifying the signal**, not authoring the
+prose: does this tier match the actual blast radius? Does this spec say what you meant? A
+suggestion isn't a decision until you've looked at it — that's the *just-enough-human*
+principle: the least human attention that still keeps every decision honest, never zero.
+
+## One next task, never a backlog
+
+MinSpec's status bar and sidebar don't show you a queue to triage. They surface **one
+deterministic next human task** at a time — the single thing blocking progress right now.
+No prioritization meeting, no backlog grooming. Finish that one thing and the next one
+appears.
+
+## What feels different, day one
+
+- You write a spec sentence *before* opening the file you're about to change — even for a
+  trivial fix.
+- Validation is **never-wrong**: MinSpec tells you what it verified and what it didn't. It
+  never reports "done" on a hunch, and neither should you.
+- "I classified this T2" is a claim you can check, not a vibe — the classifier shows its
+  reasoning.
 
 ## How it works
 
-1. You classify your task's complexity
-2. MinSpec tells you which phases to complete
+1. You classify your task's complexity (or accept the suggestion)
+2. MinSpec tells you which phases that tier requires
 3. You write just enough spec for that tier
-4. You implement with confidence
+4. You implement, and the tool verifies rather than assumes
 
-No AI required. No account. No telemetry. The extension opens no network connection of its own; the few features that run your own `gh`, `git` or `claude` command-line tools are all listed under [What MinSpec Does on Your Network](https://github.com/AIClarityAU/minspec/blob/main/packages/minspec/README.md#what-minspec-does-on-your-network). Just markdown files and good engineering practice.
+No AI required. No account. No telemetry. The extension opens no network connection of its own; the few features that run your own `gh`, `git` or `claude` command-line tools are all listed under [What MinSpec Does on Your Network](https://github.com/AIClarityAU/minspec/blob/main/packages/minspec/README.md#what-minspec-does-on-your-network). Just markdown files and a working method.
