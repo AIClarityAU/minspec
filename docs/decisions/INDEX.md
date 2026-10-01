@@ -786,4 +786,12 @@ When one of the four ai-review voters dies on a session limit, the panel fails c
 <!-- dr-summary:DR-098 auto=88bcb5af582d -->
 MinSpec scaffolds a workflow into adopters that auto-merges a docs-only pull request carrying the docs-lane label, but never created the label, and gh pr create refuses to open a pull request naming a label the repository lacks. So where the label was missing, every approval fell to a manual Open PR step and a manual merge (#2243). Creating the label is a new kind of forge write, and it narrows a statement MinSpec ships to every adopter.
 <!-- /dr-summary:DR-098 -->
+
+## [DR-101 — Walking-skeleton completion is a deterministic tie-break term, declared by an epic's `skeleton:` list - read by the resolver, never inferred](DR-101.md)
+
+*Status: proposed · Date: 2026-10-01*
+
+<!-- dr-summary:DR-101 auto=6f98618207b2 -->
+Triggered by: #297 (vertical-slice completion as a priority signal). DR-019 (deterministic next-task ordering) ranks pending human tasks by severity class and then by a within-class order, which DR-039 (goals drive priority) widened to (epic.order, goal-rank, priority, artifact-id). The code is compareRanked at packages/shared/src/next-task.ts:996-1002. Every term before artifact-id is a human weight; artifact-id is an arbitrary deterministic pick.
+<!-- /dr-summary:DR-101 -->
 <!-- minspec:dr-index:end -->
