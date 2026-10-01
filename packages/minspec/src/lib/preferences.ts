@@ -143,15 +143,57 @@ export function loadPreferences(rootDir: string): BootstrapPreferences {
 }
 
 /**
+ * Has this folder opted in to MinSpec?
+ *
+ * The opt-in marker is `.minspec/` at the workspace root (constitution
+ * invariant 3). Defined HERE, in the dependency-free module, so the store can
+ * gate its own write and a command that only wants a preference can ask the
+ * question without importing `auto-bootstrap`. `isMinspecInitialized` there
+ * delegates to this, so there is one definition, not two.
+ *
+ * An empty root means "no folder open". `path.join('', '.minspec')` resolves
+ * against the process's working directory, so without the explicit check an
+ * extension host that happened to start inside a MinSpec project would answer
+ * "opted in" for a window with no folder at all.
+ */
+export function hasOptInMarker(rootDir: string): boolean {
+  return rootDir !== '' && fs.existsSync(path.join(rootDir, '.minspec'));
+}
+
+/**
+ * Thrown by {@link savePreferences} when asked to persist into a folder that
+ * has not opted in. A distinct class so a caller (or a test) can tell "this
+ * folder never opted in" from an ordinary I/O failure.
+ */
+export class NotOptedInError extends Error {
+  constructor(rootDir: string) {
+    super(
+      rootDir === ''
+        ? 'MinSpec: no folder is open, so there is no project to save a preference in.'
+        : `MinSpec: ${rootDir} has no .minspec/ directory (it has not opted in), so no preference was saved there. Run "MinSpec: Initialize" first.`,
+    );
+    this.name = 'NotOptedInError';
+  }
+}
+
+/**
  * Merge new preferences with existing ones and persist to disk.
- * Creates `.minspec/` if it does not exist.
+ *
+ * NEVER creates `.minspec/` (#2355). That directory is the opt-in marker, and
+ * this store used to `mkdir -p` it before every write, so any caller reachable
+ * before opt-in manufactured the marker: closing the "not initialized" toast
+ * was enough. The store now refuses instead, and refuses VISIBLY (a throw, not
+ * a silent skip), so a caller that needs to remember something before opt-in
+ * has to choose a store that is not inside the repo - see `runBootstrap`'s
+ * per-workspace memory. There is deliberately no `mkdir` left here at all: if
+ * the marker vanishes between the check and the write, `writeFileSync` fails
+ * with `ENOENT` rather than recreating it.
  */
 export function savePreferences(
   rootDir: string,
   update: BootstrapPreferences,
 ): void {
-  const minspecDir = path.join(rootDir, '.minspec');
-  fs.mkdirSync(minspecDir, { recursive: true });
+  if (!hasOptInMarker(rootDir)) throw new NotOptedInError(rootDir);
   const current = loadPreferences(rootDir);
   const merged = { ...current, ...update };
   fs.writeFileSync(
