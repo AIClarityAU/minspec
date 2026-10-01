@@ -47,6 +47,12 @@ const VSCODE_RULE = 'tier0/no-restricted-imports';
 const LIB_HOST = 'packages/minspec/src/lib/spec.ts';
 /** A real file in the UI layer — used to prove the lib-scoped rules stay scoped. */
 const VIEWS_HOST = 'packages/minspec/src/views/status-bar.ts';
+/**
+ * #1546 / #2378 — a real `commands/` file, the layer the second emitter
+ * actually landed in before #1551 deleted it. Used as the fixture host for the
+ * single-emitter gate below.
+ */
+const COMMANDS_HOST = 'packages/minspec/src/commands/init.ts';
 /** Real files in the two exempt trees (FR-1 `ignores`). */
 const TEST_TREE_HOST = 'packages/minspec/src/test/views.test.ts';
 const BENCH_TREE_HOST = 'packages/minspec/src/__benchmarks__/perf.bench.ts';
@@ -117,7 +123,7 @@ const valueImport = (specifier: string): string =>
   `import thing from '${specifier}';\nexport const used = thing;\n`;
 
 describe('SPEC-040 — the fixture hosts these tests depend on exist', () => {
-  it.each([LIB_HOST, VIEWS_HOST, TEST_TREE_HOST, BENCH_TREE_HOST])(
+  it.each([LIB_HOST, VIEWS_HOST, COMMANDS_HOST, TEST_TREE_HOST, BENCH_TREE_HOST])(
     '%s is a real file',
     (hostFile) => {
       expect(
@@ -304,6 +310,80 @@ describe('SPEC-040 FR-3 — lib stays vscode-free, at warn until #830', () => {
       );
       expect(errorsOf(messages, LAYER_RULE), describeAll(messages)).toHaveLength(1);
       expect(warningsOf(messages, VSCODE_RULE), describeAll(messages)).toHaveLength(1);
+    },
+    LINT_TIMEOUT,
+  );
+});
+
+/**
+ * #1546 / SPEC-025 FR-6 — `lib/constitution-nudge` has exactly one legitimate
+ * importer, `extension.ts`. Before #2378, nothing exercised this rule at all —
+ * it had been checked once, by hand, per #1551's commit message. `COMMANDS_HOST`
+ * is not an arbitrary fixture host: it is the file the second emitter actually
+ * lived in before #1551 deleted it, so the first case here is a regression test
+ * for that instance, not only the structural property.
+ *
+ * #2378 found a SECOND weakness beyond "no witness": a single inline
+ * `eslint-disable` silences this diagnostic (measured on main at `f4e6cbcf`),
+ * unlike the `lib/**` blocks beside it, which set `linterOptions:
+ * { noInlineConfig: true }`. Adding that same option to the #1546 block
+ * (`eslint.config.mjs:265-295`) was EVALUATED, not applied: that block's `files`
+ * glob — unlike the `lib/**`-scoped blocks — also matches `views/**` and
+ * `commands/**`, and `noInlineConfig` is file-level, not rule-level (ESLint has
+ * no per-rule inline-disable lock). Verified locally: adding it there breaks
+ * `SPEC-040 INV-4 ... Tier-0-scoped` below (VIEWS_HOST loses its escape hatch
+ * for the unrelated `@aiclarity/shared` barrel rule as a side effect) — that
+ * test exists precisely to catch an inline-disable lockout leaking outside
+ * `lib/` into the UI layers, and it does so correctly here. Closing that half
+ * is an architecture call (whether UI layers keep the inline-disable escape
+ * hatch at all, tree-wide) — out of this test file's own scope to decide, and
+ * `eslint.config.mjs` is outside this change's file allowlist regardless. The
+ * third case below PINS the gap instead as a visible, named, currently-open
+ * weakness rather than leaving it undocumented — if it ever flips to pass,
+ * decide whether to flip the assertion (fix landed narrowly) or delete this
+ * test (fix landed by removing the escape hatch tree-wide) rather than
+ * deleting it quietly.
+ */
+describe('SPEC-025 FR-6 / #1546 — lib/constitution-nudge has exactly one emitter', () => {
+  it(
+    'errors on an import of lib/constitution-nudge from commands/',
+    async () => {
+      const messages = await lintFixture(
+        valueImport('../lib/constitution-nudge'),
+        COMMANDS_HOST,
+      );
+      expect(errorsOf(messages, 'no-restricted-imports'), describeAll(messages)).toHaveLength(1);
+    },
+    LINT_TIMEOUT,
+  );
+
+  it(
+    'allows the real emitter, extension.ts, to import lib/constitution-nudge',
+    async () => {
+      const messages = await lintFixture(
+        valueImport('./lib/constitution-nudge'),
+        'packages/minspec/src/extension.ts',
+      );
+      expect(
+        errorsOf(messages, 'no-restricted-imports'),
+        describeAll(messages),
+      ).toHaveLength(0);
+    },
+    LINT_TIMEOUT,
+  );
+
+  it(
+    'KNOWN GAP (#2378) — an inline eslint-disable still silences the single-emitter error',
+    async () => {
+      // This PASSES today because the gap is still open — it is a witness, not
+      // a desired outcome. See the describe-block comment above for why closing
+      // it is an architecture decision rather than a config tweak made here.
+      const messages = await lintFixture(
+        '// eslint-disable-next-line no-restricted-imports\n' +
+          valueImport('../lib/constitution-nudge'),
+        COMMANDS_HOST,
+      );
+      expect(errorsOf(messages, 'no-restricted-imports'), describeAll(messages)).toHaveLength(0);
     },
     LINT_TIMEOUT,
   );
