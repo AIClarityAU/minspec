@@ -23,6 +23,12 @@ const LIFECYCLE_GROUPS: LifecycleGroup[] = [
   { label: 'Triaged', lifecycleLabel: 'triaged', defaultExpanded: true },
   { label: 'Agent-Ready', lifecycleLabel: 'agent-ready', defaultExpanded: true },
   { label: 'Work in Progress', lifecycleLabel: 'wip', defaultExpanded: true },
+  // `done` is a lifecycle label, not a close action — an issue can carry it
+  // while still OPEN (closing is a separate step). Without this group, such
+  // an issue matches no group in the filter below and is silently dropped
+  // from the pane (#2460). Collapsed by default: an open+done issue should
+  // be rare, so it shouldn't compete for attention with the active groups.
+  { label: 'Done, still open', lifecycleLabel: 'done', defaultExpanded: false },
   { label: 'Unlabeled', lifecycleLabel: null, defaultExpanded: false },
 ];
 
@@ -56,6 +62,7 @@ export class BacklogGroupNode extends vscode.TreeItem {
 function issueIcon(issue: BacklogIssue): string {
   if (issue.lifecycleLabel === 'wip') return 'sync';
   if (issue.lifecycleLabel === 'agent-ready') return 'robot';
+  if (issue.lifecycleLabel === 'done') return 'check';
   if (issue.priorityLabel === 'P1') return 'flame';
   if (issue.priorityLabel === 'P2') return 'arrow-up';
   if (issue.priorityLabel === 'P3') return 'arrow-down';
