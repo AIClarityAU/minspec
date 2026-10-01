@@ -409,14 +409,18 @@ describe('BacklogTreeProvider', () => {
     expect((children[0] as { label: string }).label).toBe('Work in Progress');
   });
 
-  it('getChildren root: shows error message when fetch fails', async () => {
+  it('getChildren root: shows the failure reason, not a false "no issues found" (#2247)', async () => {
     mockIsGhAvailable.mockResolvedValue(true);
-    mockFetchIssues.mockRejectedValue(new Error('network error'));
+    mockFetchIssues.mockRejectedValue(new Error('GitHub API rate limit exceeded — try again later'));
 
     const children = await provider.getChildren();
 
+    // A gh failure must never render as the same message as zero open
+    // issues — that's the false-zero this issue is about.
     expect(children).toHaveLength(1);
-    expect((children[0] as { label: string }).label).toBe('Failed to fetch issues from GitHub');
+    const label = (children[0] as { label: string }).label;
+    expect(label).not.toBe('No open issues found');
+    expect(label).toBe('Unavailable: GitHub API rate limit exceeded — try again later');
   });
 
   it('getChildren root: uses cached issues on subsequent calls', async () => {
