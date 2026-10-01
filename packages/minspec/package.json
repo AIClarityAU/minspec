@@ -210,7 +210,7 @@
       },
       {
         "command": "minspec.refreshBacklog",
-        "title": "MinSpec: Refresh Backlog",
+        "title": "MinSpec: Refresh Backlog (contacts GitHub through your gh CLI)",
         "icon": "$(refresh)"
       },
       {
