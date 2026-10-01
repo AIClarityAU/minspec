@@ -111,7 +111,7 @@ spec gate's ownership signal stays as narrow as the change.
 - [x] **6.4** From the repository root: the full vitest suite, lint, build, typecheck and
   validate.
 - [x] **6.5** Re-run 2.3's check on the final tree: the approval still verifies.
-- [ ] **6.6** `main` moved under the open pull request and conflicted with it. Merge it in,
+- [x] **6.6** `main` moved under the open pull request and conflicted with it. Merge it in,
   keep both sides' intent, and repeat 6.1 to 6.5 on the merged tree.
   *Done when:* all five hold on the merged tree, and every file this change never edited
   is byte-identical to `main`.
