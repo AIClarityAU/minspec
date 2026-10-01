@@ -97,17 +97,17 @@ wide as the change.
 
 ## 6 - Prove it and verify
 
-- [ ] **6.1** Mutation check. With the fix in place, make the render fetch again and
+- [x] **6.1** Mutation check. With the fix in place, make the render fetch again and
   confirm the consent test goes red; restore and confirm it goes green.
   *Done when:* both observations are recorded in the pull request.
-- [ ] **6.2** Run the final versions of both T0 files against an export of the pre-fix tree
+- [x] **6.2** Run the final versions of both T0 files against an export of the pre-fix tree
   and record the failures, so the red evidence is for the tests as merged and not for an
   earlier draft of them.
-- [ ] **6.3** Typecheck the two new test files with `tsc` directly. No tsconfig in the
+- [x] **6.3** Typecheck the two new test files with `tsc` directly. No tsconfig in the
   repository includes the tests directory, so the suite passing says nothing about types.
-- [ ] **6.4** From the repository root: the full vitest suite, lint, build, typecheck and
+- [x] **6.4** From the repository root: the full vitest suite, lint, build, typecheck and
   validate.
-- [ ] **6.5** Re-run 2.3's check on the final tree: the approval still verifies.
+- [x] **6.5** Re-run 2.3's check on the final tree: the approval still verifies.
 
 ## Not in this change
 
