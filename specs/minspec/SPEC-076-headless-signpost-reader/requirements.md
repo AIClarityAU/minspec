@@ -242,9 +242,22 @@ tier is wrong, the remedy is to raise it and re-gate — ceremony ratchets up, n
   `vscode`, transitively included. The 16-module closure measured above is the current state;
   a test keeps it true.
 
-## Decisions needed (Clarify)
+## Decisions (Clarify – resolved 2026-10-01)
 
-### DQ-1 (shape) — N roots in one process, versus N invocations
+Both questions are answered with this document's recommended option, and both are already
+built: at T2 (spec plus plan) this spec was implemented in the change that introduced it
+("Why T2, and why that is not a shortcut" above), so each decision cites the code that
+embodies it. The selections were written down by an agent session under DR-086 autonomy
+(`"autonomy": "act"` in `.minspec/config.json`), not put to the founder one at a time. The
+options stay below each decision, because DR-086 §4 requires the rejected alternatives to be
+kept in the durable artifact when nobody saw them live.
+
+### DQ-1 (shape) — N roots in one process, versus N invocations (resolved: Option A)
+
+**Decision:** Option A, one invocation takes N roots (recommended option taken under DR-086
+autonomy; the founder's approval of this spec is the sign-off). Built as FR-3 specifies:
+`scripts/next-task.ts:211` takes every positional argument as a root and defaults to the
+working directory, and `:219` resolves each root on its own.
 
 - **Option A — one invocation takes N roots (rec).** As specified in FR-3. *Cost:* the
   output envelope becomes a container with per-root success and failure rather than a single
@@ -258,7 +271,12 @@ tier is wrong, the remedy is to raise it and re-gate — ceremony ratchets up, n
 Recommendation: **Option A**, with the single-root case preserved by defaulting to the
 working directory when no argument is given, so the extra structure is the only cost.
 
-### DQ-2 (semantics) — working tree versus `origin/main`
+### DQ-2 (semantics) — working tree versus `origin/main` (resolved: Option A)
+
+**Decision:** Option A, the working tree (recommended option taken under DR-086 autonomy; the
+founder's approval of this spec is the sign-off). Built as FR-4 specifies:
+`scripts/next-task.ts:177` builds the graph from the root on disk, and `readTreeState`
+(`:114-134`) reports the `HEAD` short sha and a dirty flag beside each answer.
 
 Settled as FR-4 rather than left open, because the divergence has to be deliberate. The
 extension judges approval against the **working tree**: `getApprovalStatus`
