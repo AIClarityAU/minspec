@@ -28,15 +28,40 @@ Full explanation, attribution to source methodologies, and FAQ at [**minspec.dev
 
 ## What MinSpec Does on Your Network
 
-The MinSpec extension itself makes **zero network calls** — no telemetry, no analytics, no accounts, no backend. All spec data lives in your project directory.
+The MinSpec extension opens no network connection of its own. It has no telemetry, no analytics, no account and no backend, and nothing is sent to the people who make it. Your specs, decisions and approvals are files in your project directory.
 
-Three opt-in commands shell out to your local [GitHub CLI](https://cli.github.com/) (`gh`) when you invoke them:
+Some features run command-line tools you already have installed: the [GitHub CLI](https://cli.github.com/) (`gh`), `git` and `claude`. Those tools contact the network under your own sign-in. This is every case, read from the code.
 
-- **MinSpec: Park Topic** — creates a GitHub Issue via `gh issue create`
-- **MinSpec: Quick Triage Inbox Issue** — labels/comments via `gh issue edit`
-- **MinSpec: Refresh Backlog** — lists issues via `gh issue list`
+### Runs without asking first
 
-These run under your own GitHub authentication and only when you trigger them. If `gh` isn't installed, MinSpec falls back to local files (e.g. `.minspec/parking-lot.md`). Nothing else in the extension contacts a network.
+Two read-only checks. Both run only after you run **MinSpec: Initialize SDD Structure** or **MinSpec: Refresh Harness Files**, from the Command Palette or by accepting MinSpec's toast, and only in a git repository:
+
+- Whether `gh` is installed and signed in: `gh --version`, then `gh auth status`.
+- If it is, this repository's own settings on GitHub: its branch rulesets, and the names (never the values) of its Actions secrets. MinSpec uses them to decide whether to offer you a branch ruleset.
+
+These checks write nothing to GitHub.
+
+### Runs only when you ask
+
+| You do this | MinSpec runs |
+|-------------|--------------|
+| **MinSpec: Refresh Backlog (contacts GitHub through your gh CLI)**, from the Command Palette, from the Backlog pane's title bar, or by selecting the pane's "Backlog not loaded" row | `gh issue list`. The pane loads nothing when it is drawn and never refreshes on its own: not when the window regains focus, and not when the pane becomes visible. A loaded list shows the time it was loaded |
+| **MinSpec: Park Topic** or **MinSpec: Park Topic (force)**, or **Park as Issue** on a drift warning | `gh auth status`, then `gh issue list` to look for an open issue with the same title (the force command skips this), then `gh issue create`. `gh issue comment` instead, if you choose to comment on the issue it found |
+| **MinSpec: Score Issue (WSJF)** | `gh auth status` and `gh issue list`. After you choose Apply: `gh issue view`, `gh issue edit` and `gh issue comment` |
+| **MinSpec: Quick Triage Inbox Issue** | `gh auth status`, `gh issue list`, then `gh issue edit` |
+| **MinSpec: Push docs via lane**, after you confirm the dialog that names the push | `gh auth status`, `git fetch`, `git push`, then `gh pr create` |
+| **MinSpec: Backfill Epics (AI-assisted)**, when you choose the AI pass, or accept MinSpec's offer to backfill (its text says it is AI-enhanced if Claude Code is installed) | `claude -p`, which sends the ids, titles and first paragraph of your specs and decisions to the model provider your `claude` command is set up with. The heuristic pass is offline |
+| **Create ruleset** or **Add checks**, on the offer that can follow the two checks above | `gh api`, to create or update a branch ruleset on this repository |
+
+### Runs when a setting allows it
+
+| Setting | MinSpec runs | When |
+|---------|--------------|------|
+| `minspec.pushOnApprove` | `git push` of the approval commit. When you approve on a protected branch the push goes to a new branch, and can be preceded by a `git fetch` of the default branch | `prompt` (the default) asks after each approval and pushes only if you choose Push. Choosing Always push from now on pushes too, and records that choice for this project in `.minspec/preferences.json`, so later approvals here push without asking. `always` pushes without asking. `never` sends nothing |
+| `minspec.approvalPr` | `gh pr list` and `gh pr create`, and `gh label create` when the repository has no `docs-lane` label | Only after an approval has been pushed to a side branch. `auto` (the default) opens the pull request. `manual` shows a link instead |
+| `minspec.autoBackfillUseAi` | `claude -p`, as described above | `false` (the default) asks each time. `true` uses the AI pass whenever you run Backfill Epics. Choosing Always on that question records the same choice for this project in `.minspec/preferences.json` |
+
+If `gh` is not installed or not signed in, Park Topic saves to `.minspec/parking-lot.md` instead. The other `gh` features say that they could not run. They do not report an empty result.
 
 ## Quick Start
 
@@ -276,7 +301,7 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type "MinSpec" to 
 | **MinSpec: Park Topic (force)** | The same, without the check for an existing matching issue |
 | **MinSpec: Score Issue (WSJF)** | Calculate a Weighted Shortest Job First score for backlog prioritization |
 | **MinSpec: Quick Triage Inbox Issue** | Triage an inbox-labelled GitHub Issue with priority and labels |
-| **MinSpec: Refresh Backlog** | Manually refresh the sidebar backlog view from GitHub Issues |
+| **MinSpec: Refresh Backlog (contacts GitHub through your gh CLI)** | Load, or reload, the Backlog pane from this repository's GitHub issues. The pane loads nothing until you run this |
 
 ### AI tool context, traceability and publishing docs
 
@@ -328,7 +353,7 @@ No. MinSpec has zero AI dependencies. It works with any AI coding tool (Claude C
 
 ### Does MinSpec make network calls or require an account?
 
-The extension binary makes no network calls — no telemetry, no analytics, no accounts, no backend. Three opt-in commands (Park Topic, Quick Triage, Refresh Backlog) shell out to your local `gh` CLI under your own GitHub auth, and only when you invoke them. If `gh` isn't installed, they fall back to local files. See [What MinSpec Does on Your Network](#what-minspec-does-on-your-network) above.
+No account. The extension opens no network connection of its own: no telemetry, no analytics, no backend. Some features run your own `gh`, `git` or `claude` command-line tools, and those do contact the network, under your sign-in. Two read-only checks run without asking, after Initialize or Refresh Harness Files. Everything else runs only when you ask for it or switch it on. The full list is in [What MinSpec Does on Your Network](#what-minspec-does-on-your-network).
 
 ### Can I use MinSpec with Spec Kit?
 
@@ -350,7 +375,7 @@ Contributions are welcome. See the [GitHub repository](https://github.com/AIClar
 
 ## Privacy
 
-MinSpec collects **zero data**. No telemetry, no analytics, no accounts, no backend. The extension binary makes no network calls. Three opt-in commands (Park Topic, Quick Triage Inbox Issue, Refresh Backlog) delegate to your local `gh` CLI under your own GitHub authentication, and only when you trigger them — see [What MinSpec Does on Your Network](#what-minspec-does-on-your-network). All spec data stays on your local filesystem. [Privacy Policy](https://aiclarity.com.au/privacy)
+MinSpec collects **zero data**: no telemetry, no analytics, no account, no backend, and the extension opens no network connection of its own. Your work leaves your machine only through your own `gh`, `git` and `claude` command-line tools, in the cases listed under [What MinSpec Does on Your Network](#what-minspec-does-on-your-network). [Privacy Policy](https://aiclarity.com.au/privacy)
 
 ## License
 

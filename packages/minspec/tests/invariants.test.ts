@@ -109,7 +109,9 @@ describe('Invariant 2: No backend — no network calls', () => {
   // Files allowed to use child_process. All are Tier-1 local-tool delegation
   // (DR-004): the extension shells a locally-installed binary that owns its own
   // networking — the extension process makes zero outbound connections.
-  //   - github / parking-lot / backlog / git-analyzer → `gh` + `git` CLI
+  //   - github / parking-lot / git-analyzer → `gh` + `git` CLI
+  //   - backlog → `gh`, which reaches the network: allowlisted on the consent
+  //     clause, see the comment on its entry below (SPEC-085)
   //   - epic-backfill → `claude -p` for AI epic proposal (DR-016, opt-in,
   //     degrades to a pure heuristic when `claude` is absent)
   const CHILD_PROCESS_ALLOWLIST = new Set([
@@ -122,6 +124,16 @@ describe('Invariant 2: No backend — no network calls', () => {
     'lib/build-provenance.ts',
     'lib/github.ts',
     'lib/parking-lot.ts',
+    // SPEC-085: the Backlog's issue calls. UNLIKE the local-git entries, this one
+    // DOES reach the network - `gh issue list`, and `gh issue view/edit/comment`
+    // from Score WSJF and Quick Triage - so it is allowlisted on the CONSENT clause
+    // of constitution invariant #1 ("no network calls without explicit user
+    // consent"), not on a "local tool only" claim. It is reachable only from a
+    // gesture: the Refresh Backlog command (which the Backlog pane's own not-loaded
+    // row also runs) and the two commands the user invokes. Drawing the pane,
+    // window focus, a folder change and the epic commands start no process at
+    // all - pinned at the child-process boundary in backlog-consent.test.ts, not
+    // merely asserted. See views/backlog-view.ts BacklogTreeProvider.refresh.
     'lib/backlog.ts',
     'lib/git-analyzer.ts',
     'lib/epic-backfill.ts',

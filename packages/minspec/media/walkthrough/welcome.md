@@ -24,4 +24,4 @@ The key insight: **ceremony is proportional to complexity.** A one-line fix does
 3. You write just enough spec for that tier
 4. You implement with confidence
 
-No AI required. No accounts. No network calls. Just markdown files and good engineering practice.
+No AI required. No account. No telemetry. The extension opens no network connection of its own; the few features that run your own `gh`, `git` or `claude` command-line tools are all listed under [What MinSpec Does on Your Network](https://github.com/AIClarityAU/minspec/blob/main/packages/minspec/README.md#what-minspec-does-on-your-network). Just markdown files and good engineering practice.

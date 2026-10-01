@@ -84,14 +84,14 @@ wide as the change.
 
 ## 5 - Published statements
 
-- [ ] **5.1** `packages/minspec/README.md` - rewrite "What MinSpec Does on Your Network" as
+- [x] **5.1** `packages/minspec/README.md` - rewrite "What MinSpec Does on Your Network" as
   three lists, one per kind of consent; make the FAQ answer and the Privacy section point at
   it; give the command table the new title (FR-8).
-- [ ] **5.2** `packages/minspec/media/walkthrough/welcome.md` - replace "No network calls."
+- [x] **5.2** `packages/minspec/media/walkthrough/welcome.md` - replace "No network calls."
   with the true claims and a link to the section (FR-8).
-- [ ] **5.3** `sites/minspec.dev/index.html` - the feature card says the same and links to
+- [x] **5.3** `sites/minspec.dev/index.html` - the feature card says the same and links to
   the section (FR-8, DQ-3).
-- [ ] **5.4** `packages/minspec/tests/invariants.test.ts` - the `lib/backlog.ts` allowlist
+- [x] **5.4** `packages/minspec/tests/invariants.test.ts` - the `lib/backlog.ts` allowlist
   entry gets a consent-clause comment in the form the approve-push entry uses (FR-10).
   *Done when, for 5.1 to 5.4:* the README claims test is green end to end.
 
