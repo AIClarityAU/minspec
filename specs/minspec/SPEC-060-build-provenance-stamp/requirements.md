@@ -188,6 +188,24 @@ review cycle, and a false forgery accusation against a legitimate human approval
   lifecycle semantics — this spec is about *knowing which build wrote a signpost*,
   never about changing what a signpost says. *Rationale: constitution invariant #1;
   keep this spec's blast radius separate from DR-069's.*
+- **FR-7 (dirty-build ancestry resolution — formalizes DQ-2's amendment, closes
+  [#1528](https://github.com/AIClarityAU/minspec/issues/1528)).** `detectBuildSkew`
+  (`packages/minspec/src/lib/build-provenance.ts:104-145`) MUST strip a trailing
+  `-dirty` suffix from the build SHA before any git resolution (`cat-file -e` at
+  line 128, `merge-base --is-ancestor` at line 137, `rev-list --count` at line
+  141), and the resulting advisory (`skewMessage`, `build-provenance.ts:159-167`)
+  MUST keep the `-dirty` marker visible in the displayed string and state
+  explicitly that the comparison is *approximate* — the running build also
+  carries uncommitted local changes the stripped commit does not capture, so
+  "N commits behind" is a lower bound, not an exact count. *Rationale: the
+  writer (`scripts/build-extension.sh:30-31` at time of writing — cited as
+  `:20-22` in the triggering issue against an earlier revision of this file)
+  already emits `<sha>-dirty` for exactly the population most likely to be
+  genuinely stale (a dirty tree means someone is mid-iteration), but the
+  reader never learned the suffix, so FR-3 silently
+  returns `unknown` and warns about nothing — a silent-gate failure constitution
+  invariant #2 forbids. See DQ-2's amendment below for the full reasoning and its
+  stated cost.*
 
 ## Acceptance Criteria
 
@@ -223,6 +241,23 @@ review cycle, and a false forgery accusation against a legitimate human approval
   Plan will locate the exact file) are updated to reference the FR-2 provenance
   surface as a required check before a status/phases mismatch is called forgery;
   asserted by a grep/text fixture over the prompt content, not by an LLM run.
+- **AC-10 (FR-7, resolves).** Given an injected build SHA of the form `<sha>-dirty`
+  where `<sha>` is a real ancestor of `HEAD` N commits back, `detectBuildSkew`
+  returns `{ kind: 'stale', sha: <sha>, behind: N }` — not `unknown` — and
+  `skewMessage`'s string names both the stripped commit and the fact that the
+  build also carries uncommitted local changes (e.g. "built from `<sha>` plus
+  uncommitted changes, approximately N commits behind this checkout"), never
+  phrased as an exact match.
+- **AC-11 (FR-7, test pin).**
+  `packages/minspec/tests/build-provenance.test.ts` gains at least one case
+  exercising the `-dirty`-suffixed path through `detectBuildSkew` (stale resolves
+  correctly; a non-ancestor `-dirty` sha still reports `unknown`, never a false
+  `stale`) and one asserting `skewMessage`'s approximate wording for a dirty
+  verdict — closing the exact gap the issue names: today no test references
+  `detectBuildSkew`'s dirty path, `surfaceBuildSkewAdvisory`, or `isMinspecRepo`
+  (verified by grep against
+  `packages/minspec/tests/build-provenance.test.ts` while writing this spec; no
+  match for `dirty`).
 
 ## Invariants
 
@@ -346,7 +381,8 @@ surface this spec touches, so none is guessed here.
   > **Amendment (normative for Plan):** `detectBuildSkew` MUST strip a trailing `-dirty`
   > before resolving the commit, and the surfaced message MUST keep the marker visible —
   > e.g. *"built from `614a569` plus uncommitted changes, 12 commits behind this
-  > checkout"*.
+  > checkout"*. **Formalized as FR-7 / AC-10 / AC-11** (added 2026-10-01, closing #1528)
+  > so Plan/Tasks pick this up as a tracked, testable requirement rather than prose-only.
   >
   > **Cost of the amendment, stated:** the skew count is then computed against a commit
   > the bundle does not exactly match, because the bundle contains that commit *plus*
@@ -520,6 +556,13 @@ surface this spec touches, so none is guessed here.
 - **Blocked PR:** [#996](https://github.com/AIClarityAU/minspec/pull/996).
 - **Sibling half of the same incident (authorship, not build identity):**
   [#1007](https://github.com/AIClarityAU/minspec/issues/1007).
+- **Follow-up fix, formalized as FR-7/AC-10/AC-11:**
+  [#1528](https://github.com/AIClarityAU/minspec/issues/1528) — `<sha>-dirty`
+  (written by `scripts/build-extension.sh:30-31`, per DQ-2 Option A) was not a
+  resolvable git object, so `detectBuildSkew` silently returned `unknown` for
+  every dirty-tree build — exactly the population most likely to be genuinely
+  stale. DQ-2's amendment resolved the design; this update adds the testable
+  FR/AC Plan and Tasks need to build and verify it.
 - **Adjacent, not blocking, per SPEC-050:**
   [SPEC-050 §Traceability](../SPEC-050-silent-approval-pr/requirements.md) already
   notes #1019 as adjacent to its own docs-lane commit-on-approve work.
