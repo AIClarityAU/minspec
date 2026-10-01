@@ -2,15 +2,26 @@
  * SPEC-026 Layer 1 — Session Presence (FR-1..7) + the sync-gate primitive.
  *
  * A lightweight, file-based heartbeat: each live extension-host activation writes
- * one `.minspec/sessions/<uuid>.session.json` record and refreshes it every 30s.
+ * one `.minspec/sessions/<uuid>.session.json` record and refreshes it every 30s -
+ * but ONLY in a folder that already opted in. `.minspec/` at the workspace root is
+ * the opt-in marker (constitution invariant 3), so a writer that created it would
+ * make every folder the extension is ever opened on look opted in (#2328). Every
+ * write and delete in `SessionPresenceManager` is therefore gated on `isOptedIn()`,
+ * and the one directory this module creates (`sessions/`) is made NON-recursively,
+ * so it cannot bring `.minspec/` into existence even if the gate were bypassed.
  * Other sessions read the directory to know who else is live (FR-4/FR-5), and the
  * drain's gated fast-forward (`scripts/drain-inbox.sh sync_shared_checkouts`) keys
  * on `isCheckoutOccupied` to decide whether a checkout is safe to advance.
  *
  * Tier-0 / offline (INV-5): this module imports ONLY `fs`, `path`, `crypto`,
- * `child_process` (git, local) and the `vscode` TYPE (compile-time only). It makes
- * zero network calls. The Tier-0 import-ban gate (tier0-import-ban.test.ts) forbids
- * http/https/fetch/net — none appear here.
+ * `child_process` (git, local), the `vscode` TYPE (compile-time only), and two
+ * sibling Tier-0 modules (`./session`, and `./preferences` for the shared
+ * `hasOptInMarker` opt-in predicate — the dependency-free leaf module, not
+ * `./auto-bootstrap`'s re-export, which would drag that orchestrator's whole
+ * scaffold/template-registry/epic-backfill/epic-manager/merge-refresh graph
+ * into this lean Layer-1 primitive; #2363). It makes zero network calls. The
+ * Tier-0 import-ban gate (tier0-import-ban.test.ts) forbids http/https/fetch/net
+ * — none appear here.
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -22,6 +33,7 @@ import { execFileSync } from 'child_process';
 import type * as vscode from 'vscode';
 
 import { loadSession, saveSession, type SessionType } from './session';
+import { hasOptInMarker } from './preferences';
 
 // ── Paired named constants (FR-3) — the ONE place these numbers live in TS ──────
 // STALE_SECS = 4 × HEARTBEAT_SECS. They are PAIRED: drift one without the other and
@@ -421,6 +433,12 @@ function gitOut(rootDir: string, args: string[]): string {
  * refreshes every HEARTBEAT_SECS, watches the directory for peers, and prunes dead
  * records on read. Construct once per `activate()`, `start()` on activation,
  * `stop()` on deactivate.
+ *
+ * Constitution invariant 3 (#2328): `activate()` constructs and starts this for
+ * EVERY window, opted in or not, so the opt-in check lives here rather than at the
+ * call site. In a folder with no `.minspec/` every method below is a filesystem
+ * no-op; with no folder open at all (`rootDir === ''`) `start()` does not even arm
+ * the timer.
  */
 export class SessionPresenceManager {
   readonly sessionId = randomUUID();
@@ -447,30 +465,80 @@ export class SessionPresenceManager {
     return path.join(this.sessionsDir, `${this.sessionId}.session.json`);
   }
 
+  /**
+   * Is there a folder open at all? With none, `activate()` hands us `''`, and
+   * `path.join('', '.minspec/sessions')` is a RELATIVE path that resolves against
+   * the extension host's working directory - an arbitrary folder nobody chose.
+   * Kept as its own check (used independently by `start()`, below) even though
+   * `hasOptInMarker` also treats `''` as not opted in.
+   */
+  private get hasRoot(): boolean {
+    return this.rootDir !== '';
+  }
+
+  /**
+   * The single opt-in gate for every write and delete below (constitution
+   * invariant 3): a folder is open AND it already carries the `.minspec/` marker.
+   * Reuses the project-wide predicate (`hasOptInMarker`, in the dependency-free
+   * `./preferences` leaf module) rather than a second definition of "is this a
+   * MinSpec project" (#2363 — `hasOptInMarker` already treats an empty root as
+   * not opted in, so this does not need its own empty-root special case).
+   *
+   * Re-evaluated on every call, never cached: a folder that opts in after
+   * activation (MinSpec: Initialize) starts heartbeating on the next tick, and one
+   * whose `.minspec/` is removed stops being written to.
+   */
+  private isOptedIn(): boolean {
+    return hasOptInMarker(this.rootDir);
+  }
+
   /** FR-3 — write the record immediately, then start the heartbeat + watcher. */
   start(): void {
+    // 0. No folder open ⇒ there is no project to be present in, and none can
+    //    appear under this root later. Report zero peers and arm nothing.
+    if (!this.hasRoot) {
+      this.maybeFireCount();
+      return;
+    }
     // 1. Persist sessionId into the singular .minspec/session.json so a shell
     //    agent's trailer + $MINSPEC_SESSION_ID resolve identically (FR-11).
-    try {
-      const s = loadSession(this.rootDir);
-      if (s && s.sessionId !== this.sessionId) {
-        saveSession(this.rootDir, { ...s, sessionId: this.sessionId });
+    //    Opted-in folders only: saveSession() creates .minspec/ when it is absent.
+    if (this.isOptedIn()) {
+      try {
+        const s = loadSession(this.rootDir);
+        if (s && s.sessionId !== this.sessionId) {
+          saveSession(this.rootDir, { ...s, sessionId: this.sessionId });
+        }
+      } catch {
+        /* best-effort — a missing/invalid session.json must not break activation */
       }
-    } catch {
-      /* best-effort — a missing/invalid session.json must not break activation */
     }
     // 2. Write the presence file immediately (before the interval) to shrink the
     //    live-but-unrecorded window to the activation instant.
     this.writeHeartbeat();
     // 3. Heartbeat interval — re-derive dynamic fields from the CURRENT session.json.
     //    unref() so the timer never keeps the process (or a test runner) alive.
+    //    Armed even when the folder is not opted in (each tick is then one
+    //    existsSync and no write) so that opting in later needs no window reload.
     this.timer = setInterval(() => {
       this.writeHeartbeat();
+      this.ensureWatcher(); // picks up a sessions/ dir that only now exists
       this.maybeFireCount();
     }, HEARTBEAT_SECS * 1000);
     this.timer.unref?.();
-    // 4. fs.watch for low-latency peer detection (FR-7); fall back to the 30s poll
-    //    if it throws (tmpfs quirks on some CI runners).
+    // 4. fs.watch for low-latency peer detection (FR-7).
+    this.ensureWatcher();
+    this.maybeFireCount();
+  }
+
+  /**
+   * FR-7 — watch the sessions dir for peers; fall back to the 30s poll if fs.watch
+   * throws (tmpfs quirks on some CI runners, or the dir not existing because the
+   * folder has not opted in). Idempotent: a no-op once a watcher is live. fs.watch
+   * only observes - it creates nothing.
+   */
+  private ensureWatcher(): void {
+    if (this.watcher) return;
     try {
       this.watcher = fs.watch(this.sessionsDir, () => {
         if (this.watchDebounce) clearTimeout(this.watchDebounce);
@@ -480,7 +548,6 @@ export class SessionPresenceManager {
     } catch {
       this.watcher = undefined; // FR-7 fallback: heartbeat poll drives maybeFireCount
     }
-    this.maybeFireCount();
   }
 
   /** VS Code Disposable alias so the manager can be pushed to `context.subscriptions`. */
@@ -512,7 +579,9 @@ export class SessionPresenceManager {
     }
     this.watcher = undefined;
     try {
-      fs.unlinkSync(this.ownFile);
+      // Gated like every other write: with no folder open, ownFile is a path
+      // relative to the working directory, which is not ours to delete from.
+      if (this.isOptedIn()) fs.unlinkSync(this.ownFile);
     } catch {
       /* crash/SIGKILL leaves the file; FR-4's 120s + kill-0 evict it */
     }
@@ -526,9 +595,14 @@ export class SessionPresenceManager {
   /**
    * FR-4 — prune dead records (best-effort unlink), exclude self, return the OTHER
    * live sessions. Never throws.
+   *
+   * Pruning is a delete, so it is gated too: outside an opted-in folder there are
+   * no peers to report and nothing here may be removed (with no folder open the
+   * read itself would be of the working directory's `.minspec/sessions`).
    */
   getActiveSessions(now = Date.now()): SessionPresenceRecord[] {
     const out: SessionPresenceRecord[] = [];
+    if (!this.isOptedIn()) return out;
     for (const { rec, file } of readAllRecords(this.rootDir)) {
       let dead: boolean;
       try {
@@ -550,12 +624,20 @@ export class SessionPresenceManager {
     return out;
   }
 
-  /** Atomic heartbeat write (temp + rename) so a reader never sees a half-written record. */
+  /**
+   * Atomic heartbeat write (temp + rename) so a reader never sees a half-written
+   * record. A no-op unless the folder is opted in (constitution invariant 3).
+   */
   private writeHeartbeat(): void {
+    if (!this.isOptedIn()) return; // never the thing that creates the opt-in marker
     try {
-      fs.mkdirSync(this.sessionsDir, { recursive: true });
-    } catch {
-      return; // can't create the dir ⇒ nothing to write (best-effort)
+      // Deliberately NOT `{ recursive: true }`: this may create `sessions/` inside
+      // an existing `.minspec/`, and must fail (ENOENT) rather than create
+      // `.minspec/` itself if the marker vanished between the check above and here.
+      fs.mkdirSync(this.sessionsDir);
+    } catch (e: unknown) {
+      // Already there is the normal case; anything else ⇒ nothing to write to.
+      if ((e as NodeJS.ErrnoException | undefined)?.code !== 'EEXIST') return;
     }
     const s = loadSession(this.rootDir);
     const record: SessionPresenceRecord = {

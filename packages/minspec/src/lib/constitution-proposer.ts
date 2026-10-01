@@ -18,7 +18,9 @@
  *    content is left byte-untouched. Re-running adds only what is absent
  *    (idempotent / additive).
  *  - INV-4 Degrade, never block. {@link buildSeedProposal} returns ≥1 candidate
- *    for any non-empty manifest; integrate never produces an empty constitution.
+ *    for any non-empty manifest, so integrating that proposal never leaves the
+ *    constitution BARE. Bare is not the FR-6 nudge's `empty`, which stays true
+ *    for a DRAFT-only one (see `seedConstitution` in scaffold.ts, #1546).
  *
  * Pure logic, no vscode dependency.
  */
