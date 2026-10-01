@@ -51,7 +51,7 @@ import {
   linkToSpecCommand,
 } from './views/codelens-provider';
 import { maybeShowNudge, recordInstallTimestamp, exportTraceability, setupConformanceWatcher } from './lib/bridge';
-import { runBootstrap, isWatchedGitPath, type BootstrapVsCode } from './lib/auto-bootstrap';
+import { runBootstrap, isWatchedGitPath, isMinspecInitialized, type BootstrapVsCode } from './lib/auto-bootstrap';
 import { findActiveSpec, trackActiveSpecEditor } from './lib/active-spec';
 import { parseSpec } from './lib/spec';
 import { loadConfig, resolveAndValidate } from './lib/config';
@@ -113,7 +113,12 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // ─── Session presence heartbeat (SPEC-026 FR-1..7) ──────────────────────────
   // Writes .minspec/sessions/<uuid>.session.json immediately, refreshes it every
-  // 30s, and prunes dead peers on read. This is the load-bearing prerequisite for
+  // 30s, and prunes dead peers on read - but ONLY in a folder that already has
+  // .minspec/ at its root. Activation runs in every window, so this is started
+  // unconditionally and the manager itself enforces the opt-in (constitution
+  // invariant 3, #2328): no .minspec/ ⇒ no write, no mkdir, no delete; no folder
+  // open (workspaceRoot === '') ⇒ not even a timer. A folder that opts in later
+  // begins heartbeating on the next tick. Where it runs, this is the prerequisite for
   // the drain's presence-gated fast-forward: with no heartbeat running,
   // isCheckoutOccupied is always TRUE ⇒ every shared checkout stays fetch-only
   // (exactly today's safe behaviour). Tier-0 / offline — fs + git + crypto only.
@@ -122,7 +127,24 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(presence); // FR-6 — presence.dispose() → stop() (never throws)
   // FR-11: expose this session's id to shell-driven agents in the integrated
   // terminal so their commit trailer / gate self-identify with the same id.
-  context.environmentVariableCollection?.replace('MINSPEC_SESSION_ID', presence.sessionId);
+  //
+  // Gated on the SAME opt-in predicate `presence.ts` uses (constitution
+  // invariant 3, #2356): a folder with no `.minspec/` — or no folder open at
+  // all — must see NO extension side effect, and a contributed terminal env
+  // var is one: VS Code surfaces it in the terminal UI, so a user who merely
+  // installed the extension would see it in unrelated projects. Re-run after
+  // `MinSpec: Initialize` (both the direct command and auto-bootstrap's
+  // `executeCommand` path run through the same registration) so a folder that
+  // opts in during this activation starts carrying the var without a window
+  // reload, matching presence's "opts in later" guarantee.
+  const syncSessionIdEnvVar = (): void => {
+    if (workspaceRoot !== '' && isMinspecInitialized(workspaceRoot)) {
+      context.environmentVariableCollection?.replace('MINSPEC_SESSION_ID', presence.sessionId);
+    } else {
+      context.environmentVariableCollection?.delete('MINSPEC_SESSION_ID');
+    }
+  };
+  syncSessionIdEnvVar();
 
   // Active spec panel
   const specPanel = new SpecPanel();
@@ -342,6 +364,7 @@ export function activate(context: vscode.ExtensionContext): void {
       async (folderArg?: string, deps?: Parameters<typeof initCommand>[1]) => {
         await initCommand(folderArg, deps);
         refreshScaffoldCommitStatusBar();
+        syncSessionIdEnvVar(); // #2356: a folder that just opted in gets the var now, not on next reload
       },
     ),
     vscode.commands.registerCommand(
@@ -349,6 +372,7 @@ export function activate(context: vscode.ExtensionContext): void {
       async (folderArg?: string, deps?: Parameters<typeof initRefreshCommand>[1]) => {
         await initRefreshCommand(folderArg, deps);
         refreshScaffoldCommitStatusBar();
+        syncSessionIdEnvVar(); // #2356: harmless re-sync; initRefresh can also run on a not-yet-opted-in folder
       },
     ),
     vscode.commands.registerCommand('minspec.commitHarnessRefresh', async (folderArg?: string) => {
@@ -635,6 +659,10 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.workspace
         .getConfiguration('minspec')
         .get<boolean>(key, false) === true,
+    // #2355: where an answer is remembered for a folder with no `.minspec/`.
+    // The alternative store is `.minspec/preferences.json`, and writing it there
+    // would create the opt-in marker in a folder that just declined to opt in.
+    preOptInMemory: context.workspaceState,
   };
   for (const folder of vscode.workspace.workspaceFolders ?? []) {
     void runBootstrap(folder.uri.fsPath, bootstrapVsCode);

@@ -94,10 +94,16 @@ const COMMIT_ANYWAY_ACTION = 'Commit here anyway';
  * section-merge templates (CLAUDE.md, AGENTS.md, .cursorrules,
  * .minspec/constitution.md) plus the managed-region templates (CI workflow,
  * git hooks, and the tool-gated Spec Kit slash-command shims), and
- * `.gitignore` (init/refresh append the ephemeral-state entries).
+ * `.gitignore` / `.gitattributes` (init/refresh append the ephemeral-state
+ * entries and the executed-file LF pin, respectively — #2398).
  */
 const SCAFFOLD_PATHSPECS: readonly string[] = [
   '.gitignore',
+  // The LF pin for executed hooks/scripts/workflows (#2398) — written alongside
+  // .gitignore by the same ensureGitattributesEntries() call, and staged for the
+  // same reason: left uncommitted, it protects nothing until a human commits it
+  // separately, which is exactly the gap that let the CRLF breakage go unnoticed.
+  '.gitattributes',
   // scaffold()-authored, non-template, non-gitignored managed files (#610).
   '.minspec/config.json',
   'docs/epics/INDEX.md',

@@ -109,7 +109,16 @@ resolve_go_bin() {
     command -v go
     return 0
   fi
-  for _cand in "$HOME"/.local/opt/go*/bin/go; do
+  # Sorted by version (`sort -rV`, newest first), not left to raw glob expansion:
+  # shell glob order is locale COLLATION, not version order, so with several legacy
+  # toolchains side by side an unsorted `for` picks whichever collates first (a
+  # simple two-way go1.9/go1.10 pair happens to still land on the newer of the two,
+  # by coincidence of digit count — but add a third, go1.11, and collation-first
+  # picks go1.10, not the true newest go1.11 (#1867)). An unmatched glob still
+  # expands to the literal pattern; `sort -rV` passes a single word straight
+  # through, so the `[ -x "$_cand" ]` test below is still what decides, exactly
+  # as it did before this loop had a sort in front of it.
+  for _cand in $(printf '%s\n' "$HOME"/.local/opt/go*/bin/go | sort -rV); do
     if [ -x "$_cand" ]; then
       printf '%s\n' "$_cand"
       return 0
