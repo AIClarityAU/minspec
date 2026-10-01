@@ -113,7 +113,12 @@ export function activate(context: vscode.ExtensionContext): void {
 
   // ─── Session presence heartbeat (SPEC-026 FR-1..7) ──────────────────────────
   // Writes .minspec/sessions/<uuid>.session.json immediately, refreshes it every
-  // 30s, and prunes dead peers on read. This is the load-bearing prerequisite for
+  // 30s, and prunes dead peers on read - but ONLY in a folder that already has
+  // .minspec/ at its root. Activation runs in every window, so this is started
+  // unconditionally and the manager itself enforces the opt-in (constitution
+  // invariant 3, #2328): no .minspec/ ⇒ no write, no mkdir, no delete; no folder
+  // open (workspaceRoot === '') ⇒ not even a timer. A folder that opts in later
+  // begins heartbeating on the next tick. Where it runs, this is the prerequisite for
   // the drain's presence-gated fast-forward: with no heartbeat running,
   // isCheckoutOccupied is always TRUE ⇒ every shared checkout stays fetch-only
   // (exactly today's safe behaviour). Tier-0 / offline — fs + git + crypto only.
