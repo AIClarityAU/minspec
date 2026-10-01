@@ -2,9 +2,9 @@
  * T0 - SPEC-086 FR-9: MinSpec does not recommend ScroogeLLM, and what recommended it
  * cannot come back unnoticed.
  *
- * MinSpec used to show an install prompt for ScroogeLLM, a product that is shelved and was
- * never published (issue #2205). SPEC-086 removed the prompt, the probe of the user's
- * other AI tools that worded it, the conformance export built for ScroogeLLM to read, two
+ * MinSpec used to show an install prompt for ScroogeLLM, a product that is shelved and is
+ * not published (issue #2205). SPEC-086 removed the prompt, the probe of the user's other
+ * AI tools that worded it, the conformance export built for ScroogeLLM to read, two
  * settings and a command. This file is the gate that keeps them out.
  *
  * WHAT THIS PINS
@@ -19,7 +19,8 @@
  *      nowhere in it, comments included. And no string the shipped code holds names the
  *      product or a retired id. A string is the only way source can put a message, a
  *      link, a setting key or a stored-state key in front of a user, so this also catches
- *      a prompt whose wording lives in code.
+ *      a prompt whose wording lives in code. A bundled file that is not TypeScript (a JSON
+ *      asset, say) is read whole.
  *   4. The extension pack. `packages/extension-pack` names the product by design until
  *      its retirement is decided (issue #2359), so it must stay impossible to package
  *      through its scripts: `private: true`, and a `package` script that can only refuse.
@@ -244,8 +245,14 @@ function installTargetFindings(where: string, source: string): Finding[] {
   return checkLines(where, source, INSTALL_TARGET_RULES);
 }
 
-/** 3b. A string the code holds that names the product or a retired id. */
-function literalFindings(where: string, source: string): Finding[] {
+/**
+ * 3b. Text the shipped code holds that names the product or a retired id. In TypeScript
+ * that is every string and template literal, and never a comment. Any other file bundled
+ * from a source tree (a JSON asset, say) has no comments to leave alone, so every line of
+ * it counts.
+ */
+function heldTextFindings(where: string, source: string): Finding[] {
+  if (!where.endsWith('.ts')) return checkLines(where, source, SURFACE_RULES);
   return stringLiterals(where, source).flatMap(({ line, text }) =>
     check(`${where}:${line}`, text, SURFACE_RULES),
   );
@@ -392,15 +399,14 @@ describe('the listing text does not name ScroogeLLM (SPEC-086 FR-9)', () => {
 
 describe('the bundled source cannot put ScroogeLLM in front of a user (SPEC-086 FR-1, FR-3, FR-4, FR-9)', () => {
   const everyFile = SOURCE_ROOTS.flatMap(root => filesUnder(root));
-  const shippedTypeScript = SOURCE_ROOTS.flatMap(root => filesUnder(root, NOT_SHIPPED)).filter(file =>
-    file.endsWith('.ts'),
-  );
+  const shipped = SOURCE_ROOTS.flatMap(root => filesUnder(root, NOT_SHIPPED));
 
   it('reads the source trees rather than an empty list', () => {
     expect(everyFile.length).toBeGreaterThan(100);
-    expect(shippedTypeScript.length).toBeGreaterThan(100);
-    expect(shippedTypeScript.map(rel)).toContain('packages/minspec/src/extension.ts');
-    expect(shippedTypeScript.map(rel)).toContain('packages/shared/src/index.ts');
+    expect(shipped.length).toBeGreaterThan(100);
+    expect(everyFile.length).toBeGreaterThan(shipped.length);
+    expect(shipped.map(rel)).toContain('packages/minspec/src/extension.ts');
+    expect(shipped.map(rel)).toContain('packages/shared/src/index.ts');
   });
 
   it(
@@ -421,7 +427,7 @@ describe('the bundled source cannot put ScroogeLLM in front of a user (SPEC-086 
   it(
     'no string the shipped code holds names the product or a retired id',
     () => {
-      expect(shippedTypeScript.flatMap(file => literalFindings(rel(file), read(file)))).toEqual([]);
+      expect(shipped.flatMap(file => heldTextFindings(rel(file), read(file)))).toEqual([]);
     },
     SLOW,
   );
@@ -631,7 +637,13 @@ describe('the source checks see an install target and a string, and leave the me
     ['a read of the retired conformance setting', "const on = config.get<boolean>('conformance.enabled', false);"],
     ['a registration of the retired command', "vscode.commands.registerCommand('minspec.exportTraceability', run);"],
   ])('flags %s', (_name, line) => {
-    expect(literalFindings('lib/example.ts', `${line}\n`).map(finding => finding.where)).toEqual(['lib/example.ts:1']);
+    expect(heldTextFindings('lib/example.ts', `${line}\n`).map(finding => finding.where)).toEqual(['lib/example.ts:1']);
+  });
+
+  it('reads every line of a bundled file that is not TypeScript', () => {
+    const asset = '{\n  "tip": "Install ScroogeLLM next."\n}\n';
+    expect(heldTextFindings('lib/tips.json', asset).map(finding => finding.where)).toEqual(['lib/tips.json:2']);
+    expect(heldTextFindings('lib/tips.json', '{\n  "tip": "Spec before code."\n}\n')).toEqual([]);
   });
 
   // The kinds of mention SPEC-086 lists under "Mentions that are not upsell and stay".
@@ -649,7 +661,7 @@ describe('the source checks see an install target and a string, and leave the me
 
   it('does not flag a comment that names the scroogellm repository or uses it as an example slug', () => {
     expect(installTargetFindings('lib/example.ts', mentionsThatStay)).toEqual([]);
-    expect(literalFindings('lib/example.ts', mentionsThatStay)).toEqual([]);
+    expect(heldTextFindings('lib/example.ts', mentionsThatStay)).toEqual([]);
   });
 
   it('that sample really does mention the product, so the two results above are not trivially empty', () => {
