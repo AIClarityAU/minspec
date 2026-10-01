@@ -21,8 +21,16 @@
  * paths, so this drift cannot itself cause a wrong discard; it can only
  * over-report `ORPHAN` in the extension's UI the same way the bash script did
  * before #2068):
- *   REDUNDANT  the dirty path's content is byte-identical to `origin/<default>`'s
- *              version, or is locally deleted and absent there too. Carries no
+ *   REDUNDANT  the dirty path's content is the same as `origin/<default>`'s
+ *              version by git's own notion of "same" — the blob id `git
+ *              hash-object` would assign the working-tree file matches the
+ *              blob id already on origin (#2472: NOT raw byte equality — a
+ *              `core.autocrlf=true` checkout converts line endings on write,
+ *              so the working-tree bytes and the committed blob's bytes
+ *              differ even when git itself considers the content identical;
+ *              comparing blob ids, which is what `hash-object` reproduces,
+ *              stays correct there and is still byte-exact for binary files)
+ *              — or is locally deleted and absent there too. Carries no
  *              information — safe to discard, because the eventual sanctioned
  *              fast-forward (`sync_shared_checkouts()`, DR-065) reproduces it.
  *   ORPHAN     content differs (or exists only on one side in a way that isn't
@@ -160,16 +168,32 @@ function gitOk(rootDir: string, args: string[]): boolean {
   }
 }
 
-/** Raw bytes of `ref:path`, or null on any failure (missing ref, missing path, …). */
-function gitShowBytes(rootDir: string, ref: string, relPath: string): Buffer | null {
-  try {
-    return execFileSync('git', ['show', `${ref}:${relPath}`], {
-      cwd: rootDir,
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-  } catch {
-    return null;
-  }
+/**
+ * The blob id `ref:relPath` already has, or null if it doesn't resolve
+ * (missing ref, missing path, …). A blob id is content-addressed — two paths
+ * with the same id are provably the same content, with no byte comparison
+ * needed.
+ */
+function gitBlobId(rootDir: string, ref: string, relPath: string): string | null {
+  return gitOut(rootDir, ['rev-parse', '--verify', '-q', `${ref}:${relPath}`]) || null;
+}
+
+/**
+ * #2472: the blob id git would assign `relPath` if it were added/committed
+ * from the working tree RIGHT NOW. Critically, `hash-object` runs the same
+ * clean filters a real `git add` would — CRLF→LF normalization under
+ * `core.autocrlf=true`/`.gitattributes` `text` rules included — so this
+ * matches a blob already on `origin` whenever git itself would consider the
+ * content identical, even when the raw working-tree bytes differ from the
+ * committed blob's bytes (the CRLF-checkout case the plain byte comparison
+ * this replaced got wrong). Still byte-exact for binary files: `hash-object`
+ * only converts paths git's own attributes mark as text. `relPath` is passed
+ * relative to `rootDir` (not an absolute path) so any path-scoped
+ * `.gitattributes` rule resolves against the same tree git would use for a
+ * real commit. Null on any failure (unreadable path, not a file, …).
+ */
+function gitWorkingTreeBlobId(rootDir: string, relPath: string): string | null {
+  return gitOut(rootDir, ['hash-object', '--', relPath]) || null;
 }
 
 /**
@@ -255,11 +279,12 @@ export function classifyPrimary(rootDir: string): PrimaryClassification | null {
       if (!existsUpstream) {
         kind = 'ORPHAN'; // content not on origin at all
       } else {
-        const upstreamBytes = gitShowBytes(topLevel, originRef, p);
-        const localBytes = safeReadFile(path.join(topLevel, p));
-        // Any read failure ⇒ can't prove equality ⇒ ORPHAN (fail toward keeping
-        // it, mirroring isCheckoutOccupied's "any error ⇒ occupied" direction).
-        kind = upstreamBytes !== null && localBytes !== null && upstreamBytes.equals(localBytes)
+        const upstreamBlobId = gitBlobId(topLevel, originRef, p);
+        const localBlobId = gitWorkingTreeBlobId(topLevel, p);
+        // Any lookup failure ⇒ can't prove equality ⇒ ORPHAN (fail toward
+        // keeping it, mirroring isCheckoutOccupied's "any error ⇒ occupied"
+        // direction).
+        kind = upstreamBlobId !== null && localBlobId !== null && upstreamBlobId === localBlobId
           ? 'REDUNDANT'
           : 'ORPHAN';
       }
@@ -272,14 +297,6 @@ export function classifyPrimary(rootDir: string): PrimaryClassification | null {
   }
 
   return { ...empty, originRef, behind, ahead, redundant, orphans };
-}
-
-function safeReadFile(absPath: string): Buffer | null {
-  try {
-    return fs.readFileSync(absPath);
-  } catch {
-    return null;
-  }
 }
 
 /**

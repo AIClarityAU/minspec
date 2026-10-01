@@ -240,6 +240,46 @@ describe('classifyPrimary', () => {
     expect(a?.existsUpstream).toBe(true);
   });
 
+  // #2472: a `core.autocrlf=true` checkout (git's Windows default) writes
+  // CRLF line endings to the working tree even though the blob git stores
+  // (and origin's blob) is LF — so a plain byte comparison of the
+  // working-tree file against `origin/<default>`'s blob never matches, even
+  // when the text is identical. The fix compares blob ids (`git
+  // hash-object`, which applies the same clean filter a real `git add`
+  // would) instead of raw bytes. Mirrors the issue's own measured table:
+  // "origin moves ahead by one commit that adds a line to doc.md; the
+  // clone... edits its doc.md to exactly the content origin now holds."
+  it('#2472 classifies a CRLF working-tree copy as REDUNDANT when its content matches an LF origin blob (core.autocrlf=true)', () => {
+    const { primary } = buildLandedElsewhereFixture();
+    // Reproduce `core.autocrlf=true` taking effect in THIS checkout (git's
+    // Windows default; also settable on Linux, which is where this suite
+    // runs — the issue's own "Measured" section used the same approach).
+    // `hash-object`'s clean-filter behaviour reads this live, not a
+    // snapshot taken at clone time, so setting it now (rather than only at
+    // `initRepo`) is sufficient to exercise the fix.
+    runGit(['config', 'core.autocrlf', 'true'], primary);
+
+    // d.txt already diverged upstream in buildLandedElsewhereFixture (origin
+    // holds 'd-upstream\n'). Overwrite the working copy with the IDENTICAL
+    // text, but CRLF line endings — the exact "same content, different
+    // bytes" shape the issue describes, built directly with `fs` (not `git
+    // checkout`) so the raw bytes on disk are deterministic regardless of
+    // this test runner's own autocrlf setting.
+    fs.writeFileSync(path.join(primary, 'd.txt'), 'd-upstream\r\n', 'utf-8');
+
+    const result = classifyPrimary(primary)!;
+    const d = result.redundant.find((c) => c.path === 'd.txt') ?? result.orphans.find((c) => c.path === 'd.txt');
+    expect(d?.kind).toBe('REDUNDANT');
+    expect(d?.existsLocally).toBe(true);
+    expect(d?.existsUpstream).toBe(true);
+    // Ground truth: the raw bytes are NOT equal (CRLF vs LF) — proving this
+    // passed because of blob-id comparison, not because the fixture
+    // accidentally produced byte-identical content.
+    expect(fs.readFileSync(path.join(primary, 'd.txt'))).not.toEqual(
+      execFileSync('git', ['show', 'origin/main:d.txt'], { cwd: primary }),
+    );
+  });
+
   it('reports off-default-branch and skips classification entirely', () => {
     const { primary } = buildLandedElsewhereFixture();
     runGit(['checkout', '-b', 'feature/x'], primary);
