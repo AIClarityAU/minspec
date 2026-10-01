@@ -527,6 +527,13 @@ export function activate(context: vscode.ExtensionContext): void {
   // Guard against self-trigger: regenerateDrIndex writes INDEX.md, which is a
   // *.md under decisionsDir and would re-fire the watcher → infinite loop.
   // Debounce coalesces bursts (e.g. multi-file save) into one regenerate.
+  //
+  // Opt-in gate (#2461): a folder with no `.minspec/` never asked MinSpec to
+  // manage its decisions directory (constitution invariant 3 — blast radius).
+  // The watcher itself is unconditional (cheap, in-memory), but the *write* is
+  // re-checked every time the debounced timer fires, not once at activation,
+  // so a folder that runs `MinSpec: Initialize` mid-session starts getting an
+  // index without a window reload, and a folder that never does never gets one.
   let adrIndexTimer: ReturnType<typeof setTimeout> | undefined;
   const onAdrsChanged = (uri?: vscode.Uri) => {
     adrTreeProvider.refresh();
@@ -536,6 +543,7 @@ export function activate(context: vscode.ExtensionContext): void {
     if (!workspaceRoot) return;
     if (adrIndexTimer) clearTimeout(adrIndexTimer);
     adrIndexTimer = setTimeout(() => {
+      if (!isMinspecInitialized(workspaceRoot)) return;
       try {
         regenerateDrIndex(workspaceRoot, decisionsDir ? { decisionsDir } : undefined);
       } catch {
