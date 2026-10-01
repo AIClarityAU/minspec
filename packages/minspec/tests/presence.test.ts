@@ -313,18 +313,23 @@ describe('sameCheckout (#2403 — canonicalized checkout comparison)', () => {
     }
   });
 
-  it('isCheckoutOccupied is DORMANT for a differently-cased live record on a simulated win32 host', () => {
+  it('isCheckoutOccupied is OCCUPIED (not falsely DORMANT) for a differently-cased live record on a simulated win32 host', () => {
     // The regression this issue reports: on Windows, the SAME checkout can be
     // recorded with different drive-letter case, and the old `path.resolve`-only
     // compare (case-preserving) would treat that as "a different tree", find
-    // nobody, and let a destructive discard through (fail OPEN). This proves
-    // the opposite now holds for case-only differences once the comparison runs
-    // through the win32 branch of sameCheckout, by calling it directly the way
-    // isCheckoutOccupied's fail-safe matrix above already exercises the default
-    // (POSIX) path with real temp directories.
+    // nobody, and let a destructive discard through (fail OPEN). Unlike the
+    // `win32(...)` table test above — which calls `sameCheckout` directly — this
+    // one drives `isCheckoutOccupied` itself end-to-end: a real live record is
+    // written to a real temp sessions dir with a Windows-spelled `worktreeRoot`,
+    // and `isCheckoutOccupied` is asked about a DIFFERENTLY-cased spelling of the
+    // same folder, injecting the win32 `sameCheckoutDeps` seam so the comparison
+    // runs through the win32 branch on this Linux test runner.
     const recorded = 'C:\\Users\\jason\\code\\minspec';
     const editorReported = 'c:\\Users\\jason\\code\\minspec';
-    expect(win32(recorded, editorReported)).toBe(true); // ⇒ same checkout ⇒ OCCUPIED, not dormant
+    writeRecord(makeRecord({ worktreeRoot: recorded }));
+    expect(isCheckoutOccupied(root, editorReported, Date.now(), { platform: 'win32', realpathNative: neverResolves })).toBe(
+      true, // ⇒ same checkout ⇒ OCCUPIED, never falsely DORMANT
+    );
   });
 });
 

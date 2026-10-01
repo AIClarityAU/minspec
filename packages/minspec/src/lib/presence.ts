@@ -368,8 +368,20 @@ export function listWorktreeRoots(primaryRoot: string): string[] {
  * the OPPOSITE fail-direction from the FR-12 pre-commit backstop (which fails
  * OPEN/allow) — a false "unoccupied" mutates a live tree (unrecoverable), whereas a
  * false "occupied" only skips an ff (harmless, retried).
+ *
+ * `sameCheckoutDeps` (#2403) is the same injectable seam {@link sameCheckout} takes —
+ * production never passes it (real `process.platform` + real native realpath); tests
+ * use it to force the win32 comparison branch from Linux CI so the regression this
+ * function exists to close (a differently-cased Windows worktreeRoot record wrongly
+ * read as "a different tree" ⇒ false dormant ⇒ fail OPEN) is exercised through THIS
+ * function's own call chain, not just through `sameCheckout` directly.
  */
-export function isCheckoutOccupied(rootDir: string, worktreeRoot: string, now = Date.now()): boolean {
+export function isCheckoutOccupied(
+  rootDir: string,
+  worktreeRoot: string,
+  now = Date.now(),
+  sameCheckoutDeps: SameCheckoutDeps = {},
+): boolean {
   let entries: { rec: SessionPresenceRecord | null; file: string }[];
   try {
     entries = [];
@@ -389,7 +401,7 @@ export function isCheckoutOccupied(rootDir: string, worktreeRoot: string, now = 
     }
   }
   if (live.length === 0) return true; // no demonstrable live session ⇒ occupied
-  return live.some((r) => sameCheckout(r.worktreeRoot, worktreeRoot));
+  return live.some((r) => sameCheckout(r.worktreeRoot, worktreeRoot, sameCheckoutDeps));
 }
 
 /**
