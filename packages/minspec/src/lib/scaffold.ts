@@ -48,9 +48,16 @@ const CONSTITUTION_REL_PATH = TEMPLATE_OUTPUT_PATHS['constitution.md'];
 
 /**
  * SPEC-025 FR-4/FR-5: seed the constitution with deterministic DRAFT entries so
- * it is never empty (INV-4). Reads the current constitution, runs the offline
+ * it is not left BARE (INV-4). Reads the current constitution, runs the offline
  * seed provider over the assembled context manifest, integrates additively
  * (never overwriting human content, idempotent), and writes the result back.
+ *
+ * BARE, not empty: where INV-4/FR-5 say "never empty", "empty" means left as
+ * template placeholders only. The FR-6 nudge's `empty` (`isAllTemplate` in
+ * constitution-nudge.ts) is a different predicate: a DRAFT-only constitution
+ * still reads as all-template there, until it holds a non-DRAFT list item (a
+ * rule a human wrote or accepted). Both are correct by design; do not merge
+ * them (#1546).
  *
  * SPEC-043 D8: `seedConstitution` NO LONGER feeds the hash manifest. It writes
  * `constitution.md` and returns; the manifest is recorded once, LAST, from the
@@ -1413,8 +1420,9 @@ export function generateHarnessFiles(rootDir: string): string[] {
   }
 
   // SPEC-025 FR-4/FR-5: seed the freshly written constitution so first-init is
-  // never empty. Best-effort — a proposer failure must never break init. Writes
-  // the file only; no longer a manifest source (SPEC-043 D8).
+  // not left bare (bare, not the FR-6 nudge's `empty`: see `seedConstitution`).
+  // Best-effort — a proposer failure must never break init. Writes the file
+  // only; no longer a manifest source (SPEC-043 D8).
   try {
     seedConstitution(rootDir);
   } catch {
