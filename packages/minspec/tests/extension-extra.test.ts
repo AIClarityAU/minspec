@@ -310,7 +310,7 @@ function makeMockContext(overrides: Partial<Record<string, any>> = {}) {
     globalState: { get: vi.fn(() => undefined), update: vi.fn() },
     workspaceState: { get: vi.fn((_k: string, def: any) => def), update: vi.fn() },
     // SPEC-026 FR-11: activate() sets MINSPEC_SESSION_ID via this collection.
-    environmentVariableCollection: { replace: vi.fn(), append: vi.fn(), prepend: vi.fn(), clear: vi.fn() },
+    environmentVariableCollection: { replace: vi.fn(), append: vi.fn(), prepend: vi.fn(), delete: vi.fn(), clear: vi.fn() },
     ...overrides,
   } as unknown as vscode.ExtensionContext;
 }
@@ -855,6 +855,27 @@ describe('refresh-wrapping command callbacks', () => {
     expect(panelDisposable).toBeDefined();
     panelDisposable.dispose();
     expect(mockSpecPanel.dispose).toHaveBeenCalled();
+  });
+});
+
+// ===========================================================================
+// #2355: the bootstrap toast remembers a pre-opt-in answer in workspaceState
+// ===========================================================================
+
+describe('auto-bootstrap host wiring (#2355)', () => {
+  it('hands runBootstrap the workspaceState as its pre-opt-in memory, for every folder', async () => {
+    const { runBootstrap } = await import('../src/lib/auto-bootstrap');
+    const ctx = makeMockContext();
+    activate(ctx);
+
+    // Without this the answer to the "not initialized" toast has nowhere to live
+    // except a file in the folder, and the toast would return on every activation.
+    const calls = vi.mocked(runBootstrap).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    for (const [folder, host] of calls) {
+      expect(folder).toBe('/tmp/test-workspace');
+      expect(host.preOptInMemory).toBe(ctx.workspaceState);
+    }
   });
 });
 

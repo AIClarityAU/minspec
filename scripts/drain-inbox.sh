@@ -895,19 +895,28 @@ reconcile_labels() {
 # gh's stderr is deliberately NOT redirected — the message that would have named the
 # cause ("please run: gh auth login") was being discarded.
 #
-# The limit is EXPLICIT and announced. `gh issue list` caps at 30 by default and
-# says nothing, so the queue this loop has always enumerated was the first 30 per
-# label — a silent cap that reads as the whole queue. Pinning it here changes no
-# behaviour (30 is what it already was) while making the number a decision someone
-# made rather than a default nobody saw, and the caller warns when a result lands
-# exactly on the cap. Raising it is tracked separately: it is a dispatch-VOLUME
-# decision, not a correctness one, and does not belong in the same change as a
-# fail-loud fix.
-_ready_limit="${MINSPEC_DRAIN_QUEUE_LIMIT:-30}"
+# The FETCH is deliberately uncapped in practice (#2197). It used to carry the same
+# cap that gated dispatch volume, which meant the #2196 ranker only ever saw the
+# newest `_dispatch_cap` issues per label — `gh issue list` returns newest first, so
+# an older, higher-value issue could never even become a candidate, however it would
+# have ranked. The read and the dispatch-volume decision are two different questions;
+# capping at read time answered both with one number and got the first one wrong.
+#
+# `_ready_fetch_limit` is still EXPLICIT and announced, for the reason the old cap
+# was too: `gh issue list` defaults to 30 and says nothing, so an uncapped-looking
+# call still needs a real number, or it silently becomes the same bug one zero later.
+# The caller warns when a result lands exactly on this fetch limit.
+_ready_fetch_limit="${MINSPEC_DRAIN_QUEUE_FETCH_LIMIT:-1000}"
 _ready_numbers() {
-  gh issue list --repo "$REPO" --label "$1" --limit "$_ready_limit" \
+  gh issue list --repo "$REPO" --label "$1" --limit "$_ready_fetch_limit" \
     --json number --jq '.[].number'
 }
+
+# _dispatch_cap — how many issues this CYCLE dispatches, applied AFTER ranking
+# (#2197) rather than at the read above. Same env var and default as the old
+# read-time cap (MINSPEC_DRAIN_QUEUE_LIMIT, 30): the knob a human already knows
+# didn't need a new name, only a new point of application.
+_dispatch_cap="${MINSPEC_DRAIN_QUEUE_LIMIT:-30}"
 
 # _read_queue <varname> <label> — read one label's queue INTO a named variable, and
 # recover from a DEAD CREDENTIAL once before giving up.
@@ -948,9 +957,10 @@ _read_queue() {
 
 run_cycle() {
   local inbox_issues all_ready n out drc cap
-  local inbox_rc ready_rc ready_full ready_spec _lbl
+  local inbox_rc ready_rc ready_full ready_spec _lbl ready_total
   local ac_halt ac_sig
   local quota_verdict
+  local triage_out triage_rc just_labeled_ready
 
   # Admission control: never START a cycle the quota window cannot finish. This
   # runs before ensure_fresh_run_dir so a deferred cycle costs nothing at all —
@@ -1006,11 +1016,26 @@ run_cycle() {
     echo "[drain]          That is NOT an empty inbox. See the gh error above for the cause." >&2
     inbox_issues=""
   fi
+  # #1855 item 4 — a sanity floor: if triage stamps an issue agent-ready /
+  # agent-ready-specify and the ready-set query two steps down comes back empty,
+  # those two disagree with each other IN THE SAME CYCLE, which is a stronger
+  # signal than either read alone (a stale credential could still make both wrong
+  # together, but a read-after-write lag on just the second query cannot). Detected
+  # from triage's own success line ("  → #<n>: agent-ready[-specify] ..."), not by
+  # re-querying — a second query is exactly the kind of read this bug is about.
+  just_labeled_ready=0
   if [[ -n "$inbox_issues" ]]; then
     echo "[drain] triaging $(echo "$inbox_issues" | wc -l | tr -d ' ') inbox issue(s)..."
     for n in $inbox_issues; do
       echo "[drain] triaging #$n..."
-      "$TRIAGE" "$n" || echo "[drain] WARNING: triage failed for #$n"
+      triage_rc=0
+      triage_out="$("$TRIAGE" "$n" 2>&1)" || triage_rc=$?
+      printf '%s\n' "$triage_out"
+      if (( triage_rc != 0 )); then
+        echo "[drain] WARNING: triage failed for #$n"
+      elif [[ "$triage_out" == *"→ #${n}: agent-ready"* ]]; then
+        just_labeled_ready=1
+      fi
     done
   fi
 
@@ -1038,17 +1063,27 @@ run_cycle() {
     echo "[drain]          Nothing was dispatched this cycle. See the gh error above." >&2
     return 1
   fi
-  # No silent caps: a label that came back exactly at the limit is almost certainly
-  # truncated, and the difference between "30 ready" and "30 of 119 ready" changes
-  # what a reader does about it.
+  # No silent caps on the READ: a label that came back exactly at the FETCH limit is
+  # almost certainly truncated, and the difference between "1000 ready" and "1000 of
+  # 4000 ready" changes what a reader does about it. This is the read-time sibling of
+  # the dispatch-time cap NOTE below (#2197) — different limit, different number,
+  # same reason: a cap that says nothing looks exactly like the whole queue.
   for _lbl in "agent-ready:$ready_full" "agent-ready-specify:$ready_spec"; do
-    if [[ "$(printf '%s' "${_lbl#*:}" | grep -c . || true)" == "$_ready_limit" ]]; then  # swallow-ok: grep -c exits 1 on zero matches, which cannot equal a positive limit — the comparison below is the decision, not this status
-      echo "[drain] NOTE: '${_lbl%%:*}' returned exactly ${_ready_limit} issue(s) — the query cap." >&2
-      echo "[drain]       The real queue is probably longer. Raise MINSPEC_DRAIN_QUEUE_LIMIT to see it." >&2
+    if [[ "$(printf '%s' "${_lbl#*:}" | grep -c . || true)" == "$_ready_fetch_limit" ]]; then  # swallow-ok: grep -c exits 1 on zero matches, which cannot equal a positive limit — the comparison below is the decision, not this status
+      echo "[drain] NOTE: '${_lbl%%:*}' returned exactly ${_ready_fetch_limit} issue(s) — the fetch cap." >&2
+      echo "[drain]       The real queue is probably longer. Raise MINSPEC_DRAIN_QUEUE_FETCH_LIMIT to see it." >&2
     fi
   done
   all_ready="$(printf '%s\n%s\n' "$ready_full" "$ready_spec" | sed '/^$/d' | sort -un)"
   if [[ -z "$all_ready" ]]; then
+    # The contradiction is reported ALONGSIDE "cycle done", not instead of it: the
+    # query itself succeeded (ready_rc==0, checked above), so this is not the #1855
+    # failed-query case and must not return non-zero for it — that would turn a
+    # possible read-after-write lag into a false backoff. It is still loud, on its
+    # own distinguishable line, independent of the exit status this cycle ends with.
+    if (( just_labeled_ready )); then
+      echo "[drain] CONTRADICTION: triage just labelled at least one issue agent-ready / agent-ready-specify this cycle, but the ready-set query below came back empty (#1855 sanity floor) — treat the 'cycle done' line with suspicion." >&2
+    fi
     echo "[drain] no agent-ready / agent-ready-specify issues after triage — cycle done."
     return 0
   fi
@@ -1088,6 +1123,23 @@ run_cycle() {
   else
     all_ready="$rank_out"
     echo "[drain] dispatch order ranked by value (#2196): $(printf '%s' "$all_ready" | tr '\n' ' ')"
+  fi
+
+  # Apply the dispatch cap HERE — after ranking, not at the read above (#2197). The
+  # full ready set was fetched and fully ranked (or, on a ranker failure, fully
+  # ordered numerically); only the BATCH this cycle actually dispatches is trimmed to
+  # size. Nothing is dropped: the untrimmed issues stay labelled agent-ready and are
+  # read, ranked, and reconsidered again next cycle — deferred by value, not silently
+  # lost. `head` on an already-ordered list keeps the first N, which is the top N by
+  # rank (or the lowest-numbered N on a numeric-order fallback).
+  #
+  # This NOTE is the dispatch-time sibling of the fetch-time one above (#2197): same
+  # shape, moved to the point where a cap now actually decides anything.
+  ready_total="$(printf '%s\n' "$all_ready" | grep -c . || true)"  # swallow-ok: all_ready is already known non-empty above, so grep -c cannot be the empty-input 1
+  if (( ready_total > _dispatch_cap )); then
+    echo "[drain] NOTE: ${ready_total} issue(s) ready — dispatching the top ${_dispatch_cap} this cycle." >&2
+    echo "[drain]       The rest stay queued and are re-ranked next cycle. Raise MINSPEC_DRAIN_QUEUE_LIMIT to dispatch more per cycle." >&2
+    all_ready="$(printf '%s\n' "$all_ready" | head -n "$_dispatch_cap")"
   fi
 
   # Freshness is guaranteed by ensure_fresh_run_dir at the top of this cycle (#773):
