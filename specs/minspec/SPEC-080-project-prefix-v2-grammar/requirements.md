@@ -92,7 +92,7 @@ current):
   approvable segment is `SP|DR|EP` (+ the `RF`-paragraph's PR-approvable wrinkle below),
   never `IS`/`PR` as approvable letter codes.
 - **The paragraph type table is bigger than the issue lists.** DR-053 §3's accepted table
-  has 20 codes, not 13 — the issue's list omits `NFR AS CT DP TV FM D CL RF`. This spec
+  has 22 codes, not 13 — the issue's list omits `NFR AS CT DP TV FM D CL RF`. This spec
   specifies against the full accepted table.
 
 ### A real irregularity in the accepted grammar that the module must still parse correctly
@@ -156,7 +156,7 @@ it is the accepted interim cost, is **DQ-1**.
   stale ask — see Context).
 - **FR-4 — Paragraph segment, closed vocabulary, longest-match.** The module can parse and
   resolve a third segment of the shape `<TYPE><digits>` for every code in DR-053 §3's full
-  table (`FR NFR OQ D CL RD R AC AS CT DP TV FM INV AL CR CQ FU M G DV RF` — 20 codes, not
+  table (`FR NFR OQ D CL RD R AC AS CT DP TV FM INV AL CR CQ FU M G DV RF` — 22 codes, not
   the issue's 13), with `INV` taking a named slug instead of digits, and type-code matching
   ordered so no shorter code (`R`, `FR`) ever consumes a longer code's prefix (`RD`, `NFR`)
   by accident (see Context's longest-match note). `G`'s plain-numbered-vs-dashed shape is
