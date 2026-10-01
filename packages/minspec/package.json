@@ -78,7 +78,7 @@
       },
       {
         "command": "minspec.tidyPrimary",
-        "title": "MinSpec: Tidy Primary (discard redundant copies)"
+        "title": "MinSpec: Tidy Checkout (discard redundant copies)"
       },
       {
         "command": "minspec.constitutionShowPrompt",
@@ -485,7 +485,7 @@
         "minspec.manualCreate.enabled": {
           "type": "boolean",
           "default": false,
-          "description": "Show the manual 'Create Decision' / 'Create Epic' (+) buttons in the Decisions view toolbar. Off by default: with an AI assistant you normally create decisions and epics by asking it. Turn on for air-gapped / LLM-off (Tier-0) work, where the manual buttons are the primary way to author them."
+          "description": "Show the manual 'Create Decision' / 'Create Epic' (+) buttons in the Decisions view toolbar. Off by default: with an AI assistant you normally create decisions and epics by asking it. Turn on for air-gapped / AI-free work, where the manual buttons are the primary way to author them."
         },
         "minspec.autoClassifyOnCommit": {
           "type": "boolean",
@@ -521,10 +521,10 @@
           ],
           "default": "auto",
           "enumDescriptions": [
-            "Open the pull request for you, labelled for the docs-lane so it auto-merges — the approval finishes with no extra click.",
+            "Open the pull request for you and apply the 'docs-lane' label, which a CI workflow in this repository watches for and merges automatically once checks pass — the approval finishes with no extra click.",
             "Show a notification with an 'Open PR' link and the compare URL, and let you create the PR yourself. This is the behaviour from before this setting existed."
           ],
-          "markdownDescription": "What MinSpec does **after** an approval commit has already been pushed to a side branch because the current branch is protected (see `#minspec.pushOnApprove#` and `#minspec.protectedBranches#`).\n\n- `auto` (default) — MinSpec runs your own authenticated `gh` to open the PR and applies the `docs-lane` label, which is what lets the lane workflow auto-merge it. The label is applied **only** when every committed path is docs (specs/, docs/, .minspec/approvals/, skills/*.md, top-level *.md); the workflow re-verifies this independently and refuses loudly otherwise, so code can never ride the lane. If the repository has no `docs-lane` label yet but carries the docs-lane workflow, `auto` creates the label first (once; an existing label is never edited), because `gh` refuses to open a pull request that names a missing label.\n- `manual` — the previous behaviour, exactly.\n\nThis setting **never causes a push of its own**: it only ever runs on a branch `#minspec.pushOnApprove#` already pushed with your consent, so with `pushOnApprove` at `never` — or a declined prompt — nothing here runs at all.\n\nIf `gh` is missing, not logged in, or GitHub is unreachable, `auto` degrades to exactly the `manual` notification with the reason appended. The approval is already committed and pushed either way."
+          "markdownDescription": "What MinSpec does **after** an approval commit has already been pushed to a side branch because the current branch is protected (see `#minspec.pushOnApprove#` and `#minspec.protectedBranches#`).\n\n- `auto` (default) — MinSpec runs your own authenticated `gh` to open the PR and applies the `docs-lane` label. A CI workflow in this repository watches for that label and merges the pull request automatically once its checks pass. The label is applied **only** when every committed path is docs (specs/, docs/, .minspec/approvals/, skills/*.md, top-level *.md); the workflow re-verifies this independently and refuses loudly otherwise, so code can never auto-merge this way. If the repository has no `docs-lane` label yet but carries that workflow, `auto` creates the label first (once; an existing label is never edited), because `gh` refuses to open a pull request that names a missing label.\n- `manual` — the previous behaviour, exactly.\n\nThis setting **never causes a push of its own**: it only ever runs on a branch `#minspec.pushOnApprove#` already pushed with your consent, so with `pushOnApprove` at `never` — or a declined prompt — nothing here runs at all.\n\nIf `gh` is missing, not logged in, or GitHub is unreachable, `auto` degrades to exactly the `manual` notification with the reason appended. The approval is already committed and pushed either way."
         },
         "minspec.protectedBranches": {
           "type": "array",
@@ -552,7 +552,7 @@
           "type": "string",
           "default": "",
           "scope": "application",
-          "markdownDescription": "Your **explicit human identity** for recording approvals (DR-056). When set, approving a spec records this email as `approvedBy` instead of the ambient `git config user.email`. Use it when a checkout's git identity is an agent/bot (so approvals aren't refused as agent self-approval) while still attributing the human act to you. Leave blank to fall back to `git config user.email`. An agent/bot or blank identity is always refused — an approval must be an explicit human act. Personal preference; follows you across projects."
+          "markdownDescription": "Your **explicit human identity** for recording approvals. When set, approving a spec records this email as `approvedBy` instead of the ambient `git config user.email`. Use it when a checkout's git identity is an agent/bot (so approvals aren't refused as agent self-approval) while still attributing the human act to you. Leave blank to fall back to `git config user.email`. An agent/bot or blank identity is always refused — an approval must be an explicit human act. Personal preference; follows you across projects."
         },
         "minspec.ruleset.requiredChecks": {
           "type": "array",
@@ -560,7 +560,7 @@
             "type": "string"
           },
           "default": [],
-          "description": "EXTRA status-check contexts the post-init branch-ruleset advisory requires, on top of the ones MinSpec resolves automatically. Empty by default: MinSpec already requires 'MinSpec SDD validation' (always produced by its own scaffolded CI), and adds 'ai-review'/'ready-to-merge' once their workflows and reviewer secrets are present, and 'lint'/'test'/'build' once package.json has a runnable script for them. Anything listed here is required VERBATIM and is never checked for producibility — a context no CI reports permanently blocks every PR on the default branch (#559)."
+          "description": "EXTRA status-check contexts the post-init branch-ruleset advisory requires, on top of the ones MinSpec resolves automatically. Empty by default: MinSpec already requires 'MinSpec SDD validation' (always produced by its own scaffolded CI), and adds 'ai-review'/'ready-to-merge' once their workflows and reviewer secrets are present, and 'lint'/'test'/'build' once package.json has a runnable script for them. Anything listed here is required VERBATIM and is never checked for producibility — a context no CI reports permanently blocks every PR on the default branch."
         },
         "minspec.coverage.minimumPercentage": {
           "type": "number",
