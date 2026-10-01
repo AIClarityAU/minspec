@@ -270,7 +270,7 @@ export async function backfillEpicsCommand(
       const ALWAYS = 'Always';
       const HEURISTIC = 'Heuristic only';
       const choice = await vscode.window.showInformationMessage(
-        'MinSpec: Claude Code detected. Use AI to propose the epic taxonomy? (Runs `claude -p` locally; the extension makes no network calls.)',
+        'MinSpec: Claude Code detected. Use AI to propose the epic taxonomy? (Runs your own `claude` command, which sends the pending specs\' and decisions\' ids, titles and a short digest to Anthropic under your account.)',
         ALWAYS,
         USE_AI,
         HEURISTIC,

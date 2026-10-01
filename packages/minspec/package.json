@@ -541,7 +541,7 @@
         "minspec.autoBackfillUseAi": {
           "type": "boolean",
           "default": false,
-          "description": "Always use the AI pass when backfilling epics (skips the per-run 'AI-enhanced?' prompt). Set globally by choosing 'Always' on that prompt — a personal preference that follows you across projects. Runs 'claude -p' locally; the extension makes no network calls. Off by default."
+          "description": "Always use the AI pass when backfilling epics (skips the per-run 'AI-enhanced?' prompt). Set globally by choosing 'Always' on that prompt — a personal preference that follows you across projects. Runs your own 'claude' command, which sends the pending specs' and decisions' ids, titles and a short digest to Anthropic under your account. Off by default."
         },
         "minspec.advancePhaseOnApprove": {
           "type": "boolean",
