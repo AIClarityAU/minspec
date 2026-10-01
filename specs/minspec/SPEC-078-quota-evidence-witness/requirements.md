@@ -7,6 +7,19 @@ product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain — DR-066's own domain (the silent-gate incident family); SPEC-054/SPEC-071 use it for the same gate-signal integrity class
 aspects: [ci, ai-review, quota, evidence, silent-gate, retry]
 relates_to: [DR-063, DR-079, SPEC-054, SPEC-071, SPEC-074, "#1630", "#1086", "#1204"]
+# Ownership declared in Specify, before approval mints a hash (SPEC-038 FR-1/FR-2; the shipped
+# `/minspec-specify` guidance, FRONTMATTER_GUIDANCE in slash-commands.ts). Approval advances
+# `plan` to `in-progress`, the state `validateOwnership` fires on, and canonical.ts strips only
+# `status`/`phases` from the hash, so declaring after approval would stale the sign-off.
+# NEW, not yet created: the pinning-test file FR-8 requires. FR-8 is unconditional, so this
+# holds under every DQ answer. Same shape as SPEC-074, whose single-classifier test AC-8 cites.
+implements: [packages/minspec/tests/quota-evidence-witness.test.ts]
+# Modified, not owned (one owner per file); all three exist on main. review-branch.sh (FR-1..3)
+# and ai-review-retry.yml (FR-6) are in no spec's `implements:`; ai-review.yml (FR-4) is
+# SPEC-031's. DQ-3 Option B would add scripts/review-decide.sh (also SPEC-031's) here; the
+# recommended Option A does not. ci-review-templates.ts is left out, as SPEC-065/069/070 leave
+# it: it embeds generated copies of these files (scripts/gen-ci-templates.mjs), never hand-edited.
+affects: [scripts/review-branch.sh, .github/workflows/ai-review.yml, .github/workflows/ai-review-retry.yml]
 phases:
   specify: done
   clarify: pending
@@ -292,3 +305,6 @@ value that three consumers must learn), revisit this.
 3. AC-5/AC-6/AC-7: retry-step fixture with a stubbed `gh` returning set comment bodies.
 4. AC-8: single-classifier assertion, SPEC-074's shape.
 Every test is run red against the pre-fix code before the fix lands.
+
+New test file (owned by this spec, declared under `implements:`):
+`packages/minspec/tests/quota-evidence-witness.test.ts`.

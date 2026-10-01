@@ -98,6 +98,9 @@ describe('the project-local store carries the two migrated preferences', () => {
 
   beforeEach(() => {
     tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-inv3-'));
+    // The store lives INSIDE the opt-in marker and never creates it (#2355), so
+    // a project-local preference only exists in a project that has opted in.
+    fs.mkdirSync(path.join(tmp, '.minspec'));
   });
   afterEach(() => {
     fs.rmSync(tmp, { recursive: true, force: true });

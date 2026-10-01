@@ -859,6 +859,27 @@ describe('refresh-wrapping command callbacks', () => {
 });
 
 // ===========================================================================
+// #2355: the bootstrap toast remembers a pre-opt-in answer in workspaceState
+// ===========================================================================
+
+describe('auto-bootstrap host wiring (#2355)', () => {
+  it('hands runBootstrap the workspaceState as its pre-opt-in memory, for every folder', async () => {
+    const { runBootstrap } = await import('../src/lib/auto-bootstrap');
+    const ctx = makeMockContext();
+    activate(ctx);
+
+    // Without this the answer to the "not initialized" toast has nowhere to live
+    // except a file in the folder, and the toast would return on every activation.
+    const calls = vi.mocked(runBootstrap).mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    for (const [folder, host] of calls) {
+      expect(folder).toBe('/tmp/test-workspace');
+      expect(host.preOptInMemory).toBe(ctx.workspaceState);
+    }
+  });
+});
+
+// ===========================================================================
 // Epic-grouping toggles (lines 82-92, 187-189)
 // ===========================================================================
 
