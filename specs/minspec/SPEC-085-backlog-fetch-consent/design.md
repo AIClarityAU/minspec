@@ -50,6 +50,13 @@ changes a requirement.
    on the swallow the fix removes), the second carries the two FR-6 command tests. This
    change makes no edit of its own to either file.
 
+   *Overtaken during review.* The same commit reached `main` first, inside #2475, which
+   went on to rewrite its classifier (#2459). When `main` was merged into this branch the
+   adopted copy left nothing behind: `packages/minspec/src/lib/backlog.ts`,
+   `packages/minspec/src/commands/backlog.ts` and the two test files are byte-identical to
+   `main`, so this change no longer touches them. Issue #2247 itself stayed open, because
+   #2475's closing reference names only #2459; this change still closes it.
+
 2. **The provider's method names are pinned by two suites this spec does not own.**
    `packages/minspec/tests/extension.test.ts:16` and
    `packages/minspec/tests/extension-extra.test.ts:30` replace the provider with a mock that
@@ -91,11 +98,16 @@ changes a requirement.
 
 6. **`child_process` is not the only way this code starts a process.**
    `packages/minspec/src/commands/init.ts:256` loads `simple-git`, which runs `git` on its
-   behalf, and is not in `CHILD_PROCESS_ALLOWLIST` because the allowlist test looks for a
-   `child_process` import. What it runs is local (`rev-parse`, `check-ignore`, `add`,
-   `commit`, `checkout -b`, `status`). FR-9's inventory is therefore widened to every module
-   that loads either library, so the README's list rests on a test that sees both routes.
-   The gap in the allowlist test itself is #2456.
+   behalf. When this plan was written it was in no allowlist, because the allowlist test
+   looked only for a `child_process` import. What it runs is local (`rev-parse`,
+   `check-ignore`, `add`, `commit`, `checkout -b`, `status`). FR-9's inventory is therefore
+   widened to every module that loads either library, so the README's list rests on a test
+   that sees both routes.
+
+   *Overtaken during review.* #2473 closed that gap on `main` (#2456): the list the spec
+   calls `CHILD_PROCESS_ALLOWLIST` is now named `SPAWN_ALLOWLIST`, it includes
+   `commands/init.ts`, and a syntax-tree check refuses `simple-git`'s network methods
+   outside a consent list. The inventory test reads the list by its new name.
 
 ## Architecture
 
@@ -128,8 +140,8 @@ Who may start a process, after this change:
 | `scoreWsjfCommand`, `triageIssueCommand` | Yes | Commands the user invokes (FR-6), unchanged in when they run |
 
 The panel no longer calls `isGhAvailable` at all (DQ-2). After a gesture the single
-`gh issue list` is the probe: #2247's classifier turns a missing binary or a signed-out CLI
-into a reason on the could-not-load row.
+`gh issue list` is the probe: the classifier in `lib/backlog.ts` turns a missing binary or a
+signed-out CLI into a reason on the could-not-load row.
 
 ## Contracts
 
@@ -253,12 +265,13 @@ A gesture with no workspace folder open starts nothing: `fetchIssues` would othe
 
 ## Failure handling, consumed from #2247
 
-Adopted commit `460166a8` makes `fetchIssues` reject with a classified reason and stops the
-two commands reporting a false zero. This plan uses its result in one place: the provider's
-gesture catches the rejection and holds it as `{ kind: 'failed', reason }`. That is the only
-`catch` this work adds, and it yields a failure-shaped value (INV-2). The row wording
-changes from the adopted commit's "Unavailable: (reason)" to "Could not load issues:
-(reason)", the spec's own term for the state.
+Commit `460166a8` makes `fetchIssues` reject with a classified reason and stops the two
+commands reporting a false zero. It was adopted here under DQ-5 and has since landed on
+`main` through #2475. This plan uses its result in one place: the provider's gesture catches
+the rejection and holds it as `{ kind: 'failed', reason }`. That is the only `catch` this
+work adds, and it yields a failure-shaped value (INV-2). The row wording changes from that
+commit's "Unavailable: (reason)", which is what `main` shows today, to "Could not load
+issues: (reason)", the spec's own term for the state.
 
 The result of the last gesture is what the panel shows. A failed refresh therefore replaces
 an earlier list with the failure row. Keeping the old list next to a failure notice would be
@@ -322,7 +335,8 @@ T0, written before any source change and shown red on 5f679727:
   hide a second call); no other source file mentions it; and only the panel and the two
   commands reference `fetchIssues`.
 - `packages/minspec/tests/readme-network-claims.test.ts` (FR-9, FR-10). One declared
-  inventory; every `CHILD_PROCESS_ALLOWLIST` entry and every module that loads
+  inventory; every entry of the spawn allowlist (`SPAWN_ALLOWLIST`; the spec's
+  `CHILD_PROCESS_ALLOWLIST`, renamed by #2473) and every module that loads
   `child_process` or `simple-git` is classified; every network-reaching feature is named in
   the README section under the sub-heading for its kind of consent and is a real command
   title, setting or button; the retired phrases are absent from the README, the walkthrough
@@ -342,9 +356,9 @@ feature is named in the right list (DQ-4).
 
 ## Invariants
 
-- **INV-1.** No socket, no `http`, `https`, `fetch` or `net` import, no new
-  `CHILD_PROCESS_ALLOWLIST` entry. The panel starts two fewer processes per render and none
-  until asked.
+- **INV-1.** No socket, no `http`, `https`, `fetch` or `net` import, and no entry added to
+  the spawn allowlist by this change. The panel starts two fewer processes per render and
+  none until asked.
 - **INV-2.** One new `catch`, in the gesture, producing the `failed` state. The zero-issue
   row is reachable only from a `gh` call that succeeded.
 - **INV-3.** No setting written, nothing stored. The state lives in the provider and is
@@ -369,25 +383,30 @@ dependency and already imported by `packages/minspec/src/lib/import-cycle-check.
 - **A failed refresh hides the previous list** (see Failure handling).
 - **Pull request #2441 is open and pins the README's command table to the manifest.**
   Whichever of the two merges second has to carry the renamed Refresh Backlog title.
-- **The reason shown comes from #2247's classifier unmodified.** Its matching is by
-  substring, so a `gh` message can be given the wrong label: any failure whose text contains
-  "auth" (a repository named `auth-service`, the word "OAuth") is shown as "not
-  authenticated". The row still shows a failure and never a zero. Tracked as #2459.
+- **The reason shown comes from the classifier on `main`, which this change does not edit.**
+  When this plan was written that was #2247's, which matched by substring: any failure
+  whose text contained "auth" (a repository named `auth-service`, the word "OAuth") was
+  shown as "not authenticated" (#2459). #2475 replaced it with phrase matching before this
+  change merged. An unknown wording falls to a generic arm that shows `gh`'s own text. The
+  row shows a failure in every case and never a zero.
 
 ## Follow-ups (tracked)
 
-- #2455 - `npm test` inside `packages/minspec` finds no test files and exits 1. The suite
-  runs from the repository root, which is how this change was verified.
-- #2456 - the invariant 1 allowlist test cannot see a process started through `simple-git`
-  (finding 6).
+Four of these were fixed on `main` while this change was in review; they stay listed
+because this change is where they were found.
+
+- #2455 - `npm test` inside `packages/minspec` found no test files and exited 1. Fixed by
+  #2470. This change was verified from the repository root, as CI runs it.
+- #2456 - the invariant 1 allowlist test could not see a process started through
+  `simple-git` (finding 6). Fixed by #2473.
 - #2457 - four places outside this spec's five still carry the retired claim (the
   `minspec.autoBackfillUseAi` description, the backfill prompt, two changelog entries), and
   the changelog has no entry for this change.
-- #2459 - the adopted classifier shows "not authenticated" for any `gh` failure whose text
-  contains "auth". Not fixed here: the spec does not re-specify the #2247 fix.
-- #2460 - in lifecycle grouping the pane leaves out open issues labelled `done`, so a
-  repository whose open issues all carry that label shows the loaded-at row and nothing
-  under it. Older than this change, and outside it.
+- #2459 - the #2247 classifier showed "not authenticated" for any `gh` failure whose text
+  contained "auth". Fixed by #2475.
+- #2460 - in lifecycle grouping the pane left out open issues labelled `done`. Fixed by
+  #2476, which added a "Done, still open" group. This change keeps that group, and its
+  test now runs on the gesture flow.
 - #2246 - the 100-issue truncation. Out of scope by the spec; the loaded-at row states no
   issue count, so it makes no claim that truncation could falsify.
 - #645 - re-positioning the network story, under DR-054.

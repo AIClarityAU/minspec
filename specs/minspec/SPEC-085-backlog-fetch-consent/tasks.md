@@ -23,9 +23,9 @@ The order below is the order of work. Each task names the file it changes and wh
 outside observer checks to call it done. The plan is [design.md](design.md); the contract is
 [requirements.md](requirements.md).
 
-Every backticked path in this file is a file this change itself edits or creates. Files it
-only reads are named in prose, so that the spec gate's ownership signal stays exactly as
-wide as the change.
+Every backticked path in this file is a file this change edits or creates, or one the
+commit adopted in task 3.1 changed. Files it only reads are named in prose, so that the
+spec gate's ownership signal stays as narrow as the change.
 
 ## 1 - T0 invariant tests, written before any source change
 
@@ -62,6 +62,9 @@ wide as the change.
   *Done when:* the pick applies with no conflict, those three test files pass, and the FR-6
   group of the consent test goes green while the FR-1 group stays red (the swallow is gone,
   the unprompted fetch is not).
+  *Overtaken during review:* the same commit reached `main` through #2475. After the merge
+  in 6.6, four of the six files are identical to `main` and this change no longer touches
+  them; the view and its test carry this change's own edits on top.
 
 ## 4 - The consent gate
 
@@ -108,6 +111,10 @@ wide as the change.
 - [x] **6.4** From the repository root: the full vitest suite, lint, build, typecheck and
   validate.
 - [x] **6.5** Re-run 2.3's check on the final tree: the approval still verifies.
+- [ ] **6.6** `main` moved under the open pull request and conflicted with it. Merge it in,
+  keep both sides' intent, and repeat 6.1 to 6.5 on the merged tree.
+  *Done when:* all five hold on the merged tree, and every file this change never edited
+  is byte-identical to `main`.
 
 ## Not in this change
 
@@ -118,6 +125,6 @@ wide as the change.
   Recording completion is a lifecycle act for a human or the extension, never a line
   written by the change being judged.
 - **#2455, #2456, #2457, #2459, #2460.** Filed while building this; none is needed for the
-  requirements.
+  requirements. All but #2457 were fixed on `main` before this change merged.
 - **#2246** (truncation at 100 issues), **#573** (multi-root) and **#645** (positioning),
   as the spec lists.
