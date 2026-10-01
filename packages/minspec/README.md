@@ -158,31 +158,78 @@ All settings are under the `minspec.*` namespace in VS Code Settings.
 |---------|------|---------|-------------|
 | `minspec.specsDir` | `string` | `"specs"` | Directory for spec files, relative to workspace root |
 | `minspec.decisionsDir` | `string` | `"docs/decisions"` | Directory for Architecture Decision Records, relative to workspace root |
+| `minspec.specsLayout` | `"flat"` or `"spec-kit"` | `"flat"` | One file per spec, or one folder per spec with separate `spec.md`/`plan.md`/`tasks.md` (strict Spec Kit layout) |
 | `minspec.codelens.enabled` | `boolean` | `true` | Enable/disable CodeLens annotations showing spec requirement mappings |
+| `minspec.autoBootstrap.enabled` | `boolean` | `true` | Offer Initialize, Refresh and Classify as toasts when MinSpec detects they apply |
+| `minspec.manualCreate.enabled` | `boolean` | `false` | Show the manual "Create Decision" / "Create Epic" buttons in the Decisions pane toolbar |
+| `minspec.autoClassifyOnCommit` | `boolean` | `false` | Automatically run Classify Task Complexity after each git commit |
+| `minspec.commitOnApprove` | `boolean` | `true` | Commit an approved document and its approval record together, in one commit of their own. Never pushes |
+| `minspec.pushOnApprove` | `"never"`, `"prompt"` or `"always"` | `"prompt"` | Whether an approval commit is pushed automatically after it is made |
+| `minspec.approvalPr` | `"auto"` or `"manual"` | `"auto"` | After an approval has been pushed to a side branch: open the pull request through your `gh`, or show a link for you to open it |
+| `minspec.protectedBranches` | `string[]` | `["main", "master", "trunk"]` | Branches that reject a direct push |
+| `minspec.autoBackfillUseAi` | `boolean` | `false` | Always use the AI pass when backfilling epics, without asking each time. Runs your local `claude` command |
+| `minspec.advancePhaseOnApprove` | `boolean` | `false` | Queue a phase-advance request on every spec approval without asking each time |
+| `minspec.approverEmail` | `string` | `""` | The human identity recorded on approvals. Blank falls back to `git config user.email` |
+| `minspec.ruleset.requiredChecks` | `string[]` | `[]` | Extra status checks for the branch ruleset that Initialize offers to create, on top of the ones MinSpec works out |
+| `minspec.coverage.minimumPercentage` | `number` | `80` | The value pre-selected in Initialize's coverage prompt |
 
 ## Commands
 
 Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type "MinSpec" to see all commands.
 
-Manual commands are listed below. Setup commands (init, refresh, classify) are auto-triggered via toasts -- no need to invoke them manually.
+Setup commands (init, refresh, classify) are auto-triggered via toasts -- no need to invoke them manually.
+
+### Keyboard shortcuts
+
+| Shortcut | Command |
+|----------|---------|
+| `Alt+A` | **MinSpec: Approve/Accept Active** |
+| `Alt+N` | **MinSpec: Go to Next Review Task** |
+| `Ctrl+K Ctrl+P` (`Cmd+K Cmd+P` on macOS) | **MinSpec: Push docs via lane** |
 
 | Command | Description |
 |---------|-------------|
+| **MinSpec: Initialize SDD Structure** | Scaffold the SDD structure (`.minspec/`, `specs/`, harness files) for the project |
+| **MinSpec: Refresh Harness Files** | Merge updated templates into generated harness files, preserving your edits |
+| **MinSpec: Commit Harness Refresh** | Offer again to commit generated files that are still uncommitted |
+| **MinSpec: Tidy Primary (discard redundant copies)** | Discard changed files that are identical to the default branch, after confirmation |
+| **MinSpec: Show Constitution Generation Prompt** | Open a prepared prompt for drafting the constitution in your own AI assistant |
+| **MinSpec: Propose Constitution (draft)** | Write a draft of invariants, principles and constraints into the constitution, offline |
+| **MinSpec: Compact Constitution** | Strip the draft markers from the constitution, after you confirm |
+| **MinSpec: Classify Task Complexity** | Classify the current git changes into a tier |
 | **MinSpec: Show SDD Status** | Display a summary of all specs, their tiers, and current phases |
+| **MinSpec: Go to Next Review Task** | Open the one thing waiting on your review |
 | **MinSpec: Refresh Spec Tree** | Manually refresh the sidebar spec tree view |
 | **MinSpec: Declare Session Scope** | Set the scope for your current work session (enables drift detection) |
 | **MinSpec: Park Topic** | Create a GitHub Issue (or local note) for an out-of-scope topic |
+| **MinSpec: Park Topic (force)** | The same, without the check for an existing matching issue |
 | **MinSpec: Inject Active Spec Context** | Write the active spec's context into detected AI tool config files |
 | **MinSpec: Remove Active Spec Context** | Remove injected spec context from AI tool config files |
 | **MinSpec: Show Active Spec Panel** | Open the webview panel displaying the current spec's phase stepper and task checklist |
 | **MinSpec: Generate Example Spec** | Create a sample spec file for demo and learning purposes |
+| **MinSpec: Migrate Spec Layout (Flat ↔ Spec Kit)** | Convert specs between one file per spec and one folder per spec |
+| **MinSpec: Check Spec Completeness** | Report what a spec is missing. Changes nothing |
+| **MinSpec: Approve Spec for Implementation** | Approve a spec, after a completeness check |
+| **MinSpec: Approve/Accept Active** | Approve or accept whichever spec, decision or epic is open |
+| **MinSpec: Revoke Spec Approval** | Withdraw a spec's approval |
+| **MinSpec: Show Changes Since Approval** | Open the difference between the approved text and the current text |
 | **MinSpec: Create Architecture Decision Record** | Create a new DR-NNN.md file from the ADR template with sequential numbering |
+| **MinSpec: Accept Decision** | Set a proposed decision to accepted |
+| **MinSpec: Set Decision Status…** | Choose any status for a decision |
+| **MinSpec: Regenerate Decision Register INDEX** | Rebuild `docs/decisions/INDEX.md` |
+| **MinSpec: Create Epic** | Create a new epic document |
+| **MinSpec: Regenerate Epic INDEX** | Rebuild the epic index |
+| **MinSpec: Backfill Epics (AI-assisted)** | Propose epics for existing specs and decisions, with an optional AI-assisted pass |
+| **MinSpec: Toggle Group by Epic (Specs)** | Switch the Specs pane between its normal grouping and grouping by epic |
+| **MinSpec: Toggle Group by Epic (Decisions)** | Switch the Decisions pane between its normal grouping and grouping by epic |
+| **MinSpec: Toggle Group by Epic (Backlog)** | Switch the Backlog pane between its normal grouping and grouping by epic |
 | **MinSpec: Score Issue (WSJF)** | Calculate a Weighted Shortest Job First score for backlog prioritization |
 | **MinSpec: Quick Triage Inbox Issue** | Triage an inbox-labelled GitHub Issue with priority and labels |
 | **MinSpec: Refresh Backlog** | Manually refresh the sidebar backlog view from GitHub Issues |
 | **MinSpec: Go to Spec Requirement** | Navigate from code to the linked spec requirement |
 | **MinSpec: Go to Code Location** | Navigate from a spec requirement to its implementing code |
 | **MinSpec: Link Code to Spec Requirement** | Create a traceability mapping between a code location and a spec requirement |
+| **MinSpec: Push docs via lane** | Gather changed documentation files, ask you to confirm, and open a pull request for them through your `gh` |
 
 ## Spec File Format
 
