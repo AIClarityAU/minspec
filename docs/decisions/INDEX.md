@@ -771,6 +771,14 @@ SPEC-034's broker exchanges a GitHub Actions OIDC token for a GitHub App install
 Ownership declarations leave the canonical approval hash, so every record minted before the change stops matching. Locally that is a one-off migration; in an adopter's repo the thing recomputing those hashes is a merge-gating review input that MinSpec ships with no gate, no snapshot and no migration, so their reviewers would read MISMATCH against valid approvals. Adopters get a frozen, diagnosis-only copy of the old basis and a third verdict that names it, rather than a flag that defaults the change off or a corpus-rewriting script MinSpec cannot test.
 <!-- /dr-summary:DR-096 -->
 
+## [DR-097 — A single voter's verdict may be reused across an ai-review re-run, bound to one head SHA — where reusing the whole panel was rejected](DR-097.md)
+
+*Status: proposed · Date: 2026-09-26*
+
+<!-- dr-summary:DR-097 auto=85c9e4fc299d -->
+When one of the four ai-review voters dies on a session limit, the panel fails closed and the re-run re-pays for the three that answered. This keeps the survivors, bound to the same head SHA - which is the whole distinction from #1840, where whole-panel reuse across a moved base was measured and refused. The safety property lived only in a comment at first, and the comment was false: three of four voters on #2163 caught the code reusing across commits while its docblock denied it.
+<!-- /dr-summary:DR-097 -->
+
 ## [DR-099 — The pre-commit harness gets a non-blocking outcome for the first time - correctness checks block, metric checks warn, not tool-present-or-absent](DR-099.md)
 
 *Status: proposed · Date: 2026-10-01*
