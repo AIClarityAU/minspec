@@ -285,6 +285,10 @@ function seedApprovedSpec(root: string): void {
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-approval-pr-'));
+  // An approval happens in a project that has opted in. The preference store
+  // refuses to create `.minspec/` itself (#2355), so the fixture must carry the
+  // marker a real project has rather than rely on the store to manufacture it.
+  fs.mkdirSync(path.join(tmp, '.minspec'));
   H.config = {};
   H.choice = undefined;
   H.runner = undefined;
@@ -1035,7 +1039,8 @@ describe('FR-8: "Always push from now on" (DR-071)', () => {
   it('swallows a failed preference write AND a failed settings write — the approval still pushes', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      // A FILE where the root should be: `savePreferences`' mkdir throws ENOTDIR.
+      // A FILE where the root should be: it has no `.minspec/`, so
+      // `savePreferences` refuses (NotOptedInError since #2355; ENOTDIR before).
       const unwritable = path.join(tmp, 'not-a-dir');
       fs.writeFileSync(unwritable, 'x', 'utf-8');
       H.updateRejects = true;
