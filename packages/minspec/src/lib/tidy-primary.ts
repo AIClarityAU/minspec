@@ -71,7 +71,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
-import { readAllRecords, isRecordLive, SESSIONS_DIR, type SessionPresenceRecord } from './presence';
+import { readAllRecords, isRecordLive, sameCheckout, SESSIONS_DIR, type SessionPresenceRecord } from './presence';
 
 /** One dirty path's verdict. */
 export interface TidyClassification {
@@ -284,7 +284,9 @@ function safeReadFile(absPath: string): Buffer | null {
 
 /**
  * The other LIVE sessions (per SPEC-026 presence, excluding `selfSessionId`)
- * whose `worktreeRoot` is this exact checkout. A non-empty result means
+ * whose `worktreeRoot` is this exact checkout — compared with `sameCheckout`
+ * (presence.ts), not raw string equality, so two Windows spellings of the
+ * same folder still match (#2403). A non-empty result means
  * someone else is actively working in this primary right now — reason enough
  * for the tidy command to refuse (a peer mid-edit could be about to touch one
  * of these "redundant" paths, even though the classification is correct at
@@ -311,8 +313,6 @@ export function otherLiveSessionsHere(
   selfSessionId?: string,
   now = Date.now(),
 ): SessionPresenceRecord[] | null {
-  const target = path.resolve(worktreeRoot);
-
   // A sessions dir that can't even be listed (missing, permissions, ...)
   // can't demonstrate anyone's absence — fail closed rather than treat it
   // like "confirmed empty" the way readAllRecords' own `[]` return would.
@@ -326,7 +326,7 @@ export function otherLiveSessionsHere(
   for (const { rec } of readAllRecords(rootDir)) {
     if (!rec) return null; // corrupt/unreadable/malformed ⇒ can't attribute ⇒ can't rule out a peer
     if (selfSessionId && rec.sessionId === selfSessionId) continue;
-    if (path.resolve(rec.worktreeRoot) !== target) continue;
+    if (!sameCheckout(rec.worktreeRoot, worktreeRoot)) continue;
     if (!isRecordLive(rec, now)) continue;
     out.push(rec);
   }

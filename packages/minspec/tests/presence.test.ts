@@ -28,6 +28,7 @@ import {
   readAllRecords,
   isCheckoutOccupied,
   contendingLiveSessions,
+  sameCheckout,
   SessionPresenceManager,
   type SessionPresenceRecord,
 } from '../src/lib/presence';
@@ -243,6 +244,87 @@ describe('contendingLiveSessions (FR-10)', () => {
   it('ignores a dead same-tree claimant (INV-8 sequential handoff)', () => {
     writeRecord(makeRecord({ worktreeRoot: root, fileAllowlist: ['a/'], pid: deadPid() }));
     expect(contendingLiveSessions(root, root, ['a/b.ts'])).toHaveLength(0);
+  });
+});
+
+describe('sameCheckout (#2403 — canonicalized checkout comparison)', () => {
+  // These fixture paths are Windows spellings and never exist on the Linux test
+  // runner's real filesystem, so `fs.realpathSync.native` would reliably throw
+  // ENOENT anyway — but injecting a `realpathNative` that always throws makes
+  // that fallback-to-`path.resolve` explicit and immune to CI environment
+  // quirks, rather than relying on an accident of what paths happen not to exist.
+  const neverResolves = (): never => {
+    throw new Error('ENOENT (fixture path does not exist)');
+  };
+  const win32 = (a: string, b: string): boolean =>
+    sameCheckout(a, b, { platform: 'win32', realpathNative: neverResolves });
+  const posix = (a: string, b: string): boolean =>
+    sameCheckout(a, b, { platform: 'linux', realpathNative: neverResolves });
+
+  // Table of Windows spellings of ONE folder — the issue's reproduction: VS
+  // Code's fsPath lower-cases the drive letter, git prints the OS's own
+  // spelling, and a short-name/subst/junction can differ further still.
+  const WIN_SPELLINGS = [
+    'C:\\Users\\jason\\code\\minspec',
+    'c:\\Users\\jason\\code\\minspec', // lower-case drive letter (VS Code fsPath)
+    'C:/Users/jason/code/minspec', // forward slashes (git's `rev-parse --show-toplevel`)
+    'c:\\USERS\\JASON\\CODE\\MINSPEC', // another case entirely
+    'C:\\Users\\jason\\code\\minspec\\', // trailing separator
+  ];
+
+  it('win32: every spelling in the table names the same checkout as every other', () => {
+    for (const a of WIN_SPELLINGS) {
+      for (const b of WIN_SPELLINGS) {
+        expect(win32(a, b)).toBe(true);
+      }
+    }
+  });
+
+  it('win32: a genuinely different folder is NOT the same checkout', () => {
+    expect(win32('C:\\Users\\jason\\code\\minspec', 'C:\\Users\\jason\\code\\other-repo')).toBe(false);
+  });
+
+  it('posix: the SAME spellings differing only by case are DIFFERENT checkouts (case-sensitive fs)', () => {
+    expect(posix('/home/jason/code/minspec', '/home/jason/code/MINSPEC')).toBe(false);
+  });
+
+  it('posix: trailing-slash / "." segment equivalence still resolves equal', () => {
+    expect(posix('/home/jason/code/minspec/.', '/home/jason/code/minspec/')).toBe(true);
+  });
+
+  it('falls back to path.resolve (not an exception) when realpath cannot resolve either side', () => {
+    expect(sameCheckout('/tmp/sc-2403-does-not-exist-a', '/tmp/sc-2403-does-not-exist-a')).toBe(true);
+    expect(sameCheckout('/tmp/sc-2403-does-not-exist-a', '/tmp/sc-2403-does-not-exist-b')).toBe(false);
+  });
+
+  it('canonicalizes through realpath when it succeeds (e.g. a symlinked checkout)', () => {
+    const real = fs.mkdtempSync(path.join(os.tmpdir(), 'samecheckout-real-'));
+    const link = path.join(os.tmpdir(), `samecheckout-link-${Date.now()}`);
+    try {
+      fs.symlinkSync(real, link, 'dir');
+      expect(sameCheckout(real, link)).toBe(true);
+    } finally {
+      try {
+        fs.unlinkSync(link);
+      } catch {
+        /* best-effort cleanup */
+      }
+      fs.rmSync(real, { recursive: true, force: true });
+    }
+  });
+
+  it('isCheckoutOccupied is DORMANT for a differently-cased live record on a simulated win32 host', () => {
+    // The regression this issue reports: on Windows, the SAME checkout can be
+    // recorded with different drive-letter case, and the old `path.resolve`-only
+    // compare (case-preserving) would treat that as "a different tree", find
+    // nobody, and let a destructive discard through (fail OPEN). This proves
+    // the opposite now holds for case-only differences once the comparison runs
+    // through the win32 branch of sameCheckout, by calling it directly the way
+    // isCheckoutOccupied's fail-safe matrix above already exercises the default
+    // (POSIX) path with real temp directories.
+    const recorded = 'C:\\Users\\jason\\code\\minspec';
+    const editorReported = 'c:\\Users\\jason\\code\\minspec';
+    expect(win32(recorded, editorReported)).toBe(true); // ⇒ same checkout ⇒ OCCUPIED, not dormant
   });
 });
 
