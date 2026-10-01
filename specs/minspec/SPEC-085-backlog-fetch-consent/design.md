@@ -82,8 +82,12 @@ changes a requirement.
 
 5. **The README moved under the spec.** #2396 rewrote the listing after the spec's line
    numbers were taken. The same sentences are now at `packages/minspec/README.md:31`,
-   `:33-39`, `:331` and `:353`. The walkthrough line (`:27`) and the site line (`:1164`) did
-   not move.
+   `:33-39`, `:331` and `:353`. The walkthrough line (`:27`) and the site line (`:1164`) had
+   not moved when this plan was written. The walkthrough then moved during the build: #2276
+   rewrote the page and kept the claim as its closing sentence ("No AI required. No
+   accounts. No network calls. Just markdown files and a working method."). When `main` was
+   merged into this branch the correction was applied to that sentence, now the page's last
+   line, and the rest of the page is #2276's.
 
 6. **`child_process` is not the only way this code starts a process.**
    `packages/minspec/src/commands/init.ts:256` loads `simple-git`, which runs `git` on its
