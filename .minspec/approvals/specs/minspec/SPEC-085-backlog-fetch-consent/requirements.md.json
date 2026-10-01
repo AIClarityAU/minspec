@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-085-backlog-fetch-consent/requirements.md",
+  "specHash": "1e738d263f045886565be412b6b2b8843c3766f1d1e94b56a6b119d9cda158df",
+  "approvedAt": "2026-10-01T06:19:21.540Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "64dc17c17247a1a7542a31e762a19645fc5d2ac2"
+}
