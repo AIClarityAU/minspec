@@ -117,6 +117,7 @@ wide as the change.
 - **Marking the spec done.** `implement` is left `in-progress` and `status` `implementing`.
   Recording completion is a lifecycle act for a human or the extension, never a line
   written by the change being judged.
-- **#2455, #2456, #2457.** Filed while building this; none is needed for the requirements.
+- **#2455, #2456, #2457, #2459, #2460.** Filed while building this; none is needed for the
+  requirements.
 - **#2246** (truncation at 100 issues), **#573** (multi-root) and **#645** (positioning),
   as the spec lists.

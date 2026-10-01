@@ -370,8 +370,9 @@ dependency and already imported by `packages/minspec/src/lib/import-cycle-check.
 - **Pull request #2441 is open and pins the README's command table to the manifest.**
   Whichever of the two merges second has to carry the renamed Refresh Backlog title.
 - **The reason shown comes from #2247's classifier unmodified.** Its matching is by
-  substring, so an unusual `gh` message can be given the wrong label; the row still shows a
-  failure and never a zero.
+  substring, so a `gh` message can be given the wrong label: any failure whose text contains
+  "auth" (a repository named `auth-service`, the word "OAuth") is shown as "not
+  authenticated". The row still shows a failure and never a zero. Tracked as #2459.
 
 ## Follow-ups (tracked)
 
@@ -382,6 +383,11 @@ dependency and already imported by `packages/minspec/src/lib/import-cycle-check.
 - #2457 - four places outside this spec's five still carry the retired claim (the
   `minspec.autoBackfillUseAi` description, the backfill prompt, two changelog entries), and
   the changelog has no entry for this change.
+- #2459 - the adopted classifier shows "not authenticated" for any `gh` failure whose text
+  contains "auth". Not fixed here: the spec does not re-specify the #2247 fix.
+- #2460 - in lifecycle grouping the pane leaves out open issues labelled `done`, so a
+  repository whose open issues all carry that label shows the loaded-at row and nothing
+  under it. Older than this change, and outside it.
 - #2246 - the 100-issue truncation. Out of scope by the spec; the loaded-at row states no
   issue count, so it makes no claim that truncation could falsify.
 - #645 - re-positioning the network story, under DR-054.
