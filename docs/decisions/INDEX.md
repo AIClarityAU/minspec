@@ -757,7 +757,7 @@ SPEC-034's broker exchanges a GitHub Actions OIDC token for a GitHub App install
 
 ## [DR-095 — A socket bind-mounted as a file pins one inode, so restarting the broker is the act that severs it - mount a dedicated directory, read-only](DR-095.md)
 
-*Status: proposed · Date: 2026-09-25*
+*Status: accepted · Date: 2026-09-25*
 
 <!-- dr-summary:DR-095 auto=e43c8c7ab700 -->
 /etc/nixos/home.nix:95 declares it: The host side is **$XDG_RUNTIME_DIR**, which for a user manager is /run/user/1000. It is not /tmp; /tmp/gh-app-token.sock is only the path the socket is presented at *inside* the container. This matters for the proposal below, because "mount the directory" means mounting the systemd user runtime directory, which is a very different object from a purpose-built socket directory.
