@@ -1,14 +1,14 @@
 ---
 id: SPEC-074
 type: requirements
-status: planning
+status: specifying   # DERIVED, not a regression: the 2026-09-30 amendment (#2237) stales the approval that landed in #2077, and deriveStatus returns 'specifying' whenever approvalState !== 'approved' (SPEC-022 INV-1, not this spec's INV-1). Re-approval flips this back to 'planning'.
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute — the dev-time autonomous build/merge pipeline (dispatch-issue.sh's own crash-classification lives here)
 aspects: [agent-dispatch, quota, labeling, no-silent-gate, tier-0]
 relates_to: [SPEC-044, SPEC-062, DR-063, DR-084, DR-076]
 implements: [packages/minspec/tests/dispatch-quota-classification.test.ts]  # NEW — the T3 regression test this spec owns
-affects: [scripts/dispatch-issue.sh, scripts/dispatch-ready-check.sh]  # dispatch-issue.sh is OWNED by SPEC-044 via implements: — this spec modifies its crash branch, never owns the file (INV: one owner per file). dispatch-ready-check.sh is currently unowned by any spec; this spec adds one line (the countermand list) without claiming ownership of the file.
+affects: [scripts/dispatch-issue.sh, scripts/dispatch-ready-check.sh, scripts/drain-inbox.sh]  # dispatch-issue.sh is OWNED by SPEC-044 via implements: — this spec modifies its crash branch, never owns the file (INV: one owner per file). dispatch-ready-check.sh is currently unowned by any spec; this spec adds one line (the countermand list) without claiming ownership of the file. drain-inbox.sh is also OWNED by SPEC-044; since the 2026-09-30 amendment this spec may expose its existing CLI-notice matcher to dispatch (FR-1/FR-2), never change what it matches or how the drain backs off (FR-6).
 phases:
   specify: done
   clarify: done
@@ -20,14 +20,37 @@ phases:
 # MinSpec — Distinguish provider-quota exhaustion from a genuine dispatch dead end (Requirements)
 
 > **This is a SPECIFICATION ONLY.** No code, script, or test is created by the dispatch
-> that produced it. A human reads this spec, resolves the
-> **[Decisions needed (Clarify)](#decisions-needed-clarify)** section, and approves it
-> through the normal spec-approval gate before anything is built.
+> that produced it. A human reads this spec, resolves its Clarify questions, and approves it
+> through the normal spec-approval gate before anything is built. Each question carries an
+> agent-recorded selection under
+> **[Clarify selections](#clarify-selections-recorded-by-an-agent-2026-10-01-ratified-only-by-approval-of-this-spec)**;
+> the human resolves them by approving this spec with those in place, or by changing them
+> first.
 
 Materializes **#1656** — *"provider quota exhaustion is recorded as agent-escalated, so a
 wait-for-reset is indistinguishable from a genuine dead end."* Sibling of **#1652** ("the
 other way an issue leaves the queue in a state nothing retries" — not read for this spec;
 flagged only so a reviewer doesn't conflate the two).
+
+## Amendment (2026-09-30) – the drain's CLI-notice matcher, not `isQuotaExhaustion`
+
+The approval that landed in #2077 rested on two premises that no longer hold. The first,
+that `$LOG` is harness-only text, was refuted by **#2233** (drain paused on the word
+"quota"): `$LOG` is written by `claude -p ... --output-format text 2>&1 | tee "$LOG"`, so it
+holds the agent's final message as well as any CLI notice. The second, that `drain-inbox.sh`
+classifies the same stream with `isQuotaExhaustion` from
+`.github/scripts/ai-review-guard.js`, stopped being true when **#2239** (the drain's
+CLI-notice matcher) merged on 2026-09-30. Built as approved, this spec would stamp
+`agent-blocked-quota` on a genuine crash whenever the agent's prose discussed quotas, and
+AC-6 would pin dispatch to a predicate the drain no longer uses. **#2237** (SPEC-074 rests
+on a refuted premise) tracks this amendment.
+
+Amended, each marked inline: FR-1, FR-2, FR-6, AC-3, AC-4, AC-6, AC-7, INV-3, the three
+Context passages that named the classifier, Why no new DR, Test items 3 and 5, and
+`affects:` (FR-2 needs the matched lines, so the drain's matcher must be exposed to
+dispatch). Unchanged: the scope, FR-3 to FR-5, AC-1, AC-2, AC-5, the other invariants and
+both Clarify decisions. This edit stales the approval, so the spec derives `specifying`
+until the founder re-approves it.
 
 ## One-Sentence Scope
 
@@ -75,27 +98,45 @@ between "reviewer read the code and wants fixes" and "review could not produce a
 trustworthy verdict" — DR-063 split out a `blocked` class and the `isQuotaExhaustion`/
 `isQuotaExhaustionStrict` predicates in `.github/scripts/ai-review-guard.js` to tell the
 two apart without a human). This spec applies the same split to the *dispatch* label
-family, using the *same* classifier — see FR-1.
+family, but not with DR-063's content predicates: `$LOG` carries the agent's prose, so the
+classifier is the drain's CLI-notice matcher — see FR-1 (amended 2026-09-30).
 
 ### Prior art already in this repo that this spec must reuse, not duplicate
 
 - **`.github/scripts/ai-review-guard.js`** exports `isQuotaExhaustion(text)` (loose,
-  correct for harness/CLI diagnostic text), `isQuotaExhaustionStrict(text)` (tight,
-  correct for agent-authored prose that might merely *discuss* quotas), and
+  correct for harness/CLI diagnostic text), `isQuotaExhaustionStrict(text)` (tight, meant
+  for agent-authored prose that might merely *discuss* quotas – narrower, not exact: it
+  still matches `too many requests` and `429`), and
   `parseResetInstant(text, nowMs)` (extracts an ISO-8601 reset instant from either a
   relative "`resets in 25 minutes`" or absolute "`resets 1pm (Australia/Sydney)`"
   phrasing, or returns `null` — which callers MUST read as "retry on the normal cadence",
   never as "never retry"). All three are already unit-tested
-  (`.github/scripts/ai-review-guard.test.js`) and already consumed by
-  `scripts/review-pr.sh`, `scripts/review-decide.sh`, `scripts/review-approvable.sh`,
-  `scripts/review-branch.sh`, and `scripts/drain-inbox.sh` (`is_quota()`, `:264-267`).
-  `scripts/dispatch-issue.sh` is the one dispatch-family script that does **not** yet call
-  into this module.
+  (`.github/scripts/ai-review-guard.test.js`). *Amended 2026-09-30:* the quota predicates
+  are consumed by the review path (`scripts/review-branch.sh`,
+  `scripts/review-approvable.sh` and `scripts/review-decide.sh`), which keeps them, because
+  it can still judge the reviewer's stderr (harness text) loosely and fall back to the
+  strict variant on its stdout (model text) only when stderr is silent (`quota_failure` in
+  `review-branch.sh`). `scripts/drain-inbox.sh` was a consumer until #2239 (the drain's
+  CLI-notice matcher): it receives one merged stream and cannot make that split.
+  `scripts/dispatch-issue.sh` does not yet call into this module; after this spec it calls
+  `parseResetInstant` (FR-2) and never the quota predicates (FR-1).
 - **`scripts/drain-inbox.sh`** already classifies dispatch-issue.sh's *combined stdout*
-  with `is_quota()` (`classify_dispatch`, `:722-737`) and, on a hit, pauses the whole drain
-  **cycle** for a backoff (`return 42`) — but this is orchestrator-level throttling. It
-  does not touch the per-issue GitHub labels dispatch-issue.sh itself writes, which is
-  exactly the gap #1656 reports. The two are complementary, not overlapping: this spec's
+  with `is_quota()` (`classify_dispatch`) and, on a hit, pauses the whole drain **cycle**
+  (`return 42`). *Amended 2026-09-30:* since #2239 (the drain's CLI-notice matcher),
+  `is_quota()` matches only the Claude CLI's own limit-notice lines: a closed list of forms
+  (`_quota_notice_forms`, compiled to `QUOTA_NOTICE_RE`), anchored at column 0, and read
+  outside paired markdown code fences (`quota_notice_lines`). So an issue title, a commit
+  subject or the agent's prose that merely mentions a limit is not a signal. It is exposed as
+  the pure seam `scripts/drain-inbox.sh --is-quota` and pinned by the #2233 T3 regression
+  block in `packages/minspec/tests/drain-continuous.test.ts`. Only the matched lines reach
+  the drain's own reset parser (`quota_publish_notice`). And after a signal that only a
+  child's text raised, the drain refreshes the meter before any long sleep: a fresh reading
+  with headroom in every window it can see contradicts the signal, so the drain rests a
+  brief backoff instead of sleeping to the published reset (`quota_signal_sleep_decision`),
+  a veto capped at `MINSPEC_QUOTA_CONTRADICT_MAX` signals in a row, after which it fails
+  closed to the reset. All of this is orchestrator-level throttling. It does not touch the
+  per-issue GitHub labels dispatch-issue.sh itself writes, which is exactly the gap #1656
+  reports. The two are complementary, not overlapping: this spec's
   fix makes the *label* correct; drain-inbox.sh's existing gate makes the *next dispatch
   attempt* wait. Both should keep working after this change (AC-7).
 - **`scripts/dispatch-ready-check.sh:635`** already carries a "countermand list" — labels
@@ -108,28 +149,50 @@ family, using the *same* classifier — see FR-1.
 
 DR-359's filter (costly-to-reverse in under a day) doesn't apply: this reuses an existing,
 already-tested classifier, adds one new GitHub label (revertible by deleting it), and
-changes one script's branch ordering. DR-063 and DR-084 already establish the governing
+changes one script's branch ordering (since the 2026-09-30 amendment, also exposing the
+drain's existing matcher to it, an equally reversible seam or shared file). DR-063 and DR-084 already establish the governing
 precedents (split an overloaded label; the pipeline can jam on shared quota) — this spec
 applies them, it doesn't set new policy. No DR is proposed; `docs/decisions/INDEX.md` has
 no existing entry for this narrower question either.
 
 ## Functional Requirements
 
-- **FR-1 (single-sourced detection, no new regex).** Before the existing generic-crash
-  branch (`dispatch-issue.sh`'s `else` at `:2005`) applies any label, the captured `$LOG`
-  MUST be tested with the SAME `isQuotaExhaustion(text)` predicate `drain-inbox.sh` and the
-  `review-*.sh` family already use (`.github/scripts/ai-review-guard.js`), invoked the same
-  way (`GUARD="$GUARD" node -e '...'`, mirroring `drain-inbox.sh:264-267`). Loose variant,
-  not strict: `$LOG` is the CLI's own transcript (harness/diagnostic text), the same shape
-  `drain-inbox.sh` feeds it, not agent-authored prose. *Rationale: a second, hand-rolled
-  regex in dispatch-issue.sh would drift from the tested one the instant either changes —
-  the exact class of bug DR-063 exists to prevent.*
+- **FR-1 (single-sourced detection, no new regex) – amended 2026-09-30 (#2237).** Before
+  the existing generic-crash branch (`dispatch-issue.sh`'s `else` at `:2005`) applies any
+  label, the captured `$LOG` MUST be tested with the SAME matcher `drain-inbox.sh`'s
+  `is_quota()` uses: the Claude CLI's own limit-notice lines (`_quota_notice_forms` →
+  `QUOTA_NOTICE_RE`, filtered by `quota_notice_lines`), anchored at column 0 and read
+  outside paired markdown code fences. Dispatch reaches it either through the drain's pure
+  seam `scripts/drain-inbox.sh --is-quota` or through one shared `scripts/lib` file that
+  both scripts source; which one is a Plan decision (FR-2 bears on it). NOT
+  `isQuotaExhaustion`, loose or strict: `$LOG` is written by `claude -p ... --output-format
+  text 2>&1 | tee "$LOG"`, so it holds the agent's final message as well as any CLI notice,
+  and a content predicate reads that prose as a signal. #2233 measured exactly this in the
+  drain: on 2026-09-30 an issue title, a commit subject and an agent quoting `too many
+  requests` in a dispatch's output paused it three times while the meter read 5h 0%. The
+  strict variant is no answer: it still matches `too many requests`.
+  *Rationale: a second, hand-rolled regex in dispatch-issue.sh would drift from the
+  tested one the instant either changes — the exact class of bug DR-063 exists to prevent —
+  and the per-issue label and the drain's cycle pause read the same text, so they must
+  agree on what in it is a wall.* *Honest limit, inherited with the matcher:* an unfenced
+  column-0 copy of a CLI limit line in the agent's own output still matches. The drain has
+  the meter as a second witness for that residue (see Context); the per-issue label has
+  none under this spec. Hitting that residue takes a crash whose own output reproduces a
+  wall line exactly that way.
 
-- **FR-2 (reset time, best-effort).** When FR-1 matches, `$LOG` MUST also be run through
-  `parseResetInstant` from the same module to recover a reset instant. A `null` result
-  (no reset time stated, or unparseable) MUST be treated as "reset time not stated" in the
-  posted comment (FR-4) — never as grounds to skip the quota classification or to imply
-  "never retry."
+- **FR-2 (reset time, best-effort) – amended 2026-09-30 (#2237).** When FR-1 matches, the
+  notice lines it matched, not the whole `$LOG`, MUST be run through `parseResetInstant`
+  from `.github/scripts/ai-review-guard.js` to recover a reset instant. Over the whole
+  `$LOG`, the agent's prose could displace or null out the CLI's stated reset:
+  `parseResetInstant` prefers the first relative phrase (`resets in 25 minutes`) anywhere
+  in its input over any absolute one, and returns `null` when the first absolute phrase it
+  finds carries no zone. The drain feeds its own reset parser only the notice lines for the
+  same reason (`quota_publish_notice`, #2239). `--is-quota` answers only yes or no, so the
+  Plan MUST give dispatch the matched lines through the same single source as FR-1 (a
+  sibling pure seam on `drain-inbox.sh`, or the shared `scripts/lib` file), never through a
+  second pattern (INV-3). A `null` result (no reset time stated, or unparseable) MUST be
+  treated as "reset time not stated" in the posted comment (FR-4) — never as grounds to
+  skip the quota classification or to imply "never retry."
 
 - **FR-3 (distinct label, no requeue).** On an FR-1 match, the issue MUST receive a new
   label `agent-blocked-quota` in place of `agent-escalated`. `needs-human-review` MUST NOT
@@ -152,14 +215,20 @@ no existing entry for this narrower question either.
   check is a new, narrower branch spliced in ahead of the generic crash handling, not a
   replacement for it.
 
-- **FR-6 (drain-orchestrated runs are not double-counted incorrectly).** When
-  dispatch-issue.sh is launched by `drain-inbox.sh`'s fan-out, `drain-inbox.sh`'s own
-  `classify_dispatch`/`is_quota` (`:722-737`) reads dispatch-issue.sh's *entire* stdout —
-  which will now include the FR-4 comment-echo — and will therefore continue to detect the
-  outage and pause the drain cycle, unchanged. This spec MUST NOT alter drain-inbox.sh's
-  own detection or backoff; the two layers (per-issue label, per-cycle pause) are
-  independent witnesses to the same event, not a hand-off (constitution invariant 2 — an
-  independent second witness is a feature here, not redundancy to remove).
+- **FR-6 (drain-orchestrated runs are not double-counted incorrectly) – amended 2026-09-30
+  (#2237).** When dispatch-issue.sh is launched by `drain-inbox.sh`'s fan-out,
+  `drain-inbox.sh`'s own `classify_dispatch`/`is_quota` reads dispatch-issue.sh's *entire*
+  stdout. What it detects there is the CLI's own limit line, which `tee "$LOG"` passes
+  through unprefixed at column 0, not the FR-4 comment-echo, so it continues to detect the
+  outage and pause the drain cycle, unchanged. The implementation MUST keep that
+  passthrough as it is (no prefix, no indent, no fence around the CLI's output): the drain's
+  matcher depends on it, and AC-7 pins it. This spec MUST NOT alter drain-inbox.sh's own
+  detection or backoff, including the meter check before a long sleep; exposing the
+  existing matcher to dispatch (FR-1/FR-2) is the only drain-side change it permits, and it
+  must leave what the matcher matches unchanged. The two layers (per-issue label, per-cycle
+  pause) are independent witnesses to the same event, not a hand-off (constitution
+  invariant 2 — an independent second witness is a feature here, not redundancy to
+  remove).
 
 ## Acceptance Criteria
 
@@ -172,24 +241,43 @@ no existing entry for this narrower question either.
   when eligible, and still ends in `agent-escalated,needs-human-review` when the retry
   budget is spent. Asserted by execution against `escalate_next_action`, not by reading
   source text.
-- **AC-3 (FR-5, negative — unknown crash unchanged).** A fixture `$LOG` that is a crash but
-  matches neither `ESCALATE:` nor `isQuotaExhaustion` still takes today's `:2005-2021`
-  path unchanged: `agent-escalated,needs-human-review`, `agent-ready` removed.
-- **AC-4 (FR-2/FR-4).** A `$LOG` with an absolute reset phrase produces a posted comment
-  that states the parsed instant/time; a `$LOG` that matches FR-1 but carries no parseable
-  reset phrase (e.g. a bare "quota exceeded" with no `resets`/`try again` clause) still
-  produces `agent-blocked-quota` and a comment that explicitly says the reset time is not
-  stated — never a thrown error, never a silently skipped comment.
+- **AC-3 (FR-5, negative — unknown crash unchanged) – amended 2026-09-30 (#2237).** A
+  fixture `$LOG` that is a crash but matches neither `ESCALATE:` nor the FR-1 matcher still
+  takes today's `:2005-2021` path unchanged: `agent-escalated,needs-human-review`,
+  `agent-ready` removed. The fixtures MUST include the #2233 shapes, crashes whose `$LOG`
+  only *mentions* a limit: agent prose quoting `too many requests` or saying `quota`, and a
+  wall line quoted inside a code fence or indented. Each is paired with a control that
+  appends the genuine CLI wall line and must then classify as quota, so a matcher that
+  matched nothing cannot pass (the pattern of the #2233 block in `drain-continuous.test.ts`).
+- **AC-4 (FR-2/FR-4) – amended 2026-09-30 (#2237).** A `$LOG` with an absolute reset phrase
+  produces a posted comment that states the parsed instant/time; a `$LOG` that matches FR-1
+  but carries no parseable reset phrase (e.g. the bare CLI line `You've hit your session
+  limit`, with no `· resets …` suffix) still produces `agent-blocked-quota` and a comment
+  that explicitly says the reset time is not stated — never a thrown error, never a silently
+  skipped comment. A `$LOG` whose agent prose carries a different reset phrase (`resets in
+  25 minutes`) beside the AC-1 wall line produces a comment stating the wall line's reset
+  (1pm Australia/Sydney), not the prose's.
 - **AC-5 (FR-3, countermand list).** With `agent-blocked-quota` present and a stale
   `agent-ready` also present, `scripts/dispatch-ready-check.sh` refuses (does not admit the
   issue as ready), mirroring the existing `agent-quarantined`/`agent-done`/`agent-escalated`
   rows in the same list.
-- **AC-6 (FR-1, no drift).** The predicate dispatch-issue.sh uses and the one
-  `drain-inbox.sh`'s `is_quota()` uses are the SAME function from the SAME file, asserted
-  by a test that would fail if dispatch-issue.sh ever inlined its own copy.
-- **AC-7 (FR-6, non-regression).** With drain-inbox.sh orchestrating a dispatch that hits
-  the AC-1 fixture, drain-inbox.sh's own cycle-level pause (`return 42`) still fires,
-  unchanged by this spec.
+- **AC-6 (FR-1, no drift) – amended 2026-09-30 (#2237).** dispatch-issue.sh's quota check
+  and `drain-inbox.sh`'s `is_quota()` resolve to the SAME matcher, one pattern list and one
+  fence filter defined in ONE file (`drain-inbox.sh` itself, reached through `--is-quota`,
+  or the shared `scripts/lib` file both source). Asserted by a test that would fail if
+  dispatch-issue.sh ever inlined its own copy of the patterns or called `isQuotaExhaustion`
+  or `isQuotaExhaustionStrict`, and that runs the AC-1 wall and the AC-3 fixtures through
+  both scripts and gets the same verdict from each.
+- **AC-7 (FR-6, non-regression) – amended 2026-09-30 (#2237).** With drain-inbox.sh
+  orchestrating a dispatch that hits the AC-1 fixture, drain-inbox.sh's own cycle-level
+  pause (`return 42`) still fires, unchanged by this spec. This is the contract test between
+  the two scripts: the drain's matcher relies on the CLI's line reaching its capture at
+  column 0 through dispatch-issue.sh's `tee "$LOG"`, an assumption #2239's review flagged as
+  load-bearing and that only fixtures pin today. So the test MUST drive dispatch-issue.sh's
+  real output path (a stub `claude` that prints the AC-1 wall line), not feed the drain a
+  fixture string. It asserts that the pause fires; how long the drain then rests is its
+  meter check's call (a fresh reading with headroom shortens it), which this spec leaves
+  alone.
 
 ## Invariants
 
@@ -200,17 +288,41 @@ no existing entry for this narrower question either.
 - **INV-2 (#1112, no silent requeue).** `agent-ready` is never restored by this change,
   under any of the three paths. This is the property #1307 added for crashes generally and
   this spec must not weaken it for the quota subclass.
-- **INV-3 (single source of truth).** No second, hand-maintained quota-detection regex may
-  exist in `scripts/dispatch-issue.sh`. If `.github/scripts/ai-review-guard.js`'s exports
-  ever need widening for this call site, they are widened THERE, in the tested module, not
-  forked.
+- **INV-3 (single source of truth) – amended 2026-09-30 (#2237).** No second,
+  hand-maintained quota-detection regex may exist in `scripts/dispatch-issue.sh`, and it
+  may not classify with `isQuotaExhaustion`/`isQuotaExhaustionStrict` either (those stay
+  the review path's). If the CLI-notice matcher (`_quota_notice_forms` in
+  `scripts/drain-inbox.sh`, or the shared `scripts/lib` file if the Plan moves it there)
+  ever needs widening for this call site, it is widened THERE, where the #2233 regression
+  tests pin it, not forked.
 - **INV-4 (constitution #3, blast radius).** This change is internal dev-tooling for this
   repo's own dispatch pipeline; it introduces no network call, no new external dependency,
   and no behaviour reachable outside a repo that opts in via `.minspec/`.
 
-## Decisions needed (Clarify)
+## Clarify selections (recorded by an agent 2026-10-01; ratified only by approval of this spec)
+
+DQ-1 and DQ-2 each carry a **Recorded selection** line naming the option this document
+already recommended. An agent session wrote those lines on 2026-10-01, and no human
+recorded a choice for either: the approval that landed in #2077 was given while both
+questions carried a recommendation and no selection, and it wrote `clarify: done` over them
+(the shape #1480 describes). Recording the selections did not touch that line. This
+repository runs with `"autonomy": "act"` (`.minspec/config.json:58`), under which an agent
+proceeds on a stated recommendation and leaves the options it did not take on record
+(DR-086 §2 and §4), which is why the options stay below with their costs. Approving a T3
+spec is the second class on that section's stop list (`scripts/lib/autonomy.ts:68-70`), so
+nothing here stands in for that approval: the lines propose, and approving this spec is
+what ratifies them. An approval records a canonical hash that covers this body
+(`packages/minspec/src/lib/approval.ts:4-8`) and reads as stale once the hash stops matching
+(`resolveStatus`, `:483-490`), so an approval of this text covers these selections and
+changing one afterwards voids it. When the lines were written no approval covered this
+text: the 2026-09-30 amendment above had already staled the one from #2077
+(`status: specifying`). A question in this section with no **Recorded selection** line is
+still open.
 
 ### DQ-1 (scope) — bounded auto-reconsideration after the reset passes
+
+**Recorded selection: Option A,** split out. This spec's scope stays FR-1 to FR-6, and
+bounded auto-reconsideration is the follow-up tracked as #2421.
 
 The issue's step 4 proposes, as an explicit **optional** extra: letting the drain
 reconsider an `agent-blocked-quota` issue once the recorded reset timestamp has passed,
@@ -240,6 +352,10 @@ delaying the narrower, clearly-scoped fix on unresolved design questions.
 
 ### DQ-2 (scope boundary) — the creator-shepherd's own fix-agent call site
 
+**Recorded selection: Option A,** out of scope. The shepherd's fix-agent call site keeps
+today's behaviour under this spec, and what it does on a quota wall is parked for triage as
+#2422.
+
 `shepherd_own_pr`'s fix-agent invocation (`scripts/dispatch-issue.sh:1762`, a SEPARATE
 `claude -p` launch used to repair an already-opened PR's failing gate) has a structurally
 similar shape — a `claude -p` call whose failure is handled generically — but it is not
@@ -266,12 +382,16 @@ Matches the issue's own T3 regression spec:
    (AC-1).
 2. Negative: a log with `ESCALATE:` still takes the escalation path, including the DR-355
    opus retry (AC-2).
-3. Negative: an unrecognised crash still takes the existing `:2005-2021` hold, unchanged
-   (AC-3).
+3. Negative: an unrecognised crash still takes the existing `:2005-2021` hold, unchanged,
+   including a crash whose `$LOG` only mentions a limit (the #2233 shapes), each with its
+   wall-appended control (AC-3; amended 2026-09-30).
 4. `dispatch-ready-check.sh` refuses re-readying an issue carrying `agent-blocked-quota`
    (AC-5).
-5. A single shared-classifier assertion (AC-6) — e.g. both scripts' quota checks resolve to
-   the same `require(...)` target — so the two can never silently diverge.
+5. A single shared-classifier assertion (AC-6) — dispatch-issue.sh's quota check goes
+   through `drain-inbox.sh --is-quota` (or sources the same `scripts/lib` file the drain
+   does), carries no pattern of its own and no `isQuotaExhaustion` call, and returns the
+   drain's verdict on the same fixtures — so the two can never silently diverge (amended
+   2026-09-30).
 
 New test file (owned by this spec):
 `packages/minspec/tests/dispatch-quota-classification.test.ts`.

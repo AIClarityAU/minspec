@@ -83,6 +83,19 @@ export interface ParsedSpec {
   readonly sections: Map<string, string>;
   readonly phaseSections: Partial<Record<Phase, PhaseContent>>;
   readonly raw: string;
+  /**
+   * Raw top-level frontmatter lines (key + any indented continuation — block-list
+   * items, nested maps, folded scalars) whose key `SpecFrontmatter` does NOT model,
+   * preserved VERBATIM in original order (#2324). Without this, any round trip
+   * through `writeSpec()` — the task-checkbox panel write and `MinSpec: Migrate
+   * Layout` both go through it — silently dropped `implements:`/`affects:`/
+   * `implements_reason:` (SPEC-038 ownership) and `depends_on:`/`supersedes:`/
+   * `relates_to:` (FR-13 edges), because `serializeFrontmatter` only ever emitted
+   * the fixed field set it knows about. Optional (defaults to none) so every
+   * existing synthetic-ParsedSpec construction site (shard builders, tests) keeps
+   * compiling unchanged.
+   */
+  readonly extraFrontmatter?: readonly string[];
 }
 
 // --- Parser ---
@@ -170,6 +183,57 @@ function parseFrontmatterYaml(yaml: string): Record<string, unknown> {
   return result;
 }
 
+/**
+ * Frontmatter keys `SpecFrontmatter` models explicitly. Keep in sync with
+ * `serializeFrontmatter`'s emitted keys — anything NOT in this set is an
+ * unrecognized field that `extractUnknownFrontmatterLines` must preserve
+ * verbatim rather than let `parseSpec`/`writeSpec` silently drop (#2324).
+ */
+const KNOWN_FRONTMATTER_KEYS = new Set([
+  'id', 'title', 'type', 'tier', 'status', 'superseded-by', 'created', 'epic', 'product', 'phases',
+]);
+
+/**
+ * Raw top-level frontmatter lines (key + any indented continuation — block-list
+ * items, nested maps, folded scalars) whose key is NOT in `knownKeys`, in
+ * original order. A contiguous run of full-line `#` comments immediately above
+ * an unknown key travels with it (the common "why this field" annotation);
+ * comments immediately above a KNOWN key are dropped here, same as they always
+ * were by `serializeFrontmatter`'s clean rebuild of known fields — this
+ * function only widens what survives a round trip, never narrows it (#2324).
+ */
+function extractUnknownFrontmatterLines(yaml: string, knownKeys: ReadonlySet<string>): string[] {
+  const lines = yaml.split('\n');
+  const out: string[] = [];
+  let i = 0;
+  while (i < lines.length) {
+    const commentStart = i;
+    while (i < lines.length && /^#/.test(lines[i])) i++;
+    const comments = lines.slice(commentStart, i);
+
+    if (i >= lines.length) break; // trailing comments with no following key
+
+    const m = lines[i].match(/^([A-Za-z_][\w-]*)[ \t]*:/);
+    if (!m) {
+      // Blank line or stray content between blocks — not a key line, drop it
+      // (and the comments collected above, which attach to nothing).
+      i++;
+      continue;
+    }
+
+    const key = m[1];
+    const blockStart = i;
+    i++;
+    while (i < lines.length && /^[ \t]/.test(lines[i])) i++;
+    const block = lines.slice(blockStart, i);
+
+    if (!knownKeys.has(key)) {
+      out.push(...comments, ...block);
+    }
+  }
+  return out;
+}
+
 /** Parse task items from markdown body */
 function parseTasks(body: string): TaskItem[] {
   const tasks: TaskItem[] = [];
@@ -219,6 +283,7 @@ export function parseSpec(content: string): ParsedSpec {
 
   const fmParsed = parseFrontmatterYaml(fmRaw);
   const fmPhases = (fmParsed.phases as Record<string, string>) ?? {};
+  const extraFrontmatter = extractUnknownFrontmatterLines(fmRaw, KNOWN_FRONTMATTER_KEYS);
 
   // Build frontmatter with defaults
   const frontmatter: SpecFrontmatter = {
@@ -293,7 +358,7 @@ export function parseSpec(content: string): ParsedSpec {
   }
   flushSection();
 
-  return { frontmatter, preamble, sections, phaseSections, raw };
+  return { frontmatter, preamble, sections, phaseSections, raw, extraFrontmatter };
 }
 
 const TIERS_SET = new Set(['T1', 'T2', 'T3', 'T4']);
@@ -301,8 +366,16 @@ const STATUSES_SET = new Set<string>(SPEC_STATUSES);
 
 // --- Writer ---
 
-/** Serialize frontmatter to YAML string */
-function serializeFrontmatter(fm: SpecFrontmatter): string {
+/**
+ * Serialize frontmatter to YAML string.
+ *
+ * @param extra  Unrecognized frontmatter lines to preserve verbatim (#2324) —
+ *               see `ParsedSpec.extraFrontmatter`. Emitted right before
+ *               `phases:`, matching the hand-authored corpus convention (the
+ *               SPEC-038 ownership fields and FR-13 edge fields all sit
+ *               between `product:`/`epic:` and `phases:` in real specs).
+ */
+function serializeFrontmatter(fm: SpecFrontmatter, extra: readonly string[] = []): string {
   const lines: string[] = [];
   lines.push(`id: ${fm.id}`);
   lines.push(`title: ${fm.title}`);
@@ -325,6 +398,7 @@ function serializeFrontmatter(fm: SpecFrontmatter): string {
   // Owning product slug (SPECS-pane prefix-strip key). Emit only when present so a
   // single-product repo stays product-less. Was dropped on every round-trip (#153.4).
   if (fm.product) lines.push(`product: ${fm.product}`);
+  lines.push(...extra);
   lines.push('phases:');
   for (const phase of PHASES) {
     lines.push(`  ${phase}: ${fm.phases[phase]}`);
@@ -334,14 +408,16 @@ function serializeFrontmatter(fm: SpecFrontmatter): string {
 
 /**
  * Write a spec to markdown string.
- * Preserves user content in sections not managed by frontmatter.
+ * Preserves user content in sections not managed by frontmatter, and any
+ * frontmatter field `SpecFrontmatter` doesn't model (#2324 —
+ * `ParsedSpec.extraFrontmatter`).
  */
 export function writeSpec(spec: ParsedSpec): string {
   const parts: string[] = [];
 
   // Frontmatter
   parts.push('---');
-  parts.push(serializeFrontmatter(spec.frontmatter));
+  parts.push(serializeFrontmatter(spec.frontmatter, spec.extraFrontmatter));
   parts.push('---');
   parts.push('');
 
