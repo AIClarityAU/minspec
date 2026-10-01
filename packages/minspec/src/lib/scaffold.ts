@@ -415,14 +415,6 @@ export function scaffold(rootDir: string): void {
 }
 
 /**
- * Ensure MinSpec's machine-local files (session.json, calibration.json,
- * generated-hashes.json, template-baseline.json) are present in the project's
- * .gitignore — see MINSPEC_GITIGNORE_ENTRIES.
- *
- * Idempotent: skips any entry already listed (exact match, ignoring leading
- * whitespace). Creates .gitignore if missing. Preserves existing content.
- */
-/**
  * Untrack any path MinSpec declares machine-local that git is nonetheless tracking.
  *
  * WHY THIS EXISTS. Writing an entry into `.gitignore` does NOT make a file ignored —
@@ -480,6 +472,13 @@ export function untrackDeclaredMachineLocalPaths(rootDir: string): string[] {
 }
 
 /**
+ * Ensure MinSpec's machine-local files (session.json, calibration.json,
+ * generated-hashes.json, template-baseline.json) are present in the project's
+ * .gitignore — see MINSPEC_GITIGNORE_ENTRIES.
+ *
+ * Idempotent: skips any entry already listed (exact match, ignoring leading
+ * whitespace). Creates .gitignore if missing. Preserves existing content.
+ *
  * @returns the paths removed from the git index, for the caller to REPORT. Never
  * discard this — an unreported `git rm --cached` is precisely the invisible git
  * action G-8 exists to remove.
