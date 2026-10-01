@@ -18,7 +18,7 @@
   "bugs": {
     "url": "https://github.com/AIClarityAU/minspec/issues"
   },
-  "preview": false,
+  "preview": true,
   "homepage": "https://minspec.dev",
   "qna": "marketplace",
   "engines": {
