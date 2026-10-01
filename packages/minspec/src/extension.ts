@@ -51,7 +51,7 @@ import {
   linkToSpecCommand,
 } from './views/codelens-provider';
 import { maybeShowNudge, recordInstallTimestamp, exportTraceability, setupConformanceWatcher } from './lib/bridge';
-import { runBootstrap, isWatchedGitPath, type BootstrapVsCode } from './lib/auto-bootstrap';
+import { runBootstrap, isWatchedGitPath, isMinspecInitialized, type BootstrapVsCode } from './lib/auto-bootstrap';
 import { findActiveSpec, trackActiveSpecEditor } from './lib/active-spec';
 import { parseSpec } from './lib/spec';
 import { loadConfig, resolveAndValidate } from './lib/config';
@@ -127,7 +127,24 @@ export function activate(context: vscode.ExtensionContext): void {
   context.subscriptions.push(presence); // FR-6 — presence.dispose() → stop() (never throws)
   // FR-11: expose this session's id to shell-driven agents in the integrated
   // terminal so their commit trailer / gate self-identify with the same id.
-  context.environmentVariableCollection?.replace('MINSPEC_SESSION_ID', presence.sessionId);
+  //
+  // Gated on the SAME opt-in predicate `presence.ts` uses (constitution
+  // invariant 3, #2356): a folder with no `.minspec/` — or no folder open at
+  // all — must see NO extension side effect, and a contributed terminal env
+  // var is one: VS Code surfaces it in the terminal UI, so a user who merely
+  // installed the extension would see it in unrelated projects. Re-run after
+  // `MinSpec: Initialize` (both the direct command and auto-bootstrap's
+  // `executeCommand` path run through the same registration) so a folder that
+  // opts in during this activation starts carrying the var without a window
+  // reload, matching presence's "opts in later" guarantee.
+  const syncSessionIdEnvVar = (): void => {
+    if (workspaceRoot !== '' && isMinspecInitialized(workspaceRoot)) {
+      context.environmentVariableCollection?.replace('MINSPEC_SESSION_ID', presence.sessionId);
+    } else {
+      context.environmentVariableCollection?.delete('MINSPEC_SESSION_ID');
+    }
+  };
+  syncSessionIdEnvVar();
 
   // Active spec panel
   const specPanel = new SpecPanel();
@@ -347,6 +364,7 @@ export function activate(context: vscode.ExtensionContext): void {
       async (folderArg?: string, deps?: Parameters<typeof initCommand>[1]) => {
         await initCommand(folderArg, deps);
         refreshScaffoldCommitStatusBar();
+        syncSessionIdEnvVar(); // #2356: a folder that just opted in gets the var now, not on next reload
       },
     ),
     vscode.commands.registerCommand(
@@ -354,6 +372,7 @@ export function activate(context: vscode.ExtensionContext): void {
       async (folderArg?: string, deps?: Parameters<typeof initRefreshCommand>[1]) => {
         await initRefreshCommand(folderArg, deps);
         refreshScaffoldCommitStatusBar();
+        syncSessionIdEnvVar(); // #2356: harmless re-sync; initRefresh can also run on a not-yet-opted-in folder
       },
     ),
     vscode.commands.registerCommand('minspec.commitHarnessRefresh', async (folderArg?: string) => {
