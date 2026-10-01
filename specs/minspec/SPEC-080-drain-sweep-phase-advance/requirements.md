@@ -193,18 +193,21 @@ Implements: [DR-057](../../../docs/decisions/DR-057.md) §3 (second trigger).
   no `tasks.md`, the sweep enqueues a request for it; given the same fixture with
   `tasks.md` present, it does not. Both cases are proved by calling the sweep's
   entry point against the fixture, never by a hand-rolled existence check in the
-  test asserting the production code took the same shortcut.
+  test asserting the production code took the same shortcut. The fixture's `status`
+  must land in the `implementing` band (`next-task.ts:837` gates on it before the
+  approval/phase checks above; the fs-adapter folds the `planning` band into
+  `implementing`, so `phase: tasks` alone does not guarantee this).
 - [ ] **(FR-1)** A spec that is `phase: tasks` but **not** approved (approval-state
   `unapproved`/`stale`) is never enqueued by the sweep, matching `next-task.ts:841`.
 - [ ] **(FR-1)** A T1/T2 spec (tier whose `requiredPhases` excludes `tasks`,
   `config.ts:111-112`) is never enqueued regardless of its other fields — its `phase`
   cannot reach `'tasks'` under the existing fs-adapter, proved by a T1 fixture that
   would otherwise match every other condition.
-  spec reduces to `.minspec/queue/<spec-path>.json` with `source: 'alt-a-toast'` (an
-  existing `phase-advance-queue.test.ts` case) and the drain-sweep case both resolve
 - [ ] **(FR-2, INV-2)** The sweep's enqueue call for a ready spec produces a sidecar
   identical in shape to the toast's, differing only in `source: 'drain-sweep'` and
-  `requestedAt`.
+  `requestedAt`: the same spec path, enqueued once with `source: 'alt-a-toast'` (an
+  existing `phase-advance-queue.test.ts` case) and once via the drain-sweep path, both
+  resolve to the identical `.minspec/queue/<spec-path>.json` request path.
 - [ ] **(FR-3)** Running the sweep twice in a row against an unchanged fixture leaves
   exactly one request file per ready spec (overwritten, not duplicated), with
   `requestedAt` advancing.
