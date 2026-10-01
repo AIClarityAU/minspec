@@ -1,7 +1,7 @@
 ---
 id: SPEC-086
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - the epic that carries the upsell-trust rules this spec retires along with the upsell itself
@@ -18,8 +18,8 @@ implements: [packages/minspec/tests/no-scroogellm-upsell.test.ts]
 affects: [packages/minspec/src/lib/bridge.ts, packages/minspec/src/lib/ai-usage-detector.ts, packages/minspec/src/extension.ts, packages/minspec/package.json, packages/shared/src/contracts/conformance.ts, packages/shared/src/index.ts, packages/extension-pack/package.json, packages/minspec/tests/bridge.test.ts, packages/minspec/tests/ai-usage-detector.test.ts, packages/minspec/tests/extension-extra.test.ts, packages/minspec/tests/import-boundaries.test.ts]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
