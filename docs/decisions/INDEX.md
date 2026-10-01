@@ -797,7 +797,7 @@ MinSpec scaffolds a workflow into adopters that auto-merges a docs-only pull req
 
 ## [DR-100 — Publish MinSpec to the VS Code Marketplace as an early preview - a bounded exception to the phase order, for one stated reason and behind stated preconditions](DR-100.md)
 
-*Status: proposed · Date: 2026-10-01*
+*Status: accepted · Date: 2026-10-01*
 
 <!-- dr-summary:DR-100 auto=2c0bfd94dcb0 -->
 The founder needs MinSpec on a Windows work PC that runs Microsoft's VS Code, and asked on 2026-10-01 for the extension to be published just before the visualiser work, about a week out. The constitution puts a Marketplace publish in Phase 2 and says Phase 2 work may not displace unfinished Phase 1 work, so publishing now needs a recorded exception, with its scope and preconditions stated.
