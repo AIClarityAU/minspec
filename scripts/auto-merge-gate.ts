@@ -687,13 +687,25 @@ export function isBoundaryPath(rawPath: string): boolean {
 }
 
 /**
- * If ANY changed file is a CI/build-config boundary file (#422), return the
- * high-blast `manifest_changed` consequence signal to INJECT into the analyzer
- * output (recognized-high in `classifyBlast` ⇒ blast=high ⇒ hold). Returns
- * `undefined` when none matched. Sibling to `detectManifestChange`: same
- * defense-in-depth for a class the public-API analyzer does not cover — here
- * CI/build config rather than supply-chain manifests. Reuses the `manifest_changed`
- * signal name so no new name has to be classified in `auto-merge.ts`.
+ * If ANY changed file is a boundary file (#422; widened to repo-governance
+ * settings by #1742), return the high-blast `manifest_changed` consequence
+ * signal to INJECT into the analyzer output (recognized-high in
+ * `classifyBlast` ⇒ blast=high ⇒ hold). Returns `undefined` when none matched.
+ * Sibling to `detectManifestChange`: same defense-in-depth for a class the
+ * public-API analyzer does not cover — here CI/build/governance config rather
+ * than supply-chain manifests. Reuses the `manifest_changed` signal name so no
+ * new name has to be classified in `auto-merge.ts`.
+ *
+ * `explain` is ONE string for every category in {@link isBoundaryPath}
+ * (CI/build config, package-manager config, compiler config, machinery
+ * generators, repo-governance settings) rather than switching text per
+ * category: the categories share one signal name and one gate decision, and a
+ * per-category branch is exactly the maintenance obligation that let #1874
+ * happen — a category (`.minspec/config.json`, #1742) added after this string
+ * was written, described by wording scoped to the category that existed when
+ * it shipped (#422). The generic wording costs some of the CI-specific detail
+ * #422 wanted spelled out, in exchange for staying true of every path the
+ * function can match, including ones added later.
  */
 export function detectBoundaryChange(
   changedFiles: ReadonlyArray<ChangedFile>,
@@ -708,10 +720,13 @@ export function detectBoundaryChange(
     axis: 'consequence',
     degraded: false,
     explain:
-      `CI/build-config boundary file(s) changed (${matched.join(', ')}) — arbitrary-CI / ` +
-      `package-manager / compiler config the public-API analyzer does not signal; ` +
-      `gate-injected high-blast (deny-by-default, #422). A workflow can run code (e.g. ` +
-      `\`curl … | sh\`) that trips no sensitive term.`,
+      `Boundary file(s) changed (${matched.join(', ')}) — CI/build config, ` +
+      `package-manager / compiler config, or repo-governance settings the ` +
+      `public-API analyzer does not signal; gate-injected high-blast ` +
+      `(deny-by-default, #422). This class of file can change how the repo ` +
+      `behaves or is gated without tripping any sensitive-term or public-API ` +
+      `signal — e.g. a CI workflow running \`curl … | sh\`, or a governance ` +
+      `setting change like the autonomy setting flipping unseen.`,
   };
 }
 
