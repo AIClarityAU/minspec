@@ -7,6 +7,12 @@
           { "type": "command", "command": "bash \"$CLAUDE_PROJECT_DIR/scripts/hooks/spec-gate.sh\"" },
           { "type": "command", "command": "node \"$CLAUDE_PROJECT_DIR/scripts/hooks/marker-guard.mjs\"" }
         ]
+      },
+      {
+        "matcher": "Bash",
+        "hooks": [
+          { "type": "command", "command": "python3 \"$CLAUDE_PROJECT_DIR/scripts/hooks/host-write-guard.py\"" }
+        ]
       }
     ],
     "SessionStart": [

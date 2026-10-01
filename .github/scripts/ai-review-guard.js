@@ -215,7 +215,81 @@ const BLOCKED_BY = 'blocked-by';
 // loosely all the time ("depends on the seam landing first" as narrative), while
 // "Blocked by" reads as a declaration in every corpus I checked. One unambiguous
 // form beats two fuzzy ones — a second form can be added if a real body wants it.
-const BLOCKED_BY_LINE_RE = /^[\s>*_-]*\**\s*blocked\s+by\b\**\s*:?\s*(.+)$/gim;
+//
+// LEADING-DECORATION PATTERN — catastrophic-backtracking history (minspec#2134).
+// PR bodies are untrusted, attacker-controlled input, and this repo is public, so
+// this class has been through three rounds of hardening; all are recorded here so
+// a future edit does not casually reintroduce any of them.
+//
+// Round 1: the leading class `[\s>*_-]*` and the adjacent `\**` both included `*` —
+// two greedy quantifiers ranging over an OVERLAPPING alphabet, which gave the
+// backtracking engine O(n^2) work to discover a line of leading asterisks does not
+// match (measured ~4s at 40K asterisks). The round-1 fix dropped `*` from the
+// leading class, leaving `\**` as its sole owner — but left a SECOND, identically-
+// shaped overlap in place: `[\s>_-]*` includes `\s`, and the `\s*` right after
+// `\**` also matches `\s`, with only the nullable `\**` between them. Whenever
+// `\**` matched zero (the common case — most declarations have no bold marker),
+// those two `\s`-matching quantifiers became adjacent, reproducing the exact same
+// class of bug on plain whitespace instead of asterisks (measured ~1.5s at 40K
+// spaces or tabs). Caught in review of the round-1 PR, not by the round-1 test —
+// which used an asterisk-only fixture and could not have distinguished "ReDoS
+// closed" from "one of two ReDoS vectors closed" (the transferable lesson: vary
+// the INPUT ALPHABET, not just the code, or a passing test gives false assurance).
+//
+// Root cause of both: this module never re-derives "is this a fresh overlap" by
+// inspection — there is no lint rule or CI check for regex catastrophic-backtracking
+// shapes in this repo, so the only backstop is deliberately-varied timing tests
+// (see ai-review-guard.test.js) plus this comment's inventory for the next reviewer.
+//
+// Round 2 fix — collapse ALL leading decoration into ONE bounded quantifier:
+// `[\s>*_-]{0,64}`. One quantifier over a union alphabet cannot have a split-point
+// ambiguity with itself (there is only one way to decide how many characters it
+// consumed), which closes the asterisk and whitespace axes outright. The `{0,64}`
+// bound closes a THIRD, distinct mechanism found while fixing the second: `\s`
+// matches line terminators, and the `m` flag makes `^` succeed after every one of
+// them — so an all-newline body gives the engine O(n) valid anchor points, each
+// doing O(remaining length) work with an UNBOUNDED quantifier, which is O(n^2)
+// even with zero ambiguity inside any single attempt (measured ~1.7s at 40K
+// newlines with the round-2 class left unbounded). Bounding the quantifier caps
+// each anchor's work at O(64) regardless of body size, making the total O(64n) —
+// linear (measured ~14ms at 40K newlines, ~57ms at 160K, confirmed linear not
+// quadratic).
+//
+// Round 3: rounds 1-2 closed this shape before "blocked by"; the identical shape
+// still existed after it. `\**\s*:?\s*` has TWO `\s`-matching quantifiers — the
+// `\s*` right before `:?` and the `\s*` right after it — with only the nullable
+// `:?` between them, exactly round 2's "two same-alphabet quantifiers, nullable
+// separator" bug, one region over. `\**` itself does not add a fourth overlap: it
+// shares no alphabet with `\s`, so an all-asterisk or all-space run in this region
+// resolves in one attempt as soon as `(.+)` finds a non-`\n` character to grab —
+// the same reason rounds 1-2 needed an all-NEWLINE fixture, not all-whitespace, to
+// force the exhaustive backtrack (`.` matches space/tab/`*`, never `\n`). Found by
+// the ai-review panel's security voter reviewing the round-2 PR: round 1 and 2's
+// own regression tests varied the alphabet BEFORE "blocked by" — applying their
+// own lesson — but not after it, so this fourth vector passed unnoticed a second
+// time. `"blocked by" + "\n" x 40K` reproduces it (measured ~2000ms unfixed).
+//
+// Round 3 fix — same medicine as round 2, applied to the region after "blocked
+// by": collapse `\s*:?\s*` into ONE bounded quantifier over the union alphabet,
+// `[\s:]{0,64}`. Caps this region's worst case at O(64) too (measured ~15ms at
+// 40K newlines, matching round 2's linear result).
+//
+// HONESTY CHECK on what this changes vs the ORIGINAL (pre-#2134) pattern: this is
+// a near-superset, not a strict one. Every realistic decoration still matches
+// identically — `* `, `  * `, `> `, `**`, `> **`, `-`, `_`, `blocked by: #1`,
+// `blocked by #1`, `blocked by:#1` — and even the round-1-broken combinations like
+// `*>Blocked by` / `*-Blocked by` (restored, since `*` is back in the same class
+// as `>`/`-`). Two input classes stop matching, neither of which any human writes
+// nor relied on as a feature — both only "worked" before as a side effect of
+// unbounded quantifiers: a leading decoration run longer than 64 characters (round
+// 2 — e.g. 100 nested blockquote markers), and a post-"blocked by" separator run
+// longer than 64 characters OR containing more than one `:` (round 3 — e.g.
+// `blocked by::: #1`, where the extra colons now get consumed as separator instead
+// of spilling into the captured reference text). Acceptable because
+// parseBlockedBy's output feeds only the advisory `blocked-by` dependency label:
+// it is author-self-declared prose, not a security boundary, and it gates nothing
+// a human is not already looking at.
+const BLOCKED_BY_LINE_RE = /^[\s>*_-]{0,64}blocked\s+by\b\**[\s:]{0,64}(.+)$/gim;
 
 // Only the LEADING run of refs on a declaring line counts: `#N`, separated by
 // commas/`and`/whitespace. Scanning stops at the first token that is not one of
