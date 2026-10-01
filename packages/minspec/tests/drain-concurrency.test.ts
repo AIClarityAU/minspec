@@ -38,9 +38,20 @@ function findRepoRoot(): string {
 const DRAIN = path.join(findRepoRoot(), 'scripts', 'drain-inbox.sh');
 
 function sh(args: string[], env: NodeJS.ProcessEnv = {}): string {
+  // MINSPEC_DRAIN_CONCURRENCY must be stripped from the inherited environment,
+  // not merely overridden per-call: a dispatch sandbox that itself runs under a
+  // configured fan-out width (e.g. an agent container exporting
+  // MINSPEC_DRAIN_CONCURRENCY=3 for its OWN drain invocations) leaks that value
+  // into every child process by default, including this one. The "defaults to
+  // 1" and "fails safe on malformed input" cases below call sh(['--concurrency'])
+  // with no explicit override, so their premise — the var is absent — silently
+  // became false outside a hermetic CI runner, and the default-path assertion
+  // failed against the ambient value instead of the documented default (#1208).
+  const base = { ...process.env };
+  delete base.MINSPEC_DRAIN_CONCURRENCY;
   return execFileSync('bash', [DRAIN, ...args], {
     encoding: 'utf-8',
-    env: { ...process.env, ...env },
+    env: { ...base, ...env },
     stdio: ['ignore', 'pipe', 'ignore'],
   }).trim();
 }
