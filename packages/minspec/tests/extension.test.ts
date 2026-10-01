@@ -310,6 +310,7 @@ vi.mock('path', async () => {
 import * as vscode from 'vscode';
 import * as fs from 'fs';
 import { activate, deactivate } from '../src/extension';
+import { computeNextTask } from '../src/commands/next-task';
 import { initCommand, initRefreshCommand, commitHarnessRefreshCommand } from '../src/commands/init';
 import { classifyCommand } from '../src/commands/classify';
 import { statusCommand } from '../src/commands/status';
@@ -359,7 +360,7 @@ function makeMockContext(overrides: Partial<Record<string, any>> = {}) {
       update: vi.fn(),
     },
     // SPEC-026 FR-11: activate() sets MINSPEC_SESSION_ID via this collection.
-    environmentVariableCollection: { replace: vi.fn(), append: vi.fn(), prepend: vi.fn(), clear: vi.fn() },
+    environmentVariableCollection: { replace: vi.fn(), append: vi.fn(), prepend: vi.fn(), delete: vi.fn(), clear: vi.fn() },
     ...overrides,
   } as unknown as vscode.ExtensionContext;
 }
@@ -432,9 +433,50 @@ describe('activate()', () => {
       'minspec.removeContext',
       'minspec.generateExample',
       'minspec.showSpecPanel',
+      // The Alt+A dispatch chain (#303/#377): approveActive never re-implements
+      // approve/accept logic, it only routes to these three plus itself. All
+      // four registering is exactly the invariant the alt-a-dead-key
+      // investigation (2026-09-25) needed and this list didn't cover — an
+      // activation throw between here and approveActive's own registerCommand
+      // call would silently kill the keybinding with nothing in this suite
+      // going red.
+      'minspec.approveActive',
+      'minspec.approveSpec',
+      'minspec.acceptAdr',
+      'minspec.acceptEpic',
     ];
 
     for (const cmd of expectedCommands) {
+      expect(registeredCommands.has(cmd), `missing command: ${cmd}`).toBe(true);
+    }
+  });
+
+  // Regression test for the alt-a-dead-key investigation (2026-09-25). The
+  // founder reported Alt+A ("minspec.approveActive") firing dead. The leading
+  // hypothesis was that some throwable call earlier in activate() throws and
+  // kills every registerCommand() that lexically follows it, since
+  // approveActive registers roughly two-thirds of the way through the
+  // function body. That hypothesis was REFUTED by code review (every risky
+  // call already visible in activate() is individually try/catch-guarded) —
+  // this test asserts the specific guard around the next-task status bar
+  // paint holds: computeNextTask throwing must not prevent approveActive (or
+  // its sibling approve/accept commands) from registering. Asserts the
+  // registration LIST, not the happy path, per RCDD Phase 3 (a happy-path
+  // assertion would pass even if the guard were deleted, as long as nothing
+  // actually throws in the mocked run).
+  it('registers minspec.approveActive even when computeNextTask throws', () => {
+    vi.mocked(computeNextTask).mockImplementation(() => {
+      throw new Error('simulated: malformed workspace graph');
+    });
+
+    expect(() => activate(makeMockContext())).not.toThrow();
+
+    for (const cmd of [
+      'minspec.approveActive',
+      'minspec.approveSpec',
+      'minspec.acceptAdr',
+      'minspec.acceptEpic',
+    ]) {
       expect(registeredCommands.has(cmd), `missing command: ${cmd}`).toBe(true);
     }
   });
@@ -859,6 +901,88 @@ describe('activate()', () => {
     expect(
       calls.some((c) => String(c[0]).includes("isn't initialized")),
     ).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // #2356: MINSPEC_SESSION_ID terminal env var — gated on the same opt-in
+  // predicate presence.ts uses, not set unconditionally for every window.
+  // -------------------------------------------------------------------------
+
+  it('sets MINSPEC_SESSION_ID when the folder has opted in (.minspec/ exists)', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+
+    const context = makeMockContext();
+    activate(context);
+
+    expect(context.environmentVariableCollection.replace).toHaveBeenCalledWith(
+      'MINSPEC_SESSION_ID',
+      expect.any(String),
+    );
+    expect(context.environmentVariableCollection.delete).not.toHaveBeenCalled();
+  });
+
+  it('does not set MINSPEC_SESSION_ID, and clears any stale value, when the folder never opted in', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    const context = makeMockContext();
+    activate(context);
+
+    expect(context.environmentVariableCollection.replace).not.toHaveBeenCalledWith(
+      'MINSPEC_SESSION_ID',
+      expect.anything(),
+    );
+    expect(context.environmentVariableCollection.delete).toHaveBeenCalledWith('MINSPEC_SESSION_ID');
+  });
+
+  it('re-syncs MINSPEC_SESSION_ID after minspec.init so a folder opting in now gets it without a reload', async () => {
+    // Starts un-opted-in (existsSync false) so activation itself does not set it...
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    const context = makeMockContext();
+    activate(context);
+    expect(context.environmentVariableCollection.replace).not.toHaveBeenCalledWith(
+      'MINSPEC_SESSION_ID',
+      expect.anything(),
+    );
+
+    // ...then `MinSpec: Initialize` runs and creates .minspec/ — the registered
+    // command handler must re-check and set the var on the SAME activation,
+    // with no window reload.
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const initHandler = registeredCommands.get('minspec.init')!;
+    await initHandler(undefined, undefined);
+
+    expect(context.environmentVariableCollection.replace).toHaveBeenCalledWith(
+      'MINSPEC_SESSION_ID',
+      expect.any(String),
+    );
+  });
+
+  it('does not set MINSPEC_SESSION_ID when no folder is open at all', () => {
+    // .minspec/ "exists" per the fs mock, but there is no folder to resolve a
+    // root from — isMinspecInitialized('') would test the extension host's cwd,
+    // which is exactly the bug presence.ts's hasRoot guard exists to avoid.
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const origFolders = vscode.workspace.workspaceFolders;
+    Object.defineProperty(vscode.workspace, 'workspaceFolders', {
+      value: undefined,
+      configurable: true,
+    });
+
+    const context = makeMockContext();
+    try {
+      activate(context);
+
+      expect(context.environmentVariableCollection.replace).not.toHaveBeenCalledWith(
+        'MINSPEC_SESSION_ID',
+        expect.anything(),
+      );
+      expect(context.environmentVariableCollection.delete).toHaveBeenCalledWith('MINSPEC_SESSION_ID');
+    } finally {
+      Object.defineProperty(vscode.workspace, 'workspaceFolders', {
+        value: origFolders,
+        configurable: true,
+      });
+    }
   });
 
   it('surfaces the #320 propose-draft nudge when an initialized constitution is empty', async () => {
