@@ -245,6 +245,34 @@ export function checkStatusParity(
 }
 
 /**
+ * Join a status claim's line with its WRAPPED CONTINUATION LINES into one paragraph string.
+ *
+ * #2180: a negation guard that tests only the single physical source line a status claim
+ * sits on catches a trailing "Not accepted …" clause when it happens to land on the FIRST
+ * physical line, and misses it whenever this repo's own prose wrap breaks the sentence
+ * before the negation word — an accident of column width, not a property of what the
+ * sentence means. Absorbing every subsequent non-blank, non-heading line back into one
+ * string turns the physical-line boundary this module locates the token on back into the
+ * paragraph boundary a reader actually parses.
+ *
+ * The claim's `line` (used to target the rewrite) is unchanged by this — it only widens
+ * what text callers read when deciding whether the sentence is safe to rewrite.
+ */
+export function claimParagraphText(content: string, line: number): string {
+  const lines = content.split('\n');
+  const startIdx = line - 1;
+  if (startIdx < 0 || startIdx >= lines.length) return '';
+  const paragraph: string[] = [lines[startIdx]];
+  for (let j = startIdx + 1; j < lines.length; j++) {
+    const l = lines[j];
+    if (!l.trim()) break; // blank line ends the paragraph
+    if (/^#{1,6}\s/.test(l)) break; // a heading ends the paragraph
+    paragraph.push(l);
+  }
+  return paragraph.join(' ');
+}
+
+/**
  * EVERY status claim in the body, not just the first.
  *
  * WHY THE SINGULAR VERSION IS NOT ENOUGH (#1223 — and this fix's own first attempt got it

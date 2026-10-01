@@ -67,7 +67,11 @@ export function isSpecKitDirEntry(entryName: string): boolean {
  */
 export function splitSpecForSpecKit(spec: ParsedSpec): Record<SpecKitFile, ParsedSpec> {
   const shards: Record<SpecKitFile, ParsedSpec> = {
-    'spec.md': emptyShard(spec.frontmatter, spec.preamble),
+    // Only spec.md carries frontmatter on write (writeShard), so only it needs
+    // extraFrontmatter — without this, the flat→spec-kit migration direction
+    // silently dropped implements:/affects:/relates_to: just like the flat→flat
+    // one (#2324): writeSpec(shard) only re-emits what THIS object carries.
+    'spec.md': emptyShard(spec.frontmatter, spec.preamble, spec.extraFrontmatter),
     'plan.md': emptyShard(spec.frontmatter, ''),
     'tasks.md': emptyShard(spec.frontmatter, ''),
   };
@@ -80,13 +84,14 @@ export function splitSpecForSpecKit(spec: ParsedSpec): Record<SpecKitFile, Parse
   return shards;
 }
 
-function emptyShard(fm: SpecFrontmatter, preamble: string): ParsedSpec {
+function emptyShard(fm: SpecFrontmatter, preamble: string, extraFrontmatter?: readonly string[]): ParsedSpec {
   return {
     frontmatter: fm,
     preamble,
     sections: new Map<string, string>(),
     phaseSections: {},
     raw: '',
+    extraFrontmatter,
   };
 }
 
@@ -131,6 +136,11 @@ export function mergeSpecKitShards(shards: Partial<Record<SpecKitFile, ParsedSpe
     sections: merged,
     phaseSections: {},
     raw: '',
+    // spec.md is authoritative for frontmatter (see docstring), so its
+    // extraFrontmatter is too — carrying it through is what lets the
+    // spec-kit→flat migration direction round-trip implements:/affects:/
+    // relates_to: (#2324).
+    extraFrontmatter: specShard.extraFrontmatter,
   };
 }
 
