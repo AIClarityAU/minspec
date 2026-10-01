@@ -15,6 +15,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as zlib from 'zlib';
 import { execFileSync, execSync } from 'child_process';
 import { sidecarPath, readRecord } from '../src/lib/approval-store';
 import {
@@ -330,7 +331,6 @@ describe('Slice 3 — pin-failure fallthrough → GZIP_MARKER, recoverBaseline r
     const specRelForTest = 'specs/minspec/SPEC-GZTEST/requirements.md';
     const bodyOnly = '# Gzip recovery test\n\nBody content for gz recovery.\n';
     const buf = Buffer.from(bodyOnly, 'utf-8');
-    const zlib = require('zlib') as typeof import('zlib');
     const gz = zlib.gzipSync(buf);
     const dir = path.join(tmp, '.minspec', 'snapshots');
     fs.mkdirSync(dir, { recursive: true });

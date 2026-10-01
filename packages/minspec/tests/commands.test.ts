@@ -147,7 +147,7 @@ import {
 import { generateExampleCommand } from '../src/commands/example';
 import { declareScopeCommand, ensureSession } from '../src/commands/session';
 import { parkCommand } from '../src/commands/park';
-import { commentOnIssue, getRepoFromRemote } from '../src/lib/parking-lot';
+import { commentOnIssue } from '../src/lib/parking-lot';
 import { scoreWsjfCommand, triageIssueCommand } from '../src/commands/backlog';
 import { scaffold, generateHarnessFiles, refreshHarnessFiles } from '../src/lib/scaffold';
 import {

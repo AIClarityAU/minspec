@@ -23,7 +23,6 @@ import * as path from 'path';
 import { execFileSync } from 'child_process';
 import { sidecarPath } from '../src/lib/approval-store';
 import { approveSpec, GZIP_MARKER } from '../src/lib/approval';
-import type { ApprovalRecord } from '../src/lib/approval';
 import { computeSpecRework } from '../src/lib/trust-metrics';
 import { useShellTimeout } from './helpers/shell-timeout';
 

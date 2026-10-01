@@ -4,7 +4,6 @@ import {
   DEFAULT_CONFIG,
   DEFAULT_COVERAGE_MINIMUM,
   setCoverageMinimum,
-  type MinspecConfig,
 } from '../src/lib/config';
 import * as fs from 'fs';
 import * as path from 'path';

@@ -26,6 +26,7 @@
 
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 
@@ -89,7 +90,7 @@ function runGateStatus(
   ].join('\n');
 
   const stderrFile = path.join(
-    fs.mkdtempSync(path.join(require('os').tmpdir(), 'gate-bound-')),
+    fs.mkdtempSync(path.join(os.tmpdir(), 'gate-bound-')),
     'err',
   );
   let out = '';
