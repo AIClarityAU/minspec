@@ -20,9 +20,12 @@ phases:
 # MinSpec - Stop automated wakes of idle sessions, and warn before a cold resume (Requirements)
 
 > **This is a SPECIFICATION ONLY.** No code, script, hook or test is created by the
-> dispatch that produced it. A human reads it, resolves
-> **[Decisions needed (Clarify)](#decisions-needed-clarify)**, and approves it through the
-> normal spec-approval gate before anything is built.
+> dispatch that produced it. A human reads it, resolves its Clarify questions, and approves
+> it through the normal spec-approval gate before anything is built. Each question carries
+> an agent-recorded selection under
+> **[Clarify selections](#clarify-selections-recorded-by-an-agent-2026-10-02-ratified-only-by-approval-of-this-spec)**;
+> the human resolves them by approving this spec with those in place, or by changing them
+> first.
 
 Materializes **#1922** (the cold-resume guard issue, AIClarityAU/minspec): *"cold-resume
 guard - warn before a prompt re-bills an expired cache, and stop automated messages waking
@@ -1034,9 +1037,31 @@ and an `agent-name` record.
 - **Changing the harness,** including asking for a native "skip this wake if the cache is
   cold" option.
 
-## Decisions needed (Clarify)
+## Clarify selections (recorded by an agent 2026-10-02; ratified only by approval of this spec)
+
+DQ-1 to DQ-8 each carry a **Recorded selection** line naming the option this document
+already recommended. An agent session wrote those lines on 2026-10-02, and no human chose
+them. This repository runs with `"autonomy": "act"` (`.minspec/config.json:58`), under which
+an agent proceeds on a stated recommendation and leaves the options it did not take on
+record (DR-086 §2 and §4), which is why the options stay below with their costs. Approving a
+T3 spec is the second class on that section's stop list (`scripts/lib/autonomy.ts:68-70`),
+so nothing here stands in for that approval: the lines propose, and approving this spec is
+what ratifies them. An approval records a canonical hash that covers this body
+(`packages/minspec/src/lib/approval.ts:4-8`) and reads as stale once the hash stops matching
+(`resolveStatus`, `:483-490`), so an approval of this text covers these selections and
+changing one afterwards voids it. When the lines were written this spec had not landed on
+`main` and no approval of it existed there (`status: specifying`, `clarify: pending`). A
+question in this section with no **Recorded selection** line is still open.
 
 ### DQ-1 - the founder's "wake everything" instruction vs Part A
+
+**Recorded selection: Option A,** adopt Part A for non-urgent peer messages and
+cross-session notices, observe first (FR-7), with the chief-of-staff change tracked as #2211
+(the chief-of-staff wake policy). This is the option that puts Part A ahead of the founder's
+2026-09-25 "wake everything" instruction where the two conflict, which is a non-urgent peer
+message or notice reaching a cold session. Nothing is held while Part A is in `observe`, the
+default FR-19 gives it. FR-7 lists "DQ-1 is decided" among the conditions for switching to
+`enforce`, and it is approval of this spec that decides it, not this line.
 
 The founder's instruction of 2026-09-25 to the chief-of-staff skill reads *"make sure cos
 skill includes waking up all sessions that cos didn't intentionally pause"*, and the skill
@@ -1058,6 +1083,10 @@ sessions.
 
 ### DQ-2 - task notifications: defer or deliver?
 
+**Recorded selection: Option A,** task notifications are delivered, logged by class in
+observe mode, and revisited once that log has data. FR-1, FR-4 and AC-11 are already written
+this way.
+
 A task notification means a background task the session itself launched has finished.
 Under autonomy `act` (DR-086), continuing on it is often the point.
 
@@ -1068,6 +1097,10 @@ Under autonomy `act` (DR-086), continuing on it is often the point.
   (SPEC-044's auto-wrapup) until the human returns.
 
 ### DQ-3 - the warning's carrier in VS Code
+
+**Recorded selection: Option A,** the warning is a `systemMessage`, with `additionalContext`
+as the fallback only if probe P2 shows that VS Code does not display it. FR-8 and AC-17 are
+already written this way.
 
 Whether VS Code shows a `systemMessage` is unknown until probe P2. The same question decides
 how FR-18's error lines reach the human; until P2 is recorded, those lines go out on both
@@ -1084,6 +1117,9 @@ surfaces regardless of this choice.
 
 ### DQ-4 - the context threshold
 
+**Recorded selection: Option A,** 150,000 tokens, the threshold FR-13's cold predicate
+already uses.
+
 - **Option A (rec).** 150,000. *Cost:* catches 85.9% of rewrite tokens on the sample
   against 89.0% at 100,000 (M12), so about 3 points of coverage are left in exchange for
   fewer interruptions.
@@ -1092,6 +1128,9 @@ surfaces regardless of this choice.
 
 ### DQ-5 - the epic
 
+**Recorded selection: Option A,** EPIC-009 (Team Readiness), the `epic:` this spec's
+frontmatter already carries.
+
 - **Option A (rec).** EPIC-009 (Team Readiness), next to SPEC-026, SPEC-027 and SPEC-044.
   *Cost:* Part B is single-session economics and fits EPIC-009's "more than one actor" test
   loosely.
@@ -1099,6 +1138,9 @@ surfaces regardless of this choice.
   from the SPEC-027 mailbox whose constraint it hands over (Follow-up 2, #2209).
 
 ### DQ-6 - does this spec's delivery policy need a decision record?
+
+**Recorded selection: Option A,** no decision record. Option B is not taken, so none is
+written with this spec.
 
 This is this spec's own question. It is analogous to, but separate from, #1923's open
 question about its own Parts 1 and 2, which this spec does not answer.
@@ -1113,6 +1155,11 @@ question about its own Parts 1 and 2, which this spec does not answer.
 
 ### DQ-7 - the operator's other repositories
 
+**Recorded selection: Option A,** the hook stays dev-time, in this repository only (INV-6).
+The operator's other repositories stay uncovered until the guard ships as its own spec,
+tracked as #2210 (ship the guard to adopter repositories), and that only if the audits show
+the saving.
+
 The hook covers sessions in this repository only (M6: the MinSpecPro project's sessions
 carried 85.5% of measured cache-creation tokens). voip-sms-inbox (9.4%) and memory-fabric
 (3.8%) are not covered.
@@ -1125,6 +1172,9 @@ carried 85.5% of measured cache-creation tokens). voip-sms-inbox (9.4%) and memo
   doing it for them.
 
 ### DQ-8 - a warm-session recycling nudge
+
+**Recorded selection: Option A,** no warm-session recycling nudge is built now. FR-12
+already says this spec builds none.
 
 - **Option A (rec).** Do not build one now. FR-12's rule depends on `N`, the next task's
   call count, which the hook cannot know. *Cost:* warm sessions keep carrying context past
