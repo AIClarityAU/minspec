@@ -44,6 +44,10 @@
 #   rationale: <one line>
 #   TRIAGE_VERDICT_END
 #
+# human_only is itself fail-closed (#345): a MISSING line or a garbled value
+# (anything other than yes/true/no/false) normalises to `unknown`, which is
+# routed as if human-only had been asserted — never as `no`.
+#
 # stdout: one line "<label> <role> <hold>"
 #   label ∈ {agent-ready, agent-ready-specify, needs-review, needs-info}
 #   role  ∈ {dev, architect, security, reviewer}
@@ -53,7 +57,7 @@
 #
 # `--fields` prints the SAME decision as key=value lines instead of one space-joined
 # line, adding the two NORMALISED inputs the verdict record must carry for audit:
-#   label=… role=… hold=… tier=<T1|T2|T3|T4|unknown> human_only=<yes|no>
+#   label=… role=… hold=… tier=<T1|T2|T3|T4|unknown> human_only=<yes|no|unknown>
 # Same code path, same exit codes — only the projection differs. It exists so the
 # record written by triage-inbox.sh carries THIS gate's normalised view of tier /
 # human_only rather than a second, hand-rolled re-parse of the agent's raw text
@@ -64,7 +68,8 @@
 # (dispatch) needs the machine-readable reason to refuse a held item without
 # re-running an LLM, so this gate stops discarding the reason it already computes.
 # Mapping — each token names the BRANCH that fired, in the order below:
-#   human    human_only was asserted (any tier)      → needs-review
+#   human    human_only was asserted, OR was missing/garbled
+#            (fail-closed, #345) (any tier)           → needs-review
 #   info     the agent asked for more information     → needs-info
 #   specify  T3/T4 auto-buildable: the SPEC may be    → agent-ready-specify
 #            written now; implementation stays held
@@ -147,14 +152,22 @@ case "$TIER" in
   *) emit needs-info "$ROLE" unknown; exit 0 ;;
 esac
 
-# Normalised human_only, carried into the record. Note the asymmetry is deliberate:
-# only an explicit yes/true asserts human-only, and everything else (including a
-# missing field) reads as `no` — because the AFFIRMATIVE path is gated by `hold`,
-# which fails closed on its own. A missing human_only can therefore never turn a
-# held verdict into a buildable one.
-if [[ "$HUMAN" == "yes" || "$HUMAN" == "true" ]]; then
-  HUMAN_OUT="yes"
-fi
+# Normalised human_only, carried into the record. Three outcomes, not two:
+# an explicit yes/true asserts human-only; an explicit no/false asserts the
+# opposite; anything else — a MISSING field (field() returns "" when the line
+# isn't there at all) or a garbled value ("maybe", "TBD", ...) — is neither,
+# and per the fail-closed contract (lines 7-9) is normalised to `unknown`
+# rather than silently defaulting to `no`. `unknown` is routed as a human
+# gate below (same branch as an explicit `yes`), so a missing/garbled field
+# can never fall through to the auto-build path (#345 — it previously did:
+# field() returning "" made the "yes"/"true" check false, execution fell
+# through, and a T1/T2 agent-ready verdict with no human_only line reached
+# plain `agent-ready`).
+case "$HUMAN" in
+  yes|true) HUMAN_OUT="yes" ;;
+  no|false) HUMAN_OUT="no" ;;
+  *) HUMAN_OUT="unknown" ;;
+esac
 
 # Deterministic gate — order matters, every fall-through lands on a human gate:
 # 1. human-only (any tier)                 → needs-review          (hold: human)
@@ -172,7 +185,7 @@ fi
 # call auto-buildable (a human-only-adjacent, unclear, or garbled one). Requiring the
 # affirmative token keeps every non-affirmative T3/T4 on exactly its pre-#1169
 # outcome — needs-review, hold `tier`.
-if [[ "$HUMAN_OUT" == "yes" ]]; then
+if [[ "$HUMAN_OUT" == "yes" || "$HUMAN_OUT" == "unknown" ]]; then
   emit needs-review "$ROLE" human; exit 0
 fi
 if [[ "$DECISION" == "needs-info" ]]; then
