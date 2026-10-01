@@ -72,6 +72,13 @@
 #   scripts/remediate-pr.sh --cap-notice-decision [author_logins_csv] < comments.json
 #     → prints post | skip — whether the one-shot "capped, needs a human" notice is
 #       posted this sweep (never skip unless authorship is provable)
+#   scripts/remediate-pr.sh --check-same-repo <head_owner> <head_repo> <base_owner/repo>
+#     → exit 0 iff the PR's head repo IS the base repo we operate against, exit 1
+#       otherwise (#1894: a fork PR's headRefName is only safe to resolve as
+#       origin/<branch> when the head repo is the base repo — for a fork, that
+#       resolves against an unrelated, possibly-colliding same-named branch in the
+#       BASE repo, and a push there writes to the wrong place while reporting
+#       success against the PR)
 
 set -euo pipefail
 
@@ -98,6 +105,21 @@ MAX_CRASHES="${MINSPEC_REMEDIATE_MAX_CRASHES:-2}"
 # real delimiter, so it never over-matches human branches like `fixture-…` (the
 # char after `fix` there is a letter, not `/` or `-`).
 AUTOMATION_BRANCH_RE='^(agent|fix|feat)[/-]'
+
+# ── Pure fork-guard (no gh/git/claude — safe to unit-test in isolation) ────────
+# #1894: `headRefName` alone is not enough to know which repo a branch lives in — a
+# PR opened from a FORK carries a headRefName that means nothing against the BASE
+# repo's `origin`. Resolving it there anyway either fails harmlessly (no such
+# branch) or, when the base repo happens to have a same-named branch (ordinary
+# under this repo's fix/*, feat/*, agent/* conventions), silently pushes agent
+# commits to that unrelated branch while reporting success against the PR. Compare
+# the head repo the API already knows against the base repo we operate on, and
+# refuse — visibly, exit 0, no side effect — whenever they differ, rather than
+# inferring identity from the branch name.
+same_repo() {
+  local head_owner="$1" head_name="$2" base_repo="$3"
+  [[ -n "$head_owner" && -n "$head_name" && "${head_owner,,}/${head_name,,}" == "${base_repo,,}" ]]
+}
 
 # ── Pure classifier (no gh/git/claude — safe to unit-test in isolation) ────────
 # Decide, from a PR's already-fetched attributes, what remediation (if any) applies.
@@ -365,6 +387,14 @@ if [[ "${1:-}" == "--check-markers" ]]; then
   fi
   if assert_markers_isolated "$@"; then exit 0; else exit 1; fi
 fi
+if [[ "${1:-}" == "--check-same-repo" ]]; then
+  shift
+  if [[ $# -ne 3 ]]; then
+    echo "Usage: remediate-pr.sh --check-same-repo <head_owner> <head_repo> <base_owner/repo>" >&2
+    exit 2
+  fi
+  if same_repo "$1" "$2" "$3"; then exit 0; else exit 1; fi
+fi
 if [[ "${1:-}" == "--sanitize-body" ]]; then
   sanitize_comment_body "$(cat)"
   exit 0
@@ -423,13 +453,15 @@ ALLOWED_TOOLS="Read,Edit,Write,Glob,Grep,Bash(npm test),Bash(npm run validate),B
 
 echo "Fetching PR #$PR ($REPO)..."
 PR_JSON=$(gh pr view "$PR" --repo "$REPO" \
-  --json number,state,isDraft,headRefName,mergeable,mergeStateStatus,labels,statusCheckRollup,title,author 2>/dev/null) || {
+  --json number,state,isDraft,headRefName,headRepository,headRepositoryOwner,mergeable,mergeStateStatus,labels,statusCheckRollup,title,author 2>/dev/null) || {
   echo "ERROR: could not fetch PR #$PR" >&2; exit 1
 }
 
 STATE=$(jq -r '.state' <<<"$PR_JSON")
 IS_DRAFT=$(jq -r '.isDraft' <<<"$PR_JSON")
 BRANCH=$(jq -r '.headRefName' <<<"$PR_JSON")
+HEAD_OWNER=$(jq -r '.headRepositoryOwner.login // empty' <<<"$PR_JSON")
+HEAD_REPO_NAME=$(jq -r '.headRepository.name // empty' <<<"$PR_JSON")
 MERGEABLE=$(jq -r '.mergeable' <<<"$PR_JSON")
 MERGE_STATE=$(jq -r '.mergeStateStatus' <<<"$PR_JSON")
 TITLE=$(jq -r '.title' <<<"$PR_JSON")
@@ -438,6 +470,18 @@ LABELS_CSV=$(jq -r '[.labels[].name] | join(",")' <<<"$PR_JSON")
 # Only OPEN, non-draft PRs are remediable.
 if [[ "$STATE" != "OPEN" ]]; then echo "PR #$PR is $STATE — skipping."; exit 0; fi
 if [[ "$IS_DRAFT" == "true" ]]; then echo "PR #$PR is a draft — skipping."; exit 0; fi
+
+# #1894: refuse to act unless the PR's head repo IS the base repo we operate on.
+# `origin/$BRANCH` (used below to build the worktree and, later, to push) only
+# names the PR's actual head when the two coincide — for a fork PR it names an
+# unrelated, possibly-colliding same-named branch in the BASE repo, and a push
+# there silently remediates the wrong branch while reporting success against
+# this PR. Explicitly out of scope beats silently wrong: exit 0, no side effect,
+# reason stated. (option 1 of #1894 — pin the repo, don't infer it from a SHA.)
+if ! same_repo "$HEAD_OWNER" "$HEAD_REPO_NAME" "$REPO"; then
+  echo "  PR #$PR's head repo is '${HEAD_OWNER:-?}/${HEAD_REPO_NAME:-?}', not the base repo ($REPO) this sweep operates on — refusing to resolve 'origin/$BRANCH' against an unrelated repo (#1894). Leaving for a human." >&2
+  exit 0
+fi
 
 # #1803: GitHub computes mergeStateStatus LAZILY, so the FIRST read after a push is
 # routinely UNKNOWN even on a genuinely healthy PR — not because anything is wrong,
