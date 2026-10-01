@@ -32,6 +32,10 @@ Numbers in parentheses, here and below, are pull requests or issues at github.co
 - Files MinSpec declares machine-local are removed from the git index when they were already tracked, not only added to `.gitignore`, and MinSpec says so when it does it (#1146).
 - `minspec.ruleset.requiredChecks` now defaults to empty. It used to default to `lint` and `test`, and a required check that nothing reports blocks every pull request (#1671).
 
+### Removed
+
+- **The ScroogeLLM install prompt is gone**, and so are the two settings and the command that existed for it: `minspec.scroogellmNudge.enabled`, `minspec.conformance.enabled`, and **MinSpec: Export Traceability for ScroogeLLM**, which wrote `.minspec/traceability-export.json`. ScroogeLLM is not published, so the prompt recommended an extension nobody could install. MinSpec also no longer looks in your home directory and at your installed extensions for other AI tools, which it did only to word that prompt. If either setting is in your `settings.json` it now does nothing and can be deleted (#2205).
+
 ### Fixed
 
 - **The presence heartbeat no longer creates `.minspec/` in a folder that never opted in.** It used to create `.minspec/sessions/` in any folder you opened (#2357).
