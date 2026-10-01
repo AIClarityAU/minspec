@@ -204,6 +204,13 @@ describe('BacklogIssueNode', () => {
     expect((node.iconPath as { id: string }).id).toBe('issue-opened');
   });
 
+  it('uses check icon for done lifecycle', () => {
+    const issue = makeIssue({ lifecycleLabel: 'done' });
+    const node = new BacklogIssueNode(issue);
+
+    expect((node.iconPath as { id: string }).id).toBe('check');
+  });
+
   it('lifecycle label takes precedence over priority for icon (wip > P1)', () => {
     const issue = makeIssue({ lifecycleLabel: 'wip', priorityLabel: 'P1' });
     const node = new BacklogIssueNode(issue);
@@ -396,6 +403,30 @@ describe('BacklogTreeProvider', () => {
     expect(unlabeledGroup?.issues).toHaveLength(1);
   });
 
+  it('getChildren root: an open issue labelled done lands in "Done, still open", not dropped (#2460)', async () => {
+    const issues = [
+      makeIssue({ number: 1, lifecycleLabel: 'inbox' }),
+      makeIssue({ number: 2, lifecycleLabel: 'done', state: 'OPEN' }),
+    ];
+    mockIsGhAvailable.mockResolvedValue(true);
+    mockFetchIssues.mockResolvedValue(issues);
+    mockSortBacklog.mockReturnValue(issues);
+
+    const children = await provider.getChildren();
+
+    // Before the fix, the done-labelled issue matched no group and the
+    // pane showed only Inbox (1 group), silently dropping issue #2.
+    expect(children).toHaveLength(2);
+    const groups = children as BacklogGroupNode[];
+
+    const doneGroup = groups.find(g => g.label === 'Done, still open');
+    expect(doneGroup).toBeDefined();
+    expect(doneGroup?.issues).toHaveLength(1);
+    expect(doneGroup?.issues[0].number).toBe(2);
+    // Collapsed by default — rare state, shouldn't compete with active groups.
+    expect(doneGroup?.collapsibleState).toBe(1); // Collapsed
+  });
+
   it('getChildren root: filters out empty groups', async () => {
     const issues = [makeIssue({ number: 1, lifecycleLabel: 'wip' })];
     mockIsGhAvailable.mockResolvedValue(true);
@@ -409,14 +440,18 @@ describe('BacklogTreeProvider', () => {
     expect((children[0] as { label: string }).label).toBe('Work in Progress');
   });
 
-  it('getChildren root: shows error message when fetch fails', async () => {
+  it('getChildren root: shows the failure reason, not a false "no issues found" (#2247)', async () => {
     mockIsGhAvailable.mockResolvedValue(true);
-    mockFetchIssues.mockRejectedValue(new Error('network error'));
+    mockFetchIssues.mockRejectedValue(new Error('GitHub API rate limit exceeded — try again later'));
 
     const children = await provider.getChildren();
 
+    // A gh failure must never render as the same message as zero open
+    // issues — that's the false-zero this issue is about.
     expect(children).toHaveLength(1);
-    expect((children[0] as { label: string }).label).toBe('Failed to fetch issues from GitHub');
+    const label = (children[0] as { label: string }).label;
+    expect(label).not.toBe('No open issues found');
+    expect(label).toBe('Unavailable: GitHub API rate limit exceeded — try again later');
   });
 
   it('getChildren root: uses cached issues on subsequent calls', async () => {

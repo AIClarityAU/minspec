@@ -787,6 +787,14 @@ When one of the four ai-review voters dies on a session limit, the panel fails c
 MinSpec scaffolds a workflow into adopters that auto-merges a docs-only pull request carrying the docs-lane label, but never created the label, and gh pr create refuses to open a pull request naming a label the repository lacks. So where the label was missing, every approval fell to a manual Open PR step and a manual merge (#2243). Creating the label is a new kind of forge write, and it narrows a statement MinSpec ships to every adopter.
 <!-- /dr-summary:DR-098 -->
 
+## [DR-099 — Code-quality checks in the pre-commit harness split by class - correctness checks block and ship in v1, metric checks warn by default and are deferred to v2](DR-099.md)
+
+*Status: proposed · Date: 2026-10-01*
+
+<!-- dr-summary:DR-099 auto=893eb78b4e47 -->
+#1555 asks for a code-quality stage in the scaffolded pre-commit gate, and this record sets its rule by class. Correctness checks (shellcheck, actionlint, the TypeScript typecheck) block: three new ways for a commit to be refused, argued here against the advisory default earlier records state, and SPEC-080 ships them in v1. Metric checks (duplication, complexity, circular dependencies, dead code) warn by default until a project opts one into blocking, and are deferred to a v2 tracked as #2463.
+<!-- /dr-summary:DR-099 -->
+
 ## [DR-100 — Publish MinSpec to the VS Code Marketplace as an early preview - a bounded exception to the phase order, for one stated reason and behind stated preconditions](DR-100.md)
 
 *Status: proposed · Date: 2026-10-01*
