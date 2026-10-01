@@ -82,10 +82,14 @@ function decide({
  * skip-unhandled-state are #1803's two new tokens (an UNKNOWN or unrecognised
  * mergeStateStatus) — included here so the priority gates below (merged, stand-down,
  * the wall-clock ceiling) are proven to apply to them too, not just the pre-existing
- * vocabulary.
+ * vocabulary. skip-live-owned (SPEC-044 FR-6/INV-4, the owner gate) was missing until
+ * #1730 — the "the derived-list guard proves this list" test below is what keeps that
+ * from recurring: a hand-maintained "exhaustive" list drifts silently every time
+ * classify_pr grows a token, which is exactly the class of bug this one was.
  */
 const ALL_ACTIONS = [
   'skip-not-automation',
+  'skip-live-owned',
   'skip-conflict',
   'agent-remediate-checks',
   'agent-remediate-review',
@@ -95,6 +99,40 @@ const ALL_ACTIONS = [
   'skip-unhandled-state',
   'some-token-from-the-future',
 ];
+
+/**
+ * #1730: ALL_ACTIONS above is hand-maintained and asserts it is exhaustive — the same
+ * validator asymmetry this repo has hit before (checks the values present, never
+ * asserts one should be). skip-live-owned went unregistered for a full release this
+ * way, silently excluding it from all three INV-5/D3 safety sweeps. This derives the
+ * REAL token vocabulary straight from classify_pr's source (every `echo "<token>"`
+ * inside its function body, in remediate-pr.sh) and asserts it equals ALL_ACTIONS
+ * minus the one deliberate sentinel that classify_pr can never actually emit — so
+ * adding a token to classify_pr without registering it here fails the build instead
+ * of silently shrinking coverage.
+ */
+function classifyPrTokensFromSource(): string[] {
+  const src = fs.readFileSync(REMEDIATE, 'utf-8');
+  const start = src.indexOf('\nclassify_pr() {');
+  if (start === -1) {
+    throw new Error('classify_pr() { not found in remediate-pr.sh — derivation is stale');
+  }
+  const end = src.indexOf('\n}', start);
+  if (end === -1) {
+    throw new Error('classify_pr() closing brace not found in remediate-pr.sh — derivation is stale');
+  }
+  const body = src.slice(start, end);
+  const tokens = [...body.matchAll(/echo "([a-z0-9-]+)"/g)].map((m) => m[1]);
+  return [...new Set(tokens)];
+}
+
+describe('shepherd --decide: ALL_ACTIONS is exhaustive (#1730)', () => {
+  it('equals the real token vocabulary classify_pr emits, plus only the deliberate sentinel', () => {
+    const real = classifyPrTokensFromSource();
+    const declared = ALL_ACTIONS.filter((a) => a !== 'some-token-from-the-future');
+    expect(new Set(declared)).toEqual(new Set(real));
+  });
+});
 
 describe('shepherd --decide: INV-5/D3 a reclaimed owner never elects a credentialed op', () => {
   it('stands down for EVERY action token when the claim is no longer held', () => {
