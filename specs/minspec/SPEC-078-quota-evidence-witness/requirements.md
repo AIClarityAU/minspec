@@ -1,7 +1,7 @@
 ---
 id: SPEC-078
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain — DR-066's own domain (the silent-gate incident family); SPEC-054/SPEC-071 use it for the same gate-signal integrity class
@@ -22,8 +22,8 @@ implements: [packages/minspec/tests/quota-evidence-witness.test.ts]
 affects: [scripts/review-branch.sh, .github/workflows/ai-review.yml, .github/workflows/ai-review-retry.yml]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
