@@ -204,6 +204,13 @@ describe('BacklogIssueNode', () => {
     expect((node.iconPath as { id: string }).id).toBe('issue-opened');
   });
 
+  it('uses check icon for done lifecycle', () => {
+    const issue = makeIssue({ lifecycleLabel: 'done' });
+    const node = new BacklogIssueNode(issue);
+
+    expect((node.iconPath as { id: string }).id).toBe('check');
+  });
+
   it('lifecycle label takes precedence over priority for icon (wip > P1)', () => {
     const issue = makeIssue({ lifecycleLabel: 'wip', priorityLabel: 'P1' });
     const node = new BacklogIssueNode(issue);
@@ -394,6 +401,30 @@ describe('BacklogTreeProvider', () => {
 
     const unlabeledGroup = groups.find(g => g.label === 'Unlabeled');
     expect(unlabeledGroup?.issues).toHaveLength(1);
+  });
+
+  it('getChildren root: an open issue labelled done lands in "Done, still open", not dropped (#2460)', async () => {
+    const issues = [
+      makeIssue({ number: 1, lifecycleLabel: 'inbox' }),
+      makeIssue({ number: 2, lifecycleLabel: 'done', state: 'OPEN' }),
+    ];
+    mockIsGhAvailable.mockResolvedValue(true);
+    mockFetchIssues.mockResolvedValue(issues);
+    mockSortBacklog.mockReturnValue(issues);
+
+    const children = await provider.getChildren();
+
+    // Before the fix, the done-labelled issue matched no group and the
+    // pane showed only Inbox (1 group), silently dropping issue #2.
+    expect(children).toHaveLength(2);
+    const groups = children as BacklogGroupNode[];
+
+    const doneGroup = groups.find(g => g.label === 'Done, still open');
+    expect(doneGroup).toBeDefined();
+    expect(doneGroup?.issues).toHaveLength(1);
+    expect(doneGroup?.issues[0].number).toBe(2);
+    // Collapsed by default — rare state, shouldn't compete with active groups.
+    expect(doneGroup?.collapsibleState).toBe(1); // Collapsed
   });
 
   it('getChildren root: filters out empty groups', async () => {
