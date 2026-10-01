@@ -773,7 +773,7 @@ Ownership declarations leave the canonical approval hash, so every record minted
 
 ## [DR-097 — A single voter's verdict may be reused across an ai-review re-run, bound to one head SHA — where reusing the whole panel was rejected](DR-097.md)
 
-*Status: proposed · Date: 2026-09-26*
+*Status: accepted · Date: 2026-09-26*
 
 <!-- dr-summary:DR-097 auto=85c9e4fc299d -->
 When one of the four ai-review voters dies on a session limit, the panel fails closed and the re-run re-pays for the three that answered. This keeps the survivors, bound to the same head SHA - which is the whole distinction from #1840, where whole-panel reuse across a moved base was measured and refused. The safety property lived only in a comment at first, and the comment was false: three of four voters on #2163 caught the code reusing across commits while its docblock denied it.
