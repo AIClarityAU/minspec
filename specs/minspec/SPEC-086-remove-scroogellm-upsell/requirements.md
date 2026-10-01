@@ -106,8 +106,8 @@ It is the "nudge" in `packages/minspec/src/lib/bridge.ts`, fired from activation
 bridge code the surviving instruments use. Checked in the `AIClarityAU/scroogellm` checkout
 at `c6c3b92` (2026-09-30): `git grep` for `traceability-export`, `ConformanceContract`,
 `conformance` and `@aiclarity/shared` across everything except Markdown, `docs/` and
-`specs/` returns nothing. The only hits anywhere are two design documents
-(`specs/scroogellm/clarify.md`, `specs/scroogellm/design.md`). No surviving instrument
+`specs/` returns nothing. The only hits anywhere are four documents in `specs/scroogellm/`
+(`clarify.md`, `design.md`, `requirements.md`, `tasks.md`). No surviving instrument
 reads the export or the contract. The terms searched are named so a reader can judge the
 absence claim.
 
