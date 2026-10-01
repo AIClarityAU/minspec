@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-075-validate-corpus-from-config/requirements.md",
+  "specHash": "04311d22048f6c4b48efd6123d6855f5104202068887d18265df6ad5f10c545f",
+  "approvedAt": "2026-09-30T22:09:00.336Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "da52935336304529c75f12608276f3154946865d"
+}
