@@ -640,6 +640,10 @@ export function activate(context: vscode.ExtensionContext): void {
       vscode.workspace
         .getConfiguration('minspec')
         .get<boolean>(key, false) === true,
+    // #2355: where an answer is remembered for a folder with no `.minspec/`.
+    // The alternative store is `.minspec/preferences.json`, and writing it there
+    // would create the opt-in marker in a folder that just declined to opt in.
+    preOptInMemory: context.workspaceState,
   };
   for (const folder of vscode.workspace.workspaceFolders ?? []) {
     void runBootstrap(folder.uri.fsPath, bootstrapVsCode);

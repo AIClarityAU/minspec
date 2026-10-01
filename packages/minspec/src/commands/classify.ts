@@ -6,7 +6,7 @@ import { runConsequenceAnalyzers } from '../lib/consequence-analyzers';
 import { loadConfig, applyVSCodeOverrides, TIERS } from '../lib/config';
 import type { Tier } from '../lib/config';
 import { resolveTargetFolder } from '../lib/resolve-folder';
-import { savePreferences } from '../lib/preferences';
+import { hasOptInMarker, savePreferences } from '../lib/preferences';
 
 /** Tier the next-higher one above `tier`, or `tier` itself if already T4. */
 function nextTierUp(tier: Tier): Tier {
@@ -119,13 +119,23 @@ export async function classifyCommand(
   // one-click "harder than it looks → raise tier" ONLY at the boundary where
   // that miss lives — predicted-T1 — to avoid nag fatigue (DR-021 Risk 2).
   // Dismissible like any MinSpec toast.
-  const showBumpUp = predictedTier === 'T1';
+  //
+  // #2355: both buttons that PERSIST something are offered only in a folder that
+  // has opted in. Classifying is allowed in any folder, and in one with no
+  // `.minspec/` each of them would create the opt-in marker as a side effect of
+  // answering a toast: the bump-up through `.minspec/calibration.json`, the
+  // standing choice through `.minspec/preferences.json` (plus a workspace setting
+  // that changes that repo's behaviour). The one-off verdict and its details are
+  // still shown there; anything that lasts belongs to an initialized project.
+  const optedIn = hasOptInMarker(workspaceRoot);
+  const showBumpUp = optedIn && predictedTier === 'T1';
   const bumpUpLabel = 'Harder than it looks — raise tier';
   // The old "Override Tier" wrote to a calibration log nothing reads back
   // (DR-021 gutted the feedback loop). Replace it with a live affordance: opt
   // into auto-classify-on-commit so the advice runs itself going forward (#203).
   const AUTO_CLASSIFY = 'Auto-classify from now on';
-  const actions = ['Show Details', AUTO_CLASSIFY];
+  const actions = ['Show Details'];
+  if (optedIn) actions.push(AUTO_CLASSIFY);
   if (showBumpUp) actions.push(bumpUpLabel);
 
   // Advisory toast: names the unit (your current diff) and states that nothing
