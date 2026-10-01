@@ -79,8 +79,8 @@ directory (the editor API mocked, `gh` reported unavailable) and listed the dire
 afterwards. The probe is not part of this change; FR-10 specifies the permanent version.
 "Read" means the path was followed in the code and not run. A file named without its path
 is the one file of that name under `packages/minspec/src/` or `packages/minspec/tests/`;
-the names that exist twice there (`session.ts`, `constitution.ts`, `tidy-primary.ts`) are
-always written in full.
+three names used below exist twice there (`session.ts`, `constitution.ts`,
+`tidy-primary.ts`) and are always written in full.
 
 ### The one guard that exists, and where it is used
 
