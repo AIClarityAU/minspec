@@ -15,9 +15,13 @@
  *
  * Tier-0 / offline (INV-5): this module imports ONLY `fs`, `path`, `crypto`,
  * `child_process` (git, local), the `vscode` TYPE (compile-time only), and two
- * sibling Tier-0 modules (`./session`, and `./auto-bootstrap` for the shared
- * `isMinspecInitialized` opt-in predicate). It makes zero network calls. The Tier-0 import-ban gate (tier0-import-ban.test.ts) forbids
- * http/https/fetch/net — none appear here.
+ * sibling Tier-0 modules (`./session`, and `./preferences` for the shared
+ * `hasOptInMarker` opt-in predicate — the dependency-free leaf module, not
+ * `./auto-bootstrap`'s re-export, which would drag that orchestrator's whole
+ * scaffold/template-registry/epic-backfill/epic-manager/merge-refresh graph
+ * into this lean Layer-1 primitive; #2363). It makes zero network calls. The
+ * Tier-0 import-ban gate (tier0-import-ban.test.ts) forbids http/https/fetch/net
+ * — none appear here.
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -29,7 +33,7 @@ import { execFileSync } from 'child_process';
 import type * as vscode from 'vscode';
 
 import { loadSession, saveSession, type SessionType } from './session';
-import { isMinspecInitialized } from './auto-bootstrap';
+import { hasOptInMarker } from './preferences';
 
 // ── Paired named constants (FR-3) — the ONE place these numbers live in TS ──────
 // STALE_SECS = 4 × HEARTBEAT_SECS. They are PAIRED: drift one without the other and
@@ -465,6 +469,8 @@ export class SessionPresenceManager {
    * Is there a folder open at all? With none, `activate()` hands us `''`, and
    * `path.join('', '.minspec/sessions')` is a RELATIVE path that resolves against
    * the extension host's working directory - an arbitrary folder nobody chose.
+   * Kept as its own check (used independently by `start()`, below) even though
+   * `hasOptInMarker` also treats `''` as not opted in.
    */
   private get hasRoot(): boolean {
     return this.rootDir !== '';
@@ -473,16 +479,17 @@ export class SessionPresenceManager {
   /**
    * The single opt-in gate for every write and delete below (constitution
    * invariant 3): a folder is open AND it already carries the `.minspec/` marker.
-   * Reuses the project-wide predicate (`isMinspecInitialized`) rather than a second
-   * definition of "is this a MinSpec project". The empty-root check is ours because
-   * that predicate, given `''`, would test the working directory.
+   * Reuses the project-wide predicate (`hasOptInMarker`, in the dependency-free
+   * `./preferences` leaf module) rather than a second definition of "is this a
+   * MinSpec project" (#2363 — `hasOptInMarker` already treats an empty root as
+   * not opted in, so this does not need its own empty-root special case).
    *
    * Re-evaluated on every call, never cached: a folder that opts in after
    * activation (MinSpec: Initialize) starts heartbeating on the next tick, and one
    * whose `.minspec/` is removed stops being written to.
    */
   private isOptedIn(): boolean {
-    return this.hasRoot && isMinspecInitialized(this.rootDir);
+    return hasOptInMarker(this.rootDir);
   }
 
   /** FR-3 — write the record immediately, then start the heartbeat + watcher. */
