@@ -64,16 +64,31 @@ CLAIM_MARKER='minspec-claim'
 SHIPPED_MARKER='<!-- minspec-shipped -->'
 
 # ── Self identity ────────────────────────────────────────────────────────────
-# One session id per process, cached. Prefers the presence sessionId (MINSPEC_SESSION_ID)
-# so a claim and the presence heartbeat agree; else a fresh uuid.
+# One session id per process. Prefers an explicit override (MINSPEC_LEASE_SID, e.g.
+# tests), then the presence sessionId (MINSPEC_SESSION_ID) so a claim and the presence
+# heartbeat agree; else derives one DETERMINISTICALLY (#2132).
+#
+# Deliberately NOT memoized via `export` (the previous approach): every caller invokes
+# this through `$(...)` command substitution, which forks a SUBSHELL — an export written
+# there dies with that subshell and is invisible to the parent, so the memo never stuck
+# and each call fell through to mint a FRESH /proc/sys/kernel/random/uuid. A session
+# could therefore never recognise its own claim (lease_verify_holds always false),
+# which is fatal to D3's re-verify-before-credentialed-op check: `holds != yes` makes
+# shepherd_decide return stand-down unconditionally (scripts/lib/shepherd-pr.sh),
+# 100% of the time, for every session, even the one that JUST wrote the claim.
+#
+# Fixed by deriving from state that IS already stable across those subshells: bash's
+# `$$` is inherited unchanged into command-substitution subshells (unlike `$BASHPID`,
+# which is that subshell's OWN pid), so it names the same value on every call within
+# one process. Mixing in that pid's start time means a later, unrelated process that
+# the kernel happens to reuse the same pid for can never collide with a stale sid
+# computed earlier in the same boot.
 lease_self_sid() {
   if [[ -n "${MINSPEC_LEASE_SID:-}" ]]; then printf '%s' "$MINSPEC_LEASE_SID"; return 0; fi
-  local sid="${MINSPEC_SESSION_ID:-}"
-  if [[ -z "$sid" ]]; then
-    sid="$(cat /proc/sys/kernel/random/uuid 2>/dev/null || echo "sid-$$-$(date -u +%s 2>/dev/null || echo 0)")"
-  fi
-  export MINSPEC_LEASE_SID="$sid"
-  printf '%s' "$sid"
+  if [[ -n "${MINSPEC_SESSION_ID:-}" ]]; then printf '%s' "$MINSPEC_SESSION_ID"; return 0; fi
+  local pid="$$" starttime
+  starttime="$(stat -c '%Y' "/proc/$pid" 2>/dev/null)" || starttime=""
+  printf 'sid-%s-%s' "$pid" "${starttime:-0}"
 }
 
 lease_self_host() { hostname 2>/dev/null || echo "unknown-host"; }
@@ -257,18 +272,23 @@ lease_acquire() {
 
 # renew: refresh this session's claim heartbeat (lastRenewed). Parent-side ticker (D10).
 # Edits the session's own claim comment in place (keeps serverOrder = winner key stable).
+#
+# The claim is found through lease_read_claims, the ONE parse of the comments endpoint.
+# This function and lease_release used to carry private copies of that parse, and both
+# walked `.[][]` over UNSLURPED `gh api --paginate` output: the second `[]` iterated a
+# comment's field values, `.body` on the first string (`url`) aborted jq with exit 5,
+# and no renewal or release ever reached GitHub (#2298). Only lease_read_claims slurped.
 lease_renew() {
   gh_bot_init   # arm bot attribution before this function's GitHub write (#1355)
-  local item="${1:?lease_renew needs an item}" sid host now
+  local item="${1:?lease_renew needs an item}" sid host now claims
   sid="$(lease_self_sid)"; host="$(lease_self_host)"; now="$(date -u +%Y-%m-%dT%H:%M:%S.000Z)"
+  claims="$(lease_read_claims "$item")" || return 1
   local cid claimed
-  # Find our claim comment id + its original claimedAt (preserve it; only bump lastRenewed).
-  read -r cid claimed < <(gh api --paginate "repos/${MINSPEC_LEASE_REPO}/issues/${item}/comments" 2>/dev/null \
-    | jq -r --arg m "<!-- ${CLAIM_MARKER}:" --arg sid "$sid" '
-        [ .[][] | select(.body|contains($m))
-          | { id:.id, p:(.body|capture("<!-- '"${CLAIM_MARKER}"':(?<j>\\{.*?\\}) -->";"s").j|fromjson) }
-          | select(.p.sessionId==$sid) ] | (.[-1] // empty) | "\(.id)\t\(.p.claimedAt)"' 2>/dev/null \
-    | tr '\t' ' ') || return 1
+  # Our claim comment id (its serverOrder) + its original claimedAt (preserve it; only
+  # bump lastRenewed).
+  IFS=$'\t' read -r cid claimed < <(printf '%s' "$claims" | jq -r --arg sid "$sid" '
+      [ .[] | select(.sessionId == $sid) ] | (.[-1] // empty)
+      | "\(.serverOrder)\t\(.claimedAt)"' 2>/dev/null) || return 1
   [[ -n "$cid" ]] || return 1
   local wt pid; wt="$(lease_worktree_path "$item")"; pid=$$
   gh api -X PATCH "repos/${MINSPEC_LEASE_REPO}/issues/comments/${cid}" \
@@ -286,17 +306,16 @@ lease_verify_holds() {
   [[ "$decision" == "own" ]]
 }
 
-# release: retract this session's claim comment(s) on this item (best-effort).
+# release: retract this session's claim comment(s) on this item (best-effort). Found
+# through lease_read_claims, the one parse of the comments endpoint (see lease_renew).
 lease_release() {
   gh_bot_init   # arm bot attribution before this function's GitHub write (#1355)
-  local item="${1:?lease_release needs an item}" sid
+  local item="${1:?lease_release needs an item}" sid claims
   sid="$(lease_self_sid)"
+  claims="$(lease_read_claims "$item")" || return 0
   local ids
-  ids="$(gh api --paginate "repos/${MINSPEC_LEASE_REPO}/issues/${item}/comments" 2>/dev/null \
-    | jq -r --arg m "<!-- ${CLAIM_MARKER}:" --arg sid "$sid" '
-        .[][] | select(.body|contains($m))
-        | select((.body|capture("<!-- '"${CLAIM_MARKER}"':(?<j>\\{.*?\\}) -->";"s").j|fromjson|.sessionId)==$sid)
-        | .id' 2>/dev/null)" || return 0
+  ids="$(printf '%s' "$claims" | jq -r --arg sid "$sid" \
+    '.[] | select(.sessionId == $sid) | .serverOrder' 2>/dev/null)" || return 0
   local id
   while IFS= read -r id; do
     [[ -n "$id" ]] || continue
@@ -335,10 +354,28 @@ lease_release_all() {
 # only meaningful to a caller that SOURCES this lib and holds it for the build.
 _LEASE_TICKER_PID=""
 
+# A failed renewal is REPORTED on stderr, which reaches the dispatch log (the drain runs
+# each dispatch `2>&1`). It is never discarded, because constitution invariant 2 forbids
+# it: this heartbeat is the witness lease_verify_holds reads before every credentialed
+# step (D3), so a failure nobody sees surfaces only later, as a claim that lapsed after
+# LEASE_TTL_SECS and a shepherd that stood down. That is how #2298 stayed invisible: every
+# renewal failed, and `>/dev/null 2>&1 || true` hid all of them.
+#
+# Each renewal runs in its own subshell. A renewal can EXIT rather than return: the bot
+# wrapper calls gh_bot_die (`exit 1`) when it cannot mint a token for the PATCH. Run in
+# the ticker's own shell, that exit ended the ticker for the rest of the build. In a
+# subshell it costs one tick, and it is reported. Exit 143 is SIGTERM from
+# lease_stop_renew_ticker, which reaps an in-flight renewal at teardown. That is the
+# designed stop, not a failed heartbeat, so it is not reported.
 lease_start_renew_ticker() {
   local item="${1:?lease_start_renew_ticker needs an item}"
   [[ -z "$_LEASE_TICKER_PID" ]] || return 0    # idempotent — exactly one ticker per dispatch
-  ( while sleep "$LEASE_RENEW_SECS"; do lease_renew "$item" >/dev/null 2>&1 || true; done ) &
+  ( while sleep "$LEASE_RENEW_SECS"; do
+      _lease_rc=0
+      ( lease_renew "$item" ) >/dev/null || _lease_rc=$?
+      (( _lease_rc == 0 || _lease_rc == 143 )) && continue
+      echo "lease: renewal of the claim on #${item} FAILED (exit ${_lease_rc}); heartbeat not written. The claim lapses ${LEASE_TTL_SECS}s after its last successful renewal, and this session then no longer holds it." >&2
+    done ) &
   _LEASE_TICKER_PID=$!
   return 0
 }

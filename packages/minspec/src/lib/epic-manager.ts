@@ -304,10 +304,15 @@ export function setEpicStatus(filePath: string, status: EpicStatus): EpicStatus 
     throw new Error(`No frontmatter block in ${filePath}`);
   }
   const yaml = fmMatch[1];
-  const statusLineRe = /^([ \t]*)status[ \t]*:[ \t]*.*$/m;
-  // `$1` keeps the captured indent; status is escaped for consistency (#152).
+  // Anchored to column 0 (#2149) — a non-anchored, non-global match on ANY
+  // indent would rewrite the FIRST `status:` line regardless of nesting,
+  // silently leaving a top-level key untouched if a nested `status:`
+  // preceded it. Anchoring makes writer and validator target the same line
+  // by construction, rather than relying on house key order.
+  const statusLineRe = /^status[ \t]*:[ \t]*.*$/m;
+  // Status is escaped for consistency (#152).
   const newYaml = statusLineRe.test(yaml)
-    ? yaml.replace(statusLineRe, `$1status: ${escapeReplacement(status)}`)
+    ? yaml.replace(statusLineRe, `status: ${escapeReplacement(status)}`)
     : `${yaml}\nstatus: ${status}`;
   // Replacer FUNCTION so a `$` anywhere in the rewritten block is literal (#152).
   const block = `---\n${newYaml}\n---`;
