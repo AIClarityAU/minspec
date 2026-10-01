@@ -183,9 +183,27 @@ contract.
 - **INV-4 (one owner per file).** This spec owns only the new test; `template-registry.ts`
   stays `affects:`, consistent with SPEC-066 and SPEC-063.
 
-## Decisions needed (Clarify)
+## Clarify selections (recorded by an agent 2026-10-01; ratified only by approval of this spec)
+
+CQ-1, CQ-2 and CQ-3 each carry a **Recorded selection** line naming the option this document
+already recommended. An agent session wrote those lines on 2026-10-01, and no human chose
+them. This repository runs with `"autonomy": "act"` (`.minspec/config.json:58`), under which
+an agent proceeds on a stated recommendation and leaves the options it did not take on
+record (DR-086 §2 and §4), which is why the options stay below with their costs. Approving a
+T3 spec is the second class on that section's stop list (`scripts/lib/autonomy.ts:68-70`),
+so nothing here stands in for that approval: the lines propose, and approving this spec is
+what ratifies them. An approval records a canonical hash that covers this body
+(`packages/minspec/src/lib/approval.ts:4-8`) and reads as stale once the hash stops matching
+(`resolveStatus`, `:483-490`), so an approval of this text covers these selections and
+changing one afterwards voids it. When the lines were written no approval of this spec had
+landed on `main` (`status: specifying`, `clarify: pending`). A question in this section with
+no **Recorded selection** line is still open.
 
 ### CQ-1 (shape) — how the corpora are expressed in config
+
+**Recorded selection: `a`,** the `validatedCorpora` map. Its cost stands as written: Plan
+must define whether `specsDir` or a corpus entry for the same directory wins, and assert that
+in a test.
 
 - **`a` — a `validatedCorpora` map of path → required frontmatter key/pattern (rec).**
   Reuses `specsDir`/`decisionsDir` as the defaults that seed it, and satisfies FR-4 with no
@@ -201,6 +219,10 @@ contract.
 
 ### CQ-2 (shape, needs a DR if chosen) — an unmanaged region instead of config
 
+**Recorded selection: `c` is not taken,** as recommended below. `validate.py` gets no
+unmanaged region (INV-2), so the decision record this heading mentions is not written: it
+was conditional on choosing `c`.
+
 - **`c` — a sanctioned unmanaged region inside `validate.py`** (e.g. a clearly marked
   project-rules block the refresh preserves).
   **Cost:** it makes an edit point inside a managed file a public contract that cannot be
@@ -210,6 +232,11 @@ contract.
   considering it.
 
 ### CQ-3 (scope) — does this spec reconcile this repo's own drift
+
+**Recorded selection: `d`,** out of scope. Declaring this repo's `docs/domain` and
+`docs/decisions` corpora in its own config is the follow-up tracked as #2390. Until that
+lands the waiver at `packages/minspec/tests/managed-region-self-application.test.ts:74-75`
+stays in place.
 
 - **`d` — no, out of scope (rec).** This spec makes the corpora configurable; setting this
   repo's config to declare `docs/domain` and `docs/decisions` is a follow-up.
