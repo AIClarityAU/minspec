@@ -45,6 +45,7 @@ import { parseSpec, type ParsedSpec, type SpecStatus } from './spec';
 import { getCurrentPhase } from './lifecycle';
 import { deriveStatus, explicitTerminalOf, type ExplicitTerminal } from './lifecycle';
 import { getApprovalStatus, type ApprovalStatus } from './approval';
+import { isTerminalSpecStatus } from './spec-vocabulary';
 
 // ───────────────────────────────────────────────────────────────────────────
 // Status-enum mapping tables — STRICT 1:1 (INV-FIDELITY).
@@ -548,6 +549,12 @@ export function buildArtifactGraph(rootDir: string): ArtifactGraph {
       // which ones it acts on (only approved + implementing specs qualify), so
       // the gate stays in ONE place rather than being half-encoded here.
       implementHole: readImplementHole(disc),
+      // #2370: deliberately the ONE spot that reads the literal `status:` line for
+      // a spec — not to derive `status` above (that would re-introduce #112), but
+      // to tell the resolver when `commands/approve.ts` / `approve-active.ts`
+      // (which DO trust the literal, by design since #440) would refuse this spec.
+      // Same predicate those commands use, so the two surfaces can't drift again.
+      literalStatusTerminal: isTerminalSpecStatus(fm.status),
     });
   }
 

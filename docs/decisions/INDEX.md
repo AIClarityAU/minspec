@@ -749,7 +749,7 @@ The drain's admission control gates on a quota reading at ~/.claude/quota.json. 
 
 ## [DR-094 — The review broker's tokens live one hour because GitHub issues no shorter credential - exposure is bounded by immediate use and non-storage, not by a TTL the API will not honour](DR-094.md)
 
-*Status: proposed · Date: 2026-09-18*
+*Status: accepted · Date: 2026-09-18*
 
 <!-- dr-summary:DR-094 auto=f02b7feacc1d -->
 SPEC-034's broker exchanges a GitHub Actions OIDC token for a GitHub App installation token, so an adopter's CI can post as minspec-sdd[bot] without holding the App private key. DR-054's reasoning is that one leaked App key mints tokens for every repository that ever installed the App, so the blast radius of the key dwarfs the blast radius of any one token. Short token lifetime was the compensating control.
@@ -757,7 +757,7 @@ SPEC-034's broker exchanges a GitHub Actions OIDC token for a GitHub App install
 
 ## [DR-095 — A socket bind-mounted as a file pins one inode, so restarting the broker is the act that severs it - mount a dedicated directory, read-only](DR-095.md)
 
-*Status: proposed · Date: 2026-09-25*
+*Status: accepted · Date: 2026-09-25*
 
 <!-- dr-summary:DR-095 auto=e43c8c7ab700 -->
 /etc/nixos/home.nix:95 declares it: The host side is **$XDG_RUNTIME_DIR**, which for a user manager is /run/user/1000. It is not /tmp; /tmp/gh-app-token.sock is only the path the socket is presented at *inside* the container. This matters for the proposal below, because "mount the directory" means mounting the systemd user runtime directory, which is a very different object from a purpose-built socket directory.
@@ -765,7 +765,7 @@ SPEC-034's broker exchanges a GitHub Actions OIDC token for a GitHub App install
 
 ## [DR-096 — Adopters get a frozen, diagnosis-only pre-strip basis and a third provenance verdict - not a flag, and not a migration](DR-096.md)
 
-*Status: proposed · Date: 2026-09-25*
+*Status: accepted · Date: 2026-09-25*
 
 <!-- dr-summary:DR-096 auto=68c7f9167e09 -->
 Ownership declarations leave the canonical approval hash, so every record minted before the change stops matching. Locally that is a one-off migration; in an adopter's repo the thing recomputing those hashes is a merge-gating review input that MinSpec ships with no gate, no snapshot and no migration, so their reviewers would read MISMATCH against valid approvals. Adopters get a frozen, diagnosis-only copy of the old basis and a third verdict that names it, rather than a flag that defaults the change off or a corpus-rewriting script MinSpec cannot test.
@@ -773,11 +773,19 @@ Ownership declarations leave the canonical approval hash, so every record minted
 
 ## [DR-097 — A single voter's verdict may be reused across an ai-review re-run, bound to one head SHA — where reusing the whole panel was rejected](DR-097.md)
 
-*Status: proposed · Date: 2026-09-26*
+*Status: accepted · Date: 2026-09-26*
 
 <!-- dr-summary:DR-097 auto=85c9e4fc299d -->
 When one of the four ai-review voters dies on a session limit, the panel fails closed and the re-run re-pays for the three that answered. This keeps the survivors, bound to the same head SHA - which is the whole distinction from #1840, where whole-panel reuse across a moved base was measured and refused. The safety property lived only in a comment at first, and the comment was false: three of four voters on #2163 caught the code reusing across commits while its docblock denied it.
 <!-- /dr-summary:DR-097 -->
+
+## [DR-098 — The approval flow may create MinSpec's own missing docs-lane label - consent to push an approval covers the one label its pull request needs, and nothing wider](DR-098.md)
+
+*Status: accepted · Date: 2026-10-01*
+
+<!-- dr-summary:DR-098 auto=88bcb5af582d -->
+MinSpec scaffolds a workflow into adopters that auto-merges a docs-only pull request carrying the docs-lane label, but never created the label, and gh pr create refuses to open a pull request naming a label the repository lacks. So where the label was missing, every approval fell to a manual Open PR step and a manual merge (#2243). Creating the label is a new kind of forge write, and it narrows a statement MinSpec ships to every adopter.
+<!-- /dr-summary:DR-098 -->
 
 ## [DR-099 — The pre-commit harness gets a non-blocking outcome for the first time - correctness checks block, metric checks warn, not tool-present-or-absent](DR-099.md)
 
@@ -786,4 +794,12 @@ When one of the four ai-review voters dies on a session limit, the panel fails c
 <!-- dr-summary:DR-099 auto=893eb78b4e47 -->
 Every DR-037 pre-commit stage today is block-or-skip: a present tool always blocks on a real finding, and the only non-blocking path is the tool being absent. #1555 asks for a code-quality stage whose metric checks are expected to be noisy, so this record accepts a new outcome — correctness checks (shellcheck, actionlint, typecheck) keep blocking, metric checks (duplication, complexity, circular deps, dead code) warn by default until a project opts a check into blocking.
 <!-- /dr-summary:DR-099 -->
+
+## [DR-100 — Publish MinSpec to the VS Code Marketplace as an early preview - a bounded exception to the phase order, for one stated reason and behind stated preconditions](DR-100.md)
+
+*Status: proposed · Date: 2026-10-01*
+
+<!-- dr-summary:DR-100 auto=2c0bfd94dcb0 -->
+The founder needs MinSpec on a Windows work PC that runs Microsoft's VS Code, and asked on 2026-10-01 for the extension to be published just before the visualiser work, about a week out. The constitution puts a Marketplace publish in Phase 2 and says Phase 2 work may not displace unfinished Phase 1 work, so publishing now needs a recorded exception, with its scope and preconditions stated.
+<!-- /dr-summary:DR-100 -->
 <!-- minspec:dr-index:end -->

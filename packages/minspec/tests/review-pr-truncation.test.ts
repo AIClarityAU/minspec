@@ -135,10 +135,18 @@ esac
 // script refuses, leaves the PR unlabeled, and every assertion below observes the
 // refusal rather than the review. It returns WITHOUT reading the fixture, so the
 // fixture describes the REVIEWER invocation only.
+//
+// The reviewer invocation itself (#2168) captures stdin to
+// $FAKE_CLAUDE_STDIN_CAPTURE_FILE before emitting its canned verdict. review-pr.sh
+// sends the prompt via a temp-file redirected onto stdin, never argv (#624/#477) —
+// a stub that answered from argv alone (or that never touched stdin) would pass
+// this test identically whether that wiring existed or not. Capturing what actually
+// arrived on stdin gives the assertion something real to check.
 const FAKE_CLAUDE = `#!/usr/bin/env bash
 for a in "$@"; do
   [ "$a" = "--help" ] && { echo "  --json-schema <schema>"; exit 0; }
 done
+cat - > "$FAKE_CLAUDE_STDIN_CAPTURE_FILE"
 cat "$FAKE_CLAUDE_OUTPUT_FILE"
 `;
 
@@ -184,6 +192,7 @@ describe('review-pr.sh — end-to-end sanity (untruncated path unaffected)', () 
     const claudeOutFile = path.join(scratch, 'claude-output.txt');
     const commentBodyFile = path.join(scratch, 'comment-body.txt');
     const editLogFile = path.join(scratch, 'edit-calls.log');
+    const stdinCaptureFile = path.join(scratch, 'claude-stdin-capture.txt');
 
     fs.writeFileSync(
       prViewFile,
@@ -199,6 +208,7 @@ describe('review-pr.sh — end-to-end sanity (untruncated path unaffected)', () 
     fs.writeFileSync(claudeOutFile, CLEAN_PASS_VERDICT);
     fs.writeFileSync(commentBodyFile, '');
     fs.writeFileSync(editLogFile, '');
+    fs.writeFileSync(stdinCaptureFile, '');
 
     execFileSync('bash', [REVIEW_PR, '999', '--repo', 'fake/repo'], {
       env: {
@@ -213,14 +223,23 @@ describe('review-pr.sh — end-to-end sanity (untruncated path unaffected)', () 
         FAKE_CLAUDE_OUTPUT_FILE: claudeOutFile,
         FAKE_COMMENT_BODY_FILE: commentBodyFile,
         FAKE_EDIT_LOG_FILE: editLogFile,
+        FAKE_CLAUDE_STDIN_CAPTURE_FILE: stdinCaptureFile,
       },
       encoding: 'utf-8',
     });
 
     const editLog = fs.readFileSync(editLogFile, 'utf-8');
     const commentBody = fs.readFileSync(commentBodyFile, 'utf-8');
+    const claudeStdin = fs.readFileSync(stdinCaptureFile, 'utf-8');
 
     expect(addedLabel(editLog)).toBe('ai-review:pass');
     expect(commentBody).not.toContain('Diff truncated');
+    // The distinguishing assertion (#2168): proves the prompt actually arrived
+    // on claude's stdin, not just that claude ran and the script pressed on
+    // regardless. Checks for content review-pr.sh only puts in USER_CONTENT
+    // (the diff body and PR title), which could not appear here if the prompt
+    // were still going in as an argv element or not reaching claude at all.
+    expect(claudeStdin).toContain('+small change');
+    expect(claudeStdin).toContain('Title: Test PR');
   });
 });
