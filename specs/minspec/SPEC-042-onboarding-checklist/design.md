@@ -76,7 +76,6 @@ interface OnboardingModel {
   primer: [string, string, string, string];   // the 4 #156 points; no progress meter field exists (INV-2)
   rows: OnboardingRow[];
   showSettingIds: boolean;    // default false (FR-9)
-  scroogeNudgeShownOn: true;  // FR-12: no off-control on this page
 }
 
 // Identity (D4) — offline seed on render; gh read is click-gated (net-new, NOT in resolveApproverEmail).
@@ -102,7 +101,6 @@ RECOMMENDED  ○→●  Silent harness refresh .............. minspec.silentRefr
 OPTIONAL     [▸]  Backfill epics with AI ............. button → minspec.backfillEpics {aiConsent:true} (FR-8)
              [▸]  Install GitHub PR extension ....... button → installExtension (init.ts:707 — FR-17)
              [#]  Coverage minimum % ................ minspec.coverage.minimumPercentage  (seeds config/CI; NOT enforced — FR-11)
-             ●    ScroogeLLM nudge .................. minspec.scroogellmNudge.enabled  (shown ON; no off here — FR-12)
 FOOTER       ○→●  Offer setup automatically ......... minspec.autoBootstrap.enabled
              ○→●  Show setting ids .................. (view-only; default OFF — FR-9)
 ```
@@ -132,7 +130,6 @@ Non-modal, keyboard-first, theme-aware. All colors via VS Code webview theme tok
  │   ▸  Backfill epics with AI            [ Backfill with AI ]      │
  │   ▸  Install GitHub PR extension       [ Install ]              │
  │   #  Coverage minimum %  [ 80 ]  seeds config/CI · not enforced  │
- │   ●  ScroogeLLM tips (on)                                        │
  ├─────────────────────────────────────────────────────────────────┤
  │  ⚙ Offer setup automatically on activation      ●                │
  │  ⚙ Show setting ids                             ○   (off)        │
@@ -168,8 +165,8 @@ Keys: a keyboard shortcut renders wherever a row carries one (FR-9 — shown whe
 - `package.json` *(affects)* — **flip `advancePhaseOnApprove` default `false → true`** (D5); label copy for the unified `commitOnApprove` consent (FR-7).
 - `auto-bootstrap.ts` *(affects — reuse only)* — page-local dismissals call `savePreferences`/`answeredSignatures` (no behavior change to the module).
 
-**Slice 3 — identity + per-action buttons + seed (FR-5, FR-8, FR-11, FR-12, FR-14, FR-16, FR-17).**
-- `getting-started-webview.ts` — the approver field (offline seed) + click-gated **"Verify against GitHub"** action (D4) + amber flag; the per-action buttons — Backfill with AI (FR-8), Install GitHub PR extension (FR-17), Refresh harness now (FR-16) — each with per-click consent (D3); coverage seed field; shown-on Scrooge row.
+**Slice 3 — identity + per-action buttons + seed (FR-5, FR-8, FR-11, FR-14, FR-16, FR-17).**
+- `getting-started-webview.ts` — the approver field (offline seed) + click-gated **"Verify against GitHub"** action (D4) + amber flag; the per-action buttons — Backfill with AI (FR-8), Install GitHub PR extension (FR-17), Refresh harness now (FR-16) — each with per-click consent (D3); coverage seed field.
 - `onboarding-settings.ts` — `ApproverIdentity` compute (offline seed value + format check; divergence only after verify).
 - `init.ts` *(affects — reuse only)* — call the existing `offerGitHubPrExtensionAdvisory` install path (Install button) from the button; dispatch the existing `minspec.initRefresh` (Refresh now). No new install/refresh logic.
 
@@ -190,7 +187,7 @@ Keys: a keyboard shortcut renders wherever a row carries one (FR-9 — shown whe
 
 - **T0 (invariants, before implementation):** INV-1 — a network-recording harness asserts **zero** network/external calls on open/render (identity seeded offline), and that Backfill/Install/Refresh-now/Verify-against-GitHub fire only on explicit click (AC-1, AC-6, AC-12, AC-13, AC-14). INV-2 — a DOM/structure test asserts **no** progress-meter/"N of M" element exists (AC-2). INV-3 — a dismissal round-trips through `answeredSignatures` and re-appears on a signature change (AC-3). INV-4 — the identity row renders the offline value with zero network and the page writes **only** `minspec.approverEmail`, never an approval record; the `gh` read fires only on the Verify click, and an air-gapped host renders without hanging (AC-5, AC-14). INV-5 — `silentRefresh` renders disabled/Planned; the `advancePhaseOnApprove` default flip preserves an explicitly-set value.
 - **T1 (contract):** `onboarding-settings.ts` model builder — each row maps to its real `minspec.*` id / command id; `rowClickToggles` true **only** for non-planned `toggle` rows (AC-7); `ApproverIdentity` — offline `value` seed with no network, and the `divergesFromGh` truth table (only populated post-verify).
-- **T2 (feature, per slice):** AC-4 (switch↔setting binding; defaults), AC-8 ("Show setting ids" off; footer; shortcut shown where a binding exists), AC-9 (coverage helper copy matches [package.json:528](../../../packages/minspec/package.json#L528)), AC-10 (Scrooge shown-on, never written false), AC-11 (no reading-time/conformance control), AC-12 (Refresh now → `minspec.initRefresh` on click only), AC-13 (Install button on click only, absent-button would fail).
+- **T2 (feature, per slice):** AC-4 (switch↔setting binding; defaults), AC-8 ("Show setting ids" off; footer; shortcut shown where a binding exists), AC-9 (coverage helper copy matches [package.json:528](../../../packages/minspec/package.json#L528)), AC-11 (no reading-time/conformance control), AC-12 (Refresh now → `minspec.initRefresh` on click only), AC-13 (Install button on click only, absent-button would fail).
 - **T3 (regression):** one per bug found during implement.
 
 ## Risks

@@ -11,7 +11,7 @@ type: requirements
 # together with the sidecar. An agent must never hand-write either — that forges a sign-off.
 # When an edit voids the approval, the honest interim is to set this DOWN to `specifying`
 # (under-claim) and let spec-gate block; only the human's Alt+A restores it.
-status: planning
+status: specifying
 tier: T3
 product: minspec
 epic: EPIC-003  # SDD Core — the onboarding page is the front door to init/classify/refresh/approval gates (see notes: a dedicated onboarding/first-run EPIC would be the ideal home)
@@ -45,7 +45,7 @@ Grounded in the current codebase, with `file:line` evidence:
 
 - **First-run guidance is a toast pile, evaluated one-at-a-time on every activation.** [`runBootstrap`](../../../packages/minspec/src/lib/auto-bootstrap.ts#L734) walks [`BOOTSTRAP_STEPS`:528](../../../packages/minspec/src/lib/auto-bootstrap.ts#L528) and offers **the first eligible step only** — a modal-ish info toast with `Primary` / `Always` / `Don't ask again` actions. Six distinct offers (init, harness-refresh via `minspec.initRefresh`, classify, epic-backfill, DESIGN.md-stub removal, tasks.md scaffold) compete for that one slot, so a user never sees the whole setup surface at once and cannot revisit a step they dismissed except by changing the underlying state. There is **no single, re-openable place** that shows "here is everything MinSpec can set up for you, and what you've chosen."
 - **The re-openable foundation is already merged.** [#883] added `answeredSignatures` ([auto-bootstrap.ts:68](../../../packages/minspec/src/lib/auto-bootstrap.ts#L68)) — a per-`(prompt, state-signature)` memory persisted in `.minspec/preferences.json` ([loadPreferences:82](../../../packages/minspec/src/lib/auto-bootstrap.ts#L82), [savePreferences:101](../../../packages/minspec/src/lib/auto-bootstrap.ts#L101)). A dismissed step returns **only when its underlying state genuinely changes** (e.g. a fresh template bump moves [`harnessDriftSignature`:201](../../../packages/minspec/src/lib/auto-bootstrap.ts#L201)). This is the exact "not a one-shot dismiss" semantics the page needs — it consumes the same model rather than inventing a new one.
-- **The authoritative settings already exist** in `contributes.configuration` ([package.json:462-530](../../../packages/minspec/package.json#L462)). Every switch the page surfaces is a real contributed setting — `scroogellmNudge.enabled` ([:472], default `true`), `autoBootstrap.enabled` ([:477], `true`), `autoClassifyOnCommit` ([:487], `false`), `commitOnApprove` ([:492], `true`), `autoBackfillUseAi` ([:497], `false`), `advancePhaseOnApprove` ([:502], **`false` today**), `approverEmail` ([:507], `""`, `scope: application`), `coverage.minimumPercentage` ([:524], `80`) — **except `silentRefresh`, which is planned ([#186]) and not contributed.**
+- **The authoritative settings already exist** in `contributes.configuration` ([package.json:462-530](../../../packages/minspec/package.json#L462)). Every switch the page surfaces is a real contributed setting — `autoBootstrap.enabled` ([:477], `true`), `autoClassifyOnCommit` ([:487], `false`), `commitOnApprove` ([:492], `true`), `autoBackfillUseAi` ([:497], `false`), `advancePhaseOnApprove` ([:502], **`false` today**), `approverEmail` ([:507], `""`, `scope: application`), `coverage.minimumPercentage` ([:524], `80`) — **except `silentRefresh`, which is planned ([#186]) and not contributed.**
 - **Approver identity resolves offline today, and has a real DR-056-shaped gate.** [`resolveApproverEmail`:92](../../../packages/minspec/src/commands/approve.ts#L92) prefers `minspec.approverEmail` over ambient `git config user.email` — **purely local git config, no network** ([:96](../../../packages/minspec/src/commands/approve.ts#L96); its docstring notes "Tier-0/offline: gitConfigEmail reads local git config only") — and the approve path **refuses** an agent/bot/absent identity ([approve.ts:240](../../../packages/minspec/src/commands/approve.ts#L240)). A free-typed approver email is therefore *forgeable* — the very unverifiable-approval problem [DR-056] / [SPEC-037] exist for. Verifying an email against the GitHub login is a *net-new* external read this spec introduces (see FR-5), not part of the existing offline resolver.
 - **Coverage is honestly non-enforced today.** [package.json:528](../../../packages/minspec/package.json#L528) states the setting "does **NOT** itself change an already-initialized project's enforced threshold" — it only seeds the onboarding prompt / `.minspec/config.json`. The page must preserve that honesty, not imply enforcement.
 - **The GitHub PR extension offer is already a per-action, first-init-only advisory.** [`offerGitHubPrExtensionAdvisory`:707](../../../packages/minspec/src/commands/init.ts#L707) installs **only on the user's explicit "Install" click** — the network-touching action is gated. The page adopts, not weakens, that consent shape.
@@ -69,7 +69,6 @@ The page is **offline UI over settings that already exist**. It renders with **z
 - **FR-9 (keyboard shortcuts shown where they exist; setting ids hidden by default).** Any actionable row that **carries a keybinding** displays it inline/as a persistent tooltip at all times (RSI / keyboard-first preference — a preference, not a gate: a row without a binding is not required to invent one); raw `minspec.*` setting ids are hidden behind a **default-off "Show setting ids"** meta-toggle. *Rationale: shortcut visibility is a standing accessibility need wherever a shortcut exists (a user can't use a shortcut she can't see); mandating one per row would over-specify a preference. Setting ids are power-user detail that clutters the default view.*
 - **FR-10 (whole-row click toggles single-toggle rows only).** A whole-row click flips a row **only** when the row is a single boolean toggle; text/number-field rows (approver email, coverage), the multi-control approvals row, and any row carrying a secondary control (e.g. the refresh row's "Refresh now" action — FR-16) are **excluded** from row-click. *Rationale: a11y — a stray row-click must never mutate a text field or fire a secondary action.*
 - **FR-11 (coverage seed field, honestly framed).** A number field bound to `minspec.coverage.minimumPercentage` ([:524]) is framed as a **non-enforced seed/default** — it seeds `.minspec/config.json` / the CI gate at setup; the extension itself does not enforce it (verbatim to [package.json:528](../../../packages/minspec/package.json#L528)). *Rationale: never imply enforcement the code does not perform (evidence discipline).*
-- **FR-12 (ScroogeLLM nudge shown-on, no off-switch here).** `minspec.scroogellmNudge.enabled` ([:472]) is shown **on** and is **not disable-able on this page** (G-5 acquisition funnel, [constitution G-5:40](../../../.minspec/constitution.md#L40)). The setting still exists and is toggleable in the standard VS Code Settings editor — so it is not an un-disable-able-anywhere dark pattern. *Rationale: protect the funnel on the acquisition surface while keeping a real off-switch reachable.*
 - **FR-13 (footer master controls).** A footer carries `minspec.autoBootstrap.enabled` ([:477]) — "offer setup automatically on activation; off = this page opens only on demand" — and the "Show setting ids" toggle. *Rationale: the master on/off and the display toggle are meta-controls, separated from the setup items.*
 - **FR-14 (Tier-0 offline; per-action consent).** The page renders with **zero network calls**. Every network/external/mutating action — Backfill with AI (FR-8), install the GitHub PR extension (FR-17, [init.ts:707](../../../packages/minspec/src/commands/init.ts#L707)), verifying the approver identity against GitHub (FR-5) — fires **only on an explicit click** and never on render. *Rationale: constitution invariant ([offline:5](../../../.minspec/constitution.md#L5)) / [DR-004]; the click is the consent.*
 - **FR-15 (evidence-honesty cuts).** Reading-time estimates ([SPEC-017] — zero code; surfacing it would be a false signpost) and auto-export-traceability / conformance (`minspec.conformance.enabled` [:467] — niche, only meaningful with ScroogeLLM present) are **excluded** from this page. *Rationale: never render a setting whose behavior is unbuilt or belongs elsewhere.*
@@ -89,7 +88,7 @@ The page is **offline UI over settings that already exist**. It renders with **z
 
 1. **Slice 1 — the page exists, read-only.** The `minspec.gettingStarted` command + webview: the mindset primer, the hero *Initialize SDD structure* action (`minspec.init`), and a **read-only** render of the current tiered settings (no writes yet). Shortcut-visibility (FR-9) rides the hero row here. Thinnest end-to-end: open → render current state → run init. Delivers the "one re-openable surface" (FR-1, FR-2, FR-14) immediately.
 2. **Slice 2 — standing switches + meta-controls.** Wire the Recommended-tier switches to their `minspec.*` settings (write via config API), the row-click a11y rule (FR-10), the **"Show setting ids" meta-toggle (FR-9)**, and the footer master (FR-13). Includes the FR-6 default flip and the FR-7 unified consent label. `silentRefresh` renders Planned/disabled. Shortcut-visibility (FR-9) rides each switch row that has a binding.
-3. **Slice 3 — identity + per-action buttons + seed.** The approver-identity field seeded **offline** with the click-gated **"Verify against GitHub"** action, validation, and the amber divergence flag (FR-5); the per-action buttons — Backfill with AI (FR-8), Install GitHub PR extension (FR-17), and Refresh harness now (FR-16) — each with per-click consent (FR-14); the coverage seed field (FR-11); the shown-on Scrooge nudge (FR-12). Shortcut-visibility (FR-9) rides these action rows.
+3. **Slice 3 — identity + per-action buttons + seed.** The approver-identity field seeded **offline** with the click-gated **"Verify against GitHub"** action, validation, and the amber divergence flag (FR-5); the per-action buttons — Backfill with AI (FR-8), Install GitHub PR extension (FR-17), and Refresh harness now (FR-16) — each with per-click consent (FR-14); the coverage seed field (FR-11). Shortcut-visibility (FR-9) rides these action rows.
 
 ## Out of scope (tracked elsewhere)
 
@@ -99,7 +98,7 @@ The page is **offline UI over settings that already exist**. It renders with **z
 - **Implementing `silentRefresh`** — the *behavior* is [#186]; this spec only reserves its **Planned** switch (FR-4 / INV-5), it does not build silent refresh (the built refresh path surfaced here is the manual `minspec.initRefresh` action, FR-16).
 - **agent-execute** onboarding — a separate extension ([DR-015]); not this page.
 - **Actual coverage enforcement** — the page only seeds the value (FR-11); enforcement lives in `.minspec/config.json` + CI, unchanged.
-- **The `scroogellmNudge` off-switch** — intentionally absent here (FR-12); it stays in the Settings editor.
+- **The ScroogeLLM nudge setting.** Was FR-12/AC-10 (shown-on, no off-switch here, "to protect the funnel") — dropped (#2361). The cited rationale (goal G-5) was retired by [DR-075]; #2205 removes `scroogellmNudge.enabled` and the ScroogeLLM upsell entirely, so the page has nothing to surface here.
 
 ## Open Questions
 
@@ -128,7 +127,6 @@ Resolved 2026-07-25/26; each proposal above was put to the human during the prot
 - **AC-7 (FR-10).** A whole-row click flips a single-toggle row; a test asserts a row-click on the email row, the coverage row, the approvals row, and the refresh row (FR-16) does **not** mutate their field / fire their secondary control.
 - **AC-8 (FR-9, FR-13).** "Show setting ids" defaults **off**; any row that carries a keybinding displays it (inline/tooltip); the footer exposes `autoBootstrap.enabled`.
 - **AC-9 (FR-11).** The coverage field's helper text states it seeds config/CI and is **not** enforced by the extension (matches [package.json:528](../../../packages/minspec/package.json#L528)).
-- **AC-10 (FR-12).** The Scrooge nudge is shown **on** with **no** off-control on this page; a test asserts the page never writes `scroogellmNudge.enabled = false`.
 - **AC-11 (FR-15).** No reading-time or conformance control is present on the page.
 - **AC-12 (FR-16, FR-14).** The "Refresh now" action dispatches `minspec.initRefresh` **only on click**; a render-only test asserts no harness refresh runs on render.
 - **AC-13 (FR-17, FR-14).** The "Install" button invokes the GitHub-PR-extension install path (`offerGitHubPrExtensionAdvisory`) **only on click** and **never on render**; a render-only test asserts no install is triggered. An implementation that omitted the button would fail this AC.
@@ -151,15 +149,18 @@ Resolved 2026-07-25/26; each proposal above was put to the human during the prot
 - **Planned dependency:** [#186] (`silentRefresh` behavior — FR-4 renders the switch as Planned; FR-16 surfaces the built manual refresh instead).
 - **Parent:** [#533].
 - **Prototype (owner-only):** private Artifact `ddfe8bfe-3c4e-433f-a15d-d60af692ef00`.
+- **FR-12/AC-10 dropped:** [#2361] (triggered by #2205 removing `scroogellmNudge.enabled`); rationale was goal G-5, retired by [DR-075].
 
 [#533]: https://github.com/AIClarityAU/minspec/issues/533
 [#883]: https://github.com/AIClarityAU/minspec/pull/883
 [#758]: https://github.com/AIClarityAU/minspec/issues/758
 [#186]: https://github.com/AIClarityAU/minspec/issues/186
 [#156]: https://github.com/AIClarityAU/minspec/issues/156
+[#2361]: https://github.com/AIClarityAU/minspec/issues/2361
 [SPEC-018]: ../SPEC-018-spec-custom-editor/requirements.md
 [SPEC-037]: ../SPEC-037-approver-identity/requirements.md
 [SPEC-017]: ../SPEC-017-trust-dashboard/requirements.md
 [DR-004]: ../../../docs/decisions/DR-004.md
 [DR-015]: ../../../docs/decisions/DR-015.md
 [DR-056]: ../../../docs/decisions/DR-056.md
+[DR-075]: ../../../docs/decisions/DR-075.md

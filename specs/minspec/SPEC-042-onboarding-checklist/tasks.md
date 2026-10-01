@@ -156,7 +156,7 @@ AC-3, AC-4, AC-7, AC-8 pass; every Recommended switch reads/writes its real sett
 
 ## Slice 3 — identity + per-action buttons + seed — PENDING
 
-Covers **FR-5, FR-8, FR-11, FR-12, FR-16, FR-17, FR-14**, **INV-1, INV-4**.
+Covers **FR-5, FR-8, FR-11, FR-16, FR-17, FR-14**, **INV-1, INV-4**.
 This is the only slice that introduces an external read — every one of them is a click.
 
 ### T0 — Invariants (first)
@@ -179,9 +179,6 @@ This is the only slice that introduces an external read — every one of them is
       `minspec.backfillEpics`, `minspec.initRefresh`, and the GitHub-PR-extension install
       path each fire **zero** times on render, and exactly once on their button click.
       AC-13 explicitly fails an implementation that **omits** the Install button.
-- [ ] `getting-started.test.ts` — **AC-10 (FR-12)**: the page never writes
-      `minspec.scroogellmNudge.enabled = false` (asserted over every interaction, not just
-      the Scrooge row) and renders it **on** with no off-control.
 
 ### T1 — Contract
 - [ ] `onboarding-settings.test.ts` — `ApproverIdentity`: `value` is the offline
@@ -209,15 +206,14 @@ This is the only slice that introduces an external read — every one of them is
       on click only (FR-17). **No new install logic.**
 - [ ] `getting-started-webview.ts` — the coverage number field bound to
       `minspec.coverage.minimumPercentage`, helper copy **verbatim from**
-      [package.json:528](../../../packages/minspec/package.json#L528) (FR-11 / AC-9); and
-      the Scrooge nudge row rendered **on** with no off-control (FR-12).
+      [package.json:528](../../../packages/minspec/package.json#L528) (FR-11 / AC-9).
 - [ ] `packages/minspec/src/commands/init.ts` (**affects — reuse only**) — expose/reuse the
       existing install + refresh entry points for the buttons. No new network capability
       beyond the click-gated `gh api user` read named in D4.
 
 ### Done when
-AC-5, AC-6, AC-9, AC-10, AC-12, AC-13, AC-14 pass; the page is feature-complete against
-requirements FR-1..FR-17 with every external action click-gated.
+AC-5, AC-6, AC-9, AC-12, AC-13, AC-14 pass; the page is feature-complete against
+requirements FR-1..FR-17 (FR-12 dropped, #2361) with every external action click-gated.
 
 ---
 
