@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-076-headless-signpost-reader/requirements.md",
+  "specHash": "4547521210246b82166895dfe34094c3cbeda127672591d2ca2f88be1253cbfc",
+  "approvedAt": "2026-10-01T00:59:09.379Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T2",
+  "migrated": false,
+  "baselineBlob": "d46a811d532b11e4f33b9428481f2a14f26a5fd6"
+}
