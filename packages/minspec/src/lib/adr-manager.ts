@@ -469,6 +469,75 @@ export function validateDrSequence(decisionsDir: string): DrSequenceWarning[] {
   return warnings;
 }
 
+/**
+ * A decision/epic record carrying TWO frontmatter-shaped `---` blocks back to
+ * back (#2467).
+ */
+export interface DoubledFrontmatterFinding {
+  /** 1-indexed line of the FIRST block's closing `---`. */
+  readonly firstBlockEndLine: number;
+  /** 1-indexed line of the SECOND block's opening `---`, directly after the first. */
+  readonly secondBlockStartLine: number;
+}
+
+/** A YAML-shaped top-level line: `key: value` (or `key:` alone). */
+const YAML_KEY_LINE_RE = /^[A-Za-z][A-Za-z0-9_-]*:[ \t]*\S/m;
+
+/** A `status:` frontmatter line, the concrete symptom this detector keys on. */
+const STATUS_KEY_LINE_RE = /^status[ \t]*:/m;
+
+/**
+ * Detect a decision/epic record whose body carries two frontmatter-shaped
+ * blocks in a row — the shape {@link setAdrStatus} produces when it is handed a
+ * record whose EXISTING block it could not parse (#2467): it synthesizes a
+ * fresh block and prepends it, leaving the original block as body text
+ * immediately below, complete with its own stale `status:` line. Nothing
+ * downstream notices: {@link listAdrs} reads only the first block, and the
+ * status-parity rule (status-parity.ts) compares frontmatter against a
+ * `## Status` section or a head blockquote — a stray body `status:` line is
+ * neither.
+ *
+ * Deliberately narrow (precision over recall, the same discipline as the
+ * dangling park-ref lint above): a bare `---` horizontal rule immediately
+ * followed by another `---` divider is legal markdown and must not
+ * false-positive as damage. So this fires only when BOTH blocks look like YAML
+ * (each carries at least one `key: value` line) AND at least one of the two
+ * carries a `status:` line — the concrete symptom (#2467 measured): two
+ * different status assertions surviving in one record.
+ *
+ * Pure — no fs. Returns `undefined` when the file has no doubled block.
+ */
+export function detectDoubledFrontmatter(content: string): DoubledFrontmatterFinding | undefined {
+  // Split on LF only, then fence-line comparisons tolerate a trailing CR
+  // (`isFence`). The real #2467 shape MIXES endings in one file: `setAdrStatus`
+  // prepends a freshly synthesized LF block ahead of an original block it could
+  // not parse because THAT block is still CRLF (the SPEC-095/#2397 damage) — so
+  // a plain `=== '---'` test matches the new block's fence but misses the old
+  // one's, whose lines end `---\r`.
+  const lines = content.split('\n');
+  const isFence = (line: string | undefined): boolean => line?.replace(/\r$/, '') === '---';
+  if (!isFence(lines[0])) return undefined;
+
+  let i = 1;
+  while (i < lines.length && !isFence(lines[i])) i++;
+  if (i >= lines.length) return undefined; // first block never closes
+
+  let j = i + 1;
+  while (j < lines.length && lines[j].trim() === '') j++;
+  if (j >= lines.length || !isFence(lines[j])) return undefined; // no second block directly after
+
+  let k = j + 1;
+  while (k < lines.length && !isFence(lines[k])) k++;
+  if (k >= lines.length) return undefined; // second block never closes
+
+  const block1 = lines.slice(1, i).join('\n');
+  const block2 = lines.slice(j + 1, k).join('\n');
+  if (!YAML_KEY_LINE_RE.test(block1) || !YAML_KEY_LINE_RE.test(block2)) return undefined;
+  if (!STATUS_KEY_LINE_RE.test(block1) && !STATUS_KEY_LINE_RE.test(block2)) return undefined;
+
+  return { firstBlockEndLine: i + 1, secondBlockStartLine: j + 1 };
+}
+
 // ─── ADR Template ───────────────────────────────────────────────────────────
 
 /**
