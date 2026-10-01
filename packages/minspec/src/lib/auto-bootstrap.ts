@@ -16,8 +16,11 @@
  *   - Pure local file system + VS Code API
  *
  * Persistence:
- *   - Per-prompt "Don't ask again" choices write to
+ *   - In a folder that HAS opted in (`.minspec/` exists), every answer writes to
  *     `.minspec/preferences.json`
+ *   - In a folder that has NOT, answers go to the host's per-workspace memory
+ *     (`BootstrapVsCode.preOptInMemory`) and nothing is written into the folder,
+ *     because the write would itself create the opt-in marker (#2355)
  *   - Master toggle: `minspec.autoBootstrap.enabled` setting (default: true)
  */
 
@@ -42,6 +45,7 @@ import { findSpecDirsMissingTasksMd, scaffoldTasksMd } from './scaffold';
 import {
   type AlwaysPrefKey,
   type BootstrapPreferences,
+  hasOptInMarker,
   loadPreferences,
   savePreferences,
   resolveProjectPreference,
@@ -49,6 +53,8 @@ import {
 export {
   type AlwaysPrefKey,
   type BootstrapPreferences,
+  hasOptInMarker,
+  NotOptedInError,
   preferencesPath,
   loadPreferences,
   savePreferences,
@@ -59,9 +65,13 @@ export {
 // Detection — pure file-system checks (no vscode dependency)
 // ---------------------------------------------------------------------------
 
-/** Whether `.minspec/` exists in the workspace */
+/**
+ * Whether `.minspec/` exists in the workspace. Delegates to the one definition
+ * of the opt-in marker in `preferences.ts` (#2355), which the preference store
+ * gates its own write on.
+ */
 export function isMinspecInitialized(rootDir: string): boolean {
-  return fs.existsSync(path.join(rootDir, '.minspec'));
+  return hasOptInMarker(rootDir);
 }
 
 /**
@@ -179,15 +189,19 @@ export function harnessDriftSignature(rootDir: string): string {
  * Uses the existence of `.git/index` + recent mtime as a cheap proxy for
  * "is this a git repo with changes" — we don't want to shell out to `git
  * status` on every activation. The classification cache directory is created
- * if missing.
+ * if missing - but only inside an existing `.minspec/` (#2355): a DETECTOR must
+ * not be able to manufacture the opt-in marker, so a folder that has not opted
+ * in answers `false` and is left untouched.
  *
  * Returns true when:
+ *   - The workspace has opted in (`.minspec/` exists)
  *   - The workspace looks like a git repo
  *   - No file in `.minspec/classifications/` has a newer mtime than the
  *     `.git/index` (i.e. the latest classification predates the latest stage
  *     activity)
  */
 export function hasUnclassifiedChanges(rootDir: string): boolean {
+  if (!isMinspecInitialized(rootDir)) return false;
   const gitDir = path.join(rootDir, '.git');
   const gitIndex = path.join(gitDir, 'index');
   if (!fs.existsSync(gitIndex)) return false;
@@ -281,6 +295,85 @@ export interface BootstrapVsCode {
    * only the project-local preference is consulted.
    */
   getBooleanSetting?(key: string): boolean;
+  /**
+   * Where an answer is remembered for a folder that has NOT opted in (#2355).
+   *
+   * The host passes VS Code's `workspaceState`: per-workspace, owned by the
+   * editor, and stored outside the repo. It exists because the only other store
+   * is `.minspec/preferences.json`, and writing that in a folder with no
+   * `.minspec/` creates the opt-in marker - so declining to opt in used to opt
+   * the folder in.
+   *
+   * Optional so existing test stubs need not implement it. Absent, an answer
+   * given before opt-in is simply not remembered (the prompt returns on the
+   * next activation); it is never written into the folder instead.
+   */
+  readonly preOptInMemory?: BootstrapMemory;
+}
+
+/**
+ * The slice of VS Code's `Memento` the bootstrap needs. Declared structurally
+ * so this module keeps no `vscode` import and `context.workspaceState` can be
+ * passed as-is.
+ */
+export interface BootstrapMemory {
+  get<T>(key: string): T | undefined;
+  update(key: string, value: unknown): PromiseLike<void>;
+}
+
+/**
+ * Key prefix for the pre-opt-in answers. One entry PER FOLDER (the absolute
+ * root is the suffix): `workspaceState` is shared by every folder of a
+ * multi-root workspace, and declining in one folder must not silence another.
+ */
+export const PRE_OPT_IN_MEMORY_KEY_PREFIX = 'minspec.bootstrap.preOptIn:';
+
+/**
+ * Read the answers that apply to this folder.
+ *
+ * Exactly one store is consulted, chosen by the opt-in marker:
+ *   - opted in  → `.minspec/preferences.json`, as always. The pre-opt-in memory
+ *     is NOT merged in: once a project has its own file, that file is the single
+ *     authority, and a stale "don't ask" from before it opted in must not
+ *     outrank it.
+ *   - not opted in → the host's per-workspace memory (the file cannot exist).
+ */
+function loadBootstrapPreferences(
+  rootDir: string,
+  vscode: BootstrapVsCode,
+): BootstrapPreferences {
+  if (isMinspecInitialized(rootDir)) return loadPreferences(rootDir);
+  const stored = vscode.preOptInMemory?.get<unknown>(
+    PRE_OPT_IN_MEMORY_KEY_PREFIX + rootDir,
+  );
+  return stored && typeof stored === 'object'
+    ? (stored as BootstrapPreferences)
+    : {};
+}
+
+/**
+ * Persist an answer for this folder - the ONLY way `runBootstrap` writes one.
+ *
+ * The store is chosen at WRITE time, not when the prompt was shown, because the
+ * answer can change the folder's state: "Initialize" that succeeds has created
+ * `.minspec/` by the time its answer is recorded (file), while one the user
+ * cancelled has not (memory). Same top-level merge as `savePreferences`.
+ */
+async function saveBootstrapPreferences(
+  rootDir: string,
+  vscode: BootstrapVsCode,
+  update: BootstrapPreferences,
+): Promise<void> {
+  if (isMinspecInitialized(rootDir)) {
+    savePreferences(rootDir, update);
+    return;
+  }
+  const memory = vscode.preOptInMemory;
+  if (!memory) return;
+  await memory.update(PRE_OPT_IN_MEMORY_KEY_PREFIX + rootDir, {
+    ...loadBootstrapPreferences(rootDir, vscode),
+    ...update,
+  });
 }
 
 /** Identifiers used by the per-prompt skip flags */
@@ -670,7 +763,7 @@ export const BOOTSTRAP_STEPS: readonly BootstrapStep[] = [
  *   - Steps are evaluated in order; the first eligible one is offered
  *   - "Always" (when offered) → enables auto-run for the step, then runs once
  *   - "Primary" → runs the associated command once
- *   - "Don't ask again" → writes the corresponding skip flag to preferences
+ *   - "Don't ask again" → records the corresponding skip flag
  *   - Dismissing the toast (the X) → eligible again only when the underlying
  *     state changes. There is no explicit "Not Now": the toast's close button
  *     already does exactly that, so a dedicated button was redundant.
@@ -681,6 +774,11 @@ export const BOOTSTRAP_STEPS: readonly BootstrapStep[] = [
  * the step while that signature is unchanged, so an already-answered prompt is not
  * re-offered until its state genuinely moves (e.g. a NEW template bump re-arms the
  * refresh prompt). "Don't ask again" remains a forever-skip via its `skip*` flag.
+ *
+ * WHERE an answer is recorded depends on whether the folder has opted in (#2355):
+ * `.minspec/preferences.json` if it has, the host's per-workspace memory if it
+ * has not. No answer to any prompt creates a file or directory in a folder with
+ * no `.minspec/` - only the command a primary action dispatches may do that.
  *
  * Returns a result object describing what (if anything) was offered, so tests
  * can assert behavior without inspecting vscode mocks.
@@ -700,12 +798,19 @@ export interface BootstrapResult {
  * answers) must be carried forward here. Keyed by `skipPrefKey` — never `kind` — so
  * the three `kind: 'backfill'` steps never cross-suppress (I5). A step with no
  * `signature` records nothing (it keeps its prior, signature-less behavior).
+ *
+ * Reads and writes through the opt-in-aware pair (#2355), so in a folder with no
+ * `.minspec/` the signature lands in the host's per-workspace memory, not on disk.
  */
-function recordAnsweredSignature(rootDir: string, step: BootstrapStep): void {
+async function recordAnsweredSignature(
+  rootDir: string,
+  step: BootstrapStep,
+  vscode: BootstrapVsCode,
+): Promise<void> {
   if (!step.signature) return;
   const sig = step.signature(rootDir);
-  const current = loadPreferences(rootDir);
-  savePreferences(rootDir, {
+  const current = loadBootstrapPreferences(rootDir, vscode);
+  await saveBootstrapPreferences(rootDir, vscode, {
     answeredSignatures: {
       ...(current.answeredSignatures ?? {}),
       [step.skipPrefKey]: sig,
@@ -772,7 +877,7 @@ export async function runBootstrap(
     return { enabled: true, offered: null, choice: null };
   }
 
-  const prefs = loadPreferences(rootDir);
+  const prefs = loadBootstrapPreferences(rootDir, vscode);
 
   for (const step of steps) {
     if (!step.shouldRun(rootDir, prefs)) continue;
@@ -813,7 +918,9 @@ export async function runBootstrap(
       // able to write a settings file. The `enableAutoClassify` call below is
       // still made, because it is what starts the on-commit watcher live (#203).
       if (step.alwaysPrefKey) {
-        savePreferences(rootDir, { [step.alwaysPrefKey]: true });
+        await saveBootstrapPreferences(rootDir, vscode, {
+          [step.alwaysPrefKey]: true,
+        });
       }
       // Opt into auto-run going forward, then run once now. If the host can't
       // persist the setting, fall back to a plain one-shot run.
@@ -821,7 +928,7 @@ export async function runBootstrap(
         await vscode.enableAutoClassify(rootDir);
       }
       await vscode.executeCommand(step.commandId, rootDir, step.commandArg);
-      recordAnsweredSignature(rootDir, step);
+      await recordAnsweredSignature(rootDir, step, vscode);
     } else if (choice === step.primaryAction) {
       if (step.action) {
         // In-process effect (e.g. DESIGN.md stub removal, #315) — no command.
@@ -832,15 +939,17 @@ export async function runBootstrap(
         // specific arg (backfill → AI consent).
         await vscode.executeCommand(step.commandId, rootDir, step.commandArg);
       }
-      recordAnsweredSignature(rootDir, step);
+      await recordAnsweredSignature(rootDir, step, vscode);
     } else if (choice === DONT_ASK) {
       // Forever-skip via the boolean flag (unchanged, honored by `shouldRun`).
-      savePreferences(rootDir, { [step.skipPrefKey]: true });
+      await saveBootstrapPreferences(rootDir, vscode, {
+        [step.skipPrefKey]: true,
+      });
     } else {
       // Dismissed (the X / `undefined`) or any other resolution — still an
       // answer to THIS state, so record the signature so it is not re-flooded
       // until the state changes (#883).
-      recordAnsweredSignature(rootDir, step);
+      await recordAnsweredSignature(rootDir, step, vscode);
     }
 
     return {
