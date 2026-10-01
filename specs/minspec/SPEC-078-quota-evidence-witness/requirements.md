@@ -6,7 +6,7 @@ tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain — DR-066's own domain (the silent-gate incident family); SPEC-054/SPEC-071 use it for the same gate-signal integrity class
 aspects: [ci, ai-review, quota, evidence, silent-gate, retry]
-relates_to: [DR-063, DR-079, SPEC-054, SPEC-071, SPEC-074, "#1630", "#1086", "#1204"]
+relates_to: [DR-063, DR-079, SPEC-054, SPEC-071, SPEC-074, "#1630", "#1086", "#1204", "#1461"]
 phases:
   specify: done
   clarify: pending
@@ -26,6 +26,18 @@ log contains the quota diagnostic."* It does not dispute **#1630** (the no-evide
 an unevidenced block may be a genuine crash, so do not loop it). The guard is right; the
 evidence marker it is fed is wrong.
 
+**Updated for #1461** — *"the PAYG review failover swallows its own failure and reports it
+as a subscription quota block"* (PR #1458, run `31569157501`). Independently reported,
+same code path as Finding C below: a second real incident, not a restatement of #2178.
+#1461 adds two things this spec did not previously cover and both are folded in: the
+posted comment can advertise a remedy (`AI_REVIEW_FAILOVER=payg`) that is *already
+configured* (Finding D, FR-9, AC-9), and it raises — as an open question, not a finding —
+whether `isQuotaExhaustion` should recognise `Credit balance is too low` (DQ-5). #1461 is
+not filed as a separate spec: it shares every file, function, and root cause this spec
+already analyses, and a second spec over the same lines would be two owners for one
+defect (constitution invariant 2's "no single producer" is about witnesses, not about
+specs — one spec per design question still applies).
+
 **Id note.** `SPEC-075` (#1698 validator corpora), `SPEC-076` (#1816 human-decision
 witness) and `SPEC-077` (#1922 idle-session wakes) are claimed on other branches in this
 checkout's remote refs, so this is `SPEC-078`. Those refs may be stale; if the id collides
@@ -35,8 +47,9 @@ at review time, renumber.
 
 Make the `evidence: captured | NONE` marker that `ai-review-retry.yml` trusts reflect the
 quota diagnostic `scripts/review-branch.sh` actually observed on every voter that blocked,
-by construction rather than by three separately maintained code paths agreeing by luck, and
-make a decline visible on the PR itself.
+by construction rather than by three separately maintained code paths agreeing by luck;
+make a decline visible on the PR itself; and stop the posted comment from telling the
+operator to configure something that is already configured.
 
 ## Context — how the marker is produced and consumed (read from code, not inferred)
 
@@ -115,6 +128,25 @@ though the second failure (PAYG) was never shown to be quota. A PAYG misconfigur
   in this repo, so this is a live shape, not a hypothetical.
 - Not the cause of #2172: there all four voters blocked, including `reviewer`.
 
+### Finding D — the posted comment advertises a remedy that may already be configured (#1461)
+
+- `.github/workflows/ai-review.yml:661` prints a fixed line unconditionally whenever
+  `FINAL=ai-review:blocked`: *"**Fail over to PAYG API** — set repo variable
+  `AI_REVIEW_FAILOVER=payg` + secret `ANTHROPIC_API_KEY`; re-runs then use pay-as-you-go
+  instead of the subscription quota."* The step has `AI_REVIEW_FAILOVER` and
+  `ANTHROPIC_API_KEY` available (`review-branch.sh` already reads both at `:390`), but the
+  comment-building step never checks them before printing the line.
+- On #1461's own repro, both were already set — the failover **did** fire
+  (`review-branch.sh:391`'s log line proves it) and still failed (Finding C). The posted
+  comment nonetheless told the operator to do what was already done, which is a no-op
+  remedy: following it changes nothing, and nothing in the comment says the failover was
+  already attempted or why it didn't help.
+- This is a distinct defect from Findings A–C: those are about whether the `evidence:`
+  marker is *correct*; this is about whether the human-facing *prose* in Option 2 is
+  *actionable* given the config the workflow can already see. Fixing A–C does not fix D —
+  a correctly-`captured` marker with Finding C's PAYG detail still sits under the same
+  unconditional "set X" sentence today.
+
 ## Functional Requirements
 
 - **FR-1 (evidence is the classifying attempt's evidence).** The text `emit_unavailable`
@@ -167,6 +199,17 @@ though the second failure (PAYG) was never shown to be quota. A PAYG misconfigur
   after the fix, and that fails again if either end of the producer/consumer contract
   moves (the issue's proposed fix 2).
 
+- **FR-9 (don't advertise an already-configured remedy — #1461).** The Option 2 line in
+  `ai-review.yml`'s blocked-comment (`:661`) MUST reflect whether `AI_REVIEW_FAILOVER` was
+  already `payg` and a key was present for the run that just blocked:
+  - Failover was **not** configured → keep today's "set repo variable… + secret…" text
+    (still actionable).
+  - Failover **was** configured (and therefore already attempted, per `review-branch.
+    sh:390-397`) → the text MUST instead say the failover was attempted and did not
+    produce a verdict, and point at the `detail:` block (Findings A–C, now fixed by
+    FR-1–FR-3) for why — never repeat the setup instructions for a step that already ran.
+  *(Closes Finding D.)*
+
 ## Acceptance Criteria
 
 - **AC-1 (Finding C, the reported case).** Fixture: subscription attempt's stderr contains
@@ -195,6 +238,12 @@ though the second failure (PAYG) was never shown to be quota. A PAYG misconfigur
 - **AC-8 (no predicate drift).** A test fails if the `captured`/`NONE` decision stops
   going through the shared classifier module — the same shape SPEC-074 uses for its
   single-classifier guarantee.
+- **AC-9 (Finding D, the reported remedy text).** Workflow-step fixture with
+  `AI_REVIEW_FAILOVER=payg` and `ANTHROPIC_API_KEY` set, `FINAL=ai-review:blocked`:
+  the posted comment's Option 2 line does NOT contain the literal "set repo variable"
+  setup instruction; it states the failover was attempted. The negative is also asserted:
+  with `AI_REVIEW_FAILOVER` unset, the existing setup instruction is still present
+  unchanged.
 
 ## Invariants
 
@@ -267,6 +316,35 @@ With FR-4, one comment can carry several `evidence:` lines. Today the retry take
   silently stops working on old blocks; grep-over-log re-creates a second predicate that
   can drift (INV-3).
 
+### DQ-5 — Should `isQuotaExhaustion` learn `Credit balance is too low` (#1461's fix 4)?
+
+The PAYG attempt's stderr on both #2172 and #1461's hypothesised repro is a dead-key/
+no-credit message, and `Credit balance is too low` matches neither the loose nor the strict
+classifier (`insufficient (quota|credit)` requires the literal word "insufficient", which
+this phrasing lacks). FR-1–FR-2 make the marker correctly reflect *whatever* the
+classifier decides; they don't change what the classifier decides. Unresolved by #1461's
+own admission ("either is defensible; silence is not"):
+
+- **Option A — add it to `isQuotaExhaustion`.** A dead PAYG key then reads as `reason:
+  quota`, `evidence: captured`, and rides the hourly retry — which never heals a dead key.
+  *Cost:* a dev with no credit left gets an hourly no-op retry forever instead of a
+  one-time clear signal; also widens the SAME classifier `quota_failure()` uses on the
+  *subscription* attempt, so a subscription failure containing that exact phrase (unlikely,
+  but not impossible if Anthropic ever reuses wording across products) would also start
+  reading as quota there.
+- **Option B — leave it out, deliberately, with a comment** (`isQuotaExhaustion`'s own
+  docblock already explains the "kept deliberately TIGHT" rationale at
+  `.github/scripts/ai-review-guard.js:316-318`) **(rec)**. A dead PAYG key then fails the
+  classifier, which — per FR-1–FR-3 and the existing fail-closed branch (`review-branch.
+  sh:404-409`) — surfaces as a genuine crash, not a quota block, which is the more honest
+  read of "the credential is permanently broken, not temporarily rate-limited." *Cost:*
+  the resulting comment and label (`ai-review:changes`/crash path, not `:blocked`) read as
+  if the dev's code is at fault, which DR-063's `blocked`/`changes` split exists to avoid
+  for infrastructure outages — this is the same tension DQ-3 names for the aggregate
+  `reason:` field, just one level lower (the classifier itself, not just its reporting).
+- Either option requires `.github/scripts/ai-review-guard.test.js` to gain a case either
+  way, so the choice is pinned and visible at the next drift.
+
 ## Why no new DR
 
 The DR-359 filter asks whether the choice costs more than a day to undo. Every change here
@@ -280,8 +358,10 @@ value that three consumers must learn), revisit this.
 
 - Changing the retry's cadence, per-tick cap (`head -25`), or reset-time handling (#1204)
   beyond carrying the reset marker for non-`reviewer` voters (FR-4).
-- Changing `isQuotaExhaustion` / `isQuotaExhaustionStrict` themselves.
-- Re-running or unblocking #2172 / #2120 — operational, not part of this spec.
+- Changing `isQuotaExhaustion` / `isQuotaExhaustionStrict` themselves — **except** as DQ-5
+  resolves; that decision is in scope precisely because #1461 raised it, but the Plan phase
+  must not pre-empt it by picking a side.
+- Re-running or unblocking #2172 / #2120 / #1458 — operational, not part of this spec.
 
 ## Test plan (for the Plan phase to place)
 
@@ -291,4 +371,9 @@ value that three consumers must learn), revisit this.
 2. AC-4: workflow-step fixture for the comment builder with four vote outputs.
 3. AC-5/AC-6/AC-7: retry-step fixture with a stubbed `gh` returning set comment bodies.
 4. AC-8: single-classifier assertion, SPEC-074's shape.
+5. AC-9: `ai-review.yml` comment-builder fixture with `AI_REVIEW_FAILOVER`/
+   `ANTHROPIC_API_KEY` set vs. unset, asserting the Option 2 text branches correctly.
+6. DQ-5 (whichever option Clarify picks): a case in `ai-review-guard.test.js` pinning
+   `isQuotaExhaustion("Credit balance is too low")` to `true` (Option A) or `false`
+   (Option B).
 Every test is run red against the pre-fix code before the fix lands.
