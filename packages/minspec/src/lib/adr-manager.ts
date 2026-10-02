@@ -5,6 +5,7 @@ import { loadConfig, applyVSCodeOverrides, resolveAndValidate } from './config';
 import { slugify } from './spec-manager';
 import { epicRefValue } from './epic-manager';
 import { inspectAllStatusClaims, claimParagraphText } from './status-parity';
+import { ensureDirectory } from './opt-in';
 export { slugify };
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -586,7 +587,9 @@ export function generateAdrContent(id: string, title: string, date: string): str
  */
 export function createAdr(rootDir: string, title: string, vscodeOverrides?: { decisionsDir?: string }): AdrSummary {
   const decisionsDir = resolveDecisionsDir(rootDir, vscodeOverrides);
-  fs.mkdirSync(decisionsDir, { recursive: true });
+  // Through the shared guard (SPEC-096 FR-4): it will not create `.minspec/`,
+  // which closes the route where `minspec.decisionsDir` points inside it.
+  ensureDirectory(decisionsDir);
 
   const num = nextAdrNumber(decisionsDir);
   const id = formatAdrId(num);
@@ -1134,7 +1137,7 @@ export function regenerateDrIndex(
   options: DrIndexOptions = {},
 ): DrIndexResult {
   const decisionsDir = resolveDecisionsDir(rootDir, vscodeOverrides);
-  fs.mkdirSync(decisionsDir, { recursive: true });
+  ensureDirectory(decisionsDir); // SPEC-096 FR-4: never creates `.minspec/`
 
   const indexPath = path.join(decisionsDir, 'INDEX.md');
   const existing = fs.existsSync(indexPath) ? fs.readFileSync(indexPath, 'utf-8') : null;

@@ -3,6 +3,7 @@ import * as path from 'path';
 import { detectTools, type DetectedTools } from './tool-detector';
 import { ASPECT_GUIDANCE } from './spec-validator';
 import { SPEC_STATUSES } from './spec';
+import { ensureDirectory } from './opt-in';
 
 /**
  * Spec Kit-compatible slash command surface.
@@ -380,7 +381,7 @@ export function generateSlashCommandShims(
 
   if (tools.claude) {
     const dir = path.join(rootDir, '.claude', 'commands');
-    fs.mkdirSync(dir, { recursive: true });
+    ensureDirectory(dir); // SPEC-096 FR-4: the one directory operation
     for (const cmd of SPEC_KIT_COMMANDS) {
       const filePath = path.join(dir, `${slashCommandName(cmd)}.md`);
       if (!fs.existsSync(filePath)) {
@@ -392,7 +393,7 @@ export function generateSlashCommandShims(
 
   if (tools.cursor) {
     const dir = path.join(rootDir, '.cursor', 'rules');
-    fs.mkdirSync(dir, { recursive: true });
+    ensureDirectory(dir); // SPEC-096 FR-4: the one directory operation
     const filePath = path.join(dir, 'spec-kit-commands.mdc');
     if (!fs.existsSync(filePath)) {
       fs.writeFileSync(filePath, buildCursorShim(), 'utf-8');

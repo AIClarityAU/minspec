@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { loadConfig, applyVSCodeOverrides, resolveAndValidate } from './config';
 import { slugify } from './spec-manager';
+import { ensureDirectory } from './opt-in';
 
 // ─── Types ──────────────────────────────────────────────────────────────────
 
@@ -516,7 +517,7 @@ export function createEpic(
   goal?: string,
 ): EpicSummary {
   const epicsDir = resolveEpicsDir(rootDir, vscodeOverrides);
-  fs.mkdirSync(epicsDir, { recursive: true });
+  ensureDirectory(epicsDir); // SPEC-096 FR-4: never creates `.minspec/`
 
   const num = nextEpicNumber(epicsDir);
   const id = formatEpicId(num);
@@ -639,7 +640,7 @@ export function mergeEpicIndex(existing: string | null, autoContent: string): st
 /** Regenerate <epicsDir>/INDEX.md, preserving user content outside markers. */
 export function writeEpicIndex(rootDir: string, vscodeOverrides?: { epicsDir?: string }): { filePath: string; count: number } {
   const epicsDir = resolveEpicsDir(rootDir, vscodeOverrides);
-  fs.mkdirSync(epicsDir, { recursive: true });
+  ensureDirectory(epicsDir); // SPEC-096 FR-4: never creates `.minspec/`
 
   const epics = listEpics(rootDir, vscodeOverrides);
   const indexPath = path.join(epicsDir, 'INDEX.md');

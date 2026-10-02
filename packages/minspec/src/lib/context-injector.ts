@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { Tier, Phase } from './config';
 import type { SpecStatus } from './spec';
+import { ensureDirectory } from './opt-in';
 
 /** Context about the currently active spec, injected into AI tool config files */
 export interface ActiveSpecContext {
@@ -107,10 +108,7 @@ export function injectContextToFile(filePath: string, context: ActiveSpecContext
     existing = fs.readFileSync(filePath, 'utf-8');
   }
   const updated = injectContext(existing, context);
-  const dir = path.dirname(filePath);
-  if (!fs.existsSync(dir)) {
-    fs.mkdirSync(dir, { recursive: true });
-  }
+  ensureDirectory(path.dirname(filePath)); // SPEC-096 FR-4: the one directory operation
   fs.writeFileSync(filePath, updated, 'utf-8');
 }
 
