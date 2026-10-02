@@ -492,7 +492,12 @@ out.
 Measured by running the whole suite against the finished guard and reading every failure,
 and then by the clean-runner check of finding 13. **32 existing test files change**, by 226
 added lines and 9 removed. The 9 removed lines are five test titles and the two lines each
-of the two inverted tests; no other line of any existing test was removed.
+of the two inverted tests; no other line of any existing test was removed for the guard.
+
+The comment corrections of finding 14 came after that measurement and are not part of it:
+two comment lines in `approve-action.test.ts`, which is one of the 32, and two in
+`backfill-epics-command.test.ts`, a 33rd file. Against `main` the existing tests therefore
+change in 33 files, by 230 added lines and 13 removed.
 
 **A store was called on a real temp folder with no marker (23 files).** Each gains one
 `mkdir` of `.minspec`, in the setup its tests share or in the tests that need it.
@@ -601,8 +606,9 @@ dependency and already imported by four other test files.
   wrote it to the console and told the user nothing; that was filed as #2506, fixed on
   `main` by pull request #2509 before this pull request opened, and is merged in (finding
   14). Each now shows a warning.
-- **Pull requests that touch the same files will conflict.** 28 existing source files
-  change, most by a line or two, and one is new.
+- **Pull requests that touch the same files will conflict.** 29 existing source files
+  change, most by a line or two and one (`backfill-epics.ts`) by a comment only, and one is
+  new.
 
 ## Follow-ups (tracked)
 
