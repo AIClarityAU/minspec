@@ -788,7 +788,7 @@ function generateManagedRegionTemplates(rootDir: string, tools: DetectedTools): 
     if (tpl.condition && !tpl.condition(tools)) continue;
     const fullPath = path.join(rootDir, tpl.outputPath);
     if (!fs.existsSync(fullPath)) {
-      writeManagedFile(fullPath, tpl);
+      writeManagedFile(fullPath, tpl, rootDir);
     }
   }
 }
@@ -798,8 +798,12 @@ function generateManagedRegionTemplates(rootDir: string, tools: DetectedTools): 
  * marked block) and, for executable templates (the git hooks), set the execute bit
  * so git will actually run the hook. Single place both scaffold and the deleted-file
  * re-scaffold path go through, so the bytes and the mode never diverge.
+ *
+ * `rootDir` is needed (not just `fullPath`) so the git-index fix below
+ * ({@link recordExecutableBitInIndex}) can run `git update-index` scoped to the
+ * right repository and pathspec (#2399).
  */
-function writeManagedFile(fullPath: string, tpl: ManagedRegionTemplate): void {
+function writeManagedFile(fullPath: string, tpl: ManagedRegionTemplate, rootDir: string): void {
   fs.mkdirSync(path.dirname(fullPath), { recursive: true });
   fs.writeFileSync(fullPath, renderManagedFile(tpl));
   if (tpl.executable) {
@@ -807,8 +811,51 @@ function writeManagedFile(fullPath: string, tpl: ManagedRegionTemplate): void {
       fs.chmodSync(fullPath, 0o755);
     } catch {
       // chmod can fail on filesystems without POSIX modes (e.g. some Windows
-      // mounts). Git on those platforms ignores the bit anyway — best-effort.
+      // mounts) — recordExecutableBitInIndex below is what actually gates
+      // execution on a POSIX checkout, so a failure here is not fatal on its own.
     }
+    recordExecutableBitInIndex(rootDir, fullPath);
+  }
+}
+
+/**
+ * Record the execute bit in the git INDEX for a freshly scaffolded executable
+ * template (#2399) — not just the filesystem, which is what `fs.chmodSync` above
+ * sets and what the old comment it replaced relied on ("git ignores the bit
+ * anyway").
+ *
+ * That was true only on the machine running the scaffold. The filesystem mode is
+ * NOT what git commits — the index entry's own mode is — and on a filesystem
+ * without POSIX modes (Windows, some mounts) the chmod above is a silent no-op,
+ * so a new hook file lands in the index at git's default `100644`. A commit made
+ * from that machine then carries `100644` hooks forever: git never changes the
+ * mode of a file already in the index just because a later commit runs on a
+ * POSIX machine. Every other checkout of that commit — Linux, macOS, CI — then
+ * SKIPS the hook, printing only a disableable hint, never a failure, so
+ * `.minspec/hooks/pre-commit` and `commit-msg` (the secret scan, the protected-
+ * branch guard, the RCDD root-cause gate) stop running with nothing else
+ * reporting it: exactly the silent-gate shape constitution invariant 2 forbids.
+ *
+ * `git update-index --add --chmod=+x` sets the index mode directly, independent
+ * of what the filesystem supports, so it fixes the one platform where the chmod
+ * above cannot. It is a no-op when the bit is already `100755` (the common,
+ * already-correct case elsewhere), and best-effort/silent when there is no repo
+ * or no git on PATH — mirroring `ensureHooksPath` above: scaffolding must never
+ * fail because of this, and a repo with no git backstop is covered by the DR-037
+ * CI workflow instead.
+ */
+function recordExecutableBitInIndex(rootDir: string, fullPath: string): void {
+  try {
+    // git pathspecs want forward slashes even when `path.relative` gives back
+    // platform separators (backslashes on win32).
+    const relPath = path.relative(rootDir, fullPath).split(path.sep).join('/');
+    execFileSync('git', ['update-index', '--add', '--chmod=+x', '--', relPath], {
+      cwd: rootDir,
+      stdio: 'ignore',
+    });
+  } catch {
+    // Not a git repo, no git on PATH, or the index update failed — leave the
+    // filesystem bit (if the platform honours it) as the only fallback.
   }
 }
 
@@ -1018,8 +1065,25 @@ function refreshManagedRegionTemplates(rootDir: string, tools: DetectedTools): M
 
     if (!fs.existsSync(fullPath)) {
       // Re-scaffold a deleted managed file, shebang + markers and all.
-      writeManagedFile(fullPath, tpl);
+      writeManagedFile(fullPath, tpl, rootDir);
       continue;
+    }
+
+    if (tpl.executable) {
+      // Self-heal an EXISTING hook/script too (#2399), not just a freshly
+      // (re-)scaffolded one: a repo first initialized or last re-scaffolded on
+      // Windows already has this file on disk with a correct body but a `100644`
+      // index entry, and nothing about its content differs from the template, so
+      // the marker-diff logic below would never touch it again. Refresh is the
+      // one path every such repo eventually runs, so it is where this actually
+      // gets fixed. No-op when the bit is already `100755`.
+      try {
+        fs.chmodSync(fullPath, 0o755);
+      } catch {
+        // Filesystem without POSIX modes — recordExecutableBitInIndex below is
+        // what actually matters there.
+      }
+      recordExecutableBitInIndex(rootDir, fullPath);
     }
 
     const onDisk = fs.readFileSync(fullPath, 'utf-8');
@@ -1066,7 +1130,7 @@ function refreshManagedRegionTemplates(rootDir: string, tools: DetectedTools): M
 export function rescaffoldManagedRegionFile(rootDir: string, outputPath: string): boolean {
   const tpl = MANAGED_REGION_TEMPLATES.find((t) => t.outputPath === outputPath);
   if (!tpl) return false;
-  writeManagedFile(path.join(rootDir, tpl.outputPath), tpl);
+  writeManagedFile(path.join(rootDir, tpl.outputPath), tpl, rootDir);
   return true;
 }
 
