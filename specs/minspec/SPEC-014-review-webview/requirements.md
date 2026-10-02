@@ -29,13 +29,16 @@ implements_reason: >-
 
 # MinSpec — Prettified Spec-Review Webview (Requirements)
 
-**Date:** 2026-06-01
-**Status:** Implementing (SDD Implement phase)
+**Date:** 2026-06-01 (refreshed 2026-10-02 — see **Refresh note** below)
+**Status:** Specified, not built. (The frontmatter's literal `status: implementing` is the
+pre-#1651 writer's default stamp, named as such in this file's own frontmatter comment and in
+`implements_reason`; it is not evidence. Zero code exists for this feature — confirmed again
+on this refresh, same method as `implements_reason`.)
 **Triggered by:** session request — "expand the planned webview that approximates
 ExitPlanMode (pretty not MD, with a text-select → comment → LLM revision → highlight
 changes process); a scroll-bottom Approve button that, instead of closing, shows the
 next spec/dr/issue/doc that needs approving."
-**Materialises:** [#36](https://github.com/harvest316/minspec/issues/36) (parked from
+**Materialises:** [#36](https://github.com/AIClarityAU/minspec/issues/36) (parked from
 [DR-012](../../../docs/decisions/DR-012.md) — prettified review webview).
 **Epic:** [EPIC-002 Signpost Integrity](../../../docs/epics/EPIC-002-signpost-integrity.md)
 **Consumes:** [SPEC-012 Next-Task Resolver](../SPEC-012-next-task-resolver/requirements.md)
@@ -45,6 +48,32 @@ next spec/dr/issue/doc that needs approving."
 [`spec-validator.ts`](../../../packages/minspec/src/lib/spec-validator.ts).
 
 ---
+
+**Refresh note (2026-10-02, issue #36 Specify-phase dispatch).** Issue #36 asks for exactly
+what this spec already specifies in far more depth (text-select comment pins, rendered
+markdown, approve-from-the-view); its own `*Parked from session scope... (2026-05-30)*` line
+and the issue's (global-register) `DR-362` reference both match this spec's `DR-012` origin
+story (`DR-012.md`'s own text cites `DR-362 (parent register, mmo-platform)` for an unrelated
+amendment, confirming it is not a local id — see `docs/decisions/DR-012.md:8`). Per the
+dispatch instructions for this issue, this is an UPDATE to the existing spec, not a new id.
+Verified against `origin/main` at `722e7b57` (2026-10-02):
+- Still zero code (re-confirmed `implements_reason`'s checks).
+- Two `file:line` citations had gone stale since 2026-06-01 and are corrected throughout
+  this document: `approve.ts:70-100` → the function is now `approve.ts:202-419` and, more to
+  the point, it gained **two more refusal gates** since this spec was written (the #1317
+  `violationsIntroducedByApproval` check and the DR-056 approver-identity check) — FR-10 and
+  the Blast-Radius section below now name all three; `spec-panel-html.ts:131-138` →
+  `spec-panel-html.ts:144-153`.
+- A new interaction this spec did not know about when written: `approveSpecCommand` now also
+  fires a DR-057 post-approve phase-advance toast. Recorded as **FR-OQ3** (new open question)
+  and in Blast-Radius, not resolved here — it is a plan-phase sequencing choice.
+- SPEC-012's FR/INV numbers this spec cites (FR-6, FR-7, FR-11, FR-12, FR-15, INV #5) and its
+  node-kind set (still no `issue-triage`) were re-checked against current SPEC-012 and are
+  unchanged.
+- A separate, unmerged backfill (`fix(#1513)`, commit `e1a7d5b2`, not yet in `origin/main`)
+  is in flight to give this spec (and ten siblings) a proper `phases:` block and correct
+  derived status. Not duplicated here — out of this issue's scope and would conflict with
+  that in-flight change if done twice.
 
 ## Context
 
@@ -119,7 +148,7 @@ for content-bearing artifacts (specs, ADRs).
   formatted HTML (headings, tables, code blocks, links) — not raw markdown text. The
   renderer + sanitiser MUST run locally with no network fetch (no remote images/scripts/
   fonts) and MUST reuse the existing CSP-nonce pattern
-  ([`spec-panel-html.ts:131-138`](../../../packages/minspec/src/views/spec-panel-html.ts#L131-L138)):
+  ([`spec-panel-html.ts:144-153`](../../../packages/minspec/src/views/spec-panel-html.ts#L144-L153)):
   `default-src 'none'`, inline style allowed, scripts only via per-render nonce. Untrusted
   spec content MUST be sanitised before injection (no raw HTML passthrough).
 - **FR-2 (frontmatter + gate state header).** The panel MUST show the artifact's id,
@@ -200,12 +229,23 @@ for content-bearing artifacts (specs, ADRs).
 
 ### Approve + chain to next (the signpost walk)
 
-- **FR-10 (Approve runs the DR-012 gate, never bypasses it).** The scroll-bottom primary
-  action MUST run `validateSpec` first and **refuse** on errors (reusing the exact
-  `approveSpecCommand` logic — [`approve.ts:70-100`](../../../packages/minspec/src/commands/approve.ts#L70-L100)),
-  surfacing blocking violations. On success it records the approval (re-hash) /
-  acceptance / promotion appropriate to the node kind. The webview MUST NOT be a softer
-  path to approval than the existing command.
+- **FR-10 (Approve runs the DR-012 gate, never bypasses it — THREE refusal checks, not
+  one).** `approveSpecCommand` ([`approve.ts:202-419`](../../../packages/minspec/src/commands/approve.ts#L202-L419))
+  has grown two refusal gates since this spec was first written, and the scroll-bottom
+  primary action MUST reuse all three, in the same order, or the pretty door is the R2
+  bypass this spec exists to prevent:
+  1. `validateSpec` — refuse on blocking violations
+     ([`approve.ts:244-266`](../../../packages/minspec/src/commands/approve.ts#L244-L266)).
+  2. `violationsIntroducedByApproval` (#1317) — refuse when the status/phase advance
+     approval itself triggers would newly violate a rule that did not apply before the
+     advance ([`approve.ts:268-297`](../../../packages/minspec/src/commands/approve.ts#L268-L297)).
+  3. The DR-056 approver-identity check — refuse an agent/bot or absent identity before
+     any status flip ([`approve.ts:299-325`](../../../packages/minspec/src/commands/approve.ts#L299-L325)).
+
+  Surfacing blocking violations for whichever gate refuses. On success it records the
+  approval (re-hash) / acceptance / promotion appropriate to the node kind. The webview
+  MUST NOT be a softer path to approval than the existing command — "gate parity" means
+  parity with all three gates, not just the first.
 - **FR-11 (Approve advances, does not close).** After a successful decision the panel MUST
   **not** close. It MUST request the next human task from the SPEC-012 resolver and load
   that artifact into the same panel. The panel closes only when the resolver reports the
@@ -280,9 +320,13 @@ that pin it.
    FR-17 import-ban both collapse and must be re-split. Establish the boundary in the first
    module, not after.
 4. **Gate-call reuse of `approveSpecCommand` (FR-10, INV — Gate parity).** FR-10 requires the
-   webview reuse `approve.ts:70-100` *verbatim*, not a fork. A copied-then-drifted validator
-   path is the exact bypass R2 warns of; refactoring two divergent approval paths back into
-   one later is far costlier than wiring the single shared call now.
+   webview reuse `approve.ts:202-419`'s three refusal gates (`validateSpec`,
+   `violationsIntroducedByApproval`, the DR-056 approver-identity check) *verbatim*, not a
+   fork of any one of them. A copied-then-drifted validator path is the exact bypass R2
+   warns of, and it is now a three-way target, not a one-way one, because two gates were
+   added to `approveSpecCommand` after this spec was first written — exactly the drift this
+   seam is ranked to warn against. Refactoring two divergent approval paths back into one
+   later is far costlier than wiring the single shared call now.
 5. **SPEC-012 resolver as sole "next" source (FR-12, INV — Single ordering authority).** The
    moment this webview caches or re-derives ordering, it can disagree with the status-bar /
    CI signpost (R3) and the single-engine invariant (SPEC-012 FR-11) is broken across
@@ -350,7 +394,7 @@ decision-only node (epic-promote / issue-triage) collapses to a summary card:
 Checkbox DoD tracing the FRs. The feature is "done" only when all hold.
 
 - [ ] **Renders, not raw** — the active artifact shows formatted HTML (headings, tables,
-  code blocks) under the reused CSP-nonce pattern (`spec-panel-html.ts:131-138`),
+  code blocks) under the reused CSP-nonce pattern (`spec-panel-html.ts:144-153`),
   `default-src 'none'`, untrusted content sanitised before injection (FR-1).
 - [ ] **Gate-state header** — id / title / tier / status / approval state
   (`approved`/`stale`/`unapproved` from `approval.ts`) + blocking validator violations show
@@ -367,10 +411,11 @@ Checkbox DoD tracing the FRs. The feature is "done" only when all hold.
   new/changed spans locally; each round gets a distinct, cycling, theme-token colour paired
   with a non-colour "changed · rev N" label/tooltip (WCAG 1.4.1); cleared on approve (FR-7,
   FR-7a, FR-8).
-- [ ] **Approve is never softer than the command** — the scroll-bottom action runs
-  `validateSpec` and refuses on errors using the exact `approveSpecCommand` logic
-  (`approve.ts:70-100`); a revision forces a visible re-hash so prior approval goes `stale`
-  (FR-9, FR-10, INV — Gate parity).
+- [ ] **Approve is never softer than the command** — the scroll-bottom action runs, and
+  refuses on, all three `approveSpecCommand` gates (`validateSpec`,
+  `violationsIntroducedByApproval`, the DR-056 approver-identity check —
+  `approve.ts:202-419`), not only the first; a revision forces a visible re-hash so prior
+  approval goes `stale` (FR-9, FR-10, INV — Gate parity).
 - [ ] **Approve advances, does not close** — on success the panel loads the next human task
   from the SPEC-012 resolver into the same panel; closes only on empty queue → terminal
   "All clear" state (FR-11). Ordering is never re-derived locally (FR-12, INV — Single
@@ -435,9 +480,15 @@ Checkbox DoD tracing the FRs. The feature is "done" only when all hold.
 Beyond the `depends_on: SPEC-012` link above, the declared touch-surface and the failure
 each change would trigger:
 
-- **`approve.ts:70-100` (`approveSpecCommand` validate-then-refuse path)** — FR-10 reuses it
-  verbatim. If its signature or refusal behaviour changes, the webview's Approve silently
-  diverges from `minspec.approveSpec` → INV — Gate parity breaks (R2). Any edit there must
+- **`approve.ts:202-419` (`approveSpecCommand`, now THREE refusal gates, not one)** — FR-10
+  reuses all of it verbatim: `validateSpec` (`:244-266`), the #1317
+  `violationsIntroducedByApproval` check (`:268-297`), and the DR-056 approver-identity check
+  (`:299-325`). The last two did not exist when this spec was first written — FR-10 was
+  originally scoped to `validateSpec` alone — so any implementer working from an older reading
+  of this spec would wire only the first gate and leave the webview's Approve weaker than the
+  command, which is exactly the R2 bypass this spec exists to prevent. If any gate's signature
+  or refusal behaviour changes, the webview's Approve silently diverges from
+  `minspec.approveSpec` → INV — Gate parity breaks (R2). Any edit to any of the three must
   re-run the gate-parity test for both surfaces.
 - **`spec-validator.ts` (DR-012 gate)** — the validator the gate calls. A new violation class
   added there must surface in FR-2's header and be refused by FR-10; a missing-vs-dangling
@@ -445,8 +496,19 @@ each change would trigger:
 - **`approval.ts` (content-hash + `approved`/`stale`/`unapproved`)** — FR-2 reads its state,
   FR-9 depends on its hash-binding. Change the hash algorithm and every persisted approval +
   every stored pin's "did the artifact change" assumption (FR-4) must be re-evaluated.
-- **`spec-panel-html.ts:131-138` (CSP-nonce pattern)** — FR-1 reuses it. Loosen the CSP there
+- **`spec-panel-html.ts:144-153` (CSP-nonce pattern)** — FR-1 reuses it. Loosen the CSP there
   (e.g. allow remote `img-src`) and the no-network-fetch guarantee of FR-1 silently weakens.
+- **DR-057's post-approve phase-advance toast (`approve.ts:375-401`)** — new since this spec
+  was authored. It already does something FR-11 also wants, from a different motive: it fires
+  immediately after a successful approve and offers (or, if the preference is set, silently
+  performs) an LLM-free enqueue for implementation dispatch. FR-11's "advance to the next
+  *human* task" and this toast's "enqueue the *agent* work" are different queues (SPEC-012's
+  own Two-Queues invariant) and must not be merged into one control, but they now both want to
+  run in the instant after Approve returns — the plan phase MUST decide how the webview's
+  "load next human task" interacts with this toast (sequence, or let the toast fire in the host
+  editor behind the webview) rather than silently racing or double-prompting. Tracked as
+  **FR-OQ3** below; not resolved here because it is a plan-phase sequencing choice, not a new
+  requirement on what either queue contains.
 - **SPEC-012 resolver node-kind set** — FR-12 renders whatever it emits. Adding/removing a
   node kind (e.g. the planned `issue-triage`) changes which artifacts the walk loads; an
   unhandled kind must degrade to "shown, not approvable" rather than crash the walk (FR-13).
@@ -561,7 +623,7 @@ default and what each costs against the invariants.
   HTML (headings, tables, code blocks — pretty, not raw MD) with the FR-3 Google-Docs
   right-margin conversation pane and FR-7/FR-7a per-round colour highlighting; a text editor
   shows raw markdown and has no margin-card or multi-colour span affordance. It would also
-  drop the FR-1 CSP-nonce sandbox (`spec-panel-html.ts:131-138`) the no-network guarantee
+  drop the FR-1 CSP-nonce sandbox (`spec-panel-html.ts:144-153`) the no-network guarantee
   reuses. A native editor is the right surface for *editing* the `.md`, which is exactly the
   viewer-vs-editor split deferred below.
 
@@ -641,10 +703,20 @@ default and what each costs against the invariants.
   a `minspec.dispatchRevision` command into `agent-execute`, a prompt file the running
   session watches, or `claude -p` via the DR-017 broker? Must be dirty-editor-safe (R4).
   *(Open — plan phase.)*
+- **FR-OQ3 — sequencing against DR-057's post-approve phase-advance toast (newly found,
+  2026-10-02).** `approveSpecCommand` now fires a second "what next" prompt immediately after
+  a successful approve (`approve.ts:375-401`): an LLM-free enqueue offer for implementation
+  dispatch, distinct from FR-11's "load the next *human* decision" (Blast-Radius). Both want
+  to run the instant Approve returns. Plan MUST pick one of: (a) the webview's "load next"
+  runs first and the toast appears in the host editor behind/after it; (b) the toast is
+  suppressed while the webview walk is active and resumes when the walk ends or is stopped;
+  (c) something else that keeps the two queues visibly separate (SPEC-012's Two-Queues
+  invariant) with no double-prompt and no silent race. *(Open — plan phase.)*
 
 ## Follow-ups (tracked)
 
 - **SPEC-012 `issue-triage` node kind** — so the approve-chain can include gh issues
   (session ask). Cross-spec follow-up, not covered by this spec's own FRs → SPEC-012
   amendment, tracked at
-  [#92](https://github.com/harvest316/minspec/issues/92).
+  [#92](https://github.com/AIClarityAU/minspec/issues/92) (filed under this repo's prior
+  org name, `harvest316`, which renamed to `AIClarityAU` — same repo, same issue number).
