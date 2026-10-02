@@ -210,8 +210,8 @@ flowchart TD
 Three properties come from the shape, not from a check that could be skipped.
 
 - **It cannot create the marker.** The only `mkdir` in the module is never called for a
-  component that is the marker, and it is never recursive, so no parent is created as a
-  side effect.
+  missing component that is the marker, and it is never recursive, so no parent is created
+  as a side effect.
 - **It creates nothing when it refuses.** The look comes first and covers the whole path.
 - **The race has two outcomes.** If the marker goes after the look, the next `mkdir` has no
   parent and fails with `ENOENT`. The operation then looks again: when a marker component
@@ -404,8 +404,12 @@ T0, written before any source change and observed on a024a751:
   real `activate()`, all 44 contributed commands through the handlers it registers, real
   folders, prompts answered, only `vscode` and the child-process boundary stubbed. A handler
   that rejects fails the test, so a pass cannot come from a gap in the stand-in for the
-  editor. Today 51 of 182 fail, each because the marker was created or the refusal was not
-  shown.
+  editor. Today 51 of 186 fail, each because the marker was created or the refusal was not
+  shown. It also fires every event `activate()` subscribes to (the watchers, saves, focus,
+  visibility and configuration changes) in each folder with no marker, with the debounced
+  work run on a fake clock. Those cases pass today, because the ambient paths were fixed
+  one at a time earlier; they are there so that commands, events and activation are checked
+  in one place.
 
 What varies, because the earlier instances of this defect were fixture-shaped: the marker
 (absent; present; present but holding only `preferences.json`, the residue issue #2365
@@ -414,8 +418,8 @@ INV-4), the root (a folder; no folder at all), the folder (empty; primed; primed
 directory settings inside `.minspec/`; primed with no git repository), and the workspace
 (one folder; two, one opted in and one not).
 
-Not vacuous. 40 mutants were applied one at a time and run against the three files and the
-two existing opt-in suites, with a clean control run before and after (336 tests, none
+Not vacuous. 41 mutants were applied one at a time and run against the three files and the
+two existing opt-in suites, with a clean control run before and after (340 tests, none
 failing either time):
 
 - the guard removed from a converted writer (`saveSession` back to `mkdir -p`): red, in the
@@ -424,15 +428,16 @@ failing either time):
   once in a command with no check: red both times, the second in the inventory and in the
   command sweep for all three folders;
 - one mutant per store (15), per command check (9), per handler FR-8 names (7) and per rule
-  inside the guard (6).
+  inside the guard (6), and one for the opt-in gate on the decisions watcher, which the
+  event sweep pins.
 
-39 of the 40 turn the suite red. The one that does not is the equivalent mutant of finding
-12, and its paired mutant (the check and the guarded write both removed) is among the 39.
+40 of the 41 turn the suite red. The one that does not is the equivalent mutant of finding
+12, and its paired mutant (the check and the guarded write both removed) is among the 40.
 
 The final versions of the three files were run against an export of a024a751, so the red
 evidence is for the tests as merged and not for an earlier draft: the guard test cannot
-load, 25 of the inventory test's 60 fail, and 51 of the command test's 182 fail. On the
-changed tree all 301 pass (59, 60 and 182).
+load, 25 of the inventory test's 60 fail, and 51 of the command test's 186 fail. On the
+changed tree all 305 pass (59, 60 and 186).
 
 Tests are outside every tsconfig in the repository, so the three files were typechecked
 directly with `tsc` under the root compiler options, and the check was shown to report an

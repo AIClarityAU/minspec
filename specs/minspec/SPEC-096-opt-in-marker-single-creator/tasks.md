@@ -50,8 +50,10 @@ change.
   folders with no marker, with every prompt answered. Covers FR-10, FR-6, FR-7 and FR-8.
   *Done when:* it fails on the pre-change tree because a command created the marker or did
   not show the refusal, and no handler rejects for want of something in the stand-in for
-  the editor. Observed on a024a751: 51 of 182 fail, none of them a rejected handler apart
-  from the one the test expects (the auto-classify button, whose refusal had no handler).
+  the editor. Observed on a024a751, with the file as merged: 51 of 186 fail, none of them a
+  rejected handler apart from the one the test expects (the auto-classify button, whose
+  refusal had no handler). It was 51 of 182 when first committed; the four added since are
+  the event sweep of 9.10, which passes on a024a751.
 
 ## 2 - Plan and task list
 
@@ -137,7 +139,8 @@ change.
   persisting button.
 - [x] **7.7** `packages/minspec/src/extension.ts` - show a refusal from either drift-warning
   action; correct the comment that says Refresh can run before opt-in.
-  *Done when, for 7.1 to 7.7:* the command test is green end to end. Observed: 182 of 182.
+  *Done when, for 7.1 to 7.7:* the command test is green end to end. Observed: all of it,
+  186 tests once 9.10 added four.
 
 ## 8 - The words follow the code (FR-12)
 
@@ -160,14 +163,14 @@ change.
   tried, in a library module (the inventory) and in a command with no check (the inventory
   and the command sweep in all three folders).
 - [x] **9.3** Remove each command check and each store refusal in turn, one at a time.
-  Observed: 40 mutants in all, with a clean control run before and after. 39 turn the
+  Observed: 41 mutants in all, with a clean control run before and after. 40 turn the
   suite red. The one that does not is equivalent (Propose Constitution's command check,
-  whose guarded write refuses with the same message); removing both is among the 39.
+  whose guarded write refuses with the same message); removing both is among the 40.
   Running them is also what showed two outcomes of the guard that had no test, losing the
   race to another creator of the same directory, so two cases were added.
 - [x] **9.4** Run the final versions of the three T0 files against an export of a024a751
   and record the failures, so the red evidence is for the tests as merged. Observed: the
-  guard test cannot load, 25 of 60 fail in the inventory test, 51 of 182 in the command
+  guard test cannot load, 25 of 60 fail in the inventory test, 51 of 186 in the command
   test.
 - [x] **9.5** Typecheck the three new test files with `tsc` directly. No tsconfig in the
   repository includes the tests directory, so the suite passing says nothing about types.
@@ -185,6 +188,11 @@ change.
   fake test root read as opted in. Run throwaway copies of the 13 suites that use that
   root, pointed at a path that does not exist. Observed: 48 failures in four suites before
   their precondition was stated, none after.
+- [x] **9.10** Fire every event `activate()` subscribes to, in each folder with no marker,
+  with the debounced work run; and the same in a folder that has opted in, as the control.
+  Added to the command test. Observed: the folder is byte-identical each time, and the
+  control's decisions index is written. Removing the decisions watcher's opt-in gate turns
+  it red.
 
 ## Not in this change
 
