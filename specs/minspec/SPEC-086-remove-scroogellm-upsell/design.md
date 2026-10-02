@@ -190,9 +190,9 @@ decision, and what keeps that text away from a user is the guard, which is what 
 
 Every check also runs against invented inputs that contain what it looks for: eleven kinds
 of manifest reintroduction, four listing lines, four install targets, five strings, a
-bundled JSON asset, and ten ways to break the pack's guard. A sample of the comments that stay is run through the source
-checks and must produce nothing. That is what makes a green on the real tree a finding and
-not a reader that sees nothing (INV-2).
+bundled JSON asset, and ten ways to break the pack's guard. A sample of the comments that
+stay is run through the source checks and must produce nothing. That is what makes a green
+on the real tree a finding and not a reader that sees nothing (INV-2).
 
 ## Activation tests
 

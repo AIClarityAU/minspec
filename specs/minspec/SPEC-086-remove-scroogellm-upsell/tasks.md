@@ -119,8 +119,10 @@ command with no registration, or the reverse.
 - [x] **7.5** Confirm the mentions the spec says stay are still in the tree and the gate is
   green with them there.
 - [x] **7.6** Re-run 2.3's check on the final tree: the approval still verifies.
-- [ ] **7.7** Merge `main` into the branch immediately before opening the pull request, and
+- [x] **7.7** Merge `main` into the branch immediately before opening the pull request, and
   repeat 7.3, 7.4 and 7.6 on the merged tree.
+  *Done when:* all three hold on the merged head, and every file this change never edited is
+  byte-identical to `main`.
 
 ## Not in this change
 
