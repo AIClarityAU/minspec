@@ -158,7 +158,8 @@ Fourteen facts, each checked against the code. None changes a requirement.
     pointed at a path that does not exist: 48 tests in those four fail before their
     precondition is stated, none after. Repeated on the final tests with the two further
     suites that only name document paths under that root: all 242 tests in the fifteen
-    pass. The litter itself was left alone: it is shared scratch.
+    pass, and all 243 once `main` was merged in. The litter itself was left alone: it is
+    shared scratch.
 
 14. **`main` moved while this was built, and what landed rests on a premise this change
     removes.** Commit 360818bc, pull request #2509, is the fix for #2506, an issue filed

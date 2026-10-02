@@ -180,18 +180,28 @@ change.
   Observed: clean under the root compiler options, and the same command reports an
   injected error.
 - [x] **9.6** From the repository root: the full vitest suite as CI runs it, lint, build,
-  typecheck, import cycles and validate. Observed: 348 files and 7519 tests pass with
-  coverage at 94.25 percent of statements; lint has no errors and the five warnings `main`
-  has; validate passes with 181 warnings, two fewer than `main`.
+  typecheck, import cycles and validate. Observed on be31c689, the head with `main` merged
+  in: all 348 files pass, 7525 tests, with coverage at 94.38 percent of statements; lint
+  has no errors and the five warnings `main` has; validate passes with 181 warnings, two
+  fewer than `main`. None of the suite's 2 skipped and 3 expected-fail tests is added by
+  this change. An earlier full run, on a machine under load, timed out three tests of a
+  suite this change does not touch; 9.11 is what followed from it.
 - [x] **9.7** Re-run 2.3's check on the final tree: the approval still verifies. Observed:
   APPROVED, stored and computed both `1b3c314a`; status MATCH.
-- [ ] **9.8** Merge `main` into the branch immediately before the pull request opens, and
-  repeat 9.4 to 9.7 on the merged tree.
+- [x] **9.8** Merge `main` into the branch immediately before the pull request opens, and
+  repeat 9.4 to 9.7 on the merged tree. Observed: `main` had moved by one commit, 360818bc
+  (9.12). It merged with no textual conflict, as a merge and not a rebase. On the merged
+  tree: the three T0 files fail on an export of 360818bc exactly as on a024a751 (9.4), they
+  typecheck (9.5), the full verification passes on be31c689 (9.6), and the approval still
+  verifies there, APPROVED with stored and computed both `1b3c314a`, status MATCH (9.7).
+  `main` was fetched again after that run and had not moved. The commit that carries this
+  tick changes only this file and the plan beside it.
 - [x] **9.9** Clean-runner check. A stray `/tmp/ws/.minspec` on the build machine makes a
   fake test root read as opted in. Run throwaway copies of the 13 suites that use that
   root, pointed at a path that does not exist. Observed: 48 failures in four suites before
   their precondition was stated, none after. Repeated on the final tests with the two
-  further suites that only name document paths under that root: 242 of 242 pass.
+  further suites that only name document paths under that root: 242 of 242 pass, and 243
+  of 243 once `main` was merged in and brought one more test.
 - [x] **9.10** Fire every event `activate()` subscribes to, in each folder with no marker,
   with the debounced work run; and the same in a folder that has opted in, as the control.
   Added to the command test. Observed: the folder is byte-identical each time, and the
