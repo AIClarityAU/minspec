@@ -15,6 +15,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { execFileSync } from 'child_process';
+import * as ts from 'typescript';
 
 // Modules under test
 import { parseSpec, writeSpec } from '../src/lib/spec';
@@ -106,13 +107,31 @@ describe('Invariant 2: No backend — no network calls', () => {
     return results;
   }
 
-  // Files allowed to use child_process. All are Tier-1 local-tool delegation
-  // (DR-004): the extension shells a locally-installed binary that owns its own
-  // networking — the extension process makes zero outbound connections.
-  //   - github / parking-lot / backlog / git-analyzer → `gh` + `git` CLI
+  // Files allowed to spawn a process — via `child_process` OR `simple-git` (#2456).
+  // All are Tier-1 local-tool delegation (DR-004): the extension shells a
+  // locally-installed binary that owns its own networking — the extension process
+  // makes zero outbound connections, UNLESS the file is also listed on
+  // NETWORK_CONSENT_ALLOWLIST below, in which case see that allowlist's comment.
+  //   - github / parking-lot / git-analyzer → `gh` + `git` CLI
+  //   - backlog → `gh`, which reaches the network: allowlisted on the consent
+  //     clause, see the comment on its entry below (SPEC-085)
   //   - epic-backfill → `claude -p` for AI epic proposal (DR-016, opt-in,
   //     degrades to a pure heuristic when `claude` is absent)
-  const CHILD_PROCESS_ALLOWLIST = new Set([
+  //
+  // #2456: this set used to be named CHILD_PROCESS_ALLOWLIST and the test below it
+  // scanned ONLY for a `child_process` import. `commands/init.ts` spawns `git`
+  // through the `simple-git` library (a dynamic `import('simple-git')`) and was
+  // invisible to that scan — present in neither the import pattern nor this
+  // allowlist, so adding it would have changed nothing either way. The gate
+  // validated every value it saw and never asserted it was seeing all of them,
+  // which is the asymmetric-validator shape the constitution warns about: a
+  // `simple-git`-based `git.push()`/`.fetch()`/`.pull()` anywhere would have added
+  // a network path with this test staying green throughout. The scan below now
+  // treats a `simple-git` import (static or dynamic) exactly like a `child_process`
+  // import, and the AST-based NETWORK_CONSENT_ALLOWLIST check further down bans
+  // that library's own network methods outside the files explicitly allowlisted on
+  // the consent clause.
+  const SPAWN_ALLOWLIST = new Set([
     // #1439 build provenance: `git rev-parse` / `merge-base --is-ancestor` /
     // `rev-list --count` against the OPEN WORKSPACE, to tell whether the running
     // extension build predates the checkout being edited. Local git plumbing, read-only,
@@ -122,6 +141,18 @@ describe('Invariant 2: No backend — no network calls', () => {
     'lib/build-provenance.ts',
     'lib/github.ts',
     'lib/parking-lot.ts',
+    // SPEC-085: the Backlog's issue calls. UNLIKE the local-git entries, this one
+    // DOES reach the network - `gh issue list`, and `gh issue view/edit/comment`
+    // from Score WSJF and Quick Triage - so it is allowlisted on the CONSENT clause
+    // of constitution invariant #1 ("no network calls without explicit user
+    // consent"), not on a "local tool only" claim. It is reachable only from a
+    // gesture: the Refresh Backlog command (which the Backlog pane's own not-loaded
+    // row also runs) and the two commands the user invokes. Drawing the pane,
+    // window focus, a folder change and the epic commands start no process at
+    // all - pinned at the child-process boundary in backlog-consent.test.ts, not
+    // merely asserted. See views/backlog-view.ts BacklogTreeProvider.refresh.
+    // It is not on NETWORK_CONSENT_ALLOWLIST below: that list is for network
+    // calls made through a simple-git client, and this module shells `gh` itself.
     'lib/backlog.ts',
     'lib/git-analyzer.ts',
     'lib/epic-backfill.ts',
@@ -213,6 +244,37 @@ describe('Invariant 2: No backend — no network calls', () => {
     // module's own MUTATION SAFETY / TIER-0 doc comment. See
     // lib/tidy-primary.ts gitOut/gitOutRaw.
     'lib/tidy-primary.ts',
+    // #2456: scaffold's recoverable-commit offer loads `simple-git` via a lazy
+    // dynamic import (`defaultCommitter`) and runs `git rev-parse
+    // --is-inside-work-tree`, `checkIgnore`, `add`, `commit`, `raw(['rev-parse',
+    // '--verify', ...])` and `checkout -b` through it — all local, read-or-write
+    // against the OPEN WORKSPACE, never fetched/pushed/pulled/cloned. Same Tier-0
+    // posture as lib/git-analyzer.ts above, which wraps the same library. This is
+    // the file the #2456 gap named directly: it was never in this allowlist, and
+    // the OLD `child_process`-only scan could not see it either way. It is
+    // deliberately ABSENT from NETWORK_CONSENT_ALLOWLIST below — if a future change
+    // makes it call `git.push()`/`.fetch()`/`.pull()`, that AST check fails until
+    // this file is added there too, with the same consent-clause justification
+    // approve-push.ts/approval-recover.ts/push-docs-lane.ts carry. See
+    // commands/init.ts defaultCommitter.
+    'commands/init.ts',
+  ]);
+
+  // Of SPAWN_ALLOWLIST, the subset additionally permitted to reach the NETWORK
+  // through a `simple-git` client — i.e. allowlisted on constitution invariant #1's
+  // CONSENT clause, not on a "local git only" claim (#2456). None of these three
+  // uses `simple-git` today (they shell `git`/`gh` directly via `child_process`),
+  // so this set is currently vacuous against the AST check below — it exists so
+  // that a FUTURE module reaching the network through `simple-git` has exactly one
+  // place to declare that, instead of the ban silently applying by default. Adding
+  // a file here is a claim that its network call sits behind the same consent gate
+  // (`minspec.pushOnApprove` at `always`, or an explicit user click) that already
+  // justifies its `child_process` entry above — never add a file here to make a
+  // failing test pass without that justification being true.
+  const NETWORK_CONSENT_ALLOWLIST = new Set([
+    'lib/approve-push.ts',
+    'lib/approval-recover.ts',
+    'commands/push-docs-lane.ts',
   ]);
 
   // Files allowed to *name* HTTP clients as detection data (not call them). They
@@ -270,7 +332,23 @@ describe('Invariant 2: No backend — no network calls', () => {
     expect(violations).toEqual([]);
   });
 
-  it('only allowlisted files use child_process (for gh CLI)', () => {
+  // A file that spawns `git` through the `simple-git` LIBRARY is just as much a
+  // spawn point as one that calls `child_process` directly — `simple-git` is a
+  // thin wrapper that shells the `git` binary underneath. Matched the same way
+  // `child_process` is: a static `import`/`require`, OR a dynamic `import(...)`
+  // (the shape `commands/init.ts` actually uses, #2456).
+  function importsChildProcessOrSimpleGit(content: string): boolean {
+    const CHILD_PROCESS_IMPORT =
+      /import\s.*from\s+['"]child_process['"]/.test(content) ||
+      /require\s*\(\s*['"]child_process['"]\s*\)/.test(content);
+    const SIMPLE_GIT_IMPORT =
+      /import\s.*from\s+['"]simple-git['"]/.test(content) ||
+      /require\s*\(\s*['"]simple-git['"]\s*\)/.test(content) ||
+      /import\s*\(\s*['"]simple-git['"]\s*\)/.test(content);
+    return CHILD_PROCESS_IMPORT || SIMPLE_GIT_IMPORT;
+  }
+
+  it('only allowlisted files spawn processes — child_process or simple-git (for gh/git CLI, #2456)', () => {
     const files = getAllTsFiles(srcRoot);
     const violations: string[] = [];
 
@@ -278,15 +356,213 @@ describe('Invariant 2: No backend — no network calls', () => {
       const relPath = path.relative(srcRoot, filePath);
       const content = fs.readFileSync(filePath, 'utf-8');
 
-      if (/import\s.*from\s+['"]child_process['"]/.test(content) ||
-          /require\s*\(\s*['"]child_process['"]\s*\)/.test(content)) {
-        if (!CHILD_PROCESS_ALLOWLIST.has(relPath)) {
-          violations.push(relPath);
-        }
+      if (importsChildProcessOrSimpleGit(content) && !SPAWN_ALLOWLIST.has(relPath)) {
+        violations.push(relPath);
       }
     }
 
     expect(violations).toEqual([]);
+  });
+
+  // ─── #2456: simple-git's own network methods, banned outside the consent clause ──
+  //
+  // The test above closes the INVENTORY gap (a simple-git user must be declared).
+  // It does not — and by design cannot, since "inventory" is a text scan — stop an
+  // ALREADY-declared, local-only module from calling `git.push()`/`.fetch()`/
+  // `.pull()`/`.clone()`/`.mirror()`/`.listRemote()` through the client it already
+  // holds. A text match for `.push(` would false-positive on every `Array.push`
+  // call in the tree, so this is an AST walk: it tracks which local variables are
+  // actually bound to a `simpleGit(...)` client (including the
+  // `injected ?? simpleGit(...)` fallback pattern `git-analyzer.ts` uses, and the
+  // `const { simpleGit } = await import('simple-git')` shape `commands/init.ts`
+  // uses) and flags a network-named method call ONLY when its receiver resolves to
+  // one of those — never a bare identifier match on the method name.
+  describe('simple-git network methods are gated on allowlisted consent, not a text match', () => {
+    const NETWORK_METHOD_NAMES = new Set(['push', 'pull', 'fetch', 'clone', 'mirror', 'listRemote']);
+
+    /** Local names bound to the `simpleGit` factory, from either import shape. */
+    function simpleGitFactoryNames(sourceFile: ts.SourceFile): Set<string> {
+      const names = new Set<string>();
+
+      const visit = (node: ts.Node): void => {
+        // `import { simpleGit } from 'simple-git'` (or a default-imported alias).
+        if (
+          ts.isImportDeclaration(node) &&
+          ts.isStringLiteral(node.moduleSpecifier) &&
+          node.moduleSpecifier.text === 'simple-git' &&
+          node.importClause
+        ) {
+          if (node.importClause.name) names.add(node.importClause.name.text);
+          const bindings = node.importClause.namedBindings;
+          if (bindings && ts.isNamedImports(bindings)) {
+            for (const element of bindings.elements) {
+              const imported = (element.propertyName ?? element.name).text;
+              if (imported === 'simpleGit') names.add(element.name.text);
+            }
+          }
+        }
+
+        // `const { simpleGit } = await import('simple-git')`.
+        if (ts.isVariableDeclaration(node) && node.initializer) {
+          let init = node.initializer;
+          if (ts.isAwaitExpression(init)) init = init.expression;
+          if (
+            ts.isCallExpression(init) &&
+            init.expression.kind === ts.SyntaxKind.ImportKeyword &&
+            init.arguments.length > 0 &&
+            ts.isStringLiteral(init.arguments[0]) &&
+            init.arguments[0].text === 'simple-git' &&
+            ts.isObjectBindingPattern(node.name)
+          ) {
+            for (const element of node.name.elements) {
+              if (ts.isBindingElement(element) && ts.isIdentifier(element.name)) {
+                const imported =
+                  element.propertyName && ts.isIdentifier(element.propertyName)
+                    ? element.propertyName.text
+                    : element.name.text;
+                if (imported === 'simpleGit') names.add(element.name.text);
+              }
+            }
+          }
+        }
+
+        ts.forEachChild(node, visit);
+      };
+      visit(sourceFile);
+      return names;
+    }
+
+    /**
+     * Does `expr` resolve, after unwrapping `await`/parens/`as`/non-null and the
+     * `a ?? b` / `a || b` fallback forms, to a direct call of one of `factoryNames`?
+     * Catches `injectedGit ?? simpleGit(repoPath)` (git-analyzer.ts's exact shape)
+     * without needing a full type checker: either operand resolving is enough,
+     * because both sides of that fallback are the same client type by construction.
+     */
+    function unwrapsToFactoryCall(expr: ts.Expression, factoryNames: ReadonlySet<string>): boolean {
+      let e: ts.Expression = expr;
+      while (
+        ts.isParenthesizedExpression(e) ||
+        ts.isAsExpression(e) ||
+        ts.isNonNullExpression(e) ||
+        ts.isAwaitExpression(e)
+      ) {
+        e = e.expression;
+      }
+      if (ts.isCallExpression(e) && ts.isIdentifier(e.expression) && factoryNames.has(e.expression.text)) {
+        return true;
+      }
+      if (
+        ts.isBinaryExpression(e) &&
+        (e.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken ||
+          e.operatorToken.kind === ts.SyntaxKind.BarBarToken)
+      ) {
+        return (
+          unwrapsToFactoryCall(e.left, factoryNames) || unwrapsToFactoryCall(e.right, factoryNames)
+        );
+      }
+      return false;
+    }
+
+    /** Local variables bound (directly or via `??`/`||`) to a simple-git client. */
+    function findClientVariables(sourceFile: ts.SourceFile, factoryNames: ReadonlySet<string>): Set<string> {
+      const clientVars = new Set<string>();
+      const visit = (node: ts.Node): void => {
+        if (ts.isVariableDeclaration(node) && node.initializer && ts.isIdentifier(node.name)) {
+          if (unwrapsToFactoryCall(node.initializer, factoryNames)) {
+            clientVars.add(node.name.text);
+          }
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(sourceFile);
+      return clientVars;
+    }
+
+    /** Every network-method call whose receiver resolves to a simple-git client. */
+    function findNetworkCalls(
+      sourceFile: ts.SourceFile,
+      factoryNames: ReadonlySet<string>,
+      clientVars: ReadonlySet<string>,
+    ): { methodName: string; line: number }[] {
+      const hits: { methodName: string; line: number }[] = [];
+      const visit = (node: ts.Node): void => {
+        if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
+          const propertyAccess = node.expression;
+          const methodName = propertyAccess.name.text;
+          if (NETWORK_METHOD_NAMES.has(methodName)) {
+            const receiver = propertyAccess.expression;
+            const receiverIsClient =
+              (ts.isIdentifier(receiver) && clientVars.has(receiver.text)) ||
+              unwrapsToFactoryCall(receiver, factoryNames);
+            if (receiverIsClient) {
+              const { line } = ts.getLineAndCharacterOfPosition(sourceFile, node.getStart(sourceFile));
+              hits.push({ methodName, line: line + 1 });
+            }
+          }
+        }
+        ts.forEachChild(node, visit);
+      };
+      visit(sourceFile);
+      return hits;
+    }
+
+    it('no simple-git client outside NETWORK_CONSENT_ALLOWLIST calls a network method', () => {
+      const files = getAllTsFiles(srcRoot);
+      const violations: { file: string; method: string; line: number }[] = [];
+
+      for (const filePath of files) {
+        const relPath = path.relative(srcRoot, filePath);
+        if (NETWORK_CONSENT_ALLOWLIST.has(relPath)) continue;
+
+        const content = fs.readFileSync(filePath, 'utf-8');
+        if (!/simple-git/.test(content)) continue; // cheap pre-filter before parsing
+
+        const sourceFile = ts.createSourceFile(
+          filePath,
+          content,
+          ts.ScriptTarget.Latest,
+          /* setParentNodes */ false,
+          ts.ScriptKind.TS,
+        );
+        const factoryNames = simpleGitFactoryNames(sourceFile);
+        if (factoryNames.size === 0) continue; // mentions 'simple-git' only in prose/comments
+
+        const clientVars = findClientVariables(sourceFile, factoryNames);
+        for (const hit of findNetworkCalls(sourceFile, factoryNames, clientVars)) {
+          violations.push({ file: `${relPath}:${hit.line}`, method: hit.methodName, line: hit.line });
+        }
+      }
+
+      expect(violations).toEqual([]);
+    });
+
+    it('sanity: the scanner tells Array.prototype.push apart from a simple-git client (never a text match)', () => {
+      const fixture = `
+        const arr: number[] = [];
+        arr.push(1); // must NOT be flagged — this is not a simple-git client
+
+        async function demo() {
+          const { simpleGit } = await import('simple-git');
+          const git = simpleGit('/tmp');
+          await git.status(); // local — must NOT be flagged
+          await git.push(); // network — MUST be flagged
+          await simpleGit('/tmp').fetch(); // network via a chained call — MUST be flagged
+        }
+      `;
+      const sourceFile = ts.createSourceFile(
+        'fixture.ts',
+        fixture,
+        ts.ScriptTarget.Latest,
+        false,
+        ts.ScriptKind.TS,
+      );
+      const factoryNames = simpleGitFactoryNames(sourceFile);
+      const clientVars = findClientVariables(sourceFile, factoryNames);
+      const hits = findNetworkCalls(sourceFile, factoryNames, clientVars);
+
+      expect(hits.map((h) => h.methodName).sort()).toEqual(['fetch', 'push']);
+    });
   });
 });
 

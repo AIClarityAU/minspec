@@ -61,19 +61,6 @@ export function commitOnApproveEnabled(): boolean {
   return vscode.workspace.getConfiguration('minspec').get<boolean>('commitOnApprove', true);
 }
 
-/**
- * Commit the approval paths when the setting is on, returning a toast suffix.
- *
- *   ''                                        — setting off, not a repo, or no net change
- *   ' · committed'                            — the doc (+ record) were committed
- *   ' · not committed (detached HEAD)'        — refused so the approval isn't lost on next checkout
- *   ' · not committed (merge/cherry-pick …)'  — git refuses a partial commit mid-operation (#1112)
- *   ' · commit failed — approval saved …'     — git/hook rejected; approval on disk, uncommitted, unstaged
- *
- * Never rejects (delegates to `commitApproval`, which never rejects). A failed or
- * refused commit is surfaced (never-wrong: the user must know the approval is
- * uncommitted), with the full git/hook stderr logged for diagnosis.
- */
 /** Offer labels — worded to match #1054's harness-commit offer, so the two
  *  destination guards read as one behaviour rather than two dialects. */
 const SHOW_FILES_ACTION = 'Show me the files';
@@ -188,6 +175,19 @@ async function recoverOnProtectedBranch(
   return { suffix };
 }
 
+/**
+ * Commit the approval paths when the setting is on, returning a toast suffix.
+ *
+ *   ''                                        — setting off, not a repo, or no net change
+ *   ' · committed'                            — the doc (+ record) were committed
+ *   ' · not committed (detached HEAD)'        — refused so the approval isn't lost on next checkout
+ *   ' · not committed (merge/cherry-pick …)'  — git refuses a partial commit mid-operation (#1112)
+ *   ' · commit failed — approval saved …'     — git/hook rejected; approval on disk, uncommitted, unstaged
+ *
+ * Never rejects (delegates to `commitApproval`, which never rejects). A failed or
+ * refused commit is surfaced (never-wrong: the user must know the approval is
+ * uncommitted), with the full git/hook stderr logged for diagnosis.
+ */
 export async function commitApprovalIfEnabled(
   rootDir: string,
   absPaths: readonly string[],

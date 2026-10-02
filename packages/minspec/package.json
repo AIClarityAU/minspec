@@ -210,7 +210,7 @@
       },
       {
         "command": "minspec.refreshBacklog",
-        "title": "MinSpec: Refresh Backlog",
+        "title": "MinSpec: Refresh Backlog (contacts GitHub through your gh CLI)",
         "icon": "$(refresh)"
       },
       {
@@ -640,7 +640,7 @@
     "prepackage": "npm run supply-chain:check",
     "package": "npm run build && vsce package --no-dependencies",
     "prepublish": "npm run supply-chain:check",
-    "test": "vitest run",
+    "test": "cd ../.. && vitest run packages/minspec/tests",
     "bench": "vitest bench",
     "pretest:e2e": "npm run build && tsc -p tsconfig.test.json",
     "test:e2e": "node scripts/retry-e2e.mjs"
