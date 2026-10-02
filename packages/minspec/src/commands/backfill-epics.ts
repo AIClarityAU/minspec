@@ -56,12 +56,27 @@ function alwaysUseAi(rootDir: string): boolean {
  * Tier-0 posture (invariant 1) and never consented to `claude -p` running there.
  * DR-078 §1 names `.minspec/preferences.json` as the correct store. Fixed in
  * #1319.
+ *
+ * `savePreferences` refuses (rather than creates) in a folder with no
+ * `.minspec/` (#2355), and this command runs well before anything else in it
+ * would create that marker — unlike Approve Spec, Backfill Epics is reachable
+ * in a folder that has never opted in. Before #2506 the refusal reached only
+ * `console.warn`, which a user never sees: the toast had already told them
+ * "Always" was accepted, so the click was silently a no-op and the AI prompt
+ * returned on the very next run. Surface it on the notification API too, same
+ * as the sibling fix for the phase-advance queue write (#1512) — the click
+ * still does its one-time job (the caller sets `useAi = true` regardless), only
+ * the "from now on" part failed.
  */
 function enableAlwaysUseAi(rootDir: string): void {
   try {
     savePreferences(rootDir, { autoBackfillUseAi: true });
   } catch (err) {
-    console.warn(`MinSpec: failed to persist autoBackfillUseAi pref — ${err instanceof Error ? err.message : String(err)}`);
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`MinSpec: failed to persist autoBackfillUseAi pref — ${message}`);
+    void vscode.window.showWarningMessage(
+      `MinSpec: "Always" was not remembered — ${message} Using AI for this run only.`,
+    );
   }
 }
 
