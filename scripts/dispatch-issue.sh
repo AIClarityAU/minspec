@@ -22,6 +22,24 @@ REPO="AIClarityAU/minspec"
 WORKTREE_BASE="/tmp/minspec-agent"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROLES_DIR="${SCRIPT_DIR}/roles"
+
+# Pin every bare `git` op to the repo THIS SCRIPT lives in, never the caller's
+# inherited cwd (#1896). `gh` calls below all target $REPO explicitly; the git
+# calls (fetch/worktree) had no equivalent pin and inherited whatever `origin`
+# the process cwd happened to have — silently correct when launched from this
+# repo (the common case), but a write into a DIFFERENT repo's checkout when
+# launched from elsewhere (e.g. drain-inbox.sh started outside this repo, or a
+# shared-machine cron cwd). REPO_ROOT is derived from SCRIPT_DIR, which is
+# already resolved above from BASH_SOURCE, not cwd. Guarded by a `.minspec/`
+# check rather than trusted blindly: SCRIPT_DIR is one directory below repo
+# root today, but that stops being true the moment these scripts are vendored
+# or installed somewhere shared, and a silent wrong-root would reproduce the
+# exact bug this is fixing.
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+if [[ ! -d "${REPO_ROOT}/.minspec" ]]; then
+  echo "ERROR: resolved REPO_ROOT ($REPO_ROOT, from SCRIPT_DIR=$SCRIPT_DIR) has no .minspec/ — refusing to run git ops against an unexpected repo. This script must live one directory below the repo it dispatches for." >&2
+  exit 1
+fi
 # shellcheck source=scripts/lib/agent-context.sh
 source "${SCRIPT_DIR}/lib/agent-context.sh"
 # Agent writes carry the BOT's identity, never the human's (#1355). This arms a
@@ -397,13 +415,13 @@ done
 #                                  drain-inbox.sh → dispatch-issue.sh chain
 #                                  fetches/checks once, not once per issue.
 if [[ "${MINSPEC_FRESHNESS_CHECKED:-}" != "1" ]]; then
-  git fetch origin main -q 2>/dev/null || true
+  git -C "$REPO_ROOT" fetch origin main -q 2>/dev/null || true
   # Known blind spot: if the fetch fails (network/auth) or origin/main isn't
   # a resolvable ref, rev-list falls through to `echo 0`, so BEHIND reads as
   # "0 commits behind" and the guard fails OPEN (proceeds as if fresh) rather
   # than blocking on an unrelated infra problem. Accepted tradeoff — see the
   # `|| true` / `|| echo 0` robustness design above.
-  BEHIND=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0)
+  BEHIND=$(git -C "$REPO_ROOT" rev-list --count HEAD..origin/main 2>/dev/null || echo 0)
   if [[ "${BEHIND:-0}" -gt 0 ]]; then
     if [[ "${MINSPEC_ALLOW_STALE:-}" == "1" ]]; then
       echo "WARNING: checkout is $BEHIND commit(s) behind origin/main — proceeding anyway (MINSPEC_ALLOW_STALE=1)." >&2
@@ -679,8 +697,8 @@ WORKTREE="$(lease_worktree_path "$ISSUE")"
 
 if [[ -d "$WORKTREE" ]]; then
   echo "Cleaning up existing worktree at $WORKTREE"
-  git worktree remove "$WORKTREE" --force 2>/dev/null || true
-  git branch -D "$BRANCH" 2>/dev/null || true
+  git -C "$REPO_ROOT" worktree remove "$WORKTREE" --force 2>/dev/null || true
+  git -C "$REPO_ROOT" branch -D "$BRANCH" 2>/dev/null || true
 fi
 
 # Branch off ORIGIN/main, not local `main`. The shared checkout's local `main`
@@ -691,7 +709,7 @@ fi
 # merge). Fetch the remote ref and branch from there so every agent starts from
 # the true tip. Fetch is a parent-side credentialed op; the agent still gets no
 # network tools.
-git fetch origin main -q
+git -C "$REPO_ROOT" fetch origin main -q
 
 # Spec-gate (HITL) reliance — DR-031 D3:
 # We deliberately do NOT set MINSPEC_GATE_OFF and do NOT seed approvals into the
@@ -700,7 +718,7 @@ git fetch origin main -q
 # genuinely human-approved spec passes the gate inside the worktree, while an
 # unapproved/stale spec correctly BLOCKS the dispatched edit (surfaced, never
 # bypassed). The bypass kill-switch is human-only; the pipeline must never use it.
-git worktree add -b "$BRANCH" "$WORKTREE" origin/main
+git -C "$REPO_ROOT" worktree add -b "$BRANCH" "$WORKTREE" origin/main
 
 echo "Launching $ROLE agent for: $ISSUE_TITLE"
 

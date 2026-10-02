@@ -37,10 +37,23 @@ function findRepoRoot(): string {
 }
 const DRAIN = path.join(findRepoRoot(), 'scripts', 'drain-inbox.sh');
 
+/**
+ * The width a test runs at is whatever that test passes, never whatever the
+ * machine running the suite happens to export. The suite is routinely run INSIDE
+ * a live drain (the dispatcher re-runs it as the merge gate), and that drain
+ * exports its own MINSPEC_DRAIN_CONCURRENCY — so inheriting it made "defaults to
+ * 1" assert the operator's setting instead of the script's default (#2369).
+ */
+function baseEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.MINSPEC_DRAIN_CONCURRENCY;
+  return env;
+}
+
 function sh(args: string[], env: NodeJS.ProcessEnv = {}): string {
   return execFileSync('bash', [DRAIN, ...args], {
     encoding: 'utf-8',
-    env: { ...process.env, ...env },
+    env: { ...baseEnv(), ...env },
     stdio: ['ignore', 'pipe', 'ignore'],
   }).trim();
 }
