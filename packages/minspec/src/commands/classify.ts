@@ -138,12 +138,15 @@ export async function classifyCommand(
   // Dismissible like any MinSpec toast.
   //
   // #2355: both buttons that PERSIST something are offered only in a folder that
-  // has opted in. Classifying is allowed in any folder, and in one with no
-  // `.minspec/` each of them would create the opt-in marker as a side effect of
-  // answering a toast: the bump-up through `.minspec/calibration.json`, the
-  // standing choice through `.minspec/preferences.json` (plus a workspace setting
-  // that changes that repo's behaviour). The one-off verdict and its details are
-  // still shown there; anything that lasts belongs to an initialized project.
+  // has opted in. Classifying is allowed in any folder, but what these two keep
+  // lives under `.minspec/`, the opt-in marker: the bump-up in
+  // `.minspec/calibration.json`, the standing choice in `.minspec/preferences.json`
+  // (plus a workspace setting that changes that repo's behaviour). When this was
+  // written each of them created the marker as a side effect of answering a toast;
+  // since SPEC-096 the stores refuse instead, so offering the buttons in a folder
+  // with no `.minspec/` would only offer a refusal. The one-off verdict and its
+  // details are still shown there; anything that lasts belongs to an initialized
+  // project.
   const optedIn = hasOptInMarker(workspaceRoot);
   const showBumpUp = optedIn && predictedTier === 'T1';
   const bumpUpLabel = 'Harder than it looks — raise tier';
