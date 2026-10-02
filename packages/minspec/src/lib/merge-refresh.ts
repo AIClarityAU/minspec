@@ -245,6 +245,65 @@ export function parseSections(content: string): Section[] {
 }
 
 /**
+ * Headings from `templateHeadings` that occur MORE THAN ONCE in
+ * `existingContent` (#2467).
+ *
+ * This is the backstop for damage already on disk — SPEC-095 stops new CRLF
+ * damage from `mergeFile`/`refreshHarnessFiles`, but a file a past, buggy run
+ * already doubled stays doubled: the merge keeps a surplus duplicate-named
+ * section as user content BY DESIGN (#153, "no user content is ever dropped"),
+ * so a later Refresh never reconciles it. Measured (#2467): a CRLF copy of
+ * CLAUDE.md went 418→835 lines (12→24 headings); `.minspec/constitution.md`
+ * went 4→8.
+ *
+ * Deliberately scoped to headings the TEMPLATE itself carries, not any
+ * duplicate heading in the file — `parseSections` already tolerates (and
+ * `mergeFile` preserves) a user file with its OWN duplicate-named section in
+ * document order; that is ordinary user content, not damage, and flagging it
+ * would be a false positive on a legitimate file. Only a heading the template
+ * owns appearing twice is the shape nothing downstream repairs.
+ *
+ * Deliberately does NOT reuse {@link parseSections} — it cannot see the
+ * shape this function exists to catch. `parseSections` splits on `\n` only,
+ * and in JS a bare `.` excludes `\r` as a line terminator, so a heading line
+ * that is still CRLF (`## Overview\r`) fails `^## (.+)$` entirely and is
+ * swallowed into the surrounding body text rather than recognized as a
+ * heading at all. That is exactly what happens upstream when `mergeFile`
+ * meets a CRLF `existing` file: every one of its headings reads as unparsed
+ * body, so the whole file collapses to one `__preamble__` section, every
+ * template section gets freshly appended (nothing matched to consume it),
+ * and the old headings survive only as plain text inside that preserved
+ * preamble blob — present in the raw bytes, invisible to section-level
+ * parsing. So this function instead counts raw heading-LINE occurrences
+ * directly over the text, splitting on any line ending (LF/CRLF/CR) so a
+ * still-CRLF heading line counts the same as a plain-LF one.
+ *
+ * Pure — no fs. `templateHeadings` is the heading list the LIVE template
+ * renders for this file (via {@link parseSections} over `renderTemplate`'s
+ * output, filtered to exclude {@link PREAMBLE_HEADING} — the template's own
+ * headings are always clean LF, so no CRLF handling is needed on that side).
+ */
+export function detectDoubledTemplateHeadings(
+  existingContent: string,
+  templateHeadings: readonly string[],
+): string[] {
+  const templateSet = new Set(templateHeadings);
+  const counts = new Map<string, number>();
+  for (const line of existingContent.split(/\r\n|\r|\n/)) {
+    const m = line.match(/^## (.+)$/);
+    if (!m) continue;
+    const heading = m[1];
+    if (!templateSet.has(heading)) continue;
+    counts.set(heading, (counts.get(heading) ?? 0) + 1);
+  }
+  const doubled: string[] = [];
+  for (const [heading, count] of counts) {
+    if (count > 1) doubled.push(heading);
+  }
+  return doubled;
+}
+
+/**
  * SHA-256 hash of section content (trimmed to ignore trailing whitespace).
  * Deterministic — same content always produces the same hash.
  */
