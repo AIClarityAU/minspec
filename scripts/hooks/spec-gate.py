@@ -515,7 +515,13 @@ def main():
     by_id = {}         # sid -> list of per-doc candidate dicts
     for sp in glob.glob(os.path.join(cwd, "specs", "**", "*.md"), recursive=True):
         try:
-            with open(sp, "r", encoding="utf-8") as fh:
+            # utf-8-sig (not utf-8): a leading UTF-8 byte order mark must not
+            # survive into `head`, or the `^---` anchor below never matches and
+            # the spec is silently dropped from gating consideration whatever
+            # its approval state (#2477, constitution invariant 2 - no silent
+            # gate). utf-8-sig strips at most one leading mark and is otherwise
+            # identical to utf-8.
+            with open(sp, "r", encoding="utf-8-sig") as fh:
                 head = fh.read(8000)
         except Exception:
             continue

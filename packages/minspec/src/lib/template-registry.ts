@@ -1805,7 +1805,14 @@ def staged_content(root, rel):
             ["git", "show", ":" + rel],
             cwd=root, capture_output=True, text=True, check=True,
         )
-        return out.stdout
+        text = out.stdout
+        # \`text=True\` decodes with the locale codec, which (unlike utf-8-sig)
+        # never strips a leading UTF-8 byte order mark: it survives as one
+        # U+FEFF character. Strip it here so the \`^---\` frontmatter match
+        # below sees the same string a BOM-less file would produce (#2477).
+        if text.startswith("\\ufeff"):
+            text = text[1:]
+        return text
     except Exception:
         return None
 
@@ -2036,7 +2043,11 @@ def main():
         )
         def reader(rel):
             try:
-                with open(os.path.join(root, rel), "r", encoding="utf-8") as fh:
+                # utf-8-sig, not utf-8: a leading UTF-8 byte order mark must not
+                # reach parse_frontmatter, or its \`^---\` anchor never matches and
+                # a marked spec is rejected with "missing or invalid \`id:
+                # SPEC-NNN\` frontmatter" even though it has one (#2477).
+                with open(os.path.join(root, rel), "r", encoding="utf-8-sig") as fh:
                     return fh.read()
             except Exception:
                 return None

@@ -429,6 +429,29 @@ class ScopedGateTests(unittest.TestCase):
             self.fx.decision("specs/minspec/SPEC-906-early/requirements.md"), "allow"
         )
 
+    def test_bom_marked_spec_is_not_silently_skipped(self):
+        """#2477: a spec whose file starts with a UTF-8 byte order mark must still
+        be a gating candidate. Before the fix the head was read under the plain
+        "utf-8" codec, which leaves U+FEFF in the string; the `^---` frontmatter
+        anchor then never matched, `if not fmatch: continue` dropped the spec from
+        `by_id` entirely, and its declared `implements:` file was never frozen -
+        a gate that stops evaluating without saying so (constitution invariant 2,
+        no silent gate), indistinguishable from "this spec is not gated"."""
+        content = self.fx.write_spec(
+            "specs/minspec/SPEC-907-marked/requirements.md",
+            "SPEC-907", IMPLEMENTING_PHASES,
+            extra_fm="implements: [packages/bom/src/thing.ts]\n",
+        )
+        # Rewrite with a leading mark; still unapproved (no sidecar written).
+        self.fx.write(
+            "specs/minspec/SPEC-907-marked/requirements.md", "﻿" + content
+        )
+        self.fx.write("packages/bom/src/thing.ts", "export const t = 1;\n")
+        self.assertEqual(
+            self.fx.decision("packages/bom/src/thing.ts"), "deny",
+            "a BOM-marked unapproved spec must still gate its declared impl file",
+        )
+
     # --- flat/umbrella edge: must not freeze the whole specs/ tree ----------
 
     def test_flat_umbrella_spec_blocks_only_declared_impl_not_the_tree(self):
