@@ -49,6 +49,12 @@ import * as os from 'os';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import { execFileSync as realExecFileSync } from 'child_process';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #1285: every case builds a real folder and most run real local `git`, both in the
+// fixture and from inside the commands. Under load the 5s default measures the
+// runner, not a hang. At module scope, where the raise takes effect (#1399).
+useShellTimeout();
 
 // ─── The child-process boundary ─────────────────────────────────────────────
 

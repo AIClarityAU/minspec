@@ -44,6 +44,14 @@ import * as os from 'os';
 import * as path from 'path';
 import * as ts from 'typescript';
 
+/**
+ * For the one test here that parses every source file with the TypeScript compiler.
+ * It takes between one and two seconds on an idle machine, which leaves vitest's 5 s
+ * default measuring how busy the runner is, not whether anything hung. Given to that
+ * test alone, so every other test in this file still fails fast at the default.
+ */
+const WHOLE_TREE_PARSE_TIMEOUT_MS = 30_000;
+
 const race = vi.hoisted(() => ({
   /** Run just before the Nth `mkdirSync` (1-based) reaches the real filesystem. */
   beforeMkdir: null as null | { nth: number; run: () => void },
@@ -237,7 +245,7 @@ describe('SPEC-096 FR-1: one predicate, in a module that imports only fs and pat
     walk(SRC_ROOT);
     expect(scanned).toBeGreaterThan(50); // a scan that read nothing proves nothing
     expect(definitions).toEqual([path.join('lib', 'opt-in.ts')]);
-  });
+  }, WHOLE_TREE_PARSE_TIMEOUT_MS);
 
   it('the module imports only fs and path, and nothing by any other route', () => {
     const text = fs.readFileSync(OPT_IN_MODULE, 'utf-8');

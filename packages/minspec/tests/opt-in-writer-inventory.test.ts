@@ -47,6 +47,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
 import * as ts from 'typescript';
+import { useShellTimeout } from './helpers/shell-timeout';
 
 import { saveSession, type SessionState } from '../src/lib/session';
 import { saveCalibration, recordOverride, loadCalibration } from '../src/lib/classifier';
@@ -61,6 +62,11 @@ import { scaffold, generateHarnessFiles, refreshHarnessFiles } from '../src/lib/
 // so this file loads on the pre-change tree and fails there for the real reason
 // (the writers create the marker), not for a missing module.
 import { NotOptedInError } from '../src/lib/preferences';
+
+// #1285: the approveSpec cases run real `git` child processes, and Part 2 parses the
+// whole source tree once per test. Under load the 5s default measures the runner, not
+// a hang. At module scope, where the raise takes effect (#1399).
+useShellTimeout();
 
 const PACKAGE_ROOT = path.resolve(__dirname, '..');
 const REPO_ROOT = path.resolve(PACKAGE_ROOT, '..', '..');
