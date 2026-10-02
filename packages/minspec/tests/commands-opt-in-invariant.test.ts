@@ -727,6 +727,11 @@ const refusalFor = (folder: string): string =>
   `MinSpec: ${folder} has no .minspec/ directory (it has not opted in), so nothing was written there. ` +
   `Run "${INITIALIZE_TITLE}" first.`;
 
+/** The preference store's refusal: a preference WAS the write, so it may say so (FR-8). */
+const preferenceRefusalFor = (folder: string): string =>
+  `MinSpec: ${folder} has no .minspec/ directory (it has not opted in), so no preference was saved there. ` +
+  `Run "${INITIALIZE_TITLE}" first.`;
+
 // ─── The classification every contributed command must carry ────────────────
 
 type CommandClass =
@@ -1936,9 +1941,7 @@ describe('SPEC-096 FR-8: a folder that opts out while a prompt is open gets the 
       // A preference WAS the write here, so this one refusal may say so (FR-8).
       expect(run.shown.at(-1)).toEqual({
         level: 'error',
-        message:
-          `MinSpec: ${session.dir} has no .minspec/ directory (it has not opted in), so no preference was saved there. ` +
-          `Run "${INITIALIZE_TITLE}" first.`,
+        message: preferenceRefusalFor(session.dir),
         buttons: [],
         argCount: 1,
       });
@@ -2035,6 +2038,12 @@ describe('SPEC-096 FR-8: a folder that opts out while a prompt is open gets the 
     expect(queued).toHaveLength(1);
     expect(queued[0].level).toBe('warning');
     expect(queued[0].message).toContain(refusalFor(session.dir));
+    // "Always" itself was not remembered either, and that is said too. It used to
+    // reach the console only (#2506, fixed on main while this was being built).
+    const notRemembered = run.shown.filter((s) => /"Always" was not remembered/.test(s.message));
+    expect(notRemembered).toHaveLength(1);
+    expect(notRemembered[0].level).toBe('warning');
+    expect(notRemembered[0].message).toContain(preferenceRefusalFor(session.dir));
     expectNoMarker(run);
   });
 });
