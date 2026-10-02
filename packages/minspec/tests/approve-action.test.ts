@@ -792,8 +792,8 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
       vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce('Always' as never);
       // Simulates `savePreferences` refusing in a folder with no `.minspec/`
       // (NotOptedInError, preferences.ts) — the narrow race this guard is for:
-      // `.minspec/` existed moments earlier (the approval's own sidecar write)
-      // and was removed before this call.
+      // `.minspec/` existed when the command started (Approve Spec refuses
+      // otherwise, SPEC-096) and was removed before this call.
       vi.mocked(savePreferences).mockImplementationOnce(() => {
         throw new Error('MinSpec: /tmp/ws has no .minspec/ directory (it has not opted in)');
       });

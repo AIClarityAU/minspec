@@ -149,11 +149,12 @@ function advancePhaseOnApproveEnabled(rootDir: string): boolean {
  * "Never surfaces as a failure" is not "never surfaces" — `console.warn` alone
  * lands in the Debug Console, which nobody watching an Alt+A toast ever opens,
  * so before #2506 a refused write here was indistinguishable from a saved one:
- * the toast had already said "Always" was accepted. In the ordinary flow the
- * approval's own sidecar write (`recordApproval`, above) creates `.minspec/`
- * moments earlier in this same command, so this call usually succeeds even in
- * a folder that started with no marker; the refusal this guards is the
- * narrower race where `.minspec/` is removed between that write and this one.
+ * the toast had already said "Always" was accepted. Approve Spec refuses in a
+ * folder with no `.minspec/` before it asks or writes anything, and nothing in
+ * it creates that directory (SPEC-096), so the folder had opted in when this
+ * command started. The refusal this guards is the race where `.minspec/` is
+ * removed after the approval was recorded, which in practice means while the
+ * follow-up toast is open.
  * Rare does not mean exempt from constitution invariant 2 (no silent gate) —
  * surface it the same non-blocking way `enqueuePhaseAdvanceSafely` already does
  * for the sibling queue write (#1512).

@@ -491,8 +491,8 @@ describe('backfillEpicsCommand()', () => {
   });
 
   // #2506: Backfill Epics is reachable in a folder that has never opted in
-  // (it writes into docs/, which is allowed pre-opt-in) — unlike Approve Spec,
-  // nothing earlier in this command creates `.minspec/` for it. Before this
+  // (it writes into docs/, which is allowed pre-opt-in) and creates no
+  // `.minspec/` there; Approve Spec, by contrast, refuses. Before this
   // fix, a `savePreferences` refusal there reached only `console.warn`, which
   // a user never sees, so the toast's "Always" looked accepted when it silently
   // remembered nothing.
