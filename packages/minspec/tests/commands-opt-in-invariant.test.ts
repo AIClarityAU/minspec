@@ -251,6 +251,8 @@ const host = vi.hoisted(() => ({
   settingWrites: [] as Array<{ key: string; value: unknown }>,
   /** What `activate()` subscribed to file saves (the drift check is one of them). */
   saveListeners: [] as Array<(document: unknown) => unknown>,
+  /** Every event `activate()` subscribed to, by kind, so a test can fire them all. */
+  events: [] as Array<{ kind: string; listener: (arg: unknown) => unknown }>,
 }));
 
 vi.mock('vscode', async () => {
@@ -262,6 +264,11 @@ vi.mock('vscode', async () => {
   const contributed = manifest.contributes.configuration.properties;
 
   const disposable = () => ({ dispose: () => undefined });
+  /** Record a subscription so a test can fire the event later. */
+  const listen = (kind: string) => (listener: (arg: unknown) => unknown) => {
+    host.events.push({ kind, listener });
+    return disposable();
+  };
 
   const uriFile = (p: string) => ({
     scheme: 'file',
@@ -447,9 +454,9 @@ vi.mock('vscode', async () => {
   class Selection extends Range {}
 
   const watcher = () => ({
-    onDidChange: () => disposable(),
-    onDidCreate: () => disposable(),
-    onDidDelete: () => disposable(),
+    onDidChange: listen('file changed'),
+    onDidCreate: listen('file created'),
+    onDidDelete: listen('file deleted'),
     dispose: () => undefined,
   });
 
@@ -494,9 +501,9 @@ vi.mock('vscode', async () => {
       },
       tabGroups: undefined,
       createTreeView: () => ({
-        onDidChangeVisibility: () => disposable(),
-        onDidExpandElement: () => disposable(),
-        onDidCollapseElement: () => disposable(),
+        onDidChangeVisibility: listen('view visibility'),
+        onDidExpandElement: listen('view expanded'),
+        onDidCollapseElement: listen('view collapsed'),
         reveal: async () => undefined,
         dispose: () => undefined,
         visible: false,
@@ -525,8 +532,8 @@ vi.mock('vscode', async () => {
             { isCancellationRequested: false, onCancellationRequested: () => disposable() },
           ),
         ),
-      onDidChangeActiveTextEditor: () => disposable(),
-      onDidChangeWindowState: () => disposable(),
+      onDidChangeActiveTextEditor: listen('active editor'),
+      onDidChangeWindowState: listen('window state'),
     },
     workspace: {
       get workspaceFolders() {
@@ -573,12 +580,12 @@ vi.mock('vscode', async () => {
       },
       onDidSaveTextDocument: (listener: (document: unknown) => unknown) => {
         host.saveListeners.push(listener);
-        return { dispose: () => undefined };
+        return listen('file saved')(listener);
       },
-      onDidChangeTextDocument: () => disposable(),
-      onDidCloseTextDocument: () => disposable(),
-      onDidChangeConfiguration: () => disposable(),
-      onDidChangeWorkspaceFolders: () => disposable(),
+      onDidChangeTextDocument: listen('text changed'),
+      onDidCloseTextDocument: listen('text closed'),
+      onDidChangeConfiguration: listen('configuration'),
+      onDidChangeWorkspaceFolders: listen('workspace folders'),
       registerTextDocumentContentProvider: () => disposable(),
       textDocuments: [],
     },
@@ -998,6 +1005,8 @@ interface Session {
   run(commandId: string, answerer?: Answerer): Promise<Run>;
   /** Fire the editor's "a file was saved" event for a file under `dir`. */
   save(relativePath: string, answerer?: Answerer): Promise<Run>;
+  /** Fire every event `activate()` subscribed to, and let its debounced work run. */
+  fireEveryEvent(): Promise<Run & { fired: string[] }>;
   close(): void;
 }
 
@@ -1043,6 +1052,7 @@ async function open(dir: string, kind: FixtureKind, options: OpenOptions = {}): 
   host.external = [];
   host.settingWrites = [];
   host.saveListeners = [];
+  host.events = [];
   host.registered.clear();
   boundary.started = [];
   boundary.gh = null;
@@ -1111,6 +1121,15 @@ async function open(dir: string, kind: FixtureKind, options: OpenOptions = {}): 
     };
   };
 
+  /** A saved-file document, as the editor passes one to a listener. */
+  const documentAt = (fsPath: string) => ({
+    uri: { scheme: 'file', fsPath, path: fsPath, toString: () => `file://${fsPath}` },
+    fileName: fsPath,
+    languageId: fsPath.endsWith('.md') ? 'markdown' : 'typescript',
+    version: 1,
+    getText: () => (fs.existsSync(fsPath) ? fs.readFileSync(fsPath, 'utf-8') : ''),
+  });
+
   let closed = false;
   const session: Session = {
     dir,
@@ -1122,17 +1141,68 @@ async function open(dir: string, kind: FixtureKind, options: OpenOptions = {}): 
       return observe(answerer, () => handler()); // no argument: the Command Palette passes none
     },
     save(relativePath, answerer) {
-      const fsPath = path.join(dir, relativePath);
-      const document = {
-        uri: { scheme: 'file', fsPath, path: fsPath, toString: () => `file://${fsPath}` },
-        fileName: fsPath,
-        languageId: 'typescript',
-        getText: () => fs.readFileSync(fsPath, 'utf-8'),
-      };
+      const document = documentAt(path.join(dir, relativePath));
       expect(host.saveListeners.length).toBeGreaterThan(0);
       return observe(answerer, () => {
         for (const listener of host.saveListeners) listener(document);
       });
+    },
+    async fireEveryEvent() {
+      const fired: string[] = [];
+      const source = documentAt(path.join(dir, SOURCE_FILE));
+      const uri = (...segments: string[]) => documentAt(path.join(dir, ...segments)).uri;
+      /** What the editor would hand each kind of listener. */
+      const argumentsFor = (kind: string): unknown[] => {
+        switch (kind) {
+          case 'file changed':
+          case 'file created':
+          case 'file deleted':
+            // A decision record, a spec and the git HEAD: one path for each watcher's pattern.
+            return [
+              uri('docs', 'decisions', 'DR-001-use-the-filesystem.md'),
+              uri(SPEC_FILE),
+              uri('.git', 'HEAD'),
+            ];
+          case 'view visibility':
+            return [{ visible: true }];
+          case 'view expanded':
+          case 'view collapsed':
+            return [{ element: { id: 'group:inbox' } }];
+          case 'active editor':
+            return [undefined, { document: source }];
+          case 'window state':
+            return [{ focused: true }];
+          case 'file saved':
+          case 'text closed':
+            return [source];
+          case 'text changed':
+            return [{ document: source }];
+          case 'configuration':
+            return [{ affectsConfiguration: () => true }];
+          case 'workspace folders':
+            return [{ added: [], removed: [] }];
+          default:
+            throw new Error(`no argument is defined for the "${kind}" event`);
+        }
+      };
+      const run = await observe(undefined, async () => {
+        // The handlers debounce their work behind 300 ms timers. Fake the clock so
+        // that work runs here, inside the observation, and not after it.
+        vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
+        try {
+          for (const { kind, listener } of [...host.events]) {
+            for (const argument of argumentsFor(kind)) {
+              await listener(argument);
+              fired.push(kind);
+            }
+          }
+          vi.advanceTimersByTime(2000);
+          await settle();
+        } finally {
+          vi.useRealTimers();
+        }
+      });
+      return { ...run, fired };
     },
     close() {
       if (closed) return;
@@ -1711,6 +1781,62 @@ describe('SPEC-096 FR-10: controls that stop a pass coming from a dead writer', 
       expect(fs.readFileSync(lot, 'utf-8')).toContain('## Example topic');
       expect(run.shown.map((s) => s.message)).toEqual([`MinSpec: Saved to ${lot}`]);
     });
+  });
+});
+
+// ─── Events: what runs with no command at all ───────────────────────────────
+
+describe('SPEC-096: no event activate() subscribes to creates the marker either', () => {
+  // Commands are one way in. The other is everything the extension does on its own:
+  // file watchers, focus and visibility changes, saves, configuration changes. Each
+  // listener `activate()` registered is fired here, with its debounced work run.
+  // (The git-HEAD watcher is registered only when `minspec.autoClassifyOnCommit` is
+  // on, and its one effect is a status-bar line; it is not part of this sweep.)
+
+  it.each(NO_MARKER_FIXTURES)('in a folder with no .minspec/ (%s): nothing is created at all', async (kind) => {
+    const session = await openFresh(kind);
+
+    const run = await session.fireEveryEvent();
+
+    expectNoRejection(run, 'an event listener');
+    // Not vacuous: the listeners were really captured and really called.
+    expect(new Set(run.fired)).toEqual(
+      new Set([
+        'active editor',
+        'configuration',
+        'file changed',
+        'file created',
+        'file deleted',
+        'file saved',
+        'text changed',
+        'text closed',
+        'view visibility',
+        'view expanded',
+        'view collapsed',
+        'window state',
+        'workspace folders',
+      ]),
+    );
+    expect(run.fired.length).toBeGreaterThan(40);
+    expect(run.asked).toEqual([]);
+    expectFolderUnchanged(run);
+    expectNoMarker(run);
+  });
+
+  it('control: in a folder that has opted in, the same events do their work', async () => {
+    const dir = makeFolder('primed');
+    fs.mkdirSync(path.join(dir, '.minspec'));
+    const session = await open(dir, 'primed');
+    const index = path.join(dir, 'docs', 'decisions', 'INDEX.md');
+    expect(fs.existsSync(index)).toBe(false);
+
+    const run = await session.fireEveryEvent();
+
+    expectNoRejection(run, 'an event listener');
+    // The decisions watcher regenerates the register's index behind a 300 ms
+    // debounce, and only in a folder that has opted in. Its appearing here is what
+    // shows the listeners above ran their work and found nothing they may write.
+    expect(fs.existsSync(index)).toBe(true);
   });
 });
 
