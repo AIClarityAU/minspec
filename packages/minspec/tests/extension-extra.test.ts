@@ -446,7 +446,19 @@ describe('auto-classify git watcher', () => {
 
 describe('an installation that ran the ScroogeLLM bridge (SPEC-086 FR-1, FR-2, FR-3, FR-5, DQ-4)', () => {
   const THIRTY_DAYS = 30 * 24 * 60 * 60 * 1000;
-  const RETIRED = /scroogellmNudge|installedAt|conformance/;
+
+  /** The three keys the bridge kept in global state. */
+  const OLD_STATE_KEYS = [
+    'minspec.installedAt',
+    'minspec.scroogellmNudge.lastShownAt',
+    'minspec.scroogellmNudge.dismissed',
+  ];
+
+  /** The two settings it read, named the way `getConfiguration('minspec')` is asked for them. */
+  const OLD_SETTING_KEYS = ['scroogellmNudge.enabled', 'conformance.enabled'];
+
+  /** A settings key with or without the `minspec.` section in front of it. */
+  const isOldSetting = (key: string): boolean => OLD_SETTING_KEYS.includes(key.replace(/^minspec\./, ''));
 
   /** Global state as an earlier build left it: installed a month ago, prompt shown once, never dismissed. */
   function stateAnEarlierBuildLeft() {
@@ -457,7 +469,7 @@ describe('an installation that ran the ScroogeLLM bridge (SPEC-086 FR-1, FR-2, F
     };
     return {
       get: vi.fn((key: string, fallback?: unknown) => (key in stored ? stored[key] : fallback)),
-      update: vi.fn(() => Promise.resolve()),
+      update: vi.fn((_key: string, _value: unknown) => Promise.resolve()),
     };
   }
 
@@ -490,14 +502,19 @@ describe('an installation that ran the ScroogeLLM bridge (SPEC-086 FR-1, FR-2, F
   it('does not ask whether any other extension is installed', async () => {
     await activateWhereThePromptWouldHaveShown();
 
+    // Deliberately broad: activation asks about no extension at all, the product or
+    // any other tool (FR-2). A later feature with a reason to ask about one at
+    // activation changes this case, and says which one.
     expect(vi.mocked(vscode.extensions.getExtension).mock.calls.map((call) => call[0])).toEqual([]);
   });
 
   it('reads and writes none of the state the earlier build stored', async () => {
     const globalState = await activateWhereThePromptWouldHaveShown();
 
-    expect(globalState.get.mock.calls.map((call) => call[0]).filter((key) => RETIRED.test(key))).toEqual([]);
-    expect(globalState.update.mock.calls).toEqual([]);
+    const read = globalState.get.mock.calls.map((call) => call[0]);
+    const written = globalState.update.mock.calls.map((call) => call[0]);
+    expect(read.filter((key) => OLD_STATE_KEYS.includes(key))).toEqual([]);
+    expect(written.filter((key) => OLD_STATE_KEYS.includes(key))).toEqual([]);
   });
 
   it('reads neither retired setting', async () => {
@@ -505,7 +522,7 @@ describe('an installation that ran the ScroogeLLM bridge (SPEC-086 FR-1, FR-2, F
 
     // The recorder saw activation read settings at all, so "none retired" is a finding.
     expect(configKeysRead.length).toBeGreaterThan(0);
-    expect(configKeysRead.filter((key) => RETIRED.test(key))).toEqual([]);
+    expect(configKeysRead.filter(isOldSetting)).toEqual([]);
   });
 
   it('creates no conformance watcher, even with the old setting stored as on and ScroogeLLM installed', () => {
