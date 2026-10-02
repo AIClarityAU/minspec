@@ -27,6 +27,7 @@ import {
   savePreferences,
   resolveProjectPreference,
 } from '../lib/preferences';
+import { hasOptInMarker, notOptedInMessage } from '../lib/opt-in';
 
 /** A tree node carrying a SpecSummary (from the spec tree context menu). */
 interface SpecNodeLike {
@@ -211,6 +212,16 @@ export async function approveSpecCommand(
     : await resolveTargetFolder();
   if (!rootDir) return;
 
+  // SPEC-096 FR-6: an approval is recorded under `.minspec/`, and `.minspec/` is
+  // the opt-in marker. In a folder that has not opted in, refuse as soon as the
+  // folder is known - before the spec picker, and long before the status flip,
+  // the git blob and the record. One message, no button. This covers every way
+  // in: the palette, the Specs pane, and Alt+A (which runs this command).
+  if (!hasOptInMarker(rootDir)) {
+    vscode.window.showErrorMessage(notOptedInMessage(rootDir));
+    return;
+  }
+
   const spec = await pickSpec(rootDir, node, 'Select a spec to approve for implementation', {
     // Already-approved specs have nothing to do here; stale ones (edited since
     // approval) still need re-approval, so keep them.
@@ -321,6 +332,16 @@ export async function approveSpecCommand(
           'or approve from a checkout whose git identity is yours — then re-run Approve.',
       },
     );
+    return;
+  }
+
+  // SPEC-096 FR-6, again: the picker and the dialogs above wait for the user, so
+  // the marker can be gone by now. The check has to PRECEDE the status flip at the
+  // top of the `try` below, or a refusal from the record would arrive after the
+  // spec file had been rewritten - a spec that reads as approved with nothing
+  // behind it.
+  if (!hasOptInMarker(rootDir)) {
+    vscode.window.showErrorMessage(notOptedInMessage(rootDir));
     return;
   }
 
