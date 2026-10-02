@@ -61,7 +61,7 @@ These checks write nothing to GitHub.
 | `minspec.approvalPr` | `gh pr list` and `gh pr create`, and `gh label create` when the repository has no `docs-lane` label | Only after an approval has been pushed to a side branch. `auto` (the default) opens the pull request. `manual` shows a link instead |
 | `minspec.autoBackfillUseAi` | `claude -p`, as described above | `false` (the default) asks each time. `true` uses the AI pass whenever you run Backfill Epics. Choosing Always on that question records the same choice for this project in `.minspec/preferences.json` |
 
-If `gh` is not installed or not signed in, Park Topic saves to `.minspec/parking-lot.md` instead. The other `gh` features say that they could not run. They do not report an empty result.
+If `gh` is not installed or not signed in, Park Topic saves to `.minspec/parking-lot.md` instead in an initialized project; in a folder that has not been initialized it saves nothing in the folder and says so. The other `gh` features say that they could not run. They do not report an empty result.
 
 ## Quick Start
 

@@ -39,6 +39,7 @@ Numbers in parentheses, here and below, are pull requests or issues at github.co
 ### Fixed
 
 - **The presence heartbeat no longer creates `.minspec/` in a folder that never opted in.** It used to create `.minspec/sessions/` in any folder you opened (#2357).
+- **Only Initialize creates `.minspec/`.** Refresh Harness Files no longer sets up a folder that was never initialized; it says so and points you at **MinSpec: Initialize SDD Structure**. Declare Session Scope, Link Code to Spec Requirement, Propose Constitution (draft) and Approve Spec for Implementation used to create `.minspec/` as a side effect in such a folder; they now ask for Initialize first, and write nothing. Park Topic can still create a GitHub issue there, but no longer writes a local parking lot: if the issue cannot be created it says the topic was not saved and hands your text back in an untitled editor (#2364).
 - Refresh Harness Files no longer deletes content you wrote yourself, and no longer renames the project after the folder it happens to run in (#1755, #1536).
 - Approving a spec is refused when the spec cannot satisfy the status the approval would give it, and finished or superseded specs are no longer offered for approval (#1364, #2117).
 - "Always" on the classify prompt is honoured. It used to be written to a store the prompt never read (#2096).
