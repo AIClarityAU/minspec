@@ -824,7 +824,7 @@ Add a copy-to-clipboard button to the code block component.
 
 ## Acceptance Criteria
 
-- [ ] **Copy works** — clicking the button puts the code on the clipboard. (FR-1)
+- [ ] **Copy works** - clicking the button puts the code on the clipboard. (FR-1)
 
 ## Plan
 

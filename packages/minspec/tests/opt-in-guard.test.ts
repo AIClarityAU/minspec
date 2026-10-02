@@ -467,6 +467,33 @@ describe('SPEC-096 FR-2 (c): removing the marker between the look and the create
     expect(err).toBeInstanceOf(NotOptedInError);
   });
 
+  it('losing the race to another creator of the same directory is not an error', () => {
+    // Two windows on one project both make `.minspec/sessions/`. The second create
+    // finds it already there, which is the outcome it wanted.
+    fs.mkdirSync(path.join(root, '.minspec'));
+    const target = path.join(root, '.minspec', 'sessions');
+    race.mkdirCalls = [];
+    race.beforeMkdir = { nth: 1, run: () => fs.mkdirSync(target) };
+
+    expect(() => ensureDirectory(target)).not.toThrow();
+
+    expect(race.fired).toBe(1);
+    expect(fs.statSync(target).isDirectory()).toBe(true);
+  });
+
+  it('losing the race to something that is NOT a directory is an error', () => {
+    fs.mkdirSync(path.join(root, '.minspec'));
+    const target = path.join(root, '.minspec', 'sessions');
+    race.mkdirCalls = [];
+    race.beforeMkdir = { nth: 1, run: () => fs.writeFileSync(target, 'in the way\n') };
+
+    const err = thrownBy(() => ensureDirectory(target));
+
+    expect(race.fired).toBe(1);
+    expect(err).not.toBeInstanceOf(NotOptedInError);
+    expect((err as NodeJS.ErrnoException).code).toBe('EEXIST');
+  });
+
   it('a filesystem error that is not about the marker stays a filesystem error', () => {
     // Remove an ordinary parent instead: the marker is not involved, so the caller
     // gets the real error rather than a refusal that would misdescribe it.
