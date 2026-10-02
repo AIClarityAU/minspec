@@ -22,8 +22,9 @@ phases:
 Plan for [requirements.md](requirements.md), built under the six recorded Clarify selections
 (Option A for DQ-1 to DQ-6). Citations of "today" are against `origin/main` a024a751, the
 commit this plan was written on. The spec took its line numbers on ff968418 and 32 commits
-have landed since; "Reconciliation with main" gives what moved. New code is cited by symbol,
-because its line numbers move.
+have landed since; "Reconciliation with main" gives what moved. One more commit landed
+while this was being built (360818bc); it is merged in, and finding 14 says what it changed.
+New code is cited by symbol, because its line numbers move.
 
 ## Approach in one paragraph
 
@@ -43,7 +44,7 @@ Harness Files stops calling the creator at all.
 
 ## What Plan found that the spec did not know
 
-Thirteen facts, each checked against the code. None changes a requirement.
+Fourteen facts, each checked against the code. None changes a requirement.
 
 1. **Writer row 8 no longer exists.** The build of SPEC-086 (removal of the ScroogeLLM
    upsell), commit 4d971269, pull request #2492, deleted `packages/minspec/src/lib/bridge.ts`,
@@ -159,6 +160,24 @@ Thirteen facts, each checked against the code. None changes a requirement.
     suites that only name document paths under that root: all 242 tests in the fifteen
     pass. The litter itself was left alone: it is shared scratch.
 
+14. **`main` moved while this was built, and what landed rests on a premise this change
+    removes.** Commit 360818bc, pull request #2509, is the fix for #2506, an issue filed
+    from this build (see "Costs and risks carried forward"): three "Always" buttons whose
+    preference write was refused in a folder with no `.minspec/` said nothing about it.
+    Each now shows a warning. It merged with no textual conflict. Four comments it added
+    rest on Approve Spec's own sidecar write creating `.minspec/` earlier in the same
+    command, so that a folder which started with no marker has one by the time the
+    preference is saved (two say so, and two contrast Backfill Epics with it). After this
+    change Approve Spec refuses in such a folder before it asks or writes anything, so the
+    comments are corrected (FR-12): one in `packages/minspec/src/commands/approve.ts`,
+    which is in the spec's file list, and three outside it, in
+    `packages/minspec/src/commands/backfill-epics.ts`, `approve-action.test.ts` and
+    `backfill-epics-command.test.ts`. Those three are comment lines only, with no code and
+    no assertion touched, and were confirmed with the session that dispatched this build.
+    The refusal those comments describe is still reachable by one route, the marker being
+    removed after the approval was recorded, and the command test's case for that route now
+    asserts the new warning as well as the refused queue request.
+
 ## Reconciliation with main
 
 The property the spec states binds this plan. Its line numbers do not, and these are the
@@ -190,6 +209,10 @@ No writer was found on a024a751 that the spec did not see. The count was taken a
 parsing every file under `packages/minspec/src` and `packages/shared/src`: 29 `mkdirSync`, 2
 `mkdtempSync` and 1 `renameSync`, and no use of `vscode.workspace.fs`, a workspace edit, `cp`,
 `symlink`, or any callback or promise form.
+
+360818bc, the one commit that landed after that (finding 14), adds no directory-creating
+call and no command: it changes three `catch` blocks and their comments. The inventory and
+the command classification are the same on the merged tree.
 
 ## The guard
 
@@ -434,11 +457,14 @@ failing either time):
 
 40 of the 41 turn the suite red. The one that does not is the equivalent mutant of finding
 12, and its paired mutant (the check and the guarded write both removed) is among the 40.
+The run was repeated on the final test files, and again on the tree with `main` merged in
+(finding 14), with the same result each time.
 
 The final versions of the three files were run against an export of a024a751, so the red
 evidence is for the tests as merged and not for an earlier draft: the guard test cannot
 load, 25 of the inventory test's 60 fail, and 51 of the command test's 186 fail. On the
-changed tree all 305 pass (59, 60 and 186).
+changed tree all 305 pass (59, 60 and 186). The same run against an export of 360818bc,
+where `main` stood when the pull request opened, fails the same 76 tests.
 
 Tests are outside every tsconfig in the repository, so the three files were typechecked
 directly with `tsc` under the root compiler options, and the check was shown to report an
@@ -569,9 +595,11 @@ dependency and already imported by four other test files.
   whether to refuse before the questions, and again inside `parkTopic`. One extra
   `gh auth status` per use, in that case only. Passing the answer down would change the
   library's signature for a saving nobody would notice.
-- **Three "Always" buttons are not remembered in a folder that has not opted in**, and do
-  not say so. The preference store's refusal predates this change; those call sites write
-  it to the console. #2506.
+- **Three "Always" buttons are not remembered in a folder that has not opted in.** The
+  preference store's refusal predates this change. When this was built those call sites
+  wrote it to the console and told the user nothing; that was filed as #2506, fixed on
+  `main` by pull request #2509 before this pull request opened, and is merged in (finding
+  14). Each now shows a warning.
 - **Pull requests that touch the same files will conflict.** 28 existing source files
   change, most by a line or two, and one is new.
 
@@ -581,6 +609,7 @@ Filed while building this:
 
 - #2506 - three "Always" choices are silently not remembered in a folder that has not
   opted in (Backfill Epics, Always push from now on, and Approve's follow-up toast).
+  Closed: fixed on `main` by pull request #2509, which this branch has merged.
 - #2507 - Create ADR and Regenerate Decision Register INDEX wrap the refusal in their own
   failure sentence (finding 10).
 - #2508 - hiding the commands that will be refused. The spec's Out of Scope defers it and

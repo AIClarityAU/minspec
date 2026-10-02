@@ -169,11 +169,12 @@ change.
   Running them is also what showed two outcomes of the guard that had no test (losing the
   race to another creator of the same directory, and finding something that is not a
   directory in the way), so two cases were added. The run was repeated on the final test
-  files with the same result.
+  files, and again on the tree with `main` merged in, with the same result each time.
 - [x] **9.4** Run the final versions of the three T0 files against an export of a024a751
   and record the failures, so the red evidence is for the tests as merged. Observed: the
   guard test cannot load, 25 of 60 fail in the inventory test, 51 of 186 in the command
-  test.
+  test. Repeated against an export of 360818bc, where `main` stood when the pull request
+  opened: the same 76 tests fail.
 - [x] **9.5** Typecheck the three new test files with `tsc` directly. No tsconfig in the
   repository includes the tests directory, so the suite passing says nothing about types.
   Observed: clean under the root compiler options, and the same command reports an
@@ -203,6 +204,19 @@ change.
   *Done when:* a throwaway 6 s test passes in a file that calls the helper and times out in
   one that does not. Observed: it passes in the two that call it, and times out at 5000 ms
   in the guard file, whose other tests stay on the default.
+- [x] **9.12** Reconcile with what landed on `main` during the build: 360818bc, the fix for
+  #2506 (three "Always" buttons silently not remembered), pull request #2509. Merged, with
+  no textual conflict. Four comments it added rest on Approve Spec's own sidecar write
+  creating the marker, which this change removes, so they are corrected:
+  `packages/minspec/src/commands/approve.ts`,
+  `packages/minspec/src/commands/backfill-epics.ts`,
+  `packages/minspec/tests/approve-action.test.ts` and
+  `packages/minspec/tests/backfill-epics-command.test.ts`. The last three are outside the
+  spec's file list and change by comment lines only. The race case in
+  `packages/minspec/tests/commands-opt-in-invariant.test.ts` for Approve's follow-up toast
+  also asserts the warning that fix added.
+  *Done when:* that assertion fails with the warning removed and passes with it restored.
+  Observed: it does.
 
 ## Not in this change
 
@@ -216,6 +230,7 @@ change.
 - **Hiding the refusing commands from the palette.** The spec's Out of Scope; now tracked
   as #2508.
 - **Three "Always" buttons that are not remembered in a folder that has not opted in.**
-  #2506. Their refusal predates this change and is written to the console.
+  Filed as #2506. Fixed on `main` by pull request #2509 while this was being built, and
+  merged in: each now shows a warning.
 - **The wording of the refusal inside Create ADR and Regenerate Decision Register INDEX.**
   #2507. Their file is outside this spec's list.
