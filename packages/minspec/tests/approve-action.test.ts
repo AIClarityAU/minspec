@@ -784,6 +784,39 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
         'alt-a-toast',
       );
     });
+
+    it('a refused "Always" pref write (not opted in) still enqueues, and warns visibly (#2506)', async () => {
+      pickFirst();
+      vi.mocked(readSpecFile).mockReturnValueOnce(parsedSpec() as never);
+      vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
+      vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce('Always' as never);
+      // Simulates `savePreferences` refusing in a folder with no `.minspec/`
+      // (NotOptedInError, preferences.ts) — the narrow race this guard is for:
+      // `.minspec/` existed moments earlier (the approval's own sidecar write)
+      // and was removed before this call.
+      vi.mocked(savePreferences).mockImplementationOnce(() => {
+        throw new Error('MinSpec: /tmp/ws has no .minspec/ directory (it has not opted in)');
+      });
+
+      await expect(approveSpecCommand(undefined)).resolves.toBeUndefined();
+      expect(vscode.window.showErrorMessage).not.toHaveBeenCalled();
+      const successCall = vi
+        .mocked(vscode.window.showInformationMessage)
+        .mock.calls.find((c) => String(c[0]).includes('✓ Approved SPEC-001'));
+      expect(successCall).toBeTruthy();
+      // The refused write must not block the one-time enqueue the user asked for.
+      expect(enqueuePhaseAdvance).toHaveBeenCalledWith(
+        '/tmp/ws',
+        '/tmp/ws/specs/minspec/SPEC-001/spec.md',
+        'alt-a-toast',
+      );
+      // Before #2506 this reached only `console.warn`, invisible to an Alt+A
+      // toast user — the user was told nothing while the "Always" they clicked
+      // silently remembered nothing.
+      expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+        expect.stringContaining('"Always" was not remembered'),
+      );
+    });
   });
 
   it('shows error when approveSpec throws (catch path)', async () => {
