@@ -166,8 +166,10 @@ change.
   Observed: 41 mutants in all, with a clean control run before and after. 40 turn the
   suite red. The one that does not is equivalent (Propose Constitution's command check,
   whose guarded write refuses with the same message); removing both is among the 40.
-  Running them is also what showed two outcomes of the guard that had no test, losing the
-  race to another creator of the same directory, so two cases were added.
+  Running them is also what showed two outcomes of the guard that had no test (losing the
+  race to another creator of the same directory, and finding something that is not a
+  directory in the way), so two cases were added. The run was repeated on the final test
+  files with the same result.
 - [x] **9.4** Run the final versions of the three T0 files against an export of a024a751
   and record the failures, so the red evidence is for the tests as merged. Observed: the
   guard test cannot load, 25 of 60 fail in the inventory test, 51 of 186 in the command
@@ -187,12 +189,20 @@ change.
 - [x] **9.9** Clean-runner check. A stray `/tmp/ws/.minspec` on the build machine makes a
   fake test root read as opted in. Run throwaway copies of the 13 suites that use that
   root, pointed at a path that does not exist. Observed: 48 failures in four suites before
-  their precondition was stated, none after.
+  their precondition was stated, none after. Repeated on the final tests with the two
+  further suites that only name document paths under that root: 242 of 242 pass.
 - [x] **9.10** Fire every event `activate()` subscribes to, in each folder with no marker,
   with the debounced work run; and the same in a folder that has opted in, as the control.
   Added to the command test. Observed: the folder is byte-identical each time, and the
   control's decisions index is written. Removing the decisions watcher's opt-in gate turns
   it red.
+- [x] **9.11** Stop the three new test files being judged by a 5 s clock under load. The
+  command test and the inventory test run real local git in most cases, so they raise their
+  timeout at module scope with the repository's helper for suites that shell out; the guard
+  test gives its one whole-tree parse a timeout of its own.
+  *Done when:* a throwaway 6 s test passes in a file that calls the helper and times out in
+  one that does not. Observed: it passes in the two that call it, and times out at 5000 ms
+  in the guard file, whose other tests stay on the default.
 
 ## Not in this change
 

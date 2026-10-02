@@ -155,8 +155,9 @@ Thirteen facts, each checked against the code. None changes a requirement.
     `init-command.test.ts`. With the litter present the root reads as opted in and they
     pass. Measured with throwaway copies of the thirteen suites that use that literal,
     pointed at a path that does not exist: 48 tests in those four fail before their
-    precondition is stated, none after. The litter itself was left alone: it is shared
-    scratch.
+    precondition is stated, none after. Repeated on the final tests with the two further
+    suites that only name document paths under that root: all 242 tests in the fifteen
+    pass. The litter itself was left alone: it is shared scratch.
 
 ## Reconciliation with main
 
@@ -442,6 +443,20 @@ changed tree all 305 pass (59, 60 and 186).
 Tests are outside every tsconfig in the repository, so the three files were typechecked
 directly with `tsc` under the root compiler options, and the check was shown to report an
 injected error.
+
+The new files are not judged by a 5 s clock under load. The command test and the inventory
+test run real local `git` in most cases, and raise their timeout at module scope with the
+helper the repository has for suites that shell out (`tests/helpers/shell-timeout.ts`). The
+guard test spawns nothing, so only its one test that parses every source file carries a
+timeout of its own. What prompted it was measured: a full run on a loaded machine timed out
+three tests of `import-cycle-check.test.ts`, a suite this change does not touch, which take
+a quarter of a second each on an idle machine. Three of the new tests take one to two
+seconds idle, and had passed that run by luck of scheduling. A throwaway 6 s test showed the
+raise takes effect: it passes in the two files that call the helper and times out at 5000 ms
+in the guard file. Considered and not done: leaving the default, which charges the flake to
+whoever pushes next; and raising it for the whole repository, which that helper's own
+rationale rules out, because the default is the hang signal for suites that do not shell
+out.
 
 ### Existing tests that change
 
