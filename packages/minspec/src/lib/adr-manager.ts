@@ -591,37 +591,6 @@ function synthesizeAdrFrontmatter(filePath: string, content: string, status: Adr
 }
 
 /**
- * Rewrite the `status:` line in an ADR's frontmatter in place.
- * Adds the line if frontmatter exists but has no status field.
- *
- * Pre-MinSpec DRs have no frontmatter at all, yet `listAdrs` deliberately
- * surfaces them into the picker (with a synthetic `proposed` status). To keep
- * the read and write paths symmetric (#201), synthesize and prepend a
- * frontmatter block from the filename + body rather than throwing.
- * Returns the updated status.
- */
-/**
- * Reconcile every body status claim with `status`, and return the new content.
- *
- * A DR's status lives in THREE places — frontmatter, the body, and the INDEX entry.
- * `setAdrStatus` historically wrote only the first and `applyStatus` only the third, so
- * every acceptance left the file asserting two different statuses at once (#1624). That
- * took `main` red on 2026-08-19 and blocked every open PR.
- *
- * The claims are located with `inspectAllStatusClaims` — the SAME reader the #626/#1223
- * parity gate uses — rather than a regex of this module's own. That is deliberate: the
- * first version of this function matched only a bold `**Proposed.**` token, while the gate
- * also recognises a plain-text leading word and the head-blockquote form
- * `> **Status: proposed — …**`. A writer narrower than its reader silently leaves exactly
- * the claims the gate will fail on. Sharing the locator makes the two impossible to
- * diverge: whatever the gate can read, this rewrites.
- *
- * Still conservative in WHAT it rewrites — only `comparable` claims, i.e. a word already in
- * the artifact's status vocabulary. `freeform` ("Clarify complete — awaiting Accept") and
- * `unparseable` lines are returned untouched, because silently rewording a hand-authored
- * rationale is a worse failure than a caught parity error.
- */
-/**
  * A status line whose PROSE negates a status word — `**Proposed** … Not accepted …`.
  *
  * `reconcileBodyStatus` swaps the token and cannot see the rest of the sentence. When
@@ -671,6 +640,27 @@ export function statusProseWouldInvert(
   return null;
 }
 
+/**
+ * Reconcile every body status claim with `status`, and return the new content.
+ *
+ * A DR's status lives in THREE places — frontmatter, the body, and the INDEX entry.
+ * `setAdrStatus` historically wrote only the first and `applyStatus` only the third, so
+ * every acceptance left the file asserting two different statuses at once (#1624). That
+ * took `main` red on 2026-08-19 and blocked every open PR.
+ *
+ * The claims are located with `inspectAllStatusClaims` — the SAME reader the #626/#1223
+ * parity gate uses — rather than a regex of this module's own. That is deliberate: the
+ * first version of this function matched only a bold `**Proposed.**` token, while the gate
+ * also recognises a plain-text leading word and the head-blockquote form
+ * `> **Status: proposed — …**`. A writer narrower than its reader silently leaves exactly
+ * the claims the gate will fail on. Sharing the locator makes the two impossible to
+ * diverge: whatever the gate can read, this rewrites.
+ *
+ * Still conservative in WHAT it rewrites — only `comparable` claims, i.e. a word already in
+ * the artifact's status vocabulary. `freeform` ("Clarify complete — awaiting Accept") and
+ * `unparseable` lines are returned untouched, because silently rewording a hand-authored
+ * rationale is a worse failure than a caught parity error.
+ */
 export function reconcileBodyStatus(content: string, status: AdrStatus): string {
   const claims = inspectAllStatusClaims(content, 'dr');
   const targets = claims.filter((c): c is { kind: 'comparable'; token: string; line: number } =>
@@ -702,6 +692,16 @@ export function reconcileBodyStatus(content: string, status: AdrStatus): string 
   return lines.join('\n');
 }
 
+/**
+ * Rewrite the `status:` line in an ADR's frontmatter in place.
+ * Adds the line if frontmatter exists but has no status field.
+ *
+ * Pre-MinSpec DRs have no frontmatter at all, yet `listAdrs` deliberately
+ * surfaces them into the picker (with a synthetic `proposed` status). To keep
+ * the read and write paths symmetric (#201), synthesize and prepend a
+ * frontmatter block from the filename + body rather than throwing.
+ * Returns the updated status.
+ */
 export function setAdrStatus(filePath: string, status: AdrStatus): AdrStatus {
   if (!ADR_STATUSES.has(status)) {
     throw new Error(`Invalid ADR status: ${status}`);

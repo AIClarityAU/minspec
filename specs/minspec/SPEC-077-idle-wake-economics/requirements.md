@@ -1,7 +1,7 @@
 ---
 id: SPEC-077
 type: requirements
-status: specifying
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-009  # Team Readiness - concurrent multi-session coordination. Part A governs delivery between sessions, next to the presence, mailbox and coordinated-session specs; DQ-5 states the cost of this fit
@@ -10,9 +10,9 @@ relates_to: [SPEC-026, SPEC-027, SPEC-044, DR-073, DR-086, DR-057]  # presence h
 implements: [scripts/hooks/cold-resume.sh, scripts/hooks/cold-resume.py, packages/minspec/tests/cold-resume-hook.test.ts]  # all NEW, all dev-time only and never shipped (INV-6). The .py split mirrors .claude/hooks/session-title.{sh,py}; if Plan picks another language, rename here BEFORE approval, since these paths are hashed
 affects: [.claude/settings.json]  # owned by no spec today; this spec only adds hook registrations to it
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
