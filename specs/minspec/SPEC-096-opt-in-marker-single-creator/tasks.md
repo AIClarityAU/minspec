@@ -66,99 +66,125 @@ change.
 
 ## 3 - The guard (FR-1, FR-2)
 
-- [ ] **3.1** `packages/minspec/src/lib/opt-in.ts` (new, owned) - the predicate, the refusal
+- [x] **3.1** `packages/minspec/src/lib/opt-in.ts` (new, owned) - the predicate, the refusal
   error, its wording, `assertOptedIn` and `ensureDirectory`. Imports `fs` and `path` only.
-  *Done when:* the guard test is green.
-- [ ] **3.2** `packages/minspec/src/lib/preferences.ts` - the predicate and the error move
+  *Done when:* the guard test is green. Observed: all of it, 59 tests after 9.3 added two.
+- [x] **3.2** `packages/minspec/src/lib/preferences.ts` - the predicate and the error move
   out and are re-exported from here, and `savePreferences` passes its own clause to the
   refusal.
   *Done when:* the two existing opt-in invariant suites (the bootstrap toast and the
-  presence heartbeat) pass with no edit made to either file.
+  presence heartbeat) pass with no edit made to either file. Observed: both pass, and
+  neither file is in this change.
 
 ## 4 - The stores (FR-5, FR-4)
 
-- [ ] **4.1** Replace the store's own `mkdir` with the guard in
+- [x] **4.1** Replace the store's own `mkdir` with the guard in
   `packages/minspec/src/lib/session.ts`, `packages/minspec/src/lib/classifier.ts`,
   `packages/minspec/src/lib/parking-lot.ts`, `packages/minspec/src/lib/approval-store.ts`,
   `packages/minspec/src/lib/phase-advance-queue.ts`,
   `packages/minspec/src/lib/traceability.ts` and `packages/minspec/src/lib/merge-refresh.ts`.
-- [ ] **4.2** `packages/minspec/src/lib/approval.ts` - the gzip fallback through the guard,
+- [x] **4.2** `packages/minspec/src/lib/approval.ts` - the gzip fallback through the guard,
   and `approveSpec` refuses itself before its first side effect (the git blob and ref).
-- [ ] **4.3** The two already behind the predicate: `packages/minspec/src/lib/auto-bootstrap.ts`
+- [x] **4.3** The two already behind the predicate: `packages/minspec/src/lib/auto-bootstrap.ts`
   and `packages/minspec/src/lib/presence.ts`.
   *Done when, for 4.1 to 4.3:* every store case in the inventory test is green, with the
-  marker absent, present, and present holding only `preferences.json`.
-- [ ] **4.4** Fixtures of existing tests that leaned on a store creating the marker.
+  marker absent, present, and present holding only `preferences.json`. Observed: all green.
+- [x] **4.4** Fixtures of existing tests that leaned on a store or a command creating the
+  marker.
   *Done when:* the list is measured by running the suite, recorded in design.md with a
-  reason per file, and no assertion in any of them was weakened, removed or re-pointed.
+  reason per file, and no assertion in any of them was weakened or removed where a
+  precondition is enough. Observed: 32 files, 226 lines added and 9 removed. The 9 are five
+  test titles and the two lines each of the two tests that asserted the defect on a bare
+  folder and are inverted in place. Both the list and the five are in design.md under
+  "Existing tests that change".
 
 ## 5 - Refresh is not a second Initialize (FR-3)
 
-- [ ] **5.1** `packages/minspec/src/lib/scaffold.ts` - split what `scaffold()` writes beside
+- [x] **5.1** `packages/minspec/src/lib/scaffold.ts` - split what `scaffold()` writes beside
   the marker from the call that creates it; `refreshHarnessFiles` refuses with no marker and
   never calls the creator; the three template and managed-file writes go through the guard.
-- [ ] **5.2** `packages/minspec/src/commands/init.ts` - `initRefreshCommand` checks before
+- [x] **5.2** `packages/minspec/src/commands/init.ts` - `initRefreshCommand` checks before
   calling it and shows the refusal.
   *Done when, for 5.1 and 5.2:* the inventory test's caller pin and Refresh cases are green,
-  and Refresh in an empty folder leaves it empty.
+  and Refresh in an empty folder leaves it empty. Observed: green. On a024a751 the same
+  call left 59 files and directories.
 
 ## 6 - Artifact and tool directories (FR-4, DQ-4)
 
-- [ ] **6.1** `packages/minspec/src/lib/adr-manager.ts`,
+- [x] **6.1** `packages/minspec/src/lib/adr-manager.ts`,
   `packages/minspec/src/lib/epic-manager.ts`, `packages/minspec/src/lib/spec-manager.ts`,
   `packages/minspec/src/lib/spec-layout.ts` and `packages/minspec/src/commands/example.ts`.
-- [ ] **6.2** `packages/minspec/src/lib/claude-settings.ts`,
+- [x] **6.2** `packages/minspec/src/lib/claude-settings.ts`,
   `packages/minspec/src/lib/slash-commands.ts` and
   `packages/minspec/src/lib/context-injector.ts`.
   *Done when, for 6.1 and 6.2:* the inventory equality is green (five files, and nothing
   else), and Generate Example Spec with `minspec.specsDir` inside `.minspec/` shows the
-  refusal and creates nothing.
+  refusal and creates nothing. Observed: both, once 7.3 converted the last direct call.
 
 ## 7 - The commands (FR-6, FR-7, FR-8)
 
-- [ ] **7.1** `packages/minspec/src/commands/session.ts` - check before the questions; show
+- [x] **7.1** `packages/minspec/src/commands/session.ts` - check before the questions; show
   a refusal from the save.
-- [ ] **7.2** `packages/minspec/src/views/codelens-provider.ts` - the same for Link Code.
-- [ ] **7.3** `packages/minspec/src/commands/constitution.ts` - check before anything; the
+- [x] **7.2** `packages/minspec/src/views/codelens-provider.ts` - the same for Link Code.
+- [x] **7.3** `packages/minspec/src/commands/constitution.ts` - check before anything; the
   draft's directory through the guard.
-- [ ] **7.4** `packages/minspec/src/commands/approve.ts` - check when the folder is known
+- [x] **7.4** `packages/minspec/src/commands/approve.ts` - check when the folder is known
   and again before the status flip.
-- [ ] **7.5** `packages/minspec/src/commands/park.ts` - before opt-in: refuse before the
+- [x] **7.5** `packages/minspec/src/commands/park.ts` - before opt-in: refuse before the
   first question when only the local file is left; hand the typed topic back when issue
   creation fails after the questions.
-- [ ] **7.6** `packages/minspec/src/commands/classify.ts` - show a refusal from either
+- [x] **7.6** `packages/minspec/src/commands/classify.ts` - show a refusal from either
   persisting button.
-- [ ] **7.7** `packages/minspec/src/extension.ts` - show a refusal from either drift-warning
+- [x] **7.7** `packages/minspec/src/extension.ts` - show a refusal from either drift-warning
   action; correct the comment that says Refresh can run before opt-in.
-  *Done when, for 7.1 to 7.7:* the command test is green end to end.
+  *Done when, for 7.1 to 7.7:* the command test is green end to end. Observed: 182 of 182.
 
 ## 8 - The words follow the code (FR-12)
 
-- [ ] **8.1** The eight comments FR-12 names, corrected in the commit that changes the code
+- [x] **8.1** The eight comments FR-12 names, corrected in the commit that changes the code
   beside each.
-- [ ] **8.2** `packages/minspec/README.md` - the one sentence about the Park Topic fallback.
-  *Done when:* the README claims test and the README parity tests still pass.
-- [ ] **8.3** `packages/minspec/CHANGELOG.md` - one Unreleased entry naming the two changes
-  a user can notice.
+- [x] **8.2** `packages/minspec/README.md` - the one sentence about the Park Topic fallback.
+  *Done when:* the README claims test and every other test that reads the README still
+  pass. Observed: the three suites that read it pass. The repository has no README parity
+  test on `main` yet; the one that pins the command table is in an open pull request.
+- [x] **8.3** `packages/minspec/CHANGELOG.md` - one Unreleased entry naming the changes a
+  user can notice.
 
 ## 9 - Prove it and verify
 
-- [ ] **9.1** Mutation check: remove the guard from one converted writer and confirm a
-  test goes red; restore and confirm green.
-- [ ] **9.2** Mutation check: add a new `mkdir` of a `.minspec/` path outside the guard and
-  confirm a test goes red; restore and confirm green.
-- [ ] **9.3** Remove each command check and each store refusal in turn, one at a time.
-  *Done when, for 9.1 to 9.3:* each observation is recorded in the pull request, with the
-  equivalent mutant named as equivalent.
-- [ ] **9.4** Run the final versions of the three T0 files against an export of a024a751
-  and record the failures, so the red evidence is for the tests as merged.
-- [ ] **9.5** Typecheck the three new test files with `tsc` directly. No tsconfig in the
+- [x] **9.1** Mutation check: remove the guard from one converted writer and confirm a
+  test goes red; restore and confirm green. Observed: `saveSession` back to `mkdir -p`
+  fails 5 tests, in the inventory, the store's own cases and two command cases.
+- [x] **9.2** Mutation check: add a new `mkdir` of a `.minspec/` path outside the guard and
+  confirm a test goes red; restore and confirm green. Observed: red both times it was
+  tried, in a library module (the inventory) and in a command with no check (the inventory
+  and the command sweep in all three folders).
+- [x] **9.3** Remove each command check and each store refusal in turn, one at a time.
+  Observed: 40 mutants in all, with a clean control run before and after. 39 turn the
+  suite red. The one that does not is equivalent (Propose Constitution's command check,
+  whose guarded write refuses with the same message); removing both is among the 39.
+  Running them is also what showed two outcomes of the guard that had no test, losing the
+  race to another creator of the same directory, so two cases were added.
+- [x] **9.4** Run the final versions of the three T0 files against an export of a024a751
+  and record the failures, so the red evidence is for the tests as merged. Observed: the
+  guard test cannot load, 25 of 60 fail in the inventory test, 51 of 182 in the command
+  test.
+- [x] **9.5** Typecheck the three new test files with `tsc` directly. No tsconfig in the
   repository includes the tests directory, so the suite passing says nothing about types.
-- [ ] **9.6** From the repository root: the full vitest suite as CI runs it, lint, build,
-  typecheck, import cycles and validate.
-- [ ] **9.7** Re-run 2.3's check on the final tree: the approval still verifies.
+  Observed: clean under the root compiler options, and the same command reports an
+  injected error.
+- [x] **9.6** From the repository root: the full vitest suite as CI runs it, lint, build,
+  typecheck, import cycles and validate. Observed: 348 files and 7519 tests pass with
+  coverage at 94.25 percent of statements; lint has no errors and the five warnings `main`
+  has; validate passes with 181 warnings, two fewer than `main`.
+- [x] **9.7** Re-run 2.3's check on the final tree: the approval still verifies. Observed:
+  APPROVED, stored and computed both `1b3c314a`; status MATCH.
 - [ ] **9.8** Merge `main` into the branch immediately before the pull request opens, and
   repeat 9.4 to 9.7 on the merged tree.
+- [x] **9.9** Clean-runner check. A stray `/tmp/ws/.minspec` on the build machine makes a
+  fake test root read as opted in. Run throwaway copies of the 13 suites that use that
+  root, pointed at a path that does not exist. Observed: 48 failures in four suites before
+  their precondition was stated, none after.
 
 ## Not in this change
 
@@ -169,4 +195,9 @@ change.
   `.minspec/` holding only `preferences.json` is opted in here, as it is today.
 - **Writes outside `.minspec/` before opt-in.** #2462, as DQ-5 records.
 - **Where the marker is looked for.** #2464.
-- **Hiding the refusing commands from the palette.** The spec's Out of Scope.
+- **Hiding the refusing commands from the palette.** The spec's Out of Scope; now tracked
+  as #2508.
+- **Three "Always" buttons that are not remembered in a folder that has not opted in.**
+  #2506. Their refusal predates this change and is written to the console.
+- **The wording of the refusal inside Create ADR and Regenerate Decision Register INDEX.**
+  #2507. Their file is outside this spec's list.

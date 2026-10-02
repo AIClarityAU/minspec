@@ -43,7 +43,7 @@ Harness Files stops calling the creator at all.
 
 ## What Plan found that the spec did not know
 
-Twelve facts, each checked against the code. None changes a requirement.
+Thirteen facts, each checked against the code. None changes a requirement.
 
 1. **Writer row 8 no longer exists.** The build of SPEC-086 (removal of the ScroogeLLM
    upsell), commit 4d971269, pull request #2492, deleted `packages/minspec/src/lib/bridge.ts`,
@@ -110,23 +110,28 @@ Twelve facts, each checked against the code. None changes a requirement.
    It was confirmed with the session that dispatched this build before it was made. The
    changelog entry FR-12 also requires was in the dispatch from the start.
 
-9. **Existing tests lean on a store or a command creating `.minspec/`.** The spec's
-   frontmatter says which ones is a Plan-phase measurement, and its Test plan says such
-   fixtures "create it themselves". The measured list, with a reason per file, is under
-   "Existing tests that change". The same confirmation covered these, with two conditions:
-   no assertion is weakened, removed or re-pointed, and a test that was the only thing
-   exercising a store with no marker keeps that coverage in the new invariant tests.
+9. **Existing tests lean on a store or a command creating `.minspec/`, and five assert
+   it.** The spec's frontmatter says which ones is a Plan-phase measurement, and its Test
+   plan says such fixtures "create it themselves". Measured: 32 files. In 27 the change is
+   a precondition and nothing else. In five a test asserted the defect itself (that a store
+   creates the marker, or that Refresh sets up an empty folder), which FR-5 and FR-3
+   invert, so those assertions could not survive in any form. The list, a reason per file
+   and the five before-and-after assertions are under "Existing tests that change". All of
+   it was confirmed with the session that dispatched this build, with two conditions: no
+   assertion is weakened or removed where a precondition is enough, and a test that was the
+   only thing exercising a store with no marker keeps that coverage in the new invariant
+   tests.
 
 10. **Two decision commands reach the refusal through a setting, and their file is not in
     `affects:`.** With `minspec.decisionsDir` pointed inside `.minspec/`, Create ADR and
     Regenerate Decision Register INDEX reach the guard through `createAdr` and
     `regenerateDrIndex`. `packages/minspec/src/commands/adr.ts` already catches any error
     and shows it (`:103-106`, `:345-348`), so the refusal reaches the user inside that
-    command's own failure sentence: "MinSpec: Failed to create ADR - " followed by the
-    refusal. It names the folder, says the marker is absent and names Initialize, and no
-    success message follows, which is what FR-6's last paragraph asks. It is not the bare
-    refusal, and the product name appears twice. Tidying that needs a file outside this
-    change, tracked as a follow-up.
+    command's own failure sentence: it begins "MinSpec: Failed to create ADR" and then
+    carries the whole refusal. It names the folder, says the marker is absent and names
+    Initialize, and no success message follows, which is what FR-6's last paragraph asks.
+    It is not the bare refusal, and the product name appears twice. Tidying that needs a
+    file outside this change, tracked as #2507.
 
 11. **`minspec.approveActive` is a router, and it is classified by where it routes.** Alt+A
     runs Approve Spec, Accept Decision or Accept Epic depending on what is in focus. With
@@ -140,6 +145,18 @@ Twelve facts, each checked against the code. None changes a requirement.
     untouched. Removing both turns the command test red. The Test plan asks for "a mutant
     per store and per command check"; this is the one command check whose mutant cannot be
     killed, and the pull request says so instead of reporting it as killed.
+
+13. **A stray directory on the build machine made four suites pass that a clean runner
+    would fail.** `/tmp/ws/.minspec/preferences.json` exists on the machine this was built
+    on, left by a test run on 2026-09-28 that passed the fake root `/tmp/ws` to a store
+    that still created the marker (the shape issue #1924 describes). Four suites drive
+    commands this change touches against that fake root: `approve-action.test.ts`,
+    `approve-command.test.ts`, `approve-terminal-lifecycle.test.ts` and
+    `init-command.test.ts`. With the litter present the root reads as opted in and they
+    pass. Measured with throwaway copies of the thirteen suites that use that literal,
+    pointed at a path that does not exist: 48 tests in those four fail before their
+    precondition is stated, none after. The litter itself was left alone: it is shared
+    scratch.
 
 ## Reconciliation with main
 
@@ -333,6 +350,26 @@ is unchanged in shape: with no marker its local fallback throws the refusal, whi
 the command catches to hand the text back. The untitled document carries the title, the
 context, the labels and the session scope.
 
+The three messages, each an error with no button. Before the first question, when `gh` is
+not usable:
+
+```
+MinSpec: This topic cannot be parked here. The GitHub CLI (gh) is not installed or not signed in, so it could not be used, and <folder> has no .minspec/ directory to hold a local parking lot, so nothing was written there. Run "MinSpec: Initialize SDD Structure" first to keep a local parking lot.
+```
+
+Before the first question, when the folder has no GitHub remote:
+
+```
+MinSpec: This topic cannot be parked here. gh could not be used: this folder has no GitHub remote to file the issue against, and <folder> has no .minspec/ directory to hold a local parking lot, so nothing was written there. Run "MinSpec: Initialize SDD Structure" first to keep a local parking lot.
+```
+
+After the questions, when no issue was created. It is shown first and the editor opened
+second, so that it is said even if the editor cannot be opened:
+
+```
+MinSpec: This topic was NOT saved. No GitHub issue was created for it, and <folder> has no .minspec/ directory to hold a local parking lot, so nothing was written there. MinSpec is opening your text in an untitled editor so it is not lost. Run "MinSpec: Initialize SDD Structure" first to keep a local parking lot.
+```
+
 ## Order of work
 
 1. The three tests the spec owns, red on a024a751.
@@ -377,24 +414,98 @@ INV-4), the root (a folder; no folder at all), the folder (empty; primed; primed
 directory settings inside `.minspec/`; primed with no git repository), and the workspace
 (one folder; two, one opted in and one not).
 
-Not vacuous, each with a clean control run before and after:
+Not vacuous. 40 mutants were applied one at a time and run against the three files and the
+two existing opt-in suites, with a clean control run before and after (336 tests, none
+failing either time):
 
-- remove the guard from a converted writer, and a test goes red;
-- add a new `mkdir` of a `.minspec/` path outside the guard, and a test goes red;
-- remove each command check and each store refusal in turn (finding 12 names the one that
-  is equivalent).
+- the guard removed from a converted writer (`saveSession` back to `mkdir -p`): red, in the
+  inventory, in that store's own cases, and in two command cases;
+- a new `mkdir` of a `.minspec/` path added outside the guard, once in a library module and
+  once in a command with no check: red both times, the second in the inventory and in the
+  command sweep for all three folders;
+- one mutant per store (15), per command check (9), per handler FR-8 names (7) and per rule
+  inside the guard (6).
 
-The final versions of the three files are run against an export of a024a751, so the red
-evidence is for the tests as merged and not for an earlier draft.
+39 of the 40 turn the suite red. The one that does not is the equivalent mutant of finding
+12, and its paired mutant (the check and the guarded write both removed) is among the 39.
+
+The final versions of the three files were run against an export of a024a751, so the red
+evidence is for the tests as merged and not for an earlier draft: the guard test cannot
+load, 25 of the inventory test's 60 fail, and 51 of the command test's 182 fail. On the
+changed tree all 301 pass (59, 60 and 182).
+
+Tests are outside every tsconfig in the repository, so the three files were typechecked
+directly with `tsc` under the root compiler options, and the check was shown to report an
+injected error.
 
 ### Existing tests that change
 
 `bootstrap-opt-in-invariant.test.ts` and `presence-opt-in-invariant.test.ts` are not edited.
-Every other change to an existing test is a fixture precondition: one `mkdir` of `.minspec`
-where a real temp folder is used, or a statement of the opted-in precondition where a mocked
-root is. No assertion is weakened, removed or re-pointed. The list is measured in task 4 by
-running the suite against the guard and reading each failure, and is recorded here with the
-reason per file and the count.
+
+Measured by running the whole suite against the finished guard and reading every failure,
+and then by the clean-runner check of finding 13. **32 existing test files change**, by 226
+added lines and 9 removed. The 9 removed lines are five test titles and the two lines each
+of the two inverted tests; no other line of any existing test was removed.
+
+**A store was called on a real temp folder with no marker (23 files).** Each gains one
+`mkdir` of `.minspec`, in the setup its tests share or in the tests that need it.
+
+| File (under `packages/minspec/tests/`) | What leaned on the store creating the marker |
+|---|---|
+| `approval.test.ts` | `approveSpec`, for every lifecycle case |
+| `approval-diff.test.ts` | `approveSpec`, which mints the baseline the diff reads |
+| `approval-store.test.ts` | `writeRecord` |
+| `approve-baseline.test.ts` | `approveSpec`: the pinned blob and the gzip fallback |
+| `approver-identity.test.ts` | `approveSpec`; with the marker present, a denial there is the identity gate's alone |
+| `trust-metrics.test.ts` | `approveSpec`, in five folders |
+| `trust-nondestructive.test.ts` | `approveSpec` |
+| `wasted-review.test.ts` | `approveSpec` |
+| `ownership-guard.test.ts` | `approveSpec`, in the one case with no `config.json` |
+| `spec-tree-provider.test.ts` | `approveSpec`, behind the approval badge |
+| `issue-rank-cli.test.ts` | `approveSpec`, inside the builder of a workspace with derived statuses |
+| `classifier.test.ts` | `saveCalibration` and `recordOverride` |
+| `invariants.test.ts` | `recordOverride`, in the "override persists" invariant |
+| `traceability.test.ts` | `saveTraceability` |
+| `features.test.ts` | `saveTraceability` and `saveSession` |
+| `parking-lot.test.ts` | `appendToParkingLotFile` |
+| `parking-lot-async.test.ts` | `parkTopic`'s local fallback, in the three tests that write the file |
+| `parking-lot-dedup.test.ts` | the same fallback |
+| `parking-lot-force.test.ts` | the same fallback |
+| `phase-advance-queue.test.ts` | `enqueuePhaseAdvance` |
+| `merge-refresh.test.ts` | `saveHashes`, in the one test that calls it on a fresh folder |
+| `scaffold.test.ts` | `refreshHarnessFiles` on an empty folder |
+| `project-name-1529.test.ts` | `refreshHarnessFiles`, used to build the fixture |
+
+**A command was driven against a fake root with its libraries mocked (8 files).** Each
+states that the root has opted in, as a mock of the predicate, so the test no longer reads
+whatever the disk holds at that path.
+
+| File | Fake root | Command |
+|---|---|---|
+| `commands.test.ts` | `/tmp/test-workspace` | Declare Session Scope, Park Topic, Refresh |
+| `codelens-provider.test.ts` | `/tmp/test` | Link Code |
+| `park-command.test.ts` | `/tmp/park-cmd-ws` | Park Topic |
+| `multi-root-command-scope.test.ts` | `/tmp/root-a`, `/tmp/root-b` | Approve Spec |
+| `init-command.test.ts` | `/tmp/ws` | Refresh (finding 13) |
+| `approve-action.test.ts` | `/tmp/ws` | Approve Spec (finding 13) |
+| `approve-command.test.ts` | `/tmp/ws` | Approve Spec (finding 13) |
+| `approve-terminal-lifecycle.test.ts` | `/tmp/ws` | Approve Spec (finding 13) |
+
+**A test asserted the defect itself (5 tests; `session.test.ts` is the 32nd file).** These
+are the only existing assertions whose meaning changes.
+
+| Test | Asserted before | Asserts now | From |
+|---|---|---|---|
+| `session.test.ts`, "creates .minspec dir if it does not exist" | saving into a bare folder leaves `.minspec/session.json` | the same call throws the refusal and no `.minspec` exists | FR-5 |
+| `parking-lot.test.ts`, "creates .minspec dir if it does not exist" | appending in a bare folder leaves `.minspec/parking-lot.md` | the same call throws the refusal and no `.minspec` exists | FR-5, FR-7 |
+| `classifier.test.ts`, "creates .minspec directory if missing" | `calibration.json` exists after a save | unchanged; the folder has the marker first, and the title no longer claims the store creates it | FR-5 |
+| `traceability.test.ts`, "creates .minspec directory and file" | `traceability.json` exists and round-trips | unchanged; the same | FR-5 |
+| `scaffold.test.ts`, "creates harness files when none exist (same as generate)" | every harness file exists after Refresh on an empty folder | unchanged; the folder has the marker first, and a comment points at where the refusal is asserted | FR-3, DQ-1 |
+
+Coverage moved, it was not deleted. Each store's behaviour with no marker is now asserted in
+`opt-in-writer-inventory.test.ts` (the refusal, nothing created, and the same with no folder
+open), `parkTopic`'s in the command test's Park Topic cases, and each command's in the
+command test's sweep.
 
 ## Invariants
 
@@ -434,10 +545,30 @@ dependency and already imported by four other test files.
 - **`ownership-advance-guard.ts` has its own walk up to a `.minspec` directory.** It finds a
   project root for a spec file and decides nothing about opt-in. It is left alone, and it is
   the one other place in the source that reads the marker by name.
-- **Pull requests that touch the same files will conflict.** 29 source files change by a
-  line or two each.
+- **Park Topic probes `gh` twice in a folder that has not opted in.** Once to decide
+  whether to refuse before the questions, and again inside `parkTopic`. One extra
+  `gh auth status` per use, in that case only. Passing the answer down would change the
+  library's signature for a saving nobody would notice.
+- **Three "Always" buttons are not remembered in a folder that has not opted in**, and do
+  not say so. The preference store's refusal predates this change; those call sites write
+  it to the console. #2506.
+- **Pull requests that touch the same files will conflict.** 28 existing source files
+  change, most by a line or two, and one is new.
 
 ## Follow-ups (tracked)
+
+Filed while building this:
+
+- #2506 - three "Always" choices are silently not remembered in a folder that has not
+  opted in (Backfill Epics, Always push from now on, and Approve's follow-up toast).
+- #2507 - Create ADR and Regenerate Decision Register INDEX wrap the refusal in their own
+  failure sentence (finding 10).
+- #2508 - hiding the commands that will be refused. The spec's Out of Scope defers it and
+  filed nothing; this is its tracking.
+- #1924 - fake roots that reach the real filesystem. Finding 13 is recorded there as a
+  second instance.
+
+Carried from the spec:
 
 - #2365 - folders an earlier build marked by accident stay opted in. Held for a human
   decision; nothing here treats such a folder differently.
