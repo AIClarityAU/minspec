@@ -35,7 +35,7 @@ plan. That keeps the ownership signal exactly as wide as the spec declared it.
   the extension pack's guard. Each check also runs against invented inputs that contain what
   it looks for. Covers FR-9, and pins FR-3, FR-4 and FR-8.
   *Done when:* it fails against the unchanged tree for the reasons the spec names, and not
-  because of a missing symbol. Observed on 17ea58b9: 4 of 54 failed, listing the export
+  because of a missing symbol. Observed on 17ea58b9: 4 of 55 failed, listing the export
   command and both settings in the manifest, the extension id and Marketplace address in the
   bridge, eight strings the shipped code holds, and the pack's refusal text.
 
@@ -53,22 +53,22 @@ plan. That keeps the ownership signal exactly as wide as the spec declared it.
 One commit. Callers and declarations go together, so that no commit has a contributed
 command with no registration, or the reverse.
 
-- [ ] **3.1** `packages/minspec/src/extension.ts` - remove the bridge import, the
+- [x] **3.1** `packages/minspec/src/extension.ts` - remove the bridge import, the
   `minspec.exportTraceability` registration, the conformance watcher block, the install-time
   and prompt calls, and the export handler with its doc comment (FR-1, FR-4, FR-5).
-- [ ] **3.2** `packages/minspec/package.json` - remove the export command and the two
+- [x] **3.2** `packages/minspec/package.json` - remove the export command and the two
   settings (FR-3, FR-4).
   *Done when:* the diff of that file shows those three entries and nothing else.
-- [ ] **3.3** Delete `packages/minspec/src/lib/bridge.ts` and
+- [x] **3.3** Delete `packages/minspec/src/lib/bridge.ts` and
   `packages/minspec/src/lib/ai-usage-detector.ts` (FR-1, FR-2, FR-5, FR-6).
-- [ ] **3.4** Delete `packages/minspec/tests/bridge.test.ts` and
+- [x] **3.4** Delete `packages/minspec/tests/bridge.test.ts` and
   `packages/minspec/tests/ai-usage-detector.test.ts` (FR-7).
-- [ ] **3.5** `packages/minspec/tests/extension-extra.test.ts` - drop the bridge mock, its
-  imports and the seven cases that exercised it; keep every other case; add the three
+- [x] **3.5** `packages/minspec/tests/extension-extra.test.ts` - drop the bridge mock, its
+  imports and the seven cases that exercised it; keep every other case; add the six
   activation cases from the plan (FR-7, and FR-1 to FR-5 as behaviour).
-  *Done when:* the file is green, and its two "old installation" cases fail when run against
-  the unchanged tree.
-- [ ] **3.6** `packages/minspec/tests/import-boundaries.test.ts` - reduce the pinned list to
+  *Done when:* the file is green, and its five "old installation" cases fail when run
+  against the unchanged tree.
+- [x] **3.6** `packages/minspec/tests/import-boundaries.test.ts` - reduce the pinned list to
   the five files that remain and correct "seven" in the header, the list's comment and the
   test title. The assertion stays an exact comparison (FR-7).
   *Done when for 3.1 to 3.6:* the manifest and source groups of the gate are green, and
@@ -76,14 +76,14 @@ command with no registration, or the reverse.
 
 ## 4 - Remove the shared contract
 
-- [ ] **4.1** Delete `packages/shared/src/contracts/conformance.ts` and remove its
+- [x] **4.1** Delete `packages/shared/src/contracts/conformance.ts` and remove its
   re-export from `packages/shared/src/index.ts` (FR-6).
   *Done when:* the shared package builds from an empty output folder, and the extension
   typechecks against the rebuilt package.
 
 ## 5 - The extension pack
 
-- [ ] **5.1** `packages/extension-pack/package.json` - the refusal says the pack is blocked
+- [x] **5.1** `packages/extension-pack/package.json` - the refusal says the pack is blocked
   because ScroogeLLM is shelved (scroogellm DR-021) and no longer says to remove the guard
   when the product is live. It still exits 1. Nothing else in the manifest changes (FR-8).
   *Done when:* the pack group of the gate is green, and `npm run package` in that folder
@@ -91,30 +91,36 @@ command with no registration, or the reverse.
 
 ## 6 - The record
 
-- [ ] **6.1** `packages/minspec/CHANGELOG.md` - one entry under Unreleased saying the
+- [x] **6.1** `packages/minspec/CHANGELOG.md` - one entry under Unreleased saying the
   prompt, the two settings and the export command are gone, and why (FR-10).
-- [ ] **6.2** `specs/minspec/tasks.md` - one line under "Post-Launch: ScroogeLLM Bridge"
+- [x] **6.2** `specs/minspec/tasks.md` - one line under "Post-Launch: ScroogeLLM Bridge"
   saying this spec removed that work, so the ticked boxes are not read as shipped features
   (FR-10).
-- [ ] **6.3** The doc comment on the non-interactive folder resolver, in the `lib/` folder's
+- [x] **6.3** The doc comment on the non-interactive folder resolver, in the `lib/` folder's
   resolve-folder module - remove the clause that names the deleted watcher as a caller.
   Comment only; its own commit.
 
 ## 7 - Prove it and verify
 
-- [ ] **7.1** Reintroduction check. With the removal in place, put back one surface at a
+- [x] **7.1** Reintroduction check. With the removal in place, put back one surface at a
   time, run the gate, restore the tree, and confirm the gate is green again.
   *Done when:* each kind of surface the gate covers has been shown to turn it red, and the
-  results are recorded in the pull request.
-- [ ] **7.2** Run the final gate and the final activation suite against an export of the
+  results are recorded in the pull request. Observed: 27 changes tried, 25 reintroductions
+  red, 2 controls green, the tree clean and the gate green after each restore.
+- [x] **7.2** Run the final gate and the final activation suite against an export of the
   unchanged tree and record the failures, so the red evidence is for the tests as merged.
-- [ ] **7.3** Typecheck the new test file with `tsc` directly. No tsconfig in the
+  Observed on 17ea58b9: 9 of 91 failed, 4 in the gate and 5 in the activation suite.
+- [x] **7.3** Typecheck the new test file with `tsc` directly. No tsconfig in the
   repository includes the tests directory, so the suite passing says nothing about types.
-- [ ] **7.4** From the repository root, as CI runs it: build the shared package, the full
+- [x] **7.4** From the repository root, as CI runs it: build the shared package, the full
   vitest suite with coverage, lint, typecheck, the import-cycle check, build and validate.
-- [ ] **7.5** Confirm the mentions the spec says stay are still in the tree and the gate is
+  The end-to-end suite was also run in a real editor host from a scratch checkout: 37
+  passing, 5 skipped for want of an image library, none failing.
+- [x] **7.5** Confirm the mentions the spec says stay are still in the tree and the gate is
   green with them there.
-- [ ] **7.6** Re-run 2.3's check on the final tree: the approval still verifies.
+- [x] **7.6** Re-run 2.3's check on the final tree: the approval still verifies.
+- [ ] **7.7** Merge `main` into the branch immediately before opening the pull request, and
+  repeat 7.3, 7.4 and 7.6 on the merged tree.
 
 ## Not in this change
 

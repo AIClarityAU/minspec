@@ -81,15 +81,14 @@ Ten facts, each checked against the code. None changes a requirement.
    `npm run package` is the script. I believe a direct `vsce package` run inside the pack's
    folder is stopped by neither half; that was not run, because building a package is out
    of bounds for this change. FR-8 pins the two halves the spec names. Closing the direct
-   route belongs to the retirement decision (issue #2359, retire the extension pack), and
-   the finding is recorded there.
+   route belongs to the retirement decision (issue #2359, retire the extension pack).
 
 7. **An open pull request asserts that the three entries exist.** Pull request #2441 (pin
    the README's tables to the manifest) adds a test with a "pending removal" list holding
    `minspec.exportTraceability`, `minspec.scroogellmNudge.enabled` and
    `minspec.conformance.enabled`, and asserts each is still in the manifest. It is not on
    `main`, conflicts with it, and has been handed to a human. Whichever of the two lands
-   second deletes that list. This change says so on that pull request.
+   second deletes that list.
 
 8. **The spawn allowlist changed its name.** The list SPEC-085 and this build's brief call
    `CHILD_PROCESS_ALLOWLIST` is `SPAWN_ALLOWLIST` on `main` since pull request #2473. They
@@ -104,18 +103,19 @@ Ten facts, each checked against the code. None changes a requirement.
    rule that it stays at zero is a different property from the one this spec's gate covers,
    so it is filed (issue #2491) and not built here.
 
-10. **Five more records cite the deleted code.** DQ-6 lists SPEC-042, DR-014, DR-001 and the
-    EPIC-006 summary. SPEC-018, SPEC-022, SPEC-040, DR-064 and the product design document
-    cite it too. One of them is a markdown link to the bridge file, and `npm run validate`
-    does not check file links (its output is identical with the file absent). They are left
-    alone for the reason DQ-6 gives, and listed with line numbers in issue #2490.
+10. **Six more places cite the deleted code.** DQ-6 lists SPEC-042, DR-014, DR-001 and the
+    EPIC-006 summary. SPEC-018, SPEC-022, SPEC-040, DR-064, the product design document and
+    a comment in the lint configuration cite it too. One of them is a markdown link to the
+    bridge file, and `npm run validate` does not check link targets (its output is identical
+    with the file absent). They are left alone for the reason DQ-6 gives, and listed with
+    line numbers in issue #2490.
 
 ## What is removed
 
 | FR | What goes | Where, on 17ea58b9 |
 |---|---|---|
 | FR-1 | The activation call site: record the install time, then try the prompt | `packages/minspec/src/extension.ts:758-761` |
-| FR-1 | The prompt, its message builder and the install-time recorder | `packages/minspec/src/lib/bridge.ts:52-126` |
+| FR-1 | The prompt, its message builder and the install-time recorder | `bridge.ts:52-126`, in `packages/minspec/src/lib/` |
 | FR-2 | The probe of the home directory and of ten other extensions | `packages/minspec/src/lib/ai-usage-detector.ts`, all 65 lines |
 | FR-3 | `minspec.conformance.enabled` and `minspec.scroogellmNudge.enabled` | `packages/minspec/package.json:470-479` |
 | FR-4 | The export command: contribution, registration, handler | `packages/minspec/package.json:238-241`; `extension.ts:465`; `extension.ts:873-892` |
@@ -155,7 +155,7 @@ One file, `packages/minspec/tests/no-scroogellm-upsell.test.ts`, the file the sp
 | The manifest | Every key and every string value of `packages/minspec/package.json`, at any depth | One names the product (`scrooge`, any casing), or uses `minspec.conformance.enabled` or `minspec.exportTraceability` as a whole id | FR-3, FR-4, FR-9 |
 | The listing text | Every document in the package root except the changelog, every file under `media/`, and any other file the manifest points at | A line names the product or a retired id | FR-9 |
 | The source, any text | Every file under `packages/minspec/src` and `packages/shared/src`, comments included | The extension id `aiclarity.scroogellm` appears, or a Marketplace or Open VSX address that names the product | FR-9 |
-| The source, strings | Every string and template literal in the bundled TypeScript, read from the syntax tree | A string names the product or a retired id | FR-1, FR-3, FR-4 |
+| The source, strings | Every string and template literal in the bundled TypeScript, read from the syntax tree, and every line of a bundled file that is not TypeScript | A string names the product or a retired id | FR-1, FR-3, FR-4 |
 | The pack | `packages/extension-pack/package.json`, and any other extension manifest that names the product | `private` is not `true`; there is a script besides `package`; `package` is anything but a lone `node -e "..."`; that program exits zero; its output does not say "shelved" and "DR-021"; or it says when to lift the guard | FR-8, FR-9 |
 
 Four choices in it are worth stating.
@@ -189,27 +189,32 @@ text is not scanned at all. Under DQ-3 its manifest names the product until the 
 decision, and what keeps that text away from a user is the guard, which is what is pinned.
 
 Every check also runs against invented inputs that contain what it looks for: eleven kinds
-of manifest reintroduction, four listing lines, four install targets, five strings, and ten
-ways to break the pack's guard. A sample of the comments that stay is run through the source
+of manifest reintroduction, four listing lines, four install targets, five strings, a
+bundled JSON asset, and ten ways to break the pack's guard. A sample of the comments that stay is run through the source
 checks and must produce nothing. That is what makes a green on the real tree a finding and
 not a reader that sees nothing (INV-2).
 
 ## Activation tests
 
-Three cases are added to `packages/minspec/tests/extension-extra.test.ts`, the suite that
-loses its bridge mock. They drive the real `activate()`.
+Six cases are added to `packages/minspec/tests/extension-extra.test.ts`, the suite that loses
+its bridge mock. They drive the real `activate()`.
 
 | Case | Set up | Asserts | Covers |
 |---|---|---|---|
-| The upsell's conditions | The three stored-state keys present, install time 30 days old, both retired settings stored as on, the product not installed | No message that names the product; no other extension is asked about; none of the three keys is read or written; neither retired setting is read | FR-1, FR-2, FR-3, DQ-4 |
-| The watcher's conditions | `conformance.enabled` stored as on, the product reported as installed | Activation creates the five standing watchers and no sixth | FR-5, DQ-4 |
+| No prompt | The three stored-state keys present, install time 30 days old, both retired settings stored as on, the product not installed | No message that names the product is shown | FR-1 |
+| No probe | The same | Activation does not ask whether any extension is installed | FR-1, FR-2 |
+| Old state left alone | The same | None of the three keys is read, and nothing is written to global state | DQ-4 |
+| Old settings left alone | The same | Neither retired setting is read. The harness records every key that is read, and the case first checks that it recorded some | FR-3, DQ-4 |
+| No watcher | `conformance.enabled` stored as on, the product reported as installed | Activation creates the five standing watchers and no sixth | FR-5, DQ-4 |
 | Command parity | Nothing | The commands activation registers are exactly the commands the manifest contributes | FR-4, FR-7 |
 
-The first two are also the proof for the invariant this build was given: an installation that
-still has the old values stored activates without error and reads none of them. They are
-written so that they fail when the bridge is present. With the mock gone, running the final
-suite against the unchanged tree runs the real bridge, which shows the prompt, asks about
-eleven extensions, reads the install time and a setting, and creates a sixth watcher.
+The first five are also the proof for the invariant this build was given: an installation
+that still has the old values stored activates without error and reads none of them. They
+are written so that they fail when the bridge is present. With the mock gone, running the
+final suite against the unchanged tree runs the real bridge, and each of the five fails for
+its own reason: the prompt is shown, eleven extensions are asked about, the install time and
+two prompt keys are read, both settings are read, and a sixth watcher is created. The parity
+case passes on both trees, as it should: both are consistent, at 45 commands and at 44.
 
 ## The pack
 
@@ -228,8 +233,9 @@ keyword and `extensionPack` entry that name the product stay, by DQ-3.
 Nothing is cleaned up (DQ-4). After the removal the only use of the extension's global state
 is the first-approval tip, reached from the approve command. Activation reads and writes
 none. A stored `minspec.scroogellmNudge.enabled` or `minspec.conformance.enabled` is a
-setting no code asks for; the editor shows it greyed out in `settings.json` and it does
-nothing. The activation cases above pin both halves.
+setting no code asks for. DQ-4 says the editor then shows it as an unknown setting in
+`settings.json`; that was not checked in an editor here. The activation cases above pin
+both halves of what the code does.
 
 ## Work in flight on the same subject
 
@@ -241,22 +247,27 @@ nothing. The activation cases above pin both halves.
 | #2441, README tables pinned to the manifest | See finding 7 | Whichever lands second deletes the pending-removal list |
 | #2469, a spec not yet on `main` (only Initialize creates `.minspec/`, issue #2364) | Lists the bridge's export as one of the writers it would guard | Already written for both outcomes: it says the row does not exist if the bridge is gone |
 
-**Pull request #2275 is closed, not reworked.** Its premise is "this pack bundles MinSpec and
-ScroogeLLM", and its third page tells the reader to look for ScroogeLLM in the Command
-Palette. FR-8 says the pack is blocked because the product is shelved and removes the
+**Pull request #2275 is to be closed, not reworked.** Its premise is "this pack bundles
+MinSpec and ScroogeLLM", and its third page tells the reader to look for ScroogeLLM in the
+Command Palette. FR-8 says the pack is blocked because the product is shelved and removes the
 promise that the guard lifts when it goes live, so the walkthrough could never be shown to a
 user. Without the ScroogeLLM page it would orient the reader across one extension, which is
 the pack of one that DQ-3 rejected as having no purpose. If issue #2359 decides to keep the
 pack with a different second extension, a walkthrough is written for that pack then. What
-would have to change is stated on the pull request: no ScroogeLLM page or step, no claim
-that the pack bundles it, and a base that has the corrected refusal. Issue #157, which it
-would have closed, stays open and is not closed by this change.
+would have to change: no ScroogeLLM page or step, no claim that the pack bundles it, and a
+base that has the corrected refusal. Issue #157, which it would have closed, stays open.
+
+The gate would not have stopped that pull request, and that is by design. Merged onto this
+change it leaves `private: true` and the refusing script in place, so the gate stays green
+(measured: 55 of 55 on the merged tree). What keeps the pack's text from a user is the
+guard, and the guard is what the gate pins. Closing it is a judgement about dead weight on
+a pack whose future is undecided, not a failed check.
 
 ## Test plan
 
 T0, written before any source change and shown red on 17ea58b9:
 
-- `packages/minspec/tests/no-scroogellm-upsell.test.ts` (FR-9). Fails 4 of 54 on the
+- `packages/minspec/tests/no-scroogellm-upsell.test.ts` (FR-9). Fails 4 of 55 on the
   unchanged tree: the command and both settings in the manifest; the extension id and
   Marketplace address in the bridge; eight strings the shipped code holds; and the pack's
   refusal, for not naming the shelving and for saying twice when to lift the guard. The
@@ -265,12 +276,16 @@ T0, written before any source change and shown red on 17ea58b9:
 
 T2:
 
-- The three activation cases above.
+- The six activation cases above.
 - `packages/minspec/tests/import-boundaries.test.ts` keeps asserting an exact list, now of
   five (FR-7).
 
 Proof the gate is not vacuous, recorded in the pull request: with the removal in place, each
-kind of surface is put back one at a time, the gate is run, and the tree is restored.
+kind of surface is put back one at a time, the gate is run, and the tree is restored. 27
+changes were tried in a scratch checkout. The 25 reintroductions each turned the gate red
+(the two that put a command back on one side only also failed the parity case), and the 2
+controls stayed green: a comment naming the scroogellm repository as an adopter, and a
+second changelog entry naming the product.
 
 What the test plan cannot do is show that a recommendation is absent when it does not name
 the product. That limit is DQ-5's stated cost.
@@ -304,22 +319,27 @@ dependency and is used the same way by three existing tests.
 - **`private: true` is a marker, not a lock** (finding 6). The pack is unpackageable through
   its scripts, not through the tool.
 - **A retired pack fails the gate until the expectation is deleted.** Deliberate, and one line.
-- **The pinned list of `vscode` importers is five while SPEC-040 and DR-064 still say seven**
-  (issue #2490).
+- **The pinned list of `vscode` importers is five while SPEC-040, DR-064 and the lint
+  configuration's comment still say seven** (issue #2490).
+- **`npm run validate` gains one warning this change cannot remove.** The spec's Context
+  cites the tool probe by path and line range, and FR-2 deletes that file, so the validator
+  reports the citation as dangling. The line is in the body the approval hash covers. Against
+  `main` the count is one lower all the same, 179 from 180: the two warnings that this spec
+  had no plan and no task list are gone.
 - **Pull request #2441** (finding 7).
 - **Users who set either setting, or used the command, find them gone.** The changelog entry
   is the only explanation they get; nothing in the editor says why (DQ-4).
 
 ## Follow-ups (tracked)
 
-- #2359 - decide whether to retire the extension pack. Filed by the spec. Finding 6 is added
-  to it.
+- #2359 - decide whether to retire the extension pack. Filed by the spec. Finding 6 bears on
+  that decision.
 - #2360 - the root README. Filed by the spec; pull request #2434 is open for it.
 - #2361 - amend SPEC-042. Filed by the spec; pull request #2381 is open for it.
 - #2488 - a comment in the CI workflow names the deleted bridge file as its example.
 - #2489 - the shared package's description still says it holds a classification engine and
   ScroogeLLM contracts.
-- #2490 - five more records cite the deleted code (finding 10).
+- #2490 - six more places cite the deleted code (finding 10).
 - #2491 - decide whether to pin that no shipped source reads the home directory (finding 9).
 - #830 - relocate the `vscode`-coupled `lib/` files. Its list of seven becomes five.
 - #157 - the pack's orientation walkthrough. Stays open; depends on #2359.
