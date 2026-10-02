@@ -50,7 +50,6 @@ import {
   goToCodeCommand,
   linkToSpecCommand,
 } from './views/codelens-provider';
-import { maybeShowNudge, recordInstallTimestamp, exportTraceability, setupConformanceWatcher } from './lib/bridge';
 import { runBootstrap, isWatchedGitPath, isMinspecInitialized, type BootstrapVsCode } from './lib/auto-bootstrap';
 import { findActiveSpec, trackActiveSpecEditor } from './lib/active-spec';
 import { parseSpec } from './lib/spec';
@@ -462,7 +461,6 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand('minspec.removeContext', () => removeContextCommand(workspaceRoot)),
     vscode.commands.registerCommand('minspec.generateExample', generateExampleCommand),
     vscode.commands.registerCommand('minspec.migrateLayout', () => migrateLayoutCommand(workspaceRoot)),
-    vscode.commands.registerCommand('minspec.exportTraceability', () => exportTraceabilityCommand(workspaceRoot)),
     // approve/revoke already fire `minspec.refreshTree` internally — no extra
     // refresh here (it only added to the redundant burst; issue #154).
     vscode.commands.registerCommand('minspec.approveSpec', async (node) => {
@@ -747,19 +745,6 @@ export function activate(context: vscode.ExtensionContext): void {
     );
   }
 
-  // ScroogeLLM bridge: conformance auto-export watcher (Phase 10)
-  if (workspaceRoot) {
-    const conformanceWatcher = setupConformanceWatcher(workspaceRoot);
-    if (conformanceWatcher) {
-      context.subscriptions.push(conformanceWatcher);
-    }
-  }
-
-  // ScroogeLLM bridge: record install timestamp on first activation, then
-  // attempt the nudge (gated on 24h install age + 7d cooldown).
-  recordInstallTimestamp(context);
-  void maybeShowNudge(context);
-
   // #320: empty-constitution nudge with an offer-to-fix action. If the
   // constitution has no human-authored rules yet, surface a SOFT, NON-MODAL
   // toast whose primary action runs the deterministic Propose command. Advisory
@@ -867,27 +852,6 @@ async function surfaceConstitutionProposeNudge(
     }
   } catch {
     // best-effort — the nudge is advisory; never let it break activation.
-  }
-}
-
-/**
- * Command: Export traceability data for ScroogeLLM conformance checking.
- */
-function exportTraceabilityCommand(workspaceRoot: string): void {
-  if (!workspaceRoot) {
-    vscode.window.showErrorMessage('MinSpec: No workspace folder open.');
-    return;
-  }
-
-  try {
-    const result = exportTraceability(workspaceRoot);
-    vscode.window.showInformationMessage(
-      `MinSpec: Exported traceability for ${result.specCount} spec(s) to ${path.basename(result.filePath)}.`,
-    );
-  } catch (err) {
-    vscode.window.showErrorMessage(
-      `MinSpec: Failed to export traceability — ${err instanceof Error ? err.message : String(err)}`,
-    );
   }
 }
 

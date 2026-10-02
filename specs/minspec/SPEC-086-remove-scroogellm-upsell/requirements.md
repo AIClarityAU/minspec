@@ -1,7 +1,7 @@
 ---
 id: SPEC-086
 type: requirements
-status: planning
+status: implementing
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - the epic that carries the upsell-trust rules this spec retires along with the upsell itself
@@ -19,9 +19,9 @@ affects: [packages/minspec/src/lib/bridge.ts, packages/minspec/src/lib/ai-usage-
 phases:
   specify: done
   clarify: done
-  plan: in-progress
-  tasks: pending
-  implement: pending
+  plan: done
+  tasks: done
+  implement: in-progress
 ---
 
 # SPEC-086: MinSpec stops recommending ScroogeLLM, and stops shipping the bridge built for it
