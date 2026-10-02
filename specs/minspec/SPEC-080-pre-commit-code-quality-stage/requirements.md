@@ -1,7 +1,7 @@
 ---
 id: SPEC-080
 type: requirements
-status: specifying
+status: planning
 tier: T4
 product: minspec
 epic: EPIC-003  # SDD Core Methodology — DR-037, the pre-commit gate harness this adds a stage to, is itself epic: EPIC-003 (docs/decisions/DR-037.md:2)
@@ -10,9 +10,9 @@ relates_to: [DR-037, DR-066, DR-099, SPEC-054, SPEC-066, SPEC-075]
 implements: [packages/minspec/tests/pre-commit-code-quality-stage.test.ts]  # NEW — the T0 this spec owns
 affects: [packages/minspec/src/lib/template-registry.ts, .minspec/hooks/pre-commit, packages/minspec/tests/scaffold-is-committable.test.ts]  # template-registry.ts is claimed by no spec's implements:; follows SPEC-066/SPEC-075/SPEC-063 precedent of affects:-only for this shared file
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---
