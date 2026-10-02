@@ -29,6 +29,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import { ensureDirectory } from './opt-in';
 
 /** Section hash map: heading → SHA-256 hash of section body */
 export interface SectionHashes {
@@ -1403,10 +1404,14 @@ export function loadProvenHashes(rootDir: string): ManifestBaseline {
  * one sentence in a notice, never a spent entry. Written FIRST, and any stamp key in
  * `hashes` dropped, so the serialized bytes stay deterministic for identical input
  * (SPEC-043 INV-4).
+ *
+ * Never creates `.minspec/` (SPEC-096 FR-5). Its callers run after Initialize has
+ * created the opt-in marker, so this has never needed to; in a folder with no
+ * marker it throws `NotOptedInError` and writes nothing.
  */
 export function saveHashes(rootDir: string, hashes: GeneratedHashes): void {
   const hashesPath = path.join(rootDir, '.minspec', HASHES_FILENAME);
-  fs.mkdirSync(path.dirname(hashesPath), { recursive: true });
+  ensureDirectory(path.dirname(hashesPath));
   const stamped: Record<string, unknown> = {
     [MANIFEST_STAMP_KEY]: { hashVersion: MANIFEST_HASH_VERSION },
   };
@@ -1451,10 +1456,13 @@ export function loadTemplateBaseline(rootDir: string): GeneratedHashes {
  * Persist the raw-template baseline to `.minspec/template-baseline.json`.
  * Written at every generate/refresh so drift detection always has a current
  * like-for-like reference. See {@link loadTemplateBaseline}.
+ *
+ * Never creates `.minspec/` (SPEC-096 FR-5): in a folder with no opt-in marker it
+ * throws `NotOptedInError` and writes nothing.
  */
 export function saveTemplateBaseline(rootDir: string, baseline: GeneratedHashes): void {
   const baselinePath = path.join(rootDir, '.minspec', TEMPLATE_BASELINE_FILENAME);
-  fs.mkdirSync(path.dirname(baselinePath), { recursive: true });
+  ensureDirectory(path.dirname(baselinePath));
   fs.writeFileSync(baselinePath, JSON.stringify(baseline, null, 2) + '\n');
 }
 

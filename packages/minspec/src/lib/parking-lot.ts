@@ -3,6 +3,7 @@ import * as path from 'path';
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { isGhAvailable, getRepoFromRemote } from './github';
+import { ensureDirectory } from './opt-in';
 export { isGhAvailable, getRepoFromRemote };
 
 const execFileAsync = promisify(execFile);
@@ -186,12 +187,14 @@ export async function commentOnIssue(
 /**
  * Append an entry to .minspec/parking-lot.md as a fallback
  * when `gh` is unavailable.
+ *
+ * Never creates `.minspec/`: that directory is the opt-in marker (constitution
+ * invariant 3). In a folder that has not opted in there is no local parking lot,
+ * so this throws `NotOptedInError` and writes nothing (SPEC-096 FR-5, FR-7).
  */
 export function appendToParkingLotFile(rootDir: string, entry: ParkingLotEntry): string {
   const minspecDir = path.join(rootDir, '.minspec');
-  if (!fs.existsSync(minspecDir)) {
-    fs.mkdirSync(minspecDir, { recursive: true });
-  }
+  ensureDirectory(minspecDir);
 
   const filePath = path.join(minspecDir, 'parking-lot.md');
   const existingContent = fs.existsSync(filePath)
@@ -234,6 +237,12 @@ export interface ParkOptions {
  * By default a dedup gate (issue #24) reuses an existing open issue / heading
  * whose normalized title matches. Pass `{ force: true }` to bypass that gate and
  * always create (issue #136).
+ *
+ * The local file lives in `.minspec/`, so it exists only in a folder that has
+ * opted in. In one that has not, the GitHub path still works (it writes nothing
+ * in the folder); when that path is unavailable or fails, this throws
+ * `NotOptedInError` from {@link appendToParkingLotFile} rather than creating the
+ * opt-in marker to hold the file (SPEC-096 FR-7).
  */
 export async function parkTopic(
   rootDir: string,

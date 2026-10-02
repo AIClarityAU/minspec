@@ -31,6 +31,7 @@ import { computeTemplateBaseline } from './template-registry';
 import { collectArtifacts } from './epic-backfill';
 import { listEpics } from './epic-manager';
 import { findSpecDirsMissingTasksMd, scaffoldTasksMd } from './scaffold';
+import { ensureDirectory } from './opt-in';
 
 // ---------------------------------------------------------------------------
 // Preferences (persisted in .minspec/preferences.json)
@@ -209,7 +210,11 @@ export function hasUnclassifiedChanges(rootDir: string): boolean {
   // Ensure the classifications dir exists so the user can collect results
   const classificationsDir = path.join(rootDir, '.minspec', 'classifications');
   try {
-    fs.mkdirSync(classificationsDir, { recursive: true });
+    // Through the shared guard (SPEC-096 FR-4): it creates `classifications/`
+    // below an existing `.minspec/` and can never create `.minspec/` itself, so
+    // the marker vanishing after the check above ends in the `catch`, not in a
+    // recreated marker.
+    ensureDirectory(classificationsDir);
   } catch {
     // If we can't create it, skip the prompt rather than spamming
     return false;
