@@ -78,18 +78,27 @@ keyboard, making no `gh` network call until the user performs an explicit gestur
 
 ## Context — what exists today, and what does not (read from `origin/main`, not inferred)
 
-### No PR data source exists in the extension
+### No PR *queue* data source exists in the extension
 
 `packages/minspec/src/lib/github.ts` exports exactly two things: `isGhAvailable`
 (`gh auth status`) and `getRepoFromRemote` (local git remote parsing, no network).
-Neither lists, reads, or watches pull requests. A repo-wide search for `pr list`,
-`gh pr`, and `PullRequest` across `packages/minspec/src` and `packages/shared/src`
-returns no hits outside `.github/workflows/*.yml` (server-side CI, not the
-extension) and `scripts/*.ts`/`.sh` (the dev-time CLI dispatcher, not loaded into
-the extension host). The closest sibling, the Backlog pane
+Neither lists, reads, or watches pull requests. `packages/minspec/src/lib/approval-pr.ts`
+does reach `gh pr` twice — the exported `openPullRequest`'s single `gh pr create`
+(FR-4 there) and an internal, unexported `findOpenPrForHead` probe (`gh pr list
+--head <branch> --state open --json url --limit 1`, `approval-pr.ts:751-784`) — but
+both are single-branch, single-field (`url` only) existence checks that gate
+whether SPEC-039/SPEC-050 open a *new* PR, not a general-purpose fetch; neither
+returns, or is shaped to return, the multi-row `mergeable`/`statusCheckRollup`/label
+set FR-5 needs, and neither is called outside that create-or-adopt path. Beyond
+that one seam, a repo-wide search for `pr list`, `gh pr`, and `PullRequest` across
+`packages/minspec/src` and `packages/shared/src` returns no hits outside
+`.github/workflows/*.yml` (server-side CI, not the extension) and
+`scripts/*.ts`/`.sh` (the dev-time CLI dispatcher, not loaded into the extension
+host). The closest sibling, the Backlog pane
 (`packages/minspec/src/views/backlog-view.ts`), fetches **issues**
 (`gh issue list`), not PRs. This pane is new ground, not an extension of an
-existing fetcher.
+existing fetcher — the one existing `gh pr list` call is a narrower, differently
+shaped, unexported probe this pane cannot reuse as-is.
 
 ### The consent precedent this pane must follow (SPEC-085)
 
@@ -232,9 +241,13 @@ system this issue does not otherwise justify.
 - **FR-9 — Offline core, Tier-0 boundary.** No module reachable from this pane
   may import `http`/`https`/`fetch`/`net`; all GitHub reads and writes go through
   the `gh` CLI the user already has configured, as every existing network-reaching
-  MinSpec module does (`CHILD_PROCESS_ALLOWLIST`,
-  `packages/minspec/tests/invariants.test.ts:115-216`), and the new entry this
-  pane adds MUST be listed there.
+  MinSpec module does (`SPAWN_ALLOWLIST`,
+  `packages/minspec/tests/invariants.test.ts:134-261`, renamed from
+  `CHILD_PROCESS_ALLOWLIST` by #2456), and the new entry this pane adds MUST be
+  listed there. The `gh` shell-out is the network actor, not this pane's own
+  process, so the separate `NETWORK_CONSENT_ALLOWLIST`
+  (`invariants.test.ts:274-278`, which gates `simple-git`'s own network methods)
+  does not apply here.
 
 ## Acceptance Criteria
 
@@ -259,7 +272,7 @@ system this issue does not otherwise justify.
       the view, arrow keys between rows, Enter activates, and the refresh
       keybinding fires with no pointing device. (FR-7)
 - [ ] A repo-wide scan finds no `http`/`https`/`fetch`/`net` import reachable from
-      the new module(s), and `CHILD_PROCESS_ALLOWLIST` lists the new `gh pr`
+      the new module(s), and `SPAWN_ALLOWLIST` lists the new `gh pr`
       invocation(s). (FR-9)
 
 ## Invariants (must not break)
