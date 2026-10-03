@@ -297,9 +297,10 @@ also hashes every spec in `specs/` LF and CRLF through both twins.
    (`spec-manager.ts`), plus the two #2481 detectors (finding 2).
 4. **FR-6.** `setAdrStatus` decides by the record's first non-blank line, a leading mark
    ignored: not `---` means synthesize, `---` with no parseable block means throw, name the
-   file and write nothing. `applyStatus` (`commands/adr.ts:199-280`) then shows that error
-   and no "predates MinSpec" offer. The suites that pin the synthesize branch for a record
-   that opens with `---` change, as AC-19 allows.
+   file and write nothing. `applyStatus`
+   (`packages/minspec/src/commands/adr.ts:200-272`) then shows that error and no
+   "predates MinSpec" offer. The suites that pin the synthesize branch for a record that
+   opens with `---` change, as AC-19 allows.
 5. **FR-10.** `packages/minspec/tests/text-io-inventory.test.ts`, the two-pin inventory,
    shown to fail on the code before it. Its exclusions follow the source-scan invariants in
    `packages/minspec/tests/invariants.test.ts` (whose allowlist is now `SPAWN_ALLOWLIST`).

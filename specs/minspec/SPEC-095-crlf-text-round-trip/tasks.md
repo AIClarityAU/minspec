@@ -31,78 +31,91 @@ ownership signal stays as narrow as the change.
 
 ## 1 - T0 tests, written before any source change
 
-- [ ] **1.1** `packages/minspec/tests/text-round-trip.test.ts` (new, owned) - FR-9's behaviour
+- [x] **1.1** `packages/minspec/tests/text-round-trip.test.ts` (new, owned) - FR-9's behaviour
   test with the Slice 1 rows: every function in the four tables against the CRLF and mixed
   variants, each with its LF control; the three symptoms #2397 names; AC-2's signpost; the
   named cases for FR-5, FR-7 and FR-8; the `core.autocrlf=true` end-to-end case; T1 cases for
   the module, loaded at run time.
   *Done when:* on 350c6fa4 every CRLF row is red, pair by pair, and every control is green.
+  Observed with the file as merged (5.3): 108 failed, 56 passed. All 47 controls green, all
+  47 CRLF rows red, 41 of 47 mixed rows red. The six mixed rows already green there are
+  readers whose one line falls on an LF line of the alternating variant, or writers whose
+  input ties, so today's LF append is what FR-4 asks for.
 
 ## 2 - Plan and task list
 
-- [ ] **2.1** `specs/minspec/SPEC-095-crlf-text-round-trip/design.md` (new) - the plan for both
+- [x] **2.1** `specs/minspec/SPEC-095-crlf-text-round-trip/design.md` (new) - the plan for both
   slices, with the nine findings Plan made that the spec did not have.
-- [ ] **2.2** `specs/minspec/SPEC-095-crlf-text-round-trip/tasks.md` (new) - this file.
-- [ ] **2.3** `specs/minspec/SPEC-095-crlf-text-round-trip/requirements.md` - advance the
+- [x] **2.2** `specs/minspec/SPEC-095-crlf-text-round-trip/tasks.md` (new) - this file.
+- [x] **2.3** `specs/minspec/SPEC-095-crlf-text-round-trip/requirements.md` - advance the
   lifecycle mirrors (`status` and `phases` only; the body is hash-bound to the founder's
   approval and is not touched).
   *Done when:* `npm run facts -- hash SPEC-095` still reports APPROVED with stored and
-  computed hashes equal, and `npm run facts -- status SPEC-095` reports MATCH.
+  computed hashes equal, and `npm run facts -- status SPEC-095` reports MATCH. Observed:
+  APPROVED, both `968403c0...`, the value before the edit; status MATCH (`implementing`).
 
 ## 3 - The module
 
-- [ ] **3.1** `packages/minspec/src/lib/text-io.ts` (new, owned) - preparing, detecting and
-  restoring (FR-1 without its mark step, FR-4), and the read and write wrappers.
-  *Done when:* the T1 cases are green.
+- [x] **3.1** `packages/minspec/src/lib/text-io.ts` (new, owned) - preparing, detecting and
+  restoring (FR-1 without its mark step, FR-4), and two read wrappers. A writer keeps its own
+  `fs.writeFileSync` call and writes the restored text (design, "The module").
+  *Done when:* the T1 cases are green. Observed: 9 of 9.
 
 ## 4 - Readers and writers behind the four tables
 
-- [ ] **4.1** `packages/minspec/src/lib/adr-manager.ts` - reads through the module in
+- [x] **4.1** `packages/minspec/src/lib/adr-manager.ts` - reads through the module in
   `listAdrs`, `adrHasFrontmatter`, `validateDrIndexStatus`, `validateDrAmendments` and the
   record read behind the INDEX summary; `extractExistingSummary` and `mergeDrIndex` prepare
   at entry and `mergeDrIndex` restores; `setAdrStatus` and `regenerateDrIndex` restore.
-- [ ] **4.2** `packages/minspec/src/lib/epic-manager.ts` - `listEpics`, `readArtifactEpic`;
+- [x] **4.2** `packages/minspec/src/lib/epic-manager.ts` - `listEpics`, `readArtifactEpic`;
   `setArtifactEpic`, `setEpicStatus`, `setEpicOrder`, `writeEpicIndex` restore;
   `mergeEpicIndex` prepares and restores.
-- [ ] **4.3** `packages/minspec/src/lib/status-parity.ts` - `inspectStatusLine` and
+- [x] **4.3** `packages/minspec/src/lib/status-parity.ts` - `inspectStatusLine` and
   `inspectAllStatusClaims` prepare at entry, which covers `checkStatusParity`.
-- [ ] **4.4** `packages/minspec/src/lib/merge-refresh.ts` - `parseSections` prepares,
+- [x] **4.4** `packages/minspec/src/lib/merge-refresh.ts` - `parseSections` prepares,
   `hashSection` hashes the LF form (FR-7), `mergeFile` prepares and restores.
-- [ ] **4.5** `packages/minspec/src/lib/constitution.ts`,
+- [x] **4.5** `packages/minspec/src/lib/constitution.ts`,
   `packages/minspec/src/lib/constitution-compaction.ts`,
   `packages/minspec/src/lib/constitution-proposer.ts` - `parseConstitution` prepares;
   `compactConstitution` and `integrateProposal` prepare and restore.
-- [ ] **4.6** `packages/minspec/src/lib/scaffold.ts` - `seedConstitution`,
+- [x] **4.6** `packages/minspec/src/lib/scaffold.ts` - `seedConstitution`,
   `buildTasksMdContent`, `scaffoldTasksMd`, `findSpecDirsMissingTasksMd`,
   `ensureGitattributesEntries`, `ensureGitignoreEntries`,
   `migrateLegacyClaudeSlashCommandShims`, `refreshManagedRegionTemplates` and
   `checkManagedRegionMarkers`; and `isLfPinnedPath`, which writes a pinned managed file LF
   throughout (FR-5(c)).
-- [ ] **4.7** `packages/minspec/src/lib/epic-backfill.ts` - the two reads behind
+- [x] **4.7** `packages/minspec/src/lib/epic-backfill.ts` - the two reads behind
   `collectArtifacts`. `applyBackfill` is fixed by 4.2.
-- [ ] **4.8** `packages/minspec/src/lib/spec.ts`, `packages/minspec/src/lib/spec-layout.ts`,
+- [x] **4.8** `packages/minspec/src/lib/spec.ts`, `packages/minspec/src/lib/spec-layout.ts`,
   `packages/minspec/src/lib/spec-manager.ts`, `packages/minspec/src/views/spec-panel.ts` -
   `parseSpec` calls the module and records `source`; `setSpecStatus`, `setSpecPhases` and
   `advanceSpecToImplementing` read through the module and restore; `writeSpecFile`, the
   panel's checkbox write, `writeSpecKitDir` and `migrateLayout` restore (FR-5(a) for a
   migration).
-- [ ] **4.9** `packages/minspec/src/lib/slash-commands.ts`,
+- [x] **4.9** `packages/minspec/src/lib/slash-commands.ts`,
   `packages/minspec/src/lib/context-injector.ts`, `packages/minspec/src/lib/parking-lot.ts` -
   `injectAgentsSlashSection`, `injectContext` and `removeContext` prepare and restore;
   `appendToParkingLotFile` restores.
-- [ ] **4.10** `packages/minspec/CHANGELOG.md` - one Unreleased entry.
-  *Done when, for 4.1 to 4.9:* every row of the behaviour test is green.
+- [x] **4.10** `packages/minspec/CHANGELOG.md` - one Unreleased entry.
+  *Done when, for 4.1 to 4.9:* every row of the behaviour test is green. Observed: 164 of
+  164.
 
 ## 5 - Prove it and verify
 
-- [ ] **5.1** Mutation check: with the fix in place, break the restoring step and confirm the
-  writer rows go red; restore it.
-- [ ] **5.2** Mutation check: revert one converted reader to a bare split on `\n` and confirm
-  its rows go red; restore it.
-- [ ] **5.3** Run the final test file against an export of the pre-change tree and record the
-  failures, so the red evidence is for the tests as merged.
-- [ ] **5.4** Typecheck the new test file with `tsc` directly: no tsconfig includes the tests
-  directory, so a green run says nothing about types.
+- [x] **5.1** Mutation check: with the fix in place, break the restoring step and confirm the
+  writer rows go red; restore it. Observed with `restoreLineEndings` returning its input: 72
+  red - every writer row in both variants (60), the three symptoms, the migration, manifest
+  and end-to-end cases, and the six T1 restore cases; every reader row stayed green.
+- [x] **5.2** Mutation check: revert one converted reader to a bare split on `\n` and confirm
+  its rows go red; restore it. Observed with `parseSections` splitting `content` on `\n`: 13
+  red - its own two rows, `mergeFile`'s two, the six rows reached through Refresh, the
+  Refresh symptom (AC-7), the manifest case (AC-15) and the end-to-end case.
+  `integrateProposal` stayed green: it prepares before it calls `parseSections`.
+- [x] **5.3** Run the final test file against an export of the pre-change tree and record the
+  failures, so the red evidence is for the tests as merged. Observed: see 1.1.
+- [x] **5.4** Typecheck the new test file with `tsc` directly: no tsconfig includes the tests
+  directory, so a green run says nothing about types. Observed: it found two type errors in
+  the test (a proposal's section names, a narrowed handler), both fixed; then exit 0.
 - [ ] **5.5** From the repository root: the suite the way CI runs it, lint, build, typecheck,
   validate.
 - [ ] **5.6** The approval verdict of every approvable on `main`, before and after, with the
