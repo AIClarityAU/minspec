@@ -18,7 +18,7 @@ affects: [packages/shared/src/index.ts, packages/minspec/src/lib/epic-backfill.t
 # SPEC-116: Every model call names the feature that made it, and MinSpec shows what each feature has cost
 
 > **SPECIFICATION ONLY.** Nothing is built by the dispatch that produced this. A human
-> reads it, answers the six questions under
+> reads it, answers the seven questions under
 > [Decisions needed (Clarify)](#decisions-needed-clarify), and approves it through the
 > normal spec-approval gate before any code changes. Every requirement below is written
 > under each question's recommended option, so approving the spec as it stands accepts
@@ -56,8 +56,14 @@ c6c3b92, and the `AIClarityAU/sealbox` checkout at 9d7a5f3.
 | 2 | Every call is "routed via the host-side broker, optionally the Scrooge proxy." | [DR-052](../../../docs/decisions/DR-052.md) (accepted) makes the default billing mode the genuine `claude` command-line tool talking directly to Anthropic: "it does **not** proxy or Scrooge-route that traffic" (`DR-052.md:61-63`), and "Broker + Scrooge value = API-key mode only" (`:70`). Scrooge DR-021 item 5 separately forbids routing subscription sign-in through any third-party proxy. | In the default mode there is no HTTP request the caller can put a header on, and no proxy to read one. A header covers only the opt-in API-key mode. |
 | 3 | "MinSpec core makes zero HTTP calls ... The bridge (`src/lib/bridge.ts`) is passive/file-based ... Nothing to tag there." | Half true. `bridge.ts` no longer exists ([SPEC-086](../SPEC-086-remove-scroogellm-upsell/requirements.md) removed it and the shared contract it used). MinSpec still makes no HTTP call, but it does run a model: `packages/minspec/src/lib/epic-backfill.ts:627` runs `claude -p` for the AI-assisted epic backfill ([SPEC-011](../SPEC-011-epic-backfill/requirements.md), [DR-016](../../../docs/decisions/DR-016.md)), started from the `minspec.backfillEpics` command (`packages/minspec/package.json:167-168`); the `minspec.autoBackfillUseAi` setting (`:527-531`) makes the AI pass run without asking each time. A search of `packages/minspec/src` for the quoted program name `'claude'` finds two lines, both in that file: the `--version` probe at `:161` and this call. | MinSpec has one costed feature today and it is un-costed. That is the first caller this spec covers. |
 | 4 | The features to tag "live in agent-execute (Tier-1)." | The extension is now named SealBox and has its own repository ([DR-044](../../../docs/decisions/DR-044.md)). That repository holds no extension source: the 40 tracked files outside `docs/`, `specs/` and `sites/` are harness, hook, workflow and dispatch-script files, with no package and no `src/`. Its two specs were retired as duplicates of this repository's [SPEC-016](../../agent-execute/SPEC-016-reality-check/requirements.md) and [SPEC-019](../../agent-execute/SPEC-019-execution-substrate/requirements.md), so those two remain the governing text, and neither has code yet. | The reality-check and round-table callers cannot be changed now. This spec fixes the contract they must meet when built. DQ-5. |
-| 5 | Show the result "in MinSpec settings." | SPEC-086 added a test that fails if the word `scrooge` appears in any setting title or description in the MinSpec manifest (`packages/minspec/tests/no-scroogellm-upsell.test.ts`), and goal G-5 (MinSpec as a funnel into ScroogeLLM) is retired (`.minspec/constitution.md:48-52`, [DR-075](../../../docs/decisions/DR-075.md)). Separately, I believe the editor's Settings page can show only the fixed text an extension declares in its manifest and cannot show a live number; this is from knowledge of the editor, not from a check made here. | The view must not depend on, name, or promote ScroogeLLM, and it cannot be the Settings page itself. DQ-4. |
+| 5 | Show the result "in MinSpec settings." | SPEC-086 added a test (`packages/minspec/tests/no-scroogellm-upsell.test.ts`) that fails if the word `scrooge`, in any casing (`:87`), appears in any key or string of the MinSpec manifest, in the listing text, **or in any string literal in the shipped source** - and the shipped source it reads is both `packages/minspec/src` and `packages/shared/src` (`:63`, `:254-259`, `:427-433`). Comments are not read (`:32`). Goal G-5 (MinSpec as a funnel into ScroogeLLM) is retired (`.minspec/constitution.md:48-52`, [DR-075](../../../docs/decisions/DR-075.md)). Separately, I believe the editor's Settings page can show only the fixed text an extension declares in its manifest and cannot show a live number; this is from knowledge of the editor, not from a check made here. | The view must not depend on, name, or promote ScroogeLLM, and it cannot be the Settings page itself. DQ-4. And no code this spec adds to either package may hold the header's name as a string, because the name contains the product's name. DQ-7. |
 | 6 | "$X ... this week." | In subscription mode no per-call dollar amount is charged. Sealbox DR-048 (itself `superseded`) recorded the same fact: `costUsd | null, // null in subscription mode (no per-call $ meter exists there)`. | A dollar figure in the default mode is an estimate, not money spent, and must say so. DQ-2. |
+
+**What could not be checked from this repository.** Rows 1, 4 and 6 rest on reads of two
+other repositories (scroogellm at c6c3b92, sealbox at 9d7a5f3). A reviewer with only this
+checkout cannot confirm them. Before approving, a human should re-run the row 1 search in
+the scroogellm checkout and open sealbox DR-048; if row 1 is wrong (a tag reader exists),
+DQ-1 and DQ-7 are the answers to revisit.
 
 **What stays true.** The defect the issue names is real and unchanged: nothing anywhere
 requires a model call to say which feature made it. SPEC-016 FR-7 promises a round-table
@@ -84,8 +90,9 @@ the contract and the header as one way of carrying it.
 4. **A view.** A read-only command sums those lines per feature over a window and shows
    them beside the name of the controlling switch.
 5. **The header, when it applies.** A caller that does send an HTTP request through a
-   proxy documented to read `X-Scrooge-Tag-*` sends `X-Scrooge-Tag-feature` with the same
-   id, from the same registry. No caller in this repository does that today.
+   proxy documented to read a feature tag header sends the same id, from the same
+   registry, as that header's value. No caller in this repository does that today, and
+   the header's name is not held anywhere in this repository's shipped source (DQ-7).
 
 ### Contract (to live in `packages/shared/src/feature-usage.ts`)
 
@@ -128,8 +135,11 @@ export interface FeatureUsageSummary {
   readonly known: boolean;                      // false = id not in this build's registry
 }
 
-export const FEATURE_TAG_HEADER = 'X-Scrooge-Tag-feature';
+/** True when `value` is well-formed (FR-2's pattern). Says nothing about registry membership. */
+export declare function isFeatureId(value: string): value is FeatureId;
 ```
+
+The contract deliberately holds **no header name**. See FR-14 and DQ-7.
 
 ## Functional Requirements
 
@@ -226,19 +236,29 @@ export const FEATURE_TAG_HEADER = 'X-Scrooge-Tag-feature';
   or prompt about spend, and MUST NOT suggest turning a feature off. The view is opened by
   the user and states figures (constitution principle 4, avoid nagging).
 
-- **FR-13 - No ScroogeLLM in any user-visible surface.** No command title, setting text or
-  view text added by this spec names ScroogeLLM, and `no-scroogellm-upsell.test.ts` MUST
-  still pass. The header name in FR-14 is a wire constant in `@aiclarity/shared`, not a
-  user-visible string.
+- **FR-13 - No ScroogeLLM in any user-visible surface or shipped string.** No command
+  title, setting text, view text, or string literal in `packages/minspec/src` or
+  `packages/shared/src` added by this spec names ScroogeLLM, and
+  `no-scroogellm-upsell.test.ts` MUST still pass with no edit to that file. That test
+  does not tell a wire constant from a message: any string literal in shipped source that
+  matches `/scrooge/i` fails it (`no-scroogellm-upsell.test.ts:87`, `:254-259`,
+  `:427-433`). The literal `X-Scrooge-Tag-feature` is therefore not written in either
+  package, and MUST NOT be assembled from pieces to get past the test - the test's own
+  header (`:37-38`) names that as something it cannot see, which makes it a way around
+  the gate, not a way to satisfy it.
 
 ### The header, and other extensions
 
-- **FR-14 - The header carries the same id.** `@aiclarity/shared` MUST export the header
-  name `X-Scrooge-Tag-feature` and a pure function returning the header pair for a
-  `FeatureId`. Any caller that sends a model request over HTTP through a proxy documented
-  to read that header MUST send it, with the value taken from the registry. This places no
-  obligation on MinSpec, which sends no HTTP request. No requirement here depends on any
-  proxy reading the header.
+- **FR-14 - A proxy header carries the same id; its name belongs to the proxy.**
+  `@aiclarity/shared` MUST export `isFeatureId`, a pure check that a string is a
+  well-formed id, and MUST NOT export or contain any header name. Any caller that sends a
+  model request over HTTP through a proxy documented to read a feature tag header MUST
+  send the registry id, checked with `isFeatureId`, as that header's value. The header's
+  name is part of the proxy's interface, so the caller that talks to the proxy holds it,
+  in its own source. The only name ever proposed is `X-Scrooge-Tag-feature` (scrooge
+  DR-013, superseded; row 1), and no reader of it exists. This places no obligation on
+  MinSpec, which sends no HTTP request, and no requirement here depends on any proxy
+  reading a header (DQ-7).
 
 - **FR-15 - What the reality-check and round-table callers owe.** When the features in
   SPEC-016 are built, each MUST have a feature id (`reality-check`, `round-table`), MUST
@@ -279,9 +299,13 @@ export const FEATURE_TAG_HEADER = 'X-Scrooge-Tag-feature';
       still shows the rest. (FR-11)
 - [ ] Activating the extension and running a costed feature produces no notification and
       no status-bar item about spend. (FR-12)
-- [ ] `no-scroogellm-upsell.test.ts` passes unchanged. (FR-13)
-- [ ] The header helper returns `['X-Scrooge-Tag-feature', 'epic-backfill-ai']` for that
-      id and rejects a string that is not a valid id. (FR-14)
+- [ ] `no-scroogellm-upsell.test.ts` passes, and `git diff` shows that file untouched.
+      Adding the line `export const H = 'X-Scrooge-Tag-feature';` to
+      `packages/shared/src/feature-usage.ts` turns it red, which shows the test reads the
+      new file. (FR-13)
+- [ ] `isFeatureId('epic-backfill-ai')` is true; it is false for `'Epic Backfill'`, for
+      the empty string and for a 49-character id. `packages/shared/src/feature-usage.ts`
+      exports nothing whose value is a header name. (FR-14)
 
 ## Invariants (must not break)
 
@@ -311,8 +335,8 @@ answered by a human. The requirements above assume the recommended option in eve
 
 ### DQ-1 - Where is the spend measured?
 
-- **Option A - by the caller, into a local record; the proxy header is carried when a
-  proxy is in the path (rec).** Works in the default subscription mode, where there is no
+- **Option A - by the caller, into a local record; a proxy header carries the same id
+  when a proxy is in the path (rec; who holds the header's name is DQ-7).** Works in the default subscription mode, where there is no
   proxy; works with nothing else installed; covers MinSpec's existing call now. *Cost:*
   MinSpec owns a small file format and a writer that a proxy would otherwise have owned,
   and the figure is what the calling tool reported rather than an independent measurement
@@ -388,6 +412,31 @@ answered by a human. The requirements above assume the recommended option in eve
 - **Option B - a runtime check only, rejecting a call with no feature.** *Cost:* found
   when the feature runs, not when it is written, and only if that path is exercised.
 
+### DQ-7 - Does this repository hold the header's name?
+
+The issue's title asks for `X-Scrooge-Tag-feature` to be stamped. The name contains the
+product name, and SPEC-086's test fails on any string literal in `packages/minspec/src`
+or `packages/shared/src` that contains it (row 5). An earlier draft of this spec required
+the constant in `@aiclarity/shared` and also required that test to pass unchanged; the two
+cannot both hold, and review caught it.
+
+- **Option A - no header name in this repository; the shared package exports the id and
+  its validator, and whichever caller talks to a proxy holds that proxy's header name
+  (rec).** FR-13 and FR-14 as written. SPEC-086's test stays as approved. Nothing is lost
+  today, since the header has no reader (row 1) and no sender in this repository (row 2,
+  row 3). *Cost:* the issue's literal ask is not delivered by this spec. If two callers
+  in two repositories ever do send the header, each spells the name itself and nothing
+  checks that they agree; a shared constant would have.
+- **Option B - export the constant from `@aiclarity/shared` and add an exemption for that
+  one literal to `no-scroogellm-upsell.test.ts`.** One spelling, shared. *Cost:* it edits
+  a gate that SPEC-086 (approved) put there to keep the product name out of shipped
+  strings, for a constant nothing reads; an exemption by exact text is the first hole in
+  a test whose value is that it has none, and SPEC-086 FR-9 would need amending and
+  re-approving to say so.
+- **Option C - export the constant but build the string from pieces so the test does not
+  see it.** *Cost:* this defeats the gate while leaving it green, which is the silent-gate
+  failure constitution invariant 2 names. Listed only so it is on record as rejected.
+
 ## Why no new DR
 
 Nothing here is hard to reverse. The record is a local, uncommitted measurement file
@@ -401,9 +450,10 @@ register was checked for an existing record on per-feature cost attribution
 decides it. The only hits for the header are [DR-048](../../../docs/decisions/DR-048.md)
 `:81` and DR-049 `:93`, which mention it in passing.
 
-A decision record becomes necessary under two answers: DQ-1 Option B, which would make
-MinSpec depend on a shelved product and so reverses the direction of DR-075; and DQ-3
-Option C, which puts spend data into shared history, where it cannot be taken back.
+A decision record becomes necessary under three answers: DQ-1 Option B, which would make
+MinSpec depend on a shelved product and so reverses the direction of DR-075; DQ-3
+Option C, which puts spend data into shared history, where it cannot be taken back; and
+DQ-7 Option B, which narrows a gate an approved spec established.
 
 ## Out of Scope
 
@@ -437,7 +487,11 @@ Recorded because this spec was written without a live conversation (DR-086 secti
 - **Passing the feature through the `claude` program's custom-header environment variable
   so a proxy could read it.** Not rejected outright, but not required: I believe such a
   variable exists, unverified, and it would only matter in API-key mode behind a proxy
-  that reads the header, which nothing does today. FR-14 leaves room for it.
+  that reads the header, which nothing does today. FR-14 leaves room for it: the value
+  would be the registry id, and the header's name would sit with whatever configures that
+  variable, not in the shared package.
+- **A header-name constant in `@aiclarity/shared`.** Rejected: DQ-7. It was in the first
+  draft of this spec and contradicted FR-13.
 - **A "turn this off to save $X" prompt.** Rejected: FR-12.
 
 ## Test plan (for the Plan phase to place)
@@ -490,5 +544,5 @@ then they exist only in this text.
 - **Specs this must not regress:**
   [SPEC-086](../SPEC-086-remove-scroogellm-upsell/requirements.md) FR-9,
   [SPEC-096](../SPEC-096-opt-in-marker-single-creator/requirements.md).
-- **DR for this spec:** none, by design; see "Why no new DR" for the two answers that
+- **DR for this spec:** none, by design; see "Why no new DR" for the three answers that
   would require one.
