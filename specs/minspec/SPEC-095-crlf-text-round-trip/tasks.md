@@ -116,12 +116,18 @@ ownership signal stays as narrow as the change.
 - [x] **5.4** Typecheck the new test file with `tsc` directly: no tsconfig includes the tests
   directory, so a green run says nothing about types. Observed: it found two type errors in
   the test (a proposal's section names, a narrowed handler), both fixed; then exit 0.
-- [ ] **5.5** From the repository root: the suite the way CI runs it, lint, build, typecheck,
-  validate.
-- [ ] **5.6** The approval verdict of every approvable on `main`, before and after, with the
-  repository's own `npm run facts`: identical.
-- [ ] **5.7** Merge `origin/main` into the branch before opening the pull request and repeat
-  5.4 to 5.6 on the merged tree.
+- [x] **5.5** From the repository root: the suite the way CI runs it, lint, build, typecheck,
+  validate. Observed on the final tree: `npx vitest run --coverage` 349 of 349 files, 7691
+  passed (3 expected-fail and 2 skipped, as on main); lint, build, typecheck, import cycles
+  and validate pass, and validate warns about nothing new (two fewer: SPEC-095's missing
+  design and tasks).
+- [x] **5.6** The approval verdict of every approvable on `main`, before and after, with the
+  repository's own `npm run facts`: identical. Observed over 386 runs (78 sidecars, every
+  spec file, 100 decision records): 384 byte-identical; the other two are this spec's own
+  lifecycle mirrors, with the same stored and computed hash, APPROVED, and status MATCH.
+- [x] **5.7** Merge `origin/main` into the branch before opening the pull request and repeat
+  5.4 to 5.6 on the merged tree. Observed: `origin/main` had not moved from 350c6fa4, so the
+  merge was a no-op and 5.4 to 5.6 stand as run.
 
 ## 6 - Slice 2 (not in this change)
 
@@ -152,5 +158,5 @@ None of these is started here; they are listed so the slice has its task list.
   Slice 2 is still owed, and recording completion is a lifecycle act for a human or the
   extension, never a line written by the change being judged.
 - **One Refresh that is not a fixed point** (design finding 7). Pre-existing and not about
-  line endings; filed as its own issue.
+  line endings: #2520.
 - **#2465, #2466, #2467, #2468, #2472, #2474, #2477**, as the spec lists.

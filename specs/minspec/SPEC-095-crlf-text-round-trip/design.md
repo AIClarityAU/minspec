@@ -111,7 +111,7 @@ showed nine facts that change how the requirements are met. None changes a requi
 7. **One Refresh is not a fixed point when it seeds a new DRAFT.** Measured on LF:
    `seedConstitution` runs after the merge, so a DRAFT it adds reaches `.cursorrules` on the
    next Refresh, not this one. It is not a line-ending defect and is out of scope; it is
-   filed separately, and the behaviour test settles its fixture with two Refreshes.
+   #2520, and the behaviour test settles its fixture with two Refreshes.
 
 8. **Five of the 23 `affects:` files need no edit in Slice 1.** `buildArtifactGraph` reads
    decisions and epics through `listAdrs` and `listEpics`, so fixing those fixes the
