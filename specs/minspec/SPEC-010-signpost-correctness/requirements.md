@@ -2,11 +2,11 @@
 id: SPEC-010
 type: requirements
 # Editing voids approval (hash in .minspec/approvals.json → stale); re-run "MinSpec: Approve Spec". DR-012
-status: implementing
+status: specifying  # Amendment A (#121) edits approved text, so the DR-012 hash approval is void until re-approved; `implementing` is not derivable without a current approval (lifecycle.ts:130, :140)
 tier: T4  # foundational: 17 FRs, DAG model, shared multi-caller contract — full ceremony (manual classification; classifier under-tiers by diff size)
 product: minspec
 epic: EPIC-002  # Signpost Integrity
-relates_to: [SPEC-005, SPEC-006, SPEC-012, SPEC-013]  # repair trigger; predicate strength; global order (DR-019); traceability parse-grammar co-owner
+relates_to: [SPEC-005, SPEC-006, SPEC-012, SPEC-013, DR-028, DR-029]  # repair trigger; predicate strength; global order (DR-019); traceability parse-grammar co-owner; DR-028/DR-029 = the cross-cutting-section coverage edge (Amendment A, #121)
 implements: none
 implements_reason: >-
   Specified, not built. Verified by absence rather than inferred: zero `SPEC-010` citations
@@ -21,7 +21,7 @@ affects: []
 # MinSpec — Signpost Correctness (Requirements)
 
 **Date:** 2026-05-31
-**Status:** Implementing (SDD Implement phase)
+**Status:** Specifying — Amendment A (2026-10-03, [#121](https://github.com/AIClarityAU/minspec/issues/121)) is proposed and awaits re-approval; FR-1 to FR-17 are unchanged
 **Decision:** [DR-012](../../../docs/decisions/DR-012.md) (HITL gate consumes this contract)
 **Triggered by:** session request — "the signpost must always be correct; cover all the bases"
 **Epic:** [EPIC-002 Signpost Integrity](../../../docs/epics/EPIC-002-signpost-integrity.md)
@@ -74,6 +74,10 @@ Signpost = the **first incomplete node in topological order**. A partially-
 covered node (plan covers FR-1..3 of FR-1..5) is itself the signpost target,
 named to the specific hole (FR-4, FR-5). Multiple specs = multiple chains = a
 graph; topo-sort yields the global next step.
+
+> **Amendment A (proposed, [#121](https://github.com/AIClarityAU/minspec/issues/121))** adds a
+> second edge out of the spec node, to each required cross-cutting section. It is specified
+> in full at the end of this document and changes nothing above until it is approved.
 
 ## Requirements
 
@@ -454,3 +458,333 @@ sketch. T0 is mandated by FR-8 for every state→signpost mapping.
   report" is a positioning beat (FR-17); lead with the mechanism, not a "never wrong"
   infallibility claim (baseline correctness isn't a differentiator). Non-code →
   `harvest316/minspec` issue per DR-023 forward rule if the team wants it surfaced.
+
+## Amendment A (2026-10-03) — coverage edge from each FR to the required cross-cutting sections — PROPOSED, not accepted
+
+**Triggered by:** [#121](https://github.com/AIClarityAU/minspec/issues/121) (amend SPEC-010:
+the coverage DAG must include required cross-cutting sections).
+**Rests on:** [DR-028](../../../docs/decisions/DR-028.md) decision 3 (cross-cutting sections
+are coverage-checked, on this spec's DAG) and [DR-029](../../../docs/decisions/DR-029.md)
+(self-audit floor; names this amendment in its follow-ups). No new decision record: the
+choice to put this edge on SPEC-010's DAG is already recorded in DR-028, which is accepted.
+**Consumed by:** [SPEC-013](../SPEC-013-risk-section-policy/requirements.md) FR-11 (coverage
+layer of the self-audit floor).
+
+**How to read this amendment.** FR-1 to FR-17 above are untouched. Everything this
+amendment adds is in this section, numbered on from FR-18. Outside this section the diff
+changes only the two status lines, the `relates_to:` list and a three-line pointer under the
+State Model. This spec is T4 (complete ceremony) and was approved on 2026-09-09; editing it
+voids that hash-bound approval (DR-012, the approval gate), so the frontmatter says
+`specifying` until a human re-approves. Three questions under
+[Decisions needed (Clarify)](#decisions-needed-clarify) are for the human to settle.
+
+### One-sentence scope
+
+Add one edge type to the coverage DAG so that a required cross-cutting section which is
+present but does not reference every FR is a partially-covered node naming the missing FRs,
+instead of reading as complete because it exists.
+
+### Context
+
+The State Model above has one chain: `spec`, then `plan`, then `tasks`, then `code`. A
+spec's own cross-cutting sections (Risks & Mitigations, Consequences) are not nodes, so the
+DAG cannot see the failure DR-028 was written for: a Risks section is authored early, FRs
+are added later, and the section still reads as done because it is present.
+
+DR-028 splits the cure in two. **Freshness** (was the section written against the current
+FR text?) is a hash check and belongs to SPEC-013 FR-10. **Coverage** (is each FR referenced
+in the section at all?) is the same question FR-3 already asks of the plan, so it belongs
+here. This amendment specifies only the coverage half.
+
+**Measured state of the corpus (2026-10-03, base commit `350c6fa4`).** A throwaway read-only
+script (not committed) scanned every `specs/**/SPEC-*/requirements.md`, took as the FR set
+each `FR-N` that opens a list item, heading or table row, and looked for whole-token
+references inside the section whose heading starts with "Risks" or "Consequences":
+
+| Measure | Count |
+|---|---|
+| Spec requirements files scanned | 76 |
+| ...with at least one FR id | 73 |
+| ...with a Risks section | 41 |
+| ...whose Risks section references every FR | 2 |
+| ...with a Consequences section | 13 |
+| ...whose Consequences section references every FR | 0 |
+| ...using a suffixed FR id such as `FR-4a` | 9 |
+| Sections using a range such as `FR-1..3` | 3 |
+
+This spec is itself in the 39: its Risks & Mitigations table references 13 of 17 FRs and
+omits FR-4, FR-5, FR-9 and FR-12. The parser used for these counts is ad hoc, so the
+numbers are an order-of-magnitude guide for the decisions below, not a baseline to assert
+against. No FR-id parser exists in the product today: a search of `packages/minspec/src`,
+`packages/shared/src` and `scripts` for an `FR-` digit pattern in code returns nothing,
+which agrees with SPEC-013 FR-12 ("parses none of these").
+
+### State model (amended)
+
+```
+spec(FR-1..N) --covers--> plan(items) --covers--> tasks(checkboxes) --covers--> code
+      |
+      +--referenced-in--> section(Risks & Mitigations)
+      +--referenced-in--> section(<each further coverage-bearing section>)
+```
+
+A section node is a **leaf**: nothing depends on it. It has four states, defined in FR-20.
+
+### Requirements (Amendment A)
+
+- **FR-18 (section nodes).** For each spec, the DAG gains one node per **coverage-bearing
+  section** that applies to that spec. Which sections are coverage-bearing, and which apply
+  to a given spec (artifact kind and minimum tier), is supplied to the checker as input by
+  its caller; the source of that list is SPEC-013 FR-1's section registry. This spec does
+  not hold a second copy of the registry. The initial list is settled by DQ-1.
+- **FR-19 (the reference predicate).** FR-N is **covered by** a section when the section
+  body contains FR-N as a whole token.
+  - *One FR set.* The FR set is the same set FR-3 uses for the spec-to-plan edge. The two
+    edges MUST NOT be able to disagree about which FRs a spec has.
+  - *Whole token.* `FR-1` is not matched inside `FR-10`, and `FR-4` is not matched inside
+    `FR-4a`; a suffixed id is its own FR and is covered only by its own token.
+  - *Literal only.* A range or shorthand (`FR-1..3`, `FR-2/3/4`, "FR-1 to FR-5") covers
+    only the ids written out in full. Interior ids are not inferred.
+  - *Foreign references do not count.* A token qualified by another spec's id
+    (`SPEC-005 FR-3`, `SPEC-005's FR-3`, `SPEC-005/FR-3`) does not cover this spec's FR-3.
+    The same token qualified by this spec's own id does.
+  - *Section body.* From the matching heading to the next heading of the same or a higher
+    level. Locating the heading is SPEC-013 FR-2's predicate, not redefined here; when it
+    matches more than one section, the body is the union of them.
+  - *Unknown ids are ignored.* A token naming an FR that is not in the FR set is listed in
+    the evidence (FR-22) and never changes the verdict. It is not the incoherent state of
+    FR-6, because prose legitimately mentions other specs' FRs in looser phrasing.
+- **FR-20 (four states; presence never latches complete).** Each section node reports
+  exactly one of:
+  - `covered` — the section is present and every FR in the FR set is covered;
+  - `partial` — the section is present and one or more FRs are not covered. The verdict
+    names them, in ascending id order. A present section that references no FR at all is
+    `partial` with every FR named;
+  - `absent` — no section with that heading exists;
+  - `not-applicable` — the spec's FR set is empty.
+
+  A present section is never `covered` on presence alone. An empty FR set is never reported
+  as `covered`: a spec whose FR ids failed to parse must not read as fully covered.
+- **FR-21 (signpost placement).** A `partial` section is the FR-1 "partway" state and is
+  named to its specific FRs ("Risks & Mitigations does not reference FR-7, FR-8"). FR-11
+  applies unchanged: before the ready transition a `partial` section is a forward checklist
+  entry, at the transition it is an error-severity diagnostic. Because a section node is a
+  leaf, it never changes the verdict of the plan, tasks or code edges. Within one spec, a
+  section hole that is due sorts **before** that spec's plan, tasks and code holes (a spec
+  whose own self-audit has a hole is not finished being specified); the order across specs
+  remains SPEC-012's. When an `absent` section becomes a finding is settled by DQ-2.
+- **FR-22 (evidence).** FR-4's derivation covers the new edge: for each section node the
+  signpost can show the section heading and file, the state, the covered ids, the uncovered
+  ids, and any unknown ids. A wrong verdict is diagnosable to the heading and the FR id.
+- **FR-23 (structural only).** The edge answers one question: is the FR's id present in
+  the section. It MUST NOT score, rank or judge what is written beside the id. A written
+  escape that names the FR ("FR-9: no distinct risk, covered by FR-2", SPEC-013 FR-3)
+  covers it. Mirrors SPEC-013 FR-4 and SPEC-012 FR-15 (no quality oracle).
+- **FR-24 (coverage and freshness stay separate).** The edge reads section text and the FR
+  set. It MUST NOT read, write or depend on SPEC-013's freshness hash (SPEC-013 FR-10), and
+  a freshness verdict MUST NOT suppress or satisfy a coverage verdict, nor the reverse. The
+  two are reported independently; a consumer that shows both joins them by FR id.
+- **FR-25 (same checker, same guarantees).** The edge is part of the single shared L1
+  checker of FR-16, not a second function, so all four callers get the identical verdict.
+  It is Tier 0 (no AI, no network), pure (FR-2), advisory (FR-5), and it never writes or
+  generates section text. A finding from this edge MUST NOT change any caller's exit code
+  (aligned with SPEC-013 FR-6, which forbids a non-zero exit for the same findings). Every
+  state in FR-20 and every rule in FR-19 has a T0 (invariant-tier) test under FR-8.
+
+### Contract (the shape SPEC-013 FR-11 consumes)
+
+Interface only; names are final at Plan, the fields and states are the contract.
+
+```ts
+/** One coverage-bearing section that applies to this spec (caller-supplied, FR-18). */
+interface CoverageSection {
+  heading: string;        // registry heading, e.g. "Risks & Mitigations"
+  body: string | null;    // union of matching section bodies; null when absent
+}
+
+type SectionCoverage =
+  | { heading: string; state: 'covered'; covered: string[]; unknown: string[] }
+  | { heading: string; state: 'partial'; covered: string[]; uncovered: string[]; unknown: string[] }
+  | { heading: string; state: 'absent' }
+  | { heading: string; state: 'not-applicable'; reason: 'no-fr-ids' };
+
+/** Pure. Same inputs give the same output. `frIds` is the FR-3 FR set. */
+declare function sectionCoverage(
+  specId: string,
+  frIds: readonly string[],
+  sections: readonly CoverageSection[],
+): SectionCoverage[];
+```
+
+`covered`, `uncovered` and `unknown` are id lists in ascending order (numeric part first,
+then suffix). `partial` always has a non-empty `uncovered`.
+
+### Decisions needed (Clarify)
+
+Each question states a recommendation and what that recommendation costs.
+
+**DQ-1 — Which sections carry the edge at first?** The caller-supplied list makes this a
+data choice that is cheap to widen later, but the first list decides how much the edge
+flags on day one.
+
+- `a` **(rec)** Risks & Mitigations only. It is the one section whose registry shape is
+  already per-FR, and the only one with a per-FR written escape (SPEC-013 FR-3), so every
+  flagged FR has a legitimate one-line way to be covered. *Cost: it is narrower than the
+  issue's wording and DR-028's context paragraph, which both name Consequences; a
+  Consequences section can still silently under-cover, caught only by SPEC-013 freshness.*
+- `b` Risks & Mitigations and Consequences, as the issue words it. *Cost: SPEC-013 FR-4
+  defines Consequences as a minimal positive/negative shape with no per-FR escape, so
+  satisfying the edge means listing every FR id in a section never designed per-FR.
+  Measured: 0 of 13 existing Consequences sections would pass.*
+- `c` Every registry row marked cross-cutting (ten sections), the widest reading of
+  DR-029's "self-audit-section coverage edge". *Cost: demands per-FR references in
+  Assumptions, Alternatives Considered and Rollback, which are free prose; the largest
+  volume of findings and the strongest pull toward id-listing boilerplate.*
+
+If `a` is chosen, Test / Verification Strategy (registry shape "per-FR test tier") is the
+natural second row and is a list edit, not a new mechanism. It is not proposed here because
+the issue does not ask for it.
+
+**DQ-2 — When does an `absent` section become a finding?** FR-11's resolved open question
+says there is one ready trigger, the `status: done` transition. SPEC-013 FR-13, approved
+later, makes the self-audit sections due earlier for T3/T4 specs, at core-signoff. Two
+approved specs disagree about "due".
+
+- `d` **(rec)** Keep FR-11's single trigger. An `absent` section is silent until the
+  ready transition and a finding at it; the signpost never learns about core-signoff.
+  SPEC-013 FR-6 raises its own offer after core-signoff, using this predicate. *Cost:
+  between core-signoff and the ready transition the signpost does not point at an absent
+  section; until SPEC-013's lifecycle is built nothing does.*
+- `e` Dueness is a second caller-supplied input, fed from SPEC-013's lifecycle, with
+  FR-11 as the fallback while that lifecycle is unbuilt. *Cost: reopens a resolved open
+  question, adds a second trigger and couples the signpost's timing to an unbuilt
+  mechanism (SPEC-013 FR-13 has no implementation, per its own `implements_reason`).*
+
+**DQ-3 — What happens to the specs that already fail?** By the measurement above, about 39
+of the 41 specs with a Risks section would report `partial`.
+
+- `f` **(rec)** No grandfathering. Findings are advisory and never change an exit code
+  (FR-25), so existing specs simply show their holes and are fixed when next edited.
+  *Cost: every already-approved spec that is fixed needs re-approval, because adding the
+  missing FR ids edits hash-locked text; and until fixed, about 39 specs carry a standing
+  diagnostic, which risks teaching the reader to ignore the edge.*
+- `g` Apply the edge only to specs approved after this amendment ships. *Cost: needs a
+  persisted per-spec marker or an approval-date comparison, which is new state the pure
+  derivation (FR-2) must read, and leaves the 39 permanently unchecked.*
+- `h` One backfill pass before the edge is switched on. *Cost: about 39 spec edits and 39
+  re-approvals in one batch, for a human who reads every document.*
+
+### Invariants (Amendment A)
+
+- **INV-A1 — Presence never latches complete (T0).** No input exists for which a section
+  is `covered` while an FR in the FR set has no whole-token reference in its body.
+- **INV-A2 — Empty is not covered (T0).** An empty FR set yields `not-applicable`, never
+  `covered`.
+- **INV-A3 — Structural only (T0).** The verdict depends only on which FR ids appear in
+  the section body; changing any other text leaves it unchanged.
+- **INV-A4 — Leaf node (T0).** Adding, removing or changing a section node never changes
+  the plan, tasks or code verdict for the same spec.
+- **INV-A5 — One checker, one FR set (T1).** The edge lives in the FR-16 function and uses
+  the FR-3 FR set.
+- The four invariants above this amendment (signpost correctness, advisory, Tier 0, user
+  override wins) and constitution invariants 1 (offline core) and 2 (no silent gate) hold
+  unchanged. This edge is advisory, so it is not a gate; if a later spec makes it gate
+  anything, invariant 2's visible-failure rule applies to that spec.
+
+### Acceptance criteria (Amendment A)
+
+- [ ] **Partial is named** — a spec with FR-1 to FR-5 whose Risks section references FR-1
+  to FR-3 reports `partial` with `uncovered` exactly FR-4, FR-5. (FR-19, FR-20, INV-A1)
+- [ ] **Added FR reopens the node** — starting from `covered`, adding FR-6 to the spec
+  with no section edit yields `partial` naming FR-6. (FR-20, INV-A1)
+- [ ] **Whole token** — a section containing only `FR-10` and `FR-4a` covers neither FR-1
+  nor FR-4. (FR-19)
+- [ ] **Literal only** — a section containing `FR-1..3` covers FR-1 and nothing else.
+  (FR-19)
+- [ ] **Foreign reference** — `SPEC-005 FR-3` does not cover this spec's FR-3; the same
+  token qualified by the spec's own id does. (FR-19)
+- [ ] **Empty FR set** — a spec with no parsed FR ids reports `not-applicable`, and the
+  evidence says no FR ids were parsed. (FR-20, FR-22, INV-A2)
+- [ ] **Written escape covers** — "FR-9: no distinct risk, covered by FR-2" covers FR-9;
+  rewording the text beside the id does not change the verdict. (FR-23, INV-A3)
+- [ ] **Leaf** — toggling a section between `covered` and `partial` leaves the plan, tasks
+  and code verdicts byte-identical. (FR-21, INV-A4)
+- [ ] **Independent of freshness** — the verdict is identical with and without a SPEC-013
+  freshness record present, and for a stale and a fresh one. (FR-24)
+- [ ] **One verdict, no exit-code change** — the four FR-16 callers return the identical
+  section verdicts for one fixture, and a `partial` finding leaves `npm run validate` exit
+  status unchanged. (FR-25, INV-A5)
+- [ ] **Evidence** — the derivation for a `partial` section shows heading, file, covered,
+  uncovered and unknown ids. (FR-22)
+- [ ] **Unknown id ignored** — a section mentioning FR-99 in a spec with FR-1 to FR-5
+  lists FR-99 as unknown and reports the same state as without it. (FR-19)
+
+### Costly to refactor (Amendment A)
+
+1. **The reference grammar (FR-19).** Once specs are authored to satisfy it, tightening it
+   (for example, requiring the id to open a table row) reopens every `covered` section.
+   Loosening is cheap. It is co-owned with SPEC-013 FR-12's parse contract and extends
+   Costly #3 above. *Check: FR-19's five rules are fixed and tested before any spec is
+   edited to satisfy the edge.*
+2. **The verdict shape (Contract).** SPEC-013 FR-11 consumes it; changing a state name or
+   field is a two-spec change.
+
+Everything else is cheap: the section list is data (DQ-1), and the intra-spec sort position
+in FR-21 is one ordering key.
+
+### Risks & mitigations (Amendment A)
+
+| # | Risk | Likelihood · Impact | Mitigation |
+|---|---|---|---|
+| RA1 | **Id-listing passes the edge.** A line reading "FR-1 to FR-17: none" written out in full covers everything and says nothing. | High · Med | Stated, not solved: FR-23 makes the edge structural by design; SPEC-013 R4 (vacuity passes Tier 0) is the standing residual and its specificity layer is the next net. No skim claim rests on this edge. |
+| RA2 | **False covered through a loosely phrased foreign reference** ("its FR-3" about another spec). | Med · Med | FR-19 excludes the three id-qualified forms; the unqualified form is an accepted residual, visible in FR-22 evidence. |
+| RA3 | **False covered through an unparsed FR set.** | Low · High | FR-20 and INV-A2: empty is `not-applicable`, never `covered`; FR-19 ties the FR set to FR-3's so a parse gap shows on the plan edge too. |
+| RA4 | **Standing noise.** About 39 existing specs report `partial`; readers learn to ignore it. | High · Med | DQ-3 puts the choice to the human; FR-25 keeps findings off every exit code; FR-21 with FR-11 keeps pre-ready holes as a checklist, not errors. |
+| RA5 | **Section list drifts from SPEC-013's registry.** | Med · Med | FR-18: the list is caller-supplied from the registry, with no second copy in this spec. |
+| RA6 | **Coverage and freshness get merged into one signal** and one masks the other. | Low · High | FR-24 forbids either reading or satisfying the other; acceptance criterion "Independent of freshness". |
+| RA7 | **Two unbuilt specs each wait on the other.** This edge needs SPEC-013 FR-2 (heading match) and FR-12 (FR-id grammar); SPEC-013 FR-11 needs this edge. | Med · Med | The dependency is on two small pure parsers, not on SPEC-013's lifecycle. Plan sequences those parsers first in `packages/shared`; FR-22's evidence and FR-25's tests do not depend on the rest of SPEC-013. |
+| RA8 | **A section hole outranks real plan work** in the signpost. | Low · Low | FR-21 sorts it first only once due; FR-7 dismissal applies; the position is one ordering key. |
+
+### Alternatives considered (Amendment A)
+
+- **A new spec instead of an amendment.** Rejected: DR-028 decision 3, SPEC-013 FR-11 and
+  the issue all place the edge on this spec's DAG, and FR-16's single-checker rule means a
+  second spec would own half of one function.
+- **Put coverage in SPEC-013 beside freshness.** Rejected by DR-028: it is the question
+  FR-3 already asks, and a second coverage implementation is the drift FR-16 exists to
+  prevent.
+- **Expand ranges** (`FR-1..3` covers FR-2). Rejected: three notations are in use in the
+  corpus and each needs its own rule; a mis-expanded range reads as covered when it is not,
+  which is the one direction this spec forbids. Literal-only errs toward naming a hole.
+- **Treat unknown ids as incoherent state (FR-6).** Rejected: sections routinely mention
+  other specs' FRs, so this would degrade healthy specs to "state unclear".
+- **Section nodes on the main chain, before plan.** Rejected: it would let a Risks hole
+  change the plan edge's verdict, and DR-028 wants these sections completed last.
+- **Require the id in a fixed position** (first cell of a table row). Rejected for now:
+  stronger against RA1 but fails T1 and T2 specs, whose Risks form is a line or bullets
+  (SPEC-013 FR-4). Recorded under Costly to refactor as the direction that is expensive
+  to take later.
+
+### Out of scope (Amendment A)
+
+- Freshness, the hash, and when a section is stale (SPEC-013 FR-10).
+- Whether a section is required, its shape, and its heading match (SPEC-013 FR-1, FR-2,
+  FR-4).
+- Decision records. They have no FR set, so this edge does not apply to them; nothing here
+  promises a DR equivalent.
+- Authoring, repairing or backfilling section text. Backfill of existing specs is DQ-3.
+- The DR-053 version 2 reference grammar (`FR3`, slash-joined). The edge follows whatever
+  FR-id grammar SPEC-013 FR-12 fixes; migration is tracked at #679 (grammar) and #681
+  (corpus).
+- Making any finding blocking.
+
+### Follow-ups (Amendment A, tracked)
+
+- **This spec's own Risks & Mitigations omits FR-4, FR-5, FR-9 and FR-12.** Deliberately
+  not fixed in this amendment, so the diff above the amendment stays reviewable; it falls
+  under whichever option DQ-3 selects. Tracked on #121.
+- **SPEC-013 FR-11** already says it consumes this edge "amended under #121"; no edit to
+  SPEC-013 is needed for this amendment as proposed. If DQ-2 option `e` is chosen, SPEC-013
+  FR-13 gains a consumer and that spec needs its own tracked amendment (no issue filed:
+  this dispatch has no network access; it would be filed when `e` is selected).
+- **Plan and tasks** for the edge follow re-approval, on #121.
