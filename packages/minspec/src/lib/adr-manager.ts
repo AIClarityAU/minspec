@@ -6,6 +6,7 @@ import { slugify } from './spec-manager';
 import { epicRefValue } from './epic-manager';
 import { inspectAllStatusClaims, claimParagraphText } from './status-parity';
 import { ensureDirectory } from './opt-in';
+import { prepareText, readDocument, readDocumentText, restoreLineEndings } from './text-io';
 export { slugify };
 
 // ─── Types ──────────────────────────────────────────────────────────────────
@@ -277,7 +278,8 @@ export function validateDrAmendments(decisionsDir: string): DrAmendmentGap[] {
     // next DR the extension created.
     const id = `DR-${match[1]}`;
     try {
-      bodies.set(id, fs.readFileSync(path.join(decisionsDir, entry), 'utf-8'));
+      // Prepared (SPEC-095): a CRLF record's frontmatter claims are read like an LF one's.
+      bodies.set(id, readDocumentText(path.join(decisionsDir, entry)));
     } catch {
       // Unreadable file — skip it rather than fail the whole scan.
     }
@@ -510,11 +512,11 @@ const STATUS_KEY_LINE_RE = /^status[ \t]*:/m;
  */
 export function detectDoubledFrontmatter(content: string): DoubledFrontmatterFinding | undefined {
   // Split on LF only, then fence-line comparisons tolerate a trailing CR
-  // (`isFence`). The real #2467 shape MIXES endings in one file: `setAdrStatus`
-  // prepends a freshly synthesized LF block ahead of an original block it could
-  // not parse because THAT block is still CRLF (the SPEC-095/#2397 damage) — so
-  // a plain `=== '---'` test matches the new block's fence but misses the old
-  // one's, whose lines end `---\r`.
+  // (`isFence`). The real #2467 shape MIXES endings in one file: before SPEC-095,
+  // `setAdrStatus` prepended a freshly synthesized LF block ahead of an original
+  // block it could not parse because THAT block was CRLF (the #2397 damage), and
+  // files it damaged that way stay on disk. A plain `=== '---'` test matches the
+  // new block's fence but misses the old one's, whose lines end `---\r`.
   const lines = content.split('\n');
   const isFence = (line: string | undefined): boolean => line?.replace(/\r$/, '') === '---';
   if (!isFence(lines[0])) return undefined;
@@ -615,7 +617,9 @@ export const ADR_STATUS_VALUES: readonly AdrStatus[] = [
 /** True if the ADR file already has a leading YAML frontmatter block. */
 export function adrHasFrontmatter(filePath: string): boolean {
   try {
-    return FRONTMATTER_RE.test(fs.readFileSync(filePath, 'utf-8'));
+    // Prepared (SPEC-095): a CRLF record has its frontmatter too. Reading it as "none" is
+    // what sent Accept Decision to its "predates MinSpec" prompt and a second block (#2397).
+    return FRONTMATTER_RE.test(readDocumentText(filePath));
   } catch {
     return false;
   }
@@ -773,18 +777,22 @@ export function reconcileBodyStatus(content: string, status: AdrStatus): string 
  * the read and write paths symmetric (#201), synthesize and prepend a
  * frontmatter block from the filename + body rather than throwing.
  * Returns the updated status.
+ *
+ * SPEC-095: the record is read through `text-io` and written back in the line endings it
+ * had. A CRLF record used to fail the frontmatter pattern and take the synthesize branch,
+ * which put an LF block in front of a block that still said `proposed` (#2397).
  */
 export function setAdrStatus(filePath: string, status: AdrStatus): AdrStatus {
   if (!ADR_STATUSES.has(status)) {
     throw new Error(`Invalid ADR status: ${status}`);
   }
-  const content = fs.readFileSync(filePath, 'utf-8');
+  const { text: content, original } = readDocument(filePath);
   const fmMatch = content.match(FRONTMATTER_RE);
   if (!fmMatch) {
     // No frontmatter — synthesize one and prepend it, preserving the body
     // verbatim (only collapsing leading blank lines before the heading).
     const block = `---\n${synthesizeAdrFrontmatter(filePath, content, status)}\n---`;
-    fs.writeFileSync(filePath, `${block}\n\n${content.replace(/^\s*\n+/, '')}`, 'utf-8');
+    fs.writeFileSync(filePath, restoreLineEndings(`${block}\n\n${content.replace(/^\s*\n+/, '')}`, original), 'utf-8');
     return status;
   }
 
@@ -829,7 +837,7 @@ export function setAdrStatus(filePath: string, status: AdrStatus): AdrStatus {
   const updated = content.replace(FRONTMATTER_RE, () => block);
   // #1624 — the body's `## Status` section is the third place this status lives.
   // Writing only the frontmatter here is what broke parity on every acceptance.
-  fs.writeFileSync(filePath, reconcileBodyStatus(updated, status), 'utf-8');
+  fs.writeFileSync(filePath, restoreLineEndings(reconcileBodyStatus(updated, status), original), 'utf-8');
   return status;
 }
 
@@ -969,12 +977,15 @@ interface ExistingSummary {
  * Pull the existing per-entry summary block for `id` out of a prior INDEX.md.
  * Returns the visible text plus the recorded auto-fingerprint, or null when the
  * entry (or its markers) is absent — e.g. a legacy INDEX from before #191.
+ *
+ * Prepares its input itself (SPEC-095 FR-2): the pattern needs LF after each marker, and a
+ * caller outside the extension can hand it an INDEX read as it was on disk.
  */
 export function extractExistingSummary(existingIndex: string, id: string): ExistingSummary | null {
   const re = new RegExp(
     `${escapeRegex(`<!-- dr-summary:${id} auto=`)}([0-9a-f]+)${escapeRegex(' -->')}\\n([\\s\\S]*?)\\n${escapeRegex(summaryCloseMarker(id))}`,
   );
-  const m = existingIndex.match(re);
+  const m = prepareText(existingIndex).match(re);
   if (!m) return null;
   return { autoHash: m[1], text: m[2].trim() };
 }
@@ -1004,7 +1015,8 @@ export function renderDrEntry(
 ): string {
   let body = '';
   try {
-    const content = fs.readFileSync(summary.filePath, 'utf-8');
+    // Prepared (SPEC-095): a CRLF record's frontmatter is not mistaken for its summary.
+    const content = readDocumentText(summary.filePath);
     const fmMatch = content.match(FRONTMATTER_RE);
     body = fmMatch ? content.slice(fmMatch[0].length) : content;
   } catch {
@@ -1085,8 +1097,18 @@ export function buildDrIndexContent(
  *  - If markers exist: replace content between them.
  *  - If markers absent and file is empty/missing/legacy-table-only: full replace.
  *  - Otherwise: prepend markered block; preserve existing user content below.
+ *
+ * SPEC-095 FR-2/FR-3: the merge works on the LF form of `existing`, and the result is given
+ * the line endings `existing` had, so the user's lines keep theirs. A missing INDEX is a
+ * new file and is written LF (FR-5).
  */
 export function mergeDrIndex(existing: string | null, autoContent: string): string {
+  if (existing === null) return mergeDrIndexText(null, autoContent);
+  return restoreLineEndings(mergeDrIndexText(prepareText(existing), autoContent), existing);
+}
+
+/** {@link mergeDrIndex} on LF text. */
+function mergeDrIndexText(existing: string | null, autoContent: string): string {
   const wrapped = `${INDEX_MARKER_START}\n${autoContent.trimEnd()}\n${INDEX_MARKER_END}\n`;
 
   if (existing === null || existing.trim() === '') {
@@ -1140,7 +1162,9 @@ export function regenerateDrIndex(
   ensureDirectory(decisionsDir); // SPEC-096 FR-4: never creates `.minspec/`
 
   const indexPath = path.join(decisionsDir, 'INDEX.md');
-  const existing = fs.existsSync(indexPath) ? fs.readFileSync(indexPath, 'utf-8') : null;
+  // Read through `text-io` and written back in its own line endings (SPEC-095).
+  const prior = fs.existsSync(indexPath) ? readDocument(indexPath) : null;
+  const existing = prior ? prior.text : null;
 
   // Thread the prior INDEX through so per-entry curated summaries survive (#191).
   const { content, count } = buildDrIndexContent(
@@ -1151,7 +1175,7 @@ export function regenerateDrIndex(
   );
 
   const merged = mergeDrIndex(existing, content);
-  fs.writeFileSync(indexPath, merged, 'utf-8');
+  fs.writeFileSync(indexPath, prior ? restoreLineEndings(merged, prior.original) : merged, 'utf-8');
 
   return { filePath: indexPath, count };
 }
@@ -1219,7 +1243,8 @@ export function validateDrIndexStatus(decisionsDir: string): DrIndexStatusDrift[
   const indexPath = path.join(decisionsDir, 'INDEX.md');
   if (!fs.existsSync(indexPath)) return [];
 
-  const indexContent = fs.readFileSync(indexPath, 'utf-8');
+  // Both reads prepared (SPEC-095): a CRLF record is not reported as `proposed`.
+  const indexContent = readDocumentText(indexPath);
   const drifts: DrIndexStatusDrift[] = [];
   const seen = new Set<string>();
 
@@ -1234,7 +1259,7 @@ export function validateDrIndexStatus(decisionsDir: string): DrIndexStatusDrift[
 
     let fileStatus = 'proposed';
     try {
-      const content = fs.readFileSync(path.join(decisionsDir, entry), 'utf-8');
+      const content = readDocumentText(path.join(decisionsDir, entry));
       const fmMatch = content.match(FRONTMATTER_RE);
       if (fmMatch) {
         const fm = parseFrontmatterYaml(fmMatch[1]);
@@ -1376,7 +1401,9 @@ export function listAdrs(rootDir: string, vscodeOverrides?: { decisionsDir?: str
       const stat = fs.statSync(filePath);
       if (!stat.isFile()) continue;
 
-      const content = fs.readFileSync(filePath, 'utf-8');
+      // Prepared (SPEC-095): on a CRLF checkout every record read as `proposed`, so the
+      // signpost offered to accept decisions that were already accepted (#2397).
+      const content = readDocumentText(filePath);
       const fmMatch = content.match(FRONTMATTER_RE);
       if (!fmMatch) {
         // File has no frontmatter — derive a clean, humanized title from the

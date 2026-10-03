@@ -3,6 +3,7 @@ import * as path from 'path';
 import type { Tier, Phase } from './config';
 import type { SpecStatus } from './spec';
 import { ensureDirectory } from './opt-in';
+import { prepareText, restoreLineEndings } from './text-io';
 
 /** Context about the currently active spec, injected into AI tool config files */
 export interface ActiveSpecContext {
@@ -54,48 +55,56 @@ export function buildContextBlock(context: ActiveSpecContext): string {
  * If a block already exists between markers, it is replaced.
  * If no block exists, it is appended at the end.
  * User content outside the markers is never touched.
+ *
+ * Works on the LF form of `fileContent`, and the result is given back the line endings
+ * `fileContent` had (SPEC-095 FR-2/FR-3): a CRLF file used to end with mixed endings.
  */
 export function injectContext(fileContent: string, context: ActiveSpecContext): string {
   const block = buildContextBlock(context);
-  const startIdx = fileContent.indexOf(BLOCK_START);
-  const endIdx = fileContent.indexOf(BLOCK_END);
+  const text = prepareText(fileContent);
+  const startIdx = text.indexOf(BLOCK_START);
+  const endIdx = text.indexOf(BLOCK_END);
 
   if (startIdx !== -1 && endIdx !== -1) {
     // Replace existing block
-    const before = fileContent.slice(0, startIdx);
-    const after = fileContent.slice(endIdx + BLOCK_END.length);
-    return before + block + after;
+    const before = text.slice(0, startIdx);
+    const after = text.slice(endIdx + BLOCK_END.length);
+    return restoreLineEndings(before + block + after, fileContent);
   }
 
   // Append to end — ensure there's a blank line separator
-  const trimmed = fileContent.trimEnd();
+  const trimmed = text.trimEnd();
   if (trimmed.length === 0) {
-    return block + '\n';
+    return restoreLineEndings(block + '\n', fileContent);
   }
-  return trimmed + '\n\n' + block + '\n';
+  return restoreLineEndings(trimmed + '\n\n' + block + '\n', fileContent);
 }
 
 /**
  * Remove the active-spec block from file content.
  * Returns the content without the block (and surrounding blank lines cleaned up).
+ *
+ * Works on the LF form, like {@link injectContext}, so the blank-line clean-up below sees
+ * a CRLF file's blank lines too; the result keeps the file's own line endings (SPEC-095).
  */
 export function removeContext(fileContent: string): string {
-  const startIdx = fileContent.indexOf(BLOCK_START);
-  const endIdx = fileContent.indexOf(BLOCK_END);
+  const text = prepareText(fileContent);
+  const startIdx = text.indexOf(BLOCK_START);
+  const endIdx = text.indexOf(BLOCK_END);
 
   if (startIdx === -1 || endIdx === -1) {
     return fileContent;
   }
 
-  const before = fileContent.slice(0, startIdx);
-  const after = fileContent.slice(endIdx + BLOCK_END.length);
+  const before = text.slice(0, startIdx);
+  const after = text.slice(endIdx + BLOCK_END.length);
 
   // Clean up extra blank lines at the join point
   const cleanBefore = before.replace(/\n{2,}$/, '\n');
   const cleanAfter = after.replace(/^\n{2,}/, '\n');
 
   const result = cleanBefore + cleanAfter;
-  return result.trim().length === 0 ? '' : result;
+  return result.trim().length === 0 ? '' : restoreLineEndings(result, fileContent);
 }
 
 /**
