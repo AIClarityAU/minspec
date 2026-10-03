@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { Tier, Phase, SpecsLayout } from './config';
 import { hashLockReminder } from './approval-store';
+import { ensureDirectory } from './opt-in';
 import { loadConfig, PHASES, resolveAndValidate, DEFAULT_CONFIG } from './config';
 import type { SpecFrontmatter, ParsedSpec } from './spec';
 import { writeSpec, readSpecFile, writeSpecFile } from './spec';
@@ -358,7 +359,7 @@ export function createSpec(
 ): SpecSummary {
   const config = loadConfig(rootDir);
   const specsDir = resolveAndValidate(rootDir, config.specsDir);
-  fs.mkdirSync(specsDir, { recursive: true });
+  ensureDirectory(specsDir); // SPEC-096 FR-4: never creates `.minspec/`
 
   const id = nextSpecId(specsDir, product);
   const slug = slugify(title);

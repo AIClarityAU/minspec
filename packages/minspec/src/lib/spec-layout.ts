@@ -3,6 +3,7 @@ import * as path from 'path';
 import type { ParsedSpec, SpecFrontmatter } from './spec';
 import { parseSpec, writeSpec } from './spec';
 import { PHASES } from './config';
+import { ensureDirectory } from './opt-in';
 import type { ShardIdFile } from './spec-validator';
 
 /**
@@ -270,7 +271,7 @@ export function readSpecKitDir(dirPath: string): ParsedSpec {
  * (plan.md / tasks.md are skipped if empty), but spec.md is always written.
  */
 export function writeSpecKitDir(dirPath: string, spec: ParsedSpec): void {
-  fs.mkdirSync(dirPath, { recursive: true });
+  ensureDirectory(dirPath); // SPEC-096 FR-4: never creates `.minspec/`
   const shards = splitSpecForSpecKit(spec);
 
   for (const fileName of SPEC_KIT_FILES) {

@@ -42,6 +42,7 @@ import { writeEpicIndex } from './epic-manager';
 import { initialOwnershipDeclaration } from './ownership-ratchet';
 import { assembleContext } from './constitution-context';
 import { seedProvider, integrateProposal, CONSTITUTION_SECTION_SCHEMA } from './constitution-proposer';
+import { assertOptedIn, ensureDirectory } from './opt-in';
 
 /** Output path of the constitution, relative to project root. */
 const CONSTITUTION_REL_PATH = TEMPLATE_OUTPUT_PATHS['constitution.md'];
@@ -381,12 +382,32 @@ export function ensureGitattributesEntries(rootDir: string): void {
 /**
  * Creates the .minspec/ directory structure in rootDir.
  * Idempotent — never overwrites existing config.json.
+ *
+ * THE CREATOR (SPEC-096 FR-3). `.minspec/` at the folder root is the opt-in marker
+ * (constitution invariant 3), and the `mkdirSync` below is the ONLY call in the
+ * extension that may create it: this function is the opt-in, reached from
+ * "MinSpec: Initialize SDD Structure" and from nowhere else. Every other
+ * directory the extension creates goes through `ensureDirectory` (`./opt-in`),
+ * which cannot. `tests/opt-in-writer-inventory.test.ts` pins both halves: this
+ * one direct call, and who calls this function.
  */
 export function scaffold(rootDir: string): void {
   const minspecDir = path.join(rootDir, '.minspec');
   fs.mkdirSync(minspecDir, { recursive: true });
+  writeScaffoldDefaults(rootDir);
+}
 
-  const configPath = path.join(minspecDir, 'config.json');
+/**
+ * What {@link scaffold} writes beside the marker: the default `config.json` when
+ * there is none, and the epic registry's index. It creates no `.minspec/`.
+ *
+ * Split out so that Refresh Harness Files can bring a project's defaults up to
+ * date WITHOUT calling the creator (SPEC-096 FR-3, DQ-1). With the marker present
+ * `scaffold()` and this function write the same bytes; with it absent this one
+ * fails on its first write instead of opting the folder in.
+ */
+function writeScaffoldDefaults(rootDir: string): void {
+  const configPath = path.join(rootDir, '.minspec', 'config.json');
   if (!fs.existsSync(configPath)) {
     // Record the project's name at creation, so it stops being re-derived from the
     // directory on every later refresh (#1529). Written ONLY here, never back-filled
@@ -800,7 +821,7 @@ function generateManagedRegionTemplates(rootDir: string, tools: DetectedTools): 
  * re-scaffold path go through, so the bytes and the mode never diverge.
  */
 function writeManagedFile(fullPath: string, tpl: ManagedRegionTemplate): void {
-  fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+  ensureDirectory(path.dirname(fullPath));
   fs.writeFileSync(fullPath, renderManagedFile(tpl));
   if (tpl.executable) {
     try {
@@ -1483,7 +1504,7 @@ export function generateHarnessFiles(rootDir: string): string[] {
     // Only write if file doesn't exist (first-time generation). The manifest is
     // recorded LAST from the final on-disk bytes (SPEC-043), not here.
     if (!fs.existsSync(fullPath)) {
-      fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+      ensureDirectory(path.dirname(fullPath));
       fs.writeFileSync(fullPath, content);
     } else {
       skippedExisting.push(relativePath);
@@ -1572,10 +1593,21 @@ export function generateHarnessFiles(rootDir: string): string[] {
  * lack of a baseline, files left untouched because their MinSpec markers were
  * deleted, paths removed from the git index, and a project-name mismatch. An empty
  * array means a fully clean refresh.
+ *
+ * REFUSES in a folder that has not opted in (SPEC-096 FR-3, DQ-1): it throws
+ * `NotOptedInError` before writing anything. Refresh merges templates into a
+ * project Initialize set up; it used to begin by calling `scaffold()`, which made
+ * it a second Initialize under a name that did not say so (59 files and
+ * directories in an empty folder, git hooks and workflows among them).
  */
 export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
-  // Ensure .minspec/ exists
-  scaffold(rootDir);
+  // Refresh never opts a folder in. With no `.minspec/` it refuses here, before
+  // the first write; Initialize is the one opt-in gesture.
+  assertOptedIn(rootDir);
+  // The defaults Initialize writes beside the marker (a missing config.json, the
+  // epic index) - NOT `scaffold()`, so no call that can create the marker is
+  // reachable from Refresh, even if the marker goes between the check and here.
+  writeScaffoldDefaults(rootDir);
   // Backfill any missing ignore entries on auto-refresh-on-open so existing
   // projects (scaffolded before a new state file was added) stop committing
   // machine-local merge-refresh state. Idempotent — adds only what's missing.
@@ -1654,7 +1686,7 @@ export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
 
     if (!fs.existsSync(fullPath)) {
       // File doesn't exist yet — write fresh
-      fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+      ensureDirectory(path.dirname(fullPath));
       fs.writeFileSync(fullPath, generated);
     } else {
       // File exists — merge (decision logic + oldHashes reads unchanged, INV-5).

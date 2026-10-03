@@ -58,9 +58,9 @@ function alwaysUseAi(rootDir: string): boolean {
  * #1319.
  *
  * `savePreferences` refuses (rather than creates) in a folder with no
- * `.minspec/` (#2355), and this command runs well before anything else in it
- * would create that marker — unlike Approve Spec, Backfill Epics is reachable
- * in a folder that has never opted in. Before #2506 the refusal reached only
+ * `.minspec/` (#2355), and nothing in this command creates that marker. Unlike
+ * Approve Spec, which refuses there (SPEC-096), Backfill Epics is reachable in
+ * a folder that has never opted in. Before #2506 the refusal reached only
  * `console.warn`, which a user never sees: the toast had already told them
  * "Always" was accepted, so the click was silently a no-op and the AI prompt
  * returned on the very next run. Surface it on the notification API too, same

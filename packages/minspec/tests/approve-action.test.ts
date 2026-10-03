@@ -144,6 +144,19 @@ vi.mock('../src/lib/spec-layout', () => ({
   readShardIdFiles: vi.fn(() => []),
 }));
 
+// ─── The folder has opted in (SPEC-096) ─────────────────────────────────────
+// Every test here drives a command against the fake root `/tmp/ws`, and has always treated it
+// as an initialized project. The commands now check for the `.minspec/` opt-in
+// marker before they do anything. The fake root is not a real folder, and a path
+// under /tmp can be left behind by some other run, so the precondition is stated
+// here instead of being read from whatever the disk happens to hold. What these
+// commands do in a folder that has NOT opted in is pinned, on real folders, by
+// commands-opt-in-invariant.test.ts.
+vi.mock('../src/lib/opt-in', async (importOriginal) => ({
+  ...(await importOriginal<typeof import('../src/lib/opt-in')>()),
+  hasOptInMarker: vi.fn(() => true),
+}));
+
 // ─── Imports ───────────────────────────────────────────────────────────────
 
 import * as vscode from 'vscode';
@@ -779,8 +792,8 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
       vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce('Always' as never);
       // Simulates `savePreferences` refusing in a folder with no `.minspec/`
       // (NotOptedInError, preferences.ts) — the narrow race this guard is for:
-      // `.minspec/` existed moments earlier (the approval's own sidecar write)
-      // and was removed before this call.
+      // `.minspec/` existed when the command started (Approve Spec refuses
+      // otherwise, SPEC-096) and was removed before this call.
       vi.mocked(savePreferences).mockImplementationOnce(() => {
         throw new Error('MinSpec: /tmp/ws has no .minspec/ directory (it has not opted in)');
       });
