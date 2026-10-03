@@ -45,7 +45,7 @@ Give the **Create ADR** template a real `## Follow-ups (tracked)` section (it ha
 today), add one shared, reusable predicate for "this line names a tracked `SPEC-NNN` or
 issue `#`, or is an explicit `None`", and wire that predicate into one new **soft** (warn,
 never fail) validator rule scoped to DRs numbered after DR-023 itself — so the convention
-the prose and 77 of 101 existing DRs already follow by hand gains a template default and a
+the prose and 78 of 100 existing DRs already follow by hand gains a template default and a
 visible check, without retrofitting history or blocking anything.
 
 ## Context — what exists today, read from `origin/main`
@@ -64,12 +64,18 @@ template "gains" the section; it never did.
 
 Measured across `docs/decisions/DR-*.md` (100 files):
 
-- **77 of 100** carry some form of a Follow-ups heading. **24** carry none —
-  `DR-001`, `002`, `004`, `006`–`021`, `026`, `028`, `030`, `055`, `058` — every one of them
-  **at or before `DR-030`** except three: `DR-055`, `DR-058` (which in fact *do* carry the
-  section, just under a different heading text — see next point) and the genuine gaps,
-  `DR-026`, `DR-028`, `DR-030` (grepped for `follow` case-insensitively: zero hits in any of
-  the three).
+- **78 of 100** carry some form of a Follow-ups heading, matched by prefix
+  (`^##+\s*Follow-ups`, case-insensitive) — this count already includes `DR-055` and
+  `DR-058`, whose heading text varies (see next point) but which the prefix match correctly
+  reports as present. **22** carry none: `DR-001`, `002`, `004`, `006`–`021`, `026`, `028`,
+  `030`. Nineteen of those 22 (`DR-001`, `002`, `004`, `006`–`021`) are numbered at or before
+  `DR-023` and predate the convention — FR-3 exempts them (id ≤ 23). The remaining three,
+  `DR-026`, `DR-028`, `DR-030`, postdate DR-023 and are the genuine gaps FR-3 must warn on
+  (AC-6). A bare case-insensitive grep for the word `follow` is not the same test and is not
+  equivalent evidence: it returns zero hits for `DR-026` and `DR-028`, but a false hit for
+  `DR-030` (line 43, "review the following DATA" — unrelated prose, not a heading). The
+  heading-prefix regex above, not the bare-word
+  grep, is the actual predicate and correctly reports all three as absent.
 - **The heading text already varies.** Three distinct strings are in use:
   `## Follow-ups (tracked)` (the plain form, DR-023's own), `## Follow-ups (tracked · DR-023)`
   (`DR-055`), and `## Follow-ups (tracked — DR-023)` (`DR-058`). A predicate that matches the
@@ -78,7 +84,7 @@ Measured across `docs/decisions/DR-*.md` (100 files):
   for a different section family. This spec's predicate (FR-2) must not repeat that mistake.
 
 So the gap is not "nobody follows the convention" — the opposite: unprompted discipline
-already produced 77/100. The gap is that nothing *defaults* it (so new DRs start from a
+already produced 78/100. The gap is that nothing *defaults* it (so new DRs start from a
 blank template and must be remembered) and nothing *checks* it (so a miss, like the three
 genuine ones above, is invisible until noticed by hand — DR-023's own Context problem,
 recurring one level up).
@@ -275,7 +281,7 @@ DR**).
 - **Reuse or extend SPEC-013's `hasSection` registry instead of a standalone predicate.**
   Rejected for now — that mechanism is itself largely unbuilt (Context) and scoped to a
   different section family; taking a dependency on unbuilt infrastructure to ship a small,
-  already-decided, already-77%-adopted convention would trade a two-line string match for a
+  already-decided, already-78%-adopted convention would trade a two-line string match for a
   cross-spec coupling. Revisit if/when SPEC-013's registry actually ships.
 - **Exact-string heading match instead of prefix match.** Rejected — `DR-055`/`DR-058`
   measured in Context prove the heading already varies; an exact match would immediately
