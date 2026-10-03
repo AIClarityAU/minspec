@@ -158,8 +158,12 @@ export function restoreLineEndings(lfText: string, original: string | readonly s
 export interface TextDocument { readonly text: string; readonly original: string }
 export function readDocument(filePath: string): TextDocument;
 export function readDocumentText(filePath: string): string;
-export function writeDocument(filePath: string, lfText: string, original: string | readonly string[]): void;
 ```
+
+A writer keeps its own `fs.writeFileSync` call, with the arguments it has today, and
+writes `restoreLineEndings(output, original)`. Several existing suites assert those calls
+exactly, and some writers pass no encoding, so a shared write wrapper would change calls
+those suites pin (AC-19) for no gain: the restoring step is the module's either way.
 
 `original` takes several texts for one case only: a spec-kit directory migrated to one flat
 file, whose input is three files. Their lines are paired in file order and the majority is
@@ -191,7 +195,7 @@ passes user text that holds one.
 
 | Writer | How the original reaches the write |
 |---|---|
-| `setAdrStatus`, `setSpecStatus` (both of its writes), `setSpecPhases`, `setEpicStatus`, `setEpicOrder`, `setArtifactEpic`, `regenerateDrIndex`, `writeEpicIndex`, `appendToParkingLotFile`, `seedConstitution`, `ensureGitignoreEntries`, `ensureGitattributesEntries` | the function reads with `readDocument` and writes with `writeDocument` against what it read |
+| `setAdrStatus`, `setSpecStatus` (both of its writes), `setSpecPhases`, `setEpicStatus`, `setEpicOrder`, `setArtifactEpic`, `regenerateDrIndex`, `writeEpicIndex`, `appendToParkingLotFile`, `seedConstitution`, `ensureGitignoreEntries`, `ensureGitattributesEntries` | the function reads with `readDocument` and writes `restoreLineEndings(output, original)` |
 | `mergeFile`, `integrateProposal`, `compactConstitution`, `mergeDrIndex`, `mergeEpicIndex`, `injectAgentsSlashSection`, `injectContext`, `removeContext` | each restores against the text it was handed, so its callers (`refreshHarnessFiles`, `generateSlashCommandShims`, `injectContextToFile`, the constitution commands) write its result unchanged |
 | `writeSpecFile`, the spec panel's checkbox write | against `ParsedSpec.source` (finding 4) |
 | `writeSpecKitDir` | each shard against that file on disk; a shard file that does not exist yet against the spec's `source` (finding 5) |

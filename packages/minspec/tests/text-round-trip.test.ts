@@ -39,6 +39,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync, spawnSync } from 'child_process';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// The end-to-end case clones and refreshes real repositories, and the FR-8 case runs the
+// Python twin over every spec: neither fits vitest's 5s default under load (#1285).
+useShellTimeout();
 
 // The spec panel's checkbox write is one of the writers in the tables, and the panel is the
 // only module here that talks to the editor. This is the smallest editor surface it uses.
@@ -641,8 +646,8 @@ const CONSTITUTION_EMPTY_GOALS = [
 
 const PROPOSAL: Proposal = {
   candidates: [
-    { id: 'SEED-1', section: 'goals', text: 'Trace specs to their owning epic.', provenance: 'docs/epics/ epics are tracked', draft: true },
-    { id: 'SEED-2', section: 'principles', text: 'Honor CLAUDE.md project instructions.', provenance: 'a CLAUDE.md is present', draft: true },
+    { id: 'SEED-1', section: 'Goals', text: 'Trace specs to their owning epic.', provenance: 'docs/epics/ epics are tracked', draft: true },
+    { id: 'SEED-2', section: 'Principles', text: 'Honor CLAUDE.md project instructions.', provenance: 'a CLAUDE.md is present', draft: true },
   ],
   notableUnwritten: [],
 };
@@ -698,6 +703,13 @@ function initializeAgainOutputs(): Record<string, OutputClass> {
     '.minspec/generated-hashes.json': 'lf',
     '.minspec/template-baseline.json': 'lf',
   };
+}
+
+/** The handler the spec panel registered for messages from its webview. */
+function panelMessageHandler(): (message: unknown) => void {
+  const handler = panelHooks.onMessage;
+  if (!handler) throw new Error('the spec panel did not listen for messages');
+  return handler;
 }
 
 /** The last `## ` section of a document, removed: a template section the next Refresh brings back. */
@@ -1002,8 +1014,7 @@ const PATH_WRITERS: readonly PathWriterRow[] = [
       panelHooks.errors.length = 0;
       const panel = new SpecPanel();
       panel.show(path.join(root, SPEC_FLAT));
-      if (!panelHooks.onMessage) throw new Error('the panel did not listen for messages');
-      panelHooks.onMessage({ command: 'toggleTask', phase: 'tasks', taskIndex: 0, done: true });
+      panelMessageHandler()({ command: 'toggleTask', phase: 'tasks', taskIndex: 0, done: true });
       panel.dispose();
       if (panelHooks.errors.length > 0) throw new Error(panelHooks.errors.join('; '));
     },
@@ -1709,13 +1720,21 @@ describe('SPEC-095 T1: text-io prepares, detects and restores', () => {
     expect(restoreLineEndings('a\nb\nc\n', ['a\r\n', 'b\n', 'c\r\n'])).toBe('a\r\nb\nc\r\n');
   });
 
-  it('readDocument and writeDocument round-trip a CRLF file through LF text', async () => {
-    const { readDocument, writeDocument } = await loadTextIo();
+  it('readDocument hands on LF text and the original, and restoring the edit gives a CRLF file back', async () => {
+    const { readDocument, readDocumentText, restoreLineEndings } = await loadTextIo();
     const file = path.join(SCRATCH, 't1-doc.md');
     fs.writeFileSync(file, '---\r\nid: X\r\n---\r\nbody\r\n');
     const doc = readDocument(file);
     expect(doc.text).toBe('---\nid: X\n---\nbody\n');
-    writeDocument(file, doc.text.replace('body', 'body\nmore'), doc.original);
+    expect(doc.original).toBe('---\r\nid: X\r\n---\r\nbody\r\n');
+    expect(readDocumentText(file)).toBe(doc.text);
+    fs.writeFileSync(file, restoreLineEndings(doc.text.replace('body', 'body\nmore'), doc.original));
     expect(fs.readFileSync(file, 'utf-8')).toBe('---\r\nid: X\r\n---\r\nbody\r\nmore\r\n');
+  });
+
+  it('restoreLineEndings treats a carriage return inside the LF text as content', async () => {
+    const { restoreLineEndings } = await loadTextIo();
+    // CRLF original: the stray CR stays in its line, and the line still gets one ending.
+    expect(restoreLineEndings('a\nb\rc\n', 'a\r\n')).toBe('a\r\nb\rc\r\n');
   });
 });
