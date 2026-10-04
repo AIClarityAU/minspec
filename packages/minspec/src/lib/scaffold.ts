@@ -1696,6 +1696,27 @@ export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
   // as the gitignore backfill immediately above).
   ensureGitattributesEntries(rootDir);
 
+  // #2520: seed BEFORE building context/rendering, not just after merging below.
+  // A signal that appeared since the last refresh (e.g. docs/decisions/ coming
+  // into use) can make `seedConstitution` add a new DRAFT entry to an EXISTING
+  // section (Invariants/Principles/Constraints/Goals all pre-exist from
+  // Initialize). Seeding only after the render-and-merge loop — as this function
+  // used to, exclusively — means the templates rendered THIS run (buildContext
+  // below) still read the pre-seed constitution, so any mirror whose template
+  // iterates the constitution's list (`.cursorrules`, measured in #2520) lags one
+  // whole refresh behind constitution.md itself: Refresh 1 seeds the DRAFT,
+  // Refresh 2 is the first to render it, Refresh 3 is finally quiet. Seeding here
+  // too closes that gap for the common case (the section already exists) in the
+  // same run the signal first appears. The post-merge call below stays — it is
+  // still the only seed that can see a section the merge loop ITSELF just added
+  // (a template-upgrade case, not this bug), so removing it would reintroduce a
+  // lag for that case.
+  try {
+    seedConstitution(rootDir);
+  } catch {
+    // best-effort — never break a refresh on a proposer failure.
+  }
+
   const config = loadConfig(rootDir);
   const context = buildContext(rootDir, config);
 
@@ -1784,9 +1805,13 @@ export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
     }
   }
 
-  // SPEC-025 FR-4/FR-5: re-seed after merge so a still-empty section gains DRAFT
-  // entries on refresh too; additive + idempotent, never overwrites human edits.
-  // Writes the file only; no longer a manifest source (SPEC-043 D8).
+  // SPEC-025 FR-4/FR-5: re-seed after merge too (#2520 keeps this one, in addition
+  // to the pre-render call above), so a section the merge loop just ADDED (a
+  // template upgrade introducing a new heading) still gains DRAFT entries this
+  // run, not next. The pre-render call above cannot reach that case — the section
+  // does not exist in constitution.md until after this file's own template merge
+  // runs. Additive + idempotent, never overwrites human edits. Writes the file
+  // only; no longer a manifest source (SPEC-043 D8).
   try {
     seedConstitution(rootDir);
   } catch {
