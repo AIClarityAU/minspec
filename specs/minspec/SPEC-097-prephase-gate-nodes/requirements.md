@@ -33,8 +33,8 @@ slash command exists.
 ### This issue is already half-shipped, ahead of its own spec
 
 `packages/shared/src/next-task.ts` already carries code stamped `#227` for `answer-OQ`:
-the severity-ranked pending case (`next-task.ts:507-526`, in-flight: spec `implementing` with an
-unresolved OQ) and the terminal-coherence case (`next-task.ts:793-822`, a spec/DR that reached a
+the severity-ranked pending case (`next-task.ts:806-840`, in-flight: spec `implementing` with an
+unresolved OQ) and the terminal-coherence case (`next-task.ts:501-514`, `:530-540`, a spec/DR that reached a
 terminal status while an OQ was still open) are both implemented and exercise the Tier-0 ranking
 core described by this spec's FR-1/FR-2. The module's own header names this precisely: *"'answer-OQ'
 (#227) IS implemented in this slice... Parsing the Clarify/Open-Questions prose into that boolean...
@@ -131,7 +131,7 @@ backlog.
   `hasUnresolvedOpenQuestions: boolean` for every `SpecNode` and `AdrNode` by reading the
   artifact's Open-Questions section and setting it on the literals at `artifact-graph.ts:538-556`
   and `:571-577` respectively — the two sites measured in Context as currently omitting it. The
-  Tier-0 resolver core (`next-task.ts:507-526`, `:793-822`) MUST NOT change; this FR is
+  Tier-0 resolver core (`next-task.ts:806-840`, `:501-514`, `:530-540`) MUST NOT change; this FR is
   exclusively the fs-adapter's missing half, per SPEC-012's own INV-CONSUME split (the resolver
   decides severity/ordering; the fs-adapter decides what *is* an open question).
 - **FR-2 (heading-text resolution, no corpus migration).** The corpus already marks resolution
@@ -149,7 +149,7 @@ backlog.
   `spec-validator.ts:628-663` (verb + "as ... issue/ticket" + a linked `#NNN`), not a second
   regex with different semantics for the same kind of claim.
 - **FR-4 (no behavior change to already-shipped severity logic).** With FR-1 wired, the
-  in-flight case (`next-task.ts:507-526`) and the terminal-coherence case (`:793-822`) MUST begin
+  in-flight case (`next-task.ts:806-840`) and the terminal-coherence case (`:501-514`, `:530-540`) MUST begin
   firing on real repos exactly as their existing fixtures already assert — this FR is "turn the
   flag on," never "change what the flag does."
 
