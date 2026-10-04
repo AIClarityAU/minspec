@@ -6,6 +6,7 @@ import { loadConfig, resolveAndValidate } from './config';
 import { listAdrs } from './adr-manager';
 import { parseSpec } from './spec';
 import { slugify } from './spec-manager';
+import { readDocumentText } from './text-io';
 import {
   listEpics,
   createEpic,
@@ -223,7 +224,9 @@ function collectSpecs(rootDir: string): ArtifactRef[] {
       } else if (e.isFile() && e.name.endsWith('.md')) {
         let content: string;
         try {
-          content = fs.readFileSync(full, 'utf-8');
+          // Prepared (SPEC-095): the `product:` read and the digest below assume LF. On a
+          // CRLF spec the digest was the frontmatter text and the product was not read.
+          content = readDocumentText(full);
         } catch {
           continue;
         }
@@ -316,7 +319,7 @@ function collectAdrs(rootDir: string): ArtifactRef[] {
   return listAdrs(rootDir).map(a => {
     let digest = '';
     try {
-      digest = firstParagraph(fs.readFileSync(a.filePath, 'utf-8'));
+      digest = firstParagraph(readDocumentText(a.filePath)); // prepared (SPEC-095)
     } catch {
       // best-effort
     }
