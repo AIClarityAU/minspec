@@ -68,6 +68,12 @@ interface Start {
 
 type Reply = (start: Start, finish: (err: Error | null, stdout?: string) => void) => void;
 
+/** Every start in the current test, so the tidy-up after it can see them all. */
+const recorded: Start[] = [];
+
+/** The one file a test ever puts in a call's directory. */
+const LEFT_BEHIND = 'left-behind.txt';
+
 /** A reply that makes the whole pass succeed: one epic, one mapping onto SPEC-001. */
 const GOOD_JSON = JSON.stringify({
   epics: [{ slug: 'payments', title: 'Payments', rationale: 'billing work' }],
@@ -97,6 +103,7 @@ function installClaude(reply: Reply): Start[] {
       cwdEntriesAtCall: exists ? fs.readdirSync(cwd) : null,
     };
     starts.push(start);
+    recorded.push(start);
     reply(start, (err, stdout = '') => {
       if (err) callback(err);
       else callback(null, { stdout, stderr: '' });
@@ -198,6 +205,13 @@ describe('#2570 - the AI pass starts `claude` sealed', () => {
   });
   afterEach(() => {
     vi.restoreAllMocks();
+    // Whatever is left of the directories the calls ran in, even when a test failed
+    // half way. Never recursive: see the note at the top of this file.
+    for (const { options } of recorded.splice(0)) {
+      if (typeof options.cwd !== 'string') continue;
+      fs.rmSync(path.join(options.cwd, LEFT_BEHIND), { force: true });
+      removeIfEmpty(options.cwd);
+    }
     fs.rmSync(project, { recursive: true, force: true });
   });
 
@@ -424,7 +438,7 @@ describe('#2570 - the AI pass starts `claude` sealed', () => {
       // host's own, say) into the loss of everything under it.
       const starts = installClaude((start, finish) => {
         if (typeof start.options.cwd === 'string') {
-          fs.writeFileSync(path.join(start.options.cwd, 'left-behind.txt'), 'keep me');
+          fs.writeFileSync(path.join(start.options.cwd, LEFT_BEHIND), 'keep me');
         }
         finish(null, GOOD_JSON);
       });
@@ -432,17 +446,11 @@ describe('#2570 - the AI pass starts `claude` sealed', () => {
       const result = await proposeAI(project);
 
       expect(typeof starts[0].options.cwd).toBe('string');
-      const cwd = starts[0].options.cwd as string;
-      const left = path.join(cwd, 'left-behind.txt');
-      try {
-        expect(result.failure).toBeUndefined();
-        // The distinguishing assertion: a recursive delete takes this file with it.
-        expect(fs.existsSync(left)).toBe(true);
-        expect(fs.readFileSync(left, 'utf-8')).toBe('keep me');
-      } finally {
-        fs.rmSync(left, { force: true });
-        removeIfEmpty(cwd);
-      }
+      const left = path.join(starts[0].options.cwd as string, LEFT_BEHIND);
+      expect(result.failure).toBeUndefined();
+      // The distinguishing assertion: a recursive delete takes this file with it.
+      expect(fs.existsSync(left)).toBe(true);
+      expect(fs.readFileSync(left, 'utf-8')).toBe('keep me');
     });
 
     it('T3: waits for a directory that is still in use, then removes it', async () => {
@@ -469,11 +477,9 @@ describe('#2570 - the AI pass starts `claude` sealed', () => {
 
       // A bounded number of tries: it must end, and it must not cost the user the result.
       expect(rmdir).toHaveBeenCalledTimes(5);
+      expect(rmdir).toHaveBeenLastCalledWith(starts[0].options.cwd);
       expect(result.failure).toBeUndefined();
       expect(result.proposal?.mappings).toHaveLength(1);
-
-      rmdir.mockRestore();
-      removeIfEmpty(starts[0].options.cwd as string);
     });
 
     it('T3: a directory that will not go does not turn a finished pass into a failed one', async () => {
@@ -489,9 +495,6 @@ describe('#2570 - the AI pass starts `claude` sealed', () => {
       expect(rmdir).toHaveBeenCalledWith(cwd);
       expect(result.failure).toBeUndefined();
       expect(result.proposal?.mappings).toHaveLength(1);
-
-      rmdir.mockRestore();
-      removeIfEmpty(cwd);
     });
   });
 
