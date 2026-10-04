@@ -1,8 +1,8 @@
 {
   "name": "minspec",
   "displayName": "MinSpec",
-  "description": "Complexity-adaptive specification-driven development. Classifies changes into tiers and applies proportional ceremony — a one-line fix needs one sentence of spec, an architecture rewrite gets the full treatment.",
-  "version": "0.1.26",
+  "description": "Scope-adaptive spec-driven development. Classifies each change by how far it reaches and applies proportional ceremony: one sentence of spec for a small change, the full treatment for a far-reaching one.",
+  "version": "0.1.27",
   "private": true,
   "publisher": "aiclarity",
   "license": "MIT",
@@ -527,12 +527,12 @@
         "minspec.autoBackfillUseAi": {
           "type": "boolean",
           "default": false,
-          "description": "Always use the AI pass when backfilling epics (skips the per-run 'AI-enhanced?' prompt). Set globally by choosing 'Always' on that prompt — a personal preference that follows you across projects. Runs 'claude -p' locally; the extension makes no network calls. Off by default."
+          "description": "Always use the AI pass when backfilling epics (skips the per-run 'AI-enhanced?' prompt). The AI pass runs your own 'claude' command, which sends the ids and titles of your specs, decisions and epics, and the first paragraph of each spec or decision that has no epic yet, to the model provider it is set up with. Choosing 'Always' on that prompt saves the same choice for this project only, in .minspec/preferences.json. Off by default."
         },
         "minspec.advancePhaseOnApprove": {
           "type": "boolean",
           "default": false,
-          "description": "Always enqueue a phase-advance request when you approve a spec (skips the per-approval follow-up prompt). Set globally by choosing 'Always' on that prompt — a personal preference that follows you across projects. Enqueue-only: writes a request to .minspec/queue/ for a downstream consumer to dequeue; never runs 'claude -p' itself. Off by default."
+          "description": "Always enqueue a phase-advance request when you approve a spec (skips the per-approval follow-up prompt). Choosing 'Always' on that prompt saves the same choice for this project only, in .minspec/preferences.json. Enqueue-only: writes a request to .minspec/queue/ for a downstream consumer to dequeue; never runs 'claude -p' itself. Off by default."
         },
         "minspec.approverEmail": {
           "type": "string",
@@ -625,7 +625,6 @@
     "supply-chain:check": "../../scripts/check-supply-chain.sh",
     "prepackage": "npm run supply-chain:check",
     "package": "npm run build && vsce package --no-dependencies",
-    "prepublish": "npm run supply-chain:check",
     "test": "cd ../.. && vitest run packages/minspec/tests",
     "bench": "vitest bench",
     "pretest:e2e": "npm run build && tsc -p tsconfig.test.json",

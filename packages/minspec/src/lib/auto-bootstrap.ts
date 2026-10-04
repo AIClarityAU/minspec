@@ -664,8 +664,14 @@ export const BOOTSTRAP_STEPS: readonly BootstrapStep[] = [
       !prefs.skipBackfillPrompt &&
       isMinspecInitialized(rootDir) &&
       hasUnbackfilledEpics(rootDir),
+    // This offer's button IS the consent for the AI pass: `commandArg` below makes the
+    // command skip its own consent prompt (#213), so this text is all the user reads
+    // before `claude` runs. It therefore says what is sent, in the same sentence as that
+    // prompt (#2568). It used to say only "AI-enhanced if Claude Code is installed".
+    // Pinned, with the prompt, the setting description and the README, by
+    // tests/readme-network-claims.test.ts.
     message:
-      'MinSpec: Several specs/decisions have no epic. Backfill epics now? (AI-enhanced if Claude Code is installed.)',
+      'MinSpec: Several specs/decisions have no epic. Backfill epics now? (AI-enhanced if Claude Code is installed: Backfill then runs your own `claude` command, which sends the ids and titles of your specs, decisions and epics, and the first paragraph of each spec or decision that has no epic yet, to the model provider it is set up with.)',
     primaryAction: 'Backfill',
     commandId: 'minspec.backfillEpics',
     skipPrefKey: 'skipBackfillPrompt',
