@@ -25,8 +25,9 @@
  *   4. The allowlist entry for `lib/backlog.ts` says it reaches the network and why that
  *      is allowed (SPEC-085 FR-10).
  *   5. The AI pass says what it sends in every place it is offered or described: the
- *      consent prompt, the setting that skips the prompt, and the README. One sentence,
- *      held here once, so the three cannot drift apart (issue #2457).
+ *      consent prompt, the setting that skips the prompt, the README, and the backfill
+ *      offer, whose button starts the AI pass without the prompt (issue #2568). One
+ *      sentence, held here once, so the four cannot drift apart (issue #2457).
  *
  * WHAT THIS CANNOT PROVE (SPEC-085 DQ-4). It is a text-presence check. It proves each
  * feature is NAMED in the right part of the section; it cannot prove the sentence around
@@ -47,6 +48,8 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as ts from 'typescript';
+
+import { BOOTSTRAP_STEPS } from '../src/lib/auto-bootstrap';
 
 const PACKAGE_ROOT = path.resolve(__dirname, '..');
 const REPO_ROOT = path.resolve(PACKAGE_ROOT, '..', '..');
@@ -558,7 +561,7 @@ describe('the lib/backlog.ts allowlist entry carries a consent-clause comment (S
 
 // ─── 5. The AI pass says what it sends, wherever it is offered ──────────────
 
-describe('the AI pass names what it sends in the prompt, the setting and the README (#2457)', () => {
+describe('the AI pass names what it sends in the prompt, the setting, the README and the offer (#2457, #2568)', () => {
   /**
    * What the AI pass hands to the user's `claude` command, as `buildPrompt` in
    * `lib/epic-backfill.ts` assembles it: the id and title of every spec, decision and epic,
@@ -600,5 +603,33 @@ describe('the AI pass names what it sends in the prompt, the setting and the REA
 
   it('the README network section says the same', () => {
     expect(visibleText(networkSection())).toContain(AI_PASS_SENDS);
+  });
+
+  /**
+   * The setup offers that hand AI consent to their command (#2568). Such an offer passes
+   * `{ aiConsent: true }`, and the command then skips the consent prompt above (#213), so
+   * the offer's own text is the only thing the user reads before `claude` runs. These are
+   * the real step objects the bootstrap runner shows, not a copy of their text.
+   */
+  const offersThatGrantAiConsent = BOOTSTRAP_STEPS.filter(
+    step => (step.commandArg as { aiConsent?: unknown } | undefined)?.aiConsent === true,
+  );
+
+  it('exactly one setup offer hands AI consent to its command: the epic backfill offer', () => {
+    // Guards the selector. If no step carried the flag, the check below would pass on nothing.
+    expect(offersThatGrantAiConsent.map(step => `${step.kind}:${step.commandId}`)).toEqual([
+      'backfill:minspec.backfillEpics',
+    ]);
+  });
+
+  it('an offer that hands AI consent says what is sent before its button is pressed', () => {
+    for (const step of offersThatGrantAiConsent) {
+      const message = plainText(step.message);
+      // The AI pass runs only when `claude` is there; the offer must not promise it otherwise.
+      expect(message).toContain('if claude code is installed');
+      // It names the button that gives the consent, and then the same sentence as the prompt.
+      expect(message).toContain(`${step.primaryAction.toLowerCase()} then runs your own claude command`);
+      expect(message).toContain(AI_PASS_SENDS);
+    }
   });
 });

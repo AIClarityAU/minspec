@@ -50,7 +50,7 @@ These checks write nothing to GitHub.
 | **MinSpec: Score Issue (WSJF)** | `gh auth status` and `gh issue list`. After you choose Apply: `gh issue view`, `gh issue edit` and `gh issue comment` |
 | **MinSpec: Quick Triage Inbox Issue** | `gh auth status`, `gh issue list`, then `gh issue edit` |
 | **MinSpec: Push docs via lane**, after you confirm the dialog that names the push | `gh auth status`, `git fetch`, `git push`, then `gh pr create` |
-| **MinSpec: Backfill Epics (AI-assisted)**, when you choose the AI pass, or accept MinSpec's offer to backfill (its text says it is AI-enhanced if Claude Code is installed) | `claude -p`, which sends the ids and titles of your specs, decisions and epics, and the first paragraph of each spec or decision that has no epic yet, to the model provider your `claude` command is set up with. The heuristic pass is offline |
+| **MinSpec: Backfill Epics (AI-assisted)**, when you choose the AI pass, or accept MinSpec's offer to backfill (its text says it is AI-enhanced if Claude Code is installed, and what the AI pass sends) | `claude -p`, which sends the ids and titles of your specs, decisions and epics, and the first paragraph of each spec or decision that has no epic yet, to the model provider your `claude` command is set up with. The heuristic pass is offline |
 | **Create ruleset** or **Add checks**, on the offer that can follow the two checks above | `gh api`, to create or update a branch ruleset on this repository |
 
 ### Runs when a setting allows it
