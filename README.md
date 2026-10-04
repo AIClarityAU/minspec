@@ -1,10 +1,10 @@
 # MinSpecPro
 
-![status](https://img.shields.io/badge/status-under%20construction-orange)
-![release](https://img.shields.io/badge/release-none%20yet-lightgrey)
-![marketplace](https://img.shields.io/badge/marketplace-not%20published-red)
+![status](https://img.shields.io/badge/status-early%20preview-orange)
+[![version](https://img.shields.io/github/package-json/v/AIClarityAU/minspec?filename=packages%2Fminspec%2Fpackage.json&label=version)](packages/minspec/CHANGELOG.md)
+[![marketplace](https://img.shields.io/badge/marketplace-preview-blue)](https://marketplace.visualstudio.com/items?itemName=aiclarity.minspec)
 
-> 🚧 **Under construction — pre-release.** APIs, specs, and layout change daily; nothing here is published to the VS Code Marketplace or Open VSX, and there are no stability guarantees. Star/watch to follow along — don't depend on it yet.
+> 🚧 **Early preview.** The MinSpec extension is released to the VS Code Marketplace as a preview, as [`aiclarity.minspec`](https://marketplace.visualstudio.com/items?itemName=aiclarity.minspec). A release is published by hand after it merges here, so that listing is what you can install today, and the [changelog](packages/minspec/CHANGELOG.md) says what each version contains. Nothing is on Open VSX, and the MinSpec Pro extension pack is not published. APIs, specs, and layout still change daily, and there are no stability guarantees.
 >
 > **ScroogeLLM is not in this repo.** Its source, spec, design, and research live in a separate private repository ([DR-027](docs/decisions/DR-027.md)). This monorepo hosts **MinSpec** (open), the shared classifier, and the extension-pack manifest.
 
@@ -55,13 +55,31 @@ npm test          # all packages
 npm run lint
 npm run build
 npm run validate  # frontmatter check on specs/**/*.md
-
-# Package one extension
-cd packages/minspec && npm run package    # → .vsix
-
-# Publish (requires vsce token)
-cd packages/minspec && npx vsce publish
 ```
+
+### Releasing MinSpec
+
+A release is published by a person, never by an agent ([DR-076](docs/decisions/DR-076.md)), and always from a packaged file. Run these from the repository root.
+
+Before packaging, fetch the current threat catalogs the supply-chain scan compares against (this needs a signed-in `gh`). With none fetched the scan still passes, as an inventory only ([#2410](https://github.com/AIClarityAU/minspec/issues/2410), the gap that lets a release build skip the comparison), so check that the package step prints `0 findings against N catalog(s)`:
+
+```bash
+BUMBLEBEE_CATALOG_REF=main ./scripts/fetch-bumblebee-catalogs.sh
+```
+
+Step 1, package. This runs the supply-chain scan, then the build, then writes `packages/minspec/minspec-<version>.vsix`:
+
+```bash
+(cd packages/minspec && npm run package)
+```
+
+Step 2, publish that file. It needs a Marketplace token:
+
+```bash
+(cd packages/minspec && npx vsce publish --packagePath "minspec-$(node -p "require('./package.json').version").vsix")
+```
+
+Do not run `vsce publish` without `--packagePath`. On its own it runs neither the scan nor the build, and it packages whatever is already in `packages/minspec/out/` ([#2411](https://github.com/AIClarityAU/minspec/issues/2411), the publish path that skipped the gate).
 
 ## Layout
 

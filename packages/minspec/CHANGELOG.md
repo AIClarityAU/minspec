@@ -5,11 +5,13 @@ All notable changes to the MinSpec extension will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.1.27] - 2026-10-04
 
-Everything in this section is on `main`, and in any build made from it, but has not been published. The version in `package.json` has stayed at 0.1.26 since 2026-07-31, so a build made today is numbered 0.1.26 and already contains all of it. The release either bumps the version and renames this heading, or folds this section into 0.1.26.
+The preview release for the VS Code Marketplace, and the first version built for publishing since 0.1.16. Versions 0.1.17 to 0.1.26, below, were local builds, so an update from 0.1.16 brings everything from 0.1.17 on. This section lists what changed after 0.1.26.
 
 Numbers in parentheses, here and below, are pull requests or issues at github.com/AIClarityAU/minspec.
+
+**A `.minspec/` folder you never asked for.** A `.minspec/` folder that holds only `preferences.json`, in a project you never initialised, is left over from an old bug: declining or closing the setup toast used to create it. MinSpec reads any `.minspec/` folder as "this project is initialised", so delete that folder. The setup toast can then appear once more, and declining or closing it no longer creates anything in the project (#2355, #2365).
 
 ### Added
 
@@ -27,10 +29,16 @@ Numbers in parentheses, here and below, are pull requests or issues at github.co
 ### Changed
 
 - **The listing is marked as a preview** (`"preview": true` in the manifest).
+- **The Backlog pane contacts GitHub only when you ask.** It loads nothing until you run **MinSpec: Refresh Backlog (contacts GitHub through your gh CLI)** from the Command Palette, the pane's title bar or its "Backlog not loaded" row. It no longer fetches when it is drawn, when the window regains focus or when the pane becomes visible, and a loaded list shows when it was loaded (#2329).
+- **The README's account of the network was wrong and has been replaced.** It said that three commands run your local `gh` CLI and that nothing else contacts a network, and the 0.1.6 and 0.1.9 entries below, left as written, repeat the three-command count. In fact the Backlog pane fetched without being asked, and other features run `gh`, `git` and `claude` too. The README section "What MinSpec Does on Your Network" now lists every case (#2329, #2457).
 - **Licence: everything is MIT.** The bundled `@aiclarity/shared` package moved from MPL-2.0 to MIT, so the extension no longer ships a second licence (#1435).
 - MinSpec stopped writing machine-wide configuration (#1405).
 - Files MinSpec declares machine-local are removed from the git index when they were already tracked, not only added to `.gitignore`, and MinSpec says so when it does it (#1146).
 - `minspec.ruleset.requiredChecks` now defaults to empty. It used to default to `lint` and `test`, and a required check that nothing reports blocks every pull request (#1671).
+- The getting-started walkthrough explains the way of working (why ceremony follows scope, what you are asked to verify, the next-task signpost) where it used to tour the buttons (#156).
+- Setting descriptions no longer cite internal decision-record and issue numbers (#2408).
+- A new project's `.minspec/config.json` has an `autonomy` key, set to `ask`. MinSpec checks the value when it reads the file and does nothing else with it (#1795).
+- Correction to the 0.1.7 entry below: publishing never ran the supply-chain scan, only packaging did. The scan was attached to a script name (`prepublish`) that the publishing tool does not run. That script is removed, and the documented release steps now package first and publish the packaged file (#2411).
 
 ### Removed
 
@@ -41,7 +49,21 @@ Numbers in parentheses, here and below, are pull requests or issues at github.co
 - **A checkout with Windows line endings (CRLF) now works like any other.** Accept Decision no longer puts a second frontmatter block in front of a decision record, Refresh Harness Files no longer appends every section of `CLAUDE.md`, `AGENTS.md`, `.cursorrules`, the constitution and the labels file a second time, and Approve Spec no longer fails with "No frontmatter block". The decision and epic lists, the Next Task signpost and the status checks read a CRLF file the same as its LF copy. A file MinSpec edits keeps its own line endings, so git sees only the lines that changed; files MinSpec creates are written LF, and a hook or script under MinSpec's LF pin that a CRLF checkout broke runs again after one Refresh (#2397).
 - **The presence heartbeat no longer creates `.minspec/` in a folder that never opted in.** It used to create `.minspec/sessions/` in any folder you opened (#2357).
 - **Only Initialize creates `.minspec/`.** Refresh Harness Files no longer sets up a folder that was never initialized; it says so and points you at **MinSpec: Initialize SDD Structure**. Declare Session Scope, Link Code to Spec Requirement, Propose Constitution (draft) and Approve Spec for Implementation used to create `.minspec/` as a side effect in such a folder; they now ask for Initialize first, and write nothing. Park Topic can still create a GitHub issue there, but no longer writes a local parking lot: if the issue cannot be created it says the topic was not saved and hands your text back in an untitled editor (#2364).
+- Declining or closing a setup toast no longer creates `.minspec/preferences.json` in a project that was never initialised. The answer is kept in VS Code's own per-workspace storage (#2355).
+- The `MINSPEC_SESSION_ID` terminal variable is set only in an initialised project. It used to be added to the terminals of every window (#2356).
+- The decision index (`docs/decisions/INDEX.md`) is no longer rewritten in a project that was never initialised when a file in the decisions folder changes (#2461).
+- Choosing "Always" on the AI-backfill, push or phase-advance prompt now warns when the choice could not be saved, as in a project that was never initialised. It used to look saved, and the question came back (#2506).
+- **Windows:** the hooks, scripts and workflows Initialize writes are pinned to LF line endings by a `.gitattributes` block, which Initialize and Refresh Harness Files add. With `core.autocrlf` set to `true`, a later checkout used to turn the hooks into CRLF files that no shell could run, and every commit failed (#2398).
+- **Windows:** the pre-commit hook no longer takes a Python that is on the PATH for a Python that runs. It starts `python3`, `python` and `py -3` in turn and falls back to its shell checks when none starts, so the Microsoft Store placeholder `python3.exe` no longer blocks a commit (#2400).
+- **Windows:** Accept Decision no longer takes a decision record that is already committed for a new one. An uncommitted edit to it could be committed first, under a `chore(adr): add ...` message, ahead of the acceptance (#2402).
+- **Windows:** Tidy Checkout's check for another window on the same checkout compares folders by their real path, so two spellings of one folder (drive-letter case, short names) no longer read as two folders (#2403).
+- The four Windows fixes above and the CRLF fix were tested on Linux, by imitating Windows. MinSpec's automated tests do not run on Windows.
+- A failed GitHub fetch is reported as a failure, with the reason. The Backlog pane, Score Issue (WSJF) and Quick Triage Inbox Issue used to report no issues when `gh` was missing, signed out, offline or rate limited, and a failure that only mentioned "auth" was reported as not signed in (#2247, #2459).
+- An open issue labelled `done` is listed in the Backlog pane, under "Done, still open". It used to be left out of the pane (#2460).
+- The Next Task signpost no longer asks you to approve a spec that is already `done` and that no approve command will act on (#2370).
+- Frontmatter keys MinSpec does not model (`implements:`, `depends_on:` and the like) survive when it rewrites a spec. Ticking a task in the spec panel and Migrate Spec Layout used to drop them (#2324).
 - Refresh Harness Files no longer deletes content you wrote yourself, and no longer renames the project after the folder it happens to run in (#1755, #1536).
+- One Refresh Harness Files is enough to carry a new draft entry of the constitution into `.cursorrules`. It used to take a second Refresh (#2520).
 - Approving a spec is refused when the spec cannot satisfy the status the approval would give it, and finished or superseded specs are no longer offered for approval (#1364, #2117).
 - "Always" on the classify prompt is honoured. It used to be written to a store the prompt never read (#2096).
 - A frontmatter key written as a block list (for example `implements:` followed by `- path` lines) is read in full; only its first item used to be read. Status writes touch only the top-level `status:` key (#1976, #2282).
@@ -56,7 +78,7 @@ Numbers in parentheses, here and below, are pull requests or issues at github.co
 
 ## [0.1.26] - 2026-07-31
 
-Versions 0.1.17 to 0.1.26 were built and installed locally and were never published. 0.1.16 is the newest version the VS Code Marketplace holds.
+Versions 0.1.17 to 0.1.26 were built and installed locally and were never published. The VS Code Marketplace held nothing newer than 0.1.16 while they were built.
 
 ### Added
 
@@ -215,7 +237,7 @@ The largest step in this list: seven weeks of work, built and installed locally.
 
 ## [0.1.16] - 2026-05-29
 
-The newest version the VS Code Marketplace holds. The listing was later unpublished.
+The newest version the VS Code Marketplace held when the listing was unpublished.
 
 ### Changed
 

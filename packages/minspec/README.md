@@ -77,7 +77,7 @@ The same three actions, and every other command, are in the Command Palette unde
 
 Read this before you accept Initialize. Besides Markdown files it adds git hooks, changes one git setting, and adds GitHub Actions workflows. Everything it writes is inside the project folder, and nothing is committed unless you accept the commit offer that follows.
 
-This is what Initialize wrote into a new git repository that held only a README, with version 0.1.26:
+This is what Initialize wrote into a new git repository that held only a README, with version 0.1.27:
 
 | Path | What it is |
 |------|------------|
@@ -96,15 +96,16 @@ This is what Initialize wrote into a new git repository that held only a README,
 | `.github/workflows/docs-lane.yml` | Merges a documentation-only pull request that carries the `docs-lane` label once its checks pass |
 | `.github/scripts/ai-review-guard.js`, `.github/scripts/ai-review-guard.test.js`, `scripts/review-branch.sh`, `scripts/review-decide.sh`, `scripts/lib/agent-context.sh`, `scripts/approval-provenance.py`, `scripts/hooks/canonical.py`, `scripts/roles/*.md` (4 files) | The scripts and reviewer prompts those workflows run |
 | `.gitignore` | A block of entries for MinSpec's machine-local files |
+| `.gitattributes` | A block that pins the git hooks, the Claude Code hook, the shell and Python scripts under `scripts/`, and the workflows to LF line endings. Without it, git converts them to CRLF on checkout wherever `core.autocrlf` is `true`, which is usual on Windows, and a shell cannot run a CRLF hook |
 | `.minspec/generated-hashes.json`, `.minspec/template-baseline.json` | Bookkeeping that Refresh uses to tell your edits from template changes. Machine-local, ignored by git |
 
 The files for Claude Code and Cursor are written whether or not you use those tools. Delete the ones you do not want.
 
 After writing the files, Initialize asks for a minimum test-coverage figure, may suggest the GitHub Pull Requests extension, offers to commit what it generated, and may offer to create a GitHub branch ruleset that requires the generated checks. Each of these is a prompt you can decline.
 
-**Files that already exist.** Initialize does not overwrite an existing file. It does add to three: the ignore block in `.gitignore`, a slash-command section in `AGENTS.md`, and one hook entry in `.claude/settings.json` (that file is re-serialised, so its formatting changes).
+**Files that already exist.** Initialize does not overwrite an existing file. It does add to four: the ignore block in `.gitignore`, the line-ending block in `.gitattributes`, a slash-command section in `AGENTS.md`, and one hook entry in `.claude/settings.json` (that file is re-serialised, so its formatting changes).
 
-**Git hooks.** Initialize sets this repository's `core.hooksPath` to `.minspec/hooks`, so the hooks run on every commit, from any tool. If the repository already used another hooks folder (Husky's, for example), that setting is replaced and those hooks stop running until you chain them yourself. The hooks are shell scripts; `validate.py` runs only where `python3` is available.
+**Git hooks.** Initialize sets this repository's `core.hooksPath` to `.minspec/hooks`, so the hooks run on every commit, from any tool. If the repository already used another hooks folder (Husky's, for example), that setting is replaced and those hooks stop running until you chain them yourself. The hooks are shell scripts; `validate.py` runs only where a working Python 3 is found (the hook tries `python3`, `python` and `py -3` in turn), and without one `pre-commit` falls back to shell checks of its own.
 
 - `pre-commit` refuses a commit made directly on the default branch when the repository has a remote (allow it with `git config minspec.allowCommitOnDefaultBranch true`), scans staged changes with `gitleaks` if it is installed, and checks staged specs and decision records.
 - `commit-msg` requires a `Root cause:` line in the body of a `fix:` commit, and a `Follow-ups:` line when the message says work was deferred.
@@ -290,7 +291,7 @@ Open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and type "MinSpec" to 
 | **MinSpec: Accept Epic** | Set a proposed epic to active. In the tree's context menu only |
 | **MinSpec: Regenerate Epic INDEX** | Rebuild the epic index |
 | **MinSpec: Backfill Epics (AI-assisted)** | Propose epics for existing specs and decisions. A heuristic pass runs offline; an optional AI pass runs your local `claude` command if you agree. Nothing is written until you apply the proposal |
-| **MinSpec: Toggle Group by Epic (Specs)**, **(Decisions)**, **(Backlog)** | Switch a pane between its normal grouping and grouping by epic |
+| **MinSpec: Toggle Group by Epic (Specs)**, **MinSpec: Toggle Group by Epic (Decisions)**, **MinSpec: Toggle Group by Epic (Backlog)** | Switch a pane between its normal grouping and grouping by epic |
 
 ### Session, parking and backlog
 
