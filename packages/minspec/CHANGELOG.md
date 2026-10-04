@@ -11,7 +11,7 @@ The preview release for the VS Code Marketplace, and the first version built for
 
 Numbers in parentheses, here and below, are pull requests or issues at github.com/AIClarityAU/minspec.
 
-**A `.minspec/` folder you never asked for.** A `.minspec/` folder that holds only `preferences.json`, in a project you never initialised, is left over from an old bug: declining or closing the setup toast used to create it. MinSpec reads any `.minspec/` folder as "this project is initialised", so delete that folder. The setup toast can then appear once more, and declining or closing it no longer creates anything in the project (#2355, #2365).
+**A `.minspec/` folder you never asked for.** A `.minspec/` folder that holds only `preferences.json`, in a project you never initialised, is left over from an old bug: declining or closing the setup toast used to create it. An empty `classifications` folder or a `sessions` folder beside that file is MinSpec's too, not yours. MinSpec reads any `.minspec/` folder as "this project is initialised", so delete that folder. The setup toast can then appear once more, and declining or closing it no longer creates anything in the project (#2355, #2365).
 
 ### Added
 

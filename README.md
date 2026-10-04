@@ -2,9 +2,9 @@
 
 ![status](https://img.shields.io/badge/status-early%20preview-orange)
 [![version](https://img.shields.io/github/package-json/v/AIClarityAU/minspec?filename=packages%2Fminspec%2Fpackage.json&label=version)](packages/minspec/CHANGELOG.md)
-[![marketplace](https://img.shields.io/badge/marketplace-preview-blue)](https://marketplace.visualstudio.com/items?itemName=aiclarity.minspec)
+[![release channel](https://img.shields.io/badge/release%20channel-Marketplace%20preview-blue)](https://marketplace.visualstudio.com/items?itemName=aiclarity.minspec)
 
-> 🚧 **Early preview.** The MinSpec extension is released to the VS Code Marketplace as a preview, as [`aiclarity.minspec`](https://marketplace.visualstudio.com/items?itemName=aiclarity.minspec). A release is published by hand after it merges here, so that listing is what you can install today, and the [changelog](packages/minspec/CHANGELOG.md) says what each version contains. Nothing is on Open VSX, and the MinSpec Pro extension pack is not published. APIs, specs, and layout still change daily, and there are no stability guarantees.
+> 🚧 **Early preview.** MinSpec's release channel is the VS Code Marketplace, as a preview: [`aiclarity.minspec`](https://marketplace.visualstudio.com/items?itemName=aiclarity.minspec). Each release is published by hand after it merges here, so the Marketplace listing, not this page, is the record of what you can install today; the [changelog](packages/minspec/CHANGELOG.md) says what each version contains. Open VSX is not a release channel yet, and the MinSpec Pro extension pack is not released. APIs, specs, and layout still change daily, and there are no stability guarantees.
 >
 > **ScroogeLLM is not in this repo.** Its source, spec, design, and research live in a separate private repository ([DR-027](docs/decisions/DR-027.md)). This monorepo hosts **MinSpec** (open), the shared classifier, and the extension-pack manifest.
 
@@ -80,6 +80,8 @@ Step 2, publish that file. It needs a Marketplace token:
 ```
 
 Do not run `vsce publish` without `--packagePath`. On its own it runs neither the scan nor the build, and it packages whatever is already in `packages/minspec/out/` ([#2411](https://github.com/AIClarityAU/minspec/issues/2411), the publish path that skipped the gate).
+
+Why a packaged file: the supply-chain decision ([DR-005](docs/decisions/DR-005.md)) requires that a compromised dependency blocks a release, and the gate that does it runs in `npm run package`, through the `prepackage` hook. DR-005 also lists a `prepublish` hook. vsce never ran it, so it gated nothing, and it has been removed from the manifest. Publishing the file that step 1 wrote is what keeps DR-005's requirement true. Bringing DR-005's own wording into line is tracked in [#2563](https://github.com/AIClarityAU/minspec/issues/2563).
 
 ## Layout
 
