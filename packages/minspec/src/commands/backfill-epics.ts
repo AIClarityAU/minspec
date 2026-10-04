@@ -284,8 +284,14 @@ export async function backfillEpicsCommand(
       const USE_AI = 'AI-enhanced';
       const ALWAYS = 'Always';
       const HEURISTIC = 'Heuristic only';
+      // The consent prompt names what leaves the machine (#2457). It used to say "the
+      // extension makes no network calls": true of the extension's own process, and beside
+      // the point, because `claude` sends what MinSpec hands it to a model provider. What
+      // is handed over is assembled by `buildPrompt` in lib/epic-backfill.ts. The wording
+      // is pinned, together with the setting description and the README, by
+      // tests/readme-network-claims.test.ts.
       const choice = await vscode.window.showInformationMessage(
-        'MinSpec: Claude Code detected. Use AI to propose the epic taxonomy? (Runs `claude -p` locally; the extension makes no network calls.)',
+        'MinSpec: Claude Code detected. Use AI to propose the epic taxonomy? (Runs your own `claude` command, which sends the ids and titles of your specs, decisions and epics, and the first paragraph of each spec or decision that has no epic yet, to the model provider it is set up with.)',
         ALWAYS,
         USE_AI,
         HEURISTIC,

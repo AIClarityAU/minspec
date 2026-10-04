@@ -18,14 +18,28 @@
  *      Your Network" section, under the heading that matches how it is triggered, and is
  *      a real command title, setting or button in the code.
  *   3. The retired sentences are gone from every location that carried them: the README,
- *      the walkthrough page and the site.
+ *      the walkthrough page and the site, and the two places issue #2457 found after
+ *      SPEC-085 shipped: the manifest (a setting description read in the Settings editor
+ *      and on the listing) and the messages of the commands (the consent prompt for the
+ *      AI pass said "the extension makes no network calls" while asking to run `claude`).
  *   4. The allowlist entry for `lib/backlog.ts` says it reaches the network and why that
  *      is allowed (SPEC-085 FR-10).
+ *   5. The AI pass says what it sends in every place it is offered or described: the
+ *      consent prompt, the setting that skips the prompt, and the README. One sentence,
+ *      held here once, so the three cannot drift apart (issue #2457).
  *
  * WHAT THIS CANNOT PROVE (SPEC-085 DQ-4). It is a text-presence check. It proves each
  * feature is NAMED in the right part of the section; it cannot prove the sentence around
  * the name is accurate, and "local-only" is checked only against a list of literal
  * network verbs passed as arguments. A human still reads the section at review.
+ *
+ * The same holds for 3 and 5. The retired phrases are looked for in the manifest and in the
+ * string literals under `src/commands`; a message built in `src/lib` or `src/views` is not
+ * read (`src/lib` holds the templates of files MinSpec writes into a project, where "no
+ * network calls without consent" is a rule about that project and not a claim about
+ * MinSpec). And 5 pins the words, not their truth: what the AI pass sends is decided by
+ * `buildPrompt` in `lib/epic-backfill.ts`, which is not exported, so a change there needs
+ * the sentence changed by hand.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -42,6 +56,8 @@ const WALKTHROUGH = path.join(PACKAGE_ROOT, 'media', 'walkthrough', 'welcome.md'
 const SITE = path.join(REPO_ROOT, 'sites', 'minspec.dev', 'index.html');
 const INVARIANTS_TEST = path.join(PACKAGE_ROOT, 'tests', 'invariants.test.ts');
 const MANIFEST = path.join(PACKAGE_ROOT, 'package.json');
+const COMMANDS_DIR = path.join(SRC_ROOT, 'commands');
+const BACKFILL_COMMAND = path.join(COMMANDS_DIR, 'backfill-epics.ts');
 
 // ─── The inventory ──────────────────────────────────────────────────────────
 
@@ -246,6 +262,38 @@ function visibleText(raw: string): string {
 
 const networkSection = (): string => section(read(README), NETWORK_SECTION_HEADING);
 
+/** Every string value in a parsed JSON document, at any depth. Keys are not values. */
+function jsonStrings(value: unknown): string[] {
+  if (typeof value === 'string') return [value];
+  if (Array.isArray(value)) return value.flatMap(jsonStrings);
+  if (value !== null && typeof value === 'object') return Object.values(value).flatMap(jsonStrings);
+  return [];
+}
+
+/**
+ * The text of every string literal in a TypeScript source: quoted strings, and the literal
+ * parts of template strings. Comments are not literals and are not returned, which is the
+ * point: a comment cannot be shown to a user, a string can.
+ */
+function stringLiterals(sourceText: string, fileName = 'source.ts'): string[] {
+  const sf = ts.createSourceFile(fileName, sourceText, ts.ScriptTarget.ES2022, true);
+  const out: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isStringLiteralLike(node)) {
+      out.push(node.text);
+    } else if (ts.isTemplateExpression(node)) {
+      out.push(node.head.text, ...node.templateSpans.map(span => span.literal.text));
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return out;
+}
+
+/** Every string literal under `src/commands`, where the extension's prompts are worded. */
+const commandMessages = (): string[] =>
+  sourceFiles(COMMANDS_DIR).flatMap(file => stringLiterals(read(file), file));
+
 // ─── 1. Every spawning module is classified ─────────────────────────────────
 
 describe('every module that may start a process is classified (SPEC-085 FR-9)', () => {
@@ -389,10 +437,15 @@ describe('the README network section names every network-reaching feature (SPEC-
 // ─── 3. The retired sentences are gone from every location ──────────────────
 
 describe('the retired network claims are gone from every location (SPEC-085 FR-8)', () => {
-  const locations = [
-    { name: 'README', file: README },
-    { name: 'walkthrough page', file: WALKTHROUGH },
-    { name: 'site', file: SITE },
+  // The last two were added for issue #2457. SPEC-085 listed the five places it knew of;
+  // the same claim was also in a setting description and in the consent prompt for the AI
+  // pass, and stayed there because this list did not reach them.
+  const locations: ReadonlyArray<{ name: string; text: () => string }> = [
+    { name: 'README', text: () => read(README) },
+    { name: 'walkthrough page', text: () => read(WALKTHROUGH) },
+    { name: 'site', text: () => read(SITE) },
+    { name: 'manifest', text: () => jsonStrings(JSON.parse(read(MANIFEST))).join('\n') },
+    { name: 'command messages', text: () => commandMessages().join('\n') },
   ];
 
   // FR-8 retires the first two by name. The last two are the short claim the spec's
@@ -408,12 +461,31 @@ describe('the retired network claims are gone from every location (SPEC-085 FR-8
 
   describe.each(locations)('$name', location => {
     it('exists and is not empty', () => {
-      expect(visibleText(read(location.file)).length).toBeGreaterThan(100);
+      expect(visibleText(location.text()).length).toBeGreaterThan(100);
     });
 
     it.each(retired)('does not say "%s"', phrase => {
-      expect(visibleText(read(location.file))).not.toContain(phrase);
+      expect(visibleText(location.text())).not.toContain(phrase);
     });
+  });
+
+  it('the two readers added for #2457 see what they are pointed at', () => {
+    // A reader that returned nothing would pass every "does not say" above. Each is shown
+    // a small input holding a retired phrase, and what it must not read.
+    expect(jsonStrings({ a: { b: ['x', { c: 'the extension makes no network calls' }] }, d: 1 })).toEqual([
+      'x',
+      'the extension makes no network calls',
+    ]);
+    const source = [
+      '// a comment may say no network calls',
+      'const quoted = "makes no network calls";',
+      'const templated = `zero network calls for ${quoted} here`;',
+    ].join('\n');
+    expect(stringLiterals(source)).toEqual(['makes no network calls', 'zero network calls for ', ' here']);
+
+    // And on the real tree: both find the text they exist to read.
+    expect(jsonStrings(JSON.parse(read(MANIFEST))).some(text => text.includes('AI pass'))).toBe(true);
+    expect(commandMessages().some(text => text.includes('Use AI to propose the epic taxonomy'))).toBe(true);
   });
 
   it('the README FAQ answer and Privacy section point at the network section', () => {
@@ -461,5 +533,52 @@ describe('the lib/backlog.ts allowlist entry carries a consent-clause comment (S
     // assertion above would fail for the wrong reason and this one says which.
     const withConsentClause = entries.filter(entry => /CONSENT clause/.test(entry.comment)).map(entry => entry.module);
     expect(withConsentClause).toContain('lib/approve-push.ts');
+  });
+});
+
+// ─── 5. The AI pass says what it sends, wherever it is offered ──────────────
+
+describe('the AI pass names what it sends in the prompt, the setting and the README (#2457)', () => {
+  /**
+   * What the AI pass hands to the user's `claude` command, as `buildPrompt` in
+   * `lib/epic-backfill.ts` assembles it: the id and title of every spec, decision and epic,
+   * and the first paragraph of each spec or decision that has no epic. Written the way a
+   * reader sees it (lower case, no markup), because that is how it is compared.
+   */
+  const AI_PASS_SENDS =
+    'sends the ids and titles of your specs, decisions and epics, and the first paragraph of each spec or decision that has no epic yet, to the model provider';
+
+  const consentPrompts = (): string[] =>
+    stringLiterals(read(BACKFILL_COMMAND), BACKFILL_COMMAND).filter(text =>
+      text.includes('Use AI to propose the epic taxonomy'),
+    );
+
+  const settingDescription = (): string => {
+    const manifest = JSON.parse(read(MANIFEST)) as {
+      contributes: { configuration: { properties: Record<string, { description?: string }> } };
+    };
+    return manifest.contributes.configuration.properties['minspec.autoBackfillUseAi']?.description ?? '';
+  };
+
+  it('there is one consent prompt for the AI pass', () => {
+    // The checks below are about this string. If it is reworded past recognition or split
+    // in two, this fails first and says so.
+    expect(consentPrompts()).toHaveLength(1);
+  });
+
+  it('the consent prompt says what is sent, and that your own claude command sends it', () => {
+    const prompt = visibleText(consentPrompts()[0] ?? '');
+    expect(prompt).toContain('your own claude command');
+    expect(prompt).toContain(AI_PASS_SENDS);
+  });
+
+  it('the setting that skips the prompt says the same', () => {
+    const description = visibleText(settingDescription());
+    expect(description).toContain("your own 'claude' command");
+    expect(description).toContain(AI_PASS_SENDS);
+  });
+
+  it('the README network section says the same', () => {
+    expect(visibleText(networkSection())).toContain(AI_PASS_SENDS);
   });
 });
