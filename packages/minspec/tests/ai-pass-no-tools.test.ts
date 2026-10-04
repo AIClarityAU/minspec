@@ -9,10 +9,12 @@
  * set. A sentence in a spec could make it read a file.
  *
  * WHAT WAS MEASURED (Claude Code 2.1.283, started through `execFile` the way the
- * extension starts it, random canary files). Each row is why one assertion below exists:
+ * extension starts it, random canary files, on a machine with 6 MCP servers configured).
+ * Each row is why one assertion below exists:
  *
- *   default start             46 tools and 6 MCP servers loaded; a canary was read
- *   + `--tools ""`            built-in tools gone, 14 MCP tools still loaded
+ *   default start             46 tools loaded (32 built in, 14 from the MCP servers);
+ *                             a canary was read
+ *   + `--tools ""`            built-in tools gone, the 14 MCP tools still loaded
  *   + `--strict-mcp-config`   0 tools, 0 MCP servers
  *   ...and still              a path written `@/abs/path` is attached BY THE CLI ITSELF,
  *                             with no tool involved: three canaries outside the directory
@@ -254,16 +256,18 @@ describe('#2570 - the AI pass starts `claude` sealed', () => {
       expect(args[0]).toBe('-p');
       const prompt = args[1];
       // MinSpec's own words first: a prompt that began with project text could begin
-      // with `/` (a command) or `-` (a switch).
+      // with `-`, which the CLI refuses as an unknown switch (measured), or with
+      // whatever a later release treats specially at the start of a prompt.
       expect(prompt.startsWith('You are organizing')).toBe(true);
       expect(prompt).toContain('SPEC-001');
       expect(prompt).toContain('Payment Flow');
       expect(prompt.trimEnd().endsWith('}')).toBe(true); // the JSON shape it must answer in is the last line
       expect(args.filter(a => a === prompt)).toHaveLength(1);
 
-      // `--tools` takes a LIST: any bare word after it would be read as a tool name, and
-      // a prompt placed there would be swallowed. So after the prompt there are only
-      // switches, plus the one empty value that IS the tool list.
+      // `--tools` takes a LIST: any bare word after it is read as a tool name. Measured:
+      // a prompt placed there is swallowed and the CLI reports it was given none. So
+      // after the prompt there are only switches, plus the one empty value that IS the
+      // tool list.
       const afterPrompt = args.slice(2);
       const bare = afterPrompt.filter((token, i) => {
         if (token.startsWith('--')) return false;
@@ -519,7 +523,7 @@ describe('#2570 - the AI pass starts `claude` sealed', () => {
       expect(result.failure?.detail).toContain('ENOENT');
     });
 
-    it('T3: a `claude` too old to know a switch is named as that, and is not tried again without it', async () => {
+    it('T3: a `claude` that does not know a switch is named as that, and is not tried again without it', async () => {
       // Observed on 1.0.60 and 2.0.30, which do not know `--tools`: exit code 1 in about a
       // second, before any model call, with exactly this on stderr.
       const starts = installClaude((_s, finish) => finish(exitCode1("error: unknown option '--tools'\n")));
@@ -527,9 +531,10 @@ describe('#2570 - the AI pass starts `claude` sealed', () => {
       const result = await proposeAI(project);
 
       expect(result.proposal).toBeNull();
-      expect(result.failure?.reason).toBe('claude-too-old');
-      expect(result.failure?.detail).toContain('--tools');
-      expect(result.failure?.detail).toMatch(/newer Claude Code/);
+      expect(result.failure?.reason).toBe('claude-incompatible');
+      // It names the switch and says what to do about it.
+      expect(result.failure?.detail).toContain('does not know `--tools`');
+      expect(result.failure?.detail).toMatch(/updating it/);
       // The distinguishing assertion: one start. A retry without the switch would be the
       // unsealed call this whole file exists to remove.
       expect(starts).toHaveLength(1);
