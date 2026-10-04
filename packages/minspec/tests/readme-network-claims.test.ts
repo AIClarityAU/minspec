@@ -34,12 +34,13 @@
  * network verbs passed as arguments. A human still reads the section at review.
  *
  * The same holds for 3 and 5. The retired phrases are looked for in the manifest and in the
- * string literals under `src/commands`; a message built in `src/lib` or `src/views` is not
- * read (`src/lib` holds the templates of files MinSpec writes into a project, where "no
- * network calls without consent" is a rule about that project and not a claim about
- * MinSpec). And 5 pins the words, not their truth: what the AI pass sends is decided by
- * `buildPrompt` in `lib/epic-backfill.ts`, which is not exported, so a change there needs
- * the sentence changed by hand.
+ * string literals under `src/commands`, one string at a time, so a phrase split across two
+ * literals is not seen. A message built in `src/lib` or `src/views` is not read (`src/lib`
+ * holds the templates of files MinSpec writes into a project, where "no network calls
+ * without consent" is a rule about that project and not a claim about MinSpec). And 5 pins
+ * the words, not their truth: what the AI pass sends is decided by `buildPrompt` in
+ * `lib/epic-backfill.ts`, which is not exported, so a change there needs the sentence
+ * changed by hand.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -260,6 +261,16 @@ function visibleText(raw: string): string {
     .toLowerCase();
 }
 
+/**
+ * A string that is not markup (a manifest value, a string literal) as a reader sees it:
+ * emphasis characters removed, whitespace collapsed, lower case. Unlike
+ * {@link visibleText} it drops nothing between a `<` and a `>`: in a message an angle
+ * bracket is a character, and treating it as a tag would hide whatever followed it.
+ */
+function plainText(raw: string): string {
+  return raw.replace(/[*_`]/g, '').replace(/\s+/g, ' ').toLowerCase();
+}
+
 const networkSection = (): string => section(read(README), NETWORK_SECTION_HEADING);
 
 /** Every string value in a parsed JSON document, at any depth. Keys are not values. */
@@ -440,12 +451,15 @@ describe('the retired network claims are gone from every location (SPEC-085 FR-8
   // The last two were added for issue #2457. SPEC-085 listed the five places it knew of;
   // the same claim was also in a setting description and in the consent prompt for the AI
   // pass, and stayed there because this list did not reach them.
-  const locations: ReadonlyArray<{ name: string; text: () => string }> = [
-    { name: 'README', text: () => read(README) },
-    { name: 'walkthrough page', text: () => read(WALKTHROUGH) },
-    { name: 'site', text: () => read(SITE) },
-    { name: 'manifest', text: () => jsonStrings(JSON.parse(read(MANIFEST))).join('\n') },
-    { name: 'command messages', text: () => commandMessages().join('\n') },
+  // Each location is a list of texts, already as a reader sees them: one for a page, and
+  // one per string for the manifest and the command messages, so that nothing in one
+  // string can hide a phrase in another.
+  const locations: ReadonlyArray<{ name: string; texts: () => string[] }> = [
+    { name: 'README', texts: () => [visibleText(read(README))] },
+    { name: 'walkthrough page', texts: () => [visibleText(read(WALKTHROUGH))] },
+    { name: 'site', texts: () => [visibleText(read(SITE))] },
+    { name: 'manifest', texts: () => jsonStrings(JSON.parse(read(MANIFEST))).map(plainText) },
+    { name: 'command messages', texts: () => commandMessages().map(plainText) },
   ];
 
   // FR-8 retires the first two by name. The last two are the short claim the spec's
@@ -461,11 +475,12 @@ describe('the retired network claims are gone from every location (SPEC-085 FR-8
 
   describe.each(locations)('$name', location => {
     it('exists and is not empty', () => {
-      expect(visibleText(location.text()).length).toBeGreaterThan(100);
+      expect(location.texts().join(' ').length).toBeGreaterThan(100);
     });
 
     it.each(retired)('does not say "%s"', phrase => {
-      expect(visibleText(location.text())).not.toContain(phrase);
+      // Compared as a list, so a failure prints the text that carries the phrase.
+      expect(location.texts().filter(text => text.includes(phrase))).toEqual([]);
     });
   });
 
@@ -482,6 +497,11 @@ describe('the retired network claims are gone from every location (SPEC-085 FR-8
       'const templated = `zero network calls for ${quoted} here`;',
     ].join('\n');
     expect(stringLiterals(source)).toEqual(['makes no network calls', 'zero network calls for ', ' here']);
+
+    // An angle bracket in a message is a character and not a tag: nothing after it is lost.
+    const bracketed = 'if a < b the extension makes no network calls, when b > c';
+    expect(plainText(bracketed)).toContain('no network calls');
+    expect(visibleText(bracketed)).not.toContain('no network calls');
 
     // And on the real tree: both find the text they exist to read.
     expect(jsonStrings(JSON.parse(read(MANIFEST))).some(text => text.includes('AI pass'))).toBe(true);
@@ -567,13 +587,13 @@ describe('the AI pass names what it sends in the prompt, the setting and the REA
   });
 
   it('the consent prompt says what is sent, and that your own claude command sends it', () => {
-    const prompt = visibleText(consentPrompts()[0] ?? '');
+    const prompt = plainText(consentPrompts()[0] ?? '');
     expect(prompt).toContain('your own claude command');
     expect(prompt).toContain(AI_PASS_SENDS);
   });
 
   it('the setting that skips the prompt says the same', () => {
-    const description = visibleText(settingDescription());
+    const description = plainText(settingDescription());
     expect(description).toContain("your own 'claude' command");
     expect(description).toContain(AI_PASS_SENDS);
   });
