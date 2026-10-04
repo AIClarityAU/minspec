@@ -72,7 +72,6 @@ If `gh` is not installed or not signed in, Park Topic saves to `.minspec/parking
 
 The same three actions, and every other command, are in the Command Palette under "MinSpec:".
 
-[![MinSpec Sidebar](https://raw.githubusercontent.com/AIClarityAU/minspec/main/packages/minspec/media/screenshots/sidebar.png)](https://raw.githubusercontent.com/AIClarityAU/minspec/main/packages/minspec/media/screenshots/sidebar.png)
 ### What Initialization Produces
 
 Read this before you accept Initialize. Besides Markdown files it adds git hooks, changes one git setting, and adds GitHub Actions workflows. Everything it writes is inside the project folder, and nothing is committed unless you accept the commit offer that follows.
@@ -148,7 +147,6 @@ Solid arrows are the full T3/T4 path. Dashed arrows show how T1 collapses Specif
 
 All specs in your project appear in the Explorer sidebar, in lanes by status (Specifying, Planning, Implementing, Done, Archived, Superseded) or grouped by epic. Each row shows the spec's tier (T1-T4), progress, current phase and whether it is approved. Click a spec to open it. Right-click to reclassify it, approve it or revoke its approval, see what changed since it was approved, or open its design and task files. Two more panes list the project's decisions and its issue backlog.
 
-[![Sidebar Tree View](https://raw.githubusercontent.com/AIClarityAU/minspec/main/packages/minspec/media/screenshots/sidebar.png)](https://raw.githubusercontent.com/AIClarityAU/minspec/main/packages/minspec/media/screenshots/sidebar.png)
 ### Active Spec Panel
 
 A webview panel displays the current spec as a vertical stepper. Completed phases collapse. The active phase expands with its content. Tasks appear as an interactive checklist you can toggle directly.
@@ -164,7 +162,6 @@ Inline CodeLens annotations appear above code that is mapped to a spec requireme
 
 MinSpec manages Architecture Decision Records (ADRs) as `docs/decisions/DR-NNN.md` ("DR" for decision record) and keeps an index of them. A new record starts as `proposed`. Accept it, or set another status, from the Decisions pane in the sidebar, or with `Alt+A` while it is open.
 
-[![ADR Tree View](https://raw.githubusercontent.com/AIClarityAU/minspec/main/packages/minspec/media/screenshots/adr-tree.png)](https://raw.githubusercontent.com/AIClarityAU/minspec/main/packages/minspec/media/screenshots/adr-tree.png)
 ### Approvals
 
 Approval is the human sign-off between writing a spec and building from it. Approving a spec (`Alt+A`, or the tick in the Specs pane) first checks it for completeness, then records who approved it and a hash of the approved text under `.minspec/approvals/`. If the text changes afterwards the approval shows as stale, and **MinSpec: Show Changes Since Approval** opens the difference. By default the approval is committed in its own commit (`minspec.commitOnApprove`) and MinSpec then asks whether to push it (`minspec.pushOnApprove`). An approval is refused when the approver's identity belongs to an agent or bot.

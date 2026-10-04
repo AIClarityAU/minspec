@@ -45,6 +45,7 @@ Numbers in parentheses, here and below, are pull requests or issues at github.co
 ### Removed
 
 - **The ScroogeLLM install prompt is gone**, and so are the two settings and the command that existed for it: `minspec.scroogellmNudge.enabled`, `minspec.conformance.enabled`, and **MinSpec: Export Traceability for ScroogeLLM**, which wrote `.minspec/traceability-export.json`. ScroogeLLM is not published, so the prompt recommended an extension nobody could install. MinSpec also no longer looks in your home directory and at your installed extensions for other AI tools, which it did only to word that prompt. If either setting is in your `settings.json` it now does nothing and can be deleted (#2205).
+- **Two screenshots that showed an older interface are gone from the listing**: the sidebar (used twice) and the Decisions pane. They showed a pane titled MINSPEC with lanes Active, Done and Archived, a status bar item that no longer exists, and a title-bar glitch fixed in 0.1.11. Their image files are no longer shipped, and neither are two the page had already stopped using, one of them a toast reading "Classification engine coming in Phase 2". The sidebar and Decisions sections have no picture until new ones are taken (#2394).
 
 ### Fixed
 
