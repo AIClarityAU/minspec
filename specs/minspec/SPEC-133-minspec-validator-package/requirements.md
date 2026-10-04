@@ -96,9 +96,14 @@ with no second, hand-maintained reimplementation of the engine.
   `project-prefix.ts`, `review-signals.ts`, `rework.ts`, `trust-model.ts` — no validator. The
   real engine is `validateSpec` in
   [`packages/minspec/src/lib/spec-validator.ts`](../../../packages/minspec/src/lib/spec-validator.ts)
-  (1,512 lines), consumed today only by the VS Code `MinSpec: Check Spec` command
+  (1,512 lines), consumed today by at least two in-extension call sites: the VS Code
+  `MinSpec: Check Spec` command
   ([`commands/validate.ts`](../../../packages/minspec/src/commands/validate.ts#L6), which
-  imports `validateSpec` at its own `:6` and calls it at `:57`). This
+  imports `validateSpec` at its own `:6` and calls it at `:57`) and the spec-approval gate
+  ([`commands/approve.ts`](../../../packages/minspec/src/commands/approve.ts#L7), which imports
+  `validateSpec` at `:7` and calls it at `:272` to compute `violationsIntroducedByApproval`).
+  Both are in-process VS Code command paths, not separate runtimes — this package would still
+  be the first consumer outside the extension process. This
   is the same unexecuted-move shape CLAUDE.md already records for the classifier
   ("Classifier engine still lives in `packages/minspec/src/lib/classifier.ts` — DR-014's move
   to here is `status: proposed`, not executed (tracked: #54)") — except no issue tracks the
@@ -182,8 +187,9 @@ with no second, hand-maintained reimplementation of the engine.
   already establishes for this repo's own CI-visible validator output.
 - **FR-5 (independent publish cycle).** A CI workflow publishes `packages/validator` to npm on
   its own trigger (e.g. a version-tag or path-filtered release workflow), **not** coupled to
-  `npm run package` (the VSIX build, `package.json:15`) or to the extension's own version
-  number — DR-037's "published independently of the extension release cycle."
+  `npm run package` (root `package.json:17`, which fans out to the VSIX build at
+  `packages/minspec/package.json:627`'s `vsce package --no-dependencies`) or to the extension's
+  own version number — DR-037's "published independently of the extension release cycle."
 
 ## Invariants (must not be broken)
 
