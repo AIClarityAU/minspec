@@ -2,12 +2,14 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFile } from 'child_process';
+import { randomBytes } from 'crypto';
 import { promisify } from 'util';
 import { loadConfig, resolveAndValidate } from './config';
 import { listAdrs } from './adr-manager';
 import { parseSpec } from './spec';
 import { slugify } from './spec-manager';
 import { readDocumentText } from './text-io';
+import { ensureDirectory } from './opt-in';
 import {
   listEpics,
   createEpic,
@@ -712,6 +714,53 @@ export function aiPassEnv(base: NodeJS.ProcessEnv = process.env): NodeJS.Process
   };
 }
 
+/**
+ * Make the directory one call runs in: new, empty, and closed to everyone else.
+ * Throws when any step fails, and the caller then starts nothing.
+ *
+ * It is made with `ensureDirectory`, not `mkdtemp`, because SPEC-096 routes every
+ * directory the extension creates through that one operation and pins the few
+ * direct calls that remain (FR-4, tests/opt-in-writer-inventory.test.ts). What
+ * `mkdtemp` would have given is rebuilt here, in this order:
+ *
+ *   an unguessable name   128 random bits, so nobody can have made it first
+ *   mode 0700             set straight after the create, whatever the umask.
+ *                         Measured under umask 000: 777 as created, 700 after
+ *   still empty           checked once the mode is set. From then on nobody else
+ *                         can put a file in it, so empty now is empty when
+ *                         `claude` starts
+ *
+ * The last two are not tidiness. Claude Code runs the hooks of a settings file it
+ * finds in its starting directory, in print mode and without asking (measured).
+ * A directory another user could write to would be a way to run commands as this
+ * one.
+ */
+function makeWorkDir(): string {
+  const root = os.tmpdir();
+  // `ensureDirectory` makes missing parents too. A temp dir that is not there is
+  // a reason to stop, not something to create.
+  if (!fs.statSync(root).isDirectory()) {
+    throw Object.assign(new Error(`${root} is not a directory`), { code: 'ENOTDIR' });
+  }
+  const dir = path.join(root, `minspec-ai-pass-${randomBytes(16).toString('hex')}`);
+  ensureDirectory(dir);
+  try {
+    fs.chmodSync(dir, 0o700);
+    if (fs.readdirSync(dir).length > 0) {
+      throw Object.assign(new Error(`${dir} is not empty`), { code: 'ENOTEMPTY' });
+    }
+  } catch (err) {
+    // Take it back if it is still empty. If it is not, it is not this code's to empty.
+    try {
+      fs.rmdirSync(dir);
+    } catch {
+      // Left where it is.
+    }
+    throw err;
+  }
+  return dir;
+}
+
 /** How many times `removeWorkDir` tries a directory that is still in use. */
 const REMOVE_ATTEMPTS = 5;
 
@@ -724,9 +773,9 @@ const REMOVE_ATTEMPTS = 5;
  * ran in into the loss of everything under it: a fallback to the extension
  * host's own directory, written that way, deletes it.
  *
- * Best-effort beyond that. The directory is created with mode 0700 in the OS
- * temp dir, so one that outlives the call costs nothing, and a removal that
- * fails must never turn a finished AI pass into a failed one. The retries are a
+ * Best-effort beyond that. The directory is empty, mode 0700 and in the OS temp
+ * dir, so one that outlives the call costs nothing, and a removal that fails
+ * must never turn a finished AI pass into a failed one. The retries are a
  * precaution for Windows, where a directory cannot be removed while a process
  * still has it as its working directory and a cancelled `claude` may not have
  * gone yet. That path is reasoned, not measured: it has not been run on Windows.
@@ -790,7 +839,7 @@ export async function proposeAI(
   // or MCP file of whatever directory the extension host happens to run in.
   let workDir: string;
   try {
-    workDir = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'minspec-ai-pass-'));
+    workDir = makeWorkDir();
   } catch (err) {
     // No directory, no call. Starting `claude` anywhere else is what #2570 removed.
     const code = (err as { code?: unknown } | null)?.code;

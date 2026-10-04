@@ -31,6 +31,13 @@
  * Every assertion here is on the captured call, never on an exported helper, so each one
  * fails on the unfixed code for the reason it names.
  *
+ * HOW THE MOMENT BEFORE THE DOOR CLOSES IS REACHED. The directory is created, then closed
+ * to other users, then checked for anything that arrived in between. `vi.spyOn(fs, ...)`
+ * cannot redefine an ESM namespace export, so `fs` is mocked file-wide as a pure
+ * passthrough (the shape `opt-in-guard.test.ts` uses) with one hook, on `chmodSync`.
+ * Disarmed it is transparent. It counts its firings, so a test cannot pass because the
+ * window was never opened.
+ *
  * A NOTE ON DELETING THINGS. The directory the call runs in is taken from the captured
  * call, which means a broken implementation chooses it. So nothing in this file deletes
  * that directory recursively: a test's own tidy-up removes one named file and then uses
@@ -44,6 +51,27 @@ import * as path from 'path';
 import * as os from 'os';
 
 vi.mock('child_process', () => ({ execFile: vi.fn() }));
+
+const door = vi.hoisted(() => ({
+  /** Runs in place of the real `chmodSync`, which it is handed as `close`. Null = transparent. */
+  onClose: null as null | ((dir: string, close: () => void) => void),
+  fired: 0,
+}));
+
+vi.mock('fs', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('fs')>();
+  const chmodSync = ((target: unknown, mode: unknown) => {
+    const close = (): void => {
+      (actual.chmodSync as (a: unknown, b: unknown) => void)(target, mode);
+    };
+    const hook = door.onClose;
+    if (hook === null) return close();
+    door.fired += 1;
+    return hook(String(target), close);
+  }) as typeof actual.chmodSync;
+  const patched = { ...actual, chmodSync };
+  return { ...patched, default: patched };
+});
 
 import { execFile } from 'child_process';
 import { proposeAI } from '../src/lib/epic-backfill';
@@ -66,6 +94,8 @@ interface Start {
   readonly options: StartOptions;
   readonly cwdExistedAtCall: boolean;
   readonly cwdEntriesAtCall: string[] | null;
+  /** Permission bits of the directory at call time, or null when there was none. */
+  readonly cwdModeAtCall: number | null;
 }
 
 type Reply = (start: Start, finish: (err: Error | null, stdout?: string) => void) => void;
@@ -103,6 +133,7 @@ function installClaude(reply: Reply): Start[] {
       options,
       cwdExistedAtCall: exists,
       cwdEntriesAtCall: exists ? fs.readdirSync(cwd) : null,
+      cwdModeAtCall: exists ? fs.statSync(cwd).mode & 0o777 : null,
     };
     starts.push(start);
     recorded.push(start);
@@ -204,6 +235,8 @@ describe('#2570 - the AI pass starts `claude` sealed', () => {
     writeConfig(project);
     writeSpec(project, 'SPEC-001', 'Payment Flow');
     mockExecFile.mockReset();
+    door.onClose = null;
+    door.fired = 0;
   });
   afterEach(() => {
     vi.restoreAllMocks();
@@ -391,6 +424,19 @@ describe('#2570 - the AI pass starts `claude` sealed', () => {
       expect(typeof starts[0].options.cwd).toBe('string');
       expect(starts[0].options.cwd).not.toBe(starts[1].options.cwd);
     });
+
+    // Mode bits mean nothing on Windows, where the temp dir is per-user already.
+    it.skipIf(process.platform === 'win32')('T3: is closed to everyone else, whatever the umask', async () => {
+      // Claude Code runs the hooks of a settings file it finds in its starting directory,
+      // in print mode and without asking (measured). So a directory another user can
+      // write to is a way to run commands as this one. A plain create follows the umask:
+      // measured under umask 000 it is mode 777, and under the usual 022 it is 755.
+      const { cwdModeAtCall } = await onePass();
+
+      expect(cwdModeAtCall).not.toBeNull();
+      expect((cwdModeAtCall as number) & 0o077).toBe(0);
+      expect((cwdModeAtCall as number) & 0o700).toBe(0o700);
+    });
   });
 
   // ─── Nothing is left behind ─────────────────────────────────────────────────
@@ -521,6 +567,69 @@ describe('#2570 - the AI pass starts `claude` sealed', () => {
       expect(result.failure?.reason).toBe('no-work-dir');
       expect(result.failure?.detail).toMatch(/working directory/);
       expect(result.failure?.detail).toContain('ENOENT');
+      // And the missing temp dir was not quietly created to make the call possible.
+      expect(fs.existsSync(missing)).toBe(false);
+    });
+
+    it('T3: a temp dir that is a file is refused the same way', async () => {
+      const starts = installClaude(succeed);
+      const aFile = path.join(project, 'not-a-directory');
+      fs.writeFileSync(aFile, '');
+
+      const result = await withTempDirAt(aFile, () => proposeAI(project));
+
+      expect(starts).toEqual([]);
+      expect(result.failure?.reason).toBe('no-work-dir');
+      expect(result.failure?.detail).toContain('ENOTDIR');
+    });
+
+    it('T3: a directory somebody got into first is refused, and `claude` is not started in it', async () => {
+      // The moment that matters: after the directory exists and before it is closed to
+      // others. Whatever arrived in that window is found by the look that follows.
+      const starts = installClaude(succeed);
+      let made: string | undefined;
+      door.onClose = (dir, close) => {
+        made = dir;
+        fs.writeFileSync(path.join(dir, LEFT_BEHIND), 'planted before the door closed');
+        close();
+      };
+
+      const result = await proposeAI(project);
+
+      try {
+        expect(door.fired).toBe(1); // the window was opened
+        expect(starts).toEqual([]);
+        expect(result.proposal).toBeNull();
+        expect(result.failure?.reason).toBe('no-work-dir');
+        expect(result.failure?.detail).toContain('ENOTEMPTY');
+        // Not this code's to empty: what was planted is still there, untouched.
+        expect(made).toBeDefined();
+        expect(fs.readFileSync(path.join(made as string, LEFT_BEHIND), 'utf-8')).toBe('planted before the door closed');
+      } finally {
+        if (made !== undefined) {
+          fs.rmSync(path.join(made, LEFT_BEHIND), { force: true });
+          removeIfEmpty(made);
+        }
+      }
+    });
+
+    it('T3: when the directory cannot be closed to others, nothing is started and it is taken back', async () => {
+      const starts = installClaude(succeed);
+      let made: string | undefined;
+      door.onClose = (dir) => {
+        made = dir;
+        throw errno('EPERM');
+      };
+
+      const result = await proposeAI(project);
+
+      expect(door.fired).toBe(1);
+      expect(starts).toEqual([]);
+      expect(result.failure?.reason).toBe('no-work-dir');
+      expect(result.failure?.detail).toContain('EPERM');
+      expect(made).toBeDefined();
+      expect(path.dirname(made as string)).toBe(os.tmpdir());
+      expect(fs.existsSync(made as string)).toBe(false);
     });
 
     it('T3: a `claude` that does not know a switch is named as that, and is not tried again without it', async () => {
