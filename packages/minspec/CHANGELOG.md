@@ -80,6 +80,10 @@ Numbers in parentheses, here and below, are pull requests or issues at github.co
 - The generated harness passes the checks it generates, and the secret check prints the finding it tells you to review (#1539, #1551).
 - A second toast repeating the approval message is gone (#1701).
 
+### Security
+
+- **The AI pass of Backfill Epics can no longer be made to read your files.** It hands titles and first paragraphs from your specs and decisions to your own `claude` command, and it used to start that command with its tools switched on, in whatever folder the editor was running in. Text in a spec or decision could make it read a file, either by asking the model to or directly, because Claude Code attaches any file written as `@path` in a prompt. The command is now started with every tool switched off, no MCP servers, no file references (an `@` in a spec or decision is sent as `(at)`) and an empty temporary folder. An older Claude Code that does not know these switches is reported as such, and the heuristic result is used (#2570).
+
 ## [0.1.26] - 2026-07-31
 
 Versions 0.1.17 to 0.1.26 were built and installed locally and were never published. The VS Code Marketplace held nothing newer than 0.1.16 while they were built.
