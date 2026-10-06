@@ -802,4 +802,12 @@ MinSpec scaffolds a workflow into adopters that auto-merges a docs-only pull req
 <!-- dr-summary:DR-100 auto=2c0bfd94dcb0 -->
 The founder needs MinSpec on a Windows work PC that runs Microsoft's VS Code, and asked on 2026-10-01 for the extension to be published just before the visualiser work, about a week out. The constitution puts a Marketplace publish in Phase 2 and says Phase 2 work may not displace unfinished Phase 1 work, so publishing now needs a recorded exception, with its scope and preconditions stated.
 <!-- /dr-summary:DR-100 -->
+
+## [DR-102 — Checkbox state leaves the canonical approval hash - a ticked task-list item records progress, and the hash covers the contract](DR-102.md)
+
+*Status: proposed · Date: 2026-10-04*
+
+<!-- dr-summary:DR-102 auto=d9ecefef75dc -->
+DR-035 (normalize checkbox state before hashing) made this decision on 2026-06-19 and was accepted. It was never built. It named hashContent() in approval.ts and sha() in spec-gate.py; approval hashing shipped instead through DR-034 (approval foundation) and SPEC-022 (its spec) as canonicalizeSpec() / specHash(), which has no checkbox step (packages/shared/src/canonical.ts:89-123, scripts/hooks/canonical.py:56-80). On 2026-07-12 a documentation-honesty pass (commit 0e7b1d67) changed DR-035's status from accepted to superseded because its body claimed an implementation that did not exist. No record superseded it. The register…
+<!-- /dr-summary:DR-102 -->
 <!-- minspec:dr-index:end -->
