@@ -706,6 +706,10 @@ ensure_fresh_run_dir() {
 #   0  — cycle completed (work done or nothing ready).
 #   42 — a Claude quota/limit signal was seen mid-dispatch → loop should back off.
 #   1  — a transient error → loop counts it toward MAX_CONSEC_FAIL, keeps going.
+#        Also returned when EVERY dispatch attempted this cycle failed (#2140) —
+#        deliberately the same code as any other transient error, so a persistent
+#        credential/config fault still trips MAX_CONSEC_FAIL and stops the loop
+#        loudly instead of grinding through the whole ready queue on a dead token.
 # (There is no longer a terminal "stale" code: #773 self-heals the run dir each
 #  cycle instead of stopping the loop when the checkout falls behind main.)
 # ── Step 0 reconcilers (#1306, #1322) ────────────────────────────────────────
@@ -728,11 +732,31 @@ RECONCILE_CLAIM_STALE_SECS="${MINSPEC_RECONCILE_STALE_SECS:-21600}"   # 6 h
 
 # Epoch seconds when `agent-running` was most recently applied to <issue>, or empty.
 # The timeline is the only honest source: `updatedAt` moves on any activity at all.
+#
+# #2002 (found while fixing PR #1772's review on the sibling `reopened_after_close`):
+# `gh api --paginate --jq F` applies F to EACH PAGE separately and prints one result
+# per page (measured against api.github.com: a 19-event timeline at `per_page=2`
+# printed 10 lines, not 1). The old shape's `| tail -1` guard took the LAST PAGE's
+# output, not the last MATCH — so whenever the `agent-running` label event fell on an
+# earlier page (any issue with 30+ timeline events since being claimed), the last page
+# contributed `empty`, `iso` came back blank, and this function returned 1. The caller
+# (`reconcile_stale_claims`) reads that as "claim time is unreadable — leaving it
+# alone", so the #1306 orphan-claim reaper went silently inert on exactly the
+# long-lived issues most likely to be carrying a stale claim.
+#
+# Same fix shape as the reopen veto: fetch raw with `--paginate` (no `--jq`, so gh
+# prints each page's array one after another instead of a filtered result per page),
+# flatten with `jq -s 'add // []'`, and reduce exactly once over the whole history.
+# `--slurp` is not a way out here either: `gh` rejects `--slurp` together with `--jq`.
 claim_applied_at() {
-  local iso
-  iso=$(gh api "repos/${REPO}/issues/$1/timeline" --paginate \
-    --jq '[.[] | select(.event=="labeled" and .label.name=="agent-running") | .created_at] | last // empty' \
-    2>/dev/null | tail -1) || return 1
+  local raw iso
+  raw=$(gh api "repos/${REPO}/issues/$1/timeline" --paginate 2>/dev/null) || return 1
+  [[ -n "$raw" ]] || return 1
+  iso=$(printf '%s' "$raw" | jq -r -s '
+      (add // []) as $events
+      | if ($events | type) != "array" then ""
+        else ([$events[] | select(.event=="labeled" and .label.name=="agent-running") | .created_at] | last // "")
+        end' 2>/dev/null) || return 1
   [[ -n "$iso" ]] || return 1
   date -u -d "$iso" +%s 2>/dev/null || return 1
 }
@@ -795,9 +819,12 @@ reconcile_stale_claims() {
 #     it vetoes can straddle a page boundary, and neither page sees both halves — the
 #     close page says "no", the reopen page says "yes", and the caller compares a
 #     TWO-LINE string against "yes" and silently re-closes an issue a human reopened.
-#     The sibling `claim_applied_at` can guard its per-page reduction with `| tail -1`
-#     because the last page holding a match carries the answer; here no single page
-#     does, so no such guard exists.
+#     The sibling `claim_applied_at` used to guard its per-page reduction with a
+#     `| tail -1` on the theory that the last page holding a match carries the answer
+#     — but the *last page of the timeline* is not the same thing as *the page holding
+#     the last match*, and on any issue where the `agent-running` label event wasn't on
+#     the final page, that guard threw the real answer away (#2002). It now uses this
+#     same raw-fetch-and-flatten shape instead of a page-position guard.
 #   * `--slurp` is not a way out: `gh` rejects `--slurp` together with `--jq`.
 #
 # So: raw `--paginate`, then `jq -s 'add // []'` to flatten the per-page arrays into
@@ -941,19 +968,28 @@ reconcile_labels() {
 # gh's stderr is deliberately NOT redirected — the message that would have named the
 # cause ("please run: gh auth login") was being discarded.
 #
-# The limit is EXPLICIT and announced. `gh issue list` caps at 30 by default and
-# says nothing, so the queue this loop has always enumerated was the first 30 per
-# label — a silent cap that reads as the whole queue. Pinning it here changes no
-# behaviour (30 is what it already was) while making the number a decision someone
-# made rather than a default nobody saw, and the caller warns when a result lands
-# exactly on the cap. Raising it is tracked separately: it is a dispatch-VOLUME
-# decision, not a correctness one, and does not belong in the same change as a
-# fail-loud fix.
-_ready_limit="${MINSPEC_DRAIN_QUEUE_LIMIT:-30}"
+# The FETCH is deliberately uncapped in practice (#2197). It used to carry the same
+# cap that gated dispatch volume, which meant the #2196 ranker only ever saw the
+# newest `_dispatch_cap` issues per label — `gh issue list` returns newest first, so
+# an older, higher-value issue could never even become a candidate, however it would
+# have ranked. The read and the dispatch-volume decision are two different questions;
+# capping at read time answered both with one number and got the first one wrong.
+#
+# `_ready_fetch_limit` is still EXPLICIT and announced, for the reason the old cap
+# was too: `gh issue list` defaults to 30 and says nothing, so an uncapped-looking
+# call still needs a real number, or it silently becomes the same bug one zero later.
+# The caller warns when a result lands exactly on this fetch limit.
+_ready_fetch_limit="${MINSPEC_DRAIN_QUEUE_FETCH_LIMIT:-1000}"
 _ready_numbers() {
-  gh issue list --repo "$REPO" --label "$1" --limit "$_ready_limit" \
+  gh issue list --repo "$REPO" --label "$1" --limit "$_ready_fetch_limit" \
     --json number --jq '.[].number'
 }
+
+# _dispatch_cap — how many issues this CYCLE dispatches, applied AFTER ranking
+# (#2197) rather than at the read above. Same env var and default as the old
+# read-time cap (MINSPEC_DRAIN_QUEUE_LIMIT, 30): the knob a human already knows
+# didn't need a new name, only a new point of application.
+_dispatch_cap="${MINSPEC_DRAIN_QUEUE_LIMIT:-30}"
 
 # _read_queue <varname> <label> — read one label's queue INTO a named variable, and
 # recover from a DEAD CREDENTIAL once before giving up.
@@ -994,7 +1030,7 @@ _read_queue() {
 
 run_cycle() {
   local inbox_issues all_ready n out drc cap
-  local inbox_rc ready_rc ready_full ready_spec _lbl
+  local inbox_rc ready_rc ready_full ready_spec _lbl ready_total
   local ac_halt ac_sig
   local quota_verdict
   local triage_out triage_rc just_labeled_ready
@@ -1100,13 +1136,15 @@ run_cycle() {
     echo "[drain]          Nothing was dispatched this cycle. See the gh error above." >&2
     return 1
   fi
-  # No silent caps: a label that came back exactly at the limit is almost certainly
-  # truncated, and the difference between "30 ready" and "30 of 119 ready" changes
-  # what a reader does about it.
+  # No silent caps on the READ: a label that came back exactly at the FETCH limit is
+  # almost certainly truncated, and the difference between "1000 ready" and "1000 of
+  # 4000 ready" changes what a reader does about it. This is the read-time sibling of
+  # the dispatch-time cap NOTE below (#2197) — different limit, different number,
+  # same reason: a cap that says nothing looks exactly like the whole queue.
   for _lbl in "agent-ready:$ready_full" "agent-ready-specify:$ready_spec"; do
-    if [[ "$(printf '%s' "${_lbl#*:}" | grep -c . || true)" == "$_ready_limit" ]]; then  # swallow-ok: grep -c exits 1 on zero matches, which cannot equal a positive limit — the comparison below is the decision, not this status
-      echo "[drain] NOTE: '${_lbl%%:*}' returned exactly ${_ready_limit} issue(s) — the query cap." >&2
-      echo "[drain]       The real queue is probably longer. Raise MINSPEC_DRAIN_QUEUE_LIMIT to see it." >&2
+    if [[ "$(printf '%s' "${_lbl#*:}" | grep -c . || true)" == "$_ready_fetch_limit" ]]; then  # swallow-ok: grep -c exits 1 on zero matches, which cannot equal a positive limit — the comparison below is the decision, not this status
+      echo "[drain] NOTE: '${_lbl%%:*}' returned exactly ${_ready_fetch_limit} issue(s) — the fetch cap." >&2
+      echo "[drain]       The real queue is probably longer. Raise MINSPEC_DRAIN_QUEUE_FETCH_LIMIT to see it." >&2
     fi
   done
   all_ready="$(printf '%s\n%s\n' "$ready_full" "$ready_spec" | sed '/^$/d' | sort -un)"
@@ -1158,6 +1196,23 @@ run_cycle() {
   else
     all_ready="$rank_out"
     echo "[drain] dispatch order ranked by value (#2196): $(printf '%s' "$all_ready" | tr '\n' ' ')"
+  fi
+
+  # Apply the dispatch cap HERE — after ranking, not at the read above (#2197). The
+  # full ready set was fetched and fully ranked (or, on a ranker failure, fully
+  # ordered numerically); only the BATCH this cycle actually dispatches is trimmed to
+  # size. Nothing is dropped: the untrimmed issues stay labelled agent-ready and are
+  # read, ranked, and reconsidered again next cycle — deferred by value, not silently
+  # lost. `head` on an already-ordered list keeps the first N, which is the top N by
+  # rank (or the lowest-numbered N on a numeric-order fallback).
+  #
+  # This NOTE is the dispatch-time sibling of the fetch-time one above (#2197): same
+  # shape, moved to the point where a cap now actually decides anything.
+  ready_total="$(printf '%s\n' "$all_ready" | grep -c . || true)"  # swallow-ok: all_ready is already known non-empty above, so grep -c cannot be the empty-input 1
+  if (( ready_total > _dispatch_cap )); then
+    echo "[drain] NOTE: ${ready_total} issue(s) ready — dispatching the top ${_dispatch_cap} this cycle." >&2
+    echo "[drain]       The rest stay queued and are re-ranked next cycle. Raise MINSPEC_DRAIN_QUEUE_LIMIT to dispatch more per cycle." >&2
+    all_ready="$(printf '%s\n' "$all_ready" | head -n "$_dispatch_cap")"
   fi
 
   # Freshness is guaranteed by ensure_fresh_run_dir at the top of this cycle (#773):
@@ -1221,6 +1276,18 @@ run_cycle() {
   }
 
   local saw_quota=0 verdict=""
+  # Dispatch attempts/failures, rolled up across BOTH the serial and parallel paths
+  # below (#2140, constitution invariant 2: no silent gate). `classify_dispatch`
+  # already warns on EACH failed dispatch, but nothing aggregated those warnings —
+  # so a cycle in which every single dispatch 401'd still fell through to the
+  # cheerful "cycle done." at the bottom of this function, indistinguishable in the
+  # log from a cycle that actually worked. Measured 2026-09-25: five dispatches,
+  # five `HTTP 401: Bad credentials`, then "cycle done." — the token minted at
+  # `gh_bot_init` had expired mid-loop and nothing re-minted for THIS process (see
+  # #2066 above for the read-refresh fix; this is the separate, more important
+  # half — making an all-failed cycle say so, regardless of WHY every dispatch
+  # failed).
+  local dispatch_attempts=0 dispatch_failures=0
 
   if (( DISPATCH_CONCURRENCY <= 1 )); then
     # ── Serial path — the historical behaviour, unchanged. Output still streams
@@ -1240,6 +1307,8 @@ run_cycle() {
       out=$(cat "$cap" 2>/dev/null || true); rm -f "$cap"
       verdict="$(classify_dispatch "$n" "$drc" "$out")"
       ac_outcomes="${ac_outcomes:+$ac_outcomes,}${verdict:0:1}"
+      dispatch_attempts=$(( dispatch_attempts + 1 ))
+      [[ "$drc" -ne 0 ]] && dispatch_failures=$(( dispatch_failures + 1 ))
       [[ "${verdict:1:1}" == "1" ]] && saw_quota=1
       if (( saw_quota )); then
         echo "[drain] Claude usage-limit signal while dispatching #$n — pausing this cycle (will back off, not fail)."
@@ -1297,6 +1366,8 @@ run_cycle() {
 
       verdict="$(classify_dispatch "$n" "$rc" "$out")"
       ac_outcomes="${ac_outcomes:+$ac_outcomes,}${verdict:0:1}"
+      dispatch_attempts=$(( dispatch_attempts + 1 ))
+      [[ "$rc" -ne 0 ]] && dispatch_failures=$(( dispatch_failures + 1 ))
       if [[ "${verdict:1:1}" == "1" ]]; then
         saw_quota=1
         QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"
@@ -1349,6 +1420,26 @@ run_cycle() {
         fi
       done
     fi
+  fi
+
+  # #2140 — a cycle in which EVERY attempted dispatch failed is not a completed
+  # cycle, and must never read as one. Per-dispatch WARNINGs (classify_dispatch,
+  # above) are easy to miss in a long log; this is the roll-up that makes N-of-N
+  # failures impossible to mistake for a healthy "cycle done." Deliberately scoped
+  # to ALL failing, not SOME: a partial failure already has a WARNING per issue and
+  # the issue stays in the ready queue for the next cycle, which is the existing,
+  # correct degrade-gracefully behaviour (see the issue body's own "blast radius"
+  # note — nothing is lost when only some dispatches fail).
+  #
+  # Returns 1, the existing "transient error" code (see this function's docstring
+  # above) — run_loop already counts consecutive 1s toward MAX_CONSEC_FAIL and
+  # stops the loop with a loud message after enough of them, which is exactly the
+  # right response to "every dispatch is failing": likely a persistent credential
+  # or config fault, not a one-off worth quietly retrying forever.
+  if (( dispatch_attempts > 0 && dispatch_failures == dispatch_attempts )); then
+    echo "[drain] CYCLE FAILED: all ${dispatch_attempts} dispatch(es) attempted this cycle failed (see the WARNING(s) above for each) — this is NOT a healthy cycle (#2140)." >&2
+    echo "[drain]              Likely cause: an expired/invalid credential or a broken dispatch path — not an empty backlog. The failed issue(s) remain in the ready queue for the next cycle." >&2
+    return 1
   fi
 
   echo "[drain] cycle done."

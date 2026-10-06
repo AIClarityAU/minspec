@@ -126,6 +126,43 @@ resolve_go_bin() {
   done
   return 1
 }
+# Minimum Go toolchain version this script's own header advertises ("Set GO_BIN or
+# install Go 1.25+."). Checked below so an old-but-resolvable toolchain fails here, with
+# a message naming both versions and the path, instead of one step later at `go install`
+# with a generic, unattributed failure (#1746 — filed off three non-blocking #1740
+# reviews; resolve_go_bin() itself never checked the resolved toolchain's version).
+GO_VERSION_MIN_MAJOR=1
+GO_VERSION_MIN_MINOR=25
+
+# Parse `"$1" version` (expected shape: "go version go1.21.0 linux/amd64") and compare
+# against the floor above.
+#   - New enough, or version string unparseable → return 0 (proceed). An unparseable
+#     `go version` is not evidence of an unusable toolchain — refusing on it would
+#     reintroduce the exact misfire class #1506 fixed: a gate that fails closed on a
+#     correctly provisioned machine and trains operators toward
+#     SKIP_SUPPLY_CHAIN_CHECK=1. See resolve_go_bin()'s header comment.
+#   - Too old → print the found/required versions and the resolved path, exit 2
+#     directly (not `return`): the caller has nothing left to do but stop.
+check_go_version() {
+  _go="$1"
+  _ver_out="$("$_go" version 2>/dev/null)" || return 0
+  _ver="$(printf '%s\n' "$_ver_out" | sed -n 's/.*go\([0-9][0-9]*\)\.\([0-9][0-9]*\).*/\1 \2/p')"
+  [ -n "$_ver" ] || return 0
+  _major="${_ver%% *}"
+  _minor="${_ver##* }"
+  case "$_major" in ''|*[!0-9]*) return 0 ;; esac
+  case "$_minor" in ''|*[!0-9]*) return 0 ;; esac
+  if [ "$_major" -gt "$GO_VERSION_MIN_MAJOR" ]; then
+    return 0
+  fi
+  if [ "$_major" -eq "$GO_VERSION_MIN_MAJOR" ] && [ "$_minor" -ge "$GO_VERSION_MIN_MINOR" ]; then
+    return 0
+  fi
+  echo "check-supply-chain: Go toolchain too old — found go${_major}.${_minor}, need go${GO_VERSION_MIN_MAJOR}.${GO_VERSION_MIN_MINOR}+ (resolved: $_go)" >&2
+  echo "  required for bumblebee install. Set GO_BIN to a newer toolchain or install Go ${GO_VERSION_MIN_MAJOR}.${GO_VERSION_MIN_MINOR}+." >&2
+  echo "  (exit 2: could not run — not a threat finding)" >&2
+  exit 2
+}
 # ----------------------------------------------------------------------------
 
 # Self-install bumblebee on first run. A missing toolchain or a failed install is a
@@ -143,6 +180,7 @@ if [ ! -x "$BUMBLEBEE_BIN" ]; then
     echo "  (exit 2: could not run — not a threat finding)" >&2
     exit 2
   fi
+  check_go_version "$GO_RESOLVED"
   echo "check-supply-chain: installing bumblebee $BUMBLEBEE_VERSION using $GO_RESOLVED..." >&2
   if ! GOBIN="$HOME/go/bin" "$GO_RESOLVED" install "github.com/perplexityai/bumblebee/cmd/bumblebee@$BUMBLEBEE_VERSION"; then
     echo "check-supply-chain: bumblebee@$BUMBLEBEE_VERSION install failed" >&2

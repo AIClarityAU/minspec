@@ -429,6 +429,9 @@ describe('SpecTreeProvider — approval wiring (regression)', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-approval-wiring-'));
+    // SPEC-096: an approval record lives in `.minspec/`, so it is written only in a folder
+    // that has opted in. The store used to create that directory itself.
+    fs.mkdirSync(path.join(tmpDir, '.minspec'));
   });
 
   function writeSpec(id: string): string {

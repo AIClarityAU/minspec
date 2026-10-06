@@ -197,14 +197,65 @@ jobs:
             }));
           "
 
+      # Red means tests FAILED, and nothing else (#2389). This step used to compare
+      # vitest's passed count with the parenthesised total, which also counts skipped,
+      # todo and expected-fail tests, so one skipped test turned the public badge red on
+      # a green main. It also captured the run with a swallowed exit status, so a vitest
+      # that never started left both counts empty, two empty strings compared equal, and
+      # the badge went green for a suite that did not run (the instance #1986 names).
+      #
+      # So: the counts come from vitest's JSON report rather than its human summary, the
+      # exit status is used rather than discarded, and a report this cannot read FAILS
+      # the step and writes no badge - the published badge keeps its previous value and
+      # the red step says why. A run with failing tests publishes a red badge and does
+      # not fail the step: the gating run is "Test with coverage" above; this one only
+      # reports.
+      #
+      # This block runs only on a push to main, so no pull request's CI executes it.
+      # packages/minspec/tests/ci-tests-badge.test.ts cuts it out of this file and runs
+      # it, which is the only pre-merge check it gets. That test finds the step by its
+      # name and fails loudly if the name changes.
       - name: Extract test counts
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: |
-          TEST_OUTPUT=$(npx vitest run 2>&1 || true)
-          PASSED=$(echo "$TEST_OUTPUT" | grep -oP '\d+(?= passed)' | tail -1)
-          TOTAL=$(echo "$TEST_OUTPUT" | grep -oP '(?<=\()\d+(?=\))' | tail -1)
-          if [ "$PASSED" = "$TOTAL" ]; then COLOR="brightgreen"; else COLOR="red"; fi
-          echo "{\"schemaVersion\":1,\"label\":\"tests\",\"message\":\"${PASSED} passed\",\"color\":\"${COLOR}\"}" > .badges/tests.json
+          set -euo pipefail
+          report="${RUNNER_TEMP:-/tmp}/vitest-badge-report.json"
+          log="${RUNNER_TEMP:-/tmp}/vitest-badge-run.log"
+          # A report left by an earlier run must never be read as this one.
+          rm -f "$report"
+          status=0
+          npx vitest run --reporter=json --outputFile="$report" > "$log" 2>&1 || status=$?
+          VITEST_STATUS="$status" VITEST_REPORT="$report" node <<'NODE' || { echo "vitest exit status: $status. Last lines of its output:"; tail -n 40 "$log"; exit 1; }
+          const fs = require('fs');
+          const fail = (why) => {
+            console.log('::error title=tests badge::' + why + ' No badge was written, so the published badge keeps its previous value.');
+            process.exit(1);
+          };
+          let report;
+          try {
+            report = JSON.parse(fs.readFileSync(process.env.VITEST_REPORT, 'utf8'));
+          } catch (err) {
+            fail('vitest left no readable JSON report (' + err.message + ').');
+          }
+          if (report === null || typeof report !== 'object') fail('the vitest report is not a JSON object.');
+          const count = (key) => (Number.isInteger(report[key]) && report[key] >= 0 ? report[key] : null);
+          const passed = count('numPassedTests');
+          const failed = count('numFailedTests');
+          const total = count('numTotalTests');
+          if (passed === null || failed === null || total === null || total === 0 || passed + failed === 0) {
+            fail('the vitest report carries no usable test counts.');
+          }
+          const green = Number(process.env.VITEST_STATUS) === 0 && report.success === true && failed === 0;
+          const message = green
+            ? passed + ' passed'
+            : failed > 0
+              ? passed + ' passed, ' + failed + ' failed'
+              : passed + ' passed, run failed';
+          const color = green ? 'brightgreen' : 'red';
+          fs.mkdirSync('.badges', { recursive: true });
+          fs.writeFileSync('.badges/tests.json', JSON.stringify({ schemaVersion: 1, label: 'tests', message, color }));
+          console.log('tests badge: ' + message + ' (' + color + ')');
+          NODE
 
       - name: Publish badges to badges branch
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
