@@ -549,3 +549,128 @@ describe('T3 regression — the weekly ceiling must outrank the 5h window-reset'
     expect(secs).toBe(6 * 3600);
   });
 });
+
+describe('T3 regression (#2233): a text-only signal that a fresh meter contradicts does not sleep to the reset', () => {
+  // Measured 2026-09-30. A false match on the word "quota" (19:03) paused the drain; the
+  // last in-flight build finished at 19:15:54, and the drain then slept 17061s "to the
+  // published reset". The reading beside that reset said 5h 0% / 7d 26%, observed 861s
+  // earlier: 39s inside the 900s freshness limit, so quota_sleep_secs believed its
+  // resets_at and never looked at the percentage next to it.
+  //
+  // `--quota-signal-sleep [<streak>]` is the pure seam for the rest the loop takes after a
+  // TEXT signal: "<secs> <verdict> <meter says>". The verdict is `contradicted` (a fresh
+  // reading shows room in every window: short backoff), `confirmed` (the meter agrees or
+  // cannot speak: today's sleep, fail closed) or `overruled` (the meter contradicted the
+  // previous signal too, so it is not seeing whatever is binding: fail closed).
+  const sig = (env: Record<string, string> = {}, streak?: number) => {
+    const r = run(streak === undefined ? ['--quota-signal-sleep'] : ['--quota-signal-sleep', String(streak)], env);
+    const [secs, verdict] = r.out.split(/\s+/);
+    return { code: r.code, secs: Number(secs), verdict, out: r.out };
+  };
+  const write7 = (q: Record<string, number>) =>
+    fs.writeFileSync(quotaFile, JSON.stringify({ observed_at: nowSec(), ...q }));
+
+  it('the measured case: fresh 5h 0% / 7d 26%, reset 17061s out, gets the SHORT backoff and names the reading', () => {
+    write7({
+      used_percentage: 0, resets_at: nowSec() + 17061, observed_at: nowSec() - 861,
+      seven_day_percentage: 26, seven_day_resets_at: nowSec() + 400000,
+    });
+    const r = sig();
+    expect(r.code).toBe(0);
+    expect(r.verdict).toBe('contradicted');
+    expect(r.secs).toBe(60);
+    expect(r.out).toMatch(/0% of the 5h window used/);
+  });
+
+  it('CONTROL: the same signal with the 5h window at 95% still sleeps to the published reset', () => {
+    write({ used_percentage: 95, resets_at: nowSec() + 600 });
+    const r = sig();
+    expect(r.verdict).toBe('confirmed');
+    expect(r.secs).toBeGreaterThanOrEqual(600);
+    expect(r.secs).toBeLessThan(900);
+  });
+
+  it('a STALE reading cannot contradict anything: the fixed backoff, exactly as before (fail closed)', () => {
+    write({ used_percentage: 0, resets_at: nowSec() + 17000, observed_at: nowSec() - 901 });
+    const r = sig({ MINSPEC_DRAIN_QUOTA_BACKOFF: '1800' });
+    expect(r.verdict).toBe('confirmed');
+    expect(r.secs).toBe(1800);
+    expect(r.out).toMatch(/stale/);
+  });
+
+  it('NO reading cannot contradict anything either, and spends no bootstrap admit finding that out', () => {
+    const r = sig({ MINSPEC_DRAIN_QUOTA_BACKOFF: '1800' });
+    expect(r.verdict).toBe('confirmed');
+    expect(r.secs).toBe(1800);
+    expect(fs.existsSync(`${quotaFile}.bootstrap`)).toBe(false);
+  });
+
+  it('a WEEKLY window at its bar is not headroom, even with the 5h window empty', () => {
+    write7({
+      used_percentage: 0, resets_at: nowSec() + 3600,
+      seven_day_percentage: 97, seven_day_resets_at: nowSec() + 200000,
+    });
+    const r = sig();
+    expect(r.verdict).toBe('confirmed');
+    expect(r.secs).toBe(6 * 3600);
+  });
+
+  it('a meter that already contradicted the previous signal is overruled: fail closed to the published reset', () => {
+    // A cap the meter cannot see (a per-model limit, say) produces a signal on every
+    // launch while the meter keeps reading low. Believing it every time would strand one
+    // issue per probe, so the veto is spent after MINSPEC_QUOTA_CONTRADICT_MAX in a row.
+    write({ used_percentage: 0, resets_at: nowSec() + 3000 });
+    expect(sig({}, 0).verdict).toBe('contradicted');
+    const r = sig({}, 1);
+    expect(r.verdict).toBe('overruled');
+    expect(r.secs).toBeGreaterThanOrEqual(3000);
+    expect(r.secs).toBeLessThan(3300);
+  });
+
+  it('MINSPEC_QUOTA_CONTRADICT_MAX=0 turns the veto off (every signal fails closed, the pre-#2233 behaviour)', () => {
+    write({ used_percentage: 0, resets_at: nowSec() + 3000 });
+    const r = sig({ MINSPEC_QUOTA_CONTRADICT_MAX: '0' });
+    expect(r.verdict).toBe('overruled');
+    expect(r.secs).toBeGreaterThanOrEqual(3000);
+  });
+
+  it('the short backoff is tunable, and clamped so it can never spin', () => {
+    write({ used_percentage: 0, resets_at: nowSec() + 3000 });
+    expect(sig({ MINSPEC_QUOTA_CONTRADICTED_BACKOFF: '300' }).secs).toBe(300);
+    expect(sig({ MINSPEC_QUOTA_CONTRADICTED_BACKOFF: '0' }).secs).toBe(60);
+  });
+
+  it('always leads with a bare integer, because the loop feeds it to sleep', () => {
+    write({ used_percentage: 0, resets_at: nowSec() + 3000 });
+    expect(run(['--quota-signal-sleep']).out).toMatch(/^\d+ contradicted /);
+    expect(run(['--quota-signal-sleep'], { MINSPEC_QUOTA_FILE: '/nonexistent/x.json' }).out).toMatch(/^\d+ confirmed /);
+  });
+
+  it('T0: the meter contradicts a signal IF AND ONLY IF the admission gate would admit on the same reading', () => {
+    // One predicate, two consumers: the veto is quota_gate's own verdict, not a copy of
+    // its rules that could drift from them. Walk readings on both sides of every bar.
+    const readings: Array<Record<string, number> | null> = [
+      { used_percentage: 0, resets_at: nowSec() + 3600 },
+      { used_percentage: 89, resets_at: nowSec() + 3600 },
+      { used_percentage: 90, resets_at: nowSec() + 3600 },
+      { used_percentage: 100, resets_at: nowSec() - 60 },
+      { used_percentage: 0, resets_at: nowSec() + 3600, observed_at: nowSec() - 901 },
+      { used_percentage: 0, resets_at: nowSec() + 3600, seven_day_percentage: 94, seven_day_resets_at: nowSec() + 100000 },
+      { used_percentage: 0, resets_at: nowSec() + 3600, seven_day_percentage: 95, seven_day_resets_at: nowSec() + 100000 },
+      { used_percentage: 5, resets_at: nowSec() - 60, seven_day_percentage: 99, seven_day_resets_at: nowSec() + 200000 },
+      null,
+    ];
+    let contradicted = 0;
+    for (const q of readings) {
+      fs.rmSync(quotaFile, { force: true });
+      if (q) write7(q);
+      const admits = run(['--quota-gate'], { MINSPEC_QUOTA_BOOTSTRAP_ADMITS: '0' }).code === 0;
+      const verdict = sig().verdict;
+      expect(verdict === 'contradicted', `reading ${JSON.stringify(q)}: gate admits=${admits}, veto=${verdict}`).toBe(admits);
+      if (admits) contradicted++;
+    }
+    // Both sides of the equivalence were exercised, so it cannot hold vacuously.
+    expect(contradicted).toBeGreaterThan(0);
+    expect(contradicted).toBeLessThan(readings.length);
+  });
+});

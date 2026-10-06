@@ -82,10 +82,14 @@ function decide({
  * skip-unhandled-state are #1803's two new tokens (an UNKNOWN or unrecognised
  * mergeStateStatus) — included here so the priority gates below (merged, stand-down,
  * the wall-clock ceiling) are proven to apply to them too, not just the pre-existing
- * vocabulary.
+ * vocabulary. skip-live-owned (SPEC-044 FR-6/INV-4, the owner gate) was missing until
+ * #1730 — the "the derived-list guard proves this list" test below is what keeps that
+ * from recurring: a hand-maintained "exhaustive" list drifts silently every time
+ * classify_pr grows a token, which is exactly the class of bug this one was.
  */
 const ALL_ACTIONS = [
   'skip-not-automation',
+  'skip-live-owned',
   'skip-conflict',
   'agent-remediate-checks',
   'agent-remediate-review',
@@ -95,6 +99,40 @@ const ALL_ACTIONS = [
   'skip-unhandled-state',
   'some-token-from-the-future',
 ];
+
+/**
+ * #1730: ALL_ACTIONS above is hand-maintained and asserts it is exhaustive — the same
+ * validator asymmetry this repo has hit before (checks the values present, never
+ * asserts one should be). skip-live-owned went unregistered for a full release this
+ * way, silently excluding it from all three INV-5/D3 safety sweeps. This derives the
+ * REAL token vocabulary straight from classify_pr's source (every `echo "<token>"`
+ * inside its function body, in remediate-pr.sh) and asserts it equals ALL_ACTIONS
+ * minus the one deliberate sentinel that classify_pr can never actually emit — so
+ * adding a token to classify_pr without registering it here fails the build instead
+ * of silently shrinking coverage.
+ */
+function classifyPrTokensFromSource(): string[] {
+  const src = fs.readFileSync(REMEDIATE, 'utf-8');
+  const start = src.indexOf('\nclassify_pr() {');
+  if (start === -1) {
+    throw new Error('classify_pr() { not found in remediate-pr.sh — derivation is stale');
+  }
+  const end = src.indexOf('\n}', start);
+  if (end === -1) {
+    throw new Error('classify_pr() closing brace not found in remediate-pr.sh — derivation is stale');
+  }
+  const body = src.slice(start, end);
+  const tokens = [...body.matchAll(/echo "([a-z0-9-]+)"/g)].map((m) => m[1]);
+  return [...new Set(tokens)];
+}
+
+describe('shepherd --decide: ALL_ACTIONS is exhaustive (#1730)', () => {
+  it('equals the real token vocabulary classify_pr emits, plus only the deliberate sentinel', () => {
+    const real = classifyPrTokensFromSource();
+    const declared = ALL_ACTIONS.filter((a) => a !== 'some-token-from-the-future');
+    expect(new Set(declared)).toEqual(new Set(real));
+  });
+});
 
 describe('shepherd --decide: INV-5/D3 a reclaimed owner never elects a credentialed op', () => {
   it('stands down for EVERY action token when the claim is no longer held', () => {
@@ -333,6 +371,39 @@ describe('shepherd: a PR BLOCKED on a still-running ai-review keeps being shephe
   });
 });
 
+// #1729 — the shepherd's OWN classify call substituted a POSITIVE "PR is clean"
+// token (`skip-clean`) for ANY failure of `remediate-pr.sh --classify` (the ONLY
+// producer of that token), both exit code and stderr discarded
+// (`2>/dev/null || echo "skip-clean"`). Invariant 2: an errored witness must fail
+// closed and visibly, never read as healthy. `skip-unclassified` is the caller-
+// synthesized replacement — classify_pr itself never emits it (see the doc header
+// of shepherd-pr.sh) — and `stop-unclassified` is shepherd_decide's arm for it.
+describe('shepherd --decide: an ERRORED classifier reads as unclassified, never clean (#1729)', () => {
+  it('skip-unclassified does NOT collapse into skip-clean (never asserted healthy)', () => {
+    const t = decide({ action: 'skip-unclassified', checksPending: 'no', automergeArmed: 'no' });
+    expect(t).not.toBe('stop-awaiting-human');
+    expect(t).not.toBe('wait');
+  });
+
+  it('skip-unclassified does NOT fall through to the generic stop-not-automation default', () => {
+    // Distinct claim: stop-not-automation asserts "this branch is out of automation
+    // scope", which the caller has no basis to claim when the classifier crashed.
+    expect(decide({ action: 'skip-unclassified' })).not.toBe('stop-not-automation');
+  });
+
+  it('gets its own honestly-named terminal token', () => {
+    expect(decide({ action: 'skip-unclassified' })).toBe('stop-unclassified');
+  });
+
+  it('still stands down when the claim is lost (INV-5/D3)', () => {
+    expect(decide({ action: 'skip-unclassified', holds: 'no' })).toBe('stand-down');
+  });
+
+  it('is a STOP, not an escape from the FR-4 wall-clock ceiling', () => {
+    expect(decide({ action: 'skip-unclassified', elapsed: 3600, maxSecs: 3600 })).toBe('stop-timeout');
+  });
+});
+
 describe('shepherd wiring: the loop is bounded by CODE, not by a token', () => {
   const code = fs.readFileSync(DISPATCH, 'utf-8');
 
@@ -415,6 +486,58 @@ describe('shepherd wiring: the loop is bounded by CODE, not by a token', () => {
     const nextArmOrEnd = body.indexOf(';;', start);
     const arm = body.slice(start, nextArmOrEnd === -1 ? undefined : nextArmOrEnd);
     expect(arm).toMatch(/return 0/);
+  });
+
+  // #1729: the classify call used to be
+  // `... 2>/dev/null || echo "skip-clean"` — a swallowed exit code AND stderr,
+  // substituting a POSITIVE "clean" claim for ANY crash of the only producer of
+  // this token. Pin the fix at the wiring level so a future edit cannot silently
+  // reintroduce the exact shape invariant 2 forbids.
+  describe('the classify call fails closed, never reads a crash as clean (#1729)', () => {
+    const body = shepherdBody();
+    const classifyCallStart = body.indexOf('remediate-pr.sh" --classify');
+    // Look at everything from the classify invocation through the next 20 lines,
+    // which covers the exit-code capture and the resulting fallback assignment.
+    const classifyRegion = body.slice(classifyCallStart, classifyCallStart + 1500);
+
+    it('the classify call exists', () => {
+      expect(classifyCallStart, 'the --classify call must exist').toBeGreaterThan(-1);
+    });
+
+    it('never substitutes skip-clean on failure of its own classify call', () => {
+      expect(classifyRegion).not.toMatch(/\|\|\s*echo\s*"skip-clean"/);
+    });
+
+    it("captures the classify call's exit code rather than discarding it", () => {
+      expect(classifyRegion).toMatch(/classify_rc=\$\?/);
+    });
+
+    it('does not discard stderr from the classify call (no bare 2>/dev/null on it)', () => {
+      // Only the classify INVOCATION itself — up through the `|| classify_rc=$?`
+      // that closes it — not the cleanup lines after, which legitimately read the
+      // captured errfile back with their OWN harmless 2>/dev/null.
+      const invocationEnd = body.indexOf('|| classify_rc=$?', classifyCallStart);
+      expect(invocationEnd, 'the classify_rc capture must exist').toBeGreaterThan(-1);
+      const invocation = body.slice(classifyCallStart, invocationEnd);
+      expect(invocation).not.toMatch(/2>\/dev\/null/);
+      expect(invocation).toMatch(/2>"\$classify_errfile"/);
+    });
+
+    it('the fallback token reads as "could not classify", not "clean"', () => {
+      expect(classifyRegion).toMatch(/action="skip-unclassified"/);
+    });
+
+    it('handles stop-unclassified explicitly in the decision case statement', () => {
+      expect(body).toMatch(/stop-unclassified\)/);
+    });
+
+    it('stop-unclassified actually stops (returns) rather than falling through', () => {
+      const start = body.indexOf('stop-unclassified)');
+      expect(start, 'stop-unclassified arm must exist').toBeGreaterThan(-1);
+      const nextArmOrEnd = body.indexOf(';;', start);
+      const arm = body.slice(start, nextArmOrEnd === -1 ? undefined : nextArmOrEnd);
+      expect(arm).toMatch(/return 0/);
+    });
   });
 
   // Regression + gate for the second review round on PR #975. `automerge_armed` read
