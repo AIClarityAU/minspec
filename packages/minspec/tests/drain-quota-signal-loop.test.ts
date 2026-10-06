@@ -245,7 +245,9 @@ describe('#2233: a genuine wall is still a pause, and the meter decides how long
     const log = await runUntil(l, (s) => s.includes('CONTRADICTED by the meter'));
     expect(log).toContain('usage-limit signal while dispatching #901');
     expect(log).toContain('NOT publishing a wall reading for that signal');
-    expect(log).toMatch(/CONTRADICTED by the meter \(open:0% of the 5h window used\) — backing off 60s/);
+    // The meter's verdict is quoted whole, and since #2514 it ends with the cap it was
+    // judged against, so the reading is followed by that and no longer by the bracket.
+    expect(log).toMatch(/CONTRADICTED by the meter \(open:0% of the 5h window used, cap [^)]*\) — backing off 60s/);
     expect(log).not.toContain('quota window exhausted');
     // The meter was asked AFTER the signal, not only before it.
     expect(meterCallCount(l)).toBeGreaterThanOrEqual(1);

@@ -47,9 +47,28 @@
 #   MINSPEC_DRAIN_INTERVAL=1200    — seconds between cycles (default 20 min).
 #   MINSPEC_DRAIN_QUOTA_BACKOFF=1800 — seconds to pause after a quota signal (30 min).
 #                  Now only a FALLBACK: when ~/.claude/quota.json carries a live
-#                  reset time, the loop sleeps to that instead of guessing.
-#   MINSPEC_QUOTA_FILE=~/.claude/quota.json — the published 5h window deadline.
-#   MINSPEC_QUOTA_ADMIT_PCT=90     — defer a cycle at/above this %% of the window.
+#                  reset time, the loop sleeps to that instead of guessing, or to
+#                  the moment a ramped cap would next admit, whichever is sooner.
+#   MINSPEC_QUOTA_FILE=~/.claude/quota.json — the published reading: how much of the 5h
+#                                    window is used and when it resets, and the same
+#                                    for the weekly window when the producer sees it.
+#   The admission cap, one per window (#2514). The gate holds at or above the cap, and
+#   it is asked before every cycle and before every dispatch in it (#2573). A cap that
+#   is SET is fixed. Left unset, which is the default, it RAMPS toward the reset:
+#       cap = min(100, max(floor, 100 - rate x time left to that window's reset))
+#   so the drain leaves headroom early in a window and uses what is left near its end.
+#   MINSPEC_QUOTA_ADMIT_PCT=<n>    — 5h window: a fixed cap of n%. 0 holds everything.
+#   MINSPEC_QUOTA_ADMIT_PCT_7D=<n> — weekly window: the same. 0 is how to pause a drain.
+#   MINSPEC_QUOTA_RAMP_FLOOR=60    — 5h ramp: the cap never goes below this.
+#   MINSPEC_QUOTA_RAMP_PER_HOUR=8  — 5h ramp: % held back per hour still to run
+#                                    (60 until five hours are left, 92 with one left).
+#   MINSPEC_QUOTA_RAMP_FLOOR_7D=60 — weekly ramp: its floor.
+#   MINSPEC_QUOTA_RAMP_PER_DAY_7D=10 — weekly ramp: % held back per day still to run
+#                                    (60 until four days are left, 80 at two, 90 at
+#                                    one, 95 at twelve hours, over 99 in the last hour).
+#                                    A reading with no usable reset time gets the floor.
+#                                    Any of the six that is not a whole number holds
+#                                    everything and says which, rather than guess a cap.
 #   MINSPEC_QUOTA_STALE_SEC=900    — ignore a reading older than this (fails CLOSED — defers).
 #   MINSPEC_QUOTA_BOOTSTRAP_ADMITS=3 — admits granted while NO reading has EVER existed,
 #                                    before the gate refuses outright (#1775 bootstrap
@@ -185,12 +204,33 @@ MAX_CONSEC_FAIL="${MINSPEC_DRAIN_MAX_FAILURES:-3}"   # stop after N straight err
 # See QUOTA_BOOTSTRAP_ADMITS and quota_gate's "no reading" arm for the small,
 # explicit, one-time allowance and its worst case.
 QUOTA_FILE="${MINSPEC_QUOTA_FILE:-$HOME/.claude/quota.json}"
-QUOTA_ADMIT_PCT="${MINSPEC_QUOTA_ADMIT_PCT:-90}"     # defer at/above this % used
-QUOTA_ADMIT_PCT_7D="${MINSPEC_QUOTA_ADMIT_PCT_7D:-95}"  # same, for the WEEKLY window.
-# Deliberately higher than the 5h bar: a 5h window reopens within hours, so deferring is
-# cheap, but the weekly window can be days out and blocking that long is far worse than
-# spending the tail of it. The 7d ceiling is invisible in the 5h reading and can bind
-# FIRST — 5h at 30% while 7d sits at 61% is a real observed state.
+# ── The cap: how much of a window the drain may use (#2514) ──────────────────
+# One cap per window, and the gate holds at or above it. Each is in one of two modes,
+# chosen by whether its knob is SET:
+#
+#   fixed    MINSPEC_QUOTA_ADMIT_PCT (5h) / MINSPEC_QUOTA_ADMIT_PCT_7D (weekly) is set:
+#            that number is the cap, whatever the clock says. 0 holds everything.
+#   ramped   it is unset (the default): the cap is 100% less a reserve that shrinks as
+#            the window's reset approaches, and never below a floor.
+#
+# A fixed cap forces a bad choice, and #2514 records both halves of it. Left at the old
+# defaults (90 and 95) the drain spent the week's headroom early, and the founder hit
+# the weekly wall a day before the reset. Capped at a flat 60 by hand, it strands 40%
+# of the window at every reset unless someone remembers to lift it. The reserve does
+# what a person does without thinking: careful while the reset is days away, generous
+# in the last hours, when anything unspent is about to be lost anyway.
+#
+# The two windows are independent and the weekly one can bind FIRST: it is invisible
+# in the 5h reading, and 5h at 30% while 7d sits at 61% is a real observed state.
+#
+# An EMPTY knob is the same as an unset one (`:-`), so a window can be put back on the
+# ramp by clearing its variable. 0 is a cap like any other, and the one that pauses.
+QUOTA_ADMIT_PCT="${MINSPEC_QUOTA_ADMIT_PCT:-}"            # 5h: the fixed cap, if any
+QUOTA_ADMIT_PCT_7D="${MINSPEC_QUOTA_ADMIT_PCT_7D:-}"      # weekly: the fixed cap, if any
+QUOTA_RAMP_FLOOR="${MINSPEC_QUOTA_RAMP_FLOOR:-60}"        # 5h ramp: never below this %
+QUOTA_RAMP_PER_HOUR="${MINSPEC_QUOTA_RAMP_PER_HOUR:-8}"   # 5h ramp: % held back per hour left
+QUOTA_RAMP_FLOOR_7D="${MINSPEC_QUOTA_RAMP_FLOOR_7D:-60}"  # weekly ramp: never below this %
+QUOTA_RAMP_PER_DAY_7D="${MINSPEC_QUOTA_RAMP_PER_DAY_7D:-10}"  # weekly ramp: % held back per day left
 QUOTA_STALE_SEC="${MINSPEC_QUOTA_STALE_SEC:-900}"    # older reading proves nothing
 QUOTA_SLEEP_MAX="${MINSPEC_QUOTA_SLEEP_MAX:-21600}"  # 6 h clamp vs a corrupt epoch
 QUOTA_SLEEP_MIN="${MINSPEC_QUOTA_SLEEP_MIN:-60}"     # never spin
@@ -249,6 +289,14 @@ QUOTA_CONTRADICT_MAX="${MINSPEC_QUOTA_CONTRADICT_MAX:-1}"
 # last clean cycle.
 QUOTA_PAUSE_CAUSE=""
 QUOTA_CONTRADICTED_STREAK=0
+# Neither configuration nor loop state: where _quota_cap and _quota_admit_wait leave
+# their answers. They are asked some twenty times in a row when the gate works out how
+# long a hold will last, so they set these instead of printing, which would cost a fork
+# per ask.
+QCAP_TENTHS=0      # the cap in force, in tenths of a percent
+QCAP_MODE=""       # fixed | ramped
+QWAIT_SECS=0       # seconds until that cap would admit the usage asked about
+QWAIT_WHY=""       # ramp (it admits before the reset) | reset (it does not)
 
 # Dispatch fan-out (#1208). Default 1 = the historical strictly-sequential walk,
 # byte-for-byte: parallelism is OPT-IN, never inherited. >1 dispatches up to N
@@ -1044,6 +1092,10 @@ run_cycle() {
     QUOTA_PAUSE_CAUSE="gate"
     return 42
   fi
+  # An ADMIT is logged too (#2514). The verdict names the cap in force and its mode, and
+  # under a ramp that cap is different every cycle: a log that showed it only on a hold
+  # would leave a reader to infer what the drain was allowed for the rest of the week.
+  echo "[drain] quota gate — $quota_verdict"
   # Admitted. Whatever pauses this cycle from here on sets its cause (#2233): only a
   # `signal` pause, where a child's text was the sole witness, lets the meter shorten
   # the rest.
@@ -1584,9 +1636,18 @@ _quota_read() {
 # usage-limit text signal is judged against the meter, and a reading taken BEFORE the
 # signal can lag it by up to QUOTA_REFRESH_MIN_AGE; one taken after cannot. So the
 # rest after a text signal asks the producer once more, whatever the reading's age.
+#
+# A reading whose WEEKLY reset has passed is refreshed whatever its age as well
+# (#2514). It describes a week that is over: young by the clock, out of date by its
+# own account. Under a fixed cap that rarely mattered. Under a ramp it is the normal
+# end of every week: the ramp lets usage climb toward 100% by the reset, the drain
+# sleeps to the reset, and it wakes seconds later holding a reading that says "97%
+# used" of a window that no longer exists and offers no reset time to ramp against.
+# That reading gets the floor, so without this the first act of a new week would be a
+# hold, and a sleep to the next 5h reset.
 _quota_try_refresh() {
   [[ "$QUOTA_REFRESH" == "1" ]] || return 0
-  local now vals o
+  local now vals o wr
   now=$(date +%s)
   # ONLY a reading that EXISTS and has aged out is refreshed. A missing reading is
   # deliberately left alone: that arm carries the bounded bootstrap allowance (INV-E)
@@ -1594,15 +1655,190 @@ _quota_try_refresh() {
   # manufacture the very first reading — turning a documented, bounded blind-admit
   # into an unbounded one. #1859 is about a reading going stale, not a missing one.
   vals=$(_quota_read 2>/dev/null) || return 0
-  read -r _ _ o _ _ <<<"$vals"
-  [[ "${1:-}" == "force" ]] || (( now - o > QUOTA_REFRESH_MIN_AGE )) || return 0
+  read -r _ _ o _ wr <<<"$vals"
+  [[ "${1:-}" == "force" ]] || (( now - o > QUOTA_REFRESH_MIN_AGE )) || (( wr > 0 && wr <= now )) || return 0
   if ! timeout "$QUOTA_REFRESH_TIMEOUT" bash -c "$QUOTA_REFRESH_CMD" >/dev/null 2>&1; then
     echo "[drain] quota refresh failed (\`$QUOTA_REFRESH_CMD\`) — the reading stands as-is and the gate still fails closed on it." >&2
   fi
 }
 
+# ── The cap in force (#2514) ───────────────────────────────────────────────────
+# Everything that decides against a cap goes through _quota_cap: the gate, the sleep
+# that follows a hold, and the lines that tell a reader which cap decided. One rule
+# with several readers cannot drift; a second copy of the arithmetic is how the
+# weekly-ceiling ordering bug hid in #1676.
+
+# _quota_knob_problem <ENV-NAME> <value> <cap|floor|rate>: is this knob unusable? Prints
+# what is wrong and returns 0 if so; prints nothing and returns 1 if it is fine. `%q`
+# because the value came from the environment and the complaint lands on the gate's
+# verdict channel, which is one line: a newline in a knob must not become a second.
+_quota_knob_problem() {
+  local name="$1" val="$2" kind="$3"
+  # An unset cap is not a problem: it is how a window is put on the ramp.
+  [[ "$kind" == "cap" && -z "$val" ]] && return 1
+  if [[ ! "$val" =~ ^[0-9]{1,6}$ ]]; then
+    printf '%s=%q is not a whole number' "$name" "$val"
+    return 0
+  fi
+  if [[ "$kind" == "floor" ]] && (( 10#$val > 100 )); then
+    printf '%s=%s is above 100' "$name" "$val"
+    return 0
+  fi
+  return 1
+}
+
+# _quota_cap_config_problem: the first unusable cap knob, if any. Returns 0 with the
+# complaint on stdout when there is one, 1 with no output when all six are usable.
+#
+# The callers HOLD on a complaint; they do not fall back to a default. Whoever sets a
+# cap is restricting the drain, and a default could be looser than the number they
+# mistyped: `6O` for 60 must not become a ramp that admits at 95. A knob that is
+# ignored without a word would be a gate that lies about what it is doing.
+_quota_cap_config_problem() {
+  _quota_knob_problem MINSPEC_QUOTA_ADMIT_PCT "$QUOTA_ADMIT_PCT" cap \
+    || _quota_knob_problem MINSPEC_QUOTA_ADMIT_PCT_7D "$QUOTA_ADMIT_PCT_7D" cap \
+    || _quota_knob_problem MINSPEC_QUOTA_RAMP_FLOOR "$QUOTA_RAMP_FLOOR" floor \
+    || _quota_knob_problem MINSPEC_QUOTA_RAMP_FLOOR_7D "$QUOTA_RAMP_FLOOR_7D" floor \
+    || _quota_knob_problem MINSPEC_QUOTA_RAMP_PER_HOUR "$QUOTA_RAMP_PER_HOUR" rate \
+    || _quota_knob_problem MINSPEC_QUOTA_RAMP_PER_DAY_7D "$QUOTA_RAMP_PER_DAY_7D" rate
+}
+
+# _quota_cap <5h|7d> <seconds to that window's reset>: the cap in force for one window.
+# Sets QCAP_TENTHS (tenths of a percent) and QCAP_MODE (fixed|ramped). Prints nothing
+# and forks nothing. Only call it once _quota_cap_config_problem has found no problem:
+# it does arithmetic on the knobs.
+#
+#   fixed    the knob, as given.
+#   ramped   min(100, max(floor, 100 - rate x time left)), with the rate per hour for
+#            the 5h window and per day for the weekly one. Zero or fewer seconds left
+#            means the reading carries no usable reset time, and the cap is the floor:
+#            with no clock to ramp against, the cautious end of the ramp is the answer.
+#
+# TENTHS, ROUNDED DOWN. Usage arrives as a whole percent, so a cap of 99.58 and a cap
+# of 99 differ only at 99% used, which is exactly the case the founder named ("in the
+# last hour make it 100%"). Whole percents would hold the last point of every window
+# back; tenths admit it. Rounding DOWN keeps any error on the side of holding, and
+# makes the number printed the number that decided: "cap 70.0%, 70% used, held" reads
+# true, where a cap of 70.0001 shown as 70.0 and admitting 70% would not.
+#
+# `10#` because a knob may be written 060, which bash would otherwise read as octal.
+_quota_cap() {
+  local win="$1" left="$2" fixed floor rate unit t
+  if [[ "$win" == "7d" ]]; then
+    fixed="$QUOTA_ADMIT_PCT_7D"; floor="$QUOTA_RAMP_FLOOR_7D"; rate="$QUOTA_RAMP_PER_DAY_7D"; unit=86400
+  else
+    fixed="$QUOTA_ADMIT_PCT"; floor="$QUOTA_RAMP_FLOOR"; rate="$QUOTA_RAMP_PER_HOUR"; unit=3600
+  fi
+  if [[ -n "$fixed" ]]; then
+    QCAP_MODE="fixed"
+    QCAP_TENTHS=$(( 10#$fixed * 10 ))
+    return 0
+  fi
+  QCAP_MODE="ramped"
+  floor=$(( 10#$floor * 10 ))
+  if (( left <= 0 )); then
+    QCAP_TENTHS=$floor
+    return 0
+  fi
+  # 100% less the reserve, the reserve rounded UP so that the cap rounds down.
+  t=$(( 1000 - (10#$rate * left * 10 + unit - 1) / unit ))
+  (( t < floor )) && t=$floor
+  (( t > 1000 )) && t=1000
+  QCAP_TENTHS=$t
+  return 0
+}
+
+# _quota_defers <5h|7d> <used %> <seconds to that window's reset>: exit 0 iff the cap
+# holds that usage. At or above the cap is a hold, so a cap of 0 holds a 0% reading:
+# that is the pause a drain is given with MINSPEC_QUOTA_ADMIT_PCT_7D=0.
+_quota_defers() {
+  _quota_cap "$1" "$3"
+  (( $2 * 10 >= QCAP_TENTHS ))
+}
+
+# _quota_admit_wait <5h|7d> <used %> <seconds to that window's reset>: how long until
+# that window's cap would admit that usage, were usage to stand still. Sets QWAIT_SECS,
+# and QWAIT_WHY to `ramp` (the ramp gets there before the reset) or `reset` (nothing
+# admits before the reset: a fixed cap does not move, and no ramp admits a spent
+# window). Ask only about a usage the cap is holding now.
+#
+# It ASKS _quota_cap about later moments instead of inverting the ramp with a formula
+# of its own. Two formulas for one rule would have to be kept in step by hand, and the
+# one that drifted would be this one, the one nobody reads. The cap never falls as the
+# reset nears, so the first moment it admits is found by halving: about twenty asks for
+# a week of seconds, none of which forks.
+_quota_admit_wait() {
+  local win="$1" used="$2" left="$3" lo=1 hi="$3" mid
+  QWAIT_SECS="$left"; QWAIT_WHY="reset"
+  # Still held with one second to go: only the reset itself will admit this.
+  _quota_defers "$win" "$used" 1 && return 0
+  # Not held even now: there is nothing to wait for (the callers do not ask this).
+  _quota_defers "$win" "$used" "$hi" || { QWAIT_SECS=0; QWAIT_WHY="ramp"; return 0; }
+  # Admitted with `lo` seconds left, held with `hi`: close the gap.
+  while (( hi - lo > 1 )); do
+    mid=$(( (lo + hi) / 2 ))
+    if _quota_defers "$win" "$used" "$mid"; then hi=$mid; else lo=$mid; fi
+  done
+  QWAIT_SECS=$(( left - lo )); QWAIT_WHY="ramp"
+  return 0
+}
+
+# _quota_span <seconds>: a length of time the way a log should say it, to one decimal
+# and rounded to nearest, so two days less a second still reads "2.0 days".
+_quota_span() {
+  local s="$1" t
+  if (( s >= 86400 )); then
+    t=$(( (s * 10 + 43200) / 86400 )); printf '%d.%d days' "$(( t / 10 ))" "$(( t % 10 ))"
+  elif (( s >= 3600 )); then
+    t=$(( (s * 10 + 1800) / 3600 )); printf '%d.%d h' "$(( t / 10 ))" "$(( t % 10 ))"
+  else
+    printf '%d min' "$(( (s + 59) / 60 ))"
+  fi
+}
+
+# _quota_cap_text <5h|7d> <seconds to that window's reset>: the cap in force as a log
+# reads it, mode and all, e.g. `60% fixed by MINSPEC_QUOTA_ADMIT_PCT_7D` or
+# `80.0% ramped: 10%/day held back, 2.0 days to reset, floor 60%`. No parentheses: the
+# loop wraps a whole verdict in a pair of its own.
+_quota_cap_text() {
+  local win="$1" left="$2" var rate floor per
+  _quota_cap "$win" "$left"
+  if [[ "$win" == "7d" ]]; then
+    var="MINSPEC_QUOTA_ADMIT_PCT_7D"; rate="$QUOTA_RAMP_PER_DAY_7D"; floor="$QUOTA_RAMP_FLOOR_7D"; per="day"
+  else
+    var="MINSPEC_QUOTA_ADMIT_PCT"; rate="$QUOTA_RAMP_PER_HOUR"; floor="$QUOTA_RAMP_FLOOR"; per="hour"
+  fi
+  if [[ "$QCAP_MODE" == "fixed" ]]; then
+    printf '%d%% fixed by %s' "$(( QCAP_TENTHS / 10 ))" "$var"
+  elif (( left <= 0 )); then
+    printf '%d.%d%% ramped: no reset time in the reading, so the floor' "$(( QCAP_TENTHS / 10 ))" "$(( QCAP_TENTHS % 10 ))"
+  else
+    printf '%d.%d%% ramped: %d%%/%s held back, %s to reset, floor %d%%' \
+      "$(( QCAP_TENTHS / 10 ))" "$(( QCAP_TENTHS % 10 ))" "$(( 10#$rate ))" "$per" "$(_quota_span "$left")" "$(( 10#$floor ))"
+  fi
+}
+
+# _quota_cap_config_text <5h|7d>: which mode a window will be judged in, for the times
+# there is no reading to work an actual cap out from.
+_quota_cap_config_text() {
+  if [[ "$1" == "7d" ]]; then
+    if [[ -n "$QUOTA_ADMIT_PCT_7D" ]]; then printf 'fixed at %d%% by MINSPEC_QUOTA_ADMIT_PCT_7D' "$(( 10#$QUOTA_ADMIT_PCT_7D ))"
+    else printf 'ramped from a %d%% floor, %d%%/day held back' "$(( 10#$QUOTA_RAMP_FLOOR_7D ))" "$(( 10#$QUOTA_RAMP_PER_DAY_7D ))"; fi
+  else
+    if [[ -n "$QUOTA_ADMIT_PCT" ]]; then printf 'fixed at %d%% by MINSPEC_QUOTA_ADMIT_PCT' "$(( 10#$QUOTA_ADMIT_PCT ))"
+    else printf 'ramped from a %d%% floor, %d%%/hour held back' "$(( 10#$QUOTA_RAMP_FLOOR ))" "$(( 10#$QUOTA_RAMP_PER_HOUR ))"; fi
+  fi
+}
+
 quota_gate() {
-  local vals p r o wp wr now
+  local vals p r o wp wr now why left cap5 cap7="" next=""
+  # Before anything else, including the bootstrap allowance: with a cap nobody can
+  # read there is nothing to admit against, and a blind admit would spend an
+  # allowance on a drain that is misconfigured, not merely unobserved.
+  if why=$(_quota_cap_config_problem); then
+    echo "defer:bad-config (${why}, so no cap can be worked out and the gate holds until it is fixed or unset)"
+    return 42
+  fi
   _quota_try_refresh
   now=$(date +%s)
   if ! vals=$(_quota_read); then
@@ -1625,51 +1861,98 @@ quota_gate() {
   # a fresh reading whose 5h window had just reset was admitted with the weekly window
   # exhausted, which is precisely the wall this gate exists to prevent. It was reachable
   # on every single wake: sleep to the 5h reset, wake, get admitted, hit the weekly wall.
-  if (( wp >= 0 )) && (( wp >= QUOTA_ADMIT_PCT_7D )); then
-    if (( wr > now )); then
-      echo "defer:$(( wr - now )) (7d window ${wp}% used — the WEEKLY ceiling, resets in $(( (wr - now + 3599) / 3600 )) h)"
-    else
-      echo "defer:$QUOTA_SLEEP_MAX (7d window ${wp}% used — the WEEKLY ceiling, no usable reset time)"
+  #
+  # The number after `defer:` is how long the hold will last if usage stands still: to
+  # the reset under a fixed cap, and to the moment the ramp passes this usage under a
+  # ramped one, which the reason then spells out.
+  if (( wp >= 0 )); then
+    left=$(( wr > now ? wr - now : 0 ))
+    cap7=$(_quota_cap_text 7d "$left")
+    if _quota_defers 7d "$wp" "$left"; then
+      if (( left > 0 )); then
+        _quota_admit_wait 7d "$wp" "$left"
+        [[ "$QWAIT_WHY" == "ramp" ]] && next="; at this usage the ramp next admits in $(_quota_span "$QWAIT_SECS")"
+        echo "defer:${QWAIT_SECS} (7d window ${wp}% used — the WEEKLY ceiling, resets in $(( (left + 3599) / 3600 )) h; cap ${cap7}${next})"
+      else
+        echo "defer:$QUOTA_SLEEP_MAX (7d window ${wp}% used — the WEEKLY ceiling, no usable reset time; cap ${cap7})"
+      fi
+      return 42
     fi
-    return 42
+    cap7="; 7d window ${wp}% used, cap ${cap7}"
   fi
   if (( r <= now )); then
-    echo "open:window-reset (resets_at already passed — proceeding)"
+    echo "open:window-reset (resets_at already passed — proceeding${cap7})"
     return 0
   fi
-  if (( p >= QUOTA_ADMIT_PCT )); then
-    echo "defer:$(( r - now )) (5h window ${p}% used, resets in $(( (r - now + 59) / 60 )) min)"
+  left=$(( r - now ))
+  cap5=$(_quota_cap_text 5h "$left")
+  if _quota_defers 5h "$p" "$left"; then
+    _quota_admit_wait 5h "$p" "$left"
+    [[ "$QWAIT_WHY" == "ramp" ]] && next="; at this usage the ramp next admits in $(_quota_span "$QWAIT_SECS")"
+    echo "defer:${QWAIT_SECS} (5h window ${p}% used, resets in $(( (left + 59) / 60 )) min; cap ${cap5}${next})"
     return 42
   fi
-  echo "open:${p}% of the 5h window used"
+  # No parentheses on this one: the loop quotes a verdict inside a pair of its own.
+  echo "open:${p}% of the 5h window used, cap ${cap5}${cap7}"
   return 0
 }
 
-# quota_sleep_secs: how long to wait for the window, from the PUBLISHED reset
-# rather than a fixed guess. Falls back to QUOTA_BACKOFF when there is no usable
-# deadline, and is clamped both ways so a corrupt epoch can neither spin the loop
-# nor park it for a week.
-quota_sleep_secs() {
-  local vals p r o wp wr now secs=""
+# _quota_sleep_plan: how long to wait after a hold, and what set that length. Prints
+# "<secs> <why>": `reset` (to the published reset), `ramp` (to the moment a ramped cap
+# would next admit the usage as read), `fallback` (QUOTA_BACKOFF: the reading offers
+# no usable deadline) or `clamp` (any of those, cut short at QUOTA_SLEEP_MAX). Clamped
+# both ways, so a corrupt epoch can neither spin the loop nor park it for a week.
+#
+# WHY NOT SIMPLY "TO THE RESET" (#2514). Under a ramp the cap rises while the drain
+# sleeps. A hold at 81% with the weekly cap at 81.0 lifts in a quarter of an hour;
+# slept to the weekly reset, which the clamp turns into six hours, the drain would wake
+# to find it could have been working for five and three quarters of them, and a ramp
+# nobody is awake to see might as well be a fixed cap. So the wait is the gate's own
+# answer to "when would you next admit this?" (_quota_admit_wait), which is the reset
+# itself for a fixed cap or a spent window, and never later than the reset.
+_quota_sleep_plan() {
+  local vals p r o wp wr now secs="" why="fallback"
   now=$(date +%s)
-  if vals=$(_quota_read); then
+  if ! _quota_cap_config_problem >/dev/null && vals=$(_quota_read); then
     read -r p r o wp wr <<<"$vals"
     if (( now - o <= QUOTA_STALE_SEC )); then
       # Sleep toward whichever window is actually BINDING. When the weekly ceiling is
       # what deferred us, the 5h reset is the wrong deadline — it can be minutes away
       # while the weekly window is days out, so the loop would wake, re-defer, and
       # report "sleeping to the published reset" while sleeping to an irrelevant one.
-      if (( wp >= 0 )) && (( wp >= QUOTA_ADMIT_PCT_7D )) && (( wr > now )); then
-        secs=$(( wr - now + QUOTA_SLEEP_MARGIN ))
+      if (( wp >= 0 )) && (( wr > now )) && _quota_defers 7d "$wp" "$(( wr - now ))"; then
+        _quota_admit_wait 7d "$wp" "$(( wr - now ))"
+        secs=$(( QWAIT_SECS + QUOTA_SLEEP_MARGIN )); why="$QWAIT_WHY"
       elif (( r > now )); then
-        secs=$(( r - now + QUOTA_SLEEP_MARGIN ))
+        if _quota_defers 5h "$p" "$(( r - now ))"; then
+          _quota_admit_wait 5h "$p" "$(( r - now ))"
+          secs=$(( QWAIT_SECS + QUOTA_SLEEP_MARGIN )); why="$QWAIT_WHY"
+        else
+          # The meter shows room, so the gate is not what sent us here: a usage-limit
+          # TEXT signal is, one the meter did not contradict or was not believed on. That
+          # is a wall the reading cannot see, and the published 5h reset is the only
+          # deadline it comes with, exactly as before the ramp.
+          secs=$(( r - now + QUOTA_SLEEP_MARGIN )); why="reset"
+        fi
       fi
     fi
   fi
-  [[ -n "$secs" ]] || secs="$QUOTA_BACKOFF"
+  [[ -n "$secs" ]] || { secs="$QUOTA_BACKOFF"; why="fallback"; }
   (( secs < QUOTA_SLEEP_MIN )) && secs="$QUOTA_SLEEP_MIN"
-  (( secs > QUOTA_SLEEP_MAX )) && secs="$QUOTA_SLEEP_MAX"
-  printf '%d\n' "$secs"
+  # Cut short, the sleep no longer ends where its reason says it does, so the reason
+  # changes with it: a line promising "to the published reset" over a six-hour sleep
+  # toward a reset four days off is a claim the log should not make.
+  (( secs > QUOTA_SLEEP_MAX )) && { secs="$QUOTA_SLEEP_MAX"; why="clamp"; }
+  printf '%d %s\n' "$secs" "$why"
+}
+
+# quota_sleep_secs: how long to wait for the window, from the PUBLISHED reset
+# rather than a fixed guess, and no longer than a ramped cap needs to admit again
+# (_quota_sleep_plan). Always a bare integer: it is fed straight to sleep.
+quota_sleep_secs() {
+  local plan
+  plan=$(_quota_sleep_plan)
+  printf '%d\n' "${plan%% *}"
 }
 
 # _quota_meter_admits: exit 0 iff the reading AS IT STANDS shows room in every window
@@ -1777,27 +2060,45 @@ quota_signal_backoff_sleep() {
 # This is the difference between installed and adopted: say out loud when the gate
 # cannot see anything, and which of the three states it is actually in — never
 # consumes a bootstrap admit itself, this only READS the counter (_quota_bootstrap_count).
+#
+# Every state also says which CAP the gate is judging against and in which mode
+# (#2514): the cap in force when there is a reading to work it out from, and each
+# window's mode when there is not. A fixed cap lives only in the environment of the
+# process started with it, so this line is the one place a reader can tell a loop
+# that was started capped from one that was not (#2573).
 quota_health() {
-  local vals p r o wp wr now
+  local vals p r o wp wr now why caps
+  if why=$(_quota_cap_config_problem); then
+    echo "inert: the cap cannot be worked out (${why}), so admission control is HOLDING (failing closed) on every reading until that knob is fixed or unset."
+    return 0
+  fi
   now=$(date +%s)
+  caps="Caps once a reading exists: 5h $(_quota_cap_config_text 5h); 7d $(_quota_cap_config_text 7d)."
   if ! vals=$(_quota_read); then
     local bc; bc=$(_quota_bootstrap_count)
     if (( bc < QUOTA_BOOTSTRAP_ADMITS )); then
-      echo "inert: no reading at $QUOTA_FILE — admission control is BLIND but NOT YET FAILING CLOSED: bootstrap allowance ${bc}/${QUOTA_BOOTSTRAP_ADMITS} recorded, and the gate still attempts a bounded blind admit until it is exhausted, a real reading appears, or $QUOTA_BOOTSTRAP_FILE turns out to be unwritable (an attempt that can't be recorded is refused rather than granted uncounted — this reports the counter, not writability). Install a quota producer before it runs out."
+      echo "inert: no reading at $QUOTA_FILE — admission control is BLIND but NOT YET FAILING CLOSED: bootstrap allowance ${bc}/${QUOTA_BOOTSTRAP_ADMITS} recorded, and the gate still attempts a bounded blind admit until it is exhausted, a real reading appears, or $QUOTA_BOOTSTRAP_FILE turns out to be unwritable (an attempt that can't be recorded is refused rather than granted uncounted — this reports the counter, not writability). Install a quota producer before it runs out. ${caps}"
     else
-      echo "inert: no reading at $QUOTA_FILE, and the ${QUOTA_BOOTSTRAP_ADMITS}-admit bootstrap allowance is exhausted — admission control is BLIND and HOLDING (failing closed). Install a quota producer: run a session whose statusline renders on this machine, or pipe a wall message into '--quota-publish-wall'."
+      echo "inert: no reading at $QUOTA_FILE, and the ${QUOTA_BOOTSTRAP_ADMITS}-admit bootstrap allowance is exhausted — admission control is BLIND and HOLDING (failing closed). Install a quota producer: run a session whose statusline renders on this machine, or pipe a wall message into '--quota-publish-wall'. ${caps}"
     fi
     return 0
   fi
   read -r p r o wp wr <<<"$vals"
   if (( now - o > QUOTA_STALE_SEC )); then
-    echo "inert: reading is $(( (now - o) / 60 )) min old (limit $(( QUOTA_STALE_SEC / 60 )) min) — admission control is BLIND and HOLDING (failing closed) at $QUOTA_FILE."
+    echo "inert: reading is $(( (now - o) / 60 )) min old (limit $(( QUOTA_STALE_SEC / 60 )) min) — admission control is BLIND and HOLDING (failing closed) at $QUOTA_FILE. ${caps}"
     return 0
   fi
-  if (( wp >= 0 )); then
-    echo "live: 5h window ${p}% used, resets in $(( (r - now) / 60 )) min; 7d window ${wp}% used."
+  # A 5h window whose reset has passed is admitted as reset whatever it says it used,
+  # so no cap applies to it; saying "floor" there would describe a check that is not made.
+  if (( r > now )); then
+    caps="Cap in force: 5h $(_quota_cap_text 5h "$(( r - now ))")"
   else
-    echo "live: 5h window ${p}% used, resets in $(( (r - now) / 60 )) min (no weekly reading)."
+    caps="Cap in force: 5h none, that window has reset"
+  fi
+  if (( wp >= 0 )); then
+    echo "live: 5h window ${p}% used, resets in $(( (r - now) / 60 )) min; 7d window ${wp}% used. ${caps}; 7d $(_quota_cap_text 7d "$(( wr > now ? wr - now : 0 ))")."
+  else
+    echo "live: 5h window ${p}% used, resets in $(( (r - now) / 60 )) min (no weekly reading). ${caps}."
   fi
 }
 
@@ -1863,10 +2164,27 @@ quota_publish_wall() {
 
 # quota_backoff_sleep: the rc=42 rest. Sleeps to the deadline; wait_interval still
 # bails the moment the session dies, so a multi-hour wait stays interruptible.
+#
+# The line says what set the length, because they are different promises: the published
+# reset; the moment a ramped cap would next admit (#2514, sooner than the reset, and the
+# reason a ramp is ever seen); the fixed backoff, when the reading offers no deadline at
+# all; or the longest single sleep, when the hold outlasts it. The last two used to
+# claim "the published reset rather than a guess" as well, one while being the guess
+# and the other while stopping days short of the reset.
 quota_backoff_sleep() {
-  local secs
-  secs=$(quota_sleep_secs)
-  echo "[drain] quota window exhausted — sleeping ${secs}s, to the published reset rather than a guess."
+  local plan secs why
+  plan=$(_quota_sleep_plan)
+  read -r secs why <<<"$plan"
+  case "$why" in
+    ramp)
+      echo "[drain] quota cap holding - sleeping ${secs}s, until the ramped cap would next admit at this usage, not on to the reset." ;;
+    fallback)
+      echo "[drain] quota window exhausted — sleeping ${secs}s, the fixed backoff: no deadline could be taken from the reading (it is missing, stale, or carries no usable reset time)." ;;
+    clamp)
+      echo "[drain] quota window exhausted — sleeping ${secs}s, the longest single sleep (MINSPEC_QUOTA_SLEEP_MAX): the hold outlasts it, and the gate is asked again on waking." ;;
+    *)
+      echo "[drain] quota window exhausted — sleeping ${secs}s, to the published reset rather than a guess." ;;
+  esac
   wait_interval "$secs"
 }
 
