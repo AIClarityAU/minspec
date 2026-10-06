@@ -2,12 +2,12 @@
   "name": "@aiclarity/shared",
   "version": "0.0.1",
   "private": true,
-  "description": "Shared classification engine and contracts for MinSpec and ScroogeLLM",
+  "description": "Tier-0 code shared by the MinSpec extension and this repository's scripts: canonical spec hashing, next-task resolution, review signals and project prefixes",
   "license": "MIT",
   "main": "out/index.js",
   "types": "out/index.d.ts",
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "test": "vitest run"
+    "test": "cd ../.. && vitest run packages/shared/tests"
   }
 }

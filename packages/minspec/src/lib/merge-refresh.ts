@@ -29,6 +29,8 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as crypto from 'crypto';
+import { ensureDirectory } from './opt-in';
+import { prepareText, restoreLineEndings } from './text-io';
 
 /** Section hash map: heading → SHA-256 hash of section body */
 export interface SectionHashes {
@@ -214,11 +216,15 @@ export const PREAMBLE_HEADING = '__preamble__';
  * Parse markdown content into sections delimited by `## ` headings.
  * The content before the first heading is stored under the key "__preamble__"
  * ({@link PREAMBLE_HEADING}).
+ *
+ * The content is prepared first (SPEC-095 FR-2), so section bodies are always LF. On a
+ * CRLF file `^## (.+)$` used to match no heading at all, and the whole file read as one
+ * preamble: the measured 13 sections of a generated `CLAUDE.md` came back as 1.
  */
 export function parseSections(content: string): Section[] {
   const sections: Section[] = [];
   if (typeof content !== 'string') return sections;
-  const lines = content.split('\n');
+  const lines = prepareText(content).split('\n');
   let currentHeading: string = PREAMBLE_HEADING;
   let currentBody: string[] = [];
 
@@ -245,11 +251,71 @@ export function parseSections(content: string): Section[] {
 }
 
 /**
+ * Headings from `templateHeadings` that occur MORE THAN ONCE in
+ * `existingContent` (#2467).
+ *
+ * This is the backstop for damage already on disk — SPEC-095 stops new CRLF
+ * damage from `mergeFile`/`refreshHarnessFiles`, but a file a past, buggy run
+ * already doubled stays doubled: the merge keeps a surplus duplicate-named
+ * section as user content BY DESIGN (#153, "no user content is ever dropped"),
+ * so a later Refresh never reconciles it. Measured (#2467): a CRLF copy of
+ * CLAUDE.md went 418→835 lines (12→24 headings); `.minspec/constitution.md`
+ * went 4→8.
+ *
+ * Deliberately scoped to headings the TEMPLATE itself carries, not any
+ * duplicate heading in the file — `parseSections` already tolerates (and
+ * `mergeFile` preserves) a user file with its OWN duplicate-named section in
+ * document order; that is ordinary user content, not damage, and flagging it
+ * would be a false positive on a legitimate file. Only a heading the template
+ * owns appearing twice is the shape nothing downstream repairs.
+ *
+ * Counts raw heading LINES over the text, splitting on any line ending
+ * (LF/CRLF/CR) itself, rather than reusing {@link parseSections}. When this was
+ * written `parseSections` split on `\n` only, and a heading line still ending
+ * `\r` (`## Overview\r`) failed `^## (.+)$` and read as body text: that is how
+ * `mergeFile`, meeting a CRLF `existing` file, collapsed the whole file into one
+ * `__preamble__` section and appended every template section again, leaving the
+ * old headings as plain text inside that preamble. SPEC-095 now prepares the
+ * text in `parseSections`, so the parser sees those headings; this detector
+ * keeps its own split so that it does not depend on the parser whose past
+ * output it exists to find. Routing that split through `text-io` is SPEC-095's
+ * second slice (its design, finding 2).
+ *
+ * Pure — no fs. `templateHeadings` is the heading list the LIVE template
+ * renders for this file (via {@link parseSections} over `renderTemplate`'s
+ * output, filtered to exclude {@link PREAMBLE_HEADING} — the template's own
+ * headings are always clean LF, so no CRLF handling is needed on that side).
+ */
+export function detectDoubledTemplateHeadings(
+  existingContent: string,
+  templateHeadings: readonly string[],
+): string[] {
+  const templateSet = new Set(templateHeadings);
+  const counts = new Map<string, number>();
+  for (const line of existingContent.split(/\r\n|\r|\n/)) {
+    const m = line.match(/^## (.+)$/);
+    if (!m) continue;
+    const heading = m[1];
+    if (!templateSet.has(heading)) continue;
+    counts.set(heading, (counts.get(heading) ?? 0) + 1);
+  }
+  const doubled: string[] = [];
+  for (const [heading, count] of counts) {
+    if (count > 1) doubled.push(heading);
+  }
+  return doubled;
+}
+
+/**
  * SHA-256 hash of section content (trimmed to ignore trailing whitespace).
  * Deterministic — same content always produces the same hash.
+ *
+ * The hash of the body's LF form, for any body (SPEC-095 FR-7), so a manifest recorded on
+ * one copy of a project is honoured on a copy with other line endings. For an LF body this
+ * is the value it always was, so every manifest entry recorded from LF bytes stays valid.
  */
 export function hashSection(content: string): string {
-  return crypto.createHash('sha256').update(content.trim()).digest('hex');
+  return crypto.createHash('sha256').update(prepareText(content).trim()).digest('hex');
 }
 
 /**
@@ -622,7 +688,12 @@ export function generatedAddsContent(existingBody: string, generatedBody: string
  * hold then rests on positive evidence from the second refresh onward, which is
  * also why the fail-closed report correctly stops firing after the first.
  *
- * @param existing   - Current file content on disk
+ * LINE ENDINGS (SPEC-095 FR-2/FR-3). The merge works on the LF form of `existing`, and
+ * `merged` is given back the line endings `existing` had: a line it kept keeps its own,
+ * and a line it wrote takes the file's. A CRLF file used to parse as one preamble section,
+ * so every template section was appended a second time on every Refresh (#2397).
+ *
+ * @param existing   - Current file content on disk, in whatever line endings it has
  * @param generated  - Freshly rendered template content
  * @param oldHashes  - Section hashes from the last generation, and EVIDENCE: every
  *                     branch below reads a match as proof MinSpec wrote those bytes.
@@ -1061,8 +1132,11 @@ export function mergeFile(
     }
   }
 
+  const mergedText = sectionsToMarkdown(mergedSections);
   return {
-    merged: sectionsToMarkdown(mergedSections),
+    // `parseSections` prepared `existing`, so every kept body is LF here; restoring gives
+    // the file back its own endings (SPEC-095). An LF `existing` comes back unchanged.
+    merged: typeof existing === 'string' ? restoreLineEndings(mergedText, existing) : mergedText,
     preservedWithoutBaseline,
     withheldTemplateHashes,
     // Filtered last: any heading some occurrence really did record has a true hash
@@ -1344,10 +1418,14 @@ export function loadProvenHashes(rootDir: string): ManifestBaseline {
  * one sentence in a notice, never a spent entry. Written FIRST, and any stamp key in
  * `hashes` dropped, so the serialized bytes stay deterministic for identical input
  * (SPEC-043 INV-4).
+ *
+ * Never creates `.minspec/` (SPEC-096 FR-5). Its callers run after Initialize has
+ * created the opt-in marker, so this has never needed to; in a folder with no
+ * marker it throws `NotOptedInError` and writes nothing.
  */
 export function saveHashes(rootDir: string, hashes: GeneratedHashes): void {
   const hashesPath = path.join(rootDir, '.minspec', HASHES_FILENAME);
-  fs.mkdirSync(path.dirname(hashesPath), { recursive: true });
+  ensureDirectory(path.dirname(hashesPath));
   const stamped: Record<string, unknown> = {
     [MANIFEST_STAMP_KEY]: { hashVersion: MANIFEST_HASH_VERSION },
   };
@@ -1392,10 +1470,13 @@ export function loadTemplateBaseline(rootDir: string): GeneratedHashes {
  * Persist the raw-template baseline to `.minspec/template-baseline.json`.
  * Written at every generate/refresh so drift detection always has a current
  * like-for-like reference. See {@link loadTemplateBaseline}.
+ *
+ * Never creates `.minspec/` (SPEC-096 FR-5): in a folder with no opt-in marker it
+ * throws `NotOptedInError` and writes nothing.
  */
 export function saveTemplateBaseline(rootDir: string, baseline: GeneratedHashes): void {
   const baselinePath = path.join(rootDir, '.minspec', TEMPLATE_BASELINE_FILENAME);
-  fs.mkdirSync(path.dirname(baselinePath), { recursive: true });
+  ensureDirectory(path.dirname(baselinePath));
   fs.writeFileSync(baselinePath, JSON.stringify(baseline, null, 2) + '\n');
 }
 

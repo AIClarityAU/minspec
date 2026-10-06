@@ -88,11 +88,16 @@
 # to init keeps it running — so it is NOT killed for free. What makes it die with
 # the session is an EXPLICIT liveness poll, not process-tree luck:
 #   1. Before forking, the FOREGROUND resolves SESSION_PID — the Claude Code
-#      session process (comm=claude), which is an ancestor of this hook and lives
-#      exactly as long as the session (normal close, crash, or kill all end it).
-#      Resolution walks up from $PPID; it must happen in the foreground while that
-#      ancestry is still intact (after the fork+disown the loop is reparented and
-#      $PPID no longer points at the session).
+#      session process, which is an ancestor of this hook and lives exactly as
+#      long as the session (normal close, crash, or kill all end it). Matched by
+#      comm=claude OR by the versioned per-release binary every current install
+#      runs as (comm is just the version number there, e.g. "2.1.283" — matched
+#      via its args/exe path instead; #2215). Resolution walks up from $PPID; it
+#      must happen in the foreground while that ancestry is still intact (after
+#      the fork+disown the loop is reparented and $PPID no longer points at the
+#      session). When the walk finds no Claude ancestor it falls back to $PPID
+#      and the banner says so, instead of printing a bare pid that looks just as
+#      plausible as a real match.
 #   2. The disowned loop polls `kill -0 $SESSION_PID` every MINSPEC_DRAIN_POLL
 #      seconds (both between cycles and before each cycle). When the session
 #      process is gone the poll fails and the loop exits within one poll interval.
@@ -541,27 +546,68 @@ sync_shared_checkouts() {
   return 0
 }
 
-# resolve_session_pid: print the PID of the Claude Code session that (transitively)
-# launched us, so the loop can watch it. MUST be called in the FOREGROUND, before
-# any fork/disown, while $PPID still chains up to the session. Prefers an explicit
-# MINSPEC_SESSION_PID; else walks up the process tree to the nearest `claude`
-# ancestor; else falls back to $PPID (a manual run's own shell — so a hand-started
-# continuous drain still dies with the terminal that launched it).
-resolve_session_pid() {
+# resolve_session_anchor: sets globals SESSION_ANCHOR_PID (the resolved pid) and
+# SESSION_ANCHOR_FALLBACK (1 when the walk found no Claude ancestor and fell back
+# to $PPID, 0 when it genuinely matched a Claude process or an explicit
+# MINSPEC_SESSION_PID override). MUST be called in the FOREGROUND, before any
+# fork/disown, while $PPID still chains up to the session.
+#
+# The walk matches THREE independent signals, any one of which is sufficient
+# (#2215 — none of comm/args alone is reliable on every install shape):
+#   • comm contains "claude" (older/system installs, e.g. a `claude` wrapper)
+#   • args contain the old marker strings (`claude-code` / `anthropic.claude`)
+#   • args OR /proc/<pid>/exe contain "/claude/versions/" — the versioned
+#     per-release binary every current Claude Code install runs as (its `comm`
+#     is just the version number, e.g. "2.1.283", and `args` may truncate or
+#     omit the full path depending on how the launcher set argv[0], so the
+#     literal binary at /proc/<pid>/exe is the one signal argv spoofing/
+#     truncation cannot hide).
+resolve_session_anchor() {
+  SESSION_ANCHOR_PID="$PPID"
+  SESSION_ANCHOR_FALLBACK=1
   if [[ -n "${MINSPEC_SESSION_PID:-}" ]] && kill -0 "${MINSPEC_SESSION_PID}" 2>/dev/null; then
-    printf '%s' "$MINSPEC_SESSION_PID"; return 0
+    SESSION_ANCHOR_PID="$MINSPEC_SESSION_PID"
+    SESSION_ANCHOR_FALLBACK=0
+    return 0
   fi
-  local pid="$PPID" guard=0 comm args
+  local pid="$PPID" guard=0 comm args exe
   while [[ -n "$pid" && "$pid" != "0" && "$pid" != "1" && "$guard" -lt 20 ]]; do
     comm="$(ps -o comm= -p "$pid" 2>/dev/null | tr -d ' \t' || true)"  # swallow-ok: ps exits non-zero precisely when the pid is gone, which is the same conclusion the test below draws
     args="$(ps -o args= -p "$pid" 2>/dev/null || true)"  # swallow-ok: ps exits non-zero precisely when the pid is gone, which is the same conclusion the test below draws
-    if [[ "$comm" == *claude* || "$args" == *claude-code* || "$args" == *anthropic.claude* ]]; then
-      printf '%s' "$pid"; return 0
+    exe=""
+    [[ -r "/proc/$pid/exe" ]] && exe="$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)"  # swallow-ok: unreadable/raced exe just leaves exe empty, falling through to the other two signals
+    if [[ "$comm" == *claude* || "$args" == *claude-code* || "$args" == *anthropic.claude* \
+          || "$args" == *"/claude/versions/"* || "$exe" == *"/claude/versions/"* ]]; then
+      SESSION_ANCHOR_PID="$pid"
+      SESSION_ANCHOR_FALLBACK=0
+      return 0
     fi
     pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' \t' || true)"
     guard=$((guard + 1))
   done
-  printf '%s' "$PPID"
+  SESSION_ANCHOR_PID="$PPID"
+  SESSION_ANCHOR_FALLBACK=1
+  return 0
+}
+
+# resolve_session_pid: back-compat/CLI wrapper — prints just the resolved pid
+# (the `--resolve-session-pid` seam and any scripted consumer expect a bare
+# numeric pid on stdout, not the fallback flag). Callers that need to know
+# WHETHER it fell back (to annotate a banner, #2215) call resolve_session_anchor
+# directly and read SESSION_ANCHOR_FALLBACK — command substitution runs in a
+# subshell, so a flag set only as a side effect here would not survive `$(...)`.
+resolve_session_pid() {
+  resolve_session_anchor
+  printf '%s' "$SESSION_ANCHOR_PID"
+  return 0
+}
+
+# session_anchor_note: human-readable suffix for a banner line that names
+# SESSION_PID, appended only when resolve_session_anchor fell back to $PPID
+# without finding a Claude ancestor — so a bare pid in the log is never
+# mistaken for a confirmed Claude Code session (#2215).
+session_anchor_note() {
+  [[ "${SESSION_PID_FALLBACK:-0}" == "1" ]] && printf ' (anchored to the calling shell, not a Claude session)'
   return 0
 }
 
@@ -670,6 +716,10 @@ ensure_fresh_run_dir() {
 #   0  — cycle completed (work done or nothing ready).
 #   42 — a Claude quota/limit signal was seen mid-dispatch → loop should back off.
 #   1  — a transient error → loop counts it toward MAX_CONSEC_FAIL, keeps going.
+#        Also returned when EVERY dispatch attempted this cycle failed (#2140) —
+#        deliberately the same code as any other transient error, so a persistent
+#        credential/config fault still trips MAX_CONSEC_FAIL and stops the loop
+#        loudly instead of grinding through the whole ready queue on a dead token.
 # (There is no longer a terminal "stale" code: #773 self-heals the run dir each
 #  cycle instead of stopping the loop when the checkout falls behind main.)
 # ── Step 0 reconcilers (#1306, #1322) ────────────────────────────────────────
@@ -692,11 +742,31 @@ RECONCILE_CLAIM_STALE_SECS="${MINSPEC_RECONCILE_STALE_SECS:-21600}"   # 6 h
 
 # Epoch seconds when `agent-running` was most recently applied to <issue>, or empty.
 # The timeline is the only honest source: `updatedAt` moves on any activity at all.
+#
+# #2002 (found while fixing PR #1772's review on the sibling `reopened_after_close`):
+# `gh api --paginate --jq F` applies F to EACH PAGE separately and prints one result
+# per page (measured against api.github.com: a 19-event timeline at `per_page=2`
+# printed 10 lines, not 1). The old shape's `| tail -1` guard took the LAST PAGE's
+# output, not the last MATCH — so whenever the `agent-running` label event fell on an
+# earlier page (any issue with 30+ timeline events since being claimed), the last page
+# contributed `empty`, `iso` came back blank, and this function returned 1. The caller
+# (`reconcile_stale_claims`) reads that as "claim time is unreadable — leaving it
+# alone", so the #1306 orphan-claim reaper went silently inert on exactly the
+# long-lived issues most likely to be carrying a stale claim.
+#
+# Same fix shape as the reopen veto: fetch raw with `--paginate` (no `--jq`, so gh
+# prints each page's array one after another instead of a filtered result per page),
+# flatten with `jq -s 'add // []'`, and reduce exactly once over the whole history.
+# `--slurp` is not a way out here either: `gh` rejects `--slurp` together with `--jq`.
 claim_applied_at() {
-  local iso
-  iso=$(gh api "repos/${REPO}/issues/$1/timeline" --paginate \
-    --jq '[.[] | select(.event=="labeled" and .label.name=="agent-running") | .created_at] | last // empty' \
-    2>/dev/null | tail -1) || return 1
+  local raw iso
+  raw=$(gh api "repos/${REPO}/issues/$1/timeline" --paginate 2>/dev/null) || return 1
+  [[ -n "$raw" ]] || return 1
+  iso=$(printf '%s' "$raw" | jq -r -s '
+      (add // []) as $events
+      | if ($events | type) != "array" then ""
+        else ([$events[] | select(.event=="labeled" and .label.name=="agent-running") | .created_at] | last // "")
+        end' 2>/dev/null) || return 1
   [[ -n "$iso" ]] || return 1
   date -u -d "$iso" +%s 2>/dev/null || return 1
 }
@@ -759,9 +829,12 @@ reconcile_stale_claims() {
 #     it vetoes can straddle a page boundary, and neither page sees both halves — the
 #     close page says "no", the reopen page says "yes", and the caller compares a
 #     TWO-LINE string against "yes" and silently re-closes an issue a human reopened.
-#     The sibling `claim_applied_at` can guard its per-page reduction with `| tail -1`
-#     because the last page holding a match carries the answer; here no single page
-#     does, so no such guard exists.
+#     The sibling `claim_applied_at` used to guard its per-page reduction with a
+#     `| tail -1` on the theory that the last page holding a match carries the answer
+#     — but the *last page of the timeline* is not the same thing as *the page holding
+#     the last match*, and on any issue where the `agent-running` label event wasn't on
+#     the final page, that guard threw the real answer away (#2002). It now uses this
+#     same raw-fetch-and-flatten shape instead of a page-position guard.
 #   * `--slurp` is not a way out: `gh` rejects `--slurp` together with `--jq`.
 #
 # So: raw `--paginate`, then `jq -s 'add // []'` to flatten the per-page arrays into
@@ -905,19 +978,28 @@ reconcile_labels() {
 # gh's stderr is deliberately NOT redirected — the message that would have named the
 # cause ("please run: gh auth login") was being discarded.
 #
-# The limit is EXPLICIT and announced. `gh issue list` caps at 30 by default and
-# says nothing, so the queue this loop has always enumerated was the first 30 per
-# label — a silent cap that reads as the whole queue. Pinning it here changes no
-# behaviour (30 is what it already was) while making the number a decision someone
-# made rather than a default nobody saw, and the caller warns when a result lands
-# exactly on the cap. Raising it is tracked separately: it is a dispatch-VOLUME
-# decision, not a correctness one, and does not belong in the same change as a
-# fail-loud fix.
-_ready_limit="${MINSPEC_DRAIN_QUEUE_LIMIT:-30}"
+# The FETCH is deliberately uncapped in practice (#2197). It used to carry the same
+# cap that gated dispatch volume, which meant the #2196 ranker only ever saw the
+# newest `_dispatch_cap` issues per label — `gh issue list` returns newest first, so
+# an older, higher-value issue could never even become a candidate, however it would
+# have ranked. The read and the dispatch-volume decision are two different questions;
+# capping at read time answered both with one number and got the first one wrong.
+#
+# `_ready_fetch_limit` is still EXPLICIT and announced, for the reason the old cap
+# was too: `gh issue list` defaults to 30 and says nothing, so an uncapped-looking
+# call still needs a real number, or it silently becomes the same bug one zero later.
+# The caller warns when a result lands exactly on this fetch limit.
+_ready_fetch_limit="${MINSPEC_DRAIN_QUEUE_FETCH_LIMIT:-1000}"
 _ready_numbers() {
-  gh issue list --repo "$REPO" --label "$1" --limit "$_ready_limit" \
+  gh issue list --repo "$REPO" --label "$1" --limit "$_ready_fetch_limit" \
     --json number --jq '.[].number'
 }
+
+# _dispatch_cap — how many issues this CYCLE dispatches, applied AFTER ranking
+# (#2197) rather than at the read above. Same env var and default as the old
+# read-time cap (MINSPEC_DRAIN_QUEUE_LIMIT, 30): the knob a human already knows
+# didn't need a new name, only a new point of application.
+_dispatch_cap="${MINSPEC_DRAIN_QUEUE_LIMIT:-30}"
 
 # _read_queue <varname> <label> — read one label's queue INTO a named variable, and
 # recover from a DEAD CREDENTIAL once before giving up.
@@ -958,9 +1040,10 @@ _read_queue() {
 
 run_cycle() {
   local inbox_issues all_ready n out drc cap
-  local inbox_rc ready_rc ready_full ready_spec _lbl
+  local inbox_rc ready_rc ready_full ready_spec _lbl ready_total
   local ac_halt ac_sig
   local quota_verdict
+  local triage_out triage_rc just_labeled_ready
 
   # Admission control: never START a cycle the quota window cannot finish. This
   # runs before ensure_fresh_run_dir so a deferred cycle costs nothing at all —
@@ -1016,11 +1099,26 @@ run_cycle() {
     echo "[drain]          That is NOT an empty inbox. See the gh error above for the cause." >&2
     inbox_issues=""
   fi
+  # #1855 item 4 — a sanity floor: if triage stamps an issue agent-ready /
+  # agent-ready-specify and the ready-set query two steps down comes back empty,
+  # those two disagree with each other IN THE SAME CYCLE, which is a stronger
+  # signal than either read alone (a stale credential could still make both wrong
+  # together, but a read-after-write lag on just the second query cannot). Detected
+  # from triage's own success line ("  → #<n>: agent-ready[-specify] ..."), not by
+  # re-querying — a second query is exactly the kind of read this bug is about.
+  just_labeled_ready=0
   if [[ -n "$inbox_issues" ]]; then
     echo "[drain] triaging $(echo "$inbox_issues" | wc -l | tr -d ' ') inbox issue(s)..."
     for n in $inbox_issues; do
       echo "[drain] triaging #$n..."
-      "$TRIAGE" "$n" || echo "[drain] WARNING: triage failed for #$n"
+      triage_rc=0
+      triage_out="$("$TRIAGE" "$n" 2>&1)" || triage_rc=$?
+      printf '%s\n' "$triage_out"
+      if (( triage_rc != 0 )); then
+        echo "[drain] WARNING: triage failed for #$n"
+      elif [[ "$triage_out" == *"→ #${n}: agent-ready"* ]]; then
+        just_labeled_ready=1
+      fi
     done
   fi
 
@@ -1048,17 +1146,27 @@ run_cycle() {
     echo "[drain]          Nothing was dispatched this cycle. See the gh error above." >&2
     return 1
   fi
-  # No silent caps: a label that came back exactly at the limit is almost certainly
-  # truncated, and the difference between "30 ready" and "30 of 119 ready" changes
-  # what a reader does about it.
+  # No silent caps on the READ: a label that came back exactly at the FETCH limit is
+  # almost certainly truncated, and the difference between "1000 ready" and "1000 of
+  # 4000 ready" changes what a reader does about it. This is the read-time sibling of
+  # the dispatch-time cap NOTE below (#2197) — different limit, different number,
+  # same reason: a cap that says nothing looks exactly like the whole queue.
   for _lbl in "agent-ready:$ready_full" "agent-ready-specify:$ready_spec"; do
-    if [[ "$(printf '%s' "${_lbl#*:}" | grep -c . || true)" == "$_ready_limit" ]]; then  # swallow-ok: grep -c exits 1 on zero matches, which cannot equal a positive limit — the comparison below is the decision, not this status
-      echo "[drain] NOTE: '${_lbl%%:*}' returned exactly ${_ready_limit} issue(s) — the query cap." >&2
-      echo "[drain]       The real queue is probably longer. Raise MINSPEC_DRAIN_QUEUE_LIMIT to see it." >&2
+    if [[ "$(printf '%s' "${_lbl#*:}" | grep -c . || true)" == "$_ready_fetch_limit" ]]; then  # swallow-ok: grep -c exits 1 on zero matches, which cannot equal a positive limit — the comparison below is the decision, not this status
+      echo "[drain] NOTE: '${_lbl%%:*}' returned exactly ${_ready_fetch_limit} issue(s) — the fetch cap." >&2
+      echo "[drain]       The real queue is probably longer. Raise MINSPEC_DRAIN_QUEUE_FETCH_LIMIT to see it." >&2
     fi
   done
   all_ready="$(printf '%s\n%s\n' "$ready_full" "$ready_spec" | sed '/^$/d' | sort -un)"
   if [[ -z "$all_ready" ]]; then
+    # The contradiction is reported ALONGSIDE "cycle done", not instead of it: the
+    # query itself succeeded (ready_rc==0, checked above), so this is not the #1855
+    # failed-query case and must not return non-zero for it — that would turn a
+    # possible read-after-write lag into a false backoff. It is still loud, on its
+    # own distinguishable line, independent of the exit status this cycle ends with.
+    if (( just_labeled_ready )); then
+      echo "[drain] CONTRADICTION: triage just labelled at least one issue agent-ready / agent-ready-specify this cycle, but the ready-set query below came back empty (#1855 sanity floor) — treat the 'cycle done' line with suspicion." >&2
+    fi
     echo "[drain] no agent-ready / agent-ready-specify issues after triage — cycle done."
     return 0
   fi
@@ -1098,6 +1206,23 @@ run_cycle() {
   else
     all_ready="$rank_out"
     echo "[drain] dispatch order ranked by value (#2196): $(printf '%s' "$all_ready" | tr '\n' ' ')"
+  fi
+
+  # Apply the dispatch cap HERE — after ranking, not at the read above (#2197). The
+  # full ready set was fetched and fully ranked (or, on a ranker failure, fully
+  # ordered numerically); only the BATCH this cycle actually dispatches is trimmed to
+  # size. Nothing is dropped: the untrimmed issues stay labelled agent-ready and are
+  # read, ranked, and reconsidered again next cycle — deferred by value, not silently
+  # lost. `head` on an already-ordered list keeps the first N, which is the top N by
+  # rank (or the lowest-numbered N on a numeric-order fallback).
+  #
+  # This NOTE is the dispatch-time sibling of the fetch-time one above (#2197): same
+  # shape, moved to the point where a cap now actually decides anything.
+  ready_total="$(printf '%s\n' "$all_ready" | grep -c . || true)"  # swallow-ok: all_ready is already known non-empty above, so grep -c cannot be the empty-input 1
+  if (( ready_total > _dispatch_cap )); then
+    echo "[drain] NOTE: ${ready_total} issue(s) ready — dispatching the top ${_dispatch_cap} this cycle." >&2
+    echo "[drain]       The rest stay queued and are re-ranked next cycle. Raise MINSPEC_DRAIN_QUEUE_LIMIT to dispatch more per cycle." >&2
+    all_ready="$(printf '%s\n' "$all_ready" | head -n "$_dispatch_cap")"
   fi
 
   # Freshness is guaranteed by ensure_fresh_run_dir at the top of this cycle (#773):
@@ -1161,6 +1286,18 @@ run_cycle() {
   }
 
   local saw_quota=0 verdict=""
+  # Dispatch attempts/failures, rolled up across BOTH the serial and parallel paths
+  # below (#2140, constitution invariant 2: no silent gate). `classify_dispatch`
+  # already warns on EACH failed dispatch, but nothing aggregated those warnings —
+  # so a cycle in which every single dispatch 401'd still fell through to the
+  # cheerful "cycle done." at the bottom of this function, indistinguishable in the
+  # log from a cycle that actually worked. Measured 2026-09-25: five dispatches,
+  # five `HTTP 401: Bad credentials`, then "cycle done." — the token minted at
+  # `gh_bot_init` had expired mid-loop and nothing re-minted for THIS process (see
+  # #2066 above for the read-refresh fix; this is the separate, more important
+  # half — making an all-failed cycle say so, regardless of WHY every dispatch
+  # failed).
+  local dispatch_attempts=0 dispatch_failures=0
 
   if (( DISPATCH_CONCURRENCY <= 1 )); then
     # ── Serial path — the historical behaviour, unchanged. Output still streams
@@ -1180,6 +1317,8 @@ run_cycle() {
       out=$(cat "$cap" 2>/dev/null || true); rm -f "$cap"
       verdict="$(classify_dispatch "$n" "$drc" "$out")"
       ac_outcomes="${ac_outcomes:+$ac_outcomes,}${verdict:0:1}"
+      dispatch_attempts=$(( dispatch_attempts + 1 ))
+      [[ "$drc" -ne 0 ]] && dispatch_failures=$(( dispatch_failures + 1 ))
       [[ "${verdict:1:1}" == "1" ]] && saw_quota=1
       if (( saw_quota )); then
         echo "[drain] Claude usage-limit signal while dispatching #$n — pausing this cycle (will back off, not fail)."
@@ -1237,6 +1376,8 @@ run_cycle() {
 
       verdict="$(classify_dispatch "$n" "$rc" "$out")"
       ac_outcomes="${ac_outcomes:+$ac_outcomes,}${verdict:0:1}"
+      dispatch_attempts=$(( dispatch_attempts + 1 ))
+      [[ "$rc" -ne 0 ]] && dispatch_failures=$(( dispatch_failures + 1 ))
       if [[ "${verdict:1:1}" == "1" ]]; then
         saw_quota=1
         QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"
@@ -1289,6 +1430,26 @@ run_cycle() {
         fi
       done
     fi
+  fi
+
+  # #2140 — a cycle in which EVERY attempted dispatch failed is not a completed
+  # cycle, and must never read as one. Per-dispatch WARNINGs (classify_dispatch,
+  # above) are easy to miss in a long log; this is the roll-up that makes N-of-N
+  # failures impossible to mistake for a healthy "cycle done." Deliberately scoped
+  # to ALL failing, not SOME: a partial failure already has a WARNING per issue and
+  # the issue stays in the ready queue for the next cycle, which is the existing,
+  # correct degrade-gracefully behaviour (see the issue body's own "blast radius"
+  # note — nothing is lost when only some dispatches fail).
+  #
+  # Returns 1, the existing "transient error" code (see this function's docstring
+  # above) — run_loop already counts consecutive 1s toward MAX_CONSEC_FAIL and
+  # stops the loop with a loud message after enough of them, which is exactly the
+  # right response to "every dispatch is failing": likely a persistent credential
+  # or config fault, not a one-off worth quietly retrying forever.
+  if (( dispatch_attempts > 0 && dispatch_failures == dispatch_attempts )); then
+    echo "[drain] CYCLE FAILED: all ${dispatch_attempts} dispatch(es) attempted this cycle failed (see the WARNING(s) above for each) — this is NOT a healthy cycle (#2140)." >&2
+    echo "[drain]              Likely cause: an expired/invalid credential or a broken dispatch path — not an empty backlog. The failed issue(s) remain in the ready queue for the next cycle." >&2
+    return 1
   fi
 
   echo "[drain] cycle done."
@@ -1712,7 +1873,7 @@ wait_interval() {
 run_loop() {
   local deadline consec=0 rc
   deadline=$(( $(date +%s) + MAX_LIFETIME ))
-  echo "[drain] continuous loop started (session=$SESSION_PID, interval=${INTERVAL}s, quota_backoff=${QUOTA_BACKOFF}s, max_lifetime=${MAX_LIFETIME}s)."
+  echo "[drain] continuous loop started (session=$SESSION_PID$(session_anchor_note), interval=${INTERVAL}s, quota_backoff=${QUOTA_BACKOFF}s, max_lifetime=${MAX_LIFETIME}s)."
   echo "[drain] quota gate — $(quota_health)"
   while :; do
     if ! session_alive "$SESSION_PID"; then
@@ -1980,8 +2141,11 @@ fi
 # the Claude session (after the fork+disown below the loop is reparented and this
 # ancestry is gone). Only needed for the continuous loop.
 SESSION_PID=""
+SESSION_PID_FALLBACK=0
 if $CONTINUOUS; then
-  SESSION_PID="$(resolve_session_pid)"
+  resolve_session_anchor
+  SESSION_PID="$SESSION_ANCHOR_PID"
+  SESSION_PID_FALLBACK="$SESSION_ANCHOR_FALLBACK"
 fi
 
 # Only one drain process at a time. The lock holds the background driver's PID; if
@@ -2019,7 +2183,7 @@ fi
 DRAIN_PID=$!
 disown "$DRAIN_PID"
 if $CONTINUOUS; then
-  echo "🔁  Continuous drain in background (PID $DRAIN_PID, session $SESSION_PID, every $((INTERVAL / 60))m; dies with the session; log: $LOG)"
+  echo "🔁  Continuous drain in background (PID $DRAIN_PID, session $SESSION_PID$(session_anchor_note), every $((INTERVAL / 60))m; dies with the session; log: $LOG)"
 else
   echo "🚀  Triage + drain in background (PID $DRAIN_PID, log: $LOG)"
 fi

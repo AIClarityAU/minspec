@@ -1161,7 +1161,7 @@
         <div class="feature-card">
           <span class="feature-icon" aria-hidden="true">&#x1F512;</span>
           <h3>Offline Core, Opt-in Integrations</h3>
-          <p>The extension binary makes no network calls &mdash; no telemetry, no analytics, no accounts, no backend. Three opt-in commands (Park Topic, Quick Triage, Refresh Backlog) shell out to your local <code>gh</code> CLI under your own GitHub auth, and only when you invoke them. If <code>gh</code> isn&rsquo;t installed they fall back to local files. Your code never leaves your machine.</p>
+          <p>The extension opens no network connection of its own: no telemetry, no analytics, no accounts, no backend. Some features run your own <code>gh</code>, <code>git</code> or <code>claude</code> command-line tools, under your own sign-in. Two read-only checks run at setup without asking; everything else runs only when you ask for it or switch it on. <a href="https://github.com/AIClarityAU/minspec/blob/main/packages/minspec/README.md#what-minspec-does-on-your-network" target="_blank" rel="noopener">The full list is in the README</a>.</p>
         </div>
         <div class="feature-card">
           <span class="feature-icon" aria-hidden="true">&#x1F4C4;</span>

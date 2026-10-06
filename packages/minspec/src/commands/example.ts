@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { loadConfig, applyVSCodeOverrides, resolveAndValidate } from '../lib/config';
 import { resolveTargetFolder } from '../lib/resolve-folder';
+import { ensureDirectory, NotOptedInError } from '../lib/opt-in';
 
 /**
  * Generate an example spec file demonstrating all four tiers.
@@ -34,7 +35,17 @@ export async function generateExampleCommand(): Promise<void> {
     if (overwrite !== 'Overwrite') return;
   }
 
-  fs.mkdirSync(specsDir, { recursive: true });
+  try {
+    ensureDirectory(specsDir);
+  } catch (err) {
+    // SPEC-096 FR-6: this command has no opt-in check of its own (the specs
+    // directory is not under `.minspec/` by default). It reaches the refusal only
+    // when `minspec.specsDir` points inside `.minspec/` in a folder that has not
+    // opted in, and then it shows the same refusal as any other command.
+    if (!(err instanceof NotOptedInError)) throw err;
+    vscode.window.showErrorMessage(err.message);
+    return;
+  }
   // Stamp `created` at CALL time. Building the content here (not as a
   // module-level const) keeps the date current for every invocation instead of
   // freezing it to extension-activation time (AIClarityAU/minspec#153).

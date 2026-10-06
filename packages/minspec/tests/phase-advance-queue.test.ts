@@ -8,6 +8,9 @@ let tmp: string;
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-queue-'));
+  // SPEC-096: the queue lives in `.minspec/`, so a request is written only in a
+  // folder that has opted in. The store used to create that directory itself.
+  fs.mkdirSync(path.join(tmp, '.minspec'));
 });
 afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });

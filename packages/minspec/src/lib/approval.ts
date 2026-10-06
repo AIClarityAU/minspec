@@ -27,6 +27,7 @@ import type { Tier } from './config';
 // creates no runtime cycle. Verified by scripts/check-import-cycles.ts.
 import { parseSpec } from './spec';
 import { assertOwnershipDeclaredForAdvance } from './ownership-advance-guard';
+import { assertOptedIn, ensureDirectory } from './opt-in';
 import {
   readRecord,
   writeRecord,
@@ -98,11 +99,16 @@ export function refKey(specPath: string): string {
  * Write a gzip-compressed body snapshot to `.minspec/snapshots/<refKey>.json.gz`
  * as the DR-043 per-machine fallback when git blob pinning is unavailable.
  * Returns true on success, false on any error (so mintBaseline can degrade to '').
+ *
+ * `snapshots/` is created below an existing `.minspec/`, never together with it.
+ * In a folder that has not opted in that refusal lands in the `catch` below and
+ * reads as `false`, which is why this function cannot be the one that refuses:
+ * `approveSpec` does it, before anything here runs (SPEC-096 FR-5).
  */
 function writeGzipFallback(rootDir: string, specPath: string, bodyBuf: Buffer): boolean {
   try {
     const dir = path.join(rootDir, '.minspec', 'snapshots');
-    fs.mkdirSync(dir, { recursive: true });
+    ensureDirectory(dir);
     const gz = zlib.gzipSync(bodyBuf);
     fs.writeFileSync(path.join(dir, `${refKey(specPath)}.json.gz`), gz);
     return true;
@@ -526,6 +532,15 @@ export function approveSpec(
   // never mints, mutates, or half-writes a record. Every caller is gated here, not
   // just the UI; the command layer pre-checks too for a friendlier message.
   assertHumanApprover(email);
+
+  // SPEC-096 FR-5: the opt-in gate, in the same place and for the same reason. An
+  // approval is recorded under `.minspec/`, the opt-in marker, and a folder that
+  // has not opted in has nowhere to hold one. Refuse BEFORE the first side effect:
+  // that is the git blob and ref `mintBaseline` writes below, not a file under
+  // `.minspec/`, so the store's own refusal (`writeRecord`) would arrive after a
+  // ref had been left in a repository that never asked for it. And the gzip
+  // fallback cannot refuse at all (it returns `false` on any error).
+  assertOptedIn(rootDir);
 
   // 0. Single read — hash and baseline both derive from THESE bytes (no double-read,
   //    no TOCTOU skew between specHash and baselineBlob).
