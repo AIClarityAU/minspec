@@ -201,6 +201,8 @@ product: minspec
 
 ## Post-Launch: ScroogeLLM Bridge (Week 11+)
 
+> **Removed by [SPEC-086](SPEC-086-remove-scroogellm-upsell/requirements.md) (issue #2205).** ScroogeLLM is shelved, so everything in this section was taken out of the extension; the ticked boxes below record work that was done and later removed, not features that ship.
+
 ### 10.1 Bridge Nudge
 - [x] Detect LLM API usage patterns (if observable without proxy)
 - [x] Surface savings estimate: "ScroogeLLM could save ~$X/month"

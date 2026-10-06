@@ -240,6 +240,9 @@ function statusWorkspace(root: string, kinds: Record<string, Kind>): void {
   };
   const epic = (id: string, order: number) =>
     `---\nid: ${id}\nslug: ${id.toLowerCase()}\ntitle: ${id}\nstatus: active\norder: ${order}\n---\n\n# ${id}\n`;
+  // SPEC-096: a MinSpec workspace is a folder that has opted in. The real approvals
+  // below are recorded under `.minspec/`, which the approval store no longer creates.
+  fs.mkdirSync(path.join(root, '.minspec'), { recursive: true });
   write('docs/epics/EPIC-001-a.md', epic('EPIC-001', 2));
   write('docs/epics/EPIC-002-b.md', epic('EPIC-002', 1));
   const EPIC: Record<string, string | undefined> = {

@@ -19,6 +19,7 @@
 
 import * as fs from 'fs';
 import * as path from 'path';
+import { ensureDirectory } from './opt-in';
 
 // --- Types ---
 
@@ -77,11 +78,14 @@ export function loadTraceability(workspaceRoot: string): TraceabilityData {
 
 /**
  * Save traceability data to .minspec/traceability.json.
- * Creates .minspec directory if needed.
+ *
+ * Never creates `.minspec/`: that directory is the opt-in marker (constitution
+ * invariant 3). In a folder that has not opted in this throws `NotOptedInError`
+ * and writes nothing (SPEC-096 FR-5).
  */
 export function saveTraceability(workspaceRoot: string, data: TraceabilityData): void {
   const dirPath = path.join(workspaceRoot, '.minspec');
-  fs.mkdirSync(dirPath, { recursive: true });
+  ensureDirectory(dirPath);
   const filePath = traceabilityPath(workspaceRoot);
   fs.writeFileSync(filePath, JSON.stringify(data, null, 2) + '\n', 'utf-8');
 }
