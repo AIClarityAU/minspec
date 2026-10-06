@@ -15,9 +15,14 @@
  * quietly, per `.minspec/constitution.md` invariant 2.
  */
 
-import { readdirSync, readFileSync, statSync, existsSync } from 'fs';
+import { readFileSync, statSync, existsSync } from 'fs';
 import { join, relative, dirname, sep } from 'path';
-import { validateDrSequence, validateDrIndexStatus, validateDrAmendments } from '../packages/minspec/src/lib/adr-manager';
+import {
+  validateDrSequence,
+  validateDrIndexStatus,
+  validateDrAmendments,
+  detectDoubledFrontmatter,
+} from '../packages/minspec/src/lib/adr-manager';
 import {
   validateSplitLayoutCoverage,
   checkAcceptanceCriteria,
@@ -34,38 +39,24 @@ import {
 import { listOrphanedRecords } from '../packages/minspec/src/lib/approval-store';
 import { checkStatusParity, inspectStatusLine, inspectAllStatusClaims } from '../packages/minspec/src/lib/status-parity';
 import { checkManagedRegionMarkers } from '../packages/minspec/src/lib/scaffold';
+// The corpus walkers, under their former local names. `safeGlob` now tolerates ONLY an
+// absent root; every other read failure reaches the rule's own catch instead of being
+// turned into an empty corpus (#1999).
+import { walkFilesByExt as glob, walkOptionalRoot as safeGlob } from './lib/corpus-walk';
 import { checkDeclaredDrIds } from './lib/dr-id-collision';
 import { checkDeclaredSpecIds } from './lib/spec-id-collision';
-import { SELF_HOSTED_TEMPLATE_NAMES } from '../packages/minspec/src/lib/template-registry';
+import {
+  SELF_HOSTED_TEMPLATE_NAMES,
+  TEMPLATE_NAMES,
+  TEMPLATE_OUTPUT_PATHS,
+} from '../packages/minspec/src/lib/template-registry';
 import { detectTools } from '../packages/minspec/src/lib/tool-detector';
+import { buildContext, renderTemplate } from '../packages/minspec/src/lib/template-engine';
+import { parseSections, PREAMBLE_HEADING, detectDoubledTemplateHeadings } from '../packages/minspec/src/lib/merge-refresh';
 
 const ROOT = process.cwd();
 let errors = 0;
 let warnings = 0;
-
-function glob(dir: string, ext: string): string[] {
-  const results: string[] = [];
-  const entries = readdirSync(dir, { withFileTypes: true });
-  for (const entry of entries) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      results.push(...glob(full, ext));
-    } else if (entry.name.endsWith(ext)) {
-      results.push(full);
-    }
-  }
-  return results;
-}
-
-// glob() that tolerates a missing directory (returns []) — used by checks that
-// scan optional corpus locations.
-function safeGlob(dir: string, ext: string): string[] {
-  try {
-    return glob(dir, ext);
-  } catch {
-    return [];
-  }
-}
 
 function parseFrontmatter(content: string): Record<string, string> {
   const match = content.match(/^---\n([\s\S]*?)\n---/);
@@ -312,6 +303,11 @@ try {
     file: relative(ROOT, file),
     content: readFileSync(file, 'utf-8'),
   }));
+  // A zero-file scan is itself a defect signal, not a clean register: the two are
+  // indistinguishable in the output otherwise (#1999, same guard Rule 19 already carries).
+  if (drFiles.length === 0) {
+    warn('Rule 17 scanned 0 DR files; do not read the green as a collision-free register.');
+  }
   for (const defect of checkDeclaredDrIds(drFiles)) {
     fail(join(ROOT, defect.files[0]), `DR id ${defect.kind} — ${defect.message}`);
   }
@@ -351,6 +347,9 @@ try {
       file: relative(ROOT, file),
       content: readFileSync(file, 'utf-8'),
     }));
+  if (specFiles.length === 0) {
+    warn('Rule 18 scanned 0 spec files; do not read the green as a collision-free corpus.');
+  }
   for (const defect of checkDeclaredSpecIds(specFiles)) {
     fail(join(ROOT, defect.files[0]), `Spec id ${defect.kind} — ${defect.message}`);
   }
@@ -775,6 +774,78 @@ try {
     `claim-word check could not run (${err instanceof Error ? err.message : String(err)}) — ` +
       'Rule 19 validated NOTHING this run; do not read the green as a clean corpus.',
   );
+}
+
+// Rule 20 (non-fatal, #2467): a decision or epic record carrying TWO
+// frontmatter-shaped `---` blocks back to back. This is the shape
+// `setAdrStatus` (adr-manager.ts:711-717) produces when handed a record whose
+// EXISTING block it could not parse: it synthesizes a fresh LF block and
+// prepends it, leaving the original block as body text immediately below,
+// stale `status:` line and all — four `---` lines and two `status:` lines in
+// one record. Nothing downstream notices: `listAdrs` reads only the FIRST
+// block (adr-manager.ts:1308-1336), and the status-parity rule (Rule 11 above)
+// compares frontmatter against a `## Status` section or a head blockquote — a
+// stray body `status:` line is neither. The CRLF parsing fix (SPEC-095, #2397)
+// stops new damage; this is the backstop for a file already damaged, which
+// nothing else finds or repairs. WARN only (Low severity, #2467): the damage is
+// visible in a diff, and whether any real project carries such a file is
+// unverified.
+try {
+  const doubledFmRoots: { dir: string; label: string }[] = [
+    { dir: resolveDecisionsDir(), label: 'decision' },
+    { dir: join(ROOT, 'docs', 'epics'), label: 'epic' },
+  ];
+  for (const { dir, label } of doubledFmRoots) {
+    for (const file of safeGlob(dir, '.md')) {
+      const finding = detectDoubledFrontmatter(readFileSync(file, 'utf-8'));
+      if (finding) {
+        warn(
+          `doubled-frontmatter ${relative(ROOT, file)}: this ${label} record carries TWO ` +
+            `frontmatter-shaped blocks — the first closes at line ${finding.firstBlockEndLine}, ` +
+            `and a second \`---\` block opens again immediately at line ${finding.secondBlockStartLine} ` +
+            `(#2467). Likely a synthesized block prepended ahead of the original. Merge the two ` +
+            `into one frontmatter block (keep the correct \`status:\`) and remove the stale duplicate.`,
+        );
+      }
+    }
+  }
+} catch {
+  // decisions/epics dir unreadable / absent — nothing to check, stay silent.
+}
+
+// Rule 21 (non-fatal, #2467): a generated harness file (CLAUDE.md, AGENTS.md,
+// .cursorrules, .minspec/constitution.md, labels.md) in which a TEMPLATE
+// heading occurs twice — the shape `refreshHarnessFiles` → `mergeFile`
+// (merge-refresh.ts:986-990) produces on a CRLF-damaged existing file: every
+// `##` heading gets appended a second time rather than merged. Measured
+// (#2467): a CRLF copy of CLAUDE.md went 418→835 lines (12→24 headings);
+// `.minspec/constitution.md` went 4→8. The harness merge keeps a surplus
+// duplicate-named section as user content BY DESIGN (merge-refresh.ts:993-1005),
+// so a later Refresh leaves a doubled file doubled forever — nothing else in
+// the pipeline notices. WARN only (Low severity, #2467).
+try {
+  const harnessConfig = loadConfig(ROOT);
+  const harnessContext = buildContext(ROOT, harnessConfig);
+  for (const name of TEMPLATE_NAMES) {
+    const outputPath = join(ROOT, TEMPLATE_OUTPUT_PATHS[name]);
+    if (!existsSync(outputPath)) continue;
+    const templateHeadings = parseSections(renderTemplate(name, harnessContext))
+      .map((s) => s.heading)
+      .filter((h) => h !== PREAMBLE_HEADING);
+    const existingContent = readFileSync(outputPath, 'utf-8');
+    const doubled = detectDoubledTemplateHeadings(existingContent, templateHeadings);
+    if (doubled.length > 0) {
+      const shown = doubled.slice(0, 5).join(', ');
+      const more = doubled.length > 5 ? ` (+${doubled.length - 5} more)` : '';
+      warn(
+        `doubled-sections ${relative(ROOT, outputPath)}: ${doubled.length} template heading(s) ` +
+          `appear twice — ${shown}${more} (#2467; likely a CRLF-damaged Refresh, see SPEC-095). ` +
+          `Each doubled section must be reconciled by hand: decide which copy is current and delete the other.`,
+      );
+    }
+  }
+} catch {
+  // Template rendering / harness files unreadable — nothing to check, stay silent.
 }
 
 checkCiReviewTemplatesFresh().then(() => {

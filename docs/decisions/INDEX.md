@@ -732,16 +732,74 @@ DR-072 gave a triage-held issue a human exit, but only for the tier hold: human_
 <!-- /dr-summary:DR-091 -->
 
 ## [DR-092 — A harness refresh may only move a project forward — the build must carry an ordered template identity, and an unordered one holds the write](DR-092.md)
-*Status: proposed · Date: 2026-09-06*
-<!-- dr-summary:DR-092 auto=000000000000 -->
-MinSpec: Refresh Harness Files writes the templates baked into the running bundle, with no notion of newer or older. A refresh from a stale build rewrote three of a consuming repo's managed files backwards, deleting a no-silent-gate block, while the extension version string stayed identical across the three merges it was missing. Direction is a question the refresh has never asked.
+
+*Status: accepted · Date: 2026-09-06*
+
+<!-- dr-summary:DR-092 auto=80e5aba9e2d1 -->
+Four properties of the current code turn "stale" into "destructive". Each is cited because the fix has to change a specific one: 1. **A stale build does not skip; it writes.** For a Markdown harness section the merge ends at merge-refresh.ts:953-957 — a section "proven unmodified against the recorded baseline" takes *whatever the running bundle renders*. For a managed region there is no baseline consulted at all: scaffold.ts:952-957 splices the running bundle's block in whenever the bytes differ. Both branches…
 <!-- /dr-summary:DR-092 -->
 
 ## [DR-093 — A fail-closed gate may refresh its own witness, because a witness only an absent human can produce turns "fail closed" into "never run"](DR-093.md)
 
-*Status: proposed · Date: 2026-09-09*
+*Status: accepted · Date: 2026-09-09*
 
 <!-- dr-summary:DR-093 auto=732512d00014 -->
 The drain's admission control gates on a quota reading at ~/.claude/quota.json. The reading's only producers were **interactive** surfaces - a rendering statusline - while the drain that consumes it runs **unattended**. Measured 2026-09-09 (#1859): the file was **49 hours stale** while holding "used_percentage": 3.0. Over 100 issues carried agent-ready / agent-ready-specify and none dispatched. The pipeline had been dead for days and presented as a quiet week.
 <!-- /dr-summary:DR-093 -->
+
+## [DR-094 — The review broker's tokens live one hour because GitHub issues no shorter credential - exposure is bounded by immediate use and non-storage, not by a TTL the API will not honour](DR-094.md)
+
+*Status: accepted · Date: 2026-09-18*
+
+<!-- dr-summary:DR-094 auto=f02b7feacc1d -->
+SPEC-034's broker exchanges a GitHub Actions OIDC token for a GitHub App installation token, so an adopter's CI can post as minspec-sdd[bot] without holding the App private key. DR-054's reasoning is that one leaked App key mints tokens for every repository that ever installed the App, so the blast radius of the key dwarfs the blast radius of any one token. Short token lifetime was the compensating control.
+<!-- /dr-summary:DR-094 -->
+
+## [DR-095 — A socket bind-mounted as a file pins one inode, so restarting the broker is the act that severs it - mount a dedicated directory, read-only](DR-095.md)
+
+*Status: accepted · Date: 2026-09-25*
+
+<!-- dr-summary:DR-095 auto=e43c8c7ab700 -->
+/etc/nixos/home.nix:95 declares it: The host side is **$XDG_RUNTIME_DIR**, which for a user manager is /run/user/1000. It is not /tmp; /tmp/gh-app-token.sock is only the path the socket is presented at *inside* the container. This matters for the proposal below, because "mount the directory" means mounting the systemd user runtime directory, which is a very different object from a purpose-built socket directory.
+<!-- /dr-summary:DR-095 -->
+
+## [DR-096 — Adopters get a frozen, diagnosis-only pre-strip basis and a third provenance verdict - not a flag, and not a migration](DR-096.md)
+
+*Status: accepted · Date: 2026-09-25*
+
+<!-- dr-summary:DR-096 auto=68c7f9167e09 -->
+Ownership declarations leave the canonical approval hash, so every record minted before the change stops matching. Locally that is a one-off migration; in an adopter's repo the thing recomputing those hashes is a merge-gating review input that MinSpec ships with no gate, no snapshot and no migration, so their reviewers would read MISMATCH against valid approvals. Adopters get a frozen, diagnosis-only copy of the old basis and a third verdict that names it, rather than a flag that defaults the change off or a corpus-rewriting script MinSpec cannot test.
+<!-- /dr-summary:DR-096 -->
+
+## [DR-097 — A single voter's verdict may be reused across an ai-review re-run, bound to one head SHA — where reusing the whole panel was rejected](DR-097.md)
+
+*Status: accepted · Date: 2026-09-26*
+
+<!-- dr-summary:DR-097 auto=85c9e4fc299d -->
+When one of the four ai-review voters dies on a session limit, the panel fails closed and the re-run re-pays for the three that answered. This keeps the survivors, bound to the same head SHA - which is the whole distinction from #1840, where whole-panel reuse across a moved base was measured and refused. The safety property lived only in a comment at first, and the comment was false: three of four voters on #2163 caught the code reusing across commits while its docblock denied it.
+<!-- /dr-summary:DR-097 -->
+
+## [DR-098 — The approval flow may create MinSpec's own missing docs-lane label - consent to push an approval covers the one label its pull request needs, and nothing wider](DR-098.md)
+
+*Status: accepted · Date: 2026-10-01*
+
+<!-- dr-summary:DR-098 auto=88bcb5af582d -->
+MinSpec scaffolds a workflow into adopters that auto-merges a docs-only pull request carrying the docs-lane label, but never created the label, and gh pr create refuses to open a pull request naming a label the repository lacks. So where the label was missing, every approval fell to a manual Open PR step and a manual merge (#2243). Creating the label is a new kind of forge write, and it narrows a statement MinSpec ships to every adopter.
+<!-- /dr-summary:DR-098 -->
+
+## [DR-099 — Code-quality checks in the pre-commit harness split by class - correctness checks block and ship in v1, metric checks warn by default and are deferred to v2](DR-099.md)
+
+*Status: accepted · Date: 2026-10-01*
+
+<!-- dr-summary:DR-099 auto=893eb78b4e47 -->
+#1555 asks for a code-quality stage in the scaffolded pre-commit gate, and this record sets its rule by class. Correctness checks (shellcheck, actionlint, the TypeScript typecheck) block: three new ways for a commit to be refused, argued here against the advisory default earlier records state, and SPEC-080 ships them in v1. Metric checks (duplication, complexity, circular dependencies, dead code) warn by default until a project opts one into blocking, and are deferred to a v2 tracked as #2463.
+<!-- /dr-summary:DR-099 -->
+
+## [DR-100 — Publish MinSpec to the VS Code Marketplace as an early preview - a bounded exception to the phase order, for one stated reason and behind stated preconditions](DR-100.md)
+
+*Status: accepted · Date: 2026-10-01*
+
+<!-- dr-summary:DR-100 auto=2c0bfd94dcb0 -->
+The founder needs MinSpec on a Windows work PC that runs Microsoft's VS Code, and asked on 2026-10-01 for the extension to be published just before the visualiser work, about a week out. The constitution puts a Marketplace publish in Phase 2 and says Phase 2 work may not displace unfinished Phase 1 work, so publishing now needs a recorded exception, with its scope and preconditions stated.
+<!-- /dr-summary:DR-100 -->
 <!-- minspec:dr-index:end -->

@@ -51,21 +51,34 @@ export const GOVERNANCE_PATH_PATTERN = '^(docs/decisions/|specs/)';
 export const GOVERNANCE_PATH_REGEX = new RegExp(GOVERNANCE_PATH_PATTERN);
 
 /**
- * `docs-lane.yml`'s `grep -qE '^[+-]status:'` — an ADDED or REMOVED line whose content
- * begins `status:`.
+ * `docs-lane.yml`'s `grep -qE '^[+-]([*_>|-]+ ?)?[*_]*[Ss]tatus:'` — an ADDED or REMOVED
+ * line whose content begins with a status field, allowing markdown decoration
+ * (emphasis, blockquote, list or table cell) before the word, and either case.
  *
  * Matched per diff LINE (see {@link patchHasStatusTransition}) rather than with JS's
  * `m` flag: `grep` splits on `\n` alone, while JS multiline `^` also follows `\r`,
  * ` ` and ` `. Anchoring by hand keeps the two engines answering identically
  * on a patch containing any of those.
  *
- * As in the workflow, this is deliberately coarse — it matches a `status:` line quoted
- * inside a fenced block or in body prose, not only frontmatter. Over-refusing costs one
- * human merge keystroke; under-refusing lets a ratification auto-merge. Telling
- * frontmatter from body text would mean tracking position within each hunk, i.e. a
- * second predicate for the two sides to disagree about.
+ * As in the workflow, this is deliberately coarse: it matches a status line quoted
+ * inside a fenced block as well as one in frontmatter. Over-refusing costs one human
+ * merge keystroke; under-refusing lets a ratification auto-merge.
+ *
+ * The prefix class is load-bearing (#2124). The pattern was `^[+-]status:`, which only
+ * ever matched frontmatter — every prose form here carries leading `**`, `*` or `> **`,
+ * and each defeats that anchor alone. The severe miss was a DR AMENDMENT: an amendment
+ * has no frontmatter of its own, so its ``**Status: `proposed`.**`` line IS its status.
+ * Leading whitespace stays unmatched on purpose, because an indented `status:` is a
+ * TypeScript or YAML literal inside a fenced block, not a governance status.
+ *
+ * THIS IS A FLOOR, NOT A CENSUS. A `## Status` section whose BODY carries the ruling,
+ * and an amendment whose disposition lives only in its `##` heading, are both known to
+ * be uncovered and are tracked on #2124 — no line-wise predicate can see either,
+ * because the changed line contains no status token. Do not write an assertion here
+ * claiming the set is complete; the previous version of this comment did claim it, and
+ * was wrong.
  */
-export const STATUS_TRANSITION_PATTERN = '^[+-]status:';
+export const STATUS_TRANSITION_PATTERN = '^[+-]([*_>|-]+ ?)?[*_]*[Ss]tatus:';
 
 /** Compiled {@link STATUS_TRANSITION_PATTERN}, applied to ONE diff line at a time. */
 export const STATUS_TRANSITION_REGEX = new RegExp(STATUS_TRANSITION_PATTERN);
@@ -98,9 +111,14 @@ export function isGovernancePath(rel: string): boolean {
 }
 
 /**
- * True iff `patch` contains an added or removed `status:` line — the workflow's
- * `grep -qE '^[+-]status:'`, line by line so no regex-engine difference can separate
- * the two answers.
+ * True iff `patch` contains an added or removed status line — the workflow's
+ * `grep -qE '^[+-]([*_>|-]+ ?)?[*_]*[Ss]tatus:'`, applied line by line so no
+ * regex-engine difference can separate the two answers.
+ *
+ * "Status line" here means {@link STATUS_TRANSITION_PATTERN}, which is broader than a
+ * frontmatter `status:` field: it also covers the emphasised, blockquoted, list and
+ * table-cell forms. Read that constant's doc before relying on this, including the
+ * two classes it deliberately does NOT cover.
  */
 export function patchHasStatusTransition(patch: string): boolean {
   if (typeof patch !== 'string' || patch.length === 0) return false;
