@@ -96,6 +96,8 @@ export interface DrainFixture {
   issueSecs?: Record<number, number>;
   /** A line the dispatch of that issue prints as its last, e.g. the CLI's own limit notice. */
   issueSays?: Record<number, string>;
+  /** The same for the remediation of that pull request. */
+  remediateSays?: Record<number, string>;
   env?: Record<string, string>;
 }
 
@@ -201,7 +203,10 @@ exit 0
 `,
   );
   stub('triage.sh', `echo "$1" >> "${dir}/triaged"\necho "triaged #$1"\nexit 0\n`);
-  stub('remediate.sh', `echo "$1" >> "${dir}/remediated"\necho "remediated PR #$1"\nexit 0\n`);
+  stub(
+    'remediate.sh',
+    `echo "$1" >> "${dir}/remediated"\necho "remediated PR #$1"\n[[ -f "${dir}/says-pr.$1" ]] && cat "${dir}/says-pr.$1"\nexit 0\n`,
+  );
   // The ranker's stdout IS the order, so the hook must stay off it.
   stub(
     'rank.sh',
@@ -217,6 +222,9 @@ exit 0
   }
   for (const [issue, line] of Object.entries(f.issueSays ?? {})) {
     fs.writeFileSync(path.join(dir, `says-issue.${issue}`), `${line}\n`);
+  }
+  for (const [pr, line] of Object.entries(f.remediateSays ?? {})) {
+    fs.writeFileSync(path.join(dir, `says-pr.${pr}`), `${line}\n`);
   }
   if (f.readingAfterRanking) {
     fs.writeFileSync(path.join(dir, 'after-ranking.sh'), writeReadingBash(f.readingAfterRanking, quota));

@@ -44,6 +44,11 @@
 # Env knobs (all optional):
 #   MINSPEC_DRAIN_CONTINUOUS=0     — force pure one-shot even on --auto/--continuous
 #                                    (the "keep it a one-shot" opt-out).
+#   MINSPEC_DRAIN_SPECIFY=0        — leave the `agent-ready-specify` queue alone: no
+#                                    spec-writing dispatches (#2582). Triage, `agent-ready`
+#                                    builds and pull request remediation carry on, and
+#                                    each cycle says how many such issues it left.
+#                                    Default 1. Anything else is read as 0, and said so.
 #   MINSPEC_DRAIN_INTERVAL=1200    — seconds between cycles (default 20 min).
 #   MINSPEC_DRAIN_QUOTA_BACKOFF=1800 — seconds to pause after a quota signal (30 min).
 #                  Now only a FALLBACK: when ~/.claude/quota.json carries a live
@@ -140,7 +145,10 @@ gh_bot_init
 # #1208 concurrency harness points it at a hermetic stub so the fan-out can be
 # proven to actually overlap without launching real build agents.
 DISPATCH="${MINSPEC_DRAIN_DISPATCH:-${SCRIPT_DIR}/dispatch-issue.sh}"
-TRIAGE="${SCRIPT_DIR}/triage-inbox.sh"
+# Env-overridable for the same reason as DISPATCH above and REMEDIATE below: with no
+# seam, a hermetic test that lists an inbox issue runs the real triager, which launches
+# claude. Only a test has a use for it (#2582: "triage still runs with spec-writing off").
+TRIAGE="${MINSPEC_DRAIN_TRIAGE:-${SCRIPT_DIR}/triage-inbox.sh}"
 # Env-overridable like DISPATCH, so a hermetic test can drive the PR sweep through a
 # stub rather than the real remediator (#2233: the 18:11 false pause was on this path).
 REMEDIATE="${MINSPEC_DRAIN_REMEDIATE:-${SCRIPT_DIR}/remediate-pr.sh}"
@@ -997,6 +1005,52 @@ reconcile_labels() {
   reconcile_done_issues  || echo "[drain] reconcile: agent-done pass errored — continuing."
 }
 
+# sweep_open_prs: Step 3 of a cycle. Sweep open PRs for FIXABLE problems and
+# auto-remediate them (conflicts are surfaced, not touched). remediate-pr.sh owns ALL
+# the decision-making — branch-prefix scope, classification, attempt caps — so the
+# drain stays thin and there is ONE source of truth for what "fixable" means. We only
+# enumerate open, non-draft PRs and hand each to it; a clean/out-of-scope PR self-skips
+# cheaply (one gh fetch, no agent). Disable with MINSPEC_DRAIN_REMEDIATE_PRS=0.
+#
+# Returns 0 when the sweep is done (or switched off), and 42 when a remediation ended
+# on the CLI's own limit notice, with the pause cause recorded: the caller returns
+# that from run_cycle as it stands.
+#
+# A function, and not the tail of run_cycle it used to be, because it now has two
+# callers (#2582): the end of an ordinary cycle, and a cycle whose only ready work is
+# spec-writing with spec-writing switched off, which has nothing to dispatch and
+# must still get here. The body is the old block, moved and not edited.
+sweep_open_prs() {
+  if [[ "${MINSPEC_DRAIN_REMEDIATE_PRS:-1}" != "0" ]]; then
+    # The dispatch loop above may have run for hours. Same reason as the per-item
+    # refresh: the sweep's own enumeration is a read, and remediate-pr.sh is a child
+    # that inherits this token.
+    gh_bot_warm_read
+    local open_prs pr rcap rout
+    open_prs=$(gh pr list --repo "$REPO" --state open --json number,isDraft \
+      --jq '.[] | select(.isDraft==false) | .number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no open PRs to remediate
+    if [[ -n "$open_prs" ]]; then
+      echo "[drain] sweeping $(echo "$open_prs" | wc -l | tr -d ' ') open PR(s) for fixable problems..."
+      for pr in $open_prs; do
+        # Same quota discipline as dispatch: remediation may launch claude, which
+        # exits 0 even under a usage limit — the signal is in the OUTPUT. Capture
+        # + classify; a quota hit pauses the whole cycle (loop backs off). Only the
+        # CLI's own notice counts: a refreshed PR's `HEAD is now at <subject>` is not
+        # one, which is what paused the drain at 18:11 on 2026-09-30 (#2233).
+        rcap=$(mktemp)
+        "$REMEDIATE" "$pr" 2>&1 | tee "$rcap" || true
+        rout=$(cat "$rcap" 2>/dev/null || true); rm -f "$rcap"  # swallow-ok: the capture file is written by this script moments earlier and removed on the same line; absent means the launch produced no output
+        if is_quota <<<"$rout"; then
+          echo "[drain] Claude usage-limit signal while remediating PR #$pr — pausing this cycle (will back off, not fail)."
+          QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"
+          return 42
+        fi
+      done
+    fi
+  fi
+  return 0
+}
+
 # ── The queue read — ONE definition, two consumers ────────────────────────────
 #
 # _ready_numbers <label> — open issue numbers for one label, or a LOUD failure.
@@ -1038,6 +1092,36 @@ _ready_numbers() {
 # read-time cap (MINSPEC_DRAIN_QUEUE_LIMIT, 30): the knob a human already knows
 # didn't need a new name, only a new point of application.
 _dispatch_cap="${MINSPEC_DRAIN_QUEUE_LIMIT:-30}"
+
+# DRAIN_SPECIFY — whether this drain dispatches spec-writing work (#2582). 1, the
+# default, is the behaviour there has always been: both ready queues are dispatched.
+# At 0 the `agent-ready-specify` queue is still READ, so a cycle can say how much it is
+# leaving, and then left alone. Spec drafts were being written faster than they were
+# read (87 pull requests awaiting approval and 272 issues still queued behind them on
+# 2026-10-07), and the only other ways to stop them were to pause the whole drain or to
+# strip a label from every one of those issues.
+#
+# The switch is on the QUEUE, which is the label. dispatch-issue.sh decides how an issue
+# runs from its verdict record, not from the label that queued it (#983), and that is
+# not changed here: this decides what is handed to it.
+#
+# Anything that is neither 0 nor 1 is read as 0, and run_cycle says so every cycle. The
+# knob exists to stop spending, so the reading that spends nothing is the safe one for
+# a value nobody can interpret; `off` or `false` quietly meaning "on" would be a knob
+# that lies about what it is doing.
+DRAIN_SPECIFY="${MINSPEC_DRAIN_SPECIFY:-1}"
+
+# _specify_only <agent-ready numbers> <agent-ready-specify numbers>: the issues that are
+# queued for spec-writing and NOT also queued for a build, one per line. An issue in
+# both queues is a build (an approved spec leaves the old label beside the new one), so
+# it stays in the queue and is not counted as left.
+_specify_only() {
+  local -A build=()
+  local n
+  for n in $1; do build[$n]=1; done
+  for n in $2; do [[ -n "${build[$n]:-}" ]] || printf '%s\n' "$n"; done
+  return 0
+}
 
 # _read_queue <varname> <label> — read one label's queue INTO a named variable, and
 # recover from a DEAD CREDENTIAL once before giving up.
@@ -1200,6 +1284,21 @@ run_cycle() {
     fi
   done
   all_ready="$(printf '%s\n%s\n' "$ready_full" "$ready_spec" | sed '/^$/d' | sort -un)"
+
+  # Spec-writing switched off (#2582, see DRAIN_SPECIFY). Said once per cycle, here,
+  # before either return below, so that a cycle with nothing ready says it too: a switch
+  # that only spoke when it had something to skip would look, on a quiet day, exactly
+  # like a switch that was not set.
+  local -a spec_left=()
+  if [[ "$DRAIN_SPECIFY" != "1" ]]; then
+    mapfile -t spec_left < <(_specify_only "$ready_full" "$ready_spec")
+    if [[ "$DRAIN_SPECIFY" == "0" ]]; then
+      echo "[drain] spec-writing is switched OFF (MINSPEC_DRAIN_SPECIFY=0): ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
+    else
+      echo "[drain] spec-writing is switched OFF (MINSPEC_DRAIN_SPECIFY=$(printf '%q' "$DRAIN_SPECIFY") is neither 0 nor 1, so it is read as 0, the setting that spends nothing): ${#spec_left[@]} agent-ready-specify issue(s) left in the queue, not dispatched. Triage, agent-ready builds and pull request remediation run as usual."
+    fi
+  fi
+
   if [[ -z "$all_ready" ]]; then
     # The contradiction is reported ALONGSIDE "cycle done", not instead of it: the
     # query itself succeeded (ready_rc==0, checked above), so this is not the #1855
@@ -1211,6 +1310,25 @@ run_cycle() {
     fi
     echo "[drain] no agent-ready / agent-ready-specify issues after triage — cycle done."
     return 0
+  fi
+
+  # With spec-writing off, what is dispatched is the build queue alone. Narrowed HERE,
+  # before ranking and before the dispatch cap: capped first and skipped afterwards, a
+  # cap of 2 whose top two were spec-writing issues would dispatch nothing at all, on
+  # every cycle, with builds queued behind them.
+  if [[ "$DRAIN_SPECIFY" != "1" ]]; then
+    all_ready="$(printf '%s\n' "$ready_full" | sed '/^$/d' | sort -un)"
+    if [[ -z "$all_ready" ]]; then
+      # Everything ready is spec-writing. There is nothing to rank or dispatch, but this
+      # is NOT the empty queue the return above handles: with the switch on, this cycle
+      # would have dispatched and then swept the open PRs, and "pull request remediation
+      # still runs" has to stay true when spec-writing is the only work there is. So the
+      # sweep runs from here. (That an empty queue skips the sweep at all is #1708's.)
+      echo "[drain] nothing to dispatch this cycle: every ready issue is agent-ready-specify. Going on to pull request remediation."
+      sweep_open_prs || return $?
+      echo "[drain] cycle done."
+      return 0
+    fi
   fi
 
   # Dispatch ORDER (#2196): what each issue unblocks, then the spec it serves, then
@@ -1467,39 +1585,9 @@ run_cycle() {
     (( saw_quota )) && return 42
   fi
 
-  # Step 3: sweep open PRs for FIXABLE problems and auto-remediate them (conflicts
-  # are surfaced, not touched). remediate-pr.sh owns ALL the decision-making —
-  # branch-prefix scope, classification, attempt caps — so the drain stays thin and
-  # there is ONE source of truth for what "fixable" means. We only enumerate open,
-  # non-draft PRs and hand each to it; a clean/out-of-scope PR self-skips cheaply
-  # (one gh fetch, no agent). Disable with MINSPEC_DRAIN_REMEDIATE_PRS=0.
-  if [[ "${MINSPEC_DRAIN_REMEDIATE_PRS:-1}" != "0" ]]; then
-    # The dispatch loop above may have run for hours. Same reason as the per-item
-    # refresh: the sweep's own enumeration is a read, and remediate-pr.sh is a child
-    # that inherits this token.
-    gh_bot_warm_read
-    local open_prs pr rcap rout
-    open_prs=$(gh pr list --repo "$REPO" --state open --json number,isDraft \
-      --jq '.[] | select(.isDraft==false) | .number' 2>/dev/null || true)  # swallow-known: #1855 a failed query reads as no open PRs to remediate
-    if [[ -n "$open_prs" ]]; then
-      echo "[drain] sweeping $(echo "$open_prs" | wc -l | tr -d ' ') open PR(s) for fixable problems..."
-      for pr in $open_prs; do
-        # Same quota discipline as dispatch: remediation may launch claude, which
-        # exits 0 even under a usage limit — the signal is in the OUTPUT. Capture
-        # + classify; a quota hit pauses the whole cycle (loop backs off). Only the
-        # CLI's own notice counts: a refreshed PR's `HEAD is now at <subject>` is not
-        # one, which is what paused the drain at 18:11 on 2026-09-30 (#2233).
-        rcap=$(mktemp)
-        "$REMEDIATE" "$pr" 2>&1 | tee "$rcap" || true
-        rout=$(cat "$rcap" 2>/dev/null || true); rm -f "$rcap"  # swallow-ok: the capture file is written by this script moments earlier and removed on the same line; absent means the launch produced no output
-        if is_quota <<<"$rout"; then
-          echo "[drain] Claude usage-limit signal while remediating PR #$pr — pausing this cycle (will back off, not fail)."
-          QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"
-          return 42
-        fi
-      done
-    fi
-  fi
+  # Step 3: sweep open PRs for fixable problems (sweep_open_prs, above). A limit
+  # notice from a remediation pauses the cycle: 42, cause already recorded.
+  sweep_open_prs || return $?
 
   # #2140 — a cycle in which EVERY attempted dispatch failed is not a completed
   # cycle, and must never read as one. Per-dispatch WARNINGs (classify_dispatch,
