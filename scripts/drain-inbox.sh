@@ -62,8 +62,12 @@
 #   is SET is fixed. Left unset, which is the default, it RAMPS toward the reset:
 #       cap = min(100, max(floor, 100 - rate x time left to that window's reset))
 #   so the drain leaves headroom early in a window and uses what is left near its end.
-#   MINSPEC_QUOTA_ADMIT_PCT=<n>    — 5h window: a fixed cap of n%. 0 holds everything.
-#   MINSPEC_QUOTA_ADMIT_PCT_7D=<n> — weekly window: the same. 0 is how to pause a drain.
+#   MINSPEC_QUOTA_ADMIT_PCT=<n>    — 5h window: a fixed cap of n%.
+#   MINSPEC_QUOTA_ADMIT_PCT_7D=<n> — weekly window: the same. 0 holds every reading that
+#                                    reports that window, which is how a drain has been
+#                                    paused. It is not a complete pause: a reading with
+#                                    no weekly figure is judged on the 5h window alone,
+#                                    and the verdict says when that happened (#2586).
 #   MINSPEC_QUOTA_RAMP_FLOOR=60    — 5h ramp: the cap never goes below this.
 #   MINSPEC_QUOTA_RAMP_PER_HOUR=8  — 5h ramp: % held back per hour still to run
 #                                    (60 until five hours are left, 92 with one left).
@@ -217,7 +221,8 @@ QUOTA_FILE="${MINSPEC_QUOTA_FILE:-$HOME/.claude/quota.json}"
 # chosen by whether its knob is SET:
 #
 #   fixed    MINSPEC_QUOTA_ADMIT_PCT (5h) / MINSPEC_QUOTA_ADMIT_PCT_7D (weekly) is set:
-#            that number is the cap, whatever the clock says. 0 holds everything.
+#            that number is the cap, whatever the clock says. 0 holds every reading
+#            that reports the window.
 #   ramped   it is unset (the default): the cap is 100% less a reserve that shrinks as
 #            the window's reset approaches, and never below a floor.
 #
@@ -232,7 +237,7 @@ QUOTA_FILE="${MINSPEC_QUOTA_FILE:-$HOME/.claude/quota.json}"
 # in the 5h reading, and 5h at 30% while 7d sits at 61% is a real observed state.
 #
 # An EMPTY knob is the same as an unset one (`:-`), so a window can be put back on the
-# ramp by clearing its variable. 0 is a cap like any other, and the one that pauses.
+# ramp by clearing its variable. 0 is a cap like any other: it holds at 0% used.
 QUOTA_ADMIT_PCT="${MINSPEC_QUOTA_ADMIT_PCT:-}"            # 5h: the fixed cap, if any
 QUOTA_ADMIT_PCT_7D="${MINSPEC_QUOTA_ADMIT_PCT_7D:-}"      # weekly: the fixed cap, if any
 QUOTA_RAMP_FLOOR="${MINSPEC_QUOTA_RAMP_FLOOR:-60}"        # 5h ramp: never below this %
@@ -1967,6 +1972,13 @@ quota_gate() {
       return 42
     fi
     cap7="; 7d window ${wp}% used, cap ${cap7}"
+  elif [[ -n "$QUOTA_ADMIT_PCT_7D" ]]; then
+    # A weekly cap was SET and this reading gives nothing to hold it against. The
+    # verdict is unchanged (only some producers see the weekly window, and the 5h one
+    # is still judged), but it is not passed over in silence: someone set that cap to
+    # restrict the drain, 0 to pause it, and an admit that quietly skipped it would
+    # look exactly like an admit that honoured it (#2586).
+    cap7="; this reading reports NO weekly window, so the weekly cap of $(( 10#$QUOTA_ADMIT_PCT_7D ))% fixed by MINSPEC_QUOTA_ADMIT_PCT_7D was not applied"
   fi
   if (( r <= now )); then
     echo "open:window-reset (resets_at already passed — proceeding${cap7})"
@@ -2186,6 +2198,7 @@ quota_health() {
   if (( wp >= 0 )); then
     echo "live: 5h window ${p}% used, resets in $(( (r - now) / 60 )) min; 7d window ${wp}% used. ${caps}; 7d $(_quota_cap_text 7d "$(( wr > now ? wr - now : 0 ))")."
   else
+    [[ -n "$QUOTA_ADMIT_PCT_7D" ]] && caps="${caps}; the weekly cap of $(( 10#$QUOTA_ADMIT_PCT_7D ))% fixed by MINSPEC_QUOTA_ADMIT_PCT_7D is NOT being applied, there being no weekly window to hold against it"
     echo "live: 5h window ${p}% used, resets in $(( (r - now) / 60 )) min (no weekly reading). ${caps}."
   fi
 }

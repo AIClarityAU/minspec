@@ -275,6 +275,26 @@ describe('#2514 R1: a cap that is SET is fixed, per window, and wins over the ra
     expect(gate(reading).code).toBe(0);
   });
 
+  it('a SET weekly cap that a reading gives nothing to hold against is not skipped in silence', () => {
+    // Only some producers see the weekly window, so a reading without one is still
+    // judged on the 5h window alone, exactly as before (#2586 is the open question of
+    // whether it should be). What changed is that the admit says the cap was not applied:
+    // a drain "paused" with a weekly cap of 0 that dispatches on such a reading used to
+    // look, in the log, exactly like one that had honoured the cap.
+    const env = { MINSPEC_QUOTA_ADMIT_PCT_7D: '0' };
+    const r = gate({ pct: 3, resetIn: HOUR }, env);
+    expect(r.code).toBe(0);
+    expect(r.out).toMatch(/reports NO weekly window, so the weekly cap of 0% fixed by MINSPEC_QUOTA_ADMIT_PCT_7D was not applied/);
+    expect(run(['--quota-health'], env).out).toMatch(/weekly cap of 0% fixed by MINSPEC_QUOTA_ADMIT_PCT_7D is NOT being applied/);
+    // The same on the other admit there is, a 5h window that has reset.
+    expect(gate({ pct: 3, resetIn: -60 }, env).out).toMatch(/^open:window-reset[^\n]*weekly cap of 0%[^\n]*was not applied/);
+    // CONTROL: with no weekly cap set there is nothing to report, and nothing is.
+    expect(gate({ pct: 3, resetIn: HOUR }).out).not.toMatch(/not applied/);
+    expect(run(['--quota-health']).out).not.toMatch(/NOT being applied/);
+    // CONTROL: with a weekly figure in the reading the cap is applied, and holds.
+    expect(gate({ pct: 3, resetIn: HOUR, weekPct: 0, weekResetIn: DAY }, env).code).toBe(42);
+  });
+
   it('an EMPTY cap variable is the same as none: that window ramps', () => {
     const r = gate({ pct: 91, resetIn: HOUR }, { MINSPEC_QUOTA_ADMIT_PCT: '' });
     expect(r.code).toBe(0);
