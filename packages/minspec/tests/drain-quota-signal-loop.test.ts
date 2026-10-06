@@ -25,9 +25,14 @@ import * as os from 'os';
 import * as path from 'path';
 import { execFileSync, spawn, type ChildProcess } from 'child_process';
 import { useShellTimeout } from './helpers/shell-timeout';
+import { drainBaseEnv, useHostileAmbientDrainKnobs } from './helpers/drain-env';
 
 // Module scope, never a hook: vitest resolves timeouts before beforeAll runs (#1399).
 useShellTimeout();
+
+// Module scope: nothing in this file may depend on drain or quota knobs in the surrounding
+// environment, so it runs with hostile ones planted there (#2574, helpers/drain-env.ts).
+useHostileAmbientDrainKnobs();
 
 const DRAIN = path.resolve(__dirname, '../../../scripts/drain-inbox.sh');
 const FIX = path.resolve(__dirname, 'fixtures', 'drain-quota-signal');
@@ -125,7 +130,7 @@ cat "${dir}/dispatch.$n.txt"
   const session = spawn('sleep', ['300'], { stdio: 'ignore' });
   const log = path.join(dir, 'log');
   const env: NodeJS.ProcessEnv = {
-    ...process.env,
+    ...drainBaseEnv(),
     PATH: `${bin}:${process.env.PATH}`,
     MINSPEC_DRAIN_DISPATCH: path.join(bin, 'dispatch.sh'),
     MINSPEC_DRAIN_REMEDIATE: path.join(bin, 'remediate.sh'),

@@ -29,8 +29,13 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { useShellTimeout } from './helpers/shell-timeout';
+import { drainBaseEnv, useHostileAmbientDrainKnobs } from './helpers/drain-env';
 
 useShellTimeout();
+
+// Module scope: nothing in this file may depend on drain or quota knobs in the surrounding
+// environment, so it runs with hostile ones planted there (#2574, helpers/drain-env.ts).
+useHostileAmbientDrainKnobs();
 
 function findScriptsDir(): string {
   let dir = __dirname;
@@ -180,7 +185,7 @@ function runBlock(
   const file = path.join(tmp, 'block.sh');
   fs.writeFileSync(file, script, 'utf-8');
   const fullEnv: NodeJS.ProcessEnv = {
-    ...process.env,
+    ...drainBaseEnv(),
     PATH: `${gh.bin}:${process.env.PATH}`,
     MINSPEC_ISSUE_RANKER: ranker,
     ...env,
