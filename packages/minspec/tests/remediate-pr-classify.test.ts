@@ -16,6 +16,9 @@ import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+useShellTimeout();
 
 const SCRIPT = path.resolve(__dirname, '../../../scripts/remediate-pr.sh');
 const LIB = path.resolve(__dirname, '../../../scripts/lib/agent-egress.sh');
@@ -274,6 +277,76 @@ describe('remediate-pr.sh --classify: SPEC-044 owner gate (drain = orphan-fallba
     expect(() =>
       execFileSync('bash', [SCRIPT, '--classify', 'agent/issue-1', 'MERGEABLE'], { encoding: 'utf-8' }),
     ).toThrow();
+  });
+});
+
+// #1894 — a fork PR's headRefName means nothing against the BASE repo's `origin`:
+// resolving `origin/<headRefName>` there either fails harmlessly (no such branch) or,
+// when the base repo happens to have a same-named branch (ordinary under this repo's
+// fix/*, feat/*, agent/* conventions), silently pushes agent commits to that unrelated
+// branch while reporting success against the PR. `same_repo` is the pure comparison
+// the call site gates on before ever touching `origin/$BRANCH`.
+function checkSameRepo(headOwner: string, headRepo: string, baseRepo: string): boolean {
+  try {
+    execFileSync('bash', [SCRIPT, '--check-same-repo', headOwner, headRepo, baseRepo], { encoding: 'utf-8' });
+    return true;
+  } catch (e: any) {
+    if (e.status === 1) return false;
+    throw e;
+  }
+}
+
+describe('remediate-pr.sh --check-same-repo: fork-PR guard (#1894)', () => {
+  it('same owner and repo → true (the ordinary, same-repo PR)', () => {
+    expect(checkSameRepo('AIClarityAU', 'minspec', 'AIClarityAU/minspec')).toBe(true);
+  });
+
+  it('a different owner (a fork) → false, even when the repo NAME matches', () => {
+    expect(checkSameRepo('someoutsidecontributor', 'minspec', 'AIClarityAU/minspec')).toBe(false);
+  });
+
+  it('a different repo name under the same owner → false', () => {
+    expect(checkSameRepo('AIClarityAU', 'minspec-fork', 'AIClarityAU/minspec')).toBe(false);
+  });
+
+  it('is case-insensitive, matching GitHub login/repo-name semantics', () => {
+    expect(checkSameRepo('aiclarityau', 'MinSpec', 'AIClarityAU/minspec')).toBe(true);
+  });
+
+  it('an empty/unresolved head owner or repo name → false, never guessed as a match', () => {
+    expect(checkSameRepo('', 'minspec', 'AIClarityAU/minspec')).toBe(false);
+    expect(checkSameRepo('AIClarityAU', '', 'AIClarityAU/minspec')).toBe(false);
+  });
+
+  it('rejects a malformed arity rather than guessing', () => {
+    expect(() =>
+      execFileSync('bash', [SCRIPT, '--check-same-repo', 'AIClarityAU', 'minspec'], { encoding: 'utf-8' }),
+    ).toThrow();
+  });
+});
+
+describe('remediate-pr.sh: the fork-PR guard is wired into the main flow (#1894)', () => {
+  const code = fs.readFileSync(SCRIPT, 'utf-8');
+
+  it('requests headRepository and headRepositoryOwner from the PR fetch — the exact filed repro (`grep headRepository` used to return nothing)', () => {
+    expect(code).toMatch(/--json number,state,isDraft,headRefName,headRepository,headRepositoryOwner,/);
+  });
+
+  it('calls same_repo before the worktree is ever created against origin/$BRANCH', () => {
+    const guardIdx = code.indexOf('if ! same_repo "$HEAD_OWNER" "$HEAD_REPO_NAME" "$REPO"');
+    const worktreeIdx = code.indexOf('git worktree add --detach "$WORKTREE" "origin/${BRANCH}"');
+    expect(guardIdx).toBeGreaterThan(-1);
+    expect(worktreeIdx).toBeGreaterThan(-1);
+    expect(guardIdx).toBeLessThan(worktreeIdx);
+  });
+
+  it('refuses silently-wrong (side-effect-free exit 0), never a network write, on mismatch', () => {
+    const guardBlock = code.slice(
+      code.indexOf('if ! same_repo "$HEAD_OWNER" "$HEAD_REPO_NAME" "$REPO"'),
+      code.indexOf('if ! same_repo "$HEAD_OWNER" "$HEAD_REPO_NAME" "$REPO"') + 400,
+    );
+    expect(guardBlock).toMatch(/exit 0/);
+    expect(guardBlock).not.toMatch(/git push|gh pr edit|gh label create/);
   });
 });
 

@@ -285,6 +285,10 @@ function seedApprovedSpec(root: string): void {
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-approval-pr-'));
+  // An approval happens in a project that has opted in. The preference store
+  // refuses to create `.minspec/` itself (#2355), so the fixture must carry the
+  // marker a real project has rather than rely on the store to manufacture it.
+  fs.mkdirSync(path.join(tmp, '.minspec'));
   H.config = {};
   H.choice = undefined;
   H.runner = undefined;
@@ -1032,14 +1036,16 @@ describe('FR-8: "Always push from now on" (DR-071)', () => {
     });
   });
 
-  it('swallows a failed preference write AND a failed settings write — the approval still pushes', async () => {
+  it('swallows a failed preference write AND a failed settings write — the approval still pushes, and tells the user (#2506)', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      // A FILE where the root should be: `savePreferences`' mkdir throws ENOTDIR.
+      // A FILE where the root should be: it has no `.minspec/`, so
+      // `savePreferences` refuses (NotOptedInError since #2355; ENOTDIR before).
       const unwritable = path.join(tmp, 'not-a-dir');
       fs.writeFileSync(unwritable, 'x', 'utf-8');
       H.updateRejects = true;
       H.choice = 'Always push from now on';
+      H.warn.length = 0;
 
       const { suffix } = await pushApprovalIfEnabled(unwritable, 'spec-050', {
         subject: SUBJECT,
@@ -1049,6 +1055,16 @@ describe('FR-8: "Always push from now on" (DR-071)', () => {
       expect(pushApprovalMock).toHaveBeenCalledTimes(1);
       expect(suffix).toContain('pushed');
       expect(warnSpy).toHaveBeenCalled();
+      // #2506: a bare console.warn never reaches a user — Alt+A toast users
+      // never open the Debug Console. Both the offer-shown memory and the
+      // "Always push" consent itself refused into this unwritable root, and
+      // each MUST now also surface on the notification API, or the click
+      // silently remembers nothing while the toast claimed it was accepted.
+      expect(H.warn.length).toBeGreaterThanOrEqual(2);
+      expect(H.warn.some((w) => w.message.includes('could not remember that this offer was shown'))).toBe(
+        true,
+      );
+      expect(H.warn.some((w) => w.message.includes('"Always push" was not remembered'))).toBe(true);
     } finally {
       warnSpy.mockRestore();
     }

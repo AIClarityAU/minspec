@@ -80,6 +80,9 @@ describe('#2009 check-orphaned-docstring — the gate as CI runs it', () => {
     expect(output).toMatch(/\d+ source\(s\) scanned/);
     const scanned = Number(/(\d+) source\(s\) scanned/.exec(output)?.[1] ?? 0);
     expect(scanned).toBeGreaterThan(400); // both roots, not just one
+    // #2102 reattached the five #2009 backlog instances; the waiver is empty and this
+    // must say so, not just print a clean exit code that could mask a broken waiver read.
+    expect(output).toMatch(/0 known and tracked/);
   });
 
   // The load-bearing case. Without it the suite would pass against a gate that never fires.
@@ -107,10 +110,10 @@ describe('#2009 check-orphaned-docstring — the gate as CI runs it', () => {
     expect(output).toMatch(/could not run|not a directory/);
   });
 
-  it('counts the tracked backlog by file, so a new orphan in a known file still fails', () => {
-    // A count rather than line numbers: line numbers rot on the next edit, and a stale
-    // waiver either fails a clean file or silences a real defect.
-    expect(KNOWN_ORPHANED_DOCSTRINGS.get('packages/minspec/src/lib/adr-manager.ts')).toBe(2);
-    expect([...KNOWN_ORPHANED_DOCSTRINGS.values()].reduce((a, b) => a + b, 0)).toBe(5);
+  it('holds an empty backlog now #2009\'s five tracked instances are reattached (#2102)', () => {
+    // The waiver is a COUNT per file, not line numbers, so it survives drift — but the
+    // right count post-#2102 is zero: every file it names is clean, and a stale non-zero
+    // entry here would silence a real orphan reintroduced in that same file.
+    expect([...KNOWN_ORPHANED_DOCSTRINGS.values()].reduce((a, b) => a + b, 0)).toBe(0);
   });
 });

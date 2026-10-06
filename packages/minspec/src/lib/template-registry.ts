@@ -79,9 +79,15 @@ export const TEMPLATE_OUTPUT_PATHS: Record<TemplateName, string> = {
 const LABELS_MD_TEMPLATE = `# Issue label vocabulary — {{projectName}}
 
 The labels MinSpec's triage step classifies against. **This file is documentation and a
-copy-paste script — MinSpec never creates, edits, or reads a label on any forge.** Core
-functionality works offline and makes no network call without your explicit consent, so
-applying these is always a command *you* run.
+copy-paste script — MinSpec never creates, edits, or reads any of these labels on a
+forge.** Core functionality works offline and makes no network call without your explicit
+consent, so applying these is always a command *you* run.
+
+One label is not in this vocabulary, and it is the single exception: \`docs-lane\`, the
+label MinSpec's docs-lane workflow auto-merges on. When an approval you consented to push
+is eligible for that lane, MinSpec opens its pull request with the label, and creates the
+label first if this repository carries the docs-lane workflow but does not have the label
+yet. It never edits a \`docs-lane\` label that already exists.
 
 Triage reads an issue's **type label** as one of its inputs. A type it is told to
 recognise but that does not exist as a label is an input that is always absent — the
@@ -1458,7 +1464,8 @@ fi
 # it degrades to the always-present shell gate below. Tiers:
 #   Node   — only if @aiclarity/minspec-validator is ALREADY resolvable
 #            (\`npx --no-install\`, never a network fetch that could E404-block).
-#   python — only if python3 is on PATH and validate.py exists.
+#   python — only if a python3/python/\`py -3\` candidate actually RUNS (not
+#            merely resolves on PATH, #2400) and validate.py exists.
 #   shell  — always present; the two pattern-matchable gates, inline below.
 
 # minspec_shell_gate: the always-correct baseline. (1) every staged specs/**/ md
@@ -1530,10 +1537,33 @@ if command -v npx >/dev/null 2>&1 \\
   exit $?
 fi
 
-# Python tier — ONLY when python3 + validate.py are present.
-if command -v python3 >/dev/null 2>&1 && [ -f "$hook_dir/validate.py" ]; then
-  python3 "$hook_dir/validate.py" --pre-commit
-  exit $?
+# Python tier — ONLY when a candidate interpreter actually RUNS (#2400). A name
+# being on PATH is not proof it can run the script: Windows ships python.exe /
+# python3.exe "app execution aliases" under
+# %LOCALAPPDATA%\\Microsoft\\WindowsApps that \`command -v\` resolves on every
+# machine, Python installed or not — with no Microsoft Store Python, invoking
+# the alias prints a Store-install prompt and exits non-zero. \`command -v
+# python3\` proved a NAME exists, never that it RUNS; only invoking it can tell
+# those apart, so probe each candidate by executing it. Order covers the
+# spellings that matter across platforms: python3 (POSIX / most installs),
+# python (the python.org Windows installer ships python.exe, not python3.exe),
+# then the py launcher's -3 switch (bundled with python.org Windows installs).
+if [ -f "$hook_dir/validate.py" ]; then
+  minspec_py=""
+  for minspec_py_candidate in python3 python "py -3"; do
+    # shellcheck disable=SC2086  # intentional word-split: "py -3" is launcher + flag.
+    if $minspec_py_candidate -c 'import sys; sys.exit(0 if sys.version_info[0] >= 3 else 1)' >/dev/null 2>&1; then
+      minspec_py="$minspec_py_candidate"
+      break
+    fi
+  done
+  if [ -n "$minspec_py" ]; then
+    # A real interpreter started: let its verdict (pass OR fail) stand — only
+    # "no candidate could start at all" falls through to the shell tier below.
+    # shellcheck disable=SC2086
+    $minspec_py "$hook_dir/validate.py" --pre-commit
+    exit $?
+  fi
 fi
 
 # Shell tier — always present.
