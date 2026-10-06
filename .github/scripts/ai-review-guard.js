@@ -3,8 +3,11 @@
 // This module is deliberately I/O-free: no network, no `github`/octokit, no
 // `fs`, no process access. Every function is a pure input→output mapping so the
 // security-critical decisions (revert-or-not, strip-or-not, verified-or-not,
-// green-or-not) can be unit-tested exhaustively (see ai-review-guard.test.js in
-// the MinSpec repo - this file ships to adopters, its test suite does not)
+// green-or-not) can be unit-tested exhaustively (see ai-review-guard.test.js beside
+// this file - AIClarityAU/minspec#871 made that suite a parity-managed file, so it
+// ships with this guard and is byte-synced to it; `node --test
+// .github/scripts/ai-review-guard.test.js` works wherever this file lives, though
+// only MinSpec's own CI runs it automatically so far - AIClarityAU/minspec#2059)
 // and the workflow that requires it stays a thin, auditable I/O shell.
 //
 // Threats this closes (see the header of ready-to-merge.yml for the full note):
@@ -212,7 +215,81 @@ const BLOCKED_BY = 'blocked-by';
 // loosely all the time ("depends on the seam landing first" as narrative), while
 // "Blocked by" reads as a declaration in every corpus I checked. One unambiguous
 // form beats two fuzzy ones — a second form can be added if a real body wants it.
-const BLOCKED_BY_LINE_RE = /^[\s>*_-]*\**\s*blocked\s+by\b\**\s*:?\s*(.+)$/gim;
+//
+// LEADING-DECORATION PATTERN — catastrophic-backtracking history (minspec#2134).
+// PR bodies are untrusted, attacker-controlled input, and this repo is public, so
+// this class has been through three rounds of hardening; all are recorded here so
+// a future edit does not casually reintroduce any of them.
+//
+// Round 1: the leading class `[\s>*_-]*` and the adjacent `\**` both included `*` —
+// two greedy quantifiers ranging over an OVERLAPPING alphabet, which gave the
+// backtracking engine O(n^2) work to discover a line of leading asterisks does not
+// match (measured ~4s at 40K asterisks). The round-1 fix dropped `*` from the
+// leading class, leaving `\**` as its sole owner — but left a SECOND, identically-
+// shaped overlap in place: `[\s>_-]*` includes `\s`, and the `\s*` right after
+// `\**` also matches `\s`, with only the nullable `\**` between them. Whenever
+// `\**` matched zero (the common case — most declarations have no bold marker),
+// those two `\s`-matching quantifiers became adjacent, reproducing the exact same
+// class of bug on plain whitespace instead of asterisks (measured ~1.5s at 40K
+// spaces or tabs). Caught in review of the round-1 PR, not by the round-1 test —
+// which used an asterisk-only fixture and could not have distinguished "ReDoS
+// closed" from "one of two ReDoS vectors closed" (the transferable lesson: vary
+// the INPUT ALPHABET, not just the code, or a passing test gives false assurance).
+//
+// Root cause of both: this module never re-derives "is this a fresh overlap" by
+// inspection — there is no lint rule or CI check for regex catastrophic-backtracking
+// shapes in this repo, so the only backstop is deliberately-varied timing tests
+// (see ai-review-guard.test.js) plus this comment's inventory for the next reviewer.
+//
+// Round 2 fix — collapse ALL leading decoration into ONE bounded quantifier:
+// `[\s>*_-]{0,64}`. One quantifier over a union alphabet cannot have a split-point
+// ambiguity with itself (there is only one way to decide how many characters it
+// consumed), which closes the asterisk and whitespace axes outright. The `{0,64}`
+// bound closes a THIRD, distinct mechanism found while fixing the second: `\s`
+// matches line terminators, and the `m` flag makes `^` succeed after every one of
+// them — so an all-newline body gives the engine O(n) valid anchor points, each
+// doing O(remaining length) work with an UNBOUNDED quantifier, which is O(n^2)
+// even with zero ambiguity inside any single attempt (measured ~1.7s at 40K
+// newlines with the round-2 class left unbounded). Bounding the quantifier caps
+// each anchor's work at O(64) regardless of body size, making the total O(64n) —
+// linear (measured ~14ms at 40K newlines, ~57ms at 160K, confirmed linear not
+// quadratic).
+//
+// Round 3: rounds 1-2 closed this shape before "blocked by"; the identical shape
+// still existed after it. `\**\s*:?\s*` has TWO `\s`-matching quantifiers — the
+// `\s*` right before `:?` and the `\s*` right after it — with only the nullable
+// `:?` between them, exactly round 2's "two same-alphabet quantifiers, nullable
+// separator" bug, one region over. `\**` itself does not add a fourth overlap: it
+// shares no alphabet with `\s`, so an all-asterisk or all-space run in this region
+// resolves in one attempt as soon as `(.+)` finds a non-`\n` character to grab —
+// the same reason rounds 1-2 needed an all-NEWLINE fixture, not all-whitespace, to
+// force the exhaustive backtrack (`.` matches space/tab/`*`, never `\n`). Found by
+// the ai-review panel's security voter reviewing the round-2 PR: round 1 and 2's
+// own regression tests varied the alphabet BEFORE "blocked by" — applying their
+// own lesson — but not after it, so this fourth vector passed unnoticed a second
+// time. `"blocked by" + "\n" x 40K` reproduces it (measured ~2000ms unfixed).
+//
+// Round 3 fix — same medicine as round 2, applied to the region after "blocked
+// by": collapse `\s*:?\s*` into ONE bounded quantifier over the union alphabet,
+// `[\s:]{0,64}`. Caps this region's worst case at O(64) too (measured ~15ms at
+// 40K newlines, matching round 2's linear result).
+//
+// HONESTY CHECK on what this changes vs the ORIGINAL (pre-#2134) pattern: this is
+// a near-superset, not a strict one. Every realistic decoration still matches
+// identically — `* `, `  * `, `> `, `**`, `> **`, `-`, `_`, `blocked by: #1`,
+// `blocked by #1`, `blocked by:#1` — and even the round-1-broken combinations like
+// `*>Blocked by` / `*-Blocked by` (restored, since `*` is back in the same class
+// as `>`/`-`). Two input classes stop matching, neither of which any human writes
+// nor relied on as a feature — both only "worked" before as a side effect of
+// unbounded quantifiers: a leading decoration run longer than 64 characters (round
+// 2 — e.g. 100 nested blockquote markers), and a post-"blocked by" separator run
+// longer than 64 characters OR containing more than one `:` (round 3 — e.g.
+// `blocked by::: #1`, where the extra colons now get consumed as separator instead
+// of spilling into the captured reference text). Acceptable because
+// parseBlockedBy's output feeds only the advisory `blocked-by` dependency label:
+// it is author-self-declared prose, not a security boundary, and it gates nothing
+// a human is not already looking at.
+const BLOCKED_BY_LINE_RE = /^[\s>*_-]{0,64}blocked\s+by\b\**[\s:]{0,64}(.+)$/gim;
 
 // Only the LEADING run of refs on a declaring line counts: `#N`, separated by
 // commas/`and`/whitespace. Scanning stops at the first token that is not one of
@@ -417,6 +494,221 @@ function renderPatchFingerprint(fp) {
 function parsePatchFingerprint(text) {
   const m = String(text == null ? '' : text).match(/patch-fingerprint:([0-9a-f]{64})\b/);
   return m ? m[1] : null;
+}
+
+// The review protocol's control tokens. Named here so this module has ONE definition
+// instead of two, and so a cross-file test can pin them against the other sites that
+// hardcode the same literals - scripts/review-decide.sh, scripts/review-branch.sh and
+// .github/workflows/ai-review.yml. They cannot be IMPORTED there (two of the three are
+// bash), so a shared constant cannot be the mechanism; the test is (#2163 review).
+const VERDICT_BEGIN_TOKEN = 'REVIEW_VERDICT_BEGIN';
+const VERDICT_END_TOKEN = 'REVIEW_VERDICT_END';
+const UNAVAILABLE_TOKEN = 'REVIEW_UNAVAILABLE';
+
+const VOTER_RECORD_PREFIX = 'voter-record:';
+
+/**
+ * Is `text` STRUCTURALLY a single unambiguous verdict block?
+ *
+ * Structure only, on purpose. review-decide.sh is the single definition of what a
+ * verdict MEANS (pass vs changes); re-deciding that here would create a second copy
+ * free to drift from it. This answers the narrower question the record layer needs:
+ * "is this a verdict at all, or is it prose?"
+ *
+ * WHY IT IS NEEDED. ai-review.yml substitutes a human sentence when a voter emits
+ * nothing — `(reviewer emitted no verdict block — fail-closed to changes)`. That is
+ * non-empty, so the empty-block rail passes it, and reuse would then pin a
+ * placeholder as a verdict for as long as the patch is unchanged: the voter that
+ * never ran would never run again. Same for a REVIEW_UNAVAILABLE marker, which says
+ * the review could not RUN.
+ *
+ * The AMBIGUITY count is a BARE SUBSTRING count, matching review-decide.sh:157
+ * rather than the anchored extractor. That asymmetry is deliberate and must stay:
+ * a decorated marker (`**REVIEW_VERDICT_BEGIN**`, a trailing word) is invisible to an
+ * anchored count but visible to that gate, so an anchored count here could record
+ * something the gate will later distrust. Anything review-decide.sh would refuse must
+ * never become a survivor. Being broader than needed costs a re-run; being narrower
+ * costs a placeholder pinned in place of a review.
+ */
+function isStructuralVerdictBlock(text) {
+  const s = String(text == null ? '' : text).replace(/\r/g, '');
+  const count = (needle) => s.split(needle).length - 1;
+  if (count(VERDICT_BEGIN_TOKEN) !== 1) return false;
+  if (count(VERDICT_END_TOKEN) !== 1) return false;
+  // A could-not-run marker is not a verdict, however well-formed.
+  if (s.includes(UNAVAILABLE_TOKEN)) return false;
+  // ORDER, over line-anchored markers — a prose mention is not a delimiter, and the
+  // closing marker cannot precede the opening one. Leading indentation is allowed,
+  // as it is everywhere else in this protocol (review-decide.sh's `^[[:space:]]*`).
+  const lines = s.split('\n');
+  const begin = lines.findIndex((ln) => ln.trim() === VERDICT_BEGIN_TOKEN);
+  const end = lines.findIndex((ln) => ln.trim() === VERDICT_END_TOKEN);
+  if (begin < 0 || end < 0) return false;
+  return begin < end;
+}
+
+/**
+ * Render one voter's verdict block for storage on the ai-review check-run output.
+ *
+ * Shape: `voter-record:<role>:<sha256 of block>:<base64 of block>`. The digest is not
+ * security - provenance comes from the check-run's `app.slug` - it is a TRUNCATION
+ * detector. Check-run output has a hard size limit, four voter blocks can approach it,
+ * and a half-written record must be unusable rather than silently short. Base64 keeps
+ * newlines and markdown fences out of the surrounding markdown, and contains no `:`,
+ * so the field separator stays unambiguous.
+ */
+function renderVoterRecord(role, block) {
+  const r = String(role == null ? '' : role);
+  if (!/^[a-z][a-z0-9-]*$/.test(r)) return '';
+  const body = String(block == null ? '' : block);
+  if (body.trim() === '') return ''; // a silent voter is never a survivor
+  // ...and neither is a voter whose "block" is the fail-closed placeholder, an
+  // unavailable marker, or prose. See isStructuralVerdictBlock for why non-empty
+  // is not enough.
+  if (!isStructuralVerdictBlock(body)) return '';
+  const crypto = require('crypto');
+  const digest = crypto.createHash('sha256').update(body, 'utf8').digest('hex');
+  return `${VOTER_RECORD_PREFIX}${r}:${digest}:${Buffer.from(body, 'utf8').toString('base64')}`;
+}
+
+/**
+ * Read voter records back out of check-run output text.
+ *
+ * A record whose payload does not hash to its own digest is DROPPED, not repaired: that
+ * is the truncated-output case, and a partially-recovered verdict block is exactly the
+ * kind of plausible-but-wrong artifact this repo keeps getting bitten by. First record
+ * for a role wins, so callers pass check-runs newest-first.
+ */
+function parseVoterRecords(text) {
+  const out = {};
+  const re = new RegExp(`${VOTER_RECORD_PREFIX}([a-z][a-z0-9-]*):([0-9a-f]{64}):([A-Za-z0-9+/=]+)`, 'g');
+  const src = String(text == null ? '' : text);
+  const crypto = require('crypto');
+  let m;
+  while ((m = re.exec(src)) !== null) {
+    const [, role, digest, b64] = m;
+    if (Object.prototype.hasOwnProperty.call(out, role)) continue;
+    let decoded;
+    try {
+      decoded = Buffer.from(b64, 'base64').toString('utf8');
+    } catch (_) {
+      continue;
+    }
+    if (decoded.trim() === '') continue;
+    if (crypto.createHash('sha256').update(decoded, 'utf8').digest('hex') !== digest) continue;
+    out[role] = decoded;
+  }
+  return out;
+}
+
+/**
+ * Which voters must run, and which may reuse a verdict already produced for this exact
+ * patch (#2142).
+ *
+ * DELIBERATELY DOES NOT require the prior check-run to be `completed` + `success`, which
+ * is where this parts company with findReattestableVerdict below. That function reuses a
+ * whole PASS, so success is the point. Here the prior run FAILED overall - one voter went
+ * silent and the panel fail-closed to `changes` - and that is precisely the run whose
+ * survivors are worth keeping. Requiring success would disable reuse exactly when it is
+ * needed.
+ *
+ * What it does require, and why each one:
+ *   - an allowlisted `app.slug`: a verdict record in a PUBLIC repo is forgeable, so the
+ *     server-attested producer identity is the only thing making it trustworthy;
+ *   - the SAME patch fingerprint: the voter must have been looking at this input;
+ *   - a record that round-trips its digest: see parseVoterRecords.
+ *
+ * It CANNOT upgrade a verdict, because it copies the block verbatim and the caller
+ * re-combines; a reused `changes` stays `changes`. And a voter with no usable record is
+ * never a survivor, so silence always costs a re-run rather than being inherited.
+ *
+ * SHA-BOUND, and `headSha` is REQUIRED. Without it nothing is reused at all.
+ *
+ * This was WRONG when first written, and the wrongness is worth keeping on the record
+ * because it is the exact failure this repo keeps paying for. The comment here claimed
+ * reuse happened "within ONE head SHA" while the code compared only the patch
+ * fingerprint and never looked at `head_sha` - so it reused across commits whenever the
+ * diff matched, which IS the base-moved case #1840 was closed over, justified by a
+ * sentence saying it was not. Three voters caught it; the diff's own test reused across
+ * two SHAs and proved it.
+ *
+ * The fix narrows the CODE to the claim rather than widening the claim to the code,
+ * because the claim is what makes the feature safe and the narrowing costs nothing:
+ * #2142's case is a voter dying and the SAME head being re-reviewed, so same-SHA reuse
+ * keeps the whole benefit. Cross-SHA reuse would buy the repeats #1840 measured - every
+ * one of which was a base move - and buy the #1394 semantic-conflict risk with them.
+ *
+ * WHY `headSha` IS REQUIRED HERE AND OPTIONAL IN verifyHeadPassCheckRun. There it is
+ * belt-and-braces: the workflow already queries BY the head ref, so the SHA match
+ * re-checks something upstream established. Here it IS the safety property, so leaving
+ * it optional would make the docblock above false again in the default path.
+ *
+ * Among candidates on that SHA, the MOST RECENT wins, by `checkRunTime` - the same
+ * ordering verifyHeadPassCheckRun uses, so a re-run's fresher record supersedes an
+ * earlier one. Caller array order is deliberately NOT load-bearing: it was, and the
+ * test asserting recency passed only because the fixture happened to be ordered.
+ */
+function selectVotersToRun({ roles, checkRuns, patchHash, allowlist, headSha } = {}) {
+  const wanted = Array.isArray(roles) ? roles.slice() : [];
+  const notes = [];
+  const reuse = {};
+
+  if (!patchHash) {
+    notes.push('no patch fingerprint for this head, so every voter runs');
+    return { run: wanted, reuse, notes };
+  }
+  // The SHA binding is the safety property, not a nicety - see the docblock. A caller
+  // that does not say which head it is reviewing gets no reuse.
+  if (!headSha) {
+    notes.push('no head SHA to bind reuse to, so every voter runs');
+    return { run: wanted, reuse, notes };
+  }
+  const allowed = Array.isArray(allowlist) ? allowlist.filter(Boolean) : [];
+  if (allowed.length === 0) {
+    notes.push('empty reviewer allowlist, so nothing is reused');
+    return { run: wanted, reuse, notes };
+  }
+  // MOST RECENT FIRST, so the newest record for a role wins the first-wins loop below.
+  // Sorted here rather than trusted from the caller: the recency guarantee has to come
+  // from this function, or the note it prints ("verdict recorded on X") is the only
+  // thing tying a reused verdict to a run, and it would name whichever one the caller
+  // happened to list first.
+  const runs = (Array.isArray(checkRuns) ? checkRuns : [])
+    .slice()
+    .sort((a, b) => checkRunTime(b) - checkRunTime(a));
+
+  for (const c of runs) {
+    if (!c || c.name !== CHECK_NAME) continue;
+    // Same SHA only. A prior run on a DIFFERENT commit reviewed a different merge
+    // result even when the diff text is byte-identical (#1394).
+    if (c.head_sha !== headSha) continue;
+    const slug = c.app && c.app.slug;
+    const identities = [slug, slug ? `${slug}[bot]` : null].filter(Boolean);
+    // isAuthorizedReviewer, not a raw `includes` - it lower-cases the login, so this
+    // cannot become a SECOND, stricter door than the one verifyHeadPassCheckRun uses.
+    // Harmless today because every caller passes parseAllowlist output, which is already
+    // lower-cased; the divergence is the defect, not a present miss (#2163 review).
+    if (!identities.some((i) => isAuthorizedReviewer(i, allowed))) continue;
+    const text = [c.output && c.output.title, c.output && c.output.summary, c.output && c.output.text]
+      .filter(Boolean)
+      .join('\n');
+    if (parsePatchFingerprint(text) !== patchHash) continue;
+    const records = parseVoterRecords(text);
+    for (const role of wanted) {
+      if (Object.prototype.hasOwnProperty.call(reuse, role)) continue;
+      if (!Object.prototype.hasOwnProperty.call(records, role)) continue;
+      reuse[role] = records[role];
+      notes.push(
+        `reusing ${role}: same patch and same head ${String(c.head_sha).slice(0, 8)}`,
+      );
+    }
+  }
+
+  const run = wanted.filter((r) => !Object.prototype.hasOwnProperty.call(reuse, r));
+  for (const role of run) {
+    notes.push(`running ${role}: no usable prior verdict for this patch`);
+  }
+  return { run, reuse, notes };
 }
 
 /**
@@ -1120,6 +1412,14 @@ module.exports = {
   parsePatchFingerprint,
   findReattestableVerdict,
   PATCH_FINGERPRINT_PREFIX,
+  VOTER_RECORD_PREFIX,
+  renderVoterRecord,
+  isStructuralVerdictBlock,
+  VERDICT_BEGIN_TOKEN,
+  VERDICT_END_TOKEN,
+  UNAVAILABLE_TOKEN,
+  parseVoterRecords,
+  selectVotersToRun,
   parseResetInstant,
   VERDICT_SCHEMA,
   defangProtocolTokens,

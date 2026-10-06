@@ -2,6 +2,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type { Tier, Phase, SpecsLayout } from './config';
 import { hashLockReminder } from './approval-store';
+import { ensureDirectory } from './opt-in';
 import { loadConfig, PHASES, resolveAndValidate, DEFAULT_CONFIG } from './config';
 import type { SpecFrontmatter, ParsedSpec } from './spec';
 import { writeSpec, readSpecFile, writeSpecFile } from './spec';
@@ -20,7 +21,9 @@ import {
   readSpecKitDir,
   writeSpecKitDir,
   specKitDirName,
+  SPEC_KIT_FILES,
 } from './spec-layout';
+import { restoreLineEndings } from './text-io';
 
 /** Summary of a spec for listing/display */
 export interface SpecSummary {
@@ -89,8 +92,8 @@ const SPEC_ID_RE = /^SPEC-(\d+)/;
 const FLAT_DIR_NUM_RE = /^(\d{3,})-/;
 const SPEC_FILE_RE = /^SPEC-\d{3,}.*\.md$/;
 /** Match an `id: SPEC-NNN` / `product: slug` frontmatter line (value may carry an inline `# comment`). */
-const FM_ID_LINE_RE = /^id:\s*(SPEC-\d+)/m;
-const FM_PRODUCT_LINE_RE = /^product:\s*([^\s#]+)/m;
+const FM_ID_LINE_RE = /^id:[ \t]*(SPEC-\d+)/m;
+const FM_PRODUCT_LINE_RE = /^product:[ \t]*([^\s#]+)/m;
 
 /** One discovered spec id and the product that owns it (if known). */
 interface DiscoveredSpec {
@@ -358,7 +361,7 @@ export function createSpec(
 ): SpecSummary {
   const config = loadConfig(rootDir);
   const specsDir = resolveAndValidate(rootDir, config.specsDir);
-  fs.mkdirSync(specsDir, { recursive: true });
+  ensureDirectory(specsDir); // SPEC-096 FR-4: never creates `.minspec/`
 
   const id = nextSpecId(specsDir, product);
   const slug = slugify(title);
@@ -635,6 +638,12 @@ export interface MigrationResult {
  *
  * Frontmatter and body content are preserved byte-for-byte (round-trip
  * tested in spec-layout.test.ts — see "no data loss" invariant).
+ *
+ * Line endings (SPEC-095 FR-5(a)): the files written hold the same text as the spec they
+ * replace, so they take that spec's line endings rather than LF, which every other file
+ * MinSpec creates is written in. Flat to spec-kit goes through `writeSpecKitDir`, which
+ * restores the new files against the flat spec's `source`; spec-kit to flat restores the
+ * new file against the directory's files, read before they are removed.
  */
 export function migrateLayout(rootDir: string, target: SpecsLayout): MigrationResult {
   const specsDir = resolveSpecsDir(rootDir);
@@ -677,7 +686,15 @@ export function migrateLayout(rootDir: string, target: SpecsLayout): MigrationRe
           warning: `Target file already exists: ${fileName}`,
         };
       }
-      fs.writeFileSync(filePath, writeSpec(parsed), 'utf-8');
+      // The directory's files, in the order `readSpecKitDir` reads them: the text the new
+      // file holds, and so the line endings it takes.
+      const sources =
+        entry.kind === 'spec-kit'
+          ? SPEC_KIT_FILES.map((f) => path.join(entry.dirPath, f))
+              .filter((p) => fs.existsSync(p))
+              .map((p) => fs.readFileSync(p, 'utf-8'))
+          : [parsed.source ?? ''];
+      fs.writeFileSync(filePath, restoreLineEndings(writeSpec(parsed), sources), 'utf-8');
     }
 
     toDelete.push(entry);

@@ -20,24 +20,35 @@
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
+import { execFileSync } from 'child_process';
 
 const REPO_ROOT = path.resolve(__dirname, '../../..');
 
 /** A Cloudflare account id is 32 lowercase hex characters. */
 const ACCOUNT_ID = /^\s*account_id\s*=\s*"([0-9a-f]{32})"\s*$/m;
 
-function findWranglerConfigs(dir: string, out: string[] = []): string[] {
-  for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
-    if (entry.name === 'node_modules' || entry.name === '.git' || entry.name === 'dist') continue;
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) findWranglerConfigs(full, out);
-    else if (/^wrangler\.(toml|jsonc?)$/.test(entry.name)) out.push(full);
-  }
-  return out;
+/**
+ * #1984 — enumerate from git, not the working tree. `fs.readdirSync` from the repo root has
+ * no concept of tracked-ness: a gitignored harness worktree (e.g. `.claude/worktrees/**`) left
+ * behind by a crashed agent run sits under the repo root and gets scanned as though it were
+ * repo content, so a `wrangler.toml` inside it is reported as an unpinned-account violation
+ * that CI never sees (CI's checkout never has one). `git ls-files` draws the same corpus
+ * locally and in CI, so the two environments agree by construction.
+ */
+function findWranglerConfigs(): string[] {
+  const out = execFileSync(
+    'git',
+    ['ls-files', '-z', '--', '*wrangler.toml', '*wrangler.json', '*wrangler.jsonc'],
+    { cwd: REPO_ROOT, encoding: 'utf8' },
+  );
+  return out
+    .split('\0')
+    .filter((line) => line.length > 0)
+    .map((line) => path.join(REPO_ROOT, line));
 }
 
 describe('#1869 every Worker config pins account_id', () => {
-  const configs = findWranglerConfigs(REPO_ROOT);
+  const configs = findWranglerConfigs();
 
   it('finds at least one Worker config — otherwise this suite passes by finding nothing', () => {
     // Without this, deleting or renaming every wrangler.toml turns the gate below green,

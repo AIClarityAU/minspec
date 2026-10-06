@@ -17,7 +17,12 @@
 
 import { readFileSync, statSync, existsSync } from 'fs';
 import { join, relative, dirname, sep } from 'path';
-import { validateDrSequence, validateDrIndexStatus, validateDrAmendments } from '../packages/minspec/src/lib/adr-manager';
+import {
+  validateDrSequence,
+  validateDrIndexStatus,
+  validateDrAmendments,
+  detectDoubledFrontmatter,
+} from '../packages/minspec/src/lib/adr-manager';
 import {
   validateSplitLayoutCoverage,
   checkAcceptanceCriteria,
@@ -40,8 +45,14 @@ import { checkManagedRegionMarkers } from '../packages/minspec/src/lib/scaffold'
 import { walkFilesByExt as glob, walkOptionalRoot as safeGlob } from './lib/corpus-walk';
 import { checkDeclaredDrIds } from './lib/dr-id-collision';
 import { checkDeclaredSpecIds } from './lib/spec-id-collision';
-import { SELF_HOSTED_TEMPLATE_NAMES } from '../packages/minspec/src/lib/template-registry';
+import {
+  SELF_HOSTED_TEMPLATE_NAMES,
+  TEMPLATE_NAMES,
+  TEMPLATE_OUTPUT_PATHS,
+} from '../packages/minspec/src/lib/template-registry';
 import { detectTools } from '../packages/minspec/src/lib/tool-detector';
+import { buildContext, renderTemplate } from '../packages/minspec/src/lib/template-engine';
+import { parseSections, PREAMBLE_HEADING, detectDoubledTemplateHeadings } from '../packages/minspec/src/lib/merge-refresh';
 
 const ROOT = process.cwd();
 let errors = 0;
@@ -522,25 +533,66 @@ try {
 // changed, turning a silent main-breakage into a commit/PR-time error with the
 // exact fix command. Dynamic `import()` (not a top-level await) keeps this file
 // runnable under either CJS or ESM compilation of this script.
+//
+// FAIL CLOSED (#871, constitution invariant 2). This rule used to wrap its WHOLE body
+// in `try { … } catch { /* stay silent */ }`, which made it the one gate guaranteed not
+// to notice the thing it exists to notice: a registered managed source that is absent or
+// unreadable throws inside `generateAll`, and the catch turned that into a quiet pass —
+// while also abandoning every generated file after the first error. "Could not check" is
+// not "checked and fine", and the corpus-optional rules this was copied from are not an
+// analogy: those scan directories that legitimately may not exist, whereas every path
+// here is REGISTERED in the generator, so its absence is a defect by construction.
 async function checkCiReviewTemplatesFresh(): Promise<void> {
+  type GeneratedFile = { outputPath: string; content: string };
+  const GEN = join(ROOT, 'scripts/gen-ci-templates.mjs');
+  let gen: {
+    generateAll: (repoRoot: string) => GeneratedFile[];
+    CI_TEMPLATE_OUTPUT_PATHS?: readonly string[];
+  };
   try {
-    const gen = await import('./gen-ci-templates.mjs');
-    // Iterate EVERY generated file the generator owns (the CI-review stack and the
-    // Claude Code hook stack, #1093) rather than naming one — a file added to the
-    // generator is gated here without anyone remembering to widen this rule.
-    for (const { outputPath, content } of gen.generateAll(ROOT)) {
-      const outFile = join(ROOT, outputPath);
-      const onDisk = readFileSync(outFile, 'utf-8');
-      if (onDisk !== content) {
-        fail(
-          outFile,
-          'stale — drifted from its on-disk sources (#678). Run: node scripts/gen-ci-templates.mjs',
-        );
-      }
+    gen = await import('./gen-ci-templates.mjs');
+  } catch (error) {
+    fail(GEN, `cannot be loaded (${(error as Error).message}) — template staleness is UNVERIFIED, not clean.`);
+    return;
+  }
+
+  // APPLICABILITY, decided BEFORE anything can throw, and decided on the generated
+  // OUTPUTS rather than on the sources. `ROOT` is `process.cwd()`, so this script is
+  // also run against scratch trees that were never meant to hold an embedded-template
+  // stack; "this is not that repo" is a real answer and must stay distinguishable from
+  // "this repo is broken". Keying on a SOURCE would collapse the two — a deleted
+  // managed source would read as "not that repo" and go quiet, which is the #871 hole.
+  const outputs = gen.CI_TEMPLATE_OUTPUT_PATHS ?? [];
+  if (!outputs.some((p) => existsSync(join(ROOT, p)))) return;
+
+  // Iterate EVERY generated file the generator owns (the CI-review stack and the
+  // Claude Code hook stack, #1093) rather than naming one — a file added to the
+  // generator is gated here without anyone remembering to widen this rule.
+  let generated: GeneratedFile[];
+  try {
+    generated = gen.generateAll(ROOT);
+  } catch (error) {
+    fail(GEN, `${(error as Error).message}`);
+    return;
+  }
+
+  for (const { outputPath, content } of generated) {
+    const outFile = join(ROOT, outputPath);
+    let onDisk: string;
+    try {
+      onDisk = readFileSync(outFile, 'utf-8');
+    } catch (error) {
+      // Keep going: one missing generated file must not stop the remaining ones being
+      // checked ("never … stops evaluating", invariant 2).
+      fail(outFile, `generated file is missing or unreadable (${(error as Error).message}). Run: node scripts/gen-ci-templates.mjs`);
+      continue;
     }
-  } catch {
-    // Generator or one of its source files unreadable/absent — nothing to check,
-    // stay silent (mirrors the other corpus-optional rules above).
+    if (onDisk !== content) {
+      fail(
+        outFile,
+        'stale — drifted from its on-disk sources (#678). Run: node scripts/gen-ci-templates.mjs',
+      );
+    }
   }
 }
 
@@ -714,6 +766,78 @@ try {
     `claim-word check could not run (${err instanceof Error ? err.message : String(err)}) — ` +
       'Rule 19 validated NOTHING this run; do not read the green as a clean corpus.',
   );
+}
+
+// Rule 20 (non-fatal, #2467): a decision or epic record carrying TWO
+// frontmatter-shaped `---` blocks back to back. This is the shape
+// `setAdrStatus` (adr-manager.ts:711-717) produces when handed a record whose
+// EXISTING block it could not parse: it synthesizes a fresh LF block and
+// prepends it, leaving the original block as body text immediately below,
+// stale `status:` line and all — four `---` lines and two `status:` lines in
+// one record. Nothing downstream notices: `listAdrs` reads only the FIRST
+// block (adr-manager.ts:1308-1336), and the status-parity rule (Rule 11 above)
+// compares frontmatter against a `## Status` section or a head blockquote — a
+// stray body `status:` line is neither. The CRLF parsing fix (SPEC-095, #2397)
+// stops new damage; this is the backstop for a file already damaged, which
+// nothing else finds or repairs. WARN only (Low severity, #2467): the damage is
+// visible in a diff, and whether any real project carries such a file is
+// unverified.
+try {
+  const doubledFmRoots: { dir: string; label: string }[] = [
+    { dir: resolveDecisionsDir(), label: 'decision' },
+    { dir: join(ROOT, 'docs', 'epics'), label: 'epic' },
+  ];
+  for (const { dir, label } of doubledFmRoots) {
+    for (const file of safeGlob(dir, '.md')) {
+      const finding = detectDoubledFrontmatter(readFileSync(file, 'utf-8'));
+      if (finding) {
+        warn(
+          `doubled-frontmatter ${relative(ROOT, file)}: this ${label} record carries TWO ` +
+            `frontmatter-shaped blocks — the first closes at line ${finding.firstBlockEndLine}, ` +
+            `and a second \`---\` block opens again immediately at line ${finding.secondBlockStartLine} ` +
+            `(#2467). Likely a synthesized block prepended ahead of the original. Merge the two ` +
+            `into one frontmatter block (keep the correct \`status:\`) and remove the stale duplicate.`,
+        );
+      }
+    }
+  }
+} catch {
+  // decisions/epics dir unreadable / absent — nothing to check, stay silent.
+}
+
+// Rule 21 (non-fatal, #2467): a generated harness file (CLAUDE.md, AGENTS.md,
+// .cursorrules, .minspec/constitution.md, labels.md) in which a TEMPLATE
+// heading occurs twice — the shape `refreshHarnessFiles` → `mergeFile`
+// (merge-refresh.ts:986-990) produces on a CRLF-damaged existing file: every
+// `##` heading gets appended a second time rather than merged. Measured
+// (#2467): a CRLF copy of CLAUDE.md went 418→835 lines (12→24 headings);
+// `.minspec/constitution.md` went 4→8. The harness merge keeps a surplus
+// duplicate-named section as user content BY DESIGN (merge-refresh.ts:993-1005),
+// so a later Refresh leaves a doubled file doubled forever — nothing else in
+// the pipeline notices. WARN only (Low severity, #2467).
+try {
+  const harnessConfig = loadConfig(ROOT);
+  const harnessContext = buildContext(ROOT, harnessConfig);
+  for (const name of TEMPLATE_NAMES) {
+    const outputPath = join(ROOT, TEMPLATE_OUTPUT_PATHS[name]);
+    if (!existsSync(outputPath)) continue;
+    const templateHeadings = parseSections(renderTemplate(name, harnessContext))
+      .map((s) => s.heading)
+      .filter((h) => h !== PREAMBLE_HEADING);
+    const existingContent = readFileSync(outputPath, 'utf-8');
+    const doubled = detectDoubledTemplateHeadings(existingContent, templateHeadings);
+    if (doubled.length > 0) {
+      const shown = doubled.slice(0, 5).join(', ');
+      const more = doubled.length > 5 ? ` (+${doubled.length - 5} more)` : '';
+      warn(
+        `doubled-sections ${relative(ROOT, outputPath)}: ${doubled.length} template heading(s) ` +
+          `appear twice — ${shown}${more} (#2467; likely a CRLF-damaged Refresh, see SPEC-095). ` +
+          `Each doubled section must be reconciled by hand: decide which copy is current and delete the other.`,
+      );
+    }
+  }
+} catch {
+  // Template rendering / harness files unreadable — nothing to check, stay silent.
 }
 
 checkCiReviewTemplatesFresh().then(() => {

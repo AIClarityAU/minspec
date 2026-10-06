@@ -31,6 +31,8 @@ function makeVsCodeStub(
   overrides: Partial<{
     enabled: boolean;
     response: string | undefined;
+    settings: Record<string, boolean>;
+    memory: Map<string, unknown>;
   }> = {},
 ) {
   const enabled = overrides.enabled ?? true;
@@ -38,13 +40,27 @@ function makeVsCodeStub(
   const showPrompt = vi.fn(async () => response);
   const executeCommand = vi.fn(async () => undefined);
   const enableAutoClassify = vi.fn(async () => undefined);
+  // The READ counterpart to `enableAutoClassify` (#2079). Backed by a plain map
+  // so a test can stand in a contributed VS Code setting value.
+  const settings = overrides.settings ?? {};
+  const getBooleanSetting = vi.fn((key: string) => settings[key] === true);
+  // Stand-in for VS Code's `workspaceState` (#2355): where an answer given in a
+  // folder with no `.minspec/` is remembered, instead of in a file there.
+  const memory = overrides.memory ?? new Map<string, unknown>();
   const stub: BootstrapVsCode = {
     isEnabled: () => enabled,
     showPrompt,
     executeCommand,
     enableAutoClassify,
+    getBooleanSetting,
+    preOptInMemory: {
+      get: <T,>(key: string) => memory.get(key) as T | undefined,
+      update: async (key: string, value: unknown) => {
+        memory.set(key, value);
+      },
+    },
   };
-  return { stub, showPrompt, executeCommand, enableAutoClassify };
+  return { stub, showPrompt, executeCommand, enableAutoClassify, getBooleanSetting, memory };
 }
 
 describe('auto-bootstrap', () => {
@@ -189,6 +205,7 @@ describe('auto-bootstrap', () => {
     });
 
     it('T0: returns true when .git/index is newer and no classifications exist', () => {
+      fs.mkdirSync(path.join(tmpDir, '.minspec'));
       fs.mkdirSync(path.join(tmpDir, '.git'), { recursive: true });
       const headPath = path.join(tmpDir, '.git', 'HEAD');
       const indexPath = path.join(tmpDir, '.git', 'index');
@@ -238,14 +255,21 @@ describe('auto-bootstrap', () => {
       expect(loadPreferences(tmpDir)).toEqual({});
     });
 
-    it('T0: savePreferences creates .minspec/ and writes JSON', () => {
+    it('T0: savePreferences writes JSON into an existing .minspec/', () => {
+      fs.mkdirSync(path.join(tmpDir, '.minspec'));
       savePreferences(tmpDir, { skipInitPrompt: true });
       expect(fs.existsSync(preferencesPath(tmpDir))).toBe(true);
       const loaded = loadPreferences(tmpDir);
       expect(loaded.skipInitPrompt).toBe(true);
     });
 
+    it('T0: savePreferences never creates .minspec/ - it refuses instead (#2355)', () => {
+      expect(() => savePreferences(tmpDir, { skipInitPrompt: true })).toThrow(/has not opted in/);
+      expect(fs.readdirSync(tmpDir)).toEqual([]);
+    });
+
     it('T0: savePreferences merges with existing preferences (does not clobber)', () => {
+      fs.mkdirSync(path.join(tmpDir, '.minspec'));
       savePreferences(tmpDir, { skipInitPrompt: true });
       savePreferences(tmpDir, { skipRefreshPrompt: true });
       const loaded = loadPreferences(tmpDir);
@@ -303,11 +327,13 @@ describe('auto-bootstrap', () => {
       expect(prefs.skipInitPrompt).toBeFalsy();
     });
 
-    it("T0: Don't ask again persists skipInitPrompt: true", async () => {
-      const { stub } = makeVsCodeStub({ response: "Don't ask again" });
+    it("T0: Don't ask again persists skipInitPrompt: true - in workspace memory, not in the folder (#2355)", async () => {
+      const { stub, memory } = makeVsCodeStub({ response: "Don't ask again" });
       await runBootstrap(tmpDir, stub);
-      const prefs = loadPreferences(tmpDir);
-      expect(prefs.skipInitPrompt).toBe(true);
+      // The folder has not opted in, so the answer must not be written into it:
+      // `.minspec/preferences.json` there would BE the opt-in marker.
+      expect([...memory.values()]).toEqual([{ skipInitPrompt: true }]);
+      expect(fs.readdirSync(tmpDir)).toEqual([]);
     });
   });
 
@@ -363,6 +389,144 @@ describe('auto-bootstrap', () => {
   });
 
   // =========================================================================
+  // #2079: the "Always" choice must SURVIVE the window that recorded it.
+  // Regression for the founder report "I click Always and it asks me again".
+  // These exercise the SHIPPED classify step, not a synthetic one, because the
+  // defect lived in that step's own guard.
+  // =========================================================================
+
+  describe('runBootstrap() — "Always" survives a reload (#2079)', () => {
+    /** Make the real classify step eligible: a git repo with staging activity. */
+    function armClassifyPrompt(): void {
+      fs.mkdirSync(path.join(tmpDir, '.minspec'), { recursive: true });
+      fs.mkdirSync(path.join(tmpDir, '.git'), { recursive: true });
+      const headPath = path.join(tmpDir, '.git', 'HEAD');
+      const indexPath = path.join(tmpDir, '.git', 'index');
+      fs.writeFileSync(headPath, 'ref: refs/heads/main\n');
+      fs.writeFileSync(indexPath, 'binary index contents');
+      const now = Date.now();
+      fs.utimesSync(headPath, (now - 60000) / 1000, (now - 60000) / 1000);
+      fs.utimesSync(indexPath, now / 1000, now / 1000);
+    }
+
+    /**
+     * Simulate further staging activity (a `git add`). This is what expires the
+     * per-state answer memory (#883 keys the classify step on `.git/index`
+     * mtime) and is exactly why the founder saw the prompt come back.
+     */
+    function restageFiles(): void {
+      const indexPath = path.join(tmpDir, '.git', 'index');
+      const later = Date.now() + 5000;
+      fs.utimesSync(indexPath, later / 1000, later / 1000);
+    }
+
+    const classifyStep = (): BootstrapStep =>
+      BOOTSTRAP_STEPS.find((s) => s.kind === 'classify')!;
+
+    it('T3: "Always", then a reload with fresh staging → never prompts again', async () => {
+      armClassifyPrompt();
+      const first = makeVsCodeStub({ response: 'Always' });
+      const r1 = await runBootstrap(tmpDir, first.stub, [classifyStep()]);
+      expect(r1.offered).toBe('classify');
+      expect(r1.choice).toBe('Always');
+
+      restageFiles();
+
+      // A new window: a brand-new host stub, nothing carried in memory. The only
+      // channel between the two runs is what run 1 persisted.
+      const second = makeVsCodeStub({ response: 'Always' });
+      const r2 = await runBootstrap(tmpDir, second.stub, [classifyStep()]);
+      expect(second.showPrompt).not.toHaveBeenCalled();
+      expect(r2.offered).toBeNull();
+      // ...and it classifies anyway, passively (auto mode = status bar, no toast).
+      expect(second.executeCommand).toHaveBeenCalledWith(
+        'minspec.classify',
+        tmpDir,
+        { auto: true },
+      );
+    });
+
+    it('T3: the WRITE half — "Always" persists the choice where the guard reads', async () => {
+      armClassifyPrompt();
+      const { stub } = makeVsCodeStub({ response: 'Always' });
+      await runBootstrap(tmpDir, stub, [classifyStep()]);
+      expect(loadPreferences(tmpDir).autoClassifyOnCommit).toBe(true);
+    });
+
+    it('T3: the READ half — an already-persisted choice suppresses the prompt', async () => {
+      armClassifyPrompt();
+      savePreferences(tmpDir, { autoClassifyOnCommit: true });
+      const { stub, showPrompt, executeCommand } = makeVsCodeStub({
+        response: 'Always',
+      });
+      const r = await runBootstrap(tmpDir, stub, [classifyStep()]);
+      expect(showPrompt).not.toHaveBeenCalled();
+      expect(r.offered).toBeNull();
+      expect(executeCommand).toHaveBeenCalledWith('minspec.classify', tmpDir, {
+        auto: true,
+      });
+    });
+
+    it('T3: the contributed setting is honoured as the fallback (DR-078 read order)', async () => {
+      armClassifyPrompt();
+      const { stub, showPrompt } = makeVsCodeStub({
+        response: 'Always',
+        settings: { autoClassifyOnCommit: true },
+      });
+      await runBootstrap(tmpDir, stub, [classifyStep()]);
+      expect(showPrompt).not.toHaveBeenCalled();
+    });
+
+    it('T3: a project preference of false overrides a setting of true (opt-out survives)', async () => {
+      armClassifyPrompt();
+      savePreferences(tmpDir, { autoClassifyOnCommit: false });
+      const { stub, showPrompt } = makeVsCodeStub({
+        response: undefined,
+        settings: { autoClassifyOnCommit: true },
+      });
+      await runBootstrap(tmpDir, stub, [classifyStep()]);
+      expect(showPrompt).toHaveBeenCalled();
+    });
+
+    it('T3: the shipped classify step declares where its "Always" is remembered', () => {
+      const step = classifyStep();
+      expect(step.alwaysAction).toBe('Always');
+      expect(step.alwaysPrefKey).toBe('autoClassifyOnCommit');
+      expect(step.alwaysSettingKey).toBe('autoClassifyOnCommit');
+      expect(step.alwaysRunArg).toEqual({ auto: true });
+    });
+
+    it('T3: a step with an "Always" label but no store is never silently suppressed', async () => {
+      const unbacked: BootstrapStep = {
+        kind: 'classify',
+        shouldRun: () => true,
+        message: 'MinSpec: synthetic?',
+        primaryAction: 'Classify',
+        commandId: 'minspec.classify',
+        skipPrefKey: 'skipClassifyPrompt',
+        alwaysAction: 'Always',
+      };
+      fs.mkdirSync(path.join(tmpDir, '.minspec'));
+      savePreferences(tmpDir, { autoClassifyOnCommit: true });
+      const { stub, showPrompt } = makeVsCodeStub({
+        response: undefined,
+        settings: { autoClassifyOnCommit: true },
+      });
+      await runBootstrap(tmpDir, stub, [unbacked]);
+      expect(showPrompt).toHaveBeenCalled();
+    });
+
+    it('T3: a host with no setting reader still honours the persisted choice', async () => {
+      armClassifyPrompt();
+      savePreferences(tmpDir, { autoClassifyOnCommit: true });
+      const { stub, showPrompt } = makeVsCodeStub({ response: 'Always' });
+      delete (stub as { getBooleanSetting?: unknown }).getBooleanSetting;
+      await runBootstrap(tmpDir, stub, [classifyStep()]);
+      expect(showPrompt).not.toHaveBeenCalled();
+    });
+  });
+
+  // =========================================================================
   // #213: backfill step forwards AI consent so the command doesn't re-ask
   // =========================================================================
 
@@ -398,9 +562,14 @@ describe('auto-bootstrap', () => {
 
   describe('runBootstrap() — honoring skip preferences', () => {
     it('T0: respects skipInitPrompt and surfaces no init toast', async () => {
-      // .minspec/ missing → would normally trigger init prompt
-      savePreferences(tmpDir, { skipInitPrompt: true });
-      const { stub, showPrompt } = makeVsCodeStub();
+      // .minspec/ missing → would normally trigger init prompt. The skip flag for
+      // a folder that has not opted in lives in workspace memory (#2355): answer
+      // "Don't ask again" once, then reload against the same memory.
+      const first = makeVsCodeStub({ response: "Don't ask again" });
+      await runBootstrap(tmpDir, first.stub);
+      expect(first.showPrompt).toHaveBeenCalledTimes(1);
+
+      const { stub, showPrompt } = makeVsCodeStub({ memory: first.memory });
       const result = await runBootstrap(tmpDir, stub);
       expect(showPrompt).not.toHaveBeenCalled();
       expect(result.offered).toBeNull();
@@ -824,6 +993,14 @@ describe('auto-bootstrap', () => {
   // =========================================================================
 
   describe('runBootstrap() — per-signature answer memory (#883)', () => {
+    // These pin the FILE-backed memory, which is what an opted-in project uses.
+    // The store never creates `.minspec/` (#2355), so the fixture opts in the way
+    // a real project has; the not-opted-in half lives in
+    // bootstrap-opt-in-invariant.test.ts.
+    beforeEach(() => {
+      fs.mkdirSync(path.join(tmpDir, '.minspec'));
+    });
+
     /**
      * A controllable step whose signature and skip flag we can drive. `shouldRun`
      * mirrors the real steps (honours its DONT_ASK boolean) so the forever-skip

@@ -40,6 +40,9 @@
  *     authenticated CLI, and it is unreachable unless a consented push already
  *     succeeded (SPEC-050 INV-1). MinSpec opens no socket itself — the same
  *     Tier-1 local-tool-delegation posture (DR-004) as `lib/approve-push.ts`.
+ *     The same holds for the one other forge write here, #2243's creation of the
+ *     missing `docs-lane` label: it happens only inside that same consented
+ *     PR-opening step, and only when the caller opts in.
  *   - The only in-repo dependency is `./docs-corpus`, a pure predicate that does
  *     zero I/O, so {@link laneLabelsFor} is decidable offline.
  *
@@ -79,6 +82,11 @@
 import { execFile } from 'child_process';
 import { promisify } from 'util';
 import { isDocsCorpusPath } from './docs-corpus';
+import {
+  governanceStatusTransitions,
+  isGovernancePath,
+  type DiffEntry,
+} from './governance-transition';
 import type { ApprovalRecord } from './approval';
 
 const execFileAsync = promisify(execFile);
@@ -91,6 +99,15 @@ const GIT_TIMEOUT_MS = 30_000;
  * place ({@link laneLabelsFor}) so INV-2 is a property of the code, not a habit.
  */
 export const DOCS_LANE_LABEL = 'docs-lane';
+
+/**
+ * How {@link DOCS_LANE_LABEL} looks when MinSpec has to create it (#2243): the colour
+ * and description the label in AIClarityAU/minspec has carried since the lane shipped
+ * (#575), so an adopter's copy is indistinguishable from the original.
+ */
+export const DOCS_LANE_LABEL_COLOR = '0e8a16';
+export const DOCS_LANE_LABEL_DESCRIPTION =
+  'Docs-only PR — docs-lane workflow auto-merges once checks pass';
 
 /**
  * Minimal git/gh surface, injectable so tests drive a stub instead of spawning a
@@ -214,6 +231,37 @@ export interface OpenPrRequest {
    * Slice 1 is a pure refactor (R3/AC-10). Only SPEC-050's approval path opts in.
    */
   readonly adoptExisting?: boolean;
+  /**
+   * #2243. When the create is refused because {@link DOCS_LANE_LABEL} does not exist
+   * in the target repository, create that one label and retry the create once.
+   *
+   * WHY. `gh` resolves every `--label` to an id BEFORE it creates the pull request,
+   * and refuses outright when one is missing: nothing is created. MinSpec scaffolds
+   * the docs-lane workflow into adopter repositories, but nothing ever provisioned
+   * the label that workflow gates on. The ai-review workflow provisions the labels IT applies;
+   * the lane workflow cannot, because it only runs on a PR that already carries its
+   * label. So in a repository that never had the label (voip-sms-inbox) every approval
+   * fell to the manual `Open PR` surface, and the PR made by hand could not ride the
+   * lane, so it needed a manual merge as well.
+   *
+   * THE BOUNDARY, stated because this is a forge write. The decision, its consent
+   * reasoning and the alternatives rejected are recorded in DR-098 (lane-label
+   * provisioning); SPEC-050's design.md carries the design. Widening any line below
+   * is a new decision, not an edit:
+   *   - Only {@link DOCS_LANE_LABEL}, never whatever name gh reports. A maintainer's
+   *     own missing label is theirs to create.
+   *   - Only inside the PR-opening step, which is reachable only after a consented
+   *     push (SPEC-050 INV-1), so the consent that covers opening the PR covers
+   *     creating the label it needs (constitution invariant 1).
+   *   - Only in the repository the PR targets: same `cwd`, same `slug`, so gh resolves
+   *     the base repository the same way for both writes (constitution invariant 3).
+   *     The approval caller also requires the checkout to carry the lane workflow.
+   *   - At most once per call, and never `--force`: an existing label is never edited.
+   *
+   * DEFAULT false: SPEC-039's command keeps its pinned behaviour (R3/AC-10) and gains
+   * no call. Only SPEC-050's approval path opts in.
+   */
+  readonly provisionLaneLabel?: boolean;
 }
 
 export interface OpenPrResult {
@@ -222,6 +270,62 @@ export interface OpenPrResult {
   readonly url?: string;
   /** Error detail incl. gh stderr (present on 'offline'/'failed'/'gh-unauthenticated'). */
   readonly error?: string;
+  /**
+   * #2243. The requested label gh refused because the repository does not have it
+   * (present on 'failed' when that was the cause), so a caller can state the real
+   * reason instead of "opening the PR failed".
+   */
+  readonly missingLabel?: string;
+  /**
+   * #2243. True when THIS call created {@link DOCS_LANE_LABEL}. Set whatever the
+   * retry's outcome, because the write happened either way and a caller must never
+   * leave a forge write unmentioned.
+   */
+  readonly labelProvisioned?: boolean;
+}
+
+/** GitHub's hard cap on a PR title (`Title is too long (maximum is 256 characters)`). */
+const PR_TITLE_MAX_LEN = 256;
+
+/** {@link splitCommitMessage}'s result: a title GitHub will accept, plus the rest. */
+export interface SplitCommitMessage {
+  /** The commit subject, capped to {@link PR_TITLE_MAX_LEN} on a word boundary. */
+  readonly title: string;
+  /** Everything after the subject's blank-line separator, or `''` when there is none. */
+  readonly body: string;
+}
+
+/**
+ * Split a full commit message into a PR-safe title and the remaining body — the
+ * TypeScript twin of `scripts/push-docs.sh`'s `pr_title`/`pr_rest` split (#1606,
+ * `bde62b84`). `push-docs-lane.ts` (#1883) is the only current caller; it lives
+ * here rather than in that command so a future second TS caller shares this
+ * exact behaviour instead of re-deriving (and re-diverging from) it.
+ *
+ * Passing a whole multi-line commit message straight through as `--title` both
+ * loses the body (the RCDD gate requires one on every `fix:` commit) and, past
+ * {@link PR_TITLE_MAX_LEN} chars, fails `gh pr create` outright — *after* the
+ * branch is already pushed, stranding it with no PR pointing at it.
+ *
+ * Mirrors the bash algorithm exactly:
+ *   1. `title` = the first line; `body` = whatever follows the first `\n`, with
+ *      one leading blank separator line (a second `\n`) stripped if present.
+ *   2. If `title` alone exceeds {@link PR_TITLE_MAX_LEN}, truncate it to that
+ *      many characters, then back up to the last space so the cut lands on a
+ *      word boundary rather than mid-word (`${truncated% *}` in bash).
+ */
+export function splitCommitMessage(message: string): SplitCommitMessage {
+  const newline = message.indexOf('\n');
+  let title = newline === -1 ? message : message.slice(0, newline);
+  let body = newline === -1 ? '' : message.slice(newline + 1);
+  if (body.startsWith('\n')) body = body.slice(1); // drop the single blank separator line
+
+  if (title.length > PR_TITLE_MAX_LEN) {
+    const truncated = title.slice(0, PR_TITLE_MAX_LEN);
+    const lastSpace = truncated.lastIndexOf(' ');
+    title = lastSpace !== -1 ? truncated.slice(0, lastSpace) : truncated;
+  }
+  return { title, body };
 }
 
 /**
@@ -253,28 +357,244 @@ export function buildPrCreateArgs(
 }
 
 /**
+ * gh's refusal when a `--label` names a label the repository does not have. gh maps
+ * every label name to an id before it creates anything, and reports the first miss as
+ * `could not add label: '<name>' not found` (captured verbatim from gh 2.100.0 against
+ * voip-sms-inbox, 2026-09-30).
+ */
+const MISSING_LABEL_PATTERN = /could not add label: '([^']+)' not found/i;
+
+/** The label named in gh's missing-label refusal, or undefined for any other message (#2243). */
+export function missingLabelFrom(message: string): string | undefined {
+  const m = MISSING_LABEL_PATTERN.exec(message);
+  return m ? m[1] : undefined;
+}
+
+/**
+ * The argv that creates {@link DOCS_LANE_LABEL} (#2243). PURE, like
+ * {@link buildPrCreateArgs}, so the exact forge write is assertable without a
+ * subprocess.
+ *
+ * `--repo` only when the PR request names one, so the label and the PR resolve the
+ * same base repository. Never `--force`: that turns create into create-or-UPDATE and
+ * would rewrite a label a maintainer had customised.
+ */
+export function buildLaneLabelCreateArgs(slug?: string): string[] {
+  return [
+    'label',
+    'create',
+    DOCS_LANE_LABEL,
+    ...(slug ? ['--repo', slug] : []),
+    '--color',
+    DOCS_LANE_LABEL_COLOR,
+    '--description',
+    DOCS_LANE_LABEL_DESCRIPTION,
+  ];
+}
+
+/**
  * INV-2 predicate: decides `docs-lane` from evidence. (NOT the only place the label
  * is minted — `push-docs-lane.ts` passes a literal; see the header's INV-2 note.)
  *
- * Returns `[DOCS_LANE_LABEL]` iff `paths` is non-empty AND every entry is in the
- * docs corpus; `[]` otherwise — including for `undefined`, which means the caller
- * could not determine the PR's real changed set. The non-empty requirement is not a formality — an
- * empty list would make `every` vacuously true, which is precisely the
- * unproven-absolute / silent-gate class constitution invariant #2 forbids. A
- * caller that cannot enumerate what it committed has not PROVEN the change is
- * docs-only, so it does not get the label that skips a human merge keystroke.
+ * TWO questions, both of which must answer yes:
  *
- * `.github/workflows/docs-lane.yml:33/:52-54` independently re-verifies the paths
- * server-side and refuses loudly on a mismatch — two witnesses, so a bug here
- * cannot land code on an auto-merge lane.
+ *   1. MEMBERSHIP. `paths` is non-empty AND every entry is in the docs corpus.
+ *      `undefined` — the caller could not determine the PR's real changed set — and
+ *      the empty list both answer NO. The non-empty requirement is not a formality:
+ *      an empty list would make `every` vacuously true, which is precisely the
+ *      unproven-absolute / silent-gate class constitution invariant #2 forbids. A
+ *      caller that cannot enumerate what it committed has not PROVEN the change is
+ *      docs-only, so it does not get the label that skips a human merge keystroke.
+ *
+ *   2. ELIGIBILITY (#2078). No path carries a GOVERNANCE STATUS TRANSITION — a
+ *      changed `status:` line under `docs/decisions/` or `specs/`. Membership alone
+ *      was the whole test until now, and since #1847 that is the wrong question for
+ *      the only PR class this code actually produces: a DR acceptance or a spec
+ *      approval is docs-only BY CONSTRUCTION, so it passed (1), earned the label,
+ *      and was then refused by the lane with `exit 1` — a permanent manufactured red
+ *      on the maintainer's own approval artefacts (measured: run 35783197257 on
+ *      #2073, repeated on #2071 and #2072). `docs-lane` is not a required check, so
+ *      nothing was mechanically blocked; the cost is a red that can never be cleared,
+ *      which trains every reader to ignore a gate.
+ *
+ * `diffs` supplies (2)'s evidence: the unified diff of each changed GOVERNANCE file,
+ * normally {@link branchDiffEntries}' output. It is optional ONLY because a PR with no
+ * governance path needs none — if `paths` contains one and `diffs` is absent, or does
+ * not COVER every governance path in `paths`, the answer is no label. A partial witness
+ * is the silent-gate shape: the covered file is clean and the uncovered one is simply
+ * never asked about.
+ *
+ * This is a SECOND definition of the lane's rule, and that is a real cost — the two can
+ * drift. The refusal is bash inside a GitHub Actions `run:` block and this is TypeScript
+ * in the extension host, so no artefact can execute both and one shared implementation
+ * is not available. The containment is `tests/governance-lane-eligibility.test.ts`, which
+ * reads `govern='…'` and the `grep -qE '…'` pattern out of the workflow's own text,
+ * asserts they are byte-identical to `governance-transition.ts`'s constants, and runs
+ * both engines over a shared fixture set.
+ *
+ * Both refusals only ever WITHHOLD a label; nothing here can stop the lane evaluating a
+ * PR that carries one. `.github/workflows/docs-lane.yml:33/:52-54/:225` re-verifies paths,
+ * holds and status transitions server-side and refuses loudly on a mismatch — two
+ * witnesses, so a bug here cannot land code on an auto-merge lane.
  */
-export function laneLabelsFor(paths: readonly string[] | undefined): string[] {
+export function laneLabelsFor(
+  paths: readonly string[] | undefined,
+  diffs?: readonly DiffEntry[],
+): string[] {
+  return laneRefusal(paths, diffs).kind === 'eligible' ? [DOCS_LANE_LABEL] : [];
+}
+
+/**
+ * Why the lane label was withheld — or `eligible` when it was not.
+ *
+ * Exists so the surfaces a human reads can name the ACTUAL reason. Before #2078 there
+ * was only one, so the toast and the PR body both hard-coded "because it is not
+ * docs-only". That sentence is now FALSE for the commonest case by far: a spec approval
+ * or a DR acceptance IS docs-only, and is withheld because ratifying it is a human act
+ * (DR-029, DR-086 §2). A signpost that states a false reason is the never-wrong defect
+ * this repo exists to avoid, so the reason travels with the decision rather than being
+ * re-guessed at each surface.
+ */
+export type LaneRefusal =
+  | { readonly kind: 'eligible' }
+  /** The caller could not enumerate what the PR changes (`undefined`/empty paths). */
+  | { readonly kind: 'unproven' }
+  /** At least one changed path is outside the docs corpus. */
+  | { readonly kind: 'not-docs-only'; readonly paths: readonly string[] }
+  /** A governance path changed but its diff was not supplied — an absent witness. */
+  | { readonly kind: 'unproven-governance'; readonly paths: readonly string[] }
+  /** A `status:` line changed under `docs/decisions/` or `specs/` (#1847, #2078). */
+  | { readonly kind: 'governance-status-transition'; readonly paths: readonly string[] };
+
+/**
+ * The ONE lane decision. {@link laneLabelsFor} is the label-shaped view of it, so the
+ * label and the reason can never disagree — the shape that would otherwise let a toast
+ * explain a refusal that did not happen.
+ */
+export function laneRefusal(
+  paths: readonly string[] | undefined,
+  diffs?: readonly DiffEntry[],
+): LaneRefusal {
   // `undefined` means the caller COULD NOT DETERMINE the PR's real changed paths
   // (see branchChangedPaths). Unproven is not the same as docs-only, and the
   // fail-closed answer is no label — mirroring the constitution's "unmeasured
   // blast = high blast" and invariant #2's refusal to let a missing witness pass.
-  if (!Array.isArray(paths) || paths.length === 0) return [];
-  return paths.every((p) => isDocsCorpusPath(p)) ? [DOCS_LANE_LABEL] : [];
+  if (!Array.isArray(paths) || paths.length === 0) return { kind: 'unproven' };
+  const nonDocs = paths.filter((p) => !isDocsCorpusPath(p));
+  if (nonDocs.length > 0) return { kind: 'not-docs-only', paths: nonDocs };
+
+  // (2) ELIGIBILITY. Only governance paths need diff evidence, so an ordinary
+  // docs-only PR — CLAUDE.md, a skill, an approval sidecar on its own — still earns
+  // the label with no extra work and no extra git call.
+  const governance = paths.map(toPosix).filter((p) => isGovernancePath(p));
+  if (governance.length === 0) return { kind: 'eligible' };
+  if (!Array.isArray(diffs)) return { kind: 'unproven-governance', paths: governance };
+  const covered = new Set(diffs.map((d) => toPosix(d.path)));
+  const uncovered = governance.filter((p) => !covered.has(p));
+  if (uncovered.length > 0) return { kind: 'unproven-governance', paths: uncovered };
+  const transitions = governanceStatusTransitions(diffs);
+  if (transitions.length > 0) {
+    return { kind: 'governance-status-transition', paths: transitions };
+  }
+  return { kind: 'eligible' };
+}
+
+/**
+ * One sentence naming why the lane was refused, for the PR body and the toast.
+ * `undefined` for `eligible` — there is nothing to explain on the happy path.
+ */
+export function laneRefusalSentence(refusal: LaneRefusal): string | undefined {
+  switch (refusal.kind) {
+    case 'eligible':
+      return undefined;
+    case 'not-docs-only':
+      return (
+        'NOT labelled for the docs-lane — these paths are not docs-only, so this PR ' +
+        'needs a human merge.'
+      );
+    case 'governance-status-transition':
+      return (
+        'NOT labelled for the docs-lane — it changes a `status:` line in a decision ' +
+        'record or spec. Accepting a DR and approving a spec are human acts (DR-029, ' +
+        'DR-086 §2), so the lane refuses them by design (#1847) and this PR needs a ' +
+        'human merge keystroke. This is the intended outcome, not a fault.'
+      );
+    case 'unproven-governance':
+      return (
+        'NOT labelled for the docs-lane — MinSpec could not read the diff of every ' +
+        'decision record or spec this PR changes, so it cannot show the change is not ' +
+        'a ratification. This PR needs a human merge.'
+      );
+    case 'unproven':
+      return (
+        'NOT labelled for the docs-lane — MinSpec could not determine what this PR ' +
+        'changes, so this PR needs a human merge.'
+      );
+  }
+}
+
+/** Normalize to the forward-slash form git and the lane both use (Windows callers). */
+function toPosix(rel: string): string {
+  return rel.replace(/\\/g, '/');
+}
+
+/**
+ * Upper bound on the number of `git diff` invocations {@link branchDiffEntries} will
+ * make. A docs PR touching more than this many GOVERNANCE files is not a shape MinSpec
+ * produces, and spawning hundreds of subprocesses from the extension host to decide one
+ * label is the wrong trade. Over the cap the answer is `undefined` → no label → a human
+ * merges: one keystroke, which is the cheap direction.
+ */
+const MAX_GOVERNANCE_DIFFS = 200;
+
+/**
+ * ELIGIBILITY EVIDENCE (#2078) — the unified diff of every GOVERNANCE file the PR
+ * changes, in the shape `.github/workflows/docs-lane.yml`'s status gate reads from the
+ * GitHub API (`filename` + `patch`).
+ *
+ * Only governance paths are diffed. The lane's own loop `continue`s past everything
+ * else before it ever looks at a patch, so diffing the rest would be work whose result
+ * is discarded — and the label decision for a PR with no governance path needs no git
+ * call at all.
+ *
+ * One `git diff` per file rather than one call split on `diff --git` boundaries:
+ * attribution then holds BY CONSTRUCTION, including across renames and paths containing
+ * spaces, instead of resting on a header parser that a rename makes ambiguous. The cap
+ * above bounds the cost.
+ *
+ * FAILS CLOSED, and that direction is load-bearing: any failure — git absent, unknown
+ * base, unreadable output, too many files — returns `undefined`, which
+ * {@link laneLabelsFor} treats as "cannot prove eligibility" → NO label → no auto-merge
+ * → a human merges. An EMPTY array is a different answer and means something definite:
+ * this PR has no governance path, so there is nothing for the status gate to object to.
+ *
+ * A governance file whose diff comes back EMPTY is kept as an entry with an empty
+ * `patch`, which {@link governanceStatusTransitions} counts as a transition — the same
+ * arm the lane uses when GitHub omits `.patch`. An absent witness is an unknown, not a
+ * clean file.
+ */
+export async function branchDiffEntries(
+  run: ExecRun,
+  cwd: string,
+  base: string,
+  head: string,
+  paths: readonly string[],
+): Promise<DiffEntry[] | undefined> {
+  const governance = paths.map(toPosix).filter((p) => isGovernancePath(p));
+  if (governance.length === 0) return [];
+  // Checked BEFORE the first spawn: a cap enforced after the fact has already paid
+  // the cost it exists to avoid.
+  if (governance.length > MAX_GOVERNANCE_DIFFS) return undefined;
+  const entries: DiffEntry[] = [];
+  for (const path of governance) {
+    try {
+      const { stdout } = await run('git', ['diff', `${base}...${head}`, '--', path], { cwd });
+      entries.push({ path, patch: stdout });
+    } catch {
+      return undefined;
+    }
+  }
+  return entries;
 }
 
 /** Inputs for {@link buildApprovalPrBody}. Every field but `paths` may be absent. */
@@ -301,6 +621,13 @@ export interface ApprovalPrBodyInput {
    * and is not one (#1025). The body must describe the PR that exists.
    */
   readonly labels?: readonly string[];
+  /**
+   * The lane decision behind `labels`, so an unlabelled body states the REAL reason
+   * (#2078). Omitted → the body says the label was withheld without claiming why,
+   * which is honest; the old hard-coded "these paths are not docs-only" was not, for
+   * an approval PR that is docs-only and withheld because ratifying is a human act.
+   */
+  readonly refusal?: LaneRefusal;
 }
 
 /**
@@ -320,14 +647,16 @@ export interface ApprovalPrBodyInput {
  *     (DR-012); nothing here writes it.
  */
 export function buildApprovalPrBody(input: ApprovalPrBodyInput): string {
-  const { record, sha, labels } = input;
+  const { record, sha, labels, refusal } = input;
+  const withheld =
+    (refusal && laneRefusalSentence(refusal)) ??
+    'NOT labelled for the docs-lane, so this PR needs a human merge.';
   const lane =
     labels === undefined
       ? 'MinSpec approval record.'
       : labels.includes(DOCS_LANE_LABEL)
         ? 'MinSpec approval record, labelled for the **docs-lane**.'
-        : 'MinSpec approval record. NOT labelled for the docs-lane — these paths are ' +
-          'not docs-only, so this PR needs a human merge.';
+        : `MinSpec approval record. ${withheld}`;
   const lines: string[] = [lane, ''];
 
   const artifact = record?.specPath ?? input.paths[0];
@@ -481,7 +810,8 @@ function urlFromAlreadyExists(message: string): string | undefined {
  * NEVER rejects (INV-5). The classification order below — ENOENT, then auth,
  * then network, then everything else — is byte-identical to SPEC-039's original
  * create-path arm, and must stay so: `push-docs-lane.test.ts` pins it and AC-10
- * forbids editing that test.
+ * forbids editing that test. #2243 adds no arm to that order: a missing label still
+ * classifies `failed`, and only gains the informational `missingLabel` field.
  *
  * Deliberately NOT folded in: SPEC-039's `gh auth status` PREFLIGHT. It runs far
  * earlier in that command — before the fetch, the worktree and the commit —
@@ -492,6 +822,10 @@ function urlFromAlreadyExists(message: string): string | undefined {
  * else-arm is `failed`. The two must not be unified.
  * Callers that skip the preflight lose nothing: the create path still yields
  * `gh-absent` / `gh-unauthenticated` / `offline` on its own.
+ *
+ * #2243: with `provisionLaneLabel`, the one refusal MinSpec can repair itself (its own
+ * lane label missing from the repository) is repaired once and the create retried
+ * once. See {@link OpenPrRequest.provisionLaneLabel} for the boundary.
  */
 export async function openPullRequest(req: OpenPrRequest): Promise<OpenPrResult> {
   const { run, cwd, adoptExisting = false } = req;
@@ -501,28 +835,82 @@ export async function openPullRequest(req: OpenPrRequest): Promise<OpenPrResult>
       if (existing) return { outcome: 'adopted', url: existing };
     }
 
-    try {
-      const { stdout } = await run('gh', buildPrCreateArgs(req), { cwd });
-      return { outcome: 'created', url: stdout.trim() };
-    } catch (err) {
-      if (isEnoent(err)) return { outcome: 'gh-absent' };
-      const msg = describeError(err);
-      // Checked BEFORE the auth/network arms so an "already exists" reply can
-      // never be misread as one of them — but only when the caller asked for
-      // idempotency, so SPEC-039's classification is untouched (R3/AC-10).
-      if (adoptExisting) {
-        const adopted = urlFromAlreadyExists(msg);
-        if (adopted) return { outcome: 'adopted', url: adopted };
-      }
-      if (isAuthError(msg)) return { outcome: 'gh-unauthenticated', error: msg };
-      if (isNetworkError(msg)) return { outcome: 'offline', error: msg };
-      return { outcome: 'failed', error: msg };
+    const first = await attemptCreate(req);
+    // `missingLabel` is only ever set to a label the request CARRIED, so this is also
+    // the guard that a request without the lane label can never provision it.
+    if (!req.provisionLaneLabel || first.missingLabel !== DOCS_LANE_LABEL) return first;
+
+    const label = await createLaneLabel(run, cwd, req.slug);
+    if (label.error !== undefined) {
+      // Not retried: the create would fail identically. The approval is already
+      // pushed, so this is a PR-opening failure with its real cause named.
+      return {
+        outcome: 'failed',
+        error: `${first.error ?? ''} — creating the '${DOCS_LANE_LABEL}' label also failed: ${label.error}`,
+        missingLabel: DOCS_LANE_LABEL,
+      };
     }
+    // Exactly one retry. A second identical refusal is reported as it stands, never
+    // looped on.
+    const retry = await attemptCreate(req);
+    return label.created ? { ...retry, labelProvisioned: true } : retry;
   } catch (err) {
     // INV-5 backstop. Reached when the runner throws a NON-Error (`throw 'boom'`),
     // or synchronously before returning a promise — cases the inner catch's
     // classification would still handle, but which must not escape even if a
     // future edit moves work outside it. An approval is never lost to this.
     return { outcome: 'failed', error: describeError(err) };
+  }
+}
+
+/**
+ * One `gh pr create`, classified. Extracted unchanged from {@link openPullRequest} so
+ * the #2243 retry is classified by the SAME code as the first attempt, never a copy.
+ */
+async function attemptCreate(req: OpenPrRequest): Promise<OpenPrResult> {
+  const { run, cwd, adoptExisting = false } = req;
+  try {
+    const { stdout } = await run('gh', buildPrCreateArgs(req), { cwd });
+    return { outcome: 'created', url: stdout.trim() };
+  } catch (err) {
+    if (isEnoent(err)) return { outcome: 'gh-absent' };
+    const msg = describeError(err);
+    // Checked BEFORE the auth/network arms so an "already exists" reply can
+    // never be misread as one of them — but only when the caller asked for
+    // idempotency, so SPEC-039's classification is untouched (R3/AC-10).
+    if (adoptExisting) {
+      const adopted = urlFromAlreadyExists(msg);
+      if (adopted) return { outcome: 'adopted', url: adopted };
+    }
+    if (isAuthError(msg)) return { outcome: 'gh-unauthenticated', error: msg };
+    if (isNetworkError(msg)) return { outcome: 'offline', error: msg };
+    // #2243: still `failed`, but name the label when that is the cause, and only a
+    // label this request actually asked for.
+    const missing = missingLabelFrom(msg);
+    return missing !== undefined && req.labels.includes(missing)
+      ? { outcome: 'failed', error: msg, missingLabel: missing }
+      : { outcome: 'failed', error: msg };
+  }
+}
+
+/**
+ * Create {@link DOCS_LANE_LABEL} in the repository `cwd`/`slug` resolves to (#2243).
+ *
+ * `created: false` with no `error` means another writer created it first: gh says it
+ * "already exists", which is all the retry needs. Three approvals made seconds apart
+ * race on exactly this. Never throws: a non-`Error` throw is described like any other.
+ */
+async function createLaneLabel(
+  run: ExecRun,
+  cwd: string,
+  slug?: string,
+): Promise<{ created: boolean; error?: string }> {
+  try {
+    await run('gh', buildLaneLabelCreateArgs(slug), { cwd });
+    return { created: true };
+  } catch (err) {
+    const msg = describeError(err);
+    if (/already exists/i.test(msg)) return { created: false };
+    return { created: false, error: msg };
   }
 }
