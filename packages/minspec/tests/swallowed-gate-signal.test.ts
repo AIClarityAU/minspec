@@ -79,7 +79,11 @@ describe('INV-1: the motivating defect is caught in the real tree', () => {
       { cwd: REPO, encoding: 'utf8' },
     );
     expect(out).toMatch(/0 unannotated/);
-  });
+    // 30s, not the 5s default: this shells out through `npx tsx`, whose cold start was
+    // MEASURED at 5107ms on an otherwise-idle machine — i.e. a coin-flip against the
+    // default. A timeout here reads as "the gate is broken" when it means "node was
+    // slow", which is the worst kind of red.
+  }, 30_000);
 });
 
 describe('INV-5: the quoted capture idiom is seen', () => {
@@ -161,12 +165,24 @@ describe('INV-6: a conditional spanning lines still counts as deciding', () => {
   });
 
   it('sees dispatch-issue.sh SPEC024_CHANGED, whose conditional spans three lines', () => {
-    const source = readFileSync(join(REPO, 'scripts/dispatch-issue.sh'), 'utf8');
+    // Markers are stripped first: that site is annotated `swallow-ok` (an empty list is
+    // the strongest stop class there, so it fails closed), and an annotation suppresses
+    // the finding entirely. This asserts the MATCHER sees a multi-line conditional as a
+    // read, which is the property that regressed.
+    //
+    // The first version of this test asserted `knownIssue === 1978` instead, which
+    // pinned an ANNOTATION rather than a behaviour — so correcting that site's triage
+    // broke the test, correctly. Same error INV-5 already had; asserting on annotated
+    // source would also pass with the blind spot fully reopened.
+    const source = readFileSync(join(REPO, 'scripts/dispatch-issue.sh'), 'utf8').replace(
+      /#\s*swallow-(ok|known):.*$/gm,
+      '',
+    );
     const found = findSwallowedGateSignals('scripts/dispatch-issue.sh', source).find(
       (f) => f.variable === 'SPEC024_CHANGED',
     );
     expect(found, 'the multi-line conditional blind spot has reopened').toBeDefined();
-    expect(found!.knownIssue).toBe(1978);
+    expect(found!.decidesAt.length).toBeGreaterThan(0);
   });
 });
 
@@ -233,7 +249,7 @@ describe('INV-4: the check itself fails closed', () => {
         stdio: 'pipe',
       }),
     ).toThrow();
-  });
+  }, 30_000);
 
   it('exits non-zero on an unannotated finding', () => {
     expect(

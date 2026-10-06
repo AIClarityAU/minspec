@@ -161,6 +161,13 @@ const SUBJECT = 'chore(approve): SPEC-050 approved for implementation';
 const SPEC_REL = 'specs/minspec/SPEC-050-silent-approval-pr/requirements.md';
 const SIDECAR_REL = `.minspec/approvals/${SPEC_REL}.json`;
 const DOCS_PATHS = [SPEC_REL, SIDECAR_REL];
+/**
+ * A governance-path patch with NO `status:` line (#2078) — an ordinary prose edit,
+ * which the docs-lane accepts. The label decision reads this through
+ * `branchDiffEntries`; a fixture carrying a `status:` line would be an approval and
+ * would be refused the lane on purpose.
+ */
+const ORDINARY_DOCS_PATCH = '@@ -12,3 +12,3 @@\n-a speling mistake\n+a spelling mistake\n';
 const HEAD_SHA = 'abc1234def5678901234567890abcdef12345678';
 const NEW_PR_URL = 'https://github.com/o/r/pull/7';
 const EXISTING_PR_URL = 'https://github.com/o/r/pull/42';
@@ -188,6 +195,14 @@ const DEFAULT_RESPONSES: Record<string, Resp> = {
   // the happy path labels docs-lane. Tests that need a non-docs or unresolvable
   // range override this key.
   'git diff --name-only -z': `${DOCS_PATHS.join('\0')}\0`,
+  // #2078 ELIGIBILITY evidence. Since the lane refuses a governance `status:`
+  // transition (#1847), `laneLabelsFor` also needs the PATCH of each changed
+  // `specs/**` / `docs/decisions/**` file — `git diff <base>...<head> -- <path>`.
+  // The default answer is an ordinary prose edit, so the happy path still labels
+  // docs-lane. The key cannot collide with the `--name-only` entry above: that
+  // command's argv starts `git diff --name-only`, never `git diff origin/`.
+  // Tests that need a refusal override this key with a `status:` patch.
+  'git diff origin/': ORDINARY_DOCS_PATCH,
   'gh pr create': `${NEW_PR_URL}\n`,
   // Unmapped `gh pr list` falls through to the empty-stdout default below, which
   // `findOpenPrForHead` reads as "no open PR" — the create path then runs.
@@ -270,6 +285,10 @@ function seedApprovedSpec(root: string): void {
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-approval-pr-'));
+  // An approval happens in a project that has opted in. The preference store
+  // refuses to create `.minspec/` itself (#2355), so the fixture must carry the
+  // marker a real project has rather than rely on the store to manufacture it.
+  fs.mkdirSync(path.join(tmp, '.minspec'));
   H.config = {};
   H.choice = undefined;
   H.runner = undefined;
@@ -1017,14 +1036,16 @@ describe('FR-8: "Always push from now on" (DR-071)', () => {
     });
   });
 
-  it('swallows a failed preference write AND a failed settings write — the approval still pushes', async () => {
+  it('swallows a failed preference write AND a failed settings write — the approval still pushes, and tells the user (#2506)', async () => {
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     try {
-      // A FILE where the root should be: `savePreferences`' mkdir throws ENOTDIR.
+      // A FILE where the root should be: it has no `.minspec/`, so
+      // `savePreferences` refuses (NotOptedInError since #2355; ENOTDIR before).
       const unwritable = path.join(tmp, 'not-a-dir');
       fs.writeFileSync(unwritable, 'x', 'utf-8');
       H.updateRejects = true;
       H.choice = 'Always push from now on';
+      H.warn.length = 0;
 
       const { suffix } = await pushApprovalIfEnabled(unwritable, 'spec-050', {
         subject: SUBJECT,
@@ -1034,6 +1055,16 @@ describe('FR-8: "Always push from now on" (DR-071)', () => {
       expect(pushApprovalMock).toHaveBeenCalledTimes(1);
       expect(suffix).toContain('pushed');
       expect(warnSpy).toHaveBeenCalled();
+      // #2506: a bare console.warn never reaches a user — Alt+A toast users
+      // never open the Debug Console. Both the offer-shown memory and the
+      // "Always push" consent itself refused into this unwritable root, and
+      // each MUST now also surface on the notification API, or the click
+      // silently remembers nothing while the toast claimed it was accepted.
+      expect(H.warn.length).toBeGreaterThanOrEqual(2);
+      expect(H.warn.some((w) => w.message.includes('could not remember that this offer was shown'))).toBe(
+        true,
+      );
+      expect(H.warn.some((w) => w.message.includes('"Always push" was not remembered'))).toBe(true);
     } finally {
       warnSpy.mockRestore();
     }
@@ -1099,6 +1130,16 @@ describe('INV-2 (#1224 review): the diff ref must outlive pushApproval', () => {
           throw new Error(`fatal: bad revision '${range}'`);
         }
         return { stdout: `${DOCS_PATHS.join('\0')}\0`, stderr: '' };
+      }
+      // #2078: the eligibility diff is subject to the SAME ref constraint — model it
+      // here too, or this fixture would prove the label survives on a ref git rejects.
+      if (key.startsWith('git diff origin/')) {
+        // argv is ['diff', '<base>...<head>', '--', '<path>'].
+        const range = args[1];
+        if (!range.includes(`origin/${BRANCH}`)) {
+          throw new Error(`fatal: bad revision '${range}'`);
+        }
+        return { stdout: ORDINARY_DOCS_PATCH, stderr: '' };
       }
       if (key.startsWith('git rev-parse HEAD')) return { stdout: `${HEAD_SHA}\n`, stderr: '' };
       if (key.startsWith('gh pr create')) return { stdout: `${NEW_PR_URL}\n`, stderr: '' };

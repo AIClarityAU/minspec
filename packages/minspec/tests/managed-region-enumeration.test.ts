@@ -14,7 +14,7 @@
  * (#1281), "what does Refresh touch" — derives its own copy, and nothing reconciled
  * those copies against the registry.
  *
- * 14 of the 30 paths are COMPUTED rather than literal, so a text search of the
+ * 14 of the 31 paths are COMPUTED rather than literal, so a text search of the
  * registry source cannot find them: `.claude/commands/*` is one registry line
  * (`...SPEC_KIT_COMMANDS.map(buildClaudeShimTemplate)`) that expands to 8 files.
  * Any method that reads the enumeration by grep undercounts by construction.
@@ -58,6 +58,7 @@ const PINNED_OUTPUT_PATHS: readonly string[] = [
   '.claude/hooks/session-title.sh',
   '.cursor/rules/spec-kit-commands.mdc',
   '.github/scripts/ai-review-guard.js',
+  '.github/scripts/ai-review-guard.test.js',
   '.github/workflows/ai-review-retry.yml',
   '.github/workflows/ai-review.yml',
   '.github/workflows/docs-lane.yml',
@@ -90,7 +91,7 @@ describe('MANAGED_REGION_TEMPLATES enumeration (T0, #1987)', () => {
     // Deliberately separate from the membership assertion: if someone regenerates
     // the pinned list from a stale tree, this still states the number a reader can
     // check against the issue that set it.
-    expect(MANAGED_REGION_TEMPLATES.length).toBe(30);
+    expect(MANAGED_REGION_TEMPLATES.length).toBe(31);
   });
 
   it('cannot pass vacuously — both sides are non-empty and the pin is not a stub', () => {

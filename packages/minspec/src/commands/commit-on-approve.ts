@@ -1,15 +1,21 @@
+import * as fs from 'fs';
+import * as path from 'path';
 import * as vscode from 'vscode';
 import { commitApproval, isUntrackedAtHead, type CommitApprovalResult } from '../lib/approve-commit';
 import { pushApproval, type PushApprovalResult } from '../lib/approve-push';
 import { recoverProtectedBranchApproval, type RecoverResult } from '../lib/approval-recover';
 import {
   branchChangedPaths,
+  branchDiffEntries,
   buildApprovalPrBody,
   defaultExecRun,
   laneLabelsFor,
+  laneRefusal,
+  laneRefusalSentence,
   openPullRequest,
   resolveHeadSha,
   type ExecRun,
+  type LaneRefusal,
   type OpenPrResult,
 } from '../lib/approval-pr';
 import { readRecord, toPosixRel } from '../lib/approval-store';
@@ -55,19 +61,6 @@ export function commitOnApproveEnabled(): boolean {
   return vscode.workspace.getConfiguration('minspec').get<boolean>('commitOnApprove', true);
 }
 
-/**
- * Commit the approval paths when the setting is on, returning a toast suffix.
- *
- *   ''                                        — setting off, not a repo, or no net change
- *   ' · committed'                            — the doc (+ record) were committed
- *   ' · not committed (detached HEAD)'        — refused so the approval isn't lost on next checkout
- *   ' · not committed (merge/cherry-pick …)'  — git refuses a partial commit mid-operation (#1112)
- *   ' · commit failed — approval saved …'     — git/hook rejected; approval on disk, uncommitted, unstaged
- *
- * Never rejects (delegates to `commitApproval`, which never rejects). A failed or
- * refused commit is surfaced (never-wrong: the user must know the approval is
- * uncommitted), with the full git/hook stderr logged for diagnosis.
- */
 /** Offer labels — worded to match #1054's harness-commit offer, so the two
  *  destination guards read as one behaviour rather than two dialects. */
 const SHOW_FILES_ACTION = 'Show me the files';
@@ -182,6 +175,19 @@ async function recoverOnProtectedBranch(
   return { suffix };
 }
 
+/**
+ * Commit the approval paths when the setting is on, returning a toast suffix.
+ *
+ *   ''                                        — setting off, not a repo, or no net change
+ *   ' · committed'                            — the doc (+ record) were committed
+ *   ' · not committed (detached HEAD)'        — refused so the approval isn't lost on next checkout
+ *   ' · not committed (merge/cherry-pick …)'  — git refuses a partial commit mid-operation (#1112)
+ *   ' · commit failed — approval saved …'     — git/hook rejected; approval on disk, uncommitted, unstaged
+ *
+ * Never rejects (delegates to `commitApproval`, which never rejects). A failed or
+ * refused commit is surfaced (never-wrong: the user must know the approval is
+ * uncommitted), with the full git/hook stderr logged for diagnosis.
+ */
 export async function commitApprovalIfEnabled(
   rootDir: string,
   absPaths: readonly string[],
@@ -345,6 +351,33 @@ const OPEN_PR_ACTION = 'Open PR';
 const PR_BASE = 'origin/HEAD';
 
 /**
+ * The lane workflow, where the `docs-lane-workflow` template scaffolds it
+ * (`template-registry.ts`; the two are pinned equal by
+ * `tests/approval-lane-label-parity.test.ts`). Hardcoded rather than imported for the
+ * same reason as {@link preferencesApi}: the registry's module graph is enormous, and
+ * this module commits every approval.
+ */
+export const LANE_WORKFLOW_REL = '.github/workflows/docs-lane.yml';
+
+/**
+ * #2243 — does this checkout carry the workflow that consumes the `docs-lane` label?
+ *
+ * The approval flow may create that label on the forge when the repository lacks it,
+ * and this is the gate on doing so. The label's only purpose is to trigger that
+ * workflow, so in a repository that never installed it the write would buy nothing:
+ * no auto-merge, just an unexplained label. It is read locally (no network), and any
+ * error answers "no", the direction that writes nothing. This gate is condition 3 of
+ * DR-098 (lane-label provisioning), which records the decision to make the write.
+ */
+function laneWorkflowPresent(rootDir: string): boolean {
+  try {
+    return fs.existsSync(path.join(rootDir, ...LANE_WORKFLOW_REL.split('/')));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * `answeredSignatures` key for the FR-8 standing-consent offer (#883 model).
  *
  * The VALUE is a CONSTANT sentinel, not a derived state signature: unlike the
@@ -386,8 +419,14 @@ async function pushAlwaysOfferAlreadyMade(rootDir: string): Promise<boolean> {
  * bare `{ answeredSignatures: { … } }` would REPLACE the whole map and wipe the
  * bootstrap steps' answers. Same hazard, same fix, as `recordAnsweredSignature`.
  *
- * Swallows every failure (read-only checkout, unwritable root, full disk): a
- * preference write must never turn a SUCCESSFUL approval into a visible error.
+ * Never lets a write failure here turn a SUCCESSFUL approval into a visible
+ * ERROR (read-only checkout, unwritable root, full disk, or — #2506 — a folder
+ * with no `.minspec/` for `savePreferences` to refuse into). That is not the
+ * same thing as never telling the user: a bare `console.warn` lands in the
+ * Debug Console, which nobody watching this toast ever opens, so the failure
+ * must still reach them some visible, non-blocking way (constitution invariant
+ * 2 — no silent gate). See the call site's comment for what it means in
+ * practice when this fails.
  */
 async function recordPushAlwaysOfferMade(rootDir: string): Promise<void> {
   try {
@@ -400,8 +439,10 @@ async function recordPushAlwaysOfferMade(rootDir: string): Promise<void> {
       },
     });
   } catch (err) {
-    console.warn(
-      `MinSpec: could not remember the push-always offer — ${err instanceof Error ? err.message : String(err)}`,
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`MinSpec: could not remember the push-always offer — ${message}`);
+    void vscode.window.showWarningMessage(
+      `MinSpec: could not remember that this offer was shown — ${message} You may see it again next time.`,
     );
   }
 }
@@ -435,7 +476,13 @@ const PUSH_ALWAYS_PREF_KEY = 'pushOnApprove';
  *
  * Swallow-and-warn on failure (the `approve.ts` precedent): the approval has
  * already succeeded and the caller pushes regardless — losing the PREFERENCE must
- * never look like losing the approval.
+ * never look like losing the approval. "Swallow" means never let it block or
+ * fail the push, not never tell the user: before #2506 the only signal was
+ * `console.warn`, invisible outside the Debug Console, so a refusal from a
+ * folder with no `.minspec/` (Accept Decision / Accept Epic reach this before
+ * anything else creates the marker) looked identical to success — the toast had
+ * already said "Always push" was accepted. A non-blocking warning toast fixes
+ * that without touching the push itself.
  */
 async function enableAlwaysPush(rootDir: string): Promise<void> {
   try {
@@ -446,8 +493,10 @@ async function enableAlwaysPush(rootDir: string): Promise<void> {
       [PUSH_ALWAYS_PREF_KEY]: 'always',
     } as Parameters<typeof savePreferences>[1]);
   } catch (err) {
-    console.warn(
-      `MinSpec: failed to persist pushOnApprove=always — ${err instanceof Error ? err.message : String(err)}`,
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`MinSpec: failed to persist pushOnApprove=always — ${message}`);
+    void vscode.window.showWarningMessage(
+      `MinSpec: "Always push" was not remembered — ${message} Pushing this once only.`,
     );
   }
 }
@@ -613,14 +662,50 @@ function manualPrSurface(result: PushApprovalResult, reason?: string): string {
  * FR-3's "no click completes the operation" holds on both branches: one shows no
  * toast, the other a warning with no action.
  */
-async function notifyPrOpened(message: string, labels: readonly string[]): Promise<void> {
+async function notifyPrOpened(
+  message: string,
+  labels: readonly string[],
+  refusal?: LaneRefusal,
+): Promise<void> {
   // Labelled = the happy path = the caller's own suffix already said it. Silence here,
   // not a duplicate (#1700).
   if (labels.length > 0) return;
+  // #2078: a governance status transition is the DESIGNED outcome for every approval
+  // and acceptance PR — the lane refuses them on purpose (#1847). Warning on it would
+  // fire on literally every approval, which is the cry-wolf shape that costs the
+  // warning below the attention it needs. The reason is not lost: `laneSuffixNote`
+  // puts it in the suffix, which all three callers surface in their own success toast
+  // (the #1700 contract, pinned by the `r.suffix` assertions in the wiring tests).
+  if (refusal?.kind === 'governance-status-transition') return;
+  const why =
+    (refusal && laneRefusalSentence(refusal)) ??
+    'NOT labelled for the docs-lane, so this PR needs a human merge.';
   await vscode.window.showWarningMessage(
-    `${message} — but NOT labelled for the docs-lane, because it is not docs-only. ` +
-      `Auto-merge will not run; this PR needs a human merge.`,
+    `${message} — but ${why} Auto-merge will not run.`,
   );
+}
+
+/**
+ * The lane note the status suffix carries, per refusal reason (#2078).
+ *
+ * Short by necessity — it is appended to a one-line toast — and it must never state a
+ * reason that is not the real one. The old text said "not docs-only" unconditionally,
+ * which is false for an approval PR: those ARE docs-only and are withheld because
+ * ratifying is a human act.
+ */
+function laneSuffixNote(refusal: LaneRefusal): string {
+  switch (refusal.kind) {
+    case 'eligible':
+      return '';
+    case 'not-docs-only':
+      return ' — not docs-only, so no docs-lane label';
+    case 'governance-status-transition':
+      return ' — a status: transition is a human act, so no docs-lane label (#1847)';
+    case 'unproven-governance':
+      return ' — governance diff unreadable, so no docs-lane label';
+    case 'unproven':
+      return ' — changed paths unprovable, so no docs-lane label';
+  }
 }
 
 /** Short, fixed reason per failed {@link openPullRequest} outcome (FR-5). */
@@ -726,7 +811,19 @@ async function openApprovalPr(
     // literally what the PR was opened from. Fails closed exactly as before if it
     // cannot be resolved.
     const changed = await branchChangedPaths(run, rootDir, PR_BASE, `origin/${result.branch}`);
-    const labels = laneLabelsFor(changed);
+    // ELIGIBILITY evidence (#2078). Corpus membership was the whole label test until
+    // now, and since #1847 it is the wrong question for the only PR class this code
+    // produces: an approval or acceptance is a `status:` transition plus its sidecar,
+    // so it IS docs-only, earned the label, and was then refused by the lane with
+    // `exit 1` — a permanent manufactured red on the maintainer's own artefacts.
+    // Diffing only the governance files costs nothing on an ordinary docs PR (there
+    // are none, so no git call is made), and `undefined` fails closed exactly as an
+    // unresolvable path range does.
+    const diffs = changed
+      ? await branchDiffEntries(run, rootDir, PR_BASE, `origin/${result.branch}`, changed)
+      : undefined;
+    const refusal = laneRefusal(changed, diffs);
+    const labels = laneLabelsFor(changed, diffs);
     const record = readRecord(rootDir, approvableRelPath(paths));
     // Caller-supplied SHA WINS, and an EXPLICIT `null` suppresses the fallback
     // entirely — see `ApprovalPushContext.sha` for why the three states differ.
@@ -734,12 +831,21 @@ async function openApprovalPr(
     // that is certainly wrong for the caller that passes it.
     const sha = ctx.sha === undefined ? await resolveHeadSha(run, rootDir) : (ctx.sha ?? undefined);
 
+    // #2243 — the one input that made voip-sms-inbox differ from this repository: it
+    // had no `docs-lane` LABEL, and gh refuses to open a PR that names a missing one.
+    // So every approval there fell to the `Open PR` surface below, and the PR made by
+    // hand carried no label, so the lane never saw it and it needed a manual merge.
+    // When the PR is being opened with the lane label AND this checkout carries the
+    // lane workflow that consumes it, let the seam create the label once. `labels` is
+    // `laneLabelsFor`'s output, so non-empty means exactly `[docs-lane]`.
+    const provisionLaneLabel = labels.length > 0 && laneWorkflowPresent(rootDir);
+
     const pr = await openPullRequest({
       run,
       cwd: rootDir,
       head: result.branch,
       title: ctx.subject,
-      body: buildApprovalPrBody({ paths, record, sha, labels }),
+      body: buildApprovalPrBody({ paths, record, sha, labels, refusal }),
       labels,
       // FR-6: if an open PR already exists for this head, adopt it rather than
       // fanning out a second one.
@@ -757,28 +863,41 @@ async function openApprovalPr(
       // — which is why it stays. R2 itself is unmitigated and belongs in a
       // follow-up, not in a comment that quietly implies otherwise.
       adoptExisting: true,
+      provisionLaneLabel,
     });
 
     // A PR whose paths are NOT all docs is still opened — the branch is already
     // pushed, and leaving the developer without a PR would be the worse failure —
     // but it goes UNLABELLED and the suffix says so, so "no auto-merge" is never
     // a silent surprise.
-    const laneNote = labels.length === 0 ? ' — not docs-only, so no docs-lane label' : '';
+    const laneNote = laneSuffixNote(refusal);
+    // #2243 — creating a label is a write to the maintainer's repository. It happens
+    // once per repository, and it is said once, on the approval that did it.
+    const labelNote = pr.labelProvisioned ? ' · created the missing docs-lane label' : '';
 
     switch (pr.outcome) {
       case 'created':
-        void notifyPrOpened(`MinSpec: approval PR opened — ${pr.url}`, labels);
-        return { suffix: ` · pushed on ${result.branch} · PR opened${laneNote} (${pr.url})`, pr };
-      case 'adopted':
-        void notifyPrOpened(`MinSpec: approval PR already open — ${pr.url}`, labels);
+        void notifyPrOpened(`MinSpec: approval PR opened — ${pr.url}`, labels, refusal);
         return {
-          suffix: ` · pushed on ${result.branch} · PR already open (${pr.url})`,
+          suffix: ` · pushed on ${result.branch} · PR opened${laneNote} (${pr.url})${labelNote}`,
+          pr,
+        };
+      case 'adopted':
+        void notifyPrOpened(`MinSpec: approval PR already open — ${pr.url}`, labels, refusal);
+        return {
+          suffix: ` · pushed on ${result.branch} · PR already open (${pr.url})${labelNote}`,
           pr,
         };
       default: {
         if (pr.error) console.warn(`MinSpec: approval PR not opened — ${pr.error}`);
-        const reason = PR_FAILURE_REASON[pr.outcome] ?? 'the PR could not be opened';
-        return { suffix: manualPrSurface(result, reason), pr };
+        // #2243: a missing label is named, not folded into "opening the PR failed",
+        // which is all the founder was told in voip-sms-inbox. "could not be created"
+        // only when creating it was actually attempted and did not happen.
+        const reason = pr.missingLabel
+          ? `the '${pr.missingLabel}' label does not exist in this repository` +
+            (provisionLaneLabel && !pr.labelProvisioned ? ' and could not be created' : '')
+          : PR_FAILURE_REASON[pr.outcome] ?? 'the PR could not be opened';
+        return { suffix: manualPrSurface(result, reason) + labelNote, pr };
       }
     }
   } catch (err) {
@@ -872,8 +991,9 @@ export async function pushApprovalIfEnabled(
     // show-once rather than show-until-answered-a-particular-way. Deliberate
     // trade-off: if `enableAlwaysPush` below fails to persist, the offer is still
     // spent and the user keeps clicking `Push` per approval. That is a degradation
-    // the console warning explains, and it is the lesser evil against re-nagging
-    // someone who has already answered.
+    // a visible warning toast now explains (#2506 — a bare console.warn never
+    // reached the user), and it is the lesser evil against re-nagging someone
+    // who has already answered.
     if (!alreadyOffered) await recordPushAlwaysOfferMade(rootDir);
 
     if (choice === ALWAYS_PUSH_ACTION) {

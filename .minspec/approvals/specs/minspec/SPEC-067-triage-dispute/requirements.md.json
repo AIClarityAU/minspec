@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-067-triage-dispute/requirements.md",
+  "specHash": "081a2f041499adca934bec87188e9e28ba6aa471e3b482f9b5578605e8b970f9",
+  "approvedAt": "2026-09-21T09:58:56.595Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T3",
+  "migrated": false,
+  "baselineBlob": "d765ca8121e1ca15c919fe2303997e2ce2e01f70"
+}

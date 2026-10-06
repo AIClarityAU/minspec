@@ -32,9 +32,11 @@ describe('dispatch-issue.sh: sources the claim lease lib (held in-parent for the
 describe('dispatch-issue.sh: check-then-claim is the FIRST step, BEFORE the worktree (FR-1)', () => {
   it('the claim (lease_acquire) precedes `git worktree add`', () => {
     const acquireIdx = src.indexOf('lease_acquire "$ISSUE"');
-    // Anchor on the real command (`git worktree add -b "$BRANCH"`), not the earlier
-    // freshness-guard COMMENT that also mentions `git worktree add ... origin/main`.
-    const worktreeAddIdx = src.indexOf('git worktree add -b "$BRANCH"');
+    // Anchor on the real command (`git -C "$REPO_ROOT" worktree add -b "$BRANCH"`,
+    // pinned to the script's own repo root rather than the caller's cwd — #1896),
+    // not the earlier freshness-guard COMMENT that also mentions
+    // `git worktree add ... origin/main`.
+    const worktreeAddIdx = src.indexOf('git -C "$REPO_ROOT" worktree add -b "$BRANCH"');
     expect(acquireIdx).toBeGreaterThan(-1);
     expect(worktreeAddIdx).toBeGreaterThan(-1);
     expect(acquireIdx, 'claim must come before worktree creation').toBeLessThan(worktreeAddIdx);

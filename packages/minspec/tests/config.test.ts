@@ -98,6 +98,46 @@ describe('loadConfig()', () => {
     // Everything else still default
     expect(config.specsDir).toBe(DEFAULT_CONFIG.specsDir);
   });
+
+  describe('autonomy (#1795, DR-086)', () => {
+    it('defaults to "ask"', () => {
+      expect(DEFAULT_CONFIG.autonomy).toBe('ask');
+    });
+
+    it('reads an exact "act" token from config.json', () => {
+      const dir = path.join(tmpDir, '.minspec');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ autonomy: 'act' }));
+      expect(loadConfig(tmpDir).autonomy).toBe('act');
+    });
+
+    it.each([
+      ['a typo', 'acts'],
+      ['differently-cased', 'ACT'],
+      ['whitespace-only padding around a non-token', ' acting '],
+      ['a boolean-ish string', 'true'],
+      ['empty string', ''],
+    ])('normalizes %s ("%s") to "ask" — fail-closed, never grants autonomy', (_label, value) => {
+      const dir = path.join(tmpDir, '.minspec');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ autonomy: value }));
+      expect(loadConfig(tmpDir).autonomy).toBe('ask');
+    });
+
+    it('normalizes a non-string JSON value to "ask"', () => {
+      const dir = path.join(tmpDir, '.minspec');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ autonomy: true }));
+      expect(loadConfig(tmpDir).autonomy).toBe('ask');
+    });
+
+    it('trims whitespace around an otherwise-exact "act" token', () => {
+      const dir = path.join(tmpDir, '.minspec');
+      fs.mkdirSync(dir, { recursive: true });
+      fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify({ autonomy: '  act  ' }));
+      expect(loadConfig(tmpDir).autonomy).toBe('act');
+    });
+  });
 });
 
 describe('setCoverageMinimum()', () => {

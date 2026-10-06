@@ -11,13 +11,25 @@
  * nothing ever fast-forwards a primary (see `scripts/check-primaries-clean.sh`
  * for the full mechanism writeup and the G2-deadlock analysis).
  *
- * CLASSIFICATION (mirrors `check-primaries-clean.sh` byte-for-byte):
+ * CLASSIFICATION (mirrored `check-primaries-clean.sh`'s two-outcome shape as of
+ * #1162; the bash script gained a THIRD outcome, LANDED-ON-BRANCH, in #2068 —
+ * a dirty path byte-identical to some OTHER remote-tracking ref, not just
+ * `origin/<default>`, is landed work sitting in a feature branch/open PR, not
+ * unlanded. This module has NOT been widened to match yet (`ORPHAN` below still
+ * covers that case here), so the two are no longer byte-for-byte in parity —
+ * tracked as a follow-up. `tidyRedundantPaths` only ever discards `REDUNDANT`
+ * paths, so this drift cannot itself cause a wrong discard; it can only
+ * over-report `ORPHAN` in the extension's UI the same way the bash script did
+ * before #2068):
  *   REDUNDANT  the dirty path's content is byte-identical to `origin/<default>`'s
  *              version, or is locally deleted and absent there too. Carries no
  *              information — safe to discard, because the eventual sanctioned
  *              fast-forward (`sync_shared_checkouts()`, DR-065) reproduces it.
  *   ORPHAN     content differs (or exists only on one side in a way that isn't
- *              a matching absence). Real unlanded work. NEVER touched here.
+ *              a matching absence). Real unlanded work in a plain `git status`
+ *              sense, but see the #2068 note above — some of what lands here
+ *              may actually be landed on a branch this classifier doesn't check.
+ *              NEVER touched here regardless.
  *
  * TIER-0 / OFFLINE (invariant #1): this module makes NO network call, including
  * no `git fetch`. It classifies against whatever `origin/<default>` ref is
@@ -59,7 +71,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
-import { readAllRecords, isRecordLive, SESSIONS_DIR, type SessionPresenceRecord } from './presence';
+import { readAllRecords, isRecordLive, sameCheckout, SESSIONS_DIR, type SessionPresenceRecord } from './presence';
 
 /** One dirty path's verdict. */
 export interface TidyClassification {
@@ -272,7 +284,9 @@ function safeReadFile(absPath: string): Buffer | null {
 
 /**
  * The other LIVE sessions (per SPEC-026 presence, excluding `selfSessionId`)
- * whose `worktreeRoot` is this exact checkout. A non-empty result means
+ * whose `worktreeRoot` is this exact checkout — compared with `sameCheckout`
+ * (presence.ts), not raw string equality, so two Windows spellings of the
+ * same folder still match (#2403). A non-empty result means
  * someone else is actively working in this primary right now — reason enough
  * for the tidy command to refuse (a peer mid-edit could be about to touch one
  * of these "redundant" paths, even though the classification is correct at
@@ -299,8 +313,6 @@ export function otherLiveSessionsHere(
   selfSessionId?: string,
   now = Date.now(),
 ): SessionPresenceRecord[] | null {
-  const target = path.resolve(worktreeRoot);
-
   // A sessions dir that can't even be listed (missing, permissions, ...)
   // can't demonstrate anyone's absence — fail closed rather than treat it
   // like "confirmed empty" the way readAllRecords' own `[]` return would.
@@ -314,7 +326,7 @@ export function otherLiveSessionsHere(
   for (const { rec } of readAllRecords(rootDir)) {
     if (!rec) return null; // corrupt/unreadable/malformed ⇒ can't attribute ⇒ can't rule out a peer
     if (selfSessionId && rec.sessionId === selfSessionId) continue;
-    if (path.resolve(rec.worktreeRoot) !== target) continue;
+    if (!sameCheckout(rec.worktreeRoot, worktreeRoot)) continue;
     if (!isRecordLive(rec, now)) continue;
     out.push(rec);
   }
