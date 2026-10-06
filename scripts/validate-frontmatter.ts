@@ -78,8 +78,15 @@ function safeGlob(dir: string, ext: string): string[] {
   }
 }
 
+// `\r?\n`, not `\n` — a CRLF checkout (Windows `core.autocrlf=true`; this repo's
+// `.gitattributes` pins `specs/**` and `.minspec/approvals/**` to LF but not
+// `docs/decisions/**` or `docs/epics/**`, #2465) must still match this anchor. A
+// bare `\n` silently returns `{}` on every CRLF file: every frontmatter-bearing
+// rule below then reads it as having NO frontmatter rather than failing loudly,
+// which is exactly invariant 2's "no silent gate". Mirrors the Python twin's
+// intent already proven out in `declaredSpecId` (spec-id-collision.ts).
 function parseFrontmatter(content: string): Record<string, string> {
-  const match = content.match(/^---\n([\s\S]*?)\n---/);
+  const match = content.match(/^---\r?\n([\s\S]*?)\r?\n---/);
   if (!match) return {};
   const fm: Record<string, string> = {};
   for (const line of match[1].split('\n')) {
@@ -140,23 +147,46 @@ try {
   // docs/domain/ doesn't exist yet — that's fine
 }
 
-// Build the registry of valid epic refs (ids + slugs, lowercased) from
-// docs/epics/EPIC-*.md. Empty when the repo predates epics — the epic gate
-// then skips entirely (graceful degradation: don't demand epics a repo hasn't
-// adopted). Mirrors epicRefSet() in the extension.
-function loadEpicRefs(): Set<string> {
+// Registry of valid epic refs (ids + slugs, lowercased) from docs/epics/EPIC-*.md,
+// plus enough bookkeeping to tell "this repo has no epics" apart from "this repo
+// has epic files but none of them could be read" (#2465). `fileCount === 0` is
+// the former — the epic gate below skips entirely (graceful degradation: don't
+// demand epics a repo hasn't adopted). `fileCount > 0` with `refs.size === 0` is
+// the latter, and must FAIL rather than silently skip: an empty registry reads
+// identically to "no epics" at the call site, which is exactly the silent-gate
+// shape constitution invariant 2 forbids (this is how a CRLF-only docs/epics/
+// tree — every file present, none parsed — went unnoticed).
+interface EpicRegistry {
+  readonly refs: Set<string>;
+  /** Epic files found, regardless of whether an id/slug could be read from them. */
+  readonly fileCount: number;
+  /** Epic files found but unreadable, or readable with neither id: nor slug:. */
+  readonly unreadable: readonly string[];
+}
+
+function loadEpicRefs(): EpicRegistry {
   const refs = new Set<string>();
+  const unreadable: string[] = [];
   const epicsDir = join(ROOT, 'docs', 'epics');
+  let files: string[];
   try {
-    for (const file of glob(epicsDir, '.md')) {
-      const fm = parseFrontmatter(readFileSync(file, 'utf-8'));
-      if (fm['id']) refs.add(fm['id'].toLowerCase());
-      if (fm['slug']) refs.add(fm['slug'].toLowerCase());
-    }
+    files = glob(epicsDir, '.md');
   } catch {
     // docs/epics/ doesn't exist — no epics registered.
+    return { refs, fileCount: 0, unreadable };
   }
-  return refs;
+  for (const file of files) {
+    try {
+      const fm = parseFrontmatter(readFileSync(file, 'utf-8'));
+      const before = refs.size;
+      if (fm['id']) refs.add(fm['id'].toLowerCase());
+      if (fm['slug']) refs.add(fm['slug'].toLowerCase());
+      if (refs.size === before) unreadable.push(relative(ROOT, file));
+    } catch (err) {
+      unreadable.push(`${relative(ROOT, file)} (${err instanceof Error ? err.message : String(err)})`);
+    }
+  }
+  return { refs, fileCount: files.length, unreadable };
 }
 
 // Extract the machine ref from an `epic:` value, dropping any inline title
@@ -215,7 +245,34 @@ function buildReferenceRegistry(): ReferenceRegistry {
 // (which has adopted epics); the shipped extension keeps epics soft (warning,
 // FR-9). See DR-003 "RCDD on the RCDD" addendum.
 const specsDir = join(ROOT, 'specs');
-const epicRefs = loadEpicRefs();
+const epicsDir = join(ROOT, 'docs', 'epics');
+const epicRegistry = loadEpicRefs();
+const epicRefs = epicRegistry.refs;
+
+// Fail CLOSED (#2465) when epic files exist but the registry built from them is
+// empty — e.g. every file in docs/epics/ is CRLF and parseFrontmatter cannot see
+// any of them. Left silent, `epicRefs.size > 0` below reads identically to "this
+// repo has no epics" and skips the whole gate below without saying so, which is
+// the silent-stop-evaluating shape invariant 2 forbids. A genuinely epic-less
+// repo (fileCount === 0) is unaffected — that is the gate's normal skip path.
+if (epicRegistry.fileCount > 0 && epicRefs.size === 0) {
+  fail(
+    epicsDir,
+    `${epicRegistry.fileCount} epic file(s) exist in docs/epics/ but none could be ` +
+      `read for an \`id:\`/\`slug:\` (${epicRegistry.unreadable.join(', ')}) — the epic ` +
+      'gate cannot tell that apart from "no epics adopted" and would otherwise skip ' +
+      'silently. Check these files for CRLF line endings or malformed frontmatter.',
+  );
+} else if (epicRegistry.unreadable.length > 0) {
+  // Registry is non-empty (the gate below still runs), but some epic files
+  // contributed nothing to it — surface that too rather than let a bad file hide
+  // behind the others' successful reads.
+  warn(
+    `${epicRegistry.unreadable.length} epic file(s) in docs/epics/ could not be read for an ` +
+      `\`id:\`/\`slug:\`, and are silently absent from the epic registry: ${epicRegistry.unreadable.join(', ')}`,
+  );
+}
+
 try {
   const specFiles = glob(specsDir, '.md');
   for (const file of specFiles) {

@@ -208,7 +208,12 @@ function resolveSpecArg(root: string, arg: string): string {
 // Semantics pinned to spec-validator.ts `rawFrontmatterField`/`fmListField`
 // (and their Python twin, `scripts/hooks/spec-gate.py` `fm_value`/`fm_list`).
 
-const FRONTMATTER_BLOCK_RE = /^---\n([\s\S]*?)\n---\n?/;
+// `\r?\n`, not `\n` — a CRLF spec/DR file (Windows checkout; `docs/decisions/**`
+// is not LF-pinned in this repo's `.gitattributes`, #2465) must still match this
+// anchor, or `rawField`/`listField` silently read it as having no frontmatter at
+// all (e.g. `facts owns` would report every CRLF spec as declaring no `id:` and
+// owning nothing). Same fix already proven in `declaredSpecId` (spec-id-collision.ts).
+const FRONTMATTER_BLOCK_RE = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?/;
 
 /** The raw frontmatter block text (without the `---` fences), or '' if absent. */
 function frontmatterBlock(raw: string): string {
@@ -240,13 +245,19 @@ function listField(raw: string, key: string): string[] {
       .map((t) => t.replace(/^["']+|["']+$/g, ''));
   }
   const lines = block.split('\n');
-  const keyLine = new RegExp(`^${key}[ \\t]*:[ \\t]*(?:#.*)?$`);
-  const item = /^[ \t]+-[ \t]*(.+?)[ \t]*(?:#.*)?$/;
+  // `m` on both — matched per-line below, but on a CRLF file (#2465) each line
+  // still carries a trailing `\r` (split only breaks on `\n`). Without `m`, `$`
+  // anchors on the true end of the string and never reaches past the `\r` that
+  // `.`/`[ \t]` cannot themselves consume, so every line would silently fail to
+  // match and the block-list form would read as empty. `rawField`'s own regex
+  // above already relies on the same `m` behaviour against the whole block.
+  const keyLine = new RegExp(`^${key}[ \\t]*:[ \\t]*(?:#.*)?$`, 'm');
+  const item = /^[ \t]+-[ \t]*(.+?)[ \t]*(?:#.*)?$/m;
   const toks: string[] = [];
   for (let i = 0; i < lines.length; i++) {
     if (keyLine.test(lines[i])) {
       for (const cont of lines.slice(i + 1)) {
-        if (/^[ \t]*$/.test(cont)) continue;
+        if (/^[ \t]*\r?$/.test(cont)) continue; // blank (CRLF leaves a lone trailing \r)
         const m = cont.match(item);
         if (!m) break; // de-indented / next key → list ended
         toks.push(m[1].replace(/^["']+|["']+$/g, ''));

@@ -714,6 +714,17 @@ describe('C — frontmatterField: only the leading block, only a real declaratio
   it('returns undefined when there is no frontmatter at all (pre-MinSpec records)', () => {
     expect(frontmatterField('# DR-001\n\nAn old decision.\n', 'title')).toBeUndefined();
   });
+
+  // #2465 — a CRLF decision file (Windows checkout; docs/decisions/** is not
+  // LF-pinned in this repo's .gitattributes) must not silently read as having no
+  // frontmatter. `FRONTMATTER_RE` used to anchor on a bare `\n`, so this returned
+  // `undefined` for every CRLF file — which checkDeclaredDrIds (below) then read
+  // as "frontmatter-less", disabling the declared-id half of the duplicate-id gate.
+  it('reads a field from a CRLF frontmatter block (#2465, base-red before the \\r?\\n fix)', () => {
+    const crlf = drWith('DR-088', 'Ownership leaves the hash', '#1481').replace(/\n/g, '\r\n');
+    expect(frontmatterField(crlf, 'title')).toBe('Ownership leaves the hash');
+    expect(frontmatterField(crlf, 'triggered_by')).toBe('#1481');
+  });
 });
 
 describe('C — modifiedDecisionPaths: the exact complement of what half B claims', () => {
