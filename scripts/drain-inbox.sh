@@ -1275,6 +1275,33 @@ run_cycle() {
     echo "[drain]     Tune/disable with MINSPEC_DISPATCH_AUTOCOMPACT_HALT=<N> (0 disables). PR remediation (Step 3) still runs." >&2
   }
 
+  # admit_next_dispatch: the quota gate, asked before EVERY launch on BOTH paths (#2573).
+  # Returns 0 to launch. On a hold it says why, records that the gate (not a child's
+  # text) paused the cycle, and returns 42.
+  #
+  # The cycle's own check at the top of run_cycle is not enough, and for a while it was
+  # all the one-at-a-time path had. A cycle is up to MINSPEC_DRAIN_QUEUE_LIMIT issues
+  # long and runs for hours, so a cap checked once was a cap on the first issue only.
+  # #2573, 2026-10-04: started under a 60% weekly cap at 58%, a 100-issue cycle was
+  # still dispatching at 66% two hours later, and was stopped by hand.
+  #
+  # One function for both paths, because the per-launch check already existed for
+  # width > 1 and the serial loop had simply never been given it: two copies of "ask the
+  # gate, then hold" is how one of them came to be missing.
+  #
+  # Called directly, never inside `$(...)`: it sets QUOTA_PAUSE_CAUSE, and an assignment
+  # made in a subshell would be discarded (the same trap classify_dispatch documents).
+  # Costs one local file read per launch, plus a refresh of the reading when it has
+  # aged, which is the point: by the next launch the last reading is an agent-run old.
+  admit_next_dispatch() {
+    local qv
+    qv=$(quota_gate) && return 0
+    echo "[drain] $qv — holding the rest of the queue for the window."
+    # The meter itself said hold, so no text signal this cycle may shorten the rest.
+    QUOTA_PAUSE_CAUSE="gate"
+    return 42
+  }
+
   local saw_quota=0 verdict=""
   # Dispatch attempts/failures, rolled up across BOTH the serial and parallel paths
   # below (#2140, constitution invariant 2: no silent gate). `classify_dispatch`
@@ -1290,10 +1317,14 @@ run_cycle() {
   local dispatch_attempts=0 dispatch_failures=0
 
   if (( DISPATCH_CONCURRENCY <= 1 )); then
-    # ── Serial path — the historical behaviour, unchanged. Output still streams
+    # ── Serial path — one at a time, the default. Output still streams
     # LIVE through `tee`, which matters for a multi-minute build: a captured-then-
     # dumped block would leave the log silent while work is happening.
     for n in $all_ready; do
+      # Admission control per DISPATCH, not just per cycle (#2573). A hold here ends the
+      # cycle exactly as the parallel path's does: nothing more is launched, the cause
+      # is the gate, and run_loop sleeps on 42 instead of counting a failure.
+      admit_next_dispatch || return 42
       # Per ITEM, not just per cycle. One cycle over a 60-issue queue runs for hours, so
       # the token minted at the top of it dies partway down the list — measured on
       # 2026-09-27, where dispatch #1898 through #2021 succeeded and every dispatch from
@@ -1323,7 +1354,7 @@ run_cycle() {
     # concurrent builds stay live AND readable instead of interleaving anonymously.
     local -A pid_issue=() pid_cap=()
     local -a queue=($all_ready)
-    local qi=0 stop_launching=0 p rc n out qv
+    local qi=0 stop_launching=0 p rc n out
 
     launch_next() {
       # Same per-item refresh as the serial path. This runs in the PARENT — only the
@@ -1343,14 +1374,10 @@ run_cycle() {
         # Admission control per LAUNCH, not just per cycle. A fan-out can outlive
         # the window it started in, and an agent begun near the wall dies partway
         # having spent everything — the expensive failure this whole gate exists
-        # to prevent. Re-checking here costs one local file read per launch.
-        if ! qv=$(quota_gate); then
-          echo "[drain] $qv — holding the rest of the queue for the window."
-          saw_quota=1; stop_launching=1
-          # The meter itself said hold, so no text signal this cycle may shorten the rest.
-          QUOTA_PAUSE_CAUSE="gate"
-          break
-        fi
+        # to prevent. The same check the serial path makes (admit_next_dispatch).
+        # Unlike that path this one cannot return yet: builds already in flight are
+        # left to finish, and the 42 follows once they have (below).
+        admit_next_dispatch || { saw_quota=1; stop_launching=1; break; }
         launch_next
       done
       (( ${#pid_issue[@]} == 0 )) && break
@@ -1532,17 +1559,16 @@ _quota_read() {
 # NEVER once succeeded at this path, then refuses outright and names what to
 # install.
 #
-# WORST CASE while blind: up to QUOTA_BOOTSTRAP_ADMITS admitted decisions, each
-# with the SAME blast radius as any ordinary admitted cycle (this allowance does
-# not widen what one admit can do, only how many blind ones are handed out). In
-# the default serial dispatch mode (DISPATCH_CONCURRENCY=1) that means up to
-# QUOTA_BOOTSTRAP_ADMITS cycles, each free to dispatch the ENTIRE agent-ready
-# backlog with no further quota check until a real usage-limit hit ends it — no
-# different from any single legitimately-admitted cycle today. In parallel mode
-# (DISPATCH_CONCURRENCY>1), quota_gate is re-consulted per LAUNCH (see the
-# `qv=$(quota_gate)` call in run_cycle's parallel path), so the allowance caps at
-# exactly QUOTA_BOOTSTRAP_ADMITS concurrent launches before the rest of the queue
-# holds for the window.
+# WORST CASE while blind: QUOTA_BOOTSTRAP_ADMITS admitted decisions, each with the
+# blast radius of ONE ordinary admit (this allowance does not widen what one admit
+# can do, only how many blind ones are handed out). The gate is asked at the top of
+# a cycle and again before every launch, on both dispatch paths (admit_next_dispatch
+# in run_cycle, #2573), and every ask that finds no reading spends one admit. So a
+# machine that has never had a reading gets QUOTA_BOOTSTRAP_ADMITS asks in all, cycle
+# tops and launches alike: with work queued, that is one cycle's top and
+# QUOTA_BOOTSTRAP_ADMITS - 1 launches, and then it holds. Until #2573 the serial path
+# asked once per cycle, so the same allowance bought QUOTA_BOOTSTRAP_ADMITS whole
+# cycles, each free to dispatch the entire backlog with no further check.
 # Best-effort refresh of the reading, called by quota_gate before it consults.
 #
 # THIS FUNCTION MUST NEVER WRITE TO STDOUT. quota_gate's stdout IS the verdict
