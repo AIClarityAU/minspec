@@ -15,7 +15,7 @@
  * quietly, per `.minspec/constitution.md` invariant 2.
  */
 
-import { readdirSync, readFileSync, statSync, existsSync } from 'fs';
+import { readFileSync, statSync, existsSync } from 'fs';
 import { join, relative, dirname, sep } from 'path';
 import {
   validateDrSequence,
@@ -39,6 +39,10 @@ import {
 import { listOrphanedRecords } from '../packages/minspec/src/lib/approval-store';
 import { checkStatusParity, inspectStatusLine, inspectAllStatusClaims } from '../packages/minspec/src/lib/status-parity';
 import { checkManagedRegionMarkers } from '../packages/minspec/src/lib/scaffold';
+// The corpus walkers, under their former local names. `safeGlob` now tolerates ONLY an
+// absent root; every other read failure reaches the rule's own catch instead of being
+// turned into an empty corpus (#1999).
+import { walkFilesByExt as glob, walkOptionalRoot as safeGlob } from './lib/corpus-walk';
 import { checkDeclaredDrIds } from './lib/dr-id-collision';
 import { checkDeclaredSpecIds } from './lib/spec-id-collision';
 import {
@@ -53,30 +57,6 @@ import { parseSections, PREAMBLE_HEADING, detectDoubledTemplateHeadings } from '
 const ROOT = process.cwd();
 let errors = 0;
 let warnings = 0;
-
-function glob(dir: string, ext: string): string[] {
-  const results: string[] = [];
-  const entries = readdirSync(dir, { withFileTypes: true });
-  for (const entry of entries) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      results.push(...glob(full, ext));
-    } else if (entry.name.endsWith(ext)) {
-      results.push(full);
-    }
-  }
-  return results;
-}
-
-// glob() that tolerates a missing directory (returns []) — used by checks that
-// scan optional corpus locations.
-function safeGlob(dir: string, ext: string): string[] {
-  try {
-    return glob(dir, ext);
-  } catch {
-    return [];
-  }
-}
 
 function parseFrontmatter(content: string): Record<string, string> {
   const match = content.match(/^---\n([\s\S]*?)\n---/);
@@ -273,9 +253,17 @@ try {
 }
 
 // Rule 6 (non-fatal): local DR-NNN sequence health (issue #41). WARNS — never
-// fails the build — on a gap (a number skipped, e.g. DR-010 → DR-362), a
-// duplicate number, or an under-padded id. Would have caught DR-362 (a global-
-// register number minted into this project-local register). Tier-0, offline.
+// fails the build — on a duplicate number or an under-padded id. Tier-0, offline.
+//
+// It does NOT warn on a skipped number any more (#2051). That rule read every
+// id absent from the run as an error and said "renumber the out-of-sequence DR",
+// which is wrong whenever the id is held by an open pull request — the normal
+// state under worktree-per-session (#168), and invisible to an offline scan. It
+// caught the DR-362 leak once; it fired on correct work continuously.
+//
+// Cross-PR id truth is .github/workflows/dr-id-collision.yml ALONE — Rule 17
+// below is the offline half and, as its own comment says, cannot see any pull
+// request. Do not read the two as interchangeable.
 try {
   const drWarnings = validateDrSequence(resolveDecisionsDir());
   for (const w of drWarnings) {
@@ -315,6 +303,11 @@ try {
     file: relative(ROOT, file),
     content: readFileSync(file, 'utf-8'),
   }));
+  // A zero-file scan is itself a defect signal, not a clean register: the two are
+  // indistinguishable in the output otherwise (#1999, same guard Rule 19 already carries).
+  if (drFiles.length === 0) {
+    warn('Rule 17 scanned 0 DR files; do not read the green as a collision-free register.');
+  }
   for (const defect of checkDeclaredDrIds(drFiles)) {
     fail(join(ROOT, defect.files[0]), `DR id ${defect.kind} — ${defect.message}`);
   }
@@ -354,6 +347,9 @@ try {
       file: relative(ROOT, file),
       content: readFileSync(file, 'utf-8'),
     }));
+  if (specFiles.length === 0) {
+    warn('Rule 18 scanned 0 spec files; do not read the green as a collision-free corpus.');
+  }
   for (const defect of checkDeclaredSpecIds(specFiles)) {
     fail(join(ROOT, defect.files[0]), `Spec id ${defect.kind} — ${defect.message}`);
   }

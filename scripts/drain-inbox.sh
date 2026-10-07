@@ -73,7 +73,9 @@
 #                                    neither the dormant-checkout fast-forward NOR the
 #                                    read-only origin fetch runs.
 #   MINSPEC_DRAIN_RUN_DIR=<path>   — where the self-synced run-dir worktree lives
-#                                    (default /tmp/minspec-drain-run).
+#                                    (default /tmp/minspec-drain-run). Set to "" (not
+#                                    just unset) to explicitly disable self-refresh —
+#                                    an empty value is honoured, not defaulted.
 #
 # Opt-in is the once-off permission gate (#239): set it once with --enable-auto,
 # then the session-start hook drains automatically thereafter. The pref lives in
@@ -86,11 +88,16 @@
 # to init keeps it running — so it is NOT killed for free. What makes it die with
 # the session is an EXPLICIT liveness poll, not process-tree luck:
 #   1. Before forking, the FOREGROUND resolves SESSION_PID — the Claude Code
-#      session process (comm=claude), which is an ancestor of this hook and lives
-#      exactly as long as the session (normal close, crash, or kill all end it).
-#      Resolution walks up from $PPID; it must happen in the foreground while that
-#      ancestry is still intact (after the fork+disown the loop is reparented and
-#      $PPID no longer points at the session).
+#      session process, which is an ancestor of this hook and lives exactly as
+#      long as the session (normal close, crash, or kill all end it). Matched by
+#      comm=claude OR by the versioned per-release binary every current install
+#      runs as (comm is just the version number there, e.g. "2.1.283" — matched
+#      via its args/exe path instead; #2215). Resolution walks up from $PPID; it
+#      must happen in the foreground while that ancestry is still intact (after
+#      the fork+disown the loop is reparented and $PPID no longer points at the
+#      session). When the walk finds no Claude ancestor it falls back to $PPID
+#      and the banner says so, instead of printing a bare pid that looks just as
+#      plausible as a real match.
 #   2. The disowned loop polls `kill -0 $SESSION_PID` every MINSPEC_DRAIN_POLL
 #      seconds (both between cycles and before each cycle). When the session
 #      process is gone the poll fails and the loop exits within one poll interval.
@@ -136,7 +143,15 @@ LOG="${MINSPEC_DRAIN_LOG:-/tmp/minspec-drain-inbox.log}"
 # scripts from a DEDICATED worktree hard-synced to origin/main: fresh by
 # construction, self-healing, and NEVER touching the primary's HEAD/working tree
 # (rule #8). Overridable for tests; opt out with MINSPEC_DRAIN_SELF_REFRESH=0.
-DRAIN_RUN_DIR="${MINSPEC_DRAIN_RUN_DIR:-/tmp/minspec-drain-run}"
+# NOTE the unset-only default (`-`, not `:-`): an explicitly EMPTY
+# MINSPEC_DRAIN_RUN_DIR="" must stay empty so the `[[ -z "$DRAIN_RUN_DIR" ]]` guard
+# in ensure_fresh_run_dir below can actually fire and disable self-refresh (#2238).
+# With `:-` an empty value was indistinguishable from unset, so it silently fell
+# back to /tmp/minspec-drain-run — the LIVE drain's run dir — and a test setting
+# it to "" without also passing MINSPEC_DRAIN_SELF_REFRESH=0 would hard-reset that
+# live tree instead of getting the "self-refresh disabled" behaviour its warning
+# text claimed.
+DRAIN_RUN_DIR="${MINSPEC_DRAIN_RUN_DIR-/tmp/minspec-drain-run}"
 # The shared checkout the drain runs from — the root whose .minspec/sessions/ the
 # presence gate reads. Env-overridable so the FR-14 parity harness (and unit tests)
 # can point it at a hermetic fixture without a full git clone.
@@ -531,27 +546,68 @@ sync_shared_checkouts() {
   return 0
 }
 
-# resolve_session_pid: print the PID of the Claude Code session that (transitively)
-# launched us, so the loop can watch it. MUST be called in the FOREGROUND, before
-# any fork/disown, while $PPID still chains up to the session. Prefers an explicit
-# MINSPEC_SESSION_PID; else walks up the process tree to the nearest `claude`
-# ancestor; else falls back to $PPID (a manual run's own shell — so a hand-started
-# continuous drain still dies with the terminal that launched it).
-resolve_session_pid() {
+# resolve_session_anchor: sets globals SESSION_ANCHOR_PID (the resolved pid) and
+# SESSION_ANCHOR_FALLBACK (1 when the walk found no Claude ancestor and fell back
+# to $PPID, 0 when it genuinely matched a Claude process or an explicit
+# MINSPEC_SESSION_PID override). MUST be called in the FOREGROUND, before any
+# fork/disown, while $PPID still chains up to the session.
+#
+# The walk matches THREE independent signals, any one of which is sufficient
+# (#2215 — none of comm/args alone is reliable on every install shape):
+#   • comm contains "claude" (older/system installs, e.g. a `claude` wrapper)
+#   • args contain the old marker strings (`claude-code` / `anthropic.claude`)
+#   • args OR /proc/<pid>/exe contain "/claude/versions/" — the versioned
+#     per-release binary every current Claude Code install runs as (its `comm`
+#     is just the version number, e.g. "2.1.283", and `args` may truncate or
+#     omit the full path depending on how the launcher set argv[0], so the
+#     literal binary at /proc/<pid>/exe is the one signal argv spoofing/
+#     truncation cannot hide).
+resolve_session_anchor() {
+  SESSION_ANCHOR_PID="$PPID"
+  SESSION_ANCHOR_FALLBACK=1
   if [[ -n "${MINSPEC_SESSION_PID:-}" ]] && kill -0 "${MINSPEC_SESSION_PID}" 2>/dev/null; then
-    printf '%s' "$MINSPEC_SESSION_PID"; return 0
+    SESSION_ANCHOR_PID="$MINSPEC_SESSION_PID"
+    SESSION_ANCHOR_FALLBACK=0
+    return 0
   fi
-  local pid="$PPID" guard=0 comm args
+  local pid="$PPID" guard=0 comm args exe
   while [[ -n "$pid" && "$pid" != "0" && "$pid" != "1" && "$guard" -lt 20 ]]; do
     comm="$(ps -o comm= -p "$pid" 2>/dev/null | tr -d ' \t' || true)"  # swallow-ok: ps exits non-zero precisely when the pid is gone, which is the same conclusion the test below draws
     args="$(ps -o args= -p "$pid" 2>/dev/null || true)"  # swallow-ok: ps exits non-zero precisely when the pid is gone, which is the same conclusion the test below draws
-    if [[ "$comm" == *claude* || "$args" == *claude-code* || "$args" == *anthropic.claude* ]]; then
-      printf '%s' "$pid"; return 0
+    exe=""
+    [[ -r "/proc/$pid/exe" ]] && exe="$(readlink -f "/proc/$pid/exe" 2>/dev/null || true)"  # swallow-ok: unreadable/raced exe just leaves exe empty, falling through to the other two signals
+    if [[ "$comm" == *claude* || "$args" == *claude-code* || "$args" == *anthropic.claude* \
+          || "$args" == *"/claude/versions/"* || "$exe" == *"/claude/versions/"* ]]; then
+      SESSION_ANCHOR_PID="$pid"
+      SESSION_ANCHOR_FALLBACK=0
+      return 0
     fi
     pid="$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' \t' || true)"
     guard=$((guard + 1))
   done
-  printf '%s' "$PPID"
+  SESSION_ANCHOR_PID="$PPID"
+  SESSION_ANCHOR_FALLBACK=1
+  return 0
+}
+
+# resolve_session_pid: back-compat/CLI wrapper — prints just the resolved pid
+# (the `--resolve-session-pid` seam and any scripted consumer expect a bare
+# numeric pid on stdout, not the fallback flag). Callers that need to know
+# WHETHER it fell back (to annotate a banner, #2215) call resolve_session_anchor
+# directly and read SESSION_ANCHOR_FALLBACK — command substitution runs in a
+# subshell, so a flag set only as a side effect here would not survive `$(...)`.
+resolve_session_pid() {
+  resolve_session_anchor
+  printf '%s' "$SESSION_ANCHOR_PID"
+  return 0
+}
+
+# session_anchor_note: human-readable suffix for a banner line that names
+# SESSION_PID, appended only when resolve_session_anchor fell back to $PPID
+# without finding a Claude ancestor — so a bare pid in the log is never
+# mistaken for a confirmed Claude Code session (#2215).
+session_anchor_note() {
+  [[ "${SESSION_PID_FALLBACK:-0}" == "1" ]] && printf ' (anchored to the calling shell, not a Claude session)'
   return 0
 }
 
@@ -1817,7 +1873,7 @@ wait_interval() {
 run_loop() {
   local deadline consec=0 rc
   deadline=$(( $(date +%s) + MAX_LIFETIME ))
-  echo "[drain] continuous loop started (session=$SESSION_PID, interval=${INTERVAL}s, quota_backoff=${QUOTA_BACKOFF}s, max_lifetime=${MAX_LIFETIME}s)."
+  echo "[drain] continuous loop started (session=$SESSION_PID$(session_anchor_note), interval=${INTERVAL}s, quota_backoff=${QUOTA_BACKOFF}s, max_lifetime=${MAX_LIFETIME}s)."
   echo "[drain] quota gate — $(quota_health)"
   while :; do
     if ! session_alive "$SESSION_PID"; then
@@ -2085,8 +2141,11 @@ fi
 # the Claude session (after the fork+disown below the loop is reparented and this
 # ancestry is gone). Only needed for the continuous loop.
 SESSION_PID=""
+SESSION_PID_FALLBACK=0
 if $CONTINUOUS; then
-  SESSION_PID="$(resolve_session_pid)"
+  resolve_session_anchor
+  SESSION_PID="$SESSION_ANCHOR_PID"
+  SESSION_PID_FALLBACK="$SESSION_ANCHOR_FALLBACK"
 fi
 
 # Only one drain process at a time. The lock holds the background driver's PID; if
@@ -2124,7 +2183,7 @@ fi
 DRAIN_PID=$!
 disown "$DRAIN_PID"
 if $CONTINUOUS; then
-  echo "🔁  Continuous drain in background (PID $DRAIN_PID, session $SESSION_PID, every $((INTERVAL / 60))m; dies with the session; log: $LOG)"
+  echo "🔁  Continuous drain in background (PID $DRAIN_PID, session $SESSION_PID$(session_anchor_note), every $((INTERVAL / 60))m; dies with the session; log: $LOG)"
 else
   echo "🚀  Triage + drain in background (PID $DRAIN_PID, log: $LOG)"
 fi

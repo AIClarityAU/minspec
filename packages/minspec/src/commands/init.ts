@@ -13,6 +13,7 @@ import { TEMPLATE_NAMES, TEMPLATE_OUTPUT_PATHS, MANAGED_REGION_TEMPLATES } from 
 import { CLAUDE_SETTINGS_PATH } from '../lib/claude-settings';
 import { resolveTargetFolder, workspaceFolderLabel } from '../lib/resolve-folder';
 import { setCoverageMinimum, DEFAULT_COVERAGE_MINIMUM } from '../lib/config';
+import { hasOptInMarker, notOptedInMessage } from '../lib/opt-in';
 import { getRepoFromRemote } from '../lib/github';
 import { resolveRemotes, renameToOriginCandidate } from '../lib/git-remotes';
 import { resolveBranchDestination, defaultGitRun } from '../lib/approve-commit';
@@ -1487,6 +1488,15 @@ export async function initRefreshCommand(
 ): Promise<void> {
   const folder = folderArg ?? (await resolveTargetFolder());
   if (!folder) return;
+  // SPEC-096 FR-3 / DQ-1: Refresh is not a second Initialize. In a folder with no
+  // `.minspec/` it refuses - one message, no button, nothing written - and points
+  // at the command that does opt a folder in. `refreshHarnessFiles` refuses too;
+  // checking here is what lets the message be the plain refusal rather than a
+  // "refresh failed" wrapped around it.
+  if (!hasOptInMarker(folder)) {
+    vscode.window.showErrorMessage(notOptedInMessage(folder));
+    return;
+  }
   // Same all-or-nothing concern as initCommand: a mid-sequence write failure
   // must surface, not silently leave a partial/inconsistent harness (#153).
   let warnings: ReturnType<typeof refreshHarnessFiles>;

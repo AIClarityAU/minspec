@@ -757,6 +757,9 @@ describe('Invariant 5: User override always wins', () => {
 
   beforeEach(() => {
     tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-inv5-'));
+    // SPEC-096: the override log lives in `.minspec/`, so it is written only in a folder
+    // that has opted in. The store used to create that directory itself.
+    fs.mkdirSync(path.join(tmpDir, '.minspec'));
   });
 
   afterEach(() => {

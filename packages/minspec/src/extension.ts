@@ -42,7 +42,8 @@ import { loadSession, saveSession, addToScope, isFileInScope } from './lib/sessi
 import { SessionPresenceManager } from './lib/presence';
 import { detectTools, getToolFilePath, type DetectedTools } from './lib/tool-detector';
 import { injectContextToFile, removeContextFromFile, type ActiveSpecContext } from './lib/context-injector';
-import { parkTopic, createParkingLotEntry } from './lib/parking-lot';
+import { parkTopic, createParkingLotEntry, type ParkResult } from './lib/parking-lot';
+import { NotOptedInError } from './lib/opt-in';
 import {
   MinSpecCodeLensProvider,
   MinSpecSpecFileLensProvider,
@@ -380,7 +381,10 @@ export function activate(context: vscode.ExtensionContext): void {
       async (folderArg?: string, deps?: Parameters<typeof initRefreshCommand>[1]) => {
         await initRefreshCommand(folderArg, deps);
         refreshScaffoldCommitStatusBar();
-        syncSessionIdEnvVar(); // #2356: harmless re-sync; initRefresh can also run on a not-yet-opted-in folder
+        // #2356: harmless re-sync. Refresh never opts a folder in (it refuses when
+        // there is no `.minspec/`, SPEC-096 FR-3), so this cannot be the call that
+        // first sets the var; it only keeps it in step with the marker.
+        syncSessionIdEnvVar();
       },
     ),
     vscode.commands.registerCommand('minspec.commitHarnessRefresh', async (folderArg?: string) => {
@@ -1013,7 +1017,24 @@ function handleFileSaveDriftCheck(
 }
 
 /**
+ * Show a store's opt-in refusal as MinSpec's own message (SPEC-096 FR-8).
+ * Returns false, having shown nothing, for any other error.
+ */
+function showedOptInRefusal(err: unknown): boolean {
+  if (!(err instanceof NotOptedInError)) return false;
+  vscode.window.showErrorMessage(err.message);
+  return true;
+}
+
+/**
  * Show a drift warning with three action options.
+ *
+ * The warning is only ever shown for a folder with a session file, so one that
+ * has opted in. It then waits for the user, and the marker can be gone by the
+ * time a button is clicked. Both persisting actions refuse in that case
+ * (`.minspec/` is not theirs to recreate), and nothing awaits this function, so
+ * the refusal is shown here: left alone it would be an unhandled rejection and
+ * the user would see nothing at all.
  */
 async function showDriftWarning(
   filePath: string,
@@ -1038,7 +1059,13 @@ async function showDriftWarning(
       ['idea', 'inbox'],
     );
 
-    const result = await parkTopic(workspaceRoot, entry);
+    let result: ParkResult;
+    try {
+      result = await parkTopic(workspaceRoot, entry);
+    } catch (err) {
+      if (!showedOptInRefusal(err)) throw err;
+      return; // refused: no "Saved to" after it
+    }
     if (result.method === 'github') {
       vscode.window.showInformationMessage(`MinSpec: Created GitHub issue — ${result.url}`);
     } else {
@@ -1046,7 +1073,12 @@ async function showDriftWarning(
     }
   } else if (choice === 'Add to Scope') {
     const updatedSession = addToScope(session, filePath, workspaceRoot);
-    saveSession(workspaceRoot, updatedSession);
+    try {
+      saveSession(workspaceRoot, updatedSession);
+    } catch (err) {
+      if (!showedOptInRefusal(err)) throw err;
+      return; // refused: no "Added to session scope" after it
+    }
     vscode.window.showInformationMessage(`MinSpec: Added "${relativePath}" to session scope.`);
   }
 }

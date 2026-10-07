@@ -212,6 +212,36 @@ if [[ "${ISSUE:-}" == "--paths-have-approvable-doc" ]]; then
   if paths_have_approvable_doc; then echo "hold"; exit 0; else echo "arm"; exit 1; fi
 fi
 
+# issue_linked_in_closing_refs TARGET_ISSUE — pure: exit 0 iff TARGET_ISSUE
+# appears among the closing-issue numbers piped in on stdin, one per line — the
+# shape `gh pr view --json closingIssuesReferences --jq
+# '.closingIssuesReferences[].number'` emits.
+#
+# #2228: PRs opened after ~05:20Z on 2026-09-30 carried a `Closes #N` trailer
+# (added below, #1322) verbatim, yet GitHub reported an EMPTY
+# `closingIssuesReferences` — the external trigger is unverified (a GitHub-side
+# incident/behaviour change is the lead candidate). But regardless of that
+# trigger, the pipeline had a real, independent defect: it WRITES the trailer
+# and trusts GitHub's keyword parser to act on it, and nothing downstream ever
+# read that parse back. A required outcome (merging closes the issue) rested on
+# a single unwitnessed producer — exactly the gap constitution invariant 2
+# forbids ("no required check hinges on a single producer that one
+# permission/config gap can disable"). This is the missing witness; the caller
+# below decides what a "no" means (needs-human-review, never silent).
+#
+# `-x` exact-match on a whole line so target `22` cannot false-match a `220`
+# emitted on the same stdin — a bare substring grep would.
+issue_linked_in_closing_refs() {
+  local target="$1"
+  grep -qxF "$target"
+}
+
+# Pure seam: prove the linkage check without gh/dispatch. Closing-ref numbers on
+# stdin, target issue as $2 (ISSUE itself is consumed by the flag string above).
+if [[ "${ISSUE:-}" == "--issue-linked" ]]; then
+  if issue_linked_in_closing_refs "${2:-}"; then exit 0; else exit 1; fi
+fi
+
 # autonomy_stop_classes_for_paths <newline-separated changed paths> (#1614)
 #
 # Derive the DR-086 stop classes that apply to MERGING this change set, as a
@@ -1048,6 +1078,27 @@ run_reviewer_stage() {
     return 0
   fi
 
+  # 6a. VERIFY the `Closes #$ISSUE` trailer (added above, #1322) actually LINKED
+  #     (#2228) — no silent gate (constitution invariant 2). Steps above only
+  #     WRITE the trailer into the body and trust GitHub's keyword parser to act
+  #     on it; nothing previously read that parse back, so a silent link
+  #     failure had no witness anywhere in this pipeline. Fail closed exactly
+  #     like the diff enumeration below (6b): an API/read error is treated the
+  #     same as "not confirmed linked", never as "assume it worked". The result
+  #     feeds 6b through closing_link_confirmed, which starts at 0 and turns 1
+  #     only on a positive match: the needs-human-review label alone holds no
+  #     merge, so an unconfirmed link has to withhold the --auto arm itself.
+  local closing_refs closing_link_confirmed=0
+  closing_refs=$(gh pr view "$pr_num" --repo "$REPO" --json closingIssuesReferences \
+    --jq '.closingIssuesReferences[].number' 2>/dev/null || true)  # swallow-ok: an API error and a genuinely empty list both fall through to the "not linked" branch below — a read failure is never treated as confirmation
+  if ! issue_linked_in_closing_refs "$ISSUE" <<<"$closing_refs"; then
+    gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+    gh pr comment "$pr_num" --repo "$REPO" --body "$(printf '## Closing-issue link not confirmed (#2228)\n\nThis PR carries a `Closes #%s` trailer, but GitHub currently reports `closingIssuesReferences` WITHOUT #%s in it — merging this PR may NOT auto-close the issue. Labeled `needs-human-review` and native auto-merge withheld: a human should confirm the link (re-saving the PR body with no text change sometimes re-triggers the parse) before merging, or close #%s manually once this merges.' "$ISSUE" "$ISSUE" "$ISSUE")" 2>/dev/null || true
+    echo "WARNING: PR #$pr_num does not show #$ISSUE in closingIssuesReferences — the Closes trailer did not link (#2228). Labeled needs-human-review; native auto-merge withheld." >&2
+  else
+    closing_link_confirmed=1
+  fi
+
   # 6b. Native auto-merge (DR-061): if the project opted in, mark the PR --auto so
   #     GitHub merges it the moment the required `ready-to-merge` check (= provenance-
   #     verified ai-review:pass) goes green — no human keystroke, no per-PR babysit.
@@ -1100,6 +1151,15 @@ run_reviewer_stage() {
       grep -qE "${PUBLISH_PATH_RE}" <<<"$changed_files" \
         && hold_why="${hold_why} It touches a PUBLISH path (sites/** → public Cloudflare Pages via deploy-sites.yml) — merging IS publishing (#981)."
       echo "  → native auto-merge WITHHELD on PR #$pr_num — ${hold_why} A human owns this merge. Labeled needs-human-review."
+    elif [[ "$closing_link_confirmed" != "1" ]]; then
+      # #2228: 6a could not confirm that the `Closes #$ISSUE` trailer linked. Its
+      # needs-human-review label holds nothing by itself: ready-to-merge holds only on
+      # hold:* / changes / an unverified pass, and the --auto arm below reads no label.
+      # Arming here would let GitHub merge the moment ready-to-merge goes green and
+      # leave the issue open, with the only witness a label beside an already-armed
+      # merge (constitution invariant 2). So an unconfirmed link withholds the arm.
+      gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+      echo "  → native auto-merge WITHHELD on PR #$pr_num — its Closes #$ISSUE trailer is not confirmed linked (closingIssuesReferences lacks #$ISSUE), so merging could leave the issue open (#2228). A human owns this merge. Labeled needs-human-review."
     elif gh pr merge "$pr_num" --repo "$REPO" --squash --auto 2>/dev/null; then
       echo "  → native auto-merge armed on PR #$pr_num (merges on ai-review:pass)"
     else

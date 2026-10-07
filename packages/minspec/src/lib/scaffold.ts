@@ -42,6 +42,8 @@ import { writeEpicIndex } from './epic-manager';
 import { initialOwnershipDeclaration } from './ownership-ratchet';
 import { assembleContext } from './constitution-context';
 import { seedProvider, integrateProposal, CONSTITUTION_SECTION_SCHEMA } from './constitution-proposer';
+import { assertOptedIn, ensureDirectory } from './opt-in';
+import { prepareText, readDocument, readDocumentText, restoreLineEndings } from './text-io';
 
 /** Output path of the constitution, relative to project root. */
 const CONSTITUTION_REL_PATH = TEMPLATE_OUTPUT_PATHS['constitution.md'];
@@ -68,12 +70,16 @@ const CONSTITUTION_REL_PATH = TEMPLATE_OUTPUT_PATHS['constitution.md'];
  *
  * Best-effort: callers wrap in try/catch so a proposer failure never breaks
  * init/refresh (mirrors writeEpicIndex).
+ *
+ * SPEC-095: read through `text-io` and written back in the constitution's own line
+ * endings. On a CRLF constitution it used to append the four schema headings again
+ * every time Initialize ran (#2397).
  */
 function seedConstitution(rootDir: string): void {
   const fullPath = path.join(rootDir, CONSTITUTION_REL_PATH);
   if (!fs.existsSync(fullPath)) return;
 
-  const existing = fs.readFileSync(fullPath, 'utf-8');
+  const { text: existing, original } = readDocument(fullPath);
   const manifest = assembleContext(rootDir);
   const proposal = seedProvider.propose(manifest, CONSTITUTION_SECTION_SCHEMA);
   // seedProvider is synchronous (FR-5); integrate expects a resolved Proposal.
@@ -82,7 +88,7 @@ function seedConstitution(rootDir: string): void {
   const { merged } = integrateProposal(existing, proposal);
   if (merged === existing) return;
 
-  fs.writeFileSync(fullPath, merged);
+  fs.writeFileSync(fullPath, restoreLineEndings(merged, original));
 }
 
 export { DEFAULT_CONFIG };
@@ -133,13 +139,18 @@ function rawFrontmatterLine(raw: string, key: string): string | undefined {
  * `epic` lines verbatim, with `type: tasks` (placed right after `id:`, matching
  * the corpus). The body is a single placeholder heading prompting the author to
  * fill in the task breakdown — intentionally minimal (no invented tasks).
+ *
+ * The source is prepared first (SPEC-095 FR-2): a CRLF requirements file used to yield the
+ * placeholder id and none of the inherited fields. The result is a new file, written LF
+ * (SPEC-095 FR-5).
  */
 export function buildTasksMdContent(requirementsRaw: string): string {
-  const idLine = rawFrontmatterLine(requirementsRaw, 'id') ?? 'id: SPEC-000';
+  const source = prepareText(requirementsRaw);
+  const idLine = rawFrontmatterLine(source, 'id') ?? 'id: SPEC-000';
   const fm: string[] = ['---', idLine, 'type: tasks'];
   for (const key of TASKS_MD_INHERITED_FIELDS) {
     if (key === 'id') continue; // already emitted first
-    const line = rawFrontmatterLine(requirementsRaw, key);
+    const line = rawFrontmatterLine(source, key);
     if (line) fm.push(line);
   }
   fm.push('---');
@@ -178,7 +189,7 @@ export function scaffoldTasksMd(dirPath: string): boolean {
 
   let requirementsRaw: string;
   try {
-    requirementsRaw = fs.readFileSync(requirementsPath, 'utf-8');
+    requirementsRaw = readDocumentText(requirementsPath);
   } catch {
     return false;
   }
@@ -239,7 +250,8 @@ export function findSpecDirsMissingTasksMd(rootDir: string): MissingTasksMdSpec[
     const requirementsPath = path.join(dir, 'requirements.md');
     if (fs.existsSync(requirementsPath)) {
       try {
-        const raw = fs.readFileSync(requirementsPath, 'utf-8');
+        // Prepared (SPEC-095): a CRLF requirements.md was not recognised as a split spec.
+        const raw = readDocumentText(requirementsPath);
         const type = scalarValue(rawFrontmatterLine(raw, 'type'));
         const id = scalarValue(rawFrontmatterLine(raw, 'id'));
         const tierRaw = scalarValue(rawFrontmatterLine(raw, 'tier'));
@@ -351,12 +363,15 @@ export const MINSPEC_GITATTRIBUTES_ENTRIES = [
  * out with the wrong line ending — git only re-normalizes a path's line endings on a
  * checkout that writes it, so this alone fixes every checkout from here forward, not
  * bytes already on disk (same caveat the issue names for `.gitattributes` in general).
+ *
+ * An existing file is read through `text-io` and written back in its own line endings
+ * (SPEC-095); a CRLF `.gitattributes` used to get an LF block appended. Git reads either.
  */
 export function ensureGitattributesEntries(rootDir: string): void {
   const gitattributesPath = path.join(rootDir, '.gitattributes');
-  const existing = fs.existsSync(gitattributesPath)
-    ? fs.readFileSync(gitattributesPath, 'utf-8')
-    : '';
+  const { text: existing, original } = fs.existsSync(gitattributesPath)
+    ? readDocument(gitattributesPath)
+    : { text: '', original: '' };
 
   const existingLines = new Set(
     existing.split('\n').map((line) => line.trim()).filter((line) => line.length > 0),
@@ -375,18 +390,89 @@ export function ensureGitattributesEntries(rootDir: string): void {
     (hasMarker ? '' : MINSPEC_GITATTRIBUTES_MARKER + '\n') + missing.join('\n') + '\n';
   const separator = existing.length > 0 && !existing.endsWith('\n\n') ? '\n' : '';
 
-  fs.writeFileSync(gitattributesPath, existing + prefix + separator + block);
+  fs.writeFileSync(gitattributesPath, restoreLineEndings(existing + prefix + separator + block, original));
+}
+
+/**
+ * A gitattributes path pattern, as a RegExp over a repository-relative POSIX path. Only
+ * the syntax {@link MINSPEC_GITATTRIBUTES_ENTRIES} uses: a double star followed by a slash
+ * (zero or more directories), a trailing slash and double star (everything inside), a
+ * single star and `?` (within one path segment), and literal characters. Every entry holds
+ * a slash, so every pattern is anchored at the repository root, as git anchors it.
+ */
+function gitattributesPatternToRegExp(pattern: string): RegExp {
+  let source = '';
+  for (let i = 0; i < pattern.length; i++) {
+    if (pattern.startsWith('**/', i)) {
+      source += '(?:.*/)?';
+      i += 2;
+    } else if (pattern.startsWith('/**', i) && i + 3 === pattern.length) {
+      source += '/.*';
+      i += 2;
+    } else if (pattern[i] === '*') {
+      source += '[^/]*';
+    } else if (pattern[i] === '?') {
+      source += '[^/]';
+    } else {
+      source += pattern[i].replace(/[.+^${}()|[\]\\]/g, '\\$&');
+    }
+  }
+  return new RegExp(`^${source}$`);
+}
+
+/** The path patterns of the `eol=lf` entries Initialize writes, compiled once. */
+const LF_PINNED_PATTERNS: readonly RegExp[] = MINSPEC_GITATTRIBUTES_ENTRIES.map((entry) =>
+  entry.trim().split(/\s+/),
+)
+  .filter(([, ...attributes]) => attributes.includes('eol=lf'))
+  .map(([pattern]) => gitattributesPatternToRegExp(pattern));
+
+/**
+ * SPEC-095 FR-5(c): is `relPath` (relative to the project root) a file MinSpec's own
+ * `.gitattributes` block pins to LF?
+ *
+ * Such a managed file is written LF throughout, the user's lines outside its markers
+ * included: a shell cannot run a script whose lines end CRLF, and git checks the file out
+ * LF under the pin anyway. Every other document MinSpec edits is written back in its own
+ * line endings. The set comes from {@link MINSPEC_GITATTRIBUTES_ENTRIES}, the block
+ * Initialize writes, so it has one source; asking git at run time would be a child process
+ * in the core (constitution invariant 1), so `text-round-trip.test.ts` asks
+ * `git check-attr` instead, on a scaffolded project, and fails if the two sets differ.
+ */
+export function isLfPinnedPath(relPath: string): boolean {
+  const posix = relPath.split(path.sep).join('/').replace(/\\/g, '/').replace(/^\.\//, '');
+  return LF_PINNED_PATTERNS.some((pattern) => pattern.test(posix));
 }
 
 /**
  * Creates the .minspec/ directory structure in rootDir.
  * Idempotent — never overwrites existing config.json.
+ *
+ * THE CREATOR (SPEC-096 FR-3). `.minspec/` at the folder root is the opt-in marker
+ * (constitution invariant 3), and the `mkdirSync` below is the ONLY call in the
+ * extension that may create it: this function is the opt-in, reached from
+ * "MinSpec: Initialize SDD Structure" and from nowhere else. Every other
+ * directory the extension creates goes through `ensureDirectory` (`./opt-in`),
+ * which cannot. `tests/opt-in-writer-inventory.test.ts` pins both halves: this
+ * one direct call, and who calls this function.
  */
 export function scaffold(rootDir: string): void {
   const minspecDir = path.join(rootDir, '.minspec');
   fs.mkdirSync(minspecDir, { recursive: true });
+  writeScaffoldDefaults(rootDir);
+}
 
-  const configPath = path.join(minspecDir, 'config.json');
+/**
+ * What {@link scaffold} writes beside the marker: the default `config.json` when
+ * there is none, and the epic registry's index. It creates no `.minspec/`.
+ *
+ * Split out so that Refresh Harness Files can bring a project's defaults up to
+ * date WITHOUT calling the creator (SPEC-096 FR-3, DQ-1). With the marker present
+ * `scaffold()` and this function write the same bytes; with it absent this one
+ * fails on its first write instead of opting the folder in.
+ */
+function writeScaffoldDefaults(rootDir: string): void {
+  const configPath = path.join(rootDir, '.minspec', 'config.json');
   if (!fs.existsSync(configPath)) {
     // Record the project's name at creation, so it stops being re-derived from the
     // directory on every later refresh (#1529). Written ONLY here, never back-filled
@@ -499,10 +585,11 @@ export function ensureGitignoreEntries(rootDir: string): string[] {
   // present, correct-looking, and inert because the files were tracked first.
   const untracked = untrackDeclaredMachineLocalPaths(rootDir);
 
+  // Read through `text-io` and written back in its own line endings (SPEC-095).
   const gitignorePath = path.join(rootDir, '.gitignore');
-  const existing = fs.existsSync(gitignorePath)
-    ? fs.readFileSync(gitignorePath, 'utf-8')
-    : '';
+  const { text: existing, original } = fs.existsSync(gitignorePath)
+    ? readDocument(gitignorePath)
+    : { text: '', original: '' };
 
   const existingLines = new Set(
     existing.split('\n').map((line) => line.trim()).filter((line) => line.length > 0),
@@ -519,7 +606,7 @@ export function ensureGitignoreEntries(rootDir: string): string[] {
     (hasMarker ? '' : MINSPEC_GITIGNORE_MARKER + '\n') + missing.join('\n') + '\n';
   const separator = existing.length > 0 && !existing.endsWith('\n\n') ? '\n' : '';
 
-  fs.writeFileSync(gitignorePath, existing + prefix + separator + block);
+  fs.writeFileSync(gitignorePath, restoreLineEndings(existing + prefix + separator + block, original));
   return untracked;
 }
 
@@ -800,7 +887,7 @@ function generateManagedRegionTemplates(rootDir: string, tools: DetectedTools): 
  * re-scaffold path go through, so the bytes and the mode never diverge.
  */
 function writeManagedFile(fullPath: string, tpl: ManagedRegionTemplate): void {
-  fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+  ensureDirectory(path.dirname(fullPath));
   fs.writeFileSync(fullPath, renderManagedFile(tpl));
   if (tpl.executable) {
     try {
@@ -863,7 +950,8 @@ function migrateLegacyClaudeSlashCommandShims(rootDir: string): void {
     const legacyFull = path.join(rootDir, legacyRel);
     if (!fs.existsSync(legacyFull)) continue;
 
-    const onDisk = fs.readFileSync(legacyFull, 'utf-8');
+    // Prepared (SPEC-095): a pristine shim checked out CRLF is still pristine.
+    const onDisk = readDocumentText(legacyFull);
 
     const start = managedRegionStartMarker(claudeShimTemplateName(command), 'html');
     const end = managedRegionEndMarker(claudeShimTemplateName(command), 'html');
@@ -1004,6 +1092,10 @@ function tryAutoHealManagedRegion(
  * Returns the warnings for any files left untouched (missing markers, un-healable)
  * so the vscode-aware caller can surface them. The file is NEVER modified on a
  * warning.
+ *
+ * Line endings (SPEC-095): the file is read through `text-io`, the region is found and
+ * replaced on LF text, and the result is written back in the file's own line endings,
+ * except a file {@link isLfPinnedPath} names, which is written LF throughout (FR-5(c)).
  */
 function refreshManagedRegionTemplates(rootDir: string, tools: DetectedTools): ManagedRegionWarning[] {
   const warnings: ManagedRegionWarning[] = [];
@@ -1022,10 +1114,14 @@ function refreshManagedRegionTemplates(rootDir: string, tools: DetectedTools): M
       continue;
     }
 
-    const onDisk = fs.readFileSync(fullPath, 'utf-8');
+    const { text: onDisk, original } = readDocument(fullPath);
     const startMarker = managedRegionStartMarker(tpl.name, tpl.commentStyle);
     const endMarker = managedRegionEndMarker(tpl.name, tpl.commentStyle);
     const split = splitManagedRegion(onDisk, startMarker, endMarker);
+    // A pinned file is written LF throughout, its user lines included: a CRLF hook does
+    // not start. Every other managed file keeps its own endings (SPEC-095 FR-5(c), FR-3).
+    const writeBack = (lf: string): string =>
+      isLfPinnedPath(tpl.outputPath) ? lf : restoreLineEndings(lf, original);
 
     if (!split) {
       // Markers missing/corrupted — cannot identify MinSpec's region by markers
@@ -1033,7 +1129,7 @@ function refreshManagedRegionTemplates(rootDir: string, tools: DetectedTools): M
       // lines gone) before giving up.
       const healed = tryAutoHealManagedRegion(onDisk, tpl, startMarker, endMarker);
       if (healed !== null) {
-        fs.writeFileSync(fullPath, healed);
+        fs.writeFileSync(fullPath, writeBack(healed));
         continue;
       }
       // Can't prove it's safe — NEVER clobber the whole file; skip and warn so
@@ -1044,8 +1140,8 @@ function refreshManagedRegionTemplates(rootDir: string, tools: DetectedTools): M
 
     // Overwrite ONLY the managed region with the current template; preserve the
     // user's surrounding content verbatim.
-    const updated = spliceManagedRegion(split, renderManagedBlock(tpl));
-    if (updated !== onDisk) {
+    const updated = writeBack(spliceManagedRegion(split, renderManagedBlock(tpl)));
+    if (updated !== original) {
       fs.writeFileSync(fullPath, updated);
     }
   }
@@ -1144,7 +1240,9 @@ export function checkManagedRegionMarkers(
     const fullPath = path.join(rootDir, tpl.outputPath);
     if (!fs.existsSync(fullPath)) continue;
 
-    const onDisk = fs.readFileSync(fullPath, 'utf-8');
+    // Prepared (SPEC-095): a CRLF file whose markers were stripped is healable, as its LF
+    // copy is; compared raw, its body never matched the template and read as diverged.
+    const onDisk = readDocumentText(fullPath);
     const startMarker = managedRegionStartMarker(tpl.name, tpl.commentStyle);
     const endMarker = managedRegionEndMarker(tpl.name, tpl.commentStyle);
     if (splitManagedRegion(onDisk, startMarker, endMarker)) continue;
@@ -1483,7 +1581,7 @@ export function generateHarnessFiles(rootDir: string): string[] {
     // Only write if file doesn't exist (first-time generation). The manifest is
     // recorded LAST from the final on-disk bytes (SPEC-043), not here.
     if (!fs.existsSync(fullPath)) {
-      fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+      ensureDirectory(path.dirname(fullPath));
       fs.writeFileSync(fullPath, content);
     } else {
       skippedExisting.push(relativePath);
@@ -1572,10 +1670,21 @@ export function generateHarnessFiles(rootDir: string): string[] {
  * lack of a baseline, files left untouched because their MinSpec markers were
  * deleted, paths removed from the git index, and a project-name mismatch. An empty
  * array means a fully clean refresh.
+ *
+ * REFUSES in a folder that has not opted in (SPEC-096 FR-3, DQ-1): it throws
+ * `NotOptedInError` before writing anything. Refresh merges templates into a
+ * project Initialize set up; it used to begin by calling `scaffold()`, which made
+ * it a second Initialize under a name that did not say so (59 files and
+ * directories in an empty folder, git hooks and workflows among them).
  */
 export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
-  // Ensure .minspec/ exists
-  scaffold(rootDir);
+  // Refresh never opts a folder in. With no `.minspec/` it refuses here, before
+  // the first write; Initialize is the one opt-in gesture.
+  assertOptedIn(rootDir);
+  // The defaults Initialize writes beside the marker (a missing config.json, the
+  // epic index) - NOT `scaffold()`, so no call that can create the marker is
+  // reachable from Refresh, even if the marker goes between the check and here.
+  writeScaffoldDefaults(rootDir);
   // Backfill any missing ignore entries on auto-refresh-on-open so existing
   // projects (scaffolded before a new state file was added) stop committing
   // machine-local merge-refresh state. Idempotent — adds only what's missing.
@@ -1586,6 +1695,27 @@ export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
   // Backfill the LF pin too, for a project scaffolded before #2398 (same rationale
   // as the gitignore backfill immediately above).
   ensureGitattributesEntries(rootDir);
+
+  // #2520: seed BEFORE building context/rendering, not just after merging below.
+  // A signal that appeared since the last refresh (e.g. docs/decisions/ coming
+  // into use) can make `seedConstitution` add a new DRAFT entry to an EXISTING
+  // section (Invariants/Principles/Constraints/Goals all pre-exist from
+  // Initialize). Seeding only after the render-and-merge loop — as this function
+  // used to, exclusively — means the templates rendered THIS run (buildContext
+  // below) still read the pre-seed constitution, so any mirror whose template
+  // iterates the constitution's list (`.cursorrules`, measured in #2520) lags one
+  // whole refresh behind constitution.md itself: Refresh 1 seeds the DRAFT,
+  // Refresh 2 is the first to render it, Refresh 3 is finally quiet. Seeding here
+  // too closes that gap for the common case (the section already exists) in the
+  // same run the signal first appears. The post-merge call below stays — it is
+  // still the only seed that can see a section the merge loop ITSELF just added
+  // (a template-upgrade case, not this bug), so removing it would reintroduce a
+  // lag for that case.
+  try {
+    seedConstitution(rootDir);
+  } catch {
+    // best-effort — never break a refresh on a proposer failure.
+  }
 
   const config = loadConfig(rootDir);
   const context = buildContext(rootDir, config);
@@ -1654,7 +1784,7 @@ export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
 
     if (!fs.existsSync(fullPath)) {
       // File doesn't exist yet — write fresh
-      fs.mkdirSync(path.dirname(fullPath), { recursive: true });
+      ensureDirectory(path.dirname(fullPath));
       fs.writeFileSync(fullPath, generated);
     } else {
       // File exists — merge (decision logic + oldHashes reads unchanged, INV-5).
@@ -1675,9 +1805,13 @@ export function refreshHarnessFiles(rootDir: string): ManagedRegionWarning[] {
     }
   }
 
-  // SPEC-025 FR-4/FR-5: re-seed after merge so a still-empty section gains DRAFT
-  // entries on refresh too; additive + idempotent, never overwrites human edits.
-  // Writes the file only; no longer a manifest source (SPEC-043 D8).
+  // SPEC-025 FR-4/FR-5: re-seed after merge too (#2520 keeps this one, in addition
+  // to the pre-render call above), so a section the merge loop just ADDED (a
+  // template upgrade introducing a new heading) still gains DRAFT entries this
+  // run, not next. The pre-render call above cannot reach that case — the section
+  // does not exist in constitution.md until after this file's own template merge
+  // runs. Additive + idempotent, never overwrites human edits. Writes the file
+  // only; no longer a manifest source (SPEC-043 D8).
   try {
     seedConstitution(rootDir);
   } catch {

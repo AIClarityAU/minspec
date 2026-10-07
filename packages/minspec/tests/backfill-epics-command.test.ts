@@ -490,6 +490,37 @@ describe('backfillEpicsCommand()', () => {
     expect(proposeAI).toHaveBeenCalledWith(FOLDER, expect.objectContaining({ signal: expect.anything() }));
   });
 
+  // #2506: Backfill Epics is reachable in a folder that has never opted in
+  // (it writes into docs/, which is allowed pre-opt-in) and creates no
+  // `.minspec/` there; Approve Spec, by contrast, refuses. Before this
+  // fix, a `savePreferences` refusal there reached only `console.warn`, which
+  // a user never sees, so the toast's "Always" looked accepted when it silently
+  // remembered nothing.
+  it('warns visibly when "Always" cannot be persisted (not opted in), but still uses AI this run', async () => {
+    vi.mocked(vscode.workspace.getConfiguration).mockReturnValue({
+      get: vi.fn(() => false),
+      update: vi.fn(() => Promise.resolve()),
+    } as never);
+    vi.mocked(isClaudeAvailable).mockResolvedValue(true);
+    vi.mocked(proposeAI).mockResolvedValue({ proposal: { ...makeProposal(1, 1), source: 'ai' } as BackfillProposal });
+    vi.mocked(vscode.window.showInformationMessage)
+      .mockResolvedValueOnce('Always' as never)
+      .mockResolvedValueOnce('Apply' as never);
+    vi.mocked(applyBackfill).mockReturnValueOnce({ epicsCreated: 1, artifactsTagged: 1, skipped: 0 });
+    vi.mocked(savePreferences).mockImplementationOnce(() => {
+      throw new Error(`MinSpec: ${FOLDER} has no .minspec/ directory (it has not opted in)`);
+    });
+
+    await backfillEpicsCommand(FOLDER);
+
+    // The one-time choice is still honoured for THIS run — a failed "remember
+    // this" must never also undo the "do this" the user asked for.
+    expect(proposeAI).toHaveBeenCalledWith(FOLDER, expect.objectContaining({ signal: expect.anything() }));
+    expect(vscode.window.showWarningMessage).toHaveBeenCalledWith(
+      expect.stringContaining('"Always" was not remembered'),
+    );
+  });
+
   // The final approval toast is NON-modal (no { modal: true } options object).
   it('uses a non-modal toast for the final approval', async () => {
     vi.mocked(vscode.window.showInformationMessage).mockResolvedValueOnce('Apply' as never);

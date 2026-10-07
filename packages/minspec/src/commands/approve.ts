@@ -27,6 +27,7 @@ import {
   savePreferences,
   resolveProjectPreference,
 } from '../lib/preferences';
+import { hasOptInMarker, notOptedInMessage } from '../lib/opt-in';
 
 /** A tree node carrying a SpecSummary (from the spec tree context menu). */
 interface SpecNodeLike {
@@ -144,12 +145,29 @@ function advancePhaseOnApproveEnabled(rootDir: string): boolean {
  * reason: the approval itself already succeeded by the time this runs, so a
  * write error here must not throw into `approveSpecCommand`'s catch and paint a
  * false "Failed to approve" toast.
+ *
+ * "Never surfaces as a failure" is not "never surfaces" — `console.warn` alone
+ * lands in the Debug Console, which nobody watching an Alt+A toast ever opens,
+ * so before #2506 a refused write here was indistinguishable from a saved one:
+ * the toast had already said "Always" was accepted. Approve Spec refuses in a
+ * folder with no `.minspec/` before it asks or writes anything, and nothing in
+ * it creates that directory (SPEC-096), so the folder had opted in when this
+ * command started. The refusal this guards is the race where `.minspec/` is
+ * removed after the approval was recorded, which in practice means while the
+ * follow-up toast is open.
+ * Rare does not mean exempt from constitution invariant 2 (no silent gate) —
+ * surface it the same non-blocking way `enqueuePhaseAdvanceSafely` already does
+ * for the sibling queue write (#1512).
  */
 function enableAdvancePhaseOnApprove(rootDir: string): void {
   try {
     savePreferences(rootDir, { advancePhaseOnApprove: true });
   } catch (err) {
-    console.warn(`MinSpec: failed to persist advancePhaseOnApprove pref — ${err instanceof Error ? err.message : String(err)}`);
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`MinSpec: failed to persist advancePhaseOnApprove pref — ${message}`);
+    void vscode.window.showWarningMessage(
+      `MinSpec: "Always" was not remembered — ${message} Advancing the phase this once only.`,
+    );
   }
 }
 
@@ -210,6 +228,16 @@ export async function approveSpecCommand(
     ? folderForFile(node.spec.filePath) ?? (await resolveTargetFolder())
     : await resolveTargetFolder();
   if (!rootDir) return;
+
+  // SPEC-096 FR-6: an approval is recorded under `.minspec/`, and `.minspec/` is
+  // the opt-in marker. In a folder that has not opted in, refuse as soon as the
+  // folder is known - before the spec picker, and long before the status flip,
+  // the git blob and the record. One message, no button. This covers every way
+  // in: the palette, the Specs pane, and Alt+A (which runs this command).
+  if (!hasOptInMarker(rootDir)) {
+    vscode.window.showErrorMessage(notOptedInMessage(rootDir));
+    return;
+  }
 
   const spec = await pickSpec(rootDir, node, 'Select a spec to approve for implementation', {
     // Already-approved specs have nothing to do here; stale ones (edited since
@@ -321,6 +349,16 @@ export async function approveSpecCommand(
           'or approve from a checkout whose git identity is yours — then re-run Approve.',
       },
     );
+    return;
+  }
+
+  // SPEC-096 FR-6, again: the picker and the dialogs above wait for the user, so
+  // the marker can be gone by now. The check has to PRECEDE the status flip at the
+  // top of the `try` below, or a refusal from the record would arrive after the
+  // spec file had been rewritten - a spec that reads as approved with nothing
+  // behind it.
+  if (!hasOptInMarker(rootDir)) {
+    vscode.window.showErrorMessage(notOptedInMessage(rootDir));
     return;
   }
 
