@@ -805,7 +805,7 @@ The founder needs MinSpec on a Windows work PC that runs Microsoft's VS Code, an
 
 ## [DR-103 — New MinSpec versions reach the Marketplace through a release workflow that holds no stored credential - automatic to the pre-release channel, the founder's approval for everyone else](DR-103.md)
 
-*Status: proposed · Date: 2026-10-07*
+*Status: accepted · Date: 2026-10-07*
 
 <!-- dr-summary:DR-103 auto=46c85ea2201e -->
 The founder asked on 2026-10-05 for the published MinSpec version to be kept current, and on 2026-10-07 offered to give agents the Marketplace token. This record decides how new versions reach the VS Code Marketplace from now on: through a release workflow that signs in with no stored credential, publishes to the pre-release channel by itself, and needs the founder's approval before it publishes to everyone.
