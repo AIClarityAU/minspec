@@ -10,8 +10,9 @@
  */
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
-import { execFileSync } from 'child_process';
+import { execFileSync, spawnSync } from 'child_process';
 
 const DRAIN = path.resolve(__dirname, '../../../scripts/drain-inbox.sh');
 const DRAIN_SRC = fs.readFileSync(DRAIN, 'utf-8');
@@ -55,6 +56,77 @@ describe('drain-inbox.sh — session-lifetime seam (#239: loop dies with the ses
 
   it('--resolve-session-pid: prints a numeric anchor pid (falls back to PPID off-session)', () => {
     expect(run(['--resolve-session-pid']).out).toMatch(/^\d+$/);
+  });
+});
+
+/**
+ * T3 regression — #2215: resolve_session_pid missed the versioned claude binary.
+ *
+ * Every current Claude Code install runs as a versioned per-release binary
+ * (e.g. /home/jason/.local/share/claude/versions/2.1.283) whose `comm` is just
+ * the version number ("2.1.283") and whose `args` contained neither of the old
+ * marker strings (`claude-code` / `anthropic.claude`). The walk in
+ * resolve_session_pid fell through every ancestor and returned $PPID — the
+ * transient shell of the hook or tool call, not the session — so the
+ * continuous drain's `session_alive` check found that pid gone within minutes
+ * and stopped after one cycle.
+ *
+ * This builds a REAL fake process tree: a copy of the bash binary renamed to
+ * "2.1.283" and invoked via its full "<tmp>/claude/versions/2.1.283" path, so
+ * the OS-level comm and args for that process are exactly what the issue
+ * measured on the real machine, not a mock of `ps`. It stays alive (bash -c
+ * with a trailing command forces a real fork rather than an exec tail-call) as
+ * the GRANDPARENT of `bash drain-inbox.sh --resolve-session-pid`, with a plain
+ * `bash` shell in between, so the resolver's walk must climb one level past its
+ * $PPID and match it.
+ *
+ * The intermediate shell is what makes this test able to fail. With the drain
+ * as a DIRECT child of the fake, its $PPID IS the fake, so the no-match fallback
+ * (resolve_session_anchor returns $PPID) printed the very pid the assertion
+ * expects, and the test passed against the unfixed script too. Now the fallback
+ * prints the intermediate shell's pid, which the test captures (`$$`) and
+ * asserts differs from the fake's.
+ */
+describe('T3 regression (#2215): resolve_session_pid matches the versioned claude binary', () => {
+  it('walks up to a "2.1.283"-named ancestor invoked from a /claude/versions/ path', () => {
+    const fakeRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-fake-claude-'));
+    const fakeBinDir = path.join(fakeRoot, 'claude', 'versions');
+    fs.mkdirSync(fakeBinDir, { recursive: true });
+    const fakeBin = path.join(fakeBinDir, '2.1.283');
+    const realBash = execFileSync('sh', ['-c', 'command -v bash'], { encoding: 'utf-8' }).trim();
+    fs.copyFileSync(realBash, fakeBin);
+    fs.chmodSync(fakeBin, 0o755);
+
+    try {
+      // `; true` after the inner command is load-bearing: a bare `bash -c 'single-cmd'`
+      // lets bash tail-call-exec the single command, REPLACING this process (and its
+      // "2.1.283" identity) instead of forking a child under it.
+      //
+      // MINSPEC_SESSION_PID is cleared explicitly: this test may itself be RUN from
+      // inside a live Claude Code session whose own hook already exported that var,
+      // and resolve_session_pid checks it FIRST — an inherited value would short-circuit
+      // the walk entirely and the test would pass for the wrong reason (matching the
+      // REAL session, not the fake tree built here).
+      //
+      // The inner `bash -c` is the intermediate shell: it prints its own pid ($$),
+      // then forks the drain (again `; true`, so it forks rather than execs).
+      const intermediate = `echo "$$"; bash "${DRAIN}" --resolve-session-pid; true`;
+      const r = spawnSync(
+        fakeBin,
+        ['-c', `bash -c '${intermediate}'; true`, '--output-format', 'stream-json'],
+        { encoding: 'utf-8', env: { ...process.env, MINSPEC_SESSION_PID: '' } }
+      );
+      expect(r.status, r.stderr).toBe(0);
+      expect(r.pid, 'the fake "2.1.283" process must itself have a pid to match against').toBeGreaterThan(0);
+      const [intermediatePid, resolvedPid] = r.stdout.trim().split('\n');
+      // The fallback answer. It must differ from the fake's pid, or this test cannot
+      // tell a matched walk from a fallback, which is how it once passed unfixed.
+      expect(intermediatePid).toMatch(/^\d+$/);
+      expect(intermediatePid, 'the drain must NOT be a direct child of the fake').not.toBe(String(r.pid));
+      expect(resolvedPid).toBe(String(r.pid));
+    } finally {
+      fs.rmSync(fakeRoot, { recursive: true, force: true });
+    }
   });
 });
 

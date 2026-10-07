@@ -125,7 +125,17 @@ describe('refreshHarnessFiles()', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('creates harness files when none exist (same as generate)', () => {
+  // Retitled by SPEC-096 (FR-3, DQ-1): this used to run Refresh on an EMPTY folder
+  // and expect a whole project, which made Refresh a second Initialize. Refresh now
+  // refuses in a folder with no `.minspec/` (one message, nothing created). That
+  // refusal is asserted in opt-in-writer-inventory.test.ts, under
+  // "refreshHarnessFiles (FR-3: Refresh is not a second Initialize)", and at the
+  // command level in commands-opt-in-invariant.test.ts, under "Refresh Harness
+  // Files: refuses in an empty folder instead of setting it up". What is kept here
+  // is the other half: in a folder that HAS opted in, Refresh still writes every
+  // harness file that is missing.
+  it('creates harness files when none exist yet, in a folder that has opted in', () => {
+    fs.mkdirSync(path.join(tmpDir, '.minspec'));
     refreshHarnessFiles(tmpDir);
 
     for (const name of TEMPLATE_NAMES) {

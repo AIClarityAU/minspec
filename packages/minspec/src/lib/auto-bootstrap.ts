@@ -34,6 +34,7 @@ import { computeTemplateBaseline } from './template-registry';
 import { collectArtifacts } from './epic-backfill';
 import { listEpics } from './epic-manager';
 import { findSpecDirsMissingTasksMd, scaffoldTasksMd } from './scaffold';
+import { ensureDirectory } from './opt-in';
 
 // ---------------------------------------------------------------------------
 // Preferences (persisted in .minspec/preferences.json)
@@ -212,7 +213,11 @@ export function hasUnclassifiedChanges(rootDir: string): boolean {
   // Ensure the classifications dir exists so the user can collect results
   const classificationsDir = path.join(rootDir, '.minspec', 'classifications');
   try {
-    fs.mkdirSync(classificationsDir, { recursive: true });
+    // Through the shared guard (SPEC-096 FR-4): it creates `classifications/`
+    // below an existing `.minspec/` and can never create `.minspec/` itself, so
+    // the marker vanishing after the check above ends in the `catch`, not in a
+    // recreated marker.
+    ensureDirectory(classificationsDir);
   } catch {
     // If we can't create it, skip the prompt rather than spamming
     return false;
@@ -687,8 +692,14 @@ export const BOOTSTRAP_STEPS: readonly BootstrapStep[] = [
       !prefs.skipBackfillPrompt &&
       isMinspecInitialized(rootDir) &&
       hasUnbackfilledEpics(rootDir),
+    // This offer's button IS the consent for the AI pass: `commandArg` below makes the
+    // command skip its own consent prompt (#213), so this text is all the user reads
+    // before `claude` runs. It therefore says what is sent, in the same sentence as that
+    // prompt (#2568). It used to say only "AI-enhanced if Claude Code is installed".
+    // Pinned, with the prompt, the setting description and the README, by
+    // tests/readme-network-claims.test.ts.
     message:
-      'MinSpec: Several specs/decisions have no epic. Backfill epics now? (AI-enhanced if Claude Code is installed.)',
+      'MinSpec: Several specs/decisions have no epic. Backfill epics now? (AI-enhanced if Claude Code is installed: Backfill then runs your own `claude` command, which sends the ids and titles of your specs, decisions and epics, and the first paragraph of each spec or decision that has no epic yet, to the model provider it is set up with.)',
     primaryAction: 'Backfill',
     commandId: 'minspec.backfillEpics',
     skipPrefKey: 'skipBackfillPrompt',

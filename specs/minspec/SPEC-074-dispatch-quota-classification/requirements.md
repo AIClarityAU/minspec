@@ -1,7 +1,7 @@
 ---
 id: SPEC-074
 type: requirements
-status: specifying   # DERIVED, not a regression: the 2026-09-30 amendment (#2237) stales the approval that landed in #2077, and deriveStatus returns 'specifying' whenever approvalState !== 'approved' (SPEC-022 INV-1, not this spec's INV-1). Re-approval flips this back to 'planning'.
+status: planning
 tier: T3
 product: minspec
 epic: EPIC-007  # Agent Execute — the dev-time autonomous build/merge pipeline (dispatch-issue.sh's own crash-classification lives here)
@@ -20,9 +20,12 @@ phases:
 # MinSpec — Distinguish provider-quota exhaustion from a genuine dispatch dead end (Requirements)
 
 > **This is a SPECIFICATION ONLY.** No code, script, or test is created by the dispatch
-> that produced it. A human reads this spec, resolves the
-> **[Decisions needed (Clarify)](#decisions-needed-clarify)** section, and approves it
-> through the normal spec-approval gate before anything is built.
+> that produced it. A human reads this spec, resolves its Clarify questions, and approves it
+> through the normal spec-approval gate before anything is built. Each question carries an
+> agent-recorded selection under
+> **[Clarify selections](#clarify-selections-recorded-by-an-agent-2026-10-01-ratified-only-by-approval-of-this-spec)**;
+> the human resolves them by approving this spec with those in place, or by changing them
+> first.
 
 Materializes **#1656** — *"provider quota exhaustion is recorded as agent-escalated, so a
 wait-for-reset is indistinguishable from a genuine dead end."* Sibling of **#1652** ("the
@@ -296,9 +299,30 @@ no existing entry for this narrower question either.
   repo's own dispatch pipeline; it introduces no network call, no new external dependency,
   and no behaviour reachable outside a repo that opts in via `.minspec/`.
 
-## Decisions needed (Clarify)
+## Clarify selections (recorded by an agent 2026-10-01; ratified only by approval of this spec)
+
+DQ-1 and DQ-2 each carry a **Recorded selection** line naming the option this document
+already recommended. An agent session wrote those lines on 2026-10-01, and no human
+recorded a choice for either: the approval that landed in #2077 was given while both
+questions carried a recommendation and no selection, and it wrote `clarify: done` over them
+(the shape #1480 describes). Recording the selections did not touch that line. This
+repository runs with `"autonomy": "act"` (`.minspec/config.json:58`), under which an agent
+proceeds on a stated recommendation and leaves the options it did not take on record
+(DR-086 §2 and §4), which is why the options stay below with their costs. Approving a T3
+spec is the second class on that section's stop list (`scripts/lib/autonomy.ts:68-70`), so
+nothing here stands in for that approval: the lines propose, and approving this spec is
+what ratifies them. An approval records a canonical hash that covers this body
+(`packages/minspec/src/lib/approval.ts:4-8`) and reads as stale once the hash stops matching
+(`resolveStatus`, `:483-490`), so an approval of this text covers these selections and
+changing one afterwards voids it. When the lines were written no approval covered this
+text: the 2026-09-30 amendment above had already staled the one from #2077
+(`status: specifying`). A question in this section with no **Recorded selection** line is
+still open.
 
 ### DQ-1 (scope) — bounded auto-reconsideration after the reset passes
+
+**Recorded selection: Option A,** split out. This spec's scope stays FR-1 to FR-6, and
+bounded auto-reconsideration is the follow-up tracked as #2421.
 
 The issue's step 4 proposes, as an explicit **optional** extra: letting the drain
 reconsider an `agent-blocked-quota` issue once the recorded reset timestamp has passed,
@@ -327,6 +351,10 @@ feature layered on top, not the fix for the reported defect, and bundling it ris
 delaying the narrower, clearly-scoped fix on unresolved design questions.
 
 ### DQ-2 (scope boundary) — the creator-shepherd's own fix-agent call site
+
+**Recorded selection: Option A,** out of scope. The shepherd's fix-agent call site keeps
+today's behaviour under this spec, and what it does on a quota wall is parked for triage as
+#2422.
 
 `shepherd_own_pr`'s fix-agent invocation (`scripts/dispatch-issue.sh:1762`, a SEPARATE
 `claude -p` launch used to repair an already-opened PR's failing gate) has a structurally

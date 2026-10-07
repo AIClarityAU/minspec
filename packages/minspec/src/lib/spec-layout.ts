@@ -3,6 +3,8 @@ import * as path from 'path';
 import type { ParsedSpec, SpecFrontmatter } from './spec';
 import { parseSpec, writeSpec } from './spec';
 import { PHASES } from './config';
+import { ensureDirectory } from './opt-in';
+import { restoreLineEndings } from './text-io';
 import type { ShardIdFile } from './spec-validator';
 
 /**
@@ -268,10 +270,20 @@ export function readSpecKitDir(dirPath: string): ParsedSpec {
  * Write a ParsedSpec out to a spec-kit directory.
  * Creates the directory if needed. Only writes files that have content
  * (plan.md / tasks.md are skipped if empty), but spec.md is always written.
+ *
+ * Line endings (SPEC-095): each file is written in its own line endings when it exists, so
+ * a phase transition leaves a CRLF directory CRLF. One that does not exist yet is part of a
+ * layout migration and takes the endings of the spec it was migrated from (FR-5(a)), or is
+ * written LF when the spec was built in memory. Restoring against the files' concatenation
+ * instead would trade blank-line endings between files a write did not change.
  */
 export function writeSpecKitDir(dirPath: string, spec: ParsedSpec): void {
-  fs.mkdirSync(dirPath, { recursive: true });
+  ensureDirectory(dirPath); // SPEC-096 FR-4: never creates `.minspec/`
   const shards = splitSpecForSpecKit(spec);
+  const inOwnEndings = (filePath: string, content: string): string => {
+    if (fs.existsSync(filePath)) return restoreLineEndings(content, fs.readFileSync(filePath, 'utf-8'));
+    return spec.source === undefined ? content : restoreLineEndings(content, spec.source);
+  };
 
   for (const fileName of SPEC_KIT_FILES) {
     const shard = shards[fileName];
@@ -279,7 +291,7 @@ export function writeSpecKitDir(dirPath: string, spec: ParsedSpec): void {
     const filePath = path.join(dirPath, fileName);
 
     if (fileName === 'spec.md') {
-      fs.writeFileSync(filePath, content, 'utf-8');
+      fs.writeFileSync(filePath, inOwnEndings(filePath, content), 'utf-8');
       continue;
     }
 
@@ -287,7 +299,7 @@ export function writeSpecKitDir(dirPath: string, spec: ParsedSpec): void {
     if (content.trim() === '') {
       if (fs.existsSync(filePath)) fs.unlinkSync(filePath);
     } else {
-      fs.writeFileSync(filePath, content, 'utf-8');
+      fs.writeFileSync(filePath, inOwnEndings(filePath, content), 'utf-8');
     }
   }
 }

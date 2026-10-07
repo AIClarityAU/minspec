@@ -408,6 +408,67 @@ describe('pre-commit author identity gate — fails CLOSED when it cannot see (i
   });
 });
 
+/**
+ * #1971 — an allowlist key SET to an empty value (the shape a bootstrap script
+ * produces when it forgets to fill in its address list, e.g. `git config
+ * minspec.allowedCommitEmails "$EMAILS"` with $EMAILS unset) must not read as
+ * "never configured". `git config --get-all` returns rc 0 with empty output for
+ * that case, exactly like the "not set" rc-1 case once only `-n` is checked —
+ * collapsing them silently turns the gate off for a project that believes it
+ * opted in (constitution invariant 2: no silent gate).
+ */
+describe('pre-commit author identity gate — configured-but-empty allowlist (#1971)', () => {
+  it('REFUSES rather than silently no-op when the allowlist key is set to an empty value', () => {
+    withRepo((repo) => {
+      git(repo.dir, ['config', 'minspec.allowedCommitEmails', '']);
+      // Control: git config really does read this back as rc 0 with empty output,
+      // not rc 1 — otherwise this test cannot tell the fixed gate from a no-op one.
+      const probe = spawnSync('git', ['config', '--get-all', 'minspec.allowedCommitEmails'], {
+        cwd: repo.dir,
+        encoding: 'utf8',
+      });
+      expect(probe.status).toBe(0);
+      expect(probe.stdout.trim()).toBe('');
+
+      const r = repo.commit('empty allowlist', 'anything@example.invalid');
+      expect(r.code).not.toBe(0);
+      expect(r.stderr).toContain('minspec.allowedCommitEmails');
+      expect(r.stderr).toMatch(/names no address|misconfiguration/i);
+    });
+  });
+});
+
+/**
+ * #1971 — when neither author.email nor user.email is configured, the hook has no
+ * config value to compare the recorded author against (unlike the sibling `elif`
+ * branch a few lines down). git exports whichever source it actually used —
+ * GIT_AUTHOR_EMAIL, `--author`, an `--amend` / `-C` that kept an earlier commit's
+ * author — into the hook's own environment as GIT_AUTHOR_EMAIL before running it,
+ * so the hook cannot tell that source apart from the EMAIL/`<user>@<hostname>`
+ * fallback by reading its environment. The old wording asserted the fallback
+ * unconditionally, which was wrong for exactly the case the hook's header calls
+ * out (a container session's ambient email) and sent the user to fix a user.email
+ * that was never the problem — the retry was refused AGAIN, this time with the
+ * correct advice the `elif` branch already had.
+ */
+describe('pre-commit author identity gate — first refusal names a real cause (#1971)', () => {
+  it('names GIT_AUTHOR_EMAIL, not just the EMAIL fallback, when no author.email/user.email is configured', () => {
+    withRepo((repo) => {
+      git(repo.dir, ['config', 'minspec.allowedCommitEmails', 'linked@example.com']);
+      const r = repo.commit('ambient container email, no local config at all', null, {
+        GIT_AUTHOR_EMAIL: 'ambient@container.local',
+      });
+      expect(r.code).not.toBe(0);
+      expect(r.stderr).toContain('ambient@container.local');
+      expect(r.stderr).toContain('GIT_AUTHOR_EMAIL');
+      // The actionable advice must lead with undoing the override, not "git config
+      // user.email ..." alone — that fix does not fix this case, so following it
+      // verbatim would be refused again.
+      expect(r.stderr).toMatch(/Fix:\s*unset GIT_AUTHOR_EMAIL/);
+    });
+  });
+});
+
 describe('pre-commit author identity gate — documented escape hatch', () => {
   it('honours EMAIL_GATE_OFF=1 even against a configured, mismatched allowlist', () => {
     withRepo((repo) => {

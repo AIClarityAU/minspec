@@ -124,6 +124,9 @@ let tmpDir: string;
 beforeEach(() => {
   mockExecFile.mockReset();
   tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-dedup-test-'));
+  // SPEC-096 FR-7: the local file exists only in a folder that has opted in (it
+  // lives in `.minspec/`, which the store no longer creates).
+  fs.mkdirSync(path.join(tmpDir, '.minspec'));
 });
 
 afterEach(() => {
