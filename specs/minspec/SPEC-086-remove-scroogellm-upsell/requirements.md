@@ -1,7 +1,7 @@
 ---
 id: SPEC-086
 type: requirements
-status: specifying
+status: implementing
 tier: T3
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - the epic that carries the upsell-trust rules this spec retires along with the upsell itself
@@ -18,20 +18,22 @@ implements: [packages/minspec/tests/no-scroogellm-upsell.test.ts]
 affects: [packages/minspec/src/lib/bridge.ts, packages/minspec/src/lib/ai-usage-detector.ts, packages/minspec/src/extension.ts, packages/minspec/package.json, packages/shared/src/contracts/conformance.ts, packages/shared/src/index.ts, packages/extension-pack/package.json, packages/minspec/tests/bridge.test.ts, packages/minspec/tests/ai-usage-detector.test.ts, packages/minspec/tests/extension-extra.test.ts, packages/minspec/tests/import-boundaries.test.ts]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
-  tasks: pending
-  implement: pending
+  clarify: done
+  plan: done
+  tasks: done
+  implement: in-progress
 ---
 
 # SPEC-086: MinSpec stops recommending ScroogeLLM, and stops shipping the bridge built for it
 
 > **SPECIFICATION ONLY.** Nothing is built by the dispatch that produced this. A human
-> reads it, checks **[Decisions needed (Clarify)](#decisions-needed-clarify)**, and approves
-> it through the normal spec-approval gate before any code changes. Every requirement below
-> is written under each decision's recommended option, so approving the spec as it stands
-> accepts those recommendations and leaves no question open. Choosing a different option
-> changes only the requirements that decision names.
+> reads it, checks its Clarify questions, and approves it through the normal spec-approval
+> gate before any code changes. Each question carries an agent-recorded selection under
+> **[Clarify selections](#clarify-selections-recorded-by-an-agent-2026-10-01-ratified-only-by-approval-of-this-spec)**;
+> the human answers by approving this spec with those in place, or by changing them first.
+> Every requirement below is written under each decision's recommended option, so approving
+> the spec as it stands accepts those recommendations and leaves no question open. Choosing
+> a different option changes only the requirements that decision names.
 
 Materializes **[#2205](https://github.com/AIClarityAU/minspec/issues/2205)** - founder,
 2026-09-29: *"minspec still shows an upsell recommender to install scrooge. park a gh issue
@@ -104,8 +106,8 @@ It is the "nudge" in `packages/minspec/src/lib/bridge.ts`, fired from activation
 bridge code the surviving instruments use. Checked in the `AIClarityAU/scroogellm` checkout
 at `c6c3b92` (2026-09-30): `git grep` for `traceability-export`, `ConformanceContract`,
 `conformance` and `@aiclarity/shared` across everything except Markdown, `docs/` and
-`specs/` returns nothing. The only hits anywhere are two design documents
-(`specs/scroogellm/clarify.md`, `specs/scroogellm/design.md`). No surviving instrument
+`specs/` returns nothing. The only hits anywhere are four documents in `specs/scroogellm/`
+(`clarify.md`, `design.md`, `requirements.md`, `tasks.md`). No surviving instrument
 reads the export or the contract. The terms searched are named so a reader can judge the
 absence claim.
 
@@ -272,12 +274,29 @@ a future reader to unblock a pack for a product that is not coming.
 - **INV-5 - Workspace boundaries (constitution constraint 2).** `@aiclarity/shared` loses
   an export; nothing in `packages/minspec` may be left importing it.
 
-## Decisions needed (Clarify)
+## Clarify selections (recorded by an agent 2026-10-01; ratified only by approval of this spec)
 
 Each decision carries a recommendation and its cost. The requirements above assume the
 recommended option in every case.
 
+DQ-1 to DQ-6 each carry a **Recorded selection** line naming the option this document
+already recommended. An agent session wrote those lines on 2026-10-01, and no human chose
+them. This repository runs with `"autonomy": "act"` (`.minspec/config.json:58`), under which
+an agent proceeds on a stated recommendation and leaves the options it did not take on
+record (DR-086 §2 and §4), which is why the options stay below with their costs. Approving a
+T3 spec is the second class on that section's stop list (`scripts/lib/autonomy.ts:68-70`),
+so nothing here stands in for that approval: the lines propose, and approving this spec is
+what ratifies them. An approval records a canonical hash that covers this body
+(`packages/minspec/src/lib/approval.ts:4-8`) and reads as stale once the hash stops matching
+(`resolveStatus`, `:483-490`), so an approval of this text covers these selections and
+changing one afterwards voids it. When the lines were written no approval of this spec had
+landed on `main` (`status: specifying`, `clarify: pending`). A question in this section with
+no **Recorded selection** line is still open.
+
 ### DQ-1 - How much of the bridge goes?
+
+**Recorded selection: Option A,** all of it: the prompt, the tool probe, the watcher, the
+export command and both settings.
 
 - **Option A - all of it: prompt, tool probe, watcher, export command, both settings
   (rec).** The export and the watcher exist only for ScroogeLLM to consume, nothing that
@@ -295,6 +314,9 @@ recommended option in every case.
 
 ### DQ-2 - Does the shared conformance contract go too?
 
+**Recorded selection: Option A,** yes, the shared conformance contract is deleted with the
+bridge.
+
 - **Option A - yes, with the bridge (rec).** After DQ-1 Option A it has no importer in this
   repo, the package is private, and the scroogellm checkout does not import it. *Cost:*
   a later conformance feature re-derives the types from history; and
@@ -304,6 +326,11 @@ recommended option in every case.
   consumes it, with no producer and no consumer.
 
 ### DQ-3 - What happens to the extension pack?
+
+**Recorded selection: Option A,** the pack's manifest stays and stays unpublishable, its
+refusal text is corrected, and retiring the pack is decided separately (#2359). Option B is
+not taken, so the decision record that deleting the pack would need is not written: "Why no
+new DR" below makes one necessary only under that option.
 
 - **Option A - leave the manifest, keep it unpublishable, fix its refusal text, and decide
   retirement separately (rec).** The pack is not a user-facing upsell and cannot ship.
@@ -321,6 +348,9 @@ recommended option in every case.
 
 ### DQ-4 - Clean up state left by earlier builds?
 
+**Recorded selection: Option A,** leave the state earlier builds stored where it is; no
+cleanup code is added.
+
 `aiclarity.minspec` is listed on the Marketplace (gallery query, 2026-10-01), so machines
 other than the developer's may hold the three global-state keys and the two settings.
 
@@ -334,6 +364,8 @@ other than the developer's may hold the three global-state keys and the two sett
 
 ### DQ-5 - Is the reintroduction gate worth having?
 
+**Recorded selection: Option A,** yes, a gate scoped to user-visible surfaces (FR-9).
+
 - **Option A - yes, scoped to user-visible surfaces (rec).** FR-9. *Cost:* it is a text
   check over named surfaces; an upsell worded without the product name, or placed in a
   runtime message string, would pass. It guards against the old thing coming back, not
@@ -342,6 +374,10 @@ other than the developer's may hold the three global-state keys and the two sett
   prose-only posture constitution principle 8 rejects.
 
 ### DQ-6 - What about the specs and decision records that describe the upsell as live?
+
+**Recorded selection: Option A,** this spec does not edit the documents that describe the
+upsell as live (SPEC-042, DR-014, DR-001 and the EPIC-006 summary). It states the
+supersession, and the SPEC-042 amendment is tracked as #2361.
 
 - **Option A - do not edit them here; record the supersession in this spec and track the
   follow-ups (rec).** SPEC-042 carries an approval record

@@ -22,6 +22,24 @@ REPO="AIClarityAU/minspec"
 WORKTREE_BASE="/tmp/minspec-agent"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROLES_DIR="${SCRIPT_DIR}/roles"
+
+# Pin every bare `git` op to the repo THIS SCRIPT lives in, never the caller's
+# inherited cwd (#1896). `gh` calls below all target $REPO explicitly; the git
+# calls (fetch/worktree) had no equivalent pin and inherited whatever `origin`
+# the process cwd happened to have — silently correct when launched from this
+# repo (the common case), but a write into a DIFFERENT repo's checkout when
+# launched from elsewhere (e.g. drain-inbox.sh started outside this repo, or a
+# shared-machine cron cwd). REPO_ROOT is derived from SCRIPT_DIR, which is
+# already resolved above from BASH_SOURCE, not cwd. Guarded by a `.minspec/`
+# check rather than trusted blindly: SCRIPT_DIR is one directory below repo
+# root today, but that stops being true the moment these scripts are vendored
+# or installed somewhere shared, and a silent wrong-root would reproduce the
+# exact bug this is fixing.
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+if [[ ! -d "${REPO_ROOT}/.minspec" ]]; then
+  echo "ERROR: resolved REPO_ROOT ($REPO_ROOT, from SCRIPT_DIR=$SCRIPT_DIR) has no .minspec/ — refusing to run git ops against an unexpected repo. This script must live one directory below the repo it dispatches for." >&2
+  exit 1
+fi
 # shellcheck source=scripts/lib/agent-context.sh
 source "${SCRIPT_DIR}/lib/agent-context.sh"
 # Agent writes carry the BOT's identity, never the human's (#1355). This arms a
@@ -192,6 +210,36 @@ paths_have_approvable_doc() {
 # Pure seam: prove the withhold classifier without gh/dispatch. Paths on stdin.
 if [[ "${ISSUE:-}" == "--paths-have-approvable-doc" ]]; then
   if paths_have_approvable_doc; then echo "hold"; exit 0; else echo "arm"; exit 1; fi
+fi
+
+# issue_linked_in_closing_refs TARGET_ISSUE — pure: exit 0 iff TARGET_ISSUE
+# appears among the closing-issue numbers piped in on stdin, one per line — the
+# shape `gh pr view --json closingIssuesReferences --jq
+# '.closingIssuesReferences[].number'` emits.
+#
+# #2228: PRs opened after ~05:20Z on 2026-09-30 carried a `Closes #N` trailer
+# (added below, #1322) verbatim, yet GitHub reported an EMPTY
+# `closingIssuesReferences` — the external trigger is unverified (a GitHub-side
+# incident/behaviour change is the lead candidate). But regardless of that
+# trigger, the pipeline had a real, independent defect: it WRITES the trailer
+# and trusts GitHub's keyword parser to act on it, and nothing downstream ever
+# read that parse back. A required outcome (merging closes the issue) rested on
+# a single unwitnessed producer — exactly the gap constitution invariant 2
+# forbids ("no required check hinges on a single producer that one
+# permission/config gap can disable"). This is the missing witness; the caller
+# below decides what a "no" means (needs-human-review, never silent).
+#
+# `-x` exact-match on a whole line so target `22` cannot false-match a `220`
+# emitted on the same stdin — a bare substring grep would.
+issue_linked_in_closing_refs() {
+  local target="$1"
+  grep -qxF "$target"
+}
+
+# Pure seam: prove the linkage check without gh/dispatch. Closing-ref numbers on
+# stdin, target issue as $2 (ISSUE itself is consumed by the flag string above).
+if [[ "${ISSUE:-}" == "--issue-linked" ]]; then
+  if issue_linked_in_closing_refs "${2:-}"; then exit 0; else exit 1; fi
 fi
 
 # autonomy_stop_classes_for_paths <newline-separated changed paths> (#1614)
@@ -397,13 +445,13 @@ done
 #                                  drain-inbox.sh → dispatch-issue.sh chain
 #                                  fetches/checks once, not once per issue.
 if [[ "${MINSPEC_FRESHNESS_CHECKED:-}" != "1" ]]; then
-  git fetch origin main -q 2>/dev/null || true
+  git -C "$REPO_ROOT" fetch origin main -q 2>/dev/null || true
   # Known blind spot: if the fetch fails (network/auth) or origin/main isn't
   # a resolvable ref, rev-list falls through to `echo 0`, so BEHIND reads as
   # "0 commits behind" and the guard fails OPEN (proceeds as if fresh) rather
   # than blocking on an unrelated infra problem. Accepted tradeoff — see the
   # `|| true` / `|| echo 0` robustness design above.
-  BEHIND=$(git rev-list --count HEAD..origin/main 2>/dev/null || echo 0)
+  BEHIND=$(git -C "$REPO_ROOT" rev-list --count HEAD..origin/main 2>/dev/null || echo 0)
   if [[ "${BEHIND:-0}" -gt 0 ]]; then
     if [[ "${MINSPEC_ALLOW_STALE:-}" == "1" ]]; then
       echo "WARNING: checkout is $BEHIND commit(s) behind origin/main — proceeding anyway (MINSPEC_ALLOW_STALE=1)." >&2
@@ -679,8 +727,8 @@ WORKTREE="$(lease_worktree_path "$ISSUE")"
 
 if [[ -d "$WORKTREE" ]]; then
   echo "Cleaning up existing worktree at $WORKTREE"
-  git worktree remove "$WORKTREE" --force 2>/dev/null || true
-  git branch -D "$BRANCH" 2>/dev/null || true
+  git -C "$REPO_ROOT" worktree remove "$WORKTREE" --force 2>/dev/null || true
+  git -C "$REPO_ROOT" branch -D "$BRANCH" 2>/dev/null || true
 fi
 
 # Branch off ORIGIN/main, not local `main`. The shared checkout's local `main`
@@ -691,7 +739,7 @@ fi
 # merge). Fetch the remote ref and branch from there so every agent starts from
 # the true tip. Fetch is a parent-side credentialed op; the agent still gets no
 # network tools.
-git fetch origin main -q
+git -C "$REPO_ROOT" fetch origin main -q
 
 # Spec-gate (HITL) reliance — DR-031 D3:
 # We deliberately do NOT set MINSPEC_GATE_OFF and do NOT seed approvals into the
@@ -700,7 +748,7 @@ git fetch origin main -q
 # genuinely human-approved spec passes the gate inside the worktree, while an
 # unapproved/stale spec correctly BLOCKS the dispatched edit (surfaced, never
 # bypassed). The bypass kill-switch is human-only; the pipeline must never use it.
-git worktree add -b "$BRANCH" "$WORKTREE" origin/main
+git -C "$REPO_ROOT" worktree add -b "$BRANCH" "$WORKTREE" origin/main
 
 echo "Launching $ROLE agent for: $ISSUE_TITLE"
 
@@ -1030,6 +1078,27 @@ run_reviewer_stage() {
     return 0
   fi
 
+  # 6a. VERIFY the `Closes #$ISSUE` trailer (added above, #1322) actually LINKED
+  #     (#2228) — no silent gate (constitution invariant 2). Steps above only
+  #     WRITE the trailer into the body and trust GitHub's keyword parser to act
+  #     on it; nothing previously read that parse back, so a silent link
+  #     failure had no witness anywhere in this pipeline. Fail closed exactly
+  #     like the diff enumeration below (6b): an API/read error is treated the
+  #     same as "not confirmed linked", never as "assume it worked". The result
+  #     feeds 6b through closing_link_confirmed, which starts at 0 and turns 1
+  #     only on a positive match: the needs-human-review label alone holds no
+  #     merge, so an unconfirmed link has to withhold the --auto arm itself.
+  local closing_refs closing_link_confirmed=0
+  closing_refs=$(gh pr view "$pr_num" --repo "$REPO" --json closingIssuesReferences \
+    --jq '.closingIssuesReferences[].number' 2>/dev/null || true)  # swallow-ok: an API error and a genuinely empty list both fall through to the "not linked" branch below — a read failure is never treated as confirmation
+  if ! issue_linked_in_closing_refs "$ISSUE" <<<"$closing_refs"; then
+    gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+    gh pr comment "$pr_num" --repo "$REPO" --body "$(printf '## Closing-issue link not confirmed (#2228)\n\nThis PR carries a `Closes #%s` trailer, but GitHub currently reports `closingIssuesReferences` WITHOUT #%s in it — merging this PR may NOT auto-close the issue. Labeled `needs-human-review` and native auto-merge withheld: a human should confirm the link (re-saving the PR body with no text change sometimes re-triggers the parse) before merging, or close #%s manually once this merges.' "$ISSUE" "$ISSUE" "$ISSUE")" 2>/dev/null || true
+    echo "WARNING: PR #$pr_num does not show #$ISSUE in closingIssuesReferences — the Closes trailer did not link (#2228). Labeled needs-human-review; native auto-merge withheld." >&2
+  else
+    closing_link_confirmed=1
+  fi
+
   # 6b. Native auto-merge (DR-061): if the project opted in, mark the PR --auto so
   #     GitHub merges it the moment the required `ready-to-merge` check (= provenance-
   #     verified ai-review:pass) goes green — no human keystroke, no per-PR babysit.
@@ -1082,6 +1151,15 @@ run_reviewer_stage() {
       grep -qE "${PUBLISH_PATH_RE}" <<<"$changed_files" \
         && hold_why="${hold_why} It touches a PUBLISH path (sites/** → public Cloudflare Pages via deploy-sites.yml) — merging IS publishing (#981)."
       echo "  → native auto-merge WITHHELD on PR #$pr_num — ${hold_why} A human owns this merge. Labeled needs-human-review."
+    elif [[ "$closing_link_confirmed" != "1" ]]; then
+      # #2228: 6a could not confirm that the `Closes #$ISSUE` trailer linked. Its
+      # needs-human-review label holds nothing by itself: ready-to-merge holds only on
+      # hold:* / changes / an unverified pass, and the --auto arm below reads no label.
+      # Arming here would let GitHub merge the moment ready-to-merge goes green and
+      # leave the issue open, with the only witness a label beside an already-armed
+      # merge (constitution invariant 2). So an unconfirmed link withholds the arm.
+      gh pr edit "$pr_num" --repo "$REPO" --add-label "needs-human-review" 2>/dev/null || true
+      echo "  → native auto-merge WITHHELD on PR #$pr_num — its Closes #$ISSUE trailer is not confirmed linked (closingIssuesReferences lacks #$ISSUE), so merging could leave the issue open (#2228). A human owns this merge. Labeled needs-human-review."
     elif gh pr merge "$pr_num" --repo "$REPO" --squash --auto 2>/dev/null; then
       echo "  → native auto-merge armed on PR #$pr_num (merges on ai-review:pass)"
     else
@@ -1438,13 +1516,31 @@ shepherd_own_pr() {
     [[ "$(jq -r '.autoMergeRequest // "null"' <<<"$pr_json")" != "null" ]] && automerge_armed=yes
 
     local action holds attempts decision
+    local classify_rc=0 classify_errfile classify_err
     # The 7th argument is the SPEC-044 D5 owner-gate, and the creator passes "no"
     # DELIBERATELY: the live claim on this item is our own, so `skip-live-owned` must
     # never fire here. That token exists to keep the DRAIN off a PR whose creator is
     # still shepherding it — the owner ignores it and drives its own PR (FR-6/INV-4).
+    #
+    # #1729 (invariant 2): this used to be `|| echo "skip-clean"`, which substituted
+    # a POSITIVE "PR is clean" assertion for ANY failure of the ONLY producer of this
+    # token — a bad argument, a `set -u` trip, a missing file, a syntax error from an
+    # edit — both the exit code AND stderr (the only diagnostic for why it died) were
+    # discarded. `skip-clean` reads as healthy downstream; a crashed classifier is not
+    # healthy. The sibling call below already gets this right
+    # (`|| echo "stop-not-automation"`) — this now matches it: capture the exit code
+    # and stderr, and on failure emit a token that says "could not classify" rather
+    # than asserting the PR is fine.
+    classify_errfile="$(mktemp)"
     action=$("${SCRIPT_DIR}/remediate-pr.sh" --classify \
                "$BRANCH" "$mergeable" "$merge_state" "$labels_csv" \
-               "$failing_non_review" "$ai_review_bad" "no" 2>/dev/null || echo "skip-clean")
+               "$failing_non_review" "$ai_review_bad" "no" 2>"$classify_errfile") || classify_rc=$?
+    classify_err="$(cat "$classify_errfile" 2>/dev/null || true)"
+    rm -f "$classify_errfile"
+    if [[ $classify_rc -ne 0 ]]; then
+      action="skip-unclassified"
+      echo "  PR #$pr_num: remediate-pr.sh --classify FAILED (exit $classify_rc) — could NOT classify this PR, NOT treating it as clean.${classify_err:+ stderr: $classify_err}" >&2
+    fi
 
     # D3 — re-verify ownership BEFORE electing any credentialed step.
     holds=no
@@ -1494,6 +1590,14 @@ shepherd_own_pr() {
         # "stop-*" must actually stop here, or it silently falls through to `sleep`
         # below and polls the full hour ceiling under a name that says it wouldn't.
         echo "  PR #$pr_num has mergeStateStatus '$merge_state', which this classifier does not recognise — leaving it alone rather than assuming it is clean or out of automation scope. Not polling further."
+        return 0 ;;
+      stop-unclassified)
+        # #1729: remediate-pr.sh --classify itself errored (see the classify_rc
+        # check above, which already logged its stderr). Say so visibly rather
+        # than falling silent, and do NOT hand off as needs-human-review — the
+        # failure may be transient, so leave the PR retry-able: the next dispatch
+        # re-runs --classify fresh instead of this loop guessing either way.
+        echo "  PR #$pr_num could not be classified — leaving it alone rather than assuming it is clean. Not polling further; will retry classification next dispatch."
         return 0 ;;
       wait)
         : ;;  # green but unmerged: waiting on checks, native auto-merge, or a human
