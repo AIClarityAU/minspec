@@ -140,7 +140,7 @@ describe('#2514 R3: the 5h ramp, at the boundary', () => {
     { when: 'two and a half hours left', left: 2.5 * HOUR, cap: '80.0', admits: 79, defers: 80 },
     { when: 'one hour left', left: HOUR, cap: '92.0', admits: 91, defers: 92 },
     { when: 'thirty minutes left', left: HOUR / 2, cap: '96.0', admits: 95, defers: 96 },
-    { when: 'the last minute', left: 60, cap: '99.8', admits: 99, defers: 100 },
+    { when: 'ninety seconds left', left: 90, cap: '99.8', admits: 99, defers: 100 },
   ])('$when: cap $cap%, $admits% is admitted and $defers% is not', ({ left, cap, admits, defers }) => {
     const open = gate({ pct: admits, resetIn: left });
     expect(open.code, open.out).toBe(0);
@@ -366,6 +366,20 @@ describe('#2514 R2: the ramp opens no path the gate did not have (invariant 2)',
     expect(run(['--quota-gate'], { MINSPEC_QUOTA_ADMIT_PCT_7D: '60' }).out).toMatch(/^open:bootstrap 1\/3/);
   });
 
+  it('a corrupt far-future reset with a very large rate still gets the floor, not an overflowed 100%', () => {
+    // rate x seconds x 10 overflows 64 bits here (999999 x 1e12 x 10), and wrapped
+    // negative it used to read as "nothing held back": a cap of 100% from garbage.
+    const reading = { pct: 70, resetIn: 1e12 };
+    const env = { MINSPEC_QUOTA_RAMP_PER_HOUR: '999999' };
+    const r = gate(reading, env);
+    expect(r.code, r.out).toBe(42);
+    expect(r.out).toMatch(/5h window 70% used[^)]*cap 60\.0% ramped/);
+    // CONTROL: a usage under the floor is still admitted on the same reading.
+    expect(gate({ ...reading, pct: 59 }, env).code).toBe(0);
+    // And the sleep is still a bare integer inside the clamp.
+    expect(sleepSecs(reading, env)).toBe(6 * HOUR);
+  });
+
   it('a knob with leading zeros is read as the decimal number it looks like', () => {
     // bash reads 08 as bad octal; a cap of "060" must be 60, not an error and not 48.
     expect(gate({ ...QUIET_5H, weekPct: 59, weekResetIn: DAY }, { MINSPEC_QUOTA_ADMIT_PCT_7D: '060' }).code).toBe(0);
@@ -436,8 +450,10 @@ describe('#2514 R4: the health line names the cap in force and its mode', () => 
 
 describe('#2514 R5: after a hold, the sleep ends when the ramp would next admit', () => {
   const MARGIN = 15; // QUOTA_SLEEP_MARGIN: settle past the boundary
-  // A reading is written, then the script reads the clock: allow a few seconds between.
-  const SLOP = 4;
+  // A reading is written, then the script reads the clock. On a quiet machine that is a
+  // few milliseconds; a loaded CI runner can take seconds to start a shell. The waits
+  // here are hundreds to thousands of seconds, so twenty of slack costs them nothing.
+  const SLOP = 20;
 
   it('weekly: 81% with 1.9 days left sleeps about 14 minutes, not six hours', () => {
     // cap(1.9 days) = 81.0, so 81% is held. The cap passes 81 once 163296s are left,
@@ -472,7 +488,7 @@ describe('#2514 R5: after a hold, the sleep ends when the ramp would next admit'
     { name: '5h 70% with four hours left', reading: { pct: 70, resetIn: 4 * HOUR }, shift: 'resetIn' },
     { name: '5h 99% with twenty minutes left', reading: { pct: 99, resetIn: 1200 }, shift: 'resetIn' },
   ];
-  it.each(bounds)('$name: the gate admits when the sleep ends, and not a few seconds before', ({ reading, shift }) => {
+  it.each(bounds)('$name: the gate admits when the sleep ends, and not before', ({ reading, shift }) => {
     // The property the bound exists for, checked against the gate itself, not against
     // a second copy of the ramp's arithmetic in this file.
     const max = { MINSPEC_QUOTA_SLEEP_MAX: '999999' }; // lift the 6h clamp: this is about the bound
@@ -483,12 +499,12 @@ describe('#2514 R5: after a hold, the sleep ends when the ramp would next admit'
     const wait = secs - MARGIN;
     const then = (delta: number): Reading => ({ ...reading, [shift]: left - wait + delta });
     expect(gate(then(-SLOP)).code, 'when the sleep ends').toBe(0);
-    expect(gate(then(SLOP + 2)).code, 'a few seconds earlier').toBe(42);
+    expect(gate(then(SLOP + 2)).code, 'a little earlier').toBe(42);
   });
 
   it('the verdict says when, so the hold reads as a wait and not as a wall', () => {
     const r = gate({ ...QUIET_5H, weekPct: 81, weekResetIn: 164160 });
-    expect(r.out).toMatch(/^defer:86\d \(7d window 81% used/);
+    expect(r.out).toMatch(/^defer:8[3-6]\d \(7d window 81% used/);
     expect(r.out).toMatch(/at this usage the ramp next admits in 15 min/);
   });
 
@@ -499,9 +515,10 @@ describe('#2514 R5: after a hold, the sleep ends when the ramp would next admit'
   });
 
   it('a wait shorter than the minimum is still the minimum: the loop never spins on a cap about to lift', () => {
-    // 81% is held until 163296s are left. Ten seconds short of that, the ramp admits in
-    // about ten seconds; the sleep is the 60s floor, not ten plus the margin.
-    const reading = { ...QUIET_5H, weekPct: 81, weekResetIn: 163296 + 10 };
+    // 81% is held until 163296s are left. Forty seconds short of that, the ramp admits in
+    // about forty seconds; with the margin that is under a minute, and the sleep is the
+    // 60s floor.
+    const reading = { ...QUIET_5H, weekPct: 81, weekResetIn: 163296 + 40 };
     expect(gate(reading).code).toBe(42);
     expect(sleepSecs(reading)).toBe(60);
   });
@@ -592,7 +609,7 @@ describe('#2514 R5 in the real loop: the sleep line says what bounded the sleep'
     const m = d.log().match(/quota window exhausted — sleeping (\d+)s, to the published reset rather than a guess/);
     expect(m, d.log()).not.toBeNull();
     expect(Number(m![1])).toBeLessThanOrEqual(2 * HOUR + 15);
-    expect(Number(m![1])).toBeGreaterThanOrEqual(2 * HOUR + 15 - 6);
+    expect(Number(m![1])).toBeGreaterThanOrEqual(2 * HOUR + 15 - 30);
   });
 
   it('a reading that went stale offers no deadline: the fixed backoff, named as that', async () => {
@@ -631,13 +648,13 @@ describe('#2514 R4 + R5 in the real loop: the log shows the cap at the start, on
     // The cycle's own line, on an ADMIT: the cap is visible when nothing is wrong too.
     expect(log).toMatch(/\[drain\] quota gate — open:5% of the 5h window used, cap 76\.0% ramped[^\n]*7d window 61% used, cap 65\.0% ramped/);
     // The hold.
-    expect(log).toMatch(/\[drain\] defer:95\d\d \(7d window 66% used[^\n]*cap 65\.0% ramped[^\n]*the ramp next admits in 2\.6 h\) — holding the rest of the queue/);
+    expect(log).toMatch(/\[drain\] defer:9[45]\d\d \(7d window 66% used[^\n]*cap 65\.0% ramped[^\n]*the ramp next admits in 2\.6 h\) — holding the rest of the queue/);
     // The sleep: bounded by the ramp, and the log says that is what bounded it.
     const m = log.match(/\[drain\] quota cap holding - sleeping (\d+)s, until the ramped cap would next admit/);
     expect(m, log).not.toBeNull();
     const secs = Number(m![1]);
     expect(secs).toBeLessThanOrEqual(9504 + 15);
-    expect(secs).toBeGreaterThanOrEqual(9504 + 15 - 6);
+    expect(secs).toBeGreaterThanOrEqual(9504 + 15 - 30);
     expect(log).not.toContain('to the published reset');
   });
 

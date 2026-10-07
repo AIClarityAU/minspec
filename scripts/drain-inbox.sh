@@ -152,6 +152,8 @@ DISPATCH="${MINSPEC_DRAIN_DISPATCH:-${SCRIPT_DIR}/dispatch-issue.sh}"
 # Env-overridable for the same reason as DISPATCH above and REMEDIATE below: with no
 # seam, a hermetic test that lists an inbox issue runs the real triager, which launches
 # claude. Only a test has a use for it (#2582: "triage still runs with spec-writing off").
+# The issue ranker is looked for beside TRIAGE (run_cycle), so a test that sets this
+# sets MINSPEC_ISSUE_RANKER as well, or gets the loud numeric-order fallback.
 TRIAGE="${MINSPEC_DRAIN_TRIAGE:-${SCRIPT_DIR}/triage-inbox.sh}"
 # Env-overridable like DISPATCH, so a hermetic test can drive the PR sweep through a
 # stub rather than the real remediator (#2233: the 18:11 false pause was on this path).
@@ -1024,7 +1026,8 @@ reconcile_labels() {
 # A function, and not the tail of run_cycle it used to be, because it now has two
 # callers (#2582): the end of an ordinary cycle, and a cycle whose only ready work is
 # spec-writing with spec-writing switched off, which has nothing to dispatch and
-# must still get here. The body is the old block, moved and not edited.
+# must still get here. The body is the old block, moved and not edited, so where a
+# comment in it says "the dispatch loop above" it means run_cycle's.
 sweep_open_prs() {
   if [[ "${MINSPEC_DRAIN_REMEDIATE_PRS:-1}" != "0" ]]; then
     # The dispatch loop above may have run for hours. Same reason as the per-item
@@ -1833,6 +1836,12 @@ _quota_cap() {
     QCAP_TENTHS=$floor
     return 0
   fi
+  # A reset more than a year off is a corrupt epoch, not a window. By a year out every
+  # rate that holds anything back has long since reached the floor (the slowest, 1% a
+  # day, would reserve 365%), so capping the time here changes no cap. What it does is
+  # keep the product below from overflowing on a large rate and a larger epoch: wrapped
+  # negative, it came out as a reserve below zero and so a cap of 100%.
+  (( left > 31536000 )) && left=31536000
   # 100% less the reserve, the reserve rounded UP so that the cap rounds down.
   t=$(( 1000 - (10#$rate * left * 10 + unit - 1) / unit ))
   (( t < floor )) && t=$floor

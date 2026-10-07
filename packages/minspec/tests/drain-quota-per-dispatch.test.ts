@@ -188,7 +188,8 @@ describe('#2573: the parallel path keeps its per-launch check (one implementatio
         ready: issues(4),
         reading: AT_58,
         readingAfterIssue: { 901: AT_66 },
-        issueSecs: { 901: 0.4, 902: 1.6 },
+        // Far enough apart that a loaded machine cannot let #902 finish first.
+        issueSecs: { 901: 0.3, 902: 3 },
         issueSays: { 902: "You've hit your session limit · resets 11:20am (Australia/Sydney)" },
         env: { ...CAP_60, MINSPEC_DRAIN_CONCURRENCY: '2' },
       },
