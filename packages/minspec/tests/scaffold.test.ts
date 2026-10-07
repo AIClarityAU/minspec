@@ -125,7 +125,17 @@ describe('refreshHarnessFiles()', () => {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('creates harness files when none exist (same as generate)', () => {
+  // Retitled by SPEC-096 (FR-3, DQ-1): this used to run Refresh on an EMPTY folder
+  // and expect a whole project, which made Refresh a second Initialize. Refresh now
+  // refuses in a folder with no `.minspec/` (one message, nothing created). That
+  // refusal is asserted in opt-in-writer-inventory.test.ts, under
+  // "refreshHarnessFiles (FR-3: Refresh is not a second Initialize)", and at the
+  // command level in commands-opt-in-invariant.test.ts, under "Refresh Harness
+  // Files: refuses in an empty folder instead of setting it up". What is kept here
+  // is the other half: in a folder that HAS opted in, Refresh still writes every
+  // harness file that is missing.
+  it('creates harness files when none exist yet, in a folder that has opted in', () => {
+    fs.mkdirSync(path.join(tmpDir, '.minspec'));
     refreshHarnessFiles(tmpDir);
 
     for (const name of TEMPLATE_NAMES) {
@@ -304,18 +314,18 @@ describe('applyAuthorshipCorrections() — #1697 NEW-A3', () => {
     expect(applyAuthorshipCorrections(DISK, { Nonexistent: 'x' })).toEqual(DISK);
   });
 
-  it('DOES invent one for an `Object.prototype` heading — #1752, latent, pinned', () => {
-    // Not a `never`: the guard is `heading in corrected`, and `in` walks the
-    // prototype chain, so the eight `Object.prototype` names pass it on a map that
-    // does not carry them. Asserted as the CURRENT behaviour rather than described in
-    // a comment, so #1752's fix (`Object.create(null)` for every heading-keyed map)
-    // turns this red and is noticed.
-    //
-    // Latent, not live: a withheld hash exists only for a heading the TEMPLATE also
-    // carries, and MinSpec ships no template heading with a prototype name.
+  it('does NOT invent one for an `Object.prototype` heading — #1752, fixed', () => {
+    // Before the fix, the guard `heading in corrected` walked the prototype
+    // chain, so the seven `Object.prototype` names (`constructor`, `toString`,
+    // `valueOf`, `hasOwnProperty`, `isPrototypeOf`, `propertyIsEnumerable`,
+    // `toLocaleString`) passed it even on a map that never carried them —
+    // measured, `constructor` was invented from thin air. `corrected` is now
+    // built null-prototype (`Object.assign(Object.create(null), diskHashes)`),
+    // so `in` here means "disk actually has this heading" and nothing else.
     const out = applyAuthorshipCorrections(DISK, { constructor: 'INVENTED' });
-    expect(Object.prototype.hasOwnProperty.call(out, 'constructor')).toBe(true);
-    expect(Object.keys(out)).toContain('constructor');
+    expect(Object.prototype.hasOwnProperty.call(out, 'constructor')).toBe(false);
+    expect(Object.keys(out)).not.toContain('constructor');
+    expect(out).toEqual(DISK);
   });
 
   it('deletes an unauthored heading outright rather than correcting it', () => {

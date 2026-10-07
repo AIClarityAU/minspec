@@ -18,6 +18,7 @@ import * as path from 'path';
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..');
 const MINSPEC_README = path.join(REPO_ROOT, 'packages', 'minspec', 'README.md');
 const ROOT_README = path.join(REPO_ROOT, 'README.md');
+const MINSPEC_MANIFEST = path.join(REPO_ROOT, 'packages', 'minspec', 'package.json');
 const TEMPLATE_REGISTRY = path.join(
   REPO_ROOT,
   'packages',
@@ -49,6 +50,18 @@ describe('DR-021 Decision 3 — docs reframe tier as scope, not difficulty', () 
     const md = read(ROOT_README);
     expect(md).toContain('scope-adaptive');
     expect(md.toLowerCase()).toContain('not how hard');
+  });
+
+  it('the manifest description frames MinSpec as scope-adaptive, not complexity-adaptive', () => {
+    // The description is the summary line of the Marketplace listing. It kept its
+    // "Complexity-adaptive" opening after the two READMEs were reframed, because this file
+    // read the READMEs and the templates and not the manifest (issue #2564).
+    const manifest = JSON.parse(read(MINSPEC_MANIFEST)) as { description?: unknown };
+    expect(typeof manifest.description).toBe('string');
+    const description = String(manifest.description).toLowerCase();
+    expect(description).toContain('scope-adaptive');
+    expect(description).toMatch(/how far (it|a change) reaches|mechanical scope|blast radius/);
+    expect(description).not.toMatch(/complexity|difficult|how hard/);
   });
 
   it('scaffolded harness templates describe tiers by scope, not difficulty', () => {
