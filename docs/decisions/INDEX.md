@@ -786,4 +786,28 @@ When one of the four ai-review voters dies on a session limit, the panel fails c
 <!-- dr-summary:DR-098 auto=88bcb5af582d -->
 MinSpec scaffolds a workflow into adopters that auto-merges a docs-only pull request carrying the docs-lane label, but never created the label, and gh pr create refuses to open a pull request naming a label the repository lacks. So where the label was missing, every approval fell to a manual Open PR step and a manual merge (#2243). Creating the label is a new kind of forge write, and it narrows a statement MinSpec ships to every adopter.
 <!-- /dr-summary:DR-098 -->
+
+## [DR-099 — Code-quality checks in the pre-commit harness split by class - correctness checks block and ship in v1, metric checks warn by default and are deferred to v2](DR-099.md)
+
+*Status: accepted · Date: 2026-10-01*
+
+<!-- dr-summary:DR-099 auto=893eb78b4e47 -->
+#1555 asks for a code-quality stage in the scaffolded pre-commit gate, and this record sets its rule by class. Correctness checks (shellcheck, actionlint, the TypeScript typecheck) block: three new ways for a commit to be refused, argued here against the advisory default earlier records state, and SPEC-080 ships them in v1. Metric checks (duplication, complexity, circular dependencies, dead code) warn by default until a project opts one into blocking, and are deferred to a v2 tracked as #2463.
+<!-- /dr-summary:DR-099 -->
+
+## [DR-100 — Publish MinSpec to the VS Code Marketplace as an early preview - a bounded exception to the phase order, for one stated reason and behind stated preconditions](DR-100.md)
+
+*Status: accepted · Date: 2026-10-01*
+
+<!-- dr-summary:DR-100 auto=2c0bfd94dcb0 -->
+The founder needs MinSpec on a Windows work PC that runs Microsoft's VS Code, and asked on 2026-10-01 for the extension to be published just before the visualiser work, about a week out. The constitution puts a Marketplace publish in Phase 2 and says Phase 2 work may not displace unfinished Phase 1 work, so publishing now needs a recorded exception, with its scope and preconditions stated.
+<!-- /dr-summary:DR-100 -->
+
+## [DR-103 — New MinSpec versions reach the Marketplace through a release workflow that holds no stored credential - automatic to the pre-release channel, the founder's approval for everyone else](DR-103.md)
+
+*Status: proposed · Date: 2026-10-07*
+
+<!-- dr-summary:DR-103 auto=46c85ea2201e -->
+The founder asked on 2026-10-05 for the published MinSpec version to be kept current, and on 2026-10-07 offered to give agents the Marketplace token. This record decides how new versions reach the VS Code Marketplace from now on: through a release workflow that signs in with no stored credential, publishes to the pre-release channel by itself, and needs the founder's approval before it publishes to everyone.
+<!-- /dr-summary:DR-103 -->
 <!-- minspec:dr-index:end -->

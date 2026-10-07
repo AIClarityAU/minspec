@@ -5,10 +5,12 @@ import {
   parkTopic,
   commentOnIssue,
   getRepoFromRemote,
+  isGhAvailable,
   type ParkingLotEntry,
   type ParkResult,
 } from '../lib/parking-lot';
 import { resolveTargetFolder } from '../lib/resolve-folder';
+import { hasOptInMarker, INITIALIZE_COMMAND_TITLE, NotOptedInError } from '../lib/opt-in';
 
 /** Options for {@link parkCommand}. */
 export interface ParkCommandOptions {
@@ -32,6 +34,14 @@ type DedupAction = 'open' | 'comment' | 'force';
  * quick-pick: open the existing issue, add a comment to it, or force-create a
  * new one anyway (issue #136). Pass `{ force: true }` to skip the dedup gate
  * entirely — the `MinSpec: Park Topic (force)` command does this.
+ *
+ * In a folder that has not opted in (SPEC-096 FR-7) the GitHub path still works,
+ * because it writes nothing in the folder. The local parking lot does not exist
+ * there: it lives in `.minspec/`, the opt-in marker. So when only the local file
+ * would be left, the command refuses before its first question; and when issue
+ * creation fails after the questions, it says the topic was not saved and hands
+ * the typed text back in an untitled editor. With the marker present nothing here
+ * differs from before.
  */
 export async function parkCommand(opts: ParkCommandOptions = {}): Promise<void> {
   const force = opts.force === true;
@@ -41,6 +51,17 @@ export async function parkCommand(opts: ParkCommandOptions = {}): Promise<void> 
   // against the wrong project (AIClarityAU/minspec#373).
   const folder = await resolveTargetFolder();
   if (!folder) return;
+
+  // SPEC-096 FR-7: with no `.minspec/`, find out BEFORE asking anything whether
+  // GitHub can take the topic. If it cannot, only the local file would be left,
+  // and there is no local file in a folder that has not opted in.
+  if (!hasOptInMarker(folder)) {
+    const blocker = await gitHubBlocker(folder);
+    if (blocker) {
+      vscode.window.showErrorMessage(cannotParkMessage(folder, blocker));
+      return;
+    }
+  }
 
   // Step 1: Title
   const title = await vscode.window.showInputBox({
@@ -78,7 +99,8 @@ export async function parkCommand(opts: ParkCommandOptions = {}): Promise<void> 
   const entry = createParkingLotEntry(title, body || '', sessionScope, labels);
 
   // Show progress while attempting GitHub issue creation
-  const result = await park(folder, entry, force);
+  const result = await parkOrHandBack(folder, entry, force);
+  if (!result) return; // not saved; the user has been told and has the text back
 
   if (result.deduped) {
     // A matching open issue / parking-lot entry already existed (issue #24).
@@ -104,6 +126,85 @@ function park(
     },
     async () => parkTopic(folder, entry, { force }),
   );
+}
+
+/** Why GitHub cannot take a topic, when that is knowable before asking anything. */
+type GitHubBlocker = 'gh-unavailable' | 'no-github-remote';
+
+/**
+ * The two reasons `parkTopic` falls straight through to the local file without
+ * trying to create an issue: `gh` is not usable, or the folder has no GitHub
+ * remote to file against. Runs `gh auth status` and reads the local git remotes,
+ * exactly the probes `parkTopic` runs itself, and only ever after the user has
+ * invoked Park Topic (constitution invariant 1).
+ */
+async function gitHubBlocker(folder: string): Promise<GitHubBlocker | undefined> {
+  if (!(await isGhAvailable())) return 'gh-unavailable';
+  if (!(await getRepoFromRemote(folder))) return 'no-github-remote';
+  return undefined;
+}
+
+/** What every Park refusal says about the folder: it has no local parking lot. */
+function noLocalParkingLot(folder: string): string {
+  return `${folder} has no .minspec/ directory to hold a local parking lot, so nothing was written there`;
+}
+
+/** The refusal shown before the first question (SPEC-096 FR-7): both reasons, and what to do. */
+function cannotParkMessage(folder: string, blocker: GitHubBlocker): string {
+  const gh =
+    blocker === 'gh-unavailable'
+      ? 'The GitHub CLI (gh) is not installed or not signed in, so it could not be used'
+      : 'gh could not be used: this folder has no GitHub remote to file the issue against';
+  return (
+    `MinSpec: This topic cannot be parked here. ${gh}, and ${noLocalParkingLot(folder)}. ` +
+    `Run "${INITIALIZE_COMMAND_TITLE}" first to keep a local parking lot.`
+  );
+}
+
+/** The topic as the user typed it, for the untitled editor it is handed back in. */
+function topicAsText(entry: ParkingLotEntry): string {
+  return [
+    `# ${entry.title}`,
+    '',
+    entry.body || '(no additional context)',
+    '',
+    `Labels: ${entry.labels.join(', ') || 'none'}`,
+    `Session scope: ${entry.sessionScope}`,
+    '',
+  ].join('\n');
+}
+
+/**
+ * Park the topic. When the local file is refused because the folder has not
+ * opted in (SPEC-096 FR-7), say that the topic was NOT saved and why, and open
+ * the typed text in an untitled editor so it is not lost; then return undefined,
+ * so the caller shows no success message. Nothing is written under the folder.
+ *
+ * That refusal is reached when issue creation fails after the questions were
+ * answered, and also when the marker is removed while they were open.
+ */
+async function parkOrHandBack(
+  folder: string,
+  entry: ParkingLotEntry,
+  force: boolean,
+): Promise<ParkResult | undefined> {
+  try {
+    return await park(folder, entry, force);
+  } catch (err) {
+    if (!(err instanceof NotOptedInError)) throw err;
+  }
+  // Said first, so that it is said even if the editor below cannot be opened.
+  vscode.window.showErrorMessage(
+    `MinSpec: This topic was NOT saved. No GitHub issue was created for it, and ${noLocalParkingLot(folder)}. ` +
+      'MinSpec is opening your text in an untitled editor so it is not lost. ' +
+      `Run "${INITIALIZE_COMMAND_TITLE}" first to keep a local parking lot.`,
+  );
+  const doc = await vscode.workspace.openTextDocument({
+    content: topicAsText(entry),
+    language: 'markdown',
+  });
+  await vscode.window.showTextDocument(doc, { preview: false });
+  return undefined;
 }
 
 /**
@@ -164,8 +265,8 @@ async function handleDedupHit(
       return;
 
     case 'force': {
-      const forced = await park(folder, entry, true);
-      notifyCreated(forced);
+      const forced = await parkOrHandBack(folder, entry, true);
+      if (forced) notifyCreated(forced);
       return;
     }
   }

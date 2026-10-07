@@ -7,17 +7,23 @@
  * the opt-in marker (constitution invariant 3), so a writer that created it would
  * make every folder the extension is ever opened on look opted in (#2328). Every
  * write and delete in `SessionPresenceManager` is therefore gated on `isOptedIn()`,
- * and the one directory this module creates (`sessions/`) is made NON-recursively,
- * so it cannot bring `.minspec/` into existence even if the gate were bypassed.
+ * and the one directory this module creates (`sessions/`) is made through the
+ * shared guard (`ensureDirectory` in `./opt-in`, SPEC-096), which cannot bring
+ * `.minspec/` into existence even if the gate were bypassed.
  * Other sessions read the directory to know who else is live (FR-4/FR-5), and the
  * drain's gated fast-forward (`scripts/drain-inbox.sh sync_shared_checkouts`) keys
  * on `isCheckoutOccupied` to decide whether a checkout is safe to advance.
  *
  * Tier-0 / offline (INV-5): this module imports ONLY `fs`, `path`, `crypto`,
  * `child_process` (git, local), the `vscode` TYPE (compile-time only), and two
- * sibling Tier-0 modules (`./session`, and `./auto-bootstrap` for the shared
- * `isMinspecInitialized` opt-in predicate). It makes zero network calls. The Tier-0 import-ban gate (tier0-import-ban.test.ts) forbids
- * http/https/fetch/net — none appear here.
+ * sibling Tier-0 modules (`./session`, and `./opt-in` for the shared
+ * `hasOptInMarker` predicate and the guarded directory operation - the leaf
+ * module that imports only `fs` and `path`, not `./auto-bootstrap`'s re-export,
+ * which would drag that orchestrator's whole
+ * scaffold/template-registry/epic-backfill/epic-manager/merge-refresh graph
+ * into this lean Layer-1 primitive; #2363). It makes zero network calls. The
+ * Tier-0 import-ban gate (tier0-import-ban.test.ts) forbids http/https/fetch/net
+ * — none appear here.
  */
 import * as fs from 'fs';
 import * as path from 'path';
@@ -29,7 +35,7 @@ import { execFileSync } from 'child_process';
 import type * as vscode from 'vscode';
 
 import { loadSession, saveSession, type SessionType } from './session';
-import { isMinspecInitialized } from './auto-bootstrap';
+import { ensureDirectory, hasOptInMarker } from './opt-in';
 
 // ── Paired named constants (FR-3) — the ONE place these numbers live in TS ──────
 // STALE_SECS = 4 × HEARTBEAT_SECS. They are PAIRED: drift one without the other and
@@ -261,6 +267,65 @@ function isValidRecord(v: unknown): v is SessionPresenceRecord {
 
 // ── THE SYNC-GATE PRIMITIVE (FR-9 family / #168 / DR-051 §4a) ────────────────────
 
+/** Injectable seams for {@link sameCheckout} — production uses the real platform
+ * and the real native realpath; tests override `platform` to exercise the
+ * win32 branch (and `realpathNative` to simulate a resolution) from Linux CI,
+ * where no actual Windows filesystem exists to canonicalize against. */
+export interface SameCheckoutDeps {
+  platform?: NodeJS.Platform;
+  realpathNative?: (p: string) => string;
+}
+
+/**
+ * True iff `a` and `b` name the SAME checkout root (#2403). A plain
+ * `path.resolve(a) !== path.resolve(b)` string compare — what
+ * `isCheckoutOccupied`, `contendingLiveSessions`, and
+ * `otherLiveSessionsHere` (tidy-primary.ts) each did before this function
+ * existed — only normalizes separators and `.`/`..` segments. It does not
+ * fold case, so on Windows (case-insensitive filesystem) two spellings of the
+ * identical folder compare UNEQUAL: VS Code reports a workspace `fsPath` with
+ * a lower-case drive letter (`c:\Users\...`) while git prints its top level
+ * as the OS spells it (`C:/Users/...`); an 8.3 short name, a `subst` drive, or
+ * a junction can also spell the same folder differently. Because the three
+ * callers above use this to find a LIVE peer in "the same checkout" before
+ * allowing a destructive or gating action, a spelling mismatch makes the
+ * check find nobody and FAIL OPEN — exactly backwards for a guard that exists
+ * to fail closed (constitution invariant 2).
+ *
+ * Canonicalizes both sides through `fs.realpathSync.native` first (folds
+ * 8.3 names, junctions, and `subst` drives, and on Windows normalizes drive-
+ * letter case too), then — because realpath does not guarantee case-folding
+ * on every Windows filesystem/Node version, and because a side that cannot be
+ * realpath'd falls back to `path.resolve` alone — compares case-insensitively
+ * whenever `platform` is `win32`. `path.win32`/`path.posix` (rather than the
+ * ambient `path` module) is selected from `platform`, so a test can force the
+ * win32 code path and spelling table on a Linux CI runner.
+ *
+ * Falls back to `path.resolve` (via the selected `path.win32`/`path.posix`)
+ * when a side cannot be realpath'd — already deleted, a permissions error, or
+ * (in a test) a fixture path that does not exist on the real filesystem —
+ * rather than throwing, so callers get the old resolve-only behaviour instead
+ * of an exception on the error-y side.
+ */
+export function sameCheckout(a: string, b: string, deps: SameCheckoutDeps = {}): boolean {
+  const platform = deps.platform ?? process.platform;
+  const isWin = platform === 'win32';
+  const pathImpl = isWin ? path.win32 : path.posix;
+  const realpathNative = deps.realpathNative ?? ((p: string) => fs.realpathSync.native(p));
+
+  const canonical = (p: string): string => {
+    try {
+      return realpathNative(p);
+    } catch {
+      return pathImpl.resolve(p);
+    }
+  };
+
+  const ra = canonical(a);
+  const rb = canonical(b);
+  return isWin ? ra.toLowerCase() === rb.toLowerCase() : ra === rb;
+}
+
 /**
  * Every worktree root the primary's repo tracks, so the sync gate can read EACH
  * worktree's OWN `.minspec/sessions/` (that is where `SessionPresenceManager`
@@ -305,8 +370,20 @@ export function listWorktreeRoots(primaryRoot: string): string[] {
  * the OPPOSITE fail-direction from the FR-12 pre-commit backstop (which fails
  * OPEN/allow) — a false "unoccupied" mutates a live tree (unrecoverable), whereas a
  * false "occupied" only skips an ff (harmless, retried).
+ *
+ * `sameCheckoutDeps` (#2403) is the same injectable seam {@link sameCheckout} takes —
+ * production never passes it (real `process.platform` + real native realpath); tests
+ * use it to force the win32 comparison branch from Linux CI so the regression this
+ * function exists to close (a differently-cased Windows worktreeRoot record wrongly
+ * read as "a different tree" ⇒ false dormant ⇒ fail OPEN) is exercised through THIS
+ * function's own call chain, not just through `sameCheckout` directly.
  */
-export function isCheckoutOccupied(rootDir: string, worktreeRoot: string, now = Date.now()): boolean {
+export function isCheckoutOccupied(
+  rootDir: string,
+  worktreeRoot: string,
+  now = Date.now(),
+  sameCheckoutDeps: SameCheckoutDeps = {},
+): boolean {
   let entries: { rec: SessionPresenceRecord | null; file: string }[];
   try {
     entries = [];
@@ -326,8 +403,7 @@ export function isCheckoutOccupied(rootDir: string, worktreeRoot: string, now = 
     }
   }
   if (live.length === 0) return true; // no demonstrable live session ⇒ occupied
-  const target = path.resolve(worktreeRoot);
-  return live.some((r) => path.resolve(r.worktreeRoot) === target);
+  return live.some((r) => sameCheckout(r.worktreeRoot, worktreeRoot, sameCheckoutDeps));
 }
 
 /**
@@ -344,13 +420,12 @@ export function contendingLiveSessions(
   selfSessionId?: string,
   now = Date.now(),
 ): SessionPresenceRecord[] {
-  const target = path.resolve(worktreeRoot);
   const out: SessionPresenceRecord[] = [];
   for (const { rec } of readAllRecords(rootDir)) {
     if (!rec) continue;
     if (selfSessionId && rec.sessionId === selfSessionId) continue;
     if (!isRecordLive(rec, now)) continue;
-    if (path.resolve(rec.worktreeRoot) !== target) continue; // different tree ⇒ not a contender
+    if (!sameCheckout(rec.worktreeRoot, worktreeRoot)) continue; // different tree ⇒ not a contender
     if (rec.fileAllowlist.length === 0) continue; // empty allowlist ⇒ not a contender
     if (paths.some((p) => isPathClaimed(rec.fileAllowlist, p))) out.push(rec);
   }
@@ -465,6 +540,8 @@ export class SessionPresenceManager {
    * Is there a folder open at all? With none, `activate()` hands us `''`, and
    * `path.join('', '.minspec/sessions')` is a RELATIVE path that resolves against
    * the extension host's working directory - an arbitrary folder nobody chose.
+   * Kept as its own check (used independently by `start()`, below) even though
+   * `hasOptInMarker` also treats `''` as not opted in.
    */
   private get hasRoot(): boolean {
     return this.rootDir !== '';
@@ -473,16 +550,17 @@ export class SessionPresenceManager {
   /**
    * The single opt-in gate for every write and delete below (constitution
    * invariant 3): a folder is open AND it already carries the `.minspec/` marker.
-   * Reuses the project-wide predicate (`isMinspecInitialized`) rather than a second
-   * definition of "is this a MinSpec project". The empty-root check is ours because
-   * that predicate, given `''`, would test the working directory.
+   * Reuses the project-wide predicate (`hasOptInMarker`, in the dependency-free
+   * `./opt-in` leaf module) rather than a second definition of "is this a
+   * MinSpec project" (#2363 — `hasOptInMarker` already treats an empty root as
+   * not opted in, so this does not need its own empty-root special case).
    *
    * Re-evaluated on every call, never cached: a folder that opts in after
    * activation (MinSpec: Initialize) starts heartbeating on the next tick, and one
    * whose `.minspec/` is removed stops being written to.
    */
   private isOptedIn(): boolean {
-    return this.hasRoot && isMinspecInitialized(this.rootDir);
+    return hasOptInMarker(this.rootDir);
   }
 
   /** FR-3 — write the record immediately, then start the heartbeat + watcher. */
@@ -495,7 +573,8 @@ export class SessionPresenceManager {
     }
     // 1. Persist sessionId into the singular .minspec/session.json so a shell
     //    agent's trailer + $MINSPEC_SESSION_ID resolve identically (FR-11).
-    //    Opted-in folders only: saveSession() creates .minspec/ when it is absent.
+    //    Opted-in folders only. saveSession() no longer creates .minspec/ (it
+    //    refuses, SPEC-096), so this gate now spares a refusal, not a marker.
     if (this.isOptedIn()) {
       try {
         const s = loadSession(this.rootDir);
@@ -624,13 +703,14 @@ export class SessionPresenceManager {
   private writeHeartbeat(): void {
     if (!this.isOptedIn()) return; // never the thing that creates the opt-in marker
     try {
-      // Deliberately NOT `{ recursive: true }`: this may create `sessions/` inside
-      // an existing `.minspec/`, and must fail (ENOENT) rather than create
-      // `.minspec/` itself if the marker vanished between the check above and here.
-      fs.mkdirSync(this.sessionsDir);
-    } catch (e: unknown) {
-      // Already there is the normal case; anything else ⇒ nothing to write to.
-      if ((e as NodeJS.ErrnoException | undefined)?.code !== 'EEXIST') return;
+      // Through the shared guard (SPEC-096 FR-4). It may create `sessions/` inside
+      // an existing `.minspec/`, and it refuses rather than create `.minspec/`
+      // itself if the marker vanished between the check above and here.
+      ensureDirectory(this.sessionsDir);
+    } catch {
+      // No directory to write to (the marker went, or the filesystem said no).
+      // Ambient path: stay silent and write nothing; the next tick tries again.
+      return;
     }
     const s = loadSession(this.rootDir);
     const record: SessionPresenceRecord = {
