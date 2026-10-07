@@ -802,4 +802,12 @@ MinSpec scaffolds a workflow into adopters that auto-merges a docs-only pull req
 <!-- dr-summary:DR-100 auto=2c0bfd94dcb0 -->
 The founder needs MinSpec on a Windows work PC that runs Microsoft's VS Code, and asked on 2026-10-01 for the extension to be published just before the visualiser work, about a week out. The constitution puts a Marketplace publish in Phase 2 and says Phase 2 work may not displace unfinished Phase 1 work, so publishing now needs a recorded exception, with its scope and preconditions stated.
 <!-- /dr-summary:DR-100 -->
+
+## [DR-103 — New MinSpec versions reach the Marketplace through a release workflow that holds no stored credential - automatic to the pre-release channel, the founder's approval for everyone else](DR-103.md)
+
+*Status: proposed · Date: 2026-10-07*
+
+<!-- dr-summary:DR-103 auto=46c85ea2201e -->
+The founder asked on 2026-10-05 for the published MinSpec version to be kept current, and on 2026-10-07 offered to give agents the Marketplace token. This record decides how new versions reach the VS Code Marketplace from now on: through a release workflow that signs in with no stored credential, publishes to the pre-release channel by itself, and needs the founder's approval before it publishes to everyone.
+<!-- /dr-summary:DR-103 -->
 <!-- minspec:dr-index:end -->
