@@ -554,18 +554,17 @@ export function approveSpec(
   // SPEC-051: ownership pre-check, at the LIB boundary for the same reason DR-056's
   // approver gate is here — approval ADVANCES the phase map, and some rules are gated on
   // that map, so a spec can be complete now and violate an error the instant it is
-  // advanced. #1317 closed the UI path (`commands/approve.ts`); this closes every other
-  // caller OF THIS FUNCTION — a script, a test, a future command, an agent driving
-  // `approveSpec`. Four red mains came through that gap.
+  // advanced. This closes every caller OF THIS FUNCTION — a script, a test, a future
+  // command, an agent driving `approveSpec` — independent of whatever the UI does.
+  // Four red mains came through that gap (#1317).
   //
-  // NOT closed here, stated plainly rather than implied: `advanceSpecToImplementing`
-  // (`spec.ts`) is the function that actually WRITES `phases.plan: in-progress`, and it
-  // remains unguarded. Guarding it needs `spec.ts` to import the validator, but
-  // `spec-validator.ts` value-imports `./spec` (`SPEC_STATUSES`, `SPEC_TYPES`,
-  // `stripInlineComment`) — a real runtime cycle, and dodging the cycle checker with a
-  // lazy `require` would hide it rather than remove it. Its ONLY production caller today
-  // is `commands/approve.ts:315`, which #1317 already refuses before reaching. So the
-  // exposure is a future direct caller, not a live hole. Tracked as tasks.md T4.2.
+  // `advanceSpecToImplementing` (`spec.ts`) — the function that actually WRITES
+  // `phases.plan: in-progress` — carries the SAME guard call at its own top, before its
+  // own write (#1446, once the `./spec-vocabulary` extraction removed the cycle that
+  // used to block it). `commands/approve.ts` — the UI a human actually drives — calls it
+  // too, before `advanceSpecToImplementing` (#1806; before that it inlined
+  // `violationsIntroducedByApproval` as an independent second implementation that could
+  // drift from this one). All three call sites now run the one function below.
   //
   // Reuses `violationsIntroducedByApproval` rather than a fresh predicate, which buys two
   // deliberate properties for free:

@@ -1081,11 +1081,16 @@ describe('approveSpecCommand — target-status gate (#1317)', () => {
     expect(advanceSpecToImplementing).not.toHaveBeenCalled();
     expect(approveSpec).not.toHaveBeenCalled();
 
-    // And the human is told what, specifically, is unsatisfied.
+    // And the human is told what, specifically, is unsatisfied. #1806: the check now
+    // runs through the SHARED guard (`assertOwnershipDeclaredForAdvance`), whose thrown
+    // message bundles the violation + fixHint into one string that lands in the modal's
+    // `detail` — the short title (`call[0]`) stays generic on purpose, matching the
+    // "spec is not complete" refusal a few lines above it in approve.ts.
     const call = vi.mocked(vscode.window.showErrorMessage).mock.calls[0];
     expect(call[0]).toContain('SPEC-001');
-    expect(call[0]).toContain('implements:');
-    expect((call[1] as { modal?: boolean } | undefined)?.modal).toBe(true);
+    const options = call[1] as { modal?: boolean; detail?: string } | undefined;
+    expect(options?.modal).toBe(true);
+    expect(options?.detail).toContain('implements:');
   });
 
   it('approves normally when the advance introduces nothing', async () => {
