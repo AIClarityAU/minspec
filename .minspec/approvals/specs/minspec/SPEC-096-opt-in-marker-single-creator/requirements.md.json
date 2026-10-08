@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-096-opt-in-marker-single-creator/requirements.md",
+  "specHash": "1b3c314a5ff4387d5773895524e708a4e3078ab6a2131a14891d252193cb9d2c",
+  "approvedAt": "2026-10-02T04:11:02.385Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T4",
+  "migrated": false,
+  "baselineBlob": "3efff4415698d3df67078907f2befd497f2d26e3"
+}

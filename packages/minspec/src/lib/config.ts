@@ -53,23 +53,11 @@ export interface MinspecConfig {
    * (default, pre-backfill) surfaces undeclared T3/T4 specs without blocking;
    * flip to `error` once the corpus is backfilled (FR-7 ratchet). The companion
    * `ownership.implements.invalid` is always an error regardless of this dial.
-   * Absent → treated as `warn`.
+   * Absent → treated as `warn`. A config that `scaffold()` CREATES starts at
+   * `error` instead when no spec in the repo would fail the rule, since there is
+   * nothing to backfill (`ownership-ratchet.ts`, #2250).
    */
   readonly ownershipDeclaration?: 'warn' | 'error';
-  /**
-   * Severity of the #1912 `status.inline-comment` / `status.orphan-comment` rules.
-   *
-   * The `status:` frontmatter line carries a value and nothing else (#1900). The three
-   * status writers rebuild that line as indent + key + value, so an inline comment is
-   * DESTROYED on write, and indented `#` lines after it SURVIVE and go on describing a
-   * value that no longer holds (#1879). Both are annotations the writer cannot keep
-   * honest, so the convention is to put rationale in body prose instead.
-   *
-   * `warn` (default) surfaces them without blocking; flip to `error` once the corpus is
-   * clean and the writers consume continuations (the SPEC-038 FR-7 ratchet). Absent →
-   * treated as `warn`.
-   */
-  readonly statusLineAnnotation?: 'warn' | 'error';
   /**
    * Permitted approver identities for the `approval-integrity` gate (DR-081 §4, #1376).
    *
@@ -90,6 +78,20 @@ export interface MinspecConfig {
    */
   readonly approvers?: readonly string[];
   /**
+   * Severity of the #1912 `status.inline-comment` / `status.orphan-comment` rules.
+   *
+   * The `status:` frontmatter line carries a value and nothing else (#1900). The three
+   * status writers rebuild that line as indent + key + value, so an inline comment is
+   * DESTROYED on write, and indented `#` lines after it SURVIVE and go on describing a
+   * value that no longer holds (#1879). Both are annotations the writer cannot keep
+   * honest, so the convention is to put rationale in body prose instead.
+   *
+   * `warn` (default) surfaces them without blocking; flip to `error` once the corpus is
+   * clean and the writers consume continuations (the SPEC-038 FR-7 ratchet). Absent →
+   * treated as `warn`.
+   */
+  readonly statusLineAnnotation?: 'warn' | 'error';
+  /**
    * The project's name, as rendered into every generated harness file (#1529).
    *
    * Explicit and authoritative: set this to rename the project deliberately.
@@ -103,6 +105,29 @@ export interface MinspecConfig {
    * from a worktree and would persist the wrong name.
    */
   readonly projectName?: string;
+  /**
+   * The autonomy axis (DR-086) — governs whether this repo's own dev-time dispatch
+   * scripts (`scripts/dispatch-issue.sh`, `scripts/drain-inbox.sh`) may act on an
+   * already-analysed recommendation without a human round-trip, bounded by DR-086
+   * §2's enumerated stop list. `ask` (default): every choice stops and asks. `act`:
+   * the agent proceeds except on the stop list.
+   *
+   * The AUTHORITATIVE reader is `scripts/lib/autonomy.ts`'s `readAutonomy` /
+   * `resolveAutonomy` — it reads `.minspec/config.json` directly and does not go
+   * through `loadConfig`. This field exists so the typed shape a human edits
+   * through the extension can see, validate, and (eventually) display the key —
+   * NOT so the extension consumes or acts on it. Shipping unattended-act
+   * capability *inside* the extension itself is a separate decision nobody has
+   * made (DR-086 §5, constitution invariant 3: MinSpec's blast radius stops at
+   * the project it is installed in).
+   *
+   * `loadConfig` normalizes this field with the same exact-token, fail-closed
+   * comparison as `resolveAutonomy` (any value other than the literal `'act'`
+   * becomes `'ask'`), duplicated rather than imported so the extension bundle
+   * never pulls in `scripts/lib/autonomy.ts`. Keep the two comparisons in lockstep
+   * by construction if either changes.
+   */
+  readonly autonomy?: 'ask' | 'act';
 }
 
 /** 80% statement/branch/function/line coverage — the commonly-cited industry bar. */
@@ -127,6 +152,7 @@ export const DEFAULT_CONFIG: MinspecConfig = {
   },
   coverage: { minimumPercentage: DEFAULT_COVERAGE_MINIMUM },
   ownershipDeclaration: 'warn',
+  autonomy: 'ask',
   statusLineAnnotation: 'warn',
 };
 
@@ -147,6 +173,21 @@ function deepMerge<T extends object>(defaults: T, overrides: Partial<T>): T {
 }
 
 /**
+ * Validate the `autonomy` token the same way `resolveAutonomy` in
+ * `scripts/lib/autonomy.ts` does: exact-token, deny-by-default. Anything other
+ * than the literal `'act'` (whitespace-trimmed) — absent, empty, a typo like
+ * `"acts"` or `"ACT"`, or any non-string JSON value — normalizes to `'ask'`.
+ * There is no fail-open path: an unrecognised value can never grant autonomy.
+ *
+ * Deliberately re-implemented here rather than imported from
+ * `scripts/lib/autonomy.ts`, so the shipped extension bundle never pulls in
+ * that dev-time-only module (DR-086 §5).
+ */
+function normalizeAutonomy(raw: unknown): 'ask' | 'act' {
+  return typeof raw === 'string' && raw.trim() === 'act' ? 'act' : 'ask';
+}
+
+/**
  * Load config from .minspec/config.json, merged with defaults.
  * Missing keys get default values. Invalid JSON = pure defaults.
  */
@@ -158,7 +199,8 @@ export function loadConfig(rootDir: string): MinspecConfig {
   try {
     const raw = fs.readFileSync(configPath, 'utf-8');
     const userConfig = JSON.parse(raw) as Partial<MinspecConfig>;
-    return deepMerge(DEFAULT_CONFIG, userConfig);
+    const merged = deepMerge(DEFAULT_CONFIG, userConfig);
+    return { ...merged, autonomy: normalizeAutonomy(merged.autonomy) };
   } catch {
     return DEFAULT_CONFIG;
   }

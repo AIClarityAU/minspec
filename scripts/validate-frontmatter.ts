@@ -15,16 +15,21 @@
  * quietly, per `.minspec/constitution.md` invariant 2.
  */
 
-import { readdirSync, readFileSync, statSync, existsSync } from 'fs';
+import { readFileSync, statSync, existsSync } from 'fs';
 import { join, relative, dirname, sep } from 'path';
-import { validateDrSequence, validateDrIndexStatus, validateDrAmendments } from '../packages/minspec/src/lib/adr-manager';
+import {
+  validateDrSequence,
+  validateDrIndexStatus,
+  validateDrAmendments,
+  detectDoubledFrontmatter,
+} from '../packages/minspec/src/lib/adr-manager';
 import {
   validateSplitLayoutCoverage,
   checkAcceptanceCriteria,
   validateOwnership,
+  type SplitLayoutFile,
   validateStatusAnnotation,
   validateFrontmatterProse,
-  type SplitLayoutFile,
 } from '../packages/minspec/src/lib/spec-validator';
 import { parseSpec } from '../packages/minspec/src/lib/spec';
 import { DEFAULT_CONFIG, loadConfig } from '../packages/minspec/src/lib/config';
@@ -36,38 +41,24 @@ import {
 import { listOrphanedRecords } from '../packages/minspec/src/lib/approval-store';
 import { checkStatusParity, inspectStatusLine, inspectAllStatusClaims } from '../packages/minspec/src/lib/status-parity';
 import { checkManagedRegionMarkers } from '../packages/minspec/src/lib/scaffold';
+// The corpus walkers, under their former local names. `safeGlob` now tolerates ONLY an
+// absent root; every other read failure reaches the rule's own catch instead of being
+// turned into an empty corpus (#1999).
+import { walkFilesByExt as glob, walkOptionalRoot as safeGlob } from './lib/corpus-walk';
 import { checkDeclaredDrIds } from './lib/dr-id-collision';
 import { checkDeclaredSpecIds } from './lib/spec-id-collision';
-import { SELF_HOSTED_TEMPLATE_NAMES } from '../packages/minspec/src/lib/template-registry';
+import {
+  SELF_HOSTED_TEMPLATE_NAMES,
+  TEMPLATE_NAMES,
+  TEMPLATE_OUTPUT_PATHS,
+} from '../packages/minspec/src/lib/template-registry';
 import { detectTools } from '../packages/minspec/src/lib/tool-detector';
+import { buildContext, renderTemplate } from '../packages/minspec/src/lib/template-engine';
+import { parseSections, PREAMBLE_HEADING, detectDoubledTemplateHeadings } from '../packages/minspec/src/lib/merge-refresh';
 
 const ROOT = process.cwd();
 let errors = 0;
 let warnings = 0;
-
-function glob(dir: string, ext: string): string[] {
-  const results: string[] = [];
-  const entries = readdirSync(dir, { withFileTypes: true });
-  for (const entry of entries) {
-    const full = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      results.push(...glob(full, ext));
-    } else if (entry.name.endsWith(ext)) {
-      results.push(full);
-    }
-  }
-  return results;
-}
-
-// glob() that tolerates a missing directory (returns []) — used by checks that
-// scan optional corpus locations.
-function safeGlob(dir: string, ext: string): string[] {
-  try {
-    return glob(dir, ext);
-  } catch {
-    return [];
-  }
-}
 
 function parseFrontmatter(content: string): Record<string, string> {
   const match = content.match(/^---\n([\s\S]*?)\n---/);
@@ -264,9 +255,17 @@ try {
 }
 
 // Rule 6 (non-fatal): local DR-NNN sequence health (issue #41). WARNS — never
-// fails the build — on a gap (a number skipped, e.g. DR-010 → DR-362), a
-// duplicate number, or an under-padded id. Would have caught DR-362 (a global-
-// register number minted into this project-local register). Tier-0, offline.
+// fails the build — on a duplicate number or an under-padded id. Tier-0, offline.
+//
+// It does NOT warn on a skipped number any more (#2051). That rule read every
+// id absent from the run as an error and said "renumber the out-of-sequence DR",
+// which is wrong whenever the id is held by an open pull request — the normal
+// state under worktree-per-session (#168), and invisible to an offline scan. It
+// caught the DR-362 leak once; it fired on correct work continuously.
+//
+// Cross-PR id truth is .github/workflows/dr-id-collision.yml ALONE — Rule 17
+// below is the offline half and, as its own comment says, cannot see any pull
+// request. Do not read the two as interchangeable.
 try {
   const drWarnings = validateDrSequence(resolveDecisionsDir());
   for (const w of drWarnings) {
@@ -306,6 +305,11 @@ try {
     file: relative(ROOT, file),
     content: readFileSync(file, 'utf-8'),
   }));
+  // A zero-file scan is itself a defect signal, not a clean register: the two are
+  // indistinguishable in the output otherwise (#1999, same guard Rule 19 already carries).
+  if (drFiles.length === 0) {
+    warn('Rule 17 scanned 0 DR files; do not read the green as a collision-free register.');
+  }
   for (const defect of checkDeclaredDrIds(drFiles)) {
     fail(join(ROOT, defect.files[0]), `DR id ${defect.kind} — ${defect.message}`);
   }
@@ -345,6 +349,9 @@ try {
       file: relative(ROOT, file),
       content: readFileSync(file, 'utf-8'),
     }));
+  if (specFiles.length === 0) {
+    warn('Rule 18 scanned 0 spec files; do not read the green as a collision-free corpus.');
+  }
   for (const defect of checkDeclaredSpecIds(specFiles)) {
     fail(join(ROOT, defect.files[0]), `Spec id ${defect.kind} — ${defect.message}`);
   }
@@ -640,7 +647,34 @@ try {
   // specs/ unreadable / absent — nothing to validate, stay silent.
 }
 
-// Rule 20 (#1912): the `status:` frontmatter line carries a value and nothing
+// Rule 14 (harden, #760): every MANAGED_REGION_TEMPLATES output path present on
+// disk must carry valid MinSpec markers. `refreshManagedRegionTemplates`
+// (scaffold.ts) already DETECTS a marker-less managed file — but only when a
+// human happens to run "MinSpec: Refresh Harness Files"; until then the file is
+// fully committable. Root-caused via a scrooge port (#48/#760): two CI-review
+// files were hand-ported without markers, one then diverged locally, and both
+// stayed merged, unnoticed, across several commits. FATAL when the body has
+// diverged (auto-heal cannot recover it, so Refresh will skip + warn this file
+// silently forever); a WARN when the body is still byte-identical to the
+// template (auto-heal can restore the markers losslessly — worth surfacing, not
+// blocking). `SELF_HOSTED_TEMPLATE_NAMES` excludes the #564 CI-review-stack
+// templates in THIS repo only: minspec authors those files directly (never
+// marker-wrapped here) and gates their freshness via Rule 12 above instead.
+try {
+  for (const v of checkManagedRegionMarkers(ROOT, detectTools(ROOT), {
+    exclude: SELF_HOSTED_TEMPLATE_NAMES,
+  })) {
+    if (v.severity === 'error') {
+      fail(join(ROOT, v.outputPath), v.message);
+    } else {
+      warn(`${v.outputPath}: ${v.message}`);
+    }
+  }
+} catch {
+  // scaffold/tool-detector unavailable — nothing to check, stay silent.
+}
+
+// Rule 23 (#1912): the `status:` frontmatter line carries a value and nothing
 // else (the #1900 convention). `validateStatusAnnotation` is the SAME function the
 // in-extension approve gate (`validateSpec`) calls — enforced identically on the
 // commit/CI surface, never a reimplementation that could drift (the #654 lesson).
@@ -667,16 +701,17 @@ try {
 // silence, and a file the rule could not run on is REPORTED at the configured severity.
 // DELIBERATELY NOT `safeGlob` — audit the feeder, not just a rule's own catch (#1999).
 // This rule USED TO call `safeGlob`, and that made the per-file catch below unreachable
-// for any error raised while BUILDING the list: `safeGlob` converts a failure anywhere
-// in its recursive walk into an empty list, so one unreadable directory under `specs/`
-// handed this loop zero files and the catch never fired. Measured before the change:
-// 2 findings on a clean tree, 0 with a single unreadable subdirectory, and
+// for any error raised while BUILDING the list: `safeGlob` then converted a failure
+// anywhere in its recursive walk into an empty list, so one unreadable directory under
+// `specs/` handed this loop zero files and the catch never fired. Measured before the
+// change: 2 findings on a clean tree, 0 with a single unreadable subdirectory, and
 // `Frontmatter validation passed.` printed both times.
 //
 // So the throwing `glob` is used directly and the two cases are separated by hand:
-// an absent `specs/` is the only silence, and a walk that throws is REPORTED. Fixing
-// `safeGlob` itself belongs to #1999 / PR #2005, not here; written this way, Rule 20 is
-// correct under either version of it and needs no rebase when that lands.
+// an absent `specs/` is the only silence, and a walk that throws is REPORTED. `safeGlob`
+// itself has since been fixed (#1999 / PR #2005: it now tolerates only an absent root),
+// so either walker would be correct here today. The explicit form is kept because it
+// says which case is silent at the point of use.
 // No try here on purpose: `loadConfig` is total (config.ts catches its own read/parse
 // and returns DEFAULT_CONFIG), so a guard would be an unreachable branch pretending to
 // cover something. That totality hides a separate, PRE-EXISTING downgrade — a corrupt
@@ -689,7 +724,7 @@ if (existsSync(specsDir)) {
   try {
     annFiles = glob(specsDir, '.md');
   } catch (error) {
-    const why = `the specs corpus could not be listed (${(error as Error).message}) — Rule 20 validated NOTHING this run; do not read the green as a clean corpus.`;
+    const why = `the specs corpus could not be listed (${(error as Error).message}) — Rule 23 validated NOTHING this run; do not read the green as a clean corpus.`;
     if (annFailsClosed) fail(specsDir, why);
     else warn(`status-annotation: ${why}`);
   }
@@ -712,33 +747,6 @@ for (const file of annFiles) {
     if (v.severity === 'error') fail(file, `${v.message} ${v.fixHint}`);
     else warn(`status-annotation ${relative(ROOT, file)}: ${v.message}`);
   }
-}
-
-// Rule 14 (harden, #760): every MANAGED_REGION_TEMPLATES output path present on
-// disk must carry valid MinSpec markers. `refreshManagedRegionTemplates`
-// (scaffold.ts) already DETECTS a marker-less managed file — but only when a
-// human happens to run "MinSpec: Refresh Harness Files"; until then the file is
-// fully committable. Root-caused via a scrooge port (#48/#760): two CI-review
-// files were hand-ported without markers, one then diverged locally, and both
-// stayed merged, unnoticed, across several commits. FATAL when the body has
-// diverged (auto-heal cannot recover it, so Refresh will skip + warn this file
-// silently forever); a WARN when the body is still byte-identical to the
-// template (auto-heal can restore the markers losslessly — worth surfacing, not
-// blocking). `SELF_HOSTED_TEMPLATE_NAMES` excludes the #564 CI-review-stack
-// templates in THIS repo only: minspec authors those files directly (never
-// marker-wrapped here) and gates their freshness via Rule 12 above instead.
-try {
-  for (const v of checkManagedRegionMarkers(ROOT, detectTools(ROOT), {
-    exclude: SELF_HOSTED_TEMPLATE_NAMES,
-  })) {
-    if (v.severity === 'error') {
-      fail(join(ROOT, v.outputPath), v.message);
-    } else {
-      warn(`${v.outputPath}: ${v.message}`);
-    }
-  }
-} catch {
-  // scaffold/tool-detector unavailable — nothing to check, stay silent.
 }
 
 // Rule 19 (FATAL, #1683, DR-087): three integrity words are forbidden claims.
@@ -843,6 +851,78 @@ try {
     `claim-word check could not run (${err instanceof Error ? err.message : String(err)}) — ` +
       'Rule 19 validated NOTHING this run; do not read the green as a clean corpus.',
   );
+}
+
+// Rule 20 (non-fatal, #2467): a decision or epic record carrying TWO
+// frontmatter-shaped `---` blocks back to back. This is the shape
+// `setAdrStatus` (adr-manager.ts:711-717) produces when handed a record whose
+// EXISTING block it could not parse: it synthesizes a fresh LF block and
+// prepends it, leaving the original block as body text immediately below,
+// stale `status:` line and all — four `---` lines and two `status:` lines in
+// one record. Nothing downstream notices: `listAdrs` reads only the FIRST
+// block (adr-manager.ts:1308-1336), and the status-parity rule (Rule 11 above)
+// compares frontmatter against a `## Status` section or a head blockquote — a
+// stray body `status:` line is neither. The CRLF parsing fix (SPEC-095, #2397)
+// stops new damage; this is the backstop for a file already damaged, which
+// nothing else finds or repairs. WARN only (Low severity, #2467): the damage is
+// visible in a diff, and whether any real project carries such a file is
+// unverified.
+try {
+  const doubledFmRoots: { dir: string; label: string }[] = [
+    { dir: resolveDecisionsDir(), label: 'decision' },
+    { dir: join(ROOT, 'docs', 'epics'), label: 'epic' },
+  ];
+  for (const { dir, label } of doubledFmRoots) {
+    for (const file of safeGlob(dir, '.md')) {
+      const finding = detectDoubledFrontmatter(readFileSync(file, 'utf-8'));
+      if (finding) {
+        warn(
+          `doubled-frontmatter ${relative(ROOT, file)}: this ${label} record carries TWO ` +
+            `frontmatter-shaped blocks — the first closes at line ${finding.firstBlockEndLine}, ` +
+            `and a second \`---\` block opens again immediately at line ${finding.secondBlockStartLine} ` +
+            `(#2467). Likely a synthesized block prepended ahead of the original. Merge the two ` +
+            `into one frontmatter block (keep the correct \`status:\`) and remove the stale duplicate.`,
+        );
+      }
+    }
+  }
+} catch {
+  // decisions/epics dir unreadable / absent — nothing to check, stay silent.
+}
+
+// Rule 21 (non-fatal, #2467): a generated harness file (CLAUDE.md, AGENTS.md,
+// .cursorrules, .minspec/constitution.md, labels.md) in which a TEMPLATE
+// heading occurs twice — the shape `refreshHarnessFiles` → `mergeFile`
+// (merge-refresh.ts:986-990) produces on a CRLF-damaged existing file: every
+// `##` heading gets appended a second time rather than merged. Measured
+// (#2467): a CRLF copy of CLAUDE.md went 418→835 lines (12→24 headings);
+// `.minspec/constitution.md` went 4→8. The harness merge keeps a surplus
+// duplicate-named section as user content BY DESIGN (merge-refresh.ts:993-1005),
+// so a later Refresh leaves a doubled file doubled forever — nothing else in
+// the pipeline notices. WARN only (Low severity, #2467).
+try {
+  const harnessConfig = loadConfig(ROOT);
+  const harnessContext = buildContext(ROOT, harnessConfig);
+  for (const name of TEMPLATE_NAMES) {
+    const outputPath = join(ROOT, TEMPLATE_OUTPUT_PATHS[name]);
+    if (!existsSync(outputPath)) continue;
+    const templateHeadings = parseSections(renderTemplate(name, harnessContext))
+      .map((s) => s.heading)
+      .filter((h) => h !== PREAMBLE_HEADING);
+    const existingContent = readFileSync(outputPath, 'utf-8');
+    const doubled = detectDoubledTemplateHeadings(existingContent, templateHeadings);
+    if (doubled.length > 0) {
+      const shown = doubled.slice(0, 5).join(', ');
+      const more = doubled.length > 5 ? ` (+${doubled.length - 5} more)` : '';
+      warn(
+        `doubled-sections ${relative(ROOT, outputPath)}: ${doubled.length} template heading(s) ` +
+          `appear twice — ${shown}${more} (#2467; likely a CRLF-damaged Refresh, see SPEC-095). ` +
+          `Each doubled section must be reconciled by hand: decide which copy is current and delete the other.`,
+      );
+    }
+  }
+} catch {
+  // Template rendering / harness files unreadable — nothing to check, stay silent.
 }
 
 checkCiReviewTemplatesFresh().then(() => {

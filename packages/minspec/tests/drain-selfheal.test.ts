@@ -92,6 +92,30 @@ describe('drain-inbox.sh: run dir self-heals past a STALE primary (#773 function
     }).trim();
     expect(out).toBe('in-place');
   });
+
+  it('MINSPEC_DRAIN_RUN_DIR="" (explicitly empty) is honoured, not silently defaulted (#2238)', () => {
+    // Regression for #2238: `${MINSPEC_DRAIN_RUN_DIR:-/tmp/minspec-drain-run}` treats
+    // an EMPTY value the same as an UNSET one, so a caller that sets
+    // MINSPEC_DRAIN_RUN_DIR="" (drain-concurrency.test.ts did, to mean "no run dir")
+    // silently fell back to /tmp/minspec-drain-run — which, on a machine running a
+    // real drain, IS that live drain's run dir. ensure_fresh_run_dir would then
+    // `git reset --hard origin/main` it out from under the live process.
+    //
+    // Deliberately does NOT reproduce the pre-fix failure for real: with the bug
+    // present this exact env would resolve to /tmp/minspec-drain-run and, on any
+    // machine where that path is a live drain's worktree (the founder's machine most
+    // of the day, and this repo's own dev containers), `git reset --hard` it — i.e.
+    // proving "base red" here would BE the incident. Only the fixed, safe behaviour
+    // is asserted: DRAIN_RUN_DIR stays empty, self-refresh disables itself, and the
+    // WARNING line's claim ("self-refresh disabled") is actually true.
+    const res = spawnSync('bash', [DRAIN, '--refresh-run-dir'], {
+      encoding: 'utf-8',
+      env: { ...process.env, MINSPEC_DRAIN_RUN_DIR: '' },
+    });
+    expect(res.status).toBe(0);
+    expect(res.stdout.trim()).toBe('in-place');
+    expect(res.stderr).toContain('MINSPEC_DRAIN_RUN_DIR is empty — self-refresh disabled, running in place.');
+  });
 });
 
 describe('drain-inbox.sh: the terminal "die on stale" path is gone (#773)', () => {

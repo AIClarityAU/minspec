@@ -7,7 +7,7 @@ type: requirements
 # exactly those two from the hash); never hand-write either. Every OTHER frontmatter field —
 # including `implements:`/`affects:` below — IS hashed, so adding one after approval voids the
 # signature (SPEC-051's recorded trap). They are therefore declared NOW, before any approval.
-status: specifying
+status: planning
 tier: T4
 product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain — same epic as DR-081, the accepted decision this contracts
@@ -23,9 +23,9 @@ implements: [.github/workflows/approval-integrity.yml, .github/scripts/approval-
 # in the corpus — this spec edits them without claiming them.
 affects: [.github/workflows/ai-review.yml, .github/workflows/ready-to-merge.yml, .github/workflows/ci.yml, .github/scripts/ai-review-guard.js, scripts/approval-provenance.py]
 phases:
-  specify: in-progress
-  clarify: pending
-  plan: pending
+  specify: done
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

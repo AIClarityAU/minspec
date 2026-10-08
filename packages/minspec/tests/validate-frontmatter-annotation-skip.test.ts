@@ -3,7 +3,7 @@
  *
  * Constitution invariant 2 says a merge-gating check "fails visibly, never
  * best-effort", and that "a missing or errored witness fails the gate closed and
- * visibly (never silently passes or stops evaluating)". The first cut of Rule 20
+ * visibly (never silently passes or stops evaluating)". The first cut of Rule 23
  * wrapped its whole sweep in one bare `try { … } catch {}`, so a single unreadable
  * spec aborted the loop and every REMAINING spec went unchecked with nothing said.
  *
@@ -89,7 +89,7 @@ function withTmp(fn: (dir: string) => void): void {
   }
 }
 
-describe('#1912 Rule 20 — no silent skip (constitution invariant 2)', () => {
+describe('#1912 Rule 23 — no silent skip (constitution invariant 2)', () => {
   // The control. Without it, every assertion below could be satisfied by a rule that
   // scanned nothing at all — "found no violations" and "never looked" print alike.
   it('reports the violation when every spec is readable', () => {
@@ -144,8 +144,9 @@ describe('#1912 Rule 20 — no silent skip (constitution invariant 2)', () => {
     });
   });
   // The per-file catch above is unreachable for a failure that happens while BUILDING
-  // the file list. `safeGlob` turns any error in the recursive walk into an empty list,
-  // so one unreadable directory used to hand the loop zero files and nothing was said.
+  // the file list. `safeGlob` turned any error in the recursive walk into an empty list
+  // (until #1999 / PR #2005), so one unreadable directory used to hand the loop zero
+  // files and nothing was said.
   // Measured before the fix: 2 findings clean, 0 with one unreadable subdirectory,
   // "Frontmatter validation passed." both times (#1999).
   it('announces a corpus it could not even list, rather than scanning zero files quietly', () => {
@@ -155,7 +156,7 @@ describe('#1912 Rule 20 — no silent skip (constitution invariant 2)', () => {
       makeUnreadable(path.join(dir, 'specs', 'locked'));
       try {
         const { output } = runValidate(dir);
-        expect(output).toContain('Rule 20 validated NOTHING this run');
+        expect(output).toContain('Rule 23 validated NOTHING this run');
       } finally {
         fs.chmodSync(path.join(dir, 'specs', 'locked'), 0o755);
       }
@@ -175,7 +176,7 @@ describe('#1912 Rule 20 — no silent skip (constitution invariant 2)', () => {
       makeUnreadable(path.join(dir, 'specs', 'locked'));
       try {
         const { status, output } = runValidate(dir);
-        expect(output).toContain('Rule 20 validated NOTHING this run');
+        expect(output).toContain('Rule 23 validated NOTHING this run');
         expect(status).not.toBe(0);
       } finally {
         fs.chmodSync(path.join(dir, 'specs', 'locked'), 0o755);

@@ -36,15 +36,34 @@
  *          keep testing the pure fail-closed invariant in isolation from this
  *          carve-out; the "bootstrap allowance" describe block below tests INV-E
  *          on its own, at the real default.
+ *   INV-F  the verdicts here depend on what each test sets and on nothing else: the
+ *          helpers start from an environment with every MINSPEC_QUOTA_* and
+ *          MINSPEC_DRAIN_* knob removed, and the whole file runs with hostile values
+ *          for those knobs in the surrounding environment, so a leak fails here
+ *          rather than in the next agent a capped drain dispatches (#2574).
+ *
+ * THIS FILE TESTS THE FIXED CAPS. Since #2514 an unset cap is a ramp, which has its own
+ * table in drain-quota-ramp.test.ts. A cap that IS set must keep meaning exactly what it
+ * meant, and the live drain depends on that (it is paused with
+ * MINSPEC_QUOTA_ADMIT_PCT_7D=0). So the helpers below pin both caps to the values that
+ * were the defaults when these tests were written, 90 and 95, and not one assertion in
+ * the file moved when the default did.
  */
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { execFileSync } from 'child_process';
+import { drainBaseEnv, useHostileAmbientDrainKnobs, HOSTILE_AMBIENT_KNOBS } from './helpers/drain-env';
+
+// Module scope, like useShellTimeout: every test below runs with the leak primed (#2574).
+useHostileAmbientDrainKnobs();
 
 const DRAIN = path.resolve(__dirname, '../../../scripts/drain-inbox.sh');
 const nowSec = () => Math.floor(Date.now() / 1000);
+
+/** The caps this file's verdicts were written against: the pre-#2514 defaults, now explicit. */
+const FIXED_CAPS = { MINSPEC_QUOTA_ADMIT_PCT: '90', MINSPEC_QUOTA_ADMIT_PCT_7D: '95' };
 
 let tmpDir: string;
 let quotaFile: string;
@@ -59,7 +78,8 @@ function run(args: string[], env: Record<string, string> = {}): { code: number; 
   try {
     const out = execFileSync('bash', [DRAIN, ...args], {
       encoding: 'utf-8',
-      env: { ...process.env, MINSPEC_QUOTA_FILE: quotaFile,
+      // drainBaseEnv(), never process.env: INV-F above (#2574).
+      env: { ...drainBaseEnv(), MINSPEC_QUOTA_FILE: quotaFile,
         // Refreshing the reading before consulting it (#1859) is the PRODUCER's
         // job; this file tests the GATE. Left on, it would break INV-C above
         // ("the gate needs no network") and the stale-reading tests would never
@@ -68,7 +88,7 @@ function run(args: string[], env: Record<string, string> = {}): { code: number; 
         // whether the real producer happened to succeed. Pinned off for the same
         // reason MINSPEC_QUOTA_BOOTSTRAP_ADMITS is pinned to 0: one behaviour per
         // file. The refresh seam is tested in drain-quota-refresh.test.ts.
-        MINSPEC_QUOTA_REFRESH: '0', ...env },
+        MINSPEC_QUOTA_REFRESH: '0', ...FIXED_CAPS, ...env },
     });
     return { code: 0, out: out.trim() };
   } catch (e: any) {
@@ -250,7 +270,8 @@ describe('drain-inbox.sh --quota-publish-wall — the reactive producer', () => 
     try {
       const out = execFileSync('bash', [DRAIN, '--quota-publish-wall'], {
         input: text, encoding: 'utf-8',
-        env: { ...process.env, MINSPEC_QUOTA_FILE: quotaFile,
+        // drainBaseEnv(), never process.env: INV-F at the top of this file (#2574).
+        env: { ...drainBaseEnv(), MINSPEC_QUOTA_FILE: quotaFile,
         // Refreshing the reading before consulting it (#1859) is the PRODUCER's
         // job; this file tests the GATE. Left on, it would break INV-C above
         // ("the gate needs no network") and the stale-reading tests would never
@@ -259,7 +280,7 @@ describe('drain-inbox.sh --quota-publish-wall — the reactive producer', () => 
         // whether the real producer happened to succeed. Pinned off for the same
         // reason MINSPEC_QUOTA_BOOTSTRAP_ADMITS is pinned to 0: one behaviour per
         // file. The refresh seam is tested in drain-quota-refresh.test.ts.
-        MINSPEC_QUOTA_REFRESH: '0', ...env },
+        MINSPEC_QUOTA_REFRESH: '0', ...FIXED_CAPS, ...env },
       });
       return { code: 0, out: out.trim() };
     } catch (e: any) {
@@ -471,13 +492,28 @@ describe('drain-inbox.sh --quota-gate — the WEEKLY ceiling, which the 5h readi
     expect(run(['--quota-gate']).code).toBe(42);
   });
 
-  it('the weekly bar is separately tunable and defaults looser than the 5h bar', () => {
-    // A 5h window reopens in hours; a weekly one can be days out, so blocking on it
-    // is far more expensive and the default bar is deliberately higher.
+  it('the weekly bar is separately tunable, and is its own number, not the 5h bar', () => {
+    // 92% is over this file's 5h cap (90) and under its weekly cap (95): the weekly
+    // window is judged against the weekly cap. Lowering that cap flips the verdict.
     write7({ used_percentage: 10, resets_at: nowSec() + 3600,
              seven_day_percentage: 92, seven_day_resets_at: nowSec() + 313800 });
-    expect(run(['--quota-gate']).code).toBe(0);                                    // 92 < 95 default
+    expect(run(['--quota-gate']).code).toBe(0);                                    // 92 < 95
     expect(run(['--quota-gate'], { MINSPEC_QUOTA_ADMIT_PCT_7D: '90' }).code).toBe(42);
+  });
+
+  it('a weekly cap of 0 holds everything, even a 0% reading: the pause the live drain relies on', () => {
+    // The drain is paused by starting it with MINSPEC_QUOTA_ADMIT_PCT_7D=0, and that
+    // only works because "at or above the cap" includes 0 at a cap of 0. A change that
+    // read 0 as "unset", or compared with > instead of >=, would silently un-pause it.
+    write7({ used_percentage: 0, resets_at: nowSec() + 3600,
+             seven_day_percentage: 0, seven_day_resets_at: nowSec() + 200000 });
+    const r = run(['--quota-gate'], { MINSPEC_QUOTA_ADMIT_PCT_7D: '0' });
+    expect(r.code).toBe(42);
+    expect(r.out).toMatch(/^defer:\d+ \(7d window 0% used/);
+    expect(r.out).toMatch(/WEEKLY/);
+    // CONTROL: the same reading under a cap it is below is admitted, so it is the cap
+    // of 0 that held it and not something else about the reading.
+    expect(run(['--quota-gate'], { MINSPEC_QUOTA_ADMIT_PCT_7D: '1' }).code).toBe(0);
   });
 
   it('a weekly ceiling with no usable reset still defers, bounded by the clamp', () => {
@@ -547,5 +583,192 @@ describe('T3 regression — the weekly ceiling must outrank the 5h window-reset'
     // 135s the 5h reset would give. A `> 120` assertion would pass on that 135 and
     // prove nothing, which is how this test first went green while still broken.
     expect(secs).toBe(6 * 3600);
+  });
+});
+
+describe('T3 regression (#2233): a text-only signal that a fresh meter contradicts does not sleep to the reset', () => {
+  // Measured 2026-09-30. A false match on the word "quota" (19:03) paused the drain; the
+  // last in-flight build finished at 19:15:54, and the drain then slept 17061s "to the
+  // published reset". The reading beside that reset said 5h 0% / 7d 26%, observed 861s
+  // earlier: 39s inside the 900s freshness limit, so quota_sleep_secs believed its
+  // resets_at and never looked at the percentage next to it.
+  //
+  // `--quota-signal-sleep [<streak>]` is the pure seam for the rest the loop takes after a
+  // TEXT signal: "<secs> <verdict> <meter says>". The verdict is `contradicted` (a fresh
+  // reading shows room in every window: short backoff), `confirmed` (the meter agrees or
+  // cannot speak: today's sleep, fail closed) or `overruled` (the meter contradicted the
+  // previous signal too, so it is not seeing whatever is binding: fail closed).
+  const sig = (env: Record<string, string> = {}, streak?: number) => {
+    const r = run(streak === undefined ? ['--quota-signal-sleep'] : ['--quota-signal-sleep', String(streak)], env);
+    const [secs, verdict] = r.out.split(/\s+/);
+    return { code: r.code, secs: Number(secs), verdict, out: r.out };
+  };
+  const write7 = (q: Record<string, number>) =>
+    fs.writeFileSync(quotaFile, JSON.stringify({ observed_at: nowSec(), ...q }));
+
+  it('the measured case: fresh 5h 0% / 7d 26%, reset 17061s out, gets the SHORT backoff and names the reading', () => {
+    write7({
+      used_percentage: 0, resets_at: nowSec() + 17061, observed_at: nowSec() - 861,
+      seven_day_percentage: 26, seven_day_resets_at: nowSec() + 400000,
+    });
+    const r = sig();
+    expect(r.code).toBe(0);
+    expect(r.verdict).toBe('contradicted');
+    expect(r.secs).toBe(60);
+    expect(r.out).toMatch(/0% of the 5h window used/);
+  });
+
+  it('CONTROL: the same signal with the 5h window at 95% still sleeps to the published reset', () => {
+    write({ used_percentage: 95, resets_at: nowSec() + 600 });
+    const r = sig();
+    expect(r.verdict).toBe('confirmed');
+    expect(r.secs).toBeGreaterThanOrEqual(600);
+    expect(r.secs).toBeLessThan(900);
+  });
+
+  it('a STALE reading cannot contradict anything: the fixed backoff, exactly as before (fail closed)', () => {
+    write({ used_percentage: 0, resets_at: nowSec() + 17000, observed_at: nowSec() - 901 });
+    const r = sig({ MINSPEC_DRAIN_QUOTA_BACKOFF: '1800' });
+    expect(r.verdict).toBe('confirmed');
+    expect(r.secs).toBe(1800);
+    expect(r.out).toMatch(/stale/);
+  });
+
+  it('NO reading cannot contradict anything either, and spends no bootstrap admit finding that out', () => {
+    const r = sig({ MINSPEC_DRAIN_QUOTA_BACKOFF: '1800' });
+    expect(r.verdict).toBe('confirmed');
+    expect(r.secs).toBe(1800);
+    expect(fs.existsSync(`${quotaFile}.bootstrap`)).toBe(false);
+  });
+
+  it('a WEEKLY window at its bar is not headroom, even with the 5h window empty', () => {
+    write7({
+      used_percentage: 0, resets_at: nowSec() + 3600,
+      seven_day_percentage: 97, seven_day_resets_at: nowSec() + 200000,
+    });
+    const r = sig();
+    expect(r.verdict).toBe('confirmed');
+    expect(r.secs).toBe(6 * 3600);
+  });
+
+  it('a meter that already contradicted the previous signal is overruled: fail closed to the published reset', () => {
+    // A cap the meter cannot see (a per-model limit, say) produces a signal on every
+    // launch while the meter keeps reading low. Believing it every time would strand one
+    // issue per probe, so the veto is spent after MINSPEC_QUOTA_CONTRADICT_MAX in a row.
+    write({ used_percentage: 0, resets_at: nowSec() + 3000 });
+    expect(sig({}, 0).verdict).toBe('contradicted');
+    const r = sig({}, 1);
+    expect(r.verdict).toBe('overruled');
+    expect(r.secs).toBeGreaterThanOrEqual(3000);
+    expect(r.secs).toBeLessThan(3300);
+  });
+
+  it('MINSPEC_QUOTA_CONTRADICT_MAX=0 turns the veto off (every signal fails closed, the pre-#2233 behaviour)', () => {
+    write({ used_percentage: 0, resets_at: nowSec() + 3000 });
+    const r = sig({ MINSPEC_QUOTA_CONTRADICT_MAX: '0' });
+    expect(r.verdict).toBe('overruled');
+    expect(r.secs).toBeGreaterThanOrEqual(3000);
+  });
+
+  it('the short backoff is tunable, and clamped so it can never spin', () => {
+    write({ used_percentage: 0, resets_at: nowSec() + 3000 });
+    expect(sig({ MINSPEC_QUOTA_CONTRADICTED_BACKOFF: '300' }).secs).toBe(300);
+    expect(sig({ MINSPEC_QUOTA_CONTRADICTED_BACKOFF: '0' }).secs).toBe(60);
+  });
+
+  it('always leads with a bare integer, because the loop feeds it to sleep', () => {
+    write({ used_percentage: 0, resets_at: nowSec() + 3000 });
+    expect(run(['--quota-signal-sleep']).out).toMatch(/^\d+ contradicted /);
+    expect(run(['--quota-signal-sleep'], { MINSPEC_QUOTA_FILE: '/nonexistent/x.json' }).out).toMatch(/^\d+ confirmed /);
+  });
+
+  it('T0: the meter contradicts a signal IF AND ONLY IF the admission gate would admit on the same reading', () => {
+    // One predicate, two consumers: the veto is quota_gate's own verdict, not a copy of
+    // its rules that could drift from them. Walk readings on both sides of every bar.
+    const readings: Array<Record<string, number> | null> = [
+      { used_percentage: 0, resets_at: nowSec() + 3600 },
+      { used_percentage: 89, resets_at: nowSec() + 3600 },
+      { used_percentage: 90, resets_at: nowSec() + 3600 },
+      { used_percentage: 100, resets_at: nowSec() - 60 },
+      { used_percentage: 0, resets_at: nowSec() + 3600, observed_at: nowSec() - 901 },
+      { used_percentage: 0, resets_at: nowSec() + 3600, seven_day_percentage: 94, seven_day_resets_at: nowSec() + 100000 },
+      { used_percentage: 0, resets_at: nowSec() + 3600, seven_day_percentage: 95, seven_day_resets_at: nowSec() + 100000 },
+      { used_percentage: 5, resets_at: nowSec() - 60, seven_day_percentage: 99, seven_day_resets_at: nowSec() + 200000 },
+      null,
+    ];
+    let contradicted = 0;
+    for (const q of readings) {
+      fs.rmSync(quotaFile, { force: true });
+      if (q) write7(q);
+      const admits = run(['--quota-gate'], { MINSPEC_QUOTA_BOOTSTRAP_ADMITS: '0' }).code === 0;
+      const verdict = sig().verdict;
+      expect(verdict === 'contradicted', `reading ${JSON.stringify(q)}: gate admits=${admits}, veto=${verdict}`).toBe(admits);
+      if (admits) contradicted++;
+    }
+    // Both sides of the equivalence were exercised, so it cannot hold vacuously.
+    expect(contradicted).toBeGreaterThan(0);
+    expect(contradicted).toBeLessThan(readings.length);
+  });
+});
+
+describe('T3 regression (#2574): knobs in the surrounding environment never reach the gate under test', () => {
+  // Every test above already ran with both cap knobs set to 0 in the surrounding
+  // environment (useHostileAmbientDrainKnobs at the top of this file), which is the
+  // requirement: with the caps set around it, no verdict in this file changes. These
+  // three make that arrangement checkable, so it cannot quietly become a no-op.
+  const raw = (env: NodeJS.ProcessEnv): { code: number; out: string } => {
+    try {
+      const out = execFileSync('bash', [DRAIN, '--quota-gate'], { encoding: 'utf-8', env, stdio: 'pipe' });
+      return { code: 0, out: out.trim() };
+    } catch (e: any) {
+      return { code: e.status ?? 1, out: ((e.stdout ?? '') as string).trim() };
+    }
+  };
+
+  it('the surrounding environment really does carry both cap knobs while this file runs', () => {
+    expect(process.env.MINSPEC_QUOTA_ADMIT_PCT).toBe(HOSTILE_AMBIENT_KNOBS.MINSPEC_QUOTA_ADMIT_PCT);
+    expect(process.env.MINSPEC_QUOTA_ADMIT_PCT_7D).toBe(HOSTILE_AMBIENT_KNOBS.MINSPEC_QUOTA_ADMIT_PCT_7D);
+    expect(process.env.MINSPEC_QUOTA_ADMIT_PCT_7D).toBe('0');
+  });
+
+  it('CONTROL: handed that environment as it stands, the gate gives a different verdict (the leak is real)', () => {
+    // The pre-fix helper, reduced to its shape: `{ ...process.env, <pins> }`. On a
+    // reading the gate admits by default, the ambient cap of 0 defers it. If this
+    // ever admits, the hostile knobs have stopped being hostile and the tests above
+    // are proving nothing.
+    fs.writeFileSync(quotaFile, JSON.stringify({
+      observed_at: nowSec(), used_percentage: 30, resets_at: nowSec() + 3600,
+      seven_day_percentage: 61, seven_day_resets_at: nowSec() + 313800,
+    }));
+    // Staleness is pinned so that the ambient cap, and nothing else that is hostile
+    // out there, is what decides.
+    const leaky = { ...process.env, MINSPEC_QUOTA_FILE: quotaFile, MINSPEC_QUOTA_REFRESH: '0', MINSPEC_QUOTA_STALE_SEC: '900' };
+    const leaked = raw(leaky);
+    expect(leaked.code).toBe(42);
+    expect(leaked.out).toMatch(/^defer:\d+ \(7d window 61% used/);
+    // The same reading through this file's helper: admitted, as the weekly-ceiling
+    // block above asserts ("real observed state: 5h 30%, 7d 61%").
+    expect(run(['--quota-gate']).code).toBe(0);
+  });
+
+  it('the two tests #2574 named pass with the incident value, 60, in the surrounding environment', () => {
+    // 2026-10-03/04: the drain ran with MINSPEC_QUOTA_ADMIT_PCT_7D=60 and every agent
+    // it dispatched saw exactly two failures here, on a 61% and a 92% weekly reading.
+    const saved = process.env.MINSPEC_QUOTA_ADMIT_PCT_7D;
+    process.env.MINSPEC_QUOTA_ADMIT_PCT_7D = '60';
+    try {
+      const reading = (week: number) => fs.writeFileSync(quotaFile, JSON.stringify({
+        observed_at: nowSec(), used_percentage: 10, resets_at: nowSec() + 3600,
+        seven_day_percentage: week, seven_day_resets_at: nowSec() + 313800,
+      }));
+      reading(61);
+      expect(run(['--quota-gate']).code).toBe(0);
+      reading(92);
+      expect(run(['--quota-gate']).code).toBe(0);
+      // And 60 still means 60 when a test asks for it: the knob is not being ignored.
+      expect(run(['--quota-gate'], { MINSPEC_QUOTA_ADMIT_PCT_7D: '60' }).code).toBe(42);
+    } finally {
+      process.env.MINSPEC_QUOTA_ADMIT_PCT_7D = saved;
+    }
   });
 });
