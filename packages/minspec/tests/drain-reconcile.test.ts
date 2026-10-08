@@ -172,6 +172,75 @@ function ghCalls(): string {
   return fs.existsSync(f) ? fs.readFileSync(f, 'utf-8') : '';
 }
 
+/**
+ * A stricter `gh` stub for #2002: unlike `stubGh` above (which pipes straight through
+ * `jq -r "$filter"` and so only emits a line for a page whose filter actually matches
+ * something), this one models the mechanism the issue itself measured against
+ * api.github.com — `gh api --paginate --jq F` prints exactly ONE line per page, always,
+ * even when F resolves to nothing on that page (a blank line). That is the specific
+ * condition the old `claim_applied_at` needed to be correct: with `| tail -1` picking
+ * literally the last LINE of combined output, a blank line contributed by a
+ * non-matching LAST page overwrites a real match sitting on an earlier page. Only
+ * `claim_applied_at`'s OLD shape (pre-#2002) ever sent `--jq` on this endpoint, so this
+ * stub exists solely to pin that historical defect — the fixed function fetches raw and
+ * reduces locally, so nothing production-relevant exercises the `--jq` branch below
+ * going forward.
+ */
+function stubGhOneLinePerPage(
+  responses: Record<string, string>,
+  pages: Record<string, unknown>[][],
+): string {
+  const bin = path.join(tmp, 'bin-oneperpage');
+  fs.mkdirSync(bin, { recursive: true });
+  const table = path.join(tmp, 'oneperpage-responses.json');
+  fs.writeFileSync(table, JSON.stringify(responses), 'utf-8');
+  const pagesFile = path.join(tmp, 'oneperpage-pages.json');
+  fs.writeFileSync(pagesFile, JSON.stringify(pages), 'utf-8');
+  const gh = path.join(bin, 'gh');
+  fs.writeFileSync(
+    gh,
+    `#!/usr/bin/env bash\n` +
+      `printf '%s\\n' "$*" >> ${JSON.stringify(path.join(tmp, 'gh-calls.log'))}\n` +
+      `if [[ "$*" == *timeline* ]]; then\n` +
+      `  filter=""; has_jq=0; prev=""\n` +
+      `  for a in "$@"; do [[ "$prev" == "--jq" ]] && { filter="$a"; has_jq=1; }; prev="$a"; done\n` +
+      `  n=$(jq 'length' ${JSON.stringify(pagesFile)}); i=0\n` +
+      `  while [[ $i -lt $n ]]; do\n` +
+      `    if [[ $has_jq -eq 1 ]]; then\n` +
+      `      out=$(jq -c ".[$i]" ${JSON.stringify(pagesFile)} | jq -r "$filter" 2>/dev/null)\n` +
+      `      printf '%s\\n' "$out"\n` +   // ALWAYS one line per page under this model, blank included
+      `    else\n` +
+      `      jq -c ".[$i]" ${JSON.stringify(pagesFile)}\n` +   // raw fetch (no --jq): print each page's array, caller flattens
+      `    fi\n` +
+      `    i=$((i+1))\n` +
+      `  done\n` +
+      `  exit 0\n` +
+      `fi\n` +
+      `key=""\n` +
+      `case "$*" in\n` +
+      `  *"--label agent-running"*) key=running ;;\n` +
+      `esac\n` +
+      `[[ -n "$key" ]] && node -e 'const t=require(process.argv[1]);process.stdout.write(t[process.argv[2]]??"")' ${JSON.stringify(table)} "$key"\n` +
+      `exit 0\n`,
+    { mode: 0o755 },
+  );
+  return bin;
+}
+
+function runReconcileStaleWithOneLinePerPageStub(
+  responses: Record<string, string>,
+  pages: Record<string, unknown>[][],
+): string {
+  const bin = stubGhOneLinePerPage(responses, pages);
+  const script = ['set -uo pipefail', 'REPO=owner/repo', reconcilerBlock(), 'reconcile_stale_claims'].join(
+    '\n',
+  );
+  return execFileSync('bash', ['-c', script], {
+    encoding: 'utf-8',
+    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+  });
+}
+
 describe('#1306 — orphaned agent-running claims are released', () => {
   it('does NOT reap a claim while a dispatch for that issue is alive', () => {
     // A real process whose argv looks like the dispatcher's.
@@ -215,6 +284,59 @@ describe('#1306 — orphaned agent-running claims are released', () => {
     const out = runReconciler('reconcile_stale_claims', { running: '4242\n' });
     expect(out).toContain('leaving it alone');
     expect(ghCalls()).not.toContain('--remove-label agent-running');
+  });
+});
+
+describe('#2002 — claim_applied_at reduces the WHOLE timeline, not per page', () => {
+  // Same defect class as PR #1772's review, one function over: `gh api --paginate
+  // --jq F` applies F to EACH PAGE separately, and the old `| tail -1` guard took
+  // the LAST PAGE's output, not the page holding the last MATCH. Whenever the
+  // `agent-running` label event fell on an earlier page than the timeline's last
+  // page — the normal case once an issue has accumulated 30+ events since being
+  // claimed — the last page contributed nothing, `iso` came back blank, and the
+  // #1306 reaper silently declined to evaluate the claim at all.
+
+  it('releases a stale claim whose label event is on an EARLIER page than the last', () => {
+    const out = runReconciler('reconcile_stale_claims', { running: '733\n' }, [
+      [claimEvent('2020-01-01T00:00:00Z')], // page 1: the match, ancient -> stale
+      [ev('commented', '2020-02-01T00:00:00Z')], // page 2 (the LAST page): no match
+    ]);
+    expect(out).toContain('releasing orphaned agent-running on #733');
+    expect(ghCalls()).toContain('--remove-label agent-running');
+  });
+
+  it('regression control — still finds it when the label event IS on the last page', () => {
+    const out = runReconciler('reconcile_stale_claims', { running: '734\n' }, [
+      [ev('commented', '2020-01-01T00:00:00Z')],
+      [claimEvent('2020-02-01T00:00:00Z')],
+    ]);
+    expect(out).toContain('releasing orphaned agent-running on #734');
+  });
+
+  it('takes the LAST matching label event across pages, not the first', () => {
+    // A claim can be labeled, released, and re-labeled; only the most recent
+    // application should set the age used to judge staleness.
+    const nowIso = new Date().toISOString().replace(/\.\d+Z$/, 'Z');
+    const out = runReconciler('reconcile_stale_claims', { running: '735\n' }, [
+      [claimEvent('2020-01-01T00:00:00Z')], // stale, but superseded
+      [claimEvent(nowIso)], // the real, recent applied-at
+    ]);
+    expect(out).not.toContain('releasing orphaned');
+  });
+
+  it('pins the exact reported mechanism: a blank line from the non-matching LAST page must not overwrite an earlier real match', () => {
+    // Uses `stubGhOneLinePerPage`, not the shared `stubGh` — this models `gh`'s
+    // measured "one line per page, always" behaviour precisely (see that stub's
+    // comment). Under this model the OLD `| tail -1` reduction combines "T1" (page 1's
+    // match) with "" (page 2's blank, non-matching line) into "T1\n", and `tail -1`
+    // returns the trailing blank — exactly the failure #2002 reports. The fixed
+    // `claim_applied_at` no longer sends `--jq` at all, so it never sees this stub's
+    // per-page blank lines; it reduces the flattened, raw timeline once and finds "T1".
+    const out = runReconcileStaleWithOneLinePerPageStub({ running: '733\n' }, [
+      [claimEvent('2020-01-01T00:00:00Z')], // page 1: the match, ancient -> stale
+      [ev('commented', '2020-02-01T00:00:00Z')], // page 2 (the LAST page): no match
+    ]);
+    expect(out).toContain('releasing orphaned agent-running on #733');
   });
 });
 

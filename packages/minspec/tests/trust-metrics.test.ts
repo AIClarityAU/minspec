@@ -34,6 +34,9 @@ let tmp: string;
 
 beforeEach(() => {
   tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-trust-metrics-'));
+  // SPEC-096: an approval is recorded only in a folder that has opted in. The
+  // stores used to create `.minspec/` themselves; the fixture now says so.
+  fs.mkdirSync(path.join(tmp, '.minspec'));
 });
 afterEach(() => {
   fs.rmSync(tmp, { recursive: true, force: true });
@@ -317,6 +320,7 @@ describe('AC-3 — same delta via editor-style vs agent-style on-disk body → i
 
     // --- Editor-style write in repo A ---
     const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-ac3-A-'));
+    fs.mkdirSync(path.join(tmpA, '.minspec')); // SPEC-096: an opted-in folder
     try {
       execFileSync('git', ['init', '-b', 'main'], { cwd: tmpA, stdio: 'ignore' });
       execFileSync('git', ['config', 'user.email', 'test@minspec.test'], { cwd: tmpA, stdio: 'ignore' });
@@ -336,6 +340,7 @@ describe('AC-3 — same delta via editor-style vs agent-style on-disk body → i
 
       // --- Agent-style write in repo B (same content via write() fd) ---
       const tmpB = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-ac3-B-'));
+      fs.mkdirSync(path.join(tmpB, '.minspec')); // SPEC-096: an opted-in folder
       try {
         execFileSync('git', ['init', '-b', 'main'], { cwd: tmpB, stdio: 'ignore' });
         execFileSync('git', ['config', 'user.email', 'test@minspec.test'], { cwd: tmpB, stdio: 'ignore' });
@@ -379,6 +384,7 @@ describe('AC-3 — same delta via editor-style vs agent-style on-disk body → i
 
     // --- Direct write repo ---
     const tmpDirect = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-ac3-direct-'));
+    fs.mkdirSync(path.join(tmpDirect, '.minspec')); // SPEC-096: an opted-in folder
     try {
       execFileSync('git', ['init', '-b', 'main'], { cwd: tmpDirect, stdio: 'ignore' });
       execFileSync('git', ['config', 'user.email', 'test@minspec.test'], { cwd: tmpDirect, stdio: 'ignore' });
@@ -394,6 +400,7 @@ describe('AC-3 — same delta via editor-style vs agent-style on-disk body → i
 
       // --- Rename-into-place repo ---
       const tmpRename = fs.mkdtempSync(path.join(os.tmpdir(), 'minspec-ac3-rename-'));
+      fs.mkdirSync(path.join(tmpRename, '.minspec')); // SPEC-096: an opted-in folder
       try {
         execFileSync('git', ['init', '-b', 'main'], { cwd: tmpRename, stdio: 'ignore' });
         execFileSync('git', ['config', 'user.email', 'test@minspec.test'], { cwd: tmpRename, stdio: 'ignore' });

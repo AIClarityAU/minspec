@@ -4,7 +4,8 @@
  * Reads `.minspec/constitution.md` and decides whether it is empty / all-template
  * (only HTML comments + DRAFT scaffolding, no human-authored rule). Returns a
  * SOFT advisory descriptor (never throws, never blocks). The vscode toast lives
- * in the command layer (init.ts); this is the deterministic, unit-testable half.
+ * in `surfaceConstitutionProposeNudge` (extension.ts) — the single emitter since
+ * #1551; this module is the deterministic, unit-testable half it calls into.
  *
  * Note: a constitution holding ONLY MinSpec DRAFT seed entries still counts as
  * "empty" for the nudge — the human has authored nothing yet, so we still signpost
@@ -60,8 +61,10 @@ export const PROPOSE_LLM_COMMAND_ID = 'minspec.constitutionShowPrompt';
 
 /**
  * Is the constitution all-template — only comments and MinSpec DRAFT entries,
- * with no human-authored list item or prose line? Mirrors the constitution
- * parser's list extraction, then discards items that are MinSpec DRAFTs.
+ * with no human-authored (non-DRAFT) list item? Mirrors the constitution
+ * parser's list extraction, then discards items that are MinSpec DRAFTs. A
+ * hand-written paragraph with no list item does NOT flip this to human
+ * content — see `scanForHumanListItem`, which only recognizes list items.
  */
 export function isAllTemplate(content: string): boolean {
   if (!content || !content.trim()) return true;
@@ -73,20 +76,23 @@ export function isAllTemplate(content: string): boolean {
   const humanItems = allItems.filter((item) => !item.trimStart().startsWith('DRAFT:'));
   if (humanItems.length > 0) return false;
 
-  // No human list items. Also treat any non-comment, non-DRAFT prose under a
-  // section as human content (e.g. a hand-written paragraph rule).
-  const hasHumanProse = scanForHumanProse(content);
-  return !hasHumanProse;
+  // No human list items from the parser. Rescan the raw content for a
+  // non-DRAFT list item — note this does NOT detect a hand-written paragraph
+  // with no list marker; see `scanForHumanListItem` for why.
+  const hasHumanListItem = scanForHumanListItem(content);
+  return !hasHumanListItem;
 }
 
 /**
- * Scan section bodies for a human prose line: a non-empty line that is not a
- * heading, not an HTML comment, not a DRAFT list item, and not a provenance
- * blockquote. The constitution template's own descriptive sentences live
- * directly under each `##` heading, so we only treat content under a heading as
- * potential rules and ignore the standard template descriptions.
+ * Scan section bodies for a human (non-DRAFT) list item: a line matching the
+ * list-item grammar that is not a heading, not inside an HTML comment, not a
+ * DRAFT entry, and not a provenance blockquote. Plain prose lines — including
+ * a hand-written paragraph rule with no list marker — are NOT detected as
+ * human content: the constitution template's own descriptive sentences live
+ * as paragraphs directly under each `##` heading, and nothing here can tell a
+ * human-written paragraph from a template one, so both are ignored.
  */
-function scanForHumanProse(content: string): boolean {
+function scanForHumanListItem(content: string): boolean {
   const lines = content.split('\n');
   let inComment = false;
   for (const raw of lines) {

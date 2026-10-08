@@ -388,6 +388,54 @@ describe('toggleTask()', () => {
     expect(result).toBeNull();
   });
 
+  // #2324: the spec panel's live write path is `writeSpec(toggleTask(spec, ...))`
+  // (spec-panel.ts handleMessage) — toggleTask itself only touches the body, but
+  // the SUBSEQUENT writeSpec() re-serialize was the one silently dropping
+  // implements:/affects:/relates_to: because they aren't in SpecFrontmatter's
+  // modeled field set. Exercise the real two-step path, not toggleTask alone.
+  it('survives the writeSpec() re-serialize that follows a toggle (ownership fields)', () => {
+    const withOwnership = `---
+id: SPEC-001
+title: Add rate limiting to /api/health
+tier: T3
+status: implementing
+implements:
+  - packages/minspec/src/lib/rate-limit.ts
+affects:
+  - packages/minspec/src/routes/health.ts
+relates_to: [DR-001]
+created: 2026-05-26
+phases:
+  specify: done
+  clarify: skipped
+  plan: done
+  tasks: in-progress
+  implement: pending
+---
+
+## Specify
+
+Health endpoint needs rate limiting at 100 req/min per IP.
+
+## Tasks
+
+- [x] Add express-rate-limit middleware to health route
+- [ ] Add 429 response test
+`;
+    const spec = parseSpec(withOwnership);
+    const toggled = toggleTask(spec, 'tasks', 1, true);
+    expect(toggled).not.toBeNull();
+
+    const written = writeSpec(toggled!);
+    expect(written).toContain('implements:');
+    expect(written).toContain('  - packages/minspec/src/lib/rate-limit.ts');
+    expect(written).toContain('affects:');
+    expect(written).toContain('  - packages/minspec/src/routes/health.ts');
+    expect(written).toContain('relates_to: [DR-001]');
+    // The toggle itself still took effect.
+    expect(written).toContain('- [x] Add 429 response test');
+  });
+
   it('preserves frontmatter after toggle', () => {
     const spec = parseSpec(FULL_SPEC);
     const result = toggleTask(spec, 'tasks', 0, false);

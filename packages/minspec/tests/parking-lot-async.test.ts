@@ -281,6 +281,9 @@ describe('parkTopic()', () => {
   });
 
   it('falls back to local file when gh is not available', async () => {
+    // SPEC-096 FR-7: the local file is the fallback only in a folder that has
+    // opted in (it lives in `.minspec/`, which the store no longer creates).
+    fs.mkdirSync(path.join(tmpDir, '.minspec'));
     mockExecFile.mockImplementation(
       (_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
         if (typeof _opts === 'function') cb = _opts as Function;
@@ -301,6 +304,9 @@ describe('parkTopic()', () => {
   });
 
   it('falls back to local file when repo is not found', async () => {
+    // SPEC-096 FR-7: the local file is the fallback only in a folder that has
+    // opted in (it lives in `.minspec/`, which the store no longer creates).
+    fs.mkdirSync(path.join(tmpDir, '.minspec'));
     let callIndex = 0;
     mockExecFile.mockImplementation(
       (_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
@@ -322,6 +328,9 @@ describe('parkTopic()', () => {
   });
 
   it('falls back to local file when GitHub issue creation fails', async () => {
+    // SPEC-096 FR-7: the local file is the fallback only in a folder that has
+    // opted in (it lives in `.minspec/`, which the store no longer creates).
+    fs.mkdirSync(path.join(tmpDir, '.minspec'));
     let callIndex = 0;
     mockExecFile.mockImplementation(
       (_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {

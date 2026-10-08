@@ -9,6 +9,7 @@ import {
   checkStatusParity,
   bodyStatusToken,
   inspectStatusLine,
+  claimParagraphText,
 } from '../src/lib/status-parity';
 
 const specBody = (statusLine: string) =>
@@ -309,5 +310,38 @@ describe('inspectAllStatusClaims — every claim, not just the first (#1223)', (
     const body = '> **Status: clarifying-ish, pending #91**\n\n## Status\n\nAccepted (2026-01-01).';
     const claims = inspectAllStatusClaims(dr(body), 'dr');
     expect(claims.filter((c) => c.kind === 'comparable')).toHaveLength(1);
+  });
+});
+
+// #2180 — `claimParagraphText` is the shared primitive that lets a negation guard read the
+// whole sentence a status claim sits in, not just the one physical line the token starts
+// on (this repo hard-wraps prose, so a trailing negation clause can land on a later line).
+describe('claimParagraphText (#2180)', () => {
+  it('joins wrapped continuation lines onto the claim line', () => {
+    const content = 'a\nb\n**Proposed** 2026-09-09, pending review this record is\nnot accepted yet.\n\nc\n';
+    // Line 3 (1-based) is `**Proposed** ...`.
+    expect(claimParagraphText(content, 3)).toBe(
+      '**Proposed** 2026-09-09, pending review this record is not accepted yet.',
+    );
+  });
+
+  it('stops at the next blank line', () => {
+    const content = '**Proposed** line one\nline two\n\nline three (a new paragraph)\n';
+    expect(claimParagraphText(content, 1)).toBe('**Proposed** line one line two');
+  });
+
+  it('stops at the next heading', () => {
+    const content = '**Proposed** line one\nline two\n## Context\nmore\n';
+    expect(claimParagraphText(content, 1)).toBe('**Proposed** line one line two');
+  });
+
+  it('a single-line claim with no continuation is unchanged', () => {
+    const content = 'x\n**Accepted** 2026-01-01.\n\ny\n';
+    expect(claimParagraphText(content, 2)).toBe('**Accepted** 2026-01-01.');
+  });
+
+  it('an out-of-range line returns empty', () => {
+    expect(claimParagraphText('a\nb\n', 99)).toBe('');
+    expect(claimParagraphText('a\nb\n', 0)).toBe('');
   });
 });
