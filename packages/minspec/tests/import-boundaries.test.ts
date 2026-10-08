@@ -11,9 +11,10 @@
  *      forbidden edge errors AND the allowed edge does not. A one-sided gate
  *      that reports everything, or nothing, is the classic silent gate (DR-066).
  *   2. A real-tree lint (`lintFiles` over `packages/minspec/src/lib/**`) pins the
- *      SHIPPED state: zero direction errors, and exactly the seven known
+ *      SHIPPED state: zero direction errors, and exactly the five known
  *      vscode-coupled files at `warn` (AC-3/AC-5). That count is what makes the
- *      `warn` -> `error` flip at #830 a one-line, test-verified change.
+ *      `warn` -> `error` flip at #830 a one-line, test-verified change. It was
+ *      seven until SPEC-086 deleted two of the files (see the list below).
  *
  * `lintText` is given the path of a REAL file under `src/lib/`. That is required,
  * not incidental: `parserOptions.projectService` resolves each linted path inside
@@ -47,21 +48,28 @@ const VSCODE_RULE = 'tier0/no-restricted-imports';
 const LIB_HOST = 'packages/minspec/src/lib/spec.ts';
 /** A real file in the UI layer — used to prove the lib-scoped rules stay scoped. */
 const VIEWS_HOST = 'packages/minspec/src/views/status-bar.ts';
+/**
+ * #1546 / #2378 — a real `commands/` file, the layer the second emitter
+ * actually landed in before #1551 deleted it. Used as the fixture host for the
+ * single-emitter gate below.
+ */
+const COMMANDS_HOST = 'packages/minspec/src/commands/init.ts';
 /** Real files in the two exempt trees (FR-1 `ignores`). */
 const TEST_TREE_HOST = 'packages/minspec/src/test/views.test.ts';
 const BENCH_TREE_HOST = 'packages/minspec/src/__benchmarks__/perf.bench.ts';
 
 /**
- * The seven `lib/` files that import `vscode` by VALUE today (DR-064 Context).
- * `lib/presence.ts` imports it TYPE-ONLY and is deliberately absent — that
- * carve-out is why this list is 7 and not 8.
+ * The five `lib/` files that import `vscode` by VALUE today. DR-064's Context
+ * and SPEC-040 AC-3 counted seven. SPEC-086 deleted two of them,
+ * `lib/ai-usage-detector.ts` and `lib/bridge.ts` (the ScroogeLLM prompt's tool
+ * probe and the bridge itself), so the list shrank without a file being
+ * relocated. `lib/presence.ts` imports it TYPE-ONLY and is deliberately absent:
+ * that carve-out is why this list is 5 and not 6.
  */
 const EXPECTED_VSCODE_WARN_FILES = [
   'packages/minspec/src/lib/active-adr.ts',
   'packages/minspec/src/lib/active-spec.ts',
-  'packages/minspec/src/lib/ai-usage-detector.ts',
   'packages/minspec/src/lib/approval-diff.ts',
-  'packages/minspec/src/lib/bridge.ts',
   'packages/minspec/src/lib/diagnostics.ts',
   'packages/minspec/src/lib/resolve-folder.ts',
 ];
@@ -117,7 +125,7 @@ const valueImport = (specifier: string): string =>
   `import thing from '${specifier}';\nexport const used = thing;\n`;
 
 describe('SPEC-040 — the fixture hosts these tests depend on exist', () => {
-  it.each([LIB_HOST, VIEWS_HOST, TEST_TREE_HOST, BENCH_TREE_HOST])(
+  it.each([LIB_HOST, VIEWS_HOST, COMMANDS_HOST, TEST_TREE_HOST, BENCH_TREE_HOST])(
     '%s is a real file',
     (hostFile) => {
       expect(
@@ -310,6 +318,80 @@ describe('SPEC-040 FR-3 — lib stays vscode-free, at warn until #830', () => {
 });
 
 /**
+ * #1546 / SPEC-025 FR-6 — `lib/constitution-nudge` has exactly one legitimate
+ * importer, `extension.ts`. Before #2378, nothing exercised this rule at all —
+ * it had been checked once, by hand, per #1551's commit message. `COMMANDS_HOST`
+ * is not an arbitrary fixture host: it is the file the second emitter actually
+ * lived in before #1551 deleted it, so the first case here is a regression test
+ * for that instance, not only the structural property.
+ *
+ * #2378 found a SECOND weakness beyond "no witness": a single inline
+ * `eslint-disable` silences this diagnostic (measured on main at `f4e6cbcf`),
+ * unlike the `lib/**` blocks beside it, which set `linterOptions:
+ * { noInlineConfig: true }`. Adding that same option to the #1546 block
+ * (`eslint.config.mjs:265-295`) was EVALUATED, not applied: that block's `files`
+ * glob — unlike the `lib/**`-scoped blocks — also matches `views/**` and
+ * `commands/**`, and `noInlineConfig` is file-level, not rule-level (ESLint has
+ * no per-rule inline-disable lock). Verified locally: adding it there breaks
+ * `SPEC-040 INV-4 ... Tier-0-scoped` below (VIEWS_HOST loses its escape hatch
+ * for the unrelated `@aiclarity/shared` barrel rule as a side effect) — that
+ * test exists precisely to catch an inline-disable lockout leaking outside
+ * `lib/` into the UI layers, and it does so correctly here. Closing that half
+ * is an architecture call (whether UI layers keep the inline-disable escape
+ * hatch at all, tree-wide) — out of this test file's own scope to decide, and
+ * `eslint.config.mjs` is outside this change's file allowlist regardless. The
+ * third case below PINS the gap instead as a visible, named, currently-open
+ * weakness rather than leaving it undocumented — if it ever flips to pass,
+ * decide whether to flip the assertion (fix landed narrowly) or delete this
+ * test (fix landed by removing the escape hatch tree-wide) rather than
+ * deleting it quietly.
+ */
+describe('SPEC-025 FR-6 / #1546 — lib/constitution-nudge has exactly one emitter', () => {
+  it(
+    'errors on an import of lib/constitution-nudge from commands/',
+    async () => {
+      const messages = await lintFixture(
+        valueImport('../lib/constitution-nudge'),
+        COMMANDS_HOST,
+      );
+      expect(errorsOf(messages, 'no-restricted-imports'), describeAll(messages)).toHaveLength(1);
+    },
+    LINT_TIMEOUT,
+  );
+
+  it(
+    'allows the real emitter, extension.ts, to import lib/constitution-nudge',
+    async () => {
+      const messages = await lintFixture(
+        valueImport('./lib/constitution-nudge'),
+        'packages/minspec/src/extension.ts',
+      );
+      expect(
+        errorsOf(messages, 'no-restricted-imports'),
+        describeAll(messages),
+      ).toHaveLength(0);
+    },
+    LINT_TIMEOUT,
+  );
+
+  it(
+    'KNOWN GAP (#2378) — an inline eslint-disable still silences the single-emitter error',
+    async () => {
+      // This PASSES today because the gap is still open — it is a witness, not
+      // a desired outcome. See the describe-block comment above for why closing
+      // it is an architecture decision rather than a config tweak made here.
+      const messages = await lintFixture(
+        '// eslint-disable-next-line no-restricted-imports\n' +
+          valueImport('../lib/constitution-nudge'),
+        COMMANDS_HOST,
+      );
+      expect(errorsOf(messages, 'no-restricted-imports'), describeAll(messages)).toHaveLength(0);
+    },
+    LINT_TIMEOUT,
+  );
+});
+
+/**
  * INV-4 says a layer violation is never silenced with an eslint-disable. Before
  * `linterOptions.noInlineConfig`, that was a sentence inside the rule messages
  * and nothing more: a disable comment suppressed the diagnostics completely, and
@@ -432,7 +514,7 @@ describe('SPEC-040 — the shipped tree (AC-3, AC-5)', () => {
     ).toEqual([]);
   });
 
-  it('warns on EXACTLY the seven known vscode-coupled lib files (AC-3)', () => {
+  it('warns on EXACTLY the five known vscode-coupled lib files (AC-3)', () => {
     const warned = libResults
       .filter((result) => warningsOf(result.messages, VSCODE_RULE).length > 0)
       .map((result) => rel(result.filePath))

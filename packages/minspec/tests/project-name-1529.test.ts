@@ -37,6 +37,9 @@ describe('projectName resolution (#1529)', () => {
     realCheckout = path.join(parent, 'realproj');
     worktree = path.join(parent, 'wt-some-branch-name');
     fs.mkdirSync(realCheckout, { recursive: true });
+    // SPEC-096 FR-3: Refresh no longer sets a folder up from nothing; it refuses
+    // without the opt-in marker. The fixture is a project that has opted in.
+    fs.mkdirSync(path.join(realCheckout, '.minspec'));
     // Generate a full harness in the correctly-named directory first.
     refreshHarnessFiles(realCheckout);
     // Then strip `projectName` back out of config.json, so the fixture is a project
@@ -146,6 +149,7 @@ describe('projectName resolution (#1529)', () => {
     it('scaffold records projectName in a NEWLY created config.json', () => {
       const fresh = path.join(parent, 'fresh-project');
       fs.mkdirSync(fresh, { recursive: true });
+      fs.mkdirSync(path.join(fresh, '.minspec')); // SPEC-096 FR-3: opted in, config.json not yet written
       refreshHarnessFiles(fresh);
 
       const written = JSON.parse(

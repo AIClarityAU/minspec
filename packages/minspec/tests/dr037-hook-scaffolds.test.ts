@@ -152,8 +152,11 @@ describe('the scaffolded hook scripts actually enforce the SDD gates', () => {
     const c = byPath(PRE_COMMIT).content;
     expect(c).toContain('npx --no-install @aiclarity/minspec-validator');
     expect(c).not.toContain('npx --yes @aiclarity/minspec-validator');
-    // Python tier only fires when both python3 and the script are present.
-    expect(c).toContain('command -v python3');
+    // Python tier only fires when a candidate interpreter actually RUNS, not
+    // merely resolves on PATH (#2400: Windows' python3.exe "app execution
+    // alias" placeholder passes `command -v` with no Python installed).
+    expect(c).not.toContain('command -v python3');
+    expect(c).toContain('sys.version_info[0]');
     expect(c).toContain('[ -f "$hook_dir/validate.py" ]');
     // The always-present shell gate is the terminal fallback.
     expect(c).toContain('minspec_shell_gate');
