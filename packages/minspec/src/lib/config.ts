@@ -81,7 +81,7 @@ export interface MinspecConfig {
    * Severity of the #1912 `status.inline-comment` / `status.orphan-comment` rules.
    *
    * The `status:` frontmatter line carries a value and nothing else (#1900). The three
-   * status writers rebuild that line as indent + key + value, so an inline comment is
+   * status writers replace that whole line with `status: <value>`, so an inline comment is
    * DESTROYED on write, and indented `#` lines after it SURVIVE and go on describing a
    * value that no longer holds (#1879). Both are annotations the writer cannot keep
    * honest, so the convention is to put rationale in body prose instead.

@@ -811,7 +811,7 @@ function countFrontmatterProseLines(yaml: string): number {
  * position to another and stayed exactly as orphan-able, in a shape
  * `validateStatusAnnotation` cannot see. Three reviewers caught it; nothing else would.
  *
- * `parseFrontmatterYaml` (`spec.ts:124-162`) silently discards any line that is not
+ * `parseFrontmatterYaml` (in `spec.ts`) silently discards any line that is not
  * `key: value`, so the text is invisible to every parsed-model consumer AND survives every
  * status write. Silent discard is why this needs a gate rather than care.
  *
@@ -858,13 +858,14 @@ export function validateFrontmatterProse(
  * WHY THIS MUST READ THE RAW TEXT. No parsed-model rule can see this:
  * `parseFrontmatterYaml` discards comments before the model exists, and
  * `checkStatusParity` strips `\s*#.*$` on purpose so an annotated-but-AGREEING
- * status never false-positives (`status-parity.ts:230-237`). The annotation is only
+ * status never false-positives (in `status-parity.ts`). The annotation is only
  * visible in the raw block, which is why the rule lives here and scans it directly.
  *
  * Two shapes, both annotations the writer cannot keep honest:
  *  - `status.inline-comment` — an inline `#` on the status line. The three status
- *    writers (`spec.ts`, `epic-manager.ts`, `adr-manager.ts`) rebuild the line as
- *    indent + key + value via `/^([ \t]*)status[ \t]*:[ \t]*.*$/m`, so the comment
+ *    writers (`setSpecStatus` in `spec.ts`, `setEpicStatus` in `epic-manager.ts`,
+ *    `setAdrStatus` in `adr-manager.ts`) replace the whole line with `status: <value>`
+ *    via the column-0-anchored `/^status[ \t]*:[ \t]*.*$/m`, so the comment
  *    is DESTROYED on the next status write — a silent loss.
  *  - `status.orphan-comment` — `#` lines directly after it. Those SURVIVE that rewrite
  *    and go on describing a value that no longer holds. SPEC-062 was the live case
@@ -907,17 +908,17 @@ export function validateStatusAnnotation(
   if (!block) return [];
   const severity: Severity = config.statusLineAnnotation === 'error' ? 'error' : 'warning';
   const lines = block[1].split('\n');
-  // Top-level (column-0) `status:` only — that is the key this rule is about, and in the
-  // house key order it is also the line the writers rewrite.
+  // Top-level (column-0) `status:` only — that is the key this rule is about, and it is
+  // the line the writers rewrite. Since #2149 all three (`setSpecStatus`, `setEpicStatus`,
+  // `setAdrStatus`) use the same column-0-anchored, non-global
+  // `/^status[ \t]*:[ \t]*.*$/m`, so a nested `status:` is never the line a writer
+  // touches, and this rule and the writers pick the same line by construction.
   //
-  // NOT because "no writer ever touches a nested key". That is what this comment used to
-  // claim and it is false: all three writers use a NON-global
-  // `/^([ \t]*)status[ \t]*:[ \t]*.*$/m` (`spec.ts:455`, `epic-manager.ts:307`,
-  // `adr-manager.ts:730`), which matches the FIRST `status:` at ANY indent. A frontmatter
-  // that placed a nested `status:` before the top-level one would have the NESTED line
-  // rewritten and its real status left untouched. Measured 0 such files in this corpus, so
-  // the divergence is latent rather than live, and it is a defect in three writer files this
-  // spec does not own — see the #1955 PR body for the follow-up.
+  // That was not always so. Before #2149 the writers' pattern carried a leading
+  // `([ \t]*)` and matched the FIRST `status:` at ANY indent: a frontmatter that placed a
+  // nested `status:` before the top-level one had the NESTED line rewritten and its real
+  // status left untouched. This rule reads the column-0 line, so the two disagreed on such
+  // a file until the writers were fixed.
   const idx = lines.findIndex((l) => /^status[ \t]*:/.test(l));
   if (idx === -1) return [];
 

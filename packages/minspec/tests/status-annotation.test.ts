@@ -10,7 +10,7 @@
  * Two shapes, one convention (#1900 — "move the status rationale off the line the status
  * writer owns"):
  *   A1 `status.inline-comment`  — an inline `#` on the status line. The three status
- *       writers rebuild that line as indent + key + value, so the comment is DESTROYED.
+ *       writers replace that whole line with `status: <value>`, so the comment is DESTROYED.
  *   A2 `status.orphan-comment`  — indented `#` lines directly after it. Those SURVIVE the
  *       rewrite and go on describing a value that no longer holds (SPEC-062 was the live
  *       case, #1879).
@@ -154,11 +154,11 @@ describe('#1912 status-line annotation', () => {
     // Kills the unanchored-findIndex mutant: without the `^` anchor the nested
     // `status:` matches first and its inline comment is reported against the spec.
     //
-    // The rule is scoped to the top-level key because that is the key it is ABOUT — NOT
-    // because "no writer ever touches a nested key", which this comment used to claim and
-    // which is false (the writers' `/^([ \t]*)status[ \t]*:[ \t]*.*$/m` is non-global and hits
-    // the first `status:` at any indent). See the validator docblock; 0 corpus files order
-    // their keys that way, so the divergence is latent.
+    // The rule is scoped to the top-level key because that is the key it is ABOUT. Since
+    // #2149 it is also the only line a writer rewrites: all three use the column-0-anchored
+    // `/^status[ \t]*:[ \t]*.*$/m`. Before that fix the writers' pattern matched the first
+    // `status:` at any indent, so rule and writers disagreed on a frontmatter that put a
+    // nested `status:` first. See the comment above the anchor in the validator.
     const r = rules(
       spec(['rollout:', '  status: draft  # nested, not the frontmatter status', 'status: planning']),
     );
