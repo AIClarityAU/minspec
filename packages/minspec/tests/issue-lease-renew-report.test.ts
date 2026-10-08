@@ -10,6 +10,9 @@
  *      internal gh/jq calls discarded their stderr, so a reader could not tell a
  *      claims-read failure from a missing claim from a refused PATCH from a
  *      gh_bot_die (no mintable bot token) without reproducing it by hand.
+ *      lease_renew now prints a `lease: cannot renew the claim on #N: <reason>` line
+ *      ahead of the ticker's `FAILED (exit N)` report. The reason line does not say
+ *      FAILED, so the ticker's report stays the one FAILED line per failed tick.
  *
  * Every scenario here runs the REAL scripts/lib/issue-lease.sh in a bash
  * subprocess (spawnSync, so stdout and stderr are captured separately — a plain
@@ -54,7 +57,7 @@ describe('lease renew ticker teardown: no bare "Terminated" (#2299 gap 1)', () =
       export MINSPEC_LEASE_REPO=owner/repo
       source ${JSON.stringify(LEASE)}
       LEASE_RENEW_SECS=1
-      lease_renew() { echo "lease: renewal of the claim on #$1 FAILED -- test reason." >&2; return 1; }
+      lease_renew() { echo "lease: cannot renew the claim on #$1: test reason." >&2; return 1; }
       lease_start_renew_ticker 42
       sleep 1.3
       lease_stop_renew_ticker
@@ -62,7 +65,10 @@ describe('lease renew ticker teardown: no bare "Terminated" (#2299 gap 1)', () =
     `;
     const res = run(script);
     expect(res.stdout.trim().split('\n').pop()).toBe('DONE');
-    expect(res.stderr).toMatch(/FAILED -- test reason\./);
+    expect(res.stderr).toMatch(/cannot renew the claim on #42: test reason\./);
+    // The ticker's own report rides along, after the reason: it was written to the
+    // saved stderr too, not to the fd 2 this fix silences.
+    expect(res.stderr).toMatch(/test reason\.\nlease: renewal of the claim on #42 FAILED \(exit 1\)/);
     expect(res.stderr).not.toMatch(/Terminated/);
   });
 
@@ -79,7 +85,7 @@ describe('lease renew ticker teardown: no bare "Terminated" (#2299 gap 1)', () =
       echo 0 > "$COUNT_FILE"
       lease_renew() {
         n=$(<"$COUNT_FILE"); n=$((n+1)); echo "$n" > "$COUNT_FILE"
-        echo "lease: renewal of the claim on #$1 FAILED -- simulated gh_bot_die." >&2
+        echo "gh-bot: simulated gh_bot_die." >&2
         exit 1
       }
       lease_start_renew_ticker 7
@@ -134,13 +140,32 @@ describe('lease_renew: failure reason on stderr, not just an exit code (#2299 ga
   it('reports "could not read claims" when the claims read itself fails', () => {
     const res = renewWith(`lease_read_claims() { return 1; }`);
     expect(res.stderr).toMatch(/could not read claims/);
+    expect(res.stderr).not.toMatch(/FAILED/);
     expect(res.stdout).toMatch(/rc=1/);
   });
 
   it('reports "no claim ... was found" when the read succeeds but carries none of ours', () => {
     const res = renewWith(`lease_read_claims() { echo '[]'; }`);
     expect(res.stderr).toMatch(/no claim by this session was found/);
+    expect(res.stderr).not.toMatch(/FAILED/);
     expect(res.stdout).toMatch(/rc=1/);
+  });
+
+  it('still reports "no claim ... was found" under errexit, as the CLI renew subcommand runs it', () => {
+    // The CLI's `renew)` arm calls lease_renew bare under `set -euo pipefail`. With no
+    // claim of ours jq prints nothing and the claim-id `read` returns 1 at end of input;
+    // unguarded, errexit ended the script on that line, before the reason was printed.
+    const res = run(`
+      set -euo pipefail
+      export MINSPEC_LEASE_REPO=owner/repo
+      export MINSPEC_LEASE_SID=sid-test
+      source ${JSON.stringify(LEASE)}
+      gh_bot_init() { :; }
+      lease_read_claims() { echo '[]'; }
+      lease_renew 55
+    `);
+    expect(res.status).toBe(1);
+    expect(res.stderr).toMatch(/no claim by this session was found/);
   });
 
   it('reports gh\'s own refusal text when the PATCH is rejected', () => {
@@ -156,6 +181,7 @@ describe('lease_renew: failure reason on stderr, not just an exit code (#2299 ga
       }
     `);
     expect(res.stderr).toMatch(/the PATCH was refused:.*Not Found \(HTTP 404\)/);
+    expect(res.stderr).not.toMatch(/FAILED/);
     expect(res.stdout).toMatch(/rc=1/);
   });
 

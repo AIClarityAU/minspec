@@ -38,10 +38,15 @@ import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { useShellTimeout } from './helpers/shell-timeout';
+import { drainBaseEnv, useHostileAmbientDrainKnobs } from './helpers/drain-env';
 
 // Module scope, never inside a hook: vitest resolves each test's timeout before
 // `beforeAll` runs, so a raise from within a hook is silently inert (#1399).
 useShellTimeout();
+
+// Module scope: nothing in this file may depend on drain or quota knobs in the surrounding
+// environment, so it runs with hostile ones planted there (#2574, helpers/drain-env.ts).
+useHostileAmbientDrainKnobs();
 
 function findScriptsDir(): string {
   let dir = __dirname;
@@ -155,7 +160,7 @@ function runBlock(mode: 'fail' | 'empty' | 'full'): { out: string; status: numbe
   fs.writeFileSync(file, script, 'utf-8');
   const r = spawnSync('bash', [file], {
     encoding: 'utf-8',
-    env: { ...process.env, PATH: `${bin}:${process.env.PATH}` },
+    env: { ...drainBaseEnv(), PATH: `${bin}:${process.env.PATH}` },
   });
   return { out: `${r.stdout ?? ''}${r.stderr ?? ''}`, status: r.status ?? -1 };
 }
@@ -208,6 +213,103 @@ describe('drain queue read: a failed query is not an empty queue (#1855)', () =>
 });
 
 /**
+ * #1855 item 4 — a sanity floor: triage just labelled an issue agent-ready /
+ * agent-ready-specify, and the SAME cycle's ready-set query comes back empty. Both
+ * queries reported success (this is not the failed-query case above), yet the two
+ * disagree with each other about the one issue triage just touched — a stronger
+ * signal than either read alone, and one a naive "did the exit code change" check
+ * cannot see, because the exit code does not change (#1855's own text: "deserves a
+ * loud warning independent of exit status").
+ *
+ * `TRIAGE` here is a stub that reproduces the ONE line the real `triage-inbox.sh`
+ * prints on a successful verdict ("  → #<n>: agent-ready ..."), not a re-description
+ * of the source. Driving the same extracted `run_cycle` span as the block above,
+ * so this exercises the actual branch rather than a copy of it.
+ */
+function stubTriageApplying(label: 'agent-ready' | 'agent-ready-specify'): string {
+  const p = path.join(tmp, 'triage-stub.sh');
+  fs.writeFileSync(
+    p,
+    `#!/usr/bin/env bash\necho "  → #\${1}: ${label} (role:dev · tier:T1 · hold:none)"\nexit 0\n`,
+    { mode: 0o755 },
+  );
+  return p;
+}
+
+/** `gh` that answers a non-empty inbox but an empty ready set for both labels. */
+function stubGhInboxOnly(inboxNums: number[]): string {
+  const bin = path.join(tmp, 'bin-inbox-only');
+  fs.mkdirSync(bin, { recursive: true });
+  const body =
+    'case "$*" in\n' +
+    `  *"--label inbox"*) printf "%s\\n" ${inboxNums.join(' ')} ;;\n` +
+    '  *"--label agent-ready"*) : ;;\n' +
+    '  *"--label agent-ready-specify"*) : ;;\n' +
+    'esac\nexit 0\n';
+  fs.writeFileSync(path.join(bin, 'gh'), `#!/usr/bin/env bash\n${body}`, { mode: 0o755 });
+  return bin;
+}
+
+function runSanityFloor(label: 'agent-ready' | 'agent-ready-specify'): {
+  out: string;
+  status: number;
+} {
+  const bin = stubGhInboxOnly([501]);
+  const triage = stubTriageApplying(label);
+  const script = [
+    'set -euo pipefail',
+    'REPO="AIClarityAU/minspec"',
+    'reconcile_labels() { :; }',
+    'gh_bot_warm_read() { :; }',
+    'gh_bot_reauth_read() { return 1; }',
+    `TRIAGE=${JSON.stringify(triage)}`,
+    'run_cycle() {',
+    queueBlock(),
+    '  echo "[drain] REACHED-DISPATCH ${all_ready//$\'\\n\'/,}"',
+    '  return 0',
+    '}',
+    'run_cycle',
+  ].join('\n');
+  const file = path.join(tmp, 'sanity-floor.sh');
+  fs.writeFileSync(file, script, 'utf-8');
+  const r = spawnSync('bash', [file], {
+    encoding: 'utf-8',
+    env: { ...drainBaseEnv(), PATH: `${bin}:${process.env.PATH}` },
+  });
+  return { out: `${r.stdout ?? ''}${r.stderr ?? ''}`, status: r.status ?? -1 };
+}
+
+describe('drain sanity floor: triage-just-labelled-ready contradicts an empty read (#1855 item 4)', () => {
+  it('CONTRADICTION fires when triage applies agent-ready and the ready query reads back empty', () => {
+    const { out, status } = runSanityFloor('agent-ready');
+
+    expect(out).toContain('CONTRADICTION');
+    expect(out).toContain('#1855 sanity floor');
+    // Still a successful, non-fatal cycle: the query itself did not fail (that is
+    // the HOLDING case above), so this must not be conflated with it.
+    expect(out).toContain('cycle done');
+    expect(out).not.toContain('HOLDING');
+    expect(status).toBe(0);
+  });
+
+  it('fires for agent-ready-specify too, not only the full-build label', () => {
+    const { out } = runSanityFloor('agent-ready-specify');
+
+    expect(out).toContain('CONTRADICTION');
+  });
+
+  it('CONTROL: no contradiction warning when triage never ran (empty inbox)', () => {
+    // Reuses the plain empty-queue path from the block above: nothing was just
+    // labelled ready, so an empty read is exactly what it looks like.
+    const { out, status } = runBlock('empty');
+
+    expect(out).toContain('cycle done');
+    expect(out).not.toContain('CONTRADICTION');
+    expect(status).toBe(0);
+  });
+});
+
+/**
  * Drive the REAL `drain-inbox.sh --dry-run`, which is the default one-shot shape a
  * human or a session-start hook invokes. No extraction: this exercises the module-
  * scope early-exit gate end to end, including argv dispatch and the warm call.
@@ -222,7 +324,7 @@ function runDryRun(mode: 'fail' | 'empty'): { out: string; status: number } {
     encoding: 'utf-8',
     timeout: 60_000,
     env: {
-      ...process.env,
+      ...drainBaseEnv(),
       PATH: `${bin}:${process.env.PATH}`,
       GH_TOKEN: '',
       GITHUB_TOKEN: '',
@@ -371,7 +473,7 @@ function runWithCredential(minter: string, live: string): {
   const r = spawnSync('bash', [file], {
     encoding: 'utf-8',
     env: {
-      ...process.env,
+      ...drainBaseEnv(),
       PATH: `${gh.bin}:${process.env.PATH}`,
       GH_TOKEN: '',
       GITHUB_TOKEN: '',

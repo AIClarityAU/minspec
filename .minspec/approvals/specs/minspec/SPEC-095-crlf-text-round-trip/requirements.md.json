@@ -1,0 +1,9 @@
+{
+  "specPath": "specs/minspec/SPEC-095-crlf-text-round-trip/requirements.md",
+  "specHash": "968403c00f7830d2a3f939917d4f93f538d357273b21107d3f73bceb0759fbcc",
+  "approvedAt": "2026-10-02T04:10:57.515Z",
+  "approvedBy": "github@harvest316.com",
+  "tier": "T4",
+  "migrated": false,
+  "baselineBlob": "a9ee6c88bb61b9c1363e8331d69df64494c56eb1"
+}
