@@ -27,6 +27,10 @@ vi.mock('vscode', () => ({
       shownMessages.push(msg);
       return NOTIF_CHOICE;
     }),
+    // The root fixture here (`/repo`) has no `.minspec/`, so the real
+    // (unmocked) preference store refuses every write this suite triggers
+    // (#2506 made that refusal also surface here, not just to console.warn).
+    showWarningMessage: vi.fn(),
   },
   env: { openExternal: vi.fn(async (u: string) => openedUrls.push(String(u))) },
   Uri: { parse: (s: string) => s },

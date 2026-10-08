@@ -56,12 +56,27 @@ function alwaysUseAi(rootDir: string): boolean {
  * Tier-0 posture (invariant 1) and never consented to `claude -p` running there.
  * DR-078 §1 names `.minspec/preferences.json` as the correct store. Fixed in
  * #1319.
+ *
+ * `savePreferences` refuses (rather than creates) in a folder with no
+ * `.minspec/` (#2355), and nothing in this command creates that marker. Unlike
+ * Approve Spec, which refuses there (SPEC-096), Backfill Epics is reachable in
+ * a folder that has never opted in. Before #2506 the refusal reached only
+ * `console.warn`, which a user never sees: the toast had already told them
+ * "Always" was accepted, so the click was silently a no-op and the AI prompt
+ * returned on the very next run. Surface it on the notification API too, same
+ * as the sibling fix for the phase-advance queue write (#1512) — the click
+ * still does its one-time job (the caller sets `useAi = true` regardless), only
+ * the "from now on" part failed.
  */
 function enableAlwaysUseAi(rootDir: string): void {
   try {
     savePreferences(rootDir, { autoBackfillUseAi: true });
   } catch (err) {
-    console.warn(`MinSpec: failed to persist autoBackfillUseAi pref — ${err instanceof Error ? err.message : String(err)}`);
+    const message = err instanceof Error ? err.message : String(err);
+    console.warn(`MinSpec: failed to persist autoBackfillUseAi pref — ${message}`);
+    void vscode.window.showWarningMessage(
+      `MinSpec: "Always" was not remembered — ${message} Using AI for this run only.`,
+    );
   }
 }
 
@@ -269,8 +284,14 @@ export async function backfillEpicsCommand(
       const USE_AI = 'AI-enhanced';
       const ALWAYS = 'Always';
       const HEURISTIC = 'Heuristic only';
+      // The consent prompt names what leaves the machine (#2457). It used to say "the
+      // extension makes no network calls": true of the extension's own process, and beside
+      // the point, because `claude` sends what MinSpec hands it to a model provider. What
+      // is handed over is assembled by `buildPrompt` in lib/epic-backfill.ts. The wording
+      // is pinned, together with the setting description and the README, by
+      // tests/readme-network-claims.test.ts.
       const choice = await vscode.window.showInformationMessage(
-        'MinSpec: Claude Code detected. Use AI to propose the epic taxonomy? (Runs `claude -p` locally; the extension makes no network calls.)',
+        'MinSpec: Claude Code detected. Use AI to propose the epic taxonomy? (Runs your own `claude` command, which sends the ids and titles of your specs, decisions and epics, and the first paragraph of each spec or decision that has no epic yet, to the model provider it is set up with.)',
         ALWAYS,
         USE_AI,
         HEURISTIC,

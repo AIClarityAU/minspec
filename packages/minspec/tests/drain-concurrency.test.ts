@@ -37,10 +37,23 @@ function findRepoRoot(): string {
 }
 const DRAIN = path.join(findRepoRoot(), 'scripts', 'drain-inbox.sh');
 
+/**
+ * The width a test runs at is whatever that test passes, never whatever the
+ * machine running the suite happens to export. The suite is routinely run INSIDE
+ * a live drain (the dispatcher re-runs it as the merge gate), and that drain
+ * exports its own MINSPEC_DRAIN_CONCURRENCY — so inheriting it made "defaults to
+ * 1" assert the operator's setting instead of the script's default (#2369).
+ */
+function baseEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  delete env.MINSPEC_DRAIN_CONCURRENCY;
+  return env;
+}
+
 function sh(args: string[], env: NodeJS.ProcessEnv = {}): string {
   return execFileSync('bash', [DRAIN, ...args], {
     encoding: 'utf-8',
-    env: { ...process.env, ...env },
+    env: { ...baseEnv(), ...env },
     stdio: ['ignore', 'pipe', 'ignore'],
   }).trim();
 }
@@ -162,6 +175,13 @@ exit 0
   // the test then fails as `ENOENT: log.N`, which reads like a launch-loop bug rather
   // than a lock collision. Overriding LOG but not LOCK made the suite pass or fail
   // depending on whether another drain happened to be alive.
+  // MINSPEC_DRAIN_RUN_DIR="" must be paired with MINSPEC_DRAIN_SELF_REFRESH=0. Before
+  // #2238, drain-inbox.sh's `${MINSPEC_DRAIN_RUN_DIR:-/tmp/minspec-drain-run}` treated
+  // an empty value the same as unset, so this "" silently fell back to
+  // /tmp/minspec-drain-run — the LIVE drain's run dir on a machine running one — and
+  // ensure_fresh_run_dir would `git reset --hard origin/main` that tree mid-flight.
+  // The explicit SELF_REFRESH=0 here is belt-and-braces: it disables ensure_fresh_run_dir
+  // outright regardless of how DRAIN_RUN_DIR's fallback is implemented.
   /** Run one real `--once` cycle at the given width and wait for the disowned loop. */
   function runCycle(h: Harness, width: string): { elapsedMs: number; log: string } {
     const t0 = Date.now();
@@ -170,6 +190,7 @@ exit 0
         MINSPEC_DRAIN_DISPATCH="${path.join(h.bin, 'dispatch.sh')}" \
         MINSPEC_DRAIN_CONCURRENCY="${width}" \
         MINSPEC_DRAIN_RUN_DIR="" \
+        MINSPEC_DRAIN_SELF_REFRESH=0 \
         MINSPEC_DRAIN_REMEDIATE_PRS=0 \
         MINSPEC_DRAIN_PRIMARY_ROOT="${path.join(h.dir, 'root')}" \
         MINSPEC_DRAIN_LOG="${h.log(width)}" \

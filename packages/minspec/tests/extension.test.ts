@@ -360,7 +360,7 @@ function makeMockContext(overrides: Partial<Record<string, any>> = {}) {
       update: vi.fn(),
     },
     // SPEC-026 FR-11: activate() sets MINSPEC_SESSION_ID via this collection.
-    environmentVariableCollection: { replace: vi.fn(), append: vi.fn(), prepend: vi.fn(), clear: vi.fn() },
+    environmentVariableCollection: { replace: vi.fn(), append: vi.fn(), prepend: vi.fn(), delete: vi.fn(), clear: vi.fn() },
     ...overrides,
   } as unknown as vscode.ExtensionContext;
 }
@@ -842,6 +842,56 @@ describe('activate()', () => {
     }
   });
 
+  // #2461: constitution invariant 3 (blast radius) — a folder with no
+  // `.minspec/` never opted in, so a saved decision file there must not make
+  // MinSpec write docs/decisions/INDEX.md.
+  it('does NOT regenerate INDEX.md in a folder that has not opted in (no .minspec/)', () => {
+    vi.useFakeTimers();
+    try {
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      activate(makeMockContext());
+      vi.mocked(regenerateDrIndex).mockClear();
+
+      // Opt-in check is re-evaluated when the debounced timer fires, not
+      // cached from activation — flip it to "never opted in" here.
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+
+      const onChangeHandler = adrWatcher.onDidChange.mock.calls[0][0];
+      onChangeHandler({ fsPath: '/tmp/test-workspace/docs/decisions/DR-007.md' });
+
+      vi.advanceTimersByTime(300);
+      expect(regenerateDrIndex).not.toHaveBeenCalled();
+      // Tree still refreshes regardless — only the write is gated.
+      expect(mockAdrTreeProvider.refresh).toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('regenerates INDEX.md once a folder opts in mid-session, with no window reload', () => {
+    vi.useFakeTimers();
+    try {
+      // Starts un-opted-in...
+      vi.mocked(fs.existsSync).mockReturnValue(false);
+      activate(makeMockContext());
+      vi.mocked(regenerateDrIndex).mockClear();
+
+      const onChangeHandler = adrWatcher.onDidChange.mock.calls[0][0];
+      onChangeHandler({ fsPath: '/tmp/test-workspace/docs/decisions/DR-007.md' });
+      vi.advanceTimersByTime(300);
+      expect(regenerateDrIndex).not.toHaveBeenCalled();
+
+      // ...then `MinSpec: Initialize` runs and creates .minspec/ on the SAME
+      // activation; the next debounced fire must pick that up live.
+      vi.mocked(fs.existsSync).mockReturnValue(true);
+      onChangeHandler({ fsPath: '/tmp/test-workspace/docs/decisions/DR-008.md' });
+      vi.advanceTimersByTime(300);
+      expect(regenerateDrIndex).toHaveBeenCalledTimes(1);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('wires traceability watcher callbacks to refresh CodeLens providers', () => {
     activate(makeMockContext());
 
@@ -901,6 +951,88 @@ describe('activate()', () => {
     expect(
       calls.some((c) => String(c[0]).includes("isn't initialized")),
     ).toBe(false);
+  });
+
+  // -------------------------------------------------------------------------
+  // #2356: MINSPEC_SESSION_ID terminal env var — gated on the same opt-in
+  // predicate presence.ts uses, not set unconditionally for every window.
+  // -------------------------------------------------------------------------
+
+  it('sets MINSPEC_SESSION_ID when the folder has opted in (.minspec/ exists)', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+
+    const context = makeMockContext();
+    activate(context);
+
+    expect(context.environmentVariableCollection.replace).toHaveBeenCalledWith(
+      'MINSPEC_SESSION_ID',
+      expect.any(String),
+    );
+    expect(context.environmentVariableCollection.delete).not.toHaveBeenCalled();
+  });
+
+  it('does not set MINSPEC_SESSION_ID, and clears any stale value, when the folder never opted in', () => {
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+
+    const context = makeMockContext();
+    activate(context);
+
+    expect(context.environmentVariableCollection.replace).not.toHaveBeenCalledWith(
+      'MINSPEC_SESSION_ID',
+      expect.anything(),
+    );
+    expect(context.environmentVariableCollection.delete).toHaveBeenCalledWith('MINSPEC_SESSION_ID');
+  });
+
+  it('re-syncs MINSPEC_SESSION_ID after minspec.init so a folder opting in now gets it without a reload', async () => {
+    // Starts un-opted-in (existsSync false) so activation itself does not set it...
+    vi.mocked(fs.existsSync).mockReturnValue(false);
+    const context = makeMockContext();
+    activate(context);
+    expect(context.environmentVariableCollection.replace).not.toHaveBeenCalledWith(
+      'MINSPEC_SESSION_ID',
+      expect.anything(),
+    );
+
+    // ...then `MinSpec: Initialize` runs and creates .minspec/ — the registered
+    // command handler must re-check and set the var on the SAME activation,
+    // with no window reload.
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const initHandler = registeredCommands.get('minspec.init')!;
+    await initHandler(undefined, undefined);
+
+    expect(context.environmentVariableCollection.replace).toHaveBeenCalledWith(
+      'MINSPEC_SESSION_ID',
+      expect.any(String),
+    );
+  });
+
+  it('does not set MINSPEC_SESSION_ID when no folder is open at all', () => {
+    // .minspec/ "exists" per the fs mock, but there is no folder to resolve a
+    // root from — isMinspecInitialized('') would test the extension host's cwd,
+    // which is exactly the bug presence.ts's hasRoot guard exists to avoid.
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    const origFolders = vscode.workspace.workspaceFolders;
+    Object.defineProperty(vscode.workspace, 'workspaceFolders', {
+      value: undefined,
+      configurable: true,
+    });
+
+    const context = makeMockContext();
+    try {
+      activate(context);
+
+      expect(context.environmentVariableCollection.replace).not.toHaveBeenCalledWith(
+        'MINSPEC_SESSION_ID',
+        expect.anything(),
+      );
+      expect(context.environmentVariableCollection.delete).toHaveBeenCalledWith('MINSPEC_SESSION_ID');
+    } finally {
+      Object.defineProperty(vscode.workspace, 'workspaceFolders', {
+        value: origFolders,
+        configurable: true,
+      });
+    }
   });
 
   it('surfaces the #320 propose-draft nudge when an initialized constitution is empty', async () => {

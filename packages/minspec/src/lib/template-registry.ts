@@ -79,9 +79,15 @@ export const TEMPLATE_OUTPUT_PATHS: Record<TemplateName, string> = {
 const LABELS_MD_TEMPLATE = `# Issue label vocabulary — {{projectName}}
 
 The labels MinSpec's triage step classifies against. **This file is documentation and a
-copy-paste script — MinSpec never creates, edits, or reads a label on any forge.** Core
-functionality works offline and makes no network call without your explicit consent, so
-applying these is always a command *you* run.
+copy-paste script — MinSpec never creates, edits, or reads any of these labels on a
+forge.** Core functionality works offline and makes no network call without your explicit
+consent, so applying these is always a command *you* run.
+
+One label is not in this vocabulary, and it is the single exception: \`docs-lane\`, the
+label MinSpec's docs-lane workflow auto-merges on. When an approval you consented to push
+is eligible for that lane, MinSpec opens its pull request with the label, and creates the
+label first if this repository carries the docs-lane workflow but does not have the label
+yet. It never edits a \`docs-lane\` label that already exists.
 
 Triage reads an issue's **type label** as one of its inputs. A type it is told to
 recognise but that does not exist as a label is an input that is always absent — the
@@ -226,6 +232,7 @@ Anything waiting on the human — a decision, a credential, a manual step, a mer
   integration. Say the state you already observed alongside it, so the reader can
   decide without opening anything at all.
 - **Give each item a reply key.** One or two characters, restated on the line every turn so the human never scrolls back to find one: \`m\` merge · \`c\` close · \`d\` diff/details · \`r\` re-review · \`s\` skip.
+- **A key names what the agent does on receipt.** Agent-performed actions keep the existing form (\`m\` merge, \`r\` re-review, \`d\` diff). When only the human can act (closing a tab or session, a purchase, a command in their own terminal, an \`--admin\` merge keystroke, a click in an editor UI), state the step plainly and make the key a done-signal that names what the agent does when it arrives, e.g. \`tell me x once you have closed it - I will drop it from the queue and stop re-asking\`. A done-signal must state the consequence; without it the reader cannot tell why they are typing a letter.
 - **Every choice carries a recommendation and its cost.** When an item asks the human to *decide*, name the option you recommend and, in the same breath, the primary downside or risk of the option you are recommending. A menu with no recommendation hands the analysis back to the human; a recommendation with no stated cost is advocacy, not advice. Mark it \`(rec)\` on the option and follow with one clause naming what it costs. This applies wherever a decision is put to a human — the \`**Your turn**\` block **and** the body of any issue, PR, or DR that asks them to choose.
 
 The same block lists every pull request this session opened that is still unmerged — its number, the gate state already observed this turn, and its keys:
@@ -452,6 +459,7 @@ Two notes about clones, because an inert gate is worse than no gate — it looks
 | Author identity gate (opt-in) | \`pre-commit\` | A commit author email not in a configured allowlist |
 | Secret scan | \`pre-commit\` | Staged changes containing a detected secret |
 | Spec frontmatter | \`pre-commit\` | A staged spec missing \`id: SPEC-NNN\` |
+| Decision frontmatter | \`pre-commit\` | A staged \`DR-NNN.md\` missing \`id: DR-NNN\` |
 | Deferred-work gate | \`commit-msg\` | A message that defers work without saying where it went |
 | Root-cause gate | \`commit-msg\` | A \`fix:\` commit whose body has no \`Root cause:\` line |
 
@@ -543,6 +551,20 @@ check instead of bricking the commit. Know the limit of the lower tiers: the \`p
 shell tiers match paths under \`specs/\` literally, so if \`{{specsDir}}/\` differs from that,
 only the Node tier sees your specs and a clean commit is not evidence the frontmatter is
 valid.
+
+### Decision frontmatter
+
+Every staged \`docs/decisions/DR-NNN.md\` must carry an \`id: DR-NNN\` frontmatter line, mirroring
+the spec-frontmatter gate above one artifact class over. A DR created through
+*MinSpec: Create Architecture Decision Record* always has one; a hand-written DR can silently
+lack it, and without this gate nothing notices — the register then holds records of which only
+some are machine-readable, and every cross-reference into that DR from a commit, spec, or
+another DR resolves against an id that was never there to begin with.
+
+Enforced by the same shell case inside the pre-commit hook's SDD-validation stage that checks
+spec frontmatter, and by \`validate.py\`'s \`DR_ID_RE\` tier. The path is matched literally
+against \`docs/decisions/\`, so a project that has relocated \`{{decisionsDir}}/\` is not covered
+by the lower tiers — the same known limit the spec-frontmatter gate carries.
 
 ### Deferred-work gate
 
@@ -664,6 +686,7 @@ Anything waiting on the human — a decision, a credential, a manual step, a mer
   integration. Say the state you already observed alongside it, so the reader can
   decide without opening anything at all.
 - **Give each item a reply key.** One or two characters, restated on the line every turn so the human never scrolls back to find one: \`m\` merge · \`c\` close · \`d\` diff/details · \`r\` re-review · \`s\` skip.
+- **A key names what the agent does on receipt.** Agent-performed actions keep the existing form (\`m\` merge, \`r\` re-review, \`d\` diff). When only the human can act (closing a tab or session, a purchase, a command in their own terminal, an \`--admin\` merge keystroke, a click in an editor UI), state the step plainly and make the key a done-signal that names what the agent does when it arrives, e.g. \`tell me x once you have closed it - I will drop it from the queue and stop re-asking\`. A done-signal must state the consequence; without it the reader cannot tell why they are typing a letter.
 - **Every choice carries a recommendation and its cost.** When an item asks the human to *decide*, name the option you recommend and, in the same breath, the primary downside or risk of the option you are recommending. A menu with no recommendation hands the analysis back to the human; a recommendation with no stated cost is advocacy, not advice. Mark it \`(rec)\` on the option and follow with one clause naming what it costs. This applies wherever a decision is put to a human — the \`**Your turn**\` block **and** the body of any issue, PR, or DR that asks them to choose.
 
 The same block lists every pull request this session opened that is still unmerged — its number, the gate state already observed this turn, and its keys:
@@ -743,6 +766,7 @@ Anything waiting on the human — a decision, a credential, a manual step, a mer
   integration. Say the state you already observed alongside it, so the reader can
   decide without opening anything at all.
 - **Give each item a reply key.** One or two characters, restated on the line every turn so the human never scrolls back to find one: \`m\` merge · \`c\` close · \`d\` diff/details · \`r\` re-review · \`s\` skip.
+- **A key names what the agent does on receipt.** Agent-performed actions keep the existing form (\`m\` merge, \`r\` re-review, \`d\` diff). When only the human can act (closing a tab or session, a purchase, a command in their own terminal, an \`--admin\` merge keystroke, a click in an editor UI), state the step plainly and make the key a done-signal that names what the agent does when it arrives, e.g. \`tell me x once you have closed it - I will drop it from the queue and stop re-asking\`. A done-signal must state the consequence; without it the reader cannot tell why they are typing a letter.
 - **Every choice carries a recommendation and its cost.** When an item asks the human to *decide*, name the option you recommend and, in the same breath, the primary downside or risk of the option you are recommending. A menu with no recommendation hands the analysis back to the human; a recommendation with no stated cost is advocacy, not advice. Mark it \`(rec)\` on the option and follow with one clause naming what it costs. This applies wherever a decision is put to a human — the \`**Your turn**\` block **and** the body of any issue, PR, or DR that asks them to choose.
 
 The same block lists every pull request this session opened that is still unmerged — its number, the gate state already observed this turn, and its keys:
@@ -1358,6 +1382,21 @@ if [ "\${EMAIL_GATE_OFF:-0}" != "1" ]; then
     echo "  Bypass (rare): EMAIL_GATE_OFF=1 git commit ..." >&2
     exit 1
   fi
+  # rc 0 means the key IS set, even when \`git config minspec.allowedCommitEmails ""\`
+  # (a bootstrap script that forgot to fill in its \$EMAILS var produces exactly this
+  # shape) left it empty. That must not fold back into rc 1's "never configured" —
+  # it is opted in with a witness that can admit nothing, so like the unreadable
+  # config above it refuses visibly rather than silently no-op'ing (constitution
+  # invariant 2: no silent gate).
+  if [ "$minspec_allowed_rc" -eq 0 ] && [ -z "\${minspec_allowed_emails:-}" ]; then
+    echo "✗ MinSpec gate: minspec.allowedCommitEmails is set but names no address." >&2
+    echo "  An allowlist that admits nothing would refuse every commit, so this is" >&2
+    echo "  treated as a misconfiguration rather than opted out." >&2
+    echo "  Fix:  git config minspec.allowedCommitEmails <address> [<address> ...]" >&2
+    echo "        or turn this gate off: git config --unset-all minspec.allowedCommitEmails" >&2
+    echo "  Bypass (rare): EMAIL_GATE_OFF=1 git commit ..." >&2
+    exit 1
+  fi
   if [ -n "\${minspec_allowed_emails:-}" ]; then
     if ! minspec_author_ident=$(git var GIT_AUTHOR_IDENT); then
       echo "✗ MinSpec gate: cannot determine the author identity git will record (git var GIT_AUTHOR_IDENT failed)." >&2
@@ -1407,8 +1446,23 @@ if [ "\${EMAIL_GATE_OFF:-0}" != "1" ]; then
       echo "" >&2
       minspec_fix="git config $minspec_cfg_key <one of the allowed addresses above>"
       if [ -z "\${minspec_cfg_email:-}" ]; then
-        echo "  No author.email or user.email is configured, so git fell back to the" >&2
-        echo "  EMAIL environment variable (or <user>@<hostname>)." >&2
+        # Neither author.email nor user.email is set, so there is nothing here to
+        # compare the recorded author against — unlike the elif below. That does NOT
+        # mean the EMAIL fallback is the cause: git exports whichever source it used
+        # (GIT_AUTHOR_EMAIL, --author, an --amend / -C that kept an earlier commit's
+        # author) into THIS hook's environment as GIT_AUTHOR_EMAIL before running it
+        # (determine_author_info()), so \`git var GIT_AUTHOR_IDENT\` reports the same
+        # value regardless of which source produced it and this hook cannot tell them
+        # apart by reading its own environment. Those overrides outrank the EMAIL
+        # fallback and <user>@<hostname>, so they are the likelier explanation — and
+        # are the exact "ambient email shadowing the real one" case from the header
+        # above — not just a possible one, so the Fix leads with undoing them.
+        echo "  Neither author.email nor user.email is configured. The recorded address" >&2
+        echo "  most likely came from GIT_AUTHOR_EMAIL in the environment, git commit" >&2
+        echo "  --author, or an --amend / -C that kept an earlier commit's author —" >&2
+        echo "  those all outrank the EMAIL environment variable and <user>@<hostname>," >&2
+        echo "  which apply only if none of them do." >&2
+        minspec_fix="unset GIT_AUTHOR_EMAIL, drop --author, or add --reset-author; if none of those apply: git config $minspec_cfg_key <one of the allowed addresses above>"
       elif [ "$minspec_cfg_email" != "$minspec_author_email" ]; then
         echo "  git config $minspec_cfg_key is '$minspec_cfg_email', but this commit's author overrides it:" >&2
         echo "  GIT_AUTHOR_EMAIL in the environment, git commit --author, or an --amend / -C" >&2
@@ -1458,7 +1512,8 @@ fi
 # it degrades to the always-present shell gate below. Tiers:
 #   Node   — only if @aiclarity/minspec-validator is ALREADY resolvable
 #            (\`npx --no-install\`, never a network fetch that could E404-block).
-#   python — only if python3 is on PATH and validate.py exists.
+#   python — only if a python3/python/\`py -3\` candidate actually RUNS (not
+#            merely resolves on PATH, #2400) and validate.py exists.
 #   shell  — always present; the two pattern-matchable gates, inline below.
 
 # minspec_shell_gate: the always-correct baseline. (1) every staged specs/**/ md
@@ -1530,10 +1585,33 @@ if command -v npx >/dev/null 2>&1 \\
   exit $?
 fi
 
-# Python tier — ONLY when python3 + validate.py are present.
-if command -v python3 >/dev/null 2>&1 && [ -f "$hook_dir/validate.py" ]; then
-  python3 "$hook_dir/validate.py" --pre-commit
-  exit $?
+# Python tier — ONLY when a candidate interpreter actually RUNS (#2400). A name
+# being on PATH is not proof it can run the script: Windows ships python.exe /
+# python3.exe "app execution aliases" under
+# %LOCALAPPDATA%\\Microsoft\\WindowsApps that \`command -v\` resolves on every
+# machine, Python installed or not — with no Microsoft Store Python, invoking
+# the alias prints a Store-install prompt and exits non-zero. \`command -v
+# python3\` proved a NAME exists, never that it RUNS; only invoking it can tell
+# those apart, so probe each candidate by executing it. Order covers the
+# spellings that matter across platforms: python3 (POSIX / most installs),
+# python (the python.org Windows installer ships python.exe, not python3.exe),
+# then the py launcher's -3 switch (bundled with python.org Windows installs).
+if [ -f "$hook_dir/validate.py" ]; then
+  minspec_py=""
+  for minspec_py_candidate in python3 python "py -3"; do
+    # shellcheck disable=SC2086  # intentional word-split: "py -3" is launcher + flag.
+    if $minspec_py_candidate -c 'import sys; sys.exit(0 if sys.version_info[0] >= 3 else 1)' >/dev/null 2>&1; then
+      minspec_py="$minspec_py_candidate"
+      break
+    fi
+  done
+  if [ -n "$minspec_py" ]; then
+    # A real interpreter started: let its verdict (pass OR fail) stand — only
+    # "no candidate could start at all" falls through to the shell tier below.
+    # shellcheck disable=SC2086
+    $minspec_py "$hook_dir/validate.py" --pre-commit
+    exit $?
+  fi
 fi
 
 # Shell tier — always present.
