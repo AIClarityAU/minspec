@@ -20,25 +20,13 @@ phases:
 # MinSpec — The managed validator reads its corpora from config, so a project can extend it without editing managed code (Requirements)
 
 **What you are approving.** One change to `.minspec/hooks/validate.py`, the commit-gate
-script MinSpec scaffolds into every project: it will take the list of folders it checks from
+script MinSpec scaffolds into every project: it will read the folders it checks from
 `.minspec/config.json` instead of a list written into the script, so a project can add a
-folder without editing a file that *Refresh Harness Files* overwrites. The requirements are
-the ones you approved on 2026-10-01. That approval does not carry over, because the text has
-changed in four ways since. The three Clarify answers the spec already recommended are now
-written down by an agent, and stand only if you approve: a new `validatedCorpora` config key,
-no project-editable block inside the script, and this repository's own copy brought into line
-afterwards as issue #2390 (declare this repo's corpora in config). A count the old text got
-wrong is corrected: since #2264 (the shipped ownership rule), merged three minutes before
-your first approval, the shipped script already reads the config for one setting. Because of
-that, FR-2 now says outright that a config file which exists but cannot be read or parsed
-fails the whole script, replacing that rule's warn-and-carry-on. And the spec now says what
-it does not fix: the check that issue #1698 (refresh deleted a project's commit gate)
-reported lost. What it costs: once this is built, a broken config file blocks every commit
-the script checks until the file is fixed, where the shipped script today at most prints a
-warning; and an edit a project makes inside the managed part of a file, the check #1698 lost
-included, is still overwritten without notice on refresh, which needs a separate spec (issue
-#2615, the refresh half of #1698). Nothing is left open for you to answer: five choices are
-recorded with the alternatives not taken, and approving accepts all five.
+folder without editing a file that *Refresh Harness Files* overwrites. Your approval of
+2026-10-01 does not carry over, because an approval is tied to the exact text, which has
+changed. The cost that bites: once built, a broken config file blocks every commit the
+script checks until fixed; today the script at most warns. Nothing is left for you to
+answer: five choices are recorded below, and approving accepts all five.
 
 > **This is a SPECIFICATION ONLY.** No code, script, template, or test is created by this
 > document. It is the Specify-phase artifact for #1698 (harness refresh silently deletes a
@@ -55,35 +43,66 @@ recorded with the alternatives not taken, and approving accepts all five.
 
 The text approved on 2026-10-01 is the one on `main` at `901fea36`. Its canonical hash is
 `04311d22048f6c4b48efd6123d6855f5104202068887d18265df6ad5f10c545f`, the hash all three
-approval records of this spec carry. Every change from it is listed here; a line no item
-names is byte-identical to that text.
+approval records of this spec carry. An approval is bound to that hash, which is why it does
+not carry over to this text. The requirements are the ones approved then: all six functional
+requirements, six acceptance criteria and four invariants are still here, changed only as
+items 3 and 4 say. Every change is listed below, and a line no item names is byte-identical
+to the approved text. Items 1 to 4 are the four ways the text now says something different;
+items 5 and 6 are upkeep.
 
 1. **Clarify selections recorded for CQ-1, CQ-2 and CQ-3,** each taking the option the
-   approved text already recommended. Source: #2392 (the Clarify-selections pull request).
-   Its three selection lines are carried word for word. Its introductory paragraph is
-   extended to cover CQ-4 and CQ-5, and its five code citations are read again at
-   `901fea36`, where one range had moved (`resolveStatus`, `:483-490` to `:489-496`).
+   approved text already recommended: a new `validatedCorpora` config key, no
+   project-editable block inside the script, and this repository's own copy brought into
+   line afterwards, as #2390 (declare this repo's corpora in config). An agent wrote them
+   down, and they stand only if this spec is approved. Source: #2392 (the Clarify-selections
+   pull request). Its three selection lines are carried word for word. Its introductory
+   paragraph is extended to cover CQ-4 and CQ-5, and its five code citations are read again
+   at `901fea36`, where one range had moved (`resolveStatus`, `:483-490` to `:489-496`).
 2. **A stale measurement corrected.** The approved text said neither copy of the validator
-   reads `.minspec/config.json`. The shipped template has read it for one key since #2264
-   (the shipped ownership rule). Corrected in "The defect, measured" and in the three later
+   reads `.minspec/config.json`. Since #2264 (the shipped ownership rule), which merged
+   three minutes before the first approval of this spec, the shipped script already reads
+   the config for one setting. Corrected in "The defect, measured" and in the three later
    passages that leaned on the count: two list items under "Why this is invariant 2", and
    "config-blind" in the drift section, which becomes "hard-coded". Source: #2391 (the stale
    config-blind measurement), first reported in a comment on #2344 (the second approval
    pull request).
 3. **FR-2's reach stated, and one outcome fixed where FR-2 and the shipped template
-   disagree.** FR-2 gains a paragraph, FR-1 loses the word "unreadable", AC-7 is new, CQ-5
-   is new and carries a recorded selection, and the test that pins the old outcome is named
-   under Test and declared under `affects:` (with SPEC-038, the ownership rule's spec, added
-   to `relates_to:`). Source: #2391.
-4. **What this spec does not close is said outright.** A new Context section; AC-5 and CQ-1
-   option `b` no longer read as if this spec closed #1698; CQ-2 states the cost of not
-   taking `c`; CQ-4 is new and carries a recorded selection. Source: #2303 (the drain-written
-   rewrite of this spec).
+   disagree.** Because the shipped script now reads the config, FR-2 says outright that a
+   config file which exists but cannot be read or parsed fails the whole script, replacing
+   the shipped ownership rule's warn-and-carry-on. FR-2 gains a paragraph for that, FR-1
+   loses the word "unreadable", AC-7 is new, CQ-5 is new and carries a recorded selection,
+   and the test that pins the old outcome is named under Test and declared under `affects:`
+   (with SPEC-038, the ownership rule's spec, added to `relates_to:`). Source: #2391.
+4. **What this spec does not fix is said outright:** the check that #1698 reported lost. A
+   new Context section; AC-5 and CQ-1 option `b` no longer read as if this spec closed
+   #1698; CQ-2 states the cost of not taking `c`; CQ-4 is new and carries a recorded
+   selection. Source: #2303 (the drain-written rewrite of this spec).
 5. **Citations that had moved are read again at `901fea36`** in "The drift this repo
    currently carries proves the point". Source: this consolidation.
-6. **The top of the document:** the opening paragraph, this section, the wording of the note
-   under them, and a Prior-art entry for the config read the template already has. Source:
+6. **The top of the document:** the opening paragraph, the reworded note under it, this
+   section, and a Prior-art entry for the config read the template already has. Source:
    this consolidation.
+
+What approving costs:
+
+- **A broken config file blocks commits (CQ-5).** Once this is built, a config file that
+  exists but cannot be read or parsed blocks every commit the script checks until the file
+  is fixed. The shipped script today at most prints a warning.
+- **The loss #1698 reported can still happen (CQ-2, CQ-4).** An edit a project makes inside
+  the managed part of a file, the check #1698 lost included, is still overwritten without
+  notice on refresh. Stopping that needs a separate spec, tracked as #2615 (the refresh half
+  of #1698).
+
+The five recorded choices. Each is under Clarify selections with the alternatives not
+taken, and approving this spec accepts all five:
+
+| Question | What is recorded | What it costs |
+|---|---|---|
+| CQ-1 | A new `validatedCorpora` key in config lists the folders to check and what each requires | The specs folder can then be named in two places, so Plan must say which wins and test it |
+| CQ-2 | No project-editable block inside the script | A check that config cannot express has no safe place to live until #2615 is built |
+| CQ-3 | This repository's own copy of the script is brought into line afterwards, as #2390 | Until then the copy here stays different from the one MinSpec ships, under a waiver |
+| CQ-4 | Checks that compare two places in a document are left out | The check #1698 lost is not covered, so this spec cannot close #1698 |
+| CQ-5 | A config file that cannot be read or parsed fails the whole script | It blocks every commit the script checks until the file is fixed |
 
 Not carried:
 
