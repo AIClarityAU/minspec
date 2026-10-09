@@ -1,6 +1,18 @@
 #!/usr/bin/env bash
 # session-start.sh — injected at Claude Code session start
 
+# --- Lost panels (#2380, #2379) ---
+# RUN FIRST, printed below the header. The hook's JSON (session id, folder, transcript
+# path) arrives on standard input exactly once, and everything this script starts
+# inherits that stream, so the unit that needs it has to read it before anything else
+# can. Delegated to its own unit so it is tested by EXECUTION (see session-panel.py).
+# Never fatal, but never silent either: a check that stopped running reads exactly like
+# "no session lost its panel", which is how the dead-loop backstop went unnoticed for
+# three weeks (#2379). So a non-zero exit is reported in one line.
+_PANEL="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/session-panel.py"
+_PANEL_OUT="$(python3 "$_PANEL" start 2>/dev/null)"
+_PANEL_RC=$?
+
 cat <<'SCOPE'
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 MinSpec Monorepo — Session Start
@@ -17,6 +29,13 @@ ScroogeLLM status: awaiting Specify phase (future session)
 Topic drift → GitHub issue (AIClarityAU/minspec), not inline work.
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 SCOPE
+
+# Lost panels: what the unit at the top of this script found (#2380).
+if [ "$_PANEL_RC" -ne 0 ]; then
+  echo "⚠️  Lost-panel check did not run (exit $_PANEL_RC: $_PANEL) — a session that lost its panel is NOT being reported here (#2380)."
+elif [ -n "$_PANEL_OUT" ]; then
+  printf '%s\n' "$_PANEL_OUT"
+fi
 
 # --- Identity boundary (#1816) ---
 # Where this session runs decides whose GitHub account a bare `gh` or `git push` uses:
