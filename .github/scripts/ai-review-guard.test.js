@@ -2177,9 +2177,6 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
     assert.equal(p.panelKey, reviewPanelKey({ lsTree: TREE(), coverage: '' }));
     assert.match(p.comment, /carried forward/i);
     assert.ok(p.comment.includes(P));
-    // A bare array is accepted too (`gh api --jq .check_runs`).
-    const bare = JSON.stringify(JSON.parse(rawPlan().checkRunsJson).check_runs);
-    assert.equal(planVerdictCarry(rawPlan({ checkRunsJson: bare })).carry, true);
   });
 
   test('#1688 planVerdictCarry: a refusal still returns the hashes, an empty label and NO comment', () => {
@@ -2216,5 +2213,111 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
     }
     assert.equal(planVerdictCarry().carry, false);
     assert.equal(planVerdictCarry(null).carry, false);
+  });
+
+  // ── invariant 3, continued: a listing that is not the WHOLE list ──
+  //
+  // GitHub returns check-runs one page at a time, 100 at most. "The latest round" can
+  // only be known from all of them. A commit can collect more rounds than one page
+  // holds (ai-review-retry re-runs a blocked round on a schedule, and every re-run posts
+  // another check), and then the true latest can sit on a page nobody fetched while the
+  // newest run on the page that WAS fetched decides in its place. That would carry a
+  // pass a later round had already overturned, so a listing that cannot be shown to be
+  // whole is treated exactly like one that could not be read: the full panel runs.
+  const planPass = () => JSON.parse(rawPlan().checkRunsJson).check_runs[0];
+  const at = (minutes) => new Date(Date.UTC(2026, 9, 1, 0, minutes)).toISOString();
+  const changesRun = (minutes) =>
+    round({
+      conclusion: 'failure',
+      started_at: at(minutes),
+      completed_at: at(minutes),
+      output: { title: 'AI review: changes requested', summary: 'changes' },
+    });
+  const listingJson = (total, runs) => JSON.stringify({ total_count: total, check_runs: runs });
+  /** `n` runs whose newest is a pass that would carry if the list were whole. */
+  const newestIsPass = (n) => [
+    { ...planPass(), started_at: at(5000), completed_at: at(5000) },
+    ...Array.from({ length: n - 1 }, (_, i) => changesRun(i)),
+  ];
+
+  test('#1688 inv 3: page one of two never decides the latest round - the real latest was on the page not read', () => {
+    // 101 rounds on the previous head. Page one holds 100 of them: 99 old `changes`
+    // rounds and one pass, which is the newest thing ON THAT PAGE. Page two holds the
+    // real latest round, a `changes`.
+    const pageOne = newestIsPass(100);
+    const pageTwo = [changesRun(9000)];
+    assert.equal(pageOne.length + pageTwo.length, 101);
+    // Control: that same pass, as the whole list, IS a carry. So what stops it below is
+    // the missing page and nothing else about the fixture.
+    assert.equal(planVerdictCarry(rawPlan({ checkRunsJson: listingJson(1, [pageOne[0]]) })).carry, true);
+
+    const p = planVerdictCarry(rawPlan({ checkRunsJson: listingJson(101, pageOne) }));
+    assert.equal(p.carry, false, 'page one of two must never carry');
+    assert.equal(p.label, '', 'and names no label a caller could apply');
+    assert.equal(p.comment, '');
+    assert.match(p.reason, /100 of 101/, 'the run log says how short the listing was');
+    // The order GitHub happens to return a page in must not matter.
+    assert.equal(planVerdictCarry(rawPlan({ checkRunsJson: listingJson(101, [...pageOne].reverse()) })).carry, false);
+    // The refusal is about the listing, so it holds for the other page too.
+    assert.equal(planVerdictCarry(rawPlan({ checkRunsJson: listingJson(101, pageTwo) })).carry, false);
+  });
+
+  test('#1688 inv 3: each sign of a short listing refuses ON ITS OWN - the count, and a full page', () => {
+    // 1. The count. GitHub says more exist than it returned - even when what it did
+    //    return is far short of a page, so this cannot be the full-page rule firing.
+    for (const [returned, total] of [[1, 2], [2, 3], [1, 101], [50, 1000]]) {
+      const p = planVerdictCarry(rawPlan({ checkRunsJson: listingJson(total, newestIsPass(returned)) }));
+      assert.equal(p.carry, false, `${returned} of ${total} must not carry`);
+      assert.match(p.reason, new RegExp(`${returned} of ${total}`));
+    }
+    // 2. A full page, even when the count AGREES with it. 100 is the most one request
+    //    can return, so a full page is never proof that there is no next one.
+    assert.equal(g.CHECK_RUNS_PAGE_SIZE, 100);
+    const full = planVerdictCarry(rawPlan({ checkRunsJson: listingJson(100, newestIsPass(100)) }));
+    assert.equal(full.carry, false, 'a full page must not carry, whatever the count says');
+    assert.match(full.reason, /full page/);
+    //    Control: one fewer is a whole list and carries, so rule 2 is not simply
+    //    refusing every long listing.
+    assert.equal(planVerdictCarry(rawPlan({ checkRunsJson: listingJson(99, newestIsPass(99)) })).carry, true);
+    // 3. A count that disagrees the other way is not a listing to trust either.
+    assert.equal(planVerdictCarry(rawPlan({ checkRunsJson: listingJson(1, newestIsPass(2)) })).carry, false);
+  });
+
+  test('#1688 inv 3: a listing that does not say how many check runs exist cannot be shown to be whole', () => {
+    const pass = planPass();
+    for (const total of [undefined, null, '1', 1.5, -1, true, [1], {}]) {
+      const json = JSON.stringify({ total_count: total, check_runs: [pass] });
+      const p = planVerdictCarry(rawPlan({ checkRunsJson: json }));
+      assert.equal(p.carry, false, `total_count=${JSON.stringify(total)} must not carry`);
+      assert.match(p.reason, /how many/);
+    }
+    // A bare array (`gh api --jq .check_runs`) has thrown the count away. It used to be
+    // accepted; it is exactly the shape that hides a second page.
+    const bare = planVerdictCarry(rawPlan({ checkRunsJson: JSON.stringify([pass]) }));
+    assert.equal(bare.carry, false, 'a bare array must not carry');
+    assert.match(bare.reason, /could not be read/);
+    // Control: the same run, in a listing that says it is the only one, carries.
+    assert.equal(planVerdictCarry(rawPlan({ checkRunsJson: listingJson(1, [pass]) })).carry, true);
+  });
+
+  test('#1688 inv 7: a short listing on the CURRENT head does not stand the staleness guard down', () => {
+    // The staleness guard asks the same question about the head being pushed. If it
+    // cannot see every round there, it cannot know the reviewer's latest word is a pass,
+    // so the push-time strip stays exactly what it was.
+    const passOnHead = round({ head_sha: H });
+    const whole = latestHeadRound({ listing: { total_count: 1, check_runs: [passOnHead] }, allowlist: ALLOW, headSha: H });
+    assert.equal(whole.complete, true, 'control: the whole list, with a pass, stands the guard down');
+    assert.equal(decideStalenessStrip({ action: 'synchronize', labels: [PASS], headRound: whole }).strip, false);
+    for (const listing of [
+      { total_count: 2, check_runs: [passOnHead] }, // one of two
+      { check_runs: [passOnHead] }, // no count
+      [passOnHead], // a bare array
+      { total_count: 100, check_runs: Array.from({ length: 100 }, () => passOnHead) }, // a full page
+    ]) {
+      const short = latestHeadRound({ listing, allowlist: ALLOW, headSha: H });
+      assert.equal(short.complete, false);
+      assert.equal(short.found, false, 'a short listing is not "a round was found"');
+      assert.equal(decideStalenessStrip({ action: 'synchronize', labels: [PASS], headRound: short }).strip, true);
+    }
   });
 }
