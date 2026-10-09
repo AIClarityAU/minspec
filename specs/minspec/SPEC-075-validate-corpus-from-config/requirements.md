@@ -57,7 +57,7 @@ items 5 and 6 are upkeep.
    down, and they stand only if this spec is approved. Source: #2392 (the Clarify-selections
    pull request). Its three selection lines are carried word for word. Its introductory
    paragraph is extended to cover CQ-4 and CQ-5, and its five code citations are read again
-   at `901fea36`, where one range had moved (`resolveStatus`, `:483-490` to `:489-496`).
+   at `1bc9e484`, where one range had moved (`resolveStatus`, `:483-490` to `:489-496`).
 2. **A stale measurement corrected.** The approved text said neither copy of the validator
    reads `.minspec/config.json`. Since #2264 (the shipped ownership rule), which merged
    three minutes before the first approval of this spec, the shipped script already reads
@@ -72,13 +72,17 @@ items 5 and 6 are upkeep.
    the shipped ownership rule's warn-and-carry-on. FR-2 gains a paragraph for that, FR-1
    loses the word "unreadable", AC-7 is new, CQ-5 is new and carries a recorded selection,
    and the test that pins the old outcome is named under Test and declared under `affects:`
-   (with SPEC-038, the ownership rule's spec, added to `relates_to:`). Source: #2391.
+   (with SPEC-038, the ownership rule's spec, added to `relates_to:`). "Why no new DR" now
+   names this choice, says why it carries no decision record of its own, and says what it
+   leaves to #1687 (validator rules that warn when they cannot run) and #2001 (a malformed
+   config downgrades every configured severity). Source: #2391.
 4. **What this spec does not fix is said outright:** the check that #1698 reported lost. A
    new Context section; AC-5 and CQ-1 option `b` no longer read as if this spec closed
    #1698; CQ-2 states the cost of not taking `c`; CQ-4 is new and carries a recorded
    selection. Source: #2303 (the drain-written rewrite of this spec).
-5. **Citations that had moved are read again at `901fea36`** in "The drift this repo
-   currently carries proves the point". Source: this consolidation.
+5. **Every line citation is read again at `1bc9e484`:** in "The drift this repo currently
+   carries proves the point", and in each passage items 1 to 4 add. Source: this
+   consolidation.
 6. **The top of the document:** the opening paragraph, the reworded note under it, this
    section, and a Prior-art entry for the config read the template already has. Source:
    this consolidation.
@@ -87,7 +91,9 @@ What approving costs:
 
 - **A broken config file blocks commits (CQ-5).** Once this is built, a config file that
   exists but cannot be read or parsed blocks every commit the script checks until the file
-  is fixed. The shipped script today at most prints a warning.
+  is fixed. The shipped script today at most prints a warning. This spec makes that choice
+  itself, with no decision record of its own: "Why no new DR" gives the reasons and says
+  what is left to #1687 and #2001.
 - **The loss #1698 reported can still happen (CQ-2, CQ-4).** An edit a project makes inside
   the managed part of a file, the check #1698 lost included, is still overwritten without
   notice on refresh. Stopping that needs a separate spec, tracked as #2615 (the refresh half
@@ -149,18 +155,18 @@ reads them:
 | `specsDir` | `specs` | no |
 | `decisionsDir` | `docs/decisions` | no |
 
-Measured at `901fea36`, as occurrences of each term:
+Measured at `1bc9e484`, as occurrences of each term:
 
 | copy | `config.json` | `import json` | `specsDir` | `decisionsDir` |
 |---|---:|---:|---:|---:|
 | this repository's, `.minspec/hooks/validate.py` | 0 | 0 | 0 | 0 |
-| the shipped template, `VALIDATE_PY`, `template-registry.ts:1759-2163` | 5 | 1 | 0 | 0 |
+| the shipped template, `VALIDATE_PY`, `template-registry.ts:1781-2222` | 5 | 1 | 0 | 0 |
 
 The two copies differ on whether they read the config at all, and agree that the corpora do
 not come from it. This repository's copy reads no config. The shipped template has read
 `.minspec/config.json` for one key, `ownershipDeclaration`, since #2264 (the shipped
-ownership rule; `ownership_declaration`, `template-registry.ts:1880-1897`), and still
-hard-codes its corpus list (`:2080-2084`). The text approved on 2026-10-01 said both copies
+ownership rule; `ownership_declaration`, `template-registry.ts:1927-1944`), and still
+hard-codes its corpus list (`:2127-2131`). The text approved on 2026-10-01 said both copies
 had zero occurrences of `config.json` and of `import json`. That was true of the template
 until #2264 merged, three minutes before the first approval, and it is corrected here
 (#2391, the stale config-blind measurement).
@@ -192,12 +198,12 @@ looking — or never looked at the declared truth in the first place — is the 
 
 ### The drift this repo currently carries proves the point
 
-The live file and its own template diverge on corpora today, measured at `901fea36`
-(`.minspec/hooks/validate.py:92` vs. `template-registry.ts:2080-2084`):
+The live file and its own template diverge on corpora today, measured at `1bc9e484`
+(`.minspec/hooks/validate.py:92` vs. `template-registry.ts:2127-2131`):
 
 - live validates `specs` + `docs/domain`
 - the template validates `specs` + `docs/decisions` + `docs/domain` — a strict superset,
-  including the DR-frontmatter check (`DR_ID_RE`, `template-registry.ts:1784`) the live file
+  including the DR-frontmatter check (`DR_ID_RE`, `template-registry.ts:1812`) the live file
   lacks entirely
 
 So today's drift runs one way: a refresh here would **add** `docs/decisions` coverage and
@@ -221,7 +227,7 @@ and none of the acceptance criteria below compares two places in a document.
 So this spec closes one class of silent loss: a corpus the project needs checked lives in
 config, which a refresh does not own, instead of in a list a refresh rewrites. It does not
 give the project that filed #1698 a home for the check it lost (CQ-4), and it does not change
-what a refresh does to an edit made inside a managed region. At `901fea36`
+what a refresh does to an edit made inside a managed region. At `1bc9e484`
 `refreshManagedRegionTemplates` (`packages/minspec/src/lib/scaffold.ts:1100`) splices the
 template into the region and writes whenever the bytes differ (`:1141-1146`), and returns a
 warning only for a file it left untouched (`:1092-1094`), so a replaced region is reported
@@ -246,7 +252,7 @@ reasons under Changes since the approved text. It is tracked as #2615 (the refre
 - **DR-037** owns the hook-scaffolding chain this validator sits in; the config read must not
   change the hook's detection or install contract.
 - **The shipped template already reads `.minspec/config.json`,** for `ownershipDeclaration`
-  (`template-registry.ts:1880-1897`). The corpora must come from that same read, not from a
+  (`template-registry.ts:1927-1944`). The corpora must come from that same read, not from a
   second one beside it with a failure rule of its own (FR-2, CQ-5).
 
 ### Why no new DR
@@ -257,6 +263,94 @@ behaviour parameterised by `.minspec/config.json`). This spec applies that postu
 If Clarify selects an unmanaged-code-region design instead (CQ-2 below), that **would** need a
 DR, because a sanctioned edit point inside a managed file is a new and hard-to-reverse public
 contract.
+
+**This spec makes a second choice, and writes no decision record for it either.** FR-2 with
+its reach (CQ-5) makes the shipped script exit non-zero whenever `.minspec/config.json` exists
+and cannot be read or parsed. The shipped ownership rule does the opposite with the same file
+today: it prints a warning and carries on at its default (`template-registry.ts:1937-1942`),
+and its docstring says that is to match the extension's `loadConfig` (`:1928-1930`). Once
+built, FR-2 ends that leniency in every project that takes the new script on a harness
+refresh. The approved text of this section did not mention the choice. It is put to approval
+here, and not in a record of its own, for four reasons.
+
+1. **It is the requirement approved on 2026-10-01.** FR-2's first paragraph, AC-4 and INV-1
+   are byte-identical to the approved text. AC-4 requires a non-zero exit on a config that
+   does not parse. `packages/minspec/tests/shipped-ownership-gate-2250.test.ts:284-290` runs
+   the shipped template, with no `--pre-commit` flag, over a config containing `{ not json`
+   and requires exit 0. One run has one exit code, so no build of the approved AC-4 leaves
+   that case standing. CQ-5 did not introduce the choice. It records a collision that was
+   already there when the text was approved (#2391, the stale config-blind measurement, which
+   triage holds for a human on exactly this point), and sets the two softer answers, `i` and
+   `j`, beside it with their costs.
+2. **It follows the direction a recorded decision already sets.** Invariant 2 reads "a
+   missing or errored witness fails the gate closed and visibly (never silently passes or
+   stops evaluating)" (`.minspec/constitution.md:8`), and DR-066 (no silent gate), which it
+   cites, says such a gate "must read red / blocked" (`docs/decisions/DR-066.md:57-59`).
+   `validate.py` is the validator the scaffolded CI workflow runs in a project with no npm
+   `validate` script, and its exit code decides that job (`template-registry.ts:1106-1115`).
+   With a config it cannot parse, the script does not know what the project declared: not its
+   corpora, once they come from config, and not whether the ownership rule was set to
+   `error`. Exit 0 then reads green. The comment that explains the leniency speaks of not
+   nagging (`:2140-2141`), which is principle 4 (`.minspec/constitution.md:18`). The
+   constitution lets a principle bend with justification (`:13`) and says an invariant must
+   never be violated (`:5`).
+3. **What it replaces was never a recorded decision.** SPEC-038 (spec-to-code ownership) says
+   the rule fails (FR-3, `specs/minspec/SPEC-038-spec-code-ownership/requirements.md:45`) and
+   that one config value moves it from warning to error (FR-7, `:55`). It does not say what a
+   config that cannot be read does to that value: across its `requirements.md`, `design.md`
+   and `tasks.md`, "unreadable", "loadConfig" and "validate.py" occur zero times, and
+   "malformed" once, of an owned path (`:52`). The leniency came in with #2264 (the shipped
+   ownership rule), a bug fix, as that docstring, a comment (`template-registry.ts:2140-2141`)
+   and the test case above, whose file no spec lists under `implements:`. Of the records in
+   `docs/decisions/` that contain "cannot be read", "unreadable", "does not parse",
+   "invalid", "loadConfig", "#2250" or "#2264", one is about this read, and it describes the
+   read without deciding it: DR-099 (code-quality checks split by class) lists it in its
+   Context among the warnings the harness already prints
+   (`docs/decisions/DR-099.md:74-75`), and says of those that they "were each decided where
+   the check was written" (`:190`). DR-006 (auto-detect setup actions) names an invalid
+   `config.json` only to park repairing one (`docs/decisions/DR-006.md:86`). So SPEC-038's
+   text does not change. The docstring, the comment and the test case change with the
+   template, which is why both files are under `affects:`.
+4. **It is the direction that is cheap to undo.** The constitution asks for a decision record
+   before a hard-to-reverse decision (principle 6, `.minspec/constitution.md:20`). Returning
+   to a warning later is one template change and that test case put back, and it breaks no
+   project: a script that stops failing blocks nobody. A project that had already refreshed
+   keeps the strict script until it refreshes again. CQ-2's `c` is the opposite case, an edit
+   point projects would build on and that could not be withdrawn. This is a judgment about
+   cost, not a measurement.
+
+**What invariant 2 does not settle.** It does not decide this alone, and this spec does not
+claim it does. The shipped read already does the visible half, since it prints a warning.
+What it lacks is the closed half, and two open issues ask about that half in neighbouring
+code. Both recommend something softer than FR-2:
+
+- **#1687** (four rules in this repository's own Node validator warn and exit 0 when they
+  cannot run; labelled `hold:human`). It recommends failing closed in CI and warning locally,
+  and says the answer "likely needs a DR either way, since it changes what a green validator
+  run means".
+- **#2001** (`loadConfig` returns the defaults for a config it cannot parse,
+  `packages/minspec/src/lib/config.ts:214-216`; labelled `hold:specify`). It recommends
+  keeping the fallback and announcing it, because the same function runs when the extension
+  starts, where an unhandled error is the worse failure.
+
+This spec answers neither. It decides one condition, a config file that is present and
+cannot be read or parsed, for one script, the shipped `validate.py`, which runs only as a
+gate and has no editor to keep alive. One cost #1687 names does not arise here, a folder
+that is legitimately absent starting to fail commits: a configured folder the project does
+not have is not an error (AC-3), and an absent config keeps today's defaults (FR-1). The
+other does, and CQ-5 states it: a broken config blocks commits that have nothing to do with
+it. Left to #1687: what a rule in the Node validator does when it cannot run, and whether
+invariant 2's wording changes. Left to #2001: what `loadConfig`, the extension, and the Node
+validator that reads its config through it (`scripts/validate-frontmatter.ts:747-752`) do
+with the same broken file. Once this spec is built, the shipped script is stricter than the
+extension on that file. That difference is intended, a gate beside an editor, and is not
+drift to be brought back into line with `loadConfig`. A general rule, for more than this one
+script and this one condition, is not set here. #1687 is where that question is open, and it
+already expects a decision record. If such a rule comes out softer than FR-2, it amends this
+spec.
+
+A reader who holds that this choice needs a decision record of its own should say so before
+approving. Approving this spec accepts FR-2's reach without one.
 
 ## Functional Requirements
 
@@ -281,8 +375,8 @@ contract.
   cannot be parsed. This replaces the outcome the shipped ownership rule has today for the
   same file: a `WARN` line, after which the rule runs at its default, with the read deferred
   to the first spec so that a commit which stages none never hears about a broken config
-  (`template-registry.ts:1890-1895`, `:2093-2095`, `:2125-2126`). An absent config is not a
-  failure and keeps today's default for every rule (FR-1; `:1885-1886`). What else counts as
+  (`template-registry.ts:1937-1942`, `:2140-2142`, `:2179-2180`). An absent config is not a
+  failure and keeps today's default for every rule (FR-1; `:1932-1933`). What else counts as
   malformed (a file that parses to something other than an object, a `validatedCorpora`
   entry of the wrong type) is for Plan, bounded by INV-1: an entry the validator cannot
   interpret MUST NOT be skipped silently.
@@ -444,12 +538,12 @@ so both cannot hold.
 whole script. It is the only option that leaves FR-2, AC-4 and INV-1 as they were approved.
 It also matches the fail direction recorded for the scaffolded hook, where a missing
 prerequisite fails open and an error inside the hook fails closed
-(`template-registry.ts:1200-1206`): an absent config is the missing prerequisite (FR-1), and
+(`template-registry.ts:1202-1208`): an absent config is the missing prerequisite (FR-1), and
 a config that is present and broken is the error. That match is a reading by analogy, since
 the comment speaks of a missing tool and of a tooling bug and does not mention the config.
 And the selection settles one word. FR-1 as approved listed "unreadable" among the cases
 that keep today's corpora, while INV-1 forbids narrowing coverage without a non-zero exit,
-and the shipped read uses "unreadable" for a parse failure too (`:1890-1892`). FR-1 now
+and the shipped read uses "unreadable" for a parse failure too (`:1937-1939`). FR-1 now
 keeps the default for an absent config and for one that parses and declares no corpora, and
 nothing else.
 
@@ -457,11 +551,11 @@ nothing else.
   its config value from it; a config that exists and cannot be read or parsed exits non-zero
   on every run.
   **Cost:** it withdraws a leniency #2264 chose on purpose, "a broken config does not nag on
-  every unrelated commit" (`:2093-2094`). After this spec such a config fails every run of
+  every unrelated commit" (`:2140-2141`). After this spec such a config fails every run of
   the script, so it blocks every commit the script checks, whatever is staged, until the
-  file is fixed or the gate is bypassed by name (`MINSPEC_GATE_OFF=1`, `:1210`). It also
+  file is fixed or the gate is bypassed by name (`MINSPEC_GATE_OFF=1`, `:1215`). It also
   makes the script stricter than the extension, whose `loadConfig` falls back to defaults on
-  the same file (`packages/minspec/src/lib/config.ts:189-191`).
+  the same file (`packages/minspec/src/lib/config.ts:214-216`).
 - **`i` - fail closed only when a staged file could be in scope** (for example, only when a
   Markdown file is staged), so a commit that touches no document is never blocked.
   **Cost:** FR-2 as approved carries no such condition, so this narrows an approved
