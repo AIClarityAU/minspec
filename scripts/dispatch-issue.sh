@@ -23,42 +23,124 @@ WORKTREE_BASE="/tmp/minspec-agent"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROLES_DIR="${SCRIPT_DIR}/roles"
 
-# ── "Not started" record for the caller (#2641) ──────────────────────────────
+# ── Started or refused: said by exit status, to a caller that asks (#2641) ────
 # This script exits 0 both when it has run a build and when it has declined to start
-# one: the issue is not dispatchable any more, or another session owns it. The exit code
-# keeps that meaning, because a deferral is not an error. But a caller that budgets its
-# launches has to tell the two apart, and the drain could not. It counted a refusal as a
-# dispatch, so the same refused issues at the top of its ranking used every slot of its
-# queue limit on every cycle, and it started nothing for 8.5 hours while logging
-# "cycle done" (#2641).
+# one: the issue is not dispatchable any more, or another session owns it. A caller that
+# budgets its launches has to tell the two apart, and the drain could not. It counted a
+# refusal as a dispatch, so the same refused issues at the top of its ranking used every
+# slot of its queue limit on every cycle, and it started nothing for 8.5 hours while
+# logging "cycle done" (#2641).
 #
-# So a caller may name a file in MINSPEC_DISPATCH_OUTCOME_FILE, and every exit below
-# that started nothing writes one line there: `not-started <why>`. No record means
-# "assume it started", which is the reading that can only make a caller launch LESS. An
-# older copy of this script, or an exit nobody has taught to report, costs the caller a
-# slot and never grants one. For that reason nothing past the won claim may ever call
-# report_not_started: a record left by a run that went on to build would hand its
-# caller a launch it had not counted.
+# A caller that sets MINSPEC_DISPATCH_OUTCOME_STATUS=1 is answered by this process's own
+# exit status:
 #
-# A file, and not a line of output, because this script's output carries the issue
-# title and, later, the agent's own prose. A marker in that stream could be written by
-# the text it is meant to describe, which is the mistake #2233 records for the
-# usage-limit notice. For the same reason the name is taken OUT of the environment here,
-# before anything else runs: nothing this script launches, the agent least of all, is
-# told where the record is.
-DISPATCH_OUTCOME_FILE="${MINSPEC_DISPATCH_OUTCOME_FILE:-}"
-unset MINSPEC_DISPATCH_OUTCOME_FILE
+#   DISPATCH_RC_DECLINED   refused before the claim. Nothing was started.
+#   DISPATCH_RC_STARTED    the claim was won, and the run ended the way it used to end on
+#                          0: built, escalated or crashed.
+#   0                      NO ANSWER. An exit neither function below was called for. The
+#                          caller must read it as neither of the two.
+#   anything else          a failure, as before.
+#
+# A caller that does not ask gets exit 0 for the first three, exactly as before. That is
+# what keeps an older drain working with this script: it cannot ask, and it would count
+# an unfamiliar non-zero status as a failed dispatch (three all-failed cycles stop its
+# loop).
+#
+# WHY THE EXIT STATUS, AND NOT A RECORD. The first version of this wrote `not-started`
+# into a file the caller named in the environment, and unset the variable so that the
+# agent would not learn the name. That hid nothing. Unsetting a variable does not change
+# the environment a process STARTED with, any process of the same user can read that
+# from /proc/<pid>/environ, and the agent runs arbitrary commands as this user (see the
+# note on ALLOWED_TOOLS below: "defense-in-depth, NOT a sandbox"). An agent could mark
+# its own build "not started" and hand the caller a launch it had not counted. A line of
+# output would be no better: the agent's prose travels on this script's output, and a
+# marker there can be written by the text it describes (#2233 is that mistake, made once
+# already with the usage-limit notice).
+#
+# An exit status has no such door. It is stored nowhere, it is this process's own, and
+# the caller reads it from its own wait on the process it launched. So nothing here is
+# hidden and nothing needs to be: the variable stays in the environment, and all an
+# agent learns from it is that the caller asked.
+#
+# What is left is this script ending on one of the two numbers by ACCIDENT: under
+# `set -e`, because a command it ran after the agent happened to exit with it.
+# _dispatch_on_exit closes that. Only exit_declined and exit_started leave on those
+# numbers, and exit_declined cannot once the claim is won.
+DISPATCH_RC_DECLINED=75
+DISPATCH_RC_STARTED=76
 
-# report_not_started <why>: record that this run is exiting without having started any
-# work. A no-op when no caller asked. Never fatal, and never quiet: a record that cannot
-# be written costs the caller a slot, so it is said where the caller's log will carry it.
-report_not_started() {
-  [[ -n "$DISPATCH_OUTCOME_FILE" ]] || return 0
-  if ! printf 'not-started %s\n' "$1" > "$DISPATCH_OUTCOME_FILE"; then
-    echo "WARNING: could not record 'not-started' for #$ISSUE in $DISPATCH_OUTCOME_FILE: the caller will count this run as a dispatch (#2641)." >&2
+DISPATCH_STATUS_ASKED=0
+case "${MINSPEC_DISPATCH_OUTCOME_STATUS:-}" in
+  "") ;;
+  1)  DISPATCH_STATUS_ASKED=1 ;;
+  *)  echo "WARNING: MINSPEC_DISPATCH_OUTCOME_STATUS is set to something other than 1, the only question this script knows. #$ISSUE will end on exit 0 with no answer, and its caller must not count that as a build or as a refusal (#2641)." >&2 ;;
+esac
+
+# 1 once this run has won its claim, or has none to win (MINSPEC_CLAIM_OFF). Set in ONE
+# place and never cleared. Before it nothing has been started; after it, work has.
+DISPATCH_CLAIMED=0
+# 1 once there is a claim to give back when this script exits.
+DISPATCH_RELEASE_ON_EXIT=0
+# The answering status this run has itself chosen to leave on, if any.
+DISPATCH_EXIT_AS=""
+
+# exit_declined: leave, having started nothing. For an exit BEFORE the claim.
+#
+# Reached after the claim it is a mistake in this script, and that mistake must not be
+# able to hand the caller a launch it did not count. It says so and answers "started".
+exit_declined() {
+  if (( DISPATCH_CLAIMED )); then
+    echo "WARNING: #$ISSUE reached a 'refused before starting' exit AFTER its claim was won. Work was started, and that is what its caller is told (#2641)." >&2
+    exit_started
+  fi
+  (( DISPATCH_STATUS_ASKED )) || exit 0
+  DISPATCH_EXIT_AS="$DISPATCH_RC_DECLINED"
+  exit "$DISPATCH_RC_DECLINED"
+}
+
+# exit_started: leave on what used to be exit 0, from a run that won its claim. Before the
+# claim it answers nothing (exit 0): "started" is never said on a guess.
+exit_started() {
+  (( DISPATCH_STATUS_ASKED && DISPATCH_CLAIMED )) || exit 0
+  DISPATCH_EXIT_AS="$DISPATCH_RC_STARTED"
+  exit "$DISPATCH_RC_STARTED"
+}
+
+# _dispatch_on_exit: the ONE exit trap of this script. It has two jobs.
+#
+# It gives the claim back (D6/D10). That used to be a trap of its own, set where the
+# claim is won. `trap ... EXIT` REPLACES whatever was set before it, so there cannot be
+# two; DISPATCH_RELEASE_ON_EXIT now says when there is a claim to give back.
+#
+# And it keeps the two answering statuses for the two functions above. `$?` is read
+# FIRST, before anything in here can change it.
+#
+# It calls `exit` only to CHANGE a status, and otherwise returns 0, which leaves this
+# script exiting on whatever it was already exiting with. `set +e` first: nothing in a
+# handler may end it early on a status of its own.
+#
+# A run killed by a signal is not an answer either, and cannot become one here. bash
+# runs this trap on SIGTERM, SIGINT and SIGHUP with `$?` holding the LAST COMMAND's
+# status and not the signal, so the guard below can see a 0 or, by coincidence, one of
+# the two numbers. Either way the shell then dies OF the signal, whatever this handler
+# returned or exited with, and the caller reads 128 + n: a failure. (Measured on bash
+# 5.2 for all three signals; a test pins it for SIGTERM, with each of the three values
+# in `$?`.)
+_dispatch_on_exit() {
+  local rc=$?
+  set +e
+  if (( DISPATCH_RELEASE_ON_EXIT )); then
+    lease_stop_renew_ticker; lease_release_all >/dev/null 2>&1 || true
+  fi
+  if (( DISPATCH_STATUS_ASKED )) \
+    && [[ "$rc" == "$DISPATCH_RC_DECLINED" || "$rc" == "$DISPATCH_RC_STARTED" ]] \
+    && [[ "$rc" != "$DISPATCH_EXIT_AS" ]]; then
+    echo "WARNING: #$ISSUE was ending on status $rc, which this script keeps for its own 'started' and 'refused' answers and did not choose here. Reported as a plain failure instead (#2641)." >&2
+    exit 1
   fi
   return 0
 }
+trap _dispatch_on_exit EXIT
 
 # Pin every bare `git` op to the repo THIS SCRIPT lives in, never the caller's
 # inherited cwd (#1896). `gh` calls below all target $REPO explicitly; the git
@@ -558,6 +640,10 @@ if ! VERDICT_SRC=$(mktemp 2>/dev/null) || ! BODY_FILE=$(mktemp 2>/dev/null); the
   # and "could not tell" must never be read as "ready" (#983).
   rm -f "${VERDICT_SRC:-}" 2>/dev/null || true
   echo "Skipping #$ISSUE — could not create the scratch files the verdict-record check needs (mktemp failed); failing closed rather than dispatching unverified (#983)."
+  # A plain exit 0, deliberately NOT exit_declined (#2641). This is a fault of the
+  # machine, not a property of the issue, so it will meet the next issue too: answering
+  # "refused" would give the caller its slot back and walk it through the whole queue
+  # on a full disk. With no answer the caller counts the offer and says it got none.
   exit 0
 fi
 # Every TRUSTED comment body, oldest→newest (the gate takes the LAST record, so a
@@ -590,10 +676,6 @@ rm -f "$VERDICT_SRC" "$BODY_FILE"
 
 if [[ "$READY_OK" -ne 1 ]]; then
   echo "Skipping #$ISSUE — not dispatchable at dispatch time: ${READY_REASON}"
-  # Told to the caller FIRST (#2641), before the hold below is surfaced: surfacing
-  # writes to GitHub and can abort this script, and the fact that nothing was started
-  # is already settled. The refusal itself is unchanged, and so is the exit code.
-  report_not_started not-ready
   case "$READY_REASON" in
     *'[closed]'*|*'[no-label]'*|*'[countermanded]'*)
       # #406 staleness classes: self-evident from the issue's own state/labels, so
@@ -612,7 +694,11 @@ if [[ "$READY_OK" -ne 1 ]]; then
       fi
       ;;
   esac
-  exit 0
+  # Nothing was started, and a caller that asked is told so (#2641). The refusal itself
+  # is unchanged, and for a caller that did not ask so is the exit code: 0. This comes
+  # LAST, after the hold is surfaced: a surfacing that aborts this script is a failure,
+  # and is reported as one.
+  exit_declined
 fi
 
 # ── Which MODE did the gate authorise? (#1169 / DR-076) ──────────────────────
@@ -710,28 +796,25 @@ if [[ "${MINSPEC_CLAIM_OFF:-0}" != "1" ]]; then
   # Held in THIS parent (fd 200, via the sourced lib) for the dispatch's lifetime, so a
   # second local racer cannot mutate this item's worktree/branch under us (INV-7).
   #
-  # Each of the three stand-downs below started nothing, and says so to the caller
-  # (#2641, report_not_started). None of them shows in the labels the caller read, so
-  # the caller cannot see one coming: without the record, each took a slot of its queue
-  # limit, and took it again on every cycle the stand-down recurred.
+  # Each of the three stand-downs below started nothing, and says so to a caller that
+  # asked (#2641, exit_declined). None of them shows in the labels the caller read, so
+  # the caller cannot see one coming: counted as a dispatch, each took a slot of its
+  # queue limit, and took it again on every cycle the stand-down recurred.
   if ! lease_flock "$ISSUE"; then
     echo "Standing down on #$ISSUE — another live local session holds the per-item flock (FR-11/INV-7)."
-    report_not_started flock-held
-    exit 0
+    exit_declined
   fi
   # D12/FR-3b sequential guard — refuse a closed/already-shipped item BEFORE any build.
   # The PR-per-head CAS window closes on merge, so at-most-one-merge across TIME rests here.
   if ! lease_gate_open_unshipped "$ISSUE"; then
     echo "Refusing #$ISSUE — issue is closed or already shipped (FR-3b/INV-1). Never re-dispatched."
-    report_not_started closed-or-shipped
-    exit 0
+    exit_declined
   fi
   # Soft claim: post → re-read TO EXHAUSTION → verify winner (FR-1/FR-2). Not the
   # winner, or a provably-incomplete enumeration ⇒ stand down (INV-6).
   if ! lease_acquire "$ISSUE"; then
     echo "Standing down on #$ISSUE — a live claim owned by another session wins the check (FR-1/FR-2/INV-6)."
-    report_not_started claim-lost
-    exit 0
+    exit_declined
   fi
   echo "Claimed #$ISSUE (session $(lease_self_sid)) — proceeding to build."
   # D10/FR-12 — renewal is PARENT-side (the agent is credential-free, INV-5) and driven
@@ -739,13 +822,21 @@ if [[ "${MINSPEC_CLAIM_OFF:-0}" != "1" ]]; then
   # its own live claim. The EXIT trap tears the ticker down and retracts every claim
   # this session holds, so a crash or ^C can never strand a live-LOOKING claim that
   # blocks the item until its TTL lapses.
+  #
+  # The trap is _dispatch_on_exit, set once at the top of this script (#2641): a second
+  # `trap ... EXIT` here would replace it. This flag is what arms the teardown in it.
   lease_start_renew_ticker "$ISSUE"
-  trap 'lease_stop_renew_ticker; lease_release_all >/dev/null 2>&1 || true' EXIT
+  DISPATCH_RELEASE_ON_EXIT=1
   # Absolute build ceiling (FR-12). Build-independent renew means a HUNG build would
   # otherwise hold the claim forever; this bounds it from the CLAIM, so escalation
   # retries share ONE budget instead of each getting a fresh one.
   BUILD_DEADLINE=$(( $(date -u +%s) + LEASE_ABS_MAX_SECS ))
 fi
+# The point of no return for "nothing was started" (#2641). Every exit above this line
+# started nothing. Everything below it has a claim, or was told it needs none, and goes
+# on to label the issue, make a worktree and run an agent: from here a caller that asked
+# is answered "started", and exit_declined can no longer answer "refused".
+DISPATCH_CLAIMED=1
 # 0 ⇒ unbounded: only reachable with MINSPEC_CLAIM_OFF=1, where there is no claim to
 # outlive and therefore nothing for ABS_MAX to protect.
 BUILD_DEADLINE="${BUILD_DEADLINE:-0}"
@@ -1734,7 +1825,8 @@ if (( BUILD_DEADLINE > 0 )); then
       --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
     gh issue edit "$ISSUE" --repo "$REPO" \
       --remove-label "agent-running" --add-label "needs-human-review" 2>/dev/null || true
-    exit 0
+    # Past the claim: 0 for a caller that did not ask, "started" for one that did (#2641).
+    exit_started
   fi
   # --kill-after: SIGTERM at the ceiling, then SIGKILL 30s later. Without it a
   # `claude` process that ignores SIGTERM would still hang past the ceiling, which
@@ -2212,3 +2304,10 @@ fi
 # can fire at most once (ESCALATE_RETRIED), so this loop runs 1–2 iterations.
 break
 done
+
+# The end of a run that won its claim (#2641). This script used to fall off its end
+# here, on the loop's status: 0, whether the agent built, escalated or crashed. It still
+# ends on 0 for a caller that did not ask. A caller that asked is answered "started".
+# Keep this the LAST statement: an exit added above it that means the same thing must
+# call exit_started too, or it answers nothing and the caller says so.
+exit_started

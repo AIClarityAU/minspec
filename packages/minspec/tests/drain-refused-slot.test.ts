@@ -34,10 +34,22 @@
  */
 import { afterEach, describe, expect, it } from 'vitest';
 import * as fs from 'fs';
+import * as os from 'os';
 import * as path from 'path';
 import { useHostileAmbientDrainKnobs } from './helpers/drain-env';
-import { cleanupDrains, runLoop, runOnce, type Reading } from './helpers/drain-harness';
+import {
+  cleanupDrains,
+  DRAIN,
+  REAL_DISPATCH,
+  runLoop,
+  runOnce,
+  STATUS_DECLINED,
+  type Reading,
+} from './helpers/drain-harness';
 import { useShellTimeout } from './helpers/shell-timeout';
+
+const DRAIN_SRC = fs.readFileSync(DRAIN, 'utf-8');
+const DISPATCH_SRC = fs.readFileSync(REAL_DISPATCH, 'utf-8');
 
 // Module scope, never a hook: vitest resolves timeouts before beforeAll runs (#1399).
 useShellTimeout();
@@ -235,13 +247,239 @@ describe('#2641 T0: a countermanded issue is never dispatched, whatever refuses 
     expect(d.log()).toMatch(/^Skipping #1 .*\[no-label\]/m);
   });
 
-  it('the file the dispatcher records its refusal in is never named to anything the dispatcher runs', async () => {
-    // The record decides whether a slot was used, so an agent that could find and write it
-    // could give itself a second dispatch. The name is taken out of the environment before
-    // the dispatcher runs anything.
-    const d = await runOnce({ ready: [1, 2, 10], realDispatch: countermanded([1, 2]), reading: ROOM, env: limit(1) });
+});
+
+describe('#2641 T0: nothing a dispatched agent can write changes what the drain counts', () => {
+  // The first fix had the dispatcher write "not-started" into a file the drain named in an
+  // environment variable, and "hid" the name by unsetting the variable. Unsetting does not
+  // change the environment a process STARTED with, which any process of the same user can
+  // read from /proc/<pid>/environ, and a dispatched agent runs arbitrary commands as that
+  // user (`npm test`). So a build could mark itself "not started", give its slot back, and
+  // let the cycle run past its queue limit. The limit is the bound on what a cycle spends.
+  //
+  // The agent here (forging-agent.sh in the harness) tries that, and the other two
+  // channels an agent has: the dispatcher's output and its own exit status.
+  const alarm = (log: string) => log.split('\n').filter((l) => l.startsWith('[drain] NOTHING DISPATCHED'));
+  const tried = ['read-start-up-environment', 'printed-refusal-lines', `exited-${STATUS_DECLINED}`];
+
+  it('a build whose agent forges a refusal still uses its slot: the issue behind it is not offered', async () => {
+    const d = await runOnce({ ready: [1, 10], forgingAgent: [1], reading: ROOM, env: limit(1) });
+    // The agent ran, and tried all three. Without this the rest could pass with no attack.
+    expect(d.forgeries()).toEqual(expect.arrayContaining(tried));
+    expect(d.dispatched()).toEqual([1]);
+    expect(d.offered()).toEqual([1]);
+    // And the build is not reported as a refusal anywhere.
+    expect(d.log()).not.toContain('did not use a slot of the queue limit');
+    expect(alarm(d.log())).toEqual([]);
+    expect(d.log()).toMatch(/^\[drain\] cycle done\.$/m);
+  });
+
+  it('every build forging, five ready, a limit of 2: exactly two are offered', async () => {
+    // The harm in one line: a slot handed back by each build is a cycle with no limit.
+    const d = await runOnce({ ready: [1, 2, 3, 4, 5], forgingAgent: [1, 2, 3, 4, 5], reading: ROOM, env: limit(2) });
+    expect(d.forgeries()).toEqual(expect.arrayContaining(tried));
+    expect(d.offered()).toEqual([1, 2]);
+    expect(d.dispatched()).toEqual([1, 2]);
+  });
+
+  it('the same on the parallel path: width 3, a limit of 2, every build forging', async () => {
+    const d = await runOnce({
+      ready: [1, 2, 3, 4, 5],
+      forgingAgent: [1, 2, 3, 4, 5],
+      reading: ROOM,
+      dispatchSecs: 0.2,
+      env: { ...limit(2), MINSPEC_DRAIN_CONCURRENCY: '3' },
+    });
+    expect(d.forgeries()).toEqual(expect.arrayContaining(tried));
+    expect([...d.offered()].sort((a, b) => a - b)).toEqual([1, 2]);
+  });
+
+  it('a forged refusal does not turn the only build of a cycle into "nothing dispatched"', async () => {
+    // The other direction: an agent must not be able to raise the alarm either, or the
+    // alarm stops meaning anything.
+    const d = await runOnce({ ready: [1], forgingAgent: [1], reading: ROOM, env: limit(1) });
+    expect(d.forgeries()).toEqual(expect.arrayContaining(tried));
+    expect(d.dispatched()).toEqual([1]);
+    expect(alarm(d.log())).toEqual([]);
+    expect(d.log()).not.toContain('refused by the dispatcher');
+    expect(d.log()).toMatch(/^\[drain\] cycle done\.$/m);
+  });
+
+  it('a real refusal beside a forged one: only the real one gives its slot back', async () => {
+    const d = await runOnce({
+      ready: [1, 2, 10, 20],
+      realDispatch: countermanded([1]),
+      forgingAgent: [2],
+      reading: ROOM,
+      env: limit(1),
+    });
+    expect(d.offered()).toEqual([1, 2]);
+    expect(d.dispatched()).toEqual([2]);
+    const lines = d.log().split('\n').filter((l) => l.includes('did not use a slot of the queue limit'));
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toMatch(/: #1$/);
+  });
+
+  it('the drain hands its dispatcher a question and nothing else: no file, no name of one', async () => {
+    const d = await runOnce({ ready: [1, 2], forgingAgent: [1, 2], reading: ROOM, env: limit(2) });
+    // The question, exactly, on every launch.
+    expect(d.asked()).toEqual(['1', '1']);
+    // And nothing was there for the agent to write: it looked, and found no file.
+    expect(d.forgeries().filter((f) => f.startsWith('wrote-record'))).toEqual([]);
+
+    // The same statement about the source, so that a new variable cannot arrive unnoticed.
+    // Every variable set on a dispatcher's command, on both paths: the question, alone.
+    const launches = DRAIN_SRC.split('\n').filter((l) => l.includes('"$DISPATCH" "$n"'));
+    expect(launches).toHaveLength(2); // the serial path and the parallel one
+    for (const l of launches) {
+      const before = l.slice(0, l.indexOf('"$DISPATCH"'));
+      expect(before.match(/\b[A-Z][A-Z0-9_]*=\S*/g)).toEqual(['MINSPEC_DISPATCH_OUTCOME_STATUS=1']);
+    }
+    // And the retired record is gone from both scripts, not merely unused.
+    expect(DRAIN_SRC).not.toContain('OUTCOME_FILE');
+    expect(DISPATCH_SRC).not.toContain('OUTCOME_FILE');
+  });
+});
+
+describe('#2641 T0: an answer that is missing is never read as work done, and never as a refusal', () => {
+  // The drain asks its dispatcher whether it started work or refused. No answer (a plain
+  // exit 0) is a third state, and the first fix read it as the comfortable one: a dispatch
+  // that ran. A cycle of refusals that left no answer then ended "cycle done." again, which
+  // is #2641 exactly. Two things read the answer and they want opposite defaults:
+  //   the queue limit   counts it. Unknown is treated as spent, so a cycle is never unbounded.
+  //   "did anything run" does not count it. Unknown is not evidence, and it is said out loud.
+  const alarm = (log: string) => log.split('\n').filter((l) => l.startsWith('[drain] NOTHING DISPATCHED'));
+  const unanswered = (log: string, n: number) =>
+    new RegExp(`WARNING: the dispatcher exited 0 for #${n} without saying whether it started`).test(log);
+
+  it('MISSING, a real refusal: refusals with no answer take the slots, and the cycle says nothing was dispatched', async () => {
+    // The live case again, with the dispatcher's answer lost. A refusal that says nothing
+    // the drain can read: an exit nobody taught to answer, or an older dispatcher.
+    const d = await runOnce({ ready: [1, 2, 10], quietRefusals: [1, 2], reading: ROOM, env: limit(2) });
+    expect(d.dispatched()).toEqual([]);
+    // Counted against the limit: the cycle stops at two offers.
+    expect(d.offered()).toEqual([1, 2]);
+    // Said when it happens, by number.
+    expect(unanswered(d.log(), 1)).toBe(true);
+    expect(unanswered(d.log(), 2)).toBe(true);
+    // And not counted as work: the cycle does not end like a healthy one.
+    const lines = alarm(d.log());
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('3 issue(s) ready, 0 refused by the dispatcher before any work started, 0 failed, 2 answered neither way, 1 never offered (queue limit 2)');
+    expect(d.log()).toMatch(/^\[drain\] cycle done\. No dispatch was confirmed/m);
+    expect(d.log()).not.toMatch(/^\[drain\] cycle done\.$/m);
+  });
+
+  it('MISSING, the real dispatcher: its refusal arrives as a plain exit 0 when the question never reached it', async () => {
+    // The same, through the real dispatcher and the real gate. The refusal is in the log
+    // in the dispatcher's own words, and the drain does not take those for an answer.
+    const d = await runOnce({
+      ready: [1, 2, 10, 20],
+      realDispatch: countermanded([1, 2]),
+      withholdStatusAsk: true,
+      reading: ROOM,
+      env: limit(2),
+    });
+    expect(refusalLines(d.log())).toHaveLength(2);
+    expect(d.dispatched()).toEqual([]);
+    expect(d.offered()).toEqual([1, 2]);
+    expect(unanswered(d.log(), 1)).toBe(true);
+    expect(unanswered(d.log(), 2)).toBe(true);
+    const lines = alarm(d.log());
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('4 issue(s) ready, 0 refused by the dispatcher before any work started, 0 failed, 2 answered neither way, 2 never offered');
+    expect(d.log()).not.toContain('did not use a slot of the queue limit');
+  });
+
+  it('MISSING, with room in the limit: the unanswered one is named, and the build behind it is enough to end the cycle plainly', async () => {
+    const d = await runOnce({ ready: [1, 10, 20], quietRefusals: [1], reading: ROOM, env: limit(2) });
+    expect(d.offered()).toEqual([1, 10]);
     expect(d.dispatched()).toEqual([10]);
-    expect(d.outcomeFileLeaked()).toBe(false);
+    expect(unanswered(d.log(), 1)).toBe(true);
+    expect(unanswered(d.log(), 10)).toBe(false);
+    expect(alarm(d.log())).toEqual([]);
+    expect(d.log()).toMatch(/^\[drain\] cycle done\.$/m);
+  });
+
+  it('MISSING on the parallel path: width 2, two unanswered refusals, a limit of 2', async () => {
+    const d = await runOnce({
+      ready: [1, 2, 10, 20],
+      quietRefusals: [1, 2],
+      reading: ROOM,
+      env: { ...limit(2), MINSPEC_DRAIN_CONCURRENCY: '2' },
+    });
+    expect([...d.offered()].sort((a, b) => a - b)).toEqual([1, 2]);
+    expect(d.dispatched()).toEqual([]);
+    expect(alarm(d.log())).toHaveLength(1);
+    expect(alarm(d.log())[0]).toContain('2 answered neither way, 2 never offered');
+  });
+
+  it('a dispatcher that never answers is held to the limit, and its builds are not claimed as confirmed', async () => {
+    // A dispatcher from before the question existed. Builds do run. The drain cannot know
+    // that, so it must not say so, and it must not let the missing answer lift the limit.
+    const d = await runOnce({ ready: [1, 2, 3, 4], dispatcherNeverAnswers: true, reading: ROOM, env: limit(2) });
+    expect(d.offered()).toEqual([1, 2]);
+    expect(d.dispatched()).toEqual([1, 2]);
+    expect(unanswered(d.log(), 1)).toBe(true);
+    expect(unanswered(d.log(), 2)).toBe(true);
+    const lines = alarm(d.log());
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('2 answered neither way, 2 never offered');
+    // The line after it says what an unanswered dispatch is, so the alarm is not read as
+    // proof that nothing ran.
+    expect(d.log()).toMatch(/^\[drain\] {3}An unanswered dispatch exited 0 without the dispatcher saying/m);
+  });
+
+  it('an unanswered dispatch is still an attempt: with a failure beside it the cycle is not "all failed"', async () => {
+    const d = await runOnce({ ready: [1, 2], quietRefusals: [1], issueFails: [2], reading: ROOM, env: limit(5) });
+    expect(d.log()).not.toContain('CYCLE FAILED');
+    const lines = alarm(d.log());
+    expect(lines).toHaveLength(1);
+    expect(lines[0]).toContain('2 issue(s) ready, 0 refused by the dispatcher before any work started, 1 failed, 1 answered neither way, 0 never offered');
+  });
+
+  it('STALE: an answer left over in the environment the drain started in is not this dispatch\'s answer', async () => {
+    // What a leftover would have to be to matter: the retired record file, already saying
+    // "not-started", named in the variable the first fix used; and the question variable
+    // itself, set to something that is not the question. Nothing here was vulnerable to
+    // this before the change either (the first fix named a fresh file on every launch):
+    // this pins it, it did not fail first.
+    const leftover = path.join(fs.mkdtempSync(path.join(os.tmpdir(), 'drain-leftover-')), 'outcome');
+    fs.writeFileSync(leftover, 'not-started stale\n');
+    try {
+      const d = await runOnce({
+        ready: [1, 10],
+        reading: ROOM,
+        env: { ...limit(1), MINSPEC_DISPATCH_OUTCOME_FILE: leftover, MINSPEC_DISPATCH_OUTCOME_STATUS: 'declined' },
+      });
+      expect(d.offered()).toEqual([1]);
+      expect(d.dispatched()).toEqual([1]);
+      // The dispatcher was asked by THIS drain, in the drain's own words.
+      expect(d.asked()).toEqual(['1']);
+      expect(d.log()).not.toContain('did not use a slot of the queue limit');
+      expect(fs.readFileSync(leftover, 'utf-8')).toBe('not-started stale\n');
+    } finally {
+      fs.rmSync(path.dirname(leftover), { recursive: true, force: true });
+    }
+  });
+
+  it('STALE: what one cycle counted is not carried into the next', async () => {
+    // Two cycles of the same loop. Each refuses issue 1 once and builds issue 10 once, and
+    // each says so for itself: a count kept across cycles would read "2" the second time.
+    const refusedLines = (log: string) => log.split('\n').filter((l) => l.includes('did not use a slot of the queue limit'));
+    const d = await runLoop(
+      {
+        ready: [1, 10],
+        realDispatch: countermanded([1]),
+        reading: ROOM,
+        env: { ...limit(1), MINSPEC_DRAIN_INTERVAL: '1' },
+      },
+      (log) => refusedLines(log).length >= 2,
+    );
+    const lines = refusedLines(d.log()).slice(0, 2);
+    for (const l of lines) expect(l).toMatch(/^\[drain\] 1 issue\(s\) were refused by the dispatcher before any work started.*: #1$/);
+    expect(d.offered().slice(0, 4)).toEqual([1, 10, 1, 10]);
+    expect(alarm(d.log())).toEqual([]);
   });
 });
 
@@ -291,47 +529,11 @@ describe('#2641 T0 (no silent gate): a cycle that starts nothing while issues ar
     expect(lines[0]).toMatch(/^\[drain\] NOTHING DISPATCHED this cycle: 3 issue\(s\) ready, 3 refused by the dispatcher/);
     expect(lines[0]).toContain('0 never offered');
     // The cycle is over, and its last line does not read as a healthy one.
-    expect(d.log()).toMatch(/^\[drain\] cycle done\. Nothing was dispatched/m);
+    expect(d.log()).toMatch(/^\[drain\] cycle done\. No dispatch was confirmed/m);
     expect(d.log()).not.toContain('cycle error');
-  });
-
-  it('THE LIVE CASE, with the record gone: refusals take every slot again, and the cycle says so instead of "cycle done."', async () => {
-    // This is what the drain did for 8.5 hours. Here the dispatcher is given nowhere to
-    // record that it started nothing (an older dispatcher, or one that could not write),
-    // so the slot rule has nothing to go on and the two refusals use both slots. The
-    // refusal is still in the dispatcher's own output, and that is enough to notice that
-    // the cycle started nothing with clean issues queued behind.
-    const d = await runOnce({
-      ready: [1, 2, 10, 20],
-      realDispatch: countermanded([1, 2]),
-      withholdOutcomeRecord: true,
-      reading: ROOM,
-      env: limit(2),
-    });
-    expect(d.dispatched()).toEqual([]);
-    expect(d.offered()).toEqual([1, 2]);
-    const lines = alarm(d.log());
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toMatch(/4 issue\(s\) ready, 2 refused by the dispatcher/);
-    expect(lines[0]).toContain('2 never offered');
-    expect(d.log()).toMatch(/^\[drain\] cycle done\. Nothing was dispatched/m);
-    // And each such refusal is named as having been counted against the limit.
-    expect(d.log()).toMatch(/WARNING: the dispatcher refused #1 but left no not-started record/);
-    expect(d.log()).toMatch(/WARNING: the dispatcher refused #2 but left no not-started record/);
-  });
-
-  it('with the record gone and room in the limit, the clean issue behind is still built and nothing is alarming', async () => {
-    const d = await runOnce({
-      ready: [1, 2, 10, 20],
-      realDispatch: countermanded([1, 2]),
-      withholdOutcomeRecord: true,
-      reading: ROOM,
-      env: limit(3),
-    });
-    expect(d.offered()).toEqual([1, 2, 10]);
-    expect(d.dispatched()).toEqual([10]);
-    expect(alarm(d.log())).toEqual([]);
-    expect(d.log()).toMatch(/^\[drain\] cycle done\.$/m);
+    // The hint that goes with refusals, and not the one that goes with a missing answer.
+    expect(d.log()).toContain('A ready label on an issue the dispatcher refuses is a stale stamp');
+    expect(d.log()).not.toContain('An unanswered dispatch');
   });
 
   it('a limit of 0 starts nothing and says the issues were never offered', async () => {
@@ -349,15 +551,17 @@ describe('#2641 T0 (no silent gate): a cycle that starts nothing while issues ar
     expect(d.dispatched()).toEqual([2, 10]);
     expect(alarm(d.log())).toEqual([]);
     expect(d.log()).toMatch(/^\[drain\] cycle done\.$/m);
-    expect(d.log()).not.toContain('Nothing was dispatched');
+    expect(d.log()).not.toContain('No dispatch was confirmed');
   });
 
-  it('CONTROL: an all-clean cycle prints neither the alarm nor the refused line', async () => {
+  it('CONTROL: an all-clean cycle prints neither the alarm, nor the refused line, nor a missing answer', async () => {
     const d = await runOnce({ ready: [1, 2], reading: ROOM, env: limit(2) });
     expect(d.dispatched()).toEqual([1, 2]);
     expect(alarm(d.log())).toEqual([]);
     expect(d.log()).not.toContain('refused by the dispatcher');
-    expect(d.log()).not.toContain('left no not-started record');
+    expect(d.log()).not.toContain('without saying whether it started');
+    // The stub answered, as the real dispatcher does, and the drain asked it to.
+    expect(d.asked()).toEqual(['1', '1']);
   });
 
   it('CONTROL: an empty queue is not a starved one', async () => {
@@ -403,22 +607,6 @@ describe('#2641: a refusal is neither an attempt nor a completion, for the two g
     expect(d.log()).toContain('WARNING: dispatch failed for #2');
     expect(d.log()).not.toContain('CYCLE FAILED');
     expect(d.log()).toMatch(/^\[drain\] cycle done\.$/m);
-  });
-
-  it('a refusal with no record and a failure: not all-failed, and still nothing ran, so the cycle says that', async () => {
-    const d = await runOnce({
-      ready: [1, 2],
-      realDispatch: countermanded([1]),
-      withholdOutcomeRecord: true,
-      issueFails: [2],
-      reading: ROOM,
-      env: limit(5),
-    });
-    expect(d.dispatched()).toEqual([]);
-    expect(d.log()).not.toContain('CYCLE FAILED');
-    const lines = alarm(d.log());
-    expect(lines).toHaveLength(1);
-    expect(lines[0]).toContain('2 issue(s) ready, 1 refused by the dispatcher before any work started, 1 failed, 0 never offered');
   });
 
   it('#912 breaker: a refusal between two thrashed builds does not end the run of thrashes', async () => {

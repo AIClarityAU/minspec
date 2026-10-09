@@ -392,41 +392,59 @@ _breaker_decide() {
 # went to a refusal on every cycle, and the drain started nothing for 8.5 hours while
 # logging "cycle done" (#2641).
 #
-# There are two witnesses, and they are deliberately not equals.
+# So run_cycle ASKS (MINSPEC_DISPATCH_OUTCOME_STATUS=1 on the dispatcher's own command),
+# and the dispatcher answers with its exit status. These two numbers are the dispatcher's
+# DISPATCH_RC_DECLINED and DISPATCH_RC_STARTED, and a test holds the two files to them.
 #
-# _dispatch_not_started <rc> <outcome-file> is the one that DECIDES whether a slot was
-# used. The dispatcher writes `not-started <why>` into a file whose name only this
-# process and the dispatcher's own shell ever hold. True needs exit 0 AND that record.
-# Everything else counts as a dispatch: no record, an unreadable one, a non-zero exit.
-# So each way this can go wrong makes the drain launch LESS, never more. An older
-# dispatcher that writes no record gets the old accounting, not an uncapped cycle.
-_dispatch_not_started() {
-  local rc="${1-1}" file="${2-}" first=""
-  [[ "$rc" == "0" ]] || return 1
-  [[ -n "$file" && -r "$file" ]] || return 1
-  # `read` answers non-zero for a last line with no newline and still fills the variable.
-  # The comparison below is the decision, not this status.
-  IFS= read -r first < "$file" || :
-  [[ "$first" == "not-started" || "$first" == "not-started "* ]]
+# The exit status is the ONLY thing read. Nothing is written down between the two
+# processes, so there is nothing for a dispatched agent to write: the first version of
+# this used a file named in the environment, and an agent could find the name
+# (/proc/<pid>/environ of the dispatcher) and mark its own build "not started", which
+# gave the slot back and let a cycle run past its limit. Nor is the dispatcher's output
+# read for this: agent prose travels on it (#2233). A status is also never stale. It is
+# what `wait` returns for the process this cycle launched for this issue.
+_DISPATCH_RC_DECLINED=75
+_DISPATCH_RC_STARTED=76
+
+# _dispatch_own_status <dispatcher's status> [<status of each later stage>...]
+# Prints the one status to judge a dispatch by, from the PIPESTATUS of
+# `dispatcher | tee [| sed]`. That is the dispatcher's own status when every later stage
+# succeeded, and 1 otherwise: a capture that failed is a failed dispatch, as it always
+# was under `pipefail`, and it must never pass for an answer the dispatcher did not give.
+# No status at all, or one that is not a number, is 1 for the same reason.
+_dispatch_own_status() {
+  local own="${1-}" s
+  [[ "$own" =~ ^[0-9]+$ ]] || { printf '1'; return 0; }
+  shift
+  for s in "$@"; do
+    [[ "$s" == "0" ]] || { printf '1'; return 0; }
+  done
+  printf '%s' "$own"
 }
 
-# _dispatch_refusal_in_output <issue> is the second witness: the dispatcher's own line, in
-# its captured output on stdin, saying that it skipped, refused or stood down on this
-# issue. It NEVER frees a slot. Output is the one channel that agent prose and issue
-# titles travel on as well, and a marker there can be written by the text it is meant to
-# describe (#2233 is that mistake, made once already with the usage-limit notice).
+# _dispatch_outcome <status>: what one finished dispatch came to.
 #
-# It exists so that the accounting above cannot fail silently back into #2641. A refusal
-# that left no record is named when it happens, and a cycle in which nothing ran says so,
-# from this, whether or not the record is there.
+#   declined     the dispatcher refused the issue before starting anything.
+#   started      it won its claim, and ended as it used to end on exit 0.
+#   unanswered   exit 0 and NO answer: a dispatcher from before the question, an exit in
+#                it that nobody taught to answer, or a question that never reached it.
+#   failed       any other status.
 #
-# The dispatcher prints these at column 0, before any agent has run: `Skipping #N`,
-# `Refusing #N`, `Standing down on #N`, each followed by a space, a dash and a space.
-# All of that is matched. The space after the number keeps issue 49 from answering for
-# issue 494, and the dash keeps an agent's own sentence ("Skipping #49 for now") from
-# reading as the dispatcher's. The dash is the dispatcher's em dash, compared as bytes.
-_dispatch_refusal_in_output() {
-  LC_ALL=C grep -aqE -- "^(Skipping|Refusing|Standing down on) #${1:?issue number} — "
+# `unanswered` is its own outcome because the two things that read this want opposite
+# defaults from it, and folding it into either neighbour gets one of them wrong:
+#
+#   the queue limit     counts it. Unknown is treated as spent, so a missing answer can
+#                       never make a cycle launch more than its limit.
+#   "did anything run"  does NOT count it. Unknown is not evidence of work. The first
+#                       version of this read it as a dispatch that ran, and a cycle of
+#                       refusals that left no answer ended "cycle done." again.
+_dispatch_outcome() {
+  case "${1-}" in
+    "$_DISPATCH_RC_DECLINED") printf 'declined' ;;
+    "$_DISPATCH_RC_STARTED")  printf 'started' ;;
+    0)                        printf 'unanswered' ;;
+    *)                        printf 'failed' ;;
+  esac
 }
 
 DISPATCH_CONCURRENCY="$(_validated_concurrency "${MINSPEC_DRAIN_CONCURRENCY:-1}")"
@@ -1569,66 +1587,52 @@ run_cycle() {
   # failed).
   #
   # An attempt is a dispatch that used a slot (#2641, below). An issue the dispatcher
-  # refused on the record is not one: it exited 0, so counting it here would dilute
-  # "every attempt failed" now that a cycle can walk past any number of refusals.
+  # refused is not one: nothing was tried, so counting it here would dilute "every
+  # attempt failed" now that a cycle can walk past any number of refusals.
   local dispatch_attempts=0 dispatch_failures=0
 
   # ── The queue limit is a budget of dispatches that START (#2641) ─────────────
   # `slots_used` is what the limit is compared with, on both paths. It goes up for every
-  # dispatch EXCEPT one the dispatcher recorded as not started (_dispatch_not_started),
-  # so a refusal costs nothing and the loop goes on to the next ranked issue.
+  # dispatch EXCEPT one the dispatcher answered "refused" for (_dispatch_outcome), so a
+  # refusal costs nothing and the loop goes on to the next ranked issue. A dispatch that
+  # gave no answer at all DOES use a slot.
   #
   # The other three are there to be reported, not to decide anything:
-  #   declined_count / declined   refused on the record: no slot used, named in one line.
-  #   refused_unrecorded          refused according to the dispatcher's own output, with
-  #                               no record. A slot WAS used, and each one is named.
-  #   ran_count                   exited 0 and neither witness says it was refused: the
-  #                               only evidence this cycle did any work at all.
-  local slots_used=0 ran_count=0 declined_count=0 refused_unrecorded=0 declined="" outcome=""
+  #   declined_count / declined   refused before starting: no slot used, named in one line.
+  #   unanswered_count            exit 0 and no answer. A slot WAS used, each one is named
+  #                               when it happens, and none is counted as work done.
+  #   started_count               the dispatcher said it started: the only evidence that
+  #                               this cycle did any work at all.
+  local slots_used=0 started_count=0 declined_count=0 unanswered_count=0 declined="" outcome=""
+  local -a pst=()
 
-  # new_outcome_file <issue>: print the name of a fresh file for the dispatcher's
-  # not-started record, or nothing when one cannot be made. Never fatal: with no file
-  # the dispatcher records nothing and a refusal is counted against the limit, which is
-  # the safe direction, and this says so rather than let it pass as a healthy offer.
-  new_outcome_file() {
-    local f
-    if f=$(mktemp); then printf '%s' "$f"; return 0; fi
-    echo "[drain] WARNING: could not create the outcome file for #$1: if the dispatcher refuses it, that refusal will be counted against the queue limit (#2641)." >&2
-    return 0
-  }
-
-  # book_dispatch <issue> <rc> <outcome-file> <thrash 0|1> <output>: enter one finished
-  # dispatch in the cycle's counts, and remove its outcome file. ONE function for both
-  # paths, for the reason admit_next_dispatch gives: two copies of the same bookkeeping
-  # is how one of them comes to be wrong.
+  # book_dispatch <issue> <outcome> <thrash 0|1>: enter one finished dispatch in the
+  # cycle's counts. ONE function for both paths, for the reason admit_next_dispatch
+  # gives: two copies of the same bookkeeping is how one of them comes to be wrong.
   #
   # Called directly, never inside `$(...)`: it sets the counters, and an assignment made
   # in a subshell would be discarded (the trap classify_dispatch documents).
   book_dispatch() {
-    local n="$1" drc="$2" file="$3" thrash="$4" out="$5" said_refused=0
-    if [[ "$drc" == "0" ]] && _dispatch_refusal_in_output "$n" <<<"$out"; then
-      said_refused=1
-    fi
-    if _dispatch_not_started "$drc" "$file"; then
+    local n="$1" what="$2" thrash="$3"
+    if [[ "$what" == "declined" ]]; then
       declined_count=$(( declined_count + 1 ))
       declined="${declined} #${n}"
-    else
-      slots_used=$(( slots_used + 1 ))
-      ac_outcomes="${ac_outcomes:+$ac_outcomes,}${thrash}"
-      dispatch_attempts=$(( dispatch_attempts + 1 ))
-      if [[ "$drc" -ne 0 ]]; then
-        dispatch_failures=$(( dispatch_failures + 1 ))
-      elif (( said_refused )); then
-        # The two witnesses disagree: the dispatcher says it refused, and left no record.
-        # The record is the one that decides, so the slot is spent. Say so, by number:
-        # this is exactly how #2641 looked from inside, two lines at a time.
-        refused_unrecorded=$(( refused_unrecorded + 1 ))
-        echo "[drain] WARNING: the dispatcher refused #$n but left no not-started record, so the refusal was counted against the queue limit (#2641)." >&2
-      else
-        ran_count=$(( ran_count + 1 ))
-      fi
+      return 0
     fi
-    if [[ -n "$file" ]]; then rm -f "$file"; fi
+    slots_used=$(( slots_used + 1 ))
+    ac_outcomes="${ac_outcomes:+$ac_outcomes,}${thrash}"
+    dispatch_attempts=$(( dispatch_attempts + 1 ))
+    case "$what" in
+      started) started_count=$(( started_count + 1 )) ;;
+      failed)  dispatch_failures=$(( dispatch_failures + 1 )) ;;
+      *)
+        # No answer, or an outcome this function was never taught: both are "unknown".
+        # Said here, by number, the moment it happens. The cycle's own summary is hours
+        # away in a long cycle, and a cycle the quota gate holds never reaches it.
+        unanswered_count=$(( unanswered_count + 1 ))
+        echo "[drain] WARNING: the dispatcher exited 0 for #$n without saying whether it started a build or refused the issue. Counted against the queue limit, and not as a dispatch (#2641)." >&2
+        ;;
+    esac
     return 0
   }
 
@@ -1659,14 +1663,19 @@ run_cycle() {
       gh_bot_warm_read
       echo "[drain] dispatching #$n..."
       cap=$(mktemp)
-      # The name of the record goes to the dispatcher alone, as a prefix on its own
-      # command, and is always set, to an empty value if need be: whatever this process
-      # inherited under that name must never be what the dispatcher reads (#2641).
-      outcome="$(new_outcome_file "$n")"
-      if MINSPEC_DISPATCH_OUTCOME_FILE="$outcome" "$DISPATCH" "$n" 2>&1 | tee "$cap"; then drc=0; else drc=$?; fi
+      # The question goes to the dispatcher as a prefix on its own command, so it is
+      # asked in these words whatever this process inherited under that name. The answer
+      # is the dispatcher's OWN exit status: the first entry of PIPESTATUS, and not the
+      # pipeline's, which under `pipefail` is whichever stage failed last (#2641).
+      if MINSPEC_DISPATCH_OUTCOME_STATUS=1 "$DISPATCH" "$n" 2>&1 | tee "$cap"; then pst=("${PIPESTATUS[@]}"); else pst=("${PIPESTATUS[@]}"); fi
+      drc="$(_dispatch_own_status "${pst[@]}")"
       out=$(cat "$cap" 2>/dev/null || true); rm -f "$cap"
+      # From here `drc` is a FAILURE's status and nothing else: "started" and "refused"
+      # are non-zero answers, not failures, and classify_dispatch warns on any non-zero.
+      outcome="$(_dispatch_outcome "$drc")"
+      [[ "$outcome" == "failed" ]] || drc=0
       verdict="$(classify_dispatch "$n" "$drc" "$out")"
-      book_dispatch "$n" "$drc" "$outcome" "${verdict:0:1}" "$out"
+      book_dispatch "$n" "$outcome" "${verdict:0:1}"
       [[ "${verdict:1:1}" == "1" ]] && saw_quota=1
       if (( saw_quota )); then
         echo "[drain] Claude usage-limit signal while dispatching #$n — pausing this cycle (will back off, not fail)."
@@ -1679,7 +1688,7 @@ run_cycle() {
     # ── Parallel path (#1208) — launch up to N, reap as they finish.
     # Each job tees to its own capture file AND to a per-issue prefixed stream, so
     # concurrent builds stay live AND readable instead of interleaving anonymously.
-    local -A pid_issue=() pid_cap=() pid_outcome=()
+    local -A pid_issue=() pid_cap=()
     local -a queue=($all_ready)
     local qi=0 stop_launching=0 p rc n out
 
@@ -1690,12 +1699,19 @@ run_cycle() {
       gh_bot_warm_read
       local n="${queue[$qi]}"; qi=$(( qi + 1 ))
       local cap; cap=$(mktemp)
-      # As on the serial path: the record's name goes to this one dispatcher (#2641).
-      local file; file="$(new_outcome_file "$n")"
       echo "[drain] dispatching #$n... (in flight: $(( ${#pid_issue[@]} + 1 ))/${DISPATCH_CONCURRENCY})"
-      ( MINSPEC_DISPATCH_OUTCOME_FILE="$file" "$DISPATCH" "$n" 2>&1 | tee "$cap" | sed -u "s/^/[#${n}] /" ) &
+      # As on the serial path (#2641): the question on the dispatcher's own command, and
+      # the dispatcher's own exit status for an answer. The job is a subshell, so its
+      # status is all the parent gets back: `set +e` lets the pipeline finish whatever it
+      # returns, and the subshell then exits on the dispatcher's status alone, which the
+      # parent collects with `wait` under this job's pid.
+      (
+        set +e
+        MINSPEC_DISPATCH_OUTCOME_STATUS=1 "$DISPATCH" "$n" 2>&1 | tee "$cap" | sed -u "s/^/[#${n}] /"
+        exit "$(_dispatch_own_status "${PIPESTATUS[@]}")"
+      ) &
       local pid=$!
-      pid_issue[$pid]="$n"; pid_cap[$pid]="$cap"; pid_outcome[$pid]="$file"
+      pid_issue[$pid]="$n"; pid_cap[$pid]="$cap"
     }
 
     while (( qi < ${#queue[@]} || ${#pid_issue[@]} > 0 )); do
@@ -1722,11 +1738,13 @@ run_cycle() {
       [[ -z "$p" ]] && continue
       n="${pid_issue[$p]:-}"; [[ -z "$n" ]] && continue
       out=$(cat "${pid_cap[$p]}" 2>/dev/null || true); rm -f "${pid_cap[$p]}"
-      outcome="${pid_outcome[$p]:-}"
-      unset 'pid_issue[$p]' 'pid_cap[$p]' 'pid_outcome[$p]'
+      unset 'pid_issue[$p]' 'pid_cap[$p]'
 
+      # As on the serial path: past this point `rc` is a failure's status and nothing else.
+      outcome="$(_dispatch_outcome "$rc")"
+      [[ "$outcome" == "failed" ]] || rc=0
       verdict="$(classify_dispatch "$n" "$rc" "$out")"
-      book_dispatch "$n" "$rc" "$outcome" "${verdict:0:1}" "$out"
+      book_dispatch "$n" "$outcome" "${verdict:0:1}"
       if [[ "${verdict:1:1}" == "1" ]]; then
         saw_quota=1
         QUOTA_PAUSE_CAUSE="${QUOTA_PAUSE_CAUSE:-signal}"
@@ -1755,27 +1773,30 @@ run_cycle() {
     echo "[drain] ${declined_count} issue(s) were refused by the dispatcher before any work started and did not use a slot of the queue limit:${declined}"
   fi
 
-  # Nothing ran, with issues ready. Until #2641 this ended "cycle done." like any other
-  # cycle, 22 times running. The all-failed roll-up further down (#2140) could not see
-  # it: that counts non-zero exits, and a refusal is exit 0.
+  # Nothing was confirmed started, with issues ready. Until #2641 this ended "cycle done."
+  # like any other cycle, 22 times running. The all-failed roll-up further down (#2140)
+  # could not see it: that counts non-zero exits, and a refusal was exit 0.
   #
-  # `ran_count` is the witness, and it does not depend on the not-started record: it
-  # counts a dispatch only when the record AND the dispatcher's own output both fail to
-  # call it a refusal. So this fires for the slot accounting working (everything offered
-  # was refused, so nothing in the queue is dispatchable), for a limit that offers
-  # nothing, and for the accounting NOT working (refusals with no record took the slots
-  # again), which is the case it is really here for.
+  # `started_count` is the witness, and it only moves on a POSITIVE answer: the
+  # dispatcher saying it started. Silence does not move it. So this fires when
+  # everything offered was refused (nothing in the queue is dispatchable), when the limit
+  # offers nothing, and when dispatches came back with no answer at all, which is the
+  # case that put #2641 back the first time this was written: a refusal that left no
+  # answer had been read as a dispatch that ran.
   #
   # An all-failed cycle is left to #2140's CYCLE FAILED, which also returns non-zero.
   # This one does not: a ready queue made of stale stamps is not a transient fault, and
   # counting it toward MAX_CONSEC_FAIL would stop a loop whose triage and pull request
   # sweep are still doing work. It is loud instead, and it changes the last line.
   local nothing_ran=0
-  if (( ran_count == 0 )) && ! (( dispatch_attempts > 0 && dispatch_failures == dispatch_attempts )); then
+  if (( started_count == 0 )) && ! (( dispatch_attempts > 0 && dispatch_failures == dispatch_attempts )); then
     nothing_ran=1
-    echo "[drain] NOTHING DISPATCHED this cycle: ${ready_total} issue(s) ready, $(( declined_count + refused_unrecorded )) refused by the dispatcher before any work started, ${dispatch_failures} failed, $(( ready_total - declined_count - dispatch_attempts )) never offered (queue limit ${_dispatch_cap})." >&2
-    if (( declined_count + refused_unrecorded > 0 )); then
+    echo "[drain] NOTHING DISPATCHED this cycle: ${ready_total} issue(s) ready, ${declined_count} refused by the dispatcher before any work started, ${dispatch_failures} failed, ${unanswered_count} answered neither way, $(( ready_total - declined_count - dispatch_attempts )) never offered (queue limit ${_dispatch_cap})." >&2
+    if (( declined_count > 0 )); then
       echo "[drain]   A ready label on an issue the dispatcher refuses is a stale stamp. Re-triage it (scripts/triage-inbox.sh <N>) or remove the label: until then it is offered, and refused, every cycle." >&2
+    fi
+    if (( unanswered_count > 0 )); then
+      echo "[drain]   An unanswered dispatch exited 0 without the dispatcher saying whether it started a build or refused the issue, so it is not counted as work done. Each is named in a WARNING above. If builds did run, the dispatcher in use predates the answer (#2641)." >&2
     fi
   fi
 
@@ -1806,8 +1827,10 @@ run_cycle() {
   # The last line of a cycle that started nothing must not be the last line of one that
   # worked (#2641): it is the line a reader checks, and for 8.5 hours it was the only
   # thing the log had to say. It still begins "cycle done.", because the cycle is done.
+  # "Confirmed", because a dispatch that gave no answer may have run: the drain does not
+  # know, and says only what it knows.
   if (( nothing_ran )); then
-    echo "[drain] cycle done. Nothing was dispatched: see NOTHING DISPATCHED above."
+    echo "[drain] cycle done. No dispatch was confirmed: see NOTHING DISPATCHED above."
   else
     echo "[drain] cycle done."
   fi
