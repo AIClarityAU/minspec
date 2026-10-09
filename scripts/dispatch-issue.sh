@@ -23,6 +23,43 @@ WORKTREE_BASE="/tmp/minspec-agent"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 ROLES_DIR="${SCRIPT_DIR}/roles"
 
+# ── "Not started" record for the caller (#2641) ──────────────────────────────
+# This script exits 0 both when it has run a build and when it has declined to start
+# one: the issue is not dispatchable any more, or another session owns it. The exit code
+# keeps that meaning, because a deferral is not an error. But a caller that budgets its
+# launches has to tell the two apart, and the drain could not. It counted a refusal as a
+# dispatch, so the same refused issues at the top of its ranking used every slot of its
+# queue limit on every cycle, and it started nothing for 8.5 hours while logging
+# "cycle done" (#2641).
+#
+# So a caller may name a file in MINSPEC_DISPATCH_OUTCOME_FILE, and every exit below
+# that started nothing writes one line there: `not-started <why>`. No record means
+# "assume it started", which is the reading that can only make a caller launch LESS. An
+# older copy of this script, or an exit nobody has taught to report, costs the caller a
+# slot and never grants one. For that reason nothing past the won claim may ever call
+# report_not_started: a record left by a run that went on to build would hand its
+# caller a launch it had not counted.
+#
+# A file, and not a line of output, because this script's output carries the issue
+# title and, later, the agent's own prose. A marker in that stream could be written by
+# the text it is meant to describe, which is the mistake #2233 records for the
+# usage-limit notice. For the same reason the name is taken OUT of the environment here,
+# before anything else runs: nothing this script launches, the agent least of all, is
+# told where the record is.
+DISPATCH_OUTCOME_FILE="${MINSPEC_DISPATCH_OUTCOME_FILE:-}"
+unset MINSPEC_DISPATCH_OUTCOME_FILE
+
+# report_not_started <why>: record that this run is exiting without having started any
+# work. A no-op when no caller asked. Never fatal, and never quiet: a record that cannot
+# be written costs the caller a slot, so it is said where the caller's log will carry it.
+report_not_started() {
+  [[ -n "$DISPATCH_OUTCOME_FILE" ]] || return 0
+  if ! printf 'not-started %s\n' "$1" > "$DISPATCH_OUTCOME_FILE"; then
+    echo "WARNING: could not record 'not-started' for #$ISSUE in $DISPATCH_OUTCOME_FILE: the caller will count this run as a dispatch (#2641)." >&2
+  fi
+  return 0
+}
+
 # Pin every bare `git` op to the repo THIS SCRIPT lives in, never the caller's
 # inherited cwd (#1896). `gh` calls below all target $REPO explicitly; the git
 # calls (fetch/worktree) had no equivalent pin and inherited whatever `origin`
@@ -553,6 +590,10 @@ rm -f "$VERDICT_SRC" "$BODY_FILE"
 
 if [[ "$READY_OK" -ne 1 ]]; then
   echo "Skipping #$ISSUE — not dispatchable at dispatch time: ${READY_REASON}"
+  # Told to the caller FIRST (#2641), before the hold below is surfaced: surfacing
+  # writes to GitHub and can abort this script, and the fact that nothing was started
+  # is already settled. The refusal itself is unchanged, and so is the exit code.
+  report_not_started not-ready
   case "$READY_REASON" in
     *'[closed]'*|*'[no-label]'*|*'[countermanded]'*)
       # #406 staleness classes: self-evident from the issue's own state/labels, so
@@ -668,20 +709,28 @@ if [[ "${MINSPEC_CLAIM_OFF:-0}" != "1" ]]; then
   # D11/FR-11 same-host flock — a real same-host CAS, auto-released on process death.
   # Held in THIS parent (fd 200, via the sourced lib) for the dispatch's lifetime, so a
   # second local racer cannot mutate this item's worktree/branch under us (INV-7).
+  #
+  # Each of the three stand-downs below started nothing, and says so to the caller
+  # (#2641, report_not_started). None of them shows in the labels the caller read, so
+  # the caller cannot see one coming: without the record, each took a slot of its queue
+  # limit, and took it again on every cycle the stand-down recurred.
   if ! lease_flock "$ISSUE"; then
     echo "Standing down on #$ISSUE — another live local session holds the per-item flock (FR-11/INV-7)."
+    report_not_started flock-held
     exit 0
   fi
   # D12/FR-3b sequential guard — refuse a closed/already-shipped item BEFORE any build.
   # The PR-per-head CAS window closes on merge, so at-most-one-merge across TIME rests here.
   if ! lease_gate_open_unshipped "$ISSUE"; then
     echo "Refusing #$ISSUE — issue is closed or already shipped (FR-3b/INV-1). Never re-dispatched."
+    report_not_started closed-or-shipped
     exit 0
   fi
   # Soft claim: post → re-read TO EXHAUSTION → verify winner (FR-1/FR-2). Not the
   # winner, or a provably-incomplete enumeration ⇒ stand down (INV-6).
   if ! lease_acquire "$ISSUE"; then
     echo "Standing down on #$ISSUE — a live claim owned by another session wins the check (FR-1/FR-2/INV-6)."
+    report_not_started claim-lost
     exit 0
   fi
   echo "Claimed #$ISSUE (session $(lease_self_sid)) — proceeding to build."
@@ -1719,8 +1768,20 @@ if (cd "$WORKTREE" && "${BUILD_TIMEOUT_ARGS[@]}" "${AGENT_ENV_SCRUB[@]}" claude 
     # human. needs-human-review makes the dead-end visible (best-effort create).
     gh label create "needs-human-review" --repo "$REPO" --color fbca04 \
       --description "Automated gate failed closed — a human must resolve" 2>/dev/null || true
+    # #2641: an escalation REPLACES readiness, here exactly as on the crash path at the
+    # bottom of this file (#1307) and as completion does (#1305). This write used to
+    # remove `agent-running` alone and lean on the claim step having already removed
+    # `agent-ready`. That removal is best-effort with its error swallowed, and a
+    # re-triage can put the label back while the build runs, so an escalated issue could
+    # keep its place in the queue: refused at every dispatch, offered again every cycle.
+    # (47 open issues wore both labels when #2641 was found. The five whose label history
+    # was read got there by older routes, a re-triage and an earlier crash path, both
+    # since closed. This was the escalation write still able to add to them.)
+    #
+    # Comments go ABOVE the command: the note on the completion path below says why a
+    # comment between `\` and its continuation silently neutralises the whole call.
     gh issue edit "$ISSUE" --repo "$REPO" \
-      --remove-label "agent-running" --add-label "agent-escalated,needs-human-review" 2>/dev/null || true
+      --remove-label "agent-running,agent-ready" --add-label "agent-escalated,needs-human-review" 2>/dev/null || true
     echo "Agent ESCALATED issue #$ISSUE (role: $ROLE, model: $RUN_MODEL) — surfaced to human (agent-escalated + needs-human-review). Review: $LOG"
   else
     # EGRESS GUARD (#358) — scan the about-to-be-published material AFTER the agent

@@ -21,6 +21,13 @@
  * the whole set back — a fetch-side regression could never make the stub disagree
  * with a correct read. It now truncates to the newest N, the way the real `gh issue
  * list --limit` does.
+ *
+ * #2641: the cap is no longer applied by trimming the ranked list inside the queue block
+ * (that trim is what let refused issues at the top of the ranking take every slot). It is
+ * applied where dispatches are counted, in the dispatch loop. So "only the top N are
+ * dispatched" cannot be read off the queue block's variable any more: that test now drives
+ * a whole cycle (helpers/drain-harness.ts) and asserts on which issues were dispatched.
+ * What a refusal does to the count is drain-refused-slot.test.ts's subject, not this file's.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -30,6 +37,7 @@ import * as path from 'path';
 import { spawnSync } from 'child_process';
 import { useShellTimeout } from './helpers/shell-timeout';
 import { drainBaseEnv, useHostileAmbientDrainKnobs } from './helpers/drain-env';
+import { cleanupDrains, runOnce } from './helpers/drain-harness';
 
 useShellTimeout();
 
@@ -229,18 +237,39 @@ describe('drain queue read: the FETCH is not capped at the dispatch volume (#219
 });
 
 describe('drain dispatch cap: applied AFTER ranking, not at the read (#2197)', () => {
-  it('dispatches only the top N of the RANKED order when the ready set exceeds the cap', () => {
+  afterEach(cleanupDrains);
+
+  it('dispatches only the top N of the RANKED order when the ready set exceeds the cap', async () => {
+    // A whole cycle, with a ranker that puts the highest issue number first. What is
+    // asserted is what the dispatcher was run for, in order: the cap is applied in the
+    // dispatch loop (#2641), so no variable in the queue block holds the batch any more.
+    const ready = Array.from({ length: 50 }, (_, i) => i + 1);
+    const d = await runOnce({
+      ready,
+      rankDescending: true,
+      reading: { pct: 1, resetIn: 3600 },
+      env: { MINSPEC_DRAIN_QUEUE_LIMIT: '5' },
+    });
+
+    // Ranked order is 50, 49, 48, ... — capped to the top 5 means 50..46 dispatch,
+    // and nothing lower (in particular, NOT the numerically-first 5).
+    expect(d.dispatched()).toEqual([50, 49, 48, 47, 46]);
+    expect(d.offered()).toEqual([50, 49, 48, 47, 46]);
+    expect(d.log()).toMatch(/NOTE: 50 issue\(s\) ready — dispatching the top 5 this cycle/);
+    expect(d.log()).toContain('MINSPEC_DRAIN_QUEUE_LIMIT');
+    expect(d.log()).toMatch(/^\[drain\] cycle done\.$/m);
+  });
+
+  it('the queue block hands the dispatch loop the WHOLE ranked list, and still announces the cap', () => {
+    // The other half of the same change (#2641): the loop can only go past a refused
+    // issue to the next ranked one if the list it walks was not cut to the cap first.
     const gh = stubGh(50);
     const rk = stubRankerReverse(); // ranks highest-numbered first
     const { out, status } = runBlock(rk, gh, { MINSPEC_DRAIN_QUEUE_LIMIT: '5' });
 
-    // Ranked order is 50, 49, 48, ... — capped to the top 5 means 50..46 dispatch,
-    // and nothing lower (in particular, NOT the numerically-first 5).
-    expect(out).toContain('REACHED-DISPATCH 50,49,48,47,46');
-    expect(out).not.toContain(',45');
-    expect(out).not.toMatch(/REACHED-DISPATCH 1,2,3,4,5/);
+    const all = Array.from({ length: 50 }, (_, i) => 50 - i).join(',');
+    expect(out).toContain(`REACHED-DISPATCH ${all}\n`);
     expect(out).toMatch(/NOTE: 50 issue\(s\) ready — dispatching the top 5 this cycle/);
-    expect(out).toContain('MINSPEC_DRAIN_QUEUE_LIMIT');
     expect(status).toBe(0);
   });
 

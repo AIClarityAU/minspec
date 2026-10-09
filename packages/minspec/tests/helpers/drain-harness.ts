@@ -14,6 +14,11 @@
  * (MINSPEC_DRAIN_REMEDIATE) and the ranker (MINSPEC_ISSUE_RANKER). Each stub records what
  * it was asked to do, so a test asserts on what ran, not on what the log claims ran.
  *
+ * One exception to "the dispatcher is a stub" (#2641): an issue a fixture describes under
+ * `realDispatch` is handed to the real scripts/dispatch-issue.sh, so that a refusal reaches
+ * the drain in the dispatcher's own words and by its own record. It cannot build anything:
+ * see the note on that field.
+ *
  * NOTHING HERE CAN REACH THE MACHINE'S OWN DRAIN. Every run gets its own lock, log, quota
  * file, run dir and primary root under one temp directory; the self-refresh and the
  * checkout sync are off; no GitHub token can be minted; and `claude` on PATH is a stub
@@ -28,6 +33,8 @@ import { execFileSync, spawn, type ChildProcess } from 'child_process';
 import { drainBaseEnv } from './drain-env';
 
 export const DRAIN = path.resolve(__dirname, '../../../../scripts/drain-inbox.sh');
+/** The real dispatcher, for a fixture that routes an issue through it (`realDispatch`). */
+export const REAL_DISPATCH = path.resolve(__dirname, '../../../../scripts/dispatch-issue.sh');
 
 const nowSec = () => Math.floor(Date.now() / 1000);
 const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -98,6 +105,31 @@ export interface DrainFixture {
   issueSays?: Record<number, string>;
   /** The same for the remediation of that pull request. */
   remediateSays?: Record<number, string>;
+  /**
+   * Issues whose dispatch FAILS: the stub prints an authentication error and exits 1
+   * without building anything. Such an issue is in `offered()` and not in `dispatched()`.
+   */
+  issueFails?: number[];
+  /**
+   * The labels GitHub reports for that issue. An issue listed here is NOT handed to the
+   * stub dispatcher: it goes to the REAL scripts/dispatch-issue.sh, which re-validates it
+   * against these labels exactly as it does in production (#2641).
+   *
+   * The harness serves no comments, so no verdict record can back such an issue and the
+   * real dispatcher can only ever REFUSE it. Give it labels that make it refuse quietly
+   * (a countermanding label, or no ready label at all): a verdict-class refusal goes on
+   * to write to GitHub, and with no token to mint here that write aborts the dispatcher.
+   * Either way nothing can be built, which is what makes the real script safe to run.
+   */
+  realDispatch?: Record<number, string[]>;
+  /**
+   * Take away the real dispatcher's means of recording that it started nothing (an older
+   * dispatcher, or one that could not write the record). Its refusal is then visible in
+   * its own output and nowhere else.
+   */
+  withholdOutcomeRecord?: boolean;
+  /** Rank the highest issue number first, so rank order and numeric order disagree. */
+  rankDescending?: boolean;
   env?: Record<string, string>;
 }
 
@@ -108,8 +140,12 @@ export interface Drain {
   banner: string;
   /** The drain's own log, so far. */
   log(): string;
-  /** Issues the dispatcher was run for, in launch order. */
+  /** Issues the STUB dispatcher ran, in launch order: the builds a real cycle would have started. */
   dispatched(): number[];
+  /** Every issue the drain handed to a dispatcher, stub or real, in launch order. */
+  offered(): number[];
+  /** Did a `gh` call inherit the name of the file the dispatcher records "not started" in? */
+  outcomeFileLeaked(): boolean;
   /** Issues the triager was run for. */
   triaged(): number[];
   /** Pull requests the remediator was run for. */
@@ -171,11 +207,32 @@ function build(f: DrainFixture): Built {
   queue('inbox', f.inbox);
   queue('prs', f.openPrs);
 
-  // gh: the three label queues and the open-PR list. Everything else is empty and
-  // succeeds, which is what the reconcilers and the reads around them need.
+  // What `gh issue view` answers for an issue routed through the real dispatcher: open,
+  // wearing the fixture's labels, with no comments (so no verdict record can back it).
+  for (const [issue, labels] of Object.entries(f.realDispatch ?? {})) {
+    fs.writeFileSync(
+      path.join(dir, `issue.${issue}.json`),
+      JSON.stringify({
+        title: `fixture issue ${issue}`,
+        body: 'fixture body',
+        state: 'OPEN',
+        labels: labels.map((name) => ({ name })),
+        comments: [],
+      }) + '\n',
+    );
+  }
+
+  // gh: the three label queues, the open-PR list, and `issue view` for an issue the
+  // fixture describes. Everything else is empty and succeeds, which is what the
+  // reconcilers and the reads around them need.
+  //
+  // The first line is a tripwire, not a feature: the drain names a file for the
+  // dispatcher to record "not started" in, and nothing the dispatcher goes on to run may
+  // inherit that name. A gh call that can see it leaves a marker (#2641).
   stub(
     'gh',
-    `label=""; prev=""
+    `[[ -n "\${MINSPEC_DISPATCH_OUTCOME_FILE:-}" ]] && echo "$*" >> "${dir}/outcome-file-leaked"
+label=""; prev=""
 for a in "$@"; do [[ "$prev" == "--label" ]] && label="$a"; prev="$a"; done
 if [[ "$1" == "issue" && "$2" == "list" ]]; then
   case "$label" in
@@ -185,15 +242,36 @@ if [[ "$1" == "issue" && "$2" == "list" ]]; then
   esac
   exit 0
 fi
+if [[ "$1" == "issue" && "$2" == "view" ]]; then
+  [[ -f "${dir}/issue.$3.json" ]] && cat "${dir}/issue.$3.json"
+  exit 0
+fi
 if [[ "$1" == "pr" && "$2" == "list" && " $* " == *" --state open "* ]]; then cat "${dir}/queue.prs"; exit 0; fi
 exit 0
 `,
   );
   // Order matters and mirrors an agent: it starts, works for a while, the meter has
   // moved by the time it is done, and whatever it says last is the end of its output.
+  //
+  // An issue the fixture describes under realDispatch never reaches that stub body. It is
+  // handed to the REAL dispatcher, so the refusal the drain sees is the shipped one, in
+  // the shipped words, recorded the shipped way: a stub that imitated it would pin
+  // whatever this file believed the dispatcher says. MINSPEC_FRESHNESS_CHECKED=1 is what
+  // the drain exports once its run dir is verified; without it the dispatcher would fetch
+  // origin and refuse to run from a checkout that is behind.
   stub(
     'dispatch.sh',
-    `echo "$1" >> "${dir}/dispatched"
+    `echo "$1" >> "${dir}/offered"
+if [[ -f "${dir}/issue.$1.json" ]]; then
+  ${f.withholdOutcomeRecord ? 'unset MINSPEC_DISPATCH_OUTCOME_FILE' : ':'}
+  MINSPEC_FRESHNESS_CHECKED=1 exec bash "${REAL_DISPATCH}" "$1"
+fi
+if [[ -f "${dir}/fails-issue.$1" ]]; then
+  echo "Fetching issue #$1..."
+  echo "HTTP 401: Bad credentials (https://api.github.com/graphql)" >&2
+  exit 1
+fi
+echo "$1" >> "${dir}/dispatched"
 echo "RAN $1"
 secs="$(cat "${dir}/secs-issue.$1" 2>/dev/null || echo "${f.dispatchSecs ?? 0}")"
 [[ "$secs" != "0" ]] && sleep "$secs"
@@ -207,10 +285,11 @@ exit 0
     'remediate.sh',
     `echo "$1" >> "${dir}/remediated"\necho "remediated PR #$1"\n[[ -f "${dir}/says-pr.$1" ]] && cat "${dir}/says-pr.$1"\nexit 0\n`,
   );
-  // The ranker's stdout IS the order, so the hook must stay off it.
+  // The ranker's stdout IS the order, so the hook must stay off it. `tac` reverses the
+  // numeric order it is handed, which is what makes rank and issue number disagree.
   stub(
     'rank.sh',
-    `cat\n[[ -f "${dir}/after-ranking.sh" ]] && bash "${dir}/after-ranking.sh" >/dev/null 2>&1\nexit 0\n`,
+    `${f.rankDescending ? 'tac' : 'cat'}\n[[ -f "${dir}/after-ranking.sh" ]] && bash "${dir}/after-ranking.sh" >/dev/null 2>&1\nexit 0\n`,
   );
   stub('claude', `echo "$*" >> "${dir}/claude-called"\necho "unexpected claude invocation: $*" >&2\nexit 1\n`);
 
@@ -219,6 +298,9 @@ exit 0
   }
   for (const [issue, secs] of Object.entries(f.issueSecs ?? {})) {
     fs.writeFileSync(path.join(dir, `secs-issue.${issue}`), `${secs}\n`);
+  }
+  for (const issue of f.issueFails ?? []) {
+    fs.writeFileSync(path.join(dir, `fails-issue.${issue}`), '');
   }
   for (const [issue, line] of Object.entries(f.issueSays ?? {})) {
     fs.writeFileSync(path.join(dir, `says-issue.${issue}`), `${line}\n`);
@@ -268,6 +350,8 @@ exit 0
     banner: '',
     log: () => (fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8') : ''),
     dispatched: () => numbers(path.join(dir, 'dispatched')),
+    offered: () => numbers(path.join(dir, 'offered')),
+    outcomeFileLeaked: () => fs.existsSync(path.join(dir, 'outcome-file-leaked')),
     triaged: () => numbers(path.join(dir, 'triaged')),
     remediated: () => numbers(path.join(dir, 'remediated')),
     claudeCalled: () => fs.existsSync(path.join(dir, 'claude-called')),
