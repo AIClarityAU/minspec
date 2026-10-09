@@ -884,13 +884,50 @@ export async function proposeAI(
   }
 }
 
+/** Longest a line of `claude`'s own output may be before the detail grows unreadable. */
+const PRINTED_LINE_LIMIT = 200;
+
+/**
+ * `execFile` leaves the child's stdin pipe open with nobody writing to it — true of
+ * this call today, and the exact cause the pull request that carries the prompt on
+ * stdin instead (#2575) measured by hand: Claude Code 2.1.283 waits roughly 3s, then
+ * prints this line and carries on regardless. It is never why the pass failed, so it
+ * must never be the line `firstPrintedLine` surfaces.
+ */
+const STDIN_WAIT_RE = /no stdin data received/i;
+
+/**
+ * The first non-blank, non-stdin-wait line of what `claude` printed — stdout checked
+ * before stderr, since the "not logged in" refusal (#2577) lands on stdout — cut to a
+ * fixed length. `null` when there is nothing useful to show, including a failure with
+ * no process behind it at all (`classifyExecFailure`'s `E2BIG` case).
+ */
+function firstPrintedLine(e: { stdout?: unknown; stderr?: unknown }): string | null {
+  for (const stream of [e.stdout, e.stderr]) {
+    if (typeof stream !== 'string') continue;
+    for (const raw of stream.split('\n')) {
+      const line = raw.trim();
+      if (line === '' || STDIN_WAIT_RE.test(line)) continue;
+      return line.length > PRINTED_LINE_LIMIT ? `${line.slice(0, PRINTED_LINE_LIMIT)}…` : line;
+    }
+  }
+  return null;
+}
+
 /**
  * Name the failure mode from execFile's error. The distinction that matters: a
  * child we KILLED (timeout/cancel) is a defect or a user act, not the absent
  * binary the old single message blamed (#1570).
  */
 function classifyExecFailure(err: unknown, timeout: number): AiFailure {
-  const e = (err ?? {}) as { killed?: boolean; signal?: string; code?: unknown; name?: string; stderr?: unknown };
+  const e = (err ?? {}) as {
+    killed?: boolean;
+    signal?: string;
+    code?: unknown;
+    name?: string;
+    stdout?: unknown;
+    stderr?: unknown;
+  };
   if (e.name === 'AbortError' || e.code === 'ABORT_ERR') {
     return { reason: 'cancelled', detail: 'was cancelled' };
   }
@@ -899,6 +936,15 @@ function classifyExecFailure(err: unknown, timeout: number): AiFailure {
   }
   if (e.code === 'ENOENT') {
     return { reason: 'claude-absent', detail: 'could not run `claude` (Claude Code is not on PATH)' };
+  }
+  // `execFile` throws this synchronously, before any process exists, once one argument
+  // crosses roughly 131,072 characters on Linux (measured on the pull request that
+  // removes this cause by moving the prompt off argv, #2575). Nothing was printed to
+  // explain it — there is no process to have printed anything — so it needs its own
+  // wording rather than the generic "failed to run" below, which would give the user
+  // nothing to act on (#2577).
+  if (e.code === 'E2BIG') {
+    return { reason: 'exit', detail: 'the prompt was too long for the process to start with' };
   }
   // A release that does not know one of `aiPassArgs`'s switches refuses it before
   // doing anything else: observed on 1.0.60 and 2.0.30, exit code 1 with
@@ -911,10 +957,17 @@ function classifyExecFailure(err: unknown, timeout: number): AiFailure {
       detail: `cannot run with the installed Claude Code, which does not know \`${unknownSwitch[1]}\` (updating it usually fixes this)`,
     };
   }
+  // Whatever `claude` itself said, so a refusal explains itself instead of reading as a
+  // bare exit code (#2577). Covers cases this file never special-cases by name: not
+  // logged in ("Not logged in · Please run /login" on stdout, measured on Claude Code
+  // 2.1.283 with an empty config directory) and an administrator-deployed managed MCP
+  // file refusing `--strict-mcp-config` at startup (documented, not measured here — it
+  // needs a machine that has one).
+  const printed = firstPrintedLine(e);
   if (typeof e.code === 'number') {
-    return { reason: 'exit', detail: `exited with code ${e.code}` };
+    return { reason: 'exit', detail: printed ? `exited with code ${e.code} — ${printed}` : `exited with code ${e.code}` };
   }
-  return { reason: 'exit', detail: 'failed to run' };
+  return { reason: 'exit', detail: printed ?? 'failed to run' };
 }
 
 /**

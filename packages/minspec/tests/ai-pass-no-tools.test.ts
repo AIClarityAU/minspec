@@ -150,6 +150,9 @@ const succeed: Reply = (_start, finish) => finish(null, GOOD_JSON);
 /** The error shapes `execFile` really produces, as observed through the same call. */
 const exitCode1 = (stderr = ''): Error =>
   Object.assign(new Error('Command failed: claude -p ...'), { code: 1, killed: false, signal: null, stdout: '', stderr });
+/** Like `exitCode1`, but with control over stdout too — the stream the "not logged in" refusal (#2577) lands on. */
+const exitCode1Output = (stdout = '', stderr = ''): Error =>
+  Object.assign(new Error('Command failed: claude -p ...'), { code: 1, killed: false, signal: null, stdout, stderr });
 const killedByTimeout = (): Error =>
   Object.assign(new Error('Command failed: claude -p ...'), { code: null, killed: true, signal: 'SIGTERM', stdout: '', stderr: '' });
 const aborted = (): Error =>
@@ -649,13 +652,71 @@ describe('#2570 - the AI pass starts `claude` sealed', () => {
       expect(starts).toHaveLength(1);
     });
 
-    it('T3: any other non-zero exit is still reported as an exit', async () => {
+    it('T3: any other non-zero exit is still reported as an exit, and names what `claude` printed', async () => {
       const starts = installClaude((_s, finish) => finish(exitCode1('Something else went wrong\n')));
 
       const result = await proposeAI(project);
 
       expect(result.failure?.reason).toBe('exit');
       expect(result.failure?.detail).toMatch(/code 1/);
+      // The distinguishing assertion (#2577): the old code gave the user nothing past
+      // the bare exit code. Now the refusal explains itself.
+      expect(result.failure?.detail).toContain('Something else went wrong');
+      expect(starts).toHaveLength(1);
+    });
+
+    it('T3: not logged in - named from what `claude` said on stdout, not left as a bare exit code (#2577)', async () => {
+      // Measured: Claude Code 2.1.283, started against an empty config directory, exits
+      // 1 with this line on stdout (never stderr) and nothing else useful.
+      const starts = installClaude(
+        (_s, finish) => finish(exitCode1Output('Not logged in · Please run /login\n')),
+      );
+
+      const result = await proposeAI(project);
+
+      expect(result.proposal).toBeNull();
+      expect(result.failure?.reason).toBe('exit');
+      expect(result.failure?.detail).toContain('Not logged in · Please run /login');
+      expect(starts).toHaveLength(1);
+    });
+
+    it('T3: a prompt too long to start the process with is named as that, not "failed to run" (#2577)', async () => {
+      // `spawn E2BIG` is thrown synchronously, before any process exists, so there is no
+      // stdout/stderr to read a line from — this case needs its own wording.
+      const starts = installClaude(() => { throw tooBigToStart(); });
+
+      const result = await proposeAI(project);
+
+      expect(result.proposal).toBeNull();
+      expect(result.failure?.reason).toBe('exit');
+      expect(result.failure?.detail).toBe('the prompt was too long for the process to start with');
+      expect(result.failure?.detail).not.toBe('failed to run');
+      expect(starts).toHaveLength(1);
+    });
+
+    it('T3: the open-stdin wait `claude` prints while nobody is feeding it is never surfaced as the failure (#2577)', async () => {
+      // `execFile` leaves the child's stdin pipe open with nobody writing to it; Claude
+      // Code 2.1.283 waits roughly 3s, prints this, and carries on. A refusal that
+      // happens to follow it must still be named by its own line, not this one.
+      const starts = installClaude(
+        (_s, finish) => finish(exitCode1Output('No stdin data received, continuing...\nNot logged in · Please run /login\n')),
+      );
+
+      const result = await proposeAI(project);
+
+      expect(result.failure?.detail).not.toContain('stdin');
+      expect(result.failure?.detail).toContain('Not logged in · Please run /login');
+      expect(starts).toHaveLength(1);
+    });
+
+    it('T3: a printed line longer than the fixed limit is cut, not carried whole (#2577)', async () => {
+      const long = 'x'.repeat(500);
+      const starts = installClaude((_s, finish) => finish(exitCode1Output(long)));
+
+      const result = await proposeAI(project);
+
+      expect(result.failure?.detail).toContain('x'.repeat(200));
+      expect(result.failure?.detail.length).toBeLessThan(long.length);
       expect(starts).toHaveLength(1);
     });
 
