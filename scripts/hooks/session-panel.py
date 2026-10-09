@@ -41,9 +41,32 @@ WHAT IT CANNOT SEE, stated rather than hidden:
   * A session killed long before this one started (a container restart after an idle
     night). Only the last RECENT_S seconds are examined, so a stale loss is not
     re-announced at every start for days. Tracked as #2633.
+  * A session that is still running, is absent from the registry and has written no
+    exit record. The registry is the only witness for such a process, so at start it
+    is named, in those words: "the registry lists no live process for it". The
+    registry is believed at all only when it lists the session that is asking.
   * The session registry and the transcript fields are internal to the CLI. Where
     this unit cannot evaluate them it says so in one line; it never reads an
     unreadable record as "nothing lost".
+
+WHAT IT ASSUMES ABOUT THE CLI (read from 2.1.283; none of it is a documented interface):
+  registry    <config>/sessions/<pid>.json holding pid, sessionId (a UUID), cwd and
+              procStart (field 22 of /proc/<pid>/stat); optionally name, status,
+              startedAt and messagingSocketPath.
+  transcript  <config>/projects/<folder>/<session id>.jsonl, one JSON record a line.
+              A prompt is type "user" and carries turnOrigin and entrypoint ("human"
+              and "sdk-cli" when typed into a panel). A clean exit is a LAST record
+              of type "cost-state"; startTime + totalDuration is when. A title is
+              "custom-title" or "ai-title". A schedule is a CronCreate tool_use whose
+              result names "job <id>", cancelled by a CronDelete tool_use of that id.
+  process     a panel session has "--input-format stream-json" in its arguments and
+              an anonymous pipe as its standard input.
+When one of these stops holding, the unit says less and says so (the registry no
+longer lists this session; no recent prompt carries an origin). It does not guess.
+
+WHAT IT PRINTS is read by a session and by a person, so nothing from a file name, the
+registry or a transcript is printed as found: a session id must be a UUID, names and
+titles go through clean(), and paths through shown().
 
 Never fatal: every path exits 0, and a failure prints one visible line.
 """
@@ -61,6 +84,7 @@ HEAD_BYTES = 512 * 1024   # where a transcript's first prompt is looked for
 TAIL_BYTES = 256 * 1024   # where its exit record and title are looked for
 INPUT_WAIT_S = 2.0        # never hold a session start on an input that does not close
 NAME_MAX = 80
+UUID = re.compile(r"[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\Z")
 
 
 # --------------------------------------------------------------------------- input
@@ -222,8 +246,10 @@ def registry():
         if not isinstance(entry, dict):
             continue
         pid, sid = entry.get("pid"), entry.get("sessionId")
-        if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 1 or not isinstance(sid, str):
+        if isinstance(pid, bool) or not isinstance(pid, int) or pid <= 1:
             continue
+        if not isinstance(sid, str) or not UUID.match(sid):
+            continue  # a session id is printed and becomes part of a path: a UUID or nothing
         entries.append(entry)
     return entries
 
@@ -270,6 +296,12 @@ def clean(text, limit=NAME_MAX):
     text = "".join(ch if ch.isprintable() else " " for ch in str(text))
     text = " ".join(text.split())
     return text if len(text) <= limit else text[: limit - 3] + "..."
+
+
+def shown(path):
+    """A path, made safe to print: each non-printable character becomes "?". Neither
+    shortened nor re-spaced, so a clean path is printed exactly and can be used."""
+    return "".join(ch if ch.isprintable() else "?" for ch in str(path))
 
 
 def age(seconds):
@@ -484,6 +516,8 @@ def mode_start(hook):
         if not item.name.endswith(".jsonl"):
             continue
         sid = item.name[: -len(".jsonl")]
+        if not UUID.match(sid):
+            continue  # not a session's transcript, and never printed (see WHAT IT PRINTS)
         try:
             info = item.stat()
         except OSError:
@@ -533,15 +567,20 @@ def mode_start(hook):
             out.append('      To stand it down sooner, SendMessage to "uds:%s": hand over and stop.' % clean(sock, 200))
         out += schedule_lines(path, "It still holds")
         if os.path.isfile(path):
-            out.append("      Transcript: %s" % path)
+            out.append("      Transcript: %s" % shown(path))
     for when, sid, title, clean_exit, path in ended:
-        how = "ended %s ago" % age(now - when) if clean_exit else "its process is gone (no exit record; last write %s ago)" % age(now - when)
+        # Without an exit record the claim is exactly as strong as its one witness.
+        how = (
+            "ended %s ago" % age(now - when)
+            if clean_exit
+            else "the registry lists no live process for it (no exit record; last write %s ago)" % age(now - when)
+        )
         out.append('    * "%s" (%s) - %s and was not re-attached.' % (clean(title or "untitled"), sid[:8], how))
         lost = schedule_lines(path, "It had armed")
         if lost:
             out += lost
             out.append("      That schedule died with it. If this panel takes over, re-arm it here with CronCreate.")
-        out.append("      Transcript: %s" % path)
+        out.append("      Transcript: %s" % shown(path))
         out.append("      Resume it in a terminal: claude --resume %s" % sid)
     if count:
         out += [
@@ -552,7 +591,7 @@ def mode_start(hook):
     if prompts_seen and not origins_seen:
         out.append(
             "⚠️  Lost-panel check: could not classify %d recent transcript%s in %s (no origin field) -"
-            % (prompts_seen, "" if prompts_seen == 1 else "s", directory)
+            % (prompts_seen, "" if prompts_seen == 1 else "s", shown(directory))
         )
         out.append("    a session that ended without being re-attached would NOT be reported (%s)." % ISSUE)
     if out:

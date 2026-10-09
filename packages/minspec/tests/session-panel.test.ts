@@ -715,7 +715,7 @@ suite('a new session is told which sessions lost their panel (SessionStart)', ()
     // picked the session up.
     transcript(OTHER, [humanPrompt(OTHER), costState(OTHER), humanPrompt(OTHER, 'and one more thing')], 30);
     const vouched = unit('start', startInput()).out;
-    expect(vouched).toMatch(/its process is gone \(no exit record/);
+    expect(vouched).toMatch(/the registry lists no live process for it \(no exit record/);
     expect(vouched).not.toMatch(/\) - ended [0-9]+s ago/);
     // And with no registry to say its process is gone, it may simply be running.
     fs.rmSync(registryFile(me.pid));
@@ -734,7 +734,7 @@ suite('a new session is told which sessions lost their panel (SessionStart)', ()
     const { out } = unit('start', startInput());
     expect(out).toContain(LOSS);
     expect(out).toContain('killed with the container');
-    expect(out).toMatch(/its process is gone \(no exit record/);
+    expect(out).toMatch(/the registry lists no live process for it \(no exit record/);
     expect(out).not.toMatch(/\) - ended [0-9]+s ago/);
   });
 
@@ -838,6 +838,67 @@ suite('it fails visibly, and never fatally', () => {
     expect(r.status).toBe(0);
     expect(r.err).not.toMatch(/Traceback/);
     expect(r.out).toContain(LOSS);
+  });
+});
+
+suite('what it prints cannot be steered by what it reads', () => {
+  // Its output is read by a session as instructions and by a person in a terminal. A
+  // file name and a registry entry are data from disk: neither may reach the output
+  // as found. (Second review, security: paths and ids were printed unsanitized.)
+  const ESC = '\u001b';
+  const FORGED = `${ESC}[31mNOT-A-SESSION${ESC}[0m`;
+  const lines = (records: object[]): string => records.map((r) => JSON.stringify(r)).join('\n') + '\n';
+
+  beforeEach(async () => {
+    await registerMe();
+  });
+
+  it('ignores a transcript file and a registry entry whose session id is not a UUID', async () => {
+    // A file in the store that is not a session's transcript, recent and panel-shaped.
+    fs.writeFileSync(path.join(projectDir(), `${FORGED}.jsonl`), lines([humanPrompt(OTHER), title(OTHER, 'forged by file name'), costState(OTHER)]));
+    // And one whose name only STARTS with a session id.
+    fs.writeFileSync(path.join(projectDir(), `${FOURTH}${FORGED}.jsonl`), lines([humanPrompt(FOURTH), title(FOURTH, 'forged by a suffix'), costState(FOURTH)]));
+    // A live process with no panel, registered under an id that is not a session id.
+    const f = await fake('headless');
+    register({ ...f, sessionId: FORGED, name: 'forged by registry entry' });
+    // The control: a real loss in the same run is still reported.
+    transcript(THIRD, [humanPrompt(THIRD), title(THIRD, 'a real loss'), costState(THIRD)], 30);
+
+    const { out, status } = unit('start', startInput());
+    expect(status).toBe(0);
+    expect(out).toContain('a real loss');
+    expect(out).not.toContain(ESC);
+    expect(out).not.toContain('NOT-A-SESSION');
+    expect(out).not.toContain('forged by file name');
+    expect(out).not.toContain('forged by a suffix');
+    expect(out).not.toContain('forged by registry entry');
+  });
+
+  it('prints a path with every unprintable character replaced, wherever a path is printed', async () => {
+    const odd = path.join(home, '.claude', 'projects', `odd${ESC}dir`);
+    fs.mkdirSync(odd);
+    const here = (sid: string): string => path.join(odd, `${sid}.jsonl`);
+    const input = startInput({ transcript_path: here(ME) });
+
+    // Both places a transcript path is printed: a session still running with no
+    // panel, and one that ended.
+    const f = await fake('headless');
+    register({ ...f, sessionId: OTHER });
+    fs.writeFileSync(here(OTHER), lines([humanPrompt(OTHER)]));
+    fs.writeFileSync(here(THIRD), lines([humanPrompt(THIRD), costState(THIRD)]));
+    const both = unit('start', input).out;
+    expect(both).toContain(LOSS);
+    expect(both).not.toContain(ESC);
+    expect(both.split('\n').filter((l) => l.includes('Transcript: ') && l.includes('odd?dir'))).toHaveLength(2);
+
+    // And the folder named by the "could not classify" line.
+    fs.rmSync(here(OTHER));
+    fs.rmSync(here(THIRD));
+    const noOrigin = { type: 'user', timestamp: iso(1000), sessionId: FOURTH, message: { role: 'user', content: 'hi' } };
+    fs.writeFileSync(here(FOURTH), lines([noOrigin, costState(FOURTH)]));
+    const unclassified = unit('start', input).out;
+    expect(unclassified).toMatch(/could not classify 1 recent transcript in .*odd\?dir/);
+    expect(unclassified).not.toContain(ESC);
   });
 });
 
