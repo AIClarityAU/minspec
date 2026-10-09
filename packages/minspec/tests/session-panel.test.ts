@@ -7,7 +7,8 @@
  * container write to a different store, so their panels come back as blank new
  * sessions, and an old process that was mid-turn runs on with no panel. Measured on
  * 2026-10-09: 2 of 2 panels blank, the old chief of staff ran headless for 29 minutes
- * with 9 of 9 file-tool calls refused, and two supervising loops were live at once.
+ * with 9 of 9 file-tool calls refused, and two supervising loops were live at once
+ * (evidence: the comment of 2026-10-09 on #2380, not this file).
  * Nothing said so to either side. session-panel.py is that missing statement.
  *
  * Executed, not grepped. Every case runs the real unit against a fixture HOME whose
@@ -947,12 +948,24 @@ suite('hook wiring, by execution', () => {
     // The backstop this replaces went unnoticed for three weeks because a check that
     // does not run and a check that finds nothing printed the same thing: nothing.
     const hook = isolatedHook();
-    const broken = 'import sys\nsys.exit(3)\n';
+    // It dies the way a real failure does: a traceback on its error stream, whose
+    // last line is the reason. The notice must carry that line (second review: the
+    // error stream was discarded, so the notice said that it failed and not why),
+    // and must not carry the escape character the reason was written with.
+    const broken = [
+      'import sys',
+      'sys.stderr.write("Traceback (most recent call last):\\n  File \\"unit\\", line 1\\nValueError: the \\x1b[31mreason it stopped\\n\\n")',
+      'sys.exit(3)',
+      '',
+    ].join('\n');
+    const why = 'Why: ValueError: the [31mreason it stopped';
     fs.writeFileSync(path.join(path.dirname(hook), 'session-panel.py'), broken);
     const cwd = fs.mkdtempSync(path.join(scratch, 'cwd-'));
     const start = spawnSync('bash', [hook], { input: JSON.stringify(startInput()), encoding: 'utf-8', env: hookEnv(), cwd, timeout: 20_000 });
     expect(start.status).toBe(0);
     expect(start.stdout).toMatch(/Lost-panel check did not run \(exit 3/);
+    expect(start.stdout).toContain(why);
+    expect(start.stdout).not.toContain('\u001b');
     expect(start.stdout).toContain('Session Start');
 
     fs.copyFileSync(PROMPT_HOOK, path.join(path.dirname(hook), 'scope-check.sh'));
@@ -965,6 +978,33 @@ suite('hook wiring, by execution', () => {
     });
     expect(prompt.status).toBe(0);
     expect(prompt.stdout).toMatch(/No-panel check did not run \(exit 3/);
+    expect(prompt.stdout).toContain(why);
+    expect(prompt.stdout).not.toContain('\u001b');
+    expect(prompt.stdout).toContain('No scope declared');
+  });
+
+  it('neither hook prints an interpreter warning from a unit that ran', () => {
+    // The error stream is captured so a failure can say why. A warning is not a
+    // failure, and this runs at every start and before every prompt.
+    const hook = isolatedHook();
+    const noisy = 'import warnings\nwarnings.warn("a deprecation nobody asked about")\n';
+    fs.writeFileSync(path.join(path.dirname(hook), 'session-panel.py'), noisy);
+    fs.copyFileSync(PROMPT_HOOK, path.join(path.dirname(hook), 'scope-check.sh'));
+    const cwd = fs.mkdtempSync(path.join(scratch, 'cwd-'));
+    const start = spawnSync('bash', [hook], { input: JSON.stringify(startInput()), encoding: 'utf-8', env: hookEnv(), cwd, timeout: 20_000 });
+    const prompt = spawnSync('bash', [path.join(path.dirname(hook), 'scope-check.sh')], {
+      input: JSON.stringify(promptInput(OTHER)),
+      encoding: 'utf-8',
+      env: hookEnv(),
+      cwd,
+      timeout: 20_000,
+    });
+    for (const r of [start, prompt]) {
+      expect(r.status).toBe(0);
+      expect(r.stdout).not.toContain('deprecation nobody asked about');
+      expect(r.stdout).not.toMatch(/did not run/);
+    }
+    expect(start.stdout).toContain('Session Start');
     expect(prompt.stdout).toContain('No scope declared');
   });
 

@@ -9,7 +9,9 @@ is not signalled: it only sees its input stream close. If it was idle it exits; 
 was mid-turn it runs on with nobody reading it. Measured 2026-10-09: 2 of 2 panels
 came back blank, the old chief of staff ran headless for 29 minutes with 9 of 9 file
 tool calls refused, and two supervising loops were live on one queue for 10 minutes.
-Neither side was told. This unit is that statement, made to both sides:
+(Those counts cannot be checked from this file: the transcripts, times and method are
+in the comment of 2026-10-09 on #2380.) Neither side was told. This unit is that
+statement, made to both sides:
 
   self   (UserPromptSubmit) - "THIS session has no panel": its own input has no writer.
   start  (SessionStart)     - "these sessions in this folder lost their panel": the ones

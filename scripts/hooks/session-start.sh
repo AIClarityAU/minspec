@@ -8,9 +8,12 @@
 # can. Delegated to its own unit so it is tested by EXECUTION (see session-panel.py).
 # Never fatal, but never silent either: a check that stopped running reads exactly like
 # "no session lost its panel", which is how the dead-loop backstop went unnoticed for
-# three weeks (#2379). So a non-zero exit is reported in one line.
+# three weeks (#2379). So a non-zero exit is reported, with the last line of what the
+# unit wrote on its way out: its error stream is captured, not discarded, so the notice
+# says WHY and nobody has to re-run it by hand to find out. (-W ignore keeps an
+# interpreter warning, which is not a failure, out of every session start.)
 _PANEL="$(cd "$(dirname "${BASH_SOURCE[0]}")" 2>/dev/null && pwd)/session-panel.py"
-_PANEL_OUT="$(python3 "$_PANEL" start 2>/dev/null)"
+_PANEL_OUT="$(python3 -W ignore "$_PANEL" start 2>&1)"
 _PANEL_RC=$?
 
 cat <<'SCOPE'
@@ -33,6 +36,10 @@ SCOPE
 # Lost panels: what the unit at the top of this script found (#2380).
 if [ "$_PANEL_RC" -ne 0 ]; then
   echo "⚠️  Lost-panel check did not run (exit $_PANEL_RC: $_PANEL) — a session that lost its panel is NOT being reported here (#2380)."
+  _PANEL_WHY="$(printf '%s\n' "$_PANEL_OUT" | grep -v '^[[:space:]]*$' | tail -n 1 | LC_ALL=C tr -cd '[:print:]' | cut -c1-200)"
+  if [ -n "$_PANEL_WHY" ]; then
+    echo "    Why: $_PANEL_WHY"
+  fi
 elif [ -n "$_PANEL_OUT" ]; then
   printf '%s\n' "$_PANEL_OUT"
 fi
