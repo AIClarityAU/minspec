@@ -1,7 +1,7 @@
 ---
 id: SPEC-134
 type: requirements
-status: specifying
+status: planning
 tier: T4
 product: minspec
 epic: EPIC-003  # SDD Core Methodology - when a spec may be written, what its frontmatter must state, and the gates that check both
@@ -21,8 +21,8 @@ implements: [packages/shared/src/specify-ready.ts, packages/shared/src/spec-fres
 affects: [packages/shared/src/next-task.ts, packages/shared/src/index.ts, packages/minspec/src/lib/artifact-graph.ts, packages/minspec/src/lib/spec-validator.ts, packages/minspec/src/lib/spec-manager.ts, packages/minspec/src/lib/slash-commands.ts, packages/minspec/src/lib/config.ts, packages/minspec/src/commands/example.ts, packages/minspec/src/commands/status.ts, packages/minspec/src/views/backlog-view.ts, packages/minspec/src/views/spec-tree-provider.ts, packages/minspec/src/lib/ci-review-templates.ts, scripts/validate-frontmatter.ts, scripts/dispatch-issue.sh, scripts/drain-inbox.sh, scripts/triage-decide.sh, scripts/roles/approvable-reviewer.md, scripts/roles/triage.md]
 phases:
   specify: done
-  clarify: pending
-  plan: pending
+  clarify: done
+  plan: in-progress
   tasks: pending
   implement: pending
 ---

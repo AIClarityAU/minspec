@@ -810,4 +810,12 @@ The founder needs MinSpec on a Windows work PC that runs Microsoft's VS Code, an
 <!-- dr-summary:DR-103 auto=46c85ea2201e -->
 The founder asked on 2026-10-05 for the published MinSpec version to be kept current, and on 2026-10-07 offered to give agents the Marketplace token. This record decides how new versions reach the VS Code Marketplace from now on: through a release workflow that signs in with no stored credential, publishes to the pre-release channel by itself, and needs the founder's approval before it publishes to everyone.
 <!-- /dr-summary:DR-103 -->
+
+## [DR-104 — An ai-review pass is carried across a push that changes nothing the voters are given - the whole-panel reuse DR-097 recorded as refused, now taken on a larger measurement](DR-104.md)
+
+*Status: proposed · Date: 2026-10-09*
+
+<!-- dr-summary:DR-104 auto=554666865cf7 -->
+main requires a pull request to be up to date before it merges, and the staleness guard (#359) voids ai-review:pass on any push. An update from main is a push, so the whole four-voter panel re-runs on a change it has already passed (#1688). This record decides that a pass is carried across a push when the text the voters would be given is byte-identical and the reviewer is unchanged, and it records what that costs: on a carried commit…
+<!-- /dr-summary:DR-104 -->
 <!-- minspec:dr-index:end -->
