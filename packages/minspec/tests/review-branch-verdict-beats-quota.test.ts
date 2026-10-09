@@ -229,6 +229,7 @@ describe('#1131 review-branch.sh — genuine outages and crashes are unchanged',
 describe('#1131 ai-review-guard — the classifier itself is not weakened', () => {
   // The fix is about WHAT the classifier is shown, not about loosening it: every
   // genuine signal must still classify as quota.
+  // eslint-disable-next-line @typescript-eslint/no-require-imports -- CJS script, dynamic path
   const guard = require(path.join(REPO, '.github/scripts/ai-review-guard.js'));
 
   it.each([

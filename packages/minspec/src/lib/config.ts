@@ -59,6 +59,15 @@ export interface MinspecConfig {
    */
   readonly ownershipDeclaration?: 'warn' | 'error';
   /**
+   * Severity of the `implement.claimed-without-evidence` rule (#1751). `warn`
+   * (default, pre-backfill) surfaces a spec whose `phases.implement` is
+   * `in-progress`/`done` while a declared `implements:` path is absent from
+   * disk, without blocking; flip to `error` once the corpus is backfilled
+   * (same FR-7 ratchet SPEC-038's `ownershipDeclaration` used). Absent →
+   * treated as `warn`.
+   */
+  readonly implementEvidence?: 'warn' | 'error';
+  /**
    * Permitted approver identities for the `approval-integrity` gate (DR-081 §4, #1376).
    *
    * An ALLOWLIST, unlike `approval.ts`'s `BUILTIN_AGENT_IDENTITIES` denylist, and the two
@@ -77,6 +86,20 @@ export interface MinspecConfig {
    * without the extension's loader). Two readers, one documented shape.
    */
   readonly approvers?: readonly string[];
+  /**
+   * Severity of the #1912 `status.inline-comment` / `status.orphan-comment` rules.
+   *
+   * The `status:` frontmatter line carries a value and nothing else (#1900). The three
+   * status writers replace that whole line with `status: <value>`, so an inline comment is
+   * DESTROYED on write, and indented `#` lines after it SURVIVE and go on describing a
+   * value that no longer holds (#1879). Both are annotations the writer cannot keep
+   * honest, so the convention is to put rationale in body prose instead.
+   *
+   * `warn` (default) surfaces them without blocking; flip to `error` once the corpus is
+   * clean and the writers consume continuations (the SPEC-038 FR-7 ratchet). Absent →
+   * treated as `warn`.
+   */
+  readonly statusLineAnnotation?: 'warn' | 'error';
   /**
    * The project's name, as rendered into every generated harness file (#1529).
    *
@@ -138,7 +161,9 @@ export const DEFAULT_CONFIG: MinspecConfig = {
   },
   coverage: { minimumPercentage: DEFAULT_COVERAGE_MINIMUM },
   ownershipDeclaration: 'warn',
+  implementEvidence: 'warn',
   autonomy: 'ask',
+  statusLineAnnotation: 'warn',
 };
 
 /** Deep merge user config over defaults. User values win. */

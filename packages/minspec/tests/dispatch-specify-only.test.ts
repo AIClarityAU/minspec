@@ -57,7 +57,6 @@ const stripComments = (s: string) =>
 const DISPATCH = path.join(scriptsDir, 'dispatch-issue.sh');
 const dispatchCode = stripComments(read('dispatch-issue.sh'));
 const triageInboxCode = stripComments(read('triage-inbox.sh'));
-const drainCode = stripComments(read('drain-inbox.sh'));
 const triageRole = read('roles/triage.md');
 
 /** Run the dispatcher's pure scope seam over a newline-separated path list. */

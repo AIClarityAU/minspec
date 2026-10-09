@@ -730,6 +730,16 @@ export interface ValidateSpecOptions {
    * access gets no false violation).
    */
   readonly siblingShardFiles?: readonly ShardIdFile[];
+  /**
+   * Repo-relative-path existence check, for `implement.claimed-without-evidence`
+   * (#1751). When supplied, a spec's declared `implements:` paths are checked
+   * against it once `phases.implement` claims active/finished work; omit it to
+   * skip the check entirely (this file is filesystem-free by design — see the
+   * header comment — so the fs lookup itself lives in the caller, same as
+   * `siblingShardFiles`/`knownEpicRefs` push their fs work up a layer). No
+   * false positive from a caller without filesystem access.
+   */
+  readonly pathExists?: (repoRelativePath: string) => boolean;
 }
 
 // ─── Spec→code ownership (SPEC-038 / #460) ───────────────────────────────────
@@ -772,6 +782,192 @@ function fmListField(raw: string, key: string): string[] {
     }
   }
   return toks;
+}
+/**
+ * `>` prose lines in a frontmatter block, exempting genuine block scalars.
+ *
+ * A key line ending in `>`/`|` (optional chomping/indent indicator) opens a scalar region
+ * that runs to the first non-blank line indented no further than that key; lines inside the
+ * region are content, however they start. Every other line beginning with `>` — column 0 or
+ * indented — is prose parked in the YAML block (#1955).
+ */
+function countFrontmatterProseLines(yaml: string): number {
+  const OPENS_SCALAR = /^([ \t]*)[\w.-]+[ \t]*:[ \t]*[>|][-+]?\d*[ \t]*$/;
+  let scalarIndent: number | null = null;
+  let n = 0;
+  for (const line of yaml.split('\n')) {
+    if (scalarIndent !== null) {
+      const indent = /^[ \t]*/.exec(line)![0].length;
+      if (line.trim() === '' || indent > scalarIndent) continue; // still inside the scalar
+      scalarIndent = null; // de-indented → region closed; fall through and judge this line
+    }
+    const opener = OPENS_SCALAR.exec(line);
+    if (opener) {
+      scalarIndent = opener[1].length;
+      continue;
+    }
+    if (/^[ \t]*>/.test(line)) n++;
+  }
+  return n;
+}
+
+/**
+ * #1955 review — prose parked INSIDE the frontmatter block.
+ *
+ * RCDD Phase 4 for a defect this change itself introduced. Moving a status annotation
+ * "off the status line" is only a fix if it lands in the BODY. The first attempt here
+ * inserted the blockquote after the first `^# ` line, which in three files was a YAML
+ * *comment* inside the frontmatter, not the H1 — so the note moved from one frontmatter
+ * position to another and stayed exactly as orphan-able, in a shape
+ * `validateStatusAnnotation` cannot see. Three reviewers caught it; nothing else would.
+ *
+ * `parseFrontmatterYaml` (in `spec.ts`) silently discards any line that is not
+ * `key: value`, so the text is invisible to every parsed-model consumer AND survives every
+ * status write. Silent discard is why this needs a gate rather than care.
+ *
+ * NARROW, BUT NOT BY INDENTATION (widened by the #1955 re-review). A `>` at column 0 inside
+ * a mapping is invalid YAML, so it is unambiguously prose. An indented `>` was originally
+ * exempted as "a legitimate block scalar (`key: >`)" — which holds only while the preceding
+ * key OPENS a scalar. Under a key that already carries a value it does not:
+ * `status: implementing` followed by `  > **Status note.** …` is prose that
+ * `validateStatusAnnotation` cannot see either (it scans for `#`), so it escaped BOTH rules
+ * — shipped code returns `[]` from the whole of `validateSpec`, and `setSpecStatus` leaves
+ * the blockquote verbatim under a status it no longer describes.
+ *
+ * So the scalar region is now TRACKED rather than inferred from indent alone: a key line
+ * ending in `>`/`|` opens it, and lines indented past that key are content. Measured on this
+ * corpus, 9 genuine block scalars (all `implements_reason: >-`) stay exempt and 0 new
+ * findings appear, so the widening closes the escape hatch at no migration cost.
+ *
+ * Unmarked prose is also silently dropped by the parser, but cannot be told from a malformed
+ * value, so it is left to the YAML parse rather than guessed at here.
+ */
+export function validateFrontmatterProse(
+  spec: ParsedSpec,
+  config: MinspecConfig,
+): ValidationViolation[] {
+  const block = spec.raw.match(FRONTMATTER_BLOCK_RE);
+  if (!block) return [];
+  const severity: Severity = config.statusLineAnnotation === 'error' ? 'error' : 'warning';
+  const n = countFrontmatterProseLines(block[1]);
+  if (n === 0) return [];
+  return [
+    {
+      rule: 'frontmatter.prose-line',
+      severity,
+      message: `Frontmatter contains ${n} blockquote line(s) — prose parked inside the YAML block.`,
+      fixHint:
+        'Move the prose into the body, after the H1. A `>` line outside a block scalar is not a YAML value: `parseFrontmatterYaml` silently discards it, so it is invisible to every consumer and survives every status write — the orphan it was meant to escape (#1955 / #1912).',
+    },
+  ];
+}
+
+/**
+ * #1912 — the `status:` frontmatter line carries a value and nothing else.
+ *
+ * WHY THIS MUST READ THE RAW TEXT. No parsed-model rule can see this:
+ * `parseFrontmatterYaml` discards comments before the model exists, and
+ * `checkStatusParity` strips `\s*#.*$` on purpose so an annotated-but-AGREEING
+ * status never false-positives (in `status-parity.ts`). The annotation is only
+ * visible in the raw block, which is why the rule lives here and scans it directly.
+ *
+ * Two shapes, both annotations the writer cannot keep honest:
+ *  - `status.inline-comment` — an inline `#` on the status line. The three status
+ *    writers (`setSpecStatus` in `spec.ts`, `setEpicStatus` in `epic-manager.ts`,
+ *    `setAdrStatus` in `adr-manager.ts`) replace the whole line with `status: <value>`
+ *    via the column-0-anchored `/^status[ \t]*:[ \t]*.*$/m`, so the comment
+ *    is DESTROYED on the next status write — a silent loss.
+ *  - `status.orphan-comment` — `#` lines directly after it. Those SURVIVE that rewrite
+ *    and go on describing a value that no longer holds. SPEC-062 was the live case
+ *    (#1879, commit `21f5c62f`): an inline `#` on the status line whose wrap lines were
+ *    INDENTED beneath it, explaining why the status read `specifying`.
+ *
+ * ADJACENCY IS THE SIGNAL; INDENT IS NOT (widened by the #1955 re-review). Every frontmatter
+ * comment survives the status write, indented or not, so indentation says nothing about
+ * survival — it only hints at what the comment is ABOUT. The run after `status:` is therefore
+ * read at ANY indent, with one asymmetry that is measured rather than assumed:
+ *  - an indented `#` reads as a wrapped continuation of the status line, and is always flagged;
+ *  - a column-0 `#` block is free-standing and, in this corpus, annotates the key that FOLLOWS
+ *    it — both instances (SPEC-044 `design.md`, `tasks.md`) are notes about a deliberately
+ *    absent `tier:`, not about the status — so it is flagged only when its own text names the
+ *    status.
+ *
+ * The hole this closes is one the rule itself created: `status.inline-comment` tells an author
+ * to move the rationale off the status line, and the nearest compliant-looking move — the same
+ * text as a column-0 comment on the very next line — was unflagged AND survives the write.
+ *
+ * REJECTED, with the measurement (DR-086 §4):
+ *  - Flagging every column-0 run unconditionally. On this corpus that is 2 findings, both
+ *    false positives, and 0 true positives; it would also put a two-file migration of
+ *    correct comments in front of the FR-7 flip to `error`.
+ *  - Extending the run across a blank line. 0 corpus instances, and a comment separated by a
+ *    blank line is as likely to annotate the NEXT key as the status.
+ * KNOWN FALSE NEGATIVE: a column-0 run that describes the status without naming it
+ * ("# waiting on approval, so not buildable yet") is not flagged.
+ *
+ * Severity from `config.statusLineAnnotation` (default `warn`, FR-7 ratchet). Scoped
+ * to the TOP-LEVEL `status:` key only — an inline comment on any other key
+ * (`epic: EPIC-007  # Agent Execute …`) is legitimate and common, and flagging those
+ * would be worse than the defect this closes.
+ */
+export function validateStatusAnnotation(
+  spec: ParsedSpec,
+  config: MinspecConfig,
+): ValidationViolation[] {
+  const block = spec.raw.match(FRONTMATTER_BLOCK_RE);
+  if (!block) return [];
+  const severity: Severity = config.statusLineAnnotation === 'error' ? 'error' : 'warning';
+  const lines = block[1].split('\n');
+  // Top-level (column-0) `status:` only — that is the key this rule is about, and it is
+  // the line the writers rewrite. Since #2149 all three (`setSpecStatus`, `setEpicStatus`,
+  // `setAdrStatus`) use the same column-0-anchored, non-global
+  // `/^status[ \t]*:[ \t]*.*$/m`, so a nested `status:` is never the line a writer
+  // touches, and this rule and the writers pick the same line by construction.
+  //
+  // That was not always so. Before #2149 the writers' pattern carried a leading
+  // `([ \t]*)` and matched the FIRST `status:` at ANY indent: a frontmatter that placed a
+  // nested `status:` before the top-level one had the NESTED line rewritten and its real
+  // status left untouched. This rule reads the column-0 line, so the two disagreed on such
+  // a file until the writers were fixed.
+  const idx = lines.findIndex((l) => /^status[ \t]*:/.test(l));
+  if (idx === -1) return [];
+
+  const out: ValidationViolation[] = [];
+  const value = lines[idx].replace(/^status[ \t]*:/, '');
+  // A `#` inside a quoted value is part of the value, not a comment. Strip balanced
+  // quotes first so `status: "planning # x"` is not read as annotated.
+  const unquoted = value.replace(/"[^"]*"|'[^']*'/g, '');
+  if (/(^|[ \t])#/.test(unquoted)) {
+    out.push({
+      rule: 'status.inline-comment',
+      severity,
+      message: 'The `status:` frontmatter line carries an inline `#` comment.',
+      fixHint:
+        'Move the rationale into body prose and leave `status:` carrying only its value. The status writers rebuild this line from the value alone, so the comment is destroyed on the next status write (#1912 / #1900).',
+    });
+  }
+
+  // Comment lines DIRECTLY after the status line: they survive the rewrite and become
+  // orphans. Read at any indent (see the docblock), and one finding regardless of how many.
+  // A blank line ends the run — a comment past one is as likely to annotate the next key.
+  let n = idx + 1;
+  while (n < lines.length && /^[ \t]*#/.test(lines[n])) n++;
+  const run = lines.slice(idx + 1, n);
+  // The asymmetry the docblock justifies: an indented `#` is a wrapped continuation of the
+  // status line and always counts; a free-standing column-0 run counts only when its own
+  // text names the status, because in this corpus those runs annotate the FOLLOWING key.
+  const wrapped = run.some((l) => /^[ \t]+#/.test(l));
+  if (run.length > 0 && (wrapped || /status/i.test(run.join('\n')))) {
+    out.push({
+      rule: 'status.orphan-comment',
+      severity,
+      message: `The \`status:\` line is followed by ${run.length} comment line(s).`,
+      fixHint:
+        'Move the rationale into body prose, not onto the line below. The status writers replace only the `status:` line itself, so an adjacent comment survives at any indent and goes on describing a value that no longer holds — the SPEC-062 case (#1879 / #1912).',
+    });
+  }
+
+  return out;
 }
 
 /**
@@ -841,6 +1037,68 @@ export function validateOwnership(spec: ParsedSpec, config: MinspecConfig): Vali
   }
 
   return out;
+}
+
+/**
+ * `implement.claimed-without-evidence` (#1751) — the direction `validateOwnership`
+ * does not check. `validateOwnership` asserts a declared `implements:` path is
+ * well-shaped, existing-or-not-yet — a not-yet-created path is valid GREENFIELD
+ * ownership by design (FR-4/AC-3). But nothing previously cross-checked the other
+ * way: when `phases.implement` is `in-progress`/`done` — i.e. the spec is actively
+ * claiming implementation progress or completion — nothing asserted that the paths
+ * it names actually exist. SPEC-065's backfill claimed `implement: in-progress`
+ * while none of its five declared `implements:` files existed on disk; only an LLM
+ * review panel caught it (PR #1661), because no deterministic rule did.
+ *
+ * Fires (severity from `config.implementEvidence`, `warn` by default — same FR-7
+ * ratchet SPEC-038's `ownershipDeclaration` used) when ALL of:
+ *  - `phases.implement` is `in-progress` or `done`, and
+ *  - the spec declares one or more owned-code `implements:` paths (the `none`
+ *    escape is exempt — it declares no paths to check), and
+ *  - at least one declared path does not exist on disk.
+ *
+ * `pathExists` is a caller-supplied resolver, not a direct fs read: this module is
+ * filesystem-free by design (see header comment), so the existence LOOKUP lives in
+ * the caller and only the DECISION lives here — mirroring how `knownEpicRefs` /
+ * `knownArtifactRefs` / `siblingShardFiles` push their own I/O up a layer. Omitting
+ * the resolver skips the check entirely (no false positive from a caller without
+ * filesystem access, the same no-false-positive contract every other optional
+ * resolver in `ValidateSpecOptions` keeps).
+ *
+ * Only tokens `isValidOwnedPath` accepts are checked — a malformed token is already
+ * flagged by `ownership.implements.invalid`, and checking a token that owns nothing
+ * would just be noise on top of that finding.
+ */
+export function validateImplementEvidence(
+  spec: ParsedSpec,
+  config: MinspecConfig,
+  pathExists?: (repoRelativePath: string) => boolean,
+): ValidationViolation[] {
+  if (!pathExists) return [];
+
+  const specType = (spec.frontmatter.type ?? '').toLowerCase();
+  if (!isPrimarySpec(specType)) return []; // implements: belongs to the primary/requirements artifact
+
+  const implementPhase = spec.frontmatter.phases.implement;
+  if (implementPhase !== 'in-progress' && implementPhase !== 'done') return [];
+
+  const raw = spec.raw;
+  const implTokens = fmListField(raw, 'implements');
+  const isNoneEscape = implTokens.length === 1 && implTokens[0].toLowerCase() === 'none';
+  if (isNoneEscape) return []; // declares no code — nothing to have evidence for
+
+  const codeTokens = implTokens.filter(isValidOwnedPath);
+  if (codeTokens.length === 0) return []; // no well-shaped path declared — ownership.implements.missing/invalid already cover this
+
+  const missing = codeTokens.filter((t) => !pathExists(t));
+  if (missing.length === 0) return [];
+
+  return [{
+    rule: 'implement.claimed-without-evidence',
+    severity: config.implementEvidence === 'error' ? 'error' : 'warning',
+    message: `Spec claims phases.implement: ${implementPhase} but declared implements: path(s) do not exist on disk: ${missing.join(', ')}.`,
+    fixHint: 'Either create the missing file(s), correct the implements: path(s) to what actually landed, or move phases.implement back to a state that matches reality (e.g. "pending") until the code exists. A spec claiming active/finished implementation work while owning zero real files is a false signpost (#1751).',
+  }];
 }
 
 /**
@@ -915,6 +1173,13 @@ export function validateSpec(
 
   // Spec→code ownership declaration (SPEC-038 / #460).
   violations.push(...validateOwnership(spec, config));
+  // #1912 — the status line carries a value and nothing else (raw-text rule).
+  violations.push(...validateStatusAnnotation(spec, config));
+  violations.push(...validateFrontmatterProse(spec, config));
+
+  // Implement-phase evidence (#1751) — the opposite direction from ownership:
+  // does a spec CLAIMING implement progress/completion actually own real files?
+  violations.push(...validateImplementEvidence(spec, config, options.pathExists));
 
   // 0. Epic reference (soft — warnings only, DR-013 FR-9). Two failure modes,
   //    both leave the spec stranded under "(no epic)":

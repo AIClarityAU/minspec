@@ -321,7 +321,7 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
   it('includes non-Error throw message in the error', async () => {
     pickFirst();
     vi.mocked(readSpecFile).mockImplementationOnce(() => {
-      // eslint-disable-next-line @typescript-eslint/no-throw-literal
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
       throw 'plain string error';
     });
 
@@ -845,7 +845,7 @@ describe('approveSpecCommand — action paths (post-selection)', () => {
     vi.mocked(validateSpec).mockReturnValueOnce(completeResult() as never);
     vi.mocked(vscode.window.showWarningMessage).mockResolvedValueOnce('Approve' as never);
     vi.mocked(approveSpec).mockImplementationOnce(() => {
-      // eslint-disable-next-line @typescript-eslint/no-throw-literal
+      // eslint-disable-next-line @typescript-eslint/only-throw-error
       throw 42;
     });
 

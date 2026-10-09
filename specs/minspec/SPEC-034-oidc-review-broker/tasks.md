@@ -1,7 +1,7 @@
 ---
 id: SPEC-034
 type: tasks
-status: implementing  # tasks authored 2026-07-12; tracks requirements.md + design.md
+status: implementing
 tier: T4
 product: minspec
 epic: EPIC-009  # Team Readiness
@@ -9,6 +9,9 @@ depends_on: [DR-054, DR-017, DR-033, DR-004]
 ---
 
 # OIDC Review Token-Broker — Tasks
+
+> **Status note.** Tasks authored 2026-07-12; tracks requirements.md + design.md
+> *(Moved off the `status:` line, which the status writer owns and rebuilds from the value alone — #1912 / #1900.)*
 
 Tasks phase for [SPEC-034](./requirements.md), realising the five slices in
 [design.md](./design.md). Dependency-ordered; each item is completable in one session and
