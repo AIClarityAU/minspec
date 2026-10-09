@@ -86,16 +86,24 @@ interface Run {
  * `labels` and no comments. With no comments there is no verdict record, so the real gate
  * can only refuse; nothing here can reach a claim, a worktree or an agent.
  */
-function dispatch(labels: string[], state: string, ask: Ask): Run & { claudeCalled: boolean } {
+function dispatch(
+  labels: string[],
+  state: string,
+  ask: Ask,
+): Run & { claudeCalled: boolean; ghCalls: number; questionPassedOn: boolean } {
   const bin = path.join(tmp, 'bin');
   fs.mkdirSync(bin, { recursive: true });
   fs.writeFileSync(
     path.join(tmp, 'issue.json'),
     JSON.stringify({ title: 'fixture', body: 'fixture body', state, labels: labels.map((name) => ({ name })), comments: [] }),
   );
+  // `gh` is the child this refusal path does run. It notes every call, and whether the
+  // caller's question was in the environment it was given.
   fs.writeFileSync(
     path.join(bin, 'gh'),
     `#!/usr/bin/env bash
+echo "$*" >> "${tmp}/gh-calls"
+[[ -n "\${MINSPEC_DISPATCH_OUTCOME_STATUS+set}" ]] && echo "$*" >> "${tmp}/question-passed-on"
 if [[ "$1" == "issue" && "$2" == "view" ]]; then cat "${tmp}/issue.json"; fi
 exit 0
 `,
@@ -123,6 +131,10 @@ exit 0
     signal: r.signal,
     out: `${r.stdout ?? ''}${r.stderr ?? ''}`,
     claudeCalled: fs.existsSync(path.join(tmp, 'claude-called')),
+    ghCalls: fs.existsSync(path.join(tmp, 'gh-calls'))
+      ? fs.readFileSync(path.join(tmp, 'gh-calls'), 'utf-8').split('\n').filter(Boolean).length
+      : 0,
+    questionPassedOn: fs.existsSync(path.join(tmp, 'question-passed-on')),
   };
 }
 
@@ -160,6 +172,18 @@ describe('#2641: the real dispatcher answers "refused" to a caller that asks, an
     expect(r.status).toBe(0);
     expect(r.out).not.toContain('WARNING');
     expect(r.claudeCalled).toBe(false);
+  });
+
+  it('the question is answered by this process and not passed on to what it runs', () => {
+    // Scope, not secrecy: nothing depends on a child not seeing it. A dispatched build
+    // runs this suite, the suite runs this script, and a copy that inherited the question
+    // would answer "refused" to a test that never asked and expects 0. That is #2574's
+    // mechanism (a drain's knobs reaching the tests its agents run) with a new variable.
+    const r = dispatch(['agent-ready', 'agent-escalated'], 'OPEN', ASKED);
+    expect(r.status).toBe(DECLINED);
+    // The child really ran, or "it never saw the question" would be true of nothing.
+    expect(r.ghCalls).toBeGreaterThan(0);
+    expect(r.questionPassedOn).toBe(false);
   });
 
   it('a question set to nothing is no question', () => {

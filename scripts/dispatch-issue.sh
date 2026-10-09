@@ -59,8 +59,8 @@ ROLES_DIR="${SCRIPT_DIR}/roles"
 #
 # An exit status has no such door. It is stored nowhere, it is this process's own, and
 # the caller reads it from its own wait on the process it launched. So nothing here is
-# hidden and nothing needs to be: the variable stays in the environment, and all an
-# agent learns from it is that the caller asked.
+# hidden and nothing needs to be: the variable is only the question, and all an agent
+# learns by reading it is that the caller asked.
 #
 # What is left is this script ending on one of the two numbers by ACCIDENT: under
 # `set -e`, because a command it ran after the agent happened to exit with it.
@@ -75,6 +75,13 @@ case "${MINSPEC_DISPATCH_OUTCOME_STATUS:-}" in
   1)  DISPATCH_STATUS_ASKED=1 ;;
   *)  echo "WARNING: MINSPEC_DISPATCH_OUTCOME_STATUS is set to something other than 1, the only question this script knows. #$ISSUE will end on exit 0 with no answer, and its caller must not count that as a build or as a refusal (#2641)." >&2 ;;
 esac
+# The question was put to THIS process, so it is not passed on. This is scope, not
+# secrecy: the value is not a secret, it can still be read from /proc/<pid>/environ, and
+# nothing depends on an agent not seeing it. What it prevents is #2574 again. A
+# dispatched build runs this repository's tests, those tests run this script, and a
+# copy that inherited the question would answer 75 to a test that never asked and
+# expects 0: red inside a dispatched build, green everywhere else.
+unset MINSPEC_DISPATCH_OUTCOME_STATUS
 
 # 1 once this run has won its claim, or has none to win (MINSPEC_CLAIM_OFF). Set in ONE
 # place and never cleared. Before it nothing has been started; after it, work has.
