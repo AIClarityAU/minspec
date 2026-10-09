@@ -1976,6 +1976,42 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
     assert.ok(!body.includes(VERDICT_BEGIN_TOKEN));
   });
 
+  test('#1688 inv 6: the link in a carried comment is only ever a plain https URL', () => {
+    const render = (fromUrl) => renderCarriedComment({ label: PASS, headSha: H, fromSha: P, reviewedSha: P, fromUrl });
+    // What GitHub issues for a check run and for a job.
+    for (const ok of [
+      'https://github.com/OWNER/REPO/runs/123',
+      'https://github.com/my-org/my_repo.js/actions/runs/37880133774/job/113657714669',
+      'https://ghe.example.com:8443/o/r/runs/1',
+    ]) {
+      assert.ok(render(ok).includes(`](${ok})`), `${ok} should be linked`);
+    }
+    // Anything markdown or HTML gives a meaning to, another scheme, or not a string:
+    // the comment is still rendered, with no link at all.
+    for (const bad of [
+      'https://github.com/o/r/runs/1`x`',
+      'https://github.com/o/r/runs/1*bold*',
+      'https://github.com/o/r/runs/1"onmouseover="x',
+      "https://github.com/o/r/runs/1'",
+      'https://github.com/o/r/runs/1) [click](https://evil.example',
+      'https://github.com/o/r/runs/1|x',
+      'https://github.com/o/r/runs/1?next=https://evil.example',
+      'https://github.com/o/r/runs/1#frag',
+      'https://github.com/o/r/runs/1 trailing',
+      'https://user:pw@github.com/o/r',
+      'http://github.com/o/r/runs/1',
+      'javascript:alert(1)',
+      '',
+      null,
+      undefined,
+      { toString: () => 'https://github.com/o/r/runs/1`x`' },
+    ]) {
+      const body = render(bad);
+      assert.match(body, /carried forward/i, 'the comment itself is still rendered');
+      assert.ok(!body.includes(']('), `${String(bad)} must not become a link`);
+    }
+  });
+
   test('#1688 inv 6: a carried comment is only ever rendered for a pass with a real source', () => {
     for (const bad of [
       { label: CHANGES, headSha: H, fromSha: P, reviewedSha: P },

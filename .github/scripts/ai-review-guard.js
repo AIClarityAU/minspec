@@ -827,6 +827,8 @@ function findReattestableVerdict({ checkRuns, patchHash, allowlist } = {}) {
 // Re-review after an update from main changed no verdict in 26 measured rounds, which
 // is too few to rule out a miss rate below about one in ten. The required build and
 // tests on the updated commit remain the check for that class; the panel no longer is.
+// The decision, what it changes in DR-097 (per-voter reuse), and what would reverse
+// it are recorded in docs/decisions/DR-104.md.
 //
 // NOT BOUND, AND SAID SO: project context the reviewer CLI loads by convention
 // (CLAUDE.md and the like) and every other file in the base checkout. They are the
@@ -1140,8 +1142,14 @@ function renderCarriedComment({ label, headSha, fromSha, reviewedSha, fromUrl } 
   if (label !== PASS) return '';
   if (!isCommitSha(headSha) || !isCommitSha(fromSha) || !isCommitSha(reviewedSha)) return '';
   // The URL is GitHub's own `html_url`, but it is interpolated into markdown, so it is
-  // shape-checked rather than trusted.
-  const url = /^https:\/\/[^\s<>()[\]]+$/.test(String(fromUrl == null ? '' : fromUrl)) ? String(fromUrl) : '';
+  // shape-checked rather than trusted - and by what it MAY contain, not by what it may
+  // not: host, optional port, and a path of plain URL characters. That is every
+  // check-run and job URL GitHub issues, and it leaves out everything markdown or HTML
+  // gives a meaning to (backtick, quote, star, bracket, pipe, query, fragment). A URL
+  // that does not fit is dropped and the comment simply has no link.
+  const url = /^https:\/\/[A-Za-z0-9.-]+(?::[0-9]+)?(?:\/[A-Za-z0-9._~%\/-]*)?$/.test(String(fromUrl == null ? '' : fromUrl))
+    ? String(fromUrl)
+    : '';
   const where =
     reviewedSha === fromSha
       ? `the voters ran on that commit. Their findings are in the AI review comment posted for it${url ? ` ([its check](${url}))` : ''}.`
