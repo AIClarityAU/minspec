@@ -1566,3 +1566,640 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
     assert.doesNotMatch(s.description, /hold/, 'no hold label ⇒ no hold wording');
   }
 });
+
+// ─── #1688 — carry the last completed verdict when nothing reviewable changed ───
+//
+// A push that only merges the base branch in (or re-pushes the same change) leaves the
+// text the voters are given byte-identical, and the panel used to re-run on it anyway.
+// Measured on #2588: 25 of 154 rounds, 14.7 percent of the panel's cost, every one of
+// them a pass followed by a pass.
+//
+// THE SEVEN INVARIANTS, each with a block below. They were written before the code:
+//   1. a base-merge-only push skips the voters and carries the verdict;
+//   2. ANY change in the reviewable input runs the full panel;
+//   3. an earlier verdict that is missing, unreadable or from an incomplete round runs
+//      the full panel (fail closed - constitution invariant 2, no silent gate);
+//   4. a carried verdict is never upgraded - `changes` and `blocked` are never a source,
+//      so neither can become a pass without the voters running;
+//   5. identity is CONTENT - a hash of what the voters are given - never "no new
+//      commits", a commit subject, the actor or the event's say-so;
+//   6. the skip is visible: comment, label and check-run all say carried, from where, why;
+//   7. the #359 staleness guard still voids a verdict on a real change.
+//
+// These are the pure decisions. The same invariants are driven against real git objects
+// (a real base merge, a real force-push, a real one-line edit) in MinSpec's own
+// packages/minspec/tests/ai-review-verdict-carry.test.ts, which this parity-managed file
+// cannot do: it ships to repos that do not carry that suite.
+{
+  const g = require('./ai-review-guard.js');
+  const {
+    CARRIED,
+    VERDICT_LABELS,
+    PANEL_KEY_PATHS,
+    PANEL_KEY_OPTIONAL_PATHS,
+    reviewPanelKey,
+    renderRoundRecord,
+    parseRoundRecord,
+    latestHeadRound,
+    decideVerdictCarry,
+    renderCarriedComment,
+    planVerdictCarry,
+    carriedLabelFault,
+    patchFingerprint,
+    VERDICT_BEGIN_TOKEN,
+  } = g;
+
+  const ALLOW = parseAllowlist('minspec-sdd[bot]');
+  const P = 'a1'.repeat(20); // the previous head: where the last round ran
+  const H = 'b2'.repeat(20); // the head under review now
+  const P0 = 'c3'.repeat(20); // an older head, where the voters last actually ran
+  const IN_A = 'a'.repeat(64);
+  const IN_B = 'b'.repeat(64);
+  const KEY_A = 'c'.repeat(64);
+  const KEY_B = 'd'.repeat(64);
+
+  const record = (o = {}) =>
+    renderRoundRecord({ label: PASS, inputHash: IN_A, panelKey: KEY_A, reviewedSha: P, ...o });
+
+  /** A check-run as the API returns it for a completed, passing round on P. */
+  const round = (o = {}) => ({
+    name: 'ai-review',
+    status: 'completed',
+    conclusion: 'success',
+    head_sha: P,
+    app: { slug: 'minspec-sdd' },
+    started_at: '2026-10-01T00:00:00Z',
+    completed_at: '2026-10-01T00:05:00Z',
+    html_url: 'https://github.example/checks/1',
+    output: { title: 'AI review: passed', summary: `The reviewer approved.\n\n${record()}`, text: '' },
+    ...o,
+  });
+
+  const decide = (o = {}) =>
+    decideVerdictCarry({
+      action: 'synchronize',
+      runAttempt: '1',
+      headSha: H,
+      beforeSha: P,
+      inputHash: IN_A,
+      panelKey: KEY_A,
+      checkRuns: [round()],
+      allowlist: ALLOW,
+      ...o,
+    });
+
+  test('#1688 fixture sanity: the record helper renders something, so a refusal below is never vacuous', () => {
+    assert.match(record(), /^review-round:v1:pass:a{64}:c{64}:(a1){20}$/);
+  });
+
+  // ── invariant 1 ──
+  test('#1688 inv 1: identical reviewable input on the previous head carries its pass, voters skipped', () => {
+    const d = decide();
+    assert.equal(d.carry, true, d.reason);
+    assert.equal(d.label, PASS);
+    assert.equal(d.fromSha, P);
+    assert.equal(d.reviewedSha, P);
+    assert.match(d.reason, /unchanged/);
+  });
+
+  test('#1688 inv 1: a carry chain keeps naming the commit the voters actually ran on', () => {
+    // P itself was a carried round: its record says the voters ran on P0.
+    const carriedRound = round({ output: { title: 't', summary: record({ reviewedSha: P0 }) } });
+    const d = decide({ checkRuns: [carriedRound] });
+    assert.equal(d.carry, true, d.reason);
+    assert.equal(d.fromSha, P, 'carried FROM the previous head');
+    assert.equal(d.reviewedSha, P0, 'but the review itself is still the one on P0');
+  });
+
+  test('#1688 inv 1: a machinery round (neutral check, pass recorded) carries its honest code verdict', () => {
+    // decideReviewCheck makes every machinery round `neutral`, so the conclusion cannot
+    // say what the verdict was. The record can, which is why it exists.
+    const d = decide({ checkRuns: [round({ conclusion: 'neutral' })] });
+    assert.equal(d.carry, true, d.reason);
+    assert.equal(d.label, PASS);
+  });
+
+  // ── invariant 2 ──
+  test('#1688 inv 2: ANY change in the reviewable input runs the full panel', () => {
+    const d = decide({ inputHash: IN_B });
+    assert.equal(d.carry, false);
+    assert.equal(d.label, undefined);
+    assert.match(d.reason, /changed/);
+  });
+
+  test('#1688 inv 2: a one-character edit changes the fingerprint the decision keys on', () => {
+    const before = 'diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n';
+    const recorded = patchFingerprint(before);
+    const src = round({ output: { title: 't', summary: record({ inputHash: recorded }) } });
+    assert.equal(decide({ checkRuns: [src], inputHash: patchFingerprint(before) }).carry, true);
+    assert.equal(decide({ checkRuns: [src], inputHash: patchFingerprint(before.replace('+b', '+B')) }).carry, false);
+    // Whitespace INSIDE a line is content (Python, YAML, Makefiles). It must not be
+    // normalised away, which is why the key is not `git patch-id`.
+    assert.equal(decide({ checkRuns: [src], inputHash: patchFingerprint(before.replace('+b', '+ b')) }).carry, false);
+  });
+
+  test('#1688 inv 2: the reviewer changing underneath the diff also runs the full panel', () => {
+    // Same diff, but the base moved the role prompts / scripts / coverage. The earlier
+    // verdict came from a different reviewer.
+    const d = decide({ panelKey: KEY_B });
+    assert.equal(d.carry, false);
+    assert.match(d.reason, /reviewer/);
+  });
+
+  // ── invariant 3 ──
+  test('#1688 inv 3: no earlier round at all runs the full panel', () => {
+    assert.equal(decide({ checkRuns: [] }).carry, false);
+    // A round on some OTHER commit is not this pull request's previous round.
+    assert.equal(decide({ checkRuns: [round({ head_sha: P0 })] }).carry, false);
+  });
+
+  test('#1688 inv 3: check-runs that could not be READ are not "no rounds" - and still run the full panel', () => {
+    for (const unreadable of [null, undefined, 'not-an-array', {}]) {
+      const d = decide({ checkRuns: unreadable });
+      assert.equal(d.carry, false);
+      assert.match(d.reason, /could not be read/, 'an API failure must not be reported as an absent round');
+    }
+  });
+
+  test('#1688 inv 3: an incomplete earlier round runs the full panel', () => {
+    for (const bad of [
+      { status: 'in_progress', conclusion: null },
+      { status: 'queued', conclusion: null },
+      { conclusion: 'cancelled' },
+      { conclusion: 'timed_out' },
+      { conclusion: 'action_required' }, // ai-review:blocked - the reviewer could not run
+      { conclusion: 'skipped' },
+      { conclusion: 'stale' },
+    ]) {
+      const d = decide({ checkRuns: [round(bad)] });
+      assert.equal(d.carry, false, `${JSON.stringify(bad)} must not be a carry source`);
+    }
+  });
+
+  test('#1688 inv 3: an unreadable, truncated, duplicated or older-format record runs the full panel', () => {
+    const rec = record();
+    for (const summary of [
+      'The reviewer approved.', // older format: no record at all
+      `patch-fingerprint:${IN_A}`, // the #1728 marker alone is not a round record
+      rec.slice(0, rec.length - 5), // truncated mid-SHA
+      rec.replace(':v1:', ':v2:'), // a version this guard does not understand
+      rec.replace(IN_A, 'z'.repeat(64)), // not hex
+      `${rec}\n\n${rec}`, // two records: ambiguous
+      `${rec}\n\n${record({ inputHash: IN_B })}`, // two records that disagree
+      '',
+    ]) {
+      const d = decide({ checkRuns: [round({ output: { title: 't', summary } })] });
+      assert.equal(d.carry, false, `summary ${JSON.stringify(summary.slice(0, 40))} must not carry`);
+    }
+    assert.equal(decide({ checkRuns: [round({ output: null })] }).carry, false);
+    assert.equal(decide({ checkRuns: [round({ output: undefined })] }).carry, false);
+  });
+
+  test('#1688 inv 3: only the allowlisted reviewer App can be a carry source', () => {
+    assert.equal(decide({ checkRuns: [round({ app: { slug: 'github-actions' } })] }).carry, false);
+    assert.equal(decide({ checkRuns: [round({ app: null })] }).carry, false);
+    assert.equal(decide({ allowlist: [] }).carry, false, 'an empty allowlist authorises nobody');
+    assert.equal(decide({ allowlist: undefined }).carry, false);
+    // Case-insensitive, like every other door into this gate (the #1840 hardening note).
+    assert.equal(decide({ checkRuns: [round({ app: { slug: 'MinSpec-SDD' } })] }).carry, true);
+  });
+
+  test('#1688 inv 3: the LATEST round on the previous head decides - a later non-pass supersedes an earlier pass', () => {
+    const earlierPass = round({ completed_at: '2026-10-01T00:05:00Z' });
+    const laterFail = round({
+      conclusion: 'failure',
+      completed_at: '2026-10-01T01:00:00Z',
+      output: { title: 'AI review: changes requested', summary: 'changes' },
+    });
+    // Order in the array must not matter: recency comes from the timestamps.
+    assert.equal(decide({ checkRuns: [earlierPass, laterFail] }).carry, false);
+    assert.equal(decide({ checkRuns: [laterFail, earlierPass] }).carry, false);
+    // ...and the other way round: an earlier failure followed by a later pass carries.
+    const earlierFail = { ...laterFail, completed_at: '2026-10-01T00:01:00Z' };
+    assert.equal(decide({ checkRuns: [earlierFail, earlierPass] }).carry, true);
+    assert.equal(decide({ checkRuns: [earlierPass, earlierFail] }).carry, true);
+  });
+
+  test('#1688 inv 3: a newer `ai-review` check from a NON-allowlisted app vetoes, exactly as it does for the witness', () => {
+    const impostor = round({ app: { slug: 'github-actions' }, completed_at: '2026-10-01T02:00:00Z' });
+    assert.equal(decide({ checkRuns: [round(), impostor] }).carry, false);
+    assert.equal(decide({ checkRuns: [impostor, round()] }).carry, false);
+  });
+
+  test('#1688 inv 3: missing fingerprints or SHAs run the full panel', () => {
+    for (const bad of [
+      { inputHash: null },
+      { inputHash: '' },
+      { inputHash: 'abc' },
+      { panelKey: null },
+      { panelKey: '' },
+      { headSha: '' },
+      { headSha: 'not-a-sha' },
+      { beforeSha: '' },
+      { beforeSha: undefined },
+      { beforeSha: '0'.repeat(40) }, // GitHub's "no previous commit" value
+      { beforeSha: H }, // the previous head cannot be the head under review
+    ]) {
+      assert.equal(decide(bad).carry, false, `${JSON.stringify(bad)} must not carry`);
+    }
+    assert.equal(decideVerdictCarry().carry, false);
+    assert.equal(decideVerdictCarry({}).carry, false);
+  });
+
+  test('#1688 inv 3: only a first-attempt push can carry - opened, reopened and re-runs always review', () => {
+    for (const action of ['opened', 'reopened', 'labeled', '', undefined]) {
+      assert.equal(decide({ action }).carry, false, `action=${action}`);
+    }
+    // A re-run is somebody asking for a fresh review; it is also what ai-review-retry
+    // does to a blocked round. It must never be answered with the old verdict.
+    for (const runAttempt of ['2', 2, '10', '', undefined, null, 'abc', '0', '1.5', '01']) {
+      assert.equal(decide({ runAttempt }).carry, false, `runAttempt=${JSON.stringify(runAttempt)}`);
+    }
+    assert.equal(decide({ runAttempt: 1 }).carry, true, 'numeric 1 is still a first attempt');
+  });
+
+  // ── invariant 4 ──
+  test('#1688 inv 4: `changes` and `blocked` rounds are never a carry source, so a carry can never upgrade one', () => {
+    const changes = round({
+      conclusion: 'failure',
+      output: { title: 'AI review: changes requested - this check blocks merge', summary: 'changes' },
+    });
+    const blocked = round({
+      conclusion: 'action_required',
+      output: { title: 'AI review could not run', summary: 'blocked' },
+    });
+    for (const src of [changes, blocked]) {
+      const d = decide({ checkRuns: [src] });
+      assert.equal(d.carry, false);
+      assert.equal(d.label, undefined);
+    }
+    // Even a record that CLAIMS pass cannot ride on a check that did not conclude one.
+    for (const conclusion of ['failure', 'action_required']) {
+      const d = decide({ checkRuns: [round({ conclusion })] });
+      assert.equal(d.carry, false, `a pass record on a '${conclusion}' check must not carry`);
+    }
+  });
+
+  test('#1688 inv 4: only a pass can be RECORDED, and only a pass can be read back', () => {
+    for (const label of [CHANGES, BLOCKED, 'ai-review:pending', '', undefined, 'pass']) {
+      assert.equal(
+        renderRoundRecord({ label, inputHash: IN_A, panelKey: KEY_A, reviewedSha: P }),
+        '',
+        `${label} must not produce a round record`,
+      );
+    }
+    // A hand-made record naming any other verdict is not understood, so it is not a source.
+    for (const slug of ['changes', 'blocked', 'PASS', 'pass2', '']) {
+      const forged = `review-round:v1:${slug}:${IN_A}:${KEY_A}:${P}`;
+      assert.equal(parseRoundRecord(forged), null, `verdict slug "${slug}" must not parse`);
+      assert.equal(decide({ checkRuns: [round({ output: { title: 't', summary: forged } })] }).carry, false);
+    }
+  });
+
+  test('#1688 inv 4: every carry there is returns exactly the recorded label', () => {
+    // Property over the fixture space used above: no input makes a carry say anything
+    // but the label the source round recorded, and a refusal names no label at all.
+    const sources = [
+      round(),
+      round({ conclusion: 'neutral' }),
+      round({ conclusion: 'failure' }),
+      round({ conclusion: 'action_required' }),
+      round({ status: 'in_progress' }),
+      round({ output: { title: 't', summary: 'no record' } }),
+    ];
+    let carries = 0;
+    for (const src of sources) {
+      const d = decide({ checkRuns: [src] });
+      if (d.carry) {
+        carries += 1;
+        const rec = parseRoundRecord(src.output.summary);
+        assert.ok(rec, 'a carry with no parseable record behind it');
+        assert.equal(d.label, rec.label);
+        assert.equal(d.label, PASS);
+      } else {
+        assert.equal(d.label, undefined, 'a refusal must not name a label a caller could apply');
+      }
+    }
+    assert.equal(carries, 2, 'exactly the success and the neutral source carry');
+  });
+
+  // ── invariant 5 ──
+  test('#1688 inv 5: identity is content - unrelated SHAs with the same input carry (a force-push)', () => {
+    // Nothing here says the new head descends from the old one, and nothing needs to.
+    const d = decide({ headSha: 'e5'.repeat(20) });
+    assert.equal(d.carry, true, d.reason);
+  });
+
+  test('#1688 inv 5: the decision reads no commit count, subject, actor or branch-update flag', () => {
+    // Offer every "this was just a base merge" hint a caller might be tempted to trust,
+    // alongside a CHANGED input. None of them may produce a carry.
+    const d = decide({
+      inputHash: IN_B,
+      newCommits: 0,
+      commitSubject: "Merge branch 'main' into feature",
+      actor: 'minspec-sdd[bot]',
+      isBaseMerge: true,
+      updateBranch: true,
+    });
+    assert.equal(d.carry, false);
+    // And with an UNCHANGED input, hints claiming the opposite do not stop one.
+    const e = decide({ newCommits: 12, commitSubject: 'feat: rewrite everything', isBaseMerge: false });
+    assert.equal(e.carry, true);
+  });
+
+  // ── invariant 6 ──
+  test('#1688 inv 6: the carried comment says carried, from which commit, why, and how to get a fresh review', () => {
+    const body = renderCarriedComment({ label: PASS, headSha: H, fromSha: P, reviewedSha: P0, fromUrl: 'https://github.example/checks/1' });
+    const heading = body.split('\n')[0];
+    assert.match(heading, /^## 🤖 AI review — `ai-review:pass`/, 'keeps the heading prefix readers and tools key on');
+    assert.match(heading, /carried forward/i, 'the HEADING itself says carried');
+    assert.match(heading, /did not run/i);
+    assert.match(body, /not a fresh review/i);
+    assert.ok(body.includes(P), 'names the commit the verdict was carried from');
+    assert.ok(body.includes(P0), 'names the commit the voters actually ran on');
+    assert.ok(body.includes('https://github.example/checks/1'));
+    assert.match(body, /identical/i, 'says WHY');
+    assert.match(body, /does not cover/i, 'says what a carried verdict is not');
+    assert.match(body, /re-run/i, 'says how to force a fresh review');
+    assert.match(body, /<!-- ai-review-carried: from=(a1){20} reviewed=(c3){20} -->/);
+    // The shepherd reads the LAST verdict block on the thread for its findings. A carried
+    // comment must not contain one, or it would shadow the real review's block.
+    assert.ok(!body.includes(VERDICT_BEGIN_TOKEN));
+  });
+
+  test('#1688 inv 6: a carried comment is only ever rendered for a pass with a real source', () => {
+    for (const bad of [
+      { label: CHANGES, headSha: H, fromSha: P, reviewedSha: P },
+      { label: BLOCKED, headSha: H, fromSha: P, reviewedSha: P },
+      { label: PASS, headSha: H, fromSha: '', reviewedSha: P },
+      { label: PASS, headSha: H, fromSha: P, reviewedSha: '' },
+      { label: PASS, headSha: '', fromSha: P, reviewedSha: P },
+      undefined,
+    ]) {
+      assert.equal(renderCarriedComment(bad), '', `${JSON.stringify(bad)} must render nothing`);
+    }
+  });
+
+  test('#1688 inv 6: the check-run on the new head says carried in its title and summary, conclusion untouched', () => {
+    const fresh = decideReviewCheck(PASS, false);
+    const carried = decideReviewCheck(PASS, false, { fromSha: P, reviewedSha: P0 });
+    assert.equal(carried.conclusion, fresh.conclusion, 'a carry never changes what the check concludes');
+    assert.equal(carried.name, fresh.name);
+    assert.notEqual(carried.title, fresh.title);
+    assert.match(carried.title, /carried/i);
+    assert.ok(carried.title.includes(P.slice(0, 8)));
+    assert.match(carried.summary, /did not run/i);
+    assert.ok(carried.summary.includes(P));
+    assert.ok(carried.summary.includes(P0));
+    // Machinery stays neutral and stays a human gate; the carry only labels it.
+    const machinery = decideReviewCheck(PASS, true, { fromSha: P, reviewedSha: P });
+    assert.equal(machinery.conclusion, 'neutral');
+    assert.match(machinery.title, /carried/i);
+    assert.match(machinery.title, /human review required/);
+  });
+
+  test('#1688 inv 6: a carry note is refused on anything that is not a pass, or has no source', () => {
+    for (const label of [CHANGES, BLOCKED, '']) {
+      assert.deepEqual(
+        decideReviewCheck(label, false, { fromSha: P, reviewedSha: P }),
+        decideReviewCheck(label, false),
+        `${label}: a carried note must never decorate a non-pass`,
+      );
+    }
+    assert.deepEqual(decideReviewCheck(PASS, false, { fromSha: 'nope', reviewedSha: P }), decideReviewCheck(PASS, false));
+    assert.deepEqual(decideReviewCheck(PASS, false, { fromSha: P }), decideReviewCheck(PASS, false));
+    assert.deepEqual(decideReviewCheck(PASS, false, {}), decideReviewCheck(PASS, false));
+    assert.deepEqual(decideReviewCheck(PASS, false, null), decideReviewCheck(PASS, false));
+  });
+
+  test('#1688 inv 6: `ai-review:carried` is a disclosure label, never a verdict label', () => {
+    assert.equal(CARRIED, 'ai-review:carried');
+    // If it were a verdict label, the post step would strip it as a contradiction (#1468).
+    assert.ok(!VERDICT_LABELS.includes(CARRIED));
+    assert.equal(g.verdictLabelFault({ current: [PASS, CARRIED], verdict: PASS }), null);
+    assert.deepEqual(
+      g.decideVerdictLabels({ current: [PASS, CARRIED, 'ai-review:pending'], verdict: PASS }).remove,
+      ['ai-review:pending'],
+    );
+    // ...and it neither greens nor reds the gate by itself.
+    assert.equal(decideStatus({ labels: [PASS, CARRIED], passProvenance: VERIFIED }).state, 'success');
+    assert.equal(decideStatus({ labels: [CARRIED] }).state, 'failure');
+  });
+
+  test('#1688 inv 6: a missing or stale disclosure label is a FAULT, never silence', () => {
+    assert.equal(carriedLabelFault({ current: [PASS, CARRIED], carried: true }), null);
+    assert.equal(carriedLabelFault({ current: [PASS], carried: false }), null);
+    assert.match(carriedLabelFault({ current: [PASS], carried: true }), /missing/);
+    assert.match(carriedLabelFault({ current: [PASS, CARRIED], carried: false }), /still/);
+    assert.match(carriedLabelFault({ carried: true }), /missing/);
+    assert.equal(carriedLabelFault(), null);
+  });
+
+  // ── invariant 7 ──
+  test('#1688 inv 7: the staleness guard still strips a pass on a push when the new head has no completed pass round', () => {
+    const real = decideStalenessStrip({ action: 'synchronize', labels: [PASS] });
+    assert.equal(real.strip, true);
+    for (const headRound of [
+      undefined,
+      null,
+      {},
+      { found: false, complete: false },
+      { found: true, complete: false }, // the panel is still running on the new head
+      { found: true, complete: false, label: PASS }, // a label on an incomplete round is not a verdict
+      { found: true, complete: true, label: CHANGES },
+      { found: true, complete: true }, // no label
+      { found: true, complete: 'yes', label: PASS }, // truthy is not true
+    ]) {
+      const s = decideStalenessStrip({ action: 'synchronize', labels: [PASS], headRound });
+      assert.equal(s.strip, true, `${JSON.stringify(headRound)} must still strip`);
+      assert.equal(s.reason, real.reason);
+    }
+  });
+
+  test('#1688 inv 7: it stands down ONLY when the reviewer has already recorded a completed pass for this exact head', () => {
+    // A carried round finishes in seconds, so the push-time strip can now arrive AFTER
+    // the fresh label. Stripping it then would leave a reviewed head with no verdict.
+    const headRound = latestHeadRound({ checkRuns: [round({ head_sha: H })], allowlist: ALLOW, headSha: H });
+    assert.equal(headRound.complete, true);
+    assert.equal(headRound.label, PASS);
+    const s = decideStalenessStrip({ action: 'synchronize', labels: [PASS], headRound });
+    assert.equal(s.strip, false);
+    assert.match(s.reason, /already/);
+    // A round on a DIFFERENT commit says nothing about this head.
+    const elsewhere = latestHeadRound({ checkRuns: [round({ head_sha: P })], allowlist: ALLOW, headSha: H });
+    assert.equal(elsewhere.complete, false);
+    assert.equal(decideStalenessStrip({ action: 'synchronize', labels: [PASS], headRound: elsewhere }).strip, true);
+    // Other events never stripped, and still do not.
+    assert.equal(decideStalenessStrip({ action: 'labeled', labels: [PASS], headRound }).strip, false);
+    assert.equal(decideStalenessStrip({ action: 'synchronize', labels: [], headRound }).strip, false);
+  });
+
+  test('#1688 inv 7: a real change is still voided end to end - no carry AND the strip stands', () => {
+    // The new head has a different input, so no carry; and until the full panel has
+    // finished there is no completed round on it, so the push-time strip still fires.
+    assert.equal(decide({ inputHash: IN_B }).carry, false);
+    const stillRunning = latestHeadRound({
+      checkRuns: [round({ head_sha: H, status: 'in_progress', conclusion: null })],
+      allowlist: ALLOW,
+      headSha: H,
+    });
+    assert.equal(stillRunning.complete, false);
+    assert.equal(decideStalenessStrip({ action: 'synchronize', labels: [PASS], headRound: stillRunning }).strip, true);
+    const none = latestHeadRound({ checkRuns: [], allowlist: ALLOW, headSha: H });
+    assert.equal(decideStalenessStrip({ action: 'synchronize', labels: [PASS], headRound: none }).strip, true);
+  });
+
+  // ── the round record ──
+  test('#1688 round record: round-trips, and is refused unless every field is well-formed', () => {
+    const rec = record({ reviewedSha: P0 });
+    assert.deepEqual(parseRoundRecord(`summary text\n\n${rec}\n`), {
+      label: PASS,
+      inputHash: IN_A,
+      panelKey: KEY_A,
+      reviewedSha: P0,
+    });
+    for (const bad of [
+      { inputHash: 'short' },
+      { inputHash: null },
+      { panelKey: 'G'.repeat(64) },
+      { panelKey: undefined },
+      { reviewedSha: 'abc' },
+      { reviewedSha: '0'.repeat(40) },
+      { reviewedSha: undefined },
+    ]) {
+      assert.equal(record(bad), '', `${JSON.stringify(bad)} must not render`);
+    }
+    assert.equal(renderRoundRecord(), '');
+    assert.equal(parseRoundRecord(null), null);
+    assert.equal(parseRoundRecord(undefined), null);
+  });
+
+  // ── the panel key ──
+  const TREE = (overrides = {}) =>
+    `${[...PANEL_KEY_PATHS]
+      .map((p, i) => ({ p, sha: (overrides[p] === undefined ? String(i % 10) : overrides[p]) }))
+      .filter(({ sha }) => sha !== null)
+      .map(({ p, sha }) => `100644 blob ${sha.padEnd(40, 'f').slice(0, 40)}\t${p}`)
+      .join('\n')}\n`;
+
+  test('#1688 panel key: stable for the same reviewer, different when ANY reviewer file or the coverage changes', () => {
+    const base = reviewPanelKey({ lsTree: TREE(), coverage: '' });
+    assert.match(base, /^[0-9a-f]{64}$/);
+    assert.equal(reviewPanelKey({ lsTree: TREE(), coverage: '' }), base);
+    // Line order from git is not load-bearing.
+    assert.equal(reviewPanelKey({ lsTree: TREE().trim().split('\n').reverse().join('\n'), coverage: '' }), base);
+    for (const p of PANEL_KEY_PATHS) {
+      const moved = reviewPanelKey({ lsTree: TREE({ [p]: 'abcdef' }), coverage: '' });
+      assert.notEqual(moved, base, `a change to ${p} must change the key`);
+    }
+    assert.notEqual(reviewPanelKey({ lsTree: TREE(), coverage: 'single' }), base);
+    // A mode flip (the executable bit) is a change too.
+    assert.notEqual(reviewPanelKey({ lsTree: TREE().replace('100644', '100755'), coverage: '' }), base);
+  });
+
+  test('#1688 panel key: an unreadable or incomplete listing yields NO key, so nothing carries', () => {
+    assert.equal(reviewPanelKey({ lsTree: '', coverage: '' }), null);
+    assert.equal(reviewPanelKey({ lsTree: null, coverage: '' }), null);
+    assert.equal(reviewPanelKey(), null);
+    const optional = new Set(PANEL_KEY_OPTIONAL_PATHS);
+    assert.ok(optional.size > 0 && optional.size < PANEL_KEY_PATHS.length);
+    for (const p of PANEL_KEY_PATHS) {
+      const without = reviewPanelKey({ lsTree: TREE({ [p]: null }), coverage: '' });
+      if (optional.has(p)) {
+        // An optional helper may legitimately be absent - and absent is itself a state
+        // the key tells apart from present.
+        assert.match(without, /^[0-9a-f]{64}$/, `${p} is optional`);
+        assert.notEqual(without, reviewPanelKey({ lsTree: TREE(), coverage: '' }));
+      } else {
+        assert.equal(without, null, `${p} is required: without it the listing cannot be trusted`);
+      }
+    }
+    // The reviewer's own definition is in the key: the workflow (voter set, CLI pin),
+    // the guard (verdict schema, this logic), the scripts and the four role prompts.
+    for (const p of [
+      '.github/workflows/ai-review.yml',
+      '.github/scripts/ai-review-guard.js',
+      'scripts/review-branch.sh',
+      'scripts/review-decide.sh',
+      'scripts/roles/reviewer.md',
+      'scripts/roles/security.md',
+      'scripts/roles/architect.md',
+      'scripts/roles/skeptic.md',
+    ]) {
+      assert.ok(PANEL_KEY_PATHS.includes(p), `${p} must be part of the reviewer's identity`);
+      assert.ok(!optional.has(p), `${p} must be required`);
+    }
+    for (const p of optional) assert.ok(PANEL_KEY_PATHS.includes(p), `${p} is optional but not listed`);
+  });
+
+  // ── the single seam the workflow calls ──
+  const INPUT = 'diff --git a/x b/x\n--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b\n';
+  const rawPlan = (o = {}) => {
+    const inputHash = patchFingerprint(INPUT);
+    const panelKey = reviewPanelKey({ lsTree: TREE(), coverage: '' });
+    const src = round({ output: { title: 't', summary: record({ inputHash, panelKey }) } });
+    return {
+      action: 'synchronize',
+      runAttempt: '1',
+      headSha: H,
+      beforeSha: P,
+      inputText: INPUT,
+      lsTree: TREE(),
+      coverage: '',
+      allowlistRaw: 'minspec-sdd[bot]',
+      checkRunsJson: JSON.stringify({ total_count: 1, check_runs: [src] }),
+      ...o,
+    };
+  };
+
+  test('#1688 planVerdictCarry: raw text in, one decision out - and the hashes come back for the record', () => {
+    const p = planVerdictCarry(rawPlan());
+    assert.equal(p.carry, true, p.reason);
+    assert.equal(p.label, PASS);
+    assert.equal(p.fromSha, P);
+    assert.equal(p.reviewedSha, P);
+    assert.equal(p.inputHash, patchFingerprint(INPUT));
+    assert.equal(p.panelKey, reviewPanelKey({ lsTree: TREE(), coverage: '' }));
+    assert.match(p.comment, /carried forward/i);
+    assert.ok(p.comment.includes(P));
+    // A bare array is accepted too (`gh api --jq .check_runs`).
+    const bare = JSON.stringify(JSON.parse(rawPlan().checkRunsJson).check_runs);
+    assert.equal(planVerdictCarry(rawPlan({ checkRunsJson: bare })).carry, true);
+  });
+
+  test('#1688 planVerdictCarry: a refusal still returns the hashes, an empty label and NO comment', () => {
+    const p = planVerdictCarry(rawPlan({ inputText: INPUT.replace('+b', '+c') }));
+    assert.equal(p.carry, false);
+    assert.equal(p.label, '');
+    assert.equal(p.comment, '');
+    assert.equal(p.fromSha, '');
+    assert.equal(p.reviewedSha, '');
+    assert.match(p.inputHash, /^[0-9a-f]{64}$/, 'the fresh round still needs its own fingerprint recorded');
+    assert.match(p.panelKey, /^[0-9a-f]{64}$/);
+    assert.ok(p.reason.length > 0);
+  });
+
+  test('#1688 planVerdictCarry: garbage in is a refusal with a reason, never a throw and never a carry', () => {
+    for (const bad of [
+      { checkRunsJson: '' },
+      { checkRunsJson: 'not json' },
+      { checkRunsJson: '{"message":"Not Found"}' },
+      { checkRunsJson: 'null' },
+      { checkRunsJson: undefined },
+      { inputText: '' },
+      { inputText: null },
+      { lsTree: '' },
+      { allowlistRaw: '' },
+      { headSha: '' },
+      { coverage: 'single' }, // recorded under the default coverage, asked under another
+    ]) {
+      const p = planVerdictCarry(rawPlan(bad));
+      assert.equal(p.carry, false, `${JSON.stringify(bad)} must not carry`);
+      assert.equal(p.label, '');
+      assert.equal(p.comment, '');
+      assert.ok(typeof p.reason === 'string' && p.reason.length > 0);
+    }
+    assert.equal(planVerdictCarry().carry, false);
+    assert.equal(planVerdictCarry(null).carry, false);
+  });
+}
