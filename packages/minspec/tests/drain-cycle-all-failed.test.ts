@@ -67,6 +67,25 @@ exit 0
   return { dir, bin, log: path.join(dir, 'log'), quota };
 }
 
+/**
+ * Strip the whole `MINSPEC_DRAIN_*` / `MINSPEC_QUOTA_*` family from the child's
+ * environment before overlaying this run's own explicit values. Without this,
+ * `execFileSync` inherits the full ambient `process.env`, and any knob this
+ * harness does not itself set — e.g. an agent-dispatch container's own
+ * `MINSPEC_DRAIN_QUEUE_LIMIT` cost-safety default — leaks straight through and
+ * silently caps "4 ready issues" down to however many the CONTAINER allows,
+ * same mechanism `drain-concurrency.test.ts` (#1208) hit and generalized for
+ * `MINSPEC_DRAIN_CONCURRENCY` under #2369 (#2575 remediation: that fix covered
+ * only the one variable it was written for).
+ */
+function baseEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  for (const k of Object.keys(env)) {
+    if (k.startsWith('MINSPEC_DRAIN_') || k.startsWith('MINSPEC_QUOTA_')) delete env[k];
+  }
+  return env;
+}
+
 /** Run one real `--once` cycle at the given width and wait for the disowned loop. */
 function runCycle(h: Harness, width = '1'): string {
   execFileSync('bash', ['-c', `
@@ -81,7 +100,7 @@ function runCycle(h: Harness, width = '1'): string {
       MINSPEC_QUOTA_FILE="${h.quota}" \
       bash "${DRAIN}" --once 2>&1 | grep -oP 'PID \\K[0-9]+')
     while kill -0 "$pid" 2>/dev/null; do sleep 0.05; done
-  `], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+  `], { encoding: 'utf-8', env: baseEnv(), stdio: ['ignore', 'pipe', 'ignore'] });
   return fs.readFileSync(h.log, 'utf-8');
 }
 
