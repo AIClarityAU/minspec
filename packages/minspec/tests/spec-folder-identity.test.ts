@@ -33,13 +33,18 @@ import { readArtifactEpic, createEpic } from '../src/lib/epic-manager';
 
 const mockExecFile = execFile as unknown as ReturnType<typeof vi.fn>;
 
-function invoke(opts: unknown, cb: unknown, err: Error | null, stdout: string): void {
-  const callback = (typeof opts === 'function' ? opts : cb) as (e: Error | null, r?: unknown) => void;
-  if (err) callback(err);
-  else callback(null, { stdout, stderr: '' });
+/**
+ * Invoke the real `execFile` callback shape — `(err, stdout, stderr)`, never a single
+ * object — and hand back a fake `ChildProcess` so the production code's
+ * `child.stdin.end(prompt)` (#2575) has something to call.
+ */
+function invoke(opts: unknown, cb: unknown, err: Error | null, stdout: string): { stdin: { end: () => void } } {
+  const callback = (typeof opts === 'function' ? opts : cb) as (e: Error | null, out?: string, errOut?: string) => void;
+  if (err) callback(err, '', '');
+  else callback(null, stdout, '');
+  return { stdin: { end: () => {} } };
 }
 const isVersion = (args: unknown): boolean => Array.isArray(args) && args.includes('--version');
-const isDispatch = (args: unknown): boolean => Array.isArray(args) && args.includes('-p');
 
 function writeConfig(root: string): void {
   fs.mkdirSync(path.join(root, '.minspec'), { recursive: true });
@@ -175,15 +180,17 @@ describe('#1573 — a split-layout spec is one artifact', () => {
   it('T3: the AI prompt lists each spec id exactly once', async () => {
     writeSplitSpec(tmp, 'minspec/SPEC-019-execution-substrate', 'SPEC-019', 'Execution Substrate');
     createEpic(tmp, 'Core', 'core');
+    // The prompt travels on stdin, not argv (#2575), so it is captured there.
+    let prompt = '';
     mockExecFile.mockImplementation((_cmd: string, args: string[], opts: unknown, cb: unknown) => {
       if (isVersion(args)) return invoke(opts, cb, null, 'claude 2.1.0\n');
-      return invoke(opts, cb, null, '{"epics":[],"mappings":[]}');
+      const callback = (typeof opts === 'function' ? opts : cb) as (e: Error | null, out?: string, errOut?: string) => void;
+      callback(null, '{"epics":[],"mappings":[]}', '');
+      return { stdin: { end: (data?: string) => { prompt = data ?? ''; } } };
     });
 
     await proposeAI(tmp);
 
-    const dispatch = mockExecFile.mock.calls.find((c: unknown[]) => isDispatch(c[1]));
-    const prompt = (dispatch![1] as string[])[1];
     const askLines = prompt
       .slice(prompt.indexOf('ARTIFACTS TO ASSIGN'))
       .split('\n')

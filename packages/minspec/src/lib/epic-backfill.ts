@@ -649,7 +649,30 @@ function withoutAtSigns(text: string): string {
 }
 
 /**
- * The argument list for the one start of `claude` that carries a prompt.
+ * The argument list for the one start of `claude` that carries a prompt. The
+ * prompt itself is never one of these: it goes to the child's stdin, written
+ * and closed by `runSealedClaude` below, never a command-line argument (#2575).
+ * Three things followed from putting it on the command line instead, all
+ * measured on Linux, Node 22.23, Claude Code 2.1.283 (2026-10-04):
+ *
+ *   a 3 s wait on every call     `execFile` leaves the child's stdin open with
+ *                                nobody writing to it; Claude Code waits on it
+ *                                before proceeding ("no stdin data received")
+ *   a 128 KiB ceiling            one argument of 131,072 characters or more
+ *                                throws `spawn E2BIG` before the process even
+ *                                starts, so a project a little under twice the
+ *                                179-artifact / 76,937-char prompt measured in
+ *                                #1570 could not run the pass at all
+ *   visible in the process list  the prompt carries spec and decision titles
+ *                                and first paragraphs, readable there by other
+ *                                users of the same machine while the call runs
+ *
+ * `-p` with no following prompt argument reads it from stdin instead (the
+ * CLI's own error text, when neither is given: "Input must be provided either
+ * through stdin or as a prompt argument when using --print"). That also
+ * removes the one thing the old order depended on: with no prompt on the
+ * command line, there is no positional argument for a list-taking switch such
+ * as `--tools` to swallow, so the switches below may come in any order.
  *
  *   --tools ""                 no built-in tool. The closed form: a tool added to
  *                              Claude Code later is off as well, where a list of
@@ -663,13 +686,6 @@ function withoutAtSigns(text: string): string {
  *                              call each one would be an orphan in the user's
  *                              `~/.claude/projects`, holding the project's text
  *
- * The order is load-bearing. `--tools` takes a LIST, so a bare word after it is
- * read as a tool name: measured, a prompt placed there is swallowed and the CLI
- * reports that it was given none. The prompt therefore comes first, straight
- * after `-p`, and only switches follow it. `prompt` must also open with the
- * caller's own words, never with project text: one that began with `-` is
- * refused as an unknown switch (measured).
- *
  * Deliberately absent: `--bare` and `--setting-sources`. The first never reads
  * OAuth or keychain credentials (its own help text) and the second can leave out
  * the user's settings file, so either would cost some people the AI pass.
@@ -678,9 +694,9 @@ function withoutAtSigns(text: string): string {
  * is reported (`claude-incompatible`). It is never tried again without them.
  * Exported with `aiPassEnv` so that the call can be reproduced by hand exactly.
  */
-export function aiPassArgs(prompt: string): string[] {
+export function aiPassArgs(): string[] {
   return [
-    '-p', withoutAtSigns(prompt),
+    '-p',
     '--tools', '',
     '--strict-mcp-config',
     '--no-session-persistence',
@@ -796,6 +812,55 @@ async function removeWorkDir(dir: string): Promise<void> {
 }
 
 /**
+ * Start the sealed `claude` call and hand it the prompt on stdin, never as a
+ * command-line argument (#2575 — see `aiPassArgs` for why). `execFile`, not
+ * its promisified form: the promise `util.promisify` returns is undocumented
+ * plumbing for reaching the `ChildProcess` it wraps, and that reach is exactly
+ * what writing to stdin needs, so this does it directly instead.
+ *
+ * The write happens the same tick `execFile` returns, before anything about
+ * the call is awaited, so the pipe is never left open for Claude Code to wait
+ * on. `end`, not `write` then `end`: one call writes the prompt and closes the
+ * pipe, the signal that no more input is coming.
+ *
+ * `err.stdout`/`err.stderr` are attached here because the plain (non-promisified)
+ * callback does not carry them on the error the way `util.promisify`'s custom
+ * implementation for `execFile` does — and `classifyExecFailure` below reads
+ * `stderr` off a failure to name an incompatible `claude` by the switch it
+ * rejected.
+ */
+function runSealedClaude(
+  prompt: string,
+  cwd: string,
+  timeout: number,
+  signal: AbortSignal | undefined,
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = execFile(
+      'claude',
+      aiPassArgs(),
+      { cwd, timeout, maxBuffer: 4 * 1024 * 1024, env: aiPassEnv(), signal },
+      (err, stdout, stderr) => {
+        if (err) {
+          reject(Object.assign(err, { stdout, stderr }));
+        } else {
+          resolve({ stdout: stdout ?? '', stderr: stderr ?? '' });
+        }
+      },
+    );
+    // `stdin` is typed nullable because `execFile` accepts a `stdio` override that
+    // can remove it; this call passes none, so Node always gives it a pipe here.
+    // Still fails closed rather than asserting it, so a future `stdio` change
+    // reports plainly instead of throwing past `classifyExecFailure`.
+    if (child.stdin === null) {
+      reject(Object.assign(new Error('could not open stdin to carry the prompt to `claude`'), { code: 'ENOSTDIN' }));
+      return;
+    }
+    child.stdin.end(withoutAtSigns(prompt));
+  });
+}
+
+/**
  * Run the Tier-1 AI proposal via `claude -p`. Never throws: every way it can
  * come back empty (binary absent or incompatible, no working directory,
  * timeout, cancel, non-JSON, unusable) is a named `AiFailure`, and the caller
@@ -808,7 +873,8 @@ async function removeWorkDir(dir: string): Promise<void> {
  *
  * The dispatch is the sealed start described above (#2570): `aiPassArgs` and
  * `aiPassEnv`, in a directory made for this call and removed after it whatever
- * the outcome. With no directory there is no call.
+ * the outcome. With no directory there is no call. The prompt itself travels on
+ * stdin, not in `aiPassArgs` (#2575) — see `runSealedClaude`.
  */
 export async function proposeAI(
   rootDir: string,
@@ -853,13 +919,7 @@ export async function proposeAI(
   }
 
   try {
-    const { stdout } = await execFileAsync('claude', aiPassArgs(prompt), {
-      cwd: workDir,
-      timeout,
-      maxBuffer: 4 * 1024 * 1024,
-      env: aiPassEnv(),
-      signal: opts.signal,
-    });
+    const { stdout } = await runSealedClaude(prompt, workDir, timeout, opts.signal);
     const json = extractJson(stdout);
     if (!json) {
       return { proposal: null, failure: { reason: 'non-json', detail: 'returned output that was not JSON' } };

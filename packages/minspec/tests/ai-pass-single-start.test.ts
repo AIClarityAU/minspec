@@ -178,7 +178,7 @@ describe('#2570 - `claude` is started with a prompt in exactly one, sealed, plac
 
 describe('the scan refuses every shape of unsealed start', () => {
   const SEALED_CALL =
-    "await execFileAsync('claude', aiPassArgs(prompt), { cwd: workDir, timeout, env: aiPassEnv(), signal });";
+    "await execFileAsync('claude', aiPassArgs(), { cwd: workDir, timeout, env: aiPassEnv(), signal });";
 
   it.each<{ shape: string; file: string; source: string; role: Role; why: RegExp }>([
     {
@@ -196,13 +196,13 @@ describe('the scan refuses every shape of unsealed start', () => {
     {
       shape: 'the sealed start with its directory taken out',
       file: SEALED_MODULE,
-      source: "await execFileAsync('claude', aiPassArgs(prompt), { timeout, env: aiPassEnv() });",
+      source: "await execFileAsync('claude', aiPassArgs(), { timeout, env: aiPassEnv() });",
       role: 'unsealed-start', why: /sets no cwd/,
     },
     {
       shape: 'the sealed start with the plain environment',
       file: SEALED_MODULE,
-      source: "await execFileAsync('claude', aiPassArgs(prompt), { cwd: workDir, env: { ...process.env } });",
+      source: "await execFileAsync('claude', aiPassArgs(), { cwd: workDir, env: { ...process.env } });",
       role: 'unsealed-start', why: /env does not come from aiPassEnv\(\)/,
     },
     {

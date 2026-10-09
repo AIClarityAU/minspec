@@ -38,10 +38,16 @@ import { listEpics, readArtifactEpic, createEpic } from '../src/lib/epic-manager
 
 const mockExecFile = execFile as unknown as ReturnType<typeof vi.fn>;
 
-function invoke(opts: unknown, cb: unknown, err: Error | null, stdout: string): void {
-  const callback = (typeof opts === 'function' ? opts : cb) as (e: Error | null, r?: unknown) => void;
-  if (err) callback(err);
-  else callback(null, { stdout, stderr: '' });
+/**
+ * Invoke the real `execFile` callback shape — `(err, stdout, stderr)`, never a single
+ * object — and hand back a fake `ChildProcess` so the production code's
+ * `child.stdin.end(prompt)` (#2575) has something to call.
+ */
+function invoke(opts: unknown, cb: unknown, err: Error | null, stdout: string): { stdin: { end: () => void } } {
+  const callback = (typeof opts === 'function' ? opts : cb) as (e: Error | null, out?: string, errOut?: string) => void;
+  if (err) callback(err, '', '');
+  else callback(null, stdout, '');
+  return { stdin: { end: () => {} } };
 }
 const isVersion = (args: unknown): boolean => Array.isArray(args) && args.includes('--version');
 const isDispatch = (args: unknown): boolean => Array.isArray(args) && args.includes('-p');
@@ -201,15 +207,17 @@ describe('backfill — AI budget + empty-epic gate', () => {
     it('T3: the prompt asks only about UNASSIGNED artifacts', async () => {
       writeSpec(tmp, 'alpha', 'SPEC-001', 'Already Sorted', { epic: 'EPIC-001' });
       writeSpec(tmp, 'beta', 'SPEC-002', 'Needs An Epic');
+      // The prompt travels on stdin, not argv (#2575), so it is captured there.
+      let prompt = '';
       mockExecFile.mockImplementation((_cmd: string, args: string[], opts: unknown, cb: unknown) => {
         if (isVersion(args)) return invoke(opts, cb, null, 'claude 2.1.0\n');
-        return invoke(opts, cb, null, '{"epics":[],"mappings":[]}');
+        const callback = (typeof opts === 'function' ? opts : cb) as (e: Error | null, out?: string, errOut?: string) => void;
+        callback(null, '{"epics":[],"mappings":[]}', '');
+        return { stdin: { end: (data?: string) => { prompt = data ?? ''; } } };
       });
 
       await proposeAI(tmp);
 
-      const dispatch = mockExecFile.mock.calls.find((c: unknown[]) => isDispatch(c[1]));
-      const prompt = (dispatch![1] as string[])[1];
       // The tagged spec may appear as taxonomy context, but the ask itself must
       // not include it — every such mapping is discarded at apply (FR-6), so
       // generating one only burns the budget that then runs out.
