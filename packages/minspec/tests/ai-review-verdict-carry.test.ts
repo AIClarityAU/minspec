@@ -39,6 +39,11 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { spawnSync } from 'child_process';
+import { useShellTimeout } from './helpers/shell-timeout';
+
+// #1285: every case builds real git history and runs real bash. Enforced by
+// shell-timeout-coverage.test.ts.
+useShellTimeout();
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports -- CJS script, no ESM export
 const GUARD = require('../../../.github/scripts/ai-review-guard.js');
@@ -302,6 +307,16 @@ describe('#1688 inv 2 - any change in the pull request\'s own diff runs the full
     expect(patchId(m1, h)).toBe(patchId(m0, p));
 
     expect(plan(f, { before: p, head: h, base: m1, checkRuns: [priorRound] }).carry).toBe(false);
+
+    // And it is the WHITESPACE that the fingerprint sees, not only the blob ids on the
+    // diff's `index` line (which change with any edit at all). Take those lines out of
+    // both inputs and the two must still fingerprint differently - a key that ignored
+    // whitespace would be saved here by the `index` line and nothing else.
+    const withoutIndexLines = (text: string): string => text.split('\n').filter((l) => !l.startsWith('index ')).join('\n');
+    const before = withoutIndexLines(reviewState(f, m0, p).inputText);
+    const after = withoutIndexLines(reviewState(f, m1, h).inputText);
+    expect(before.replace(/\s+/g, '')).toBe(after.replace(/\s+/g, '')); // same but for whitespace
+    expect(GUARD.patchFingerprint(after)).not.toBe(GUARD.patchFingerprint(before));
   });
 
   it('a merge commit that smuggles an edit in is not a base merge: no carry', () => {

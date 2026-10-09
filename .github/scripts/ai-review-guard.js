@@ -441,34 +441,38 @@ function parseResetInstant(text, nowMs) {
   return new Date(cand).toISOString();
 }
 
-// ─── Patch-fingerprint re-attestation (#1728) ────────────────────────────────
+// ─── Patch-fingerprint recording (#1728) ─────────────────────────────────────
 //
-// WHAT IS LIVE TODAY: recording only. The ai-review workflow embeds a
-// `patch-fingerprint:` marker in the verdict check-run's output. NOTHING reads that
-// marker back to skip a review. `findReattestableVerdict` below is implemented,
-// tested and exported, but has no production caller, and the gate that consumes
-// witnesses (`ready-to-merge.yml` → verifyHeadPassWitness / verifyHeadPassCheckRun)
-// is unchanged — so every branch update still re-runs the full four-voter panel.
-// Wiring the consumer is #1840. Recording lands first by necessity: a marker can
-// only be consumed on PRs old enough to already carry one.
+// WHAT THIS SECTION IS. The ai-review workflow embeds a `patch-fingerprint:` marker -
+// a hash of the three-dot diff - in the verdict check-run's output. It is a
+// MEASUREMENT record: `scripts/review-churn-report.sh` reads it back to count how often
+// a round re-reviewed a patch an earlier round had already passed.
+//
+// WHAT READS IT TO SKIP A REVIEW: nothing. `findReattestableVerdict` below is
+// implemented, tested and exported, has no production caller, and is kept because the
+// churn instrument mirrors its strictness. The proposal to wire it, #1840, was closed.
+//
+// The skip that DOES exist is the verdict carry further down (#1688, `planVerdictCarry`).
+// It does not key on this marker. It keys on its own `review-round:` record, which
+// binds more than the diff - the approval facts the voters are shown, and the reviewer
+// itself - and which, unlike this function, takes the LATEST round on the previous
+// head rather than any earlier passing one. Read that section for what it claims.
 //
 // WHY THE MARKER IS RECORDED. Under `strict` branch protection every merge puts every
 // other open PR BEHIND, and the branch update re-triggers a full four-voter review —
 // of a patch that did not change. The reviewer reads the THREE-DOT patch
-// (`base...head`), and a forward-merge leaves that patch byte-identical, so the
-// previous verdict is still a true statement about exactly this content.
+// (`base...head`), and a forward-merge leaves that patch byte-identical.
 //
-// WHAT THE CONSUMER MUST NOT DO, when it is built: reuse an old witness. The
-// SHA-binding in verifyHeadPassCheckRun (#466/#810) is load-bearing — a witness must
-// correspond to the CURRENT head. A re-attestation is therefore to post a FRESH
-// check-run on the new SHA, carrying the same verdict and the same fingerprint. The
-// claim changes from "four voters reviewed this SHA" to "four voters reviewed this
-// patch, and this SHA has that patch" — still true, and stated rather than implied.
+// WHAT NO CONSUMER MAY DO: reuse an old witness. The SHA-binding in
+// verifyHeadPassCheckRun (#466/#810) is load-bearing — a witness must correspond to
+// the CURRENT head. Carrying a verdict therefore means posting a FRESH check-run on
+// the new SHA. The claim changes from "four voters reviewed this SHA" to "four voters
+// reviewed this input, and this SHA has that input" — still true, and stated rather
+// than implied.
 //
-// HONEST LIMIT, and the reason the consumer is to be opt-in: an identical patch can
-// produce a DIFFERENT merge result, because the base moved. That is the #1394
-// semantic-conflict class. `strict` narrows it (the branch must be current) but does
-// not remove it, so re-attestation trades back a little of what `strict` buys.
+// HONEST LIMIT: an identical patch can produce a DIFFERENT merge result, because the
+// base moved. That is the #1394 semantic-conflict class. `strict` narrows it (the
+// branch must be current) but does not remove it.
 
 const PATCH_FINGERPRINT_PREFIX = 'patch-fingerprint:';
 
@@ -743,6 +747,447 @@ function findReattestableVerdict({ checkRuns, patchHash, allowlist } = {}) {
   return { ok: false, reason: 'no prior passing review of this exact patch' };
 }
 
+// ─── Verdict carry (#1688) ───────────────────────────────────────────────────
+//
+// WHAT IT DOES. Before the voters run for a head H, one question is asked: did this
+// push change anything a reviewer would be given? If it did not, and the previous head
+// P carries a completed pass, the voters are skipped and P's verdict is carried to H -
+// VISIBLY. The comment, the `ai-review:carried` label and the check-run on H all say
+// the verdict was carried, from which commit, and why. Anything else runs the full
+// panel exactly as before.
+//
+// WHY. Under `strict` a pull request must be current with its base before it can
+// merge, so a branch update pushes a merge commit, the #359 staleness guard voids the
+// verdict, and four voters re-read text that did not change. Measured over 154 rounds
+// in four repositories (#2588 sections 4 and 5): 25 rounds - 14.7 percent of the
+// panel's cost - re-reviewed a pull request whose own change was line-for-line the
+// same, and all 25 followed a pass with another pass.
+//
+// IS IT LIVE? Only once the ai-review workflow calls `planVerdictCarry`. That call is
+// a workflow edit, which the review App cannot push (it holds no `workflows`
+// permission), so it lands by a human hand. It also has to land AFTER this module is
+// on the base branch, because the workflow loads this file from the trusted base: the
+// "seam first, caller second" order recorded on verdictLabelFault below (#1468).
+// Do not take either state from this comment: search ai-review.yml for
+// `planVerdictCarry`. No caller means every push is still reviewed in full.
+//
+// WHAT "NOTHING CHANGED" MEANS. Two hashes. Both are recorded on the check-run of the
+// round that produced the verdict, and both are recomputed for H by the trusted base
+// checkout from git objects:
+//
+//   input  the reviewable input - `scripts/review-branch.sh <base> <head>
+//          --print-input`, the exact block of the prompt that depends on the change:
+//          the three-dot diff as the voters see it, plus the approval facts
+//          `approval-provenance.py` derives for it. The diff alone is NOT enough: a
+//          pull request that changes only an approval sidecar keeps a byte-identical
+//          diff while the base edits the approved spec underneath it, and the facts
+//          then read MISMATCH where they read MATCHES. Hashing what is shown, rather
+//          than what was pushed, is what catches that.
+//   panel  the reviewer itself - the blobs of PANEL_KEY_PATHS at the BASE commit plus
+//          the coverage mode. The review scripts and role prompts come from the base,
+//          and a base merge is precisely the push that moves the base. If it moved the
+//          reviewer, the earlier verdict came from a different one.
+//
+// The hash is over bytes. Not `git patch-id`, which ignores whitespace: indentation
+// is content in Python, YAML and Makefiles. And nothing here is told what KIND of
+// push this was - no commit count, no subject, no actor, no "this was a branch
+// update" flag. A merge commit with the stock subject that also edits a file hashes
+// differently and is reviewed; a force-push of the same change onto a new base hashes
+// the same and is not.
+//
+// WHAT IS CARRIED. A completed `ai-review:pass`, and nothing else. A pass means every
+// required voter returned a valid pass, so it is a complete round by construction.
+// `ai-review:changes` is not carried, because a voter that crashed without a verdict
+// also fails closed to `changes` and a carry would make that outage stick; and
+// `ai-review:blocked` is the review NOT running, which is no verdict at all. Neither
+// can therefore be turned into a pass without the voters running, and neither can be
+// made permanent by a re-push.
+//
+// WHICH EARLIER ROUND. The LATEST `ai-review` check-run on the previous head, and only
+// that one - the same most-recent-wins rule verifyHeadPassCheckRun applies, so a later
+// `changes` on that commit beats an earlier pass. If that round is missing, unreadable,
+// still running, not from the allowlisted reviewer App, or anything but a recorded
+// pass, the full panel runs. Every refusal carries a reason for the run log.
+//
+// THE WAY OUT. Re-running the workflow run always reviews. It is the escape hatch for
+// a human who wants fresh eyes on an unchanged diff, and it is what ai-review-retry
+// does to a blocked round.
+//
+// THIS REVERSES #1840, AND THE COST IS REAL. #1840 proposed this and was closed: what
+// it measured (3 repeats in 41 runs, all on one pull request) was too small to buy the
+// risk it carried. #2588 measured 25 in 154 across four repositories, and the trade was
+// taken on that. The risk did not change. The voters can open files outside the diff,
+// and those move with the base, so a carried pass says nothing about a new interaction
+// between this change and what the base gained - the #1394 semantic-conflict class.
+// Re-review after an update from main changed no verdict in 26 measured rounds, which
+// is too few to rule out a miss rate below about one in ten. The required build and
+// tests on the updated commit remain the check for that class; the panel no longer is.
+//
+// NOT BOUND, AND SAID SO: project context the reviewer CLI loads by convention
+// (CLAUDE.md and the like) and every other file in the base checkout. They are the
+// same class as "the base moved" above. PANEL_KEY_PATHS is the review machinery the
+// scripts name explicitly, and a test pins it to what review-branch.sh reads.
+
+/** The disclosure label a carried verdict wears. NOT a verdict label (see VERDICT_LABELS). */
+const CARRIED = 'ai-review:carried';
+
+const ROUND_RECORD_PREFIX = 'review-round:';
+const ROUND_RECORD_VERSION = 'v1';
+// Verdict slug → label. One entry on purpose: only a pass is ever recorded.
+const ROUND_VERDICTS = { pass: PASS };
+
+/**
+ * The reviewer's own files, read at the BASE commit. Changing any of them changes who
+ * the reviewer is, so a verdict from before the change is not carried across it.
+ *
+ * `.github/workflows/ai-review.yml` is here for two things nothing else records: which
+ * voters run and how their votes combine, and the pinned reviewer CLI version (and so
+ * the model). The guard is here because it holds the verdict schema and this logic.
+ */
+const PANEL_KEY_PATHS = [
+  '.github/workflows/ai-review.yml',
+  '.github/scripts/ai-review-guard.js',
+  'scripts/review-branch.sh',
+  'scripts/review-decide.sh',
+  'scripts/lib/agent-context.sh',
+  'scripts/approval-provenance.py',
+  'scripts/hooks/canonical.py',
+  'scripts/roles/reviewer.md',
+  'scripts/roles/security.md',
+  'scripts/roles/architect.md',
+  'scripts/roles/skeptic.md',
+];
+/**
+ * The two helpers review-branch.sh guards with a file test before it calls them, so
+ * they may legitimately be absent. Every other path is required: a listing without it
+ * is a listing that failed, not a reviewer without that file.
+ */
+const PANEL_KEY_OPTIONAL_PATHS = ['scripts/approval-provenance.py', 'scripts/hooks/canonical.py'];
+
+function isHex64(s) {
+  return typeof s === 'string' && /^[0-9a-f]{64}$/.test(s);
+}
+
+/** A git commit name: SHA-1 or SHA-256. All zeros is git's "no such commit". */
+function isCommitSha(s) {
+  return typeof s === 'string' && /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(s) && !/^0+$/.test(s);
+}
+
+function sha256Hex(text) {
+  return require('crypto').createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+/**
+ * Fingerprint of the reviewer, from `git ls-tree <base> -- <PANEL_KEY_PATHS>` output
+ * and the raw coverage setting. Null - so nothing carries - when a required file is
+ * not listed: an empty or partial listing is what a failed `git` call looks like, and
+ * it must not hash to something two failed calls would agree on.
+ *
+ * The coverage value is taken RAW, not normalised the way the workflow normalises it.
+ * A second copy of that rule here could drift from the first; the price of not having
+ * one is a single needless review when an unset variable is spelled out.
+ */
+function reviewPanelKey({ lsTree, coverage } = {}) {
+  const listed = new Map();
+  for (const line of String(lsTree == null ? '' : lsTree).split('\n')) {
+    const m = /^(\d{6}) blob ([0-9a-f]{40}|[0-9a-f]{64})\t(.+)$/.exec(line);
+    if (m) listed.set(m[3], `${m[1]} ${m[2]}`);
+  }
+  const optional = new Set(PANEL_KEY_OPTIONAL_PATHS);
+  const lines = ['panel-key/v1'];
+  for (const p of PANEL_KEY_PATHS) {
+    const entry = listed.get(p);
+    if (!entry && !optional.has(p)) return null;
+    lines.push(`${p}\t${entry || 'absent'}`);
+  }
+  lines.push(`coverage\t${String(coverage == null ? '' : coverage).trim()}`);
+  return sha256Hex(`${lines.join('\n')}\n`);
+}
+
+/**
+ * The record a completed round leaves on its check-run, so the next round can tell
+ * whether anything changed: `review-round:v1:pass:<input>:<panel>:<reviewed sha>`.
+ *
+ * `reviewedSha` is the commit the voters actually ran on. For a fresh round that is
+ * the round's own head; a carried round copies it from its source, so a chain of
+ * branch updates keeps pointing at the one real review.
+ *
+ * Returns '' for anything that is not a pass with both hashes and a real commit. No
+ * record is how a round says "do not carry from me".
+ */
+function renderRoundRecord({ label, inputHash, panelKey, reviewedSha } = {}) {
+  const slug = Object.keys(ROUND_VERDICTS).find((k) => ROUND_VERDICTS[k] === label);
+  if (!slug) return '';
+  if (!isHex64(inputHash) || !isHex64(panelKey) || !isCommitSha(reviewedSha)) return '';
+  return `${ROUND_RECORD_PREFIX}${ROUND_RECORD_VERSION}:${slug}:${inputHash}:${panelKey}:${reviewedSha}`;
+}
+
+/**
+ * Read a round record back out of check-run output text. Null unless there is EXACTLY
+ * one, complete and well-formed: two records are an ambiguity, and a half-written one
+ * is the truncated-output case - neither is repaired, both mean "no record".
+ */
+function parseRoundRecord(text) {
+  const src = String(text == null ? '' : text);
+  if (src.split(ROUND_RECORD_PREFIX).length - 1 !== 1) return null;
+  const re = new RegExp(
+    `${ROUND_RECORD_PREFIX}${ROUND_RECORD_VERSION}:([a-z]+):([0-9a-f]{64}):([0-9a-f]{64}):([0-9a-f]{64}|[0-9a-f]{40})(?![0-9a-f])`,
+  );
+  const m = re.exec(src);
+  if (!m) return null;
+  if (!Object.prototype.hasOwnProperty.call(ROUND_VERDICTS, m[1])) return null;
+  if (!isCommitSha(m[4])) return null;
+  return { label: ROUND_VERDICTS[m[1]], inputHash: m[2], panelKey: m[3], reviewedSha: m[4] };
+}
+
+/**
+ * The latest `ai-review` round on one commit, and whether it is a completed pass.
+ *
+ * Two callers, one rule: the carry asks it about the PREVIOUS head ("is there a pass
+ * to carry?"), and the staleness guard asks it about the CURRENT head ("has the
+ * reviewer already recorded a pass for this exact commit?").
+ *
+ * Mirrors verifyHeadPassCheckRun on purpose - same name filter, same SHA filter, same
+ * most-recent-wins, same allowlist door - so this cannot become a second, softer way
+ * in. The latest run decides even when it is not the reviewer's: a newer check of the
+ * same name from another app makes the round unusable rather than being skipped over.
+ *
+ * `checkRuns` that is not an array means the API could not be read, which is reported
+ * as that and never as "no round".
+ */
+function latestHeadRound({ checkRuns, allowlist, headSha } = {}) {
+  const none = (reason) => ({ found: false, complete: false, reason });
+  if (!isCommitSha(headSha)) return none('there is no commit to look for a review round on');
+  if (!Array.isArray(checkRuns)) return none('the check-runs for that commit could not be read');
+  const allowed = Array.isArray(allowlist) ? allowlist.filter(Boolean) : [];
+  if (allowed.length === 0) {
+    return none('the reviewer allowlist (AI_REVIEW_BOT_LOGINS) is empty, so no round can be attributed to the reviewer');
+  }
+  const short = headSha.slice(0, 8);
+  const ours = checkRuns.filter((c) => c && c.name === CHECK_NAME && c.head_sha === headSha);
+  if (ours.length === 0) return none(`no ${CHECK_NAME} round is recorded on ${short}`);
+
+  const latest = ours.reduce((a, b) => (checkRunTime(b) >= checkRunTime(a) ? b : a));
+  const found = {
+    found: true,
+    complete: false,
+    headSha,
+    url: typeof latest.html_url === 'string' ? latest.html_url : '',
+  };
+  const slug = latest.app && latest.app.slug;
+  const identities = [slug, slug ? `${slug}[bot]` : null].filter(Boolean);
+  if (!identities.some((id) => isAuthorizedReviewer(id, allowed))) {
+    return { ...found, reason: `the latest ${CHECK_NAME} check on ${short} was not posted by an allowlisted reviewer` };
+  }
+  if (latest.status !== 'completed') {
+    return { ...found, reason: `the review round on ${short} has not completed` };
+  }
+  const out = latest.output || {};
+  const rec = parseRoundRecord([out.title, out.summary, out.text].filter(Boolean).join('\n'));
+  if (!rec) {
+    return {
+      ...found,
+      reason: `the review round on ${short} left no readable pass record (it did not pass, could not run, or predates round records)`,
+    };
+  }
+  // The record says pass; the check must agree. `neutral` is a machinery pull request,
+  // where the conclusion is an exemption and says nothing about the verdict.
+  if (latest.conclusion !== 'success' && latest.conclusion !== 'neutral') {
+    return {
+      ...found,
+      reason: `the review round on ${short} records a pass but its check concluded '${sanitizeLogin(latest.conclusion)}'`,
+    };
+  }
+  return {
+    ...found,
+    complete: true,
+    label: rec.label,
+    inputHash: rec.inputHash,
+    panelKey: rec.panelKey,
+    reviewedSha: rec.reviewedSha,
+    reason: `completed ${rec.label} round on ${short}`,
+  };
+}
+
+/**
+ * May the verdict on the previous head be carried to this one? (#1688)
+ *
+ * Deny by default: every path that is not the one carry returns `{ carry: false,
+ * reason }` with NO label, so a caller cannot apply a verdict from a refusal.
+ *
+ * Reads exactly these inputs and nothing else. In particular it is given no commit
+ * count, subject, actor or "this was a branch update" hint, and would ignore one.
+ *
+ * @param {object} o
+ * @param {string} o.action       the pull_request event action; only `synchronize` carries
+ * @param {string|number} o.runAttempt  `github.run_attempt`; only the first attempt carries
+ * @param {string} o.headSha      the head under review
+ * @param {string} o.beforeSha    the head before this push (`github.event.before`)
+ * @param {string|null} o.inputHash  fingerprint of the reviewable input at `headSha`
+ * @param {string|null} o.panelKey   fingerprint of the reviewer at this round's base
+ * @param {object[]|null} o.checkRuns  check-runs on `beforeSha`; non-array = unreadable
+ * @param {string[]} o.allowlist  parsed AI_REVIEW_BOT_LOGINS
+ */
+function decideVerdictCarry({ action, runAttempt, headSha, beforeSha, inputHash, panelKey, checkRuns, allowlist } = {}) {
+  const no = (reason) => ({ carry: false, reason });
+  if (action !== 'synchronize') {
+    return no('only a push to an open pull request can carry a verdict; a newly opened or reopened one is always reviewed');
+  }
+  if (String(runAttempt).trim() !== '1') {
+    return no('this is a re-run of the workflow, which always gets a fresh review');
+  }
+  if (!isCommitSha(headSha)) return no('the head commit under review is not known');
+  if (!isCommitSha(beforeSha)) return no('the push reports no previous head commit');
+  if (beforeSha === headSha) return no('the previous head is the head under review');
+  if (!isHex64(inputHash)) {
+    return no('the reviewable input at this head could not be fingerprinted (an empty or unreadable diff)');
+  }
+  if (!isHex64(panelKey)) {
+    return no("the reviewer's own files at the base commit could not be read, so the reviewer cannot be shown to be unchanged");
+  }
+  const prior = latestHeadRound({ checkRuns, allowlist, headSha: beforeSha });
+  if (!prior.complete) return no(prior.reason);
+  const short = beforeSha.slice(0, 8);
+  if (prior.inputHash !== inputHash) {
+    return no(`what the reviewers would be given has changed since ${short} was reviewed`);
+  }
+  if (prior.panelKey !== panelKey) {
+    return no(`the reviewer itself has changed since ${short} was reviewed (role prompts, review scripts, workflow or coverage)`);
+  }
+  return {
+    carry: true,
+    label: prior.label,
+    fromSha: beforeSha,
+    reviewedSha: prior.reviewedSha,
+    fromUrl: prior.url,
+    reason: `what the reviewers are given, and the reviewer, are unchanged since ${short}`,
+  };
+}
+
+/**
+ * The comment posted for a carried verdict. It has one job the fresh comment does not:
+ * make sure nobody reads it as a review. So the heading says carried, the first line
+ * says NOT a fresh review, and it names the commit the voters actually ran on.
+ *
+ * Returns '' unless this is a pass with a real source - a carried comment is never
+ * rendered for anything else.
+ *
+ * Contains no verdict block, deliberately: the shepherd takes its findings from the
+ * LAST verdict block on the thread, and this must not shadow the real review's.
+ */
+function renderCarriedComment({ label, headSha, fromSha, reviewedSha, fromUrl } = {}) {
+  if (label !== PASS) return '';
+  if (!isCommitSha(headSha) || !isCommitSha(fromSha) || !isCommitSha(reviewedSha)) return '';
+  // The URL is GitHub's own `html_url`, but it is interpolated into markdown, so it is
+  // shape-checked rather than trusted.
+  const url = /^https:\/\/[^\s<>()[\]]+$/.test(String(fromUrl == null ? '' : fromUrl)) ? String(fromUrl) : '';
+  const where =
+    reviewedSha === fromSha
+      ? `the voters ran on that commit. Their findings are in the AI review comment posted for it${url ? ` ([its check](${url}))` : ''}.`
+      : `that round was itself carried: the voters last ran on commit ${reviewedSha}. Their findings are in the AI review comment posted for that commit${url ? ` ([the round this was carried from](${url}))` : ''}.`;
+  return [
+    `## 🤖 AI review — \`${label}\` (carried forward: the voters did not run on this commit)`,
+    '',
+    `> ♻️ **This is NOT a fresh review.** The verdict is carried forward from the review round on commit ${fromSha}.`,
+    '>',
+    '> **Why:** this push changed nothing a reviewer is given. What the voters are shown for this commit - the pull request\'s own diff against its merge base, plus the approval facts derived from it - is byte-for-byte identical to what was reviewed there, and the reviewer itself (role prompts, review scripts, workflow, coverage) is unchanged. A push that only merges the base branch in, or pushes the same change again, is the usual cause.',
+    '>',
+    `> **Where the review is:** ${where}`,
+    '>',
+    '> **What a carried verdict does not cover:** the reviewers can open files outside the diff, and those may have changed with the base branch. A carried pass says nothing about a new interaction between this change and what the base gained since. The required build and tests on this commit are the check for that.',
+    '>',
+    '> **To get a fresh review of this commit:** re-run this workflow run. A re-run never carries.',
+    '',
+    '_Carried by the review bot from CI; decided by `planVerdictCarry` in `.github/scripts/ai-review-guard.js`. Only a completed `ai-review:pass` is ever carried - a `changes` or `blocked` round always re-runs the voters. The merge gates are unchanged: `ready-to-merge` still needs its witness on this commit, and a pull request that changes the review machinery still needs a human._',
+    '',
+    `<!-- ai-review-carried: from=${fromSha} reviewed=${reviewedSha} -->`,
+    '',
+  ].join('\n');
+}
+
+/**
+ * Is the disclosure label telling the truth? Null when it is, else the fault in words.
+ *
+ * The workflow re-reads the pull request's labels after writing them and fails the
+ * step on a fault, the way `verdictLabelFault` does for the verdict itself (#1468). A
+ * carried verdict that lost its label would be mistaken for a review; a fresh verdict
+ * still wearing one would be mistaken for a carry. Neither may be silent.
+ */
+function carriedLabelFault({ current = [], carried } = {}) {
+  const has = Array.isArray(current) && current.includes(CARRIED);
+  if (carried === true && !has) {
+    return `\`${CARRIED}\` is missing: the verdict on this commit was carried forward, and the label that says so is not on the pull request`;
+  }
+  if (carried !== true && has) {
+    return `\`${CARRIED}\` is still on the pull request, but the verdict on this commit came from a fresh review`;
+  }
+  return null;
+}
+
+/**
+ * The single seam the workflow calls (#1688): raw text in, one decision out.
+ *
+ * Everything the workflow step can get wrong by hand - parsing the API response,
+ * hashing, comparing, wording the comment - happens here, where it is tested. The step
+ * runs three commands and passes their output through unread:
+ *
+ *   inputText      `scripts/review-branch.sh <base> <head> --print-input`
+ *   lsTree         `git ls-tree <base> -- <PANEL_KEY_PATHS>`
+ *   checkRunsJson  the check-runs API response for the previous head
+ *
+ * A failed command arrives as empty text, and empty text is always a refusal.
+ *
+ * The hashes are returned on a refusal too: the round that then runs needs them for
+ * its own record, and computing them a second time elsewhere would be a second
+ * definition.
+ */
+function planVerdictCarry(raw) {
+  const o = raw && typeof raw === 'object' ? raw : {};
+  const inputHash = patchFingerprint(o.inputText);
+  const panelKey = reviewPanelKey({ lsTree: o.lsTree, coverage: o.coverage });
+
+  let checkRuns = null; // null = unreadable, which latestHeadRound reports as such
+  try {
+    const parsed = JSON.parse(String(o.checkRunsJson == null ? '' : o.checkRunsJson));
+    if (Array.isArray(parsed)) checkRuns = parsed;
+    else if (parsed && Array.isArray(parsed.check_runs)) checkRuns = parsed.check_runs;
+  } catch (_) {
+    checkRuns = null;
+  }
+
+  const d = decideVerdictCarry({
+    action: o.action,
+    runAttempt: o.runAttempt,
+    headSha: o.headSha,
+    beforeSha: o.beforeSha,
+    inputHash,
+    panelKey,
+    checkRuns,
+    allowlist: parseAllowlist(o.allowlistRaw),
+  });
+  const comment = d.carry
+    ? renderCarriedComment({
+        label: d.label,
+        headSha: o.headSha,
+        fromSha: d.fromSha,
+        reviewedSha: d.reviewedSha,
+        fromUrl: d.fromUrl,
+      })
+    : '';
+  // A carry with nothing to post would be an invisible one, so it is not a carry.
+  const carry = d.carry === true && comment !== '';
+  return {
+    carry,
+    reason: d.carry && !carry ? 'the carried-verdict comment could not be rendered, so the verdict is not carried' : d.reason,
+    label: carry ? d.label : '',
+    fromSha: carry ? d.fromSha : '',
+    reviewedSha: carry ? d.reviewedSha : '',
+    inputHash: inputHash || '',
+    panelKey: panelKey || '',
+    comment: carry ? comment : '',
+  };
+}
+
 // GitHub truncates commit-status descriptions at 140 chars; keep ours within it
 // even when a description carries a (potentially long) provenance reason.
 const MAX_DESCRIPTION = 140;
@@ -790,10 +1235,32 @@ function decideProvenanceRevert({ action, labelName, senderLogin, allowlist } = 
 
 // #359 — staleness. On a `synchronize` event (new commits pushed) any existing
 // `ai-review:pass` reviewed an older head and is now stale; it must be stripped.
-function decideStalenessStrip({ action, labels } = {}) {
+//
+// #1688 — with ONE exception, and it is narrow. `labels` here is the label set at the
+// moment of the push, so "there was a pass" is a fact about the OLD head. The strip
+// itself runs later, against the LIVE pull request, and removes whatever
+// `ai-review:pass` is there by then. That gap never mattered while a review took
+// minutes. A carried verdict lands in seconds, so the push-time strip can now arrive
+// AFTER the fresh label and remove it - leaving a reviewed head with no verdict label
+// and nothing left to put one back.
+//
+// So the caller may pass `headRound`: latestHeadRound() for the CURRENT head. When it
+// is a completed pass recorded by the allowlisted reviewer on this exact commit, the
+// label on the pull request is this head's own and is not stripped. In every other
+// case - no `headRound` (every caller before #1688), no round on this head yet, a round
+// still running, anything but a recorded pass - the strip is exactly what it was. A
+// real change therefore still voids the verdict: its new head has no completed round
+// until the full panel has finished.
+function decideStalenessStrip({ action, labels, headRound } = {}) {
   if (action !== 'synchronize') return { strip: false };
   const set = new Set(Array.isArray(labels) ? labels : []);
   if (!set.has(PASS)) return { strip: false };
+  if (headRound && headRound.complete === true && headRound.label === PASS) {
+    return {
+      strip: false,
+      reason: 'the reviewer has already recorded a completed ai-review:pass round for this exact head, so the label is not stale',
+    };
+  }
   return {
     strip: true,
     reason: 'new commits were pushed after ai-review:pass — the greenlight is stale',
@@ -1210,7 +1677,14 @@ function shouldMarkBlockedBy({ openBlockers } = {}) {
 // The check's NAME is the shared `CHECK_NAME` constant declared at the top of
 // this module — verifyHeadPassCheckRun (#810) reads check-runs by that same
 // constant, so the producer and the verifier cannot drift apart (#822).
-function decideReviewCheck(label, isMachineryPr) {
+//
+// #1688 — `carried` ({ fromSha, reviewedSha }) is passed when the verdict on this head
+// was carried forward rather than produced by the voters. It changes the WORDS only:
+// the title and summary say carried, from which commit, and where the voters last ran.
+// The conclusion is computed before `carried` is looked at and is never touched by it,
+// and the note is refused on anything that is not a pass with a real source, so it
+// cannot dress a `changes` or a `blocked` as something else.
+function decideReviewCheck(label, isMachineryPr, carried) {
   const machinery = isMachineryPr === true;
   const pass = !machinery && label === PASS;
 
@@ -1258,6 +1732,20 @@ function decideReviewCheck(label, isMachineryPr) {
       'was empty/unrecognised. This check is deliberately **failure**: when ' +
       '`ai-review` is required in the branch ruleset, this blocks merge until ' +
       'a human resolves it. See the AI review comment for details.';
+  }
+
+  if (label === PASS && carried && isCommitSha(carried.fromSha) && isCommitSha(carried.reviewedSha)) {
+    const { fromSha, reviewedSha } = carried;
+    title = `${title} (verdict carried forward from ${fromSha.slice(0, 8)}, voters did not run)`;
+    summary =
+      '**Carried forward - the voters did not run on this commit.** This push changed ' +
+      'nothing a reviewer is given, so the `ai-review:pass` recorded on commit ' +
+      `${fromSha} is carried to this one rather than re-reviewed. ` +
+      (reviewedSha === fromSha
+        ? 'The voters ran on that commit. '
+        : `That round was itself carried: the voters last ran on commit ${reviewedSha}. `) +
+      'Re-run the workflow run to get a fresh review; a re-run never carries.\n\n' +
+      summary;
   }
 
   return { name: CHECK_NAME, conclusion, title, summary };
@@ -1420,6 +1908,18 @@ module.exports = {
   UNAVAILABLE_TOKEN,
   parseVoterRecords,
   selectVotersToRun,
+  CARRIED,
+  ROUND_RECORD_PREFIX,
+  PANEL_KEY_PATHS,
+  PANEL_KEY_OPTIONAL_PATHS,
+  reviewPanelKey,
+  renderRoundRecord,
+  parseRoundRecord,
+  latestHeadRound,
+  decideVerdictCarry,
+  renderCarriedComment,
+  carriedLabelFault,
+  planVerdictCarry,
   parseResetInstant,
   VERDICT_SCHEMA,
   defangProtocolTokens,

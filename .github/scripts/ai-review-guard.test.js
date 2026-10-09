@@ -1760,6 +1760,11 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
     assert.equal(decide({ checkRuns: [round({ app: null })] }).carry, false);
     assert.equal(decide({ allowlist: [] }).carry, false, 'an empty allowlist authorises nobody');
     assert.equal(decide({ allowlist: undefined }).carry, false);
+    // ...and the refusal NAMES the variable. An unset allowlist makes the carry quietly
+    // do nothing forever while looking wired; the run log has to say which knob it is,
+    // not blame the check-run for being posted by the wrong app.
+    assert.match(decide({ allowlist: [] }).reason, /AI_REVIEW_BOT_LOGINS/);
+    assert.doesNotMatch(decide({ checkRuns: [round({ app: { slug: 'github-actions' } })] }).reason, /AI_REVIEW_BOT_LOGINS/);
     // Case-insensitive, like every other door into this gate (the #1840 hardening note).
     assert.equal(decide({ checkRuns: [round({ app: { slug: 'MinSpec-SDD' } })] }).carry, true);
   });
@@ -1804,6 +1809,16 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
     }
     assert.equal(decideVerdictCarry().carry, false);
     assert.equal(decideVerdictCarry({}).carry, false);
+    // Each refusal above must hold for its OWN reason, not because a later check
+    // happens to catch it. So give each one a source that would otherwise carry.
+    // A head cannot be carried from itself, even with a matching pass sitting on it:
+    const onHead = round({ head_sha: H });
+    assert.equal(decide({ checkRuns: [onHead] }).carry, false, 'control: a round on H is not the previous head P');
+    assert.equal(decide({ beforeSha: H, checkRuns: [onHead] }).carry, false, 'previous head == head under review');
+    // A missing fingerprint must not "match" a record that is also missing one. No
+    // record can be, because none renders without both - which is the property:
+    assert.equal(renderRoundRecord({ label: PASS, inputHash: '', panelKey: KEY_A, reviewedSha: P }), '');
+    assert.equal(renderRoundRecord({ label: PASS, inputHash: IN_A, panelKey: '', reviewedSha: P }), '');
   });
 
   test('#1688 inv 3: only a first-attempt push can carry - opened, reopened and re-runs always review', () => {
