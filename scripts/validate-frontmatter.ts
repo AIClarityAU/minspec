@@ -27,6 +27,7 @@ import {
   validateSplitLayoutCoverage,
   checkAcceptanceCriteria,
   validateOwnership,
+  validateImplementEvidence,
   type SplitLayoutFile,
 } from '../packages/minspec/src/lib/spec-validator';
 import { parseSpec } from '../packages/minspec/src/lib/spec';
@@ -639,6 +640,37 @@ try {
     for (const v of validateOwnership(parseSpec(content), ownCfg)) {
       if (v.severity === 'error') fail(file, `${v.message} ${v.fixHint}`);
       else warn(`ownership ${relative(ROOT, file)}: ${v.message}`);
+    }
+  }
+} catch {
+  // specs/ unreadable / absent — nothing to validate, stay silent.
+}
+
+// Rule 22 (#1751): a spec whose `phases.implement` is `in-progress`/`done` must
+// have its declared `implements:` files actually exist on disk. `validateOwnership`
+// (Rule 15 above) only checks the OTHER direction — a declared path is valid whether
+// or not it exists yet (greenfield ownership). Nothing previously checked that a
+// spec CLAIMING active/finished implementation work owns real files; SPEC-065's
+// backfilled `phases:` block claimed `implement: in-progress` with none of its five
+// declared `implements:` files on disk, and only an ai-review LLM panel caught it
+// (PR #1661) — this rule makes that deterministic and gates it on the commit/CI
+// surface. `validateImplementEvidence` is the SAME function `validateSpec`'s
+// in-extension approve gate calls (Goal G-6: one rule, every surface). Ships as
+// `warn` by default (`implementEvidence` FR-7 ratchet, mirrors Rule 15's
+// `ownershipDeclaration`) — inert until flipped to `error`.
+try {
+  for (const file of glob(specsDir, '.md')) {
+    const content = readFileSync(file, 'utf-8');
+    // implements: paths are always repo-ROOT-relative (SPEC-038), unlike Rule 9's
+    // file:line citations — an owned-code path is never resolved against the
+    // spec's own directory.
+    for (const v of validateImplementEvidence(
+      parseSpec(content),
+      loadConfig(ROOT),
+      (relPath) => existsSync(join(ROOT, relPath)),
+    )) {
+      if (v.severity === 'error') fail(file, `${v.message} ${v.fixHint}`);
+      else warn(`implement-evidence ${relative(ROOT, file)}: ${v.message}`);
     }
   }
 } catch {
