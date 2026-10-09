@@ -87,6 +87,20 @@ export interface MinspecConfig {
    */
   readonly approvers?: readonly string[];
   /**
+   * Severity of the #1912 `status.inline-comment` / `status.orphan-comment` rules.
+   *
+   * The `status:` frontmatter line carries a value and nothing else (#1900). The three
+   * status writers replace that whole line with `status: <value>`, so an inline comment is
+   * DESTROYED on write, and indented `#` lines after it SURVIVE and go on describing a
+   * value that no longer holds (#1879). Both are annotations the writer cannot keep
+   * honest, so the convention is to put rationale in body prose instead.
+   *
+   * `warn` (default) surfaces them without blocking; flip to `error` once the corpus is
+   * clean and the writers consume continuations (the SPEC-038 FR-7 ratchet). Absent →
+   * treated as `warn`.
+   */
+  readonly statusLineAnnotation?: 'warn' | 'error';
+  /**
    * The project's name, as rendered into every generated harness file (#1529).
    *
    * Explicit and authoritative: set this to rename the project deliberately.
@@ -149,6 +163,7 @@ export const DEFAULT_CONFIG: MinspecConfig = {
   ownershipDeclaration: 'warn',
   implementEvidence: 'warn',
   autonomy: 'ask',
+  statusLineAnnotation: 'warn',
 };
 
 /** Deep merge user config over defaults. User values win. */
