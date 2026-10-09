@@ -1176,7 +1176,38 @@ _ready_numbers() {
 # It counts dispatches that START (#2641). An issue the dispatcher refuses before doing
 # any work does not use one, so a cycle may OFFER more issues than this; it never starts
 # more. The counting is in run_cycle's dispatch loops (slots_used, book_dispatch).
-_dispatch_cap="${MINSPEC_DRAIN_QUEUE_LIMIT:-30}"
+#
+# _queue_limit <raw>: the limit as a whole number of dispatches, or nothing and a
+# non-zero status when <raw> is not one.
+#
+# The limit is compared in arithmetic, and bash arithmetic does two things to a value it
+# is handed raw. One it cannot evaluate (`5x`, `2.5`, `1e3`) makes the comparison an
+# ERROR, and an error in a test reads as false: on `main` the trim sat inside such a
+# test, so a mistyped limit skipped the trim and the whole ready set was dispatched. And
+# it EVALUATES what it is given: a limit of `ready_total[$(command)]` ran the command
+# (the name has to be a variable that is set; an unset one stops on `set -u` first).
+# Nothing but digits reaches arithmetic now.
+#
+# Leading zeros are decimal, as `head -n` read them (`010` is ten; arithmetic alone would
+# call it eight and refuse `08`). Whitespace around the value is dropped. Nine digits at
+# most, so the conversion cannot overflow.
+_queue_limit() {
+  local raw="${1-}"
+  raw="${raw#"${raw%%[![:space:]]*}"}"
+  raw="${raw%"${raw##*[![:space:]]}"}"
+  [[ "$raw" =~ ^[0-9]{1,9}$ ]] || return 1
+  printf '%s' "$(( 10#$raw ))"
+}
+
+# A limit that cannot be read is not "no limit", and it is not the default either:
+# somebody asked for something else. Nothing is dispatched until it is a number, and
+# every cycle says so where the log carries it (run_cycle), not once at start-up where
+# only the launcher sees it.
+_dispatch_cap_unreadable=0
+if ! _dispatch_cap="$(_queue_limit "${MINSPEC_DRAIN_QUEUE_LIMIT:-30}")"; then
+  _dispatch_cap=0
+  _dispatch_cap_unreadable=1
+fi
 
 # DRAIN_SPECIFY — whether this drain dispatches spec-writing work (#2582). 1, the
 # default, is the behaviour there has always been: both ready queues are dispatched.
@@ -1474,7 +1505,11 @@ run_cycle() {
   # This NOTE is the dispatch-time sibling of the fetch-time one above (#2197): same
   # shape, at the point where a cap decides anything.
   ready_total="$(printf '%s\n' "$all_ready" | grep -c . || true)"  # swallow-ok: all_ready is already known non-empty above, so grep -c cannot be the empty-input 1
-  if (( ready_total > _dispatch_cap )); then
+  if (( _dispatch_cap_unreadable )); then
+    # Said every cycle (#2641). The value itself is not printed back: it is whatever the
+    # environment held, and this line is what an operator searches the log for.
+    echo "[drain] WARNING: MINSPEC_DRAIN_QUEUE_LIMIT is not a whole number of dispatches, so this cycle dispatches nothing. A limit that cannot be read is not 'no limit'. Set it to a number of at most nine digits." >&2
+  elif (( ready_total > _dispatch_cap )); then
     echo "[drain] NOTE: ${ready_total} issue(s) ready — dispatching the top ${_dispatch_cap} this cycle." >&2
     echo "[drain]       An issue the dispatcher refuses does not count toward that. The rest stay queued and are re-ranked next cycle. Raise MINSPEC_DRAIN_QUEUE_LIMIT to dispatch more per cycle." >&2
   fi

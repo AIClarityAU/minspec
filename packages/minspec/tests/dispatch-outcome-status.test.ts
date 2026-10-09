@@ -477,6 +477,33 @@ describe('#2641: the whole script keeps to it', () => {
     expect(traps[0].i).toBeLessThan((firstSource as { i: number }).i);
   });
 
+  it('no library the script sources, directly or through another, sets an exit trap of its own', () => {
+    // The one trap is set BEFORE the libraries are sourced, and `trap ... EXIT` replaces
+    // the trap before it. A library that set one at source time would switch off the
+    // claim's teardown and the guard on the answering statuses, and nothing in this
+    // script's own text would show it. So the rule is checked where it could be broken.
+    const libDir = path.dirname(DISPATCH);
+    const sourced = (text: string): string[] =>
+      [...text.matchAll(/^\s*(?:source|\.)\s+"\$\{[A-Za-z_][A-Za-z0-9_]*\}\/((?:lib\/)?[a-z0-9-]+\.sh)"/gm)].map((m) => m[1]);
+    const seen = new Set<string>();
+    const queue = sourced(src).map((rel) => path.resolve(libDir, rel));
+    while (queue.length > 0) {
+      const file = queue.shift() as string;
+      if (seen.has(file) || !fs.existsSync(file)) continue;
+      seen.add(file);
+      queue.push(...sourced(fs.readFileSync(file, 'utf-8')).map((rel) => path.resolve(path.dirname(file), rel)));
+    }
+    // Seven today. Fewer would mean the extractor above stopped seeing them.
+    expect(seen.size).toBeGreaterThanOrEqual(7);
+    for (const file of seen) {
+      const traps = fs
+        .readFileSync(file, 'utf-8')
+        .split('\n')
+        .filter((l) => !/^\s*#/.test(l) && /\btrap\b.*\b(EXIT|0)\s*($|[;)}&|#])/.test(l));
+      expect(traps, path.basename(file)).toEqual([]);
+    }
+  });
+
   it('the claim is marked in one place, and the trap that gives it back is armed above it', () => {
     expect(claimed).toBeGreaterThan(0);
     expect(lines.filter((l) => /^\s*DISPATCH_CLAIMED=1\s*$/.test(l))).toHaveLength(1);

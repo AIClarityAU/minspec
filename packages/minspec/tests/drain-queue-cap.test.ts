@@ -283,3 +283,98 @@ describe('drain dispatch cap: applied AFTER ranking, not at the read (#2197)', (
     expect(status).toBe(0);
   });
 });
+
+describe('#2641 T0: a queue limit that is not a number dispatches nothing, not everything', () => {
+  // The limit is compared in arithmetic on every offer. A value bash cannot evaluate
+  // (`5x`, `2.5`, `1e3`) makes each comparison an ERROR, an error in a test reads as false,
+  // and "has the limit been reached" never comes out true: a mistyped limit was no limit
+  // at all. That is older than #2641. On `main` the trim sat inside the same kind of test,
+  // so the same values skipped the trim and dispatched the whole ready set. It is fixed
+  // here because the limit is now what every cycle is held to, offer by offer.
+  afterEach(cleanupDrains);
+
+  const ROOM = { pct: 1, resetIn: 3600 };
+  const ready = (n: number) => Array.from({ length: n }, (_, i) => i + 1);
+
+  /** The limit as the script reads it: the real `_queue_limit`, run on its own. */
+  function queueLimit(raw: string): { out: string; ok: boolean } {
+    const m = content.match(/^_queue_limit\(\) \{[\s\S]*?^\}/m);
+    if (!m) throw new Error('_queue_limit() not found in drain-inbox.sh (#2641)');
+    const r = spawnSync('bash', ['-c', `set -euo pipefail\n${m[0]}\n_queue_limit "$1"`, 'bash', raw], { encoding: 'utf-8' });
+    return { out: r.stdout, ok: r.status === 0 };
+  }
+
+  it.each([
+    { raw: '0', is: '0' },
+    { raw: '2', is: '2' },
+    { raw: '30', is: '30' },
+    { raw: '999999999', is: '999999999' },
+    // Decimal, as `head -n` read them: arithmetic would take the first for eight and
+    // refuse the second ("value too great for base").
+    { raw: '010', is: '10' },
+    { raw: '08', is: '8' },
+    // What a shell profile can leave around a value.
+    { raw: ' 3', is: '3' },
+    { raw: '3\n', is: '3' },
+  ])('_queue_limit reads $raw as $is', ({ raw, is }) => {
+    expect(queueLimit(raw)).toEqual({ out: is, ok: true });
+  });
+
+  it.each(['', ' ', 'abc', '5x', 'x5', '2.5', '1e3', '-1', '+1', '0x10', '3;', '1 2', '1,000', '9999999999', 'raw[$(id)]'])(
+    '_queue_limit refuses %j, and prints nothing',
+    (raw) => {
+      expect(queueLimit(raw)).toEqual({ out: '', ok: false });
+    },
+  );
+
+  it.each(['5x', '2.5', '1e3', 'abc', '-1', '0x10', '3;', '9999999999'])(
+    'a limit of %j: nothing is offered, and the cycle says why',
+    async (raw) => {
+      const d = await runOnce({ ready: ready(6), reading: ROOM, env: { MINSPEC_DRAIN_QUEUE_LIMIT: raw } });
+      expect(d.offered()).toEqual([]);
+      expect(d.dispatched()).toEqual([]);
+      expect(d.log()).toMatch(/^\[drain\] WARNING: MINSPEC_DRAIN_QUEUE_LIMIT is not a whole number of dispatches/m);
+      // The cycle finishes, and not on the line a healthy one ends on.
+      expect(d.log()).toContain('6 never offered (queue limit 0)');
+      expect(d.log()).toMatch(/^\[drain\] cycle done\. No dispatch was confirmed/m);
+      expect(d.log()).not.toContain('cycle error');
+    },
+  );
+
+  it('a limit that is a command in arithmetic clothing is never evaluated', async () => {
+    // `(( n > limit ))` evaluates its operands, and an array subscript may hold a command
+    // substitution. The value is the operator's own, so this is not a boundary being
+    // crossed, but a number read from the environment should not be able to run anything.
+    //
+    // The name in front of the subscript has to be a variable that is SET, or `set -u`
+    // stops the evaluation first: `ready_total` is one the cycle has set by the time it
+    // compares against the limit. Measured on `main`'s drain with this value: the marker
+    // is created.
+    const marker = path.join(tmp, 'evaluated');
+    const d = await runOnce({
+      ready: ready(3),
+      reading: ROOM,
+      env: { MINSPEC_DRAIN_QUEUE_LIMIT: `ready_total[$(touch ${marker})]` },
+    });
+    expect(fs.existsSync(marker)).toBe(false);
+    expect(d.offered()).toEqual([]);
+    expect(d.log()).toMatch(/WARNING: MINSPEC_DRAIN_QUEUE_LIMIT is not a whole number of dispatches/);
+  });
+
+  it.each([
+    { raw: '08', n: 8 },
+    { raw: '010', n: 10 },
+    { raw: ' 3 ', n: 3 },
+  ])('a limit of $raw is $n, read as decimal: exactly that many of twelve are dispatched', async ({ raw, n }) => {
+    const d = await runOnce({ ready: ready(12), reading: ROOM, env: { MINSPEC_DRAIN_QUEUE_LIMIT: raw } });
+    expect(d.dispatched()).toEqual(ready(n));
+    expect(d.log()).not.toContain('is not a whole number');
+    expect(d.log()).toMatch(new RegExp(`NOTE: 12 issue\\(s\\) ready — dispatching the top ${n} this cycle`));
+  });
+
+  it('CONTROL: an ordinary limit prints no warning about itself', async () => {
+    const d = await runOnce({ ready: ready(4), reading: ROOM, env: { MINSPEC_DRAIN_QUEUE_LIMIT: '2' } });
+    expect(d.dispatched()).toEqual([1, 2]);
+    expect(d.log()).not.toContain('is not a whole number');
+  });
+});
