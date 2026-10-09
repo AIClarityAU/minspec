@@ -175,7 +175,29 @@ describe('#1305/#1307 — completion and crash label writes actually execute', (
     return lines[i - 1] + '\n' + lines[i];
   }
 
+  /**
+   * Every statement that stamps `agent-escalated`, each with the line that follows it
+   * (the `echo` that says which path this is). Comment lines are skipped, so prose that
+   * quotes the flag cannot stand in for a command.
+   *
+   * By ALL occurrences and not by first match, deliberately (#2641). The crash path and
+   * the deliberate-escalation path now carry the SAME label write, word for word, so a
+   * marker can no longer tell them apart: `findIndex` would return the first of the two
+   * and the test named for the other would silently be testing its sibling.
+   */
+  function escalationWrites(): { statement: string; next: string }[] {
+    const lines = content.split('\n');
+    return lines
+      .map((line, i) => ({ line, i }))
+      .filter(({ line }) => line.includes('--add-label "agent-escalated') && !/^\s*#/.test(line))
+      .map(({ i }) => ({ statement: lines[i - 1] + '\n' + lines[i], next: lines[i + 1] ?? '' }));
+  }
+
   function runLabelWrite(marker: string): string {
+    return runStatement(labelWriteStatement(marker));
+  }
+
+  function runStatement(statement: string): string {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'label-write-'));
     const bin = path.join(dir, 'bin');
     fs.mkdirSync(bin);
@@ -185,7 +207,7 @@ describe('#1305/#1307 — completion and crash label writes actually execute', (
       `#!/usr/bin/env bash\nprintf '%s\\n' "$*" >> ${JSON.stringify(log)}\nexit 0\n`,
       { mode: 0o755 },
     );
-    const script = ['set -uo pipefail', 'ISSUE=4242', 'REPO=owner/repo', labelWriteStatement(marker)].join('\n');
+    const script = ['set -uo pipefail', 'ISSUE=4242', 'REPO=owner/repo', statement].join('\n');
     try {
       execFileSync('bash', ['-c', script], {
         encoding: 'utf-8',
@@ -206,16 +228,55 @@ describe('#1305/#1307 — completion and crash label writes actually execute', (
   });
 
   it('the crash write really runs, and raises needs-human-review', () => {
-    // Marker must include the agent-ready removal: the DR-355 escalation path a few
-    // hundred lines earlier also ends in `--add-label "agent-escalated,needs-human-review"`,
-    // and matching that one instead would silently test the wrong statement.
-    const call = runLabelWrite(
-      '--remove-label "agent-running,agent-ready" --add-label "agent-escalated,needs-human-review"',
-    );
+    // Picked by the line that FOLLOWS it, which names the path. The deliberate
+    // escalation path a few hundred lines earlier carries the identical label write
+    // (#2641), so no marker inside the statement can single this one out.
+    const crash = escalationWrites().filter((w) => w.next.includes('Agent CRASHED on issue'));
+    expect(crash, 'could not find the crash path label write').toHaveLength(1);
+    const call = runStatement(crash[0].statement);
     expect(call, 'gh was never invoked — the command is dead').not.toBe('');
     expect(call).toContain('issue edit 4242');
     expect(call).toContain('--remove-label agent-running,agent-ready');
     expect(call).toContain('needs-human-review');
+  });
+
+  it('#2641 — the deliberate escalation write really runs, and drops agent-ready as the crash write does', () => {
+    // This writer removed `agent-running` alone. It leaned on the claim step having
+    // removed `agent-ready` already, and that removal is best-effort with its error
+    // swallowed, so an escalated issue could keep its place in the queue: refused at
+    // every dispatch and offered again on every cycle.
+    const escalated = escalationWrites().filter((w) => w.next.includes('Agent ESCALATED issue'));
+    expect(escalated, 'could not find the deliberate escalation label write').toHaveLength(1);
+    const call = runStatement(escalated[0].statement);
+    expect(call, 'gh was never invoked — the command is dead').not.toBe('');
+    expect(call).toContain('issue edit 4242');
+    expect(call).toContain('--remove-label agent-running,agent-ready');
+    expect(call).toContain('--add-label agent-escalated,needs-human-review');
+  });
+
+  it('#2641 — EVERY statement that stamps agent-escalated drops agent-ready: the property, not one call site', () => {
+    const writes = escalationWrites();
+    // Two today: the deliberate escalation and the crash. A third writer has to be
+    // counted here on purpose, and then meets the same assertions as the other two.
+    expect(writes).toHaveLength(2);
+    for (const w of writes) {
+      const call = runStatement(w.statement);
+      expect(call, `gh was never invoked for the write before: ${w.next.trim()}`).not.toBe('');
+      expect(call, w.next.trim()).toContain('--remove-label agent-running,agent-ready');
+      expect(call, w.next.trim()).toContain('--add-label agent-escalated,needs-human-review');
+    }
+  });
+
+  it('#2641 — an escalated issue that still wore agent-ready is what the gate refuses; without it, it is no longer a ready issue at all', () => {
+    // Why the write matters, shown on the real gate. With the stale label left on, the
+    // issue is in the queue and refused as countermanded every time it is offered. With
+    // it removed, the issue is not a ready issue: it leaves the queue.
+    const left = readyCheck('agent-ready,agent-escalated,needs-human-review,role:dev');
+    expect(left.ok).toBe(false);
+    expect(left.reason).toContain('[countermanded]');
+    const removed = readyCheck('agent-escalated,needs-human-review,role:dev');
+    expect(removed.ok).toBe(false);
+    expect(removed.reason).toContain('[no-label]');
   });
 });
 

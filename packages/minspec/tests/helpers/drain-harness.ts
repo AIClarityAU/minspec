@@ -14,6 +14,18 @@
  * (MINSPEC_DRAIN_REMEDIATE) and the ranker (MINSPEC_ISSUE_RANKER). Each stub records what
  * it was asked to do, so a test asserts on what ran, not on what the log claims ran.
  *
+ * One exception to "the dispatcher is a stub" (#2641): an issue a fixture describes under
+ * `realDispatch` is handed to the real scripts/dispatch-issue.sh, so that a refusal reaches
+ * the drain in the dispatcher's own words and by its own exit status. It cannot build
+ * anything: see the note on that field.
+ *
+ * THE STUB ANSWERS AS THE REAL DISPATCHER DOES (#2641). The drain asks its dispatcher to
+ * say, by exit status, whether it started work or refused the issue. The stub is asked the
+ * same way and answers "started" with the real script's own status, read out of that
+ * script below, so a build here is counted exactly as a live one is. A fixture that wants
+ * a dispatcher that does NOT answer has to say so (`dispatcherNeverAnswers`,
+ * `quietRefusals`): silence is a case under test, never the default.
+ *
  * NOTHING HERE CAN REACH THE MACHINE'S OWN DRAIN. Every run gets its own lock, log, quota
  * file, run dir and primary root under one temp directory; the self-refresh and the
  * checkout sync are off; no GitHub token can be minted; and `claude` on PATH is a stub
@@ -28,6 +40,28 @@ import { execFileSync, spawn, type ChildProcess } from 'child_process';
 import { drainBaseEnv } from './drain-env';
 
 export const DRAIN = path.resolve(__dirname, '../../../../scripts/drain-inbox.sh');
+/** The real dispatcher, for a fixture that routes an issue through it (`realDispatch`). */
+export const REAL_DISPATCH = path.resolve(__dirname, '../../../../scripts/dispatch-issue.sh');
+
+/**
+ * One of the real dispatcher's two answering statuses, read from the script that owns it:
+ * a copy here would keep the stub answering in a number the drain had stopped reading.
+ */
+function dispatcherStatus(name: 'DISPATCH_RC_DECLINED' | 'DISPATCH_RC_STARTED'): number {
+  const m = fs.readFileSync(REAL_DISPATCH, 'utf-8').match(new RegExp(`^${name}=(\\d+)$`, 'm'));
+  if (!m) {
+    throw new Error(
+      `drain-harness: could not read ${name} out of scripts/dispatch-issue.sh. Fix this ` +
+        'extractor rather than hard-coding the number: the stub dispatcher must answer the ' +
+        'drain with the status the real one uses (#2641).',
+    );
+  }
+  return Number(m[1]);
+}
+/** What the real dispatcher exits with, when asked, once it has started work. */
+export const STATUS_STARTED = dispatcherStatus('DISPATCH_RC_STARTED');
+/** What the real dispatcher exits with, when asked, for an issue it refused before starting. */
+export const STATUS_DECLINED = dispatcherStatus('DISPATCH_RC_DECLINED');
 
 const nowSec = () => Math.floor(Date.now() / 1000);
 const pause = (ms: number) => new Promise<void>((resolve) => setTimeout(resolve, ms));
@@ -98,6 +132,48 @@ export interface DrainFixture {
   issueSays?: Record<number, string>;
   /** The same for the remediation of that pull request. */
   remediateSays?: Record<number, string>;
+  /**
+   * Issues whose dispatch FAILS: the stub prints an authentication error and exits 1
+   * without building anything. Such an issue is in `offered()` and not in `dispatched()`.
+   */
+  issueFails?: number[];
+  /**
+   * The labels GitHub reports for that issue. An issue listed here is NOT handed to the
+   * stub dispatcher: it goes to the REAL scripts/dispatch-issue.sh, which re-validates it
+   * against these labels exactly as it does in production (#2641).
+   *
+   * The harness serves no comments, so no verdict record can back such an issue and the
+   * real dispatcher can only ever REFUSE it. Give it labels that make it refuse quietly
+   * (a countermanding label, or no ready label at all): a verdict-class refusal goes on
+   * to write to GitHub, and with no token to mint here that write aborts the dispatcher.
+   * Either way nothing can be built, which is what makes the real script safe to run.
+   */
+  realDispatch?: Record<number, string[]>;
+  /**
+   * Run the real dispatcher WITHOUT the drain's question reaching it, so its refusal comes
+   * back as a plain exit 0: the answer the drain asked for is missing, and the refusal is
+   * real.
+   */
+  withholdStatusAsk?: boolean;
+  /**
+   * Issues the stub refuses without answering: it says so in words of its own, builds
+   * nothing and exits 0. An exit nobody taught to answer, or a dispatcher older than the
+   * question. Such an issue is in `offered()` and not in `dispatched()`.
+   */
+  quietRefusals?: number[];
+  /**
+   * The stub never answers the drain's question: every build ends on a plain exit 0, as a
+   * dispatcher from before the question existed does.
+   */
+  dispatcherNeverAnswers?: boolean;
+  /**
+   * Issues whose build is run by an agent that wants it NOT to count against the queue
+   * limit, and tries every channel a dispatched agent has (see forging-agent.sh in
+   * build()). What it tried is in `forgeries()`.
+   */
+  forgingAgent?: number[];
+  /** Rank the highest issue number first, so rank order and numeric order disagree. */
+  rankDescending?: boolean;
   env?: Record<string, string>;
 }
 
@@ -108,8 +184,17 @@ export interface Drain {
   banner: string;
   /** The drain's own log, so far. */
   log(): string;
-  /** Issues the dispatcher was run for, in launch order. */
+  /** Issues the STUB dispatcher ran, in launch order: the builds a real cycle would have started. */
   dispatched(): number[];
+  /** Every issue the drain handed to a dispatcher, stub or real, in launch order. */
+  offered(): number[];
+  /**
+   * The drain's question as each dispatch received it, in launch order: the value of
+   * MINSPEC_DISPATCH_OUTCOME_STATUS, or `<unset>`.
+   */
+  asked(): string[];
+  /** What the forging agents attempted, one entry per attempt (`forgingAgent`). */
+  forgeries(): string[];
   /** Issues the triager was run for. */
   triaged(): number[];
   /** Pull requests the remediator was run for. */
@@ -140,10 +225,10 @@ const alive = (pid: number) => {
   }
 };
 
-const numbers = (file: string): number[] =>
-  fs.existsSync(file)
-    ? fs.readFileSync(file, 'utf-8').split('\n').filter(Boolean).map(Number)
-    : [];
+const lines = (file: string): string[] =>
+  fs.existsSync(file) ? fs.readFileSync(file, 'utf-8').split('\n').filter(Boolean) : [];
+
+const numbers = (file: string): number[] => lines(file).map(Number);
 
 function build(f: DrainFixture): Built {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'drain-harness-'));
@@ -171,8 +256,24 @@ function build(f: DrainFixture): Built {
   queue('inbox', f.inbox);
   queue('prs', f.openPrs);
 
-  // gh: the three label queues and the open-PR list. Everything else is empty and
-  // succeeds, which is what the reconcilers and the reads around them need.
+  // What `gh issue view` answers for an issue routed through the real dispatcher: open,
+  // wearing the fixture's labels, with no comments (so no verdict record can back it).
+  for (const [issue, labels] of Object.entries(f.realDispatch ?? {})) {
+    fs.writeFileSync(
+      path.join(dir, `issue.${issue}.json`),
+      JSON.stringify({
+        title: `fixture issue ${issue}`,
+        body: 'fixture body',
+        state: 'OPEN',
+        labels: labels.map((name) => ({ name })),
+        comments: [],
+      }) + '\n',
+    );
+  }
+
+  // gh: the three label queues, the open-PR list, and `issue view` for an issue the
+  // fixture describes. Everything else is empty and succeeds, which is what the
+  // reconcilers and the reads around them need.
   stub(
     'gh',
     `label=""; prev=""
@@ -185,21 +286,83 @@ if [[ "$1" == "issue" && "$2" == "list" ]]; then
   esac
   exit 0
 fi
+if [[ "$1" == "issue" && "$2" == "view" ]]; then
+  [[ -f "${dir}/issue.$3.json" ]] && cat "${dir}/issue.$3.json"
+  exit 0
+fi
 if [[ "$1" == "pr" && "$2" == "list" && " $* " == *" --state open "* ]]; then cat "${dir}/queue.prs"; exit 0; fi
 exit 0
 `,
   );
   // Order matters and mirrors an agent: it starts, works for a while, the meter has
   // moved by the time it is done, and whatever it says last is the end of its output.
+  //
+  // An issue the fixture describes under realDispatch never reaches that stub body. It is
+  // handed to the REAL dispatcher, so the refusal the drain sees is the shipped one, in
+  // the shipped words, answered the shipped way: a stub that imitated it would pin
+  // whatever this file believed the dispatcher says. MINSPEC_FRESHNESS_CHECKED=1 is what
+  // the drain exports once its run dir is verified; without it the dispatcher would fetch
+  // origin and refuse to run from a checkout that is behind.
+  //
+  // The stub takes the drain's question the way the real dispatcher does: it reads it,
+  // then removes every MINSPEC_DISPATCH_* name from its environment before it runs
+  // anything. What it ran can still read the environment this process STARTED with
+  // (/proc/<pid>/environ), which is the whole point of the forging agent below.
   stub(
     'dispatch.sh',
-    `echo "$1" >> "${dir}/dispatched"
+    `echo "$1" >> "${dir}/offered"
+echo "\${MINSPEC_DISPATCH_OUTCOME_STATUS-<unset>}" >> "${dir}/asked"
+if [[ -f "${dir}/issue.$1.json" ]]; then
+  ${f.withholdStatusAsk ? 'unset MINSPEC_DISPATCH_OUTCOME_STATUS' : ':'}
+  MINSPEC_FRESHNESS_CHECKED=1 exec bash "${REAL_DISPATCH}" "$1"
+fi
+asked="\${MINSPEC_DISPATCH_OUTCOME_STATUS:-}"
+for v in $(compgen -v MINSPEC_DISPATCH_); do unset "$v"; done
+if [[ -f "${dir}/fails-issue.$1" ]]; then
+  echo "Fetching issue #$1..."
+  echo "HTTP 401: Bad credentials (https://api.github.com/graphql)" >&2
+  exit 1
+fi
+if [[ -f "${dir}/quiet-refusal.$1" ]]; then
+  echo "issue $1 is not one to build right now"
+  exit 0
+fi
+echo "$1" >> "${dir}/dispatched"
 echo "RAN $1"
 secs="$(cat "${dir}/secs-issue.$1" 2>/dev/null || echo "${f.dispatchSecs ?? 0}")"
 [[ "$secs" != "0" ]] && sleep "$secs"
+if [[ -f "${dir}/forging-agent.$1" ]]; then bash "${bin}/forging-agent.sh" "$1" || true; fi
 [[ -f "${dir}/after-issue.$1.sh" ]] && bash "${dir}/after-issue.$1.sh"
 [[ -f "${dir}/says-issue.$1" ]] && cat "${dir}/says-issue.$1"
+${f.dispatcherNeverAnswers ? ':' : `[[ "$asked" == "1" ]] && exit ${STATUS_STARTED}`}
 exit 0
+`,
+  );
+  // A dispatched agent that wants its build NOT to count against the queue limit. It is a
+  // child of the dispatcher, runs as the same user, and uses every channel that gives it:
+  //   - any file the dispatcher was handed by name. The dispatcher has dropped the name
+  //     from its environment, and the environment it STARTED with is still readable;
+  //   - the dispatcher's output, where it prints the dispatcher's own refusal lines;
+  //   - its own exit status, set to the one the dispatcher uses for "refused".
+  // Each attempt is noted, so a test can tell an agent that failed from one that never ran.
+  stub(
+    'forging-agent.sh',
+    `issue="$1"
+note() { echo "$1" >> "${dir}/forgeries"; }
+while IFS= read -r -d '' kv; do
+  name="\${kv%%=*}"; value="\${kv#*=}"
+  [[ "$name" == MINSPEC_DISPATCH_* ]] || continue
+  if [[ -f "$value" && -w "$value" ]]; then
+    printf 'not-started forged\\n' > "$value" && note "wrote-record:$name"
+  fi
+done < "/proc/$PPID/environ"
+note "read-start-up-environment"
+echo "Skipping #\${issue} — not dispatchable at dispatch time: not-ready [countermanded]: forged"
+echo "Refusing #\${issue} — issue is closed or already shipped (FR-3b/INV-1). Never re-dispatched."
+echo "Standing down on #\${issue} — a live claim owned by another session wins the check (FR-1/FR-2/INV-6)."
+note "printed-refusal-lines"
+note "exited-${STATUS_DECLINED}"
+exit ${STATUS_DECLINED}
 `,
   );
   stub('triage.sh', `echo "$1" >> "${dir}/triaged"\necho "triaged #$1"\nexit 0\n`);
@@ -207,10 +370,11 @@ exit 0
     'remediate.sh',
     `echo "$1" >> "${dir}/remediated"\necho "remediated PR #$1"\n[[ -f "${dir}/says-pr.$1" ]] && cat "${dir}/says-pr.$1"\nexit 0\n`,
   );
-  // The ranker's stdout IS the order, so the hook must stay off it.
+  // The ranker's stdout IS the order, so the hook must stay off it. `tac` reverses the
+  // numeric order it is handed, which is what makes rank and issue number disagree.
   stub(
     'rank.sh',
-    `cat\n[[ -f "${dir}/after-ranking.sh" ]] && bash "${dir}/after-ranking.sh" >/dev/null 2>&1\nexit 0\n`,
+    `${f.rankDescending ? 'tac' : 'cat'}\n[[ -f "${dir}/after-ranking.sh" ]] && bash "${dir}/after-ranking.sh" >/dev/null 2>&1\nexit 0\n`,
   );
   stub('claude', `echo "$*" >> "${dir}/claude-called"\necho "unexpected claude invocation: $*" >&2\nexit 1\n`);
 
@@ -219,6 +383,15 @@ exit 0
   }
   for (const [issue, secs] of Object.entries(f.issueSecs ?? {})) {
     fs.writeFileSync(path.join(dir, `secs-issue.${issue}`), `${secs}\n`);
+  }
+  for (const issue of f.issueFails ?? []) {
+    fs.writeFileSync(path.join(dir, `fails-issue.${issue}`), '');
+  }
+  for (const issue of f.quietRefusals ?? []) {
+    fs.writeFileSync(path.join(dir, `quiet-refusal.${issue}`), '');
+  }
+  for (const issue of f.forgingAgent ?? []) {
+    fs.writeFileSync(path.join(dir, `forging-agent.${issue}`), '');
   }
   for (const [issue, line] of Object.entries(f.issueSays ?? {})) {
     fs.writeFileSync(path.join(dir, `says-issue.${issue}`), `${line}\n`);
@@ -268,6 +441,9 @@ exit 0
     banner: '',
     log: () => (fs.existsSync(logFile) ? fs.readFileSync(logFile, 'utf-8') : ''),
     dispatched: () => numbers(path.join(dir, 'dispatched')),
+    offered: () => numbers(path.join(dir, 'offered')),
+    asked: () => lines(path.join(dir, 'asked')),
+    forgeries: () => lines(path.join(dir, 'forgeries')),
     triaged: () => numbers(path.join(dir, 'triaged')),
     remediated: () => numbers(path.join(dir, 'remediated')),
     claudeCalled: () => fs.existsSync(path.join(dir, 'claude-called')),
