@@ -167,6 +167,12 @@ function postedRound(
   };
 }
 
+/**
+ * The check-runs API response for a commit whose rounds are exactly `runs`: the WHOLE
+ * list, which is what GitHub's `total_count` says when nothing is on another page.
+ */
+const wholeListing = (runs: unknown[]) => ({ total_count: runs.length, check_runs: runs });
+
 /** Ask the single seam the workflow calls, with the raw inputs the workflow would have. */
 function plan(
   f: Fixture,
@@ -182,7 +188,7 @@ function plan(
     lsTree: state.lsTree,
     coverage: '',
     allowlistRaw: ALLOWLIST,
-    checkRunsJson: JSON.stringify({ total_count: o.checkRuns.length, check_runs: o.checkRuns }),
+    checkRunsJson: JSON.stringify(wholeListing(o.checkRuns)),
   });
 }
 
@@ -441,6 +447,44 @@ describe('#1688 inv 3 - a missing, unreadable or incomplete earlier verdict runs
     expect(unreadable.reason).toMatch(/could not be read/);
   });
 
+  it('a check-run listing that is not the whole list - the real latest round may be on a page nobody read', () => {
+    const { f, m0, p, m1, priorRound } = reviewedPullRequest();
+    const laterChanges = postedRound(f, m0, p, { label: 'ai-review:changes' }); // the real latest, posted after the pass
+    const h = mergeBaseIn(f);
+    const state = reviewState(f, m1, h);
+    const ask = (listing: unknown) =>
+      GUARD.planVerdictCarry({
+        action: 'synchronize', runAttempt: '1', headSha: h, beforeSha: p,
+        inputText: state.inputText, lsTree: state.lsTree, coverage: '', allowlistRaw: ALLOWLIST,
+        checkRunsJson: JSON.stringify(listing),
+      });
+
+    // With both rounds in hand the later `changes` decides, so nothing carries.
+    expect(ask({ total_count: 2, check_runs: [priorRound, laterChanges] }).carry).toBe(false);
+    // Control: the pass alone, as the whole list, WOULD carry. So below it is the
+    // missing round that stops it and nothing else.
+    expect(ask({ total_count: 1, check_runs: [priorRound] }).carry).toBe(true);
+
+    // The defect this guards: GitHub returned only the page holding the pass, and said
+    // a second round exists. The newest round on that page is not the latest round.
+    const short = ask({ total_count: 2, check_runs: [priorRound] });
+    expect(short.carry).toBe(false);
+    expect(short.label).toBe('');
+    expect(short.comment).toBe('');
+    expect(short.reason).toMatch(/1 of 2/);
+
+    // The same list with its count thrown away, and with no count at all.
+    expect(ask([priorRound]).carry).toBe(false);
+    expect(ask({ check_runs: [priorRound] }).carry).toBe(false);
+
+    // A full page is never proof of a last page, whatever the count says.
+    const fullPage = Array.from({ length: GUARD.CHECK_RUNS_PAGE_SIZE }, () => priorRound);
+    expect(fullPage).toHaveLength(100);
+    const full = ask({ total_count: fullPage.length, check_runs: fullPage });
+    expect(full.carry).toBe(false);
+    expect(full.reason).toMatch(/full page/);
+  });
+
   it('a first push, a reopen and a re-run always get the full panel', () => {
     const { f, p, m1, priorRound } = reviewedPullRequest();
     const h = mergeBaseIn(f);
@@ -574,7 +618,7 @@ describe('#1688 inv 7 - the staleness guard still voids a verdict on a real chan
     const allow = GUARD.parseAllowlist(ALLOWLIST);
     // What ready-to-merge sees on the new head while the full panel runs: the OLD round
     // is on the old commit, and nothing completed is on this one.
-    const headRound = GUARD.latestHeadRound({ checkRuns: [priorRound], allowlist: allow, headSha: h });
+    const headRound = GUARD.latestHeadRound({ listing: wholeListing([priorRound]), allowlist: allow, headSha: h });
     expect(headRound.complete).toBe(false);
     expect(GUARD.decideStalenessStrip({ action: 'synchronize', labels: [PASS], headRound }).strip).toBe(true);
   });
@@ -585,15 +629,26 @@ describe('#1688 inv 7 - the staleness guard still voids a verdict on a real chan
     const allow = GUARD.parseAllowlist(ALLOWLIST);
 
     // Before the carried round has posted: strip, exactly as before.
-    const early = GUARD.latestHeadRound({ checkRuns: [priorRound], allowlist: allow, headSha: h });
+    const early = GUARD.latestHeadRound({ listing: wholeListing([priorRound]), allowlist: allow, headSha: h });
     expect(GUARD.decideStalenessStrip({ action: 'synchronize', labels: [PASS], headRound: early }).strip).toBe(true);
 
     // After: the label on the pull request is the fresh one, and stripping it would
     // leave a reviewed head with no verdict.
     const carriedRound = postedRound(f, m1, h, { reviewedSha: p });
-    const late = GUARD.latestHeadRound({ checkRuns: [priorRound, carriedRound], allowlist: allow, headSha: h });
+    const late = GUARD.latestHeadRound({ listing: wholeListing([priorRound, carriedRound]), allowlist: allow, headSha: h });
     expect(late.complete).toBe(true);
     expect(GUARD.decideStalenessStrip({ action: 'synchronize', labels: [PASS], headRound: late }).strip).toBe(false);
+
+    // ...and only when that listing is the whole list. If GitHub says another round
+    // exists on this commit that was not returned, the reviewer's latest word is not
+    // known to be the pass, so the strip is what it always was.
+    const short = GUARD.latestHeadRound({
+      listing: { total_count: 3, check_runs: [priorRound, carriedRound] },
+      allowlist: allow,
+      headSha: h,
+    });
+    expect(short.complete).toBe(false);
+    expect(GUARD.decideStalenessStrip({ action: 'synchronize', labels: [PASS], headRound: short }).strip).toBe(true);
   });
 });
 

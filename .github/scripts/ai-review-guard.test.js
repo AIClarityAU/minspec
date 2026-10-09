@@ -1635,18 +1635,26 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
     ...o,
   });
 
-  const decide = (o = {}) =>
-    decideVerdictCarry({
+  /** The API response for a commit whose rounds are exactly `runs`: the WHOLE list. */
+  const whole = (runs) => ({ total_count: runs.length, check_runs: runs });
+
+  // `checkRuns` is shorthand for "these are ALL the rounds on the previous head". A
+  // test about a listing that is short, countless or unreadable passes `listing`
+  // itself, which is what the guard is actually given.
+  const decide = (o = {}) => {
+    const { checkRuns, ...rest } = o;
+    return decideVerdictCarry({
       action: 'synchronize',
       runAttempt: '1',
       headSha: H,
       beforeSha: P,
       inputHash: IN_A,
       panelKey: KEY_A,
-      checkRuns: [round()],
+      listing: whole(checkRuns === undefined ? [round()] : checkRuns),
       allowlist: ALLOW,
-      ...o,
+      ...rest,
     });
+  };
 
   test('#1688 fixture sanity: the record helper renders something, so a refusal below is never vacuous', () => {
     assert.match(record(), /^review-round:v1:pass:a{64}:c{64}:(a1){20}$/);
@@ -1714,11 +1722,37 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
   });
 
   test('#1688 inv 3: check-runs that could not be READ are not "no rounds" - and still run the full panel', () => {
-    for (const unreadable of [null, undefined, 'not-an-array', {}]) {
-      const d = decide({ checkRuns: unreadable });
+    for (const unreadable of [
+      null,
+      undefined,
+      'not-an-object',
+      {},
+      { message: 'Bad credentials' },
+      { total_count: 1 }, // a count with no list
+      { total_count: 1, check_runs: 'nope' },
+      [round()], // a bare array: the list with its count thrown away
+    ]) {
+      const d = decide({ listing: unreadable });
       assert.equal(d.carry, false);
       assert.match(d.reason, /could not be read/, 'an API failure must not be reported as an absent round');
     }
+    // Control: the same round in a readable listing carries, so the loop above is
+    // refusing the listings and not the round.
+    assert.equal(decide({ listing: whole([round()]) }).carry, true);
+    // The old parameter name is not a second way in: a caller still passing a bare
+    // `checkRuns` is given nothing to carry from.
+    const old = decideVerdictCarry({
+      action: 'synchronize',
+      runAttempt: '1',
+      headSha: H,
+      beforeSha: P,
+      inputHash: IN_A,
+      panelKey: KEY_A,
+      checkRuns: [round()],
+      allowlist: ALLOW,
+    });
+    assert.equal(old.carry, false);
+    assert.match(old.reason, /could not be read/);
   });
 
   test('#1688 inv 3: an incomplete earlier round runs the full panel', () => {
@@ -2034,14 +2068,14 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
   test('#1688 inv 7: it stands down ONLY when the reviewer has already recorded a completed pass for this exact head', () => {
     // A carried round finishes in seconds, so the push-time strip can now arrive AFTER
     // the fresh label. Stripping it then would leave a reviewed head with no verdict.
-    const headRound = latestHeadRound({ checkRuns: [round({ head_sha: H })], allowlist: ALLOW, headSha: H });
+    const headRound = latestHeadRound({ listing: whole([round({ head_sha: H })]), allowlist: ALLOW, headSha: H });
     assert.equal(headRound.complete, true);
     assert.equal(headRound.label, PASS);
     const s = decideStalenessStrip({ action: 'synchronize', labels: [PASS], headRound });
     assert.equal(s.strip, false);
     assert.match(s.reason, /already/);
     // A round on a DIFFERENT commit says nothing about this head.
-    const elsewhere = latestHeadRound({ checkRuns: [round({ head_sha: P })], allowlist: ALLOW, headSha: H });
+    const elsewhere = latestHeadRound({ listing: whole([round({ head_sha: P })]), allowlist: ALLOW, headSha: H });
     assert.equal(elsewhere.complete, false);
     assert.equal(decideStalenessStrip({ action: 'synchronize', labels: [PASS], headRound: elsewhere }).strip, true);
     // Other events never stripped, and still do not.
@@ -2054,13 +2088,13 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
     // finished there is no completed round on it, so the push-time strip still fires.
     assert.equal(decide({ inputHash: IN_B }).carry, false);
     const stillRunning = latestHeadRound({
-      checkRuns: [round({ head_sha: H, status: 'in_progress', conclusion: null })],
+      listing: whole([round({ head_sha: H, status: 'in_progress', conclusion: null })]),
       allowlist: ALLOW,
       headSha: H,
     });
     assert.equal(stillRunning.complete, false);
     assert.equal(decideStalenessStrip({ action: 'synchronize', labels: [PASS], headRound: stillRunning }).strip, true);
-    const none = latestHeadRound({ checkRuns: [], allowlist: ALLOW, headSha: H });
+    const none = latestHeadRound({ listing: whole([]), allowlist: ALLOW, headSha: H });
     assert.equal(decideStalenessStrip({ action: 'synchronize', labels: [PASS], headRound: none }).strip, true);
   });
 
@@ -2305,9 +2339,9 @@ test('decideStatus: no hold present → behaviour is byte-identical to before #1
     // cannot see every round there, it cannot know the reviewer's latest word is a pass,
     // so the push-time strip stays exactly what it was.
     const passOnHead = round({ head_sha: H });
-    const whole = latestHeadRound({ listing: { total_count: 1, check_runs: [passOnHead] }, allowlist: ALLOW, headSha: H });
-    assert.equal(whole.complete, true, 'control: the whole list, with a pass, stands the guard down');
-    assert.equal(decideStalenessStrip({ action: 'synchronize', labels: [PASS], headRound: whole }).strip, false);
+    const all = latestHeadRound({ listing: { total_count: 1, check_runs: [passOnHead] }, allowlist: ALLOW, headSha: H });
+    assert.equal(all.complete, true, 'control: the whole list, with a pass, stands the guard down');
+    assert.equal(decideStalenessStrip({ action: 'synchronize', labels: [PASS], headRound: all }).strip, false);
     for (const listing of [
       { total_count: 2, check_runs: [passOnHead] }, // one of two
       { check_runs: [passOnHead] }, // no count

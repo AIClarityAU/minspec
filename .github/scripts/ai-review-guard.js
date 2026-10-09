@@ -809,6 +809,11 @@ function findReattestableVerdict({ checkRuns, patchHash, allowlist } = {}) {
 // still running, not from the allowlisted reviewer App, or anything but a recorded
 // pass, the full panel runs. Every refusal carries a reason for the run log.
 //
+// "Latest" is only chosen from a listing shown to be WHOLE (wholeCheckRunListing).
+// GitHub pages check-runs, so the newest run on one page of several is not the latest
+// round, and trusting it would carry a pass that a round on an unread page had already
+// overturned. One page that is short, or full, or has lost its count is a refusal.
+//
 // THE WAY OUT. Re-running the workflow run always reviews. It is the escape hatch for
 // a human who wants fresh eyes on an unchanged diff, and it is what ai-review-retry
 // does to a blocked round.
@@ -940,6 +945,54 @@ function parseRoundRecord(text) {
   return { label: ROUND_VERDICTS[m[1]], inputHash: m[2], panelKey: m[3], reviewedSha: m[4] };
 }
 
+// The most check-runs GitHub returns for one request, and the `per_page` both callers
+// ask for. A response holding this many is a FULL page, and a full page is never proof
+// that there is no next one.
+const CHECK_RUNS_PAGE_SIZE = 100;
+
+/**
+ * A check-runs API response, accepted only when it is provably the WHOLE list.
+ *
+ * "The latest round on this commit" is only knowable from every round on it. GitHub
+ * returns them one page at a time, and a commit can collect more than a page holds:
+ * ai-review-retry re-runs a blocked round on a schedule and each re-run posts another
+ * check. Picking the latest from one page of several would let the newest run ON THAT
+ * PAGE decide while the real latest sat unread on another - a pass carried forward
+ * after a later round had overturned it. So this does not paginate and does not guess.
+ * It takes GitHub's response exactly as returned, `{ total_count, check_runs }`, and
+ * refuses unless two independent signs both say nothing is missing:
+ *
+ *   1. the count - `total_count` is there, is a count, and equals what was returned;
+ *   2. the page - fewer than a full page came back.
+ *
+ * Either alone would catch a short page today. Both are checked because each rests on
+ * something the other does not: the first on GitHub's count being right, the second on
+ * the caller having asked for a full-size page (CHECK_RUNS_PAGE_SIZE).
+ *
+ * A bare array is refused: it is the same list with the count thrown away. A refusal
+ * is reported as a listing problem, never as "no round", and it costs one thing: on a
+ * commit with a page or more of rounds the verdict is never carried and the panel runs.
+ */
+function wholeCheckRunListing(listing, short) {
+  const no = (reason) => ({ ok: false, checkRuns: null, reason });
+  const where = short ? ` for ${short}` : '';
+  if (!listing || typeof listing !== 'object' || Array.isArray(listing) || !Array.isArray(listing.check_runs)) {
+    return no('the check-runs for that commit could not be read');
+  }
+  const runs = listing.check_runs;
+  const total = listing.total_count;
+  if (!Number.isInteger(total) || total < 0) {
+    return no(`the check-runs listing${where} does not say how many check runs exist, so it cannot be shown to be the whole list`);
+  }
+  if (runs.length !== total) {
+    return no(`the check-runs listing${where} is not the whole list (${runs.length} of ${total}), so the latest round cannot be known`);
+  }
+  if (runs.length >= CHECK_RUNS_PAGE_SIZE) {
+    return no(`the check-runs listing${where} is a full page (${runs.length}), which cannot be shown to be the last one, so the latest round cannot be known`);
+  }
+  return { ok: true, checkRuns: runs, reason: '' };
+}
+
 /**
  * The latest `ai-review` round on one commit, and whether it is a completed pass.
  *
@@ -952,18 +1005,24 @@ function parseRoundRecord(text) {
  * in. The latest run decides even when it is not the reviewer's: a newer check of the
  * same name from another app makes the round unusable rather than being skipped over.
  *
- * `checkRuns` that is not an array means the API could not be read, which is reported
- * as that and never as "no round".
+ * `listing` is the check-runs API response for that commit, passed through unread:
+ * `{ total_count, check_runs }`. It goes through wholeCheckRunListing first, so "latest"
+ * is only ever chosen from a list shown to be whole. A listing that could not be read,
+ * or cannot be shown to be whole, is reported as that and never as "no round" - and
+ * both leave `complete` false, which every caller treats as "review in full" (the
+ * carry) or "strip as before" (the staleness guard).
  */
-function latestHeadRound({ checkRuns, allowlist, headSha } = {}) {
+function latestHeadRound({ listing, allowlist, headSha } = {}) {
   const none = (reason) => ({ found: false, complete: false, reason });
   if (!isCommitSha(headSha)) return none('there is no commit to look for a review round on');
-  if (!Array.isArray(checkRuns)) return none('the check-runs for that commit could not be read');
+  const short = headSha.slice(0, 8);
+  const whole = wholeCheckRunListing(listing, short);
+  if (!whole.ok) return none(whole.reason);
+  const checkRuns = whole.checkRuns;
   const allowed = Array.isArray(allowlist) ? allowlist.filter(Boolean) : [];
   if (allowed.length === 0) {
     return none('the reviewer allowlist (AI_REVIEW_BOT_LOGINS) is empty, so no round can be attributed to the reviewer');
   }
-  const short = headSha.slice(0, 8);
   const ours = checkRuns.filter((c) => c && c.name === CHECK_NAME && c.head_sha === headSha);
   if (ours.length === 0) return none(`no ${CHECK_NAME} round is recorded on ${short}`);
 
@@ -1025,10 +1084,12 @@ function latestHeadRound({ checkRuns, allowlist, headSha } = {}) {
  * @param {string} o.beforeSha    the head before this push (`github.event.before`)
  * @param {string|null} o.inputHash  fingerprint of the reviewable input at `headSha`
  * @param {string|null} o.panelKey   fingerprint of the reviewer at this round's base
- * @param {object[]|null} o.checkRuns  check-runs on `beforeSha`; non-array = unreadable
+ * @param {object|null} o.listing  the check-runs API response for `beforeSha`, exactly as
+ *                                 GitHub returned it (`{ total_count, check_runs }`); one
+ *                                 that is unreadable or not provably whole is a refusal
  * @param {string[]} o.allowlist  parsed AI_REVIEW_BOT_LOGINS
  */
-function decideVerdictCarry({ action, runAttempt, headSha, beforeSha, inputHash, panelKey, checkRuns, allowlist } = {}) {
+function decideVerdictCarry({ action, runAttempt, headSha, beforeSha, inputHash, panelKey, listing, allowlist } = {}) {
   const no = (reason) => ({ carry: false, reason });
   if (action !== 'synchronize') {
     return no('only a push to an open pull request can carry a verdict; a newly opened or reopened one is always reviewed');
@@ -1045,7 +1106,7 @@ function decideVerdictCarry({ action, runAttempt, headSha, beforeSha, inputHash,
   if (!isHex64(panelKey)) {
     return no("the reviewer's own files at the base commit could not be read, so the reviewer cannot be shown to be unchanged");
   }
-  const prior = latestHeadRound({ checkRuns, allowlist, headSha: beforeSha });
+  const prior = latestHeadRound({ listing, allowlist, headSha: beforeSha });
   if (!prior.complete) return no(prior.reason);
   const short = beforeSha.slice(0, 8);
   if (prior.inputHash !== inputHash) {
@@ -1133,7 +1194,11 @@ function carriedLabelFault({ current = [], carried } = {}) {
  *
  *   inputText      `scripts/review-branch.sh <base> <head> --print-input`
  *   lsTree         `git ls-tree <base> -- <PANEL_KEY_PATHS>`
- *   checkRunsJson  the check-runs API response for the previous head
+ *   checkRunsJson  the check-runs API response for the previous head, as GitHub
+ *                  returned it: ONE request, `per_page` = CHECK_RUNS_PAGE_SIZE, and no
+ *                  `--jq` that unwraps it. The `total_count` in it is how a second page
+ *                  is noticed (wholeCheckRunListing), so a caller that strips it gets a
+ *                  refusal, not a guess.
  *
  * A failed command arrives as empty text, and empty text is always a refusal.
  *
@@ -1146,13 +1211,14 @@ function planVerdictCarry(raw) {
   const inputHash = patchFingerprint(o.inputText);
   const panelKey = reviewPanelKey({ lsTree: o.lsTree, coverage: o.coverage });
 
-  let checkRuns = null; // null = unreadable, which latestHeadRound reports as such
+  // The response is handed on WHOLE - count and all - and never unwrapped to its
+  // `check_runs` here: the count is what lets wholeCheckRunListing tell one page of
+  // several from the whole list. null = unparseable, which is reported as unreadable.
+  let listing = null;
   try {
-    const parsed = JSON.parse(String(o.checkRunsJson == null ? '' : o.checkRunsJson));
-    if (Array.isArray(parsed)) checkRuns = parsed;
-    else if (parsed && Array.isArray(parsed.check_runs)) checkRuns = parsed.check_runs;
+    listing = JSON.parse(String(o.checkRunsJson == null ? '' : o.checkRunsJson));
   } catch (_) {
-    checkRuns = null;
+    listing = null;
   }
 
   const d = decideVerdictCarry({
@@ -1162,7 +1228,7 @@ function planVerdictCarry(raw) {
     beforeSha: o.beforeSha,
     inputHash,
     panelKey,
-    checkRuns,
+    listing,
     allowlist: parseAllowlist(o.allowlistRaw),
   });
   const comment = d.carry
@@ -1915,6 +1981,8 @@ module.exports = {
   reviewPanelKey,
   renderRoundRecord,
   parseRoundRecord,
+  CHECK_RUNS_PAGE_SIZE,
+  wholeCheckRunListing,
   latestHeadRound,
   decideVerdictCarry,
   renderCarriedComment,
