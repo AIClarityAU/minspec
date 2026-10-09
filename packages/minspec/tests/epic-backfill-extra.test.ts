@@ -27,10 +27,14 @@ import * as path from 'path';
 import * as os from 'os';
 
 // ─── Mock child_process BEFORE importing the module under test ──────────────
+// The callback shape is the real one `execFile` uses — `(err, stdout, stderr)`, never
+// a single object — and the mock returns a fake `ChildProcess` so the production code's
+// `child.stdin.end(prompt)` (#2575) has something to call.
 vi.mock('child_process', () => ({
   execFile: vi.fn((_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
     if (typeof _opts === 'function') cb = _opts as Function;
-    if (cb) cb(null, { stdout: '', stderr: '' });
+    if (cb) cb(null, '', '');
+    return { stdin: { end: () => {} } };
   }),
 }));
 
@@ -87,7 +91,8 @@ function mockExecSuccess(stdout: string): void {
   mockExecFile.mockImplementation(
     (_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
       if (typeof _opts === 'function') cb = _opts as Function;
-      if (cb) cb(null, { stdout, stderr: '' });
+      if (cb) cb(null, stdout, '');
+      return { stdin: { end: () => {} } };
     },
   );
 }
@@ -97,7 +102,8 @@ function mockExecFailure(msg = 'Command failed'): void {
   mockExecFile.mockImplementation(
     (_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
       if (typeof _opts === 'function') cb = _opts as Function;
-      if (cb) cb(new Error(msg), { stdout: '', stderr: msg });
+      if (cb) cb(new Error(msg), '', msg);
+      return { stdin: { end: () => {} } };
     },
   );
 }
@@ -426,14 +432,13 @@ describe('proposeAI() — buildPrompt with registered epics', () => {
     writeSpec(tmp, 'minspec/billing', 'SPEC-001', 'Billing Spec');
     createEpic(tmp, 'Core', 'core', undefined, 'Core work');
 
-    // Capture the prompt text by inspecting the execFile call args.
+    // The prompt travels on stdin, not argv (#2575) — captured there, not from args.
     let capturedPrompt = '';
     mockExecFile.mockImplementation(
-      (_cmd: string, args: string[], _opts: unknown, cb?: Function) => {
+      (_cmd: string, _args: string[], _opts: unknown, cb?: Function) => {
         if (typeof _opts === 'function') cb = _opts as Function;
-        // args[0] is '-p', args[1] is the prompt string
-        capturedPrompt = args[1] ?? '';
-        if (cb) cb(null, { stdout: '', stderr: '' });
+        if (cb) cb(null, '', '');
+        return { stdin: { end: (data?: string) => { capturedPrompt = data ?? ''; } } };
       },
     );
 

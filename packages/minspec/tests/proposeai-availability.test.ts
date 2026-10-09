@@ -26,11 +26,16 @@ import { proposeAI, isClaudeAvailable } from '../src/lib/epic-backfill';
 
 const mockExecFile = execFile as unknown as ReturnType<typeof vi.fn>;
 
-/** Invoke the promisify-style callback, tolerating the (cmd,args,cb) form. */
-function invoke(opts: unknown, cb: unknown, err: Error | null, stdout: string): void {
-  const callback = (typeof opts === 'function' ? opts : cb) as (e: Error | null, r?: unknown) => void;
-  if (err) callback(err);
-  else callback(null, { stdout, stderr: '' });
+/**
+ * Invoke the real `execFile` callback shape — `(err, stdout, stderr)`, never a single
+ * object — and hand back a fake `ChildProcess` so the production code's
+ * `child.stdin.end(prompt)` (#2575) has something to call.
+ */
+function invoke(opts: unknown, cb: unknown, err: Error | null, stdout: string): { stdin: { end: () => void } } {
+  const callback = (typeof opts === 'function' ? opts : cb) as (e: Error | null, out?: string, errOut?: string) => void;
+  if (err) callback(err, '', '');
+  else callback(null, stdout, '');
+  return { stdin: { end: () => {} } };
 }
 
 /** True for the availability probe call (`claude --version`). */

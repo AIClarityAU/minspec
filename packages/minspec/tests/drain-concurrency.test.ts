@@ -43,10 +43,21 @@ const DRAIN = path.join(findRepoRoot(), 'scripts', 'drain-inbox.sh');
  * a live drain (the dispatcher re-runs it as the merge gate), and that drain
  * exports its own MINSPEC_DRAIN_CONCURRENCY — so inheriting it made "defaults to
  * 1" assert the operator's setting instead of the script's default (#2369).
+ *
+ * Generalized (#2575 remediation): #2369 only deleted the ONE variable the test
+ * it was written for happened to trip over. Every other `MINSPEC_DRAIN_*` /
+ * `MINSPEC_QUOTA_*` knob was left to inherit from whatever ambient environment
+ * launched the suite — an agent-dispatch container sets `MINSPEC_DRAIN_QUEUE_LIMIT`
+ * as its own cost-safety default, and that leaked through here too, making "4
+ * ready issues dispatch all 4" assert the container's setting instead of the
+ * script's documented default (30). Strip the whole family, not just the one
+ * knob a past bug happened to name.
  */
 function baseEnv(): NodeJS.ProcessEnv {
   const env = { ...process.env };
-  delete env.MINSPEC_DRAIN_CONCURRENCY;
+  for (const k of Object.keys(env)) {
+    if (k.startsWith('MINSPEC_DRAIN_') || k.startsWith('MINSPEC_QUOTA_')) delete env[k];
+  }
   return env;
 }
 
@@ -198,7 +209,7 @@ exit 0
         MINSPEC_QUOTA_FILE="${h.quota}" \
         bash "${DRAIN}" --once 2>&1 | grep -oP 'PID \\K[0-9]+')
       while kill -0 "$pid" 2>/dev/null; do sleep 0.05; done
-    `], { encoding: 'utf-8', stdio: ['ignore', 'pipe', 'ignore'] });
+    `], { encoding: 'utf-8', env: baseEnv(), stdio: ['ignore', 'pipe', 'ignore'] });
     void out;
     return { elapsedMs: Date.now() - t0, log: fs.readFileSync(h.log(width), 'utf-8') };
   }
