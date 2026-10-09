@@ -2229,7 +2229,11 @@ quota_gate() {
         [[ "$QWAIT_WHY" == "ramp" ]] && next="; at this usage the ramp next admits in $(_quota_span "$QWAIT_SECS")"
         echo "defer:${QWAIT_SECS} (7d window ${wp}% used — the WEEKLY ceiling, resets in $(( (left + 3599) / 3600 )) h; cap ${cap7}${next})"
       else
-        echo "defer:$QUOTA_SLEEP_MAX (7d window ${wp}% used — the WEEKLY ceiling, no usable reset time; cap ${cap7})"
+        # No usable weekly reset: this is the "no deadline" case _quota_sleep_plan
+        # treats as the fixed backoff (#2603), never the 5h reset and never the
+        # QUOTA_SLEEP_MAX clamp — printing either here would claim a wait this gate
+        # does not actually ask for.
+        echo "defer:$QUOTA_BACKOFF (7d window ${wp}% used — the WEEKLY ceiling, no usable reset time; cap ${cap7})"
       fi
       return 42
     fi
@@ -2282,9 +2286,23 @@ _quota_sleep_plan() {
       # what deferred us, the 5h reset is the wrong deadline — it can be minutes away
       # while the weekly window is days out, so the loop would wake, re-defer, and
       # report "sleeping to the published reset" while sleeping to an irrelevant one.
-      if (( wp >= 0 )) && (( wr > now )) && _quota_defers 7d "$wp" "$(( wr - now ))"; then
-        _quota_admit_wait 7d "$wp" "$(( wr - now ))"
-        secs=$(( QWAIT_SECS + QUOTA_SLEEP_MARGIN )); why="$QWAIT_WHY"
+      if (( wp >= 0 )) && _quota_defers 7d "$wp" "$(( wr > now ? wr - now : 0 ))"; then
+        # The weekly window is what's binding (checked with its OWN reset, or 0 when
+        # that reset has already passed — never the 5h window's). A passed-or-missing
+        # weekly reset is not a deadline the gate can sleep toward, so this is "no
+        # usable deadline", exactly the fallback branch below, not the 5h reset (#2603):
+        # the 5h reset can be minutes away while the actual hold is the weekly ceiling,
+        # days out, and sleeping to the wrong one wakes the loop early for nothing — or,
+        # once a wrap producer's weekly figure goes stale for a stretch after its own
+        # reset, with the old reading still fresh enough to pass the staleness check,
+        # sleeps hours past a weekly hold that could have lifted the moment the producer
+        # published the new week.
+        if (( wr > now )); then
+          _quota_admit_wait 7d "$wp" "$(( wr - now ))"
+          secs=$(( QWAIT_SECS + QUOTA_SLEEP_MARGIN )); why="$QWAIT_WHY"
+        else
+          secs="$QUOTA_BACKOFF"; why="fallback"
+        fi
       elif (( r > now )); then
         if _quota_defers 5h "$p" "$(( r - now ))"; then
           _quota_admit_wait 5h "$p" "$(( r - now ))"
