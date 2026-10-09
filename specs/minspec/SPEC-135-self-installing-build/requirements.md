@@ -7,7 +7,7 @@ product: minspec
 epic: EPIC-006  # Trust, Consent & Supply Chain - one consent, then an unattended path from main into the editor
 aspects: [build, provenance, install, consent, supply-chain, git-sync, drain, dogfood, host, no-silent-gate, blast-radius]
 depends_on: [SPEC-060, SPEC-026, DR-065, DR-074]  # SPEC-060 owns the build stamp and, once its Amendment A is approved, the packed-path question; SPEC-026 the session records the witness sits beside; DR-065 the fast-forward this extends; DR-074 the blast-radius rule the host act is written under
-relates_to: [SPEC-044, DR-051, DR-066, DR-004, DR-005, DR-086, DR-103, "#2203", "#2616", "#1678", "#1167", "#1354", "#1439", "#1952", "#1504", "#512", "#2613", "#2626", "#2628", "#2629"]
+relates_to: [SPEC-044, DR-051, DR-066, DR-004, DR-005, DR-086, DR-103, "#2203", "#2616", "#1678", "#1167", "#1354", "#1439", "#1952", "#1504", "#512", "#2613", "#2626", "#2628", "#2629", "#2632"]
 # Ownership declared in Specify, before approval mints a hash (SPEC-038). All eight files
 # are NEW and are needed under every answer to the open questions below: the witness
 # writer, the one bash definition of the packed paths, the build step, the host act, the
@@ -47,7 +47,9 @@ assumption: installing under open windows is safe.
 > requirement below is written under each question's recommended answer, so approving the
 > spec as it stands accepts those three answers and leaves no question open. This change
 > also carries **Amendment A to SPEC-060** (build provenance stamp), which needs its own
-> re-approval; see FR-18.
+> re-approval; see FR-18. Two decision records must also be amended before the parts that
+> lean on them are built; approving this spec does not amend them. See
+> **[Decision records](#decision-records)**.
 
 Materializes **[#2203](https://github.com/AIClarityAU/minspec/issues/2203)** (no host-side
 check for installed extension staleness) and
@@ -299,7 +301,9 @@ extension (window)  writes its witness; shows the state; restarts nothing
   writes the consent record into the drop, naming what was consented to, when, and by
   which operating-system user, and registers one per-user background service. It never
   asks for elevated rights and never registers anything system-wide. Running it again
-  replaces the earlier registration; it never adds a second.
+  replaces the earlier registration; it never adds a second. Whether a script may write
+  that registration at all is for DR-074 to say (INV-3, #2632); if it may not, the act
+  prints the registration and the founder installs it himself.
 
 - **FR-11 - When the act refuses.** It MUST refuse, changing nothing and saying which
   check failed, when the folder has no `.minspec/`, when the folder is not this
@@ -420,8 +424,9 @@ extension (window)  writes its witness; shows the state; restarts nothing
 Ranked by what is hardest to undo.
 
 1. **A service on the founder's machine.** Why costly: it is the one piece no agent
-   session can install, observe or repair directly. What to check: everything it acts on
-   is fixed at setup (FR-12), and one command removes it (FR-16).
+   session can install, observe or repair directly, and its registration sits on a
+   surface DR-074 bounds. What to check: everything it acts on is fixed at setup (FR-12),
+   one command removes it (FR-16), and #2632 is recorded before it is built.
 2. **The record shapes in the drop.** Why costly: three processes on two sides of a
    container boundary read them. What to check: one writer per record, and the table
    under "How the parts fit" is the whole contract.
@@ -517,8 +522,12 @@ Ranked by what is hardest to undo.
   the registration names one checkout and every pass re-checks `.minspec/` and the
   consent record before acting. No adopter's project, and no other checkout on this
   machine, changes behaviour. DR-074 states that bound with no exception for an owner's
-  own act. This spec reads the invariant's own test, a machine "that did not opt in", and
-  treats the setup act as that machine's opt-in. Approving this spec accepts that reading.
+  own act, and the invariant's own test is a machine "that did not opt in". Whether an
+  owner's explicit act on his own machine is inside the bound is for that record to say,
+  not for this spec, and approving this spec does not say it. The registration is not
+  built until DR-074 carries the answer: #2632. If the answer is no, the act writes only
+  inside the checkout and prints the registration for the founder to install himself;
+  one clause of FR-10 moves and nothing else does.
 - **INV-4 - Never ahead.** No automatic mover leaves the checkout on a commit the
   installed build does not cover.
 - **INV-5 - No uncommitted byte is lost, moved or rewritten.** There is no stash,
@@ -549,9 +558,10 @@ Ranked by what is hardest to undo.
   checkout (FR-23).
 
 DR-065 calls its exception the sole one (`docs/decisions/DR-065.md:69`) and DR-051
-(approvables on main) repeats it (`docs/decisions/DR-051.md:132`). Approving this spec is
-the decision; the record must follow before part E is built. Tracked as #2628 (DR-065
-needs an amendment for the consent-gated case). The amendment to DR-065 proposed on
+(approvables on main) repeats it (`docs/decisions/DR-051.md:132`). Approving this spec
+does not amend that record. The amendment is its own act and must be made before part E
+is built. Tracked as #2628 (DR-065 needs an amendment for the consent-gated case). The
+amendment to DR-065 proposed on
 2026-08-30, which would discard byte-identical leftovers, is not used and not needed:
 FR-22 reaches the same end without removing a file.
 
@@ -653,14 +663,21 @@ is no. They are Plan-phase work in this spec, not separate issues.
 
 ## Decision records
 
-One existing record needs an amendment. No new record is written.
+Two existing records must be amended, each before the part that leans on it is built.
+Approving this spec decides neither; each is its own act.
 
-- **DR-065 needs an amendment** naming the consent-gated case, before part E is built:
-  #2628.
-- **No new record for the rest.** The witness, the build step and the installer can each
-  be removed in under a day (the undo command, one kill switch in the drain, one file
-  write in the extension). DR-103 (versions reach the Marketplace through a release
-  workflow) is a different channel with a different audience and is unchanged.
+- **DR-065 needs an amendment** naming the consent-gated case, before part E (the pull)
+  is built: #2628.
+- **DR-074 needs to say whether an owner's own act on his own machine is inside its
+  bound**, before part C's registration is built: #2632. This spec recommends that it
+  is, under the conditions INV-3 lists, and that recommendation's cost is a second
+  widening of the invariant beside the org-admin policy, marked by something weaker than
+  `.minspec/` at a repository root.
+- **Parts A, B and D need no record.** The witness, the build step and the narrower count
+  write only inside the project, and each can be removed in under a day (one file write
+  in the extension, one switch in the drain, one list). DR-103 (versions reach the
+  Marketplace through a release workflow) is a different channel with a different
+  audience and is unchanged.
 
 ## Risks
 
@@ -700,7 +717,9 @@ One existing record needs an amendment. No new record is written.
 ## What this costs
 
 - Code merged to `main` runs in the founder's editor with no act of his, typically
-  within one drain cycle plus one updater pass.
+  within one drain cycle plus one updater pass. The installed build serves every project
+  he opens in that editor, as it does today; from here on those projects get each merged
+  build without him choosing the moment.
 - There is a service on his machine that agents cannot repair. When it stops, the cost
   is a status-bar notice and a held checkout until he re-runs one command.
 - A failing build holds the checkout just before the first commit that needs it, for as
@@ -759,9 +778,10 @@ Recorded because this spec was written without a live conversation (DR-086 secti
   [SPEC-060](../SPEC-060-build-provenance-stamp/requirements.md) (build provenance
   stamp), Amendment A.
 - **Follow-ups filed from this spec:** #2628 (DR-065 needs an amendment for the
-  consent-gated case), #2629 (retire the hand-queued fast-forwards once the updater is
-  live), #2626 (the gated fast-forward cannot open from the container; found while
-  measuring, parked).
+  consent-gated case), #2632 (DR-074 must say whether an owner's own act is inside its
+  bound), #2629 (retire the hand-queued fast-forwards once the updater is live), #2626
+  (the gated fast-forward cannot open from the container; found while measuring,
+  parked).
 - **Neighbours, not duplicates:** #1678 (an in-use primary never fast-forwards), #1167
   (the content-clean deadlock), #1354 (an orphan approval record blocks the
   fast-forward), #1439 (a stale install disables shipped gates), #1952 (version reused
@@ -778,4 +798,5 @@ Recorded because this spec was written without a live conversation (DR-086 secti
   [SPEC-026](../SPEC-026-session-presence/requirements.md) (session presence),
   [SPEC-044](../SPEC-044-coordinated-self-completing-sessions/requirements.md)
   (coordinated sessions, which owns the drain script).
-- **DR for this spec:** none; see "Decision records".
+- **DR for this spec:** no new record. Two existing records need an amendment first; see
+  "Decision records".
